@@ -320,10 +320,11 @@ describe("B. reports sweep home + weekly guard (#3527 S4)", () => {
     // Issue #3121 S5 moved the tick dispatch out of queue.ts into
     // the named entry points module — the sweep/corpus rider order
     // now lives there (corpus-sync before reports-index-backfill).
-    const tickSrc = readFileSync(
-      "src/services/consolidatedCronEntries.ts",
-      "utf8",
-    );
+    // Issue #4234 moves the tick's six POSTs out of the entry point
+    // module into the shared rider list (src/services/tickRiders.ts),
+    // used by both the Worker entry point and the SDK alarm tick —
+    // the order lives there now.
+    const tickSrc = readFileSync("src/services/tickRiders.ts", "utf8");
     const sweepAt = tickSrc.indexOf("/trading/reports/index-backfill-sweep");
     const corpusAt = tickSrc.indexOf("/knowledge/corpus-sync");
     expect(corpusAt).toBeGreaterThan(-1);

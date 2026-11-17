@@ -78,13 +78,17 @@ describe("entry-point enumeration (#756)", () => {
     // (src/services/consolidatedCronEntries.ts), so the surface is
     // now all three files — the halt story is unchanged: the route
     // self-checks the switch, and the entry point only dispatches
-    // over HTTP, never applying weights itself.
+    // over HTTP, never applying weights itself. Issue #4234 moves the
+    // tick's six POSTs out of the entry point module into the shared
+    // rider list (src/services/tickRiders.ts), so the surface gains a
+    // fourth file; the halt story is unchanged again.
     const entry = prodFiles
       .filter(
         (f) =>
           f.rel === "server.ts" ||
           f.rel === "server/routes/queue.ts" ||
-          f.rel === "services/consolidatedCronEntries.ts",
+          f.rel === "services/consolidatedCronEntries.ts" ||
+          f.rel === "services/tickRiders.ts",
       )
       .map((f) => f.text)
       .join("\n");

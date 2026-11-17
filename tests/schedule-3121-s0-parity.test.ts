@@ -84,13 +84,21 @@ const MON_0900_EDT = new Date("2026-10-26T13:00:00Z");
 /** Monday 2026-10-19 21:05 UTC (copied from tests/research-schedule-guard.test.ts). */
 const MON_2105_UTC = new Date(Date.UTC(2026, 9, 19, 21, 5, 0));
 
-describe("S0-P01 worker crons: no live trigger (#4112 owner direction)", () => {
-  it("registers no cron, and keeps every expression commented out", () => {
+describe("S0-P01 worker crons: one live trigger, the #4234 watchdog (#4112 owner direction + ADR 0030)", () => {
+  it("registers exactly the hourly watchdog cron, and keeps the three duty expressions commented out", () => {
     const wrangler = read("wrangler.jsonc");
-    // #4112: the owner removed all schedules. The block survives as a comment,
-    // so the expressions are still visible when a schedule is restored.
-    expect(wrangler).not.toMatch(/^\s*"triggers":/m);
-    expect(wrangler).not.toMatch(/^\s*"crons":/m);
+    // #4234 (ADR 0030): the hourly heartbeat watchdog is the ONE live
+    // cron — it checks the heartbeat SDK alarm exists and is fresh,
+    // and re-arms it when missing or stale. The three duty crons stay
+    // OFF per #4112: their work rides the one SDK alarm tick.
+    expect(wrangler).toMatch(/^\s*"triggers":/m);
+    expect(wrangler).toMatch(/^\s*"crons":/m);
+    const uncommented = wrangler
+      .split("\n")
+      .filter((line) => !line.trim().startsWith("//"));
+    expect(
+      uncommented.filter((line) => line.includes('"0 * * * *"')),
+    ).toHaveLength(1);
     for (const cron of ["0 3 * * *", "*/30 * * * *", "0 4 * * *"]) {
       const lines = wrangler.split("\n").filter((l) => l.includes(`"${cron}"`));
       expect(lines.length, `${cron} is stated`).toBeGreaterThan(0);
@@ -339,15 +347,19 @@ describe("S0-P09 baseline reconciliation (B-T2-08): unowned baselines are remove
   });
 });
 
-describe("S0-P10 tick evaluation (B-T3-01): goals are tick-polled, never SDK-scheduled", () => {
-  it("pins the three schedule systems and the no-callback rule", () => {
+describe("S0-P10 tick evaluation (B-T3-01): goals are tick-polled inside the one SDK alarm tick", () => {
+  it("pins the three schedule systems and the one-alarm rule", () => {
     expect(SCHEDULE_SYSTEMS.map((s) => s.id)).toEqual([
       "orchestrator-durable-schedules",
       "scheduled-agent-goals",
       "worker-cron-triggers",
     ]);
     const agent = read("src/agents/scheduled-agent.ts");
-    expect(agent).toContain("onCron() calls, never via the SDK scheduler");
+    // Issue #4234 (ADR 0030): goals are still polled — one `isDue`
+    // check per goal per tick — but the tick itself arrives via the
+    // one recurring SDK alarm (`scheduleEvery`, `onCron` in-process),
+    // not via the Worker cron. No goal gets its own SDK schedule.
+    expect(agent).toContain("via the one recurring SDK alarm");
     expect(agent).toContain("isDue(goal.cron, goal.lastRun, now, goal.timeZone)");
   });
 });
@@ -437,14 +449,17 @@ describe("S0-P17 worker cron duties (B-T1-01/02): renewal runs either way, tick 
     // src/server/routes/queue.ts; S5 (#3121) moves the branch bodies
     // into the named entry points in consolidatedCronEntries.ts —
     // the dispatcher keeps the gate evaluation + stub creation, the
-    // module keeps the dispatches. The entry surface is all three
-    // files; the pin tracks the move (gitops §7). The route list is
-    // SIX, not five: the pre-S5 list omitted the
-    // reports-index-backfill sweep, the same six-vs-seven error S5
-    // corrects in §1.2.
+    // module keeps the dispatches. Issue #4234 moves the six rider
+    // dispatches into the one shared helper in tickRiders.ts (the
+    // entry point calls it; the SDK alarm tick calls it too) — the
+    // entry surface is all four files; the pin tracks the move
+    // (gitops §7). The route list is SIX, not five: the pre-S5 list
+    // omitted the reports-index-backfill sweep, the same six-vs-seven
+    // error S5 corrects in §1.2.
     const server = read("src/server.ts") + read("src/server/routes/queue.ts");
     const entries = resolveCommercialBarePaths(
-      read("src/services/consolidatedCronEntries.ts"),
+      read("src/services/consolidatedCronEntries.ts") +
+        read("src/services/tickRiders.ts"),
     );
     expect(server).toContain("renewAllStoredETradeTokens");
     expect(server).toContain("SCHEDULED_AGENT");

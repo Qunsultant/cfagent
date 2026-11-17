@@ -258,18 +258,22 @@
       "persist": false
     }
   },
-  // Issue #4112 (owner direction): NO schedules and NO triggers. Every cron
-  // entry is commented out, so nothing fires - no ScheduledAgent tick, no
-  // nightly research run, no retention pass. The scheduled() handler and
-  // resolveCronEntryPoint stay in code and become unreachable, so restoring a
-  // schedule is an uncomment here, not a code change.
-  // "triggers": {
-  //   "crons": [
-  //     "0 3 * * *",
-  //     "*/30 * * * *",
-  //     "0 4 * * *"
-  //   ]
-  // },
+  // Issue #4112 (owner direction): NO duty schedules and NO duty
+  // triggers. The three duty crons stay commented out, so no Worker
+  // tick, no token renewal, and no retention pass fires from a cron.
+  // Issue #4234 (ADR 0030) is the ONE exception: the hourly
+  // heartbeat watchdog cron fires, so the watchdog can check the
+  // heartbeat SDK alarm exists and is fresh, and re-arm it when
+  // missing or stale. Restoring a duty schedule is an uncomment
+  // here, not a code change.
+  "triggers": {
+    "crons": [
+      "0 * * * *"
+      // "0 3 * * *",
+      // "*/30 * * * *",
+      // "0 4 * * *"
+    ]
+  },
   // PR #6 — Vectorize for VectorMemory
   "vectorize": [
     {

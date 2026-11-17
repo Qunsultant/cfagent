@@ -786,7 +786,17 @@ function measure(): Map<string, number> {
  * universe descriptor line — naming the provider is the
  * descriptor's job). Measured totals move 1284/10140 -> 1284/10142
  * (re-based onto ca881bc4).
- *
+ * Baseline update (#4234, 2026-11-16): the heartbeat slice moves the
+ * token-renewal and retention duties onto the one SDK alarm tick (ADR 0030).
+ * The alarm tick's due-check adapter reuses the one renewal implementation —
+ * it binds the same `renewAllStoredETradeTokens` the Worker dispatcher already
+ * binds (baselined in queue.ts), so the duty has one implementation, not two.
+ * 1 new row, dispositioned INTEGRATION (a data-bearing identifier, not
+ * framing: the name is the stored-token renewal function the adapter binds;
+ * the tokens it renews are E*TRADE tokens by definition, and the tenant's
+ * broker selection still governs broker behaviour elsewhere):
+ * scheduled-agent.ts etrade 2 (the import + the bind). Measured totals move
+ * 1285/10168 -> 1286/10170 (re-based onto 16215a13).
  */
 const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (188 rows / 989 lines) ----
@@ -994,7 +1004,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/services/platformKnowledge.ts", "etrade", 51],
   ["src/services/platformKnowledge.ts", "yahoo", 12],
   ["src/trading/interfaces.ts", "etrade", 2],
-  // ---- INTEGRATION (698 rows / 7062 lines) ----
+  // ---- INTEGRATION (699 rows / 7064 lines) ----
   ["docs/CLOUDFLARE_SCHEDULING_AND_ETAPI_TUNING.md", "etrade", 12],
   ["docs/CLOUDFLARE_SCHEDULING_AND_ETAPI_TUNING.md", "yahoo", 1],
   ["docs/EXTERNAL_APIS_AND_ENDPOINTS_DIRECTORY.md", "alpaca", 3],
@@ -1177,6 +1187,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/agents/routes/watchlists.ts", "etrade", 29],
   ["src/agents/sandbox-agent.ts", "etrade", 7],
   ["src/agents/sandboxA2aDispatch.ts", "etrade", 1],
+  ["src/agents/scheduled-agent.ts", "etrade", 2],
   ["src/agents/scheduledTasksPipeline.ts", "alpaca", 1],
   // #4452 INTEGRATION, fallen back in #3960: the host-side
   // options-step wiring no longer binds the chain source to the

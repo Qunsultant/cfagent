@@ -79,14 +79,15 @@ describe("deploy-worker script helpers (#3789)", () => {
     expect(Array.isArray((parsed.durable_objects as any)?.bindings)).toBe(true);
   });
 
-  it("declares no container and no cron trigger in this repository (#4112)", () => {
+  it("declares no container and exactly the one watchdog cron trigger in this repository (#4112 + #4234)", () => {
     const live = readFileSync("wrangler.jsonc", "utf8");
     const active = stripJsoncComments(live);
     expect(active).not.toContain('"containers"');
-    expect(active).not.toContain('"triggers"');
+    // #4234 (ADR 0030): the hourly heartbeat watchdog is the ONE live
+    // cron — the duty crons stay commented out per #4112.
     const parsed = JSON.parse(active) as Record<string, unknown>;
     expect(parsed.containers).toBeUndefined();
-    expect(parsed.triggers).toBeUndefined();
+    expect(parsed.triggers).toEqual({ crons: ["0 * * * *"] });
   });
 
   it("isContainersForbiddenError detects Cloudflare Containers 403 Forbidden errors", () => {

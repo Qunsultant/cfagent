@@ -44,6 +44,7 @@ import { createScreenerEventsWorkHandler } from "../../messaging/screenerEventsC
 import type { RunLedgerProjectMessage } from "../../workflows/runLedgerQueueTransport";
 import { createDeadLetterStoreAdapter, ensureDeadLetterStoreSchema } from "../../data/createDeadLetterStorePorts";
 import { resolveDlqDepthAlertThreshold } from "../../config/dlqDepthAlert";
+import { resolveHeartbeatWatchdogConfig } from "../../config/heartbeatWatchdog";
 import { persistDeadLetterLanding } from "../../messaging/deadLetterPersist";
 import { postSlackText, resourceSlackPost } from "../../agents/resourceGoals";
 import type { SlackDeliveryEnv } from "../../agents/social/delivery";
@@ -394,6 +395,9 @@ export async function handleScheduledEvent(event: any, env: Env, ctx?: any): Pro
       entryPoint,
       serviceUserLogin: userLogin,
       serviceProvisioned,
+      heartbeatWatchdog: resolveHeartbeatWatchdogConfig(
+        env as unknown as Record<string, unknown>,
+      ),
       orchestrator: agent,
       scheduledAgent: actorGateway.stub<{
         onCron(): Promise<unknown>;

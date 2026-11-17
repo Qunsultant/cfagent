@@ -12,6 +12,17 @@
  * wiring, same guards (the five tick-riding jobs keep theirs
  * unchanged), same skip-when-unprovisioned behavior.
  *
+ * Issue #4234 (ADR 0030) adds a fourth entry point, `watchdog`
+ * (`0 * * * *`, hourly): the ONE Worker cron that still fires. It
+ * checks the heartbeat SDK alarm exists and fired recently on the
+ * ScheduledAgent, re-arms it when missing or stale, and records one
+ * ledger row. It is NOT a duty cron — it lives outside the agent by
+ * design, it never calls onCron, and it is NOT in `WORKER_CRONS` or
+ * `CRON_ENTRY_POINTS` below; it routes by name in
+ * `entryPointForCron`, before the duty-cron table. The three duty
+ * crons stay OFF per #4112; their work moves onto the one SDK alarm
+ * tick (see `src/services/heartbeatClock.ts`).
+ *
  * A ledger row records the DISPATCH, not downstream outcomes:
  * downstream work (the tick's six POSTs, the retention pass, the
  * renewal sweep) has its own rows. A row's outcome is `success` when
@@ -52,28 +63,31 @@ import {
   WORKER_TICK_CRON,
 } from "./consolidatedScheduling";
 import {
+  DEFAULT_HEARTBEAT_INTERVAL_SECONDS,
+  DEFAULT_HEARTBEAT_WATCHDOG_STALE_AFTER_MS,
+  HEARTBEAT_ALARM_CALLBACK,
+  HEARTBEAT_WATCHDOG_CRON,
+  type HeartbeatWatchdogConfig,
+} from "../config/heartbeatWatchdog";
+import { decideHeartbeatWatchdog } from "./heartbeatWatchdog";
+import { dispatchTickRiders } from "./tickRiders";
+
+/** Re-exported so the router's watchdog cron is one named value (#4234). */
+export { HEARTBEAT_WATCHDOG_CRON };
+import {
   buildJobRunRecord,
   type JobRunOutcome,
   type JobRunRecord,
 } from "./jobRunRecords";
-import {
-  observeInternalDispatch,
-  type ScheduledJobId,
-} from "../observability/scheduledJobOutcomes";
-import {
-  backgroundDispatchHeaders,
-  backgroundDispatchHeadersWithTrace,
-} from "../security/backgroundAttribution";
-import {
-  childSpan,
-  formatTraceparent,
-  newTraceContext,
-  type ObservabilitySink,
-} from "../observability/observabilityPorts";
-import { commercialBarePath } from "../data/commercialUrlCatalog";
+import { backgroundDispatchHeaders } from "../security/backgroundAttribution";
+import type { ObservabilitySink } from "../observability/observabilityPorts";
 
-/** The three named cron entry points. */
-export type CronEntryPointName = "tick" | "renewTokens" | "retention";
+/** The four named cron entry points: the three S5 duty crons plus the #4234 watchdog. */
+export type CronEntryPointName =
+  | "tick"
+  | "renewTokens"
+  | "retention"
+  | "watchdog";
 
 export interface CronEntryPoint {
   cron: string;
@@ -86,15 +100,21 @@ export interface CronEntryPoint {
  * members — they are named exactly once, here, and the table below
  * is derived from `WORKER_CRONS`, so a drift between the table and
  * S1 fails the S5-P08 pin loudly instead of silently forking.
+ *
+ * Issue #4234 (ADR 0030): the hourly watchdog cron routes here by
+ * name, before the duty-cron table — it is NOT a duty cron, so it is
+ * NOT in `WORKER_CRONS` and NOT in the table below. This function is
+ * the single router: `resolveCronEntryPoint` delegates to it.
  */
 function entryPointForCron(cron: string): CronEntryPointName | null {
   if (cron === WORKER_TICK_CRON) return "tick";
   if (cron === "0 3 * * *") return "renewTokens";
   if (cron === "0 4 * * *") return "retention";
+  if (cron === HEARTBEAT_WATCHDOG_CRON) return "watchdog";
   return null;
 }
 
-/** The routing table, single-sourced from S1 `WORKER_CRONS`. */
+/** The routing table, single-sourced from S1 `WORKER_CRONS` (the three duty crons only; the watchdog routes by name above). */
 export const CRON_ENTRY_POINTS: readonly CronEntryPoint[] =
   WORKER_CRONS.flatMap((cron) => {
     const entryPoint = entryPointForCron(cron);
@@ -106,10 +126,7 @@ export function resolveCronEntryPoint(
   cron: unknown,
 ): CronEntryPointName | null {
   if (typeof cron !== "string") return null;
-  return (
-    CRON_ENTRY_POINTS.find((entry) => entry.cron === cron)?.entryPoint ??
-    null
-  );
+  return entryPointForCron(cron);
 }
 
 /* =================================================================
@@ -175,11 +192,12 @@ export function buildCronDispatchRecord(
 /**
  * Validate a record-route payload (builder-validation discipline,
  * same as `parseOutcomePayload`). Rejects: a non-object body; a cron
- * that is not one of the three Worker crons; an entryPoint that is
- * not the one its cron resolves to; an outcome outside
- * success/failure/skipped; a missing or non-ISO started/finished;
- * a finished before started; an error/detail present but not a
- * string; `skipped` without a detail; `failure` without an error.
+ * that is not one of the routed crons (the three duty crons + the
+ * #4234 watchdog cron); an entryPoint that is not the one its cron
+ * resolves to; an outcome outside success/failure/skipped; a missing
+ * or non-ISO started/finished; a finished before started; an
+ * error/detail present but not a string; `skipped` without a detail;
+ * `failure` without an error.
  */
 export function parseCronDispatchRecordPayload(
   body: unknown,
@@ -246,8 +264,30 @@ export interface CronEntryPointDeps {
   serviceProvisioned: boolean;
   /** The shared Orchestrator stub ({ fetch }), created by the dispatcher. */
   orchestrator: { fetch: (request: Request) => Promise<unknown> };
-  /** The ScheduledAgent stub ({ onCron }). */
-  scheduledAgent: { onCron: () => Promise<unknown> };
+  /**
+   * The ScheduledAgent stub ({ onCron }). The watchdog's reads +
+   * re-arm are optional: only the watchdog entry point uses them,
+   * and the S5 duty-entry-point deps never carry them.
+   */
+  scheduledAgent: {
+    onCron: () => Promise<unknown>;
+    /** SDK schedule list (watchdog only). */
+    listSchedules?: () => Promise<Array<{ id: string; callback: string }>>;
+    /** Recorded tick history, newest first (watchdog only). */
+    getTickHistory?: () => Promise<Array<{ timestamp: string }>>;
+    /** Re-arm primitive (watchdog only). */
+    ensureHeartbeatAlarm?: (
+      intervalSeconds: number,
+      opts?: { force?: boolean },
+    ) => Promise<{ armed: boolean; alreadyArmed: boolean }>;
+  };
+  /**
+   * Watchdog config (watchdog entry point only; resolved by the
+   * dispatcher from env). Absent → the built-in defaults, so a
+   * caller that never wires the watchdog still gets the ADR 0030
+   * backstop instead of a crash.
+   */
+  heartbeatWatchdog?: HeartbeatWatchdogConfig;
   /** Bound token renewal (production: `renewAllStoredETradeTokens(env)`). */
   renewTokens: () => Promise<unknown>;
   /** Observability sink factory (production: `createObservabilitySink(env)`). */
@@ -289,6 +329,9 @@ function gateDeniedDetail(deps: CronEntryPointDeps, what: string): string {
  * observer; the digest POST is direct and unobserved. One trace per
  * tick; every dispatch carries a child span of it. A failing
  * observed dispatch NEVER fails the tick (the observer swallows).
+ * The six dispatches live in `src/services/tickRiders.ts` (issue
+ * #4234): the SDK alarm tick dispatches the same riders through the
+ * same helper — one dispatch list, never two.
  */
 export async function runTickEntryPoint(
   deps: CronEntryPointDeps,
@@ -310,126 +353,20 @@ export async function runTickEntryPoint(
   }
   const userLogin = deps.serviceUserLogin;
   try {
-    const tickTrace = newTraceContext();
-    const observeTickDispatch = (
-      job: ScheduledJobId,
-      promise: Promise<unknown>,
-    ): Promise<void> =>
-      observeInternalDispatch(promise, {
-        job,
-        sink: deps.createSink(),
-        trace: tickTrace,
-        recordFailure: async (input) => {
-          const recorded = (await deps.orchestrator.fetch(
-            new Request("https://agent.internal/scheduled-job-outcome", {
-              method: "POST",
-              headers: backgroundDispatchHeadersWithTrace(
-                userLogin,
-                formatTraceparent(childSpan(tickTrace)),
-              ),
-              body: JSON.stringify(input),
-            }),
-          )) as unknown as { status?: unknown };
-          if (
-            !recorded ||
-            typeof recorded.status !== "number" ||
-            recorded.status >= 400
-          ) {
-            throw new Error("scheduled-job-outcome record failed");
-          }
-        },
-        alertUnreachable: async (failedJob, trace) => {
-          await deps.slackPoster(
-            `Scheduled job ${failedJob} dispatch failed AND its outcome ` +
-              `record is unreachable (trace ${trace.traceId}). The DO did ` +
-              `not record this failure — investigate the dispatch layer; ` +
-              `see Cloudflare logs for the tick.`,
-          );
-        },
-      });
-    const dispatchHeaders = () =>
-      backgroundDispatchHeadersWithTrace(
-        userLogin,
-        formatTraceparent(childSpan(tickTrace)),
-      );
     // PR #4 — ScheduledAgent tick: evaluate due goals, budget-check,
     // create Orchestrator jobs (issue #166).
     await deps.dispatchAndAwait(deps.scheduledAgent.onCron());
-    // Issue #354 — the daily options-research run (after market close)
-    // rides this tick. Fire/no-fire is decided inside the tick route.
-    await deps.dispatchAndAwait(
-      observeTickDispatch(
-        "research",
-        deps.orchestrator.fetch(
-          new Request("https://agent.internal/research/scheduled-tick", {
-            method: "POST",
-            headers: dispatchHeaders(),
-          }),
-        ),
-      ),
-    );
-    // Issue #705 — the weekly reflection job rides this tick.
-    await deps.dispatchAndAwait(
-      observeTickDispatch(
-        "reflection",
-        deps.orchestrator.fetch(
-          new Request("https://agent.internal/reflection/run", {
-            method: "POST",
-            headers: dispatchHeaders(),
-          }),
-        ),
-      ),
-    );
-    // Issue #754 — the weekly strategy-weight adjustment rides this tick.
-    await deps.dispatchAndAwait(
-      observeTickDispatch(
-        "adaptation",
-        deps.orchestrator.fetch(
-          new Request("https://agent.internal/adaptation/weights/run", {
-            method: "POST",
-            headers: dispatchHeaders(),
-          }),
-        ),
-      ),
-    );
-    // Issue #1169 (S4-4) — the weekly corpus sync rides this tick.
-    await deps.dispatchAndAwait(
-      observeTickDispatch(
-        "corpus-sync",
-        deps.orchestrator.fetch(
-          new Request("https://agent.internal/knowledge/corpus-sync", {
-            method: "POST",
-            headers: dispatchHeaders(),
-          }),
-        ),
-      ),
-    );
-    // Issue #3527 (S4) — the weekly reports canonical-index sweep
-    // rides this tick on its OWN rider.
-    await deps.dispatchAndAwait(
-      observeTickDispatch(
-        "reports-index-backfill",
-        deps.orchestrator.fetch(
-          new Request(
-            "https://agent.internal/trading/reports/index-backfill-sweep",
-            {
-              method: "POST",
-              headers: dispatchHeaders(),
-            },
-          ),
-        ),
-      ),
-    );
-    // Issue #2659 (monetization Phase 2.4) — the scheduled digest
-    // pass rides this tick. Direct dispatch: NOT observed.
-    await deps.dispatchAndAwait(
-      deps.orchestrator.fetch(
-        new Request(`https://agent.internal${commercialBarePath("lifecycleDigestRunDue")}`, {
-          method: "POST",
-          headers: dispatchHeaders(),
-        }),
-      ),
-    );
+    // Issue #4234 — the six piggyback dispatches ride this tick from
+    // the one shared helper (see src/services/tickRiders.ts): the
+    // SDK alarm tick dispatches the same riders, in the same order,
+    // under one trace.
+    await dispatchTickRiders({
+      userLogin,
+      orchestratorFetch: (request) => deps.orchestrator.fetch(request),
+      createSink: deps.createSink,
+      dispatchAndAwait: deps.dispatchAndAwait,
+      slackPoster: deps.slackPoster,
+    });
     // Issue #1077 Phase 5b slice 1: the parallel social tick is gone.
     // Social posting is now a ScheduledAgent goal ("daily-social-post",
     // disabled by default) evaluated by the onCron call at the top of
@@ -576,6 +513,81 @@ export async function runRetentionEntryPoint(
   }
 }
 
+/**
+ * Issue #4234 (ADR 0030) — the hourly heartbeat watchdog entry point.
+ *
+ * Reads the alarm list + last tick from the ScheduledAgent stub,
+ * decides via the pure `decideHeartbeatWatchdog`, re-arms only on
+ * positive evidence (missing → plain re-arm; stale → force re-arm;
+ * healthy → nothing), records exactly one ledger row per run, and
+ * NEVER calls onCron (the watchdog does no tick work). On unreadable
+ * evidence or a re-arm failure it records a failure row naming the
+ * error, then rethrows — fail-closed, never re-arm on evidence it
+ * cannot see.
+ */
+export async function runWatchdogEntryPoint(
+  deps: CronEntryPointDeps,
+): Promise<void> {
+  const started = deps.now().toISOString();
+  const config: HeartbeatWatchdogConfig = deps.heartbeatWatchdog ?? {
+    intervalSeconds: DEFAULT_HEARTBEAT_INTERVAL_SECONDS,
+    staleAfterMs: DEFAULT_HEARTBEAT_WATCHDOG_STALE_AFTER_MS,
+  };
+  try {
+    const { listSchedules, getTickHistory, ensureHeartbeatAlarm } =
+      deps.scheduledAgent;
+    if (
+      typeof listSchedules !== "function" ||
+      typeof getTickHistory !== "function" ||
+      typeof ensureHeartbeatAlarm !== "function"
+    ) {
+      throw new Error(
+        "scheduled agent exposes no heartbeat alarm reads (listSchedules / getTickHistory / ensureHeartbeatAlarm)",
+      );
+    }
+    const schedules = await listSchedules();
+    const alarmExists = schedules.some(
+      (schedule) => schedule.callback === HEARTBEAT_ALARM_CALLBACK,
+    );
+    const ticks = await getTickHistory();
+    const lastTickAtMs =
+      ticks.length > 0 ? Date.parse(ticks[0].timestamp) : null;
+    const decision = decideHeartbeatWatchdog({
+      alarmExists,
+      lastTickAtMs:
+        lastTickAtMs !== null && Number.isFinite(lastTickAtMs)
+          ? lastTickAtMs
+          : null,
+      nowMs: deps.now().getTime(),
+      staleAfterMs: config.staleAfterMs,
+    });
+    if (decision.rearm) {
+      await ensureHeartbeatAlarm(config.intervalSeconds, {
+        force: decision.forceRearm,
+      });
+    }
+    await deps.recordDispatch({
+      cron: deps.cron,
+      entryPoint: "watchdog",
+      outcome: "success",
+      started,
+      finished: deps.now().toISOString(),
+      detail: `heartbeat watchdog: ${decision.finding} — ${decision.detail}`,
+    });
+  } catch (err) {
+    await deps.recordDispatch({
+      cron: deps.cron,
+      entryPoint: "watchdog",
+      outcome: "failure",
+      started,
+      finished: deps.now().toISOString(),
+      error: errorMessage(err),
+      detail: `heartbeat watchdog failed: ${errorMessage(err)}`,
+    });
+    throw err;
+  }
+}
+
 const ENTRY_POINT_RUNNERS: Record<
   CronEntryPointName,
   (deps: CronEntryPointDeps) => Promise<void>
@@ -583,6 +595,7 @@ const ENTRY_POINT_RUNNERS: Record<
   tick: runTickEntryPoint,
   renewTokens: runRenewTokensEntryPoint,
   retention: runRetentionEntryPoint,
+  watchdog: runWatchdogEntryPoint,
 };
 
 /** Run one entry point by name (the thin dispatcher's single call). */
