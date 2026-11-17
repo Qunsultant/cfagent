@@ -115,12 +115,15 @@ describe("Fills visibility on BrokerRemoteOrder (#4666)", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     try {
-      const client = new ETradeRestClient({
-        ENVIRONMENT: "sandbox",
-        ETRADE_CONSUMER_KEY: "test-key",
-        ETRADE_CONSUMER_SECRET: "test-secret",
-        ETRADE_ACCOUNT_ID_KEY: "acct-key",
-      } as any);
+      const client = new ETradeRestClient(
+        {
+          ENVIRONMENT: "sandbox",
+          ETRADE_CONSUMER_KEY: "test-key",
+          ETRADE_CONSUMER_SECRET: "test-secret",
+          ETRADE_ACCOUNT_ID_KEY: "acct-key",
+        } as any,
+        "tester_4666",
+      );
       vi.spyOn(client as any, "generateOAuthHeader").mockResolvedValue("OAuth test");
 
       const list = await client.fetchOrders("acct-key", { count: 10 });
