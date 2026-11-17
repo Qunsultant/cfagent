@@ -14,7 +14,7 @@ describe("E*TRADE brackets / OCO / OTO honesty & placeBracketExits (#4667)", () 
   });
 
   it("placeBracketExits submits separate SELL LIMIT and SELL STOP orders for a BUY entry", async () => {
-    const client = new ETradeRestClient({ ETRADE_ENVIRONMENT: "sandbox" } as unknown as Env);
+    const client = new ETradeRestClient({ ETRADE_ENVIRONMENT: "sandbox" } as unknown as Env, "tester_4667");
     const placeOrderSpy = vi.spyOn(client, "placeOrder").mockImplementation(async (params) => ({
       success: true,
       orderId: params.orderId,
