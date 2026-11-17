@@ -52,6 +52,7 @@ import { handleTradingScheduleRoutes, handleTradingOmniRoutes, handleTradingQuot
 import { handleMessagingSagaRoutes, handleMessagingSocialRoutes, handleMessagingSlackRoutes } from "./server/routes/messaging";
 import { handleScheduleWebhookRoutes } from "./server/routes/scheduleWebhook";
 import { handlePlatformTelemetryRoutes, handlePlatformRetrievalRoutes, handlePlatformMcpRoutes, handlePlatformPaymentsRoutes, handlePlatformBrowserRoutes } from "./server/routes/platform";
+import { handleOtelRoutes } from "./server/routes/otel";
 import { handleScheduledEvent, handleQueueBatch } from "./server/routes/queue";
 import { createStructuredLogger } from "./observability/structuredLogger";
 import { createObservabilitySink } from "./observability/createObservabilityPorts";
@@ -176,6 +177,13 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
     // /api/telemetry/decisions/:id/(decide|apply|supersede|expire).
     const platformTelemetryResponse = await handlePlatformTelemetryRoutes(request, env, url, path);
     if (platformTelemetryResponse) return platformTelemetryResponse;
+    // Issue #5081 (S1, observability program #5080): the OTLP
+    // ingestion route (POST /api/otel/v1/logs) — the real HTTP
+    // endpoint for external OTLP senders. The Worker-side SDK
+    // uses the same handler in-process (no HTTP self-fetch).
+    // The route is disabled (404) unless OTEL_INGEST_TOKEN is set.
+    const otelResponse = await handleOtelRoutes(request, env, url, path);
+    if (otelResponse) return otelResponse;
     // Slice 4 (#2902): audit/reports moved to src/server/routes/privacy.ts —
     // /api/audit/history, /api/reports/list, /api/reports/seed-canonical.
     const privacyReportsResponse = await handlePrivacyReportsRoutes(request, env, url, path);

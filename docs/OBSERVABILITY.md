@@ -336,3 +336,98 @@ leaky producer envelope cannot leak through it.
   a `resource.sql_op` envelope folded through the Q1 consumer
   path and visible in the stream, with AE totals agreeing with
   the D1 rollup. Not fabricated here.
+
+## 6. OpenTelemetry (OTel) — the telemetry library (issue #5081, program #5080 S1)
+
+OTel is the instrumentation library for logs, metrics, and traces
+(the S1 slice implements LOGGING only; metrics is S2 #5082,
+tracing spans is S3, and #2808's harmonization program stays
+parked). No SigNoz, no ClickHouse, no VPS, no Workers Paid
+features, no D1 for telemetry. The stack is the stock JS 3.x
+logs line: `@opentelemetry/api` 1.10.0 + `@opentelemetry/sdk-logs`
+3.1.1 + `@opentelemetry/otlp-transformer` 0.301.2.
+
+### The four-level on/off mechanism (all externalized)
+
+Every switch lives in `config/otel.json` + env vars and resolves
+run > session > user > env > config-file > built-in safe default
+(the PAYMENTS_FLOW_MODE pattern, `src/config/otelModes.ts`).
+Invalid values fail closed to OFF / none / 0 with a coded
+OBS-1001 message. Flipping a switch is a config-file or env-var
+change, effective on the next deploy; the runtime flip without a
+redeploy (KV/D1 switches + admin UI) is S7/S8.
+
+1. **Global master** — `OTEL_ENABLED` / `OTEL_SDK_DISABLED`
+   (the OTel standard kill switch). Master off = nothing emitted,
+   nothing exported, no cost. Default: ON (so the J1–J7 domain,
+   which is ON, actually emits).
+2. **Per-signal** — `OTEL_LOGS_EXPORTER` / `OTEL_METRICS_EXPORTER` /
+   `OTEL_TRACES_EXPORTER` (`otlp` | `console` | `none`). `none`
+   turns that signal off globally. Logs is the live signal
+   (`otlp`); metrics and traces resolve to `none` until S2/S3.
+3. **Per-domain** — `OTEL_DOMAIN_<DOMAIN>_ENABLED` / the config
+   map `otel.domains.<domain>.enabled`. One AOP gate at the domain
+   boundary (`createOtelDomainGate`); domain code calls through
+   it and contains no scattered `if (enabled)` checks. J1–J7 is
+   ON; Stock Copilot, IAAA, MCP/A2A, scheduler, payments, market
+   data, platform are OFF by default and enableable later by
+   flipping a switch, without a code change.
+4. **Per-domain level + sampling** — the log level
+   (`ALL`/`ERROR`/`DEBUG`/`INFO`/`WARN`/`TRACE`/`OFF`) and the
+   sampling ratio per domain. Level `OFF` = that domain emits
+   nothing.
+
+### Export: OTLP/HTTP to R2 (archive) + console
+
+The OTel SDK exports OTLP/HTTP (JSON) through a thin exporter
+over the official `JsonLogsSerializer`, with an injected
+transport. The Worker-side SDK hands OTLP to the ingestion
+handler in-process (a real HTTP POST to the Worker's own domain
+returns Cloudflare 522). `POST /api/otel/v1/logs` is a real HTTP
+endpoint for external OTLP senders; it is disabled (404) unless
+the `OTEL_INGEST_TOKEN` secret is set, and requires
+`Authorization: Bearer <token>` when it is. The ingestion
+handler writes one JSONL object per batch to R2
+(`REPORTS_BUCKET`, `otel-archive/<YYYY-MM-DD>/<id>.jsonl`),
+falling back to the structured logger (Workers Logs, via the
+base sink) when R2 is unbound. The fallback log is injected
+(`OtelIngestionLog`, built by `createOtelIngestionLog` over a
+structured logger) — the ingestion module never calls raw
+`console.*` (the #3515 ratchet pins new files at zero) — and
+the logger writes to the base sink only, never the OTel sink
+(a fallback record must not re-enter the OTel pipeline). R2
+is retention, not observability — no query engine, dashboard,
+or alerting on it until the S8 dashboard.
+
+### J1–J7 instrumentation (S1 scope)
+
+The J1–J7 Job Pipeline Engine (Epic #3533) is instrumented
+through the engine's existing seams only — the
+`runSettledObserver` (chained after the feed-run observer) and
+the stage-step `journal` — on the ScheduledAgent host,
+emitting `job.run.settled` + `job.stage.step.started` /
+`completed` / `failed` through the ONE structured logger with
+component `job-pipeline`, via a fan-out sink (Analytics Engine /
+console AND OTel). The workflow / options / in-memory hosts are
+not yet wired (same helper, later slice). The 242 raw
+`console.*` sites outside the structured logger are NOT swept
+in this PR (follow-on work).
+
+### Coded messages (the S7 catalog seed)
+
+`OBS-1001` config invalid (fail-closed) · `OBS-1002` export
+failed · `OBS-1003` ingest failed (R2 write) · `OBS-1004`
+ingest rejected (malformed OTLP) · `OBS-1005` sink degraded.
+Defined in one place (`src/observability/otelMessages.ts`);
+S7 adopts and expands it into the one message catalog.
+
+### Why not the stock exporter or the pydantic package
+
+- The stock `OTLPLogExporter` (`@opentelemetry/exporter-logs-otlp-http`)
+  has no public transport injection, so it cannot route to the
+  same-Worker ingestion route (the 522 self-fetch rule). The thin
+  exporter uses the official serializer + an injected transport
+  instead.
+- `@pydantic/otel-cf-workers` is traces-only (no LoggerProvider /
+  sdk-logs) and its `@opentelemetry/core` 2.x conflicts with the
+  logs stack's core 3.x. S3 (tracing) will evaluate it then.

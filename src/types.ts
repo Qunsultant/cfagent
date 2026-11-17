@@ -16,6 +16,22 @@ export interface Env {
   // dataset is provisioned; absence means the sink degrades
   // to local logging (never fails the request).
   OBSERVABILITY?: AnalyticsEngineDataset;
+  // Issue #5081 (S1, observability program #5080): the OTel
+  // switches. All optional so code is safe before they are set;
+  // absence means the config-file / built-in defaults apply
+  // (master ON, logs=otlp, j1j7 ON, all other domains OFF).
+  // OTEL_INGEST_TOKEN is a secret (wrangler secret put), never
+  // in wrangler.jsonc and never in the repo; without it the
+  // external OTLP ingestion HTTP surface is disabled (404).
+  OTEL_ENABLED?: string;
+  OTEL_SDK_DISABLED?: string;
+  OTEL_LOGS_EXPORTER?: string;
+  OTEL_METRICS_EXPORTER?: string;
+  OTEL_TRACES_EXPORTER?: string;
+  OTEL_DOMAIN_J1J7_ENABLED?: string;
+  OTEL_DOMAIN_J1J7_LEVEL?: string;
+  OTEL_DOMAIN_J1J7_SAMPLING?: string;
+  OTEL_INGEST_TOKEN?: string;
   // Issue #1739: queue-backed messaging bindings. Optional so code is
   // safe before the bindings propagate; absence means the legacy
   // in-process bus (the composition root returns null).

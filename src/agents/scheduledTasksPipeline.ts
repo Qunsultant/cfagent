@@ -75,6 +75,17 @@ import {
   type JobScheduleHost,
   type JobStatusView,
 } from "../services/jobPipelineEngine";
+// Issue #5081 (S1, observability program #5080): the OTel J1–J7
+// observers — the run-settled observer and the stage-step
+// journal, chained with this host's existing observers. The
+// OTel logging stack is built once per control (the control is
+// cached on ctx), gated by the per-domain j1j7 switch.
+import { createOtelJobPipelineLogger, createOtelLogging } from "../observability/otelProvider";
+import {
+  chainRunSettledObservers,
+  createOtelJobPipelineRunSettledObserver,
+  createOtelJobStepJournal,
+} from "../observability/otelJobPipeline";
 import { buildFeedJobRegistry, buildFeedStatus } from "../services/feedJobs";
 import { resolveFeedJobTimeouts } from "../services/feedJobTimeouts";
 import {
@@ -490,10 +501,30 @@ export function createScheduledAgentPipelineControl(
   const sql = pipelineSql(ctx);
   const stores = createJobPipelineStoresFromSql(sql);
   const messaging = createJobPipelineMessaging(ctx.env);
+  // Issue #5081 (S1): the OTel J1–J7 logging stack for this
+  // host's control plane. The OTel run-settled observer is
+  // CHAINED after the feed-run observer (the feed observer is
+  // kept, never replaced); the OTel stage-step journal wraps
+  // the identity journal (no journal was set here before).
+  // Both observers check the per-domain j1j7 switch first and
+  // no-op when it is OFF, so the OTel wiring costs nothing
+  // when the domain is off. The workflow / options / in-memory
+  // hosts are not yet wired — same helper, later slice.
+  const otel = createOtelLogging(ctx.env);
+  const otelLogger = createOtelJobPipelineLogger(ctx.env, otel);
+  const otelObserverDeps = {
+    logger: otelLogger,
+    isEnabled: () => otel.isDomainEnabled("j1j7"),
+    flush: () => otel.flush(),
+  };
   return new JobPipelineControl({
     stores,
     runRecorder: jobRunRecorderFromStore(new SqlJobRunRecordStore(sql)),
-    runSettledObserver: feedRunSettledObserverFor(ctx),
+    runSettledObserver: chainRunSettledObservers(
+      feedRunSettledObserverFor(ctx),
+      createOtelJobPipelineRunSettledObserver(otelObserverDeps),
+    ),
+    journal: createOtelJobStepJournal(otelObserverDeps),
     publisher: messaging.ports?.publisher ?? null,
     // #4312 — the feed execution bound resolves from env here
     // (FEED_JOB_EXECUTION_MS, 240s when no knob is set), so the
