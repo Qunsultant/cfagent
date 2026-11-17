@@ -814,6 +814,16 @@ function measure(): Map<string, number> {
  * 123->124 — the identity parameter threaded into the exchange;
  * pepGateway.ts etrade 5->8 — the two inventory entries and their
  * comment). Baseline totals move 1303/10407 -> 1305/10512.
+ * Baseline update (#4856, 2026-11-17): the evaluate route's panel
+ * screen cuts over to the strategy workflow host, gated — the gate
+ * and host dispatch name the provider they integrate,
+ * dispositioned INTEGRATION (naming the provider is their job): 1
+ * new row (etradeOptionsEvaluate.ts nasdaq 1 — the universe
+ * descriptor literal) and 1 raise (etradeOptionsEvaluate.ts etrade
+ * 25->29 — the broker derivation literal, the gate and derivation
+ * comments naming the platform, and the service type reference).
+ * Baseline totals move 1308/10537 -> 1309/10542 (re-based onto
+ * c26e0d2c).
  */
 const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (188 rows / 989 lines) ----
@@ -1022,7 +1032,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/services/platformKnowledge.ts", "etrade", 51],
   ["src/services/platformKnowledge.ts", "yahoo", 12],
   ["src/trading/interfaces.ts", "etrade", 2],
-  // ---- INTEGRATION (699 rows / 7064 lines) ----
+  // ---- INTEGRATION (700 rows / 7069 lines) ----
   ["docs/CLOUDFLARE_SCHEDULING_AND_ETAPI_TUNING.md", "etrade", 12],
   ["docs/CLOUDFLARE_SCHEDULING_AND_ETAPI_TUNING.md", "yahoo", 1],
   ["docs/EXTERNAL_APIS_AND_ENDPOINTS_DIRECTORY.md", "alpaca", 3],
@@ -1170,7 +1180,8 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/agents/routes/etradeBrokerScreen.ts", "etrade", 28],
   ["src/agents/routes/etradeOptions.ts", "etrade", 65],
   ["src/agents/routes/etradeOptionsDiscoveryReport.ts", "etrade", 4],
-  ["src/agents/routes/etradeOptionsEvaluate.ts", "etrade", 25],
+  ["src/agents/routes/etradeOptionsEvaluate.ts", "etrade", 29],
+  ["src/agents/routes/etradeOptionsEvaluate.ts", "nasdaq", 1],
   ["src/agents/routes/etradeOptionsNoView.ts", "etrade", 7],
   ["src/agents/routes/etradeOptionsProfiles.ts", "etrade", 7],
   ["src/agents/routes/etradeOptionsRuns.ts", "alpaca", 2],

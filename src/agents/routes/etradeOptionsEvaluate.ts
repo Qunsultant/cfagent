@@ -16,13 +16,27 @@ import { recordStrategyCandidates } from "../../services/strategyReviews";
 import {
   generateSyntheticOptionChains,
   rankCandidatesWithLlm,
+  type PipelineResult,
   type StrategyRequest,
 } from "../../trading";
 import { runOptionsPanelViaEngine } from "../../workflows/optionsScreenEngine";
+import { discoveryBrokerStageInput } from "../../services/discoveryService";
+import type { JobPipelineStores } from "../../data/jobPipelinePorts";
+import type { JobRunRecorder } from "../../services/jobPipelineEngine";
+import type { BrokerStageInput } from "../../workflows/optionsStepPorts";
+import {
+  awaitOptionsWorkflowRun,
+  optionsWorkflowRunDepsFromEnv,
+  startStrategyScreenWorkflow,
+  type AwaitOptionsWorkflowRunOpts,
+  type StartOptionsScreenWorkflowOpts,
+} from "../../workflows/optionsWorkflowHost";
+import { panelResultToPipelineResult } from "../../workflows/strategyScreenPorts";
+import type { PanelDiscoveryResult } from "../../services/recommendationKernel";
 import { DEFAULT_AI_MODEL } from "../model";
 import type { ETradeService } from "../../services/etrade";
 import type { DatabaseORM } from "../../orm";
-import type { ETradeOptionChain, ETradeOptionExpireDate } from "../../types";
+import type { Env, ETradeOptionChain, ETradeOptionExpireDate } from "../../types";
 import type { EtradeOptionsRouteContext } from "./etradeOptions";
 
 import { createStructuredLogger } from "../../observability/structuredLogger";
@@ -39,6 +53,180 @@ export interface LlmIdeasRetrievalState {
   usedSyntheticChains: boolean;
 }
 
+/** The evaluate leg's dispatch decision: the host, or the unchanged sync dispatch. */
+export interface EvaluateDispatchDecision {
+  route: "host" | "sync";
+  reason: string;
+}
+
+/**
+ * Issue #4856 — the evaluate leg's dispatch gate (the #4848
+ * manual-route gate's shape, as the #4853 panel gate mirrors it).
+ * The host only when the leg's (broker, mode) pair derived from
+ * the E*TRADE platform with the request's environment and the
+ * residency bindings are configured; anything else stays on the
+ * unchanged sync dispatch. No snapshot clause: the route carries
+ * no stored snapshot input. No symbol gate: every evaluation is
+ * single-symbol by construction. No gate decision is logged; the
+ * run's job record shows which dispatch served it.
+ */
+export function evaluateDispatchRoute(input: {
+  broker: BrokerStageInput | null;
+  env: Env;
+}): EvaluateDispatchDecision {
+  if (!input.broker) {
+    return {
+      route: "sync",
+      reason:
+        "no broker stage input derives from the route platform, so the residency could not resolve the run's own chain source",
+    };
+  }
+  const workflow = input.env.JOB_PIPELINE_WORKFLOW;
+  if (!input.env.AGENT_DB || !workflow || typeof workflow.create !== "function") {
+    return {
+      route: "sync",
+      reason: "the workflow residency bindings are not configured in this deployment",
+    };
+  }
+  return {
+    route: "host",
+    reason: "broker pair derived and residency bindings configured",
+  };
+}
+
+/** The per-run host dispatch: the decision plus the derived pair, taken once per run. */
+export interface EvaluateHostDispatch {
+  decision: EvaluateDispatchDecision;
+  broker: BrokerStageInput | null;
+}
+
+/**
+ * Issue #4856 — resolve the evaluate leg's host dispatch once per
+ * run: the (broker, mode) pair derives from the E*TRADE platform
+ * with the request's environment, through the #4853 derivation —
+ * the same (env, overrideEnv) the ETradeService was constructed
+ * with (the dispatcher passes ctx.requestedEnv as the service's
+ * override), so the residency fetches the same environment's
+ * chains the sync dispatch would. The platform, environment, and
+ * bindings are fixed for the run, so a run never mixes dispatches
+ * mid-flight.
+ */
+export function resolveEvaluateHostDispatch(
+  env: Env,
+  requestedEnv: "TEST" | "PROD" | undefined,
+): EvaluateHostDispatch {
+  const broker = discoveryBrokerStageInput("etrade", env, requestedEnv);
+  return { decision: evaluateDispatchRoute({ broker, env }), broker };
+}
+
+/**
+ * Issue #4856 — the host dispatch's injectable seams (the
+ * #4291/#4848/#4853/#4854 idiom): the workflow create call, the
+ * residency stores, and the await options. Tests inject fakes;
+ * production passes nothing and the dispatch derives from env.
+ */
+export interface EvaluateHostSeams {
+  startWorkflow?: StartOptionsScreenWorkflowOpts["startWorkflow"];
+  stores?: JobPipelineStores;
+  runRecorder?: JobRunRecorder;
+  awaitOptions?: AwaitOptionsWorkflowRunOpts;
+}
+
+/**
+ * Issue #4856 — one evaluate-route panel screen through the
+ * strategy workflow host: define the strategy job with the leg's
+ * broker pair and the universe descriptor stamped on the stored
+ * request, create the workflow instance, await settlement, and map
+ * the shapeReport back to the PipelineResult the route consumes.
+ * The envelope is the sync dispatch's envelope
+ * (runOptionsPanelViaEngine): the strategy request, riskProfile
+ * "balanced", trigger "manual", and the sync run-id template, so a
+ * host run and a sync run are the same job shape in Workflow Runs.
+ * The universe descriptor is tenant-less: the residency rebuild
+ * defaults the tenant exactly as the route's call-site bundle
+ * build does (nasdaqUniverseSeamFromSql passes no tenant). The
+ * await bound is the manual route's (300s, #4848): a panel screen
+ * over live chains is the same shape of work. A failed run throws
+ * the sync path's failure shape; a run that completes without a
+ * report refuses to answer from nothing, as the sync path does.
+ *
+ * The live universe deps are never built here: they are a
+ * function-valued seam and can never travel on the stored
+ * definition — the descriptor travels, and the resolving steps
+ * rebuild live deps per invocation (#4857). The caller's engine
+ * stores do not thread here: the host run records over the
+ * residency's durable stores, not the caller's stores, so a
+ * host-path evaluation is not addressable by per-stage control
+ * from the copilot turn until control moves to the durable stores
+ * (#4859). The stage queue is not threaded either: the residency
+ * binds it from env (#4851), so a host-path evaluation publishes
+ * stage-boundary messages through the residency's queue where the
+ * sync dispatch publishes nothing (it passes no queue) — the
+ * workflow norm for durable runs, and the only queue the
+ * residency offers; there is no per-run opt-out on the start seam.
+ */
+export async function runEvaluatePanelViaHost(args: {
+  env: Env;
+  request: StrategyRequest;
+  runId: string;
+  userLogin: string;
+  broker: BrokerStageInput;
+  seams?: EvaluateHostSeams;
+}): Promise<PipelineResult> {
+  const deps =
+    args.seams?.stores && args.seams?.runRecorder
+      ? { stores: args.seams.stores, runRecorder: args.seams.runRecorder }
+      : optionsWorkflowRunDepsFromEnv(args.env);
+  const started = await startStrategyScreenWorkflow(
+    args.env,
+    {
+      runId: args.runId,
+      request: {
+        assetClass: "options",
+        runIdentity: { runId: args.runId },
+        trigger: "manual",
+        classInput: {
+          strategyRequest: args.request,
+          strategyFilter: undefined,
+          riskProfile: "balanced",
+          alternatives: undefined,
+          snapshotOverride: undefined,
+        },
+      },
+      userLogin: args.userLogin,
+      trigger: "manual",
+      universe: { provider: "nasdaq" },
+      broker: args.broker,
+    },
+    {
+      ...deps,
+      ...(args.seams?.startWorkflow ? { startWorkflow: args.seams.startWorkflow } : {}),
+    },
+  );
+  const view = await awaitOptionsWorkflowRun(deps, started.jobId, {
+    timeoutMs: 300_000,
+    ...(args.seams?.awaitOptions ?? {}),
+  });
+  if (view.state === "failed") {
+    const failed = view.stages.find((stage) => stage.status === "failed");
+    throw new Error(
+      `Options strategy screen failed at ${failed?.stageId ?? "unknown"}: ${failed?.error ?? "unknown reason"}`,
+    );
+  }
+  if (view.state !== "completed") {
+    throw new Error(
+      `Options strategy screen run ${args.runId} ended ${view.state} without a result`,
+    );
+  }
+  const panelResult = view.shapeReport as PanelDiscoveryResult | undefined;
+  if (!panelResult) {
+    throw new Error(
+      "Options strategy screen completed without a report artifact; refusing to answer from nothing.",
+    );
+  }
+  return panelResultToPipelineResult(panelResult);
+}
+
 export async function executeLlmIdeasEvaluation(args: {
   ctx: EtradeOptionsRouteContext;
   orm: DatabaseORM;
@@ -49,6 +237,12 @@ export async function executeLlmIdeasEvaluation(args: {
   cached: ReturnType<DatabaseORM["getOptionsChain"]>;
   retrievedChains: ETradeOptionChain[];
   state: LlmIdeasRetrievalState;
+  /**
+   * Issue #4856: test seams for the host dispatch (the #4854
+   * idiom). Production leaves it unset and the dispatch derives
+   * from env; tests inject fakes. Only read on the host route.
+   */
+  hostSeams?: EvaluateHostSeams;
 }): Promise<Response> {
   const { ctx, orm, etrade, userLogin, symbol, question, cached, retrievedChains, state } = args;
 
@@ -180,7 +374,28 @@ export async function executeLlmIdeasEvaluation(args: {
   // (runOptionsPanelViaEngine) instead of the direct runPanelPipelineRetired4068 call.
   // The universe deps ride the helper's fifth parameter, exactly as the
   // direct call passed them to the screener's constructor.
-  const pipelineResult = await runOptionsPanelViaEngine(etrade.client, strategyRequest, { riskProfile: "balanced" }, userLogin, await etrade.getUniverseDeps?.(ctx.agentCtx?.storage));
+  // Issue #4856: the host dispatch resolves once per run, before the
+  // panel call — the platform, environment, and bindings are fixed
+  // for the run. The run id mints here with the sync dispatch's
+  // template (runOptionsPanelViaEngineWithAgents mints its own
+  // internally — PipelineOptions carries no run id — so the two
+  // dispatches share the template, not the mint, and only one
+  // dispatch runs per invocation). On the host route the live
+  // universe deps are never built: the descriptor travels on the
+  // stored request and the residency rebuilds the deps (#4857).
+  const hostDispatch = resolveEvaluateHostDispatch(ctx.env, ctx.requestedEnv);
+  const evaluateRunId = `options-panel:service:${symbol}:${new Date().toISOString()}`;
+  const pipelineResult =
+    hostDispatch.decision.route === "host" && hostDispatch.broker
+      ? await runEvaluatePanelViaHost({
+          env: ctx.env,
+          request: strategyRequest,
+          runId: evaluateRunId,
+          userLogin,
+          broker: hostDispatch.broker,
+          ...(args.hostSeams ? { seams: args.hostSeams } : {}),
+        })
+      : await runOptionsPanelViaEngine(etrade.client, strategyRequest, { riskProfile: "balanced" }, userLogin, await etrade.getUniverseDeps?.(ctx.agentCtx?.storage));
   const topRanked = pipelineResult.ranked.slice(0, 10);
   const candidates = topRanked.map((r) => r.candidate);
   let llmJudgment: Awaited<ReturnType<typeof rankCandidatesWithLlm>> | null = null;
