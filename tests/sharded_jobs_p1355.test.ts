@@ -46,7 +46,7 @@ import {
   type ShardChainContext,
   type ShardRow,
 } from "../src/services/shardJobs";
-import { buildOptionsChainJobDefinition } from "../src/services/optionsChainPipelineJobs";
+import { buildOptionsChainJobDefinition } from "../src/services/optionsChainJobDefinition";
 import { executeShardJob } from "../src/services/shardExecutors";
 import { collateOpportunityScanShards } from "../src/trading/options/opportunityScanner";
 import { marketScreenScheduleCriteriaSchema, optionsAnalysisScheduleCriteriaSchema } from "../src/trading/screeningSchemas";
