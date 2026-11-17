@@ -421,3 +421,48 @@ export class ResearchTaskLedger {
     this.store.set(TASK_PREFIX + task.id, JSON.stringify(task));
   }
 }
+
+/**
+ * Issue #5121 (#5109 Data layer) — Reconcile a `ResearchTask` ledger entry with
+ * the single `workflowRuns` / engine job recorder (`research:<runId>`).
+ * Ensures the task ledger acts strictly as an execution-status projection over
+ * the engine job rather than a silent second run recorder.
+ */
+export interface ResearchTaskReconciliation {
+  engineJobId: string;
+  taskId: string;
+  userLogin: string;
+  trigger: ResearchTask["trigger"];
+  engineStatus: "queued" | "running" | "completed" | "failed" | "cancelled";
+  reportRunId: string | null;
+  executionPath: ResearchExecutionPath | null;
+  evaluationVerdict: "pass" | "fail" | null;
+  updatedAt: string;
+}
+
+export function reconcileResearchTaskWithRunRecord(
+  task: ResearchTask,
+  engineJobId: string,
+): ResearchTaskReconciliation {
+  const statusMap: Record<ResearchTaskStatus, ResearchTaskReconciliation["engineStatus"]> = {
+    queued: "queued",
+    claimed: "running",
+    running: "running",
+    completed: "completed",
+    failed: "failed",
+    escalated: "failed",
+    cancelled: "cancelled",
+  };
+  return {
+    engineJobId,
+    taskId: task.id,
+    userLogin: task.userLogin,
+    trigger: task.trigger,
+    engineStatus: statusMap[task.status],
+    reportRunId: task.reportRunId ?? null,
+    executionPath: task.path ?? null,
+    evaluationVerdict: task.evaluation?.verdict ?? null,
+    updatedAt: task.updatedAt,
+  };
+}
+

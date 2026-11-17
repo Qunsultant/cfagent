@@ -13,6 +13,7 @@ import type { Env } from "../../types";
 import { ETradeEmailTradingService } from "../../trading";
 import { codedMessage } from "../../outcomes/outcomeAspects";
 import { storeReportAtGeneration } from "../../services/scheduledReports";
+import { researchReportToStoreInput } from "../../workflows/researchCanonicalLeg";
 import { deliverGatedSlack } from "../../services/gatedSlackDelivery";
 import {
   evaluateResearchOutcome,
@@ -125,18 +126,7 @@ export async function generateAndStoreResearchReport(
 
   const stored = storeReportAtGeneration(
     ctx.ensureTables(),
-    {
-      runId: report.runId,
-      generationId: report.generationId,
-      title: `Options research — ${report.createdAt.slice(0, 10)} (${report.trigger})`,
-      source: "options_research",
-      summary: report.summary,
-      userLogin: opts.userLogin,
-      body: {
-        ...(report as unknown as Record<string, unknown>),
-        ...Object.fromEntries(Object.entries(artifacts).filter(([, value]) => value !== undefined)),
-      },
-    },
+    researchReportToStoreInput(report, artifacts, opts.userLogin),
     ctx.env as { AI?: any; VECTOR_MEMORY?: any },
   );
 
