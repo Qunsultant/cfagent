@@ -15,6 +15,8 @@
 export interface OptionsRunAlertContext {
   /** `scheduled` | `manual` | `triggered` — the run type the firer used. */
   readonly trigger?: string;
+  /** The login that owns the run (the schedule's owner). */
+  readonly owner?: string;
   readonly scheduleId?: string;
   readonly workflow?: string;
   readonly mode?: string;
@@ -33,7 +35,10 @@ export function optionsRunContextLine(ctx: OptionsRunAlertContext): string {
   const modeSource = typeof ctx.modeSource === "string" && ctx.modeSource.trim() ? ` (${ctx.modeSource.trim()})` : "";
   const parts = [
     `dispatch ${orUnknown(ctx.trigger) === "unknown" ? "scheduled" : orUnknown(ctx.trigger)}`,
-    ctx.scheduleId ? `schedule ${ctx.scheduleId}` : null,
+    `owner ${orUnknown(ctx.owner)}`,
+    // Issue #5232: the schedule is ALWAYS rendered. A scheduled run with no
+    // schedule id is a traceability defect, and omitting the field hides it.
+    `schedule ${orUnknown(ctx.scheduleId)}`,
     `workflow ${orUnknown(ctx.workflow) === "unknown" ? "optionsScreenWorkflow" : orUnknown(ctx.workflow)}`,
     `mode ${mode}${modeSource}`,
     `broker ${orUnknown(ctx.broker)}`,

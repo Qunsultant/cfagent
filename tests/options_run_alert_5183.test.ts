@@ -2,14 +2,17 @@
  * Issue #5183 — one failure notice that names the schedule, dispatch, workflow,
  * mode, broker and run. Incident #5181 shipped four copies of a message that
  * named none of them.
+ * Issue #5232 — it must also name the OWNER and always render the schedule,
+ * because "no one ran this" is what an unattributed alert produces.
  */
 import { describe, expect, it } from "vitest";
 import { optionsFailureAlertText, optionsRunContextLine } from "../src/services/optionsRunAlertFormat";
 
-describe("options run alert format (#5183)", () => {
+describe("options run alert format (#5183, #5232)", () => {
   it("names every field the reader needs", () => {
     const line = optionsRunContextLine({
       trigger: "scheduled",
+      owner: "trader_alice",
       scheduleId: "sched-42",
       mode: "live",
       modeSource: "pin",
@@ -19,18 +22,26 @@ describe("options run alert format (#5183)", () => {
     });
 
     expect(line).toBe(
-      "dispatch scheduled · schedule sched-42 · workflow optionsScreenWorkflow · mode live (pin) · broker etrade · account acct-9 · run run_abc",
+      "dispatch scheduled · owner trader_alice · schedule sched-42 · workflow optionsScreenWorkflow · mode live (pin) · broker etrade · account acct-9 · run run_abc",
     );
   });
 
   it("renders unknown values as unknown, never blank", () => {
     const line = optionsRunContextLine({});
 
+    expect(line).toContain("owner unknown");
+    expect(line).toContain("schedule unknown");
     expect(line).toContain("mode unknown");
     expect(line).toContain("broker unknown");
     expect(line).toContain("run unknown");
     expect(line).not.toMatch(/·\s*·/);
     expect(line.endsWith("· ")).toBe(false);
+  });
+
+  it("always renders the schedule field, even when the run carried none (#5232)", () => {
+    const line = optionsRunContextLine({ owner: "trader_bob", broker: "alpaca" });
+
+    expect(line).toContain("schedule unknown");
   });
 
   it("defaults the dispatch to scheduled and the workflow to the options pipeline", () => {
@@ -44,7 +55,15 @@ describe("options run alert format (#5183)", () => {
     const text = optionsFailureAlertText({
       universe: "NASDAQ100",
       thesis: "bullish",
-      context: { trigger: "triggered", mode: "paper", modeSource: "selection", broker: "alpaca", runId: "run_1" },
+      context: {
+        trigger: "triggered",
+        owner: "trader_alice",
+        scheduleId: "sched-7",
+        mode: "paper",
+        modeSource: "selection",
+        broker: "alpaca",
+        runId: "run_1",
+      },
       errorMessage: "[FAILURE_AUTH_NO_SESSION] No E*TRADE session is stored for this account.",
       timestamp: "2026-11-17T21:35:03.509Z",
     });
@@ -52,6 +71,8 @@ describe("options run alert format (#5183)", () => {
 
     expect(lines[0]).toContain("Scheduled Options Screen FAILED — NASDAQ100 (bullish)");
     expect(lines[1]).toContain("dispatch triggered");
+    expect(lines[1]).toContain("owner trader_alice");
+    expect(lines[1]).toContain("schedule sched-7");
     expect(lines[1]).toContain("broker alpaca");
     expect(lines[2]).toContain("FAILURE_AUTH_NO_SESSION");
     expect(lines[3]).toBe("_Time: 2026-11-17T21:35:03.509Z_");

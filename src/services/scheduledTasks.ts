@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Cloudflare Agents Task Scheduling Service
  *
  * Implements:
@@ -4002,6 +4002,8 @@ export class ScheduledTasksService {
             thesis: targetThesis,
             context: {
               trigger: options.trigger,
+              // Issue #5232: whose run this is, and which schedule fired.
+              owner: options.userLogin || this.userLogin,
               scheduleId: options.scheduleId,
               mode: optionsEffectiveMode?.mode,
               modeSource: optionsEffectiveMode?.modeSource,
