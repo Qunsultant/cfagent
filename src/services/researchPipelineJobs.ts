@@ -10,6 +10,15 @@
  */
 import type { JobStepRegistry } from "./jobPipelineSteps";
 import type { ResearchEvaluation, ResearchReport } from "./researchPipeline";
+import { codedMessage } from "../outcomes/outcomeAspects";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+import {
+  DEFAULT_RESEARCH_JOB_CONFIG,
+  RESEARCH_AOP_RULES,
+  resolveResearchJobConfig,
+  type ResearchJobConfig,
+} from "../config/researchJobConfig";
 import {
   RESEARCH_PIPELINE_STAGES,
   type ResearchPipelineStage,
@@ -19,6 +28,10 @@ import {
   researchEngineJobId,
   type ResearchEvaluationStorePort,
 } from "../workflows/researchDataPorts";
+
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "services/researchPipelineJobs",
+});
 
 export const ANALYZE_OODA_STEP = "analyze.ooda";
 export const EVALUATE_APPLY_STEP = "evaluate.apply";
@@ -91,9 +104,17 @@ export function registerResearchSteps(
     const runId = params.runId || ctx.jobId.replace(/^research:/, "");
     const userLogin = params.userLogin || "";
     if (!userLogin) {
-      throw new Error(`analyze.ooda (${ctx.jobId}): explicit userLogin is required`);
+      throw new Error(codedMessage("FAILURE_RESEARCH_OWNER_MISSING"));
     }
+    const config = resolveResearchJobConfig();
+    assertResearchAopCompliance(config, { userLogin });
     const trigger = params.trigger === "scheduled" ? "scheduled" : "manual";
+    structuredLog.info("researchPipelineJobs.analyze_ooda_started", {
+      jobId: ctx.jobId,
+      runId,
+      trigger,
+      oodaBudgetMs: config.oodaBudgetMs,
+    });
     const report = await deps.runOodaAnalysis({
       runId,
       userLogin,
@@ -114,25 +135,59 @@ export function registerResearchSteps(
     const runId = params.runId || ctx.jobId.replace(/^research:/, "");
     const userLogin = params.userLogin || "";
     if (!userLogin) {
-      throw new Error(`evaluate.apply (${ctx.jobId}): explicit userLogin is required`);
+      throw new Error(codedMessage("FAILURE_RESEARCH_OWNER_MISSING"));
     }
-    const evaluation = deps.runEvaluateStage
-      ? await deps.runEvaluateStage({
-          runId,
-          userLogin,
-          evaluationStore: deps.evaluationStore,
-        })
-      : null;
-    if (evaluation && deps.evaluationStore) {
-      deps.evaluationStore.saveEvaluation(runId, JSON.stringify(evaluation));
+    try {
+      const evaluation = deps.runEvaluateStage
+        ? await deps.runEvaluateStage({
+            runId,
+            userLogin,
+            evaluationStore: deps.evaluationStore,
+          })
+        : null;
+      if (evaluation && deps.evaluationStore) {
+        deps.evaluationStore.saveEvaluation(runId, JSON.stringify(evaluation));
+      }
+      return {
+        output: evaluation,
+        descriptor: `${researchArtifactKey(runId, "evaluate")} (${evaluation ? evaluation.stats.evaluated : 0} evaluated)`,
+      };
+    } catch (err) {
+      structuredLog.error("researchPipelineJobs.evaluate_apply_failed", {
+        jobId: ctx.jobId,
+        runId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      throw new Error(codedMessage("FAILURE_RESEARCH_EVALUATE_FAILED"));
     }
-    return {
-      output: evaluation,
-      descriptor: `${researchArtifactKey(runId, "evaluate")} (${evaluation ? evaluation.aggregates.evaluated : 0} evaluated)`,
-    };
   });
 
   return registry;
+}
+
+/**
+ * Programme §10 AOP guard for research job execution (#5119):
+ * enforces externalized config bounds, owner-scoped identity, and rule flags.
+ */
+export function assertResearchAopCompliance(
+  config: ResearchJobConfig = DEFAULT_RESEARCH_JOB_CONFIG,
+  ctx: { userLogin?: string },
+): void {
+  if (!ctx.userLogin?.trim()) {
+    throw new Error(codedMessage("FAILURE_RESEARCH_OWNER_MISSING"));
+  }
+  if (
+    !RESEARCH_AOP_RULES.storedDataOnly ||
+    !RESEARCH_AOP_RULES.durableResumableStages ||
+    !RESEARCH_AOP_RULES.ownerScopedReads ||
+    !RESEARCH_AOP_RULES.cappedParallel ||
+    !RESEARCH_AOP_RULES.fullProvenance
+  ) {
+    throw new Error("Research AOP invariants violated");
+  }
+  if (config.oodaBudgetMs <= 0 || config.maxParallelCandidates < 1) {
+    throw new Error("Invalid externalized ResearchJobConfig bounds");
+  }
 }
 
 export interface ResearchJobDefinitionConfig {
