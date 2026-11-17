@@ -1,0 +1,4 @@
+### Changed
+
+- Tail slice 3 (#5140, sub of #3695): ApiKeysPanel, DownloadsPanel, SecurityHubHome, DataHubHome, DataLifecyclePanel, TenantAdminPanel, UserAdminPanel, ChannelsAdminPanel, ScheduleRunLedgerPanel, and ScheduledGoalsPanel are now primitives-only interiors (0 bespoke classes, each rendering at least one PageSection). The ten register entries are removed; the interiors total falls 64 → 0. `apiKeysPanel.css` retires in place (no rules remain; deprecation-ledger entry added).
+- NOTE: the freeze drops 18 keys (2,536 → 2,518), not 20 — `section-label-row` and `schedules-toolbar` keep their freeze entries because their rules stay live in the shared sheets (`styles.css`, still used by BrokerDynamicMenu; `reports.css`). The rule-of-three `ui-grow` pin moves 7 → 8 (ApiKeysPanel mint-row TextInput wrapper, the same grow-to-fill-a-Flex-row pattern).

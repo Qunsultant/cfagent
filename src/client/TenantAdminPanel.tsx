@@ -37,9 +37,11 @@ import { useCallback, useEffect, useState } from "react";
 import { isApiFetchTimeoutError } from "./apiFetch";
 import {
   Button,
+  CardHeader,
   Checkbox,
   EmptyState,
   Notice,
+  PageSection,
   Spinner,
   Stack,
   Table,
@@ -152,11 +154,9 @@ export function TenantAdminPanel() {
   };
 
   return (
+    <PageSection>
     <Stack gap="2">
-      <div className="section-label-row">
-        <span>Tenants</span>
-        <small>Operator-only: create, list, and administer tenant settings</small>
-      </div>
+      <CardHeader title="Tenants" subtitle="Operator-only: create, list, and administer tenant settings" />
       <Notice tone="info">
         Memberships below are read-only. Grants, revokes, and edits live on the IAAA Admin tab.
         Tenant identity here comes from the commercial account row — the same authority the
@@ -216,10 +216,7 @@ export function TenantAdminPanel() {
       {selectedId && detailLoading && <Spinner />}
       {selectedId && !detailLoading && detail && (
         <Stack gap="2">
-          <div className="section-label-row">
-            <span>{detail.tenantId}</span>
-            <small>Tenant settings and members</small>
-          </div>
+          <CardHeader title={detail.tenantId} subtitle="Tenant settings and members" />
           <Checkbox
             label="Ads enabled for this tenant"
             checked={detail.adsEnabled}
@@ -274,10 +271,7 @@ export function TenantAdminPanel() {
               }
             }}
           />
-          <div className="section-label-row">
-            <span>Account members</span>
-            <small>From commercial account rows — the payment-screen identity authority</small>
-          </div>
+          <CardHeader title="Account members" subtitle="From commercial account rows — the payment-screen identity authority" />
           {detail.members.length === 0 ? (
             <EmptyState title="No account members" description="This tenant has a settings row but no commercial account rows yet." />
           ) : (
@@ -293,10 +287,7 @@ export function TenantAdminPanel() {
               rowKey={(row) => row.userId}
             />
           )}
-          <div className="section-label-row">
-            <span>IAAA memberships (read-only)</span>
-            <small>From the IAAA read path; changes live on the IAAA Admin tab</small>
-          </div>
+          <CardHeader title="IAAA memberships (read-only)" subtitle="From the IAAA read path; changes live on the IAAA Admin tab" />
           {memberships.length === 0 ? (
             <EmptyState title="No IAAA memberships" description="No membership records exist for this tenant." />
           ) : (
@@ -318,5 +309,6 @@ export function TenantAdminPanel() {
         </Stack>
       )}
     </Stack>
+    </PageSection>
   );
 }

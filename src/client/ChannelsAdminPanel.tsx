@@ -33,9 +33,11 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   Button,
+  CardHeader,
   Checkbox,
   EmptyState,
   Notice,
+  PageSection,
   Spinner,
   Stack,
 } from "./components/ui";
@@ -103,11 +105,9 @@ export function ChannelsAdminPanel() {
   };
 
   return (
+    <PageSection>
     <Stack gap="2">
-      <div className="section-label-row">
-        <span>Channels</span>
-        <small>Operator-only: enable or disable delivery channels per tenant</small>
-      </div>
+      <CardHeader title="Channels" subtitle="Operator-only: enable or disable delivery channels per tenant" />
       <Notice tone="info">
         Enablement flags only — no webhook URLs, tokens, or secrets are collected here. A
         disabled channel is refused at dispatch with a typed error; email, Slack, and webhook
@@ -122,9 +122,7 @@ export function ChannelsAdminPanel() {
         <EmptyState title="No tenants yet" description="Create a tenant on the Tenants tab first." />
       ) : (
         <Stack gap="1">
-          <div className="section-label-row">
-            <span>Select a tenant</span>
-          </div>
+          <CardHeader title="Select a tenant" />
           {tenants.map((tenant) => (
             <div key={tenant.tenantId}>
               <Button
@@ -141,10 +139,7 @@ export function ChannelsAdminPanel() {
       {selectedId && channelsLoading && <Spinner />}
       {selectedId && !channelsLoading && channels && (
         <Stack gap="2">
-          <div className="section-label-row">
-            <span>{selectedId}</span>
-            <small>Delivery channels — a tenant with no saved row reads as all-enabled</small>
-          </div>
+          <CardHeader title={selectedId} subtitle="Delivery channels — a tenant with no saved row reads as all-enabled" />
           {TENANT_CHANNEL_META.map((meta) => (
             <div key={meta.id}>
               <Checkbox
@@ -159,5 +154,6 @@ export function ChannelsAdminPanel() {
         </Stack>
       )}
     </Stack>
+    </PageSection>
   );
 }

@@ -15,7 +15,7 @@
  * Inactive views unmount (TabPanel default).
  */
 import { useEffect, useState } from "react";
-import { Card, Grid, PageShell, Tabs, TabPanel, type TabOption } from "./components/ui";
+import { Card, CardHeader, Grid, PageSection, PageShell, Tabs, TabPanel, type TabOption } from "./components/ui";
 import { DataProvidersPanel } from "./DataProvidersPanel";
 import { AlpacaSignInCard } from "./AlpacaSignInCard";
 import { DataLifecyclePanel } from "./DataLifecyclePanel";
@@ -62,29 +62,22 @@ export function DataHubHome({ userLogin }: DataHubHomeProps = {}) {
       title="DataHub"
       scopeNote="Market-data providers, data lifecycle, and parameters & export"
     >
-      <div className="data-hub-tabs-wrapper">
-        <Tabs<DataHubView>
-          idBase="data-hub"
-          ariaLabel="DataHub views"
-          tabs={DATA_HUB_TABS}
-          value={deepLink.view}
-          onChange={handleSelectView}
-        />
-      </div>
+      <PageSection>
+      <Tabs<DataHubView>
+        idBase="data-hub"
+        ariaLabel="DataHub views"
+        tabs={DATA_HUB_TABS}
+        value={deepLink.view}
+        onChange={handleSelectView}
+      />
 
       <TabPanel idBase="data-hub" tabId="data-providers" active={deepLink.view === "data-providers"}>
         <Card>
-          <div className="section-label-row">
-            <span>Data Providers</span>
-            <small>Provisioning lifecycle for market-data providers</small>
-          </div>
+          <CardHeader title="Data Providers" subtitle="Provisioning lifecycle for market-data providers" />
           <DataProvidersPanel />
         </Card>
         <Card>
-          <div className="section-label-row">
-            <span>BYOK Provider Credentials</span>
-            <small>Bring Your Own Keys for broker execution and market data</small>
-          </div>
+          <CardHeader title="BYOK Provider Credentials" subtitle="Bring Your Own Keys for broker execution and market data" />
           <Grid columns={2} gap="3">
             <AlpacaSignInCard activeEnv="TEST" collapsedWhenConfigured={false} />
             <AlpacaSignInCard activeEnv="PROD" collapsedWhenConfigured={false} />
@@ -94,10 +87,7 @@ export function DataHubHome({ userLogin }: DataHubHomeProps = {}) {
 
       <TabPanel idBase="data-hub" tabId="data-lifecycle" active={deepLink.view === "data-lifecycle"}>
         <Card>
-          <div className="section-label-row">
-            <span>Data Lifecycle</span>
-            <small>Clean state, platform bootstrap &amp; tenant bootstrap</small>
-          </div>
+          <CardHeader title="Data Lifecycle" subtitle="Clean state, platform bootstrap & tenant bootstrap" />
           <DataLifecyclePanel />
         </Card>
       </TabPanel>
@@ -107,6 +97,7 @@ export function DataHubHome({ userLogin }: DataHubHomeProps = {}) {
           <DownloadsPanel userLogin={userLogin} />
         </Card>
       </TabPanel>
+      </PageSection>
     </PageShell>
   );
 }

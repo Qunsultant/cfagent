@@ -18,7 +18,7 @@
  * Inactive views unmount (TabPanel default).
  */
 import { useCallback, useEffect, useState } from "react";
-import { Card, PageShell, Tabs, TabPanel, type TabOption } from "./components/ui";
+import { Card, CardHeader, PageSection, PageShell, Tabs, TabPanel, type TabOption } from "./components/ui";
 import { IaaaAdminPanel } from "./IaaaAdminPanel";
 import { UserAdminPanel } from "./UserAdminPanel";
 import { ProfileSection } from "./ProfileSection";
@@ -103,32 +103,25 @@ export function SecurityHubHome({ userLogin, user }: SecurityHubHomeProps = {}) 
       title="SecurityHub"
       scopeNote="IAAA admin, users, admin access, your profile, the Policy Decision Point, the Policy Enforcement Point, the Policy Information Point, and the Policy Administration Point"
     >
-      <div className="security-hub-tabs-wrapper">
-        <Tabs<SecurityHubView>
-          idBase="security-hub"
-          ariaLabel="SecurityHub views"
-          tabs={SECURITY_HUB_TABS}
-          value={deepLink.view}
-          onChange={handleSelectView}
-        />
-      </div>
+      <PageSection>
+      <Tabs<SecurityHubView>
+        idBase="security-hub"
+        ariaLabel="SecurityHub views"
+        tabs={SECURITY_HUB_TABS}
+        value={deepLink.view}
+        onChange={handleSelectView}
+      />
 
       <TabPanel idBase="security-hub" tabId="iaaa-admin" active={deepLink.view === "iaaa-admin"}>
         <Card>
-          <div className="section-label-row">
-            <span>IAAA Admin</span>
-            <small>Read-only memberships, genesis &amp; audit</small>
-          </div>
+          <CardHeader title="IAAA Admin" subtitle="Read-only memberships, genesis & audit" />
           <IaaaAdminPanel />
         </Card>
       </TabPanel>
 
       <TabPanel idBase="security-hub" tabId="users" active={deepLink.view === "users"}>
         <Card>
-          <div className="section-label-row">
-            <span>Users</span>
-            <small>User profiles, tenant memberships &amp; account linkage</small>
-          </div>
+          <CardHeader title="Users" subtitle="User profiles, tenant memberships & account linkage" />
           <UserAdminPanel />
         </Card>
       </TabPanel>
@@ -146,53 +139,39 @@ export function SecurityHubHome({ userLogin, user }: SecurityHubHomeProps = {}) 
 
       <TabPanel idBase="security-hub" tabId="profile" active={deepLink.view === "profile"}>
         <Card>
-          <div className="section-label-row">
-            <span>Profile</span>
-            <small>Your display name and phone</small>
-          </div>
+          <CardHeader title="Profile" subtitle="Your display name and phone" />
           {userLogin ? <ProfileSection userLogin={userLogin} /> : null}
         </Card>
       </TabPanel>
 
       <TabPanel idBase="security-hub" tabId="pdp" active={deepLink.view === "pdp"}>
         <Card>
-          <div className="section-label-row">
-            <span>PDP</span>
-            <small>Live policy state: active snapshot, source &amp; obligations</small>
-          </div>
+          <CardHeader title="PDP" subtitle="Live policy state: active snapshot, source & obligations" />
           <PdpPanel />
         </Card>
       </TabPanel>
 
       <TabPanel idBase="security-hub" tabId="pep" active={deepLink.view === "pep"}>
         <Card>
-          <div className="section-label-row">
-            <span>PEP</span>
-            <small>Live enforcement state: gated routes, enforcement &amp; grace</small>
-          </div>
+          <CardHeader title="PEP" subtitle="Live enforcement state: gated routes, enforcement & grace" />
           <PepPanel />
         </Card>
       </TabPanel>
 
       <TabPanel idBase="security-hub" tabId="pip" active={deepLink.view === "pip"}>
         <Card>
-          <div className="section-label-row">
-            <span>PIP</span>
-            <small>Live attribute state: schema, sources &amp; your attributes</small>
-          </div>
+          <CardHeader title="PIP" subtitle="Live attribute state: schema, sources & your attributes" />
           <PipPanel />
         </Card>
       </TabPanel>
 
       <TabPanel idBase="security-hub" tabId="pap" active={deepLink.view === "pap"}>
         <Card>
-          <div className="section-label-row">
-            <span>PAP</span>
-            <small>Live policy administration: proposals, preview, approval &amp; promotion</small>
-          </div>
+          <CardHeader title="PAP" subtitle="Live policy administration: proposals, preview, approval & promotion" />
           <PolicyProposalsPanel />
         </Card>
       </TabPanel>
+      </PageSection>
     </PageShell>
   );
 }

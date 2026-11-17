@@ -23,8 +23,10 @@ import {
   Badge,
   Button,
   EmptyState,
+  Flex,
   Modal,
   Notice,
+  PageSection,
   SegmentedControl,
   Spinner,
   Table,
@@ -449,8 +451,8 @@ export function ScheduleRunLedgerPanel({
   );
 
   return (
-    <div className="schedule-run-ledger">
-      <div className="schedules-toolbar">
+    <PageSection>
+      <Flex align="center" justify="between" gap="3" wrap>
         {/* Issue #4262 (S1) — one ledger, filtered by kind. The set comes from
             config, so a deployment can show fewer (or different) buttons. */}
         {filters.length > 1 && (
@@ -502,7 +504,7 @@ export function ScheduleRunLedgerPanel({
             </Button>
           </>
         )}
-      </div>
+      </Flex>
 
       {error && (
         <Notice tone="danger" title="Run ledger could not be loaded">
@@ -558,11 +560,11 @@ export function ScheduleRunLedgerPanel({
 
       {selectedAsyncJobId && (
         <div>
-          <div className="schedules-toolbar">
+          <Flex align="center" gap="3">
             <span className="ui-meta">
               Job detail: <code>{selectedAsyncJobId}</code>
             </span>
-          </div>
+          </Flex>
           <AsyncJobResultViewer
             jobId={selectedAsyncJobId}
             variant="standalone"
@@ -570,6 +572,6 @@ export function ScheduleRunLedgerPanel({
           />
         </div>
       )}
-    </div>
+    </PageSection>
   );
 }
