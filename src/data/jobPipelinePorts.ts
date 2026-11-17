@@ -219,7 +219,7 @@ export interface JobInstanceRecord {
   currentRunId: string | null;
   runStartedAt: string | null;
   /** How the live/last run was triggered (stamped onto its terminal run record). */
-  runTrigger: "scheduled" | "manual" | null;
+  runTrigger: "scheduled" | "manual" | "triggered" | "copilot" | "autopilot" | null;
   /**
    * The schedule id that dispatched the live/last run (stamped onto
    * its terminal run record, #3310). Null when the run was not

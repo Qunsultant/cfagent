@@ -19,6 +19,7 @@
  * the adapted `WorkflowRun` for the detail view (the row is a projection).
  */
 import type { JobRunOutcome, JobRunRecord } from "../data/jobRunRecordPorts";
+import { isLedgerTrigger } from "./consolidatedScheduling";
 import type { RunLedgerKind } from "../config/runLedgerModes";
 import type { WorkflowRun } from "./workflowRuns";
 
@@ -99,10 +100,13 @@ export function attachWorkflowRuns(
       outcome: outcomeOf(run),
       // The ledger's trigger vocabulary is narrower than the workflow read's:
       // an unrepresentable leg stays unrecorded here and is visible in the
-      // detail view, never coerced into another verb.
+      // detail view, never coerced into another verb. The vocabulary is the
+      // eight-valued ledger trigger (#5028): a workflow-run trigger that
+      // names one of the five dispatch modes (or a mechanism value) passes
+      // through; anything else (e.g. "agent") stays unrecorded.
       triggeredBy: (run.triggeredBy ?? run.triggerDetail) as JobRunRecord["triggeredBy"],
       trigger:
-        run.trigger === "scheduled" || run.trigger === "manual"
+        isLedgerTrigger(run.trigger) && run.trigger !== "unknown"
           ? run.trigger
           : undefined,
       scheduleId: null,

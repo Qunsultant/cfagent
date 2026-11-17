@@ -802,14 +802,17 @@ extended — not in S0):**
 
 ### O4 decision (S1): `trigger` sits ALONGSIDE `triggeredBy` — it does not supersede it
 
-**Decision (pinned in S1, before any write-site change):** the §4
-`trigger` column is ADDITIVE. `triggeredBy` (`scheduled | manual`) is
-retained exactly as today — required, validated by
-`buildJobRunRecord`, rendered by `JobsPanel` / `WorkflowRunsPanel`,
-and typed into the #2840 in-flight firing claim
-(`goalFiringClaims.ts`). `trigger` is the five-valued ledger
-vocabulary (`scheduled | manual | worker-cron | async-chain |
-unknown`) that distinguishes firings `triggeredBy` cannot express.
+**Decision (pinned in S1, before any write-site change; widened by
+#5028, Venus ruling 2026-11-17 — the five dispatch modes):** the §4
+`trigger` column is ADDITIVE. `triggeredBy` (manual | scheduled |
+triggered | copilot | autopilot — the five dispatch modes) is
+retained — required, validated by `buildJobRunRecord`, rendered by
+`JobsPanel` / `WorkflowRunsPanel`, and typed into the #2840
+in-flight firing claim (`goalFiringClaims.ts`). `trigger` is the
+eight-valued ledger vocabulary (`scheduled | manual | triggered |
+copilot | autopilot | worker-cron | async-chain | unknown`) that
+distinguishes firings `triggeredBy` cannot express on its own
+(Worker cron dispatch, async-chain step, legacy `unknown`).
 
 Why alongside, not supersede:
 
@@ -817,7 +820,7 @@ Why alongside, not supersede:
    row (DO SQLite `job_run_records` + ScheduledAgent KV
    `jobRunRecords` arrays) carries `triggeredBy` and no `trigger`;
    the claim guard, both panels, and the builder all type on the
-   two-valued field. Rewriting them in the primitives slice would
+   five-valued field (#5028 widened it from two-valued). Rewriting them in the primitives slice would
    risk behavior change in exactly the slice that must have none.
 2. The two fields answer different questions. `triggeredBy` is the
    human-facing origin a reader already understands (did the cadence
@@ -828,7 +831,7 @@ Why alongside, not supersede:
    write site stamps `trigger` explicitly when it knows its path
    (worker-cron at cron dispatches, async-chain at chain minting);
    otherwise the builder derives it from `triggeredBy`
-   (`scheduled` → `scheduled`, `manual` → `manual`). `unknown` is
+   (each of the five dispatch modes maps to itself). `unknown` is
    legacy-rows-only, produced only by the read normalizer for rows
    written before S1.
 4. Retiring `triggeredBy` is S6 territory at the earliest: only

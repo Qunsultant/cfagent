@@ -50,22 +50,40 @@ export type JobRunSystem =
 /** success | failure | skipped — see the header note on skipped. */
 export type JobRunOutcome = "success" | "failure" | "skipped";
 
-/** scheduled = the cadence fired it; manual = a Run-now / trigger. */
-export type JobRunTrigger = "scheduled" | "manual";
+/** scheduled = the cadence fired it; manual = a Run-now / trigger;
+ * triggered = a scheduler Run-now button; copilot = the copilot
+ * dispatched it; autopilot = the autonomous loop dispatched it.
+ * Venus ruling 2026-11-17 (#5028, #3214): the five dispatch modes. */
+export type JobRunTrigger =
+  | "scheduled"
+  | "manual"
+  | "triggered"
+  | "copilot"
+  | "autopilot";
 
 /**
  * Issue #3121 S1 — the consolidated run-ledger trigger vocabulary
  * (inventory §4; O4 decision: sits ALONGSIDE `triggeredBy`, it does
- * not supersede it). The five-way distinction `triggeredBy` cannot
- * express: a cadence firing, a manual trigger, a Worker cron
+ * not supersede it). The eight-valued distinction `triggeredBy`
+ * cannot express on its own: a cadence firing, a manual trigger, a
+ * scheduler Run-now (`triggered`), a copilot dispatch (`copilot`),
+ * an autonomous-loop dispatch (`autopilot`), a Worker cron
  * dispatch, an async-chain step, or — legacy rows only — `unknown`
  * (the producing path predates trigger stamping). No NEW row is ever
  * `unknown` or null: the builder derives `trigger` from
  * `triggeredBy` when a write site does not stamp one explicitly.
+ * The three mode values come from Venus's five-dispatch-mode ruling
+ * 2026-11-17 (#5028, #3214), which supersedes the O4 "triggeredBy
+ * stays two-valued" half: the modes live in `triggeredBy` and are
+ * carried into `trigger` by the derivation. worker-cron and
+ * async-chain stay mechanism values, never dispatch modes.
  */
 export type JobRunLedgerTrigger =
   | "scheduled"
   | "manual"
+  | "triggered"
+  | "copilot"
+  | "autopilot"
   | "worker-cron"
   | "async-chain"
   | "unknown";
@@ -110,7 +128,7 @@ export interface JobRunRecord {
   finished: string;
   outcome: JobRunOutcome;
   triggeredBy: JobRunTrigger;
-  /** Issue #3121 S1 — §4 ledger trigger (five-valued; see JobRunLedgerTrigger). */
+  /** Issue #3121 S1 — §4 ledger trigger (eight-valued; see JobRunLedgerTrigger). */
   trigger?: JobRunLedgerTrigger;
   /** Issue #3121 S1 — originating schedule id (SDK schedule id, goal id, or Worker cron expression); null = no originating schedule. */
   scheduleId?: string | null;
