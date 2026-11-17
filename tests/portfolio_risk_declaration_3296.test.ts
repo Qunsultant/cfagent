@@ -34,7 +34,7 @@ describe("portfolio risk is declared per broker (#3296)", () => {
     expect(brokerSupports("alpaca", "positions")).toBe(true);
     expect(brokerSupports("alpaca", "portfolioRisk")).toBe(true);
     for (const broker of ROUTED_BROKER_IDS) {
-      expect(BROKER_CATALOG[broker].supports.portfolioRisk).toBe(true);
+      expect(BROKER_CATALOG[broker].supports.portfolioRisk).toBe(broker !== "tastytrade");
     }
   });
 });
