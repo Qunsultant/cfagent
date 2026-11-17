@@ -60,6 +60,7 @@
 
 import { parseStockScreenRequest } from "../trading";
 import type { StockScreenProvider } from "../trading";
+import { normalizeJobRunTrigger, type JobRunTrigger } from "../data/jobRunRecordPorts";
 import {
   admitScreenModeSelection,
   type ScreenModeSelection,
@@ -89,8 +90,7 @@ export type StockScreenSource = "etrade" | "market-data" | "goal" | "nlq" | "mes
  * the workflow hop instead of collapsing to "manual".
  */
 export type StockScreenTrigger =
-  | "manual"
-  | "scheduled"
+  | JobRunTrigger
   | "nlq"
   | "mesh"
   | "goal"
@@ -192,9 +192,12 @@ export function withRunProvenance(
   return out;
 }
 
-/** Issue #2908 (G1): the workflow command trigger for a spec — "scheduled" only for scheduled specs, "manual" otherwise (workflowPorts admits nothing else). The spec's own trigger rides the command as specTrigger. */
-export function workflowTriggerForSpec(spec: StockScreenRunSpec): "manual" | "scheduled" {
-  return spec.trigger === "scheduled" ? "scheduled" : "manual";
+/** Issue #2908 (G1): the workflow command trigger for a spec — the
+ * five dispatch modes pass through (#5052); a source-only spec
+ * trigger (nlq / mesh / goal / research) commands as manual, as
+ * before. The spec's own trigger rides the command as specTrigger. */
+export function workflowTriggerForSpec(spec: StockScreenRunSpec): JobRunTrigger {
+  return normalizeJobRunTrigger(spec.trigger);
 }
 
 /**

@@ -6,6 +6,7 @@ import { EmptyState, Table, Tabs, TabPanel, Badge, Button, Card, DetailCard, Fle
 import { BRAND } from "../branding";
 import { normalizeAutopilotLimits, type AutopilotPolicyLimits } from "../../services/riskPolicyEngine";
 import type { TradeRecord } from "../../types";
+import type { JobRunTrigger } from "../../data/jobRunRecordPorts";
 import { csrfHeaders } from "../apiFetch";
 
 /**
@@ -13,6 +14,16 @@ import { csrfHeaders } from "../apiFetch";
  * with the server, so the limit the UI shows is the limit that is enforced.
  */
 export type { AutopilotPolicyLimits } from "../../services/riskPolicyEngine";
+
+/** Issue #5052: the five dispatch modes, as the outcome rows carry
+ * them — a Run-now run reads "Triggered", never "Manual". */
+const JOB_TRIGGER_LABELS: Record<JobRunTrigger, string> = {
+  manual: "Manual",
+  scheduled: "Scheduled",
+  triggered: "Triggered",
+  copilot: "Copilot",
+  autopilot: "Autopilot",
+};
 
 export interface AutonomousActionItem {
   id: string;
@@ -34,7 +45,7 @@ export interface AutonomousActionItem {
 export interface JobOutcomeFeedItem {
   id: string;
   kind: "stock" | "options" | "goal" | "discovery" | "corpus" | "reports" | "feed";
-  trigger: "manual" | "scheduled";
+  trigger: JobRunTrigger;
   status: "completed" | "failed" | "partial";
   scanned: number | null;
   matched: number | null;
@@ -1184,7 +1195,7 @@ export function AutopilotControlCenter({
                   <Badge size="xs" uppercase tone="info">
                     {JOB_OUTCOME_KIND_LABELS[job.kind] ?? job.kind}
                   </Badge>
-                  <span className="ui-meta-sm">{job.trigger === "scheduled" ? "Scheduled" : "Manual"}</span>
+                  <span className="ui-meta-sm">{JOB_TRIGGER_LABELS[job.trigger] ?? job.trigger}</span>
                 </>
               ),
             },

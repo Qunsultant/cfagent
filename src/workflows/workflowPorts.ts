@@ -102,6 +102,7 @@ import type { ScenarioDefinition } from "../services/goalScenarioEngine";
 import type { OptionScreenerFilter, StageChainConfig, StockScreenerFilter } from "../types";
 import type { BrokerId } from "../trading";
 import type { StockScreenDelivery } from "./stockScreenRunSpec";
+import type { JobRunTrigger } from "../data/jobRunRecordPorts";
 
 /** Re-exported for workflow callers (single import surface). */
 export type { StageName };
@@ -250,18 +251,18 @@ export interface WorkflowJobCommand {
   type: "run-screen";
   /** Trigger source for audit (never branched on): e.g. "scheduled-tasks" or "manual". */
   source: string;
-  trigger: "manual" | "scheduled";
+  trigger: JobRunTrigger;
   /**
    * Issue #2908 (G1): the spec's own trigger, carried
-   * alongside the workflow trigger (which admits only
-   * manual|scheduled). Lets NLQ ("nlq"), mesh ("mesh"),
+   * alongside the workflow trigger (the five dispatch modes).
+   * Lets NLQ ("nlq"), mesh ("mesh"),
    * goal, and research runs keep their provenance through
    * the workflow hop instead of collapsing to "manual".
    * Shape mirrors StockScreenRunSpec's trigger vocabulary;
    * kept inline here to avoid a workflowPorts <->
    * stockScreenRunSpec import cycle.
    */
-  specTrigger?: "manual" | "scheduled" | "nlq" | "mesh" | "goal" | "research";
+  specTrigger?: JobRunTrigger | "nlq" | "mesh" | "goal" | "research";
   /** Issue #2908 (G1): spec provenance carried on the command (defined fields only; genuinely unknown fields stay absent). */
   scheduleId?: string;
   goalId?: string;
@@ -806,7 +807,7 @@ export interface WorkflowCollation {
 export interface ParentScreenReportInput {
   jobId: string;
   userLogin: string;
-  trigger: "manual" | "scheduled";
+  trigger: JobRunTrigger;
   goalScreen: boolean;
   collation: WorkflowCollation;
   childRunIds: string[];

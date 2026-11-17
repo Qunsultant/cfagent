@@ -20,6 +20,7 @@ import type {
 } from "../../types";
 import { DatabaseORM, type SqlStorage } from "../../orm";
 import type { DataProviderPorts } from "../../data/buildDataProviderPorts";
+import type { JobRunTrigger } from "../../data/jobRunRecordPorts";
 import { TradingPlatformRegistry } from "../registry";
 import { resolveTenantBroker } from "../../services/tenantProviders";
 import { readTenantBrokerSelection } from "../../services/providerConnections";
@@ -108,9 +109,10 @@ export interface UnifiedOptionsRequest {
    * it. Carried ONLY into the scan-run save (the history row's
    * trigger) — never into the cache key, the scan template, or the
    * request snapshot, so a manual and a scheduled run over the
-   * same scan still share one cached result.
+   * same scan still share one cached result. Issue #5052: the five
+   * dispatch modes — a Run-now run saves "triggered" here.
    */
-  trigger?: "manual" | "scheduled";
+  trigger?: JobRunTrigger;
   targetPrice?: number;
   targetDate?: string;
   expectedIvDirection?: ExpectedIvDirection;

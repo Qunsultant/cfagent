@@ -58,6 +58,7 @@
 import type { Env } from "../types";
 import type { ScreenerRunResult } from "../agents/screener-agent";
 import type { ShardJobRow } from "../data/shardJobPorts";
+import type { JobRunTrigger } from "../data/jobRunRecordPorts";
 import { readJobHistory } from "../data/createShardJobPorts";
 import { createWorkflowPorts } from "./createWorkflowPorts";
 import { buildStockScreenWorkflowCommand } from "./screenExecutionBroker";
@@ -221,7 +222,7 @@ export function collationFromRows(rows: ShardJobRow[] | null, jobId: string): Wo
 /** The failed ScreenerRunResult for one shard that produced no readable body. */
 function failedShardResult(args: {
   shard: WorkflowShard;
-  trigger: "manual" | "scheduled";
+  trigger: JobRunTrigger;
   provider: string | undefined;
   sector: string;
   startedAtIso: string;
@@ -265,7 +266,7 @@ function assembleResults(args: {
   rows: ShardJobRow[] | null;
   startedAtIso: string;
   jobId: string;
-  trigger: "manual" | "scheduled";
+  trigger: JobRunTrigger;
   // Issue #4278: the provider a synthesized failure carries — the
   // command's when the run named one, undefined when it did not
   // (no hardcoded default: the engine never reported one).
@@ -382,7 +383,7 @@ async function startStockScreenViaEngine(input: RunStockScreenViaEngineInput): P
   command: WorkflowJobCommand;
   handle: WorkflowHandle;
   ports: WorkflowPort;
-  trigger: "manual" | "scheduled";
+  trigger: JobRunTrigger;
   startedAtIso: string;
 }> {
   const { env, spec, userLogin } = input;

@@ -53,6 +53,7 @@
  */
 import { z } from "zod";
 import type { OptionScreenerFilter, StockScreenerFilter } from "../types";
+import { JOB_RUN_TRIGGERS, type JobRunTrigger } from "../data/jobRunRecordPorts";
 import { UNIVERSES } from "./universes";
 import type {
   EventCalendarInfo,
@@ -681,12 +682,14 @@ export const unifiedOptionsRequestFields = {
   // route schema's refinement below, never resolved silently.
   strategyMode: z.enum(["thesis", "all", "no-view"]).optional(),
   farDated: z.boolean().optional(),
-  // Issue #3264: the run trigger (manual/scheduled) carried into the
-  // scan-run save so Docs can show the Run Type. Server-populated
-  // only — a client-supplied value is never trusted: the unified
-  // route deletes it after parsing (like eventCalendarBySymbol),
-  // and only the scheduled caller passes it to the service.
-  trigger: z.enum(["manual", "scheduled"]).optional(),
+  // Issue #3264: the run trigger carried into the scan-run save so
+  // Docs can show the Run Type. Server-populated only — a
+  // client-supplied value is never trusted: the unified route deletes
+  // it after parsing (like eventCalendarBySymbol), and only the
+  // scheduled caller passes it to the service. Issue #5052: the five
+  // dispatch modes (#5028, #3214) — a Run-now route stamps
+  // "triggered" here, never "manual".
+  trigger: z.enum(JOB_RUN_TRIGGERS).optional(),
   candidateLimit: z.union([intAtLeast(1), z.literal("all")]).optional(),
 } satisfies Record<keyof UnifiedOptionsRequest, z.ZodType>;
 
@@ -779,8 +782,11 @@ export interface ScheduleIdentity {
   userLogin?: string;
   /** Trusted broker environment stamped likewise. */
   environment?: string;
-  /** "scheduled" for armed schedules, "manual" for trigger-route runs. */
-  trigger: "manual" | "scheduled";
+  /** "scheduled" for armed schedules; "triggered" for the scheduler's
+   *  on-demand Run-now routes; "manual" for UX runs; "copilot" /
+   *  "autopilot" for agentic dispatches. The five dispatch modes
+   *  (#5028, #3214). */
+  trigger: JobRunTrigger;
   /**
    * Issue #3655: tenant broker stamped server-side from the tenant
    * selection at creation — never a form value. Absent on payloads
@@ -855,7 +861,7 @@ const stageChainFields = {
 /** `trigger` is part of the services' options types and the manager's
  *  payloads carry it; it is accepted as criteria and always overwritten
  *  by the identity stamp at assembly. */
-const triggerField = { trigger: z.enum(["manual", "scheduled"]).optional() };
+const triggerField = { trigger: z.enum(JOB_RUN_TRIGGERS).optional() };
 
 export const marketScreenScheduleCriteriaSchema = z.strictObject({
   sector: nonEmptyString.optional(),
@@ -1111,7 +1117,7 @@ export function buildSchedulePayload(
   options?: {
     /** Creation defaults (effective-universe + maxItems stamping)
      *  apply when a schedule is ARMED — the create route and the NLQ
-     *  executor. The trigger routes pass false: a manual trigger runs
+     *  executor. The trigger routes pass false: a Run-now trigger runs
      *  the caller's criteria as given (validated + identity-stamped),
      *  and the services apply their own identical defaults at run
      *  time, exactly as they did before #959. */

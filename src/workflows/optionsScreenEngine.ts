@@ -53,6 +53,7 @@ import {
   type JobPipelineStores,
 } from "../data/createJobPipelinePorts";
 import type { JobArtifactStore } from "../data/jobPipelinePorts";
+import type { JobRunTrigger } from "../data/jobRunRecordPorts";
 import { createInMemoryJobPipelineStores } from "../data/inMemoryJobPipelineAdapter";
 import { SqlJobRunRecordStore } from "../data/doSqliteJobRunRecordAdapter";
 import { InMemoryJobRunRecordStore } from "../data/inMemoryJobRunRecordAdapter";
@@ -890,7 +891,7 @@ export async function runOptionsScanViaEngine(
     scanOptions?: OpportunityScanOptions;
     requestRecord?: ScanRequestRecord;
     platformRunId?: string;
-    trigger?: "manual" | "scheduled";
+    trigger?: JobRunTrigger;
     scanRunStore?: ScanRunStore;
     userLogin?: string;
     /**
@@ -991,7 +992,7 @@ async function dispatchScreenViaEngine(
     runId: string;
     userLogin?: string;
     request: unknown;
-    trigger?: "manual" | "scheduled";
+    trigger?: JobRunTrigger;
   },
   deps: OptionsScreenEngineDeps,
   jobId: string,
@@ -1110,7 +1111,7 @@ export async function runOptionsScreenViaEngine(
     runId: string;
     userLogin?: string;
     request: unknown;
-    trigger?: "manual" | "scheduled";
+    trigger?: JobRunTrigger;
   },
   deps: OptionsScreenEngineDeps,
 ): Promise<OptionsScreenWorkflowOutcome> {
@@ -1155,7 +1156,7 @@ export async function runStrategyScreenViaEngine(
     runId: string;
     userLogin?: string;
     request: unknown;
-    trigger?: "manual" | "scheduled";
+    trigger?: JobRunTrigger;
   },
   deps: OptionsScreenEngineDeps,
 ): Promise<OptionsScreenWorkflowOutcome> {
