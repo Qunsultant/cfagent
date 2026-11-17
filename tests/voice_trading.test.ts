@@ -245,9 +245,9 @@ describe("Cloudflare Voice Trading Agent (E*TRADE Desk)", () => {
   // 3. ETradeVoiceTradingService Core Operations
   // =========================================================================
   describe("ETradeVoiceTradingService", () => {
-    it("provides an executive voice welcome greeting", () => {
+    it("provides an executive voice welcome greeting", async () => {
       const service = new ETradeVoiceTradingService(mockEnv, orm, sessionId);
-      const greeting = service.getWelcomeGreeting();
+      const greeting = await service.getWelcomeGreeting();
 
       expect(greeting.spokenText).toContain("Welcome to the E*TRADE Voice Trading Desk");
       expect(greeting.displayMarkdown).toContain("Voice Trading Desk Connected");

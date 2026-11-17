@@ -1099,7 +1099,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/agents/judge.ts", "etrade", 1],
   ["src/agents/judge.ts", "yahoo", 1],
   ["src/agents/nlq/execution.ts", "alpaca", 1],
-  ["src/agents/nlq/execution.ts", "etrade", 82],
+  ["src/agents/nlq/execution.ts", "etrade", 78],
   ["src/agents/nlq/execution.ts", "yahoo", 1],
   ["src/agents/nlq/formatting.ts", "etrade", 4],
   ["src/agents/nlq/llmPlanning.ts", "alpaca", 1],
@@ -1734,7 +1734,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/trading/screeningProvider.ts", "yahoo", 9],
   ["src/trading/screeningSchemas.ts", "etrade", 4],
   ["src/trading/screeningSchemas.ts", "yahoo", 3],
-  ["src/trading/slack/agent.ts", "etrade", 81],
+  ["src/trading/slack/agent.ts", "etrade", 80],
   ["src/trading/slack/agent.ts", "yahoo", 2],
   ["src/trading/stockQuoteSource.ts", "alpaca", 1],
   ["src/trading/stockQuoteSource.ts", "etrade", 2],
@@ -1743,7 +1743,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/trading/technicals.ts", "yahoo", 12],
   ["src/trading/universes.ts", "etrade", 4],
   ["src/trading/universes.ts", "yahoo", 1],
-  ["src/trading/voice/agent.ts", "etrade", 31],
+  ["src/trading/voice/agent.ts", "etrade", 17],
   ["src/types.ts", "alpaca", 15],
   ["src/types.ts", "etrade", 82],
   ["src/types.ts", "yahoo", 3],
@@ -2237,9 +2237,9 @@ const BASELINE: Array<[string, string, number]> = [
   // data providers it compares by definition; the table is the artefact,
   // not platform framing (same disposition as the broker-parity-matrix
   // rows, #4038/#4039). Measured 2026-11-15 on the placed file.
-  ["docs/architecture/business/brokerage-data-matrix.md", "etrade", 82],
+  ["docs/architecture/business/brokerage-data-matrix.md", "etrade", 81],
   ["docs/architecture/business/brokerage-data-matrix.md", "public.com", 14],
-  ["docs/architecture/business/brokerage-data-matrix.md", "alpaca", 63],
+  ["docs/architecture/business/brokerage-data-matrix.md", "alpaca", 59],
   ["docs/architecture/business/brokerage-data-matrix.md", "schwab", 3],
   ["docs/architecture/business/brokerage-data-matrix.md", "fidelity", 2],
   ["docs/architecture/business/brokerage-data-matrix.md", "robinhood", 1],
@@ -2351,6 +2351,17 @@ const BASELINE: Array<[string, string, number]> = [
   ["docs/architecture/data/data-model.md", "etrade", 4],
   ["docs/architecture/data/data-model.md", "public.com", 1],
   ["docs/architecture/data/data-model.md", "alpaca", 2],
+  // #5131 INTEGRATION (two new modules, 7 matching lines): the channel-broker
+  // setting and its one resolver. The config file's literal IS the setting's
+  // value (the legacy fallback broker a deployment may change), and the
+  // resolver quotes the #4999 expression it replaces plus the two fallback
+  // cases it keeps apart. Neither names a broker as copy; both are the
+  // provenance a reader needs to see why the historical default was kept.
+  // The same PR shrinks slack/agent.ts 81->80, voice/agent.ts 31->17,
+  // nlq/execution.ts 82->78 and the matrix (etrade 82->81, alpaca 63->59) by
+  // routing the channel labels through brokerPresentation.
+  ["src/config/channelBrokers.ts", "etrade", 4],
+  ["src/trading/channelBroker.ts", "etrade", 3],
 ];
 
 const BASELINE_MAP = new Map(BASELINE.map(([f, t, c]) => [`${f}\t${t}`, c]));

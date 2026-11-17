@@ -5,9 +5,8 @@ import {
   parseStockScreenerFilter,
   SCREENING_SCHEDULE_CALLBACKS,
   TradingPlatformRegistry,
-  brokerPresentation,
+  resolveChannelBroker,
 } from "../../trading";
-import { resolveTenantBrokerSelection } from "../../services/tenantProviders";
 import { ETradeAgenticPaymentService, TRADING_PAID_SERVICES } from "../../services/agenticPayments";
 import { describeX402PaymentPath } from "../../services/x402PaymentPath";
 import { ETradeBrowserService } from "../../services/browserAgent";
@@ -1909,12 +1908,15 @@ async function executeNLQQueryAsyncCore(
     }
 
     if (action === "preview_order") {
-      const brokerId = (await resolveTenantBrokerSelection(env).catch(() => null)) ?? ("etrade" as const);
-      const brokerLabel = brokerPresentation(brokerId).label;
+      // Issue #5131: the draft's broker and the copy describing it resolve
+      // through the one shared channel-broker expression (override → selection
+      // → configured channel fallback), so the label cannot name another broker.
+      const channelBroker = await resolveChannelBroker(env);
+      const brokerLabel = channelBroker.presentation.label;
       const platform =
-        brokerId === "etrade"
+        channelBroker.executing === "etrade"
           ? etrade
-          : TradingPlatformRegistry.getPlatform(brokerId, env ?? ({} as Env), orm, login, undefined, deps?.storage);
+          : TradingPlatformRegistry.getPlatform(channelBroker.executing, env ?? ({} as Env), orm, login, undefined, deps?.storage);
       const sym = (plan.tradingData?.symbol || "").trim().toUpperCase();
       if (!sym) {
         return {

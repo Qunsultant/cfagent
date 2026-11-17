@@ -37,7 +37,7 @@ import {
   type ApprovalExecutor,
 } from "../channels/approval";
 import { TradingPlatformRegistry } from "../registry";
-import { resolveTenantBrokerSelection } from "../../services/tenantProviders";
+import { resolveChannelBroker } from "../channelBroker";
 import {
   deliverJourneyDecision,
   findDecidedJourneyGate,
@@ -265,15 +265,18 @@ export class ETradeSlackTradingService {
         // keeps only the Block Kit rendering. The engine's tier gate
         // refuses before any ledger read, so a below-tier principal
         // cannot even probe draft existence (Phase 1 behaviour).
-        const brokerId = await resolveTenantBrokerSelection(this.env).catch(() => null);
-        const tradingService: ApprovalExecutor = brokerId
-          ? (TradingPlatformRegistry.getPlatform(
-              brokerId,
+        const channelBroker = await resolveChannelBroker(this.env);
+        // Exact pre-#5131 shape preserved: nothing selected → the legacy
+        // service; a broker selected → its registry platform (which carries
+        // the #1393 frozen-terms guard the bare service does not).
+        const tradingService: ApprovalExecutor = channelBroker.source === "fallback"
+          ? new ETradeService(orm, this.env, this.identityLogin())
+          : (TradingPlatformRegistry.getPlatform(
+              channelBroker.executing,
               this.env,
               orm,
               this.identityLogin(),
-            ) as unknown as ApprovalExecutor)
-          : new ETradeService(orm, this.env, this.identityLogin());
+            ) as unknown as ApprovalExecutor);
         const outcome = await approvePreviewedOrder({
           trades: orm.trades ?? null,
           executor: tradingService,
@@ -701,16 +704,20 @@ export class ETradeSlackTradingService {
         const total: string = String(row.estimatedTotal || "$0.00");
         const price: string = String(row.estimatedPrice || "$0.00");
 
+        // Issue #5131: the card names the broker the approval path will execute
+        // on — resolved by the same shared expression, printed by
+        // `brokerPresentation`, never a literal "E*TRADE" for every tenant.
+        const previewBroker = await resolveChannelBroker(this.env);
         blockKitMessage = {
           channel,
           thread_ts: threadTs,
-          text: `⚠️ ACTION REQUIRED: Authorize E*TRADE Order Preview: ${actionStr} ${qty} ${symbol} (${total})`,
+          text: `⚠️ ACTION REQUIRED: Authorize ${previewBroker.presentation.label} Order Preview: ${actionStr} ${qty} ${symbol} (${total})`,
           blocks: [
             {
               type: "header",
               text: {
                 type: "plain_text",
-                text: `🛡️ E*TRADE Order Preview (HITL Approval Required)`,
+                text: `🛡️ ${previewBroker.presentation.label} Order Preview (HITL Approval Required)`,
                 emoji: true,
               },
             },
@@ -989,15 +996,17 @@ export class ETradeSlackTradingService {
       }
     }
 
-    const brokerId = await resolveTenantBrokerSelection(this.env).catch(() => null);
-    const tradingService: ApprovalExecutor = brokerId
-      ? (TradingPlatformRegistry.getPlatform(
-          brokerId,
+    const channelBroker = await resolveChannelBroker(this.env);
+    // Exact pre-#5131 shape preserved: nothing selected → the legacy service;
+    // a broker selected → its registry platform.
+    const tradingService: ApprovalExecutor = channelBroker.source === "fallback"
+      ? new ETradeService(this.orm, this.env, this.identityLogin())
+      : (TradingPlatformRegistry.getPlatform(
+          channelBroker.executing,
           this.env,
           this.orm,
           this.identityLogin(),
-        ) as unknown as ApprovalExecutor)
-      : new ETradeService(this.orm, this.env, this.identityLogin());
+        ) as unknown as ApprovalExecutor);
 
     // Issue #2041 S2: saga journey-gate buttons. The button value
     // carries the saga id (not an order id); the decider is the
@@ -1688,9 +1697,11 @@ export class ETradeSlackTradingService {
       const symbol = String(row.symbol || "EQUITY").toUpperCase();
       const qty = row.quantity || 1;
       const total = row.estimatedTotal || "$0.00";
+      // Issue #5131: the slash-command card names the selected broker too.
+      const previewBroker = await resolveChannelBroker(this.env);
       const payload: SlackBlockKitPayload = {
         channel: channelId,
-        text: `⚠️ Action Required: Authorize E*TRADE Order Preview: ${action} ${qty} ${symbol} (${total})`,
+        text: `⚠️ Action Required: Authorize ${previewBroker.presentation.label} Order Preview: ${action} ${qty} ${symbol} (${total})`,
         blocks: [
           {
             type: "header",
@@ -1812,11 +1823,14 @@ export class ETradeSlackTradingService {
       : String(draft.estimatedTotal || "$0.00");
     const proposerDid = draft.proposerDid || AGENT_DIDS.TRADING;
     const channel = options.channel || draft.channel;
+    // Issue #5131: the shared HITL card names the broker the approval path will
+    // execute on, not the first broker in the catalogue.
+    const brokerLabel = (await resolveChannelBroker(this.env)).presentation.label;
 
     const payload: SlackBlockKitPayload = {
       channel,
       thread_ts: options.threadTs,
-      text: `⚠️ ACTION REQUIRED: Authorize E*TRADE Order Preview: ${actionStr} ${qty} ${symbol} (${totalStr})`,
+      text: `⚠️ ACTION REQUIRED: Authorize ${brokerLabel} Order Preview: ${actionStr} ${qty} ${symbol} (${totalStr})`,
       blocks: [
         {
           type: "header",

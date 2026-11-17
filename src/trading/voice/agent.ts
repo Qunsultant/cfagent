@@ -37,9 +37,9 @@ import {
 } from "../channels/approval";
 import { getVoiceConfig, getTradingConstraints } from "../../config/etapiConfig";
 import { brokerPresentation } from "../brokerPresentation";
+import { resolveChannelBroker } from "../channelBroker";
 import { TradingPlatformRegistry } from "../registry";
-import type { TradingPlatformId } from "../interfaces";
-import { resolveTenantBrokerSelection } from "../../services/tenantProviders";
+import type { BrokerId } from "../../services/tenantProviders";
 import { getPlatformCapabilitiesDeskSummary } from "../../services/platformKnowledge";
 import { actorGateway } from "../../services/cloudflareActorGateway";
 
@@ -187,6 +187,14 @@ export class ETradeVoiceTradingService {
       ? new ETradeService(this.orm, this.env, this.sessionId)
       : new ETradeService(this.env, undefined, this.sessionId);
 
+    // Issue #5131: resolve the turn's broker ONCE - the per-turn override, then
+    // the tenant selection, then the channel fallback (the #4999 order, now the
+    // one shared expression in channelBroker.ts). The approval executor and
+    // every label below read this one value, so the name on screen can never
+    // describe a different broker than the order will reach.
+    const turn = await resolveChannelBroker(this.env, request.copilotBrokerId);
+    const turnBroker = turn.executing;
+
     // 0. Conversational Open-Ended Single-Word Prompt (e.g. "Find", "Search", "Help", "Explore")
     if (/^(find|search|help|lookup|show me|explore|menu)$/i.test(cleanTranscript.trim())) {
       const caps = getPlatformCapabilitiesDeskSummary();
@@ -208,17 +216,15 @@ export class ETradeVoiceTradingService {
     if (approveMatch) {
       // Issue #4664 (Gap 10): resolve the selected broker's platform instead
       // of refusing non-E*TRADE by name, so voice approvals work across brokers.
-      const resolvedBroker: TradingPlatformId =
-        (request.copilotBrokerId as TradingPlatformId | undefined) ??
-        (await resolveTenantBrokerSelection(this.env).catch(() => null)) ??
-        "etrade";
+      // Issue #5131: the broker is resolved once per turn (turnBroker), so the
+      // spoken and markdown result name the broker that actually executed.
       const executor: ApprovalExecutor =
-        resolvedBroker === "etrade"
+        turnBroker === "etrade"
           ? tradingService
-          : (TradingPlatformRegistry.getPlatform(resolvedBroker, this.env, this.orm, this.sessionId) as unknown as ApprovalExecutor);
+          : (TradingPlatformRegistry.getPlatform(turnBroker, this.env, this.orm, this.sessionId) as unknown as ApprovalExecutor);
       const rawId = approveMatch[2];
       const explicitId = rawId ? (rawId.startsWith("ord_") ? rawId : `ord_${rawId}`) : undefined;
-      return this.handleVoiceApproval(explicitId, authorizerDid, executor, timestamp, resolvedBroker);
+      return this.handleVoiceApproval(explicitId, authorizerDid, executor, timestamp, turnBroker);
     }
 
     // -----------------------------------------------------------------------
@@ -237,7 +243,14 @@ export class ETradeVoiceTradingService {
     // -----------------------------------------------------------------------
     // 3. Process Market Data, Screener, Portfolio, or Order Preview via NLQ Engine
     // -----------------------------------------------------------------------
-    return this.handleVoiceNLQ(cleanTranscript, rawTranscript, authorizerDid, tradingService, timestamp);
+    return this.handleVoiceNLQ(
+      cleanTranscript,
+      rawTranscript,
+      authorizerDid,
+      tradingService,
+      timestamp,
+      turn.presentation.label,
+    );
   }
 
   /**
@@ -248,7 +261,7 @@ export class ETradeVoiceTradingService {
     authorizerDid: string,
     tradingService: ApprovalExecutor,
     timestamp: string,
-    brokerId: TradingPlatformId = "etrade",
+    brokerId: BrokerId,
   ): Promise<VoiceTradingTurnResponse> {
     // Issue #1262 Phase 3: approval runs through the shared engine
     // (trade-tier gate + draft lookup + execute/fallback). Voice
@@ -378,7 +391,11 @@ export class ETradeVoiceTradingService {
     rawTranscript: string,
     authorizerDid: string,
     tradingService: ETradeService,
-    timestamp: string
+    timestamp: string,
+    // Issue #5131: the broker's own name, resolved once for the turn by
+    // processVoiceTurn through `brokerPresentation`. Result headings print it
+    // instead of inventing "E*TRADE" for every tenant.
+    brokerLabel: string
   ): Promise<VoiceTradingTurnResponse> {
     try {
       // Issue #781: NLQ execution reads and writes through the ORM
@@ -471,7 +488,7 @@ export class ETradeVoiceTradingService {
           return {
             success: true,
             spokenText: tuneFinancialPronunciation(spokenRaw),
-            displayMarkdown: `### E*TRADE Options Screener (${nlqRes.count} Contracts)\n\n${nlqRes.summary || "Options screen completed."}\n\n` +
+            displayMarkdown: `### ${brokerLabel} Options Screener (${nlqRes.count} Contracts)\n\n${nlqRes.summary || "Options screen completed."}\n\n` +
               (tableRows ? `| Contract | Type | Strike | Expiration | Delta |\n|---|---|---:|---|---:|\n${tableRows}` : ""),
             actionType: "options_screener",
             proposerDid: AGENT_DIDS.TRADING,
@@ -515,7 +532,7 @@ export class ETradeVoiceTradingService {
         const spokenRaw = `${company || sym} is trading at ${price}, ${change} today. Bid is ${bidAsk.split("/")[0]?.trim() || "N/A"} and ask is ${bidAsk.split("/")[1]?.trim() || "N/A"}, with volume of ${volume}. Would you like to draft a trade order?`;
         const spokenText = tuneFinancialPronunciation(spokenRaw);
 
-        const displayMarkdown = `### 📈 E*TRADE Quote: **${sym}** - ${company}\n\n- **Last Price:** **${price}** (${change})\n- **Bid / Ask:** ${bidAsk}\n- **Volume:** ${volume}\n- **52-Week Range:** ${range52}\n\n*Say "Buy 10 ${sym} at market" to draft an order.*`;
+        const displayMarkdown = `### 📈 ${brokerLabel} Quote: **${sym}** - ${company}\n\n- **Last Price:** **${price}** (${change})\n- **Bid / Ask:** ${bidAsk}\n- **Volume:** ${volume}\n- **52-Week Range:** ${range52}\n\n*Say "Buy 10 ${sym} at market" to draft an order.*`;
 
         const marketQuote: ETradeQuote = {
           symbol: sym,
@@ -610,7 +627,7 @@ export class ETradeVoiceTradingService {
           const spokenRaw = `I screened the universe, but no ${filterDesc} currently meet that threshold. ${closestHint} You can say "Screen all ${sector || "tech"} stocks", or ask for a quote on a specific symbol.`;
           const spokenText = tuneFinancialPronunciation(spokenRaw);
 
-          const displayMarkdown = `### 🔍 E*TRADE Screener (0 Equities Matched)\n\n` +
+          const displayMarkdown = `### 🔍 ${brokerLabel} Screener (0 Equities Matched)\n\n` +
             `> ⚠️ **No Matches Found**: No equities in the universe satisfied the criteria: **${nlqRes.summary || filterDesc}**.\n\n` +
             (closestSymbol ? `**Closest Candidate in Sector:**\n- **${closestSymbol}**: Price: $${closestPrice.toFixed(2)} | RSI(14): **${closestRsi.toFixed(1)}**\n\n` : "") +
             `*💡 Voice Desk Tips:* Say *"Screen all ${sector || "tech"} stocks"* to broaden your screen, or say *"Quote ${closestSymbol || "AAPL"}"* for full metrics.`;
@@ -787,9 +804,9 @@ export class ETradeVoiceTradingService {
 
       // Case D: Portfolio & Account Balances
       if (domain === "trading" && action === "positions") {
-        const spokenRaw = `Your E*TRADE account has a reconciled net balance. Detailed holdings and purchasing power have been reconciled against live E*TRADE records.`;
+        const spokenRaw = `Your ${brokerLabel} account has a reconciled net balance. Detailed holdings and purchasing power have been reconciled against live ${brokerLabel} records.`;
         const spokenText = tuneFinancialPronunciation(spokenRaw);
-        const displayMarkdown = `### 💼 E*TRADE Portfolio & Balance Summary\n\n${nlqRes.summary}\n\n*🛡️ Verified against live E*TRADE REST API feeds.*`;
+        const displayMarkdown = `### 💼 ${brokerLabel} Portfolio & Balance Summary\n\n${nlqRes.summary}\n\n*🛡️ Verified against live ${brokerLabel} REST API feeds.*`;
 
         return {
           success: true,
@@ -947,7 +964,7 @@ export class ETradeVoiceTradingService {
           `| **${c.underlying}** | ${c.type} | ${c.strike} | ${c.bidAsk} | ${c.delta} | ${c.iv} | ${c.volume} | ${c.dte} | \`${c.technicalSignal}\` |`
         ).join("\n");
 
-        const displayMarkdown = `### 📊 E*TRADE Options Screener (${contracts.length} Contracts Matched)\n\n` +
+        const displayMarkdown = `### 📊 ${brokerLabel} Options Screener (${contracts.length} Contracts Matched)\n\n` +
           `| Symbol | Type | Strike | Bid/Ask | Delta | IV | Volume | DTE | Signal |\n` +
           `|---|---|---|---|---|---|---|---|---|\n` +
           `${tableRows}\n\n` +
@@ -979,7 +996,7 @@ export class ETradeVoiceTradingService {
             .join("\n");
         }
 
-        const displayMarkdown = `### 📋 E*TRADE Watchlists\n\n` +
+        const displayMarkdown = `### 📋 ${brokerLabel} Watchlists\n\n` +
           `${nlqRes.summary}\n\n` +
           `| Watchlist | Symbols Count | Tickers | Storage |\n` +
           `|---|---|---|---|\n` +
@@ -1043,13 +1060,17 @@ export class ETradeVoiceTradingService {
   }
 
   /**
-   * Executive Voice Trading Greeting for incoming calls
+   * Executive Voice Trading Greeting for incoming calls.
+   * Issue #5131: the desk name follows the selected broker (#3417/#3418) through
+   * the one shared channel-broker resolution, so a tenant on another broker is
+   * greeted by the broker it actually trades on.
    */
-  getWelcomeGreeting(): { spokenText: string; displayMarkdown: string } {
+  async getWelcomeGreeting(): Promise<{ spokenText: string; displayMarkdown: string }> {
+    const deskName = (await resolveChannelBroker(this.env)).presentation.deskName;
     const spokenText =
-      "Welcome to the E*TRADE Voice Trading Desk. You can ask for real-time market quotes, technical screening, portfolio status, schedule automated tasks, or draft trade order tickets. How can I assist your portfolio today?";
+      `Welcome to the ${deskName}. You can ask for real-time market quotes, technical screening, portfolio status, schedule automated tasks, or draft trade order tickets. How can I assist your portfolio today?`;
     const displayMarkdown =
-      "### 🎙️ E*TRADE Voice Trading Desk Connected\n\n*Speak freely to query market data, run screener scans, schedule recurring alerts, or propose trade tickets with Human-in-the-Loop protection.*";
+      `### 🎙️ ${deskName} Connected\n\n*Speak freely to query market data, run screener scans, schedule recurring alerts, or propose trade tickets with Human-in-the-Loop protection.*`;
     return { spokenText, displayMarkdown };
   }
 }
@@ -1135,7 +1156,7 @@ export async function handleVoiceWebSocketConnection(
 
         // 1. Call Start handshake
         if (msg.type === "start_call" || msg.type === "hello") {
-          const welcome = service.getWelcomeGreeting();
+          const welcome = await service.getWelcomeGreeting();
           ws.send(
             JSON.stringify({
               type: "call_accepted",
