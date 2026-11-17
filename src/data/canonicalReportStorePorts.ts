@@ -109,7 +109,14 @@ export interface CanonicalReportWritePort {
    *  pair the dedupe lookup scopes on (#2398) — guarded
    *  exactly as the legacy ensure guarded it, with a shape
    *  reconciliation that swaps a pre-#2398 global index for
-   *  the tenant-scoped one. Idempotent. */
+   *  the tenant-scoped one. Idempotent. Issue #4507: a CREATE
+   *  that fails on legacy duplicate pairs no longer logs and
+   *  continues without the index — the ensure dedupes the
+   *  pairs first (newest row survives per pair, the #2863
+   *  read rule; NULL pairs never touched), retries the CREATE
+   *  once, and throws a named error if the schema is still
+   *  unreconcilable, so the failure is reported instead of
+   *  silently degraded. */
   ensureSchema(): void;
   /** The dedupe lookup: the row id stored for a (generation,
    *  owner) pair, or "" when none. Tenant-scoped. */

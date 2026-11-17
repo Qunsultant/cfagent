@@ -18,9 +18,12 @@
  *    existing-instance shapes: (a) fresh, (b) carrying the
  *    pre-#2398 global index (swap; rows untouched), (c)
  *    already carrying the tenant-scoped index (no-op);
- *  - the #876 guard's survival: a degraded table holding
- *    same-tenant duplicate pairs gets NO index and a loud
- *    log, never a thrown ensure;
+ *  - the #4507 dedupe guard: a degraded table holding
+ *    same-tenant duplicate pairs gets deduped (newest row
+ *    survives per pair, the #2863 read rule) and the index
+ *    built — never a silent degradation, never a thrown
+ *    ensure for the duplicate case; an unreconcilable schema
+ *    throws a named error instead.
  *  - the seam end-to-end over a pre-#2398 instance and over
  *    the R2 seam: both tenants' reports land, retrievable by
  *    their owners, with stored fan-out outcomes recorded.
@@ -185,7 +188,7 @@ describe("#2398 [shapes]: ensureSchema index reconciliation", () => {
     expect(store.getRowById("r-alice")?.title).toBe("Title r-alice");
   });
 
-  it("(d) degraded table (same-tenant duplicate pairs, no index): ensure logs loudly, never throws, rows untouched", () => {
+  it("(d) degraded table (same-tenant duplicate pairs, no index): ensure dedupes (newest survives) and builds the index", () => {
     const sql = new SqliteTestStorage();
     sql.sqlite.exec(`CREATE TABLE mas_reports (
       id TEXT PRIMARY KEY,
@@ -211,10 +214,18 @@ describe("#2398 [shapes]: ensureSchema index reconciliation", () => {
       .map((args) => args.map((a) => String(a)).join(" "))
       .join("\n");
     expect(logged).toContain(INDEX);
-    // Honest degradation (the #876 contract): no index was
-    // built over the duplicates, and no row was deleted.
-    expect(generationIndexColumns(sql)).toEqual([]);
-    expect(store.listRows(undefined, undefined, 10)).toHaveLength(2);
+    expect(logged).toContain("rep-dup-1");
+    // Issue #4507: the silent degradation is gone — the duplicate
+    // pair is resolved (newest survives; the two rows share a
+    // created_at, so the greatest id wins) and the index is built.
+    expect(generationIndexColumns(sql)).toEqual(["user_login", "generation_id"]);
+    const rows = store.listRows(undefined, undefined, 10);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.id).toBe("rep-dup-2");
+    // A second ensure is a no-op: the index stays, the survivor stays.
+    store.ensureSchema();
+    expect(generationIndexColumns(sql)).toEqual(["user_login", "generation_id"]);
+    expect(store.listRows(undefined, undefined, 10)).toHaveLength(1);
   });
 });
 

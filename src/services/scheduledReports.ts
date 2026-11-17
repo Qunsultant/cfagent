@@ -167,10 +167,15 @@ function storePorts(sql: SqlStorage): CanonicalReportStorePorts {
  * so a DO's table can predate any subset of the current
  * shape) and the guarded, tenant-scoped generation UNIQUE
  * index (#2398: (user_login, generation_id), shape-reconciled
- * from the pre-#2398 global index in the same ensure;
- * duplicates are logged loudly, never deleted; idempotency
- * for such a DO degrades to the SELECT-then-INSERT check in
- * storeReportAtGeneration until the rows are resolved).
+ * from the pre-#2398 global index in the same ensure).
+ * Issue #4507: legacy duplicate pairs no longer degrade the
+ * ensure silently — the adapter dedupes them first (newest
+ * row survives per pair, the #2863 read rule; NULL pairs never
+ * touched), retries the CREATE once, and throws a named error
+ * if the schema is still unreconcilable. The seam fails closed
+ * on that throw per call (never throws into scheduled runs),
+ * and the idempotency backstop is restored instead of
+ * degrading to the SELECT-then-INSERT check.
  */
 export function ensureScheduledReportsTable(sql: SqlStorage): void {
   storePorts(sql).write.ensureSchema();
