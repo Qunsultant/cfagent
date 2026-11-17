@@ -16,6 +16,7 @@ import { describe, it, expect, afterEach, vi } from "vitest";
 import { AlpacaTradingPlatform } from "../src/trading/alpaca/platform";
 import { ETradeTradingPlatform } from "../src/trading/etrade/platform";
 import { PublicTradingPlatform } from "../src/trading/public/platform";
+import { TastytradeTradingPlatform } from "../src/trading/tastytrade/platform";
 import { BROKER_CATALOG, brokerSupports, type BrokerId, type BrokerOperation } from "../src/trading/brokerCatalog";
 
 const CREDS = { ALPACA_API_KEY: "key", ALPACA_SECRET_KEY: "secret" } as any;
@@ -63,6 +64,8 @@ describe("declared capabilities match the implementation (#3233)", () => {
       // Issue #3990: Public joins the parity total — every capability
       // the catalog declares for public must have a platform method.
       public: PublicTradingPlatform.prototype,
+      // Issue #4675: Tastytrade Slice 1 joins the parity total.
+      tastytrade: TastytradeTradingPlatform.prototype,
     };
     for (const broker of Object.keys(BROKER_CATALOG) as BrokerId[]) {
       for (const [operation, method] of Object.entries(OPERATION_METHOD) as [BrokerOperation, string][]) {
