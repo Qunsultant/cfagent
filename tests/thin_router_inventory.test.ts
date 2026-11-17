@@ -541,6 +541,8 @@ const HANDLER_FILE: Record<string, string> = {
   "handleBrokerScreenRoutes": "brokerScreen.ts",
   // Issue #3351: Alpaca sign-in (verify, store, disconnect).
   "handleBrokerConnectRoutes": "brokerConnect.ts",
+  // Issue #5113: account binding GET/PUT/DELETE.
+  "handleAccountBindingRoutes": "accountBindings.ts",
   "handleBrokerGateRoutes": "brokerGate.ts",
   "handleEtradeBrokerActivityRoutes": "etradeBroker.ts",
   "handleTradingIntegrationsRoutes": "tradingIntegrations.ts",
@@ -598,6 +600,7 @@ const EXPECTED_DELEGATIONS = [
   "handleBrokerRiskRoutes",
   "handleBrokerScreenRoutes",
   "handleBrokerConnectRoutes",
+  "handleAccountBindingRoutes",
   "handleBrokerGateRoutes",
   "handleEtradeBrokerRoutes",
   "handleBrokerOrderRoutes",
@@ -900,6 +903,7 @@ const EXPECTED_INVENTORY = [
   // (personal-token status; the paste itself lives at /api/public/connect).
   "handleBrokerConnectRoutes :: endsWith(\"/broker/connect/public\")",
   "handleBrokerConnectRoutes :: endsWith(\"/broker/disconnect/alpaca\")",
+  "handleAccountBindingRoutes :: endsWith(\"/broker/account-binding\")",
   "handleBrokerGateRoutes :: includes(\"/etrade/\")",
   "handleBrokerGateRoutes :: includes(\"/etrade/options/\")",
   "handleEtradeBrokerRoutes :: endsWith(\"/environment/switch\")",
