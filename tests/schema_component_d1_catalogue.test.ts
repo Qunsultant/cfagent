@@ -133,6 +133,7 @@ const D1_MIGRATION_SQL_SHA256: Record<number, string> = {
   65: "8ae8db73d068294023dddf8f77bba1f330a034a08ea31d70e53a8871e4a61fa3",
   66: "bc6889fe632afcd5f76a8998668a4d0a09aedb690aac5a876a367751d5b6b2d4",
   67: "651071233310241645a5a826fcca8c0b3de60c47eedbfa0ec5625428e54a3913",
+  68: "7ea09289f5ad6227af9f658167ac90124a0d901b7537c68f3680904d1c605de3",
 };
 
 /** Per-version statement counts, measured from the base runner. */
@@ -204,6 +205,7 @@ const D1_MIGRATION_STATEMENT_COUNTS: Record<number, number> = {
   65: 1,
   66: 10,
   67: 1,
+  68: 1,
 };
 
 /** The 11 seed-DML statements, exact text, measured from the base runner. */
@@ -243,11 +245,11 @@ function expectedD1Model(): SchemaModel {
 }
 
 describe("D1 catalogue — migrationRunner delegates (#4282 P1)", () => {
-  it("catalogues all 216 runner statements: 205 schema + 11 seed", () => {
+  it("catalogues all 223 runner statements: 212 schema + 11 seed", () => {
     const catalogue = buildD1Catalogue();
-    expect(D1_CATALOGUE_ENTRIES.length).toBe(222);
-    expect(catalogue.size()).toBe(222);
-    expect(catalogue.byKind("schema").length).toBe(211);
+    expect(D1_CATALOGUE_ENTRIES.length).toBe(223);
+    expect(catalogue.size()).toBe(223);
+    expect(catalogue.byKind("schema").length).toBe(212);
     expect(catalogue.byKind("seed").length).toBe(11);
     const verbs = new Map<string, number>();
     const classify = (statement: string): string => {
@@ -275,7 +277,7 @@ describe("D1 catalogue — migrationRunner delegates (#4282 P1)", () => {
     expect(verbs.get("CREATE TABLE")).toBe(101);
     expect(verbs.get("CREATE INDEX")).toBe(52);
     expect(verbs.get("CREATE UNIQUE INDEX")).toBe(7);
-    expect(verbs.get("ALTER TABLE")).toBe(50);
+    expect(verbs.get("ALTER TABLE")).toBe(51);
     expect(verbs.get("DROP TABLE")).toBe(1);
     expect(verbs.get("INSERT OR IGNORE")).toBe(7);
     expect(verbs.get("INSERT INTO")).toBe(1);
@@ -287,7 +289,7 @@ describe("D1 catalogue — migrationRunner delegates (#4282 P1)", () => {
       .map(Number)
       .sort((a, b) => a - b);
     expect(versions).toEqual(
-      Array.from({ length: 67 }, (_, i) => i + 1),
+      Array.from({ length: 68 }, (_, i) => i + 1),
     );
     const allCodes = new Set<string>();
     for (const version of versions) {

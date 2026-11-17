@@ -1,24 +1,26 @@
 /**
- * Issue #3261 — user profile port (display name + phone).
+ * Issue #3261 — user profile port (display name + phone + contact email).
  *
- * One row per verified login: the user's display name and phone
- * number, editable self-service from the account flow (#3256).
- * Keyed by login, never by a client-supplied tenant — no tenantId
+ * One row per verified login: the user's display name, phone
+ * number, and contact email, editable self-service from the
+ * account flow (#3256). Keyed by login, never by a client-supplied tenant — no tenantId
  * is stored here at all; the tenant is derivable from the resolved
  * platform identity (#2219) and is never a scoping input.
  *
  * Storage home (decided, owner direction 2026-11-06): D1,
  * alongside account data — the `agent_user_profiles` table in the
- * same D1 database as the account rows (migration 0050). A
- * dedicated table, not columns on the commercial accounts row, so
- * billing upserts (subscription activation, refunds, referral
- * earn) can never clobber profile fields. Phone is an UNVERIFIED
- * contact field: it is never used for auth or recovery, and no
- * verification is claimed for it — verification is a follow-up,
- * not this slice. Email is NOT a field here: email change touches
- * IAAA / session / auth and needs CISO review first (#3261 comment
- * 6681436382, refs #945); until that review lands, email is
- * explicitly deferred and no email route exists.
+ * same D1 database as the account rows (migration 0050; email
+ * column added by migration 0068). A dedicated table, not columns
+ * on the commercial accounts row, so billing upserts (subscription
+ * activation, refunds, referral earn) can never clobber profile
+ * fields. Phone and email are UNVERIFIED contact fields: they are
+ * never used for auth or recovery, and no verification is claimed
+ * for them — verification is a follow-up, not this slice. Email is
+ * a contact email ONLY: it never changes the login (the login IS
+ * the verified identity — platformIdentity.ts carries no email).
+ * The email column was added owner-directed 2026-11-16, the
+ * CISO-review deferral lifted by explicit owner direction; no
+ * CISO review happened and none is claimed.
  *
  * ADR 0002 port-first: domain code depends only on this interface.
  * Only the adapters (Drizzle D1, in-memory) touch a store, and
@@ -42,6 +44,11 @@ export interface UserProfile {
   displayName: string | null;
   /** Null when never set. Unverified contact field, never auth. */
   phone: string | null;
+  /**
+   * Null when never set. Contact email only: it never changes the
+   * login and is never used for auth or recovery. Unverified.
+   */
+  email: string | null;
   updatedAtMs: number;
 }
 

@@ -1190,6 +1190,22 @@ export const MIGRATION_0067_JOB_PIPELINE_RUN_WORKFLOW_INSTANCE_ID: DataMigration
   sql: d1MigrationSql(67),
 };
 
+/**
+ * Issue #3261 (email completion, owner-directed 2026-11-16 —
+ * the CISO-review deferral is LIFTED by explicit owner
+ * direction; no CISO review happened and none is claimed):
+ * the contact email column on agent_user_profiles. Additive
+ * column only; existing rows read back as NULL (no contact
+ * email set). Contact email only: it never changes the login
+ * (the login IS the verified identity) and is never used for
+ * auth or recovery.
+ */
+export const MIGRATION_0068_USER_PROFILE_EMAIL: DataMigration = {
+  version: 68,
+  name: "0068_user_profile_email",
+  sql: d1MigrationSql(68),
+};
+
 export const MIGRATION_0058_PRODUCT_VERSIONS: DataMigration = {
   version: 58,
   name: "0058_product_versions",
@@ -1423,6 +1439,7 @@ export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANC
   MIGRATION_0065_JOB_PIPELINE_RUN_ASYNC_JOB_ID,
   MIGRATION_0066_REFERRAL_CODES,
   MIGRATION_0067_JOB_PIPELINE_RUN_WORKFLOW_INSTANCE_ID,
+  MIGRATION_0068_USER_PROFILE_EMAIL,
 ];
 
 function splitStatements(sqlText: string): string[] {

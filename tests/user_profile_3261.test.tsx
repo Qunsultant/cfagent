@@ -9,10 +9,11 @@
  * save, coded messages, field errors, idempotency-key reuse — runs
  * for real.
  *
- * Governing rule, tested here: display name + phone only. No email
- * field exists anywhere in the section (email change needs CISO
- * review first, #3261 comment 6681436382), and an unset display
- * name shows as the login (PROPOSED default, display-only).
+ * Governing rule, tested here: display name + phone + contact
+ * email, all editable. The login is shown read-only (it IS the
+ * verified identity) and never changes when the contact email
+ * changes. An unset display name shows as the login (PROPOSED
+ * default, display-only).
  *
  * AOP amendment: every message the section renders comes from the
  * server's coded response — tests assert the message FROM the
@@ -41,6 +42,7 @@ const apiState = vi.hoisted(() => ({
     userLogin: "prof-ui-a",
     displayName: null,
     phone: null,
+    email: null,
     updatedAtMs: null,
   } as UserProfileView,
   fetchError: null as null | Error,
@@ -66,6 +68,7 @@ vi.mock("../src/client/profileApi", async (importOriginal) => {
         displayName:
           input.displayName === undefined ? apiState.profile.displayName : (input.displayName as string | null),
         phone: input.phone === undefined ? apiState.profile.phone : (input.phone as string | null),
+        email: input.email === undefined ? apiState.profile.email : (input.email as string | null),
         updatedAtMs: 1234,
       };
       apiState.profile = next;
@@ -126,7 +129,7 @@ function clickSave(container: HTMLElement) {
 
 beforeEach(() => {
   vi.restoreAllMocks();
-  apiState.profile = { userLogin: "prof-ui-a", displayName: null, phone: null, updatedAtMs: null };
+  apiState.profile = { userLogin: "prof-ui-a", displayName: null, phone: null, email: null, updatedAtMs: null };
   apiState.fetchError = null;
   apiState.saveCalls = [];
   apiState.saveError = null;
@@ -138,10 +141,10 @@ beforeEach(() => {
 describe("displayNameFor (#3261)", () => {
   it("shows the login when no display name is set, and the display name when it is", () => {
     expect(
-      displayNameFor({ userLogin: "prof-ui-a", displayName: null, phone: null, updatedAtMs: null }),
+      displayNameFor({ userLogin: "prof-ui-a", displayName: null, phone: null, email: null, updatedAtMs: null }),
     ).toBe("prof-ui-a");
     expect(
-      displayNameFor({ userLogin: "prof-ui-a", displayName: "Ada", phone: null, updatedAtMs: 1 }),
+      displayNameFor({ userLogin: "prof-ui-a", displayName: "Ada", phone: null, email: null, updatedAtMs: 1 }),
     ).toBe("Ada");
   });
 });
@@ -153,18 +156,22 @@ describe("ProfileSection (#3261)", () => {
     expect(container.textContent).toContain("prof-ui-a");
     const nameInput = inputByLabel(container, "Display name");
     const phoneInput = inputByLabel(container, "Phone");
+    const emailInput = inputByLabel(container, "Email");
     expect(nameInput.value).toBe("");
     expect(phoneInput.value).toBe("");
+    expect(emailInput.value).toBe("");
     // Length hints come from the config, not a second hardcoded copy.
     expect(nameInput.maxLength).toBe(PROFILE_LIMITS.displayNameMaxLength);
     expect(phoneInput.maxLength).toBe(PROFILE_LIMITS.phoneMaxLength);
+    expect(emailInput.maxLength).toBe(PROFILE_LIMITS.emailMaxLength);
 
     setInputValue(nameInput, "  Ada Lovelace  ");
     setInputValue(phoneInput, " +1 555-0100 ");
+    setInputValue(emailInput, "  ada@example.com  ");
     await clickSave(container);
     await flush();
     expect(apiState.saveCalls).toHaveLength(1);
-    expect(apiState.saveCalls[0].input).toEqual({ displayName: "Ada Lovelace", phone: "+1 555-0100" });
+    expect(apiState.saveCalls[0].input).toEqual({ displayName: "Ada Lovelace", phone: "+1 555-0100", email: "ada@example.com" });
     expect(apiState.saveCalls[0].key.length).toBeGreaterThan(0);
     expect(container.textContent).toContain(catalogMessage("SUCCESS_PROFILE_UPDATED"));
     // The confirmation announces via role="status" (the Notice primitive).
@@ -178,25 +185,29 @@ describe("ProfileSection (#3261)", () => {
       userLogin: "prof-ui-a",
       displayName: "Ada",
       phone: "+1 555-0100",
+      email: "ada@example.com",
       updatedAtMs: 100,
     };
     const { container } = await renderSection();
     expect(inputByLabel(container, "Display name").value).toBe("Ada");
     expect(inputByLabel(container, "Phone").value).toBe("+1 555-0100");
+    expect(inputByLabel(container, "Email").value).toBe("ada@example.com");
     expect(container.textContent).toContain("showing as Ada");
 
     setInputValue(inputByLabel(container, "Display name"), "   ");
+    setInputValue(inputByLabel(container, "Email"), "   ");
     await clickSave(container);
     await flush();
-    expect(apiState.saveCalls[0].input).toEqual({ displayName: null, phone: "+1 555-0100" });
+    expect(apiState.saveCalls[0].input).toEqual({ displayName: null, phone: "+1 555-0100", email: null });
   });
 
-  it("renders no email field anywhere", async () => {
+  it("renders an email field with the login-unchanged hint, and never offers a login change", async () => {
     const { container } = await renderSection();
     const labels = Array.from(container.querySelectorAll("label")).map((l) => l.textContent ?? "");
-    expect(labels.join(" ")).not.toMatch(/email/i);
-    expect(container.querySelectorAll("input").length).toBe(2);
-    expect(container.textContent).toContain("Email cannot be changed here yet");
+    expect(labels.join(" ")).toMatch(/email/i);
+    expect(container.querySelectorAll("input").length).toBe(3);
+    expect(container.textContent).toContain("does not change your sign-in login");
+    expect(container.textContent).not.toContain("Email cannot be changed here yet");
   });
 
   it("shows the server's coded message when loading fails, with a retry", async () => {
@@ -227,6 +238,24 @@ describe("ProfileSection (#3261)", () => {
     expect(inputByLabel(container, "Display name").getAttribute("aria-invalid")).toBeNull();
     expect(container.textContent).toContain(catalogMessage("FAILURE_PROFILE_VALIDATION"));
     expect(container.textContent).not.toContain(catalogMessage("SUCCESS_PROFILE_UPDATED"));
+    expect(apiState.saveCalls).toHaveLength(1);
+  });
+
+  it("marks the email field invalid with the coded message on a 400 naming email", async () => {
+    apiState.saveError = new ProfileApiError(
+      catalogMessage("FAILURE_PROFILE_VALIDATION"),
+      "FAILURE_PROFILE_VALIDATION",
+      400,
+      "email",
+    );
+    const { container } = await renderSection();
+    await clickSave(container);
+    await flush();
+    const emailInput = inputByLabel(container, "Email");
+    expect(emailInput.getAttribute("aria-invalid")).toBe("true");
+    expect(inputByLabel(container, "Display name").getAttribute("aria-invalid")).toBeNull();
+    expect(inputByLabel(container, "Phone").getAttribute("aria-invalid")).toBeNull();
+    expect(container.textContent).toContain(catalogMessage("FAILURE_PROFILE_VALIDATION"));
     expect(apiState.saveCalls).toHaveLength(1);
   });
 

@@ -1,5 +1,5 @@
 /**
- * Issue #3261 — user profile client API (display name + phone).
+ * Issue #3261 — user profile client API (display name + phone + contact email).
  *
  * Client-only: this module calls the #3261 self-only routes and
  * creates none.
@@ -20,8 +20,9 @@
  *   FAILURE_PROFILE_DUPLICATE means the save already landed, so
  *   this module refetches the profile and returns it with the
  *   duplicate message instead of surfacing an error.
- * - Email: no field, no call. Email change needs CISO review
- *   first (#3261 comment 6681436382, refs #945).
+ * - Email is a CONTACT email: it never changes the login and is
+ *   never used for sign-in. Added owner-directed 2026-11-16
+ *   (CISO-review deferral lifted by explicit owner direction).
  */
 import { apiFetch, asyncJobErrorCode } from "./apiFetch";
 import { codedMessage } from "../outcomes/outcomeAspects";
@@ -31,6 +32,7 @@ export interface UserProfileView {
   userLogin: string;
   displayName: string | null;
   phone: string | null;
+  email: string | null;
   updatedAtMs: number | null;
 }
 
@@ -38,6 +40,7 @@ export interface UserProfileView {
 export interface SaveProfileInput {
   displayName?: string | null;
   phone?: string | null;
+  email?: string | null;
 }
 
 /** A saved profile plus the server's coded outcome message. */
@@ -74,7 +77,7 @@ export function newIdempotencyKey(): string {
 export class ProfileApiError extends Error {
   readonly code: string;
   readonly status: number;
-  readonly field?: "displayName" | "phone" | "idempotencyKey";
+  readonly field?: "displayName" | "phone" | "email" | "idempotencyKey";
 
   constructor(message: string, code: string, status: number, field?: ProfileApiError["field"]) {
     super(message);
@@ -97,7 +100,10 @@ function parseCodedError(data: unknown): { code: string; message: string; field?
   if (typeof data.code !== "string" || data.code.length === 0) return null;
   if (typeof data.message !== "string" || data.message.length === 0) return null;
   const field =
-    data.field === "displayName" || data.field === "phone" || data.field === "idempotencyKey"
+    data.field === "displayName" ||
+    data.field === "phone" ||
+    data.field === "email" ||
+    data.field === "idempotencyKey"
       ? data.field
       : undefined;
   return { code: data.code, message: data.message, field };
@@ -140,17 +146,27 @@ function parseUserProfile(value: unknown): UserProfileView {
   if (
     typeof value.userLogin !== "string" ||
     value.userLogin.length === 0 ||
-    (value.displayName !== null && typeof value.displayName !== "string") ||
-    (value.phone !== null && typeof value.phone !== "string") ||
-    (value.updatedAtMs !== null && typeof value.updatedAtMs !== "number")
+    (value.displayName !== null &&
+      value.displayName !== undefined &&
+      typeof value.displayName !== "string") ||
+    (value.phone !== null &&
+      value.phone !== undefined &&
+      typeof value.phone !== "string") ||
+    (value.email !== null &&
+      value.email !== undefined &&
+      typeof value.email !== "string") ||
+    (value.updatedAtMs !== null &&
+      value.updatedAtMs !== undefined &&
+      typeof value.updatedAtMs !== "number")
   ) {
     throw new ProfileApiError(LOAD_FALLBACK, "", 0);
   }
   return {
     userLogin: value.userLogin,
-    displayName: value.displayName as string | null,
-    phone: value.phone as string | null,
-    updatedAtMs: value.updatedAtMs as number | null,
+    displayName: (value.displayName ?? null) as string | null,
+    phone: (value.phone ?? null) as string | null,
+    email: (value.email ?? null) as string | null,
+    updatedAtMs: (value.updatedAtMs ?? null) as number | null,
   };
 }
 
@@ -175,6 +191,7 @@ export async function saveProfile(
   const body: Record<string, unknown> = { idempotencyKey };
   if (input.displayName !== undefined) body.displayName = input.displayName;
   if (input.phone !== undefined) body.phone = input.phone;
+  if (input.email !== undefined) body.email = input.email;
   const { status, data } = await callRaw(
     "/api/platform/accounts/profile",
     { method: "POST", body: JSON.stringify(body) },

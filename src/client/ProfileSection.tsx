@@ -1,16 +1,17 @@
 /**
- * Issue #3261 — profile section: display name + phone, self-service.
+ * Issue #3261 — profile section: display name + phone + contact
+ * email, self-service.
  *
  * Built ONLY from src/client/components/ui/ primitives with
  * token-only styling (ux-architecture §20): no bespoke classes, no
  * inline styles.
  *
- * Display name and phone are the only editable fields. The login
- * is shown read-only (it IS the verified identity). Email is not
- * editable here: changing the sign-in email touches IAAA / session
- * / auth and needs CISO review first (#3261 comment 6681436382,
- * refs #945) — the section says so in one fixed line instead of
- * offering a field that goes nowhere.
+ * Display name, phone, and contact email are the editable fields.
+ * The login is shown read-only (it IS the verified identity) and
+ * never changes when the contact email changes. Email is a contact
+ * email only — used to contact the user about the account, never
+ * for sign-in, and not verified. Added owner-directed 2026-11-16
+ * (CISO-review deferral lifted by explicit owner direction).
  *
  * Phone is an UNVERIFIED contact field: the hint says so, and it
  * is never used for sign-in. Input length hints come from
@@ -48,7 +49,7 @@ export interface ProfileSectionProps {
   userLogin: string;
 }
 
-type FieldErrors = { displayName?: string; phone?: string };
+type FieldErrors = { displayName?: string; phone?: string; email?: string };
 
 export function ProfileSection({ userLogin }: ProfileSectionProps) {
   const [profile, setProfile] = useState<UserProfileView | null>(null);
@@ -56,6 +57,7 @@ export function ProfileSection({ userLogin }: ProfileSectionProps) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [displayName, setDisplayName] = useState("");
   const [phone, setPhone] = useState("");
+  const [email, setEmail] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
@@ -71,6 +73,7 @@ export function ProfileSection({ userLogin }: ProfileSectionProps) {
       setProfile(found);
       setDisplayName(found.displayName ?? "");
       setPhone(found.phone ?? "");
+      setEmail(found.email ?? "");
     } catch (err) {
       setLoadError(
         err instanceof ProfileApiError
@@ -100,6 +103,7 @@ export function ProfileSection({ userLogin }: ProfileSectionProps) {
         {
           displayName: displayName.trim() ? displayName.trim() : null,
           phone: phone.trim() ? phone.trim() : null,
+          email: email.trim() ? email.trim() : null,
         },
         pendingKey.current,
       );
@@ -107,6 +111,7 @@ export function ProfileSection({ userLogin }: ProfileSectionProps) {
       setProfile(result.profile);
       setDisplayName(result.profile.displayName ?? "");
       setPhone(result.profile.phone ?? "");
+      setEmail(result.profile.email ?? "");
       setSavedMessage(result.message);
       setSavedDuplicate(result.duplicate);
     } catch (err) {
@@ -116,6 +121,8 @@ export function ProfileSection({ userLogin }: ProfileSectionProps) {
         setFieldErrors({ displayName: err.message });
       } else if (err instanceof ProfileApiError && err.field === "phone") {
         setFieldErrors({ phone: err.message });
+      } else if (err instanceof ProfileApiError && err.field === "email") {
+        setFieldErrors({ email: err.message });
       } else {
         setSaveError(
           err instanceof ProfileApiError
@@ -171,10 +178,15 @@ export function ProfileSection({ userLogin }: ProfileSectionProps) {
           error={fieldErrors.phone}
           onChange={(event) => setPhone(event.target.value)}
         />
-        <p>
-          Email cannot be changed here yet — changing the sign-in email needs a
-          security review first.
-        </p>
+        <TextInput
+          label="Email"
+          hint="Optional. Contact email — used only to contact you about your account. Changing it does not change your sign-in login, and it is not verified."
+          value={email}
+          maxLength={PROFILE_LIMITS.emailMaxLength}
+          inputMode="email"
+          error={fieldErrors.email}
+          onChange={(event) => setEmail(event.target.value)}
+        />
         {saveError && <Notice tone="danger">{saveError}</Notice>}
         {savedMessage && (
           <Notice tone={savedDuplicate ? "info" : "success"}>{savedMessage}</Notice>

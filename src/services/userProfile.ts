@@ -30,10 +30,13 @@
  *   clears it; absent leaves it unchanged. UNVERIFIED contact
  *   field: never used for auth or recovery; no verification is
  *   claimed.
- * - email: NOT a field here at all. Email change touches IAAA /
- *   session / auth and needs CISO review first (#3261 comment
- *   6681436382, refs #945). A client-supplied email is ignored,
- *   never read, never stored.
+ * - email: 1–PROFILE_LIMITS.emailMaxLength chars after trimming;
+ *   one @, non-empty local part, domain with at least one dot, no
+ *   spaces or control characters. Null clears it; absent leaves it
+ *   unchanged. CONTACT email only: it never changes the login and
+ *   is never used for auth or recovery; no verification is claimed.
+ *   Added owner-directed 2026-11-16, the CISO-review deferral
+ *   lifted by explicit owner direction (no CISO review happened).
  * - idempotencyKey: NOT a profile field. The route extracts it
  *   separately (Idempotent Receiver, standards §7.2): a profile
  *   save without one is refused, and a replayed one is a 409.
@@ -45,12 +48,13 @@ import { PROFILE_LIMITS } from "../config/profileLimits";
 export type ValidatedProfileInput = {
   displayName?: string | null;
   phone?: string | null;
+  email?: string | null;
 };
 
 /** Structural failure: which field, and which kind — never a message. */
 export type ProfileValidationFailure = {
-  field: "displayName" | "phone";
-  kind: "wrongType" | "empty" | "tooLong" | "controlChars" | "badChars" | "noDigit";
+  field: "displayName" | "phone" | "email";
+  kind: "wrongType" | "empty" | "tooLong" | "controlChars" | "badChars" | "noDigit" | "badFormat";
 };
 
 export type ProfileValidationResult =
@@ -110,12 +114,39 @@ function validatePhone(value: unknown): FieldResult {
   return { ok: true, value: trimmed };
 }
 
+// One @, non-empty local part, domain with at least one dot, no
+// whitespace. A pragmatic RFC 5322 subset for a contact address:
+// it rejects the typos (missing @, missing domain, missing dot,
+// spaces, double @) without pretending to be a full validator.
+const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function validateEmail(value: unknown): FieldResult {
+  if (value === null) return { ok: true, value: null };
+  if (typeof value !== "string") {
+    return { ok: false, failure: { field: "email", kind: "wrongType" } };
+  }
+  const trimmed = value.trim();
+  if (trimmed.length < 1) {
+    return { ok: false, failure: { field: "email", kind: "empty" } };
+  }
+  if (trimmed.length > PROFILE_LIMITS.emailMaxLength) {
+    return { ok: false, failure: { field: "email", kind: "tooLong" } };
+  }
+  if (hasControlCharacter(trimmed)) {
+    return { ok: false, failure: { field: "email", kind: "controlChars" } };
+  }
+  if (!EMAIL_SHAPE.test(trimmed)) {
+    return { ok: false, failure: { field: "email", kind: "badFormat" } };
+  }
+  return { ok: true, value: trimmed };
+}
+
 /**
  * Validate a profile-update body. Returns only the keys the client
  * sent (absent = unchanged); unknown fields — including any
- * client-supplied email, userLogin, or tenantId — are ignored.
- * The first invalid field fails the whole input (one field error
- * per response; the client marks that field).
+ * client-supplied userLogin or tenantId — are ignored. The first
+ * invalid field fails the whole input (one field error per
+ * response; the client marks that field).
  */
 export function validateProfileInput(body: unknown): ProfileValidationResult {
   const input = (body ?? {}) as Record<string, unknown>;
@@ -129,6 +160,11 @@ export function validateProfileInput(body: unknown): ProfileValidationResult {
     const checked = validatePhone(input.phone);
     if (!checked.ok) return checked;
     validated.phone = checked.value;
+  }
+  if ("email" in input) {
+    const checked = validateEmail(input.email);
+    if (!checked.ok) return checked;
+    validated.email = checked.value;
   }
   return { ok: true, value: validated };
 }
@@ -156,18 +192,20 @@ export interface UserProfileView {
   userLogin: string;
   displayName: string | null;
   phone: string | null;
+  email: string | null;
   updatedAtMs: number | null;
 }
 
 /** Shape a stored row (or its absence) as the read view. */
 export function toUserProfileView(userLogin: string, profile: UserProfile | null): UserProfileView {
   if (!profile) {
-    return { userLogin, displayName: null, phone: null, updatedAtMs: null };
+    return { userLogin, displayName: null, phone: null, email: null, updatedAtMs: null };
   }
   return {
     userLogin: profile.userLogin,
     displayName: profile.displayName,
     phone: profile.phone,
+    email: profile.email,
     updatedAtMs: profile.updatedAtMs,
   };
 }
