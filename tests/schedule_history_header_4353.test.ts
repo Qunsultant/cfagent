@@ -64,7 +64,9 @@ describe("4353-P03 one heading row on the schedules list", () => {
     const start = panel.indexOf("<CardHeader");
     const heading = panel.slice(start, panel.indexOf("/>", start));
     expect(heading).toContain("Every durable schedule, one row each");
-    expect(heading).toContain("sched-count-pill");
+    // Issue #5077: the count pill is a Badge now, not a bespoke span.
+    expect(heading).toContain("<Badge");
+    expect(heading).toContain("Shown");
     expect(panel).not.toContain('caption="Every durable schedule, one row each"');
   });
 });

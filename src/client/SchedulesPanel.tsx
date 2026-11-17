@@ -32,10 +32,13 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Badge,
   Button,
+  Card,
   CardHeader,
   Flex,
   Notice,
+  PageSection,
   PillGroup,
+  Stack,
   Table,
   useToast,
   type TableColumn,
@@ -477,9 +480,9 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
       header: sortableHeader("schedule", SCHEDULE_ROW_COLUMN_LABELS.schedule),
       ariaSort: tableSortAria(sort, "schedule"),
       render: (s) => (
-        <div className="schedule-row-job">
-          <span className="schedule-row-name">{scheduleDisplayName(s)}</span>
-          <span className="schedule-row-badges">
+        <Stack gap="1">
+          <strong>{scheduleDisplayName(s)}</strong>
+          <Flex as="span" gap="1" align="center" wrap>
             {/* #2329: the same badge vocabulary as the screening rows — a
                 generic job is a System job, never a screening kind. */}
             <Badge tone="neutral" size="xs">
@@ -516,8 +519,8 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
             <Badge tone="neutral" size="xs" uppercase>
               {s.type}
             </Badge>
-          </span>
-        </div>
+          </Flex>
+        </Stack>
       ),
     },
     {
@@ -525,7 +528,7 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
       header: sortableHeader("id", SCHEDULE_ROW_COLUMN_LABELS.id),
       ariaSort: tableSortAria(sort, "id"),
       render: (s) => (
-        <code className="schedule-row-id" title={s.id}>
+        <code className="ui-mono" title={s.id}>
           {s.id}
         </code>
       ),
@@ -538,14 +541,14 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
       // wide enough to hold them (the owner: widen the cadence column).
       cellClassName: "schedule-row-cadence",
       render: (s) => (
-        <div className="schedule-row-stack">
-          <span className="schedule-row-value">{genericCadence(s)}</span>
-          <span className="schedule-row-muted">
+        <Stack gap="0-5">
+          <strong className="ui-meta">{genericCadence(s)}</strong>
+          <span className="ui-meta">
             {s.kind === "ticker-push"
               ? `Last push: ${formatLastPush(s.lastPushAt)}`
               : `Next run: ${s.paused ? "paused" : formatNextRun(s)}`}
           </span>
-        </div>
+        </Stack>
       ),
     },
     {
@@ -597,14 +600,14 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
             : `${brokerLabel} account: missing — this schedule cannot authenticate`
           : "";
         return (
-          <div className="schedule-row-stack">
-            <span className="schedule-row-value">{lines.length > 0 ? lines[0] : "—"}</span>
+          <Stack gap="0-5">
+            <strong className="ui-meta">{lines.length > 0 ? lines[0] : "—"}</strong>
             {(lines.length > 1 || account) && (
-              <span className="schedule-row-muted">
+              <span className="ui-meta">
                 {[...lines.slice(1), account].filter(Boolean).join(" · ")}
               </span>
             )}
-          </div>
+          </Stack>
         );
       },
     },
@@ -619,7 +622,7 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
         // own editor (a screening row's schedule form, whose cadence lives
         // there; any other row's cadence dialog, interval-only for the live
         // feed). No kind gets a shorter list and no kind gets a second word.
-        <div className="schedule-row-actions">
+        <Flex gap="1" align="center" justify="end">
           <Button
             type="button"
             variant="secondary"
@@ -682,7 +685,7 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
           >
             Delete
           </Button>
-        </div>
+        </Flex>
       ),
     },
     {
@@ -713,7 +716,7 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
     .filter((column): column is TableColumn<ScheduleItem> => Boolean(column));
 
   return (
-    <div className="schedules-panel">
+    <PageSection>
       <ScheduleDetailModal
         item={detailsTarget}
         detail={detail}
@@ -779,12 +782,12 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
       </ConfirmModal>
 
       {userLogin && (
-        <div className="schedule-context">
+        <div className="ui-meta">
           Schedules for <strong>{userLogin}</strong>{activeEnv ? ` · E*TRADE ${activeEnv}` : ""}
         </div>
       )}
 
-      <div className="schedules-toolbar">
+      <Flex justify="between" align="center" gap="3" wrap>
         <PillGroup
           options={tabs.map((t) => ({ id: t.id, label: t.label }))}
           value={activeTab}
@@ -816,7 +819,7 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
         >
           ↻ Refresh
         </Button>
-      </div>
+      </Flex>
 
       {actionError && (
         <Notice tone="danger" title="Schedule action failed" onDismiss={() => setActionError(null)}>
@@ -849,7 +852,7 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
       )}
 
       {loading && schedules.length === 0 ? (
-        <p className="sched-table-status">Loading schedules…</p>
+        <p className="ui-meta">Loading schedules…</p>
       ) : error ? (
         <Notice tone="danger" title="Schedules could not be loaded">
           {error}{" "}
@@ -858,8 +861,8 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
           </Button>
         </Notice>
       ) : showGenericSection ? (
-        <section className="sched-section-card">
-          <header className="sched-section-header">
+        <Card>
+          <header>
             {/* Issue #4353 — one heading row: the name, the count and the
                 table's own description, instead of a title stacked over the
                 caption. */}
@@ -867,12 +870,12 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
               title={
                 <>
                   <span aria-hidden="true">🗂️</span> Schedules
-                  <span className="sched-count-pill">{statusFiltered.length} Shown</span>
-                  <small className="schedule-row-muted">Every durable schedule, one row each</small>
+                  <Badge tone="accent" size="xs">{statusFiltered.length} Shown</Badge>
+                  <span className="ui-meta">Every durable schedule, one row each</span>
                 </>
               }
             />
-            {loading && <span className="schedule-row-muted">Refreshing…</span>}
+            {loading && <span className="ui-meta">Refreshing…</span>}
           </header>
           <Table
             columns={visibleGenericColumns}
@@ -882,15 +885,15 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
             rowTitle={(s) => `${s.id} · ${s.callback}`}
             containerClassName="sched-table-scroll"
             empty={
-              <p className="sched-table-status">
+              <p className="ui-meta">
                 {statusFilter === "all"
                   ? "No schedules in this group."
                   : `No ${SCHEDULE_LIST_STATUS_LABELS[statusFilter].toLowerCase()} schedules in this group.`}
               </p>
             }
           />
-        </section>
+        </Card>
       ) : null}
-    </div>
+    </PageSection>
   );
 }

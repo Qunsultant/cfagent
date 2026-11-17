@@ -499,6 +499,13 @@ const CONFORMING_INTERIORS: string[] = [
   // are removed in the same PR.
   "src/client/DataProvidersPanel.tsx",
   "src/client/PlatformAdminPanel.tsx",
+  // Issue #5077 (tail slice 2): the four migrated interiors —
+  // Options Flows, Async Jobs, IAAA Admin, Schedules; their register
+  // entries are removed in the same PR.
+  "src/client/options/flows/OptionsFlowsHub.tsx",
+  "src/client/AsyncJobsPanel.tsx",
+  "src/client/IaaaAdminPanel.tsx",
+  "src/client/SchedulesPanel.tsx",
 ]
 
 /** Every routable surface file (measured 2026-11-10 on main 299f2aa4):

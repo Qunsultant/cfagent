@@ -385,7 +385,9 @@ function usedLegacyClasses(): Set<string> {
 describe("mapping table covers the order/options/autopilot legacy classes (#3135)", () => {
   it("every used legacy class appears in the mapping table", () => {
     const used = usedLegacyClasses();
-    expect(used.size).toBe(644);
+    // Issue #5077 (tail slice 2): 644 -> 616 — the four migrated interiors
+    // no longer use 28 distinct legacy classes.
+    expect(used.size).toBe(616);
     const doc = readFileSync(MAPPING_DOC, "utf8");
     const missing = [...used].filter((c) => !doc.includes(`\`${c}\``));
     expect(missing).toEqual([]);

@@ -4,8 +4,61 @@ import { useBrokerEnvironment } from "../../brokerEnvironment";
 import { usePolling } from "../../usePolling";
 import { useAutoRefresh } from "../../autoRefresh";
 import { getPollingConfig } from "../../pollingConfig";
-import { Button, Table, PageShell, type TableColumn } from "../../components/ui";
+import {
+  Badge,
+  Button,
+  EmptyState,
+  Flex,
+  Notice,
+  PageSection,
+  PageShell,
+  Spinner,
+  Stack,
+  Table,
+  type BadgeTone,
+  type TableColumn,
+} from "../../components/ui";
+
+// Issue #5077: the optionsFlows.css import stays — the sheet styles this
+// hub's child components (FlowFiltersSidebar, FlowSummaryDualBars,
+// FlowTradeDetailModal, news sentiment badges), which are not migrated in
+// this slice. This file itself no longer uses any class from it; the import
+// is the subtree's only load of the sheet (main.tsx does not import it).
+// Retiring the sheet waits on migrating those children.
 import "./optionsFlows.css";
+
+/** Tone maps for the flow badges (sheet rules, token-only). */
+function flowTypeTone(type: string): BadgeTone {
+  switch (type.toLowerCase()) {
+    case "sweep": return "trade";
+    case "split": return "accent";
+    case "block": return "info";
+    default: return "neutral";
+  }
+}
+
+function flowProvenanceTone(provenance: string): BadgeTone {
+  return provenance === "chain-derived" ? "neutral" : "warning";
+}
+
+function flowSentimentClass(sentiment: string): string {
+  if (sentiment === "bullish") return "ui-success";
+  if (sentiment === "bearish") return "ui-danger";
+  return "";
+}
+
+function presetTone(color: SavedFilterPreset["color"]): BadgeTone {
+  switch (color) {
+    case "purple":
+    case "magenta": return "purple";
+    case "green": return "success";
+    case "yellow":
+    case "orange": return "warning";
+    case "cyan": return "info";
+    default: return "neutral";
+  }
+}
+
 import {
   LiveFlowItem,
   NewsFlowItem,
@@ -404,7 +457,7 @@ export function OptionsFlowsHub({
         ];
 
     return (
-      <div className="options-flows-container options-flows-builder-view">
+      <div className="ui-page-frame">
         <PageShell
           title="Institutional Options Flows"
           scopeNote="Options flows, dark pool prints, institutional sweeps, blocks, and insider disclosures"
@@ -431,44 +484,49 @@ export function OptionsFlowsHub({
 
 
   const liveColumns: TableColumn<LiveFlowItem>[] = [
-    { key: "time", header: "Time", cellClassName: "flow-time-cell",
+    { key: "time", header: "Time",
       render: (item) => <span>{item.timestamp ? formatFlowDateTime(item.timestamp) : item.time}</span> },
-    { key: "symbol", header: "Symbol", cellClassName: (item) => `flow-symbol-cell ${item.sentiment}`,
-      render: (item) => <span>{item.symbol}</span> },
-    { key: "strategy", header: "Strategy", cellClassName: "flow-strategy-cell",
+    { key: "symbol", header: "Symbol",
+      render: (item) => <strong className={flowSentimentClass(item.sentiment) || undefined}>{item.symbol}</strong> },
+    { key: "strategy", header: "Strategy",
       render: (item) => (
         <span>
           {item.strategy}
-          {item.companyName && <span className="flow-strategy-desc">({item.companyName})</span>}
+          {item.companyName && <span className="ui-meta">({item.companyName})</span>}
         </span>
       ) },
-    { key: "expiration", header: "Expiration", cellClassName: "flow-exp-cell",
+    { key: "expiration", header: "Expiration",
       render: (item) => <span>{item.expiration}</span> },
-    { key: "premium", header: "Premium", cellClassName: (item) => `flow-premium-cell ${item.sentiment}`,
+    { key: "premium", header: "Premium",
       render: (item) => (
         <span>
-          {item.premiumFormatted}
-          {item.abnormalActivity && <span className="flow-aa-badge">AA</span>}
+          <span className={flowSentimentClass(item.sentiment) || undefined}>{item.premiumFormatted}</span>
+          {item.abnormalActivity && (
+            <>
+              {" "}
+              <Badge tone="warning" size="xs">AA</Badge>
+            </>
+          )}
         </span>
       ) },
     { key: "type", header: "Type",
       render: (item) => (
-        <span>
-          <span className={`flow-type-badge ${item.type.toLowerCase()}`}>{item.type}</span>
-          <span className={`flow-prov-badge prov-${item.provenance}`} title={FLOW_PROVENANCE_NOTICE}>
+        <Stack gap="1">
+          <Badge tone={flowTypeTone(item.type)} size="xs">{item.type}</Badge>
+          <Badge tone={flowProvenanceTone(item.provenance)} size="xs" title={FLOW_PROVENANCE_NOTICE}>
             {item.provenance === "chain-derived"
               ? "modelled · chain-derived"
               : item.provenance === "generated"
                 ? "🧪 generated"
                 : "static sample"}
-          </span>
-        </span>
+          </Badge>
+        </Stack>
       ) },
     { key: "action", header: "Action",
       render: (item) => (
         <Button
-          className="subnav-btn"
-          style={{ padding: "var(--space-1) var(--space-1-5)", fontSize: "var(--font-size-caption)", borderColor: "var(--color-warning)", color: "var(--color-warning)" }}
+          variant="secondary"
+          size="sm"
           title="Analyze institutional trade risk profile"
           onClick={(e) => {
             e.stopPropagation();
@@ -480,17 +538,15 @@ export function OptionsFlowsHub({
       ) },
   ];
   const newsColumns: TableColumn<NewsFlowItem>[] = [
-    { key: "time", header: "Time", cellClassName: "flow-time-cell",
+    { key: "time", header: "Time",
       render: (item) => <span>{item.time}</span> },
-    { key: "headline", header: "Headline", cellClassName: "news-headline-cell",
+    { key: "headline", header: "Headline",
       render: (item) => (
         <span>
-          <span className="news-symbols-prefix">{item.symbols.join(", ")}:</span>
+          <strong>{item.symbols.join(", ")}:</strong>{" "}
           <span>{item.headline}</span>
           {item.source && (
-            <span style={{ marginLeft: "8px", fontSize: "0.75rem", color: "var(--color-text-muted)", opacity: 0.8 }}>
-              — {item.source}
-            </span>
+            <span className="ui-meta"> — {item.source}</span>
           )}
         </span>
       ) },
@@ -509,18 +565,18 @@ export function OptionsFlowsHub({
       } },
   ];
   const congressColumns: TableColumn<CongressFlowItem>[] = [
-    { key: "filingDate", header: "Filing Date", cellClassName: "flow-time-cell",
+    { key: "filingDate", header: "Filing Date",
       render: (item) => <span>{item.filingDate}</span> },
     { key: "politician", header: "Politician",
       render: (item) => (
         <span>
-          <span className="congress-politician">{item.politician}</span>
-          <span className={`congress-meta-tag ${item.party === "Democrat" ? "dem" : "rep"}`}>
+          <strong>{item.politician}</strong>{" "}
+          <Badge tone={item.party === "Democrat" ? "info" : "danger"} size="xs">
             {item.party[0]} - {item.state}
-          </span>
+          </Badge>
         </span>
       ) },
-    { key: "asset", header: "Asset / Strategy", cellClassName: "flow-strategy-cell",
+    { key: "asset", header: "Asset / Strategy",
       render: (item) => (
         <span>
           <strong>{item.symbol}</strong>: {item.assetDescription}
@@ -529,33 +585,33 @@ export function OptionsFlowsHub({
     { key: "transaction", header: "Transaction",
       render: (item) => <span>{item.transaction}</span> },
     { key: "amount", header: "Amount",
-      render: (item) => <span style={{ color: "var(--color-text-muted)" }}>{item.amountRange}</span> },
-    { key: "premium", header: "Est. Premium", cellClassName: "flow-premium-cell bullish",
-      render: (item) => <span>{item.estimatedPremiumFormatted}</span> },
+      render: (item) => <span className="ui-meta">{item.amountRange}</span> },
+    { key: "premium", header: "Est. Premium",
+      render: (item) => <span className="ui-success">{item.estimatedPremiumFormatted}</span> },
   ];
   const insiderColumns: TableColumn<InsiderFlowItem>[] = [
-    { key: "reportDate", header: "Report Date", cellClassName: "flow-time-cell",
+    { key: "reportDate", header: "Report Date",
       render: (item) => <span>{item.reportDate}</span> },
-    { key: "trade", header: "Trade", cellClassName: "flow-strategy-cell",
+    { key: "trade", header: "Trade",
       render: (item) => (
         <span>
-          {item.trade}
-          <span className="flow-strategy-desc">({item.companyName})</span>
+          {item.trade}{" "}
+          <span className="ui-meta">({item.companyName})</span>
         </span>
       ) },
-    { key: "member", header: "Member", cellClassName: "insider-member-cell",
+    { key: "member", header: "Member",
       render: (item) => (
-        <span>
-          {item.member}
-          <div className="insider-title-sub">{item.title}</div>
-        </span>
+        <Stack gap="0">
+          <span>{item.member}</span>
+          <span className="ui-meta">{item.title}</span>
+        </Stack>
       ) },
-    { key: "premium", header: "Premium", cellClassName: "flow-premium-cell bullish",
-      render: (item) => <span>{item.premiumFormatted}</span> },
+    { key: "premium", header: "Premium",
+      render: (item) => <span className="ui-success">{item.premiumFormatted}</span> },
   ];
 
   return (
-    <div className="options-flows-container">
+    <div className="ui-page-frame">
       <PageShell
         title="Institutional Options Flows"
         scopeNote="Options flows, dark pool prints, institutional sweeps, blocks, and insider disclosures"
@@ -565,7 +621,6 @@ export function OptionsFlowsHub({
         ariaLabel="Institutional Options Flows"
         activeTabId={subTab}
         onTabChange={handleTabChange}
-        className="flows-capability-nav"
         tabs={[
           {
             id: "summary",
@@ -627,28 +682,26 @@ export function OptionsFlowsHub({
         rightContent={
           <>
             <CopilotTriggerButton label="✨ Ask Copilot" />
-            <div
-              title={FLOW_PROVENANCE_NOTICE}
-              style={{ display: "flex", alignItems: "center", gap: "var(--space-1-5)", fontSize: "var(--font-size-micro)", color: "var(--color-warning)", background: "var(--color-warning-subtle, var(--color-surface-sunken))", padding: "var(--space-1) var(--space-2)", borderRadius: "var(--radius-full, 12px)", border: "1px solid var(--color-warning)", fontWeight: 600 }}
-            >
-              <span>🧪</span>
-              <span>{flowProvenance.provenances.includes("generated") ? "MODELLED · INCLUDES GENERATED SAMPLES" : "MODELLED — NOT A TRADE TAPE"}</span>
-              {lastSyncTime && <span style={{ color: "var(--color-text-muted)", fontWeight: 400 }}>{lastSyncTime}</span>}
-            </div>
+            <Badge tone="warning" size="sm" title={FLOW_PROVENANCE_NOTICE}>
+              🧪 {flowProvenance.provenances.includes("generated") ? "MODELLED · INCLUDES GENERATED SAMPLES" : "MODELLED — NOT A TRADE TAPE"}
+              {lastSyncTime && <span> {lastSyncTime}</span>}
+            </Badge>
             <Button
+              variant="secondary"
+              size="sm"
               onClick={() => fetchLiveFlows(filterConfig)}
               disabled={isRefreshing}
-              style={{ display: "flex", alignItems: "center", gap: "var(--space-1)", fontSize: "var(--font-size-micro)", color: "var(--color-text-muted)", background: "var(--color-surface-sunken)", border: "1px solid var(--color-border-medium)", borderRadius: "var(--radius-sm)", padding: "var(--space-1) var(--space-2)", cursor: isRefreshing ? "wait" : "pointer" }}
               title="Refresh modelled options flow estimates"
             >
               {isRefreshing ? "Refreshing..." : "↻ Refresh"}
             </Button>
-            <div
-              className="flows-gauge-badge-wrap"
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={() => handleTabChange("summary")}
               title="Overall Options Market Flow Sentiment Dial"
             >
-              <svg className="flows-gauge-svg" viewBox="0 0 40 20">
+              <svg width={32} height={18} viewBox="0 0 40 20" aria-hidden="true">
                 <path
                   d="M 5 20 A 15 15 0 0 1 35 20"
                   fill="none"
@@ -671,59 +724,56 @@ export function OptionsFlowsHub({
                   strokeLinecap="round"
                 />
               </svg>
-              <span className="flows-gauge-text">{summaryData.bullishSentimentRatio}% Bullish</span>
-            </div>
+              <span className="ui-meta">{summaryData.bullishSentimentRatio}% Bullish</span>
+            </Button>
           </>
         }
       />
 
       {/* Provenance disclosure (issue #119): this is modelled flow, not a tape */}
-      <div className="flows-delay-banner">
-        <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
-          <span aria-hidden="true">🧪</span>
-          <span style={{ fontWeight: 600 }}>Modelled Options Flow — not a live trade tape</span>
-          <span style={{ fontWeight: 400, color: "var(--color-text-muted)" }}>{flowProvenanceText}</span>
-        </div>
-
-        <div className="flows-delay-banner-right">
-          {activePreset && (
-            <div className={`flows-filter-active-pill-header ${activePreset.color}`}>
-              <span>Filter: {activePreset.name}</span>
-            </div>
-          )}
-          <Button
-            className={`flow-toggle-filters-btn ${isFiltersOpen ? "active" : ""}`}
-            onClick={() => setIsFiltersOpen(!isFiltersOpen)}
-            title={isFiltersOpen ? "Hide filters to expand table" : "Show filters panel"}
-          >
-            {isFiltersOpen ? "✕ Hide Filters" : "⚙️ Filters"}
-          </Button>
-        </div>
-      </div>
+      <Notice tone="warning">
+        <Flex justify="between" align="center" gap="2">
+          <Flex gap="2" align="center">
+            <span aria-hidden="true">🧪</span>
+            <strong>Modelled Options Flow — not a live trade tape</strong>
+            <span className="ui-meta">{flowProvenanceText}</span>
+          </Flex>
+          <Flex gap="2" align="center">
+            {activePreset && (
+              <Badge tone={presetTone(activePreset.color)} size="sm">
+                Filter: {activePreset.name}
+              </Badge>
+            )}
+            <Button
+              variant={isFiltersOpen ? "primary" : "secondary"}
+              size="sm"
+              aria-pressed={isFiltersOpen}
+              onClick={() => setIsFiltersOpen(!isFiltersOpen)}
+              title={isFiltersOpen ? "Hide filters to expand table" : "Show filters panel"}
+            >
+              {isFiltersOpen ? "✕ Hide Filters" : "⚙️ Filters"}
+            </Button>
+          </Flex>
+        </Flex>
+      </Notice>
 
       {/* Main Split Layout: Data Tables + Right Sidebar */}
-      <div className="flows-main-layout">
-        <main className="flows-table-area">
+      <PageSection>
+        <Flex>
+          <main className="ui-grow">
           {/* SUB-TAB 1: SUMMARY VIEW */}
           {subTab === "summary" && (
             !hasLoadedInitial && isRefreshing ? (
-              <div style={{ padding: "calc(var(--space-6) * 2 + var(--space-4)) calc(var(--space-6) + var(--space-2))", textAlign: "center", color: "var(--color-text-muted)" }}>
-                <div style={{ fontSize: "var(--font-size-title-sm)", fontWeight: 600, color: "var(--color-text-primary)", marginBottom: "0.5rem" }}>
-                  Aggregating Modelled Options Flow Leaderboard...
-                </div>
-                <div style={{ fontSize: "var(--font-size-body)" }}>
-                  Calculating net bullish vs bearish dollar volumes from modelled flow estimates derived from option-chain snapshots
-                </div>
-              </div>
+              <Stack gap="2" align="center">
+                <Spinner />
+                <strong>Aggregating Modelled Options Flow Leaderboard...</strong>
+                <span className="ui-meta">Calculating net bullish vs bearish dollar volumes from modelled flow estimates derived from option-chain snapshots</span>
+              </Stack>
             ) : summaryData.totalTrades === 0 ? (
-              <div style={{ padding: "calc(var(--space-6) * 2 + var(--space-4)) calc(var(--space-6) + var(--space-2))", textAlign: "center", color: "var(--color-text-muted)" }}>
-                <div style={{ fontSize: "var(--font-size-title)", fontWeight: 600, color: "var(--color-text-primary)", marginBottom: "0.5rem" }}>
-                  No flow estimates available
-                </div>
-                <div style={{ fontSize: "var(--font-size-body)" }}>
-                  No option-chain data is currently available to derive flow estimates.
-                </div>
-              </div>
+              <EmptyState
+                title="No flow estimates available"
+                description="No option-chain data is currently available to derive flow estimates."
+              />
             ) : (
               <FlowSummaryDualBars
                 bullishItems={summaryData.bullishLeaderboard}
@@ -737,57 +787,56 @@ export function OptionsFlowsHub({
           {(subTab === "live" || subTab === "historical") && (
             <>
               {filterConfig.tickers.length > 0 && (
-                <div className="flow-drilldown-banner">
-                  <div className="flow-drilldown-info">
-                    <span className="flow-drilldown-badge">TICKER DRILLDOWN</span>
-                    <span className="flow-drilldown-text">
-                      Showing modelled flow for <strong>{filterConfig.tickers.join(", ")}</strong>
-                    </span>
-                  </div>
-                  <div className="flow-drilldown-actions">
-                    <Button
-                      className="flow-drilldown-back-btn"
-                      onClick={() => handleTabChange("summary")}
-                    >
-                      ← Return to Market Summary
-                    </Button>
-                    <Button
-                      className="flow-drilldown-clear-btn"
-                      onClick={handleClearTickerDrilldown}
-                    >
-                      ✕ Show All Tickers
-                    </Button>
-                  </div>
-                </div>
+                <Notice tone="info">
+                  <Flex justify="between" align="center" gap="2">
+                    <Flex gap="2" align="center">
+                      <Badge tone="info" size="xs" uppercase>TICKER DRILLDOWN</Badge>
+                      <span>
+                        Showing modelled flow for <strong>{filterConfig.tickers.join(", ")}</strong>
+                      </span>
+                    </Flex>
+                    <Flex gap="1" align="center">
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => handleTabChange("summary")}
+                      >
+                        ← Return to Market Summary
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={handleClearTickerDrilldown}
+                      >
+                        ✕ Show All Tickers
+                      </Button>
+                    </Flex>
+                  </Flex>
+                </Notice>
               )}
               {!hasLoadedInitial && isRefreshing ? (
-                <div style={{ padding: "calc(var(--space-6) * 2 + var(--space-4)) calc(var(--space-6) + var(--space-2))", textAlign: "center", color: "var(--color-text-muted)" }}>
-                  <div style={{ fontSize: "var(--font-size-title-sm)", fontWeight: 600, color: "var(--color-text-primary)", marginBottom: "0.5rem" }}>
-                    Loading Modelled Institutional Options Flow Estimates...
-                  </div>
-                  <div style={{ fontSize: "var(--font-size-body)" }}>
-                    Deriving sweep and block estimates from option-chain snapshots — not exchange trade prints
-                  </div>
-                </div>
+                <Stack gap="2" align="center">
+                  <Spinner />
+                  <strong>Loading Modelled Institutional Options Flow Estimates...</strong>
+                  <span className="ui-meta">Deriving sweep and block estimates from option-chain snapshots — not exchange trade prints</span>
+                </Stack>
               ) : filteredLiveItems.length === 0 ? (
-                <div style={{ padding: "calc(var(--space-6) * 2) var(--space-4)", textAlign: "center", color: "var(--color-text-muted)" }}>
-                  <div style={{ fontSize: "var(--font-size-title)", fontWeight: 600, color: "var(--color-text-primary)", marginBottom: "0.5rem" }}>
-                    No flow estimates available
-                  </div>
-                  <div style={{ fontSize: "var(--font-size-body)" }}>
-                    {filterConfig.tickers.length > 0 || filterConfig.minPremium > 0
+                <EmptyState
+                  title="No flow estimates available"
+                  description={
+                    filterConfig.tickers.length > 0 || filterConfig.minPremium > 0
                       ? "No modelled flow items matching the current filter criteria."
-                      : "No option-chain data currently available to derive flow estimates."}
-                  </div>
-                </div>
+                      : "No option-chain data currently available to derive flow estimates."
+                  }
+                />
               ) : (
                 <Table
                   columns={liveColumns}
                   rows={filteredLiveItems}
                   rowKey={(item) => item.id}
                   onRowClick={(item) => handleOpenTradeDetail(item)}
-                  rowClassName="clickable-row"
-                  className="flow-table"
+                  containerClassName="ui-scroll-frame"
+                  stickyHeader
                 />
               )}
             </>
@@ -796,23 +845,16 @@ export function OptionsFlowsHub({
           {/* SUB-TAB 4: NEWS FLOW */}
           {subTab === "news" && (
             !hasLoadedInitial && isRefreshing && newsItems.length === 0 ? (
-              <div style={{ padding: "calc(var(--space-6) * 2 + var(--space-4)) calc(var(--space-6) + var(--space-2))", textAlign: "center", color: "var(--color-text-muted)" }}>
-                <div style={{ fontSize: "var(--font-size-title-sm)", fontWeight: 600, color: "var(--color-text-primary)", marginBottom: "0.5rem" }}>
-                  Fetching Live Market News...
-                </div>
-                <div style={{ fontSize: "var(--font-size-body)" }}>
-                  Connecting to real-time financial market news feeds
-                </div>
-              </div>
+              <Stack gap="2" align="center">
+                <Spinner />
+                <strong>Fetching Live Market News...</strong>
+                <span className="ui-meta">Connecting to real-time financial market news feeds</span>
+              </Stack>
             ) : filteredNewsItems.length === 0 ? (
-              <div style={{ padding: "calc(var(--space-6) * 2) var(--space-4)", textAlign: "center", color: "var(--color-text-muted)" }}>
-                <div style={{ fontSize: "var(--font-size-title)", fontWeight: 600, color: "var(--color-text-primary)", marginBottom: "0.5rem" }}>
-                  No live feed available
-                </div>
-                <div style={{ fontSize: "var(--font-size-body)" }}>
-                  No live financial news prints currently available from market feeds.
-                </div>
-              </div>
+              <EmptyState
+                title="No live feed available"
+                description="No live financial news prints currently available from market feeds."
+              />
             ) : (
               <Table
                 columns={newsColumns}
@@ -821,8 +863,8 @@ export function OptionsFlowsHub({
                 onRowClick={(item) => {
                   if (item.url) window.open(item.url, "_blank", "noopener,noreferrer");
                 }}
-                rowClassName={(item) => (item.url ? "clickable-row" : "")}
-                className="flow-table"
+                containerClassName="ui-scroll-frame"
+                stickyHeader
               />
             )
           )}
@@ -830,31 +872,24 @@ export function OptionsFlowsHub({
           {/* SUB-TAB 5: CONGRESS FLOW */}
           {subTab === "congress" && (
             !hasLoadedInitial && isRefreshing && congressItems.length === 0 ? (
-              <div style={{ padding: "calc(var(--space-6) * 2 + var(--space-4)) calc(var(--space-6) + var(--space-2))", textAlign: "center", color: "var(--color-text-muted)" }}>
-                <div style={{ fontSize: "var(--font-size-title-sm)", fontWeight: 600, color: "var(--color-text-primary)", marginBottom: "0.5rem" }}>
-                  Fetching Congressional Trading Disclosures...
-                </div>
-                <div style={{ fontSize: "var(--font-size-body)" }}>
-                  Connecting to real-time congressional member stock disclosure feeds
-                </div>
-              </div>
+              <Stack gap="2" align="center">
+                <Spinner />
+                <strong>Fetching Congressional Trading Disclosures...</strong>
+                <span className="ui-meta">Connecting to real-time congressional member stock disclosure feeds</span>
+              </Stack>
             ) : filteredCongressItems.length === 0 ? (
-              <div style={{ padding: "calc(var(--space-6) * 2) var(--space-4)", textAlign: "center", color: "var(--color-text-muted)" }}>
-                <div style={{ fontSize: "var(--font-size-title)", fontWeight: 600, color: "var(--color-text-primary)", marginBottom: "0.5rem" }}>
-                  No live feed available
-                </div>
-                <div style={{ fontSize: "var(--font-size-body)" }}>
-                  No live congressional trading disclosures feed currently available.
-                </div>
-              </div>
+              <EmptyState
+                title="No live feed available"
+                description="No live congressional trading disclosures feed currently available."
+              />
             ) : (
               <Table
                 columns={congressColumns}
                 rows={filteredCongressItems}
                 rowKey={(item) => item.id}
                 onRowClick={(item) => handleTradeOrPrompt(item.symbol)}
-                rowClassName="clickable-row"
-                className="flow-table"
+                containerClassName="ui-scroll-frame"
+                stickyHeader
               />
             )
           )}
@@ -862,31 +897,24 @@ export function OptionsFlowsHub({
           {/* SUB-TAB 6: INSIDER FLOW */}
           {subTab === "insider" && (
             !hasLoadedInitial && isRefreshing && insiderItems.length === 0 ? (
-              <div style={{ padding: "calc(var(--space-6) * 2 + var(--space-4)) calc(var(--space-6) + var(--space-2))", textAlign: "center", color: "var(--color-text-muted)" }}>
-                <div style={{ fontSize: "var(--font-size-title-sm)", fontWeight: 600, color: "var(--color-text-primary)", marginBottom: "0.5rem" }}>
-                  Streaming Live SEC Form 4 Filings...
-                </div>
-                <div style={{ fontSize: "var(--font-size-body)" }}>
-                  Connecting directly to SEC EDGAR real-time insider trade disclosures
-                </div>
-              </div>
+              <Stack gap="2" align="center">
+                <Spinner />
+                <strong>Streaming Live SEC Form 4 Filings...</strong>
+                <span className="ui-meta">Connecting directly to SEC EDGAR real-time insider trade disclosures</span>
+              </Stack>
             ) : filteredInsiderItems.length === 0 ? (
-              <div style={{ padding: "calc(var(--space-6) * 2) var(--space-4)", textAlign: "center", color: "var(--color-text-muted)" }}>
-                <div style={{ fontSize: "var(--font-size-title)", fontWeight: 600, color: "var(--color-text-primary)", marginBottom: "0.5rem" }}>
-                  No live feed available
-                </div>
-                <div style={{ fontSize: "var(--font-size-body)" }}>
-                  No live SEC Form 4 insider trading feed currently available.
-                </div>
-              </div>
+              <EmptyState
+                title="No live feed available"
+                description="No live SEC Form 4 insider trading feed currently available."
+              />
             ) : (
               <Table
                 columns={insiderColumns}
                 rows={filteredInsiderItems}
                 rowKey={(item) => item.id}
                 onRowClick={(item) => handleTradeOrPrompt(item.symbol)}
-                rowClassName="clickable-row"
-                className="flow-table"
+                containerClassName="ui-scroll-frame"
+                stickyHeader
               />
             )
           )}
@@ -925,7 +953,8 @@ export function OptionsFlowsHub({
             onClose={() => setIsFiltersOpen(false)}
           />
         )}
-      </div>
+        </Flex>
+      </PageSection>
 
       {/* Trade Detail Modal */}
       {selectedDetailTrade && (
