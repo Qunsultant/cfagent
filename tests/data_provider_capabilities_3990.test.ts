@@ -122,7 +122,7 @@ describe("3990: Alpaca data adapter declares exactly what it serves", () => {
   it("declares quotes, historicalBars, optionsChains, news — and no fundamentals", () => {
     const adapter = createAlpacaDataProvider(fixtureMarketData());
     expect(adapter.id).toBe("alpaca");
-    expect([...adapter.capabilities]).toEqual(["quotes", "historicalBars", "optionsChains", "news"]);
+    expect([...adapter.capabilities]).toEqual(["quotes", "historicalBars", "news", "optionsChains"]);
   });
 
   it("has getOptionsChain/getOptionExpiryDates and no getFundamentals by default", () => {
@@ -162,8 +162,8 @@ describe("3990: Alpaca data adapter declares exactly what it serves", () => {
     expect(report.checks.map((c) => c.capability)).toEqual([
       "quotes",
       "historicalBars",
-      "optionsChains",
       "news",
+      "optionsChains",
     ]);
   });
 
@@ -185,8 +185,8 @@ describe("3990: Alpaca data adapter declares exactly what it serves", () => {
       "quotes",
       "historicalBars",
       "fundamentals",
-      "optionsChains",
       "news",
+      "optionsChains",
     ]);
     const out = await adapter.getFundamentals!("AAPL", RUN);
     expect(out.providerId).toBe("alpaca");

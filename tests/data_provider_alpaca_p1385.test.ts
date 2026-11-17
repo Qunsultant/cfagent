@@ -399,7 +399,7 @@ describe("verifier: verifyAlpacaDataProvider shapes", () => {
       news: (async () => []) as never,
     });
     expect(result.ok).toBe(true);
-    expect(result.summary).toMatch(/conformance passed for quotes, historicalBars, optionsChains, news/);
+    expect(result.summary).toMatch(/conformance passed for quotes, historicalBars, news, optionsChains/);
   });
 
   it("kit failure → ok:false with the failure list, never a silent pass", async () => {
