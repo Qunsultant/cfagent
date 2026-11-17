@@ -86,6 +86,11 @@ import {
   createOtelJobPipelineRunSettledObserver,
   createOtelJobStepJournal,
 } from "../observability/otelJobPipeline";
+import { createOtelMetrics } from "../observability/otelMetricsProvider";
+import {
+  createOtelJobPipelineMetricsRunSettledObserver,
+  createOtelJobPipelineMetricsStepJournal,
+} from "../observability/otelJobPipelineMetrics";
 import { buildFeedJobRegistry, buildFeedStatus } from "../services/feedJobs";
 import { resolveFeedJobTimeouts } from "../services/feedJobTimeouts";
 import {
@@ -519,14 +524,33 @@ export function createScheduledAgentPipelineControl(
     isEnabled: () => otel.isDomainEnabled("j1j7"),
     flush: () => otel.flush(),
   };
+  // Issue #5082 (S2): the OTel J1–J7 metrics stack for this
+  // host's control plane, built once per control alongside the
+  // logging stack. The metrics run-settled observer is CHAINED
+  // after the logging observer (the logging observer is kept,
+  // never replaced); the metrics stage-step journal WRAPS the
+  // logging journal (metrics → logging → identity → step).
+  // Both metrics observers check the per-domain j1j7 switch
+  // first and no-op when it is OFF. The logging path is
+  // untouched by this wiring.
+  const otelMetrics = createOtelMetrics(ctx.env);
+  const otelMetricsObserverDeps = {
+    recorder: otelMetrics.recorder,
+    isEnabled: () => otelMetrics.isDomainEnabled("j1j7"),
+    flush: () => otelMetrics.flush(),
+  };
   return new JobPipelineControl({
     stores,
     runRecorder: jobRunRecorderFromStore(new SqlJobRunRecordStore(sql)),
     runSettledObserver: chainRunSettledObservers(
       feedRunSettledObserverFor(ctx),
       createOtelJobPipelineRunSettledObserver(otelObserverDeps),
+      createOtelJobPipelineMetricsRunSettledObserver(otelMetricsObserverDeps),
     ),
-    journal: createOtelJobStepJournal(otelObserverDeps),
+    journal: createOtelJobPipelineMetricsStepJournal({
+      ...otelMetricsObserverDeps,
+      inner: createOtelJobStepJournal(otelObserverDeps),
+    }),
     publisher: messaging.ports?.publisher ?? null,
     // #4312 — the feed execution bound resolves from env here
     // (FEED_JOB_EXECUTION_MS, 240s when no knob is set), so the

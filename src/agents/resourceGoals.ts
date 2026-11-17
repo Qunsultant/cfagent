@@ -81,6 +81,16 @@ export interface RollupResult {
 export async function runResourceRollup(deps: {
   db: ResourceGoalDb;
   nowMs: number;
+  /**
+   * Issue #5082 (S2) — optional metrics recorder. After the
+   * rows are written to D1, the recorder receives the SAME
+   * rows (the #1819 rollup absorbed as the first metric: the
+   * rollup data is readable as metrics from the one store).
+   * The dep is optional (the goal works unchanged without
+   * one) and best-effort (a recorder throw never fails the
+   * rollup goal).
+   */
+  metrics?: { recordResourceRollup(rows: readonly DailyRollupRow[]): void };
 }): Promise<RollupResult> {
   const day = previousUtcDay(deps.nowMs);
   const { startMs, endMs } = utcDayBounds(day);
@@ -88,6 +98,16 @@ export async function runResourceRollup(deps: {
   const totals = await new D1ResourceUsageAdapter(deps.db).totals(startMs, endMs, DAY_MS);
   const rows = rollupRowsFromTotals(totals, day);
   await writeDailyRollup(deps.db, day, rows);
+  // Issue #5082 (S2): hand the same rows to the metrics
+  // recorder (best-effort — a recorder failure never fails
+  // the rollup goal, and the D1 write above already landed).
+  if (deps.metrics) {
+    try {
+      deps.metrics.recordResourceRollup(rows);
+    } catch {
+      // Best-effort metrics hook.
+    }
+  }
   const sums = rows.reduce(
     (acc, r) => ({ ops: acc.ops + r.ops, rowsRead: acc.rowsRead + r.rowsRead, rowsWritten: acc.rowsWritten + r.rowsWritten }),
     { ops: 0, rowsRead: 0, rowsWritten: 0 }
