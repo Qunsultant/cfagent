@@ -159,7 +159,7 @@ export class DefinePipelineChainCommand implements IMcpToolCommand<DefinePipelin
       root: {
         kind: "chain",
         inputs: {
-          sources: input.sources ?? ["alpaca"],
+          sources: input.sources ?? ["primary-feed"],
           datasets: input.datasets ?? ["quotes"],
         },
         schedule: input.cron ? { enabled: true, cron: input.cron } : { enabled: false },
