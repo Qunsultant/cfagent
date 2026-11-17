@@ -54,6 +54,14 @@ Journey impact — REQUIRED before/after statement (an issue without it is incom
 - Search terms used:
 - If an existing issue already covers this work, do NOT create a duplicate — comment on that issue instead. A new issue is justified only when no existing issue covers it, or when the difference is stated above. (Record confirmed relationships under Related issues below.)
 
+## Reuse class (required — pick one; definitions: gitops §7 "Reuse before you build")
+- [ ] Reuse — this issue delivers its outcome using an existing mechanism as it stands (call it, route to it, expose its existing read path, remove a fallback branch). No behaviour change.
+- [ ] Enhancement — this issue delivers its outcome by extending or changing an existing mechanism's behaviour (new fields, branches, parameters, or a surface on something that already exists). State the §7 sub-kind: enhance / optimize / consolidate.
+- [ ] New — this issue builds a mechanism or behaviour with no existing counterpart (new store, workflow, endpoint, surface, or mode). Last option.
+- Reused mechanism (name + file:line, or "none — new"):
+- Enhancement sub-kind and what changes (enhance / optimize / consolidate; or "n/a"):
+- Search confirming nothing exists (for New: terms + what was checked; or "n/a"):
+
 ## Related issues
 Parent epic:
 Blocks / Blocked by:
@@ -160,12 +168,19 @@ For each dimension state Enabled (this change adds it), Preserved (the change ke
 
 ## Test plan
 
-## Dependencies
-Cross-lane need: if this requires another lane's capability, link that lane's separately created and assigned issue here — do not fold their work into this issue.
+## Dependencies (for prioritization — the ordering record; Parallelism states whether this issue can start)
+Blocking — this issue cannot start (or cannot merge) until these land. Each entry states the dependency's state and what it unblocks. A blocked slice names its unblocker here and states what is blocked; never work around a dependency (no parallel re-implementation, no silent fallback). If a dependency's state changes, update this section in the same PR that discovers it. A cross-lane need is a blocking dependency on that lane's separately created and assigned issue — link it here, do not fold their work into this issue.
+- [ ] #NNNN — <title> — state: open / merged / blocked — unblocks: <what this issue needs from it>
+- (None — write "None" if there are no blocking dependencies.)
+Related — linked work that is not blocking (parent, sub-issue, adjacent):
+- #NNNN — <title> — <role>
+Blocked by this issue — work waiting on this issue (reverse dependencies, if any):
+- #NNNN — <title>
+- (None — write "None" if nothing waits on this issue.)
 
 ## Parallelism (gitops §5, issue #4070)
 Parallel or Serial:
-Depends on (issue numbers, or none):
+Depends on: see ## Dependencies (Blocking) — the list lives there, not here; do not duplicate it.
 Conflicts with (shared files/surfaces, or none):
 
 ## Change management (expected)
@@ -179,7 +194,7 @@ Communication:
 No UX drift, no architecture drift, no rework, no regression — reuse is mandatory.
 UX surfaces touched + primitives/tokens used (or none):
 Architecture surfaces touched + patterns/boundaries/ADRs followed (or none):
-Reused surfaces (existing implementations reused):
+Reused surfaces (existing implementations reused — must match the ## Reuse class above):
 Rework justification (if rebuilding an existing capability, why — otherwise none):
 Regression risk + pins preserving existing behavior:
 
@@ -223,6 +238,7 @@ All development on this issue must follow:
 ## Completion report (gitops §15 — fill on close; the single document for this issue)
 - Issue / Pull request / Integration (merged, target, resulting commit):
 - Implementation (key decisions, alternatives, scope exclusions):
+- Reuse class (as filed, or as changed with reason — reuse / enhancement / new + evidence):
 - Test evidence (red, green, regression, integration/evaluation; CI runs; post-merge checks):
 - Change management (actual: change type, impacted surfaces, migration and data impact, rollout plan, rollback plan, communication, changelog entry):
 - Conformance (actual: UX primitives/tokens used, architecture boundaries followed, reused surfaces, rework justification, regression pins):
@@ -235,5 +251,6 @@ All development on this issue must follow:
 - How to harness this value from UX:
 - Process docs updated (file + commit, or none with reason):
 - Follow-ups ledger (G2 rule — every follow-up IS a sub-issue under this issue; list its sub-issue number here, or an explicit owner deferral with date and reason):
+- Out-of-scope items filed (issue #4099): `[Out-of-Scope]` sub-issue numbers for anything this issue surfaced as out of scope or not considered, or none.
 - Remaining work (gitops §15 — handoff-ready completion): next sub-issues with numbers and state (open / in progress / blocked + reason); branch/PR state (merged / closed / open, with numbers); where the evidence lives (logs, comments, files). A completed issue with no remaining-work statement is incomplete.
 - Next-step gate (PASS / BLOCKED + reason):

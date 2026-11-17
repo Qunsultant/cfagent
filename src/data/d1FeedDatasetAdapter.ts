@@ -19,7 +19,8 @@
  * catalogue's text, issued via db.run(sql.raw(...)).
  */
 import { sql } from "drizzle-orm";
-import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
+import { type DrizzleD1Database } from "drizzle-orm/d1";
+import { createDrizzleD1Db } from "./d1QueryLogger";
 import type { DataProviderId } from "../trading";
 import type {
   FeedDatasetArtifact,
@@ -40,7 +41,7 @@ export type FeedDatasetD1Db = DrizzleD1Database<{
 
 /** Build the Drizzle D1 database object from a bound D1 client. */
 export function createD1FeedDatasetDb(d1: D1Database): FeedDatasetD1Db {
-  return drizzle(d1, {
+  return createDrizzleD1Db(d1, {
     schema: { masFeedDatasets },
   });
 }

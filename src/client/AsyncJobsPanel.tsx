@@ -1,9 +1,29 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Button, TextInput } from "./components/ui";
+import {
+  Badge,
+  Button,
+  Card,
+  Flex,
+  Notice,
+  PageSection,
+  Stack,
+  TextInput,
+  type BadgeTone,
+} from "./components/ui";
 import { AsyncJobResultViewer } from "./AsyncJobResultViewer";
 import { usePolling } from "./usePolling";
 import { useAutoRefresh } from "./autoRefresh";
 import { csrfHeaders } from "./apiFetch";
+
+/** Badge tone for a job status (sheet rules, token-only). */
+function jobStatusTone(status: AsyncJob["status"]): BadgeTone {
+  switch (status) {
+    case "completed": return "success";
+    case "failed": return "danger";
+    case "running": return "info";
+    case "queued": return "neutral";
+  }
+}
 
 type AsyncJob = {
   jobId: string;
@@ -144,78 +164,82 @@ export function AsyncJobsPanel({ embedded = false }: AsyncJobsPanelProps = {}) {
 
   if (embedded) {
     return (
-      <div className="settings-async-jobs-box">
-        <div className="async-jobs-subhead">
-          <div className="async-status-pill-badge" role="status">
-            <span className={`async-dot ${activeCount > 0 || failedCount > 0 ? "active" : "idle"}`} />
-            <span className="async-count-txt">
+      <PageSection>
+        <Flex justify="between" align="center" gap="2">
+          <div role="status">
+            <Badge tone={error ? "danger" : activeCount > 0 ? "info" : failedCount > 0 ? "warning" : "success"} size="sm" dot>
               {statusLabel}
-            </span>
+            </Badge>
           </div>
           <Button
             type="button"
-            className="btn-async-mini-refresh"
+            variant="secondary"
+            size="sm"
             onClick={() => void refresh()}
             title="Refresh background tasks"
           >
             🔄 Refresh
           </Button>
-        </div>
+        </Flex>
 
         {lastRefreshedAt && (
-          <p className="async-jobs-refreshed">
+          <p className="ui-meta">
             Last refreshed {new Date(lastRefreshedAt).toLocaleTimeString()}.
           </p>
         )}
 
-        {error && <p className="async-jobs-error" role="alert">{error}</p>}
+        {error && <Notice tone="danger">{error}</Notice>}
 
         {jobs.length === 0 ? (
-          <div className="async-jobs-empty-hint">
-            <span>No background jobs recorded in this session.</span>
-          </div>
+          <p className="ui-meta-sm">No background jobs recorded in this session.</p>
         ) : (
           <>
-            <ul className="settings-async-jobs-list">
+            <ul className="ui-stack">
               {tree.slice(0, 5).map((node) => (
-              <li key={node.job.jobId} className={`settings-async-job-item status-${node.job.status}`}>
-                <div className="job-item-main">
-                  <span className="job-item-label" title={node.job.label}>{node.job.label}</span>
-                  <div className="job-item-tags">
-                    <span className={`job-tag-status ${node.job.status}`}>{node.job.status}</span>
-                    {node.children.length > 0 && (
-                      <span className="job-tag-subjobs">{node.children.length} sub-job{node.children.length === 1 ? "" : "s"}</span>
+              <li key={node.job.jobId}>
+                <Card padding="sm">
+                  <Flex justify="between" align="center" gap="2">
+                    <Stack gap="1" className="ui-grow">
+                      <strong className="ui-single-line" title={node.job.label}>{node.job.label}</strong>
+                      <Flex gap="1" align="center" wrap>
+                        <Badge tone={jobStatusTone(node.job.status)} size="xs">{node.job.status}</Badge>
+                        {node.children.length > 0 && (
+                          <span className="ui-meta-sm">{node.children.length} sub-job{node.children.length === 1 ? "" : "s"}</span>
+                        )}
+                        <span className="ui-meta-sm">
+                          {new Date(node.job.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                        </span>
+                      </Flex>
+                    </Stack>
+                    {(node.job.status === "completed" || node.job.status === "failed") && (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => void openResult(node.job.jobId)}
+                        title={node.job.status === "completed" ? "Inspect job payload result" : "Inspect failure reason"}
+                      >
+                        {node.job.status === "completed" ? "Result" : "Error"}
+                      </Button>
                     )}
-                    <span className="job-tag-time">
-                      {new Date(node.job.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                    </span>
-                  </div>
-                </div>
-                {(node.job.status === "completed" || node.job.status === "failed") && (
-                  <Button
-                    type="button"
-                    className="btn-async-view-result"
-                    onClick={() => void openResult(node.job.jobId)}
-                    title={node.job.status === "completed" ? "Inspect job payload result" : "Inspect failure reason"}
-                  >
-                    {node.job.status === "completed" ? "Result" : "Error"}
-                  </Button>
-                )}
-                {node.job.status === "failed" && (
-                  <Button
-                    type="button"
-                    className="btn-async-view-result"
-                    onClick={() => void retryJob(node.job.jobId)}
-                    title="Retry this job from its recorded payload — upstream stages are not re-run"
-                  >
-                    Retry
-                  </Button>
-                )}
+                    {node.job.status === "failed" && (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => void retryJob(node.job.jobId)}
+                        title="Retry this job from its recorded payload — upstream stages are not re-run"
+                      >
+                        Retry
+                      </Button>
+                    )}
+                  </Flex>
+                </Card>
               </li>
             ))}
             </ul>
             {tree.length > 5 && (
-              <p className="async-jobs-truncated">
+              <p className="ui-meta">
                 Showing 5 of {tree.length} jobs.
               </p>
             )}
@@ -223,76 +247,84 @@ export function AsyncJobsPanel({ embedded = false }: AsyncJobsPanelProps = {}) {
         )}
 
         <AsyncJobResultViewer jobId={selectedJob} variant="embedded" />
-      </div>
+      </PageSection>
     );
   }
 
   return (
-    <details className="async-jobs-panel">
+    <details>
       <summary>
         Async tasks
-        {activeCount > 0 && <span className="async-jobs-count">{activeCount}</span>}
+        {activeCount > 0 && <Badge tone="info" size="xs">{activeCount}</Badge>}
       </summary>
-      <div className="async-jobs-content">
-        <div className="async-jobs-heading">
+      <Stack gap="3">
+        <Flex justify="between" align="center" gap="2">
           <strong>Background work</strong>
-          <Button type="button" onClick={() => void refresh()}>Refresh</Button>
-        </div>
-        <div role="status" className="async-jobs-live-status">
+          <Button type="button" variant="secondary" size="sm" onClick={() => void refresh()}>Refresh</Button>
+        </Flex>
+        <div role="status" className="ui-meta">
           {statusLabel}
         </div>
         {lastRefreshedAt && (
-          <p className="async-jobs-refreshed">
+          <p className="ui-meta">
             Last refreshed {new Date(lastRefreshedAt).toLocaleTimeString()}.
           </p>
         )}
-        {error && <p className="async-jobs-error" role="alert">{error}</p>}
+        {error && <Notice tone="danger">{error}</Notice>}
         {jobs.length === 0 ? (
-          <p className="async-jobs-empty">Submitted work will appear here.</p>
+          <p className="ui-meta">Submitted work will appear here.</p>
         ) : (
-          <ul className="async-jobs-list">
+          <ul className="ui-stack">
             {tree.map((node) => (
               <li key={node.job.jobId}>
-                <span>
-                  <strong>{node.job.label}</strong>
-                  <small>
-                    {node.job.status}
-                    {node.job.stage ? ` · stage: ${node.job.stage}` : ""} · {new Date(node.job.createdAt).toLocaleString()}
-                  </small>
-                </span>
-                {(node.job.status === "completed" || node.job.status === "failed") && (
-                  <Button type="button" onClick={() => void openResult(node.job.jobId)}>
-                    {node.job.status === "completed" ? "View result" : "View error"}
-                  </Button>
-                )}
-                {node.job.status === "failed" && (
-                  <Button type="button" onClick={() => void retryJob(node.job.jobId)}>
-                    Retry
-                  </Button>
-                )}
+                <Flex justify="between" align="center" gap="2">
+                  <span>
+                    <strong>{node.job.label}</strong>
+                    <small>
+                      {node.job.status}
+                      {node.job.stage ? ` · stage: ${node.job.stage}` : ""} · {new Date(node.job.createdAt).toLocaleString()}
+                    </small>
+                  </span>
+                  <Flex gap="1" align="center">
+                    {(node.job.status === "completed" || node.job.status === "failed") && (
+                      <Button type="button" variant="secondary" size="sm" onClick={() => void openResult(node.job.jobId)}>
+                        {node.job.status === "completed" ? "View result" : "View error"}
+                      </Button>
+                    )}
+                    {node.job.status === "failed" && (
+                      <Button type="button" variant="secondary" size="sm" onClick={() => void retryJob(node.job.jobId)}>
+                        Retry
+                      </Button>
+                    )}
+                  </Flex>
+                </Flex>
                 {node.children.length > 0 && (
-                  <ul className="async-jobs-children">
+                  <ul className="ui-stack">
                     {node.children.map((child) => (
                       <li key={child.jobId}>
-                        <span>
-                          <strong>{child.label}</strong>
-                          <small>
-                            {child.status} · {child.jobKind ?? "sub-job"}
-                            {child.stage ? ` · stage: ${child.stage}` : ""}
-                            {child.notBefore && child.status === "queued" ? ` · runs after ${new Date(child.notBefore).toLocaleString()}` : ""}
-                            {child.channel ? ` · ${child.channel}` : ""} · {new Date(child.createdAt).toLocaleString()}
-                          </small>
-                        </span>
-                        {(child.status === "completed" || child.status === "failed") && (
-                          <Button type="button" onClick={() => void openResult(child.jobId)}>
-                            {child.status === "completed" ? "View result" : "View error"}
-                          </Button>
-                        )}
-                        {child.status === "failed" && (
-                          <Button type="button" onClick={() => void retryJob(child.jobId)}>
-                            Retry
-                          </Button>
-                        )}
+                        <Flex justify="between" align="center" gap="2">
+                          <span>
+                            <strong>{child.label}</strong>
+                            <small>
+                              {child.status} · {child.jobKind ?? "sub-job"}
+                              {child.stage ? ` · stage: ${child.stage}` : ""}
+                              {child.notBefore && child.status === "queued" ? ` · runs after ${new Date(child.notBefore).toLocaleString()}` : ""}
+                              {child.channel ? ` · ${child.channel}` : ""} · {new Date(child.createdAt).toLocaleString()}
+                            </small>
+                          </span>
+                          <Flex gap="1" align="center">
+                            {(child.status === "completed" || child.status === "failed") && (
+                              <Button type="button" variant="secondary" size="sm" onClick={() => void openResult(child.jobId)}>
+                                {child.status === "completed" ? "View result" : "View error"}
+                              </Button>
+                            )}
+                            {child.status === "failed" && (
+                              <Button type="button" variant="secondary" size="sm" onClick={() => void retryJob(child.jobId)}>
+                                Retry
+                              </Button>
+                            )}
+                          </Flex>
+                        </Flex>
                       </li>
                     ))}
                   </ul>
@@ -302,7 +334,7 @@ export function AsyncJobsPanel({ embedded = false }: AsyncJobsPanelProps = {}) {
           </ul>
         )}
         <AsyncJobResultViewer jobId={selectedJob} variant="standalone" />
-      </div>
+      </Stack>
     </details>
   );
 }

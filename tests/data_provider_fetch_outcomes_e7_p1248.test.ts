@@ -818,7 +818,9 @@ describe("verifier probe outcomes (issue #1248)", () => {
     expect(rows.length).toBeGreaterThanOrEqual(2);
     expect(rows.every((r) => r.status === "fetch_failed")).toBe(true);
     expect(rows.every((r) => r.failureKind === "auth")).toBe(true);
-    expect(new Set(rows.map((r) => r.capability))).toEqual(new Set(["quotes", "optionsChains"]));
+    expect(new Set(rows.map((r) => r.capability))).toEqual(
+      new Set(["quotes", "optionsChains", "historicalBars"])
+    );
   });
 
   it("etrade: an unconfigured service fails verify BEFORE any probe — no fetch, no rows", async () => {

@@ -8,7 +8,7 @@ All work must be sized and prioritized with dependencies.
 Learn from your successes and failures - don't repeat the mistakes.
 Just one of everything - Reuse don't recreate.
 Create if it doesn't exist - No parallel, multiple, similar, duplicate, etc. capabilities/solutions.
-No hard coding - every default/constant/setting/etc. must be externalized and configurable through a config file. Make this chance on every code touch.
+No hard coding - every default/constant/setting/etc. must be externalized and configurable through a config file. Make these changes on every code touch.
 Always provide update with clickable Issue/PR in simple business terms explaining what has been done and what is in progress.
 
 Publish early (CICD can verify) - verify later (only if needed) as per revised gitops.md

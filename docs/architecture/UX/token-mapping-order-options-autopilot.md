@@ -8,10 +8,10 @@ Every legacy class the order / options / autopilot layouts use, mapped to its to
 
 ## Method
 
-- **Scope:** `OrderTicketPanel.tsx`, `ETradeTradingHub.tsx`, `components/AutopilotControlCenter.tsx`, all `Options*.tsx`, all of `src/client/options/**`, and `chat/OptionsStrategyCard.tsx` — 29 files. The S-U4 section below maps the 51 classes retired by #4820 (`WorkflowRunsPanel.tsx`, `ReferralsTab.tsx`, `PaymentsPage.tsx`, `SocialPostingPanel.tsx`, `AdsTab.tsx`, `RevenueTab.tsx`) — outside the 644-class extraction. The #4913 section below maps the 6 classes retired by #4913 (the rule-of-three header migration) — also outside the extraction.
+- **Scope:** `OrderTicketPanel.tsx`, `ETradeTradingHub.tsx`, `components/AutopilotControlCenter.tsx`, all `Options*.tsx`, all of `src/client/options/**`, and `chat/OptionsStrategyCard.tsx` — 29 files. The S-U4 section below maps the 51 classes retired by #4820 (`WorkflowRunsPanel.tsx`, `ReferralsTab.tsx`, `PaymentsPage.tsx`, `SocialPostingPanel.tsx`, `AdsTab.tsx`, `RevenueTab.tsx`) — outside the 616-class extraction. The #4913 section below maps the 6 classes retired by #4913 (the rule-of-three header migration) — also outside the extraction. The #5077 section below maps the 30 classes retired by #5077 (the tail-slice-2 interior migration) — also outside the extraction.
 - **Extraction:** `className` attributes (quoted strings and `{...}` expressions); `${...}` interpolations stripped from literal parts; lowercase string literals harvested as state classes (`"active"`, `"selected"`) — except comparison operands (`"x" ===`, `=== "x"`, `.includes("x")`), which are data values, not classes.
-- **Verification:** each used class was checked against the class selectors defined in the 9 stylesheets these layouts load (`styles.css`, `primitives.css`, `strategyDiscovery.css`, `riskAnalysis.css`, `optionsFlows.css`, `optionsResearch.css`, `optionsCard.css`, `scheduledOptions.css`, `optionsResearch.css`). 605 of 644 have a rule; 39 are referenced but defined nowhere (dead classes, listed with their own successor).
-- **Coverage pin:** `tests/template_token_tiers_3135.test.ts` re-extracts the used set and asserts every class appears in this document and the total is 644. Add a class to a layout and the pin fails until this table gains its row. `ui-cell-nowrap` is applied via the Table primitive's `cellClassName` prop, which the extractor does not scan — it is listed here because it is genuinely used (8 sites in AutopilotControlCenter), so this table holds 702 rows against 644 extracted classes (645 #3135 rows + 51 S-U4 rows + 6 #4913 rows below).
+- **Verification:** each used class was checked against the class selectors defined in the 9 stylesheets these layouts load (`styles.css`, `primitives.css`, `strategyDiscovery.css`, `riskAnalysis.css`, `optionsFlows.css`, `optionsResearch.css`, `optionsCard.css`, `scheduledOptions.css`, `optionsResearch.css`). 578 of 616 have a rule; 38 are referenced but defined nowhere (dead classes, listed with their own successor).
+- **Coverage pin:** `tests/template_token_tiers_3135.test.ts` re-extracts the used set and asserts every class appears in this document and the total is 616. Add a class to a layout and the pin fails until this table gains its row. `ui-cell-nowrap` is applied via the Table primitive's `cellClassName` prop, which the extractor does not scan — it is listed here because it is genuinely used (8 sites in AutopilotControlCenter), so this table holds 704 rows against 616 extracted classes (617 #3135 rows + 51 S-U4 rows + 6 #4913 rows + 30 #5077 rows below).
 
 ## Correction to the brief
 
@@ -19,12 +19,13 @@ The #3135 discussion brief said "the three layouts reference hundreds of literal
 
 ## Summary
 
-- **644** legacy classes used by the layouts in scope.
-- **170 Token** — map to a primitive that already exists (11 of them are `ui-*` classes, already tokens; 51 more are the S-U4 retired-class rows below, 6 more the #4913 retired-class rows below).
+- **616** legacy classes used by the layouts in scope.
+- **172 Token** — map to a primitive that already exists (13 of them are `ui-*` classes, already tokens; 51 more are the S-U4 retired-class rows below, 6 more the #4913 retired-class rows below, 10 more the #5077 retired-class rows below).
 - **532 Deletion candidate** — no token equivalent yet; successor is "none yet" (S-U7) except 40 dead classes whose successor is deletion itself (no rule exists, so removing the reference changes nothing).
 - **0 deletions in this slice.**
-- **S-U4 (#4820): 51 of the 170 Token rows** live in the section below — the retired classes of the six migrated interiors, all mapped to existing primitives or `ui-*` utilities (702 rows total).
-- **#4913: 6 of the 170 Token rows** live in the section below — the heading classes retired by the rule-of-three header migration, all mapped to CardHeader.
+- **S-U4 (#4820): 51 of the 172 Token rows** live in the section below — the retired classes of the six migrated interiors, all mapped to existing primitives or `ui-*` utilities (704 rows total).
+- **#4913: 6 of the 172 Token rows** live in the section below — the heading classes retired by the rule-of-three header migration, all mapped to CardHeader.
+- **#5077 (tail slice 2): 10 of the 172 Token rows** live in the section below — the classes retired by the four-interior migration, all mapped to existing primitives or `ui-*` utilities (704 rows total).
 
 Disposition rules, in order: `ui-*` → itself; `*-card-header` → CardHeader; `*-btn` / `*-button` → Button; `*-badge` / `*-pill` → Badge; `*-modal` → Modal; `*-tabs` / `*-tab` → Tabs; `*-input` / `*-select` → TextInput / Select; `*-notice` / `*-banner` / `*-alert` → Notice; `*-table` → Table; `*-card` → Card family (WorkCard / DetailCard); bare state words (`active`, `selected`, …) → primitive prop/state on migration; everything else → deletion candidate, successor none yet.
 
@@ -123,6 +124,54 @@ is a `CardHeader` now.)
 | `risk-ai-title` | Token | `CardHeader` | RiskAnalysisModal.tsx |
 | `risk-modal-h2` | Token | `CardHeader` | RiskAnalysisModal.tsx |
 | `risk-section-title` | Token | `CardHeader` | RiskAnalysisModal.tsx |
+
+### #5077 (tail slice 2) — retired classes, 30 classes (10 Token, 20 deletion candidate)
+
+Retired by the tail-slice-2 migration (#5077, sub of #3695): the four
+interiors `OptionsFlowsHub.tsx`, `AsyncJobsPanel.tsx`, `IaaaAdminPanel.tsx`,
+and `SchedulesPanel.tsx` render zero bespoke classes now. These rows are
+NOT part of the 616-class extraction above — they map the classes the
+migration removed, so the mapping stays complete as slices retire classes.
+Disposition and successor are as recorded at #3135: the Token rows name
+the primitive this slice used, and the Deletion-candidate rows keep their
+S-U7 successor — the CSS rules still live in `optionsFlows.css`,
+`iaaaAdminPanel.css`, `styles.css`, and `scheduledOptions.css` (neither
+sheet retires in this slice; the rules serve child components that still
+use them), so S-U7 still owns their removal. (`flows-capability-nav` had
+no rule anywhere; removing the reference changed nothing.)
+
+| Legacy class | Disposition | Successor | Used by |
+|---|---|---|---|
+| `congress-meta-tag` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | OptionsFlowsHub.tsx |
+| `congress-politician` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | OptionsFlowsHub.tsx |
+| `dem` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | OptionsFlowsHub.tsx |
+| `flow-aa-badge` | Token | Badge primitive | OptionsFlowsHub.tsx |
+| `flow-drilldown-actions` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | OptionsFlowsHub.tsx |
+| `flow-drilldown-back-btn` | Token | Button primitive | OptionsFlowsHub.tsx |
+| `flow-drilldown-badge` | Token | Badge primitive | OptionsFlowsHub.tsx |
+| `flow-drilldown-banner` | Token | Notice primitive | OptionsFlowsHub.tsx |
+| `flow-drilldown-clear-btn` | Token | Button primitive | OptionsFlowsHub.tsx |
+| `flow-drilldown-info` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | OptionsFlowsHub.tsx |
+| `flow-drilldown-text` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | OptionsFlowsHub.tsx |
+| `flow-prov-badge` | Token | Badge primitive | OptionsFlowsHub.tsx |
+| `flow-strategy-desc` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | OptionsFlowsHub.tsx |
+| `flow-table` | Token | Table primitive | OptionsFlowsHub.tsx |
+| `flow-toggle-filters-btn` | Token | Button primitive | OptionsFlowsHub.tsx |
+| `flow-type-badge` | Token | Badge primitive | OptionsFlowsHub.tsx |
+| `flows-capability-nav` | Deletion candidate | Delete — no rule defines this class anywhere in `src/client`; removing the reference changes nothing visually | OptionsFlowsHub.tsx |
+| `flows-delay-banner` | Token | Notice primitive | OptionsFlowsHub.tsx |
+| `flows-delay-banner-right` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | OptionsFlowsHub.tsx |
+| `flows-filter-active-pill-header` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | OptionsFlowsHub.tsx |
+| `flows-gauge-badge-wrap` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | OptionsFlowsHub.tsx |
+| `flows-gauge-svg` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | OptionsFlowsHub.tsx |
+| `flows-gauge-text` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | OptionsFlowsHub.tsx |
+| `flows-main-layout` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | OptionsFlowsHub.tsx |
+| `flows-table-area` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | OptionsFlowsHub.tsx |
+| `insider-title-sub` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | OptionsFlowsHub.tsx |
+| `news-symbols-prefix` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | OptionsFlowsHub.tsx |
+| `options-flows-builder-view` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | OptionsFlowsHub.tsx |
+| `options-flows-container` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | OptionsFlowsHub.tsx |
+| `rep` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | OptionsFlowsHub.tsx |
 
 ### `strat` — 278 classes (54 Token, 224 deletion candidate)
 
@@ -407,11 +456,10 @@ is a `CardHeader` now.)
 | `strat-zoom-btn` | Token | Button primitive | StrategyDiscoveryPanel.tsx |
 | `strat-zoom-btn-group` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | StrategyDiscoveryPanel.tsx |
 
-### `flow` — 93 classes (25 Token, 68 deletion candidate)
+### `flow` — 80 classes (16 Token, 64 deletion candidate)
 
 | Legacy class | Disposition | Successor | Used by |
 |---|---|---|---|
-| `flow-aa-badge` | Token | Badge primitive | OptionsFlowsHub.tsx |
 | `flow-action-btns-row` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | FlowFiltersSidebar.tsx |
 | `flow-active-preset-chip` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | FlowFiltersSidebar.tsx |
 | `flow-active-preset-remove` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | FlowFiltersSidebar.tsx |
@@ -437,13 +485,6 @@ is a `CardHeader` now.)
 | `flow-current-filter-form` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | FlowFiltersSidebar.tsx |
 | `flow-dir-btn` | Token | Button primitive | FlowFiltersSidebar.tsx |
 | `flow-direction-icons-row` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | FlowFiltersSidebar.tsx |
-| `flow-drilldown-actions` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | OptionsFlowsHub.tsx |
-| `flow-drilldown-back-btn` | Token | Button primitive | OptionsFlowsHub.tsx |
-| `flow-drilldown-badge` | Token | Badge primitive | OptionsFlowsHub.tsx |
-| `flow-drilldown-banner` | Token | Notice primitive | OptionsFlowsHub.tsx |
-| `flow-drilldown-clear-btn` | Token | Button primitive | OptionsFlowsHub.tsx |
-| `flow-drilldown-info` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | OptionsFlowsHub.tsx |
-| `flow-drilldown-text` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | OptionsFlowsHub.tsx |
 | `flow-dual-leaderboard-container` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | FlowSummaryDualBars.tsx |
 | `flow-filters-sidebar` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | FlowFiltersSidebar.tsx |
 | `flow-form-group` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | FlowFiltersSidebar.tsx |
@@ -484,7 +525,6 @@ is a `CardHeader` now.)
 | `flow-preset-tagline` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | FlowFiltersSidebar.tsx |
 | `flow-preset-tags` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | FlowFiltersSidebar.tsx |
 | `flow-preset-title` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | FlowFiltersSidebar.tsx |
-| `flow-prov-badge` | Token | Badge primitive | OptionsFlowsHub.tsx |
 | `flow-range-slider` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | FlowFiltersSidebar.tsx |
 | `flow-reset-filter-btn` | Token | Button primitive | FlowFiltersSidebar.tsx |
 | `flow-save-filter-btn` | Token | Button primitive | FlowFiltersSidebar.tsx |
@@ -495,14 +535,10 @@ is a `CardHeader` now.)
 | `flow-sidebar-tabs` | Token | Tabs primitive | FlowFiltersSidebar.tsx |
 | `flow-slider-val-tag` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | FlowFiltersSidebar.tsx |
 | `flow-stat-pct-text` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | FlowFiltersSidebar.tsx |
-| `flow-strategy-desc` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | OptionsFlowsHub.tsx |
-| `flow-table` | Token | Table primitive | OptionsFlowsHub.tsx |
 | `flow-ticker-input-wrap` | Deletion candidate | Delete — no rule defines this class anywhere in `src/client`; removing the reference changes nothing visually | FlowFiltersSidebar.tsx |
 | `flow-ticker-tag-chip` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | FlowFiltersSidebar.tsx |
 | `flow-tickers-chip-row` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | FlowFiltersSidebar.tsx |
 | `flow-toggle-btn` | Token | Button primitive | FlowFiltersSidebar.tsx |
-| `flow-toggle-filters-btn` | Token | Button primitive | OptionsFlowsHub.tsx |
-| `flow-type-badge` | Token | Badge primitive | OptionsFlowsHub.tsx |
 | `flow-your-filters-panel` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | FlowFiltersSidebar.tsx |
 
 ### `risk` — 60 classes (10 Token, 50 deletion candidate)
@@ -570,7 +606,7 @@ is a `CardHeader` now.)
 | `risk-warning-list` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | RiskAnalysisModal.tsx |
 | `risk-warning-title` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | RiskAnalysisModal.tsx |
 
-### `options` — 36 classes (4 Token, 32 deletion candidate)
+### `options` — 34 classes (4 Token, 30 deletion candidate)
 
 | Legacy class | Disposition | Successor | Used by |
 |---|---|---|---|
@@ -588,8 +624,6 @@ is a `CardHeader` now.)
 | `options-download-menu-item` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | OptionsDataDownloadDropdown.tsx |
 | `options-download-status` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | OptionsDataDownloadDropdown.tsx |
 | `options-error` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | LlmStrategyEvalModal.tsx, ThreeWayComparison.tsx |
-| `options-flows-builder-view` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | OptionsFlowsHub.tsx |
-| `options-flows-container` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | OptionsFlowsHub.tsx |
 | `options-greek-item` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | OptionsStrategyCard.tsx |
 | `options-greeks-strip` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | OptionsStrategyCard.tsx |
 | `options-legs-section` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | OptionsStrategyCard.tsx |
@@ -664,21 +698,7 @@ is a `CardHeader` now.)
 | `autonomous-runs-list` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | AutonomousOptionsRuns.tsx |
 | `autonomous-runs-loading` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | AutonomousOptionsRuns.tsx |
 
-### `flows` — 9 classes (1 Token, 8 deletion candidate)
-
-| Legacy class | Disposition | Successor | Used by |
-|---|---|---|---|
-| `flows-capability-nav` | Deletion candidate | Delete — no rule defines this class anywhere in `src/client`; removing the reference changes nothing visually | OptionsFlowsHub.tsx |
-| `flows-delay-banner` | Token | Notice primitive | OptionsFlowsHub.tsx |
-| `flows-delay-banner-right` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | OptionsFlowsHub.tsx |
-| `flows-filter-active-pill-header` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | OptionsFlowsHub.tsx |
-| `flows-gauge-badge-wrap` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | OptionsFlowsHub.tsx |
-| `flows-gauge-svg` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | OptionsFlowsHub.tsx |
-| `flows-gauge-text` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | OptionsFlowsHub.tsx |
-| `flows-main-layout` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | OptionsFlowsHub.tsx |
-| `flows-table-area` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | OptionsFlowsHub.tsx |
-
-### `ui-* (already tokens)` — 11 classes (11 Token, 0 deletion candidate)
+### `ui-* (already tokens)` — 13 classes (13 Token, 0 deletion candidate)
 
 | Legacy class | Disposition | Successor | Used by |
 |---|---|---|---|
@@ -686,8 +706,10 @@ is a `CardHeader` now.)
 | `ui-danger` | Token | Itself — already a primitive/text-utility class (`src/client/components/ui/`, `primitives.css`) | AutopilotControlCenter.tsx, ETradeTradingHub.tsx, OptionsResearchPanel.tsx |
 | `ui-footer-bar` | Token | Itself — already a primitive/text-utility class (`src/client/components/ui/`, `primitives.css`) | AutopilotControlCenter.tsx |
 | `ui-footnote` | Token | Itself — already a primitive/text-utility class (`src/client/components/ui/`, `primitives.css`) | DiscoveryRunsPanel.tsx, LlmOptionsIdeasPanel.tsx, OptionsResearchPanel.tsx, OrderTicketPanel.tsx |
+| `ui-grow` | Token | Itself — already a primitive/text-utility class (`src/client/components/ui/`, `primitives.css`) | OptionsFlowsHub.tsx |
 | `ui-meta` | Token | Itself — already a primitive/text-utility class (`src/client/components/ui/`, `primitives.css`) | AutopilotControlCenter.tsx, DiscoveryRunsPanel.tsx, ETradeTradingHub.tsx, LlmOptionsIdeasPanel.tsx, OptionsResearchPanel.tsx, OrderTicketPanel.tsx |
 | `ui-meta-sm` | Token | Itself — already a primitive/text-utility class (`src/client/components/ui/`, `primitives.css`) | AutopilotControlCenter.tsx, DiscoveryRunsPanel.tsx, ETradeTradingHub.tsx, OptionsResearchPanel.tsx |
+| `ui-page-frame` | Token | Itself — already a primitive/text-utility class (`src/client/components/ui/`, `primitives.css`) | OptionsFlowsHub.tsx |
 | `ui-single-line` | Token | Itself — already a primitive/text-utility class (`src/client/components/ui/`, `primitives.css`) | AutopilotControlCenter.tsx |
 | `ui-success` | Token | Itself — already a primitive/text-utility class (`src/client/components/ui/`, `primitives.css`) | AutopilotControlCenter.tsx, ETradeTradingHub.tsx, OptionsResearchPanel.tsx |
 | `ui-table-sort` | Token | Itself — already a primitive/text-utility class (`src/client/components/ui/`, `primitives.css`) | AutopilotControlCenter.tsx |
@@ -715,13 +737,6 @@ is a `CardHeader` now.)
 | `bullish-count` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | FlowSummaryDualBars.tsx |
 | `bullish-fill` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | FlowSummaryDualBars.tsx |
 | `bullish-row` | Deletion candidate | Delete — no rule defines this class anywhere in `src/client`; removing the reference changes nothing visually | FlowSummaryDualBars.tsx |
-
-### `congress` — 2 classes (0 Token, 2 deletion candidate)
-
-| Legacy class | Disposition | Successor | Used by |
-|---|---|---|---|
-| `congress-meta-tag` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | OptionsFlowsHub.tsx |
-| `congress-politician` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | OptionsFlowsHub.tsx |
 
 ### `deep` — 2 classes (0 Token, 2 deletion candidate)
 
@@ -900,12 +915,6 @@ is a `CardHeader` now.)
 |---|---|---|---|
 | `delta` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | StrategyDiscoveryPanel.tsx |
 
-### `dem` — 1 classes (0 Token, 1 deletion candidate)
-
-| Legacy class | Disposition | Successor | Used by |
-|---|---|---|---|
-| `dem` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | OptionsFlowsHub.tsx |
-
 ### `disabled` — 1 classes (0 Token, 1 deletion candidate)
 
 | Legacy class | Disposition | Successor | Used by |
@@ -977,12 +986,6 @@ is a `CardHeader` now.)
 | Legacy class | Disposition | Successor | Used by |
 |---|---|---|---|
 | `highlight` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | OptionsDataDownloadDropdown.tsx, RiskAnalysisModal.tsx, StrategyDiscoveryPanel.tsx |
-
-### `insider` — 1 classes (0 Token, 1 deletion candidate)
-
-| Legacy class | Disposition | Successor | Used by |
-|---|---|---|---|
-| `insider-title-sub` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | OptionsFlowsHub.tsx |
 
 ### `iv` — 1 classes (0 Token, 1 deletion candidate)
 
@@ -1056,12 +1059,6 @@ is a `CardHeader` now.)
 |---|---|---|---|
 | `neutral` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | FlowFiltersSidebar.tsx |
 
-### `news` — 1 classes (0 Token, 1 deletion candidate)
-
-| Legacy class | Disposition | Successor | Used by |
-|---|---|---|---|
-| `news-symbols-prefix` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | OptionsFlowsHub.tsx |
-
 ### `normalized` — 1 classes (0 Token, 1 deletion candidate)
 
 | Legacy class | Disposition | Successor | Used by |
@@ -1103,12 +1100,6 @@ is a `CardHeader` now.)
 | Legacy class | Disposition | Successor | Used by |
 |---|---|---|---|
 | `remove` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | StrategyDiscoveryPanel.tsx |
-
-### `rep` — 1 classes (0 Token, 1 deletion candidate)
-
-| Legacy class | Disposition | Successor | Used by |
-|---|---|---|---|
-| `rep` | Deletion candidate | None yet — bespoke layout class; S-U7 deprecation owns removal | OptionsFlowsHub.tsx |
 
 ### `report` — 1 classes (0 Token, 1 deletion candidate)
 

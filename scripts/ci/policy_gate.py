@@ -39,6 +39,11 @@ messages are not fallback context.
     the §9 "Out of scope:" line — presence only, never a judgment of
     whether the [Out-of-Scope] sub-issues it names are the right ones.
     "None" is a valid value.
+(l) Reuse class + dependencies lines (gitops §5/§9, issue #5124): PR body
+    must carry the §9 "Reuse class:" line naming one of reuse /
+    enhancement / new, and the §9 "Dependencies:" line — presence only,
+    never a judgment of whether the class is right or the dependencies
+    are complete. "None" is a valid Dependencies value.
 """
 
 import argparse
@@ -236,6 +241,26 @@ def evaluate_policy(
                 "(k) out of scope: PR body has no "
                 "'Out of scope:' line "
                 "(see gitops §9, issue #4099)"
+            )
+
+        # (l) Reuse class + dependencies lines (gitops §5/§9, issue #5124).
+        # Presence only: the gate checks that the §9 "Reuse class:" line
+        # exists and names one of reuse / enhancement / new, and that the
+        # §9 "Dependencies:" line exists. "None" is a valid Dependencies
+        # value. The gate never judges whether the class is right or the
+        # dependencies are complete — that is the reviewer's job. Checked
+        # against the PR body alone (not commit messages), like (h)/(k).
+        if not re.search(r"(?i)reuse class\s*:\s*(reuse|enhancement|new)\b", body):
+            failures.append(
+                "(l) reuse class: PR body has no "
+                "'Reuse class:' line naming reuse, enhancement, or new "
+                "(see gitops §5/§9, issue #5124)"
+            )
+        if not re.search(r"(?i)dependencies\s*:", body):
+            failures.append(
+                "(l) dependencies: PR body has no "
+                "'Dependencies:' line "
+                "(see gitops §5/§9, issue #5124)"
             )
 
     # (d) CHANGELOG entry under ## [Unreleased], or a changelog.d fragment.

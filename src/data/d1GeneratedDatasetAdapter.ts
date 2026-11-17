@@ -20,7 +20,8 @@
  * The denormalized rows_persisted column carries the count of
  * format bodies the run generated (this family's "rows").
  */
-import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
+import { type DrizzleD1Database } from "drizzle-orm/d1";
+import { createDrizzleD1Db } from "./d1QueryLogger";
 import { and, desc, eq, gt, ne } from "drizzle-orm";
 import { jobGeneratedDatasets } from "./drizzleSchema";
 import {
@@ -44,7 +45,7 @@ export type GeneratedDatasetDb = DrizzleD1Database<{
 
 /** Build the Drizzle D1 database object from a bound D1 client. */
 export function createD1GeneratedDatasetDb(d1: D1Database): GeneratedDatasetDb {
-  return drizzle(d1, { schema: { jobGeneratedDatasets } });
+  return createDrizzleD1Db(d1, { schema: { jobGeneratedDatasets } });
 }
 
 /** Idempotent schema-ensure: applies migration 0056 if unapplied. */

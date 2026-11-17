@@ -10,7 +10,8 @@
  * balance credit) — it does not build a multi-statement
  * transaction.
  */
-import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
+import { type DrizzleD1Database } from "drizzle-orm/d1";
+import { createDrizzleD1Db } from "./d1QueryLogger";
 import { and, asc, desc, eq, gt, isNull, lt } from "drizzle-orm";
 import {
   agentCodeRedemptionCounts,
@@ -65,7 +66,7 @@ export type ReferralCodeDb = DrizzleD1Database<{
 
 /** Build the Drizzle D1 database object from a bound D1 client. */
 export function createD1ReferralCodeDb(d1: D1Database): ReferralCodeDb {
-  return drizzle(d1, {
+  return createDrizzleD1Db(d1, {
     schema: {
       agentReferralCodeRules,
       agentReferralCodes,

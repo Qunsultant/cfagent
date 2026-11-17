@@ -11,7 +11,8 @@
  * `db.transaction()` is sequential BEGIN/COMMIT, not
  * Postgres-equivalent atomicity on D1).
  */
-import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
+import { type DrizzleD1Database } from "drizzle-orm/d1";
+import { createDrizzleD1Db } from "./d1QueryLogger";
 import { asc, eq } from "drizzle-orm";
 import { agentStoreOperators } from "./drizzleSchema";
 import {
@@ -32,7 +33,7 @@ export type StoreOperatorsDb = DrizzleD1Database<{
 
 /** Build the Drizzle D1 database object from a bound D1 client. */
 export function createD1StoreOperatorsDb(d1: D1Database): StoreOperatorsDb {
-  return drizzle(d1, {
+  return createDrizzleD1Db(d1, {
     schema: {
       agentStoreOperators,
     },

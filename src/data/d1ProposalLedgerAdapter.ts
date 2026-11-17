@@ -12,7 +12,8 @@
  * sequential BEGIN/COMMIT and not atomic (migrationRunner
  * header); single-row operations use the Drizzle builder.
  */
-import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
+import { type DrizzleD1Database } from "drizzle-orm/d1";
+import { createDrizzleD1Db } from "./d1QueryLogger";
 import { asc, desc, eq } from "drizzle-orm";
 import {
   agentProposals,
@@ -43,7 +44,7 @@ export type ProposalLedgerDb = DrizzleD1Database<{
 
 /** Build the Drizzle D1 database object from a bound D1 client. */
 export function createD1ProposalLedgerDb(d1: D1Database): ProposalLedgerDb {
-  return drizzle(d1, {
+  return createDrizzleD1Db(d1, {
     schema: { agentProposals, agentProposalTransitions },
   });
 }

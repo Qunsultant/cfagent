@@ -12,7 +12,8 @@
  * D1). The redemption claim is a single PK insert: the loser of a
  * race gets a UNIQUE violation and re-checks, never a double spend.
  */
-import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
+import { type DrizzleD1Database } from "drizzle-orm/d1";
+import { createDrizzleD1Db } from "./d1QueryLogger";
 import { and, asc, eq, isNull } from "drizzle-orm";
 import {
   agentCommercialAccounts,
@@ -67,7 +68,7 @@ export type CommercialDb = DrizzleD1Database<{
 
 /** Build the Drizzle D1 database object from a bound D1 client. */
 export function createD1CommercialDb(d1: D1Database): CommercialDb {
-  return drizzle(d1, {
+  return createDrizzleD1Db(d1, {
     schema: {
       agentCommercialAccounts,
       agentTenantSettings,

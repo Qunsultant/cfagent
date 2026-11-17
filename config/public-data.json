@@ -1,0 +1,43 @@
+{
+  "activity": {
+    "pageSize": 50
+  },
+  "bars": {
+    "instrumentType": "EQUITY",
+    "defaultLimit": 60,
+    "maxLimit": 2500,
+    "defaultPeriod": "QUARTER",
+    "intradayPeriod": "DAY",
+    "intradayAggregations": [
+      "ONE_MINUTE",
+      "FIVE_MINUTES",
+      "TEN_MINUTES",
+      "FIFTEEN_MINUTES",
+      "THIRTY_MINUTES",
+      "ONE_HOUR"
+    ],
+    "aggregations": {
+      "1MIN": "ONE_MINUTE",
+      "5MIN": "FIVE_MINUTES",
+      "10MIN": "TEN_MINUTES",
+      "15MIN": "FIFTEEN_MINUTES",
+      "30MIN": "THIRTY_MINUTES",
+      "1H": "ONE_HOUR",
+      "60MIN": "ONE_HOUR",
+      "1D": "ONE_DAY",
+      "1W": "ONE_WEEK",
+      "1M": "ONE_MONTH"
+    },
+    "periodsByLimit": [
+      { "maxLimit": 1, "period": "DAY" },
+      { "maxLimit": 5, "period": "WEEK" },
+      { "maxLimit": 21, "period": "MONTH" },
+      { "maxLimit": 63, "period": "QUARTER" },
+      { "maxLimit": 126, "period": "HALF_YEAR" },
+      { "maxLimit": 252, "period": "YEAR" },
+      { "maxLimit": 1260, "period": "FIVE_YEARS" },
+      { "maxLimit": 2520, "period": "TEN_YEARS" },
+      { "maxLimit": 100000, "period": "ALL" }
+    ]
+  }
+}

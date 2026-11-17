@@ -653,6 +653,9 @@ describe("server route inventory pin (#2902)", () => {
     // quotes delegation. Later slices extend this list in dispatch order.
     // #3311 adds the schedule webhook delegation right after the
     // Messaging Saga delegation (the webhook family it belongs to).
+    // #5081 (S1, observability program #5080) adds the OTel
+    // ingestion delegation right after the Platform telemetry
+    // delegation (the telemetry family it belongs to).
     expect(calls).toEqual([
       "handleCoreEarlyRoutes",
       "handlePrivacyRoutes",
@@ -663,6 +666,7 @@ describe("server route inventory pin (#2902)", () => {
       "handleAuthMeRoutes",
       "handlePrivacyChainsRoutes",
       "handlePlatformTelemetryRoutes",
+      "handleOtelRoutes",
       "handlePrivacyReportsRoutes",
       "handlePlatformRetrievalRoutes",
       "handleAuthIaaaRoutes",
@@ -689,7 +693,7 @@ describe("server route inventory pin (#2902)", () => {
     expect(serverSrc).toContain('from "./server/auth"');
   });
 
-  it("server.ts stays at the Slice 9 achieved size (320 lines, contract §2)", () => {
+  it("server.ts stays at the Slice 9 achieved size (328 lines, contract §2)", () => {
     // Slice 9 (#2902 Cleanup) sets the pin the slice actually achieves:
     // server.ts 669 lines → 291 lines (dead imports pruned per
     // tsc --noUnusedLocals, exports moved to src/server/exports.ts).
@@ -714,9 +718,13 @@ describe("server route inventory pin (#2902)", () => {
     // #3311 records a fourth deliberate growth: +6 lines for the
     // schedule webhook delegation (1 import line + a 3-line comment
     // + the 2-line dispatch branch) (314 → 320).
+    // #5081 records a fifth deliberate growth: +8 lines for the
+    // OTel ingestion delegation (1 import line + a 5-line comment
+    // + the 2-line dispatch branch) (320 → 328). The routing logic
+    // itself lives in src/server/routes/otel.ts, not here.
     const src = readFileSync("src/server.ts", "utf8");
     const lines = src.split("\n").length - (src.endsWith("\n") ? 1 : 0);
-    expect(lines).toBeLessThanOrEqual(320);
+    expect(lines).toBeLessThanOrEqual(328);
   });
 });
 

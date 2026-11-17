@@ -6,7 +6,8 @@
  * reads only tables migrations 0007 / 0026 / 0028 already create
  * (agent_commercial_accounts, agent_tenant_settings).
  */
-import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
+import { type DrizzleD1Database } from "drizzle-orm/d1";
+import { createDrizzleD1Db } from "./d1QueryLogger";
 import { eq } from "drizzle-orm";
 import { agentCommercialAccounts, agentTenantSettings } from "./drizzleSchema";
 import type { TenantDirectory } from "./tenantDirectoryPorts";
@@ -19,7 +20,7 @@ export type TenantDirectoryDb = DrizzleD1Database<{
 
 /** Build the Drizzle D1 database object from a bound D1 client. */
 export function createD1TenantDirectoryDb(d1: D1Database): TenantDirectoryDb {
-  return drizzle(d1, {
+  return createDrizzleD1Db(d1, {
     schema: { agentCommercialAccounts, agentTenantSettings },
   });
 }

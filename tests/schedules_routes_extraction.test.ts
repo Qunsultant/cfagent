@@ -38,20 +38,15 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
+import { MockSqlStorage } from "./mock-sql";
+import { DatabaseORM } from "../src/orm";
+import type { AuditEvent } from "../src/types";
 
 vi.mock("../src/services/scheduledTasks", () => ({
   ScheduledTasksService: vi.fn(),
 }));
 vi.mock("../src/security/storageRetention", () => ({
   runStorageRetention: vi.fn(),
-}));
-vi.mock("../src/services/auditTamperAlert", () => ({
-  verifyStoredAuditChainAndAlert: vi.fn(() => ({
-    valid: true,
-    brokenIndex: null,
-    reason: null,
-    alertRecorded: false,
-  })),
 }));
 vi.mock("../src/security/etradeOAuth", () => ({
   getStoredTokens: vi.fn(),
@@ -61,7 +56,6 @@ vi.mock("../src/security/etradeOAuth", () => ({
 
 import { ScheduledTasksService } from "../src/services/scheduledTasks";
 import { runStorageRetention } from "../src/security/storageRetention";
-import { verifyStoredAuditChainAndAlert } from "../src/services/auditTamperAlert";
 import { getStoredTokens } from "../src/security/etradeOAuth";
 import {
   handleSchedulesRoutes,
@@ -399,39 +393,70 @@ describe("schedules behavior (extraction #379)", () => {
 
   it("POST /schedules/trigger-retention runs the retention pass over the ORM", async () => {
     (runStorageRetention as any).mockReturnValue({ deleted: 4, retentionDays: 90 });
-    const getOrm = vi.fn(() => ({ tag: "orm" }));
-    const ctx = baseCtx({ getOrm: getOrm as any });
+    const sql = new MockSqlStorage();
+    const orm = new DatabaseORM(sql);
+    const ctx = baseCtx({ getOrm: (() => orm) as any, agentCtx: { storage: { sql } } as any });
     const res = await handleSchedulesRoutes(req("POST", "/schedules/trigger-retention"), urlOf("/schedules/trigger-retention"), "/schedules/trigger-retention", "s1", ctx);
     expect((res as Response).status).toBe(200);
     const body = (await (res as Response).json()) as Record<string, unknown>;
     // #2294: the pass also reports the outcome-feed prune (0 on an empty table).
     expect(body).toMatchObject({ success: true, deleted: 4, retentionDays: 90 });
     expect(typeof body.jobOutcomesPruned).toBe("number");
-    expect(runStorageRetention).toHaveBeenCalledWith({ tag: "orm" }, { retentionDays: undefined });
+    expect(runStorageRetention).toHaveBeenCalledWith(orm, { retentionDays: undefined });
   });
 
-  it("POST /schedules/trigger-retention reports a valid chain verification and prunes (#3156)", async () => {
+  it("POST /schedules/trigger-retention reports a valid chain verification and prunes (#3156, #2437)", async () => {
     (runStorageRetention as any).mockReturnValue({ deleted: 4, retentionDays: 90 });
-    const getOrm = vi.fn(() => ({ tag: "orm" }));
-    const ctx = baseCtx({ getOrm: getOrm as any });
+    const sql = new MockSqlStorage();
+    const orm = new DatabaseORM(sql);
+    const mkEvent = (id: string, type: string): AuditEvent => ({
+      id,
+      sessionId: "s1",
+      type,
+      agent: "orchestrator",
+      payload: { jobId: "j1" },
+      createdAt: new Date().toISOString(),
+    });
+    orm.events.create(mkEvent("a1", "goal_screen.workflow_submitted"));
+    orm.events.create(mkEvent("a2", "goal_screen.run_failed"));
+    const ctx = baseCtx({ getOrm: (() => orm) as any, agentCtx: { storage: { sql } } as any });
     const res = await handleSchedulesRoutes(req("POST", "/schedules/trigger-retention"), urlOf("/schedules/trigger-retention"), "/schedules/trigger-retention", "s1", ctx);
     expect((res as Response).status).toBe(200);
     const body = (await (res as Response).json()) as Record<string, unknown>;
     expect(body.auditChainPruneSkipped).toBe(false);
     expect(body.auditChainVerification).toMatchObject({ valid: true, alertRecorded: false });
+    // #2437: the run persists a checkpoint naming the verified tail.
+    expect(body.auditChainVerification).toMatchObject({ windowed: false });
+    expect((body.auditChainVerification as Record<string, any>).checkpoint).toMatchObject({
+      valid: true,
+      rowsChecked: 2,
+      tailRowId: 2,
+      anchorKind: "genesis",
+    });
     expect(runStorageRetention).toHaveBeenCalled();
   });
 
-  it("POST /schedules/trigger-retention SKIPS pruning on a failed chain verification (#3156)", async () => {
-    (verifyStoredAuditChainAndAlert as any).mockReturnValueOnce({
-      valid: false,
-      brokenIndex: 2,
-      reason: "eventHash recomputation mismatch (row payload modified)",
-      alertRecorded: true,
-      alertId: "tamper_ab12cd34",
+  it("POST /schedules/trigger-retention SKIPS pruning on a failed chain verification (#3156, #2437)", async () => {
+    (runStorageRetention as any).mockReturnValue({ deleted: 4, retentionDays: 90 });
+    const sql = new MockSqlStorage();
+    const orm = new DatabaseORM(sql);
+    const mkEvent = (id: string, type: string): AuditEvent => ({
+      id,
+      sessionId: "s1",
+      type,
+      agent: "orchestrator",
+      payload: { jobId: "j1" },
+      createdAt: new Date().toISOString(),
     });
-    const getOrm = vi.fn(() => ({ tag: "orm" }));
-    const ctx = baseCtx({ getOrm: getOrm as any });
+    orm.events.create(mkEvent("a1", "goal_screen.workflow_submitted"));
+    orm.events.create(mkEvent("a2", "goal_screen.run_failed"));
+    // Real sabotage (no mocked verify call): tamper the first row's payload.
+    sql.exec(
+      `UPDATE mas_events SET payload = ? WHERE id = ?`,
+      JSON.stringify({ jobId: "tampered" }),
+      "a1",
+    );
+    const ctx = baseCtx({ getOrm: (() => orm) as any, agentCtx: { storage: { sql } } as any });
     const res = await handleSchedulesRoutes(req("POST", "/schedules/trigger-retention"), urlOf("/schedules/trigger-retention"), "/schedules/trigger-retention", "s1", ctx);
     expect((res as Response).status).toBe(200);
     const body = (await (res as Response).json()) as Record<string, unknown>;
@@ -440,11 +465,39 @@ describe("schedules behavior (extraction #379)", () => {
     expect(body.auditChainPruneSkipped).toBe(true);
     expect(body.auditChainVerification).toMatchObject({
       valid: false,
-      brokenIndex: 2,
+      brokenIndex: 0,
       alertRecorded: true,
-      alertId: "tamper_ab12cd34",
     });
+    expect((body.auditChainVerification as Record<string, any>).alertId).toMatch(/^tamper_/);
     expect(runStorageRetention).not.toHaveBeenCalled();
+  });
+
+  it("POST /schedules/trigger-retention verifies windowed on the second run (#2437)", async () => {
+    (runStorageRetention as any).mockReturnValue({ deleted: 4, retentionDays: 90 });
+    const sql = new MockSqlStorage();
+    const orm = new DatabaseORM(sql);
+    const mkEvent = (id: string, type: string): AuditEvent => ({
+      id,
+      sessionId: "s1",
+      type,
+      agent: "orchestrator",
+      payload: { jobId: "j1" },
+      createdAt: new Date().toISOString(),
+    });
+    orm.events.create(mkEvent("a1", "goal_screen.workflow_submitted"));
+    orm.events.create(mkEvent("a2", "goal_screen.run_failed"));
+    const ctx = baseCtx({ getOrm: (() => orm) as any, agentCtx: { storage: { sql } } as any });
+    const trigger = () =>
+      handleSchedulesRoutes(req("POST", "/schedules/trigger-retention"), urlOf("/schedules/trigger-retention"), "/schedules/trigger-retention", "s1", ctx);
+    const first = (await (await trigger()).json()) as Record<string, any>;
+    expect(first.auditChainVerification).toMatchObject({ valid: true, windowed: false });
+    orm.events.create(mkEvent("a3", "followup.schedule_failed"));
+    const second = (await (await trigger()).json()) as Record<string, any>;
+    expect(second.auditChainVerification).toMatchObject({ valid: true, windowed: true, rowsChecked: 1 });
+    expect(second.auditChainVerification.checkpoint).toMatchObject({
+      tailRowId: 3,
+      anchorKind: "checkpoint",
+    });
   });
 
   it("POST /schedules/trigger-iv-collection requires auth (401) and otherwise collects via the service", async () => {

@@ -228,6 +228,16 @@ export class MockSqlStorage implements SqlStorage {
       const rest = selectMatch[3] || "";
       let rows = [...(this.tables.get(tbl) || [])];
 
+      // Issue #2437: real SQLite exposes rowid (1-based insertion order)
+      // as a selectable/filterable column. The mock mirrors it
+      // positionally for append-only reads (ORDER BY rowid below already
+      // relied on this). After a DELETE the positional rowid shifts,
+      // unlike real SQLite — tests that assert rowids must not delete
+      // rows first.
+      if (/rowid/i.test(q)) {
+        rows = rows.map((r, i) => ({ ...r, rowid: i + 1 }));
+      }
+
       // WHERE clause
       const whereMatch = rest.match(/WHERE\s+(.+?)(?:\s+ORDER\s+BY|\s+LIMIT|\s+OFFSET|$)/i);
       let argIndex = 0;

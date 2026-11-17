@@ -12,7 +12,8 @@
  * (the port rows carry no timestamps): inserts stamp both,
  * conflict updates refresh updated_at_ms only.
  */
-import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
+import { type DrizzleD1Database } from "drizzle-orm/d1";
+import { createDrizzleD1Db } from "../data/d1QueryLogger";
 import { and, eq, inArray } from "drizzle-orm";
 import {
   agentMarketEdges,
@@ -39,7 +40,7 @@ export type MarketGraphDb = DrizzleD1Database<{
 
 /** Build the Drizzle D1 database object from a bound D1 client. */
 export function createD1MarketGraphDb(d1: D1Database): MarketGraphDb {
-  return drizzle(d1, {
+  return createDrizzleD1Db(d1, {
     schema: { agentMarketNodes, agentMarketEdges },
   });
 }

@@ -95,7 +95,7 @@ const TOOL_SCHEMAS: Record<string, { properties: Record<string, unknown>; requir
   get_accounts: { properties: {}, required: [] },
   get_orders: { properties: {}, required: [] },
   get_order: { properties: { order_id: { type: "string" } }, required: ["order_id"] },
-  get_portfolio: { properties: {}, required: [] },
+  get_portfolio: { properties: { account_id: { type: "string" } }, required: ["account_id"] },
   get_quotes: { properties: { symbols: { type: "array" } }, required: ["symbols"] },
   get_option_greeks: { properties: { symbols: { type: "array" } }, required: ["symbols"] },
 };
@@ -242,6 +242,7 @@ describe("Slice C — the trading client is a second allow-list over the same tr
       "get_quotes",
       "get_option_expirations",
       "get_option_chain",
+      "get_price_history",
     ]);
   });
 
@@ -453,9 +454,11 @@ describe("Slice C — catalog, registry, presentation, identities carry public",
     expect(entry.supports.optionChains).toBe(true);
     expect(entry.supports.orderHistory).toBe(true);
     expect(entry.supports.orderCancel).toBe(true);
-    // Q3: no get_history tool verified — account activity is a stated
-    // gap, never an empty table. No watchlists or alerts tool either.
-    expect(entry.supports.accountActivity).toBe(false);
+    // Issue #4673: get_history is verified on the live surface, so
+    // account activity is served. Watchlists and alerts have no tool
+    // there and stay named gaps, never an empty table.
+    expect(entry.supports.accountActivity).toBe(true);
+    expect(entry.supports.positionLots).toBe(true);
     expect(entry.supports.watchlists).toBe(false);
     expect(entry.supports.alerts).toBe(false);
     // Public has no paper mode: TEST resolves to the paper bucket for

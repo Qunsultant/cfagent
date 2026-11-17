@@ -137,6 +137,12 @@ const STORAGE_ALLOW_LIST: Array<[string, number, string]> = [
   // the caller's DO SQLite (spec + plan + placed rungs); no existing port
   // models a resumable ladder, so the statements live here.
   ["src/services/ladderStateStore.ts", 4, "issue #3887 ladder state: one row per ladder (spec/plan/placed) that a later observation resumes from; no port models it"],
+  // Issue #2437: checkpointed audit-chain verification — one read-only
+  // rowid-window SELECT (WHERE rowid > ?) over the DO's own mas_events.
+  // No repository port can express a rowid window (the where-language
+  // cannot address rowid; that extension is #4751's later slice), and the
+  // checkpoint itself is written through the settings port, not here.
+  ["src/services/auditChainVerification.ts", 1, "issue #2437 audit-chain window read: bounded rowid-window SELECT over the instance's own mas_events; no port expresses a rowid window"],
 ];
 
 /** The step-4c families: zero above-layer sites remain. */
@@ -344,7 +350,9 @@ describe("global D-D census: surface 1 — storage-shaped sites above the layer"
     // sessionStore's 2 (the SessionStore DO's statements move
     // to its data-layer adapter) → 16; issue #1257 adds the
     // live-check route's 2 (DO-internal SELECT-only read, same
-    // class) → 18.
+    // class) → 18; issue #2437 adds the checkpointed audit-chain
+    // verification's 1 (bounded rowid-window read; no port can
+    // express a rowid window) → 19.
     // #3917: derived from the allow-list, not a hand-bumped literal — a new
     // dispositioned slice adds sites and its allow-list row together.
     expect(total).toBe(STORAGE_ALLOW_LIST.reduce((sum, [, sites]) => sum + sites, 0));
@@ -949,11 +957,15 @@ const STEP5_FUNNEL_SITES: Array<[string, string, string]> = [
   ["src/security/etradeOAuth.ts", "listStoreEntries", "etrade"],
   ["src/security/iaaaAuditStore.ts", "createStoreSender", "sessions"],
   ["src/security/iaaaAuditStore.ts", "listStoreEntries", "sessions"],
+  // Issue #4676 / #3410: IBKR OAuth 2.1 + PKCE + DCR tokens live in SessionStore DO.
+  ["src/security/ibkrOAuth.ts", "createStoreKv", "ibkr"],
   ["src/security/publicOAuth.ts", "createStoreKv", "<dynamic>"],
   ["src/security/publicOAuth.ts", "createStoreKv", "public"],
   ["src/security/serviceTokens.ts", "createStoreKv", "service_tokens"],
   ["src/security/session.ts", "createStoreKv", "sessions"],
   ["src/security/session.ts", "listStoreEntries", "sessions"],
+  // Issue #5110: per-user { broker, mode, accountType, accountId } bindings in SessionStore DO.
+  ["src/services/accountBindings.ts", "createStoreKv", "account_bindings"],
   ["src/services/agenticPayments.ts", "consumeStoreKey", "payments"],
   ["src/services/agenticPayments.ts", "createStoreKv", "payments"],
   // Issue #3351: the per-user Alpaca credential record lives in its own bucket
@@ -1416,6 +1428,7 @@ describe("global D-D census: step 5e — residual bucket family port composition
       ["src/security/apiKeys.ts", "../data/durableKv"],
       ["src/security/etradeOAuth.ts", "../data/durableKv"],
       ["src/security/iaaaAuditStore.ts", "../data/durableKv"],
+      ["src/security/ibkrOAuth.ts", "../data/durableKv"],
       ["src/security/publicOAuth.ts", "../data/durableKv"],
       ["src/security/serviceTokens.ts", "../data/durableKv"],
       ["src/security/session.ts", "../data/durableKv"],
@@ -1439,6 +1452,7 @@ describe("global D-D census: step 5e — residual bucket family port composition
       // sink moved into the ScheduledAgent mutation methods, so the
       // route no longer imports DoStubLike (it threads the session
       // actor into the methods instead).
+      ["src/services/accountBindings.ts", "../data/durableKv"],
       ["src/services/actorGatewayPorts.ts", "../data/durableKv"],
       ["src/services/agenticPayments.ts", "../data/durableKv"],
       ["src/trading/alpaca/credentialStore.ts", "../../data/durableKv"],

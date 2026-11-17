@@ -29,7 +29,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { Button, CardHeader, EmptyState, Modal, Notice, Select, Spinner, Table, Tabs, TabPanel, TextInput } from "./components/ui";
+import { Badge, Button, CardHeader, EmptyState, Flex, Modal, Notice, PageSection, Select, Spinner, Stack, Table, Tabs, TabPanel, TextInput } from "./components/ui";
 import { useUrlSyncedTabs } from "./useUrlSyncedTabs";
 import {
   deactivateSelf,
@@ -68,6 +68,13 @@ import { BootstrapProposalsPanel } from "./BootstrapProposalsPanel";
 import { LoggedInUsersPanel } from "./LoggedInUsersPanel";
 import { fetchRoleGrants } from "./roleGrantsApi";
 import { fetchLoggedInUsers } from "./loggedInUsersApi";
+
+// Issue #5077: the iaaaAdminPanel.css import stays — the sheet styles this
+// panel's child components (ServiceUserSection, AdminQueueWipePanel,
+// PolicyProposalsPanel), which are not migrated in this slice. This file
+// itself no longer uses any class from it; the import is the subtree's
+// only load of the sheet (main.tsx does not import it). Retiring the sheet
+// waits on migrating those children.
 import "./iaaaAdminPanel.css";
 
 type IaaaAdminTab = "overview" | "members" | "api" | "mcp" | "iaaa" | "correlations";
@@ -377,8 +384,8 @@ export function IaaaAdminPanel() {
     // proposals stay platform-only.
     if (roleGrantsAllowed || loggedInUsersAllowed) {
       return (
-        <div className="iaaa-admin-panel">
-          <p className="iaaa-admin-note">
+        <PageSection>
+          <p>
             You are a tenant admin, not a platform admin. Only your own tenant&apos;s
             sections are available here; the rest of IAAA Admin requires platform-admin.
           </p>
@@ -394,7 +401,7 @@ export function IaaaAdminPanel() {
               <LoggedInUsersPanel />
             </>
           )}
-        </div>
+        </PageSection>
       );
     }
     return (
@@ -412,7 +419,7 @@ export function IaaaAdminPanel() {
   );
 
   return (
-    <div className="iaaa-admin-panel">
+    <PageSection>
       {/* Issue #4839 G1: the page states its purpose before the tab bar.
       A Notice (ui primitive), not a new bespoke note paragraph — the
       interior ceiling for this file (ux_shell_exceptions_3047.json)
@@ -477,22 +484,22 @@ export function IaaaAdminPanel() {
         <TabPanel idBase="iaaa-admin-overview" tabId="summary" active={section === "summary"}>
         {/* Issue #4839 G2: the Summary section has a heading like every other section. */}
         <CardHeader title="Summary" />
-        <div className="iaaa-admin-summary">
-          <div>
-            <span className="iaaa-admin-label">Tenant</span>
+        <Flex gap="6" wrap>
+          <Stack gap="1">
+            <span className="ui-label">Tenant</span>
             <strong>{overview.tenantId}</strong>
-          </div>
-          <div>
-            <span className="iaaa-admin-label">Your roles</span>
+          </Stack>
+          <Stack gap="1">
+            <span className="ui-label">Your roles</span>
             <strong>{roles.length > 0 ? roles.join(", ") : "None"}</strong>
-          </div>
-          <div>
-            <span className="iaaa-admin-label">Platform genesis</span>
+          </Stack>
+          <Stack gap="1">
+            <span className="ui-label">Platform genesis</span>
             <strong>
               {overview.genesis.platformGenesisOccurred ? "Completed" : "Not yet occurred"}
             </strong>
-          </div>
-        </div>
+          </Stack>
+        </Flex>
         {/* Issue #4839 G3: dead ends get a way forward — verified against
         docs/architecture/security/iaaa-admin-bootstrap-genesis.md: genesis is the
         one-shot first platform: grant from the bootstrap list, and a role comes
@@ -515,16 +522,16 @@ export function IaaaAdminPanel() {
         {overview.adminCounts && (
           <>
             <CardHeader title="Admin counts" />
-            <div className="iaaa-admin-summary">
-              <div>
-                <span className="iaaa-admin-label">Platform admins</span>
+            <Flex gap="6" wrap>
+              <Stack gap="1">
+                <span className="ui-label">Platform admins</span>
                 <strong>{overview.adminCounts.platformAdmins}</strong>
-              </div>
-              <div>
-                <span className="iaaa-admin-label">Tenant admins (all tenants)</span>
+              </Stack>
+              <Stack gap="1">
+                <span className="ui-label">Tenant admins (all tenants)</span>
                 <strong>{overview.adminCounts.tenantAdminsTotal}</strong>
-              </div>
-            </div>
+              </Stack>
+            </Flex>
             {overview.adminCounts.tenantAdminsByTenant.length === 0 ? (
               <EmptyState
                 title="No tenant admins"
@@ -602,7 +609,7 @@ export function IaaaAdminPanel() {
 
         <TabPanel idBase="iaaa-admin-overview" tabId="deactivate" active={section === "deactivate"}>
         <CardHeader title="Deactivate my account" />
-        <p className="iaaa-admin-note">
+        <p>
           Deactivation revokes your sessions, memberships, API keys, and broker tokens,
           suppresses mail, and verifies the result. It cannot be undone from this panel.
           Click once to arm, again to confirm. If you deactivate by mistake, sign in
@@ -624,7 +631,7 @@ export function IaaaAdminPanel() {
         approval only records; the grant mints after a second, distinct admin
         approves (the post-approval notice already says this). The "Audit events
         are read-only" sentence moved to the Audit events sub-tab, where it belongs. */}
-        <p className="iaaa-admin-note">
+        <p>
           Pending access requests below can be approved or denied here. A first approval
           only records the approval — the grant mints after a second, distinct admin
           approves. Membership grant, revoke, and edit live on the Members tab.
@@ -718,7 +725,7 @@ export function IaaaAdminPanel() {
       </TabPanel>
 
       <TabPanel idBase="iaaa-admin" tabId="members" active={tab === "members"}>
-        <p className="iaaa-admin-note">
+        <p>
           Memberships in this tenant (platform admins see all tenants&apos; memberships).
           Granting yourself a role is refused server-side; a grant requires fresh
           authentication for the step-up obligation, so a stale session must sign in again.
@@ -869,7 +876,7 @@ export function IaaaAdminPanel() {
       </TabPanel>
 
       <TabPanel idBase="iaaa-admin" tabId="api" active={tab === "api"}>
-        <p className="iaaa-admin-note">
+        <p>
           Every HTTP endpoint in the worker route table, derived from the server route
           branches. Aliases are one endpoint, not several. The catch-all forwarder is
           marked as such — it is not an endpoint.
@@ -890,7 +897,7 @@ export function IaaaAdminPanel() {
                 <>
                   <code>{endpoint.path}</code>
                   {endpoint.aliases.length > 0 && (
-                    <div className="iaaa-admin-aliases">
+                    <div className="ui-meta">
                       aliases: {endpoint.aliases.join(", ")}
                     </div>
                   )}
@@ -902,9 +909,9 @@ export function IaaaAdminPanel() {
               header: "Gating",
               render: (endpoint) => (
                 <>
-                  <span className="iaaa-admin-badge">{endpoint.auth}</span>
+                  <Badge tone="info" size="xs">{endpoint.auth}</Badge>
                   {endpoint.kind !== "http" && (
-                    <span className="iaaa-admin-badge iaaa-admin-badge-kind">{endpoint.kind}</span>
+                    <Badge tone="warning" size="xs">{endpoint.kind}</Badge>
                   )}
                 </>
               ),
@@ -917,7 +924,7 @@ export function IaaaAdminPanel() {
       </TabPanel>
 
       <TabPanel idBase="iaaa-admin" tabId="mcp" active={tab === "mcp"}>
-        <p className="iaaa-admin-note">
+        <p>
           The MCP tools, resources, and prompts from the existing client catalog — reused,
           not duplicated. Server capabilities the catalog lacks are listed below as gaps.
         </p>
@@ -966,7 +973,7 @@ export function IaaaAdminPanel() {
       </TabPanel>
 
       <TabPanel idBase="iaaa-admin" tabId="iaaa" active={tab === "iaaa"}>
-        <p className="iaaa-admin-note">
+        <p>
           The full IAAA audit-event taxonomy the code can emit, with the builder and the
           live emitting site for each event. Occurrences that emit no audit event are
           listed below as gaps — never fabricated into events.
@@ -988,7 +995,7 @@ export function IaaaAdminPanel() {
               render: (event) => (
                 <>
                   <div>{event.builder}</div>
-                  {event.emitter && <div className="iaaa-admin-aliases">{event.emitter}</div>}
+                  {event.emitter && <div className="ui-meta">{event.emitter}</div>}
                 </>
               ),
             },
@@ -1009,7 +1016,7 @@ export function IaaaAdminPanel() {
       </TabPanel>
 
       <TabPanel idBase="iaaa-admin" tabId="correlations" active={tab === "correlations"}>
-        <p className="iaaa-admin-note">
+        <p>
           Mapping tables. Rows with no counterpart are shown as UNMAPPED, not forced into
           a match. Every row cites its source in the catalog module.
         </p>
@@ -1025,7 +1032,7 @@ export function IaaaAdminPanel() {
             {
               key: "relation",
               header: "Relation",
-              render: (row) => <span className="iaaa-admin-badge">{row.relation}</span>,
+              render: (row) => <Badge tone="info" size="xs">{row.relation}</Badge>,
             },
             { key: "note", header: "Note", render: (row) => row.note },
           ]}
@@ -1048,7 +1055,7 @@ export function IaaaAdminPanel() {
             {
               key: "relation",
               header: "Relation",
-              render: (row) => <span className="iaaa-admin-badge">{row.relation}</span>,
+              render: (row) => <Badge tone="info" size="xs">{row.relation}</Badge>,
             },
             { key: "note", header: "Note", render: (row) => row.note },
           ]}
@@ -1056,6 +1063,6 @@ export function IaaaAdminPanel() {
           rowKey={(_row, index) => `event-endpoint-${index}`}
         />
       </TabPanel>
-    </div>
+    </PageSection>
   );
 }

@@ -496,6 +496,14 @@
  * inventory entries — bringing the pinned inventory to 485 entries
  * (480 measured on the slice base); the delegation sequence is
  * unchanged (same handler, same position).
+ *
+ * Issue #2437 added one — GET /api/audit/chain-verification (in
+ * handleAuditRoutes, before the /audit detail branch in source
+ * order) — bringing the pinned inventory to 487 entries.
+ * Correction (CI run 44069015909): the first #2437 commit wrongly
+ * deleted the #4672 exercise entry from this pin while removing no
+ * such route from source, so CI read 487 against a pinned 486.
+ * The entry is restored here; the route still exists in source.
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
@@ -653,6 +661,7 @@ const EXPECTED_INVENTORY = [
   "handleAdsRevenueReferralsRoutes :: endsWith(\"/external-ads\")",
   "handleAdsRevenueReferralsRoutes :: endsWith(\"/external-ads/impression\")",
   "handleAdsRevenueReferralsRoutes :: endsWith(\"/external-ads/click\")",
+  "handleAuditRoutes :: endsWith(\"/audit/chain-verification\")",
   "handleAuditRoutes :: endsWith(\"/audit\")",
   "handleAuditRoutes :: endsWith(\"/audit\")",
   "handleAuditRoutes :: endsWith(\"/audit/event\")",

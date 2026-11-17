@@ -14,7 +14,8 @@
  * under a NULL guard, then re-reads the row: the claim won
  * iff the stored token is the caller's (the slice-1 pattern).
  */
-import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
+import { type DrizzleD1Database } from "drizzle-orm/d1";
+import { createDrizzleD1Db } from "./d1QueryLogger";
 import { and, eq, isNull } from "drizzle-orm";
 import { agentBreakerState, breakerTripAlerts } from "./drizzleSchema";
 import {
@@ -36,7 +37,7 @@ export type BreakerStateStoreDb = DrizzleD1Database<{
 
 /** Build the Drizzle D1 database object from a bound D1 client. */
 export function createD1BreakerStateStoreDb(d1: D1Database): BreakerStateStoreDb {
-  return drizzle(d1, {
+  return createDrizzleD1Db(d1, {
     schema: {
       agentBreakerState,
       breakerTripAlerts,

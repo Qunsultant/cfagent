@@ -130,7 +130,8 @@ const ATTEMPTS_MAX = 10;
 const DELAY_MIN_MS = 0;
 const DELAY_MAX_MS = 120_000;
 
-function parseIntClamped(
+/** Shared by the D1 policy resolvers (#4930, #4933): parse + clamp one integer. */
+export function parseIntClamped(
   raw: string | undefined,
   min: number,
   max: number,

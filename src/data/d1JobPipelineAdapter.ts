@@ -10,7 +10,8 @@
  * query-builder sites live here, inside src/data/ — never
  * above the layer (global D-D census surface 3).
  */
-import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
+import { type DrizzleD1Database } from "drizzle-orm/d1";
+import { createDrizzleD1Db } from "./d1QueryLogger";
 import { and, asc, eq } from "drizzle-orm";
 import {
   jobPipelineArtifacts,
@@ -41,7 +42,7 @@ export type JobPipelineDb = DrizzleD1Database<{
 
 /** Build the Drizzle D1 database object from a bound D1 client. */
 export function createD1JobPipelineDb(d1: D1Database): JobPipelineDb {
-  return drizzle(d1, {
+  return createDrizzleD1Db(d1, {
     schema: { jobPipelineDefinitions, jobPipelineInstances, jobPipelineArtifacts },
   });
 }

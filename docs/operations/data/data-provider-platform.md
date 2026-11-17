@@ -82,7 +82,7 @@ not implement fails that capability's check):
 | Provider | Serves |
 | --- | --- |
 | etrade | quotes, optionsChains |
-| public | quotes, optionsChains (servable only once an operator configures → verifies → enables its provider record; the seed is "registered") |
+| public | quotes, optionsChains, historicalBars (bars via get_price_history, verified on the live surface by #4673; servable only once an operator configures → verifies → enables its provider record; the seed is "registered") |
 | yahoo | quotes, historicalBars, fundamentals, news |
 | nasdaq | screenUniverse |
 | alpaca | quotes, historicalBars, optionsChains (fundamentals via the Yahoo route, never faked) |

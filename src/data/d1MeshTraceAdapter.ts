@@ -12,7 +12,7 @@
  * and the first record wins.
  */
 import { asc, eq } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/d1";
+import { createDrizzleD1Db } from "./d1QueryLogger";
 import { agentMeshTraceHops } from "./drizzleSchema";
 import type { MeshTraceHop, MeshTraceStore } from "./meshTracePorts";
 import {
@@ -23,7 +23,7 @@ import {
 export type D1MeshTraceDb = ReturnType<typeof createD1MeshTraceDb>;
 
 export function createD1MeshTraceDb(d1: unknown) {
-  return drizzle(d1 as never, { schema: { agentMeshTraceHops } });
+  return createDrizzleD1Db(d1 as never, { schema: { agentMeshTraceHops } });
 }
 
 /** Create agent_mesh_trace_hops if absent (idempotent; safe to call per request). */

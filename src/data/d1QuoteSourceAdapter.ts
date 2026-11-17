@@ -18,7 +18,7 @@
  * catalogue's text, issued via db.run(sql.raw(...)).
  */
 import { sql } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/d1";
+import { createDrizzleD1Db } from "./d1QueryLogger";
 import { quoteSourceSetting } from "./drizzleSchema";
 import {
   normalizeQuoteSource,
@@ -32,7 +32,7 @@ import { executeDml } from "./schemaComponent/dmlExecutor";
 
 /** Build the Drizzle D1 database object from a bound D1 client. */
 export function createD1QuoteSourceDb(d1: D1Database): QuoteSourceD1Db {
-  return drizzle(d1, {
+  return createDrizzleD1Db(d1, {
     schema: { quoteSourceSetting },
   });
 }

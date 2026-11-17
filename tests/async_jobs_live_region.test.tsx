@@ -107,7 +107,9 @@ describe("AsyncJobsPanel live regions (#1578, A2)", () => {
       root!.render(<AsyncJobsPanel />);
     });
     await waitForText("1 task running");
-    const region = document.querySelector(".async-jobs-live-status[role='status']");
+    // Issue #5077: the live-status line no longer carries its bespoke class;
+    // the role is the selector (unique in full mode once the spinner is gone).
+    const region = document.querySelector("[role='status']");
     expect(region, "full-mode status line must exist").not.toBeNull();
     expect(region!.textContent).toContain("1 task running");
   });

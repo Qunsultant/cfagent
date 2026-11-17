@@ -36,10 +36,12 @@ import type {
 } from "../interfaces";
 import type {
   BrokerAccount,
+  BrokerActivity,
   BrokerCancelOrderResult,
   BrokerOrderDraft,
   BrokerOrderExecutionResult,
   BrokerPosition,
+  BrokerPositionLot,
   BrokerQuote,
   BrokerRemoteOrder,
   BrokerStatus,
@@ -51,8 +53,10 @@ import { createPublicDataProviderFromEnv } from "../dataProviders/adapters";
 import { PublicTradingMcpClient } from "../../mcps/public/publicTradingMcp";
 import {
   parsePublicAccounts,
+  parsePublicActivity,
   parsePublicOrders,
   parsePublicPositions,
+  parsePublicTaxLots,
   publicCancelReceipt,
   publicDraftFromPreflight,
   publicAuctionOrderType,
@@ -68,6 +72,7 @@ import { getPublicAccessToken, getPublicCredentialSource } from "../../security/
 import { AGENT_DIDS, createDidAttestationSync, getUserDid } from "../../agents/did";
 import { decodeOrderPriceSource, encodeOrderPriceSource } from "../quotePolicies";
 import { computeBracketExits } from "../bracketPercent";
+import { publicActivityPageSize } from "../../config/publicData";
 import { NeutralMarketScreener } from "../neutralMarketScreener";
 import { platformQuoteSource } from "../stockQuoteSource";
 import type { StockScreenerFilter, StockScreenResult } from "../../types";
@@ -209,10 +214,12 @@ export class PublicTradingPlatform implements ITradingPlatform {
         `PUBLIC_AUCTION_ON_OPEN_UNSUPPORTED: Public.com documents the on-close order types (MARKET_ON_CLOSE, LIMIT_ON_CLOSE) and no on-open type, so an OPG (MOO/LOO) order cannot be placed. Choose "At the close" or a plain day order; nothing was sent.`
       );
     }
-    // DAY is the documented default; GTD exists but needs an expiry we do not
-    // carry here, and GTC/IOC/FOK are not in Public's published set.
+    // Issue #4668 (matrix gap 14): live tools/list on the hosted MCP server verified
+    // `time_in_force` on both `preflight_order` and `place_order`. GTD requires
+    // `expiration_time` which this path does not carry yet.
+    if (timeInForce === "gtc" || timeInForce === "ioc" || timeInForce === "fok") return;
     throw new Error(
-      `PUBLIC_TIME_IN_FORCE_UNVERIFIED: Public.com documents DAY (and GTD, which needs an expiry this path does not carry), so a ${String(timeInForce).toUpperCase()} order cannot be placed truthfully. Choose the day default; nothing was sent.`
+      `PUBLIC_TIME_IN_FORCE_UNVERIFIED: Public.com ${String(timeInForce).toUpperCase()} requires an expiration_time or unverified term this path does not carry. Choose DAY, GTC, IOC, or FOK; nothing was sent.`
     );
   }
 
@@ -309,18 +316,70 @@ export class PublicTradingPlatform implements ITradingPlatform {
     return new NeutralMarketScreener({ quoteSource: platformQuoteSource(this) }).screenMarkets(filter);
   }
 
-  async getPositions(): Promise<{ account: BrokerAccount; positions: BrokerPosition[] }> {
-    const [accounts, portfolio] = await Promise.all([
-      this.getAccounts(),
-      this.trading.callTradingTool("get_portfolio", {}).then((t) => this.trading.parseResult(t)),
-    ]);
-    const { positions, buyingPower } = parsePublicPositions(portfolio);
+  /**
+   * The first account id this credential can see. The account-scoped
+   * tools (get_portfolio, get_history, get_tax_lots*) declare
+   * account_id as REQUIRED in the live schema, so every one of them is
+   * fed from here rather than called bare (issue #4673 fixed the bare
+   * get_portfolio call this method replaced).
+   */
+  private async resolveAccount(): Promise<{ account: BrokerAccount; accountId: string }> {
+    const accounts = await this.getAccounts();
     const account = accounts[0];
     if (!account) {
-      throw new Error("no Public.com account was found for this token; connect Public in Settings first.");
+      throw new Error("no Public account was found for this token; connect Public in Settings first.");
     }
+    return { account, accountId: account.accountId };
+  }
+
+  async getPositions(): Promise<{ account: BrokerAccount; positions: BrokerPosition[] }> {
+    const { account, accountId } = await this.resolveAccount();
+    const portfolio = this.trading.parseResult(
+      await this.trading.callTradingTool("get_portfolio", {
+        accountId: { names: ["account_id", "accountId"], value: accountId },
+      })
+    );
+    const { positions, buyingPower } = parsePublicPositions(portfolio);
     if (buyingPower !== undefined) account.cashAvailableForInvestment = buyingPower;
     return { account, positions };
+  }
+
+  /**
+   * Issue #4673 (matrix gap 19): the broker's own account activity
+   * (get_history on the verified surface) — trades, money movements
+   * (deposit / withdrawal / dividend) and position adjustments (split /
+   * merger). The type word is carried verbatim; a caller's filter is an
+   * exact match on that word, never a translated enum.
+   */
+  async getAccountActivity(activityType?: string): Promise<BrokerActivity[]> {
+    const { accountId } = await this.resolveAccount();
+    const text = await this.trading.callTradingTool("get_history", {
+      accountId: { names: ["account_id", "accountId"], value: accountId },
+      pageSize: { names: ["page_size", "pageSize"], value: publicActivityPageSize() },
+    });
+    const activities = parsePublicActivity(this.trading.parseResult(text));
+    return activityType ? activities.filter((a) => a.activityType === activityType) : activities;
+  }
+
+  /**
+   * Issue #4673 (matrix gap 19): one row per open tax lot, from
+   * get_tax_lots_for_symbol. Public's position rows carry no numeric
+   * position id, so the neutral positionId argument is the symbol — the
+   * only identifier the broker's own lot tool accepts.
+   */
+  async getPositionLots(accountKey: string, positionId: string): Promise<BrokerPositionLot[]> {
+    const symbol = String(positionId ?? "").trim().toUpperCase();
+    if (!symbol) {
+      throw new Error(
+        "a Public tax-lot read needs the position's symbol (this broker's positions carry no numeric id)."
+      );
+    }
+    const accountId = accountKey || (await this.resolveAccount()).accountId;
+    const text = await this.trading.callTradingTool("get_tax_lots_for_symbol", {
+      symbol: { names: ["symbol", "ticker"], value: symbol },
+      accountId: { names: ["account_id", "accountId"], value: accountId },
+    });
+    return parsePublicTaxLots(this.trading.parseResult(text));
   }
 
   async previewOrder(params: OrderPreviewParams): Promise<BrokerOrderDraft> {
@@ -378,6 +437,7 @@ export class PublicTradingPlatform implements ITradingPlatform {
           orderType: publicAuctionOrderType(orderType, params.timeInForce) ?? orderType,
           limitPrice: params.limitPrice,
           stopPrice: params.stopPrice,
+          timeInForce: params.timeInForce,
           orderClass,
           takeProfit,
           stopLoss,
@@ -649,6 +709,7 @@ export class PublicTradingPlatform implements ITradingPlatform {
           // Issue #4654 (matrix gap 4): the stop price travels to the wire for
           // a stop type; it was accepted by the arg builder but never passed.
           stopPrice: params.stopPrice,
+          timeInForce: params.timeInForce,
           orderClass: params.orderClass,
           takeProfit: params.takeProfit,
           stopLoss: params.stopLoss,

@@ -14,7 +14,7 @@
  * at-least-once delivery.
  */
 import { and, desc, eq } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/d1";
+import { createDrizzleD1Db } from "./d1QueryLogger";
 import { agentChainAudit, agentReports } from "./drizzleSchema";
 import type {
   AuditEventKind,
@@ -33,7 +33,7 @@ import {
 export type D1AuditReportDb = ReturnType<typeof createD1AuditReportDb>;
 
 export function createD1AuditReportDb(d1: unknown) {
-  return drizzle(d1 as never, { schema: { agentChainAudit, agentReports } });
+  return createDrizzleD1Db(d1 as never, { schema: { agentChainAudit, agentReports } });
 }
 
 /** Create audit + report tables if absent (idempotent; safe to call per request). */

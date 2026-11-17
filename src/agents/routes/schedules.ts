@@ -49,6 +49,7 @@ import {
   isBrokerId,
   resolveTenantProviders,
 } from "../../services/tenantProviders";
+import { accountBindingAuditFields, resolveExecutionAccountContext } from "../../services/accountBindings";
 import { tradingTypeFor } from "../../trading";
 import { isLoginShaped, getServiceUserLogin } from "../../security/serviceIdentity";
 import { findDuplicateSchedule } from "../../services/scheduleDedupe";
@@ -57,7 +58,11 @@ import {
   stampScheduleProvenance,
 } from "../../services/consolidatedScheduling";
 import { runStorageRetention } from "../../security/storageRetention";
-import { verifyStoredAuditChainAndAlert } from "../../services/auditTamperAlert";
+import { verifyStoredAuditChainAndAlert, type TamperAlertResult } from "../../services/auditTamperAlert";
+import {
+  verifyStoredAuditChainAndAlertCheckpointed,
+  type CheckpointedTamperAlertResult,
+} from "../../services/auditChainVerification";
 import { createBlobStore } from "../../services/blobStoreR2Adapter";
 import { pruneJobOutcomes } from "../../services/jobOutcomes";
 import { SqlJobRunRecordStore } from "../../data/doSqliteJobRunRecordAdapter";
@@ -1402,6 +1407,19 @@ export async function handleSchedulesRoutes(
         // stamps identity from the trusted context only.
         let screeningPayload: unknown;
         if (ctx.accountScopedScheduleCallbacks.has(callback)) {
+          const scheduleAccountCtx =
+            trustedUserLogin && createBrokerId && createMode
+              ? await resolveExecutionAccountContext(ctx.env, trustedUserLogin, {
+                  broker: createBrokerId,
+                  mode: createMode,
+                  accountType: safePayload.accountType ?? "stock",
+                  scope: "schedule",
+                  explicitAccountId: safePayload.accountId,
+                })
+              : null;
+          if (scheduleAccountCtx) {
+            ctx.audit?.("schedule.account_binding_resolved", "orchestrator", accountBindingAuditFields(scheduleAccountCtx));
+          }
           const built = buildSchedulePayload(callback, safePayload, {
             userLogin: trustedUserLogin || undefined,
             environment: trustedEnvironment || undefined,
@@ -1656,9 +1674,17 @@ export async function handleSchedulesRoutes(
         // export, and job-outcome prune do not touch mas_events
         // and still run. Retention windows themselves are
         // unchanged by this slice.
-        let auditChainVerification;
+        // #2437: checkpointed verification — the nightly run reads only the
+        // post-checkpoint window and persists the last-verified record
+        // (position + outcome) in mas_settings, so its absence is itself
+        // observable. A context without raw SQL (tests, older callers)
+        // falls back to the #3156 full verify, which records no checkpoint.
+        let auditChainVerification: TamperAlertResult | CheckpointedTamperAlertResult;
         try {
-          auditChainVerification = verifyStoredAuditChainAndAlert(ctx.getOrm());
+          const auditSql = ctx.agentCtx?.storage?.sql;
+          auditChainVerification = auditSql
+            ? verifyStoredAuditChainAndAlertCheckpointed(auditSql, ctx.getOrm())
+            : verifyStoredAuditChainAndAlert(ctx.getOrm());
         } catch (err) {
           structuredLog.error("schedules.retention_tamper_alert_write_failed", {
             message: "[retention] tamper alert write failed; retention aborted:",
@@ -1671,9 +1697,19 @@ export async function handleSchedulesRoutes(
         }
         const auditChainPruneSkipped = !auditChainVerification.valid;
         if (auditChainPruneSkipped) {
+          // #2437: the checkpointed result carries the persisted record;
+          // the #3156 fallback does not. A type predicate (not an inline
+          // `in` check) narrows the union for the compiler.
+          const isCheckpointed = (
+            r: TamperAlertResult | CheckpointedTamperAlertResult,
+          ): r is CheckpointedTamperAlertResult => "checkpoint" in r;
+          const brokenRowId = isCheckpointed(auditChainVerification)
+            ? auditChainVerification.checkpoint.brokenRowId
+            : null;
           structuredLog.error("schedules.retention_audit_chain_verification_failed", {
-            message: `[retention] audit chain verification FAILED brokenIndex=${auditChainVerification.brokenIndex} reason=${auditChainVerification.reason}; storage-retention prune skipped, evidence preserved.`,
+            message: `[retention] audit chain verification FAILED brokenIndex=${auditChainVerification.brokenIndex} brokenRowId=${brokenRowId ?? "n/a"} reason=${auditChainVerification.reason}; storage-retention prune skipped, evidence preserved.`,
             brokenIndex: auditChainVerification.brokenIndex,
+            brokenRowId,
             reason: auditChainVerification.reason,
           });
         }

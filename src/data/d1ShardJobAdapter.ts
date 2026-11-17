@@ -12,7 +12,7 @@
  * delivery.
  */
 import { and, asc, count, desc, eq, lt } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/d1";
+import { createDrizzleD1Db } from "./d1QueryLogger";
 import { agentShardJobs } from "./drizzleSchema";
 import type { ShardJobRow, ShardJobStore, ShardJobStatus } from "./shardJobPorts";
 import type {
@@ -28,7 +28,7 @@ import {
 export type D1ShardJobDb = ReturnType<typeof createD1ShardJobDb>;
 
 export function createD1ShardJobDb(d1: unknown) {
-  return drizzle(d1 as never, { schema: { agentShardJobs } });
+  return createDrizzleD1Db(d1 as never, { schema: { agentShardJobs } });
 }
 
 /** Create agent_shard_jobs if absent (idempotent; safe to call per request). */

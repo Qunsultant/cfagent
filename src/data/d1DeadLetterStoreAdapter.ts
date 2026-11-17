@@ -18,7 +18,8 @@
  * a caller token under a NULL guard, then re-reads the row:
  * the claim won iff the stored token is the caller's.
  */
-import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
+import { type DrizzleD1Database } from "drizzle-orm/d1";
+import { createDrizzleD1Db } from "./d1QueryLogger";
 import { and, asc, count, desc, eq, isNull } from "drizzle-orm";
 import { agentDeadLetterRecords, dlqDepthState } from "./drizzleSchema";
 import {
@@ -41,7 +42,7 @@ export type DeadLetterStoreDb = DrizzleD1Database<{
 
 /** Build the Drizzle D1 database object from a bound D1 client. */
 export function createD1DeadLetterStoreDb(d1: D1Database): DeadLetterStoreDb {
-  return drizzle(d1, {
+  return createDrizzleD1Db(d1, {
     schema: {
       agentDeadLetterRecords,
       dlqDepthState,

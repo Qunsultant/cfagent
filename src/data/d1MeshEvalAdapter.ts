@@ -11,7 +11,7 @@
  * same run converges, and the first record wins.
  */
 import { asc, desc, eq } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/d1";
+import { createDrizzleD1Db } from "./d1QueryLogger";
 import { agentMeshEvalResults } from "./drizzleSchema";
 import type {
   MeshEvalFactValue,
@@ -26,7 +26,7 @@ import {
 export type D1MeshEvalDb = ReturnType<typeof createD1MeshEvalDb>;
 
 export function createD1MeshEvalDb(d1: unknown) {
-  return drizzle(d1 as never, { schema: { agentMeshEvalResults } });
+  return createDrizzleD1Db(d1 as never, { schema: { agentMeshEvalResults } });
 }
 
 /** Create agent_mesh_eval_results if absent (idempotent; safe to call per request). */

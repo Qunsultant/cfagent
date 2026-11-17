@@ -31,6 +31,11 @@ import {
   validateStrictAuditWrite,
   type RestTwinsScopedModes,
 } from "../../config/restTwinsModes";
+import { settingReadFromSql } from "../../services/screeningFlags";
+import {
+  AUDIT_CHAIN_LAST_VERIFICATION_KEY,
+  parseAuditChainVerificationRecord,
+} from "../../services/auditChainVerification";
 
 /** The subset of OrchestratorAgent surface the audit handlers need. */
 export interface AuditRouteContext {
@@ -157,6 +162,28 @@ export async function handleAuditRoutes(
   sessionId: string,
   ctx: AuditRouteContext
 ): Promise<Response | null> {
+  // Issue #2437: audit-chain verification status (read-only). Returns the
+  // persisted last-verification record written by the nightly retention
+  // pass, so an operator can see when the chain last verified OK (and up
+  // to which row) — or that it has never verified. The record is
+  // instance-level (the shared Orchestrator instance's chain, like the
+  // retention pass itself), not a session row, so no session filter
+  // applies. Placed BEFORE the /audit/:id detail branch, whose regex
+  // would otherwise swallow this segment.
+  if (path.endsWith("/audit/chain-verification") && request.method === "GET") {
+    try {
+      const sql = ctx.ensureTables();
+      const stored = settingReadFromSql(sql)(AUDIT_CHAIN_LAST_VERIFICATION_KEY);
+      const record = parseAuditChainVerificationRecord(stored);
+      if (!record) {
+        return Response.json({ verified: false, reason: "never verified" });
+      }
+      return Response.json({ verified: true, ...record });
+    } catch (err) {
+      return Response.json({ error: err instanceof Error ? err.message : "Failed to fetch audit chain verification" }, { status: 500 });
+    }
+  }
+
   // Audit event detail endpoint (#1968)
   // GET /api/audit/:id returns one event with its full payload. The id
   // is session-scoped: an unknown id and a row from another session both

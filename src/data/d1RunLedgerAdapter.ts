@@ -12,7 +12,7 @@
  * WHERE stored.updated_at < excluded.updated_at.
  */
 import { and, desc, eq, lt } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/d1";
+import { createDrizzleD1Db } from "./d1QueryLogger";
 import {
   agentAsyncJobs,
   agentTenantProjectionCarriers,
@@ -37,7 +37,7 @@ import { dmlFragment } from "./schemaComponent/dmlExecutor";
 export type D1RunLedgerDb = ReturnType<typeof createD1RunLedgerDb>;
 
 export function createD1RunLedgerDb(d1: unknown) {
-  return drizzle(d1 as never, {
+  return createDrizzleD1Db(d1 as never, {
     schema: { agentAsyncJobs, agentTenantProjectionCarriers },
   });
 }

@@ -1734,6 +1734,12 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/types.ts", "alpaca", 15],
   ["src/types.ts", "etrade", 82],
   ["src/types.ts", "yahoo", 3],
+  // Issue #4676 / #3410 INTEGRATION: IBKR Hosted MCP v1 config, OAuth 2.1 + PKCE + DCR seam, and mesh registration.
+  ["src/agents/orchestrator/meshMcpClient.ts", "interactive brokers / ibkr", 36],
+  ["src/config/ibkr.ts", "interactive brokers / ibkr", 10],
+  ["src/security/ibkrOAuth.ts", "interactive brokers / ibkr", 79],
+  ["src/trading/accountBindings.ts", "interactive brokers / ibkr", 4],
+  ["src/types.ts", "interactive brokers / ibkr", 1],
   // #3960 INTEGRATION: the broker stage input's residency factory
   // resolves the chain source per invocation — the legacy direct
   // client's import + construction for runs carrying no input

@@ -35,6 +35,7 @@ import type {
   ETradeOptionChain,
   ETradeOptionChainContract,
   ETradeQuote,
+  MarketDataResearchHistoricalBar,
 } from "../types";
 import type { PublicMcpClient, PublicMcpTool } from "../mcps/public/publicMcp";
 import { withBreaker } from "../breakers/breakerDecorator";
@@ -725,4 +726,167 @@ export async function readPublicOptionChain(
     underlyingPrice
   );
   return { tool: "get_option_chain", args: picked.args, text, payload, chain };
+}
+
+/* --------------------------- historical bars --------------------------- */
+
+function pickField(record: Record<string, unknown>, names: string[]): unknown {
+  for (const name of names) {
+    if (record[name] !== undefined && record[name] !== null) return record[name];
+  }
+  return undefined;
+}
+
+/** A bar timestamp as an ISO string, from epoch seconds/milliseconds or a date string. */
+function barTimestamp(value: unknown): string | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const ms = value < 1e12 ? value * 1000 : value;
+    const date = new Date(ms);
+    return Number.isFinite(date.getTime()) ? date.toISOString() : undefined;
+  }
+  if (typeof value === "string" && value.trim() !== "") {
+    const numeric = Number(value);
+    if (Number.isFinite(numeric)) return barTimestamp(numeric);
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? new Date(parsed).toISOString() : undefined;
+  }
+  return undefined;
+}
+
+/**
+ * Issue #4673 (matrix gap 19): the bar rows in a get_price_history result.
+ * The tool documents OHLCV bars split into pre-market, regular and
+ * after-hours sessions, so both a flat bars array and session-keyed
+ * buckets are read; every bucket is merged and the caller sorts by time.
+ */
+function collectBarRows(payload: unknown): unknown[] {
+  if (Array.isArray(payload)) return payload;
+  if (!isRecord(payload)) return [];
+  const rows: unknown[] = [];
+  const flatKeys = ["bars", "price_history", "priceHistory", "candles", "prices", "items", "records"];
+  for (const key of flatKeys) {
+    const value = payload[key];
+    if (Array.isArray(value)) rows.push(...value);
+  }
+  const sessionKeys = [
+    "regular",
+    "regularHours",
+    "preMarket",
+    "pre_market",
+    "premarket",
+    "afterHours",
+    "after_hours",
+    "afterhours",
+    "sessions",
+  ];
+  for (const key of sessionKeys) {
+    const value = payload[key];
+    if (Array.isArray(value)) rows.push(...value);
+    else if (isRecord(value)) {
+      for (const nested of Object.values(value)) {
+        if (Array.isArray(nested)) rows.push(...nested);
+      }
+    }
+  }
+  if (rows.length === 0 && isRecord(payload.data)) {
+    for (const nested of Object.values(payload.data)) {
+      if (Array.isArray(nested)) rows.push(...nested);
+    }
+  }
+  return rows;
+}
+
+/**
+ * Issue #4673: map a get_price_history payload into the neutral bar
+ * shape. Strictly honest: a row missing any of open/high/low/close or
+ * volume is skipped rather than zero-filled, and the result is
+ * time-ordered, de-duplicated by timestamp, and cut to `limit` from the
+ * tail (the most recent window the caller asked for).
+ */
+export function parsePublicPriceHistory(
+  payload: unknown,
+  limit?: number
+): MarketDataResearchHistoricalBar[] {
+  const bars: MarketDataResearchHistoricalBar[] = [];
+  for (const row of collectBarRows(payload)) {
+    if (!isRecord(row)) continue;
+    const timestamp = barTimestamp(
+      pickField(row, ["timestamp", "time", "datetime", "date", "start_time", "startTime", "ts"])
+    );
+    const open = numValue(pickField(row, ["open", "o"]));
+    const high = numValue(pickField(row, ["high", "h"]));
+    const low = numValue(pickField(row, ["low", "l"]));
+    const close = numValue(pickField(row, ["close", "c"]));
+    const volume = numValue(pickField(row, ["volume", "v", "vol"]));
+    if (!timestamp || open === undefined || high === undefined || low === undefined || close === undefined) {
+      continue;
+    }
+    if (volume === undefined) continue;
+    const bar: MarketDataResearchHistoricalBar = {
+      provenance: "live",
+      timestamp,
+      open,
+      high,
+      low,
+      close,
+      volume,
+    };
+    const vwap = numValue(pickField(row, ["vwap", "vw"]));
+    if (vwap !== undefined) bar.vwap = vwap;
+    const tradeCount = numValue(pickField(row, ["trade_count", "tradeCount", "trades", "n"]));
+    if (tradeCount !== undefined) bar.tradeCount = tradeCount;
+    bars.push(bar);
+  }
+  const byTimestamp = new Map<string, MarketDataResearchHistoricalBar>();
+  for (const bar of bars) {
+    if (!byTimestamp.has(bar.timestamp)) byTimestamp.set(bar.timestamp, bar);
+  }
+  const sorted = [...byTimestamp.values()].sort(
+    (a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp)
+  );
+  return limit !== undefined && limit > 0 ? sorted.slice(-limit) : sorted;
+}
+
+/**
+ * Issue #4673: read get_price_history for one symbol. The tool is
+ * verified on the live surface (the #4668 tools/list probe) and is on
+ * the data client's read-only allow-list. Parameter names come from the
+ * live inputSchema, never from this file; a required parameter the
+ * schema declares but no name maps onto is refused by name.
+ */
+export async function readPublicPriceHistory(
+  client: PublicMcpClient,
+  symbol: string,
+  request: { period: string; aggregation: string; instrumentType?: string },
+  opts?: { breaker?: CircuitBreaker }
+): Promise<PublicToolRead> {
+  const breaker = opts?.breaker ?? defaultBreakerRegistry().breakerFor("public");
+  return (await withBreaker(breaker, () => readPublicPriceHistoryInner(client, symbol, request))).value;
+}
+
+async function readPublicPriceHistoryInner(
+  client: PublicMcpClient,
+  symbol: string,
+  request: { period: string; aggregation: string; instrumentType?: string }
+): Promise<PublicToolRead> {
+  const tools = await client.listTools();
+  const tool = offerTool(tools, "get_price_history");
+  const picked = pickArgs(tool.inputSchema, {
+    symbol: { names: ["symbol", "ticker"], value: symbol },
+    period: { names: ["period", "time_period", "timePeriod"], value: request.period },
+    aggregation: { names: ["aggregation", "interval"], value: request.aggregation },
+    instrumentType: {
+      names: ["instrument_type", "instrumentType"],
+      value: request.instrumentType,
+    },
+  });
+  const missing = missingRequired(tool.inputSchema, picked.args);
+  if (missing.length > 0) {
+    const declared = Object.keys(schemaProps(tool.inputSchema).properties).join(", ");
+    throw new PublicDataError(
+      `get_price_history requires ${missing.join(", ")}, which could not be mapped from its declared schema (it declares: ${declared}).`
+    );
+  }
+  const text = await client.callToolText("get_price_history", picked.args);
+  return { tool: "get_price_history", args: picked.args, text, payload: parseToolJson(text) };
 }
