@@ -65,6 +65,10 @@ const ARMING_SITES: Record<string, { count: number; role: string }> = {
     count: 11,
     role: "the schedule store's own arming helpers (create route + resume/update re-arm; payloads arrive builder-validated) + the alarms adapter arm (3: cron/interval/delayed, #3123 unified-store alarms port) + the approve-route sdkAdapter.create (4: cron/interval/scheduled/delay, #3122) — the approve path re-arms an already-validated approved pending definition (payload built upstream via buildSchedulePayload at proposal; no new payload construction) and adopts the record into the unified store",
   },
+  "src/agents/scheduled-agent.ts": {
+    count: 1,
+    role: "the heartbeat SDK alarm arm (#4234, ADR 0030): ensureHeartbeatAlarm arms the ONE recurring onCron alarm via scheduleEvery — not a screening schedule, so no builder payload: the callback is the agent's own onCron heartbeat, and goals are still polled via isDue per goal",
+  },
   "src/services/agentScheduleCapability.ts": {
     count: 4,
     role: "the capability's SDK adapter (nlqPortToAgentSdkAdapter.create, #3122) — a pass-through arming funnel for agent-schedulable callbacks (cron/interval/scheduled/delay); payloads arrive from the NLQ executor (buildSchedulePayload) or the approved definition; armed alarms are adopted into the unified store, cancellations remove the record",
@@ -141,7 +145,17 @@ describe("screen-schedule creation paths — enumeration pin", () => {
 
   it("the ScheduledAgent substrate stays out of the screening schedule store (delineation, #1236/#1224)", () => {
     const src = readFileSync("src/agents/scheduled-agent.ts", "utf8");
-    expect(ARMING_PATTERN.test(src)).toBe(false);
+    // #4234 (ADR 0030) is the ONE exception to "no arming here": the
+    // agent arms exactly one schedule — its own heartbeat alarm via
+    // scheduleEvery in ensureHeartbeatAlarm — never a screening
+    // schedule. The delineation still holds: no screening callback
+    // is armed from this file.
+    const armingLines = src
+      .split("\n")
+      .filter((line) => ARMING_PATTERN.test(line));
+    expect(armingLines).toHaveLength(1);
+    expect(armingLines[0]).toContain("scheduleEvery");
+    expect(src).toContain("ensureHeartbeatAlarm");
     expect(src).toContain("NOT a screening scheduler");
   });
 });

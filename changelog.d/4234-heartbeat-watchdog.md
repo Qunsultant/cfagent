@@ -1,0 +1,3 @@
+### Changed
+
+- Heartbeat replaces the Worker crons (issue #4234, ADR 0030): the ScheduledAgent now arms one recurring SDK alarm (`scheduleEvery`, `onCron` in-process, from `onStart`), so the tick, its six piggyback rider dispatches, and the daily token-renewal (03:00 UTC) and retention (04:00 UTC) due-checks all ride the one alarm tick. The three duty crons stay OFF per #4112. The hourly Worker watchdog cron (`0 * * * *`) is the only live cron: it checks the heartbeat alarm exists and fired recently, re-arms it when missing or stale, and records one ledger row per run. The nightly research run keeps riding the tick with its own daily guard; no separate trigger.

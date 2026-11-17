@@ -63,15 +63,27 @@ describe("schedule systems inventory", () => {
     expect(SCHEDULED_GOAL_IDS_INVENTORY).toEqual(live);
   });
 
-  it("declares no cron trigger in wrangler.jsonc (#4112 owner direction)", () => {
+  it("declares exactly the one watchdog cron trigger in wrangler.jsonc (#4112 owner direction + #4234 ADR 0030)", () => {
     const wrangler = readFileSync(join(root, "wrangler.jsonc"), "utf8");
-    // Comment lines are not entries: the block survives only as a comment.
+    // Comment lines are not entries: the duty crons survive only as
+    // comments. #4234 is the ONE live cron: the hourly heartbeat
+    // watchdog, which re-arms the SDK alarm when missing or stale.
     const active = wrangler
       .split("\n")
       .filter((line) => !line.trim().startsWith("//"))
       .join("\n");
-    expect(active).not.toContain('"crons"');
-    expect(active).not.toContain('"triggers"');
+    const liveCrons = [...active.matchAll(/"([^"]+)"\s*$/gm)]
+      .map((m) => m[1])
+      .filter((s) => s.includes("*"));
+    expect(liveCrons).toEqual(["0 * * * *"]);
+    for (const cron of ["0 3 * * *", "*/30 * * * *", "0 4 * * *"]) {
+      const lines = wrangler.split("\n").filter((l) => l.includes(`"${cron}"`));
+      expect(lines.length, `${cron} is stated`).toBeGreaterThan(0);
+      expect(
+        lines.every((l) => l.trim().startsWith("//")),
+        `${cron} is commented out everywhere`,
+      ).toBe(true);
+    }
     // The inventory stays: it is the code's dispatch table, kept for re-enable.
     expect(WORKER_CRON_TRIGGERS_INVENTORY.length).toBeGreaterThan(0);
   });

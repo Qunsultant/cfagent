@@ -591,12 +591,24 @@ describe("3123-P09 worker duties as records", () => {
     }
   });
 
-  it("Worker crons stay OFF: wrangler.jsonc has no uncommented triggers", () => {
+  it("only the #4234 watchdog cron fires: wrangler.jsonc has one uncommented trigger, the three duty crons stay commented", () => {
     const wrangler = source("wrangler.jsonc");
     const uncommented = wrangler
       .split("\n")
-      .filter((line) => !line.trim().startsWith("//") && line.includes('"crons"'));
-    expect(uncommented).toEqual([]);
+      .filter((line) => !line.trim().startsWith("//"));
+    // The one live cron is the hourly heartbeat watchdog (ADR 0030):
+    // it checks the heartbeat alarm exists and is fresh, and re-arms
+    // it when missing or stale.
+    expect(
+      uncommented.filter((line) => line.includes('"0 * * * *"')),
+    ).toHaveLength(1);
+    // The three duty crons stay OFF per #4112: no uncommented line
+    // names one.
+    for (const cron of ["0 3 * * *", "*/30 * * * *", "0 4 * * *"]) {
+      expect(
+        uncommented.filter((line) => line.includes(`"${cron}"`)),
+      ).toEqual([]);
+    }
   });
 });
 

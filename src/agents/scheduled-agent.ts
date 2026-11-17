@@ -40,6 +40,7 @@ import {
   type JobRunRecord,
 } from "../services/jobRunRecords";
 import { resolveMissedScheduleGraceMs } from "../config/missedScheduleAlert";
+import { HEARTBEAT_ALARM_CALLBACK } from "../config/heartbeatWatchdog";
 import {
   findMissedGoalFiring,
   missedFiringDetail,
@@ -65,6 +66,25 @@ import {
   type GoalScheduleAuditEvent,
 } from "../services/consolidatedScheduling";
 import { SHARED_ORCHESTRATOR_INSTANCE, getServiceUserLogin } from "../security/serviceIdentity";
+import { isPlatformServiceProvisioned } from "../security/serviceDispatch";
+import { sessionStore } from "../security/session";
+import { createKvMembershipStore } from "../security/iaaaMembershipStore";
+import { backgroundDispatchHeaders } from "../security/backgroundAttribution";
+import { renewAllStoredETradeTokens } from "../security/etradeOAuth";
+import { resolveHeartbeatDueCheckConfig } from "../config/heartbeatWatchdog";
+import { armHeartbeatAlarm, isHeartbeatAlarmTick } from "../services/heartbeatClock";
+import { dispatchTickRiders } from "../services/tickRiders";
+import {
+  RENEWAL_DISPATCH_CRON,
+  RETENTION_DISPATCH_CRON,
+  runHeartbeatDueChecks,
+} from "../services/heartbeatDueChecks";
+import {
+  runRenewTokensEntryPoint,
+  runRetentionEntryPoint,
+  type CronDispatchRecordInput,
+  type CronEntryPointDeps,
+} from "../services/consolidatedCronEntries";
 import {
   runAutopilotMonthlyEvaluation,
   type AutopilotMonthlyEvaluationResult,
@@ -421,12 +441,14 @@ export interface ScheduledAgentCronOpts {
  * NO turn path and NO port hooks (portHooks stays unset, so
  * PortThink.beforeTurn returns undefined and the chat hooks are
  * no-ops). Its observable behavior is the cron/goal surface below,
- * unchanged: ticks still arrive via the Worker cron trigger as RPC
- * onCron() calls, never via the SDK scheduler (this class registers
- * no schedule callbacks, so the SDK's schedule-time callback-name
- * validation has nothing to check), and onCron never touches Think's
- * session, so no lifecycle boot is needed on that path — the
- * adapter-owned start() precondition applies to turns only.
+ * unchanged: ticks arrive via the one recurring SDK alarm
+ * (`scheduleEvery`, `onCron` in-process — issue #4234, ADR 0030),
+ * armed from `onStart` and re-armed by the hourly Worker watchdog
+ * when missing or stale; the Worker tick cron stays OFF per #4112,
+ * and the RPC `onCron()` path still works for manual triggers and
+ * tests. onCron never touches Think's session, so no lifecycle boot
+ * is needed on that path — the adapter-owned start() precondition
+ * applies to turns only.
  */
 /**
  * Issue #2426 (G14) — the audit actor for ScheduledAgent's own
@@ -919,6 +941,24 @@ export class ScheduledAgent extends PortThink {
     } catch (error) {
       structuredLog.error("scheduledAgent.on_start_orphaned_pipeline_runs_settle_failed", {
         message: "[ScheduledAgent][onStart] Could not settle orphaned pipeline runs:",
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    // Issue #4234 (ADR 0030) — arm the one recurring heartbeat alarm
+    // (`scheduleEvery`, `onCron` in-process). Best-effort by the same
+    // rule as the recoveries above: the ensure-pattern is idempotent
+    // (a present alarm is a no-op), and a failed arm is logged and
+    // never fails startup — the hourly Worker watchdog re-arms a
+    // missing alarm, so a missed arm here is recovered within the
+    // hour.
+    try {
+      const result = await armHeartbeatAlarm(this, this.env);
+      structuredLog.info("scheduledAgent.on_start_heartbeat_alarm", {
+        message: `[ScheduledAgent][onStart] Heartbeat alarm ${result.armed ? "armed" : "already armed"}.`,
+      });
+    } catch (error) {
+      structuredLog.error("scheduledAgent.on_start_heartbeat_alarm_failed", {
+        message: "[ScheduledAgent][onStart] Could not arm the heartbeat alarm (the hourly watchdog will re-arm it):",
         error: error instanceof Error ? error.message : String(error),
       });
     }
@@ -1656,6 +1696,46 @@ export class ScheduledAgent extends PortThink {
       jobsSkipped: 0,
       errors: [],
     };
+
+    // Issue #4234 (ADR 0030) — the heartbeat alarm tick: the SDK
+    // invokes a scheduled callback as `handler(payload, schedule)`,
+    // so a second argument that is an `onCron` Schedule row marks
+    // this invocation as the alarm firing. Every other shape (RPC
+    // `onCron()`, manual trigger, test call) is not the alarm and
+    // behaves exactly as today.
+    const isAlarmTick = isHeartbeatAlarmTick(envOrOpts, maybeOpts);
+
+    // Issue #4234 — the #2331 slice 2 provisioning guard, alarm
+    // ticks only: the tick skips with a logged reason if the
+    // platform-tier service user is not provisioned. The skip is
+    // recorded as a tick (so the watchdog still sees the alarm
+    // fired), with the reason in its errors.
+    let alarmUserLogin: string | null = null;
+    if (isAlarmTick) {
+      alarmUserLogin = getServiceUserLogin(env);
+      const serviceProvisioned =
+        alarmUserLogin !== null &&
+        (await isPlatformServiceProvisioned(
+          createKvMembershipStore(sessionStore(env)),
+          alarmUserLogin,
+          now.getTime(),
+        ));
+      if (!serviceProvisioned) {
+        const reason = !alarmUserLogin
+          ? "SERVICE_USER_LOGIN is not configured"
+          : "service user is not provisioned for the platform tier";
+        const detail = `${reason} — heartbeat tick skipped rather than running unattended work without a verified identity (#2331 slice 2)`;
+        structuredLog.error(
+          "scheduledAgent.heartbeat_tick_skipped_unprovisioned",
+          {
+            message: `[ScheduledAgent][onCron] ${detail}`,
+          },
+        );
+        tick.errors.push(detail);
+        await this.recordTick(tick);
+        return tick;
+      }
+    }
 
     // Issue #3121 Phase 2 (#3124) — single evaluation scan: the
     // tick evaluates from one load; the save step below reuses the
@@ -2428,7 +2508,200 @@ export class ScheduledAgent extends PortThink {
 
     await this.saveGoals(goals, records);
     await this.recordTick(tick);
+    // Issue #4234 (ADR 0030) — alarm ticks only: the tick's riders
+    // and daily due-checks ride the alarm firing. Best-effort: the
+    // riders' observer and the due-check runner already swallow
+    // their own failures, and anything else here is logged, never
+    // thrown — the goal tick above already recorded.
+    if (isAlarmTick && alarmUserLogin !== null) {
+      try {
+        await this.runAlarmTickWork(alarmUserLogin);
+      } catch (error) {
+        structuredLog.error("scheduledAgent.heartbeat_tick_work_failed", {
+          message:
+            "[ScheduledAgent][onCron] Heartbeat tick work failed (the goal tick stands):",
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
     return tick;
+  }
+
+  /**
+   * Issue #4234 (ADR 0030) — the alarm tick's extra work: the six
+   * piggyback rider dispatches, then the daily due-checks (token
+   * renewal + retention). Runs after the goal tick records, so a
+   * failure here never un-records the tick.
+   */
+  private async runAlarmTickWork(userLogin: string): Promise<void> {
+    const env = this.env;
+    const orchestrator = actorGateway.stub<DoStubLike>(
+      env.ORCHESTRATOR_AGENT,
+      SHARED_ORCHESTRATOR_INSTANCE,
+    );
+    await dispatchTickRiders({
+      userLogin,
+      orchestratorFetch: (request) => orchestrator.fetch(request),
+      createSink: () => createObservabilitySink(env),
+      dispatchAndAwait: async (promise) => {
+        await promise;
+      },
+      slackPoster: async (text: string) => {
+        await postSlackText({ post: fetchSlackPost, env, text });
+      },
+    });
+    const lastRenewalAtMs = await this.lastSuccessfulRunAtMs(
+      RENEWAL_DISPATCH_CRON,
+    );
+    const lastRetentionAtMs = await this.lastSuccessfulRunAtMs(
+      RETENTION_DISPATCH_CRON,
+    );
+    await runHeartbeatDueChecks({
+      now: () => new Date(),
+      lastRenewalAtMs,
+      lastRetentionAtMs,
+      config: resolveHeartbeatDueCheckConfig(env),
+      runRenewal: () =>
+        runRenewTokensEntryPoint(
+          this.alarmTickEntryPointDeps(
+            RENEWAL_DISPATCH_CRON,
+            "renewTokens",
+            userLogin,
+            true,
+          ),
+        ),
+      runRetention: () =>
+        runRetentionEntryPoint(
+          this.alarmTickEntryPointDeps(
+            RETENTION_DISPATCH_CRON,
+            "retention",
+            userLogin,
+            true,
+          ),
+        ),
+      logError: (...args: unknown[]) => {
+        structuredLog.error("scheduledAgent.heartbeat_due_check_error", {
+          message: args.map((arg) => String(arg)).join(" "),
+        });
+      },
+      logInfo: (...args: unknown[]) => {
+        structuredLog.info("scheduledAgent.heartbeat_due_check_info", {
+          message: args.map((arg) => String(arg)).join(" "),
+        });
+      },
+    });
+  }
+
+  /**
+   * Issue #4234 — the entry-point deps adapter for the alarm tick's
+   * due-check runs: the renewal/retention entry points run
+   * in-process here, with the same deps the Worker dispatcher
+   * builds (the Orchestrator stub, the record-route poster, the
+   * background headers) — one implementation of each duty, never a
+   * second. The gate already proved the service user provisioned,
+   * so the adapter takes it as given.
+   */
+  private alarmTickEntryPointDeps(
+    cron: string,
+    entryPoint: "renewTokens" | "retention",
+    userLogin: string,
+    serviceProvisioned: boolean,
+  ): CronEntryPointDeps {
+    const env = this.env;
+    const orchestrator = actorGateway.stub<DoStubLike>(
+      env.ORCHESTRATOR_AGENT,
+      SHARED_ORCHESTRATOR_INSTANCE,
+    );
+    const recordDispatch = async (
+      input: CronDispatchRecordInput,
+    ): Promise<void> => {
+      // The Worker's record poster, verbatim in shape: POST the
+      // record route via the shared Orchestrator stub, under the
+      // background headers. NEVER throws — a record failure is
+      // logged and resolved, so it can never fail the dispatch it
+      // records.
+      try {
+        const response = (await orchestrator.fetch(
+          new Request(
+            "https://agent.internal/schedules/record-cron-dispatch",
+            {
+              method: "POST",
+              headers: backgroundDispatchHeaders(userLogin),
+              body: JSON.stringify(input),
+            },
+          ),
+        )) as unknown as { status?: unknown };
+        if (
+          !response ||
+          typeof response.status !== "number" ||
+          response.status >= 400
+        ) {
+          structuredLog.error("scheduledAgent.alarm_tick_record_failed", {
+            entryPoint: input.entryPoint,
+            status:
+              typeof response?.status === "number"
+                ? response.status
+                : "unknown",
+            message: "the dispatch stands, the row is missing",
+          });
+        }
+      } catch (err) {
+        structuredLog.error("scheduledAgent.alarm_tick_record_failed", {
+          entryPoint: input.entryPoint,
+          error: err instanceof Error ? err.message : String(err),
+          message:
+            "record fetch failed; the dispatch stands, the row is missing",
+        });
+      }
+    };
+    return {
+      cron,
+      entryPoint,
+      serviceUserLogin: userLogin,
+      serviceProvisioned,
+      orchestrator,
+      scheduledAgent: {
+        onCron: () => this.onCron(),
+      },
+      renewTokens: renewAllStoredETradeTokens.bind(null, env),
+      createSink: () => createObservabilitySink(env),
+      slackPoster: async (text: string) => {
+        await postSlackText({ post: fetchSlackPost, env, text });
+      },
+      dispatchAndAwait: async (promise) => {
+        await promise;
+      },
+      recordDispatch,
+      now: () => new Date(),
+      logError: (...args: unknown[]) => {
+        structuredLog.error("scheduledAgent.alarm_tick_entry_point_error", {
+          message: args.map((arg) => String(arg)).join(" "),
+        });
+      },
+      logInfo: (...args: unknown[]) => {
+        structuredLog.info("scheduledAgent.alarm_tick_entry_point_info", {
+          message: args.map((arg) => String(arg)).join(" "),
+        });
+      },
+    };
+  }
+
+  /**
+   * Issue #4234 — the last SUCCESSFUL dispatch for one cron jobId
+   * (newest first), or null when it never ran. A failed dispatch
+   * leaves no successful row, so the duty stays due and retries on
+   * the next tick. A ledger read failure reads as never-ran (the
+   * merged read falls back to the legacy KV home, and an empty home
+   * is null) — fail-open toward running the duty.
+   */
+  private async lastSuccessfulRunAtMs(
+    jobId: string,
+  ): Promise<number | null> {
+    const runs = await this.listJobRuns(jobId, 50).catch(() => []);
+    const last = runs.find((run) => run.outcome === "success");
+    if (!last) return null;
+    const atMs = Date.parse(last.finished);
+    return Number.isFinite(atMs) ? atMs : null;
   }
 
   /** List all scheduled goals. */
@@ -2440,6 +2713,45 @@ export class ScheduledAgent extends PortThink {
   async getTickHistory(limit: number = 20): Promise<ScheduleTick[]> {
     const history = await this.getTicks();
     return history.slice(0, Math.max(1, Math.min(50, limit)));
+  }
+
+  /**
+   * Issue #4234 (ADR 0030) — the heartbeat re-arm primitive: the
+   * #618/#3788 ensure-pattern for the recurring `onCron` alarm.
+   * Skip when an `onCron` schedule already exists; `scheduleEvery`
+   * when absent; on force, cancel the existing `onCron` schedules
+   * only (other callbacks are left alone) and re-create. The SDK's
+   * `scheduleEvery` is itself idempotent, so calling this from
+   * `onStart` is safe. Refuses a non-positive interval instead of
+   * arming a broken alarm.
+   */
+  async ensureHeartbeatAlarm(
+    intervalSeconds: number,
+    opts?: { force?: boolean },
+  ): Promise<{ armed: boolean; alreadyArmed: boolean }> {
+    if (!Number.isFinite(intervalSeconds) || intervalSeconds <= 0) {
+      throw new Error(
+        "heartbeat interval must be a positive number of seconds",
+      );
+    }
+    const existing = await this.listSchedules();
+    const heartbeat = existing.filter(
+      (schedule) => schedule.callback === HEARTBEAT_ALARM_CALLBACK,
+    );
+    if (heartbeat.length > 0 && !opts?.force) {
+      return { armed: false, alreadyArmed: true };
+    }
+    if (opts?.force) {
+      for (const schedule of heartbeat) {
+        await this.cancelSchedule(schedule.id);
+      }
+    }
+    await this.scheduleEvery(
+      intervalSeconds,
+      HEARTBEAT_ALARM_CALLBACK,
+      {},
+    );
+    return { armed: true, alreadyArmed: false };
   }
 
   /**

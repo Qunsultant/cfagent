@@ -256,10 +256,11 @@ describe("A. registration (#3527 S5)", () => {
   it("the tick entry point wraps BOTH riders in observeTickDispatch under the new ids, corpus before sweep", () => {
     // Issue #3121 S5 moved the tick dispatch out of queue.ts into
     // the named entry points module — the observer wiring lives there.
-    const tickSrc = readFileSync(
-      "src/services/consolidatedCronEntries.ts",
-      "utf8",
-    );
+    // Issue #4234 moves the tick's six POSTs into the shared rider
+    // list (src/services/tickRiders.ts) — the observer wiring lives
+    // there now, used by both the Worker entry point and the SDK
+    // alarm tick.
+    const tickSrc = readFileSync("src/services/tickRiders.ts", "utf8");
     expect(tickSrc).toMatch(/observeTickDispatch\(\s*"corpus-sync",/);
     expect(tickSrc).toMatch(/observeTickDispatch\(\s*"reports-index-backfill",/);
     expect(tickSrc.indexOf('"corpus-sync"')).toBeLessThan(
