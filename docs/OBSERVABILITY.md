@@ -347,7 +347,7 @@ features, no D1 for telemetry. The stack is the stock JS 3.x
 logs line: `@opentelemetry/api` 1.10.0 + `@opentelemetry/sdk-logs`
 3.1.1 + `@opentelemetry/otlp-transformer` 0.301.2.
 
-### The four-level on/off mechanism (all externalized)
+### The five-level on/off mechanism (all externalized)
 
 Every switch lives in `config/otel.json` + env vars and resolves
 run > session > user > env > config-file > built-in safe default
@@ -376,6 +376,26 @@ redeploy (KV/D1 switches + admin UI) is S7/S8.
    (`ALL`/`ERROR`/`DEBUG`/`INFO`/`WARN`/`TRACE`/`OFF`) and the
    sampling ratio per domain. Level `OFF` = that domain emits
    nothing.
+5. **Per-destination** (issue #5138) — one switch per destination
+   (`OTEL_DESTINATION_<NAME>_ENABLED` / the config map
+   `otel.destinations.<name>`): `analyticsEngine` (the Analytics
+   Engine sink), `r2` (the OTLP export to R2), `console` (the
+   console sink). Each is individually on/off; invalid fails
+   closed to OFF. Config-file defaults are all ON (preserving
+   the current behavior); the built-in safe default is OFF.
+   `createObservabilitySink` (the composition root) respects
+   them: AE off means never write to it (fall back to console
+   only if console is on; if both off, the event is dropped —
+   logging never fails the caller). The OTel transport respects
+   the R2 switch (R2 off = no R2 write; ingestion falls back to
+   the structured log).
+
+**Workers Logs is NOT a switch in this file.** It is deploy-time
+only: `wrangler.jsonc` `observability.enabled` (set `false` to
+silence it entirely; currently `true` at 1% sampling,
+`persist: false` per #4131). The Worker cannot flip the
+Cloudflare platform log pipeline at runtime — no runtime switch
+exists for it, and none is pretended here.
 
 ### Export: OTLP/HTTP to R2 (archive) + console
 

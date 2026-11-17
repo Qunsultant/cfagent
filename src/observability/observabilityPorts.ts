@@ -229,6 +229,24 @@ export class ConsoleObservabilitySink implements ObservabilitySink {
 }
 
 /**
+ * Issue #5138 (S1 extension, observability program #5080) —
+ * drop-everything sink: every destination is OFF, so the event
+ * is dropped. It never throws and never logs — a disabled
+ * destination must not produce output through another
+ * destination. Logging never fails the caller, even when all
+ * destinations are off.
+ */
+export class NoopObservabilitySink implements ObservabilitySink {
+  write(_event: ObservabilityEvent): void {
+    // Dropped by operator choice (all destinations off).
+  }
+
+  writeBatch(_events: readonly ObservabilityEvent[]): void {
+    // Dropped by operator choice (all destinations off).
+  }
+}
+
+/**
  * Degradation wrapper: an adapter failure degrades to local
  * logging and NEVER throws to the caller (the issue's failure
  * criterion: Analytics Engine unavailability never fails the

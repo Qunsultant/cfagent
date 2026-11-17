@@ -31,6 +31,13 @@ export interface Env {
   OTEL_DOMAIN_J1J7_ENABLED?: string;
   OTEL_DOMAIN_J1J7_LEVEL?: string;
   OTEL_DOMAIN_J1J7_SAMPLING?: string;
+  // Issue #5138 — one switch per destination (Analytics Engine
+  // sink, R2 OTLP export, console sink). Optional so code is safe
+  // before they are set; absence means the config-file / built-in
+  // defaults apply (all ON in the file, OFF built-in).
+  OTEL_DESTINATION_ANALYTICS_ENGINE_ENABLED?: string;
+  OTEL_DESTINATION_R2_ENABLED?: string;
+  OTEL_DESTINATION_CONSOLE_ENABLED?: string;
   OTEL_INGEST_TOKEN?: string;
   // Issue #1739: queue-backed messaging bindings. Optional so code is
   // safe before the bindings propagate; absence means the legacy
