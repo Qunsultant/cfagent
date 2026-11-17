@@ -22,6 +22,17 @@ import type { ShardChainContext } from "../types";
 /** The chain job's kind — the job id is `options-chain:<chainId>`. */
 export const OPTIONS_CHAIN_JOB_KIND = "options-chain";
 
+/**
+ * Issue #4774 — the options chain's short id (user ruling, comment
+ * 6912854849, 2026-11-16): "optionsscr". The options chain shape
+ * (options.runRoot / options.runStage, 8 execution stages, 4 display
+ * stages) IS the options-screener family's chain, so the family's
+ * short id names the chain too. The stable job kind above is
+ * unchanged; the short id is the alias a run is named, traced, and
+ * surfaced under.
+ */
+export const OPTIONS_CHAIN_SHORT_ID = "optionsscr" as const;
+
 /** The six chain steps, one per stage. */
 export const OPTIONS_CHAIN_FEED_STEP = "options-chain.feed";
 export const OPTIONS_CHAIN_ASSEMBLE_STEP = "options-chain.assemble";
@@ -138,7 +149,7 @@ export function buildOptionsChainJobDefinition(chain: ShardChainContext): unknow
   };
   return {
     jobId,
-    name: `Options sharded chain ${chain.chainId}`,
+    name: `optionsscr chain ${chain.chainId}`,
     kind: OPTIONS_CHAIN_JOB_KIND,
     root,
     chain,

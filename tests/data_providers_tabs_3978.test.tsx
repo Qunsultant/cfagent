@@ -221,7 +221,7 @@ describe("DataProvidersPanel tabs (issue #3978)", () => {
       "Analyze Jobs",
       "Generate Jobs",
       "Deliver Jobs",
-      "Pipeline",
+      "feedsrc — Feed chain",
       "Capabilities & Routes",
       "Connectivity & Session",
       "Actions",

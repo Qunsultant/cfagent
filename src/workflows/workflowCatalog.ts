@@ -13,6 +13,15 @@
  * projection, and the pub/sub seam is the #2869 stage message. This module
  * adds no runtime behaviour — it declares what the runtime must satisfy, and
  * `assertWorkflowCatalog` refuses a declaration that does not.
+ *
+ * Issue #4774 — every workflow also carries its chain short id (user
+ * ruling, comment 6912854849, 2026-11-16): stockscr, optionsscr, goalscr,
+ * strategyscr, feedsrc (the feed chain, whose short id is declared in
+ * chainPipelineJobs.ts). The short id is the alias a run is named, traced,
+ * and surfaced under; the stable `id` is unchanged (renaming it would move
+ * every lookup). A family with no ruled short id yet (trading-leg,
+ * payment-run, saga-run) carries none — the #4774 build proposes theirs
+ * in the PR body for the user's ruling, and does not wire one silently.
  */
 
 import { STAGE_NAMES, type StageName } from "../messaging/messagingPorts";
@@ -90,6 +99,15 @@ export interface StageDeclaration {
 export interface WorkflowDeclaration {
   /** Stable id used by the control plane and the UI. */
   id: string;
+  /**
+   * Issue #4774 — the chain's short id (user ruling, comment 6912854849,
+   * 2026-11-16): stockscr, optionsscr, goalscr, strategyscr. The alias a
+   * run is named, traced, and surfaced under; the stable `id` is
+   * unchanged. Absent exactly where the user has not ruled one yet
+   * (trading-leg, payment-run, saga-run) — do not wire a proposed one
+   * silently; the proposal lives in the #4774 PR body for the ruling.
+   */
+  shortId?: string;
   family: WorkflowFamily;
   labelKey: string;
   /** Human label, externalized here (data, not a literal in a component). */
@@ -167,6 +185,7 @@ function stage(
  */
 const STOCK_SCREENER: WorkflowDeclaration = {
   id: "stock-screener",
+  shortId: "stockscr",
   family: "stock",
   labelKey: "workflow.stock-screener",
   label: "Stock screener",
@@ -213,6 +232,7 @@ const STOCK_SCREENER: WorkflowDeclaration = {
  * stranding the formats that generated (#3072's per-format rule). */
 const OPTIONS_SCREENER: WorkflowDeclaration = {
   id: "options-screener",
+  shortId: "optionsscr",
   family: "options",
   labelKey: "workflow.options-screener",
   label: "Options screener",
@@ -375,6 +395,7 @@ const SAGA_RUN: WorkflowDeclaration = {
 /** Goal screen: runs on the screener workflow, goal-shaped request. */
 const GOAL_SCREEN: WorkflowDeclaration = {
   id: "goal-screen",
+  shortId: "goalscr",
   family: "goal",
   labelKey: "workflow.goal-screen",
   label: "Goal screen",
@@ -395,6 +416,7 @@ const GOAL_SCREEN: WorkflowDeclaration = {
 /** Strategy discovery: ranked strategies, no artifacts by design. */
 const STRATEGY_DISCOVERY: WorkflowDeclaration = {
   id: "strategy-discovery",
+  shortId: "strategyscr",
   family: "strategy",
   labelKey: "workflow.strategy-discovery",
   label: "Strategy discovery",
@@ -433,6 +455,15 @@ export function workflowById(id: string): WorkflowDeclaration | null {
 }
 
 /**
+ * Issue #4774 — one workflow by its chain short id (stockscr,
+ * optionsscr, goalscr, strategyscr), or null. The short id is the
+ * alias a run is named, traced, and surfaced under.
+ */
+export function workflowByShortId(shortId: string): WorkflowDeclaration | null {
+  return WORKFLOW_CATALOG.find((workflow) => workflow.shortId === shortId) ?? null;
+}
+
+/**
  * Assert the catalog's invariants. Refuses loudly rather than rendering a
  * half-declared workflow: a duplicate id, an empty stage list, an unknown
  * stage name, stages out of canonical order, or a stage missing one of the
@@ -443,12 +474,29 @@ export function assertWorkflowCatalog(
 ): void {
   if (catalog.length === 0) throw new Error("Workflow catalog refused: it is empty.");
   const seen = new Set<string>();
+  const seenShortIds = new Set<string>();
   for (const workflow of catalog) {
     if (!workflow.id.trim()) throw new Error("Workflow catalog refused: a workflow carries no id.");
     if (seen.has(workflow.id)) {
       throw new Error(`Workflow catalog refused: duplicate workflow id ${workflow.id}.`);
     }
     seen.add(workflow.id);
+    // Issue #4774 — a chain short id is one family's alias: unique
+    // across the catalog, lower-case alphanumerics, and absent exactly
+    // where the user has not ruled one yet.
+    if (workflow.shortId !== undefined) {
+      if (!/^[a-z][a-z0-9]*$/.test(workflow.shortId)) {
+        throw new Error(
+          `Workflow catalog refused: ${workflow.id} carries short id "${workflow.shortId}" — a short id is lower-case alphanumerics (#4774).`,
+        );
+      }
+      if (seenShortIds.has(workflow.shortId)) {
+        throw new Error(
+          `Workflow catalog refused: duplicate chain short id "${workflow.shortId}" (#4774).`,
+        );
+      }
+      seenShortIds.add(workflow.shortId);
+    }
     for (const stageDeclaration of workflow.stages) {
       const topics = stageDeclaration.publishes;
       if (workflow.stageSeam) {

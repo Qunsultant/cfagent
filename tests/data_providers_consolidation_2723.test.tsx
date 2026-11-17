@@ -171,7 +171,7 @@ describe("Data Providers consolidation & tabular presentation (#2723)", () => {
       // #3539 pin update (§7): the Deliver Jobs column joins the table.
       "Deliver Jobs",
       // #3540 pin update (§7): the Pipeline column joins the table.
-      "Pipeline",
+      "feedsrc — Feed chain",
       "Capabilities & Routes",
       "Connectivity & Session",
       "Actions",

@@ -1,9 +1,11 @@
 /**
- * Issue #3540 (Pipeline J7) — the pipeline-chain copilot
+ * Issue #3540 (Pipeline J7) — the feedsrc-chain copilot
  * commands: the General Copilot tools (and, through the one
  * catalog, the Stock Copilot surface) for the composed
- * pipeline chains — the deliverJobCommands.ts pattern
- * transposed to the composed chain.
+ * feedsrc chains — the deliverJobCommands.ts pattern
+ * transposed to the composed chain. (Issue #4774 renamed the
+ * chain "pipeline chain" to "feedsrc chain"; the tool NAMES
+ * are unchanged — a name is an identifier clients call by.)
  *
  * Each command is a thin dispatch over the ScheduledAgent door
  * (src/agents/orchestrator/meshDoors.ts) — the pipeline's host
@@ -35,7 +37,7 @@ import { createRunBridgePorts } from "../../agents/orchestrator/runBridge";
 const SOURCE_PROPERTY = {
   type: "string",
   description:
-    "The pipeline chain's source or name: a qualified source + universe (\"yahoo nasdaq100 pipeline\", \"sp100 pipeline\"), \"pipeline\" plus a single-job source (\"alpaca pipeline\", \"etrade pipeline\", \"public pipeline\"), or an exact pipeline chain job id (e.g. yahoo-nasdaq100-quotes-pipeline).",
+    "The feedsrc chain's source or name: a qualified source + universe (\"yahoo nasdaq100 pipeline\", \"sp100 pipeline\"), \"pipeline\" plus a single-job source (\"alpaca pipeline\", \"etrade pipeline\", \"public pipeline\"), or an exact feedsrc chain job id (e.g. yahoo-nasdaq100-quotes-pipeline).",
 } as const;
 
 const STAGE_PROPERTY = {
@@ -50,14 +52,14 @@ export class RunPipelineChainCommand
 {
   readonly name = "run_pipeline_chain";
   readonly description =
-    "Run a composed pipeline chain now through the job pipeline (the ScheduledAgent host's control plane) and return its settled outcome plus its end-to-end status. The chain executes the lineage's five stages as one job — feed pulls and persists the dataset, enrich derives from the persisted copy, analyze derives from the enriched copy, generate renders from the analyzed copy, and deliver delivers the generated reports to the configured channels — all under ONE run id, so every stage artifact of the run names the same lineage. Each stage also remains individually schedulable and manageable through its own job tools. A stage whose persisted input is missing refuses by name and the chain halts at that stage (its frontier), never fabricating downstream output. Examples: source \"yahoo nasdaq100 pipeline\" runs the Yahoo Nasdaq-100 chain end-to-end; \"sp100 pipeline\", \"alpaca pipeline\", \"etrade pipeline\", \"public pipeline\" run those chains. Requires the chat turn's acting identity.";
+    "Run a feedsrc chain now through the job pipeline (the ScheduledAgent host's control plane) and return its settled outcome plus its end-to-end status. The chain executes the lineage's five stages as one job — feed pulls and persists the dataset, enrich derives from the persisted copy, analyze derives from the enriched copy, generate renders from the analyzed copy, and deliver delivers the generated reports to the configured channels — all under ONE run id, so every stage artifact of the run names the same lineage. Each stage also remains individually schedulable and manageable through its own job tools. A stage whose persisted input is missing refuses by name and the chain halts at that stage (its frontier), never fabricating downstream output. Examples: source \"yahoo nasdaq100 pipeline\" runs the Yahoo Nasdaq-100 chain end-to-end; \"sp100 pipeline\", \"alpaca pipeline\", \"etrade pipeline\", \"public pipeline\" run those chains. Requires the chat turn's acting identity.";
   readonly jsonSchema = {
     type: "object" as const,
     properties: { source: SOURCE_PROPERTY },
     required: ["source"],
   };
   readonly zodSchema = z.object({
-    source: z.string().min(1).describe("Pipeline chain source or name"),
+    source: z.string().min(1).describe("feedsrc chain source or name"),
   });
 
   async execute(input: { source: string }, context: McpToolContext) {
@@ -108,14 +110,14 @@ export class GetPipelineChainStatusCommand
 {
   readonly name = "get_pipeline_chain_status";
   readonly description =
-    "Report one pipeline chain's end-to-end status — the answer to \"where is the pipeline?\": the chain's run state and last run outcome, EVERY stage's state in the chain's current/last run (feed, enrich, analyze, generate, deliver, with unit counts and errors), the FRONTIER (the stage the chain stopped advancing at — the failed, stopped, or in-flight stage; null when the last chain run completed), each stage job's own latest run state (the stage jobs also advance independently through their own schedules), and the next scheduled chain run. A chain that has never run reports the honest never-run state with frontier \"feed\". This is the same status the Data Providers UX surface renders. Requires the chat turn's acting identity.";
+    "Report one feedsrc chain's end-to-end status — the answer to \"where is the feedsrc chain?\": the chain's run state and last run outcome, EVERY stage's state in the chain's current/last run (feed, enrich, analyze, generate, deliver, with unit counts and errors), the FRONTIER (the stage the chain stopped advancing at — the failed, stopped, or in-flight stage; null when the last chain run completed), each stage job's own latest run state (the stage jobs also advance independently through their own schedules), and the next scheduled chain run. A chain that has never run reports the honest never-run state with frontier \"feed\". This is the same status the Data Providers UX surface renders. Requires the chat turn's acting identity.";
   readonly jsonSchema = {
     type: "object" as const,
     properties: { source: SOURCE_PROPERTY },
     required: ["source"],
   };
   readonly zodSchema = z.object({
-    source: z.string().min(1).describe("Pipeline chain source or name"),
+    source: z.string().min(1).describe("feedsrc chain source or name"),
   });
 
   async execute(input: { source: string }, context: McpToolContext) {
@@ -134,7 +136,7 @@ export class GetPipelineChainStatusCommand
 export class ListPipelineChainsCommand implements IMcpToolCommand<{}> {
   readonly name = "list_pipeline_chains";
   readonly description =
-    "List every composed pipeline chain (Yahoo Nasdaq-100, Yahoo S&P 100, Alpaca, E*TRADE, Public) with its end-to-end status: chain run state, per-stage states, the current frontier, each stage job's own latest run state, and the next scheduled chain run. Requires the chat turn's acting identity.";
+    "List every feedsrc chain (Yahoo Nasdaq-100, Yahoo S&P 100, Alpaca, E*TRADE, Public) with its end-to-end status: chain run state, per-stage states, the current frontier, each stage job's own latest run state, and the next scheduled chain run. Requires the chat turn's acting identity.";
   readonly jsonSchema = { type: "object" as const, properties: {} };
   readonly zodSchema = z.object({});
 
@@ -159,7 +161,7 @@ export class ManagePipelineChainCommand
 {
   readonly name = "manage_pipeline_chain";
   readonly description =
-    "Apply one management operation to a pipeline chain through the pipeline control plane: pause (stop the chain's run at the next stage boundary, resumable), resume (continue the chain from the persisted checkpoint — completed stages are read back from their hand-offs, never re-executed), cancel (terminal for the chain's run), retry (re-run as a new run), or the per-stage operations stage_pause / stage_resume / stage_cancel, which stop, resume, or cancel ONE stage inside the chain's run (the stage parameter names it: feed, enrich, analyze, generate, or deliver) — a stage can be paused or cancelled without dismantling the chain, and a cancelled stage's downstream never proceeds. The control plane's own refusals (for example, pausing a chain that is not running, or resuming a stage that is not the stopped one) are returned as errors, never as success. Requires the chat turn's acting identity.";
+    "Apply one management operation to a feedsrc chain through the pipeline control plane: pause (stop the chain's run at the next stage boundary, resumable), resume (continue the chain from the persisted checkpoint — completed stages are read back from their hand-offs, never re-executed), cancel (terminal for the chain's run), retry (re-run as a new run), or the per-stage operations stage_pause / stage_resume / stage_cancel, which stop, resume, or cancel ONE stage inside the chain's run (the stage parameter names it: feed, enrich, analyze, generate, or deliver) — a stage can be paused or cancelled without dismantling the chain, and a cancelled stage's downstream never proceeds. The control plane's own refusals (for example, pausing a chain that is not running, or resuming a stage that is not the stopped one) are returned as errors, never as success. Requires the chat turn's acting identity.";
   readonly jsonSchema = {
     type: "object" as const,
     properties: {
@@ -182,7 +184,7 @@ export class ManagePipelineChainCommand
     required: ["source", "action"],
   };
   readonly zodSchema = z.object({
-    source: z.string().min(1).describe("Pipeline chain source or name"),
+    source: z.string().min(1).describe("feedsrc chain source or name"),
     action: z
       .enum([
         "pause",

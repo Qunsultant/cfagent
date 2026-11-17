@@ -74,9 +74,26 @@ export interface ChainPipelineCatalogEntry {
   sourceId: DataProviderId;
   dataset: string;
   label: string;
+  /**
+   * Issue #4774 — the chain SHAPE's short id (user ruling, comment
+   * 6912854849, 2026-11-16): every feed-chain entry carries "feedsrc".
+   * The shape id, not the instance id: the per-feed jobId stays the
+   * instance identity, and the short id is what a run of this chain
+   * is named, traced, and surfaced under.
+   */
+  shortId: string;
   /** Lower-case name fragments the copilot/UX resolution accepts. */
   aliases: readonly string[];
 }
+
+/**
+ * Issue #4774 — the feed chain's short id (user ruling, comment
+ * 6912854849, 2026-11-16). One home for the shape name: the catalog
+ * entries, the built job definitions, and the surfaces name the chain
+ * "feedsrc". Resolution by the shape id alone refuses as ambiguous
+ * (every entry carries it) — a caller names a lineage, never a shape.
+ */
+export const FEED_CHAIN_SHORT_ID = "feedsrc" as const;
 
 const QUOTES_FEED_ENTRIES = FEED_PIPELINE_CATALOG.filter(
   (e) => e.dataset === "quotes",
@@ -116,7 +133,8 @@ export const CHAIN_PIPELINE_CATALOG: readonly ChainPipelineCatalogEntry[] =
       deliverJobId: `${feed.jobId}-enrich-analyze-generate-deliver`,
       sourceId: feed.sourceId,
       dataset: feed.dataset,
-      label: `Pipeline — ${feed.label}`,
+      label: `feedsrc — ${feed.label}`,
+      shortId: FEED_CHAIN_SHORT_ID,
       aliases: [
         ...((SOURCE_JOB_COUNT.get(feed.sourceId) ?? 0) === 1
           ? [`${feed.sourceId} pipeline`, `pipeline ${feed.sourceId}`]
@@ -138,6 +156,10 @@ export const CHAIN_PIPELINE_CATALOG: readonly ChainPipelineCatalogEntry[] =
  * a unique alias the query contains. Ambiguous or unknown
  * names return null — the caller refuses by name rather than
  * guessing (the #2144 rule, the family resolvers' idiom).
+ *
+ * Issue #4774: the shape short id "feedsrc" is NOT a resolvable
+ * name here — every entry carries it, so it names no lineage
+ * and resolution by it refuses (null), like any ambiguous name.
  */
 export function resolvePipelineChain(
   query: string,
@@ -234,7 +256,7 @@ export function buildChainPipelineJobDefinition(
   };
   return {
     jobId: chain.id,
-    name: `Pipeline — ${chain.sourceId} ${chain.dataset} (${chain.universe})`,
+    name: `feedsrc — ${chain.sourceId} ${chain.dataset} (${chain.universe})`,
     root,
   };
 }
@@ -369,7 +391,7 @@ export interface PipelineChainStageView {
 }
 
 /**
- * The one-query answer to "where is the pipeline?": the
+ * The one-query answer to "where is the feedsrc chain?": the
  * chain's per-stage states, the frontier (the stage the
  * current/last chain run stopped advancing at — the failed,
  * stopped, or in-flight stage; null when the last chain run

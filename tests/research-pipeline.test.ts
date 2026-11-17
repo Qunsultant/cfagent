@@ -135,6 +135,28 @@ describe("runResearchPipeline", () => {
     expect(report.trigger).toBe("manual");
   });
 
+  it("trace entries carry level-qualified short ids (#4774)", async () => {
+    const report = await runResearchPipeline(
+      { provider: fixtureProvider() },
+      testConfig(),
+      { trigger: "manual", userLogin: "tester", runId: "rsr_test4774", now: NOW }
+    );
+    expect(report.runId).toBe("rsr_test4774");
+    // The candidate-level OODA loop: every entry is `ooda:<stage>`.
+    expect(report.oodaTrace.length).toBeGreaterThan(0);
+    for (const step of report.oodaTrace) {
+      expect(step.shortId).toBe(`ooda:${step.stage}`);
+    }
+    // The run-level pipeline stages: every entry is `respipe:<stage>`.
+    expect(report.stageTrace.length).toBeGreaterThan(0);
+    for (const step of report.stageTrace) {
+      expect(step.shortId).toBe(`respipe:${step.stage}`);
+    }
+    // The bare stage strings are unchanged — only the short id differs.
+    expect(report.oodaTrace.some((s) => s.stage === "observe")).toBe(true);
+    expect(report.stageTrace.some((s) => s.stage === "observe")).toBe(true);
+  });
+
   it("stores exactly ONE canonical report (idempotent generation id)", async () => {
     const report = await runResearchPipeline(
       { provider: fixtureProvider() },

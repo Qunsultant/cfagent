@@ -608,11 +608,11 @@ export function DataProvidersPanel() {
     try {
       await postPipelineChainAction(view.id, chain.jobId, action, stage);
       toast.success(
-        `Pipeline chain "${chain.jobId}" ${action}${stage ? ` (${stage})` : ""} dispatched.`
+        `feedsrc chain "${chain.jobId}" ${action}${stage ? ` (${stage})` : ""} dispatched.`
       );
       await load();
     } catch (err: any) {
-      setError(err?.message || `Failed to ${action} pipeline chain "${chain.jobId}".`);
+      setError(err?.message || `Failed to ${action} feedsrc chain "${chain.jobId}".`);
     } finally {
       setActingId(null);
     }
@@ -1398,17 +1398,21 @@ export function DataProvidersPanel() {
       },
     },
     {
-      // #3540: the provider's composed pipeline chains —
+      // #3540: the provider's composed feedsrc chains —
       // the end-to-end roll-up (per-stage states + the
       // current frontier) with chain-level and
       // frontier-stage management, reusing the feed-job
       // cell classes (no new stylesheet).
+      // Issue #4774: the section names the chain shape
+      // "feedsrc" — the bare "Pipeline" header named no
+      // chain at all, and a feed-chain card is not a
+      // screener-chain card.
       key: "pipelineChains",
-      header: "Pipeline",
+      header: "feedsrc — Feed chain",
       render: (view) => {
         const chains = view.pipelineChains ?? [];
         if (chains.length === 0) {
-          return <span className="ui-meta-sm">No pipeline</span>;
+          return <span className="ui-meta-sm">No feedsrc chain</span>;
         }
         const busy = actingId === view.id;
         return (
