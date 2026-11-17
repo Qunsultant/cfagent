@@ -16,6 +16,7 @@ import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import * as XLSX from "@e965/xlsx";
 import type { GoalDrivenScreenResult } from "./goalDrivenScreen";
 import { recordJobOutcome } from "./jobOutcomes";
+import type { JobRunTrigger } from "../data/jobRunRecordPorts";
 import type { SqlStorage } from "../orm";
 import { createStructuredLogger } from "../observability/structuredLogger";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
@@ -161,7 +162,7 @@ export async function generateGoalScreenPdf(
  */
 export interface GoalRunOutcomeRecord {
   id: string;
-  trigger: "manual" | "scheduled";
+  trigger: JobRunTrigger;
   status: "completed" | "failed" | "partial";
   scanned?: number;
   matched?: number;

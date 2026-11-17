@@ -28,6 +28,7 @@ import { getServiceUserLogin } from "../security/serviceIdentity";
 import { DatabaseORM } from "../orm";
 import { ETradeService } from "../services/etrade";
 import { createFeedDatasetAdapter } from "../data/createFeedDatasetPorts";
+import type { JobRunTrigger } from "../data/jobRunRecordPorts";
 import {
   buildFeedJobRegistry,
   readPersistedSentiment,
@@ -49,12 +50,6 @@ import {
   validateQuotaOverrideInput,
   type QuotaUsageView,
 } from "../security/userRequestQuota";
-import { createOtelMetrics } from "../observability/otelMetricsProvider";
-import {
-  createOtelMetricsRecorder,
-  type OtelMetricsRecorder,
-} from "../observability/otelMetricsRecorder";
-import { MeterProvider } from "@opentelemetry/sdk-metrics";
 import {
   ScreenAlreadyRunningError,
   screenInFlightFromProbe,
@@ -177,8 +172,9 @@ const structuredLog = createStructuredLogger(createObservabilitySink({}), {
 });
 
 export interface ScreenerRunRequest {
-  /** Who triggered the screen. */
-  trigger: "manual" | "scheduled";
+  /** Who triggered the screen. The five dispatch modes (#5028, #3214);
+   *  a Run-now route stamps "triggered" (#5052). */
+  trigger: JobRunTrigger;
   /** Manual: user filters (search/limit/price-range/trend). Scheduled: { sector }. */
   filters?: StockScreenerFilter;
   /** Scheduled: sector label (issue #421: "ALL" when none was selected). */
@@ -367,7 +363,7 @@ export interface ScreenerGatherStageOutput extends ScreenerFeedStageOutput {
 export interface ScreenerGoalRunner {
   (req: {
     scenario: ScenarioDefinition;
-    trigger: "manual" | "scheduled";
+    trigger: JobRunTrigger;
     idempotencyKey: string;
     userLogin?: string;
     environment?: "TEST" | "PROD";
@@ -479,7 +475,7 @@ export interface ScreenerAgentPort {
 
 export interface ScreenerRunResult {
   timestamp: string;
-  trigger: "manual" | "scheduled";
+  trigger: JobRunTrigger;
   /** Issue #1007: the data provider that produced this run. */
   provider: StockScreenProvider;
   /**
@@ -669,58 +665,6 @@ export class ScreenerAgent extends PortThink {
       this.dataProviderPortsPromise = buildDataProviderPorts(this.env);
     }
     return this.dataProviderPortsPromise;
-  }
-
-  /**
-   * Issue #5082 (S2) — the lazily created OTel metrics
-   * recorder for the quota counter (quota.report_runs). Cached
-   * on the agent (the agent is long-lived, so the
-   * MeterProvider's periodic reader keeps exporting). A
-   * creation failure falls back to a disabled recorder (a
-   * no-op) — metrics never fail a quota charge.
-   */
-  private otelMetricsRecorderCache: OtelMetricsRecorder | null = null;
-
-  private quotaMetricsRecorder(): OtelMetricsRecorder {
-    if (!this.otelMetricsRecorderCache) {
-      try {
-        this.otelMetricsRecorderCache = createOtelMetrics(this.env).recorder;
-      } catch {
-        // Fall back to a disabled recorder (a no-op).
-        this.otelMetricsRecorderCache = createOtelMetricsRecorder({
-          meter: new MeterProvider().getMeter("cfagent-quota-fallback"),
-          settings: {
-            exportIntervalMs: 300000,
-            freeTierDailyWriteLimit: 100000,
-            freeTierDailyReadQueryLimit: 10000,
-            healthPipelineMaxFailureRate: 0.05,
-            sloResourceRowsReadMaxPct: 0.7,
-          },
-          isEnabled: () => false,
-        });
-      }
-    }
-    return this.otelMetricsRecorderCache;
-  }
-
-  /**
-   * Issue #5082 (S2) — the quota-charge metrics hook: records
-   * one quota.report_runs metric per charged report run. The
-   * hook is best-effort (a recorder throw never fails the
-   * gate — the gate wraps the hook in try/catch too).
-   */
-  private quotaMetricsOnCharge(): (charge: {
-    userLogin: string;
-    kind: string;
-    tenantId: string;
-  }) => void {
-    return (charge) => {
-      try {
-        this.quotaMetricsRecorder().recordQuotaCharge(charge);
-      } catch {
-        // Best-effort metrics hook.
-      }
-    };
   }
 
   private async platformBootstrap(): Promise<void> {
@@ -923,7 +867,7 @@ export class ScreenerAgent extends PortThink {
    * exit path; the record lives with the work in this DO.
    */
   async createScreenerTask(input: {
-    trigger: "manual" | "scheduled";
+    trigger: JobRunTrigger;
     universe: string;
     sector: string;
     userLogin?: string;
@@ -1127,7 +1071,6 @@ export class ScreenerAgent extends PortThink {
       userLogin: login,
       kind: "screen",
       runId: input.runId,
-      onCharge: this.quotaMetricsOnCharge(),
     });
   }
 
@@ -1296,7 +1239,6 @@ export class ScreenerAgent extends PortThink {
         userLogin: lockLogin,
         kind: "screen",
         runId: `screen:${lockLogin}:${lockUniverse}:${lock.startedAt ?? Date.now()}`,
-        onCharge: this.quotaMetricsOnCharge(),
       });
     } catch (quotaErr) {
       this.screenRunLock().release(lockLogin, lockUniverse, lock.token);
@@ -3127,7 +3069,6 @@ export class ScreenerAgent extends PortThink {
       userLogin,
       kind: "goalScreen",
       runId: `goalScreen:${req.idempotencyKey}`,
-      onCharge: this.quotaMetricsOnCharge(),
     });
     const tradeClient = this.tradeService(userLogin, req.environment);
     const { goalUniverseDeps } = await this.buildGoalUniverseDeps({
@@ -3239,7 +3180,6 @@ export class ScreenerAgent extends PortThink {
       userLogin,
       kind: "goalScreen",
       runId: `goalScreen:${req.idempotencyKey}`,
-      onCharge: this.quotaMetricsOnCharge(),
     });
     const tradeClient = this.tradeService(userLogin, req.environment);
     const { runProductionGoalScreen, createYahooStockScreener, createLiveStockScreener } = await import("../services/screeningRuntime");

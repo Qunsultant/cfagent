@@ -49,6 +49,7 @@ import type { RunDetail } from "./runDetails";
 const RUN_TYPE_LABELS: Record<DocumentRunType, string> = {
   manual: "Manual",
   scheduled: "Scheduled",
+  triggered: "Triggered",
 };
 
 const SORT_LABELS: Record<DocumentSortKey, string> = {

@@ -31,6 +31,7 @@ import {
 import type { SqlStorage } from "../orm";
 import type { ScreenerRunOutcome } from "./screenerFollowups";
 import type { ScheduledReportInput } from "./scheduledReports";
+import type { JobRunTrigger } from "../data/jobRunRecordPorts";
 import { createStructuredLogger } from "../observability/structuredLogger";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
 import { DEFAULT_TENANT_PROVIDERS } from "../data/commercialPorts";
@@ -117,7 +118,16 @@ export interface UnifiedOptionsRunRecord {
   title: string;
   source: string;
   summary: string;
-  trigger: "manual" | "scheduled" | "triggered" | "goal" | "agentic";
+  /**
+   * Issue #5052 — reconciled onto the five dispatch modes (#5028,
+   * #3214). The old "goal" / "agentic" values are gone: no writer
+   * ever produced them (verified #5052 — the only "goal" stamp is
+   * the goal-stock spec, a different record), "goal" is context that
+   * rides goalId, and "agentic" had no single-mode mapping. Legacy
+   * stored rows carrying them read back as "unknown" on the
+   * Workflow Runs / Docs surfaces — never invented, never crashed.
+   */
+  trigger: JobRunTrigger;
   strategyMode?: "thesis" | "all" | "no-view";
   /** Issue #2600: the remaining strategy-choice controls, when known. */
   candidateLimit?: number | "all";
@@ -218,7 +228,7 @@ export function recordUnifiedOptionsRun(
 
 export interface OptionsRunOutcomeRecord {
   id: string;
-  trigger: "manual" | "scheduled";
+  trigger: JobRunTrigger;
   status: "completed" | "failed" | "partial";
   scanned?: number;
   matched?: number;
@@ -303,7 +313,7 @@ export interface UnifiedStrategyStage {
 export interface StrategyScreenRecordInput {
   userLogin: string;
   symbol: string;
-  trigger: "manual" | "scheduled";
+  trigger: JobRunTrigger;
   mode: "strategies" | "best-trade";
   ranked: unknown[];
   bestTrade?: unknown;
@@ -791,7 +801,7 @@ export async function recordOptionsServeReport(
 export interface OptionsOrchestratorRun {
   timestamp: string;
   success: boolean;
-  trigger: "manual" | "scheduled";
+  trigger: JobRunTrigger;
   thesis: string;
   symbols: string[];
   withTrades: number;

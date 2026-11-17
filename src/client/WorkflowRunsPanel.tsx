@@ -92,6 +92,7 @@ type ScheduleFilter = "all" | WorkflowScheduleMechanism;
 const TRIGGER_LABEL: Record<WorkflowRunTrigger, string> = {
   manual: "Manual",
   scheduled: "Scheduled",
+  triggered: "Triggered",
   autonomous: "Autonomous",
   webhook: "Webhook",
   agent: "Agent",
@@ -101,6 +102,7 @@ const TRIGGER_LABEL: Record<WorkflowRunTrigger, string> = {
 const TRIGGER_TONE: Record<WorkflowRunTrigger, "neutral" | "info" | "purple" | "accent"> = {
   manual: "neutral",
   scheduled: "info",
+  triggered: "info",
   autonomous: "purple",
   webhook: "accent",
   agent: "accent",
@@ -111,6 +113,7 @@ const TRIGGER_OPTIONS: Array<{ id: TriggerFilter; label: string }> = [
   { id: "all", label: "All triggers" },
   { id: "scheduled", label: "Scheduled" },
   { id: "manual", label: "Manual" },
+  { id: "triggered", label: "Triggered" },
   { id: "autonomous", label: "Autonomous" },
   { id: "webhook", label: "Webhook" },
   { id: "unknown", label: "Not recorded" },

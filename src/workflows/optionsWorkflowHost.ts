@@ -95,6 +95,7 @@ import {
   optionsChainJobId,
 } from "../services/optionsChainJobDefinition";
 import type { Env, ShardChainContext } from "../types";
+import type { JobRunTrigger } from "../data/jobRunRecordPorts";
 import {
   COMPARISON_JOB_ID_PREFIX,
   comparisonJobDefinition,
@@ -126,7 +127,7 @@ export interface StartOptionsScreenWorkflowInput {
   request: unknown;
   /** The acting login — rides the raw config beside the request. */
   userLogin?: string;
-  trigger?: "manual" | "scheduled";
+  trigger?: JobRunTrigger;
   /**
    * The universe stage input (#4473): a serializable descriptor
    * stamped on the stored request's classInput, from which the
@@ -158,7 +159,7 @@ export interface StartOptionsScreenWorkflowInput {
 export interface StartOptionsScreenWorkflowOpts {
   startWorkflow?: (
     jobId: string,
-    params: { trigger: "manual" | "scheduled" },
+    params: { trigger: JobRunTrigger },
   ) => Promise<{ instanceId: string }>;
   stores?: JobPipelineStores;
   runRecorder?: JobRunRecorder;
@@ -372,7 +373,7 @@ export interface StartOptionsChainWorkflowInput {
   chain: ShardChainContext;
   /** The acting login — rides the raw config beside the chain. */
   userLogin?: string;
-  trigger?: "manual" | "scheduled";
+  trigger?: JobRunTrigger;
 }
 
 /**
@@ -454,7 +455,7 @@ export interface StartGoalOptionsLegWorkflowInput {
   goalRunId?: string;
   /** The acting login — rides the raw config beside the request. */
   userLogin?: string;
-  trigger?: "manual" | "scheduled";
+  trigger?: JobRunTrigger;
   /**
    * The universe stage input (#4473): stamped on the stored
    * request's classInput beside the goal run id, so a

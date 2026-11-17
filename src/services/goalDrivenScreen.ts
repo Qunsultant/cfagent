@@ -58,6 +58,7 @@ import {
 } from "./screenerTaskLedger";
 import { goalStockSpecFromPlan } from "../workflows/goalStockScreenSpec";
 import type { StockScreenRunSpec } from "../workflows/stockScreenRunSpec";
+import type { JobRunTrigger } from "../data/jobRunRecordPorts";
 import type { GoalScreenCommand } from "../workflows/workflowPorts";
 
 /**
@@ -151,7 +152,7 @@ async function runGoalOptionsLegViaWorkflow(args: {
   registry: ScreeningProviderRegistry;
   plan: GoalScreenPlan;
   userLogin?: string;
-  trigger: "manual" | "scheduled";
+  trigger: JobRunTrigger;
   idempotencyKey?: string;
 }): Promise<ScreeningResult> {
   const { workflow } = args;
@@ -305,7 +306,7 @@ async function runGoalStockLegViaWorkflow(args: {
   registry: ScreeningProviderRegistry;
   plan: GoalScreenPlan;
   userLogin?: string;
-  trigger: "manual" | "scheduled";
+  trigger: JobRunTrigger;
   idempotencyKey?: string;
   environment?: "TEST" | "PROD";
   provider?: GoalScreenProvider;
@@ -542,7 +543,7 @@ export async function runGoalDrivenScreen(input: {
    *  PlannerInput + stage messages; absent an identity the leg
    *  fails closed rather than publishing under a fabricated login. */
   userLogin?: string;
-  trigger?: "manual" | "scheduled";
+  trigger?: JobRunTrigger;
   idempotencyKey?: string;
   optionsWorkflow?: OptionsWorkflowDeps;
   /** Issue #4279 ([One engine] #3550 S4): goal dispatch as a
@@ -738,7 +739,7 @@ export async function runGoalDrivenScreenWithLedger(input: {
    *  (and their provenance) name the engine that actually served them. */
   stockProviderId?: string;
   scenario: ScenarioDefinition;
-  trigger: "manual" | "scheduled";
+  trigger: JobRunTrigger;
   idempotencyKey: string;
   userLogin?: string;
   assetClasses?: ScreeningProviderAssetClass[];

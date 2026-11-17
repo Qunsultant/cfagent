@@ -49,6 +49,8 @@
  * the screen itself.
  */
 
+import type { JobRunTrigger } from "../data/jobRunRecordPorts";
+
 export type ScreenerTaskStatus =
   | "queued"
   | "claimed"
@@ -80,7 +82,7 @@ export interface ScreenerTaskEvaluation {
 export interface ScreenerTask {
   id: string;
   idempotencyKey: string;
-  trigger: "manual" | "scheduled";
+  trigger: JobRunTrigger;
   universe: string;
   sector: string;
   userLogin?: string;
@@ -224,7 +226,7 @@ export class ScreenerTaskLedger {
    * minute slot, so a duplicate delivery shares one record.
    */
   async create(input: {
-    trigger: "manual" | "scheduled";
+    trigger: JobRunTrigger;
     universe: string;
     sector: string;
     userLogin?: string;

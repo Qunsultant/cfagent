@@ -40,6 +40,7 @@
  */
 
 import { shardableUniverses, type BrokerId } from "../trading";
+import type { JobRunTrigger } from "../data/jobRunRecordPorts";
 import type { Env, StageChainConfig } from "../types";
 import {
   manualWorkflowJobId,
@@ -93,7 +94,7 @@ export function shardsForUniverse(universe: string): WorkflowShard[] {
 export interface ParentScreenCommandInput {
   jobId: string;
   source: string;
-  trigger: "manual" | "scheduled";
+  trigger: JobRunTrigger;
   specTrigger?: WorkflowJobCommand["specTrigger"];
   userLogin: string;
   tenantId?: string;

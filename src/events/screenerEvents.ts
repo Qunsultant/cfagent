@@ -39,6 +39,8 @@
  * Full statement: docs/architecture/security/screener-event-bus-loss-window-1770.md.
  */
 
+import type { JobRunTrigger } from "../data/jobRunRecordPorts";
+
 export interface ScreenerOpportunity {
   symbol: string;
   companyName: string;
@@ -53,7 +55,7 @@ export interface ScreenerCompletedEvent {
   timestamp: string;
   /** The selected stock universe; distinct from the sector filter. */
   universe?: string;
-  trigger?: "manual" | "scheduled";
+  trigger?: JobRunTrigger;
   /** Target size before any E*TRADE quote failures or filters. */
   expectedCount?: number;
   /** Per-run PDF storage key, avoiding races through the latest-report pointer. */
@@ -134,7 +136,7 @@ export interface ScreenerFailedEvent {
   type: "screener.failed";
   timestamp: string;
   universe?: string;
-  trigger?: "manual" | "scheduled";
+  trigger?: JobRunTrigger;
   deliveryId?: string;
   sector: string;
   error: string;
@@ -172,7 +174,7 @@ export interface OptionsOpportunitySummary {
 export interface OptionsCompletedEvent {
   type: "options.completed";
   timestamp: string;
-  trigger?: "manual" | "scheduled";
+  trigger?: JobRunTrigger;
   universe?: string;
   thesis: string;
   totalScanned: number;
@@ -216,7 +218,7 @@ export interface OptionsCompletedEvent {
 export interface OptionsFailedEvent {
   type: "options.failed";
   timestamp: string;
-  trigger?: "manual" | "scheduled";
+  trigger?: JobRunTrigger;
   universe?: string;
   thesis: string;
   error: string;
