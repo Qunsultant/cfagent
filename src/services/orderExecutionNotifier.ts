@@ -22,7 +22,35 @@ const structuredLog = createStructuredLogger(createObservabilitySink({}), {
   component: "services/orderExecutionNotifier",
 });
 
-export type OrderNotificationStatus = "delivered" | "not_configured" | "disabled" | "failed";
+export type OrderNotificationStatus =
+  | "delivered"
+  | "deduped"
+  | "not_configured"
+  | "disabled"
+  | "failed";
+
+const MAX_ORDER_NOTIFICATION_DEDUP_KEYS = 2_000;
+const deliveredOrderNotificationKeys = new Set<string>();
+
+export function resetOrderNotificationDedupForTests(): void {
+  deliveredOrderNotificationKeys.clear();
+}
+
+function orderNotificationDedupKey(
+  orderId: string,
+  status: string,
+  channel: "slack" | "email",
+): string {
+  return `order_notify:${orderId.trim()}:${status.trim().toLowerCase()}:${channel}`;
+}
+
+function rememberDeliveredKey(key: string): void {
+  if (deliveredOrderNotificationKeys.size >= MAX_ORDER_NOTIFICATION_DEDUP_KEYS) {
+    const oldest = deliveredOrderNotificationKeys.values().next().value;
+    if (oldest !== undefined) deliveredOrderNotificationKeys.delete(oldest);
+  }
+  deliveredOrderNotificationKeys.add(key);
+}
 
 export interface ChannelNotificationReceipt {
   sent: boolean;
@@ -185,8 +213,14 @@ export async function notifyOrderExecution(
       : null;
 
   // 1. Slack Notification
+  const slackDedupKey = orderNotificationDedupKey(input.orderId, input.status, "slack");
   let slackReceipt: ChannelNotificationReceipt;
-  if (gate && !gate.isEnabled("slack")) {
+  if (deliveredOrderNotificationKeys.has(slackDedupKey)) {
+    slackReceipt = {
+      sent: false,
+      status: "deduped",
+    };
+  } else if (gate && !gate.isEnabled("slack")) {
     slackReceipt = {
       sent: false,
       status: "disabled",
@@ -204,6 +238,9 @@ export async function notifyOrderExecution(
         text: slackText,
         ...(input.slackChannel ? { channel: input.slackChannel } : {}),
       });
+      if (res.ok) {
+        rememberDeliveredKey(slackDedupKey);
+      }
       slackReceipt = {
         sent: res.ok,
         status: res.ok ? "delivered" : "failed",
