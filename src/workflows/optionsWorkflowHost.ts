@@ -93,7 +93,7 @@ import { createBuiltinStepRegistry } from "../services/jobPipelineSteps";
 import {
   buildOptionsChainJobDefinition,
   optionsChainJobId,
-} from "../services/optionsChainPipelineJobs";
+} from "../services/optionsChainJobDefinition";
 import type { Env, ShardChainContext } from "../types";
 import {
   COMPARISON_JOB_ID_PREFIX,
