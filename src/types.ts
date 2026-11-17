@@ -753,6 +753,7 @@ export interface Env {
   ETRADE_ACCOUNT_ID_KEY?: string;
   ETRADE_ENVIRONMENT?: "sandbox" | "live";
   ETRADE_MCP_SERVER_URL?: string;
+  IBKR_MCP_SERVER_URL?: string;
   ETAPI_CONFIG?: string;
   // Market Data & Research Configuration (yfinance & Alpaca)
   ALPACA_API_KEY?: string;

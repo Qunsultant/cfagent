@@ -122,6 +122,8 @@ import {
   resolveAgentCapabilityManifest,
   type CapabilityState,
 } from "../../actors/capabilityManifest";
+import { IBKR_CONFIG } from "../../config/ibkr";
+import { checkIbkrRegionAvailability, isIbkrToolAllowedV1 } from "../../security/ibkrOAuth";
 import type { CopilotRegistrationId } from "../../services/copilotChannels";
 import { createStructuredLogger } from "../../observability/structuredLogger";
 import { createObservabilitySink } from "../../observability/createObservabilityPorts";
@@ -445,5 +447,126 @@ export function resolveStockCopilotMcpActivation(deps: {
   return {
     active: deps.sourceTab === STOCK_COPILOT_SOURCE_TAB && state === "enabled",
     state,
+  };
+}
+
+/**
+ * Issue #4676 / #3410 (Gap 22): IBKR hosted MCP registration on the Agents SDK
+ * MCP client manager (`this.mcp`), NOT a separate RemoteMcpClient.
+ */
+export const IBKR_MCP_SERVER_ID = IBKR_CONFIG.serverId;
+
+export function createIbkrMcpFetch(deps: {
+  getAccessToken: () => Promise<string | null>;
+  countryCode?: string | null;
+  fetchImpl?: typeof fetch;
+}): OpenaimpMcpFetch {
+  const doFetch = deps.fetchImpl ?? fetch;
+  return async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const region = checkIbkrRegionAvailability(deps.countryCode);
+    if (!region.allowed) {
+      return Response.json(
+        { code: region.code, message: region.message },
+        { status: 403 },
+      );
+    }
+    const token = await deps.getAccessToken();
+    if (!token) {
+      return Response.json(
+        {
+          code: "IBKR_AUTH_REQUIRED",
+          message: "Interactive Brokers MCP session is not authorized. Please connect IBKR first.",
+        },
+        { status: 401 },
+      );
+    }
+    const headers = new Headers(init?.headers);
+    headers.set("Authorization", `Bearer ${token}`);
+    return doFetch(input, { ...init, headers });
+  };
+}
+
+export async function ensureIbkrMcpConnection(deps: {
+  mcp: MeshMcpManagerPort;
+  fetch: OpenaimpMcpFetch;
+  url?: string;
+  audit: (type: string, payload: Record<string, unknown>) => void;
+}): Promise<EnsureOpenaimpMcpResult> {
+  const { mcp } = deps;
+  const serverUrl = deps.url ?? IBKR_CONFIG.mcpServerUrl;
+  try {
+    await mcp.waitForConnections({ timeout: 10_000 });
+  } catch {
+    // waitForConnections is best-effort.
+  }
+
+  const existingTools = Object.keys(mcp.getAITools({ serverId: IBKR_MCP_SERVER_ID }));
+  if (existingTools.length > 0) {
+    return { ready: true, toolCount: existingTools.length, reused: true };
+  }
+
+  try {
+    try {
+      await mcp.removeServer(IBKR_MCP_SERVER_ID);
+    } catch {
+      // Nothing registered yet.
+    }
+    await mcp.registerServer(IBKR_MCP_SERVER_ID, {
+      url: serverUrl,
+      name: IBKR_MCP_SERVER_ID,
+      transport: { type: "streamable-http", fetch: deps.fetch },
+      retry: { maxAttempts: 1, baseDelayMs: 10, maxDelayMs: 10 },
+    });
+    await mcp.connectToServer(IBKR_MCP_SERVER_ID);
+    await mcp.discoverIfConnected(IBKR_MCP_SERVER_ID);
+  } catch (err) {
+    const rawMsg = err instanceof Error ? err.message : "IBKR MCP connection failed";
+    // Never leak tokens or stack details in audit/error payloads.
+    const safeMsg = rawMsg.replace(/Bearer\s+\S+/gi, "Bearer [REDACTED]").split("\n")[0];
+    deps.audit("ibkr_mcp.discovery_failed", {
+      serverId: IBKR_MCP_SERVER_ID,
+      error: safeMsg,
+    });
+    return { ready: false, toolCount: 0, reused: false, error: safeMsg };
+  }
+
+  const discovered = Object.keys(mcp.getAITools({ serverId: IBKR_MCP_SERVER_ID }));
+  if (discovered.length === 0) {
+    const message = "IBKR MCP connection produced an empty catalog";
+    deps.audit("ibkr_mcp.discovery_failed", {
+      serverId: IBKR_MCP_SERVER_ID,
+      error: message,
+    });
+    return { ready: false, toolCount: 0, reused: false, error: message };
+  }
+
+  deps.audit("ibkr_mcp.discovery_ready", {
+    serverId: IBKR_MCP_SERVER_ID,
+    toolCount: discovered.length,
+  });
+  return { ready: true, toolCount: discovered.length, reused: false };
+}
+
+/**
+ * v1 read-only Copilot turn gate for `tool_ibkr_*`.
+ *
+ * Strips any IBKR tool that is not in the v1 read-only allowlist (and
+ * unconditionally blocks trade/order/write tools), leaving all non-IBKR
+ * tools untouched.
+ */
+export function ibkrTurnGate(deps: {
+  toolNames: readonly string[];
+  pinnedAllowlist?: readonly string[];
+}): { activeTools?: string[]; blockedIbkrTools: string[] } {
+  const blockedIbkrTools = deps.toolNames.filter(
+    (name) => name.startsWith("tool_ibkr_") && !isIbkrToolAllowedV1(name, deps.pinnedAllowlist),
+  );
+  if (blockedIbkrTools.length === 0) {
+    return { blockedIbkrTools: [] };
+  }
+  const blockedSet = new Set(blockedIbkrTools);
+  return {
+    activeTools: deps.toolNames.filter((name) => !blockedSet.has(name)),
+    blockedIbkrTools,
   };
 }
