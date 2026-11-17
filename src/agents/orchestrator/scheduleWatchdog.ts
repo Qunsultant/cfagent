@@ -252,3 +252,9 @@ export async function watchdogMissedSchedules(
   }
   return result;
 }
+
+export function formatMissedScheduleAlertDetail(info: MissedScheduleAlertInfo): string {
+  const callbackPart = info.callback ? ` | callback: ${info.callback}` : "";
+  const ownerPart = info.userLogin ? ` | user: ${info.userLogin}` : "";
+  return `missed-fire: expected ${info.expectedTick} (last run: ${info.lastRun ?? "never"})${callbackPart}${ownerPart}`;
+}
