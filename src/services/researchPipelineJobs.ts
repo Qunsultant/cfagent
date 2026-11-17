@@ -150,7 +150,7 @@ export function registerResearchSteps(
       }
       return {
         output: evaluation,
-        descriptor: `${researchArtifactKey(runId, "evaluate")} (${evaluation ? evaluation.stats.evaluated : 0} evaluated)`,
+        descriptor: `${researchArtifactKey(runId, "evaluate")} (${evaluation ? evaluation.aggregates.evaluated : 0} evaluated)`,
       };
     } catch (err) {
       structuredLog.error("researchPipelineJobs.evaluate_apply_failed", {
