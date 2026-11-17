@@ -6,6 +6,15 @@ to migrate consumers off them. Deletion needs zero consumers plus an
 owner decision plus a gate amendment, and is never part of a program
 slice.
 
+## 2026-11-17 — tail slice 1 retires dataProvidersPanel.css in place (#5016)
+
+- File: `src/client/dataProvidersPanel.css` → retired in place (no rules remain)
+- Date: 2026-11-17
+- Reason: Issue #5016 (sub of #3695, tail slice 1) migrates `src/client/DataProvidersPanel.tsx` to primitives and tokens; the sheet's sole importer no longer imports it and no other consumer exists. The sheet stays on disk (no file deletion, gitops §22) with a deprecation header naming its successor. `src/client/PlatformAdminPanel.tsx` is migrated in the same slice but has no sheet of its own — its classes lived in the shared `src/client/styles.css`, whose rules stay for the other consumers.
+- Replacement: `src/client/components/ui/primitives.css` (ui-* utilities, incl. `ui-link`, `ui-mono`, `ui-meta-sm`, `ui-meta`, `ui-label`, `ui-danger`, `ui-grow`, `ui-scroll-frame`) and `src/client/tokens.css` (design tokens).
+- Consumers at deprecation: none — the sole importer was migrated in the same slice.
+- Deletion condition: zero consumers (already met) plus an owner decision plus a gate amendment; deletion is never part of a program slice.
+
 ## 2026-11-16 — S-U5 retires agentsPanel.css + docsAndReports.css in place (#4927)
 
 - Files: `src/client/agentsPanel.css`, `src/client/docsAndReports.css` → retired in place (no rules remain)

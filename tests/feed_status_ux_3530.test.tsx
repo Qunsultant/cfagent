@@ -281,9 +281,18 @@ async function click(scope: ParentNode, text: string) {
 }
 
 function feedBlock(id: string): Element {
-  const block = providerItem(id).querySelector(".dpp-feed-status");
-  if (!block) throw new Error(`No .dpp-feed-status block for "${id}". Row: ${providerItem(id).textContent?.slice(0, 600)}`);
+  // Tail slice 1 (issue #5016): the feed block is a Stack keyed by the
+  // feed job id (no bespoke class anymore); the data attribute is the
+  // stable hook.
+  const block = providerItem(id).querySelector("[data-feed-job]");
+  if (!block) throw new Error(`No [data-feed-job] block for "${id}". Row: ${providerItem(id).textContent?.slice(0, 600)}`);
   return block;
+}
+
+// The feed-status chip is a Badge now (tail slice 1, issue #5016): its
+// text is the chip text and its tone class carries the severity.
+function chipBadge(block: Element): Element | null {
+  return block.querySelector(".ui-badge");
 }
 
 beforeEach(() => {
@@ -312,7 +321,8 @@ describe("feed status block rendering (issue #3530 status UX)", () => {
     await renderPanel();
     await click(container, "yahoo");
     const block = feedBlock("yahoo");
-    expect(block.querySelector(".dpp-feed-status-chip-never-run")).not.toBeNull();
+    expect(chipBadge(block)?.textContent?.trim()).toBe("Never run");
+    expect(chipBadge(block)?.className).toContain("tone-neutral");
     expect(block.textContent).toContain("yahoo-nasdaq100-quotes");
     expect(block.textContent).toContain("Universe: Nasdaq-100");
     expect(block.textContent).toContain("Cadence: every 60m");
@@ -329,7 +339,8 @@ describe("feed status block rendering (issue #3530 status UX)", () => {
     await renderPanel();
     await click(container, "yahoo");
     const block = feedBlock("yahoo");
-    expect(block.querySelector(".dpp-feed-status-chip-ready")).not.toBeNull();
+    expect(chipBadge(block)?.textContent?.trim()).toBe("Ready");
+    expect(chipBadge(block)?.className).toContain("tone-success");
     expect(block.textContent).toContain("Last run: completed");
     expect(block.textContent).toContain("manual");
     expect(block.textContent).toContain("100/100 rows");
@@ -343,8 +354,9 @@ describe("feed status block rendering (issue #3530 status UX)", () => {
     await renderPanel();
     await click(container, "yahoo");
     const block = feedBlock("yahoo");
-    expect(block.querySelector(".dpp-feed-status-chip-stale")).not.toBeNull();
-    expect(block.querySelector(".dpp-feed-status-chip-ready")).toBeNull();
+    expect(chipBadge(block)?.textContent?.trim()).toBe("Stale");
+    expect(chipBadge(block)?.className).toContain("tone-warning");
+    expect([...block.querySelectorAll(".ui-badge")].map((b) => b.textContent?.trim())).not.toContain("Ready");
     expect(block.textContent).toContain("Local copy: 98 rows");
     expect(block.textContent).toContain("STALE");
   });
@@ -354,7 +366,8 @@ describe("feed status block rendering (issue #3530 status UX)", () => {
     await renderPanel();
     await click(container, "yahoo");
     const block = feedBlock("yahoo");
-    expect(block.querySelector(".dpp-feed-status-chip-failed")).not.toBeNull();
+    expect(chipBadge(block)?.textContent?.trim()).toBe("Last run failed");
+    expect(chipBadge(block)?.className).toContain("tone-danger");
     expect(block.textContent).toContain("Last run: failed");
     expect(block.textContent).toContain("scheduled");
     expect(block.textContent).toContain("0/100 rows");
@@ -385,7 +398,8 @@ describe("feed status block rendering (issue #3530 status UX)", () => {
     await renderPanel();
     await click(container, "yahoo");
     const block = feedBlock("yahoo");
-    expect(block.querySelector(".dpp-feed-status-chip-not-configured")).not.toBeNull();
+    expect(chipBadge(block)?.textContent?.trim()).toBe("Not configured");
+    expect(chipBadge(block)?.className).toContain("tone-neutral");
     expect(block.textContent).toContain("no dataset store is wired on this host");
     expect(block.textContent).toContain("Universe: Nasdaq-100");
     expect([...block.querySelectorAll("button")].map((b) => b.textContent?.trim())).not.toContain("Run now");
@@ -402,7 +416,7 @@ describe("feed status block rendering (issue #3530 status UX)", () => {
     expect(row.textContent).toContain("listed-securities universe");
     expect(row.textContent).toContain("(issue 3530)");
     expect(row.textContent).not.toContain("No feed jobs");
-    expect(row.querySelector(".dpp-feed-status")).toBeNull();
+    expect(row.querySelector("[data-feed-job]")).toBeNull();
   });
 
   it("another jobless provider (public) gets the bare honest line, not nasdaq's reason", async () => {
@@ -425,7 +439,7 @@ describe("feed status block rendering (issue #3530 status UX)", () => {
     const row = providerItem("nasdaq");
     expect(row.textContent).toContain("Nasdaq-100 universe (stored index list)");
     expect(row.textContent).not.toContain("No feed job for this source");
-    expect(row.querySelector(".dpp-feed-status")).toBeNull();
+    expect(row.querySelector("[data-feed-job]")).toBeNull();
   });
 
   it("feed block and pipeline blocks coexist: both render, pipeline actions intact", async () => {
@@ -435,7 +449,7 @@ describe("feed status block rendering (issue #3530 status UX)", () => {
     await renderPanel();
     await click(container, "yahoo");
     const row = providerItem("yahoo");
-    expect(row.querySelector(".dpp-feed-status")).not.toBeNull();
+    expect(row.querySelector("[data-feed-job]")).not.toBeNull();
     expect(row.textContent).toContain("Yahoo quotes — Nasdaq-100");
     // The pipeline block's own Run button and the status block's Run now.
     expect(buttonWithText(row, "Run")).toBeTruthy();
@@ -448,7 +462,7 @@ describe("feed status block rendering (issue #3530 status UX)", () => {
     await click(container, "yahoo");
     const row = providerItem("yahoo");
     expect(row.textContent).toContain("No data yet");
-    expect(row.querySelector(".dpp-feed-status")).not.toBeNull();
+    expect(row.querySelector("[data-feed-job]")).not.toBeNull();
     expect(feedBlock("yahoo").textContent).toContain("Last run: completed");
   });
 });
@@ -541,7 +555,7 @@ describe("Run now — the S1 feed-run route (issue #3530 status UX)", () => {
     expect(container.textContent).toContain("run failed");
     expect(container.textContent).toContain("FEED_FETCH_FAILED");
     expect(document.body.textContent).not.toContain("run completed");
-    expect(feedBlock("yahoo").querySelector(".dpp-feed-status-chip-failed")).not.toBeNull();
+    expect(chipBadge(feedBlock("yahoo"))?.textContent?.trim()).toBe("Last run failed");
   });
 
   it("a partial run outcome is surfaced as partial (warning), with its counts", async () => {

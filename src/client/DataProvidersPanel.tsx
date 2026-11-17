@@ -15,7 +15,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { Button, EmptyState, Notice, Spinner, Table, type TableColumn, Tabs, TabPanel, TextInput, useToast, type TabOption } from "./components/ui";
+import { Badge, Button, EmptyState, Flex, Notice, PageSection, Spinner, Stack, Table, type BadgeTone, type TableColumn, Tabs, TabPanel, TextInput, useToast, type TabOption } from "./components/ui";
 import { useUrlSyncedTabs } from "./useUrlSyncedTabs";
 import {
   fetchDataProviders,
@@ -50,7 +50,6 @@ import {
   type GenerateJobActionName,
   type GenerateJobView,
 } from "./dataProvidersApi";
-import "./dataProvidersPanel.css";
 
 const ACTION_PAST: Record<DataProviderActionName, string> = {
   configure: "configured",
@@ -93,6 +92,30 @@ const HEALTH_STATUS_LABELS: Record<DataProviderHealthStatus, string> = {
   "no-data": "No data yet",
 };
 
+/** Badge tone for a pipeline state: running/queued warn, failed fails, completed succeeds. */
+function feedStateTone(state: string): BadgeTone {
+  if (state === "running" || state === "queued") return "warning";
+  if (state === "failed") return "danger";
+  if (state === "completed") return "success";
+  return "neutral";
+}
+
+/** Badge tone for a feed-status chip: failed fails, stale warns, ready succeeds. */
+function feedStatusTone(tone: string): BadgeTone {
+  if (tone === "failed") return "danger";
+  if (tone === "stale") return "warning";
+  if (tone === "ready") return "success";
+  return "neutral";
+}
+
+/** Badge tone for a provider health status. */
+const HEALTH_STATUS_TONES: Record<DataProviderHealthStatus, BadgeTone> = {
+  healthy: "success",
+  degraded: "warning",
+  down: "danger",
+  "no-data": "neutral",
+};
+
 /**
  * The display state of the #3530 feed-status block, derived ONLY
  * from the served block (never recomputed): not-configured,
@@ -132,12 +155,12 @@ function FeedStatusBlock({
   const lastRun = feed.lastRun;
   const snapshot = feed.snapshot;
   return (
-    <div className="dpp-feed-status" data-feed-job={feed.jobId}>
-      <div className="dpp-feed-head">
-        <span className="dpp-feed-label">{feed.jobId}</span>
-        <span className={`dpp-feed-status-chip dpp-feed-status-chip-${chip.tone}`}>{chip.text}</span>
-      </div>
-      <div className="dpp-feed-meta">
+    <Stack gap="1" data-feed-job={feed.jobId}>
+      <Flex align="center" gap="2" wrap>
+        <strong>{feed.jobId}</strong>
+        <Badge size="sm" tone={feedStatusTone(chip.tone)}>{chip.text}</Badge>
+      </Flex>
+      <Stack gap="0" className="ui-meta">
         <span>{`Universe: ${feed.universeLabel}`}</span>
         <span>{`Cadence: every ${feed.cadenceMinutes}m · stale after ${feed.staleAfterMinutes}m`}</span>
         {feed.state === "not-configured" && (
@@ -150,7 +173,7 @@ function FeedStatusBlock({
           </span>
         )}
         {feed.state === "ready" && lastRun?.codedError && (
-          <span className="dpp-feed-error">{lastRun.codedError}</span>
+          <span className="ui-danger">{lastRun.codedError}</span>
         )}
         {feed.state === "ready" && lastRun?.errorMessage && <span>{lastRun.errorMessage}</span>}
         {feed.state === "ready" &&
@@ -161,15 +184,15 @@ function FeedStatusBlock({
           ) : (
             <span>Local copy: none usable</span>
           ))}
-      </div>
+      </Stack>
       {feed.state !== "not-configured" && (
-        <div className="dpp-feed-actions">
+        <Flex gap="1" wrap>
           <Button size="sm" variant="secondary" disabled={busy} onClick={onRunNow}>
             Run now
           </Button>
-        </div>
+        </Flex>
       )}
-    </div>
+    </Stack>
   );
 }
 
@@ -208,9 +231,9 @@ function FeedJobScheduleEditor({
   }, [schedule?.interval]);
   if (!schedule) {
     return (
-      <div className="dpp-feed-meta">
+      <Stack gap="0" className="ui-meta">
         <span>Schedule: unknown</span>
-      </div>
+      </Stack>
     );
   }
   const label = !schedule.enabled
@@ -223,11 +246,11 @@ function FeedJobScheduleEditor({
   const parsed = Number.parseInt(minutes, 10);
   const canSave = Number.isInteger(parsed) && parsed > 0;
   return (
-    <div className="dpp-feed-schedule">
-      <div className="dpp-feed-meta">
+    <Stack gap="1">
+      <Stack gap="0" className="ui-meta">
         <span>{label}</span>
-      </div>
-      <div className="dpp-feed-actions">
+      </Stack>
+      <Flex gap="1" wrap>
         <TextInput
           size="sm"
           type="number"
@@ -266,8 +289,8 @@ function FeedJobScheduleEditor({
             Enable schedule
           </Button>
         )}
-      </div>
-    </div>
+      </Flex>
+    </Stack>
   );
 }
 
@@ -280,25 +303,25 @@ function FeedJobScheduleEditor({
  */
 function FeedNoJobBlock({ providerId }: { providerId: string }) {
   return (
-    <div className="dpp-feed-nojob">
-      <span className="dpp-feed-none">No feed job for this source</span>
+    <Stack gap="1">
+      <span className="ui-meta-sm">No feed job for this source</span>
       {providerId === "nasdaq" && (
-        <span className="dpp-feed-nojob-note">
+        <span className="ui-meta-sm">
           Its adapter serves the US listed-securities universe, not quotes, so it does not fit the
           quotes feed-job contract — no feed job is registered for it rather than a fabricated one
           (issue 3530).
         </span>
       )}
-    </div>
+    </Stack>
   );
 }
 
 /**
  * The provider table, shared by the overview tab (all providers) and
- * each provider tab (one row). One component, one `dpp-table` className
- * occurrence: the two tables are the same table with different columns
- * and rows, not two bespoke tables. Keeps the DataProvidersPanel
- * bespoke-class count at its registered snapshot (ux gate #3991, S-U1).
+ * each provider tab (one row). One component: the two tables are the
+ * same table with different columns and rows, not two bespoke tables;
+ * the Table primitive's own `ui-table` styling applies, inside a
+ * `ui-scroll-frame` container.
  */
 function ProviderTable({
   columns,
@@ -315,9 +338,7 @@ function ProviderTable({
       rowProps={(view) => ({
         "data-provider-id": view.id,
       } as React.HTMLAttributes<HTMLTableRowElement>)}
-      rowClassName="dpp-item"
-      className="dpp-table"
-      containerClassName="dpp-table-container"
+      containerClassName="ui-scroll-frame"
     />
   );
 }
@@ -645,9 +666,8 @@ export function DataProvidersPanel() {
     {
       key: "provider",
       header: "Provider",
-      cellClassName: "dpp-col-provider-cell",
       render: (view) => (
-        <div className="dpp-col-provider">
+        <Stack gap="0">
           {linkProviderName ? (
             <a
               className="ui-link"
@@ -660,25 +680,24 @@ export function DataProvidersPanel() {
               {providerDisplayName(view)}
             </a>
           ) : (
-            <span className="dpp-item-name">{providerDisplayName(view)}</span>
+            <strong>{providerDisplayName(view)}</strong>
           )}
-          <code className="dpp-item-id">{view.id}</code>
-          <div className="dpp-item-meta">
+          <code className="ui-mono">{view.id}</code>
+          <Stack gap="0" className="ui-meta">
             <span>{`Adapter: ${view.adapterKind}`}</span>
             <span>{`Precedence: ${view.precedence}`}</span>
-          </div>
-        </div>
+          </Stack>
+        </Stack>
       ),
     },
     {
       key: "state",
       header: "Lifecycle & State",
-      cellClassName: "dpp-col-state-cell",
       render: (view) => (
-        <div className="dpp-col-state">
-          <span className="dpp-item-state">{view.lifecycleState}</span>
-          <span className="dpp-item-enabled">{view.enabled ? "Enabled" : "Disabled"}</span>
-          <div className="dpp-item-meta">
+        <Stack gap="0">
+          <span className="ui-label">{view.lifecycleState}</span>
+          <span className="ui-meta-sm">{view.enabled ? "Enabled" : "Disabled"}</span>
+          <Stack gap="0" className="ui-meta">
             <span>{`Serving: ${view.serving ? "Yes" : "No"}`}</span>
             <span>
               {"Credential reference: "}
@@ -691,34 +710,33 @@ export function DataProvidersPanel() {
             ) : (
               <span>Not verified</span>
             )}
-          </div>
-        </div>
+          </Stack>
+        </Stack>
       ),
     },
     {
       key: "health",
       header: "Health & Telemetry",
-      cellClassName: "dpp-col-health-cell",
       render: (view) => (
-        <div className="dpp-col-health">
+        <Stack gap="0">
           {view.health ? (
-            <div className="dpp-health">
-              <div className="dpp-health-head">
-                <span className={`dpp-health-status dpp-health-status-${view.health.status}`}>
+            <Stack gap="0" className="ui-meta">
+              <Flex align="center" gap="2" wrap>
+                <Badge size="sm" tone={HEALTH_STATUS_TONES[view.health.status]}>
                   {HEALTH_STATUS_LABELS[view.health.status] ?? view.health.status}
-                </span>
+                </Badge>
                 <span>{`Captures: ${view.health.totalCaptures}`}</span>
                 <span>{`Failure rate: ${Math.round(view.health.failureRate * 100)}%`}</span>
                 <span>{`Last 24h: ${view.health.capturesLast24h} captures, ${view.health.failuresLast24h} failed`}</span>
-              </div>
-              <div className="dpp-health-meta">
+              </Flex>
+              <Flex gap="2" wrap>
                 <span>{`Last success: ${fmtDataProviderTime(view.health.lastSuccessAt)}`}</span>
                 <span>{`Last failure: ${fmtDataProviderTime(view.health.lastFailureAt)}`}</span>
                 <span>{`Captured data: ${fmtCaptureBytes(view.health.totalRawBytes)}`}</span>
-              </div>
+              </Flex>
               {typeof view.health.fetchFailureRate === "number" &&
                 typeof view.health.fetchAttempts === "number" && (
-                  <div className="dpp-health-meta">
+                  <Flex gap="2" wrap>
                     <span>{`Fetch failure rate: ${Math.round(view.health.fetchFailureRate * 100)}%`}</span>
                     <span>{`${view.health.fetchFailures ?? 0} of ${view.health.fetchAttempts} attempts failed`}</span>
                     {view.health.lastFetchFailureAt && (
@@ -728,28 +746,27 @@ export function DataProvidersPanel() {
                           : ""
                       }`}</span>
                     )}
-                  </div>
+                  </Flex>
                 )}
               {Object.keys(view.health.byCapability ?? {}).length > 0 && (
-                <ul className="dpp-health-caps">
+                <Stack gap="0">
                   {Object.entries(view.health.byCapability).map(([capability, agg]) => (
-                    <li key={capability} className="dpp-health-cap">
+                    <span key={capability}>
                       {`${capability}: ${agg.totalCaptures} captures (${agg.failedCount} failed)`}
-                    </li>
+                    </span>
                   ))}
-                </ul>
+                </Stack>
               )}
-            </div>
+            </Stack>
           ) : (
-            <span className="dpp-health-nodata">Health unavailable</span>
+            <span className="ui-meta-sm">Health unavailable</span>
           )}
-        </div>
+        </Stack>
       ),
     },
     {
       key: "feedJobs",
       header: "Feed Jobs",
-      cellClassName: "dpp-col-feed-cell",
       render: (view) => {
         const feed = view.feed ?? null;
         const jobs = view.feedJobs ?? [];
@@ -758,7 +775,7 @@ export function DataProvidersPanel() {
         }
         const busy = actingId === view.id;
         return (
-          <div className="dpp-feed-jobs">
+          <Stack gap="2">
             {feed && (
               <FeedStatusBlock
                 feed={feed}
@@ -778,14 +795,14 @@ export function DataProvidersPanel() {
                     : `${(snapshot.ageSeconds / 3600).toFixed(1)}h old`
                 : null;
               return (
-                <div key={job.jobId} className="dpp-feed-job">
-                  <div className="dpp-feed-head">
-                    <span className="dpp-feed-label">{job.label}</span>
-                    <span className={`dpp-feed-state dpp-feed-state-${state}`}>
+                <Stack key={job.jobId} gap="1">
+                  <Flex align="center" gap="2" wrap>
+                    <strong>{job.label}</strong>
+                    <Badge size="sm" tone={feedStateTone(state)}>
                       {state}
-                    </span>
-                  </div>
-                  <div className="dpp-feed-meta">
+                    </Badge>
+                  </Flex>
+                  <Stack gap="0" className="ui-meta">
                     {job.feed?.state === "never-run" || !lastRun ? (
                       <span>Never run</span>
                     ) : (
@@ -802,19 +819,19 @@ export function DataProvidersPanel() {
                       <span>{`Next run: ${fmtDataProviderTime(job.nextScheduledRun)}`}</span>
                     )}
                     {lastRun?.codedError && (
-                      <span className="dpp-feed-error">{lastRun.codedError}</span>
+                      <span className="ui-danger">{lastRun.codedError}</span>
                     )}
-                  </div>
+                  </Stack>
                   {(job.feed?.history?.length ?? 0) > 1 && (
-                    <ul className="dpp-feed-history">
+                    <Stack gap="0" className="ui-meta-sm">
                       {job.feed!.history.slice(1, 4).map((run) => (
-                        <li key={run.runId}>
+                        <span key={run.runId}>
                           {`${run.status} · ${fmtDataProviderTime(run.finishedAt)} · ${run.received}/${run.requested} rows`}
-                        </li>
+                        </span>
                       ))}
-                    </ul>
+                    </Stack>
                   )}
-                  <div className="dpp-feed-actions">
+                  <Flex gap="1" wrap>
                     <Button
                       size="sm"
                       variant="secondary"
@@ -863,31 +880,30 @@ export function DataProvidersPanel() {
                         Retry
                       </Button>
                     )}
-                  </div>
+                  </Flex>
                   <FeedJobScheduleEditor view={view} job={job} busy={busy} onSave={saveFeedSchedule} />
-                </div>
+                </Stack>
               );
             })}
-          </div>
+          </Stack>
         );
       },
     },
     {
       // #3536: the enrich jobs column — the feed-jobs
-      // column's shape transposed (same dpp-feed-*
+      // column's shape transposed (same feed-job
       // classes; no new stylesheet), plus the lineage
       // line naming the feed run each copy derives from.
       key: "enrichJobs",
       header: "Enrich Jobs",
-      cellClassName: "dpp-col-feed-cell",
       render: (view) => {
         const jobs = view.enrichJobs ?? [];
         if (jobs.length === 0) {
-          return <span className="dpp-feed-none">No enrich jobs</span>;
+          return <span className="ui-meta-sm">No enrich jobs</span>;
         }
         const busy = actingId === view.id;
         return (
-          <div className="dpp-feed-jobs">
+          <Stack gap="2">
             {jobs.map((job) => {
               const state = job.pipeline?.state ?? "unknown";
               const lastRun = job.enrich?.lastRun ?? null;
@@ -900,14 +916,14 @@ export function DataProvidersPanel() {
                     : `${(snapshot.ageSeconds / 3600).toFixed(1)}h old`
                 : null;
               return (
-                <div key={job.jobId} className="dpp-feed-job">
-                  <div className="dpp-feed-head">
-                    <span className="dpp-feed-label">{job.label}</span>
-                    <span className={`dpp-feed-state dpp-feed-state-${state}`}>
+                <Stack key={job.jobId} gap="1">
+                  <Flex align="center" gap="2" wrap>
+                    <strong>{job.label}</strong>
+                    <Badge size="sm" tone={feedStateTone(state)}>
                       {state}
-                    </span>
-                  </div>
-                  <div className="dpp-feed-meta">
+                    </Badge>
+                  </Flex>
+                  <Stack gap="0" className="ui-meta">
                     {job.enrich?.state === "never-run" || !lastRun ? (
                       <span>Never run</span>
                     ) : (
@@ -927,19 +943,19 @@ export function DataProvidersPanel() {
                       <span>{`Next run: ${fmtDataProviderTime(job.nextScheduledRun)}`}</span>
                     )}
                     {lastRun?.codedError && (
-                      <span className="dpp-feed-error">{lastRun.codedError}</span>
+                      <span className="ui-danger">{lastRun.codedError}</span>
                     )}
-                  </div>
+                  </Stack>
                   {(job.enrich?.history?.length ?? 0) > 1 && (
-                    <ul className="dpp-feed-history">
+                    <Stack gap="0" className="ui-meta-sm">
                       {job.enrich!.history.slice(1, 4).map((run) => (
-                        <li key={run.runId}>
+                        <span key={run.runId}>
                           {`${run.status} · ${fmtDataProviderTime(run.finishedAt)} · ${run.received}/${run.requested} rows`}
-                        </li>
+                        </span>
                       ))}
-                    </ul>
+                    </Stack>
                   )}
-                  <div className="dpp-feed-actions">
+                  <Flex gap="1" wrap>
                     <Button
                       size="sm"
                       variant="secondary"
@@ -988,31 +1004,30 @@ export function DataProvidersPanel() {
                         Retry
                       </Button>
                     )}
-                  </div>
-                </div>
+                  </Flex>
+                </Stack>
               );
             })}
-          </div>
+          </Stack>
         );
       },
     },
     {
       // #3537: the analyze jobs column — the enrich-jobs
-      // column's shape transposed (same dpp-feed-*
+      // column's shape transposed (same feed-job
       // classes; no new stylesheet), plus the lineage
       // line naming the enrich run each copy derives from
       // and the breadth line from the analyzed summary.
       key: "analyzeJobs",
       header: "Analyze Jobs",
-      cellClassName: "dpp-col-feed-cell",
       render: (view) => {
         const jobs = view.analyzeJobs ?? [];
         if (jobs.length === 0) {
-          return <span className="dpp-feed-none">No analyze jobs</span>;
+          return <span className="ui-meta-sm">No analyze jobs</span>;
         }
         const busy = actingId === view.id;
         return (
-          <div className="dpp-feed-jobs">
+          <Stack gap="2">
             {jobs.map((job) => {
               const state = job.pipeline?.state ?? "unknown";
               const lastRun = job.analyze?.lastRun ?? null;
@@ -1025,14 +1040,14 @@ export function DataProvidersPanel() {
                     : `${(snapshot.ageSeconds / 3600).toFixed(1)}h old`
                 : null;
               return (
-                <div key={job.jobId} className="dpp-feed-job">
-                  <div className="dpp-feed-head">
-                    <span className="dpp-feed-label">{job.label}</span>
-                    <span className={`dpp-feed-state dpp-feed-state-${state}`}>
+                <Stack key={job.jobId} gap="1">
+                  <Flex align="center" gap="2" wrap>
+                    <strong>{job.label}</strong>
+                    <Badge size="sm" tone={feedStateTone(state)}>
                       {state}
-                    </span>
-                  </div>
-                  <div className="dpp-feed-meta">
+                    </Badge>
+                  </Flex>
+                  <Stack gap="0" className="ui-meta">
                     {job.analyze?.state === "never-run" || !lastRun ? (
                       <span>Never run</span>
                     ) : (
@@ -1057,19 +1072,19 @@ export function DataProvidersPanel() {
                       <span>{`Next run: ${fmtDataProviderTime(job.nextScheduledRun)}`}</span>
                     )}
                     {lastRun?.codedError && (
-                      <span className="dpp-feed-error">{lastRun.codedError}</span>
+                      <span className="ui-danger">{lastRun.codedError}</span>
                     )}
-                  </div>
+                  </Stack>
                   {(job.analyze?.history?.length ?? 0) > 1 && (
-                    <ul className="dpp-feed-history">
+                    <Stack gap="0" className="ui-meta-sm">
                       {job.analyze!.history.slice(1, 4).map((run) => (
-                        <li key={run.runId}>
+                        <span key={run.runId}>
                           {`${run.status} · ${fmtDataProviderTime(run.finishedAt)} · ${run.received}/${run.requested} rows`}
-                        </li>
+                        </span>
                       ))}
-                    </ul>
+                    </Stack>
                   )}
-                  <div className="dpp-feed-actions">
+                  <Flex gap="1" wrap>
                     <Button
                       size="sm"
                       variant="secondary"
@@ -1118,31 +1133,30 @@ export function DataProvidersPanel() {
                         Retry
                       </Button>
                     )}
-                  </div>
-                </div>
+                  </Flex>
+                </Stack>
               );
             })}
-          </div>
+          </Stack>
         );
       },
     },
     {
       // #3538: the generate jobs column — the analyze-jobs
-      // column's shape transposed (same dpp-feed-*
+      // column's shape transposed (same feed-job
       // classes; no new stylesheet), plus the per-report
       // formats line and the canonical leg's outcome from
       // the generated copy.
       key: "generateJobs",
       header: "Generate Jobs",
-      cellClassName: "dpp-col-feed-cell",
       render: (view) => {
         const jobs = view.generateJobs ?? [];
         if (jobs.length === 0) {
-          return <span className="dpp-feed-none">No generate jobs</span>;
+          return <span className="ui-meta-sm">No generate jobs</span>;
         }
         const busy = actingId === view.id;
         return (
-          <div className="dpp-feed-jobs">
+          <Stack gap="2">
             {jobs.map((job) => {
               const state = job.pipeline?.state ?? "unknown";
               const lastRun = job.generate?.lastRun ?? null;
@@ -1155,14 +1169,14 @@ export function DataProvidersPanel() {
                     : `${(snapshot.ageSeconds / 3600).toFixed(1)}h old`
                 : null;
               return (
-                <div key={job.jobId} className="dpp-feed-job">
-                  <div className="dpp-feed-head">
-                    <span className="dpp-feed-label">{job.label}</span>
-                    <span className={`dpp-feed-state dpp-feed-state-${state}`}>
+                <Stack key={job.jobId} gap="1">
+                  <Flex align="center" gap="2" wrap>
+                    <strong>{job.label}</strong>
+                    <Badge size="sm" tone={feedStateTone(state)}>
                       {state}
-                    </span>
-                  </div>
-                  <div className="dpp-feed-meta">
+                    </Badge>
+                  </Flex>
+                  <Stack gap="0" className="ui-meta">
                     {job.generate?.state === "never-run" || !lastRun ? (
                       <span>Never run</span>
                     ) : (
@@ -1187,19 +1201,19 @@ export function DataProvidersPanel() {
                       <span>{`Next run: ${fmtDataProviderTime(job.nextScheduledRun)}`}</span>
                     )}
                     {lastRun?.codedError && (
-                      <span className="dpp-feed-error">{lastRun.codedError}</span>
+                      <span className="ui-danger">{lastRun.codedError}</span>
                     )}
-                  </div>
+                  </Stack>
                   {(job.generate?.history?.length ?? 0) > 1 && (
-                    <ul className="dpp-feed-history">
+                    <Stack gap="0" className="ui-meta-sm">
                       {job.generate!.history.slice(1, 4).map((run) => (
-                        <li key={run.runId}>
+                        <span key={run.runId}>
                           {`${run.status} · ${fmtDataProviderTime(run.finishedAt)} · ${run.received}/${run.requested} formats`}
-                        </li>
+                        </span>
                       ))}
-                    </ul>
+                    </Stack>
                   )}
-                  <div className="dpp-feed-actions">
+                  <Flex gap="1" wrap>
                     <Button
                       size="sm"
                       variant="secondary"
@@ -1248,11 +1262,11 @@ export function DataProvidersPanel() {
                         Retry
                       </Button>
                     )}
-                  </div>
-                </div>
+                  </Flex>
+                </Stack>
               );
             })}
-          </div>
+          </Stack>
         );
       },
     },
@@ -1262,15 +1276,14 @@ export function DataProvidersPanel() {
       // delivery copy + per-channel outcomes).
       key: "deliverJobs",
       header: "Deliver Jobs",
-      cellClassName: "dpp-col-feed-cell",
       render: (view) => {
         const jobs = view.deliverJobs ?? [];
         if (jobs.length === 0) {
-          return <span className="dpp-feed-none">No deliver jobs</span>;
+          return <span className="ui-meta-sm">No deliver jobs</span>;
         }
         const busy = actingId === view.id;
         return (
-          <div className="dpp-feed-jobs">
+          <Stack gap="2">
             {jobs.map((job) => {
               const state = job.pipeline?.state ?? "unknown";
               const lastRun = job.deliver?.lastRun ?? null;
@@ -1283,14 +1296,14 @@ export function DataProvidersPanel() {
                     : `${(snapshot.ageSeconds / 3600).toFixed(1)}h old`
                 : null;
               return (
-                <div key={job.jobId} className="dpp-feed-job">
-                  <div className="dpp-feed-head">
-                    <span className="dpp-feed-label">{job.label}</span>
-                    <span className={`dpp-feed-state dpp-feed-state-${state}`}>
+                <Stack key={job.jobId} gap="1">
+                  <Flex align="center" gap="2" wrap>
+                    <strong>{job.label}</strong>
+                    <Badge size="sm" tone={feedStateTone(state)}>
                       {state}
-                    </span>
-                  </div>
-                  <div className="dpp-feed-meta">
+                    </Badge>
+                  </Flex>
+                  <Stack gap="0" className="ui-meta">
                     {job.deliver?.state === "never-run" || !lastRun ? (
                       <span>Never run</span>
                     ) : (
@@ -1315,19 +1328,19 @@ export function DataProvidersPanel() {
                       <span>{`Next run: ${fmtDataProviderTime(job.nextScheduledRun)}`}</span>
                     )}
                     {lastRun?.codedError && (
-                      <span className="dpp-feed-error">{lastRun.codedError}</span>
+                      <span className="ui-danger">{lastRun.codedError}</span>
                     )}
-                  </div>
+                  </Stack>
                   {(job.deliver?.history?.length ?? 0) > 1 && (
-                    <ul className="dpp-feed-history">
+                    <Stack gap="0" className="ui-meta-sm">
                       {job.deliver!.history.slice(1, 4).map((run) => (
-                        <li key={run.runId}>
+                        <span key={run.runId}>
                           {`${run.status} · ${fmtDataProviderTime(run.finishedAt)} · ${run.received}/${run.requested} channels`}
-                        </li>
+                        </span>
                       ))}
-                    </ul>
+                    </Stack>
                   )}
-                  <div className="dpp-feed-actions">
+                  <Flex gap="1" wrap>
                     <Button
                       size="sm"
                       variant="secondary"
@@ -1376,11 +1389,11 @@ export function DataProvidersPanel() {
                         Retry
                       </Button>
                     )}
-                  </div>
-                </div>
+                  </Flex>
+                </Stack>
               );
             })}
-          </div>
+          </Stack>
         );
       },
     },
@@ -1392,29 +1405,28 @@ export function DataProvidersPanel() {
       // cell classes (no new stylesheet).
       key: "pipelineChains",
       header: "Pipeline",
-      cellClassName: "dpp-col-feed-cell",
       render: (view) => {
         const chains = view.pipelineChains ?? [];
         if (chains.length === 0) {
-          return <span className="dpp-feed-none">No pipeline</span>;
+          return <span className="ui-meta-sm">No pipeline</span>;
         }
         const busy = actingId === view.id;
         return (
-          <div className="dpp-feed-jobs">
+          <Stack gap="2">
             {chains.map((chain) => {
               const state = chain.pipeline?.state ?? "unknown";
               const frontierStage = chain.frontier
                 ? chain.stages.find((s) => s.stage === chain.frontier)
                 : undefined;
               return (
-                <div key={chain.jobId} className="dpp-feed-job">
-                  <div className="dpp-feed-head">
-                    <span className="dpp-feed-label">{chain.label}</span>
-                    <span className={`dpp-feed-state dpp-feed-state-${state}`}>
+                <Stack key={chain.jobId} gap="1">
+                  <Flex align="center" gap="2" wrap>
+                    <strong>{chain.label}</strong>
+                    <Badge size="sm" tone={feedStateTone(state)}>
                       {state}
-                    </span>
-                  </div>
-                  <div className="dpp-feed-meta">
+                    </Badge>
+                  </Flex>
+                  <Stack gap="0" className="ui-meta">
                     {chain.pipeline?.lastRunStatus ? (
                       <span>
                         {`Last run: ${chain.pipeline.lastRunStatus} ${fmtDataProviderTime(chain.pipeline.lastRunAt)}`}
@@ -1431,16 +1443,16 @@ export function DataProvidersPanel() {
                       <span>{`Frontier: ${chain.frontier}`}</span>
                     )}
                     {frontierStage?.error && (
-                      <span className="dpp-feed-error">{frontierStage.error}</span>
+                      <span className="ui-danger">{frontierStage.error}</span>
                     )}
                     {chain.pipeline?.lastError && (
-                      <span className="dpp-feed-error">{chain.pipeline.lastError}</span>
+                      <span className="ui-danger">{chain.pipeline.lastError}</span>
                     )}
                     {chain.nextScheduledRun && (
                       <span>{`Next run: ${fmtDataProviderTime(chain.nextScheduledRun)}`}</span>
                     )}
-                  </div>
-                  <div className="dpp-feed-actions">
+                  </Stack>
+                  <Flex gap="1" wrap>
                     <Button
                       size="sm"
                       variant="secondary"
@@ -1528,25 +1540,24 @@ export function DataProvidersPanel() {
                           {`Cancel ${frontierStage.stage}`}
                         </Button>
                       )}
-                  </div>
-                </div>
+                  </Flex>
+                </Stack>
               );
             })}
-          </div>
+          </Stack>
         );
       },
     },
     {
       key: "capabilities",
       header: "Capabilities & Routes",
-      cellClassName: "dpp-col-capabilities-cell",
       render: (view) => {
         const myRoutes = routes.filter(
           (r) => r.primaryProviderId === view.id || r.gapFillProviderId === view.id
         );
         return (
-          <div className="dpp-col-capabilities">
-            <div className="dpp-item-meta">
+          <Stack gap="0">
+            <Stack gap="0" className="ui-meta">
               <span>
                 {`Capabilities: ${
                   view.declaredCapabilities.length > 0
@@ -1554,33 +1565,32 @@ export function DataProvidersPanel() {
                     : "None declared"
                 }`}
               </span>
-            </div>
+            </Stack>
             {myRoutes.length > 0 && (
-              <ul className="dpp-routes">
+              <Stack gap="0">
                 {myRoutes.map((route) => (
-                  <li key={route.capability} className="dpp-route">
-                    <span className="dpp-route-capability">{route.capability}</span>
-                    <span className="dpp-route-tier">{`Tier: ${route.minTier === "premium" ? "Premium" : "Freemium"}`}</span>
+                  <Flex key={route.capability} gap="2" wrap className="ui-meta-sm">
+                    <strong>{route.capability}</strong>
+                    <strong>{`Tier: ${route.minTier === "premium" ? "Premium" : "Freemium"}`}</strong>
                     <span>{`Primary: ${route.primaryProviderId}`}</span>
                     <span>{`Gap-fill: ${route.gapFillProviderId ?? "—"}`}</span>
                     <span>{`Resolves: ${route.resolves ? "Yes" : "No"}`}</span>
-                    {route.error && <span className="dpp-route-error">{route.error}</span>}
-                  </li>
+                    {route.error && <span className="ui-danger">{route.error}</span>}
+                  </Flex>
                 ))}
-              </ul>
+              </Stack>
             )}
-          </div>
+          </Stack>
         );
       },
     },
     {
       key: "connectivity",
       header: "Connectivity & Session",
-      cellClassName: "dpp-col-session-cell",
       render: (view) => (
-        <div className="dpp-col-session">
+        <Stack gap="0">
           {isETradeProvider(view) ? (
-            <div className="dpp-session-info">
+            <Stack gap="0" className="ui-meta">
               {etradeStatus === null ? (
                 <span>E*TRADE session presence unavailable for this session.</span>
               ) : (
@@ -1599,31 +1609,30 @@ export function DataProvidersPanel() {
                   </span>
                 </>
               )}
-            </div>
+            </Stack>
           ) : (
-            <div className="dpp-session-info">
+            <Stack gap="0" className="ui-meta">
               <span>
                 {view.verification ? "Connectivity verified" : "Awaiting verification"}
               </span>
               <span>
                 {view.credentialRef ? "Credential reference set" : "No credential configured"}
               </span>
-            </div>
+            </Stack>
           )}
-        </div>
+        </Stack>
       ),
     },
     {
       key: "actions",
       header: "Actions",
-      cellClassName: "dpp-col-actions-cell",
       render: (view) => {
         const busy = actingId === view.id;
         return (
-          <div className="dpp-col-actions">
+          <Stack gap="1">
             {confirmingDeprovisionId === view.id ? (
-              <div className="dpp-item-actions">
-                <span className="dpp-confirm-text">
+              <Flex align="center" gap="1" wrap>
+                <span className="ui-meta">
                   Deprovision this provider? Its capability routes are withdrawn and its
                   credential reference is cleared.
                 </span>
@@ -1644,9 +1653,9 @@ export function DataProvidersPanel() {
                 >
                   Cancel
                 </Button>
-              </div>
+              </Flex>
             ) : (
-              <div className="dpp-item-actions">
+              <Flex align="center" gap="1" wrap>
                 <Button
                   size="sm"
                   variant="secondary"
@@ -1683,18 +1692,17 @@ export function DataProvidersPanel() {
                 >
                   Deprovision
                 </Button>
-              </div>
+              </Flex>
             )}
 
             {configuringId === view.id && (
-              <div className="dpp-configure-form">
+              <Stack gap="2">
                 <TextInput
                   id="dpp-configure-credential-ref"
                   label="Credential reference"
                   placeholder="env:PROVIDER_API_KEY"
                   value={configureRef}
                   onChange={(event) => setConfigureRef(event.target.value)}
-                  wrapperClassName="dpp-configure-field"
                 />
                 <TextInput
                   id="dpp-configure-display-name"
@@ -1702,9 +1710,8 @@ export function DataProvidersPanel() {
                   placeholder="e.g. Yahoo Finance"
                   value={configureName}
                   onChange={(event) => setConfigureName(event.target.value)}
-                  wrapperClassName="dpp-configure-field"
                 />
-                <div className="dpp-configure-actions">
+                <Flex gap="2">
                   <Button
                     size="sm"
                     variant="primary"
@@ -1722,10 +1729,10 @@ export function DataProvidersPanel() {
                   >
                     Cancel
                   </Button>
-                </div>
-              </div>
+                </Flex>
+              </Stack>
             )}
-          </div>
+          </Stack>
         );
       },
     },
@@ -1752,8 +1759,9 @@ export function DataProvidersPanel() {
   );
 
   return (
-    <div className="dpp-panel">
-      <p className="dpp-desc">
+    <PageSection>
+      <Stack gap="3">
+      <p className="ui-meta">
         Market-data providers are provisioned through a unified lifecycle: register, configure a
         credential <em>reference</em> (never the secret itself), verify connectivity, then enable.
         Disabling preserves configuration; deprovisioning withdraws capability routes and clears credentials.
@@ -1764,11 +1772,11 @@ export function DataProvidersPanel() {
           {error}
         </Notice>
       )}
-      <div style={{ margin: "0 0 0.75rem" }}>
+      <Flex>
         <Button variant="secondary" size="sm" onClick={() => void load()} loading={loading} disabled={loading}>
           ↻ Refresh
         </Button>
-      </div>
+      </Flex>
 
       <Tabs
         tabs={providerTabs}
@@ -1779,9 +1787,9 @@ export function DataProvidersPanel() {
       />
       <TabPanel idBase="data-providers" tabId="overview" active={effectiveTab === "overview"}>
         {loading ? (
-          <div className="dpp-loading">
+          <Flex align="center" gap="2">
             <Spinner size="sm" /> Loading data providers…
-          </div>
+          </Flex>
         ) : needsAuth ? (
           <EmptyState
             title="Sign-in required"
@@ -1808,14 +1816,14 @@ export function DataProvidersPanel() {
             description="Please log in to view and manage data providers."
           />
         ) : (
-          <div className="dpp-register-row">
+          <Flex align="end" gap="2" wrap>
             <TextInput
               id="dpp-register-id"
               label="New provider ID"
               placeholder="e.g. alpaca"
               value={registerId}
               onChange={(event) => setRegisterId(event.target.value)}
-              wrapperClassName="dpp-register-field"
+              wrapperClassName="ui-grow"
             />
             <TextInput
               id="dpp-register-precedence"
@@ -1823,7 +1831,7 @@ export function DataProvidersPanel() {
               placeholder="e.g. 3"
               value={registerPrecedence}
               onChange={(event) => setRegisterPrecedence(event.target.value)}
-              wrapperClassName="dpp-register-field"
+              wrapperClassName="ui-grow"
             />
             <Button
               variant="primary"
@@ -1833,9 +1841,10 @@ export function DataProvidersPanel() {
             >
               Register provider
             </Button>
-          </div>
+          </Flex>
         )}
       </TabPanel>
-    </div>
+      </Stack>
+    </PageSection>
   );
 }

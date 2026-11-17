@@ -888,13 +888,17 @@ describe("panel route tier badge (issue #1202)", () => {
     await flush(60);
     await waitForText("Primary: etrade");
 
-    const rows = [...container.querySelectorAll(".dpp-route")];
-    expect(rows).toHaveLength(2);
-    const quotesRow = rows.find((r) => r.textContent?.includes("quotes"));
-    const chainsRow = rows.find((r) =>
-      r.textContent?.includes("optionsChains")
+    // Tail slice 1 (issue #5016): route rows are Flex rows now; the
+    // capability is a <strong> and the row is its closest div.
+    const quotesCap = [...container.querySelectorAll("strong")].find(
+      (s) => s.textContent?.trim() === "quotes",
     );
-    expect(quotesRow?.textContent).toContain("Tier: Premium");
-    expect(chainsRow?.textContent).toContain("Tier: Freemium");
+    const chainsCap = [...container.querySelectorAll("strong")].find(
+      (s) => s.textContent?.trim() === "optionsChains",
+    );
+    expect(quotesCap).not.toBeUndefined();
+    expect(chainsCap).not.toBeUndefined();
+    expect(quotesCap?.closest("div")?.textContent).toContain("Tier: Premium");
+    expect(chainsCap?.closest("div")?.textContent).toContain("Tier: Freemium");
   });
 });

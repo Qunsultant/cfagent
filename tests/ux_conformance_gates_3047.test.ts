@@ -494,6 +494,11 @@ const CONFORMING_INTERIORS: string[] = [
   "src/client/ApprovalsPanel.tsx",
   "src/client/QueuesPage.tsx",
   "src/client/chat/tabs/EndpointsTab.tsx",
+  // Issue #5016 (tail slice 1): the two migrated interiors —
+  // Data Providers, Platform Admin drawer; their register entries
+  // are removed in the same PR.
+  "src/client/DataProvidersPanel.tsx",
+  "src/client/PlatformAdminPanel.tsx",
 ]
 
 /** Every routable surface file (measured 2026-11-10 on main 299f2aa4):

@@ -17,12 +17,25 @@ import { NAV_ICON_MAP } from "./components/NavigationMenu";
  * The panel is self-contained: ad-banner preferences come from
  * `adBannerConfig` (localStorage, optional parent override) and the
  * request-admin-access action posts the same endpoint the settings menu used
- * to post. Styling follows docs/architecture/UX/ux-architecture.md §20 — primitives,
- * tokens, scoped classes, no inline layout styles.
+ * to post. Styling follows docs/architecture/UX/ux-architecture.md §20 — primitives
+ * and tokens only, no bespoke classes and no inline layout styles.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Button, CardHeader, PillGroup } from "./components/ui";
+import { useCallback, useEffect, useState } from "react";
+import {
+  Badge,
+  Button,
+  Card,
+  CardHeader,
+  Drawer,
+  Flex,
+  PageSection,
+  PillGroup,
+  Stack,
+  Tabs,
+  TabPanel,
+  type TabOption,
+} from "./components/ui";
 import {
   getStoredAdBannerConfig,
   saveStoredAdBannerConfig,
@@ -73,21 +86,24 @@ export function AdsSection({
   onOpenPartnerDeals?: () => void;
 }) {
   return (
-    <div className="etrade-panel-section settings-ads-section">
-      <div className="section-label-row">
-        <span>Ads &amp; Partner Banners</span>
-        <small>{ads.enabled ? "Active (Customized)" : "Disabled (Clean Workspace)"}</small>
-      </div>
+    <PageSection>
+      <CardHeader
+        title="Ads & Partner Banners"
+        meta={
+          <span className="ui-meta-sm">
+            {ads.enabled ? "Active (Customized)" : "Disabled (Clean Workspace)"}
+          </span>
+        }
+      />
 
-      <p className="settings-section-desc">
+      <p className="ui-meta">
         Promotional banners and sponsor spotlights are externalized by default to keep workspace tabs clean.
         Toggle them on if desired, or browse deals on-demand.
       </p>
 
-      <div className="settings-pref-row">
-        <span className="pref-row-lbl">Workspace Banners:</span>
+      <Flex align="center" justify="between" gap="2">
+        <span className="ui-label">Workspace Banners:</span>
         <PillGroup
-          className="settings-pref-btn-group"
           ariaLabel="Workspace banners"
           size="sm"
           variant="default"
@@ -98,64 +114,62 @@ export function AdsSection({
           value={ads.enabled ? "on" : "off"}
           onChange={(v) => onToggleMaster(v === "on")}
         />
-      </div>
+      </Flex>
 
       {ads.enabled && (
-        <div className="settings-ads-suboptions">
-          <div className="settings-pref-row">
-            <span className="pref-row-lbl">Sponsor Spotlight:</span>
-            <PillGroup
-              className="settings-pref-btn-group"
-              ariaLabel="Sponsor Spotlight"
-              size="sm"
-              variant="default"
-              options={[
-                { id: "off", label: "OFF" },
-                { id: "on", label: "ON" },
-              ]}
-              value={ads.showSponsorSpotlight ? "on" : "off"}
-              onChange={(v) => onToggleOption("showSponsorSpotlight", v === "on")}
-            />
-          </div>
+        <Card padding="sm">
+          <Stack gap="2">
+            <Flex align="center" justify="between" gap="2">
+              <span className="ui-label">Sponsor Spotlight:</span>
+              <PillGroup
+                ariaLabel="Sponsor Spotlight"
+                size="sm"
+                variant="default"
+                options={[
+                  { id: "off", label: "OFF" },
+                  { id: "on", label: "ON" },
+                ]}
+                value={ads.showSponsorSpotlight ? "on" : "off"}
+                onChange={(v) => onToggleOption("showSponsorSpotlight", v === "on")}
+              />
+            </Flex>
 
-          <div className="settings-pref-row">
-            <span className="pref-row-lbl">Ad Network Strip:</span>
-            <PillGroup
-              className="settings-pref-btn-group"
-              ariaLabel="Ad Network Strip"
-              size="sm"
-              variant="default"
-              options={[
-                { id: "off", label: "OFF" },
-                { id: "on", label: "ON" },
-              ]}
-              value={ads.showAdNetworkStrip ? "on" : "off"}
-              onChange={(v) => onToggleOption("showAdNetworkStrip", v === "on")}
-            />
-          </div>
+            <Flex align="center" justify="between" gap="2">
+              <span className="ui-label">Ad Network Strip:</span>
+              <PillGroup
+                ariaLabel="Ad Network Strip"
+                size="sm"
+                variant="default"
+                options={[
+                  { id: "off", label: "OFF" },
+                  { id: "on", label: "ON" },
+                ]}
+                value={ads.showAdNetworkStrip ? "on" : "off"}
+                onChange={(v) => onToggleOption("showAdNetworkStrip", v === "on")}
+              />
+            </Flex>
 
-          <div className="settings-pref-row">
-            <span className="pref-row-lbl">Google Ad Units:</span>
-            <PillGroup
-              className="settings-pref-btn-group"
-              ariaLabel="Google Ad Units"
-              size="sm"
-              variant="default"
-              options={[
-                { id: "off", label: "OFF" },
-                { id: "on", label: "ON" },
-              ]}
-              value={ads.showGoogleAdUnits ? "on" : "off"}
-              onChange={(v) => onToggleOption("showGoogleAdUnits", v === "on")}
-            />
-          </div>
-        </div>
+            <Flex align="center" justify="between" gap="2">
+              <span className="ui-label">Google Ad Units:</span>
+              <PillGroup
+                ariaLabel="Google Ad Units"
+                size="sm"
+                variant="default"
+                options={[
+                  { id: "off", label: "OFF" },
+                  { id: "on", label: "ON" },
+                ]}
+                value={ads.showGoogleAdUnits ? "on" : "off"}
+                onChange={(v) => onToggleOption("showGoogleAdUnits", v === "on")}
+              />
+            </Flex>
+          </Stack>
+        </Card>
       )}
 
-      <div className="settings-ads-external-actions">
+      <Stack>
         <Button
           type="button"
-          className="btn-open-deals-showcase"
           onClick={() => {
             if (onOpenPartnerDeals) {
               onOpenPartnerDeals();
@@ -167,39 +181,39 @@ export function AdsSection({
         >
           ⭐ Browse Partner Deals &amp; Cloud Credits (External) ↗
         </Button>
-      </div>
-    </div>
+      </Stack>
+    </PageSection>
   );
 }
 
 export function ProvenanceSection() {
   return (
-    <div className="etrade-panel-section etrade-provenance-section">
-      <details className="etrade-provenance-drawer" open>
-        <summary className="etrade-provenance-summary">
+    <PageSection>
+      <details open>
+        <summary>
           <span>⚙️ Technical Diagnostics &amp; Provenance</span>
-          <span className="provenance-chevron" aria-hidden="true">▾</span>
+          <span aria-hidden="true">▾</span>
         </summary>
-        <div className="etrade-provenance-content">
-          <div className="etrade-provenance-row">
+        <Stack gap="1" className="ui-meta-sm">
+          <Flex align="center" gap="2" wrap>
             <strong>DID:</strong>
-            <code className="etrade-provenance-code">did:agent:openaimp:trading</code>
-          </div>
-          <div className="etrade-provenance-row">
+            <code className="ui-mono">did:agent:openaimp:trading</code>
+          </Flex>
+          <Flex align="center" gap="2" wrap>
             <strong>Architecture:</strong>
             <span>MCP &amp; OAuth 1.0a REST Client</span>
-          </div>
-          <div className="etrade-provenance-row">
+          </Flex>
+          <Flex align="center" gap="2" wrap>
             <strong>Attestation:</strong>
             <span>Internal W3C DID Cryptographic Stamping</span>
-          </div>
-          <div className="etrade-provenance-row">
+          </Flex>
+          <Flex align="center" gap="2" wrap>
             <strong>Ledger Architecture:</strong>
             <span>Institutional Execution Ledger &amp; Audit Trail</span>
-          </div>
-        </div>
+          </Flex>
+        </Stack>
       </details>
-    </div>
+    </PageSection>
   );
 }
 
@@ -219,48 +233,48 @@ export function AdminAccessSection({
   // instead of printing "unknown" / "UN" / "@unknown" (issue #2624 fix-up).
   if (!login) {
     return (
-      <div className="etrade-panel-section user-session-section">
-        <div className="section-label-row">
-          <span>Request admin access</span>
-          <small>No signed-in identity</small>
-        </div>
-        <p className="settings-section-desc">
+      <PageSection>
+        <CardHeader
+          title="Request admin access"
+          meta={<span className="ui-meta-sm">No signed-in identity</span>}
+        />
+        <p className="ui-meta">
           The session user is not available on this page, so an access request cannot be attributed.
           Reload the page after signing in and try again.
         </p>
-      </div>
+      </PageSection>
     );
   }
   const initials = (user?.name || login).slice(0, 2).toUpperCase();
   return (
-    <div className="etrade-panel-section user-session-section">
-      <div className="section-label-row">
-        <span>Request admin access</span>
-        <small>Signed in as {login}</small>
-      </div>
-      <div className="settings-user-card compact">
-        <div className="settings-user-meta">
+    <PageSection>
+      <CardHeader
+        title="Request admin access"
+        meta={<span className="ui-meta-sm">Signed in as {login}</span>}
+      />
+      <Card padding="sm">
+        <Flex align="center" gap="2">
           {user?.avatar ? (
-            <img src={user.avatar} alt={login} className="settings-user-avatar" />
+            <img src={user.avatar} alt={login} width={28} height={28} />
           ) : (
-            <div className="settings-user-avatar-placeholder">{initials}</div>
+            <Badge size="sm" tone="neutral">{initials}</Badge>
           )}
-          <div className="settings-user-details">
-            <span className="settings-user-name">{user?.name || login}</span>
-            <span className="settings-user-login">@{login}</span>
-            {user?.providerName && <span className="settings-user-login">Logged in via {user.providerName}</span>}
+          <Stack gap="0">
+            <strong>{user?.name || login}</strong>
+            <span className="ui-meta-sm">@{login}</span>
+            {user?.providerName && <span className="ui-meta-sm">Logged in via {user.providerName}</span>}
             <Button type="button" disabled={requesting} onClick={onRequest}>
               Request admin access
             </Button>
             {status && (
-              <span className="settings-user-login" role="status">
+              <span className="ui-meta-sm" role="status">
                 {status}
               </span>
             )}
-          </div>
-        </div>
-      </div>
-    </div>
+          </Stack>
+        </Flex>
+      </Card>
+    </PageSection>
   );
 }
 
@@ -278,7 +292,6 @@ export function PlatformAdminPanel({
   const firstItem = items[0];
   const [active, setActive] = useState<string>(initialSection ?? firstItem.id);
   const [ads, setAds] = useState<AdBannerConfig>(() => adBannerConfig ?? getStoredAdBannerConfig());
-  const panelRef = useRef<HTMLElement | null>(null);
 
   // Ad preferences: parent-controlled when given, stored otherwise.
   useEffect(() => {
@@ -306,118 +319,92 @@ export function PlatformAdminPanel({
     if (open) setActive(initialSection ?? firstItem.id);
   }, [open, initialSection, firstItem.id]);
 
-  // Escape closes the drawer without touching anything else on the page.
-  useEffect(() => {
-    if (!open) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [open, onClose]);
-
   if (!open) return null;
 
-  const activeSection = items.find((entry) => entry.id === active) ?? firstItem;
+
+  const tabOptions: TabOption<string>[] = items.map((section) => {
+    const ItemIcon = section.icon ? NAV_ICON_MAP[section.icon] : null;
+    return {
+      id: section.id,
+      label: section.label,
+      ...(ItemIcon ? { icon: <ItemIcon active={active === section.id} /> } : {}),
+    };
+  });
 
   return (
-    <div
-      className="platform-admin-backdrop"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
+    <Drawer
+      open={open}
+      onClose={onClose}
+      title={platformAdminTitle(config)}
+      ariaLabel="Platform Admin"
     >
-      <aside
-        className="platform-admin-panel"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Platform Admin"
-        ref={panelRef}
-      >
-        <header className="platform-admin-header">
-          <div className="platform-admin-title-block">
-            <CardHeader title={platformAdminTitle(config)} />
-            <p className="platform-admin-subtitle">Administration surfaces for this workspace</p>
-          </div>
-          <Button
-            type="button"
-            variant="secondary"
-            className="platform-admin-close"
-            onClick={onClose}
-            aria-label="Close Platform Admin"
-            title="Close Platform Admin"
-          >
-            ✕
-          </Button>
-        </header>
-
-        <div className="platform-admin-body">
-          <nav className="platform-admin-menu" aria-label="Platform Admin sections">
-            {items.map((section: PlatformAdminMenuItemConfig) => {
-              const ItemIcon = section.icon ? NAV_ICON_MAP[section.icon] : null;
-              return (
-                <Button
-                  key={section.id}
-                  type="button"
-                  variant="secondary"
-                  className={`platform-admin-menu-item ${active === section.id ? "active" : ""}`}
-                  aria-current={active === section.id ? "page" : undefined}
-                  onClick={() => setActive(section.id)}
-                  title={section.description}
-                >
-                  <div className="platform-admin-menu-row">
-                    {ItemIcon && (
-                      <span className="platform-admin-menu-icon" aria-hidden="true">
-                        <ItemIcon active={active === section.id} />
-                      </span>
-                    )}
-                    <span className="platform-admin-menu-label">{section.label}</span>
-                  </div>
-                  <span className="platform-admin-menu-desc">{section.description}</span>
-                </Button>
-              );
-            })}
-          </nav>
-
-          <div className="platform-admin-content" role="region" aria-label={activeSection.label}>
-            {active === "ads" && (
-              <AdsSection
-                ads={ads}
-                onToggleMaster={toggleMaster}
-                onToggleOption={toggleOption}
-                {...(onOpenPartnerDeals ? { onOpenPartnerDeals } : {})}
-              />
-            )}
-            {/* Issue #4561: the last schedule outpost moved to the
-                schedules home — `background-tasks` renders there as
-                `?tab=schedules&view=background-tasks` (the async-jobs
-                panel), and `scheduled-goals` / `jobs` left the
-                platform-admin sub-menu with it (their panels were
-                already folded into the home in #3121 S2, #4110). This
-                drawer mounts no panels for any of the three; the
-                retired addresses redirect to the home
-                (legacySchedulesRedirect). */}
-            {active === "provenance" && <ProvenanceSection />}
-            {active === "api-keys" && (
-              <div className="etrade-panel-section settings-api-keys-section">
-                <div className="section-label-row">
-                  <span>API Keys</span>
-                  <small>MCP transport access for external clients</small>
-                </div>
-                <ApiKeysPanel />
-              </div>
-            )}
-            {/* Issue #4585: the data and security sections moved into
-                their own hubs — `data-providers`, `data-lifecycle`, and
-                `downloads` render in DataHub (`?tab=data-hub`);
-                `iaaa-admin`, `users`, and `admin-access` render in
-                SecurityHub (`?tab=security-hub`). This drawer mounts no
-                panels for any of the six; the retired addresses redirect
-                to the hubs (legacyPlatformAdminHubRedirect). */}
-          </div>
-        </div>
-      </aside>
-    </div>
+      <Stack gap="3">
+        <p className="ui-meta">Administration surfaces for this workspace</p>
+        <Tabs
+          tabs={tabOptions}
+          value={active}
+          onChange={setActive}
+          ariaLabel="Platform Admin sections"
+          idBase="platform-admin-drawer"
+        />
+        <TabPanel idBase="platform-admin-drawer" tabId="ads" active={active === "ads"}>
+          <AdsSection
+            ads={ads}
+            onToggleMaster={toggleMaster}
+            onToggleOption={toggleOption}
+            {...(onOpenPartnerDeals ? { onOpenPartnerDeals } : {})}
+          />
+        </TabPanel>
+        {/* Issue #4561: the last schedule outpost moved to the
+            schedules home — `background-tasks` renders there as
+            `?tab=schedules&view=background-tasks` (the async-jobs
+            panel), and `scheduled-goals` / `jobs` left the
+            platform-admin sub-menu with it (their panels were
+            already folded into the home in #3121 S2, #4110). This
+            drawer mounts no panels for any of the three; the
+            retired addresses redirect to the home
+            (legacySchedulesRedirect). */}
+        <TabPanel
+          idBase="platform-admin-drawer"
+          tabId="provenance"
+          active={active === "provenance"}
+        >
+          <ProvenanceSection />
+        </TabPanel>
+        <TabPanel
+          idBase="platform-admin-drawer"
+          tabId="api-keys"
+          active={active === "api-keys"}
+        >
+          <PageSection>
+            <CardHeader
+              title="API Keys"
+              meta={<span className="ui-meta-sm">MCP transport access for external clients</span>}
+            />
+            <ApiKeysPanel />
+          </PageSection>
+        </TabPanel>
+        {items
+          .filter((section) => !["ads", "provenance", "api-keys"].includes(section.id))
+          .map((section) => (
+            <TabPanel
+              key={section.id}
+              idBase="platform-admin-drawer"
+              tabId={section.id}
+              active={active === section.id}
+            >
+              {null}
+            </TabPanel>
+          ))}
+        {/* Issue #4585: the data and security sections moved into
+            their own hubs — `data-providers`, `data-lifecycle`, and
+            `downloads` render in DataHub (`?tab=data-hub`);
+            `iaaa-admin`, `users`, and `admin-access` render in
+            SecurityHub (`?tab=security-hub`). This drawer mounts no
+            panels for any of the six; the retired addresses redirect
+            to the hubs (legacyPlatformAdminHubRedirect). */}
+      </Stack>
+    </Drawer>
   );
 }
 
