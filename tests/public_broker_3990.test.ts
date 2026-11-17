@@ -526,8 +526,11 @@ describe("Slice C — catalog, registry, presentation, identities carry public",
     // FAILURE_BILLING_IDENTITY_UNAVAILABLE +
     // FAILURE_BILLING_STRIPE_NOT_CONFIGURED +
     // FAILURE_BILLING_CHECKOUT_SESSION_INVALID +
-    // FAILURE_PLAN_NOT_EFFECTIVE_FOR_SEGMENT).
-    expect(Object.keys((outcomeCatalog as { outcomes: Record<string, unknown> }).outcomes)).toHaveLength(244);
+    // FAILURE_PLAN_NOT_EFFECTIVE_FOR_SEGMENT) + 3 (#3335:
+    // FAILURE_IDENTITY_LOGIN_REQUIRED +
+    // FAILURE_IDENTITY_SCHEMA_UNAVAILABLE +
+    // FAILURE_IDENTITY_READ_FAILED).
+    expect(Object.keys((outcomeCatalog as { outcomes: Record<string, unknown> }).outcomes)).toHaveLength(247);
   });
 
   it("the OAuth scopes request trading.write (the connect grant must cover placement)", () => {
