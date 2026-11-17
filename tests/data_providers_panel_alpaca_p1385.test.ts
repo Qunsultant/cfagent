@@ -122,6 +122,7 @@ describe("panel: alpaca enabled + health renders with no panel change (#1385)", 
     const item = container.querySelector('[data-provider-id="alpaca"]');
     expect(item).not.toBeNull();
     expect(item!.textContent).toContain("Enabled");
-    expect(item!.querySelector(".dpp-health-status")).not.toBeNull();
+    // Tail slice 1 (issue #5016): the health status is a Badge now.
+    expect([...item!.querySelectorAll(".ui-badge")].map((b) => b.textContent?.trim())).toContain("Healthy");
   });
 });

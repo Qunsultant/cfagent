@@ -50,7 +50,8 @@ describe("Data Providers consolidation & tabular presentation (#2723)", () => {
   });
 
   it("source defines tabular structure and StockHub callout link (#2896)", () => {
-    expect(dppSrc).toContain("dpp-table");
+    // Tail slice 1 (issue #5016): the table is the ui-table primitive now.
+    expect(dppSrc).toContain("ui-table");
     expect(dppSrc).toContain("<Table");
     expect(dppSrc).toContain('header: "Provider"');
     expect(dppSrc).toContain('header: "Connectivity & Session"');
@@ -150,8 +151,8 @@ describe("Data Providers consolidation & tabular presentation (#2723)", () => {
       await new Promise((r) => setTimeout(r, 50));
     });
 
-    // Verifies table element exists
-    const table = container.querySelector("table.dpp-table");
+    // Verifies table element exists (tail slice 1, issue #5016: ui-table).
+    const table = container.querySelector("table.ui-table");
     expect(table).not.toBeNull();
 
     // Verifies headers

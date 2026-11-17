@@ -529,10 +529,14 @@ describe("rule of three: margins and layout containers (#4913)", () => {
   });
 
   it("ui-grow and ui-clip are kept with justification, pinned at their counts", () => {
+    // ui-grow uses (5): AuditVaultPage's two form-field wrappers, the
+    // WorkflowRunsPanel stack, and — tail slice 1 (issue #5016) — the
+    // DataProvidersPanel register form's two TextInput wrappers, the
+    // same grow-to-fill-a-Flex-row pattern as AuditVaultPage's.
     const attrs = classAttrTokens4913(clientTsx());
     const grow = attrs.filter((a) => a.tokens.includes("ui-grow")).length;
     const clip = attrs.filter((a) => a.tokens.includes("ui-clip")).length;
-    expect(grow).toBe(3);
+    expect(grow).toBe(5);
     expect(clip).toBe(1);
   });
 });

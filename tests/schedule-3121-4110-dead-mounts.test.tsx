@@ -121,23 +121,27 @@ describe("4110-P01/P02 the dead render blocks and their imports are gone (#4110)
 });
 
 describe("4110-P03 an open drawer at a retired section mounts neither panel (#4110)", () => {
+  // Tail slice 1 (issue #5016): the drawer is the ui Drawer primitive
+  // now, which portals to document.body, and the menu is a Tabs strip —
+  // so these tests query the document, not the render container.
   it("initialSection scheduled-goals mounts no goals panel", async () => {
     await render(panel({ initialSection: "scheduled-goals" }));
-    expect(container.querySelector('[role="dialog"]')).toBeTruthy();
-    expect(container.querySelector('[data-testid="scheduled-goals-panel"]')).toBeNull();
+    expect(document.querySelector('[role="dialog"]')).toBeTruthy();
+    expect(document.querySelector('[data-testid="scheduled-goals-panel"]')).toBeNull();
   });
 
   it("initialSection jobs mounts no jobs panel", async () => {
     await render(panel({ initialSection: "jobs" }));
-    expect(container.querySelector('[role="dialog"]')).toBeTruthy();
-    expect(container.querySelector('[data-testid="jobs-panel"]')).toBeNull();
+    expect(document.querySelector('[role="dialog"]')).toBeTruthy();
+    expect(document.querySelector('[data-testid="jobs-panel"]')).toBeNull();
   });
 
   it("the drawer menu no longer lists the retired sections", async () => {
     await render(panel());
     const menuLabels = Array.from(
-      container.querySelectorAll(".platform-admin-menu-item"),
+      document.querySelectorAll('[role="tab"]'),
     ).map((item) => item.textContent ?? "");
+    expect(menuLabels).toHaveLength(7);
     expect(menuLabels.some((label) => label.includes("Scheduled goals"))).toBe(false);
     expect(
       menuLabels.some(

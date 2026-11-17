@@ -137,19 +137,23 @@ describe("platform admin in the left navigation (#2624)", () => {
 });
 
 describe("platform admin panel (#2624)", () => {
+  // Tail slice 1 (issue #5016): the drawer is the ui Drawer primitive now,
+  // which portals to document.body, and the menu is a Tabs strip — so
+  // these tests query the document (the #1880 portaled-dialog lesson),
+  // not the render container, and read tabs instead of menu items.
   it("renders nothing while closed", async () => {
     await render(panel({ open: false }));
-    expect(container.querySelector('[role="dialog"]')).toBeNull();
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
   });
 
   it("renders a named drawer with every menu item", async () => {
     await render(panel());
-    const dialog = container.querySelector('[role="dialog"]');
+    const dialog = document.querySelector('[role="dialog"]');
     expect(dialog).toBeTruthy();
-    expect(dialog!.getAttribute("aria-label")).toBe("Platform Admin");
-    expect(container.querySelector(".platform-admin-title-block h4")?.textContent).toBe("Platform Admin");
+    expect(document.querySelector(".ui-drawer-title")?.textContent).toBe("Platform Admin");
+    expect(dialog!.getAttribute("aria-labelledby")).toBe(document.querySelector(".ui-drawer-title")?.id);
 
-    const menuItems = container.querySelectorAll(".platform-admin-menu-item");
+    const menuItems = document.querySelectorAll('[role="tab"]');
     expect(menuItems).toHaveLength(7);
     expect(menuItems[0].textContent).toContain("Ads & Partner Banners");
     expect(menuItems[4].textContent).toContain("Channels");
@@ -159,20 +163,20 @@ describe("platform admin panel (#2624)", () => {
 
   it("opens at the section the nav asked for", async () => {
     await render(panel({ initialSection: "api-keys" }));
-    expect(container.querySelector('[data-testid="api-keys-panel"]')).toBeTruthy();
+    expect(document.querySelector('[data-testid="api-keys-panel"]')).toBeTruthy();
   });
 
   it("switches section on menu selection", async () => {
     await render(panel());
-    expect(container.textContent).toContain("Workspace Banners");
+    expect(document.body.textContent).toContain("Workspace Banners");
 
-    const apiKeys = Array.from(container.querySelectorAll(".platform-admin-menu-item")).find((item) =>
+    const apiKeys = Array.from(document.querySelectorAll('[role="tab"]')).find((item) =>
       item.textContent?.includes("API Keys"),
     ) as HTMLElement;
     await act(async () => {
       apiKeys.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
-    expect(container.querySelector('[data-testid="api-keys-panel"]')).toBeTruthy();
+    expect(document.querySelector('[data-testid="api-keys-panel"]')).toBeTruthy();
   });
 
   it("honours a custom config's title and item order", async () => {
@@ -189,25 +193,27 @@ describe("platform admin panel (#2624)", () => {
       ],
     };
     await render(panel({ config: custom }));
-    expect(container.querySelector(".platform-admin-title-block h4")?.textContent).toBe("Operations Admin");
-    const labels = Array.from(container.querySelectorAll(".platform-admin-menu-label")).map((el) => el.textContent);
+    expect(document.querySelector(".ui-drawer-title")?.textContent).toBe("Operations Admin");
+    const labels = Array.from(document.querySelectorAll('[role="tab"]')).map((el) => el.textContent);
     expect(labels).toEqual(["Keys", "IAAA"]);
-    expect(container.querySelector('[data-testid="api-keys-panel"]')).toBeTruthy();
+    expect(document.querySelector('[data-testid="api-keys-panel"]')).toBeTruthy();
   });
 
   it("closes on Escape and on the backdrop, never on a click inside", async () => {
     const onClose = vi.fn();
     await render(panel({ onClose }));
 
-    const inside = container.querySelector(".platform-admin-content") as HTMLElement;
+    const inside = document.querySelector(".ui-drawer-body") as HTMLElement;
     await act(async () => {
       inside.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
     });
     expect(onClose).not.toHaveBeenCalled();
 
-    const backdrop = container.querySelector(".platform-admin-backdrop") as HTMLElement;
+    // The Drawer closes on a backdrop *click* (target === currentTarget),
+    // not a mousedown like the old hand-rolled shell.
+    const backdrop = document.querySelector(".ui-drawer-backdrop") as HTMLElement;
     await act(async () => {
-      backdrop.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+      backdrop.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
     expect(onClose).toHaveBeenCalledTimes(1);
 

@@ -135,7 +135,8 @@ function selectedTabLabel(): string | null {
 }
 
 function tableHeaders(): string[] {
-  const table = container.querySelector("table.dpp-table");
+  // Tail slice 1 (issue #5016): the table is the ui-table primitive now.
+  const table = container.querySelector("table.ui-table");
   if (!table) return [];
   return Array.from(table.querySelectorAll("th")).map((th) => th.textContent?.trim() ?? "");
 }
