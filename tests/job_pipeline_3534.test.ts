@@ -648,7 +648,7 @@ describe("J1 substrates — DO adapters, queue composition root, workflow flow",
     );
     expect(outcome.state).toBe("completed");
     expect(journaled).toHaveLength(2);
-    expect(journaled[0]).toContain("job-step:");
+    expect(journaled[0]).toContain("step:");
     await expect(
       runJobPipelineWorkflowFlow(
         {

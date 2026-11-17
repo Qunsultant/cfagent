@@ -142,11 +142,14 @@ no chain and must not appear where a chain is named.
 | `optionsscr` | Options chain (`options.runRoot` / `options.runStage`, 8 execution stages, 4 display stages) | feed → assemble → generate → store → serve → deliver | `src/workflows/workflowCatalog.ts` (options-screener), `src/services/optionsChainJobDefinition.ts` (`OPTIONS_CHAIN_SHORT_ID`) |
 | `goalscr` | Goal screen (a family, not a separate chain shape — goal screens ride the screener chain) | feed → analysis → store → deliver (goal-shaped request) | `src/workflows/workflowCatalog.ts` (goal-screen) |
 | `strategyscr` | Strategy discovery | analysis → store → deliver | `src/workflows/workflowCatalog.ts` (strategy-discovery) |
+| `tradrun` | Trading leg (approval-gated order execution — one family; stocks and options are screening families, not trading) | analysis → store | `src/workflows/workflowCatalog.ts` (trading-leg) |
+| `payrun` | Payment run (the charged path) | analysis → store → deliver | `src/workflows/workflowCatalog.ts` (payment-run) |
+| `sagarun` | Saga run (one cross-domain journey, payment leg then screen leg, compensable) | payment leg → screen leg | `src/workflows/workflowCatalog.ts` (saga-run) |
+| `resrch` | Research (OODA is one research type within the family) | configure → observe → orient → decide → build-and-price → challenge-and-gate → rank-and-report → evaluate-later | Ruled; no catalog family yet — #5118 owns the entry |
 
-The remaining families have no ruled short id yet (trading-leg,
-payment-run, saga-run): the #4774 build proposes `tradscr`, `payrun`,
-`sagarun` in its PR body, and the user rules them. Do not wire a
-proposed id into code before that ruling.
+All catalog families now carry a ruled short id (2026-11-17). The
+research family is ruled `resrch` but has no catalog family yet —
+#5118 owns the research catalog entry.
 
 ### Execution-tree levels (#4774)
 
@@ -158,34 +161,40 @@ chain/family ids (user ruling, issue #4774 comment 6959360479,
 | Level | Short id | Instance id example | Where the id comes from |
 |---|---|---|---|
 | Chain | `chain` | `chain:feedsrc` | The ruled chain short ids above |
-| Pipeline | `pipe` | `pipe:<feed>-pipeline` | The chain job's `jobId` |
+| Pipeline | `pipe` | `pipe:<feed>-<dataset>` | The chain job's `jobId` |
 | Workflow | `wf` | `wf:<workflow instance id>` | The ThinkWorkflow instance |
 | Job | `job` | `job:stock-screener` | The job definition's `jobId` |
-| Stage | `stage` | `stage:job:feed` | The stage's node path (`job:<nodePath>`) |
+| Stage | `stage` | `stage:feed` | The stage's node path (bare — `feed`, not `job:feed`) |
 | Sub-stage / unit | `unit` | `unit:AAPL` | The stage's shard key |
-| Task | `task` | `task:<schedule id>` | The scheduled task / async job |
-| Run | `run` | `run:run-m9x-1` | The engine's `newRunId()` |
-| Transaction | `txn` | `txn:<ledger row id>` | The `mas_transactions` `id` PK |
+| Task | `task` | `task:<uuid8>` | A task proposal; a schedule tick is `sched:<uuid>` |
+| Run | `run` | `run:m9x-1` | The engine's `newRunId()` |
+| Transaction | `txn` | `pay:a1b2c3d4` | The `mas_transactions` `id` PK (a payment draft's id is its row id) |
 
-A stage execution's id reuses the engine's existing format, it is not
-invented: `job-stage:<runId>:<stageId>:<unitId>` is the prefix of the
-stage-action CloudEvents id (`jobPipelineEvents.ts`), and
-`job-step:<runId>:<nodePath>:<stepIndex>:<shardKey>:<itemIndex>` is
-the journal id the engine passes to `journal.do`
-(`jobPipelineEngine.ts`) — the durability key for the step's
-exactly-once execution.
+A stage execution's id is `stage:<runBody>:<stageId>:<unitId>` and a
+step execution's id is
+`step:<runBody>:<nodePath>:<stepIndex>:<shardKey>:<itemIndex>` — the
+journal id the engine passes to `journal.do`
+(`jobPipelineEngine.ts`), the durability key for the step's
+exactly-once execution. Both embed bodies, never full ids: the run
+body (`m9x-1`), not the run id (`run:m9x-1`), and the stage body
+(`feed`), not the qualified node id (`job:feed`). A stage-action
+CloudEvents id (`event:<runBody>:<stageId>:<unitId>:<action>:<atMillis>:<suffix>`,
+`jobPipelineEvents.ts`) shares the stage id's run-body / stage /
+unit segments — segment equality, not a string prefix, is the link
+between a stage execution and its events.
 
 #### OODA vs run-level stages
 
 The research pipeline has the same stage name at two levels, and the
-ids are what resolve it: the candidate-level OODA loop's steps are
+level is what resolves it: the candidate-level OODA loop's steps are
 `ooda:observe` | `ooda:orient` | `ooda:decide` | `ooda:act`
-(`OodaStep`, `researchPipeline.ts`), while the run-level pipeline
-stages are `respipe:configure` | `respipe:observe` |
-`respipe:orient` | `respipe:decide` | `respipe:build-and-price` |
-`respipe:challenge-and-gate` | `respipe:rank-and-report` |
-`respipe:evaluate-later` (`PipelineStage`). Each trace entry carries
-its level-qualified `shortId`; the bare `stage` string is unchanged.
+(`OodaStep`, `researchPipeline.ts`), while each run-level pipeline
+stage is identified by its stage execution id
+(`stage:<runBody>:configure`, `stage:<runBody>:observe`, … —
+`PipelineStage`). The `respipe:` namespace that used to qualify
+run-level stages was retired by the uniform-convention adoption
+(#5175, 2026-11-17); only the candidate-level OODA loop carries a
+qualified shortId. The bare `stage` string is unchanged.
 The research run's engine onboarding (#5109, CFO lane) is in flight:
 the engine job id (`research:<runId>`) and data ports landed (#5121,
 `researchDataPorts.ts`); the trigger dispatch (#5120) and the cutover
@@ -193,19 +202,20 @@ flag (#5122) are recorded merged; the analyze.ooda step registration
 (#5118, PR #5143 open), AOP compliance (#5119, PR #5144 open), and
 Copilot execution (#5123, no PR) remain. The direct
 `runResearchPipeline` call from ResearchAgent is the pre-cutover /
-rollback path. The `ooda:` / `respipe:` ids are names the #5118 step
+rollback path. The `ooda:` ids are names the #5118 step
 registration can reuse; CLO-arsi does not build it.
 
 #### Per-instance ids
 
 Every run/transaction instance carries a unique id: engine runs mint
-`run-<time>-<counter>` (`jobPipelineEngine.ts` `newRunId`), research
-runs mint `rsr_<time>_<rand>` (`researchPipeline.ts` `newRunId`),
-async jobs mint `crypto.randomUUID()`, ledger rows carry their `id`
-PK. A trace step's instance id is DERIVED, not stored:
-`run:<runId>/<qualified-step-id>#<index>` (e.g.
-`run:rsr_abc123/ooda:observe#2`) — the index is the entry's position
-in its trace array.
+`run:<time>-<counter>` (`jobPipelineEngine.ts` `newRunId`), research
+runs still mint `rsr_<time>_<rand>` (`researchPipeline.ts` `newRunId`)
+— legacy, pending #5175 migration — async jobs mint
+`crypto.randomUUID()`, ledger rows carry their `id` PK. A trace
+step's instance id is DERIVED, not stored:
+`trace:<runBody>:<loop>:<step>:<index>` (e.g.
+`trace:m9x-1:ooda:observe:2`) — the index is the entry's position in
+its trace array.
 
 ## The nine named components
 

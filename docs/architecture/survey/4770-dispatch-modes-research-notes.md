@@ -197,11 +197,12 @@ researcher.
   chain shape. The short ids are wired into the catalog ids, the
   chain catalog entries, the job-definition spec, the options-chain
   leaf, the UI labels, and the dispatch-modes doc's naming section
-  ("Chain short ids"). The remaining families (trading-leg,
-  payment-run, saga-run) have no ruled short id yet — the #4774 PR
-  body proposes `tradscr`, `payrun`, `sagarun` for the user's
-  ruling. This R3 note is now the record of the applied names, not
-  the interim fix.
+  ("Chain short ids"). The remaining families are now ruled
+  (2026-11-17): `tradrun` = trading-leg, `payrun` = payment-run,
+  `sagarun` = saga-run; the research family is ruled `resrch` (OODA
+  is one research type within the family) but has no catalog family
+  yet — #5118 owns the entry. This R3 note is now the record of the
+  applied names, not the interim fix.
 
 - **Extended (#4774, user ruling comment 6959360479, 2026-11-17):**
   the short-id system covers ALL execution-tree levels — stages,
@@ -209,22 +210,22 @@ researcher.
   (`src/services/executionTreeIds.ts`: `chain` / `pipe` / `wf` /
   `job` / `stage` / `unit` / `task` / `run` / `txn`, one printable id
   per instance as `<level>:<local-id>`). The stage/step execution ids
-  reuse the engine's existing `job-stage:` event-id prefix and
-  `job-step:` journal-id shape. The OODA ambiguity is resolved by
+  follow the uniform convention (`stage:` / `step:` / `event:`,
+  bodies embedded, fixed arity). The OODA ambiguity is resolved by
   level: candidate-level steps are `ooda:*`, run-level research
-  stages are `respipe:*`, and each trace entry carries its qualified
-  `shortId` (the bare stage strings are unchanged). Every
+  stages are plain `stage:` execution ids (`respipe:` retired), and
+  each OODA trace entry carries its qualified `shortId` (the bare
+  stage strings are unchanged). Every
   run/transaction instance already carries a unique id (engine
-  `run-*`, research `rsr_*`, async-job UUID, ledger `id` PK); a trace
-  step's instance id is derived (`run:<runId>/<step>#<index>`), not
+  `run:*`, research `rsr_*`, async-job UUID, ledger `id` PK); a trace
+  step's instance id is derived (`trace:<runBody>:<loop>:<step>:<index>`), not
   stored. NOT in the slice: the research run's engine onboarding
   (#5109, CFO lane) — the engine job id (`research:<runId>`) and data
   ports landed (#5121); the trigger dispatch (#5120) and cutover flag
   (#5122) are recorded merged; the analyze.ooda step registration
   (#5118, PR #5143 open), AOP compliance (#5119, PR #5144 open), and
-  Copilot execution (#5123, no PR) remain. The `ooda:` / `respipe:`
-  ids are names the #5118 step registration can reuse; CLO-arsi does
-  not build it.
+  Copilot execution (#5123, no PR) remain. The `ooda:` ids are names
+  the #5118 step registration can reuse; CLO-arsi does not build it.
 
 ### R4 — Stage per-unit deadline (600s) exceeds the run execution deadline (240s) (inconsistency)
 

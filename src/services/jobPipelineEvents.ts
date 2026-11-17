@@ -17,6 +17,7 @@ import {
   type MessagePublisher,
 } from "../messaging/messagingPorts";
 import { stageIdempotencyKey } from "../workflows/stageMessage";
+import { stageActionEventId } from "./executionTreeIds";
 import type { JobRunState } from "../data/jobPipelinePorts";
 import { createStructuredLogger } from "../observability/structuredLogger";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
@@ -157,9 +158,23 @@ export function jobStageActionEvent(input: JobStageActionInput): MessageEnvelope
     typeof globalThis.crypto?.randomUUID === "function"
       ? globalThis.crypto.randomUUID()
       : Math.random().toString(36).slice(2);
+  // Issue #4774 (uniform convention, #5175): the event id is
+  // `event:<runBody>:<stage>:<unit>:<action>:<atMillis>:<suffix>` — the
+  // `<at>` is epoch millis, not ISO, because an ISO timestamp contains
+  // `:` and no body may contain `:`. An unparseable `at` falls back to
+  // the mint time rather than dropping the event.
+  const parsedAt = Date.parse(input.at);
+  const atMillis = Number.isNaN(parsedAt) ? Date.now() : parsedAt;
   return assertMessageEnvelope({
     specversion: "1.0",
-    id: `job-stage:${input.runId}:${input.stageId}:${input.unitId ?? "-"}:${input.action}:${input.at}:${suffix}`,
+    id: stageActionEventId(
+      input.runId,
+      input.stageId,
+      input.unitId,
+      input.action,
+      atMillis,
+      suffix,
+    ),
     source: "job-pipeline",
     type: `job.stage.${input.action}`,
     time: input.at,

@@ -271,6 +271,7 @@ const OPTIONS_SCREENER: WorkflowDeclaration = {
 /** The trading leg: approval-gated before execution (#3073). */
 const TRADING_LEG: WorkflowDeclaration = {
   id: "trading-leg",
+  shortId: "tradrun",
   family: "trading",
   labelKey: "workflow.trading-leg",
   label: "Trading leg",
@@ -301,6 +302,7 @@ const TRADING_LEG: WorkflowDeclaration = {
 /** Payment: the charged path, gate-checked before anything is confirmed. */
 const PAYMENT_RUN: WorkflowDeclaration = {
   id: "payment-run",
+  shortId: "payrun",
   family: "payment",
   labelKey: "workflow.payment-run",
   label: "Payment run",
@@ -355,6 +357,7 @@ const PAYMENT_RUN: WorkflowDeclaration = {
 /** Saga: one cross-domain journey, payment leg then screen leg, compensable. */
 const SAGA_RUN: WorkflowDeclaration = {
   id: "saga-run",
+  shortId: "sagarun",
   family: "saga",
   labelKey: "workflow.saga-run",
   label: "Goal saga",

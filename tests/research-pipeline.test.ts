@@ -147,10 +147,12 @@ describe("runResearchPipeline", () => {
     for (const step of report.oodaTrace) {
       expect(step.shortId).toBe(`ooda:${step.stage}`);
     }
-    // The run-level pipeline stages: every entry is `respipe:<stage>`.
+    // The run-level pipeline stages carry no shortId: `respipe:` was
+    // retired by the uniform-convention adoption (#5175) — a run-level
+    // stage is identified by its stage execution id.
     expect(report.stageTrace.length).toBeGreaterThan(0);
     for (const step of report.stageTrace) {
-      expect(step.shortId).toBe(`respipe:${step.stage}`);
+      expect("shortId" in step).toBe(false);
     }
     // The bare stage strings are unchanged — only the short id differs.
     expect(report.oodaTrace.some((s) => s.stage === "observe")).toBe(true);

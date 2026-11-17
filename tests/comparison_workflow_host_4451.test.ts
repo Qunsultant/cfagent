@@ -39,6 +39,7 @@ import {
   type JobRunRecorder,
 } from "../src/services/jobPipelineEngine";
 import { createBuiltinStepRegistry } from "../src/services/jobPipelineSteps";
+import { runIdBody } from "../src/services/executionTreeIds";
 import {
   buildComparisonQuestion,
   kernelSnapshotFromDataSnapshot,
@@ -543,7 +544,7 @@ describe("comparison workflow host (#4451)", () => {
     expect(outcome.state).toBe("completed");
     expect(journal.names.length).toBeGreaterThanOrEqual(1);
     for (const name of journal.names) {
-      expect(name.startsWith(`job-step:${outcome.runId}:`)).toBe(true);
+      expect(name.startsWith(`step:${runIdBody(outcome.runId)}:`)).toBe(true);
     }
     // The real core ran through the real gateway port: generation
     // fired (the snapshot has contracts), and the recorded prompt
