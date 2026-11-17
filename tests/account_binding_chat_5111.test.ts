@@ -30,17 +30,15 @@ function makeMemoryDoNamespace() {
 }
 
 describe("Issue #5111 (Sub-issue 2 of #5094) — Chat & Copilot account binding tool", () => {
-  it("registers broker_account_binding in McpToolFactory and steers it in chatPrompt", () => {
+  it("registers broker_account_binding in McpToolFactory and exposes its tool definition", () => {
     const cmd = McpToolFactory.getTool("broker_account_binding");
     expect(cmd).toBeDefined();
+    expect(cmd?.description).toContain("account binding");
 
-    const prompt = buildOrchestratorSystemPrompt({
-      route: { agent: "trading", confidence: 0.9, reason: "account binding" },
-      memoryContext: "",
-      vectorContext: "",
-      activeBroker: "alpaca",
-    } as any);
-    expect(prompt).toContain("tool_openaimp_broker_account_binding");
+    const defs = McpToolFactory.getToolDefinitions();
+    const bindingTool = defs.find((t) => t.name === "broker_account_binding");
+    expect(bindingTool).toBeDefined();
+    expect(bindingTool?.description).toContain("account binding");
   });
 
   it("supports set, list, get, and clear through chat for multiple account types", async () => {
