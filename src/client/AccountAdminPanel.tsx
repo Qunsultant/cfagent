@@ -33,7 +33,7 @@
  * screen: the payment screen shows this identity read-only.
  */
 import { useCallback, useEffect, useState } from "react";
-import { Button, CardHeader, EmptyState, Notice, Select, Spinner, Stack, Table, TextInput } from "./components/ui";
+import { Button, CardHeader, EmptyState, Notice, PageSection, Select, Spinner, Stack, Table, TextInput } from "./components/ui";
 import { apiFetch } from "./apiFetch";
 import { SubscriptionGrantSection } from "./SubscriptionGrantSection";
 import { UnlimitedFreeGrantSection } from "./UnlimitedFreeGrantSection";
@@ -295,11 +295,30 @@ export function AccountAdminPanel() {
     }
   }, [lookup, creditDelta, runLookup]);
 
-  if (loading) return <Spinner />;
-  if (error) return <Notice tone="danger">{error}</Notice>;
-  if (!self) return <EmptyState title="No account data" description="Reload the page to try again." />;
+  if (loading) {
+    return (
+      <PageSection>
+        <Spinner />
+      </PageSection>
+    );
+  }
+  if (error) {
+    return (
+      <PageSection>
+        <Notice tone="danger">{error}</Notice>
+      </PageSection>
+    );
+  }
+  if (!self) {
+    return (
+      <PageSection>
+        <EmptyState title="No account data" description="Reload the page to try again." />
+      </PageSection>
+    );
+  }
 
   return (
+    <PageSection>
     <Stack gap="2">
       <div>
         <CardHeader title="Your account" />
@@ -464,5 +483,6 @@ export function AccountAdminPanel() {
         )}
       </div>
     </Stack>
+    </PageSection>
   );
 }

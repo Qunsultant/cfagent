@@ -104,7 +104,9 @@ describe("4334-P04 the platform-admin gate is unchanged", () => {
     expect(view).toContain("fetchAdminOverview()");
     expect(view).toContain("isOverviewGateRefusal(message)");
     expect(view).toContain('title="Not an IAAA admin"');
-    expect(view).toContain("return <AdminQueueWipePanel />;");
+    // Issue #5174 (tail slice 4): the allowed branch mounts the panel
+    // inside a PageSection — the gate is unchanged, only the wrapper is new.
+    expect(view).toContain("<PageSection>\n      <AdminQueueWipePanel />\n    </PageSection>");
   });
 });
 

@@ -520,6 +520,18 @@ const CONFORMING_INTERIORS: string[] = [
   "src/client/ChannelsAdminPanel.tsx",
   "src/client/ScheduleRunLedgerPanel.tsx",
   "src/client/ScheduledGoalsPanel.tsx",
+  // Issue #5174 (tail slice 4): the last seven registered interiors —
+  // Checkout, Search Hub, Risk Analysis, Account Admin, Alpaca Sign-in,
+  // Free-Run Allowance, Schedule Queue; sectioned only, 0 bespoke.
+  // Their register entries are removed in the same PR; the interior
+  // register is now empty.
+  "src/client/CheckoutPanel.tsx",
+  "src/client/search/SearchHub.tsx",
+  "src/client/RiskAnalysisPanel.tsx",
+  "src/client/AccountAdminPanel.tsx",
+  "src/client/AlpacaSignInCard.tsx",
+  "src/client/FreeRunAllowanceSection.tsx",
+  "src/client/ScheduleQueueView.tsx",
 ]
 
 /** Every routable surface file (measured 2026-11-10 on main 299f2aa4):
