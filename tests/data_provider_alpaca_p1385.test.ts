@@ -437,9 +437,10 @@ describe("verifier: verifyAlpacaDataProvider shapes", () => {
     // The kit probes without a run context, so resolveRunContext
     // defaults the tenant to "default" — the probe rows live there.
     const failed = listFetchFailures(sql as never, "default");
-    expect(failed.length).toBe(3);
+    expect(failed.length).toBe(4);
     expect(failed.map((r) => r.capability).sort()).toEqual([
       "historicalBars",
+      "news",
       "optionsChains",
       "quotes",
     ]);
@@ -455,12 +456,14 @@ describe("verifier: verifyAlpacaDataProvider shapes", () => {
   it("conformance parity field-for-field over the injected provider", async () => {
     const adapter = createAlpacaDataProvider(fixtureMarketData(), undefined, {
       optionsChain: stubOptionsChain as never,
+      news: (async () => []) as never,
     });
     const report = await runDataProviderConformance(adapter);
     expect(report.ok).toBe(true);
     expect(report.checks.map((c) => c.capability)).toEqual([
       "quotes",
       "historicalBars",
+      "news",
       "optionsChains",
     ]);
   });
@@ -523,6 +526,7 @@ describe("lifecycle + routes: alpaca verifies, enables, and serves with health; 
       verifyAlpacaDataProvider(undefined, {
         provider: fixtureMarketData(),
         optionsChain: stubOptionsChain as never,
+        news: (async () => []) as never,
       });
     const verified = await transitionProvider(sql as never, "alpaca", "verify", "tester", {
       verifier: verifier as never,
