@@ -119,10 +119,10 @@ const stubOptionsChain = {
 };
 
 describe("3990: Alpaca data adapter declares exactly what it serves", () => {
-  it("declares quotes, historicalBars, optionsChains — and no fundamentals", () => {
+  it("declares quotes, historicalBars, optionsChains, news — and no fundamentals", () => {
     const adapter = createAlpacaDataProvider(fixtureMarketData());
     expect(adapter.id).toBe("alpaca");
-    expect([...adapter.capabilities]).toEqual(["quotes", "historicalBars", "optionsChains"]);
+    expect([...adapter.capabilities]).toEqual(["quotes", "historicalBars", "optionsChains", "news"]);
   });
 
   it("has getOptionsChain/getOptionExpiryDates and no getFundamentals by default", () => {
@@ -155,6 +155,7 @@ describe("3990: Alpaca data adapter declares exactly what it serves", () => {
   it("conformance passes over the stubbed options source", async () => {
     const adapter = createAlpacaDataProvider(fixtureMarketData(), undefined, {
       optionsChain: stubOptionsChain as never,
+      news: (async () => []) as never,
     });
     const report = await runDataProviderConformance(adapter);
     expect(report.ok).toBe(true);
@@ -162,6 +163,7 @@ describe("3990: Alpaca data adapter declares exactly what it serves", () => {
       "quotes",
       "historicalBars",
       "optionsChains",
+      "news",
     ]);
   });
 
@@ -184,6 +186,7 @@ describe("3990: Alpaca data adapter declares exactly what it serves", () => {
       "historicalBars",
       "fundamentals",
       "optionsChains",
+      "news",
     ]);
     const out = await adapter.getFundamentals!("AAPL", RUN);
     expect(out.providerId).toBe("alpaca");

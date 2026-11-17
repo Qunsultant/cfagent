@@ -112,8 +112,9 @@ describe("options product slice 2 provider context", () => {
     expect(dataProviderSupportsCapability("nasdaq", "screenUniverse")).toBe(true);
     // Alpaca declares no fundamentals (ADR 0019: Yahoo-covered).
     expect(dataProviderSupportsCapability("alpaca", "fundamentals")).toBe(false);
-    // News is declared by Yahoo only (#3932).
-    for (const p of ["etrade", "public", "nasdaq", "alpaca"]) {
+    // News is declared by Yahoo (#3932) and Alpaca (#4674).
+    expect(dataProviderSupportsCapability("alpaca", "news")).toBe(true);
+    for (const p of ["etrade", "public", "nasdaq"]) {
       expect(dataProviderSupportsCapability(p, "news")).toBe(false);
     }
     // Unknown providers declare nothing: no invented capability.
