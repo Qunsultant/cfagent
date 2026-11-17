@@ -140,6 +140,9 @@ describe("Cloudflare Voice Trading Agent (E*TRADE Desk)", () => {
     AI_SEARCH_ENDPOINT: "https://ai-search.internal",
     ORCHESTRATOR_AGENT: {} as any,
     ETRADE_ENVIRONMENT: "sandbox",
+    // Issue #5147: this suite pins the E*TRADE desk, so the selection is
+    // explicit — the no-selection default is the platform default (Alpaca).
+    TENANT_BROKER_ID: "etrade",
   };
 
   beforeEach(() => {

@@ -67,6 +67,10 @@ import {
   registerOptionsWorkflowSteps,
   type OptionsWorkflowStepDeps,
 } from "./optionsPipelineJobs";
+import {
+  registerOptionsChainSteps,
+  type OptionsChainStepDeps,
+} from "./optionsChainPipelineJobs";
 import type { JobPipelineStores } from "../data/jobPipelinePorts";
 import type {
   JobPipelineControl,
@@ -403,7 +407,9 @@ export function registerEnrichStep(
  * (the ScheduledAgent host, the workflow start path, the
  * workflow itself). One registry, one engine, every stage
  * family. The analyze deps are the third argument, the
- * generate deps the fourth, and the deliver deps the fifth:
+ * generate deps the fourth, and the deliver deps the fifth;
+ * the screener deps the sixth, the options deps the seventh,
+ * and the options-chain deps (#4780) the eighth:
  * production compositions always pass them; a stage-scoped
  * test registry may omit them (the registry then simply lacks
  * those steps, exactly as registerEnrichStep alone composes
@@ -426,6 +432,11 @@ export function createPipelineStepRegistry(
   // rebuilds the stage ports per invocation. Absent ⇒ the
   // registry simply lacks them, as for the screener steps.
   optionsDeps?: OptionsWorkflowStepDeps,
+  // Issue #4780: the options-chain steps compose here too, in both
+  // residencies — the chain job's six steps, resolved per invocation
+  // from the chain on the stored definition. Absent ⇒ the registry
+  // simply lacks them, as for the options steps.
+  optionsChainDeps?: OptionsChainStepDeps,
 ): JobStepRegistry {
   const registry = createFeedStepRegistry(feedDeps);
   registerEnrichStep(registry, enrichDeps);
@@ -434,6 +445,7 @@ export function createPipelineStepRegistry(
   if (deliverDeps) registerDeliverStep(registry, deliverDeps);
   if (screenerDeps) registerScreenerSteps(registry, screenerDeps);
   if (optionsDeps) registerOptionsWorkflowSteps(registry, optionsDeps);
+  if (optionsChainDeps) registerOptionsChainSteps(registry, optionsChainDeps);
   return registry;
 }
 

@@ -177,12 +177,15 @@ const delegateSeamFake = (runScreen: (req: any) => Promise<any>) => async (input
   // a monolithic Yahoo screen.
   it("a guard-blocked sharded run fails loud and never submits a shard chain (#3655)", async () => {
     const { service, publish, runScreen } = fallbackService(async () => yahooSuccessResult());
-    const shardSubmit = vi.fn(async () => ({ jobId: "never" }));
-    (service as any).shardSubmit = shardSubmit;
+    // Issue #4780: the tripwire rides the seam the stock sharded path
+    // actually submits through (submitStockScreenViaEngine) — the
+    // shardSubmit port is gone.
+    const submitStockScreen = vi.fn(async () => ({ jobId: "never", workflowId: "wf-never" }));
+    (service as any).submitStockScreenViaEngine = submitStockScreen;
     const result = await service.autonomousMarketScreen({ sharded: true, provider: "etrade" });
     expect(result.success).toBe(false);
     expect(result.error).toContain("FAILURE_AUTH_NO_SESSION");
-    expect(shardSubmit).not.toHaveBeenCalled();
+    expect(submitStockScreen).not.toHaveBeenCalled();
     expect(runScreen).not.toHaveBeenCalled();
     const events = publish.mock.calls.map((c) => c[0]);
     expect(events.find((e: any) => e.type === "screener.completed")).toBeUndefined();

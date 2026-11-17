@@ -1,0 +1,3 @@
+### Fixed
+
+- **Residual Slack/voice broker literals (#5148, follows #5131):** the Slack quote card, portfolio card, execution and cancel receipts, options routing status and `/help` banner, plus the two class-header comments, still named a hard-coded broker for every tenant. They now resolve through `resolveChannelBroker`/`brokerPresentation`, so an Alpaca or Public tenant reads its own broker on the cards that follow the preview it already saw correctly. E*TRADE tenants see the same words as before. The shrink-only census drops `src/trading/slack/agent.ts` 80→62 and `src/trading/voice/agent.ts` 17→16.

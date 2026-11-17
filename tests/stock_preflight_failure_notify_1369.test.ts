@@ -90,14 +90,17 @@ describe("autonomousMarketScreen preflight-blocked failure path (#1369)", () => 
 
   it("a blocked sharded run notifies through the same catch and never submits a shard chain", async () => {
     const { service, publish, runScreen } = blockedService();
-    const shardSubmit = vi.fn(async () => ({ jobId: "never" }));
-    (service as any).shardSubmit = shardSubmit;
+    // Issue #4780: the tripwire rides the seam the stock sharded path
+    // actually submits through (submitStockScreenViaEngine) — the
+    // shardSubmit port is gone.
+    const submitStockScreen = vi.fn(async () => ({ jobId: "never", workflowId: "wf-never" }));
+    (service as any).submitStockScreenViaEngine = submitStockScreen;
     const result = await service.autonomousMarketScreen({ sharded: true, provider: "etrade" });
     expect(result.success).toBe(false);
     expect(String((result as any).error)).toContain("FAILURE_AUTH_NO_SESSION");
     expect(runScreen).not.toHaveBeenCalled();
     const failed = publish.mock.calls.map((c) => c[0]).filter((e: any) => e.type === "screener.failed");
     expect(failed).toHaveLength(1);
-    expect(shardSubmit).not.toHaveBeenCalled();
+    expect(submitStockScreen).not.toHaveBeenCalled();
   });
 });

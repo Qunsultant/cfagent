@@ -1,1 +1,4 @@
-{"legacyDefaultBroker":"etrade"}
+{
+  "noSelectionDefault": "platform",
+  "legacyDefaultBroker": "etrade"
+}

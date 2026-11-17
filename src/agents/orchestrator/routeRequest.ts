@@ -898,7 +898,6 @@ export async function routeRequest(deps: RouteRequestDeps, request: Request): Pr
     getOrm: () => deps.getOrm(),
     scheduleScreenerFollowups: (outcome: ScreenerRunOutcome, userLogin: string, chainReport?: boolean) =>
       scheduleScreenerFollowups(deps.asyncJobsContext(), outcome, userLogin, chainReport),
-    submitShardJob: (spec) => (deps as any).submitAsyncJob(spec),
     submitAsyncJob: (spec) => (deps as any).submitAsyncJob(spec),
     autonomousMarketScreen: (payload) => deps.autonomousMarketScreen(payload),
     autoRenewETradeTokens: (payload) => deps.autoRenewETradeTokens(payload),

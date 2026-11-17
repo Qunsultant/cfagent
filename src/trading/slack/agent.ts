@@ -1,5 +1,6 @@
 /**
- * Cloudflare Slack Trading Agent for E*TRADE
+ * Cloudflare Slack Trading Agent — resolves the tenant's selected broker for
+ * execution and names that broker in every card (#5131, #5148).
  * Repurposed from Cloudflare Agents Slack SDK pattern:
  * https://developers.cloudflare.com/agents/examples/slack-agent/
  *
@@ -269,7 +270,12 @@ export class ETradeSlackTradingService {
         // Exact pre-#5131 shape preserved: nothing selected → the legacy
         // service; a broker selected → its registry platform (which carries
         // the #1393 frozen-terms guard the bare service does not).
-        const tradingService: ApprovalExecutor = channelBroker.source === "fallback"
+        // Exact pre-#5131 shape kept: the legacy service serves the no-selection
+        // case only, and only while that default is E*TRADE (#5147 moves the
+        // default to the platform broker, which goes through the registry).
+        const useLegacyChannelService =
+          channelBroker.source === "no-selection" && channelBroker.executing === "etrade";
+        const tradingService: ApprovalExecutor = useLegacyChannelService
           ? new ETradeService(orm, this.env, this.identityLogin())
           : (TradingPlatformRegistry.getPlatform(
               channelBroker.executing,
@@ -330,14 +336,16 @@ export class ETradeSlackTradingService {
           channel,
           thread_ts: threadTs,
           text: isSuccess
-            ? `✅ Order \`${targetOrderId}\` APPROVED & EXECUTED on E*TRADE by <@${user}> (Ref: \`${execId}\`)`
+            ? `✅ Order \`${targetOrderId}\` APPROVED & EXECUTED on ${channelBroker.presentation.label} by <@${user}> (Ref: \`${execId}\`)`
             : `❌ Execution failed for order \`${targetOrderId}\`: ${execMessage || "Failed"}`,
           blocks: [
             {
               type: "header",
               text: {
                 type: "plain_text",
-                text: isSuccess ? "✅ ORDER EXECUTED ON E*TRADE" : "❌ E*TRADE EXECUTION FAILED",
+                text: isSuccess
+                  ? `✅ ORDER EXECUTED ON ${channelBroker.presentation.label}`
+                  : `❌ ${channelBroker.presentation.label} EXECUTION FAILED`,
                 emoji: true,
               },
             },
@@ -403,6 +411,8 @@ export class ETradeSlackTradingService {
       const cancelMatch = rawText.match(/^(?:cancel|reject|abort|dismiss)\s+([a-zA-Z0-9_\-]+)$/i);
       if (cancelMatch) {
         const targetOrderId = cancelMatch[1].trim();
+        // Issue #5148: name the broker the draft was destined for, not a literal.
+        const channelBroker = await resolveChannelBroker(this.env);
         // Issue #1262 Phase 3: cancellation runs through the shared
         // engine (preview-tier gate + unconditional by-id update,
         // exactly as before — including the authorizer stamp).
@@ -431,7 +441,7 @@ export class ETradeSlackTradingService {
               type: "section",
               text: {
                 type: "mrkdwn",
-                text: `Order draft \`${targetOrderId}\` was cancelled by <@${user}>. No capital was moved and no order was routed to E*TRADE.`,
+                text: `Order draft \`${targetOrderId}\` was cancelled by <@${user}>. No capital was moved and no order was routed to ${channelBroker.presentation.label}.`,
               },
             },
             {
@@ -537,6 +547,9 @@ export class ETradeSlackTradingService {
 
       const domain = plan.domain;
       const action = plan.tradingData?.action || "query";
+      // Issue #5148: every card below names the broker this surface resolves,
+      // not the first broker in the catalogue. Resolved once per event.
+      const brokerLabel = (await resolveChannelBroker(this.env)).presentation.label;
       const rowText = nlqRes.rows.slice(0, 50).map((row) => JSON.stringify(row)).join("\n");
       const responseText = [nlqRes.summary || "NLQ request processed.", rowText].filter(Boolean).join("\n\n");
       const responseHtml = `<h2>NLQ research response</h2><p>${escapeHtml(nlqRes.summary || "NLQ request processed.")}</p>` +
@@ -593,13 +606,13 @@ export class ETradeSlackTradingService {
         blockKitMessage = {
           channel,
           thread_ts: threadTs,
-          text: `E*TRADE Quote for ${q.symbol}: ${q.lastPrice} (${q.change})`,
+          text: `${brokerLabel} Quote for ${q.symbol}: ${q.lastPrice} (${q.change})`,
           blocks: [
             {
               type: "header",
               text: {
                 type: "plain_text",
-                text: `📈 E*TRADE Quote: ${q.symbol} - ${q.company || ""}`,
+                text: `📈 ${brokerLabel} Quote: ${q.symbol} - ${q.company || ""}`,
                 emoji: true,
               },
             },
@@ -619,7 +632,7 @@ export class ETradeSlackTradingService {
               elements: [
                 {
                   type: "mrkdwn",
-                  text: `🛡️ Attested by Trading Agent DID (\`${AGENT_DIDS.TRADING}\`) • Direct E*TRADE Live REST API Feed`,
+                  text: `🛡️ Attested by Trading Agent DID (\`${AGENT_DIDS.TRADING}\`) • Direct ${brokerLabel} Live REST API Feed`,
                 },
               ],
             },
@@ -788,13 +801,13 @@ export class ETradeSlackTradingService {
         blockKitMessage = {
           channel,
           thread_ts: threadTs,
-          text: `E*TRADE Portfolio & Balance: ${nlqRes.summary}`,
+          text: `${brokerLabel} Portfolio & Balance: ${nlqRes.summary}`,
           blocks: [
             {
               type: "header",
               text: {
                 type: "plain_text",
-                text: `💼 E*TRADE Brokerage Account Overview`,
+                text: `💼 ${brokerLabel} Brokerage Account Overview`,
                 emoji: true,
               },
             },
@@ -810,7 +823,7 @@ export class ETradeSlackTradingService {
               elements: [
                 {
                   type: "mrkdwn",
-                  text: `Reconciled against live E*TRADE REST API • Stamped with Trading Agent DID`,
+                  text: `Reconciled against live ${brokerLabel} REST API • Stamped with Trading Agent DID`,
                 },
               ],
             },
@@ -897,7 +910,7 @@ export class ETradeSlackTradingService {
       blockKitMessage = {
         channel,
         thread_ts: threadTs,
-        text: nlqRes.summary || "E*TRADE Trading Assistant ready.",
+        text: nlqRes.summary || "Trading Assistant ready.",
         blocks: [
           {
             type: "section",
@@ -999,7 +1012,11 @@ export class ETradeSlackTradingService {
     const channelBroker = await resolveChannelBroker(this.env);
     // Exact pre-#5131 shape preserved: nothing selected → the legacy service;
     // a broker selected → its registry platform.
-    const tradingService: ApprovalExecutor = channelBroker.source === "fallback"
+    // Exact pre-#5131 shape kept: the legacy service serves the no-selection
+    // case only, and only while that default is E*TRADE (#5147).
+    const useLegacyChannelService =
+      channelBroker.source === "no-selection" && channelBroker.executing === "etrade";
+    const tradingService: ApprovalExecutor = useLegacyChannelService
       ? new ETradeService(this.orm, this.env, this.identityLogin())
       : (TradingPlatformRegistry.getPlatform(
           channelBroker.executing,
@@ -1116,7 +1133,7 @@ export class ETradeSlackTradingService {
       };
     }
 
-    // 1. Approve & Execute Order on E*TRADE
+    // 1. Approve & Execute the Order
     if (actionId === "etrade_approve_order") {
       // Issue #1262 Phase 3: button approvals run through the shared
       // engine. Exactly the button's order id — never the latest
@@ -1173,7 +1190,9 @@ export class ETradeSlackTradingService {
           type: "header",
           text: {
             type: "plain_text",
-            text: isSuccess ? "✅ ORDER EXECUTED ON E*TRADE" : "❌ E*TRADE EXECUTION FAILED",
+            text: isSuccess
+              ? `✅ ORDER EXECUTED ON ${channelBroker.presentation.label}`
+              : `❌ ${channelBroker.presentation.label} EXECUTION FAILED`,
             emoji: true,
           },
         },
@@ -1224,7 +1243,7 @@ export class ETradeSlackTradingService {
       // Update message in Slack if response_url is available
       if (payload.response_url) {
         await this.postResponseUrl(payload.response_url, {
-          text: isSuccess ? `✅ Order ${orderId} executed on E*TRADE` : `❌ Execution failed for order ${orderId}`,
+          text: isSuccess ? `✅ Order ${orderId} executed on ${channelBroker.presentation.label}` : `❌ Execution failed for order ${orderId}`,
           blocks: replacementBlocks,
           replace_original: true,
         });
@@ -1235,7 +1254,7 @@ export class ETradeSlackTradingService {
         actionId,
         orderId,
         status: isSuccess ? "executed" : "error",
-        message: isSuccess ? `Order successfully routed to E*TRADE (Ref: ${execId})` : (execMessage || "Failed"),
+        message: isSuccess ? `Order successfully routed to ${channelBroker.presentation.label} (Ref: ${execId})` : (execMessage || "Failed"),
         replacementBlocks,
         proposerDid: AGENT_DIDS.TRADING,
         authorizerDid,
@@ -1312,7 +1331,7 @@ export class ETradeSlackTradingService {
           type: "section",
           text: {
             type: "mrkdwn",
-            text: `Order draft \`${orderId}\` was cancelled by <@${user.id}>. No capital was moved and no order was routed to E*TRADE.`,
+            text: `Order draft \`${orderId}\` was cancelled by <@${user.id}>. No capital was moved and no order was routed to ${channelBroker.presentation.label}.`,
           },
         },
         {
@@ -1360,7 +1379,7 @@ export class ETradeSlackTradingService {
       const legsCount = Array.isArray(optData.legs) ? optData.legs.length : 1;
 
       // Create an order draft in SQLite if ORM is available. Issue #2165:
-      // the draft row IS the queue entry for E*TRADE routing — a failed
+      // the draft row IS the queue entry for the broker routing — a failed
       // create must fail loudly (error post + failure result + audit),
       // never the QUEUED claim with no record behind it.
       const draftId = `opt_${sym}_${Date.now()}`;
@@ -1471,7 +1490,7 @@ export class ETradeSlackTradingService {
             { type: "mrkdwn", text: `*Legs:*\n${legsCount} option leg(s)` },
             { type: "mrkdwn", text: `*Draft ID:*\n\`${draftId}\`` },
             { type: "mrkdwn", text: `*Authorizer:*\n<@${user.id}>` },
-            { type: "mrkdwn", text: `*Status:*\n*QUEUED FOR E*TRADE ROUTING*` },
+            { type: "mrkdwn", text: `*Status:*\n*QUEUED FOR ROUTING*` },
           ],
         },
         {
@@ -1564,6 +1583,8 @@ export class ETradeSlackTradingService {
     const userId = (formData.get("user_id") as string) || "unknown_user";
     const responseUrl = (formData.get("response_url") as string) || "";
     void responseUrl;
+    // Issue #5148: the slash-command cards name the broker this surface resolves.
+    const commandBrokerLabel = (await resolveChannelBroker(this.env)).presentation.label;
 
     if (this.principal === null) {
       return Response.json({
@@ -1654,7 +1675,7 @@ export class ETradeSlackTradingService {
         blocks: [
           {
             type: "header",
-            text: { type: "plain_text", text: `📈 E*TRADE Quote: ${symbol}`, emoji: true },
+            text: { type: "plain_text", text: `📈 ${commandBrokerLabel} Quote: ${symbol}`, emoji: true },
           },
           {
             type: "section",
@@ -1792,7 +1813,7 @@ export class ETradeSlackTradingService {
     // Default /help
     return Response.json({
       response_type: "ephemeral",
-      text: "🤖 *E*TRADE Slack Trading Agent Commands:*\n" +
+      text: `🤖 *${commandBrokerLabel} Slack Trading Agent Commands:*\n` +
         "• `/trade buy 10 NVDA limit 130.00` - Create interactive order preview with HITL approval buttons\n" +
         "• `/quote AAPL` - Live market quote card\n" +
         "• `/snap SPY` or `/snap ORD_123` - Command Browser Agent to take visual snapshot & deliver to Slack\n" +
