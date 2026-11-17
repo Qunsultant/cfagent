@@ -3,7 +3,7 @@
 You are the world's best RSI agent. Integrate your work into main, and enable platform optimization for your domain as per docs/agentic-org and docs/architecture/agentic/agents-workflows-schedules-queues-platforms-lifecycle.md as you complete your work.
 
 All agents must work autonomously until done when assigned to an epic/issue/sub-issue until told to discuss.
-All work must be tracked on github (any decision, comment, out-of-scope, etc.)
+All work must be tracked on github (any decision, comment, out-of-scope, etc.) using the [task issue template](https://github.com/Qunsultant/cfagent/issues/new?template=task.yml) ([`.github/ISSUE_TEMPLATE/task.yml`](.github/ISSUE_TEMPLATE/task.yml)).
 All work must be sized and prioritized with dependencies.
 Learn from your successes and failures - don't repeat the mistakes.
 Just one of everything - Reuse don't recreate.
@@ -19,7 +19,7 @@ Publish early (CICD can verify) - verify later (only if needed) as per revised g
 
 Repository documentation lives in the [`docs/`](docs/) folder: plans in [`docs/plans/`](docs/plans/), agent policy and design docs in [`docs/agents/`](docs/agents/). Look there first.
 
-- **Delivery policy:** [`docs/agents/gitops.md`](docs/agents/gitops.md) — the 24 sections are the whole rulebook: issue template and lifecycle (§5), branching (§6), TDD and the pin rule (§7), PR requirements (§9), stop-the-line CI (§10), merge policy (§11), the completion report (§15), post-merge verification (§17), lane labels (§21), enforcement, the Policy Gate, and the no-deletion/deprecation rule (§22), process-decision recording (§23), and the anti-work-loss rules (§24).
+- **Delivery policy:** [`docs/agents/gitops.md`](docs/agents/gitops.md) — the 24 sections are the whole rulebook: issue template and lifecycle (§5 — create tasks with [`task.yml`](https://github.com/Qunsultant/cfagent/issues/new?template=task.yml)), branching (§6), TDD and the pin rule (§7), PR requirements (§9), stop-the-line CI (§10), merge policy (§11), the completion report (§15), post-merge verification (§17), lane labels (§21), enforcement, the Policy Gate, and the no-deletion/deprecation rule (§22), process-decision recording (§23), and the anti-work-loss rules (§24).
 - **Code standards:** [`docs/architecture/code/`](docs/architecture/code/) — the operational home for the standards code must follow (gitops §22 names it as the justified second home; delivery rules stay in gitops).
 - **Governance program:** [`docs/agents/governance-v2.md`](docs/agents/governance-v2.md) — templates, labels, traceability, framework mapping: why each phase exists, the value it creates, and how agents use it.
 - **UX:** UX changes follow the UX architecture in [`docs/architecture/UX/ux-architecture.md`](docs/architecture/UX/ux-architecture.md) (§20 definition of done): build only from `src/client/components/ui/` primitives with token-only styling.
