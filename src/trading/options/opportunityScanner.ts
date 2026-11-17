@@ -1075,8 +1075,12 @@ export type OpportunityScanOptions = {
   explicitFields?: string[];
   /** Clock override for deterministic provenance (issue #27): the
    *  result's `generatedAt` is stamped from this instant instead of
-   *  the wall clock. */
-  now?: Date;
+   *  the wall clock. Issue #4855: a Date, or the ISO string a
+   *  stored dispatch request round-trips it to — the D1 job
+   *  definition store JSON-serializes the request, so a hosted
+   *  run's `now` arrives as a string. Both read the same instant;
+   *  resolveScanClock normalizes once at each consumption site. */
+  now?: Date | string;
   /** Per-name earnings/dividend calendar facts (issue #16),
    *  pre-fetched by the caller from the calendar service
    *  (src/services/eventCalendar.ts). The scanner never fetches.
@@ -1085,6 +1089,20 @@ export type OpportunityScanOptions = {
    *  name counts toward coverage.eventCalendar either way. */
   eventCalendarBySymbol?: Record<string, EventCalendarInfo>;
 };
+
+/**
+ * Issue #4855: the scan's clock as a Date. The `now` option is a
+ * Date on the in-process path and the ISO string the D1 job
+ * definition store round-trips it to on the hosted path; both read
+ * the same instant. Absent, the wall clock — the pre-#4855 default
+ * at both consumption sites.
+ */
+function resolveScanClock(options: OpportunityScanOptions): Date {
+  const now = options.now;
+  if (now instanceof Date) return now;
+  if (typeof now === "string") return new Date(now);
+  return new Date();
+}
 
 
 /**
@@ -1355,7 +1373,7 @@ export function enrichScanSnapshots(
       // carries no usable IV — the symbol then resolves its thesis
       // target from the legacy percentage factor and is named in the
       // fallback disclosure below.
-      const emPct = estimateExpectedMovePct(snapshot.contracts, price, options.now ?? new Date());
+      const emPct = estimateExpectedMovePct(snapshot.contracts, price, resolveScanClock(options));
       const { targetPrice, source: targetSource, targetEmUnits } = resolveScanTarget(
         plan.effectiveTemplate,
         symbol,
@@ -1556,7 +1574,7 @@ export function collateScanResult(
     borderline,
     gateParams: plan.gate,
     profileRef: plan.strategyProfile ? toProfileRef(plan.strategyProfile) : null,
-    generatedAt: (options.now ?? new Date()).toISOString(),
+    generatedAt: resolveScanClock(options).toISOString(),
     modelVersion: SCAN_MODEL_VERSION,
     requestSnapshot: {
       template: {
