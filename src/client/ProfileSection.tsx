@@ -88,7 +88,6 @@ export function ProfileSection({ userLogin }: ProfileSectionProps) {
   useEffect(() => {
     void load();
     // Load once on mount: the profile is the caller's own row.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const save = async () => {
