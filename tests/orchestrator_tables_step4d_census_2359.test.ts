@@ -216,8 +216,9 @@ describe("4d family census: surface-1 execution sites", () => {
       ["src/data/doSqliteScreenerPresetAdapter.ts", 6],
       // 21 at step 4d; 22 since #2528 slice 1: updateBody (see
       // global_dd_census_2356 pin note); 23 since #2863:
-      // getRowByRunIdForOwner.
-      ["src/data/doSqliteCanonicalReportStoreAdapter.ts", 23],
+      // getRowByRunIdForOwner; 25 since #4507: the two dedupe
+      // SELECTs (pair scan + per-pair row list).
+      ["src/data/doSqliteCanonicalReportStoreAdapter.ts", 25],
       ["src/data/doSqliteUsageEventAdapter.ts", 4],
     ]);
     for (const [f, n] of layer) {
