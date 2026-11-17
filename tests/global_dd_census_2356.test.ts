@@ -137,6 +137,12 @@ const STORAGE_ALLOW_LIST: Array<[string, number, string]> = [
   // the caller's DO SQLite (spec + plan + placed rungs); no existing port
   // models a resumable ladder, so the statements live here.
   ["src/services/ladderStateStore.ts", 4, "issue #3887 ladder state: one row per ladder (spec/plan/placed) that a later observation resumes from; no port models it"],
+  // Issue #2437: checkpointed audit-chain verification — one read-only
+  // rowid-window SELECT (WHERE rowid > ?) over the DO's own mas_events.
+  // No repository port can express a rowid window (the where-language
+  // cannot address rowid; that extension is #4751's later slice), and the
+  // checkpoint itself is written through the settings port, not here.
+  ["src/services/auditChainVerification.ts", 1, "issue #2437 audit-chain window read: bounded rowid-window SELECT over the instance's own mas_events; no port expresses a rowid window"],
 ];
 
 /** The step-4c families: zero above-layer sites remain. */
@@ -344,7 +350,9 @@ describe("global D-D census: surface 1 — storage-shaped sites above the layer"
     // sessionStore's 2 (the SessionStore DO's statements move
     // to its data-layer adapter) → 16; issue #1257 adds the
     // live-check route's 2 (DO-internal SELECT-only read, same
-    // class) → 18.
+    // class) → 18; issue #2437 adds the checkpointed audit-chain
+    // verification's 1 (bounded rowid-window read; no port can
+    // express a rowid window) → 19.
     // #3917: derived from the allow-list, not a hand-bumped literal — a new
     // dispositioned slice adds sites and its allow-list row together.
     expect(total).toBe(STORAGE_ALLOW_LIST.reduce((sum, [, sites]) => sum + sites, 0));

@@ -496,6 +496,10 @@
  * inventory entries — bringing the pinned inventory to 485 entries
  * (480 measured on the slice base); the delegation sequence is
  * unchanged (same handler, same position).
+ *
+ * Issue #2437 added one — GET /api/audit/chain-verification (in
+ * handleAuditRoutes, before the /audit detail branch in source
+ * order) — bringing the pinned inventory to 486 entries.
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
@@ -653,6 +657,7 @@ const EXPECTED_INVENTORY = [
   "handleAdsRevenueReferralsRoutes :: endsWith(\"/external-ads\")",
   "handleAdsRevenueReferralsRoutes :: endsWith(\"/external-ads/impression\")",
   "handleAdsRevenueReferralsRoutes :: endsWith(\"/external-ads/click\")",
+  "handleAuditRoutes :: endsWith(\"/audit/chain-verification\")",
   "handleAuditRoutes :: endsWith(\"/audit\")",
   "handleAuditRoutes :: endsWith(\"/audit\")",
   "handleAuditRoutes :: endsWith(\"/audit/event\")",
@@ -920,8 +925,6 @@ const EXPECTED_INVENTORY = [
   "handleBrokerOrderRoutes :: endsWith(\"/broker/order/execute\")",
   // Issue #4670: the neutral replace route — same router, same tenant broker.
   "handleBrokerOrderRoutes :: endsWith(\"/broker/order/replace\")",
-  // Issue #4672: the neutral option exercise route — same router, same tenant broker.
-  "handleBrokerOrderRoutes :: endsWith(\"/broker/position/exercise\")",
   // Issue #3390: the neutral cancel route, on the same delegating router.
   "handleBrokerOrderRoutes :: endsWith(\"/broker/order/cancel\")",
   // Issue #3884: the per-ticker cancel scope.
