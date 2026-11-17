@@ -2914,7 +2914,7 @@ export interface ShardChainContext {
    * claim "paper" while the run executed live under a pin.
    */
   modeSource?: "pin" | "selection" | "inference";
-  trigger?: "manual" | "scheduled";
+  trigger?: import("./data/jobRunRecordPorts").JobRunTrigger;
   /** Issue #4415: the schedule that dispatched the chain, when known. */
   scheduleId?: string;
   maxItems?: number;

@@ -24,7 +24,7 @@ import type { RunSummary } from "../services/runSummaries";
 export type DocumentRunSource = "stock" | "options" | "goal" | "strategy";
 
 /** How the run was started. `null` when the home store recorded no trigger. */
-export type DocumentRunType = "manual" | "scheduled";
+export type DocumentRunType = "manual" | "scheduled" | "triggered";
 
 export interface DocumentRow {
   /** Stable row key (the RunSummary id — canonical report id or detail-store id). */
@@ -115,8 +115,9 @@ export function documentRunSource(
 }
 
 /**
- * Normalizes a recorded trigger onto manual/scheduled. Unknown or absent
- * triggers stay null — the page says "—" instead of inventing a value.
+ * Normalizes a recorded trigger onto the dispatch modes. Unknown or
+ * absent triggers stay null — the page says "—" instead of inventing
+ * a value. Issue #5052: a Run-now run reads "triggered".
  */
 export function documentRunType(
   run: Pick<RunSummary, "trigger">,
@@ -125,6 +126,7 @@ export function documentRunType(
   if (!trigger) return null;
   if (trigger.startsWith("manual")) return "manual";
   if (trigger.startsWith("schedul") || trigger === "cron") return "scheduled";
+  if (trigger === "triggered") return "triggered";
   return null;
 }
 

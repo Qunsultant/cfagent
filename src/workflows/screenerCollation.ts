@@ -42,6 +42,7 @@ import { createObservabilitySink } from "../observability/createObservabilityPor
 import { projectLegOutcomes } from "../data/shardJobProjection";
 import type { LegOutcome, ShardJobStore } from "../data/shardJobPorts";
 import type { GoalDrivenScreenResult } from "../services/goalDrivenScreen";
+import type { JobRunTrigger } from "../data/jobRunRecordPorts";
 import type { ScenarioDefinition } from "../services/goalScenarioEngine";
 import {
   type ScreenIntentInterpreter,
@@ -597,7 +598,7 @@ export interface ScreenerFinalizeDeps {
 
 /** The screen request one shard executes (structural subset of the agent's request). */
 export interface ShardScreenRequest {
-  trigger: "manual" | "scheduled";
+  trigger: JobRunTrigger;
   universe?: string;
   symbols?: unknown[];
   provider?: string;
@@ -627,7 +628,7 @@ export interface ShardScreenRequest {
 export interface GoalShardRequest {
   scenario: ScenarioDefinition;
   scenarioSource: "built" | "stored";
-  trigger: "manual" | "scheduled";
+  trigger: JobRunTrigger;
   idempotencyKey: string;
   userLogin: string;
   environment?: "TEST" | "PROD";

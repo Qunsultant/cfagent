@@ -39,6 +39,7 @@
 
 import type { GoalScreenPlan } from "../services/goalDrivenScreen";
 import type { StockScreenRunSpec } from "./stockScreenRunSpec";
+import type { JobRunTrigger } from "../data/jobRunRecordPorts";
 import type { StockScreenProvider } from "../trading";
 import {
   planStockScreenRun,
@@ -94,7 +95,7 @@ export function isGoalStockSpec(spec: StockScreenRunSpec): boolean {
  */
 export function planGoalStockLeg(
   spec: StockScreenRunSpec,
-  trigger: "manual" | "scheduled",
+  trigger: JobRunTrigger,
   timestamp: string,
   provider?: StockScreenProvider,
 ): StockScreenPlan {

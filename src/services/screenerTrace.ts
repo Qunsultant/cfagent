@@ -12,6 +12,8 @@
  * block carries which run it belongs to.
  */
 
+import type { JobRunTrigger } from "../data/jobRunRecordPorts";
+
 export interface ScreenerTrace {
   /** The arming schedule's id, when the caller knows it (see the
    *  scheduleId precedent on the scheduled-task options: the SDK
@@ -23,8 +25,11 @@ export interface ScreenerTrace {
   runId: string;
   /** Wrapper name, e.g. "autonomousOptionsAnalysis". */
   workflow: string;
-  /** What started the run. */
-  trigger: "manual" | "scheduled" | "retry" | "followup";
+  /** What started the run. The five dispatch modes plus the two
+   *  mechanism values: "retry" (a re-fire) and "followup" (a
+   *  follow-up leg). Issue #5052: a Run-now trace carries
+   *  "triggered". */
+  trigger: JobRunTrigger | "retry" | "followup";
   /** Pipeline stage/step that emitted the message, e.g. "auth guard". */
   stage: string;
   /** The tracked job id, when the message comes from a job leg. */

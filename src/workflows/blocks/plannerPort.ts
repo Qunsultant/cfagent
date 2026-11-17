@@ -23,6 +23,7 @@ import { parseOptionScreenerFilter } from "../../trading";
 import type { StockScreenProvider } from "../../trading";
 import { planGoalStockLeg } from "../goalStockScreenSpec";
 import { planFromSpec } from "../stockScreenPlanner";
+import type { JobRunTrigger } from "../../data/jobRunRecordPorts";
 import type { StockScreenRunSpec } from "../stockScreenRunSpec";
 
 export interface PlanDelivery {
@@ -35,7 +36,7 @@ export interface PlanDelivery {
 export interface PlannerInput {
   assetClass: string;
   runIdentity: { runId?: string; jobId?: string };
-  trigger: "manual" | "scheduled";
+  trigger: JobRunTrigger;
   /** Rich provenance (goal | nlq | mesh | research); rides the command. */
   provenanceTrigger?: string;
   provider?: string;
@@ -49,7 +50,7 @@ export interface PlannerInput {
 export interface Plan {
   assetClass: string;
   runIdentity: { runId?: string; jobId?: string };
-  trigger: "manual" | "scheduled";
+  trigger: JobRunTrigger;
   provenanceTrigger?: string;
   provider?: string;
   idempotencyKey: string;

@@ -11,6 +11,8 @@
  */
 
 /** DO storage key holding the run history (issue #223). */
+import type { JobRunTrigger } from "../data/jobRunRecordPorts";
+
 export const OPTIONS_RUNS_KEY = "options:last_runs";
 
 /** Retained run count; older runs fall off the tail. */
@@ -20,7 +22,7 @@ export const OPTIONS_RUNS_LIMIT = 20;
 export interface OptionsRunRecord {
   timestamp: string;
   success: boolean;
-  trigger: "manual" | "scheduled";
+  trigger: JobRunTrigger;
   thesis: string;
   symbols: string[];
   withTrades: number;

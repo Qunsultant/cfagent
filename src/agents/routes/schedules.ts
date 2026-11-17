@@ -52,6 +52,7 @@ import {
 import { accountBindingAuditFields, resolveExecutionAccountContext } from "../../services/accountBindings";
 import { tradingTypeFor } from "../../trading";
 import { isLoginShaped, getServiceUserLogin } from "../../security/serviceIdentity";
+import type { JobRunTrigger } from "../../data/jobRunRecordPorts";
 import { findDuplicateSchedule } from "../../services/scheduleDedupe";
 import {
   buildScheduleProvenance,
@@ -222,7 +223,7 @@ export interface SchedulesRouteContext {
     universe?: string;
     maxItems?: number;
     broadcast?: boolean;
-    trigger?: "manual" | "scheduled";
+    trigger?: JobRunTrigger;
     userLogin?: string;
     environment?: ETradeEnvironment;
     emailTo?: string;
@@ -1572,7 +1573,8 @@ export async function handleSchedulesRoutes(
         // schedule builder as schedule creation — identity keys in the
         // body are stripped and re-stamped from the trusted context.
         const { userLogin: _bodyLogin, environment: _bodyEnv, ...triggerCriteria } = body ?? {};
-        const built = buildSchedulePayload("autonomousMarketScreen", triggerCriteria, { userLogin, environment, trigger: "manual" }, { applyCreationDefaults: false });
+        // Issue #5052: a Run-now dispatch stamps "triggered", never "manual".
+        const built = buildSchedulePayload("autonomousMarketScreen", triggerCriteria, { userLogin, environment, trigger: "triggered" }, { applyCreationDefaults: false });
         if (!built.ok) {
           return Response.json({ success: false, error: built.error }, { status: 400 });
         }
@@ -1611,7 +1613,8 @@ export async function handleSchedulesRoutes(
         const service = new ScheduledTasksService(ctx.env, ctx.getOrm(), userLogin, createOptionsDiscoveryPorts({ sql: ctx.agentCtx.storage.sql, storage: ctx.agentCtx.storage }).scanRuns, undefined, undefined, undefined, ctx.scheduleScreenerFollowups, { sql: ctx.agentCtx.storage.sql, blobStorage: ctx.agentCtx.storage, env: ctx.env }, undefined, ctx.env.SCREENER_EVENTS ?? null);
         // Issue #959: validate through the shared schedule builder.
         const { userLogin: _bodyLogin, environment: _bodyEnv, ...triggerCriteria } = body ?? {};
-        const built = buildSchedulePayload("autonomousOptionsAnalysis", triggerCriteria, { userLogin: userLogin || undefined, environment, trigger: "manual" }, { applyCreationDefaults: false });
+        // Issue #5052: a Run-now dispatch stamps "triggered", never "manual".
+        const built = buildSchedulePayload("autonomousOptionsAnalysis", triggerCriteria, { userLogin: userLogin || undefined, environment, trigger: "triggered" }, { applyCreationDefaults: false });
         if (!built.ok) {
           return Response.json({ success: false, error: built.error }, { status: 400 });
         }
@@ -1994,7 +1997,8 @@ export async function handleSchedulesRoutes(
         // Issue #959: validate through the shared schedule builder
         // (the service's own derivation validation still runs inside).
         const { userLogin: _bodyLogin, environment: _bodyEnv, ...triggerCriteria } = body ?? {};
-        const built = buildSchedulePayload("autonomousStrategyDiscovery", triggerCriteria, { userLogin, environment, trigger: "manual" }, { applyCreationDefaults: false });
+        // Issue #5052: a Run-now dispatch stamps "triggered", never "manual".
+        const built = buildSchedulePayload("autonomousStrategyDiscovery", triggerCriteria, { userLogin, environment, trigger: "triggered" }, { applyCreationDefaults: false });
         if (!built.ok) {
           return Response.json({ success: false, error: built.error }, { status: 400 });
         }

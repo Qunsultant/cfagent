@@ -32,6 +32,7 @@
 import type { ETradeOptionChain, OptionScreenFetchError, OptionScreenerFilter } from "../types";
 import type { OptionsCanonicalStore, UnifiedOptionsRunRecord } from "../services/optionsServeRecord";
 import { recordUnifiedOptionsRun } from "../services/optionsServeRecord";
+import { normalizeJobRunTrigger } from "../data/jobRunRecordPorts";
 import type { CanonicalReportStoreSeam } from "../services/generateJobs";
 import {
   OPTIONS_CANONICAL_LEG_REASONS,
@@ -408,7 +409,10 @@ export function createOptionsScreenPorts(
               summary:
                 result.filterSummary ??
                 `${result.matchedCount ?? 0} matches across ${result.totalUnderlyingsScanned ?? 0} underlyings`,
-              trigger: request.trigger === "scheduled" ? "scheduled" : "manual",
+              // Issue #5052: the dispatch trigger passes through the
+              // five modes — a scheduler Run-now ("triggered") is
+              // never collapsed to "manual".
+              trigger: normalizeJobRunTrigger(request.trigger),
               ...(request.classInput?.goalPlan?.goalId || request.classInput?.goalId
                 ? { goalId: request.classInput.goalPlan?.goalId ?? request.classInput.goalId }
                 : {}),

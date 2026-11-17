@@ -28,6 +28,7 @@ import { getServiceUserLogin } from "../security/serviceIdentity";
 import { DatabaseORM } from "../orm";
 import { ETradeService } from "../services/etrade";
 import { createFeedDatasetAdapter } from "../data/createFeedDatasetPorts";
+import type { JobRunTrigger } from "../data/jobRunRecordPorts";
 import {
   buildFeedJobRegistry,
   readPersistedSentiment,
@@ -177,8 +178,9 @@ const structuredLog = createStructuredLogger(createObservabilitySink({}), {
 });
 
 export interface ScreenerRunRequest {
-  /** Who triggered the screen. */
-  trigger: "manual" | "scheduled";
+  /** Who triggered the screen. The five dispatch modes (#5028, #3214);
+   *  a Run-now route stamps "triggered" (#5052). */
+  trigger: JobRunTrigger;
   /** Manual: user filters (search/limit/price-range/trend). Scheduled: { sector }. */
   filters?: StockScreenerFilter;
   /** Scheduled: sector label (issue #421: "ALL" when none was selected). */
@@ -367,7 +369,7 @@ export interface ScreenerGatherStageOutput extends ScreenerFeedStageOutput {
 export interface ScreenerGoalRunner {
   (req: {
     scenario: ScenarioDefinition;
-    trigger: "manual" | "scheduled";
+    trigger: JobRunTrigger;
     idempotencyKey: string;
     userLogin?: string;
     environment?: "TEST" | "PROD";
@@ -479,7 +481,7 @@ export interface ScreenerAgentPort {
 
 export interface ScreenerRunResult {
   timestamp: string;
-  trigger: "manual" | "scheduled";
+  trigger: JobRunTrigger;
   /** Issue #1007: the data provider that produced this run. */
   provider: StockScreenProvider;
   /**
@@ -923,7 +925,7 @@ export class ScreenerAgent extends PortThink {
    * exit path; the record lives with the work in this DO.
    */
   async createScreenerTask(input: {
-    trigger: "manual" | "scheduled";
+    trigger: JobRunTrigger;
     universe: string;
     sector: string;
     userLogin?: string;

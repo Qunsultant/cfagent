@@ -53,13 +53,32 @@ export type JobRunOutcome = "success" | "failure" | "skipped";
 /** scheduled = the cadence fired it; manual = a Run-now / trigger;
  * triggered = a scheduler Run-now button; copilot = the copilot
  * dispatched it; autopilot = the autonomous loop dispatched it.
- * Venus ruling 2026-11-17 (#5028, #3214): the five dispatch modes. */
-export type JobRunTrigger =
-  | "scheduled"
-  | "manual"
-  | "triggered"
-  | "copilot"
-  | "autopilot";
+ * Venus ruling 2026-11-17 (#5028, #3214): the five dispatch modes.
+ * One tuple is the source of truth: the type derives from it and
+ * the zod schemas build from it, so a sixth mode lands in one place. */
+export const JOB_RUN_TRIGGERS = [
+  "scheduled",
+  "manual",
+  "triggered",
+  "copilot",
+  "autopilot",
+] as const;
+
+export type JobRunTrigger = (typeof JOB_RUN_TRIGGERS)[number];
+
+/**
+ * Issue #5052 — normalize an untrusted dispatch trigger onto the
+ * five modes: a known mode passes through, anything else (unknown
+ * string, missing value) reads as "manual" — never invented. This is
+ * NOT resolveScheduleRunTrigger (jobRunRecords.ts): that derives a
+ * schedule run's trigger and defaults to "scheduled"; this one is
+ * the dispatch-site pass-through with the manual default.
+ */
+export function normalizeJobRunTrigger(value: unknown): JobRunTrigger {
+  return (JOB_RUN_TRIGGERS as readonly string[]).includes(value as string)
+    ? (value as JobRunTrigger)
+    : "manual";
+}
 
 /**
  * Issue #3121 S1 — the consolidated run-ledger trigger vocabulary
