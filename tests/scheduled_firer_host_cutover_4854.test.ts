@@ -369,20 +369,32 @@ describe("scheduled firer dispatch gate (#4854)", () => {
     expect(decision.reason).toMatch(/snapshot/i);
   });
 
-  it("resolves the per-run dispatch once: the firer platform with the schedule environment", () => {
-    const host = resolveScheduledFirerHostDispatch(boundEnv(), "TEST", undefined);
-    expect(host.broker).toEqual({ broker: "etrade", mode: "paper" });
+  it("resolves the per-run dispatch once: the tenant's broker with the schedule environment", async () => {
+    // Issue #5184: the scheduled firer follows the tenant's resolved broker
+    // (the platform default when nothing was selected), never a literal id.
+    const host = await resolveScheduledFirerHostDispatch(boundEnv(), "TEST", undefined);
+    expect(host.broker).toEqual({ broker: "alpaca", mode: "paper" });
     expect(host.decision.route).toBe("host");
-    const live = resolveScheduledFirerHostDispatch(boundEnv(), "PROD", undefined);
-    expect(live.broker).toEqual({ broker: "etrade", mode: "live" });
-    expect(live.decision.route).toBe("host");
-    const snapshotted = resolveScheduledFirerHostDispatch(boundEnv(), "TEST", {
+    const etrade = await resolveScheduledFirerHostDispatch(
+      boundEnv({ TENANT_BROKER_ID: "etrade" }),
+      "PROD",
+      undefined,
+    );
+    expect(etrade.broker).toEqual({ broker: "etrade", mode: "live" });
+    expect(etrade.decision.route).toBe("host");
+    const snapshotted = await resolveScheduledFirerHostDispatch(boundEnv(), "TEST", {
       artifacts: { AAPL: "feed-1" },
     });
     expect(snapshotted.decision.route).toBe("sync");
-    const unbound = resolveScheduledFirerHostDispatch({} as Env, "TEST", undefined);
-    expect(unbound.broker).toEqual({ broker: "etrade", mode: "paper" });
+    const unbound = await resolveScheduledFirerHostDispatch({} as Env, "TEST", undefined);
+    expect(unbound.broker).toEqual({ broker: "alpaca", mode: "paper" });
     expect(unbound.decision.route).toBe("sync");
+  });
+
+  it("refuses a broker whose catalogue declares no option chains (#5184)", async () => {
+    await expect(
+      resolveScheduledFirerHostDispatch(boundEnv({ TENANT_BROKER_ID: "tastytrade" }), "TEST", undefined),
+    ).rejects.toThrow(/FAILURE_BROKER_UNAVAILABLE/);
   });
 });
 
