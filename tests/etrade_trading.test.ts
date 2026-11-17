@@ -25,6 +25,9 @@ describe("E*TRADE Agentic Trading Hub & Screening Engine", () => {
     AI_SEARCH_ENDPOINT: "https://ai-search.internal",
     ORCHESTRATOR_AGENT: {} as any,
     ETRADE_ENVIRONMENT: "sandbox",
+    // Issue #5147: this suite pins the E*TRADE desk and its NLQ drafts, so the
+    // selection is explicit — the no-selection default is the platform default.
+    TENANT_BROKER_ID: "etrade",
   };
 
   beforeEach(() => {
