@@ -637,7 +637,7 @@ describe("SlackAgent.onRequest — mandatory gate (#147)", () => {
     );
     expect(res.status).toBe(200);
     const json = (await res.json()) as any;
-    expect(json.text).toContain("E*TRADE Slack Trading Agent Commands");
+    expect(json.text).toContain("Slack Trading Agent Commands");
   });
 
   it("configured + invalid signature: slash command → 401", async () => {

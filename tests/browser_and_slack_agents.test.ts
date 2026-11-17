@@ -354,7 +354,7 @@ describe("Cloudflare Browser Agent & Independent Slack Agent", () => {
       const response = await slackService().processSlackCommand(formData);
       expect(response.status).toBe(200);
       const json = await response.json() as any;
-      expect(json.text).toContain("E*TRADE Slack Trading Agent Commands");
+      expect(json.text).toContain("Slack Trading Agent Commands");
       expect(json.text).toContain("/snap");
       expect(json.text).toContain("/trade");
       expect(json.text).toContain("/quote");

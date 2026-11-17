@@ -1,5 +1,6 @@
 /**
- * Cloudflare Voice Trading Agent for E*TRADE
+ * Cloudflare Voice Trading Agent — resolves the tenant's selected broker for
+ * execution and names that broker in the greeting and result headings.
  * Repurposed from Cloudflare Agents Voice SDK pattern:
  * https://developers.cloudflare.com/agents/examples/voice-agent/
  *

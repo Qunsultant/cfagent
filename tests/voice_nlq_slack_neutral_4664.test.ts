@@ -6,7 +6,7 @@ import { DatabaseORM } from "../src/orm";
 import { MockSqlStorage } from "./mock-sql";
 import { DynamicMarketScreener } from "../src/trading/screener";
 import { MOCK_TEST_UNIVERSE } from "./fixtures/mockUniverse";
-import { resolveChannelBroker } from "../src/trading";
+import { resolveChannelBroker, resolveNoSelectionBroker } from "../src/trading";
 import { executeNLQQueryAsync } from "../src/agents/nlq/execution";
 import type { Env } from "../src/types";
 
@@ -236,10 +236,30 @@ describe("Issue #5131 — channel labels name the broker the surface executes on
     expect(res.response?.text).not.toContain("E*TRADE");
   });
 
-  it("a tenant with no selection keeps today's E*TRADE wording", async () => {
+  it("a tenant with no selection resolves the platform default (Alpaca, #5147)", async () => {
     const res = await previewCardViaSlack({});
 
-    expect(res.response?.text).toContain("E*TRADE Order Preview");
+    expect(res.response?.text).toContain("Alpaca Order Preview");
+    expect(res.response?.text).not.toContain("E*TRADE");
+  });
+
+  it("the no-selection resolution is the platform default, not a channel fallback", async () => {
+    const channelBroker = await resolveChannelBroker({});
+
+    expect(channelBroker.source).toBe("no-selection");
+    expect(channelBroker.executing).toBe("alpaca");
+    expect(channelBroker.presentation.label).toBe("Alpaca");
+  });
+
+  it("the configured policy decides the no-selection broker, and an unknown legacy id never guesses", () => {
+    // Shipped policy: the one platform default (#3937/#5147).
+    expect(resolveNoSelectionBroker({ noSelectionDefault: "platform", legacyDefaultBroker: "etrade" }, "alpaca")).toBe("alpaca");
+    // Explicit escape hatch: the pre-#5147 per-channel broker.
+    expect(resolveNoSelectionBroker({ noSelectionDefault: "legacy", legacyDefaultBroker: "etrade" }, "alpaca")).toBe("etrade");
+    // A typo in the escape hatch falls back to the platform default.
+    expect(resolveNoSelectionBroker({ noSelectionDefault: "legacy", legacyDefaultBroker: "tradier" }, "alpaca")).toBe("alpaca");
+    // An unrecognised policy is treated as "platform".
+    expect(resolveNoSelectionBroker({ noSelectionDefault: "bogus", legacyDefaultBroker: "etrade" }, "public")).toBe("public");
   });
 
   it("an id outside the catalogue renders the name-free fallback, never E*TRADE", async () => {
@@ -264,7 +284,7 @@ describe("Issue #5131 — channel labels name the broker the surface executes on
     expect(greeting.displayMarkdown).toContain("Alpaca Voice Trading Desk Connected");
   });
 
-  it("voice welcome keeps the E*TRADE desk for a tenant with no selection", async () => {
+  it("voice welcome uses the platform default for a tenant with no selection (#5147)", async () => {
     const service = new ETradeVoiceTradingService(
       { APP_BASE_URL: "https://example.com" } as unknown as Env,
       makeTradesOrm(),
@@ -272,7 +292,8 @@ describe("Issue #5131 — channel labels name the broker the surface executes on
     );
     const greeting = await service.getWelcomeGreeting();
 
-    expect(greeting.spokenText).toContain("Welcome to the E*TRADE Voice Trading Desk");
+    expect(greeting.spokenText).toContain("Welcome to the Alpaca Voice Trading Desk");
+    expect(greeting.spokenText).not.toContain("E*TRADE");
   });
 
   it("a voice quote heading names the selected broker (Alpaca)", async () => {
@@ -306,9 +327,90 @@ describe("Issue #5131 — channel labels name the broker the surface executes on
       expect(res.success).toBe(true);
       expect(res.displayMarkdown).toContain("Alpaca Quote");
       expect(res.displayMarkdown).not.toContain("E*TRADE");
+      } finally {
+      DynamicMarketScreener.setTestUniverseFixture(null);
+      DynamicMarketScreener.setTestListingsFixture(null);
+    }
+  });
+
+  it("Slack quote card names the selected broker (Alpaca, #5148)", async () => {
+    DynamicMarketScreener.setTestUniverseFixture(MOCK_TEST_UNIVERSE);
+    DynamicMarketScreener.setTestListingsFixture(MOCK_TEST_UNIVERSE.map((stock) => ({
+      symbol: stock.symbol,
+      companyName: stock.companyName,
+      exchange: "nasdaq" as const,
+      lastPrice: stock.lastPrice,
+      change: stock.change,
+      changePercent: stock.changePercent,
+      marketCap: (stock.marketCap || 0) * 1e9,
+    })));
+    try {
+      const sql = new MockSqlStorage();
+      const orm = new DatabaseORM(sql);
+      orm.initializeSchema("slack-label-user");
+      const service = new ETradeSlackTradingService(
+        {
+          AI_SEARCH_ENDPOINT: "https://ai-search.internal",
+          ORCHESTRATOR_AGENT: {} as any,
+          ETRADE_ENVIRONMENT: "sandbox",
+          TENANT_BROKER_ID: "alpaca",
+        } as unknown as Env,
+        orm,
+        "slack-label-user",
+        undefined,
+      );
+      const res = await service.processSlackEvent({
+        type: "event_callback",
+        event: {
+          type: "message",
+          channel: "C123",
+          user: "U123",
+          text: "quote AAPL",
+          ts: "1700000000.000300",
+        },
+      });
+
+      expect(res.response?.text).toContain("Alpaca Quote");
+      expect(res.response?.text).not.toContain("E*TRADE");
     } finally {
       DynamicMarketScreener.setTestUniverseFixture(null);
       DynamicMarketScreener.setTestListingsFixture(null);
     }
+  });
+
+  it("Slack approval receipt names the broker that executed (Alpaca, #5148)", async () => {
+    const draft = {
+      id: "ord_alpaca_receipt_1",
+      symbol: "AAPL",
+      action: "BUY",
+      quantity: 1,
+      price: 180,
+      orderType: "MARKET",
+      totalValue: 180,
+      status: "previewed",
+    };
+    const executeOrder = vi.fn(async () => ({ success: true, executionId: "alp_exec_receipt_1", message: "ok" }));
+    vi.spyOn(TradingPlatformRegistry, "getPlatform").mockReturnValue({ executeOrder, placeOrderRemote: vi.fn() } as any);
+
+    const service = new ETradeSlackTradingService(
+      { TENANT_BROKER_ID: "alpaca" } as unknown as Env,
+      makeTradesOrm({ [draft.id]: draft }),
+      "slack-user",
+      undefined,
+    );
+    const res = await service.processSlackEvent({
+      type: "event_callback",
+      event: {
+        type: "message",
+        channel: "C123",
+        user: "U123",
+        text: `approve ${draft.id}`,
+        ts: "1700000000.000400",
+      },
+    });
+
+    expect(res.actionType).toBe("approval");
+    expect(res.response?.text).toContain("Alpaca");
+    expect(res.response?.text).not.toContain("E*TRADE");
   });
 });
