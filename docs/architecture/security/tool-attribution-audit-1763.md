@@ -224,6 +224,7 @@ other doors. Scope column is #1843's declaration, consumed here.
 | `public_preview_order` | mcp:trade | L (I / R on other doors) — creates a draft with a provenanced price via the Public preflight; preview only, no placement (#3990) |
 | `public_place_order` | mcp:trade | L (I / R on other doors) — settles a stored preview draft by orderId; preview-first, refuses without orderId; TEST refuses with FAILURE_PUBLIC_NO_PAPER_MODE (Public has no paper trading); PROD places with real money; the result is an acceptance receipt, not a fill (#3990) |
 | `public_cancel_order` | mcp:trade | L (I / R on other doors) — cancels one order via the Public `cancel_order` tool; no cancel-all on the Public surface (#3990) |
+| `broker_account_binding` | mcp:write | L (control-plane account binding `{ broker, mode, accountType, accountId }` per user, #5111) |
 | `foss_alpaca_place_order` (deprecated #1906 alias of `alpaca_place_order`, same scope) | mcp:trade | L (I / R on other doors) |
 | `execute_durable_twap` | mcp:trade | L (I / R on other doors) |
 | `propose_stock_trade` | mcp:trade | L via door 2 only — acting identity required (#2349); refused on doors 1/3 (no acting-identity carrier there). Preview only: the result is a pending-approval proposal; no order is placed |

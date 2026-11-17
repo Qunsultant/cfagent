@@ -271,6 +271,7 @@ Sub-agent & MCP capabilities directly available to you (the tool_openaimp_* tool
 - 'tool_openaimp_confirm_payment_draft': Approve, authorize, or cancel a pending payment or task draft only upon explicit user confirmation.
 - 'tool_openaimp_execute_nlq': ${input.chatNlqEnabled ? "(Enabled in chat turns by CHAT_NLQ_MODE) Submit a natural-language database, market-data, or options-strategy query as an asynchronous job." : "(Flagged OFF in chat turns by CHAT_NLQ_MODE, default off — not available in this turn; use the structured tools and door commands.)"}
 - 'tool_openaimp_manage_session_memory' / 'rememberFact': Session facts; rule 5 governs when to remember.
+- 'tool_openaimp_broker_account_binding': Inspect, set, or clear the user's active '{ broker, mode, accountType, accountId }' account binding (e.g., selecting a specific stock, options, or forex account for tenant, autopilot, copilot, or schedule scopes).
 - 'createTaskDraft': Draft actionable tasks with priorities and deadlines.
 - 'tool_openaimp_run_stock_screen': THE universe-screen tool — run a stock screen over a named universe (NASDAQ100, SP500, SP100, RUSSELL2000, TECH, ETF, LEV_ETF, or ALL) as a durable screener workflow.
 - 'tool_openaimp_run_options_strategy_screen': THE options-strategy-screen tool — screen options strategies over a named universe by structured constraints (strategy type from the strategy catalog, maxLoss, minProfit, minRewardRisk, DTE window); never deflect that request to a UI workflow (rule 6).
