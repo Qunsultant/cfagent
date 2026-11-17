@@ -192,7 +192,9 @@ describe("new-page scaffold (issues #3080, #3137)", () => {
         "--category", "Platform",
         "--issue", "3080",
         "--nav",
-        "--icon", "Reports",
+        // Issue #5169: Reports is the Observability nav icon now, so
+        // the probe uses Tasks (a free icon key) instead.
+        "--icon", "Tasks",
         "--badge", "Probe",
       ]);
       const nav = JSON.parse(read(tmp, "src/client/nav-config.json")) as {
@@ -246,7 +248,10 @@ describe("new-page scaffold (issues #3080, #3137)", () => {
           "--description", "x",
           "--category", "Platform",
           "--nav",
-          "--icon", "Reports",
+          // Issue #5169: Reports is the Observability nav icon now, so
+          // the probe uses Tasks — the throw under test is the duplicate
+          // badge, not the icon.
+          "--icon", "Tasks",
           "--badge", "PDF",
         ]),
       ).toThrow();

@@ -26,6 +26,18 @@
  *  OBS-1007 otel.metrics.free_tier_guard — the metrics
  *    free-tier write guard dropped Analytics Engine writes for
  *    the day (the configured daily write limit was reached).
+ *
+ * Codes added for the R2 archive sub-tab (#5169, interim file
+ * browser over the same archive):
+ *  OBS-1008 otel.archive.unavailable — the archive could not be
+ *    read (R2 unbound, or the audit write a read depends on
+ *    failed).
+ *  OBS-1009 otel.archive.key_rejected — the requested key is
+ *    outside the otel-archive/ prefix (or missing).
+ *  OBS-1010 otel.archive.not_found — no object exists under the
+ *    requested archive key.
+ *  OBS-1011 otel.archive.forbidden — a signed-in non-admin was
+ *    denied the archive (authenticated, not platform-admin).
  */
 
 /** A switch value failed closed to the safe default (OFF / none / 0). */
@@ -42,6 +54,14 @@ export const OBS_SINK_DEGRADED = "OBS-1005" as const;
 export const OBS_METRICS_EXPORT_FAILED = "OBS-1006" as const;
 /** The metrics free-tier write guard dropped Analytics Engine writes for the day. */
 export const OBS_METRICS_FREE_TIER_GUARD = "OBS-1007" as const;
+/** The OTel archive could not be read (R2 unbound, or the audit a read depends on failed). */
+export const OBS_ARCHIVE_UNAVAILABLE = "OBS-1008" as const;
+/** The requested archive key is outside the otel-archive/ prefix (or missing). */
+export const OBS_ARCHIVE_KEY_REJECTED = "OBS-1009" as const;
+/** No object exists under the requested archive key. */
+export const OBS_ARCHIVE_NOT_FOUND = "OBS-1010" as const;
+/** A signed-in non-admin was denied the OTel archive. */
+export const OBS_ARCHIVE_FORBIDDEN = "OBS-1011" as const;
 
 /** Formats a coded message: `[OBS-####] <message>`. */
 export function formatOtelMessage(code: string, message: string): string {

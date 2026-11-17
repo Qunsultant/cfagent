@@ -53,7 +53,8 @@ describe("Stock Hub split (#2896)", () => {
     // #4626 retires the Approvals + Options Flows nav entries: 31 → 29.
     // Issue 4682 retires the referrals, ads, and social nav entries
     // into the one Marketing Hub entry: 29 → 27.
-    expect(ROUTES.filter(hasNavEntry)).toHaveLength(27);
+    // Issue #5169 adds the Observability nav entry: 27 → 28.
+    expect(ROUTES.filter(hasNavEntry)).toHaveLength(28);
   });
 
   it("defines the Hub tab set: stocks, new-screen (+run-screen alias), research (+ patterns, presets #2954)", () => {

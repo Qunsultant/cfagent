@@ -27,7 +27,10 @@
  *   Marketing Hub route (`?tab=marketing-hub`), which took the
  *   referrals slot at navOrder 10; navOrders 13..28 shift down two,
  *   keeping 0..26 across the 27 nav entries; the route count is 45.
- * - `navEntry` is present only for the 27 entries that render in the nav.
+ *   Issue #5169 added the 46th id, "observability", as a real nav
+ *   entry (navOrder 27) — the OTel R2 archive file browser; navOrders
+ *   0..27 across the 28 nav entries.
+ * - `navEntry` is present only for the 28 entries that render in the nav.
  *   Its `navOrder` reproduces the historical sidebar/top-strip order, so
  *   deriving NAVIGATION_ITEMS from this table changes nothing visible.
  * - `navGroup` is the nav entry highlighted when this tab is active. It

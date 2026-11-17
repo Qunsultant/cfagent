@@ -31,6 +31,7 @@ import { SchedulesHome } from "./SchedulesHome";
 import { AuditVaultPage } from "./AuditVaultPage";
 import { DataHubHome } from "./DataHubHome";
 import { SecurityHubHome } from "./SecurityHubHome";
+import { ObservabilityHome } from "./ObservabilityHome";
 import { MarketingHubHome } from "./MarketingHubHome";
 import type { TradeOrderContext } from "./trading/tradeOrderContext";
 import { getCrumb } from "./routes";
@@ -1081,6 +1082,11 @@ export function Chat({ user }: { user: User }) {
         userLogin={user.login}
         user={{ login: user.login, name: user.name, avatar: user.avatar }}
       />
+    ),
+    // Issue #5169: the Observability home — the R2 archive file
+    // browser (the interim view until the S8 dashboard lands).
+    observability: (
+      <ObservabilityHome />
     ),
     // Issue #4530: the Product Hub is the ONLY place for
     // product-domain URLs — the standalone products entry retired

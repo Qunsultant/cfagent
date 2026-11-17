@@ -1100,11 +1100,15 @@ const STEP5B_PORT_SITES: Array<[string, string, number]> = [
   // populate-market-graph); the count is unchanged, only the file,
   // so the family total is unchanged.
   // (Order is the scanner's sort: "src/server/routes/auth.ts" sorts
-  // before "src/server/routes/platform.ts" sorts before
+  // before "src/server/routes/otelArchive.ts" sorts before
+  // "src/server/routes/platform.ts" sorts before
   // "src/server/routes/privacy.ts".)
   ["src/server/routes/auth.ts", "listSessionFamilyEntries", 20],
   ["src/server/routes/auth.ts", "wiredAccessRequestStore", 1],
   ["src/server/routes/auth.ts", "wiredMembershipStore", 4],
+  // #5169 (2026-11-17): the OTel archive routes compose
+  // wiredMembershipStore once, following the IAAA admin pattern.
+  ["src/server/routes/otelArchive.ts", "wiredMembershipStore", 1],
   ["src/server/routes/platform.ts", "wiredMembershipStore", 2],
   // #4116 (2026-11-12): the /api/ops/run-ledger-reconcile route composes
   // wiredMembershipStore once, following the IAAA admin pattern; 4 -> 5.

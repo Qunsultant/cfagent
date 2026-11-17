@@ -457,13 +457,14 @@ describe("4585-P06 the homes render their tabs and mount the panels (#4585)", ()
 });
 
 describe("4585-P07 nav counts move (#4585)", () => {
-  it("routes 45, navOrders 0..26, sub-menu groups 20, surfaces 29", () => {
+  it("routes 46, navOrders 0..27, sub-menu groups 21, surfaces 30", () => {
     const routes = navConfigData.routes as {
       id: string;
       navEntry?: { navOrder: number };
     }[];
     // Issue 4682: the Marketing Hub route joins the table; 44 → 45.
-    expect(routes).toHaveLength(45);
+    // Issue #5169: the Observability route joins the table; 45 → 46.
+    expect(routes).toHaveLength(46);
     const orders = routes
       .filter((r) => r.navEntry)
       .map((r) => r.navEntry!.navOrder)
@@ -471,13 +472,14 @@ describe("4585-P07 nav counts move (#4585)", () => {
     // S1 #4626 retires the Approvals + Options Flows nav entries: 31 -> 29.
     // Issue 4682 retires the referrals, ads, and social nav entries
     // into the one Marketing Hub route: 29 -> 27.
-    expect(orders).toEqual(Array.from({ length: 27 }, (_, i) => i));
+    // Issue #5169 adds the Observability nav entry: 27 -> 28.
+    expect(orders).toEqual(Array.from({ length: 28 }, (_, i) => i));
     const dataHub = routes.find((r) => r.id === "data-hub");
     const securityHub = routes.find((r) => r.id === "security-hub");
     expect(dataHub?.navEntry?.navOrder).toBe(25);
     expect(securityHub?.navEntry?.navOrder).toBe(26);
-    expect(Object.keys(navConfigData.subMenus as Record<string, unknown>)).toHaveLength(20);
-    expect(SURFACE_TAB_DEFS).toHaveLength(29);
+    expect(Object.keys(navConfigData.subMenus as Record<string, unknown>)).toHaveLength(21);
+    expect(SURFACE_TAB_DEFS).toHaveLength(30);
     const platformAdmin = SURFACE_TAB_DEFS.find((d) => d.surface === "platform-admin");
     expect([...platformAdmin!.values]).toEqual([...REMAINING_PLATFORM_ADMIN]);
   });

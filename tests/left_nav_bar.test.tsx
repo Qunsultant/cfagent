@@ -77,7 +77,7 @@ describe("LeftNavBar UX & Reorganization (issue #2685)", () => {
     expect(titles).toContain("SANDBOX");
   });
 
-  it("holds the final Platform order: Platform Admin, Schedules, Workflows, Agents, Audit & Vault, DataHub, SecurityHub (#2974; Queues retired into Schedules in #4574; audit + NLQ merged into Audit & Vault in #4575; DataHub + SecurityHub split out of Platform Admin in #4585)", () => {
+  it("holds the final Platform order: Platform Admin, Schedules, Workflows, Agents, Audit & Vault, DataHub, SecurityHub, Observability (#2974; Queues retired into Schedules in #4574; audit + NLQ merged into Audit & Vault in #4575; DataHub + SecurityHub split out of Platform Admin in #4585; Observability added in #5169)", () => {
     const plat = DEFAULT_LEFT_NAV_CONFIG.sections.find((s) => s.id === "section-platform");
     expect(plat).toBeDefined();
     expect(plat!.items.map((i) => i.id)).toEqual([
@@ -88,6 +88,7 @@ describe("LeftNavBar UX & Reorganization (issue #2685)", () => {
       "audit-vault",
       "data-hub",
       "security-hub",
+      "observability",
     ]);
   });
 
