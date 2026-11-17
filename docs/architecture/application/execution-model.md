@@ -77,7 +77,7 @@ flowchart TB
 
 | Entity | Id | What it is | Parent | Children |
 |---|---|---|---|---|
-| Family | `chain:<family>` | A workflow family: `stockscr`, `optionsscr`, `goalscr`, `strategyscr`, `feedsrc`, `resrch` (proposed), `tradscr` (proposed), `payrun` (proposed), `sagarun` (proposed). | — | Job definitions |
+| Family | `chain:<family>` | A workflow family: `stockscr`, `optionsscr`, `goalscr`, `strategyscr`, `feedsrc`, `resrch` (ruled 2026-11-17 — OODA is one type of research within the family), `tradscr` (proposed), `payrun` (proposed), `sagarun` (proposed). | — | Job definitions |
 | JobDefinition | `job:<spec>` / `pipe:<feed>-<dataset>` | A job spec with a stage vocabulary and a node tree. | Family | Stages (vocabulary), nodes |
 | Task | `task:<uuid8>` / `sched:<uuid>` (proposed) / `job:<uuid>` | An invocation that causes a run. | — | Runs |
 | Run | `run:<time>-<counter>` | ONE execution instance of one job definition, caused by one task. The root. | Task, JobDefinition | Stage executions, generations, transactions, deliveries |
@@ -92,8 +92,8 @@ flowchart TB
 
 Notes:
 
-- **OODA is just another workflow.** The nightly research run is a sibling family of stockscr/optionsscr/goalscr/strategyscr; its job id is already `research:<runBody>` (#5120). Proposed family short id: `resrch` (matches the job, agent, and pipeline naming); the alternative is `ooda`, the product name — but it collides conceptually with the `ooda:` loop-step namespace. Its stages are the 8 pipeline stages. The OODA *loop* (observe/orient/decide/act) is a cycle *inside* the analyze stage (`analyze.ooda`, #5118), one iteration per candidate — its instances are trace entries, not stage executions. That is why the same words appeared at two levels: the run-level stage `stage:<runBody>:observe:-` vs the candidate-level iteration `trace:<runBody>:ooda:observe:2`. The hierarchy scopes them, so the separate `respipe:` namespace retires (it was the #4774 workaround for a flat namespace).
-- **Trading is one family today** (`tradscr`, proposed): one catalog family, one `TradingTradeWorkflow` host, one shared stage vocabulary. If stock and options trading stages diverge, they split into two families.
+- **OODA is one type of research.** The research family's short id is `resrch` (ruled 2026-11-17). OODA is one *type* of research within the family — not the family itself. The research family contains research types; OODA (the nightly run) is one of them; the other types are to be enumerated. Its stages are the 8 pipeline stages. The OODA *loop* (observe/orient/decide/act) is a cycle *inside* the analyze stage (`analyze.ooda`, #5118), one iteration per candidate — its instances are trace entries, not stage executions. That is why the same words appeared at two levels: the run-level stage `stage:<runBody>:observe:-` vs the candidate-level iteration `trace:<runBody>:ooda:observe:2`. The hierarchy scopes them, so the separate `respipe:` namespace retires (it was the #4774 workaround for a flat namespace).
+- **Trading (order execution) is one family** (`tradscr`, proposed): one catalog family, one `TradingTradeWorkflow` host, one shared stage vocabulary. Stocks and options are screening families, not trading — they are not part of the trading family, and there is no "stock trading" vs "options trading" split.
 - **A unit is a coordinate, not an id.** A sharded stage has one stage-execution id per unit (`stage:m9x2k-2:feed:AAPL`, `stage:m9x2k-2:feed:MSFT`); no separate `unit:` id is minted.
 - **A chain is a job whose steps are jobs.** That is the recursion in the diagram: the options chain job's feed/assemble/generate/store/serve/deliver nodes are themselves jobs. A **pipe** is a feed-pipeline job inside the feed chain.
 
@@ -255,8 +255,8 @@ The count depends on the job definition and the universe size: total = 1 (run) +
 ## 7. Open rulings
 
 - Adopt the uniform convention (§5) — and the #5173 question: rework PR #5173 to it now, or land #5173 as-is and rename in #5175's first slice.
-- Family short id for research: `resrch` vs `ooda`.
-- Trading: one family (`tradscr`) vs two (stock / options).
+- Enumerate the research types (OODA is one — what are the others?).
+- `tradscr` / `payrun` / `sagarun` family short ids (proposed).
 - `respipe:` retirement (follows from §2 — the hierarchy scopes the stages).
 - `sched:<uuid>` schedule-id form (proposed).
 - `tradscr` / `payrun` / `sagarun` family short ids (proposed, from #4774).
