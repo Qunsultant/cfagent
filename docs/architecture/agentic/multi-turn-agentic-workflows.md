@@ -24,7 +24,7 @@ is gated exactly like #2530: gate closed, no model seam or no audit sink means t
 flowchart LR
   subgraph Contract["Stage contract (shared)"]
     IN["input artifact<br/>(by key, never re-fetched)"]
-    MODES["modes<br/>sync · async<br/>parallel · sequential<br/>batch · online<br/>sharded · monolithic"]
+    MODES["modes<br/>sync · async<br/>parallel · sequential<br/>batch · online<br/>sharded · monolith"]
     OUT["persist → checkpoint → publish<br/>(#2869 seam, runId+stageId)"]
   end
 

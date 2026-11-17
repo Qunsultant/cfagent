@@ -57,7 +57,7 @@ export function WorkflowCatalogPage() {
   return (
     <PageTemplate
       title="Workflow Catalog"
-      scopeNote="Every workflow the platform can run, and the full contract of each of its stages: the four mode axes (sync/async, parallel/sequential, batch/online, sharded/monolithic), what the stage consumes, persists and publishes, its retry bucket, its checkpoint and whether it needs an approval. Read-only in this slice; the run action lands with each family's submission path."
+      scopeNote="Every workflow the platform can run, and the full contract of each of its stages: the four mode axes (sync/async, parallel/sequential, batch/online, sharded/monolith), what the stage consumes, persists and publishes, its retry bucket, its checkpoint and whether it needs an approval. Read-only in this slice; the run action lands with each family's submission path."
     >
       <Tabs<WorkflowCatalogView>
         idBase="workflow-catalog"

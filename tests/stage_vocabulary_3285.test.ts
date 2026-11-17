@@ -52,10 +52,10 @@ function baseWorkflow(over: Partial<WorkflowDeclaration> = {}): WorkflowDeclarat
         consumesStageMessage: null,
         consumes: null,
         modes: {
-          timing: ["immediate"],
+          delivery: ["immediate"],
           concurrency: ["sequential"],
-          volume: ["batch"],
-          partitioning: ["none"],
+          pacing: ["batch"],
+          shape: ["none"],
         },
         retryBucket: "acquisition",
         checkpointed: true,
