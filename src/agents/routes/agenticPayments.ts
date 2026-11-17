@@ -1105,12 +1105,17 @@ export async function handleAgenticPaymentsRoutes(
   const ensureStores = async (
     store: D1CommercialAdapter,
     subs: D1SubscriptionAdapter,
+    // Issue #3335: the identity read names a schema-ensure failure
+    // with its own outcome (FAILURE_IDENTITY_SCHEMA_UNAVAILABLE)
+    // instead of the store-unbound code. Every other caller keeps
+    // the default, so their bodies are unchanged.
+    schemaFailureCode: string = "FAILURE_COMMERCIAL_STORE_UNAVAILABLE",
   ): Promise<Response | null> => {
     try {
       await ensureCommercialSchema(store.db);
       await ensureSubscriptionSchema(subs.db);
     } catch (err: any) {
-      return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_STORE_UNAVAILABLE") }, { status: 503 });
+      return Response.json({ code: schemaFailureCode, error: codedMessage(schemaFailureCode) }, { status: 503 });
     }
     return null;
   };
@@ -1165,12 +1170,19 @@ export async function handleAgenticPaymentsRoutes(
   if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.identity) && request.method === "GET") {
     try {
       const login = commercialLogin();
-      if (!login) return Response.json({ code: "FAILURE_AUTH_NO_SESSION", error: "Unauthorized: verified login required." }, { status: 401 });
+      // Issue #3335: one distinct coded outcome per failure mode, so
+      // a failing session names its cause. FAILURE_AUTH_NO_SESSION
+      // cannot serve here: its catalog message describes a brokerage
+      // OAuth session, not a missing verified login — which is why
+      // this handler previously returned raw text for the 401. The
+      // cause in the original #3335 session remains unknown — each
+      // mode is now diagnosable instead.
+      if (!login) return Response.json({ code: "FAILURE_IDENTITY_LOGIN_REQUIRED", error: codedMessage("FAILURE_IDENTITY_LOGIN_REQUIRED") }, { status: 401 });
       const store = requireStore();
       if (store instanceof Response) return store;
       const subs = requireSubs();
       if (subs instanceof Response) return subs;
-      const ensured = await ensureStores(store, subs);
+      const ensured = await ensureStores(store, subs, "FAILURE_IDENTITY_SCHEMA_UNAVAILABLE");
       if (ensured) return ensured;
       const identity = await resolvePlatformIdentity(
         { commercial: store, subscriptions: subs },
@@ -1178,7 +1190,7 @@ export async function handleAgenticPaymentsRoutes(
       );
       return Response.json({ ...toPlatformIdentityView(identity), code: "SUCCESS_IDENTITY_READ" });
     } catch (err: any) {
-      return Response.json({ code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE") }, { status: 503 });
+      return Response.json({ code: "FAILURE_IDENTITY_READ_FAILED", error: codedMessage("FAILURE_IDENTITY_READ_FAILED") }, { status: 503 });
     }
   }
 

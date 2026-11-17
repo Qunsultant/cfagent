@@ -23,6 +23,7 @@ import {
   markFirstRunComplete,
   firstRunStorageKey,
 } from "../src/client/firstRunApi";
+import { codedMessage } from "../src/outcomes/outcomeAspects";
 
 const realFetch = globalThis.fetch;
 
@@ -124,5 +125,31 @@ describe("lifecycle preferences route (existing route, no new port)", () => {
     );
     expect(prefs.digestEnabled).toBe(true);
     expect(prefs.welcomeEnabled).toBe(false);
+  });
+});
+
+describe("fetchPlatformIdentity coded failures (#3335)", () => {
+  it.each([
+    [401, "FAILURE_IDENTITY_LOGIN_REQUIRED"],
+    [503, "FAILURE_COMMERCIAL_STORE_UNAVAILABLE"],
+    [503, "FAILURE_IDENTITY_SCHEMA_UNAVAILABLE"],
+    [503, "FAILURE_IDENTITY_READ_FAILED"],
+  ])("surfaces %s %s as a typed error with the catalog message", async (status, code) => {
+    stubFetch(() => Response.json({ code, error: codedMessage(code) }, { status }));
+    const err = await fetchPlatformIdentity().catch((e) => e);
+    expect(err).toBeInstanceOf(FirstRunApiError);
+    expect((err as FirstRunApiError).status).toBe(status);
+    expect((err as FirstRunApiError).code).toBe(code);
+    expect((err as FirstRunApiError).message).toBe(codedMessage(code));
+  });
+
+  it("the four coded failures carry four different messages", async () => {
+    const codes = [
+      "FAILURE_IDENTITY_LOGIN_REQUIRED",
+      "FAILURE_COMMERCIAL_STORE_UNAVAILABLE",
+      "FAILURE_IDENTITY_SCHEMA_UNAVAILABLE",
+      "FAILURE_IDENTITY_READ_FAILED",
+    ];
+    expect(new Set(codes.map((c) => codedMessage(c))).size).toBe(4);
   });
 });
