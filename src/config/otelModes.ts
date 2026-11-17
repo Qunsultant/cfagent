@@ -1,8 +1,9 @@
 /**
- * Issue #5081 (S1, observability program #5080) — the port for
- * the OpenTelemetry on/off switches (the four-level mechanism).
+ * Issue #5081 (S1, observability program #5080) + #5138
+ * (destination switches) — the port for the OpenTelemetry
+ * on/off switches (the five-level mechanism).
  *
- * Four levels, all externalized (config/otel.json + env vars),
+ * Five levels, all externalized (config/otel.json + env vars),
  * following the PAYMENTS_FLOW_MODE resolver pattern
  * (src/config/paymentsFlowModes.ts):
  *  1. GLOBAL MASTER — OTEL_ENABLED / OTEL_SDK_DISABLED (the OTel
@@ -19,6 +20,19 @@
  *     (ALL/ERROR/DEBUG/INFO/WARN/TRACE/OFF) and the sampling
  *     ratio per domain, both config values. Level OFF = that
  *     domain emits nothing.
+ *  5. PER-DESTINATION (#5138) — OTEL_DESTINATION_<NAME>_ENABLED /
+ *     config map otel.destinations.<name>. One switch per
+ *     destination: analyticsEngine (the Analytics Engine sink),
+ *     r2 (the OTLP export to R2), console (the console sink).
+ *     Each is individually on/off; invalid fails closed to OFF.
+ *     The config-file defaults are all ON (preserving the
+ *     current behavior); the built-in safe default is OFF.
+ *
+ * Workers Logs is NOT a level here: it is deploy-time only
+ * (wrangler.jsonc observability.enabled). The Worker cannot
+ * flip the Cloudflare platform log pipeline at runtime, so no
+ * resolver exists for it — see config/otel.json's comment and
+ * docs/OBSERVABILITY.md §6.
  *
  * RESOLUTION, in this order: run > session > user > env >
  * config-file > built-in safe default. The config file
@@ -77,10 +91,28 @@ import { createObservabilitySink } from "../observability/createObservabilityPor
 import { OBS_CONFIG_INVALID, formatOtelMessage } from "../observability/otelMessages";
 import rawOtelConfig from "../../config/otel.json";
 
-/** Issue #5081 — module logger on the S1 structured-logging seam. */
-const structuredLog = createStructuredLogger(createObservabilitySink({}), {
-  component: "config/otelModes",
-});
+/**
+ * Issue #5081 — module logger on the S1 structured-logging seam.
+ *
+ * LAZY (created on first use, never at module top level):
+ * src/observability/createObservabilityPorts.ts imports the
+ * destination resolver from this module, so this module's
+ * top-level evaluation must not call createObservabilitySink —
+ * the sink reads OTEL_FILE_CONFIG, a const declared below,
+ * which is still in its temporal dead zone during this
+ * module's evaluation. A lazy logger keeps the import cycle
+ * safe: by the time logInvalid first runs (at runtime, after
+ * all modules are loaded), OTEL_FILE_CONFIG is initialized.
+ */
+let structuredLogCache: ReturnType<typeof createStructuredLogger> | null = null;
+function getStructuredLog(): ReturnType<typeof createStructuredLogger> {
+  if (!structuredLogCache) {
+    structuredLogCache = createStructuredLogger(createObservabilitySink({}), {
+      component: "config/otelModes",
+    });
+  }
+  return structuredLogCache;
+}
 
 /** The domains OTel can be enabled for, one at a time. */
 export type OtelDomain =
@@ -106,6 +138,22 @@ export const OTEL_DOMAINS: readonly OtelDomain[] = [
 
 /** The three OTel signals. S1 is logs only; metrics/traces are wired for S2/S3. */
 export type OtelSignal = "logs" | "metrics" | "traces";
+
+/** Issue #5138 — the three observability destinations, each individually switchable. */
+export type OtelDestination = "analyticsEngine" | "r2" | "console";
+
+export const OTEL_DESTINATIONS: readonly OtelDestination[] = [
+  "analyticsEngine",
+  "r2",
+  "console",
+] as const;
+
+/** The env-var name for one destination's switch. */
+export function otelDestinationEnvName(destination: OtelDestination): string {
+  if (destination === "analyticsEngine") return "OTEL_DESTINATION_ANALYTICS_ENGINE_ENABLED";
+  if (destination === "r2") return "OTEL_DESTINATION_R2_ENABLED";
+  return "OTEL_DESTINATION_CONSOLE_ENABLED";
+}
 
 /** The per-signal exporter kinds (the OTel standard env-var values). */
 export type OtelExporterKind = "otlp" | "console" | "none";
@@ -137,6 +185,8 @@ export interface OtelFileConfig {
     maxQueueSize: number;
   };
   domains: Record<OtelDomain, OtelDomainFileConfig>;
+  /** Issue #5138 — one switch per destination (all ON in the file). */
+  destinations: Record<OtelDestination, boolean>;
 }
 
 /** The parsed config file (the operational defaults). */
@@ -165,7 +215,7 @@ function logInvalid(
   value: unknown,
   fallback: string,
 ): void {
-  structuredLog.warn(otelConfigErrorEvent(), {
+  getStructuredLog().warn(otelConfigErrorEvent(), {
     message: formatOtelMessage(
       OBS_CONFIG_INVALID,
       `${switchName} unrecognized value at ${source}; failing closed to "${fallback}"`,
@@ -248,6 +298,54 @@ export function otelSignalExporterDefault(signal: OtelSignal): OtelExporterKind 
   if (signal === "logs") return OTEL_FILE_CONFIG.logsExporter;
   if (signal === "metrics") return OTEL_FILE_CONFIG.metricsExporter;
   return OTEL_FILE_CONFIG.tracesExporter;
+}
+
+/** Issue #5138 — the config-file default for a destination (all ON in the file). */
+export function otelDestinationEnabledDefault(destination: OtelDestination): boolean {
+  return OTEL_FILE_CONFIG.destinations[destination] ?? true;
+}
+
+export interface ResolvedOtelDestinationEnabled {
+  enabled: boolean;
+  /** True only when the winning level held an unrecognized value. */
+  invalid: boolean;
+  /** The raw winning value, when it was a string (preserved for logs). */
+  raw?: string;
+  /** Which level won, or "builtin" when every level was blank. */
+  source: OtelResolutionSource;
+}
+
+/**
+ * Issue #5138 — resolves one destination's enabled flag over
+ * run > session > user > env > file > builtin (OFF). First
+ * non-blank level wins; an unrecognized winning value fails
+ * closed to OFF with invalid=true and no fall-through.
+ */
+export function resolveOtelDestinationEnabled(
+  destination: OtelDestination,
+  levels: OtelScopeLevels,
+): ResolvedOtelDestinationEnabled {
+  const switchName = otelDestinationEnvName(destination);
+  for (const [source, value] of orderedLevels(levels)) {
+    const normalized = normalizeBoolean(value);
+    if (normalized === null) continue;
+    if (normalized === "invalid") {
+      logInvalid(switchName, source, value, "OFF");
+      return {
+        enabled: false,
+        invalid: true,
+        raw: typeof value === "string" ? value : undefined,
+        source,
+      };
+    }
+    return {
+      enabled: normalized,
+      invalid: false,
+      raw: typeof value === "string" ? value : undefined,
+      source,
+    };
+  }
+  return { enabled: false, invalid: false, raw: undefined, source: "builtin" };
 }
 
 export interface ResolvedOtelMaster {

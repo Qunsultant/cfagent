@@ -64,6 +64,8 @@ function j1j7OnConfig(overrides: Partial<OtelLoggingConfig> = {}): OtelLoggingCo
       "market-data": { enabled: false, level: "INFO", samplingRatio: 1 },
       platform: { enabled: false, level: "INFO", samplingRatio: 1 },
     },
+    // Issue #5138 — all destinations ON (the file defaults).
+    destinations: { analyticsEngine: true, r2: true, console: true },
     ...overrides,
   };
 }

@@ -51,7 +51,7 @@ import {
 } from "@opentelemetry/sdk-logs";
 import { JsonLogsSerializer } from "@opentelemetry/otlp-transformer";
 import { ExportResultCode } from "@opentelemetry/core";
-import type { OtelDomain, OtelExporterKind, OtelLevel } from "../config/otelModes";
+import type { OtelDestination, OtelDomain, OtelExporterKind, OtelLevel } from "../config/otelModes";
 import { OBS_EXPORT_FAILED, OBS_SINK_DEGRADED, formatOtelMessage } from "./otelMessages";
 import type { ObservabilityEvent, ObservabilityLevel, ObservabilitySink } from "./observabilityPorts";
 
@@ -67,6 +67,8 @@ export interface OtelLoggingConfig {
   masterEnabled: boolean;
   logsExporter: OtelExporterKind;
   domains: Record<OtelDomain, OtelDomainSwitches>;
+  /** Issue #5138 — one switch per destination (resolved, all ON by default). */
+  destinations: Record<OtelDestination, boolean>;
 }
 
 /**

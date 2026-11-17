@@ -280,6 +280,8 @@ describe("J1–J7 observers end-to-end — observer → OTel sink → OTLP/HTTP 
         "market-data": { enabled: false, level: "INFO", samplingRatio: 1 },
         platform: { enabled: false, level: "INFO", samplingRatio: 1 },
       },
+      // Issue #5138 — all destinations ON (the file defaults).
+      destinations: { analyticsEngine: true, r2: true, console: true },
     };
     const { provider, logger } = createOtelLoggerProvider({
       config,

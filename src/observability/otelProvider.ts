@@ -34,14 +34,17 @@
 
 import type { Env } from "../types";
 import {
+  OTEL_DESTINATIONS,
   OTEL_DOMAINS,
   OTEL_FILE_CONFIG,
   otelSdkDisabled,
+  resolveOtelDestinationEnabled,
   resolveOtelDomainEnabled,
   resolveOtelDomainLevel,
   resolveOtelDomainSampling,
   resolveOtelMaster,
   resolveOtelSignalExporter,
+  type OtelDestination,
   type OtelDomain,
   type OtelScopeLevels,
 } from "../config/otelModes";
@@ -108,7 +111,24 @@ export function resolveOtelLoggingConfig(
       ).ratio,
     };
   }
-  return { masterEnabled, logsExporter, domains };
+  // Issue #5138 — one switch per destination (env OTEL_DESTINATION_<NAME>_ENABLED
+  // over the config-file value, built-in safe default OFF). The R2 switch
+  // gates the OTel transport below; the AE/console switches gate the base
+  // sink (createObservabilitySink) that the host passes the resolved values to.
+  const destinations = {} as Record<OtelDestination, boolean>;
+  for (const destination of OTEL_DESTINATIONS) {
+    const envName =
+      destination === "analyticsEngine"
+        ? "OTEL_DESTINATION_ANALYTICS_ENGINE_ENABLED"
+        : destination === "r2"
+          ? "OTEL_DESTINATION_R2_ENABLED"
+          : "OTEL_DESTINATION_CONSOLE_ENABLED";
+    destinations[destination] = resolveOtelDestinationEnabled(
+      destination,
+      levelsFor(envName, OTEL_FILE_CONFIG.destinations[destination]),
+    ).enabled;
+  }
+  return { masterEnabled, logsExporter, domains, destinations };
 }
 
 /** A sink that fans out to every sink in order, never throwing. */
@@ -167,12 +187,22 @@ export interface OtelLoggingHandle {
  */
 export function createOtelLogging(env: Env): OtelLoggingHandle {
   const config = resolveOtelLoggingConfig(env as unknown as Record<string, unknown>);
-  const blobStore = createBlobStore(env);
+  // Issue #5138 — R2 off means no R2 write: the transport passes a
+  // null blob store, so ingestion falls back to the structured log
+  // (which itself respects the console switch through the base sink).
+  const blobStore = config.destinations.r2 ? createBlobStore(env) : null;
   // The ingestion fallback writes through the structured logger
   // over the BASE sink only (never the OTel sink — a fallback
-  // record must not re-enter the OTel pipeline).
+  // record must not re-enter the OTel pipeline). The base sink
+  // receives the resolved AE/console destinations (full scope).
   const ingestionLog = createOtelIngestionLog(
-    createStructuredLogger(createObservabilitySink(env), { component: "otel-ingestion" }),
+    createStructuredLogger(
+      createObservabilitySink(env, {
+        analyticsEngine: config.destinations.analyticsEngine,
+        console: config.destinations.console,
+      }),
+      { component: "otel-ingestion" },
+    ),
   );
   const transport: OtelTransport = async (body) => {
     const result = await handleOtelLogsIngestion({ body, blobStore, log: ingestionLog });
@@ -211,7 +241,10 @@ export function createOtelLogging(env: Env): OtelLoggingHandle {
  * When OTel is off, the logger writes to the base sink only.
  */
 export function createOtelJobPipelineLogger(env: Env, otel: OtelLoggingHandle): StructuredLogger {
-  const base = createObservabilitySink(env);
+  const base = createObservabilitySink(env, {
+    analyticsEngine: otel.config.destinations.analyticsEngine,
+    console: otel.config.destinations.console,
+  });
   const sinks: ObservabilitySink[] = [base];
   if (otel.sink) sinks.push(otel.sink);
   return createStructuredLogger(createFanOutSink(sinks), {
