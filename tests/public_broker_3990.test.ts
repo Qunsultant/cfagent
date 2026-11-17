@@ -527,7 +527,7 @@ describe("Slice C — catalog, registry, presentation, identities carry public",
     // FAILURE_BILLING_STRIPE_NOT_CONFIGURED +
     // FAILURE_BILLING_CHECKOUT_SESSION_INVALID +
     // FAILURE_PLAN_NOT_EFFECTIVE_FOR_SEGMENT).
-    expect(Object.keys((outcomeCatalog as { outcomes: Record<string, unknown> }).outcomes)).toHaveLength(244);
+    expect(Object.keys((outcomeCatalog as { outcomes: Record<string, unknown> }).outcomes)).toHaveLength(248);
   });
 
   it("the OAuth scopes request trading.write (the connect grant must cover placement)", () => {
