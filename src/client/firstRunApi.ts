@@ -334,15 +334,34 @@ function parseAccountSelf(value: unknown): AccountSelfView {
 }
 
 /**
+ * Issue #5226 (2.27) — read the referral value from the landing URL.
+ * The referral link format is `/?ref=<value>` (Chat builds it with the
+ * referrer login); the value is passed through verbatim and resolved
+ * server-side (issued code first, then referrer login). Pure and
+ * null-safe so it is unit-testable without a browser.
+ */
+export function referralCodeFromSearch(search: string): string | null {
+  const value = new URLSearchParams(search).get("ref");
+  if (!value) return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+/**
  * Create the account for the verified session (#3256 step 1).
  * Idempotent server-side: an existing account returns created
  * false. The session cookie is the identity; no identity header
- * and no client-supplied tenant are sent.
+ * and no client-supplied tenant are sent. The optional referral
+ * code (#5226, 2.27) is the `?ref=` value from the landing URL;
+ * it is attribution input only — it never affects the account
+ * itself, and an invalid value is silently unattributed server-side.
  */
-export async function setupAccount(): Promise<{ created: boolean; identity: PlatformIdentityView }> {
+export async function setupAccount(
+  referralCode?: string,
+): Promise<{ created: boolean; identity: PlatformIdentityView }> {
   const body = await callAbsolute<unknown>("/api/platform/accounts/setup", {
     method: "POST",
-    body: JSON.stringify({}),
+    body: JSON.stringify(referralCode ? { referralCode } : {}),
   });
   if (!isRecord(body) || typeof body.created !== "boolean") throw new FirstRunApiError(0);
   return { created: body.created, identity: parseIdentity(body.identity) };

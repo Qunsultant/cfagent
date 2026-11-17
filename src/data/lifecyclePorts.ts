@@ -173,9 +173,11 @@ export interface ReferralAttribution {
    * How the attribution was recorded. `operator` = the operator attribution
    * route (#2657). `code` = a referral-kind code redemption (#3307), which
    * passes `source: "code"`; the operator route always stamps `operator`
-   * regardless of client input.
+   * regardless of client input. `signup` = captured at account creation
+   * from a referral code or link (#5226, 2.27); the setup route always
+   * stamps `signup` regardless of which form resolved.
    */
-  source: "operator" | "code";
+  source: "operator" | "code" | "signup";
   createdAtMs: number;
 }
 
