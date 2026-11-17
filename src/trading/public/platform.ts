@@ -209,7 +209,7 @@ export class PublicTradingPlatform implements ITradingPlatform {
         `PUBLIC_AUCTION_ON_OPEN_UNSUPPORTED: Public.com documents the on-close order types (MARKET_ON_CLOSE, LIMIT_ON_CLOSE) and no on-open type, so an OPG (MOO/LOO) order cannot be placed. Choose "At the close" or a plain day order; nothing was sent.`
       );
     }
-    // Issue #4668 (matrix gap 14): live tools/list on mcp.public.com verified
+    // Issue #4668 (matrix gap 14): live tools/list on the hosted MCP server verified
     // `time_in_force` on both `preflight_order` and `place_order`. GTD requires
     // `expiration_time` which this path does not carry yet.
     if (timeInForce === "gtc" || timeInForce === "ioc" || timeInForce === "fok") return;
