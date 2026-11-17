@@ -116,6 +116,21 @@ const PRESENTATIONS: Readonly<Record<BrokerId, BrokerPresentation>> = {
       live: "Personal access token active; orders place with real money.",
     },
   },
+  tastytrade: {
+    known: true,
+    label: "Tastytrade",
+    icon: "🍒",
+    deskName: "Tastytrade Voice Trading Desk",
+    deskAgentName: "Tastytrade Voice Desk",
+    botName: "TastytradeAgent",
+    modeBadge: { paper: "PAPER SANDBOX", live: "LIVE TRADING" },
+    modeWord: { paper: "Paper sandbox", live: "Live trading" },
+    modeShort: { paper: "Sandbox", live: "Live" },
+    sessionCopy: {
+      paper: "OAuth2 refresh-token session active for Tastytrade certification sandbox.",
+      live: "OAuth2 refresh-token session active for Tastytrade live trading.",
+    },
+  },
 };
 
 /**

@@ -65,7 +65,7 @@ describe("settings broker list is registry-driven (#3855)", () => {
 
   it("a fourth broker registered in the catalog appears with no settings-UI edit", () => {
     const options = brokerOptions(FOUR_BROKER_CATALOG, presentDouble);
-    expect(options.map((o) => o.id)).toEqual(["etrade", "alpaca", "public", "ibkr"]);
+    expect(options.map((o) => o.id)).toEqual([...Object.keys(BROKER_CATALOG), "ibkr"]);
     const fourth = options.find((o) => o.id === "ibkr");
     expect(fourth?.label).toBe("Interactive Brokers");
     expect(fourth?.credentialKind).toBe("api_key_pair");

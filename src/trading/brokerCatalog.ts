@@ -25,7 +25,7 @@
  */
 
 /** Brokers with a registered `ITradingPlatform`. Never an environment. */
-export type BrokerId = "etrade" | "alpaca" | "public";
+export type BrokerId = "etrade" | "alpaca" | "public" | "tastytrade";
 
 /** The platform environment token carried by routes/settings today. */
 export type TradingEnvironment = "TEST" | "PROD";
@@ -34,7 +34,11 @@ export type TradingEnvironment = "TEST" | "PROD";
 export type TradingType = "paper" | "live";
 
 /** How this broker authenticates. Each kind has exactly one seam (#2755). */
-export type BrokerCredentialKind = "oauth1_per_login" | "api_key_pair" | "personal_token";
+export type BrokerCredentialKind =
+  | "oauth1_per_login"
+  | "api_key_pair"
+  | "personal_token"
+  | "oauth2_refresh_token";
 
 /** Asset classes the platform can route orders for. */
 export type BrokerAssetClass = "equity" | "options";
@@ -158,7 +162,12 @@ export interface BrokerDefinition {
 }
 
 /** Wire protocol strings, one per broker kind. Additive: existing values stay. */
-export type BrokerProtocol = "etrade_oauth_rest" | "alpaca_rest_v2" | "mcp_json_rpc" | "sandbox_simulated";
+export type BrokerProtocol =
+  | "etrade_oauth_rest"
+  | "alpaca_rest_v2"
+  | "mcp_json_rpc"
+  | "tastytrade_oauth2_rest"
+  | "sandbox_simulated";
 
 /** Status mode strings, one per trading type per broker kind. */
 export type BrokerStatusMode = "live_oauth" | "paper_api" | "live_api" | "mcp_remote" | "simulated_engine" | "sandbox_api";
@@ -206,6 +215,15 @@ const CREDENTIAL_GUIDANCE: Readonly<Record<BrokerId, BrokerCredentialGuidance>> 
     envNames: { paper: [], live: [] },
     summary:
       "Public.com signs in with a personal access token: create one on the API settings page of your Public account and paste it here. The server verifies it against Public's MCP server before storing, and the token is never shown again.",
+  },
+  tastytrade: {
+    kind: "oauth2_refresh_token",
+    envNames: {
+      paper: ["TASTYTRADE_PAPER_CLIENT_SECRET", "TASTYTRADE_PAPER_REFRESH_TOKEN", "TASTYTRADE_PAPER_URL"],
+      live: ["TASTYTRADE_LIVE_CLIENT_SECRET", "TASTYTRADE_LIVE_REFRESH_TOKEN", "TASTYTRADE_LIVE_URL"],
+    },
+    summary:
+      "Tastytrade signs in with an OAuth2 personal refresh-token grant (client secret + refresh token) for the selected trading type, verified against /customers/me/accounts before storing.",
   },
 };
 
@@ -427,6 +445,56 @@ export const BROKER_CATALOG = {
         place: "public_place_order",
         orders: "public_orders",
         cancel: "public_cancel_order",
+      },
+    },
+  },
+  // Issue #4675 (Gap 21): Tastytrade — Slice 1 catalog entry + OAuth2
+  // refresh-token credential seam + ITradingPlatform REST adapter.
+  tastytrade: {
+    id: "tastytrade",
+    label: "Tastytrade",
+    credentialKind: "oauth2_refresh_token",
+    assetClasses: ["equity", "options"],
+    paperMode: true,
+    tradingTypeForEnvironment: { TEST: "paper", PROD: "live" },
+    supports: {
+      quote: true,
+      detailedQuote: true,
+      accounts: true,
+      positions: true,
+      positionLots: false,
+      portfolioRisk: false,
+      optionChains: false,
+      optionExpireDates: false,
+      orderPreview: true,
+      orderPlace: true,
+      marketScreening: true,
+      optionsScanner: false,
+      ivHistory: false,
+      orderHistory: true,
+      accountActivity: false,
+      alerts: false,
+      watchlists: false,
+      orderCancel: true,
+      optionsDiscovery: false,
+    },
+    statusVocabulary: {
+      protocol: "tastytrade_oauth2_rest",
+      mode: { paper: "paper_api", live: "live_api" },
+      environment: { paper: "paper", live: "live" },
+    },
+    copilot: {
+      supported: false,
+      autonomousCycle: false,
+      bracketOrders: "none",
+      percentBrackets: false,
+      barsProvider: "yfinance",
+      tools: {
+        quote: "",
+        preview: "",
+        place: "",
+        orders: null,
+        cancel: null,
       },
     },
   },
