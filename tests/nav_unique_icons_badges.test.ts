@@ -40,6 +40,9 @@
  * nav count 31 → 29 and navOrders 4..21 shift down one, 23..30 down
  * two, so display order stays 0..28; pin updated in the same PR per
  * the §7 pin rule.)
+ * (#5169 added the Observability nav entry, navOrder 27, last in
+ * display order; nav count 27 → 28 and display order stays 0..27;
+ * pin updated in the same PR per the §7 pin rule.)
  */
 import { describe, it, expect } from "vitest";
 import { ROUTES, hasNavEntry } from "../src/client/routes";
@@ -48,10 +51,11 @@ import { NAVIGATION_ITEMS } from "../src/client/components/NavigationMenu";
 const navRoutes = ROUTES.filter(hasNavEntry);
 // Issue 4682: the referrals, ads, and social nav entries retired into
 // the one Marketing Hub route; 29 → 27 entries.
-const NAV_COUNT = 27;
+// Issue #5169: the Observability nav entry; 27 → 28 entries.
+const NAV_COUNT = 28;
 
 describe("left-nav unique icons and badges", () => {
-  it("has the full 27-item nav", () => {
+  it("has the full 28-item nav", () => {
     expect(navRoutes).toHaveLength(NAV_COUNT);
     expect(NAVIGATION_ITEMS).toHaveLength(NAV_COUNT);
   });
@@ -109,5 +113,11 @@ describe("left-nav unique icons and badges", () => {
     expect(byId.get("marketing-hub")!.icon).toBe("Banners");
     expect(byId.get("marketing-hub")!.navEntry.badge).toBe("Marketing");
     expect(byId.get("marketing-hub")!.navEntry.navOrder).toBe(10);
+    // Issue #5169: the Observability nav entry (R2 archive file
+    // browser) takes the last slot; its icon is Reports — Audit is
+    // already the Audit & Vault nav icon, so it cannot be reused.
+    expect(byId.get("observability")!.icon).toBe("Reports");
+    expect(byId.get("observability")!.navEntry.badge).toBe("Archive");
+    expect(byId.get("observability")!.navEntry.navOrder).toBe(27);
   });
 });

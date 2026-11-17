@@ -39,6 +39,12 @@ export interface Env {
   OTEL_DESTINATION_R2_ENABLED?: string;
   OTEL_DESTINATION_CONSOLE_ENABLED?: string;
   OTEL_INGEST_TOKEN?: string;
+  // Issue #5169 — the R2 archive list limits (page size, max
+  // objects per page). Optional so code is safe before they are
+  // set; absence means the config-file / built-in defaults
+  // apply (50 / 500).
+  OTEL_ARCHIVE_PAGE_SIZE?: string;
+  OTEL_ARCHIVE_MAX_OBJECTS?: string;
   // Issue #1739: queue-backed messaging bindings. Optional so code is
   // safe before the bindings propagate; absence means the legacy
   // in-process bus (the composition root returns null).

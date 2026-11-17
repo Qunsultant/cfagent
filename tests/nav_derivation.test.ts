@@ -78,10 +78,12 @@ const EXPECTED_ORDER = [
   "assets-hub",
   "data-hub",
   "security-hub",
+  // Issue #5169: the Observability nav entry (navOrder 27, last).
+  "observability",
 ];
 
 describe("nav derivation", () => {
-  it("derives the 27 nav items in display order", () => {
+  it("derives the 28 nav items in display order", () => {
     expect(NAVIGATION_ITEMS.map((i) => i.id)).toEqual(EXPECTED_ORDER);
   });
 

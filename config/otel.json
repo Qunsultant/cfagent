@@ -74,5 +74,9 @@
     "slo": {
       "resourceRowsReadMaxPct": 0.7
     }
+  },
+  "archive": {
+    "pageSize": 50,
+    "maxObjects": 500
   }
 }

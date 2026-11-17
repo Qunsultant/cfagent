@@ -31,7 +31,8 @@ describe("Product Hub nav (#4530)", () => {
     expect(ids).toContain("product-hub");
     expect(ids).not.toContain("products");
     // Issue 4682: the Marketing Hub route joins the table; 44 → 45.
-    expect(ids.length).toBe(45);
+    // Issue #5169: the Observability route joins the table; 45 → 46.
+    expect(ids.length).toBe(46);
     const hub = routes.find((r) => r.id === "product-hub")!;
     expect(hub.navGroup).toBe("product-hub");
     // #4574 retired the queues route (navOrders 12..30 down one) and #4575
@@ -42,13 +43,15 @@ describe("Product Hub nav (#4530)", () => {
     // route's slot, now 24 in a 0..28 run. Issue 4682 retires the
     // referrals, ads, and social entries (navOrders 13..28 down two) —
     // the hub keeps the products route's slot, now 22 in a 0..26 run.
+    // Issue #5169 adds the Observability entry (navOrder 27) — the hub
+    // keeps its slot, now 22 in a 0..27 run.
     expect(hub.navEntry?.navOrder).toBe(22);
-    // Nav entries are 27 with orders exactly 0..26.
+    // Nav entries are 28 with orders exactly 0..27.
     const orders = routes
       .filter((r) => r.navEntry !== undefined)
       .map((r) => r.navEntry!.navOrder)
       .sort((a, b) => a - b);
-    expect(orders).toEqual(Array.from({ length: 27 }, (_, i) => i));
+    expect(orders).toEqual(Array.from({ length: 28 }, (_, i) => i));
   });
 
   it("nav-config carries a product-hub sub-menu with the five hub tabs plus the two admin sub-tabs (#4689)", () => {

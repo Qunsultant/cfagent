@@ -290,6 +290,10 @@ const CONFORMING_ROUTES: Record<string, string> = {
   // which carry the PageShell.
   "data-hub": "src/client/DataHubHome.tsx",
   "security-hub": "src/client/SecurityHubHome.tsx",
+  // Issue #5169: the Observability home renders from the shell
+  // (Chat.tsx TAB_CONTENT → ObservabilityHome), which carries the
+  // PageShell.
+  observability: "src/client/ObservabilityHome.tsx",
   // Issue 4682: the Marketing Hub renders from the shell (Chat.tsx
   // SHELL_CONTENT → MarketingHubHome), which carries the PageShell.
   // The three section panels keep their own entries below — they
@@ -375,6 +379,9 @@ const EXPECTED_TAB_CONTENT_KEYS = [
   // shell — their TAB_CONTENT entries join the shell-conforming keys.
   "data-hub",
   "security-hub",
+  // Issue #5169: the Observability home renders from the shell —
+  // its TAB_CONTENT entry joins the shell-conforming keys.
+  "observability",
 ];
 
 const EXPECTED_SUB_TABS = [
@@ -566,6 +573,8 @@ const INTERIOR_SURFACE_FILES: string[] = [
   // Issue #4585: the DataHub and SecurityHub homes (route files).
   "src/client/DataHubHome.tsx",
   "src/client/SecurityHubHome.tsx",
+  // Issue #5169: the Observability home (route file).
+  "src/client/ObservabilityHome.tsx",
   // Issue 4682: the Marketing Hub home (route file).
   "src/client/MarketingHubHome.tsx",
   "src/client/chat/tabs/AdsTab.tsx",

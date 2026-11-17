@@ -32,15 +32,16 @@ describe("nav-config.json shape (issue #2977)", () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it("routes: navOrders are exactly 0..26 across the 27 nav entries", () => {
+  it("routes: navOrders are exactly 0..27 across the 28 nav entries", () => {
     const orders = (navData.routes as { navEntry?: { navOrder: number } }[])
       .filter((r) => r.navEntry)
       .map((r) => r.navEntry!.navOrder);
     // Issue 4682: the referrals, ads, and social nav entries retired
     // into the one Marketing Hub route (navOrder 10); 29 → 27 entries.
-    expect(orders).toHaveLength(27);
+    // Issue #5169: the Observability route joins the table; 27 → 28 entries.
+    expect(orders).toHaveLength(28);
     expect([...orders].sort((a, b) => a - b)).toEqual(
-      Array.from({ length: 27 }, (_, i) => i),
+      Array.from({ length: 28 }, (_, i) => i),
     );
   });
 
@@ -60,11 +61,12 @@ describe("nav-config.json shape (issue #2977)", () => {
     }
   });
 
-  it("subMenus: 20 groups, every sub-item has id and label", () => {
+  it("subMenus: 21 groups, every sub-item has id and label", () => {
     const groups = Object.keys(navData.subMenus as Record<string, unknown[]>);
     // Issue 4682: the Marketing Hub adds the 20th sub-menu group
     // (referrals, ads, social as its views).
-    expect(groups).toHaveLength(20);
+    // Issue #5169: Observability adds the 21st sub-menu group (archive).
+    expect(groups).toHaveLength(21);
     for (const items of Object.values(navData.subMenus as Record<string, { id: string; label: string }[]>)) {
       for (const item of items) {
         expect(item.id).toBeTruthy();
@@ -88,7 +90,7 @@ describe("nav-config.json shape (issue #2977)", () => {
     }
   });
 
-  it("deepLinkSurfaces: 29 surfaces, unique, pages resolve, values non-empty", () => {
+  it("deepLinkSurfaces: 30 surfaces, unique, pages resolve, values non-empty", () => {
     const ids = new Set((navData.routes as { id: string }[]).map((r) => r.id));
     const surfaces = navData.deepLinkSurfaces as {
       surface: string;
@@ -96,8 +98,9 @@ describe("nav-config.json shape (issue #2977)", () => {
       values: string[];
     }[];
     // Issue 4682: the Marketing Hub adds the 29th surface.
-    expect(surfaces).toHaveLength(29);
-    expect(new Set(surfaces.map((s) => s.surface)).size).toBe(29);
+    // Issue #5169: Observability adds the 30th surface (archive).
+    expect(surfaces).toHaveLength(30);
+    expect(new Set(surfaces.map((s) => s.surface)).size).toBe(30);
     for (const s of surfaces) {
       if (s.page !== null) expect(ids.has(s.page)).toBe(true);
       expect(s.values.length).toBeGreaterThan(0);
@@ -125,7 +128,7 @@ describe("nav-config.json loaders (issue #2977)", () => {
     expect(Object.keys(DEEP_LINK_OVERRIDES)).toHaveLength(
       Object.keys(navData.deepLinks as Record<string, unknown>).length,
     );
-    expect(SURFACE_TAB_DEFS).toHaveLength(29); // Issue 4682: + marketing-hub.
+    expect(SURFACE_TAB_DEFS).toHaveLength(30); // Issue 4682: + marketing-hub. Issue #5169: + observability.
     // 5 metadata sections + sandbox menu-only section.
     const built = buildDefaultLeftNavConfig().sections;
     expect(built).toHaveLength(6);

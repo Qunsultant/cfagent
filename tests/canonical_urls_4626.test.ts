@@ -355,7 +355,8 @@ describe("nav-config keeps the retired routes, drops their nav entries (#4626)",
       routes: { id: string; navEntry?: unknown }[];
     };
     // Issue 4682: the Marketing Hub route joins the table; 44 → 45.
-    expect(data.routes).toHaveLength(45);
+    // Issue #5169: the Observability route joins the table; 45 → 46.
+    expect(data.routes).toHaveLength(46);
     const byId = new Map(data.routes.map((r) => [r.id, r]));
     for (const id of ["screeners", "research", "options-flows", "risk-analysis", "approvals"]) {
       expect(byId.has(id)).toBe(true);
@@ -373,9 +374,9 @@ describe("nav-config keeps the retired routes, drops their nav entries (#4626)",
     const orders = data.routes
       .filter((r) => r.navEntry)
       .map((r) => (r.navEntry as { navOrder: number }).navOrder);
-    expect(orders).toHaveLength(27);
+    expect(orders).toHaveLength(28);
     expect([...orders].sort((a, b) => a - b)).toEqual(
-      Array.from({ length: 27 }, (_, i) => i),
+      Array.from({ length: 28 }, (_, i) => i),
     );
   });
 });

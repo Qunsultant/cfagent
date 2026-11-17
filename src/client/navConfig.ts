@@ -294,6 +294,7 @@ export function isNavItemOrSubItemActive(
             currentTab === "product-hub" ||
             currentTab === "audit-vault" ||
             currentTab === "marketing-hub" ||
+            currentTab === "observability" ||
             currentTab === "billing") &&
           view === sub.id
         )

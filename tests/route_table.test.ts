@@ -57,6 +57,9 @@ const EXPECTED_IDS = [
   // Issue 4682: the Marketing Hub route (the three marketing
   // nav entries retire into it; 44 → 45 routes).
   "marketing-hub",
+  // Issue #5169: the Observability route (the OTel R2 archive
+  // file browser; 45 → 46 routes).
+  "observability",
   "omnichannel",
   "options",
   "options-flows",
@@ -126,13 +129,14 @@ describe("route table", () => {
     }
   });
 
-  it("has exactly 27 nav entries with unique 0..26 display order", () => {
+  it("has exactly 28 nav entries with unique 0..27 display order", () => {
     const nav = ROUTES.filter(hasNavEntry);
     // Issue 4682: the referrals, ads, and social nav entries retired
     // into the one Marketing Hub route; 29 → 27 entries.
-    expect(nav).toHaveLength(27);
+    // Issue #5169: the Observability nav entry joins the table; 27 → 28.
+    expect(nav).toHaveLength(28);
     const orders = nav.map((r) => r.navEntry.navOrder).sort((a, b) => a - b);
-    expect(orders).toEqual(Array.from({ length: 27 }, (_, i) => i));
+    expect(orders).toEqual(Array.from({ length: 28 }, (_, i) => i));
     for (const r of nav) {
       expect(r.navEntry.label.length).toBeGreaterThan(0);
       expect(r.navEntry.shortLabel.length).toBeGreaterThan(0);
@@ -147,7 +151,7 @@ describe("route table", () => {
     }
   });
 
-  it("derives visibility defaults: the 27 nav entries, all visible", () => {
+  it("derives visibility defaults: the 28 nav entries, all visible", () => {
     const navIds = ROUTES.filter(hasNavEntry).map((r) => r.id).sort();
     expect(Object.keys(DEFAULT_VISIBLE_NAV_TABS).sort()).toEqual(navIds);
     expect(Object.values(DEFAULT_VISIBLE_NAV_TABS).every((v) => v === true)).toBe(true);

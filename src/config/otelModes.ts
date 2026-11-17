@@ -191,7 +191,34 @@ export interface OtelFileConfig {
   destinations: Record<OtelDestination, boolean>;
   /** Issue #5082 (S2) — the metrics settings (all config values, externalized). */
   metrics: OtelMetricsFileConfig;
+  /** Issue #5169 — the archive browser settings (all config values, externalized). */
+  archive: OtelArchiveFileConfig;
 }
+
+/** One archive section in the config file (config/otel.json). */
+export interface OtelArchiveFileConfig {
+  pageSize: number;
+  maxObjects: number;
+}
+
+/** The resolved archive settings (the operational values the archive list consumes). */
+export interface OtelArchiveSettings {
+  pageSize: number;
+  maxObjects: number;
+}
+
+/**
+ * Issue #5169 — the BUILTIN safe defaults for the archive
+ * settings (used only when the file is missing or a value is
+ * invalid). These are the LOW-VOLUME defaults: 50 objects per
+ * page, 500 max per page — the list route can never return an
+ * unbounded list. An invalid value fails closed to these, never
+ * to a value that would flood the caller or R2.
+ */
+export const OTEL_ARCHIVE_SETTINGS_BUILTIN: OtelArchiveSettings = {
+  pageSize: 50,
+  maxObjects: 500,
+} as const;
 
 /** One metrics section in the config file (config/otel.json). */
 export interface OtelMetricsFileConfig {
@@ -715,6 +742,67 @@ export function resolveOtelMetricsSettings(
         input.sloResourceRowsReadMaxPct,
         normalizeRatio,
         OTEL_METRICS_SETTINGS_BUILTIN.sloResourceRowsReadMaxPct,
+      ),
+    },
+    invalid,
+  };
+}
+
+export interface OtelArchiveSettingsInput {
+  pageSize: OtelScopeLevels;
+  maxObjects: OtelScopeLevels;
+}
+
+export interface ResolvedOtelArchiveSettings {
+  settings: OtelArchiveSettings;
+  /** True when any setting's winning level held an unrecognized value. */
+  invalid: boolean;
+}
+
+/**
+ * Issue #5169 — resolves the archive settings over run >
+ * session > user > env > file > builtin (the safe defaults).
+ * Each setting resolves independently through the same
+ * five-level mechanism; an unrecognized winning value for a
+ * setting fails closed to that setting's builtin safe default
+ * with a coded OBS-1001 message and no fall-through.
+ * `invalid` is true when any setting failed closed.
+ */
+export function resolveOtelArchiveSettings(
+  input: OtelArchiveSettingsInput,
+): ResolvedOtelArchiveSettings {
+  let invalid = false;
+  const resolveOne = <T>(
+    switchName: string,
+    levels: OtelScopeLevels,
+    normalize: (raw: unknown) => T | "invalid" | null,
+    builtin: T,
+  ): T => {
+    for (const [source, value] of orderedLevels(levels)) {
+      const normalized = normalize(value);
+      if (normalized === null) continue;
+      if (normalized === "invalid") {
+        logInvalid(switchName, source, value, String(builtin));
+        invalid = true;
+        return builtin;
+      }
+      return normalized;
+    }
+    return builtin;
+  };
+  return {
+    settings: {
+      pageSize: resolveOne(
+        "OTEL_ARCHIVE_PAGE_SIZE",
+        input.pageSize,
+        normalizePositiveInt,
+        OTEL_ARCHIVE_SETTINGS_BUILTIN.pageSize,
+      ),
+      maxObjects: resolveOne(
+        "OTEL_ARCHIVE_MAX_OBJECTS",
+        input.maxObjects,
+        normalizePositiveInt,
+        OTEL_ARCHIVE_SETTINGS_BUILTIN.maxObjects,
       ),
     },
     invalid,

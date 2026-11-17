@@ -53,6 +53,7 @@ import { handleMessagingSagaRoutes, handleMessagingSocialRoutes, handleMessaging
 import { handleScheduleWebhookRoutes } from "./server/routes/scheduleWebhook";
 import { handlePlatformTelemetryRoutes, handlePlatformRetrievalRoutes, handlePlatformMcpRoutes, handlePlatformPaymentsRoutes, handlePlatformBrowserRoutes } from "./server/routes/platform";
 import { handleOtelRoutes } from "./server/routes/otel";
+import { handleOtelArchiveRoutes } from "./server/routes/otelArchive";
 import { handleScheduledEvent, handleQueueBatch } from "./server/routes/queue";
 import { createStructuredLogger } from "./observability/structuredLogger";
 import { createObservabilitySink } from "./observability/createObservabilityPorts";
@@ -184,6 +185,12 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
     // The route is disabled (404) unless OTEL_INGEST_TOKEN is set.
     const otelResponse = await handleOtelRoutes(request, env, url, path);
     if (otelResponse) return otelResponse;
+    // Issue #5169 (observability program #5080): the OTel R2
+    // archive read routes (GET /api/otel/v1/archive + /object) —
+    // the interim file browser over the archive S1/S2 write.
+    // Authenticated + platform-admin gated, audited, fail-closed.
+    const otelArchiveResponse = await handleOtelArchiveRoutes(request, env, url, path);
+    if (otelArchiveResponse) return otelArchiveResponse;
     // Slice 4 (#2902): audit/reports moved to src/server/routes/privacy.ts —
     // /api/audit/history, /api/reports/list, /api/reports/seed-canonical.
     const privacyReportsResponse = await handlePrivacyReportsRoutes(request, env, url, path);

@@ -222,6 +222,22 @@
       }
     },
     {
+      "id": "observability",
+      "navGroup": "observability",
+      "crumb": "Observability",
+      "category": "Platform",
+      "icon": "Reports",
+      "description": "The archived OTel telemetry — raw OTLP JSONL in R2, listed by date",
+      "navEntry": {
+        "label": "Observability",
+        "shortLabel": "Observability",
+        "navOrder": 27,
+        "defaultVisible": true,
+        "badge": "Archive",
+        "badgeType": "neutral"
+      }
+    },
+    {
       "id": "omnichannel",
       "retain": true,
       "navGroup": "omnichannel",
@@ -994,6 +1010,15 @@
         "shortLabel": "Live policy administration: proposals, preview, approval & promotion",
         "icon": "IaaaAdmin",
         "description": "Live policy administration: proposals, preview, approval & promotion"
+      }
+    ],
+    "observability": [
+      {
+        "id": "archive",
+        "label": "Archive",
+        "shortLabel": "Archived OTLP objects in R2",
+        "icon": "Database",
+        "description": "Archived OTLP objects in R2, by date"
       }
     ],
     "schedules": [
@@ -1802,7 +1827,8 @@
     },
     "payment-assurance:operators": {
       "tab": "payment-assurance",
-      "view": "operators"    },
+      "view": "operators"
+    },
     "security-hub:pip": {
       "tab": "security-hub",
       "view": "pip"
@@ -1810,6 +1836,10 @@
     "security-hub:pap": {
       "tab": "security-hub",
       "view": "pap"
+    },
+    "observability:archive": {
+      "tab": "observability",
+      "view": "archive"
     }
   },
   "deepLinkSurfaces": [
@@ -1890,6 +1920,14 @@
         "pep",
         "pip",
         "pap"
+      ]
+    },
+    {
+      "surface": "observability",
+      "page": "observability",
+      "param": "view",
+      "values": [
+        "archive"
       ]
     },
     {
@@ -2164,7 +2202,8 @@
         "queue",
         "cancel",
         "wipe",
-        "recreate"      ]
+        "recreate"
+      ]
     }
   ],
   "hostedIds": [
