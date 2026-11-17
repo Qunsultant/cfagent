@@ -598,6 +598,8 @@ describe("census chat column vs the mesh-door command registry (#2421)", () => {
       "get_pipeline_chain_status",
       "list_pipeline_chains",
       "manage_pipeline_chain",
+      "run_research_job",
+      "define_pipeline_chain",
     ],
     PaymentsAgent: ["check_payment_budget", "get_payment_budget", "get_payments_overview"],
     TradingAgent: [

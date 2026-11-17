@@ -58,6 +58,11 @@ import type { DatabaseORM } from "../../orm";
 
 import { createStructuredLogger } from "../../observability/structuredLogger";
 import { createObservabilitySink } from "../../observability/createObservabilityPorts";
+import {
+  controlResearchStage,
+  dispatchResearchEngineRun,
+  type ResearchStageOp,
+} from "../../workflows/researchScreenEngine";
 
 /** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
 const structuredLog = createStructuredLogger(createObservabilitySink({}), {
@@ -533,19 +538,47 @@ export async function handleScreenerResearchRoutes(
     // forwarding, so the DO sees /research/*.
     // ==========================================
 
-    // Manual run (dashboard "Run now").
+    // Manual run (dashboard "Run now") — dispatches research:<runId> via #5120.
     if (path.endsWith("/research/run") && request.method === "POST") {
       const userLogin = request.headers.get("x-user-login") || sessionId;
       try {
-        const out = await triggerManualResearch(
-          ctx.runResearchAndPublish,
-          userLogin
-        );
-        return Response.json(out);
+        const dispatched = await dispatchResearchEngineRun({
+          userLogin,
+          trigger: "manual",
+          execute: () => triggerManualResearch(ctx.runResearchAndPublish, userLogin),
+        });
+        return Response.json(dispatched.outcome);
       } catch (err: any) {
         return Response.json(
           { success: false, error: err?.message || "Research run failed." },
           { status: 500 }
+        );
+      }
+    }
+
+    // Per-stage control for research:<runId> (#5120): POST /research/runs/:runId/stages/:stageId
+    const stageMatch = path.match(/\/research\/runs\/([^/]+)\/stages\/([^/]+)$/);
+    if (stageMatch && request.method === "POST") {
+      const userLogin = request.headers.get("x-user-login") || sessionId;
+      let op: ResearchStageOp = "status";
+      try {
+        const body = (await request.json().catch(() => ({}))) as { op?: ResearchStageOp };
+        if (body.op) op = body.op;
+      } catch {
+        // default op = status
+      }
+      try {
+        const result = controlResearchStage({
+          runId: decodeURIComponent(stageMatch[1]),
+          stageId: decodeURIComponent(stageMatch[2]),
+          op,
+          userLogin,
+        });
+        return Response.json(result);
+      } catch (err: any) {
+        return Response.json(
+          { ok: false, error: err?.message || "Research stage control failed." },
+          { status: 400 }
         );
       }
     }
@@ -601,10 +634,15 @@ export async function handleScreenerResearchRoutes(
         const screeningFlags = await import("../../services/screeningFlags");
         const readScreeningSetting = (key: string) => ctx.readSettingRaw(key);
         const screeningPaused = screeningFlags.isScreeningScheduledPaused(readScreeningSetting);
-        const out = await triggerScheduledResearch(
-          ctx.runResearchAndPublish,
-          userLogin
-        );
+        const dispatched = await dispatchResearchEngineRun({
+          userLogin,
+          trigger: "scheduled",
+          execute: () => triggerScheduledResearch(ctx.runResearchAndPublish, userLogin),
+        });
+        const out = {
+          ...dispatched.outcome,
+          engineJobId: dispatched.engineJobId,
+        };
         // #583 docx §9: after the scheduled run, evaluate runs due for
         // follow-up (older than 24h, no evaluation row). Best-effort: never
         // fails the tick.

@@ -288,6 +288,7 @@ export function legacyDualHomeRedirect(search: string): LegacyProductRedirect | 
       return reportsTab ? { tab: "reports", params: { reportsTab } } : { tab: "reports" };
     }
     if (view === "goal-screen") return { tab: "goal-screen" };
+    if (view === "ooda") return { tab: "options-screener", view: "ooda" };
     if (view === "review") return { tab: "review" };
     if (view === "track-record") return { tab: "track-record" };
     return { tab: "assets-hub" };

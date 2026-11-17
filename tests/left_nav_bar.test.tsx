@@ -142,12 +142,14 @@ describe("LeftNavBar UX & Reorganization (issue #2685)", () => {
     const stockIdx = itemIds.indexOf("stock-hub");
     const optIdx = itemIds.indexOf("options-screener");
     const goalIdx = itemIds.indexOf("goal-screen");
+    const oodaIdx = itemIds.indexOf("ooda");
     const chatIdx = itemIds.indexOf("chat");
 
     expect(stockIdx).toBeGreaterThanOrEqual(0);
     expect(optIdx).toBe(stockIdx + 1);
     expect(goalIdx).toBe(optIdx + 1);
-    expect(chatIdx).toBe(goalIdx + 1);
+    expect(oodaIdx).toBe(goalIdx + 1);
+    expect(chatIdx).toBe(oodaIdx + 1);
   });
 
   it("positions workflows in the Workflows sub-menu and not top-level in Platform", () => {
