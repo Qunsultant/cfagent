@@ -6,7 +6,8 @@
  * (ADR 0002). A read never creates a row: an absent row reads as
  * null, and callers fall back to the per-user localStorage flag.
  */
-import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
+import { type DrizzleD1Database } from "drizzle-orm/d1";
+import { createDrizzleD1Db } from "./d1QueryLogger";
 import { eq } from "drizzle-orm";
 import { agentOnboardingState } from "./drizzleSchema";
 import type { OnboardingState, OnboardingStateStore } from "./onboardingPorts";
@@ -18,7 +19,7 @@ export type OnboardingDb = DrizzleD1Database<{
 
 /** Build the Drizzle D1 database object from a bound D1 client. */
 export function createD1OnboardingDb(d1: D1Database): OnboardingDb {
-  return drizzle(d1, {
+  return createDrizzleD1Db(d1, {
     schema: { agentOnboardingState },
   });
 }

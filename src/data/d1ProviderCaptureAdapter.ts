@@ -12,7 +12,8 @@
  * drift on the semantics that matter. Reads are tenant-scoped
  * exactly as the legacy store's are.
  */
-import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
+import { type DrizzleD1Database } from "drizzle-orm/d1";
+import { createDrizzleD1Db } from "./d1QueryLogger";
 import { and, asc, eq } from "drizzle-orm";
 import { agentDataCaptures } from "./drizzleSchema";
 import {
@@ -46,7 +47,7 @@ export type ProviderCaptureDb = DrizzleD1Database<{
 
 /** Build the Drizzle D1 database object from a bound D1 client. */
 export function createD1ProviderCaptureDb(d1: D1Database): ProviderCaptureDb {
-  return drizzle(d1, { schema: { agentDataCaptures } });
+  return createDrizzleD1Db(d1, { schema: { agentDataCaptures } });
 }
 
 /** Idempotent schema-ensure: applies pending migrations, if any. */

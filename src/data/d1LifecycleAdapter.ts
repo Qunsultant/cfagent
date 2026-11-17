@@ -16,7 +16,8 @@
  * exceeds amountUSD — an over-allocating UPDATE is refused by
  * the adapter's own guard and the whole redeem throws).
  */
-import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
+import { type DrizzleD1Database } from "drizzle-orm/d1";
+import { createDrizzleD1Db } from "./d1QueryLogger";
 import { and, asc, eq } from "drizzle-orm";
 import {
   agentDigestPassDays,
@@ -65,7 +66,7 @@ export type LifecycleDb = DrizzleD1Database<{
 
 /** Build the Drizzle D1 database object from a bound D1 client. */
 export function createD1LifecycleDb(d1: D1Database): LifecycleDb {
-  return drizzle(d1, {
+  return createDrizzleD1Db(d1, {
     schema: {
       agentReferralRules,
       agentReferralEarnings,

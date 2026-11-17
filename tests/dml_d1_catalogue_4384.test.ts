@@ -64,11 +64,22 @@ function count(pattern: RegExp, source: string): number {
 }
 
 describe("D1 family pin: zero inline raw DML outside the catalogue (#4384)", () => {
+  /**
+   * #4933 — the query-logger wrapper is the ONE exception to the
+   * .prepare( ban: d1QueryLogger.ts forwards the binding's prepare()
+   * so drizzle's own prepared statements can be timed. It issues no
+   * DML itself (no statement text of its own, no params of its own) —
+   * the forwarded call is the adapter's query, executed through the
+   * catalogue path exactly as before. The exception is exactly one
+   * forwarding call; a second .prepare( in this file still fails.
+   */
+  const PREPARE_ALLOW_LIST = new Map([["src/data/d1QueryLogger.ts", 1]]);
   it("no .prepare( calls in src/data/d1*.ts", () => {
     const hits: string[] = [];
     for (const file of d1Files()) {
       const n = count(PREPARE_PATTERN, stripComments(readFileSync(file, "utf8")));
-      if (n > 0) hits.push(`${file}: ${n}`);
+      const allowed = PREPARE_ALLOW_LIST.get(file) ?? 0;
+      if (n !== allowed) hits.push(`${file}: ${n} (allowed ${allowed})`);
     }
     expect(hits, "raw .prepare( survives outside the catalogue").toEqual([]);
   });

@@ -6,7 +6,8 @@
  * statement ops only (ADR 0002). A read never creates a row:
  * an absent row reads as DEFAULT_TENANT_CHANNELS.
  */
-import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
+import { type DrizzleD1Database } from "drizzle-orm/d1";
+import { createDrizzleD1Db } from "./d1QueryLogger";
 import { eq } from "drizzle-orm";
 import { agentTenantChannels } from "./drizzleSchema";
 import {
@@ -25,7 +26,7 @@ export type TenantChannelDb = DrizzleD1Database<{
 
 /** Build the Drizzle D1 database object from a bound D1 client. */
 export function createD1TenantChannelDb(d1: D1Database): TenantChannelDb {
-  return drizzle(d1, {
+  return createDrizzleD1Db(d1, {
     schema: { agentTenantChannels },
   });
 }

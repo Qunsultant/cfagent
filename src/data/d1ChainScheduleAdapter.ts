@@ -10,7 +10,8 @@
  * consistency is the R5 story (idempotent writes +
  * reconciliation), not a distributed transaction.
  */
-import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
+import { type DrizzleD1Database } from "drizzle-orm/d1";
+import { createDrizzleD1Db } from "./d1QueryLogger";
 import { and, desc, eq } from "drizzle-orm";
 import {
   agentChains,
@@ -37,7 +38,7 @@ export type ChainScheduleDb = DrizzleD1Database<{
 
 /** Build the Drizzle D1 database object from a bound D1 client. */
 export function createD1ChainScheduleDb(d1: D1Database): ChainScheduleDb {
-  return drizzle(d1, {
+  return createDrizzleD1Db(d1, {
     schema: { agentGovernance, agentChains, agentSynthesizedSchedules },
   });
 }

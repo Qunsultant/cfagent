@@ -7,7 +7,8 @@
  * atomic on any store (same rule as the other D1 adapters; see
  * migrationRunner.ts).
  */
-import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
+import { type DrizzleD1Database } from "drizzle-orm/d1";
+import { createDrizzleD1Db } from "./d1QueryLogger";
 import { and, asc, eq, gt } from "drizzle-orm";
 import {
   agentRunsPackBalances,
@@ -53,7 +54,7 @@ export type RunsPackDb = DrizzleD1Database<{
 
 /** Build the Drizzle D1 database object from a bound D1 client. */
 export function createD1RunsPackDb(d1: D1Database): RunsPackDb {
-  return drizzle(d1, {
+  return createDrizzleD1Db(d1, {
     schema: {
       agentRunsPackVersions,
       agentRunsPackBalances,

@@ -11,7 +11,7 @@
  * transition explicitly.
  */
 import { asc, eq } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/d1";
+import { createDrizzleD1Db } from "./d1QueryLogger";
 import { agentMeshProposals } from "./drizzleSchema";
 import {
   MESH_PROPOSAL_OPEN_STATES,
@@ -29,7 +29,7 @@ import {
 export type D1MeshProposalDb = ReturnType<typeof createD1MeshProposalDb>;
 
 export function createD1MeshProposalDb(d1: unknown) {
-  return drizzle(d1 as never, { schema: { agentMeshProposals } });
+  return createDrizzleD1Db(d1 as never, { schema: { agentMeshProposals } });
 }
 
 /** Create agent_mesh_proposals if absent (idempotent; safe to call per request). */

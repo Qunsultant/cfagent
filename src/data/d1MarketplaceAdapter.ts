@@ -26,7 +26,8 @@
  *
  * #CDO-mha7
  */
-import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
+import { type DrizzleD1Database } from "drizzle-orm/d1";
+import { createDrizzleD1Db } from "./d1QueryLogger";
 
 import {
   AD_COLUMN_MAP,
@@ -61,7 +62,7 @@ export type MarketplaceDb = DrizzleD1Database<Record<string, never>>;
 
 /** Build the Drizzle D1 database object from a bound D1 client. */
 export function createD1MarketplaceDb(d1: D1Database): MarketplaceDb {
-  return drizzle(d1) as unknown as MarketplaceDb;
+  return createDrizzleD1Db(d1) as unknown as MarketplaceDb;
 }
 
 interface D1TableConfig {

@@ -30,7 +30,8 @@
  *    and the MIN/MAX date span; listSymbols ascending.
  */
 import { and, asc, desc, eq, sql } from "drizzle-orm";
-import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
+import { type DrizzleD1Database } from "drizzle-orm/d1";
+import { createDrizzleD1Db } from "./d1QueryLogger";
 
 import { agentIvHistory } from "./drizzleSchema";
 import {
@@ -53,7 +54,7 @@ export type IvHistoryDb = DrizzleD1Database<{
 
 /** Build the Drizzle D1 database object from a bound D1 client. */
 export function createD1IvHistoryDb(d1: D1Database): IvHistoryDb {
-  return drizzle(d1, { schema: { agentIvHistory } });
+  return createDrizzleD1Db(d1, { schema: { agentIvHistory } });
 }
 
 /** Idempotent schema-ensure: applies pending migrations, if any. */

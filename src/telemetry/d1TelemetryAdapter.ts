@@ -19,7 +19,8 @@
  * an O(rows) read is bounded; pushing aggregation to SQL is
  * a named follow-up if volume ever grows.
  */
-import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
+import { type DrizzleD1Database } from "drizzle-orm/d1";
+import { createDrizzleD1Db } from "../data/d1QueryLogger";
 import { and, eq, gte, inArray, lt } from "drizzle-orm";
 import {
   agentCalibrationDecisions,
@@ -51,7 +52,7 @@ export type TelemetryDb = DrizzleD1Database<{
 
 /** Build the Drizzle D1 database object from a bound D1 client. */
 export function createD1TelemetryDb(d1: D1Database): TelemetryDb {
-  return drizzle(d1, {
+  return createDrizzleD1Db(d1, {
     schema: { agentThesisRealizations, agentCalibrationDecisions },
   });
 }
