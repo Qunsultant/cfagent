@@ -60,16 +60,21 @@ export const SDK_HUNG_TIMEOUT_DEFAULT_SECONDS = 30;
  *
  * O4 decision (pinned in the inventory doc §4 before any write-site
  * change): `trigger` sits ALONGSIDE `triggeredBy`; it does not
- * supersede it. `triggeredBy` stays the two-valued human-facing
- * origin (scheduled | manual); `trigger` is the five-valued ledger
- * vocabulary. Derivation is total: no NEW row is ever `unknown` or
+ * supersede it. `triggeredBy` is the five-valued dispatch-mode
+ * origin (Venus ruling 2026-11-17, #5028: manual | scheduled |
+ * triggered | copilot | autopilot); `trigger` is the eight-valued
+ * ledger vocabulary (the five modes + worker-cron | async-chain |
+ * unknown). Derivation is total: no NEW row is ever `unknown` or
  * null.
  * ================================================================= */
 
-/** The five-valued ledger trigger vocabulary, in derivation order. */
+/** The eight-valued ledger trigger vocabulary, in derivation order. */
 export const LEDGER_TRIGGERS: readonly JobRunLedgerTrigger[] = [
   "scheduled",
   "manual",
+  "triggered",
+  "copilot",
+  "autopilot",
   "worker-cron",
   "async-chain",
   "unknown",
@@ -87,8 +92,8 @@ export function isLedgerTrigger(value: unknown): value is JobRunLedgerTrigger {
  * on the firing payload wins — except an explicit `"unknown"`, which
  * a payload may never stamp (unknown is legacy-rows-only, produced
  * solely by the read normalizer). An absent or invalid explicit
- * trigger falls back to the `triggeredBy` derivation (`scheduled` →
- * `scheduled`, `manual` → `manual`); an absent `triggeredBy`
+ * trigger falls back to the `triggeredBy` derivation (each of the
+ * five dispatch modes maps to itself); an absent `triggeredBy`
  * defaults to `scheduled`, reproducing `resolveScheduleRunTrigger`.
  */
 export function resolveLedgerTrigger(
@@ -104,7 +109,15 @@ export function resolveLedgerTrigger(
       return explicit;
     }
   }
-  return triggeredBy === "manual" ? "manual" : "scheduled";
+  if (
+    triggeredBy === "manual" ||
+    triggeredBy === "triggered" ||
+    triggeredBy === "copilot" ||
+    triggeredBy === "autopilot"
+  ) {
+    return triggeredBy;
+  }
+  return "scheduled";
 }
 
 /**

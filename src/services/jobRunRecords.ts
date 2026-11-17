@@ -61,7 +61,13 @@ const SYSTEMS: readonly string[] = [
   "worker-cron",
 ];
 const OUTCOMES: readonly string[] = ["success", "failure", "skipped"];
-const TRIGGERS: readonly string[] = ["scheduled", "manual"];
+const TRIGGERS: readonly string[] = [
+  "scheduled",
+  "manual",
+  "triggered",
+  "copilot",
+  "autopilot",
+];
 
 /**
  * Build and validate a run record. Throws on: unknown system /
@@ -241,11 +247,19 @@ export function resolveScheduleRunJobId(
   return `callback:${callback}`;
 }
 
-/** Manual only when the payload says so; everything else is scheduled. */
+/** The payload's trigger when it names one of the five dispatch modes; everything else is scheduled. */
 export function resolveScheduleRunTrigger(payload: unknown): JobRunTrigger {
   if (payload && typeof payload === "object") {
     const trigger = (payload as Record<string, unknown>).trigger;
-    if (trigger === "manual") return "manual";
+    if (
+      trigger === "manual" ||
+      trigger === "scheduled" ||
+      trigger === "triggered" ||
+      trigger === "copilot" ||
+      trigger === "autopilot"
+    ) {
+      return trigger;
+    }
   }
   return "scheduled";
 }

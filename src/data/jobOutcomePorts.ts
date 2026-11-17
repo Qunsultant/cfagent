@@ -24,6 +24,13 @@
  * wrap is claimed.
  */
 import type { SqlStorage } from "../orm";
+import type { JobRunTrigger } from "./jobRunRecordPorts";
+
+// Issue #5028 — the outcome sink records the run's true dispatch mode.
+// It is the same vocabulary as JobRunTrigger (Venus ruling 2026-11-17:
+// five modes — manual, scheduled, triggered, copilot, autopilot), so it
+// aliases it rather than carrying a second copy that can drift.
+export type JobOutcomeTrigger = JobRunTrigger;
 
 export type JobOutcomeKind =
   | "stock"
@@ -41,7 +48,6 @@ export type JobOutcomeKind =
   // Runs ledger shows what the trading path actually did (id
   // `order:<orderId>`), including a coded refusal.
   | "trading";
-export type JobOutcomeTrigger = "manual" | "scheduled";
 export type JobOutcomeStatus = "completed" | "failed" | "partial";
 
 export interface JobOutcomeInput {

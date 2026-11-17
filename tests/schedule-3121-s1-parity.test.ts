@@ -11,9 +11,10 @@
  *
  * Coverage:
  * - S1-P01 O4 vocabulary: `trigger` sits ALONGSIDE `triggeredBy`
- *   (five-valued ledger vocabulary vs the two-valued origin); the
- *   builder derives it, accepts explicit worker-cron / async-chain,
- *   and never stamps `unknown` on a new row.
+ *   (eight-valued ledger vocabulary vs the five-valued dispatch-mode
+ *   origin, #5028); the builder derives it, accepts explicit
+ *   worker-cron / async-chain, and never stamps `unknown` on a new
+ *   row.
  * - S1-P02 ledger shape: the four fields on JOB_RUN_RECORD_FIELDS
  *   and on every built record, present even when null.
  * - S1-P03 legacy normalization: pre-S1 rows read back as
@@ -226,23 +227,33 @@ afterEach(() => {
 });
 
 describe("S1-P01 O4 vocabulary — trigger alongside triggeredBy (#3121)", () => {
-  it("pins the five-valued ledger vocabulary", () => {
+  it("pins the eight-valued ledger vocabulary", () => {
     expect([...LEDGER_TRIGGERS]).toEqual([
       "scheduled",
       "manual",
+      "triggered",
+      "copilot",
+      "autopilot",
       "worker-cron",
       "async-chain",
       "unknown",
     ]);
   });
 
-  it("derives trigger from triggeredBy and keeps triggeredBy two-valued", () => {
+  it("derives trigger from triggeredBy across the five dispatch modes (#5028)", () => {
     const scheduled = buildJobRunRecord(baseRecord({ triggeredBy: "scheduled" }));
     expect(scheduled.trigger).toBe("scheduled");
     expect(scheduled.triggeredBy).toBe("scheduled");
     const manual = buildJobRunRecord(baseRecord({ triggeredBy: "manual" }));
     expect(manual.trigger).toBe("manual");
     expect(manual.triggeredBy).toBe("manual");
+    // Deliberate pin update (Venus ruling 2026-11-17, #5028): triggeredBy
+    // was two-valued under #3121 O4; the five dispatch modes widen it.
+    for (const mode of ["triggered", "copilot", "autopilot"] as const) {
+      const rec = buildJobRunRecord(baseRecord({ triggeredBy: mode }));
+      expect(rec.trigger).toBe(mode);
+      expect(rec.triggeredBy).toBe(mode);
+    }
   });
 
   it("accepts explicit worker-cron and async-chain triggers", () => {
