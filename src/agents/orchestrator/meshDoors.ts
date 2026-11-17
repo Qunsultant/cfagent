@@ -172,8 +172,11 @@ export type MeshDoorErrorCode =
   | "generate_job_not_found"
   // Issue #3539: the deliver-job door's unknown/ambiguous job name.
   | "deliver_job_not_found"
-  // Issue #3540: the pipeline-chain door's unknown/ambiguous
+  // Issue #3540: the feedsrc-chain door's unknown/ambiguous
   // chain name, and a stage action that names no stage.
+  // (Issue #4774 renamed the door's chain "pipeline chain" to
+  // "feedsrc chain"; the refusal CODES are unchanged — a code is
+  // an identifier clients may match, not a label.)
   | "pipeline_chain_not_found"
   | "pipeline_chain_stage_required"
   // Issue #2488: the mesh screen door's (meshScreenDoor.ts)
@@ -1196,7 +1199,7 @@ export interface PipelineChainRunBridge {
 }
 
 /**
- * Run one composed chain end-to-end through the pipeline
+ * Run one feedsrc chain end-to-end through the pipeline
  * host's control plane (the chain dispatch refreshes the
  * chain definition from the stored stage definitions first)
  * and report its settled outcome + the end-to-end status view
@@ -1232,7 +1235,10 @@ export async function runPipelineChainViaDoor(
       jobId: bridgeJobId,
       sessionId: bridge.sessionId,
       capability: "pipeline.chain",
-      displayName: `Pipeline chain — ${entry.label}`,
+      // Issue #4774: the entry label already carries the feedsrc
+      // short id ("feedsrc — <lineage>"), so it IS the display
+      // name — prefixing "Pipeline chain — " again would repeat it.
+      displayName: entry.label,
       userLogin: login,
       trigger: "manual",
       chainJobId: entry.jobId,

@@ -225,7 +225,9 @@ function WorkflowCard({
           }
         />
         <span>
-          <code>{workflow.id}</code> | family {workflow.family} | {workflow.stages.length} stages |{" "}
+          <code>{workflow.id}</code>
+          {workflow.shortId ? ` · ${workflow.shortId}` : ""} | family {workflow.family} |{" "}
+          {workflow.stages.length} stages |{" "}
           {workflow.stageSeam ? "stage seam wired" : "stage seam not wired yet"}
         </span>
         {workflow.runtimeSteps.length > 0 && (
