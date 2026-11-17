@@ -12,7 +12,7 @@ import type { Env, ScheduledTaskResult, StageChainConfig, TradeRecord, ScreenedS
 import { DatabaseORM, type SqlStorage } from "../orm";
 import type { JobRunTrigger } from "../data/jobRunRecordPorts";
 import { BusinessError, codedMessage } from "../outcomes/outcomeAspects";
-import { BROKER_CATALOG } from "../trading";
+import { resolveRunBrokerContext, type RunBrokerContext } from "./runBrokerContext";
 import { renewETradeAccessToken, getStoredTokens, etradeIdentityFromLogin } from "../security/etradeOAuth";
 import { resolveScreenerAgentName } from "../agents/screenerAgentName";
 import { actorGateway } from "./cloudflareActorGateway";
@@ -565,6 +565,8 @@ export function scheduledFirerDispatchRoute(input: {
 export interface ScheduledFirerHostDispatch {
   decision: ScheduledFirerDispatchDecision;
   broker: BrokerStageInput | null;
+  /** Issue #5188 — the run's resolved broker context (broker, mode, account). */
+  context: RunBrokerContext;
 }
 
 /**
@@ -589,21 +591,18 @@ export async function resolveScheduledFirerHostDispatch(
   environment: string | undefined,
   snapshotInput?: FeedSnapshotInput,
 ): Promise<ScheduledFirerHostDispatch> {
-  const brokerId = await resolveTenantBroker(env);
-  if (BROKER_CATALOG[brokerId]?.supports?.optionChains !== true) {
-    // Named refusal, before any workflow starts: the run must not reach a
-    // broker whose catalogue says it serves no option chains.
-    throw new Error(
-      codedMessage(
-        "FAILURE_BROKER_UNAVAILABLE",
-        `${brokerId} does not serve option chains; this schedule needs a broker whose catalogue declares optionChains`,
-      ),
-    );
-  }
-  const broker = discoveryBrokerStageInput(brokerId, env, environment);
+  // Issue #5188: one resolution for the whole run — broker, mode, modeSource,
+  // account — with the option-chain capability gate inside it.
+  const context = await resolveRunBrokerContext({
+    env,
+    environment,
+    requireCapability: "optionChains",
+  });
+  const broker = discoveryBrokerStageInput(context.brokerId, env, environment);
   return {
     decision: scheduledFirerDispatchRoute({ broker, env, snapshotInput }),
     broker,
+    context,
   };
 }
 
