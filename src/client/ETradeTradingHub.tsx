@@ -62,6 +62,7 @@ import {
 import { ErrorBoundary } from "./ErrorBoundary";
 import { ScreenersHub } from "./ScreenersHub";
 import { GoalScreenPanel } from "./GoalScreenPanel";
+import { OodaResearchPage } from "./OodaResearchPage";
 import { ReportsPanel } from "./ReportsPanel";
 import { ScreeningReviewPanel } from "./ScreeningReviewPanel";
 import { TrackRecordPanel } from "./TrackRecordPanel";
@@ -112,6 +113,7 @@ export type TradingSubTab =
   | "stock-hub"
   | "reports"
   | "goal-screen"
+  | "ooda"
   | "review"
   | "track-record"
   | "iv-history"
@@ -1859,6 +1861,7 @@ export function ETradeTradingHub({
       "stock-hub": "Stock Hub",
       reports: "Reports",
       "goal-screen": "Goal Screen",
+      ooda: "OODA Research",
       review: "Proposal Review",
       "track-record": "Track Record",
       "iv-history": "IV History",
@@ -2302,6 +2305,8 @@ export function ETradeTradingHub({
           TAB_CONTENT), not through this hub. */}
 
       {effectiveSubTab === "goal-screen" && <GoalScreenPanel activeEnv={activeEnv} userLogin={user?.login} />}
+
+      {effectiveSubTab === "ooda" && <OodaResearchPage userLogin={user?.login} />}
 
       {effectiveSubTab === "review" && <ScreeningReviewPanel userLogin={user?.login} />}
 
