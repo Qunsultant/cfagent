@@ -60,7 +60,7 @@ describe("Option exercise & assignment visibility (#4672)", () => {
 
   it("POST /broker/position/exercise enforces auth, validation, and broker capability", async () => {
     const ctx = (broker: string) => ({
-      env: { TENANT_BROKER: broker } as unknown as Env,
+      env: { BROKER_ID: broker } as unknown as Env,
       getOrm: () => undefined,
       readSettingRaw: () => broker,
     });
