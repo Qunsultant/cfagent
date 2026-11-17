@@ -20,7 +20,7 @@ gap). Change the code, change this table in the same PR.
 | Options chains + expiries | parity | parity | parity |
 | Accounts | parity | parity | parity |
 | Positions | parity | parity | parity |
-| Position lots | parity | parity | impossible (the hosted MCP surface exposes no lot-level position read) |
+| Position lots | parity | parity | parity (get_tax_lots_for_symbol; verified on the live surface, #4673) |
 | Order preview | parity | parity | parity |
 | Order placement | parity | parity | live-only (Public has no paper mode; TEST refuses with FAILURE_PUBLIC_NO_PAPER_MODE) |
 | Order cancel | parity | parity | parity |
@@ -33,7 +33,8 @@ gap). Change the code, change this table in the same PR.
 ## Data-plane rows
 
 Historical bars and fundamentals are served by the registered data providers,
-not by the broker platforms: etrade/public declare quotes + optionsChains,
+not by the broker platforms: etrade declares quotes + optionsChains, public
+declares quotes + optionsChains + historicalBars (get_price_history, #4673),
 yahoo declares quotes + historicalBars + fundamentals, nasdaq screenUniverse,
 alpaca quotes + historicalBars + fundamentals. A tenant whose selected provider
 cannot serve a capability is served by a capable provider with the substitution
