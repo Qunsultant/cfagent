@@ -1069,6 +1069,82 @@ export function createYahooDataProvider(
   });
 }
 
+/**
+ * Issue #4674 (matrix gap 20): Alpaca Data API news search (`/v1beta1/news`),
+ * using the same `buildAlpacaOptionsConfig` data credentials as Alpaca
+ * options/market reads. Fails closed with a named error when credentials are
+ * missing or the API returns non-2xx; a 200 with no articles returns [].
+ */
+export async function fetchAlpacaNewsArticles(
+  symbol: string,
+  env?: Env,
+  newsCount = 5,
+): Promise<DataNewsArticle[]> {
+  const clean = symbol.toUpperCase().trim();
+  const cfg = buildAlpacaOptionsConfig(env);
+  const apiKey = cfg.headers["APCA-API-KEY-ID"];
+  const apiSecret = cfg.headers["APCA-API-SECRET-KEY"];
+  if (!apiKey || !apiSecret) {
+    throw new Error(
+      `Alpaca news requires configured API credentials for "${clean}".`,
+    );
+  }
+  const url = `${cfg.dataUrl.replace(/\/+$/, "")}/v1beta1/news?symbols=${encodeURIComponent(clean)}&limit=${newsCount}`;
+  const res = await fetch(url, {
+    headers: {
+      "APCA-API-KEY-ID": apiKey,
+      "APCA-API-SECRET-KEY": apiSecret,
+      Accept: "application/json",
+    },
+  });
+  if (!res.ok) {
+    throw new Error(
+      `Alpaca news request failed for "${clean}" (HTTP ${res.status})`,
+    );
+  }
+  const data: unknown = await res.json();
+  const rawNews: unknown[] = Array.isArray(
+    (data as { news?: unknown } | null)?.news,
+  )
+    ? (data as { news: unknown[] }).news
+    : [];
+  const now = Date.now();
+  const articles: DataNewsArticle[] = [];
+  for (const [idx, raw] of rawNews.entries()) {
+    const item = raw as Record<string, unknown>;
+    const headline =
+      typeof item.headline === "string"
+        ? item.headline.trim()
+        : typeof item.title === "string"
+          ? item.title.trim()
+          : "";
+    if (!headline) continue;
+    const rawTime = item.created_at ?? item.updated_at;
+    const parsedTime =
+      typeof rawTime === "string" && rawTime.trim() !== ""
+        ? Date.parse(rawTime)
+        : NaN;
+    articles.push({
+      headline,
+      source:
+        typeof item.source === "string" && item.source.trim() !== ""
+          ? item.source
+          : "Alpaca News",
+      publishedAt: Number.isFinite(parsedTime)
+        ? new Date(parsedTime).toISOString()
+        : new Date(now - idx * 180000).toISOString(),
+      symbol: clean,
+      ...(typeof item.url === "string" && item.url !== ""
+        ? { url: item.url }
+        : {}),
+      ...(typeof item.summary === "string" && item.summary !== ""
+        ? { summary: item.summary }
+        : {}),
+    });
+  }
+  return articles;
+}
+
 /** Alpaca adapter — wraps AlpacaMarketDataProvider. */
 export function createAlpacaDataProvider(
   provider: IMarketDataProvider,
@@ -1087,6 +1163,9 @@ export function createAlpacaDataProvider(
     // snapshots); tests inject a stub. The default is built here,
     // in the Alpaca factory, so the shared wrapper stays generic.
     optionsChain: options?.optionsChain ?? alpacaOptionsChainSource(provider, env),
+    // Issue #4674 — wire Alpaca Data API `/v1beta1/news` so Alpaca
+    // declares `news` natively alongside quotes/historicalBars/optionsChains.
+    news: options?.news ?? ((symbol: string) => fetchAlpacaNewsArticles(symbol, env)),
   });
 }
 

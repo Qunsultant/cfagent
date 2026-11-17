@@ -770,13 +770,13 @@ describe("data provider adapters (issue #1118)", () => {
       createYahooDataProvider(fakeMarketDataProvider("yfinance")).capabilities
     ).toEqual(["quotes", "historicalBars", "fundamentals", "news"]);
     // #3932: the Yahoo adapter declares news (Yahoo News search);
-    // Alpaca declares none — no news fetcher is supplied for it.
+    // #4674: Alpaca declares news via `/v1beta1/news` (`fetchAlpacaNewsArticles`).
     // #3990: Alpaca declares optionsChains (the repo's own Alpaca
     // options read path) and NOT fundamentals — its getFundamentals
     // throws (ADR 0019: Yahoo covers fundamentals, never faked).
     expect(
       createAlpacaDataProvider(fakeMarketDataProvider("alpaca")).capabilities
-    ).toEqual(["quotes", "historicalBars", "optionsChains"]);
+    ).toEqual(["quotes", "historicalBars", "optionsChains", "news"]);
     expect(
       createNasdaqDataProvider(async () => nasdaqListingsFixture).capabilities
     ).toEqual(["screenUniverse"]);
