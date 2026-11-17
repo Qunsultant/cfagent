@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Cloudflare Agents Task Scheduling Service
  *
  * Implements:
@@ -13,6 +13,7 @@ import { DatabaseORM, type SqlStorage } from "../orm";
 import type { JobRunTrigger } from "../data/jobRunRecordPorts";
 import { BusinessError, codedMessage } from "../outcomes/outcomeAspects";
 import { resolveRunBrokerContext, type RunBrokerContext } from "./runBrokerContext";
+import { optionsFailureAlertText } from "./optionsRunAlertFormat";
 import { renewETradeAccessToken, getStoredTokens, etradeIdentityFromLogin } from "../security/etradeOAuth";
 import { resolveScreenerAgentName } from "../agents/screenerAgentName";
 import { actorGateway } from "./cloudflareActorGateway";
@@ -75,8 +76,8 @@ import {
   type OptionStrategyType,
   type StrategyRequest,
   // Issue #2583: the report scope (theses, strategies, chains, formats,
-  // channels) is data — config/options-reports.json, env
-  // OPTIONS_REPORT_CONFIG / OPTIONS_REPORT_PRESET — not a hardcoded default.
+  // channels) is data â€” config/options-reports.json, env
+  // OPTIONS_REPORT_CONFIG / OPTIONS_REPORT_PRESET â€” not a hardcoded default.
   describeReportScope,
   resolveOptionsReportScope,
   strategyModeFromReportScope,
@@ -126,7 +127,7 @@ import { discoveryBrokerStageInput } from "./discoveryService";
 import { optionsArtifactKey } from "../workflows/optionsScreenPorts";
 // Issue #1291: the scheduled path's unified scan result is an
 // OpportunityScanResult, not the OptionScreenResult the workbook
-// generator reads — adapt at this seam (XLSX; #1569 applies the
+// generator reads â€” adapt at this seam (XLSX; #1569 applies the
 // same adapter at the CSV seam below).
 import { adaptOpportunityScanToOptionScreenResult } from "../trading";
 import type { ScanRunStore } from "../trading";
@@ -185,7 +186,7 @@ import {
 import { deliverGatedSlack } from "./gatedSlackDelivery";
 import { getEventCalendarCoverage, getSymbolEventCalendar } from "./eventCalendar";
 
-/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+/** Issue #3515 S3 â€” module logger on the S2 structured-logging seam. */
 const structuredLog = createStructuredLogger(createObservabilitySink({}), {
   component: "services/scheduledTasks",
 });
@@ -222,12 +223,12 @@ export interface AutonomousOptionsAnalysisOptions {
   userLogin?: string;
   /** Issue #2216: the arming schedule's id, when the caller knows it
    *  (recorded as run provenance; the SDK callback path supplies none
-   *  — the schedules routes stamp it at arm/trigger time when known). */
+   *  â€” the schedules routes stamp it at arm/trigger time when known). */
   scheduleId?: string;
-  /** Consolidation C4 (#1329): per-record stage-chain config — in
+  /** Consolidation C4 (#1329): per-record stage-chain config â€” in
    *  chain mode the run bridges fully (bridge deliver jobs carry the
    *  adopted PDF; direct Slack/email delivery is suppressed so the
-   *  artifact is delivered exactly once). Absent ⇒ direct path. */
+   *  artifact is delivered exactly once). Absent â‡’ direct path. */
   stageChain?: StageChainConfig;
   /** Execute each underlying as a paced durable shard, then collate once. */
   sharded?: boolean;
@@ -235,12 +236,12 @@ export interface AutonomousOptionsAnalysisOptions {
 
 export interface AutonomousStrategyDiscoveryOptions {
   /** Complete saved StrategyRequests, captured from the discovery
-   *  panel and re-run verbatim (issue #126 decision — the system
+   *  panel and re-run verbatim (issue #126 decision â€” the system
    *  never derives a target or invents a view for a schedule). */
   requests?: StrategyRequest[];
   /** Input model discriminator (issue #533). Absent or "saved-request"
    *  is the #126 model above; "profile-derived" arms the fields
-   *  below instead; "no-view" (issue #534) arms constraintSets —
+   *  below instead; "no-view" (issue #534) arms constraintSets â€”
    *  the service branches on it. The three shapes are mutually
    *  exclusive: a payload mixing them fails pre-execution. */
   inputModel?: "saved-request" | "profile-derived" | "no-view";
@@ -253,7 +254,7 @@ export interface AutonomousStrategyDiscoveryOptions {
   /** Profile-derived model: the Strategy Profile id, resolved at
    *  fire time under the schedule owner's identity. */
   profileId?: string;
-  /** No-view model (issue #534): constraint sets — one symbol each,
+  /** No-view model (issue #534): constraint sets â€” one symbol each,
    *  constraints only. No thesis, target, or IV direction exists on
    *  the type; validateNoViewRequest rejects smuggled view fields. */
   constraintSets?: NoViewStrategyRequest[];
@@ -266,22 +267,22 @@ export interface AutonomousStrategyDiscoveryOptions {
   /** Consolidation #1236 (discovery notifications): per-task delivery
    *  recipients. Carried to the bridge in chain mode and to the direct
    *  delivery in non-chain mode. A task naming no channels plans no
-   *  notification — env-configured channels are never added to a
+   *  notification â€” env-configured channels are never added to a
    *  discovery run that did not name them. */
   emailTo?: string;
   slackChannel?: string;
   webhookUrl?: string;
   /** Consolidation #1236 (feed seam): per-task feed input. When
    *  present, generate reads stored snapshot artifacts instead of
-   *  live-loading — per symbol, through the panel's snapshot
-   *  override. Absent ⇒ the fused live path, unchanged. The no-view
+   *  live-loading â€” per symbol, through the panel's snapshot
+   *  override. Absent â‡’ the fused live path, unchanged. The no-view
    *  model never calls runDiscoveryRequest, so it ignores this
-   *  field — recorded as remainder. */
+   *  field â€” recorded as remainder. */
   snapshotInput?: FeedSnapshotInput;
-  /** Consolidation C4 (#1329): per-record stage-chain config — a
+  /** Consolidation C4 (#1329): per-record stage-chain config â€” a
    *  completed discovery run bridges generate + serve (canonical
    *  report adoption). Consolidation #1236 notifications: chain mode
-   *  ALSO carries delivery — the bridge flips deliverViaChain to
+   *  ALSO carries delivery â€” the bridge flips deliverViaChain to
    *  true with the task's own channel fields + a deliveryChannels
    *  allowlist derived from them, and direct delivery is suppressed
    *  in chain mode (goal-pattern exactly-once). A task naming no
@@ -293,33 +294,33 @@ export interface AutonomousStrategyDiscoveryOptions {
 }
 
 /**
- * Failure contract for scheduled jobs (issue #112 — deliberate; do not
+ * Failure contract for scheduled jobs (issue #112 â€” deliberate; do not
  * "fix" by throwing):
  *
  * These methods NEVER throw to their scheduler caller. A failure is
  * returned as a terminal `{ success: false, error }` result and is
- * surfaced by the service itself — an audit event plus, for user-facing
- * jobs, a session message — and by the OrchestratorAgent callback's
+ * surfaced by the service itself â€” an audit event plus, for user-facing
+ * jobs, a session message â€” and by the OrchestratorAgent callback's
  * broadcast. The Cloudflare Agents SDK retries a THROWING callback by
  * default ({ maxAttempts: 3, baseDelayMs: 100, maxDelayMs: 3000 }), but
  * that platform retry is deliberately NOT used here: a broker/data
- * failure will not heal within 100ms–3s, and a blind retry could
+ * failure will not heal within 100msâ€“3s, and a blind retry could
  * duplicate notifications after a partial success. The async-job
  * plumbing makes the same choice explicitly, passing
  * `retry: { maxAttempts: 1 }` on its schedule() calls. A failed
- * scheduled run stays failed — visible in the audit log, the session,
- * and the broadcast — until its next scheduled fire or a manual
+ * scheduled run stays failed â€” visible in the audit log, the session,
+ * and the broadcast â€” until its next scheduled fire or a manual
  * trigger.
  */
 /**
  * Consolidation #1236 (discovery notifications): map a discovery
  * run's per-symbol outcomes to the delivery surface's opportunity
- * shape — the same top-10 shape stock screens render. Per completed
+ * shape â€” the same top-10 shape stock screens render. Per completed
  * outcome the best trade wins, else the top ranked strategy; the
  * no-view path reads bestNoViewTrade/rankedNoView. Failed outcomes
  * and abstentions (status "abstained", or completed + abstained
  * true on the no-view path) contribute nothing. Only label +
- * underlying price exist on candidates — no company name or change
+ * underlying price exist on candidates â€” no company name or change
  * percent is fabricated. Capped at 10 here; the formatter slices to
  * 10 again, so the cap is belt-and-braces.
  */
@@ -364,7 +365,7 @@ export interface DiscoveryDeliveryOutcomeInput {
   stageChain?: ScreenerRunOutcome["stageChain"];
   /**
    * Issue #3313: the originating schedule / workflow run, when the
-   * caller knows it — stamped onto the delivery outcome so the
+   * caller knows it â€” stamped onto the delivery outcome so the
    * bridge record joins the run to its schedule/workflow.
    */
   scheduleId?: string;
@@ -376,13 +377,13 @@ export interface DiscoveryDeliveryOutcomeInput {
 
 /**
  * Consolidation #1236 (discovery notifications): build the one
- * delivery outcome for a discovery run, shared by both phases —
+ * delivery outcome for a discovery run, shared by both phases â€”
  * chain mode (bridge carries it to the planner) and direct mode
  * (delivered through the port inside the run). Chain mode derives
  * the deliveryChannels allowlist from the task's own fields in
  * CHANNEL_ORDER; a task naming no channels gets an empty allowlist
  * and plans nothing. reportUrl wires to the run's real detail
- * address (GET /api/etrade/options/discovery-runs/:id) — no UI
+ * address (GET /api/etrade/options/discovery-runs/:id) â€” no UI
  * deep-link exists for a run, so none is invented.
  */
 export function buildDiscoveryDeliveryOutcome(
@@ -396,7 +397,7 @@ export function buildDiscoveryDeliveryOutcome(
     kind: "discovery",
     trigger: input.trigger,
     success: input.status !== "failed",
-    thesis: `Strategy discovery (${input.inputModel}) — ${input.symbols.join(", ")}`,
+    thesis: `Strategy discovery (${input.inputModel}) â€” ${input.symbols.join(", ")}`,
     summary: input.summary,
     pdfKeys: [],
     canonicalReportId: input.reportId,
@@ -425,12 +426,12 @@ export function buildDiscoveryDeliveryOutcome(
  * Issue #1770 (slice C): write one screener-loop outcome to the
  * EXISTING Analytics Engine sink. foldEnvelopeToEvent already maps
  * screener.completed/failed envelopes to screener.delivery telemetry
- * events, but no screener-loop caller invoked it before — the loop
+ * events, but no screener-loop caller invoked it before â€” the loop
  * emitted nothing. Returns true when a point was written, false
  * when the envelope folds to nothing (e.g. options.* events) or
  * the sink could not be written. Best-effort by construction: the
  * sink is Safe-wrapped (unbound env degrades to the console sink),
- * and any residual error is warned, never thrown — telemetry must
+ * and any residual error is warned, never thrown â€” telemetry must
  * never fail the run or its deliveries.
  */
 export async function writeScreenerEventTelemetry(
@@ -456,14 +457,14 @@ export async function writeScreenerEventTelemetry(
  * Issue #3655 (F6): resolve a scheduled stock run's effective data
  * provider. Precedence: an explicit payload provider wins (a schedule
  * that names its provider keeps it); otherwise the tenant's
- * dataProviderId at RUN time — a later change of the tenant selection
+ * dataProviderId at RUN time â€” a later change of the tenant selection
  * applies to future runs without re-arming. A "public" selection
- * resolves to the Public adapter (#3990) — it is a stock-screen
+ * resolves to the Public adapter (#3990) â€” it is a stock-screen
  * provider, not a fallback case. When neither source names a
  * stock-screen provider (StockScreenProvider), the run is REFUSED
  * with a typed BusinessError (FAILURE_NO_SCREENING_PROVIDER):
  * the legacy silent default is removed, never replaced by another
- * silent default — a missing/unavailable provider fails loud and
+ * silent default â€” a missing/unavailable provider fails loud and
  * coded, so the run record and surfaces show the refusal instead
  * of another provider's data.
  */
@@ -495,10 +496,10 @@ export function resolveScheduledStockProvider(
 
 /**
  * Issue #3655: effective live/paper mode for a discovery run, from
- * (broker, environment) via the effective-mode resolver — an Alpaca
+ * (broker, environment) via the effective-mode resolver â€” an Alpaca
  * deployment pin beats the schedule's environment, so the record
  * carries the mode the run actually executed under plus its resolver
- * source. Undefined when no mode can be resolved — mode is never
+ * source. Undefined when no mode can be resolved â€” mode is never
  * guessed from a missing environment.
  */
 async function resolveDiscoveryRunMode(
@@ -517,14 +518,14 @@ export interface ScheduledFirerDispatchDecision {
 }
 
 /**
- * Issue #4854 — the scheduled firer's dispatch gate (the #4848
+ * Issue #4854 â€” the scheduled firer's dispatch gate (the #4848
  * manual-route gate's shape, as the #4853 panel gate mirrors it).
  * The host only when the leg's (broker, mode) pair derived from
  * the platform the run executes on and the residency bindings are
  * configured, and the run carries no stored snapshot input; anything
  * else stays on the unchanged sync dispatch. A snapshot-input run
  * stays on sync because the stored snapshot would have to ride the
- * D1 job definition — the #1236 feed seam's contract is a
+ * D1 job definition â€” the #1236 feed seam's contract is a
  * stored-snapshot run, not a live-chain run. No symbol gate: every
  * discovery expression is symbol-scoped. No gate decision is
  * logged; the run's job record shows which dispatch served it.
@@ -545,7 +546,7 @@ export function scheduledFirerDispatchRoute(input: {
     return {
       route: "sync",
       reason:
-        "a snapshot input rides along, so the run executes on its stored snapshot — the snapshot does not travel on the job definition",
+        "a snapshot input rides along, so the run executes on its stored snapshot â€” the snapshot does not travel on the job definition",
     };
   }
   const workflow = input.env.JOB_PIPELINE_WORKFLOW;
@@ -565,25 +566,25 @@ export function scheduledFirerDispatchRoute(input: {
 export interface ScheduledFirerHostDispatch {
   decision: ScheduledFirerDispatchDecision;
   broker: BrokerStageInput | null;
-  /** Issue #5188 — the run's resolved broker context (broker, mode, account). */
+  /** Issue #5188 â€” the run's resolved broker context (broker, mode, account). */
   context: RunBrokerContext;
 }
 
 /**
- * Issue #4854 — resolve the firer's host dispatch once per run:
+ * Issue #4854 â€” resolve the firer's host dispatch once per run:
  * the (broker, mode) pair derives from the firer platform with
- * the schedule's environment, through the #4853 derivation —
+ * the schedule's environment, through the #4853 derivation â€”
  * the same environment resolution the platform was constructed
  * with, so the residency fetches the same environment's chains the
- * sync dispatch would — and the gate decides from it. The
+ * sync dispatch would â€” and the gate decides from it. The
  * platform, environment, and snapshot input are fixed for the run,
  * so a run never mixes dispatches mid-flight.
  *
- * Issue #5184 — the run carries the broker: the stage input derives from the
+ * Issue #5184 â€” the run carries the broker: the stage input derives from the
  * tenant's resolved broker (`resolveTenantBroker`, the one default), never a
  * literal id. A broker whose catalogue entry does not declare
  * `supports.optionChains` is refused here, by name, before any workflow
- * starts — the alternative is a schedule that authenticates a broker the
+ * starts â€” the alternative is a schedule that authenticates a broker the
  * tenant does not use and fails every cron (incident #5181).
  */
 export async function resolveScheduledFirerHostDispatch(
@@ -591,8 +592,8 @@ export async function resolveScheduledFirerHostDispatch(
   environment: string | undefined,
   snapshotInput?: FeedSnapshotInput,
 ): Promise<ScheduledFirerHostDispatch> {
-  // Issue #5188: one resolution for the whole run — broker, mode, modeSource,
-  // account — with the option-chain capability gate inside it.
+  // Issue #5188: one resolution for the whole run â€” broker, mode, modeSource,
+  // account â€” with the option-chain capability gate inside it.
   const context = await resolveRunBrokerContext({
     env,
     environment,
@@ -607,7 +608,7 @@ export async function resolveScheduledFirerHostDispatch(
 }
 
 /**
- * Issue #4854 — the host dispatch's injectable seams (the
+ * Issue #4854 â€” the host dispatch's injectable seams (the
  * #4291/#4848/#4853 idiom): the workflow create call, the residency
  * stores, and the await options. Tests inject fakes; production
  * passes nothing and the dispatch derives from env.
@@ -620,7 +621,7 @@ export interface ScheduledFirerHostSeams {
 }
 
 /**
- * Issue #4854 — one scheduled firer panel screen through the
+ * Issue #4854 â€” one scheduled firer panel screen through the
  * strategy workflow host: define the strategy job with the leg's
  * broker pair and the universe descriptor stamped on the stored
  * request, create the workflow instance, await settlement, and map
@@ -643,7 +644,7 @@ export interface ScheduledFirerHostSeams {
  * control from the copilot turn until control moves to the durable
  * stores (#4859). The sync fallback keeps the #4275 threading for
  * gated-out runs. The stage queue is not threaded either: the
- * residency binds it from env (#4851 — the same binding the
+ * residency binds it from env (#4851 â€” the same binding the
  * service's stageQueue threads from), so a host-path screen
  * publishes through the same queue as today.
  */
@@ -722,7 +723,7 @@ export class ScheduledTasksService {
     /** Issue #1123 S5b: the follow-up bridge. When the host wires it,
      *  screener events join the tracked job pipeline instead of the
      *  private event bus (stock chains fully; options bridge fully in
-     *  chain mode — C4 #1329 — and record-only otherwise, because
+     *  chain mode â€” C4 #1329 â€” and record-only otherwise, because
      *  unchained options delivery stays on the #223 direct path). */
     private followupScheduler?: (
       outcome: import("./screenerFollowups").ScreenerRunOutcome,
@@ -746,7 +747,7 @@ export class ScheduledTasksService {
     /** Issue #3186 (battery fix): the stage-message queue the
      *  scheduled options pipeline publishes to. Threaded in from
      *  the hosts that own `env` (they pass their queue binding, or
-     *  null when unbound) — the service itself must never name the
+     *  null when unbound) â€” the service itself must never name the
      *  binding (messaging_ports pin). Absent, the pipeline runs
      *  unpublished, exactly as before. */
     private stageQueue?: import("../workflows/stageQueueTransport").StageQueueSend | null,
@@ -755,7 +756,7 @@ export class ScheduledTasksService {
      * the monolithic scheduled screen runs through. Optional:
      * absent, the service calls the real seam; tests inject a
      * fake. The field exists only so a test can substitute the
-     * seam — it never selects a different engine.
+     * seam â€” it never selects a different engine.
      */
     private runStockScreenViaEngine?: RunStockScreenViaEngine,
     /** Issue #4275: the host Durable Object's SQL handle, for the
@@ -765,7 +766,7 @@ export class ScheduledTasksService {
      *  is built over). Present, each scheduled panel screen
      *  defines its strategy job and records its run durably;
      *  absent, the firer runs over in-memory engine stores (the
-     *  #4069 accepted-absent discipline, as the scheduled scan) —
+     *  #4069 accepted-absent discipline, as the scheduled scan) â€”
      *  the screen still executes on the engine, only its run
      *  record is run-duration. */
     private engineSql?: SqlStorage,
@@ -773,21 +774,21 @@ export class ScheduledTasksService {
      * Issue #4280: the one engine seam's submit-only entry
      * (submitStockScreenViaEngine) the scheduled sharded screen
      * submits through. Same injectable rule as its await sibling
-     * above — tests substitute a fake; production omits it.
+     * above â€” tests substitute a fake; production omits it.
      */
     private submitStockScreenViaEngine?: SubmitStockScreenViaEngine,
     /**
      * Issue #4780: the one engine seam's start entry
      * (startOptionsChainWorkflow) the scheduled sharded options
      * chain submits through. Same injectable rule as the stock
-     * chain's submit seam above — tests substitute a fake;
+     * chain's submit seam above â€” tests substitute a fake;
      * production omits it and the dispatch derives from env.
      */
     private startOptionsChainWorkflow?: typeof startOptionsChainWorkflowSeam,
     /**
      * Issue #4854: the host dispatch's injectable seams for the
      * scheduled firer's panel runs. Same injectable rule as the
-     * engine seams above — tests substitute fakes; production
+     * engine seams above â€” tests substitute fakes; production
      * omits it and the dispatch derives from env.
      */
     private firerHostSeams?: ScheduledFirerHostSeams,
@@ -798,7 +799,7 @@ export class ScheduledTasksService {
    * flows (discovery variants, IV collection). The injected ORM is
    * forwarded as-is; these flows use the service's REST client, and
    * the ORM reaches only its trading platform, whose contract is
-   * explicitly optional with every access guarded — so without an
+   * explicitly optional with every access guarded â€” so without an
    * ORM, platform persistence is honestly absent. The former stub
    * fallback (an ORM whose exec returns an empty array for every
    * query) made the platform believe persistence existed while
@@ -815,7 +816,7 @@ export class ScheduledTasksService {
   /**
    * Issue #1378: the route-bound universe deps for scheduled
    * options discovery (full capture via platformDeps when its blob
-   * handle is present, outcome-only otherwise — the same split as
+   * handle is present, outcome-only otherwise â€” the same split as
    * the options_analysis site). Undefined when no platform store
    * is configured or the bundle cannot be built; discovery then
    * throws naming the seam rather than fetching directly. The run
@@ -857,7 +858,7 @@ export class ScheduledTasksService {
   }
 
   /**
-   * ScreenerAgent stub (issue #261) — one agent owns all screening.
+   * ScreenerAgent stub (issue #261) â€” one agent owns all screening.
    */
   private getScreenerAgent(userLogin = this.userLogin): import("../agents/screener-agent").ScreenerAgent {
     // Issue #1779 dedup: this method's inline naming duplicate is
@@ -879,7 +880,7 @@ export class ScheduledTasksService {
 
   /**
    * Issue #1333: discovery outcomes into the job-outcome sink.
-   * Guarded on platformDeps.sql and never throwing — a sink failure
+   * Guarded on platformDeps.sql and never throwing â€” a sink failure
    * must not fail the discovery run.
    */
   private recordDiscoveryOutcome(input: {
@@ -915,7 +916,7 @@ export class ScheduledTasksService {
     try {
       // Issue #1999 (D7): this service runs system-path executions
       // only (cron/bridge/scheduled), so every row it writes is a
-      // system-principal row for the run owner — never a session
+      // system-principal row for the run owner â€” never a session
       // row, never a defaulted identity. G-AUD-3, applied.
       this.orm.events.create({
         id: crypto.randomUUID(),
@@ -927,7 +928,7 @@ export class ScheduledTasksService {
       });
     } catch (err) {
       // Issue #1999: an audit insertion failure is fail-visible,
-      // never silent — the warn carries type + login on the
+      // never silent â€” the warn carries type + login on the
       // worker-log channel. The run's outcome is unchanged: the
       // audit store is the record, not the run.
       structuredLog.warn("scheduledTasks.audit_insertion_failed", {
@@ -941,7 +942,7 @@ export class ScheduledTasksService {
 
   /**
    * Issue #1174 (#1173 S1): the scheduled-run auth guard. Delegates
-   * the policy to etradeAuthPreflight (verify → renew → block) with
+   * the policy to etradeAuthPreflight (verify â†’ renew â†’ block) with
    * this host's seams: the episode dedup store rides platformDeps'
    * blob storage (the host DO storage, when the host supplied it) and
    * the alert/record path is the follow-up bridge plus a direct Slack
@@ -949,8 +950,8 @@ export class ScheduledTasksService {
    *
    * Issue #3655: the guard is broker-aware. The tenant broker is
    * resolved FIRST (guardScheduledBrokerAuth, fail-closed): broker
-   * etrade — or an unreadable/unconfigured selection, preserving
-   * pre-#3655 behaviour — runs the E*TRADE preflight below,
+   * etrade â€” or an unreadable/unconfigured selection, preserving
+   * pre-#3655 behaviour â€” runs the E*TRADE preflight below,
    * unchanged. Any other broker verifies that broker's credentials
    * instead; a missing credential blocks loud with a coded,
    * broker-named message, and the E*TRADE preflight never runs for
@@ -962,8 +963,8 @@ export class ScheduledTasksService {
    * Issue #2440: the run-as login resolves to its session identity
    * via the alias record before the guard runs, so tokens stored
    * under internal-id or alias-login keys resolve exactly as the
-   * panel seam resolves them. The login is already trusted here —
-   * it is the schedule's owner login — and an unresolvable login
+   * panel seam resolves them. The login is already trusted here â€”
+   * it is the schedule's owner login â€” and an unresolvable login
    * yields an empty identity, keeping today's login-only lookup
    * (the helper never throws: a store blip falls back to {}).
    */
@@ -1049,12 +1050,12 @@ export class ScheduledTasksService {
     event: import("../events/screenerEvents").ScreenerEvent
   ): Promise<ScreenerDeliveryConfigStatus | undefined> {
     try {
-      // Issue #1123 S5b: the tracked pipeline is the preferred sink —
-      // the run is recorded as a main job and chained (report →
-      // deliveries → notifications) exactly like an interactive
+      // Issue #1123 S5b: the tracked pipeline is the preferred sink â€”
+      // the run is recorded as a main job and chained (report â†’
+      // deliveries â†’ notifications) exactly like an interactive
       // screen. The bus remains for hosts that don't wire the bridge.
       if (this.followupScheduler) {
-        // Consolidation C4 (#1329): a chained event bridges fully —
+        // Consolidation C4 (#1329): a chained event bridges fully â€”
         // options in chain mode, and any screener event carrying a
         // stage-chain config. Unchained options events stay
         // record-only (chainReport=false); their delivery stays on
@@ -1064,12 +1065,12 @@ export class ScheduledTasksService {
           this.userLogin,
           Boolean((event as { stageChain?: unknown }).stageChain) || event.type.startsWith("screener."),
         );
-        // Chained delivery owns its own errors — no bus-path config
+        // Chained delivery owns its own errors â€” no bus-path config
         // status applies here.
         return undefined;
       }
       // Issue #1770 (slice B): the bus-path email config status for
-      // the run's task result — only when this run requested email
+      // the run's task result â€” only when this run requested email
       // (event recipient or the deployment default). The status
       // describes the deployment's transports, which the queue
       // consumer shares, so it holds for the queue path too.
@@ -1081,7 +1082,7 @@ export class ScheduledTasksService {
         : undefined;
       // Issue #1739: the durable queue is primary for the two
       // bus-subscribed event types (screener.completed / screener.failed
-      // — screener.md §8.1). options.* events keep the legacy bus path:
+      // â€” screener.md Â§8.1). options.* events keep the legacy bus path:
       // they have no bus subscribers today, and their delivery stays on
       // the #223 direct path. The bus fallback below runs only when no
       // subscriber stream received the event, so an event is never
@@ -1100,7 +1101,7 @@ export class ScheduledTasksService {
               return deliveryConfig;
             }
             structuredLog.warn("scheduledTasks.queue_publish_no_subscriber", {
-              message: "[ScheduledTasksService] queue publish reached no subscriber stream — falling back to the in-process bus.",
+              message: "[ScheduledTasksService] queue publish reached no subscriber stream â€” falling back to the in-process bus.",
             });
           }
         } catch (err) {
@@ -1122,7 +1123,7 @@ export class ScheduledTasksService {
       // Issue #1770 (slice C): bus leg emits the same single
       // telemetry point; options.* events fold to nothing, so this
       // call is a no-op for them. The chained path above returns
-      // before this point and never emits here — chained delivery
+      // before this point and never emits here â€” chained delivery
       // owns its own outcome reporting.
       if (event.type.startsWith("screener.")) {
         await writeScreenerEventTelemetry(this.env, this.userLogin, event);
@@ -1150,8 +1151,8 @@ export class ScheduledTasksService {
       // Issue #2442 S3: the run-as login resolves to its session identity
       // via the alias record before the token read, so tokens stored
       // under internal-id or alias-login keys resolve exactly as the
-      // panel seam resolves them. The login is already trusted here —
-      // it is the schedule's owner login — and an unresolvable login
+      // panel seam resolves them. The login is already trusted here â€”
+      // it is the schedule's owner login â€” and an unresolvable login
       // yields an empty identity, keeping today's login-only lookup
       // (the helper never throws: a store blip falls back to {}).
       const identity = await etradeIdentityFromLogin(this.env, user);
@@ -1223,24 +1224,24 @@ export class ScheduledTasksService {
    */
   /**
    * Issue #1355: scheduled stock screen as sharded jobs. This
-   * branch does NOT run the screen — it submits the chain's first
+   * branch does NOT run the screen â€” it submits the chain's first
    * shard (feed.nasdaq) through the orchestrator's async-job
    * submission port, and the executor's completion hooks advance
-   * the chain (nasdaq → etrade → yahoo → assemble → pdf/xlsx/csv
-   * → store → serve → deliver). The monolithic path below is
+   * the chain (nasdaq â†’ etrade â†’ yahoo â†’ assemble â†’ pdf/xlsx/csv
+   * â†’ store â†’ serve â†’ deliver). The monolithic path below is
    * untouched when the flag is absent; off runs keep today's
    * behaviour exactly.
    *
    * Composition supersedes the single-provider option here: the
    * feed shards fetch nasdaq (universe) + etrade (quotes) + yahoo
    * (gap-fill quotes for symbols etrade missed + history
-   * technicals), and assemble merges them — the same dataset the
+   * technicals), and assemble merges them â€” the same dataset the
    * monolithic path screens, with per-element provenance.
    *
    * No screener.completed event is published at submission: the
    * run has no outcome yet, and publishing one would make the
    * follow-up bridge record a second main job + a second report
-   * chain (double delivery). The engine job IS the record — its
+   * chain (double delivery). The engine job IS the record â€” its
    * completion announces via the tracked pipeline's delivered
    * notifications, and its store stage writes the mas_reports
    * rows. The caller (scheduledCallbacks) records last_runs with
@@ -1248,7 +1249,7 @@ export class ScheduledTasksService {
    * write, which the store stage owns.
    *
    * Issue #4280 ([One engine] #3550 S5): submits through the one
-   * engine seam (submit-only — the chain's submit-and-return
+   * engine seam (submit-only â€” the chain's submit-and-return
    * contract). The seam fails honestly with a coded WorkflowError
    * when the workflow port is unavailable; the run never executes
    * unsharded under a sharded label.
@@ -1275,19 +1276,19 @@ export class ScheduledTasksService {
       dataProviderId?: string;
       /** Issue #3655: live/paper mode, recorded on the chain at submission. */
       mode?: "live" | "paper";
-      /** Issue #3655 (effective mode): which resolver leg produced the mode — pin/selection/inference. */
+      /** Issue #3655 (effective mode): which resolver leg produced the mode â€” pin/selection/inference. */
       modeSource?: EffectiveModeSource;
     },
     userLogin: string,
     timestamp: string
   ): Promise<ReturnType<ScheduledTasksService["autonomousMarketScreen"]>> {
     // Issue #2866: the sharded scheduled run is planned through
-    // the one planner, like the monolithic path (Slice 5) — same
+    // the one planner, like the monolithic path (Slice 5) â€” same
     // values (universe default TECH, sector precedence request >
     // filters > ALL), derived once instead of by hand. Issue
     // #4280 ([One engine] #3550 S5): the submission below is the
     // engine seam's submit-only entry (submitStockScreenViaEngine)
-    // — the broker's chain start is retired; the engine job id
+    // â€” the broker's chain start is retired; the engine job id
     // IS the chain id.
     const shardedPlan = planScheduledScreen(
       {
@@ -1302,7 +1303,7 @@ export class ScheduledTasksService {
     const universe = shardedPlan.universe;
     const sector = shardedPlan.sector;
     // Issue #4280 ([One engine] #3550 S5): the shard-submit port
-    // guard is gone with the chain — the seam owns the unavailable
+    // guard is gone with the chain â€” the seam owns the unavailable
     // failure now (coded WorkflowError when the workflow port cannot
     // be built), and the try/catch below audits + rethrows it on the
     // same failure path. The run still never executes unsharded
@@ -1314,14 +1315,14 @@ export class ScheduledTasksService {
     // active in this instance's mas_async_jobs rows (platformDeps.sql
     // is that same storage; absent, only the lock probe applies). A
     // refused submission returns the skipped shape the caller already
-    // honors — no new run, no duplicate Slack partial.
+    // honors â€” no new run, no duplicate Slack partial.
     // Issue #2860 (Factor 8): both probes are
     // FAIL-CLOSED. A probe that cannot answer refuses the submission
     // (skippedReason "gate-unavailable", audited so the refusal is
-    // visible) instead of proceeding ungated — the pre-#2860
+    // visible) instead of proceeding ungated â€” the pre-#2860
     // availability choice is gone; the risk-accepted alternative
     // was not taken (user decision 2026-11-06).
-    // Issue #4280: the probes still run first, unchanged — the
+    // Issue #4280: the probes still run first, unchanged â€” the
     // active-chain probe additionally guards the deploy-transition
     // window (a pre-migration chain still in flight); the seam's
     // own in-flight probe (gate 2) covers in-flight engine jobs.
@@ -1355,7 +1356,7 @@ export class ScheduledTasksService {
         activeChain = hasActiveChain(rows, userLogin, universe);
       } catch (err) {
         // Fail-closed (#2860 Factor 8): a gate read failure
-        // refuses the submission — it must not wedge open a
+        // refuses the submission â€” it must not wedge open a
         // second chain for the same user + universe.
         this.audit("screener.sharded_chain_gate_unavailable", {
           sector: sector || "ALL",
@@ -1374,7 +1375,7 @@ export class ScheduledTasksService {
       }
     }
     // Issue #2860: the chainId is the submission attempt's
-    // correlation id — generated before the try so the
+    // correlation id â€” generated before the try so the
     // catch's failed event can carry it too (a UUID
     // generation has no side effects, so this moves
     // nothing else). Issue #4280: the chain id IS the engine
@@ -1383,7 +1384,7 @@ export class ScheduledTasksService {
     const chainId = crypto.randomUUID();
     try {
       // Issue #4280 ([One engine] #3550 S5): the sharded run
-      // submits through the one engine seam (submit-only — the
+      // submits through the one engine seam (submit-only â€” the
       // chain's submit-and-return contract; the tick never
       // awaits the run). The delivery envelope + stageChain ride
       // the command to the deliver stage, where the follow-up
@@ -1399,7 +1400,7 @@ export class ScheduledTasksService {
           source: "scheduled",
           trigger: "scheduled",
           deliver: true,
-          // Issue #4278: StockScreenRunSpec.filters is required —
+          // Issue #4278: StockScreenRunSpec.filters is required â€”
           // an absent filter set is the empty filter, same semantics.
           filters: options.filters ?? {},
           universe,
@@ -1441,7 +1442,7 @@ export class ScheduledTasksService {
         ...(options.provider ? { provider: options.provider } : {}),
       });
       // Issue #2860: the chain's submission IS its
-      // screen.started — trace_id is the chainId, the
+      // screen.started â€” trace_id is the chainId, the
       // correlation id the whole chain's rows + logs
       // share. Completion is async (serve/deliver jobs),
       // so no screen.completed is emitted here; the
@@ -1510,10 +1511,10 @@ export class ScheduledTasksService {
   }
 
   /**
-   * Issue #4624 — the tenant a delivery belongs to, resolved for the delivery
+   * Issue #4624 â€” the tenant a delivery belongs to, resolved for the delivery
    * IDENTITY only (never for authorization). Best effort by design: an
    * unavailable commercial store, a missing account row, or a tenant mismatch
-   * yields null, is audited, and leaves the identity `unscoped` — the run
+   * yields null, is audited, and leaves the identity `unscoped` â€” the run
    * itself never fails on this read.
    */
   private async resolveDeliveryTenant(userLogin: string): Promise<string | null> {
@@ -1556,24 +1557,24 @@ export class ScheduledTasksService {
      *  criteria filter this run. Resolved at RUN time (below), so
      *  preset edits apply to future runs without re-arming the
      *  schedule. When set, the preset's criteria REPLACE options.filters
-     *  — a run never merges two filter sources. */
+     *  â€” a run never merges two filter sources. */
     presetId?: string;
     /** Issue #1007: data provider for the run, resolved at run time
-     *  through resolveScheduledStockProvider — an unresolvable
+     *  through resolveScheduledStockProvider â€” an unresolvable
      *  selection refuses the run with FAILURE_NO_SCREENING_PROVIDER
      *  (#3655 F6), never a default. "yahoo" runs the same pipeline
      *  over the Yahoo data-source adapter. */
     provider?: import("../trading").StockScreenProvider;
     /** Consolidation C3 (#1277): stage-chain config from the schedule
-     *  payload — carried onto the run's events so the follow-up
+     *  payload â€” carried onto the run's events so the follow-up
      *  bridge stamps the run's stage jobs. */
     stageChain?: import("../types").StageChainConfig;
     /** Issue #1355: run this scheduled screen as sharded jobs
-     *  (feed → generate → store → serve → deliver) instead of the
+     *  (feed â†’ generate â†’ store â†’ serve â†’ deliver) instead of the
      *  monolithic runScreen path. Absent/false keeps today's
      *  behaviour exactly. */
     sharded?: boolean;
-    /** Issue #2373 (slice C): schedule kind for paid routing —
+    /** Issue #2373 (slice C): schedule kind for paid routing â€”
      *  absent fails closed to recurring (coverage-only), exactly
      *  like the goal tick. Carried on the schedule payload by the
      *  schedule-creation guard in src/agents/routes/schedules.ts;
@@ -1582,7 +1583,7 @@ export class ScheduledTasksService {
     /** Issue #2373 (slice C): human authorization at submission
      *  for a one-off run. Stock ticks never start a checkout (see
      *  the payment-decision block below), so an authorized one-off
-     *  without coverage still skips — honestly, not charged. */
+     *  without coverage still skips â€” honestly, not charged. */
     authorizedAtSubmission?: boolean;
   } = {}): Promise<ScheduledTaskResult<{
     totalScanned: number;
@@ -1599,7 +1600,7 @@ export class ScheduledTasksService {
     dataProviderId?: string;
     /** Issue #3655: live/paper mode the run executed under. */
     mode?: "live" | "paper";
-    /** Issue #3655 (effective mode): which resolver leg produced the mode — pin | selection | inference. */
+    /** Issue #3655 (effective mode): which resolver leg produced the mode â€” pin | selection | inference. */
     modeSource?: EffectiveModeSource;
     expectedCount?: number;
     pdfKey?: string;
@@ -1623,12 +1624,12 @@ export class ScheduledTasksService {
   }>> {
     const timestamp = new Date().toISOString();
     // Issue #3655: the #1527 silent Yahoo fallback is REMOVED on this
-    // path — a blocked provider fails loud and coded (below), never
+    // path â€” a blocked provider fails loud and coded (below), never
     // screens another provider's data. Broker/provider/mode provenance
     // for the run is resolved inside the try, from the tenant
     // selections at RUN time. Declared here so the catch below can
     // name them on a failure even when resolution itself failed
-    // (then they stay undefined — never a guessed value).
+    // (then they stay undefined â€” never a guessed value).
     let tenantProviders: import("../data/commercialPorts").TenantProviders | undefined;
     let effectiveProvider: import("../trading").StockScreenProvider | undefined;
     let runBrokerId: string | undefined;
@@ -1654,26 +1655,26 @@ export class ScheduledTasksService {
       deliveryTenantId = await this.resolveDeliveryTenant(userLogin);
       // Issue #2373 (slice C): monetization ON gates scheduled
       // stock screens at the tick, mirroring the goal tick's
-      // admission stage — but as a payment DECISION, not a
+      // admission stage â€” but as a payment DECISION, not a
       // workflow start. Scheduled stock runs execute through the
       // one-engine seam (#4278/#4280): the monolithic path starts
       // the stock screen workflow via runStockScreenViaEngine and
       // awaits its collation, and the sharded path submits the
       // engine job via submitStockScreenViaEngine, whose id is
-      // the chain id — neither path is a direct
+      // the chain id â€” neither path is a direct
       // ScreenerAgent.runScreen call any more. No payment
       // workflow is ever started here and no one-off checkout is
       // available for stock schedules. Covered runs consume FIRST (subscription
       // included run, else credits) through the workflow's own
       // consume ports, then run exactly as today. Uncovered runs
-      // skip, audited and explained — never charged unattended,
+      // skip, audited and explained â€” never charged unattended,
       // never run uncovered. A consume error skips too: unlike
       // the workflow's best-effort consume (the run is already
       // paid there), nothing is paid yet at this tick, so a failed
       // consume must not yield an uncovered run. A missing,
       // invalid, or UNAPPROVED stock price THROWS into the
       // run_failed path below (getApprovedPrice returns null for
-      // #2547-proposed prices, exactly like a missing price — never
+      // #2547-proposed prices, exactly like a missing price â€” never
       // a code-constant fallback). No checkout contact is needed
       // on this path and none is invented: no checkout is ever
       // started, so the goal tick's skipped_no_checkout_contact
@@ -1681,7 +1682,7 @@ export class ScheduledTasksService {
       // equivalent; the account read passes emailTo ?? "" only
       // as an identity field. Manual triggers (trigger "manual")
       // bypass this block entirely and keep today's behaviour.
-      // Flag OFF → this block is skipped and the run is exactly
+      // Flag OFF â†’ this block is skipped and the run is exactly
       // as today.
       const effectiveTrigger = options.trigger || "scheduled";
       if (effectiveTrigger === "scheduled") {
@@ -1743,9 +1744,9 @@ export class ScheduledTasksService {
           await ensureCommercialSchema(commercial.db);
           await ensureSubscriptionSchema(subscriptions.db);
           // Issue #3179: the run tenant is the schedule OWNER's
-          // stored account tenant, never the deployment default —
+          // stored account tenant, never the deployment default â€”
           // a mismatched default no longer fails owner ticks
-          // closed on the mismatch throw below. No owner row →
+          // closed on the mismatch throw below. No owner row â†’
           // the explicit, audited env-default fallback.
           const tickTenant = await resolveTickTenant(commercial, {
             userId: userLogin,
@@ -1781,7 +1782,7 @@ export class ScheduledTasksService {
             // Uncovered one-off authorized: resolvePaidScreenAction
             // says start_payment, but there is no payment workflow
             // for a stock chain/monolith to ride, so no checkout can
-            // happen. Skip with an honest explanation — this is
+            // happen. Skip with an honest explanation â€” this is
             // the documented #2373 limitation, not a bug to work
             // around. (The engine cutover (#4280) already moved the
             // sharded path onto the engine seam, so the remaining
@@ -1795,7 +1796,7 @@ export class ScheduledTasksService {
             );
           }
           try {
-            // Issue #3245: a grant-covered run consumes nothing —
+            // Issue #3245: a grant-covered run consumes nothing â€”
             // no included run, no credits. Only the two spending
             // coverages consume here; the old bare `else` would
             // have charged credits for a free grant run.
@@ -1813,7 +1814,7 @@ export class ScheduledTasksService {
         }
       }
       // Issue #1499 (#940-E): a schedule's presetId resolves at RUN time
-      // against the caller's own presets, before any broker work — so a
+      // against the caller's own presets, before any broker work â€” so a
       // missing, foreign, unreadable, or wrong-asset-class preset fails
       // this run loudly through the catch below (audit + session
       // message + failure broadcast), never as a silent unfiltered run.
@@ -1823,7 +1824,7 @@ export class ScheduledTasksService {
       if (options.presetId !== undefined) {
         const sql = this.platformDeps?.sql;
         if (!sql) {
-          throw new Error("Preset resolution is unavailable for this scheduled screen host — the run cannot apply its preset, so it does not run unfiltered.");
+          throw new Error("Preset resolution is unavailable for this scheduled screen host â€” the run cannot apply its preset, so it does not run unfiltered.");
         }
         const resolved = resolvePresetFilter(sql, userLogin, options.presetId);
         if (!resolved.ok) {
@@ -1837,11 +1838,11 @@ export class ScheduledTasksService {
       // Issue #17: the portfolio-context flag is read at run time
       // (settings live in the orchestrator's storage, which this
       // service's platformDeps.sql points at). No sql host means no
-      // settings read, which the flag contract reads as OFF — never
+      // settings read, which the flag contract reads as OFF â€” never
       // as an error. The sharded chain below does not carry this
       // flag yet (its ShardChainContext has no field for it), so a
       // sharded scheduled run simply runs unmodified; the
-      // monolithic path — the default — carries it.
+      // monolithic path â€” the default â€” carries it.
       const portfolioContext = this.platformDeps?.sql
         ? isPortfolioContextEnabled(settingReadFromSql(this.platformDeps.sql))
         : false;
@@ -1849,7 +1850,7 @@ export class ScheduledTasksService {
       // dataProviderId at RUN time (explicit payload provider wins;
       // see resolveScheduledStockProvider), so a later change of the
       // tenant selection applies to future runs without re-arming.
-      // The guard runs only for etrade-provider runs — Yahoo/Alpaca
+      // The guard runs only for etrade-provider runs â€” Yahoo/Alpaca
       // runs never touch the broker (#1007 pattern). A blocked run
       // FAILS LOUD with the guard's coded error: the #1527 silent
       // whole-run Yahoo fallback is gone on this path.
@@ -1861,7 +1862,7 @@ export class ScheduledTasksService {
       );
       effectiveProvider = effectiveProviderResolved;
       // Issue #3655 (F6): the broker resolves through the platform
-      // resolver (resolveTenantBroker) — one default, never an
+      // resolver (resolveTenantBroker) â€” one default, never an
       // inline legacy default.
       const runBrokerIdResolved = await resolveTenantBroker(this.env);
       runBrokerId = runBrokerIdResolved;
@@ -1872,7 +1873,7 @@ export class ScheduledTasksService {
           environment: options.environment,
         });
       // Issue #3655: the run records the EFFECTIVE mode, not the
-      // schedule's stated environment — an Alpaca deployment pin
+      // schedule's stated environment â€” an Alpaca deployment pin
       // (ALPACA_TRADING_TYPE=live) beats a TEST schedule, so the
       // record must say live with source "pin", never "paper".
       runMode = runModeResolved?.mode;
@@ -1899,32 +1900,32 @@ export class ScheduledTasksService {
         }
       }
       // Issue #1355: sharded execution. The monolithic path below is
-      // untouched when the flag is absent — off runs keep today's
+      // untouched when the flag is absent â€” off runs keep today's
       // behaviour exactly.
       // Issue #3655: the sharded chain carries the run's effective
       // provider + broker + mode (recorded at submission, see
       // autonomousMarketScreenSharded). The sharded STOCK feed itself
-      // (planNextFeedShard nasdaq → etrade → yahoo) cannot yet follow
-      // the provider without redesign — named limitation in the #3655
+      // (planNextFeedShard nasdaq â†’ etrade â†’ yahoo) cannot yet follow
+      // the provider without redesign â€” named limitation in the #3655
       // PR body, never silently left as E*TRADE.
       if (options.sharded) {
         // Issue #1412: await (do not bare-return) so a rejection from
-        // the sharded path — e.g. the missing-port throw above — is
+        // the sharded path â€” e.g. the missing-port throw above â€” is
         // caught by this function's catch instead of escaping to the
         // caller. A bare `return` of a rejected promise bypasses the
         // enclosing try/catch in an async function.
         return await this.autonomousMarketScreenSharded({ ...options, provider: effectiveProviderResolved, brokerId: runBrokerIdResolved, dataProviderId: tenantProvidersResolved.dataProviderId, mode: runModeResolved?.mode, modeSource: runModeResolved?.modeSource, filters: screenFilters }, userLogin, timestamp);
       }
       // Issue #2865: the monolithic scheduled run is the broker's
-      // sync branch (asyncRequested false → broker null → sync) and
-      // is planned through the one planner — sector, universe,
+      // sync branch (asyncRequested false â†’ broker null â†’ sync) and
+      // is planned through the one planner â€” sector, universe,
       // provider, and fallback marker resolve here, not by hand.
       // Values are identical to the hand-derived ones above:
       // the planner's sector/universe/provider/fallback resolution
       // is the same derivation runScreenInner used, with the provider
-      // now required (#4431) — the scheduled path resolves it first
+      // now required (#4431) â€” the scheduled path resolves it first
       // (#3655 F6), so the planner never meets a missing one here.
-      // The fallback→yahoo rule is the planner's verbatim copy.
+      // The fallbackâ†’yahoo rule is the planner's verbatim copy.
       const scheduledPlan = planScheduledScreen(
         {
           sector: options.sector,
@@ -1941,7 +1942,7 @@ export class ScheduledTasksService {
       // Issue #4278: the monolithic scheduled run goes through
       // the one engine seam (was getScreenerAgent(userLogin)
       // .runScreen). Spec: source scheduled, trigger scheduled,
-      // deliver false — delivery stays the service's
+      // deliver false â€” delivery stays the service's
       // publishScreenerEvent bus path below, exactly as before.
       // The overrides carry the fields the spec cannot express:
       // the effective provider, the sector, the
@@ -1955,7 +1956,7 @@ export class ScheduledTasksService {
           trigger: "scheduled",
           deliver: false,
           // Issue #4278: StockScreenRunSpec.filters is required
-          // (the direct runScreen call accepted undefined) — an
+          // (the direct runScreen call accepted undefined) â€” an
           // absent filter set is the empty filter, same semantics.
           filters: screenFilters ?? {},
           universe: scheduledPlan.universe,
@@ -1988,7 +1989,7 @@ export class ScheduledTasksService {
       // Audit every run (not just ones with hits) so "Recent autonomous
       // actions" shows the full history, including quiet runs.
       // Issue #1527: the audit names the run's provider and, for a
-      // fallback run, the marker — the fallback is visible in history.
+      // fallback run, the marker â€” the fallback is visible in history.
       this.audit("screener.run_completed", {
         runId: `screener:${result.timestamp || timestamp}`,
         screenType: "stock",
@@ -2098,8 +2099,8 @@ export class ScheduledTasksService {
         timestamp,
       };
     } catch (err: any) {
-      // Failure surfacing (issue #112): screen failures used to vanish —
-      // no audit event, no session message — unlike options analysis.
+      // Failure surfacing (issue #112): screen failures used to vanish â€”
+      // no audit event, no session message â€” unlike options analysis.
       // Audit and surface them symmetrically.
       // Issue #1527: a fallback run that itself fails takes this same
       // path; the audit names the fallback so the failure record
@@ -2126,7 +2127,7 @@ export class ScheduledTasksService {
             id: crypto.randomUUID(),
             sessionId: this.userLogin,
             role: "assistant",
-            content: `⚠️ Scheduled Market Screen failed for sector ${options.sector || "ALL"}: ${err.message || "Market screener execution error"}`,
+            content: `âš ï¸ Scheduled Market Screen failed for sector ${options.sector || "ALL"}: ${err.message || "Market screener execution error"}`,
             agent: "orchestrator",
             createdAt: timestamp,
           });
@@ -2153,7 +2154,7 @@ export class ScheduledTasksService {
         sector: options.sector || "ALL",
         error: err.message || "Market screener execution error",
         stageChain: options.stageChain,
-        // Issue #3313: as on the completed event — a failed run
+        // Issue #3313: as on the completed event â€” a failed run
         // joins its schedule too.
         scheduleId: options.scheduleId,
         emailTo: options.emailTo,
@@ -2174,9 +2175,9 @@ export class ScheduledTasksService {
   /**
    * Consolidation C1 (issue #1201, epic #1151 R1): runs a goal-driven
    * screen (Phase 1 scenario + Phase 3 semantics through the Phase 0
-   * registry) via the goal workflow — the same one-agent-owns-screening
+   * registry) via the goal workflow â€” the same one-agent-owns-screening
    * delegation as autonomousMarketScreen. Issue #4280 ([One engine]
-   * #3550 S5): the workflow is THE path (chain mode included) —
+   * #3550 S5): the workflow is THE path (chain mode included) â€”
    * canonical recording (mas_reports + screening activity log) and
    * optional Phase 6 channel delivery happen inside the workflow's
    * store + deliver stages; the direct registry-leg path is
@@ -2198,7 +2199,7 @@ export class ScheduledTasksService {
     emailTo?: string;
     /** Issue #2216: the arming schedule's id, when the caller knows it. */
     scheduleId?: string;
-    /** Issue #2186: schedule kind for paid routing — absent fails
+    /** Issue #2186: schedule kind for paid routing â€” absent fails
      *  closed to recurring (coverage-only). No caller sets this yet. */
     scheduleKind?: "one_off" | "recurring";
     /** Issue #2186: human authorization at submission for a one-off
@@ -2206,12 +2207,12 @@ export class ScheduledTasksService {
     authorizedAtSubmission?: boolean;
     slackChannel?: string;
     pushToSlack?: boolean;
-    /** Consolidation C4 (#1329): per-record stage-chain config — a
+    /** Consolidation C4 (#1329): per-record stage-chain config â€” a
      *  completed goal screen bridges generate + serve (canonical
      *  report adoption). Consolidation #1236 chains delivery too:
      *  in chain mode the direct Phase 6 delivery is suppressed and
      *  the bridge carries deliverViaChain=true, so the artifact is
-     *  delivered exactly once, by the chain. Absent ⇒ unbridged. */
+     *  delivered exactly once, by the chain. Absent â‡’ unbridged. */
     stageChain?: StageChainConfig;
   } = {}): Promise<ScheduledTaskResult<{
     taskId: string;
@@ -2281,7 +2282,7 @@ export class ScheduledTasksService {
           ? `goal-screen:scheduled:${userLogin}:${scenario.goalKind}:${timestamp.slice(0, 16)}`
           : `goal-screen:manual:${userLogin}:${scenario.goalKind}:${timestamp}`;
       // Consolidation #1236: in chain mode the direct Phase 6 delivery
-      // is suppressed — the bridge below carries deliverViaChain=true
+      // is suppressed â€” the bridge below carries deliverViaChain=true
       // so the chain delivers exactly once to the same recipients.
       // Direct delivery (immediate text, draft-marked, no hold) and
       // chain delivery (followup.deliver, immediate post-#1347) share
@@ -2294,7 +2295,7 @@ export class ScheduledTasksService {
         ...(options.pushToSlack || options.slackChannel ? ["slack" as const] : []),
       ];
       // Issue #4280 ([One engine] #3550 S5): chain mode no longer
-      // takes a direct path — the workflow's deliver stage bridges
+      // takes a direct path â€” the workflow's deliver stage bridges
       // with the stage chain (deliverViaChain=true) so the chain
       // delivers exactly once to the same recipients. Direct
       // delivery (immediate text, draft-marked, no hold) and
@@ -2303,14 +2304,14 @@ export class ScheduledTasksService {
       // timing (deliverDelaySeconds) and text format (generic
       // followup text, no hit list), not the hold semantics.
       // Issue #1571: the goal path never went through the scheduled
-      // auth guard — unlike the market and options screens, which
+      // auth guard â€” unlike the market and options screens, which
       // both pre-flight it. A stocks-requesting goal run now guards
       // too: when E*TRADE auth is dead it falls back to a whole-run
       // Yahoo stock leg (the agent's provider-"yahoo" goal path),
       // with the #1527 marker semantics. The guard's deduped episode
       // alert already fired inside the guard; a fallback success
       // emits no failure notice. Options-only runs never consult the
-      // guard — there is no stock leg to fall back, and the options
+      // guard â€” there is no stock leg to fall back, and the options
       // path is unchanged (stocks only, per the 2026-10-25 ruling).
       // A fallback that itself fails takes the normal failure path
       // in the catch below.
@@ -2347,25 +2348,25 @@ export class ScheduledTasksService {
       // scheduled goal screens. Only when NOT in chain mode:
       // the chain bridge below needs the completed result (its
       // canonicalReportId + counts) to bridge generate + serve,
-      // and a queued run has no result to bridge — chain mode
+      // and a queued run has no result to bridge â€” chain mode
       // keeps direct behavior byte-identical. A null start
       // (no workflow binding, no projection store, start
       // error) falls through to the direct path unchanged.
       // Issue #1997: the workflow-first path above is
-      // flag-gated. Flag OFF → the block is skipped and the
+      // flag-gated. Flag OFF â†’ the block is skipped and the
       // run goes direct (scheduled runs return to direct by
-      // default until the flag is enabled). Flag ON → the
+      // default until the flag is enabled). Flag ON â†’ the
       // workflow is REQUIRED: a failed start throws, so the
       // tick records a failure (run_failed audit) instead of
       // silently running direct.
       // Issue #2186 (slice 10): monetization ON gates scheduled goal
       // screens before any workflow or direct start. Covered runs go
       // through PaymentWorkflow (re-check + consume + start); uncovered
-      // recurring/unstated runs are skipped, audited, and explained —
+      // recurring/unstated runs are skipped, audited, and explained â€”
       // never an unattended charge, never a free run. Chain mode has
       // no paid path (a queued run has no result to bridge), so it
       // skips the same way. An account/store failure THROWS into the
-      // tick's run_failed path below — coverage unknown is not a skip.
+      // tick's run_failed path below â€” coverage unknown is not a skip.
       // CROSS-LANE (CTO review): this block sits ahead of the
       // CTO-owned workflow-first block (#1997) and returns/throws
       // before it; it does not change the free-path workflow start,
@@ -2393,11 +2394,11 @@ export class ScheduledTasksService {
         // price table was removed by the catalogue slice). Fail-closed: an
         // unbound catalogue or a missing/invalid stored price
         // THROWS into the tick's run_failed path, like the store
-        // failures below — coverage unknown is not a skip, and no
+        // failures below â€” coverage unknown is not a skip, and no
         // price is ever guessed. A fresh store seeds the proposed
         // goal price at ensure time, so the value is unchanged.
         // Issue #2373 (slice C): the read is approval-aware
-        // (#2547) — getApprovedPrice returns null for a PROPOSED
+        // (#2547) â€” getApprovedPrice returns null for a PROPOSED
         // (unapproved) price exactly like a missing one, so an
         // unapproved goal price fails closed here instead of
         // routing to the payment workflow. (The tick previously
@@ -2440,7 +2441,7 @@ export class ScheduledTasksService {
         // Issue #4280 ([One engine] #3550 S5): chain mode rides
         // the payment workflow now (the paid command carries
         // stageChain + slackChannel; the payment path passes the
-        // command through unreconstructed) — the chain-mode
+        // command through unreconstructed) â€” the chain-mode
         // monetization skip is gone with the direct path.
         const commercial = createCommercialAdapter(this.env as { AGENT_DB?: unknown });
         const subscriptions = createSubscriptionAdapter(this.env as { AGENT_DB?: unknown });
@@ -2452,9 +2453,9 @@ export class ScheduledTasksService {
         await ensureCommercialSchema(commercial.db);
         await ensureSubscriptionSchema(subscriptions.db);
         // Issue #3179: the run tenant is the schedule OWNER's
-        // stored account tenant, never the deployment default —
+        // stored account tenant, never the deployment default â€”
         // a mismatched default no longer fails owner ticks
-        // closed on the mismatch throw below. No owner row →
+        // closed on the mismatch throw below. No owner row â†’
         // the explicit, audited env-default fallback. The
         // resolved tenant threads into the paid command and the
         // payment-workflow submission unchanged below.
@@ -2546,7 +2547,7 @@ export class ScheduledTasksService {
         };
       }
       // Issue #4280 ([One engine] #3550 S5): the workflow path is
-      // now THE path for ALL scheduled goal screens — chain mode
+      // now THE path for ALL scheduled goal screens â€” chain mode
       // rides the payment workflow too (the paid command carries
       // stageChain + slackChannel; the payment path passes the
       // command through unreconstructed), and the direct path +
@@ -2558,7 +2559,7 @@ export class ScheduledTasksService {
       const { createObservabilitySink } =
         await import("../observability/createObservabilityPorts");
       // Issue #3179: the free-path command carries the owner's
-      // stored account tenant too — the tenant a schedule runs
+      // stored account tenant too â€” the tenant a schedule runs
       // under must not depend on the monetization flag. No owner
       // row (or an unreadable store) takes the explicit, audited
       // env-default fallback; the free path never fails on it,
@@ -2634,7 +2635,7 @@ export class ScheduledTasksService {
         },
       };
       // Issue #4280 ([One engine] #3550 S5): the direct path is
-      // gone — the workflow submission above returns the queued
+      // gone â€” the workflow submission above returns the queued
       // shape, and the workflow's deliver stage bridges with the
       // stage chain. (The direct run + bridge block that used to
       // follow here is deleted by this slice; the scheduleId
@@ -2659,7 +2660,7 @@ export class ScheduledTasksService {
             id: crypto.randomUUID(),
             sessionId: this.userLogin,
             role: "assistant",
-            content: `⚠️ Scheduled Goal Screen failed: ${err.message || "Goal screen execution error"}${providerFallback ? " (Yahoo fallback after E*TRADE auth failure)" : ""}`,
+            content: `âš ï¸ Scheduled Goal Screen failed: ${err.message || "Goal screen execution error"}${providerFallback ? " (Yahoo fallback after E*TRADE auth failure)" : ""}`,
             agent: "orchestrator",
             createdAt: timestamp,
           });
@@ -2758,7 +2759,7 @@ export class ScheduledTasksService {
    * history (the delivery channel) and audits the outcome.
    *
    * Issue #123 (F19): the result reflects what actually happened per
-   * channel. The chat-message insert IS the delivery — if it fails (or
+   * channel. The chat-message insert IS the delivery â€” if it fails (or
    * no message store is available), the dispatch FAILED: the failure is
    * audited as `reminder.dispatch_failed` (the #112 failure contract)
    * and returned as `{ success: false, error }`, never swallowed into a
@@ -2785,7 +2786,7 @@ export class ScheduledTasksService {
           id: crypto.randomUUID(),
           sessionId: this.userLogin,
           role: "assistant",
-          content: `⏰ Scheduled Reminder [${reminderId}]: ${message}`,
+          content: `â° Scheduled Reminder [${reminderId}]: ${message}`,
           agent: "orchestrator",
           createdAt: timestamp,
         });
@@ -2933,13 +2934,13 @@ export class ScheduledTasksService {
       ...(reportScope.chains.dte.maxDte !== null ? { maxDte: reportScope.chains.dte.maxDte } : {}),
     };
     const reportRunId = `options_scanner:${timestamp}:${targetThesis}`;
-    // Issue #2600: the schedule's strategy mode — an explicitly
+    // Issue #2600: the schedule's strategy mode â€” an explicitly
     // stored strategyMode wins; otherwise the #2583 scope maps
     // (resolver "all" -> mode "all", "explicit" -> mode "thesis").
     // This replaces the old forced evaluateAllStrategies: true on
     // both fire paths: a schedule that wants the old always-all
     // behaviour stores strategyMode "all" explicitly. No-view is
-    // refused here — this is a viewed scan; no-view schedules use
+    // refused here â€” this is a viewed scan; no-view schedules use
     // the autonomousStrategyDiscovery no-view model.
     if (options.strategyMode === "no-view") {
       throw new Error("strategyMode \"no-view\" cannot run a viewed options analysis; use a strategy-discovery schedule with the no-view input model.");
@@ -2950,10 +2951,15 @@ export class ScheduledTasksService {
       (options.pushToSlack === undefined && Boolean(this.env.SLACK_BOT_TOKEN || getCfpayConfig(this.env)));
     // Issue #3655 (effective mode): the monolithic run's effective mode,
     // resolved once up front so the success audit, the bus event, the
-    // return data, AND the failure audit all name the same mode — the
+    // return data, AND the failure audit all name the same mode â€” the
     // mode the run actually executed under, never the schedule's stated
     // environment alone. Declared here so the catch below can name it
     // even when resolution itself failed (then it stays undefined).
+    // Issue #5183: the failure alert names the schedule, dispatch, workflow,
+    // mode, broker and run. The broker is hoisted beside the mode so the
+    // catch can print the same pair the run resolved; both stay undefined
+    // when resolution itself failed, and the formatter renders `unknown`.
+    let optionsRunBrokerId: string | undefined;
     let optionsEffectiveMode: Awaited<ReturnType<typeof resolveScheduledEffectiveMode>> | undefined;
 
     try {
@@ -2962,20 +2968,21 @@ export class ScheduledTasksService {
         throw new Error("No authenticated E*TRADE account is associated with this options screen. Sign in and run it again.");
       }
       // Issue #3655 (effective mode): resolved before the guard, from
-      // the tenant selections at RUN time — an Alpaca deployment pin
+      // the tenant selections at RUN time â€” an Alpaca deployment pin
       // (ALPACA_TRADING_TYPE=live) beats a TEST schedule.
       // Issue #3655 (F6): the broker resolves through the platform
-      // resolver (resolveTenantBroker) — one default, never an
+      // resolver (resolveTenantBroker) â€” one default, never an
       // inline legacy default.
       {
+        optionsRunBrokerId = await resolveTenantBroker(this.env);
         optionsEffectiveMode = await resolveScheduledEffectiveMode({
           env: this.env,
-          brokerId: await resolveTenantBroker(this.env),
+          brokerId: optionsRunBrokerId,
           environment: options.environment,
         });
       }
       // Issue #1174 (#1173 S1): same auth pre-flight as the stock
-      // screen — options scans die on the same midnight-ET token
+      // screen â€” options scans die on the same midnight-ET token
       // cliff; block up front with one alert per episode instead.
       // Issue #1583: when an alert was already sent for this episode
       // (!guard.alerted), honor the contract ("further runs today stay quiet")
@@ -3025,7 +3032,7 @@ export class ScheduledTasksService {
       const effectiveUniverse = options.universe || (options.symbols && options.symbols.length > 0 ? null : "NASDAQ100");
       if (effectiveUniverse) {
         // Issue #1378: the universe resolves through the route
-        // table (bundle → reader → binder), never by direct
+        // table (bundle â†’ reader â†’ binder), never by direct
         // listings-module call. Without a platform store there is
         // no bundle to build: the named throw below reaches the
         // scheduled failure notification path (this block is inside
@@ -3036,7 +3043,7 @@ export class ScheduledTasksService {
         // capture is recorded under a minted id.
         if (!this.platformDeps?.sql) {
           throw new Error(
-            "options_analysis universe resolution requires platformDeps.sql — no platform store is configured (#1378)"
+            "options_analysis universe resolution requires platformDeps.sql â€” no platform store is configured (#1378)"
           );
         }
         const {
@@ -3102,7 +3109,7 @@ export class ScheduledTasksService {
       // fit one budget. Explicit sharded: true still shards regardless
       // of size; manual runs and small scheduled runs keep the
       // monolithic path. Caveat: the limit is a typical-cost heuristic
-      // — a symbol with unusually many expirations in its window can
+      // â€” a symbol with unusually many expirations in its window can
       // still partial even below it, and then the #1718 degraded
       // notice (not silence) is what the run reports.
       const SCHEDULED_OPTIONS_MONOLITHIC_SYMBOL_LIMIT = Math.max(
@@ -3110,7 +3117,7 @@ export class ScheduledTasksService {
         Math.floor(DEFAULT_SUBREQUEST_BUDGET / 12),
       );
       // Issue #2599 (F3): the budget is a property of the
-      // invocation, not of the trigger label — an on-demand
+      // invocation, not of the trigger label â€” an on-demand
       // ("manual") invocation of this same scan over the same
       // universe previously ran monolithically and silently
       // deferred most symbols past the budget, while the
@@ -3124,21 +3131,21 @@ export class ScheduledTasksService {
         symbols.length > SCHEDULED_OPTIONS_MONOLITHIC_SYMBOL_LIMIT;
       if (options.sharded || autoShard) {
         // Issue #4780: the chain START is the one engine job
-        // `options-chain:<chainId>` — the chain is built exactly as
+        // `options-chain:<chainId>` â€” the chain is built exactly as
         // before (same broker/mode provenance, same schedule
         // attribution, same per-symbol screen inputs) and dispatched
         // through startOptionsChainWorkflow. The bespoke submission
         // path (per-symbol specs + the async-job submit port + the
         // pacing helper) is gone: the feed node's sharded shape
-        // with sequential units is the pacing now — each unit is its
+        // with sequential units is the pacing now â€” each unit is its
         // own journaled workflow step, its own Worker invocation,
-        // its own subrequest budget — so the 1s stagger / `runAt`
+        // its own subrequest budget â€” so the 1s stagger / `runAt`
         // is retired, not dropped (the step boundary replaces it
         // structurally). The per-symbol event-calendar fan-out is
         // still avoided here: each feed unit fetches its own
         // symbol's calendar inside its step.
         // Issue Qunsultant/cfagent#488: the chain's email channel follows the
-        // same resolution as direct delivery — run > stored user > env.
+        // same resolution as direct delivery â€” run > stored user > env.
         const resolvedEmailTo = resolveEmailDestination({
           eventEmailTo: options.emailTo,
           storedEmailTo: await getStoredEmailDestination(this.env, options.userLogin || this.userLogin),
@@ -3150,11 +3157,11 @@ export class ScheduledTasksService {
         // under the broker this chain was submitted with.
         const chainTenantProviders = await resolveTenantProviders(this.env);
         // Issue #3655 (F6): the broker resolves through the platform
-        // resolver (resolveTenantBroker) — one default, never an
+        // resolver (resolveTenantBroker) â€” one default, never an
         // inline legacy default.
         const chainBrokerId = await resolveTenantBroker(this.env);
         // Issue #3655 (effective mode): the chain records the mode the
-        // run actually executes under — an Alpaca deployment pin beats
+        // run actually executes under â€” an Alpaca deployment pin beats
         // the schedule's environment, so the chain's mode comes from
         // the effective-mode resolver, never tradingTypeFor alone.
         const chainEffectiveMode = await resolveScheduledEffectiveMode({
@@ -3291,7 +3298,7 @@ export class ScheduledTasksService {
         channel: "ui",
         userLogin,
         // Issue #3264: the run's trigger rides into the scan-store
-        // save (the history row's trigger) via the request — the
+        // save (the history row's trigger) via the request â€” the
         // service never forwards it to the scan template or cache.
         trigger: options.trigger ?? "scheduled",
         overrideEnv: options.environment,
@@ -3300,7 +3307,7 @@ export class ScheduledTasksService {
         eventCalendarBySymbol: Object.fromEntries(scanCalendarCoverage.bySymbol),
       };
       const scanStorage = memoryStageStorage();
-      // Issue #4271: the scheduled scan is a strategy screen — it
+      // Issue #4271: the scheduled scan is a strategy screen â€” it
       // defines the strategy job (strategy-screen:<runId>), not the
       // options job.
       const scanOutcome = await runStrategyScreenViaEngine(
@@ -3390,13 +3397,13 @@ export class ScheduledTasksService {
       );
       const scanData = response.data as any;
       auditRunId = scanData?.scanRunId || reportRunId;
-      // Issue #3314: stamp the arming schedule's §4 linkage onto the
-      // scan-store row once the run id is known — the persist stage
+      // Issue #3314: stamp the arming schedule's Â§4 linkage onto the
+      // scan-store row once the run id is known â€” the persist stage
       // inside the workflow cannot know it (the workflow command
       // carries no scheduleId; threading it through is #4198's
       // scope), so the stamp happens here, after the workflow
       // returns, where both the scan id and the schedule id are
-      // known. Failures warn only — a row without its linkage is
+      // known. Failures warn only â€” a row without its linkage is
       // still a recorded run. A run with no arming schedule records
       // the absence explicitly: the save already stamped nulls, so
       // no backfill runs for it.
@@ -3421,7 +3428,7 @@ export class ScheduledTasksService {
       // Issue #916: Don't fail the entire run on partial chain failures.
       // Log the coverage gaps but continue with what we have. Only throw
       // if we have coverage data AND nothing was evaluated (total failure).
-      // If coverage is missing (e.g. test mocks), don't throw — the old
+      // If coverage is missing (e.g. test mocks), don't throw â€” the old
       // code only threw on coverageErrors > 0.
       const hasCoverage = scanData?.coverage != null;
       const evaluatedCount = Number(scanData?.coverage?.evaluated ?? 0);
@@ -3433,7 +3440,7 @@ export class ScheduledTasksService {
       // run is a total failure exactly like evaluatedCount === 0
       // and takes the same coded gate instead of publishing an
       // empty report. A result with any non-empty signal still
-      // proceeds — absence of coverage alone never discards a
+      // proceeds â€” absence of coverage alone never discards a
       // run that produced evidence.
       if (!hasCoverage) {
         const withTradesCount = Number(scanData?.withTrades ?? 0);
@@ -3450,7 +3457,7 @@ export class ScheduledTasksService {
       }
       if (hasCoverage && evaluatedCount === 0) {
         // Issue #915 (Mubasher): name the dominant skip reason alongside
-        // the counts — counts alone left failing runs undiagnosable.
+        // the counts â€” counts alone left failing runs undiagnosable.
         // Issue #1290: the scanner now stamps that ranking on the
         // result (partial.topSkipReason); consume the stamp when
         // present and keep the local ranking only as the fallback for
@@ -3503,7 +3510,7 @@ export class ScheduledTasksService {
 
       // Issue #275: tag each opportunity with its strategy's direction
       // tags (the catalog theses) before the PDF, the canonical report
-      // and the channel payloads are built from this data — every
+      // and the channel payloads are built from this data â€” every
       // published copy carries the tags.
       if (Array.isArray(scanData?.opportunities)) {
         scanData.opportunities = tagOpportunitiesWithDirection(scanData.opportunities);
@@ -3532,7 +3539,7 @@ export class ScheduledTasksService {
             trigger: "scheduled",
             result: response.data,
             userLogin,
-            title: `Options scanner — ${targetThesis} (${timestamp.slice(0, 10)})`,
+            title: `Options scanner â€” ${targetThesis} (${timestamp.slice(0, 10)})`,
             summary: response.summary,
             timestamp,
           }
@@ -3547,7 +3554,7 @@ export class ScheduledTasksService {
             optionsPdfFile = pdfData.fileName;
           }
         } else {
-          // Issue #1023 (S4): NO direct-generator fallback — the unified
+          // Issue #1023 (S4): NO direct-generator fallback â€” the unified
           // pipeline is the only PDF path (#914/#680). The run publishes
           // without a PDF: optionsPdfKey stays undefined, so no reportUrl
           // is fabricated, and the failure is visible here in the log.
@@ -3582,7 +3589,7 @@ export class ScheduledTasksService {
       // Issue #1346: generate + store the options CSV (own failure
       // domain; recorded, never fatal). Issue #1569: the scheduled
       // path's unified scan result is an OpportunityScanResult, not
-      // the OptionScreenResult the CSV generator reads — adapt at
+      // the OptionScreenResult the CSV generator reads â€” adapt at
       // this seam with the same #1291 adapter as the XLSX call above.
       try {
         const screenerAgent = this.getScreenerAgent(userLogin);
@@ -3602,7 +3609,7 @@ export class ScheduledTasksService {
       // Issue #3264: stamp the generated keys onto the scan-store
       // row (the manual route already does this) so the run's scan
       // record carries its artifacts even when the canonical twin
-      // is missing. Failures warn only — the canonical row above
+      // is missing. Failures warn only â€” the canonical row above
       // is the primary record.
       if (typeof scanData?.scanRunId === "string" && scanData.scanRunId && this.scanRunStore) {
         try {
@@ -3627,7 +3634,7 @@ export class ScheduledTasksService {
       const canonical = storeOptionsCanonicalReport(this.orm, {
         runId: generationId,
         generationId,
-        title: `Options scanner — ${targetThesis} (${timestamp.slice(0, 10)})`,
+        title: `Options scanner â€” ${targetThesis} (${timestamp.slice(0, 10)})`,
         source: "options_scanner",
         summary: response.summary,
         body: {
@@ -3663,7 +3670,7 @@ export class ScheduledTasksService {
       this.env);
 
       // Consolidation C4 (#1329): chain mode suppresses the direct
-      // Slack/email/webhook delivery below — the bridge's deliver jobs
+      // Slack/email/webhook delivery below â€” the bridge's deliver jobs
       // carry the adopted PDF instead, so the artifact is delivered
       // exactly once. Audit + session message stay (they are the run's
       // record, not delivery channels).
@@ -3673,7 +3680,7 @@ export class ScheduledTasksService {
       // summary attached, avoiding the old text-plus-file duplicate pair.
       if (shouldNotifySlack && !chainMode) {
         // Issue #1718: a below-floor partial is NOT broadcast as a
-        // success — degraded notice only, no PDF/files, no report link.
+        // success â€” degraded notice only, no PDF/files, no report link.
         // Persistence above (run record, canonical report, PDF) is
         // untouched: the run stays stored as evidence.
         if (optionsCoverageBelowBroadcastFloor(scanData?.partial)) {
@@ -3704,8 +3711,8 @@ export class ScheduledTasksService {
             ...(optionsPdf && optionsPdfFile ? { pdf: {
               bytes: optionsPdf,
               fileName: optionsPdfFile,
-              title: `Options Scanner Report — ${targetThesis} ${timestamp.slice(0, 10)}`,
-              comment: `📄 Options scan PDF — ${matchCount} matches${reportUrl ? `\n${reportUrl}` : ""}\n\n${text}`,
+              title: `Options Scanner Report â€” ${targetThesis} ${timestamp.slice(0, 10)}`,
+              comment: `ðŸ“„ Options scan PDF â€” ${matchCount} matches${reportUrl ? `\n${reportUrl}` : ""}\n\n${text}`,
             } } : {}),
             ...(optionsXlsx && optionsXlsxFile ? { files: [{
               bytes: optionsXlsx,
@@ -3751,7 +3758,7 @@ export class ScheduledTasksService {
         let emailOk = false;
         if (cfpay) {
           try {
-            const subject = `📊 E*TRADE Scheduled Options Intelligence [${targetThesis.toUpperCase()}] - ${symbols.join(", ")}`;
+            const subject = `ðŸ“Š E*TRADE Scheduled Options Intelligence [${targetThesis.toUpperCase()}] - ${symbols.join(", ")}`;
             const body = `${response.toEmailText()}${reportUrl ? `\n\nPDF report: ${reportUrl}` : ""}`;
             // Issue #1195: attach PDF + XLSX when the run produced them.
             const toB64 = (bytes: Uint8Array) => {
@@ -3793,7 +3800,7 @@ export class ScheduledTasksService {
             const emailService = new ETradeEmailTradingService(this.env, this.orm, this.userLogin);
             notifications.email = await emailService.sendOutboundEmail(
               targetEmail,
-              `📊 E*TRADE Scheduled Options Intelligence [${targetThesis.toUpperCase()}] - ${symbols.join(", ")}`,
+              `ðŸ“Š E*TRADE Scheduled Options Intelligence [${targetThesis.toUpperCase()}] - ${symbols.join(", ")}`,
               response.toEmailHtml(),
               `${response.toEmailText()}${reportUrl ? `\n\nPDF report: ${reportUrl}` : ""}`,
               // Issue #1195: PDF + XLSX attachments (array form, #1191).
@@ -3873,7 +3880,7 @@ export class ScheduledTasksService {
             id: crypto.randomUUID(),
             sessionId: this.userLogin,
             role: "assistant",
-            content: `🎯 Scheduled Options Intelligence: ${response.summary}`,
+            content: `ðŸŽ¯ Scheduled Options Intelligence: ${response.summary}`,
             agent: "orchestrator",
             createdAt: timestamp,
           });
@@ -3916,7 +3923,7 @@ export class ScheduledTasksService {
         // lifecycle completed notice can apply the broadcast floor.
         partial: scanData?.partial,
         // Issue #3655 (effective mode): the bus event is what the
-        // bridge records the run from — it carries the effective
+        // bridge records the run from â€” it carries the effective
         // mode, never just the schedule's stated environment.
         ...(optionsEffectiveMode ? { mode: optionsEffectiveMode.mode, modeSource: optionsEffectiveMode.modeSource } : {}),
         opportunities: (response.data?.opportunities || []).slice(0, 10).map((row: any) => ({
@@ -3971,7 +3978,7 @@ export class ScheduledTasksService {
             id: crypto.randomUUID(),
             sessionId: this.userLogin,
             role: "assistant",
-            content: `⚠️ Scheduled Options Intelligence failed for ${symbols.join(", ") || options.universe || "NASDAQ100"}: ${err.message || "Scheduled options analysis failed"}`,
+            content: `âš ï¸ Scheduled Options Intelligence failed for ${symbols.join(", ") || options.universe || "NASDAQ100"}: ${err.message || "Scheduled options analysis failed"}`,
             agent: "orchestrator",
             createdAt: timestamp,
           });
@@ -3987,10 +3994,23 @@ export class ScheduledTasksService {
         const failure = await deliverGatedSlack(this.env, {
           // The local `userLogin` (options.userLogin || this.userLogin)
           // is declared inside the try block, so it is out of scope in
-          // this catch — spell out the same resolution here.
+          // this catch â€” spell out the same resolution here.
           userLogin: options.userLogin || this.userLogin,
           channel: options.slackChannel,
-          text: `⚠️ Scheduled Options Screen FAILED — ${options.universe || symbols.join(", ") || "NASDAQ100"} (${targetThesis})\nError: ${err.message || "Scheduled options analysis failed"}\n_Time: ${timestamp}_`,
+          text: optionsFailureAlertText({
+            universe: options.universe || symbols.join(", ") || "NASDAQ100",
+            thesis: targetThesis,
+            context: {
+              trigger: options.trigger,
+              scheduleId: options.scheduleId,
+              mode: optionsEffectiveMode?.mode,
+              modeSource: optionsEffectiveMode?.modeSource,
+              broker: optionsRunBrokerId,
+              runId: auditRunId,
+            },
+            errorMessage: err.message || "Scheduled options analysis failed",
+            timestamp,
+          }),
         });
         if (!failure.ok) structuredLog.warn("scheduledTasks.slack_failure_notification_failed", {
           message: "[ScheduledTasksService] Slack failure notification failed",
@@ -4007,7 +4027,7 @@ export class ScheduledTasksService {
         thesis: targetThesis,
         error: err.message || "Scheduled options analysis failed",
         stageChain: options.stageChain,
-        // Issue #3313: as on the completed event — a failed run
+        // Issue #3313: as on the completed event â€” a failed run
         // joins its schedule too.
         scheduleId: options.scheduleId,
       });
@@ -4023,7 +4043,7 @@ export class ScheduledTasksService {
 
   /**
    * Scheduled strategy discovery (issue #126, PR-E): re-runs SAVED
-   * StrategyRequests — captured whole from the discovery panel — against
+   * StrategyRequests â€” captured whole from the discovery panel â€” against
    * live chains through the same panel pipeline function the interactive
    * route uses, and persists one run record per execution
    * (SqlDiscoveryRunStore) with per-symbol outcomes.
@@ -4039,14 +4059,14 @@ export class ScheduledTasksService {
    * NOTHING. Once execution starts, exactly one run record is
    * persisted: "completed" when every request produced a result,
    * "partial" when some did and some failed (the failures are named on
-   * the record), and "failed" when none did — an all-failed run takes
+   * the record), and "failed" when none did â€” an all-failed run takes
    * the failure path (audit + session message + { success: false })
    * and its record exists for diagnosis, never as a success.
    */
 
   /**
    * Issue #424: strategy-discovery failures were audit + session-message
-   * only — silent in Slack/webhook terms, unlike every sibling scheduled
+   * only â€” silent in Slack/webhook terms, unlike every sibling scheduled
    * job (market screen failures fan out via the bus publishers; options
    * analysis failures send a Slack A2A notice). Mirror that fan-out here:
    * Slack (cfpay A2A when configured, else the bot-token service) plus the
@@ -4060,7 +4080,7 @@ export class ScheduledTasksService {
     inputModel?: string;
   }): Promise<void> {
     const text =
-      `⚠️ Scheduled Strategy Discovery FAILED — ${args.symbols.join(", ") || "no symbols"}\n` +
+      `âš ï¸ Scheduled Strategy Discovery FAILED â€” ${args.symbols.join(", ") || "no symbols"}\n` +
       `Error: ${args.error}\n_Time: ${new Date().toISOString()}_`;
     let attempted = false;
     try {
@@ -4134,7 +4154,7 @@ export class ScheduledTasksService {
     // Issue #534: the no-view input model has its own validation +
     // ranking flow. A payload carrying constraintSets under any other
     // (or no) discriminator routes here too, so the shape is judged
-    // — and rejected as mixed — instead of being silently ignored by
+    // â€” and rejected as mixed â€” instead of being silently ignored by
     // a sibling model.
     if (options.inputModel === "no-view" || options.constraintSets !== undefined) {
       return this.autonomousStrategyDiscoveryNoView(options, timestamp);
@@ -4172,7 +4192,7 @@ export class ScheduledTasksService {
             id: crypto.randomUUID(),
             sessionId: this.userLogin,
             role: "assistant",
-            content: `⚠️ Scheduled Strategy Discovery failed for ${symbols.join(", ") || "no saved requests"}: ${error}`,
+            content: `âš ï¸ Scheduled Strategy Discovery failed for ${symbols.join(", ") || "no saved requests"}: ${error}`,
             agent: "orchestrator",
             createdAt: timestamp,
           });
@@ -4219,7 +4239,7 @@ export class ScheduledTasksService {
         return await fail("Discovery run store not configured for this service instance");
       }
       if (!Array.isArray(requests) || requests.length === 0) {
-        return await fail("Scheduled discovery requires at least one saved strategy request; none was supplied. Capture a view in the discovery panel and schedule it — no view is invented for a schedule.");
+        return await fail("Scheduled discovery requires at least one saved strategy request; none was supplied. Capture a view in the discovery panel and schedule it â€” no view is invented for a schedule.");
       }
       if (requests.length > MAX_SAVED_REQUESTS_PER_RUN) {
         return await fail(`Scheduled discovery is capped at ${MAX_SAVED_REQUESTS_PER_RUN} saved requests per run; ${requests.length} were supplied.`);
@@ -4231,7 +4251,7 @@ export class ScheduledTasksService {
         }
       }
 
-      // One client/agent set for the whole execution — the same
+      // One client/agent set for the whole execution â€” the same
       // construction the interactive strategies route uses, under the
       // schedule owner's identity and environment (#447/#461).
       const etrade = this.createETradeService(userLogin, options.environment);
@@ -4242,8 +4262,8 @@ export class ScheduledTasksService {
       };
 
       // Issue #4854: the firer's host dispatch is decided once per
-      // run — the platform, environment, and snapshot input are
-      // fixed for the run — and threaded into each symbol's screen,
+      // run â€” the platform, environment, and snapshot input are
+      // fixed for the run â€” and threaded into each symbol's screen,
       // so a run never mixes dispatches mid-flight.
       const firerHost = await resolveScheduledFirerHostDispatch(
         this.env,
@@ -4327,8 +4347,8 @@ export class ScheduledTasksService {
             role: "assistant",
             content:
               status === "completed"
-                ? `🔭 Scheduled Strategy Discovery completed for ${symbols.join(", ")}: all ${requests.length} saved requests produced results.`
-                : `🔭 Scheduled Strategy Discovery partially completed for ${symbols.join(", ")}: ${requests.length - failures.length} of ${requests.length} requests produced results; failed: ${failures.map((f) => `${f.symbol} (${f.error})`).join("; ")}.`,
+                ? `ðŸ”­ Scheduled Strategy Discovery completed for ${symbols.join(", ")}: all ${requests.length} saved requests produced results.`
+                : `ðŸ”­ Scheduled Strategy Discovery partially completed for ${symbols.join(", ")}: ${requests.length - failures.length} of ${requests.length} requests produced results; failed: ${failures.map((f) => `${f.symbol} (${f.error})`).join("; ")}.`,
             agent: "orchestrator",
             createdAt: timestamp,
           });
@@ -4360,13 +4380,13 @@ export class ScheduledTasksService {
    * Consolidation C4 (#1329): persist the canonical mas_reports row
    * for a discovery run and, when the run carries stageChain, bridge
    * it (generate + serve stages, then deliver when the task named
-   * channels — #1236 notifications). Called right after the detail
-   * save, before the status is judged — so even a failed run gains
+   * channels â€” #1236 notifications). Called right after the detail
+   * save, before the status is judged â€” so even a failed run gains
    * its canonical row (the detail prune can never erase it from
    * GET /api/runs). Failed runs do NOT bridge and do NOT deliver:
    * their failure-notice path is channel-divergent from the
    * bridge's, and suppressing it would risk a lost notice. A bridge
-   * failure never fails the run itself — it is logged, and the
+   * failure never fails the run itself â€” it is logged, and the
    * canonical row is the record. Non-chain runs deliver directly
    * (Phase 1) when the task named channels; chain mode suppresses
    * direct delivery so the notification is sent exactly once.
@@ -4384,7 +4404,7 @@ export class ScheduledTasksService {
     let reportId: string | undefined;
     if (this.orm) {
       // Issue #2180: the run report's document set, generated BEFORE the
-      // canonical write so the row carries the keys — the store is
+      // canonical write so the row carries the keys â€” the store is
       // insert-only per generation id, so a later write could never attach
       // them.
       const reportInput: DiscoveryReportInput = {
@@ -4407,7 +4427,7 @@ export class ScheduledTasksService {
       const stored = await storeReportStage(this.orm, {
         runId: `discovery:${args.run.id}`,
         generationId: `discovery:${args.run.id}`,
-        title: `Strategy discovery — ${args.run.inputModel}`,
+        title: `Strategy discovery â€” ${args.run.inputModel}`,
         source: "discovery",
         summary: args.summary,
         body: buildDiscoveryCanonicalBody(
@@ -4418,7 +4438,7 @@ export class ScheduledTasksService {
             symbols: args.symbols,
             trigger: args.options.trigger || "scheduled",
             // Consolidation #1236 (feed seam): surface the feed inputs
-            // through serve — which artifact fed each symbol, its
+            // through serve â€” which artifact fed each symbol, its
             // asOf, and whether it was stale. Only in snapshot mode.
             ...(args.outcomes.some((o) => o.snapshotInput)
               ? {
@@ -4488,7 +4508,7 @@ export class ScheduledTasksService {
 
   /**
    * Consolidation #1236 Phase 1: deliver a non-chain discovery
-   * notification directly through the delivery port — the same
+   * notification directly through the delivery port â€” the same
    * transports, footer, allowlist, and per-channel isolation as the
    * chain path, so direct and chain texts are identical for the
    * same outcome. Best-effort by design: a failure is audited via
@@ -4535,7 +4555,7 @@ export class ScheduledTasksService {
   /**
    * Runs ONE constructed discovery request through the pipeline and
    * shapes its outcome. Shared verbatim by the saved-request path
-   * (issue #126) and the profile-derived path (issue #533) — the two
+   * (issue #126) and the profile-derived path (issue #533) â€” the two
    * input models differ in where requests come from, never in how a
    * request is executed or judged.
    */
@@ -4552,7 +4572,7 @@ export class ScheduledTasksService {
       // Consolidation #1236 (feed seam): snapshot-input mode. The
       // stored snapshot replaces the live load (panel shim
       // override); the pipeline downstream is unchanged. A missing
-      // artifact or filter mismatch fails this symbol explicitly —
+      // artifact or filter mismatch fails this symbol explicitly â€”
       // never a silent live fallback, which would hide the missing
       // feed and run on different data than the schedule named.
       let snapshotOverride: OptionsDataSnapshot | undefined;
@@ -4590,8 +4610,8 @@ export class ScheduledTasksService {
       // Issue #2600: fire-time fetch bands for saved requests. A
       // captured request that carries farDated true but no bands
       // (captured before bands were computed) gets its bands derived
-      // here from its own mode-resolved selection — the same rule as
-      // the panel route — so a far-horizon saved schedule actually
+      // here from its own mode-resolved selection â€” the same rule as
+      // the panel route â€” so a far-horizon saved schedule actually
       // fetches its horizons. A no-view mode on a saved (viewed)
       // request fails this symbol honestly instead of throwing
       // inside the engine's viewed filter.
@@ -4612,7 +4632,7 @@ export class ScheduledTasksService {
       }
       // Issue #4854: the firer's panel screen dispatches through
       // the strategy workflow host when the per-run dispatch says
-      // so — the same stages, the same envelope, the same run id —
+      // so â€” the same stages, the same envelope, the same run id â€”
       // and through the unchanged engine-routed panel otherwise.
       // The run id mints once, here, so a host run and a sync run
       // carry the same job identity for the same symbol.
@@ -4683,7 +4703,7 @@ export class ScheduledTasksService {
 
   /**
    * Issue #533 (D4): resolves a watchlist NAME to its symbols from
-   * the owner's stored watchlists — no E*TRADE round-trip, so
+   * the owner's stored watchlists â€” no E*TRADE round-trip, so
    * watchlist edits between arming and firing are honoured. The name
    * match is trimmed and case-insensitive. Returns null when no
    * stored watchlist matches (or the ORM is unavailable); the caller
@@ -4726,7 +4746,7 @@ export class ScheduledTasksService {
    * request runs through the unchanged pipeline, and the run persists
    * stamped "profile-derived" with the profile reference and the full
    * derivation per symbol. A symbol that cannot be derived honestly
-   * ABSTAINS — reason on the record, no request, no target — and an
+   * ABSTAINS â€” reason on the record, no request, no target â€” and an
    * all-abstained fire persists as a FAILED run on the #112 failure
    * path. Resolution failures before execution (identity, stores,
    * profile, symbol set) persist NOTHING, the saved-path precedent.
@@ -4782,7 +4802,7 @@ export class ScheduledTasksService {
             id: crypto.randomUUID(),
             sessionId: this.userLogin,
             role: "assistant",
-            content: `⚠️ Scheduled Strategy Discovery failed for ${attemptedSymbols.join(", ") || "no symbols"}: ${error}`,
+            content: `âš ï¸ Scheduled Strategy Discovery failed for ${attemptedSymbols.join(", ") || "no symbols"}: ${error}`,
             agent: "orchestrator",
             createdAt: timestamp,
           });
@@ -4841,7 +4861,7 @@ export class ScheduledTasksService {
       const profile = await this.strategyProfileStore.get(userLogin, profileId);
       if (!profile) {
         // Deleted (or never existed) since arming: an honest failure
-        // naming the profile — never a silently substituted view.
+        // naming the profile â€” never a silently substituted view.
         return await fail(
           `Strategy profile ${profileId} was not found for this account. It may have been deleted after the schedule was armed; no run was recorded.`
         );
@@ -4890,7 +4910,7 @@ export class ScheduledTasksService {
         );
       }
 
-      // One client/agent set for the whole execution — the saved
+      // One client/agent set for the whole execution â€” the saved
       // path's construction, under the schedule owner's identity and
       // environment (#447/#461, #672).
       const etrade = this.createETradeService(userLogin, options.environment);
@@ -4902,8 +4922,8 @@ export class ScheduledTasksService {
       const emMultiples = getOpportunityScannerConfig().targetEmMultiples;
 
       // Issue #4854: the firer's host dispatch is decided once per
-      // run — the platform, environment, and snapshot input are
-      // fixed for the run — and threaded into each symbol's screen,
+      // run â€” the platform, environment, and snapshot input are
+      // fixed for the run â€” and threaded into each symbol's screen,
       // so a run never mixes dispatches mid-flight.
       const firerHost = await resolveScheduledFirerHostDispatch(
         this.env,
@@ -4950,7 +4970,7 @@ export class ScheduledTasksService {
         }
         constructed.push(derived.request);
         // Issue #16: attach this name's event calendar before the
-        // pipeline runs — the persisted run record carries it on the
+        // pipeline runs â€” the persisted run record carries it on the
         // request, so the run's calendar facts stay auditable. The
         // service never throws; uncovered keeps event risk unverified.
         derived.request.eventCalendar = await getSymbolEventCalendar(symbol);
@@ -4973,7 +4993,7 @@ export class ScheduledTasksService {
             : "partial";
 
       const profileRef = toProfileRef(profile);
-      // The run is persisted BEFORE the status is judged — an
+      // The run is persisted BEFORE the status is judged â€” an
       // all-abstained/failed fire's record is exactly what makes the
       // honesty inspectable (and the run id joins the failure data).
       const discoveryMode = await resolveDiscoveryRunMode(this.env, options.environment);
@@ -5063,8 +5083,8 @@ export class ScheduledTasksService {
             role: "assistant",
             content:
               status === "completed"
-                ? `🔭 Scheduled Strategy Discovery (profile-derived) completed for ${symbols.join(", ")}: all ${constructed.length} derived requests produced results.`
-                : `🔭 Scheduled Strategy Discovery (profile-derived) partially completed for ${symbols.join(", ")}: ${completedCount} of ${constructed.length} derived requests produced results${failureNote}${abstainNote}.`,
+                ? `ðŸ”­ Scheduled Strategy Discovery (profile-derived) completed for ${symbols.join(", ")}: all ${constructed.length} derived requests produced results.`
+                : `ðŸ”­ Scheduled Strategy Discovery (profile-derived) partially completed for ${symbols.join(", ")}: ${completedCount} of ${constructed.length} derived requests produced results${failureNote}${abstainNote}.`,
             agent: "orchestrator",
             createdAt: timestamp,
           });
@@ -5094,14 +5114,14 @@ export class ScheduledTasksService {
 
   /**
    * The no-view discovery fire (issue #534). The schedule armed
-   * constraint sets — a symbol plus constraints per set, with NO
-   * thesis and NO target anywhere — and each symbol's live chain is
+   * constraint sets â€” a symbol plus constraints per set, with NO
+   * thesis and NO target anywhere â€” and each symbol's live chain is
    * ranked once by the target-free score model (no-view-v1). Nothing
    * in this path constructs, derives, or defaults a StrategyRequest:
    * the question is "which structures does this symbol's chain
    * support best under these constraints", and where the honest
-   * answer is "none" the symbol ABSTAINS — a completed outcome with
-   * the gate reasons recorded and a no_trade pick — rather than
+   * answer is "none" the symbol ABSTAINS â€” a completed outcome with
+   * the gate reasons recorded and a no_trade pick â€” rather than
    * failing or crowning a best-of-garbage. Status semantics mirror
    * the sibling models with the plan's one deliberate difference:
    * all-failed takes the #112 failure path, an all-abstained fire is
@@ -5159,7 +5179,7 @@ export class ScheduledTasksService {
             id: crypto.randomUUID(),
             sessionId: this.userLogin,
             role: "assistant",
-            content: `⚠️ Scheduled Strategy Discovery (no-view) failed for ${symbols.join(", ") || "no constraint sets"}: ${error}`,
+            content: `âš ï¸ Scheduled Strategy Discovery (no-view) failed for ${symbols.join(", ") || "no constraint sets"}: ${error}`,
             agent: "orchestrator",
             createdAt: timestamp,
           });
@@ -5208,7 +5228,7 @@ export class ScheduledTasksService {
       }
       if (options.inputModel !== "no-view") {
         return await fail(
-          `No-view constraint sets require inputModel "no-view"; this payload carries ${options.inputModel ? `"${options.inputModel}"` : "no inputModel"}. The discovery input models are mutually exclusive — no run was recorded.`
+          `No-view constraint sets require inputModel "no-view"; this payload carries ${options.inputModel ? `"${options.inputModel}"` : "no inputModel"}. The discovery input models are mutually exclusive â€” no run was recorded.`
         );
       }
       if (
@@ -5218,12 +5238,12 @@ export class ScheduledTasksService {
         options.profileId !== undefined
       ) {
         return await fail(
-          "No-view discovery payloads carry constraintSets only — requests, symbols, watchlistName and profileId belong to the other discovery input models. Mixed payload shapes are rejected, never partially honoured; no run was recorded."
+          "No-view discovery payloads carry constraintSets only â€” requests, symbols, watchlistName and profileId belong to the other discovery input models. Mixed payload shapes are rejected, never partially honoured; no run was recorded."
         );
       }
       if (!Array.isArray(options.constraintSets) || options.constraintSets.length === 0) {
         return await fail(
-          "No-view discovery requires at least one constraint set in payload.constraintSets; none was supplied. A constraint set names a symbol and its constraints only — no view is invented for a schedule."
+          "No-view discovery requires at least one constraint set in payload.constraintSets; none was supplied. A constraint set names a symbol and its constraints only â€” no view is invented for a schedule."
         );
       }
       if (options.constraintSets.length > MAX_SAVED_REQUESTS_PER_RUN) {
@@ -5232,8 +5252,8 @@ export class ScheduledTasksService {
         );
       }
       // Every set is validated BEFORE any chain loads: an invalid
-      // set — including one smuggling a thesis/target past the type
-      // (validateNoViewRequest rejects view fields outright) — fails
+      // set â€” including one smuggling a thesis/target past the type
+      // (validateNoViewRequest rejects view fields outright) â€” fails
       // the whole payload pre-execution, the saved-path precedent.
       for (let i = 0; i < options.constraintSets.length; i++) {
         const validationError = validateNoViewRequest(
@@ -5246,7 +5266,7 @@ export class ScheduledTasksService {
         }
       }
 
-      // One client/agent set for the whole execution — the saved
+      // One client/agent set for the whole execution â€” the saved
       // path's construction, under the schedule owner's identity and
       // environment (#447/#461).
       const etrade = this.createETradeService(userLogin, options.environment);
@@ -5285,7 +5305,7 @@ export class ScheduledTasksService {
               ? "completed"
               : "partial";
 
-      // The run is persisted BEFORE the status is judged — an
+      // The run is persisted BEFORE the status is judged â€” an
       // all-failed fire's record is exactly what makes the failure
       // diagnosable (and the run id joins the failure data).
       const discoveryMode = await resolveDiscoveryRunMode(this.env, options.environment);
@@ -5367,10 +5387,10 @@ export class ScheduledTasksService {
             role: "assistant",
             content:
               status === "completed" && abstentions.length === 0
-                ? `🔭 Scheduled Strategy Discovery (no-view) completed for ${symbols.join(", ")}: all ${constraintSets.length} constraint sets produced ranked structures under their constraints. No view was supplied, derived, or assumed.`
+                ? `ðŸ”­ Scheduled Strategy Discovery (no-view) completed for ${symbols.join(", ")}: all ${constraintSets.length} constraint sets produced ranked structures under their constraints. No view was supplied, derived, or assumed.`
                 : status === "completed"
-                  ? `🔭 Scheduled Strategy Discovery (no-view) completed for ${symbols.join(", ")}: no structure qualified under the stated constraints — every symbol abstained${abstainNote}. No pick was manufactured.`
-                  : `🔭 Scheduled Strategy Discovery (no-view) partially completed for ${symbols.join(", ")}: ${completedCount} of ${constraintSets.length} constraint sets produced ranked structures${failureNote}${abstainNote}.`,
+                  ? `ðŸ”­ Scheduled Strategy Discovery (no-view) completed for ${symbols.join(", ")}: no structure qualified under the stated constraints â€” every symbol abstained${abstainNote}. No pick was manufactured.`
+                  : `ðŸ”­ Scheduled Strategy Discovery (no-view) partially completed for ${symbols.join(", ")}: ${completedCount} of ${constraintSets.length} constraint sets produced ranked structures${failureNote}${abstainNote}.`,
             agent: "orchestrator",
             createdAt: timestamp,
           });
@@ -5404,8 +5424,8 @@ export class ScheduledTasksService {
    * the sibling models use, chain failure is judged exactly as in
    * runDiscoveryRequest, and qualifying structures are ranked by the
    * target-free model. A loaded chain with zero qualifying
-   * structures is a completed ABSTENTION — flagged, gate reasons in
-   * `excluded`, empty ranked set, no_trade pick — never a failure
+   * structures is a completed ABSTENTION â€” flagged, gate reasons in
+   * `excluded`, empty ranked set, no_trade pick â€” never a failure
    * and never a manufactured pick.
    */
   private async runNoViewDiscoveryRequest(
@@ -5425,7 +5445,7 @@ export class ScheduledTasksService {
       // abstention: the screen records why (validation error,
       // per-symbol fetch errors, or the client's recorded upstream
       // cause). Zero contracts with NO failure signal means the
-      // chain loaded empty — the gates then abstain honestly below.
+      // chain loaded empty â€” the gates then abstain honestly below.
       const fetchReasons = (snapshot.screen.fetchErrors ?? [])
         .filter((e) => e.symbol === symbol)
         .map((e) => e.reason);
@@ -5486,7 +5506,7 @@ export class ScheduledTasksService {
 
   /**
    * Issue #1999 (D2): persist one IV-collection run's report row.
-   * Returns false (and audits) when the store throws — the caller
+   * Returns false (and audits) when the store throws â€” the caller
    * reports failure instead of success. Returns true when the row
    * is stored, or when no store is configured (nothing to fail).
    */
@@ -5496,9 +5516,9 @@ export class ScheduledTasksService {
       this.orm.storeCanonicalReport({
         runId: `iv_collection:${report.date}`,
         generationId: `iv_collection:${report.date}`,
-        title: `Daily IV collection — ${report.date}`,
+        title: `Daily IV collection â€” ${report.date}`,
         source: "iv_collection",
-        summary: `📈 Daily IV collection [${report.date}]: ${report.recorded} recorded, ${report.alreadyRecorded} already recorded, ${report.failed} failed across ${report.outcomes.length} tracked names.`,
+        summary: `ðŸ“ˆ Daily IV collection [${report.date}]: ${report.recorded} recorded, ${report.alreadyRecorded} already recorded, ${report.failed} failed across ${report.outcomes.length} tracked names.`,
         body: { ...report, trackedCount: report.outcomes.length },
         createdAt: timestamp,
         userLogin: this.userLogin,
@@ -5518,12 +5538,12 @@ export class ScheduledTasksService {
 
   /**
    * Daily ATM IV collection (issue #15): one IV-history record per
-   * tracked name (curated universe ∪ all watchlist symbols), derived
+   * tracked name (curated universe âˆª all watchlist symbols), derived
    * from the live chain through the scanner's own data path
-   * (OptionsDataAgent over the DynamicOptionsScreener — broker chains
+   * (OptionsDataAgent over the DynamicOptionsScreener â€” broker chains
    * only). Idempotent per (symbol, day): rerunning the task the same
    * day records nothing twice. A name whose chain fails gets NO
-   * record and is named in the report's failed outcomes — history is
+   * record and is named in the report's failed outcomes â€” history is
    * never fabricated to fill a gap. Runs under this service's
    * userLogin identity, like its sibling tasks.
    *
@@ -5624,7 +5644,7 @@ export class ScheduledTasksService {
             sessionId: this.userLogin,
             role: "assistant",
             content:
-              `📈 Daily IV collection [${report.date}]: ${report.recorded} recorded, ` +
+              `ðŸ“ˆ Daily IV collection [${report.date}]: ${report.recorded} recorded, ` +
               `${report.alreadyRecorded} already recorded, ${report.failed} failed ` +
               `across ${report.outcomes.length} tracked names.`,
             agent: "orchestrator",
@@ -5637,11 +5657,11 @@ export class ScheduledTasksService {
 
       // Issue #278: persist the scheduled run's report durably
       // (mas_reports) so the AI Search agent can surface it later.
-      // Issue #308: through the single generate→store seam — one
+      // Issue #308: through the single generateâ†’store seam â€” one
       // canonical row per generation (generationId = run id).
       // Issue #1999 (D2): the persisted row IS this run's record
       // (#278: persist so the agent can surface it later). A lost
-      // store must not report success — the run failed its point.
+      // store must not report success â€” the run failed its point.
       const stored = this.persistIvCollectionReport(report, timestamp);
 
       return {
