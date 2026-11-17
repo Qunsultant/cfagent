@@ -442,4 +442,21 @@ describe("zero behavior change (#4933)", () => {
       "no such table",
     );
   });
+
+  it("an unbound binding constructs exactly like bare drizzle() (no Proxy TypeError)", () => {
+    // Regression: the first PR CI run failed feed_parity_3941's
+    // "no AGENT_DB in workflow residency still refuses by name" case —
+    // feedStepDepsForWorkflow calls createD1IndexListDb(undefined) and
+    // the wrapper's `new Proxy(undefined, …)` threw at construction,
+    // where a bare drizzle(undefined) constructs fine and the refusal
+    // surfaces downstream by name. A missing binding is not a query
+    // to observe: it passes through untouched.
+    const sink = new CapturingSink();
+    const logger = createD1QueryLogger({ sink, nowMs: () => 9500 });
+    const wrapped = createDrizzleD1Db(undefined as never, { schema: { probeItems } }, { logger });
+    expect(wrapped.$client).toBeUndefined();
+    const plain = drizzle(undefined as never, { schema: { probeItems } });
+    expect(plain.$client).toBeUndefined();
+    expect(sink.events).toHaveLength(0);
+  });
 });
