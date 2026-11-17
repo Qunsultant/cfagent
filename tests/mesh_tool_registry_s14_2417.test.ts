@@ -157,10 +157,12 @@ const EXPECTED_STATUS: Record<string, MeshToolFamilyStatus> = {
   // Issue #3990: Public.com copilot tools (quotes + orders on the
   // Public MCP transport, preview-first placement).
   "public-mcp-commands": "live",
+  // Issue #5111: Chat & Copilot multi-account binding tool.
+  "account-binding-mcp-commands": "live",
 };
 
 describe("tool family status table (#2417)", () => {
-  it("records exactly the 23 expected families, no more, no fewer", () => {
+  it("records exactly the 24 expected families, no more, no fewer", () => {
     expect(MESH_TOOL_FAMILIES.map((f) => f.id).sort()).toEqual(
       Object.keys(EXPECTED_STATUS).sort(),
     );
