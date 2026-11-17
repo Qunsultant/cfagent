@@ -776,22 +776,26 @@ export class OrchestratorAgent extends PortThink {
   }
 
   private scheduleWatchdogContext(): ScheduleWatchdogContext {
+    const ownerLogin = this.getScreenerExecutionContext()?.userLogin;
     return {
       env: this.env,
       sql: this.ctx.storage.sql,
       storage: this.ctx.storage,
       listSchedules: () => this.listSchedules(),
       audit: (type, agent, payload) => this.audit(type, agent, payload),
+      ...(ownerLogin ? { userLogin: ownerLogin } : {}),
       notifyMissedSchedule: async (info) => {
         // Issue #3788: missed-schedule alert via postSlackText (the
         // #2567 stuck-run seam: catalog text, webhook first, bot
         // token second). Detection + the exactly-once claim live in
         // scheduleWatchdog.watchdogMissedSchedules; this hook is
         // delivery only, and audits its own outcome.
+        const ownerPart = info.userLogin ? ` | user: ${info.userLogin}` : "";
+        const callbackPart = info.callback ? ` | callback: ${info.callback}` : "";
         const text = renderChannelText("missed_schedule_alert", "slack", {
           scheduleId: info.scheduleId, kind: "schedule", callback: info.callback,
           expectedTick: info.expectedTick, lastRun: info.lastRun ?? "never",
-          detail: `missed-fire: expected ${info.expectedTick} (last run: ${info.lastRun ?? "never"})`,
+          detail: `missed-fire: expected ${info.expectedTick} (last run: ${info.lastRun ?? "never"})${callbackPart}${ownerPart}`,
         }, "legacy_missed_schedule_alert");
         const result = await postSlackText({ post: fetchSlackPost, env: this.env, text });
         this.audit(result.ok ? "schedule.missed_fire_alert" : "schedule.missed_fire_alert_failed", "orchestrator", {
