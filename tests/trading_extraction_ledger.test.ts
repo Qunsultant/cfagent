@@ -84,6 +84,9 @@ const PINNED_STAR_REEXPORTS = [
   // trading surface (broker-neutral — same ITradingPlatform contract
   // as etrade/alpaca, over the Public MCP transport).
   "./public/platform",
+  // Issue #4675: Tastytrade Slice 1 platform + OAuth2 credential seam.
+  "./tastytrade/platform",
+  "./tastytrade/credentials",
   "./alpaca/fillLots",
   "./alpaca/occSymbol",
   // Issue #3351: the Alpaca sign-in surface, exported through the boundary so

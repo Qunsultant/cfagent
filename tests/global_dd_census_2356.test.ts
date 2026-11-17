@@ -972,6 +972,8 @@ const STEP5_FUNNEL_SITES: Array<[string, string, string]> = [
   ["src/trading/alpaca/credentialStore.ts", "createStoreKv", "alpaca"],
   ["src/trading/channels/intake.ts", "consumeStoreKey", "slack_principal_links"],
   ["src/trading/channels/intake.ts", "createStoreKv", "slack_principal_links"],
+  // Issue #4675: per-user Tastytrade OAuth2 refresh-token credentials in SessionStore DO.
+  ["src/trading/tastytrade/credentials.ts", "createStoreKv", "tastytrade"],
 ];
 
 describe("global D-D census: step 5 — SessionStore funnel composition sites (#2432)", () => {
@@ -1457,6 +1459,7 @@ describe("global D-D census: step 5e — residual bucket family port composition
       ["src/services/agenticPayments.ts", "../data/durableKv"],
       ["src/trading/alpaca/credentialStore.ts", "../../data/durableKv"],
       ["src/trading/channels/intake.ts", "../../data/durableKv"],
+      ["src/trading/tastytrade/credentials.ts", "../../data/durableKv"],
       ["tests/durable_session_store.test.ts", "../src/data/durableKv"],
       ["tests/payments_webhook_settlement.test.ts", "../src/data/durableKv"],
       ["tests/step5a_characterization_2432.test.ts", "../src/data/durableKv"],
