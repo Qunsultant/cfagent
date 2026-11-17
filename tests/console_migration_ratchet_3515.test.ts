@@ -371,7 +371,10 @@ const REMAINING_PIN: Readonly<Record<string, number>> = {
   "src/data/createScreenRunLockPorts.ts": 1,
   "src/data/d1GovernanceAdapter.ts": 1,
   "src/data/d1ResourceUsageAdapter.ts": 1,
-  "src/data/doSqliteCanonicalReportStoreAdapter.ts": 2,
+  // #4507: 2 -> 3 — the per-pair dedupe audit log (a data deletion
+  // must be auditable); the CREATE-retry log reuses the old silent
+  // path's slot. Ceiling raised deliberately, not drifted.
+  "src/data/doSqliteCanonicalReportStoreAdapter.ts": 3,
   "src/data/doSqliteEnrichmentAdapter.ts": 2,
   "src/data/doSqliteJobOutcomeAdapter.ts": 1,
   "src/data/doSqliteScreeningActivityAdapter.ts": 2,
