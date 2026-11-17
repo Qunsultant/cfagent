@@ -1,7 +1,7 @@
 # Execution model: one tree, one id convention
 
 **Location:** `docs/architecture/application/execution-model.md`
-**Status:** PROPOSED — the terminology collapse (§1) and the uniform id convention (§5) are proposals under #5175, awaiting the user's ruling. Verified facts (code on main, ruled short ids) are marked as such; everything else is proposed.
+**Status:** PROPOSED — the terminology collapse (§1) remains proposed; the uniform id convention (§5) was ADOPTED 2026-11-17. Verified facts (code on main, ruled short ids) are marked as such; everything else is proposed.
 **Related:** #5175 (standardize run/transaction ids — the design record), #4774 (chain short ids; PR #5173 implements the pre-uniform shapes), #5109 (research onto the engine), #4808 (per-node execution tree), `docs/architecture/data/data-model.md` (the data model), `docs/architecture/application/screener.md` (the screener capability), `docs/architecture/application/api-mcp.md` (the API/MCP surface).
 
 ---
@@ -77,7 +77,7 @@ flowchart TB
 
 | Entity | Id | What it is | Parent | Children |
 |---|---|---|---|---|
-| Family | `chain:<family>` | A workflow family: `stockscr`, `optionsscr`, `goalscr`, `strategyscr`, `feedsrc`, `resrch` (ruled 2026-11-17 — OODA is one type of research within the family), `tradscr` (proposed), `payrun` (proposed), `sagarun` (proposed). | — | Job definitions |
+| Family | `chain:<family>` | A workflow family: `stockscr`, `optionsscr`, `goalscr`, `strategyscr`, `feedsrc`, `resrch` (ruled 2026-11-17 — OODA is one type of research within the family; Holly etc. later), `tradrun` (ruled 2026-11-17), `payrun` (ruled 2026-11-17), `sagarun` (ruled 2026-11-17). | — | Job definitions |
 | JobDefinition | `job:<spec>` / `pipe:<feed>-<dataset>` | A job spec with a stage vocabulary and a node tree. | Family | Stages (vocabulary), nodes |
 | Task | `task:<uuid8>` / `sched:<uuid>` (proposed) / `job:<uuid>` | An invocation that causes a run. | — | Runs |
 | Run | `run:<time>-<counter>` | ONE execution instance of one job definition, caused by one task. The root. | Task, JobDefinition | Stage executions, generations, transactions, deliveries |
@@ -92,8 +92,8 @@ flowchart TB
 
 Notes:
 
-- **OODA is one type of research.** The research family's short id is `resrch` (ruled 2026-11-17). OODA is one *type* of research within the family — not the family itself. The research family contains research types; OODA (the nightly run) is one of them; the other types are to be enumerated. Its stages are the 8 pipeline stages. The OODA *loop* (observe/orient/decide/act) is a cycle *inside* the analyze stage (`analyze.ooda`, #5118), one iteration per candidate — its instances are trace entries, not stage executions. That is why the same words appeared at two levels: the run-level stage `stage:<runBody>:observe:-` vs the candidate-level iteration `trace:<runBody>:ooda:observe:2`. The hierarchy scopes them, so the separate `respipe:` namespace retires (it was the #4774 workaround for a flat namespace).
-- **Trading (order execution) is one family** (`tradscr`, proposed): one catalog family, one `TradingTradeWorkflow` host, one shared stage vocabulary. Stocks and options are screening families, not trading — they are not part of the trading family, and there is no "stock trading" vs "options trading" split.
+- **OODA is one type of research.** The research family's short id is `resrch` (ruled 2026-11-17). OODA is one *type* of research within the family — not the family itself. The research family contains research types; OODA (the nightly run) is one of them for now; Holly and others come later. Its stages are the 8 pipeline stages. The OODA *loop* (observe/orient/decide/act) is a cycle *inside* the analyze stage (`analyze.ooda`, #5118), one iteration per candidate — its instances are trace entries, not stage executions. That is why the same words appeared at two levels: the run-level stage `stage:<runBody>:observe:-` vs the candidate-level iteration `trace:<runBody>:ooda:observe:2`. The hierarchy scopes them, so the separate `respipe:` namespace retires (confirmed 2026-11-17; it was the #4774 workaround for a flat namespace).
+- **Trading (order execution) is one family** (`tradrun`, ruled 2026-11-17): one catalog family, one `TradingTradeWorkflow` host, one shared stage vocabulary. Stocks and options are screening families, not trading — they are not part of the trading family, and there is no "stock trading" vs "options trading" split.
 - **A unit is a coordinate, not an id.** A sharded stage has one stage-execution id per unit (`stage:m9x2k-2:feed:AAPL`, `stage:m9x2k-2:feed:MSFT`); no separate `unit:` id is minted.
 - **A chain is a job whose steps are jobs.** That is the recursion in the diagram: the options chain job's feed/assemble/generate/store/serve/deliver nodes are themselves jobs. A **pipe** is a feed-pipeline job inside the feed chain.
 
@@ -183,7 +183,7 @@ The short id and the system id are not two ids: the short id is the **body** (th
 | Family | `chain:<family>` | `chain:stockscr` | Declared (ruled) | What family this is |
 | Level | `lvl:<level>` | `lvl:run` | Declared | What kind of node this is |
 | OODA step | `ooda:<step>` | `ooda:observe` | Declared | Which loop step (candidate level) |
-| Research stage | `respipe:<stage>` | `respipe:observe` | Declared — retires under the hierarchy (§2) | Which run-level stage (legacy namespace) |
+| Research stage | `respipe:<stage>` | `respipe:observe` | Retired (confirmed 2026-11-17) | Which run-level stage (legacy namespace) |
 | Job definition | `job:<spec>` | `job:screener` | Declared | Which job spec |
 | Feed pipeline job | `pipe:<feed>-<dataset>` | `pipe:yahoo-nasdaq100-quotes` | Declared | Which feed pipeline |
 | Job-definition node | `node:<spec>:<nodePath>` | `node:screener:root` | Declared | Which node of which job |
@@ -207,7 +207,7 @@ The short id and the system id are not two ids: the short id is the **body** (th
 
 **Deliberately outside the convention:** external ids (`gateway_ref`, `order_ref`, Cloudflare `instanceId`) — assigned by others, stored as-is, declared in the registry by source. OTEL `traceId` / `spanId` — must stay bare hex for W3C traceparent compatibility. `session_id` — a scope key, not an instance id. DB-internal surrogate keys (AUTOINCREMENT rowids) — storage, not identity; they must never leak out as platform ids. Legacy formats — kept as aliases → canonical, never minted again.
 
-**What the convention renames (the cost):** `run-…` → `run:…`; `job-stage:` → `stage:`; `job-step:` → `step:`; stage-action events → `event:`; `pay_` / `task_` / `ord_` / `rsr_` separators unify to `:`. PR #5173 (#4774) implements the pre-uniform shapes — adopting the convention means reworking it or landing it and renaming in #5175's first slice (ruling owed).
+**What the convention renames (the cost):** `run-…` → `run:…`; `job-stage:` → `stage:`; `job-step:` → `step:`; stage-action events → `event:`; `pay_` / `task_` / `ord_` / `rsr_` separators unify to `:`. PR #5173 (#4774) implemented the pre-uniform shapes — the rework to the uniform convention is in flight (ruled 2026-11-17: rework now).
 
 ---
 
@@ -254,11 +254,6 @@ The count depends on the job definition and the universe size: total = 1 (run) +
 
 ## 7. Open rulings
 
-- Adopt the uniform convention (§5) — and the #5173 question: rework PR #5173 to it now, or land #5173 as-is and rename in #5175's first slice.
-- Enumerate the research types (OODA is one — what are the others?).
-- `tradscr` / `payrun` / `sagarun` family short ids (proposed).
-- `respipe:` retirement (follows from §2 — the hierarchy scopes the stages).
-- `sched:<uuid>` schedule-id form (proposed).
-- `tradscr` / `payrun` / `sagarun` family short ids (proposed, from #4774).
-- Generation id canonical shape (needs the research family's short id).
+- Enumerate the research types beyond OODA (Holly etc. — later).
+- Generation id canonical shape (settled by the uniform convention: `gen:<runBody>`).
 - Goal record id prefix (gap G12 — unverified on main).
