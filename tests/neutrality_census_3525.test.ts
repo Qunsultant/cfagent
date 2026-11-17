@@ -797,23 +797,6 @@ function measure(): Map<string, number> {
  * broker selection still governs broker behaviour elsewhere):
  * scheduled-agent.ts etrade 2 (the import + the bind). Measured totals move
  * 1285/10168 -> 1286/10170 (re-based onto 16215a13).
- *
- * Baseline update (#4988, 2026-11-16): the service login gains its own
- * E*TRADE token through the 3-legged flow (#945 Q10, option 1) — the new
- * service-user E*TRADE routes, the PEP inventory entries that name them,
- * the client calls and the Service User panel, and the runbook section
- * that documents the flow all name the provider they integrate —
- * dispositioned INTEGRATION (naming the provider is their job): 2 new
- * rows (serviceUserApi.ts etrade 14 — the route literals, the three
- * client functions and their doc comments; ServiceUserSection.tsx etrade
- * 18 — the authorize button, the verifier PIN input, the checklist copy
- * and the call sites) and 5 raises (service-identity.md etrade 10->27 —
- * the new authorization section; serviceUser.ts etrade 2->44 — the three
- * routes, their dispatch and their audit events; iaaaEndpointCatalog.ts
- * etrade 34->44 — the three endpoint entries; etradeOAuth.ts etrade
- * 123->124 — the identity parameter threaded into the exchange;
- * pepGateway.ts etrade 5->8 — the two inventory entries and their
- * comment). Baseline totals move 1303/10407 -> 1305/10512.
  */
 const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (188 rows / 989 lines) ----
@@ -948,7 +931,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["docs/operations/runbook/alerting.md", "yahoo", 6],
   ["docs/operations/runbook/screening-system-runbook.md", "etrade", 1],
   ["docs/operations/runbook/screening-system-runbook.md", "yahoo", 1],
-  ["docs/operations/runbook/service-identity.md", "etrade", 27],
+  ["docs/operations/runbook/service-identity.md", "etrade", 10],
   ["src/agents/trading-agent.ts", "etrade", 11],
   ["src/client/AccountPanels.tsx", "etrade", 17],
   ["src/client/Chat.tsx", "etrade", 9],
@@ -961,7 +944,6 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/client/FirstRunScreen.tsx", "alpaca", 3],
   ["src/client/FirstRunScreen.tsx", "etrade", 32],
   ["src/client/IvHistoryPanel.tsx", "etrade", 3],
-  ["src/client/ServiceUserSection.tsx", "etrade", 18],
   ["src/client/MarketDataResearchHub.tsx", "alpaca", 55],
   ["src/client/MarketDataResearchHub.tsx", "etrade", 8],
   ["src/client/OmnichannelPanel.tsx", "etrade", 3],
@@ -1199,7 +1181,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/agents/routes/routeIdentity.ts", "etrade", 1],
   ["src/agents/routes/schedules.ts", "etrade", 21],
   ["src/agents/routes/screenerResearch.ts", "yahoo", 1],
-  ["src/agents/routes/serviceUser.ts", "etrade", 44],
+  ["src/agents/routes/serviceUser.ts", "etrade", 2],
   ["src/agents/routes/tradingIntegrations.ts", "etrade", 24],
   ["src/agents/routes/watchlists.ts", "alpaca", 1],
   ["src/agents/routes/watchlists.ts", "etrade", 29],
@@ -1267,7 +1249,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/client/executionCard.ts", "etrade", 3],
   ["src/client/firstRunApi.ts", "etrade", 11],
   ["src/client/iaaaAdminApi.ts", "etrade", 1],
-  ["src/client/iaaaEndpointCatalog.ts", "etrade", 44],
+  ["src/client/iaaaEndpointCatalog.ts", "etrade", 34],
   ["src/client/mcpEndpointsData.ts", "alpaca", 14],
   ["src/client/mcpEndpointsData.ts", "etrade", 53],
   ["src/client/mcpEndpointsData.ts", "yahoo", 5],
@@ -1278,7 +1260,6 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/client/router.ts", "etrade", 2],
   ["src/client/runExport.ts", "etrade", 9],
   ["src/client/scannerApi.ts", "etrade", 7],
-  ["src/client/serviceUserApi.ts", "etrade", 14],
   ["src/client/screeningAdapters.ts", "alpaca", 1],
   ["src/client/screeningAdapters.ts", "etrade", 4],
   ["src/client/screeningAdapters.ts", "nasdaq", 1],
@@ -1441,7 +1422,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/patterns/interfaces.ts", "etrade", 3],
   ["src/security/apiKeys.ts", "etrade", 2],
   ["src/security/brokerTokenRejection.ts", "etrade", 9],
-  ["src/security/etradeOAuth.ts", "etrade", 124],
+  ["src/security/etradeOAuth.ts", "etrade", 123],
   ["src/security/etradeTokenCache.ts", "etrade", 3],
   ["src/security/githubOAuth.ts", "etrade", 1],
   ["src/security/grantProposals.ts", "etrade", 1],
@@ -1454,7 +1435,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/security/openapiSpec.ts", "yahoo", 4],
   ["src/security/outboundRateLimiter.ts", "alpaca", 7],
   ["src/security/outboundRateLimiter.ts", "etrade", 8],
-  ["src/security/pepGateway.ts", "etrade", 8],
+  ["src/security/pepGateway.ts", "etrade", 5],
   ["src/security/publicOAuth.ts", "etrade", 3],
   ["src/security/publicOAuth.ts", "public.com", 3],
   ["src/security/serviceIdentity.ts", "etrade", 4],
@@ -2307,6 +2288,18 @@ const BASELINE: Array<[string, string, number]> = [
   ["docs/operations/jobs-workflow-pipelines-stages-dispatch-modes.md", "alpaca", 1],
   ["docs/operations/jobs-workflow-pipelines-stages-dispatch-modes.md", "yahoo", 2],
   ["docs/operations/jobs-workflow-pipelines-stages-dispatch-modes.md", "nasdaq", 1],
+  // #5024 (post-merge red on the first CI run): the data-model
+  // document names the three broker providers its model maps
+  // (Alpaca/E*TRADE/Public) — in the trading subject area, in the
+  // broker-route paths, and in the quoted durableKv namespace
+  // list. Dispositioned INTEGRATION: naming the provider is the
+  // document's job, as in #4802/#4813 — neutralizing the names
+  // would make the model document unusable (the route paths and
+  // the namespace list are data-bearing identifiers, quoted
+  // verbatim). Totals move 1303/10407 -> 1306/10414.
+  ["docs/architecture/data/data-model.md", "etrade", 4],
+  ["docs/architecture/data/data-model.md", "public.com", 1],
+  ["docs/architecture/data/data-model.md", "alpaca", 2],
 ];
 
 const BASELINE_MAP = new Map(BASELINE.map(([f, t, c]) => [`${f}\t${t}`, c]));
