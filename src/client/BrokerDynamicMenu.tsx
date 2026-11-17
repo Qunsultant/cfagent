@@ -11,6 +11,7 @@ import { apiFetch } from "./apiFetch";
 import { syncTarget, connectStatusEndpoint } from "./brokerEndpoints";
 import { brokerPresentation } from "../trading";
 import { PublicTokenCard } from "./PublicTokenCard";
+import { AccountBindingSelector } from "./AccountBindingSelector";
 import { brokerCredentialGuidance, isBrokerId } from "../trading";
 import { brokerOptions } from "./brokerOptions";
 import { fetchWatchlists, type ETradeWatchlist } from "./accountApi";
@@ -987,6 +988,12 @@ export function BrokerDynamicMenu({
                 <PublicTokenCard />
               </div>
             )}
+
+            {/* Account & asset-class binding selector (issue #5113) */}
+            <AccountBindingSelector
+              broker={selectedBrokerId}
+              mode={isLive ? "live" : "paper"}
+            />
           </div>
 
           {/* Preferences & Appearance Settings */}
