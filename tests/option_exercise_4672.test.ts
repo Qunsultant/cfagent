@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { AlpacaMarketDataProvider } from "../src/services/marketDataResearch";
 import { AlpacaTradingPlatform } from "../src/trading/alpaca/platform";
-import { handleBrokerOrdersRoute } from "../src/agents/routes/brokerOrders";
+import { handleBrokerOrderRoutes } from "../src/agents/routes/brokerOrders";
 import { McpToolFactory } from "../src/mcps/openaimp/commands";
-import { resolveToolRequiredPermission } from "../src/mcps/openaimp/mcpPermissionPorts";
+import { MCP_TOOL_SCOPES } from "../src/mcps/openaimp/mcpPermissionPorts";
 import type { Env } from "../src/types";
 
 describe("Option exercise & assignment visibility (#4672)", () => {
@@ -65,7 +65,7 @@ describe("Option exercise & assignment visibility (#4672)", () => {
       readSettingRaw: () => broker,
     });
 
-    const unauth = await handleBrokerOrdersRoute(
+    const unauth = await handleBrokerOrderRoutes(
       new Request("https://example.com/api/broker/position/exercise", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -76,7 +76,7 @@ describe("Option exercise & assignment visibility (#4672)", () => {
     );
     expect(unauth?.status).toBe(401);
 
-    const missingSymbol = await handleBrokerOrdersRoute(
+    const missingSymbol = await handleBrokerOrderRoutes(
       new Request("https://example.com/api/broker/position/exercise", {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-user-login": "tester_4672" },
@@ -87,7 +87,7 @@ describe("Option exercise & assignment visibility (#4672)", () => {
     );
     expect(missingSymbol?.status).toBe(400);
 
-    const unsupported = await handleBrokerOrdersRoute(
+    const unsupported = await handleBrokerOrderRoutes(
       new Request("https://example.com/api/broker/position/exercise", {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-user-login": "tester_4672" },
@@ -104,6 +104,6 @@ describe("Option exercise & assignment visibility (#4672)", () => {
   it("registers alpaca_exercise_option MCP tool with mcp:trade permission", () => {
     const tool = McpToolFactory.getTool("alpaca_exercise_option");
     expect(tool).toBeDefined();
-    expect(resolveToolRequiredPermission("alpaca_exercise_option")).toBe("mcp:trade");
+    expect(MCP_TOOL_SCOPES["alpaca_exercise_option"]).toBe("mcp:trade");
   });
 });
