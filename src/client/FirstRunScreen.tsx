@@ -56,6 +56,7 @@ import {
   fetchETradeStatus,
   fetchPlatformIdentity,
   markFirstRunComplete,
+  referralCodeFromSearch,
   saveOnboardingState,
   setupAccount,
   startETradeOAuth,
@@ -210,7 +211,12 @@ export function FirstRunScreen({ userLogin, initialStep, onComplete, onDismiss, 
     setSetupError(null);
     (async () => {
       try {
-        const result = await setupAccount();
+        // Issue #5226 (2.27): forward the referral link's `?ref=`
+        // value so account creation can attribute the signup. The
+        // value is attribution input only — it never affects the
+        // account, and an invalid value is silently unattributed.
+        const referralCode = referralCodeFromSearch(window.location.search) ?? undefined;
+        const result = await setupAccount(referralCode);
         if (!cancelled) {
           setIdentity(result.identity);
           setSetupError(null);

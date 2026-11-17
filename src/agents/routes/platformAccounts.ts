@@ -78,12 +78,16 @@
  * No store client imports, no env.AGENT_DB references, no SQL.
  */
 import { createCommercialAdapter } from "../../data/createCommercialPorts";
+import { createLifecycleAdapter } from "../../data/createLifecyclePorts";
 import { createOnboardingAdapter } from "../../data/createOnboardingPorts";
 import { createPriceCatalogueAdapter } from "../../data/createPriceCataloguePorts";
 import { createProfileAdapter } from "../../data/createProfilePorts";
+import { createReferralCodeAdapters } from "../../data/createReferralCodePorts";
 import { createStoreOperatorsAdapter } from "../../data/createStoreOperatorsPorts";
 import { createSubscriptionAdapter } from "../../data/createSubscriptionPorts";
 import type { CommercialStore } from "../../data/commercialPorts";
+import type { ReferralCreditPort } from "../../data/lifecyclePorts";
+import type { ReferralCodeRuleStore, ReferralCodeStore } from "../../data/referralCodePorts";
 import type { OnboardingStateStore } from "../../data/onboardingPorts";
 import type { UserProfileStore } from "../../data/profilePorts";
 import type { PriceCatalogue, PriceEntry } from "../../data/priceCataloguePorts";
@@ -95,6 +99,7 @@ import {
   toPlatformIdentityView,
   type PlatformIdentity,
 } from "../../services/platformIdentity";
+import { captureSignupAttribution } from "../../services/referralAttribution";
 import {
   extractIdempotencyKey,
   toUserProfileView,
@@ -134,6 +139,20 @@ export interface PlatformAccountPorts {
   onboarding: OnboardingStateStore | null;
   /** User profile store (#3261); null when unbound — the profile routes fail closed with 503. */
   profile: UserProfileStore | null;
+  /**
+   * Lifecycle store (#5226, 2.27); null/undefined when unbound — the setup
+   * route skips attribution, never blocks account creation.
+   */
+  lifecycle?: ReferralCreditPort | null;
+  /**
+   * Referral-code stores (#5226, 2.27); null/undefined when unbound —
+   * the setup route skips code resolution. Only the rule + code reads
+   * are used (no redemption, no balance mutation at signup).
+   */
+  referralCodes?: {
+    rules: Pick<ReferralCodeRuleStore, "getRule">;
+    codes: Pick<ReferralCodeStore, "getCodeByHash">;
+  } | null;
 }
 
 export interface PlatformAccountRouteContext {
@@ -185,6 +204,7 @@ export interface AccountView {
 function resolvePorts(ctx: PlatformAccountRouteContext): PlatformAccountPorts {
   if (ctx.ports) return ctx.ports;
   const env = ctx.env as unknown as { AGENT_DB?: unknown };
+  const referralCodeAdapters = createReferralCodeAdapters(env);
   return {
     commercial: createCommercialAdapter(env),
     subscriptions: createSubscriptionAdapter(env),
@@ -192,6 +212,10 @@ function resolvePorts(ctx: PlatformAccountRouteContext): PlatformAccountPorts {
     operators: createStoreOperatorsAdapter(env),
     onboarding: createOnboardingAdapter(env),
     profile: createProfileAdapter(env),
+    lifecycle: createLifecycleAdapter(env),
+    referralCodes: referralCodeAdapters
+      ? { rules: referralCodeAdapters.rules, codes: referralCodeAdapters.codes }
+      : null,
   };
 }
 
@@ -556,8 +580,9 @@ export async function handlePlatformAccountRoutes(
       return Response.json({ error: "Commercial account store is unavailable." }, { status: 503 });
     }
     // The body is never trusted for identity: a client-supplied
-    // tenantId is not read here at all, in any path.
-    await request.json().catch(() => ({}));
+    // tenantId is not read here at all, in any path. The only body
+    // field read is the optional referral code (#5226, 2.27).
+    const setupBody = (await request.json().catch(() => ({}))) as { referralCode?: unknown };
     const identity = await resolvePlatformIdentity(
       { commercial: ports.commercial, subscriptions: ports.subscriptions },
       { userId: verifiedLogin, nowMs: Date.now() },
@@ -582,6 +607,42 @@ export async function handlePlatformAccountRoutes(
       tenantId,
       tier: "Free",
     });
+    // Issue #5226 (2.27): automatic referral attribution, best-effort
+    // and only on actual creation (the idempotent re-call returns
+    // above, where the attribution already stands). The capture never
+    // throws and never fails setup — an unbound store, an unknown
+    // code, a self-referral, or any store error is a silent skip,
+    // and the operator record-earn route stays the manual fallback.
+    // The automatic earn trigger in the paid-submit path reads the
+    // attribution row from here on the referred user's first
+    // verified paid run.
+    if (ports.lifecycle && ports.referralCodes && ports.commercial) {
+      try {
+        const attribution = await captureSignupAttribution(
+          {
+            codes: ports.referralCodes.codes,
+            rules: ports.referralCodes.rules,
+            commercial: ports.commercial,
+            lifecycle: ports.lifecycle,
+          },
+          {
+            codeValue: setupBody.referralCode,
+            referredUserId: verifiedLogin,
+            tenantId,
+            nowMs: Date.now(),
+          },
+        );
+        if (attribution) {
+          ctx.audit("platform.account.referral_attributed", "payments", {
+            userLogin: verifiedLogin,
+            referrerUserId: attribution.referrerUserId,
+            source: attribution.source,
+          });
+        }
+      } catch {
+        // Attribution must never block account creation.
+      }
+    }
     return Response.json({
       created: true,
       ...(await buildAccountView(ports, verifiedLogin)),
