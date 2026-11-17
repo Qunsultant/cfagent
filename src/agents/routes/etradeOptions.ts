@@ -72,14 +72,14 @@ import type { DatabaseORM, SqlStorage } from "../../orm";
 import type { ScreenerAgent } from "../screener-agent";
 import { deliverGatedSlack } from "../../services/gatedSlackDelivery";
 import { screenerOutcomeFromRunResult } from "../../services/screenerFollowups";
-import { type PanelDiscoveryResult, mintComparisonRunId } from "../../services/recommendationKernel";
+import { type PanelDiscoveryResult } from "../../services/recommendationKernel";
 import {
   runComparePanelViaPipeline,
   runManualPanelViaPipeline,
 } from "../../workflows/manualPanelScreen";
-import { optionsEngineStoresFromSql, runComparisonViaEngine } from "../../workflows/optionsScreenEngine";
 import type { OptionsStageStorage } from "../../workflows/optionsScreenPorts";
-import { buildComparisonQuestion, kernelSnapshotFromDataSnapshot, listComparisonOutcomes, runProductionComparison, type ProductionComparisonDeps, type ProductionComparisonResult } from "../../services/comparisonRunner";
+import { buildComparisonQuestion, kernelSnapshotFromDataSnapshot, listComparisonOutcomes, type ProductionComparisonDeps } from "../../services/comparisonRunner";
+import { runPanelComparison } from "../../services/comparisonHostDispatch";
 import { getSymbolEventCalendar, toEventCalendarInfo } from "../../services/eventCalendar";
 import {
   handleOptionsLatestRuns,
@@ -610,42 +610,25 @@ export async function handleEtradeOptionsRoutes(
           env: ctx.env,
           ledgerSql: ctx.getOrm(),
         };
-        // Issue #4399: the panel comparison dispatches through the
-        // engine comparison job (#4276) when the host DO's SQL
-        // handle is available, so the run has a durable pipeline
-        // record and control addresses it by run id; without a
-        // usable handle the core executes directly (the #4069
-        // accepted-absent discipline), exactly as the NLQ
-        // comparison leg does. The engine path changes nothing
-        // about the comparison itself — same core inputs, same
-        // envelope — modulo the run id, which the route mints so
-        // the engine job and the artifact carry one id.
-        const storageSql = ctx.agentCtx?.storage?.sql;
-        let comparison: ProductionComparisonResult;
-        if (typeof storageSql?.exec === "function") {
-          const runId = mintComparisonRunId();
-          comparison = await runComparisonViaEngine(
-            {
-              runId,
-              request: {
-                assetClass: "options",
-                runIdentity: { runId },
-                trigger: "manual",
-                classInput: {
-                  comparisonRequest: {
-                    request: req,
-                    riskProfile: parsedDiscovery.value.riskProfile ?? "balanced",
-                    strategyFilter: parsedDiscovery.value.strategyFilter,
-                  },
-                },
-              },
-              engineStores: optionsEngineStoresFromSql(storageSql),
-            },
-            () => runProductionComparison({ ...coreArgs, runId }),
-          );
-        } else {
-          comparison = await runProductionComparison(coreArgs);
-        }
+        // Issue #4896: the comparison dispatches through the
+        // shared panel dispatch — the workflow host when the
+        // gate resolves to it, else the sync engine dispatch
+        // (#4399) or the direct core call (#4069), exactly as
+        // before. The dispatch lives in the shared module so
+        // this route stays under its size ratchet (#359); the
+        // local fetch above stays on every path, since the
+        // response envelope needs the snapshot's fields.
+        const comparison = await runPanelComparison({
+          env: ctx.env,
+          requestedEnv: ctx.requestedEnv,
+          userLogin,
+          brokerId: "etrade",
+          request: banded.request,
+          riskProfile: parsedDiscovery.value.riskProfile ?? "balanced",
+          strategyFilter: parsedDiscovery.value.strategyFilter,
+          coreArgs,
+          storageSql: ctx.agentCtx?.storage?.sql,
+        });
         const { artifact, generationNotes } = comparison;
         return Response.json({
           status: "compared",

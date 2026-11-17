@@ -283,6 +283,17 @@ export interface ProductionComparisonResult {
   };
 }
 
+/**
+ * Issue #4896 — the empty-snapshot failure, in one place: the
+ * resolving comparison step and the NLQ runner both fail a
+ * comparison whose snapshot has no screened contracts with this
+ * message, so the sync and host paths report the identical
+ * failure and the format cannot drift between them.
+ */
+export function comparisonEmptySnapshotError(symbol: string): Error {
+  return new Error(`Comparison snapshot for ${symbol} has no screened contracts.`);
+}
+
 export async function runProductionComparison(deps: ProductionComparisonDeps): Promise<ProductionComparisonResult> {
   const generateDetailsFn = deps.generateDetailsFn ?? generateLlmIdeaDetails;
   const rankWithLlmFn = deps.rankWithLlmFn ?? rankCandidatesWithLlm;

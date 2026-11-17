@@ -824,6 +824,18 @@ function measure(): Map<string, number> {
  * comments naming the platform, and the service type reference).
  * Baseline totals move 1308/10537 -> 1309/10542 (re-based onto
  * c26e0d2c).
+ * Baseline update (#4896, 2026-11-17): the comparison legs cut
+ * over to the comparison workflow host, gated — the gate
+ * derivations name the provider they integrate, dispositioned
+ * INTEGRATION (naming the provider is their job): 1 new row
+ * (comparisonNlqRunner.ts etrade 1 — the NLQ leg's derivation
+ * literal) and 1 raise (etradeOptions.ts etrade 65->66 — the
+ * panel leg's derivation literal in the delegation call). The
+ * shared dispatch module names no provider. Baseline totals move
+ * 1314/10672 -> 1315/10674 (re-based onto 67197ab8, preserving
+ * the main-side accountBindings row); the INTEGRATION marker is
+ * restated 700/7069 -> 707/7306 (direct recount — the marker was
+ * stale before this change).
  */
 const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (188 rows / 989 lines) ----
@@ -1032,7 +1044,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/services/platformKnowledge.ts", "etrade", 51],
   ["src/services/platformKnowledge.ts", "yahoo", 12],
   ["src/trading/interfaces.ts", "etrade", 2],
-  // ---- INTEGRATION (700 rows / 7069 lines) ----
+  // ---- INTEGRATION (707 rows / 7306 lines) ----
   ["docs/CLOUDFLARE_SCHEDULING_AND_ETAPI_TUNING.md", "etrade", 12],
   ["docs/CLOUDFLARE_SCHEDULING_AND_ETAPI_TUNING.md", "yahoo", 1],
   ["docs/EXTERNAL_APIS_AND_ENDPOINTS_DIRECTORY.md", "alpaca", 3],
@@ -1178,7 +1190,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/agents/routes/etradeBrokerPortfolioRisk.ts", "etrade", 28],
   ["src/agents/routes/etradeBrokerPublish.ts", "etrade", 6],
   ["src/agents/routes/etradeBrokerScreen.ts", "etrade", 28],
-  ["src/agents/routes/etradeOptions.ts", "etrade", 65],
+  ["src/agents/routes/etradeOptions.ts", "etrade", 66],
   ["src/agents/routes/etradeOptionsDiscoveryReport.ts", "etrade", 4],
   ["src/agents/routes/etradeOptionsEvaluate.ts", "etrade", 29],
   ["src/agents/routes/etradeOptionsEvaluate.ts", "nasdaq", 1],
@@ -1495,6 +1507,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/services/chainPipelineJobs.ts", "yahoo", 1],
   ["src/services/checkoutPorts.ts", "etrade", 1],
   ["src/services/cloudflareEmailSender.ts", "etrade", 2],
+  ["src/services/comparisonNlqRunner.ts", "etrade", 1],
   ["src/services/consolidatedCronEntries.ts", "etrade", 3],
   ["src/services/correlationService.ts", "yahoo", 1],
   ["src/services/cryptoUtils.ts", "etrade", 1],
