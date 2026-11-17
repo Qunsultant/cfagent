@@ -255,7 +255,7 @@ describe("adapter: alpaca declares quotes/bars/optionsChains; batch rides the wr
     const adapter = createAlpacaDataProvider(fixtureMarketData());
     expect(adapter.id).toBe("alpaca");
     expect(adapter.name).toBe("Alpaca Markets");
-    expect([...adapter.capabilities]).toEqual(["quotes", "historicalBars", "optionsChains"]);
+    expect([...adapter.capabilities]).toEqual(["quotes", "historicalBars", "news", "optionsChains"]);
     const out = await adapter.getQuote!("AAPL", RUN);
     expect(out.providerId).toBe("alpaca");
     expect(out.capability).toBe("quotes");
