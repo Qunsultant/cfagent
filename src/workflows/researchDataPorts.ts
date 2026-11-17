@@ -59,7 +59,7 @@ export async function resolveResearchDatasets(input: {
     available: true,
     dataset,
     asOf: dataset.asOf,
-    source: dataset.source,
+    source: dataset.sourceId,
   };
 }
 
