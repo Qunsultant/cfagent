@@ -38,6 +38,14 @@
  *    requested archive key.
  *  OBS-1011 otel.archive.forbidden — a signed-in non-admin was
  *    denied the archive (authenticated, not platform-admin).
+ *
+ * Codes added in S3 (#2808, tracing):
+ *  OBS-1012 otel.traces.export.failed — the OTLP traces
+ *    exporter failed to export a batch (transport or
+ *    serialization failure).
+ *  OBS-1013 otel.traces.free_tier_guard — the traces
+ *    free-tier write guard dropped Analytics Engine writes for
+ *    the day (the configured daily write limit was reached).
  */
 
 /** A switch value failed closed to the safe default (OFF / none / 0). */
@@ -62,6 +70,10 @@ export const OBS_ARCHIVE_KEY_REJECTED = "OBS-1009" as const;
 export const OBS_ARCHIVE_NOT_FOUND = "OBS-1010" as const;
 /** A signed-in non-admin was denied the OTel archive. */
 export const OBS_ARCHIVE_FORBIDDEN = "OBS-1011" as const;
+/** The OTLP traces exporter failed to export a batch. */
+export const OBS_TRACES_EXPORT_FAILED = "OBS-1012" as const;
+/** The traces free-tier write guard dropped Analytics Engine writes for the day. */
+export const OBS_TRACES_FREE_TIER_GUARD = "OBS-1013" as const;
 
 /** Formats a coded message: `[OBS-####] <message>`. */
 export function formatOtelMessage(code: string, message: string): string {

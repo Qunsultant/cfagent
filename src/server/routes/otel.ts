@@ -28,6 +28,7 @@ import {
   createOtelIngestionLog,
   handleOtelLogsIngestion,
   handleOtelMetricsIngestion,
+  handleOtelTracesIngestion,
 } from "../../observability/otelIngestion";
 
 /** The OTLP ingestion route path (logs). */
@@ -35,6 +36,9 @@ export const OTEL_INGESTION_ROUTE = "/api/otel/v1/logs" as const;
 
 /** Issue #5082 (S2) — the OTLP metrics ingestion route path. */
 export const OTEL_METRICS_INGESTION_ROUTE = "/api/otel/v1/metrics" as const;
+
+/** Issue #2808 (S3) — the OTLP traces ingestion route path. */
+export const OTEL_TRACES_INGESTION_ROUTE = "/api/otel/v1/traces" as const;
 
 function jsonResponse(status: number, body: Record<string, unknown>): Response {
   return new Response(JSON.stringify(body), {
@@ -46,9 +50,10 @@ function jsonResponse(status: number, body: Record<string, unknown>): Response {
 /**
  * The OTel ingestion route handler (the server.ts dispatch
  * shape: returns a Response when the path matches, null to
- * fall through to the next handler). Handles both the logs
- * route (POST /api/otel/v1/logs) and the metrics route (POST
- * /api/otel/v1/metrics, issue #5082 S2) under the same
+ * fall through to the next handler). Handles the logs route
+ * (POST /api/otel/v1/logs), the metrics route (POST
+ * /api/otel/v1/metrics, issue #5082 S2), and the traces route
+ * (POST /api/otel/v1/traces, issue #2808 S3) under the same
  * OTEL_INGEST_TOKEN gate.
  */
 export async function handleOtelRoutes(
@@ -57,7 +62,12 @@ export async function handleOtelRoutes(
   _url: URL,
   path: string,
 ): Promise<Response | null> {
-  if (path !== OTEL_INGESTION_ROUTE && path !== OTEL_METRICS_INGESTION_ROUTE) return null;
+  if (
+    path !== OTEL_INGESTION_ROUTE &&
+    path !== OTEL_METRICS_INGESTION_ROUTE &&
+    path !== OTEL_TRACES_INGESTION_ROUTE
+  )
+    return null;
 
   if (request.method !== "POST") {
     return new Response("Method Not Allowed", {
@@ -89,6 +99,23 @@ export async function handleOtelRoutes(
   // keeps the logs handler.
   if (path === OTEL_METRICS_INGESTION_ROUTE) {
     const result = await handleOtelMetricsIngestion({
+      body,
+      blobStore: createBlobStore(env),
+      log: createOtelIngestionLog(structuredLog),
+    });
+    return jsonResponse(result.status, {
+      received: result.received,
+      stored: result.stored,
+      ...(result.key ? { key: result.key } : {}),
+      ...(result.fallback ? { fallback: result.fallback } : {}),
+      ...(result.error ? { error: result.error } : {}),
+      ...(result.code ? { code: result.code } : {}),
+    });
+  }
+  // Issue #2808 (S3): the traces route hands the OTLP traces
+  // payload to the traces ingestion handler.
+  if (path === OTEL_TRACES_INGESTION_ROUTE) {
+    const result = await handleOtelTracesIngestion({
       body,
       blobStore: createBlobStore(env),
       log: createOtelIngestionLog(structuredLog),

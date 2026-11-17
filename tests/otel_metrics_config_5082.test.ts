@@ -43,7 +43,7 @@ describe("OTel metrics exporter — resolveOtelSignalExporter(\"metrics\", ...)"
   it("metrics defaults to otlp (the live signal in S2) from the file", () => {
     expect(otelSignalExporterDefault("metrics")).toBe("otlp");
     expect(otelSignalExporterDefault("logs")).toBe("otlp");
-    expect(otelSignalExporterDefault("traces")).toBe("none");
+    expect(otelSignalExporterDefault("traces")).toBe("otlp");
   });
 
   it("resolves the metrics exporter from the file value", () => {

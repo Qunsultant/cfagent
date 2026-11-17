@@ -91,6 +91,11 @@ import {
   createOtelJobPipelineMetricsRunSettledObserver,
   createOtelJobPipelineMetricsStepJournal,
 } from "../observability/otelJobPipelineMetrics";
+import { createOtelTracing } from "../observability/otelTracesProvider";
+import {
+  createOtelJobPipelineTracesRunSettledObserver,
+  createOtelJobPipelineTracesStepJournal,
+} from "../observability/otelJobPipelineTraces";
 import { buildFeedJobRegistry, buildFeedStatus } from "../services/feedJobs";
 import { resolveFeedJobTimeouts } from "../services/feedJobTimeouts";
 import {
@@ -539,6 +544,21 @@ export function createScheduledAgentPipelineControl(
     isEnabled: () => otelMetrics.isDomainEnabled("j1j7"),
     flush: () => otelMetrics.flush(),
   };
+  // Issue #2808 (S3): the OTel J1–J7 tracing stack for this
+  // host's control plane, built once per control alongside the
+  // logging and metrics stacks. The traces run-settled observer
+  // is CHAINED after the metrics observer (the metrics observer
+  // is kept, never replaced); the traces stage-step journal
+  // WRAPS the metrics journal (traces → metrics → logging →
+  // identity → step). Both traces observers check the
+  // per-domain j1j7 switch first and no-op when it is OFF. The
+  // logging and metrics paths are untouched by this wiring.
+  const otelTraces = createOtelTracing(ctx.env);
+  const otelTracesObserverDeps = {
+    tracer: otelTraces.tracer,
+    isEnabled: () => otelTraces.isDomainEnabled("j1j7"),
+    flush: () => otelTraces.flush(),
+  };
   return new JobPipelineControl({
     stores,
     runRecorder: jobRunRecorderFromStore(new SqlJobRunRecordStore(sql)),
@@ -546,10 +566,14 @@ export function createScheduledAgentPipelineControl(
       feedRunSettledObserverFor(ctx),
       createOtelJobPipelineRunSettledObserver(otelObserverDeps),
       createOtelJobPipelineMetricsRunSettledObserver(otelMetricsObserverDeps),
+      createOtelJobPipelineTracesRunSettledObserver(otelTracesObserverDeps),
     ),
-    journal: createOtelJobPipelineMetricsStepJournal({
-      ...otelMetricsObserverDeps,
-      inner: createOtelJobStepJournal(otelObserverDeps),
+    journal: createOtelJobPipelineTracesStepJournal({
+      ...otelTracesObserverDeps,
+      inner: createOtelJobPipelineMetricsStepJournal({
+        ...otelMetricsObserverDeps,
+        inner: createOtelJobStepJournal(otelObserverDeps),
+      }),
     }),
     publisher: messaging.ports?.publisher ?? null,
     // #4312 — the feed execution bound resolves from env here
