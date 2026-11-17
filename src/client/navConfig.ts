@@ -100,6 +100,15 @@ export function buildDefaultLeftNavConfig(): LeftNavConfig {
         badge: "Goal",
         badgeType: "ai",
         description: "Goal-driven screening flow with AI-orchestrated criteria",
+      }, {
+        id: "ooda",
+        label: "OODA",
+        shortLabel: "OODA",
+        category: "Intelligence",
+        icon: "Research",
+        badge: "OODA",
+        badgeType: "ai",
+        description: "Nightly OODA options research runs, stage detail, and track record",
       });
     }
 

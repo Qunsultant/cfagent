@@ -55,7 +55,11 @@ export type FeatureFlag =
   // Rollout/kill-switch flag for the neutral broker panels; an
   // absent value inherits options_screener (see
   // OPTIONS_PRODUCT_FLAG_PARENTS), an explicit OFF always wins.
-  | "broker_panel_contract";
+  | "broker_panel_contract"
+  // Issue #5122 (#5109 S8): flagship cutover flag for the nightly
+  // OODA research engine job (`research:<runId>`). OFF rolls back to
+  // the direct pipeline entry.
+  | "research_engine_cutover";
 
 export const DEFAULT_MONETIZATION_FLAG_VALUE = false;
 
@@ -98,6 +102,8 @@ export const ALL_FEATURE_FLAGS: readonly FeatureFlag[] = [
   "options_iv_history",
   // Issue #2853: broker panel contract (inherits options_screener).
   "broker_panel_contract",
+  // Issue #5122: flagship cutover flag for research:<runId>.
+  "research_engine_cutover",
 ] as const;
 
 /**

@@ -1460,6 +1460,10 @@
     "goal-screen": {
       "tab": "goal-screen"
     },
+    "ooda": {
+      "tab": "options-screener",
+      "view": "ooda"
+    },
     "sandbox-checkout": {
       "href": "/checkout/sandbox",
       "newTab": true

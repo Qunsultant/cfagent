@@ -175,6 +175,8 @@ other doors. Scope column is #1843's declaration, consumed here.
 | `manage_deliver_job` | mcp:write | L via door 2 only — acting identity required (#3539); refused on doors 1/3 (no acting-identity carrier there) |
 | `run_pipeline_chain` | mcp:write | L via door 2 only — acting identity required (#3540); refused on doors 1/3 (no acting-identity carrier there) |
 | `manage_pipeline_chain` | mcp:write | L via door 2 only — acting identity required (#3540); refused on doors 1/3 (no acting-identity carrier there) |
+| `run_research_job` | mcp:write | L via door 2 only — acting identity required (#5117); dispatches `research:<runId>` or controls `(runId, stageId)` |
+| `define_pipeline_chain` | mcp:write | L via door 2 only — acting identity required (#5117); defines declarative pipeline chains on `JobPipelineControl` |
 
 ### mcp:execute (7)
 
