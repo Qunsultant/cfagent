@@ -43,16 +43,23 @@ export type WorkflowFamily =
   | "goal"
   | "strategy";
 
-/** The four mode axes (#3069 R3). Every stage declares all four. */
+/**
+ * The four mode axes (#3069 R3). Every stage declares all four.
+ *
+ * Issue #4772: these are the engine's names (delivery / concurrency /
+ * pacing / shape). The catalogue's old names (timing / volume /
+ * partitioning) and the `monolithic` spelling are retired — the engine
+ * spells the unsharded shape `monolith`.
+ */
 export interface StageModes {
   /** Inline caller-waits, or a job/queue. */
-  timing: readonly ("sync" | "async")[];
+  delivery: readonly ("sync" | "async")[];
   /** One unit at a time, or a capped fan-out. */
   concurrency: readonly ("sequential" | "parallel")[];
   /** Whole set at once, or one unit per invocation. */
-  volume: readonly ("batch" | "online")[];
-  /** One partition per run, or partitioned across runs. */
-  partitioning: readonly ("sharded" | "monolithic")[];
+  pacing: readonly ("batch" | "online")[];
+  /** One execution unit, or one unit per configured shard key. */
+  shape: readonly ("sharded" | "monolith")[];
 }
 
 /** What one stage declares about itself. */
@@ -155,10 +162,10 @@ export const STAGE_LABELS: Record<StageName, string> = {
 };
 
 const ALL_MODES: StageModes = {
-  timing: ["sync", "async"],
+  delivery: ["sync", "async"],
   concurrency: ["sequential", "parallel"],
-  volume: ["batch", "online"],
-  partitioning: ["sharded", "monolithic"],
+  pacing: ["batch", "online"],
+  shape: ["sharded", "monolith"],
 };
 
 function stage(
@@ -589,7 +596,7 @@ export function assertWorkflowCatalog(
         );
       }
       lastIndex = index;
-      for (const axis of ["timing", "concurrency", "volume", "partitioning"] as const) {
+      for (const axis of ["delivery", "concurrency", "pacing", "shape"] as const) {
         const modes = stageDeclaration.modes[axis];
         if (!Array.isArray(modes) || modes.length === 0) {
           throw new Error(

@@ -752,14 +752,12 @@ stage ids it covers. The stage vocabulary is
 | `strategy-discovery` | strategy | analysis, store, deliver | yes | `?tab=options-screener` | Ranked strategies, no artifacts by design. Stages are recorded on the unified run record, not as stage-message topics. |
 
 The catalogue also declares each stage's modes (`StageModes`,
-`src/workflows/workflowCatalog.ts:38`): timing sync/async,
-concurrency sequential/parallel, volume batch/online, partitioning
-sharded/monolithic. Note the names differ from the engine's
-execution-mode axes (delivery, concurrency, pacing, shape — see the
-execution-mode reference and the remediation list in the research
-notes); the values are the same four axes under different names,
-except the catalog spells the unsharded shape `monolithic` where
-the engine spells it `monolith`.
+`src/workflows/workflowCatalog.ts:38`): delivery sync/async,
+concurrency sequential/parallel, pacing batch/online, shape
+sharded/monolith — the same names and values as the engine's
+execution-mode axes (#4772 unified the two namings on the engine's
+names; the catalogue's old names timing/volume/partitioning and the
+`monolithic` spelling are retired).
 
 ## The stage-job builders — J2 through J7, plus options and screener
 
@@ -972,11 +970,11 @@ async, monolith — "one unit, in order, all items, async dispatch".
 - **The engine** supports all four axes on every job, with the
   one refusal above.
 - **The workflow catalogue** declares the same four axes under
-  different names (`StageModes`,
-  `src/workflows/workflowCatalog.ts:38`): timing (sync/async),
-  concurrency (sequential/parallel), volume (batch/online),
-  partitioning (sharded/monolithic). The values match; the names
-  do not (see the remediation list in the research notes).
+  the same names (`StageModes`,
+  `src/workflows/workflowCatalog.ts:38`): delivery (sync/async),
+  concurrency (sequential/parallel), pacing (batch/online),
+  shape (sharded/monolith). The names and the values match the
+  engine's (#4772).
 - **The workflow residency** supports whatever the job's
   definition configures; the flow awaits the outcome whatever the
   delivery mode.

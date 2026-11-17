@@ -23,10 +23,10 @@ import {
 import type { WorkflowRun, WorkflowRunStage } from "../services/workflowRuns";
 
 const MODE_AXES: ReadonlyArray<{ key: keyof StageDeclaration["modes"]; label: string }> = [
-  { key: "timing", label: "Timing" },
+  { key: "delivery", label: "Delivery" },
   { key: "concurrency", label: "Concurrency" },
-  { key: "volume", label: "Volume" },
-  { key: "partitioning", label: "Partitioning" },
+  { key: "pacing", label: "Pacing" },
+  { key: "shape", label: "Shape" },
 ];
 
 const MODE_SEPARATOR = " / ";

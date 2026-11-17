@@ -37,10 +37,10 @@ describe("the catalog declares what can be run (#3071)", () => {
   it("every stage declares all four mode axes (#3069 R3)", () => {
     for (const workflow of WORKFLOW_CATALOG) {
       for (const stage of workflow.stages) {
-        expect(stage.modes.timing.length).toBeGreaterThan(0);
+        expect(stage.modes.delivery.length).toBeGreaterThan(0);
         expect(stage.modes.concurrency.length).toBeGreaterThan(0);
-        expect(stage.modes.volume.length).toBeGreaterThan(0);
-        expect(stage.modes.partitioning.length).toBeGreaterThan(0);
+        expect(stage.modes.pacing.length).toBeGreaterThan(0);
+        expect(stage.modes.shape.length).toBeGreaterThan(0);
       }
     }
   });
@@ -98,9 +98,9 @@ describe("the catalog refuses a half-declared workflow (#3071)", () => {
 
   it("refuses a stage missing a mode axis", () => {
     const broken = stock().stages.map((s, i) =>
-      i === 0 ? { ...s, modes: { ...s.modes, volume: [] as never[] } } : s,
+      i === 0 ? { ...s, modes: { ...s.modes, pacing: [] as never[] } } : s,
     );
-    expect(() => assertWorkflowCatalog([bad({ stages: broken as never })])).toThrow(/volume/i);
+    expect(() => assertWorkflowCatalog([bad({ stages: broken as never })])).toThrow(/pacing/i);
   });
 
   it("refuses an undeclared stage name", () => {
