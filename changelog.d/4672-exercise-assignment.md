@@ -1,0 +1,2 @@
+### Added
+- Add option exercise support for Alpaca (`POST /v2/positions/{symbol_or_contract_id}/exercise`) via `AlpacaMarketDataProvider.exerciseOptionPosition`, `ITradingPlatform.exerciseOption` (`AlpacaTradingPlatform`), neutral route `POST /broker/position/exercise`, and `alpaca_exercise_option` MCP tool (`mcp:trade`), plus `OPASN` / `OPEXC` / `OPEXP` assignment/exercise labels in `AlpacaBrokerPanel` (#4672).

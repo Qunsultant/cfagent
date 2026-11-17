@@ -2279,6 +2279,17 @@ export interface BrokerReplaceOrderResult {
   httpStatus?: number;
 }
 
+/** Issue #4672 (matrix gap 18): option exercise outcome from the broker. */
+export interface BrokerExerciseOptionResult {
+  success: boolean;
+  symbolOrContractId: string;
+  broker: string;
+  status: "submitted" | "refused" | "failed";
+  message: string;
+  code?: string;
+  httpStatus?: number;
+}
+
 // --- Omnichannel Trading Agent Communication Channels (Email & Slack) ---
 
 export interface InboundEmailPayload {

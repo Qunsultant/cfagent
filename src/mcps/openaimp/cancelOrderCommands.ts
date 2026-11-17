@@ -121,6 +121,12 @@ export class AlpacaCancelOrderCommand implements IMcpToolCommand {
   }
 }
 
+async function resolveSelectedAlpacaPlatform(context: McpToolContext) {
+  const { resolveTradeEnvironmentFromSettings } = await import("../../agents/routes/brokerEnvironment");
+  const environment = resolveTradeEnvironmentFromSettings(context.readSettingRaw, context.env);
+  return TradingPlatformRegistry.getPlatform("alpaca", context.env, context.orm, context.sessionId, environment);
+}
+
 /**
  * Issue #4670 (matrix gap 16) — `alpaca_replace_order`: change ONE open order in
  * place, as an agent tool.
@@ -194,9 +200,9 @@ export class AlpacaReplaceOrderCommand implements IMcpToolCommand<{
     // resolution the sibling order tools use.
     const { resolveTradeEnvironmentFromSettings } = await import("../../agents/routes/brokerEnvironment");
     const environment = resolveTradeEnvironmentFromSettings(context.readSettingRaw, context.env);
-    const platform = TradingPlatformRegistry.getPlatform("alpaca", context.env, context.orm, context.sessionId, environment);
+    const platform = await resolveSelectedAlpacaPlatform(context);
     if (typeof platform.replaceOrderRemote !== "function") {
-      throw new Error("Alpaca does not provide order replacement on this platform instance.");
+      throw new Error("This broker does not provide order replacement on this platform instance.");
     }
 
     const receipt = await platform.replaceOrderRemote({
@@ -214,6 +220,50 @@ export class AlpacaReplaceOrderCommand implements IMcpToolCommand<{
       status: receipt.status,
       code: receipt.code,
       environment,
+      message: receipt.message,
+    });
+    return receipt;
+  }
+}
+
+/**
+ * Issue #4672 (matrix gap 18) — `alpaca_exercise_option`: exercise an open long
+ * option position (`POST /v2/positions/{symbol_or_contract_id}/exercise`).
+ */
+export class AlpacaExerciseOptionCommand implements IMcpToolCommand<{ symbolOrContractId: string }> {
+  readonly name = "alpaca_exercise_option";
+  readonly description =
+    "Exercise an open long option contract position (POST /v2/positions/{symbol_or_contract_id}/exercise).";
+
+  readonly jsonSchema = {
+    type: "object" as const,
+    properties: {
+      symbolOrContractId: {
+        type: "string",
+        description: "OCC option symbol (e.g. AAPL261218C00200000) or broker position contract id",
+      },
+    },
+    required: ["symbolOrContractId"],
+  };
+
+  readonly zodSchema = z.object({
+    symbolOrContractId: z.string().min(1).describe("OCC option symbol or contract id"),
+  });
+
+  async execute(input: { symbolOrContractId: string }, context: McpToolContext) {
+    const symbolOrContractId = String(input?.symbolOrContractId ?? "").trim();
+    if (!symbolOrContractId) throw new Error("symbolOrContractId is required");
+
+    const platform = await resolveSelectedAlpacaPlatform(context);
+    if (typeof platform.exerciseOption !== "function") {
+      throw new Error("This broker does not support option exercise on this platform instance.");
+    }
+
+    const receipt = await platform.exerciseOption(symbolOrContractId);
+    context.audit?.(receipt.success ? "alpaca.option_exercised" : "alpaca.option_exercise_refused", "trading", {
+      symbolOrContractId: receipt.symbolOrContractId,
+      status: receipt.status,
+      code: receipt.code,
       message: receipt.message,
     });
     return receipt;

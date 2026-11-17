@@ -589,6 +589,46 @@ export async function handleBrokerOrderRoutes(
     }
   }
 
+  // Issue #4672 (matrix gap 18): neutral option exercise endpoint.
+  if (path.endsWith("/broker/position/exercise") && request.method === "POST") {
+    try {
+      const body = (await request.json().catch(() => ({}))) as any;
+      const symbolOrContractId = String(body.symbolOrContractId ?? body.symbol ?? body.contractId ?? "").trim();
+      if (!symbolOrContractId) {
+        return Response.json({ error: "symbolOrContractId is required" }, { status: 400 });
+      }
+      const userLogin = request.headers.get("x-user-login");
+      if (!userLogin) return unauthenticatedResponse();
+
+      const broker = await resolveTenantBroker(ctx.env);
+      const platform = brokerSupports(broker, "orderPlace")
+        ? TradingPlatformRegistry.getPlatform(broker, ctx.env, ctx.getOrm(), userLogin, requestedEnv)
+        : null;
+      if (!platform || typeof platform.exerciseOption !== "function") {
+        return Response.json(
+          {
+            code: "provider_unsupported",
+            broker,
+            message: `${broker} does not support option exercise here.`,
+            retryable: false,
+          },
+          { status: 501 },
+        );
+      }
+
+      const receipt = await platform.exerciseOption(symbolOrContractId);
+      return Response.json(
+        { ...receipt, timestamp: new Date().toISOString() },
+        { status: receipt.success ? 200 : 409 },
+      );
+    } catch (err) {
+      return Response.json(
+        { error: err instanceof Error ? err.message : "Failed to exercise option" },
+        { status: 500 },
+      );
+    }
+  }
+
   // Issue #3390: neutral cancel. A remote order belongs to the broker that took
   // it, not to a stored draft, so the broker is the tenant's selection — and a
   // broker without the capability is refused by name, never asked to cancel

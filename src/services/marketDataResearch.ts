@@ -2898,6 +2898,70 @@ export class AlpacaMarketDataProvider implements IMarketDataProvider {
   }
 
   /**
+   * Issue #4672 (matrix gap 18): Alpaca Trading v2 option exercise endpoint
+   * (`POST /v2/positions/{symbol_or_contract_id}/exercise`).
+   */
+  async exerciseOptionPosition(symbolOrContractId: string): Promise<import("../types").BrokerExerciseOptionResult> {
+    const id = String(symbolOrContractId ?? "").trim();
+    if (!id) {
+      return {
+        success: false,
+        symbolOrContractId: "",
+        broker: "alpaca",
+        status: "refused",
+        message: "Option exercise requires a contract symbol or position id.",
+      };
+    }
+    if (!this.isConfigured()) {
+      return {
+        success: false,
+        symbolOrContractId: id,
+        broker: "alpaca",
+        status: "failed",
+        message: "Alpaca Trading error: credentials are not configured, so no exercise request was sent.",
+      };
+    }
+
+    try {
+      const res = await this.throttledFetch(
+        `${this.getTradingUrl()}/v2/positions/${encodeURIComponent(id)}/exercise`,
+        {
+          method: "POST",
+          headers: { ...this.getHeaders(), Accept: "application/json" },
+        },
+      );
+      if (res.ok) {
+        return {
+          success: true,
+          symbolOrContractId: id,
+          broker: "alpaca",
+          status: "submitted",
+          httpStatus: res.status,
+          message: `Alpaca option exercise submitted for ${id}.`,
+        };
+      }
+      const data = (await res.json().catch(() => ({}))) as { message?: unknown };
+      const detail = typeof data?.message === "string" && data.message ? data.message : `HTTP ${res.status}`;
+      return {
+        success: false,
+        symbolOrContractId: id,
+        broker: "alpaca",
+        status: "refused",
+        httpStatus: res.status,
+        message: `Alpaca did not exercise ${id}: ${detail}`,
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        symbolOrContractId: id,
+        broker: "alpaca",
+        status: "failed",
+        message: `Alpaca exercise failed: ${err?.message || String(err)}`,
+      };
+    }
+  }
+
+  /**
    * Real Alpaca Trading v2: Get Account Details
    */
   async getAccount(): Promise<{ success: boolean; account?: any; message?: string; httpStatus?: number }> {

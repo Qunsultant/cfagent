@@ -1032,6 +1032,12 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
     };
   }
 
+  /** Issue #4672 (matrix gap 18): exercise an open long option position at Alpaca. */
+  async exerciseOption(symbolOrContractId: string) {
+    await this.ready();
+    return this.alpacaData.exerciseOptionPosition(symbolOrContractId);
+  }
+
   /**
    * Issue #3398 / #3508: truthful session-orders capability for Alpaca.
    * Alpaca supports pre_market (04:00–09:30 ET), regular (09:30–16:00 ET),
