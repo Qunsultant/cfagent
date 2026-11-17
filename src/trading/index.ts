@@ -64,6 +64,7 @@ export * from "./advancedOrders";
 // the platform seams (see src/trading/timeInForce.ts).
 export * from "./timeInForce";
 export * from "./brokerCatalog";
+export * from "./accountBindings";
 export * from "./brokerPanels";
 // Issue #3417: what a broker is CALLED, beside what it can do. The worker and
 // the client both read it, so no surface has to invent a name.

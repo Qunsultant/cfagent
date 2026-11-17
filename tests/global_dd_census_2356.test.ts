@@ -964,6 +964,8 @@ const STEP5_FUNNEL_SITES: Array<[string, string, string]> = [
   ["src/security/serviceTokens.ts", "createStoreKv", "service_tokens"],
   ["src/security/session.ts", "createStoreKv", "sessions"],
   ["src/security/session.ts", "listStoreEntries", "sessions"],
+  // Issue #5110: per-user { broker, mode, accountType, accountId } bindings in SessionStore DO.
+  ["src/services/accountBindings.ts", "createStoreKv", "account_bindings"],
   ["src/services/agenticPayments.ts", "consumeStoreKey", "payments"],
   ["src/services/agenticPayments.ts", "createStoreKv", "payments"],
   // Issue #3351: the per-user Alpaca credential record lives in its own bucket
@@ -1450,6 +1452,7 @@ describe("global D-D census: step 5e — residual bucket family port composition
       // sink moved into the ScheduledAgent mutation methods, so the
       // route no longer imports DoStubLike (it threads the session
       // actor into the methods instead).
+      ["src/services/accountBindings.ts", "../data/durableKv"],
       ["src/services/actorGatewayPorts.ts", "../data/durableKv"],
       ["src/services/agenticPayments.ts", "../data/durableKv"],
       ["src/trading/alpaca/credentialStore.ts", "../../data/durableKv"],
