@@ -53,6 +53,28 @@
           "timeInForce": ["DAY", "CLS"]
         }
       }
+    },
+    "tastytrade": {
+      "paper": {
+        "equity": {
+          "orderTypes": ["MARKET", "LIMIT", "STOP", "STOP_LIMIT"],
+          "timeInForce": ["DAY", "GTC", "IOC", "FOK"]
+        },
+        "options": {
+          "orderTypes": ["MARKET", "LIMIT"],
+          "timeInForce": ["DAY", "GTC", "IOC", "FOK"]
+        }
+      },
+      "live": {
+        "equity": {
+          "orderTypes": ["MARKET", "LIMIT", "STOP", "STOP_LIMIT"],
+          "timeInForce": ["DAY", "GTC", "IOC", "FOK"]
+        },
+        "options": {
+          "orderTypes": ["MARKET", "LIMIT"],
+          "timeInForce": ["DAY", "GTC", "IOC", "FOK"]
+        }
+      }
     }
   }
 }

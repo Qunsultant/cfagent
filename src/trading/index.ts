@@ -17,6 +17,7 @@ import { TradingPlatformRegistry } from "./registry";
 import { ETradeTradingPlatform } from "./etrade/platform";
 import { AlpacaTradingPlatform } from "./alpaca/platform";
 import { PublicTradingPlatform } from "./public/platform";
+import { TastytradeTradingPlatform } from "./tastytrade/platform";
 import { assertBrokerCatalogComplete } from "./brokerCatalog";
 
 // Register default pluggable platforms (unchanged)
@@ -33,6 +34,10 @@ TradingPlatformRegistry.register(
 TradingPlatformRegistry.register(
   "public",
   (env, orm, userLogin, overrideEnv) => new PublicTradingPlatform(env, orm, userLogin, overrideEnv),
+);
+TradingPlatformRegistry.register(
+  "tastytrade",
+  (env, orm, userLogin, overrideEnv) => new TastytradeTradingPlatform(env, orm, userLogin, overrideEnv),
 );
 TradingPlatformRegistry.register("sandbox", (env, orm, userLogin, overrideEnv, storage) => new ETradeTradingPlatform(env, orm, userLogin, overrideEnv, undefined, storage));
 
@@ -85,6 +90,8 @@ export * from "./etrade/client";
 export * from "./etrade/platform";
 export * from "./alpaca/platform";
 export * from "./public/platform";
+export * from "./tastytrade/platform";
+export * from "./tastytrade/credentials";
 export * from "./alpaca/fillLots";
 export * from "./alpaca/occSymbol";
 // Issue #3351: the sign-in surface. Exported through the boundary so route
