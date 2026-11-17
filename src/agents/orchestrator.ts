@@ -775,8 +775,8 @@ export class OrchestratorAgent extends PortThink {
     };
   }
 
-  private scheduleWatchdogContext(): ScheduleWatchdogContext {
-    const ownerLogin = this.getScreenerExecutionContext()?.userLogin;
+  private async scheduleWatchdogContext(): Promise<ScheduleWatchdogContext> {
+    const ownerLogin = (await this.getScreenerExecutionContext())?.userLogin;
     return {
       env: this.env,
       sql: this.ctx.storage.sql,
@@ -2000,7 +2000,7 @@ export class OrchestratorAgent extends PortThink {
   // expected tick + grace. Armed from onStart on the same 15-minute
   // tick as the #3784 sweep: one tick implementation, two consumers.
   async watchdogMissedSchedules(): Promise<ScheduleWatchdogSweepResult> {
-    return watchdogMissedSchedules(this.scheduleWatchdogContext(), {
+    return watchdogMissedSchedules(await this.scheduleWatchdogContext(), {
       recordedCallbacks: RECORDED_SCHEDULE_CALLBACKS,
     });
   }
