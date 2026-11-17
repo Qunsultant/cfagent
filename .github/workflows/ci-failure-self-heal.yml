@@ -23,7 +23,7 @@ jobs:
       issues: write
     steps:
       - name: File issues for failed workflow runs
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const SELF = "Workflow Failure Watch";
