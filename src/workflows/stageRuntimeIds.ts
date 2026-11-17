@@ -141,6 +141,22 @@ export type StrategyPipelineStage = (typeof STRATEGY_PIPELINE_STAGES)[number];
 export const STRATEGY_ADDRESSABLE_STAGES = STRATEGY_PIPELINE_STAGES;
 
 /**
+ * Issue #5118 (#5109 S2) — the nightly research (`research:<runId>`) pipeline's
+ * stages in execution order. Extends the `jobs` family (feed, enrich, analyze,
+ * generate, deliver) with the `evaluate` stage.
+ */
+export const RESEARCH_PIPELINE_STAGES = [
+  "feed",
+  "enrich",
+  "analyze",
+  "generate",
+  "deliver",
+  "evaluate",
+] as const;
+
+export type ResearchPipelineStage = (typeof RESEARCH_PIPELINE_STAGES)[number];
+
+/**
  * Issue #4067 - the 4 display stages the catalog partitions the 8
  * execution stages under (workflowCatalog.ts, options-screener
  * entry: feed covers plan/chainFetch/enrich/screen/risk; store
