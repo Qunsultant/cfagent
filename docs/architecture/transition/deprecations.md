@@ -64,6 +64,14 @@ slice.
   is unbound, rather than silently dropping bytes to legacy DO storage.
 - Deletion condition: zero consumers plus an owner decision plus a gate
   amendment; deletion is never part of a program slice.
+## 2026-11-17 — tail slice 3 retires apiKeysPanel.css in place (#5140)
+
+- File: `src/client/apiKeysPanel.css` → retired in place (no rules remain)
+- Date: 2026-11-17
+- Reason: Issue #5140 (sub of #3695, tail slice 3) migrates `src/client/ApiKeysPanel.tsx` to primitives and tokens; the sheet's sole importer no longer imports it and no other component uses any of its 18 selectors (checked `className=` AND `wrapperClassName=` uses). The sheet stays on disk (no file deletion, gitops §22) with a deprecation header naming its successor. The other nine files in the slice import no sheet: their classes were dead (13 distinct, zero CSS rules repo-wide) or shared rules that stay (`section-label-row` in `src/client/styles.css`, still used by `BrokerDynamicMenu.tsx`; `schedules-toolbar` in `src/client/reports.css`).
+- Replacement: `src/client/components/ui/primitives.css` (ui-* utilities, incl. `ui-meta`, `ui-mono`, `ui-danger`, `ui-grow`) and `src/client/tokens.css` (design tokens), plus the Card, CardHeader, Flex, Notice, PageSection, and Stack primitives.
+- Consumers at deprecation: none — the sole importer was migrated in the same slice.
+- Deletion condition: zero consumers (already met) plus an owner decision plus a gate amendment; deletion is never part of a program slice.
 
 ## 2026-11-17 — tail slice 1 retires dataProvidersPanel.css in place (#5016)
 

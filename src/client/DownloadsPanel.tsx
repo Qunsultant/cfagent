@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Button, CardHeader, TextInput, Card, Stack, Flex, Grid } from "./components/ui";
+import { Button, CardHeader, TextInput, Card, PageSection, Stack, Flex, Grid } from "./components/ui";
 import { OptionsDataDownloadDropdown } from "./options/OptionsDataDownloadDropdown";
 import { useBrokerEnvironment } from "./brokerEnvironment";
 
@@ -16,48 +16,43 @@ export function DownloadsPanel({ activeEnv, userLogin }: DownloadsPanelProps) {
   const [symbol, setSymbol] = useState("NVDA");
 
   return (
-    <div className="downloads-panel">
-      <div className="section-label-row">
-        <span>Parameters &amp; Options Data Export</span>
-        <small>Download comprehensive options datasets, Greek surfaces, and historical chain parameters</small>
-      </div>
+    <PageSection>
+      <CardHeader
+        title="Parameters & Options Data Export"
+        subtitle="Download comprehensive options datasets, Greek surfaces, and historical chain parameters"
+      />
 
-      <Stack gap="4" className="downloads-content">
+      <Stack gap="4">
         <Card>
           <Stack gap="3">
             <div>
-              <CardHeader title="Options Chain &amp; Dataset Download" />
-              <p className="downloads-card-sub">
+              <CardHeader title="Options Chain & Dataset Download" />
+              <p className="ui-meta">
                 Select an underlying ticker to export its live options chain across all strikes, maturities, and Greeks.
               </p>
             </div>
 
             <Flex align="center" gap="3" wrap>
-              <div className="downloads-ticker-field">
-                <TextInput
-                  id="export-ticker-input"
-                  label="Underlying Symbol"
-                  type="text"
-                  value={symbol}
-                  onChange={(e) => setSymbol(e.target.value.toUpperCase())}
-                  placeholder="NVDA"
-                  maxLength={10}
-                />
-              </div>
+              <TextInput
+                id="export-ticker-input"
+                label="Underlying Symbol"
+                type="text"
+                value={symbol}
+                onChange={(e) => setSymbol(e.target.value.toUpperCase())}
+                placeholder="NVDA"
+                maxLength={10}
+              />
 
-              <div className="downloads-action-btn">
-                <OptionsDataDownloadDropdown
-                  symbol={symbol.trim() || "NVDA"}
-                  activeEnv={effectiveEnv}
-                  userLogin={userLogin}
-                  label={`📥 Export ${symbol.trim() || "NVDA"} Options Data`}
-                  className="downloads-export-btn"
-                />
-              </div>
+              <OptionsDataDownloadDropdown
+                symbol={symbol.trim() || "NVDA"}
+                activeEnv={effectiveEnv}
+                userLogin={userLogin}
+                label={`📥 Export ${symbol.trim() || "NVDA"} Options Data`}
+              />
             </Flex>
 
             <Flex align="center" gap="2" wrap>
-              <span className="downloads-popular-label">Popular:</span>
+              <span>Popular:</span>
               {POPULAR_SYMBOLS.map((sym) => (
                 <Button
                   key={sym}
@@ -74,23 +69,23 @@ export function DownloadsPanel({ activeEnv, userLogin }: DownloadsPanelProps) {
 
         <Card>
           <Stack gap="3">
-            <CardHeader title="Export Formats &amp; Data Dictionary" />
+            <CardHeader title="Export Formats & Data Dictionary" />
             <Grid columns={3} gap="3">
-              <div className="downloads-format-card">
+              <div>
                 <strong>📊 CSV Format (.csv)</strong>
-                <p className="downloads-format-desc">
+                <p>
                   Tabular structure suitable for spreadsheet modeling in Excel, Google Sheets, or Python pandas analysis. Includes all strikes, bid, ask, volume, open interest, and Black-Scholes Greeks.
                 </p>
               </div>
-              <div className="downloads-format-card">
+              <div>
                 <strong>📋 Excel Format (.xlsx)</strong>
-                <p className="downloads-format-desc">
+                <p>
                   Multi-tab workbook containing formatted Calls, Puts, Greek Surfaces, and Volatility Skew summary with column auto-widths and numeric formatting.
                 </p>
               </div>
-              <div className="downloads-format-card">
+              <div>
                 <strong>🔧 JSON Format (.json)</strong>
-                <p className="downloads-format-desc">
+                <p>
                   Raw structured JSON payload matching the ETAPI schema, perfect for programmatic consumption, pipeline feeds, and custom backtesting engines.
                 </p>
               </div>
@@ -98,6 +93,6 @@ export function DownloadsPanel({ activeEnv, userLogin }: DownloadsPanelProps) {
           </Stack>
         </Card>
       </Stack>
-    </div>
+    </PageSection>
   );
 }

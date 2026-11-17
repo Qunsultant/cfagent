@@ -54,7 +54,7 @@ import {
 // Issue #4333 — the section no longer lists those runs: the ledger is the
 // one run list, and this section hands the reader to it (`kind=goal`).
 import { normalizeJobRunRecord } from "../services/jobRunRecords";
-import { Badge, Button, CardHeader, Checkbox, Flex, Modal, Notice, Select, Stack, Table, Tabs, TabPanel, TextInput, type TableColumn } from "./components/ui";
+import { Badge, Button, CardHeader, Checkbox, Flex, Modal, Notice, PageSection, Select, Stack, Table, Tabs, TabPanel, TextInput, type TableColumn } from "./components/ui";
 import { DelegationContractPreview } from "./DelegationContractPreview";
 import { buildDelegationContract } from "./delegationContract";
 import { useUrlSyncedTabs } from "./useUrlSyncedTabs";
@@ -75,6 +75,12 @@ import {
 import { cronToEnglish } from "./SchedulesPanel";
 
 export interface ScheduledGoalsPanelProps {
+  /**
+   * Retained for callers (SchedulesHome renders the panel embedded);
+   * it no longer changes the markup — the retired `scheduled-goals-panel`
+   * class it used to toggle was dead (no CSS rule), so both renderings
+   * are identical now.
+   */
   embedded?: boolean;
 }
 
@@ -118,7 +124,7 @@ function ResultRows({ results }: { results: PresetGoalResult[] | null }) {
   );
 }
 
-export function ScheduledGoalsPanel({ embedded = false }: ScheduledGoalsPanelProps = {}) {
+export function ScheduledGoalsPanel(_props: ScheduledGoalsPanelProps = {}) {
   const [goals, setGoals] = useState<ScheduledGoal[]>([]);
   const [ticks, setTicks] = useState<ScheduleTick[]>([]);
   const [operations, setOperations] = useState<CatalogOperation[]>([]);
@@ -452,7 +458,7 @@ export function ScheduledGoalsPanel({ embedded = false }: ScheduledGoalsPanelPro
   }));
 
   return (
-    <div className={embedded ? "" : "scheduled-goals-panel"}>
+    <div>
       <Modal
         open={removeTarget !== null}
         onClose={() => setRemoveTarget(null)}
@@ -483,6 +489,7 @@ export function ScheduledGoalsPanel({ embedded = false }: ScheduledGoalsPanelPro
         </p>
       </Modal>
 
+      <PageSection>
       <Tabs<GoalScheduleSection>
         idBase="schedules-goals"
         ariaLabel="Goal schedule sections"
@@ -751,10 +758,7 @@ export function ScheduledGoalsPanel({ embedded = false }: ScheduledGoalsPanelPro
           <CardHeader title="Recent ticks" />
           {ticks.length === 0 && <div className="ui-meta">No ticks recorded yet.</div>}
           {ticks.map((t, i) => (
-            <div
-              key={`${t.timestamp}-${i}`}
-              style={{ borderBottom: "1px solid var(--color-border-subtle)", paddingBottom: "var(--space-2)" }}
-            >
+            <div key={`${t.timestamp}-${i}`}>
               <Stack gap="1">
                 <div>
                   <strong>{fmtTime(t.timestamp)}</strong> — evaluated {t.goalsEvaluated}, created{" "}
@@ -810,6 +814,7 @@ export function ScheduledGoalsPanel({ embedded = false }: ScheduledGoalsPanelPro
           </div>
         </Stack>
       </TabPanel>
+      </PageSection>
     </div>
   );
 }

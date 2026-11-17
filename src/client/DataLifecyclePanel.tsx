@@ -28,9 +28,11 @@ import React, { useCallback, useEffect, useState } from "react";
 import {
   Badge,
   Button,
+  CardHeader,
   Checkbox,
   Modal,
   Notice,
+  PageSection,
   SegmentedControl,
   Select,
   Spinner,
@@ -211,10 +213,7 @@ function CleanStateCard() {
 
   return (
     <Stack gap="3">
-      <div className="section-label-row">
-        <span>Clean state</span>
-        <small>Preview, export, then clear to the defined clean state</small>
-      </div>
+      <CardHeader title="Clean state" subtitle="Preview, export, then clear to the defined clean state" />
       <Notice tone="info">
         Tenant scope clears only the named tenant&apos;s member instances,
         memberships, genesis marker, and member sessions. Platform scope is
@@ -411,10 +410,7 @@ function PlatformBootstrapCard() {
 
   return (
     <Stack gap="3">
-      <div className="section-label-row">
-        <span>Platform bootstrap</span>
-        <small>Initialization elements, checked against their sources of truth</small>
-      </div>
+      <CardHeader title="Platform bootstrap" subtitle="Initialization elements, checked against their sources of truth" />
       <Notice tone="info">
         The check reports each element present, missing, or external
         (deployment-owned, with no in-route action). Initialize performs the
@@ -536,10 +532,7 @@ function TenantBootstrapCard() {
 
   return (
     <Stack gap="3">
-      <div className="section-label-row">
-        <span>Tenant bootstrap</span>
-        <small>Full initialization after the directory record, per step</small>
-      </div>
+      <CardHeader title="Tenant bootstrap" subtitle="Full initialization after the directory record, per step" />
       <Notice tone="info">
         Bootstrap creates the tenant record when missing, verifies the
         effective settings through the settings port, grants the founding
@@ -787,10 +780,7 @@ function RecreateCard() {
 
   return (
     <Stack gap="3">
-      <div className="section-label-row">
-        <span>Recreate schema</span>
-        <small>Rebuild the schema on the D1 leg and the member instances</small>
-      </div>
+      <CardHeader title="Recreate schema" subtitle="Rebuild the schema on the D1 leg and the member instances" />
       <Notice tone="info">
         The recreate rebuilds SQL schema only: it probes each store, runs
         only the steps that close a diff, and verifies afterwards. A second
@@ -1018,11 +1008,13 @@ function RecreateCard() {
 
 export function DataLifecyclePanel() {
   return (
-    <Stack gap="4">
-      <CleanStateCard />
-      <PlatformBootstrapCard />
-      <TenantBootstrapCard />
-      <RecreateCard />
-    </Stack>
+    <PageSection>
+      <Stack gap="4">
+        <CleanStateCard />
+        <PlatformBootstrapCard />
+        <TenantBootstrapCard />
+        <RecreateCard />
+      </Stack>
+    </PageSection>
   );
 }
