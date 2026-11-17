@@ -4568,6 +4568,11 @@
           "pk": 0
         },
         {
+          "name": "email",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
           "name": "updated_at_ms",
           "type": "INTEGER",
           "pk": 0

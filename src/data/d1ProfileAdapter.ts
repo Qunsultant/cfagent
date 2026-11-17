@@ -14,13 +14,13 @@
  * failure rolls both back, so a key is never recorded without its
  * write and a write never lands without its key.
  */
-import { type DrizzleD1Database } from "drizzle-orm/d1";
-import { createDrizzleD1Db } from "./d1QueryLogger";
+import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
 import { eq } from "drizzle-orm";
 import { agentProfileIdempotencyKeys, agentUserProfiles } from "./drizzleSchema";
 import {
   applyMigrations,
   MIGRATION_0050_USER_PROFILES,
+  MIGRATION_0068_USER_PROFILE_EMAIL,
   type MigrationDb,
 } from "./migrationRunner";
 import type { UserProfile, UserProfileStore } from "./profilePorts";
@@ -35,7 +35,7 @@ export type ProfileDb = DrizzleD1Database<{
 
 /** Build the Drizzle D1 database object from a bound D1 client. */
 export function createD1ProfileDb(d1: D1Database): ProfileDb {
-  return createDrizzleD1Db(d1, {
+  return drizzle(d1, {
     schema: { agentUserProfiles, agentProfileIdempotencyKeys },
   });
 }
@@ -43,12 +43,15 @@ export function createD1ProfileDb(d1: D1Database): ProfileDb {
 /**
  * Idempotent schema-ensure: applies migration 0050 (the
  * agent_user_profiles table + the agent_profile_idempotency_keys
- * table). Re-ensure is a no-op (idempotent creation plus
- * the migration marker), so a later ensure never overwrites a
- * stored profile.
+ * table) and migration 0068 (the contact email column). Re-ensure
+ * is a no-op (idempotent creation plus the migration marker), so a
+ * later ensure never overwrites a stored profile.
  */
 export async function ensureUserProfileSchema(db: ProfileDb): Promise<number[]> {
-  return applyMigrations(db as unknown as MigrationDb, [MIGRATION_0050_USER_PROFILES]);
+  return applyMigrations(db as unknown as MigrationDb, [
+    MIGRATION_0050_USER_PROFILES,
+    MIGRATION_0068_USER_PROFILE_EMAIL,
+  ]);
 }
 
 function toProfile(row: typeof agentUserProfiles.$inferSelect): UserProfile {
@@ -56,6 +59,7 @@ function toProfile(row: typeof agentUserProfiles.$inferSelect): UserProfile {
     userLogin: row.userLogin,
     displayName: row.displayName,
     phone: row.phone,
+    email: row.email,
     updatedAtMs: row.updatedAtMs,
   };
 }
@@ -80,6 +84,7 @@ export class D1ProfileAdapter implements UserProfileStore {
         userLogin: profile.userLogin,
         displayName: profile.displayName,
         phone: profile.phone,
+        email: profile.email,
         updatedAtMs: profile.updatedAtMs,
       })
       .onConflictDoUpdate({
@@ -87,6 +92,7 @@ export class D1ProfileAdapter implements UserProfileStore {
         set: {
           displayName: profile.displayName,
           phone: profile.phone,
+          email: profile.email,
           updatedAtMs: profile.updatedAtMs,
         },
       });
@@ -115,6 +121,7 @@ export class D1ProfileAdapter implements UserProfileStore {
           userLogin: profile.userLogin,
           displayName: profile.displayName,
           phone: profile.phone,
+          email: profile.email,
           updatedAtMs: profile.updatedAtMs,
         },
         idempotencyKey,

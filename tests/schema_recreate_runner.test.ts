@@ -114,9 +114,9 @@ function canonParams(params: Record<string, string>): string {
 }
 
 describe("P5 runner — plan resolution (P4 finding 1: phased order)", () => {
-  it("resolves 418 executable steps and skips the seed-form entry with its reason", () => {
+  it("resolves 419 executable steps and skips the seed-form entry with its reason", () => {
     const p = plan();
-    expect(p.steps).toHaveLength(418);
+    expect(p.steps).toHaveLength(419);
     expect(p.skipped).toHaveLength(1);
     expect(p.skipped[0].code).toBe(SEED_FORM_CODE);
     expect(p.skipped[0].reason).toMatch(/call site/i);
@@ -127,7 +127,7 @@ describe("P5 runner — plan resolution (P4 finding 1: phased order)", () => {
     const harness = resolveCombinedSteps().filter(
       (s) => s.code !== SEED_FORM_CODE,
     );
-    expect(harness).toHaveLength(418);
+    expect(harness).toHaveLength(419);
     // Production move 1: the rebuild CREATE for agent_price_catalogue
     // must stay after the RENAME that clears its table (a second
     // table-creation for the same table cannot run before the rename
@@ -248,13 +248,13 @@ describe("P5 runner — delta-to-steps selection (P4 finding 3, P4 finding 2)", 
   it("selects every needed schema step and every seed on a fresh D1 store", () => {
     const legPlan = planForLeg(plan(), "d1");
     const selected = selectSteps(legPlan, emptySchemaModel(), []);
-    // 241 schema steps in the leg, minus 6 column-adds whose columns
+    // 242 schema steps in the leg, minus 6 column-adds whose columns
     // a selected creation already provides (the ORM's tenant_id,
     // mas_events' hashes, mas_trades' broker/price_source/mode) — those
     // would fail on real SQLite as duplicate columns, so the
     // projected-model walk skips them. All 11 seeds run: their
     // tables' creations are selected.
-    expect(selected.schema).toHaveLength(235);
+    expect(selected.schema).toHaveLength(236);
     expect(selected.seeds).toHaveLength(11);
     expect(selected.skipped).toHaveLength(8);
     expect(

@@ -612,6 +612,7 @@ export function FirstRunScreen({ userLogin, initialStep, onComplete, onDismiss, 
                   Display name: {summary.profile?.displayName ?? summary.identity.userLogin}
                 </p>
                 <p>Phone: {summary.profile?.phone ?? "Not provided"}</p>
+                <p>Email: {summary.profile?.email ?? "Not provided"}</p>
                 {/* Issue #3263: approved-free quota at a glance. The
                     grant is operator-set; a missing quota read or an
                     inactive grant reads as no grant, never as zero —

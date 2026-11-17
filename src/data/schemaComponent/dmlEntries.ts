@@ -599,6 +599,7 @@ const BATCH_ENTRIES: DmlCatalogueEntry[] = [
             set: {
               displayName: profile.displayName,
               phone: profile.phone,
+              email: profile.email,
               updatedAtMs: profile.updatedAtMs,
             },
           }),

@@ -18,6 +18,8 @@ export interface ProfileLimits {
   displayNameMaxLength: number;
   /** Phone: maximum characters after trimming (30). */
   phoneMaxLength: number;
+  /** Email: maximum characters after trimming (254, the RFC 5321 path limit). */
+  emailMaxLength: number;
 }
 
 export const PROFILE_LIMITS: ProfileLimits = raw as ProfileLimits;

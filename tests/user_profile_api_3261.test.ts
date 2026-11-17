@@ -32,6 +32,7 @@ const VIEW = {
   userLogin: "prof-api-a",
   displayName: "Ada",
   phone: "+1 555-0100",
+  email: null,
   updatedAtMs: 1234,
 };
 

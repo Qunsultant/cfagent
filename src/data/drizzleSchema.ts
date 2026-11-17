@@ -418,19 +418,24 @@ export const agentOnboardingState = sqliteTable("agent_onboarding_state", {
 });
 
 /**
- * Issue #3261 — user profile: display name + phone, one row per
- * verified login. A dedicated table, not columns on the commercial
- * accounts row, so billing upserts can never clobber profile
- * fields. Phone is an UNVERIFIED contact field, never used for
- * auth or recovery. No email column: email change touches IAAA /
- * session / auth and needs CISO review first (#3261 comment
- * 6681436382, refs #945). This schema MAPS the table; DDL
- * authority lives in migration 0050 (src/data/migrationRunner.ts).
+ * Issue #3261 — user profile: display name + phone + contact
+ * email, one row per verified login. A dedicated table, not
+ * columns on the commercial accounts row, so billing upserts can
+ * never clobber profile fields. Phone and email are UNVERIFIED
+ * contact fields, never used for auth or recovery. Email is a
+ * contact email only: it never changes the login (the login IS
+ * the verified identity — src/services/platformIdentity.ts
+ * carries no email). Email was added by migration 0068
+ * (owner-directed 2026-11-16, CISO-review deferral lifted by
+ * explicit owner direction; no CISO review happened). This schema
+ * MAPS the table; DDL authority lives in migrations 0050 + 0068
+ * (src/data/migrationRunner.ts).
  */
 export const agentUserProfiles = sqliteTable("agent_user_profiles", {
   userLogin: text("user_login").primaryKey(),
   displayName: text("display_name"),
   phone: text("phone"),
+  email: text("email"),
   updatedAtMs: integer("updated_at_ms").notNull(),
 });
 

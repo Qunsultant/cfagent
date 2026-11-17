@@ -386,19 +386,23 @@ export async function handlePlatformAccountRoutes(
 
     // User profile (#3261) — self only, keyed by the verified
     // session login. The body is never trusted for identity: a
-    // client-supplied userLogin/tenantId/email is not read here at
-    // all, in any path. Display name and phone only — email change
-    // needs CISO review first (#3261 comment 6681436382, refs
-    // #945) and has no route until that review lands. Every
-    // response carries {code, message} from the outcome catalog
-    // (AOP); validation failures are structural (field + kind at
-    // the point of failure, kind to logs only, never values).
+    // client-supplied userLogin/tenantId is not read here at all,
+    // in any path. Display name, phone, and contact email are the
+    // editable fields; the contact email never changes the login
+    // (the login IS the verified identity) and is never used for
+    // auth or recovery. Email was added owner-directed 2026-11-16,
+    // the CISO-review deferral lifted by explicit owner direction;
+    // no CISO review happened and none is claimed. Every response
+    // carries {code, message} from the outcome catalog (AOP);
+    // validation failures are structural (field + kind at the
+    // point of failure, kind to logs only, never values).
     // Idempotent Receiver (standards §7.2): the POST requires an
     // idempotencyKey and replays it with 409. A POST with no
     // profile fields is a no-op read: it writes nothing and audits
     // nothing. Writes audit code + message + login + changed-flags
-    // only, never the profile values themselves (phone is PII).
-    // A store throw fails closed as a coded 503, never a raw error.
+    // only, never the profile values themselves (email and phone
+    // are PII). A store throw fails closed as a coded 503, never
+    // a raw error.
     if (isProfileGet || isProfileSave) {
       if (!ports.profile) {
         logAspectEvent({
@@ -442,6 +446,7 @@ export async function handlePlatformAccountRoutes(
       const body = (await request.json().catch(() => ({}))) as {
         displayName?: unknown;
         phone?: unknown;
+        email?: unknown;
         idempotencyKey?: unknown;
       };
       const key = extractIdempotencyKey(body);
@@ -483,7 +488,7 @@ export async function handlePlatformAccountRoutes(
         return Response.json(profileCodedBody("FAILURE_PROFILE_STORE_UNAVAILABLE"), { status: 503 });
       }
       const input = validated.value;
-      if (!("displayName" in input) && !("phone" in input)) {
+      if (!("displayName" in input) && !("phone" in input) && !("email" in input)) {
         return Response.json({
           ...profileCodedBody("SUCCESS_PROFILE_READ"),
           ...toUserProfileView(verifiedLogin, previous.profile),
@@ -498,6 +503,7 @@ export async function handlePlatformAccountRoutes(
             displayName:
               "displayName" in input ? (input.displayName ?? null) : (previous.profile?.displayName ?? null),
             phone: "phone" in input ? (input.phone ?? null) : (previous.profile?.phone ?? null),
+            email: "email" in input ? (input.email ?? null) : (previous.profile?.email ?? null),
             updatedAtMs: nowMs,
           },
           key.key,
@@ -536,6 +542,7 @@ export async function handlePlatformAccountRoutes(
         userLogin: verifiedLogin,
         displayNameChanged: (previous.profile?.displayName ?? null) !== next.displayName,
         phoneChanged: (previous.profile?.phone ?? null) !== next.phone,
+        emailChanged: (previous.profile?.email ?? null) !== next.email,
         updatedAtMs: nowMs,
       });
       return Response.json({
