@@ -48,8 +48,15 @@ describe("Issue #5118 (Sub-issue 2 of #5109) — Research Services", () => {
           runId,
           evaluatedAt: "2026-11-17T22:00:00.000Z",
           rulesVersion: "1.0.0",
-          stats: { evaluated: 1, invalidated: 0, winning: 1, directionCorrect: 1 },
-          results: [],
+          ideas: [],
+          aggregates: {
+            evaluated: 1,
+            invalidated: 0,
+            avgPnlPerUnit: 12.5,
+            dataQualityFailures: 0,
+            directionAccuracy: 1,
+          },
+          note: "test evaluation",
         }),
         evaluationStore: {
           listRunReportJson: () => [],
