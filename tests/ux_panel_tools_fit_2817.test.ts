@@ -12,8 +12,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-const stylesSrc = readFileSync(join(__dirname, "../src/client/styles.css"), "utf8");
-const dropdownSrc = readFileSync(join(__dirname, "../src/client/options/strategyDiscovery.css"), "utf8");
+const stylesSrc = readFileSync(join(__dirname, "../src/client/styles.deprecated.css"), "utf8");
+const dropdownSrc = readFileSync(join(__dirname, "../src/client/options/strategyDiscovery.deprecated.css"), "utf8");
 const menuSrc = readFileSync(join(__dirname, "../src/client/BrokerDynamicMenu.tsx"), "utf8");
 
 // Flat top-level rule block for a selector: from the selector's
@@ -73,7 +73,7 @@ describe("Settings panel tools-row fit contract (#2817)", () => {
   });
 
   it("the dropdown's own file does not re-expand the button", () => {
-    // strategyDiscovery.css owns the button's base look; it must not
+    // strategyDiscovery.deprecated.css owns the button's base look; it must not
     // set a fixed width or min-width that defeats the panel's shrink.
     const block = ruleBlock(dropdownSrc, ".options-download-main-btn {");
     expect(block).not.toContain("min-width: 3");

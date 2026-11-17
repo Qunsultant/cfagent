@@ -53,7 +53,7 @@ import { buildAppliedPatternParams } from "./patternApplyHandoff";
 import { stockPatternById } from "../workflows/stockPatternCatalog";
 import { navigateToTab, subscribeToRouteChanges } from "./router";
 import type { TradeOrderContext } from "./trading/tradeOrderContext";
-import "./optionsResearch.css";
+import "./optionsResearch.deprecated.css";
 
 /** Stock Hub (issue #2896): the stock-specific copy of the screener
  *  hub — exactly three tabs. Stocks (autonomous run history + run

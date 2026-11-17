@@ -18,7 +18,7 @@ import {
   DIRECTION_TAG_LABELS,
   isDirectionTag,
 } from "../../trading";
-import "./strategyDiscovery.css";
+import "./strategyDiscovery.deprecated.css";
 
 export interface StrategyInfo {
   id: string;

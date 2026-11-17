@@ -60,7 +60,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import "./scannerPanel.css";
+import "./scannerPanel.deprecated.css";
 import { Badge, Button, Card, CardHeader, Checkbox, FieldShell, Flex, Grid, Notice, PageSection, PillGroup, Select, Stack, Table, TextInput, type BadgeTone } from "./components/ui";
 import { StrategyLibraryModal } from "./options/StrategyLibraryModal";
 import { resolveCatalogStrategyLabels } from "./options/strategyLibrary";

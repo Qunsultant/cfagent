@@ -100,6 +100,8 @@ Each grandfathered class carries the slice that burns it down:
 | S-U8 | `options/flows/optionsFlows.css`, `scheduledOptions.css`, `chat/optionsCard.css`, `researchReports.css` | 277 |
 | S-U9 | `options/riskAnalysis.css` | 68 |
 
+S-U7 (the slice, #5178) renamed 20 sheets to `*.deprecated.css` — the 3 S-U7 files plus 12 leftovers from closed waves plus 5 already-retired sheets. Wave values are unchanged: waves track class migration, not filenames.
+
 Multi-file classes (123) take the **earliest** wave among their
 defining files (wave-1 < S-U4 < … < S-U9). The entry's `file` is the
 defining file with the earliest wave (alphabetical tie-break); `files`

@@ -46,7 +46,7 @@ import { RiskAnalysisModal } from "./RiskAnalysisModal";
 import type { RiskSubject } from "./riskManagementEngine";
 import { OptionsDataDownloadDropdown } from "./OptionsDataDownloadDropdown";
 import type { TradeOrderContext } from "../trading/tradeOrderContext";
-import "./strategyDiscovery.css";
+import "./strategyDiscovery.deprecated.css";
 import { StrategyLibraryModal, type StrategyInfo } from "./StrategyLibraryModal";
 import { Button, CardHeader, FieldShell, PillGroup, SegmentedControl, Select, Table, TextInput, Modal, useToast } from "../components/ui";
 

@@ -75,7 +75,7 @@ import { fetchLoggedInUsers } from "./loggedInUsersApi";
 // itself no longer uses any class from it; the import is the subtree's
 // only load of the sheet (main.tsx does not import it). Retiring the sheet
 // waits on migrating those children.
-import "./iaaaAdminPanel.css";
+import "./iaaaAdminPanel.deprecated.css";
 
 type IaaaAdminTab = "overview" | "members" | "api" | "mcp" | "iaaa" | "correlations";
 

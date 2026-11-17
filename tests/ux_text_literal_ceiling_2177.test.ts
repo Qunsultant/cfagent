@@ -111,7 +111,7 @@ describe("running-text trim — token-scale sizes only (#2177)", () => {
   });
 
   it("sets the body base size to the body token", () => {
-    const styles = readFileSync(join(clientDir, "styles.css"), "utf8");
+    const styles = readFileSync(join(clientDir, "styles.deprecated.css"), "utf8");
     const body = /body\s*\{[^}]*\}/.exec(stripCssComments(styles));
     expect(body?.[0]).toMatch(/font-size:\s*var\(--font-size-body\)/);
   });

@@ -31,8 +31,8 @@ import type { TradeOrderContext } from "../trading/tradeOrderContext";
 import { TabHoverItem } from "../TabHoverItem";
 import { CapabilityNavBar, CopilotTriggerButton, type CapabilityTabItem } from "../components/CapabilityNavBar";
 import { OptionsDataDownloadDropdown } from "./OptionsDataDownloadDropdown";
-import "./strategyDiscovery.css";
-import "./optionsResearch.css";
+import "./strategyDiscovery.deprecated.css";
+import "./optionsResearch.deprecated.css";
 import { optionScreenEndpoint } from "../brokerEndpoints";
 
 interface OptionsResearchPanelProps {

@@ -29,7 +29,7 @@ import {
   type ServiceTokenInfo,
   type ServiceTokenTier,
 } from "./serviceTokensApi";
-import "./serviceTokensPanel.css";
+import "./serviceTokensPanel.deprecated.css";
 
 const ROLE_OPTIONS = SERVICE_TOKEN_ROLE_OPTIONS;
 

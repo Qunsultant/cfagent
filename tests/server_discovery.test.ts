@@ -119,7 +119,7 @@ describe("server discovery mapping (issue #29)", () => {
     // Full-size charts derive dimensions from their container and use the UX
     // token height cap; the heatmap stays inside a token-sized scroll viewport.
     const chartCode = fs.readFileSync(path.resolve("src/client/components/UniversalChart.tsx"), "utf8");
-    const strategyCss = fs.readFileSync(path.resolve("src/client/options/strategyDiscovery.css"), "utf8");
+    const strategyCss = fs.readFileSync(path.resolve("src/client/options/strategyDiscovery.deprecated.css"), "utf8");
     const tokenCss = fs.readFileSync(path.resolve("src/client/tokens.css"), "utf8");
     expect(chartCode).toContain("new ResizeObserver");
     expect(chartCode).toContain("var(--chart-max-height, 52vh)");

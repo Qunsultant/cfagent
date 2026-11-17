@@ -9,7 +9,7 @@ import {
   type RetrievedOptionsDataExport,
 } from "../runExport";
 import type { TradeOrderContext, TradeOrderLeg } from "../trading/tradeOrderContext";
-import "./strategyDiscovery.css";
+import "./strategyDiscovery.deprecated.css";
 
 import { Button, CardHeader, Modal, TextInput, FieldShell } from "../components/ui";
 import { FeatureDisabledNotice, isOptionsProductEnabled } from "../featureFlags";

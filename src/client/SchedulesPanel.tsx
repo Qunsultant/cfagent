@@ -56,7 +56,7 @@ import { CadenceModal } from "./scheduledOptionsManager/CadenceModal";
 import { ConfirmModal } from "./scheduledOptionsManager/ConfirmModal";
 import { ScheduleDetailModal } from "./scheduledOptionsManager/ScheduleDetailModal";
 import { formatNextRun } from "./scheduledOptionsManager/format";
-import "./reports.css";
+import "./reports.deprecated.css";
 
 export interface ScheduleItem {
   id: string;

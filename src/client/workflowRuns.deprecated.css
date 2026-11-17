@@ -1,6 +1,6 @@
 /**
- * DEPRECATED — S-U4 (#4820): this sheet is retired in place (no rules
- * remain). Superseded by src/client/components/ui/primitives.css (ui-*
+ * DEPRECATED — S-U7 (#5178): renamed to workflowRuns.deprecated.css per gitops §22.
+ * This sheet is retired in place (no rules remain). Superseded by src/client/components/ui/primitives.css (ui-*
  * utilities) and src/client/tokens.css (design tokens). No consumers
  * remain; the sole importer (src/client/WorkflowRunsPanel.tsx) no
  * longer imports it. Deletion needs zero consumers plus an owner

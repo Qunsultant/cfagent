@@ -28,7 +28,7 @@
  *
  * Built only from src/client/components/ui/ primitives with
  * token-only styling (ux-architecture §20); classes live in
- * stockCopilotPanel.css (the panel's registered stylesheet).
+ * stockCopilotPanel.deprecated.css (the panel's registered stylesheet).
  */
 import React, { useRef, useState } from "react";
 import { Badge, Button, Notice, TextInput } from "./components/ui";

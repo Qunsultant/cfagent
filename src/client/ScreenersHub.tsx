@@ -8,7 +8,7 @@ import type { ScreenedStockItem } from "../types";
 import { CapabilityNavBar, CopilotTriggerButton, type CapabilityTabItem } from "./components/CapabilityNavBar";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { Notice, PageSection } from "./components/ui";
-import "./optionsResearch.css";
+import "./optionsResearch.deprecated.css";
 
 /** S8 (consolidation, umbrella #958): the hub's tabs — the four
  *  planned asset classes only.

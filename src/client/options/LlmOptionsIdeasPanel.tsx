@@ -9,7 +9,7 @@ import {
   type RawOptionsIdeasExport,
   type RetrievedOptionsDataExport,
 } from "../runExport";
-import "./optionsResearch.css";
+import "./optionsResearch.deprecated.css";
 
 export interface LlmOptionsIdeasResponse {
   mode: "llm_evaluation_of_quant_candidates";

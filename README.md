@@ -108,7 +108,7 @@ ai-search-agent/
 │   └── client/
 │       ├── main.tsx        # React 19 entry
 │       ├── Chat.tsx        # Multi-tab UI (Chat, NLQ Analytics, Inspector)
-│       └── styles.css      # Dark-mode glassmorphic design system
+│       └── styles.deprecated.css  # Dark-mode glassmorphic design system
 ├── wrangler.jsonc          # Worker, DO SQLite migration, KV & AI bindings
 ├── vite.config.ts          # Vite configuration
 └── package.json            # Scripts & dependencies

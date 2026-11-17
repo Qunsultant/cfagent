@@ -16,7 +16,7 @@ import {
   downloadNormalizedOptionsData,
   downloadBothOptionsData,
 } from "../runExport";
-import "./strategyDiscovery.css";
+import "./strategyDiscovery.deprecated.css";
 
 export interface OptionsDataDownloadDropdownProps {
   symbol: string;

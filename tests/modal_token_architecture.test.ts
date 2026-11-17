@@ -4,7 +4,7 @@ import path from "path";
 
 describe("Universal Modal System & Diagnostics Token Architecture", () => {
   const tokensCss = fs.readFileSync(path.resolve("src/client/tokens.css"), "utf8");
-  const stylesCss = fs.readFileSync(path.resolve("src/client/styles.css"), "utf8");
+  const stylesCss = fs.readFileSync(path.resolve("src/client/styles.deprecated.css"), "utf8");
   const tradingHub = fs.readFileSync(path.resolve("src/client/ETradeTradingHub.tsx"), "utf8");
 
   describe("Universal Modal System in tokens.css", () => {
@@ -114,7 +114,7 @@ describe("Universal Modal System & Diagnostics Token Architecture", () => {
   });
 
   describe("Strategy Discovery & Payoff Analyzer Top Buttons Token Architecture", () => {
-    const stratCss = fs.readFileSync(path.resolve("src/client/options/strategyDiscovery.css"), "utf8");
+    const stratCss = fs.readFileSync(path.resolve("src/client/options/strategyDiscovery.deprecated.css"), "utf8");
 
     it("standardizes top button heights, typography, and border radius across both rows", () => {
       expect(tokensCss).toContain(".strat-view-tab-btn");

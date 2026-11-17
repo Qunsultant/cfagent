@@ -36,7 +36,7 @@ import {
   type LoggedInUsersResponse,
   type QuotaUsageResponse,
 } from "./loggedInUsersApi";
-import "./loggedInUsersPanel.css";
+import "./loggedInUsersPanel.deprecated.css";
 
 export function LoggedInUsersPanel() {
   const [data, setData] = useState<LoggedInUsersResponse | null>(null);

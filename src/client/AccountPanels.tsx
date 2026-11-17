@@ -43,7 +43,7 @@ import {
   type ETradeWatchlist,
 } from "./accountApi";
 import { fmtUsd } from "./portfolioRiskApi";
-import "./accountPanels.css";
+import "./accountPanels.deprecated.css";
 
 const fmtTime = (epochMs: number | undefined) => (epochMs ? new Date(epochMs).toLocaleString() : "—");
 
