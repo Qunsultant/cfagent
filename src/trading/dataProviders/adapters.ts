@@ -1271,12 +1271,13 @@ export async function verifyAlpacaDataProvider(
      * passes none: the factory defaults the real source from env.
      */
     optionsChain?: OptionsChainSource;
+    news?: MarketDataProviderOptions["news"];
   }
 ): Promise<{ ok: boolean; summary: string }> {
   const adapter = createAlpacaDataProvider(
     options?.provider ?? new AlpacaMarketDataProvider(env),
     env,
-    { outcomeRecorder: options?.outcomeRecorder, optionsChain: options?.optionsChain }
+    { outcomeRecorder: options?.outcomeRecorder, optionsChain: options?.optionsChain, news: options?.news }
   );
   if (!adapter.isConfigured(env)) {
     return {
