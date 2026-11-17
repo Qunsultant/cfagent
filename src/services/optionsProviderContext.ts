@@ -85,7 +85,7 @@ const DATA_PROVIDER_CAPABILITIES: Record<DataProviderId, readonly DataProviderCa
   public: ["quotes", "optionsChains"],
   yahoo: ["quotes", "historicalBars", "fundamentals", "news"],
   nasdaq: ["screenUniverse"],
-  alpaca: ["quotes", "historicalBars", "optionsChains"],
+  alpaca: ["quotes", "historicalBars", "optionsChains", "news"],
 };
 
 export interface TenantProviderContext {
