@@ -259,7 +259,11 @@ const STEP4D_DATA_LAYER_FILES: Array<[string, number]> = [
   // 23 since #2863: getRowByRunIdForOwner SELECT (newest
   // run-id row, owner-scoped) lives in the data layer, behind
   // the port — the Replay read moved out of scheduledReports.
-  ["src/data/doSqliteCanonicalReportStoreAdapter.ts", 23],
+  // 25 since #4507: the ensureSchema dedupe guard's two
+  // SELECTs (duplicate-pair scan + survivor lookup per pair)
+  // live in the adapter; the DELETE reuses deleteRow and the
+  // CREATE retry reuses one closure, so no further sites.
+  ["src/data/doSqliteCanonicalReportStoreAdapter.ts", 25],
   ["src/data/doSqliteUsageEventAdapter.ts", 4],
   ["src/data/orchestratorTablePorts.ts", 0],
   ["src/data/canonicalReportStorePorts.ts", 0],

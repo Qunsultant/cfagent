@@ -138,18 +138,97 @@ export class DoSqliteCanonicalReportStore
     // Issue #876: the dedupe index is guarded — creating a UNIQUE
     // index over pairs that already hold duplicate non-null
     // values throws; unguarded, that aborted ensure (and therefore
-    // EVERY report write for the DO) forever. The duplicates are
-    // logged loudly (never deleted here) and the ensure completes.
-    try {
+    // EVERY report write for the DO) forever.
+    // Issue #4507: the guard is dedupe-or-report now, not
+    // log-and-continue. A failed CREATE means legacy duplicate
+    // (user_login, generation_id) pairs are stored; they are the
+    // same logical report stored twice (a generation id is a
+    // tenant-local idempotency key), so the ensure resolves them
+    // — newest row survives per pair (the #2863 read rule:
+    // duplicates resolve to the newest row), the rest are
+    // deleted — then retries the CREATE once. If the CREATE still
+    // fails the schema is unreconcilable and the ensure throws a
+    // named error instead of silently continuing without the
+    // idempotency backstop; every seam caller fails closed on it
+    // (store → null + REPORT_FANOUT_FAILED; reads → null/[]).
+    // Crash-safe without a transaction: the dedupe is idempotent
+    // (a second run finds no pairs) and the CREATE is
+    // IF NOT EXISTS, so an interrupted ensure self-heals on the
+    // next call — the same shape as the DROP-then-CREATE swap
+    // above. NULL pairs are never touched (SQLite UNIQUE treats
+    // NULLs as distinct; they can never block the index).
+    const createGenerationIndex = () => {
       this.sql.exec(
         doStatementSql("schema.index.mas_reports.create_unique_index_idx_mas_reports_generation", { TABLE })
       );
+    };
+    try {
+      createGenerationIndex();
     } catch (err) {
+      const removed = this.dedupeGenerationIndexPairs();
       console.error(
-        `[scheduledReports] ensureScheduledReportsTable: unique-index creation for idx_mas_reports_generation failed (duplicate (user_login, generation_id) values already stored?); continuing without it: ${err instanceof Error ? err.message : String(err)}`,
+        `[scheduledReports] ensureScheduledReportsTable: unique-index creation for idx_mas_reports_generation failed (${err instanceof Error ? err.message : String(err)}); deduped ${removed.length} duplicate row(s), retrying the CREATE`,
         err
       );
+      try {
+        createGenerationIndex();
+      } catch (retryErr) {
+        throw new Error(
+          `[scheduledReports] ensureScheduledReportsTable: unique-index creation for idx_mas_reports_generation failed after dedupe (${removed.length} duplicate row(s) removed) and retry (${retryErr instanceof Error ? retryErr.message : String(retryErr)}); the index is missing and report writes fail closed until the schema is repaired (original failure: ${err instanceof Error ? err.message : String(err)})`
+        );
+      }
     }
+  }
+
+  /**
+   * Issue #4507 — resolve legacy duplicate (user_login,
+   * generation_id) pairs so the tenant-scoped generation UNIQUE
+   * index can be built. Surviving-row rule: per pair with both
+   * columns non-NULL, keep the row with the greatest created_at;
+   * ties break on the greatest id (deterministic total order) —
+   * the newest row, matching the #2863 read rule (duplicates
+   * resolve to the newest row). Every other row in the pair is
+   * the same logical report stored twice (a generation id is a
+   * tenant-local idempotency key) and is deleted through the
+   * adapter's own deleteRow. NULL pairs are never touched:
+   * SQLite UNIQUE treats NULLs as distinct, so they can never
+   * block the index, and legacy NULL rows (pre-#308 generation
+   * id, pre-#584 owner) must survive untouched. Idempotent: a
+   * second run finds no pairs and removes nothing. Returns the
+   * ids of the rows removed; each pair's removal is logged
+   * loudly (a data deletion must be auditable).
+   */
+  private dedupeGenerationIndexPairs(): string[] {
+    const pairs = Array.from(
+      this.sql.exec(
+        `SELECT user_login, generation_id FROM ${TABLE} WHERE user_login IS NOT NULL AND generation_id IS NOT NULL GROUP BY user_login, generation_id HAVING COUNT(*) > 1`
+      )
+    ) as Array<{ user_login?: unknown; generation_id?: unknown }>;
+    const removed: string[] = [];
+    for (const pair of pairs) {
+      const owner = String(pair.user_login ?? "");
+      const generationId = String(pair.generation_id ?? "");
+      const rows = Array.from(
+        this.sql.exec(
+          `SELECT id FROM ${TABLE} WHERE user_login = ? AND generation_id = ? ORDER BY created_at DESC, id DESC`,
+          owner,
+          generationId
+        )
+      ) as Array<{ id?: unknown }>;
+      if (rows.length <= 1) continue;
+      const kept = String(rows[0]?.id ?? "");
+      const victims = rows.slice(1);
+      for (const victim of victims) {
+        const id = String(victim.id ?? "");
+        if (!id) continue;
+        this.deleteRow(id);
+        removed.push(id);
+      }
+      console.error(
+        `[scheduledReports] ensureScheduledReportsTable: deduped generation-index pair (${owner}, ${generationId}): kept ${kept}, removed ${victims.length} duplicate row(s): ${victims.map((r) => String(r.id ?? "")).join(", ")}`
+      );
+    }
+    return removed;
   }
 
   findIdByGeneration(generationId: string, owner: string): string {
