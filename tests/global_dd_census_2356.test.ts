@@ -957,6 +957,8 @@ const STEP5_FUNNEL_SITES: Array<[string, string, string]> = [
   ["src/security/etradeOAuth.ts", "listStoreEntries", "etrade"],
   ["src/security/iaaaAuditStore.ts", "createStoreSender", "sessions"],
   ["src/security/iaaaAuditStore.ts", "listStoreEntries", "sessions"],
+  // Issue #4676 / #3410: IBKR OAuth 2.1 + PKCE + DCR tokens live in SessionStore DO.
+  ["src/security/ibkrOAuth.ts", "createStoreKv", "ibkr"],
   ["src/security/publicOAuth.ts", "createStoreKv", "<dynamic>"],
   ["src/security/publicOAuth.ts", "createStoreKv", "public"],
   ["src/security/serviceTokens.ts", "createStoreKv", "service_tokens"],
@@ -1424,6 +1426,7 @@ describe("global D-D census: step 5e — residual bucket family port composition
       ["src/security/apiKeys.ts", "../data/durableKv"],
       ["src/security/etradeOAuth.ts", "../data/durableKv"],
       ["src/security/iaaaAuditStore.ts", "../data/durableKv"],
+      ["src/security/ibkrOAuth.ts", "../data/durableKv"],
       ["src/security/publicOAuth.ts", "../data/durableKv"],
       ["src/security/serviceTokens.ts", "../data/durableKv"],
       ["src/security/session.ts", "../data/durableKv"],
