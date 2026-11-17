@@ -1,0 +1,81 @@
+name: Probe Public MCP Schema
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: Probe Public.com MCP tools/list
+    runs-on: ubuntu-latest
+    environment: PROD
+    steps:
+      - name: Query Public MCP tools/list and write /tmp/public-mcp-schema.json
+        env:
+          PUBLIC_API_KEY: ${{ secrets.PUBLIC_API_KEY }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          token = os.environ.get("PUBLIC_API_KEY", "").strip()
+          if not token:
+              raise SystemExit("PUBLIC_API_KEY secret is empty in PROD environment.")
+
+          def parse_body(content_type: str, raw: bytes) -> dict:
+              text = raw.decode("utf-8", "replace")
+              if "text/event-stream" in (content_type or ""):
+                  for line in text.splitlines():
+                      line = line.strip()
+                      if line.startswith("data:"):
+                          data = line[5:].strip()
+                          if data and data != "[DONE]":
+                              try:
+                                  return json.loads(data)
+                              except json.JSONDecodeError:
+                                  continue
+                  raise RuntimeError("No JSON data found in SSE response")
+              return json.loads(text)
+
+          req = urllib.request.Request(
+              "https://mcp.public.com/mcp",
+              data=json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}).encode("utf-8"),
+              method="POST",
+              headers={
+                  "Content-Type": "application/json",
+                  "Accept": "application/json, text/event-stream",
+                  "Authorization": f"Bearer {token}",
+                  "MCP-Protocol-Version": "2025-06-18",
+              },
+          )
+          with urllib.request.urlopen(req, timeout=60) as resp:
+              body = parse_body(resp.headers.get("Content-Type", ""), resp.read())
+
+          tools = body.get("result", {}).get("tools", [])
+          out = {
+              "toolCount": len(tools),
+              "toolNames": [t.get("name") for t in tools],
+              "tools": tools,
+          }
+          with open("/tmp/public-mcp-schema.json", "w", encoding="utf-8") as f:
+              json.dump(out, f, indent=2)
+
+          focus = {t.get("name"): t.get("inputSchema") for t in tools if t.get("name") in ("place_order", "preflight_order", "cancel_and_replace_order", "get_orders")}
+          summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+          if summary_path:
+              with open(summary_path, "a", encoding="utf-8") as s:
+                  s.write(f"### Public MCP tools/list ({len(tools)} tools)\n\n")
+                  s.write("Tools: `" + "`, `".join(out["toolNames"]) + "`\n\n")
+                  s.write("```json\n" + json.dumps(focus, indent=2) + "\n```\n")
+          print(f"Wrote {len(tools)} tools to /tmp/public-mcp-schema.json")
+          PY
+
+      - name: Upload /tmp/public-mcp-schema.json artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: public-mcp-schema
+          path: /tmp/public-mcp-schema.json
+          retention-days: 7
