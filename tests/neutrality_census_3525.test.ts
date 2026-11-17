@@ -1734,7 +1734,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/trading/screeningProvider.ts", "yahoo", 9],
   ["src/trading/screeningSchemas.ts", "etrade", 4],
   ["src/trading/screeningSchemas.ts", "yahoo", 3],
-  ["src/trading/slack/agent.ts", "etrade", 80],
+  ["src/trading/slack/agent.ts", "etrade", 62],
   ["src/trading/slack/agent.ts", "yahoo", 2],
   ["src/trading/stockQuoteSource.ts", "alpaca", 1],
   ["src/trading/stockQuoteSource.ts", "etrade", 2],
@@ -1743,7 +1743,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/trading/technicals.ts", "yahoo", 12],
   ["src/trading/universes.ts", "etrade", 4],
   ["src/trading/universes.ts", "yahoo", 1],
-  ["src/trading/voice/agent.ts", "etrade", 17],
+  ["src/trading/voice/agent.ts", "etrade", 16],
   ["src/types.ts", "alpaca", 15],
   ["src/types.ts", "etrade", 82],
   ["src/types.ts", "yahoo", 3],
@@ -2360,7 +2360,7 @@ const BASELINE: Array<[string, string, number]> = [
   // The same PR shrinks slack/agent.ts 81->80, voice/agent.ts 31->17,
   // nlq/execution.ts 82->78 and the matrix (etrade 82->81, alpaca 63->59) by
   // routing the channel labels through brokerPresentation.
-  ["src/config/channelBrokers.ts", "etrade", 4],
+  ["src/config/channelBrokers.ts", "etrade", 2],
   ["src/trading/channelBroker.ts", "etrade", 3],
 ];
 
