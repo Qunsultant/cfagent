@@ -776,7 +776,7 @@ describe("data provider adapters (issue #1118)", () => {
     // throws (ADR 0019: Yahoo covers fundamentals, never faked).
     expect(
       createAlpacaDataProvider(fakeMarketDataProvider("alpaca")).capabilities
-    ).toEqual(["quotes", "historicalBars", "optionsChains", "news"]);
+    ).toEqual(["quotes", "historicalBars", "news", "optionsChains"]);
     expect(
       createNasdaqDataProvider(async () => nasdaqListingsFixture).capabilities
     ).toEqual(["screenUniverse"]);
@@ -887,6 +887,7 @@ describe("data provider conformance kit (issue #1118)", () => {
           }),
           getExpiryDates: async () => [{ year: 2026, month: 3, day: 20 }],
         } as never,
+        news: (async () => []) as never,
       }),
       createNasdaqDataProvider(async () => nasdaqListingsFixture),
     ];
