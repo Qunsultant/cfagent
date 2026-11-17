@@ -135,7 +135,7 @@ migration removed, so the mapping stays complete as slices retire classes.
 Disposition and successor are as recorded at #3135: the Token rows name
 the primitive this slice used, and the Deletion-candidate rows keep their
 S-U7 successor — the CSS rules still live in `optionsFlows.css`,
-`iaaaAdminPanel.css`, `styles.css`, and `scheduledOptions.css` (neither
+`iaaaAdminPanel.deprecated.css`, `styles.deprecated.css`, and `scheduledOptions.css` (neither
 sheet retires in this slice; the rules serve child components that still
 use them), so S-U7 still owns their removal. (`flows-capability-nav` had
 no rule anywhere; removing the reference changed nothing.)

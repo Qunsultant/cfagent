@@ -3,7 +3,7 @@ import { join } from "path";
 import { describe, expect, it } from "vitest";
 
 const HERE = join(__dirname, "..");
-const CSS = "src/client/styles.css";
+const CSS = "src/client/styles.deprecated.css";
 const NAV = "src/client/components/NavigationMenu.tsx";
 const CHAT = "src/client/Chat.tsx";
 const PILL = "src/client/components/MarketStatusPill.tsx";

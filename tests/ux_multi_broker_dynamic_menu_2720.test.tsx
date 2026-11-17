@@ -24,7 +24,7 @@ const tuningSrc = readFileSync(
   "utf8",
 );
 const stylesSrc = readFileSync(
-  join(here, "..", "src", "client", "styles.css"),
+  join(here, "..", "src", "client", "styles.deprecated.css"),
   "utf8",
 );
 

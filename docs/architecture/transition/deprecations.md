@@ -6,6 +6,186 @@ to migrate consumers off them. Deletion needs zero consumers plus an
 owner decision plus a gate amendment, and is never part of a program
 slice.
 
+## 2026-11-17 — S-U7 renames styles.css to styles.deprecated.css (#5178)
+
+- File: `src/client/styles.css` → `src/client/styles.deprecated.css`
+- Date: 2026-11-17
+- Reason: Issue #5178 (sub of #3695, S-U7) deprecates the bespoke CSS files per gitops §22 (rename form): the shared sheet is renamed in place, its sole importer (`src/client/main.tsx`) updated to the new path, and a deprecation header added. Rules unchanged. 1,296 selectors, 456 with live users in 68 files (heaviest: `BrokerDynamicMenu.tsx`, `landing.ts`, `ScannerPanel.tsx`, `StrategyDiscoveryPanel.tsx`, `ETradeTradingHub.tsx`, `Chat.tsx`, plus ~20 test files asserting on classes).
+- Replacement: `src/client/components/ui/primitives.css` (ui-* utilities) and `src/client/tokens.css` (design tokens).
+- Consumers at deprecation: 68 files use its live selectors (see Reason).
+- Deletion condition: zero consumers plus an owner decision plus a gate amendment; deletion is never part of a program slice.
+
+## 2026-11-17 — S-U7 renames options/strategyDiscovery.css to strategyDiscovery.deprecated.css (#5178)
+
+- File: `src/client/options/strategyDiscovery.css` → `src/client/options/strategyDiscovery.deprecated.css`
+- Date: 2026-11-17
+- Reason: Issue #5178 (sub of #3695, S-U7) deprecates the bespoke CSS files per gitops §22 (rename form): renamed in place, its 5 importers updated to the new path, and a deprecation header added. Rules unchanged. 477 selectors, 357 with live users in 23 files (`StrategyDiscoveryPanel`, `OptionsResearchPanel`, `RiskAnalysisModal`, `LlmStrategyEvalModal`, `OptionsDataDownloadDropdown`, `StrategyLibraryModal`, `FlowFiltersSidebar`, `ScannerPanel`, `PortfolioPanel`, `ScheduledOptionsManager`, `RawContractsScreener`, `StockSearchBar`, `MarketTickerTape`, `BrokerDynamicMenu`, `landing.ts`, `Field.tsx`, `AgentChatTabContent`, `OptionsStrategyCard`, `McpApiExplorer`, `StrategyReviewPanel`, `PortfolioRiskPanel`, `WorkflowRunsPanel`).
+- Replacement: `src/client/components/ui/primitives.css` (ui-* utilities) and `src/client/tokens.css` (design tokens).
+- Consumers at deprecation: 23 files use its live selectors (see Reason).
+- Deletion condition: zero consumers plus an owner decision plus a gate amendment; deletion is never part of a program slice.
+
+## 2026-11-17 — S-U7 renames workflowsHub.css to workflowsHub.deprecated.css (#5178)
+
+- File: `src/client/workflowsHub.css` → `src/client/workflowsHub.deprecated.css`
+- Date: 2026-11-17
+- Reason: Issue #5178 (sub of #3695, S-U7) deprecates the bespoke CSS files per gitops §22 (rename form): renamed in place, its sole importer (`src/client/WorkflowsHub.tsx`) updated to the new path, and a deprecation header added. Rules unchanged. 113 selectors, 8 with live users in 6 files (`BrokerDynamicMenu`, `MarkdownContent`, `StockSearchBar`, `landing.ts`, `StrategyDiscoveryPanel`, `LiveResultPreview`); 105 selectors with no static use (WorkflowsHub migrated in S-U3).
+- Replacement: `src/client/components/ui/primitives.css` (ui-* utilities) and `src/client/tokens.css` (design tokens).
+- Consumers at deprecation: 6 files use its live selectors (see Reason).
+- Deletion condition: zero consumers plus an owner decision plus a gate amendment; deletion is never part of a program slice.
+
+## 2026-11-17 — S-U7 renames accountPanels.css to accountPanels.deprecated.css (#5178)
+
+- File: `src/client/accountPanels.css` → `src/client/accountPanels.deprecated.css`
+- Date: 2026-11-17
+- Reason: Issue #5178 (sub of #3695, S-U7) deprecates the bespoke CSS files per gitops §22 (rename form): renamed in place, its sole importer (`src/client/AccountPanels.tsx`) updated to the new path, and a deprecation header added. Rules unchanged. 14 selectors, all 14 with live users in 1 file.
+- Replacement: `src/client/components/ui/primitives.css` (ui-* utilities) and `src/client/tokens.css` (design tokens).
+- Consumers at deprecation: `AccountPanels.tsx` uses all 14 selectors.
+- Deletion condition: zero consumers plus an owner decision plus a gate amendment; deletion is never part of a program slice.
+
+## 2026-11-17 — S-U7 renames agenticWalletPanel.css to agenticWalletPanel.deprecated.css (#5178)
+
+- File: `src/client/agenticWalletPanel.css` → `src/client/agenticWalletPanel.deprecated.css`
+- Date: 2026-11-17
+- Reason: Issue #5178 (sub of #3695, S-U7) deprecates the bespoke CSS files per gitops §22 (rename form): renamed in place, its sole importer (`src/client/AgenticWalletPanel.tsx`) updated to the new path, and a deprecation header added. Rules unchanged. 27 selectors, 26 with live users in 2 files (`AgenticWalletPanel.tsx` + its test); 1 unused (`simulated`).
+- Replacement: `src/client/components/ui/primitives.css` (ui-* utilities) and `src/client/tokens.css` (design tokens).
+- Consumers at deprecation: `AgenticWalletPanel.tsx` (+ its test) use 26 selectors.
+- Deletion condition: zero consumers plus an owner decision plus a gate amendment; deletion is never part of a program slice.
+
+## 2026-11-17 — S-U7 renames iaaaAdminPanel.css to iaaaAdminPanel.deprecated.css (#5178)
+
+- File: `src/client/iaaaAdminPanel.css` → `src/client/iaaaAdminPanel.deprecated.css`
+- Date: 2026-11-17
+- Reason: Issue #5178 (sub of #3695, S-U7) deprecates the bespoke CSS files per gitops §22 (rename form): renamed in place, its sole importer (`src/client/IaaaAdminPanel.tsx`) updated to the new path, and a deprecation header added. Rules unchanged. 8 selectors, 3 with live users in 3 files — `ServiceUserSection.tsx`, `AdminQueueWipePanel.tsx`, `PolicyProposalsPanel.tsx` — NOT the importer (`IaaaAdminPanel.tsx` uses 0 of its 8 selectors); 5 unused.
+- Replacement: `src/client/components/ui/primitives.css` (ui-* utilities) and `src/client/tokens.css` (design tokens).
+- Consumers at deprecation: `ServiceUserSection.tsx`, `AdminQueueWipePanel.tsx`, `PolicyProposalsPanel.tsx` use 3 selectors.
+- Deletion condition: zero consumers plus an owner decision plus a gate amendment; deletion is never part of a program slice.
+
+## 2026-11-17 — S-U7 renames loggedInUsersPanel.css to loggedInUsersPanel.deprecated.css (#5178)
+
+- File: `src/client/loggedInUsersPanel.css` → `src/client/loggedInUsersPanel.deprecated.css`
+- Date: 2026-11-17
+- Reason: Issue #5178 (sub of #3695, S-U7) deprecates the bespoke CSS files per gitops §22 (rename form): renamed in place, its sole importer (`src/client/LoggedInUsersPanel.tsx`) updated to the new path, and a deprecation header added. Rules unchanged. 19 selectors, all 19 with live users in 2 files (`LoggedInUsersPanel.tsx`, `BootstrapProposalsPanel.tsx`).
+- Replacement: `src/client/components/ui/primitives.css` (ui-* utilities) and `src/client/tokens.css` (design tokens).
+- Consumers at deprecation: `LoggedInUsersPanel.tsx` + `BootstrapProposalsPanel.tsx` use all 19 selectors.
+- Deletion condition: zero consumers plus an owner decision plus a gate amendment; deletion is never part of a program slice.
+
+## 2026-11-17 — S-U7 renames roleGrantsPanel.css to roleGrantsPanel.deprecated.css (#5178)
+
+- File: `src/client/roleGrantsPanel.css` → `src/client/roleGrantsPanel.deprecated.css`
+- Date: 2026-11-17
+- Reason: Issue #5178 (sub of #3695, S-U7) deprecates the bespoke CSS files per gitops §22 (rename form): renamed in place, its sole importer (`src/client/RoleGrantsPanel.tsx`) updated to the new path, and a deprecation header added. Rules unchanged. 17 selectors, all 17 with live users in 1 file.
+- Replacement: `src/client/components/ui/primitives.css` (ui-* utilities) and `src/client/tokens.css` (design tokens).
+- Consumers at deprecation: `RoleGrantsPanel.tsx` uses all 17 selectors.
+- Deletion condition: zero consumers plus an owner decision plus a gate amendment; deletion is never part of a program slice.
+
+## 2026-11-17 — S-U7 renames serviceTokensPanel.css to serviceTokensPanel.deprecated.css (#5178)
+
+- File: `src/client/serviceTokensPanel.css` → `src/client/serviceTokensPanel.deprecated.css`
+- Date: 2026-11-17
+- Reason: Issue #5178 (sub of #3695, S-U7) deprecates the bespoke CSS files per gitops §22 (rename form): renamed in place, its sole importer (`src/client/ServiceTokensPanel.tsx`) updated to the new path, and a deprecation header added. Rules unchanged. 27 selectors, all 27 with live users in 1 file.
+- Replacement: `src/client/components/ui/primitives.css` (ui-* utilities) and `src/client/tokens.css` (design tokens).
+- Consumers at deprecation: `ServiceTokensPanel.tsx` uses all 27 selectors.
+- Deletion condition: zero consumers plus an owner decision plus a gate amendment; deletion is never part of a program slice.
+
+## 2026-11-17 — S-U7 renames reports.css to reports.deprecated.css (#5178)
+
+- File: `src/client/reports.css` → `src/client/reports.deprecated.css`
+- Date: 2026-11-17
+- Reason: Issue #5178 (sub of #3695, S-U7) deprecates the bespoke CSS files per gitops §22 (rename form): renamed in place, its 2 importers (`src/client/ReportsPanel.tsx`, `src/client/SchedulesPanel.tsx`) updated to the new path, and a deprecation header added. Rules unchanged. 52 selectors, 32 with live users in 18 files (shared sheet: research tabs, `BrokerDynamicMenu`, `StrategyDiscoveryPanel`, `ScheduleFormModal`, `NotificationFields`, `DiscoveryFormSections`, `Field.tsx`, `landing.ts`, `McpApiExplorer`, `PendingReviewQueue`, `SetupCatalogPanel`, `StrategyReviewPanel`, `PortfolioRiskPanel`, `AgentChatTabContent`, `ResearchIdeasBrowser`, `ResearchRunDetail`, `ResearchTrackRecord`, `StockSearchBar`, `OptionsDataDownloadDropdown`). `schedules-toolbar` stays live here.
+- Replacement: `src/client/components/ui/primitives.css` (ui-* utilities) and `src/client/tokens.css` (design tokens).
+- Consumers at deprecation: 18 files use its live selectors (see Reason).
+- Deletion condition: zero consumers plus an owner decision plus a gate amendment; deletion is never part of a program slice.
+
+## 2026-11-17 — S-U7 renames scannerPanel.css to scannerPanel.deprecated.css (#5178)
+
+- File: `src/client/scannerPanel.css` → `src/client/scannerPanel.deprecated.css`
+- Date: 2026-11-17
+- Reason: Issue #5178 (sub of #3695, S-U7) deprecates the bespoke CSS files per gitops §22 (rename form): renamed in place, its sole importer (`src/client/ScannerPanel.tsx`) updated to the new path, and a deprecation header added. Rules unchanged. 67 selectors, 7 with live users in 7 files (`ScannerPanel`, `AccountPanels`, `BrokerDynamicMenu`, `StockCopilotPanel`, `StockSearchBar`, `Checkbox.tsx`, `landing.ts`); 60 selectors with no static use (ScannerPanel migrated in S-U2).
+- Replacement: `src/client/components/ui/primitives.css` (ui-* utilities) and `src/client/tokens.css` (design tokens).
+- Consumers at deprecation: 7 files use its live selectors (see Reason).
+- Deletion condition: zero consumers plus an owner decision plus a gate amendment; deletion is never part of a program slice.
+
+## 2026-11-17 — S-U7 renames portfolioRiskPanel.css to portfolioRiskPanel.deprecated.css (#5178)
+
+- File: `src/client/portfolioRiskPanel.css` → `src/client/portfolioRiskPanel.deprecated.css`
+- Date: 2026-11-17
+- Reason: Issue #5178 (sub of #3695, S-U7) deprecates the bespoke CSS files per gitops §22 (rename form): renamed in place, its sole importer (`src/client/PortfolioRiskPanel.tsx`) updated to the new path, and a deprecation header added. Rules unchanged. 35 selectors, 27 with live users in 1 file; 8 unused (`prp-badge-*`, `prp-binding`, `prp-table`).
+- Replacement: `src/client/components/ui/primitives.css` (ui-* utilities) and `src/client/tokens.css` (design tokens).
+- Consumers at deprecation: `PortfolioRiskPanel.tsx` uses 27 selectors.
+- Deletion condition: zero consumers plus an owner decision plus a gate amendment; deletion is never part of a program slice.
+
+## 2026-11-17 — S-U7 renames stockCopilotPanel.css to stockCopilotPanel.deprecated.css (#5178)
+
+- File: `src/client/stockCopilotPanel.css` → `src/client/stockCopilotPanel.deprecated.css`
+- Date: 2026-11-17
+- Reason: Issue #5178 (sub of #3695, S-U7) deprecates the bespoke CSS files per gitops §22 (rename form): renamed in place, its sole importer (`src/client/StockCopilotPanel.tsx`) updated to the new path, and a deprecation header added. Rules unchanged. 12 selectors, all 12 with live users in 3 files (`StockCopilotPanel.tsx`, `StockCopilotVoiceControl.tsx` + its test).
+- Replacement: `src/client/components/ui/primitives.css` (ui-* utilities) and `src/client/tokens.css` (design tokens).
+- Consumers at deprecation: `StockCopilotPanel.tsx` + `StockCopilotVoiceControl.tsx` use all 12 selectors.
+- Deletion condition: zero consumers plus an owner decision plus a gate amendment; deletion is never part of a program slice.
+
+## 2026-11-17 — S-U7 renames optionsResearch.css to optionsResearch.deprecated.css (#5178)
+
+- File: `src/client/optionsResearch.css` → `src/client/optionsResearch.deprecated.css`
+- Date: 2026-11-17
+- Reason: Issue #5178 (sub of #3695, S-U7) deprecates the bespoke CSS files per gitops §22 (rename form): renamed in place, its 2 importers (`src/client/ScreenersHub.tsx`, `src/client/StockHub.tsx`) updated to the new path, and a deprecation header added. Rules unchanged. 95 selectors, 8 with live users in 12 files; 87 unused. This copy differs from `src/client/options/optionsResearch.css` (158 changed lines, different tail block) — the pair is NOT unified in this slice (separate migration; importer sets differ).
+- Replacement: `src/client/components/ui/primitives.css` (ui-* utilities) and `src/client/tokens.css` (design tokens).
+- Consumers at deprecation: 12 files use its 8 live selectors.
+- Deletion condition: zero consumers plus an owner decision plus a gate amendment; deletion is never part of a program slice.
+
+## 2026-11-17 — S-U7 renames options/optionsResearch.css to options/optionsResearch.deprecated.css (#5178)
+
+- File: `src/client/options/optionsResearch.css` → `src/client/options/optionsResearch.deprecated.css`
+- Date: 2026-11-17
+- Reason: Issue #5178 (sub of #3695, S-U7) deprecates the bespoke CSS files per gitops §22 (rename form): renamed in place, its 2 importers (`src/client/options/LlmOptionsIdeasPanel.tsx`, `src/client/options/OptionsResearchPanel.tsx`) updated to the new path, and a deprecation header added. Rules unchanged. 101 selectors, 20 with live users in 10 files; 81 unused. This copy differs from `src/client/optionsResearch.css` (158 changed lines, different tail block) — the pair is NOT unified in this slice (separate migration; importer sets differ).
+- Replacement: `src/client/components/ui/primitives.css` (ui-* utilities) and `src/client/tokens.css` (design tokens).
+- Consumers at deprecation: 10 files use its 20 live selectors.
+- Deletion condition: zero consumers plus an owner decision plus a gate amendment; deletion is never part of a program slice.
+
+## 2026-11-17 — S-U7 renames workflowRuns.css to workflowRuns.deprecated.css (#5178)
+
+- File: `src/client/workflowRuns.css` → `src/client/workflowRuns.deprecated.css`
+- Date: 2026-11-17
+- Reason: Issue #5178 (sub of #3695, S-U7) renames the already-retired sheet per gitops §22 (rename form): it was retired in place by S-U4 (#4820) with a deprecation header and no rules; this slice renames the file so the name itself says it can be deleted, keeping the header text (first line changed to the rename note). No importers, no rules, no freeze entries.
+- Replacement: `src/client/components/ui/primitives.css` (ui-* utilities) and `src/client/tokens.css` (design tokens).
+- Consumers at deprecation: none.
+- Deletion condition: zero consumers (already met) plus an owner decision plus a gate amendment; deletion is never part of a program slice.
+
+## 2026-11-17 — S-U7 renames agentsPanel.css to agentsPanel.deprecated.css (#5178)
+
+- File: `src/client/agentsPanel.css` → `src/client/agentsPanel.deprecated.css`
+- Date: 2026-11-17
+- Reason: Issue #5178 (sub of #3695, S-U7) renames the already-retired sheet per gitops §22 (rename form): it was retired in place by S-U5 (#4927) with a deprecation header and no rules; this slice renames the file so the name itself says it can be deleted, keeping the header text (first line changed to the rename note). No importers, no rules, no freeze entries.
+- Replacement: `src/client/components/ui/primitives.css` (ui-* utilities) and `src/client/tokens.css` (design tokens).
+- Consumers at deprecation: none.
+- Deletion condition: zero consumers (already met) plus an owner decision plus a gate amendment; deletion is never part of a program slice.
+
+## 2026-11-17 — S-U7 renames docsAndReports.css to docsAndReports.deprecated.css (#5178)
+
+- File: `src/client/docsAndReports.css` → `src/client/docsAndReports.deprecated.css`
+- Date: 2026-11-17
+- Reason: Issue #5178 (sub of #3695, S-U7) renames the already-retired sheet per gitops §22 (rename form): it was retired in place by S-U5 (#4927) with a deprecation header and no rules; this slice renames the file so the name itself says it can be deleted, keeping the header text (first line changed to the rename note). No importers, no rules, no freeze entries.
+- Replacement: `src/client/components/ui/primitives.css` (ui-* utilities) and `src/client/tokens.css` (design tokens).
+- Consumers at deprecation: none.
+- Deletion condition: zero consumers (already met) plus an owner decision plus a gate amendment; deletion is never part of a program slice.
+
+## 2026-11-17 — S-U7 renames dataProvidersPanel.css to dataProvidersPanel.deprecated.css (#5178)
+
+- File: `src/client/dataProvidersPanel.css` → `src/client/dataProvidersPanel.deprecated.css`
+- Date: 2026-11-17
+- Reason: Issue #5178 (sub of #3695, S-U7) renames the already-retired sheet per gitops §22 (rename form): it was retired in place by tail slice 1 (#5016) with a deprecation header and no rules; this slice renames the file so the name itself says it can be deleted, keeping the header text (first line changed to the rename note). No importers, no rules, no freeze entries.
+- Replacement: `src/client/components/ui/primitives.css` (ui-* utilities) and `src/client/tokens.css` (design tokens).
+- Consumers at deprecation: none.
+- Deletion condition: zero consumers (already met) plus an owner decision plus a gate amendment; deletion is never part of a program slice.
+
+## 2026-11-17 — S-U7 renames apiKeysPanel.css to apiKeysPanel.deprecated.css (#5178)
+
+- File: `src/client/apiKeysPanel.css` → `src/client/apiKeysPanel.deprecated.css`
+- Date: 2026-11-17
+- Reason: Issue #5178 (sub of #3695, S-U7) renames the already-retired sheet per gitops §22 (rename form): it was retired in place by tail slice 3 (#5140) with a deprecation header and no rules; this slice renames the file so the name itself says it can be deleted, keeping the header text (first line changed to the rename note). No importers, no rules, no freeze entries.
+- Replacement: `src/client/components/ui/primitives.css` (ui-* utilities) and `src/client/tokens.css` (design tokens).
+- Consumers at deprecation: none.
+- Deletion condition: zero consumers (already met) plus an owner decision plus a gate amendment; deletion is never part of a program slice.
+
 ## 2026-11-17 — options sharded chain start routes through the one engine (#4780)
 
 - Function: the bespoke options chain start (`planOptionsFeedShards` +

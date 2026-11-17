@@ -1,6 +1,6 @@
 /**
- * DEPRECATED — tail slice 1 (#5016): this sheet is retired in place (no rules
- * remain). Superseded by src/client/components/ui/primitives.css (ui-*
+ * DEPRECATED — S-U7 (#5178): renamed to dataProvidersPanel.deprecated.css per gitops §22.
+ * This sheet is retired in place (no rules remain). Superseded by src/client/components/ui/primitives.css (ui-*
  * utilities, incl. `ui-link`, `ui-mono`, `ui-meta-sm`, `ui-meta`, `ui-label`,
  * `ui-danger`, `ui-grow`, `ui-scroll-frame`) and src/client/tokens.css
  * (design tokens). No consumers remain; the sole importer

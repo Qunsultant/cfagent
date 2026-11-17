@@ -1,6 +1,6 @@
 /**
- * DEPRECATED — S-U5 (#4927): this sheet is retired in place (no rules
- * remain). Superseded by src/client/components/ui/primitives.css (ui-*
+ * DEPRECATED — S-U7 (#5178): renamed to docsAndReports.deprecated.css per gitops §22.
+ * This sheet is retired in place (no rules remain). Superseded by src/client/components/ui/primitives.css (ui-*
  * utilities, incl. the new `ui-page-frame`, plus `ui-link`, `ui-mono`,
  * `ui-meta-sm`, `ui-meta`, `ui-cell-nowrap`, `ui-scroll-frame`) and
  * src/client/tokens.css (design tokens). No consumers remain; the sole

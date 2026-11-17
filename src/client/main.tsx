@@ -12,7 +12,7 @@ import { ToastProvider } from "./components/ui";
 import { applyThemeToDocument, getStoredTheme, initThemeListener } from "./theme";
 import { applyTypographyToDocument, getStoredFontScale, getStoredFontStyle, initTypographyListener } from "./typography";
 import { applyDensityToDocument, getStoredDensity, initDensityListener } from "./designTokens";
-import "./styles.css";
+import "./styles.deprecated.css";
 import "./tokens.css";
 import "./components/ui/primitives.css";
 

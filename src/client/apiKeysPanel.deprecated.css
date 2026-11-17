@@ -1,6 +1,6 @@
 /**
- * DEPRECATED — tail slice 3 (#5140): this sheet is retired in place (no rules
- * remain). Superseded by src/client/components/ui/primitives.css (ui-*
+ * DEPRECATED — S-U7 (#5178): renamed to apiKeysPanel.deprecated.css per gitops §22.
+ * This sheet is retired in place (no rules remain). Superseded by src/client/components/ui/primitives.css (ui-*
  * utilities, incl. `ui-meta`, `ui-mono`, `ui-danger`, `ui-grow`) and
  * src/client/tokens.css (design tokens), plus the Card, CardHeader, Flex,
  * Notice, PageSection, and Stack primitives. No consumers remain; the sole

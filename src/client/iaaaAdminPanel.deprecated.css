@@ -1,3 +1,12 @@
+/**
+ * DEPRECATED — S-U7 (#5178): renamed to iaaaAdminPanel.deprecated.css per gitops §22.
+ * Superseded by src/client/components/ui/primitives.css (ui-* utilities) and
+ * src/client/tokens.css (design tokens). 8 selectors, 3 with live users
+ * in 3 files; rules unchanged, import updated to the new path.
+ * Deletion needs zero consumers plus an owner decision plus a gate
+ * amendment; deletion is never part of a program slice (gitops §22).
+ * See docs/architecture/transition/deprecations.md.
+ */
 /* IAAA Admin panel (issue #945, IAAA-UI v1: read-only). Small local
    styles in the same spirit as apiKeysPanel.css; no design-system
    change. */

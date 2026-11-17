@@ -1310,9 +1310,9 @@ const BASELINE: Array<[string, string, number]> = [
   // ("yahoo-finance") named verbatim — a data-bearing identifier.
   ["src/client/screeningAdapters.ts", "yahoo", 7],
   ["src/client/stockCopilotApi.ts", "alpaca", 1],
-  ["src/client/styles.css", "alpaca", 8],
-  ["src/client/styles.css", "etrade", 79],
-  ["src/client/styles.css", "yahoo", 4],
+  ["src/client/styles.deprecated.css", "alpaca", 8],
+  ["src/client/styles.deprecated.css", "etrade", 79],
+  ["src/client/styles.deprecated.css", "yahoo", 4],
   ["src/client/tenantProviders.ts", "alpaca", 10],
   ["src/client/tenantProviders.ts", "etrade", 4],
   ["src/client/tenantProviders.ts", "nasdaq", 1],
@@ -2108,7 +2108,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/client/components/UniversalChart.tsx", "polygon", 1],
   ["src/client/landing.ts", "polygon", 1],
   ["src/client/options/riskManagementEngine.ts", "etrade", 2],
-  ["src/client/options/strategyDiscovery.css", "fidelity", 1],
+  ["src/client/options/strategyDiscovery.deprecated.css", "fidelity", 1],
   ["src/client/tokens.css", "fidelity", 1],
   ["src/client/trading/strategyAutobuild.ts", "etrade", 1],
   ["src/config/curatedStockUniverse.json", "robinhood", 1],
@@ -2376,6 +2376,13 @@ const BASELINE: Array<[string, string, number]> = [
   // routing the channel labels through brokerPresentation.
   ["src/config/channelBrokers.ts", "etrade", 2],
   ["src/trading/channelBroker.ts", "etrade", 3],
+  // #5178 (S-U7 ledger): the styles.css ledger entry names its heaviest
+  // consumer file verbatim — ETradeTradingHub.tsx. The filename is the
+  // provenance a reader needs to trace the 456 live selectors; neutralizing
+  // it would make the consumer list unusable. Dispositioned INTEGRATION, as
+  // in #4802/#4813/#5024. (The broker-naming sweep #5236 renames the panel
+  // to TradeHub, which shrinks this row to 0 in its own slice.)
+  ["docs/architecture/transition/deprecations.md", "etrade", 1],
 ];
 
 const BASELINE_MAP = new Map(BASELINE.map(([f, t, c]) => [`${f}\t${t}`, c]));

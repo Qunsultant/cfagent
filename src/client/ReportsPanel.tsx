@@ -24,7 +24,7 @@ import { ResearchRunDetail } from "./chat/tabs/ResearchRunDetail";
 import { replayReport, replaySummary, type ReplayResponse } from "./replayReport";
 import { ResearchIdeasBrowser } from "./chat/tabs/ResearchIdeasBrowser";
 import { ResearchTrackRecord } from "./chat/tabs/ResearchTrackRecord";
-import "./reports.css";
+import "./reports.deprecated.css";
 
 export interface ReportItem {
   id: string;

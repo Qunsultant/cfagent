@@ -52,7 +52,7 @@ import {
   type ReceiptEntry,
 } from "./agenticWalletApi";
 import { fmtUsd } from "./portfolioRiskApi";
-import "./agenticWalletPanel.css";
+import "./agenticWalletPanel.deprecated.css";
 
 export function AgenticWalletPanel() {
   const [status, setStatus] = useState<AgenticWalletStatus | null>(null);

@@ -59,7 +59,7 @@ import {
   type StockCopilotStatus,
   type StockCopilotStatusKind,
 } from "./stockCopilotApi";
-import "./stockCopilotPanel.css";
+import "./stockCopilotPanel.deprecated.css";
 
 /** Auto-refresh cadence for the panel (the loop itself runs every 30 minutes). */
 const REFRESH_MS = 60_000;

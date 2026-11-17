@@ -7,7 +7,7 @@
  * ticket), rebuilt as primitives with token-only styling.
  *
  * Each organism reproduces its hand-rolled original's structure
- * (verified against styles.css `.order-ticket-layout` :4460,
+ * (verified against styles.deprecated.css `.order-ticket-layout` :4320,
  * OrderTicketPanel.tsx's button rows, and ApprovalsPanel as rendered
  * in Chat.tsx:972): same children in the same order, same 1.4fr/1fr
  * ratio with the same 900px collapse, same primary-right /
@@ -55,7 +55,7 @@ afterEach(() => {
   container?.remove();
 });
 
-describe("WorkspaceGrid (#3134 — order ticket layout, styles.css:4460)", () => {
+describe("WorkspaceGrid (#3134 — order ticket layout, styles.deprecated.css:4320)", () => {
   it("workspace variant renders sections in an auto-fit grid", () => {
     render(
       <WorkspaceGrid variant="workspace">

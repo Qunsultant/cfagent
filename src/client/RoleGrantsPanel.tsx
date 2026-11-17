@@ -28,7 +28,7 @@ import {
   ROLE_GRANT_ROLE_OPTIONS,
   type RoleGrantInfo,
 } from "./roleGrantsApi";
-import "./roleGrantsPanel.css";
+import "./roleGrantsPanel.deprecated.css";
 
 const ROLE_OPTIONS = ROLE_GRANT_ROLE_OPTIONS;
 

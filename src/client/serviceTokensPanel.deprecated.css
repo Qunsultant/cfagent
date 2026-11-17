@@ -1,3 +1,12 @@
+/**
+ * DEPRECATED — S-U7 (#5178): renamed to serviceTokensPanel.deprecated.css per gitops §22.
+ * Superseded by src/client/components/ui/primitives.css (ui-* utilities) and
+ * src/client/tokens.css (design tokens). 27 selectors, 27 with live users
+ * in 1 file; rules unchanged, import updated to the new path.
+ * Deletion needs zero consumers plus an owner decision plus a gate
+ * amendment; deletion is never part of a program slice (gitops §22).
+ * See docs/architecture/transition/deprecations.md.
+ */
 /* Service tokens section (issue #2681) — stp- prefixed, token-only. */
 
 .stp-panel {

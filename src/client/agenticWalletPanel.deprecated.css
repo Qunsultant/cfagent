@@ -1,3 +1,12 @@
+/**
+ * DEPRECATED — S-U7 (#5178): renamed to agenticWalletPanel.deprecated.css per gitops §22.
+ * Superseded by src/client/components/ui/primitives.css (ui-* utilities) and
+ * src/client/tokens.css (design tokens). 27 selectors, 26 with live users
+ * in 2 files; rules unchanged, import updated to the new path.
+ * Deletion needs zero consumers plus an owner decision plus a gate
+ * amendment; deletion is never part of a program slice (gitops §22).
+ * See docs/architecture/transition/deprecations.md.
+ */
 /* Agentic Wallet panel (issue #139) — awp- prefixed, self-contained. */
 .awp-panel {
   margin: 1.25rem 0;

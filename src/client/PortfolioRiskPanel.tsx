@@ -44,7 +44,7 @@ import {
   type SizingResult,
 } from "./portfolioRiskApi";
 import type { TradeOrderContext } from "./trading/tradeOrderContext";
-import "./portfolioRiskPanel.css";
+import "./portfolioRiskPanel.deprecated.css";
 import { Button, Table, TextInput, Select } from "./components/ui";
 
 interface PortfolioRiskPanelProps {

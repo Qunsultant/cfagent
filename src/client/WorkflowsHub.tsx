@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from "react";
-import "./workflowsHub.css";
+import "./workflowsHub.deprecated.css";
 import { Badge, Button, Card, CardHeader, KpiRibbon, Notice, PageSection, PillGroup, Table, TextInput, PageShell, Tabs, Stack, Flex, Grid, type BadgeTone } from "./components/ui";
 import { useUrlSyncedTabs } from "./useUrlSyncedTabs";
 import { STRATEGY_LIBRARY } from "./options/strategyLibrary";

@@ -8,7 +8,7 @@ import { gapClass, type LayoutGap, type GridMinWidth } from "./layout";
  * - "workspace": the page's sections in an auto-fit grid (the default
  *   workspace arrangement).
  * - "list-detail": the order ticket's 1.4fr/1fr two-column layout
- *   (styles.css `.order-ticket-layout`), collapsing to one column
+ *   (styles.deprecated.css `.order-ticket-layout`), collapsing to one column
  *   below 900px.
  * - "feed": a single column — the feed/queue reading order.
  */

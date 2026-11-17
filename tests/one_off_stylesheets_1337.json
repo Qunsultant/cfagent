@@ -1,16 +1,16 @@
 [
   {
-    "path": "src/client/accountPanels.css",
-    "lines": 133,
+    "path": "src/client/accountPanels.deprecated.css",
+    "lines": 142,
     "reason": "grandfathered (#1337)"
   },
   {
-    "path": "src/client/agenticWalletPanel.css",
-    "lines": 189,
+    "path": "src/client/agenticWalletPanel.deprecated.css",
+    "lines": 198,
     "reason": "grandfathered (#1337)"
   },
   {
-    "path": "src/client/apiKeysPanel.css",
+    "path": "src/client/apiKeysPanel.deprecated.css",
     "lines": 130,
     "reason": "grandfathered (#1337)"
   },
@@ -20,18 +20,18 @@
     "reason": "Options Strategy Card and Copilot subnav styling (#2563; tokens only)"
   },
   {
-    "path": "src/client/dataProvidersPanel.css",
+    "path": "src/client/dataProvidersPanel.deprecated.css",
     "lines": 373,
     "reason": "Tabular presentation and consolidated provider connectivity (#2723; tokens only); feed-jobs column growth (#3535; tokens only); feed status block growth (issue #3530; tokens only)"
   },
   {
-    "path": "src/client/docsAndReports.css",
+    "path": "src/client/docsAndReports.deprecated.css",
     "lines": 164,
     "reason": "Docs and Reports page layout (new page; tokens only)"
   },
   {
-    "path": "src/client/iaaaAdminPanel.css",
-    "lines": 74,
+    "path": "src/client/iaaaAdminPanel.deprecated.css",
+    "lines": 83,
     "reason": "grandfathered (#1337)"
   },
   {
@@ -40,8 +40,8 @@
     "reason": "grandfathered (#1337)"
   },
   {
-    "path": "src/client/options/optionsResearch.css",
-    "lines": 1203,
+    "path": "src/client/options/optionsResearch.deprecated.css",
+    "lines": 1212,
     "reason": "grandfathered (#1337), screener deck layout (#1793); Deprecated header added (#3139, +5 lines)"
   },
   {
@@ -50,22 +50,22 @@
     "reason": "grandfathered (#1337)"
   },
   {
-    "path": "src/client/options/strategyDiscovery.css",
+    "path": "src/client/options/strategyDiscovery.deprecated.css",
     "lines": 5505,
     "reason": "grandfathered (#1337)"
   },
   {
-    "path": "src/client/optionsResearch.css",
-    "lines": 1223,
+    "path": "src/client/optionsResearch.deprecated.css",
+    "lines": 1232,
     "reason": "grandfathered (#1337), screener deck layout (#1793); Deprecated header added (#3139, +5 lines)"
   },
   {
-    "path": "src/client/portfolioRiskPanel.css",
-    "lines": 297,
+    "path": "src/client/portfolioRiskPanel.deprecated.css",
+    "lines": 298,
     "reason": "grandfathered (#1337)"
   },
   {
-    "path": "src/client/reports.css",
+    "path": "src/client/reports.deprecated.css",
     "lines": 617,
     "reason": "grandfathered (#1337)"
   },
@@ -75,7 +75,7 @@
     "reason": "grandfathered (#1337)"
   },
   {
-    "path": "src/client/scannerPanel.css",
+    "path": "src/client/scannerPanel.deprecated.css",
     "lines": 468,
     "reason": "grandfathered (#1337)"
   },
@@ -85,43 +85,43 @@
     "reason": "grandfathered (#1337)"
   },
   {
-    "path": "src/client/roleGrantsPanel.css",
-    "lines": 99,
+    "path": "src/client/roleGrantsPanel.deprecated.css",
+    "lines": 108,
     "reason": "Role grants panel (issue #2688; tokens only)"
   },
   {
-    "path": "src/client/serviceTokensPanel.css",
-    "lines": 168,
+    "path": "src/client/serviceTokensPanel.deprecated.css",
+    "lines": 177,
     "reason": "Service tokens panel (issue #2681; tokens only)"
   },
   {
-    "path": "src/client/loggedInUsersPanel.css",
-    "lines": 104,
+    "path": "src/client/loggedInUsersPanel.deprecated.css",
+    "lines": 113,
     "reason": "Logged-in users panel (issue #2836; tokens only)"
   },
   {
-    "path": "src/client/styles.css",
+    "path": "src/client/styles.deprecated.css",
     "lines": 14425,
     "reason": "grandfathered (#1337)"
   },
   {
-    "path": "src/client/workflowsHub.css",
-    "lines": 1188,
+    "path": "src/client/workflowsHub.deprecated.css",
+    "lines": 1197,
     "reason": "grandfathered (#1337)"
   },
   {
-    "path": "src/client/workflowRuns.css",
+    "path": "src/client/workflowRuns.deprecated.css",
     "lines": 268,
     "reason": "Workflow Runs ledger layout (#2095) — page-specific grid/table layout, token values only"
   },
   {
-    "path": "src/client/agentsPanel.css",
+    "path": "src/client/agentsPanel.deprecated.css",
     "lines": 59,
     "reason": "Agents view layout (#2469, Agent Mesh S20/G9) — page-specific fleet/detail layout in the Workflow Runs page's pattern, token values only"
   },
   {
-    "path": "src/client/stockCopilotPanel.css",
-    "lines": 86,
+    "path": "src/client/stockCopilotPanel.deprecated.css",
+    "lines": 95,
     "reason": "Stock Copilot panel (issue #3422; tokens only; #3738 voice-control row)"
   }
 ]
