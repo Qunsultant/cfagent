@@ -2,7 +2,7 @@
 
 - **Status:** Draft (2026-11-17). Not yet reviewed; counts are measured on fresh `main` of that date (tarball, no git metadata in the survey tree — base commit hash UNVERIFIED).
 - **Scope:** the whole Qunsultant/cfagent system (NextGenTP, live at `https://agent.openaimp.com/`): its stores, its catalogues, and how the data model relates to Durable Objects, agents, HTTP APIs, MCP, services, products, and security.
-- **How to read it:** §1 is the conceptual view (subject areas, no tables). §2 is the logical view (entities, keys, cardinality, authoritative-vs-projection and tenancy marking). §3 is the physical view (the actual stores and catalogue counts). §4 is the subject-area view (one section per area: entities, store home, owner, readers/writers, integrity rules). §5 is the gap table — every gap found, with evidence and the issue it maps to (or the existing issue that already tracks it).
+- **How to read it:** §1 is the conceptual view (subject areas, no tables). §2 is the logical view (entities, keys, cardinality, authoritative-vs-projection and tenancy marking). §3 is the physical view (the actual stores and catalogue counts). §4 is the subject-area view (one section per area: entities, store home, owner, readers/writers, integrity rules). §5 is the gap table — every gap found, with evidence and the issue it maps to (or the existing issue that already tracks it). Each view carries its diagram inline (Mermaid, rendered by GitHub): subject-area relationships in §1.2, surfaces-to-entities in §1.3, the core ER in §2.2, the physical topology in §3.3. Every node and edge in the diagrams traces to a fact stated in the surrounding text; nothing is drawn from a name alone.
 - **Sources (the model has no other home):** ADR 0020 (DO/D1/R2 topology), ADR 0022 (data foundation, esp. D-C transaction aspect, D-G authoritative reads, D-F substrate families), ADR 0028 (data-provider/broker taxonomy), ADR 0029 (unified schedule store), ADR 0032 (data-access mechanism standard), ADR 0033 (cross-store consistency contract, incl. the frozen Appendix A audit of 2026-11-16), the schema-component catalogues in `src/data/schemaComponent/`, `src/data/drizzleSchema.ts`, `src/data/migrationRunner.ts`, `wrangler.jsonc`, and the pin/census tests in `tests/`. The full survey evidence (including the 181-row per-table map) lives in the drafting workspace and is summarized here; anything this doc could not verify from the tree is marked **UNVERIFIED**.
 - **Conventions:** "DO" = Durable Object SQLite (authoritative execution state, ADR 0022 D-G). "D1" = the `AGENT_DB` database (projection / read model, plus the D1-native substrate families of ADR 0022 D-F). "Catalogue" = the fail-closed statement registries in `src/data/schemaComponent/` (unknown code, duplicate code, or kind/plane/table mismatch is rejected at registration, never at execution). Counts below were recounted from the definitions on 2026-11-17; where a header comment disagrees with the recount, the recount wins and the disagreement is listed in §5.
 
@@ -34,6 +34,40 @@
 - **Market data** (SA-6) feeds SA-1 runs; **configuration** (SA-10) parameterizes them; **tenancy** (SA-9) scopes nearly every row in SA-1–SA-8, by construction on the DO side (per-login instance) and by `tenant_id` column on the D1 side.
 - **Schedules** (SA-5) synthesize **chains** whose transitions project into D1; **chains** are the only subject area whose DO source of truth is a KV key (`synthesizedSchedules` in the ScheduledAgent), not a SQL table.
 
+```mermaid
+flowchart TD
+    SA1["SA-1 Jobs and runs"]
+    SA2["SA-2 Reports"]
+    SA3["SA-3 Audit and security"]
+    SA4["SA-4 Telemetry and observability"]
+    SA5["SA-5 Schedules and chains"]
+    SA6["SA-6 Market data"]
+    SA7["SA-7 Trading and orders"]
+    SA8["SA-8 Payments and billing"]
+    SA9["SA-9 Tenants, users and identity"]
+    SA10["SA-10 Configuration and settings"]
+    SA11["SA-11 Marketplace and commercial"]
+    SA12["SA-12 Knowledge and corpus"]
+    CHAT["chat / MCP call"]
+    SA5 -->|"driven by schedule / goal"| SA1
+    CHAT -->|"drives"| SA1
+    SA6 -->|"feeds"| SA1
+    SA10 -->|"parameterizes"| SA1
+    SA1 -->|"produces"| SA2
+    SA1 -->|"produces"| SA4
+    SA2 -->|"indexed into"| SA12
+    SA1 -->|"consequential actions write"| SA3
+    SA5 -->|"consequential actions write"| SA3
+    SA7 -->|"consequential actions write"| SA3
+    SA8 -->|"consequential actions write"| SA3
+    SA7 -.->|"shares ledger shape, separate ledgers"| SA8
+    SA9 -->|"scopes nearly every row"| SA1
+    SA9 -->|"scopes nearly every row"| SA2
+    SA9 -->|"scopes nearly every row"| SA7
+    SA9 -->|"scopes nearly every row"| SA8
+    SA11 -->|"checkout"| SA8
+```
+
 ### 1.3 Relationship to the seven dimensions
 
 | Dimension | Subject areas it touches | How it touches the data model |
@@ -45,6 +79,39 @@
 | 5. Services | SA-1, SA-2, SA-4, SA-5, SA-6 | The job-pipeline engine, scheduled tasks/firer, chain pipeline, feed jobs, report services, and projection/reconcile services are the writers of SA-1/SA-2/SA-5; they all write through the port layer except the sites in §3.5. |
 | 6. Products (NextGenTP) | SA-2, SA-5, SA-6, SA-7, SA-8, SA-9 | Screeners, options hub, reports, schedules/goals, workflow runs/catalog, chat/Copilot, data hub, platform admin, audit vault, billing — every panel reads through the HTTP routes (§1.3 row 3) or the MCP tools in chat; no client code touches storage directly (verified by survey). |
 | 7. Security | SA-3, SA-9, and the tenancy marking on every area | Audit chain (hash-chained `mas_events` + IAAA whole-log store), IAAA identity/binding, PDP-gated routes (5 sites), per-login DO isolation (authorization by construction), tenant-scoped D1 reads, session/token hashing. See §2.4 and §4 SA-3/SA-9. |
+
+```mermaid
+flowchart LR
+    subgraph SURF["Surfaces"]
+        CHAT["Chat / Copilot"]
+        MCP["MCP tools (about 142 registrations / 133 distinct)"]
+        ROUTES["HTTP routes (81 files)"]
+        SRV["Services: job-pipeline engine, scheduled firer, chain pipeline, feed jobs, report services, projection / reconcile"]
+        PANELS["NextGenTP panels: screeners, reports, schedules, workflow runs, chat, data hub, admin, audit vault, billing"]
+        FIRER["Scheduled firer"]
+    end
+    subgraph STORES["Entities / stores"]
+        DO["DO SQLite (authoritative execution state)"]
+        D1P["D1 projection (read model)"]
+        D1N["D1-native substrate (trace, proposals, fleet registry, audit chain)"]
+        R2B["R2 blobs"]
+        AIS2["AI Search / Vectorize"]
+    end
+    CHAT -->|"NLQ / mesh door"| MCP
+    MCP -->|"synchronous tools"| DO
+    MCP -->|"queued (allowlist) — async-job receipt"| DO
+    MCP -->|"run_stock_screen — workflow run record"| DO
+    MCP -->|"trading tools (synchronous, never queued)"| DO
+    ROUTES -->|"storage handle + ports"| DO
+    ROUTES -->|"Drizzle catalogue"| D1P
+    SRV -->|"writes (port layer)"| DO
+    SRV -->|"projection / reconcile"| D1P
+    PANELS -->|"reads via routes or MCP tools"| ROUTES
+    PANELS -->|"reads via routes or MCP tools"| MCP
+    FIRER -->|"drives schedules / chains / reports"| DO
+    DO -->|"row to body"| R2B
+    DO -->|"index (gated off)"| AIS2
+```
 
 ## 2. Logical view
 
@@ -92,6 +159,116 @@ Conventions: **A** = authoritative store (DO SQLite, unless marked D1-native). *
 - Transaction 1:1 payment draft (same row, status transition); transaction 1:N gateway attempts is **UNVERIFIED** (no attempt table was found).
 - Report 1:1 R2 blob (row↔body pair, R2 put precedes the row insert per the #2347 contract; a row never claims a body it does not have).
 - Schedule 1:N synthesized chains; chain 1:N shard jobs.
+
+```mermaid
+erDiagram
+    CANONICAL_REPORT {
+        string id PK
+        string user_login
+        string generation_id
+        string title
+        string run_id
+    }
+    REPORT_VERSION {
+        string reportId PK
+        int version PK
+        string content_hash
+    }
+    REPORT_BLOB {
+        string r2_key PK
+        string kind
+    }
+    JOB_RUN_RECORD {
+        string job_id PK
+        string definition
+        string outcome
+    }
+    STAGE_EVENT {
+        string id PK
+        string job_id FK
+        string stage
+    }
+    STAGE_DATASET {
+        string job_id PK
+        string stage PK
+        string status
+    }
+    SCHEDULE {
+        string id PK
+        string kind
+        string state
+    }
+    CHAIN {
+        string tenantId PK
+        string id PK
+        string status
+    }
+    CHAIN_TRANSITION {
+        string chainId PK
+        int version PK
+        string status
+    }
+    TICK {
+        string id PK
+        string schedule_id FK
+    }
+    GOAL {
+        string id PK
+        string kind
+        string state
+    }
+    FIRING {
+        string id PK
+        string goal_id FK
+    }
+    SHARD_JOB {
+        string tenantId PK
+        string chainId PK
+        string jobKey PK
+        string status
+    }
+    TENANT {
+        string tenant_id PK
+    }
+    TENANT_SETTING {
+        string tenant_id PK
+        string key PK
+        string value
+    }
+    AUDIT_EVENT {
+        string id PK
+        string previous_event_hash FK
+        string event_hash
+    }
+    AUDIT_CHAIN {
+        string tenant_id PK
+        int sequence PK
+        string prevHash
+        string entryHash
+    }
+    TRANSACTION {
+        string id PK
+        int amount
+        string status
+    }
+    PAYMENT_DRAFT {
+        string id PK
+        string status
+    }
+    CANONICAL_REPORT ||--o{ REPORT_VERSION : "has (projection only)"
+    CANONICAL_REPORT ||--|| REPORT_BLOB : "row to body pair"
+    JOB_RUN_RECORD ||--o{ STAGE_EVENT : "emits"
+    JOB_RUN_RECORD ||--o{ STAGE_DATASET : "produces"
+    SCHEDULE ||--o{ TICK : "fires"
+    GOAL ||--o{ FIRING : "fires"
+    SCHEDULE ||--o{ CHAIN : "synthesizes"
+    CHAIN ||--o{ CHAIN_TRANSITION : "versioned status"
+    CHAIN ||--o{ SHARD_JOB : "runs"
+    TENANT ||--o{ CANONICAL_REPORT : "scopes (D1 side)"
+    TENANT ||--|| TENANT_SETTING : "has"
+    AUDIT_CHAIN ||--o{ AUDIT_EVENT : "contains"
+    TRANSACTION ||--|| PAYMENT_DRAFT : "same row"
+```
 
 ### 2.3 Authoritative vs projection (ADR 0033 R-3, R-5)
 
@@ -142,6 +319,43 @@ Measured on fresh `main` 2026-11-17. Catalogue totals (recounted from definition
 - **Vectorize:** one index, `VECTOR_MEMORY` → `vector-memory` (`wrangler.jsonc:278-283`).
 - **AI Search:** namespace `AI_SEARCH` → `default`, instance `"screener-search"` (`wrangler.jsonc:186-188`); report indexing gated by `AI_SEARCH_REPORT_INDEXING_ENABLED` (default OFF). The MCP endpoint is deliberately unconfigured (`AI_SEARCH_MCP_ENDPOINT` unset, owner decision).
 - **Analytics Engine:** `OBSERVABILITY` dataset `observability` (`wrangler.jsonc:61-64`); unbound degrades to local logging.
+
+```mermaid
+flowchart TD
+    subgraph DO["Durable Object SQLite — one database per DO instance (14 bindings)"]
+        ORCH["OrchestratorAgent — mas_* families: mas_reports, mas_events, mas_async_jobs, mas_transactions, mas_trades"]
+        SCR["ScreenerAgent — task ledger, provider configs"]
+        RES["ResearchAgent — research store, task ledger"]
+        SCH["ScheduledAgent — unified_schedules (SQL) + KV goals / tickHistory"]
+        TRD["TradingAgent — ORM tables (own instance)"]
+        PAY["PaymentsAgent — KV payments array (no SQL)"]
+        RAA["ReportAssetAgent — KV-only"]
+        SES["SessionStore — single table kv_store (all buckets)"]
+        SLK["SlackAgent — ORM tables (own instance)"]
+        OSC["OptionsScannerMCP — own storage via ORM"]
+    end
+    subgraph D1["D1 (AGENT_DB) — projection + D1-native substrate (101 tables)"]
+        PROJ["Run-ledger projections: agent_async_jobs, agent_reports, agent_chains, agent_synthesized_schedules, agent_shard_jobs, agent_chain_audit"]
+        DUAL["Dual-homed: job_pipeline_*, job_run_records, job_*_datasets"]
+        NAT["D1-native substrate: agent_audit_chain, agent_trace_records, agent_proposals, agent_work_item_events, agent_fleet_registry"]
+        COMM["Commercial / billing / marketplace: agent_products, agent_bundles, agent_referral_*, agent_ads (about 60 tables)"]
+        TEN["Tenancy: agent_tenant_settings, agent_tenant_channels, agent_tenant_projection_carriers"]
+        TEL["Telemetry: agent_thesis_realizations, resource_sql_ops, resource_daily_rollups"]
+    end
+    subgraph EXT["Object / search stores"]
+        R2["R2 REPORTS_BUCKET — report PDF / blob bodies"]
+        VEC["Vectorize vector-memory"]
+        AIS["AI Search screener-search — report index (gated off by default)"]
+        KV["KV via durableKv — logical buckets over SessionStore DO"]
+    end
+    ORCH -->|"projection (sync / async / operator carrier)"| PROJ
+    ORCH -->|"projection"| DUAL
+    SCH -->|"projection"| PROJ
+    ORCH -->|"row to body pair (R2 put first)"| R2
+    ORCH -->|"report index (gated off)"| AIS
+    RES -->|"report bodies"| R2
+    KV -->|"stub.fetch to SessionStore"| SES
+```
 
 ### 3.4 Indexes (physical, named)
 
