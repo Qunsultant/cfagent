@@ -57,6 +57,13 @@ export interface OrderExecutionNotificationInput {
   strategy?: string;
   reason?: string;
   timestamp?: string;
+  /** #5155: end-to-end execution traceability fields. */
+  triggerSource?: "scheduled_task" | "ux" | "chat_copilot" | string;
+  scheduleId?: string;
+  taskId?: string;
+  runId?: string;
+  traceId?: string;
+  accountId?: string;
 }
 
 function escapeHtml(raw: string): string {
@@ -107,8 +114,14 @@ export function formatOrderNotificationPayload(input: OrderExecutionNotification
     `• Price: ${priceLine}`,
     ...(bracketSummary ? [`• Bracket Exits: ${bracketSummary}`] : []),
     `• Broker / Mode: ${broker} (${mode})`,
+    ...(input.accountId ? [`• Account ID: ${input.accountId}`] : []),
     `• Order ID: ${input.orderId}`,
     `• Origin: ${input.origin}`,
+    ...(input.userLogin?.trim() ? [`• User: ${input.userLogin.trim()}`] : []),
+    ...(input.triggerSource ? [`• Trigger: ${input.triggerSource}`] : []),
+    ...(input.scheduleId || input.taskId ? [`• Schedule / Task: ${input.scheduleId ?? input.taskId}`] : []),
+    ...(input.runId ? [`• Run ID: ${input.runId}`] : []),
+    ...(input.traceId ? [`• Trace ID: ${input.traceId}`] : []),
     ...(input.strategy ? [`• Strategy: ${input.strategy}`] : []),
     ...(input.session ? [`• Session: ${input.session}`] : []),
     ...(input.reason ? [`• Reason: ${input.reason}`] : []),
@@ -129,8 +142,16 @@ export function formatOrderNotificationPayload(input: OrderExecutionNotification
     ["Price", priceLine],
     ...(bracketSummary ? [["Bracket Exits", bracketSummary]] : []),
     ["Broker / Mode", `${broker} (${mode})`],
+    ...(input.accountId ? [["Account ID", input.accountId]] : []),
     ["Order ID", input.orderId],
     ["Origin", input.origin],
+    ...(input.userLogin?.trim() ? [["User", input.userLogin.trim()]] : []),
+    ...(input.triggerSource ? [["Trigger", input.triggerSource]] : []),
+    ...(input.scheduleId || input.taskId
+      ? [["Schedule / Task", input.scheduleId ?? input.taskId!]]
+      : []),
+    ...(input.runId ? [["Run ID", input.runId]] : []),
+    ...(input.traceId ? [["Trace ID", input.traceId]] : []),
     ...(input.strategy ? [["Strategy", input.strategy]] : []),
     ...(input.session ? [["Session", input.session]] : []),
     ...(input.reason ? [["Reason", input.reason]] : []),
