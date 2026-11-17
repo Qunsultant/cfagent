@@ -62,6 +62,7 @@ import { handleBrokerOrderRoutes } from "../routes/brokerOrders";
 import { handleBrokerOptionsRoutes } from "../routes/brokerOptions";
 import { handleBrokerReadsRoutes } from "../routes/brokerReads";
 import { handleBrokerConnectRoutes } from "../routes/brokerConnect";
+import { handleAccountBindingRoutes } from "../routes/accountBindings";
 import { handleBrokerRiskRoutes } from "../routes/brokerRisk";
 import { handleBrokerScreenRoutes } from "../routes/brokerScreen";
 import { handleEtradeOptionsRoutes } from "../routes/etradeOptions";
@@ -573,6 +574,11 @@ export async function routeRequest(deps: RouteRequestDeps, request: Request): Pr
     readSettingRaw: (key) => deps.readSettingRaw(key),
   });
   if (brokerConnectResponse) return brokerConnectResponse;
+
+  const accountBindingResponse = await handleAccountBindingRoutes(request, url, path, sessionId, {
+    env: deps.env,
+  });
+  if (accountBindingResponse) return accountBindingResponse;
 
   // Provider/broker slice 1: the broker gate delegation
   // (src/agents/routes/brokerGate.ts). Invoked at this exact
