@@ -257,3 +257,38 @@ The count depends on the job definition and the universe size: total = 1 (run) +
 - Enumerate the research types beyond OODA (Holly etc. — later).
 - Generation id canonical shape (settled by the uniform convention: `gen:<runBody>`).
 - Goal record id prefix (gap G12 — unverified on main).
+
+---
+
+## 8. Unsurfaced-work gaps (filed 2026-11-17)
+
+A survey of fresh main (2026-11-17) found 22 capabilities developed but not surfaced through UX, schedules, Copilot, or autopilot. Each is filed as a sub-issue; the umbrella parent is #5199. The full report (evidence per gap, deliberately-unsurfaced items) lives in the survey workspace (`~/workspace/verify-priority-queue/4774/unsurfaced/gaps-report.md`).
+
+14 gaps attach to #5199 because their domain parents were closed at filing (verified 2026-11-17); the closed parent is named as Related in each issue body. 8 attach to their open domain parents.
+
+| Gap | Capability | Issue | Parent |
+|---|---|---|---|
+| U-01 | Ranked stock setups (Top setups) — the stock-side pick | #5200 | #5199 |
+| U-02 | Judge-score display reads a field the writer never sets | #5201 | #5058 |
+| U-03 | LLM-vs-quant comparison track record across runs | #5202 | #5199 |
+| U-04 | Copilot intents never become proposals (High) | #5203 | #5199 |
+| U-05 | List pending workflow-backed trade-approval waits | #5204 | #5199 |
+| U-06 | Surface rebalance proposals (route + panel) | #5205 | #5199 |
+| U-07 | First producer for composition repairs | #5206 | #5199 |
+| U-08 | Wire goal-scenario discovery triggers | #5207 | #5199 |
+| U-09 | Proactive hedge check (schedule / on position open / MCP) | #5208 | #5199 |
+| U-10 | Generate the MCP explorer catalog from the live tool list | #5209 | #3695 |
+| U-11 | Monthly product-mix review: trigger + review surface | #5210 | #2620 |
+| U-12 | Production trigger for the golden-task eval harness | #5211 | #5199 |
+| U-13 | Hand introspection proposals to the proposal pipeline | #5212 | #5058 |
+| U-14 | Wire sandbox strategy synthesis into the self-RSI path + activation cards | #5213 | #5056 |
+| U-15 | Select the dataset-backed options-chain source when fresh | #5214 | #5199 |
+| U-16 | Wire the per-tenant credential store into resolution + migrate | #5215 | #5199 |
+| U-17 | Per-family pipeline-job schedule tools | #5216 | #5199 |
+| U-18 | Daily QA sweep: implement the sweep or remove the goal | #5217 | #5199 |
+| U-19 | Opportunity hunt: implement the hunt or remove the goal | #5218 | #4174 |
+| U-20 | Read surface for the resource comparison report | #5219 | #1819 |
+| U-21 | Schedule / goal approvals queue in the live approvals tab | #5220 | #3122 |
+| U-22 | List / inspect surface for synthesized goal chains | #5221 | #5199 |
+
+The surfacing rule these gaps establish: every developed capability gets at least one of UX / schedule / Copilot / autopilot — a capability with none of the four is a gap, filed here.
