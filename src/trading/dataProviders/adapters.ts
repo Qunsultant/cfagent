@@ -72,7 +72,9 @@ import {
   mapPublicQuoteRow,
   readPublicOptionChain,
   readPublicOptionExpirations,
+  readPublicPriceHistory,
   readPublicQuotes,
+  parsePublicPriceHistory,
   expiryDateFromYmd,
   type PublicToolRead,
 } from "../../services/publicData";
@@ -89,6 +91,7 @@ import type {
 } from "../../types";
 import type { SqlStorage } from "../../orm";
 import type { QuoteTrace } from "../etrade/quoteTrace";
+import { publicBarsInstrumentType, resolvePublicBarsRequest } from "../../config/publicData";
 import { fetchAllUsStockListings } from "../../services/nasdaqListings";
 import {
   BreakerWrappedMarketDataProvider,
@@ -1451,10 +1454,11 @@ export interface PublicDataProviderOptions {
  * does not carry stays absent; Greeks map only where the payload
  * carries them). Provenance rides the same envelope as every adapter.
  *
- * Declared capabilities are exactly the grounded ones: quotes and
- * optionsChains (expirations + chain). News and historical bars are
- * NOT declared — the MCP tool surface this slice is grounded on
- * (cfpay, verified live) covers the three data tools only.
+ * Declared capabilities are exactly the grounded ones: quotes,
+ * optionsChains and (issue #4673) historicalBars — the live tools/list
+ * probe verified get_price_history, so the bar read is no longer
+ * stated as absent. News and fundamentals are NOT declared: the
+ * surface offers no tool for them.
  *
  * With capture deps (E1), every fetch writes a capture whose raw
  * payload is the tool call's wire payload (the parsed tool result;
@@ -1485,7 +1489,7 @@ export function createPublicDataProvider(
    * one call share one attribution.
    */
   async function trackedRead<T>(
-    capability: "quotes" | "optionsChains",
+    capability: "quotes" | "optionsChains" | "historicalBars",
     requestParams: Record<string, unknown>,
     runContext: DataRunContext | undefined,
     readFn: () => Promise<T>
@@ -1518,7 +1522,7 @@ export function createPublicDataProvider(
   }
 
   async function captureRead(
-    capability: "quotes" | "optionsChains",
+    capability: "quotes" | "optionsChains" | "historicalBars",
     read: PublicToolRead,
     normalizedResult: unknown,
     runContext?: DataRunContext
@@ -1544,7 +1548,7 @@ export function createPublicDataProvider(
   }
 
   async function captureNoPayload(
-    capability: "quotes" | "optionsChains",
+    capability: "quotes" | "optionsChains" | "historicalBars",
     requestParams: Record<string, unknown>,
     normalizedResult: unknown,
     runContext?: DataRunContext
@@ -1573,7 +1577,7 @@ export function createPublicDataProvider(
   return {
     id: "public",
     name: "Public.com",
-    capabilities: ["quotes", "optionsChains"] as const,
+    capabilities: ["quotes", "optionsChains", "historicalBars"] as const,
     isConfigured: () => true,
     getQuote: async (symbol: string, runContext?: DataRunContext) => {
       const ctx = effectiveRunContext(runContext);
@@ -1625,6 +1629,47 @@ export function createPublicDataProvider(
       );
       await captureRead("quotes", read, quotes, ctx);
       return tag("public", "quotes", quotes);
+    },
+    // Issue #4673 (matrix gap 19): bars ride the provider's own
+    // get_price_history tool (verified on the live surface). The
+    // timeframe/limit -> period/aggregation mapping is configuration
+    // (config/public-data.json), never a hardcoded period here; a
+    // timeframe the configuration does not name is refused by name.
+    getHistoricalBars: async (
+      symbol: string,
+      timeframe?: string,
+      limit?: number,
+      runContext?: DataRunContext
+    ) => {
+      const ctx = effectiveRunContext(runContext);
+      const request = resolvePublicBarsRequest(timeframe, limit);
+      const { read, bars } = await trackedRead(
+        "historicalBars",
+        {
+          tool: "get_price_history",
+          symbol,
+          period: request.period,
+          aggregation: request.aggregation,
+          limit: request.limit,
+        },
+        ctx,
+        async () => {
+          const read = await readPublicPriceHistory(client, symbol, {
+            period: request.period,
+            aggregation: request.aggregation,
+            instrumentType: publicBarsInstrumentType(),
+          });
+          const bars = parsePublicPriceHistory(read.payload, request.limit);
+          if (bars.length === 0) {
+            throw new PublicDataError(
+              `get_price_history returned no usable bars for ${symbol}.`
+            );
+          }
+          return { read, bars };
+        }
+      );
+      await captureRead("historicalBars", read, bars, ctx);
+      return tag("public", "historicalBars", bars);
     },
     getOptionExpiryDates: async (symbol: string, runContext?: DataRunContext) => {
       const ctx = effectiveRunContext(runContext);

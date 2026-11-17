@@ -368,8 +368,10 @@ export const BROKER_CATALOG = {
       detailedQuote: true,
       accounts: true,
       positions: true,
-      // No tax-lot endpoint verified on the MCP surface.
-      positionLots: false,
+      // Issue #4673: get_tax_lots / get_tax_lots_for_symbol are
+      // verified on the live tools/list probe (46 tools, 2026-11-17),
+      // and the platform reads a position's lots by symbol.
+      positionLots: true,
       // Issue #3324's reasoning holds here too: the risk model is
       // the platform's, fed by this broker's own book, chains, and
       // spot price.
@@ -388,11 +390,14 @@ export const BROKER_CATALOG = {
       // Public's chains, never another broker's.
       optionsScanner: true,
       ivHistory: true,
-      // Issue #3359: Public serves order history (get_orders). No
-      // get_history tool is verified, so account activity is a
-      // stated gap; there is no watchlists or alerts tool either.
+      // Issue #3359: Public serves order history (get_orders).
+      // Issue #4673: get_history is verified too — trades, money
+      // movements (deposit / withdrawal / dividend) and position
+      // adjustments (split / merger) — so account activity is served.
+      // Alerts and watchlists are NOT on the 46-tool surface: they stay
+      // false, a named gap rather than an empty table.
       orderHistory: true,
-      accountActivity: false,
+      accountActivity: true,
       alerts: false,
       watchlists: false,
       orderCancel: true,
@@ -411,9 +416,10 @@ export const BROKER_CATALOG = {
       autonomousCycle: true,
       bracketOrders: "native",
       percentBrackets: true,
-      // Bars do not come from Public (no bars tool on the MCP
-      // surface) — they come from the tenant's data provider
-      // (alpaca by default), so the bars provider is hybrid.
+      // Issue #4673: Public itself serves bars through
+      // get_price_history (the data adapter declares historicalBars),
+      // but the copilot's own bar read still rides the market-data
+      // facade (alpaca by default), so the copilot provider is hybrid.
       barsProvider: "hybrid",
       tools: {
         quote: "public_get_quote",

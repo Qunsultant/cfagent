@@ -19,11 +19,14 @@
  * is presented, so nothing here is reachable unauthenticated.
  *
  * READ-ONLY BY CONSTRUCTION: this client will only ever invoke the
- * data tools on PUBLIC_DATA_TOOL_ALLOWLIST (the three market-data
- * tools the provider declares, plus get_accounts, which the option
- * tools' schemas require an account id from — cfpay resolves it the
- * same way). Order-placing tools are not merely unused, they are
- * refused: the data-provider platform never exposes them at all.
+ * data tools on PUBLIC_DATA_TOOL_ALLOWLIST — the market-data tools
+ * the provider declares (quotes, expirations, chain, bars), plus
+ * get_accounts (the option tools' schemas require an account id from
+ * it; cfpay resolves it the same way). Account-scoped reads
+ * (get_history, get_tax_lots*) stay off this list because they are
+ * not market data: they ride the trading client's own allow-list.
+ * Order-placing tools are not merely unused, they are refused: the
+ * data-provider platform never exposes them at all.
  *
  * The credential arrives through an injected access-token provider
  * (src/security/publicOAuth.ts is the production source: the signed-in
@@ -40,6 +43,7 @@ export const PUBLIC_DATA_TOOL_ALLOWLIST = [
   "get_quotes",
   "get_option_expirations",
   "get_option_chain",
+  "get_price_history",
 ] as const;
 
 export type PublicAccessTokenProvider = () => Promise<string | null>;
