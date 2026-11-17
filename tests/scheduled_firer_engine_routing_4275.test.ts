@@ -162,11 +162,11 @@ describe("scheduled firer routing (#4275)", () => {
     const runStore = new InMemoryDiscoveryRunStore({ idFactory: () => "run-firer-live" });
     // Constructor positions: env, orm, userLogin, scanRunStore,
     // ivHistoryStore, discoveryRunStore, strategyProfileStore,
-    // followupScheduler, platformDeps, shardSubmit, feedSnapshotStore,
+    // followupScheduler, platformDeps, feedSnapshotStore,
     // stageQueue, runStockScreenViaEngine, engineSql.
     const service = new ScheduledTasksService(
       makeEnv(), makeOrm(), USER, undefined, undefined, runStore,
-      undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, undefined,
       undefined, undefined, sql as unknown as SqlStorage,
     );
     const result = await service.autonomousStrategyDiscovery({
@@ -204,7 +204,7 @@ describe("scheduled firer routing (#4275)", () => {
     const runStore = new InMemoryDiscoveryRunStore({ idFactory: () => "run-firer-snap" });
     const service = new ScheduledTasksService(
       makeEnv(), orm, USER, undefined, undefined, runStore,
-      undefined, undefined, undefined, undefined, feedStore,
+      undefined, undefined, undefined, feedStore,
       undefined, undefined, sql as unknown as SqlStorage,
     );
     const result = await service.autonomousStrategyDiscovery({

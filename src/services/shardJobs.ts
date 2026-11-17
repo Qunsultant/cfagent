@@ -138,34 +138,6 @@ export const SHARD_RETRY_BUCKET: Record<
   deliver: STAGE_RETRY_BUCKET.deliver,
 };
 
-/**
- * Issue #4424: dispatch pacing for a chain's planned shards, one rule for
- * every caller. The first `inFlightCap` shards form the burst and are spaced
- * by `staggerMs`; every shard after the burst is spaced by `paceIntervalMs`,
- * which is the dispatch-rate backpressure the RCA asked for. The values come
- * from `config/shard-pacing.json` (env-overridable) — never a literal here.
- *
- * Limit, stated honestly: this paces DISPATCH, not execution concurrency. How
- * long a shard actually runs is the executor's business; the pacing bounds how
- * fast a chain hands work to it.
- */
-export function applyShardPacing<T extends { runAt?: string }>(
-  specs: T[],
-  pacing: { inFlightCap: number; paceIntervalMs: number; staggerMs: number },
-  nowIso: string,
-): T[] {
-  const baseMs = Date.parse(nowIso);
-  const from = Number.isFinite(baseMs) ? baseMs : Date.now();
-  const cap = Math.max(1, Math.floor(pacing.inFlightCap));
-  const stagger = Math.max(0, Math.floor(pacing.staggerMs));
-  const pace = Math.max(0, Math.floor(pacing.paceIntervalMs));
-  const burstMs = cap * stagger;
-  return specs.map((spec, index) => {
-    const delay =
-      index < cap ? index * stagger : burstMs + (index - cap + 1) * pace;
-    return { ...spec, runAt: new Date(from + delay).toISOString() };
-  });
-}
 /** Staggered not-before time for a shard index inside a stage. */
 export function staggerRunAt(nowIso: string, index: number, staggerMs: number): string {
   const base = Date.parse(nowIso);
@@ -208,31 +180,6 @@ export function planFeedStart(chain: ShardChainContext): AsyncJobSubmission {
     "nasdaq",
     undefined,
     `Stock screen — ${chain.universe} (sharded chain)`
-  );
-}
-
-/** Option chain acquisition has no cross-symbol data dependency: each
- *  underlying is an independently retryable feed shard. Jobs are
- *  staggered across invocations so each E*TRADE fan-out gets a fresh
- *  Worker subrequest budget. */
-export function planOptionsFeedShards(
-  chain: ShardChainContext,
-  nowIso: string
-): AsyncJobSubmission[] {
-  const symbols = [...new Set((chain.options?.symbols ?? []).map((s) => s.trim().toUpperCase()).filter(Boolean))];
-  const stagger = chain.staggerMs ?? 0;
-  const { eventCalendarBySymbol, ...sharedOptions } = chain.options ?? { symbols: [], thesis: "bullish", targetDate: nowIso, riskProfile: "balanced" as const };
-  const sharedChain = { ...chain, options: sharedOptions };
-  return symbols.map((symbol, index) =>
-    shardSpec(
-      sharedChain,
-      "feed",
-      symbol,
-      undefined,
-      `Options chain — ${symbol}`,
-      stagger > 0 ? staggerRunAt(nowIso, index, stagger) : undefined,
-      eventCalendarBySymbol?.[symbol] !== undefined ? { eventCalendar: eventCalendarBySymbol[symbol] } : undefined
-    )
   );
 }
 

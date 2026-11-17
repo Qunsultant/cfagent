@@ -73,6 +73,7 @@ import {
   createWikipediaIndexMembershipAdapter,
 } from "../trading";
 import type { OptionsWorkflowStepDeps } from "../services/optionsPipelineJobs";
+import { optionsChainStepDepsForWorkflow } from "../services/optionsChainPipelineJobs";
 import { fetchWikipediaIndexHtml } from "../services/indexListJob";
 import type { JobPipelineDeps } from "../services/jobPipelineEngine";
 import { JobPipelineError } from "../services/jobPipelineConfig";
@@ -349,6 +350,11 @@ export function createJobPipelineWorkflowDeps(env: Env): JobPipelineDeps {
       // resolving registration, over the D1 definition + artifact
       // stores, so an options job dispatched here executes durably.
       optionsStepDepsForWorkflow(env, stores),
+      // Issue #4780: the options-chain steps compose here too — the
+      // chain job's six steps, resolved per invocation from the chain
+      // on the stored definition, so a chain dispatched here executes
+      // durably, with the workflow step as the engine's journal.
+      optionsChainStepDepsForWorkflow(env),
     ),
     invocation: "workflow-shard",
   };

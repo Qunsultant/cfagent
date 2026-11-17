@@ -409,7 +409,7 @@ describe("ScheduledTasksService snapshot-input discovery (#1236)", () => {
     // Prove the bypass: live would now fail (no fixture, fetch throws).
     DynamicOptionsScreener.clearTestChainsFixture();
     const runStore = new InMemoryDiscoveryRunStore({ idFactory: () => "run-feed" });
-    const service = new ScheduledTasksService(makeEnv(), orm, USER, undefined, undefined, runStore, undefined, undefined, undefined, undefined, feedStore);
+    const service = new ScheduledTasksService(makeEnv(), orm, USER, undefined, undefined, runStore, undefined, undefined, undefined, feedStore);
     const result = await service.autonomousStrategyDiscovery({
       requests: [VALID_REQUEST],
       trigger: "scheduled",
@@ -433,7 +433,7 @@ describe("ScheduledTasksService snapshot-input discovery (#1236)", () => {
     const { artifactId } = await produceNvdaArtifact(feedStore, orm);
     DynamicOptionsScreener.clearTestChainsFixture();
     const runStore = new InMemoryDiscoveryRunStore({ idFactory: () => "run-feed-partial" });
-    const service = new ScheduledTasksService(makeEnv(), orm, USER, undefined, undefined, runStore, undefined, undefined, undefined, undefined, feedStore);
+    const service = new ScheduledTasksService(makeEnv(), orm, USER, undefined, undefined, runStore, undefined, undefined, undefined, feedStore);
     const msftRequest: StrategyRequest = { ...VALID_REQUEST, symbol: "MSFT" };
     const result = await service.autonomousStrategyDiscovery({
       requests: [VALID_REQUEST, msftRequest],
@@ -466,7 +466,7 @@ describe("ScheduledTasksService snapshot-input discovery (#1236)", () => {
       loadParams: { symbol: "ZZZZ", minDte: 1, maxDte: 365 }, nowIso: "2026-10-20T05:00:02.000Z",
     });
     const runStore = new InMemoryDiscoveryRunStore({ idFactory: () => "run-feed-stale" });
-    const service = new ScheduledTasksService(makeEnv(), orm, USER, undefined, undefined, runStore, undefined, undefined, undefined, undefined, feedStore);
+    const service = new ScheduledTasksService(makeEnv(), orm, USER, undefined, undefined, runStore, undefined, undefined, undefined, feedStore);
     const zzzzRequest: StrategyRequest = { ...VALID_REQUEST, symbol: "ZZZZ" };
     const result = await service.autonomousStrategyDiscovery({
       requests: [zzzzRequest],

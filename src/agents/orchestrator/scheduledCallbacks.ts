@@ -272,7 +272,7 @@ export async function autoRenewETradeTokens(ctx: ScheduledCallbacksContext, payl
   }
   const userLogin = dispatch.login;
   const environment = context?.environment || payload?.env;
-  const service = new ScheduledTasksService(ctx.env, ctx.getOrm(), userLogin, createOptionsDiscoveryPorts({ sql: ctx.agentCtx.storage.sql, storage: ctx.agentCtx.storage }).scanRuns, undefined, undefined, undefined, ctx.scheduleScreenerFollowups, undefined, undefined, undefined, ctx.env.SCREENER_EVENTS ?? null);
+  const service = new ScheduledTasksService(ctx.env, ctx.getOrm(), userLogin, createOptionsDiscoveryPorts({ sql: ctx.agentCtx.storage.sql, storage: ctx.agentCtx.storage }).scanRuns, undefined, undefined, undefined, ctx.scheduleScreenerFollowups, undefined, undefined, ctx.env.SCREENER_EVENTS ?? null);
   const res = await service.autoRenewETradeTokens(userLogin, environment);
   if (!res.success) {
     structuredLog.warn("scheduledCallbacks.token_renewal_failed", {
@@ -432,17 +432,7 @@ export async function autonomousMarketScreen(ctx: ScheduledCallbacksContext, pay
     // Scheduled callbacks have no authenticated HTTP headers. Use the
     // identity and environment saved from the user's schedules requests.
     const service = new ScheduledTasksService(ctx.env, orm, resolvedLogin, createOptionsDiscoveryPorts({ sql: ctx.agentCtx.storage.sql, storage: ctx.agentCtx.storage }).scanRuns, undefined, undefined, undefined, ctx.scheduleScreenerFollowups, { sql: ctx.agentCtx.storage.sql, blobStorage: ctx.agentCtx.storage as any, env: ctx.env },
-      // Issue #1355: shard submission rides the agent's private
-      // submitAsyncJob via the same (ctx.self as any) escape hatch
-      // this file already uses for broadcast/keepAliveWhile.
-      // Issue #3810: shard jobs this scheduled callback submits
-      // carry its trigger + schedule id, stamped at submission
-      // (a spec that already names its own provenance wins).
-      (spec) => (ctx.self as any).submitAsyncJob({
-        ...spec,
-        trigger: spec.trigger ?? trigger,
-        scheduleId: spec.scheduleId ?? payload?.scheduleId ?? null,
-      }), undefined, ctx.env.SCREENER_EVENTS ?? null);
+      undefined, ctx.env.SCREENER_EVENTS ?? null);
     const res = await service.autonomousMarketScreen({ ...payload, userLogin: resolvedLogin, environment, trigger });
     if ((res as any).skipped) {
       return (outcome = { outcome: "skipped", detail: "service skipped" });
@@ -681,7 +671,7 @@ export async function autonomousGoalScreen(ctx: ScheduledCallbacksContext, paylo
       return (outcome = { outcome: "skipped", detail: `dispatch denied (${dispatch.reason})` });
     }
     const resolvedLogin = dispatch.login;
-    const service = new ScheduledTasksService(ctx.env, ctx.getOrm(), resolvedLogin, createOptionsDiscoveryPorts({ sql: ctx.agentCtx.storage.sql, storage: ctx.agentCtx.storage }).scanRuns, undefined, undefined, undefined, ctx.scheduleScreenerFollowups, { sql: ctx.agentCtx.storage.sql, blobStorage: ctx.agentCtx.storage as any, env: ctx.env }, undefined, undefined, ctx.env.SCREENER_EVENTS ?? null);
+    const service = new ScheduledTasksService(ctx.env, ctx.getOrm(), resolvedLogin, createOptionsDiscoveryPorts({ sql: ctx.agentCtx.storage.sql, storage: ctx.agentCtx.storage }).scanRuns, undefined, undefined, undefined, ctx.scheduleScreenerFollowups, { sql: ctx.agentCtx.storage.sql, blobStorage: ctx.agentCtx.storage as any, env: ctx.env }, undefined, ctx.env.SCREENER_EVENTS ?? null);
     const res = await service.autonomousGoalScreen({ ...payload, userLogin: resolvedLogin, environment, trigger });
     if ((res as any).skipped) {
       return (outcome = { outcome: "skipped", detail: "service skipped" });
@@ -833,7 +823,6 @@ export async function autonomousStrategyDiscovery(ctx: ScheduledCallbacksContext
       createOptionsDiscoveryPorts({ sql: ctx.agentCtx.storage.sql, storage: ctx.agentCtx.storage }).strategyProfiles,
       ctx.scheduleScreenerFollowups,
       { sql: ctx.agentCtx.storage.sql, blobStorage: ctx.agentCtx.storage as any, env: ctx.env },
-      undefined,
       createOptionsDiscoveryPorts({ sql: ctx.agentCtx.storage.sql, storage: ctx.agentCtx.storage }).feedSnapshots, ctx.env.SCREENER_EVENTS ?? null,
       // Issue #4275: the firer's engine run record is durable in
       // the host DO (runStockScreenViaEngine seam: none).
@@ -939,7 +928,7 @@ export async function collectIvHistory(ctx: ScheduledCallbacksContext, payload?:
       (await buildOptionsDiscoveryPorts(ctx.env, { sql: ctx.agentCtx.storage.sql, storage: ctx.agentCtx.storage })).ivHistory,
       undefined,
       undefined,
-      ctx.scheduleScreenerFollowups, undefined, undefined, undefined, ctx.env.SCREENER_EVENTS ?? null
+      ctx.scheduleScreenerFollowups, undefined, undefined, ctx.env.SCREENER_EVENTS ?? null
     );
     const res = await service.collectDailyIvHistory({ symbols: payload?.symbols, environment });
     if (!res.success) {
@@ -987,7 +976,7 @@ export async function expireStaleOrderDraft(ctx: ScheduledCallbacksContext, payl
     auditCallbackDenial(ctx, "expireStaleOrderDraft", dispatch);
     return;
   }
-  const service = new ScheduledTasksService(ctx.env, ctx.getOrm(), dispatch.login, createOptionsDiscoveryPorts({ sql: ctx.agentCtx.storage.sql, storage: ctx.agentCtx.storage }).scanRuns, undefined, undefined, undefined, ctx.scheduleScreenerFollowups, undefined, undefined, undefined, ctx.env.SCREENER_EVENTS ?? null);
+  const service = new ScheduledTasksService(ctx.env, ctx.getOrm(), dispatch.login, createOptionsDiscoveryPorts({ sql: ctx.agentCtx.storage.sql, storage: ctx.agentCtx.storage }).scanRuns, undefined, undefined, undefined, ctx.scheduleScreenerFollowups, undefined, undefined, ctx.env.SCREENER_EVENTS ?? null);
   await service.expireStaleOrderDraft(payload.orderId);
 }
 
@@ -1004,7 +993,7 @@ export async function sendScheduledReminder(ctx: ScheduledCallbacksContext, payl
     auditCallbackDenial(ctx, "sendScheduledReminder", dispatch);
     return;
   }
-  const service = new ScheduledTasksService(ctx.env, ctx.getOrm(), dispatch.login, createOptionsDiscoveryPorts({ sql: ctx.agentCtx.storage.sql, storage: ctx.agentCtx.storage }).scanRuns, undefined, undefined, undefined, ctx.scheduleScreenerFollowups, undefined, undefined, undefined, ctx.env.SCREENER_EVENTS ?? null);
+  const service = new ScheduledTasksService(ctx.env, ctx.getOrm(), dispatch.login, createOptionsDiscoveryPorts({ sql: ctx.agentCtx.storage.sql, storage: ctx.agentCtx.storage }).scanRuns, undefined, undefined, undefined, ctx.scheduleScreenerFollowups, undefined, undefined, ctx.env.SCREENER_EVENTS ?? null);
   const res = await service.dispatchReminder(payload.reminderId, payload.message);
   if (typeof (ctx.self as any).broadcast === "function") {
     try {
