@@ -283,6 +283,8 @@ export const MCP_TOOL_SCOPES: Record<string, McpScope> = {
   // #3530 slice B: configuring a feed job's stored schedule is a
   // write on the same control plane as managing its runs.
   set_feed_job_schedule: "mcp:write",
+  // Issue #5111 (Sub-issue 2 of #5094): account binding configuration changes control-plane state only.
+  broker_account_binding: "mcp:write",
   run_enrich_job: "mcp:write",
   manage_enrich_job: "mcp:write",
   // #3537: the analyze-job writes — running an analyze job

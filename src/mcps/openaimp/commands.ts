@@ -82,6 +82,7 @@ import {
   PublicPlaceOrderCommand,
   PublicPreviewOrderCommand,
 } from "./publicCommands";
+import { BrokerAccountBindingCommand } from "./accountBindingCommands";
 import {
   AlpacaCancelAllCommand,
   AlpacaCancelOrderCommand,
@@ -1829,6 +1830,8 @@ export class McpToolFactory {
     this.registerTool(new PublicPlaceOrderCommand());
     this.registerTool(new PublicOrdersCommand());
     this.registerTool(new PublicCancelOrderCommand());
+    // Issue #5111 (Sub-issue 2 of #5094): chat-configurable { broker, mode, accountType, accountId } binding.
+    this.registerTool(new BrokerAccountBindingCommand());
 
     // #1906: deprecated aliases for the renamed market-data tools above.
     // Same commands, legacy names; use canonical tool names instead.
