@@ -22,6 +22,9 @@ import type { Env, ETradeQuote } from "../src/types";
 const liveEnv: Env = {
   APP_BASE_URL: "https://agent.openaimp.com",
   ETRADE_ENVIRONMENT: "live",
+  // Issue #5147: this suite pins the E*TRADE quote path, so the selection is
+  // explicit — the no-selection default is the platform default (Alpaca).
+  TENANT_BROKER_ID: "etrade",
 } as Env;
 
 // JPM is in the curated universe (static defaultPrice) — the symbol whose
