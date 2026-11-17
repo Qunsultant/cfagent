@@ -1,0 +1,60 @@
+/**
+ * Issue #5183 — the scheduled options failure alert must be diagnosable from
+ * the message alone.
+ *
+ * The alert that reached Slack on 2026-11-17 (incident #5181) said only
+ * "Options Screen FAILED — NASDAQ100 (bullish) · <error> · <time>". The reader
+ * could not tell which schedule fired, how it was dispatched, which workflow
+ * ran, what mode/broker it resolved, or which run it was — four identical
+ * copies of that. Every one of those values exists at the call site; this
+ * formatter is the single place that renders them, so the failure notice and
+ * any later success notice cannot drift.
+ *
+ * Unknown values render as `unknown` — never blank, never guessed.
+ */
+export interface OptionsRunAlertContext {
+  /** `scheduled` | `manual` | `triggered` — the run type the firer used. */
+  readonly trigger?: string;
+  readonly scheduleId?: string;
+  readonly workflow?: string;
+  readonly mode?: string;
+  readonly modeSource?: string;
+  readonly broker?: string;
+  readonly accountId?: string | null;
+  readonly runId?: string;
+}
+
+const orUnknown = (value: string | null | undefined): string =>
+  typeof value === "string" && value.trim() ? value.trim() : "unknown";
+
+/** One `·`-joined line naming everything the run executed under. */
+export function optionsRunContextLine(ctx: OptionsRunAlertContext): string {
+  const mode = orUnknown(ctx.mode);
+  const modeSource = typeof ctx.modeSource === "string" && ctx.modeSource.trim() ? ` (${ctx.modeSource.trim()})` : "";
+  const parts = [
+    `dispatch ${orUnknown(ctx.trigger) === "unknown" ? "scheduled" : orUnknown(ctx.trigger)}`,
+    ctx.scheduleId ? `schedule ${ctx.scheduleId}` : null,
+    `workflow ${orUnknown(ctx.workflow) === "unknown" ? "optionsScreenWorkflow" : orUnknown(ctx.workflow)}`,
+    `mode ${mode}${modeSource}`,
+    `broker ${orUnknown(ctx.broker)}`,
+    ctx.accountId ? `account ${ctx.accountId}` : null,
+    `run ${orUnknown(ctx.runId)}`,
+  ];
+  return parts.filter(Boolean).join(" · ");
+}
+
+/** The failure notice: one headline, the context line, the cause, the time. */
+export function optionsFailureAlertText(args: {
+  universe: string;
+  thesis: string;
+  context: OptionsRunAlertContext;
+  errorMessage: string;
+  timestamp: string;
+}): string {
+  return [
+    `⚠️ Scheduled Options Screen FAILED — ${args.universe} (${args.thesis})`,
+    optionsRunContextLine(args.context),
+    `Error: ${args.errorMessage || "Scheduled options analysis failed"}`,
+    `_Time: ${args.timestamp}_`,
+  ].join("\n");
+}
