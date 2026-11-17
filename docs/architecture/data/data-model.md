@@ -2,7 +2,7 @@
 
 - **Status:** Draft (2026-11-17). Not yet reviewed; counts are measured on fresh `main` of that date (tarball, no git metadata in the survey tree — base commit hash UNVERIFIED).
 - **Scope:** the whole Qunsultant/cfagent system (NextGenTP, live at `https://agent.openaimp.com/`): its stores, its catalogues, and how the data model relates to Durable Objects, agents, HTTP APIs, MCP, services, products, and security.
-- **How to read it:** §1 is the conceptual view (subject areas, no tables). §2 is the logical view (entities, keys, cardinality, authoritative-vs-projection and tenancy marking). §3 is the physical view (the actual stores and catalogue counts). §4 is the subject-area view (one section per area: entities, store home, owner, readers/writers, integrity rules). §5 is the gap table — every gap found, with evidence and the issue it maps to (or the existing issue that already tracks it). Each view carries its diagram inline (Mermaid, rendered by GitHub): subject-area relationships in §1.2, surfaces-to-entities in §1.3, the core ER in §2.2, the physical topology in §3.3. Every node and edge in the diagrams traces to a fact stated in the surrounding text; nothing is drawn from a name alone.
+- **How to read it:** §1 is the conceptual view (subject areas, no tables). §2 is the logical view (entities, keys, cardinality, authoritative-vs-projection and tenancy marking). §3 is the physical view (the actual stores and catalogue counts). §4 is the subject-area view (one section per area: entities, store home, owner, readers/writers, integrity rules). §5 is the gap table — every gap found, with evidence and the issue it maps to (or the existing issue that already tracks it). Each view carries its diagram inline (Mermaid, rendered by GitHub): subject-area relationships in §1.2, surfaces-to-entities in §1.3, the core ER in §2.2, the physical topology in §3.3. §6 is the agentic-capabilities data substrate (per-capability verdicts, the substrate map, and the area-specific gaps), with its diagrams in §6.4: agents to service/API/MCP/entities, and capability to data-substrate. Every node and edge in the diagrams traces to a fact stated in the surrounding text; nothing is drawn from a name alone.
 - **Sources (the model has no other home):** ADR 0020 (DO/D1/R2 topology), ADR 0022 (data foundation, esp. D-C transaction aspect, D-G authoritative reads, D-F substrate families), ADR 0028 (data-provider/broker taxonomy), ADR 0029 (unified schedule store), ADR 0032 (data-access mechanism standard), ADR 0033 (cross-store consistency contract, incl. the frozen Appendix A audit of 2026-11-16), the schema-component catalogues in `src/data/schemaComponent/`, `src/data/drizzleSchema.ts`, `src/data/migrationRunner.ts`, `wrangler.jsonc`, and the pin/census tests in `tests/`. The full survey evidence (including the 181-row per-table map) lives in the drafting workspace and is summarized here; anything this doc could not verify from the tree is marked **UNVERIFIED**.
 - **Conventions:** "DO" = Durable Object SQLite (authoritative execution state, ADR 0022 D-G). "D1" = the `AGENT_DB` database (projection / read model, plus the D1-native substrate families of ADR 0022 D-F). "Catalogue" = the fail-closed statement registries in `src/data/schemaComponent/` (unknown code, duplicate code, or kind/plane/table mismatch is rejected at registration, never at execution). Counts below were recounted from the definitions on 2026-11-17; where a header comment disagrees with the recount, the recount wins and the disagreement is listed in §5.
 
@@ -549,4 +549,347 @@ Severity: **High** = data can be lost, duplicated, or misreported silently, or m
 
 ---
 
-*Sources: ADR 0020, ADR 0022, ADR 0028, ADR 0029, ADR 0032, ADR 0033 (incl. Appendix A, frozen 2026-11-16); `src/data/schemaComponent/` catalogues; `src/data/drizzleSchema.ts`; `src/data/migrationRunner.ts`; `wrangler.jsonc`; `tests/` pin/census files listed in §3.6. Survey workspace: `~/workspace/data-model/` (survey-data-layer.md, survey-hosts-surfaces.md, survey-security-crossstore.md).*
+## 6. Agentic-capabilities data substrate
+
+This section is a condensed rendering of the RSI/ASI agentic-capabilities survey (main `e338710a`, 2026-11-17; survey workspace `~/workspace/data-model/diagrams/survey-agentic/`). It answers one question the earlier sections do not: how does this data model support the agentic capabilities of RSI/ASI — reflection, learning, self-improvement, self-modification — and what other agentic capabilities actually exist?
+
+**Method.** Every capability below is established from file:line evidence in the surveyed tree. A file named "learning" with no durable write is not a learning loop; a doc that describes a pipeline is not the pipeline. Where the code and the architecture docs disagree, the code wins and the disagreement is recorded as a gap (AG-1..AG-10 in §6.5). Anything not established from the tree is marked **UNVERIFIED**.
+
+**Loop vocabulary.** CLOSED = the capability's output is read back by a later decision (a real feedback loop). OPEN = the output is written but never read by any decision (write-only, display-only, or audit-only). ABSENT = the capability is described in docs but has no code path.
+
+### 6.1 Capability inventory
+
+| # | Capability | Verdict | Store home | Feedback path |
+|---|---|---|---|---|
+| C1 | Weekly reflection → learnings | CLOSED (human-gated) | DO `mas_learnings` (OrchestratorAgent) | Screener reads learnings at run start; adjustments via human review |
+| C2 | Strategy-review HITL queue | CLOSED (human) | DO `mas_strategy_reviews` | Human approve/reject → reflection reads decisions |
+| C3 | Strategy-bank reselection | CLOSED (proposal-only) | DO `mas_reselection_proposals` | Proposals → challenger bridge (C5) |
+| C4 | RSI weight adaptation v2 | CLOSED (human-gated) | DO `mas_strategy_weights_v2` + `mas_adaptation_audit` | Weights read by reselection + challenger evaluation; applied only via C5 |
+| C5 | Champion/challenger promotion gate | CLOSED (human) | DO `mas_challengers`, promotion records | Promotion changes live weights/gates; rollback restores exactly |
+| C6 | Stock Copilot agentic-cycle learn | OPEN (write-only for decisions) | DO `stock_copilot_learnings` | None into planning; display-only reads |
+| C7 | Copilot introspection / gap diagnosis | Diagnosis real; both pathways OPEN | `mas_settings` (mode) + activity/position/learning reads | Governed = draft text; self = unimplemented |
+| C8 | LLM judge quality evaluation | OPEN (audit-only) | Audit event + Vectorize (best-effort) | No consumer reads scores |
+| C9 | Vector memory recall | CLOSED | Vectorize `vector-memory` | Recall injected into chat turns + plan composition |
+| C10 | Session memory (`mas_memory`) | CLOSED (chat recall); no consolidation | DO `mas_memory` (OrchestratorAgent) | Recall into turns; never consolidated into learnings |
+| C11 | Research evaluation + track record | CLOSED for reselection/calibration | ResearchAgent DO `research_runs`, `research_evaluations` | Track ideas feed reselection; NOT consumed by live screen ranking |
+| C12 | Thesis realizations (telemetry) | OPEN (write-only) | D1 `agent_thesis_realizations` | No reader found |
+| C13 | Corpus sync | Read-only by design | AI Search + R2 + D1 (report index) | Divergences recorded, never healed |
+| C14 | Autopilot monthly evaluation | Evaluation only | Verdict record (run record) | No consumer adapts policy on verdicts |
+| C15 | Platform gap remediation | Real action (step 1); steps 2–4 verify-only | Via door → ScheduledAgent chain | Chain run is the action; result is a report |
+| C16 | Self-RSI sandbox synthesis | ABSENT | — | No code path |
+| C17 | Agent-written patterns/presets/skills | ABSENT | — (presets are user-written) | No write path exists |
+| C18 | Autonomous goal evolution | ABSENT | — (status changes are user-driven) | No autonomous mutation |
+| C19 | Memory consolidation | ABSENT | — | No bridge between `mas_memory` and learnings |
+| C20 | Stateless agents + scanner persistence | Verified mixed | TickerAgent writes; others stateless | See §6.3 |
+
+### 6.2 How the closed loops close
+
+**Reflection, review, reselection, weights, promotion (C1–C5) — the one self-improvement substrate that is real.** Every Sunday `runReflection` (`src/services/reflection.ts:172-180`, weekly guard via a `reflection_meta` learning) reads strategy-review decisions and active learnings, computes per-family approval rates, and writes findings as learnings (`source: "reflection"`). Findings with a concrete strategy family become pending review candidates; proposed behavioral adjustments go through human review — "the agent proposes, the human disposes". The screener reads applicable learnings at run start (`src/agents/screener-agent.ts:1293-1294`, `:1964-1965`, `getActiveLearnings(this.sql, "screener")`). What is NOT closed: a learning's `proposedAdjustment` text is never applied automatically — there is no code path from it to a ranking change; it reaches production only through the review queue and the promotion gate.
+
+The reselection tick (`src/services/strategyBankReselection.ts`, fired from the research track tick) builds per-regime evidence from the track record's ideas, reads the regime's v2 weights, and records proposals (`proposal_only_not_promoted` — they change nothing live). The v2 weight policy (`src/services/strategyWeightsV2.ts`: regime-conditioned, after-cost risk-adjusted, decay, versioned) scores per-(strategy, regime) evidence; every applied change writes an append-only version record with exact-restore semantics, through the `applyAdaptation` seam (budget enforced before application, kill switch halts, every attempt audited in append-only `mas_adaptation_audit`, which has no update/delete path).
+
+The champion/challenger gate (`src/services/championChallenger.ts`) has three locks, all of which must open: (1) frozen-set evidence — the challenger is scored against the champion walk-forward on the frozen, versioned v2 evaluation dataset (v2: 4 cases × 1 idea, holdout fold decides); (2) frozen criteria — acceptance criteria written at challenger creation are immutable; (3) authorized approval — promotion requires an approval record from a human/owner actor who is neither the challenger's creator nor any system/nightly actor. Every state change is audited, snapshots its prior state, and is reversible with exact restore. Evaluation is deterministic over the frozen set — no model call decides a promotion. **This gate is the one place where an autonomous proposal can become live behavior — and only with a human approval record, frozen evidence, and frozen criteria.**
+
+**Memory recall (C9, C10).** Turn outcomes and plans are embedded and stored in Vectorize `vector-memory`; recall queries by embedding similarity and injects the most similar chunks into the orchestrator prompt or the plan composer — CLOSED for chat turns and plan composition (with the caveat that the turn remember is best-effort and swallowed on failure, and a failed recall degrades silently to no context). Session facts live in the global key-value store `mas_memory` on the OrchestratorAgent DO and are recalled into turns — CLOSED for chat recall.
+
+**Research evaluation (C11).** `evaluateRun` compares a published run's ideas against later prices, writes an evaluation row, and never mutates the original report; the reselection tick consumes `track.ideas` and the challenger gate scores against the frozen v2 set. CLOSED for strategy-bank reselection and calibration display. NOT consumed by the live screen ranking: §5 records (from the #773 verification) that the stock screener ranking has zero `trackRecord` references — cited here, not re-proposed.
+
+**Corpus sync (C13)** is read-only by design, not a gap: it checks that bucket bytes AND index items both reflect the canonical corpus and records divergences, never silently healing them (ADR 0022 D-F2 exemplar; SA-12). **Platform remediation (C15)** genuinely triggers a 5-stage pipeline chain run via the door (step 1); steps 2–4 (job stagnation, connectivity, tool availability) verify nothing in that function and report `skipped` (not-run, not verified) rather than success.
+
+### 6.3 Where the loops are open or absent
+
+**C6 — the agentic cycle's learn step never reads its own learnings (AG-1).** The cycle is perceive → plan → critic/reflect → execute → learn, distilling verdicts and execution deltas into `stock_copilot_learnings` (DO SQLite, retention 50) every cycle. The module header claims step 1 reads "prior distilled learnings from tenancy memory", but `runStockCopilotAgenticCycle` never calls `listLearnings` — the only readers are display surfaces (the mesh door and the HTTP route, via `summarizeLearnings`). Learnings are written every cycle and read only when a human asks what was learned. The learn→perceive link the header describes does not exist in code.
+
+**C7 — introspection diagnoses real gaps; both improvement pathways terminate in prose (AG-2, AG-3).** `synthesizeCapabilityProposals` inspects live configuration, positions, refusals, learnings, and the tool catalog, and diagnoses four gap types (static-universe bottleneck, unhedged tail-risk exposure, strategy-synthesis sandbox, restricted session coverage). The governed pathway (default) carries a GitHub issue *draft* — title, lane, actionable plan — but no code path files the issue; the pathway is a formatted draft, not a dispatch. The self-RSI pathway describes research → sandbox code synthesis → backtest → strategy card → 1-click activation (`docs/architecture/agentic/stockcopilot-RSI.md` §7), but in code no `synthesizeStrategy` / `StrategyCard` symbol exists in `src/`; the pattern-signals module the RSI doc cites does not exist under that name (the real module is pure functions over close series, code-only, no writer); the SandboxAgent is a container-command runner with no strategy-code synthesis and no production toolset composition for headless use. The `rsiMode` switch exists and persists, but switching it to `self` enables nothing — the pipeline it enables is not built. No gap, proposal, or diagnosis is persisted to a table; proposals are computed per introspection call and rendered as markdown.
+
+**C8 — judge scores have no consumer (AG-4).** After every chat turn the orchestrator scores the answer (0–100, grounded, safe, issues) and writes the score to the audit stream (`response.evaluated`) plus a best-effort Vectorize record. No durable score table exists; no code reads past scores to change routing, prompting, or model selection. The scores are auditable and recallable as vector chunks (C9), but nothing consumes them as feedback.
+
+**C12 — thesis realizations are write-only (AG-5).** The telemetry projector writes D1 `agent_thesis_realizations` with a `(tenantId, outcomeId)` idempotency key; no route, MCP tool, service, or ranking path reads the table.
+
+**C10/C19 — no memory consolidation (AG-6).** The three memory systems — key-value session facts (`mas_memory`), learnings (`mas_learnings`), vector outcomes (Vectorize) — are written and read independently with no bridge. A fact learned in chat never becomes a learning; a learning never becomes a vector chunk. No consolidation job exists.
+
+**C14 — autopilot verdicts have no consumer (AG-7).** The monthly evaluation checks the live policy envelope against live limits and account state (dry-run only, never places orders) and writes a verdict record. No consumer reads verdicts to change policy, limits, or the envelope — a repeatedly failing policy check produces a record each month, not an adaptation.
+
+**C16 — self-RSI sandbox synthesis is absent (AG-2).** Specified in the RSI doc §7, no code path. See C7 above.
+
+**C17 — no agent write path into the pattern/preset/skill catalogues (AG-9).** Preset writes exist only in the user-facing preset adapter and routes (user-driven); pattern signals are pure functions; no pattern-catalogue module and no skill files exist. Every capability gain arrives via a human, a PR, or the champion/challenger weight path (C4–C5), never via a new pattern. Decision-first: build a governed promotion path for agent-proposed patterns, or record decided-not-to.
+
+**C18 — autonomous goal evolution is absent.** No agent modifies, evolves, or retires a goal autonomously. Goals are set by users and fired by the scheduler; the agent manages their execution, not their definition. (`updateGoalStatus` is called only from the user-facing goal routes.)
+
+**C20 — stateless agents and scanner persistence, verified mixed.** BrowserAgent, AiSearchAgent, and SandboxAgent have no SQL store — stateless, verified. TickerAgent is NOT stateless: it reads and writes the unified-schedules store on its own DO (`tickerScheduleStore()`, `src/agents/ticker-agent.ts:296-309`; `recordTickerPush` upserts the one ticker-push record for the live feed, best-effort, #4237). That contradicts §5 H-13, which lists four agents with no verified durable store; the correction is tracked as #5062 (AG-8) and §5 H-13 is left as written until that issue lands. OptionsScannerMCP's persistence doubt (§5 H-14) is confirmed: its own storage never ran through the ORM; scan results are forwarded to the orchestrator as async jobs and live only in the async job + the tool response, and its only durable record is the paid-scan audit event in the orchestrator's `mas_events`.
+
+**One boundary is UNVERIFIED (AG-10).** The weights module header states no production ranking path reads v2 weights, but the reselection tick (C3) and the challenger evaluation (C5) DO read them. Whether the live screen-ranking path applies v2 weights at decision time is not pinned by a test, so the claim can silently invert. Pin the boundary or correct the header.
+
+### 6.4 Diagrams
+
+#### 6.4.1 Agents → service / API / MCP / entities
+
+```mermaid
+flowchart TB
+    subgraph Agents ["Agents (Durable Objects)"]
+        Orch["OrchestratorAgent<br/>per-login instance"]
+        Scr["ScreenerAgent"]
+        Res["ResearchAgent"]
+        Sched["ScheduledAgent"]
+        Trade["TradingAgent"]
+        Pay["PaymentsAgent"]
+        RepA["ReportAssetAgent<br/>KV-only"]
+        Sess["SessionStore<br/>single kv_store"]
+        Tick["TickerAgent"]
+        Brow["BrowserAgent<br/>stateless"]
+        AIS["AiSearchAgent<br/>stateless"]
+        Sand["SandboxAgent<br/>container runner, no SQL store"]
+        Scan["OptionsScannerMCP<br/>no own store"]
+    end
+
+    subgraph Services ["Services (agentic capabilities)"]
+        Refl["reflection.ts<br/>runReflection (weekly)"]
+        Learn["learnings.ts<br/>record / getActive"]
+        RevQ["strategy-review queue<br/>evidence-satellite ports"]
+        Rese["strategyBankReselection<br/>proposals only"]
+        Wts["strategyWeightsV2<br/>regime / after-cost / decay"]
+        Champ["championChallenger<br/>3-lock promotion gate"]
+        Adapt["adaptationAudit<br/>applyAdaptation + budgets"]
+        Loop["stockCopilotAgenticLoop<br/>perceive-plan-critic-execute-learn"]
+        Intro["stockCopilotIntrospection<br/>gap diagnosis + remediation"]
+        Judge["LLMJudge<br/>route + evaluate"]
+        VecM["VectorMemory<br/>remember / recall"]
+        CorpS["corpusSync<br/>integrity check only"]
+        AutoE["autopilotMonthlyEvaluation<br/>dry-run policy check"]
+    end
+
+    subgraph API ["HTTP routes"]
+        LearnR["GET/POST /learnings<br/>POST /reflection/run"]
+        AdaptR["/adaptation/*<br/>candidates / promote / rollback"]
+        CopR["/stockCopilot/*<br/>status / control / learnings"]
+        EvalR["POST /api/autopilot/evaluate"]
+        TrackR["GET track-record / calibration"]
+    end
+
+    subgraph MCP ["MCP tools"]
+        MCPStatus["stock_copilot_status"]
+        MCPControl["stock_copilot_control<br/>incl. rsiMode"]
+        MCPLearn["stock_copilot_learnings"]
+        MCPEval["stock_copilot_evaluate"]
+        MCPIntro["stock_copilot_introspect"]
+        MCPRem["stock_copilot_remediate_gaps"]
+        MCPStage["stock_copilot_stage_control"]
+    end
+
+    subgraph Stores ["Stores / entities"]
+        ML["mas_learnings<br/>DO SQLite"]
+        MSR["mas_strategy_reviews<br/>DO SQLite"]
+        MW2["mas_strategy_weights_v2<br/>DO SQLite"]
+        MAA["mas_adaptation_audit<br/>DO SQLite, append-only"]
+        MCh["mas_challengers<br/>DO SQLite"]
+        MRP["mas_reselection_proposals<br/>DO SQLite"]
+        SCL["stock_copilot_learnings<br/>DO SQLite"]
+        SCA["stock_copilot_activity<br/>DO SQLite"]
+        SCC["stock_copilot_control<br/>DO SQLite"]
+        MM["mas_memory<br/>DO SQLite, key-value"]
+        ME["mas_events<br/>DO SQLite, hash chain"]
+        RR["research_runs<br/>ResearchAgent DO"]
+        RE["research_evaluations<br/>ResearchAgent DO"]
+        ATR["agent_thesis_realizations<br/>D1 (write-only)"]
+        VM["vector-memory<br/>Vectorize"]
+        MS["mas_settings<br/>DO SQLite"]
+        US["unified_schedules<br/>DO SQLite"]
+    end
+
+    Orch --> Refl
+    Orch --> Learn
+    Orch --> RevQ
+    Orch --> Judge
+    Orch --> VecM
+    Orch --> Intro
+    Orch --> Loop
+    Scr --> Learn
+    Scr --> Rese
+    Res --> TrackR
+    Res --> CorpS
+    Sched --> Loop
+    Sched --> AutoE
+    Sched --> Rese
+    Tick --> US
+    Scan --> ME
+
+    Refl --> ML
+    Refl --> MSR
+    Learn --> ML
+    RevQ --> MSR
+    Rese --> MRP
+    Rese --> MW2
+    Wts --> MW2
+    Wts --> MAA
+    Champ --> MCh
+    Champ --> MW2
+    Champ --> MAA
+    Adapt --> MAA
+    Loop --> SCL
+    Loop --> SCA
+    Loop --> SCC
+    Intro --> MS
+    Intro --> SCL
+    Intro --> SCA
+    Judge --> ME
+    Judge --> VM
+    VecM --> VM
+    CorpS --> RR
+    AutoE --> EvalR
+    MM --> Orch
+
+    LearnR --> Learn
+    LearnR --> Refl
+    AdaptR --> Champ
+    AdaptR --> Wts
+    CopR --> Loop
+    CopR --> Intro
+    EvalR --> AutoE
+    TrackR --> RR
+    TrackR --> RE
+
+    MCPStatus --> Loop
+    MCPControl --> Intro
+    MCPControl --> MS
+    MCPLearn --> SCL
+    MCPEval --> Loop
+    MCPIntro --> Intro
+    MCPRem --> Intro
+    MCPStage --> Loop
+```
+
+Reading notes: TickerAgent is the correction to §5 H-13 (see §6.3 / #5062): it writes a ticker-push record into `unified_schedules` on its own DO. BrowserAgent, AiSearchAgent, and SandboxAgent have no SQL store. OptionsScannerMCP has no own store; its only durable record is the paid-scan audit event in the orchestrator's `mas_events`. The `stock_copilot_learnings` write edge from the loop exists; the read-back edge from planning to learnings does not (see §6.4.2).
+
+#### 6.4.2 Capability → data-substrate mapping (missing links marked)
+
+```mermaid
+flowchart TB
+    subgraph Caps ["RSI / ASI capabilities"]
+        C1["C1 weekly reflection"]
+        C2["C2 review HITL queue"]
+        C3["C3 strategy-bank reselection"]
+        C4["C4 weights v2 adaptation"]
+        C5["C5 champion/challenger gate"]
+        C6["C6 agentic-cycle learn"]
+        C7["C7 gap diagnosis"]
+        C8["C8 judge quality eval"]
+        C9["C9 vector-memory recall"]
+        C10["C10 session memory"]
+        C11["C11 research eval + track record"]
+        C12["C12 thesis realizations"]
+        C14["C14 autopilot monthly eval"]
+        C15["C15 platform remediation"]
+        C16["C16 self-RSI sandbox synthesis"]
+        C17["C17 agent pattern promotion"]
+        C18["C18 goal evolution"]
+        C19["C19 memory consolidation"]
+    end
+
+    subgraph Sub ["Data substrate"]
+        S_ML["mas_learnings (DO)"]
+        S_MSR["mas_strategy_reviews (DO)"]
+        S_MRP["mas_reselection_proposals (DO)"]
+        S_MW2["mas_strategy_weights_v2 (DO)"]
+        S_MAA["mas_adaptation_audit (DO)"]
+        S_MCH["mas_challengers (DO)"]
+        S_SCL["stock_copilot_learnings (DO)"]
+        S_SCA["stock_copilot_activity (DO)"]
+        S_MM["mas_memory (DO)"]
+        S_ME["mas_events audit chain (DO)"]
+        S_RR["research_runs / evaluations (DO)"]
+        S_ATR["agent_thesis_realizations (D1)"]
+        S_VM["vector-memory (Vectorize)"]
+        S_MS["mas_settings (DO)"]
+        S_VERD["autopilot verdict record"]
+        S_CHAIN["ScheduledAgent chain run"]
+    end
+
+    subgraph Decisions ["Later decisions that consume the substrate"]
+        D_SCR["screener run start<br/>reads learnings"]
+        D_HUM["human review decision"]
+        D_PROM["promotion applies weights/gates"]
+        D_PLAN["copilot planning<br/>(next cycle)"]
+        D_TURN["chat turn prompt<br/>(recall injected)"]
+        D_RESE["reselection tick<br/>reads track + weights"]
+        D_RANK["live screen ranking"]
+        D_POL["policy / limits / envelope"]
+    end
+
+    C1 --> S_ML
+    C1 --> S_MSR
+    S_ML --> D_SCR
+    S_MSR --> D_HUM
+    D_HUM --> C1
+    C2 --> S_MSR
+    C3 --> S_MRP
+    S_MRP --> C5
+    C3 --> S_MW2
+    C4 --> S_MW2
+    C4 --> S_MAA
+    S_MW2 --> D_RESE
+    S_MW2 --> C5
+    C5 --> S_MCH
+    C5 --> S_MW2
+    C5 --> S_MAA
+    C5 --> D_PROM
+    C6 --> S_SCL
+    C6 --> S_SCA
+    S_SCL -.-|"MISSING: no read-back<br/>into planning"| D_PLAN
+    S_SCA --> C7
+    C7 --> S_MS
+    C7 -.-|"MISSING: governed path<br/>files no issue"| D_HUM
+    C7 -.-|"MISSING: self-RSI<br/>pipeline unbuilt"| C16
+    C8 --> S_ME
+    C8 --> S_VM
+    S_ME -.-|"MISSING: no score<br/>consumer"| D_TURN
+    C9 --> S_VM
+    S_VM --> D_TURN
+    C10 --> S_MM
+    S_MM --> D_TURN
+    S_MM -.-|"MISSING: no<br/>consolidation"| S_ML
+    S_MM -.-|"MISSING: no<br/>consolidation"| S_VM
+    C11 --> S_RR
+    S_RR --> D_RESE
+    S_RR -.-|"MISSING: track record<br/>not read by ranking"| D_RANK
+    C12 --> S_ATR
+    S_ATR -.-|"MISSING: no<br/>reader"| D_RESE
+    C14 --> S_VERD
+    S_VERD -.-|"MISSING: no<br/>consumer"| D_POL
+    C15 --> S_CHAIN
+    C16 -.-|"ABSENT: no code path"| S_CHAIN
+    C17 -.-|"ABSENT: no write path<br/>into catalogues"| S_MW2
+    C18 -.-|"ABSENT: no autonomous<br/>mutation"| S_CHAIN
+    C19 -.-|"ABSENT: no bridge"| S_ML
+```
+
+Reading notes: solid arrows are verified read/write/consume edges. Dotted arrows labeled MISSING are the gaps: a substrate exists but the consuming decision does not, or the capability itself is absent. C13 (corpus sync) is intentionally not drawn: it is read-only by design, not a loop. C20 (stateless agents / scanner) is intentionally not drawn: it is a store-presence finding, covered in §6.4.1.
+
+### 6.5 Gap table (specific to the agentic-capabilities data substrate)
+
+Severity: High = a claimed closed loop is open, or an autonomous capability acts on ungrounded state. Medium = a real defect or missing capability with a bounded blast radius. Low = hygiene, doc drift, or a decision to record. "Already tracked" rows are cited in §6.6, not re-proposed. All ten gaps below are filed as sub-issues under #5023; all are filed only — implementing them is not part of this section.
+
+| # | Gap | Severity | Evidence | Maps to |
+|---|---|---|---|---|
+| AG-1 | Agentic-cycle learnings are never read back into planning. The loop header claims step 1 reads "prior distilled learnings from tenancy memory", but `runStockCopilotAgenticCycle` never calls `listLearnings`; the only readers are display surfaces (mesh door + route via `summarizeLearnings`). The learn→perceive link does not exist. | Medium | `src/services/stockCopilotAgenticLoop.ts:6,411` vs `:430`; `src/data/stockCopilotStorePorts.ts:229`; `src/agents/orchestrator/meshStockCopilotDoor.ts:818`; `src/agents/routes/stockCopilot.ts:419` | #5055 |
+| AG-2 | Self-RSI sandbox synthesis is specified but unimplemented. The RSI doc §7 pipeline (research → compile → backtest → strategy card → activate) has no code path: no `synthesizeStrategy`/`StrategyCard` in `src/`; the pattern-signals module cited by the doc does not exist under that name; SandboxAgent has no strategy-code synthesis and no production toolset composition for headless use. Switching `rsiMode` to `self` enables nothing. | Medium | `docs/architecture/agentic/stockcopilot-RSI.md` §7; `src/agents/sandbox-agent.ts:108-110`; absence grep for `synthesizeStrategy\|StrategyCard` | #5056 |
+| AG-3 | Governed RSI files nothing. Introspection proposals carry a GitHub issue *draft* (title, lane, plan) but no code path files the issue; the governed pathway terminates in prose. | Low | `src/services/stockCopilotIntrospection.ts:283,314,345,376,547-549`; absence of any `createIssue` call from introspection | #5057 |
+| AG-4 | Judge quality scores have no consumer. Scores live only in the `response.evaluated` audit event and a best-effort VectorMemory record; no routing, prompting, or threshold logic reads them. | Low | `src/agents/orchestrator.ts:2852-2861`; absence of score readers | #5058 |
+| AG-5 | `agent_thesis_realizations` is write-only. Written by the telemetry projector; no route, MCP tool, service, or ranking path reads it. | Low | `src/telemetry/telemetryProjection.ts:145`; absence of readers outside `telemetry/` | #5059 |
+| AG-6 | No memory consolidation. `mas_memory` facts, `mas_learnings`, and Vectorize outcomes have no bridge; a fact learned in chat never becomes a learning. | Low | Absence of any consolidation job/symbol in `src/`; `src/data/doSqliteOrmAdapters.ts:140-159`; `src/services/learnings.ts` | #5060 |
+| AG-7 | Autopilot evaluation verdicts have no consumer. A repeatedly failing monthly policy check produces a record each month; nothing adapts policy, limits, or the envelope on verdicts. | Low | `src/services/autopilotMonthlyEvaluation.ts`; absence of verdict readers | #5061 |
+| AG-8 | Data-model doc H-13 is wrong for TickerAgent. The doc says four agents have no verified durable store; TickerAgent reads and writes the unified-schedules store on its own DO (the one ticker-push record for the live feed, #4237). Correct the doc and record the write. | Low | `src/agents/ticker-agent.ts:296-309,311-320`; data-model doc §5 H-13 | #5062 |
+| AG-9 | No agent write path into pattern/preset/skill catalogues. Presets are user-written via routes; pattern signals are pure functions; no pattern-catalogue module; no skill files. Decide: build a governed promotion path for agent-proposed patterns, or record decided-not-to. | Low | `src/data/doSqliteScreenerPresetAdapter.ts:39`; absence of pattern/preset/skill writers | #5063 |
+| AG-10 | V2-weights read boundary is unpinned. The weights module says no production ranking path reads v2 weights, but the reselection tick and challenger evaluation do read them; whether the live screen ranking applies them is not pinned by a test, so the claim can silently invert. Pin the boundary or correct the header. | Low | `src/services/strategyWeightsV2.ts:40-45` vs `src/agents/routes/screenerResearch.ts:684-696`; `src/services/championChallenger.ts` | #5064 |
+
+### 6.6 Already tracked — cited, not re-proposed
+
+- F-2 telemetry `ON CONFLICT` (#4962) — touches C12's writer.
+- #2437 audit-chain verification has no production caller — the audit substrate the judge scores (C8) ride on.
+- #3251 audit append-substrate decision — the audit substrate.
+- #4965 chain/schedule default tenant — touches the schedule store TickerAgent writes.
+- #3748 MCP scoping/security (CISO lane) — the MCP doors in C6/C7.
+- #3660/#3661 MCP trade-path reporting/HITL — the order seam the agentic cycle (C6) executes through.
+- H-13 four stateless agents (partially corrected by AG-8; BrowserAgent/AiSearchAgent/SandboxAgent confirmed stateless, OptionsScannerMCP confirmed H-14).
+- H-14 OptionsScannerMCP persistence doubt — confirmed (C20).
+- G-9 fleet registry with no production writer — no writer found in this pass either; not re-proposed.
+*Sources: ADR 0020, ADR 0022, ADR 0028, ADR 0029, ADR 0032, ADR 0033 (incl. Appendix A, frozen 2026-11-16); `src/data/schemaComponent/` catalogues; `src/data/drizzleSchema.ts`; `src/data/migrationRunner.ts`; `wrangler.jsonc`; `tests/` pin/census files listed in §3.6. Survey workspace: `~/workspace/data-model/` (survey-data-layer.md, survey-hosts-surfaces.md, survey-security-crossstore.md; diagrams/survey-agentic/ for §6).*
