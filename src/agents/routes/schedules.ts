@@ -49,6 +49,7 @@ import {
   isBrokerId,
   resolveTenantProviders,
 } from "../../services/tenantProviders";
+import { accountBindingAuditFields, resolveExecutionAccountContext } from "../../services/accountBindings";
 import { tradingTypeFor } from "../../trading";
 import { isLoginShaped, getServiceUserLogin } from "../../security/serviceIdentity";
 import { findDuplicateSchedule } from "../../services/scheduleDedupe";
@@ -1406,6 +1407,19 @@ export async function handleSchedulesRoutes(
         // stamps identity from the trusted context only.
         let screeningPayload: unknown;
         if (ctx.accountScopedScheduleCallbacks.has(callback)) {
+          const scheduleAccountCtx =
+            trustedUserLogin && createBrokerId && createMode
+              ? await resolveExecutionAccountContext(ctx.env, trustedUserLogin, {
+                  broker: createBrokerId,
+                  mode: createMode,
+                  accountType: safePayload.accountType ?? "stock",
+                  scope: "schedule",
+                  explicitAccountId: safePayload.accountId,
+                })
+              : null;
+          if (scheduleAccountCtx) {
+            ctx.audit?.("schedule.account_binding_resolved", "orchestrator", accountBindingAuditFields(scheduleAccountCtx));
+          }
           const built = buildSchedulePayload(callback, safePayload, {
             userLogin: trustedUserLogin || undefined,
             environment: trustedEnvironment || undefined,
