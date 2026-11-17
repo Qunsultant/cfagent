@@ -59,7 +59,7 @@ describe("Public MCP live-schema verified TIF & bracket args (#4668)", () => {
                       quantity: { type: "string" },
                       limit_price: { type: "string" },
                     },
-                    required: ["symbol", "instrument_type", "order_side", "order_type", "account_id"],
+                    required: ["symbol", "instrument_type", "order_side", "order_type"],
                   },
                 },
                 {
@@ -80,7 +80,7 @@ describe("Public MCP live-schema verified TIF & bracket args (#4668)", () => {
                       stop_loss_stop_price: { type: "string" },
                       stop_loss_limit_price: { type: "string" },
                     },
-                    required: ["symbol", "instrument_type", "order_side", "order_type", "account_id"],
+                    required: ["symbol", "instrument_type", "order_side", "order_type"],
                   },
                 },
               ],
