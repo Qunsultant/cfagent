@@ -132,11 +132,11 @@ export function AccountBindingSelector({
           </Badge>
         }
       />
-      <Stack gap={3}>
+      <Stack gap="3">
         {error ? <Notice tone="danger">{error}</Notice> : null}
         {statusMessage ? <Notice tone="success">{statusMessage}</Notice> : null}
 
-        <Flex gap={2} wrap={true}>
+        <Flex gap="2" wrap={true}>
           <Select
             label="Account Type"
             value={accountType}
@@ -169,18 +169,18 @@ export function AccountBindingSelector({
           />
         </Flex>
 
-        <Flex gap={2}>
+        <Flex gap="2">
           <Button variant="primary" loading={saving} onClick={handleSave}>
             Bind Account
           </Button>
         </Flex>
 
         {bindings.length > 0 ? (
-          <Stack gap={1}>
+          <Stack gap="1">
             {bindings.map((b) => (
               <Flex
                 key={`${b.broker}:${b.mode}:${b.accountType}:${b.scope}`}
-                gap={2}
+                gap="2"
                 align="center"
               >
                 <Badge tone="neutral">{b.broker}</Badge>
