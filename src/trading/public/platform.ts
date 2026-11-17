@@ -209,10 +209,12 @@ export class PublicTradingPlatform implements ITradingPlatform {
         `PUBLIC_AUCTION_ON_OPEN_UNSUPPORTED: Public.com documents the on-close order types (MARKET_ON_CLOSE, LIMIT_ON_CLOSE) and no on-open type, so an OPG (MOO/LOO) order cannot be placed. Choose "At the close" or a plain day order; nothing was sent.`
       );
     }
-    // DAY is the documented default; GTD exists but needs an expiry we do not
-    // carry here, and GTC/IOC/FOK are not in Public's published set.
+    // Issue #4668 (matrix gap 14): live tools/list on mcp.public.com verified
+    // `time_in_force` on both `preflight_order` and `place_order`. GTD requires
+    // `expiration_time` which this path does not carry yet.
+    if (timeInForce === "gtc" || timeInForce === "ioc" || timeInForce === "fok") return;
     throw new Error(
-      `PUBLIC_TIME_IN_FORCE_UNVERIFIED: Public.com documents DAY (and GTD, which needs an expiry this path does not carry), so a ${String(timeInForce).toUpperCase()} order cannot be placed truthfully. Choose the day default; nothing was sent.`
+      `PUBLIC_TIME_IN_FORCE_UNVERIFIED: Public.com ${String(timeInForce).toUpperCase()} requires an expiration_time or unverified term this path does not carry. Choose DAY, GTC, IOC, or FOK; nothing was sent.`
     );
   }
 
@@ -378,6 +380,7 @@ export class PublicTradingPlatform implements ITradingPlatform {
           orderType: publicAuctionOrderType(orderType, params.timeInForce) ?? orderType,
           limitPrice: params.limitPrice,
           stopPrice: params.stopPrice,
+          timeInForce: params.timeInForce,
           orderClass,
           takeProfit,
           stopLoss,
@@ -649,6 +652,7 @@ export class PublicTradingPlatform implements ITradingPlatform {
           // Issue #4654 (matrix gap 4): the stop price travels to the wire for
           // a stop type; it was accepted by the arg builder but never passed.
           stopPrice: params.stopPrice,
+          timeInForce: params.timeInForce,
           orderClass: params.orderClass,
           takeProfit: params.takeProfit,
           stopLoss: params.stopLoss,

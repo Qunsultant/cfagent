@@ -251,13 +251,13 @@ describe("#4656 — Public refuses a TIF it cannot honour, by name", () => {
     });
   }
 
-  it("refuses a non-default TIF at preview", async () => {
+  it("refuses a non-default TIF without expiry (gtd) at preview", async () => {
     await expect(
-      publicPlatform().previewOrder({ symbol: "AAPL", quantity: 1, orderType: "LIMIT", limitPrice: 100, timeInForce: "gtc" }),
+      publicPlatform().previewOrder({ symbol: "AAPL", quantity: 1, orderType: "LIMIT", limitPrice: 100, timeInForce: "gtd" as any }),
     ).rejects.toThrow(/PUBLIC_TIME_IN_FORCE_UNVERIFIED/);
   });
 
-  it("refuses a non-default TIF at placement with a failed receipt (never a silent day order)", async () => {
+  it("refuses a non-default TIF without expiry (gtd) at placement with a failed receipt (never a silent day order)", async () => {
     const receipt = await publicPlatform().placeOrderRemote({
       orderId: "draft-1",
       symbol: "AAPL",
@@ -265,7 +265,7 @@ describe("#4656 — Public refuses a TIF it cannot honour, by name", () => {
       quantity: 1,
       orderType: "LIMIT",
       limitPrice: 100,
-      timeInForce: "gtc",
+      timeInForce: "gtd" as any,
       userLogin: "owner@example.com",
     });
     expect(receipt.success).toBe(false);
@@ -357,15 +357,15 @@ describe("#4656 — Public refuses a TIF it cannot honour, by name", () => {
     expect(receipt.message).toMatch(/on-close order types \(MARKET_ON_CLOSE, LIMIT_ON_CLOSE\) and no on-open type/);
   });
 
-  it("still refuses the terms Public does not publish", async () => {
+  it("still refuses GTD without an expiration_time", async () => {
     const receipt = await publicPlatform().placeOrderRemote({
-      orderId: "draft-gtc",
+      orderId: "draft-gtd",
       symbol: "AAPL",
       action: "BUY",
       quantity: 1,
       orderType: "LIMIT",
       limitPrice: 100,
-      timeInForce: "gtc",
+      timeInForce: "gtd" as any,
       userLogin: "owner@example.com",
     });
     expect(receipt.success).toBe(false);

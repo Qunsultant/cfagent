@@ -112,6 +112,7 @@ export function publicSingleLegArgs(params: {
   orderType?: string;
   limitPrice?: number;
   stopPrice?: number;
+  timeInForce?: string;
   orderClass?: "simple" | "bracket" | "oco" | "oto";
   takeProfit?: { limitPrice?: number };
   stopLoss?: { stopPrice?: number; limitPrice?: number };
@@ -131,6 +132,12 @@ export function publicSingleLegArgs(params: {
   }
   if (params.stopPrice !== undefined) {
     spec.stop_price = { names: ["stop_price", "stopPrice"], value: params.stopPrice };
+  }
+  if (params.timeInForce !== undefined && params.timeInForce !== "cls") {
+    spec.time_in_force = {
+      names: ["time_in_force", "timeInForce"],
+      value: params.timeInForce.toUpperCase(),
+    };
   }
   if (params.orderClass && params.orderClass !== "simple") {
     spec.order_class = {
