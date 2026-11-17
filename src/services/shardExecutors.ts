@@ -20,10 +20,21 @@
 
 import type { DatabaseORM } from "../orm";
 import type { ETradeService } from "./etrade";
-import type { ShardChainContext } from "../types";
+import type { Env, ShardChainContext } from "../types";
 import type { OptionChainSource } from "../trading";
 import { isBrokerId } from "./tenantProviders";
 import { TradingPlatformRegistry, platformChainSource } from "../trading";
+import { discoveryBrokerStageInput } from "./discoveryService";
+import type { JobPipelineStores } from "../data/jobPipelinePorts";
+import type { JobRunRecorder } from "./jobPipelineEngine";
+import type { BrokerStageInput } from "../workflows/optionsStepPorts";
+import {
+  awaitOptionsWorkflowRun,
+  optionsWorkflowRunDepsFromEnv,
+  startStrategyScreenWorkflow,
+  type AwaitOptionsWorkflowRunOpts,
+  type StartOptionsScreenWorkflowOpts,
+} from "../workflows/optionsWorkflowHost";
 import type { ShardPayload, ShardRow } from "./shardJobs";
 import {
   assessFeedGate,
@@ -112,6 +123,14 @@ export interface ShardExecutorDeps {
    * unset and the shard uses the listings module, exactly as before.
    */
   fetchListings?: () => Promise<unknown>;
+  /**
+   * Issue #4855: test seams for the host dispatch (the #4854
+   * idiom) — the workflow create call, the residency stores, and
+   * the await options. Production leaves it unset and the dispatch
+   * derives from env; tests inject fakes. Only read on the host
+   * route.
+   */
+  hostSeams?: ShardHostSeams;
 }
 
 /**
@@ -493,6 +512,234 @@ async function generateAssemble(
   };
 }
 
+/** The shard executor's dispatch decision: the host, or the unchanged sync dispatch. */
+export interface ShardHostDispatchDecision {
+  route: "host" | "sync";
+  reason: string;
+}
+
+/**
+ * Issue #4855 — the shard's dispatch gate (the #4854 firer gate's
+ * shape). The host only when the shard's (broker, mode) pair
+ * derives and the residency bindings are configured; anything else
+ * stays on the unchanged sync dispatch. No snapshot clause: a shard
+ * scan carries no stored snapshot input. No symbol gate: every
+ * shard is one symbol by construction. No gate decision is logged;
+ * the run's job record shows which dispatch served it.
+ */
+export function shardDispatchRoute(input: {
+  broker: BrokerStageInput | null;
+  env: Env;
+}): ShardHostDispatchDecision {
+  if (!input.broker) {
+    return {
+      route: "sync",
+      reason:
+        "no broker stage input derives from the chain, so the residency could not resolve the run's own chain source",
+    };
+  }
+  const workflow = input.env.JOB_PIPELINE_WORKFLOW;
+  if (!input.env.AGENT_DB || !workflow || typeof workflow.create !== "function") {
+    return {
+      route: "sync",
+      reason: "the workflow residency bindings are not configured in this deployment",
+    };
+  }
+  return {
+    route: "host",
+    reason: "broker pair derived and residency bindings configured",
+  };
+}
+
+/** The per-shard host dispatch: the decision plus the derived pair, taken once per shard. */
+export interface ShardHostDispatch {
+  decision: ShardHostDispatchDecision;
+  broker: BrokerStageInput | null;
+}
+
+/**
+ * Issue #4855 — resolve the shard's host dispatch once per shard:
+ * the (broker, mode) pair from the chain's recorded selections —
+ * the recorded mode wins (#3655: a chain executes under the broker
+ * it was submitted with, never a fresh read that could disagree
+ * mid-chain); when the mode is unrecorded it derives from the
+ * recorded broker + the chain's environment through the #4853
+ * derivation, the same environment resolution the platform was
+ * constructed with. No recorded broker → no pair: the shard stays
+ * on sync, where the in-process fresh-read fallback still applies.
+ * The chain, broker, and environment are fixed for the chain, so a
+ * chain never mixes dispatches mid-flight.
+ */
+export function resolveShardHostDispatch(
+  env: Env,
+  chain: ShardChainContext,
+): ShardHostDispatch {
+  const broker = shardBrokerStageInput(chain, env);
+  return { decision: shardDispatchRoute({ broker, env }), broker };
+}
+
+function shardBrokerStageInput(
+  chain: ShardChainContext,
+  env: Env,
+): BrokerStageInput | null {
+  const brokerId = chain.brokerId;
+  if (!brokerId) return null;
+  if (chain.mode === "live" || chain.mode === "paper") {
+    return isBrokerId(brokerId) ? { broker: brokerId, mode: chain.mode } : null;
+  }
+  return discoveryBrokerStageInput(brokerId, env, chain.environment);
+}
+
+/**
+ * Issue #4855 — the host dispatch's injectable seams (the
+ * #4291/#4848/#4853/#4854 idiom): the workflow create call, the
+ * residency stores, and the await options. Tests inject fakes;
+ * production passes nothing and the dispatch derives from env.
+ */
+export interface ShardHostSeams {
+  startWorkflow?: StartOptionsScreenWorkflowOpts["startWorkflow"];
+  stores?: JobPipelineStores;
+  runRecorder?: JobRunRecorder;
+  awaitOptions?: AwaitOptionsWorkflowRunOpts;
+}
+
+/**
+ * Issue #4855 — the per-symbol scan request, shared by the sync and
+ * host dispatches: one builder, so a host run and a sync run are
+ * the same job shape in Workflow Runs. The template, scan options
+ * (incl. the chain-timestamp `now` override for deterministic
+ * provenance), and the absence of a requestRecord / scanRunStore
+ * are the #3186 step 3e contract, unchanged: the chain options ARE
+ * the request, and per-symbol results are stored as chain rows.
+ */
+function buildShardScanRequest(
+  chain: ShardChainContext,
+  request: NonNullable<ShardChainContext["options"]>,
+  symbol: string,
+  eventCalendar: unknown,
+  shardRunId: string,
+): ScannerPipelineRequest {
+  return {
+    assetClass: "options",
+    runIdentity: { runId: shardRunId },
+    trigger: chain.trigger ?? "scheduled",
+    classInput: {
+      scan: {
+        symbols: [symbol],
+        template: {
+          thesis: request.thesis as any,
+          targetDate: request.targetDate,
+          expectedIvDirection: "unchanged",
+          maxPlannedLoss: request.maxPlannedLoss ?? 1000,
+          minRewardRisk: request.minRewardRisk ?? 1.5,
+          // Issue #2577: the scope's DTE band rides into the shard instead of
+          // being dropped here (the per-symbol runner previously ignored it).
+          ...(request.minDte !== undefined ? { minDte: request.minDte } : {}),
+          ...(request.maxDte !== undefined ? { maxDte: request.maxDte } : {}),
+          allowedStrategies: request.allowedStrategies?.length ? request.allowedStrategies as any : ["all"],
+          // Issue #2091: the chain's scheduled scope rides into the
+          // per-symbol template; manual chains omit it (thesis default).
+          ...(request.evaluateAllStrategies === true ? { evaluateAllStrategies: true } : {}),
+          // Issue #2600: the chain's canonical mode + far-dated toggle
+          // ride the same template (the scanner resolves the mode once;
+          // a conflicting alias pair throws there, never silently).
+          ...(request.strategyMode !== undefined ? { strategyMode: request.strategyMode } : {}),
+          ...(request.farDated !== undefined ? { farDated: request.farDated } : {}),
+        },
+        options: {
+          riskProfile: request.riskProfile,
+          maxSymbols: 1,
+          eventCalendarBySymbol: eventCalendar
+            ? { [symbol]: eventCalendar as any }
+            : undefined,
+          now: new Date(chain.timestamp),
+        },
+      },
+    },
+  } as ScannerPipelineRequest;
+}
+
+/**
+ * Issue #4855 — one per-symbol shard scan through the strategy
+ * workflow host: define the strategy job with the shard's scan
+ * request and broker pair, create the workflow instance, await
+ * settlement, and return the shapeReport as the shard result. The
+ * envelope is the sync dispatch's envelope (buildShardScanRequest)
+ * with the chain's trigger and the #4420 shard run id, so a host
+ * run and a sync run are the same job shape in Workflow Runs. No
+ * universe input is stamped: the scan is symbol-scoped, so the
+ * rebuild constructs the screener without deps, exactly as the
+ * in-process shard does. The await bound is the manual route's
+ * (300s, #4848): a one-symbol scan over live chains is the same
+ * shape of work as the firer's panel screen. A failed run throws
+ * the sync path's failure shape; a run that completes without a
+ * report refuses to answer from nothing, as the sync path does.
+ * The skipped-verdict retry contract lives with the caller: the
+ * caller checks the returned result's matrix exactly as it checks
+ * the sync path's, inside the same withRetry closure.
+ *
+ * The caller's engine stores do not thread here: the host run
+ * records over the residency's durable stores, not the caller's
+ * stores, so a host-path shard is not addressable by per-stage
+ * control from the copilot turn until control moves to the durable
+ * stores (#4859). The sync fallback keeps the #4068 threading for
+ * gated-out shards. The stage queue is not threaded either: the
+ * residency binds it from env (#4851 — the same binding the shard
+ * threads), so a host-path shard publishes through the same queue
+ * as today.
+ */
+export async function runShardScanViaHost(args: {
+  env: Env;
+  request: unknown;
+  runId: string;
+  symbol: string;
+  userLogin: string;
+  trigger: "manual" | "scheduled";
+  broker: BrokerStageInput;
+  seams?: ShardHostSeams;
+}): Promise<OpportunityScanResult> {
+  const deps =
+    args.seams?.stores && args.seams?.runRecorder
+      ? { stores: args.seams.stores, runRecorder: args.seams.runRecorder }
+      : optionsWorkflowRunDepsFromEnv(args.env);
+  const started = await startStrategyScreenWorkflow(
+    args.env,
+    {
+      runId: args.runId,
+      request: args.request,
+      userLogin: args.userLogin,
+      trigger: args.trigger,
+      broker: args.broker,
+    },
+    {
+      ...deps,
+      ...(args.seams?.startWorkflow ? { startWorkflow: args.seams.startWorkflow } : {}),
+    },
+  );
+  const view = await awaitOptionsWorkflowRun(deps, started.jobId, {
+    timeoutMs: 300_000,
+    ...(args.seams?.awaitOptions ?? {}),
+  });
+  if (view.state === "failed") {
+    const failed = view.stages.find((stage) => stage.status === "failed");
+    throw new Error(
+      `Options shard scan failed at ${failed?.stageId ?? "unknown"}: ${failed?.error ?? "unknown reason"}`,
+    );
+  }
+  if (view.state !== "completed") {
+    throw new Error(
+      `Options shard scan run ${args.runId} ended ${view.state} without a result`,
+    );
+  }
+  const result = view.shapeReport as OpportunityScanResult | undefined;
+  if (!result) {
+    throw new Error(
+      `Options shard scan completed without a report artifact for ${args.symbol}; refusing to assemble from nothing.`,
+    );
+  }
+  return result;
+}
+
 async function executeOptionsSymbol(
   deps: ShardExecutorDeps,
   chain: ShardChainContext,
@@ -511,6 +758,11 @@ async function executeOptionsSymbol(
   const service = { client: engineClient };
   const eventCalendar = inputs.eventCalendar ?? await (await import("./eventCalendar")).getSymbolEventCalendar(symbol);
   const policy = resolvePipelinePolicy(deps.env).retry[SHARD_RETRY_BUCKET.feed];
+  // Issue #4855: the host dispatch resolves once per shard, outside
+  // the retry loop — the chain, broker, and environment are fixed
+  // for the chain, so a retry never re-derives the decision.
+  const hostEnv = deps.env as unknown as Env;
+  const hostDispatch = resolveShardHostDispatch(hostEnv, chain);
   return withRetry(async () => {
     // Issue #3186 step 3e - the per-symbol shard scan goes through
     // the one scanner pipeline instead of the direct
@@ -528,78 +780,61 @@ async function executeOptionsSymbol(
     // Issue #4420: the inner run's identity has one home
     // (shardScanRunId), so the Workflow Runs read derives the same id
     // from the shard payload instead of re-spelling the format.
+    // Issue #4855: the host branch dispatches the same request
+    // through the strategy workflow host; the sync branch below is
+    // the unchanged #3186 dispatch. Both return the shapeReport,
+    // and the skipped-verdict check below applies to either.
     const shardRunId = shardScanRunId(chain.chainId, symbol);
-    const shardStorage = memoryStageStorage();
-    // Issue #4271: a shard is a strategy screen — it defines the
-    // strategy job (strategy-screen:<runId>), not the options job.
-    const shardOutcome = await runStrategyScreenViaEngine(
-      {
+    const scanRequest = buildShardScanRequest(chain, request, symbol, eventCalendar, shardRunId);
+    let result: OpportunityScanResult;
+    if (hostDispatch.decision.route === "host" && hostDispatch.broker) {
+      result = await runShardScanViaHost({
+        env: hostEnv,
+        request: scanRequest,
         runId: shardRunId,
+        symbol,
         userLogin: chain.userLogin,
         trigger: chain.trigger ?? "scheduled",
-        request: {
-          assetClass: "options",
-          runIdentity: { runId: shardRunId },
+        broker: hostDispatch.broker,
+        ...(deps.hostSeams ? { seams: deps.hostSeams } : {}),
+      });
+    } else {
+      const shardStorage = memoryStageStorage();
+      // Issue #4271: a shard is a strategy screen — it defines the
+      // strategy job (strategy-screen:<runId>), not the options job.
+      const shardOutcome = await runStrategyScreenViaEngine(
+        {
+          runId: shardRunId,
+          userLogin: chain.userLogin,
           trigger: chain.trigger ?? "scheduled",
-          classInput: {
-            scan: {
-              symbols: [symbol],
-              template: {
-                thesis: request.thesis as any,
-                targetDate: request.targetDate,
-                expectedIvDirection: "unchanged",
-                maxPlannedLoss: request.maxPlannedLoss ?? 1000,
-                minRewardRisk: request.minRewardRisk ?? 1.5,
-                // Issue #2577: the scope's DTE band rides into the shard instead of
-                // being dropped here (the per-symbol runner previously ignored it).
-                ...(request.minDte !== undefined ? { minDte: request.minDte } : {}),
-                ...(request.maxDte !== undefined ? { maxDte: request.maxDte } : {}),
-                allowedStrategies: request.allowedStrategies?.length ? request.allowedStrategies as any : ["all"],
-                // Issue #2091: the chain's scheduled scope rides into the
-                // per-symbol template; manual chains omit it (thesis default).
-                ...(request.evaluateAllStrategies === true ? { evaluateAllStrategies: true } : {}),
-                // Issue #2600: the chain's canonical mode + far-dated toggle
-                // ride the same template (the scanner resolves the mode once;
-                // a conflicting alias pair throws there, never silently).
-                ...(request.strategyMode !== undefined ? { strategyMode: request.strategyMode } : {}),
-                ...(request.farDated !== undefined ? { farDated: request.farDated } : {}),
-              },
-              options: {
-                riskProfile: request.riskProfile,
-                maxSymbols: 1,
-                eventCalendarBySymbol: eventCalendar
-                  ? { [symbol]: eventCalendar as any }
-                  : undefined,
-                now: new Date(chain.timestamp),
-              },
+          request: scanRequest,
+        },
+        {
+          stages: createScannerScreenPorts({
+            agents: {
+              data: new OptionsDataAgent(new DynamicOptionsScreener(service.client)),
+              risk: new StrategyRiskAgent(),
+              recommender: new RecommendationAgent(),
             },
-          },
-        } as ScannerPipelineRequest,
-      },
-      {
-        stages: createScannerScreenPorts({
-          agents: {
-            data: new OptionsDataAgent(new DynamicOptionsScreener(service.client)),
-            risk: new StrategyRiskAgent(),
-            recommender: new RecommendationAgent(),
-          },
-          storage: shardStorage,
-        }),
-        claims: memoryStageClaims(),
-        queue: (deps.env.SCREENER_EVENTS as unknown as StageQueueSend | null) ?? null,
-        // Issue #4068: the engine run record is durable in the
-        // shard executor's SQLite.
-        engineStores: optionsEngineStoresFromSql(deps.sql),
-      },
-    );
-    if (shardOutcome.outcome !== "completed") {
-      throw new Error(`Options shard scan failed at ${shardOutcome.failedStage}: ${shardOutcome.reason}`);
-    }
-    const result = await shardStorage.get<OpportunityScanResult>(
-      optionsArtifactKey(shardRunId, "shapeReport"),
-    );
-    if (!result) {
-      throw new Error(`Options shard scan completed without a report artifact for ${symbol}; refusing to assemble from nothing.`);
+            storage: shardStorage,
+          }),
+          claims: memoryStageClaims(),
+          queue: (deps.env.SCREENER_EVENTS as unknown as StageQueueSend | null) ?? null,
+          // Issue #4068: the engine run record is durable in the
+          // shard executor's SQLite.
+          engineStores: optionsEngineStoresFromSql(deps.sql),
+        },
+      );
+      if (shardOutcome.outcome !== "completed") {
+        throw new Error(`Options shard scan failed at ${shardOutcome.failedStage}: ${shardOutcome.reason}`);
+      }
+      const stored = await shardStorage.get<OpportunityScanResult>(
+        optionsArtifactKey(shardRunId, "shapeReport"),
+      );
+      if (!stored) {
+        throw new Error(`Options shard scan completed without a report artifact for ${symbol}; refusing to assemble from nothing.`);
+      }
+      result = stored;
     }
     // The scanner converts chain-fetch exceptions into skipped rows.
     // Re-throw those here so the shard's acquisition retry bucket can
