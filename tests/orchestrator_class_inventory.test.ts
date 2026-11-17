@@ -336,8 +336,14 @@ const ORCH = "agents/orchestrator.ts";
  *  Bot merge of main adds the #3089 broker-routed order
  *  endpoints block (+25 lines) — measured 3,297 lines /
  *  158,614 B, so budget lines rise to 3310 and bytes rise
- *  to 159_200, keeping similar headroom. */
-const BUDGET_LINES = 3310;
+ *  to 159_200, keeping similar headroom.
+ *  #5052 (triggered dispatch mode) adds the JobRunTrigger
+ *  import (+1 line) and the #5157 merge adds the
+ *  schedule-watchdog async context (+2 lines) — measured
+ *  3,311 lines / 151,083 B on the merged tree, so budget
+ *  lines rise to 3325, keeping similar headroom. Bytes
+ *  unchanged — measured well under the 159,200 budget. */
+const BUDGET_LINES = 3325;
 const BUDGET_BYTES = 159_200;
 
 const count = (haystack: string, needle: string) =>
