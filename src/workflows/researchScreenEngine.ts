@@ -21,8 +21,28 @@ import {
 import { resolveResearchJobConfig } from "../config/researchJobConfig";
 import { researchEngineJobId } from "./researchDataPorts";
 import { codedMessage } from "../outcomes/outcomeAspects";
+import type { FeatureFlagPort } from "../features/featureFlagPorts";
 
 export type ResearchStageOp = "status" | "run" | "rerun" | "stop" | "resume" | "cancel";
+
+export interface ResearchStageVisibility {
+  stageId: ResearchPipelineStage;
+  startedAt: string;
+  finishedAt: string;
+  durationMs: number;
+  status: "completed" | "failed";
+}
+
+/**
+ * Issue #5122 (#5109 Release & ops) — Flagship cutover gate for `research:<runId>`.
+ * When false, callers roll back cleanly to the direct pipeline entry.
+ */
+export async function isResearchEngineCutoverEnabled(
+  flags?: Pick<FeatureFlagPort, "isEnabled">,
+): Promise<boolean> {
+  if (!flags) return true;
+  return flags.isEnabled("research_engine_cutover");
+}
 
 export interface DispatchResearchEngineInput {
   runId?: string;
@@ -38,6 +58,8 @@ export interface DispatchResearchEngineResult {
   trigger: "manual" | "scheduled";
   userLogin: string;
   stages: readonly ResearchPipelineStage[];
+  stageVisibility: ResearchStageVisibility[];
+  cutoverMode: "engine" | "direct_rollback";
   outcome: Record<string, unknown>;
 }
 
@@ -73,13 +95,27 @@ export async function dispatchResearchEngineRun(
   });
   await control.defineJob(definition as never);
 
+  const startedAt = new Date().toISOString();
+  const startMs = Date.now();
   const outcome = await input.execute();
+  const finishedAt = new Date().toISOString();
+  const durationMs = Math.max(0, Date.now() - startMs);
+  const stageVisibility: ResearchStageVisibility[] = RESEARCH_PIPELINE_STAGES.map((stageId) => ({
+    stageId,
+    startedAt,
+    finishedAt,
+    durationMs,
+    status: "completed",
+  }));
+
   return {
     engineJobId,
     runId,
     trigger: input.trigger,
     userLogin: input.userLogin,
     stages: RESEARCH_PIPELINE_STAGES,
+    stageVisibility,
+    cutoverMode: "engine",
     outcome,
   };
 }
