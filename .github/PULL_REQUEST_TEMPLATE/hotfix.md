@@ -63,3 +63,9 @@ Process documentation impact: <none, or what process docs this PR changes>
 
 ## Out of scope
 Out of scope: <none, or [Out-of-Scope] sub-issue links — every item this PR leaves out of scope gets its own sub-issue titled `[Out-of-Scope] <thing>` (issue #4099)>
+
+## Reuse class
+Reuse class: <reuse / enhancement / new> — <mechanism reused or built, with file:line; for new, the search that confirmed nothing exists>
+
+## Dependencies
+Dependencies: <blocking #NNN (state) — what it unblocks; or none>
