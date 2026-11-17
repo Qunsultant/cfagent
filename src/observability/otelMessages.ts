@@ -18,6 +18,14 @@
  *    a malformed OTLP payload.
  *  OBS-1005 otel.sink.degraded — the OTel sink dropped or could
  *    not emit a log record.
+ *
+ * Codes added in S2 (#5082, metrics):
+ *  OBS-1006 otel.metrics.export.failed — the OTLP metrics
+ *    exporter failed to export a batch (transport or
+ *    serialization failure).
+ *  OBS-1007 otel.metrics.free_tier_guard — the metrics
+ *    free-tier write guard dropped Analytics Engine writes for
+ *    the day (the configured daily write limit was reached).
  */
 
 /** A switch value failed closed to the safe default (OFF / none / 0). */
@@ -30,6 +38,10 @@ export const OBS_INGEST_FAILED = "OBS-1003" as const;
 export const OBS_INGEST_REJECTED = "OBS-1004" as const;
 /** The OTel sink dropped or could not emit a log record. */
 export const OBS_SINK_DEGRADED = "OBS-1005" as const;
+/** The OTLP metrics exporter failed to export a batch. */
+export const OBS_METRICS_EXPORT_FAILED = "OBS-1006" as const;
+/** The metrics free-tier write guard dropped Analytics Engine writes for the day. */
+export const OBS_METRICS_FREE_TIER_GUARD = "OBS-1007" as const;
 
 /** Formats a coded message: `[OBS-####] <message>`. */
 export function formatOtelMessage(code: string, message: string): string {

@@ -337,15 +337,17 @@ leaky producer envelope cannot leak through it.
   path and visible in the stream, with AE totals agreeing with
   the D1 rollup. Not fabricated here.
 
-## 6. OpenTelemetry (OTel) — the telemetry library (issue #5081, program #5080 S1)
+## 6. OpenTelemetry (OTel) — the telemetry library (issues #5081 S1 + #5082 S2, program #5080)
 
 OTel is the instrumentation library for logs, metrics, and traces
-(the S1 slice implements LOGGING only; metrics is S2 #5082,
-tracing spans is S3, and #2808's harmonization program stays
-parked). No SigNoz, no ClickHouse, no VPS, no Workers Paid
-features, no D1 for telemetry. The stack is the stock JS 3.x
-logs line: `@opentelemetry/api` 1.10.0 + `@opentelemetry/sdk-logs`
-3.1.1 + `@opentelemetry/otlp-transformer` 0.301.2.
+(the S1 slice implements LOGGING; the S2 slice implements
+METRICS — issue #5082; tracing spans is S3, and #2808's
+harmonization program stays parked). No SigNoz, no ClickHouse,
+no VPS, no Workers Paid features, no D1 for telemetry. The stack
+is the stock JS 3.x logs + metrics lines: `@opentelemetry/api`
+1.10.0 + `@opentelemetry/sdk-logs` 3.1.1 +
+`@opentelemetry/sdk-metrics` 3.1.1 + `@opentelemetry/otlp-transformer`
+0.301.2.
 
 ### The five-level on/off mechanism (all externalized)
 
@@ -363,8 +365,8 @@ redeploy (KV/D1 switches + admin UI) is S7/S8.
    which is ON, actually emits).
 2. **Per-signal** — `OTEL_LOGS_EXPORTER` / `OTEL_METRICS_EXPORTER` /
    `OTEL_TRACES_EXPORTER` (`otlp` | `console` | `none`). `none`
-   turns that signal off globally. Logs is the live signal
-   (`otlp`); metrics and traces resolve to `none` until S2/S3.
+   turns that signal off globally. Logs and metrics are the live
+   signals (`otlp`); traces resolves to `none` until S3.
 3. **Per-domain** — `OTEL_DOMAIN_<DOMAIN>_ENABLED` / the config
    map `otel.domains.<domain>.enabled`. One AOP gate at the domain
    boundary (`createOtelDomainGate`); domain code calls through
@@ -433,13 +435,74 @@ not yet wired (same helper, later slice). The 242 raw
 `console.*` sites outside the structured logger are NOT swept
 in this PR (follow-on work).
 
+### Metrics (S2 scope, issue #5082)
+
+One metrics model + one store. The model is the OTel metric
+(name, labels, value, timestamp); the store is the existing
+Analytics Engine `observability` dataset — the same store S1
+uses for logs, reached through the existing
+`createObservabilitySink` / Analytics Engine adapter
+(`metricEventForSeries` converts one OTel series into one AE
+datapoint: type `metric.<name>`, value in `count` for
+counters/gauges, sum in `durationMs` for histograms). No second
+metrics store, no new backend. The export is the same
+OTLP/HTTP pattern as logs: the SDK's `PeriodicExportingMetricReader`
+exports aggregated series (one datapoint per series per export,
+never one per event) through the thin OTLP/HTTP metric exporter
+(`JsonMetricsSerializer` + injected transport) to the in-process
+ingestion handler, which archives one JSONL object per batch to
+R2 (`otel-archive/<YYYY-MM-DD>/<id>.jsonl`) and writes each
+series to the AE sink. `POST /api/otel/v1/metrics` is a real
+HTTP endpoint for external OTLP senders, under the same
+`OTEL_INGEST_TOKEN` gate as the logs route.
+
+**Free-tier guard.** Analytics Engine Free allows 100k writes/day
+and 10k read queries/day; the limits are config values
+(`otel.metrics.freeTier.dailyWriteLimit` /
+`dailyReadQueryLimit`, env `OTEL_METRICS_FREE_TIER_*`), not
+hard-coded. The exporter counts AE writes per UTC day and, when
+the limit is reached, drops further AE writes with exactly one
+coded OBS-1007 per day (the R2 archive path is NOT guarded — R2
+has no per-row quota; a 0 write limit means no AE writes while
+R2 still archives). Aggregation (the SDK exports aggregated
+series, not per-event points) plus the guard is what keeps the
+free tier reachable.
+
+**Instruments (J1–J7 first, others OFF by default).** The
+recorder (`src/observability/otelMetricsRecorder.ts`) is the one
+model: `job.runs` (Counter), `job.stage.steps` (Counter),
+`job.stage.step.duration` (Histogram, ms), `quota.report_runs`
+(Counter — one per charged report run, not one per window),
+`resource.rows_read` / `resource.rows_written` / `resource.ops`
+(Gauges, per rollup row per day), `health.pipeline` (Gauge 1/0),
+`slo.resource.rows_read` (Gauge 1/0). The metrics gate does NOT
+apply the log level/sampling — a counter sampled at record time
+is a corrupted count; volume controls are the export interval
+(`otel.metrics.exportIntervalMs`, default 60s) + the free-tier
+guard. All recording is best-effort and never throws.
+
+**First metric: the #1819 SessionStore resource rollup.** The
+rollup goal hands the same rows it wrote to D1 to the recorder
+(`recordResourceRollup`); the rollup is already daily-aggregated
+(one gauge value per row per day), so it is the lowest-volume
+first metric. Health = the J1–J7 run failure rate vs the
+configured max (`otel.metrics.health.pipelineMaxFailureRate`,
+default 5%); the SLO = the day's SessionStore rows-read vs the
+configured max pct (`otel.metrics.slo.resourceRowsReadMaxPct`,
+default 70%) of the free-tier budget (5,000,000). Both are pure
+evaluators + a gauge; the dashboard (S8) surfaces them, and the
+70% cap-ALERT is S4 (alerting) — S2 instruments the measurement
+only.
+
 ### Coded messages (the S7 catalog seed)
 
 `OBS-1001` config invalid (fail-closed) · `OBS-1002` export
 failed · `OBS-1003` ingest failed (R2 write) · `OBS-1004`
-ingest rejected (malformed OTLP) · `OBS-1005` sink degraded.
-Defined in one place (`src/observability/otelMessages.ts`);
-S7 adopts and expands it into the one message catalog.
+ingest rejected (malformed OTLP) · `OBS-1005` sink degraded ·
+`OBS-1006` metrics export failed · `OBS-1007` metrics free-tier
+guard (AE write limit reached). Defined in one place
+(`src/observability/otelMessages.ts`); S7 adopts and expands it
+into the one message catalog.
 
 ### Why not the stock exporter or the pydantic package
 
@@ -447,7 +510,10 @@ S7 adopts and expands it into the one message catalog.
   has no public transport injection, so it cannot route to the
   same-Worker ingestion route (the 522 self-fetch rule). The thin
   exporter uses the official serializer + an injected transport
-  instead.
+  instead. The same holds for the stock `OTLPMetricExporter`
+  (`@opentelemetry/exporter-metrics-otlp-http`) — the thin metric
+  exporter uses the official `JsonMetricsSerializer` + an injected
+  transport for the same reason.
 - `@pydantic/otel-cf-workers` is traces-only (no LoggerProvider /
   sdk-logs) and its `@opentelemetry/core` 2.x conflicts with the
   logs stack's core 3.x. S3 (tracing) will evaluate it then.
