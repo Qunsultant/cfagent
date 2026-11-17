@@ -1630,7 +1630,8 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/trading/brokerPresentation.ts", "alpaca", 12],
   ["src/trading/brokerPresentation.ts", "etrade", 14],
   ["src/trading/channels/approval.ts", "etrade", 3],
-  ["src/trading/dataProviders/adapters.ts", "alpaca", 20],
+  // #4674 (Gap 20): adapters.ts/alpaca 20->28 — adds fetchAlpacaNewsArticles (/v1beta1/news) so Alpaca DataProvider declares news natively.
+  ["src/trading/dataProviders/adapters.ts", "alpaca", 28],
   ["src/trading/dataProviders/adapters.ts", "etrade", 103],
   ["src/trading/dataProviders/adapters.ts", "nasdaq", 17],
   ["src/trading/dataProviders/adapters.ts", "public.com", 4],
