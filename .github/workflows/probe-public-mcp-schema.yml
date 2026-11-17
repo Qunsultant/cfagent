@@ -9,7 +9,7 @@ permissions:
 jobs:
   probe:
     name: Probe Public.com MCP tools/list
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment: PROD
     steps:
       - name: Query Public MCP tools/list and write /tmp/public-mcp-schema.json
