@@ -3,8 +3,9 @@
  *
  * Pins (a) the route inventory and relative order of the extracted handler in
  * src/agents/routes/audit.ts — the matching order in routeRequest is
- * load-bearing, so the module must handle the 3 (path, method) pairs in the
- * same sequence as the original inline blocks; and (b) the extracted entry
+ * load-bearing, so the module must handle the 4 (path, method) pairs in the
+ * same sequence as the original inline blocks (plus the #2437
+ * chain-verification status read, which precedes them); and (b) the extracted entry
  * point's behavior with a mock context: each moved path responds as before,
  * non-matching paths return null (the orchestrator keeps routing).
  *
@@ -52,9 +53,10 @@ const req = (method: string, path: string, body?: unknown) =>
   });
 
 describe("audit route inventory (extraction #367)", () => {
-  it("the 3 route conditions appear in the extracted module in the original relative order", () => {
+  it("the 4 route conditions appear in the extracted module in the original relative order", () => {
     const moduleSrc = src("agents/routes/audit.ts");
     const markers = [
+      'path.endsWith("/audit/chain-verification") && request.method === "GET"',
       'path.endsWith("/audit") && request.method === "GET"',
       'path.endsWith("/audit") && request.method === "POST"',
       'path.endsWith("/audit/event") && request.method === "POST"',

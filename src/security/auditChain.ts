@@ -187,7 +187,26 @@ export interface AuditChainDiagnosis {
  * repairs the break, so the diagnosis is stable across alerts.
  */
 export function diagnoseAuditChain(rows: AuditChainRow[]): AuditChainDiagnosis {
-  let previousHash: string | null = null;
+  return diagnoseAuditChainWindow(rows, null);
+}
+
+/**
+ * Issue #2437 — diagnose a window of rows anchored on a previously
+ * verified tail hash. Same walk as diagnoseAuditChain, except the
+ * expected link of the first hashed row is the anchor (the tail hash
+ * of the last verified row) instead of null (genesis). A null anchor
+ * is the genesis case and behaves exactly like diagnoseAuditChain.
+ * An anchor mismatch on the first hashed row is a break at its index:
+ * the window does not continue the verified chain, so the chain is
+ * broken (a gap is tampering or loss) — never silently re-anchored.
+ * Pre-chain rows before the first hashed row are skipped, as in the
+ * full walk; a missing hash after chaining started fails.
+ */
+export function diagnoseAuditChainWindow(
+  rows: AuditChainRow[],
+  anchorHash: string | null,
+): AuditChainDiagnosis {
+  let previousHash: string | null = anchorHash;
   let chaining = false;
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
