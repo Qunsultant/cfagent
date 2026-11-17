@@ -48,10 +48,11 @@ describe("Issue #4037 — Public broker surface parity", () => {
 
   it("declares its absences instead of faking them", () => {
     const proto = PublicTradingPlatform.prototype as unknown as Record<string, unknown>;
-    // Public's MCP surface exposes no lot-level position read, no session-order
-    // terms, and no watchlist tools. Absent means the neutral routes answer
-    // provider_unsupported; a stub returning empty data would be a lie.
-    expect(proto.getPositionLots).toBeUndefined();
+    // Issue #4673: the live surface DOES expose lot-level reads
+    // (get_tax_lots_for_symbol), so getPositionLots is real now. Session-order
+    // terms and watchlist tools are still absent: the neutral routes answer
+    // provider_unsupported, and a stub returning empty data would be a lie.
+    expect(typeof proto.getPositionLots).toBe("function");
     expect(proto.supportsSessionOrders).toBeUndefined();
     expect(proto.getWatchlists).toBeUndefined();
   });
