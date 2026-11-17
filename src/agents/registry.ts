@@ -840,6 +840,14 @@ export const MESH_TOOL_FAMILIES: MeshToolFamilyEntry[] = [
     commandSources: [{ file: "src/mcps/openaimp/publicCommands.ts", kind: "readonly-name" }],
   },
   {
+    id: "account-binding-mcp-commands",
+    name: "Account-binding MCP commands",
+    source: "src/mcps/openaimp/accountBindingCommands.ts",
+    status: "live",
+    commands: ["broker_account_binding"],
+    commandSources: [{ file: "src/mcps/openaimp/accountBindingCommands.ts", kind: "readonly-name" }],
+  },
+  {
     // Issue #3883: order cancellation is its own family — one engine, one
     // vocabulary, one receipt across every cancel scope.
     id: "order-cancel-mcp-commands",
