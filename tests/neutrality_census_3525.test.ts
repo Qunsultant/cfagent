@@ -848,6 +848,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["docs/architecture/broker-parity-matrix.md", "alpaca", 2],
   ["docs/architecture/broker-parity-matrix.md", "yahoo", 1],
   ["docs/architecture/broker-parity-matrix.md", "nasdaq", 1],
+  ["docs/architecture/broker-parity-matrix.md", "tastytrade", 5],
   // #3992 PR-5 INTEGRATION: the residency decision doc names the incident
   // job by its registered id (a data-bearing identifier), per the note above.
   ["docs/architecture/feed-run-residency-and-scheduled-silence-3992.md", "yahoo", 1],
