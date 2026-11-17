@@ -14,7 +14,6 @@ import type { JobRunTrigger } from "../data/jobRunRecordPorts";
 import { BusinessError, codedMessage } from "../outcomes/outcomeAspects";
 import { renewETradeAccessToken, getStoredTokens, etradeIdentityFromLogin } from "../security/etradeOAuth";
 import { resolveScreenerAgentName } from "../agents/screenerAgentName";
-import { resolveShardPacing } from "../config/shardPacing";
 import { actorGateway } from "./cloudflareActorGateway";
 import { createMessagingPorts } from "../messaging/createMessagingPorts";
 import { toScreenerEnvelope } from "../messaging/screenerEventEnvelope";
@@ -112,6 +111,7 @@ import type { BrokerStageInput } from "../workflows/optionsStepPorts";
 import {
   awaitOptionsWorkflowRun,
   optionsWorkflowRunDepsFromEnv,
+  startOptionsChainWorkflow as startOptionsChainWorkflowSeam,
   startStrategyScreenWorkflow,
   type AwaitOptionsWorkflowRunOpts,
   type StartOptionsScreenWorkflowOpts,
@@ -718,13 +718,6 @@ export class ScheduledTasksService {
      *  Forwarded to UnifiedOptionsService; absent, scheduled scans
      *  run exactly as before (raw client, no capture). */
     private platformDeps?: ETradeCaptureDeps,
-    /** Issue #1355: async-job submission port for sharded chains.
-     *  Wired by the orchestrator to submitAsyncJob; absent, a
-     *  sharded run fails honestly instead of running unsharded
-     *  under a sharded label. */
-    private shardSubmit?: (
-      spec: import("../types").AsyncJobSubmission
-    ) => Promise<{ jobId: string; status: "queued"; statusUrl: string }>,
     /** Consolidation #1236 (feed seam): the feed artifact reader
      *  for snapshot-input mode. Wired by the orchestrator-side
      *  constructors that own a Durable Object storage handle.
@@ -765,6 +758,14 @@ export class ScheduledTasksService {
      * above — tests substitute a fake; production omits it.
      */
     private submitStockScreenViaEngine?: SubmitStockScreenViaEngine,
+    /**
+     * Issue #4780: the one engine seam's start entry
+     * (startOptionsChainWorkflow) the scheduled sharded options
+     * chain submits through. Same injectable rule as the stock
+     * chain's submit seam above — tests substitute a fake;
+     * production omits it and the dispatch derives from env.
+     */
+    private startOptionsChainWorkflow?: typeof startOptionsChainWorkflowSeam,
     /**
      * Issue #4854: the host dispatch's injectable seams for the
      * scheduled firer's panel runs. Same injectable rule as the
@@ -3104,13 +3105,20 @@ export class ScheduledTasksService {
       const autoShard =
         symbols.length > SCHEDULED_OPTIONS_MONOLITHIC_SYMBOL_LIMIT;
       if (options.sharded || autoShard) {
-        if (!this.shardSubmit) {
-          throw new Error("Sharded options runs require the async-job submission port; configure the host or run the scan directly.");
-        }
-        const { applyShardPacing, planOptionsFeedShards } = await import("./shardJobs");
-        // Issue #4424: the chain dispatch is paced by the externalized config
-        // (burst cap + interval), not by a hardcoded stagger alone.
-        const shardPacing = resolveShardPacing(this.env as unknown as Record<string, unknown>);
+        // Issue #4780: the chain START is the one engine job
+        // `options-chain:<chainId>` — the chain is built exactly as
+        // before (same broker/mode provenance, same schedule
+        // attribution, same per-symbol screen inputs) and dispatched
+        // through startOptionsChainWorkflow. The bespoke submission
+        // path (per-symbol specs + the async-job submit port + the
+        // pacing helper) is gone: the feed node's sharded shape
+        // with sequential units is the pacing now — each unit is its
+        // own journaled workflow step, its own Worker invocation,
+        // its own subrequest budget — so the 1s stagger / `runAt`
+        // is retired, not dropped (the step boundary replaces it
+        // structurally). The per-symbol event-calendar fan-out is
+        // still avoided here: each feed unit fetches its own
+        // symbol's calendar inside its step.
         // Issue Qunsultant/cfagent#488: the chain's email channel follows the
         // same resolution as direct delivery — run > stored user > env.
         const resolvedEmailTo = resolveEmailDestination({
@@ -3163,9 +3171,6 @@ export class ScheduledTasksService {
           webhookUrl: options.webhookUrl || this.env.OUTBOUND_WEBHOOK_URL,
           reportBaseUrl: this.env.APP_BASE_URL || "https://agent.openaimp.com",
           stageChain: options.stageChain,
-          // A one-second not-before interval spaces independent Worker
-          // invocations. Each invocation receives its own chain-fetch budget.
-          staggerMs: shardPacing.staggerMs,
           options: {
             symbols,
             thesis: targetThesis,
@@ -3188,10 +3193,11 @@ export class ScheduledTasksService {
         };
         // The per-symbol job owns its event-calendar request too; do not
         // fan out 100 calendar lookups in this scheduling invocation.
-        const specs = applyShardPacing(planOptionsFeedShards(chain, timestamp), shardPacing, timestamp);
-        const submitted: string[] = [];
-        for (const spec of specs) submitted.push((await this.shardSubmit(spec)).jobId);
-        this.audit("options.sharded_chain_submitted", { chainId, universe: chain.universe, symbols: symbols.length, jobs: submitted.length, scope: describeReportScope(reportScope), theses: reportScope.theses, strategies: reportScope.strategyScope === "all" ? "all" : scopeStrategies, warnings: reportScope.warnings, brokerId: chainBrokerId, dataProviderId: chainTenantProviders.dataProviderId, ...(chain.mode ? { mode: chain.mode } : {}), ...(chain.modeSource ? { modeSource: chain.modeSource } : {}) });
+        const started = await (this.startOptionsChainWorkflow ?? startOptionsChainWorkflowSeam)(
+          this.env,
+          { chain, userLogin, trigger: options.trigger || "scheduled" },
+        );
+        this.audit("options.sharded_chain_submitted", { chainId, jobId: started.jobId, workflowId: started.instanceId, universe: chain.universe, symbols: symbols.length, scope: describeReportScope(reportScope), theses: reportScope.theses, strategies: reportScope.strategyScope === "all" ? "all" : scopeStrategies, warnings: reportScope.warnings, brokerId: chainBrokerId, dataProviderId: chainTenantProviders.dataProviderId, ...(chain.mode ? { mode: chain.mode } : {}), ...(chain.modeSource ? { modeSource: chain.modeSource } : {}) });
         return {
           success: true,
           taskType: "options_analysis" as any,
@@ -3199,11 +3205,13 @@ export class ScheduledTasksService {
             totalScanned: 0,
             withTrades: 0,
             symbols,
-            summary: `Options scan queued as ${symbols.length} paced symbol jobs; results will be collated after completion.`,
+            summary: `Options scan dispatched as one engine chain job ${started.jobId}; results will be collated after completion.`,
             notifications: {},
             opportunities: [],
             sharded: true,
             chainId,
+            jobId: started.jobId,
+            workflowId: started.instanceId,
             brokerId: chainBrokerId,
             dataProviderId: chainTenantProviders.dataProviderId,
             ...(chain.mode ? { mode: chain.mode } : {}),

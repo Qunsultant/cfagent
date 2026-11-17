@@ -213,8 +213,6 @@ export interface SchedulesRouteContext {
     userLogin: string,
     chainReport?: boolean,
   ) => Promise<void>;
-  /** Issue #1574: submit an opt-in options shard chain on existing async-job rails. */
-  submitShardJob?: (spec: import("../../types").AsyncJobSubmission) => Promise<{ jobId: string; status: "queued"; statusUrl: string }>;
   /** Consolidation #1236 (feed seam): submit an async job (owner:
    *  OrchestratorAgent.submitAsyncJob). Used by the feed-snapshot
    *  route; hosts without it cannot submit feed jobs. */
@@ -1612,7 +1610,7 @@ export async function handleSchedulesRoutes(
         const environment = rawEnvironment === "TEST" || rawEnvironment === "PROD"
           ? rawEnvironment
           : context?.environment;
-        const service = new ScheduledTasksService(ctx.env, ctx.getOrm(), userLogin, createOptionsDiscoveryPorts({ sql: ctx.agentCtx.storage.sql, storage: ctx.agentCtx.storage }).scanRuns, undefined, undefined, undefined, ctx.scheduleScreenerFollowups, { sql: ctx.agentCtx.storage.sql, blobStorage: ctx.agentCtx.storage, env: ctx.env }, ctx.submitShardJob, undefined, ctx.env.SCREENER_EVENTS ?? null);
+        const service = new ScheduledTasksService(ctx.env, ctx.getOrm(), userLogin, createOptionsDiscoveryPorts({ sql: ctx.agentCtx.storage.sql, storage: ctx.agentCtx.storage }).scanRuns, undefined, undefined, undefined, ctx.scheduleScreenerFollowups, { sql: ctx.agentCtx.storage.sql, blobStorage: ctx.agentCtx.storage, env: ctx.env }, undefined, ctx.env.SCREENER_EVENTS ?? null);
         // Issue #959: validate through the shared schedule builder.
         const { userLogin: _bodyLogin, environment: _bodyEnv, ...triggerCriteria } = body ?? {};
         // Issue #5052: a Run-now dispatch stamps "triggered", never "manual".
@@ -1947,7 +1945,7 @@ export async function handleSchedulesRoutes(
           (await buildOptionsDiscoveryPorts(ctx.env, { sql: ctx.agentCtx.storage.sql, storage: ctx.agentCtx.storage })).ivHistory,
           undefined,
           undefined,
-          ctx.scheduleScreenerFollowups, undefined, undefined, undefined, ctx.env.SCREENER_EVENTS ?? null
+          ctx.scheduleScreenerFollowups, undefined, undefined, ctx.env.SCREENER_EVENTS ?? null
         );
         const result = await service.collectDailyIvHistory({ ...body, userLogin, environment });
         return Response.json(result);
@@ -1991,7 +1989,6 @@ export async function handleSchedulesRoutes(
           createOptionsDiscoveryPorts({ sql: ctx.agentCtx.storage.sql, storage: ctx.agentCtx.storage }).strategyProfiles,
           ctx.scheduleScreenerFollowups,
           { sql: ctx.agentCtx.storage.sql, blobStorage: ctx.agentCtx.storage, env: ctx.env },
-          undefined,
           createOptionsDiscoveryPorts({ sql: ctx.agentCtx.storage.sql, storage: ctx.agentCtx.storage }).feedSnapshots, ctx.env.SCREENER_EVENTS ?? null,
           // Issue #4275: the firer's engine run record is durable
           // in the host DO (runStockScreenViaEngine seam: none).

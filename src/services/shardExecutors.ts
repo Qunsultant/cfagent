@@ -579,7 +579,13 @@ export function resolveShardHostDispatch(
   return { decision: shardDispatchRoute({ broker, env }), broker };
 }
 
-function shardBrokerStageInput(
+/**
+ * Issue #4780: exported for the options-chain engine job — the chain
+ * feed step resolves its broker stage input the same way the shard
+ * executor did, so a chain executes under the broker it was submitted
+ * with.
+ */
+export function shardBrokerStageInput(
   chain: ShardChainContext,
   env: Env,
 ): BrokerStageInput | null {
@@ -613,7 +619,12 @@ export interface ShardHostSeams {
  * are the #3186 step 3e contract, unchanged: the chain options ARE
  * the request, and per-symbol results are stored as chain rows.
  */
-function buildShardScanRequest(
+/**
+ * Issue #4780: exported for the options-chain engine job — the chain
+ * feed step builds its per-symbol scan request the same way the shard
+ * executor did.
+ */
+export function buildShardScanRequest(
   chain: ShardChainContext,
   request: NonNullable<ShardChainContext["options"]>,
   symbol: string,

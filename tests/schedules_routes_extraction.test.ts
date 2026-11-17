@@ -351,7 +351,7 @@ describe("schedules behavior (extraction #379)", () => {
     expect(await (res as Response).json()).toEqual({ success: true, schedule: { id: "real-sdk-id" } });
   });
 
-  it("POST /schedules/trigger-screen runs the manual screen with the manual trigger stamp", async () => {
+  it("POST /schedules/trigger-screen runs the manual screen with the triggered trigger stamp", async () => {
     const autonomousMarketScreen = vi.fn(async () => undefined);
     const ctx = baseCtx({ autonomousMarketScreen: autonomousMarketScreen as any });
     const res = await handleSchedulesRoutes(
@@ -362,7 +362,7 @@ describe("schedules behavior (extraction #379)", () => {
       ctx
     );
     expect((res as Response).status).toBe(200);
-    expect(autonomousMarketScreen).toHaveBeenCalledWith({ universe: "SP500", userLogin: "trader1", environment: "TEST", trigger: "manual" });
+    expect(autonomousMarketScreen).toHaveBeenCalledWith({ universe: "SP500", userLogin: "trader1", environment: "TEST", trigger: "triggered" });
   });
 
   it("POST /schedules/trigger-renew requires an authenticated account (401) and otherwise renews", async () => {
@@ -388,7 +388,7 @@ describe("schedules behavior (extraction #379)", () => {
     const res = await handleSchedulesRoutes(req("POST", "/schedules/trigger-options-analysis", { maxItems: 5 }), urlOf("/schedules/trigger-options-analysis"), "/schedules/trigger-options-analysis", "s1", ctx);
     expect((res as Response).status).toBe(200);
     expect(await (res as Response).json()).toEqual({ success: true, runs: 1 });
-    expect(autonomousOptionsAnalysis).toHaveBeenCalledWith({ maxItems: 5, userLogin: "trader1", environment: "TEST", trigger: "manual" });
+    expect(autonomousOptionsAnalysis).toHaveBeenCalledWith({ maxItems: 5, userLogin: "trader1", environment: "TEST", trigger: "triggered" });
   });
 
   it("POST /schedules/trigger-retention runs the retention pass over the ORM", async () => {
