@@ -67,6 +67,10 @@ import {
   registerOptionsWorkflowSteps,
   type OptionsWorkflowStepDeps,
 } from "./optionsPipelineJobs";
+import {
+  registerResearchSteps,
+  type ResearchStepDeps,
+} from "./researchPipelineJobs";
 import type { JobPipelineStores } from "../data/jobPipelinePorts";
 import type {
   JobPipelineControl,
@@ -426,6 +430,9 @@ export function createPipelineStepRegistry(
   // rebuilds the stage ports per invocation. Absent ⇒ the
   // registry simply lacks them, as for the screener steps.
   optionsDeps?: OptionsWorkflowStepDeps,
+  // Issue #5118 (#5109 S2): research steps (`analyze.ooda` and `evaluate.apply`)
+  // compose into the same one registry alongside `analyze.apply`.
+  researchDeps?: ResearchStepDeps,
 ): JobStepRegistry {
   const registry = createFeedStepRegistry(feedDeps);
   registerEnrichStep(registry, enrichDeps);
@@ -434,6 +441,7 @@ export function createPipelineStepRegistry(
   if (deliverDeps) registerDeliverStep(registry, deliverDeps);
   if (screenerDeps) registerScreenerSteps(registry, screenerDeps);
   if (optionsDeps) registerOptionsWorkflowSteps(registry, optionsDeps);
+  if (researchDeps) registerResearchSteps(registry, researchDeps);
   return registry;
 }
 
