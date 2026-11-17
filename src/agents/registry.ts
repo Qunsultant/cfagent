@@ -942,6 +942,7 @@ export const MESH_TOOL_FAMILIES: MeshToolFamilyEntry[] = [
       { file: "src/mcps/openaimp/feedJobCommands.ts", kind: "readonly-name" },
       { file: "src/mcps/openaimp/enrichJobCommands.ts", kind: "readonly-name" },
       { file: "src/mcps/openaimp/analyzeJobCommands.ts", kind: "readonly-name" },
+      { file: "src/mcps/openaimp/researchJobCommands.ts", kind: "readonly-name" },
       { file: "src/mcps/openaimp/generateJobCommands.ts", kind: "readonly-name" },
       { file: "src/mcps/openaimp/deliverJobCommands.ts", kind: "readonly-name" },
       { file: "src/mcps/openaimp/chainJobCommands.ts", kind: "readonly-name" },
