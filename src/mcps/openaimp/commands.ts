@@ -1812,7 +1812,7 @@ export class McpToolFactory {
     this.registerTool(new AlpacaCancelOrderCommand());
     // Issue #4670 (matrix gap 16): the replace validator's first caller.
     this.registerTool(new AlpacaReplaceOrderCommand());
-    // Issue #4672 (matrix gap 18): option exercise via Alpaca Trading v2.
+    // Issue #4672 (matrix gap 18): option exercise via Trading v2.
     this.registerTool(new AlpacaExerciseOptionCommand());
     // Issue #3884/#3886: every open order for one ticker, with the shared
     // class/side/ladder filter.

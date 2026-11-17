@@ -217,6 +217,7 @@ other doors. Scope column is #1843's declaration, consumed here.
 | `alpaca_cancel_bracket_ladder` | mcp:trade | L (I / R on other doors) |
 | `trading_limits` (#3888: the externalized limits, read and change) | mcp:trade | L (I / R on other doors) |
 | `alpaca_replace_order` (#4670: change one open order in place via `PATCH /v2/orders/{id}`; a compound parent and a non-open order are refused by name) | mcp:trade | L (I / R on other doors) |
+| `alpaca_exercise_option` (#4672: exercise an open long option contract via `POST /v2/positions/{symbol_or_contract_id}/exercise`) | mcp:trade | L (I / R on other doors) |
 | `alpaca_cancel_order` (#3883: cancel one order, with bracket-leg semantics) | mcp:trade | L (I / R on other doors) |
 | `alpaca_cancel_ticker` (#3884: every open order for one symbol, filterable by class/side/ladder) | mcp:trade | L (I / R on other doors) |
 | `alpaca_cancel_all` (#3885: every open order, two-step with a single-use preview token and a configured cap) | mcp:trade | L (I / R on other doors) |
