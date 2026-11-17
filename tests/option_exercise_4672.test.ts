@@ -65,35 +65,42 @@ describe("Option exercise & assignment visibility (#4672)", () => {
       readSettingRaw: () => broker,
     });
 
+    const url = new URL("https://example.com/api/broker/position/exercise");
     const unauth = await handleBrokerOrderRoutes(
-      new Request("https://example.com/api/broker/position/exercise", {
+      new Request(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ symbolOrContractId: "AAPL261218C00200000" }),
       }),
+      url,
       "/api/broker/position/exercise",
+      "sess_4672",
       ctx("alpaca") as any,
     );
     expect(unauth?.status).toBe(401);
 
     const missingSymbol = await handleBrokerOrderRoutes(
-      new Request("https://example.com/api/broker/position/exercise", {
+      new Request(url, {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-user-login": "tester_4672" },
         body: JSON.stringify({}),
       }),
+      url,
       "/api/broker/position/exercise",
+      "sess_4672",
       ctx("alpaca") as any,
     );
     expect(missingSymbol?.status).toBe(400);
 
     const unsupported = await handleBrokerOrderRoutes(
-      new Request("https://example.com/api/broker/position/exercise", {
+      new Request(url, {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-user-login": "tester_4672" },
         body: JSON.stringify({ symbolOrContractId: "AAPL261218C00200000" }),
       }),
+      url,
       "/api/broker/position/exercise",
+      "sess_4672",
       ctx("etrade") as any,
     );
     expect(unsupported?.status).toBe(501);
