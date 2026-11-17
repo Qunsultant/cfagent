@@ -9,7 +9,8 @@
  * atomic WITH other writes, that is the transaction aspect's job
  * (src/aspects/transactionAspect.ts), not this adapter's.
  */
-import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
+import { type DrizzleD1Database } from "drizzle-orm/d1";
+import { createDrizzleD1Db } from "./d1QueryLogger";
 import { asc, desc, eq } from "drizzle-orm";
 import { agentTraceRecords } from "./drizzleSchema";
 import {
@@ -26,7 +27,7 @@ export type TraceRecordDb = DrizzleD1Database<{
 
 /** Build the Drizzle D1 database object from a bound D1 client. */
 export function createD1TraceRecordDb(d1: D1Database): TraceRecordDb {
-  return drizzle(d1, { schema: { agentTraceRecords } });
+  return createDrizzleD1Db(d1, { schema: { agentTraceRecords } });
 }
 
 /** Idempotent schema-ensure: applies pending migrations, if any. */

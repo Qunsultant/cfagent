@@ -10,7 +10,8 @@
  * time. `inserted` is resolved by a read-before-write existence
  * check — the same read the caller would do — never guessed.
  */
-import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
+import { type DrizzleD1Database } from "drizzle-orm/d1";
+import { createDrizzleD1Db } from "./d1QueryLogger";
 import { and, desc, eq } from "drizzle-orm";
 import { agentWorkItemEvents } from "./drizzleSchema";
 import {
@@ -32,7 +33,7 @@ export type WorkItemEventDb = DrizzleD1Database<{
 
 /** Build the Drizzle D1 database object from a bound D1 client. */
 export function createD1WorkItemEventDb(d1: D1Database): WorkItemEventDb {
-  return drizzle(d1, { schema: { agentWorkItemEvents } });
+  return createDrizzleD1Db(d1, { schema: { agentWorkItemEvents } });
 }
 
 /** Idempotent schema-ensure: applies pending migrations, if any. */

@@ -14,7 +14,8 @@
  * the versioned migration runner, and all query-builder
  * sites live inside src/data/.
  */
-import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
+import { type DrizzleD1Database } from "drizzle-orm/d1";
+import { createDrizzleD1Db } from "./d1QueryLogger";
 import { and, desc, eq, notInArray } from "drizzle-orm";
 import { jobRunRecords } from "./drizzleSchema";
 import {
@@ -35,7 +36,7 @@ export type JobRunRecordDb = DrizzleD1Database<{
 
 /** Build the Drizzle D1 database object from a bound D1 client. */
 export function createD1JobRunRecordDb(d1: D1Database): JobRunRecordDb {
-  return drizzle(d1, { schema: { jobRunRecords } });
+  return createDrizzleD1Db(d1, { schema: { jobRunRecords } });
 }
 
 /** Idempotent schema-ensure: applies migration 0047 if unapplied. */

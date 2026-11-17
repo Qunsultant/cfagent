@@ -21,7 +21,8 @@
  * aspect's unit is write-only by design: callers compute the
  * final rows from reads taken before the unit opens.)
  */
-import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
+import { type DrizzleD1Database } from "drizzle-orm/d1";
+import { createDrizzleD1Db } from "./d1QueryLogger";
 import { asc, eq } from "drizzle-orm";
 import {
   agentDataProviderRoutes,
@@ -63,7 +64,7 @@ export type ProviderConfigDb = DrizzleD1Database<{
 
 /** Build the Drizzle D1 database object from a bound D1 client. */
 export function createD1ProviderConfigDb(d1: D1Database): ProviderConfigDb {
-  return drizzle(d1, {
+  return createDrizzleD1Db(d1, {
     schema: { agentDataProviders, agentDataProviderRoutes },
   });
 }

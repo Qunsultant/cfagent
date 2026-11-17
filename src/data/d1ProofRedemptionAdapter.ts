@@ -11,7 +11,8 @@
  * statements only, for the transaction reason recorded in
  * migrationRunner.ts.
  */
-import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
+import { type DrizzleD1Database } from "drizzle-orm/d1";
+import { createDrizzleD1Db } from "./d1QueryLogger";
 import { eq } from "drizzle-orm";
 import { agentPaymentProofRedemptions } from "./drizzleSchema";
 import {
@@ -32,7 +33,7 @@ export type ProofRedemptionDb = DrizzleD1Database<{
 
 /** Build the Drizzle D1 database object from a bound D1 client. */
 export function createD1ProofRedemptionDb(d1: D1Database): ProofRedemptionDb {
-  return drizzle(d1, {
+  return createDrizzleD1Db(d1, {
     schema: {
       agentPaymentProofRedemptions,
     },

@@ -22,7 +22,8 @@
  * a run it did not count, and the persisted count never
  * exceeds the allowance.
  */
-import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
+import { type DrizzleD1Database } from "drizzle-orm/d1";
+import { createDrizzleD1Db } from "./d1QueryLogger";
 import { and, eq, lt } from "drizzle-orm";
 import { agentFreeRunAllowances, agentFreeRunCounts } from "./drizzleSchema";
 import {
@@ -49,7 +50,7 @@ export type FreeRunCounterDb = DrizzleD1Database<{
 
 /** Build the Drizzle D1 database object from a bound D1 client. */
 export function createD1FreeRunCounterDb(d1: D1Database): FreeRunCounterDb {
-  return drizzle(d1, {
+  return createDrizzleD1Db(d1, {
     schema: {
       agentFreeRunAllowances,
       agentFreeRunCounts,

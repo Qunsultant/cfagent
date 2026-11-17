@@ -18,7 +18,8 @@
  * per enrich job (created_at desc, id desc), keep-per-job
  * prune on store, latestUsable skipping failed/empty runs.
  */
-import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
+import { type DrizzleD1Database } from "drizzle-orm/d1";
+import { createDrizzleD1Db } from "./d1QueryLogger";
 import { and, desc, eq, gt, ne } from "drizzle-orm";
 import { jobEnrichedDatasets } from "./drizzleSchema";
 import {
@@ -41,7 +42,7 @@ export type EnrichedDatasetDb = DrizzleD1Database<{
 
 /** Build the Drizzle D1 database object from a bound D1 client. */
 export function createD1EnrichedDatasetDb(d1: D1Database): EnrichedDatasetDb {
-  return drizzle(d1, { schema: { jobEnrichedDatasets } });
+  return createDrizzleD1Db(d1, { schema: { jobEnrichedDatasets } });
 }
 
 /** Idempotent schema-ensure: applies migration 0051 if unapplied. */

@@ -8,7 +8,8 @@
  * migrationRunner.ts. The registry is a read model: upserts are
  * whole-record replacements keyed by the natural PK.
  */
-import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
+import { type DrizzleD1Database } from "drizzle-orm/d1";
+import { createDrizzleD1Db } from "./d1QueryLogger";
 import { asc, eq } from "drizzle-orm";
 import {
   agentConformanceCells,
@@ -34,7 +35,7 @@ export type FleetRegistryDb = DrizzleD1Database<{
 
 /** Build the Drizzle D1 database object from a bound D1 client. */
 export function createD1FleetRegistryDb(d1: D1Database): FleetRegistryDb {
-  return drizzle(d1, {
+  return createDrizzleD1Db(d1, {
     schema: { agentFleetRegistry, agentConformanceCells },
   });
 }

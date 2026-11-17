@@ -22,7 +22,8 @@
  * carries the count of channel pairs the run itself
  * delivered (this family's "rows").
  */
-import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
+import { type DrizzleD1Database } from "drizzle-orm/d1";
+import { createDrizzleD1Db } from "./d1QueryLogger";
 import { and, desc, eq, ne } from "drizzle-orm";
 import { jobDeliveryDatasets } from "./drizzleSchema";
 import {
@@ -46,7 +47,7 @@ export type DeliveryDatasetDb = DrizzleD1Database<{
 
 /** Build the Drizzle D1 database object from a bound D1 client. */
 export function createD1DeliveryDatasetDb(d1: D1Database): DeliveryDatasetDb {
-  return drizzle(d1, { schema: { jobDeliveryDatasets } });
+  return createDrizzleD1Db(d1, { schema: { jobDeliveryDatasets } });
 }
 
 /** Idempotent schema-ensure: applies migration 0057 if unapplied. */

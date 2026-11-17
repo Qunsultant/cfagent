@@ -9,7 +9,8 @@
  * sequences two single statements (revoke-old, then insert) —
  * it does not build a multi-statement transaction.
  */
-import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
+import { type DrizzleD1Database } from "drizzle-orm/d1";
+import { createDrizzleD1Db } from "./d1QueryLogger";
 import { and, desc, eq, gt, isNull, or } from "drizzle-orm";
 import { agentFreeAccessGrants } from "./drizzleSchema";
 import {
@@ -31,7 +32,7 @@ export type FreeAccessGrantDb = DrizzleD1Database<{
 
 /** Build the Drizzle D1 database object from a bound D1 client. */
 export function createD1FreeAccessGrantDb(d1: D1Database): FreeAccessGrantDb {
-  return drizzle(d1, {
+  return createDrizzleD1Db(d1, {
     schema: {
       agentFreeAccessGrants,
     },

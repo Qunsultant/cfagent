@@ -16,7 +16,8 @@
  * head read and the insert leaves no row at all, which is a
  * sequence gap the verifier reports, never a silent pass.
  */
-import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
+import { type DrizzleD1Database } from "drizzle-orm/d1";
+import { createDrizzleD1Db } from "./d1QueryLogger";
 import { and, asc, desc, eq, lt } from "drizzle-orm";
 import {
   agentAuditChain,
@@ -54,7 +55,7 @@ export type AuditPolicyDb = DrizzleD1Database<{
 
 /** Build the Drizzle D1 database object from a bound D1 client. */
 export function createD1AuditPolicyDb(d1: D1Database): AuditPolicyDb {
-  return drizzle(d1, {
+  return createDrizzleD1Db(d1, {
     schema: {
       agentAuditPolicyActions,
       agentAuditPolicySettings,
