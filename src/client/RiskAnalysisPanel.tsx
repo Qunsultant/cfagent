@@ -11,6 +11,7 @@ import {
   Flex,
   Grid,
   Notice,
+  PageSection,
   PageTemplate,
   Select,
   Stack,
@@ -334,6 +335,7 @@ export function RiskAnalysisPanel({
       title="Risk Analysis"
       scopeNote="Symbol-based risk profile — computed locally by the risk engine; no position needed."
     >
+      <PageSection>
       <Stack gap="4">
         <Card>
           <Stack gap="3">
@@ -654,6 +656,7 @@ export function RiskAnalysisPanel({
           </>
         )}
       </Stack>
+      </PageSection>
     </PageTemplate>
   );
 }

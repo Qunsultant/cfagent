@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { useUrlSyncedTabs } from "../useUrlSyncedTabs";
 import { CapabilityNavBar, type CapabilityTabItem } from "../components/CapabilityNavBar";
 import { ErrorBoundary } from "../ErrorBoundary";
-import { PageShell } from "../components/ui";
+import { PageSection, PageShell } from "../components/ui";
 import { Button, TextInput } from "../components/ui";
 import type { PendingQuery, TabHealth } from "./searchTabTypes";
 import { NlqSearchTab } from "./tabs/NlqSearchTab";
@@ -147,6 +147,7 @@ export function SearchHub() {
 
   return (
     <PageShell title="Search" scopeNote="One search hub: NLQ records, AI search agent, semantic report search, agent memory, platform knowledge, and tool catalog. Each tab is its own system — results are never merged across tabs.">
+      <PageSection>
       <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "flex-end", flexWrap: "wrap", marginBottom: "1rem" }}>
         <div style={{ flex: "1 1 16rem" }}>
           <TextInput label="Search all tabs" value={sharedQuery} onChange={(e) => setSharedQuery(e.target.value)} placeholder="Run one query on every tab" />
@@ -209,6 +210,7 @@ export function SearchHub() {
             </div>
           )
       )}
+    </PageSection>
     </PageShell>
   );
 }

@@ -20,7 +20,7 @@
  * behind this probe (defense in depth).
  */
 import { useEffect, useState } from "react";
-import { EmptyState, Notice, Spinner } from "./components/ui";
+import { EmptyState, Notice, PageSection, Spinner } from "./components/ui";
 import { AdminQueueWipePanel } from "./AdminQueueWipePanel";
 import { fetchAdminOverview } from "./iaaaAdminApi";
 
@@ -54,15 +54,33 @@ export function ScheduleQueueView() {
     };
   }, []);
 
-  if (gate === "loading") return <Spinner />;
-  if (gate === "denied") {
+  if (gate === "loading") {
     return (
-      <EmptyState
-        title="Not an IAAA admin"
-        description="This panel is only available to platform admins. If you should have access, sign in with an admin account."
-      />
+      <PageSection>
+        <Spinner />
+      </PageSection>
     );
   }
-  if (gate === "error") return <Notice tone="danger">{error}</Notice>;
-  return <AdminQueueWipePanel />;
+  if (gate === "denied") {
+    return (
+      <PageSection>
+        <EmptyState
+          title="Not an IAAA admin"
+          description="This panel is only available to platform admins. If you should have access, sign in with an admin account."
+        />
+      </PageSection>
+    );
+  }
+  if (gate === "error") {
+    return (
+      <PageSection>
+        <Notice tone="danger">{error}</Notice>
+      </PageSection>
+    );
+  }
+  return (
+    <PageSection>
+      <AdminQueueWipePanel />
+    </PageSection>
+  );
 }

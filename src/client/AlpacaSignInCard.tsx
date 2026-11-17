@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Badge, Button, Card, CardHeader, Flex, Notice, Spinner, Stack, TextInput, useToast } from "./components/ui";
+import { Badge, Button, Card, CardHeader, Flex, Notice, PageSection, Spinner, Stack, TextInput, useToast } from "./components/ui";
 import { csrfHeaders } from "./apiFetch";
 import { useBrokerEnvironment } from "./brokerEnvironment";
 
@@ -198,6 +198,7 @@ export function AlpacaSignInCard({ activeEnv, collapsedWhenConfigured = false }:
 
   return (
     <Card data-alpaca-signin="1" data-active-env={effectiveEnv}>
+      <PageSection>
       <Flex align="center" gap="2">
         <CardHeader title="Alpaca sign-in" />
         <Badge tone={status.signedIn ? "success" : status.configured ? "neutral" : "warning"} size="sm">
@@ -291,6 +292,7 @@ export function AlpacaSignInCard({ activeEnv, collapsedWhenConfigured = false }:
           <span data-alpaca-signin-error="1">{formError}</span>
         </Notice>
       )}
+      </PageSection>
     </Card>
   );
 }

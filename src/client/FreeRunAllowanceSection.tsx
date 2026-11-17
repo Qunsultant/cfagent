@@ -25,7 +25,7 @@
  * All calls go through src/client/apiFetch.ts (the #71 rule).
  */
 import { useCallback, useEffect, useState } from "react";
-import { Button, CardHeader, Notice, Stack, TextInput } from "./components/ui";
+import { Button, CardHeader, Notice, PageSection, Stack, TextInput } from "./components/ui";
 import { apiFetch } from "./apiFetch";
 import { FREE_RUN_FAMILIES } from "../data/freeRunCounterPorts";
 
@@ -148,6 +148,7 @@ export function FreeRunAllowanceSection() {
   if (!allowances) return null;
 
   return (
+    <PageSection>
     <Stack gap="1" data-testid="free-runs-panel">
       <CardHeader title="Free-run allowance (operator)" />
       <p>
@@ -179,5 +180,6 @@ export function FreeRunAllowanceSection() {
       })}
       {note && <Notice tone="info">{note}</Notice>}
     </Stack>
+    </PageSection>
   );
 }

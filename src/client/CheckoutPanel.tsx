@@ -50,6 +50,7 @@ import {
   EmptyState,
   Modal,
   Notice,
+  PageSection,
   PageShell,
   Select,
   Spinner,
@@ -793,6 +794,7 @@ export function CheckoutPanel({ userLogin }: { userLogin: string }) {
       loading={loading}
       error={loadError}
     >
+      <PageSection>
       <Tabs
         tabs={[
           { id: "pay", label: "Pay per run" },
@@ -1332,6 +1334,7 @@ export function CheckoutPanel({ userLogin }: { userLogin: string }) {
           {topUpDone && <Notice tone="success">{topUpDone}</Notice>}
         </Card>
       </TabPanel>
+    </PageSection>
     </PageShell>
   );
 }
