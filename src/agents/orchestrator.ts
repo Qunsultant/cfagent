@@ -18,6 +18,7 @@ import { runBizCopilotAccountBranch } from "../services/bizCopilotAccounts";
 import { runBizCopilotChannelBranch } from "../services/bizCopilotChannels";
 import { recordJobOutcome } from "../services/jobOutcomes";
 import type { JobOutcomeInput } from "../data/jobOutcomePorts";
+import type { JobRunTrigger } from "../data/jobRunRecordPorts";
 import {
   buildOrchestratorSystemPrompt,
   resolveShadowMaxSteps,
@@ -1633,7 +1634,7 @@ export class OrchestratorAgent extends PortThink {
     universe?: string;
     maxItems?: number;
     broadcast?: boolean;
-    trigger?: "manual" | "scheduled";
+    trigger?: JobRunTrigger;
     userLogin?: string;
     environment?: ETradeEnvironment;
     emailTo?: string;

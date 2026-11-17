@@ -34,7 +34,7 @@ import type { MembershipStore } from "../../security/authorization";
 import { enforceOwnerDispatch } from "../../security/runRevocationGate";
 import { sessionStore } from "../../security/session";
 import { lookupInternalUserIdByLogin } from "../../security/iaaaMigration";
-import type { JobRunOutcome } from "../../data/jobRunRecordPorts";
+import type { JobRunOutcome, JobRunTrigger } from "../../data/jobRunRecordPorts";
 import { createStructuredLogger } from "../../observability/structuredLogger";
 import { createObservabilitySink } from "../../observability/createObservabilityPorts";
 
@@ -330,7 +330,7 @@ export async function autonomousMarketScreen(ctx: ScheduledCallbacksContext, pay
   universe?: string;
   maxItems?: number;
   broadcast?: boolean;
-  trigger?: "manual" | "scheduled";
+  trigger?: JobRunTrigger;
   userLogin?: string;
   environment?: ETradeEnvironment;
   emailTo?: string;

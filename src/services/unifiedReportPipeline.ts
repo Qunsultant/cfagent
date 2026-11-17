@@ -30,6 +30,7 @@
  */
 
 import type { ScreenerPdfOptions } from "../trading";
+import type { JobRunTrigger } from "../data/jobRunRecordPorts";
 import { createStructuredLogger } from "../observability/structuredLogger";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
 
@@ -41,8 +42,8 @@ const structuredLog = createStructuredLogger(createObservabilitySink({}), {
 export interface UnifiedReportInput {
   /** "screener" for stock, "options" for options screener, "research" for research runs (#1641) */
   type: "screener" | "options" | "research";
-  /** "manual" or "scheduled" */
-  trigger: "manual" | "scheduled";
+  /** The five dispatch modes (#5052) — how the run was started. */
+  trigger: JobRunTrigger;
   /** The run result data (type-specific) */
   result: unknown;
   /** User login for scoping */

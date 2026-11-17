@@ -50,6 +50,7 @@ import {
 } from "./workflowPorts";
 import { createInMemoryJobPipelineStores } from "../data/inMemoryJobPipelineAdapter";
 import { InMemoryJobRunRecordStore } from "../data/inMemoryJobRunRecordAdapter";
+import { normalizeJobRunTrigger } from "../data/jobRunRecordPorts";
 import { InMemoryMessagingAdapter } from "../messaging/inMemoryMessagingAdapter";
 import type { MessagingPorts } from "../messaging/messagingPorts";
 import {
@@ -212,7 +213,10 @@ export class InMemoryWorkflowAdapter implements WorkflowPort {
         output: {
           timestamp: ctx.now,
           userLogin: ctx.params.userLogin as string,
-          trigger: ctx.params.trigger === "scheduled" ? "scheduled" : "manual",
+          // Issue #5052: mirror of the real feed step — the dispatch
+          // trigger passes through the five modes, never collapsed
+          // to "manual" (see screenRequestFromParams).
+          trigger: normalizeJobRunTrigger(ctx.params.trigger),
           ...(row?.universe ? { universe: row.universe } : {}),
           ...(ctx.params.provider ? { provider: ctx.params.provider } : {}),
           symbols,

@@ -40,6 +40,7 @@
  */
 
 import type { StockScreenProvider, UniverseId } from "../trading";
+import { normalizeJobRunTrigger, type JobRunTrigger } from "../data/jobRunRecordPorts";
 import { BusinessError } from "../outcomes/outcomeAspects";
 import type { StockScreenRunSpec } from "./stockScreenRunSpec";
 
@@ -59,7 +60,7 @@ export interface StockScreenPlan {
 }
 
 export interface StockScreenPlanInput {
-  trigger: "manual" | "scheduled";
+  trigger: JobRunTrigger;
   sector?: string;
   filters?: { sector?: string };
   universe?: UniverseId;
@@ -124,7 +125,7 @@ export function planScheduledScreen(
     universe?: UniverseId;
     provider?: StockScreenProvider;
     providerFallback?: StockScreenPlan["providerFallback"];
-    trigger?: "manual" | "scheduled";
+    trigger?: JobRunTrigger;
   },
   timestamp: string,
 ): StockScreenPlan {
@@ -145,17 +146,18 @@ export function planScheduledScreen(
 
 /**
  * Plan a run from a Slice 1 StockScreenRunSpec. Issue #2908
- * (G1): the trigger defaults to the spec's own trigger
- * (scheduled only for scheduled specs; every other spec
- * trigger plans as manual) — callers no longer re-derive
- * it by hand; an explicit trigger still wins.
+ * (G1): the trigger defaults to the spec's own trigger — the five
+ * dispatch modes pass through (#5052); a source-only spec trigger
+ * (nlq / mesh / goal / research) plans as manual, as before —
+ * callers no longer re-derive it by hand; an explicit trigger
+ * still wins.
  */
 export function planFromSpec(
   spec: StockScreenRunSpec,
-  trigger?: "manual" | "scheduled",
+  trigger?: JobRunTrigger,
   timestamp?: string,
 ): StockScreenPlan {
-  const resolvedTrigger = trigger ?? (spec.trigger === "scheduled" ? "scheduled" : "manual");
+  const resolvedTrigger = trigger ?? normalizeJobRunTrigger(spec.trigger);
   return buildPlan(
     {
       trigger: resolvedTrigger,

@@ -18,7 +18,7 @@
  */
 
 import type { AsyncJobChannel, AsyncJobSubmission, StageChainConfig } from "../types";
-import type { LedgerLinkage } from "../data/jobRunRecordPorts";
+import type { LedgerLinkage, JobRunTrigger } from "../data/jobRunRecordPorts";
 import type { OptionsPartialQualification } from "../trading";
 import {
   formatTraceBlock,
@@ -78,7 +78,7 @@ export interface ScreenerOutcomeOpportunity {
 /** The canonical record of a finished screener run, from any source. */
 export interface ScreenerRunOutcome {
   kind: ScreenerKind;
-  trigger: "manual" | "scheduled";
+  trigger: JobRunTrigger;
   success: boolean;
   /**
    * Issue #3121 S1 — the §4 consolidated-ledger linkage, where the

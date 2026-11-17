@@ -21,6 +21,7 @@
 import type { DatabaseORM } from "../orm";
 import type { ETradeService } from "./etrade";
 import type { Env, ShardChainContext } from "../types";
+import type { JobRunTrigger } from "../data/jobRunRecordPorts";
 import type { OptionChainSource } from "../trading";
 import { isBrokerId } from "./tenantProviders";
 import { TradingPlatformRegistry, platformChainSource } from "../trading";
@@ -694,7 +695,7 @@ export async function runShardScanViaHost(args: {
   runId: string;
   symbol: string;
   userLogin: string;
-  trigger: "manual" | "scheduled";
+  trigger: JobRunTrigger;
   broker: BrokerStageInput;
   seams?: ShardHostSeams;
 }): Promise<OpportunityScanResult> {

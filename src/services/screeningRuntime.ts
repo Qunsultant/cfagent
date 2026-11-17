@@ -65,6 +65,7 @@ import {
   type StockWorkflowDeps,
 } from "./goalDrivenScreen";
 import type { ScreenerTask, ScreenerTaskLedger } from "./screenerTaskLedger";
+import type { JobRunTrigger } from "../data/jobRunRecordPorts";
 import {
   buildScenario,
   type ScenarioConstraints,
@@ -163,7 +164,7 @@ export function createYahooStockScreener(
 
 export interface GoalScreenRunRequest {
   scenario: ScenarioDefinition;
-  trigger: "manual" | "scheduled";
+  trigger: JobRunTrigger;
   idempotencyKey: string;
   userLogin?: string;
   environment?: "TEST" | "PROD";
@@ -209,7 +210,7 @@ export async function runProductionGoalScreen(input: {
   stockProviderId?: string;
   optionsScreener: Pick<DynamicOptionsScreener, "screenOptions">;
   scenario: ScenarioDefinition;
-  trigger: "manual" | "scheduled";
+  trigger: JobRunTrigger;
   idempotencyKey: string;
   userLogin?: string;
   assetClasses?: ScreeningProviderAssetClass[];
@@ -329,7 +330,7 @@ export async function executeGoalScreenRun(input: {
   userLogin: string;
   scenario: ScenarioDefinition;
   scenarioSource: "built" | "stored";
-  trigger: "manual" | "scheduled";
+  trigger: JobRunTrigger;
   idempotencyKey: string;
   environment?: "TEST" | "PROD";
   assetClasses?: ScreeningProviderAssetClass[];

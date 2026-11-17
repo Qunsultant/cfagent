@@ -10,6 +10,7 @@
 
 import type { Env, ScheduledTaskResult, StageChainConfig, TradeRecord, ScreenedStockItem } from "../types";
 import { DatabaseORM, type SqlStorage } from "../orm";
+import type { JobRunTrigger } from "../data/jobRunRecordPorts";
 import { BusinessError, codedMessage } from "../outcomes/outcomeAspects";
 import { renewETradeAccessToken, getStoredTokens, etradeIdentityFromLogin } from "../security/etradeOAuth";
 import { resolveScreenerAgentName } from "../agents/screenerAgentName";
@@ -216,7 +217,7 @@ export interface AutonomousOptionsAnalysisOptions {
   emailTo?: string;
   webhookUrl?: string;
   environment?: string;
-  trigger?: "manual" | "scheduled";
+  trigger?: JobRunTrigger;
   userLogin?: string;
   /** Issue #2216: the arming schedule's id, when the caller knows it
    *  (recorded as run provenance; the SDK callback path supplies none
@@ -256,7 +257,7 @@ export interface AutonomousStrategyDiscoveryOptions {
    *  the type; validateNoViewRequest rejects smuggled view fields. */
   constraintSets?: NoViewStrategyRequest[];
   environment?: string;
-  trigger?: "manual" | "scheduled";
+  trigger?: JobRunTrigger;
   userLogin?: string;
   /** The arming schedule's id, when the caller knows it (recorded as
    *  run provenance; the SDK callback path supplies none). */
@@ -349,7 +350,7 @@ export interface DiscoveryDeliveryOutcomeInput {
   inputModel: string;
   symbols: string[];
   summary: string;
-  trigger: "manual" | "scheduled";
+  trigger: JobRunTrigger;
   matchedCount: number;
   totalScanned: number;
   outcomes: DiscoverySymbolOutcome[];
@@ -864,7 +865,7 @@ export class ScheduledTasksService {
    */
   private recordDiscoveryOutcome(input: {
     id: string;
-    trigger: "manual" | "scheduled";
+    trigger: JobRunTrigger;
     status: "completed" | "failed" | "partial";
     scanned?: number;
     matched?: number;
@@ -1240,7 +1241,7 @@ export class ScheduledTasksService {
       maxItems?: number;
       userLogin?: string;
       environment?: "TEST" | "PROD";
-      trigger?: "manual" | "scheduled";
+      trigger?: JobRunTrigger;
       emailTo?: string;
       slackChannel?: string;
       webhookUrl?: string;
@@ -1524,7 +1525,7 @@ export class ScheduledTasksService {
     maxItems?: number;
     userLogin?: string;
     environment?: "TEST" | "PROD";
-    trigger?: "manual" | "scheduled";
+    trigger?: JobRunTrigger;
     emailTo?: string;
     slackChannel?: string;
     webhookUrl?: string;
@@ -4238,7 +4239,7 @@ export class ScheduledTasksService {
       const discoveryMode = await resolveDiscoveryRunMode(this.env, options.environment);
       const run = await this.discoveryRunStore.save({
         createdAt: timestamp,
-        trigger: options.trigger === "manual" ? "manual-trigger" : "scheduled",
+        trigger: options.trigger === "scheduled" ? "scheduled" : "manual-trigger",
         ...(options.scheduleId ? { scheduleId: options.scheduleId } : {}),
         userLogin,
         // Issue #3388: the run records the broker whose chains produced it.
@@ -4952,7 +4953,7 @@ export class ScheduledTasksService {
       const discoveryMode = await resolveDiscoveryRunMode(this.env, options.environment);
       const run = await this.discoveryRunStore.save({
         createdAt: timestamp,
-        trigger: options.trigger === "manual" ? "manual-trigger" : "scheduled",
+        trigger: options.trigger === "scheduled" ? "scheduled" : "manual-trigger",
         ...(options.scheduleId ? { scheduleId: options.scheduleId } : {}),
         userLogin,
         // Issue #3388: the run records the broker whose chains produced it.
@@ -5264,7 +5265,7 @@ export class ScheduledTasksService {
       const discoveryMode = await resolveDiscoveryRunMode(this.env, options.environment);
       const run = await this.discoveryRunStore.save({
         createdAt: timestamp,
-        trigger: options.trigger === "manual" ? "manual-trigger" : "scheduled",
+        trigger: options.trigger === "scheduled" ? "scheduled" : "manual-trigger",
         ...(options.scheduleId ? { scheduleId: options.scheduleId } : {}),
         userLogin,
         // Issue #3388: the run records the broker whose chains produced it.

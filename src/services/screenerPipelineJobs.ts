@@ -32,6 +32,7 @@ import { screenerOutcomeFromRunResult } from "../services/screenerFollowups";
 import type { ScreenerRunOutcome } from "../services/screenerFollowups";
 import type { AsyncJobChannel, Env, StageChainConfig } from "../types";
 import type { JobPipelineStores, JobNodeConfig } from "../data/jobPipelinePorts";
+import { normalizeJobRunTrigger } from "../data/jobRunRecordPorts";
 import type { JobPipelineControl } from "./jobPipelineEngine";
 import {
   createBuiltinStepRegistry,
@@ -174,7 +175,10 @@ function screenRequestFromParams(
   const row = shardKey ? table.find((entry) => entry.shardId === shardKey) : undefined;
   const universe = (row?.universe ?? table[0]?.universe) as ScreenerRunRequest["universe"];
   return {
-    trigger: params.trigger === "scheduled" ? "scheduled" : "manual",
+    // Issue #5052: the dispatch trigger passes through the five modes
+    // — a scheduler Run-now ("triggered") is never collapsed to
+    // "manual"; anything unrecognized still reads as "manual".
+    trigger: normalizeJobRunTrigger(params.trigger),
     ...(universe ? { universe } : {}),
     ...(params.provider ? { provider: params.provider as ScreenerRunRequest["provider"] } : {}),
     ...(params.filters ? { filters: params.filters as ScreenerRunRequest["filters"] } : {}),

@@ -91,6 +91,7 @@ import {
 } from "../services/jobPipelineEngine";
 import { createBuiltinStepRegistry } from "../services/jobPipelineSteps";
 import type { Env } from "../types";
+import type { JobRunTrigger } from "../data/jobRunRecordPorts";
 import {
   COMPARISON_JOB_ID_PREFIX,
   comparisonJobDefinition,
@@ -122,7 +123,7 @@ export interface StartOptionsScreenWorkflowInput {
   request: unknown;
   /** The acting login — rides the raw config beside the request. */
   userLogin?: string;
-  trigger?: "manual" | "scheduled";
+  trigger?: JobRunTrigger;
   /**
    * The universe stage input (#4473): a serializable descriptor
    * stamped on the stored request's classInput, from which the
@@ -154,7 +155,7 @@ export interface StartOptionsScreenWorkflowInput {
 export interface StartOptionsScreenWorkflowOpts {
   startWorkflow?: (
     jobId: string,
-    params: { trigger: "manual" | "scheduled" },
+    params: { trigger: JobRunTrigger },
   ) => Promise<{ instanceId: string }>;
   stores?: JobPipelineStores;
   runRecorder?: JobRunRecorder;
