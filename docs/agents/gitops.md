@@ -150,7 +150,7 @@ Private security findings MUST use the approved private reporting process rather
 
 Every issue carries its creating agent's name as a hashtag in the `## Agent` field — attribution is how lanes establish ownership and answer "whose work is this?" without archaeology (owner direction, 2026-10-20).
 
-The issue templates live in `.github/ISSUE_TEMPLATE/` on the default branch — GitHub reads issue templates only from that directory, so a template anywhere else never surfaces in the New Issue chooser. Every template carries a per-doc conformance checklist (platforms.md, ADD.md, standards.md, gitops.md, tech-standards.md, anti-drift.md, ux-architecture.md) and a required before/after journey-impact statement; an issue with an unanswered checklist line or a missing journey-impact statement is incomplete.
+The issue templates live in `.github/ISSUE_TEMPLATE/` on the default branch — GitHub reads issue templates only from that directory, so a template anywhere else never surfaces in the New Issue chooser. Every template carries a per-doc conformance checklist (platforms.md, ADD.md, standards.md, gitops.md, tech-standards.md, anti-drift.md, ux-architecture.md) and a required before/after journey-impact statement; an issue with an unanswered checklist line or a missing journey-impact statement is incomplete. The template also carries a required `## Reuse class` section (reuse / enhancement / new, with evidence — see Reuse class below) and a `## Dependencies` section that is the ordering record for prioritization (see Dependencies for prioritization below). Both live templates — `.github/ISSUE_TEMPLATE/task.yml` (the form) and `.github/ISSUE_TEMPLATE/task.md` (the markdown template) — carry both sections, kept in sync.
 
 Task issues also carry a Full-stack coverage section (issue #4914): an architecture-first mapping table (one row per layer — 15-factors, full-stack areas, platforms enabled), a domain declaration, and a multi-dimensional enablement checklist, with one sub-issue per full-stack area; the tables live in `.github/ISSUE_TEMPLATE/task.md`.
 
@@ -202,6 +202,14 @@ Journey impact — REQUIRED before/after statement (an issue without it is incom
   - (If none found, write "None found" and give the search terms used below.)
 - Search terms used:
 - If an existing issue already covers this work, do NOT create a duplicate — comment on that issue instead. A new issue is justified only when no existing issue covers it, or when the difference is stated above. (Record confirmed relationships under Related issues below.)
+
+## Reuse class (required — pick one; definitions: gitops §7 "Reuse before you build")
+- [ ] Reuse — this issue delivers its outcome using an existing mechanism as it stands (call it, route to it, expose its existing read path, remove a fallback branch). No behaviour change.
+- [ ] Enhancement — this issue delivers its outcome by extending or changing an existing mechanism's behaviour (new fields, branches, parameters, or a surface on something that already exists). State the §7 sub-kind: enhance / optimize / consolidate.
+- [ ] New — this issue builds a mechanism or behaviour with no existing counterpart (new store, workflow, endpoint, surface, or mode). Last option.
+- Reused mechanism (name + file:line, or "none — new"):
+- Enhancement sub-kind and what changes (enhance / optimize / consolidate; or "n/a"):
+- Search confirming nothing exists (for New: terms + what was checked; or "n/a"):
 
 ## Related issues
 Parent epic:
@@ -309,12 +317,19 @@ For each dimension state Enabled (this change adds it), Preserved (the change ke
 
 ## Test plan
 
-## Dependencies
-Cross-lane need: if this requires another lane's capability, link that lane's separately created and assigned issue here — do not fold their work into this issue.
+## Dependencies (for prioritization — the ordering record; Parallelism states whether this issue can start)
+Blocking — this issue cannot start (or cannot merge) until these land. Each entry states the dependency's state and what it unblocks. A blocked slice names its unblocker here and states what is blocked; never work around a dependency (no parallel re-implementation, no silent fallback). If a dependency's state changes, update this section in the same PR that discovers it. A cross-lane need is a blocking dependency on that lane's separately created and assigned issue — link it here, do not fold their work into this issue.
+- [ ] #NNNN — <title> — state: open / merged / blocked — unblocks: <what this issue needs from it>
+- (None — write "None" if there are no blocking dependencies.)
+Related — linked work that is not blocking (parent, sub-issue, adjacent):
+- #NNNN — <title> — <role>
+Blocked by this issue — work waiting on this issue (reverse dependencies, if any):
+- #NNNN — <title>
+- (None — write "None" if nothing waits on this issue.)
 
 ## Parallelism (issue #4070)
 Parallel or Serial:
-Depends on (issue numbers, or none):
+Depends on: see ## Dependencies (Blocking) — the list lives there, not here; do not duplicate it.
 Conflicts with (shared files/surfaces, or none):
 
 ## Change management (expected)
@@ -328,7 +343,7 @@ Communication:
 No UX drift, no architecture drift, no rework, no regression — reuse is mandatory.
 UX surfaces touched + primitives/tokens used (or none):
 Architecture surfaces touched + patterns/boundaries/ADRs followed (or none):
-Reused surfaces (existing implementations reused):
+Reused surfaces (existing implementations reused — must match the ## Reuse class above):
 Rework justification (if rebuilding an existing capability, why — otherwise none):
 Regression risk + pins preserving existing behavior:
 
@@ -372,6 +387,7 @@ All development on this issue must follow:
 ## Completion report (gitops §15 — fill on close; the single document for this issue)
 - Issue / Pull request / Integration (merged, target, resulting commit):
 - Implementation (key decisions, alternatives, scope exclusions):
+- Reuse class (as filed, or as changed with reason — reuse / enhancement / new + evidence):
 - Test evidence (red, green, regression, integration/evaluation; CI runs; post-merge checks):
 - Change management (actual: change type, impacted surfaces, migration and data impact, rollout plan, rollback plan, communication, changelog entry):
 - Conformance (actual: UX primitives/tokens used, architecture boundaries followed, reused surfaces, rework justification, regression pins):
@@ -434,6 +450,16 @@ Update these fields as the issue evolves — a label, milestone, or relationship
 
 If blocked, report the blocker and seek a decision. Do not quietly switch work.
 
+### Reuse class (taxonomy)
+
+Every issue states its reuse class in the `## Reuse class` template section, with evidence. The class is a claim about the change, reviewed like any other claim: a reviewer sends back an issue whose class contradicts its diff — a `New` class on a change that only wires an existing surface, or a `Reuse` class on a change that adds a new store.
+
+- **Reuse** — the outcome is delivered using an existing mechanism as it stands: call it, route to it, expose its existing read path, or remove a fallback branch. No behaviour change. (§7 verb: reuse.)
+- **Enhancement** — the outcome is delivered by extending or changing an existing mechanism's behaviour: new fields, branches, parameters, or a surface on something that already exists. State the §7 sub-kind: enhance / optimize / consolidate.
+- **New** — the outcome needs a mechanism or behaviour with no existing counterpart: a new store, workflow, endpoint, surface, or mode. Last option. (§7 verb: extend — the need is genuinely new.) The issue must record the search that confirmed nothing exists (terms + what was checked); "there was nothing to reuse" is a finding to state, not an assumption to skip (§7 item 1).
+- The class is filed at creation and confirmed at close: the §15 completion report records the class as filed, or as changed with reason. A class change during implementation (filed as New, built as Enhancement once an existing surface is found) is a finding to record, not a silent edit.
+- The Policy Gate enforces the class on the PR: the PR body carries a `Reuse class:` line naming reuse / enhancement / new (gate check (l), presence only — the gate never judges whether the class is right; reviewers do).
+
 ### Sizing guidance (issue #1303)
 
 There is deliberately no line-count limit: a line count misleads across
@@ -462,14 +488,15 @@ Large work ships as phases, not as one PR. The structure is:
   outcome.
 - Each phase is a sub-issue of the epic with its own scope, acceptance,
   branch, and PR. Blocking order goes in the sub-issue Dependencies
-  section; dependent phases use §20 stacked PRs where they overlap in
-  time.
+  section, with each dependency's state and what it unblocks (see
+  Dependencies for prioritization); dependent phases use §20 stacked PRs
+  where they overlap in time.
 - Each sub-issue declares its parallelism (issue #4070): Parallel or
-  Serial, Depends on (issue numbers, or none), Conflicts with (shared
-  files/surfaces, or none). A Parallel sub-issue may be claimed and
-  worked at any time; a Serial sub-issue starts only once its
-  dependencies are merged. If a sub-issue's status changes, the author
-  updates the declaration in the same PR that discovers it.
+  Serial, Depends on (see ## Dependencies — the list lives there),
+  Conflicts with (shared files/surfaces, or none). A Parallel sub-issue
+  may be claimed and worked at any time; a Serial sub-issue starts only
+  once its dependencies are merged. If a sub-issue's status changes, the
+  author updates the declaration in the same PR that discovers it.
 - A phase PR closes only its own sub-issue, never the epic (see §9:
   closing keywords only when the PR fully resolves the issue). The epic
   closes only when every sub-issue is closed, with a §15 report covering
@@ -479,6 +506,16 @@ Large work ships as phases, not as one PR. The structure is:
   except the small-slice combination rule below. Bundling sub-issues into
   one PR outside that rule breaks clean revert, coherent review,
   and §15 traceability, and stays forbidden.
+
+### Dependencies for prioritization
+
+The `## Dependencies` template section is the ordering record for prioritization. `## Related issues` records the relationship graph (roles); `## Dependencies` records what blocks what, with states.
+
+- **Blocking** — dependencies this issue cannot start (or cannot merge) until they land. Each entry names the issue, its state (open / merged / blocked), and what it unblocks. A blocked slice names its unblocker here and states what is blocked; never work around a dependency: no parallel re-implementation, no silent fallback. If blocked, report the blocker and seek a decision (§5 Scope discipline).
+- **Related** — linked work that is not blocking (parent, sub-issue, adjacent), with its role.
+- **Blocked by this issue** — reverse dependencies: work waiting on this issue, if any.
+- **One source of truth.** The blocking list lives in `## Dependencies` only. `## Parallelism` states whether the issue can start (Parallel / Serial) and what it conflicts with; its "Depends on" line points at `## Dependencies` and does not duplicate the list. If a dependency's state changes, update `## Dependencies` (and `## Parallelism`, if the startability changes) in the same PR that discovers it.
+- **Prioritization reads Dependencies.** When ordering work, blocking dependencies come first: an issue whose blocking dependencies are open is not started (Serial), or is started only for the unblocked part with the blocked part named. The PR body carries a `Dependencies:` line (gate check (l), presence only — "None" is a valid value).
 
 ### Related work MUST be GitHub sub-issues
 
@@ -790,7 +827,7 @@ between.
 Every change MUST start from what already exists. Locate the capability, then extend it in preference to adding another path beside it. Parallel and near-duplicate implementations are the most expensive rework this repository produces: they drift silently, they disagree at the edges, and every later change must be made twice to stay consistent.
 
 1. **Search before writing.** Look for the behavior you are about to add, its synonyms, its tests, and its documentation (§4). "There was nothing to reuse" is a finding to state, not an assumption to skip.
-2. **Choose in this order: reuse, enhance, optimize, consolidate, extend.** Reuse the surface as it stands; enhance it when the gap is real; optimize it when it is correct but too slow or too blunt; consolidate when several partial implementations already cover the case; extend when the need is genuinely new. A new parallel implementation is the last option, never the first.
+2. **Choose in this order: reuse, enhance, optimize, consolidate, extend.** Reuse the surface as it stands; enhance it when the gap is real; optimize it when it is correct but too slow or too blunt; consolidate when several partial implementations already cover the case; extend when the need is genuinely new. A new parallel implementation is the last option, never the first. The three issue classes (§5) map onto this order: Reuse is reuse; Enhancement is enhance / optimize / consolidate — state which in the issue; New is extend, the genuinely-new need.
 3. **Justify the exception in the PR.** A second implementation of something the repository already does requires an explicit note: the existing surface you found, why extending or consolidating it was not viable, and what keeps the two from drifting. Silence is not a waiver — state it in the linked issue's completion report (§15).
 4. **A copy is a second source of truth.** Duplicated validation rules, regexes, parsers, prompt text, and config blocks are defects even while they agree. Where a surface must be reached from a context that cannot import it — a client bundle, a separate runtime, a workflow file — extract the shared piece, or pin the copies together with a test that fails when they diverge (§7, the pin rule).
 5. **Consolidate on contact.** A change touching a duplicated implementation MUST fold it into the canonical one when the scope allows. When it does not, open the follow-up issue in the same PR and link it.
@@ -979,6 +1016,12 @@ Process documentation impact: <none, or what process docs this PR changes>
 
 ## Out of scope
 Out of scope: <none, or [Out-of-Scope] sub-issue links — every item this PR leaves out of scope gets its own sub-issue titled `[Out-of-Scope] <thing>` (issue #4099)>
+
+## Reuse class
+Reuse class: <reuse / enhancement / new> — <mechanism reused or built, with file:line; for new, the search that confirmed nothing exists>
+
+## Dependencies
+Dependencies: <blocking #NNN (state) — what it unblocks; or none>
 ```
 
 Use automatic closing keywords only when the PR fully resolves the issue.
@@ -991,7 +1034,7 @@ A submit from the GitHub web UI creates a patch branch (e.g. `OpenAIMP-patch-15`
 2. **Linked issue, full reference.** Write the linked issue as `Qunsultant/cfagent#<number>` (or `OpenAIMP/cfagent#<number>`, which redirects to the same issue) in `## Linked issue`. Either form satisfies the gate without auto-closing the issue. Use a closing keyword (`Closes #<number>`) only when the PR fully resolves the issue.
 3. **Changelog fragment as a second file.** Before the PR merges, add a second file on the same patch branch via the web UI (branch view → Add file → Create new file) at `changelog.d/<issue>-<slug>.md` with a `### ` section header and at least one entry line. Do not edit CHANGELOG.md — that reintroduces the prepend race the fragments exist to end.
 
-If the gate still fails after fixing the body: body edits re-trigger Policy Gate (the workflow triggers on `edited`), so a re-run reflects the new body; a stale-base failure means the branch predates files added to main — update the branch to current main and let checks re-run. No exemption class exists for web submits, and none is proposed: workflow files are the highest-privilege files in the repo and deserve the gate most. If the gate shows a failure you believe is wrong, read the failing check's name — (a) linked issue, (b) lane, (c) hashtag, (d) changelog, (e) docs scope, (f) stale base, (i) no deletion, (j) deprecation, (k) out of scope — and fix that item, not the gate.
+If the gate still fails after fixing the body: body edits re-trigger Policy Gate (the workflow triggers on `edited`), so a re-run reflects the new body; a stale-base failure means the branch predates files added to main — update the branch to current main and let checks re-run. No exemption class exists for web submits, and none is proposed: workflow files are the highest-privilege files in the repo and deserve the gate most. If the gate shows a failure you believe is wrong, read the failing check's name — (a) linked issue, (b) lane, (c) hashtag, (d) changelog, (e) docs scope, (f) stale base, (i) no deletion, (j) deprecation, (k) out of scope, (l) reuse class + dependencies — and fix that item, not the gate.
 
 ### Review rules
 
@@ -1379,6 +1422,7 @@ Agents cannot approve their own exceptions.
 ## Completion report (gitops §15 — fill on close; the single document for this issue)
 - Issue / Pull request / Integration (merged, target, resulting commit):
 - Implementation (key decisions, alternatives, scope exclusions):
+- Reuse class (as filed, or as changed with reason — reuse / enhancement / new + evidence):
 - Test evidence (red, green, regression, integration/evaluation; CI runs; post-merge checks):
 - Change management (actual: change type, impacted surfaces, migration and data impact, rollout plan, rollback plan, communication, changelog entry):
 - Conformance (actual: UX primitives/tokens used, architecture boundaries followed, reused surfaces, rework justification, regression pins):

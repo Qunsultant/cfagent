@@ -168,6 +168,35 @@ body:
   - type: markdown
     attributes:
       value: |
+        ## Reuse class (required — pick one; definitions: gitops §7 "Reuse before you build")
+
+  - type: dropdown
+    id: reuse_class
+    attributes:
+      label: Reuse class
+      description: "Pick one; definitions: gitops §7 'Reuse before you build'."
+      options:
+        - "Reuse — delivers its outcome using an existing mechanism as it stands (call it, route to it, expose its existing read path, remove a fallback branch). No behaviour change."
+        - "Enhancement — delivers its outcome by extending or changing an existing mechanism's behaviour (new fields, branches, parameters, or a surface on something that already exists). State the §7 sub-kind: enhance / optimize / consolidate."
+        - "New — builds a mechanism or behaviour with no existing counterpart (new store, workflow, endpoint, surface, or mode). Last option."
+    validations:
+      required: true
+
+  - type: textarea
+    id: reuse_evidence
+    attributes:
+      label: Reuse evidence
+      description: "Name the reused mechanism, the enhancement sub-kind, or the search confirming nothing exists."
+      placeholder: |
+        Reused mechanism (name + file:line, or "none — new"):
+        Enhancement sub-kind and what changes (enhance / optimize / consolidate; or "n/a"):
+        Search confirming nothing exists (for New: terms + what was checked; or "n/a"):
+    validations:
+      required: true
+
+  - type: markdown
+    attributes:
+      value: |
         ## Related issues
 
   - type: input
@@ -523,15 +552,21 @@ body:
   - type: markdown
     attributes:
       value: |
-        ## Dependencies
+        ## Dependencies (for prioritization — the ordering record; Parallelism states whether this issue can start)
 
-        Cross-lane need: if this requires another lane's capability, link that lane's separately created and assigned issue here — do not fold their work into this issue.
+        Blocking — this issue cannot start (or cannot merge) until these land. Each entry states the dependency's state and what it unblocks. A blocked slice names its unblocker here and states what is blocked; never work around a dependency (no parallel re-implementation, no silent fallback). If a dependency's state changes, update this section in the same PR that discovers it. A cross-lane need is a blocking dependency on that lane's separately created and assigned issue — link it here, do not fold their work into this issue.
 
   - type: textarea
     id: dependencies
     attributes:
       label: Dependencies
-      description: "Link a separately created and assigned issue for any cross-lane need — do not fold that lane's work into this issue."
+      description: "The ordering record for prioritization: blocking dependencies with state + what they unblock, related work, and work blocked by this issue."
+      placeholder: |
+        Blocking — #NNNN — <title> — state: open / merged / blocked — unblocks: <what this issue needs from it>
+        (None — write "None" if there are no blocking dependencies.)
+        Related — linked work that is not blocking (parent, sub-issue, adjacent):
+        Blocked by this issue — work waiting on this issue (reverse dependencies, if any):
+        (None — write "None" if nothing waits on this issue.)
 
   - type: markdown
     attributes:
@@ -547,7 +582,7 @@ body:
     id: depends_on
     attributes:
       label: Depends on
-      description: "Issue numbers, or none."
+      description: "See Dependencies — the list lives there, not here; do not duplicate it."
 
   - type: input
     id: conflicts_with
@@ -586,7 +621,7 @@ body:
       placeholder: |
         UX surfaces touched + primitives/tokens used (or none):
         Architecture surfaces touched + patterns/boundaries/ADRs followed (or none):
-        Reused surfaces (existing implementations reused):
+        Reused surfaces (existing implementations reused — must match the ## Reuse class above):
         Rework justification (if rebuilding an existing capability, why — otherwise none):
         Regression risk + pins preserving existing behavior:
 
@@ -690,6 +725,7 @@ body:
       placeholder: |
         Issue / Pull request / Integration (merged, target, resulting commit):
         Implementation (key decisions, alternatives, scope exclusions):
+        Reuse class (as filed, or as changed with reason — reuse / enhancement / new + evidence):
         Test evidence (red, green, regression, integration/evaluation; CI runs; post-merge checks):
         Change management (actual: change type, impacted surfaces, migration and data impact, rollout plan, rollback plan, communication, changelog entry):
         Conformance (actual: UX primitives/tokens used, architecture boundaries followed, reused surfaces, rework justification, regression pins):
