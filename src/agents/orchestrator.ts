@@ -114,7 +114,7 @@ import { createKvMembershipStore } from "../security/iaaaMembershipStore";
 import { isLoginShaped } from "../security/serviceIdentity";
 import { sessionStore } from "../security/session";
 import { submitAsyncJob, recoverQueuedAsyncJobs, recoverStaleRunningAsyncJobs, getAsyncJob, listAsyncJobs, executeAsyncJob, sweepStaleAsyncJobs, scheduleScreenerFollowups, retryAsyncJob, retryFailedChainJobs, type AsyncJobsContext } from "./orchestrator/asyncJobs";
-import { watchdogMissedSchedules, type ScheduleWatchdogContext, type ScheduleWatchdogSweepResult } from "./orchestrator/scheduleWatchdog";
+import { formatMissedScheduleAlertDetail, watchdogMissedSchedules, type ScheduleWatchdogContext, type ScheduleWatchdogSweepResult } from "./orchestrator/scheduleWatchdog";
 import { RECORDED_SCHEDULE_CALLBACKS } from "./orchestrator/scheduleCallbacks";
 import { ensureOrchestratorTables } from "./orchestrator/tableSchema";
 import { REPORT_CONFIRMATION_TTL_MS } from "./orchestrator/reportConfirmationTtl";
@@ -775,13 +775,15 @@ export class OrchestratorAgent extends PortThink {
     };
   }
 
-  private scheduleWatchdogContext(): ScheduleWatchdogContext {
+  private async scheduleWatchdogContext(): Promise<ScheduleWatchdogContext> {
+    const ownerLogin = (await this.getScreenerExecutionContext())?.userLogin;
     return {
       env: this.env,
       sql: this.ctx.storage.sql,
       storage: this.ctx.storage,
       listSchedules: () => this.listSchedules(),
       audit: (type, agent, payload) => this.audit(type, agent, payload),
+      ...(ownerLogin ? { userLogin: ownerLogin } : {}),
       notifyMissedSchedule: async (info) => {
         // Issue #3788: missed-schedule alert via postSlackText (the
         // #2567 stuck-run seam: catalog text, webhook first, bot
@@ -791,7 +793,7 @@ export class OrchestratorAgent extends PortThink {
         const text = renderChannelText("missed_schedule_alert", "slack", {
           scheduleId: info.scheduleId, kind: "schedule", callback: info.callback,
           expectedTick: info.expectedTick, lastRun: info.lastRun ?? "never",
-          detail: `missed-fire: expected ${info.expectedTick} (last run: ${info.lastRun ?? "never"})`,
+          detail: formatMissedScheduleAlertDetail(info),
         }, "legacy_missed_schedule_alert");
         const result = await postSlackText({ post: fetchSlackPost, env: this.env, text });
         this.audit(result.ok ? "schedule.missed_fire_alert" : "schedule.missed_fire_alert_failed", "orchestrator", {
@@ -1996,7 +1998,7 @@ export class OrchestratorAgent extends PortThink {
   // expected tick + grace. Armed from onStart on the same 15-minute
   // tick as the #3784 sweep: one tick implementation, two consumers.
   async watchdogMissedSchedules(): Promise<ScheduleWatchdogSweepResult> {
-    return watchdogMissedSchedules(this.scheduleWatchdogContext(), {
+    return watchdogMissedSchedules(await this.scheduleWatchdogContext(), {
       recordedCallbacks: RECORDED_SCHEDULE_CALLBACKS,
     });
   }

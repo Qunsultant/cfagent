@@ -176,6 +176,8 @@ export interface OtelFileConfig {
   tracesExporter: OtelExporterKind;
   ingestion: {
     route: string;
+    /** Issue #5082 (S2) — the metrics ingestion route. */
+    metricsRoute: string;
     r2Prefix: string;
     r2ContentType: string;
   };
@@ -187,7 +189,50 @@ export interface OtelFileConfig {
   domains: Record<OtelDomain, OtelDomainFileConfig>;
   /** Issue #5138 — one switch per destination (all ON in the file). */
   destinations: Record<OtelDestination, boolean>;
+  /** Issue #5082 (S2) — the metrics settings (all config values, externalized). */
+  metrics: OtelMetricsFileConfig;
 }
+
+/** One metrics section in the config file (config/otel.json). */
+export interface OtelMetricsFileConfig {
+  exportIntervalMs: number;
+  freeTier: {
+    dailyWriteLimit: number;
+    dailyReadQueryLimit: number;
+  };
+  health: {
+    pipelineMaxFailureRate: number;
+  };
+  slo: {
+    resourceRowsReadMaxPct: number;
+  };
+}
+
+/** The resolved metrics settings (the operational values the metrics stack consumes). */
+export interface OtelMetricsSettings {
+  exportIntervalMs: number;
+  freeTierDailyWriteLimit: number;
+  freeTierDailyReadQueryLimit: number;
+  healthPipelineMaxFailureRate: number;
+  sloResourceRowsReadMaxPct: number;
+}
+
+/**
+ * Issue #5082 (S2) — the BUILTIN safe defaults for the metrics
+ * settings (used only when the file is missing or a value is
+ * invalid). These are the LOW-VOLUME defaults: a 5-minute
+ * export interval (few writes), the real free-tier limits
+ * (100k writes/day, 10k read queries/day), a 5% max failure
+ * rate, a 70% SLO max pct. An invalid value fails closed to
+ * these, never to a value that would flood the store.
+ */
+export const OTEL_METRICS_SETTINGS_BUILTIN: OtelMetricsSettings = {
+  exportIntervalMs: 300000,
+  freeTierDailyWriteLimit: 100000,
+  freeTierDailyReadQueryLimit: 10000,
+  healthPipelineMaxFailureRate: 0.05,
+  sloResourceRowsReadMaxPct: 0.7,
+} as const;
 
 /** The parsed config file (the operational defaults). */
 export const OTEL_FILE_CONFIG: OtelFileConfig = rawOtelConfig as OtelFileConfig;
@@ -270,6 +315,48 @@ function normalizeLevel(raw: unknown): OtelLevel | "invalid" | null {
 }
 
 function normalizeSampling(raw: unknown): number | "invalid" | null {
+  if (raw === undefined || raw === null) return null;
+  const value = typeof raw === "number" ? raw : typeof raw === "string" ? Number(raw.trim()) : NaN;
+  if (typeof raw === "string" && !raw.trim()) return null;
+  if (!Number.isFinite(value) || value < 0 || value > 1) return "invalid";
+  return value;
+}
+
+/**
+ * Issue #5082 (S2) — normalizes a positive integer (the metrics
+ * export interval). Must be a finite integer > 0; a non-positive
+ * or non-numeric value is invalid (a 0 interval would spin the
+ * exporter without pause and flood the store).
+ */
+function normalizePositiveInt(raw: unknown): number | "invalid" | null {
+  if (raw === undefined || raw === null) return null;
+  const value = typeof raw === "number" ? raw : typeof raw === "string" ? Number(raw.trim()) : NaN;
+  if (typeof raw === "string" && !raw.trim()) return null;
+  if (!Number.isFinite(value) || !Number.isInteger(value) || value <= 0) return "invalid";
+  return value;
+}
+
+/**
+ * Issue #5082 (S2) — normalizes a non-negative integer (the
+ * free-tier daily limits). 0 is valid (it disables that path —
+ * a 0 write limit means no Analytics Engine writes, while the
+ * OTLP/R2 archive path still runs); a negative or non-numeric
+ * value is invalid.
+ */
+function normalizeNonNegativeInt(raw: unknown): number | "invalid" | null {
+  if (raw === undefined || raw === null) return null;
+  const value = typeof raw === "number" ? raw : typeof raw === "string" ? Number(raw.trim()) : NaN;
+  if (typeof raw === "string" && !raw.trim()) return null;
+  if (!Number.isFinite(value) || !Number.isInteger(value) || value < 0) return "invalid";
+  return value;
+}
+
+/**
+ * Issue #5082 (S2) — normalizes a ratio in [0, 1] (the health
+ * max failure rate, the SLO max pct). A value outside [0, 1]
+ * or non-numeric is invalid.
+ */
+function normalizeRatio(raw: unknown): number | "invalid" | null {
   if (raw === undefined || raw === null) return null;
   const value = typeof raw === "number" ? raw : typeof raw === "string" ? Number(raw.trim()) : NaN;
   if (typeof raw === "string" && !raw.trim()) return null;
@@ -550,6 +637,88 @@ export function resolveOtelDomainSampling(
     };
   }
   return { ratio: 0, invalid: false, raw: undefined, source: "builtin" };
+}
+
+export interface OtelMetricsSettingsInput {
+  exportIntervalMs: OtelScopeLevels;
+  freeTierDailyWriteLimit: OtelScopeLevels;
+  freeTierDailyReadQueryLimit: OtelScopeLevels;
+  healthPipelineMaxFailureRate: OtelScopeLevels;
+  sloResourceRowsReadMaxPct: OtelScopeLevels;
+}
+
+export interface ResolvedOtelMetricsSettings {
+  settings: OtelMetricsSettings;
+  /** True when any setting's winning level held an unrecognized value. */
+  invalid: boolean;
+}
+
+/**
+ * Issue #5082 (S2) — resolves the metrics settings over run >
+ * session > user > env > file > builtin (the safe defaults).
+ * Each setting resolves independently through the same
+ * five-level mechanism; an unrecognized winning value for a
+ * setting fails closed to that setting's builtin safe default
+ * with a coded OBS-1001 message and no fall-through.
+ * `invalid` is true when any setting failed closed.
+ */
+export function resolveOtelMetricsSettings(
+  input: OtelMetricsSettingsInput,
+): ResolvedOtelMetricsSettings {
+  let invalid = false;
+  const resolveOne = <T>(
+    switchName: string,
+    levels: OtelScopeLevels,
+    normalize: (raw: unknown) => T | "invalid" | null,
+    builtin: T,
+  ): T => {
+    for (const [source, value] of orderedLevels(levels)) {
+      const normalized = normalize(value);
+      if (normalized === null) continue;
+      if (normalized === "invalid") {
+        logInvalid(switchName, source, value, String(builtin));
+        invalid = true;
+        return builtin;
+      }
+      return normalized;
+    }
+    return builtin;
+  };
+  return {
+    settings: {
+      exportIntervalMs: resolveOne(
+        "OTEL_METRICS_EXPORT_INTERVAL_MS",
+        input.exportIntervalMs,
+        normalizePositiveInt,
+        OTEL_METRICS_SETTINGS_BUILTIN.exportIntervalMs,
+      ),
+      freeTierDailyWriteLimit: resolveOne(
+        "OTEL_METRICS_FREE_TIER_DAILY_WRITE_LIMIT",
+        input.freeTierDailyWriteLimit,
+        normalizeNonNegativeInt,
+        OTEL_METRICS_SETTINGS_BUILTIN.freeTierDailyWriteLimit,
+      ),
+      freeTierDailyReadQueryLimit: resolveOne(
+        "OTEL_METRICS_FREE_TIER_DAILY_READ_QUERY_LIMIT",
+        input.freeTierDailyReadQueryLimit,
+        normalizeNonNegativeInt,
+        OTEL_METRICS_SETTINGS_BUILTIN.freeTierDailyReadQueryLimit,
+      ),
+      healthPipelineMaxFailureRate: resolveOne(
+        "OTEL_METRICS_HEALTH_PIPELINE_MAX_FAILURE_RATE",
+        input.healthPipelineMaxFailureRate,
+        normalizeRatio,
+        OTEL_METRICS_SETTINGS_BUILTIN.healthPipelineMaxFailureRate,
+      ),
+      sloResourceRowsReadMaxPct: resolveOne(
+        "OTEL_METRICS_SLO_RESOURCE_ROWS_READ_MAX_PCT",
+        input.sloResourceRowsReadMaxPct,
+        normalizeRatio,
+        OTEL_METRICS_SETTINGS_BUILTIN.sloResourceRowsReadMaxPct,
+      ),
+    },
+    invalid,
+  };
 }
 
 /**

@@ -120,13 +120,92 @@ not interchangeable.
 | Job instance | The durable per-job record: current state, current run id, the stage checkpoint, `runTrigger`. Stored in `job_pipeline_instances`. | `src/data/jobPipelinePorts.ts:43`, `:222` |
 | Run | One dispatch of a job: a `runId`, a trigger, a scope path, a schedule id when clock-fired. Recorded in the run record and the ledger. | `src/services/jobPipelineEngine.ts:794` |
 | Workflow | A durable Cloudflare Workflow instance (a `ThinkWorkflow` subclass) that executes a job or a journey. The workflow is the async boundary and the journal, not a second engine. | `src/workflows/jobPipelineWorkflow.ts:1` |
-| Pipeline | A job whose stages form a chain: feed → enrich → analyze → generate → deliver (the J-stack chain), or the screener's six stages. "Pipeline" is a shape of job, not a separate system. | `src/services/chainPipelineJobs.ts:1`, `src/config/jobDefinitionCatalog.ts:85` |
+| Pipeline | A job whose stages form a chain. "Pipeline" is a shape of job, not a separate system — and it names no chain by itself: the chains are named by their short ids (see "Chain short ids" below), never by a bare "the pipeline". | `src/services/chainPipelineJobs.ts:1`, `src/config/jobDefinitionCatalog.ts:85` |
 | Stage | One node of a job's definition (a `JobNodeConfig`): feed, gather/enrich, analysis, store, serve, deliver. The stage vocabulary is `feed | gather | analysis | store | serve | deliver`. | `src/messaging/messagingPorts.ts:154` |
 | Sub-job | One stage addressed on its own (a `scopePath` dispatch, or a stage control action): `GET /api/jobs/:jobId/stages/:stageId`. Sub-jobs are individually schedulable. | `src/agents/routes/jobStatus.ts:6`, `:48` |
 | Sub-stage / unit | One execution unit inside a stage. A run without shardable units has one implicit unit; a sharded stage has one unit per shard key. The checkpoint holds one entry per (stage, unit) pair. | `src/workflows/stageRunnerPlan.ts:57`, `src/workflows/stageRunnerPorts.ts:271` |
-| Chain | A composed pipeline job: the J-stack chain (feed → enrich → analyze → generate → deliver) or the screener chain. A chain job's stages are themselves jobs dispatched in order. | `src/services/chainPipelineJobs.ts:1` |
+| Chain | A composed pipeline job: one chain shape's stages, themselves jobs dispatched in order. The shapes are `feedsrc`, `stockscr`, and `optionsscr` (see "Chain short ids" below). | `src/services/chainPipelineJobs.ts:1` |
 | Dispatch site | A code site that calls `JobPipelineEngine.runJob`. There are 14, listed in the inventory below. | `src/services/jobPipelineEngine.ts:794` |
 | Dispatch mode | Two things, not one: the execution mode (how the run executes) and the trigger (why the run was dispatched). Both are covered below. | `src/data/jobPipelinePorts.ts:60`, `src/data/jobRunRecordPorts.ts:54` |
+
+### Chain short ids (#4774)
+
+Every chain shape is named by one short identifier (user ruling,
+issue #4774 comment 6912854849, 2026-11-16). A run is named, traced,
+and surfaced under its chain's short id; a bare "the pipeline" names
+no chain and must not appear where a chain is named.
+
+| Short id | Chain shape | Stages | Where declared |
+|---|---|---|---|
+| `feedsrc` | Feed chain (one `*-pipeline` job per quotes feed) | feed → enrich → analyze → generate → deliver | `src/services/chainPipelineJobs.ts` (`FEED_CHAIN_SHORT_ID`) |
+| `stockscr` | Screener chain (the static catalog's one family; goal screens ride this chain) | feed → enrich → analyze → store → serve → deliver | `src/workflows/workflowCatalog.ts` (stock-screener), `src/config/jobDefinitionCatalog.ts` (screener spec) |
+| `optionsscr` | Options chain (`options.runRoot` / `options.runStage`, 8 execution stages, 4 display stages) | feed → assemble → generate → store → serve → deliver | `src/workflows/workflowCatalog.ts` (options-screener), `src/services/optionsChainJobDefinition.ts` (`OPTIONS_CHAIN_SHORT_ID`) |
+| `goalscr` | Goal screen (a family, not a separate chain shape — goal screens ride the screener chain) | feed → analysis → store → deliver (goal-shaped request) | `src/workflows/workflowCatalog.ts` (goal-screen) |
+| `strategyscr` | Strategy discovery | analysis → store → deliver | `src/workflows/workflowCatalog.ts` (strategy-discovery) |
+
+The remaining families have no ruled short id yet (trading-leg,
+payment-run, saga-run): the #4774 build proposes `tradscr`, `payrun`,
+`sagarun` in its PR body, and the user rules them. Do not wire a
+proposed id into code before that ruling.
+
+### Execution-tree levels (#4774)
+
+The short-id system covers ALL levels of the execution tree, not just
+chain/family ids (user ruling, issue #4774 comment 6959360479,
+2026-11-17). One printable id per instance: `<level-short-id>:<local-id>`
+(`src/services/executionTreeIds.ts`, `qualifyExecutionId`).
+
+| Level | Short id | Instance id example | Where the id comes from |
+|---|---|---|---|
+| Chain | `chain` | `chain:feedsrc` | The ruled chain short ids above |
+| Pipeline | `pipe` | `pipe:<feed>-pipeline` | The chain job's `jobId` |
+| Workflow | `wf` | `wf:<workflow instance id>` | The ThinkWorkflow instance |
+| Job | `job` | `job:stock-screener` | The job definition's `jobId` |
+| Stage | `stage` | `stage:job:feed` | The stage's node path (`job:<nodePath>`) |
+| Sub-stage / unit | `unit` | `unit:AAPL` | The stage's shard key |
+| Task | `task` | `task:<schedule id>` | The scheduled task / async job |
+| Run | `run` | `run:run-m9x-1` | The engine's `newRunId()` |
+| Transaction | `txn` | `txn:<ledger row id>` | The `mas_transactions` `id` PK |
+
+A stage execution's id reuses the engine's existing format, it is not
+invented: `job-stage:<runId>:<stageId>:<unitId>` is the prefix of the
+stage-action CloudEvents id (`jobPipelineEvents.ts`), and
+`job-step:<runId>:<nodePath>:<stepIndex>:<shardKey>:<itemIndex>` is
+the journal id the engine passes to `journal.do`
+(`jobPipelineEngine.ts`) — the durability key for the step's
+exactly-once execution.
+
+#### OODA vs run-level stages
+
+The research pipeline has the same stage name at two levels, and the
+ids are what resolve it: the candidate-level OODA loop's steps are
+`ooda:observe` | `ooda:orient` | `ooda:decide` | `ooda:act`
+(`OodaStep`, `researchPipeline.ts`), while the run-level pipeline
+stages are `respipe:configure` | `respipe:observe` |
+`respipe:orient` | `respipe:decide` | `respipe:build-and-price` |
+`respipe:challenge-and-gate` | `respipe:rank-and-report` |
+`respipe:evaluate-later` (`PipelineStage`). Each trace entry carries
+its level-qualified `shortId`; the bare `stage` string is unchanged.
+The research run's engine onboarding (#5109, CFO lane) is in flight:
+the engine job id (`research:<runId>`) and data ports landed (#5121,
+`researchDataPorts.ts`); the trigger dispatch (#5120) and the cutover
+flag (#5122) are recorded merged; the analyze.ooda step registration
+(#5118, PR #5143 open), AOP compliance (#5119, PR #5144 open), and
+Copilot execution (#5123, no PR) remain. The direct
+`runResearchPipeline` call from ResearchAgent is the pre-cutover /
+rollback path. The `ooda:` / `respipe:` ids are names the #5118 step
+registration can reuse; CLO-arsi does not build it.
+
+#### Per-instance ids
+
+Every run/transaction instance carries a unique id: engine runs mint
+`run-<time>-<counter>` (`jobPipelineEngine.ts` `newRunId`), research
+runs mint `rsr_<time>_<rand>` (`researchPipeline.ts` `newRunId`),
+async jobs mint `crypto.randomUUID()`, ledger rows carry their `id`
+PK. A trace step's instance id is DERIVED, not stored:
+`run:<runId>/<qualified-step-id>#<index>` (e.g.
+`run:rsr_abc123/ooda:observe#2`) — the index is the entry's position
+in its trace array.
 
 ## The nine named components
 

@@ -61,6 +61,12 @@ export interface JobDefinitionParameter {
 export interface JobDefinitionSpec {
   /** Addressable id (the spec's identity, not the per-run job id). */
   id: string;
+  /**
+   * Issue #4774 — the chain's short id (user ruling, comment 6912854849,
+   * 2026-11-16): the alias a run of this spec is named, traced, and
+   * surfaced under. The stable `id` is unchanged.
+   */
+  shortId?: string;
   name: string;
   /** Bumped whenever the spec changes; the engine versions the resolved definition too. */
   version: number;
@@ -83,10 +89,11 @@ export interface JobDefinitionSpec {
 export const JOB_DEFINITION_SPECS: Readonly<Record<string, JobDefinitionSpec>> = {
   screener: {
     id: "screener",
+    shortId: "stockscr",
     name: "Stock screener",
     version: 1,
     description:
-      "The six-stage stock screen: feed → enrich → analyze → store → serve → deliver. Each stage is one engine node; the run's parameters ride every stage.",
+      "stockscr — the six-stage stock screen: feed → enrich → analyze → store → serve → deliver. Each stage is one engine node; the run's parameters ride every stage.",
     stages: [
       { kind: "feed", step: "screener.feed" },
       { kind: "enrich", step: "screener.gather" },
@@ -214,6 +221,13 @@ export function resolveJobDefinitionSpec(raw: unknown): JobDefinitionSpec {
   }
   const id = text(raw.id, "id", "<unknown>");
   const name = text(raw.name, `name (job definition "${id}")`, id);
+  // Issue #4774 — the chain short id rides the resolved spec when the
+  // raw spec declares one; a non-string value refuses, like any other
+  // malformed field, rather than being silently dropped.
+  let shortId: string | undefined;
+  if (raw.shortId !== undefined) {
+    shortId = text(raw.shortId, `shortId (job definition "${id}")`, id);
+  }
   const version = typeof raw.version === "number" && Number.isFinite(raw.version) ? raw.version : 1;
   if (!Array.isArray(raw.stages) || raw.stages.length === 0) {
     throw new Error(
@@ -246,6 +260,7 @@ export function resolveJobDefinitionSpec(raw: unknown): JobDefinitionSpec {
     : undefined;
   return {
     id,
+    ...(shortId ? { shortId } : {}),
     name,
     version,
     stages,

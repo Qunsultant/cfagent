@@ -848,6 +848,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["docs/architecture/broker-parity-matrix.md", "alpaca", 2],
   ["docs/architecture/broker-parity-matrix.md", "yahoo", 1],
   ["docs/architecture/broker-parity-matrix.md", "nasdaq", 1],
+  ["docs/architecture/broker-parity-matrix.md", "tastytrade", 5],
   // #3992 PR-5 INTEGRATION: the residency decision doc names the incident
   // job by its registered id (a data-bearing identifier), per the note above.
   ["docs/architecture/feed-run-residency-and-scheduled-silence-3992.md", "yahoo", 1],
@@ -1738,6 +1739,19 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/trading/slack/agent.ts", "yahoo", 2],
   ["src/trading/stockQuoteSource.ts", "alpaca", 1],
   ["src/trading/stockQuoteSource.ts", "etrade", 2],
+  // Issue #4675 INTEGRATION: Tastytrade Slice 1 catalog, config, credentials, and platform adapter.
+  ["src/client/portfolioRiskApi.ts", "tastytrade", 1],
+  ["src/config/tastytrade.ts", "tastytrade", 7],
+  ["src/data/discoveryRunPorts.ts", "tastytrade", 1],
+  ["src/data/ivHistoryPorts.ts", "tastytrade", 1],
+  ["src/data/scanRunPorts.ts", "tastytrade", 1],
+  ["src/services/tenantProviders.ts", "tastytrade", 2],
+  ["src/trading/brokerCatalog.ts", "tastytrade", 11],
+  ["src/trading/brokerPresentation.ts", "tastytrade", 7],
+  ["src/trading/index.ts", "tastytrade", 5],
+  ["src/trading/tastytrade/credentials.ts", "tastytrade", 76],
+  ["src/trading/tastytrade/platform.ts", "tastytrade", 61],
+  ["src/types.ts", "tastytrade", 13],
   ["src/trading/technicals.ts", "alpaca", 2],
   ["src/trading/technicals.ts", "etrade", 1],
   ["src/trading/technicals.ts", "yahoo", 12],

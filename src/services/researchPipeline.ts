@@ -42,6 +42,7 @@ import type {
   Premortem,
 } from "./researchFalsification";
 import { buildFalsification, buildPremortem } from "./researchFalsification";
+import { oodaStepShortId, researchPipelineStageShortId } from "./executionTreeIds";
 
 export type TriggerSource = "manual" | "scheduled";
 
@@ -190,6 +191,15 @@ export interface OodaStep {
   stage: "observe" | "orient" | "decide" | "act";
   detail: string;
   at: string;
+  /**
+   * Issue #4774: the level-qualified short id of this step —
+   * `ooda:observe` | `ooda:orient` | `ooda:decide` | `ooda:act`.
+   * The bare `stage` string is unchanged; the short id is what tells
+   * this candidate-level step apart from the run-level stage of the
+   * same name (`respipe:observe` etc.). Always populated by the
+   * recorder in `runResearchPipeline`.
+   */
+  shortId?: string;
 }
 
 /**
@@ -197,6 +207,9 @@ export interface OodaStep {
  * (docs/research/autonomous-options-research-pipeline.docx §1).
  * The OODA steps (above) operate *within* these stages — OODA is the
  * candidate-level loop, the pipeline stages are the run-level flow.
+ * Issue #4774: the two levels share the stage names "observe" |
+ * "orient" | "decide" — a trace entry's `shortId` (`respipe:*` here,
+ * `ooda:*` on the candidate loop) is what resolves which level it is.
  */
 export type PipelineStage =
   | "configure"
@@ -212,6 +225,13 @@ export interface PipelineStageStep {
   stage: PipelineStage;
   detail: string;
   at: string;
+  /**
+   * Issue #4774: the level-qualified short id of this stage —
+   * `respipe:<stage>`. See `OodaStep.shortId`: the same bare stage
+   * name at the candidate level is `ooda:<stage>`. Always populated
+   * by the recorder in `runResearchPipeline`.
+   */
+  shortId?: string;
 }
 
 export interface ResearchReport {
@@ -690,12 +710,12 @@ export async function runResearchPipeline(
   const runId = opts.runId ?? newRunId();
   const trace: OodaStep[] = [];
   const step = (stage: OodaStep["stage"], detail: string) =>
-    trace.push({ stage, detail, at: new Date().toISOString() });
+    trace.push({ stage, detail, at: new Date().toISOString(), shortId: oodaStepShortId(stage) });
 
   // Issue #774: pipeline stage trace (the 8 stages from the design doc).
   const stageTrace: PipelineStageStep[] = [];
   const stage = (s: PipelineStage, detail: string) =>
-    stageTrace.push({ stage: s, detail, at: new Date().toISOString() });
+    stageTrace.push({ stage: s, detail, at: new Date().toISOString(), shortId: researchPipelineStageShortId(s) });
 
   const rejected: RejectedEntry[] = [];
   const watchlist: WatchlistEntry[] = [];

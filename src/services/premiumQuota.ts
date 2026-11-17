@@ -32,6 +32,9 @@ import {
   type QuotaExceededDetails,
   type UserRequestQuotaPolicy,
 } from "../security/userRequestQuota";
+import { createOtelMetrics } from "../observability/otelMetricsProvider";
+import type { OtelMetricsHandle } from "../observability/otelMetricsProvider";
+import type { OtelMetricsRecorder } from "../observability/otelMetricsRecorder";
 import type { UserRequestQuotaPort } from "../data/userRequestQuotaPorts";
 import { createUserRequestQuotaPort } from "../data/createUserRequestQuotaPorts";
 import type { Env } from "../types";
@@ -70,6 +73,13 @@ export function premiumQuotaGate(input: {
   kind: PremiumQuotaKind;
   runId: string;
   nowMs?: number;
+  /**
+   * Issue #5082 (S2) — optional metrics hook, passed through to
+   * the #2842 gate's onCharge (one quota.report_runs metric per
+   * charged report run). Best-effort; when absent, the gate
+   * behaves exactly as before.
+   */
+  onCharge?: (charge: { userLogin: string; kind: string; tenantId: string }) => void;
 }): PremiumQuotaOutcome {
   try {
     const outcome = checkAndChargeUserRequestQuota({
@@ -80,6 +90,7 @@ export function premiumQuotaGate(input: {
       kind: input.kind,
       runId: input.runId,
       nowMs: input.nowMs,
+      onCharge: input.onCharge,
     });
     return {
       ok: true,
@@ -156,7 +167,52 @@ export async function chargePremiumQuota(input: {
     kind: input.kind,
     runId: input.runId,
     nowMs: input.nowMs,
+    // Issue #5082 (S2): one quota.report_runs metric per
+    // charged report run, via the module-level cached metrics
+    // handle (one MeterProvider per isolate, not one per
+    // charge). Best-effort (a recorder throw never fails the
+    // gate — the gate wraps the hook in try/catch).
+    onCharge: (charge) => {
+      try {
+        const recorder = premiumQuotaMetricsRecorder(input.env);
+        recorder?.recordQuotaCharge(charge);
+        // Flush promptly (fire-and-forget) so the metric
+        // exports instead of waiting for the periodic interval.
+        premiumQuotaMetricsFlush()?.catch(() => {
+          // Best-effort.
+        });
+      } catch {
+        // Best-effort metrics hook.
+      }
+    },
   });
+}
+
+/**
+ * Issue #5082 (S2) — the module-level cached OTel metrics
+ * handle for the premium quota path (one MeterProvider per
+ * isolate, not one per charge — the premium routes are
+ * per-request, and a MeterProvider per charge would leak a
+ * periodic reader per request). A creation failure returns
+ * null (the hook is a no-op) — metrics never fail a charge.
+ */
+let premiumQuotaMetricsHandle: OtelMetricsHandle | null = null;
+
+function premiumQuotaMetricsRecorder(env: Env): OtelMetricsRecorder | null {
+  try {
+    if (!premiumQuotaMetricsHandle) premiumQuotaMetricsHandle = createOtelMetrics(env);
+    return premiumQuotaMetricsHandle.recorder;
+  } catch {
+    return null;
+  }
+}
+
+function premiumQuotaMetricsFlush(): Promise<void> | null {
+  try {
+    return premiumQuotaMetricsHandle?.flush() ?? null;
+  } catch {
+    return null;
+  }
 }
 
 /**

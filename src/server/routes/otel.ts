@@ -27,10 +27,14 @@ import { createStructuredLogger } from "../../observability/structuredLogger";
 import {
   createOtelIngestionLog,
   handleOtelLogsIngestion,
+  handleOtelMetricsIngestion,
 } from "../../observability/otelIngestion";
 
-/** The OTLP ingestion route path. */
+/** The OTLP ingestion route path (logs). */
 export const OTEL_INGESTION_ROUTE = "/api/otel/v1/logs" as const;
+
+/** Issue #5082 (S2) — the OTLP metrics ingestion route path. */
+export const OTEL_METRICS_INGESTION_ROUTE = "/api/otel/v1/metrics" as const;
 
 function jsonResponse(status: number, body: Record<string, unknown>): Response {
   return new Response(JSON.stringify(body), {
@@ -42,7 +46,10 @@ function jsonResponse(status: number, body: Record<string, unknown>): Response {
 /**
  * The OTel ingestion route handler (the server.ts dispatch
  * shape: returns a Response when the path matches, null to
- * fall through to the next handler).
+ * fall through to the next handler). Handles both the logs
+ * route (POST /api/otel/v1/logs) and the metrics route (POST
+ * /api/otel/v1/metrics, issue #5082 S2) under the same
+ * OTEL_INGEST_TOKEN gate.
  */
 export async function handleOtelRoutes(
   request: Request,
@@ -50,7 +57,7 @@ export async function handleOtelRoutes(
   _url: URL,
   path: string,
 ): Promise<Response | null> {
-  if (path !== OTEL_INGESTION_ROUTE) return null;
+  if (path !== OTEL_INGESTION_ROUTE && path !== OTEL_METRICS_INGESTION_ROUTE) return null;
 
   if (request.method !== "POST") {
     return new Response("Method Not Allowed", {
@@ -77,6 +84,24 @@ export async function handleOtelRoutes(
   const structuredLog = createStructuredLogger(createObservabilitySink(env), {
     component: "otel-ingestion",
   });
+  // Issue #5082 (S2): the metrics route hands the OTLP metrics
+  // payload to the metrics ingestion handler; the logs route
+  // keeps the logs handler.
+  if (path === OTEL_METRICS_INGESTION_ROUTE) {
+    const result = await handleOtelMetricsIngestion({
+      body,
+      blobStore: createBlobStore(env),
+      log: createOtelIngestionLog(structuredLog),
+    });
+    return jsonResponse(result.status, {
+      received: result.received,
+      stored: result.stored,
+      ...(result.key ? { key: result.key } : {}),
+      ...(result.fallback ? { fallback: result.fallback } : {}),
+      ...(result.error ? { error: result.error } : {}),
+      ...(result.code ? { code: result.code } : {}),
+    });
+  }
   const result = await handleOtelLogsIngestion({
     body,
     blobStore: createBlobStore(env),

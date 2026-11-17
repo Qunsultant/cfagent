@@ -26,8 +26,10 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   Button,
+  CardHeader,
   EmptyState,
   Notice,
+  PageSection,
   Spinner,
   Stack,
   Table,
@@ -135,10 +137,7 @@ function fmtTime(ms: number): string {
 function UserViewSection({ view, heading }: { view: PlatformUserView; heading: string }) {
   return (
     <Stack gap="1-5">
-      <div className="section-label-row">
-        <span>{heading}</span>
-        <small>Verified login, tenant memberships &amp; account linkage</small>
-      </div>
+      <CardHeader title={heading} subtitle="Verified login, tenant memberships & account linkage" />
       <div>
         <div>
           <strong>Verified login:</strong> {view.userLogin}
@@ -159,10 +158,7 @@ function UserViewSection({ view, heading }: { view: PlatformUserView; heading: s
       </div>
       {view.account ? (
         <div>
-          <div className="section-label-row">
-            <span>Account linkage</span>
-            <small>Stored commercial account for this login</small>
-          </div>
+          <CardHeader title="Account linkage" subtitle="Stored commercial account for this login" />
           <div>
             <div>
               <strong>Account tenant:</strong> {view.account.tenantId}
@@ -189,10 +185,7 @@ function UserViewSection({ view, heading }: { view: PlatformUserView; heading: s
         </Notice>
       )}
       <div>
-        <div className="section-label-row">
-          <span>Tenant memberships</span>
-          <small>IAAA memberships for this login</small>
-        </div>
+        <CardHeader title="Tenant memberships" subtitle="IAAA memberships for this login" />
         {view.membershipSource === "unmapped" ? (
           <Notice tone="info">
             No wired IAAA identity was found for this login, so memberships
@@ -280,6 +273,7 @@ export function UserAdminPanel() {
   }, [lookupLogin]);
 
   return (
+    <PageSection>
     <Stack gap="1-5">
       <Notice tone="info">
         View-only: this surface shows user profiles, tenant memberships, and
@@ -292,10 +286,7 @@ export function UserAdminPanel() {
       ) : self ? (
         <UserViewSection view={self} heading="Your profile (signed-in account)" />
       ) : null}
-      <div className="section-label-row">
-        <span>Operator user lookup</span>
-        <small>Platform-admin only — other callers get a refusal, not an empty result</small>
-      </div>
+      <CardHeader title="Operator user lookup" subtitle="Platform-admin only — other callers get a refusal, not an empty result" />
       <TextInput
         label="Look up a user by login"
         value={lookupLogin}
@@ -312,5 +303,6 @@ export function UserAdminPanel() {
         <UserViewSection view={lookup} heading={`Lookup result: ${lookup.userLogin}`} />
       ) : null}
     </Stack>
+    </PageSection>
   );
 }

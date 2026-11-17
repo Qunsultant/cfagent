@@ -54,11 +54,11 @@ export const DATA_SOURCES: DataSource[] = [
   {
     id: "tastytrade",
     name: "Tastytrade",
-    status: "planned",
+    status: "integrating",
     capabilities: [
-      "Planned: options-centric quotes, IV surfaces",
+      "OAuth2 refresh-token session, accounts, positions, quotes, order dry-run/place/cancel",
     ],
-    notes: "Future source — not wired. OAuth2 pattern exists in amuse (src/tastytrade_backtest.py); port when integrating.",
+    notes: "Issue #4675 Slice 1: OAuth2 credential seam + ITradingPlatform wired in src/trading/tastytrade/.",
   },
 ];
 

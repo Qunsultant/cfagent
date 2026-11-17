@@ -384,6 +384,15 @@ export interface QuotaGateInput {
   kind: string;
   runId: string;
   nowMs?: number;
+  /**
+   * Issue #5082 (S2) — optional metrics hook, invoked ONCE per
+   * gate call that lands a charge (not once per window: one
+   * report run charges three windows but is one run). The
+   * callback is best-effort (a throw never fails the gate) and
+   * records the quota.report_runs metric. When absent, the gate
+   * behaves exactly as before.
+   */
+  onCharge?: (charge: { userLogin: string; kind: string; tenantId: string }) => void;
 }
 
 export interface QuotaGateOutcome {
@@ -459,6 +468,20 @@ export function checkAndChargeUserRequestQuota(input: QuotaGateInput): QuotaGate
       });
       usage[p.window] = charged.usage;
       anyCharged = true;
+    }
+    // Issue #5082 (S2): one metric per charged report run (not
+    // one per window). Best-effort: a callback throw never fails
+    // the gate or the charge that already landed.
+    if (anyCharged && input.onCharge) {
+      try {
+        input.onCharge({
+          userLogin: input.userLogin,
+          kind: input.kind,
+          tenantId: input.tenantId,
+        });
+      } catch {
+        // Best-effort metrics hook.
+      }
     }
     return { charged: anyCharged, alreadyCounted: allCounted && !anyCharged ? true : undefined, usage };
   } catch (err) {

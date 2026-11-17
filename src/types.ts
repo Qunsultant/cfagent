@@ -802,6 +802,17 @@ export interface Env {
    * keeps the legacy inference (paper host = paper).
    */
   ALPACA_TRADING_TYPE?: string;
+  // Tastytrade OAuth2 Configuration (issue #4675, Gap 21)
+  TASTYTRADE_CLIENT_SECRET?: string;
+  TASTYTRADE_REFRESH_TOKEN?: string;
+  TASTYTRADE_BASE_URL?: string;
+  TASTYTRADE_PAPER_CLIENT_SECRET?: string;
+  TASTYTRADE_PAPER_REFRESH_TOKEN?: string;
+  TASTYTRADE_PAPER_URL?: string;
+  TASTYTRADE_LIVE_CLIENT_SECRET?: string;
+  TASTYTRADE_LIVE_REFRESH_TOKEN?: string;
+  TASTYTRADE_LIVE_URL?: string;
+  TASTYTRADE_TRADING_TYPE?: string;
   /**
    * Issue #3888: externalized trading limits. Every limit resolves from the
    * per-ticker override setting, then the account setting, then the env var
@@ -1898,7 +1909,7 @@ export interface BrokerStatus {
   // Issue #3990: Public joins the broker union. The catalog
   // (src/trading/brokerCatalog.ts) is the source of truth for which
   // brokers exist; this field mirrors its BrokerId.
-  broker: "etrade" | "alpaca" | "public";
+  broker: "etrade" | "alpaca" | "public" | "tastytrade";
   name: string;
   configured: boolean;
   /**
@@ -1906,7 +1917,7 @@ export interface BrokerStatus {
    * reports `paper_api`/`live_api`; no broker may report another's strings.
    */
   mode: "live_oauth" | "sandbox_api" | "paper_api" | "live_api" | "mcp_remote" | "simulated_engine";
-  protocol: "mcp_json_rpc" | "etrade_oauth_rest" | "alpaca_rest_v2" | "sandbox_simulated";
+  protocol: "mcp_json_rpc" | "etrade_oauth_rest" | "alpaca_rest_v2" | "tastytrade_oauth2_rest" | "sandbox_simulated";
   mcpServerUrl?: string;
   /** `paper` is first-class since #3232; `sandbox` stays for legacy producers. */
   environment: "paper" | "sandbox" | "live";

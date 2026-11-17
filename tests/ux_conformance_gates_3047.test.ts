@@ -506,6 +506,20 @@ const CONFORMING_INTERIORS: string[] = [
   "src/client/AsyncJobsPanel.tsx",
   "src/client/IaaaAdminPanel.tsx",
   "src/client/SchedulesPanel.tsx",
+  // Issue #5140 (tail slice 3): the ten migrated interiors — API Keys,
+  // Downloads, Security Hub, Data Hub, Data Lifecycle, Tenant Admin,
+  // User Admin, Channels Admin, Run Ledger, Scheduled Goals; their
+  // register entries are removed in the same PR.
+  "src/client/ApiKeysPanel.tsx",
+  "src/client/DownloadsPanel.tsx",
+  "src/client/SecurityHubHome.tsx",
+  "src/client/DataHubHome.tsx",
+  "src/client/DataLifecyclePanel.tsx",
+  "src/client/TenantAdminPanel.tsx",
+  "src/client/UserAdminPanel.tsx",
+  "src/client/ChannelsAdminPanel.tsx",
+  "src/client/ScheduleRunLedgerPanel.tsx",
+  "src/client/ScheduledGoalsPanel.tsx",
 ]
 
 /** Every routable surface file (measured 2026-11-10 on main 299f2aa4):

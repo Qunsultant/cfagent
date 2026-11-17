@@ -1,0 +1,3 @@
+### Fixed
+
+- Identity load failures now name their cause (#3335): the `GET /payments/agentic/commercial/identity` handler returns one distinct coded outcome per failure mode instead of collapsing them into generic bodies — `FAILURE_IDENTITY_LOGIN_REQUIRED` (401, verified login absent at dispatch), `FAILURE_COMMERCIAL_STORE_UNAVAILABLE` (503, AGENT_DB unbound, unchanged), `FAILURE_IDENTITY_SCHEMA_UNAVAILABLE` (503, schema ensure threw), `FAILURE_IDENTITY_READ_FAILED` (503, identity resolution threw). FirstRunScreen renders the coded message instead of the hardcoded generic copy. The cause in the original #3335 session remains unknown — each mode is now diagnosable instead.

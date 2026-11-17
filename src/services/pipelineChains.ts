@@ -1,7 +1,10 @@
 /**
- * Issue #3540 (Pipeline J7) — the pipeline-chain registry: the
+ * Issue #3540 (Pipeline J7) — the feedsrc chain registry: the
  * composed feed → enrich → analyze → generate → deliver chain
- * as a first-class, named entity.
+ * as a first-class, named entity. Issue #4774 names this shape
+ * "feedsrc" (user ruling, comment 6912854849, 2026-11-16) — the
+ * chain's short id, carried on every catalog entry in
+ * chainPipelineJobs.ts (FEED_CHAIN_SHORT_ID).
  *
  * J2–J6 (#3535–#3539) landed the five stage families as separate
  * pipeline jobs, chained by the host's completion intake. What
@@ -75,7 +78,9 @@ export interface PipelineChainNodeRef {
 /**
  * One composed pipeline chain. `id` is the chain JOB's id (the
  * lineage's feed job id + "-pipeline"); the stage job ids are
- * the lineage's own job ids, unchanged.
+ * the lineage's own job ids, unchanged. Issue #4774: the chain
+ * SHAPE's short id is "feedsrc" (FEED_CHAIN_SHORT_ID in
+ * chainPipelineJobs.ts) — one name for every lineage's chain.
  */
 export interface PipelineChainDefinition {
   id: string;

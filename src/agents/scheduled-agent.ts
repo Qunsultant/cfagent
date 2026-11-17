@@ -221,6 +221,7 @@ import {
   runResourceComparison,
   runResourceRollup,
 } from "./resourceGoals";
+import { createOtelMetrics } from "../observability/otelMetricsProvider";
 import { createD1ResourceDb } from "../data/d1ResourceUsageAdapter";
 import {
   deliverPendingApprovals,
@@ -2129,7 +2130,27 @@ export class ScheduledAgent extends PortThink {
             continue;
           }
           if (goal.operation === "resource.rollup_daily") {
-            await runResourceRollup({ db, nowMs: now.getTime() });
+            // Issue #5082 (S2): the rollup is absorbed as the
+            // first metric — the rollup goal hands its rows to
+            // the metrics recorder (the same rows it wrote to
+            // D1), and the batch is flushed so the metrics
+            // export promptly. The metrics handle is built per
+            // tick (the rollup runs once a day) and shut down
+            // after the flush; a metrics failure never fails
+            // the rollup goal (the recorder is best-effort).
+            const otelMetrics = createOtelMetrics(env);
+            try {
+              await runResourceRollup({
+                db,
+                nowMs: now.getTime(),
+                metrics: otelMetrics.recorder,
+              });
+              await otelMetrics.flush();
+            } finally {
+              await otelMetrics.shutdown().catch(() => {
+                // Best-effort teardown.
+              });
+            }
             goal.lastRun = now.toISOString();
             tick.jobsCreated++;
             await recordGoalRun("success", { descriptor: "rollup complete" });

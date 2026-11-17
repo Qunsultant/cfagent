@@ -389,6 +389,22 @@ describe("FirstRunScreen (#2471)", () => {
     }
   });
 
+  it("a coded identity failure renders the catalog message, not the generic copy (#3335)", async () => {
+    apiState.identityError = new FirstRunApiError(503, "FAILURE_IDENTITY_READ_FAILED");
+    const { container, root } = await renderScreen({ userLogin: "screen-user-3" });
+    try {
+      expect(container.textContent ?? "").toContain(
+        resolveOutcome("FAILURE_IDENTITY_READ_FAILED").businessMessage,
+      );
+      expect(container.textContent ?? "").not.toContain("Check your connection and try again.");
+      expect(container.querySelectorAll("input").length).toBe(0);
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+    }
+  });
+
   it("a coded setup timeout renders the catalog message, not the generic copy (#3309)", async () => {
     apiState.identity = {
       userLogin: "second-user",

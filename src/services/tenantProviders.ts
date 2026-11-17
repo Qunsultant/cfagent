@@ -33,7 +33,7 @@ import type { TenantProviders } from "../data/commercialPorts";
 import { DEFAULT_TENANT_PROVIDERS } from "../data/commercialPorts";
 import { codedMessage } from "../outcomes/outcomeAspects";
 
-export const BROKER_IDS = ["etrade", "alpaca", "public"] as const;
+export const BROKER_IDS = ["etrade", "alpaca", "public", "tastytrade"] as const;
 export type BrokerId = (typeof BROKER_IDS)[number];
 
 /**
@@ -66,6 +66,7 @@ export const BROKER_IDENTITIES: Readonly<Record<string, ProviderIdentity>> = {
   etrade: { id: "etrade", displayName: "E*TRADE" },
   alpaca: { id: "alpaca", displayName: "Alpaca" },
   public: { id: "public", displayName: "Public.com" },
+  tastytrade: { id: "tastytrade", displayName: "Tastytrade" },
 };
 
 /** Identity for a data-provider id; undefined for an unknown id (never a guessed brand). */

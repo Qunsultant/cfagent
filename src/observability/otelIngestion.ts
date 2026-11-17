@@ -188,3 +188,103 @@ export async function handleOtelLogsIngestion(input: OtelIngestionInput): Promis
   }
   return { status: 202, received: records.length, stored: true, key };
 }
+
+/** Extracts every OTLP metric from a parsed ExportMetricsServiceRequest. */
+function collectMetricRecords(payload: unknown): Array<Record<string, unknown>> | null {
+  if (!payload || typeof payload !== "object") return null;
+  const resourceMetrics = (payload as { resourceMetrics?: unknown }).resourceMetrics;
+  if (!Array.isArray(resourceMetrics)) return null;
+  const records: Array<Record<string, unknown>> = [];
+  for (const resource of resourceMetrics) {
+    if (!resource || typeof resource !== "object") continue;
+    const scopeMetrics = (resource as { scopeMetrics?: unknown }).scopeMetrics;
+    if (!Array.isArray(scopeMetrics)) continue;
+    for (const scope of scopeMetrics) {
+      if (!scope || typeof scope !== "object") continue;
+      const metrics = (scope as { metrics?: unknown }).metrics;
+      if (!Array.isArray(metrics)) continue;
+      for (const metric of metrics) {
+        if (metric && typeof metric === "object") {
+          records.push(metric as Record<string, unknown>);
+        }
+      }
+    }
+  }
+  return records;
+}
+
+/**
+ * Issue #5082 (S2, observability program #5080) — the OTLP
+ * metrics ingestion handler: OTLP/JSON metrics in, R2 archive
+ * out. The same contract as handleOtelLogsIngestion (one JSONL
+ * object per batch under otel-archive/<YYYY-MM-DD>/, R2
+ * fallback to the structured log, 400 on a malformed payload,
+ * 500 on an R2 write failure), over the metrics payload shape
+ * (resourceMetrics, not resourceLogs). The metrics archive
+ * lives under the same otel-archive/ prefix as the logs
+ * archive; the two signals are distinguished by the payload
+ * shape, not by a second prefix.
+ */
+export async function handleOtelMetricsIngestion(
+  input: OtelIngestionInput,
+): Promise<OtelIngestionResult> {
+  const { blobStore } = input;
+  const now = input.now ?? (() => new Date());
+  const newId = input.newId ?? defaultId;
+  const log = input.log ?? NOOP_OTEL_INGESTION_LOG;
+
+  let text: string;
+  if (typeof input.body === "string") {
+    text = input.body;
+  } else {
+    text = new TextDecoder().decode(input.body);
+  }
+
+  let payload: unknown;
+  try {
+    payload = JSON.parse(text) as unknown;
+  } catch {
+    const error = formatOtelMessage(OBS_INGEST_REJECTED, "OTLP ingestion rejected: malformed JSON");
+    log.error(error);
+    return { status: 400, received: 0, stored: false, error, code: OBS_INGEST_REJECTED };
+  }
+
+  const records = collectMetricRecords(payload);
+  if (records === null) {
+    const error = formatOtelMessage(
+      OBS_INGEST_REJECTED,
+      "OTLP ingestion rejected: payload has no resourceMetrics array",
+    );
+    log.error(error);
+    return { status: 400, received: 0, stored: false, error, code: OBS_INGEST_REJECTED };
+  }
+
+  if (!blobStore) {
+    for (const record of records) {
+      log.info(JSON.stringify(record));
+    }
+    return { status: 202, received: records.length, stored: false, fallback: "console" };
+  }
+
+  const key = `${OTEL_ARCHIVE_PREFIX}${datePrefix(now())}/${newId()}.jsonl`;
+  const jsonl = records.map((record) => JSON.stringify(record)).join("\n") + (records.length ? "\n" : "");
+  try {
+    await blobStore.put(key, new TextEncoder().encode(jsonl), {
+      contentType: "application/json",
+    });
+  } catch (error) {
+    const message = formatOtelMessage(
+      OBS_INGEST_FAILED,
+      `OTLP ingestion failed writing ${key} to R2: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    log.error(message);
+    return {
+      status: 500,
+      received: records.length,
+      stored: false,
+      error: message,
+      code: OBS_INGEST_FAILED,
+    };
+  }
+  return { status: 202, received: records.length, stored: true, key };
+}

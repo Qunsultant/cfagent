@@ -42,8 +42,8 @@ describe("options product slice 2 provider context", () => {
     expect(DEFAULT_DATA_PROVIDER_ID).toBe(DEFAULT_TENANT_PROVIDERS.dataProviderId);
     expect(DEFAULT_BROKER_ID).toBe(DEFAULT_TENANT_PROVIDERS.brokerId);
     expect([...DATA_PROVIDER_IDS].sort()).toEqual(["alpaca", "etrade", "nasdaq", "public", "yahoo"]);
-    // Issue #3990: Public joins the broker list.
-    expect([...BROKER_IDS].sort()).toEqual(["alpaca", "etrade", "public"]);
+    // Issue #3990, #4675: Public and Tastytrade join the broker list.
+    expect([...BROKER_IDS].sort()).toEqual(["alpaca", "etrade", "public", "tastytrade"]);
   });
 
   it("defaults to the platform defaults (alpaca data / alpaca broker, #3990) and flags the fallback on absent input", () => {
