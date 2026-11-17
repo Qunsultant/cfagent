@@ -29,10 +29,12 @@
 
 import type {
   BrokerAccount,
+  BrokerActivity,
   BrokerCancelOrderResult,
   BrokerOrderDraft,
   BrokerOrderExecutionResult,
   BrokerPosition,
+  BrokerPositionLot,
   BrokerRemoteOrder,
 } from "../types";
 import type { TradingOrderLeg, OrderPreviewParams, PlaceOrderParams } from "../trading";
@@ -354,6 +356,178 @@ function mapPublicOrderStatus(raw: string | undefined): BrokerRemoteOrder["statu
     default:
       return "UNKNOWN";
   }
+}
+
+/* --------------------- account activity / tax lots ------------------- */
+
+/**
+ * Issue #4673 (matrix gap 19): a timestamp from the broker's own field
+ * candidates. Epoch seconds and milliseconds are both accepted (a value
+ * below 1e12 is seconds); an ISO string is parsed as-is. Undefined =
+ * the row carries no date, and the caller skips it rather than
+ * stamping the fetch instant on a broker fact.
+ */
+function epochMs(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value < 1e12 ? Math.round(value * 1000) : Math.round(value);
+  }
+  if (typeof value === "string" && value.trim() !== "") {
+    const numeric = Number(value);
+    if (Number.isFinite(numeric)) return numeric < 1e12 ? Math.round(numeric * 1000) : Math.round(numeric);
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  return undefined;
+}
+
+function instrumentSymbol(row: Record<string, unknown>): string | undefined {
+  const direct = str(pickField(row, ["symbol", "ticker"]));
+  if (direct) return direct;
+  const instrument = isRecord(row.instrument) ? row.instrument : undefined;
+  return instrument ? str(pickField(instrument, ["symbol", "ticker"])) : undefined;
+}
+
+/**
+ * Issue #4673 (matrix gap 19): the broker's transaction history in its
+ * own vocabulary — trades, money movements (deposit / withdrawal /
+ * dividend) and position adjustments (split / merger). The type word is
+ * carried verbatim, never normalized into a platform enum the payload
+ * did not state. A row without an id, a type or a date is skipped: the
+ * neutral row has no honest value for it, and inventing one would make
+ * the activity table claim a fact the broker never sent.
+ */
+export function parsePublicActivity(payload: unknown): BrokerActivity[] {
+  const rows = firstArray(payload, [
+    "transactions",
+    "activity",
+    "activities",
+    "history",
+    "items",
+    "records",
+    "data",
+  ]);
+  if (!rows) return [];
+  const out: BrokerActivity[] = [];
+  for (const row of rows) {
+    if (!isRecord(row)) continue;
+    const activityId = str(
+      pickField(row, ["transaction_id", "transactionId", "activity_id", "activityId", "id"])
+    );
+    const activityType = str(
+      pickField(row, [
+        "type",
+        "activity_type",
+        "activityType",
+        "transaction_type",
+        "transactionType",
+        "kind",
+        "event_type",
+      ])
+    );
+    const activityDate = epochMs(
+      pickField(row, [
+        "timestamp",
+        "time",
+        "date",
+        "created_at",
+        "createdAt",
+        "activity_date",
+        "activityDate",
+        "trade_date",
+        "tradeDate",
+      ])
+    );
+    if (!activityId || !activityType || activityDate === undefined) continue;
+    const activity: BrokerActivity = { activityId, activityType, activityDate };
+    const symbol = instrumentSymbol(row);
+    if (symbol) activity.symbol = symbol;
+    const quantity = num(pickField(row, ["quantity", "qty", "shares"]));
+    if (quantity !== undefined) activity.quantity = quantity;
+    const price = num(pickField(row, ["price", "average_price", "averagePrice", "fill_price", "fillPrice"]));
+    if (price !== undefined) activity.price = price;
+    const netAmount = num(pickField(row, ["net_amount", "netAmount", "amount", "total", "value"]));
+    if (netAmount !== undefined) activity.netAmount = netAmount;
+    const orderId = str(pickField(row, ["order_id", "orderId"]));
+    if (orderId) activity.orderId = orderId;
+    out.push(activity);
+  }
+  return out;
+}
+
+/**
+ * Issue #4673 (matrix gap 19): the account's open tax lots — one row per
+ * lot, not a re-derived average. The payload's holding term is a word
+ * (short / long / 60-40), so it is not forced onto the neutral shape's
+ * numeric termCode: that code is a different broker's vocabulary, and
+ * inventing one would state something the payload did not. A lot
+ * without an id or a quantity is skipped for the same reason as an
+ * activity row.
+ */
+export function parsePublicTaxLots(payload: unknown): BrokerPositionLot[] {
+  const rows = firstArray(payload, [
+    "tax_lots",
+    "taxLots",
+    "lots",
+    "positions",
+    "items",
+    "records",
+    "data",
+  ]);
+  if (!rows) return [];
+  const out: BrokerPositionLot[] = [];
+  for (const row of rows) {
+    if (!isRecord(row)) continue;
+    const positionLotId = str(
+      pickField(row, [
+        "lot_id",
+        "lotId",
+        "tax_lot_id",
+        "taxLotId",
+        "position_lot_id",
+        "positionLotId",
+        "id",
+      ])
+    );
+    const quantity = num(
+      pickField(row, ["quantity", "qty", "shares", "remaining_quantity", "remainingQty"])
+    );
+    if (!positionLotId || quantity === undefined) continue;
+    const lot: BrokerPositionLot = {
+      positionLotId,
+      originalQty: quantity,
+      remainingQty: quantity,
+    };
+    const available = num(pickField(row, ["available_quantity", "availableQuantity", "availableQty"]));
+    if (available !== undefined) lot.availableQty = available;
+    const adjPrice = num(
+      pickField(row, ["cost_basis_per_share", "costBasisPerShare", "adjusted_cost_basis", "adjustedCostBasis"])
+    );
+    if (adjPrice !== undefined) lot.adjPrice = adjPrice;
+    const totalCost = num(pickField(row, ["cost_basis", "costBasis", "total_cost", "totalCost"]));
+    if (totalCost !== undefined) lot.totalCost = totalCost;
+    const marketValue = num(pickField(row, ["market_value", "marketValue", "value"]));
+    if (marketValue !== undefined) lot.marketValue = marketValue;
+    const acquiredDate = epochMs(
+      pickField(row, ["acquired_date", "acquiredDate", "purchase_date", "purchaseDate", "open_date", "openDate"])
+    );
+    if (acquiredDate !== undefined) lot.acquiredDate = acquiredDate;
+    const totalGain = num(
+      pickField(row, ["unrealized_gain_loss", "unrealizedGainLoss", "unrealized_gain", "gain_loss", "total_gain"])
+    );
+    if (totalGain !== undefined) lot.totalGain = totalGain;
+    const totalGainPct = num(
+      pickField(row, [
+        "unrealized_gain_loss_percent",
+        "unrealizedGainLossPercent",
+        "gain_loss_percent",
+        "gainLossPercent",
+        "gain_percent",
+      ])
+    );
+    if (totalGainPct !== undefined) lot.totalGainPct = totalGainPct;
+    out.push(lot);
+  }
+  return out;
 }
 
 export function parsePublicOrders(payload: unknown): BrokerRemoteOrder[] {

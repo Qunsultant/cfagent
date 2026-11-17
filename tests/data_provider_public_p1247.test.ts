@@ -160,6 +160,22 @@ const FIXTURE_TOOLS = [
       required: ["symbol", "expiration_date", "account_id"],
     },
   },
+  // Issue #4673: verified on the live surface; the conformance probe now
+  // exercises the adapter's historicalBars capability through it.
+  {
+    name: "get_price_history",
+    description: "Historical OHLCV bars",
+    inputSchema: {
+      type: "object",
+      properties: {
+        symbol: { type: "string" },
+        period: { type: "string" },
+        aggregation: { type: "string" },
+        instrument_type: { type: "string" },
+      },
+      required: ["symbol", "period"],
+    },
+  },
 ];
 
 const QUOTES_PAYLOAD = {
@@ -227,6 +243,28 @@ const CHAIN_PAYLOAD = {
   ],
 };
 
+/** Issue #4673: bars for the conformance probe (the live tool returns session buckets). */
+const BARS_PAYLOAD = {
+  regular: [
+    {
+      time: "2026-11-02T14:30:00Z",
+      open: 230.1,
+      high: 233.4,
+      low: 229.8,
+      close: 232.5,
+      volume: 123456,
+    },
+    {
+      time: "2026-11-03T14:30:00Z",
+      open: 232.6,
+      high: 234.1,
+      low: 231.9,
+      close: 233.8,
+      volume: 98765,
+    },
+  ],
+};
+
 interface RecordedCall {
   url: string;
   method: string;
@@ -254,6 +292,7 @@ function makeFakeNetwork(overrides: {
     get_quotes: JSON.stringify(QUOTES_PAYLOAD),
     get_option_expirations: JSON.stringify(EXPIRATIONS_PAYLOAD),
     get_option_chain: JSON.stringify(CHAIN_PAYLOAD),
+    get_price_history: JSON.stringify(BARS_PAYLOAD),
     ...(overrides.toolText ?? {}),
   };
   const fetchImpl = async (input: any, init: any = {}): Promise<Response> => {
@@ -1041,7 +1080,7 @@ describe("public adapter", () => {
     const net = makeFakeNetwork();
     const provider = createPublicDataProvider(staticClient(PERSONAL_TOKEN, net));
     expect(provider.id).toBe("public");
-    expect(provider.capabilities).toEqual(["quotes", "optionsChains"]);
+    expect(provider.capabilities).toEqual(["quotes", "optionsChains", "historicalBars"]);
     const quote = await provider.getQuote!("AAPL");
     expect(quote.providerId).toBe("public");
     expect(quote.capability).toBe("quotes");
@@ -1091,7 +1130,7 @@ describe("public adapter", () => {
     const report = await runDataProviderConformance(provider);
     expect(report.providerId).toBe("public");
     expect(report.ok).toBe(true);
-    expect(report.checks.map((c) => c.capability)).toEqual(["quotes", "optionsChains"]);
+    expect(report.checks.map((c) => c.capability)).toEqual(["quotes", "optionsChains", "historicalBars"]);
   });
 
   it("without a token the fetch fails honestly (no fabricated data)", async () => {
@@ -1175,7 +1214,7 @@ describe("public registration and lifecycle", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as any;
     const pub = body.providers.find((p: any) => p.id === "public");
-    expect(pub.declaredCapabilities).toEqual(["quotes", "optionsChains"]);
+    expect(pub.declaredCapabilities).toEqual(["quotes", "optionsChains", "historicalBars"]);
     expect(pub.lifecycleState).toBe("registered");
     // Ships disabled: with only the seeds in place, no route resolves.
     expect(body.routes.every((r: any) => r.resolves === false)).toBe(true);

@@ -59,6 +59,12 @@ export const PUBLIC_TRADING_TOOL_ALLOWLIST = [
   "get_order",
   "search_orders",
   "get_portfolio",
+  // Issue #4673 (matrix gap 19): the account-scoped data reads the
+  // live tools/list probe verified. They are not market data, so they
+  // ride this client, never the read-only data adapter's list.
+  "get_history",
+  "get_tax_lots",
+  "get_tax_lots_for_symbol",
   "get_option_greek",
   "get_option_greeks",
 ] as const;

@@ -82,7 +82,7 @@ export type { BrokerId, DataProviderCapability };
 
 const DATA_PROVIDER_CAPABILITIES: Record<DataProviderId, readonly DataProviderCapability[]> = {
   etrade: ["quotes", "optionsChains"],
-  public: ["quotes", "optionsChains"],
+  public: ["quotes", "optionsChains", "historicalBars"],
   yahoo: ["quotes", "historicalBars", "fundamentals", "news"],
   nasdaq: ["screenUniverse"],
   alpaca: ["quotes", "historicalBars", "optionsChains", "news"],

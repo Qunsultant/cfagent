@@ -36,10 +36,12 @@ import type {
 } from "../interfaces";
 import type {
   BrokerAccount,
+  BrokerActivity,
   BrokerCancelOrderResult,
   BrokerOrderDraft,
   BrokerOrderExecutionResult,
   BrokerPosition,
+  BrokerPositionLot,
   BrokerQuote,
   BrokerRemoteOrder,
   BrokerStatus,
@@ -51,8 +53,10 @@ import { createPublicDataProviderFromEnv } from "../dataProviders/adapters";
 import { PublicTradingMcpClient } from "../../mcps/public/publicTradingMcp";
 import {
   parsePublicAccounts,
+  parsePublicActivity,
   parsePublicOrders,
   parsePublicPositions,
+  parsePublicTaxLots,
   publicCancelReceipt,
   publicDraftFromPreflight,
   publicAuctionOrderType,
@@ -68,6 +72,7 @@ import { getPublicAccessToken, getPublicCredentialSource } from "../../security/
 import { AGENT_DIDS, createDidAttestationSync, getUserDid } from "../../agents/did";
 import { decodeOrderPriceSource, encodeOrderPriceSource } from "../quotePolicies";
 import { computeBracketExits } from "../bracketPercent";
+import { publicActivityPageSize } from "../../config/publicData";
 import { NeutralMarketScreener } from "../neutralMarketScreener";
 import { platformQuoteSource } from "../stockQuoteSource";
 import type { StockScreenerFilter, StockScreenResult } from "../../types";
@@ -311,18 +316,70 @@ export class PublicTradingPlatform implements ITradingPlatform {
     return new NeutralMarketScreener({ quoteSource: platformQuoteSource(this) }).screenMarkets(filter);
   }
 
-  async getPositions(): Promise<{ account: BrokerAccount; positions: BrokerPosition[] }> {
-    const [accounts, portfolio] = await Promise.all([
-      this.getAccounts(),
-      this.trading.callTradingTool("get_portfolio", {}).then((t) => this.trading.parseResult(t)),
-    ]);
-    const { positions, buyingPower } = parsePublicPositions(portfolio);
+  /**
+   * The first account id this credential can see. The account-scoped
+   * tools (get_portfolio, get_history, get_tax_lots*) declare
+   * account_id as REQUIRED in the live schema, so every one of them is
+   * fed from here rather than called bare (issue #4673 fixed the bare
+   * get_portfolio call this method replaced).
+   */
+  private async resolveAccount(): Promise<{ account: BrokerAccount; accountId: string }> {
+    const accounts = await this.getAccounts();
     const account = accounts[0];
     if (!account) {
-      throw new Error("no Public.com account was found for this token; connect Public in Settings first.");
+      throw new Error("no Public account was found for this token; connect Public in Settings first.");
     }
+    return { account, accountId: account.accountId };
+  }
+
+  async getPositions(): Promise<{ account: BrokerAccount; positions: BrokerPosition[] }> {
+    const { account, accountId } = await this.resolveAccount();
+    const portfolio = this.trading.parseResult(
+      await this.trading.callTradingTool("get_portfolio", {
+        accountId: { names: ["account_id", "accountId"], value: accountId },
+      })
+    );
+    const { positions, buyingPower } = parsePublicPositions(portfolio);
     if (buyingPower !== undefined) account.cashAvailableForInvestment = buyingPower;
     return { account, positions };
+  }
+
+  /**
+   * Issue #4673 (matrix gap 19): the broker's own account activity
+   * (get_history on the verified surface) — trades, money movements
+   * (deposit / withdrawal / dividend) and position adjustments (split /
+   * merger). The type word is carried verbatim; a caller's filter is an
+   * exact match on that word, never a translated enum.
+   */
+  async getAccountActivity(activityType?: string): Promise<BrokerActivity[]> {
+    const { accountId } = await this.resolveAccount();
+    const text = await this.trading.callTradingTool("get_history", {
+      accountId: { names: ["account_id", "accountId"], value: accountId },
+      pageSize: { names: ["page_size", "pageSize"], value: publicActivityPageSize() },
+    });
+    const activities = parsePublicActivity(this.trading.parseResult(text));
+    return activityType ? activities.filter((a) => a.activityType === activityType) : activities;
+  }
+
+  /**
+   * Issue #4673 (matrix gap 19): one row per open tax lot, from
+   * get_tax_lots_for_symbol. Public's position rows carry no numeric
+   * position id, so the neutral positionId argument is the symbol — the
+   * only identifier the broker's own lot tool accepts.
+   */
+  async getPositionLots(accountKey: string, positionId: string): Promise<BrokerPositionLot[]> {
+    const symbol = String(positionId ?? "").trim().toUpperCase();
+    if (!symbol) {
+      throw new Error(
+        "a Public tax-lot read needs the position's symbol (this broker's positions carry no numeric id)."
+      );
+    }
+    const accountId = accountKey || (await this.resolveAccount()).accountId;
+    const text = await this.trading.callTradingTool("get_tax_lots_for_symbol", {
+      symbol: { names: ["symbol", "ticker"], value: symbol },
+      accountId: { names: ["account_id", "accountId"], value: accountId },
+    });
+    return parsePublicTaxLots(this.trading.parseResult(text));
   }
 
   async previewOrder(params: OrderPreviewParams): Promise<BrokerOrderDraft> {
