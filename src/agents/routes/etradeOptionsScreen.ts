@@ -40,6 +40,10 @@ import { recordOptionsRunOutcome, storeOptionsCanonicalReport } from "../../serv
 import { resolveTenantProviders, type BrokerId } from "../../services/tenantProviders";
 import type { Env } from "../../types";
 import { resolveTenantProviderContext, withProviderProvenance } from "../../services/optionsProviderContext";
+import {
+  resolveUnifiedScanHostDispatch,
+  runUnifiedScanViaHost,
+} from "../../services/unifiedScanHostDispatch";
 import { getEventCalendarCoverage, toEventCalendarInfo } from "../../services/eventCalendar";
 import type { EtradeOptionsRouteContext } from "./etradeOptions";
 import { createOptionsScreenPorts, optionsArtifactKey } from "../../workflows/optionsScreenPorts";
@@ -388,12 +392,9 @@ async function runUnifiedOpportunitiesViaPipeline(args: {
   }
   const { engineClient, platformRunId } = await service.resolveEngineClient();
   const runId = `options_scanner:unified:${new Date().toISOString()}:${reqData.thesis || "mixed"}`;
-  const outcome = await runOptionsScreenViaEngine(
-    {
-      runId,
-      userLogin,
-      trigger: "manual",
-      request: {
+  // Issue #4893 — the scan envelope, extracted verbatim so the host
+  // dispatch and the sync dispatch below serve the same request.
+  const request = {
         assetClass: "options",
         runIdentity: { runId },
         trigger: "manual",
@@ -463,7 +464,34 @@ async function runUnifiedOpportunitiesViaPipeline(args: {
           },
           ...(platformRunId ? { platformRunId } : {}),
         },
-      } as ScannerPipelineRequest,
+      } as ScannerPipelineRequest;
+  // Issue #4893 — the gated cutover: the host serves this scan only
+  // when the leg's (broker, mode) pair derives from the tenant
+  // selection and the residency bindings are configured; the
+  // engine-client resolution above still runs on the host path (it
+  // mints the platform run id the host-side save records under, and
+  // performs the platform bootstrap). Anything else falls through to
+  // the unchanged sync dispatch below.
+  const { decision: dispatchDecision, broker: dispatchBroker } =
+    await resolveUnifiedScanHostDispatch(ctx.env, ctx.requestedEnv);
+  if (dispatchDecision.route === "host" && dispatchBroker) {
+    const shaped = await runUnifiedScanViaHost({
+      env: ctx.env,
+      request,
+      runId,
+      userLogin,
+      broker: dispatchBroker,
+      ...(platformRunId ? { platformRunId } : {}),
+      scanRunStore: discoveryPorts.scanRuns,
+    });
+    return service.formatResponse(reqData, shaped, buildOpportunityScanSummary(shaped), false);
+  }
+  const outcome = await runOptionsScreenViaEngine(
+    {
+      runId,
+      userLogin,
+      trigger: "manual",
+      request,
     },
     {
       stages: createScannerScreenPorts({
