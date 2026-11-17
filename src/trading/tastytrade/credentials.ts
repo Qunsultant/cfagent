@@ -71,8 +71,14 @@ export function tastytradeTradingSide(env: Env, overrideEnv?: string): Tastytrad
   if (selection === "TEST") return "paper";
   if (selection === "PROD") return "live";
 
-  const base = String(env.TASTYTRADE_BASE_URL ?? "");
-  return base && !base.includes("cert.tastyworks.com") ? "live" : "paper";
+  const base = String(env.TASTYTRADE_BASE_URL ?? "").trim();
+  if (!base) return "paper";
+  try {
+    const host = new URL(base).hostname.toLowerCase();
+    return host === "api.cert.tastyworks.com" ? "paper" : "live";
+  } catch {
+    return "paper";
+  }
 }
 
 export function resolveTastytradeBaseUrl(env: Env, overrideEnv?: string): string {
