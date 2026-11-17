@@ -304,6 +304,17 @@ function wrapD1Database(
   emit: (emit: QueryEmit) => void,
   nowMs: () => number,
 ): D1Database {
+  // An unbound/missing binding is not a query to observe: drizzle()
+  // itself constructs fine around it and the refusal surfaces
+  // downstream by name (e.g. feed_parity_3941's "dataset store
+  // unbound" case, where env.AGENT_DB is undefined). A Proxy requires
+  // an object target, so pass the binding through untouched — that
+  // keeps construction-time behavior byte-identical to a bare
+  // drizzle() call, and any use-time failure behaves exactly as
+  // before. The logger simply observes nothing with no binding.
+  if (d1 === null || (typeof d1 !== "object" && typeof d1 !== "function")) {
+    return d1;
+  }
   return new Proxy(d1, {
     get(target, prop) {
       if (prop === "prepare") {
