@@ -43,6 +43,25 @@ export const STMT_ARCHIVE_LIST =
   "SELECT key, value FROM kv_store WHERE ns = ? AND key LIKE ? ORDER BY key";
 export const STMT_ARCHIVE_INSERT =
   "INSERT INTO kv_store (ns, key, value, expires_at) VALUES (?, ?, ?, NULL)";
+/**
+ * #3251 (O1) — the IAAA audit append-only table (`iaaa_audit_events`,
+ * one row per event, seq = 1-based chain position, dense by
+ * construction: the table is append-only, no delete exists, so
+ * COUNT(*) + 1 is the next seq and the tail row carries its own
+ * seq). These templates are the kv_store funnel's siblings: the
+ * SessionStore DO's statements live here, in the layer, and the
+ * census's by-table rule names this file as the table's writer
+ * set and DDL ensurer (see tests/do_dml_mechanism_mix_4385.test.ts
+ * NAMED_EXEMPTIONS — write 4, read 7 after this slice).
+ */
+export const STMT_AUDIT_TABLE_TAIL =
+  "SELECT seq, event_json FROM iaaa_audit_events ORDER BY seq DESC LIMIT 1";
+export const STMT_AUDIT_TABLE_COUNT =
+  "SELECT COUNT(*) AS n FROM iaaa_audit_events";
+export const STMT_AUDIT_TABLE_INSERT =
+  "INSERT INTO iaaa_audit_events (seq, event_json) VALUES (?, ?)";
+export const STMT_AUDIT_TABLE_LIST =
+  "SELECT seq, event_json FROM iaaa_audit_events ORDER BY seq ASC";
 
 export interface Measured<T> {
   rows: T[];
@@ -103,6 +122,13 @@ export class DoSessionStoreAdapter {
     sql.exec(
       doTableSql("kv_store"),
     );
+    // #3251 (O1) — the IAAA audit append-only table. Executed
+    // through this adapter's own exec funnel (not a second
+    // `sql.exec` site — the census pins the adapter at exactly
+    // two sql.exec sites, tests/global_dd_census_2356.test.ts);
+    // CREATE TABLE IF NOT EXISTS, so the call stays idempotent
+    // exactly like the kv_store line above it.
+    this.exec(doTableSql("iaaa_audit_events"));
     runDoSchemaMigration(
       {
         exec: (query: string, ...params: unknown[]) =>

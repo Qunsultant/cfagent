@@ -79,6 +79,10 @@ export interface StoreReply {
   event?: unknown;
   /** #1760: the audit-append op refused the event: the store is at its total cap. */
   storeFull?: boolean;
+  /** #3251: events migrated by the audit-migrate op (0 when the table already holds rows). */
+  migrated?: number;
+  /** #3251: the audit-migrate op found the table already populated. */
+  alreadyMigrated?: boolean;
   /** Platform-measured rows for this op (#1819); absent from older replies. */
   rowsRead?: number;
   rowsWritten?: number;
@@ -113,6 +117,13 @@ function classifyStoreOutcome(op: string, reply: StoreReply): StoreOpOutcome {
       // #1760: a storeFull refusal is a failed append, not a success
       // — counting it "ok" would hide cap exhaustion in the metrics.
       return reply.storeFull === true || reply.ok !== true ? "failed" : "ok";
+    case "audit-list":
+      return Array.isArray(reply.entries) ? "ok" : "failed";
+    case "audit-migrate":
+      // #3251: a migrated: 0 reply is still ok when the table
+      // already holds rows (alreadyMigrated) — the migration is
+      // idempotent, not a failure.
+      return reply.ok === true ? "ok" : "failed";
     case "list":
       return Array.isArray(reply.entries) ? "ok" : "failed";
     default:

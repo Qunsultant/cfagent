@@ -18,10 +18,10 @@
  *    leading/trailing whitespace of the adapters' template literals.
  *  - The expected-model fixture
  *    (tests/schema_component_do_expected_model.json): the DO model
- *    built by executing the 103 catalogue statements (parameterized
+ *    built by executing the 104 catalogue statements (parameterized
  *    mas_reports entries resolved with their table) plus the two
  *    ORM-catalogue indexes the DO adapters execute, through the P0
- *    InMemorySchemaInstance — 66 tables, 39 indexes. Regenerate only
+ *    InMemorySchemaInstance — 67 tables, 39 indexes. Regenerate only
  *    with the generator script
  *    ~/workspace/w4282/evidence-p2b/gen-do-catalogue.ts run against
  *    the base tree, and review the refreshed fixture in the PR diff:
@@ -34,7 +34,7 @@
  *    execute exactly these lists — statement text unchanged, no logic
  *    change.
  *
- * Scope correction (measured on the tip, not the filing counts): 103
+ * Scope correction (measured on the tip, not the filing counts): 104
  * statements, not the filed ~112. The filing's "76 TABLE / 35 INDEX"
  * is a grep count — 9 of the 77 TABLE lines are comment mentions,
  * 2 are the frozen JobPipeline v1 migration copies, and 2 of the
@@ -164,6 +164,7 @@ import { listAppliedDoSchemaMigrations } from "../src/data/doSchemaMigrations";
 
 /** sha256 of each catalogue entry's statement, measured from the base helpers. */
 const DO_STATEMENT_SHA256: Record<string, string> = {
+  "schema.do.iaaa_audit_events.create_table": "b5203033167ffa5f40d52a439f9da86bb9edf6437d3d6760e2ba89315345d010",
   "schema.do.job_analyzed_datasets.create_table": "27e6d73511b1f28cde32f099b94ce509fbbd86bce368bfcb3eb68d19211e9c15",
   "schema.do.job_delivery_datasets.create_table": "9b2956cad80923dda2660f45541488b0da2d26ef5f2b18c18638afafef2d9054",
   "schema.do.job_enriched_datasets.create_table": "d86886dbf7ed0391ad5d3d4454fe8f89d3530fcc22afad37e4e8a17322e0d969",
@@ -542,11 +543,11 @@ const DO_DELEGATED_FILES: string[] = [
 const DO_REMAINING_INLINE_DDL: string[] = [];
 
 describe("DO catalogue — adapters delegate (#4282 P2b)", () => {
-  it("catalogues all 103 DO statements: 66 table + 36 index + 1 unique-index", () => {
+  it("catalogues all 104 DO statements: 67 table + 36 index + 1 unique-index", () => {
     const catalogue = buildDoCatalogue();
-    expect(DO_CATALOGUE_ENTRIES.length).toBe(103);
-    expect(catalogue.size()).toBe(103);
-    expect(catalogue.byKind("schema").length).toBe(103);
+    expect(DO_CATALOGUE_ENTRIES.length).toBe(104);
+    expect(catalogue.size()).toBe(104);
+    expect(catalogue.byKind("schema").length).toBe(104);
     const verbs = new Map<string, number>();
     const classify = (statement: string): string => {
       const upper = statement.trim().toUpperCase();
@@ -566,20 +567,20 @@ describe("DO catalogue — adapters delegate (#4282 P2b)", () => {
       const verb = classify(entry.statement);
       verbs.set(verb, (verbs.get(verb) ?? 0) + 1);
     }
-    expect(verbs.get("CREATE TABLE")).toBe(66);
+    expect(verbs.get("CREATE TABLE")).toBe(67);
     expect(verbs.get("CREATE INDEX")).toBe(36);
     expect(verbs.get("CREATE UNIQUE INDEX")).toBe(1);
     expect(verbs.get("OTHER")).toBeUndefined();
     // Every code is unique and every entry is reachable by its code.
     const codes = new Set(DO_CATALOGUE_ENTRIES.map((e) => e.code));
-    expect(codes.size).toBe(103);
+    expect(codes.size).toBe(104);
     for (const entry of DO_CATALOGUE_ENTRIES) {
       expect(catalogue.get(entry.code).statement).toBe(entry.statement);
     }
     // Planes: DO tables on "do", indexes on "index".
     expect(
       DO_CATALOGUE_ENTRIES.filter((e) => e.plane === "do").length,
-    ).toBe(66);
+    ).toBe(67);
     expect(
       DO_CATALOGUE_ENTRIES.filter((e) => e.plane === "index").length,
     ).toBe(37);
@@ -605,7 +606,7 @@ describe("DO catalogue — adapters delegate (#4282 P2b)", () => {
   });
 
   it("each entry's statement is byte-identical to the base (sha256 pin)", () => {
-    expect(Object.keys(DO_STATEMENT_SHA256).length).toBe(103);
+    expect(Object.keys(DO_STATEMENT_SHA256).length).toBe(104);
     for (const entry of DO_CATALOGUE_ENTRIES) {
       const digest = createHash("sha256")
         .update(entry.statement, "utf8")
@@ -616,7 +617,7 @@ describe("DO catalogue — adapters delegate (#4282 P2b)", () => {
 
   it("equality pin: the catalogue builds the base DO schema exactly", () => {
     const expected = expectedDoModel();
-    expect(Object.keys(expected.tables).length).toBe(66);
+    expect(Object.keys(expected.tables).length).toBe(67);
     expect(Object.keys(expected.indexes).length).toBe(39);
     // runEqualityCheck passes no parameters, and the catalogue holds
     // parameterized entries — resolve them manually, exactly as the

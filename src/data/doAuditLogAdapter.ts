@@ -5,12 +5,14 @@
  * client in security/iaaaAuditStore.ts is: the audit-append
  * sender and the entry lister are built by the composition
  * root (createAuditPorts.ts) from createStoreSender /
- * listStoreEntries over the SAME SessionStore instance,
+ * the DO's `audit-list` op over the SAME SessionStore instance,
  * bucket "sessions" — so wire payloads and store_op metrics
  * behaviour are byte-identical to the flag-off path by
  * construction (same funnel, same payload shapes, and the
- * append remains the DO's own `audit-append` op: Q-1, the
- * mechanism does not move).
+ * append remains the DO's own `audit-append` op: #3251 (O1)
+ * moves the substrate behind that op to the append-only table
+ * on the flag-ON composition, while the flag-OFF client keeps
+ * the segment substrate).
  *
  * #CDO-mha7
  */

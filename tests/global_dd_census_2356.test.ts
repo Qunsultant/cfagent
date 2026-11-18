@@ -916,6 +916,14 @@ function funnelCallSites(): Array<[string, string, string]> {
  *  "sessions", inside its one shared backend builder). The
  *  root the flag-on path composes through is pinned in the
  *  STEP5D section below.
+ *  #3251 (O1) delta, honestly recorded: the audit root's
+ *  listStoreEntries site RETIRES — the flag-ON list seam moves
+ *  from the generic `list` op into the audit family's own
+ *  `audit-list` op on the same shared createStoreSender, so
+ *  the root composes exactly one funnel site
+ *  (createStoreSender "sessions"). The flag-off branch is
+ *  untouched: iaaaAuditStore.ts's listStoreEntries site
+ *  REMAINS.
  *  Step 5e (#2436) delta, honestly recorded: the funnel
  *  itself MOVES into the data layer (src/security/durableKv.ts
  *  → src/data/durableKv.ts, a rename — every importer now
@@ -941,7 +949,6 @@ const STEP5_FUNNEL_SITES: Array<[string, string, string]> = [
   ["src/agents/routes/kvWipe.ts", "listStoreEntries", "etrade"],
   ["src/agents/routes/kvWipe.ts", "listStoreEntries", "sessions"],
   ["src/data/createAuditPorts.ts", "createStoreSender", "sessions"],
-  ["src/data/createAuditPorts.ts", "listStoreEntries", "sessions"],
   ["src/data/createBucketPorts.ts", "createStoreKv", "<dynamic>"],
   ["src/data/createBucketPorts.ts", "createStoreSender", "<dynamic>"],
   ["src/data/createSessionPorts.ts", "createStoreKv", "sessions"],
@@ -1142,8 +1149,10 @@ describe("global D-D census: step 5b — session family port composition sites (
       ["src/agents/routes/adminTenantQueues.ts", "listStoreEntries", "sessions"],
       ["src/agents/routes/adminTenantQueues.ts", "listStoreEntries", "sessions"],
       ["src/agents/routes/kvWipe.ts", "listStoreEntries", "sessions"],
+      // #3251 (O1): the audit root's listStoreEntries site retired —
+      // its list seam is the family's own `audit-list` op on the
+      // same shared createStoreSender.
       ["src/data/createAuditPorts.ts", "createStoreSender", "sessions"],
-      ["src/data/createAuditPorts.ts", "listStoreEntries", "sessions"],
       ["src/security/iaaaAuditStore.ts", "createStoreSender", "sessions"],
       ["src/security/iaaaAuditStore.ts", "listStoreEntries", "sessions"],
     ]);

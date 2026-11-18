@@ -554,6 +554,7 @@
       "trigger": "ensureSchema()",
       "queries": [
         "CREATE TABLE IF NOT EXISTS kv_store (\n         ns TEXT NOT NULL,\n         key TEXT NOT NULL,\n         value TEXT NOT NULL,\n         expires_at INTEGER,\n         PRIMARY KEY (ns, key)\n       )",
+        "CREATE TABLE IF NOT EXISTS iaaa_audit_events (\n      seq INTEGER PRIMARY KEY,\n      event_json TEXT NOT NULL\n    )",
         "CREATE TABLE IF NOT EXISTS mas_do_schema_marker (\n  id INTEGER PRIMARY KEY,\n  version INTEGER NOT NULL,\n  updated_at_ms INTEGER NOT NULL\n)",
         "SELECT version FROM mas_do_schema_marker WHERE id = 1",
         "CREATE TABLE IF NOT EXISTS mas_do_schema_marker (\n  id INTEGER PRIMARY KEY,\n  version INTEGER NOT NULL,\n  updated_at_ms INTEGER NOT NULL\n)",

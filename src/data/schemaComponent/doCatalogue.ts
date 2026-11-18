@@ -234,6 +234,17 @@ export const DO_CATALOGUE_ENTRIES: CatalogueEntry[] = [
     form: "literal",
   },
   {
+    code: "schema.do.iaaa_audit_events.create_table",
+    plane: "do",
+    table: "iaaa_audit_events",
+    statement: `CREATE TABLE IF NOT EXISTS iaaa_audit_events (
+      seq INTEGER PRIMARY KEY,
+      event_json TEXT NOT NULL
+    )`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
     code: "schema.do.kv_store.create_table",
     plane: "do",
     table: "kv_store",

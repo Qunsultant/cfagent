@@ -19,13 +19,20 @@
  *
  *  - sendAppend speaks ONE audit-append operation (the
  *    SessionStore DO op on the DO adapter; the in-memory
- *    op mirror on the in-memory adapter) — chaining,
- *    rotation and the cap live behind that op, server-side
- *    in the DO's case, exactly as they did before this
- *    slice (Q-1: the mechanism does not move);
- *  - listEntries returns the raw entries under the audit
- *    prefix in key order (archive segments first, then the
- *    live key), or null when the read failed.
+ *    op mirror on the in-memory adapter) — chaining and the
+ *    cap live behind that op, server-side in the DO's case,
+ *    exactly as they did before this slice; #3251 (O1) adds
+ *    the substrate: the payload carries `substrate: "table"`
+ *    on the flag-ON composition (the append-only table) and
+ *    omits it on the segment substrate, where rotation still
+ *    lives behind the op;
+ *  - listEntries returns the raw entries in chain order: on
+ *    the table substrate one entry per event (keys under the
+ *    `iaaa-audit:table:` prefix, value = one event JSON); on
+ *    the segment substrate one entry per JSON array (archive
+ *    segments first, then the live key), or null when the
+ *    read failed. list() dispatches on the key prefix, so the
+ *    two shapes share one read path.
  *
  * The reply mapping is the #1760 client's, unchanged: a
  * missing/error reply is AUDIT_WRITE_FAILED data, a
@@ -50,6 +57,7 @@ import {
   IAAA_AUDIT_DEFAULT_MAX_ARCHIVE_SEGMENTS,
   IAAA_AUDIT_DEFAULT_SEGMENT_SIZE,
   IAAA_AUDIT_LOG_KEY,
+  IAAA_AUDIT_TABLE_KEY_PREFIX,
   type AuditLogPort,
   type AuditLogPortOptions,
 } from "./auditLogPorts";
@@ -85,6 +93,10 @@ export function createAuditLogStore(
   const segmentSize = options.segmentSize ?? IAAA_AUDIT_DEFAULT_SEGMENT_SIZE;
   const maxArchiveSegments =
     options.maxArchiveSegments ?? IAAA_AUDIT_DEFAULT_MAX_ARCHIVE_SEGMENTS;
+  // #3251 (O1) — the substrate rides the append payload: the
+  // DO defaults to segments when it is absent, so the flag-OFF
+  // client (which never sends it) is byte-identical.
+  const substrate = options.substrate ?? "segments";
 
   return {
     async append(): Promise<void> {
@@ -112,6 +124,7 @@ export function createAuditLogStore(
         liveMax,
         segmentSize,
         maxArchiveSegments,
+        substrate,
       });
       if (!reply || reply.error) {
         return {
@@ -147,8 +160,12 @@ export function createAuditLogStore(
           "iaaa audit log could not be read; refusing to return partial evidence",
         );
       }
-      // Entries arrive sorted by key: archive segments first
-      // ("archive:" < "events"), then the live key — chain order.
+      // Entries arrive in chain order. A table entry (key under
+      // the `iaaa-audit:table:` prefix) holds ONE event JSON; a
+      // segment entry holds a JSON array (archive segments
+      // first, then the live key). The key — not the value
+      // shape — decides, so a bare event object stored under a
+      // segment key is still corrupt, exactly as before.
       const events: IaaaAuditEvent[] = [];
       for (const entry of entries) {
         let parsed: unknown;
@@ -156,6 +173,17 @@ export function createAuditLogStore(
           parsed = JSON.parse(entry.value);
         } catch {
           throw corruptError();
+        }
+        if (entry.key.startsWith(IAAA_AUDIT_TABLE_KEY_PREFIX)) {
+          if (
+            typeof parsed !== "object" ||
+            parsed === null ||
+            typeof (parsed as { eventHash?: unknown }).eventHash !== "string"
+          ) {
+            throw corruptError();
+          }
+          events.push({ ...(parsed as IaaaAuditEvent) });
+          continue;
         }
         if (!Array.isArray(parsed)) throw corruptError();
         for (const event of parsed as IaaaAuditEvent[]) {

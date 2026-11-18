@@ -12,7 +12,7 @@
  *    + the "__table__" parameterized placeholder (P6c, #4386) + the
  *    2 route-held tables (P6d, #4387: mas_job_outcomes_meta and
  *    mas_events, both template clears);
- *  - the remaining inline count is 231 (the 297-statement survey
+ *  - the remaining inline count is 235 (the 297-statement survey
  *    inventory on 1501f5f4, less the 53 migrated by P6b and the 16
  *    migrated by P6c, plus the 2 read sites #4507 added: the dedupe
  *    pair-scan and per-pair row-list SELECTs in
@@ -20,10 +20,13 @@
  *    reconciliation, not catalogue-migrated — plus the 1 read site
  *    #5235 added: the listAllWithDetail SELECT in
  *    doSqliteUsageEventAdapter.ts, the unfiltered meter read for
- *    the revenue-summary coverage cut) — a later slice moves
+ *    the revenue-summary coverage cut — plus the 4 templates #3251
+ *    added: the STMT_AUDIT_TABLE_* templates in
+ *    doSessionStoreAdapter.ts, the parameterized path for the
+ *    iaaa_audit_events append-only table) — a later slice moves
  *    this number down and updates this pin in the same PR;
  *  - the named exemptions are recorded here with their reasons
- *    (Q4): the doSchema* ledger (5) and the kv_store funnel (7);
+ *    (Q4): the doSchema* ledger (5) and the kv_store funnel (11);
  *  - the P6c boundary is CLOSED by #4386: doSqliteOrmAdapters.ts
  *    holds ZERO inline statements (its 16 went with P6c, Q5).
  *
@@ -122,10 +125,10 @@ const NAMED_EXEMPTIONS: Array<{
   },
   {
     file: "src/data/doSessionStoreAdapter.ts",
-    write: 3,
-    read: 4,
+    write: 4,
+    read: 7,
     reason:
-      "kv_store funnel: the session store's generic key/value funnel writes through one parameterized path for all session families; cataloguing it per family would fork the funnel.",
+      "kv_store funnel: the session store's generic key/value funnel writes through one parameterized path for all session families; cataloguing it per family would fork the funnel. The audit-table templates (STMT_AUDIT_TABLE_TAIL/COUNT/INSERT/LIST, #3251) are the same file's parameterized path for the iaaa_audit_events table.",
   },
 ];
 
@@ -190,7 +193,7 @@ describe("DO mechanism mix (#4385)", () => {
     ]);
   });
 
-  it("the remaining inline count is 231 (297 surveyed − 53 P6b − 16 P6c + 2 #4507 dedupe reads + 1 #5235 listAllWithDetail read)", () => {
+  it("the remaining inline count is 235 (297 surveyed − 53 P6b − 16 P6c + 2 #4507 dedupe reads + 1 #5235 listAllWithDetail read + 4 #3251 audit-table templates)", () => {
     let write = 0;
     let read = 0;
     for (const file of doFiles()) {
@@ -198,9 +201,9 @@ describe("DO mechanism mix (#4385)", () => {
       write += counts.write;
       read += counts.read;
     }
-    expect(write).toBe(111);
-    expect(read).toBe(120);
-    expect(write + read).toBe(231);
+    expect(write).toBe(112);
+    expect(read).toBe(123);
+    expect(write + read).toBe(235);
   });
 
   it("the named exemptions hold their recorded counts, with reasons", () => {
@@ -212,7 +215,7 @@ describe("DO mechanism mix (#4385)", () => {
       expect(read, `${exemption.file} read`).toBe(exemption.read);
       exemptTotal += write + read;
     }
-    expect(exemptTotal).toBe(12);
+    expect(exemptTotal).toBe(16);
   });
 
   it("the P6c boundary is closed: doSqliteOrmAdapters.ts holds zero inline statements", () => {

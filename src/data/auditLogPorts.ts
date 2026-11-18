@@ -16,22 +16,33 @@
  * composition root (createAuditPorts.ts) only when the flag
  * is on. Flag-off composition is today's atomic client in
  * iaaaAuditStore.ts, byte-identical; flag-on composition is
- * the adapters in this family over the SAME SessionStore DO
- * and the SAME kv_store table — the flag switches the
- * serving code path only. No data migration, no dual-write,
- * no change to any stored key or value shape: bytes written
- * before this slice (including pre-#1760 legacy-shape
- * segments) read and verify identically in both flag states
- * (pinned by the conformance suite's cross-composition rows).
+ * the adapters in this family over the SAME SessionStore DO —
+ * the flag switches the serving code path only, AND the append
+ * substrate with it: flag-on appends and lists through the
+ * append-only `iaaa_audit_events` table (#3251 O1), flag-off
+ * through the segment keys. No data migration, no dual-write:
+ * the table substrate migrates the segment bytes (lazily, on
+ * first table append, or explicitly through the DO's
+ * `audit-migrate` op) and the old segment rows are retained;
+ * bytes written before this slice (including pre-#1760
+ * legacy-shape segments) read and verify identically in both
+ * flag states (pinned by the conformance suite's
+ * cross-composition rows).
  *
- * THE MECHANISM DOES NOT MOVE (Q-1): the DO adapter's append
- * remains the SessionStore `audit-append` op — one DO request
- * reads the tail, chains the event, rotates, and writes back,
- * serialized by the DO runtime. D-F.3's append-substrate
- * replacement (an append-only table behind a single-writer
- * port) is a separate, later decision, deferred by Q-1 —
- * named here so this slice is not read as its quiet burial;
- * it is NOT built here.
+ * THE MECHANISM MOVED (#3251, O1 — Q-1's deferral resolved):
+ * the DO adapter's append remains the SessionStore
+ * `audit-append` op — one DO request reads the tail, chains
+ * the event, and writes back, serialized by the DO runtime —
+ * but the substrate behind the op is now the append-only
+ * table when the flag is on: the tail is one indexed row, the
+ * cap is a COUNT(*), the write is one row insert. Rotation
+ * ceases to exist as a storage shape on the table substrate
+ * (the archive/live split was a segment detail, not a contract
+ * shape); `list()` still returns chain order. D-F.3's
+ * append-substrate replacement is BUILT here, as decided on
+ * #3251 (comment 6974500501) — in full alignment with S5
+ * (#5084): one store, one owner, one purpose; the table lives
+ * in the same DO as the segments it replaces.
  *
  * APPEND ATOMICITY IS THE CONTRACT'S CENTRE: one backend
  * operation chains and stores; a caller-chained event can
@@ -109,6 +120,20 @@ export const IAAA_AUDIT_LOG_KEY = `${IAAA_AUDIT_KEY_PREFIX}events`;
 /** Prefix for rotated archive segment keys (`iaaa-audit:archive:NNNNNN`). */
 export const IAAA_AUDIT_ARCHIVE_KEY_PREFIX = `${IAAA_AUDIT_KEY_PREFIX}archive:`;
 
+/**
+ * #3251 (O1) — the append-only audit table in the SAME SessionStore
+ * DO SQLite (`src/data/schemaComponent/doCatalogue.ts`,
+ * `schema.do.iaaa_audit_events.create_table`): one row per event,
+ * `seq` = 1-based chain position. The flag-ON composition appends
+ * and lists through this table; the flag-OFF composition keeps the
+ * segment substrate below. Old segment rows are RETAINED (their
+ * removal is a separate named step after migration verification).
+ */
+export const IAAA_AUDIT_TABLE_NAME = "iaaa_audit_events";
+
+/** Entry-key prefix for one table row in `audit-list` replies (`iaaa-audit:table:NNNNNN`). */
+export const IAAA_AUDIT_TABLE_KEY_PREFIX = `${IAAA_AUDIT_KEY_PREFIX}table:`;
+
 /** Hard ceilings: live key size, segment size, archive segment count. */
 export const IAAA_AUDIT_DEFAULT_LIVE_MAX = 2000;
 export const IAAA_AUDIT_DEFAULT_SEGMENT_SIZE = 2000;
@@ -121,6 +146,16 @@ export interface AuditLogPortOptions {
   maxArchiveSegments?: number;
   /** DO instance name; one instance holds every bucket. */
   instanceName?: string;
+  /**
+   * #3251 (O1) — which append substrate the composed store speaks.
+   * "segments" (default) is the whole-log JSON store (#1760);
+   * "table" is the append-only `iaaa_audit_events` table in the
+   * same DO. The flag-ON composition root
+   * (src/data/createAuditPorts.ts) sets "table"; every other
+   * composer keeps the default, so the flag still switches the
+   * serving code path — and now the substrate with it.
+   */
+  substrate?: "segments" | "table";
 }
 
 /**

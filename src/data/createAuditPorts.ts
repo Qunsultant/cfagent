@@ -22,12 +22,11 @@
  */
 import {
   createStoreSender,
-  listStoreEntries,
   type DoNamespaceLike,
 } from "./durableKv";
 import type { Env } from "../types";
 import {
-  IAAA_AUDIT_KEY_PREFIX,
+  IAAA_AUDIT_LOG_KEY,
   type AuditLogPort,
   type AuditLogPortOptions,
 } from "./auditLogPorts";
@@ -43,17 +42,40 @@ function doBackend(
   options: AuditLogPortOptions,
 ): AuditLogBackend {
   const instanceName = options.instanceName ?? "kv";
+  // One sender for every audit op (append, list, migrate): the
+  // funnel composition sites are census-pinned
+  // (tests/global_dd_census_2356.test.ts), so the list seam
+  // rides the same createStoreSender the append already uses
+  // instead of composing a second entry point. The DO's
+  // `audit-list` op selects the substrate server-side (table
+  // rows while the table holds any, else the segment entries),
+  // so this seam needs no substrate of its own.
+  const send = createStoreSender(namespace, "sessions", instanceName);
   return {
     configured: Boolean(namespace),
-    sendAppend: createStoreSender(namespace, "sessions", instanceName),
-    listEntries: () =>
-      listStoreEntries({
-        namespace,
-        namespaceName: "sessions",
-        prefix: IAAA_AUDIT_KEY_PREFIX,
-        instanceName,
-      }),
+    sendAppend: send,
+    listEntries: async () => {
+      const reply = await send({
+        op: "audit-list",
+        ns: "sessions",
+        key: IAAA_AUDIT_LOG_KEY,
+      });
+      return Array.isArray(reply?.entries) ? reply.entries : null;
+    },
   };
+}
+
+/**
+ * #3251 (O1) — the flag-ON composition speaks the append-only
+ * table substrate: the options the root passes to the DO
+ * adapter carry `substrate: "table"`, so the shared
+ * implementation's append payloads select the table branch
+ * of the DO's `audit-append` op. A caller-supplied substrate
+ * is never honoured here — the flag, not the caller, picks
+ * the substrate.
+ */
+function tableOptions(options: AuditLogPortOptions): AuditLogPortOptions {
+  return { ...options, substrate: "table" };
 }
 
 /** Compose the family over an env's SessionStore binding. */
@@ -64,7 +86,7 @@ export function createAuditPorts(
   const namespace = env.SESSION_STORE as unknown as
     | DoNamespaceLike
     | undefined;
-  return new DoAuditLogAdapter(doBackend(namespace, options), options);
+  return new DoAuditLogAdapter(doBackend(namespace, options), tableOptions(options));
 }
 
 /** Compose the family over a DO namespace directly (test seams / fakes). */
@@ -72,7 +94,7 @@ export function createAuditPortsFromNamespace(
   namespace: DoNamespaceLike | null | undefined,
   options: AuditLogPortOptions = {},
 ): AuditLogPort {
-  return new DoAuditLogAdapter(doBackend(namespace, options), options);
+  return new DoAuditLogAdapter(doBackend(namespace, options), tableOptions(options));
 }
 
 /** Compose the in-memory family (conformance / test doubles). */

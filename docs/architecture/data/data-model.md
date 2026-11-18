@@ -78,7 +78,7 @@ flowchart TD
 | 4. MCP | SA-1, SA-2, SA-6, SA-7, SA-8 | ~142 tool registrations / 133 distinct tool names. Queueing is an allowlist (`SYNCHRONOUS_MCP_TOOLS`): anything not listed gets an async-job receipt instead of a result. Trading tools are synchronous by design; `run_stock_screen` gets a workflow run record; `run_options_strategy_screen` does not (§5). |
 | 5. Services | SA-1, SA-2, SA-4, SA-5, SA-6 | The job-pipeline engine, scheduled tasks/firer, chain pipeline, feed jobs, report services, and projection/reconcile services are the writers of SA-1/SA-2/SA-5; they all write through the port layer except the sites in §3.5. |
 | 6. Products (NextGenTP) | SA-2, SA-5, SA-6, SA-7, SA-8, SA-9 | Screeners, options hub, reports, schedules/goals, workflow runs/catalog, chat/Copilot, data hub, platform admin, audit vault, billing — every panel reads through the HTTP routes (§1.3 row 3) or the MCP tools in chat; no client code touches storage directly (verified by survey). |
-| 7. Security | SA-3, SA-9, and the tenancy marking on every area | Audit chain (hash-chained `mas_events` + IAAA whole-log store), IAAA identity/binding, PDP-gated routes (5 sites), per-login DO isolation (authorization by construction), tenant-scoped D1 reads, session/token hashing. See §2.4 and §4 SA-3/SA-9. |
+| 7. Security | SA-3, SA-9, and the tenancy marking on every area | Audit chain (hash-chained `mas_events` + IAAA audit log), IAAA identity/binding, PDP-gated routes (5 sites), per-login DO isolation (authorization by construction), tenant-scoped D1 reads, session/token hashing. See §2.4 and §4 SA-3/SA-9. |
 
 ```mermaid
 flowchart LR
@@ -132,7 +132,7 @@ Conventions: **A** = authoritative store (DO SQLite, unless marked D1-native). *
 | Audit event (DO chain) | `id`; chain link `previous_event_hash` → `event_hash` | session, type, agent, payload, created-at | **A** DO `mas_events` (hash-chained; SHA-256 over canonical row) | **N** none — session-scoped only; tenancy by instance construction |
 | Audit event (D1 projection) | **N** `<tenantId>:<eventId>` | kind, subject, payload, projected-at | **P** D1 `agent_chain_audit` | **T** `tenant_id` |
 | Audit chain (D1) | `(tenant_id, sequence)`; `prevHash` → `entryHash` | entry, policy, pruned-at | **A** D1 `agent_audit_chain` (D1-native substrate) | **T** `tenant_id` |
-| IAAA audit log entry | position in the per-bucket array (no row key) | actor, action, payload, chained hash | **A** SessionStore DO `kv_store` (`iaaa-audit:` keys), whole-log JSON arrays, cap 22,000 events | **T** by bucket key discipline, not by column |
+| IAAA audit log entry | **N** `seq` (1-based chain position, dense) | actor, action, payload, chained hash | **A** SessionStore DO `iaaa_audit_events` (append-only table, one row per event; flag-OFF legacy segments in `kv_store` under `iaaa-audit:` keys retained), cap 22,000 events | **T** by bucket key discipline, not by column |
 | Chain / synthesized schedule | **N** `(tenantId, id)` + status | schedule, status history (versioned), owner | **A** ScheduledAgent KV key `synthesizedSchedules`; **P** D1 `agent_chains` + `agent_synthesized_schedules` | **T** `tenant_id` (D1); DO side by KV key, owner not carried on the record |
 | Shard job | **N** `(tenantId, chainId, jobKey)` + status | leg outcomes, workflow run id, status | **A** DO (screener collation); **P** D1 `agent_shard_jobs` | **T** `tenant_id` |
 | Thesis realization (telemetry) | **N** `(tenantId, outcomeId)` | outcome, evaluation, realized-at | **P** D1 `agent_thesis_realizations` | **T** `tenant_id` |
@@ -300,7 +300,7 @@ Measured on fresh `main` 2026-11-17. Catalogue totals (recounted from definition
 | TradingAgent (`TRADING_AGENT`) | ORM tables (own instance) | Tools built with `{ orm, storage }` |
 | PaymentsAgent (`PAYMENTS_AGENT`) | KV `payments` array (no SQL table) | Header calls it a "SECOND payment ledger" — see §5 |
 | ReportAssetAgent (`REPORT_ASSET_AGENT`) | KV-only (`ctx.storage` put/get/list) | No SQL, no D1 projection — see §5 |
-| SessionStore (`SESSION_STORE`) | Single table `kv_store` (all buckets: sessions, service tokens, API keys, payments claims, slack links, IAAA audit/bindings) | Plain `DurableObject`, not an Agent; performs no authorization |
+| SessionStore (`SESSION_STORE`) | Two tables: `kv_store` (all buckets: sessions, service tokens, API keys, payments claims, slack links, IAAA bindings) + `iaaa_audit_events` (append-only audit log, one row per event; #3251 O1) | Plain `DurableObject`, not an Agent; performs no authorization |
 | SlackAgent (`SLACK_AGENT`) | ORM tables (own instance) | |
 | OptionsScannerMCP (`OPTIONS_SCANNER_MCP`) | Own storage via ORM (header notes it "never ran" its own storage through the ORM — see §5) | `McpAgent`, not `PortThink` |
 | BrowserAgent / TickerAgent / AiSearchAgent / SandboxAgent | No verified durable store | **UNVERIFIED** whether stateless or persisted elsewhere |
@@ -366,7 +366,7 @@ flowchart TD
 
 ### 3.5 Where the physical model diverges from the logical one
 
-- **Whole-log rewrite audit segments:** the IAAA audit log is not a table — it is JSON arrays in one KV key (live ≤2,000 events + ≤10 archive segments of 2,000 = 22,000 cap). Appends are whole-log read-modify-write inside one DO request; hitting the cap fails visibly (`AUDIT_STORE_FULL`), never deletes evidence. The append-substrate decision (move to a real append-only table?) is deferred — tracked #3251.
+- **Append-only audit table:** the IAAA audit log is the `iaaa_audit_events` table in the same SessionStore DO SQLite (one row per event; append = tail point-read + COUNT(*) cap check + one row insert; #3251 O1, decided 2026-11-18). The flag-OFF legacy segments (JSON arrays in `kv_store` under `iaaa-audit:` keys, live ≤2,000 + ≤10 archive segments of 2,000 = 22,000 cap) are retained; migration explodes them into rows, byte-identical per event. Hitting the cap fails visibly (`AUDIT_STORE_FULL`), never deletes evidence.
 - **Projection lag classes:** the logical model says "D1 mirrors DO"; physically D1 lags by carrier class (synchronous / asynchronous / operator) and a missing row is not evidence of absence (ADR 0033 R-2).
 - **Dual-homed job tables:** `job_pipeline_*`, `job_run_records`, `job_*_datasets` exist in both D1 and DO SQLite with live adapters on both sides; the stated rule is "D1 is a projection, DO is authoritative" (`wrangler.jsonc:60-62`), but no single-writer enforcement exists beyond the cross-store pin suite — see §5.
 - **Cross-plane tables:** `mas_feed_datasets` (DDL in the remainder catalogue, DML in D1) and `mas_index_lists` (DDL in DO, DML in both D1 and DO) have no named owning plane.
@@ -406,10 +406,10 @@ flowchart TD
 ### SA-3 Audit and security
 
 - **Entities:** DO audit event (hash-chained), D1 audit event (projection), D1 audit chain, IAAA audit log entry, audit policy/action, retention prune.
-- **Store home:** DO `mas_events` (OrchestratorAgent) + D1 `agent_chain_audit` / `agent_audit_chain` + SessionStore DO `kv_store` (`iaaa-audit:` keys, whole-log arrays, 22,000 cap).
+- **Store home:** DO `mas_events` (OrchestratorAgent) + D1 `agent_chain_audit` / `agent_audit_chain` + SessionStore DO `iaaa_audit_events` (append-only table; flag-OFF legacy segments in `kv_store` under `iaaa-audit:` keys retained), 22,000 cap.
 - **Owning agent/service:** `auditChain.ts` (SHA-256 chain), `ChainedAuditRepository` (writer), `iaaaAuditStore.ts` (SessionStore `audit-append` op), `auditTamperAlert.ts`.
 - **Readers/writers:** audit routes (`/api/audit`), retention route (the one live verifier path), reconcile paths, admin audit funnel.
-- **Integrity rules:** hash chain over canonical rows; `recordBlockingAudit` has no try/catch (consequential actions must not report success when the audit write failed); cap reached fails visibly (`AUDIT_STORE_FULL`); the direct verifier `verifyStoredAuditChain` has NO production caller (tracked #2437) — its twin `verifyStoredAuditChainAndAlert` is live on exactly one retention path; the D1 prune has no production caller (see §5); append-substrate decision deferred (tracked #3251).
+- **Integrity rules:** hash chain over canonical rows; `recordBlockingAudit` has no try/catch (consequential actions must not report success when the audit write failed); cap reached fails visibly (`AUDIT_STORE_FULL`); the direct verifier `verifyStoredAuditChain` has NO production caller (tracked #2437) — its twin `verifyStoredAuditChainAndAlert` is live on exactly one retention path; the D1 prune has no production caller (see §5); append substrate is the `iaaa_audit_events` table (#3251 O1, decided 2026-11-18).
 
 ### SA-4 Telemetry and observability
 
