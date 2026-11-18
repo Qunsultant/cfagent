@@ -659,6 +659,9 @@ describe("server route inventory pin (#2902)", () => {
     // #5169 (observability program #5080) adds the OTel archive
     // delegation right after the OTel ingestion delegation (the
     // archive read routes over the archive S1/S2 write).
+    // #5086 (S7, observability program #5080) adds the OTel config
+    // delegation right after the OTel archive delegation (the
+    // admin config routes over the runtime config port).
     expect(calls).toEqual([
       "handleCoreEarlyRoutes",
       "handlePrivacyRoutes",
@@ -671,6 +674,7 @@ describe("server route inventory pin (#2902)", () => {
       "handlePlatformTelemetryRoutes",
       "handleOtelRoutes",
       "handleOtelArchiveRoutes",
+      "handleOtelConfigRoutes",
       "handlePrivacyReportsRoutes",
       "handlePlatformRetrievalRoutes",
       "handleAuthIaaaRoutes",
@@ -730,9 +734,13 @@ describe("server route inventory pin (#2902)", () => {
     // OTel archive delegation (1 import line + a 4-line comment
     // + the 2-line dispatch branch) (328 → 335). The routing logic
     // itself lives in src/server/routes/otelArchive.ts, not here.
+    // #5086 records a seventh deliberate growth: +8 lines for the
+    // OTel config delegation (1 import line + a 5-line comment
+    // + the 2-line dispatch branch) (335 → 343). The routing logic
+    // itself lives in src/server/routes/otelConfig.ts, not here.
     const src = readFileSync("src/server.ts", "utf8");
     const lines = src.split("\n").length - (src.endsWith("\n") ? 1 : 0);
-    expect(lines).toBeLessThanOrEqual(335);
+    expect(lines).toBeLessThanOrEqual(343);
   });
 });
 
