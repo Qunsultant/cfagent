@@ -69,6 +69,7 @@ import { createCommercialAdapter } from "../../data/createCommercialPorts";
 import { createSubscriptionAdapter } from "../../data/createSubscriptionPorts";
 import { resolveTenantDataProviderSelection } from "../../services/tenantProviders";
 import type { StoreTier } from "../../data/commercialPorts";
+import { isUnlimitedFreeGrantActive } from "../../data/commercialPorts";
 import { resolveEffectiveTier } from "../../data/subscriptionPorts";
 import type { MeteredGateOptions } from "../../services/meteredPaymentGate";
 import { screenAlreadyRunningDetails } from "../../services/screenInFlight";
@@ -277,6 +278,7 @@ export function premiumMeteredGateOptions(
       meter,
       category,
       resolveTier: (userLogin: string) => resolvePremiumTier(ctx.env, userLogin),
+      consumeIncludedRun: (userLogin: string) => consumePremiumIncludedRun(ctx.env, userLogin),
     };
   }
   if (options?.resolveWalletMappedLogin) {
@@ -311,6 +313,39 @@ async function resolvePremiumTier(env: Env, userLogin: string): Promise<StoreTie
   const record = await store.getAccount(userLogin);
   const subscriptions = await subs.listSubscriptions(userLogin);
   return resolveEffectiveTier(record, subscriptions, Date.now());
+}
+
+/**
+ * Issue #5222: consume one subscription included run for a
+ * premium gate call. Same rule as the native gate's coverage
+ * probe (probeCoverage, the subscription_included branch) and
+ * coverageForAccount (paidScreenSubmission.ts): the EFFECTIVE tier at read time
+ * (resolveEffectiveTier — a lapsed subscription stops
+ * conferring Subscribed) must be Subscribed and included runs
+ * must remain. Grant-first, mirroring check()/probeCoverage
+ * order: an active unlimited-free grant covers the run without
+ * burning an included run, so a grant-covered caller is NOT
+ * consumed here (the HTTP gate does not serve grant-covered
+ * calls in this slice — they are demanded payment exactly as
+ * before). Returns false when not covered or the store is
+ * unbound; throws only on a store read failure, which the gate
+ * treats as "not covered" (fail closed to demanding payment).
+ * A lost race between the balance read and consumeIncludedRun
+ * surfaces as a throw there (no runs remaining) — also
+ * fail-closed. Only wired for session traffic (x-user-login
+ * present): the gate never consults it for anonymous traffic.
+ */
+async function consumePremiumIncludedRun(env: Env, userLogin: string): Promise<boolean> {
+  const store = createCommercialAdapter(env as { AGENT_DB?: unknown });
+  const subs = createSubscriptionAdapter(env as { AGENT_DB?: unknown });
+  if (!store || !subs) return false;
+  const record = await store.getAccount(userLogin);
+  const subscriptions = await subs.listSubscriptions(userLogin);
+  if (resolveEffectiveTier(record, subscriptions, Date.now()) !== "Subscribed") return false;
+  if (isUnlimitedFreeGrantActive(record?.unlimitedFreeGrant, Date.now())) return false;
+  if ((record?.includedRuns ?? 0) <= 0) return false;
+  await store.consumeIncludedRun(userLogin);
+  return true;
 }
 
 /**

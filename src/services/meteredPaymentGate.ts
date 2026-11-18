@@ -67,6 +67,19 @@ export interface MeteredGateOptions {
    * Throws on a store read failure → the gate refuses.
    */
   resolveTier?: (userLogin: string) => Promise<StoreTier | null>;
+  /**
+   * Issue #5222: consume one subscription included run for this
+   * caller when covered. The gate calls it BEFORE any payment is
+   * demanded, only for session traffic (x-user-login present).
+   * Returns true when a run was consumed (serve without a 402),
+   * false when not covered. Throws on a store failure → the gate
+   * treats it as "not covered" and demands payment (fail closed).
+   * Absent → no bypass (existing behavior: payment is the only
+   * entitlement evidence). The port itself enforces the coverage
+   * rule (effective tier Subscribed + runs remaining); the gate
+   * trusts only its boolean, never a tier value.
+   */
+  consumeIncludedRun?: (userLogin: string) => Promise<boolean>;
 }
 
 /** The fail-closed default: implicit Free grants nothing by itself. */
@@ -113,6 +126,42 @@ export function buildMeteredCallEvent(input: {
       priceUSD,
       tier,
       protocol: receipt.protocol,
+    }),
+  };
+}
+
+/**
+ * Issue #5222: build the one usage_event row for a served call
+ * covered by subscription included runs. Same row shape as
+ * buildMeteredCallEvent, but there is no payment receipt to key
+ * on: the row is keyed by the coverage id (`cov_<uuid>`, the
+ * receiptId of the locally synthesised coverage receipt) and the
+ * detail names paidVia explicitly — a covered row must never
+ * claim a protocol payment happened. priceUSD is the run's
+ * price (for revenue accounting); the charge was 0 (included
+ * in the subscription), recorded on the coverage receipt, not
+ * here. tier is Subscribed by construction: the port only
+ * consumes for effective-tier Subscribed.
+ */
+export function buildCoveredCallEvent(input: {
+  coverageId: string;
+  userLogin: string;
+  category: string;
+  priceUSD: number;
+  tier: StoreTier;
+}): InsertUsageEventRow {
+  const { coverageId, userLogin, category, priceUSD, tier } = input;
+  return {
+    id: `use_${coverageId}`,
+    userLogin,
+    runId: coverageId,
+    category,
+    createdAt: new Date().toISOString(),
+    detailJson: JSON.stringify({
+      coverageId,
+      paidVia: "subscription_included",
+      priceUSD,
+      tier,
     }),
   };
 }
