@@ -20,6 +20,7 @@ import {
   D1JobRunRecordStore,
 } from "../data/d1JobRunRecordAdapter";
 import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
 import {
   JobPipelineControl,
   jobRunRecorderFromStore,
@@ -94,7 +95,9 @@ export interface DispatchResearchEngineResult {
   outcome: Record<string, unknown>;
 }
 
-const structuredLog = createStructuredLogger();
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "workflows/researchScreenEngine",
+});
 
 export function resolveResearchEngineAdapters(input: {
   sql?: SqlStorage;
