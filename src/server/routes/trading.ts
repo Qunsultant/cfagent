@@ -28,6 +28,7 @@ import { mergeLedgerRuns } from "../../services/unifiedLedger";
 import { workerDutiesFromInventory } from "../../services/unifiedScheduleManagement";
 import type { JobRunRecord } from "../../services/jobRunRecords";
 import { requireAuth } from "../auth";
+import { unauthorizedJson } from "./apiRefusals";
 import { evaluateRoutePep } from "../../security/pepGateway";
 import { resolveIaaaTenant } from "../../security/iaaaGithubEndToEnd";
 import { createKvMembershipStore } from "../../security/iaaaMembershipStore";
@@ -325,7 +326,7 @@ export async function handleTradingOmniRoutes(request: Request, env: Env, url: U
     // and unaffected.
     if (path === "/api/trading/email/inbound" && request.method === "POST") {
       const session = await requireAuth(request, env);
-      if (!session) return new Response("Unauthorized", { status: 401 });
+      if (!session) return unauthorizedJson();
       const userLogin = session.githubLogin;
       const targetUrl = new URL("/trading/email/inbound", "https://agent.internal");
       const forwardReq = new Request(targetUrl, request);
@@ -383,7 +384,7 @@ export async function handleTradingOmniRoutes(request: Request, env: Env, url: U
     // --- Omnichannel Trading Agent: Slack Test Simulator ---
     if (path === "/api/trading/slack/test" && request.method === "POST") {
       const session = await requireAuth(request, env);
-      if (!session) return new Response("Unauthorized", { status: 401 });
+      if (!session) return unauthorizedJson();
       const userLogin = session.githubLogin;
       const targetUrl = new URL("/trading/slack/event", "https://agent.internal");
       const forwardReq = new Request(targetUrl, request);
@@ -399,7 +400,7 @@ export async function handleTradingOmniRoutes(request: Request, env: Env, url: U
     // "trade". Self-binding only: no request field can name the login.
     if (path === "/api/trading/slack/link" && request.method === "POST") {
       const session = await requireAuth(request, env);
-      if (!session) return new Response("Unauthorized", { status: 401 });
+      if (!session) return unauthorizedJson();
       const body = (await request.json().catch(() => ({}))) as any;
       const result = await confirmSlackLink(
         env,
@@ -421,7 +422,7 @@ export async function handleTradingOmniRoutes(request: Request, env: Env, url: U
     // --- Omnichannel Trading Agent: Voice Trading Turn Simulator & API ---
     if ((path === "/api/trading/voice/turn" || path === "/api/trading/voice/test") && request.method === "POST") {
       const session = await requireAuth(request, env);
-      if (!session) return new Response("Unauthorized", { status: 401 });
+      if (!session) return unauthorizedJson();
       const userLogin = session.githubLogin;
       const targetUrl = new URL("/trading/voice/turn", "https://agent.internal");
       const forwardReq = new Request(targetUrl, request);
@@ -432,7 +433,7 @@ export async function handleTradingOmniRoutes(request: Request, env: Env, url: U
     // --- Omnichannel Trading Agent: Voice Welcome Greeting ---
     if (path === "/api/trading/voice/greeting" && request.method === "GET") {
       const session = await requireAuth(request, env);
-      if (!session) return new Response("Unauthorized", { status: 401 });
+      if (!session) return unauthorizedJson();
       const userLogin = session.githubLogin;
       const targetUrl = new URL("/trading/voice/greeting", "https://agent.internal");
       const forwardReq = new Request(targetUrl, request);
@@ -449,7 +450,7 @@ export async function handleTradingOmniRoutes(request: Request, env: Env, url: U
       // matches the session-required catch-all /api/ forwarder below;
       // in-app callers send their session cookie and are unaffected.
       const session = await requireAuth(request, env);
-      if (!session) return new Response("Unauthorized", { status: 401 });
+      if (!session) return unauthorizedJson();
       const userLogin = session.githubLogin;
       const subPath = path.replace(/^\/api/, "");
       const targetUrl = new URL(subPath + url.search, "https://agent.internal");
@@ -465,7 +466,7 @@ export async function handleTradingOmniRoutes(request: Request, env: Env, url: U
       // a null session fell back to the caller-supplied x-user-login
       // header or a shared synthetic identity.
       const session = await requireAuth(request, env);
-      if (!session) return new Response("Unauthorized", { status: 401 });
+      if (!session) return unauthorizedJson();
       const userLogin = session.githubLogin;
       const subPath = path.replace(/^\/api/, "");
       const targetUrl = new URL(subPath + url.search, "https://agent.internal");
@@ -536,7 +537,7 @@ export async function handleTradingQuotesRoutes(request: Request, env: Env, url:
     // both ways; unbound AgentDB fails closed with 503.
     if (path === "/api/market/quotes/source" && (request.method === "GET" || request.method === "POST")) {
       const session = await requireAuth(request, env);
-      if (!session) return new Response("Unauthorized", { status: 401 });
+      if (!session) return unauthorizedJson();
       const rawDb = (env as any).AGENT_DB as D1Database | undefined;
       const db = rawDb ? createD1QuoteSourceDb(rawDb) : undefined;
       if (!db) return new Response("Quote source store unavailable", { status: 503 });
@@ -583,7 +584,7 @@ export async function handleTradingApproveRoutes(request: Request, env: Env, url
       }
       const session = await requireAuth(request, env);
       if (!session) {
-        return new Response("Unauthorized: sign in to approve a trade.", { status: 401 });
+        return unauthorizedJson("Unauthorized: sign in to approve a trade.");
       }
       const userLogin = session.githubLogin;
       const targetUrl = new URL("/etrade/order/execute", "https://agent.internal");
@@ -605,7 +606,7 @@ export async function handleTradingApproveRoutes(request: Request, env: Env, url
     // --- Direct Clear & Reset Session Endpoints (Always Synchronous) ---
     if (path === "/clear" || path === "/reset" || path === "/api/clear" || path === "/api/reset") {
       const session = await requireAuth(request, env);
-      if (!session) return new Response("Unauthorized", { status: 401 });
+      if (!session) return unauthorizedJson();
 
       const targetUrl = new URL(`/clear${url.search}`, "https://agent.internal");
 

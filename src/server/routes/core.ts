@@ -17,6 +17,7 @@ import type { Env } from "../../types";
 import { publicClientMetadataDocument } from "../../security/publicOAuth";
 import { getAllFeatureFlags } from "../../config/featureFlags";
 import { requireAuth, authenticateRequest } from "../auth";
+import { unauthorizedJson } from "./apiRefusals";
 import { renewSession, setSessionCookie } from "../../session";
 import { invalidateSessionCache } from "../../security/sessionCache";
 import { ensureCsrfCookie } from "../../security/csrf";
@@ -217,13 +218,7 @@ export async function handleCoreLateRoutes(request: Request, env: Env, url: URL,
         // that parse JSON and surfaces as "Unexpected token 'U'" instead of
         // an auth message — observed on POST /api/research/run. Answer JSON
         // with a stable code, like the other gates in this server.
-        return Response.json(
-          {
-            code: "UNAUTHORIZED",
-            error: "Unauthorized: sign in again — your session is missing or has expired.",
-          },
-          { status: 401 },
-        );
+        return unauthorizedJson();
       }
 
       const subPath = path.replace(/^\/api/, "");
