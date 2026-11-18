@@ -690,6 +690,13 @@ export interface OptionsStrategyDeps {
    */
   broker?: "etrade" | "alpaca" | "public"; // Issue #3990
   /**
+   * Issue #5190 — the chain source for the run's broker. When present it
+   * replaces the E*TRADE client the caller passes at the two screener-agent
+   * construction sites, so a Copilot screen on Alpaca reads Alpaca chains.
+   * Absent = the caller's client (every pre-#5190 path unchanged).
+   */
+  chainSource?: ConstructorParameters<typeof DynamicOptionsScreener>[0];
+  /**
    * Issue #4469: the worker env, for the scan leg's workflow-residency
    * gate. When present with the residency bindings configured, the
    * scan dispatches through the strategy workflow host; absent, the
@@ -946,7 +953,7 @@ export async function runOptionsStrategyAction(
     },
     {
       stages: createStrategyScreenPorts({
-        agents: createStrategyScreenAgents(etrade.client),
+        agents: createStrategyScreenAgents(deps?.chainSource ?? etrade.client),
         storage: panelStorage,
       }),
       claims: memoryStageClaims(),
@@ -1573,7 +1580,7 @@ async function runOpportunityScan(
       },
       {
         stages: createScannerScreenPorts({
-          agents: createStrategyScreenAgents(etrade.client),
+          agents: createStrategyScreenAgents(deps?.chainSource ?? etrade.client),
           storage: scanStorage,
           scanRunStore,
         }),

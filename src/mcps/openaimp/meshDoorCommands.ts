@@ -1364,6 +1364,20 @@ export class RunOptionsStrategyScreenCommand implements IMcpToolCommand<MeshOpti
         enum: ["conservative", "balanced", "aggressive"],
         description: "Ranking posture (default balanced).",
       },
+      broker: {
+        type: "string",
+        enum: ["etrade", "alpaca", "public"],
+        description: "Run against this broker's option chains (default: the tenant's broker). A broker whose catalogue declares no option chains is refused by name.",
+      },
+      mode: {
+        type: "string",
+        enum: ["paper", "live"],
+        description: "Execution mode for this run (default: resolved for the broker).",
+      },
+      accountId: {
+        type: "string",
+        description: "Broker account to scope the run to (default: the broker's own account).",
+      },
       minDte: { type: "number", description: "Minimum days to expiration (default 14)." },
       maxDte: { type: "number", description: "Maximum days to expiration (default 60)." },
       minProbabilityOfProfit: {
@@ -1393,6 +1407,9 @@ export class RunOptionsStrategyScreenCommand implements IMcpToolCommand<MeshOpti
       .enum(["conservative", "balanced", "aggressive"])
       .optional()
       .describe("Ranking posture (default balanced)"),
+    broker: z.enum(["etrade", "alpaca", "public"]).optional().describe("Run against this broker's option chains"),
+    mode: z.enum(["paper", "live"]).optional().describe("Execution mode for this run"),
+    accountId: z.string().min(1).optional().describe("Broker account to scope the run to"),
     minDte: z.number().int().positive().optional().describe("Minimum days to expiration"),
     maxDte: z.number().int().positive().optional().describe("Maximum days to expiration"),
     minProbabilityOfProfit: z.number().min(0).max(1).optional().describe("Probability-of-profit floor, 0–1"),
@@ -1416,6 +1433,10 @@ export class RunOptionsStrategyScreenCommand implements IMcpToolCommand<MeshOpti
       status: result.status,
       count: result.count,
       strategyTypes: result.constraints.strategyTypes,
+      // Issue #5190 — the context this run executed under.
+      broker: typeof input.broker === "string" ? input.broker : "tenant",
+      mode: input.mode ?? "resolved",
+      accountId: input.accountId ?? null,
     });
     return result;
   }

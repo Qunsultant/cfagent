@@ -1121,8 +1121,8 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/agents/nlq/schema.ts", "alpaca", 1],
   ["src/agents/nlq/schema.ts", "etrade", 10],
   ["src/agents/nlq/types.ts", "etrade", 1],
-  ["src/agents/nlqOptionsStrategy.ts", "alpaca", 1],
-  ["src/agents/nlqOptionsStrategy.ts", "etrade", 20],
+  ["src/agents/nlqOptionsStrategy.ts", "alpaca", 2],
+  ["src/agents/nlqOptionsStrategy.ts", "etrade", 21],
   ["src/agents/orchestrator.ts", "etrade", 20],
   ["src/agents/orchestrator/asyncJobs.ts", "etrade", 12],
   ["src/agents/orchestrator/autopilot.ts", "etrade", 4],
@@ -1133,7 +1133,13 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/agents/orchestrator/meshDoors.ts", "nasdaq", 1],
   ["src/agents/orchestrator/meshDoors.ts", "yahoo", 12],
   ["src/agents/orchestrator/meshOptionsStageControlDoor.ts", "etrade", 8],
-  ["src/agents/orchestrator/meshOptionsStrategyDoor.ts", "etrade", 15],
+  // Issue #5190 INTEGRATION (raise + one new row): the run's broker became a
+  // tool argument and a resolved context, so the door and the engine name the
+  // brokers they can serve — data-bearing enums and refusal text, not copy.
+  // nlqOptionsStrategy etrade 20->21 / alpaca 1->2, the door 15->28 plus its
+  // first alpaca row, meshDoorCommands etrade 15->17.
+  ["src/agents/orchestrator/meshOptionsStrategyDoor.ts", "alpaca", 2],
+  ["src/agents/orchestrator/meshOptionsStrategyDoor.ts", "etrade", 28],
   ["src/agents/orchestrator/nlqPorts.ts", "etrade", 1],
   ["src/agents/orchestrator/reportDispatch.ts", "etrade", 7],
   ["src/agents/orchestrator/reportDispatch.ts", "yahoo", 1],
@@ -1460,7 +1466,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/mcps/openaimp/mcpPermissionPorts.ts", "alpaca", 6],
   ["src/mcps/openaimp/mcpPermissionPorts.ts", "etrade", 11],
   ["src/mcps/openaimp/meshDoorCommands.ts", "alpaca", 6],
-  ["src/mcps/openaimp/meshDoorCommands.ts", "etrade", 15],
+  ["src/mcps/openaimp/meshDoorCommands.ts", "etrade", 17],
   ["src/mcps/public/publicMcp.ts", "public.com", 6],
   ["src/observability/alertingList.ts", "yahoo", 3],
   ["src/observability/resourceEventGuard.ts", "etrade", 1],

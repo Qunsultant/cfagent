@@ -1,0 +1,3 @@
+### Added
+
+- **Copilot can run a screen against a chosen broker, mode and account (#5190, slice 4 of #5187):** `run_options_strategy_screen` accepts `broker` / `mode` / `accountId`, resolves them through `RunBrokerContext` (capability-gated — a broker with no option chains is refused by name), and reads that broker's chains: the engine's screener now takes an injectable `chainSource` (`OptionsStrategyDeps.chainSource`), filled from `platformChainSource`, with quotes from the platform's own read. Absent, every existing call site is unchanged; the audit records the context the run executed under.

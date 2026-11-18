@@ -80,12 +80,16 @@ import type { DatabaseORM, SqlStorage } from "../../orm";
 import type { OptionsStageStorage } from "../../workflows/optionsScreenPorts";
 import {
   UNIVERSES,
+  TradingPlatformRegistry,
   defaultRegistry,
+  platformChainSource,
   resolveUniverse,
+  type OptionChainSource,
   type OptionThesis,
   type RiskProfile,
   type UniverseId,
 } from "../../trading";
+import { resolveRunBrokerContext } from "../../services/runBrokerContext";
 import { fetchAllUsStockListings } from "../../services/nasdaqListings";
 import { ETradeService } from "../../services/etrade";
 import {
@@ -124,6 +128,16 @@ export interface MeshOptionsStrategyDoorInput {
   thesis?: string;
   /** Ranking posture → the engine's riskProfile. */
   riskProfile?: string;
+  /**
+   * Issue #5190 — the run's broker. When present the door resolves it through
+   * RunBrokerContext (capability-gated) and reads that broker's chains; absent
+   * the run uses the caller's E*TRADE service, exactly as before.
+   */
+  broker?: string;
+  /** Issue #5190 — paper/live for this run; absent = the broker's resolution. */
+  mode?: "paper" | "live";
+  /** Issue #5190 — broker account scope, when the broker exposes several. */
+  accountId?: string;
   /** Expiry window bounds → the engine's minDte / maxDte. */
   minDte?: number;
   maxDte?: number;
@@ -332,8 +346,56 @@ export async function runOptionsStrategyScreenViaDoor(
   };
 
   const etrade = (ctx.createEtradeService ?? defaultCreateEtradeService(ctx))(login);
+  // Issue #5190 — the run's broker decides the chain source. Explicit input
+  // resolves through RunBrokerContext (capability-gated); absent, the
+  // E*TRADE service is used exactly as before. A non-E*TRADE broker is served
+  // by its own platform: chains through `platformChainSource`, quotes through
+  // the platform's own getQuote. Watchlists/market-screening have no neutral
+  // equivalent here, so they answer empty rather than borrowing E*TRADE data.
+  let chainSource: OptionChainSource | undefined;
+  let runPort: {
+    client: typeof etrade.client;
+    fetchQuoteRemote: typeof etrade.fetchQuoteRemote;
+    getWatchlists: typeof etrade.getWatchlists;
+    screenMarketsAsync: typeof etrade.screenMarketsAsync;
+  } = etrade;
+  let runContextBroker: "etrade" | "alpaca" | "public" | undefined;
+  if (typeof input.broker === "string" && input.broker.trim()) {
+    const runContext = await resolveRunBrokerContext({
+      env: ctx.env,
+      selection: { brokerId: input.broker, mode: input.mode, accountId: input.accountId, source: "caller" },
+      requireCapability: "optionChains",
+    });
+    runContextBroker = runContext.brokerId as "etrade" | "alpaca" | "public";
+    if (runContext.brokerId !== "etrade") {
+      const platform = TradingPlatformRegistry.getPlatform(
+        runContext.brokerId,
+        ctx.env,
+        ctx.orm,
+        login,
+        runContext.mode === "live" ? "PROD" : "TEST",
+      );
+      const source = platformChainSource(platform);
+      if (!source) {
+        throw new MeshDoorError(
+          "door_unavailable",
+          `run_options_strategy_screen: ${runContext.brokerId} exposes no option-chain source on this deployment; choose a broker that does.`,
+        );
+      }
+      chainSource = source;
+      runPort = {
+        client: source as unknown as typeof etrade.client,
+        // The platform's own quote — the same neutral read the screener uses.
+        fetchQuoteRemote: ((symbol: string) => platform.getQuote(symbol)) as typeof etrade.fetchQuoteRemote,
+        // No neutral watchlist / market-screening surface on this path: answer
+        // empty rather than borrowing another broker's data.
+        getWatchlists: async () => [],
+        screenMarketsAsync: (async () => ({})) as unknown as typeof etrade.screenMarketsAsync,
+      };
+    }
+  }
   const run = ctx.runOptionsStrategy ?? runOptionsStrategyAction;
-  const result = await run(etrade, "options_opportunities", filters, {
+  const result = await run(runPort, "options_opportunities", filters, {
     userLogin: login,
     // Issue #4066: the door's storage IS the host DO's storage (the
     // MCP context carries the caller's OrchestratorAgent DO handle),
@@ -347,6 +409,7 @@ export async function runOptionsStrategyScreenViaDoor(
     // Issue #4469: thread the worker env so the scan leg can gate
     // onto the strategy workflow host, as the NLQ host does.
     env: ctx.env,
+    ...(chainSource ? { chainSource, broker: runContextBroker } : {}),
   });
 
   const constraints: MeshOptionsStrategyConstraints = {
