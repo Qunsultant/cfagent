@@ -157,7 +157,7 @@ export const STOCK_SCREEN_CAPABILITIES: readonly StockScreenCapability[] = [
   {
     id: "research-screener-subtab",
     name: "Research screener subtab",
-    entry: "MarketDataResearchHub ?tab=research&view=screener -> /api/market-data/screen",
+    entry: "MarketDataResearchHub ?tab=stock-hub&view=research -> /api/market-data/screen",
     engine: "ScreenerAgent.runScreen via spec",
     provider: "tenant-resolved (route)",
     persistence: "Canonical report store (persist-only)",
@@ -232,7 +232,7 @@ export const STOCK_SCREEN_CAPABILITIES: readonly StockScreenCapability[] = [
   {
     id: "preset-resolution",
     name: "Preset resolution",
-    entry: "ScreenerPresetManager / presets tab (?tab=screeners&view=presets) / schedules carrying a preset id",
+    entry: "ScreenerPresetManager / presets tab (?tab=stock-hub&view=presets) / schedules carrying a preset id",
     engine: "screenerPresetResolution.resolvePresetFilter (run-time, caller-owned)",
     provider: "none",
     persistence: "mas_screener_presets (pre-existing store)",
@@ -244,7 +244,7 @@ export const STOCK_SCREEN_CAPABILITIES: readonly StockScreenCapability[] = [
   {
     id: "pattern-application",
     name: "Pattern application",
-    entry: "ScreenersHub patterns tab (?tab=screeners&view=patterns) -> Apply to New Screen",
+    entry: "StockHub patterns tab (?tab=stock-hub&view=patterns) -> Apply to New Screen",
     engine: "stockPatternCatalog mapping + stockFilterToCriteria into the New Screen panel",
     provider: "none (catalog is data, not a provider)",
     persistence: "Setup catalog stock families (read-only source; no pattern store written)",

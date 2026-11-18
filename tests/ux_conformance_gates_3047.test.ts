@@ -271,7 +271,9 @@ const CONFORMING_ROUTES: Record<string, string> = {
   "product-hub": "src/client/ProductHub.tsx",
   "payment-assurance": "src/client/PaymentWorkflowAssurance.tsx",
   checkout: "src/client/CheckoutPanel.tsx",
-  research: "src/client/MarketDataResearchHub.tsx",
+  // #5185 (S-U8): standalone ?tab=research retired in S1 (#4626) to
+  // ?tab=stock-hub&view=research; MarketDataResearchHub renders as an interior
+  // inside StockHub/ETradeTradingHub without a nested PageShell.
   search: "src/client/search/SearchHub.tsx",
   "workflow-runs": "src/client/WorkflowRunsPanel.tsx",
   "workflow-catalog": "src/client/WorkflowCatalogPage.tsx",

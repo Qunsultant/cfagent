@@ -1,0 +1,3 @@
+### Changed
+- Migrated `OptionsScreenerPage` (`src/client/OptionsScreenerPage.tsx`) from `PageShell` to `PageTemplate`, updated `iv-history` fallback `hostTab` to `"options"`, and updated `tests/ux_shell_exceptions_3047.json` and `tests/template_conformance_3136.test.ts` (#5185, S-U8).
+- Removed the nested `<PageShell>` wrapper from `src/client/MarketDataResearchHub.tsx` so it renders cleanly inside `StockHub` / `ETradeTradingHub`, re-pointed `template.research` in `tests/ux_shell_exceptions_3047.json`, and swept stale `?tab=research` / `?tab=screeners` links in `providerUxLinks.ts`, `stockCopilotPrompt.ts`, `stockScreenCapability.ts`, `StockHub.tsx`, and `router.ts` (#5185, S-U8).

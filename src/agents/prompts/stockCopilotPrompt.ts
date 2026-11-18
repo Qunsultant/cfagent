@@ -189,7 +189,7 @@ export function buildStockCopilotMcpSteering(cap: StockCopilotPromptCapability):
 ${STOCK_COPILOT_PIPELINE_STAGE_ORDER_RULE}
 ${STOCK_COPILOT_FEED_JOB_MONITORING_RULE}
 - HONEST EXECUTION: never claim an order was placed without a broker order id; a queued job receipt is not a placement. Report the exact refusal and the fix URL.
-- FIX URLS: broker connect at ?tab=trading (Alpaca paper: /api/broker/connect/alpaca?environment=TEST; live: ?environment=PROD); credits at ?tab=checkout&checkoutTab=topup; trace at ?tab=workflow-runs; data providers at ?tab=research; workflows at ?tab=workflows.
+- FIX URLS: broker connect at ?tab=trading (Alpaca paper: /api/broker/connect/alpaca?environment=TEST; live: ?environment=PROD); credits at ?tab=checkout&checkoutTab=topup; trace at ?tab=workflow-runs; data providers at ?tab=stock-hub&view=research; workflows at ?tab=workflows.
 - 'tool_openaimp_stock_copilot_remediate_gaps': when the user asks to fix platform gaps, invoke it directly.
 - WORKSPACE FILES: files saved to '/workspace/<filename>' reside in the cloud Durable Object workspace (never local bash); always give clickable links '[Download /workspace/<filename>](/api/workspace/file?path=/workspace/<filename>&download=1)', '[View Raw](/api/workspace/file?path=/workspace/<filename>&raw=1)', and '[List Workspace Files](/api/workspace/files)'.
 - CLICKABLE LINKS: whenever a pipeline, benchmark, status read, or remediation runs, include '[View Live Workflow Runs](?tab=workflow-runs)' and, when a run id exists, '[View Workflow Run <runId>](?tab=workflow-runs&run=<runId>)'; state the exact target chain, frontier stage, unit counts, and errors.
@@ -216,7 +216,7 @@ export const STOCK_COPILOT_MCP_STEERING = `Stock Copilot — this conversation i
   1. ALWAYS provide direct clickable markdown links so the user can inspect live progress in the UI:
      - To inspect workflow runs: '[View Live Workflow Runs](?tab=workflow-runs)'
      - If a run ID is returned: '[View Workflow Run <runId>](?tab=workflow-runs&run=<runId>)'
-     - To inspect data provider feeds: '[Open Data Providers & Feeds](?tab=research)'
+     - To inspect data provider feeds: '[Open Data Providers & Feeds](?tab=stock-hub&view=research)'
      - To inspect workflows and schedules: '[Open Workflows Hub](?tab=workflows)'
   2. Pinpoint exact diagnostic facts: Always state the exact target chain (e.g. 'nasdaq100 pipeline'), the active or settled frontier stage (feed, enrich, analyze, generate, deliver), stage unit counts, and any errors or rate limits. Never return vague promises without diagnostic facts.
 ${STOCK_COPILOT_PIPELINE_STAGE_ORDER_RULE}

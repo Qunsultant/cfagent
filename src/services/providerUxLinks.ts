@@ -30,7 +30,7 @@ export const PROVIDER_UX_LINKS = {
   /** Workflow Runs ledger — every recorded run, stage, and refusal. */
   workflowRuns: "?tab=workflow-runs",
   /** Data providers and feeds. */
-  providers: "?tab=research",
+  providers: "?tab=stock-hub&view=research",
   /** Workflows hub (schedules, pipelines). */
   workflows: "?tab=workflows",
 } as const;
