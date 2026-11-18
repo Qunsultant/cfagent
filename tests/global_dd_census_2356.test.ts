@@ -242,7 +242,7 @@ const STEP4D_SERVICE_FILES = [
 
 /** The step-4d statements live in the data layer, exactly. */
 const STEP4D_DATA_LAYER_FILES: Array<[string, number]> = [
-  ["src/data/doSqliteAutopilotStateAdapter.ts", 3],
+  ["src/data/doSqliteAutopilotStateAdapter.ts", 1],
   ["src/data/doSqlitePolicyVerdictAdapter.ts", 4],
   ["src/data/doSqliteReportConfirmationAdapter.ts", 9],
   ["src/data/doSqliteScreenerPresetAdapter.ts", 6],
@@ -647,7 +647,7 @@ const PORTED_TABLE_WRITERS: Record<string, { layer: string[]; bypass?: Record<st
   mas_async_jobs: { layer: ["src/data/doSqliteAsyncJobAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"] },
   mas_runs: { layer: ["src/data/doSqliteRunRegistryAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"] },
   mas_run_aliases: { layer: ["src/data/doSqliteRunRegistryAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"] },
-  mas_autopilot: { layer: ["src/data/doSqliteAutopilotStateAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"] },
+  mas_autopilot: { layer: ["src/data/schemaComponent/doDmlEntries.ts", "src/data/schemaComponent/doCatalogue.ts"] },
   mas_policy_verdicts: { layer: ["src/data/doSqlitePolicyVerdictAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"] },
   mas_report_confirmations: { layer: ["src/data/doSqliteReportConfirmationAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"] },
   mas_screener_presets: { layer: ["src/data/doSqliteScreenerPresetAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"] },
