@@ -200,8 +200,8 @@ export function ReferralCreditRulesSection() {
             onChange={(e) => setExpiryDays(e.target.value)}
             inputMode="decimal"
           />
-          <Button onClick={save} disabled={saving}>
-            {saving ? "Saving…" : "Save referral rules"}
+          <Button onClick={save} loading={saving}>
+            Save referral rules
           </Button>
         </>
       )}
