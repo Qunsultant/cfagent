@@ -1166,6 +1166,7 @@ const EXPECTED_INVENTORY = [
   "handleStockCopilotRoutes :: endsWith(\"/stock-copilot/learnings\")",
   "handleStockCopilotRoutes :: endsWith(\"/stock-copilot/evaluate\")",
   "handleStockCopilotRoutes :: endsWith(\"/stock-copilot/control\")",
+  "handleStockCopilotRoutes :: endsWith(\"/stock-copilot/proposals/file\")",
   // Issue #3741: the one resolver's config read + write door
   // (in handleCopilotChannelsRoutes, declared first in the
   // handler; GET and POST share the path condition).

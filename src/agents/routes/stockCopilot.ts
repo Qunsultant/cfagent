@@ -95,6 +95,14 @@ import { evaluateStockCopilotStrategy } from "../../services/stockCopilotEvaluat
 import { summarizeLearnings } from "../../services/stockCopilotAgenticLoop";
 import { introspectStockCopilot } from "../../services/stockCopilotIntrospection";
 import {
+  CopilotProposalFilingError,
+  COPILOT_PROPOSAL_APPROVAL_REQUIRED,
+  COPILOT_PROPOSAL_FILER_UNAVAILABLE,
+  COPILOT_PROPOSAL_NOT_FOUND,
+  fileGovernedProposal,
+  resolveCopilotProposalFiler,
+} from "../../services/stockCopilotProposalFiling";
+import {
   latestCopilotCycleLedgerRow,
   projectCopilotLedgerRowToLastCycle,
 } from "../../services/stockCopilotLedger";
@@ -235,7 +243,20 @@ export async function handleStockCopilotRoutes(
   const isLearningsRead = path.endsWith("/stock-copilot/learnings") && request.method === "GET";
   const isEvaluateAction = path.endsWith("/stock-copilot/evaluate") && request.method === "POST";
   const isControlWrite = path.endsWith("/stock-copilot/control") && request.method === "POST";
-  if (!isStatusRead && !isControlWrite && !isIntrospectRead && !isLearningsRead && !isEvaluateAction) return null;
+  // #5527: the introspection panel's filing action. POST because it writes
+  // (it creates a GitHub issue); the approval flag is the HITL gate.
+  const isProposalFileAction =
+    path.endsWith("/stock-copilot/proposals/file") && request.method === "POST";
+  if (
+    !isStatusRead &&
+    !isControlWrite &&
+    !isIntrospectRead &&
+    !isLearningsRead &&
+    !isEvaluateAction &&
+    !isProposalFileAction
+  ) {
+    return null;
+  }
 
   // Fail closed: without the instance's verified login context
   // there is no "own instance" to read or control.
@@ -409,6 +430,74 @@ export async function handleStockCopilotRoutes(
     } catch (err) {
       return Response.json(
         { error: err instanceof Error ? err.message : "Failed to load copilot introspection" },
+        { status: 500 },
+      );
+    }
+  }
+
+  if (isProposalFileAction) {
+    try {
+      const body = (await request.json().catch(() => null)) as {
+        gapId?: unknown;
+        approve?: unknown;
+      } | null;
+      const gapId = typeof body?.gapId === "string" ? body.gapId.trim() : "";
+      if (gapId.length === 0) {
+        return Response.json({ error: "gapId is required" }, { status: 400 });
+      }
+      if (body?.approve !== true) {
+        return Response.json(
+          {
+            code: COPILOT_PROPOSAL_APPROVAL_REQUIRED,
+            error: "filing requires explicit approval",
+          },
+          { status: 400 },
+        );
+      }
+      const introspection = await introspectStockCopilot({
+        env: ctx.env,
+        userLogin,
+        readSettingRaw: ctx.readSettingRaw,
+        positionPort: positions,
+        activityPort: activity,
+        controlPort: control,
+        commercial: ctx.commercial,
+        sql: ctx.sql,
+      });
+      const proposal = introspection.reflection.capabilityProposals.find(
+        (p) => p.gapId === gapId,
+      );
+      if (!proposal) {
+        return Response.json(
+          {
+            code: COPILOT_PROPOSAL_NOT_FOUND,
+            error: `no capability proposal with gap id ${gapId}`,
+          },
+          { status: 404 },
+        );
+      }
+      const filed = await fileGovernedProposal({
+        proposal,
+        approvedBy: userLogin,
+        filer: resolveCopilotProposalFiler(ctx.env),
+        audit: ctx.audit,
+      });
+      return Response.json({ filed: { gapId, ...filed } });
+    } catch (err) {
+      if (err instanceof CopilotProposalFilingError) {
+        return Response.json(
+          { code: err.code, error: err.message },
+          {
+            status:
+              err.code === COPILOT_PROPOSAL_FILER_UNAVAILABLE ? 503 : 400,
+          },
+        );
+      }
+      return Response.json(
+        {
+          error:
+            err instanceof Error ? err.message : "Failed to file the proposal",
+        },
         { status: 500 },
       );
     }
