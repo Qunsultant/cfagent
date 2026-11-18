@@ -158,7 +158,8 @@ describe("4574-P04 the Queues page is retired (#4574)", () => {
     // #4585 split Platform Admin into DataHub + SecurityHub: 42 → 44.
     // Issue 4682 adds the Marketing Hub route: 44 → 45.
     // Issue #5169 adds the Observability route: 45 → 46.
-    expect(routes).toHaveLength(46);
+    // PR #5256 (#3696): the nav-settings route joins the table; 46 → 47.
+    expect(routes).toHaveLength(47);
     const chat = read("src/client/Chat.tsx");
     expect(chat).not.toContain("QueuesPage");
     expect(chat).not.toContain("queues: (");
