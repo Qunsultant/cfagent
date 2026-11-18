@@ -41,14 +41,29 @@ describe("FeatureFlagPort Conformance Suite (Issue #1815)", () => {
   });
 
   describe("InMemoryFeatureFlagAdapter", () => {
-    it("defaults to closed (false) for all registered flags except payment_assurance (issue #2054)", async () => {
+    it("defaults to closed (false) for all registered flags except payment_assurance (issue #2054) and schedule_chat (issue #4249)", async () => {
       const port: FeatureFlagPort = new InMemoryFeatureFlagAdapter();
       for (const flag of ALL_FEATURE_FLAGS) {
         expect(await port.isEnabled(flag)).toBe(
-          flag === "payment_assurance",
+          flag === "payment_assurance" || flag === "schedule_chat",
         );
       }
       expect(await port.isEnabled("unknown_feature")).toBe(false);
+    });
+
+    it("schedule_nlq is closed by default and schedule_chat is open by default (issue #4249)", async () => {
+      // Chat is the default scheduling channel (ON when unconfigured);
+      // NLQ is secondary and OFF when unconfigured. Explicit
+      // initialFlags still win both ways.
+      const bare = new InMemoryFeatureFlagAdapter();
+      expect(await bare.isEnabled("schedule_chat")).toBe(true);
+      expect(await bare.isEnabled("schedule_nlq")).toBe(false);
+      const flipped = new InMemoryFeatureFlagAdapter({ schedule_chat: false, schedule_nlq: true });
+      expect(await flipped.isEnabled("schedule_chat")).toBe(false);
+      expect(await flipped.isEnabled("schedule_nlq")).toBe(true);
+      const all = await bare.getAllFlags();
+      expect(all.schedule_chat).toBe(true);
+      expect(all.schedule_nlq).toBe(false);
     });
 
     it("respects initial configuration and dynamic setFlag updates", async () => {
@@ -131,6 +146,32 @@ describe("FeatureFlagPort Conformance Suite (Issue #1815)", () => {
       expect(await bulkDisabled.isEnabled("payment_assurance")).toBe(false);
       const directDisabled = new EnvFeatureFlagAdapter({ FEATURE_PAYMENT_ASSURANCE: "0" });
       expect(await directDisabled.isEnabled("payment_assurance")).toBe(false);
+    });
+
+    it("schedule_chat is ON and schedule_nlq is OFF by default across adapters, explicit settings win (issue #4249)", async () => {
+      // Env: bare and configured envs alike — the channel defaults
+      // are explicit, not the generic bare/configured fallback.
+      const bare = new EnvFeatureFlagAdapter({});
+      expect(await bare.isEnabled("schedule_chat")).toBe(true);
+      expect(await bare.isEnabled("schedule_nlq")).toBe(false);
+      const configured = new EnvFeatureFlagAdapter({ FEATURE_SCREENER: "1" });
+      expect(await configured.isEnabled("schedule_chat")).toBe(true);
+      expect(await configured.isEnabled("schedule_nlq")).toBe(false);
+      const directOff = new EnvFeatureFlagAdapter({ FEATURE_SCHEDULE_CHAT: "0" });
+      expect(await directOff.isEnabled("schedule_chat")).toBe(false);
+      const directOn = new EnvFeatureFlagAdapter({ FEATURE_SCHEDULE_NLQ: "1" });
+      expect(await directOn.isEnabled("schedule_nlq")).toBe(true);
+      // Flagship: a missing dashboard flag resolves to the same
+      // defaults (chat ON, NLQ OFF); an explicit value wins.
+      const defaults = new CfFlagshipAdapter({
+        getBooleanValue: vi.fn().mockImplementation((_flag: string, defaultVal: boolean) => Promise.resolve(defaultVal)),
+      });
+      expect(await defaults.isEnabled("schedule_chat")).toBe(true);
+      expect(await defaults.isEnabled("schedule_nlq")).toBe(false);
+      const explicitOff = new CfFlagshipAdapter({
+        getBooleanValue: vi.fn().mockResolvedValue(false),
+      });
+      expect(await explicitOff.isEnabled("schedule_chat")).toBe(false);
     });
 
     it("planned_asset_tabs is retired: unknown to every adapter (issue #2972)", async () => {

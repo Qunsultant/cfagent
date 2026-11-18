@@ -11,6 +11,8 @@
 import {
   ALL_FEATURE_FLAGS,
   DEFAULT_MONETIZATION_FLAG_VALUE,
+  DEFAULT_SCHEDULE_CHAT_FLAG_VALUE,
+  DEFAULT_SCHEDULE_NLQ_FLAG_VALUE,
   type FeatureEvaluationContext,
   type FeatureFlag,
   type FeatureFlagPort,
@@ -51,9 +53,14 @@ export class CfFlagshipAdapter implements FeatureFlagPort {
       // authoritative control; an explicit Flagship value wins, and
       // an evaluation failure still fails closed below).
     // Issue #2742 / #4613: single monetization default shared via DEFAULT_MONETIZATION_FLAG_VALUE.
+    // Issue #4249: the scheduling-channel defaults (chat ON, NLQ OFF)
+    // are the provider defaults for a missing dashboard flag, via the
+    // same shared constants the Env adapter uses.
     const defaultValue =
       flag === "payment_assurance" ||
       flag === "goal_workflow" ||
+      (flag === "schedule_chat" && DEFAULT_SCHEDULE_CHAT_FLAG_VALUE) ||
+      (flag === "schedule_nlq" && DEFAULT_SCHEDULE_NLQ_FLAG_VALUE) ||
       (flag === "monetization" && DEFAULT_MONETIZATION_FLAG_VALUE);
     try {
       // Issue #2596: Flagship cannot distinguish an absent dashboard

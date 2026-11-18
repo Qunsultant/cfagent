@@ -28,6 +28,12 @@
 import { createMAS, type MASOptions } from "../mas";
 import { AGENT_ERROR_CATALOG, AgentErrorCode } from "../../aspects/errorCodes";
 import type { Env } from "../../types";
+import { createFeatureFlagPort } from "../../features/createFeatureFlagPort";
+import type { FeatureFlagPort } from "../../features/featureFlagPorts";
+import {
+  authorizeScheduleChannel,
+  type ScheduleChannelRefusalCode,
+} from "../../features/scheduleChannelFlags";
 import {
   type AgentScheduleActionRequest,
   type AgentScheduleActionResult,
@@ -69,7 +75,11 @@ type OrchestratorA2AErrorToken =
   | "missing_operation"
   | "unknown_operation"
   | "invalid_input"
-  | "internal_error";
+  | "internal_error"
+  // Issue #4249: the chat scheduling channel is disabled (or both
+  // channels are off) — the coded refusal is FEATURE_DISABLED (or
+  // SCHEDULE_CHANNELS_BOTH_OFF) in the error text + `feature`.
+  | "feature_disabled";
 
 /**
  * Map the local error tokens onto AGENT_ERROR_CATALOG keys, the
@@ -85,6 +95,12 @@ const ORCHESTRATOR_A2A_CATALOG_CODES: Record<OrchestratorA2AErrorToken, AgentErr
   unknown_operation: AgentErrorCode.UNKNOWN_AGENT_ERROR,
   invalid_input: AgentErrorCode.UNKNOWN_AGENT_ERROR,
   internal_error: AgentErrorCode.TOOL_EXECUTION_FAILED,
+  // Issue #4249: the catalog has no feature-disabled class, so a
+  // disabled channel maps to ERR_UNKNOWN_AGENT_ERROR like the other
+  // validation tokens; the local code ("feature_disabled") and the
+  // error text carry the FEATURE_DISABLED / SCHEDULE_CHANNELS_BOTH_OFF
+  // outcome. No catalog keys are invented here.
+  feature_disabled: AgentErrorCode.UNKNOWN_AGENT_ERROR,
 };
 
 /** Resolve a local error token to its AGENT_ERROR_CATALOG token. */
@@ -102,6 +118,11 @@ export interface OrchestratorA2ADataResult {
   code?: OrchestratorA2AErrorToken;
   /** Stable AGENT_ERROR_CATALOG token when ok is false. */
   errorToken?: AgentErrorCode;
+  /**
+   * Issue #4249: the flag behind a feature_disabled refusal
+   * ("schedule_chat" / "schedule_nlq"). Set only on that token.
+   */
+  feature?: string;
   correlationId: string;
   result?: unknown;
   error?: string;
@@ -143,6 +164,13 @@ export interface OrchestratorA2ADeps {
    * here and the ops light up with no dispatch change.
    */
   schedulePrincipal?: AgentSchedulePrincipal;
+  /**
+   * Issue #4249 — the FeatureFlagPort the schedule.* entry-point
+   * gate reads (the "schedule_chat" channel flag). Absent → the
+   * composition root resolves one from env (createFeatureFlagPort).
+   * Injectable so tests drive the gate deterministically.
+   */
+  flagPort?: FeatureFlagPort;
 }
 
 const defaultMasFactory: OrchestratorMasFactory = (env, ctx) =>
@@ -182,6 +210,23 @@ function extractA2AOperation(
 }
 
 class OrchestratorA2AInputError extends Error {}
+
+/**
+ * Issue #4249: a schedule.* request refused by the chat-channel
+ * gate. Carries the coded refusal (FEATURE_DISABLED, or
+ * SCHEDULE_CHANNELS_BOTH_OFF when both channels are off) and the
+ * flag behind the refused channel, so the dispatcher can report the
+ * coded outcome instead of a generic validation error.
+ */
+class OrchestratorA2AFeatureDisabledError extends Error {
+  readonly flag: string;
+  readonly refusalCode: ScheduleChannelRefusalCode;
+  constructor(flag: string, refusalCode: ScheduleChannelRefusalCode, message: string) {
+    super(`${refusalCode}: ${message}`);
+    this.flag = flag;
+    this.refusalCode = refusalCode;
+  }
+}
 
 type MasTools = ReturnType<typeof createMAS>;
 type MasToolName =
@@ -270,6 +315,23 @@ async function executeScheduleOperation(
   args: Record<string, unknown>,
   deps: OrchestratorA2ADeps,
 ): Promise<unknown> {
+  // Issue #4249 — the chat entry-point gate runs FIRST: the
+  // schedule.* ops are the chat channel, gated by "schedule_chat"
+  // (default ON). A disabled channel refuses with the coded outcome
+  // before any capability or principal check runs, so nothing about
+  // the request is evaluated and nothing executes. The gate sits at
+  // this entry point only — the capability itself stays ungated.
+  const authorization = await authorizeScheduleChannel(
+    deps.flagPort ?? createFeatureFlagPort(env),
+    "chat",
+  );
+  if (!authorization.allowed) {
+    throw new OrchestratorA2AFeatureDisabledError(
+      authorization.flag,
+      authorization.code,
+      authorization.message,
+    );
+  }
   if (!deps.agentScheduleExecute) {
     throw new Error("Agent schedule capability is not configured for this dispatch context.");
   }
@@ -403,6 +465,11 @@ async function executeOperation(
   }
 
   if (operation === "nlq.execute") {
+    // Issue #4249: nlq.execute itself is NOT gated here — it serves
+    // every NLQ domain, and gating it on schedule_nlq would disable
+    // all of NLQ whenever the (default-OFF) channel is off. Only the
+    // scheduling intents it can produce are gated, at execution in
+    // src/agents/nlq/execution.ts (the NLQ entry point).
     const query = stringArg(args, "query");
     if (query === null) {
       throw new OrchestratorA2AInputError(
@@ -488,6 +555,20 @@ export async function dispatchOrchestratorA2A(
     );
     return { ok: true, operation, correlationId, result };
   } catch (err) {
+    // Issue #4249: a disabled scheduling channel reports the coded
+    // refusal (FEATURE_DISABLED / SCHEDULE_CHANNELS_BOTH_OFF) with
+    // the flag that refused it — never a generic validation error.
+    if (err instanceof OrchestratorA2AFeatureDisabledError) {
+      return {
+        ok: false,
+        operation,
+        code: "feature_disabled",
+        errorToken: orchestratorErrorCatalogCode("feature_disabled"),
+        feature: err.flag,
+        correlationId,
+        error: err.message,
+      };
+    }
     if (err instanceof OrchestratorA2AInputError) {
       return {
         ok: false,

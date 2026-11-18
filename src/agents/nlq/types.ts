@@ -142,6 +142,13 @@ export interface NLQSocialBriefPort {
 export interface NLQExecutionDeps extends OptionsStrategyDeps {
   schedulingPort?: NLQSchedulingPort;
   /**
+   * Issue #4249 — the FeatureFlagPort the NLQ scheduling gate reads
+   * (the "schedule_nlq" channel flag). Absent → the composition root
+   * resolves one from env (createFeatureFlagPort). Injectable so
+   * tests drive the gate deterministically.
+   */
+  flagPort?: import("../../features/featureFlagPorts").FeatureFlagPort;
+  /**
    * Issue #3122 — the agent schedule capability, bound by the
    * orchestrator (which owns the env + DO sql + audit sink). When
    * present, NLQ schedule actions route through it (PDP, classifier,
