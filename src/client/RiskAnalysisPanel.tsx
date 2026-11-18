@@ -8,6 +8,7 @@ import {
 import {
   Button,
   Card,
+  CardHeader,
   Flex,
   Grid,
   Notice,
@@ -61,20 +62,6 @@ const EMPTY_LEG: RiskLegInput = {
 function singleLegName(leg: RiskLegInput): string {
   if (leg.optionType === "CALL") return leg.side === "BUY" ? "Long Call" : "Short Call";
   return leg.side === "BUY" ? "Long Put" : "Short Put";
-}
-
-/**
- * Card header in the order-workspace pattern: distributed row, bold
- * title left, muted meta right. Built from the Flex primitive only —
- * the same header treatment the order ticket's form card uses.
- */
-function CardHeader({ title, meta }: { title: string; meta?: string }) {
-  return (
-    <Flex justify="between" align="start" gap="2">
-      <strong>{title}</strong>
-      {meta && <span>{meta}</span>}
-    </Flex>
-  );
 }
 
 /** Label/value row in the calc-card pattern (summary surfaces). */
