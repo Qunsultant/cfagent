@@ -49,6 +49,21 @@
  * structured form (spy console.info, parse the JSON event, assert on
  * operation + level + fields) — no behavior change.
  *
+ * Batch 6 (this slice) migrated `src/server/routes` — all 5 files, 38 real
+ * sites — to the same logger, and moved them from REMAINING_PIN to
+ * MIGRATED_ZERO; after batch 6 the remaining total is 103. One pin
+ * correction, the batch-2 precedent: the `src/server/routes/queue.ts`
+ * ceiling of 16 was stale (current main holds 14 real refs), so the
+ * true remaining total before batch 6 was 141, not 143; 141 − 38 = 103,
+ * and REMAINING_PIN sums to 103. The scheduled dispatcher's
+ * in-function `structuredLog` shadows the new module logger inside
+ * that function only (same name, narrower actor scope — left as is);
+ * the queue file's #3121 comment about the ceiling of 16 now reads
+ * migrated-to-zero. All 16 `auth.ts` warnings are the repeated
+ * session-rotation / granter-revocation blocks, migrated with one
+ * event name per distinct message; no test asserted on any migrated
+ * line, so no test updates were needed.
+ *
  * Batch 3 (this slice) migrated `src/agents` — all 42 files, 180
  * real sites — to the same logger, and moved them from REMAINING_PIN
  * to MIGRATED_ZERO; after batch 3 the remaining total is 234. One
@@ -323,6 +338,11 @@ const MIGRATED_ZERO: readonly string[] = [
   "src/privacy/privacyRoutes.ts",
   "src/retrieval/hybridRetrieval.ts",
   "src/server.ts",
+  "src/server/routes/auth.ts",
+  "src/server/routes/core.ts",
+  "src/server/routes/messaging.ts",
+  "src/server/routes/privacy.ts",
+  "src/server/routes/queue.ts",
   "src/services/adaptationAudit.ts",
   "src/services/agenticPayments.ts",
   "src/services/aiSearch.ts",
@@ -461,11 +481,6 @@ const REMAINING_PIN: Readonly<Record<string, number>> = {
   "src/security/storeMetrics.ts": 1,
   "src/security/webhookReplay.ts": 1,
   "src/security/workerErrorBoundary.ts": 1,
-  "src/server/routes/auth.ts": 16,
-  "src/server/routes/core.ts": 3,
-  "src/server/routes/messaging.ts": 3,
-  "src/server/routes/privacy.ts": 2,
-  "src/server/routes/queue.ts": 16,
   "src/trading/channels/intake.ts": 3,
   "src/trading/options/unifiedOptionsService.ts": 1,
 };
