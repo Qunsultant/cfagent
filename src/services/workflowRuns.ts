@@ -78,7 +78,7 @@ import { aggregateStageStatus } from "./chainPipelineJobs";
 // the same function the executor dispatches it under.
 import { shardScanJobId } from "../workflows/optionsScreenEngine";
 
-export type WorkflowRunTrigger = "manual" | "scheduled" | "triggered" | "autonomous" | "webhook" | "agent" | "unknown";
+export type WorkflowRunTrigger = "manual" | "scheduled" | "triggered" | "copilot" | "autonomous" | "webhook" | "agent" | "unknown";
 
 export type WorkflowRunStatus =
   | "queued"
@@ -761,7 +761,7 @@ const FAMILY_WORKFLOW: Record<WorkflowRunFamily, string> = {
 
 /** Issue #3810: the stamped trigger domain — the run-level
  *  triggers a submission may stamp. "unknown" is never stamped. */
-const STAMPED_TRIGGERS: readonly WorkflowRunTrigger[] = ["manual", "scheduled", "triggered", "autonomous", "webhook", "agent"];
+const STAMPED_TRIGGERS: readonly WorkflowRunTrigger[] = ["manual", "scheduled", "triggered", "copilot", "autonomous", "webhook", "agent"];
 
 function triggerEvidence(job: WorkflowRunJobRow): { trigger?: string; detail?: string; actor?: string } {
   // Issue #3810: the stamped columns are the recorded provenance —
@@ -804,6 +804,11 @@ function triggerEvidence(job: WorkflowRunJobRow): { trigger?: string; detail?: s
   // "triggered" the same way a manual/scheduled payload does.
   if (candidates.includes("triggered")) {
     return { trigger: "triggered", ...(chainActor ? { actor: chainActor } : {}) };
+  }
+  // Issue #5053: a payload carrying the copilot trigger evidences
+  // "copilot" the same way.
+  if (candidates.includes("copilot")) {
+    return { trigger: "copilot", ...(chainActor ? { actor: chainActor } : {}) };
   }
 
   const scheduleName =
@@ -862,6 +867,7 @@ const TRIGGER_LABEL: Record<WorkflowRunTrigger, string> = {
   manual: "Manual",
   scheduled: "Scheduled",
   triggered: "Triggered",
+  copilot: "Copilot",
   autonomous: "Autonomous",
   webhook: "Webhook",
   agent: "Agent",
@@ -902,6 +908,14 @@ function triggerFromOutcome(outcome: WorkflowRunOutcomeRow): {
     return {
       trigger: "triggered",
       detail: origin ? `Triggered — recorded by ${origin}` : "Triggered",
+      triggeredBy: origin,
+    };
+  }
+  // Issue #5053: a copilot outcome renders "copilot", never "unknown".
+  if (outcome.trigger === "copilot") {
+    return {
+      trigger: "copilot",
+      detail: origin ? `Copilot — recorded by ${origin}` : "Copilot",
       triggeredBy: origin,
     };
   }
@@ -1904,6 +1918,9 @@ function reportTrigger(trigger: string | null): WorkflowRunTrigger {
   // Issue #5052: a canonical body carrying the Run-now trigger
   // renders "triggered" (the serve record has stamped it since #2528).
   if (t === "triggered") return "triggered";
+  // Issue #5053: a canonical body carrying the copilot trigger
+  // renders "copilot".
+  if (t === "copilot") return "copilot";
   // Issue #3946: the engine's own scheduled vocabulary — a job run
   // record stamps "worker-cron" for its cron-scheduled runs.
   if (t.startsWith("schedul") || t === "cron" || t === "worker-cron") return "scheduled";
@@ -2452,6 +2469,7 @@ export function summarizeWorkflowRuns(runs: WorkflowRun[]): {
     manual: 0,
     scheduled: 0,
     triggered: 0,
+    copilot: 0,
     autonomous: 0,
     webhook: 0,
     agent: 0,

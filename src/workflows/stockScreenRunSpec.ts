@@ -161,10 +161,11 @@ export interface StockScreenRunSpec extends StockScreenRunProvenance {
   };
   /**
    * Issue #2908 (G1): the run trigger. The builder always sets
-   * it (goal source -> "goal", otherwise "manual" unless the
-   * caller passes one); hand-built specs must set it too —
-   * downstream code never re-derives it, and the UI renders
-   * a missing trigger as "unknown", never as "scheduled".
+   * it (goal source -> "goal", nlq/mesh sources -> "copilot"
+   * (#5053: a chat screen is a copilot dispatch), otherwise
+   * "manual" unless the caller passes one); hand-built specs must
+   * set it too — downstream code never re-derives it, and the UI
+   * renders a missing trigger as "unknown", never as "scheduled".
    */
   trigger: StockScreenTrigger;
 }
@@ -250,7 +251,7 @@ export function buildStockScreenRunSpec(args: {
    * through the stored layer. Absent → env-only admission.
    */
   readSettingRaw?: (key: string) => string | null;
-  /** Issue #2908 (G1): provenance the route knows; trigger defaults by source (goal -> "goal", else "manual"). */
+  /** Issue #2908 (G1): provenance the route knows; trigger defaults by source (goal -> "goal", nlq/mesh -> "copilot" (#5053), else "manual"). */
   trigger?: StockScreenTrigger;
   userLogin?: string;
   scheduleId?: string;
@@ -301,7 +302,11 @@ export function buildStockScreenRunSpec(args: {
         : {}),
       // Issue #2908 (G1): provenance, set once here — never
       // re-derived downstream. Undefined fields stay absent.
-      trigger: args.trigger ?? (args.source === "goal" ? "goal" : "manual"),
+      // Issue #5053: a chat source (nlq / mesh) is a copilot
+      // dispatch — the spec trigger is "copilot", mirroring the
+      // goal -> "goal" precedent. The `source` field still
+      // records nlq/mesh, so no provenance is lost.
+      trigger: args.trigger ?? (args.source === "goal" ? "goal" : args.source === "nlq" || args.source === "mesh" ? "copilot" : "manual"),
       ...(args.userLogin !== undefined ? { userLogin: args.userLogin } : {}),
       ...(args.scheduleId !== undefined ? { scheduleId: args.scheduleId } : {}),
       ...(args.jobId !== undefined ? { jobId: args.jobId } : {}),

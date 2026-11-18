@@ -565,7 +565,10 @@ async function buildScreenCommand(
   const command: WorkflowJobCommand = buildParentScreenCommand({
     jobId,
     source: "mesh-door",
-    trigger: "manual",
+    // Issue #5053: a mesh-door screen is a copilot dispatch — the
+    // command stamps "copilot", never "manual". specTrigger
+    // still carries "mesh", so the door provenance survives.
+    trigger: "copilot",
     specTrigger: "mesh",
     userLogin: req.userLogin,
     tenantId,
@@ -656,7 +659,10 @@ function startScreenBridge(
       capability: "screener.run",
       displayName: input.displayName,
       userLogin: input.userLogin,
-      trigger: "manual",
+      // Issue #5053: the bridge row is the run's own row in the
+      // jobs table — it stamps "copilot" like the command, or
+      // the mesh run renders "manual" from its payload evidence.
+      trigger: "copilot",
       workflowId: input.workflowId,
       // Issue #4357 — the join key: the wrapper row that dispatched
       // this screen. Null for sync/direct calls (no wrapper).
