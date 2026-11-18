@@ -56,3 +56,16 @@ PAYPAL_ENV="sandbox"
 LEMON_SQUEEZY_API_KEY="your-lemon-squeezy-api-key"
 LEMON_SQUEEZY_STORE_ID="your-lemon-squeezy-store-id"
 LEMON_SQUEEZY_WEBHOOK_SECRET="your-lemon-squeezy-signing-secret"
+
+# Stock Copilot agentic learning read-back (#5055, AG-1). The cycle
+# distils a learning every run; these thresholds decide whether those
+# learnings change the next plan. Defaults live in
+# src/services/stockCopilotLearningPolicy.ts - set a var only to override.
+# Kill switch: false ignores prior learnings entirely.
+COPILOT_LEARNING_READBACK_ENABLED="true"
+# Risk-category learnings in the window that hold back NEW entries.
+COPILOT_LEARNING_RISK_BLOCK_AT="2"
+# Session-category learnings in the window that force limit-only shaping.
+COPILOT_LEARNING_SESSION_LIMIT_AT="2"
+# How many of the newest learnings the policy considers.
+COPILOT_LEARNING_POLICY_WINDOW="50"

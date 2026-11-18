@@ -3,7 +3,12 @@
  *
  * Implements non-deterministic dual-mode cycle operation:
  * 1. Perceive: Gathers market bars, open positions, recent activity, active session,
- *    and prior distilled learnings from tenancy memory.
+ *    and prior distilled learnings from tenancy memory. The learnings are not
+ *    decorative (#5055): the rules in `stockCopilotLearningPolicy.ts` turn them
+ *    into plan constraints - risk learnings at/above the configured threshold
+ *    hold back NEW entries (exits still execute), session learnings at/above the
+ *    threshold force limit-only order shaping. A failed read fails open and is
+ *    recorded as a `learning_readback` cycle error.
  * 2. Plan: Evaluates setup candidates and exit triggers, constructing structured
  *    trade intents (data-only, no raw LLM text orders).
  * 3. Critic (Reflect): Validates planned intents against deterministic risk constraints,
@@ -45,6 +50,12 @@ import {
 } from "./stockCopilot";
 import { StockCopilotPositionStore } from "./stockCopilotStore";
 import {
+  deriveCopilotLearningPolicy,
+  neutralCopilotLearningPolicy,
+  resolveCopilotLearningPolicyThresholds,
+  type CopilotLearningsPolicy,
+} from "./stockCopilotLearningPolicy";
+import {
   evaluateCriticRules,
   type ProposedTradeIntent,
 } from "./stockCopilotCritic";
@@ -56,6 +67,8 @@ export interface StockCopilotAgenticCycleResult extends StockCopilotCycleResult 
     evaluatedSymbols: string[];
     proposedIntentsCount: number;
     reasoning: string;
+    /** #5055: what the prior learnings told this plan to do. */
+    learningsPolicy: CopilotLearningsPolicy;
   };
   criticVerdict: CopilotCriticVerdict;
   learningsGenerated: number;
@@ -159,6 +172,7 @@ export async function runStockCopilotAgenticCycle(
       evaluatedSymbols: [],
       proposedIntentsCount: 0,
       reasoning: "",
+      learningsPolicy: neutralCopilotLearningPolicy(true),
     },
     criticVerdict: {
       verdict: "accept",
@@ -226,6 +240,36 @@ export async function runStockCopilotAgenticCycle(
     return result;
   }
 
+  // 1b. Prior-learning read-back (#5055). The loop distils a learning every
+  // cycle; this is the read that makes the distillate a decision input. The
+  // read is best-effort: a storage fault is a recorded cycle error and the
+  // policy fails open (a blip must not halt a cycle) - it never invents a
+  // constraint. `COPILOT_LEARNING_READBACK_ENABLED=false` skips it entirely.
+  const learningThresholds = resolveCopilotLearningPolicyThresholds(deps.env);
+  let learningsPolicy = neutralCopilotLearningPolicy(
+    learningThresholds.enabled,
+  );
+  if (learningThresholds.enabled && deps.memory) {
+    try {
+      deps.memory.ensureSchema();
+      const priorLearnings = deps.memory.listLearnings(
+        deps.userLogin,
+        learningThresholds.window,
+      );
+      learningsPolicy = deriveCopilotLearningPolicy(
+        priorLearnings,
+        learningThresholds,
+      );
+    } catch (err) {
+      result.errors.push({
+        symbol: "",
+        stage: "learning_readback",
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+  result.plan.learningsPolicy = learningsPolicy;
+
   // 3. Perception Stage: Read Memory, Store, and Positions
   const store = new StockCopilotPositionStore(deps.positions);
   const openPositions = await store.listOpenPositions(deps.userLogin);
@@ -264,8 +308,9 @@ export async function runStockCopilotAgenticCycle(
     }
   }
 
-  // Evaluate candidate entries for universe
-  for (const sym of universe) {
+  // Evaluate candidate entries for universe. A risk-learning block holds back
+  // new entries only; the exit loop above has already run.
+  for (const sym of learningsPolicy.blockEntries ? [] : universe) {
     if (openPositions.some((p) => p.symbol === sym)) continue;
     for (const strat of strategies) {
       try {
@@ -276,14 +321,20 @@ export async function runStockCopilotAgenticCycle(
         if (signal.action === "enter_long" && last > 0) {
           const stopPrice = round2(last * (1 - COPILOT_STOP_LOSS_PCT / 100));
           const targetPrice = round2(last * (1 + COPILOT_TAKE_PROFIT_PCT / 100));
-          const shape = shapeCopilotSessionOrder(session, last);
+          const sessionShape = shapeCopilotSessionOrder(session, last);
+          // #5055: a session learning makes new entries limit-only even in
+          // the regular session, where the default shape is a market order.
+          const orderType = learningsPolicy.requireLimitOrders
+            ? ("LIMIT" as const)
+            : sessionShape.orderType;
+          const limitPrice = round2(last);
 
           proposedIntents.push({
             symbol: sym,
             action: "BUY",
             quantity: 10, // Sizing constraint
-            orderType: shape.orderType,
-            limitPrice: (shape.orderType === "LIMIT" ? shape.limitPrice : last) ?? last,
+            orderType,
+            limitPrice: orderType === "LIMIT" ? limitPrice : undefined,
             stopPrice,
             targetPrice,
             strategy: strat,
@@ -300,7 +351,10 @@ export async function runStockCopilotAgenticCycle(
   }
 
   result.plan.proposedIntentsCount = proposedIntents.length;
-  result.plan.reasoning = `Perceived ${openPositions.length} open positions and ${universe.length} universe tickers; identified ${proposedIntents.length} trade intent(s).`;
+  const learningNote = learningsPolicy.enabled
+    ? ` Prior learnings read: ${learningsPolicy.considered} (risk ${learningsPolicy.riskCount}, session ${learningsPolicy.sessionCount}, refusal ${learningsPolicy.refusalCount}); ${learningsPolicy.reason}`
+    : " Learning read-back disabled.";
+  result.plan.reasoning = `Perceived ${openPositions.length} open positions and ${universe.length} universe tickers; identified ${proposedIntents.length} trade intent(s).${learningNote}`;
 
   // 4. Critic Stage (Reflect)
   const criticVerdict = evaluateCriticRules({
