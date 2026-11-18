@@ -333,7 +333,7 @@ import {
   ReferralCodeScopeRefusedError,
 } from "../../services/referralCodes";
 import {
-  convertReferralCreditsForRun,
+  convertReferralCreditsForRunPartial,
   recordFirstPaidRunEarning,
 } from "../../services/referralCredits";
 import { createWorkflowPorts, type WorkflowEnv } from "../../workflows/createWorkflowPorts";
@@ -1884,22 +1884,25 @@ export async function handleAgenticPaymentsRoutes(
       // a Subscribed included run, or a commercial credit
       // balance that already covers the price, spends before
       // any referral credit is touched. Only when commercial
-      // coverage is short AND the vested referral balance covers
-      // the FULL price does conversion happen: exactly priceUSD
-      // of referral credit is redeemed and topped up into the
-      // commercial account, and the refreshed account is what
+      // coverage is short does conversion happen, through the
+      // single balance-read path
+      // (convertReferralCreditsForRunPartial): a vested balance
+      // at or above the price converts exactly, and a balance
+      // below the price converts as a partial discount — the
+      // balance tops up the commercial account and the gate
+      // below charges the remainder through the usual path
+      // (#5228, run prices only). The refreshed account is what
       // the gate below sees — so the run still goes through the
       // EXISTING gate + consumeCoverage path (paidVia
       // "credits"), with zero gate changes and no parallel
-      // bypass. A partial referral balance stays untouched (a
-      // partial discount needs gate work, deferred). Flag OFF
-      // skips conversion entirely: with the flag off the run
-      // is free anyway, and converting would burn referral
-      // credit for a free run. A conversion failure fails
-      // CLOSED (503, no payment workflow, no run); the redeem
-      // already happened by the fail-safe ordering in
-      // convertReferralCreditsForRun, and its error names the
-      // earning rows as the operator reconcile signal.
+      // bypass. Flag OFF skips conversion entirely: with the
+      // flag off the run is free anyway, and converting would
+      // burn referral credit for a free run. A conversion
+      // failure fails CLOSED (503, no payment workflow, no
+      // run); the redeem already happened by the fail-safe
+      // ordering in convertReferralCreditsForRun, and its error
+      // names the earning rows as the operator reconcile
+      // signal.
       // Price source (rebuild adaptation): the run price now
       // lives in the operator price catalogue (migration 0011),
       // not the removed FAMILY_PRICES map — so the price is
@@ -1924,17 +1927,16 @@ export async function handleAgenticPaymentsRoutes(
               if (lifecycle instanceof Response) return lifecycle;
               const lifecycleEnsured = await ensureLifecycle(lifecycle);
               if (lifecycleEnsured) return lifecycleEnsured;
-              const referralBalance = await lifecycle.redeemableBalance(login);
-              if (referralBalance >= priceUSD) {
-                try {
-                  const converted = await convertReferralCreditsForRun({
-                    lifecycle,
-                    commercial: store,
-                    userId: login,
-                    tenantId,
-                    amountUSD: priceUSD,
-                    runRequestId,
-                  });
+              try {
+                const converted = await convertReferralCreditsForRunPartial({
+                  lifecycle,
+                  commercial: store,
+                  userId: login,
+                  tenantId,
+                  amountUSD: priceUSD,
+                  runRequestId,
+                });
+                if (converted.redeemedUSD > 0) {
                   // The gate reads the caller-built account, not a
                   // fresh store read — refresh it from the topped-up
                   // store row, or the gate would miss the conversion.
@@ -1944,11 +1946,12 @@ export async function handleAgenticPaymentsRoutes(
                     runRequestId,
                     userId: login,
                     redeemedUSD: converted.redeemedUSD,
+                    remainingUSD: converted.remainingUSD,
                     family,
                   });
-                } catch (err: any) {
-                  return Response.json({ code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE") }, { status: 503 });
                 }
+              } catch (err: any) {
+                return Response.json({ code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE") }, { status: 503 });
               }
             }
           }

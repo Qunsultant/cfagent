@@ -63,6 +63,7 @@ import {
 } from "../src/services/lifecycleEmail";
 import {
   convertReferralCreditsForRun,
+  convertReferralCreditsForRunPartial,
   recordFirstPaidRunEarning,
 } from "../src/services/referralCredits";
 import {
@@ -345,6 +346,94 @@ describe("referral conversion into the coverage path (#2208)", () => {
         lifecycle, commercial, userId: "ref", tenantId: "t2", amountUSD: 0.1, runRequestId: "run-1",
       }),
     ).rejects.toThrow(/never cross tenants/);
+  });
+});
+
+describe("partial referral conversion (#5228)", () => {
+  it("a balance below the run price converts as a partial discount; the remainder stays for later runs", async () => {
+    const lifecycle = new InMemoryLifecycleAdapter();
+    const commercial = new InMemoryCommercialAdapter();
+    await lifecycle.setRules({ earnAmountUSD: 0.05, vestingDelayMs: 0, redemptionScope: "pay-per-run" });
+    await recordFirstPaidRunEarning(lifecycle, { referrerUserId: "ref", referredUserId: "new-1", tenantId: "t1" });
+    expect(await lifecycle.redeemableBalance("ref")).toBe(0.05);
+    const converted = await convertReferralCreditsForRunPartial({
+      lifecycle,
+      commercial,
+      userId: "ref",
+      tenantId: "t1",
+      amountUSD: 0.1,
+      runRequestId: "run-1",
+    });
+    expect(converted.redeemedUSD).toBe(0.05);
+    expect(converted.remainingUSD).toBe(0.05);
+    // The commercial account now holds the discount; the gate
+    // below charges the remaining $0.05 through the usual path.
+    expect((await commercial.getAccount("ref"))?.creditsUSD).toBe(0.05);
+    expect(await lifecycle.redeemableBalance("ref")).toBe(0);
+  });
+
+  it("a balance at or above the run price converts exactly, as before", async () => {
+    const lifecycle = new InMemoryLifecycleAdapter();
+    const commercial = new InMemoryCommercialAdapter();
+    await lifecycle.setRules({ earnAmountUSD: 1, vestingDelayMs: 0, redemptionScope: "pay-per-run" });
+    await recordFirstPaidRunEarning(lifecycle, { referrerUserId: "ref", referredUserId: "new-1", tenantId: "t1" });
+    const converted = await convertReferralCreditsForRunPartial({
+      lifecycle,
+      commercial,
+      userId: "ref",
+      tenantId: "t1",
+      amountUSD: 0.1,
+      runRequestId: "run-1",
+    });
+    expect(converted.redeemedUSD).toBe(0.1);
+    expect(converted.remainingUSD).toBe(0);
+    expect((await commercial.getAccount("ref"))?.creditsUSD).toBe(0.1);
+    expect(await lifecycle.redeemableBalance("ref")).toBe(0.9);
+  });
+
+  it("a zero balance converts nothing and touches no account", async () => {
+    const lifecycle = new InMemoryLifecycleAdapter();
+    const commercial = new InMemoryCommercialAdapter();
+    await lifecycle.setRules({ earnAmountUSD: 1, vestingDelayMs: 0, redemptionScope: "pay-per-run" });
+    const converted = await convertReferralCreditsForRunPartial({
+      lifecycle,
+      commercial,
+      userId: "ref",
+      tenantId: "t1",
+      amountUSD: 0.1,
+      runRequestId: "run-1",
+    });
+    expect(converted).toEqual({ redeemedUSD: 0, remainingUSD: 0.1, allocations: [] });
+    expect(await commercial.getAccount("ref")).toBeNull();
+  });
+
+  it("partial conversion never crosses tenants and never dips into unvested credit", async () => {
+    const lifecycle = new InMemoryLifecycleAdapter();
+    const commercial = new InMemoryCommercialAdapter();
+    await lifecycle.setRules({ earnAmountUSD: 1, vestingDelayMs: 0, redemptionScope: "pay-per-run" });
+    await recordFirstPaidRunEarning(lifecycle, { referrerUserId: "ref", referredUserId: "new-1", tenantId: "t1" });
+    await expect(
+      convertReferralCreditsForRunPartial({
+        lifecycle, commercial, userId: "ref", tenantId: "t2", amountUSD: 0.1, runRequestId: "run-1",
+      }),
+    ).rejects.toThrow(/never cross tenants/);
+    expect(await lifecycle.redeemableBalance("ref")).toBe(1);
+    // Unvested earnings are invisible to the balance read, so a
+    // fresh earning under a vesting delay converts nothing.
+    const unvested = new InMemoryLifecycleAdapter();
+    const unvestedCommercial = new InMemoryCommercialAdapter();
+    await unvested.setRules({ earnAmountUSD: 1, vestingDelayMs: 60000, redemptionScope: "pay-per-run" });
+    await recordFirstPaidRunEarning(unvested, { referrerUserId: "ref", referredUserId: "new-1", tenantId: "t1" });
+    const none = await convertReferralCreditsForRunPartial({
+      lifecycle: unvested,
+      commercial: unvestedCommercial,
+      userId: "ref",
+      tenantId: "t1",
+      amountUSD: 0.1,
+      runRequestId: "run-1",
+    });
+    expect(none.redeemedUSD).toBe(0);
+    expect(none.remainingUSD).toBe(0.1);
   });
 });
 
