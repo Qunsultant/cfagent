@@ -1,0 +1,3 @@
+### Fixed
+
+- **`BEHIND` no longer reads as "not queued" (#5570):** a PR waiting in the merge queue reports `mergeStateStatus: BEHIND`/`UNKNOWN` exactly like one that was never enrolled, so "it says BEHIND, I'll rebase" restarts CI and loses the queue slot — the loop this lane ran three times on #5531/#5536 before the queue answered "already in the queue" for a BEHIND head. §9 now states the rule: read `isInMergeQueue` before touching the branch, never push to a queued PR (the remote refuses and a lost slot restarts the wait), and use `node scripts/pr-delivery-state.mjs` to get `queued` vs `not-queued` in one line. Pinned by `tests/pr_queue_state_5570.test.ts`, which also asserts the classifier separates the two BEHIND cases. #clo-arsi
