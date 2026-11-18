@@ -1206,6 +1206,19 @@ export const MIGRATION_0068_USER_PROFILE_EMAIL: DataMigration = {
   sql: d1MigrationSql(68),
 };
 
+/**
+ * Issue #5229 (slice 2.31): referral-credit expiry period on
+ * agent_referral_rules. Additive column only, DEFAULT 7776000000
+ * (90 days — the PROPOSED default; operator-editable via the
+ * referral-rules route + Billing UX). Existing rows read back
+ * with the 90-day expiry, matching the seeded rule.
+ */
+export const MIGRATION_0069_REFERRAL_EXPIRY: DataMigration = {
+  version: 69,
+  name: "0069_referral_expiry",
+  sql: d1MigrationSql(69),
+};
+
 export const MIGRATION_0058_PRODUCT_VERSIONS: DataMigration = {
   version: 58,
   name: "0058_product_versions",
@@ -1440,6 +1453,7 @@ export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANC
   MIGRATION_0066_REFERRAL_CODES,
   MIGRATION_0067_JOB_PIPELINE_RUN_WORKFLOW_INSTANCE_ID,
   MIGRATION_0068_USER_PROFILE_EMAIL,
+  MIGRATION_0069_REFERRAL_EXPIRY,
 ];
 
 function splitStatements(sqlText: string): string[] {

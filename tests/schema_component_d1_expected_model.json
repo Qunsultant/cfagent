@@ -1514,6 +1514,11 @@
           "name": "updated_at_ms",
           "type": "INTEGER",
           "pk": 0
+        },
+        {
+          "name": "expiry_period_ms",
+          "type": "INTEGER",
+          "pk": 0
         }
       ],
       "constraints": {}

@@ -44,14 +44,21 @@ import {
   ensureLifecycleSchema,
 } from "../src/data/d1LifecycleAdapter";
 import { InMemoryLifecycleAdapter } from "../src/data/inMemoryLifecycleAdapter";
-import { MIGRATION_0015_LIFECYCLE_REFERRAL } from "../src/data/migrationRunner";
+import { MIGRATION_0015_LIFECYCLE_REFERRAL, MIGRATION_0069_REFERRAL_EXPIRY } from "../src/data/migrationRunner";
 import {
   agentDigestSends,
   agentNotificationPreferences,
   agentReferralEarnings,
   agentReferralRules,
 } from "../src/data/drizzleSchema";
-import type { LifecycleStore } from "../src/data/lifecyclePorts";
+import {
+  allocateRedemption,
+  expiredBalanceFor,
+  isEarningExpired,
+  redeemableBalanceFor,
+  type LifecycleStore,
+  type ReferralEarning,
+} from "../src/data/lifecyclePorts";
 import { InMemoryCommercialAdapter } from "../src/data/inMemoryCommercialAdapter";
 import {
   applyUnsubscribe,
@@ -138,6 +145,9 @@ describe("lifecycle port conformance (#2208)", () => {
         expect(rules.earnAmountUSD).toBe(0.5);
         expect(rules.vestingDelayMs).toBe(604800000);
         expect(rules.redemptionScope).toBe("pay-per-run");
+        // Issue #5229 (slice 2.31): the seeded expiry is the 90-day
+        // PROPOSED default (migration 0069).
+        expect(rules.expiryPeriodMs).toBe(7776000000);
       });
 
       it("rule changes drive later earnings (operator data, not code constants)", async () => {
@@ -192,6 +202,67 @@ describe("lifecycle port conformance (#2208)", () => {
         expect(await store.redeemableBalance("ref")).toBe(0.5);
       });
 
+      it("expired credits do not convert; the 90-day default is honored (#5229)", async () => {
+        const store: LifecycleStore = await make();
+        await store.setRules({ earnAmountUSD: 1, vestingDelayMs: 0, redemptionScope: "pay-per-run" });
+        const t0 = Date.now();
+        await store.recordEarning({ referrerUserId: "ref", referredUserId: "old-1", tenantId: "t1" });
+        vi.useFakeTimers();
+        try {
+          vi.setSystemTime(t0 + 89 * 86400000);
+          expect(await store.redeemableBalance("ref")).toBe(1);
+          vi.setSystemTime(t0 + 91 * 86400000);
+          expect(await store.redeemableBalance("ref")).toBe(0);
+          await expect(
+            store.redeem({ userId: "ref", tenantId: "t1", amountUSD: 0.5, runRequestId: "run-x" }),
+          ).rejects.toThrow(/Insufficient vested.*expired/);
+          expect((await store.listEarnings("ref"))[0].redeemedAmountUSD).toBe(0);
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      it("partially-expired balance converts only the unexpired portion (#5229)", async () => {
+        const store: LifecycleStore = await make();
+        await store.setRules({ earnAmountUSD: 1, vestingDelayMs: 0, redemptionScope: "pay-per-run" });
+        const t0 = Date.now();
+        vi.useFakeTimers();
+        try {
+          vi.setSystemTime(t0);
+          await store.recordEarning({ referrerUserId: "ref", referredUserId: "old-1", tenantId: "t1" });
+          vi.setSystemTime(t0 + 89 * 86400000);
+          await store.recordEarning({ referrerUserId: "ref", referredUserId: "new-1", tenantId: "t1" });
+          vi.setSystemTime(t0 + 91 * 86400000);
+          expect(await store.redeemableBalance("ref")).toBe(1);
+          const redeemed = await store.redeem({ userId: "ref", tenantId: "t1", amountUSD: 1, runRequestId: "run-y" });
+          expect(redeemed.redeemedUSD).toBe(1);
+          expect(redeemed.expiredUSD).toBe(1);
+          expect(redeemed.allocations).toHaveLength(1);
+          expect(redeemed.allocations[0].earningId).toBe("referral:new-1");
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      it("an expiry-period rule change is honored without a code change (#5229)", async () => {
+        const store: LifecycleStore = await make();
+        await store.setRules({
+          earnAmountUSD: 1,
+          vestingDelayMs: 0,
+          redemptionScope: "pay-per-run",
+          expiryPeriodMs: 1000,
+        });
+        const t0 = Date.now();
+        await store.recordEarning({ referrerUserId: "ref", referredUserId: "old-1", tenantId: "t1" });
+        vi.useFakeTimers();
+        try {
+          vi.setSystemTime(t0 + 2000);
+          expect(await store.redeemableBalance("ref")).toBe(0);
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
       it("preferences default digest OFF / welcome ON; toggles stick; opt-out is immediate", async () => {
         const store: LifecycleStore = await make();
         const defaults = await store.getPreferences("u1", "t1");
@@ -214,6 +285,55 @@ describe("lifecycle port conformance (#2208)", () => {
       });
     });
   }
+});
+
+describe("referral credit expiry helpers (#5229)", () => {
+  const DAY = 86400000;
+  const NOW = 1_800_000_000_000;
+  const EXPIRY = 90 * DAY;
+  const earning = (
+    id: string,
+    earnedAtMs: number,
+    amountUSD = 1,
+    redeemedAmountUSD = 0,
+  ): ReferralEarning => ({
+    id,
+    referrerUserId: "ref",
+    referredUserId: id,
+    tenantId: "t1",
+    amountUSD,
+    redeemedAmountUSD,
+    earnedAtMs,
+    vestedAtMs: earnedAtMs,
+    redeemedByRunId: null,
+    redeemedAtMs: null,
+  });
+
+  it("isEarningExpired: 91 days old is expired, 89 days is not, exactly 90 days is expired, 0 never expires", () => {
+    expect(isEarningExpired(earning("a", NOW - 91 * DAY), NOW, EXPIRY)).toBe(true);
+    expect(isEarningExpired(earning("a", NOW - 89 * DAY), NOW, EXPIRY)).toBe(false);
+    expect(isEarningExpired(earning("a", NOW - 90 * DAY), NOW, EXPIRY)).toBe(true);
+    expect(isEarningExpired(earning("a", NOW - 900 * DAY), NOW, 0)).toBe(false);
+  });
+
+  it("redeemableBalanceFor excludes expired remainders; expiredBalanceFor sums them", () => {
+    const es = [earning("old", NOW - 91 * DAY), earning("new", NOW - 2 * DAY)];
+    expect(redeemableBalanceFor(es, NOW, EXPIRY)).toBe(1);
+    expect(expiredBalanceFor(es, NOW, EXPIRY)).toBe(1);
+    expect(redeemableBalanceFor(es, NOW, 0)).toBe(2);
+    expect(expiredBalanceFor(es, NOW, 0)).toBe(0);
+    // A partially-spent expired earning contributes only its remainder.
+    const partial = [earning("old", NOW - 91 * DAY, 1, 0.4)];
+    expect(expiredBalanceFor(partial, NOW, EXPIRY)).toBe(0.6);
+    expect(redeemableBalanceFor(partial, NOW, EXPIRY)).toBe(0);
+  });
+
+  it("allocateRedemption allocates unexpired oldest-first and names the expired amount on shortfall", () => {
+    const es = [earning("old", NOW - 91 * DAY), earning("new", NOW - 2 * DAY)];
+    expect(allocateRedemption(es, 1, NOW, EXPIRY)).toEqual([{ earningId: "new", amountUSD: 1 }]);
+    expect(() => allocateRedemption(es, 1.5, NOW, EXPIRY)).toThrow(/Insufficient vested.*1 expired/);
+    expect(() => allocateRedemption([earning("old", NOW - 91 * DAY)], 0.5, NOW, EXPIRY)).toThrow(/expired/);
+  });
 });
 
 describe("lifecycle email service (#2208)", () => {
@@ -346,6 +466,27 @@ describe("referral conversion into the coverage path (#2208)", () => {
         lifecycle, commercial, userId: "ref", tenantId: "t2", amountUSD: 0.1, runRequestId: "run-1",
       }),
     ).rejects.toThrow(/never cross tenants/);
+  });
+
+  it("conversion spends nothing when the only credit is expired (#5229)", async () => {
+    const lifecycle = new InMemoryLifecycleAdapter();
+    const commercial = new InMemoryCommercialAdapter();
+    await lifecycle.setRules({ earnAmountUSD: 1, vestingDelayMs: 0, redemptionScope: "pay-per-run" });
+    const t0 = Date.now();
+    await recordFirstPaidRunEarning(lifecycle, { referrerUserId: "ref", referredUserId: "new-1", tenantId: "t1" });
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(t0 + 91 * 86400000);
+      await expect(
+        convertReferralCreditsForRun({
+          lifecycle, commercial, userId: "ref", tenantId: "t1", amountUSD: 0.1, runRequestId: "run-1",
+        }),
+      ).rejects.toThrow(/Insufficient vested/);
+      expect((await commercial.getAccount("ref"))?.creditsUSD ?? 0).toBe(0);
+      expect((await lifecycle.listEarnings("ref"))[0].redeemedAmountUSD).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -481,6 +622,13 @@ describe("lifecycle structural pins (#2208)", () => {
       const ddlColumns = [...block.matchAll(/^\s{2}(\w+) /gm)]
         .map((m) => m[1])
         .filter((c) => !["PRIMARY", "FOREIGN", "UNIQUE", "CONSTRAINT", "CHECK"].includes(c));
+      // Issue #5229 (slice 2.31): migration 0069 adds expiry_period_ms
+      // to agent_referral_rules by ALTER TABLE — the DDL that defines
+      // the table is 0015 + 0069, not 0015 alone.
+      if (table === "agent_referral_rules") {
+        const added = [...MIGRATION_0069_REFERRAL_EXPIRY.sql.matchAll(/ADD COLUMN (\w+)/g)].map((m) => m[1]);
+        ddlColumns.push(...added);
+      }
       expect(ddlColumns.sort()).toEqual(schemaColumns.sort());
     }
   });
@@ -565,6 +713,77 @@ describe("lifecycle routes (#2208)", () => {
     });
     expect(prefs1?.status).toBe(200);
     expect(((await prefs1?.json()) as any).preferences.digestEnabled).toBe(true);
+  });
+
+  it("referral rules: any verified login reads; only operators write; invalid values 400 (#5229)", async () => {
+    const { ctx } = await setup();
+    const read = await call(ctx, "GET", "/payments/agentic/commercial/referral/rules", "u1");
+    expect(read?.status).toBe(200);
+    const readBody = (await read?.json()) as {
+      rules: { expiryPeriodMs: number; earnAmountUSD: number; vestingDelayMs: number; redemptionScope: string };
+    };
+    expect(readBody.rules.expiryPeriodMs).toBe(7776000000);
+    expect(readBody.rules.earnAmountUSD).toBe(0.5);
+    expect(readBody.rules.vestingDelayMs).toBe(604800000);
+    expect(readBody.rules.redemptionScope).toBe("pay-per-run");
+    const forbidden = await call(ctx, "POST", "/payments/agentic/commercial/referral/rules", "u1", {
+      earnAmountUSD: 1,
+      vestingDelayMs: 0,
+      redemptionScope: "pay-per-run",
+      expiryPeriodMs: 86400000,
+    });
+    expect(forbidden?.status).toBe(403);
+    const bad = await call(ctx, "POST", "/payments/agentic/commercial/referral/rules", "op1", {
+      earnAmountUSD: 1,
+      vestingDelayMs: 0,
+      redemptionScope: "pay-per-run",
+      expiryPeriodMs: -1,
+    });
+    expect(bad?.status).toBe(400);
+    expect(((await bad?.json()) as any).code).toBe("FAILURE_COMMERCIAL_REQUEST_INVALID");
+    const ok = await call(ctx, "POST", "/payments/agentic/commercial/referral/rules", "op1", {
+      earnAmountUSD: 1,
+      vestingDelayMs: 0,
+      redemptionScope: "pay-per-run",
+      expiryPeriodMs: 86400000,
+    });
+    expect(ok?.status).toBe(200);
+    expect(((await ok?.json()) as any).code).toBe("SUCCESS_REFERRAL_RULES_UPDATED");
+    const reread = await call(ctx, "GET", "/payments/agentic/commercial/referral/rules", "u1");
+    const rereadBody = (await reread?.json()) as { rules: { expiryPeriodMs: number; earnAmountUSD: number } };
+    expect(rereadBody.rules.expiryPeriodMs).toBe(86400000);
+    expect(rereadBody.rules.earnAmountUSD).toBe(1);
+  });
+
+  it("balance route surfaces expired credit; it never counts toward redeemable (#5229)", async () => {
+    const { ctx } = await setup();
+    // Earn $1 vested immediately, then shorten the expiry to 1s.
+    await call(ctx, "POST", "/payments/agentic/commercial/referral/rules", "op1", {
+      earnAmountUSD: 1,
+      vestingDelayMs: 0,
+      redemptionScope: "pay-per-run",
+      expiryPeriodMs: 1000,
+    });
+    const earned = await call(ctx, "POST", "/payments/agentic/commercial/referral/record-earn", "op1", {
+      referrerUserId: "ref",
+      referredUserId: "new-1",
+      tenantId: "t1",
+    });
+    expect(earned?.status).toBe(200);
+    const fresh = await call(ctx, "GET", "/payments/agentic/commercial/referral/balance?userId=ref", "ref");
+    const freshBody = (await fresh?.json()) as { redeemableUSD: number; expiredUSD: number };
+    expect(freshBody.redeemableUSD).toBe(1);
+    expect(freshBody.expiredUSD).toBe(0);
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(Date.now() + 2000);
+      const stale = await call(ctx, "GET", "/payments/agentic/commercial/referral/balance?userId=ref", "ref");
+      const staleBody = (await stale?.json()) as { redeemableUSD: number; expiredUSD: number };
+      expect(staleBody.redeemableUSD).toBe(0);
+      expect(staleBody.expiredUSD).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("welcome is best-effort (200 even when the transport fails); digest guard + unsubscribe work", async () => {

@@ -15,6 +15,8 @@ import {
 import {
   allocateRedemption,
   defaultPreferences,
+  expiredBalanceFor,
+  redeemableBalanceFor,
   referralEarningId,
   round2,
   validateReferralRules,
@@ -34,6 +36,8 @@ export class InMemoryLifecycleAdapter implements LifecycleStore {
     earnAmountUSD: 0.5,
     vestingDelayMs: 604800000,
     redemptionScope: "pay-per-run",
+    // #5229: seeded 90-day expiry, mirroring migration 0069.
+    expiryPeriodMs: 7776000000,
     updatedAtMs: 0,
   };
   private earnings = new Map<string, ReferralEarning>();
@@ -51,6 +55,7 @@ export class InMemoryLifecycleAdapter implements LifecycleStore {
     earnAmountUSD: unknown;
     vestingDelayMs: unknown;
     redemptionScope: unknown;
+    expiryPeriodMs?: unknown;
   }): Promise<ReferralRules> {
     const validated = validateReferralRules(input);
     this.rules = { id: "default", ...validated, updatedAtMs: Date.now() };
@@ -138,13 +143,8 @@ export class InMemoryLifecycleAdapter implements LifecycleStore {
 
   async redeemableBalance(userId: string): Promise<number> {
     const earnings = await this.listEarnings(userId);
-    const now = Date.now();
-    let total = 0;
-    for (const e of earnings) {
-      if (now < e.vestedAtMs) continue;
-      total = round2(total + round2(e.amountUSD - e.redeemedAmountUSD));
-    }
-    return total;
+    // #5229: the single balance-read path — vested AND unexpired.
+    return redeemableBalanceFor(earnings, Date.now(), this.rules.expiryPeriodMs);
   }
 
   async redeem(input: {
@@ -152,7 +152,7 @@ export class InMemoryLifecycleAdapter implements LifecycleStore {
     tenantId: string;
     amountUSD: number;
     runRequestId: string;
-  }): Promise<{ allocations: ReferralAllocation[]; redeemedUSD: number }> {
+  }): Promise<{ allocations: ReferralAllocation[]; redeemedUSD: number; expiredUSD: number }> {
     if (!input.userId || !input.tenantId || !input.runRequestId) {
       throw new Error("userId, tenantId, and runRequestId are required.");
     }
@@ -162,8 +162,9 @@ export class InMemoryLifecycleAdapter implements LifecycleStore {
         throw new Error("Referral credits never cross tenants: earning tenant differs from run tenant.");
       }
     }
-    const allocations = allocateRedemption(earnings, input.amountUSD, Date.now());
     const now = Date.now();
+    const allocations = allocateRedemption(earnings, input.amountUSD, now, this.rules.expiryPeriodMs);
+    const expiredUSD = expiredBalanceFor(earnings, now, this.rules.expiryPeriodMs);
     for (const a of allocations) {
       const earning = this.earnings.get(a.earningId);
       if (!earning) throw new Error(`Referral earning ${a.earningId} vanished mid-redeem.`);
@@ -178,7 +179,7 @@ export class InMemoryLifecycleAdapter implements LifecycleStore {
         redeemedAtMs: now,
       });
     }
-    return { allocations, redeemedUSD: round2(allocations.reduce((s, a) => s + a.amountUSD, 0)) };
+    return { allocations, redeemedUSD: round2(allocations.reduce((s, a) => s + a.amountUSD, 0)), expiredUSD };
   }
 
   async getPreferences(userId: string, tenantId: string): Promise<NotificationPreferences> {

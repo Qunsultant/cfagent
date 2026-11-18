@@ -841,6 +841,8 @@ const EXPECTED_INVENTORY = [
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/auto-approve-limit\")",
   "handleAgenticPaymentsRoutes :: includes(\"/payments/agentic/auto-approve-limit\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/referral/balance\")",
+  "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/referral/rules\")",
+  "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/referral/rules\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/referral/record-earn\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/referral/attribute\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/free-access/grant\")",

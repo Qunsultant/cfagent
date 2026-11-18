@@ -33,6 +33,7 @@ import {
   MIGRATION_0015_LIFECYCLE_REFERRAL,
   MIGRATION_0031_REFERRAL_ATTRIBUTION,
   MIGRATION_0035_DIGEST_PASS,
+  MIGRATION_0069_REFERRAL_EXPIRY,
   type MigrationDb,
 } from "./migrationRunner";
 import {
@@ -43,6 +44,8 @@ import {
 import {
   allocateRedemption,
   defaultPreferences,
+  expiredBalanceFor,
+  redeemableBalanceFor,
   referralEarningId,
   round2,
   validateReferralRules,
@@ -89,6 +92,7 @@ export async function ensureLifecycleSchema(db: LifecycleDb): Promise<number[]> 
     MIGRATION_0015_LIFECYCLE_REFERRAL,
     MIGRATION_0031_REFERRAL_ATTRIBUTION,
     MIGRATION_0035_DIGEST_PASS,
+    MIGRATION_0069_REFERRAL_EXPIRY,
   ]);
 }
 
@@ -136,6 +140,7 @@ export class D1LifecycleAdapter implements LifecycleStore {
       earnAmountUSD: rows[0].earnAmountUSD,
       vestingDelayMs: rows[0].vestingDelayMs,
       redemptionScope: "pay-per-run",
+      expiryPeriodMs: rows[0].expiryPeriodMs,
       updatedAtMs: rows[0].updatedAtMs,
     };
   }
@@ -144,6 +149,7 @@ export class D1LifecycleAdapter implements LifecycleStore {
     earnAmountUSD: unknown;
     vestingDelayMs: unknown;
     redemptionScope: unknown;
+    expiryPeriodMs?: unknown;
   }): Promise<ReferralRules> {
     const validated = validateReferralRules(input);
     const record: ReferralRules = { id: "default", ...validated, updatedAtMs: Date.now() };
@@ -154,6 +160,7 @@ export class D1LifecycleAdapter implements LifecycleStore {
         earnAmountUSD: record.earnAmountUSD,
         vestingDelayMs: record.vestingDelayMs,
         redemptionScope: record.redemptionScope,
+        expiryPeriodMs: record.expiryPeriodMs,
         updatedAtMs: record.updatedAtMs,
       })
       .onConflictDoUpdate({
@@ -162,6 +169,7 @@ export class D1LifecycleAdapter implements LifecycleStore {
           earnAmountUSD: record.earnAmountUSD,
           vestingDelayMs: record.vestingDelayMs,
           redemptionScope: record.redemptionScope,
+          expiryPeriodMs: record.expiryPeriodMs,
           updatedAtMs: record.updatedAtMs,
         },
       });
@@ -292,13 +300,11 @@ export class D1LifecycleAdapter implements LifecycleStore {
 
   async redeemableBalance(userId: string): Promise<number> {
     const earnings = await this.listEarnings(userId);
-    const now = Date.now();
-    let total = 0;
-    for (const e of earnings) {
-      if (now < e.vestedAtMs) continue;
-      total = round2(total + round2(e.amountUSD - e.redeemedAmountUSD));
-    }
-    return total;
+    const rules = await this.getRules();
+    // #5229: the single balance-read path — vested AND unexpired.
+    // Both adapters share redeemableBalanceFor, so the two
+    // implementations cannot drift.
+    return redeemableBalanceFor(earnings, Date.now(), rules.expiryPeriodMs);
   }
 
   async redeem(input: {
@@ -306,7 +312,7 @@ export class D1LifecycleAdapter implements LifecycleStore {
     tenantId: string;
     amountUSD: number;
     runRequestId: string;
-  }): Promise<{ allocations: ReferralAllocation[]; redeemedUSD: number }> {
+  }): Promise<{ allocations: ReferralAllocation[]; redeemedUSD: number; expiredUSD: number }> {
     if (!input.userId || !input.tenantId || !input.runRequestId) {
       throw new Error("userId, tenantId, and runRequestId are required.");
     }
@@ -318,8 +324,10 @@ export class D1LifecycleAdapter implements LifecycleStore {
         throw new Error("Referral credits never cross tenants: earning tenant differs from run tenant.");
       }
     }
-    const allocations = allocateRedemption(earnings, input.amountUSD, Date.now());
+    const rules = await this.getRules();
     const now = Date.now();
+    const allocations = allocateRedemption(earnings, input.amountUSD, now, rules.expiryPeriodMs);
+    const expiredUSD = expiredBalanceFor(earnings, now, rules.expiryPeriodMs);
     for (const a of allocations) {
       const earning = earnings.find((e) => e.id === a.earningId);
       if (!earning) throw new Error(`Referral earning ${a.earningId} vanished mid-redeem.`);
@@ -332,7 +340,7 @@ export class D1LifecycleAdapter implements LifecycleStore {
         .set({ redeemedAmountUSD: next, redeemedByRunId: input.runRequestId, redeemedAtMs: now })
         .where(eq(agentReferralEarnings.id, a.earningId));
     }
-    return { allocations, redeemedUSD: round2(allocations.reduce((s, a) => s + a.amountUSD, 0)) };
+    return { allocations, redeemedUSD: round2(allocations.reduce((s, a) => s + a.amountUSD, 0)), expiredUSD };
   }
 
   async getPreferences(userId: string, tenantId: string): Promise<NotificationPreferences> {

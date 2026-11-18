@@ -142,7 +142,15 @@ describe("billing servicing panel", () => {
         return ok({ plans: [{ id: "pro", name: "Pro", priceUSD: 10, periodDays: 30 }] });
       }
       if (url.startsWith("/api/payments/agentic/commercial/referral/balance?")) {
-        return ok(overrides.referral ?? { userId: "owner", redeemableUSD: 1.5, totalEarnedUSD: 2.0, attribution: { referrerUserId: "referrer-1" }, rules: { earnAmountUSD: 0.5, vestingDelayMs: 604800000, redemptionScope: "pay-per-run" } });
+        return ok(overrides.referral ?? { userId: "owner", redeemableUSD: 1.5, totalEarnedUSD: 2.0, expiredUSD: 0.25, attribution: { referrerUserId: "referrer-1" }, rules: { earnAmountUSD: 0.5, vestingDelayMs: 604800000, redemptionScope: "pay-per-run" } });
+      }
+      // Issue #5229 (2.31): the referral-credit rules section mounts
+      // in the overview next to the balance card.
+      if (url === "/api/payments/agentic/commercial/referral/rules") {
+        return ok({ code: "SUCCESS_REFERRAL_RULES_READ", rules: { earnAmountUSD: 0.5, vestingDelayMs: 604800000, redemptionScope: "pay-per-run", expiryPeriodMs: 7776000000 } });
+      }
+      if (url === "/api/payments/agentic/commercial/operators") {
+        return ok({ operators: [{ login: "owner", source: "env" }] });
       }
       if (url === "/api/payments/agentic/commercial/usage-billing") {
         return ok({
@@ -202,6 +210,11 @@ describe("billing servicing panel", () => {
       expect(text).toMatch(/Subscribed/);
       expect(text).toMatch(/Pro/);
       expect(text).toMatch(/referrer-1/);
+      // Issue #5229 (2.31): the expired line and the rules section
+      // mount next to the referral balance on the Overview tab.
+      expect(text).toMatch(/Expired: \$0\.25 USD/);
+      expect(text).toMatch(/Referral credit rules/);
+      expect(text).toMatch(/90 days after they are earned/);
       // The Support snapshot lives in its own tab now (#4638) — its
       // card (the "Account: owner" line) is not mounted on the default
       // Overview tab. (The tab row itself still carries the label.)
