@@ -14,6 +14,8 @@
  * "preview" (+ trade previews) < "trade" (+ approve / execute).
  */
 import type { Env } from "../types";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
 
 export type ChannelTier = "read" | "preview" | "trade";
 
@@ -30,30 +32,34 @@ export interface EmailPrincipalEntry {
  * Parse the CHANNEL_EMAIL_PRINCIPALS config var. Malformed JSON is an
  * empty map plus a loud log — a config typo must fail closed (nobody
  * resolves) without ever throwing the worker. Individual malformed
- * entries are skipped the same way.
+ * entries are skipped the same way. The log goes through the
+ * structured logger (the console.* ratchet, #3515 S3, pins new files
+ * at zero unstructured console uses).
  */
 export function parseEmailPrincipals(env: Env): Record<string, EmailPrincipalEntry> {
+  const logger = createStructuredLogger(createObservabilitySink(env), {
+    component: "security.emailPrincipals",
+  });
   const raw = (env as { CHANNEL_EMAIL_PRINCIPALS?: string }).CHANNEL_EMAIL_PRINCIPALS;
   if (!raw || typeof raw !== "string" || raw.trim() === "") return {};
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch (err) {
-    console.error(
-      "[channels] CHANNEL_EMAIL_PRINCIPALS is not valid JSON; treating the email principal map as empty:",
-      err instanceof Error ? err.message : String(err)
-    );
+    logger.warn("email_principals.invalid_json", {
+      error: err instanceof Error ? err.message : String(err),
+    });
     return {};
   }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    console.error("[channels] CHANNEL_EMAIL_PRINCIPALS must be a JSON object; treating the email principal map as empty.");
+    logger.warn("email_principals.not_an_object", {});
     return {};
   }
   const out: Record<string, EmailPrincipalEntry> = {};
   for (const [address, entry] of Object.entries(parsed as Record<string, unknown>)) {
     const e = entry as { login?: unknown; tier?: unknown } | null;
     if (!e || typeof e.login !== "string" || e.login.trim() === "" || !isTier(e.tier)) {
-      console.error(`[channels] CHANNEL_EMAIL_PRINCIPALS entry for "${address}" is malformed (needs {login, tier}); skipping it.`);
+      logger.warn("email_principals.malformed_entry", { address });
       continue;
     }
     out[address.trim().toLowerCase()] = { login: e.login, tier: e.tier };
