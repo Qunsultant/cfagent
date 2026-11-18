@@ -59,6 +59,8 @@ import {
   stampScheduleProvenance,
 } from "../../services/consolidatedScheduling";
 import { runStorageRetention } from "../../security/storageRetention";
+import { createAuditPolicyAdapter } from "../../data/createAuditPolicyPorts";
+import { pruneAuditChainForTenant } from "../../data/auditPolicyPorts";
 import { verifyStoredAuditChainAndAlert, type TamperAlertResult } from "../../services/auditTamperAlert";
 import {
   verifyStoredAuditChainAndAlertCheckpointed,
@@ -1730,6 +1732,50 @@ export async function handleSchedulesRoutes(
               eventsRetentionDays: ctx.env.MAS_EVENTS_RETENTION_DAYS,
               memoryRetentionDays: ctx.env.MAS_MEMORY_RETENTION_DAYS,
             });
+        // #5043 (G-4): run the D1 audit-chain prune in the same nightly
+        // retention pass when DO chain verification succeeded. Fails closed
+        // when audit_policy.retentionDays is unset (skipped: true, pruned: 0).
+        const d1AuditChainPrune: {
+          tenantId: string | null;
+          pruned: number;
+          capped: boolean;
+          skipped: boolean;
+          skippedReason: string | null;
+          error: string | null;
+        } = {
+          tenantId: null,
+          pruned: 0,
+          capped: false,
+          skipped: true,
+          skippedReason: null,
+          error: null,
+        };
+        if (auditChainPruneSkipped) {
+          d1AuditChainPrune.skippedReason = "DO audit chain verification failed; evidence preserved";
+        } else {
+          try {
+            const auditPolicyPort = createAuditPolicyAdapter(ctx.env);
+            if (!auditPolicyPort) {
+              d1AuditChainPrune.skippedReason = "AGENT_DB is not bound";
+            } else {
+              const tenantId = resolveIaaaTenant(ctx.env);
+              const report = await pruneAuditChainForTenant(auditPolicyPort, tenantId);
+              d1AuditChainPrune.tenantId = report.tenantId;
+              d1AuditChainPrune.pruned = report.pruned;
+              d1AuditChainPrune.capped = report.capped;
+              d1AuditChainPrune.skipped = report.skipped;
+              if (report.skipped) {
+                d1AuditChainPrune.skippedReason = "no retentionDays configured in audit_policy";
+              }
+            }
+          } catch (err) {
+            d1AuditChainPrune.error = err instanceof Error ? err.message : String(err);
+            structuredLog.warn("schedules.retention_d1_audit_chain_prune_failed", {
+              message: "[retention] D1 audit chain prune failed:",
+              error: d1AuditChainPrune.error,
+            });
+          }
+        }
         // #2294: the outcome feed had no retention decision at all. Bound it
         // in the same nightly pass so history cannot grow into the read path.
         // Best-effort: a context without raw SQL (tests, older callers) or a
@@ -1919,6 +1965,7 @@ export async function handleSchedulesRoutes(
           ...result,
           auditChainVerification,
           auditChainPruneSkipped,
+          d1AuditChainPrune,
           jobOutcomesPruned: jobOutcomes.deletedByAge + jobOutcomes.deletedByCap,
           jobOutcomesByAge: jobOutcomes.deletedByAge,
           jobOutcomesByCap: jobOutcomes.deletedByCap,

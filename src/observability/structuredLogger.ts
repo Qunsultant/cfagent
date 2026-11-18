@@ -45,6 +45,12 @@ export interface StructuredLogContext {
   sessionRef?: string | null;
   spanId?: string;
   nowMs?: () => number;
+  /**
+   * Optional hook invoked when the underlying sink rejects or throws.
+   * Defaults to emitting a `structured_logger.sink_failed` record on
+   * `console.error` so sink failures are never silently lost (#5043).
+   */
+  onSinkFailure?: (event: ObservabilityEvent, error: unknown) => void;
 }
 
 /** Per-call overrides: anything the context carries, plus the call's own time and code. */
@@ -86,6 +92,32 @@ export function createStructuredLogger(
 ): StructuredLogger {
   const nowMs = context.nowMs ?? Date.now;
 
+  function reportSinkFailure(event: ObservabilityEvent, error: unknown): void {
+    const message = error instanceof Error ? error.message : String(error);
+    try {
+      console.error(
+        JSON.stringify({
+          type: "structured_logger.sink_failed",
+          level: "error",
+          originalOperation: event.operation,
+          tenantId: event.tenantId,
+          traceId: event.traceId,
+          error: message,
+          droppedEvent: event,
+        }),
+      );
+    } catch {
+      // stderr itself failed — nothing further we can emit without throwing.
+    }
+    if (context.onSinkFailure) {
+      try {
+        context.onSinkFailure(event, error);
+      } catch {
+        // Sink-failure observer must never fail the caller.
+      }
+    }
+  }
+
   function emit(
     level: ObservabilityLevel,
     operation: string,
@@ -116,13 +148,12 @@ export function createStructuredLogger(
     try {
       const result = sink.write(event);
       if (result && typeof (result as Promise<void>).catch === "function") {
-        (result as Promise<void>).catch(() => {
-          // A failing async sink degrades silently — logging
-          // never fails the caller.
+        (result as Promise<void>).catch((err) => {
+          reportSinkFailure(event, err);
         });
       }
-    } catch {
-      // A throwing sync sink degrades silently.
+    } catch (err) {
+      reportSinkFailure(event, err);
     }
   }
 
