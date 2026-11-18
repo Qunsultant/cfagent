@@ -10,6 +10,11 @@
 import type { AgentContext, Schedule, ScheduleOptions } from "agents";
 import type { AgentName } from "../../types";
 import { createUnifiedSchedulePorts } from "../../data/createUnifiedSchedulePorts";
+import { stampScheduleProvenance, systemProvenance } from "../../services/consolidatedScheduling";
+import {
+  STRATEGY_SCAN_BASELINE_ORIGIN,
+  strategyScanBaselineToRecord,
+} from "../../services/unifiedScheduleManagement";
 import { buildSchedulePayload } from "../../trading";
 import {
   isLoginShaped,
@@ -142,6 +147,114 @@ export async function removeUnownedBaselineSchedules(ctx: ScheduleMaintenanceCon
 }
 
 /**
+ * Issue #3121 #4236 — the unified store behind a baseline
+ * arm/adoption, or null when the host has no DO SQLite. A missing
+ * store never fails the arm: the scan is armed, and the management
+ * path adopts the record on first touch.
+ */
+function baselineStore(ctx: ScheduleMaintenanceContext) {
+  try {
+    return createUnifiedSchedulePorts({
+      sql: ctx.agentCtx.storage.sql,
+      storage: ctx.agentCtx.storage,
+    }).unifiedSchedulesSync;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Issue #3121 #4236 — adopt an already-armed baseline into the
+ * unified store: save the record, never re-arm. A record that
+ * already exists is left untouched (its creation time stands).
+ */
+async function adoptStrategyScanBaselineRecord(
+  ctx: ScheduleMaintenanceContext,
+  alarm: Schedule<unknown>,
+  context: ScreenerExecutionContext,
+): Promise<void> {
+  try {
+    const store = baselineStore(ctx);
+    if (!store) return;
+    const item = alarm as any;
+    const alarmId = typeof item.id === "string" && item.id ? item.id : null;
+    if (!alarmId) return;
+    if (store.get(alarmId)) return;
+    store.save(
+      strategyScanBaselineToRecord(
+        { id: alarmId, callback: "autonomousOptionsAnalysis", payload: item.payload },
+        { userLogin: context.userLogin, cron: ctx.strategyScanCron },
+        new Date().toISOString(),
+      ),
+    );
+  } catch (error) {
+    structuredLog.warn("scheduleMaintenance.strategy_scan_baseline_record_adopt_failed", {
+      message:
+        "[OrchestratorAgent] Could not adopt the strategy-scan baseline into the unified store:",
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+/**
+ * Issue #3121 #4236 — save the unified-store record for a just-armed
+ * baseline (record id = alarm id, the #3123 screen precedent). The
+ * SDK returns the armed schedule; a host that returns no id is
+ * resolved by re-listing for the alarm just armed. No alarm id, or
+ * a store failure, only warns — the arm already succeeded.
+ */
+async function saveStrategyScanBaselineRecord(
+  ctx: ScheduleMaintenanceContext,
+  armed: unknown,
+  context: ScreenerExecutionContext,
+  payload: unknown,
+): Promise<void> {
+  try {
+    const store = baselineStore(ctx);
+    if (!store) return;
+    let alarmId =
+      armed && typeof armed === "object" && typeof (armed as { id?: unknown }).id === "string"
+        ? ((armed as { id: string }).id as string)
+        : null;
+    if (!alarmId) {
+      const relisted = await ctx.listSchedules().catch(() => [] as Schedule<unknown>[]);
+      const match = relisted.find((s) => {
+        const item = s as any;
+        return (
+          item.callback === "autonomousOptionsAnalysis" &&
+          item.payload?.userLogin === context.userLogin
+        );
+      });
+      alarmId =
+        match && typeof (match as any).id === "string" && (match as any).id
+          ? ((match as any).id as string)
+          : null;
+    }
+    if (!alarmId) {
+      structuredLog.warn("scheduleMaintenance.strategy_scan_baseline_record_no_alarm_id", {
+        message:
+          "[OrchestratorAgent] Strategy-scan baseline armed but no alarm id could be resolved — no unified-store record saved.",
+      });
+      return;
+    }
+    if (store.get(alarmId)) return;
+    store.save(
+      strategyScanBaselineToRecord(
+        { id: alarmId, callback: "autonomousOptionsAnalysis", payload },
+        { userLogin: context.userLogin, cron: ctx.strategyScanCron },
+        new Date().toISOString(),
+      ),
+    );
+  } catch (error) {
+    structuredLog.warn("scheduleMaintenance.strategy_scan_baseline_record_save_failed", {
+      message:
+        "[OrchestratorAgent] Could not save the strategy-scan baseline unified-store record:",
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+/**
  * Issue #275: arm the hourly Strategy/Symbol Scanner run once per
  * authenticated user — the full strategy catalog (no
  * allowedStrategies restriction) over the NASDAQ100 universe,
@@ -154,11 +267,14 @@ export async function ensureStrategyScanSchedule(ctx: ScheduleMaintenanceContext
   const userLogin = context.userLogin;
   const environment = context.environment || "PROD";
   const existing = await ctx.listSchedules().catch(() => [] as Schedule<unknown>[]);
-  const already = existing.some((s) => {
+  const alreadyAlarm = existing.find((s) => {
     const item = s as any;
     return item.callback === "autonomousOptionsAnalysis" && item.payload?.userLogin === userLogin;
   });
-  if (already) return;
+  if (alreadyAlarm) {
+    await adoptStrategyScanBaselineRecord(ctx, alreadyAlarm, context);
+    return;
+  }
   try {
     const paused = createUnifiedSchedulePorts({ sql: ctx.agentCtx.storage.sql, storage: ctx.agentCtx.storage }).unifiedSchedulesSync.listByState("paused");
     const pausedForUser = paused.some(
@@ -189,13 +305,24 @@ export async function ensureStrategyScanSchedule(ctx: ScheduleMaintenanceContext
     // hand-built fallback payload outside the one capability.
     throw new Error(`Strategy-scan baseline payload rejected: ${built.error}`);
   }
-  await ctx.schedule(ctx.strategyScanCron, "autonomousOptionsAnalysis", built.value, {
+  // Issue #3121 #4236 — the armed payload carries the system
+  // provenance the Schedules home badges on. The run reads its
+  // known fields, so the extra key is inert at fire time.
+  const armedPayload = stampScheduleProvenance(
+    built.value,
+    systemProvenance(STRATEGY_SCAN_BASELINE_ORIGIN),
+  );
+  const armed = await ctx.schedule(ctx.strategyScanCron, "autonomousOptionsAnalysis", armedPayload, {
     idempotent: true,
   });
   ctx.audit("schedule.created", "orchestrator", {
     callback: "autonomousOptionsAnalysis",
     scheduleType: "cron",
     cron: ctx.strategyScanCron,
-    origin: "strategy-scan-baseline",
+    origin: STRATEGY_SCAN_BASELINE_ORIGIN,
   });
+  // Issue #3121 #4236 — the arm saves the unified-store record
+  // (id = alarm id, the #3123 screen precedent). A store failure
+  // never fails the arm.
+  await saveStrategyScanBaselineRecord(ctx, armed, context, armedPayload);
 }

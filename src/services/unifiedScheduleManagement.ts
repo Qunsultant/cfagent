@@ -38,7 +38,7 @@ import type {
   UnifiedScheduleRecord,
   UnifiedScheduleState,
 } from "../data/unifiedSchedulePorts";
-import { carryScheduleProvenance } from "./consolidatedScheduling";
+import { carryScheduleProvenance, provenanceFromPayload, stampScheduleProvenance, systemProvenance } from "./consolidatedScheduling";
 import {
   WORKER_CRON_TRIGGERS_INVENTORY,
 } from "./scheduleSystems";
@@ -213,6 +213,59 @@ export function screenScheduleToRecord(
     ...(ownerLogin ? { ownerLogin } : {}),
     alarmId: schedule.id,
     createdAt: nowIso,
+    updatedAt: nowIso,
+  };
+}
+
+/**
+ * Issue #3121 #4236 — the strategy-scan baseline's origin, named
+ * once: the system-armed hourly full-catalog scan
+ * (autonomousOptionsAnalysis, NASDAQ100). The audit already carries
+ * this origin; the record and the armed payload carry it too, so
+ * the Schedules home can name it.
+ */
+export const STRATEGY_SCAN_BASELINE_ORIGIN = "strategy-scan-baseline";
+
+/** The inputs a baseline record needs beyond the armed alarm. */
+export interface StrategyScanBaselineRecordInput {
+  userLogin: string;
+  cron: string;
+}
+
+/**
+ * A strategy-scan baseline unified record, from its armed alarm
+ * (record id = alarm id, the #3123 screen precedent). The armed
+ * payload is stamped with the system provenance — a no-op when
+ * already stamped, so a re-arm keeps the original creation time —
+ * and the record carries the same provenance value, so the record
+ * and the firing payload never disagree about the origin. An
+ * `existing` record keeps its creation time.
+ */
+export function strategyScanBaselineToRecord(
+  alarm: ScheduleAlarmLike,
+  input: StrategyScanBaselineRecordInput,
+  nowIso: string,
+  existing?: UnifiedScheduleRecord | null,
+): UnifiedScheduleRecord {
+  const minted = systemProvenance(
+    STRATEGY_SCAN_BASELINE_ORIGIN,
+    new Date(nowIso),
+  );
+  const payload = stampScheduleProvenance(alarm.payload ?? {}, minted);
+  const provenance = provenanceFromPayload(payload) ?? minted;
+  const record = screenScheduleToRecord(
+    { ...alarm, payload },
+    existing?.createdAt ?? nowIso,
+    input.userLogin,
+  );
+  return {
+    ...record,
+    definition: {
+      ...record.definition,
+      cron: input.cron,
+    },
+    provenance,
+    createdAt: existing?.createdAt ?? nowIso,
     updatedAt: nowIso,
   };
 }
