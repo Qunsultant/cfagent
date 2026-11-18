@@ -4,16 +4,20 @@
  *
  * Two backends live here, and the distinction matters:
  *
- * - `createAtomicAuditStore` (PRODUCTION WIRING): appends go through
- *   the SessionStore DO's `audit-append` op. One DO request reads
- *   the tail, chains the event, rotates, and writes back, and a DO
- *   handles one request at a time — so concurrent appends cannot
- *   lose events or fork the chain. This is what
- *   `createWiredAuditStore` returns, and what recordAuditEvent
- *   uses when the store exposes `appendAtomic`. The live key is
- *   bounded (see the caps below) and the whole store is bounded
- *   by a total cap; reaching the cap fails visible
- *   (AUDIT_STORE_FULL), never by deleting evidence.
+ * - `createAtomicAuditStore` (PRODUCTION WIRING): a thin adapter
+ *   over the AuditLog family's shared implementation
+ *   (src/data/auditLogStoreImpl.ts's createAuditLogStore, #5084) —
+ *   the single production client implementation of the
+ *   SessionStore DO's `audit-append` op. Appends go through the
+ *   DO's `audit-append` op. One DO request reads the tail, chains
+ *   the event, rotates, and writes back, and a DO handles one
+ *   request at a time — so concurrent appends cannot lose events
+ *   or fork the chain. This is what `createWiredAuditStore`
+ *   returns, and what recordAuditEvent uses when the store
+ *   exposes `appendAtomic`. The live key is bounded (see the caps
+ *   below) and the whole store is bounded by a total cap;
+ *   reaching the cap fails visible (AUDIT_STORE_FULL), never by
+ *   deleting evidence.
  * - `createKvAuditStore` (LEGACY, retained): the original
  *   read-modify-write single-key store. It is kept for backends
  *   without a Durable Object (tests, in-memory Kv) and for reads
@@ -75,10 +79,24 @@
  * flag off it returns createAtomicAuditStore exactly as before.
  * Both compositions run against the SAME Durable Object and
  * table — the flag switches the serving code path only.
+ *
+ * #5084 (observability S5) — one audit store: the client
+ * implementation is single-sourced in the AuditLog family
+ * (src/data/auditLogStoreImpl.ts's createAuditLogStore), and
+ * createAtomicAuditStore above is a thin adapter over it. The
+ * flag still selects the composition root (façade vs family
+ * root); it no longer selects between two implementations of
+ * the audit-append client. See
+ * docs/architecture/security/audit-canonical-store-5084.md for
+ * the canonical-store decision and its evidence.
  */
 
 import type { Env } from "../types";
 import { createAuditPorts } from "../data/createAuditPorts";
+import {
+  createAuditLogStore,
+  type AuditLogBackend,
+} from "../data/auditLogStoreImpl";
 import {
   IAAA_AUDIT_ARCHIVE_KEY_PREFIX,
   IAAA_AUDIT_DEFAULT_LIVE_MAX,
@@ -89,9 +107,7 @@ import {
   isAuditPortsEnabled,
 } from "../data/auditLogPorts";
 import type {
-  AuditResult,
   AuditStore,
-  CreateIaaaAuditEventInput,
   IaaaAuditEvent,
 } from "./iaaaAudit";
 import type { KvLike } from "./kvResilience";
@@ -167,10 +183,21 @@ export function createKvAuditStore(kv: KvLike): AuditStore {
 }
 
 /**
- * Transactional AuditStore over a SessionStore DO namespace. The
- * store speaks the DO's `audit-append` op for writes (atomic
- * chaining + rotation + cap, server-side) and the DO's `list` op
- * for reads (archives in key order, then the live key).
+ * Transactional AuditStore over a SessionStore DO namespace.
+ *
+ * #5084 (observability S5) — this factory is now a thin adapter
+ * over the AuditLog family's shared implementation
+ * (src/data/auditLogStoreImpl.ts's createAuditLogStore), which is
+ * the single production client implementation of the SessionStore
+ * DO's `audit-append` op. The adapter builds the family's backend
+ * seam from the namespace exactly as the family's own composition
+ * root does (src/data/createAuditPorts.ts's doBackend) — same
+ * sender, same lister, same keys — so the behavior is
+ * byte-identical to the pre-S5 atomic client, and both
+ * AUDIT_PORTS_ENABLED states serve one implementation. The
+ * store still speaks the DO's `audit-append` op for writes
+ * (atomic chaining + rotation + cap, server-side) and the DO's
+ * `list` op for reads (archives in key order, then the live key).
  *
  * append() throws by design: a caller-chained event cannot be
  * stored verbatim without bypassing the atomic chaining. Append
@@ -180,100 +207,19 @@ export function createAtomicAuditStore(
   namespace: DoNamespaceLike | null | undefined,
   options: AtomicAuditStoreOptions = {},
 ): AuditStore {
-  const send = createStoreSender(
-    namespace,
-    "sessions",
-    options.instanceName ?? "kv",
-  );
-  const liveMax = options.liveMax ?? IAAA_AUDIT_DEFAULT_LIVE_MAX;
-  const segmentSize = options.segmentSize ?? IAAA_AUDIT_DEFAULT_SEGMENT_SIZE;
-  const maxArchiveSegments =
-    options.maxArchiveSegments ?? IAAA_AUDIT_DEFAULT_MAX_ARCHIVE_SEGMENTS;
-
-  return {
-    async append(): Promise<void> {
-      throw new Error(
-        "atomic audit store: append through recordAuditEvent (appendAtomic), not append(); " +
-          "a caller-chained event cannot be stored verbatim on this backend",
-      );
-    },
-
-    async appendAtomic(
-      input: CreateIaaaAuditEventInput,
-    ): Promise<AuditResult> {
-      if (!namespace) {
-        return {
-          ok: false,
-          code: "AUDIT_WRITE_FAILED",
-          error: "audit event could not be recorded: no audit backend is configured",
-        };
-      }
-      const reply = await send({
-        op: "audit-append",
-        ns: "sessions",
-        key: IAAA_AUDIT_LOG_KEY,
-        value: JSON.stringify(input),
-        liveMax,
-        segmentSize,
-        maxArchiveSegments,
-      });
-      if (!reply || reply.error) {
-        return {
-          ok: false,
-          code: "AUDIT_WRITE_FAILED",
-          error: "audit event could not be recorded; the action must not be reported as audited",
-        };
-      }
-      if (reply.storeFull === true) {
-        return {
-          ok: false,
-          code: "AUDIT_STORE_FULL",
-          error:
-            "audit store is at its enforced capacity cap; the event was not recorded and no evidence was deleted",
-        };
-      }
-      const event = reply.event as IaaaAuditEvent | undefined;
-      if (!event || typeof event.eventHash !== "string") {
-        return {
-          ok: false,
-          code: "AUDIT_WRITE_FAILED",
-          error: "audit event could not be recorded; the action must not be reported as audited",
-        };
-      }
-      return { ok: true, event };
-    },
-
-    async list(): Promise<IaaaAuditEvent[]> {
-      if (!namespace) return [];
-      const entries = await listStoreEntries({
+  const instanceName = options.instanceName ?? "kv";
+  const backend: AuditLogBackend = {
+    configured: Boolean(namespace),
+    sendAppend: createStoreSender(namespace, "sessions", instanceName),
+    listEntries: () =>
+      listStoreEntries({
         namespace,
         namespaceName: "sessions",
         prefix: IAAA_AUDIT_KEY_PREFIX,
-        instanceName: options.instanceName ?? "kv",
-      });
-      if (entries === null) {
-        throw new Error(
-          "iaaa audit log could not be read; refusing to return partial evidence",
-        );
-      }
-      // Entries arrive sorted by key: archive segments first
-      // ("archive:" < "events"), then the live key — chain order.
-      const events: IaaaAuditEvent[] = [];
-      for (const entry of entries) {
-        let parsed: unknown;
-        try {
-          parsed = JSON.parse(entry.value);
-        } catch {
-          throw corruptError();
-        }
-        if (!Array.isArray(parsed)) throw corruptError();
-        for (const event of parsed as IaaaAuditEvent[]) {
-          events.push({ ...event });
-        }
-      }
-      return events;
-    },
+        instanceName,
+      }),
   };
+  return createAuditLogStore(backend, options);
 }
 
 /**
@@ -289,6 +235,12 @@ export function createAtomicAuditStore(
  * audit-append op, same stored bytes; the flag switches the
  * serving code path only. Flag off (the default) returns
  * createAtomicAuditStore exactly as before.
+ *
+ * #5084 (observability S5): both compositions now run the single
+ * AuditLog family implementation (createAuditLogStore) — the
+ * flag selects the composition root only, not the
+ * implementation. See the canonical-store decision doc
+ * (docs/architecture/security/audit-canonical-store-5084.md).
  */
 export function createWiredAuditStore(env: Env): AuditStore {
   if (isAuditPortsEnabled(env)) {

@@ -139,12 +139,16 @@ second logger, a second trace store, or a second dashboard.
   requests, Audit events). Owner: CISO lane (#945); the SecHub tabs are
   live on main.
 - **Telemetry it emits today.** Audit events via `recordAuditEvent`
-  (audit-before-allow) in the Audit Vault; permission-denial records
-  (the KV denial store, prefix `iaaa-permission-deny:`); session and
-  login records; structured logs. PDP/PEP/PIP are read-only viewers;
-  PAP is the policy-proposals flow.
-- **Store.** Audit Vault (`mas_events`, append-only, per-tenant) + KV
-  denial store + D1 (sessions, grants).
+  (audit-before-allow), read in the IAAA Admin Overview Audit events
+  view; permission-denial records (the KV denial store, prefix
+  `iaaa-permission-deny:`); session and login records; structured
+  logs. PDP/PEP/PIP are read-only viewers; PAP is the
+  policy-proposals flow.
+- **Store.** IAAA audit store (SessionStore DO, `iaaa-audit:` keys,
+  append-only, hash-chained, cap 22,000) + KV denial store + D1
+  (sessions, grants). The Audit Vault page (`?tab=audit-vault`) reads
+  the older `mas_events` orchestrator record — a separate record, not
+  the IAAA audit store (own decision, #5264).
 - **OTel status.** Planned. IAAA audit attribution is the audit
   capability (§3.5), not a second telemetry store.
 
@@ -237,7 +241,7 @@ itself is the umbrella, not a record.
 | S2 | Metrics | #5082 | One metrics model + store (S2). The #1819 resource rollup (`src/data/d1ResourceRollupAdapter.ts`, D1 `resource_daily_rollups`) lives here. Health + SLOs live here as metrics. | **Planned** (the #1819 rollup itself is Live) |
 | S3 | Tracing | #2808 | Trace spine: `traceparent` + D1 `agent_mesh_trace_hops` + `GET /api/traces`. OTel spans are the instrumentation; #2808's harmonization program stays parked. | **Built** (OTel span instrumentation merged; the mesh spine is Live, proof pending) |
 | S4 | Error-reporting | #5083 | One owner + one alerting path (`src/observability/otelAlerting.ts`, `createAlertingPort`). Consumes logs/metrics/audit; never replaces them. Slack (SCREENER_SLACK_CHANNEL) AND email (CHANNEL_EMAIL_PRINCIPALS), both. First consumers: sweep stuck-run, cap alert, CI failure alerts. Placeholder rules (S7 defines the real catalog). | **Built** |
-| S5 | Audit | #5084 | One audit store. Today two layers exist (`iaaaAuditStore.ts` vs `auditLogPorts`/`auditLogStoreImpl` + `auditReportPorts`) — S5 decides the canonical store (rename-form deprecation, never deletion). | **Planned** (audit itself is Live) |
+| S5 | Audit | #5084 | One audit store: the canonical store is the IAAA audit store (contract `src/data/auditLogPorts.ts`, `recordAuditEvent` in `src/security/iaaaAudit.ts`, wiring `createWiredAuditStore` in `src/security/iaaaAuditStore.ts`, SessionStore DO `audit-append` on `iaaa-audit:` keys). The audit-append client is single-sourced in `createAuditLogStore` (`src/data/auditLogStoreImpl.ts`); `createAtomicAuditStore` is a thin adapter over it. Decision + evidence: `docs/architecture/security/audit-canonical-store-5084.md`. The #1688 report family is a projection of different events, not a duplicate; the Audit Vault page reads the older `mas_events` record (own decision, #5264). | **Built** |
 | S6 | Recording | #5085 | One runs ledger / run-row model (the #4002 rule). Reconciles runs ledger vs Audit Vault vs Loop status into one source of truth for "did the run happen". | **Planned** (the ledger is Live) |
 | S7 | Coded messages + externalized config | #5086 | One message catalog (stable `OBS-####` codes + severity per message) and one config port. All thresholds, severities, retention, sampling, and the catalog live in config. | **Planned** |
 | S8 | Dashboard | #5087 | One dashboard surfacing ALL areas in one view. Health + SLOs surface here as metric thresholds. | **Planned** |
