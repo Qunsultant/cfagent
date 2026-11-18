@@ -154,6 +154,47 @@ kind holds only `mcp:payments` through the adapter; no production
 code constructs that kind today, and tool-level pinning to the
 scanner tools only sequences with the one-registry work (#5386).
 
+### The commercial ExecutionContext (GAP-5, #5477; CISO coordination #5350)
+
+The one validated context contract (`src/security/executionContext.ts`,
+#1078) is carried on the commercial workflow-to-handler path only.
+The mapping is a commercial specialization of the unchanged contract
+(`src/security/commercialExecutionContext.ts`): principal
+`service:<login>` of type `service`, permission `ledger:record`
+(GAP-2), tenant from the workflow's verified tenant, task id the
+run request id, environment `live`, consequential, and an approval
+reference naming the payment evidence — the payment intent, else
+the claim hash, else the checkout id for a charge; the
+`failure-credit:<runRequestId>` issuance for a credit. No
+connection is bound: the ledger-write authority denies every
+connection binding, so a carried context smuggling a connection
+fails revalidation. The mapping is a PROPOSAL put to CISO review
+on the GAP-5 PR, not a CISO decision — in particular the `live`
+environment (no sandbox/live signal exists on the commercial path
+and no sandbox ledger exists), the approval-reference shape, and
+the resolution requirement (a tenant-admin binding for the service
+principal in the ledger's tenant; none is provisioned in
+production today, and provisioning is CISO-owned).
+
+Both ends are observe mode, behavior-neutral. The fetcher
+(`recordCfpayLedgerRow`, `src/services/cfpayLedger.ts`) resolves
+best-effort and attaches the serialized context as the
+`x-execution-context` header only on an allow; non-resolution
+(no service identity, a shared address, no verified tenant, no
+approval reference, a PDP denial) or a store failure logs and
+leaves the request byte-identical — the write always proceeds.
+The three ledger handlers (`record`, `record-cfpay`,
+`record-native`) revalidate a carried header, log, and audit the
+outcome as `execution_context.revalidation`; absence is a silent
+no-op that never builds the store, and a denial never denies the
+request. The contract's staged statement stands: no production
+caller evaluates or enforces a context yet, and the enforcement
+flip belongs to the ledger-gate slice. The G-1 hole stays open
+until it lands (ADR 0034 D2, owner's choice). Note the agent path
+(`record`) carries no tenant: no tenant-scoped context can
+resolve for it, so its handler observes only — the workflow path
+(`record-cfpay`) is the path the context travels.
+
 ## 3. Bootstrap and the genesis window
 
 Bootstrap (`src/security/iaaaBootstrap.ts`) provisions the first admins

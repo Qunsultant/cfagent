@@ -1,0 +1,3 @@
+### Added
+
+- **ExecutionContext carried on the commercial ledger path, observe mode (#5477, GAP-5):** the one validated context contract (#1078) now travels the workflow-to-handler ledger path as an `x-execution-context` header: the fetcher resolves a `ledger:record` context for the `service:<login>` principal (verified tenant, run request id, live, payment-evidence approval reference) and attaches it only on a PDP allow; the three ledger handlers revalidate a carried context, log, and audit the outcome. Both ends are behavior-neutral — no resolution, no header, no denial, no failed write — and no production caller evaluates or enforces a context yet; the enforcement flip belongs to the ledger-gate slice. #CBO-mlops

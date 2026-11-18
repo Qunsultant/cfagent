@@ -320,6 +320,7 @@ import { getServiceUserLogin } from "../../security/serviceIdentity";
 import { lookupInternalUserIdByLogin } from "../../security/iaaaMigration";
 import { createKvMembershipStore } from "../../security/iaaaMembershipStore";
 import { sessionStore } from "../../security/session";
+import { observeLedgerWriteContext } from "../../security/commercialExecutionContext";
 import type { MembershipStore } from "../../security/authorization";
 import type { KvLike } from "../../security/kvResilience";
 import {
@@ -372,6 +373,15 @@ export interface AgenticPaymentsRouteContext {
   referralCodeAliasKv?: KvLike;
   /** Test seam: use this store instead of the SessionStore KV membership store. */
   referralCodeMembershipStore?: MembershipStore;
+  /**
+   * Issue #5477 (GAP-5): test seam for the ExecutionContext observe
+   * path on the ledger write-through routes (the referral-code
+   * precedent above). Production reads the SessionStore KV; tests
+   * inject a memory store. Absent → sessionStore(ctx.env). The
+   * observe helper never throws, so a store failure degrades to an
+   * observation error, never a request failure.
+   */
+  executionContextMembershipStore?: MembershipStore;
   /** ORM accessor (owner: OrchestratorAgent.getOrm - was `this.getOrm()`). */
   getOrm(): DatabaseORM;
   /** Audit funnel (owner: OrchestratorAgent.audit - was `this.audit`). */
@@ -507,6 +517,19 @@ export async function handleAgenticPaymentsRoutes(
   // that broke the old read-modify-write blob ledger (#785).
   if (path.endsWith("/payments/agentic/ledger/record") && request.method === "POST") {
     try {
+      // GAP-5 (#5477): observe-mode boundary check. A carried
+      // ExecutionContext is revalidated and the outcome logged +
+      // audited; absence is a silent no-op. Never denies, never
+      // throws — the request proceeds exactly as without this call.
+      await observeLedgerWriteContext({
+        getStore: () =>
+          ctx.executionContextMembershipStore ??
+          createKvMembershipStore(sessionStore(ctx.env)),
+        request,
+        nowMs: Date.now(),
+        audit: (type, payload) => ctx.audit(type, "payments", payload),
+        log: structuredLog,
+      });
       const body = (await request.json().catch(() => ({}))) as {
         agentId?: unknown;
         operation?: unknown;
@@ -609,6 +632,19 @@ export async function handleAgenticPaymentsRoutes(
   // existing row instead of a second row.
   if (path.endsWith("/payments/agentic/ledger/record-cfpay") && request.method === "POST") {
     try {
+      // GAP-5 (#5477): observe-mode boundary check. A carried
+      // ExecutionContext is revalidated and the outcome logged +
+      // audited; absence is a silent no-op. Never denies, never
+      // throws — the request proceeds exactly as without this call.
+      await observeLedgerWriteContext({
+        getStore: () =>
+          ctx.executionContextMembershipStore ??
+          createKvMembershipStore(sessionStore(ctx.env)),
+        request,
+        nowMs: Date.now(),
+        audit: (type, payload) => ctx.audit(type, "payments", payload),
+        log: structuredLog,
+      });
       const body = (await request.json().catch(() => ({}))) as {
         kind?: unknown;
         runRequestId?: unknown;
@@ -681,6 +717,19 @@ export async function handleAgenticPaymentsRoutes(
   // cannot be verified, so no row is claimed recorded.
   if (path.endsWith("/payments/agentic/ledger/record-native") && request.method === "POST") {
     try {
+      // GAP-5 (#5477): observe-mode boundary check. A carried
+      // ExecutionContext is revalidated and the outcome logged +
+      // audited; absence is a silent no-op. Never denies, never
+      // throws — the request proceeds exactly as without this call.
+      await observeLedgerWriteContext({
+        getStore: () =>
+          ctx.executionContextMembershipStore ??
+          createKvMembershipStore(sessionStore(ctx.env)),
+        request,
+        nowMs: Date.now(),
+        audit: (type, payload) => ctx.audit(type, "payments", payload),
+        log: structuredLog,
+      });
       const body = (await request.json().catch(() => ({}))) as {
         kind?: unknown;
         runRequestId?: unknown;
