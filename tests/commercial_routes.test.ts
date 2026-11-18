@@ -78,7 +78,7 @@ async function setup() {
     getOrm: () => ({}) as DatabaseORM,
     audit: vi.fn(),
   } as unknown as AgenticPaymentsRouteContext;
-  return { ctx, env, binding, screenerBinding, db };
+  return { ctx, env, binding, screenerBinding, db, mock };
 }
 
 const req = (method: string, path: string, login: string | null, body?: unknown) =>
@@ -324,6 +324,72 @@ describe("dedicated paid-submission route (#2015)", () => {
     const res = await call(noPortCtx, "POST", "/payments/agentic/commercial/submit", "u1", submitBody);
     expect(res?.status).toBe(503);
     expect(await store.findUnredeemedCredit("u1", "goal")).toEqual({ creditRunId: "run-9", amountUSD: 0.1, productId: null, versionId: null, priceUSD: null });
+  });
+
+  it("partial referral balance converts as a discount; the remainder is charged through the usual path (#5228)", async () => {
+    const { ctx, binding, db, mock } = await setup();
+    // The conversion block runs only with the monetization flag
+    // on (env legacy fallback); the price comes from the seeded
+    // catalogue (goal $0.10), the referral balance from a vested
+    // $0.05 earning — below the price, so only a partial discount.
+    const flagCtx = {
+      ...ctx,
+      env: { ...(ctx.env as Record<string, unknown>), MONETIZATION_ENABLED: "1" },
+    } as unknown as AgenticPaymentsRouteContext;
+    const { ensurePriceCatalogueSchema } = await import("../src/data/d1PriceCatalogueAdapter");
+    await ensurePriceCatalogueSchema(db);
+    const { createD1LifecycleDb, D1LifecycleAdapter, ensureLifecycleSchema } = await import("../src/data/d1LifecycleAdapter");
+    const { recordFirstPaidRunEarning } = await import("../src/services/referralCredits");
+    const lifecycleDb = createD1LifecycleDb(mock as unknown as D1Database);
+    await ensureLifecycleSchema(lifecycleDb);
+    const lifecycle = new D1LifecycleAdapter(lifecycleDb);
+    await lifecycle.setRules({ earnAmountUSD: 0.05, vestingDelayMs: 0, redemptionScope: "pay-per-run" });
+    await recordFirstPaidRunEarning(lifecycle, { referrerUserId: "u1", referredUserId: "new-1", tenantId: "t1" });
+    await call(ctx, "POST", "/payments/agentic/commercial/account", "op1", {
+      userId: "u1",
+      tenantId: "t1",
+      tier: "Free",
+      creditsUSD: 0,
+      includedRuns: 0,
+    });
+    const res = await call(flagCtx, "POST", "/payments/agentic/commercial/submit", "u1", submitBody);
+    expect(res?.status).toBe(200);
+    expect(((await res?.json()) as { status: string }).status).toBe("payment_started");
+    // The workflow starts with the topped-up account: the $0.05
+    // discount is commercial credit, and the remaining $0.05 is
+    // charged through the usual path inside the workflow.
+    expect(binding.create).toHaveBeenCalledOnce();
+    const createArg = (binding.create as unknown as { mock: { calls: Array<Array<{ params: { account: { creditsUSD: number } } }>> } }).mock.calls[0][0];
+    expect(createArg.params.account.creditsUSD).toBe(0.05);
+    expect(await lifecycle.redeemableBalance("u1")).toBe(0);
+    const audit = (ctx.audit as any).mock.calls.find(([t]: [string]) => t === "commercial.referral.converted");
+    expect(audit).toBeDefined();
+    expect(audit[2]).toMatchObject({ redeemedUSD: 0.05, remainingUSD: 0.05, family: "goal" });
+  });
+
+  it("no referral balance means no conversion audit; the workflow starts with the stored account (#5228)", async () => {
+    const { ctx, binding, db } = await setup();
+    const flagCtx = {
+      ...ctx,
+      env: { ...(ctx.env as Record<string, unknown>), MONETIZATION_ENABLED: "1" },
+    } as unknown as AgenticPaymentsRouteContext;
+    const { ensurePriceCatalogueSchema } = await import("../src/data/d1PriceCatalogueAdapter");
+    await ensurePriceCatalogueSchema(db);
+    await call(ctx, "POST", "/payments/agentic/commercial/account", "op1", {
+      userId: "u1",
+      tenantId: "t1",
+      tier: "Free",
+      creditsUSD: 0,
+      includedRuns: 0,
+    });
+    const res = await call(flagCtx, "POST", "/payments/agentic/commercial/submit", "u1", submitBody);
+    expect(res?.status).toBe(200);
+    expect(((await res?.json()) as { status: string }).status).toBe("payment_started");
+    expect(binding.create).toHaveBeenCalledOnce();
+    const createArg = (binding.create as unknown as { mock: { calls: Array<Array<{ params: { account: { creditsUSD: number } } }>> } }).mock.calls[0][0];
+    expect(createArg.params.account.creditsUSD).toBe(0);
+    const audit = (ctx.audit as any).mock.calls.find(([t]: [string]) => t === "commercial.referral.converted");
+    expect(audit).toBeUndefined();
   });
 
   it("reports submission status through the binding", async () => {

@@ -34,13 +34,22 @@
  * (503, no run, no payment workflow) and the earning rows are
  * the operator's reconcile signal. The reverse order (top-up
  * first) would mint spendable commercial credit on a redeem
- * failure, which is strictly worse. Partial balances are NOT
- * converted: conversion covers an exact run price, and a
- * balance below the price stays untouched for a later run —
- * partial-balance discounting needs gate work and is deferred.
+ * failure, which is strictly worse. Partial balances ARE
+ * converted (#5228): a balance below the run price converts as
+ * a partial discount via convertReferralCreditsForRunPartial —
+ * the balance tops up the commercial account and the gate
+ * charges the remainder through the usual path. The balance
+ * read goes through the single balance-read path
+ * (LifecycleStore.redeemableBalance) in both the exact and the
+ * partial conversion, so a future filter on that path (e.g.
+ * the 2.31 expiry filter) applies to both without touching
+ * this code. No new hardcoded values: the only inputs are the
+ * run price (operator price catalogue) and the vested balance
+ * (operator rule rows via the lifecycle port).
  */
 import type { CommercialStore } from "../data/commercialPorts";
 import type { LifecycleStore } from "../data/lifecyclePorts";
+import { round2 } from "../data/lifecyclePorts";
 
 /** The earn event: a referred user's first paid run. Idempotent per referred user. */
 export async function recordFirstPaidRunEarning(
@@ -92,4 +101,43 @@ export async function convertReferralCreditsForRun(input: {
     );
   }
   return redeemed;
+}
+
+/**
+ * Partial conversion (#5228, owner decision 2026-11-17: run
+ * prices only — referral credits may NOT buy subscriptions).
+ *
+ * Reads the vested balance through the SINGLE balance-read
+ * path (LifecycleStore.redeemableBalance — never a raw
+ * earnings read) and converts min(balance, amountUSD):
+ * a balance below the run price converts as a partial
+ * discount and the caller charges the returned remainingUSD
+ * through the usual payment path; a balance at or above the
+ * price converts exactly, as convertReferralCreditsForRun
+ * does today; a zero balance converts nothing and touches
+ * no account (no redeem, no top-up). Allocations are
+ * oldest-first over vested earnings only, as in the exact
+ * path — unvested credit is never dipped into. The 2.31
+ * expiry filter plugs into redeemableBalance, so it applies
+ * here automatically.
+ */
+export async function convertReferralCreditsForRunPartial(input: {
+  lifecycle: LifecycleStore;
+  commercial: CommercialStore;
+  userId: string;
+  tenantId: string;
+  amountUSD: number;
+  runRequestId: string;
+}): Promise<{ redeemedUSD: number; remainingUSD: number; allocations: Array<{ earningId: string; amountUSD: number }> }> {
+  const balance = await input.lifecycle.redeemableBalance(input.userId);
+  const amount = round2(Math.min(balance, input.amountUSD));
+  if (amount <= 0) {
+    return { redeemedUSD: 0, remainingUSD: round2(input.amountUSD), allocations: [] };
+  }
+  const redeemed = await convertReferralCreditsForRun({ ...input, amountUSD: amount });
+  return {
+    redeemedUSD: redeemed.redeemedUSD,
+    remainingUSD: round2(input.amountUSD - redeemed.redeemedUSD),
+    allocations: redeemed.allocations,
+  };
 }
