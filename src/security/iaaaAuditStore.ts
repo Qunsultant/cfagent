@@ -78,11 +78,14 @@
  * (#1169 semantics; absence = off; not in wrangler); with the
  * flag off it returns createAtomicAuditStore exactly as before.
  * Both compositions run against the SAME Durable Object — the
- * flag switches the serving code path AND the append substrate:
- * flag-on appends and lists through the append-only
- * `iaaa_audit_events` table (#3251 O1), flag-off through the
- * segment keys. The old segment rows are retained; their
- * removal is a separate named step.
+ * flag switches the APPEND substrate only: flag-on appends
+ * through the append-only `iaaa_audit_events` table (#3251 O1),
+ * flag-off through the segment keys; BOTH compositions list
+ * through the DO's substrate-aware `audit-list` op, so a
+ * table-substrate write reads identically from either
+ * composition (one store, two compositions — #5084). The old
+ * segment rows are retained; their removal is a separate
+ * named step.
  *
  * #5084 (observability S5) — one audit store: the client
  * implementation is single-sourced in the AuditLog family
@@ -117,7 +120,6 @@ import type {
 import type { KvLike } from "./kvResilience";
 import {
   createStoreSender,
-  listStoreEntries,
   type DoNamespaceLike,
 } from "../data/durableKv";
 
@@ -201,7 +203,19 @@ export function createKvAuditStore(kv: KvLike): AuditStore {
  * AUDIT_PORTS_ENABLED states serve one implementation. The
  * store still speaks the DO's `audit-append` op for writes
  * (atomic chaining + rotation + cap, server-side) and the DO's
- * `list` op for reads (archives in key order, then the live key).
+ * substrate-aware `audit-list` op for reads (table rows while
+ * the table holds any, else the segment entries — the live
+ * chain whichever substrate holds it).
+ *
+ * #3251 (O1) fix — the flag-OFF list seam used to be the
+ * generic kv `list` over the `iaaa-audit:` prefix
+ * (listStoreEntries), which only ever saw segment rows: a
+ * table-substrate write was invisible to the flag-OFF
+ * composition, breaking the S5 one-store property
+ * (tests/audit_one_store_5084.test.ts:152). The list now rides
+ * the same `audit-list` op as the flag-ON composition; only
+ * the APPEND substrate differs by flag (segments here, table
+ * on flag-ON).
  *
  * append() throws by design: a caller-chained event cannot be
  * stored verbatim without bypassing the atomic chaining. Append
@@ -212,16 +226,24 @@ export function createAtomicAuditStore(
   options: AtomicAuditStoreOptions = {},
 ): AuditStore {
   const instanceName = options.instanceName ?? "kv";
+  // One sender for every audit op (append + list), exactly as
+  // the flag-ON composition root builds it — the funnel
+  // composition sites are census-pinned
+  // (tests/global_dd_census_2356.test.ts), so the list seam
+  // rides the same createStoreSender the append already uses
+  // instead of composing a second entry point.
+  const send = createStoreSender(namespace, "sessions", instanceName);
   const backend: AuditLogBackend = {
     configured: Boolean(namespace),
-    sendAppend: createStoreSender(namespace, "sessions", instanceName),
-    listEntries: () =>
-      listStoreEntries({
-        namespace,
-        namespaceName: "sessions",
-        prefix: IAAA_AUDIT_KEY_PREFIX,
-        instanceName,
-      }),
+    sendAppend: send,
+    listEntries: async () => {
+      const reply = await send({
+        op: "audit-list",
+        ns: "sessions",
+        key: IAAA_AUDIT_LOG_KEY,
+      });
+      return Array.isArray(reply?.entries) ? reply.entries : null;
+    },
   };
   return createAuditLogStore(backend, options);
 }

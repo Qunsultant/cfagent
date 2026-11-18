@@ -488,12 +488,21 @@ describe("audit log conformance — cross-composition reads", () => {
     const more = await recordAuditEvent(on, auditInput("event:7", 5_000_007));
     expect(more.ok).toBe(true);
     if (more.ok) expect(more.event.previousEventHash).toBe(events[6].eventHash);
-    // ...while the flag-OFF composition still reads only the
-    // segment bytes: the two substrates diverge by design after
-    // cutover; migration is the bridge, not a sync.
+    // ...and the flag-OFF composition reads the same live chain:
+    // one store, two compositions (#5084) — the flag selects the
+    // APPEND substrate only; both compositions list through the
+    // substrate-aware `audit-list` op, so the table-substrate
+    // write is visible from the flag-OFF composition too. The
+    // substrates are storage shapes of one chain, not two live
+    // chains; migration is the bridge that moved the bytes, not
+    // a sync between divergent stores. (This expectation was
+    // 7 — "flag-OFF reads only segments" — until the #3251 fix
+    // for audit_one_store_5084:152; the divergence it pinned
+    // contradicts the S5 one-store property.)
     const offAgain = createWiredAuditStore(envOff);
     const offEvents = await offAgain.list();
-    expect(offEvents).toHaveLength(7);
+    expect(offEvents).toHaveLength(8);
+    expect(await verifyChain(offEvents)).toBe(true);
     const onEvents = await on.list();
     expect(onEvents).toHaveLength(8);
     expect(await verifyChain(onEvents)).toBe(true);

@@ -70,9 +70,9 @@ function fixtureSha256(name: string): string {
 }
 
 describe("schema equality — all planes (#4282 P4)", () => {
-  it("the frozen combined baseline is the clean-checkout seed (177 tables / 102 indexes)", () => {
+  it("the frozen combined baseline is the clean-checkout seed (178 tables / 102 indexes)", () => {
     const model = combinedExpectedModel();
-    expect(Object.keys(model.tables).length).toBe(177);
+    expect(Object.keys(model.tables).length).toBe(178);
     expect(Object.keys(model.indexes).length).toBe(102);
     expect(fixtureSha256("schema_component_combined_expected_model.json")).toBe(
       COMBINED_FIXTURE_SHA256,
@@ -82,7 +82,7 @@ describe("schema equality — all planes (#4282 P4)", () => {
   it("per-plane fixtures hold their phase counts", () => {
     const counts: Record<string, [number, number]> = {
       d1: [100, 59],
-      do: [66, 39],
+      do: [67, 39],
       orm: [13, 10],
       remainder: [19, 15],
     };
@@ -116,11 +116,12 @@ describe("schema equality — all planes (#4282 P4)", () => {
     expect(new Set(executedCodes).size).toBe(
       COMBINED_CATALOGUE_ENTRIES.length,
     );
-    expect(COMBINED_CATALOGUE_ENTRIES.length).toBe(409);
-    // 408 entries resolve to 419 statements: the mas_reports generic
+    expect(COMBINED_CATALOGUE_ENTRIES.length).toBe(410);
+    // 410 entries resolve to 421 statements: the mas_reports generic
     // ALTER expands to 11 pairs and the confirmations generic ALTER to
-    // 2, each pair one statement.
-    expect(executedStatements).toBe(420);
+    // 2, each pair one statement. #3251 adds the iaaa_audit_events
+    // CREATE TABLE: 409 → 410 entries, 420 → 421 statements.
+    expect(executedStatements).toBe(421);
     const actual = instance.introspect();
     const diff = diffSchema(actual, combinedExpectedModel());
     expect(isEmptyDiff(diff)).toBe(true);
