@@ -388,6 +388,18 @@ export interface Env {
   // #3452 — optional externalized cycle cadence for Stock Copilot (AOP).
   // Default "every 30 minutes". Floor is 30m (Worker cron limit).
   STOCK_COPILOT_CADENCE?: string;
+  // #5055 (AG-1) — the agentic cycle's learning read-back policy. The
+  // cycle distils a learning every run; these thresholds turn recent
+  // learnings into plan constraints (rules and defaults in
+  // src/services/stockCopilotLearningPolicy.ts, AOP). READBACK_ENABLED
+  // is the kill switch; RISK_BLOCK_AT is how many risk-category
+  // learnings in the window hold back NEW entries; SESSION_LIMIT_AT is
+  // how many session-category learnings force limit-only shaping;
+  // POLICY_WINDOW is how many newest learnings the policy considers.
+  COPILOT_LEARNING_READBACK_ENABLED?: string;
+  COPILOT_LEARNING_RISK_BLOCK_AT?: string;
+  COPILOT_LEARNING_SESSION_LIMIT_AT?: string;
+  COPILOT_LEARNING_POLICY_WINDOW?: string;
   // #3398 — optional deployment-default trading sessions for the
   // Stock Copilot (comma-separated session ids: pre_market, regular,
   // after_hours, exto; "none" = no sessions). The per-login stored
