@@ -49,7 +49,7 @@
 export const UNIFIED_SCHEDULES_TABLE = "unified_schedules";
 
 /**
- * The six schedule kinds, each declared exactly once (3123-P01).
+ * The seven schedule kinds, each declared exactly once (3123-P01).
  * - screen: an Agents SDK alarm schedule (creatable callbacks).
  * - goal: a tick-polled ScheduledAgent goal (built-in goals config + user goals).
  * - followup: an async-job follow-up chain step. Followup rows are
@@ -66,6 +66,11 @@ export const UNIFIED_SCHEDULES_TABLE = "unified_schedules";
  *   intervalSeconds + lastPushAt + armed; no per-push ledger rows).
  *   The record lives in the TickerAgent's own store (ADR 0029 D-0)
  *   and is read into the Schedules home list by RPC.
+ * - internal: an internal-only Agents SDK alarm schedule (#4238) —
+ *   a callback the agent arms itself, never a user-creatable one
+ *   (IV history collection, broker token renewal, the sweeps and
+ *   the watchdog). Managed through the one management service
+ *   like a screen; record id = alarm id.
  */
 export const UNIFIED_SCHEDULE_KINDS = [
   "screen",
@@ -74,6 +79,8 @@ export const UNIFIED_SCHEDULE_KINDS = [
   "worker-duty",
   "workflow-stage",
   "ticker-push",
+  // Issue #3121 #4238 — the seventh kind: internal-only callbacks.
+  "internal",
 ] as const;
 
 export type UnifiedScheduleKind = (typeof UNIFIED_SCHEDULE_KINDS)[number];

@@ -213,6 +213,8 @@ describe("S0-P06 system-job trigger routes (B-T2-05): all six routes exist", () 
       autonomousOptionsAnalysis: "/api/schedules/trigger-options-analysis",
       autonomousMarketScreen: "/api/schedules/trigger-screen",
       autonomousStrategyDiscovery: "/api/schedules/trigger-discovery",
+      // Issue #3121 #4238 — IV collection's existing manual-trigger route.
+      collectIvHistory: "/api/schedules/trigger-iv-collection",
     });
   });
 });

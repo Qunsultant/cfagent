@@ -17,6 +17,17 @@ export const SYSTEM_JOBS: Record<string, SystemJobInfo> = {
       "Re-runs saved discovery views (symbol, thesis, target) captured from the discovery panel against the live E*TRADE chain and stores the ranked results.",
     triggerRoute: "/api/schedules/trigger-discovery",
   },
+  // Issue #3121 #4238 — the daily IV history collection (#15): one
+  // ATM IV record per tracked name per day; names whose chains fail
+  // are reported failed, never fabricated. The trigger route is the
+  // existing manual-trigger path (the ScheduledOptionsManager card
+  // already handles its result shape).
+  collectIvHistory: {
+    label: "Scheduled IV collection",
+    description:
+      "Collects one ATM IV record per tracked name per day; names whose chains fail are reported failed in the run's audit — no record is ever fabricated for a missing day.",
+    triggerRoute: "/api/schedules/trigger-iv-collection",
+  },
 };
 
 /**
@@ -29,6 +40,8 @@ export const TRIGGER_ROUTES: Record<string, string> = {
   autonomousOptionsAnalysis: "/api/schedules/trigger-options-analysis",
   autonomousMarketScreen: SYSTEM_JOBS.autonomousMarketScreen.triggerRoute,
   autonomousStrategyDiscovery: SYSTEM_JOBS.autonomousStrategyDiscovery.triggerRoute,
+  // Issue #3121 #4238 — IV collection's existing manual-trigger route.
+  collectIvHistory: "/api/schedules/trigger-iv-collection",
 };
 
 export function systemJobFor(callback: unknown): SystemJobInfo | undefined {
