@@ -129,7 +129,7 @@ import {
   lookupInternalUserIdByLogin,
   lookupLoginByUserId,
 } from "../../security/iaaaMigration";
-import { isPlatformAdmin } from "../../security/iaaaAdminOverview";
+import { checkPlatformPermission } from "../../security/iaaaPdpSeam";
 import { isLoginShaped } from "../../security/serviceIdentity";
 import { sessionStore } from "../../security/session";
 import {
@@ -355,11 +355,20 @@ async function resolveWiredCaller(
   if (!isLoginShaped(login)) return { login, internalUserId: null, isPlatformAdmin: false };
   const internalUserId = await lookupInternalUserIdByLogin(stores.kv, login);
   if (!internalUserId) return { login, internalUserId: null, isPlatformAdmin: false };
-  const memberships = await stores.membershipStore.getMembershipsByUser(internalUserId);
+  // GAP-1 (seam A): the PDP platform-scope decision replaces the
+  // hand-rolled isPlatformAdmin predicate — behavior-identical
+  // (live platform-admin binding at platform scope, unrevoked,
+  // unexpired). The permission is the platform-privilege grant;
+  // per-surface mapping is CISO follow-up, not invented here.
+  const decision = await checkPlatformPermission(stores.membershipStore, {
+    internalUserId,
+    permission: "role:assign",
+    nowMs: stores.nowMs(),
+  });
   return {
     login,
     internalUserId,
-    isPlatformAdmin: isPlatformAdmin(memberships, stores.nowMs()),
+    isPlatformAdmin: decision.decision === "allow",
   };
 }
 

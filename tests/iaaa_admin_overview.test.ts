@@ -2,9 +2,9 @@ import { describe, it, expect } from "vitest";
 import {
   buildAdminOverview,
   IAAA_ADMIN_OVERVIEW_LIMIT,
-  isPlatformAdmin,
   type AdminOverviewDeps,
 } from "../src/security/iaaaAdminOverview";
+import { checkPlatformPermission } from "../src/security/iaaaPdpSeam";
 import { createMemoryMembershipStore } from "../src/security/authorization";
 import { createMemoryAuditStore } from "../src/security/iaaaAudit";
 import type { IaaaAuditEvent, AuditStore } from "../src/security/iaaaAudit";
@@ -103,40 +103,55 @@ async function depsWith(opts: {
   };
 }
 
-describe("isPlatformAdmin", () => {
-  it("true only for a live platform-scoped platform-admin binding", () => {
-    expect(isPlatformAdmin([platformAdmin(ADMIN_ID)], NOW)).toBe(true);
-    expect(isPlatformAdmin([membership({ internalUserId: USER_ID })], NOW)).toBe(false);
+describe("checkPlatformPermission (GAP-1 seam A)", () => {
+  // GAP-1: the PDP platform-scope consultation replaces the
+  // hand-rolled isPlatformAdmin predicate. This matrix is the
+  // predicate's former contract, asserted against the PDP.
+  it("allows only a live platform-scoped platform-admin binding", async () => {
+    const decide = async (memberships: Membership[], userId: string) => {
+      const store = createMemoryMembershipStore();
+      for (const m of memberships) await store.put(m);
+      return checkPlatformPermission(store, {
+        internalUserId: userId,
+        permission: "role:assign",
+        nowMs: NOW,
+      });
+    };
+    expect((await decide([platformAdmin(ADMIN_ID)], ADMIN_ID)).decision).toBe("allow");
     expect(
-      isPlatformAdmin(
-        [platformAdmin(ADMIN_ID, "other-tenant")],
-        NOW,
-      ),
-    ).toBe(true); // platform scope is platform-wide, not tenant-scoped
+      (await decide([membership({ internalUserId: USER_ID })], USER_ID)).decision,
+    ).toBe("deny");
     expect(
-      isPlatformAdmin(
-        [{ ...platformAdmin(ADMIN_ID), revokedAtMs: NOW - 1 }],
-        NOW,
-      ),
-    ).toBe(false);
+      (await decide([platformAdmin(ADMIN_ID, "other-tenant")], ADMIN_ID)).decision,
+    ).toBe("allow"); // platform scope is platform-wide, not tenant-scoped
     expect(
-      isPlatformAdmin(
-        [
-          membership({
-            internalUserId: ADMIN_ID,
-            roleBindings: [
-              {
-                role: "platform-admin",
-                scope: "platform",
-                grantedBy: "system:bootstrap-genesis",
-                expiresAtMs: NOW - 1,
-              },
-            ],
-          }),
-        ],
-        NOW,
-      ),
-    ).toBe(false);
+      (
+        await decide(
+          [{ ...platformAdmin(ADMIN_ID), revokedAtMs: NOW - 1 }],
+          ADMIN_ID,
+        )
+      ).decision,
+    ).toBe("deny");
+    expect(
+      (
+        await decide(
+          [
+            membership({
+              internalUserId: ADMIN_ID,
+              roleBindings: [
+                {
+                  role: "platform-admin",
+                  scope: "platform",
+                  grantedBy: "system:bootstrap-genesis",
+                  expiresAtMs: NOW - 1,
+                },
+              ],
+            }),
+          ],
+          ADMIN_ID,
+        )
+      ).decision,
+    ).toBe("deny");
   });
 });
 

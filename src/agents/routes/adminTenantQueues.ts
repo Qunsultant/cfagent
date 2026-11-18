@@ -10,7 +10,8 @@
  * - Gate: the #2331 slice-1 resolveCaller pattern exactly — the
  *   x-user-login header (set by the Worker from the verified session)
  *   resolves through the wired-login alias record to an internalUserId,
- *   which must hold a live platform-admin membership (isPlatformAdmin).
+ *   which must hold a live platform-admin membership (the PDP
+ *   platform-scope check, GAP-1 seam A).
  *   Anything else answers 401/403 with no data. Tenant admins get 403
  *   on every route here: platform-admin-only, same as today.
  * - Mapping: tenant -> logins comes from tenantQueueMapping.ts
@@ -43,7 +44,7 @@
  *   #2454 merges, on top of these routes.
  */
 
-import { isPlatformAdmin } from "../../security/iaaaAdminOverview";
+import { checkPlatformPermission } from "../../security/iaaaPdpSeam";
 import {
   createKvMembershipStore,
   listMembershipsFromEntries,
@@ -118,8 +119,17 @@ async function resolveCaller(
   }
   const store =
     ctx.membershipStore ?? createKvMembershipStore(sessionStore(ctx.env));
-  const memberships = await store.getMembershipsByUser(internalUserId);
-  if (!isPlatformAdmin(memberships, Date.now())) {
+  // GAP-1 (seam A): the PDP platform-scope decision replaces the
+  // hand-rolled isPlatformAdmin predicate — behavior-identical
+  // (live platform-admin binding at platform scope, unrevoked,
+  // unexpired). The permission is the platform-privilege grant;
+  // per-surface mapping is CISO follow-up, not invented here.
+  const decision = await checkPlatformPermission(store, {
+    internalUserId,
+    permission: "role:assign",
+    nowMs: Date.now(),
+  });
+  if (decision.decision !== "allow") {
     return jsonError(
       "Forbidden: tenant queue administration requires platform-admin membership.",
       403,

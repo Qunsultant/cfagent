@@ -127,7 +127,8 @@ and the approval each independently allow.
 | E*TRADE link start + verifier | `integration:connect`, PDP on + wired session, or PDP on + legacy session past its §8 grace bound | 403, action not performed; grace-expired legacy denials carry code `legacy_pdp_grace_expired` |
 | Public link start + token connect | `integration:connect`, same PDP rule as the E*TRADE gates | 403, action not performed; grace-expired legacy denials carry code `legacy_pdp_grace_expired` |
 | API-key mint | Step-up (fresh authentication), not PDP | 403 for stale and legacy sessions until re-login |
-| `GET /api/iaaa/overview` | Platform-admin, server-side | 401 no session; 403 legacy session; 403 wired non-admin with no data; 500 generic on corrupt store |
+| `GET /api/iaaa/overview` | PDP platform-scope check (`role:assign`, seam A) + wired session, server-side, always enforced | 401 no session; 403 legacy session; 403 wired non-admin with no data; 500 generic on corrupt store |
+| Platform-admin surfaces (tenant queues, KV wipe, user admin, service-user admin, lifecycle platform ops, SecHub policy/PDP/PEP/PIP views, telemetry mutations, reconcile routes) | PDP platform-scope check (`role:assign`, seam A) + wired session, always enforced | 401 no session; 403 wired non-admin with no data |
 | IAAA admin panel | Same gate, client-side | Shows "not an admin" on 403 |
 
 ## 7. Deliberately ungated — and why
@@ -162,16 +163,19 @@ gap closed — with no route left "unknown". Full table (branch,
 gate, evidence):
 [gate-coverage-inventory-1754.md](gate-coverage-inventory-1754.md).
 
-- **PDP-gated:** the four `integration:connect` routes (§6).
-  The PDP enforces nothing else by design; session-gated routes
-  never consult it.
+- **PDP-gated:** the `integration:connect` / `action:approve` /
+  `task:create` gates (§6) and the platform-admin surfaces, whose
+  gates consult the PDP at platform scope through seam A (GAP-1,
+  CISO coordination #5350). Session-gated routes outside §6 never
+  consult the PDP.
 - **Session-gated:** the bulk of the API (schedule dashboard,
   social, governance/jobs/retention/audit/reports, API keys, MCP
   transport, wallet, premium, omnichannel, browser, forwarder,
   Agents SDK routing, OpenAPI/docs, clear/reset).
-- **Session + admin / grant-gated:** overview, access-request
-  family (`canGrantRole`), telemetry mutations, retention purge,
-  seed-halt, reconcile routes, canonical seeding.
+- **Session + admin / grant-gated:** access-request family
+  (`canGrantRole`). The overview, telemetry mutations, retention
+  purge, seed-halt, reconcile routes, and canonical seeding
+  consult the PDP at platform scope (seam A) — see §6.
 - **Signature / token / payment-gated:** NLQ webhooks (HMAC +
   replay nonce), Slack webhooks (signing secret, 503 when
   unconfigured), payment webhooks (provider HMAC), email approval

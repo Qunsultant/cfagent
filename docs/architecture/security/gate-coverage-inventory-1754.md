@@ -126,12 +126,12 @@ downstream instance:
 
 | Surface | Gate |
 | --- | --- |
-| `GET /api/iaaa/overview` | Session + wired session + live platform-admin membership (401 no session; 403 legacy; 403 wired non-admin with no data) |
+| `GET /api/iaaa/overview` | Session + wired session + PDP platform-scope check via the seam (`checkPlatformPermission`, GAP-1; decision identical to the former live platform-admin membership test) (401 no session; 403 legacy; 403 wired non-admin with no data) |
 | `GET /api/iaaa/access-requests` | Session + wired session + `canGrantRole` tenant-admin check (403 otherwise) |
 | `POST /api/iaaa/access-request/decision` | Session + wired session + `canGrantRole` for the requested role (403 otherwise); grant is atomic via `grantMembership` |
 | `POST /api/iaaa/access-request` | Session + wired session + active membership in the tenant (403 otherwise) |
-| `POST /api/telemetry/decisions/:id/decide\|apply\|supersede\|expire`, `POST /api/telemetry/reconcile` | Session + live platform-admin membership (`buildAdminOverview`); reads (`GET /api/telemetry/summary`, `/api/telemetry/decisions`) are session-gated, tenant-scoped |
-| `/api/retention/purge`, `/api/governance/seed-halt`, `/api/chains/reconcile`, `/api/jobs/reconcile`, `/api/reports/seed-canonical` | Session + the IAAA admin pattern (requireAuth → wired session → live platform-admin membership, fail-closed, no data on 403) |
+| `POST /api/telemetry/decisions/:id/decide\|apply\|supersede\|expire`, `POST /api/telemetry/reconcile` | Session + PDP platform-scope check via the seam (`buildAdminOverview`, GAP-1); reads (`GET /api/telemetry/summary`, `/api/telemetry/decisions`) are session-gated, tenant-scoped |
+| `/api/retention/purge`, `/api/governance/seed-halt`, `/api/chains/reconcile`, `/api/jobs/reconcile`, `/api/reports/seed-canonical` | Session + the IAAA admin pattern (requireAuth → wired session → PDP platform-scope check via the seam, GAP-1, fail-closed, no data on 403) |
 
 ## 4. Non-session gates (signature, token, payment)
 
@@ -166,7 +166,7 @@ cannot be misread:
 | E*TRADE revoke (`POST /api/etrade/oauth/revoke`) | Session-gated; NOT PDP-gated | Yes — revocation is a safety action; gating it would let the policy it escapes from block the escape. The session gate still binds it to the caller's own tokens. |
 | API-key deletion (`DELETE /api/api-keys/:id`) | Session-gated; NOT step-up-gated (minting IS step-up-gated) | Yes — revocation must never be blocked by staleness; a stale session can still kill its own keys. Deletion is scoped to the session's own keys. |
 | `/trade/approve` | Session-gated at the edge AND downstream DO HITL gate (draft must exist, still `previewed`, execution parameters must match the preview; stale drafts expire unexecuted) | Yes — the downstream DO gate owns the decision; the edge session gate binds it to the caller's own agent. (The authz §7 shorthand "downstream DO gate" understated the edge session gate; corrected here.) |
-| Generic `/api/*` forwarder | Session-gated; NOT PDP-gated | Yes — the forwarder is session-gated and instance-scoped to the caller; PDP enforcement exists only on the four `integration:connect` routes (§1) by design. Membership/admin revocation does not deny forwarder routes (authz.md §9 residual). |
+| Generic `/api/*` forwarder | Session-gated; NOT PDP-gated | Yes — the forwarder is session-gated and instance-scoped to the caller; PDP enforcement exists on the §1 gates and the platform-admin surfaces (§3, seam A) by design, and the forwarder is none of those. Membership/admin revocation does not deny forwarder routes (authz.md §9 residual). |
 | Schedule-goal mutations (`POST/DELETE /api/schedule/goals/*`) | Session-gated (gate before the DO stub); NOT PDP-gated | Yes — same shape as the forwarder: any signed-in user may use the dashboard; no admin gate is invented here (per the route's own comment). |
 
 F-20 (zero-trust.md §5.2) — public surfaces by design, re-verified:
@@ -207,7 +207,8 @@ code:
    §1–§6 above, including the three previously ungated routes
    closed in §5. No route is left in "unknown" status.
 3. **The PDP's narrow scope is by design, not a bypass.** The PDP
-   enforces four `integration:connect` routes and the grant checks;
+   enforces the §1 gates, the grant checks, and the
+   platform-admin surfaces (§3, seam A);
    session-gated routes never consult it (authz.md §9 residual).
    Calling that a "PDP bypass" would misdescribe the architecture:
    the bypass question is whether a route that SHOULD consult the
@@ -309,5 +310,29 @@ code:
 - `docs/architecture/security/zero-trust.md` §5.2: scanner
   free-tool precision (payment gates `screen_options` only).
 - `changelog.d/1754-gate-coverage-audit.md`: fragment.
+
+## 11. Amendment (GAP-1, 2026-11-18)
+
+- The platform-admin gates in §3 (overview, telemetry mutations,
+  retention purge, seed-halt, reconcile routes, canonical
+  seeding) now consult the PDP at platform scope through the seam
+  (`checkPlatformPermission`, `src/security/iaaaPdpSeam.ts`, GAP-1
+  under #5343, CISO coordination #5350), replacing the hand-rolled
+  `isPlatformAdmin` predicate. The same consultation gates the
+  tenant-queue routes (`src/agents/routes/adminTenantQueues.ts`),
+  KV wipe (`kvWipe.ts`), user administration
+  (`platformUsers.ts`), service-user administration
+  (`serviceUser.ts`), the lifecycle platform operations
+  (`dataLifecycle.ts` `resolveWiredCaller`), and the SecHub
+  policy/PDP/PEP/PIP branch (`src/server/routes/auth.ts`) —
+  surfaces that had no §3 row before this slice; their gate is
+  recorded here rather than in invented rows. Decisions are
+  identical to the former predicate (live platform-admin binding
+  at platform scope, unrevoked, unexpired); the permission passed
+  is the platform-privilege grant (`role:assign`). Per-surface
+  permission mapping is CISO follow-up, not decided here.
+- The §6 forwarder row and §7 point 3 above were corrected in the
+  same amendment: the "only four routes" statements predated the
+  `action:approve` / `task:create` gates and seam A.
 
 #CISO-bhdm
