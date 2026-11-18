@@ -77,6 +77,13 @@ export const PERMISSIONS = [
   "action:execute",
   "audit:read",
   "audit:export",
+  // GAP-2 (#5450, #5348): the money/ledger permission — recording a
+  // ledger row. Held by tenant-admin + workspace-admin via the
+  // [...PERMISSIONS] spread below, like the other admin-only
+  // permissions; no other role holds it. CISO review owns the name +
+  // bindings; this entry follows the existing pattern pending that
+  // review (no-idle-wait, #5348).
+  "ledger:record",
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
@@ -429,7 +436,12 @@ export interface AuthorizationDecision {
   policyVersion: string;
 }
 
-export const AUTHORIZATION_POLICY_VERSION = "iaaa-authorization-1";
+/**
+ * Policy version, carried on every decision and snapshot. Advanced
+ * when the compiled tables change — `iaaa-authorization-2` adds
+ * `ledger:record` (GAP-2, #5450).
+ */
+export const AUTHORIZATION_POLICY_VERSION = "iaaa-authorization-2";
 
 function deny(
   request: AuthorizationRequest,

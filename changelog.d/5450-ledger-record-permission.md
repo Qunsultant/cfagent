@@ -1,0 +1,3 @@
+### Security
+
+- **Money/ledger permission added to the IAAA PDP table (#5450):** `ledger:record` joins the `PERMISSIONS` table in `src/security/authorization.ts` (18 permissions), held by tenant-admin and workspace-admin via the existing `[...PERMISSIONS]` spread like the other admin-only permissions; no other role holds it. The policy version advances to `iaaa-authorization-2`, carried on every decision and snapshot. No route behavior changes: no handler consults the permission until the ledger-gate slice lands. The permission name, bindings, and version advance are CISO review questions on the PR (#5348 had not decided at build time; no-idle-wait per #5348).
