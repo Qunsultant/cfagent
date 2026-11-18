@@ -17,12 +17,14 @@
  * Composed from ui/ primitives (ADR-0004): Stack for layout,
  * Spinner for loading, Notice for the propagation note,
  * EmptyState for honest error states, Table for the rows,
- * Select / TextInput / Button for the per-key editor.
+ * Select / TextInput / Button for the per-key editor,
+ * CardHeader for the section titles (no hand-rolled h3, #4913).
  * No bespoke className tokens, no inline styles, no CSS imports.
  */
 import { useEffect, useState } from "react";
 import {
   Button,
+  CardHeader,
   EmptyState,
   Notice,
   Select,
@@ -391,14 +393,14 @@ export function OtelConfigPanel() {
         operation for sink destinations and the archive list, and at the next provider
         init for transport switches (master, exporters, batch, metrics/traces settings).
       </Notice>
-      <h3>Switches, thresholds &amp; sampling</h3>
+      <CardHeader title="Switches, thresholds & sampling" />
       <Table<ConfigKeyRow>
         columns={keyColumns}
         rows={keyRows}
         rowKey={(row) => row.def.key}
         caption="Overridable OTel config keys with their effective values"
       />
-      <h3>Message catalog</h3>
+      <CardHeader title="Message catalog" />
       <p>
         The single source for message text: every log, audit, alert, and trace event
         carries one of these codes. Codes are stable across releases and never reused
