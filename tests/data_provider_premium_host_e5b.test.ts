@@ -281,7 +281,7 @@ describe("premium options-scan on-platform (issue #1206)", () => {
     expect(body.screenResult.matchedCount).toBeGreaterThan(0);
 
     // The fetches were captured on-platform, under ONE run id.
-    const captures = listCapturesByProvider(sql as any, "default", "etrade");
+    const captures = listCapturesByProvider(sql as any, "primary", "etrade");
     expect(captures.length).toBeGreaterThan(0);
     expect(captures.every((c) => c.capability === "optionsChains")).toBe(true);
     expect(captures.every((c) => c.status === "captured")).toBe(true);
@@ -291,7 +291,7 @@ describe("premium options-scan on-platform (issue #1206)", () => {
     expect(typeof runId).toBe("string");
     expect(runId.length).toBeGreaterThan(0);
     // The capture store's run read returns exactly the scan's rows.
-    expect(listCapturesByRun(sql as any, "default", runId)).toHaveLength(
+    expect(listCapturesByRun(sql as any, "primary", runId)).toHaveLength(
       captures.length
     );
 
@@ -333,7 +333,7 @@ describe("premium options-scan on-platform (issue #1206)", () => {
     expect(body.success).toBe(true);
     expect(body.screenResult.matchedCount).toBeGreaterThan(0);
 
-    const captures = listCapturesByProvider(sql as any, "default", "etrade");
+    const captures = listCapturesByProvider(sql as any, "primary", "etrade");
     expect(captures.length).toBeGreaterThan(0);
     expect(captures.every((c) => c.capability === "optionsChains")).toBe(true);
     expect(new Set(captures.map((c) => c.runId)).size).toBe(1);
@@ -368,7 +368,7 @@ describe("premium options-scan unpaid preservation (issue #1206)", () => {
     );
     expect(response).not.toBeNull();
     expect(response!.status).toBe(402);
-    expect(listCapturesByProvider(sql as any, "default", "etrade")).toHaveLength(
+    expect(listCapturesByProvider(sql as any, "primary", "etrade")).toHaveLength(
       0
     );
     expect(

@@ -1,1 +1,3 @@
+### Changed
+
 - **Data model (#5039):** Unified all deployment-default tenant fallbacks onto `DEPLOYMENT_DEFAULT_TENANT_ID = "primary"` in `src/config/tenantDefaults.ts` (IAAA, provider captures, canonical report seeding, chain-schedule reconciliation, and workflow runs), added pinning coverage, and documented the third-tenant migration consequence in `docs/architecture/data/data-model.md`.

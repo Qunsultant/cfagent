@@ -772,7 +772,7 @@ describe("UnifiedOptionsService tier enforcement (issue #1202)", () => {
     expect(typeof scanRunId).toBe("string");
     expect(await store.get(scanRunId, { userLogin: login })).not.toBeNull();
 
-    const captures = listCapturesByRun(sql, "default", scanRunId);
+    const captures = listCapturesByRun(sql, "primary", scanRunId);
     expect(captures.length).toBeGreaterThan(0);
     expect(captures.every((c) => c.capability === "optionsChains")).toBe(true);
     expect(captures.every((c) => c.providerId === "etrade")).toBe(true);

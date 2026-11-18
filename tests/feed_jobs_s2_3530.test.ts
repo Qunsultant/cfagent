@@ -377,7 +377,7 @@ describe("runFeedJob — etrade (#3530 S2)", () => {
     expect(artifact?.quotes.map((q) => (q as ETradeQuote).symbol)).toEqual(SYMBOLS);
     expect(artifact?.quotes[0]).toMatchObject({ lastPrice: 232.5 });
 
-    const captures = listCapturesByRun(sql, "default", "feed-run-etrade-ok");
+    const captures = listCapturesByRun(sql, "primary", "feed-run-etrade-ok");
     expect(captures).toHaveLength(2); // two sub-batches of ≤2 symbols
     for (const row of captures) {
       expect(row).toMatchObject({
@@ -386,7 +386,7 @@ describe("runFeedJob — etrade (#3530 S2)", () => {
         status: "captured",
         rawKind: "provider-response",
         runId: "feed-run-etrade-ok",
-        tenantId: "default",
+        tenantId: "primary",
       });
     }
     const capturedSymbols = captures
@@ -420,7 +420,7 @@ describe("runFeedJob — etrade (#3530 S2)", () => {
     // The attempt still leaves its audit capture (the adapter's
     // no-wire-response path): one provider-result row, never a
     // fabricated wire payload.
-    const captures = listCapturesByRun(sql, "default", "feed-run-etrade-notoken");
+    const captures = listCapturesByRun(sql, "primary", "feed-run-etrade-notoken");
     expect(captures).toHaveLength(1);
     expect(captures[0]).toMatchObject({
       providerId: "etrade",
@@ -568,7 +568,7 @@ describe("runFeedJob — alpaca (#3530 S2)", () => {
     expect(artifact?.providerId).toBe("alpaca");
     expect(artifact?.quotes.map((q) => (q as MarketDataResearchQuote).symbol)).toEqual(SYMBOLS);
 
-    const captures = listCapturesByRun(sql, "default", "feed-run-alpaca-ok");
+    const captures = listCapturesByRun(sql, "primary", "feed-run-alpaca-ok");
     expect(captures).toHaveLength(1);
     expect(captures[0]).toMatchObject({
       providerId: "alpaca",
