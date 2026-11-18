@@ -576,7 +576,7 @@ describe("UnifiedOptionsService platform cutover (issue #1157)", () => {
     // under the same id the captures carry.
     const stored = await store.get(scanRunId, { userLogin: depsLogin });
     expect(stored).not.toBeNull();
-    const captures = listCapturesByRun(sql, "default", scanRunId);
+    const captures = listCapturesByRun(sql, "primary", scanRunId);
     expect(captures.length).toBeGreaterThan(0);
     expect(captures.every((c) => c.capability === "optionsChains")).toBe(true);
     expect(captures.every((c) => c.providerId === "etrade")).toBe(true);
@@ -611,7 +611,7 @@ describe("UnifiedOptionsService platform cutover (issue #1157)", () => {
     expect(plainData.gate).toEqual(depsData.gate);
     expect(plainData.scanRunId).toBeTruthy();
     expect(plainData.scanRunId).not.toBe(scanRunId);
-    expect(listCapturesByRun(sql, "default", plainData.scanRunId)).toHaveLength(0);
+    expect(listCapturesByRun(sql, "primary", plainData.scanRunId)).toHaveLength(0);
   });
 });
 
@@ -644,7 +644,7 @@ describe("bindEtradeQuoteDeps (issues #1157, #1356)", () => {
     expect(surface.batchCalls[0].trace).toBe(traceSentinel);
     expect(typeof surface.batchCalls[0].onWire).toBe("function");
 
-    let captures = listCapturesByRun(sql, "default", "run-stock");
+    let captures = listCapturesByRun(sql, "primary", "run-stock");
     expect(captures).toHaveLength(2);
     expect(captures.every((c) => c.capability === "quotes")).toBe(true);
     expect(captures.every((c) => c.rawKind === "provider-response")).toBe(true);
@@ -652,7 +652,7 @@ describe("bindEtradeQuoteDeps (issues #1157, #1356)", () => {
     const single = await quoteDeps.fetchQuote("AAPL");
     expect(single.symbol).toBe("AAPL");
     expect((single as any).raw).toBeUndefined();
-    captures = listCapturesByRun(sql, "default", "run-stock");
+    captures = listCapturesByRun(sql, "primary", "run-stock");
     expect(captures).toHaveLength(3);
     expect(captures.every((c) => c.userLogin === "trader1")).toBe(true);
   });

@@ -433,7 +433,7 @@ describe("runFeedJob (#3530 S1)", () => {
       { runId: "feed-run-capture", now: () => new Date(T0) },
     );
     expect(result.status).toBe("completed");
-    const captures = listCapturesByRun(sql, "default", "feed-run-capture");
+    const captures = listCapturesByRun(sql, "primary", "feed-run-capture");
     expect(captures).toHaveLength(1);
     expect(captures[0]).toMatchObject({
       providerId: "yahoo",
@@ -441,7 +441,7 @@ describe("runFeedJob (#3530 S1)", () => {
       status: "captured",
       rawKind: "provider-result",
       runId: "feed-run-capture",
-      tenantId: "default",
+      tenantId: "primary",
     });
   });
 

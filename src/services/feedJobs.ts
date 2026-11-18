@@ -33,6 +33,7 @@
  * path), so a fetch failure is a recorded failed result. Only
  * contract violations throw (unknown job id — a caller bug).
  */
+import { DEPLOYMENT_DEFAULT_TENANT_ID } from "../config/tenantDefaults";
 import {
   HISTORY_BAR_LIMIT,
   classifyNewsSentiment,
@@ -1125,7 +1126,7 @@ export async function runFeedJob(
     envelope = await withFeedDeadline(
       deps.provider.getQuotesBatch(symbols, {
         runId,
-        tenantId: opts.tenantId ?? "default",
+        tenantId: opts.tenantId ?? DEPLOYMENT_DEFAULT_TENANT_ID,
         ...(opts.userLogin ? { userLogin: opts.userLogin } : {}),
       }),
       timeouts.fetchMs,
@@ -1442,7 +1443,7 @@ export async function runFeedFundamentalsJob(
       const envelope = await withFeedDeadline(
         deps.provider.getFundamentals(symbol, {
           runId,
-          tenantId: opts.tenantId ?? "default",
+          tenantId: opts.tenantId ?? DEPLOYMENT_DEFAULT_TENANT_ID,
           ...(opts.userLogin ? { userLogin: opts.userLogin } : {}),
         }),
         remainingMs,
@@ -1734,7 +1735,7 @@ export async function runFeedTechnicalsJob(
       const envelope = await withFeedDeadline(
         deps.provider.getHistoricalBars(symbol, "1D", HISTORY_BAR_LIMIT, {
           runId,
-          tenantId: opts.tenantId ?? "default",
+          tenantId: opts.tenantId ?? DEPLOYMENT_DEFAULT_TENANT_ID,
           ...(opts.userLogin ? { userLogin: opts.userLogin } : {}),
         }),
         remainingMs,
@@ -2080,7 +2081,7 @@ export async function runFeedSentimentJob(
       const envelope = await withFeedDeadline(
         deps.provider.getNews(symbol, {
           runId,
-          tenantId: opts.tenantId ?? "default",
+          tenantId: opts.tenantId ?? DEPLOYMENT_DEFAULT_TENANT_ID,
           ...(opts.userLogin ? { userLogin: opts.userLogin } : {}),
         }),
         remainingMs,
@@ -2521,7 +2522,7 @@ export async function runFeedOptionsChainsJob(
         symbol,
         {
           runId,
-          tenantId: opts.tenantId ?? "default",
+          tenantId: opts.tenantId ?? DEPLOYMENT_DEFAULT_TENANT_ID,
           ...(opts.userLogin ? { userLogin: opts.userLogin } : {}),
         },
       );
@@ -2573,7 +2574,7 @@ export async function runFeedOptionsChainsJob(
             },
             {
               runId,
-              tenantId: opts.tenantId ?? "default",
+              tenantId: opts.tenantId ?? DEPLOYMENT_DEFAULT_TENANT_ID,
               ...(opts.userLogin ? { userLogin: opts.userLogin } : {}),
             },
           );
