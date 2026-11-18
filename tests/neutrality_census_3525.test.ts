@@ -1675,7 +1675,11 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/trading/alpaca/optionsData.ts", "etrade", 5],
   ["src/trading/alpaca/platform.ts", "alpaca", 113],
   ["src/trading/alpaca/platform.ts", "etrade", 8],
-  ["src/trading/alpaca/signIn.ts", "alpaca", 6],
+  // #3515 S3 batch 4 INTEGRATION: the console migration adds the
+  // module-logger component line ("trading/alpaca/signIn") plus two
+  // `alpacaSignIn.*` structured-log event names; the log messages
+  // are preserved verbatim. alpaca 6->9.
+  ["src/trading/alpaca/signIn.ts", "alpaca", 9],
   ["src/trading/brokerCatalog.ts", "alpaca", 19],
   ["src/trading/brokerCatalog.ts", "etrade", 29],
   ["src/trading/brokerPanels.ts", "alpaca", 1],
@@ -1707,14 +1711,26 @@ const BASELINE: Array<[string, string, number]> = [
   // Issue #4659: the stop-price refusal names the broker in its user-facing
   // message, the same INTEGRATION growth this row already records for the
   // adapter's own vocabulary.
-  ["src/trading/etrade/client.ts", "etrade", 330],
+  // #3515 S3 batch 4 INTEGRATION: the console migration adds the
+  // module-logger component line ("trading/etrade/client") plus 26
+  // `etradeClient.*` structured-log event names; the log messages
+  // are preserved verbatim. etrade 330->357.
+  ["src/trading/etrade/client.ts", "etrade", 357],
   ["src/trading/etrade/optionOrders.ts", "etrade", 9],
   // Issue #4656: the adapter names its own time-in-force mapper (etradeOrderTerm)
   // — a code identifier in the broker's own adapter, the disposition this section
   // already records for per-broker execution entries.
-  ["src/trading/etrade/platform.ts", "etrade", 94],
+  // #3515 S3 batch 4 INTEGRATION: the console migration adds the
+  // module-logger component line ("trading/etrade/platform") plus two
+  // `etradePlatform.*` structured-log event names (baseline 94 was
+  // already stale-high vs main's 92; net +3). etrade 94->95.
+  ["src/trading/etrade/platform.ts", "etrade", 95],
   ["src/trading/etrade/quoteConfig.ts", "etrade", 2],
-  ["src/trading/etrade/quoteTrace.ts", "etrade", 1],
+  // #3515 S3 batch 4 INTEGRATION: the console migration adds the
+  // module-logger component line ("trading/etrade/quoteTrace") and
+  // nothing else brand-bearing (the event name is dynamic).
+  // etrade 1->2.
+  ["src/trading/etrade/quoteTrace.ts", "etrade", 2],
   ["src/trading/factorGrades.ts", "etrade", 5],
   ["src/trading/gather.ts", "alpaca", 4],
   ["src/trading/gather.ts", "etrade", 3],
@@ -1749,7 +1765,11 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/trading/screener.ts", "yahoo", 1],
   ["src/trading/screenerConfig.ts", "etrade", 4],
   ["src/trading/screenerConfig.ts", "yahoo", 4],
-  ["src/trading/screenerPipeline.ts", "etrade", 110],
+  // #3515 S3 batch 4 INTEGRATION: the console migration adds one
+  // `screenerPipeline.etrade_quote_failures` structured-log event
+  // name; the other three migrated sites carry no brand term.
+  // etrade 110->111.
+  ["src/trading/screenerPipeline.ts", "etrade", 111],
   ["src/trading/screenerPipeline.ts", "yahoo", 80],
   ["src/trading/screenerReportCsv.ts", "etrade", 1],
   ["src/trading/screenerReportPdf.ts", "alpaca", 3],
