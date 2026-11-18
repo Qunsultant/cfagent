@@ -59,7 +59,18 @@ export type ChannelNlqDeps = NonNullable<Parameters<typeof executeNaturalLanguag
 
 export type ChannelKind = "email" | "slack" | "voice";
 
-export type ChannelTier = "read" | "preview" | "trade";
+// Issue #5083 (S4) — the email principal map (CHANNEL_EMAIL_PRINCIPALS)
+// lives in src/security/emailPrincipals.ts (a cross-cutting identity
+// concern, not trading), so the OTel alerting port can import it
+// without crossing the trading boundary (issue #290). This module
+// re-exports it so its trading callers are unchanged.
+import {
+  isTier,
+  parseEmailPrincipals,
+  type ChannelTier,
+  type EmailPrincipalEntry,
+} from "../../security/emailPrincipals";
+export { parseEmailPrincipals, type ChannelTier, type EmailPrincipalEntry };
 
 export interface ChannelIntake {
   channel: ChannelKind;
@@ -89,53 +100,9 @@ export function tierAtLeast(tier: ChannelTier, minimum: ChannelTier): boolean {
   return TIER_RANK[tier] >= TIER_RANK[minimum];
 }
 
-function isTier(value: unknown): value is ChannelTier {
-  return value === "read" || value === "preview" || value === "trade";
-}
-
-// ---------------------------------------------------------------------------
-// Email principal map (CHANNEL_EMAIL_PRINCIPALS)
-// ---------------------------------------------------------------------------
-
-export interface EmailPrincipalEntry {
-  login: string;
-  tier: ChannelTier;
-}
-
-/**
- * Parse the CHANNEL_EMAIL_PRINCIPALS config var. Malformed JSON is an
- * empty map plus a loud log — a config typo must fail closed (nobody
- * resolves) without ever throwing the worker. Individual malformed
- * entries are skipped the same way.
- */
-export function parseEmailPrincipals(env: Env): Record<string, EmailPrincipalEntry> {
-  const raw = (env as { CHANNEL_EMAIL_PRINCIPALS?: string }).CHANNEL_EMAIL_PRINCIPALS;
-  if (!raw || typeof raw !== "string" || raw.trim() === "") return {};
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch (err) {
-    console.error(
-      "[channels] CHANNEL_EMAIL_PRINCIPALS is not valid JSON; treating the email principal map as empty:",
-      err instanceof Error ? err.message : String(err)
-    );
-    return {};
-  }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    console.error("[channels] CHANNEL_EMAIL_PRINCIPALS must be a JSON object; treating the email principal map as empty.");
-    return {};
-  }
-  const out: Record<string, EmailPrincipalEntry> = {};
-  for (const [address, entry] of Object.entries(parsed as Record<string, unknown>)) {
-    const e = entry as { login?: unknown; tier?: unknown } | null;
-    if (!e || typeof e.login !== "string" || e.login.trim() === "" || !isTier(e.tier)) {
-      console.error(`[channels] CHANNEL_EMAIL_PRINCIPALS entry for "${address}" is malformed (needs {login, tier}); skipping it.`);
-      continue;
-    }
-    out[address.trim().toLowerCase()] = { login: e.login, tier: e.tier };
-  }
-  return out;
-}
+// The email principal map (CHANNEL_EMAIL_PRINCIPALS) lives in
+// src/security/emailPrincipals.ts (see the re-export above); this
+// module keeps only the channel-intake contract here.
 
 /**
  * Extract DKIM/SPF pass results from an Authentication-Results header

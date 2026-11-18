@@ -46,6 +46,27 @@
  *  OBS-1013 otel.traces.free_tier_guard — the traces
  *    free-tier write guard dropped Analytics Engine writes for
  *    the day (the configured daily write limit was reached).
+ *
+ * Codes added in S4 (#5083, error-reporting / alerting):
+ *  OBS-1014 otel.alerting.send.failed — the alerting port
+ *    failed to deliver an alert (every enabled channel failed).
+ *  OBS-1015 otel.alerting.destination.missing — an alert had
+ *    no configured destination (no Slack token/webhook AND no
+ *    email binding, or no email recipients).
+ *  OBS-1016 otel.alerting.free_tier_guard — the alerting
+ *    free-tier guard dropped alerts for the day (the configured
+ *    max alerts per day was reached).
+ *  OBS-1017 otel.alerting.stuck_run — the sweep stuck-run
+ *    alert (a job has been RUNNING past the stuck threshold).
+ *  OBS-1018 otel.alerting.cap_breach — the SessionStore
+ *    resource cap alert (a free-tier budget is at/over 70%).
+ *  OBS-1019 otel.alerting.ci_failure — the CI failure alert
+ *    (a GitHub Actions workflow failed on main).
+ *  OBS-1017/1018/1019 are the S4 alert-subject codes (the
+ *  code each consumer's alert is logged under). Their
+ *  severity/rule mapping lands with the S7 catalog (#5086);
+ *  S4 carries only the code identifiers, not a severity/rule
+ *  schema.
  */
 
 /** A switch value failed closed to the safe default (OFF / none / 0). */
@@ -74,6 +95,18 @@ export const OBS_ARCHIVE_FORBIDDEN = "OBS-1011" as const;
 export const OBS_TRACES_EXPORT_FAILED = "OBS-1012" as const;
 /** The traces free-tier write guard dropped Analytics Engine writes for the day. */
 export const OBS_TRACES_FREE_TIER_GUARD = "OBS-1013" as const;
+/** The alerting port failed to deliver an alert (every enabled channel failed). */
+export const OBS_ALERTING_SEND_FAILED = "OBS-1014" as const;
+/** An alert had no configured destination (no Slack token/webhook AND no email binding/recipients). */
+export const OBS_ALERTING_DESTINATION_MISSING = "OBS-1015" as const;
+/** The alerting free-tier guard dropped alerts for the day (max alerts per day reached). */
+export const OBS_ALERTING_FREE_TIER_GUARD = "OBS-1016" as const;
+/** The sweep stuck-run alert (a job has been RUNNING past the stuck threshold). S4 subject code; severity/rule mapping lands with S7. */
+export const OBS_ALERTING_STUCK_RUN = "OBS-1017" as const;
+/** The SessionStore resource cap alert (a free-tier budget is at/over 70%). S4 subject code; severity/rule mapping lands with S7. */
+export const OBS_ALERTING_CAP_BREACH = "OBS-1018" as const;
+/** The CI failure alert (a GitHub Actions workflow failed on main). S4 subject code; severity/rule mapping lands with S7. */
+export const OBS_ALERTING_CI_FAILURE = "OBS-1019" as const;
 
 /** Formats a coded message: `[OBS-####] <message>`. */
 export function formatOtelMessage(code: string, message: string): string {

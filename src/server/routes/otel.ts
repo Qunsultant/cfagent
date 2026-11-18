@@ -30,6 +30,11 @@ import {
   handleOtelMetricsIngestion,
   handleOtelTracesIngestion,
 } from "../../observability/otelIngestion";
+import {
+  createAlertingPort,
+  type AlertingPort,
+} from "../../observability/otelAlerting";
+import { OBS_ALERTING_CI_FAILURE } from "../../observability/otelMessages";
 
 /** The OTLP ingestion route path (logs). */
 export const OTEL_INGESTION_ROUTE = "/api/otel/v1/logs" as const;
@@ -39,6 +44,9 @@ export const OTEL_METRICS_INGESTION_ROUTE = "/api/otel/v1/metrics" as const;
 
 /** Issue #2808 (S3) — the OTLP traces ingestion route path. */
 export const OTEL_TRACES_INGESTION_ROUTE = "/api/otel/v1/traces" as const;
+
+/** Issue #5083 (S4) — the CI failure alert ingestion route path. */
+export const OTEL_ALERTS_INGESTION_ROUTE = "/api/otel/v1/alerts" as const;
 
 function jsonResponse(status: number, body: Record<string, unknown>): Response {
   return new Response(JSON.stringify(body), {
@@ -61,11 +69,17 @@ export async function handleOtelRoutes(
   env: Env,
   _url: URL,
   path: string,
+  // Issue #5083 (S4) — test seam: the alerting port for the CI
+  // failure route. Production passes nothing (the real port is
+  // created from env); tests inject a fake port so the route can
+  // be verified without a real Slack/email delivery.
+  alertPort?: AlertingPort,
 ): Promise<Response | null> {
   if (
     path !== OTEL_INGESTION_ROUTE &&
     path !== OTEL_METRICS_INGESTION_ROUTE &&
-    path !== OTEL_TRACES_INGESTION_ROUTE
+    path !== OTEL_TRACES_INGESTION_ROUTE &&
+    path !== OTEL_ALERTS_INGESTION_ROUTE
   )
     return null;
 
@@ -85,6 +99,64 @@ export async function handleOtelRoutes(
   const authorization = request.headers.get("Authorization") ?? "";
   if (authorization !== `Bearer ${token}`) {
     return jsonResponse(401, { error: "unauthorized" });
+  }
+
+  // Issue #5083 (S4) — the CI failure alert route. This is how
+  // CI failures (GitHub Actions, the ci-failure-self-heal
+  // workflow) reach the Worker alerting port: the workflow POSTs
+  // a JSON alert report when it files a new [QA self-heal]
+  // issue. The report routes through the S4 alerting port
+  // (Slack + email). The route never throws for a delivery
+  // failure — the workflow must not fail because an alert did
+  // not deliver. This route is for CI failures only; the sweep
+  // and cap alerts are raised in-process by their consumers.
+  if (path === OTEL_ALERTS_INGESTION_ROUTE) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(await request.text());
+    } catch {
+      return jsonResponse(400, { error: "invalid JSON" });
+    }
+    const alert = parsed as Record<string, unknown>;
+    if (
+      !alert ||
+      typeof alert !== "object" ||
+      alert.source !== "ci-failure" ||
+      typeof alert.workflow !== "string" ||
+      alert.workflow.trim() === "" ||
+      typeof alert.runId !== "string" ||
+      alert.runId.trim() === "" ||
+      typeof alert.runUrl !== "string" ||
+      alert.runUrl.trim() === "" ||
+      typeof alert.conclusion !== "string" ||
+      alert.conclusion.trim() === ""
+    ) {
+      return jsonResponse(400, {
+        error: "invalid alert: expected a ci-failure report with workflow, runId, runUrl, conclusion",
+      });
+    }
+    const port = alertPort ?? createAlertingPort({ env });
+    const result = await port.reportAlert({
+      source: "ci-failure",
+      code: OBS_ALERTING_CI_FAILURE,
+      // PLACEHOLDER severity + rule id (S7 defines the real catalog).
+      severity: "error",
+      ruleId: "placeholder-ci-failure",
+      title: `CI failure: ${alert.workflow}`,
+      text: `Workflow "${alert.workflow}" ${alert.conclusion} (run ${alert.runId}, branch ${typeof alert.headBranch === "string" ? alert.headBranch : "unknown"}).`,
+      context: {
+        workflow: alert.workflow,
+        run: alert.runId,
+        runUrl: alert.runUrl,
+        conclusion: alert.conclusion,
+        ...(typeof alert.headBranch === "string" ? { branch: alert.headBranch } : {}),
+      },
+    });
+    return jsonResponse(200, {
+      received: true,
+      delivered: result.delivered,
+      code: result.code,
+    });
   }
 
   const body = new Uint8Array(await request.arrayBuffer());

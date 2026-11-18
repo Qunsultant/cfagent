@@ -45,6 +45,15 @@ export interface Env {
   // apply (50 / 500).
   OTEL_ARCHIVE_PAGE_SIZE?: string;
   OTEL_ARCHIVE_MAX_OBJECTS?: string;
+  // Issue #5083 (S4) — the alerting switches (master, Slack,
+  // email, free-tier guard). Optional so code is safe before
+  // they are set; absence means the config-file / built-in
+  // defaults apply (master ON in the file, OFF built-in; both
+  // channels ON; max 100 alerts/day).
+  OTEL_ALERTING_ENABLED?: string;
+  OTEL_ALERTING_SLACK_ENABLED?: string;
+  OTEL_ALERTING_EMAIL_ENABLED?: string;
+  OTEL_ALERTING_MAX_ALERTS_PER_DAY?: string;
   // Issue #1739: queue-backed messaging bindings. Optional so code is
   // safe before the bindings propagate; absence means the legacy
   // in-process bus (the composition root returns null).
