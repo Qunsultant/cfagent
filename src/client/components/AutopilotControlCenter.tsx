@@ -151,6 +151,17 @@ export function formatAutopilotTimestamp(value: string | number | null | undefin
  * execute now is Allowed; one held for human approval is Approval required;
  * anything else was Blocked by its binding rule.
  */
+/** #5526: the verdict-trend aggregate served by GET /autopilot (#5061). */
+export interface AutopilotVerdictTrend {
+  enabled: boolean;
+  evaluations: number;
+  blocked: number;
+  passed: number;
+  repeatedBindingRules: Array<{ rule: string; count: number }>;
+  escalated: boolean;
+  notice: string | null;
+}
+
 export function mapPolicyVerdictToRow(v: PolicyVerdictRecord): PolicyVerdictRow {
   const allowed = verdictFlag(v.execution_allowed);
   const approval = verdictFlag(v.requires_approval);
@@ -600,6 +611,8 @@ export function AutopilotControlCenter({
   });
 
   const [recentVerdicts, setRecentVerdicts] = useState<PolicyVerdictRecord[]>([]);
+  // #5526: the repeated-binding-rule aggregate; null on an older payload.
+  const [verdictTrend, setVerdictTrend] = useState<AutopilotVerdictTrend | null>(null);
   const [copiedDidId, setCopiedDidId] = useState<string | null>(null);
   const [isSimulating, setIsSimulating] = useState(false);
   const [killSwitchModalOpen, setKillSwitchModalOpen] = useState(false);
@@ -743,6 +756,9 @@ export function AutopilotControlCenter({
         const normalized = normalizeAutopilotLimits(data.limits);
         setPolicyLimits(normalized);
         setEditLimitsDraft(normalized);
+      }
+      if (data.verdictTrend && typeof data.verdictTrend === "object") {
+        setVerdictTrend(data.verdictTrend as AutopilotVerdictTrend);
       }
       if (Array.isArray(data.recentVerdicts)) {
         setRecentVerdicts(data.recentVerdicts as PolicyVerdictRecord[]);
@@ -1436,6 +1452,33 @@ export function AutopilotControlCenter({
       <DetailCard
         belowSubtitle={<span className="ui-meta-sm ui-single-line" title={AUTOPILOT_SOURCE_LINES.verdicts}>{AUTOPILOT_SOURCE_LINES.verdicts}</span>}
       >
+        {/* #5526: the trend, above the list it summarizes. The notice is
+            quoted verbatim — it is the source of truth — and the action
+            next to it is the place a human changes the envelope. */}
+        {verdictTrend?.escalated && (
+          <Notice tone="warning" variant="box" icon="⚠️" title="Repeated policy blocks">
+            <Stack gap="2">
+              <span>{verdictTrend.notice}</span>
+              {verdictTrend.repeatedBindingRules.length > 0 && (
+                <span className="ui-meta-sm">
+                  {verdictTrend.repeatedBindingRules
+                    .map((r) => `${r.rule} ×${r.count}`)
+                    .join(" · ")}
+                </span>
+              )}
+              <Flex>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => navigateToTab("autopilot", "limits")}
+                >
+                  Open limits
+                </Button>
+              </Flex>
+            </Stack>
+          </Notice>
+        )}
+
         <Flex gap="2" align="center" justify="between" wrap>
           <Flex gap="1" align="center">
             <Badge tone="neutral">{verdictRows.length}</Badge>
