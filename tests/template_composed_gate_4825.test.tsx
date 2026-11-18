@@ -40,6 +40,8 @@ import { ETradeTradingHub } from "../src/client/ETradeTradingHub";
 import { ProductHub } from "../src/client/ProductHub";
 import { AuditVaultPage } from "../src/client/AuditVaultPage";
 import { WorkflowCatalogPage } from "../src/client/WorkflowCatalogPage";
+import { NavSettingsPage } from "../src/client/NavSettingsPage";
+import { leftNavConfigIds } from "../src/client/components/NavigationMenu";
 import { ToastProvider } from "../src/client/components/ui/Toast";
 import {
   routeConformance,
@@ -63,6 +65,19 @@ const STANDALONE_ROUTES: Record<string, React.ComponentType> = {
   "product-hub": ProductHub,
   "audit-vault": AuditVaultPage,
   "workflow-catalog": WorkflowCatalogPage,
+  // nav-settings mounts with the live default: every tab visible
+  // (alltabs). NavSettingsPage takes its state as props, so the mount
+  // supplies them — the page itself fetches nothing.
+  "nav-settings": () => (
+    <NavSettingsPage
+      visibleTabs={Object.fromEntries(
+        leftNavConfigIds().map((id) => [id, true]),
+      )}
+      activePreset="alltabs"
+      onToggleTabVisibility={() => {}}
+      onApplyPreset={() => {}}
+    />
+  ),
 };
 
 /** Canonical slot order (PageTemplate renders them in this order). */

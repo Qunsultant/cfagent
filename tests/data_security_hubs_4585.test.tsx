@@ -457,14 +457,15 @@ describe("4585-P06 the homes render their tabs and mount the panels (#4585)", ()
 });
 
 describe("4585-P07 nav counts move (#4585)", () => {
-  it("routes 46, navOrders 0..27, sub-menu groups 21, surfaces 30", () => {
+  it("routes 47, navOrders 0..27, sub-menu groups 21, surfaces 30", () => {
     const routes = navConfigData.routes as {
       id: string;
       navEntry?: { navOrder: number };
     }[];
     // Issue 4682: the Marketing Hub route joins the table; 44 → 45.
     // Issue #5169: the Observability route joins the table; 45 → 46.
-    expect(routes).toHaveLength(46);
+    // PR #5256 (#3696): the nav-settings route joins the table; 46 → 47.
+    expect(routes).toHaveLength(47);
     const orders = routes
       .filter((r) => r.navEntry)
       .map((r) => r.navEntry!.navOrder)
