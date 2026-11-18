@@ -116,7 +116,8 @@ describe("SchedulesPanel (#273)", () => {
   it("shows the jobs, the screener universe, and the paused status with a Resume action", async () => {
     await render();
     const text = container.textContent || "";
-    expect(text).toContain("collectIvHistory");
+    // Issue #3121 #4238 — the IV job reads its friendly name now.
+    expect(text).toContain("Scheduled IV collection");
     expect(text).toContain("autoRenewEtradeTokens");
     expect(text).toContain("Universe: SP500");
     expect(text).toContain("Paused");
