@@ -191,77 +191,98 @@ const LOGIN_GOLDEN = `<!DOCTYPE html>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
       font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
-      background: radial-gradient(circle at 50% 10%, #1e1b4b 0%, #060913 55%, #030712 100%);
-      color: #f3f4f6;
+      background: #060913;
+      color: #f8fafc;
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+    }
+    .shell-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.875rem 1.5rem;
+      background: #0c1222;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    .shell-brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.625rem;
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: #f8fafc;
+      letter-spacing: -0.015em;
+    }
+    .shell-brand-mark {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 28px;
+      border-radius: 8px;
+      background: #6366f1;
+      color: #ffffff;
+    }
+    .shell-scope {
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: #94a3b8;
+      padding: 0.25rem 0.625rem;
+      border-radius: 9999px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      background: #0f172a;
+    }
+    .shell-main {
+      flex: 1;
       display: flex;
       align-items: center;
       justify-content: center;
-      min-height: 100vh;
       padding: 1.5rem;
     }
     .card {
-      background: rgba(17, 24, 39, 0.75);
-      backdrop-filter: blur(20px);
-      -webkit-backdrop-filter: blur(20px);
+      background: #0f172a;
       border: 1px solid rgba(255, 255, 255, 0.08);
-      border-radius: 24px;
-      padding: 3rem 2.25rem;
+      border-radius: 12px;
+      padding: 2.25rem 2rem;
       text-align: center;
       max-width: 420px;
       width: 100%;
-      box-shadow: 0 25px 60px -12px rgba(0, 0, 0, 0.6), 0 0 45px -5px rgba(99, 102, 241, 0.15);
-      position: relative;
-      overflow: hidden;
-      animation: fadeIn 0.4s ease-out;
-    }
-    @keyframes fadeIn {
-      from { opacity: 0; transform: translateY(12px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-    .card::before {
-      content: '';
-      position: absolute;
-      top: 0;
-      left: 15%;
-      right: 15%;
-      height: 1px;
-      background: linear-gradient(90deg, transparent, #38bdf8, #818cf8, transparent);
+      box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6);
     }
     .logo-badge {
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      width: 56px;
-      height: 56px;
-      background: linear-gradient(135deg, #6366f1, #06b6d4);
-      border-radius: 16px;
-      margin-bottom: 1.5rem;
-      box-shadow: 0 8px 24px rgba(99, 102, 241, 0.35), 0 0 20px rgba(99, 102, 241, 0.15);
+      width: 48px;
+      height: 48px;
+      background: #0c1222;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 12px;
+      margin-bottom: 1.25rem;
     }
     h1 {
-      font-size: 1.55rem;
+      font-size: 1.4rem;
       font-weight: 700;
-      letter-spacing: -0.025em;
+      letter-spacing: -0.02em;
       margin-bottom: 0.5rem;
       color: #f8fafc;
     }
     .brand-gradient {
-      background: linear-gradient(135deg, #ffffff 40%, #38bdf8 100%);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
+      color: #38bdf8;
     }
     .subtitle {
       color: #94a3b8;
       font-size: 0.9rem;
       line-height: 1.55;
-      margin-bottom: 2rem;
+      margin-bottom: 1.75rem;
     }
     .btn-stack {
       display: flex;
       flex-direction: row;
       justify-content: center;
       gap: 0.85rem;
-      margin-bottom: 2rem;
+      margin-bottom: 1.75rem;
     }
     .btn {
       display: inline-flex;
@@ -274,34 +295,32 @@ const LOGIN_GOLDEN = `<!DOCTYPE html>
       border-radius: 50%;
       font-size: 0.95rem;
       font-weight: 600;
-      width: 52px;
-      height: 52px;
+      width: 48px;
+      height: 48px;
       flex: none;
-      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-      box-shadow: 0 4px 14px rgba(255, 255, 255, 0.15), 0 0 24px rgba(99, 102, 241, 0.15);
-      border: 1px solid rgba(255, 255, 255, 0.15);
+      transition: background 0.15s ease, transform 0.15s ease;
+      border: 1px solid rgba(255, 255, 255, 0.08);
       position: relative;
     }
     .btn:hover {
       background: #f1f5f9;
-      transform: translateY(-2px);
-      box-shadow: 0 8px 28px rgba(255, 255, 255, 0.15), 0 0 32px rgba(99, 102, 241, 0.15);
+      transform: translateY(-1px);
     }
     .btn:active {
       transform: translateY(0);
     }
     .btn svg {
-      width: 24px;
-      height: 24px;
+      width: 22px;
+      height: 22px;
       fill: #0f172a;
       flex-shrink: 0;
     }
     .card-footer {
       border-top: 1px solid rgba(255, 255, 255, 0.08);
-      padding-top: 1.5rem;
+      padding-top: 1.25rem;
       display: flex;
       flex-direction: column;
-      gap: 0.85rem;
+      gap: 0.75rem;
       align-items: center;
     }
     .security-note {
@@ -316,7 +335,6 @@ const LOGIN_GOLDEN = `<!DOCTYPE html>
       height: 6px;
       border-radius: 50%;
       background: #22c55e;
-      box-shadow: 0 0 8px #22c55e;
     }
     .back-link {
       color: #38bdf8;
@@ -331,29 +349,42 @@ const LOGIN_GOLDEN = `<!DOCTYPE html>
   </style>
 </head>
 <body>
-  <div class="card">
-    <div class="logo-badge">
-      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-        <polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5"></polygon>
-        <line x1="12" y1="22" x2="12" y2="15.5"></line>
-        <polyline points="22 8.5 12 15.5 2 8.5"></polyline>
-      </svg>
+  <header class="shell-header">
+    <div class="shell-brand">
+      <span class="shell-brand-mark" aria-hidden="true">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5"></polygon>
+        </svg>
+      </span>
+      <span>Test App</span>
     </div>
-    <h1>Sign in to <span class="brand-gradient">Test App</span></h1>
-    <p class="subtitle">Sign in with your GitHub account to access your trading workspace.</p>
-
-    <div class="btn-stack">
-      <a href="/auth/login" class="btn btn-github provider-icon" aria-label="Sign in with GitHub" title="Sign in with GitHub"><svg viewBox="0 0 16 16" width="18" height="18" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg></a>
-    </div>
-
-    <div class="card-footer">
-      <div class="security-note">
-        <span class="security-dot" aria-hidden="true"></span>
-        <span>Protected by W3C Agent DIDs &amp; deterministic risk gates</span>
+    <span class="shell-scope">Sign In</span>
+  </header>
+  <main class="shell-main">
+    <div class="card">
+      <div class="logo-badge">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5"></polygon>
+          <line x1="12" y1="22" x2="12" y2="15.5"></line>
+          <polyline points="22 8.5 12 15.5 2 8.5"></polyline>
+        </svg>
       </div>
-      <a href="/" class="back-link">&larr; Back to Test App Home</a>
+      <h1>Sign in to <span class="brand-gradient">Test App</span></h1>
+      <p class="subtitle">Sign in with your GitHub account to access your trading workspace.</p>
+
+      <div class="btn-stack">
+        <a href="/auth/login" class="btn btn-github provider-icon" aria-label="Sign in with GitHub" title="Sign in with GitHub"><svg viewBox="0 0 16 16" width="18" height="18" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg></a>
+      </div>
+
+      <div class="card-footer">
+        <div class="security-note">
+          <span class="security-dot" aria-hidden="true"></span>
+          <span>Protected by W3C Agent DIDs &amp; deterministic risk gates</span>
+        </div>
+        <a href="/" class="back-link">&larr; Back to Test App Home</a>
+      </div>
     </div>
-  </div>
+  </main>
 </body>
 </html>`;
 

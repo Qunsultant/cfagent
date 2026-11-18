@@ -226,77 +226,98 @@ export function renderLoginPage(
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
       font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
-      background: radial-gradient(circle at 50% 10%, ${SERVER_PALETTE.indigo950} 0%, ${SERVER_PALETTE.surface} 55%, ${SERVER_PALETTE.backgroundEnd} 100%);
-      color: ${SERVER_PALETTE.gray100};
+      background: ${SERVER_PALETTE.surface};
+      color: ${SERVER_PALETTE.textPrimary};
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+    }
+    .shell-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.875rem 1.5rem;
+      background: ${SERVER_PALETTE.surfaceRaised};
+      border-bottom: 1px solid ${SERVER_PALETTE.cardBorder};
+    }
+    .shell-brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.625rem;
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: ${SERVER_PALETTE.textPrimary};
+      letter-spacing: -0.015em;
+    }
+    .shell-brand-mark {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 28px;
+      border-radius: 8px;
+      background: ${SERVER_PALETTE.indigo500};
+      color: ${SERVER_PALETTE.onGradient};
+    }
+    .shell-scope {
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: ${SERVER_PALETTE.textMuted};
+      padding: 0.25rem 0.625rem;
+      border-radius: 9999px;
+      border: 1px solid ${SERVER_PALETTE.cardBorder};
+      background: ${SERVER_PALETTE.card};
+    }
+    .shell-main {
+      flex: 1;
       display: flex;
       align-items: center;
       justify-content: center;
-      min-height: 100vh;
       padding: 1.5rem;
     }
     .card {
-      background: ${SERVER_PALETTE.loginCard};
-      backdrop-filter: blur(20px);
-      -webkit-backdrop-filter: blur(20px);
+      background: ${SERVER_PALETTE.card};
       border: 1px solid ${SERVER_PALETTE.cardBorder};
-      border-radius: 24px;
-      padding: 3rem 2.25rem;
+      border-radius: 12px;
+      padding: 2.25rem 2rem;
       text-align: center;
       max-width: 420px;
       width: 100%;
-      box-shadow: 0 25px 60px -12px ${SERVER_PALETTE.blackAlpha60}, 0 0 45px -5px ${SERVER_PALETTE.primaryAlpha};
-      position: relative;
-      overflow: hidden;
-      animation: fadeIn 0.4s ease-out;
-    }
-    @keyframes fadeIn {
-      from { opacity: 0; transform: translateY(12px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-    .card::before {
-      content: '';
-      position: absolute;
-      top: 0;
-      left: 15%;
-      right: 15%;
-      height: 1px;
-      background: linear-gradient(90deg, transparent, ${SERVER_PALETTE.accent}, ${SERVER_PALETTE.indigo400}, transparent);
+      box-shadow: 0 12px 32px ${SERVER_PALETTE.blackAlpha60};
     }
     .logo-badge {
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      width: 56px;
-      height: 56px;
-      background: linear-gradient(135deg, ${SERVER_PALETTE.indigo500}, ${SERVER_PALETTE.cyan500});
-      border-radius: 16px;
-      margin-bottom: 1.5rem;
-      box-shadow: 0 8px 24px ${SERVER_PALETTE.primaryBorder}, 0 0 20px ${SERVER_PALETTE.primaryAlpha};
+      width: 48px;
+      height: 48px;
+      background: ${SERVER_PALETTE.surfaceRaised};
+      border: 1px solid ${SERVER_PALETTE.cardBorder};
+      border-radius: 12px;
+      margin-bottom: 1.25rem;
     }
     h1 {
-      font-size: 1.55rem;
+      font-size: 1.4rem;
       font-weight: 700;
-      letter-spacing: -0.025em;
+      letter-spacing: -0.02em;
       margin-bottom: 0.5rem;
       color: ${SERVER_PALETTE.textPrimary};
     }
     .brand-gradient {
-      background: linear-gradient(135deg, ${SERVER_PALETTE.onGradient} 40%, ${SERVER_PALETTE.accent} 100%);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
+      color: ${SERVER_PALETTE.accent};
     }
     .subtitle {
       color: ${SERVER_PALETTE.textMuted};
       font-size: 0.9rem;
       line-height: 1.55;
-      margin-bottom: 2rem;
+      margin-bottom: 1.75rem;
     }
     .btn-stack {
       display: flex;
       flex-direction: row;
       justify-content: center;
       gap: 0.85rem;
-      margin-bottom: 2rem;
+      margin-bottom: 1.75rem;
     }
     .btn {
       display: inline-flex;
@@ -309,34 +330,32 @@ export function renderLoginPage(
       border-radius: 50%;
       font-size: 0.95rem;
       font-weight: 600;
-      width: 52px;
-      height: 52px;
+      width: 48px;
+      height: 48px;
       flex: none;
-      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-      box-shadow: 0 4px 14px ${SERVER_PALETTE.whiteAlpha15}, 0 0 24px ${SERVER_PALETTE.primaryAlpha};
-      border: 1px solid ${SERVER_PALETTE.whiteAlpha15};
+      transition: background 0.15s ease, transform 0.15s ease;
+      border: 1px solid ${SERVER_PALETTE.cardBorder};
       position: relative;
     }
     .btn:hover {
       background: ${SERVER_PALETTE.slate100};
-      transform: translateY(-2px);
-      box-shadow: 0 8px 28px ${SERVER_PALETTE.whiteAlpha15}, 0 0 32px ${SERVER_PALETTE.primaryAlpha};
+      transform: translateY(-1px);
     }
     .btn:active {
       transform: translateY(0);
     }
     .btn svg {
-      width: 24px;
-      height: 24px;
+      width: 22px;
+      height: 22px;
       fill: ${SERVER_PALETTE.card};
       flex-shrink: 0;
     }
     .card-footer {
       border-top: 1px solid ${SERVER_PALETTE.cardBorder};
-      padding-top: 1.5rem;
+      padding-top: 1.25rem;
       display: flex;
       flex-direction: column;
-      gap: 0.85rem;
+      gap: 0.75rem;
       align-items: center;
     }
     .security-note {
@@ -351,7 +370,6 @@ export function renderLoginPage(
       height: 6px;
       border-radius: 50%;
       background: ${SERVER_PALETTE.green500};
-      box-shadow: 0 0 8px ${SERVER_PALETTE.green500};
     }
     .back-link {
       color: ${SERVER_PALETTE.accent};
@@ -366,28 +384,41 @@ export function renderLoginPage(
   </style>
 </head>
 <body>
-  <div class="card">
-    <div class="logo-badge">
-      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="${SERVER_PALETTE.onGradient}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-        <polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5"></polygon>
-        <line x1="12" y1="22" x2="12" y2="15.5"></line>
-        <polyline points="22 8.5 12 15.5 2 8.5"></polyline>
-      </svg>
+  <header class="shell-header">
+    <div class="shell-brand">
+      <span class="shell-brand-mark" aria-hidden="true">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5"></polygon>
+        </svg>
+      </span>
+      <span>${escapeHtml(env.APP_NAME || "NextGenTP")}</span>
     </div>
-    <h1>Sign in to <span class="brand-gradient">${escapeHtml(env.APP_NAME || "NextGenTP")}</span></h1>
-    <p class="subtitle">${intro}</p>
-${noticeSection}    <div class="btn-stack">
-      ${buttons}
-    </div>
-
-    <div class="card-footer">
-      <div class="security-note">
-        <span class="security-dot" aria-hidden="true"></span>
-        <span>Protected by W3C Agent DIDs &amp; deterministic risk gates</span>
+    <span class="shell-scope">Sign In</span>
+  </header>
+  <main class="shell-main">
+    <div class="card">
+      <div class="logo-badge">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="${SERVER_PALETTE.accent}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5"></polygon>
+          <line x1="12" y1="22" x2="12" y2="15.5"></line>
+          <polyline points="22 8.5 12 15.5 2 8.5"></polyline>
+        </svg>
       </div>
-      <a href="/" class="back-link">&larr; Back to ${escapeHtml(env.APP_NAME || "NextGenTP")} Home</a>
+      <h1>Sign in to <span class="brand-gradient">${escapeHtml(env.APP_NAME || "NextGenTP")}</span></h1>
+      <p class="subtitle">${intro}</p>
+${noticeSection}      <div class="btn-stack">
+        ${buttons}
+      </div>
+
+      <div class="card-footer">
+        <div class="security-note">
+          <span class="security-dot" aria-hidden="true"></span>
+          <span>Protected by W3C Agent DIDs &amp; deterministic risk gates</span>
+        </div>
+        <a href="/" class="back-link">&larr; Back to ${escapeHtml(env.APP_NAME || "NextGenTP")} Home</a>
+      </div>
     </div>
-  </div>
+  </main>
 </body>
 </html>`;
 }
