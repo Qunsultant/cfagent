@@ -1548,3 +1548,35 @@ div.ui-drawer-title {
   flex: 1 1 auto;
   min-width: 12rem;
 }
+
+/* Ctrl-K command palette layout (#5501): keep header, filter pills, and footer
+ * non-shrinking inside the flex-column modal body so the pills never compress
+ * or overlap the scrollable results list, and reserve the 3px left border on
+ * rows to prevent hover/selection layout shift. */
+.stock-search-modal-dialog .stock-search-modal-header {
+  flex-shrink: 0;
+}
+
+.stock-search-modal-dialog .pill-group.stock-search-filter-pills {
+  display: flex;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+  width: 100%;
+  box-sizing: border-box;
+  overflow-x: visible;
+  overflow-y: visible;
+}
+
+.stock-search-modal-dialog .stock-search-results-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.stock-search-modal-dialog .stock-search-modal-footer {
+  flex-shrink: 0;
+}
+
+.stock-search-modal-dialog .search-result-row {
+  border-left: 3px solid transparent;
+}

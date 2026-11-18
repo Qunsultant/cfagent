@@ -1,0 +1,2 @@
+### Fixed
+- Fixed Ctrl-K command palette layout in `src/client/components/ui/primitives.css` so `.stock-search-modal-header`, `.pill-group.stock-search-filter-pills`, and `.stock-search-modal-footer` stay `flex-shrink: 0` while `.stock-search-results-list` scrolls with `min-height: 0`, preventing filter pills from compressing or overlapping result groups, and reserved `border-left: 3px solid transparent` on `.search-result-row` (#5501).
