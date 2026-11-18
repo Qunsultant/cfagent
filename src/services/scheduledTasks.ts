@@ -13,7 +13,7 @@ import { DatabaseORM, type SqlStorage } from "../orm";
 import type { JobRunTrigger } from "../data/jobRunRecordPorts";
 import { BusinessError, codedMessage } from "../outcomes/outcomeAspects";
 import { resolveRunBrokerContext, type RunBrokerContext } from "./runBrokerContext";
-import { optionsFailureAlertText } from "./optionsRunAlertFormat";
+import { optionsFailureAlertText, ensureCodedOutcome } from "./optionsRunAlertFormat";
 import { renewETradeAccessToken, getStoredTokens, etradeIdentityFromLogin } from "../security/etradeOAuth";
 import { resolveScreenerAgentName } from "../agents/screenerAgentName";
 import { actorGateway } from "./cloudflareActorGateway";
@@ -4010,7 +4010,7 @@ export class ScheduledTasksService {
               broker: optionsRunBrokerId,
               runId: auditRunId,
             },
-            errorMessage: err.message || "Scheduled options analysis failed",
+            errorMessage: ensureCodedOutcome(err.message, optionsRunBrokerId),
             timestamp,
           }),
         });
