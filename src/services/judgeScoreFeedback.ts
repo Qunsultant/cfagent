@@ -127,6 +127,59 @@ export function judgeScoreLearning(
  * identical request already recorded). Never throws: the caller is a chat
  * turn's finish hook.
  */
+/**
+ * Turn-hook entry point: resolve the policy from the deployment env and
+ * record the learning. One call from the orchestrator, so the agent class
+ * does not grow with the policy's wiring (its standing size budget stays
+ * meaningful). Never throws.
+ */
+/**
+ * The turn's evaluation record and its consumer in one place: the
+ * `response.evaluated` audit event (the score's evidence) and, below the
+ * threshold, the `judge` learning. The orchestrator calls this once, so the
+ * agent class carries the decision, not the wiring.
+ */
+export function recordTurnEvaluation(params: {
+  env: Env | undefined | null;
+  sql: any;
+  quality: {
+    score: number;
+    grounded: boolean;
+    safe: boolean;
+    issues: readonly string[];
+  };
+  agent: string;
+  requestId: string;
+  audit: (type: string, agent: "judge", payload: Record<string, unknown>) => void;
+}): void {
+  params.audit("response.evaluated", "judge", {
+    score: params.quality.score,
+    grounded: params.quality.grounded,
+    safe: params.quality.safe,
+    issues: params.quality.issues,
+  });
+  recordJudgeScoreForTurn(params.env, params.sql, {
+    score: params.quality.score,
+    grounded: params.quality.grounded,
+    safe: params.quality.safe,
+    issues: params.quality.issues,
+    agent: params.agent,
+    requestId: params.requestId,
+  });
+}
+
+export function recordJudgeScoreForTurn(
+  env: Env | undefined | null,
+  sql: any,
+  input: JudgeScoreInput,
+): string | null {
+  return recordJudgeScoreLearning(
+    sql,
+    input,
+    resolveJudgeScoreFeedbackPolicy(env),
+  );
+}
+
 export function recordJudgeScoreLearning(
   sql: any,
   input: JudgeScoreInput,
