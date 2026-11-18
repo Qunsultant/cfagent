@@ -858,6 +858,14 @@ function measure(): Map<string, number> {
  * rows. The HISTORICAL marker is restated 162/791 -> 165/820.
  * Baseline totals move 1332/10848 -> 1335/10877 (direct recount on
  * bc0222ee).
+ * Baseline update (#4239, 2026-11-18): the token-renewal record
+ * names its callback (autoRenewETradeTokens) in the record builder,
+ * the home title branch, and the classifier's exact-match rule —
+ * data-bearing identifiers, dispositioned INTEGRATION (not framing):
+ * 2 new rows (scheduleKinds.ts etrade 1;
+ * unifiedScheduleManagement.ts etrade 1) and 1 raise
+ * (scheduleDetail.ts etrade 2 -> 3). No global-total restatement:
+ * totals are not pinned (#3917).
  */
 const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (188 rows / 989 lines) ----
@@ -1907,7 +1915,14 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/client/scheduledOptionsManager/ScheduleFormModal.tsx", "alpaca", 2],
   ["src/client/scheduledOptionsManager/ScheduleFormModal.tsx", "etrade", 2],
   ["src/client/scheduledOptionsManager/scheduleDetail.ts", "alpaca", 2],
-  ["src/client/scheduledOptionsManager/scheduleDetail.ts", "etrade", 2],
+  // Issue #4239: the renewal branch names the callback
+  // (autoRenewETradeTokens) — a data-bearing identifier, INTEGRATION.
+  ["src/client/scheduledOptionsManager/scheduleDetail.ts", "etrade", 3],
+  // Issue #4239: the token-renewal record names its callback and
+  // the classifier names it exactly — data-bearing identifiers,
+  // dispositioned INTEGRATION (not framing).
+  ["src/services/scheduleKinds.ts", "etrade", 1],
+  ["src/services/unifiedScheduleManagement.ts", "etrade", 1],
   ["src/services/scheduledBrokerGuard.ts", "alpaca", 3],
   ["src/services/scheduledBrokerGuard.ts", "etrade", 14],
   ["src/services/scheduledEffectiveMode.ts", "alpaca", 7],

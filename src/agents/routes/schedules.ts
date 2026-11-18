@@ -109,7 +109,10 @@ import {
   resumeUnifiedSchedule,
   screenScheduleToRecord,
   TICKER_PUSH_RECORD_ID,
+  TOKEN_RENEWAL_RECORD_ID,
   tickerPushRecordToListItem,
+  tokenRenewalRecordToListItem,
+  tokenRenewalToRecord,
   triggerUnifiedSchedule,
   unifiedRecordToListItem,
   updateUnifiedSchedule,
@@ -124,7 +127,8 @@ import { actorGateway } from "../../services/cloudflareActorGateway";
 import type { TickerPushRecordStub } from "../../services/actorGatewayPorts";
 import { createUnifiedSchedulePorts } from "../../data/createUnifiedSchedulePorts";
 import { recordLedgerRun } from "../../services/unifiedLedger";
-import { buildJobRunRecord, type JobRunRecordInput } from "../../services/jobRunRecords";
+import { buildJobRunRecord, scheduleIdToLedgerJobId, type JobRunRecordInput } from "../../services/jobRunRecords";
+import { RENEWAL_DISPATCH_CRON } from "../../services/heartbeatDueChecks";
 import { resolveActorAttribution } from "../../security/backgroundAttribution";
 import type { DatabaseORM } from "../../orm";
 import type { AgentName, AgentScheduleItem, Env } from "../../types";
@@ -400,6 +404,35 @@ export async function readTickerPushListItem(
   } catch (err) {
     structuredLog.warn("schedules.ticker_push_read_failed", {
       message: "[Schedules] ticker-push list read failed; the row is omitted:",
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  }
+}
+
+/**
+ * Issue #3121 #4239 — the token-renewal row for the Schedules
+ * home list. The record is derived (tokenRenewalToRecord), never
+ * stored, and the last renewal is joined from the ledger's own
+ * renewal-dispatch rows (jobId = RENEWAL_DISPATCH_CRON), so the
+ * row shows the duty's last firing — or none, when it has never
+ * fired. Best-effort: a failed ledger read omits the row and logs
+ * a warning — the list never fails because the ledger cannot be
+ * read. The `sql` is the agent's SqlStorage (the same seam the
+ * runs routes read through).
+ */
+export async function readTokenRenewalListItem(
+  sql: ConstructorParameters<typeof SqlJobRunRecordStore>[0],
+): Promise<ReturnType<typeof tokenRenewalRecordToListItem> | null> {
+  try {
+    const lastRun = new SqlJobRunRecordStore(sql).latestByJob(RENEWAL_DISPATCH_CRON);
+    return tokenRenewalRecordToListItem(
+      tokenRenewalToRecord(new Date().toISOString()),
+      lastRun ? { started: lastRun.started, finished: lastRun.finished, outcome: lastRun.outcome } : undefined,
+    );
+  } catch (err) {
+    structuredLog.warn("schedules.token_renewal_read_failed", {
+      message: "[Schedules] token-renewal list read failed; the row is omitted:",
       error: err instanceof Error ? err.message : String(err),
     });
     return null;
@@ -684,6 +717,13 @@ export async function handleSchedulesRoutes(
         const tickerItem = await readTickerPushListItem(ctx.env);
         if (tickerItem && (!typeParam || tickerItem.type === typeParam)) {
           items.push(tickerItem);
+        }
+        // Issue #3121 #4239 — the token-renewal row is derived,
+        // not stored; append it with its last renewal joined from
+        // the ledger, under the same ?type= filter as the rest.
+        const renewalItem = await readTokenRenewalListItem(ctx.agentCtx.storage.sql);
+        if (renewalItem && (!typeParam || renewalItem.type === typeParam)) {
+          items.push(renewalItem);
         }
         return Response.json({
           count: items.length,
@@ -1063,7 +1103,9 @@ export async function handleSchedulesRoutes(
         const scheduleId = params.get("scheduleId") || undefined;
         const limit = Number(params.get("limit") || 50);
         const store = new SqlJobRunRecordStore(ctx.agentCtx.storage.sql);
-        const runs = scheduleId ? store.listByJob(scheduleId, limit) : store.listRecent(limit);
+        // Issue #4239 — a derived record id reads its ledger rows
+        // under its dispatch job id (token-renewal → its cron).
+        const runs = scheduleId ? store.listByJob(scheduleIdToLedgerJobId(scheduleId), limit) : store.listRecent(limit);
         return Response.json({ ok: true, runs });
       } catch (err: any) {
         return Response.json({ error: err.message || "Failed to list job runs" }, { status: 500 });
@@ -1074,7 +1116,8 @@ export async function handleSchedulesRoutes(
       try {
         const limit = Number(new URL(request.url).searchParams.get("limit") || 50);
         const store = new SqlJobRunRecordStore(ctx.agentCtx.storage.sql);
-        return Response.json({ ok: true, runs: store.listByJob(scheduleRunsMatch[1], limit) });
+        // Issue #4239 — see the /schedules/runs branch above.
+        return Response.json({ ok: true, runs: store.listByJob(scheduleIdToLedgerJobId(scheduleRunsMatch[1]), limit) });
       } catch (err: any) {
         return Response.json({ error: err.message || "Failed to list job runs" }, { status: 500 });
       }
@@ -1149,6 +1192,16 @@ export async function handleSchedulesRoutes(
               resolveTickerPushStaleAfterIntervals(ctx.env),
             ),
           );
+        }
+        // Issue #4239 — the renewal record is derived, not stored,
+        // so getUnifiedScheduleDetail would 404 it; answer it here
+        // from the same derived record + last-run join as the list.
+        if (scheduleId === TOKEN_RENEWAL_RECORD_ID) {
+          const renewalItem = await readTokenRenewalListItem(ctx.agentCtx.storage.sql);
+          if (!renewalItem) {
+            return Response.json({ error: `Schedule '${scheduleId}' not found` }, { status: 404 });
+          }
+          return Response.json(renewalItem);
         }
         const detail = await getUnifiedScheduleDetail({ store: unifiedStore(), alarms }, scheduleId);
         if (!detail.ok) {

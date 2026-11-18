@@ -186,6 +186,13 @@ export function scheduleTitle(item: ScheduledTaskItem, _profiles?: StrategyProfi
   // callback. The description lives with the callback (#15): one ATM
   // IV record per tracked name per day, never fabricated.
   if (item.callback === "collectIvHistory") return "Scheduled IV collection";
+  // Issue #3121 #4239 — the daily token renewal is an internal-only
+  // job with no system-job registry entry (the registry is
+  // deliberately the three screening jobs); the Schedules home names
+  // it here, so its row reads "Scheduled token renewal" instead of
+  // the raw callback. The label is reused from workflowLifecycle.ts
+  // ("Scheduled token renewal", family "other").
+  if (item.callback === "autoRenewETradeTokens") return "Scheduled token renewal";
   return systemJobFor(item.callback)?.label || item.callback;
 }
 

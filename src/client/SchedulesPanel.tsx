@@ -82,6 +82,9 @@ export interface ScheduleItem {
   lastPushAt?: string;
   armed?: boolean;
   health?: "healthy" | "idle" | "stale";
+  /** Issue #3121 #4239 — the token-renewal row's last ledger run. */
+  lastRunAt?: string;
+  lastRunOutcome?: string;
 }
 
 // Issue #4329 S2 (#4331): the owner's ten filters, configured in
@@ -230,10 +233,10 @@ export function scheduleDisplayName(s: ScheduleItem): string {
   return scheduleTitle(s as unknown as ScheduledTaskItem);
 }
 
-/** Last-push rendering for a ticker-push row (never a fabricated time). */
-function formatLastPush(lastPushAt?: string): string {
-  if (!lastPushAt) return "never";
-  const ms = Date.parse(lastPushAt);
+/** Last-event rendering for a derived row (never a fabricated time). */
+function formatLastEvent(lastAt?: string): string {
+  if (!lastAt) return "never";
+  const ms = Date.parse(lastAt);
   if (!Number.isFinite(ms)) return "never";
   return new Date(ms).toLocaleString();
 }
@@ -557,8 +560,10 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
           <strong className="ui-meta">{genericCadence(s)}</strong>
           <span className="ui-meta">
             {s.kind === "ticker-push"
-              ? `Last push: ${formatLastPush(s.lastPushAt)}`
-              : `Next run: ${s.paused ? "paused" : formatNextRun(s)}`}
+              ? `Last push: ${formatLastEvent(s.lastPushAt)}`
+              : s.id === "token-renewal"
+                ? `Last renewal: ${formatLastEvent(s.lastRunAt)}${s.lastRunOutcome ? ` (${s.lastRunOutcome})` : ""}`
+                : `Next run: ${s.paused ? "paused" : formatNextRun(s)}`}
           </span>
         </Stack>
       ),

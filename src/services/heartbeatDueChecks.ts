@@ -27,6 +27,13 @@ import type { HeartbeatDueCheckConfig } from "../config/heartbeatWatchdog";
  */
 export const RENEWAL_DISPATCH_CRON = "0 3 * * *";
 
+/**
+ * Issue #3121 #4239 — the unified-store record id of the token-renewal duty, named once here beside its ledger job id: the
+ * record is derived from this duty, so the id lives with the
+ * duty's identity, not with the management module.
+ */
+export const TOKEN_RENEWAL_RECORD_ID = "token-renewal";
+
 /** The ledger jobId of the retention dispatch (same S1 rule). */
 export const RETENTION_DISPATCH_CRON = "0 4 * * *";
 

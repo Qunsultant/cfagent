@@ -1,0 +1,3 @@
+### Changed
+
+- **Broker token renewal is a unified-store record (#4239):** the renewal duty — which fires through the heartbeat due-check (#4234, daily after 03:00 UTC) — is derived as one stable `internal`-kind record (`token-renewal`, system provenance with reason `token-renewal`, state `active`) and listed in the Schedules home as "Scheduled token renewal" (system family) with its last renewal joined from the ledger, or "never" when the duty has never fired. Record-only: no new kind, no new alarm, no new firing mechanism. The runs routes resolve `token-renewal` to its ledger job id (its cron), and pause/resume/trigger/update refuse the derived record with a coded error while delete is a no-op; the manual trigger stays on `POST /api/schedules/trigger-renew`. #ceo-aimp

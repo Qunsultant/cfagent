@@ -45,6 +45,9 @@ export interface ScheduleListItem {
   lastPushAt?: string;
   armed?: boolean;
   health?: "healthy" | "idle" | "stale";
+  /** Issue #3121 #4239 — the token-renewal row's last ledger run. */
+  lastRunAt?: string;
+  lastRunOutcome?: string;
 }
 
 /** A schedule detail: the raw SDK schedule, or a paused list item. */
