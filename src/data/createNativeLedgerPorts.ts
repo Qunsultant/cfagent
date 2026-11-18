@@ -6,11 +6,13 @@
  *
  * Absence of the binding is a normal, non-error state:
  * `createNativeLedgerAdapter` returns null and callers keep
- * their fail direction — the record-native endpoint fails
- * closed with 503 (the store cannot be verified), while the
- * webhook arm audits an unrecorded settlement and stays
+ * their fail direction — readers degrade (no resolver), while
+ * the webhook arm audits an unrecorded settlement and stays
  * received (confirm-by-retrieve in slice 1 remains the
  * source of truth; the webhook is a wake-up, not the record).
+ * (The `record-native` HTTP write-through that used to fail
+ * closed with 503 here was removed by #5572; the port, its
+ * readers, and the webhook arm are untouched.)
  */
 import {
   createD1NativeLedgerDb,

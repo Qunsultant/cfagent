@@ -511,6 +511,15 @@
  * bringing the pinned inventory to 494 entries (490 measured on
  * the slice base); the delegation sequence is unchanged (same
  * handler, same position).
+ *
+ * Issue #5572 removed one — POST
+ * /payments/agentic/ledger/record-native (in
+ * handleAgenticPaymentsRoutes, after the record-cfpay endpoint)
+ * — zero production HTTP callers on a re-verified grep; the
+ * workflow calls the native port directly. Bringing the pinned
+ * inventory to 494 entries (495 measured on the slice base);
+ * the delegation sequence is unchanged (same handler, same
+ * position).
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
@@ -726,7 +735,6 @@ const EXPECTED_INVENTORY = [
   "handleAgenticPaymentsRoutes :: includes(\"/payments/agentic/wallet\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/ledger/record\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/ledger/record-cfpay\")",
-  "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/ledger/record-native\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/ledger/cfpay\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/ledger/cfpay-revenue\")",
   "handleAgenticPaymentsRoutes :: endsWith(\"/payments/agentic/commercial/account\")",

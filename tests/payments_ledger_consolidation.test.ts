@@ -39,6 +39,36 @@ import { AGENTIC_SPEND_AGENT_ID } from "../src/payments/ledger";
 import { DatabaseORM } from "../src/orm";
 import { MockSqlStorage } from "./mock-sql";
 import { handleAgenticPaymentsRoutes } from "../src/agents/routes/agenticPayments";
+import type {
+  Membership,
+  MembershipStore,
+} from "../src/security/authorization";
+import { serviceUserInternalUserId } from "../src/security/serviceIdentity";
+
+// #5572: the ledger gate requires the service identity to present a
+// provisioned tenant-admin binding. The fixture login must NOT be
+// the shared-orchestrator address (the gate denies addresses as
+// identities, #2331/#2681), and the handler ctx carries the
+// provisioned store + the same configured login.
+const GATE_SERVICE_LOGIN = "svc-test";
+function provisionedGateStore(): MembershipStore {
+  const membership: Membership = {
+    membershipId: "m-gate-1",
+    internalUserId: serviceUserInternalUserId(GATE_SERVICE_LOGIN),
+    tenantId: "tenant-a",
+    roleBindings: [
+      { role: "tenant-admin", scope: "tenant", grantedBy: "admin-1" },
+    ],
+    createdBy: "admin-1",
+    createdAtMs: Date.now(),
+  };
+  return {
+    getMembershipsByUser: async (id: string) =>
+      id === membership.internalUserId ? [membership] : [],
+    put: async () => {},
+    revokeMembership: async () => false,
+  };
+}
 import { handlePaymentsRoutes } from "../src/agents/routes/payments";
 
 afterEach(() => {
@@ -65,9 +95,10 @@ function makeLedger() {
   const orm = new DatabaseORM(sql);
   orm.initializeSchema("default_trader");
   const routeCtx = {
-    env: {} as any,
+    env: { SERVICE_USER_LOGIN: GATE_SERVICE_LOGIN } as any,
     getOrm: () => orm,
     audit: () => {},
+    executionContextMembershipStore: provisionedGateStore(),
   };
   const namespace = {
     idFromName: (name: string) => name,
@@ -93,7 +124,7 @@ function makeEnv(ledger?: ReturnType<typeof makeLedger>) {
   // ledger owner login the fake namespace serves.
   const env: any = {
     CF_WALLET_FACILITATOR: "https://facilitator.test",
-    SERVICE_USER_LOGIN: "default_trader",
+    SERVICE_USER_LOGIN: GATE_SERVICE_LOGIN,
   };
   if (ledger) env.ORCHESTRATOR_AGENT = ledger.namespace;
   return env;
