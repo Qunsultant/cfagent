@@ -2,11 +2,19 @@
   "generatedFrom": "dd6df86a724ff5411a9d7842be129f1483a8a2cd",
   "generatedAt": "2026-11-14",
   "totals": {
-    "createTable": 0,
+    "createTable": 1,
     "createIndex": 0,
     "createUniqueIndex": 0,
     "alterTable": 0,
     "parameterizedDdl": 0
   },
-  "files": {}
+  "files": {
+    "src/data/doSessionStoreAdapter.ts": {
+      "createTable": 1,
+      "createIndex": 0,
+      "createUniqueIndex": 0,
+      "alterTable": 0,
+      "parameterizedDdl": 0
+    }
+  }
 }

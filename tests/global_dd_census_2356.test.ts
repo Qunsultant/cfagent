@@ -921,9 +921,14 @@ function funnelCallSites(): Array<[string, string, string]> {
  *  from the generic `list` op into the audit family's own
  *  `audit-list` op on the same shared createStoreSender, so
  *  the root composes exactly one funnel site
- *  (createStoreSender "sessions"). The flag-off branch is
- *  untouched: iaaaAuditStore.ts's listStoreEntries site
- *  REMAINS.
+ *  (createStoreSender "sessions"). The #3251 fix retires the
+ *  flag-OFF site too: iaaaAuditStore.ts's list seam moves onto
+ *  the same `audit-list` op (the generic kv `list` only ever
+ *  saw segment rows, so a table-substrate write was invisible
+ *  to the flag-OFF composition — the S5 one-store property,
+ *  tests/audit_one_store_5084.test.ts:152), so the security
+ *  layer composes exactly one funnel site as well
+ *  (createStoreSender "sessions").
  *  Step 5e (#2436) delta, honestly recorded: the funnel
  *  itself MOVES into the data layer (src/security/durableKv.ts
  *  → src/data/durableKv.ts, a rename — every importer now
@@ -966,7 +971,6 @@ const STEP5_FUNNEL_SITES: Array<[string, string, string]> = [
   ["src/security/etradeOAuth.ts", "createStoreKv", "etrade"],
   ["src/security/etradeOAuth.ts", "listStoreEntries", "etrade"],
   ["src/security/iaaaAuditStore.ts", "createStoreSender", "sessions"],
-  ["src/security/iaaaAuditStore.ts", "listStoreEntries", "sessions"],
   // Issue #4676 / #3410: IBKR OAuth 2.1 + PKCE + DCR tokens live in SessionStore DO.
   ["src/security/ibkrOAuth.ts", "createStoreKv", "ibkr"],
   ["src/security/publicOAuth.ts", "createStoreKv", "<dynamic>"],
@@ -1154,7 +1158,6 @@ describe("global D-D census: step 5b — session family port composition sites (
       // same shared createStoreSender.
       ["src/data/createAuditPorts.ts", "createStoreSender", "sessions"],
       ["src/security/iaaaAuditStore.ts", "createStoreSender", "sessions"],
-      ["src/security/iaaaAuditStore.ts", "listStoreEntries", "sessions"],
     ]);
   });
 });
