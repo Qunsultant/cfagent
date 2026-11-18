@@ -13,7 +13,7 @@ import { DatabaseORM, type SqlStorage } from "../orm";
 import type { JobRunTrigger } from "../data/jobRunRecordPorts";
 import { BusinessError, codedMessage } from "../outcomes/outcomeAspects";
 import { resolveRunBrokerContext, type RunBrokerContext, type RunBrokerSelection } from "./runBrokerContext";
-import { optionsFailureAlertText, ensureCodedOutcome } from "./optionsRunAlertFormat";
+import { optionsFailureAlertText, ensureCodedOutcome, claimNoticeDelivery } from "./optionsRunAlertFormat";
 import { renewETradeAccessToken, getStoredTokens, etradeIdentityFromLogin } from "../security/etradeOAuth";
 import { resolveScreenerAgentName } from "../agents/screenerAgentName";
 import { actorGateway } from "./cloudflareActorGateway";
@@ -4023,29 +4023,32 @@ export class ScheduledTasksService {
       // notifications cover the failure, so the direct notice is
       // suppressed (same exactly-once rule as the success path).
       if (shouldNotifySlack && !options.stageChain) {
-        const failure = await deliverGatedSlack(this.env, {
-          // The local `userLogin` (options.userLogin || this.userLogin)
-          // is declared inside the try block, so it is out of scope in
-          // this catch â€” spell out the same resolution here.
-          userLogin: options.userLogin || this.userLogin,
-          channel: options.slackChannel,
-          text: optionsFailureAlertText({
-            universe: options.universe || symbols.join(", ") || "NASDAQ100",
-            thesis: targetThesis,
-            context: {
-              trigger: options.trigger,
-              // Issue #5232: whose run this is, and which schedule fired.
-              owner: options.userLogin || this.userLogin,
-              scheduleId: options.scheduleId,
-              mode: optionsEffectiveMode?.mode,
-              modeSource: optionsEffectiveMode?.modeSource,
-              broker: optionsRunBrokerId,
-              runId: auditRunId,
-            },
-            errorMessage: ensureCodedOutcome(err.message, optionsRunBrokerId),
-            timestamp,
-          }),
+        const failureText = optionsFailureAlertText({
+          universe: options.universe || symbols.join(", ") || "NASDAQ100",
+          thesis: targetThesis,
+          context: {
+            trigger: options.trigger,
+            // Issue #5232: whose run this is, and which schedule fired.
+            owner: options.userLogin || this.userLogin,
+            scheduleId: options.scheduleId,
+            mode: optionsEffectiveMode?.mode,
+            modeSource: optionsEffectiveMode?.modeSource,
+            broker: optionsRunBrokerId,
+            runId: auditRunId,
+          },
+          errorMessage: ensureCodedOutcome(err.message, optionsRunBrokerId),
+          timestamp,
         });
+        // Issue #5182: one notice per run and rendered text. The observed
+        // duplicate carried one timestamp - the same payload delivered twice -
+        // so the key is the run that executed, never a time bucket.
+        const failure = claimNoticeDelivery(`${auditRunId}|${failureText}`)
+          ? await deliverGatedSlack(this.env, {
+              userLogin: options.userLogin || this.userLogin,
+              channel: options.slackChannel,
+              text: failureText,
+            })
+          : { ok: true as const };
         if (!failure.ok) structuredLog.warn("scheduledTasks.slack_failure_notification_failed", {
           message: "[ScheduledTasksService] Slack failure notification failed",
           error: failure.error,

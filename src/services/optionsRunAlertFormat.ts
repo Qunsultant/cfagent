@@ -81,3 +81,30 @@ export function optionsFailureAlertText(args: {
     `_Time: ${args.timestamp}_`,
   ].join("\n");
 }
+
+/**
+ * Issue #5182 — one notice per (run, rendered text), remembered for a short
+ * window.
+ *
+ * Incident #5181 saw the SAME message posted twice with the same timestamp:
+ * one delivery payload observed twice, not two runs. The transports are
+ * fallback-only (`deliverScreenerToSlack`: A2A, then direct on failure), so the
+ * duplicate is inside a single run's notification path.
+ *
+ * This guard is deliberately narrow: the key is the run id plus the exact
+ * rendered text, so two *different* runs can never collide, and a retry that
+ * produced different text still delivers. It is best-effort per isolate (a
+ * module-level map, no storage dependency); the root cause still wants the A2A
+ * log line recorded on #5182, and this guard does not hide a second execution
+ * because it keys on the run that executed.
+ */
+export function claimNoticeDelivery(key: string, nowMs: number = Date.now(), windowMs: number = 300_000): boolean {
+  for (const [seen, at] of DELIVERED_NOTICES) {
+    if (nowMs - at > windowMs) DELIVERED_NOTICES.delete(seen);
+  }
+  if (DELIVERED_NOTICES.has(key)) return false;
+  DELIVERED_NOTICES.set(key, nowMs);
+  return true;
+}
+
+const DELIVERED_NOTICES = new Map<string, number>();
