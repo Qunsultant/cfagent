@@ -1,5 +1,6 @@
 /**
- * Issue #5034 — DO SQLite adapter for `mas_ladder_states` (#3887).
+ * Issue #5034 — DO SQLite adapter for `mas_ladder_states` (#3887);
+ * a rung is recorded only after the broker returned an id.
  */
 import type { SqlStorage } from "../orm";
 import type { LadderStateStore, StoredLadderRung, StoredLadderState } from "./ladderStatePorts";

@@ -336,7 +336,7 @@ describe("#3887 — the tool surface", () => {
   });
 
   it("the persistence store keeps only rungs the broker took", () => {
-    const store = readFileSync("src/services/ladderStateStore.ts", "utf8");
+    const store = readFileSync("src/data/doSqliteLadderStateAdapter.ts", "utf8");
     expect(store).toContain("mas_ladder_states");
     expect(store).toContain("a rung is recorded only after the broker returned an id");
   });
