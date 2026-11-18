@@ -48,7 +48,11 @@ import {
   COPILOT_SESSION_IDS,
   COPILOT_SESSION_VIEWS,
   exitReasonLabel,
+  fetchStockCopilotProposals,
+  fileStockCopilotProposal,
   fetchStockCopilotStatus,
+  type CapabilityProposalView,
+  type FiledProposal,
   fmtCopilotMoney,
   fmtCopilotTime,
   setStockCopilotPaused,
@@ -140,6 +144,40 @@ export function StockCopilotPanel() {
   const [toggleError, setToggleError] = useState(false);
   const [savingSessions, setSavingSessions] = useState(false);
   const [sessionsError, setSessionsError] = useState(false);
+  // #5527: governed proposals load on demand — the introspection read is
+  // heavy, and the panel's job is the loop, not a briefing.
+  const [proposals, setProposals] = useState<CapabilityProposalView[] | null>(null);
+  const [proposalsError, setProposalsError] = useState<string | null>(null);
+  const [loadingProposals, setLoadingProposals] = useState(false);
+  const [confirmGapId, setConfirmGapId] = useState<string | null>(null);
+  const [filingGapId, setFilingGapId] = useState<string | null>(null);
+  const [filed, setFiled] = useState<Record<string, FiledProposal>>({});
+
+  const loadProposals = useCallback(async () => {
+    setLoadingProposals(true);
+    setProposalsError(null);
+    try {
+      setProposals(await fetchStockCopilotProposals());
+    } catch (err) {
+      setProposalsError(err instanceof Error ? err.message : "Failed to load proposals");
+    } finally {
+      setLoadingProposals(false);
+    }
+  }, []);
+
+  const fileProposal = useCallback(async (gapId: string) => {
+    setFilingGapId(gapId);
+    setProposalsError(null);
+    try {
+      const result = await fileStockCopilotProposal(gapId);
+      setFiled((prev) => ({ ...prev, [gapId]: result }));
+      setConfirmGapId(null);
+    } catch (err) {
+      setProposalsError(err instanceof Error ? err.message : "Failed to file the proposal");
+    } finally {
+      setFilingGapId(null);
+    }
+  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -467,6 +505,86 @@ export function StockCopilotPanel() {
           </div>
         )}
       </div>
+
+      <div className="scp-section-title">Governed proposals</div>
+      {proposals === null ? (
+        <div className="scp-feed">
+          <div className="scp-feed-row">
+            <span className="scp-feed-main">
+              Capability gaps the loop can propose as GitHub issues.
+            </span>
+            <Button
+              size="sm"
+              variant="secondary"
+              loading={loadingProposals}
+              onClick={() => void loadProposals()}
+            >
+              Review proposals
+            </Button>
+          </div>
+        </div>
+      ) : proposals.length === 0 ? (
+        <EmptyState
+          icon="🧭"
+          title="No capability gaps found"
+          description="The loop found nothing to propose right now."
+        />
+      ) : (
+        <div className="scp-feed">
+          {proposals.map((proposal) => {
+            const filedIssue = filed[proposal.gapId];
+            return (
+              <div className="scp-feed-row" key={proposal.gapId}>
+                <span className="scp-feed-main">
+                  {proposal.title}
+                  {filedIssue && (
+                    <Badge size="xs" tone="success">
+                      Filed #{filedIssue.number}
+                    </Badge>
+                  )}
+                </span>
+                {filedIssue ? (
+                  <a href={filedIssue.url} target="_blank" rel="noreferrer">
+                    Open issue
+                  </a>
+                ) : confirmGapId === proposal.gapId ? (
+                  <span className="scp-feed-time">
+                    File as a GitHub issue?
+                    <Button
+                      size="sm"
+                      variant="primary"
+                      loading={filingGapId === proposal.gapId}
+                      onClick={() => void fileProposal(proposal.gapId)}
+                    >
+                      Confirm
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => setConfirmGapId(null)}
+                    >
+                      Cancel
+                    </Button>
+                  </span>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => setConfirmGapId(proposal.gapId)}
+                  >
+                    File this proposal
+                  </Button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {proposalsError && (
+        <Notice tone="warning" variant="box">
+          {proposalsError}
+        </Notice>
+      )}
 
       <div className="scp-section-title">Cycle activity</div>
       {status.activity.length === 0 ? (

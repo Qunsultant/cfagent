@@ -187,6 +187,56 @@ async function send<T>(path: string, init?: RequestInit): Promise<T> {
   return data;
 }
 
+/** #5527: one governed capability proposal, as the panel renders it. */
+export interface CapabilityProposalView {
+  gapId: string;
+  title: string;
+  diagnosis: string;
+  readiness: string;
+  governedPathway: {
+    targetIssueTitle: string;
+    lane: string;
+    actionablePlan: string;
+  };
+}
+
+/** #5527: the filed issue the server returns. */
+export interface FiledProposal {
+  gapId: string;
+  number: number;
+  url: string;
+}
+
+/** #5527: read the governed proposals the introspection surface offers. */
+export async function fetchStockCopilotProposals(): Promise<CapabilityProposalView[]> {
+  const res = await fetch("/api/stock-copilot/introspect");
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const data = (await res.json()) as {
+    reflection?: { capabilityProposals?: CapabilityProposalView[] };
+  };
+  return data.reflection?.capabilityProposals ?? [];
+}
+
+/**
+ * #5527: file one proposal. The approval flag is the HITL gate — the
+ * server refuses without it, so this function cannot file by accident.
+ */
+export async function fileStockCopilotProposal(gapId: string): Promise<FiledProposal> {
+  const res = await fetch("/api/stock-copilot/proposals/file", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ gapId, approve: true }),
+  });
+  const data = (await res.json().catch(() => ({}))) as {
+    filed?: FiledProposal;
+    error?: string;
+  };
+  if (!res.ok || !data.filed) {
+    throw new Error(data.error ?? `HTTP ${res.status}`);
+  }
+  return data.filed;
+}
+
 export async function fetchStockCopilotStatus(): Promise<StockCopilotStatus> {
   const data = await send<StockCopilotStatus>("/api/stock-copilot/status");
   // Shape guard (issue #71): never hand the renderer a non-array.
