@@ -252,6 +252,8 @@ describe("LeftNavBar UX & Reorganization (issue #2685)", () => {
     // Issue #4638: the billing sub-menu is one entry per Billing
     // section tab (Overview first — the billing page itself, by
     // default) plus the Revenue Analytics sibling route.
+    // Issue #5230 (slice 2.32): the eleventh tab is billing-policy,
+    // between plan-stripe-price and support-snapshot.
     expect(SUB_MENU_CONFIGS.billing.map((s) => s.id)).toEqual([
       "overview",
       "refund-policy",
@@ -262,6 +264,7 @@ describe("LeftNavBar UX & Reorganization (issue #2685)", () => {
       "top-up-limits",
       "offer-rules",
       "plan-stripe-price",
+      "billing-policy",
       "support-snapshot",
       "revenue",
     ]);
