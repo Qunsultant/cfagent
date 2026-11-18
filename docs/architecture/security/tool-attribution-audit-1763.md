@@ -319,7 +319,14 @@ identity is IAAA work (#945), not rebuilt here.
   partially compensates for queued calls; sync in-process calls
   have no equivalent record. Same follow-up class as G-AUD-2
   (thread the route's authenticated login through), not a scope
-  change.
+  change. Narrowing note (GAP-3, #5459, CISO coordination #5349):
+  the gap is ADVANCED for the service-actor class — the
+  system-principal binding story threads the configured service
+  login into the PDP decision as `service:<login>`
+  (`authorizeSystemPrincipal`, `src/security/serviceDispatch.ts`),
+  so a gate consulting the story audits a login-attributable
+  decision. The gap remains open for in-process `system` callers
+  with login null, whose attribution is still the route layer.
 - **G-AUD-4 — Scanner free tools are not person-attributable.**
   `scanner_status` (and job reads without a payment link) cannot
   be attributed to a person, session, or key. Bounded by design:

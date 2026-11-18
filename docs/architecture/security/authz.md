@@ -76,6 +76,50 @@ ungated safety actions (§7) — the permission governs who may revoke
   list-all API**: the admin overview reads the caller's own memberships
   only, which is why the panel can never leak another user's roles.
 
+### The system-principal binding (GAP-3, #5459; CISO coordination #5349)
+
+Workflow-internal actors — scheduled runs, payment-workflow steps,
+service-to-service calls that act without a signed-in user — hold
+authority through the same table, not a parallel gate. The story:
+
+- The system principal is `service:<login>`, derived only through
+  `serviceUserInternalUserId` (`src/security/serviceIdentity.ts`).
+  The `system:` strings (`system:bootstrap`, `system:auto-provision`)
+  stay provenance-only markers on grants — never principals, never
+  evaluated. The principal's agent-world id is `agent:service:<login>`
+  (`agentIdForServiceLogin`, `src/security/agentAccess.ts`), derived
+  from the same login; neither derivation is ever duplicated.
+- The binding that carries a permission for the system actor is a
+  tenant-scope binding whose role grants it under the table above —
+  for `ledger:record`, a tenant-admin binding in the tenant whose
+  ledger is written — provisioned through the existing general grant
+  path (`grantMembership` + `canGrantRole`). The member-only
+  service-user provisioning route is untouched: a member binding
+  carries no money permission, and no grant rule is invented to
+  change that. The binding shape is a CISO review question on the
+  GAP-3 PR; the story as built follows the existing table.
+- Evaluation is `authorize()` at tenant scope, through the single
+  consultation `authorizeSystemPrincipal`
+  (`src/security/serviceDispatch.ts`): configured login, principal
+  id, PDP decision. An unconfigured or malformed login does not
+  resolve; a missing, revoked, or expired binding denies at the
+  next check (0 ms revocation semantics, §9). No policy change, no
+  new store, no new identity scheme.
+- The #2331 invariants stand: a platform-admin binding for the
+  service id grants nothing at tenant scope (the PDP ignores
+  platform bindings there) and is surfaced as an anomaly on the
+  consultation result so the consuming gate audits it; the flag
+  does not override a PDP allow from a legitimate tenant binding.
+  Brokerage-attached work never runs under the service identity.
+- G-AUD-3 threading is advanced for this actor class, not closed:
+  the PDP decision carries `principalId` `service:<login>` and the
+  consultation threads the login, so the consuming gate's audit row
+  is login-attributable. In-process `system` callers with login
+  null remain open — see the #1763 audit doc. This slice wires no
+  gate: the ledger gate that consumes the story is a later slice,
+  and the G-1 hole stays open until it lands (ADR 0034 D2, owner's
+  choice).
+
 ## 3. Bootstrap and the genesis window
 
 Bootstrap (`src/security/iaaaBootstrap.ts`) provisions the first admins
