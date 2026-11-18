@@ -226,6 +226,39 @@ describe("S7 payload goldens — the one builder reproduces the legacy bodies by
     });
   }
 
+  it("carries the schedule's run target only when chosen (#5189)", () => {
+    const withTarget = submission({
+      ...baseForm,
+      jobType: "optionsAnalysis",
+      targetUniverse: "NASDAQ100",
+      brokerId: "public",
+      mode: "live",
+      accountId: "acct-1",
+    });
+    expect(withTarget.payload).toMatchObject({ brokerId: "public", mode: "live", accountId: "acct-1" });
+
+    const without = submission({
+      ...baseForm,
+      jobType: "optionsAnalysis",
+      targetUniverse: "NASDAQ100",
+      brokerId: "",
+      mode: "",
+      accountId: "",
+    });
+    expect("brokerId" in without.payload).toBe(false);
+    expect("mode" in without.payload).toBe(false);
+    expect("accountId" in without.payload).toBe(false);
+
+    // A broker whose catalogue declares no option chains never leaves the form.
+    const refused = buildScheduleSubmission({
+      ...baseForm,
+      jobType: "optionsAnalysis",
+      targetUniverse: "NASDAQ100",
+      brokerId: "tastytrade",
+    });
+    expect("error" in refused).toBe(true);
+  });
+
   it("G7 one-shot cadence carries the ISO date and no other cadence keys", () => {
     const body = submission({ ...baseForm, scheduleType: "scheduled", scheduledDate: "2026-10-20T09:30" });
     expect(body.date).toBe(new Date("2026-10-20T09:30").toISOString());

@@ -816,9 +816,14 @@ const deliveryFields = {
  * the stored, server-stamped payload).
  */
 const brokerModeFields = {
-  brokerId: z.enum(["etrade", "alpaca"]).optional(),
+  // Issue #5189: the brokers whose catalogue declares `optionChains` — the
+  // options schedule's run target. A broker without chains is refused at
+  // creation by this enum (a named 400) rather than failing every cron.
+  brokerId: z.enum(["etrade", "alpaca", "public"]).optional(),
   dataProviderId: z.enum(["etrade", "public", "yahoo", "nasdaq", "alpaca"]).optional(),
   mode: z.enum(["live", "paper"]).optional(),
+  /** Issue #5189: broker account scope, when the broker exposes several. */
+  accountId: z.string().min(1).optional(),
 };
 
 /**

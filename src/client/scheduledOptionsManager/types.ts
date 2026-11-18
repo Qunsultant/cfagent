@@ -108,6 +108,14 @@ export interface ScheduleFormState {
   noViewDraft: NoViewConstraintsDraft;
   /** Broker environment stamped into options/discovery payloads. */
   environment: string;
+  /**
+   * Issue #5189 — the schedule's run target. Empty strings mean "not chosen":
+   * the payload omits the field and the run uses the tenant's context, which is
+   * exactly what every pre-existing schedule does.
+   */
+  brokerId: string;
+  mode: "" | "paper" | "live";
+  accountId: string;
 }
 
 /** One autonomous options-analysis run as returned by GET /api/options/latest (#223). */

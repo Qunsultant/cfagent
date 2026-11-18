@@ -309,6 +309,10 @@ function track1FormState(
       riskProfile: "balanced",
     },
     environment: "PROD",
+    // Issue #5189: run-target defaults are empty = the tenant's context.
+    brokerId: "",
+    mode: "",
+    accountId: "",
     ...overrides,
   };
 }

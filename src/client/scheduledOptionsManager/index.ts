@@ -18,4 +18,5 @@ export * from "./DiscoveryFormSections";
 export * from "./CadenceFields";
 export * from "./ThesisRiskFields";
 export * from "./NotificationFields";
+export * from "./RunTargetFields";
 export * from "./ScheduleFormModal";

@@ -12,7 +12,7 @@ import type { Env, ScheduledTaskResult, StageChainConfig, TradeRecord, ScreenedS
 import { DatabaseORM, type SqlStorage } from "../orm";
 import type { JobRunTrigger } from "../data/jobRunRecordPorts";
 import { BusinessError, codedMessage } from "../outcomes/outcomeAspects";
-import { resolveRunBrokerContext, type RunBrokerContext } from "./runBrokerContext";
+import { resolveRunBrokerContext, type RunBrokerContext, type RunBrokerSelection } from "./runBrokerContext";
 import { optionsFailureAlertText, ensureCodedOutcome } from "./optionsRunAlertFormat";
 import { renewETradeAccessToken, getStoredTokens, etradeIdentityFromLogin } from "../security/etradeOAuth";
 import { resolveScreenerAgentName } from "../agents/screenerAgentName";
@@ -192,6 +192,17 @@ const structuredLog = createStructuredLogger(createObservabilitySink({}), {
 });
 
 export interface AutonomousOptionsAnalysisOptions {
+  /**
+   * Issue #5189 — the schedule's own broker selection. Absent keeps today's
+   * behaviour (the tenant's broker, resolved through resolveRunBrokerContext);
+   * when set it wins over the tenant selection for this run only, and the
+   * broker must declare `optionChains` or the run is refused by name.
+   */
+  brokerId?: string;
+  /** Issue #5189 — paper/live for this schedule; absent = the resolved mode. */
+  mode?: "paper" | "live";
+  /** Issue #5189 — broker account scope, when the broker exposes several. */
+  accountId?: string;
   symbols?: string[];
   /** Universe to scan (resolves to symbols via listings; overrides symbols). */
   universe?: string;
@@ -591,12 +602,15 @@ export async function resolveScheduledFirerHostDispatch(
   env: Env,
   environment: string | undefined,
   snapshotInput?: FeedSnapshotInput,
+  // Issue #5189: the schedule's own broker/mode/account selection, when stored.
+  selection?: RunBrokerSelection,
 ): Promise<ScheduledFirerHostDispatch> {
   // Issue #5188: one resolution for the whole run â€” broker, mode, modeSource,
   // account â€” with the option-chain capability gate inside it.
   const context = await resolveRunBrokerContext({
     env,
     environment,
+    ...(selection ? { selection } : {}),
     requireCapability: "optionChains",
   });
   const broker = discoveryBrokerStageInput(context.brokerId, env, environment);
@@ -2974,12 +2988,30 @@ export class ScheduledTasksService {
       // resolver (resolveTenantBroker) â€” one default, never an
       // inline legacy default.
       {
-        optionsRunBrokerId = await resolveTenantBroker(this.env);
-        optionsEffectiveMode = await resolveScheduledEffectiveMode({
+        // Issue #5189: the schedule's stored broker/mode/account wins for this
+        // run; absent, the tenant's context applies (unchanged). One resolution
+        // feeds the alert, the audit and the scan.
+        const runContext = await resolveRunBrokerContext({
           env: this.env,
-          brokerId: optionsRunBrokerId,
           environment: options.environment,
+          ...(options.brokerId || options.mode || options.accountId
+            ? {
+                selection: {
+                  brokerId: options.brokerId,
+                  mode: options.mode,
+                  accountId: options.accountId,
+                  source: "schedule" as const,
+                },
+              }
+            : {}),
+          requireCapability: "optionChains",
         });
+        optionsRunBrokerId = runContext.brokerId;
+        optionsEffectiveMode = {
+          mode: runContext.mode,
+          isLive: runContext.mode === "live",
+          modeSource: runContext.modeSource,
+        };
       }
       // Issue #1174 (#1173 S1): same auth pre-flight as the stock
       // screen â€” options scans die on the same midnight-ET token
