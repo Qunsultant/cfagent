@@ -373,10 +373,10 @@ async function buildChatScreenCommand(
   const command: WorkflowJobCommand = buildParentScreenCommand({
     jobId,
     source: "nlq-chat",
-    // Issue #5053: a chat screen is a copilot dispatch — the
-    // command stamps "copilot", never "manual". specTrigger
-    // still carries "nlq", so the chat provenance survives.
-    trigger: "copilot",
+    // Issue #5053: the workflow COMMAND stays manual (the port accepts only
+    // manual|scheduled); the copilot dispatch travels on specTrigger (nlq)
+    // and on the bridge row, which is where the run trigger is recorded.
+    trigger: "manual",
     specTrigger: "nlq",
     userLogin: req.userLogin,
     tenantId,

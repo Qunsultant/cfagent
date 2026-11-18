@@ -565,10 +565,10 @@ async function buildScreenCommand(
   const command: WorkflowJobCommand = buildParentScreenCommand({
     jobId,
     source: "mesh-door",
-    // Issue #5053: a mesh-door screen is a copilot dispatch — the
-    // command stamps "copilot", never "manual". specTrigger
-    // still carries "mesh", so the door provenance survives.
-    trigger: "copilot",
+    // Issue #5053: the workflow COMMAND stays manual (the port accepts only
+    // manual|scheduled); the copilot dispatch travels on specTrigger (mesh)
+    // and on the bridge row, which is where the run trigger is recorded.
+    trigger: "manual",
     specTrigger: "mesh",
     userLogin: req.userLogin,
     tenantId,
