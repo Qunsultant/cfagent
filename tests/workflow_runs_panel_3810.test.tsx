@@ -218,6 +218,79 @@ describe("chain bulk retry affordance (#4416)", () => {
     expect(container.textContent ?? "").toContain("Retried 2 failed shards");
   });
 });
+describe("single-job retry affordance (#5242)", () => {
+  // A failed single async-job run (e.g. an orphaned MCP tool run): the run
+  // id IS the job id, and its one stage stands for that same job.
+  const singleJobRun = (over: Partial<WorkflowRun> = {}): WorkflowRun => {
+    const base = run({ status: "failed", id: "job-1", runId: "job-1" });
+    return {
+      ...base,
+      stages: [
+        {
+          ...base.stages[0],
+          key: "job-1",
+          jobId: "job-1",
+          stage: "mcp.tool",
+          label: "MCP: broker_account_binding",
+          status: "failed",
+          capability: "mcp.tool",
+          input: { toolName: "broker_account_binding" },
+        },
+      ],
+      ...over,
+    };
+  };
+
+  it("offers Retry job on a failed single-job run and calls the single-job endpoint", async () => {
+    const calls: Array<{ url: string; method?: string }> = [];
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      calls.push({ url, method: init?.method });
+      if (url.includes("/api/jobs/job-1/retry")) {
+        return Response.json({ success: true, jobId: "job-2", status: "queued", statusUrl: "/api/jobs/job-2" });
+      }
+      return Response.json(payload);
+    });
+    root = createRoot(container);
+    await act(async () => {
+      root.render(<RunDetail run={singleJobRun()} />);
+    });
+    await flush();
+    const buttons = [...container.querySelectorAll("button")].map((button) => button.textContent ?? "");
+    expect(buttons.some((text) => text.includes("Retry job"))).toBe(true);
+    expect(buttons.some((text) => text.includes("Retry failed shards"))).toBe(false);
+    const retry = [...container.querySelectorAll("button")].find((button) =>
+      (button.textContent ?? "").includes("Retry job"),
+    );
+    await act(async () => {
+      retry!.click();
+    });
+    await flush();
+    expect(calls.some((call) => call.url.includes("/api/jobs/job-1/retry") && call.method === "POST")).toBe(true);
+    expect(container.textContent ?? "").toContain("job-2");
+  });
+
+  it("does not offer Retry job on a failed chain run", async () => {
+    root = createRoot(container);
+    await act(async () => {
+      root.render(<RunDetail run={run({ status: "failed" })} />);
+    });
+    await flush();
+    const buttons = [...container.querySelectorAll("button")].map((button) => button.textContent ?? "");
+    expect(buttons.some((text) => text.includes("Retry failed shards"))).toBe(true);
+    expect(buttons.some((text) => text.includes("Retry job"))).toBe(false);
+  });
+
+  it("does not offer Retry job on a running single-job run", async () => {
+    root = createRoot(container);
+    await act(async () => {
+      root.render(<RunDetail run={singleJobRun({ status: "running" })} />);
+    });
+    await flush();
+    const buttons = [...container.querySelectorAll("button")].map((button) => button.textContent ?? "");
+    expect(buttons.some((text) => text.includes("Retry job"))).toBe(false);
+  });
+});
 describe("stranded chain surface (#4419)", () => {
   it("shows the stranded notice when the chain has no downstream planned", async () => {
     root = createRoot(container);
