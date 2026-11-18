@@ -201,7 +201,20 @@ export async function handleCoreLateRoutes(request: Request, env: Env, url: URL,
           }
         }
       }
-      if (!userLogin) return new Response("Unauthorized", { status: 401 });
+      if (!userLogin) {
+        // Issue #5625: an API caller must be able to READ the refusal.
+        // A bare-text 401 (`new Response("Unauthorized")`) reaches clients
+        // that parse JSON and surfaces as "Unexpected token 'U'" instead of
+        // an auth message — observed on POST /api/research/run. Answer JSON
+        // with a stable code, like the other gates in this server.
+        return Response.json(
+          {
+            code: "UNAUTHORIZED",
+            error: "Unauthorized: sign in again — your session is missing or has expired.",
+          },
+          { status: 401 },
+        );
+      }
 
       const subPath = path.replace(/^\/api/, "");
       const targetUrl = new URL(subPath + url.search, "https://agent.internal");
