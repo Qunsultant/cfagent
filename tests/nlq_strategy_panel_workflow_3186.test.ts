@@ -143,7 +143,8 @@ describe("runOptionsStrategyAction panel leg through the pipeline (#3186 step 3e
     expect(Array.isArray(res.rows)).toBe(true);
     expect(res.summary).toContain("AAPL");
     expect(storage.keys()).toHaveLength(8);
-    expect(storage.keys().every((key) => key.startsWith("options:nlq-panel:"))).toBe(true);
+    // #5175 slice 3: stage-artifact keys are options:<runId>:<stage>; the panel run id mints run: now.
+    expect(storage.keys().every((key) => key.startsWith("options:run:"))).toBe(true);
   });
 
   // CORRECTION (2026-11-05, #26 tests): without an identity the
@@ -241,7 +242,8 @@ describe("runOptionsStrategyAction scanner leg through the pipeline (#3186 step 
     // Both symbols were judged (the scan ran, not just returned empty).
     expect((res.matrix as Array<{ symbol: string }>).map((m) => m.symbol).sort()).toEqual(["AAPL", "MSFT"]);
     expect(storage.keys()).toHaveLength(8);
-    expect(storage.keys().every((key) => key.startsWith("options:nlq-scan:"))).toBe(true);
+    // #5175 slice 3: stage-artifact keys are options:<runId>:<stage>; the scanner run id mints run: now.
+    expect(storage.keys().every((key) => key.startsWith("options:run:"))).toBe(true);
     // The persist stage saved the run with the replayable request
     // record attached, and the envelope carries the save receipt.
     expect(saved).toHaveLength(1);
