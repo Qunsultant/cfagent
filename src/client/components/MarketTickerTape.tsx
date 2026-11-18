@@ -72,7 +72,6 @@ export function MarketTickerTape({ onSelectSymbol, onSelectTab, className = "" }
   // Resolve the stored selection on mount (watchlist/holdings need a fetch).
   useEffect(() => {
     fetchForSelection(selection);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Issue #2689: the Tape set control lives in SettingsMenu now; a
@@ -83,7 +82,6 @@ export function MarketTickerTape({ onSelectSymbol, onSelectTab, className = "" }
       setSelection(next);
       fetchForSelection(next);
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const resolvedMetas: QuoteSymbolMeta[] = useMemo(() => {

@@ -29,7 +29,6 @@ export function useMarketQuotes(symbols: string[], enabled = true): MarketQuotes
         .map((s) => s.toUpperCase().trim())
         .filter(Boolean)
         .join(","),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [symbols.join(",")],
   );
   const [snapshot, setSnapshot] = useState(() => quotesService.getSnapshot());

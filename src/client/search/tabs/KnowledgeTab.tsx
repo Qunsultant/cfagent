@@ -90,7 +90,6 @@ export function KnowledgeTab({ pendingQuery, onHealth, onSearch }: SearchTabProp
       setQuery(pendingQuery.query);
       void run(pendingQuery.query, category);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingQuery]);
 
   return (

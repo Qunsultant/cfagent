@@ -84,7 +84,6 @@ export function SearchAgentTab({ pendingQuery, onHealth, onSearch }: SearchTabPr
       setQuery(pendingQuery.query);
       void run(pendingQuery.query);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingQuery]);
 
   return (
