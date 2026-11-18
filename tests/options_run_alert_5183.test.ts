@@ -6,7 +6,7 @@
  * because "no one ran this" is what an unattributed alert produces.
  */
 import { describe, expect, it } from "vitest";
-import { optionsFailureAlertText, optionsRunContextLine } from "../src/services/optionsRunAlertFormat";
+import { ensureCodedOutcome, optionsFailureAlertText, optionsRunContextLine } from "../src/services/optionsRunAlertFormat";
 
 describe("options run alert format (#5183, #5232)", () => {
   it("names every field the reader needs", () => {
@@ -76,5 +76,25 @@ describe("options run alert format (#5183, #5232)", () => {
     expect(lines[1]).toContain("broker alpaca");
     expect(lines[2]).toContain("FAILURE_AUTH_NO_SESSION");
     expect(lines[3]).toBe("_Time: 2026-11-17T21:35:03.509Z_");
+  });
+});
+
+describe("coded failures at the seam (#5231)", () => {
+  it("wraps a raw provider message with the catalogue outcome and keeps the detail", () => {
+    const coded = ensureCodedOutcome("internal error", "alpaca");
+
+    expect(coded).toContain("[FAILURE_UNEXPECTED_ERROR]");
+    expect(coded).toContain("broker alpaca: internal error");
+  });
+
+  it("never double-wraps an already coded failure", () => {
+    const original = "[FAILURE_AUTH_NO_SESSION] No E*TRADE session is stored for this account.";
+
+    expect(ensureCodedOutcome(original, "etrade")).toBe(original);
+  });
+
+  it("copes with a missing message", () => {
+    expect(ensureCodedOutcome(undefined, "alpaca")).toContain("[FAILURE_UNEXPECTED_ERROR]");
+    expect(ensureCodedOutcome(undefined, "alpaca")).toContain("unknown failure");
   });
 });

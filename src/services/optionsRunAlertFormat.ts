@@ -12,6 +12,8 @@
  *
  * Unknown values render as `unknown` — never blank, never guessed.
  */
+import { codedMessage } from "../outcomes/outcomeAspects";
+
 export interface OptionsRunAlertContext {
   /** `scheduled` | `manual` | `triggered` — the run type the firer used. */
   readonly trigger?: string;
@@ -46,6 +48,22 @@ export function optionsRunContextLine(ctx: OptionsRunAlertContext): string {
     `run ${orUnknown(ctx.runId)}`,
   ];
   return parts.filter(Boolean).join(" · ");
+}
+
+/**
+ * Issue #5231 — the seam must never surface an uncoded failure.
+ *
+ * The 23:35Z alert read `Error: internal error` — a raw provider/RPC string,
+ * so neither the alert nor the run record could classify it. A message that
+ * already carries `[FAILURE_…]` passes through untouched (no double wrap);
+ * anything else becomes `FAILURE_UNEXPECTED_ERROR` with the raw text and the
+ * broker kept as detail. The run's audit row keeps the raw message either way.
+ */
+export function ensureCodedOutcome(message: unknown, broker?: string): string {
+  const raw = typeof message === "string" && message.trim() ? message.trim() : "unknown failure";
+  if (/^\[FAILURE_[A-Z0-9_]+\]/.test(raw)) return raw;
+  const detail = [broker ? `broker ${broker}` : null, raw].filter(Boolean).join(": ");
+  return codedMessage("FAILURE_UNEXPECTED_ERROR", detail);
 }
 
 /** The failure notice: one headline, the context line, the cause, the time. */
