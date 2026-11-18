@@ -96,13 +96,17 @@ describe("4466-P02 the builder puts them on the node", () => {
     );
     const feed = nodeByKind(config.root, "feed");
     const deliver = nodeByKind(config.root, "deliver");
-    expect(feed.executionMode).toEqual({ concurrency: "parallel" });
+    // Issue #4773 — the root node (feed) carries the spec default merged
+    // under the stage override: the engine resolves the job-level mode
+    // from root.executionMode only, so the spec's mode has to live here.
+    expect(feed.executionMode).toEqual({
+      concurrency: "parallel",
+      pacing: "batch",
+      delivery: "async",
+      shape: "monolith",
+    });
     expect(feed.steps[0].params).toMatchObject({ userLogin: "owner", maxItems: 25 });
     expect(deliver.executionMode).toEqual({ delivery: "sync" });
-    // The job's own mode is untouched; the node override is the only addition.
-    expect(config.executionMode).toEqual(
-      expect.objectContaining({ concurrency: "sequential", delivery: "async" }),
-    );
   });
 });
 

@@ -1226,7 +1226,11 @@ export class ScheduledAgent extends PortThink {
     }
     const resolved = resolveExecutionMode(mode);
     assertExecutionModeSupported(resolved);
-    await control.configureJob(jobId, { executionMode: resolved });
+    // Issue #4773 — the patch must land on the root node: the engine
+    // resolves the job-level mode from root.executionMode only, so a
+    // top-level executionMode was never read and the set silently did
+    // nothing (the tool still reported appliedTo: "next-run").
+    await control.configureJob(jobId, { root: { executionMode: resolved } });
     return {
       jobId,
       executionMode: resolved as unknown as Record<string, string>,

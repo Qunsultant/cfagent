@@ -57,9 +57,15 @@ describe("4366-P01 the spec builds the engine config", () => {
       "serve",
       "deliver",
     ]);
-    expect(config.executionMode).toEqual(
-      expect.objectContaining({ concurrency: "sequential", delivery: "async" }),
-    );
+    // Issue #4773 — the job's mode lives on the root node now: the
+    // engine resolves the job-level mode from root.executionMode only,
+    // so a top-level executionMode on the raw config never reaches a run.
+    expect((config.root as any).executionMode).toEqual({
+      concurrency: "sequential",
+      pacing: "batch",
+      delivery: "async",
+      shape: "monolith",
+    });
     const steps = (config.root as any).steps;
     expect(steps[0].params.userLogin).toBe("owner");
   });

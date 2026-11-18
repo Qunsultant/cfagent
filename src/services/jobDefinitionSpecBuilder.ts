@@ -23,7 +23,6 @@ export interface RawJobConfig {
   jobId: string;
   name: string;
   root: Record<string, unknown>;
-  executionMode?: Record<string, string>;
   schedule?: { enabled: boolean; cron?: string; interval?: string };
 }
 
@@ -78,13 +77,24 @@ export function buildJobConfigFromSpec(
   perStage: JobDefinitionPerStage = {},
 ): RawJobConfig {
   const schedule = spec.schedule;
+  const root = withParams(chain(spec.stages, perStage), params);
+  // Issue #4773 — the spec's mode IS the root's execution mode. The
+  // engine resolves the job-level mode from root.executionMode only, so
+  // a top-level field never reaches a run (a spec-defined job silently
+  // ran on the engine default instead of the spec's mode). The spec
+  // default sits under any mode the root node already carries from a
+  // stage-level override.
+  const nodeMode = root.executionMode as Record<string, string> | undefined;
+  const rootExecutionMode = { ...(spec.executionMode ?? {}), ...(nodeMode ?? {}) };
   return {
     jobId,
     name: `${spec.name} (${jobId})`,
-    root: withParams(chain(spec.stages, perStage), params),
-    ...(spec.executionMode
-      ? { executionMode: spec.executionMode as unknown as Record<string, string> }
-      : {}),
+    root: {
+      ...root,
+      ...(Object.keys(rootExecutionMode).length > 0
+        ? { executionMode: rootExecutionMode }
+        : {}),
+    },
     ...(schedule
       ? {
           schedule: {

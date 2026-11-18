@@ -200,9 +200,12 @@ describe("4363-P04 a mid-run change refuses by name", () => {
     expect(agent).toContain("Next-run-only: stop or cancel this run, set the mode, then start a new run.");
     expect(agent).toContain('state === "running" || state === "queued" || state === "paused"');
     // The write goes through the one engine resolver and the definition plane.
+    // Issue #4773 — the patch lands on the root node: the engine resolves
+    // the job-level mode from root.executionMode only, so a top-level
+    // executionMode was never read and the set silently did nothing.
     expect(agent).toContain("resolveExecutionMode(mode)");
     expect(agent).toContain("assertExecutionModeSupported(resolved)");
-    expect(agent).toContain("control.configureJob(jobId, { executionMode: resolved })");
+    expect(agent).toContain("control.configureJob(jobId, { root: { executionMode: resolved } })");
   });
 });
 
