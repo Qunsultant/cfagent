@@ -1228,17 +1228,8 @@ export async function handleScreenerResearchRoutes(
       if (!userLogin) return unauthenticatedResponse();
       try {
         const sql = ctx.getOrm().getSql();
-        const inFlight = Array.from(
-          sql.exec(
-            `SELECT id, candidate_id, stage, stage_started_at, created_at
-             FROM mas_promotions
-             WHERE stage IN ('shadow', 'partial', 'full')
-             ORDER BY created_at ASC`
-          )
-        ) as any[];
-        const byStage = Array.from(
-          sql.exec(`SELECT stage, COUNT(*) AS count FROM mas_promotions GROUP BY stage`)
-        ) as any[];
+        const { readPromotionsActiveCheck } = await import("../../data/promotionsReadAdapter");
+        const { inFlight, byStage } = readPromotionsActiveCheck(sql);
         return Response.json({
           inFlight,
           inFlightCount: inFlight.length,
