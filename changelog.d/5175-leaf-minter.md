@@ -1,0 +1,3 @@
+### Added
+
+- **One leaf id minter (#5175 slice 1):** `src/services/executionTreeIds.ts` is now the single minting authority — `newRunId`, `newAsyncJobId`, `newPaymentDraftId`, `newTaskProposalId`, `newLocalOrderId`, `newDidProofId`, `newGoalRecordId`, `newScheduleId`, `newPlatformRowId`, the derived builders (`jobInstanceId`, `generationId`, `deliveryId`, `chainId`, `jobDefinitionId`, `nodeId`, `pipeId`, `levelId`), the fixed-arity table `ID_FORMAT_ARITY`, and the shape-checking `parseId`. No call site moves in this slice; the registry, the migration, the no-minting pin, and the resolver are later slices.
