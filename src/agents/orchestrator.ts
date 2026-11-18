@@ -19,7 +19,6 @@ import { runBizCopilotChannelBranch } from "../services/bizCopilotChannels";
 import { recordJobOutcome } from "../services/jobOutcomes";
 import type { JobOutcomeInput } from "../data/jobOutcomePorts";
 import type { JobRunTrigger } from "../data/jobRunRecordPorts";
-import { normalizeJobRunTrigger } from "../data/jobRunRecordPorts";
 import {
   buildOrchestratorSystemPrompt,
   resolveShadowMaxSteps,
@@ -1751,17 +1750,13 @@ export class OrchestratorAgent extends PortThink {
       // the shared recorder (extracted so orchestrator.ts stays
       // within the #992 size budget). Failures warn inside it and
       // never turn a completed analysis into a failed one.
-      // Issue #5052: the dispatch trigger passes through the five
-      // modes — a Run-now ("triggered") or copilot ("copilot")
-      // options analysis is never collapsed to "scheduled";
-      // anything unrecognized still reads as "manual".
       const { recordOptionsOrchestratorRun } = await import("../services/optionsServeRecord");
       await recordOptionsOrchestratorRun(
         { orm: this.getOrm() as never, storage: this.ctx.storage },
         {
           timestamp: res.timestamp,
           success: res.success,
-          trigger: normalizeJobRunTrigger(payload?.trigger),
+          trigger: payload?.trigger,
           thesis: payload?.thesis || "bullish",
           symbols: res.data?.symbols || payload?.symbols || [],
           withTrades: res.data?.withTrades ?? 0,

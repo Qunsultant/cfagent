@@ -31,7 +31,7 @@ import {
 import type { SqlStorage } from "../orm";
 import type { ScreenerRunOutcome } from "./screenerFollowups";
 import type { ScheduledReportInput } from "./scheduledReports";
-import type { JobRunTrigger } from "../data/jobRunRecordPorts";
+import { normalizeJobRunTrigger, type JobRunTrigger } from "../data/jobRunRecordPorts";
 import { createStructuredLogger } from "../observability/structuredLogger";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
 import { DEFAULT_TENANT_PROVIDERS } from "../data/commercialPorts";
@@ -259,7 +259,7 @@ export function recordOptionsRunOutcome(
     recordJobOutcome(sql, {
       id: run.id,
       kind: "options",
-      trigger: run.trigger,
+      trigger: normalizeJobRunTrigger(run.trigger),
       status: run.status,
       scanned: run.scanned,
       matched: run.matched,
@@ -801,7 +801,12 @@ export async function recordOptionsServeReport(
 export interface OptionsOrchestratorRun {
   timestamp: string;
   success: boolean;
-  trigger: JobRunTrigger;
+  //
+  // Issue #5053: the raw dispatch trigger, normalized HERE (not in
+  // orchestrator.ts, which has a standing size budget) so a Run-now
+  // ("triggered") or copilot ("copilot") run is never collapsed to
+  // "scheduled"; anything unrecognized reads as "manual".
+  trigger?: unknown;
   thesis: string;
   symbols: string[];
   withTrades: number;
@@ -827,7 +832,7 @@ export async function recordOptionsOrchestratorRun(
     await recordOptionsRun(deps.storage, {
       timestamp: run.timestamp,
       success: run.success,
-      trigger: run.trigger,
+      trigger: normalizeJobRunTrigger(run.trigger),
       thesis: run.thesis,
       symbols: run.symbols,
       withTrades: run.withTrades,
@@ -858,7 +863,7 @@ export async function recordOptionsOrchestratorRun(
         : `Options analysis failed: ${run.error ?? "unknown error"}.`,
       body: {
         timestamp: run.timestamp,
-        trigger: run.trigger,
+        trigger: normalizeJobRunTrigger(run.trigger),
         thesis: run.thesis,
         success: run.success,
         symbols: run.symbols,
