@@ -1206,7 +1206,8 @@ export class QueryTableDataCommand implements IMcpToolCommand<{
   });
 
   async execute(input: { tableName: string; search?: string; limit?: number; offset?: number }, context: McpToolContext) {
-    if (!ALLOWED_QUERY_TABLES.has(input.tableName)) {
+    const allowUnlisted = (context as { allowUnlistedTables?: boolean }).allowUnlistedTables === true;
+    if (!allowUnlisted && !ALLOWED_QUERY_TABLES.has(input.tableName)) {
       throw new Error(
         `Table '${input.tableName}' is not in ALLOWED_QUERY_TABLES; sensitive audit/financial/settings tables cannot be queried via query_table_data.`,
       );
