@@ -28,6 +28,8 @@ Code and strategy improvements present a fundamental trade-off:
 
 The active mode is managed via an externalized setting (`stock_copilot:rsi_mode`) and switchable conversationally through natural language chat prompts or the `tool_openaimp_stock_copilot_control` MCP door.
 
+**Governed dispatch (#5057).** A proposal's governed pathway is dispatchable, not prose: `fileStockCopilotProposalViaDoor` (reached from the `stock_copilot_introspect` MCP command with `fileProposalGapId` plus `approveProposalFiling: true`) builds the §5 task issue from the proposal's own title, lane, and plan and files it through the existing GitHub filer (`src/services/meshProposalFiler.ts`). Filing requires an explicit human approval and a configured `GITHUB_ISSUE_TOKEN`; without a token it refuses with `proposal_filer_unavailable` instead of pretending to dispatch.
+
 ---
 
 ## 2. GitHub Traceability & Issue Hierarchy

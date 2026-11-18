@@ -206,6 +206,15 @@ export interface Env {
   APP_NAME: string;
   GITHUB_CLIENT_ID: string;
   GITHUB_CLIENT_SECRET: string;
+  // #5057 (AG-3) — the governed RSI pathway's filing leg. When
+  // GITHUB_ISSUE_TOKEN is set, an approved Stock Copilot proposal is filed
+  // as a task issue through the existing proposal filer
+  // (src/services/meshProposalFiler.ts); absent it, filing refuses with
+  // COPILOT_PROPOSAL_FILER_UNAVAILABLE and the proposal stays a draft.
+  // GITHUB_ISSUE_REPO overrides the target repository; the default is a
+  // single named constant in src/services/stockCopilotProposalFiling.ts.
+  GITHUB_ISSUE_TOKEN?: string;
+  GITHUB_ISSUE_REPO?: string;
   // #945 Google-as-plugin — Google OAuth client credentials. Optional:
   // Google login only exists as a wired provider, and its adapter
   // fails closed when these are absent. They are owner-set secrets
