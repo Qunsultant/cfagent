@@ -117,6 +117,10 @@ import {
   type PendingScheduleApproval,
 } from "../services/agentScheduleCapability";
 import { resolveIaaaTenant } from "../security/iaaaGithubEndToEnd";
+import {
+  DEPLOYMENT_DEFAULT_TENANT_ID,
+  DEPLOYMENT_DEFAULT_WORKSPACE_ID,
+} from "../config/tenantDefaults";
 import { resolveEnvironmentConfig } from "../config/environment";
 import { createSocialStoresFromNamespace } from "./social/durableStores";
 // Issue #3543 (Pipeline J1 host wiring, consumed by J2 #3535): the
@@ -3259,7 +3263,7 @@ export class ScheduledAgent extends PortThink {
    * that supplies none is recorded under SCHEDULED_AGENT_AUDIT_ACTOR.
    */
   async reconcileChainScheduleProjection(
-    tenantId: string = "primary",
+    tenantId: string = DEPLOYMENT_DEFAULT_TENANT_ID,
     actor?: string,
   ): Promise<ReconcileReport> {
     const adapter = createChainScheduleAdapter(this.env);
@@ -3278,7 +3282,7 @@ export class ScheduledAgent extends PortThink {
     const report = await reconcileChainSchedules({
       store: adapter,
       tenantId,
-      workspaceId: "primary",
+      workspaceId: DEPLOYMENT_DEFAULT_WORKSPACE_ID,
       nowMs: Date.now(),
       records,
     });

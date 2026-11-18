@@ -348,7 +348,7 @@ describe("feed shard: nasdaq shard result feeds the etrade shard's dependency co
     // The shard passes { runId, userLogin } with no tenant, exactly
     // like the etrade shard — resolveRunContext defaults the tenant
     // to "default", so the chain-linked capture is queried there.
-    const byRun = listCapturesByRun(sql as never, "default", "chain-nasdaq-1368");
+    const byRun = listCapturesByRun(sql as never, "primary", "chain-nasdaq-1368");
     expect(byRun.length).toBe(1);
     expect(byRun[0].providerId).toBe("nasdaq");
   });

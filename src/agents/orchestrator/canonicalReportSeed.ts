@@ -21,6 +21,7 @@ import {
   seedCanonicalReports,
   type SeedCanonicalReportsResult,
 } from "../../data/auditReportProjection";
+import { DEPLOYMENT_DEFAULT_WORKSPACE_ID } from "../../config/tenantDefaults";
 
 export type { SeedCanonicalReportsResult };
 
@@ -76,7 +77,7 @@ export async function runCanonicalReportSeed(
     store: adapter,
     auditStore: adapter,
     tenantId: ctx.tenantId,
-    workspaceId: "primary",
+    workspaceId: DEPLOYMENT_DEFAULT_WORKSPACE_ID,
     reports,
     nowMs: ctx.nowMs,
     writer: "orchestrator:seedCanonicalReports",

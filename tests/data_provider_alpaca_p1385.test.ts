@@ -388,8 +388,8 @@ describe("verifier: verifyAlpacaDataProvider shapes", () => {
     });
     expect(result.ok).toBe(false);
     expect(result.summary).toMatch(/not configured/);
-    expect(listFetchFailures(sql as never, "default").length).toBe(0);
-    expect(listCapturesByProvider(sql as never, "default", "alpaca").length).toBe(0);
+    expect(listFetchFailures(sql as never, "primary").length).toBe(0);
+    expect(listCapturesByProvider(sql as never, "primary", "alpaca").length).toBe(0);
   });
 
   it("configured + conformant provider → ok:true naming all four capabilities", async () => {
@@ -436,7 +436,7 @@ describe("verifier: verifyAlpacaDataProvider shapes", () => {
     expect(result.summary).toMatch(/conformance failed/);
     // The kit probes without a run context, so resolveRunContext
     // defaults the tenant to "default" — the probe rows live there.
-    const failed = listFetchFailures(sql as never, "default");
+    const failed = listFetchFailures(sql as never, "primary");
     expect(failed.length).toBe(4);
     expect(failed.map((r) => r.capability).sort()).toEqual([
       "historicalBars",
