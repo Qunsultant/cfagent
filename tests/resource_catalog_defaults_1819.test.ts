@@ -29,7 +29,8 @@ describe("catalog and defaults (real modules, no mocks)", () => {
       enabled: true,
     });
     expect(byId.get("resource-cap-alert")).toMatchObject({
-      cron: "0 * * * *",
+      // Issue #4253 — daily-defaults directive: was hourly.
+      cron: "0 0 * * *",
       timeZone: "UTC",
       operation: "resource.cap_alert",
       enabled: true,

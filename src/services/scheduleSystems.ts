@@ -37,6 +37,8 @@ export interface ScheduleSystem {
   execution: string;
 }
 
+import { getBuiltinScheduledGoals } from "../config/builtinScheduledGoals";
+
 export const SCHEDULE_SYSTEMS: ScheduleSystem[] = [
   {
     id: "orchestrator-durable-schedules",
@@ -51,7 +53,7 @@ export const SCHEDULE_SYSTEMS: ScheduleSystem[] = [
     id: "scheduled-agent-goals",
     name: "ScheduledAgent goals",
     owner: "ScheduledAgent (src/agents/scheduled-agent.ts, src/schedule.ts)",
-    storage: "ScheduledAgent Durable Object SQL, key 'goals'; seeded from DEFAULT_SCHEDULES only when storage is empty",
+    storage: "ScheduledAgent Durable Object SQL, key 'goals'; seeded from the built-in goals config only when storage is empty",
     creation: "POST /api/schedule/goals (schedule dashboard API); the UI toggle and trigger endpoints share the same store",
     execution:
       "Worker */30 cron tick -> ScheduledAgent onCron -> budget-check via PaymentsAgent -> Orchestrator jobs (except social.publish, executed through the social goal executor)",
@@ -77,19 +79,14 @@ export const CREATABLE_SCHEDULE_CALLBACKS_INVENTORY = [
   "runPipelineJobSchedule",
 ] as const;
 
-/** Mirrors the ids of DEFAULT_SCHEDULES in src/schedule.ts (test-pinned). */
-export const SCHEDULED_GOAL_IDS_INVENTORY = [
-  "daily-qa-sweep",
-  "opportunity-hunt",
-  "daily-social-post",
-  "resource-daily-rollup",
-  "resource-cap-alert",
-  "resource-dashboard-comparison",
-  "index-refresh-wikipedia",
-  "index-refresh-holdings",
-  // Issue #4411: the monthly Autopilot evaluation.
-  "autopilot-monthly-evaluation",
-] as const;
+/**
+ * The ids of the built-in goals config, derived from the config
+ * itself (test-pinned) — never a second handwritten list, so the
+ * inventory cannot drift from the config it describes. Issue
+ * #4411 added the monthly Autopilot evaluation as the ninth id.
+ */
+export const SCHEDULED_GOAL_IDS_INVENTORY: readonly string[] =
+  getBuiltinScheduledGoals().map((goal) => goal.id);
 
 /** Mirrors the crons array in wrangler.jsonc (test-pinned). */
 export const WORKER_CRON_TRIGGERS_INVENTORY = ["0 3 * * *", "*/30 * * * *", "0 4 * * *"] as const;
@@ -120,7 +117,7 @@ export const SCHEDULE_UNIFICATION_ANSWERS: ScheduleUnificationAnswer[] = [
     answer:
       "No. One logical store now holds both (the unified `unified_schedules` table behind the ScheduleStore port), but different creation surfaces (/api/schedule/goals vs /api/schedules/create) and different execution (tick-evaluated, budget-checked job creation vs direct callback wake). Treating a goal id as a schedule id, or vice versa, is a category error.",
     evidence:
-      "src/schedule.ts DEFAULT_SCHEDULES vs src/agents/orchestrator.ts CREATABLE_SCHEDULE_CALLBACKS; src/server.ts scheduled() */30 dispatch; src/data/unifiedSchedulePorts.ts (one record model, kind=goal vs kind=screen).",
+      "config/builtin-scheduled-goals.json (built-in goals) vs src/agents/orchestrator.ts CREATABLE_SCHEDULE_CALLBACKS; src/server.ts scheduled() */30 dispatch; src/data/unifiedSchedulePorts.ts (one record model, kind=goal vs kind=screen).",
   },
   {
     question: "What, if anything, unifies the two user-facing systems today?",

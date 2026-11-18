@@ -29,10 +29,13 @@ import {
   materializeSynthesizedRecord,
 } from "../agentic/chainFiring";
 import {
-  DEFAULT_SCHEDULES,
   type ScheduledGoal,
   type ScheduleTick,
 } from "../schedule";
+import {
+  getBuiltinScheduledGoals,
+  isBuiltinScheduledGoalId,
+} from "../config/builtinScheduledGoals";
 import {
   buildJobRunRecord,
   normalizeJobRunRecord,
@@ -550,8 +553,12 @@ export class ScheduledAgent extends PortThink {
       // No SQL storage: the `"goals"` KV key, unchanged.
       const stored = await this.ctx.storage.get<ScheduledGoal[]>("goals");
       if (!stored) {
-        await this.ctx.storage.put("goals", DEFAULT_SCHEDULES);
-        return { goals: DEFAULT_SCHEDULES, records: [] };
+        // Issue #4253 — seed from the built-in goals config, minus
+        // goals the owner removed (the removal record survives a
+        // re-seed, so a removed goal never resurrects here either).
+        const seedable = await this.seedableBuiltinGoals();
+        await this.ctx.storage.put("goals", seedable);
+        return { goals: [...seedable], records: [] };
       }
       return { goals: stored, records: [] };
     }
@@ -582,13 +589,18 @@ export class ScheduledAgent extends PortThink {
       }
     }
     if (goals.length === 0) {
-      // Seed rule, new home: DEFAULT_SCHEDULES only when empty.
-      // Distinct created_at values (one second apart) preserve the
-      // seed order under the store's created_at ordering.
+      // Seed rule, new home: the built-in goals config, only when
+      // empty — minus goals the owner removed (#4253). The removal
+      // record is the durable "never seed this goal" decision, so
+      // emptying the list (or a redeploy on an empty store) cannot
+      // resurrect a cancelled goal. Distinct created_at values (one
+      // second apart) preserve the seed order under the store's
+      // created_at ordering.
+      const seedable = await this.seedableBuiltinGoals();
       const baseMs = Date.now();
       const seeded: UnifiedScheduleRecord[] = [];
-      for (let i = 0; i < DEFAULT_SCHEDULES.length; i++) {
-        const goal = DEFAULT_SCHEDULES[i];
+      for (let i = 0; i < seedable.length; i++) {
+        const goal = seedable[i];
         try {
           const record = goalToRecord(goal);
           record.createdAt = new Date(baseMs + i * 1000).toISOString();
@@ -599,7 +611,7 @@ export class ScheduledAgent extends PortThink {
           // Seed best-effort; the return below still serves the goals.
         }
       }
-      return { goals: [...DEFAULT_SCHEDULES], records: seeded };
+      return { goals: [...seedable], records: seeded };
     }
     return { goals, records };
   }
@@ -2288,8 +2300,8 @@ export class ScheduledAgent extends PortThink {
           // ETF holdings-file URL is established anywhere in
           // the repo): it fails visibly and stays due instead
           // of fetching from an invented URL, and it ships
-          // DISABLED in DEFAULT_SCHEDULES until the binding
-          // lands (see src/schedule.ts). An all-failed job
+          // DISABLED in the built-in goals config until the binding
+          // lands (see src/config/builtinScheduledGoals.ts). An all-failed job
           // throws into the loop's catch below: tick error,
           // goal stays due — the feed job's rule. A partial
           // job stamps lastRun with its failures named as tick
@@ -2776,6 +2788,41 @@ export class ScheduledAgent extends PortThink {
     return Number.isFinite(atMs) ? atMs : null;
   }
 
+  /**
+   * Issue #4253 — the durable removal record for built-in goals.
+   * Removing a built-in goal is an owner decision that must survive
+   * a re-seed and a redeploy, so the removed ids live under the
+   * `"removedBuiltinGoals"` KV key (the same storage both the SQL
+   * and the no-SQL load paths read), separate from the goal list
+   * itself: the list can empty without losing the decision. The
+   * seed rule (`seedableBuiltinGoals`) and the Seed-all button (via
+   * GET /api/schedule/builtin-goals) both subtract this list. An
+   * explicit re-add of the goal (addGoal) clears its entry, so the
+   * owner can always bring a goal back on purpose.
+   */
+  private async getRemovedBuiltinGoalIds(): Promise<string[]> {
+    const stored = await this.ctx.storage
+      .get<string[]>("removedBuiltinGoals")
+      .catch(() => undefined);
+    if (!Array.isArray(stored)) return [];
+    return stored.filter((id): id is string => typeof id === "string");
+  }
+
+  private async setRemovedBuiltinGoalIds(ids: string[]): Promise<void> {
+    await this.ctx.storage.put("removedBuiltinGoals", [...ids]);
+  }
+
+  /** The config's built-in goals minus the owner-removed ones: what a seed may plant. */
+  private async seedableBuiltinGoals(): Promise<ScheduledGoal[]> {
+    const removed = new Set(await this.getRemovedBuiltinGoalIds());
+    return getBuiltinScheduledGoals().filter((goal) => !removed.has(goal.id));
+  }
+
+  /** Owner-removed built-in goal ids, in removal order. */
+  async listRemovedBuiltinGoalIds(): Promise<string[]> {
+    return this.getRemovedBuiltinGoalIds();
+  }
+
   /** List all scheduled goals. */
   async listGoals(): Promise<ScheduledGoal[]> {
     return this.getGoals();
@@ -2980,6 +3027,17 @@ export class ScheduledAgent extends PortThink {
     };
     goals.push(created);
     await this.saveGoals(goals, records);
+    // Issue #4253 — an explicit re-add of a removed built-in goal
+    // wins over the removal record: the goal comes back and stays
+    // back, so the record entry is cleared now that it is saved.
+    if (isBuiltinScheduledGoalId(created.id)) {
+      const removed = await this.getRemovedBuiltinGoalIds();
+      if (removed.includes(created.id)) {
+        await this.setRemovedBuiltinGoalIds(
+          removed.filter((id) => id !== created.id),
+        );
+      }
+    }
     // Issue #3121 S3 (#3312) — the lifecycle event is emitted by
     // the mutation, not the route: every entry path (route, A2A,
     // mesh door) flows through here. Best-effort; a failed audit
@@ -3003,6 +3061,15 @@ export class ScheduledAgent extends PortThink {
     if (idx < 0) return false;
     goals.splice(idx, 1);
     await this.saveGoals(goals, records);
+    // Issue #4253 — removing a built-in goal is a durable owner
+    // decision: record it so the seed rule (and Seed-all) never
+    // resurrect it. Removing a user goal records nothing.
+    if (isBuiltinScheduledGoalId(id)) {
+      const removed = await this.getRemovedBuiltinGoalIds();
+      if (!removed.includes(id)) {
+        await this.setRemovedBuiltinGoalIds([...removed, id]);
+      }
+    }
     // Issue #3121 S3 (#3312) — only an actual removal is a
     // lifecycle event; a miss is a state answer, not an event.
     await this.auditGoalLifecycle("schedule.goal.removed", id, undefined, actor);
@@ -3037,7 +3104,7 @@ export class ScheduledAgent extends PortThink {
    * Issue #2223 (final slice): A2A door, cfpay signature — the edge
    * dispatcher (src/a2a) resolves the "scheduled" name to this
    * class on the LIVE "default" instance (never the bare name: a
-   * virgin instance would seed DEFAULT_SCHEDULES and serve
+   * virgin instance would seed the built-in goals config and serve
    * plausible-looking wrong state) and calls this with the parsed
    * body + origin (a Request cannot cross the DO RPC boundary).
    * Thin delegation to the dispatch module (./scheduledA2aDispatch);

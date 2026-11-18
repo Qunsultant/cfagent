@@ -1,8 +1,8 @@
 /**
  * Issue #3996 — built-in scheduled goals read endpoint:
  * GET /api/schedule/builtin-goals returns the canonical
- * DEFAULT_SCHEDULES definitions from the server (single source of
- * truth — the client must not carry a second copy of the values).
+ * built-in goals config definitions from the server (single source
+ * of truth — the client must not carry a second copy of the values).
  *
  * Red first: the endpoint does not exist yet.
  *
@@ -79,7 +79,7 @@ describe("built-in scheduled goals endpoint (#3996)", () => {
     expect(res.status).toBe(401);
   });
 
-  it("authenticated GET lists all 8 built-ins with their canonical values", async () => {
+  it("authenticated GET lists all 9 built-ins with their canonical values", async () => {
     const { env } = makeEnv();
     const res = await worker.fetch(req("GET", "/api/schedule/builtin-goals", undefined, SESSION_ID), env);
     expect(res.status).toBe(200);
@@ -109,7 +109,8 @@ describe("built-in scheduled goals endpoint (#3996)", () => {
     expect(byId.get("daily-qa-sweep")?.timeZone).toBeUndefined();
     expect(byId.get("opportunity-hunt")).toMatchObject({
       name: "Opportunity hunt",
-      cron: "0 */6 * * *",
+      // Issue #4253 — daily-defaults directive: was every 6h.
+      cron: "0 7 * * *",
       operation: "search.opportunity_hunt",
       budgetCents: 1000,
       enabled: true,
@@ -131,7 +132,8 @@ describe("built-in scheduled goals endpoint (#3996)", () => {
       timeZone: "UTC",
     });
     expect(byId.get("resource-cap-alert")).toMatchObject({
-      cron: "0 * * * *",
+      // Issue #4253 — daily-defaults directive: was hourly.
+      cron: "0 0 * * *",
       operation: "resource.cap_alert",
       enabled: true,
       timeZone: "UTC",
@@ -164,7 +166,7 @@ describe("built-in scheduled goals endpoint (#3996)", () => {
       enabled: true,
       timeZone: "UTC",
     });
-    // DEFAULT_SCHEDULES order is the seed order.
+    // Config order is the seed order.
     expect(body.goals.map((g) => g.id)).toEqual([
       "daily-qa-sweep",
       "opportunity-hunt",

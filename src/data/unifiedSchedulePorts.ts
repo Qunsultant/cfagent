@@ -51,7 +51,7 @@ export const UNIFIED_SCHEDULES_TABLE = "unified_schedules";
 /**
  * The six schedule kinds, each declared exactly once (3123-P01).
  * - screen: an Agents SDK alarm schedule (creatable callbacks).
- * - goal: a tick-polled ScheduledAgent goal (DEFAULT_SCHEDULES + user goals).
+ * - goal: a tick-polled ScheduledAgent goal (built-in goals config + user goals).
  * - followup: an async-job follow-up chain step. Followup rows are
  *   NOT stored here — their execution record is `mas_async_jobs`
  *   (S4 design); the kind exists so the management service can

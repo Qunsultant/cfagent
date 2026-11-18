@@ -1,7 +1,8 @@
 /**
  * Issue #4411 — the monthly Autopilot evaluation's production path.
  *
- * The monthly schedule (DEFAULT_SCHEDULES `autopilot-monthly-evaluation`,
+ * The monthly schedule (built-in goals config
+ * `autopilot-monthly-evaluation`,
  * operation `autopilot.evaluate`) calls the existing
  * POST /api/autopilot/evaluate path on the OrchestratorAgent — the same
  * endpoint the manual Run Policy Check button calls — with the same

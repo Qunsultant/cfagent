@@ -70,143 +70,23 @@ export interface ScheduleTick {
   errors: string[];
 }
 
+import { getBuiltinScheduledGoals } from "./config/builtinScheduledGoals";
+
 /**
  * Default schedules. Goals themselves live in the ScheduledAgent's
  * SQL; these are the built-in evaluations that ship with the system.
  * Stored goals are seeded from this list only when storage is empty,
  * so adding an entry here does not inject it into already-running
  * deployments — an operator adds it via the schedule dashboard API.
+ *
+ * Issue #4253 — the values live in
+ * `config/builtin-scheduled-goals.json`, read through
+ * `src/config/builtinScheduledGoals.ts`; this export is a derived
+ * alias (no literals remain here), kept so the existing pins and
+ * readers keep compiling. The per-goal rationale moved to the
+ * config port's header with the values.
  */
-export const DEFAULT_SCHEDULES: ScheduledGoal[] = [
-  {
-    id: "daily-qa-sweep",
-    name: "Daily QA sweep",
-    cron: "0 6 * * *",
-    operation: "qa.run_sweep",
-    budgetCents: 500,
-    enabled: true,
-  },
-  {
-    id: "opportunity-hunt",
-    name: "Opportunity hunt",
-    cron: "0 */6 * * *",
-    operation: "search.opportunity_hunt",
-    budgetCents: 1000,
-    enabled: true,
-  },
-  {
-    // #1077 Phase 5b slice 1: the social posting schedule, shipped
-    // DISABLED. The owner enables it via the schedule dashboard API
-    // (POST /api/schedule/goals or the enabled toggle) once tokens and
-    // a content source are in place. budgetCents is a cap, not a
-    // charge: posting spends nothing, so the 1-cent floor exists only
-    // because addGoal requires a positive budget.
-    id: "daily-social-post",
-    name: "Daily social post",
-    cron: "0 9 * * 1-5",
-    timeZone: "America/New_York",
-    operation: "social.publish",
-    budgetCents: 1,
-    enabled: false,
-  },
-  {
-    // #1819 rollup slice: resource measurement goals. Canonical
-    // definitions: fresh deployments seed from here; the running
-    // deployment needs operator dashboard-API adds (see the rollup
-    // doc). All timeZone "UTC" explicitly — the rollup day is the UTC
-    // calendar day (Cloudflare D1 midnight-UTC reset; DO metering
-    // matches D1). Rollup 01:30 UTC = 90-minute buffer after midnight
-    // for in-flight writes; comparison 02:00 UTC = after the rollup;
-    // alert hourly. The alert goal never stamps lastRun by design
-    // (isDue's 23h guard would suppress hourly evaluation) — dedup
-    // lives in alert state per (budget, day).
-    id: "resource-daily-rollup",
-    name: "SessionStore daily resource rollup",
-    cron: "30 1 * * *",
-    operation: "resource.rollup_daily",
-    budgetCents: 1,
-    enabled: true,
-    timeZone: "UTC",
-  },
-  {
-    id: "resource-cap-alert",
-    name: "SessionStore 70% cap alert",
-    cron: "0 * * * *",
-    operation: "resource.cap_alert",
-    budgetCents: 1,
-    enabled: true,
-    timeZone: "UTC",
-  },
-  {
-    id: "resource-dashboard-comparison",
-    name: "SessionStore dashboard comparison",
-    cron: "0 2 * * *",
-    operation: "resource.dashboard_comparison",
-    budgetCents: 1,
-    enabled: true,
-    timeZone: "UTC",
-  },
-  {
-    // #1980 index-list refresh goals. Canonical definitions:
-    // fresh deployments seed from here; the running deployment
-    // needs operator dashboard-API adds (the #1819 pattern) —
-    // adding an entry here does not inject it into an already-
-    // running deployment. Both run on the existing */30 tick;
-    // no new scheduler, no new wrangler cron triggers.
-    // Wikipedia weekly (Sunday 04:00 UTC): the Wikipedia
-    // indices — dow, sp500, sp100, nasdaq100, sp400 (#2962),
-    // and the 11 GICS sector keys (#2962, filtered from the
-    // S&P 500 table's GICS Sector column) — within the #1852
-    // 10-day freshness cap. The production path is live: D1
-    // store via AGENT_DB + global fetch over the adapter's own
-    // Wikipedia URLs.
-    // Holdings daily (03:00 UTC) ships DISABLED, the
-    // daily-social-post precedent: no ETF holdings-file fetcher
-    // binding exists in code (no holdings URL is established
-    // anywhere in the repo, and none is invented here), so
-    // enabling it would tick-error daily. The operator enables
-    // it via Settings → Scheduled goals once the holdings
-    // fetcher is bound (see docs/architecture/security/
-    // index-list-snapshots-1980.md); forced triggerGoal still
-    // exercises it before then. #2962 adds russell3000 (IWB +
-    // IWM union) to this disabled group — its stored refresh
-    // is a carried item until the binding lands.
-    id: "index-refresh-wikipedia",
-    name: "Index-list refresh (Wikipedia)",
-    cron: "0 4 * * 0",
-    operation: "index.refresh_wikipedia",
-    budgetCents: 1,
-    enabled: true,
-    timeZone: "UTC",
-  },
-  {
-    id: "index-refresh-holdings",
-    name: "Index-list refresh (ETF holdings)",
-    cron: "0 3 * * *",
-    operation: "index.refresh_holdings",
-    budgetCents: 1,
-    enabled: false,
-    timeZone: "UTC",
-  },
-  {
-    id: "autopilot-monthly-evaluation",
-    name: "Autopilot monthly evaluation",
-    cron: "0 9 1 * *",
-    timeZone: "UTC",
-    operation: "autopilot.evaluate",
-    budgetCents: 1,
-    // Issue #4411 (sub-issue of #3121) — the one Autopilot schedule:
-    // a monthly run of the policy-envelope evaluation (dry-run only,
-    // never places orders), listed and configurable on the Schedules
-    // home. Monthly is exactly at the platform's 30-day interval cap,
-    // so no staleness threshold is attached to its outputs (#4306
-    // trap: a cadence-blind stale window would read STALE ~29.9 days
-    // out of 30). The watchdog's previousCronTickMs has no
-    // attributable tick for a monthly cron, so it never flags this
-    // schedule as missed.
-    enabled: true,
-  },
-];
+export const DEFAULT_SCHEDULES: ScheduledGoal[] = getBuiltinScheduledGoals();
 
 /** Weekday convention: 0 = Sunday … 6 = Saturday (JS Date convention). */
 const WEEKDAY_NAMES = [
@@ -355,10 +235,12 @@ export function isValidCron(cron: string): boolean {
  * Without a timeZone this is the historical behavior, preserved
  * byte-for-byte: minimal parser supporting the built-in schedules
  * ("minute hour * * *") read in UTC, day fields ignored. That
- * includes the opportunity-hunt quirk: "0 *\/6 * * *" maps the hour
- * through Number() to NaN and is therefore NEVER due. The quirk is
- * deliberately preserved here, not fixed — fixing it would change
- * the firing behavior of a shipped goal.
+ * includes the step-hour quirk: a cron like "0 *\/6 * * *" maps the
+ * hour through Number() to NaN and is therefore NEVER due. The
+ * quirk is deliberately preserved here, not fixed — fixing it would
+ * change the firing behavior of a shipped goal. (No built-in goal
+ * uses a step hour anymore — #4253 made opportunity-hunt daily —
+ * but the branch behavior stays, pinned by tests.)
  *
  * With a timeZone, the cron is matched against wall-clock parts in
  * that zone, with lists, ranges, and steps in every field and weekday
@@ -408,7 +290,7 @@ export function isDue(
  *
  * - Without a timeZone the no-timeZone branch is mirrored exactly
  *   (minute/hour only, day fields ignored; a non-numeric minute or
- *   hour — the opportunity-hunt step-hour quirk — has no tick,
+ *   hour — the step-hour quirk, e.g. "0 *\/6 * * *" — has no tick,
  *   exactly as isDue never fires it).
  * - With a timeZone the full field match runs against wall-clock
  *   parts in that zone (lists, ranges, steps, weekdays; 7 is Sunday).
