@@ -1,7 +1,7 @@
 import React from "react";
-import { Badge, Button, CardHeader, Modal, Notice, TextInput } from "../components/ui";
+import { Badge, Button, CardHeader, Checkbox, Modal, Notice, TextInput } from "../components/ui";
 import type { ScheduledTaskItem } from "./types";
-import { FREQUENCY_PRESETS, cadenceText } from "./format";
+import { FREQUENCY_PRESETS, cadenceNeedsOptIn, cadenceText } from "./format";
 import { scheduleTitle } from "./scheduleDetail";
 
 export interface CadenceModalProps {
@@ -10,7 +10,7 @@ export interface CadenceModalProps {
   error: string | null;
   onApply: (
     item: ScheduledTaskItem,
-    body: { scheduleType: "interval" | "cron"; intervalSeconds?: number; cron?: string }
+    body: { scheduleType: "interval" | "cron"; intervalSeconds?: number; cron?: string; subDailyOptIn?: boolean }
   ) => Promise<void>;
   onClose: () => void;
 }
@@ -28,12 +28,27 @@ function isIntervalOnly(item: ScheduledTaskItem): boolean {
 
 export function CadenceModal({ item, busy, error, onApply, onClose }: CadenceModalProps) {
   const [customCron, setCustomCron] = React.useState("");
+  // Issue #4235 — the owner's explicit opt-in to a sub-daily
+  // cadence. Hydrated from the schedule's current cadence (a
+  // sub-daily schedule was already opted in); a picked preset or
+  // custom cron applies with it when checked.
+  const [subDailyOptIn, setSubDailyOptIn] = React.useState(false);
 
   React.useEffect(() => {
-    if (item) setCustomCron("");
+    if (item) {
+      setCustomCron("");
+      setSubDailyOptIn(
+        cadenceNeedsOptIn(
+          item.type,
+          item.type === "interval" ? item.intervalSeconds : item.type === "cron" ? item.cron : undefined,
+        ),
+      );
+    }
   }, [item?.id]);
 
   if (!item) return null;
+
+  const optIn = subDailyOptIn ? { subDailyOptIn: true as const } : {};
 
   return (
     <Modal
@@ -85,7 +100,7 @@ export function CadenceModal({ item, busy, error, onApply, onClose }: CadenceMod
               variant="secondary"
               size="sm"
               disabled={busy}
-              onClick={() => onApply(item, { ...preset.body })}
+              onClick={() => onApply(item, { ...preset.body, ...optIn })}
               title={`Set cadence to ${preset.label}`}
             >
               {preset.label}
@@ -120,7 +135,7 @@ export function CadenceModal({ item, busy, error, onApply, onClose }: CadenceMod
               variant="primary"
               disabled={busy || !customCron.trim()}
               loading={busy}
-              onClick={() => onApply(item, { scheduleType: "cron", cron: customCron.trim() })}
+              onClick={() => onApply(item, { scheduleType: "cron", cron: customCron.trim(), ...optIn })}
             >
               Apply cron
             </Button>
@@ -131,6 +146,22 @@ export function CadenceModal({ item, busy, error, onApply, onClose }: CadenceMod
           </p>
         </section>
       )}
+
+      <section className="sched-detail-section">
+        <CardHeader title="More than once per day" />
+        <Checkbox
+          id="sched-cadence-sub-daily-opt-in"
+          label="Run more than once per day (explicit opt-in)"
+          checked={subDailyOptIn}
+          disabled={busy}
+          onChange={(event) => setSubDailyOptIn(event.target.checked)}
+        />
+        <p className="sched-detail-note">
+          Sub-daily cadences cost more compute and are off by default — check
+          the box to opt this schedule in explicitly before picking a
+          sub-daily preset or cron. The opt-in is recorded on the schedule.
+        </p>
+      </section>
     </Modal>
   );
 }

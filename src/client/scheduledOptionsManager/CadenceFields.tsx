@@ -1,8 +1,8 @@
 import React from "react";
 import { etToUtcCron } from "../options/cronTime";
-import { Select, TextInput, Button } from "../components/ui";
+import { Checkbox, Select, TextInput, Button } from "../components/ui";
 import type { ScheduleMode } from "./types";
-import { CRON_PRESETS, INTERVAL_PRESETS } from "./format";
+import { CRON_PRESETS, INTERVAL_PRESETS, cadenceNeedsOptIn } from "./format";
 
 export interface CadenceFieldsProps {
   scheduleType: ScheduleMode;
@@ -15,6 +15,14 @@ export interface CadenceFieldsProps {
   setDelaySeconds: React.Dispatch<React.SetStateAction<number>>;
   scheduledDate: string;
   setScheduledDate: React.Dispatch<React.SetStateAction<string>>;
+  /**
+   * Issue #4235 — the owner's explicit opt-in to a sub-daily
+   * cadence for this schedule. The checkbox below offers it exactly
+   * when the current cadence needs it; the form submits it only
+   * when checked.
+   */
+  subDailyOptIn: boolean;
+  setSubDailyOptIn: React.Dispatch<React.SetStateAction<boolean>>;
 }
 
 export function CadenceFields(props: CadenceFieldsProps) {
@@ -29,7 +37,20 @@ export function CadenceFields(props: CadenceFieldsProps) {
     setDelaySeconds,
     scheduledDate,
     setScheduledDate,
+    subDailyOptIn,
+    setSubDailyOptIn,
   } = props;
+  // Issue #4235 — the opt-in control appears exactly when the
+  // current cadence runs more than once per day; daily-or-less
+  // cadences need no opt-in and show none.
+  const needsOptIn = cadenceNeedsOptIn(
+    scheduleType,
+    scheduleType === "interval"
+      ? intervalSeconds
+      : scheduleType === "cron"
+        ? cronExpression
+        : undefined,
+  );
   return (
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-4)" }}>
                 <div className="sched-form-group">
@@ -86,7 +107,13 @@ export function CadenceFields(props: CadenceFieldsProps) {
                           className="preset-chip"
                           onClick={() =>
                             setCronExpression(
-                              etToUtcCron({ hour: p.etHour, minute: p.etMinute, daysOfWeek: p.daysOfWeek })
+                              etToUtcCron({
+                                hour: p.etHour,
+                                minute: p.etMinute,
+                                ...(p.daysOfWeek !== undefined ? { daysOfWeek: p.daysOfWeek } : {}),
+                                ...(p.dayOfMonth !== undefined ? { dayOfMonth: p.dayOfMonth } : {}),
+                                ...(p.month !== undefined ? { month: p.month } : {}),
+                              })
                             )
                           }
                         >
@@ -128,6 +155,23 @@ export function CadenceFields(props: CadenceFieldsProps) {
                     />
                     <p className="sched-preset-note">
                       Runs once at the chosen date and time (your local time).
+                    </p>
+                  </div>
+                )}
+
+                {needsOptIn && (
+                  <div className="sched-form-group">
+                    <Checkbox
+                      id="sched-sub-daily-opt-in"
+                      label="Run more than once per day (explicit opt-in)"
+                      checked={subDailyOptIn}
+                      onChange={(e) => setSubDailyOptIn(e.target.checked)}
+                    />
+                    <p className="sched-preset-note">
+                      This cadence runs more than once per day, which costs
+                      more compute. It is off by default — check the box to
+                      opt this schedule in explicitly. The opt-in is recorded
+                      on the schedule.
                     </p>
                   </div>
                 )}

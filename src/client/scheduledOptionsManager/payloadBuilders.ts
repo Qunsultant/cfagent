@@ -240,6 +240,13 @@ export interface ScheduleCadenceInput {
   cronExpression?: string;
   delaySeconds?: number;
   scheduledDate?: string;
+  /**
+   * Issue #4235 — the owner's explicit opt-in to a sub-daily
+   * cadence. Threaded only when true: an absent/false opt-in adds
+   * no key, so golden bodies for daily-or-less schedules are
+   * unchanged.
+   */
+  subDailyOptIn?: boolean;
 }
 
 function applyScheduleCadence(
@@ -258,6 +265,10 @@ function applyScheduleCadence(
     }
     requestBody.date = new Date(cadence.scheduledDate).toISOString();
   }
+  // Issue #4235 — only when set: the default form submits no
+  // opt-in field, and the server stamps the recorded opt-in from
+  // this key when the cadence needs it.
+  if (cadence.subDailyOptIn === true) requestBody.subDailyOptIn = true;
   return null;
 }
 

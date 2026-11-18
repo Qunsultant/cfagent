@@ -208,6 +208,9 @@ describe("POST /api/schedules/create (#111)", () => {
     const { status, body } = await postCreate(agent, {
       scheduleType: "interval",
       intervalSeconds: 3600,
+      // Issue #4235 — a 3600s interval is sub-daily, so creation
+      // carries the explicit per-schedule opt-in.
+      subDailyOptIn: true,
       callback: "autonomousOptionsAnalysis",
       payload,
     });
@@ -227,6 +230,8 @@ describe("POST /api/schedules/create (#111)", () => {
       brokerId: "etrade",
       dataProviderId: "alpaca",
       mode: "paper",
+      // Issue #4235 — the recorded opt-in rides the stored payload.
+      subDailyOptIn: true,
       // Issue #3121 S1 — creation provenance travels in the armed
       // payload; createdAt is minted at create time, pinned by shape.
       provenance: expect.objectContaining({
@@ -268,6 +273,9 @@ describe("POST /api/schedules/create (#111)", () => {
     const screen = await postCreate(agent, {
       scheduleType: "interval",
       intervalSeconds: 300,
+      // Issue #4235 — a 300s interval is sub-daily, so creation
+      // carries the explicit per-schedule opt-in.
+      subDailyOptIn: true,
       callback: "autonomousMarketScreen",
       payload: { sector: "Technology", universe: "LEV_ETF", maxItems: 29 },
     });
@@ -281,6 +289,8 @@ describe("POST /api/schedules/create (#111)", () => {
       brokerId: "etrade",
       dataProviderId: "alpaca",
       mode: "paper",
+      // Issue #4235 — the recorded opt-in rides the stored payload.
+      subDailyOptIn: true,
       // Issue #3121 S1 — creation provenance travels in the armed
       // payload; createdAt is minted at create time, pinned by shape.
       provenance: expect.objectContaining({
@@ -305,7 +315,10 @@ describe("POST /api/schedules/create (#111)", () => {
   });
 
   it.each([
-    ["interval", { scheduleType: "interval", intervalSeconds: 3600 }],
+    // Issue #4235 — the interval case is sub-daily, so it carries
+    // the explicit opt-in: the 503 under test comes from the SDK
+    // throwing, not from validation.
+    ["interval", { scheduleType: "interval", intervalSeconds: 3600, subDailyOptIn: true }],
     ["cron", { scheduleType: "cron", cron: "0 3 * * *" }],
     ["scheduled", { scheduleType: "scheduled", date: "2026-10-20T14:00:00.000Z" }],
     ["delayed", { delayInSeconds: 60 }],
@@ -381,6 +394,9 @@ describe("POST /api/schedules/create (#111)", () => {
     const body = {
       scheduleType: "interval",
       intervalSeconds: 3600,
+      // Issue #4235 — a 3600s interval is sub-daily, so creation
+      // carries the explicit per-schedule opt-in.
+      subDailyOptIn: true,
       callback: "autonomousOptionsAnalysis",
       payload: { symbols: ["NVDA"], thesis: "bullish" },
     };
@@ -407,5 +423,59 @@ describe("POST /api/schedules/create (#111)", () => {
     expect(duplicate.body.duplicate).toBe(true);
     expect(duplicate.body.schedule.id).toBe("existing-1");
     expect(scheduleEveryCalls).toHaveLength(armed);
+  });
+
+  describe("default daily cap, opt-in for finer cadence (#4235)", () => {
+    const optionsBody = (extra: Record<string, unknown>) => ({
+      callback: "autonomousOptionsAnalysis",
+      payload: { symbols: ["NVDA"], thesis: "bullish" },
+      ...extra,
+    });
+
+    it("rejects a sub-daily interval without the opt-in and arms nothing", async () => {
+      const agent = makeAgent();
+      const { status, body } = await postCreate(agent, optionsBody({ scheduleType: "interval", intervalSeconds: 3600 }));
+      expect(status).toBe(400);
+      expect(body.success).toBe(false);
+      expect(body.error).toMatch(/opt-in/i);
+      expect(scheduleEveryCalls).toHaveLength(0);
+    });
+
+    it("arms a sub-daily interval with the opt-in", async () => {
+      const agent = makeAgent();
+      const { status, body } = await postCreate(
+        agent,
+        optionsBody({ scheduleType: "interval", intervalSeconds: 3600, subDailyOptIn: true }),
+      );
+      expect(status).toBe(200);
+      expect(body.success).toBe(true);
+      expect(scheduleEveryCalls).toHaveLength(1);
+    });
+
+    it("rejects a sub-daily cron without the opt-in and arms nothing", async () => {
+      const agent = makeAgent();
+      const { status, body } = await postCreate(agent, optionsBody({ scheduleType: "cron", cron: "0 * * * *" }));
+      expect(status).toBe(400);
+      expect(body.success).toBe(false);
+      expect(body.error).toMatch(/opt-in/i);
+      expect(scheduleCalls).toHaveLength(0);
+    });
+
+    it("arms a monthly cron without any opt-in", async () => {
+      const agent = makeAgent();
+      const { status, body } = await postCreate(agent, optionsBody({ scheduleType: "cron", cron: "0 9 1 * *" }));
+      expect(status).toBe(200);
+      expect(body.success).toBe(true);
+      expect(scheduleCalls).toHaveLength(1);
+      expect(scheduleCalls[0][0]).toBe("0 9 1 * *");
+    });
+
+    it("rejects an out-of-range cron with 400 instead of a 503 from the SDK", async () => {
+      const agent = makeAgent();
+      const { status, body } = await postCreate(agent, optionsBody({ scheduleType: "cron", cron: "99 99 * * *" }));
+      expect(status).toBe(400);
+      expect(body.success).toBe(false);
+      expect(scheduleCalls).toHaveLength(0);
+    });
   });
 });

@@ -65,6 +65,7 @@ import {
   buildGoalScheduleAuditEvent,
   buildLedgerLinkage,
   isDue,
+  isSubDailyCron,
   isValidCron,
   postGoalScheduleAuditEvent,
   provenanceFromPayload,
@@ -1844,7 +1845,7 @@ export class ScheduledAgent extends PortThink {
       if (!goal.enabled && !isForced) continue;
       tick.goalsEvaluated++;
 
-      if (!isForced && !isDue(goal.cron, goal.lastRun, now, goal.timeZone)) continue;
+      if (!isForced && !isDue(goal.cron, goal.lastRun, now, goal.timeZone, { subDailyOptIn: goal.subDailyOptIn === true })) continue;
 
       // Issue #2964: per-run record inputs for this firing. `started`
       // is captured before the branch; each terminal point records
@@ -2222,12 +2223,13 @@ export class ScheduledAgent extends PortThink {
           if (goal.operation === "resource.cap_alert") {
             // The alert branch NEVER stamps lastRun, deliberately:
             // isDue's 23h guard would otherwise suppress hourly
-            // evaluation for 23h after any stamp, and no sub-daily
-            // goal can work through lastRun stamping in this codebase
-            // today. Delivery dedup lives in alert state per (budget,
-            // day), not in goal state — so both the :00 and :30 ticks
-            // match the hourly cron (minute-tolerance rule) and the
-            // second evaluation is a deduped no-op.
+            // evaluation for 23h after any stamp. Sub-daily goals
+            // work through the #4235 opt-in's per-tick guard, not
+            // through lastRun stamping. Delivery dedup lives in
+            // alert state per (budget, day), not in goal state — so
+            // both the :00 and :30 ticks match the hourly cron
+            // (minute-tolerance rule) and the second evaluation is
+            // a deduped no-op.
             const result = await runResourceCapAlert({
               db,
               nowMs: now.getTime(),
@@ -2973,6 +2975,13 @@ export class ScheduledAgent extends PortThink {
     timeZone?: string;
     provenance?: unknown;
     /**
+     * Issue #4235 — explicit owner opt-in to a sub-daily cadence
+     * for this goal. Without it a sub-daily cron is refused (the
+     * default is at most once per day); with it the opt-in is
+     * recorded on the goal and the tick's per-tick guard applies.
+     */
+    subDailyOptIn?: boolean;
+    /**
      * Issue #3121 S3 (#3312) — the acting principal for the
      * lifecycle audit event, threaded by the entry path (the
      * session login on the route path, the edge-authenticated
@@ -2985,7 +2994,7 @@ export class ScheduledAgent extends PortThink {
     if (!id) throw new Error("Goal id is required.");
     if (!goal.name.trim()) throw new Error("Goal name is required.");
     if (!isValidCron(goal.cron.trim())) {
-      throw new Error("Cron must look like 'minute hour * * *' (e.g. '0 6 * * *').");
+      throw new Error("Cron must be a valid 5-field cron expression (e.g. '0 6 * * *').");
     }
     let timeZone: string | undefined;
     if (goal.timeZone !== undefined && goal.timeZone !== "") {
@@ -3006,6 +3015,16 @@ export class ScheduledAgent extends PortThink {
     const { OPERATION_CATALOG } = await import("../orchestrate");
     const known = OPERATION_CATALOG.some((e) => e.operations.includes(goal.operation));
     if (!known) throw new Error(`Unknown operation: ${goal.operation}`);
+    // Issue #4235 — granularity first: the default is at most once
+    // per day. A sub-daily cron needs the explicit per-schedule
+    // opt-in, recorded on the goal below. Checked after the
+    // operation check so an unknown operation still reports as such.
+    const subDailyOptIn = goal.subDailyOptIn === true;
+    if (isSubDailyCron(goal.cron.trim()) && !subDailyOptIn) {
+      throw new Error(
+        `Sub-daily cron '${goal.cron.trim()}' runs more than once per day: pass subDailyOptIn: true to opt-in explicitly.`,
+      );
+    }
     // Issue #3121 S1 — creation provenance travels with the goal.
     // Validated, never trusted raw: a malformed stamp is dropped,
     // and a goal created without one simply has none ("not
@@ -3024,6 +3043,9 @@ export class ScheduledAgent extends PortThink {
       enabled: goal.enabled !== false,
       ...(timeZone ? { timeZone } : {}),
       ...(provenance ? { provenance } : {}),
+      // Issue #4235 — the opt-in is recorded only when it was
+      // needed (a sub-daily cron): a daily goal never carries it.
+      ...(subDailyOptIn && isSubDailyCron(goal.cron.trim()) ? { subDailyOptIn: true } : {}),
     };
     goals.push(created);
     await this.saveGoals(goals, records);

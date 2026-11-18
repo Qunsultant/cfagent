@@ -28,6 +28,16 @@ export interface ScheduledGoal {
    */
   timeZone?: string;
   /**
+   * Issue #4235 — explicit per-schedule opt-in to a sub-daily
+   * cadence. Absent (the default) means the schedule runs at most
+   * once per day: a sub-daily cron is capped by isDue's 23h guard,
+   * and creation/update refuse a sub-daily timing without this flag.
+   * Set only by an explicit owner opt-in, recorded here at creation
+   * (addGoal) or update (resolveScheduleUpdate) — never inferred,
+   * never defaulted.
+   */
+  subDailyOptIn?: boolean;
+  /**
    * Issue #3121 S1 — creation provenance (#2366 items 3–4, on the
    * consolidated path). Stamped at creation by the creating route;
    * carried with the goal thereafter. Absent on legacy goals whose
@@ -181,6 +191,7 @@ function isDueInZone(
   lastRun: string | undefined,
   now: Date,
   timeZone: string,
+  opts?: IsDueOptions,
 ): boolean {
   const fields = cron.trim().split(/\s+/);
   if (fields.length !== 5) return false;
@@ -203,11 +214,7 @@ function isDueInZone(
   if (!days.has(parts.day)) return false;
   if (!months.has(parts.month)) return false;
   if (!weekdays.has(parts.weekday)) return false;
-  if (lastRun) {
-    const last = new Date(lastRun).getTime();
-    if (now.getTime() - last < 23 * 60 * 60 * 1000) return false;
-  }
-  return true;
+  return dueGuardPassed(cron, lastRun, now, timeZone, opts);
 }
 
 /**
@@ -229,49 +236,125 @@ export function isValidCron(cron: string): boolean {
   return fields.every((field, i) => expandField(field, ranges[i][0], ranges[i][1]) !== null);
 }
 
+/** Seconds in one day — the default granularity ceiling (issue #4235). */
+export const SECONDS_PER_DAY = 86400;
+
+/**
+ * Issue #4235 — how many times a cron can fire per day: the number
+ * of (minute, hour) pairs its first two fields expand to. Day fields
+ * restrict WHICH days fire, never the per-day count. Undefined for
+ * an invalid cron.
+ */
+export function cronRunsPerDay(cron: string): number | undefined {
+  if (!isValidCron(cron)) return undefined;
+  const fields = cron.trim().split(/\s+/);
+  const minutes = expandField(fields[0], 0, 59);
+  const hours = expandField(fields[1], 0, 23);
+  if (!minutes || !hours) return undefined;
+  return minutes.size * hours.size;
+}
+
+/**
+ * Issue #4235 — true exactly when a cron can fire more than once a
+ * day (and false for an invalid cron, which can never fire).
+ */
+export function isSubDailyCron(cron: string): boolean {
+  return (cronRunsPerDay(cron) ?? 0) > 1;
+}
+
+/**
+ * Issue #4235 — true exactly for intervals under one day (and above
+ * zero): a second or less is not an interval, a day or more is not
+ * sub-daily.
+ */
+export function isSubDailyInterval(seconds: number): boolean {
+  return Number.isFinite(seconds) && seconds > 0 && seconds < SECONDS_PER_DAY;
+}
+
+/**
+ * Issue #4235 — the isDue evaluation options. `subDailyOptIn` is the
+ * schedule's recorded opt-in to a sub-daily cadence: without it the
+ * 23h guard caps every schedule at one firing per day; with it the
+ * guard is per-tick — the schedule fires when its most recent
+ * scheduled tick is after its last run, and not twice in one tick.
+ */
+export interface IsDueOptions {
+  subDailyOptIn?: boolean;
+}
+
+/**
+ * The anti-double-fire guard, shared by both isDue branches. Default
+ * (no opt-in): no firing within 23 hours of the last run — the daily
+ * ceiling. Opted in: the most recent scheduled tick must be after
+ * the last run, so a sub-daily schedule fires on its next tick and
+ * never twice in one tick. Fail-closed: no attributable tick means
+ * not due.
+ */
+function dueGuardPassed(
+  cron: string,
+  lastRun: string | undefined,
+  now: Date,
+  timeZone: string | undefined,
+  opts?: IsDueOptions,
+): boolean {
+  if (!lastRun) return true;
+  const last = new Date(lastRun).getTime();
+  if (opts?.subDailyOptIn === true) {
+    const prevTick = previousCronTickMs(cron, now.getTime(), timeZone);
+    if (prevTick === undefined) return false;
+    return last < prevTick;
+  }
+  return now.getTime() - last >= 23 * 60 * 60 * 1000;
+}
+
 /**
  * Check whether a cron expression is due given the last run time.
  *
- * Without a timeZone this is the historical behavior, preserved
- * byte-for-byte: minimal parser supporting the built-in schedules
- * ("minute hour * * *") read in UTC, day fields ignored. That
- * includes the step-hour quirk: a cron like "0 *\/6 * * *" maps the
- * hour through Number() to NaN and is therefore NEVER due. The
- * quirk is deliberately preserved here, not fixed — fixing it would
- * change the firing behavior of a shipped goal. (No built-in goal
- * uses a step hour anymore — #4253 made opportunity-hunt daily —
- * but the branch behavior stays, pinned by tests.)
- *
- * With a timeZone, the cron is matched against wall-clock parts in
- * that zone, with lists, ranges, and steps in every field and weekday
- * matching (0 = Sunday … 6 = Saturday, 7 also Sunday). isDue never
- * throws: an unparseable cron or an unknown zone returns false.
+ * Issue #4235 — both branches honor all five cron fields (lists,
+ * ranges, and steps in every field; weekday 7 is also Sunday), with
+ * the same minute-tolerance window: any tick inside the matching
+ * hour at or after a scheduled minute counts as due. The historical
+ * no-timeZone branch used to read minute/hour only (day fields
+ * ignored) and never fired a step hour ("0 *\/6 * * *" mapped
+ * through Number() to NaN); that quirk is gone — the step hours
+ * fire, and a monthly cron fires monthly, not daily. The 23h guard
+ * still caps every schedule at one firing per day by default; a
+ * recorded sub-daily opt-in (opts.subDailyOptIn) switches the guard
+ * to per-tick instead (see dueGuardPassed). isDue never throws: an
+ * unparseable cron or an unknown zone returns false.
  */
 export function isDue(
   cron: string,
   lastRun: string | undefined,
   now: Date,
   timeZone?: string,
+  opts?: IsDueOptions,
 ): boolean {
   if (timeZone === undefined) {
-    const [minute, hour] = cron.split(" ").map(Number);
-    if (Number.isNaN(minute) || Number.isNaN(hour)) return false;
-
-    const currentHour = now.getUTCHours();
-    const currentMinute = now.getUTCMinutes();
-
-    // Due if we're in the target hour/minute window
-    if (currentHour !== hour || currentMinute < minute) return false;
-
-    // And we haven't run in the last 23 hours (avoid double-fire)
-    if (lastRun) {
-      const last = new Date(lastRun).getTime();
-      if (now.getTime() - last < 23 * 60 * 60 * 1000) return false;
-    }
-    return true;
+    const fields = cron.trim().split(/\s+/);
+    if (fields.length !== 5) return false;
+    const [minuteField, hourField, domField, monthField, dowField] = fields;
+    const minutes = expandField(minuteField, 0, 59);
+    const hours = expandField(hourField, 0, 23);
+    const days = expandField(domField, 1, 31);
+    const months = expandField(monthField, 1, 12);
+    const weekdaysRaw = expandField(dowField, 0, 7);
+    if (!minutes || !hours || !days || !months || !weekdaysRaw) return false;
+    // Cron convention: 7 is also Sunday.
+    const weekdays = new Set([...weekdaysRaw].map((d) => (d === 7 ? 0 : d)));
+    // Minute window rule (same tolerance as the zoned branch): any
+    // tick inside the matching hour at or after a scheduled minute
+    // counts as due.
+    const minuteDue = [...minutes].some((m) => m <= now.getUTCMinutes());
+    if (!minuteDue) return false;
+    if (!hours.has(now.getUTCHours())) return false;
+    if (!days.has(now.getUTCDate())) return false;
+    if (!months.has(now.getUTCMonth() + 1)) return false;
+    if (!weekdays.has(now.getUTCDay())) return false;
+    return dueGuardPassed(cron, lastRun, now, undefined, opts);
   }
   try {
-    return isDueInZone(cron, lastRun, now, timeZone);
+    return isDueInZone(cron, lastRun, now, timeZone, opts);
   } catch {
     return false;
   }
@@ -288,10 +371,10 @@ export function isDue(
  * never flagged as missed, and a schedule it should have fired is
  * flagged exactly once per tick.
  *
- * - Without a timeZone the no-timeZone branch is mirrored exactly
- *   (minute/hour only, day fields ignored; a non-numeric minute or
- *   hour — the step-hour quirk, e.g. "0 *\/6 * * *" — has no tick,
- *   exactly as isDue never fires it).
+ * - Without a timeZone the UTC read honors all five fields (lists,
+ *   ranges, steps, weekdays; 7 is Sunday) — the same match isDue
+ *   applies since #4235 removed the old minute/hour-only read (and
+ *   its step-hour never-fires quirk).
  * - With a timeZone the full field match runs against wall-clock
  *   parts in that zone (lists, ranges, steps, weekdays; 7 is Sunday).
  *   The match is EXACT at the minute (unlike isDue's within-hour
@@ -315,14 +398,22 @@ export function previousCronTickMs(
   if (fields.length !== 5) return undefined;
   const startMinute = Math.floor(nowMs / 60000) * 60000;
   if (timeZone === undefined) {
-    const minute = Number(fields[0]);
-    const hour = Number(fields[1]);
-    if (!Number.isInteger(minute) || !Number.isInteger(hour)) return undefined;
-    if (minute < 0 || minute > 59 || hour < 0 || hour > 23) return undefined;
+    const minutes = expandField(fields[0], 0, 59);
+    const hours = expandField(fields[1], 0, 23);
+    const days = expandField(fields[2], 1, 31);
+    const months = expandField(fields[3], 1, 12);
+    const weekdaysRaw = expandField(fields[4], 0, 7);
+    if (!minutes || !hours || !days || !months || !weekdaysRaw) return undefined;
+    const weekdays = new Set([...weekdaysRaw].map((d) => (d === 7 ? 0 : d)));
     for (let step = 0; step <= PREVIOUS_CRON_TICK_SCAN_MINUTES; step++) {
       const t = startMinute - step * 60000;
       const d = new Date(t);
-      if (d.getUTCMinutes() === minute && d.getUTCHours() === hour) return t;
+      if (!minutes.has(d.getUTCMinutes())) continue;
+      if (!hours.has(d.getUTCHours())) continue;
+      if (!days.has(d.getUTCDate())) continue;
+      if (!months.has(d.getUTCMonth() + 1)) continue;
+      if (!weekdays.has(d.getUTCDay())) continue;
+      return t;
     }
     return undefined;
   }

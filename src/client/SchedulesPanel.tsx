@@ -346,7 +346,7 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
 
   const applyFrequency = async (
     s: ScheduleItem,
-    body: { scheduleType: "interval" | "cron"; intervalSeconds?: number; cron?: string }
+    body: { scheduleType: "interval" | "cron"; intervalSeconds?: number; cron?: string; subDailyOptIn?: boolean }
   ) => {
     setCadenceBusy(true);
     setCadenceError(null);
