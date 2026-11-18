@@ -5,8 +5,9 @@
  * (the caller's OrchestratorAgent instance); KV rows live in the ONE
  * shared SessionStore DO (idFromName("kv")), so wiping one affects all
  * users. That blast radius is why this route is platform-admin-gated
- * server-side (the #2331 slice-1 resolveCaller + isPlatformAdmin
- * pattern), not merely UI-gated: a raw call must not bypass the gate.
+ * server-side (the #2331 slice-1 resolveCaller + PDP platform-scope
+ * check, GAP-1 seam A), not merely UI-gated: a raw call must not
+ * bypass the gate.
  *
  * Route: POST /api/maintenance/kv-wipe, body `{ rows, confirm }`.
  * - Preview without `{ confirm: true }`: per-row counts, no deletes,
@@ -57,7 +58,7 @@ import {
   resolveIaaaTenant,
 } from "../../security/iaaaGithubEndToEnd";
 import { createKvMembershipStore } from "../../security/iaaaMembershipStore";
-import { isPlatformAdmin } from "../../security/iaaaAdminOverview";
+import { checkPlatformPermission } from "../../security/iaaaPdpSeam";
 import { lookupInternalUserIdByLogin } from "../../security/iaaaMigration";
 import { isLoginShaped } from "../../security/serviceIdentity";
 import { sessionStore } from "../../security/session";
@@ -153,8 +154,17 @@ async function resolveCaller(
   }
   const store =
     ctx.membershipStore ?? createKvMembershipStore(sessionStore(ctx.env));
-  const memberships = await store.getMembershipsByUser(internalUserId);
-  if (!isPlatformAdmin(memberships, Date.now())) {
+  // GAP-1 (seam A): the PDP platform-scope decision replaces the
+  // hand-rolled isPlatformAdmin predicate — behavior-identical
+  // (live platform-admin binding at platform scope, unrevoked,
+  // unexpired). The permission is the platform-privilege grant;
+  // per-surface mapping is CISO follow-up, not invented here.
+  const decision = await checkPlatformPermission(store, {
+    internalUserId,
+    permission: "role:assign",
+    nowMs: Date.now(),
+  });
+  if (decision.decision !== "allow") {
     return jsonError(
       "Forbidden: KV wipe requires platform-admin membership.",
       403,

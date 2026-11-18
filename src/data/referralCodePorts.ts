@@ -266,11 +266,11 @@ export function isCodeRedeemable(
 }
 
 /**
- * Tenant-admin check, mirroring isPlatformAdmin
- * (src/security/iaaaAdminOverview.ts): the caller holds a
- * tenant-admin role binding in the named tenant, on an
- * unrevoked membership, with the binding unexpired. Reads
- * only — IAAA writes stay CISO-owned.
+ * Tenant-admin check: the caller holds a tenant-admin role
+ * binding in the named tenant, on an unrevoked membership, with
+ * the binding unexpired. A pure list test for the referral
+ * rules, not a route gate (route gates consult the PDP through
+ * the seam). Reads only — IAAA writes stay CISO-owned.
  */
 export function isTenantAdminForTenant(
   memberships: Membership[],

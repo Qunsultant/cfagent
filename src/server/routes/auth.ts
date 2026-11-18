@@ -32,7 +32,8 @@ import { requireAuth } from "../auth";
 import type { Env } from "../../types";
 import { SHARED_ORCHESTRATOR_INSTANCE } from "../../security/serviceIdentity";
 import { ensureCsrfCookie } from "../../security/csrf";
-import { buildAdminOverview, computeAdminCounts, isPlatformAdmin } from "../../security/iaaaAdminOverview";
+import { buildAdminOverview, computeAdminCounts } from "../../security/iaaaAdminOverview";
+import { checkPlatformPermission } from "../../security/iaaaPdpSeam";
 import { handleSeedGovernanceRoute } from "../../data/seedGovernanceRoute";
 import { actorGateway } from "../../services/cloudflareActorGateway";
 import type { GovernedHaltState } from "../../data/governedHalt";
@@ -997,8 +998,17 @@ export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL,
       const membershipStore = wiredMembershipStore(env);
       const kv = sessionStore(env);
       const nowMs = Date.now();
-      const callerMemberships = await membershipStore.getMembershipsByUser(session.internalUserId);
-      const callerIsPlatformAdmin = isPlatformAdmin(callerMemberships, nowMs);
+      // GAP-1 (seam A): the PDP platform-scope decision replaces the
+      // hand-rolled isPlatformAdmin predicate — behavior-identical
+      // (live platform-admin binding at platform scope, unrevoked,
+      // unexpired). The permission is the platform-privilege grant;
+      // per-surface mapping is CISO follow-up, not invented here.
+      const platformDecision = await checkPlatformPermission(membershipStore, {
+        internalUserId: session.internalUserId,
+        permission: "role:assign",
+        nowMs,
+      });
+      const callerIsPlatformAdmin = platformDecision.decision === "allow";
       const callerCanGrantTenantAdmin = async (): Promise<boolean> => {
         const check = await canGrantRole(membershipStore, {
           granterInternalUserId: session.internalUserId as string,

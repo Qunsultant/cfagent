@@ -9,7 +9,9 @@
  *
  * Gating (fail-closed, server-side — the client never decides):
  * the caller must carry a wired session (internalUserId present;
- * legacy sessions have none) AND hold a live platform-admin
+ * legacy sessions have none) AND the PDP must allow the
+ * platform-scope platform-privilege check through the seam
+ * (checkPlatformPermission, GAP-1): a live platform-admin
  * membership (role "platform-admin", scope "platform", not
  * revoked, not expired). Anything else gets { allowed: false }
  * with NO membership or audit data attached, so a 403 body can
@@ -48,6 +50,7 @@ import type { MembershipStore } from "./authorization";
 import type { AuditStore, IaaaAuditEvent } from "./iaaaAudit";
 import type { KvLike } from "./kvResilience";
 import { platformGenesisMarkerKey } from "./iaaaGithubEndToEnd";
+import { checkPlatformPermission } from "./iaaaPdpSeam";
 
 /** Max audit events returned, newest first. */
 export const IAAA_ADMIN_OVERVIEW_LIMIT = 100;
@@ -173,26 +176,6 @@ export function computeAdminCounts(memberships: Membership[], nowMs: number): Ad
   };
 }
 
-/**
- * Live platform-admin test, same semantics as the end-to-end
- * module's holdsPlatformAdmin (which is module-private): a
- * platform-scoped platform-admin binding that is neither revoked
- * nor expired. Platform scope is platform-wide, not tenant-scoped,
- * so the membership's tenant does not restrict this test; the
- * audit filter below is what scopes events to the tenant.
- */
-export function isPlatformAdmin(memberships: Membership[], nowMs: number): boolean {
-  return memberships.some((m) =>
-    m.roleBindings.some(
-      (b) =>
-        b.role === "platform-admin" &&
-        b.scope === "platform" &&
-        m.revokedAtMs === undefined &&
-        (b.expiresAtMs === undefined || b.expiresAtMs > nowMs),
-    ),
-  );
-}
-
 function toEventView(event: IaaaAuditEvent): AdminAuditEventView {
   const view: AdminAuditEventView = {
     id: event.id,
@@ -213,16 +196,28 @@ function toEventView(event: IaaaAuditEvent): AdminAuditEventView {
 /**
  * Assemble the overview or refuse it. Reads only; throws only
  * when an underlying store read throws (corrupt evidence), in
- * which case the route answers 500 with no partial data.
+ * which case the route answers 500 with no partial data. The gate
+ * consults the PDP first: on deny, the caller's memberships are
+ * never read for the response, so a refusal carries no data.
  */
 export async function buildAdminOverview(
   deps: AdminOverviewDeps,
   input: AdminOverviewInput,
 ): Promise<AdminOverviewResult> {
-  const memberships = await deps.membershipStore.getMembershipsByUser(input.callerInternalUserId);
-  if (!isPlatformAdmin(memberships, deps.nowMs)) {
+  // GAP-1 (seam A): the PDP platform-scope decision replaces the
+  // hand-rolled isPlatformAdmin predicate. The decision is
+  // behavior-identical (live platform-admin binding at platform
+  // scope, unrevoked, unexpired); the memberships below are read
+  // only on allow, for the response body.
+  const decision = await checkPlatformPermission(deps.membershipStore, {
+    internalUserId: input.callerInternalUserId,
+    permission: "role:assign",
+    nowMs: deps.nowMs,
+  });
+  if (decision.decision !== "allow") {
     return { allowed: false };
   }
+  const memberships = await deps.membershipStore.getMembershipsByUser(input.callerInternalUserId);
   const allEvents = await deps.auditStore.list();
   const recentAuditEvents = allEvents
     .filter((event) => event.tenantId === deps.tenantId)

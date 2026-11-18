@@ -36,7 +36,8 @@
  * - Operator lookup: the IAAA panel's gate, reused — the caller
  *   resolves through the wired-login alias record to an
  *   internalUserId that must hold a live platform-admin
- *   membership (isPlatformAdmin). Tenant admins, unwired
+ *   membership (PDP platform-scope check, GAP-1 seam A).
+ *   Tenant admins, unwired
  *   callers, and anonymous callers get 401/403 with no data.
  *   This is an admin-surface read, not a commercial money write,
  *   so the gate is platform-admin membership, not the
@@ -64,7 +65,7 @@ import {
   type PlatformIdentity,
 } from "../../services/platformIdentity";
 import { createKvMembershipStore } from "../../security/iaaaMembershipStore";
-import { isPlatformAdmin } from "../../security/iaaaAdminOverview";
+import { checkPlatformPermission } from "../../security/iaaaPdpSeam";
 import { lookupInternalUserIdByLogin } from "../../security/iaaaMigration";
 import { sessionStore } from "../../security/session";
 import { isLoginShaped } from "../../security/serviceIdentity";
@@ -226,8 +227,17 @@ async function resolveOperatorCaller(
   }
   const store =
     ctx.membershipStore ?? createKvMembershipStore(sessionStore(ctx.env));
-  const memberships = await store.getMembershipsByUser(internalUserId);
-  if (!isPlatformAdmin(memberships, Date.now())) {
+  // GAP-1 (seam A): the PDP platform-scope decision replaces the
+  // hand-rolled isPlatformAdmin predicate — behavior-identical
+  // (live platform-admin binding at platform scope, unrevoked,
+  // unexpired). The permission is the platform-privilege grant;
+  // per-surface mapping is CISO follow-up, not invented here.
+  const decision = await checkPlatformPermission(store, {
+    internalUserId,
+    permission: "role:assign",
+    nowMs: Date.now(),
+  });
+  if (decision.decision !== "allow") {
     return jsonError(
       "Forbidden: user administration requires platform-admin membership.",
       403,

@@ -9,7 +9,8 @@
  *   the verified session, same trust as the schedules routes) is
  *   resolved to an internalUserId through the wired-login alias
  *   record, and the caller must hold a live platform-admin
- *   membership (isPlatformAdmin). Anything else answers 403 with
+ *   membership (PDP platform-scope check, GAP-1 seam A).
+ *   Anything else answers 403 with
  *   no data. A caller without an alias has no wired identity and
  *   is refused the same way legacy sessions are refused by the
  *   #1758 admin routes.
@@ -69,7 +70,7 @@ import {
   getStoredTokens,
   revokeRemoteAccessToken,
 } from "../../security/etradeOAuth";
-import { isPlatformAdmin } from "../../security/iaaaAdminOverview";
+import { checkPlatformPermission } from "../../security/iaaaPdpSeam";
 import { createKvPermissionDenialStore } from "../../security/iaaaPermissionDenialStore";
 import { requiresStepUpForAction } from "../../security/iaaaGates";
 import { evaluateRoutePep } from "../../security/pepGateway";
@@ -185,8 +186,17 @@ export async function resolveCaller(
     );
   }
   const store = ctx.membershipStore ?? createKvMembershipStore(sessionStore(ctx.env));
-  const memberships = await store.getMembershipsByUser(internalUserId);
-  if (!isPlatformAdmin(memberships, Date.now())) {
+  // GAP-1 (seam A): the PDP platform-scope decision replaces the
+  // hand-rolled isPlatformAdmin predicate — behavior-identical
+  // (live platform-admin binding at platform scope, unrevoked,
+  // unexpired). The permission is the platform-privilege grant;
+  // per-surface mapping is CISO follow-up, not invented here.
+  const decision = await checkPlatformPermission(store, {
+    internalUserId,
+    permission: "role:assign",
+    nowMs: Date.now(),
+  });
+  if (decision.decision !== "allow") {
     return jsonError(
       "Forbidden: service-user administration requires platform-admin membership.",
       403,
