@@ -16,8 +16,10 @@ import {
 import { isCopilotBroker } from "../../trading";
 import type { CommercialStore } from "../../data/commercialPorts";
 import { SqlIndexListStore } from "../../data/doSqliteIndexListAdapter";
-import { SqlJobRunRecordStore } from "../../data/doSqliteJobRunRecordAdapter";
-import { STOCK_COPILOT_TASK_ID } from "./scheduledTasksCopilot";
+import {
+  latestCopilotCycleLedgerRow,
+  projectCopilotLedgerRowToLastCycle,
+} from "../../services/stockCopilotLedger";
 import { createOrchestratorTablePorts } from "../../data/createOrchestratorTablePorts";
 import {
   createStockCopilotActivityPort,
@@ -384,17 +386,14 @@ function projectClosedPosition(p: CopilotPositionRecord): StockCopilotClosedPosi
  * empty. Best-effort: a ledger read failure reads as "no rows" (the
  * activity log is the primary signal); the status read never fails
  * on the ledger.
+ *
+ * Issue #5085 (S6): superseded as the status signal — the ledger
+ * is now the PRIMARY signal (see latestCopilotCycleLedgerRow in
+ * services/stockCopilotLedger), and this helper is kept only as a
+ * thin wrapper for existing callers.
  */
 export function hasCopilotCycleLedgerRows(sql: StockCopilotStoreSqlExecutor): boolean {
-  try {
-    const store = new SqlJobRunRecordStore(sql);
-    return (
-      store.latestByJob(STOCK_COPILOT_TASK_ID) !== undefined ||
-      store.latestByJob(`callback:${STOCK_COPILOT_TASK_ID}`) !== undefined
-    );
-  } catch {
-    return false;
-  }
+  return latestCopilotCycleLedgerRow(sql) !== undefined;
 }
 
 /**
@@ -441,15 +440,20 @@ export async function getStockCopilotStatusViaDoor(
   });
 
   const rawActivity = activity.listActivity(login, 20);
-  const lastCycle =
-    rawActivity.length > 0
-      ? (rawActivity[0] as unknown as Record<string, unknown>)
-      : null;
+  // Issue #5085 (S6): the runs ledger is the source of truth for
+  // "did the run happen" — lastCycle is a projection of the newest
+  // copilot cycle ledger row, never the activity table. The activity
+  // list stays as the "Cycle activity" detail feed.
+  const ledgerRow = latestCopilotCycleLedgerRow(ctx.sql);
+  const lastCycle = ledgerRow
+    ? (projectCopilotLedgerRowToLastCycle(ledgerRow) as unknown as Record<string, unknown>)
+    : null;
   // Issue #3899 (RC3): "live" means a cycle has run, not just that
-  // the gates pass — with no activity record and no ledger row the
-  // copilot has never executed, and the status says so.
-  const neverExecuted =
-    lastCycle === null && !hasCopilotCycleLedgerRows(ctx.sql);
+  // the gates pass — with no ledger row the copilot has never
+  // executed, and the status says so. (S6: the ledger row alone
+  // decides this now; an activity record with no ledger row is
+  // detail, not proof the run happened.)
+  const neverExecuted = lastCycle === null;
 
   const status = !flagEnabled
     ? "off"

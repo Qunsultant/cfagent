@@ -465,7 +465,12 @@ describe("Issue #3899 RC3 — status reads the real broker selection", () => {
     expect(status.status).toBe("never_executed");
   });
 
-  it("an activity record clears the never-executed state", async () => {
+  // Issue #5085 (S6): BEHAVIOUR CHANGE — the runs ledger is the
+  // source of truth for "did the run happen", so an activity record
+  // with NO ledger row no longer clears the never-executed state:
+  // the activity table is the detail feed, not the liveness proof.
+  // The record still shows in the activity feed.
+  it("an activity record without a ledger row does not clear the never-executed state", async () => {
     const sql = new SqliteTestStorage();
     const { createStockCopilotActivityPort } = await import(
       "../src/data/createStockCopilotStorePorts"
@@ -485,12 +490,19 @@ describe("Issue #3899 RC3 — status reads the real broker selection", () => {
     });
     const ctx = makeDoorCtx(sql, { commercial: await emptyCommercial() });
     const status = await getStockCopilotStatusViaDoor(ctx, "owner");
-    expect(status.neverExecuted).toBe(false);
-    expect(status.lastCycle).not.toBeNull();
-    expect(status.status).toBe("live");
+    expect(status.neverExecuted).toBe(true);
+    expect(status.lastCycle).toBeNull();
+    expect(status.status).toBe("never_executed");
+    expect(status.activity.length).toBe(1);
   });
 
-  it("a cycle ledger row without activity also clears the never-executed state", async () => {
+  // Issue #5085 (S6): BEHAVIOUR CHANGE — the ledger row IS the
+  // lastCycle now (the runs ledger is the source of truth for "did
+  // the run happen"), so a cycle ledger row without an activity
+  // record yields a lastCycle instead of a null one. The seeded row
+  // predates the outcome-class descriptor, so it falls back to the
+  // ledger outcome (skipped → inactive).
+  it("a cycle ledger row without activity yields a ledger-derived lastCycle", async () => {
     const sql = new SqliteTestStorage();
     const store = new SqlJobRunRecordStore(sql as any);
     const nowIso = new Date().toISOString();
@@ -513,7 +525,10 @@ describe("Issue #3899 RC3 — status reads the real broker selection", () => {
     const ctx = makeDoorCtx(sql, { commercial: await emptyCommercial() });
     const status = await getStockCopilotStatusViaDoor(ctx, "owner");
     expect(status.neverExecuted).toBe(false);
-    expect(status.lastCycle).toBeNull();
+    expect(status.lastCycle).not.toBeNull();
+    expect((status.lastCycle as Record<string, unknown>).cycleAt).toBe(nowIso);
+    expect((status.lastCycle as Record<string, unknown>).outcome).toBe("inactive");
+    expect(status.status).toBe("live");
   });
 
   it("REST status surfaces never_executed with a null lastCycle", async () => {

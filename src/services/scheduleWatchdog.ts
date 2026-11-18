@@ -241,13 +241,33 @@ export function classifyCopilotNonDeclaration(input: {
  * (and refusal code, when the cycle named one) as the detail — a
  * refused cycle ran and decided not to trade, which is a skip, not
  * a failure. No fourth outcome exists.
+ *
+ * Issue #5085 (S6): the outcome class rides the ledger row. When
+ * the caller supplies the placement counts, an ok cycle's
+ * descriptor names the class — "cycle complete: traded" when the
+ * cycle placed at least one entry or exit, "cycle complete: no
+ * trade" otherwise — so the Loop status (which reads the ledger,
+ * never the activity table) can render the panel badge from the
+ * row alone. Without placement counts the descriptor stays the
+ * legacy "cycle complete" (the #3788 pin); the projection falls
+ * back to the ledger outcome for such rows. Refusal details are
+ * unchanged (also pinned by #3788); the projection reads the
+ * detail for their class.
  */
 export function copilotCycleLedgerOutcome(
   status: StockCopilotCycleResult["status"],
   refusal?: string,
+  placed?: { entriesPlaced: number; exitsPlaced: number },
 ): { outcome: "success" | "skipped"; detail?: string; descriptor?: string } {
   if (status === "ok") {
-    return { outcome: "success", descriptor: "cycle complete" };
+    if (!placed) {
+      return { outcome: "success", descriptor: "cycle complete" };
+    }
+    const traded = placed.entriesPlaced + placed.exitsPlaced > 0;
+    return {
+      outcome: "success",
+      descriptor: traded ? "cycle complete: traded" : "cycle complete: no trade",
+    };
   }
   if (status === "mode_unresolved" || status === "refused_mode_mismatch" || status === "inactive_broker") {
     return {

@@ -47,6 +47,10 @@ import {
   SCHEDULE_WATCHDOG_FIRST_SEEN_KEY,
   SCHEDULE_WATCHDOG_HEARTBEAT_JOB_ID,
 } from "../services/scheduleWatchdog";
+import {
+  nameLedgerWriteFailure,
+  type ScheduleCallbackRecordFailure,
+} from "./orchestrator/scheduleCallbackRunRecords";
 import { renderChannelText } from "../outcomes/outcomeAspects";
 // Issue #3121 S3 — the tick-evaluated kind evaluates through the S1
 // shared primitives: `isDue` / `isValidCron` / `zonedDateParts` are
@@ -687,9 +691,19 @@ export class ScheduledAgent extends PortThink {
     return mergeLedgerRuns(shared, legacy).slice(0, SCHEDULED_AGENT_JOB_RUN_CAP);
   }
 
+  /**
+   * Issue #5085 (S6): returns whether the row landed. Recording
+   * never breaks the tick — but a swallowed store failure is
+   * unobservable, so a caller that supplied a hook hears about it
+   * (best-effort; a throwing hook is swallowed too). Callers that
+   * need the claim (the watchdog sweep) skip their alert when the
+   * row did not land, so the finding recurs next tick and the claim
+   * is retried rather than alerting without a claim.
+   */
   private async recordJobRun(
     record: Omit<JobRunRecord, "system">,
-  ): Promise<void> {
+    onRecordFailure?: (failure: ScheduleCallbackRecordFailure) => void,
+  ): Promise<boolean> {
     try {
       const built = buildJobRunRecord({ system: "scheduled-agent-goal", ...record });
       const post = this.ledgerPost();
@@ -699,13 +713,26 @@ export class ScheduledAgent extends PortThink {
         // legacy KV key below — the row is never lost, and the
         // merged read covers both homes.
         const serviceLogin = getServiceUserLogin(this.env);
-        if (await postLedgerRun(post, built, serviceLogin)) return;
+        if (await postLedgerRun(post, built, serviceLogin)) return true;
       }
       const runs = await this.getKvJobRuns();
       runs.unshift(built);
       await this.ctx.storage.put("jobRunRecords", runs.slice(0, SCHEDULED_AGENT_JOB_RUN_CAP));
-    } catch {
-      // Recording never breaks the tick.
+      return true;
+    } catch (err) {
+      if (onRecordFailure) {
+        try {
+          onRecordFailure({
+            jobId: record.jobId,
+            operation: record.operation,
+            outcome: record.outcome,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        } catch {
+          // Reporting a failed record must never break the tick either.
+        }
+      }
+      return false;
     }
   }
 
@@ -759,6 +786,18 @@ export class ScheduledAgent extends PortThink {
     const result = { examined: 0, missed: 0, errors: [] as string[] };
     const graceMs = resolveMissedScheduleGraceMs(this.env as { MISSED_SCHEDULE_GRACE_MINUTES?: string });
     if (graceMs <= 0) return result;
+    // Issue #5085 (S6): the audit half of the shared ledger-write
+    // namer for this agent — the goal-schedule audit sink accepts
+    // any string event type, so schedule.ledger_write_failed posts
+    // through it (fire-and-forget; the sink swallows its own
+    // failures, so naming a failed write can never fail the tick).
+    const auditLedgerWriteFailure = (
+      type: string,
+      agent: "orchestrator",
+      payload: Record<string, unknown>,
+    ): void => {
+      void this.postScheduleAuditEvent({ type, agent, payload });
+    };
     const nowMs = now.getTime();
     const nowIso = now.toISOString();
     const runs = await this.getJobRuns().catch(() => [] as JobRunRecord[]);
@@ -815,9 +854,13 @@ export class ScheduledAgent extends PortThink {
         if (!finding) continue;
         const detail = missedFiringDetail(goal.id, finding, goal.cron);
         // Claim-first: the ledger record is the exactly-once claim.
-        // A failed write alerts nothing for this goal this tick.
-        try {
-          await this.recordJobRun({
+        // Issue #5085 (S6): a failed claim write is named (audit +
+        // coded OBS-1020) through the shared namer instead of
+        // vanishing — and the goal is skipped this tick, so the
+        // finding recurs next tick and the claim is retried rather
+        // than alerting without a claim.
+        const claimed = await this.recordJobRun(
+          {
             jobId: goal.id,
             operation: goal.operation,
             started: nowIso,
@@ -829,10 +872,12 @@ export class ScheduledAgent extends PortThink {
             asyncJobId: null,
             workflowId: null,
             detail,
-          });
-        } catch {
-          continue;
-        }
+          },
+          nameLedgerWriteFailure(auditLedgerWriteFailure, "schedule.ledger_write_failed", {
+            goalId: goal.id,
+          }),
+        );
+        if (!claimed) continue;
         result.missed++;
         await this.auditGoalLifecycle("schedule.goal.missed_fire", goal.id, {
           operation: goal.operation,
@@ -871,8 +916,11 @@ export class ScheduledAgent extends PortThink {
       }
     }
     // Heartbeat: the tick ran, with examined counts. Best-effort.
-    try {
-      await this.recordJobRun({
+    // Issue #5085 (S6): a failed heartbeat write is named (audit +
+    // coded OBS-1020) through the shared namer instead of vanishing
+    // silently.
+    await this.recordJobRun(
+      {
         jobId: SCHEDULE_WATCHDOG_HEARTBEAT_JOB_ID,
         operation: "schedule.watchdog_heartbeat",
         started: nowIso,
@@ -884,10 +932,9 @@ export class ScheduledAgent extends PortThink {
         asyncJobId: null,
         workflowId: null,
         detail: `examined=${result.examined} missed=${result.missed}`,
-      });
-    } catch {
-      // Best-effort heartbeat.
-    }
+      },
+      nameLedgerWriteFailure(auditLedgerWriteFailure, "schedule.ledger_write_failed"),
+    );
     return result;
   }
 
@@ -1848,7 +1895,7 @@ export class ScheduledAgent extends PortThink {
           ...(extra.artifactRefs !== undefined
             ? { artifactRefs: extra.artifactRefs }
             : {}),
-        });
+        }).then(() => undefined);
       };
 
       // #2840: in-flight firing guard (the screen-lock pattern,
@@ -3371,7 +3418,7 @@ export class ScheduledAgent extends PortThink {
         ...(extra.descriptor !== undefined
           ? { descriptor: extra.descriptor }
           : {}),
-      });
+      }).then(() => undefined);
     };
     // #1548 (slice 0): same halt resolution as onCron, so the
     // direct one-shot path sees the mirrored halt too. Issue

@@ -49,6 +49,10 @@ import {
 import { resolveCopilotCadence } from "./stockCopilotCadence";
 import { resolveCopilotExecutionMode } from "./stockCopilotExecutionMode";
 import {
+  latestCopilotCycleLedgerRow,
+  parseCopilotCycleOutcome,
+} from "./stockCopilotLedger";
+import {
   resolveStockCopilotRsiMode,
   type StockCopilotRsiMode,
 } from "./stockCopilotRsiMode";
@@ -442,7 +446,18 @@ export async function introspectStockCopilot(
   const recentActivity = activityPort.listActivity(userLogin, 20);
 
   const refusals = recentActivity.filter((a) => a.outcome === "refused");
-  const lastCycle = recentActivity.length > 0 ? recentActivity[0] : null;
+  // Issue #5085 (S6): the runs ledger is the source of truth for
+  // "did the run happen" — lastCycleStatus comes from the newest
+  // copilot cycle ledger row, never the activity table. The
+  // activity feed stays as the detail for recentCyclesCount and
+  // refusals (feed stats, not the liveness proof). A context
+  // without SQL keeps today's read.
+  const lastCycle = deps.sql
+    ? (latestCopilotCycleLedgerRow(deps.sql as never) ?? null)
+    : null;
+  const lastCycleStatus = lastCycle
+    ? parseCopilotCycleOutcome(lastCycle)
+    : null;
 
   // 3. Assemble 5-stage pipeline tool mappings
   const pipeline = buildPipelineStageCatalog();
@@ -589,7 +604,7 @@ export async function introspectStockCopilot(
       closedPositionsCount: closedPositions.length,
       recentCyclesCount: recentActivity.length,
       recentRefusalsCount: refusals.length,
-      lastCycleStatus: lastCycle ? String(lastCycle.outcome) : null,
+      lastCycleStatus,
     },
     pipeline,
     reflection: {

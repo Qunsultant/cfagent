@@ -67,6 +67,16 @@
  *  severity/rule mapping lands with the S7 catalog (#5086);
  *  S4 carries only the code identifiers, not a severity/rule
  *  schema.
+ *
+ * Codes added in S6 (#5085, recording — one runs ledger):
+ *  OBS-1020 otel.ledger.write_failed — a runs-ledger write
+ *    failed and was named (audited + logged) instead of
+ *    vanishing silently. The #4921 KV marker sink is the
+ *    follow-up mechanism for naming a failure the SQL path
+ *    cannot report; OBS-1020 names it on the audit/log path.
+ *  Severity/rule mapping lands with the S7 catalog (#5086);
+ *  S6 carries only the code identifier, not a severity/rule
+ *  schema.
  */
 
 /** A switch value failed closed to the safe default (OFF / none / 0). */
@@ -107,6 +117,8 @@ export const OBS_ALERTING_STUCK_RUN = "OBS-1017" as const;
 export const OBS_ALERTING_CAP_BREACH = "OBS-1018" as const;
 /** The CI failure alert (a GitHub Actions workflow failed on main). S4 subject code; severity/rule mapping lands with S7. */
 export const OBS_ALERTING_CI_FAILURE = "OBS-1019" as const;
+/** A runs-ledger write failed and was named (audited + logged) instead of vanishing silently. S6 code; severity/rule mapping lands with S7. */
+export const OBS_LEDGER_WRITE_FAILED = "OBS-1020" as const;
 
 /** Formats a coded message: `[OBS-####] <message>`. */
 export function formatOtelMessage(code: string, message: string): string {
