@@ -84,6 +84,12 @@ export interface ScheduleFormState {
   cronExpression: string;
   delaySeconds: number;
   scheduledDate: string;
+  /**
+   * Issue #4235 — the owner's explicit opt-in to a sub-daily
+   * cadence for this schedule. Absent/false means the default daily
+   * ceiling; buildScheduleSubmission threads it only when true.
+   */
+  subDailyOptIn?: boolean;
   thesis: "bullish" | "bearish" | "neutral" | "directional";
   riskProfile: "conservative" | "balanced" | "aggressive";
   /**

@@ -277,9 +277,8 @@ describe("pipeline goals through ScheduledAgent", () => {
       {
         id: "hunt",
         name: "Hunt",
-        // No timeZone → historical UTC behavior: only the first two
-        // fields are read, so "0 */6" would be never-due (the
-        // preserved opportunity-hunt quirk). 13:00Z matches now.
+        // No timeZone → UTC read of all five fields (#4235). 13:00Z
+        // matches now.
         cron: "0 13 * * *",
         operation: "search.query",
         budgetCents: 100,

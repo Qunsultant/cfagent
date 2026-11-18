@@ -1,4 +1,5 @@
 import type { ScheduledTaskItem } from "./types";
+import { isSubDailyCron, isSubDailyInterval } from "../../schedule";
 
 /** Frequency presets shared by the inline frequency editors (the
  *  generic cards in SchedulesPanel and the screening cards here) —
@@ -22,18 +23,60 @@ export const INTERVAL_PRESETS = [
   { label: "Every 30 min", seconds: 1800 },
   { label: "Every 1 hour", seconds: 3600 },
   { label: "Every 4 hours", seconds: 14400 },
+  { label: "Every 12 hours", seconds: 43200 },
+  { label: "Every 24 hours", seconds: 86400 },
+  // Issue #4235 — long cadences are presets, not the limit: the
+  // free interval input accepts any value, these are shortcuts.
+  { label: "Every 2 weeks", seconds: 1209600 },
 ];
+
+/**
+ * Issue #4235 — a cron preset is an Eastern-Time intent (see
+ * ./cronTime): the ET time converts to a UTC cron at pick time.
+ * `dayOfMonth` / `month` carry dated intents (monthly and longer);
+ * absent means "every day / every month" as the preset's daysOfWeek
+ * says.
+ */
+export interface CronPreset {
+  label: string;
+  etHour: number;
+  etMinute: number;
+  daysOfWeek?: string;
+  dayOfMonth?: number;
+  month?: string;
+}
 
 // Presets are Eastern-Time intents: picking one converts the ET time to
 // a UTC cron for the current ET offset (see ./cronTime). The cron string
 // is computed at pick time, never stored here as a literal — a literal
 // would fire 4-5 hours early, as the previous hard-coded values did.
-export const CRON_PRESETS = [
+export const CRON_PRESETS: CronPreset[] = [
   { label: "Market Open (9:30 AM ET M-F)", etHour: 9, etMinute: 30, daysOfWeek: "1-5" },
   { label: "Midday Scan (12:00 PM ET M-F)", etHour: 12, etMinute: 0, daysOfWeek: "1-5" },
   { label: "Market Close (4:00 PM ET M-F)", etHour: 16, etMinute: 0, daysOfWeek: "1-5" },
   { label: "Daily Overnight (11:00 PM ET)", etHour: 23, etMinute: 0, daysOfWeek: "*" },
+  // Issue #4235 — long cadences are presets, not the limit: the free
+  // cron input accepts any valid expression, these are shortcuts.
+  // All three are daily-or-less, so none needs the sub-daily opt-in.
+  { label: "Monthly (1st, 9:30 AM ET)", etHour: 9, etMinute: 30, dayOfMonth: 1 },
+  { label: "Semi-annual (Jan & Jul 1st, 9:30 AM ET)", etHour: 9, etMinute: 30, dayOfMonth: 1, month: "1,7" },
+  { label: "Annual (Jan 1st, 9:30 AM ET)", etHour: 9, etMinute: 30, dayOfMonth: 1, month: "1" },
 ];
+
+/**
+ * Issue #4235 — whether a cadence needs the explicit per-schedule
+ * sub-daily opt-in: exactly the sub-daily cadences. One-shot
+ * timings (delayed/scheduled) never need one; an invalid cron never
+ * fires, so it never needs one either (it is refused elsewhere).
+ */
+export function cadenceNeedsOptIn(
+  kind: "interval" | "cron" | "delayed" | "scheduled",
+  value?: number | string,
+): boolean {
+  if (kind === "interval") return typeof value === "number" && isSubDailyInterval(value);
+  if (kind === "cron") return typeof value === "string" && isSubDailyCron(value);
+  return false;
+}
 
 /**
  * Issue #4353 — a history row's timestamp, DATE AND TIME (the owner's ask:

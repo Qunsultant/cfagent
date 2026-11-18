@@ -771,6 +771,9 @@ describe("POST /api/schedules/create with autonomousStrategyDiscovery (#126)", (
     const { status, body } = await postCreate(agent, {
       scheduleType: "interval",
       intervalSeconds: 3600,
+      // Issue #4235 — a 3600s interval is sub-daily, so creation
+      // carries the explicit per-schedule opt-in.
+      subDailyOptIn: true,
       callback: "autonomousStrategyDiscovery",
       payload: { requests: [VALID_REQUEST] },
     });
@@ -796,6 +799,10 @@ describe("POST /api/schedules/create with autonomousStrategyDiscovery (#126)", (
     const { status, body } = await postCreate(agent, {
       scheduleType: "interval",
       intervalSeconds: 3600,
+      // Issue #4235 — a 3600s interval is sub-daily, so the request
+      // carries the explicit opt-in; the 400 under test then comes
+      // from the payload validator, as the test pins, not the cap.
+      subDailyOptIn: true,
       callback: "autonomousStrategyDiscovery",
       payload,
     });

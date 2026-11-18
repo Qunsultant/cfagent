@@ -41,7 +41,7 @@ import {
   blankNoViewConstraintsDraft,
   noViewDraftFromConstraintSets,
 } from "./scheduledOptionsManager/noView";
-import { payloadOf } from "./scheduledOptionsManager/format";
+import { cadenceNeedsOptIn, payloadOf } from "./scheduledOptionsManager/format";
 import { scheduleTitle } from "./scheduledOptionsManager/scheduleDetail";
 import {
   buildOptionsRunNowPayload,
@@ -158,6 +158,11 @@ export function ScheduledOptionsManager({
   );
   const [delaySeconds, setDelaySeconds] = useState(1800);
   const [scheduledDate, setScheduledDate] = useState("");
+  // Issue #4235 — the owner's explicit opt-in to a sub-daily
+  // cadence for this schedule. Off by default; the create form
+  // resets it, the edit form hydrates it from the schedule's
+  // current cadence.
+  const [subDailyOptIn, setSubDailyOptIn] = useState(false);
   const [thesis, setThesis] = useState<"bullish" | "bearish" | "neutral" | "directional">("bullish");
   const [riskProfile, setRiskProfile] = useState<"conservative" | "balanced" | "aggressive">("balanced");
   // Issue #5189: the schedule's run target. Empty = the tenant's context.
@@ -390,6 +395,9 @@ export function ScheduledOptionsManager({
     setSlackChannel("#options-alerts");
     setEmailTo("");
     setWebhookUrl("");
+    // Issue #4235: a new schedule starts opted out (the default
+    // daily ceiling); the owner opts in per schedule, explicitly.
+    setSubDailyOptIn(false);
     setModalOpen(true);
   };
 
@@ -496,6 +504,15 @@ export function ScheduledOptionsManager({
     if (item.intervalSeconds) setIntervalSeconds(item.intervalSeconds);
     if (item.cron) setCronExpression(item.cron);
     if (item.delayInSeconds) setDelaySeconds(item.delayInSeconds);
+    // Issue #4235 — an edited schedule keeps its opt-in: a
+    // sub-daily cadence hydrates checked (the schedule was already
+    // opted in when it was created), a daily-or-less one unchecked.
+    setSubDailyOptIn(
+      cadenceNeedsOptIn(
+        item.type,
+        item.type === "interval" ? item.intervalSeconds : item.type === "cron" ? item.cron : undefined,
+      ),
+    );
     setModalOpen(true);
   };
 
@@ -526,6 +543,7 @@ export function ScheduledOptionsManager({
       cronExpression,
       delaySeconds,
       scheduledDate,
+      subDailyOptIn,
       thesis,
       riskProfile,
       brokerId,
@@ -1004,6 +1022,8 @@ export function ScheduledOptionsManager({
           setDelaySeconds={setDelaySeconds}
           scheduledDate={scheduledDate}
           setScheduledDate={setScheduledDate}
+          subDailyOptIn={subDailyOptIn}
+          setSubDailyOptIn={setSubDailyOptIn}
           thesis={thesis}
           setThesis={setThesis}
           riskProfile={riskProfile}

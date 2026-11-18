@@ -9,15 +9,16 @@
  * provenance on every goal-creation path (incl. synthesized
  * materialization), and the lifecycle audit through the DO-side sink
  * in the mutation methods (#3312). Tick semantics are preserved
- * VERBATIM: the 23h anti-double-fire guard, the "0 *\/6 * * *"
- * never-due quirk, the shared per-goal-per-firing budget check, the
- * in-flight firing claim, the governed-halt predicate, synthesized
- * materialization before firing, `pipeline:` goals in ONE firing,
- * one tick entry per onCron call.
+ * VERBATIM: the 23h anti-double-fire guard, the shared per-goal-per-
+ * firing budget check, the in-flight firing claim, the governed-halt
+ * predicate, synthesized materialization before firing, `pipeline:`
+ * goals in ONE firing, one tick entry per onCron call. (The "0 *\/6
+ * * *" never-due quirk is NOT preserved: #4235 removed it, so a
+ * step-hour cron fires on its step hours — see S3-P01 below.)
  *
  * Coverage:
  * - S3-P01 tick semantics through the S1 re-exports (identity,
- *   quirk + 23h guard through onCron).
+ *   five-field match + 23h guard through onCron).
  * - S3-P02 O3 — per-tick budget accounting matches onCron exactly
  *   when a tick evaluates goals across tenants (#2457 owns the
  *   cross-tenant rules; the tick enforces the same gates).
@@ -223,7 +224,7 @@ describe("S3-P01 tick semantics through the S1 re-exports (#3121)", () => {
     expect(consolidatedImports.join("\n")).toContain("zonedDateParts");
   });
 
-  it("the opportunity-hunt quirk survives the migration: '0 */6 * * *' never fires", async () => {
+  it("a step-hour cron fires on its step hours through the consolidated tick (#4235)", async () => {
     const { env, budgetCheck } = makeEnv();
     const agent = new ScheduledAgent(
       makeCtx([
@@ -231,13 +232,17 @@ describe("S3-P01 tick semantics through the S1 re-exports (#3121)", () => {
       ]) as never,
       env as never,
     );
-    // 06:00 UTC is a */6 hour — a correct parser would fire; the
-    // preserved quirk maps the hour through Number() to NaN.
+    // 06:00 UTC is a */6 hour. The old never-due quirk (the hour
+    // mapped through Number() to NaN) is gone since #4235, so the
+    // goal fires exactly like any due daily goal — once, with one
+    // budget check and one recorded run.
     const tick = await agent.onCron(env as never, { halted: false } as never);
     expect(tick.goalsEvaluated).toBe(1);
-    expect(tick.jobsCreated).toBe(0);
-    expect(budgetCheck).not.toHaveBeenCalled();
-    expect(await agent.listJobRuns("opportunity-hunt")).toHaveLength(0);
+    expect(tick.jobsCreated).toBe(1);
+    expect(budgetCheck).toHaveBeenCalledTimes(1);
+    const runs = await agent.listJobRuns("opportunity-hunt");
+    expect(runs).toHaveLength(1);
+    expect(runs[0].outcome).toBe("success");
   });
 
   it("the 23h anti-double-fire guard survives: a goal run 1h ago is not due", async () => {

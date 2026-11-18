@@ -299,7 +299,8 @@ describe("schedules behavior (extraction #379)", () => {
       getScreenerExecutionContext: vi.fn(async () => ({ userLogin: "trader1", environment: "PROD" as const })),
     });
     const res = await handleSchedulesRoutes(
-      req("POST", "/schedules/create", { callback: "autonomousMarketScreen", scheduleType: "interval", intervalSeconds: 60, payload: { universe: "NASDAQ100" } }),
+      // Issue #4235 — a 60s interval is sub-daily, so the request carries the explicit opt-in.
+      req("POST", "/schedules/create", { callback: "autonomousMarketScreen", scheduleType: "interval", intervalSeconds: 60, subDailyOptIn: true, payload: { universe: "NASDAQ100" } }),
       urlOf("/schedules/create"),
       "/schedules/create",
       "s1",
@@ -317,7 +318,8 @@ describe("schedules behavior (extraction #379)", () => {
       getScreenerExecutionContext: vi.fn(async () => ({ userLogin: "trader1", environment: "PROD" as const })),
     });
     const res = await handleSchedulesRoutes(
-      req("POST", "/schedules/create", { callback: "autonomousMarketScreen", scheduleType: "interval", intervalSeconds: 60, payload: { universe: "NASDAQ100" } }),
+      // Issue #4235 — a 60s interval is sub-daily, so the request carries the explicit opt-in.
+      req("POST", "/schedules/create", { callback: "autonomousMarketScreen", scheduleType: "interval", intervalSeconds: 60, subDailyOptIn: true, payload: { universe: "NASDAQ100" } }),
       urlOf("/schedules/create"),
       "/schedules/create",
       "s1",
@@ -339,7 +341,8 @@ describe("schedules behavior (extraction #379)", () => {
       getScreenerExecutionContext: vi.fn(async () => ({ userLogin: "trader1", environment: "PROD" as const })),
     });
     const res = await handleSchedulesRoutes(
-      req("POST", "/schedules/create", { callback: "autonomousMarketScreen", scheduleType: "interval", intervalSeconds: 60, payload: { universe: "NASDAQ100" } }),
+      // Issue #4235 — a 60s interval is sub-daily, so the request carries the explicit opt-in.
+      req("POST", "/schedules/create", { callback: "autonomousMarketScreen", scheduleType: "interval", intervalSeconds: 60, subDailyOptIn: true, payload: { universe: "NASDAQ100" } }),
       urlOf("/schedules/create"),
       "/schedules/create",
       "s1",

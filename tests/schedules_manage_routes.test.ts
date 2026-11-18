@@ -148,7 +148,10 @@ describe(" pause / resume (#273)", () => {
 
 describe("PUT /api/schedules/:id (#273)", () => {
   it("changes an interval job's frequency atomically (cancel + recreate)", async () => {
-    const res = await call("PUT", "/api/schedules/job-interval", { intervalSeconds: 900 });
+    // Issue #4235 — 900s is sub-daily, so the update carries the
+    // explicit per-schedule opt-in; the atomic cancel + recreate is
+    // the same behavior this pin always asserted.
+    const res = await call("PUT", "/api/schedules/job-interval", { intervalSeconds: 900, subDailyOptIn: true });
     expect(res?.status).toBe(200);
     const body = await res!.json();
     expect(body.success).toBe(true);
@@ -156,7 +159,9 @@ describe("PUT /api/schedules/:id (#273)", () => {
     const updated = schedules.get(body.schedule.id);
     expect(updated?.type).toBe("interval");
     expect(updated?.intervalSeconds).toBe(900);
-    expect(updated?.payload).toEqual({ symbols: ["AAPL"], userLogin: "venus" });
+    // Issue #4235 — the re-armed alarm's payload records the opt-in
+    // the update supplied, exactly as creation stamps it.
+    expect(updated?.payload).toEqual({ symbols: ["AAPL"], userLogin: "venus", subDailyOptIn: true });
   });
 
   it("switches a job from interval to cron", async () => {

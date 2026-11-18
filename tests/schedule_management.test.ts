@@ -136,15 +136,20 @@ describe("resolveScheduleUpdate (#273)", () => {
   });
 
   it("changes intervalSeconds and replaces the payload when one is given", () => {
+    // Issue #4235 — a 900s interval is sub-daily, so the update
+    // carries the explicit per-schedule opt-in (and the resolution
+    // records it); the interval change + payload replace is the
+    // same behavior this pin always asserted.
     const r = resolveScheduleUpdate(
       intervalCurrent,
-      { intervalSeconds: 900, payload: { symbols: ["MSFT"] } },
+      { intervalSeconds: 900, payload: { symbols: ["MSFT"] }, subDailyOptIn: true },
       nowMs
     );
     expect(r).toEqual({
       ok: true,
       timing: { type: "interval", intervalSeconds: 900 },
       payload: { symbols: ["MSFT"], trigger: "scheduled" },
+      subDailyOptIn: true,
     });
   });
 

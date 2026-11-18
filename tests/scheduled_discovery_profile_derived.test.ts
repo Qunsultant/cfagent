@@ -1189,6 +1189,9 @@ describe("POST /api/schedules/create with a profile-derived discovery payload (#
     const { status, body } = await postCreate(agent, {
       scheduleType: "interval",
       intervalSeconds: 3600,
+      // Issue #4235 — a 3600s interval is sub-daily, so creation
+      // carries the explicit per-schedule opt-in.
+      subDailyOptIn: true,
       callback: "autonomousStrategyDiscovery",
       payload: { inputModel: "profile-derived", symbols: ["NVDA", "MSFT"], profileId: "prof-1" },
     });
@@ -1208,6 +1211,9 @@ describe("POST /api/schedules/create with a profile-derived discovery payload (#
     const { status } = await postCreate(agent, {
       scheduleType: "interval",
       intervalSeconds: 3600,
+      // Issue #4235 — a 3600s interval is sub-daily, so creation
+      // carries the explicit per-schedule opt-in.
+      subDailyOptIn: true,
       callback: "autonomousStrategyDiscovery",
       payload: { inputModel: "profile-derived", watchlistName: "My List", profileId: "prof-1" },
     });
@@ -1220,6 +1226,9 @@ describe("POST /api/schedules/create with a profile-derived discovery payload (#
     const { status } = await postCreate(agent, {
       scheduleType: "interval",
       intervalSeconds: 3600,
+      // Issue #4235 — a 3600s interval is sub-daily, so creation
+      // carries the explicit per-schedule opt-in.
+      subDailyOptIn: true,
       callback: "autonomousStrategyDiscovery",
       payload: {
         inputModel: "saved-request",
@@ -1256,6 +1265,10 @@ describe("POST /api/schedules/create with a profile-derived discovery payload (#
     const { status, body } = await postCreate(agent, {
       scheduleType: "interval",
       intervalSeconds: 3600,
+      // Issue #4235 — a 3600s interval is sub-daily, so the request
+      // carries the explicit opt-in; the 400 under test then comes
+      // from the payload validator, as the test pins, not the cap.
+      subDailyOptIn: true,
       callback: "autonomousStrategyDiscovery",
       payload,
     });

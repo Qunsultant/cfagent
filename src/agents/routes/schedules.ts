@@ -56,6 +56,9 @@ import type { JobRunTrigger } from "../../data/jobRunRecordPorts";
 import { findDuplicateSchedule } from "../../services/scheduleDedupe";
 import {
   buildScheduleProvenance,
+  isSubDailyCron,
+  isSubDailyInterval,
+  isValidCron,
   stampScheduleProvenance,
 } from "../../services/consolidatedScheduling";
 import { runStorageRetention } from "../../security/storageRetention";
@@ -1261,6 +1264,34 @@ export async function handleSchedulesRoutes(
           );
         }
 
+        // Issue #4235 — granularity first: the default is at most
+        // once per day. A sub-daily timing needs the explicit
+        // per-schedule opt-in (body.subDailyOptIn === true); anything
+        // else is refused here, before any token check or arming, so
+        // a rejected create arms nothing. A cron is range-validated
+        // here too — an out-of-range cron is a 400, never a 503 from
+        // the SDK. One-shot timings (delayed/scheduled) need no
+        // opt-in.
+        const subDailyOptIn = body.subDailyOptIn === true;
+        const subDailyOptInError =
+          "Sub-daily cadence runs more than once per day: pass subDailyOptIn: true to opt-in explicitly.";
+        if (scheduleType === "cron" && cron) {
+          if (!isValidCron(String(cron).trim())) {
+            return Response.json(
+              { success: false, error: `Invalid cron expression '${cron}': expected a valid 5-field cron expression (minute hour day-of-month month day-of-week, each field in range).` },
+              { status: 400 }
+            );
+          }
+          if (isSubDailyCron(String(cron).trim()) && !subDailyOptIn) {
+            return Response.json({ success: false, error: subDailyOptInError }, { status: 400 });
+          }
+        }
+        if (scheduleType === "interval" && intervalSeconds) {
+          if (isSubDailyInterval(Number(intervalSeconds)) && !subDailyOptIn) {
+            return Response.json({ success: false, error: subDailyOptInError }, { status: 400 });
+          }
+        }
+
         // Stamp screening schedules with the identity established by the
         // authenticated Worker forwarder. Never trust a caller-supplied
         // payload.userLogin to select another account's E*TRADE credentials.
@@ -1464,6 +1495,23 @@ export async function handleSchedulesRoutes(
           screeningPayload !== null
         ) {
           (screeningPayload as Record<string, unknown>).scheduleKind = stampedScheduleKind;
+        }
+        // Issue #4235 — the recorded opt-in: a sub-daily schedule
+        // created with the opt-in carries it on the stored payload,
+        // so the unified record lifts it (screenScheduleToRecord)
+        // and later updates read it back. Stamped only when the
+        // cadence actually needs it — a daily schedule never
+        // carries the flag.
+        const needsOptIn =
+          (scheduleType === "cron" && typeof cron === "string" && isSubDailyCron(cron.trim())) ||
+          (scheduleType === "interval" && isSubDailyInterval(Number(intervalSeconds)));
+        if (
+          needsOptIn &&
+          subDailyOptIn &&
+          typeof screeningPayload === "object" &&
+          screeningPayload !== null
+        ) {
+          (screeningPayload as Record<string, unknown>).subDailyOptIn = true;
         }
 
         // No fabricated success (#111): this route never invents a
