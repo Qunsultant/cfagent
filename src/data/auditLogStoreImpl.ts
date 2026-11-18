@@ -5,6 +5,18 @@
  * adapter and the in-memory adapter differ ONLY in the
  * backend handles:
  *
+ * #5084 (observability S5) — this module is the SINGLE
+ * production client implementation of the SessionStore DO's
+ * `audit-append` op. The security layer's createAtomicAuditStore
+ * (src/security/iaaaAuditStore.ts) is a thin adapter over it, so
+ * both AUDIT_PORTS_ENABLED states serve this one
+ * implementation. The DO-side handler of the op lives in
+ * src/security/sessionStore.ts (the server end of the same op,
+ * not a second client); the in-memory adapter's op mirror
+ * (src/data/inMemoryAuditLogAdapter.ts) is a test double of the
+ * DO op, not a production store. See
+ * docs/architecture/security/audit-canonical-store-5084.md.
+ *
  *  - sendAppend speaks ONE audit-append operation (the
  *    SessionStore DO op on the DO adapter; the in-memory
  *    op mirror on the in-memory adapter) — chaining,

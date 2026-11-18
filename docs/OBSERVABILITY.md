@@ -41,6 +41,15 @@ and never fail the operation they instrument. Verified writers:
 Query the sink via the orchestrator's `query_table_data` operation or the
 MCP observability tooling (`src/mcp/commands.ts`).
 
+Note (S5, issue #5084): `mas_events` is the orchestrator's
+session-scoped event record, read by the Audit Vault page
+(`?tab=audit-vault`). It is NOT the canonical audit store — that is
+the IAAA audit store (`recordAuditEvent`, SessionStore DO
+`iaaa-audit:` keys), decided with evidence in
+`docs/architecture/security/audit-canonical-store-5084.md`. Whether
+the Vault should read the canonical store is its own decision
+(issue #5264).
+
 ## 3. Free-tier budgets (issue #329)
 
 The plan this Worker is on has **two 100,000/day ceilings that are spent the
@@ -631,6 +640,46 @@ state is module-level (shared across every port instance in
 the isolate, keyed by UTC day + cap) — a fresh port per alert
 must not reset it. A delivery failure on one channel never
 blocks the other; the port never throws.
+
+### Audit (S5 scope, issue #5084)
+
+One audit store. The canonical audit store is the IAAA audit
+store: the contract in `src/data/auditLogPorts.ts`, the pure
+model + single write path `recordAuditEvent` in
+`src/security/iaaaAudit.ts`, the wiring `createWiredAuditStore`
+in `src/security/iaaaAuditStore.ts`, backed by the SessionStore
+Durable Object's `audit-append` op on `iaaa-audit:` keys
+(append-only, hash-chained, live cap 2,000 + 10 archive
+segments of 2,000 = 22,000 events; reaching the cap refuses
+new appends as `AUDIT_STORE_FULL`, never deleting evidence).
+
+S5 eliminated the duplicate client implementation: the
+security layer's `createAtomicAuditStore` and the AuditLog
+family's `createAuditLogStore` both spoke the same DO op on the
+same keys. The audit-append client logic is now single-sourced
+in `createAuditLogStore` (`src/data/auditLogStoreImpl.ts`);
+`createAtomicAuditStore` is a thin adapter over it. Both
+`AUDIT_PORTS_ENABLED` states serve the one implementation — the
+flag selects the composition root only, not the implementation.
+No file was deleted; no audit event was lost (both compositions
+always wrote the same keys with byte-identical behavior, pinned
+by the #2435 conformance suite). Audit-before-allow is
+preserved (`classifyAuditFailure` / `shouldBlockAction` /
+`isAuditedSuccess` in `iaaaAudit.ts`): a consequential action
+whose audit write fails BLOCKS.
+
+The canonical audit surface is the IAAA Admin Overview Audit
+events view (`src/security/iaaaAdminOverview.ts`), which reads
+the one store. Two things S5 deliberately did NOT consolidate,
+recorded in `docs/architecture/security/
+audit-canonical-store-5084.md`: the #1688 audit REPORT family
+(`src/data/auditReportPorts.ts`) is a projection of DIFFERENT
+events (agent chain lifecycle rows in D1), not a second IAAA
+audit store; and the Audit Vault page (`?tab=audit-vault`)
+reads the older `mas_events` record (§2) — whether it should
+read the canonical store is its own decision, filed as
+[Out-of-Scope] issue #5264. S5 adds no coded messages and no
+new config; the catalog lands with S7.
 
 ### Coded messages (the S7 catalog seed)
 
