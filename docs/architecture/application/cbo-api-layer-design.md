@@ -14,6 +14,13 @@
   Docker portability). §§3/5/6/7/10/13 carry the conforming edits the
   amendment required; the original decisions stand except where §14
   explicitly supersedes part of them.
+- Amendment 2026-11-18 (same day, before any slice builds on this
+  design): §15 records the owner canonical-endpoints directive (one MCP
+  server at `https://mcp.openaimp.com/mcp`, one API server at
+  `https://api.openaimp.com/api`). §§1/7/8/10/12/13/14 carry the
+  conforming edits the amendment required; the original decisions stand,
+  and §15 fixes the hostnames the shared servers answer at plus the
+  mechanics of getting there.
 - Inventory basis: the 2026-11-18 parity inventory, basis `cd094b6f`.
   Where the design base drifted from the inventory basis, the drift is
   noted at the citation (handler line count, lifecycle route lines).
@@ -42,6 +49,11 @@ Reading rules:
   surface ON the one shared API/MCP servers (#5387/#5386). No CBO slice
   builds a second server, router, registry, auth chain, or validation
   layer.
+- §15 fixes the canonical endpoints the shared servers answer at
+  (`https://mcp.openaimp.com/mcp`, `https://api.openaimp.com/api`), the
+  transport, the path-collapse mechanics, the CORS/origin policy, and
+  the routing prerequisites — including a REQUIRED, UNPERFORMED DNS /
+  custom-domain dashboard check with a STOP rule (§15.5).
 - §12 records exactly what was verified and what was not. Nothing in
   this doc claims a live, runtime, or signed-in verification.
 
@@ -382,6 +394,15 @@ staging validation step (validate the schema against staging traffic /
 a shadow check) BEFORE enabling Block on any endpoint, so a bad schema
 cannot block legitimate traffic.
 
+Per-zone budget (§15): the `api` subdomain is a separate hostname in
+the same zone, and API Shield endpoints are per-zone — so the api
+hostname SHARES the zone's 100-endpoint / 5-schema budget with the main
+hostname. The rollout budget above covers BOTH hostnames combined, and
+the endpoint inventory lists host + path. No dashboard state is claimed
+for the new hostname; the §7.1 check confirms the zone setup including
+it. Whether the MCP endpoint enters the Shield inventory is decided by
+the #5386 survey together with the dashboard check, not assumed here.
+
 Split of duties: edge validation = shape/schema only (positive security
 model on requests). Authorization stays IN-WORKER (IAAA/PDP wiring) —
 the gateway NEVER replaces handler authorization. Defense in depth,
@@ -469,9 +490,16 @@ the code structure.
   version header; compatibility by additive change + deprecation
   discipline. A versioned path family needs an ADR + an amendment to
   `09-api-standards.md`, not a local choice in a route PR.
+- Canonical host (§15.3): the catalog path IS the URL path on the API
+  host (`https://api.openaimp.com` + catalog path). The router strips
+  the `/api` base before dispatch — the mechanism the dispatcher
+  already uses (`platform.ts:476,504`, `subPath` strip) — so the move
+  changes no handler logic. Bare aliases are not canonical on the new
+  host; the canonical form is the `/api` twin.
 - The OpenAPI document is generated from the endpoint catalog (J10:
   `buildOpenApiSpec()`, served session-gated at `/openapi.json` and
-  `/api/docs`; schemas hand-written for pilot paths only, read from the
+  `/api/docs` today — the canonical serving paths on the API host are
+  settled in §15.3; schemas hand-written for pilot paths only, read from the
   handlers, never guessed). The chanfana generator (§3) feeds the ONE
   spec artifact; the spike's "not yet specified" marker stays the honest
   state for uncovered paths until their schemas land.
@@ -661,7 +689,11 @@ filed under #5343 alongside the GAP and hardening slices, each stating
 its #1024 dependency. Alignment (§14): the migration lands the CBO
 families on the ONE router of the one API server (#5387) — the Hono app
 is the shared server's app, not a CBO-only app — and sequences with the
-#5387 survey conclusions on the shared-server shape.
+#5387 survey conclusions on the shared-server shape. Endpoints (§15):
+the one router answers at the canonical API host
+`https://api.openaimp.com/api`; the cutover slices carry the
+DNS/custom-domain/route setup (§15.5) and the old-path dual-serve /
+redirect mechanics (§15.2–§15.3).
 
 ## 11. CDO data approach (binding — owner direction 2026-11-18)
 
@@ -744,9 +776,43 @@ not this doc's. No replacement OAuth-provider library is named anywhere
 in the amendment: the survey evaluates candidates, and naming one
 unverified would be invention.
 
+Endpoints verification (2026-11-18, same day; amendment base
+`3e8f9dfa` — `src/` unchanged from `0483b1bce`, the intervening commit
+touched docs only): MCP transport verified from
+`src/mcps/openaimp/handler.ts` (SDK `Server` +
+`WebStandardStreamableHTTPServerTransport`, stateless idiom) and
+`package.json:36` (SDK 1.32.2). Current MCP dispatch verified in
+`src/server/routes/platform.ts:332–413` (`/mcp` + `/api/mcp`
+session-or-API-key, forwarded to the orchestrator agent;
+`/mcp/scanner*` x402, no session auth, scanner DO, affinity headers).
+Session cookie verified in `src/security/session.ts:36,106`
+(`session_id`, `HttpOnly; Secure; SameSite=Lax; Path=/`, no `Domain`
+attribute — host-only). CORS today verified as per-branch
+`Access-Control-Allow-Origin: *` with no credentials
+(`platform.ts:334/363/376/413/445/483/519`, `core.ts:67`) and per-branch
+OPTIONS handling; the client uses relative `/api` fetches
+(`src/client/`). The `/api` strip verified at `platform.ts:476,504`.
+OpenAPI serving verified at `src/server/routes/core.ts:136`
+(`/openapi.json` + `/api/docs`). Routing mechanism verified in
+`wrangler.jsonc:26–27` (`workers_dev: false`, one `routes` entry,
+`agent.openaimp.com`, `custom_domain: true`) and
+`.github/workflows/deploy.yml:141` (`npx wrangler deploy`). Zero
+references to `api.openaimp.com` / `mcp.openaimp.com` exist in `src/`,
+`docs/`, `wrangler.jsonc`, or `.github/` at the amendment base, and no
+Dockerfile exists in the repo — the hostnames exist only in this
+design and the owner directive until the routing work lands. #5343's
+live body was re-read at amendment time: 82,509 chars, the alignment
+section present (lines 74–91), NO endpoints section and NO subdomain
+URLs present yet — the coordinator's endpoints amendment had not
+landed; this amendment records the owner's directive as received.
+
 NOT verified (no claim is made):
 
 - The Cloudflare dashboard check (§7.1) — required, unperformed.
+- The DNS / custom-domain dashboard check (§15.5) — required,
+  unperformed. A probe of `api.openaimp.com` from proxy DNS is a hint
+  only, not evidence of public DNS; nothing here claims DNS exists or
+  does not exist from it.
 - Any live, runtime, or signed-in behavior. All findings are static
   code + doc reads.
 - FOSS versions beyond the 2026-11-18 evaluated baseline — each slice
@@ -764,6 +830,16 @@ NOT verified (no claim is made):
   §14): future surface, own issue + owner call. The Workers-only
   provider evaluated in §3 is OUT for the shared-server role.
 - API Shield plan decision if the dashboard contradicts the docs (§7.1).
+- DNS / custom-domain state for the canonical hostnames (§15.5):
+  required dashboard check, unperformed; zone/plan decisions are the
+  owner's if the dashboard contradicts the assumptions.
+- Whether a 308 redirect preserves a valid x402 payment (§15.2):
+  cutover-slice verification gate for the scanner path; no redirect on
+  that path until verified.
+- Dual-serve window length (§15.2): operator call at cutover,
+  externalized configuration, recorded in the cutover slice.
+- Session-cookie `Domain` change (§15.4): CISO review on the cutover
+  slice.
 - Price-approval, refund-execution, and other owner-gated decisions:
   carried on the parity tracker, not decided here.
 - CISO decisions: money/ledger permission name + bindings (GAP-2),
@@ -800,7 +876,8 @@ the amending author (see §12); their states are as verified then.
   payment proof is a credential under IAAA, not a parallel auth path.
   REST, MCP, and chat validate through the same shared validators in
   the door/service layer. The scanner keeps exactly its current tool
-  set and price; tool behaviour is unchanged.
+  set and price; tool behaviour is unchanged. The canonical endpoint
+  and the path-collapse mechanics are §15.2.
 
 ### 14.2 No separate CBO server
 
@@ -883,7 +960,8 @@ are built, they register on the ONE registry (#5386), carry one scope
 each under ADR 0012, execute through `executeWithPermissionGate`, and
 keep the AOP audit event per call. The MCP permission defaults
 (§2.3) are replaced by role-derived scopes through the GAP-4 seam,
-plugged into the one chain (§14.4).
+plugged into the one chain (§14.4). The registry answers at the
+canonical endpoint §15.2.
 
 ### 14.8 Sequencing and boundaries
 
@@ -902,3 +980,295 @@ plugged into the one chain (§14.4).
   route schemas and covers every data endpoint; the CBO schemas (§8,
   slice 9) feed it. The spec artifact (§7) is the shared contract for
   the edge adapter where deployed — derive, don't duplicate.
+
+## 15. Canonical endpoints (amendment 2026-11-18, owner directive)
+
+HARD design constraints, fixed by the owner 2026-11-18 09:08 EST. This
+section records the owner canonical-endpoints directive, received after
+the alignment amendment landed (PR #5388, landing `3e8f9dfa`) and
+recorded here before the design is finalized. The corresponding ADR
+decision is D12 in ADR 0034. The coordinator is amending #5343 with a
+canonical-endpoints section and posting endpoint comments on #5386
+(MCP) and #5387 (API); at amendment time #5343's body carried no
+endpoints section yet (see §12) — this section records the directive as
+received.
+
+### 15.1 The two canonical URLs
+
+| Server | Canonical URL | Owner |
+|---|---|---|
+| One MCP server | `https://mcp.openaimp.com/mcp` | CDO #5386 |
+| One API server | `https://api.openaimp.com/api` (base path `/api`) | CDO #5387 |
+
+These are the two single canonical URLs. They replace the current
+`/mcp`, `/api/mcp`, `/mcp/scanner` paths on the main domain and the
+scattered API entry points. No other hostname or path is canonical for
+either server. The app stays at `https://agent.openaimp.com` and calls
+the API server cross-origin (§15.4).
+
+### 15.2 MCP: transport, principal collapse, path mechanics
+
+Transport — verified from code, not invented. The MCP server's HTTP
+handler is the SDK low-level `Server` composed with
+`WebStandardStreamableHTTPServerTransport` in the established stateless
+idiom (`sessionIdGenerator: undefined`, `enableJsonResponse: true`), so
+responses keep the plain-JSON shape existing clients consume
+(`src/mcps/openaimp/handler.ts`, issue #2494;
+`@modelcontextprotocol/sdk` 1.32.2, `package.json:36`). The wire shape
+is JSON-RPC 2.0 over HTTP. The canonical endpoint KEEPS this transport:
+no transport change, no second framing, no SSE lane. The handler
+composition (SDK `Server` + Streamable HTTP transport + the existing
+catalog/execution layer in `src/mcps/openaimp/index.ts`) is the
+implementation the one registry runs; the endpoint move changes where
+it answers, not how it frames.
+
+Current paths — verified. The dispatcher serves three MCP surfaces
+(`src/server/routes/platform.ts:332–413`): `/mcp` and `/api/mcp`
+(JSON-RPC 2.0 + discovery; session-or-API-key auth, forwarded to the
+orchestrator agent with `x-user-login` / `x-principal-kind`), and
+`/mcp/scanner` + `/mcp/scanner/*` (x402 pay-per-use options scanner;
+no session auth — payment IS the access control; the scanner DO serves
+it, with `x-scanner-session` affinity and the `public_scanner`
+instance by default).
+
+Collapse by principal, not by path. The scanner surface collapses INTO
+the one endpoint: scanner access is distinguished by the PAID
+PRINCIPAL — the IAAA scanner-payment principal holding only
+`mcp:payments` (§14.4) — never by a separate path or server. The one
+registry serves every tool; the permission gate denies the paid
+principal anything outside the scanner tools, pinned by tests. The
+scanner keeps exactly its current tool set and price ($0.05 USDC via
+the x402 flow); the `PAYMENT-SIGNATURE` / `PAYMENT-REQUIRED` request
+headers and the `PAYMENT-RESPONSE` / `PAYMENT-REQUIRED` exposed headers
+today's scanner branch carries move to the canonical endpoint
+unchanged. Payment proof resolves to the principal in the one IAAA
+chain (§14.4) — it is a credential under IAAA, not a parallel auth
+path.
+
+Path-collapse mechanics — settled by this design. No silent breakage;
+every step below is a recorded cutover-slice behaviour:
+
+1. Canonical live. `https://mcp.openaimp.com/mcp` answers from the one
+   registry under the one IAAA chain. The migration note (new URL,
+   principal model, client re-pointing) is published with the cutover
+   slice, in docs and in the release notes of the cutover PR.
+2. Dual-serve window. The old paths (`/mcp`, `/api/mcp`,
+   `/mcp/scanner*` on `agent.openaimp.com`) keep serving, each response
+   carrying a `Deprecation` header pointing at the migration note. The
+   window length is OPERATOR CONFIGURATION decided at cutover: the
+   design REQUIRES a window, the length is an operator call recorded
+   in the cutover slice, never a hard-coded constant (§9.4).
+3. Redirect. After the window, old paths answer 308 Permanent
+   Redirect to the canonical URL. 308 — not 301/302 — because only 308
+   guarantees method + body preservation for POST JSON-RPC calls; a
+   301/302 risks downgrading a tool call to a GET.
+4. Removal only on an explicit owner call, after the window and
+   redirect phases, with the removal recorded in the deprecation
+   ledger. No path disappears silently.
+5. Scanner-path verification gate. Whether a 308 preserves a valid
+   x402 payment is VERIFIED by the cutover slice against the x402
+   implementation BEFORE redirect is enabled for `/mcp/scanner`. This
+   design claims nothing about x402 signature binding — it was not
+   verified. If verification fails, the scanner path dual-serves until
+   clients migrate, with NO redirect; the gate result is recorded in
+   the cutover slice either way.
+6. Clients re-point via configuration. The in-app explorer's MCP base
+   URL and API-key scripts' endpoint are configuration, not hard-coded
+   strings; the cutover slice moves the configured default to the
+   canonical URL and the migration note tells external clients to do
+   the same.
+
+### 15.3 API: base path, spec paths, route-table mapping
+
+Base path `/api`. The canonical URL of a route is its catalog path on
+the new host: `https://api.openaimp.com` + catalog path (for example,
+the catalog path `/api/payments/agentic/ledger/record` answers at
+`https://api.openaimp.com/api/payments/agentic/ledger/record`). The
+router strips the `/api` base before dispatch — the mechanism the
+dispatcher already uses today (`platform.ts:476,504`:
+`subPath = path.replace(/^\/api/, "")`, forwarding the suffix to the
+agent) — so every handler sees exactly the suffix it sees today. The
+move changes NO handler logic: no handler is edited to learn the new
+host, no matching rule changes, no behaviour changes.
+
+Route-table mapping. Every one of the 150 catalog routes (§8) maps to
+exactly one canonical URL by the rule above; the mapping table IS the
+catalog (§8.1) plus the host — no second table is maintained. The ~80
+handler files (82 route files counted in §8) move by the route table:
+families land on the one router (§10.3) family by family, money-first,
+each move pinned by the catalog-parity tests. Bare aliases
+(`/payments/...`, `/trading/...`, `/payments/webhook`) are NOT
+canonical on the new host: the canonical form is the `/api` twin (the
+dispatcher already treats the bare form as "alias, not a second route",
+`platform.ts:458`). Bare forms exist only on the old host during the
+dual-serve window, then 308-redirect to their `/api` canonical URL,
+then removal on owner call — the same four phases as §15.2. Existing
+alias families stay baseline rows, shrink-only, cleared on touch
+(J4, §8.2).
+
+Spec paths — settled by this design. The OpenAPI spec is served FROM
+the API server:
+
+- Spec JSON: `https://api.openaimp.com/api/openapi.json`
+- Swagger UI: `https://api.openaimp.com/api/docs`
+
+Today's relative names are preserved (`core.ts:136` serves
+`/openapi.json` and `/api/docs`); `/openapi.json` moves under `/api`
+because the API server's canonical surface is `/api/*`. Session-gated
+serving stays (J10, §8.2): the spec is the one artifact (§7, #5387
+requirement 5), generated from the route schemas, and the spike's "not
+yet specified" marker stays the honest state for uncovered paths.
+
+Root-level exception. The OAuth metadata well-known paths — AS
+metadata (RFC 8414) and protected-resource metadata (RFC 9728) — are
+the ONLY root-level paths on the API host: their locations are fixed
+by the RFCs, so they cannot live under `/api`. Everything else on that
+host lives under `/api`. On the MCP host, `/mcp` is the only canonical
+path; OAuth metadata discovery for MCP follows the MCP authorization
+specification current at build time, confirmed by the #5386 survey —
+no second MCP path is canonical, and the exact well-known shape is
+survey-confirmed, not invented here.
+
+The app calls the canonical host. The app at `agent.openaimp.com`
+calls `https://api.openaimp.com/api/...` with a configured API base
+URL (operator configuration, not a hard-coded string); the cutover
+slice moves the configured default from the relative `/api` fetches
+the client uses today (`src/client/`) to the canonical host.
+
+### 15.4 CORS / origin policy and the session cookie
+
+Current state — verified. The same-origin assumption holds today: the
+client calls relative `/api` paths, so no credentialed cross-origin
+traffic exists. CORS is per-branch, ad hoc: `Access-Control-Allow-Origin:
+*` with no credentials on the MCP branches, the premium/payments
+OPTIONS branch, and the public well-known document
+(`platform.ts:334/363/376/413/445/483/519`, `core.ts:67`), with OPTIONS
+handled inside each branch. No global CORS middleware exists. The
+session cookie is `session_id`, `HttpOnly; Secure; SameSite=Lax;
+Path=/`, with NO `Domain` attribute (`src/security/session.ts:36,106`)
+— a host-only cookie for `agent.openaimp.com`, which browsers will NOT
+send to `api.openaimp.com` as-is.
+
+Decided policy — settled by this design. The same-origin assumption
+ends; the policy is explicit:
+
+- Allowed origins: exactly `https://agent.openaimp.com`. The origin
+  list is OPERATOR CONFIGURATION (externalized, §9.4); the one origin
+  is the configured default, never a code constant. No other origin is
+  allowed for credentialed browser calls; adding one is an operator
+  decision, recorded.
+- Credentials mode: `include`. The server echoes the single allowed
+  origin (`Access-Control-Allow-Origin: <origin>`, never `*` —
+  browsers forbid `*` with credentials) with
+  `Access-Control-Allow-Credentials: true` and `Vary: Origin`.
+- Preflight: ONE OPTIONS handler in the Hono chain — Hono's CORS
+  middleware from the ecosystem (`hono/cors`, a decided FOSS piece
+  under D4/D5), calling no handler logic. Allowed methods and headers
+  are DERIVED from the one OpenAPI spec (the methods/headers the spec
+  declares), never a second list that can drift. The MCP host
+  additionally allows the x402 payment headers
+  (`PAYMENT-SIGNATURE`, `PAYMENT-REQUIRED`) and exposes
+  `PAYMENT-REQUIRED` / `PAYMENT-RESPONSE`, as today's scanner branch
+  does.
+- The `*` wildcard ENDS for credentialed browser traffic on both
+  hosts. Non-browser clients (API-key scripts, MCP clients, server
+  callers) are unaffected: CORS is a browser mechanism, and their auth
+  (API key, x402 proof, service identity) does not pass through it.
+- Session cookie — decided, security-relevant. The cookie gains
+  `Domain=.openaimp.com` (same-site; `SameSite=Lax`, `Secure`,
+  `HttpOnly` retained) so the app's session carries to the API
+  subdomain. The change lands in the cutover slice, CISO-REVIEWED: it
+  widens cookie scope to ALL `openaimp.com` subdomains, including the
+  MCP host — stated explicitly, not buried. The mitigation is the one
+  IAAA chain: the MCP host gates every call through it, a session
+  principal is never a scanner-payment principal, and the cookie alone
+  never authorizes a scanner-principal call. Rejected: a host-only
+  cookie plus a same-origin proxy — a proxy reintroduces the
+  single-host coupling the split exists to end.
+
+### 15.5 Routing, prerequisites, and the DNS check
+
+Mechanism — verified from repo config. The Worker is routed by the
+`routes` array in `wrangler.jsonc` with `custom_domain: true`: the
+single existing entry is `agent.openaimp.com` (`wrangler.jsonc:27`),
+with `workers_dev: false` (`:26`), Worker name `ai-search-agent`, main
+`src/server.ts`, deployed by `npx wrangler deploy`
+(`.github/workflows/deploy.yml:141`). Each canonical subdomain is added
+as a `routes` entry with `custom_domain: true` in the Worker config,
+in the same shape as the existing entry. The Docker shape's ingress is
+#5277's: no Dockerfile exists in the repo at the amendment base, #5277
+owns the container shape and its ingress, and this design does not
+prescribe it. Whether the two hostnames bind one Worker deployment or
+two is settled by the #5387/#5386 surveys, constrained: both hostnames
+answer from the ONE router / ONE registry — no forked code, no second
+deployment of divergent logic. The DNS/custom-domain/route setup is
+BUILD SCOPE: it is part of the cutover slices, not an ops afterthought,
+and its config-as-code lives versioned in the repo beside the existing
+`wrangler.jsonc` entry.
+
+Prerequisites — what must exist before the server can answer at either
+hostname:
+
+1. A DNS record for the subdomain in the `openaimp.com` zone.
+2. An active custom-domain binding for the Worker (or the container
+   ingress equivalent per #5277).
+3. A route pattern matching the hostname.
+4. Active TLS for the hostname (Cloudflare-managed certificates on
+   custom domains — the mechanism to confirm in the check below).
+
+Each is a pre-cutover checklist item owned by the cutover slice; the
+cutover slice records each item's evidence before enabling the
+hostname.
+
+DNS / custom-domain dashboard check — REQUIRED, UNPERFORMED.
+
+- What: confirm, in the Cloudflare dashboard, the DNS state and the
+  custom-domain state for the `openaimp.com` zone: whether the zone is
+  on Cloudflare, whether records for `api` and `mcp` exist, whether
+  custom-domain bindings can be added, and the TLS state. Record what
+  is missing once verified.
+- Status: NOT PERFORMED. The design author had no browser/dashboard
+  access. Nothing in this doc claims the check was done.
+- The probe is not evidence. A probe of `api.openaimp.com` from this
+  environment's proxy DNS is a HINT ONLY, not evidence of public DNS.
+  This doc claims nothing about DNS existence — or non-existence —
+  from it. The dashboard is the authority.
+- STOP rule: if the dashboard contradicts the assumptions (zone not on
+  Cloudflare, records absent, binding limits, TLS blocked), STOP and
+  report the exact requirement. A zone/plan decision is the owner's,
+  not a code decision. No cutover slice enables either hostname until
+  the check is recorded with its evidence (zone, records observed,
+  date, observer).
+- The check is a design-phase gate alongside §7.1, not a slice-phase
+  afterthought: the cutover plan in this section is conditional on the
+  confirmed zone state.
+
+### 15.6 Gateway note (per-zone)
+
+The `api` subdomain is a separate hostname in the same zone, and API
+Shield endpoints are per-zone: the api hostname shares the zone's
+100-endpoint / 5-schema budget with the main hostname (§7). The
+rollout budget covers both hostnames combined; the endpoint inventory
+lists host + path. No dashboard state is claimed for the new hostname;
+the §7.1 check confirms the zone setup including it. Whether the MCP
+endpoint enters the Shield inventory is decided by the #5386 survey
+together with the dashboard check, not assumed here.
+
+### 15.7 Sequencing and boundaries
+
+- The endpoints land WITH the shared-server work: the Hono migration
+  (§4, §10.3) lands the one router answering at the canonical API host;
+  the MCP consolidation (#5386) lands the one registry at the canonical
+  MCP host. The endpoint cutover is sequenced with those landings, not
+  ahead of them.
+- The dev-work stop recorded in #5387/#5386 (blocking building, not
+  the survey, pending the owner's resume word) applies to the cutover
+  slices as to all other slice builds.
+- Boundaries (unchanged): #5387 owns the API consolidation, #5386 owns
+  the MCP consolidation, #5277 owns the container shape and its
+  ingress, #1024 owns the repo-wide framework-adapter design, #5343
+  owns the commercial-surface design + ADR and its slices. Nothing here
+  folds another lane's work into CBO issues.
+- The coordinator's #5343 body amendment (canonical-endpoints section)
+  and endpoint comments on #5386/#5387 are the coordinator's work, not
+  this doc's; this section records the owner's directive as received.
