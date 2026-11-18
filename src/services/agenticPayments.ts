@@ -65,6 +65,7 @@ import { AGENT_DIDS } from "../agents/did";
 import { verifyOnChainClaim, type X402ClaimVerifier } from "./x402Verifier";
 import { describeX402PaymentPath } from "./x402PaymentPath";
 import {
+  buildCoveredCallEvent,
   buildMeteredCallEvent,
   meteredGateRefusal,
   resolveMeteredTier,
@@ -571,6 +572,38 @@ export class ETradeAgenticPaymentService {
     const extractedNonce = this.extractNonce(req.headers);
     const challenge = this.createX402Challenge(resource, priceUSD, description, extractedNonce);
 
+    // Issue #5222: Subscribed included-run bypass. Coverage is
+    // consulted BEFORE any payment is demanded (coverage-first,
+    // same order as the native gate's check()): a Subscribed
+    // caller with included runs remaining is served without a
+    // 402 challenge and the balance is decremented by the wired
+    // port. Payment-step only: the meter is still required (no
+    // meter → no bypass, fall through to the payment demand),
+    // and the served call is still metered (serveCoveredCall).
+    // Anonymous traffic has no session login, so the port is
+    // never consulted for it. Any probe failure falls through
+    // to demanding payment — never to serving free. A presented
+    // payment is ignored when covered: the proof is never
+    // verified and its tx hash never consumed, so the payer can
+    // reuse it; coverage is the cheaper entitlement and wins.
+    const sessionLogin = req.headers.get("x-user-login");
+    if (sessionLogin && metered?.meter && metered?.consumeIncludedRun) {
+      let covered = false;
+      try {
+        covered = await metered.consumeIncludedRun(sessionLogin);
+      } catch (err) {
+        structuredLog.warn("agenticPayments.included_run_probe_failed", {
+          message: `[payments] included-run probe failed for ${resource}: ${err instanceof Error ? err.message : String(err)} — demanding payment (fail closed).`,
+          resource,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        covered = false;
+      }
+      if (covered) {
+        return this.serveCoveredCall(resource, priceUSD, fulfill, metered.meter, metered.category, sessionLogin);
+      }
+    }
+
     const hasX402 = Boolean(req.headers.get("PAYMENT-SIGNATURE"));
     const hasMpp = /^payment\s/i.test(req.headers.get("Authorization") || "");
     if (hasMpp && !hasX402) {
@@ -695,6 +728,114 @@ export class ETradeAgenticPaymentService {
     return new Response(JSON.stringify(result), {
       status: 200,
       headers,
+    });
+  }
+
+  /**
+   * Issue #5222: serve one call covered by subscription included
+   * runs. The included run was already consumed by the wired port
+   * before this runs (coverage-first, same as the native gate's
+   * check(), which consumes at decision time). The shape mirrors
+   * the paid path — fulfill, then meter, then serve — with two
+   * deliberate differences: the coverage receipt is a locally
+   * synthesised record (issue #122 convention: status
+   * "simulated" + simulated true + the note mark it as NOT a
+   * verified payment; amount 0 because nothing was charged; no
+   * txHash, no network, no recipient because no payment settled),
+   * and the response carries NO payment headers (no payment
+   * happened). The meter row is the coverage row
+   * (buildCoveredCallEvent, paidVia subscription_included).
+   *
+   * Known limitation: the run is consumed before fulfill, so a
+   * meter failure here spends one included run without serving
+   * the call (the 503 refusal below). The balance is
+   * operator-reconcilable, and no unmetered serve is possible —
+   * the alternative (consume after metering) would leave a
+   * meter row for an unserved call, which corrupts the meter,
+   * the authoritative usage record.
+   */
+  private async serveCoveredCall(
+    resource: string,
+    priceUSD: number,
+    fulfill: (receipt: AgenticPaymentReceipt) => Promise<any>,
+    meter: NonNullable<MeteredGateOptions["meter"]>,
+    category: string,
+    userLogin: string,
+  ): Promise<Response> {
+    const coverageId = `cov_${crypto.randomUUID()}`;
+    const coverageReceipt: AgenticPaymentReceipt = {
+      receiptId: coverageId,
+      protocol: "x402",
+      resource,
+      amount: 0,
+      currency: "USD",
+      network: "",
+      payer: userLogin,
+      recipient: "",
+      status: "simulated",
+      simulated: true,
+      timestamp: new Date().toISOString(),
+      proposerDid: AGENT_DIDS.TRADING,
+      note: "Covered by subscription included runs (issue #5222); no x402/MPP payment was verified or charged.",
+    };
+
+    // Fulfill first, exactly as the paid path does: a fulfill
+    // failure throws (no meter row, no serve).
+    const result = await fulfill(coverageReceipt);
+
+    // Issue #2408: meter the SERVED call only, before serving it.
+    // A meter failure refuses with a typed error — the computed
+    // result is discarded, never served unmetered.
+    try {
+      meter.ensureSchema();
+      meter.insertEvent(buildCoveredCallEvent({
+        coverageId,
+        userLogin,
+        category,
+        priceUSD,
+        tier: "Subscribed",
+      }));
+    } catch (err) {
+      structuredLog.error("agenticPayments.covered_call_usage_meter_failed", {
+        message: `[payments] covered call refused ${resource}: usage meter failed: ${err instanceof Error ? err.message : String(err)}`,
+        resource,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return meteredGateRefusal(503, "MeteringUnavailable", "The usage meter failed; the covered result was not served. Retry the call.");
+    }
+
+    // Issue #2522: tier-decision audit. Best-effort, NEVER a gate
+    // condition — same posture as the paid path.
+    try {
+      if (this.orm?.events) {
+        this.orm.events.create({
+          id: crypto.randomUUID(),
+          sessionId: userLogin,
+          type: "commercial.tier.decision",
+          agent: "payments",
+          payload: {
+            userLogin,
+            tier: "Subscribed",
+            receiptId: coverageId,
+            paidVia: "subscription_included",
+            category,
+            priceUSD,
+          },
+          createdAt: new Date().toISOString(),
+        });
+      }
+    } catch (err) {
+      structuredLog.warn("agenticPayments.tier_decision_audit_failed", {
+        message: `[payments] tier-decision audit failed for ${resource}: ${err instanceof Error ? err.message : String(err)}`,
+        resource,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+
+    // No PAYMENT-RESPONSE / Payment-Receipt headers: no payment happened.
+    return new Response(JSON.stringify(result), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
     });
   }
 
