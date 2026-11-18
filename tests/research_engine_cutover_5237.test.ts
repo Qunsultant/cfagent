@@ -75,7 +75,7 @@ describe("Issue #5237 — Nightly OODA J-stack engine cutover & view=ooda UX rou
     expect(inst?.state).toBe("completed");
     const runs = runStore.listByJob("research:cutover-run-1", 10);
     expect(runs).toHaveLength(1);
-    expect(runs[0].outcome).toBe("completed");
+    expect(runs[0].outcome).toBe("success");
 
     // Verify observed stageVisibility comes from the engine (analyze & evaluate recorded)
     const analyzeVis = result.stageVisibility.find((s) => s.stageId === "analyze");
