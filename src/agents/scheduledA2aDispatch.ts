@@ -9,7 +9,7 @@
  * Instance discipline (SURVEY §1.4 — the sharpest hazard in the
  * survey): A2A resolution for "scheduled" has landed on the live
  * "default" instance since slice 1 (src/a2a/resolution.ts). A
- * virgin instance would seed DEFAULT_SCHEDULES on first read and
+ * virgin instance would seed the built-in goals config on first read and
  * serve plausible-looking WRONG state; this handler only ever runs
  * on the resolved instance, and nothing here seeds, synthesizes, or
  * fabricates schedule state. onCron — the governed firing path —

@@ -17,7 +17,7 @@
  */
 
 import type { Env } from "../../types";
-import { DEFAULT_SCHEDULES } from "../../schedule";
+import { getBuiltinScheduledGoals } from "../../config/builtinScheduledGoals";
 import { OPERATION_CATALOG } from "../../orchestrate";
 import { SCHEDULE_SYSTEMS, WORKER_CRON_TRIGGERS_INVENTORY } from "../../services/scheduleSystems";
 import { actorGateway } from "../../services/cloudflareActorGateway";
@@ -114,6 +114,11 @@ export async function handleTradingScheduleRoutes(request: Request, env: Env, ur
         setGoalEnabled(id: string, enabled: boolean, actor?: string | null): Promise<boolean>;
         triggerGoal(id: string, env?: unknown, actor?: string | null): Promise<unknown>;
         listJobRuns(jobId?: string, limit?: number): Promise<unknown[]>;
+        // Issue #4253 — owner-removed built-in goal ids, for the
+        // builtin-goals read below. Optional: older DO stubs (and
+        // the #3996 test's fake agent) do not implement it, and the
+        // endpoint treats a missing method as "nothing removed".
+        listRemovedBuiltinGoalIds?(): Promise<string[]>;
         // Issue #3122 — pending goal-approval decisions (the DO
         // methods enforce the state machine and arm under the
         // original requester's principal).
@@ -155,11 +160,23 @@ export async function handleTradingScheduleRoutes(request: Request, env: Env, ur
       // Issue #3996 — built-in goals for the goals UI dropdown +
       // seed-all button. Session-gated like every other
       // /api/schedule/* route above (unauthenticated → 401); the
-      // list is read from DEFAULT_SCHEDULES at request time, never
-      // hardcoded in the client, so the UI tracks src/schedule.ts
-      // exactly.
+      // list is read from the built-in goals config at request
+      // time, never hardcoded in the client, so the UI tracks
+      // config/builtin-scheduled-goals.json exactly. Issue #4253 —
+      // goals the owner removed are subtracted here (from the DO's
+      // removal record), so Seed-all can never re-add them; the
+      // removed ids ride along so the UI can say what was skipped.
       if (path === "/api/schedule/builtin-goals" && request.method === "GET") {
-        return Response.json({ ok: true, goals: DEFAULT_SCHEDULES });
+        const removed =
+          typeof sched.listRemovedBuiltinGoalIds === "function"
+            ? await sched.listRemovedBuiltinGoalIds()
+            : [];
+        const removedSet = new Set(removed);
+        return Response.json({
+          ok: true,
+          goals: getBuiltinScheduledGoals().filter((goal) => !removedSet.has(goal.id)),
+          removedBuiltinGoalIds: removed,
+        });
       }
       if (path === "/api/schedule/goals" && request.method === "POST") {
         const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;

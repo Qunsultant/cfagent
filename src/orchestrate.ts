@@ -61,8 +61,8 @@ export const OPERATION_CATALOG: CatalogEntry[] = [
   {
     agent: "qa",
     binding: "ORCHESTRATOR_AGENT",
-    // #1655: qa.run_sweep is the DEFAULT_SCHEDULES daily-qa-sweep
-    // operation (src/schedule.ts). It was missing from this catalog,
+    // #1655: qa.run_sweep is the built-in goals config daily-qa-sweep
+    // operation (config/builtin-scheduled-goals.json). It was missing from this catalog,
     // so every due tick threw "Unknown operation: qa.run_sweep" in
     // createJob and the goal stayed due. createJob is descriptor-only,
     // so registration is the complete op-registry fix — no executor

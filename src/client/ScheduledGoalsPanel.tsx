@@ -146,8 +146,10 @@ export function ScheduledGoalsPanel(_props: ScheduledGoalsPanelProps = {}) {
   const [busy, setBusy] = useState("");
   const [presetResults, setPresetResults] = useState<PresetGoalResult[] | null>(null);
   // Issue #3996 — built-in goals read from the server (single
-  // source of truth: src/schedule.ts DEFAULT_SCHEDULES via GET
+  // source of truth: the built-in goals config via GET
   // /api/schedule/builtin-goals, never a client-side copy).
+  // Issue #4253 — the server subtracts owner-removed goals here,
+  // so Seed-all can never re-add one.
   const [builtinGoals, setBuiltinGoals] = useState<ScheduledGoal[]>([]);
   const [builtinLoadError, setBuiltinLoadError] = useState("");
   const [builtinSelection, setBuiltinSelection] = useState("");
@@ -729,14 +731,17 @@ export function ScheduledGoalsPanel(_props: ScheduledGoalsPanelProps = {}) {
         <Stack gap="3">
           <CardHeader title="Seed all built-in goals" />
           {/* Issue #3996: seed all built-in goals — adds every missing
-              built-in goal in DEFAULT_SCHEDULES order, skipping ones
+              built-in goal in config order, skipping ones
               that already exist, and reports per-goal results. The
               disabled-by-design goals seed as disabled; the operator
-              enables them later once their prerequisites are in place. */}
+              enables them later once their prerequisites are in place.
+              Issue #4253: goals the owner removed are not listed by
+              the server, so Seed-all never re-adds them. */}
           <div className="ui-meta">
             Adds every missing built-in goal (daily QA sweep, opportunity hunt, daily social post,
-            the three SessionStore resource goals, and the two index-list refresh goals). Goals
-            that already exist are skipped, not duplicated. The daily social post and the
+            the three SessionStore resource goals, the two index-list refresh goals, and the
+            monthly Autopilot evaluation). Goals that already exist are skipped, not duplicated.
+            Goals the owner removed are not re-added. The daily social post and the
             ETF-holdings refresh seed as disabled.
           </div>
           <ResultRows results={seedResults} />

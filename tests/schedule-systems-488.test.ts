@@ -56,10 +56,16 @@ describe("schedule systems inventory", () => {
     expect(CREATABLE_SCHEDULE_CALLBACKS_INVENTORY).toEqual(live);
   });
 
-  it("tracks DEFAULT_SCHEDULES ids in src/schedule.ts", () => {
-    const schedule = readFileSync(join(root, "src", "schedule.ts"), "utf8");
-    const slice = block(schedule, "export const DEFAULT_SCHEDULES", "\n];");
-    const live = [...slice.matchAll(/id: "([^"]+)"/g)].map((m) => m[1]);
+  it("tracks the built-in goal ids in config/builtin-scheduled-goals.json (#4253)", () => {
+    // Issue #4253 — the ids moved from the DEFAULT_SCHEDULES literal
+    // in src/schedule.ts to the externalized config; the inventory is
+    // derived from the same config, and this pin proves the wiring
+    // (a re-introduced handwritten list would fail here).
+    const config = JSON.parse(
+      readFileSync(join(root, "config", "builtin-scheduled-goals.json"), "utf8"),
+    ) as Array<{ id: string }>;
+    const live = config.map((goal) => goal.id);
+    expect(live).toHaveLength(9);
     expect(SCHEDULED_GOAL_IDS_INVENTORY).toEqual(live);
   });
 

@@ -84,9 +84,10 @@ export function listOperations() {
 /**
  * Issue #3996 — built-in scheduled goals, the single source of
  * truth for the goals UI dropdown and the seed-all button. The
- * canonical definitions live in src/schedule.ts DEFAULT_SCHEDULES
- * and are read from this server endpoint at load time — the client
- * carries no second copy of the values.
+ * canonical definitions live in the built-in goals config
+ * (`config/builtin-scheduled-goals.json`) and are read from this
+ * server endpoint at load time — the client carries no second copy
+ * of the values.
  */
 export function listBuiltinGoals() {
   return api<{ ok: boolean; goals: ScheduledGoal[] }>("/api/schedule/builtin-goals");

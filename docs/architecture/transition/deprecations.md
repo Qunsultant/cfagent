@@ -6,6 +6,15 @@ to migrate consumers off them. Deletion needs zero consumers plus an
 owner decision plus a gate amendment, and is never part of a program
 slice.
 
+## 2026-11-18 — #4253 retires the red probe by rename
+
+- File: `tests/scheduled_goals_removal_red_4253.test.ts` → `tests/scheduled_goals_removal_red_4253.deprecated.ts`
+- Date: 2026-11-18
+- Reason: Issue #4253's temporary red probe proved the durable-removal bug on pre-#4253 code (a removed built-in goal was re-seeded when the goals list emptied); its red was observed before the fix landed. Per gitops §22 the file is retired by rename, never deleted. Its pins live on, rebuilt for current main's nine goals, in `tests/scheduled_goals_config_4253.test.ts` (4253-P02, 4253-P03).
+- Replacement: `tests/scheduled_goals_config_4253.test.ts`.
+- Consumers at deprecation: none — the file was a standalone probe, imported by nothing.
+- Deletion condition: zero consumers plus an owner decision plus a gate amendment; deletion is never part of a program slice.
+
 ## 2026-11-17 — S-U7 renames styles.css to styles.deprecated.css (#5178)
 
 - File: `src/client/styles.css` → `src/client/styles.deprecated.css`
