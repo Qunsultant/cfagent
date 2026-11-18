@@ -1,5 +1,5 @@
 /**
- * Issue #3885 / #5034 — single-use preview tokens for "cancel everything".
+ * Issue #3885 / #5034 — single use preview tokens for "cancel everything".
  *
  * Re-exports the port (`src/data/cancelPreviewPorts.ts`) and DO SQLite
  * adapter (`src/data/doSqliteCancelPreviewAdapter.ts`).
