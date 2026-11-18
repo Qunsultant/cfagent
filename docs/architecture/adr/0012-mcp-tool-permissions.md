@@ -200,3 +200,21 @@ through the adapter).
 - Denied calls are visible in two places (audit trail +
   observability stream) with no argument or credential
   material in either.
+
+## Amendment — GAP-4: the role→scope adapter is plugged in (2026-11-18)
+
+GAP-4 (#5468, design #5343 / ADR 0034, CISO coordination
+#5350) plugs the IAAA role→scope adapter into the seam this
+ADR left future (`resolveScopesWithRoleAdapter` +
+`scopesForIaaaRoles` in `mcpPermissionPorts.ts`): scopes
+derive from IAAA roles through a permission correspondence
+read off the compiled policy snapshot, with the
+`scanner-payment` pin (`mcp:payments` only) and the `unknown`
+deny expressed through the adapter. The correspondence is a
+proposal put to CISO review, not a CISO decision. The
+follow-up this ADR names — login→internalUserId→membership
+resolution consumable from the DO tool path — is still open:
+no gate call site supplies a role resolver yet, so the
+recorded defaults remain wherever the adapter cannot derive,
+stated explicitly in the module header. The gate, the
+declarations, and the isolation mechanics are untouched.
