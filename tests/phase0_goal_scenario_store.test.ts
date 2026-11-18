@@ -72,7 +72,7 @@ describe("goal/scenario/outcome store (issue #1098)", () => {
       source: "user",
       payload: { targetMonthly: 500 },
     });
-    expect(goal.id).toMatch(/^goal_/);
+    expect(goal.id).toMatch(/^goal:/);  // #5175 slice 3: goal records mint goal:<time36>-<rand6>
     expect(goal.status).toBe("proposed");
     const back = getGoal(sql, "alice", goal.id);
     expect(back?.title).toBe("Monthly covered-call income");

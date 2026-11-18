@@ -484,7 +484,7 @@ describe("Cloudflare Agents: Task Scheduling & Durable Timers", () => {
       expect(failurePayload).toMatchObject({
         screenType: "options",
         runType: "manual",
-        runId: expect.stringMatching(/^options_scanner:/),
+        runId: expect.stringMatching(/^run:/),  // #5175 slice 3: scheduled analysis run id mints run:
       });
       expect(orm.events.findMany({ where: { type: "options.scheduled_analysis_completed" } })).toHaveLength(0);
 

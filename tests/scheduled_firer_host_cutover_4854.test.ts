@@ -681,7 +681,7 @@ describe("scheduled firer wiring (#4854)", () => {
     expect(result.success).toBe(true);
     expect(result.data?.status).toBe("completed");
     expect(created).toHaveLength(1);
-    expect(created[0].jobId).toMatch(/^strategy-screen:options-panel:scheduled:AAPL:/);
+    expect(created[0].jobId).toMatch(/^strategy-screen:run:/);  // #5175 slice 3: scheduled panel run id mints run:
     expect(created[0].trigger).toBe("scheduled");
     expect(universeCalls).toHaveLength(OPTIONS_PIPELINE_STAGES.length);
     for (const call of universeCalls) {

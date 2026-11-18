@@ -187,6 +187,7 @@ describe("unified opportunities through the pipeline (#3186 step 3e)", () => {
     expect(csvSymbols[0]).toContain("AAPL");
     expect(csvSymbols[1]).toContain("MSFT");
     // The pipeline's 8 stage artifacts are in the DO storage.
-    expect(storage.keys().filter((k) => k.startsWith("options:options_scanner:unified:"))).toHaveLength(8);
+    // #5175 slice 3: stage-artifact keys are options:<runId>:<stage>; the unified run id mints run: now.
+    expect(storage.keys().filter((k) => k.startsWith("options:run:"))).toHaveLength(8);
   });
 });

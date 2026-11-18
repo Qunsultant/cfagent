@@ -662,7 +662,8 @@ describe("options copilot stage control (#4066)", () => {
       // job (strategy-screen:<runId>), not the options job.
       const stores = optionsEngineStoresFromSql(sql);
       const definitions = await stores.stores.definitions.listDefinitions();
-      const panelJob = definitions.find((d) => d.jobId.startsWith("strategy-screen:nlq-panel:"));
+      // #5175 slice 3: the strategy job is strategy-screen:<runId>; the panel run id mints run: now.
+      const panelJob = definitions.find((d) => d.jobId.startsWith("strategy-screen:"));
       expect(panelJob).toBeDefined();
       const definition = await stores.stores.definitions.getDefinition(panelJob!.jobId);
       const request = (definition?.rawConfig as { request?: unknown } | undefined)?.request as
@@ -711,7 +712,8 @@ describe("options copilot stage control (#4066)", () => {
       const definitions = await stores.stores.definitions.listDefinitions();
       // Issue #4271: the scan is a strategy screen, so its job is the
       // strategy job (strategy-screen:<runId>), not the options job.
-      const scanJob = definitions.find((d) => d.jobId.startsWith("strategy-screen:nlq-scan:"));
+      // #5175 slice 3: the strategy job is strategy-screen:<runId>; the scanner run id mints run: now.
+      const scanJob = definitions.find((d) => d.jobId.startsWith("strategy-screen:"));
       expect(scanJob).toBeDefined();
       const runId = scanJob!.jobId.slice("strategy-screen:".length);
       const controlled = await controlOptionsStage({

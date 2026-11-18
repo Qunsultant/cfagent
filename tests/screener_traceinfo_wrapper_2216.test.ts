@@ -66,7 +66,7 @@ describe("#2216 options wrapper passes its trace to the guard", () => {
     expect(opts.trace!.stage).toBe("auth guard");
     expect(opts.trace!.trigger).toBe("scheduled");
     expect(opts.trace!.runAs).toBe("test_trader");
-    expect(opts.trace!.runId).toMatch(/^options_scanner:.+:bullish$/);
+    expect(opts.trace!.runId).toMatch(/^run:/);  // #5175 slice 3: scheduled analysis run id mints run:
     expect(opts.trace!.firedAt).toBeDefined();
     expect(opts.trace!.universe).toBe("NASDAQ100");
     expect(opts.trace!.thesis).toBe("bullish");

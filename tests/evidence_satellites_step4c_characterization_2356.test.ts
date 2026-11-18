@@ -122,7 +122,7 @@ describe("characterization 4c: goalScenarioStore", () => {
     const sql = freshSql();
     expect(GOAL_SCENARIO_TABLES).toEqual(["mas_goals", "mas_scenarios", "mas_outcomes"]);
     const g = createGoal(sql as never, { userLogin: "alice", kind: "income", title: "T" });
-    expect(g.id).toMatch(/^goal_/);
+    expect(g.id).toMatch(/^goal:/);  // #5175 slice 3: goal records mint goal:<time36>-<rand6>
     const names = tableNames(sql);
     for (const t of GOAL_SCENARIO_TABLES) expect(names, t).toContain(t);
   });
@@ -168,7 +168,7 @@ describe("characterization 4c: goalScenarioStore", () => {
       userLogin: "alice", goalId: g.id,
       portfolioRef: { kind: "hypothetical", ref: "p1" }, shocks: { spy: -0.1 },
     });
-    expect(s?.id).toMatch(/^scen_/);
+    expect(s?.id).toMatch(/^scen:/);  // #5175 slice 3: scenario rows mint scen:<uuid>
     expect(s?.portfolioRef).toEqual({ kind: "hypothetical", ref: "p1" });
     expect(getScenario(sql as never, "bob", s!.id)).toBeNull();
     expect(listScenarios(sql as never, "alice", g.id)).toHaveLength(1);
@@ -184,7 +184,7 @@ describe("characterization 4c: goalScenarioStore", () => {
       userLogin: "alice", goalId: g.id, kind: "paper",
       recommendationRef: "rec-1", metrics: { pnl: 3 },
     });
-    expect(o?.id).toMatch(/^outc_/);
+    expect(o?.id).toMatch(/^outc:/);  // #5175 slice 3: outcome rows mint outc:<uuid>
     expect(listOutcomes(sql as never, "alice", { goalId: g.id })).toHaveLength(1);
     expect(listOutcomes(sql as never, "bob")).toEqual([]);
   });
