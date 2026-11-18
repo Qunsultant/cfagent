@@ -186,7 +186,7 @@ export class DefinePipelineChainCommand implements IMcpToolCommand<DefinePipelin
       publisher: null,
       steps: registerResearchSteps(
         createBuiltinStepRegistry(),
-        createDefaultResearchStepDeps({ allowTestStub: true }),
+        createDefaultResearchStepDeps(),
       ),
       invocation: "sync",
     });
