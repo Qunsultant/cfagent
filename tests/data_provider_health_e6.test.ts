@@ -65,7 +65,7 @@ import {
 // Capture-writing fixtures — everything goes through recordCapture.
 // ---------------------------------------------------------------------------
 
-const TENANT = "default";
+const TENANT = "primary";
 const NOW = Date.parse("2026-10-23T12:00:00.000Z");
 
 function okBlobStorage() {

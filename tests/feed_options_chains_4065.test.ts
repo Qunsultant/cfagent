@@ -926,7 +926,7 @@ describe("the chains job across residencies (#4065)", () => {
     }
     const captures = await new D1ProviderCaptureAdapter(
       createD1ProviderCaptureDb(mock as never),
-    ).listCapturesByRun("default", dispatch.runId);
+    ).listCapturesByRun("primary", dispatch.runId);
     expect(captures.length).toBeGreaterThan(0);
     for (const capture of captures) {
       expect(capture.providerId).toBe("alpaca");
@@ -976,7 +976,7 @@ describe("the chains job across residencies (#4065)", () => {
     const readCaptures = async (mock: MockD1Database, runId: string) =>
       new D1ProviderCaptureAdapter(
         createD1ProviderCaptureDb(mock as never),
-      ).listCapturesByRun("default", runId);
+      ).listCapturesByRun("primary", runId);
     const wfDataset = await readDataset(wf.mock);
     const hostDataset = await readDataset(host.mock);
     const valueFields = (d: typeof wfDataset) => ({
