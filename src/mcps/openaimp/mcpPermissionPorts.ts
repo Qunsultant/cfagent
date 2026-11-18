@@ -29,6 +29,24 @@
  * tool-call site — does NOT exist in #945's consumed surface
  * today, so it is a follow-up for the CISO lane, not built here.
  *
+ * GAP-4 (#5468, CISO coordination #5350, design #5343 / ADR 0034)
+ * plugs the adapter into the seam below
+ * (`resolveScopesWithRoleAdapter` + `scopesForIaaaRoles`): scopes
+ * derive from IAAA roles through the permission correspondence,
+ * read off the compiled policy snapshot — the CISO-owned role
+ * table stays authoritative, no second table is introduced. The
+ * correspondence itself is a PROPOSAL put to CISO review on the
+ * GAP-4 PR, not a CISO decision. Where the adapter cannot
+ * derive — no role resolver is supplied at the call site, or
+ * the resolver reports the roles unresolvable — the recorded
+ * defaults above remain, explicitly: no gate call site threads
+ * a membership store or a tenant today, and the MCP call
+ * carries no tenant, so login→roles resolution at the gate is
+ * still the CISO-lane follow-up this header names. `system`
+ * principals are never role-governed (in-process platform
+ * callers, route layer already authenticated). The gate, the
+ * declarations, and the isolation mechanics stay untouched.
+ *
  * WHAT THIS IS NOT
  * - Not session authentication: the Worker /mcp route (401
  *   without a session or cfk_ key) and IAAA requireAuth stand
@@ -75,6 +93,12 @@ import {
   type AgentAccessMode,
   type AgentInvocationRequest,
 } from "../../security/agentAccess";
+import {
+  getCompiledPolicySnapshot,
+  type Permission,
+  type PolicySnapshot,
+  type Role,
+} from "../../security/authorization";
 import type { ObligationAuditWriter } from "../../security/obligations";
 import { createExecutionStore, type ExecutionRecord, type ExecutionSeal } from "./executionStore";
 
@@ -459,8 +483,110 @@ export function defaultScopesForKind(kind: McpPrincipalKind): readonly McpScope[
   }
 }
 
+/**
+ * GAP-4 (#5468) — the IAAA permission correspondence the
+ * role→scope adapter derives through. A scope is held when the
+ * principal's roles grant ANY of the scope's source permissions
+ * under the compiled policy snapshot. This correspondence is a
+ * PROPOSAL put to CISO review (#5350), not a CISO decision:
+ * - `mcp:trade` derives from `action:execute` because no IAAA
+ *   permission governs order flow; the correspondence is the
+ *   review question, not a settled mapping.
+ * - `mcp:payments` derives from `ledger:record` (GAP-2, #5450),
+ *   the money permission for the payment surface.
+ * - `mcp:admin` derives from the audit permissions plus
+ *   `role:assign`, the platform-privilege grant (GAP-1 precedent).
+ * The role→permission table itself is never copied here: the
+ * adapter reads it from the compiled snapshot every call, so a
+ * CISO change to ROLE_GRANTS moves the derivation with it.
+ */
+export const MCP_SCOPE_PERMISSION_SOURCES: Record<McpScope, readonly Permission[]> = {
+  "mcp:read": ["task:read", "artifact:read"],
+  "mcp:write": ["task:create", "artifact:edit", "task:cancel"],
+  "mcp:execute": ["action:execute"],
+  "mcp:trade": ["action:execute"],
+  "mcp:payments": ["ledger:record"],
+  "mcp:admin": ["audit:read", "audit:export", "role:assign"],
+};
+
+/**
+ * GAP-4 (#5468) — derive MCP scopes from IAAA roles. Pure: roles
+ * in, scopes out, union over roles. A role unknown to the
+ * snapshot contributes nothing (fail-closed); an empty role set
+ * holds nothing. The snapshot defaults to the compiled policy
+ * snapshot, so the derivation always follows the live role
+ * table; callers pass a snapshot only to pin the derivation
+ * against a fixed policy in tests.
+ */
+export function scopesForIaaaRoles(
+  roles: readonly Role[],
+  snapshot: PolicySnapshot = getCompiledPolicySnapshot(),
+): readonly McpScope[] {
+  const held = new Set<Permission>();
+  for (const role of roles) {
+    for (const permission of snapshot.roleGrants[role] ?? []) held.add(permission);
+  }
+  return MCP_SCOPES.filter((scope) =>
+    MCP_SCOPE_PERMISSION_SOURCES[scope].some((permission) => held.has(permission)),
+  );
+}
+
+/**
+ * GAP-4 (#5468) — resolves a principal's IAAA roles for the
+ * adapter. Returns null when the roles cannot be resolved (no
+ * identity, no store, no tenant): the caller falls back to the
+ * recorded defaults. The resolver is injected server-side by
+ * the call site — roles never come from tool-call arguments or
+ * forwarded headers, the same rule as scopes. No call site
+ * supplies one yet: login→roles resolution at the gate is the
+ * CISO-lane follow-up (ADR 0012), still open.
+ */
+export type McpRoleResolver = (
+  principal: McpPrincipal,
+) => Promise<readonly Role[] | null> | readonly Role[] | null;
+
+/**
+ * GAP-4 (#5468) — the IAAA role→scope adapter, plugged into the
+ * ADR 0012 seam. Returns the adapter-derived scopes, or null
+ * when the adapter does not govern this principal and the
+ * recorded defaults remain:
+ * - `scanner-payment` always resolves to `[mcp:payments]` — the
+ *   paid-tool pin, now adapter-expressed. No production code
+ *   constructs this kind today (the /mcp/scanner path is what
+ *   distinguishes paid callers); the pin is the scope-level
+ *   assignment, pinned by test. Tool-level pinning to the
+ *   scanner tools only is not expressible in the one-scope-per-
+ *   tool system and sequences with the one-registry work
+ *   (#5386).
+ * - `unknown` always resolves to `[]` — fail closed, unchanged.
+ * - `system` never resolves here — in-process platform callers
+ *   hold the defaults; roles do not apply to them.
+ * - session / api-key / agent-turn resolve through the injected
+ *   resolver when one is supplied and returns roles; otherwise
+ *   null, and the defaults remain (stated explicitly, #5350).
+ */
+export async function resolveScopesWithRoleAdapter(
+  principal: McpPrincipal,
+  resolveRoles?: McpRoleResolver,
+): Promise<readonly McpScope[] | null> {
+  switch (principal.kind) {
+    case "scanner-payment":
+      return ["mcp:payments"];
+    case "unknown":
+      return [];
+    case "system":
+      return null;
+    default:
+      break;
+  }
+  if (!resolveRoles) return null;
+  const roles = await resolveRoles(principal);
+  if (roles === null) return null;
+  return scopesForIaaaRoles(roles);
+}
+
 function basePort(
-  resolveScopes: (principal: McpPrincipal) => readonly McpScope[]
+  resolveScopes: (principal: McpPrincipal) => Promise<readonly McpScope[]>,
 ): ToolPermissionPort {
   const store = createExecutionStore();
   return {
@@ -475,7 +601,7 @@ function basePort(
       if (scope === null) {
         return { allowed: false, scope: null, reason: `unknown tool: ${toolName}` };
       }
-      const scopes = resolveScopes(principal);
+      const scopes = await resolveScopes(principal);
       if (scopes.includes(scope)) return { allowed: true, scope };
       return {
         allowed: false,
@@ -495,23 +621,51 @@ function basePort(
   };
 }
 
-/** Production adapter: static default policy (no durable assignment store exists yet). */
-export function createProductionMcpPermissionPort(): ToolPermissionPort {
-  return basePort((principal) => defaultScopesForKind(principal.kind));
+export interface ProductionMcpPermissionPortOptions {
+  /**
+   * GAP-4 (#5468) — injected IAAA role resolver. When supplied,
+   * session / api-key / agent-turn principals resolve through
+   * the role→scope adapter, falling back to the recorded
+   * defaults where the resolver reports roles unresolvable.
+   * Absent → the recorded defaults exactly (all current call
+   * sites: no resolver is threaded yet).
+   */
+  resolveRoles?: McpRoleResolver;
+}
+
+/**
+ * Production adapter: the role→scope adapter over the static
+ * default policy. Adapter-derived scopes govern where the
+ * adapter resolves (kind pins always; role-derived scopes when
+ * a resolver is supplied); the recorded defaults remain
+ * everywhere else, explicitly (see the header).
+ */
+export function createProductionMcpPermissionPort(
+  options: ProductionMcpPermissionPortOptions = {},
+): ToolPermissionPort {
+  return basePort(async (principal) =>
+    (await resolveScopesWithRoleAdapter(principal, options.resolveRoles)) ??
+    defaultScopesForKind(principal.kind),
+  );
 }
 
 export interface InMemoryPermissionPortOptions {
   /**
-   * Explicit per-principal assignments, keyed `${kind}:${login ?? ""}`.
+   * Explicit per-principal assignments, keyed by kind and login
+   * as "kind:login" (empty login when the principal has none).
    * A principal with an override uses exactly that set; every other
-   * principal falls back to the production default policy. This is
-   * the seam a future IAAA role→scope adapter plugs into, and the
-   * mechanism tests use to build restricted principals.
+   * principal falls back to the role→scope adapter and then the
+   * production default policy. This was the seam a future IAAA
+   * role→scope adapter plugs into (GAP-4, #5468, plugged in); the
+   * overrides remain the mechanism tests use to build restricted
+   * principals, and they take precedence over the adapter.
    */
   overrides?: Map<string, readonly McpScope[]> | Record<string, readonly McpScope[]>;
+  /** GAP-4 (#5468) — injected IAAA role resolver; see the production adapter. */
+  resolveRoles?: McpRoleResolver;
 }
 
-/** In-memory adapter: explicit overrides over the production default policy. */
+/** In-memory adapter: explicit overrides over the adapter over the production default policy. */
 export function createInMemoryMcpPermissionPort(
   options: InMemoryPermissionPortOptions = {}
 ): ToolPermissionPort {
@@ -519,9 +673,13 @@ export function createInMemoryMcpPermissionPort(
     options.overrides instanceof Map
       ? options.overrides
       : new Map(Object.entries(options.overrides ?? {}));
-  return basePort((principal) => {
+  return basePort(async (principal) => {
     const key = `${principal.kind}:${principal.login ?? ""}`;
-    return overrides.get(key) ?? defaultScopesForKind(principal.kind);
+    return (
+      overrides.get(key) ??
+      (await resolveScopesWithRoleAdapter(principal, options.resolveRoles)) ??
+      defaultScopesForKind(principal.kind)
+    );
   });
 }
 

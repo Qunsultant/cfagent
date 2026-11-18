@@ -120,6 +120,40 @@ authority through the same table, not a parallel gate. The story:
   and the G-1 hole stays open until it lands (ADR 0034 D2, owner's
   choice).
 
+### The MCP role→scope adapter (GAP-4, #5468; CISO coordination #5350)
+
+MCP tool scopes derive from IAAA roles through the adapter plugged
+into the ADR 0012 seam (`resolveScopesWithRoleAdapter` +
+`scopesForIaaaRoles`, `src/mcps/openaimp/mcpPermissionPorts.ts`).
+The derivation is mechanical: a scope is held when the principal's
+roles grant any of the scope's source permissions under the compiled
+policy snapshot — the role table above stays authoritative, and no
+second table is introduced. The correspondence is a PROPOSAL put to
+CISO review on the GAP-4 PR, not a CISO decision:
+
+| Scope | Source permissions | Roles holding it (from the table) |
+| --- | --- | --- |
+| `mcp:read` | `task:read`, `artifact:read` | member, auditor, tenant-admin, workspace-admin |
+| `mcp:write` | `task:create`, `artifact:edit`, `task:cancel` | member, tenant-admin, workspace-admin |
+| `mcp:execute` | `action:execute` | tenant-admin, workspace-admin |
+| `mcp:trade` | `action:execute` | tenant-admin, workspace-admin |
+| `mcp:payments` | `ledger:record` | tenant-admin, workspace-admin |
+| `mcp:admin` | `audit:read`, `audit:export`, `role:assign` | auditor, platform-admin, tenant-admin, workspace-admin |
+
+Two things to state plainly. First, `mcp:trade` has no IAAA
+permission of its own: deriving it from `action:execute` is the
+open review question, and CISO may direct a different
+correspondence or a dedicated permission. Second, the adapter
+governs only where roles resolve: no gate call site threads a
+membership store or a tenant today, and the MCP call carries no
+tenant, so login→roles resolution at the gate is still the
+CISO-lane follow-up ADR 0012 names. Where no role resolver is
+supplied, the recorded permissive defaults remain, explicitly.
+`system` principals are never role-governed. The `scanner-payment`
+kind holds only `mcp:payments` through the adapter; no production
+code constructs that kind today, and tool-level pinning to the
+scanner tools only sequences with the one-registry work (#5386).
+
 ## 3. Bootstrap and the genesis window
 
 Bootstrap (`src/security/iaaaBootstrap.ts`) provisions the first admins
