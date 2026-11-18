@@ -79,8 +79,10 @@ const LIST_RESPONSE = {
 
 describe("5169 view: the Observability tab has one view, Archive", () => {
   it("OBSERVABILITY_VIEWS lists archive, labelled Archive", () => {
-    expect([...OBSERVABILITY_VIEWS]).toEqual(["archive"]);
+    // S7 (#5086) adds the Config view; archive stays the default.
+    expect([...OBSERVABILITY_VIEWS]).toEqual(["archive", "config"]);
     expect(OBSERVABILITY_VIEW_LABELS["archive"]).toBe("Archive");
+    expect(OBSERVABILITY_VIEW_LABELS["config"]).toBe("Config");
   });
 
   it("normalize/parse accept archive and fall back to archive for unknown views", () => {

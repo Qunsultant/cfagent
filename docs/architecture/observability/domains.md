@@ -432,13 +432,13 @@ How a switch is flipped:
   config-file flips take effect on the next deploy (wrangler.jsonc
   `vars` are baked at deploy; a config-file change is a code change).
   That is the mechanism S1 ships.
-- **Later (S7 config + S8 dashboard):** the runtime flip without a
-  redeploy — switches stored in KV/D1, read by the Worker at runtime,
-  manageable through an admin UI (versioned, auditable, reversible,
-  the same treatment as the #2838 policy-editor and #2842 tier
-  decisions). S1 designs the config port so the runtime store can
-  replace the env/config-file source later without touching domain
-  code. S1 does not build the runtime store.
+- **Since S7 (#5086):** the runtime flip without a redeploy —
+  switches stored in D1 (`otel_config_overrides`), read by the
+  Worker at runtime through the override cache, manageable through
+  the admin UI (`?tab=observability&view=config`) — versioned,
+  auditable, reversible, the same treatment as the #2838
+  policy-editor and #2842 tier decisions. The S8 dashboard is the
+  remaining piece (display of codes).
 
 ### 5d. Platform vs tenant surfacing
 
@@ -684,13 +684,15 @@ the tenant-admin (tenant level, §8).
   (e.g. `sessionLimits`, `agenticPaymentsModes`) and env vars in
   `wrangler.jsonc` (e.g. `IAAA_WIRING_ENABLED`,
   `IAAA_ENABLED_PROVIDERS`). Flipping a switch in S1 means changing
-  a config value or env var and redeploying. Later (S7/S8): the
-  runtime flip — switches stored in KV/D1, read at runtime,
-  manageable through an admin UI, versioned, auditable, reversible.
+  a config value or env var and redeploying. Since S7 (#5086): the
+  runtime flip — switches stored in D1, read at runtime,
+  manageable through the admin UI (`?tab=observability&view=config`),
+  versioned, auditable, reversible; the S8 dashboard is the
+  remaining display piece.
 - **What action it drives.** Changing a level, a threshold, a
   sampling ratio, or a domain switch — without a code change.
-- **Status.** **Live in pieces** (config files + env vars, per-domain
-  switches in S1). **Planned** — the single config port (S7 #5086).
+- **Status.** **Live** — the single config port (S7 #5086): the
+  catalog + D1 override store + admin UI + routes.
 
 ### 6.9 Dashboard — Planned (S8); the surfaces today are separate
 

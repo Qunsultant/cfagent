@@ -216,9 +216,9 @@ async function sendCapAlert(
   const result = await port.reportAlert({
     source: "cap-alert",
     code: OBS_ALERTING_CAP_BREACH,
-    // PLACEHOLDER severity + rule id (S7 defines the real catalog).
-    severity: "warning",
-    ruleId: "placeholder-cap-alert",
+    // S7 (#5086): the real catalog rule; the severity resolves
+    // from the catalog (warning).
+    ruleId: "rule:cap-breach",
     title: text.split("\n", 1)[0] ?? "Cap alert",
     text,
   });

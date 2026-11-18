@@ -37,11 +37,7 @@ import {
   type OtelDestination,
 } from "../src/config/otelModes";
 import { createObservabilitySink } from "../src/observability/createObservabilityPorts";
-import {
-  ConsoleObservabilitySink,
-  NoopObservabilitySink,
-  type ObservabilityEvent,
-} from "../src/observability/observabilityPorts";
+import { type ObservabilityEvent } from "../src/observability/observabilityPorts";
 import {
   createOtelLogging,
   resolveOtelLoggingConfig,
@@ -193,7 +189,11 @@ describe("createObservabilitySink — destination switches", () => {
     const sink = createObservabilitySink({});
     await sink.write(makeEvent());
     expect(info).toHaveBeenCalledTimes(1);
-    expect(sink).toBeInstanceOf(ConsoleObservabilitySink);
+    // S7 (#5086): the sink is now a runtime-delegating wrapper
+    // (destinations resolve per write from env/file + the
+    // override cache), so the class is no longer the console
+    // sink — the BEHAVIOUR (the event reached console) is the
+    // assertion, not the class.
   });
 
   it("AE off + unbound + console on falls back to console", async () => {
@@ -216,7 +216,9 @@ describe("createObservabilitySink — destination switches", () => {
       OTEL_DESTINATION_ANALYTICS_ENGINE_ENABLED: "false",
       OTEL_DESTINATION_CONSOLE_ENABLED: "false",
     });
-    expect(sink).toBeInstanceOf(NoopObservabilitySink);
+    // S7 (#5086): the sink is now a runtime-delegating wrapper
+    // (see the note above); the drop is asserted by behaviour —
+    // nothing reaches AE or console and nothing throws.
     expect(() => sink.write(makeEvent())).not.toThrow();
     expect(() => sink.writeBatch([makeEvent()])).not.toThrow();
     expect(dataset.writeDataPoint).not.toHaveBeenCalled();

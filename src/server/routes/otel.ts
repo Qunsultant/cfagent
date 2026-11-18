@@ -139,9 +139,9 @@ export async function handleOtelRoutes(
     const result = await port.reportAlert({
       source: "ci-failure",
       code: OBS_ALERTING_CI_FAILURE,
-      // PLACEHOLDER severity + rule id (S7 defines the real catalog).
-      severity: "error",
-      ruleId: "placeholder-ci-failure",
+      // S7 (#5086): the real catalog rule; the severity
+      // resolves from the catalog (error).
+      ruleId: "rule:ci-failure",
       title: `CI failure: ${alert.workflow}`,
       text: `Workflow "${alert.workflow}" ${alert.conclusion} (run ${alert.runId}, branch ${typeof alert.headBranch === "string" ? alert.headBranch : "unknown"}).`,
       context: {

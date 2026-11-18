@@ -766,8 +766,8 @@ export class OrchestratorAgent extends PortThink {
         }, "legacy_stuck_run_alert");
         const result = await createAlertingPort({ env: this.env }).reportAlert({
           source: "sweep", code: OBS_ALERTING_STUCK_RUN,
-          // PLACEHOLDER severity + rule id (S7 defines the real catalog).
-          severity: "warning", ruleId: "placeholder-sweep-stuck-run",
+          // S7 (#5086): real catalog rule; severity resolves from the catalog.
+          ruleId: "rule:stuck-run",
           title: `Stuck run: ${info.jobId}`, text, runId: info.jobId,
         });
         this.audit(result.delivered ? "async_job.stuck_alert" : "async_job.stuck_alert_failed", "orchestrator", {

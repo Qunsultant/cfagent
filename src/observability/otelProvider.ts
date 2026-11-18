@@ -7,16 +7,19 @@
  * builds an OTel provider itself; hosts call createOtelLogging
  * once and pass the handle to the observers.
  *
- * Resolution (the otelModes port): run > session > user > env >
- * config-file > built-in safe default. In production today only
- * env + the config file are settable (the run/session/user
- * carriers are populated by no production caller yet — the same
- * boundary as the payments resolvers). A runtime flip WITHOUT a
- * redeploy (switches stored in KV/D1, read at runtime, managed
- * through an admin UI) is a LATER slice (S7 config + S8
- * dashboard); this composition root is the port the runtime
- * store will replace (the env/config-file source) without
- * touching domain code.
+ * Resolution (the otelModes port): run > session > user >
+ * runtime > config-file > built-in safe default. The runtime
+ * level (S7, #5086) is the platform admin's override from the
+ * config port (D1 otel_config_overrides, read through the
+ * override cache): resolveOtelLoggingConfig consults the cache
+ * at init, the domain gate consults it per event, and
+ * isDomainEnabled consults it per call (kicking off a
+ * TTL-guarded background refresh, so a flip propagates to a
+ * long-lived isolate). The master / exporter / batch switches
+ * are read at init, so a flip there applies at the next init;
+ * a domain on/off, level, or sampling flip applies on the
+ * next event. The base sink's destinations flip per write
+ * (see createObservabilityPorts).
  *
  * The transport is the in-process ingestion handler: the OTel
  * exporter hands OTLP/JSON to handleOtelLogsIngestion, which
@@ -37,6 +40,7 @@ import {
   OTEL_DESTINATIONS,
   OTEL_DOMAINS,
   OTEL_FILE_CONFIG,
+  effectiveOtelDomainSwitches,
   otelSdkDisabled,
   resolveOtelDestinationEnabled,
   resolveOtelDomainEnabled,
@@ -48,6 +52,13 @@ import {
   type OtelDomain,
   type OtelScopeLevels,
 } from "../config/otelModes";
+import {
+  cachedOtelRuntimeOverrides,
+  otelConfigD1FromEnv,
+  otelRuntimeLevel,
+  otelRuntimeLevelByEnvName,
+  refreshOtelRuntimeOverrideCache,
+} from "../config/otelConfigPort";
 import {
   createOtelDomainGate,
   createOtelLoggerProvider,
@@ -89,6 +100,8 @@ export function resolveOtelLoggingConfig(
     run: scoped?.run,
     session: scoped?.session,
     user: scoped?.user,
+    // S7 (#5086): the runtime level from the override cache.
+    runtime: otelRuntimeLevelByEnvName(cachedOtelRuntimeOverrides(), envName),
     env: envVar(env, envName),
     file: fileValue,
   });
@@ -193,32 +206,37 @@ export function createOtelLogging(env: Env): OtelLoggingHandle {
   const blobStore = config.destinations.r2 ? createBlobStore(env) : null;
   // The ingestion fallback writes through the structured logger
   // over the BASE sink only (never the OTel sink — a fallback
-  // record must not re-enter the OTel pipeline). The base sink
-  // receives the resolved AE/console destinations (full scope).
+  // record must not re-enter the OTel pipeline). S7 (#5086):
+  // no explicit destinations — the sink resolves them per
+  // write from env/file + the runtime override cache, so a
+  // destination flip applies without a redeploy.
   const ingestionLog = createOtelIngestionLog(
-    createStructuredLogger(
-      createObservabilitySink(env, {
-        analyticsEngine: config.destinations.analyticsEngine,
-        console: config.destinations.console,
-      }),
-      { component: "otel-ingestion" },
-    ),
+    createStructuredLogger(createObservabilitySink(env), { component: "otel-ingestion" }),
   );
   const transport: OtelTransport = async (body) => {
     const result = await handleOtelLogsIngestion({ body, blobStore, log: ingestionLog });
     return { status: result.status };
+  };
+  // S7 (#5086): the batch settings resolve through the runtime
+  // cache (a flip applies at the next provider init).
+  const runtimeOverrides = cachedOtelRuntimeOverrides();
+  const batchNumber = (key: string, fallback: number): number => {
+    const value = otelRuntimeLevel(runtimeOverrides, key);
+    return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : fallback;
   };
   const { provider, logger } = createOtelLoggerProvider({
     config,
     transport,
     processor: "batch",
     batch: {
-      maxBatchSize: OTEL_FILE_CONFIG.batch.maxBatchSize,
-      scheduledDelayMs: OTEL_FILE_CONFIG.batch.scheduledDelayMs,
-      maxQueueSize: OTEL_FILE_CONFIG.batch.maxQueueSize,
+      maxBatchSize: batchNumber("batch.maxBatchSize", OTEL_FILE_CONFIG.batch.maxBatchSize),
+      scheduledDelayMs: batchNumber("batch.scheduledDelayMs", OTEL_FILE_CONFIG.batch.scheduledDelayMs),
+      maxQueueSize: batchNumber("batch.maxQueueSize", OTEL_FILE_CONFIG.batch.maxQueueSize),
     },
   });
-  const gate = createOtelDomainGate(config);
+  const gate = createOtelDomainGate(config, undefined, {
+    getRuntimeOverrides: () => cachedOtelRuntimeOverrides(),
+  });
   const live = config.masterEnabled && config.logsExporter !== "none";
   const sink = live ? createOtelObservabilitySink({ logger, gate }) : null;
   return {
@@ -226,8 +244,16 @@ export function createOtelLogging(env: Env): OtelLoggingHandle {
     sink,
     gate,
     isDomainEnabled: (domain: OtelDomain) => {
+      // S7 (#5086): stale-while-revalidate — kick off a
+      // TTL-guarded cache refresh so a flip propagates to
+      // this (possibly long-lived) isolate, then read the
+      // cache as it stands. The domain on/off flip applies
+      // per call; the master switch is init-time.
+      void refreshOtelRuntimeOverrideCache(otelConfigD1FromEnv(env));
       if (!config.masterEnabled) return false;
-      return config.domains[domain]?.enabled ?? false;
+      const base = config.domains[domain];
+      if (!base) return false;
+      return effectiveOtelDomainSwitches(domain, base, cachedOtelRuntimeOverrides()).enabled;
     },
     flush: () => provider.forceFlush(),
     shutdown: () => provider.shutdown(),
@@ -241,10 +267,12 @@ export function createOtelLogging(env: Env): OtelLoggingHandle {
  * When OTel is off, the logger writes to the base sink only.
  */
 export function createOtelJobPipelineLogger(env: Env, otel: OtelLoggingHandle): StructuredLogger {
-  const base = createObservabilitySink(env, {
-    analyticsEngine: otel.config.destinations.analyticsEngine,
-    console: otel.config.destinations.console,
-  });
+  // S7 (#5086): no explicit destinations — the base sink
+  // resolves them per write from env/file + the runtime
+  // override cache, so a destination flip applies without a
+  // redeploy (the handle's init-time config.destinations is
+  // used for the R2 transport switch only).
+  const base = createObservabilitySink(env);
   const sinks: ObservabilitySink[] = [base];
   if (otel.sink) sinks.push(otel.sink);
   return createStructuredLogger(createFanOutSink(sinks), {

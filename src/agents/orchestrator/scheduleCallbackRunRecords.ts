@@ -37,7 +37,7 @@ import { buildLedgerLinkage } from "../../services/consolidatedScheduling";
 import type { ScheduledCallbackOutcome } from "./scheduledCallbacks";
 import { createStructuredLogger } from "../../observability/structuredLogger";
 import { createObservabilitySink } from "../../observability/createObservabilityPorts";
-import { OBS_LEDGER_WRITE_FAILED } from "../../observability/otelMessages";
+import { OBS_LEDGER_WRITE_FAILED, formatCatalogMessage } from "../../observability/otelMessages";
 
 type OutcomeInput = ScheduledCallbackOutcome | void;
 
@@ -137,7 +137,7 @@ export function nameLedgerWriteFailure(
     ledgerWriteFailureLog.error(
       "ledger.write_failed",
       {
-        message: `[run-ledger] ledger write failed for job ${failure.jobId}: ${failure.error}`,
+        message: `[run-ledger] ${formatCatalogMessage(OBS_LEDGER_WRITE_FAILED, { jobId: failure.jobId, error: failure.error })}`,
         jobId: failure.jobId,
         operation: failure.operation,
       },
@@ -176,7 +176,7 @@ function storeRecord(
       ledgerWriteFailureLog.error(
         "ledger.write_failed",
         {
-          message: `[run-ledger] ledger write failed for job ${record.jobId}: ${error}`,
+          message: `[run-ledger] ${formatCatalogMessage(OBS_LEDGER_WRITE_FAILED, { jobId: record.jobId, error })}`,
           jobId: record.jobId,
           operation: record.operation,
         },

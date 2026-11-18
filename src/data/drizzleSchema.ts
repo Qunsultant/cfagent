@@ -2062,3 +2062,29 @@ export const masIndexLists = sqliteTable("mas_index_lists", {
   derivedFromHoldings: integer("derived_from_holdings").notNull(),
   membersJson: text("members_json").notNull(),
 });
+
+/**
+ * OTel runtime config overrides (#5086, migration 0070).
+ * Append-only and versioned — one row per change, keyed by
+ * (config_key, version); value_json NULL is the tombstone
+ * that clears an override. Columns are verbatim from the
+ * catalogued CREATE DDL (schema.d1.otel_config_overrides.
+ * create_table). This schema MAPS the table; it does not
+ * create it.
+ */
+export const otelConfigOverrides = sqliteTable(
+  "otel_config_overrides",
+  {
+    configKey: text("config_key").notNull(),
+    valueJson: text("value_json"),
+    version: integer("version").notNull(),
+    updatedBy: text("updated_by").notNull(),
+    updatedAtMs: integer("updated_at_ms").notNull(),
+    reason: text("reason").notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.configKey, table.version],
+    }),
+  ],
+);

@@ -719,23 +719,92 @@ ScheduledAgent goal-run recording sites do not yet wire the
 namer (their KV fallback stands). Full record:
 `docs/architecture/observability/recording-one-ledger-5085.md`.
 
-### Coded messages (the S7 catalog seed)
+### Coded messages + the config port (S7, issue #5086)
 
-`OBS-1001` config invalid (fail-closed) · `OBS-1002` export
-failed · `OBS-1003` ingest failed (R2 write) · `OBS-1004`
-ingest rejected (malformed OTLP) · `OBS-1005` sink degraded ·
-`OBS-1006` metrics export failed · `OBS-1007` metrics free-tier
-guard (AE write limit reached) · `OBS-1012` traces export
-failed · `OBS-1013` traces free-tier guard (AE write limit
-reached) · `OBS-1014` alerting send failed · `OBS-1015`
-alerting destination missing · `OBS-1016` alerting free-tier
-guard (max alerts/day reached) · `OBS-1017` stuck-run alert ·
-`OBS-1018` cap-breach alert · `OBS-1019` CI failure alert ·
-`OBS-1020` ledger write failed (a runs-ledger write failed and
-was named).
-Defined in one place
-(`src/observability/otelMessages.ts`); S7 adopts and expands it
-into the one message catalog.
+One message catalog (`src/observability/otelMessages.ts`,
+`OBS_CATALOG`) and one config port
+(`src/config/otelConfigPort.ts`): every log / audit / alert /
+trace event carries a coded message from the catalog, and
+every threshold, severity, retention, and sampling value lives
+in config — no hard-coding at the call sites (owner directive
+2026-11-12). The catalog is the single source for message
+text: no free-form message strings at call sites
+(`formatCatalogMessage` is the only formatter;
+`formatOtelMessage` is gone). Codes are stable across releases
+and never reused for a different meaning; an unknown code
+fails closed (a lookup miss, never a silent pass).
+
+The catalog (code · message · default severity):
+
+`OBS-1001` config invalid (fail-closed) · warning ·
+`OBS-1002` export failed · error · `OBS-1003` ingest failed
+(R2 write) · error · `OBS-1004` ingest rejected (malformed
+OTLP) · warning · `OBS-1005` sink degraded · warning ·
+`OBS-1006` metrics export failed · error · `OBS-1007`
+metrics free-tier guard (AE write limit reached) · warning ·
+`OBS-1008` archive unavailable · error · `OBS-1009`
+archive key rejected · warning · `OBS-1010` archive object
+not found · info · `OBS-1011` archive forbidden · warning ·
+`OBS-1012` traces export failed · error · `OBS-1013`
+traces free-tier guard (AE write limit reached) · warning ·
+`OBS-1014` alerting send failed · error · `OBS-1015`
+alerting destination missing · warning · `OBS-1016`
+alerting free-tier guard (max alerts/day reached) · warning ·
+`OBS-1017` stuck-run alert · warning · `OBS-1018` cap-breach
+alert · warning · `OBS-1019` CI failure alert · error ·
+`OBS-1020` ledger write failed (a runs-ledger write failed
+and was named) · error · `OBS-1021` alerting rule unknown (an
+alert report with an unknown rule id is rejected, never sent) ·
+error · `OBS-1022` config forbidden (a signed-in non-admin
+was denied the OTel config) · warning.
+
+The S4 placeholder alert rules now resolve through the
+catalog: `rule:stuck-run` → OBS-1017 (warning),
+`rule:cap-breach` → OBS-1018 (warning), `rule:ci-failure` →
+OBS-1019 (error). A rule id that is neither a catalog rule nor
+a `placeholder-*` rule is rejected with OBS-1021 and sends
+nothing (and consumes no guard budget); placeholder rules still
+deliver, unchanged.
+
+The config port: the runtime override store is D1
+(`AGENT_DB`, table `otel_config_overrides`, migration 0070) —
+the Worker reads it at runtime, so flipping a switch does NOT
+need a redeploy. D1 was chosen over KV (no KV namespace is
+provisioned for this Worker) and over the DO SQLite settings
+store (`mas_settings`, unreadable from a Worker isolate).
+Versioned, auditable, reversible (the #2838 / #2842
+treatment): the table is append-only — every change INSERTs a
+new versioned row with actor + timestamp + reason, clearing an
+override INSERTs a tombstone row (value NULL), and every change
+also writes a `recordAuditEvent` audit event. Revert = apply an
+earlier version's value as a new version. Only keys on the
+allow-list (`otelRuntimeOverrideKeys()`, generated from the
+catalog for the per-code `catalog.<OBS-code>.severity` keys)
+can be overridden; an unknown key or an invalid value is
+rejected at write time and never stored. A reason is required
+for every change.
+
+Resolution is now run > session > user > **runtime** > env >
+file > built-in safe default: the runtime level comes from the
+override cache (60s TTL, stale-while-revalidate). The admin
+write route force-refreshes the cache, so the writing isolate
+applies a flip immediately; other isolates pick it up within
+the TTL or on their next alert/admin request. Propagation,
+stated honestly: alerting settings, sink destinations, and
+archive-route state apply on the next operation; domain
+on/off/level/sampling apply on the next event (the gates
+consult the cache per event); the master switch, exporters,
+batch, and metrics/traces transport settings apply at the next
+provider/control init.
+
+The admin surface is `?tab=observability&view=config`
+(`OtelConfigPanel`): the catalog, the key allow-list, the
+current overrides, and the effective value + winning source
+for every key, over `GET / POST / DELETE /api/otel/v1/config`
+(platform-admin only, 401 unauthenticated, 403 with OBS-1022
+for a signed-in non-admin, 500 when the admin check itself
+fails). Full record:
+`docs/architecture/observability/message-catalog-config-port-5086.md`.
 
 ### Why not the stock exporter or the pydantic package
 
