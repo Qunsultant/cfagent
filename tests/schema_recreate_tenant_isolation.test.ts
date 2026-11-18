@@ -74,11 +74,11 @@ describe("recreate + tenant isolation (#4282 P4)", () => {
   // Issue #4654 adds the mas_trades stop_price reconciliation: 417 → 418.
   // Issue #3261 adds the agent_user_profiles email column (migration 0068): 419 → 420.
   // Issue #5229 adds the agent_referral_rules expiry_period_ms column (migration 0069): 420 → 421.
-    expect(first.summary.totalSteps).toBe(421);
-    expect(first.summary.executed).toBe(421);
+    expect(first.summary.totalSteps).toBe(422);
+    expect(first.summary.executed).toBe(422);
     expect(first.summary.failed).toBe(0);
     expect(first.summary.skipped).toBe(0);
-    expect(first.executed).toHaveLength(421);
+    expect(first.executed).toHaveLength(422);
     expect(first.failed).toEqual([]);
     expect(first.skipped).toEqual([]);
     // Uncreatable layers are deployment facts, not changes: they are
@@ -216,8 +216,8 @@ describe("recreate + tenant isolation (#4282 P4)", () => {
       partial.summary.executed +
         partial.summary.failed +
         partial.summary.skipped,
-    ).toBe(421);
-    expect(partial.summary.totalSteps).toBe(421);
+    ).toBe(422);
+    expect(partial.summary.totalSteps).toBe(422);
     // The degradation is VISIBLE, never silent: the post-run equality
     // check fails. The missing indexes are exactly the failed step's
     // index plus the indexes of the skipped steps (the run stopped in
