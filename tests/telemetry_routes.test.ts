@@ -211,16 +211,19 @@ describe("telemetry routes (#1742)", () => {
     const first = await handleTelemetryReconcileRoute({ ...base, session: ADMIN, limit: 1 });
     expect(await first.json()).toEqual({
       userLogin: "owner:alice", total: 2, alreadyRecorded: 0, imported: 1, deferred: 1, pendingSkipped: 1,
+      calibrationsCreated: 0, calibrationError: null,
     });
     // Second call converges: imports the deferred candidate.
     const second = await handleTelemetryReconcileRoute({ ...base, session: ADMIN, limit: 1 });
     expect(await second.json()).toEqual({
       userLogin: "owner:alice", total: 2, alreadyRecorded: 1, imported: 1, deferred: 0, pendingSkipped: 1,
+      calibrationsCreated: 0, calibrationError: null,
     });
     // Third call: everything already recorded.
     const third = await handleTelemetryReconcileRoute({ ...base, session: ADMIN });
     expect(await third.json()).toEqual({
       userLogin: "owner:alice", total: 2, alreadyRecorded: 2, imported: 0, deferred: 0, pendingSkipped: 1,
+      calibrationsCreated: 0, calibrationError: null,
     });
   });
 

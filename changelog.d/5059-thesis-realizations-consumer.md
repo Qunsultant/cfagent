@@ -1,0 +1,3 @@
+### Added
+
+- **`agent_thesis_realizations` now feeds calibration (#5059, AG-5):** the telemetry projector wrote one row per evaluated research idea and no production path read the rows for what they say — the reconcile route used them only to skip duplicates, and the calibration engine's reader (`proposeCalibrations`) had no production caller. The reconcile route now runs the calibration engine after the import, so fresh realizations become falsification-driven calibration proposals awaiting human review. The report carries `calibrationsCreated` and `calibrationError`; the pass is best-effort because the import has already landed — a proposal failure is reported and the rows stay durable. Pinned by `tests/telemetry_realizations_consumer_5059.test.ts`. #clo-arsi
