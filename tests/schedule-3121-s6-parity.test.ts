@@ -44,6 +44,8 @@
  *   pair below); the deprecated set is exactly the three known AOP
  *   files plus the five #3123 renames plus the #4192 screener-flow
  *   rename, and the deprecation ledger carries the five #3123 entries.
+ *   #5178 (S-U7) extends the set with twenty CSS renames (gitops §22
+ *   deprecation form); the ledger carries the twenty S-U7 entries.
  */
 import { describe, expect, it } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
@@ -348,7 +350,7 @@ describe("S6-P07 retired-module determination: the #3123 renames", () => {
     }
   });
 
-  it("the deprecated set is exactly the three known AOP files plus the five #3123 renames plus the #4192 screener-flow rename plus the #4280 chain-start rename", () => {
+  it("the deprecated set is exactly the three known AOP files plus the five #3123 renames plus the #4192 screener-flow rename plus the #4280 chain-start rename plus the twenty #5178 S-U7 CSS renames", () => {
     const found: string[] = [];
     const walk = (dir: string) => {
       for (const entry of readdirSync(join(dir), { withFileTypes: true })) {
@@ -364,7 +366,27 @@ describe("S6-P07 retired-module determination: the #3123 renames", () => {
     walk("docs");
     expect(found.sort()).toEqual([
       "docs/compliance/anti-drift-controls.deprecated.md",
+      "src/client/accountPanels.deprecated.css",
+      "src/client/agenticWalletPanel.deprecated.css",
+      "src/client/agentsPanel.deprecated.css",
+      "src/client/apiKeysPanel.deprecated.css",
+      "src/client/dataProvidersPanel.deprecated.css",
+      "src/client/docsAndReports.deprecated.css",
+      "src/client/iaaaAdminPanel.deprecated.css",
+      "src/client/loggedInUsersPanel.deprecated.css",
+      "src/client/options/optionsResearch.deprecated.css",
+      "src/client/options/strategyDiscovery.deprecated.css",
+      "src/client/optionsResearch.deprecated.css",
+      "src/client/portfolioRiskPanel.deprecated.css",
+      "src/client/reports.deprecated.css",
+      "src/client/roleGrantsPanel.deprecated.css",
+      "src/client/scannerPanel.deprecated.css",
       "src/client/scheduleApi.deprecated.ts",
+      "src/client/serviceTokensPanel.deprecated.css",
+      "src/client/stockCopilotPanel.deprecated.css",
+      "src/client/styles.deprecated.css",
+      "src/client/workflowRuns.deprecated.css",
+      "src/client/workflowsHub.deprecated.css",
       "src/data/doSqlitePausedScheduleAdapter.deprecated.ts",
       "src/data/inMemoryPausedScheduleAdapter.deprecated.ts",
       "src/data/pausedSchedulePorts.deprecated.ts",
