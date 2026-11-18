@@ -54,7 +54,7 @@ import { postSlackText, resourceSlackPost } from "../resourceGoals";
 import type { SlackDeliveryEnv } from "../social/delivery";
 import type { ScreenerAgent } from "../screener-agent";
 import type { ResearchAgent } from "../research-agent";
-import type { DatabaseORM } from "../../orm";
+import type { DatabaseORM, SqlStorage } from "../../orm";
 
 import { createStructuredLogger } from "../../observability/structuredLogger";
 import { createObservabilitySink } from "../../observability/createObservabilityPorts";
@@ -546,6 +546,7 @@ export async function handleScreenerResearchRoutes(
         const dispatched = await dispatchResearchEngineRun({
           userLogin,
           trigger: "manual",
+          sql: ctx.getOrm?.() as unknown as SqlStorage | undefined,
           execute: () => triggerManualResearch(ctx.runResearchAndPublish, userLogin),
         });
         return Response.json(dispatched.outcome);
@@ -574,6 +575,7 @@ export async function handleScreenerResearchRoutes(
           stageId: decodeURIComponent(stageMatch[2]),
           op,
           userLogin,
+          sql: ctx.getOrm?.() as unknown as SqlStorage | undefined,
         });
         return Response.json(result);
       } catch (err: any) {
@@ -638,6 +640,7 @@ export async function handleScreenerResearchRoutes(
         const dispatched = await dispatchResearchEngineRun({
           userLogin,
           trigger: "scheduled",
+          sql: ctx.getOrm?.() as unknown as SqlStorage | undefined,
           execute: () => triggerScheduledResearch(ctx.runResearchAndPublish, userLogin),
         });
         const out = {

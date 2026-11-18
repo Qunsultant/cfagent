@@ -271,4 +271,30 @@ describe("screener + research behavior (extraction #378)", () => {
     expect(await (good as Response).json()).toEqual({ evaluation: { score: 0.9 } });
     expect(evaluateRun).toHaveBeenCalledWith("r1", "s1");
   });
+
+  it("forwards ctx.getOrm() to research dispatch and stage control (#5273)", async () => {
+    const getOrm = vi.fn(() => undefined as any);
+    const runResearchAndPublish = vi.fn(async () => ({ success: true }));
+    const ctx = baseCtx({ getOrm, runResearchAndPublish: runResearchAndPublish as any });
+
+    const runRes = await handleScreenerResearchRoutes(
+      req("POST", "/research/run"),
+      urlOf("/research/run"),
+      "/research/run",
+      "sess-sql",
+      ctx,
+    );
+    expect((runRes as Response).status).toBe(200);
+    expect(getOrm).toHaveBeenCalledTimes(1);
+
+    const stageRes = await handleScreenerResearchRoutes(
+      req("POST", "/research/runs/r-sql-1/stages/analyze", { op: "status" }),
+      urlOf("/research/runs/r-sql-1/stages/analyze"),
+      "/research/runs/r-sql-1/stages/analyze",
+      "sess-sql",
+      ctx,
+    );
+    expect((stageRes as Response).status).toBe(200);
+    expect(getOrm).toHaveBeenCalledTimes(2);
+  });
 });
