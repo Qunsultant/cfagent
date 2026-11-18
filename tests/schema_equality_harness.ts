@@ -68,6 +68,8 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 /** sha256 of tests/schema_component_combined_expected_model.json as seeded. */
 /** Issue #5229 (migration 0069) re-seeds it: agent_referral_rules gains expiry_period_ms. */
 /** Issue #5175 slice 2 re-seeds it: mas_runs + mas_run_aliases + 1 index. */
+/** Issue #5086 (migration 0070) re-seeds it: otel_config_overrides table added. */
+/** Merged re-seed sha recomputed below (see the rebase note). */
 export const COMBINED_FIXTURE_SHA256 =
   "6ef03d72971a3b2bbf031fb74c5239dbf7acbcc600f7d473462978960095e92e";
 

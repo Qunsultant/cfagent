@@ -75,11 +75,12 @@ describe("recreate + tenant isolation (#4282 P4)", () => {
   // Issue #3261 adds the agent_user_profiles email column (migration 0068): 419 → 420.
   // Issue #5229 adds the agent_referral_rules expiry_period_ms column (migration 0069): 420 → 421.
   // Issue #5175 slice 2 adds mas_runs + mas_run_aliases + its index: 422 → 425.
-    expect(first.summary.totalSteps).toBe(425);
-    expect(first.summary.executed).toBe(425);
+  // Issue #5086 adds migration 0070 (otel_config_overrides table): 425 → 426.
+    expect(first.summary.totalSteps).toBe(426);
+    expect(first.summary.executed).toBe(426);
     expect(first.summary.failed).toBe(0);
     expect(first.summary.skipped).toBe(0);
-    expect(first.executed).toHaveLength(425);
+    expect(first.executed).toHaveLength(426);
     expect(first.failed).toEqual([]);
     expect(first.skipped).toEqual([]);
     // Uncreatable layers are deployment facts, not changes: they are
@@ -209,7 +210,7 @@ describe("recreate + tenant isolation (#4282 P4)", () => {
     });
     // The report is truthful: everything before the failing step
     // executed, the failing step is named, everything after it is
-    // skipped — and the three counts sum to the 425 resolved steps.
+    // skipped — and the three counts sum to the 426 resolved steps.
     expect(partial.summary.failed).toBe(1);
     expect(partial.failed).toHaveLength(1);
     expect(partial.failed[0].code).toBe(UNIQUE_INDEX_CODE);
@@ -217,8 +218,8 @@ describe("recreate + tenant isolation (#4282 P4)", () => {
       partial.summary.executed +
         partial.summary.failed +
         partial.summary.skipped,
-    ).toBe(425);
-    expect(partial.summary.totalSteps).toBe(425);
+    ).toBe(426);
+    expect(partial.summary.totalSteps).toBe(426);
     // The degradation is VISIBLE, never silent: the post-run equality
     // check fails. The missing indexes are exactly the failed step's
     // index plus the indexes of the skipped steps (the run stopped in

@@ -4573,13 +4573,13 @@
           "pk": 0
         },
         {
-          "name": "email",
-          "type": "TEXT",
+          "name": "updated_at_ms",
+          "type": "INTEGER",
           "pk": 0
         },
         {
-          "name": "updated_at_ms",
-          "type": "INTEGER",
+          "name": "email",
+          "type": "TEXT",
           "pk": 0
         }
       ],
@@ -8279,6 +8279,49 @@
         }
       ],
       "constraints": {}
+    },
+    "otel_config_overrides": {
+      "columns": [
+        {
+          "name": "config_key",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "value_json",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "version",
+          "type": "INTEGER",
+          "pk": 0
+        },
+        {
+          "name": "updated_by",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "updated_at_ms",
+          "type": "INTEGER",
+          "pk": 0
+        },
+        {
+          "name": "reason",
+          "type": "TEXT",
+          "pk": 0
+        }
+      ],
+      "constraints": {
+        "primary_key": {
+          "kind": "primaryKey",
+          "columns": [
+            "config_key",
+            "version"
+          ]
+        }
+      }
     },
     "paused_schedules": {
       "columns": [
