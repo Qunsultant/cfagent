@@ -69,6 +69,13 @@ export {
 } from "./manualOptionsRecordBuilder";
 import type { ManualOptionsScreenCtx } from "./manualOptionsRecordBuilder";
 import { countsSummary, symbolsLabel } from "./manualOptionsRecordBuilder";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "workflows/manualOptionsScreen",
+});
+
 
 export interface ManualOptionsScreenInput {
   ctx: ManualOptionsScreenCtx;
@@ -137,12 +144,20 @@ export function createManualOptionsScreenDelivery(input: ManualOptionsScreenInpu
       } else {
         pdfStatus = "failed";
         pdfError = pipelineResult.pdfError;
-        console.warn("[Orchestrator] Manual options contract PDF generation failed:", pdfError);
+        structuredLog.warn("manualOptionsScreen.pdf_generation_failed", {
+          message: "[Orchestrator] Manual options contract PDF generation failed",
+          runId,
+          error: pdfError,
+        });
       }
     } catch (pdfErr) {
       pdfStatus = "failed";
       pdfError = pdfErr instanceof Error ? pdfErr.message : String(pdfErr);
-      console.warn("[Orchestrator] Manual options contract PDF generation failed:", pdfError);
+      structuredLog.warn("manualOptionsScreen.pdf_generation_failed", {
+          message: "[Orchestrator] Manual options contract PDF generation failed",
+          runId,
+          error: pdfError,
+        });
     }
 
     let xlsxKey: string | undefined;
@@ -156,7 +171,11 @@ export function createManualOptionsScreenDelivery(input: ManualOptionsScreenInpu
     } catch (xlsxErr) {
       xlsxStatus = "failed";
       xlsxError = xlsxErr instanceof Error ? xlsxErr.message : String(xlsxErr);
-      console.warn("[Orchestrator] Manual options XLSX generation failed:", xlsxError);
+      structuredLog.warn("manualOptionsScreen.xlsx_generation_failed", {
+        message: "[Orchestrator] Manual options XLSX generation failed",
+        runId,
+        error: xlsxError,
+      });
     }
     const xlsxUrl = xlsxKey ? `/api/options/report.xlsx?key=${encodeURIComponent(xlsxKey)}` : undefined;
 
@@ -171,7 +190,11 @@ export function createManualOptionsScreenDelivery(input: ManualOptionsScreenInpu
     } catch (csvErr) {
       csvStatus = "failed";
       csvError = csvErr instanceof Error ? csvErr.message : String(csvErr);
-      console.warn("[Orchestrator] Manual options CSV generation failed:", csvError);
+      structuredLog.warn("manualOptionsScreen.csv_generation_failed", {
+        message: "[Orchestrator] Manual options CSV generation failed",
+        runId,
+        error: csvError,
+      });
     }
     const csvUrl = csvKey ? `/api/options/report.csv?key=${encodeURIComponent(csvKey)}` : undefined;
 
@@ -338,11 +361,19 @@ export function createManualOptionsScreenDelivery(input: ManualOptionsScreenInpu
           slackState = sent.ok ? "sent" : "failed";
           if (!sent.ok) {
             suppressor.release(runId, "slack");
-            console.warn("[Orchestrator] Slack A2A options contract PDF delivery failed:", sent.error);
+            structuredLog.warn("manualOptionsScreen.slack_delivery_failed", {
+              message: "[Orchestrator] Slack A2A options contract PDF delivery failed",
+              runId,
+              error: sent.error,
+            });
           }
         } catch (slackErr) {
           suppressor.release(runId, "slack");
-          console.warn("[Orchestrator] Slack A2A options delivery error:", slackErr instanceof Error ? slackErr.message : String(slackErr));
+          structuredLog.warn("manualOptionsScreen.slack_delivery_error", {
+            message: "[Orchestrator] Slack A2A options delivery error",
+            runId,
+            error: slackErr instanceof Error ? slackErr.message : String(slackErr),
+          });
         }
       }
     }
@@ -391,11 +422,19 @@ export function createManualOptionsScreenDelivery(input: ManualOptionsScreenInpu
             emailState = sent.sent ? "sent" : "failed";
             if (!sent.sent) {
               suppressor.release(runId, emailDestination);
-              console.warn("[Orchestrator] Manual options email delivery failed for", emailTo);
+              structuredLog.warn("manualOptionsScreen.email_delivery_failed", {
+                message: "[Orchestrator] Manual options email delivery failed",
+                runId,
+                emailTo,
+              });
             }
           } catch (emailErr) {
             suppressor.release(runId, emailDestination);
-            console.warn("[Orchestrator] Manual options email error:", emailErr instanceof Error ? emailErr.message : String(emailErr));
+            structuredLog.warn("manualOptionsScreen.email_error", {
+              message: "[Orchestrator] Manual options email error",
+              runId,
+              error: emailErr instanceof Error ? emailErr.message : String(emailErr),
+            });
           }
         }
       }
@@ -426,7 +465,11 @@ export function createManualOptionsScreenDelivery(input: ManualOptionsScreenInpu
           createdAt: new Date().toISOString(),
         });
       } catch (outcomeErr) {
-        console.warn("[Orchestrator] Manual options outcome record failed:", outcomeErr instanceof Error ? outcomeErr.message : String(outcomeErr));
+        structuredLog.warn("manualOptionsScreen.outcome_record_failed", {
+          message: "[Orchestrator] Manual options outcome record failed",
+          runId,
+          error: outcomeErr instanceof Error ? outcomeErr.message : String(outcomeErr),
+        });
       }
     }
 

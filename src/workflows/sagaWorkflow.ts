@@ -100,6 +100,13 @@ import {
   type SagaWorkflowStep,
 } from "./sagaWorkflowFlow";
 import { createStageBoundaryEmitter } from "./stageBoundaryEmitter";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "workflows/sagaWorkflow",
+});
+
 
 /** Wrangler binding name for the saga workflow (wrangler.jsonc). */
 export const SAGA_WORKFLOW_BINDING = "SAGA_WORKFLOW";
@@ -302,9 +309,10 @@ export class CrossDomainSagaWorkflow extends PortThinkWorkflow<any, SagaParams, 
         try {
           const adapter = createCommercialAdapter(this.env as { AGENT_DB?: unknown });
           if (!adapter) {
-            console.error(
-              `[saga-workflow] D1 credit-claim write skipped for run ${runRequestId} (AGENT_DB unbound); no redeemable claim recorded.`,
-            );
+            structuredLog.error("sagaWorkflow.credit_claim_write_skipped", {
+              message: `[saga-workflow] D1 credit-claim write skipped for run ${runRequestId} (AGENT_DB unbound); no redeemable claim recorded.`,
+              runRequestId,
+            });
             return;
           }
           await ensureCommercialSchema(adapter.db);
@@ -315,10 +323,11 @@ export class CrossDomainSagaWorkflow extends PortThinkWorkflow<any, SagaParams, 
             amountUSD: priceUSD,
           });
         } catch (err) {
-          console.error(
-            `[saga-workflow] D1 credit-claim write failed for run ${runRequestId} — claim missing, operator must re-issue from the payment record:`,
-            err instanceof Error ? err.message : String(err),
-          );
+          structuredLog.error("sagaWorkflow.credit_claim_write_failed", {
+            message: `[saga-workflow] D1 credit-claim write failed for run ${runRequestId} — claim missing, operator must re-issue from the payment record: ${err instanceof Error ? err.message : String(err)}`,
+            runRequestId,
+            error: err instanceof Error ? err.message : String(err),
+          });
         }
       },
       // Lazy refund ports: null when AGENT_DB is unbound, so the

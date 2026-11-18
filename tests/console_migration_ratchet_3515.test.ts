@@ -30,6 +30,25 @@
  * `console.*` on main, so both stay in REMAINING_PIN at their ceilings.
  * After batch 4 the remaining total is 187.
  *
+ * Batch 5 (this slice) migrated `src/workflows` — all 18 files, 44 real
+ * sites — to the same logger, and moved them from REMAINING_PIN to
+ * MIGRATED_ZERO; after batch 5 the remaining total is 143. Three
+ * judgment calls, all following established precedent, never a new
+ * scheme: the three injected `warn` defaults (`optionsScreenWorkflow`,
+ * `optionsStageSeam`, `stageBoundaryEmitter`) default to
+ * `structuredLog.warn("<base>.log", { message })`, exactly the batch-1
+ * `gateway.log` / `retrieval.log` precedent for injected log defaults,
+ * so the test seam keeps its messages and production emits structured
+ * events; `screenRunAspects.logScreenRunEvent`'s hand-built JSON line
+ * becomes one `screenRunAspects.screen_run_event` info event with the
+ * line's fields, the trace/actor/agent riding the logger's scope
+ * overrides (tenant reads null, never invented); `paymentWorkflow`'s
+ * nine new events keep that file's existing camelCase suffixes
+ * (`chargeJournalSkipped`, `failureCreditJournalSkipped`). Three tests
+ * asserted on the raw `console.log` JSON line and were updated to the
+ * structured form (spy console.info, parse the JSON event, assert on
+ * operation + level + fields) — no behavior change.
+ *
  * Batch 3 (this slice) migrated `src/agents` — all 42 files, 180
  * real sites — to the same logger, and moved them from REMAINING_PIN
  * to MIGRATED_ZERO; after batch 3 the remaining total is 234. One
@@ -363,7 +382,25 @@ const MIGRATED_ZERO: readonly string[] = [
   "src/trading/platformHistory.ts",
   "src/trading/screenerPipeline.ts",
   "src/trading/slack/agent.ts",
-];
+  "src/workflows/createWorkflowPorts.ts",
+  "src/workflows/manualOptionsScreen.ts",
+  "src/workflows/optionsScreenWorkflow.ts",
+  "src/workflows/optionsStageSeam.ts",
+  "src/workflows/paymentWorkflow.ts",
+  "src/workflows/paymentWorkflowFlow.ts",
+  "src/workflows/sagaWorkflow.ts",
+  "src/workflows/screenRunAspects.ts",
+  "src/workflows/screenerWorkflow.ts",
+  "src/workflows/screenerWorkflowFlow.deprecated.ts",
+  "src/workflows/screenerWorkflowRoutes.ts",
+  "src/workflows/stageBoundaryEmitter.ts",
+  "src/workflows/stageQueueTransport.ts",
+  "src/workflows/stageReportConsumer.ts",
+  "src/workflows/stageReportProduction.ts",
+  "src/workflows/stageRunnerCheckpointAdapter.ts",
+  "src/workflows/strategyScreenPorts.ts",
+  "src/workflows/workflowInstanceSeam.ts",
+]
 
 /**
  * Unmigrated files: ceiling counts (stripper-verified on main 3859836a,
@@ -431,24 +468,6 @@ const REMAINING_PIN: Readonly<Record<string, number>> = {
   "src/server/routes/queue.ts": 16,
   "src/trading/channels/intake.ts": 3,
   "src/trading/options/unifiedOptionsService.ts": 1,
-  "src/workflows/createWorkflowPorts.ts": 2,
-  "src/workflows/manualOptionsScreen.ts": 9,
-  "src/workflows/optionsScreenWorkflow.ts": 1,
-  "src/workflows/optionsStageSeam.ts": 1,
-  "src/workflows/paymentWorkflow.ts": 9,
-  "src/workflows/paymentWorkflowFlow.ts": 4,
-  "src/workflows/sagaWorkflow.ts": 2,
-  "src/workflows/screenRunAspects.ts": 1,
-  "src/workflows/screenerWorkflow.ts": 2,
-  "src/workflows/screenerWorkflowFlow.deprecated.ts": 1,
-  "src/workflows/screenerWorkflowRoutes.ts": 3,
-  "src/workflows/stageBoundaryEmitter.ts": 1,
-  "src/workflows/stageQueueTransport.ts": 2,
-  "src/workflows/stageReportConsumer.ts": 1,
-  "src/workflows/stageReportProduction.ts": 2,
-  "src/workflows/stageRunnerCheckpointAdapter.ts": 1,
-  "src/workflows/strategyScreenPorts.ts": 1,
-  "src/workflows/workflowInstanceSeam.ts": 1,
 };
 
 /** The structured logger's own console fallback — exactly 2 uses. */

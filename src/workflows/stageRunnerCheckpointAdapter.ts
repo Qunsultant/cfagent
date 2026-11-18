@@ -20,6 +20,13 @@ import type {
   StageRunnerCheckpoint,
   StageRunnerPlan,
 } from "./stageRunnerPorts";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "workflows/stageRunnerCheckpointAdapter",
+});
+
 
 /** Named refusal for the one operation this adapter will not perform. */
 export const STAGE_CHECKPOINT_WRITE_UNSUPPORTED =
@@ -79,9 +86,11 @@ export function createAsyncJobStageCheckpointStore(
         const rows = bind.readChainRows(runId, bind.sessionId);
         return checkpointFromChainRows(runId, rows, bind.plan, bind.unitId);
       } catch (err) {
-        console.warn(
-          `[stageCheckpoint] read failed for run ${runId}: ${err instanceof Error ? err.message : String(err)} — treating the run as having no recorded checkpoint.`,
-        );
+        structuredLog.warn("stageRunnerCheckpointAdapter.checkpoint_read_failed", {
+          message: `[stageCheckpoint] read failed for run ${runId}: ${err instanceof Error ? err.message : String(err)} — treating the run as having no recorded checkpoint.`,
+          runId,
+          error: err instanceof Error ? err.message : String(err),
+        });
         return null;
       }
     },

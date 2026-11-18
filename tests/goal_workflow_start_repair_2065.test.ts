@@ -104,7 +104,10 @@ describe("startWorkflowInstance repair (#2065)", () => {
   });
 
   it("retries with a short safe id when the derived id is rejected", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    // Issue #3515 S3 batch 5: the fallback warning rides the S2
+    // structured logger — the console-info JSON fallback carries
+    // the workflowInstanceSeam.start_used_fallback_instance event.
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
     const created: Array<{ id: string; params: unknown }> = [];
     const binding: WorkflowBindingLike = {
       create: async ({ id, params }) => {
@@ -126,7 +129,20 @@ describe("startWorkflowInstance repair (#2065)", () => {
     expect(out.workflowId).toMatch(/^screen-[0-9a-f]{40}$/);
     expect(created).toHaveLength(1);
     expect((created[0].params as WorkflowJobCommand).jobId).toBe(COMMAND.jobId);
-    expect(warn).toHaveBeenCalledTimes(1);
+    const fallbackEvents: Array<Record<string, unknown>> = [];
+    for (const call of infoSpy.mock.calls) {
+      try {
+        const parsed = JSON.parse(String(call[0])) as Record<string, unknown>;
+        if (parsed.operation === "workflowInstanceSeam.start_used_fallback_instance") {
+          fallbackEvents.push(parsed);
+        }
+      } catch {
+        // Non-JSON console.info lines are not structured events.
+      }
+    }
+    expect(fallbackEvents).toHaveLength(1);
+    expect(fallbackEvents[0].level).toBe("warn");
+    infoSpy.mockRestore();
   });
 
   it("derives a bounded hash id for a job id over the provider ceiling (#2065 remainder)", async () => {

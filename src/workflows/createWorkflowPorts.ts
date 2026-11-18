@@ -23,6 +23,13 @@
 
 import { CfWorkflowAdapter, type WorkflowBindingLike } from "./cfWorkflowAdapter";
 import type { WorkflowPort } from "./workflowPorts";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "workflows/createWorkflowPorts",
+});
+
 
 export interface WorkflowEnv {
   SCREENER_WORKFLOW?: unknown;
@@ -67,16 +74,16 @@ export function createWorkflowPorts(env: WorkflowEnv): WorkflowPort | null {
   const binding = asWorkflowBinding(env.SCREENER_WORKFLOW);
   if (!binding) {
     if (env.SCREENER_WORKFLOW) {
-      console.warn(
-        "[workflows] SCREENER_WORKFLOW binding is present but has no create/get capability — workflow ports unavailable.",
-      );
+      structuredLog.warn("createWorkflowPorts.workflow_binding_malformed", {
+        message: "[workflows] SCREENER_WORKFLOW binding is present but has no create/get capability — workflow ports unavailable.",
+      });
     }
     return null;
   }
   if (!env.AGENT_DB) {
-    console.warn(
-      "[workflows] AGENT_DB is not bound — workflow job projection unavailable, workflow ports unavailable.",
-    );
+    structuredLog.warn("createWorkflowPorts.projection_store_unbound", {
+      message: "[workflows] AGENT_DB is not bound — workflow job projection unavailable, workflow ports unavailable.",
+    });
     return null;
   }
   return new CfWorkflowAdapter(binding);

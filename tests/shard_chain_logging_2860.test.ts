@@ -51,7 +51,7 @@ describe("sharded-chain logging / classification (#2860)", () => {
       ETRADE_SANDBOX_CONSUMER_SECRET: "mock_consumer_secret",
     } as unknown as Env;
     mockOrm = new DatabaseORM(mockSql as any);
-    logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    logSpy = vi.spyOn(console, "info").mockImplementation(() => {});
   });
 
   afterEach(() => {
@@ -81,8 +81,15 @@ describe("sharded-chain logging / classification (#2860)", () => {
       for (const arg of call) {
         if (typeof arg !== "string") continue;
         try {
+          // Issue #3515 S3 batch 5: the run event rides the S2
+          // structured logger — the console-info JSON fallback
+          // carries the ObservabilityEvent, so the run fields live
+          // under `fields` and the identity under the top level.
           const parsed = JSON.parse(arg) as Record<string, unknown>;
-          if (parsed.event === "screen.started" || parsed.event === "screen.failed") out.push(parsed);
+          if (parsed.operation !== "screenRunAspects.screen_run_event") continue;
+          const fields = (parsed.fields ?? {}) as Record<string, unknown>;
+          if (fields.event !== "screen.started" && fields.event !== "screen.failed") continue;
+          out.push({ ...fields, actorId: parsed.actorId, traceId: parsed.traceId });
         } catch {
           // Non-JSON console lines are not run events.
         }
@@ -103,8 +110,8 @@ describe("sharded-chain logging / classification (#2860)", () => {
     expect(started).toHaveLength(1);
     expect(started[0].trigger).toBe("scheduled");
     expect(started[0].universe).toBe("TECH");
-    expect(started[0].actor_id).toBe("test_trader");
-    expect(typeof started[0].trace_id).toBe("string");
+    expect(started[0].actorId).toBe("test_trader");
+    expect(typeof started[0].traceId).toBe("string");
   });
 
   it("a rejected submission emits screen.failed with the classifier verdict", async () => {

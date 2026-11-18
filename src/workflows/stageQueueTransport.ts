@@ -82,6 +82,13 @@ import {
 import { stageAnalysisKey } from "./stageRuntimeIds";
 import { STAGE_IDS_BY_FAMILY, type StageFamily } from "./stageMessage";
 import { maxAttemptsForStage, resolveStageConfig } from "./stageConfig";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "workflows/stageQueueTransport",
+});
+
 
 /** The queue send seam: a Cloudflare Queue binding's send. */
 export interface StageQueueSend {
@@ -172,10 +179,10 @@ export async function publishAnalysisDone(args: {
   try {
     await args.queue.send(message);
   } catch (err) {
-    console.error(
-      "[stageQueueTransport] analysis-done publish failed (run persisted, in-process leg already ran):",
-      err instanceof Error ? err.message : String(err),
-    );
+    structuredLog.error("stageQueueTransport.analysis_done_publish_failed", {
+      message: "[stageQueueTransport] analysis-done publish failed (run persisted, in-process leg already ran)",
+      error: err instanceof Error ? err.message : String(err),
+    });
     return { published: false, reason: err instanceof Error ? err.message : String(err) };
   }
   return { published: true, message };
@@ -367,10 +374,10 @@ export async function publishStageBoundaryMessage(args: {
   try {
     await args.queue.send(args.message);
   } catch (err) {
-    console.error(
-      "[stageQueueTransport] stage-boundary publish failed (boundary persisted, in-process stage already ran):",
-      err instanceof Error ? err.message : String(err),
-    );
+    structuredLog.error("stageQueueTransport.stage_boundary_publish_failed", {
+      message: "[stageQueueTransport] stage-boundary publish failed (boundary persisted, in-process stage already ran)",
+      error: err instanceof Error ? err.message : String(err),
+    });
     return { published: false, reason: err instanceof Error ? err.message : String(err) };
   }
   return { published: true, message: args.message };

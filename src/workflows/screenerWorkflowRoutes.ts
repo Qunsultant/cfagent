@@ -25,6 +25,13 @@ import {
   type WorkflowHandle,
   type WorkflowJobCommand,
 } from "./workflowPorts";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "workflows/screenerWorkflowRoutes",
+});
+
 
 /** POST body `async: true` (the flag is stripped before schema validation by callers). */
 export function asyncRequestedFromBody(body: unknown): boolean {
@@ -119,9 +126,10 @@ export function screenModeSelectionFromFields(
   }
   const gate = resolveScreenerNdGateForHost({ env, readSettingRaw: opts?.readSettingRaw });
   if (gate.invalid) {
-    console.warn(
-      `[screener-workflow] ${screenerNdConfigErrorEvent()}: SCREENER_ND_MODE value ${JSON.stringify(gate.raw)} is not "on"/"off" — failing closed to off.`,
-    );
+    structuredLog.warn("screenerWorkflowRoutes.nd_mode_invalid_value", {
+      message: `[screener-workflow] ${screenerNdConfigErrorEvent()}: SCREENER_ND_MODE value ${JSON.stringify(gate.raw)} is not "on"/"off" — failing closed to off.`,
+      rawValue: gate.raw,
+    });
   }
   if (!gate.enabled) {
     return {
@@ -199,9 +207,10 @@ export function assertScreenModeGate(
   if (command.screenMode !== "non-deterministic") return;
   const gate = resolveScreenerNdGateForHost({ env, readSettingRaw: deps?.readSettingRaw });
   if (gate.invalid) {
-    console.warn(
-      `[screener-workflow] ${screenerNdConfigErrorEvent()}: SCREENER_ND_MODE value ${JSON.stringify(gate.raw)} is not "on"/"off" — failing closed to off.`,
-    );
+    structuredLog.warn("screenerWorkflowRoutes.nd_mode_invalid_value", {
+      message: `[screener-workflow] ${screenerNdConfigErrorEvent()}: SCREENER_ND_MODE value ${JSON.stringify(gate.raw)} is not "on"/"off" — failing closed to off.`,
+      rawValue: gate.raw,
+    });
   }
   if (!gate.enabled) {
     throw new WorkflowError(
@@ -237,10 +246,10 @@ export async function tryStartScreenerWorkflow(
     if (!ports) return null;
     return await ports.start(command);
   } catch (err) {
-    console.warn(
-      "[screener-workflow] Async start failed, falling back to sync:",
-      err instanceof Error ? err.message : String(err),
-    );
+    structuredLog.warn("screenerWorkflowRoutes.async_start_failed", {
+      message: "[screener-workflow] Async start failed, falling back to sync",
+      error: err instanceof Error ? err.message : String(err),
+    });
     return null;
   }
 }

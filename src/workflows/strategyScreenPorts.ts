@@ -370,6 +370,13 @@ import {
   type SubrequestBudget,
 } from "../trading";
 import type { ScanRunStore } from "../data/scanRunPorts";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "workflows/strategyScreenPorts",
+});
+
 
 /** The scanner leg's run request: an opportunity scan over a batch. */
 export interface ScannerPipelineRequest extends PlannerInput {
@@ -593,7 +600,10 @@ export function createScannerScreenPorts(
         });
         return { terminal: "completed", saved: true, scanRunId: saved.id, persisted: true, result };
       } catch (err) {
-        console.error("Failed to persist opportunity scan run", err);
+        structuredLog.error("strategyScreenPorts.persist_opportunity_scan_run_failed", {
+          message: "Failed to persist opportunity scan run",
+          error: err instanceof Error ? err.message : String(err),
+        });
         return {
           terminal: "completed",
           saved: false,

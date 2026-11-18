@@ -24,6 +24,13 @@
  */
 import { buildStageBoundaryMessage, publishStageBoundaryMessage, type StageQueueSend } from "./stageQueueTransport";
 import type { StageFamily } from "./stageMessage";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "workflows/optionsStageSeam",
+});
+
 
 export interface OptionsStageArtifacts {
   /** One id for the whole run; the caller decides how it is derived. */
@@ -50,7 +57,7 @@ export async function emitOptionsStageBoundaries(args: {
   warn?: (message: string) => void;
 }): Promise<EmitOptionsBoundariesResult> {
   const family = args.family ?? "options";
-  const warn = args.warn ?? ((message: string) => console.warn(message));
+  const warn = args.warn ?? ((message: string) => structuredLog.warn("optionsStageSeam.log", { message }));
   const published: string[] = [];
   const skipped: Array<{ stageId: string; reason: string }> = [];
   const { runId, userLogin } = args.artifacts;

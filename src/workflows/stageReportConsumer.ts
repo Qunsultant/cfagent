@@ -52,6 +52,13 @@ import {
 } from "./stageMessage";
 import { DEFAULT_STAGE_CONFIG, formatStageMessage, maxAttemptsForStage, resolveStageConfig, type StageConfigEnv } from "./stageConfig";
 import { describeStageAdvice, withStageAdvice } from "./stageAdvice";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "workflows/stageReportConsumer",
+});
+
 
 export type StageConsumeStatus =
   | "generated"
@@ -162,7 +169,14 @@ export async function consumeAnalysisDone(args: {
     output = await withStageAdvice({
       stageId: message.stageId,
       log: (event) => {
-        if (event.outcome === "failed") console.warn(`[stage] ${describeStageAdvice(event)}`);
+        if (event.outcome === "failed")
+          structuredLog.warn("stageReportConsumer.stage_advice_failed", {
+            message: `[stage] ${describeStageAdvice(event)}`,
+            stageId: event.stageId,
+            durationMs: event.durationMs,
+            ...(event.code ? { code: event.code } : {}),
+            ...(event.detail ? { detail: event.detail } : {}),
+          });
       },
       run: () =>
         args.generate({

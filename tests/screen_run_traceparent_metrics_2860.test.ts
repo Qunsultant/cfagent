@@ -166,7 +166,7 @@ describe("screen-run metrics aggregation (#2860 Factor 14)", () => {
   });
 
   it("the funnel folds every logged event exactly once (runScreen + chain share the join point)", () => {
-    vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.spyOn(console, "info").mockImplementation(() => {});
     logScreenRunEvent({ event: "screen.started", trigger: "manual", universe: "TECH", traceId: TRACE_ID });
     logScreenRunEvent({ event: "screen.completed", trigger: "manual", universe: "TECH", traceId: TRACE_ID, success: true, matchedCount: 2, durationMs: 50 });
     logScreenRunEvent({ event: "screen.failed", trigger: "manual", universe: "TECH", traceId: TRACE_ID, classification: "provider", error: "down", durationMs: 10 });

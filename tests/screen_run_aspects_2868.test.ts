@@ -44,8 +44,25 @@ describe("classifyScreenFailure", () => {
 });
 
 describe("logScreenRunEvent", () => {
-  it("emits one JSON line with the standards fields and no invented tenant", () => {
-    const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+  // Issue #3515 S3 batch 5: the run event rides the S2 structured
+  // logger now — the console-info JSON fallback carries the
+  // ObservabilityEvent (operation + level + fields), not the old
+  // hand-built line. Same fields, same severities.
+  function structuredEvents(spy: ReturnType<typeof vi.spyOn>): Array<Record<string, any>> {
+    const out: Array<Record<string, any>> = [];
+    for (const call of spy.mock.calls) {
+      try {
+        const parsed = JSON.parse(String(call[0])) as Record<string, any>;
+        if (parsed && typeof parsed.operation === "string") out.push(parsed);
+      } catch {
+        // Non-JSON console.info lines are not structured events.
+      }
+    }
+    return out;
+  }
+
+  it("emits one structured event with the standards fields and no invented tenant", () => {
+    const spy = vi.spyOn(console, "info").mockImplementation(() => {});
     logScreenRunEvent({
       event: "screen.completed",
       trigger: "manual",
@@ -56,19 +73,25 @@ describe("logScreenRunEvent", () => {
       matchedCount: 3,
       durationMs: 42,
     });
-    expect(spy).toHaveBeenCalledTimes(1);
-    const line = JSON.parse(String(spy.mock.calls[0][0]));
-    expect(line.trace_id).toBe("trace-1");
-    expect(line.agent_id).toBe("screener-agent");
-    expect(line.actor_id).toBe("alice");
-    expect(line.event).toBe("screen.completed");
-    expect(line.matched_count).toBe(3);
-    expect(line.duration_ms).toBe(42);
-    expect(line).not.toHaveProperty("tenant_id");
+    const events = structuredEvents(spy).filter(
+      (e) => e.operation === "screenRunAspects.screen_run_event",
+    );
+    expect(events).toHaveLength(1);
+    const line = events[0];
+    expect(line.level).toBe("info");
+    expect(line.component).toBe("workflows/screenRunAspects");
+    expect(line.traceId).toBe("trace-1");
+    expect(line.agentId).toBe("screener-agent");
+    expect(line.actorId).toBe("alice");
+    expect(line.fields.event).toBe("screen.completed");
+    expect(line.fields.matchedCount).toBe(3);
+    expect(line.fields.durationMs).toBe(42);
+    expect(line.tenantId).toBeNull();
+    spy.mockRestore();
   });
 
   it("carries classification and error on failures", () => {
-    const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const spy = vi.spyOn(console, "info").mockImplementation(() => {});
     logScreenRunEvent({
       event: "screen.failed",
       trigger: "scheduled",
@@ -77,13 +100,18 @@ describe("logScreenRunEvent", () => {
       classification: "provider",
       error: "E*TRADE unavailable",
     });
-    const line = JSON.parse(String(spy.mock.calls[0][0]));
-    expect(line.classification).toBe("provider");
-    expect(line.error).toBe("E*TRADE unavailable");
+    const events = structuredEvents(spy).filter(
+      (e) => e.operation === "screenRunAspects.screen_run_event",
+    );
+    expect(events).toHaveLength(1);
+    const line = events[0];
+    expect(line.fields.classification).toBe("provider");
+    expect(line.fields.error).toBe("E*TRADE unavailable");
+    spy.mockRestore();
   });
 
   it("never throws, even when logging itself throws", () => {
-    vi.spyOn(console, "log").mockImplementation(() => {
+    vi.spyOn(console, "info").mockImplementation(() => {
       throw new Error("log sink down");
     });
     expect(() =>

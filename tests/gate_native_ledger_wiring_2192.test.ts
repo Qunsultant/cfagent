@@ -145,7 +145,10 @@ describe("gate → native-ledger wiring (#2192)", () => {
       listRowsForRun: async () => [],
       listRowsForTenant: async () => [],
     };
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    // Issue #3515 S3 batch 5: the loud log rides the S2 structured
+    // logger — the console-info JSON fallback carries the
+    // paymentWorkflowFlow.native_ledger_record_failed error event.
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
     try {
       const out = await runPaymentWorkflowFlow(
         baseParams,
@@ -153,11 +156,34 @@ describe("gate → native-ledger wiring (#2192)", () => {
         fakeStep(),
       );
       expect(out.status).toBe("started");
-      expect(errorSpy).toHaveBeenCalled();
-      const logged = errorSpy.mock.calls.flat().join(" ");
-      expect(logged).toMatch(/native ledger/i);
+      const events: Array<{ operation: string; level: string; fields: Record<string, unknown> }> = [];
+      for (const call of infoSpy.mock.calls) {
+        try {
+          const parsed = JSON.parse(String(call[0])) as {
+            operation?: unknown;
+            level?: unknown;
+            fields?: unknown;
+          };
+          if (parsed && typeof parsed.operation === "string") {
+            events.push({
+              operation: parsed.operation,
+              level: typeof parsed.level === "string" ? parsed.level : "",
+              fields:
+                parsed.fields && typeof parsed.fields === "object"
+                  ? (parsed.fields as Record<string, unknown>)
+                  : {},
+            });
+          }
+        } catch {
+          // Non-JSON console.info lines are not structured events.
+        }
+      }
+      const failed = events.find((e) => e.operation === "paymentWorkflowFlow.native_ledger_record_failed");
+      expect(failed).toBeDefined();
+      expect(failed?.level).toBe("error");
+      expect(String(failed?.fields.message ?? "")).toMatch(/native ledger/i);
     } finally {
-      errorSpy.mockRestore();
+      infoSpy.mockRestore();
     }
   });
 

@@ -387,9 +387,10 @@ async function recordNativeLedgerBestEffort(
 ): Promise<void> {
   try {
     if (!port) {
-      console.error(
-        `[payment-workflow] native ledger row skipped for run=${row.runRequestId} (native ledger port unbound); payment unaffected.`,
-      );
+      structuredLog.error("paymentWorkflowFlow.native_ledger_row_skipped", {
+        message: `[payment-workflow] native ledger row skipped for run=${row.runRequestId} (native ledger port unbound); payment unaffected.`,
+        runRequestId: row.runRequestId,
+      });
       return;
     }
     const rail =
@@ -400,9 +401,10 @@ async function recordNativeLedgerBestEffort(
           : null;
     if (!rail) return;
     if (!Number.isFinite(row.priceUSD) || row.priceUSD <= 0) {
-      console.error(
-        `[payment-workflow] native ledger row refused for run=${row.runRequestId} without a positive price; payment unaffected.`,
-      );
+      structuredLog.error("paymentWorkflowFlow.native_ledger_row_refused", {
+        message: `[payment-workflow] native ledger row refused for run=${row.runRequestId} without a positive price; payment unaffected.`,
+        runRequestId: row.runRequestId,
+      });
       return;
     }
     const { duplicate } = await port.recordRow({
@@ -421,15 +423,17 @@ async function recordNativeLedgerBestEffort(
       versionId: row.versionId,
     });
     if (duplicate) {
-      console.log(
-        `[payment-workflow] native ledger charge row already exists for run=${row.runRequestId} (retried step, deduped)`,
-      );
+      structuredLog.info("paymentWorkflowFlow.native_ledger_charge_row_already_exists", {
+        message: `[payment-workflow] native ledger charge row already exists for run=${row.runRequestId} (retried step, deduped)`,
+        runRequestId: row.runRequestId,
+      });
     }
   } catch (err) {
-    console.error(
-      `[payment-workflow] native ledger record failed for run=${row.runRequestId} — payment unaffected:`,
-      err instanceof Error ? err.message : String(err),
-    );
+    structuredLog.error("paymentWorkflowFlow.native_ledger_record_failed", {
+      message: `[payment-workflow] native ledger record failed for run=${row.runRequestId} — payment unaffected: ${err instanceof Error ? err.message : String(err)}`,
+      runRequestId: row.runRequestId,
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 }
 
@@ -474,6 +478,13 @@ export { PAYMENT_STEP_IDS } from "./stageRuntimeIds";
 export type { PaymentStepId } from "./stageRuntimeIds";
 import type { PaymentStepId as PaymentStepIdValue } from "./stageRuntimeIds";
 type PaymentStepId = PaymentStepIdValue;
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "workflows/paymentWorkflowFlow",
+});
+
 
 export async function runPaymentWorkflowFlow(
   params: PaymentWorkflowParams,

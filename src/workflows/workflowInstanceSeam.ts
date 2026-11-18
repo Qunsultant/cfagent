@@ -44,6 +44,13 @@
  * same record field — a future extension, not built here.
  */
 import { WorkflowError } from "./workflowPorts";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "workflows/workflowInstanceSeam",
+});
+
 
 /** Minimal structural surface the seam needs from a binding (no provider types). */
 export interface ManagedWorkflowBindingInstance {
@@ -124,9 +131,12 @@ export async function startManagedWorkflowInstance(
   const fallbackId = await options.fallbackId();
   try {
     const instance = await binding.create({ id: fallbackId, params: options.params });
-    console.warn(
-      `[workflows] start used fallback instance id ${fallbackId} after id ${options.id} failed: ${errorText(firstError)}`,
-    );
+    structuredLog.warn("workflowInstanceSeam.start_used_fallback_instance", {
+      message: `[workflows] start used fallback instance id ${fallbackId} after id ${options.id} failed: ${errorText(firstError)}`,
+      fallbackId,
+      id: options.id,
+      error: errorText(firstError),
+    });
     return { workflowId: instance.id, existing: false, adoptedFallbackId: true };
   } catch (retryErr) {
     throw new WorkflowError(
