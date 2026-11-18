@@ -23,7 +23,6 @@ import { describe, expect, it, afterEach, vi } from "vitest";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import {
-  TEASER_CANDIDATE_CAP,
   buildTeaser,
   buildTeaserEmail,
   buildCatalogDisplay,
@@ -35,6 +34,7 @@ import {
   type CatalogDisplayEntry,
   type TeaserCandidateInput,
 } from "../src/data/productMarketing";
+import { LIFECYCLE_DEFAULTS } from "../src/config/lifecycleDefaults";
 import {
   buildProductCatalog,
   type ProductEntry,
@@ -69,9 +69,9 @@ function candidates(n: number): TeaserCandidateInput[] {
 }
 
 describe("teaser policy (#2695)", () => {
-  it("caps at TEASER_CANDIDATE_CAP in rank order", () => {
+  it("caps at the configured teaser cap in rank order", () => {
     const teaser = buildTeaser(candidates(5), "rank by composite score");
-    expect(TEASER_CANDIDATE_CAP).toBe(3);
+    expect(LIFECYCLE_DEFAULTS.teaserCandidateCap).toBe(3);
     expect(teaser.entries.map((e) => e.label)).toEqual(["SYM0", "SYM1", "SYM2"]);
     expect(teaser.cap).toBe(3);
     expect(teaser.totalSupplied).toBe(5);

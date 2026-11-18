@@ -9,7 +9,7 @@
  *    meter row remains the authoritative per-call tier record).
  * 2. Email content selection by tier over the existing lifecycle
  *    routes: Subscribed → full digest; Free/PayPerUse → capped digest
- *    (LIMITED_DIGEST_ITEM_CAP items + a factual cap line); welcome
+ *    (limitedDigestItemCap items + a factual cap line); welcome
  *    states the tier factually. Preferences and security-mail rules
  *    unchanged; tier-store failure on a send route refuses typed
  *    503, never sends on an unknown tier.
@@ -27,10 +27,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildDigestEmail,
   buildWelcomeEmail,
-  LIMITED_DIGEST_ITEM_CAP,
   sendDailyDigest,
   sendWelcomeBestEffort,
 } from "../src/services/lifecycleEmail";
+import { LIFECYCLE_DEFAULTS } from "../src/config/lifecycleDefaults";
 import {
   resolveEffectiveTier,
   resolveTierTransition,
@@ -224,7 +224,7 @@ describe("digest email capped by tier (#2522)", () => {
   });
 
   it("Free receives only the cap, plus a factual cap line", () => {
-    expect(LIMITED_DIGEST_ITEM_CAP).toBe(3);
+    expect(LIFECYCLE_DEFAULTS.limitedDigestItemCap).toBe(3);
     const { body } = buildDigestEmail("u1", items, "Free");
     expect(body).toContain("- a");
     expect(body).toContain("- c");

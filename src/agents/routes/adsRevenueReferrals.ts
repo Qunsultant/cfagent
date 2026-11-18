@@ -28,6 +28,7 @@ import type { DatabaseORM, SqlStorage } from "../../orm";
 import { runRestTool } from "./restToolBridge";
 import { resolveAdsTier, resolveServerAdsConfig } from "../../services/adsTier";
 import { createCommercialAdapter } from "../../data/createCommercialPorts";
+import { COMMERCIAL_DEFAULTS } from "../../config/commercialDefaults";
 import { createSubscriptionAdapter } from "../../data/createSubscriptionPorts";
 import { resolveEffectiveTier } from "../../data/subscriptionPorts";
 import {
@@ -715,7 +716,7 @@ export async function handleReferralsAdsRoutes(
         await mp.ads.incrementAllImpressions(1);
         const records = await mp.ads.findMany({
           orderBy: "clicks DESC, impressions ASC",
-          limit: 20,
+          limit: COMMERCIAL_DEFAULTS.adsListLimit,
         });
         const ads = records.map((a) => ({
           id: String(a.id),

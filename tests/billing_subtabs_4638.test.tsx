@@ -39,6 +39,7 @@ const EXPECTED_TABS = [
   "top-up-limits",
   "offer-rules",
   "plan-stripe-price",
+  "billing-policy",
   "support-snapshot",
 ] as const;
 
@@ -52,6 +53,7 @@ const EXPECTED_LABELS = [
   "Top-up limits",
   "Offer rules",
   "Plan Stripe Price mappings",
+  "Billing policy",
   "Support snapshot",
 ];
 
@@ -71,6 +73,7 @@ const TAB_MARKERS: Record<string, string> = {
   "top-up-limits": "The top-up limits could not be loaded.",
   "offer-rules": "Only a store operator can view or change upgrade-offer rules",
   "plan-stripe-price": "Only a store operator can view or change plan Stripe Price mappings",
+  "billing-policy": "Only a store operator can view or change billing policy.",
   "support-snapshot": "Account: owner",
 };
 
@@ -168,7 +171,7 @@ function countOccurrences(haystack: string, needle: string): number {
 }
 
 describe("Billing sub-tabs (#4638)", () => {
-  it("has exactly ten tabs in order, Overview first", async () => {
+  it("has exactly eleven tabs in order, Overview first", async () => {
     expect(BILLING_TABS).toEqual([...EXPECTED_TABS]);
     await renderPanel();
     expect(billingTabLabels()).toEqual([...EXPECTED_LABELS]);

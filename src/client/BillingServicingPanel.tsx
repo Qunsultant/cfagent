@@ -53,6 +53,7 @@ import { TopUpLimitsSection } from "./TopUpLimitsSection";
 import { ReferralCodesSection } from "./ReferralCodesSection";
 import { OfferRulesSection } from "./OfferRulesSection";
 import { PlanStripePriceSection } from "./PlanStripePriceSection";
+import { BillingPolicySection } from "./BillingPolicySection";
 import { COMMERCIAL_API_BASE } from "../data/commercialUrlCatalog";
 import type { SubscriptionView } from "./commercialApi";
 import {
@@ -88,6 +89,7 @@ export type BillingTab =
   | "top-up-limits"
   | "offer-rules"
   | "plan-stripe-price"
+  | "billing-policy"
   | "support-snapshot";
 
 export const BILLING_TABS: readonly BillingTab[] = [
@@ -100,6 +102,7 @@ export const BILLING_TABS: readonly BillingTab[] = [
   "top-up-limits",
   "offer-rules",
   "plan-stripe-price",
+  "billing-policy",
   "support-snapshot",
 ] as const;
 
@@ -120,6 +123,7 @@ const BILLING_TAB_OPTIONS: TabOption<BillingTab>[] = [
   { id: "top-up-limits", label: "Top-up limits" },
   { id: "offer-rules", label: "Offer rules" },
   { id: "plan-stripe-price", label: "Plan Stripe Price mappings" },
+  { id: "billing-policy", label: "Billing policy" },
   { id: "support-snapshot", label: "Support snapshot" },
 ];
 
@@ -435,6 +439,19 @@ export function BillingServicingPanel() {
             >
               <ErrorBoundary label="Plan Stripe Price mappings panel">
                 <PlanStripePriceSection />
+              </ErrorBoundary>
+            </TabPanel>
+          )}
+
+          {visitedTabs.has("billing-policy") && (
+            <TabPanel
+              idBase="billing"
+              tabId="billing-policy"
+              active={activeTab === "billing-policy"}
+              retain
+            >
+              <ErrorBoundary label="Billing policy panel">
+                <BillingPolicySection />
               </ErrorBoundary>
             </TabPanel>
           )}

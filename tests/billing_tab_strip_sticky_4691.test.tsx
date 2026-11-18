@@ -59,6 +59,7 @@ const EXPECTED_TABS = [
   "top-up-limits",
   "offer-rules",
   "plan-stripe-price",
+  "billing-policy",
   "support-snapshot",
 ] as const;
 

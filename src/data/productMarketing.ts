@@ -33,17 +33,19 @@ import type {
 import type { PriceFamily } from "./priceCataloguePorts";
 
 import { commercialBarePath } from "./commercialUrlCatalog";
+import { LIFECYCLE_DEFAULTS } from "../config/lifecycleDefaults";
 /* ------------------------------------------------------------------ */
 /* Teaser policy (#1076 B1)                                            */
 /* ------------------------------------------------------------------ */
 
 /**
  * Teaser cap, following the slice-3 digest-cap precedent
- * (LIMITED_DIGEST_ITEM_CAP = 3 in lifecycleEmail.ts). A display
- * cap, not a price or policy default: it is a named constant,
- * surfaced in the §15 as a Phase 4 choice for owner review.
+ * (limitedDigestItemCap = 3 in config/lifecycle-defaults.json, read
+ * via src/config/lifecycleDefaults.ts). A display cap, not a price or
+ * policy default: the value lives in config, surfaced in the §15 as
+ * a Phase 4 choice for owner review (#5230 externalized it; the
+ * number is unchanged).
  */
-export const TEASER_CANDIDATE_CAP = 3;
 
 export interface TeaserCandidateInput {
   label: string;
@@ -79,7 +81,7 @@ export interface TeaserResult {
 export function buildTeaser(
   candidates: TeaserCandidateInput[],
   rankingCriteria: string,
-  cap: number = TEASER_CANDIDATE_CAP,
+  cap: number = LIFECYCLE_DEFAULTS.teaserCandidateCap,
 ): TeaserResult {
   if (rankingCriteria.trim() === "") {
     throw new Error("teaser ranking criteria must be stated");

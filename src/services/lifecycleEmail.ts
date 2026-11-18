@@ -40,6 +40,7 @@ import {
   type NotificationPreferences,
 } from "../data/lifecyclePorts";
 import type { StoreTier } from "../data/commercialPorts";
+import { LIFECYCLE_DEFAULTS } from "../config/lifecycleDefaults";
 import { createStructuredLogger } from "../observability/structuredLogger";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
 
@@ -56,13 +57,14 @@ export interface EmailSender {
 /**
  * Issue #2522 (slice 3, #2405 Phase 1.3): the tier-limited digest
  * cap. ONLY Subscribed receives the full digest; Free and
- * PayPerUse receive the first LIMITED_DIGEST_ITEM_CAP items plus
- * one factual cap line. PayPerUse → limited by the #1076 ads-edge
- * reasoning: a cent-scale one-off purchase must not confer an
+ * PayPerUse receive the first LIFECYCLE_DEFAULTS.limitedDigestItemCap
+ * items plus one factual cap line. PayPerUse → limited by the #1076
+ * ads-edge reasoning: a cent-scale one-off purchase must not confer an
  * ongoing benefit. This is a slice decision, recorded on #2522
- * for owner override — not a price, not a marketing claim.
+ * for owner override — not a price, not a marketing claim. The cap
+ * value lives in `config/lifecycle-defaults.json` (#5230); this
+ * module reads it, never a literal.
  */
-export const LIMITED_DIGEST_ITEM_CAP = 3;
 
 export function buildWelcomeEmail(userId: string, tier: StoreTier = "Free"): { subject: string; body: string } {
   return {
@@ -84,7 +86,7 @@ export function buildDigestEmail(
   tier: StoreTier = "Free",
   unsubscribeUrl?: string,
 ): { subject: string; body: string } {
-  const shown = tier === "Subscribed" ? items : items.slice(0, LIMITED_DIGEST_ITEM_CAP);
+  const shown = tier === "Subscribed" ? items : items.slice(0, LIFECYCLE_DEFAULTS.limitedDigestItemCap);
   const lines = [
     `Hello ${userId},`,
     "",
