@@ -66,8 +66,9 @@ import type { UncreatableLayer } from "../src/data/schemaComponent/recreatePlann
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 /** sha256 of tests/schema_component_combined_expected_model.json as seeded. */
+/** Issue #5229 (migration 0069) re-seeds it: agent_referral_rules gains expiry_period_ms. */
 export const COMBINED_FIXTURE_SHA256 =
-  "924e913fea872d0dc8b5e4bbc2d8777d51da8281a83fcb832620bc4dea531864";
+  "2a3e7b12fe3ed79e9bd24691d8c8c462b485cb135ad5faad02b58a71e892952f";
 
 /** All four planes' entries in plane order: D1, DO, ORM, remainder. */
 export const COMBINED_CATALOGUE_ENTRIES: CatalogueEntry[] = [

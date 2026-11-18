@@ -73,7 +73,7 @@ describe("recreate + tenant isolation (#4282 P4)", () => {
     // Issue #4623 adds one probed DO statement (mas_async_jobs.tenant_id): 416 → 417.
   // Issue #4654 adds the mas_trades stop_price reconciliation: 417 → 418.
   // Issue #3261 adds the agent_user_profiles email column (migration 0068): 419 → 420.
-  // Issue #3251 adds the iaaa_audit_events CREATE TABLE: 420 → 421.
+  // Issue #5229 adds the agent_referral_rules expiry_period_ms column (migration 0069): 420 → 421.
     expect(first.summary.totalSteps).toBe(421);
     expect(first.summary.executed).toBe(421);
     expect(first.summary.failed).toBe(0);
@@ -208,8 +208,7 @@ describe("recreate + tenant isolation (#4282 P4)", () => {
     });
     // The report is truthful: everything before the failing step
     // executed, the failing step is named, everything after it is
-    // skipped — and the three counts sum to the 421 resolved steps
-    // (#3251 adds the iaaa_audit_events CREATE TABLE: 420 → 421).
+    // skipped — and the three counts sum to the 421 resolved steps.
     expect(partial.summary.failed).toBe(1);
     expect(partial.failed).toHaveLength(1);
     expect(partial.failed[0].code).toBe(UNIQUE_INDEX_CODE);
