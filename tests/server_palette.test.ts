@@ -353,7 +353,7 @@ const LOGIN_GOLDEN = `<!DOCTYPE html>
     <div class="shell-brand">
       <span class="shell-brand-mark" aria-hidden="true">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-          <polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5"></polygon>
+          <path d="M12 2L22 8.5V15.5L12 22L2 15.5V8.5Z"></path>
         </svg>
       </span>
       <span>Test App</span>
@@ -364,7 +364,7 @@ const LOGIN_GOLDEN = `<!DOCTYPE html>
     <div class="card">
       <div class="logo-badge">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-          <polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5"></polygon>
+          <path d="M12 2L22 8.5V15.5L12 22L2 15.5V8.5Z"></path>
           <line x1="12" y1="22" x2="12" y2="15.5"></line>
           <polyline points="22 8.5 12 15.5 2 8.5"></polyline>
         </svg>
