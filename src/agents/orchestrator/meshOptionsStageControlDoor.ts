@@ -10,9 +10,13 @@
  * (strategy-screen:<runId>) for a strategy run — so a strategy run
  * supports the same per-stage operations as an options run, with the
  * same gates. The run must have a durable engine record in THIS host
- * DO (dispatched from the copilot turn with a SQL handle); runs on
- * other DOs, and in-memory paid-screen runs, refuse by name
- * (`job_not_found`), never by pretending they ran here.
+ * DO (dispatched from the copilot turn with a SQL handle) or in the
+ * D1 residency (#4859: dispatched through the workflow host, whose
+ * job record persists over env.AGENT_DB — the same binding the turn's
+ * env carries, so the door builds the residency bundle from it and
+ * no cross-DO path is needed); runs on other DOs, and in-memory
+ * paid-screen runs, refuse by name (`job_not_found`), never by
+ * pretending they ran here.
  *
  * Errors: door-level refusals throw MeshDoorError (identity_required,
  * door_unavailable, bad input). Control-plane refusals propagate as
@@ -33,7 +37,10 @@ import {
   type OptionsStageControlOperation,
   type OptionsStageControlResult,
 } from "../../workflows/optionsStageControl";
+import type { OptionsEngineStores } from "../../workflows/optionsScreenEngine";
 import type { OptionsStageStorage } from "../../workflows/optionsScreenPorts";
+import { optionsWorkflowRunDepsFromEnv } from "../../workflows/optionsWorkflowHost";
+import { resolveChainSourceForRequest } from "../../workflows/brokerChainSourceResidency";
 import { MeshDoorError, requireActingLogin } from "./meshDoors";
 import type { McpToolContext } from "../../patterns/interfaces";
 
@@ -41,8 +48,15 @@ export type OptionsStageControlDoorOperation = OptionsStageControlOperation;
 
 export interface OptionsStageControlDoorContext {
   env: Env;
-  /** The host DO's raw SQLite handle — required (no record is addressable without it). */
+  /** The host DO's raw SQLite handle — required unless d1Stores is bound (no record is addressable without one of the two). */
   sql?: SqlStorage;
+  /**
+   * The D1 residency engine stores bundle (#4859) — built from
+   * env.AGENT_DB by the MCP context builder. When bound, the door
+   * drives workflow-residency runs (goal-shape first) through the
+   * same record the workflow instance drives.
+   */
+  d1Stores?: OptionsEngineStores;
   /**
    * The host DO's storage — the same handle the original leg's stage
    * artifacts persist under. The control reads it as a stage store
@@ -118,10 +132,10 @@ export async function controlOptionsStageViaDoor(
       `options run ${runId}: unknown stage operation ${JSON.stringify(input.operation)} — the operations are ${CONTROL_OPERATIONS.join(", ")}.`,
     );
   }
-  if (!ctx.sql) {
+  if (!ctx.sql && !ctx.d1Stores) {
     throw new MeshDoorError(
       "door_unavailable",
-      `options run ${runId}: the stage-control door cannot access SQLite — the executing context carries no instance SQL storage, so no engine record can be addressed.`,
+      `options run ${runId}: the stage-control door cannot access SQLite or the D1 residency — the executing context carries neither instance SQL storage nor an AGENT_DB binding, so no engine record can be addressed.`,
     );
   }
   const needsExecution =
@@ -130,7 +144,8 @@ export async function controlOptionsStageViaDoor(
     input.operation === "resume";
   const control = ctx.controlStage ?? controlOptionsStage;
   const result = await control({
-    sql: ctx.sql,
+    ...(ctx.sql ? { sql: ctx.sql } : {}),
+    ...(ctx.d1Stores ? { d1Stores: ctx.d1Stores } : {}),
     ...(ctx.storage
       ? {
           storage: ctx.storage as unknown as OptionsStageStorage | undefined,
@@ -143,10 +158,23 @@ export async function controlOptionsStageViaDoor(
     userLogin: login,
     // The chain source is only needed when a stage executes; a
     // stop/cancel never fetches, so no client is built for them.
+    // The factory (#4859) resolves a broker-carrying run's source
+    // from its descriptor; a run with no descriptor never consults
+    // it, and the turn's client stands as today.
     ...(needsExecution
       ? {
           etradeClient: (ctx.createEtradeService ??
             defaultCreateEtradeService(ctx))(login).client,
+          chainSourceFor: (
+            userLogin: string | undefined,
+            request: unknown,
+            controlRunId: string,
+          ) =>
+            resolveChainSourceForRequest(ctx.env, {
+              userLogin,
+              request,
+              runId: controlRunId,
+            }),
         }
       : {}),
   });
@@ -168,15 +196,25 @@ export function meshOptionsStageControlDoorContextFromMcp(
     | { sql?: SqlStorage }
     | undefined;
   const sql = storage?.sql;
-  if (!sql) {
+  // Issue #4859 — the D1 residency bundle: the turn's env carries
+  // the same AGENT_DB binding the workflow residency reads, so the
+  // door builds the bundle from it (construction performs no I/O;
+  // optionsWorkflowRunDepsFromEnv refuses when unbound, so the
+  // presence check below is the only gate). The door refuses only
+  // when NEITHER the DO's SQL handle NOR the D1 binding is bound.
+  const d1Stores = context.env.AGENT_DB
+    ? optionsWorkflowRunDepsFromEnv(context.env)
+    : undefined;
+  if (!sql && !d1Stores) {
     throw new MeshDoorError(
       "door_unavailable",
-      "Options stage-control door cannot access SQLite: executing context carries no instance SQL storage.",
+      "Options stage-control door cannot access SQLite or the D1 residency: executing context carries neither instance SQL storage nor an AGENT_DB binding.",
     );
   }
   return {
     env: context.env,
-    sql,
+    ...(sql ? { sql } : {}),
+    ...(d1Stores ? { d1Stores } : {}),
     storage: context.storage,
     orm: context.orm,
     audit: (type, agent, payload) => {
