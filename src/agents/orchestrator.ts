@@ -1604,6 +1604,7 @@ export class OrchestratorAgent extends PortThink {
         await autoRenewETradeTokens(this.scheduledCallbacksContext(), payload);
         return { outcome: "success", descriptor: "token renewal complete" };
       },
+      { audit: (type, agent, payload) => this.audit(type, agent, payload) },
     );
   }
 
@@ -1628,6 +1629,7 @@ export class OrchestratorAgent extends PortThink {
       payload,
       schedule,
       () => runWorkflowStage(this.scheduledCallbacksContext(), payload, schedule),
+      { audit: (type, agent, payload) => this.audit(type, agent, payload) },
     );
   }
 
@@ -1662,6 +1664,7 @@ export class OrchestratorAgent extends PortThink {
       payload,
       schedule,
       () => autonomousMarketScreen(this.scheduledCallbacksContext(), payload),
+      { audit: (type, agent, payload) => this.audit(type, agent, payload) },
     );
   }
 
@@ -1690,6 +1693,7 @@ export class OrchestratorAgent extends PortThink {
       payload,
       schedule,
       () => autonomousGoalScreen(this.scheduledCallbacksContext(), payload),
+      { audit: (type, agent, payload) => this.audit(type, agent, payload) },
     );
   }
 
@@ -1837,6 +1841,7 @@ export class OrchestratorAgent extends PortThink {
         }
         return outcome;
       },
+      { audit: (type, agent, payload) => this.audit(type, agent, payload) },
     );
   }
 
@@ -1849,6 +1854,7 @@ export class OrchestratorAgent extends PortThink {
       payload,
       schedule,
       () => autonomousStrategyDiscovery(this.scheduledCallbacksContext(), payload),
+      { audit: (type, agent, payload) => this.audit(type, agent, payload) },
     );
   }
 
@@ -1865,6 +1871,7 @@ export class OrchestratorAgent extends PortThink {
         await collectIvHistory(this.scheduledCallbacksContext(), payload);
         return { outcome: "success", descriptor: "IV collection complete" };
       },
+      { audit: (type, agent, payload) => this.audit(type, agent, payload) },
     );
   }
 
@@ -1891,6 +1898,7 @@ export class OrchestratorAgent extends PortThink {
         await expireStaleOrderDraft(this.scheduledCallbacksContext(), payload);
         return { outcome: "success", descriptor: "stale order draft expired" };
       },
+      { audit: (type, agent, payload) => this.audit(type, agent, payload) },
     );
   }
 
@@ -1987,6 +1995,7 @@ export class OrchestratorAgent extends PortThink {
         await executeAsyncJob(this.asyncJobsContext(), { jobId: payload.jobId });
         return { outcome: "success", descriptor: "async job executed" };
       },
+      { audit: (type, agent, payload) => this.audit(type, agent, payload) },
     );
   }
 

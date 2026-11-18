@@ -242,7 +242,7 @@ itself is the umbrella, not a record.
 | S3 | Tracing | #2808 | Trace spine: `traceparent` + D1 `agent_mesh_trace_hops` + `GET /api/traces`. OTel spans are the instrumentation; #2808's harmonization program stays parked. | **Built** (OTel span instrumentation merged; the mesh spine is Live, proof pending) |
 | S4 | Error-reporting | #5083 | One owner + one alerting path (`src/observability/otelAlerting.ts`, `createAlertingPort`). Consumes logs/metrics/audit; never replaces them. Slack (SCREENER_SLACK_CHANNEL) AND email (CHANNEL_EMAIL_PRINCIPALS), both. First consumers: sweep stuck-run, cap alert, CI failure alerts. Placeholder rules (S7 defines the real catalog). | **Built** |
 | S5 | Audit | #5084 | One audit store: the canonical store is the IAAA audit store (contract `src/data/auditLogPorts.ts`, `recordAuditEvent` in `src/security/iaaaAudit.ts`, wiring `createWiredAuditStore` in `src/security/iaaaAuditStore.ts`, SessionStore DO `audit-append` on `iaaa-audit:` keys). The audit-append client is single-sourced in `createAuditLogStore` (`src/data/auditLogStoreImpl.ts`); `createAtomicAuditStore` is a thin adapter over it. Decision + evidence: `docs/architecture/security/audit-canonical-store-5084.md`. The #1688 report family is a projection of different events, not a duplicate; the Audit Vault page reads the older `mas_events` record (own decision, #5264). | **Built** |
-| S6 | Recording | #5085 | One runs ledger / run-row model (the #4002 rule). Reconciles runs ledger vs Audit Vault vs Loop status into one source of truth for "did the run happen". | **Planned** (the ledger is Live) |
+| S6 | Recording | #5085 | One runs ledger / run-row model (the #4002 rule). Reconciles runs ledger vs Audit Vault vs Loop status into one source of truth for "did the run happen": the ledger is the source of truth, the Audit Vault records authorisation/attribution, the Loop status reads the ledger (`src/services/stockCopilotLedger.ts`). A failed ledger write is named through one shared namer (`nameLedgerWriteFailure`, audit + coded OBS-1020). Decision + evidence: `docs/architecture/observability/recording-one-ledger-5085.md`. | **Built** |
 | S7 | Coded messages + externalized config | #5086 | One message catalog (stable `OBS-####` codes + severity per message) and one config port. All thresholds, severities, retention, sampling, and the catalog live in config. | **Planned** |
 | S8 | Dashboard | #5087 | One dashboard surfacing ALL areas in one view. Health + SLOs surface here as metric thresholds. | **Planned** |
 | S9 | AOP alignment | #5088 | One aspect per capability (`src/observability/aspects.ts`), applied at boundaries. Eliminates per-module re-implementation of telemetry hooks. | **Planned** |
@@ -628,7 +628,7 @@ the tenant-admin (tenant level, §8).
   canonical store is decided with evidence, and the other layer is
   deprecated in rename form (gitops §22), never deleted.
 
-### 6.6 Recording — Live (ledger) / Planned (reconciliation, S6)
+### 6.6 Recording — Live (ledger + reconciliation, S6)
 
 - **What it is.** Persisting a job/run's result (run row, dataset,
   artifact) so it can be read later. Owner: the runs ledger / run
@@ -644,10 +644,15 @@ the tenant-admin (tenant level, §8).
 - **What action it drives.** "Did the run happen?" — the runs ledger
   is the source of truth for that question. A missing row for a run
   that should have happened is itself the finding (see #4001).
-- **Status.** **Live** (the ledger + the #4002 fixes). **Planned** —
-  S6 (#5085) reconciles the runs ledger vs the Audit Vault vs the
-  Loop status into one source of truth, so the three views cannot
-  disagree about whether a run happened.
+- **Status.** **Live** (the ledger + the #4002 fixes + the S6
+  reconciliation, #5085). S6 (#5085) reconciled the runs ledger vs
+  the Audit Vault vs the Loop status into one source of truth: the
+  ledger decides "did the run happen", the Audit Vault records who
+  authorised it, and the Loop status reads the ledger (lastCycle is
+  a projection of the newest copilot cycle ledger row; neverExecuted
+  is simply "no ledger row"). A failed ledger write is named through
+  one shared namer (audit + coded OBS-1020). Decision + evidence:
+  `docs/architecture/observability/recording-one-ledger-5085.md`.
 
 ### 6.7 Coded messages — Planned (S7); codes exist in places today
 

@@ -75,7 +75,7 @@ import {
   copilotCycleLedgerOutcome,
   type CopilotNonDeclarationCause,
 } from "../../services/scheduleWatchdog";
-import { recordScheduleCallbackRun } from "./scheduleCallbackRunRecords";
+import { nameLedgerWriteFailure, recordScheduleCallbackRun } from "./scheduleCallbackRunRecords";
 import { TradingPlatformRegistry } from "../../trading";
 
 /** The one code-declared task this slice arms. */
@@ -411,7 +411,13 @@ export async function runStockCopilotCycleForInstance(
           ? { universeFallbackReason: universeResolution.reason }
           : {}),
       });
-      return copilotCycleLedgerOutcome(result.status, result.refusal);
+      // Issue #5085 (S6): the outcome class rides the ledger row —
+      // the descriptor names traded vs no trade so the Loop status
+      // can render the panel badge from the ledger row alone.
+      return copilotCycleLedgerOutcome(result.status, result.refusal, {
+        entriesPlaced: result.entriesPlaced,
+        exitsPlaced: result.exitsPlaced,
+      });
     },
     {
       // Issue #4001 (follow-up): the 13:05/14:05 firings ran cleanly
@@ -419,18 +425,14 @@ export async function runStockCopilotCycleForInstance(
       // failures — so a production-only write failure is named here as
       // an audit event instead of vanishing. The next firing either
       // leaves the row or names the error.
-      onRecordFailure: (failure) => {
-        try {
-          ctx.audit("stock_copilot.ledger_write_failed", "orchestrator", {
-            code: "ledger_write_failed",
-            taskId: taskCtx.taskId,
-            jobId: failure.jobId,
-            error: failure.error,
-          });
-        } catch {
-          // Reporting a failed record must never break the firing.
-        }
-      },
+      // Issue #5085 (S6): the shared namer replaces the inline
+      // audit-only hook — same event name and payload shape (taskId
+      // included), plus the coded OBS-1020 log line.
+      onRecordFailure: nameLedgerWriteFailure(
+        ctx.audit,
+        "stock_copilot.ledger_write_failed",
+        { taskId: taskCtx.taskId },
+      ),
     },
   );
 }

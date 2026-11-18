@@ -94,7 +94,10 @@ import {
 import { evaluateStockCopilotStrategy } from "../../services/stockCopilotEvaluation";
 import { summarizeLearnings } from "../../services/stockCopilotAgenticLoop";
 import { introspectStockCopilot } from "../../services/stockCopilotIntrospection";
-import { hasCopilotCycleLedgerRows } from "../orchestrator/meshStockCopilotDoor";
+import {
+  latestCopilotCycleLedgerRow,
+  projectCopilotLedgerRowToLastCycle,
+} from "../../services/stockCopilotLedger";
 import { readCopilotCycleDispatchProbe } from "../orchestrator/scheduledTasksCopilot";
 import {
   copilotChannelsSettingKey,
@@ -279,15 +282,20 @@ export async function handleStockCopilotRoutes(
         commercial: ctx.commercial,
       });
       const rawActivity = activity.listActivity(userLogin, ACTIVITY_LIMIT);
-      const lastCycle =
-        rawActivity.length > 0
-          ? (rawActivity[0] as unknown as Record<string, unknown>)
-          : null;
+      // Issue #5085 (S6): the runs ledger is the source of truth for
+      // "did the run happen" — lastCycle is a projection of the
+      // newest copilot cycle ledger row, never the activity table.
+      // The activity list stays as the "Cycle activity" detail feed.
+      const ledgerRow = latestCopilotCycleLedgerRow(ctx.sql);
+      const lastCycle = ledgerRow
+        ? (projectCopilotLedgerRowToLastCycle(ledgerRow) as unknown as Record<string, unknown>)
+        : null;
       // Issue #3899 (RC3): "live" means a cycle has run, not just that
-      // the gates pass — with no activity record and no ledger row the
-      // copilot has never executed, and the status says so.
-      const neverExecuted =
-        lastCycle === null && !hasCopilotCycleLedgerRows(ctx.sql);
+      // the gates pass — with no ledger row the copilot has never
+      // executed, and the status says so. (S6: the ledger row alone
+      // decides this now; an activity record with no ledger row is
+      // detail, not proof the run happened.)
+      const neverExecuted = lastCycle === null;
       // Issue #4001 (follow-up): the dispatch-boundary probe — the
       // last firing the handler actually entered, and the last reason
       // the task was not declared, so a silent firing is diagnosable

@@ -34,6 +34,9 @@ import {
 } from "../src/data/createStockCopilotStorePorts";
 import { StockCopilotPositionStore } from "../src/services/stockCopilotStore";
 import { COPILOT_SESSIONS } from "../src/services/stockCopilotSessions";
+import { SqlJobRunRecordStore } from "../src/data/doSqliteJobRunRecordAdapter";
+import { buildJobRunRecord } from "../src/services/jobRunRecords";
+import { STOCK_COPILOT_TASK_ID } from "../src/agents/orchestrator/scheduledTasksCopilot";
 
 /** Minimal SqlStorage shim over node:sqlite (same shape as #2528's harness). */
 class SqliteTestStorage {
@@ -135,6 +138,26 @@ async function seed(sql: SqliteTestStorage) {
     exits: [],
     detail: null,
   });
+  // Issue #5085 (S6): the Loop status reads the runs ledger, so
+  // the live lastCycle comes from a cycle ledger row, not the
+  // activity record above (the activity feed stays as detail).
+  const ledger = new SqlJobRunRecordStore(sql as never);
+  ledger.record(
+    buildJobRunRecord({
+      system: "orchestrator-schedule",
+      jobId: STOCK_COPILOT_TASK_ID,
+      operation: STOCK_COPILOT_TASK_ID,
+      started: "2026-11-04T15:00:00.000Z",
+      finished: "2026-11-04T15:00:00.000Z",
+      outcome: "success",
+      triggeredBy: "scheduled",
+      trigger: "scheduled",
+      scheduleId: STOCK_COPILOT_TASK_ID,
+      asyncJobId: null,
+      workflowId: null,
+      descriptor: "cycle complete: traded",
+    }),
+  );
   return { open };
 }
 

@@ -681,6 +681,44 @@ read the canonical store is its own decision, filed as
 [Out-of-Scope] issue #5264. S5 adds no coded messages and no
 new config; the catalog lands with S7.
 
+### Recording (S6 scope, issue #5085)
+
+One runs ledger, one source of truth for "did the run happen".
+The run-row model is `JobRunRecord`
+(`src/data/jobRunRecordPorts.ts`); the one write entry is
+`recordLedgerRun` (`src/services/unifiedLedger.ts`); the one
+physical ledger is the OrchestratorAgent Durable Object SQLite
+`job_run_records` table (`SqlJobRunRecordStore`). The D1
+`job_run_records` table is a read replica (projector-fed); the
+ScheduledAgent side stores the same shape under its DO KV key
+`"jobRunRecords"` (transport fallback, merged on read). A run
+with no artifact still records its job/run ids (the #4002 rule).
+
+The three views are reconciled: the runs ledger is the source of
+truth; the Audit Vault records who authorised the run (it still
+reads `mas_events` — S6 does NOT re-point it, that is #5264's
+decision); the Loop status reads the ledger — `lastCycle` is a
+projection of the newest copilot cycle ledger row
+(`src/services/stockCopilotLedger.ts`), `neverExecuted` is
+simply "no ledger row", and the activity table stays as the
+"Cycle activity" detail feed. The outcome class rides the ledger
+row (the cycle descriptor names traded vs no trade; refusal
+classes ride the detail, kept byte-identical for the #3788 pin).
+
+A failed ledger write is named through one shared namer,
+`nameLedgerWriteFailure`
+(`src/agents/orchestrator/scheduleCallbackRunRecords.ts`): every
+`recordScheduleCallbackRun` site wires it (copilot site:
+`stock_copilot.ledger_write_failed`; the nine orchestrator
+schedule-callback sites + the watchdog sweep's claim and
+heartbeat writes: `schedule.ledger_write_failed`). The namer
+audits the failure AND logs coded **OBS-1020**. Residuals: no
+`job_run_records` DO→D1 projector exists (d1-only runs-view
+mode does not show DO-written rows — a separate slice), and the
+ScheduledAgent goal-run recording sites do not yet wire the
+namer (their KV fallback stands). Full record:
+`docs/architecture/observability/recording-one-ledger-5085.md`.
+
 ### Coded messages (the S7 catalog seed)
 
 `OBS-1001` config invalid (fail-closed) · `OBS-1002` export
@@ -692,7 +730,9 @@ failed · `OBS-1013` traces free-tier guard (AE write limit
 reached) · `OBS-1014` alerting send failed · `OBS-1015`
 alerting destination missing · `OBS-1016` alerting free-tier
 guard (max alerts/day reached) · `OBS-1017` stuck-run alert ·
-`OBS-1018` cap-breach alert · `OBS-1019` CI failure alert.
+`OBS-1018` cap-breach alert · `OBS-1019` CI failure alert ·
+`OBS-1020` ledger write failed (a runs-ledger write failed and
+was named).
 Defined in one place
 (`src/observability/otelMessages.ts`); S7 adopts and expands it
 into the one message catalog.

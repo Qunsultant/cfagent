@@ -28,6 +28,7 @@ import {
   registerCopilot,
 } from "../src/client/chat/copilotRegistry";
 import { MeshDoorError } from "../src/agents/orchestrator/meshDoors";
+import { STOCK_COPILOT_TASK_ID } from "../src/agents/orchestrator/scheduledTasksCopilot";
 
 class MockSqlExecutor {
   private tables: Record<string, any[]> = {
@@ -35,6 +36,7 @@ class MockSqlExecutor {
     stock_copilot_activity: [],
     stock_copilot_control: [],
     mas_settings: [],
+    job_run_records: [],
   };
 
   exec(query: string, ...params: any[]): any[] {
@@ -104,11 +106,34 @@ class MockSqlExecutor {
       return this.tables.stock_copilot_activity.filter((r) => r.user_login === user);
     }
 
+    // Issue #5085 (S6): the Loop status reads the runs ledger, so
+    // the mock serves job_run_records rows (snake_case, as the
+    // SqlJobRunRecordStore's rowToRecord expects) for the
+    // latestByJob/listByJob SELECTs.
+    if (q.startsWith("SELECT") && q.includes("JOB_RUN_RECORDS")) {
+      if (q.includes("WHERE JOB_ID")) {
+        const jobId = params[0];
+        const limit = typeof params[1] === "number" ? params[1] : 1;
+        return this.tables.job_run_records
+          .filter((r) => r.job_id === jobId)
+          .sort((a, b) => String(b.started).localeCompare(String(a.started)))
+          .slice(0, limit);
+      }
+      const limit = typeof params[0] === "number" ? params[0] : 50;
+      return [...this.tables.job_run_records]
+        .sort((a, b) => String(b.started).localeCompare(String(a.started)))
+        .slice(0, limit);
+    }
+
     return [];
   }
 
   insertMockPosition(pos: any) {
     this.tables.copilot_positions.push(pos);
+  }
+
+  insertMockLedgerRun(run: any) {
+    this.tables.job_run_records.push(run);
   }
 
   insertMockActivity(act: any) {
@@ -172,6 +197,30 @@ describe("Issue #3513 Stock Copilot Chat Door", () => {
       action: "scan_complete",
       details: JSON.stringify({ symbolsScanned: 50, signalsFound: 1 }),
       created_at: new Date().toISOString(),
+    });
+    // Issue #5085 (S6): the Loop status reads the runs ledger, so
+    // the lastCycle comes from a cycle ledger row, not the activity
+    // record above (the activity feed stays as detail).
+    sql.insertMockLedgerRun({
+      system: "orchestrator-schedule",
+      job_id: STOCK_COPILOT_TASK_ID,
+      operation: STOCK_COPILOT_TASK_ID,
+      started: new Date().toISOString(),
+      finished: new Date().toISOString(),
+      outcome: "success",
+      triggered_by: "scheduled",
+      trigger_text: "scheduled",
+      schedule_id: STOCK_COPILOT_TASK_ID,
+      async_job_id: null,
+      workflow_id: null,
+      error_text: null,
+      detail: null,
+      descriptor: "cycle complete: no trade",
+      artifact_refs_json: null,
+      broker_id: null,
+      data_provider_id: null,
+      mode: null,
+      mode_source: null,
     });
 
     const ctx = createTestDoorContext(sql);

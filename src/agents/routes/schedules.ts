@@ -67,7 +67,7 @@ import {
 import { createBlobStore } from "../../services/blobStoreR2Adapter";
 import { pruneJobOutcomes } from "../../services/jobOutcomes";
 import { SqlJobRunRecordStore } from "../../data/doSqliteJobRunRecordAdapter";
-import { recordScheduleCallbackRun } from "../orchestrator/scheduleCallbackRunRecords";
+import { nameLedgerWriteFailure, recordScheduleCallbackRun } from "../orchestrator/scheduleCallbackRunRecords";
 import {
   buildSnapshotManifest,
   ORPHAN_SWEEP_PREFIX,
@@ -1097,6 +1097,15 @@ export async function handleSchedulesRoutes(
                 payload,
                 { id: scheduleId },
                 () => ctx.runScheduleCallback(callback, payload),
+                {
+                  // Issue #5085 (S6): a failed ledger write is named
+                  // (audit + coded OBS-1020) through the shared
+                  // namer instead of vanishing silently.
+                  onRecordFailure: nameLedgerWriteFailure(
+                    (type, agent, payload) => ctx.audit(type, agent, payload),
+                    "schedule.ledger_write_failed",
+                  ),
+                },
               );
             }
           },

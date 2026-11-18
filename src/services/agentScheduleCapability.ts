@@ -54,6 +54,7 @@ import { createKvMembershipStore } from "../security/iaaaMembershipStore";
 import { createKvPermissionDenialStore } from "../security/iaaaPermissionDenialStore";
 import { sessionStore } from "../security/session";
 import { buildJobRunRecord, type JobRunRecord } from "./jobRunRecords";
+import { recordLedgerRun } from "./unifiedLedger";
 import type { AgentScheduleItem } from "../types";
 import type { Env } from "../types";
 import { SqlJobRunRecordStore } from "../data/doSqliteJobRunRecordAdapter";
@@ -1468,8 +1469,11 @@ export function createAgentScheduleExecutorDepsForDo(
     config: resolveEnvironmentConfig(env).agentSchedule,
     nowMs: () => Date.now(),
     nowIso: () => new Date().toISOString(),
+    // Issue #5085 (S6): the one write entry — agent-schedule action
+    // rows go through recordLedgerRun (validate + store) like every
+    // other DO-SQLite writer, never a direct store.record call.
     recordLedger: (record) => {
-      ledgerStore.record(record);
+      recordLedgerRun(ledgerStore, record);
     },
     audit,
     pendingApprovals: createPendingScheduleApprovalPort(sql),

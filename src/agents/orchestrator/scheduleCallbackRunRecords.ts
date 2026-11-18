@@ -35,6 +35,9 @@ import {
 import { recordLedgerRun } from "../../services/unifiedLedger";
 import { buildLedgerLinkage } from "../../services/consolidatedScheduling";
 import type { ScheduledCallbackOutcome } from "./scheduledCallbacks";
+import { createStructuredLogger } from "../../observability/structuredLogger";
+import { createObservabilitySink } from "../../observability/createObservabilityPorts";
+import { OBS_LEDGER_WRITE_FAILED } from "../../observability/otelMessages";
 
 type OutcomeInput = ScheduledCallbackOutcome | void;
 
@@ -67,8 +70,80 @@ export interface RecordScheduleCallbackRunOptions {
   /**
    * Called (best-effort) when the ledger store throws, so a silent
    * production-only write failure is named instead of vanishing.
+   * When omitted and `audit` is present, the default is the shared
+   * namer `nameLedgerWriteFailure(audit,
+   * "schedule.ledger_write_failed")` — see below.
    */
   onRecordFailure?: (failure: ScheduleCallbackRecordFailure) => void;
+  /**
+   * Issue #5085 (S6) — the audit sink for the default failure
+   * namer. The nine orchestrator.ts sites (under the #992 line
+   * budget) pass this one field instead of a per-site hook; the
+   * copilot site passes an explicit `onRecordFailure` with its own
+   * event type instead. A site with neither gets the OBS-1020 log
+   * floor in `storeRecord` (named, never silent), just no audit
+   * event.
+   */
+  audit?: LedgerWriteFailureAudit;
+}
+
+/**
+ * Issue #5085 (S6, observability program #5080) — the ONE namer
+ * for a failed runs-ledger write. A failed write is always named
+ * twice: once as an audit event (the attributable record, with the
+ * job id and the store error) and once as a coded OBS-1020
+ * structured-log line (the queryable signal). Sites reach it two
+ * ways: an explicit `onRecordFailure` hook (the copilot site, with
+ * its own event type `stock_copilot.ledger_write_failed`), or the
+ * `audit` option on `recordScheduleCallbackRun`, which applies this
+ * namer by default with `schedule.ledger_write_failed`. A site with
+ * neither still gets the OBS-1020 log floor in `storeRecord`
+ * (named, never silent), just no audit event. The #4921 KV marker
+ * sink is the follow-up mechanism for naming a failure the SQL
+ * path cannot report at all; OBS-1020 names it on the audit/log
+ * path that exists today.
+ *
+ * The hook itself never breaks the callback: a throwing audit is
+ * swallowed, and the structured logger never fails its caller.
+ */
+export type LedgerWriteFailureAudit = (
+  type: string,
+  agent: "orchestrator",
+  payload: Record<string, unknown>,
+) => void;
+
+const ledgerWriteFailureLog = createStructuredLogger(
+  createObservabilitySink({}),
+  { component: "agents/orchestrator/scheduleCallbackRunRecords" },
+);
+
+export function nameLedgerWriteFailure(
+  audit: LedgerWriteFailureAudit,
+  eventType: string,
+  extra?: Record<string, unknown>,
+): (failure: ScheduleCallbackRecordFailure) => void {
+  return (failure) => {
+    try {
+      audit(eventType, "orchestrator", {
+        code: "ledger_write_failed",
+        jobId: failure.jobId,
+        operation: failure.operation,
+        error: failure.error,
+        ...(extra ?? {}),
+      });
+    } catch {
+      // Reporting a failed record must never break the callback.
+    }
+    ledgerWriteFailureLog.error(
+      "ledger.write_failed",
+      {
+        message: `[run-ledger] ledger write failed for job ${failure.jobId}: ${failure.error}`,
+        jobId: failure.jobId,
+        operation: failure.operation,
+      },
+      { errorCode: OBS_LEDGER_WRITE_FAILED },
+    );
+  };
 }
 
 function storeRecord(
@@ -80,20 +155,33 @@ function storeRecord(
     const store = new SqlJobRunRecordStore(sql);
     recordLedgerRun(store, { system: "orchestrator-schedule", ...record });
   } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
     // Recording never breaks the callback — but a swallowed store
     // failure is unobservable, so a caller that supplied a hook hears
-    // about it (best-effort; a throwing hook is swallowed too).
+    // about it (best-effort; a throwing hook is swallowed too). A
+    // caller with no hook still gets the OBS-1020 log floor below:
+    // named, never silent.
     if (onRecordFailure) {
       try {
         onRecordFailure({
           jobId: record.jobId,
           operation: record.operation,
           outcome: record.outcome,
-          error: err instanceof Error ? err.message : String(err),
+          error,
         });
       } catch {
         // Reporting a failed record must never break the callback either.
       }
+    } else {
+      ledgerWriteFailureLog.error(
+        "ledger.write_failed",
+        {
+          message: `[run-ledger] ledger write failed for job ${record.jobId}: ${error}`,
+          jobId: record.jobId,
+          operation: record.operation,
+        },
+        { errorCode: OBS_LEDGER_WRITE_FAILED },
+      );
     }
   }
 }
@@ -171,6 +259,14 @@ export async function recordScheduleCallbackRun(
     schedule,
     triggeredBy: resolveScheduleRunTrigger(payload),
   });
+  // Issue #5085 (S6) — the default namer: an explicit hook wins;
+  // otherwise an `audit` sink applies the shared namer, and a site
+  // with neither still gets the OBS-1020 log floor in storeRecord.
+  const onRecordFailure =
+    options?.onRecordFailure ??
+    (options?.audit
+      ? nameLedgerWriteFailure(options.audit, "schedule.ledger_write_failed")
+      : undefined);
   try {
     const outcome = normalize(await run());
     storeRecord(sql, {
@@ -186,7 +282,7 @@ export async function recordScheduleCallbackRun(
       ...(outcome.detail ? { detail: outcome.detail } : {}),
       ...(outcome.descriptor ? { descriptor: outcome.descriptor } : {}),
       ...(outcome.artifactRefs ? { artifactRefs: outcome.artifactRefs } : {}),
-    }, options?.onRecordFailure);
+    }, onRecordFailure);
   } catch (err) {
     storeRecord(sql, {
       jobId,
@@ -198,7 +294,7 @@ export async function recordScheduleCallbackRun(
       ...payloadProvenance(payload),
       ...linkage,
       error: err instanceof Error ? err.message : String(err),
-    }, options?.onRecordFailure);
+    }, onRecordFailure);
     throw err;
   }
 }
