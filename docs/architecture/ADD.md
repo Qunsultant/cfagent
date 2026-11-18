@@ -117,6 +117,10 @@ decision is in [Packaging and deployment](#packaging-and-deployment).
   adapter only; `@cloudflare/workers-oauth-provider` out for the
   shared-server role). One API server (#5387) and one MCP server
   (#5386), one security model (IAAA).
+- Canonical endpoints ([ADR 0034](./adr/0034-cbo-api-layer.md) D12):
+  the one MCP server is served at `https://mcp.openaimp.com/mcp`
+  and the one API server is served at `https://api.openaimp.com/api`.
+  DNS/route setup is part of the one-server build scope.
 - Container shape owner: #5277 (J-stack portability, CAIO lane, under
   #5272) — Dockerfile + compose running the Worker under workerd; CI
   runs the engine suite against it. This document records the
