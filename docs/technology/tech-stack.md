@@ -114,3 +114,68 @@ caught real defects), the audit chain and per-statement audit
 events, and the schema pins / fixture hashes. Bespoke-by-design
 pieces are named here so no future survey mistakes them for
 replaceable custom code.
+
+## IROS enablement — FOSS technologies the validated research names (#5520)
+Condensed from docs/architecture/enterprise/agentic-IROS.md §9 (full table, maturity, runtime fit, and sources there). License key: [L] license text/header/announcement directly read; [R] reported by a secondary comparison citing the repo (LICENSE file not directly opened — verify before legal reliance); [U] unverified/disputed. No license statement here is legal advice; verify the LICENSE file at the pinned version before distribution or commercial reliance. Research basis: public sources read 2026-11-18, mostly search listings plus 3 pages read in full; no live verification performed.
+Capability	Technology	License	Verdict
+Durable orchestration	Temporal (server + SDKs)	MIT [R]	ADOPT as durable core (self-host); Temporal Cloud is a proprietary managed service. Server/container, not edge-native.
+Durable orchestration	DBOS Transact	MIT [R]	ADOPT if Postgres-centric; Conductor (hosted) is proprietary. Server/container.
+Durable orchestration	Restate (server)	BSL 1.1 → Apache-2.0 after 4 yrs [L]	ADAPT with counsel — source-available, not FOSS; SDKs MIT [R]. Server/container.
+Durable orchestration	Inngest (server/CLI)	SSPL → Apache-2.0 after 3 yrs [R]; SDKs Apache-2.0 [R]	ADAPT — source-available server; adopt SDKs + hosted, or accept SSPL.
+Durable orchestration	Cloudflare Workflows engine	Proprietary hosted service [R]	GAP — no FOSS equivalent of the hosted engine; proprietary edge layer if on Cloudflare.
+Durable orchestration	Cloudflare Agents SDK + Think (agents, @cloudflare/think)	MIT [R] for Agents SDK; Think license [U]	ADAPT — MIT code, platform-locked runtime; verify Think license from repo. Edge only.
+Durable orchestration	workerd	Apache-2.0 [L]	ADOPT for local/dev/edge-compatible runtime. Not a secure sandbox per Cloudflare.
+Durable orchestration	workers-sdk / wrangler / miniflare	MIT OR Apache-2.0 [R]	ADOPT. Dev tooling.
+Durable orchestration	AWS Step Functions	Proprietary	GAP — no FOSS equivalent; adopt only if AWS-native.
+Streaming/messaging	Apache Kafka	Apache-2.0 [R]	ADOPT for high-throughput streams. Server/container.
+Streaming/messaging	Redpanda (core)	BSL 1.1 → Apache-2.0 after 4 yrs [R]	ADAPT with counsel — source-available. Server/container.
+Streaming/messaging	NATS	Apache-2.0 [R]	ADOPT for low-latency messaging. Server/container.
+Streaming/messaging	Apache Pulsar	Apache-2.0 [R]	ADOPT if multi-tenancy/geo-replication needed. Server/container.
+Data layer	PostgreSQL	PostgreSQL License [R]	ADOPT as system of record. Server/container; reachable from Workers via HTTP drivers.
+Data layer	SQLite	Public domain [R]	ADOPT for embedded/edge state (D1/Durable Object SQLite).
+Data layer	libSQL / Turso	MIT [R]	ADOPT/ADAPT for edge SQLite.
+Data layer	DuckDB	MIT [R]	ADOPT for analytics/backtest compute. Server/container (Wasm fit unverified).
+Data layer	ClickHouse	Apache-2.0 [R]	ADOPT for tick/columnar analytics. Server/container.
+Data layer	Redis	Tri-license RSALv2/SSPLv1/AGPLv3 (8.0+) [R]	ADAPT/AVOID as FOSS — use Valkey instead.
+Data layer	Valkey	BSD-3-Clause [R]	ADOPT as Redis-compatible FOSS cache/queue. Server/container.
+Data layer	Dragonfly	BSL 1.1 [R]	ADAPT with counsel — source-available. Server/container.
+Data layer	pgvector	PostgreSQL License [R]	ADOPT if already on Postgres, up to a few M vectors. Server/container.
+Data layer	Qdrant	Apache-2.0 [R]	ADOPT for dedicated vector search. Server/container.
+Data layer	Milvus	Apache-2.0 [R]	ADOPT for billion-scale vectors. Server/container.
+Data layer	Chroma	Apache-2.0 [R]	ADOPT for dev/small RAG only. Server/container.
+Data layer	Weaviate (core)	BSD-3-Clause [R]	ADAPT (open-core). Server/container.
+Data layer	Drizzle ORM	Apache-2.0 [R, disputed] — MIT claimed for drizzle-kit / in two 2026 comparisons; verify LICENSE file	ADOPT for TypeScript edge/server data access, pinned version. Edge-native.
+Agent frameworks	LangGraph	MIT [R]	ADOPT for graph agents; pair with Temporal/DBOS for durability. Server/container.
+Agent frameworks	CrewAI	MIT [R]	ADOPT/ADAPT for role-based crews. Server/container.
+Agent frameworks	Mastra	Apache-2.0 except ee/ (Enterprise Edition License 2.0) [R]	ADAPT — open-core; avoid ee/. Server/container.
+Agent frameworks	AutoGen	MIT code / CC-BY-4.0 docs [R]; archived by Microsoft	DO NOT ADOPT AutoGen; evaluate Microsoft Agent Framework (MIT [R]).
+Agent frameworks	Cloudflare Agents SDK	MIT [R]	ADAPT (platform-locked). Edge only.
+Observability	OpenTelemetry (API/SDK/Collector)	Apache-2.0 [L]	ADOPT. SDKs edge-capable; Collector server/container.
+Observability	Prometheus	Apache-2.0 [R]	ADOPT. Server/container.
+Observability	Grafana / Loki / Tempo / Mimir / Pyroscope	AGPL-3.0 since Apr 2021 [R]	ADAPT with counsel — AGPL; Alloy (agent) Apache-2.0 [R]. Server/container.
+Auth/identity/secrets	Keycloak	Apache-2.0 [R]	ADOPT for IdP. Server/container.
+Auth/identity/secrets	Ory (Hydra/Kratos etc.)	Apache-2.0 [R]	ADOPT for cloud-native identity. Server/container.
+Auth/identity/secrets	OpenBao (Vault fork)	MPL-2.0 [R]	ADOPT for secrets. Server/container.
+Auth/identity/secrets	HashiCorp Vault	BSL 1.1 since 2023 [R]	ADAPT/AVOID as FOSS — prefer OpenBao.
+Flags/config	OpenFeature (+ flagd)	Apache-2.0 [R]	ADOPT as the vendor-neutral flag standard.
+Flags/config	Flagship (Cloudflare)	Proprietary hosted service	GAP: no FOSS Flagship — use OpenFeature/flagd elsewhere. ADOPT if on Cloudflare.
+Flags/config	Unleash	AGPLv3 from v8.0.0 [L]; official Docker images Apache-2.0	ADAPT — run unmodified Docker image (Apache-2.0) or accept AGPLv3. Server/container.
+Quant/backtesting	vectorbt	Apache-2.0 + Commons Clause [R]	ADAPT with counsel — not FOSS under OSI definition. Server/container.
+Quant/backtesting	Backtrader	GPL-3.0 [R]; stale upstream	AVOID for new work (GPL + stale); migrate.
+Quant/backtesting	Zipline-reloaded	Apache-2.0 [R]	ADOPT for Quantopian-style equities/futures backtests. Server/container.
+Quant/backtesting	QuantLib	BSD-3-Clause [R]	ADOPT for pricing/Greeks. Server/container.
+Quant/backtesting	LEAN (QuantConnect)	Apache-2.0 [R]	ADOPT as research→live engine. Server/container.
+Quant/backtesting	NautilusTrader	LGPL-3.0 [R]	ADAPT (LGPL obligations). Server/container.
+Quant/backtesting	TA-Lib	BSD-2 [R]	ADOPT for indicators. Server/container.
+Broker/market-data clients	alpaca-py (official)	Apache-2.0 [L]	ADOPT. Server/container (also JS/Go/.NET/Java official SDKs, Apache-2.0 [R]).
+Broker/market-data clients	ib_async (community)	BSD-2-Clause [R]	ADOPT for IBKR socket API; requires TWS/Gateway; not official/affiliated. Server/container.
+Broker/market-data clients	IBKR official ibapi	[U] — license not verified	VERIFY license from IBKR distribution before use. Server/container + TWS/Gateway.
+Broker/market-data clients	ibind (IBKR Client Portal REST/WS)	Apache-2.0 [R]	ADOPT/ADAPT for REST-style IBKR access. Server/container.
+Broker/market-data clients	schwab-py (community)	MIT [R]	ADOPT/ADAPT; verify against current Schwab Trader API. Server/container.
+Broker/market-data clients	E*TRADE clients	Mixed/community wrappers; pyetrade license [U]	GAP: no verified official FOSS E*TRADE client — build/adapt wrapper, verify license.
+Broker/market-data clients	ccxt (crypto exchanges)	MIT [R]	ADOPT for crypto venues; does not cover equities/options. Server/container.
+Broker/market-data clients	yfinance (unofficial Yahoo)	Apache-2.0 [R]	ADAPT with caution — no SLA, rate-limited, delayed; Yahoo has no official public API since 2017.
+Q8-driven extras	Feature store / experiment tracking	[U] — Feast/MLflow commonly cited, not verified	GAP/VERIFY — research before adopting.
+Q8-driven extras	Eval harness (LLM agents)	[U] — none verified	GAP/VERIFY — FinLake-Bench/FINSABER are benchmarks, not a shipped harness.
+Q8-driven extras	FIX engine	[U] — QuickFIX/J etc. commonly cited, not verified	GAP/VERIFY.
+Explicit NO-FOSS gaps: (1) consolidated real-time market data (SIP/OPRA feeds + exchange entitlements); (2) exchange/venue connectivity and matching; (3) broker custody, accounts, and execution itself; (4) index membership + GICS licensing (S&P DJI / MSCI / FTSE Russell / Nasdaq); (5) Cloudflare Workflows engine, Temporal Cloud, AWS Step Functions hosted control planes; (6) Flagship hosted flag service; (7) official E*TRADE FOSS client; (8) licensed fundamentals/sentiment datasets as such (the clients may be FOSS; the data is not).

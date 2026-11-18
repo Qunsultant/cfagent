@@ -1055,6 +1055,28 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/client/options/RawContractsScreener.tsx", "etrade", 2],
   ["src/client/options/StrategyDiscoveryPanel.tsx", "etrade", 19],
   ["src/client/options/flows/OptionsFlowsHub.tsx", "etrade", 3],
+  // #5520 HISTORICAL (placed AFTER the first 188 rows: the PLATFORM
+  // population above must stay fixed): the agentic IROS architecture
+  // record + the moved 2026-10-26 record name the providers/brokers
+  // they survey. They are dated records — neutralizing the names
+  // would falsify the record. Same disposition as the survey rows
+  // (#4802): the providers are the documents' subject, not platform
+  // framing. The old docs/architecture/iros.md row is deliberately
+  // RETAINED: it now measures 0 (a shrink, which passes).
+  ["docs/architecture/enterprise/agentic-IROS.md", "etrade", 19],
+  ["docs/architecture/enterprise/agentic-IROS.md", "public.com", 5],
+  ["docs/architecture/enterprise/agentic-IROS.md", "alpaca", 34],
+  ["docs/architecture/enterprise/agentic-IROS.md", "schwab", 15],
+  ["docs/architecture/enterprise/agentic-IROS.md", "fidelity", 4],
+  ["docs/architecture/enterprise/agentic-IROS.md", "robinhood", 4],
+  ["docs/architecture/enterprise/agentic-IROS.md", "interactive brokers / ibkr", 22],
+  ["docs/architecture/enterprise/agentic-IROS.md", "tradier", 1],
+  ["docs/architecture/enterprise/agentic-IROS.md", "tastytrade", 11],
+  ["docs/architecture/enterprise/agentic-IROS.md", "yahoo", 13],
+  ["docs/architecture/enterprise/agentic-IROS.md", "nasdaq", 18],
+  ["docs/architecture/enterprise/agentic-IROS.md", "polygon", 16],
+  ["docs/architecture/enterprise/agentic-IROS.md", "finnhub", 10],
+  ["docs/architecture/enterprise/iros.md", "etrade", 1],
   ["src/client/options/serverDiscovery.ts", "etrade", 1],
   // #4430 PLATFORM (S2 client copy): the 409 remediation message names the
   // provider it tells the user to switch to — the message is the action.
@@ -2443,11 +2465,18 @@ const BASELINE: Array<[string, string, number]> = [
   // Naming the provider is the adapters' job; neutralizing the row would
   // remove the inventory the tech-stack doc exists to record. Totals move
   // 1335/10877 -> 1340/10882.
-  ["docs/technology/tech-stack.md", "etrade", 1],
+  // #5520 INTEGRATION (FOSS enablement extension): the appended table
+  // names the providers/brokers its rows survey — the inventory the
+  // extension exists to record, as in #5404. Counts re-measured on
+  // the composed file: etrade 1->3, alpaca 1->2, yahoo 1->2,
+  // nasdaq 1->2, public.com unchanged, schwab + ibkr new.
+  ["docs/technology/tech-stack.md", "etrade", 3],
   ["docs/technology/tech-stack.md", "public.com", 1],
-  ["docs/technology/tech-stack.md", "alpaca", 1],
-  ["docs/technology/tech-stack.md", "yahoo", 1],
-  ["docs/technology/tech-stack.md", "nasdaq", 1],
+  ["docs/technology/tech-stack.md", "alpaca", 2],
+  ["docs/technology/tech-stack.md", "yahoo", 2],
+  ["docs/technology/tech-stack.md", "nasdaq", 2],
+  ["docs/technology/tech-stack.md", "schwab", 1],
+  ["docs/technology/tech-stack.md", "interactive brokers / ibkr", 3],
 ];
 
 const BASELINE_MAP = new Map(BASELINE.map(([f, t, c]) => [`${f}\t${t}`, c]));
