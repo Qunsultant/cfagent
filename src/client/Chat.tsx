@@ -1054,7 +1054,7 @@ export function Chat({ user }: { user: User }) {
     // not a retained trading-hub tab, so it lives in TAB_CONTENT
     // like the other standalone pages; its cards link to the
     // existing surfaces, they do not re-render them.
-    "options-screener":
+    "options-screener": (
       new URLSearchParams(routeSearch).get("view") === "ooda" ? (
         <OodaResearchPage userLogin={user.login} />
       ) : (
@@ -1064,7 +1064,8 @@ export function Chat({ user }: { user: User }) {
             setTbdMenuOpen(false);
           }}
         />
-      ),
+      )
+    ),
     "platform-admin": (
       <PlatformAdminPage
         user={{ login: user.login, name: user.name, avatar: user.avatar }}
