@@ -8,6 +8,12 @@
   doc is the full detail behind it)
 - Design base: `origin/main` at `46b6537d6` (2026-11-18). All file:line
   citations were re-verified against this base unless marked otherwise.
+- Amendment 2026-11-18 (same day, before any slice builds on this
+  design): §14 records the owner one-server alignment directive (one
+  API server #5387, one MCP server #5386, one security model, Workers +
+  Docker portability). §§3/5/6/7/10/13 carry the conforming edits the
+  amendment required; the original decisions stand except where §14
+  explicitly supersedes part of them.
 - Inventory basis: the 2026-11-18 parity inventory, basis `cd094b6f`.
   Where the design base drifted from the inventory basis, the drift is
   noted at the citation (handler line count, lifecycle route lines).
@@ -32,6 +38,10 @@ Reading rules:
 - §7 carries a REQUIRED, UNPERFORMED dashboard check with a STOP rule.
   It was not performed by the design author (no dashboard access) and
   must not be read as verified.
+- §14 carries the one-server alignment: the CBO layer is the commercial
+  surface ON the one shared API/MCP servers (#5387/#5386). No CBO slice
+  builds a second server, router, registry, auth chain, or validation
+  layer.
 - §12 records exactly what was verified and what was not. Nothing in
   this doc claims a live, runtime, or signed-in verification.
 
@@ -207,7 +217,7 @@ exists today; dispatch is sequential if-chains + the path catalog.
 | Routing | Hono 4.13.19 (MIT, 2026-11-16; ~7.9 KB gzip) — DECIDED by owner ("use hono fully": routing + middleware + ecosystem, not a shim) | Web-standards framework built for Workers; middleware + OpenAPI ecosystem; tiny bundle; actively maintained | itty-router (settled by the owner decision; minimal, no middleware/OpenAPI ecosystem depth); hand-rolled dispatch (replaced by the migration); Hono v5 (5.0.0-rc.1 — REJECTED, pre-release; re-evaluate at GA) | None — FOSS wins. Handlers stay portable behind the gateway port (no Hono imports in handler logic). |
 | Validation | zod ^4.1.8 (ALREADY a dependency) + `@hono/zod-validator` 0.9.1 (MIT; requires hono >=4.11.2, zod ^4.2.1 — slice checks the peer fit; a zod minor bump may be needed) | zod is already imported across `src/`; the validator is the official Hono integration | Hand-rolled validators (replaced by the G-4 slice); zod without Hono integration (duplicates the middleware) | None — reuse wins. The G-4 slice extends the existing validators onto zod schemas. |
 | Tokens / JWT | jose 6.2.17 (MIT, 2026-11-09; zero deps, tree-shakeable ESM, Workers-listed) behind the token-verification port | Full JOSE (JWS/JWE/JWK/JWT/JWKS), production-grade, Workers-safe, actively maintained; algorithm-pinned verification | Hono's built-in JWT middleware (REJECTED as the verifier: reported algorithm-confusion history, CVE-2026-22817/22818, fixed 4.11.4+; minimal JOSE coverage; Hono-coupled). A thin Hono middleware calls the port; jose verifies. | None — FOSS wins. One verification implementation (the port adapter). |
-| OAuth 2.1 provider | `@cloudflare/workers-oauth-provider` v1.2.4 (MIT; requires KV namespace `OAUTH_KV`; reported caveats: KV eventual-consistency — double code exchange under concurrency, revocation not final; 1.2.0 broke some clients) — EVALUATED, NOT ADOPTED in v1 | Only for the "being an OAuth provider" role (issuing tokens to third-party/MCP clients). External OAuth access is OUT of the API-layer program's scope; issuance is a future surface (own issue + the owner's call). The validation side (RFC 9728) is defined now. | Any other OAuth server library (duplicates the Cloudflare-native piece); building an AS by hand (rejected — FOSS-first when the surface is approved) | None. Issuance deferred; no custom AS code. |
+| OAuth 2.1 provider | OPEN SURVEY EVALUATION — no piece named (amendment 2026-11-18, §14): the portable provider must be runtime-agnostic, keep its store behind the existing port/adapter pattern, and cover OAuth 2.1 + OIDC, PAR/RAR/DPoP per the §6 matrix. `@cloudflare/workers-oauth-provider` v1.2.4 (MIT; requires KV namespace `OAUTH_KV`; reported caveats: KV eventual-consistency — double code exchange under concurrency, revocation not final; 1.2.0 broke some clients) was EVALUATED and is OUT for the shared-server role (Workers-only + KV-bound — violates the portability rule, §14). | Only for the "being an OAuth provider" role (issuing tokens to third-party/MCP clients). External OAuth access is OUT of the API-layer program's scope; issuance is a future surface (own issue + the owner's call). The validation side (RFC 9728) is defined now. | Any Workers-only or store-coupled OAuth server library (violates the portability rule); building an AS by hand (rejected — FOSS-first when the surface is approved) | None. Issuance deferred; no custom AS code; no provider library named or adopted before the survey concludes. |
 | OpenAPI generation | chanfana 3.4.0 (MIT, Cloudflare; Zod v4, OpenAPI 3/3.1, `fromHono` wrapper; production-proven on the Radar 2.0 public API) | Cloudflare-maintained, Workers-first; `fromHono` extends the existing app WITHOUT touching old routes (strangler fit); generates the ONE spec artifact from the zod schemas | `@hono/zod-openapi` 1.6.3 (Hono-native; requires the OpenAPIHono app shape wholesale; less incremental for the strangler migration); hand-written OpenAPI (duplicates the zod schemas — rejected) | None — FOSS wins. The generator feeds the ONE spec artifact (the `openapiSpec.ts` spike extension), never a second spec. |
 | Logging / telemetry | EXISTING wins: OpenTelemetry SDKs (already dependencies) + module logger seam (`src/observability/structuredLogger.ts`, #3515) + outcome catalog | Working capability present; a FOSS logging library would duplicate it | Any new FOSS log formatting/transport library (duplicates the working seam — OUT) | None — existing wins. |
 | Coded errors / messages | EXISTING wins: outcome catalog (`src/outcomes/outcomeCatalog.json` + `outcomeAspects.ts`) + `codedOutcomeResponse` (the coded-message AOP aspect) | The aspect pattern + mechanism already exist and are the design's rule | Any FOSS error-format library (duplicates the aspect — OUT) | None — existing wins. The aspect pattern stays; slices extend the catalog. |
@@ -216,7 +226,7 @@ exists today; dispatch is sequential if-chains + the path catalog.
 | Audit | EXISTING wins: audit funnel (`ctx.audit`, orchestrator funnel) + obligations (`src/security/obligations.ts`, audit-as-condition) | Working capability present | Any FOSS audit library (duplicates the funnel — OUT) | None — existing wins. |
 | Identity / authorization | EXISTING wins: IAAA (identityBinding, authorization/PDP, memberships, ExecutionContext, agentAccess) — enhanced by the GAP slices, never replaced | The designed model; FOSS identity would duplicate it | Any auth framework (better-auth, Clerk, Auth0 — OUT, duplicates IAAA) | None — existing wins; gaps closed by enhancement (GAP-1–GAP-5). |
 | Data access | EXISTING wins: CDO ports/adapters (ADR 0002, Drizzle D1 + in-memory adapters, catalogues, migration runner) | The binding data approach | Any other ORM/query builder (duplicates the CDO foundation — OUT) | None — existing wins. |
-| Edge gateway | Cloudflare API Shield schema validation, FREE tier (see §7) — DECIDED by owner, with ports/adapters | Managed edge schema validation; config-as-code via API/Terraform in CI/CD | Sidecar gateways (Kong, Envoy, Tyk, APISIX, KrakenD — OUT: separate services, duplicate the Worker edge, wrong fit) | None — managed service + config-as-code; no gateway logic in handlers. |
+| Edge gateway | Cloudflare API Shield schema validation, FREE tier (see §7) — DECIDED by owner, with ports/adapters, as an OPTIONAL edge adapter only (§14): the server is fully functional without it | Managed edge schema validation; config-as-code via API/Terraform in CI/CD | Sidecar gateways (Kong, Envoy, Tyk, APISIX, KrakenD — OUT: separate services, duplicate the Worker edge, wrong fit) | None — managed service + config-as-code; no gateway logic in handlers; never a required dependency. |
 
 Architecture point: ports/adapters is the REPO'S OWN pattern (ADR 0002)
 — the gateway is a port in `src/` with Worker + in-memory adapters;
@@ -274,8 +284,8 @@ IAAA.
   (RFC 9068), `mcp:payments` scope for the payment surface, DPoP
   sender-constraining (RFC 9449), validated at the MCP transport (jose +
   JWKS), protected-resource metadata (RFC 9728) advertised. Issuance
-  (`workers-oauth-provider`) is a FUTURE surface (own issue + the
-  owner's call); the validation side is defined now.
+  (portable provider — open survey evaluation, §14) is a FUTURE surface
+  (own issue + the owner's call); the validation side is defined now.
 - R-JWT-3 Delegation tokens (agents): token exchange (RFC 8693)
   down-scoped from the actor's authority, carrying RAR (RFC 9396)
   payment-scope details where the delegation authorizes payment; JWE
@@ -310,26 +320,27 @@ dispatches.
 | JWK (RFC 7517) | ✓ JWKS for local verification | ✓ JWKS at the transport | ✓ JWKS for delegation verification | N/A: no tokens | N/A: no tokens | N/A: HMAC | ◐ JWKS where a job verifies a token | ✓ JWKS for dispatch verification | jose (local/remote JWKS) |
 | JWA (RFC 7518) | ✓ pinned algorithms | ✓ pinned algorithms | ✓ pinned algorithms | N/A: no tokens | N/A: no tokens | N/A: HMAC | ◐ pinned algorithms where tokens are used | ✓ pinned algorithms | jose (CISO confirms the algorithm set) |
 | JWT (RFC 7519) | ✓ R-JWT-1 | ✓ R-JWT-2 | ✓ R-JWT-3 | N/A: session, not JWT | N/A: session, not JWT | N/A: HMAC | ◐ R-JWT-1 where a job calls HTTP | ✓ R-JWT-1 | jose |
-| OAuth 2.1 | ◐ validation side now (RFC 9728); issuance future | ◐ validation side now; issuance future | ◐ validation side now; issuance future | N/A: no OAuth flow in chat | N/A: no OAuth flow in panels | N/A: provider HMAC, no OAuth | N/A: no OAuth flow; service identity | N/A: S2S tokens, no OAuth flow | workers-oauth-provider (future issuance); jose + Hono (validation) |
+| OAuth 2.1 | ◐ validation side now (RFC 9728); issuance future | ◐ validation side now; issuance future | ◐ validation side now; issuance future | N/A: no OAuth flow in chat | N/A: no OAuth flow in panels | N/A: provider HMAC, no OAuth | N/A: no OAuth flow; service identity | N/A: S2S tokens, no OAuth flow | portable OAuth 2.1 provider — open survey evaluation (future issuance); jose + Hono (validation) |
 | OIDC Core | N/A: APIs consume access tokens/sessions, not ID Tokens | N/A: tools consume access tokens, not ID Tokens | N/A: agents don't authenticate users; the human's OIDC login is upstream | N/A: chat session is IAAA | N/A: login is upstream (providers.ts) | N/A: HMAC | N/A: no user login | N/A: no user login | Consumed only: IdPs issue ID Tokens, `providers.ts` consumes |
 | JWT access-token profile (RFC 9068) | ✓ R-JWT-1 aligned to the profile | ✓ R-JWT-2 | ◐ delegation tokens aligned where presented as access tokens | N/A: no tokens | N/A: no tokens | N/A: HMAC | ◐ where a job presents an access token | ✓ R-JWT-1 aligned to the profile | jose + the token-verification port |
-| PKCE (RFC 7636) | N/A: PKCE constrains the code flow at the AS, not API calls | ◐ public MCP clients at the AS (future issuance) | N/A: agents are confidential clients | N/A: no code flow | N/A: no code flow | N/A: HMAC | N/A: no code flow | N/A: confidential clients | workers-oauth-provider (future issuance) |
+| PKCE (RFC 7636) | N/A: PKCE constrains the code flow at the AS, not API calls | ◐ public MCP clients at the AS (future issuance) | N/A: agents are confidential clients | N/A: no code flow | N/A: no code flow | N/A: HMAC | N/A: no code flow | N/A: confidential clients | portable OAuth 2.1 provider — open survey evaluation (future issuance) |
 | DPoP (RFC 9449) | ◐ money tokens presented by public clients | ✓ sender-constraining on money tokens (mcp:payments) | ✓ agent-presented money tokens over HTTP | N/A: no tokens presented | N/A: no tokens presented | N/A: HMAC | N/A: no public-client presentation | N/A: confidential clients (mTLS instead) | Token-verification port (jose primitives; slice verifies DPoP coverage at build time) |
 | mTLS-bound tokens (RFC 8705) | ◐ S2S money tokens where client certs are supported | ◐ confidential MCP clients where client certs are supported | ◐ agent→HTTP money calls where client certs are supported | N/A: no tokens | N/A: no tokens | N/A: HMAC | N/A: in-process dispatch (membership check) | ✓ S2S money dispatches over HTTP | Cloudflare managed-CA mTLS (every plan) + jose (confirmation claim) |
 | Token introspection (RFC 7662) | ✓ money paths (revocation-sensitive); local JWKS otherwise | ✓ money tools (revocation-sensitive) | ✓ delegation tokens | N/A: no tokens | N/A: no tokens | N/A: no tokens | ◐ job-presented money tokens | ✓ money dispatches | AS introspection endpoint (future issuance) + the token-verification port |
-| Revocation (RFC 7009) | ◐ revocation endpoint at the AS (future issuance) | ◐ same | ◐ delegation revocation via the IAAA store + AS endpoint | N/A: no tokens (session revocation is the IAAA path) | N/A: no tokens (session revocation is the IAAA path) | N/A: no tokens | N/A: no tokens (membership revocation is the path) | ◐ S2S token revocation via the AS endpoint | workers-oauth-provider (future issuance); IAAA stores for delegations/memberships; `cfk_` deletion stays the user-key path |
-| PAR (RFC 9126) | N/A: PAR shapes authorization requests to the AS, not API calls | ◐ payment-scope authorization requests at the AS | ◐ agent-initiated payment-scope requests at the AS | N/A: no authorization request originates in chat | N/A: no authorization request originates in panels | N/A: HMAC | N/A: no authorization requests | N/A: no authorization requests | workers-oauth-provider (future issuance; support verified at adoption time) |
+| Revocation (RFC 7009) | ◐ revocation endpoint at the AS (future issuance) | ◐ same | ◐ delegation revocation via the IAAA store + AS endpoint | N/A: no tokens (session revocation is the IAAA path) | N/A: no tokens (session revocation is the IAAA path) | N/A: no tokens | N/A: no tokens (membership revocation is the path) | ◐ S2S token revocation via the AS endpoint | portable OAuth 2.1 provider — open survey evaluation (future issuance); IAAA stores for delegations/memberships; `cfk_` deletion stays the user-key path |
+| PAR (RFC 9126) | N/A: PAR shapes authorization requests to the AS, not API calls | ◐ payment-scope authorization requests at the AS | ◐ agent-initiated payment-scope requests at the AS | N/A: no authorization request originates in chat | N/A: no authorization request originates in panels | N/A: HMAC | N/A: no authorization requests | N/A: no authorization requests | portable OAuth 2.1 provider — open survey evaluation (future issuance; support verified at adoption time) |
 | RAR (RFC 9396) | N/A: RAR details travel in authorization/delegation requests, not API calls | ✓ payment-scope authorization details | ✓ delegation payment-scope details (R-JWT-3) | N/A: HITL approval, not RAR | N/A: HITL approval, not RAR | N/A: HMAC | N/A: no authorization details | ◐ dispatch payment-scope details where a dispatch carries payment scope | jose + the PDP seam (RAR details evaluated as the permission/scope claim) |
 | Token exchange (RFC 8693) | ◐ S2S acting on behalf of a user/delegator (down-scoped exchange) | ◐ tool acting on behalf of a delegator | ✓ delegation exchange (R-JWT-3) | N/A: no token exchange in chat | N/A: no token exchange in panels | N/A: HMAC | N/A: jobs act as the service identity, no exchange | ◐ dispatch acting on behalf of a delegator | IAAA delegation enhancement + jose |
-| AS metadata (RFC 8414) | ✓ clients discover the AS | ✓ clients discover the AS | ✓ clients discover the AS | N/A: no OAuth clients | N/A: no OAuth clients | N/A: HMAC | N/A: no OAuth clients | ◐ dispatch clients discover the AS | workers-oauth-provider (future issuance) |
+| AS metadata (RFC 8414) | ✓ clients discover the AS | ✓ clients discover the AS | ✓ clients discover the AS | N/A: no OAuth clients | N/A: no OAuth clients | N/A: HMAC | N/A: no OAuth clients | ◐ dispatch clients discover the AS | portable OAuth 2.1 provider — open survey evaluation (future issuance) |
 | Protected-resource metadata (RFC 9728) | ✓ APIs advertise as protected resources | ✓ MCP transport advertises | N/A: agents are clients, not resources | N/A: chat is not an OAuth resource | N/A: panels are not OAuth resources | N/A: HMAC | N/A: jobs are not OAuth resources | ◐ dispatch endpoints advertise where they accept access tokens | Hono routes (metadata endpoints) |
 | JAR (RFC 9101) | N/A: JAR signs authorization requests, not API calls | ◐ signed authorization requests at the AS (payment scope) | ✓ agent-initiated payment-scope requests signed | N/A: no authorization requests | N/A: no authorization requests | N/A: HMAC | N/A: no authorization requests | N/A: no authorization requests | jose (request-object signing/verification; AS support verified at adoption time) |
 
 Security bar (binding): every applicable standard applied —
 sender-constraining (DPoP/mTLS) on money tokens, introspection/revocation
 wired, PAR/RAR where authorization requests carry payment scope.
-Adoption goes THROUGH the decided pieces (Hono, jose,
-workers-oauth-provider, API Shield) + the IAAA enhancements — no
+Adoption goes THROUGH the decided pieces (Hono, jose, the surveyed
+portable OAuth provider for any future issuance surface, the optional
+API Shield edge adapter) + the IAAA enhancements — no
 parallel token/authorization implementations. Where a decided FOSS piece
 lacks a required standard at adoption time, the slice documents the gap
 and the adoption decision returns to the owner — no silent skip, no
@@ -338,7 +349,11 @@ custom re-implementation without a decision.
 ## 7. Cloudflare API Shield gateway (owner decision 2026-11-18)
 
 DECIDED: use API Shield schema validation on the free tier, with
-ports/adapters.
+ports/adapters — as an OPTIONAL edge adapter only (§14). The server
+must be FULLY FUNCTIONAL without it: the adapter is config-as-code that
+may validate shape where deployed, never a required dependency, and no
+slice may depend on edge validation being present. Spec upload via CI
+(§4) happens only where the adapter is deployed.
 
 Free-tier facts (verified from Cloudflare's own docs + blog,
 2026-11-18; RE-VERIFY in the dashboard — see §7.1): Free = 100 saved
@@ -615,7 +630,11 @@ ADR number.
 
 Sequencing rule: the GAP slices proceed on the CISO-owned specs with
 CISO review requested. Waiting applies ONLY on a real collision with
-in-flight CISO work, never as the default.
+in-flight CISO work, never as the default. Alignment (§14): the GAP
+slices plug into the ONE IAAA chain #5387/#5386 define (session,
+api-key, scanner-payment principals resolved in one place) — no
+CBO-only auth path — and sequence with/after the shared-server survey
+conclusions where they overlap (chain shape, registry shape).
 
 ### 10.2 Hardening slices (G-1–G-15)
 
@@ -623,13 +642,13 @@ in-flight CISO work, never as the default.
 |---|---|---|---|
 | 1 | G-1 | LEDGER GATE — IAAA-CONFORMANT (no interim, per §2.5): the gate consults the PDP through seam A (GAP-1/GAP-5) for the money/ledger permission (GAP-2) over the system actor's binding (GAP-3); sequences after the gap slices land; waits ONLY on a real collision, never idle. REMOVE `record-native` only after re-verifying zero production callers by repo-wide grep (workflow step `record-native-ledger` calls the native PORT, not HTTP — verified at filing); if any caller is found, gate it identically instead and say so. Tests must prove: both legitimate server-side callers (`src/payments/ledger.ts` `ledgerFetch`, `src/services/cfpayLedger.ts` `cfpayLedgerFetch`) succeed through the IAAA path, a forged user request is denied, and the permission/denial is audited. No write-path change. The G-1 hole stays open until this slice lands, by the owner's explicit choice. | IAAA modules (authorization.ts, iaaaPdpSeam.ts, executionContext.ts), `serviceDispatch` identity derivation, existing fetchers |
 | 2 | G-4 hole + auth consolidation | Hoist the gates to ONE shared auth module; convert `agenticPayments.ts` + the platform route files to it (no behavior change, pins updated). Fix lifecycle preference GET/POST (`agenticPayments.ts:8761–8815`) to derive `tenantId` from resolved session identity, never from query/body. | Existing gate closures, identity-resolution pattern |
-| 3 | G-4 validation | ONE shared request-validation helper, extending `validateProfileInput` / `validateStrictAuditWrite` onto zod schemas (zod arrives with H-1, §4; before H-1 the helper extends the existing validators without a second catalog). No second catalog. | Existing validators |
+| 3 | G-4 validation | ONE shared request-validation helper, extending `validateProfileInput` / `validateStrictAuditWrite` onto zod schemas (zod arrives with H-1, §4; before H-1 the helper extends the existing validators without a second catalog). The schemas land in the SHARED validation layer (door/service layer per #5386), not a CBO-only layer; the #5387 duplication inventory governs. No second catalog. | Existing validators |
 | 4 | G-2 | D1 batch atomicity for multi-write routes (journal post, activate-subscription pair, settings PATCH, bulk move) via the existing batch leg. Cross-store steps keep the loud-log + reconcile posture (ADR 0002 non-goal). | `d1BatchTransactionBackend` / `withTransaction` |
 | 5 | G-3 | Coded error responses: replace raw `err.message` passthrough + regex classification with catalog-coded responses + server-side logging. | G9 pattern (`paymentAssuranceLive.ts:103–112`), outcome catalog |
 | 6 | G-5/G-6 | Module logging + coded messages across the platform families. | #3515 logger seam, outcome catalog, `codedOutcomeResponse` |
 | 7 | G-11 | Channel audit funnel wiring at the `routeRequest` call site. Audit-before-write is an OWNER decision — carried, not assumed. | G2 wiring precedent |
 | 8 | G-7 | Premium prices via `getApprovedPrice`. Owner decision on seeds required before build — file, do not build until called. | Price catalogue + approval (#2547) |
-| 9 | G-8 | Catalog extension (platform families into the catalog pattern) + shared request/response schemas + OpenAPI extension for CBO routes. No registry (rejected). | `commercialUrlCatalog`, `openapiSpec.ts` spike |
+| 9 | G-8 | Catalog extension (platform families into the catalog pattern) + shared request/response schemas + OpenAPI extension for CBO routes. The CBO schemas feed the ONE OpenAPI spec (#5387 requirement 5), generated from the route schemas. No registry (rejected). | `commercialUrlCatalog`, `openapiSpec.ts` spike |
 | 10 | G-9/G-14 | Log/audit the operator-list degrade; pagination literals via `COMMERCIAL_DEFAULTS`. Fold into the nearest slice PR if small, else its own. | Existing defaults module |
 | 11 | G-10 | Route-layer ORM / `.db` reach-through remediation behind existing ports (CDO approach, §11). CDO-lane issues for any CDO-owned change. | Existing ledger/marketplace/audit ports |
 | 12 | G-12 | Doc-only: AOP section for ADD.md re-derived from real sources (this design's §9 rules). | ADR/standards sources as verified |
@@ -639,7 +658,10 @@ in-flight CISO work, never as the default.
 
 H-0–H-last per §4, sequenced after #1024 Phase 2. The Hono slices are
 filed under #5343 alongside the GAP and hardening slices, each stating
-its #1024 dependency.
+its #1024 dependency. Alignment (§14): the migration lands the CBO
+families on the ONE router of the one API server (#5387) — the Hono app
+is the shared server's app, not a CBO-only app — and sequences with the
+#5387 survey conclusions on the shared-server shape.
 
 ## 11. CDO data approach (binding — owner direction 2026-11-18)
 
@@ -707,6 +729,21 @@ Verified by direct read against the design base `46b6537d6`
   free at build time; the parallel integrated-domain doc was absent from
   the tree at build time and is not cited here.
 
+Amendment verification (2026-11-18, same day): the live bodies, titles,
+and states of #5387 and #5386 were re-read via the connector by the
+amending author (both open; #5387 "One API server: consolidate the
+entire API layer — one router, one IAAA chain, one OpenAPI spec, one
+validation layer, no duplicated rules"; #5386 "One MCP server:
+consolidate the platform and scanner MCP servers behind one registry
+and one IAAA security model"; both #CDO-mha7, parent #798 as stated in
+their bodies). #5343's live body was re-read at the same time: still
+75,730 chars, no alignment section present yet — the coordinator's body
+amendment had not landed; this amendment records the owner's directive
+as received, and the issue-body amendment is the coordinator's work,
+not this doc's. No replacement OAuth-provider library is named anywhere
+in the amendment: the survey evaluates candidates, and naming one
+unverified would be invention.
+
 NOT verified (no claim is made):
 
 - The Cloudflare dashboard check (§7.1) — required, unperformed.
@@ -723,11 +760,145 @@ NOT verified (no claim is made):
 
 - Audit-before-write (slice 7): owner decision required.
 - Premium price seeds (slice 8): owner decision required before build.
-- OAuth issuance surface (`workers-oauth-provider` adoption): future
-  surface, own issue + owner call.
+- OAuth issuance surface (portable provider — open survey evaluation,
+  §14): future surface, own issue + owner call. The Workers-only
+  provider evaluated in §3 is OUT for the shared-server role.
 - API Shield plan decision if the dashboard contradicts the docs (§7.1).
 - Price-approval, refund-execution, and other owner-gated decisions:
   carried on the parity tracker, not decided here.
 - CISO decisions: money/ledger permission name + bindings (GAP-2),
   system-principal binding shape (GAP-3), JWT algorithm set (§6 JWA row),
   delegation-token shape review (R-JWT-3, #5350).
+
+## 14. One-server alignment (amendment 2026-11-18, owner directive)
+
+ONE API server, ONE MCP server, both secure, ONE security model. This
+section records the owner alignment directive of 2026-11-18, received
+after the design first landed (PR #5384, landing `5fc9a0c0`) and
+recorded here before the design is finalized. The corresponding ADR
+decision is D11 in ADR 0034. The CDO filings below were read live by
+the amending author (see §12); their states are as verified then.
+
+### 14.1 The shared servers
+
+- #5387 "One API server" (open, #CDO-mha7, parent #798 as stated in
+  its body): one router, one IAAA middleware chain, one OpenAPI spec,
+  one validation layer, no duplicated rules. All routes (8 top-level
+  route files, ~80 handler files, every data endpoint). The IAAA
+  middleware chain resolves session, API key, and x402 payment proof
+  to IAAA principals (session, api-key, scanner-payment) in one place.
+  The survey produces a duplication inventory (validation rules,
+  per-file auth gates, hand catalogs, error/response shapes, logging)
+  and slices consolidate each family into one implementation, schedule
+  patch first. No behaviour change, pinned by conformance tests.
+- #5386 "One MCP server" (open, #CDO-mha7, parent #798 as stated in
+  its body): one registry, one security model (IAAA), one
+  implementation of every shared rule. The two servers (`/mcp`,
+  `/api/mcp` and `/mcp/scanner`) collapse to one server surface. A paid
+  caller is an IAAA principal — the scanner-payment principal kind the
+  permission gate already knows, holding only `mcp:payments` — so
+  payment proof is a credential under IAAA, not a parallel auth path.
+  REST, MCP, and chat validate through the same shared validators in
+  the door/service layer. The scanner keeps exactly its current tool
+  set and price; tool behaviour is unchanged.
+
+### 14.2 No separate CBO server
+
+The CBO API layer is the commercial surface ON the one shared servers.
+CBO routes land on the one API server; future BizCopilot MCP tools
+(#4741–#4743, file-only, no build directed) register on the ONE
+registry under the ONE IAAA model when built. No CBO slice builds a
+parallel router, registry, auth chain, or validation layer. CBO slices
+sequence WITH/AFTER the shared-server work, never as a competing
+implementation.
+
+### 14.3 Survey-first alignment
+
+#5387/#5386 are survey-first: the surveys decide the shared-server
+shape (framework confirmation, registry shape, validation-layer home,
+duplication inventory) against ADD.md (and ADR 0012 for #5386). The
+CBO design CONSUMES and aligns with the CDO surveys. It runs no
+competing framework survey, and the CBO framework/library conclusions
+(§3–§4) are not independent of the surveys: the owner decisions (Hono
+fully, JWT, FOSS-first, standards adoption) stand as owner decisions,
+and the surveys confirm and sequence the shared-server shape they land
+in. Where CBO decisions overlap survey territory (framework, registry
+shape, validation-layer home), CBO slices sequence after the survey
+conclusions. #5387's going-in recommendation is Hono, with the survey
+to confirm or pick the better alternative; #5387 records that it
+follows #5343's Hono decision and does not re-decide the CBO surface.
+
+### 14.4 The one IAAA chain
+
+The CBO IAAA enhancements (GAP-1–GAP-5; CISO #5348 money permission,
+#5349 system principal, #5350 PDP seams) plug INTO the one IAAA chain
+#5387/#5386 define. Session, API key, and x402 payment proof resolve
+to IAAA principals in one place; auth, permission, and audit run once
+per request for every caller type; no route checks auth inline; no
+route bypasses the gate. The ledger gate (§2.5, slice 1) is enforced
+through that chain — no CBO-only auth path. The paid principal holds
+only `mcp:payments`, with scope denial pinned for anything outside it.
+
+### 14.5 Portability rule (binding)
+
+The shared server runs on Cloudflare Workers AND in Docker
+(multi-cloud, cloud-agnostic, per #5277, which owns the container
+shape — workerd in a container, CI running the engine suite against
+it); NO new Cloudflare-proprietary API surface in the new layer. The
+standing source is the agentic-SaaS cross-cutting rule (cloud-agnostic
+AND cloud-native; build only on existing storage seams, no new
+cloud-proprietary API surface) plus the owner's 2026-11-18 direction;
+#5387 verified the requirement is NOT in ADD.md. This issue does not
+design the container shape — #5277 owns it; the API server must fit it
+and must not hard-code Cloudflare-only assumptions while #5277's
+design matures.
+
+Per decided piece (§3), how each complies:
+
+| Piece | Portability verdict |
+|---|---|
+| Hono 4.13.19 | COMPLIANT — Web-standards runtime API; runs on Workers and in Docker behind the gateway port. |
+| zod, OpenTelemetry, Drizzle, MCP SDK | COMPLIANT — portable libraries; Drizzle stays behind the CDO ports/adapters (§11), and the store-behind-a-port shape is what makes the Docker shape possible. |
+| jose 6.2.17 | COMPLIANT — zero-dependency ESM; verification is runtime-agnostic. |
+| chanfana 3.4.0 | COMPLIANT — generates the spec artifact from zod schemas; the artifact is portable. The survey confirms the generator choice for the one spec. |
+| Cloudflare API Shield (free tier) | OPTIONAL EDGE ADAPTER ONLY — config-as-code, never a required dependency; the server is FULLY FUNCTIONAL without it (§7). Never a layer the server depends on. |
+| OAuth 2.1 provider | OPEN SURVEY EVALUATION — no piece named. Requirement: runtime-agnostic, store behind the existing port/adapter pattern, OAuth 2.1 + OIDC, PAR/RAR/DPoP per the §6 matrix. The evaluated Workers-only provider is OUT for the shared-server role (Workers-only + KV-bound). Issuance remains a FUTURE surface (own issue + the owner's call). |
+
+### 14.6 Shared validation
+
+The CBO G-4 zod schemas land in the SHARED validation layer
+(door/service layer per #5386), not a CBO-only layer. The #5387
+duplication inventory governs: one implementation per rule, called by
+all surfaces (REST route, MCP command, chat), verified by tests that
+the surfaces refuse/answer identically. Slice 3's shared helper is
+the CBO contribution to that layer. The schedule-patch duplication
+(the rule written word-for-word in the REST route and the MCP module)
+is the first consolidation family; the CBO slices consolidate their
+families into the same inventory.
+
+### 14.7 MCP: one registry
+
+No separate CBO MCP server. When the BizCopilot tools (#4741–#4743)
+are built, they register on the ONE registry (#5386), carry one scope
+each under ADR 0012, execute through `executeWithPermissionGate`, and
+keep the AOP audit event per call. The MCP permission defaults
+(§2.3) are replaced by role-derived scopes through the GAP-4 seam,
+plugged into the one chain (§14.4).
+
+### 14.8 Sequencing and boundaries
+
+- CBO slices sequence with/after the shared-server survey conclusions
+  where they overlap, and with/after the shared-server work — never as
+  a competing implementation.
+- #5387/#5386 record a dev-work stop blocking building (not the
+  survey) pending the owner's resume word; CBO slice builds sequence
+  accordingly.
+- Boundaries: #5277 owns the container shape; #1024 owns the repo-wide
+  framework-adapter design; #5386 owns the MCP consolidation; #5387
+  owns the whole-layer consolidation including data endpoints; #5343
+  owns the commercial-surface design + ADR and its slices. Nothing here
+  folds another lane's work into CBO issues.
+- The one OpenAPI spec (#5387 requirement 5) is generated from the
+  route schemas and covers every data endpoint; the CBO schemas (§8,
+  slice 9) feed it. The spec artifact (§7) is the shared contract for
+  the edge adapter where deployed — derive, don't duplicate.

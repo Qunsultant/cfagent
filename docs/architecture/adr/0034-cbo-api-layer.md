@@ -18,7 +18,14 @@
   (commercialization program), #4514 (BizCopilot — MCP tools reuse these
   routes), CISO coordination issues #5348 (money/ledger permission),
   #5349 (system-principal binding), #5350 (PDP + ExecutionContext wiring
-  seams)
+  seams), #5387 (one API server, CDO lane), #5386 (one MCP server, CDO
+  lane), #5277 (Docker/portability shape, CAIO lane — owner of the
+  container shape #5387 requires the server to fit)
+- Amendment 2026-11-18 (same day, before any slice builds on this ADR):
+  D11 records the owner one-server alignment directive (see D11). D1–D10
+  stand as decided; where D11 supersedes part of D4/D7, D11 says so
+  explicitly. Amending PR: this PR (number and main commit recorded on
+  merge).
 
 ## Context
 
@@ -177,6 +184,9 @@ rejected alternatives is in the design doc §3; the decided pieces are:
 - OAuth 2.1 provider: `@cloudflare/workers-oauth-provider` v1.2.4
   evaluated, NOT adopted in v1 — issuance is a future surface (own issue
   plus the owner's call); the validation side is defined now.
+  AMENDED BY D11: the piece is OUT for the shared-server role
+  (Workers-only + KV-bound); the portable provider is an open survey
+  evaluation — see D11.
 - Reused, never replaced: zod, Drizzle, MCP SDK, OpenTelemetry, the
   module logger seam, the outcome catalog, the ingress throttle
   (`src/api/ingress.ts` + `src/config/apiIngressModes.ts`), the audit
@@ -241,7 +251,9 @@ duplicate. Rollout is money paths first, split into at most 5 schemas per
 family, with a staging validation step BEFORE enabling Block on any
 endpoint (Block-only means no log-first mode on Free). Edge validation is
 shape/schema only; authorization stays in-Worker — the gateway never
-replaces handler authorization.
+replaces handler authorization. AMENDED BY D11: the gateway is an
+OPTIONAL edge adapter only — the server is fully functional without it,
+and no slice may depend on edge validation being present.
 
 REQUIRED, UNPERFORMED: dashboard verification. The free-tier limits and
 that schema validation is enabled for the zone must be confirmed in the
@@ -294,6 +306,97 @@ reuse evidence per slice is in the design doc §10. AOP aspects and ADD.md
 are binding on every slice; each slice's completion note states its
 compliance evidence.
 
+### D11 — One shared server alignment (amendment 2026-11-18, owner directive)
+
+ONE API server, ONE MCP server, both secure, ONE security model. The
+CDO filings #5387 ("One API server", open, #CDO-mha7) and #5386 ("One
+MCP server", open, #CDO-mha7) — both read live by the amending author
+2026-11-18 — define the shared servers. This decision aligns the CBO
+API layer with them. It changes no owner decision in D1–D10 except
+where it explicitly supersedes a part of D4/D7 below.
+
+- NO SEPARATE CBO SERVER. The CBO API layer is the commercial surface
+  ON the one shared servers: the CBO routes land on the one API server
+  (#5387: one router, one IAAA middleware chain, one OpenAPI spec, one
+  validation layer), and future BizCopilot MCP tools (#4741–#4743,
+  file-only, no build directed) register on the ONE registry under the
+  ONE IAAA model (#5386) when built. No parallel router, registry, auth
+  chain, or validation layer is built by any CBO slice.
+- SURVEY-FIRST ALIGNMENT. #5387/#5386 are survey-first: the surveys
+  decide the shared-server shape (framework confirmation, registry
+  shape, validation-layer home, duplication inventory) against ADD.md
+  (and ADR 0012 for #5386). The CBO design CONSUMES and aligns with the
+  CDO surveys — it runs no competing framework survey, and the CBO
+  framework/library conclusions in D4–D5 are not independent of the
+  surveys. The owner decisions (Hono fully, JWT, FOSS-first, standards
+  adoption) stand as owner decisions; the surveys confirm and sequence
+  the shared-server shape they land in. Where CBO decisions overlap
+  survey territory (framework, registry shape, validation-layer home),
+  CBO slices sequence after the survey conclusions. #5387 records that
+  it follows #5343's Hono decision and does not re-decide the CBO
+  surface; #5387's going-in recommendation is Hono, with the survey to
+  confirm or pick the better alternative.
+- IAAA CHAIN. The CBO IAAA enhancements (CISO #5348 money permission,
+  #5349 system principal, #5350 PDP seams) plug INTO the one IAAA chain
+  #5387/#5386 define: session, API key, and x402 payment proof resolve
+  to IAAA principals (session, api-key, scanner-payment) in one place.
+  The ledger gate (D2, slice 1) is enforced through that chain — no
+  CBO-only auth path. The paid caller is the scanner-payment principal
+  holding only `mcp:payments` (#5386; the permission gate already
+  defines the kind).
+- PORTABILITY RULE (binding). The shared server runs on Cloudflare
+  Workers AND in Docker (multi-cloud, cloud-agnostic, per #5277, which
+  owns the container shape); NO new Cloudflare-proprietary API surface
+  in the new layer. The standing source is the agentic-SaaS
+  cross-cutting rule (cloud-agnostic AND cloud-native; build only on
+  existing storage seams, no new cloud-proprietary API surface) plus
+  the owner's 2026-11-18 direction — #5387 verified the requirement is
+  NOT in ADD.md. Per decided piece:
+  - Hono: portable (Web-standards runtime API) — COMPLIANT.
+  - zod, OpenTelemetry, Drizzle, MCP SDK: portable — COMPLIANT.
+    Drizzle stays behind the CDO ports/adapters (D8); the store behind
+    a port is what makes the Docker shape possible.
+  - jose: portable (zero-dependency ESM) — COMPLIANT.
+  - chanfana: generates the spec from zod schemas; the artifact is
+    portable — COMPLIANT, with the survey confirming the generator
+    choice for the one spec.
+  - Cloudflare API Shield (D7): stays ONLY as an OPTIONAL edge adapter
+    — config-as-code, never a required dependency. The server must be
+    FULLY FUNCTIONAL without it. D7 is amended accordingly: the gateway
+    is an edge adapter that may validate shape where deployed, never a
+    layer the server depends on. The dashboard-verification requirement
+    and STOP rule in D7 stand unchanged.
+  - `@cloudflare/workers-oauth-provider`: OUT for the shared-server
+    OAuth-provider role — Workers-only and KV-bound, which violates the
+    portability rule. This SUPERSEDES the D4 evaluation entry (which
+    recorded it as evaluated-not-adopted): it is not adopted in any
+    future issuance surface for the shared server either. The portable
+    OAuth-provider piece is an OPEN SURVEY EVALUATION: the requirement
+    is runtime-agnostic, store behind the existing port/adapter
+    pattern, OAuth 2.1 + OIDC, PAR/RAR/DPoP per the standards matrix.
+    No replacement library is named here — naming one without
+    verification would repeat the error this amendment corrects; the
+    survey evaluates candidates. Issuance remains a FUTURE surface (own
+    issue + the owner's call). The validation side (RFC 9728, jose,
+    the token-verification port) is unaffected.
+- SHARED VALIDATION. The CBO G-4 zod schemas land in the SHARED
+  validation layer (door/service layer per #5386), not a CBO-only
+  layer. The #5387 duplication inventory governs; CBO slices
+  consolidate into it (one implementation per rule, called by all
+  surfaces). Slice 3's shared helper is the CBO contribution to that
+  layer, not a second layer.
+- SEQUENCING. CBO slices sequence WITH/AFTER the shared-server work,
+  never as a competing implementation. GAP-1–GAP-5 plug into the one
+  IAAA chain as #5387/#5386 define it; the Hono migration (§4 of the
+  design doc) lands the CBO families on the one router. #5387/#5386
+  record a dev-work stop blocking building (not the survey) pending
+  the owner's resume word; CBO slice builds sequence accordingly.
+- SCOPE BOUNDARIES (unchanged). #5277 owns the container shape; #1024
+  owns the repo-wide framework-adapter design; #5386 owns the MCP
+  consolidation; #5387 owns the whole-layer consolidation including
+  data endpoints. #5343 owns the commercial-surface design + ADR and
+  its slices. Nothing in D11 folds another lane's work into CBO issues.
+
 ## Consequences
 
 - The G-1 hole stays open until the full fix lands (D2). No interim gate
@@ -319,6 +422,15 @@ compliance evidence.
 - Docs-only consequence: this ADR + the design doc change no runtime
   behavior, no UX surface, and no data. Slice PRs carry their own
   behavior, pins, and §18 receipts.
+- Alignment consequence (D11): no CBO slice builds a second router,
+  registry, auth chain, or validation layer; the CBO surfaces land on
+  the shared servers. The API Shield gateway is optional — a deployment
+  without it is fully functional, and no slice may depend on edge
+  validation being present. The OAuth-provider piece for any future
+  issuance surface is undecided pending the survey evaluation; no slice
+  names or adopts a provider library before the survey concludes. CBO
+  slice builds sequence with/after the shared-server surveys and the
+  resume word recorded in #5387/#5386.
 
 ## Alternatives considered
 
@@ -352,6 +464,16 @@ compliance evidence.
 - **Building an OAuth authorization server by hand**: REJECTED —
   FOSS-first when the issuance surface is approved; issuance itself is
   deferred to a future surface with its own issue and owner call.
+- **A separate CBO API/MCP server** (own router, registry, auth chain,
+  or validation layer): REJECTED by the owner one-server directive
+  (D11). The CBO surfaces land on the shared servers.
+- **`@cloudflare/workers-oauth-provider` for the shared-server
+  OAuth-provider role**: OUT (D11) — Workers-only and KV-bound, against
+  the portability rule. The portable provider is an open survey
+  evaluation; no replacement is named without verification.
+- **A competing CBO framework survey**: REJECTED (D11). The CDO surveys
+  (#5387/#5386) decide the shared-server shape; the CBO design consumes
+  and aligns with them.
 - **Custom idempotency-key layer**: DEFERRED to slice evaluation —
   adopted only if no FOSS piece fits behind the existing ports, with the
   gap documented; per-subsystem dedupe stays until then.
