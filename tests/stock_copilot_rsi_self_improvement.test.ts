@@ -5,6 +5,7 @@ import {
 } from "../src/services/stockCopilotIntrospection";
 import {
   resolveStockCopilotRsiMode,
+  resolveStockCopilotRsiModeState,
   parseStockCopilotRsiMode,
   isStockCopilotRsiMode,
   COPILOT_RSI_MODE_SETTING_KEY,
@@ -72,9 +73,12 @@ describe("Stock Copilot RSI: Capability Gap Diagnosis & Self-Improvement Proposa
     expect(resolveStockCopilotRsiMode()).toBe("governed");
     expect(resolveStockCopilotRsiMode({ readSettingRaw: () => null })).toBe("governed");
     expect(resolveStockCopilotRsiMode({ readSettingRaw: () => "invalid_mode" })).toBe("governed");
-    expect(resolveStockCopilotRsiMode({ readSettingRaw: () => "self" })).toBe("self");
+    // #5056: `self` parses, but the §7 pipeline is specified-only, so the mode
+    // in effect is governed and the request is reported separately.
+    expect(resolveStockCopilotRsiModeState({ readSettingRaw: () => "self" }).requested).toBe("self");
+    expect(resolveStockCopilotRsiMode({ readSettingRaw: () => "self" })).toBe("governed");
     expect(resolveStockCopilotRsiMode({ readSettingRaw: () => "governed" })).toBe("governed");
-    expect(resolveStockCopilotRsiMode({ env: { STOCK_COPILOT_RSI_MODE: "self" } as any })).toBe("self");
+    expect(resolveStockCopilotRsiMode({ env: { STOCK_COPILOT_RSI_MODE: "self" } as any })).toBe("governed");
 
     expect(parseStockCopilotRsiMode("self")).toBe("self");
     expect(parseStockCopilotRsiMode("autonomous")).toBe("self");
@@ -150,7 +154,7 @@ describe("Stock Copilot RSI: Capability Gap Diagnosis & Self-Improvement Proposa
     expect(result.explanationMarkdown).toContain("Autonomous Strategy Research & Sandboxed Backtesting");
   });
 
-  it("introspectStockCopilot surfaces Self-RSI mode when configured", async () => {
+  it("gates a configured Self-RSI mode to governed and states why (#5056)", async () => {
     const sql = createInMemorySql();
     const positionPort = createStockCopilotPositionPort(sql);
     const activityPort = createStockCopilotActivityPort(sql);
@@ -170,10 +174,14 @@ describe("Stock Copilot RSI: Capability Gap Diagnosis & Self-Improvement Proposa
     });
 
     expect(result.ok).toBe(true);
-    expect(result.configuration.rsiMode).toBe("self");
-    expect(result.explanationMarkdown).toContain("Current Mode: **SELF**");
-    expect(result.explanationMarkdown).toContain("Active Execution Pathway (🤖 Self-RSI Mode [SandboxAgent])");
-    expect(result.explanationMarkdown).toContain("Autonomous Sandbox Action");
+    // #5056: the §7 pipeline is specified-only, so the request is reported
+    // but the mode in effect stays governed — never a silent downgrade.
+    expect(result.configuration.rsiMode).toBe("governed");
+    expect(result.configuration.rsiModeRequested).toBe("self");
+    expect(result.configuration.rsiModeNotice).toBeTruthy();
+    expect(result.explanationMarkdown).toContain("Current Mode: **GOVERNED**");
+    expect(result.explanationMarkdown).toContain("RSI Mode Notice");
+    expect(result.explanationMarkdown).not.toContain("Autonomous Sandbox Action");
   });
 
   it("switches RSI mode dynamically via controlStockCopilotViaDoor", async () => {
@@ -195,11 +203,13 @@ describe("Stock Copilot RSI: Capability Gap Diagnosis & Self-Improvement Proposa
     const initialResult = await controlStockCopilotViaDoor(ctx, "trader_rsi_door", {});
     expect(initialResult.rsiMode).toBe("governed");
 
-    // Switch to self mode
+    // #5056: self mode is refused while the §7 pipeline is specified-only —
+    // the switch must not persist a mode that enables nothing.
     const switchedResult = await controlStockCopilotViaDoor(ctx, "trader_rsi_door", { rsiMode: "self" });
     expect(switchedResult.success).toBe(true);
-    expect(switchedResult.rsiMode).toBe("self");
-    expect(settings.get(COPILOT_RSI_MODE_SETTING_KEY)).toBe("self");
+    expect(switchedResult.rsiMode).toBe("governed");
+    expect(switchedResult.rsiModeNotice).toBeTruthy();
+    expect(settings.get(COPILOT_RSI_MODE_SETTING_KEY)).toBeUndefined();
 
     // Switch back to governed mode
     const backResult = await controlStockCopilotViaDoor(ctx, "trader_rsi_door", { rsiMode: "governed" });
