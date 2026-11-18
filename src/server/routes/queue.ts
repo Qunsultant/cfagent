@@ -63,6 +63,11 @@ import { createScreenerQueueHandler } from "../../messaging/screenerQueueConsume
 import { renewAllStoredETradeTokens } from "../../services/etradeOAuth";
 import { ensureBreakerDurability } from "./core";
 
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "server/routes/queue",
+});
+
 // Issue #1739 — per-subscriber dedup for screener-event delivery
 // batches. Module-level so it survives across batches in one
 // isolate; cross-isolate redelivery is possible under at-least-once
@@ -178,9 +183,9 @@ async function dispatchOptionsAnalysisQueueWork(opts: {
       opts.runId !== undefined
         ? ` (run ${opts.runId}, unit ${opts.unitId ?? opts.runId})`
         : "";
-    console.warn(
-      `[Queue Handler] Dropping options_analysis queue message${scope}: ${denied} — dispatching it would run unattended work without a verified identity (#2331 slice 2).`
-    );
+    structuredLog.warn("queue.options_analysis_dispatch_denied", {
+      message: `[Queue Handler] Dropping options_analysis queue message${scope}: ${denied} — dispatching it would run unattended work without a verified identity (#2331 slice 2).`,
+    });
     return "denied";
   }
   const queuePromise = opts.agent.fetch(
@@ -259,7 +264,7 @@ async function dispatchRunLedgerProjectQueueWork(opts: {
  * structured logger (#3515 S2 seam): the first arg is the message,
  * the rest serialize as detail. The production log adapters below go
  * through this logger so the slice adds zero NEW unstructured
- * `console.*` uses to this file (ratchet #3515 S3: the ceiling is 16).
+ * `console.*` uses to this file (ratchet #3515 S3: batch 6 migrated this file to zero).
  */
 function formatCronLogArgs(args: readonly unknown[]): Record<string, unknown> {
   const [first, ...rest] = args;
@@ -470,7 +475,7 @@ export async function handleQueueBatch(batch: any, env: Env, ctx?: any): Promise
           try {
             await ensureDeadLetterStoreSchema(dlqStore.db);
           } catch (err) {
-            console.warn("[dead-letter] schema ensure failed (console record stands):", err);
+            structuredLog.warn("queue.dead_letter_schema_ensure_failed", { message: "[dead-letter] schema ensure failed (console record stands):", error: err instanceof Error ? err.message : String(err) });
             return;
           }
           await persistDeadLetterLanding(
@@ -503,9 +508,7 @@ export async function handleQueueBatch(batch: any, env: Env, ctx?: any): Promise
         // No messaging ports (no binding): the worker cannot claim QueuePort
         // routing, so the batch is retried into the DLQ path visibly rather
         // than acked into silence — the same rule as screener-events.
-        console.warn(
-          "[job-pipeline-events] no messaging ports — retrying envelopes into the DLQ path.",
-        );
+        structuredLog.warn("queue.job_pipeline_events_no_messaging_ports", { message: "[job-pipeline-events] no messaging ports — retrying envelopes into the DLQ path." });
         for (const msg of batch.messages ?? []) {
           if (typeof msg.retry === "function") msg.retry();
         }
@@ -601,10 +604,7 @@ export async function handleQueueBatch(batch: any, env: Env, ctx?: any): Promise
           }
         }
       } catch (tapErr) {
-        console.warn(
-          "[observability] delivery tap failed (ignored):",
-          tapErr,
-        );
+        structuredLog.warn("queue.observability_delivery_tap_failed", { message: "[observability] delivery tap failed (ignored):", error: tapErr instanceof Error ? tapErr.message : String(tapErr) });
       }
       return;
     }
@@ -747,21 +747,21 @@ export async function handleQueueBatch(batch: any, env: Env, ctx?: any): Promise
                     );
                     const second = await shared.refreshCanonicalPdfFields(refreshInput);
                     if (second.status !== "refreshed" && second.status !== "noop") {
-                      console.warn(`[Queue Handler] canonical PDF refresh unresolved: per-user ${first.status}, shared ${second.status} (run ${stageMsg.runId}).`);
+                      structuredLog.warn("queue.canonical_pdf_refresh_unresolved", { message: `[Queue Handler] canonical PDF refresh unresolved: per-user ${first.status}, shared ${second.status} (run ${stageMsg.runId}).`, runId: stageMsg.runId });
                     }
                   } else if (first.status !== "refreshed" && first.status !== "noop") {
-                    console.warn(`[Queue Handler] canonical PDF refresh ${first.status} (run ${stageMsg.runId}).`);
+                    structuredLog.warn("queue.canonical_pdf_refresh_status", { message: `[Queue Handler] canonical PDF refresh ${first.status} (run ${stageMsg.runId}).`, runId: stageMsg.runId, status: first.status });
                   }
                 } catch (refreshErr) {
-                  console.warn(`[Queue Handler] canonical PDF refresh failed (run ${stageMsg.runId}); generated PDF remains on the persisted analysis key:`, refreshErr);
+                  structuredLog.warn("queue.canonical_pdf_refresh_failed", { message: `[Queue Handler] canonical PDF refresh failed (run ${stageMsg.runId}); generated PDF remains on the persisted analysis key:`, runId: stageMsg.runId, error: refreshErr instanceof Error ? refreshErr.message : String(refreshErr) });
                 }
               }
               if (typeof msg.ack === "function") msg.ack();
               if (outcome.status === "dead-lettered") {
-                console.warn("[Queue Handler] analysis-done stage message dead-lettered:", outcome.reason ?? "unknown");
+                structuredLog.warn("queue.analysis_done_stage_message_dead_lettered", { message: "[Queue Handler] analysis-done stage message dead-lettered:", reason: outcome.reason ?? "unknown" });
               }
             } catch (queueErr) {
-              console.warn("[Queue Handler] Failed to consume analysis-done stage message; retrying:", queueErr);
+              structuredLog.warn("queue.analysis_done_stage_message_consume_failed", { message: "[Queue Handler] Failed to consume analysis-done stage message; retrying:", error: queueErr instanceof Error ? queueErr.message : String(queueErr) });
               if (typeof msg.retry === "function") msg.retry();
             }
           } else if (isStageBoundaryMessage(msg.body)) {
@@ -796,10 +796,10 @@ export async function handleQueueBatch(batch: any, env: Env, ctx?: any): Promise
               );
               if (typeof msg.ack === "function") msg.ack();
               if (outcome.status === "dead-lettered") {
-                console.warn("[Queue Handler] stage-boundary message dead-lettered:", outcome.reason ?? "unknown");
+                structuredLog.warn("queue.stage_boundary_message_dead_lettered", { message: "[Queue Handler] stage-boundary message dead-lettered:", reason: outcome.reason ?? "unknown" });
               }
             } catch (queueErr) {
-              console.warn("[Queue Handler] Failed to record stage-boundary message; retrying:", queueErr);
+              structuredLog.warn("queue.stage_boundary_message_record_failed", { message: "[Queue Handler] Failed to record stage-boundary message; retrying:", error: queueErr instanceof Error ? queueErr.message : String(queueErr) });
               if (typeof msg.retry === "function") msg.retry();
             }
           } else if (isMessageEnvelope(msg.body)) {
@@ -825,7 +825,7 @@ export async function handleQueueBatch(batch: any, env: Env, ctx?: any): Promise
               }
               if (typeof msg.ack === "function") msg.ack();
             } catch (queueErr) {
-              console.warn("[Queue Handler] Failed to process queue message:", queueErr);
+              structuredLog.warn("queue.queue_message_process_failed", { message: "[Queue Handler] Failed to process queue message:", error: queueErr instanceof Error ? queueErr.message : String(queueErr) });
               if (typeof msg.retry === "function") msg.retry();
             }
           } else {
@@ -860,9 +860,7 @@ export async function handleQueueBatch(batch: any, env: Env, ctx?: any): Promise
           // worker cannot honestly claim QueuePort routing, so the
           // envelopes are retried into the DLQ path visibly rather
           // than acked into silence.
-          console.warn(
-            "[messaging] screener-events batch has no messaging ports — retrying envelopes into the DLQ path."
-          );
+          structuredLog.warn("queue.screener_events_no_messaging_ports", { message: "[messaging] screener-events batch has no messaging ports — retrying envelopes into the DLQ path." });
           for (const msg of envelopeMessages) {
             if (typeof msg.retry === "function") msg.retry();
           }
@@ -924,7 +922,7 @@ export async function handleQueueBatch(batch: any, env: Env, ctx?: any): Promise
           }
           if (typeof msg.ack === "function") msg.ack();
         } catch (queueErr) {
-          console.warn("[Queue Handler] Failed to process queue message:", queueErr);
+          structuredLog.warn("queue.queue_message_process_failed", { message: "[Queue Handler] Failed to process queue message:", error: queueErr instanceof Error ? queueErr.message : String(queueErr) });
           if (typeof msg.retry === "function") msg.retry();
         }
       }

@@ -48,6 +48,14 @@ import type { ReconcileRunLedgerResult } from "../../agents/orchestrator/runLedg
 import { isLoginShaped } from "../../security/serviceIdentity";
 import type { SeedCanonicalReportsResult } from "../../data/auditReportProjection";
 
+import { createStructuredLogger } from "../../observability/structuredLogger";
+import { createObservabilitySink } from "../../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "server/routes/privacy",
+});
+
 /**
  * Slice 4 of Qunsultant/cfagent#2902 (Privacy & compliance) — moves only.
  * The privacy family of handleFetch, verbatim and in original order:
@@ -567,14 +575,14 @@ export async function handlePrivacyChainsRoutes(request: Request, env: Env, url:
             ));
             report.auditOk = audit.ok;
             if (!audit.ok) {
-              console.error("[retention] purge audit append failed:", audit.error);
+              structuredLog.error("privacy.retention_purge_audit_append_failed", { message: "[retention] purge audit append failed:", error: audit.error });
             }
           } catch (err) {
             report.auditOk = false;
-            console.error(
-              "[retention] purge audit append threw:",
-              err instanceof Error ? err.message : String(err),
-            );
+            structuredLog.error("privacy.retention_purge_audit_append_threw", {
+              message: "[retention] purge audit append threw:",
+              error: err instanceof Error ? err.message : String(err),
+            });
           }
           return report;
         },

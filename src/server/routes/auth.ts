@@ -69,6 +69,15 @@ import { listApiKeys, mintApiKey, revokeApiKey } from "../../security/apiKeys";
 import { sendProvisioningWelcome } from "../../services/provisioningWelcome";
 
 import { commercialPath } from "../../data/commercialUrlCatalog";
+
+import { createStructuredLogger } from "../../observability/structuredLogger";
+import { createObservabilitySink } from "../../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "server/routes/auth",
+});
+
 /**
  * Slice 3 of Qunsultant/cfagent#2902 (Auth & IAAA) — moves only.
  * The login family of handleFetch, verbatim and in original order:
@@ -897,7 +906,7 @@ export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL,
           approveRotationCount = approveRotation.rotated.length;
           approveRotationUnavailable = approveRotation.unavailable;
           if (approveRotation.unavailable) {
-            console.warn("[iaaa] session rotation skipped: session listing unavailable");
+            structuredLog.warn("auth.session_rotation_skipped", { message: "[iaaa] session rotation skipped: session listing unavailable" });
           }
           approveRotationCookie = sessionRotationCookie(request, approveRotation);
         }
@@ -1458,7 +1467,7 @@ export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL,
           // Counts only, never ids, in the response.
           const grantRotation = await rotateUserSessionsForEnv(env, targetId, nowMs);
           if (grantRotation.unavailable) {
-            console.warn("[iaaa] session rotation skipped: session listing unavailable");
+            structuredLog.warn("auth.session_rotation_skipped", { message: "[iaaa] session rotation skipped: session listing unavailable" });
           }
           const grantRotationCookie = sessionRotationCookie(request, grantRotation);
           return Response.json(
@@ -1547,7 +1556,7 @@ export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL,
           // affected user's active sessions (old ids dead).
           const revokeRotation = await rotateUserSessionsForEnv(env, record.internalUserId, nowMs);
           if (revokeRotation.unavailable) {
-            console.warn("[iaaa] session rotation skipped: session listing unavailable");
+            structuredLog.warn("auth.session_rotation_skipped", { message: "[iaaa] session rotation skipped: session listing unavailable" });
           }
           const revokeRotationCookie = sessionRotationCookie(request, revokeRotation);
           // Issue #3155 (Q9): granter-revocation pass, mirroring
@@ -1559,7 +1568,7 @@ export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL,
           try {
             const passEntries = await listSessionFamilyEntries(env, "iaaa-membership:");
             if (!passEntries) {
-              console.warn("[iaaa] granter-revocation pass skipped: membership listing unavailable");
+              structuredLog.warn("auth.granter_revocation_pass_skipped", { message: "[iaaa] granter-revocation pass skipped: membership listing unavailable" });
               granterRevocationPass = { reviewed: 0, revokedBindings: 0, revokedMemberships: [], skipped: true, auditFailures: [], reason: "listing-unavailable" };
             } else {
               const pass = await runGranterRevocationPass({
@@ -1579,18 +1588,18 @@ export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL,
                     nowMs,
                   });
                   if (!audited) {
-                    console.warn(`[iaaa] granter-revocation pass audit failed for ${passRevokedId}`);
+                    structuredLog.warn("auth.granter_revocation_pass_audit_failed", { message: `[iaaa] granter-revocation pass audit failed for ${passRevokedId}`, membershipId: passRevokedId });
                     auditFailures.push(passRevokedId);
                   }
                 } catch {
-                  console.warn(`[iaaa] granter-revocation pass audit threw for ${passRevokedId}`);
+                  structuredLog.warn("auth.granter_revocation_pass_audit_threw", { message: `[iaaa] granter-revocation pass audit threw for ${passRevokedId}`, membershipId: passRevokedId });
                   auditFailures.push(passRevokedId);
                 }
               }
               granterRevocationPass = { ...pass, auditFailures };
             }
           } catch {
-            console.warn("[iaaa] granter-revocation pass failed; grants remain visible in the review queue");
+            structuredLog.warn("auth.granter_revocation_pass_failed", { message: "[iaaa] granter-revocation pass failed; grants remain visible in the review queue" });
             granterRevocationPass = { reviewed: 0, revokedBindings: 0, revokedMemberships: [], skipped: true, auditFailures: [], reason: "pass-error" };
           }
           return Response.json(
@@ -3015,7 +3024,7 @@ export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL,
           // affected user's active sessions (old ids dead).
           const memberGrantRotation = await rotateUserSessionsForEnv(env, targetId, nowMs);
           if (memberGrantRotation.unavailable) {
-            console.warn("[iaaa] session rotation skipped: session listing unavailable");
+            structuredLog.warn("auth.session_rotation_skipped", { message: "[iaaa] session rotation skipped: session listing unavailable" });
           }
           const memberGrantRotationCookie = sessionRotationCookie(request, memberGrantRotation);
           return Response.json(
@@ -3081,7 +3090,7 @@ export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL,
           // affected user's active sessions (old ids dead).
           const memberRevokeRotation = await rotateUserSessionsForEnv(env, record.internalUserId, nowMs);
           if (memberRevokeRotation.unavailable) {
-            console.warn("[iaaa] session rotation skipped: session listing unavailable");
+            structuredLog.warn("auth.session_rotation_skipped", { message: "[iaaa] session rotation skipped: session listing unavailable" });
           }
           const memberRevokeRotationCookie = sessionRotationCookie(request, memberRevokeRotation);
           // Issue #3155 (Q9): granter-revocation pass. Once this
@@ -3095,7 +3104,7 @@ export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL,
           try {
             const passEntries = await listSessionFamilyEntries(env, "iaaa-membership:");
             if (!passEntries) {
-              console.warn("[iaaa] granter-revocation pass skipped: membership listing unavailable");
+              structuredLog.warn("auth.granter_revocation_pass_skipped", { message: "[iaaa] granter-revocation pass skipped: membership listing unavailable" });
               granterRevocationPass = { reviewed: 0, revokedBindings: 0, revokedMemberships: [], skipped: true, auditFailures: [], reason: "listing-unavailable" };
             } else {
               const pass = await runGranterRevocationPass({
@@ -3115,18 +3124,18 @@ export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL,
                     nowMs,
                   });
                   if (!audited) {
-                    console.warn(`[iaaa] granter-revocation pass audit failed for ${passRevokedId}`);
+                    structuredLog.warn("auth.granter_revocation_pass_audit_failed", { message: `[iaaa] granter-revocation pass audit failed for ${passRevokedId}`, membershipId: passRevokedId });
                     auditFailures.push(passRevokedId);
                   }
                 } catch {
-                  console.warn(`[iaaa] granter-revocation pass audit threw for ${passRevokedId}`);
+                  structuredLog.warn("auth.granter_revocation_pass_audit_threw", { message: `[iaaa] granter-revocation pass audit threw for ${passRevokedId}`, membershipId: passRevokedId });
                   auditFailures.push(passRevokedId);
                 }
               }
               granterRevocationPass = { ...pass, auditFailures };
             }
           } catch {
-            console.warn("[iaaa] granter-revocation pass failed; grants remain visible in the review queue");
+            structuredLog.warn("auth.granter_revocation_pass_failed", { message: "[iaaa] granter-revocation pass failed; grants remain visible in the review queue" });
             granterRevocationPass = { reviewed: 0, revokedBindings: 0, revokedMemberships: [], skipped: true, auditFailures: [], reason: "pass-error" };
           }
           return Response.json(
@@ -3251,7 +3260,7 @@ export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL,
           // rotate the affected user's active sessions (old ids dead).
           const editRotation = await rotateUserSessionsForEnv(env, granted.membership.internalUserId, nowMs);
           if (editRotation.unavailable) {
-            console.warn("[iaaa] session rotation skipped: session listing unavailable");
+            structuredLog.warn("auth.session_rotation_skipped", { message: "[iaaa] session rotation skipped: session listing unavailable" });
           }
           const editRotationCookie = sessionRotationCookie(request, editRotation);
           return Response.json(
@@ -3333,7 +3342,7 @@ export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL,
           // sessions may do — rotate the affected user's sessions.
           const denyRotation = await rotateUserSessionsForEnv(env, targetId, nowMs);
           if (denyRotation.unavailable) {
-            console.warn("[iaaa] session rotation skipped: session listing unavailable");
+            structuredLog.warn("auth.session_rotation_skipped", { message: "[iaaa] session rotation skipped: session listing unavailable" });
           }
           const denyRotationCookie = sessionRotationCookie(request, denyRotation);
           return Response.json(
@@ -3396,7 +3405,7 @@ export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL,
           // the user's sessions may do — rotate them as well.
           const clearRotation = await rotateUserSessionsForEnv(env, targetId, nowMs);
           if (clearRotation.unavailable) {
-            console.warn("[iaaa] session rotation skipped: session listing unavailable");
+            structuredLog.warn("auth.session_rotation_skipped", { message: "[iaaa] session rotation skipped: session listing unavailable" });
           }
           const clearRotationCookie = sessionRotationCookie(request, clearRotation);
           return Response.json(

@@ -40,6 +40,14 @@ import { nlqWebhookBodySchema } from "../../api/ingressSchemas";
 import { deriveNlqNonce, sharedMemoryReplayStore, validateEmailRecipient } from "../../security/webhookReplay";
 import { ETradeWebhookService } from "../../services/tradingWebhooks";
 
+import { createStructuredLogger } from "../../observability/structuredLogger";
+import { createObservabilitySink } from "../../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "server/routes/messaging",
+});
+
 /**
  * Slice 6 of Qunsultant/cfagent#2902 (Messaging & social) — moves only.
  * The NLQ inbound webhook's single-owner handler and its service
@@ -323,7 +331,7 @@ export async function handleMessagingSagaRoutes(request: Request, env: Env, url:
         const authHeader = request.headers.get("authorization") ?? "";
         const presented = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
         if (!expected || !presented || !timingSafeEqual(presented, expected)) {
-          console.warn("[qa-investigate] denied: no session and no valid service token");
+          structuredLog.warn("messaging.qa_investigate_denied", { message: "[qa-investigate] denied: no session and no valid service token" });
           return Response.json({ error: "Unauthorized: a valid session or service token is required." }, { status: 401 });
         }
       }
@@ -420,10 +428,10 @@ export async function handleMessagingSagaRoutes(request: Request, env: Env, url:
             graphDegraded = expanded.degraded;
           }
         } catch (err) {
-          console.warn(
-            "[retrieval] memory_search graph expansion failed, dense-only:",
-            err instanceof Error ? err.message : String(err),
-          );
+          structuredLog.warn("messaging.retrieval_graph_expansion_failed", {
+            message: "[retrieval] memory_search graph expansion failed, dense-only:",
+            error: err instanceof Error ? err.message : String(err),
+          });
           graphDegraded = true;
         }
       }
@@ -441,10 +449,10 @@ export async function handleMessagingSagaRoutes(request: Request, env: Env, url:
           }),
         );
       } catch (err) {
-        console.warn(
-          "[telemetry] retrieval.completed ingestion failed (ignored):",
-          err instanceof Error ? err.message : String(err),
-        );
+        structuredLog.warn("messaging.telemetry_retrieval_completed_ingestion_failed", {
+          message: "[telemetry] retrieval.completed ingestion failed (ignored):",
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
       return Response.json({ ok: true, chunks, graph, graphDegraded });
     }

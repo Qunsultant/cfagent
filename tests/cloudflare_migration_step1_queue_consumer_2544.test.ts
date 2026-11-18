@@ -283,7 +283,10 @@ describe("step 1 (c)+(d): worker.queue() screener-events branch", () => {
   });
 
   it("denied dispatch (shared-orchestrator owner) is dropped + logged, never retried, never fetched", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    // #3515 S3 batch 6: the denied-dispatch warning now travels as a
+    // structured event (queue.options_analysis_dispatch_denied) on the
+    // console-info JSON fallback, not a console.warn line.
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
     const fetchCalls: FetchCall[] = [];
     const env = makeEnv(fetchCalls);
     const msg = mkMsg(
@@ -296,7 +299,18 @@ describe("step 1 (c)+(d): worker.queue() screener-events branch", () => {
     expect(fetchCalls).toHaveLength(0);
     expect(msg.acked).toBe(true);
     expect(msg.retried).toBe(false);
-    expect(warn.mock.calls.some((c) => String(c[0]).includes("Dropping options_analysis"))).toBe(true);
+    const denied = info.mock.calls
+      .map((c) => {
+        try {
+          return JSON.parse(String(c[0]));
+        } catch {
+          return null;
+        }
+      })
+      .filter((e) => e !== null && e.operation === "queue.options_analysis_dispatch_denied");
+    expect(denied).toHaveLength(1);
+    expect(denied[0].level).toBe("warn");
+    expect(String(denied[0].fields?.message ?? "")).toContain("Dropping options_analysis");
   });
 
   it("no identity retries (never a fabricated identity)", async () => {
