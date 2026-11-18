@@ -2415,6 +2415,19 @@ const BASELINE: Array<[string, string, number]> = [
   // in #4802/#4813/#5024. (The broker-naming sweep #5236 renames the panel
   // to TradeHub, which shrinks this row to 0 in its own slice.)
   ["docs/architecture/transition/deprecations.md", "etrade", 1],
+  // #5404 INTEGRATION (tech-stack inventory, 5 rows / 5 matching lines):
+  // docs/technology/tech-stack.md names the providers its data-provider
+  // adapters integrate (E*TRADE live, Alpaca live, Yahoo delayed, Nasdaq
+  // universe-only, Public.com) — provenance naming of the serving
+  // integration, as in #3761 (MCP server inventory) and #4802/#4813.
+  // Naming the provider is the adapters' job; neutralizing the row would
+  // remove the inventory the tech-stack doc exists to record. Totals move
+  // 1335/10877 -> 1340/10882.
+  ["docs/technology/tech-stack.md", "etrade", 1],
+  ["docs/technology/tech-stack.md", "public.com", 1],
+  ["docs/technology/tech-stack.md", "alpaca", 1],
+  ["docs/technology/tech-stack.md", "yahoo", 1],
+  ["docs/technology/tech-stack.md", "nasdaq", 1],
 ];
 
 const BASELINE_MAP = new Map(BASELINE.map(([f, t, c]) => [`${f}\t${t}`, c]));
