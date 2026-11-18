@@ -58,6 +58,24 @@ export function classifyDeliveryState(pr) {
 }
 
 /**
+ * Parse a payload from `gh pr view --json …` or the GraphQL
+ * `pullRequest` object. Tolerates a UTF-8 BOM (PowerShell's default
+ * `Out-File -Encoding utf8` writes one) and returns null when the text
+ * is not an object rather than throwing.
+ */
+export function parseDeliveryPayload(text) {
+  const clean = String(text ?? '').replace(/^\uFEFF/, '').trim();
+  if (clean.length === 0) return null;
+  try {
+    const parsed = JSON.parse(clean);
+    const pr = parsed?.data?.repository?.pullRequest ?? parsed;
+    return pr && typeof pr === "object" ? pr : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * The one-line advice for a state. Kept here (not in the CLI) so a test pins
  * the wording an agent is expected to follow.
  */

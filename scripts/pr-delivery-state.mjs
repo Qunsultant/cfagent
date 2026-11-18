@@ -25,6 +25,7 @@ import {
   classifyDeliveryState,
   deliveryAdvice,
   deliveryExitCode,
+  parseDeliveryPayload,
 } from "./prDeliveryState.mjs";
 
 function readStdin() {
@@ -54,10 +55,8 @@ const input = process.argv[2] && process.argv[2] !== "-"
   ? readFileSync(process.argv[2], "utf8")
   : readStdin();
 
-let parsed = null;
-try {
-  parsed = JSON.parse(input);
-} catch {
+const parsed = parseDeliveryPayload(input);
+if (!parsed) {
   console.error(
     "pr-delivery-state: expected JSON (gh pr view --json … or the GraphQL pullRequest object)",
   );
