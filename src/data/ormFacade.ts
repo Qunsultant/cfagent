@@ -298,15 +298,13 @@ export class DatabaseORM {
     // 8b. Inbound webhook replay-protection nonces (issue #143 P0)
     this.sql.exec(ormTableSql("webhook_replay_nonces"));
 
-    // 8c. Scheduled-run reports (issues #278, #308) — the DDL lives in
-    // src/services/scheduledReports.ts ensureScheduledReportsTable(),
-    // which is migration-safe on pre-#308 tables (PRAGMA-checked
-    // ALTER for generation_id before the unique index).
-    // Issue #389: the ORM used to carry its own duplicate DDL here,
-    // creating the unique index WITHOUT the column guard — any DO
-    // whose mas_reports predated #308 threw SQLITE_ERROR
-    // "no such column: generation_id" on every schema init.
-    // Never duplicate this DDL again; the service is the single source.
+    // 8c. Scheduled-run reports (issues #278, #308, #389) —
+    // ensureScheduledReportsTable() in src/services/scheduledReports.ts
+    // delegates to storePorts(sql).write.ensureSchema()
+    // (DoSqliteCanonicalReportStore.ensureSchema), whose parameterized
+    // DDL lives in src/data/schemaComponent/doCatalogue.ts and includes
+    // the migration-safe PRAGMA check for generation_id before creating
+    // the unique index. Never duplicate this DDL here.
     ensureScheduledReportsTable(this.sql);
 
     // 9. Trades & E*TRADE Orders Table

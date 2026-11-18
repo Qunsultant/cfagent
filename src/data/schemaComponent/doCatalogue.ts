@@ -3,21 +3,20 @@
  * home for statement text.
  *
  * The catalogue is the DO plane's single home for statement
- * text; the 50 DO adapters and the two schema-marker modules
- * assemble their DDL from its codes and remain the executors
+ * text; the DO SQLite adapters (47 `src/data/doSqlite*Adapter.ts` files
+ * on disk; 50+ exported adapter classes/factories) and the schema-marker
+ * modules assemble their DDL from its codes and remain the executors
  * (delegation, not absorption). The DO execution idiom is
  * unchanged: `this.sql.exec(...)` against the DO SqlStorage
  * handle, with the catalogue statement as the argument.
  *
- * Scope (measured from the base tree b3062e2e, not the filing
- * counts): 107 statements — 69 table statements, 37 index
- * statements, 1 unique-index statement. The filing's "76
- * TABLE / 35 INDEX" is a grep count: 9 of the 77 TABLE lines
- * are comment mentions (one per file, see the build report),
- * 2 are the frozen JobPipeline v1 migration copies, and 2 of
- * the executed indexes already live in the ORM catalogue
- * (job_run_records_recent_idx, unified_schedules_created_idx —
- * read via ormIndexSql, never duplicated here).
+ * Scope: 107 statements — 69 CREATE TABLE statements (note: 8 entries —
+ * `mas_agent_workspace_files`, `mas_async_jobs`, `mas_autopilot`,
+ * `mas_policy_verdicts`, `mas_report_confirmations`, `mas_run_aliases`,
+ * `mas_runs`, `mas_screener_presets` — carry leading whitespace/newline
+ * inside their template literal, so un-trimmed verb greps undercount),
+ * 37 index statements, 1 unique-index statement. The pin tests
+ * (`tests/schema_component_*`) are the live source of truth.
  *
  * What stays inline (P3's scope, asserted by the wiring test):
  * every probed/guarded reconciliation statement — the additive
