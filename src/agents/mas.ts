@@ -287,21 +287,41 @@ export function createMAS({ env, sessionId, requestId, sql, audit }: MASOptions)
       const now = new Date().toISOString();
 
       if (isPayment) {
-        let existingTx = null as ReturnType<typeof ormPorts.transactions.findById>;
+        let existingTx: ReturnType<typeof ormPorts.transactions.findById>;
         try {
           existingTx = ormPorts.transactions.findById(draftId);
-        } catch {}
+        } catch (err) {
+          const errorMsg = err instanceof Error ? err.message : String(err);
+          audit("payment.confirm_failed", "payments", {
+            draftId,
+            stage: "lookup",
+            error: errorMsg,
+          });
+          throw new Error(
+            `[FAILURE_PAYMENT_LEDGER_LOOKUP_FAILED] Failed to load payment draft ${draftId}: ${errorMsg}`,
+          );
+        }
+        if (!existingTx) {
+          audit("payment.confirm_failed", "payments", {
+            draftId,
+            stage: "lookup",
+            error: "not_found",
+          });
+          throw new Error(
+            `[FAILURE_PAYMENT_DRAFT_NOT_FOUND] Payment draft ${draftId} does not exist in the ledger.`,
+          );
+        }
 
-        const action = existingTx?.action || "charge";
-        const amount = existingTx ? Number(existingTx.amount) : 0;
-        const currency = existingTx?.currency || "USD";
-        const customer = existingTx?.customer || "user";
-        const gateway = (existingTx?.gateway || "stripe") as SupportedGateway;
+        const action = existingTx.action || "charge";
+        const amount = Number(existingTx.amount);
+        const currency = existingTx.currency || "USD";
+        const customer = existingTx.customer || "user";
+        const gateway = (existingTx.gateway || "stripe") as SupportedGateway;
 
         if (decision === "approved") {
           let gatewayResult: any = null;
-          let checkoutUrl = existingTx?.checkoutUrl || "";
-          let gatewayRef = existingTx?.gatewayRef || "";
+          let checkoutUrl = existingTx.checkoutUrl || "";
+          let gatewayRef = existingTx.gatewayRef || "";
 
           if (action === "charge" || action === "invoice") {
             gatewayResult = await paymentGateway.createCheckout({
@@ -311,7 +331,7 @@ export function createMAS({ env, sessionId, requestId, sql, audit }: MASOptions)
               customer,
               gateway,
               userLogin: sessionId,
-              description: note || existingTx?.note || `Payment of ${amount} ${currency} for ${customer}`,
+              description: note || existingTx.note || `Payment of ${amount} ${currency} for ${customer}`,
             });
             checkoutUrl = gatewayResult.checkoutUrl;
             gatewayRef = gatewayResult.gatewayRef;
@@ -320,7 +340,7 @@ export function createMAS({ env, sessionId, requestId, sql, audit }: MASOptions)
               transactionId: draftId,
               amount,
               gateway,
-              gatewayRef: existingTx?.gatewayRef || "",
+              gatewayRef: existingTx.gatewayRef || "",
               userLogin: sessionId,
               reason: note,
             });
@@ -336,7 +356,23 @@ export function createMAS({ env, sessionId, requestId, sql, audit }: MASOptions)
               note: note || "Approved by human authorizer",
               updatedAt: now,
             });
-          } catch {}
+          } catch (err) {
+            const errorMsg = err instanceof Error ? err.message : String(err);
+            audit("payment.ledger_divergence", "payments", {
+              draftId,
+              action,
+              gateway,
+              gatewayRef,
+              checkoutUrl,
+              amount,
+              currency,
+              reconcileStatus: "pending_reconcile",
+              error: errorMsg,
+            });
+            throw new Error(
+              `[FAILURE_PAYMENT_LEDGER_WRITE_FAILED] Gateway ${action} (${gatewayRef || "pending"}) succeeded for ${draftId}, but ledger update failed and requires reconciliation: ${errorMsg}`,
+            );
+          }
 
           const payload = {
             draftId,
@@ -362,7 +398,17 @@ export function createMAS({ env, sessionId, requestId, sql, audit }: MASOptions)
               note: note || "Rejected by human reviewer",
               updatedAt: now,
             });
-          } catch {}
+          } catch (err) {
+            const errorMsg = err instanceof Error ? err.message : String(err);
+            audit("payment.reject_failed", "payments", {
+              draftId,
+              stage: "ledger_update",
+              error: errorMsg,
+            });
+            throw new Error(
+              `[FAILURE_PAYMENT_LEDGER_WRITE_FAILED] Failed to record payment rejection for ${draftId}: ${errorMsg}`,
+            );
+          }
 
           const payload = {
             draftId,
