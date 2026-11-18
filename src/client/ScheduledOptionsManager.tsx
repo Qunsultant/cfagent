@@ -160,6 +160,10 @@ export function ScheduledOptionsManager({
   const [scheduledDate, setScheduledDate] = useState("");
   const [thesis, setThesis] = useState<"bullish" | "bearish" | "neutral" | "directional">("bullish");
   const [riskProfile, setRiskProfile] = useState<"conservative" | "balanced" | "aggressive">("balanced");
+  // Issue #5189: the schedule's run target. Empty = the tenant's context.
+  const [brokerId, setBrokerId] = useState<string>("");
+  const [mode, setMode] = useState<"" | "paper" | "live">("");
+  const [accountId, setAccountId] = useState<string>("");
   const [pushToSlack, setPushToSlack] = useState(true);
   const [slackChannel, setSlackChannel] = useState("#options-alerts");
   const [emailTo, setEmailTo] = useState("");
@@ -452,6 +456,10 @@ export function ScheduledOptionsManager({
       setPresetId(typeof payload.presetId === "string" ? payload.presetId : "");
       setThesis(payload.thesis || "bullish");
       setRiskProfile(payload.riskProfile || "balanced");
+      // Issue #5189: hydrate the stored run target; absent stays "tenant default".
+      setBrokerId(typeof payload.brokerId === "string" ? payload.brokerId : "");
+      setMode(payload.mode === "paper" || payload.mode === "live" ? payload.mode : "");
+      setAccountId(typeof payload.accountId === "string" ? payload.accountId : "");
       // Issue #2438 (conflicting-state rule): edit shows the stored
       // value or the empty/off state — never the create defaults.
       // Previously an absent pushToSlack read as true (!== false) and
@@ -520,6 +528,9 @@ export function ScheduledOptionsManager({
       scheduledDate,
       thesis,
       riskProfile,
+      brokerId,
+      mode,
+      accountId,
       pushToSlack,
       slackChannel,
       emailTo,
@@ -700,6 +711,9 @@ export function ScheduledOptionsManager({
       scheduledDate,
       thesis,
       riskProfile,
+      brokerId,
+      mode,
+      accountId,
       pushToSlack,
       slackChannel,
       emailTo,
@@ -994,6 +1008,12 @@ export function ScheduledOptionsManager({
           setThesis={setThesis}
           riskProfile={riskProfile}
           setRiskProfile={setRiskProfile}
+          brokerId={brokerId}
+          setBrokerId={setBrokerId}
+          mode={mode}
+          setMode={setMode}
+          accountId={accountId}
+          setAccountId={setAccountId}
           pushToSlack={pushToSlack}
           setPushToSlack={setPushToSlack}
           slackChannel={slackChannel}

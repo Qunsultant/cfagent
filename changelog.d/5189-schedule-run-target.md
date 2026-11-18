@@ -1,0 +1,3 @@
+### Added
+
+- **An options schedule can choose its broker, mode and account (#5189, slice 3 of #5187):** the schedule form gains a run-target row (Broker / Mode / Account), the payload stores `brokerId`/`mode`/`accountId` only when chosen, the run resolves them through `RunBrokerContext` (schedule selection beats the tenant default, `optionChains` is gated), and the schedule row shows `broker · mode` — or `tenant default` when the schedule predates the field, which is every schedule already armed. The criteria schema accepts Public and an `accountId` and still refuses a broker without option chains at creation (a named 400, not a cron that fails forever).

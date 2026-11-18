@@ -396,6 +396,21 @@ describe("scheduled firer dispatch gate (#4854)", () => {
       resolveScheduledFirerHostDispatch(boundEnv({ TENANT_BROKER_ID: "tastytrade" }), "TEST", undefined),
     ).rejects.toThrow(/FAILURE_BROKER_UNAVAILABLE/);
   });
+
+  it("carries the schedule's stored run target into the dispatch context (#5189)", async () => {
+    const host = await resolveScheduledFirerHostDispatch(
+      boundEnv({ TENANT_BROKER_ID: "etrade" }),
+      "TEST",
+      undefined,
+      { brokerId: "alpaca", mode: "paper", accountId: "acc-9", source: "schedule" },
+    );
+
+    expect(host.context.brokerId).toBe("alpaca");
+    expect(host.context.mode).toBe("paper");
+    expect(host.context.accountId).toBe("acc-9");
+    expect(host.context.source).toBe("schedule");
+    expect(host.broker).toEqual({ broker: "alpaca", mode: "paper" });
+  });
 });
 
 describe("scheduled firer panel through the host (#4854)", () => {

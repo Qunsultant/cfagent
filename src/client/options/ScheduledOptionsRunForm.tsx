@@ -106,6 +106,10 @@ export function ScheduledOptionsRunForm({ activeEnv, userLogin }: ScheduledOptio
       derivedProfileId: "",
       noViewDraft: blankNoViewConstraintsDraft(),
       environment: activeEnv,
+      // Issue #5189: Run Now uses whatever the form carries; empty = tenant context.
+      brokerId: "",
+      mode: "",
+      accountId: "",
     };
 
     // The hero Run Now's own guard, verbatim: a run needs a target.

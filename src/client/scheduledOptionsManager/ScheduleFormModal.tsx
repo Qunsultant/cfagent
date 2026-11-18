@@ -9,6 +9,7 @@ import {
   type DiscoveryFormSectionsProps,
 } from "./DiscoveryFormSections";
 import { CadenceFields, type CadenceFieldsProps } from "./CadenceFields";
+import { RunTargetFields, type RunTargetFieldsProps } from "./RunTargetFields";
 import {
   ThesisRiskFields,
   type ThesisRiskFieldsProps,
@@ -22,6 +23,7 @@ export interface ScheduleFormModalProps
   extends DiscoveryFormSectionsProps,
     CadenceFieldsProps,
     ThesisRiskFieldsProps,
+    RunTargetFieldsProps,
     NotificationFieldsProps {
   editingScheduleId: string | null;
   submitting: boolean;
@@ -375,6 +377,16 @@ export function ScheduleFormModal(props: ScheduleFormModalProps) {
                 setThesis={props.setThesis}
                 riskProfile={props.riskProfile}
                 setRiskProfile={props.setRiskProfile}
+              />
+              <RunTargetFields
+                jobType={props.jobType}
+                brokerId={props.brokerId}
+                setBrokerId={props.setBrokerId}
+                mode={props.mode}
+                setMode={props.setMode}
+                accountId={props.accountId}
+                setAccountId={props.setAccountId}
+                tenantBrokerId={props.tenantBrokerId}
               />
               <NotificationFields
                 jobType={props.jobType}

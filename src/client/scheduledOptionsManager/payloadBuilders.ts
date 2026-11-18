@@ -188,6 +188,11 @@ export function buildScheduleSubmission(
         webhookUrl: form.webhookUrl.trim() || undefined,
         environment: form.environment,
         trigger: "scheduled",
+        // Issue #5189: the schedule's own run target, only when chosen. An
+        // absent field keeps the golden-pinned legacy payload byte-identical.
+        ...(form.brokerId ? { brokerId: form.brokerId } : {}),
+        ...(form.mode ? { mode: form.mode } : {}),
+        ...((form.accountId ?? "").trim() ? { accountId: (form.accountId ?? "").trim() } : {}),
       };
     }
   }

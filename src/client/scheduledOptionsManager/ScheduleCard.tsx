@@ -1,6 +1,7 @@
 import React from "react";
 import { Badge, Button, type TableColumn } from "../components/ui";
 import type { StrategyProfile } from "../../trading";
+import { brokerPresentation } from "../../trading";
 import type { ScheduledTaskItem } from "./types";
 import { cadenceText, formatNextRun, payloadOf } from "./format";
 import { buildScheduleDetail, scheduleKind, type PresetRef } from "./scheduleDetail";
@@ -127,16 +128,13 @@ export function buildScheduleRowColumns(
           (typeof payload.env === "string" && payload.env) ||
           ctx.activeEnv;
         // Issue #3655: broker + mode from the stored payload (recorded
-        // at creation); legacy payloads without them read as the
-        // environment-derived mode with no broker claim.
+        // at creation). Issue #5189: an absent broker means "tenant default" —
+        // said out loud on the row rather than left blank — and the label comes
+        // from brokerPresentation, never a local literal.
         const brokerLabel =
           typeof payload.brokerId === "string" && payload.brokerId
-            ? payload.brokerId === "etrade"
-              ? "E*TRADE"
-              : payload.brokerId === "alpaca"
-                ? "Alpaca"
-                : payload.brokerId
-            : "";
+            ? brokerPresentation(payload.brokerId).label
+            : "tenant default";
         const modeLabel =
           typeof payload.mode === "string" && payload.mode
             ? payload.mode
@@ -149,8 +147,7 @@ export function buildScheduleRowColumns(
           <div className="schedule-row-stack">
             <span className="schedule-row-value">{model.scope}</span>
             <span className="schedule-row-muted">
-              {owner} · {environment}
-              {brokerLabel ? ` · ${brokerLabel}` : ""}
+              {owner} · {environment} · {brokerLabel}
               {modeLabel ? ` · ${modeLabel}` : ""}
             </span>
           </div>
