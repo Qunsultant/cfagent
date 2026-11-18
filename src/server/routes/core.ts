@@ -43,6 +43,14 @@ import { createBreakerTripSubscriber } from "../../breakers/breakerTripAlert";
 import { postSlackText, resourceSlackPost } from "../../agents/resourceGoals";
 import type { SlackDeliveryEnv } from "../../agents/social/delivery";
 
+import { createStructuredLogger } from "../../observability/structuredLogger";
+import { createObservabilitySink } from "../../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "server/routes/core",
+});
+
 /**
  * Slice 2 of Qunsultant/cfagent#2902 (Core dispatcher) — moves only.
  * The early Core branches of handleFetch, verbatim and in original order:
@@ -180,7 +188,7 @@ export async function handleCoreLateRoutes(request: Request, env: Env, url: URL,
           userLogin = verified.serviceLogin;
           principalKind = "service-token";
         } else if (presented) {
-          console.warn("[service-token] denied: invalid, expired, revoked, unprovisioned, or cross-tenant token");
+          structuredLog.warn("core.service_token_denied", { message: "[service-token] denied: invalid, expired, revoked, unprovisioned, or cross-tenant token" });
           try {
             await recordAuditEvent(createWiredAuditStore(env), {
               timestamp: Date.now(),
@@ -429,7 +437,7 @@ export async function handleCoreLateRoutes(request: Request, env: Env, url: URL,
             invalidateSessionCache(sessionId);
           }
         } catch (renewErr) {
-          console.warn("[session] renewal failed; page served with the existing session", renewErr);
+          structuredLog.warn("core.session_renewal_failed", { message: "[session] renewal failed; page served with the existing session", error: renewErr instanceof Error ? renewErr.message : String(renewErr) });
         }
 
         // Issue #3113 (#945 Q5): re-issue the session cookie and,
@@ -486,8 +494,8 @@ export function ensureBreakerDurability(env: Env): void {
     },
   });
   void ensureBreakerStateSchema(adapter.db).catch((err: unknown) => {
-    console.warn(
-      `[breaker] schema ensure failed, loads degrade to in-memory until it succeeds: ${err instanceof Error ? err.message : String(err)}`
-    );
+    structuredLog.warn("core.breaker_schema_ensure_failed", {
+      message: `[breaker] schema ensure failed, loads degrade to in-memory until it succeeds: ${err instanceof Error ? err.message : String(err)}`,
+    });
   });
 }

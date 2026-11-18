@@ -248,15 +248,29 @@ describe("worker queue() (#1185)", () => {
   it("drops (acks, never retries) an ownerless message when the service user is unprovisioned (#2331 slice 2)", async () => {
     const { env, search } = fakeEnv(SERVICE_LOGIN, { provisioned: false });
     const { batch, state } = batchWith({ symbol: "AAPL" });
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    // #3515 S3 batch 6: the denied-dispatch warning now travels as a
+    // structured event (queue.options_analysis_dispatch_denied) on the
+    // console-info JSON fallback, not a console.warn line.
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
     try {
       await (worker as any).queue(batch, env, undefined);
       expect(search.requests).toHaveLength(0);
       expect(state.acked).toBe(1);
       expect(state.retried).toBe(0);
-      expect(warnSpy).toHaveBeenCalled();
+      const denied = info.mock.calls
+        .map((c) => {
+          try {
+            return JSON.parse(String(c[0]));
+          } catch {
+            return null;
+          }
+        })
+        .filter((e) => e !== null && e.operation === "queue.options_analysis_dispatch_denied");
+      expect(denied).toHaveLength(1);
+      expect(denied[0].level).toBe("warn");
+      expect(String(denied[0].fields?.message ?? "")).toContain("Dropping options_analysis");
     } finally {
-      warnSpy.mockRestore();
+      info.mockRestore();
     }
   });
 
