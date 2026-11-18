@@ -8,6 +8,7 @@
 
 import {
   ALL_FEATURE_FLAGS,
+  DEFAULT_SCHEDULE_CHAT_FLAG_VALUE,
   type FeatureEvaluationContext,
   type FeatureFlag,
   type FeatureFlagPort,
@@ -21,7 +22,9 @@ export class InMemoryFeatureFlagAdapter implements FeatureFlagPort {
 
   constructor(initialFlags?: Partial<Record<FeatureFlag, boolean>>) {
     // Default-closed for all known flags, except payment_assurance
-    // (issue #2054: default ON, overridable via initialFlags).
+    // (issue #2054: default ON, overridable via initialFlags) and
+    // schedule_chat (issue #4249: default ON — chat is the default
+    // scheduling channel, overridable via initialFlags).
     // Issue #2596: options product flags are NOT pre-filled here —
     // an absent product flag must inherit its parent (see isEnabled),
     // and pre-filling false would mask that inheritance. Non-product
@@ -30,7 +33,8 @@ export class InMemoryFeatureFlagAdapter implements FeatureFlagPort {
       if (!getFeatureFlagParent(flag)) {
         this.flags.set(
           flag,
-          flag === "payment_assurance",
+          flag === "payment_assurance" ||
+            (flag === "schedule_chat" && DEFAULT_SCHEDULE_CHAT_FLAG_VALUE),
         );
       }
     }

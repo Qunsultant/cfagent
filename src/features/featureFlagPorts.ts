@@ -59,9 +59,25 @@ export type FeatureFlag =
   // Issue #5122 (#5109 S8): flagship cutover flag for the nightly
   // OODA research engine job (`research:<runId>`). OFF rolls back to
   // the direct pipeline entry.
-  | "research_engine_cutover";
+  | "research_engine_cutover"
+  // Issue #4249 ([3122] agentic scheduling): one flag per scheduling
+  // entry point. schedule_chat gates schedule requests from the chat
+  // (the schedule.* A2A ops); schedule_nlq gates the NLQ schedule
+  // intents (nlq.execute's scheduling plans). Defaults: chat ON
+  // (the default channel, listed first), NLQ OFF (secondary).
+  | "schedule_chat"
+  | "schedule_nlq";
 
 export const DEFAULT_MONETIZATION_FLAG_VALUE = false;
+
+/**
+ * Issue #4249: the scheduling-channel defaults, in one home (the
+ * adapters and the channel gate read these, never literals).
+ * Chat is the default channel (ON when unconfigured); NLQ is
+ * secondary and OFF when unconfigured.
+ */
+export const DEFAULT_SCHEDULE_CHAT_FLAG_VALUE = true;
+export const DEFAULT_SCHEDULE_NLQ_FLAG_VALUE = false;
 
 export const ALL_FEATURE_FLAGS: readonly FeatureFlag[] = [
   "screener",
@@ -104,6 +120,11 @@ export const ALL_FEATURE_FLAGS: readonly FeatureFlag[] = [
   "broker_panel_contract",
   // Issue #5122: flagship cutover flag for research:<runId>.
   "research_engine_cutover",
+  // Issue #4249: agentic-scheduling channels — chat (default ON) and
+  // NLQ (default OFF). Registered here; evaluated through the
+  // FeatureFlagPort; no second flag mechanism.
+  "schedule_chat",
+  "schedule_nlq",
 ] as const;
 
 /**

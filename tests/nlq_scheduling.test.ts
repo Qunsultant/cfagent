@@ -128,6 +128,10 @@ describe("NLQ scheduling executes against the real scheduling port (issue #109)"
       APP_BASE_URL: "https://agent.openaimp.com",
       AI_SEARCH_ENDPOINT: "https://ai-search.internal",
       ETRADE_ENVIRONMENT: "sandbox",
+      // Issue #4249: these tests drive the NLQ scheduling entry
+      // point, so the NLQ channel is explicitly on here (its default
+      // is OFF — unconfigured NLQ scheduling refuses FEATURE_DISABLED).
+      FEATURE_SCHEDULE_NLQ: "1",
       ET_API_KEY: "sandbox_consumer_key_123",
       ET_API_SECRET: "sandbox_consumer_secret_456",
       ET_BASE_URL: "https://apisb.etrade.com/v1",
@@ -421,6 +425,8 @@ describe("NLQ scheduling F1 allow-list (issue #3122)", () => {
       APP_BASE_URL: "https://agent.openaimp.com",
       AI_SEARCH_ENDPOINT: "https://ai-search.internal",
       ETRADE_ENVIRONMENT: "sandbox",
+      // Issue #4249: NLQ channel explicitly on (see first block).
+      FEATURE_SCHEDULE_NLQ: "1",
       ET_API_KEY: "sandbox_consumer_key_123",
       ET_API_SECRET: "sandbox_consumer_secret_456",
       ET_BASE_URL: "https://apisb.etrade.com/v1",

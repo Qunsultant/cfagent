@@ -143,6 +143,11 @@ describe("Cloudflare Voice Trading Agent (E*TRADE Desk)", () => {
     // Issue #5147: this suite pins the E*TRADE desk, so the selection is
     // explicit — the no-selection default is the platform default (Alpaca).
     TENANT_BROKER_ID: "etrade",
+    // Issue #4249: the voice turns below drive the NLQ scheduling entry
+    // point (executeNaturalLanguageQuery → scheduling branch), so the
+    // NLQ channel is opted in here; unconfigured NLQ scheduling refuses
+    // by design (schedule_nlq defaults OFF).
+    FEATURE_SCHEDULE_NLQ: "1",
   };
 
   beforeEach(() => {
