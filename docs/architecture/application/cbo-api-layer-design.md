@@ -21,6 +21,12 @@
   conforming edits the amendment required; the original decisions stand,
   and §15 fixes the hostnames the shared servers answer at plus the
   mechanics of getting there.
+- Amendment 2026-11-18 (same day, before any slice builds on this
+  design): §16 records the CLO coordination flag (parent-verified):
+  CBO sequences around the CLO-owned data-model issues #5023 and its
+  adjacent sub-issues #5037/#5038/#5040/#5041, building none of them.
+  §§1/10/12/13/14 carry the conforming edits the amendment required;
+  the original decisions stand.
 - Inventory basis: the 2026-11-18 parity inventory, basis `cd094b6f`.
   Where the design base drifted from the inventory basis, the drift is
   noted at the citation (handler line count, lifecycle route lines).
@@ -54,6 +60,10 @@ Reading rules:
   transport, the path-collapse mechanics, the CORS/origin policy, and
   the routing prerequisites — including a REQUIRED, UNPERFORMED DNS /
   custom-domain dashboard check with a STOP rule (§15.5).
+- §16 records the CLO coordination: CBO sequences around the CLO-owned
+  data-model issues (#5023 + #5037/#5038/#5040/#5041), building none
+  of them. The slice-start re-check for in-flight CLO work is a
+  standing requirement on every slice builder (§10).
 - §12 records exactly what was verified and what was not. Nothing in
   this doc claims a live, runtime, or signed-in verification.
 
@@ -646,6 +656,17 @@ slice. Slices may be FILED in parallel with the design PR, but no slice
 PR opens before the design lands, so slice bodies can cite the merged
 ADR number.
 
+Standing requirement — slice-start re-check for in-flight CLO work
+(§16): before claiming or building, every slice builder re-checks for
+in-flight CLO work on the shared modules — live issue state of the
+adjacent CLO issues (#5037/#5038/#5040/#5041) plus open branches/PRs
+touching the modules the slice will touch — and records the check
+(date, issues checked, result) in the slice's claim or body. If an
+overlapping CLO fix is in-flight, the slice waits/sequences — never
+collides, never duplicates, never pre-empts. The check is repeated if
+the slice stalls; a design-time check never substitutes for one at
+build time. An open-but-unclaimed CLO issue does not block a slice.
+
 ### 10.1 Gap-closing foundation (first; CISO-coordinated)
 
 | Slice | Gap | Work | Reuse |
@@ -653,7 +674,7 @@ ADR number.
 | GAP-1 | PDP unwired | Wire `authorize()` into live route handlers through the existing seam (`checkPermission`, `iaaaPdpSeam.ts:51`; `createAgentPdpChecker` pattern), fail-closed. CISO coordination: #5350. CISO review on the PR. | iaaaPdpSeam.ts, pepGateway.ts, agentAccess.ts |
 | GAP-2 | No money permission | ADD the money/ledger permission to the SAME 17-permission table with role bindings per the existing pattern (CISO decides name + bindings). CISO coordination: #5348. CISO review on the PR. | authorization.ts, pdpPorts.ts |
 | GAP-3 | System principal open (G-AUD-3) | Define + wire the system-principal binding story (`service:<login>`, `agentIdForServiceLogin`) through the existing modules; G-AUD-3 threading advanced. CISO coordination: #5349. CISO review on the PR. | serviceIdentity.ts, agentAccess.ts, iaaaMembershipStore.ts, serviceDispatch.ts |
-| GAP-4 | MCP role-to-scope seam | Plug the IAAA role-to-scope adapter into the ADR 0012 seam (`mcpPermissionPorts.ts:508`), replacing permissive defaults with role-derived scopes where specified (`mcp:payments` for the payment surface). CISO coordination: #5350. CISO review on the PR. Re-check the file at slice start (recent feature commits). | mcpPermissionPorts.ts (ADR 0012) |
+| GAP-4 | MCP role-to-scope seam | Plug the IAAA role-to-scope adapter into the ADR 0012 seam (`mcpPermissionPorts.ts:508`), replacing permissive defaults with role-derived scopes where specified (`mcp:payments` for the payment surface). CISO coordination: #5350. CISO review on the PR. Re-check the file at slice start (recent feature commits). CLO coordination (§16): sequence around #5041 (registry completeness — sync-set pin, paid-tool queueing, table-read gating); build no registry-completeness fix. | mcpPermissionPorts.ts (ADR 0012) |
 | GAP-5 | ExecutionContext staged wiring | Advance the staged wiring for the commercial path: one validated context through the workflow-to-handler path, PDP decision embedded, revalidated at boundaries. CISO coordination: #5350. CISO review on the PR. | executionContext.ts (#1078) |
 
 Sequencing rule: the GAP slices proceed on the CISO-owned specs with
@@ -668,8 +689,8 @@ conclusions where they overlap (chain shape, registry shape).
 
 | Slice | Gap | Work | Reuse |
 |---|---|---|---|
-| 1 | G-1 | LEDGER GATE — IAAA-CONFORMANT (no interim, per §2.5): the gate consults the PDP through seam A (GAP-1/GAP-5) for the money/ledger permission (GAP-2) over the system actor's binding (GAP-3); sequences after the gap slices land; waits ONLY on a real collision, never idle. REMOVE `record-native` only after re-verifying zero production callers by repo-wide grep (workflow step `record-native-ledger` calls the native PORT, not HTTP — verified at filing); if any caller is found, gate it identically instead and say so. Tests must prove: both legitimate server-side callers (`src/payments/ledger.ts` `ledgerFetch`, `src/services/cfpayLedger.ts` `cfpayLedgerFetch`) succeed through the IAAA path, a forged user request is denied, and the permission/denial is audited. No write-path change. The G-1 hole stays open until this slice lands, by the owner's explicit choice. | IAAA modules (authorization.ts, iaaaPdpSeam.ts, executionContext.ts), `serviceDispatch` identity derivation, existing fetchers |
-| 2 | G-4 hole + auth consolidation | Hoist the gates to ONE shared auth module; convert `agenticPayments.ts` + the platform route files to it (no behavior change, pins updated). Fix lifecycle preference GET/POST (`agenticPayments.ts:8761–8815`) to derive `tenantId` from resolved session identity, never from query/body. | Existing gate closures, identity-resolution pattern |
+| 1 | G-1 | LEDGER GATE — IAAA-CONFORMANT (no interim, per §2.5): the gate consults the PDP through seam A (GAP-1/GAP-5) for the money/ledger permission (GAP-2) over the system actor's binding (GAP-3); sequences after the gap slices land; waits ONLY on a real collision, never idle. REMOVE `record-native` only after re-verifying zero production callers by repo-wide grep (workflow step `record-native-ledger` calls the native PORT, not HTTP — verified at filing); if any caller is found, gate it identically instead and say so. Tests must prove: both legitimate server-side callers (`src/payments/ledger.ts` `ledgerFetch`, `src/services/cfpayLedger.ts` `cfpayLedgerFetch`) succeed through the IAAA path, a forged user request is denied, and the permission/denial is audited. No write-path change. The G-1 hole stays open until this slice lands, by the owner's explicit choice. CLO SEQUENCING RULE (§16.3, binding): #5037 (CLO-owned fix for `confirmDraft` reporting success when the ledger write fails, `src/agents/mas.ts:275–385`) is the SAME ledger neighborhood — this slice gates the write-through routes ONLY and fixes NOTHING in `confirmDraft`. At slice start the builder re-verifies #5037's live state; if CLO's fix is in-flight, this slice waits/sequences rather than colliding. The slice's tests account for #5037's state as found at slice start: if CLO's fix has landed, the tests prove the gate against the fixed confirm semantics; if it has not, the tests pin the gate's behaviour without assuming the fix. | IAAA modules (authorization.ts, iaaaPdpSeam.ts, executionContext.ts), `serviceDispatch` identity derivation, existing fetchers |
+| 2 | G-4 hole + auth consolidation | Hoist the gates to ONE shared auth module; convert `agenticPayments.ts` + the platform route files to it (no behavior change, pins updated). Fix lifecycle preference GET/POST (`agenticPayments.ts:8761–8815`) to derive `tenantId` from resolved session identity, never from query/body. CLO coordination (§16): #5038 owns the substrate / job-pipeline / `mas_events` / SessionStore isolation gaps — this slice touches none of them; sequence around #5038's decision-first work. | Existing gate closures, identity-resolution pattern |
 | 3 | G-4 validation | ONE shared request-validation helper, extending `validateProfileInput` / `validateStrictAuditWrite` onto zod schemas (zod arrives with H-1, §4; before H-1 the helper extends the existing validators without a second catalog). The schemas land in the SHARED validation layer (door/service layer per #5386), not a CBO-only layer; the #5387 duplication inventory governs. No second catalog. | Existing validators |
 | 4 | G-2 | D1 batch atomicity for multi-write routes (journal post, activate-subscription pair, settings PATCH, bulk move) via the existing batch leg. Cross-store steps keep the loud-log + reconcile posture (ADR 0002 non-goal). | `d1BatchTransactionBackend` / `withTransaction` |
 | 5 | G-3 | Coded error responses: replace raw `err.message` passthrough + regex classification with catalog-coded responses + server-side logging. | G9 pattern (`paymentAssuranceLive.ts:103–112`), outcome catalog |
@@ -678,7 +699,7 @@ conclusions where they overlap (chain shape, registry shape).
 | 8 | G-7 | Premium prices via `getApprovedPrice`. Owner decision on seeds required before build — file, do not build until called. | Price catalogue + approval (#2547) |
 | 9 | G-8 | Catalog extension (platform families into the catalog pattern) + shared request/response schemas + OpenAPI extension for CBO routes. The CBO schemas feed the ONE OpenAPI spec (#5387 requirement 5), generated from the route schemas. No registry (rejected). | `commercialUrlCatalog`, `openapiSpec.ts` spike |
 | 10 | G-9/G-14 | Log/audit the operator-list degrade; pagination literals via `COMMERCIAL_DEFAULTS`. Fold into the nearest slice PR if small, else its own. | Existing defaults module |
-| 11 | G-10 | Route-layer ORM / `.db` reach-through remediation behind existing ports (CDO approach, §11). CDO-lane issues for any CDO-owned change. | Existing ledger/marketplace/audit ports |
+| 11 | G-10 | Route-layer ORM / `.db` reach-through remediation behind existing ports (CDO approach, §11). CDO-lane issues for any CDO-owned change. CLO coordination (§16): #5040 owns the one-store-per-family decision (including which payment ledger is authoritative) — this slice builds no store-architecture decision and follows CLO's decision once made; sequence around it until then. | Existing ledger/marketplace/audit ports |
 | 12 | G-12 | Doc-only: AOP section for ADD.md re-derived from real sources (this design's §9 rules). | ADR/standards sources as verified |
 | 13 | G-13/G-15 | Verify-first: live default check for `POST /audit` legacy mode; follow-up reads (`src/services/payments.ts`, gate + claim/release, ads modes). File build issues only after verification. | — |
 
@@ -806,6 +827,26 @@ section present (lines 74–91), NO endpoints section and NO subdomain
 URLs present yet — the coordinator's endpoints amendment had not
 landed; this amendment records the owner's directive as received.
 
+CLO verification (2026-11-18, same day): the live bodies, titles,
+states, and labels of #5023, #5037, #5038, #5040, and #5041 were read
+via the connector by the amending author — all open, all
+`lane:clo-arsi` (#5037 additionally `fix`; the rest `enhancement`).
+#5023's sub-issue list was read via the API: 23 sub-issues, ALL open,
+ALL `lane:clo-arsi` (verified count, not copied). The four bodies were
+skimmed for scope: #5037 `confirmDraft` (`src/agents/mas.ts:275–385`,
+swallowed failures at :292–293/:339/:365, gateway charge at :310–330);
+#5040 four families with more than one store home, payments
+authoritativeness UNVERIFIED; #5038 four gaps (append substrate,
+job-pipeline tables, `mas_events`, SessionStore — no tenant columns);
+#5041 three registry gaps (sync-set pin, paid-tool queueing,
+table-read gating) plus the #3748 coordination note. #5343's live body
+was re-read at amendment time: 85,931 chars, the alignment and
+canonical-endpoints sections present, NO CLO-coordination section and
+no #5023/#5037/#5038/#5040/#5041 references present yet — the
+coordinator's fourth amendment had not landed; this amendment records
+the parent-verified flag as received, and the issue-body amendment is
+the coordinator's work, not this doc's.
+
 NOT verified (no claim is made):
 
 - The Cloudflare dashboard check (§7.1) — required, unperformed.
@@ -840,6 +881,12 @@ NOT verified (no claim is made):
   externalized configuration, recorded in the cutover slice.
 - Session-cookie `Domain` change (§15.4): CISO review on the cutover
   slice.
+- CLO decisions awaited (§16): the #5040 one-store-per-family decision
+  (slice 11 sequences around it); the #5038 tenant-isolation decision
+  (slice 2 touches none of its gaps); #5037's fix state at slice-1
+  start (the ledger-gate tests account for it as found); #5041's
+  registry-completeness state for MCP-adjacent slices. None is decided
+  by CBO; the slice-start re-check (§10) is the standing mechanism.
 - Price-approval, refund-execution, and other owner-gated decisions:
   carried on the parity tracker, not decided here.
 - CISO decisions: money/ledger permission name + bindings (GAP-2),
@@ -975,7 +1022,9 @@ canonical endpoint §15.2.
   framework-adapter design; #5386 owns the MCP consolidation; #5387
   owns the whole-layer consolidation including data endpoints; #5343
   owns the commercial-surface design + ADR and its slices. Nothing here
-  folds another lane's work into CBO issues.
+  folds another lane's work into CBO issues. CLO boundary (§16): #5023
+  owns the system data model and its 23 sub-issues; CBO sequences
+  around #5037/#5038/#5040/#5041 and builds none of them.
 - The one OpenAPI spec (#5387 requirement 5) is generated from the
   route schemas and covers every data endpoint; the CBO schemas (§8,
   slice 9) feed it. The spec artifact (§7) is the shared contract for
@@ -1272,3 +1321,160 @@ together with the dashboard check, not assumed here.
 - The coordinator's #5343 body amendment (canonical-endpoints section)
   and endpoint comments on #5386/#5387 are the coordinator's work, not
   this doc's; this section records the owner's directive as received.
+
+## 16. CLO coordination: sequence around the data-model issues (amendment 2026-11-18, parent-verified flag)
+
+Do not build, do not collide. This section records the parent
+coordination flag of 2026-11-18, received after the endpoints
+amendment landed (PR #5400, landing `9d22aeb30`) and recorded here
+before the design is finalized. The corresponding ADR decision is D13
+in ADR 0034. The coordinator is adding a fourth amendment (CLO
+coordination) to #5343's body; at amendment time the body carried no
+CLO-coordination section yet (see §12) — this section records the flag
+as received, with every state verified live by the amending author.
+
+### 16.1 The CLO program and the four adjacent issues
+
+Issue #5023 "[Data model] System data model: conceptual, logical,
+physical and subject-area views + improvement backlog" is CLO-lane
+owned (`lane:clo-arsi`). It carries 23 sub-issues, ALL CLO-lane, ALL
+open (verified via the sub-issues API, 2026-11-18 — counted, not
+copied). CBO works on NONE of them. Four are adjacent to the
+API-layer/ledger work. All four were verified open and `lane:clo-arsi`
+by direct read, 2026-11-18:
+
+| Issue | Title (as filed) | Overlap with this design |
+|---|---|---|
+| #5037 | [Fix] Payment confirm reports success when the ledger write fails | SAME code neighborhood as the G-1 ledger fix (slice 1). High-severity integrity defect. CLO owns the fix. |
+| #5040 | [Enhancement] One store per family: schedules, payments, reports, report assets — decision first | Journal/ledger store architecture (slice 11, §11). Decision-first; CLO owns the decision and the fix. |
+| #5038 | [Enhancement] Tenant isolation gaps: substrate, job pipeline, mas_events, SessionStore — decision first, then the fix | Lifecycle tenantId hole (slice 2) at the boundary only. CLO owns the decision and the fix. |
+| #5041 | [Enhancement] MCP registry completeness: sync-set pin, paid-tool queueing, and table-read gating | One-MCP-server work (#5386) and the GAP-4 seam. CLO owns the fix. |
+
+The remaining 19 sub-issues have no overlap with this design; they are
+not listed here, and no CBO slice touches them. If a later slice finds
+an overlap with any of the 19, the sequence rule (§16.2) applies to it
+in the same way — the rule is by lane ownership, not by this table.
+
+### 16.2 The sequence rule and the slice-start re-check
+
+SEQUENCE RULE (binding). If any of the four is in-flight in CLO, the
+overlapping CBO slice waits/sequences — never collides, never
+duplicates, never pre-empts. "In-flight" means an open CLO claim,
+branch, or PR touching the shared modules, as found by the live check
+below — not merely an open issue. An open-but-unclaimed CLO issue does
+not block a CBO slice; an in-flight one does, until it lands or the
+lanes agree a sequence in the open (on the issues, not in a side
+channel). A CBO slice that needs a CLO decision waits for it or
+sequences with it; it never decides it locally, and it never folds the
+CLO fix into its own diff "while it is there."
+
+SLICE-START RE-CHECK (standing requirement, §10). Every slice builder
+re-checks for in-flight CLO work on the shared modules at slice start
+— live issue state of the adjacent CLO issues plus open branches/PRs
+touching the modules the slice will touch — before claiming or
+building, and records the check (date, issues checked, result) in the
+slice's claim or body. The check is repeated if the slice stalls: a
+design-time check never substitutes for a check at build time. The
+four issues are linked as Related/Dependencies on the slice bodies
+that overlap them, so the check has a stable starting point.
+
+### 16.3 Per-issue sequencing
+
+#5037 — ledger neighborhood (slice 1). `confirmDraft`
+(`src/agents/mas.ts:275–385`) reports success when the ledger write
+fails: the `findById` failure is swallowed (`mas.ts:292–293`), the
+gateway charge/refund executes (`mas.ts:310–330`), the
+`transactions.update` failures to `completed`/`rejected` are swallowed
+(`mas.ts:339`, `:365`), and the `payment.confirmed` /
+`payment.rejected` audit entries are written regardless. A payment can
+be charged while the ledger never records it — the two ledgers diverge
+silently. This is the same failure SHAPE as the G-1 hole (ledger
+writes the caller cannot trust) on a different, synchronous payment
+path — which is exactly why the sequencing must be explicit:
+
+- Slice 1 (the ledger gate) gates the three write-through routes ONLY
+  (`agenticPayments.ts:508–763`). It fixes NOTHING in `confirmDraft`:
+  no swallowed-failure repair, no confirm-semantics change, no audit
+  correction. That fix is CLO's, in #5037.
+- At slice start the builder re-verifies #5037's live state. If CLO's
+  fix is in-flight, slice 1 waits/sequences rather than colliding on
+  the shared ledger neighborhood (shared modules, shared tests,
+  shared audit assertions).
+- The slice's tests account for #5037's state as found at slice start.
+  If CLO's fix has landed, the tests prove the gate against the fixed
+  confirm semantics. If it has not, the tests pin the gate's behaviour
+  without assuming the fix — and the slice body says so, so no later
+  reader mistakes the un-fixed confirm path for a gate gap.
+- The G-1 hole stays open until slice 1 lands (D2, owner's explicit
+  choice). #5037's defect stays open until CLO's fix lands. Neither
+  wait is the other's: the two landings are independent, sequenced
+  only against collision.
+
+#5040 — store architecture (slice 11, §11). Four families each have
+more than one store home with no decision stating which is canonical:
+schedules (`mas_schedules` D1 + `scheduled_tasks` DO), payments (DO
+`mas_transactions` + D1 `agent_payments` — whether both are live, and
+which is authoritative, is UNVERIFIED), reports (`mas_reports` DO +
+`agent_reports` D1), report assets (three homes), plus the KV fallback
+shape. Decision-first: CLO owns the decision, then the fix. CBO
+consequences:
+
+- Slice 11 (G-10 remediation behind ports) builds NO store-architecture
+  decision. It remediates reach-through behind the EXISTING ports
+  (§11) and follows CLO's decision once made; until then it sequences
+  around #5040 and touches no canonical-home question.
+- The journal projection posture in this design (DO authoritative,
+  ADR 0033; D1 journal as projection, §11) is stated as ADR 0033
+  states it. Nothing here assumes #5040's answer: if CLO's decision
+  changes the authoritative-home picture for payments, the affected
+  slices follow the decision — a follow-up, not a local override.
+- The D1 `agent_payments` / DO `mas_transactions` duality is NOT
+  resolved by any CBO slice. A slice that finds itself depending on
+  the answer stops and sequences with #5040.
+
+#5038 — tenant isolation (slice 2, boundary only). Four gaps, each a
+different shape, decision-first: the append-substrate isolation
+question (`SessionStore.appendAuditEvent`, `agentAuditLog`), the
+job-pipeline tables with no tenant column, `mas_events` with no tenant
+column, and SessionStore's 27 tables with no tenant column. CLO owns
+the decision and the fix. Slice 2's scope is deliberately narrower:
+derive `tenantId` from resolved session identity in the lifecycle
+preference routes, and nothing else. Slice 2 touches NO substrate,
+job-pipeline, `mas_events`, or SessionStore code; if its builder finds
+the lifecycle fix depending on one of those gaps, the slice sequences
+with #5038 instead of widening. The session-scoping rule (D1) stands
+independently of #5038's decision.
+
+#5041 — MCP registry completeness (GAP-4, §14.7). Three gaps: the
+sync-set allowlist has no completeness pin (`SYNCHRONOUS_MCP_TOOLS`,
+`src/mcps/asyncJobModes.ts:301` — a new tool silently queues), paid
+tools that queue still charge (whether any paid tool is currently
+queued is UNVERIFIED; the guarantee is missing), and the generic
+table-read tools expose arbitrary table reads with no gating
+(including `mas_events` and `mas_transactions`). CLO owns the fix,
+coordinated with CISO #3748's MCP scoping/security programme — which
+is not CBO's scope either. CBO consequences:
+
+- GAP-4 (the role-to-scope seam) plugs the adapter into the ADR 0012
+  seam and replaces permissive defaults with role-derived scopes. It
+  builds NO sync-set pin, NO queueing/charging guarantee, and NO
+  table-read gating. Those are #5041's.
+- MCP-adjacent slices coordinate with #5041's state at slice start
+  (§16.2) and sequence around in-flight registry work. The one-registry
+  consolidation (#5386) is the shared-server work; #5041's
+  completeness fixes land in it or alongside it under CLO ownership,
+  never inside a CBO slice.
+
+### 16.4 Boundaries
+
+- #5023 owns the system data model and its 23 sub-issues. #5343 owns
+  the commercial-surface design + ADR and its slices. Neither lane
+  folds the other's work into its own issues.
+- The CLO issues are linked as Related/Dependencies wherever this
+  design overlaps them (§10 slice rows, §13, D13). Linking is
+  coordination, not ownership: a link never authorizes building the
+  linked fix.
+- If a CBO slice discovers a data-model defect beyond the four
+  (including among the other 19 sub-issues), it files or links a
+  CLO-lane issue and sequences — it does not fix it in passing. One
+  implementation owner per issue, per the cross-lane rule.

@@ -20,7 +20,9 @@
   #5349 (system-principal binding), #5350 (PDP + ExecutionContext wiring
   seams), #5387 (one API server, CDO lane), #5386 (one MCP server, CDO
   lane), #5277 (Docker/portability shape, CAIO lane — owner of the
-  container shape #5387 requires the server to fit)
+  container shape #5387 requires the server to fit), #5023 (system data
+  model, CLO lane) + #5037/#5038/#5040/#5041 (adjacent CLO sub-issues —
+  coordination in D13; CBO builds none of them)
 - Amendment 2026-11-18 (same day, before any slice builds on this ADR):
   D11 records the owner one-server alignment directive (see D11). D1–D10
   stand as decided; where D11 supersedes part of D4/D7, D11 says so
@@ -33,6 +35,12 @@
   the hostnames the shared servers answer at and the mechanics of
   getting there. Amending PR: this PR (number and main commit recorded
   on merge).
+- Amendment 2026-11-18 (same day, before any slice builds on this ADR):
+  D13 records the CLO coordination flag (parent-verified 2026-11-18):
+  CBO sequences around the CLO-owned data-model issues #5023 and its
+  adjacent sub-issues #5037/#5038/#5040/#5041, building none of them.
+  D1–D12 stand as decided. Amending PR: this PR (number and main commit
+  recorded on merge).
 
 ## Context
 
@@ -509,6 +517,72 @@ prerequisites, and the required DNS check — is design doc §15.
   the D7 dashboard check confirms the zone setup including the new
   hostname.
 
+### D13 — CLO coordination: sequence around the data-model issues (amendment 2026-11-18, parent-verified flag)
+
+Issue #5023 "[Data model] System data model" is CLO-lane owned
+(`lane:clo-arsi`) with 23 sub-issues, ALL CLO-lane, ALL open — verified
+by the amending author 2026-11-18 via the sub-issues API. CBO works on
+NONE of them. Four sub-issues are adjacent to the API-layer/ledger
+work (all verified open, all `lane:clo-arsi`, by direct read
+2026-11-18). The CBO design SEQUENCES AROUND them — linked as Related
+/ Dependencies, never built, never duplicated, never pre-empted. The
+full record is design doc §16.
+
+- #5037 "[Fix] Payment confirm reports success when the ledger write
+  fails" — high-severity integrity defect, SAME code neighborhood as
+  the G-1 ledger fix: `confirmDraft` (`src/agents/mas.ts:275–385`)
+  swallows the `findById` failure, executes the gateway charge/refund,
+  swallows the `transactions.update` failures, and writes the
+  `payment.confirmed` / `payment.rejected` audit entries regardless —
+  a payment can be charged while the ledger never records it. CLO owns
+  the fix. The ledger-gate slice (slice 1, D2) accounts for it and
+  sequences around CLO's fix: the gate slice gates the write-through
+  routes only and fixes NOTHING in `confirmDraft`; at slice start it
+  re-verifies #5037's live state, and if CLO's fix is in-flight the
+  slice waits/sequences rather than colliding on the shared ledger
+  neighborhood. The gate slice's tests account for #5037's state as
+  found at slice start (see §16.3).
+- #5040 "One store per family: schedules, payments, reports, report
+  assets — decision first" — overlaps the journal/ledger store
+  architecture: which home is canonical per family is UNVERIFIED,
+  including whether both payment ledgers (DO `mas_transactions` + D1
+  `agent_payments`) are live and which is authoritative. Decision-first;
+  CLO owns the decision and the fix. CBO builds NO store-architecture
+  decision: slice 11 (G-10 remediation behind ports) and the journal
+  projection posture follow CLO's decision once made, and sequence
+  around it until then. Nothing in this ADR assumes the answer beyond
+  what ADR 0033 already states.
+- #5038 "Tenant isolation gaps: substrate, job pipeline, mas_events,
+  SessionStore" — decision-first, then the fix; CLO owns both.
+  Overlaps slice 2 only at the boundary: slice 2 fixes the lifecycle
+  preference routes to derive `tenantId` from resolved session
+  identity and touches NOTHING in the substrate, the job-pipeline
+  tables, `mas_events`, or SessionStore. Coordinate, never build the
+  CLO fix.
+- #5041 "MCP registry completeness: sync-set pin, paid-tool queueing,
+  and table-read gating" — overlaps the one-MCP-server work (#5386)
+  and the GAP-4 seam: the sync-set allowlist, the queued-paid-tool
+  charging guarantee, and the ungated table-read tools. CLO owns the
+  fix (coordinated with CISO #3748's programme, which is not CBO's
+  scope either). CBO builds no registry-completeness fix; MCP-adjacent
+  slices coordinate and sequence around it.
+
+SEQUENCE RULE (binding). If any of the four is in-flight in CLO, the
+overlapping CBO slice waits/sequences — never collides, never
+duplicates, never pre-empts. "In-flight" means an open CLO claim,
+branch, or PR touching the shared modules, as found by the live check
+below — not merely an open issue. An open-but-unclaimed CLO issue does
+not block a CBO slice; an in-flight one does, until it lands or the
+lanes agree a sequence in the open.
+
+SLICE-START RE-CHECK (standing requirement, not a design-time note).
+Every slice builder re-checks for in-flight CLO work on the shared
+modules at slice start — live issue state + open branches/PRs touching
+the modules the slice will touch — before claiming or building, and
+records the check (date, issues checked, result) in the slice's claim
+or body. The check is repeated if the slice stalls: a check from
+design time never substitutes for a check at build time.
+
 ## Consequences
 
 - The G-1 hole stays open until the full fix lands (D2). No interim gate
@@ -551,6 +625,11 @@ prerequisites, and the required DNS check — is design doc §15.
   session-cookie `Domain` change is a CISO-reviewed cutover item, not
   a silent config tweak. The API Shield budget (§7) covers both
   hostnames combined.
+- CLO consequence (D13): no CBO slice builds, duplicates, or pre-empts
+  a CLO-owned fix. A CBO slice overlapping in-flight CLO work waits or
+  sequences; the slice-start re-check is a standing requirement on
+  every slice builder, and a design-time check never substitutes for
+  one at build time.
 
 ## Alternatives considered
 
@@ -607,6 +686,12 @@ prerequisites, and the required DNS check — is design doc §15.
 - **Wildcard CORS with credentials**: REJECTED (D12) — browsers forbid
   `Access-Control-Allow-Origin: *` with credentials. The API server
   echoes the single allowed origin.
+- **Building the CLO-owned fixes inside CBO slices** (the #5037
+  confirm defect, the #5040 store decision, the #5038 isolation gaps,
+  the #5041 registry gaps): REJECTED (D13). Lane ownership is the
+  rule: CLO owns them, CBO sequences around them. A CBO slice that
+  needs a CLO decision waits for it or sequences with it; it never
+  decides it locally.
 - **Custom idempotency-key layer**: DEFERRED to slice evaluation —
   adopted only if no FOSS piece fits behind the existing ports, with the
   gap documented; per-subsystem dedupe stays until then.
