@@ -13,6 +13,7 @@ import { createUnifiedSchedulePorts } from "../../data/createUnifiedSchedulePort
 import { stampScheduleProvenance, systemProvenance } from "../../services/consolidatedScheduling";
 import {
   STRATEGY_SCAN_BASELINE_ORIGIN,
+  ivHistoryCollectionToRecord,
   strategyScanBaselineToRecord,
 } from "../../services/unifiedScheduleManagement";
 import { buildSchedulePayload } from "../../trading";
@@ -150,9 +151,10 @@ export async function removeUnownedBaselineSchedules(ctx: ScheduleMaintenanceCon
  * Issue #3121 #4236 — the unified store behind a baseline
  * arm/adoption, or null when the host has no DO SQLite. A missing
  * store never fails the arm: the scan is armed, and the management
- * path adopts the record on first touch.
+ * path adopts the record on first touch. Issue #3121 #4238 reuses
+ * it for the IV collection adoption (same store, same rule).
  */
-function baselineStore(ctx: ScheduleMaintenanceContext) {
+function unifiedScheduleStore(ctx: ScheduleMaintenanceContext) {
   try {
     return createUnifiedSchedulePorts({
       sql: ctx.agentCtx.storage.sql,
@@ -174,7 +176,7 @@ async function adoptStrategyScanBaselineRecord(
   context: ScreenerExecutionContext,
 ): Promise<void> {
   try {
-    const store = baselineStore(ctx);
+    const store = unifiedScheduleStore(ctx);
     if (!store) return;
     const item = alarm as any;
     const alarmId = typeof item.id === "string" && item.id ? item.id : null;
@@ -210,7 +212,7 @@ async function saveStrategyScanBaselineRecord(
   payload: unknown,
 ): Promise<void> {
   try {
-    const store = baselineStore(ctx);
+    const store = unifiedScheduleStore(ctx);
     if (!store) return;
     let alarmId =
       armed && typeof armed === "object" && typeof (armed as { id?: unknown }).id === "string"
@@ -252,6 +254,77 @@ async function saveStrategyScanBaselineRecord(
       error: error instanceof Error ? error.message : String(error),
     });
   }
+}
+
+/**
+ * Issue #3121 #4238 — adopt an armed IV history collection alarm
+ * into the unified store: save the record, never arm, never cancel.
+ * A record that already exists is left untouched (its creation time
+ * stands). A pause/resume cycle keeps the record id and re-arms
+ * under a new alarm id, so the live alarm's id is already that
+ * record's alarmId — adopting by id alone would save a duplicate
+ * record, so the alarmId scan guards it. The alarm's own cron is
+ * the record's cadence (read, never a literal); a non-cron alarm
+ * is not the known IV shape and is left alone.
+ */
+async function adoptIvHistoryCollectionRecord(
+  ctx: ScheduleMaintenanceContext,
+  alarm: Schedule<unknown>,
+  context: ScreenerExecutionContext,
+): Promise<void> {
+  try {
+    const store = unifiedScheduleStore(ctx);
+    if (!store) return;
+    const item = alarm as any;
+    const alarmId = typeof item.id === "string" && item.id ? item.id : null;
+    if (!alarmId) return;
+    const cron = typeof item.cron === "string" && item.cron ? item.cron : null;
+    if (!cron) return;
+    if (store.get(alarmId)) return;
+    if (store.list().some((r) => r.alarmId === alarmId)) return;
+    store.save(
+      ivHistoryCollectionToRecord(
+        { id: alarmId, callback: "collectIvHistory", payload: item.payload },
+        { userLogin: context.userLogin, cron },
+        new Date().toISOString(),
+      ),
+    );
+  } catch (error) {
+    structuredLog.warn("scheduleMaintenance.iv_history_collection_record_adopt_failed", {
+      message:
+        "[OrchestratorAgent] Could not adopt IV history collection into the unified store:",
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+/**
+ * Issue #3121 #4238 — record the armed IV history collection alarm
+ * in the unified store (record-only: nothing is armed, cancelled,
+ * or re-armed here — the weekday evening alarm is the firing
+ * schedule; this only records it so the home can list it and the
+ * ledger can join its runs). Runs on the same authenticated
+ * maintenance path as the strategy-scan baseline. An alarm for
+ * another user, or one without a cron expression, is not this
+ * user's IV record. A store failure only warns — adoption never
+ * fails maintenance.
+ */
+export async function ensureIvHistoryCollectionRecord(
+  ctx: ScheduleMaintenanceContext,
+  context: ScreenerExecutionContext,
+): Promise<void> {
+  const existing = await ctx.listSchedules().catch(() => [] as Schedule<unknown>[]);
+  const alarm = existing.find((s) => {
+    const item = s as any;
+    return (
+      item.callback === "collectIvHistory" &&
+      item.payload?.userLogin === context.userLogin &&
+      typeof item.cron === "string" &&
+      item.cron
+    );
+  });
+  if (!alarm) return;
+  await adoptIvHistoryCollectionRecord(ctx, alarm, context);
 }
 
 /**

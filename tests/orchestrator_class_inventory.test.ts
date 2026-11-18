@@ -342,8 +342,15 @@ const ORCH = "agents/orchestrator.ts";
  *  schedule-watchdog async context (+2 lines) — measured
  *  3,311 lines / 151,083 B on the merged tree, so budget
  *  lines rise to 3325, keeping similar headroom. Bytes
- *  unchanged — measured well under the 159,200 budget. */
-const BUDGET_LINES = 3325;
+ *  unchanged — measured well under the 159,200 budget.
+ *  #4238 (IV history collection as a unified-store record)
+ *  adds the ensureIvHistoryCollectionRecord delegating
+ *  wrapper + its import and the onStart adoption call
+ *  (execution in orchestrator/scheduleMaintenance.ts) —
+ *  measured 3,331 lines / 152,733 B after the addition, so
+ *  budget lines rise to 3345, keeping similar headroom.
+ *  Bytes unchanged — measured well under the 159,200 budget. */
+const BUDGET_LINES = 3345;
 const BUDGET_BYTES = 159_200;
 
 const count = (haystack: string, needle: string) =>
@@ -355,6 +362,8 @@ const DELEGATED_METHODS = [
   "migrateLegacyScreenSchedules",
   "removeUnownedBaselineSchedules",
   "ensureStrategyScanSchedule",
+  // Issue #3121 #4238 — the IV collection record adoption wrapper.
+  "ensureIvHistoryCollectionRecord",
   // scheduledCallbacks
   "autoRenewETradeTokens",
   "autonomousMarketScreen",

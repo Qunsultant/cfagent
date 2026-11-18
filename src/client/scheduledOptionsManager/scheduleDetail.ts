@@ -178,6 +178,14 @@ export function scheduleTitle(item: ScheduledTaskItem, _profiles?: StrategyProfi
     if (model === "profile-derived") return "Strategy Discovery · Profile-derived";
     return "Strategy Discovery";
   }
+  // Issue #3121 #4238 — the daily IV history collection (#15) is an
+  // internal-only job with no system-job registry entry (the registry
+  // is deliberately the three screening jobs, and the manager pins
+  // no trigger route for it); the Schedules home names it here, so
+  // its row reads "Scheduled IV collection" instead of the raw
+  // callback. The description lives with the callback (#15): one ATM
+  // IV record per tracked name per day, never fabricated.
+  if (item.callback === "collectIvHistory") return "Scheduled IV collection";
   return systemJobFor(item.callback)?.label || item.callback;
 }
 
