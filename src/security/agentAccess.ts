@@ -29,7 +29,12 @@
  *   threading G-AUD-2 asked for at that door. G-AUD-3 (system
  *   principal), G-AUD-4/G-AUD-5 (scanner free tools / shared
  *   instance), and G-AUD-6 (per-caller A2A identity) are NOT
- *   closed here; see the doc's residual list.
+ *   closed here; see the doc's residual list. GAP-3 (#5459)
+ *   advances G-AUD-3 for the service-actor class only: the
+ *   system-principal binding story (serviceDispatch.ts
+ *   authorizeSystemPrincipal) threads the service login into the
+ *   PDP decision as `service:<login>`; in-process `system`
+ *   callers with login null remain open.
  * - #2681 service tokens: a service principal's agent id derives
  *   from its service login (agentIdForServiceLogin), and its
  *   internal id stays `service:<login>` (serviceIdentity.ts) —

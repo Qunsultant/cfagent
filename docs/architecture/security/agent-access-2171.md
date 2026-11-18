@@ -141,7 +141,10 @@ adopting route supplies; this module performs no I/O itself.
 - R3 — A2A per-caller agent identity (G-AUD-6, #945 wiring).
 - R4 — System-principal login threading (G-AUD-3) and scanner
   isolation (G-AUD-4/G-AUD-5): out of this slice's scope, recorded
-  in #1763.
+  in #1763. Narrowing note (GAP-3, #5459): G-AUD-3 is advanced for
+  the service-actor class only — the binding story threads the
+  service login into the PDP decision; in-process `system`
+  callers remain open, and G-AUD-4/G-AUD-5 are unchanged.
 - R5 — Human role/membership UI (#2688): untouched except where
   agent delegation touches it (delegator-holds-permission rule).
 - R6 — Production activation (provisioning + switch): owner /
