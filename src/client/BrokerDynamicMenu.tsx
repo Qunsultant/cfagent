@@ -1,10 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
-import {
-  NAVIGATION_ITEMS,
-  DEFAULT_VISIBLE_NAV_TABS,
-  NAV_TAB_PRESETS,
-} from "./components/NavigationMenu";
-import { isTabFeatureEnabled } from "./featureFlags";
+import { navigateToTab } from "./router";
 import { PillGroup, Button, TextInput, Select, Notice } from "./components/ui";
 import { AlpacaSignInCard } from "./AlpacaSignInCard";
 import { apiFetch } from "./apiFetch";
@@ -97,10 +92,6 @@ export interface SettingsMenuProps {
   onToggleLayout?: (layout: "left" | "top") => void;
   accountMode?: "paper" | "live";
   onToggleAccountMode?: () => void;
-  // Navbar Tab visibility customization
-  visibleTabs?: Record<string, boolean>;
-  onToggleTabVisibility?: (tabId: string) => void;
-  onSetVisibleTabs?: (tabs: Record<string, boolean>) => void;
   // Centralized Auto-Refresh Settings
   autoRefreshEnabled?: boolean;
   autoRefreshInterval?: number;
@@ -156,9 +147,6 @@ export function BrokerDynamicMenu({
   onToggleLayout,
   accountMode,
   onToggleAccountMode,
-  visibleTabs,
-  onToggleTabVisibility,
-  onSetVisibleTabs,
   autoRefreshEnabled,
   autoRefreshInterval,
   onToggleAutoRefresh,
@@ -355,45 +343,6 @@ export function BrokerDynamicMenu({
     setLocalAdConfig(next);
     saveStoredAdBannerConfig(next);
     onUpdateAdBannerConfig?.(next);
-  };
-
-  // Local state for visible navbar tabs
-  const [localVisibleTabs, setLocalVisibleTabs] = useState<Record<string, boolean>>(() => {
-    if (typeof window !== "undefined") {
-      try {
-        const saved = localStorage.getItem("nextgentp_visible_nav_tabs");
-        if (saved) return { ...DEFAULT_VISIBLE_NAV_TABS, ...JSON.parse(saved) };
-      } catch {}
-    }
-    return DEFAULT_VISIBLE_NAV_TABS;
-  });
-
-  const effectiveVisibleTabs = visibleTabs || localVisibleTabs;
-
-  const handleToggleTab = (tabId: string) => {
-    if (onToggleTabVisibility) {
-      onToggleTabVisibility(tabId);
-    } else {
-      const next = {
-        ...effectiveVisibleTabs,
-        [tabId]: effectiveVisibleTabs[tabId] === false ? true : false,
-      };
-      setLocalVisibleTabs(next);
-      if (typeof window !== "undefined") {
-        localStorage.setItem("nextgentp_visible_nav_tabs", JSON.stringify(next));
-      }
-    }
-  };
-
-  const handleApplyPreset = (preset: Record<string, boolean>) => {
-    if (onSetVisibleTabs) {
-      onSetVisibleTabs(preset);
-    } else {
-      setLocalVisibleTabs(preset);
-      if (typeof window !== "undefined") {
-        localStorage.setItem("nextgentp_visible_nav_tabs", JSON.stringify(preset));
-      }
-    }
   };
 
   // Global Typography Preferences
@@ -1312,61 +1261,26 @@ export function BrokerDynamicMenu({
             </div>
           </div>
 
-          {/* Navbar Visible Tabs Configuration */}
+          {/* Navigation Tabs (issues 3696/3697): presets + pills moved
+              to the Navigation Settings page; this menu only links to it,
+              so the two surfaces never diverge. */}
           <div className="etrade-panel-section settings-nav-tabs-section">
             <div className="section-label-row">
-              <span>Navbar Visible Tabs</span>
-              <small>Toggle tabs shown in the navigation bar</small>
+              <span>Navigation Tabs</span>
+              <small>Presets and visible tabs live on the Navigation Settings page</small>
             </div>
-
-            <div className="nav-tabs-preset-row">
-              <span className="preset-label">Presets:</span>
-              <div className="nav-tabs-preset-buttons">
-                <Button
-                  type="button"
-                  className="btn-preset-mini"
-                  onClick={() => handleApplyPreset(NAV_TAB_PRESETS.all)}
-                  title="Show all available navigation tabs"
-                >
-                  All Tabs
-                </Button>
-                <Button
-                  type="button"
-                  className="btn-preset-mini"
-                  onClick={() => handleApplyPreset(NAV_TAB_PRESETS.traderFocus)}
-                  title="Show core trading and execution tabs only"
-                >
-                  Trader Focus
-                </Button>
-                <Button
-                  type="button"
-                  className="btn-preset-mini"
-                  onClick={() => handleApplyPreset(NAV_TAB_PRESETS.minimal)}
-                  title="Minimalist view: Autopilot, Orders, Portfolio, Research, Copilot"
-                >
-                  Minimal
-                </Button>
-              </div>
-            </div>
-
-            <div className="nav-tabs-grid">
-              {NAVIGATION_ITEMS.filter((item) => isTabFeatureEnabled(item.id)).map((item) => {
-                const isChecked = effectiveVisibleTabs[item.id] !== false;
-                return (
-                  <Button
-                    key={item.id}
-                    type="button"
-                    className={`nav-tab-toggle-pill ${isChecked ? "checked" : "unchecked"}`}
-                    onClick={() => handleToggleTab(item.id)}
-                    title={`${item.label} (${item.category}): ${isChecked ? "Visible in navbar (click to hide)" : "Hidden from navbar (click to show)"}`}
-                    aria-pressed={isChecked}
-                  >
-                    <span className="tab-pill-check">{isChecked ? "✓" : "○"}</span>
-                    <span className="tab-pill-text">{item.shortLabel || item.label}</span>
-                  </Button>
-                );
-              })}
-            </div>
+            <Button
+              type="button"
+              className="btn-preset-mini"
+              href="?tab=nav-settings"
+              onClick={(e) => {
+                e.preventDefault();
+                navigateToTab("nav-settings");
+              }}
+              title="Open Navigation Settings"
+            >
+              Open Navigation Settings
+            </Button>
           </div>
 
           {/* Banner message / alert */}

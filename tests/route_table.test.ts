@@ -57,6 +57,10 @@ const EXPECTED_IDS = [
   // Issue 4682: the Marketing Hub route (the three marketing
   // nav entries retire into it; 44 → 45 routes).
   "marketing-hub",
+  // Issues 3696/3697: the Navigation Settings route (presets +
+  // visible tabs page; 46 → 47 routes). No navEntry: it is reached
+  // from the fixed shell trigger, never from the nav itself.
+  "nav-settings",
   // Issue #5169: the Observability route (the OTel R2 archive
   // file browser; 45 → 46 routes).
   "observability",

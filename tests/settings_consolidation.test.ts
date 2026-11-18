@@ -3,23 +3,26 @@ import {
   NAVIGATION_ITEMS,
   DEFAULT_VISIBLE_NAV_TABS,
   NAV_TAB_PRESETS,
+  isNavIdVisible,
 } from "../src/client/components/NavigationMenu";
 
 describe("Settings Consolidation & Unified Preferences", () => {
   it("maintains complete configuration presets for navigation visible tabs", () => {
-    expect(NAV_TAB_PRESETS.all).toBeDefined();
-    expect(NAV_TAB_PRESETS.traderFocus).toBeDefined();
+    expect(NAV_TAB_PRESETS.alltabs).toBeDefined();
+    expect(NAV_TAB_PRESETS.trading).toBeDefined();
     expect(NAV_TAB_PRESETS.minimal).toBeDefined();
+    expect(NAV_TAB_PRESETS.none).toBeDefined();
 
-    // In traderFocus, essential execution & analysis tools are active
-    expect(NAV_TAB_PRESETS.traderFocus.autopilot).toBe(true);
-    expect(NAV_TAB_PRESETS.traderFocus.order).toBe(true);
-    expect(NAV_TAB_PRESETS.traderFocus.portfolio).toBe(true);
-    expect(NAV_TAB_PRESETS.traderFocus.research).toBe(true);
+    // In trading, essential execution tools are active; research lives
+    // in the research preset now, not trading.
+    expect(NAV_TAB_PRESETS.trading.autopilot).toBe(true);
+    expect(NAV_TAB_PRESETS.trading.order).toBe(true);
+    expect(NAV_TAB_PRESETS.trading.portfolio).toBe(true);
+    expect(NAV_TAB_PRESETS.trading["stock-hub"]).toBe(false);
 
-    // Non-core tabs are disabled in traderFocus
-    expect(NAV_TAB_PRESETS.traderFocus.ads).toBe(false);
-    expect(NAV_TAB_PRESETS.traderFocus.referrals).toBe(false);
+    // Non-core tabs are disabled in trading
+    expect(NAV_TAB_PRESETS.trading["marketing-hub"]).toBe(false);
+    expect(NAV_TAB_PRESETS.trading["platform-admin"]).toBe(false);
   });
 
   it("provides all default items in NAVIGATION_ITEMS with proper metadata", () => {
@@ -46,6 +49,8 @@ describe("Settings Consolidation & Unified Preferences", () => {
     const minimalTabs = { ...NAV_TAB_PRESETS.minimal };
     expect(minimalTabs.autopilot).toBe(true);
     expect(minimalTabs.portfolio).toBe(true);
-    expect(minimalTabs.workflows).toBe(false);
+    expect(minimalTabs["workflow-runs"]).toBe(false);
+    // workflows is a route-only id: it follows its parent, workflow-runs.
+    expect(isNavIdVisible("workflows", minimalTabs)).toBe(false);
   });
 });
