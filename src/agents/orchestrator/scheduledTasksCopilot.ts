@@ -393,6 +393,10 @@ export async function runStockCopilotCycleForInstance(
       ctx.audit("stock_copilot.cycle", "orchestrator", {
         taskId: taskCtx.taskId,
         userLogin,
+        // Issue #5191: the broker context this firing executed under, recorded
+        // beside the outcome so a replay/retry can be compared with what ran.
+        broker: selectedBroker,
+        mode: selection.resolved ? selection.selection.environment ?? "resolved" : "unresolved",
         status: result.status,
         session: result.session,
         enabledSessions: result.enabledSessions,
