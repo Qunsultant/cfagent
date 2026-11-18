@@ -206,6 +206,16 @@ export interface Env {
   APP_NAME: string;
   GITHUB_CLIENT_ID: string;
   GITHUB_CLIENT_SECRET: string;
+  // #5060 (AG-6) — the memory bridge between mas_memory, mas_learnings,
+  // and Vectorize. A durable fact (explicit prefix, stable past the age
+  // floor) becomes a learning and is embedded for recall; the run is
+  // daily-guarded and best-effort (src/services/memoryConsolidation.ts).
+  MEMORY_CONSOLIDATION_ENABLED?: string;
+  MEMORY_CONSOLIDATION_FACT_PREFIXES?: string;
+  MEMORY_CONSOLIDATION_MIN_AGE_HOURS?: string;
+  MEMORY_CONSOLIDATION_SCAN_LIMIT?: string;
+  MEMORY_CONSOLIDATION_VECTORIZE?: string;
+  MEMORY_CONSOLIDATION_INTERVAL_HOURS?: string;
   // #5058 (AG-4) — the LLM judge score feedback loop. Each chat turn's
   // score lands in `response.evaluated`; a score below THRESHOLD also
   // becomes a `judge` learning that the weekly reflection job aggregates

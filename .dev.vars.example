@@ -94,3 +94,14 @@ JUDGE_LEARNING_ENABLED="true"
 JUDGE_LEARNING_THRESHOLD="60"
 JUDGE_LEARNING_MIN_COUNT="3"
 JUDGE_LEARNING_WINDOW_DAYS="7"
+
+# Memory consolidation (#5060, AG-6). Durable mas_memory facts
+# (preference:/fact: prefixes) that have been stable past the age floor
+# become learnings and are embedded for recall. Defaults live in
+# src/services/memoryConsolidation.ts.
+MEMORY_CONSOLIDATION_ENABLED="true"
+MEMORY_CONSOLIDATION_FACT_PREFIXES="preference:,fact:"
+MEMORY_CONSOLIDATION_MIN_AGE_HOURS="24"
+MEMORY_CONSOLIDATION_SCAN_LIMIT="50"
+MEMORY_CONSOLIDATION_VECTORIZE="true"
+MEMORY_CONSOLIDATION_INTERVAL_HOURS="24"

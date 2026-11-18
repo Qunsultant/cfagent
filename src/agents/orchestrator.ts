@@ -28,6 +28,7 @@ import { resolveCopilotTradingSelection } from "./copilotTradingMode";
 import { LLMJudge } from "./judge";
 import { recordTurnEvaluation } from "../services/judgeScoreFeedback";
 import { rememberTurnOutcome } from "../services/vectorTurnMemory";
+import { runDailyMemoryConsolidation } from "../services/memoryConsolidation";
 import { planNLQ, executeNLQQuery, executeNLQQueryAsync, type NLQSchedulingPort, type NLQSocialBriefPort, type NLQStockScreenPort } from "./nlq";
 import { resolveErrorAspect, AgentErrorCode } from "../aspects/errorCodes";
 import { logAspectEvent } from "../aspects/loggingAspect";
@@ -2883,6 +2884,14 @@ export class OrchestratorAgent extends PortThink {
       operation: `chat:${route.agent}`,
       summary: `Q: ${turn.userText.slice(0, 300)}\nA: ${text.slice(0, 500)}`,
       success: quality.safe !== false && quality.grounded !== false,
+    });
+
+    // Issue #5060: the daily memory bridge (durable fact → learning →
+    // vector recall); the service owns the guard, policy and failure log.
+    await runDailyMemoryConsolidation({
+      env: this.env,
+      sql: this.ctx.storage.sql,
+      memory: createOrmPorts(this.ctx.storage.sql).memory,
     });
   }
 
