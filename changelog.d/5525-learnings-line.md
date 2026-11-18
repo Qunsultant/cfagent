@@ -1,0 +1,3 @@
+### Added
+
+- **The Stock Copilot panel now says why it did not trade (#5525):** the learning policy from #5055 (`plan.learningsPolicy` — risk learnings blocking new entries, session learnings forcing limit-only shaping) travelled only on the cycle result, which no display surface reads. The loop now appends the policy sentence to the cycle's activity `detail` when it changed the plan, and the Loop-status section renders a dedicated **"Why nothing traded — …"** line from that detail. No schema change: the detail field is the record's existing "why", already rendered in the cycle feed; the panel now also shows it at the top. Pinned by `tests/stock_copilot_learning_line_5525.test.tsx` (rendered line + recorded detail). #clo-arsi

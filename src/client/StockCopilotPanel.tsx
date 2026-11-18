@@ -435,6 +435,13 @@ export function StockCopilotPanel() {
             <span className="scp-feed-main">Last cycle — No cycle recorded yet</span>
           )}
         </div>
+        {status.lastCycle?.outcome === "no_trade" && status.lastCycle.detail && (
+          <div className="scp-feed-row">
+            <span className="scp-feed-main">
+              Why nothing traded — {status.lastCycle.detail}
+            </span>
+          </div>
+        )}
         <div className="scp-feed-row">
           {status.lastCycleFiringAttempt ? (
             <>
