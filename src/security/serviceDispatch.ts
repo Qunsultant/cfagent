@@ -76,6 +76,17 @@
  *   and the result threads the login, so the consuming gate's
  *   audit row is login-attributable. In-process `system` callers
  *   with login null remain open (see the #1763 audit doc).
+ *
+ * Hardening slice 1 (#5572, CISO coordination #5348/#5349/#5350,
+ * design #5343 / ADR 0034 D2) wires the first consumer:
+ * authorizeLedgerWrite() below is the ledger-write gate. It
+ * composes ONLY the consultations above — the #2331 identity
+ * rule for entry, authorizeSystemPrincipal() per tenant for the
+ * permission — and adds no policy, no grant rule, and no store.
+ * The tenant derivation (from the principal's own memberships,
+ * never from the request) is a pattern-following proposal put
+ * to CISO review on the slice PR, not a CISO decision; see the
+ * helper's contract note.
  */
 import {
   authorize,
@@ -365,6 +376,208 @@ export async function authorizeSystemPrincipal(
             "platform-admin binding held by the service principal — an anomaly under #2331 slice 1 (provisioning grants member only); the PDP grants it nothing at tenant scope",
         }
       : {}),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Ledger-write gate (hardening slice 1, #5572)
+// ---------------------------------------------------------------------------
+
+export interface LedgerWriteGateRequest {
+  /** The login the request presented (the `x-user-login` header value). */
+  presentedLogin: unknown;
+  /** Configured service login (getServiceUserLogin), or null when unconfigured. */
+  serviceLogin: string | null;
+  nowMs: number;
+}
+
+export type LedgerWriteDenialReason =
+  | "NO_IDENTITY"
+  | "SHARED_ADDRESS"
+  | "SERVICE_NOT_CONFIGURED"
+  | "SERVICE_NOT_PROVISIONED"
+  | "NOT_SERVICE_ACTOR"
+  | "PDP_DENIED";
+
+export type LedgerWriteGateResult =
+  | {
+      allowed: true;
+      /** The configured service login the principal id derives from. */
+      serviceLogin: string;
+      /** The service principal's stable internal id, `service:<login>`. */
+      principalId: string;
+      /** The tenant whose binding allowed the write. */
+      tenantId: string;
+      /** The PDP decision that allowed the write. */
+      decision: AuthorizationDecision;
+      /** Every tenant evaluated, in evaluation order. */
+      tenantsEvaluated: string[];
+      /** Carried from the consultation when the anomaly flag was raised. */
+      anomaly?: string;
+    }
+  | {
+      allowed: false;
+      reason: LedgerWriteDenialReason;
+      /**
+       * The PDP reason(s) when the denial came from the PDP
+       * (`<tenant>:<reason>` per evaluated tenant), else the
+       * rule detail from the identity resolution.
+       */
+      detail?: string;
+      /** Every tenant evaluated, in evaluation order (empty when the denial precedes evaluation). */
+      tenantsEvaluated: string[];
+      /** Carried from the consultation when the anomaly flag was raised. */
+      anomaly?: string;
+    };
+
+/**
+ * #5572: the ledger-write gate — the single consultation the
+ * ledger write-through handlers enforce before writing a row.
+ * It composes only existing consultations:
+ *
+ * 1. Entry requires the request to present the service identity.
+ *    Service-ness is equality with the configured login only
+ *    (#2331, resolveDispatchCandidate): the PDP consultation
+ *    below evaluates the SERVICE principal's binding, so a
+ *    request presenting anything else must never reach it —
+ *    otherwise any caller would borrow the service actor's
+ *    grant. A shaped non-service login denies as
+ *    NOT_SERVICE_ACTOR; only the service actor writes ledger
+ *    rows through these routes (their only legitimate callers
+ *    are server-side).
+ * 2. The permission is `ledger:record` (GAP-2) over the system
+ *    actor's binding (GAP-3), via authorizeSystemPrincipal()
+ *    — no policy change, no new grant rule, no new store.
+ * 3. Tenant derivation is from the service principal's OWN
+ *    memberships in the store, never from the request: two
+ *    legitimate write paths carry no tenant at all (the x402
+ *    `record` path has no tenant concept; the saga compensation
+ *    credit passes none), and a body tenantId is
+ *    client-supplied from the handler's perspective (filed
+ *    M-4). The gate consults in every tenant where the
+ *    principal holds a membership, in sorted order, and
+ *    allows iff the PDP allows in at least one. The PDP
+ *    itself decides revoked/expired bindings — the gate never
+ *    pre-filters what the PDP decides. This derivation is a
+ *    pattern-following proposal put to CISO review on the
+ *    slice PR, not a CISO decision; the residual is stated
+ *    plainly: the gate authorizes the ACTOR, not the
+ *    actor-in-the-write's-tenant, and the tenant-attribution
+ *    refinement is a CISO follow-up question.
+ *
+ * Fail-closed: an unconfigured or malformed service login, a
+ * missing identity, a shared-orchestrator address, a
+ * non-service presenter, no membership anywhere, or a PDP
+ * denial in every evaluated tenant all deny — never a
+ * fallback identity, never a throw for an expected denial.
+ * Store/PDP errors propagate to the caller, which fails
+ * closed — no write without an explicit PDP allow. Logging
+ * and audit belong to the consuming handler, which receives
+ * the threaded login, the evaluated tenants, and the anomaly
+ * flag with the decision (GAP-3's contract: the anomaly never
+ * overrides a PDP allow from a legitimate tenant binding).
+ */
+export async function authorizeLedgerWrite(
+  store: MembershipStore,
+  request: LedgerWriteGateRequest,
+): Promise<LedgerWriteGateResult> {
+  const serviceLogin = request.serviceLogin;
+  if (serviceLogin === null || !isLoginShaped(serviceLogin)) {
+    return {
+      allowed: false,
+      reason: "SERVICE_NOT_CONFIGURED",
+      tenantsEvaluated: [],
+    };
+  }
+  if (isSharedOrchestratorAddress(serviceLogin)) {
+    return {
+      allowed: false,
+      reason: "SHARED_ADDRESS",
+      tenantsEvaluated: [],
+    };
+  }
+  const candidate = resolveDispatchCandidate(
+    request.presentedLogin,
+    serviceLogin,
+  );
+  if ("denied" in candidate) {
+    // resolveDispatchCandidate denies only with NO_IDENTITY or
+    // SHARED_ADDRESS; the narrowing below is exhaustive over its
+    // denial shape (the wider DispatchDenialReason union covers
+    // the enforcement halves this gate never calls).
+    const reason: LedgerWriteDenialReason =
+      candidate.reason === "SHARED_ADDRESS"
+        ? "SHARED_ADDRESS"
+        : "NO_IDENTITY";
+    return {
+      allowed: false,
+      reason,
+      ...(candidate.detail !== undefined
+        ? { detail: candidate.detail }
+        : {}),
+      tenantsEvaluated: [],
+    };
+  }
+  if (candidate.kind !== "service") {
+    return {
+      allowed: false,
+      reason: "NOT_SERVICE_ACTOR",
+      tenantsEvaluated: [],
+    };
+  }
+  const principalId = serviceUserInternalUserId(serviceLogin);
+  const memberships = await store.getMembershipsByUser(principalId);
+  const tenantsEvaluated = [
+    ...new Set(memberships.map((membership) => membership.tenantId)),
+  ].sort();
+  if (tenantsEvaluated.length === 0) {
+    return {
+      allowed: false,
+      reason: "SERVICE_NOT_PROVISIONED",
+      tenantsEvaluated,
+    };
+  }
+  let anomaly: string | undefined;
+  const pdpReasons: string[] = [];
+  for (const tenantId of tenantsEvaluated) {
+    const consultation = await authorizeSystemPrincipal(store, {
+      serviceLogin,
+      tenantId,
+      permission: "ledger:record",
+      nowMs: request.nowMs,
+    });
+    if (!consultation.resolved) {
+      // Unreachable: the login was validated above. Fail closed
+      // rather than assume the consultation can only resolve.
+      return {
+        allowed: false,
+        reason: "SERVICE_NOT_CONFIGURED",
+        detail: consultation.reason,
+        tenantsEvaluated,
+      };
+    }
+    if (consultation.anomaly !== undefined && anomaly === undefined) {
+      anomaly = consultation.anomaly;
+    }
+    if (consultation.decision.decision === "allow") {
+      return {
+        allowed: true,
+        serviceLogin,
+        principalId,
+        tenantId,
+        decision: consultation.decision,
+        tenantsEvaluated,
+        ...(anomaly !== undefined ? { anomaly } : {}),
+      };
+    }
+    pdpReasons.push(`${tenantId}:${consultation.decision.reason}`);
+  }
+  return {
+    allowed: false,
+    reason: "PDP_DENIED",
+    detail: pdpReasons.join(","),
+    tenantsEvaluated,
+    ...(anomaly !== undefined ? { anomaly } : {}),
   };
 }
 

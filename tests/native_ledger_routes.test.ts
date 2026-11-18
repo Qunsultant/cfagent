@@ -2,11 +2,13 @@
  * Issue #2192 ([Native payments] Slice 0, sub-issue of #2012,
  * umbrella #2146) — route tests.
  *
- * (a) POST /payments/agentic/ledger/record-native through the
- * real extracted handler with a fake route context: 200 on
- * first record, 409 with the existing row on replay, 400 on
- * bad input, 503 when AGENT_DB is unbound, truthful gateway
- * per rail, and rows landing in D1 (never the DO store).
+ * (a) POST /payments/agentic/ledger/record-native NO LONGER
+ * EXISTS (#5572, ledger gate): the route was removed on a
+ * re-verified zero-production-caller grep — the workflow calls
+ * the native port directly. The handler returns null for the
+ * path, touches no store, and audits nothing. The port-level
+ * behavior (D1 rows, dedupe, truthful gateway) is pinned by
+ * the adapter tests and the webhook part below, untouched.
  * (b) POST /payments/webhook through a real OrchestratorAgent:
  * a verified native session records a D1 row + audits
  * payment.settled_webhook with native:true, never touches
@@ -80,13 +82,6 @@ class MockD1Database {
   }
 }
 
-async function makePort() {
-  const mock = new MockD1Database();
-  const db = createD1NativeLedgerDb(mock as any);
-  await ensureNativeLedgerSchema(db);
-  return { mock, port: new D1NativeLedgerAdapter(db) };
-}
-
 const baseCtx = (overrides: Partial<AgenticPaymentsRouteContext> = {}): AgenticPaymentsRouteContext =>
   ({
     env: {},
@@ -97,11 +92,18 @@ const baseCtx = (overrides: Partial<AgenticPaymentsRouteContext> = {}): AgenticP
     ...overrides,
   }) as unknown as AgenticPaymentsRouteContext;
 
-const postRecordNative = (ctx: AgenticPaymentsRouteContext, body: unknown) =>
+const postRecordNative = (
+  ctx: AgenticPaymentsRouteContext,
+  body: unknown,
+  login?: string,
+) =>
   handleAgenticPaymentsRoutes(
     new Request("https://agent.internal/payments/agentic/ledger/record-native", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        ...(login === undefined ? {} : { "x-user-login": login }),
+      },
       body: JSON.stringify(body),
     }),
     new URL("https://agent.internal/payments/agentic/ledger/record-native"),
@@ -123,75 +125,26 @@ const chargeBody = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
-describe("POST /payments/agentic/ledger/record-native (#2192)", () => {
-  it("records a stripe charge, then replays it as 409 with the existing row", async () => {
-    const { mock, port } = await makePort();
-    const ctx = baseCtx({ env: { AGENT_DB: mock } as any });
-    const first = await postRecordNative(ctx, chargeBody());
-    expect(first!.status).toBe(200);
-    const firstJson = (await first!.json()) as any;
-    expect(firstJson.duplicate).toBe(false);
-    expect(firstJson.record.sessionId).toBe("screener-payment-native:run-1");
-    expect(firstJson.record.gateway).toBe("stripe");
-    expect(firstJson.record.gatewayRef).toBe("cs_test_1");
-    expect(firstJson.record.action).toBe("charge");
-    expect(firstJson.record.proposerDid).toBe("did:agent:openaimp:orchestrator");
-
-    const replay = await postRecordNative(ctx, chargeBody({ priceUSD: 999 }));
-    expect(replay!.status).toBe(409);
-    const replayJson = (await replay!.json()) as any;
-    expect(replayJson.duplicate).toBe(true);
-    expect(replayJson.record.id).toBe(firstJson.record.id);
-    expect(replayJson.record.amount).toBe(0.1);
-    expect((await port.listRowsForRun("run-1")).filter((r) => r.action === "charge")).toHaveLength(1);
+describe("POST /payments/agentic/ledger/record-native — removed (#5572)", () => {
+  it("returns null for every presenter and touches no store", async () => {
+    const mock = new MockD1Database();
+    const audit = vi.fn();
+    const ctx = baseCtx({ env: { AGENT_DB: mock } as any, audit: audit as any });
+    // Service identity, user identity, and no identity: the route
+    // does not exist, so the handler falls through for all of them.
+    // baseCtx's getOrm throws if touched, so a null result also
+    // proves the DO store was never read.
+    expect(await postRecordNative(ctx, chargeBody(), "svc-test")).toBeNull();
+    expect(await postRecordNative(ctx, chargeBody(), "some-user")).toBeNull();
+    expect(await postRecordNative(ctx, chargeBody())).toBeNull();
+    expect(audit).not.toHaveBeenCalled();
   });
 
-  it("records an x402 charge with a truthful gateway and claim-hash ref", async () => {
-    // Rail omitted: the endpoint derives x402 from a claim hash.
-    const { mock } = await makePort();
-    const ctx2 = baseCtx({ env: { AGENT_DB: mock } as any });
-    const res = await postRecordNative(
-      ctx2,
-      chargeBody({ rail: undefined, sessionId: undefined, paymentIntentId: undefined, claimTxHash: "0xabc" }),
-    );
-    expect(res!.status).toBe(200);
-    const json = (await res!.json()) as any;
-    expect(json.record.gateway).toBe("x402");
-    expect(json.record.gatewayRef).toBe("0xabc");
-  });
-
-  it("rejects missing tenant, bad rail, and non-positive price with 400", async () => {
-    const { mock } = await makePort();
-    const ctx = baseCtx({ env: { AGENT_DB: mock } as any });
-    for (const body of [
-      chargeBody({ tenantId: "" }),
-      chargeBody({ rail: "paypal" }),
-      chargeBody({ priceUSD: 0 }),
-      chargeBody({ kind: "refund" }),
-    ]) {
-      const res = await postRecordNative(ctx, body);
-      expect(res!.status).toBe(400);
-    }
-  });
-
-  it("fails closed with 503 when AGENT_DB is unbound", async () => {
-    const ctx = baseCtx({ env: {} as any });
-    const res = await postRecordNative(ctx, chargeBody());
-    expect(res!.status).toBe(503);
-  });
-
-  it("records a credit alongside the charge for the same run", async () => {
-    const { mock, port } = await makePort();
-    const ctx = baseCtx({ env: { AGENT_DB: mock } as any });
-    await postRecordNative(ctx, chargeBody());
-    const res = await postRecordNative(ctx, chargeBody({ kind: "credit" }));
-    expect(res!.status).toBe(200);
-    const json = (await res!.json()) as any;
-    expect(json.record.action).toBe("credit");
-    expect((await port.listRowsForRun("run-1")).map((r) => r.action).sort()).toEqual([
-      "charge",
-      "credit",
-    ]);
+  it("returns null with AGENT_DB unbound too (no 503: there is no route to fail closed)", async () => {
+    const audit = vi.fn();
+    const ctx = baseCtx({ env: {} as any, audit: audit as any });
+    expect(await postRecordNative(ctx, chargeBody(), "svc-test")).toBeNull();
+    expect(audit).not.toHaveBeenCalled();
   });
 });
 
