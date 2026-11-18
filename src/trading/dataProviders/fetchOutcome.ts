@@ -40,6 +40,13 @@
  */
 
 import type { DataProviderCapability, DataProviderId } from "./contract";
+import { createStructuredLogger } from "../../observability/structuredLogger";
+import { createObservabilitySink } from "../../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "trading/dataProviders/fetchOutcome",
+});
 
 /** The classified vocabulary of fetch-failure kinds. */
 export const FETCH_FAILURE_KINDS = [
@@ -313,7 +320,8 @@ export async function trackFetchOutcome<T>(
     try {
       await recorder.recordSuccess(meta);
     } catch (recorderErr) {
-      console.error("[dataProviders] fetch-outcome success recording failed", {
+      structuredLog.error("fetchOutcome.fetch_outcome_success_recording_failed", {
+        message: "[dataProviders] fetch-outcome success recording failed",
         providerId: meta.providerId,
         capability: meta.capability,
         runId: meta.runId,
@@ -328,7 +336,8 @@ export async function trackFetchOutcome<T>(
         message: err instanceof Error ? err.message : String(err),
       });
     } catch (recorderErr) {
-      console.error("[dataProviders] fetch-outcome failure recording failed", {
+      structuredLog.error("fetchOutcome.fetch_outcome_failure_recording_failed", {
+        message: "[dataProviders] fetch-outcome failure recording failed",
         providerId: meta.providerId,
         capability: meta.capability,
         runId: meta.runId,

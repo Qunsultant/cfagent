@@ -38,6 +38,13 @@ import { AGENT_DIDS, getUserDid } from "../../agents/did";
 import { RemoteMcpClient } from "../../mcps/client/mcpClient";
 import { etradeOrderKind, etradePriceType, toETradeInstruments, validateTradingOrderLegs } from "./optionOrders";
 import type { OptionRequestBudget, TradingOrderLeg } from "../interfaces";
+import { createStructuredLogger } from "../../observability/structuredLogger";
+import { createObservabilitySink } from "../../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "trading/etrade/client",
+});
 
 export type ETradeMarketMoverCategory = "gainers" | "losers" | "active";
 
@@ -170,7 +177,12 @@ export class ETradeRestClient {
       // body above stays a log-only diagnostic, never a UI message.
       this.lastErrorKind = "token_expired";
       this.lastError = `E*TRADE Session Expired [HTTP ${status}]: Token rejected on ${endpoint} [${envConfig.name}]. Error: ${errorBody.slice(0, 200) || "Unauthorized"}`;
-      console.warn(`[ETradeClient] Token rejected HTTP ${status} on ${endpoint}: ${errorBody}`);
+      structuredLog.warn("etradeClient.token_rejected", {
+        message: `[ETradeClient] Token rejected HTTP ${status} on ${endpoint}: ${errorBody}`,
+        httpStatus: status,
+        endpoint,
+        errorBody,
+      });
       // Issue #2441: a rejection is a fact about token state, so it
       // propagates to the store that serves tokens — but only when the
       // rejection means the token is dead: every 401, or a 403
@@ -354,7 +366,11 @@ export class ETradeRestClient {
       if (!res.ok) {
         const errorText = await res.text().catch(() => "");
         const error = `E*TRADE Quote API Error [HTTP ${res.status}]: ${errorText.slice(0, 200) || res.statusText}`;
-        console.warn(`[ETradeClient] fetchQuote HTTP ${res.status}: ${errorText}`);
+        structuredLog.warn("etradeClient.fetch_quote_http", {
+          message: `[ETradeClient] fetchQuote HTTP ${res.status}: ${errorText}`,
+          httpStatus: res.status,
+          errorText,
+        });
         await this.handleUpstreamAuthError(res.status, "quote", errorText);
         return fail(error);
       }
@@ -570,7 +586,10 @@ export class ETradeRestClient {
           try {
             options.onWireResponse(batchSyms, data);
           } catch (hookErr) {
-            console.warn("[ETradeClient] fetchQuotes onWireResponse hook failed:", hookErr);
+            structuredLog.warn("etradeClient.fetch_quotes_hook_failed", {
+              message: "[ETradeClient] fetchQuotes onWireResponse hook failed",
+              error: hookErr instanceof Error ? hookErr.message : String(hookErr),
+            });
           }
         }
         const rawQuoteData = data?.QuoteResponse?.QuoteData;
@@ -671,16 +690,13 @@ export class ETradeRestClient {
         handle.setError(detail);
         for (const s of b) handle.addFailure(s, category, detail);
         results.push([]);
-        console.error(JSON.stringify({
-          traceId: trace.traceId,
-          component: "quote-pipeline",
-          event: "batch_exception",
+        structuredLog.error("etradeClient.fetch_quotes_batch_exception", {
+          message: "batch_exception",
           batchIndex: bi,
           symbols: b,
           error: err instanceof Error ? err.message : String(err),
           stack: err instanceof Error ? err.stack?.slice(0, 500) : undefined,
-          timestamp: new Date().toISOString(),
-        }));
+        }, { traceId: trace.traceId });
       } finally {
         handle.complete();
       }
@@ -1012,7 +1028,10 @@ export class ETradeRestClient {
         message,
       };
     } catch (err: any) {
-      console.warn("[ETradeClient] previewOrder error:", err);
+      structuredLog.warn("etradeClient.preview_order_error", {
+        message: "[ETradeClient] previewOrder error",
+        error: err instanceof Error ? err.message : String(err),
+      });
       this.lastError = err.message || String(err);
       return null;
     }
@@ -1354,7 +1373,9 @@ export class ETradeRestClient {
           errMsg.includes("expired")
         ) {
           try {
-            console.log("[ETradeClient] Upstream preview timed out; re-previewing with fresh unique clientOrderId...");
+            structuredLog.info("etradeClient.upstream_preview_timed_out", {
+              message: "[ETradeClient] Upstream preview timed out; re-previewing with fresh unique clientOrderId...",
+            });
             // CRITICAL: E*TRADE requires a fresh clientOrderId for the new preview so it does not collide with the timed-out session
             const freshPreviewOrderId = `ord_pv_${crypto.randomUUID().slice(0, 8)}`;
             const refreshedPreview = await this.previewOrder(key, {
@@ -1476,7 +1497,10 @@ export class ETradeRestClient {
               errMsg = `E*TRADE Auto-Recovery Failed: ${autoRecoveryErr}`;
             }
           } catch (retryErr: any) {
-            console.warn("[ETradeClient] Auto-recovery preview retry failed:", retryErr);
+            structuredLog.warn("etradeClient.auto_recovery_preview_retry_failed", {
+              message: "[ETradeClient] Auto-recovery preview retry failed",
+              error: retryErr instanceof Error ? retryErr.message : String(retryErr),
+            });
             errMsg = `Auto-recovery failed: ${retryErr.message || String(retryErr)}`;
           }
         }
@@ -1657,7 +1681,11 @@ export class ETradeRestClient {
       if (!res.ok) {
         const errorText = await res.text().catch(() => "");
         this.lastError = `E*TRADE Accounts API Error [HTTP ${res.status}]: ${errorText.slice(0, 200) || res.statusText}`;
-        console.warn(`[ETradeClient] fetchAccounts HTTP ${res.status}: ${errorText}`);
+        structuredLog.warn("etradeClient.fetch_accounts_http", {
+          message: `[ETradeClient] fetchAccounts HTTP ${res.status}: ${errorText}`,
+          httpStatus: res.status,
+          errorText,
+        });
         await this.handleUpstreamAuthError(res.status, "accounts", errorText);
         return [];
       }
@@ -1695,7 +1723,10 @@ export class ETradeRestClient {
         dayTraderStatus: Boolean(a.dayTraderStatus),
       }));
     } catch (err) {
-      console.warn("[ETradeClient] fetchAccounts error:", err);
+      structuredLog.warn("etradeClient.fetch_accounts_error", {
+        message: "[ETradeClient] fetchAccounts error",
+        error: err instanceof Error ? err.message : String(err),
+      });
       if (!this.lastError) {
         this.lastError = `E*TRADE accounts request failed: ${err instanceof Error ? err.message : String(err)}`;
       }
@@ -1787,7 +1818,11 @@ export class ETradeRestClient {
       if (!res.ok && res.status !== 204) {
         const errorText = await res.text().catch(() => "");
         this.lastError = `E*TRADE Portfolio API Error [HTTP ${res.status}]: ${errorText.slice(0, 200) || res.statusText}`;
-        console.warn(`[ETradeClient] fetchPortfolio HTTP ${res.status}: ${errorText}`);
+        structuredLog.warn("etradeClient.fetch_portfolio_http", {
+          message: `[ETradeClient] fetchPortfolio HTTP ${res.status}: ${errorText}`,
+          httpStatus: res.status,
+          errorText,
+        });
         await this.handleUpstreamAuthError(res.status, "portfolio", errorText);
         return null;
       }
@@ -1883,7 +1918,10 @@ export class ETradeRestClient {
 
       return { account, positions };
     } catch (err) {
-      console.warn("[ETradeClient] fetchPortfolio error:", err);
+      structuredLog.warn("etradeClient.fetch_portfolio_error", {
+        message: "[ETradeClient] fetchPortfolio error",
+        error: err instanceof Error ? err.message : String(err),
+      });
       if (!this.lastError) {
         this.lastError = `E*TRADE portfolio request failed: ${err instanceof Error ? err.message : String(err)}`;
       }
@@ -1983,7 +2021,10 @@ export class ETradeRestClient {
         adjustedPrice: lot.adjustedPrice !== undefined ? Number(lot.adjustedPrice) : undefined,
       }));
     } catch (err) {
-      console.warn("[ETradeClient] fetchPositionLots error:", err);
+      structuredLog.warn("etradeClient.fetch_position_lots_error", {
+        message: "[ETradeClient] fetchPositionLots error",
+        error: err instanceof Error ? err.message : String(err),
+      });
       if (!this.lastError) {
         this.lastError = `E*TRADE position lots request failed: ${err instanceof Error ? err.message : String(err)}`;
       }
@@ -2050,7 +2091,11 @@ export class ETradeRestClient {
       if (!res.ok) {
         const errorText = await res.text().catch(() => "");
         this.lastError = `E*TRADE Balance API Error [HTTP ${res.status}]: ${errorText.slice(0, 200) || res.statusText}`;
-        console.warn(`[ETradeClient] fetchBalance HTTP ${res.status}: ${errorText}`);
+        structuredLog.warn("etradeClient.fetch_balance_http", {
+          message: `[ETradeClient] fetchBalance HTTP ${res.status}: ${errorText}`,
+          httpStatus: res.status,
+          errorText,
+        });
         await this.handleUpstreamAuthError(res.status, "balance", errorText);
         return null;
       }
@@ -2106,7 +2151,10 @@ export class ETradeRestClient {
         cashBalance: cashBalance > 0 ? cashBalance : undefined,
       };
     } catch (err) {
-      console.warn("[ETradeClient] fetchBalance error:", err);
+      structuredLog.warn("etradeClient.fetch_balance_error", {
+        message: "[ETradeClient] fetchBalance error",
+        error: err instanceof Error ? err.message : String(err),
+      });
       if (!this.lastError) {
         this.lastError = `E*TRADE balance request failed: ${err instanceof Error ? err.message : String(err)}`;
       }
@@ -2209,7 +2257,10 @@ export class ETradeRestClient {
         detailsURI: t.detailsURI ? String(t.detailsURI) : undefined,
       }));
     } catch (err) {
-      console.warn("[ETradeClient] fetchTransactions error:", err);
+      structuredLog.warn("etradeClient.fetch_transactions_error", {
+        message: "[ETradeClient] fetchTransactions error",
+        error: err instanceof Error ? err.message : String(err),
+      });
       if (!this.lastError) {
         this.lastError = `E*TRADE transactions request failed: ${err instanceof Error ? err.message : String(err)}`;
       }
@@ -2306,7 +2357,10 @@ export class ETradeRestClient {
         } : undefined,
       };
     } catch (err) {
-      console.warn("[ETradeClient] fetchTransactionDetails error:", err);
+      structuredLog.warn("etradeClient.fetch_transaction_details_error", {
+        message: "[ETradeClient] fetchTransactionDetails error",
+        error: err instanceof Error ? err.message : String(err),
+      });
       if (!this.lastError) {
         this.lastError = `E*TRADE transaction details request failed: ${err instanceof Error ? err.message : String(err)}`;
       }
@@ -2398,7 +2452,10 @@ export class ETradeRestClient {
         deleteTime: a.deleteTime ? Number(a.deleteTime) : undefined,
       }));
     } catch (err) {
-      console.warn("[ETradeClient] fetchAlerts error:", err);
+      structuredLog.warn("etradeClient.fetch_alerts_error", {
+        message: "[ETradeClient] fetchAlerts error",
+        error: err instanceof Error ? err.message : String(err),
+      });
       if (!this.lastError) {
         this.lastError = `E*TRADE alerts request failed: ${err instanceof Error ? err.message : String(err)}`;
       }
@@ -2478,7 +2535,10 @@ export class ETradeRestClient {
         prev: resp.prev ? String(resp.prev) : undefined,
       };
     } catch (err) {
-      console.warn("[ETradeClient] fetchAlertDetails error:", err);
+      structuredLog.warn("etradeClient.fetch_alert_details_error", {
+        message: "[ETradeClient] fetchAlertDetails error",
+        error: err instanceof Error ? err.message : String(err),
+      });
       if (!this.lastError) {
         this.lastError = `E*TRADE alert details request failed: ${err instanceof Error ? err.message : String(err)}`;
       }
@@ -2587,7 +2647,11 @@ export class ETradeRestClient {
       if (!res.ok) {
         const errorText = await res.text().catch(() => "");
         this.lastError = `E*TRADE Lookup API Error [HTTP ${res.status}]: ${errorText.slice(0, 200) || res.statusText}`;
-        console.warn(`[ETradeClient] lookupProduct HTTP ${res.status}: ${errorText}`);
+        structuredLog.warn("etradeClient.lookup_product_http", {
+          message: `[ETradeClient] lookupProduct HTTP ${res.status}: ${errorText}`,
+          httpStatus: res.status,
+          errorText,
+        });
         await this.handleUpstreamAuthError(res.status, "lookup", errorText);
         return [];
       }
@@ -2762,7 +2826,10 @@ export class ETradeRestClient {
       if (!this.lastError) {
         this.lastError = `E*TRADE option chains request failed: ${err instanceof Error ? err.message : String(err)}`;
       }
-      console.warn("[ETradeClient] getOptionChains error:", err);
+      structuredLog.warn("etradeClient.get_option_chains_error", {
+        message: "[ETradeClient] getOptionChains error",
+        error: err instanceof Error ? err.message : String(err),
+      });
       return null;
     }
   }
@@ -2968,7 +3035,10 @@ export class ETradeRestClient {
         };
       });
     } catch (err) {
-      console.warn("[ETradeClient] fetchOrders error:", err);
+      structuredLog.warn("etradeClient.fetch_orders_error", {
+        message: "[ETradeClient] fetchOrders error",
+        error: err instanceof Error ? err.message : String(err),
+      });
       if (!this.lastError) {
         this.lastError = `E*TRADE orders request failed: ${err instanceof Error ? err.message : String(err)}`;
       }
@@ -3083,7 +3153,10 @@ export class ETradeRestClient {
         symbol: instrument.Product?.symbol,
       };
     } catch (err) {
-      console.warn("[ETradeClient] fetchOrderDetails error:", err);
+      structuredLog.warn("etradeClient.fetch_order_details_error", {
+        message: "[ETradeClient] fetchOrderDetails error",
+        error: err instanceof Error ? err.message : String(err),
+      });
       if (!this.lastError) {
         this.lastError = `E*TRADE order details request failed: ${err instanceof Error ? err.message : String(err)}`;
       }
@@ -3393,10 +3466,17 @@ export class ETradeRestClient {
       if (err instanceof BusinessError) {
         // Log technical detail, but don't set lastError to technical message.
         // The caller should use err.toJSON() for the UI.
-        console.warn(`[ETradeClient] getWatchlists business error [${err.code}]:`, err.entry?.technicalDetail);
+        structuredLog.warn("etradeClient.get_watchlists_business_error", {
+          message: `[ETradeClient] getWatchlists business error [${err.code}]`,
+          code: err.code,
+          technicalDetail: err.entry?.technicalDetail,
+        });
         throw err;
       }
-      console.warn("[ETradeClient] getWatchlists error:", err);
+      structuredLog.warn("etradeClient.get_watchlists_error", {
+        message: "[ETradeClient] getWatchlists error",
+        error: err instanceof Error ? err.message : String(err),
+      });
       this.lastError = `E*TRADE watchlist request failed: ${err instanceof Error ? err.message : String(err)}`;
       return [];
     }
@@ -3450,7 +3530,11 @@ export class ETradeRestClient {
       if (!res.ok) {
         const errorText = await res.text().catch(() => "");
         this.lastError = `E*TRADE Watchlist Details API Error [HTTP ${res.status}]: ${errorText.slice(0, 200) || res.statusText}`;
-        console.warn(`[ETradeClient] getWatchlistDetails HTTP ${res.status}: ${errorText}`);
+        structuredLog.warn("etradeClient.get_watchlist_details_http", {
+          message: `[ETradeClient] getWatchlistDetails HTTP ${res.status}: ${errorText}`,
+          httpStatus: res.status,
+          errorText,
+        });
         await this.handleUpstreamAuthError(res.status, "watchlistDetails", errorText);
         return null;
       }
@@ -3482,7 +3566,10 @@ export class ETradeRestClient {
         source: "etrade_api",
       };
     } catch (err) {
-      console.warn("[ETradeClient] getWatchlistDetails error:", err);
+      structuredLog.warn("etradeClient.get_watchlist_details_error", {
+        message: "[ETradeClient] getWatchlistDetails error",
+        error: err instanceof Error ? err.message : String(err),
+      });
       if (!this.lastError) {
         this.lastError = `E*TRADE watchlist detail request failed: ${err instanceof Error ? err.message : String(err)}`;
       }

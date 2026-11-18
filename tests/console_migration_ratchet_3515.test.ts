@@ -22,6 +22,14 @@
  * true remaining total before batch 2 was 589, not 595; after batch 2
  * the remaining total is 414.
  *
+ * Batch 4 (this slice) migrated `src/trading` — 9 files, 47 real
+ * sites — to the same logger, and moved them from REMAINING_PIN to
+ * MIGRATED_ZERO. Two planned files are untouched by this batch:
+ * `src/trading/channels/intake.ts` already reached zero on main via
+ * #5083 S4 and `src/trading/options/unifiedOptionsService.ts` holds no
+ * `console.*` on main, so both stay in REMAINING_PIN at their ceilings.
+ * After batch 4 the remaining total is 187.
+ *
  * Batch 3 (this slice) migrated `src/agents` — all 42 files, 180
  * real sites — to the same logger, and moved them from REMAINING_PIN
  * to MIGRATED_ZERO; after batch 3 the remaining total is 234. One
@@ -346,6 +354,15 @@ const MIGRATED_ZERO: readonly string[] = [
   "src/telemetry/fanOutResourceUsageAdapter.ts",
   "src/telemetry/resourceUsageObservabilityAdapter.ts",
   "src/telemetry/telemetryPorts.ts",
+  "src/trading/alpaca/signIn.ts",
+  "src/trading/dataProviders/fetchOutcome.ts",
+  "src/trading/email/agent.ts",
+  "src/trading/etrade/client.ts",
+  "src/trading/etrade/platform.ts",
+  "src/trading/etrade/quoteTrace.ts",
+  "src/trading/platformHistory.ts",
+  "src/trading/screenerPipeline.ts",
+  "src/trading/slack/agent.ts",
 ];
 
 /**
@@ -412,17 +429,8 @@ const REMAINING_PIN: Readonly<Record<string, number>> = {
   "src/server/routes/messaging.ts": 3,
   "src/server/routes/privacy.ts": 2,
   "src/server/routes/queue.ts": 16,
-  "src/trading/alpaca/signIn.ts": 2,
   "src/trading/channels/intake.ts": 3,
-  "src/trading/dataProviders/fetchOutcome.ts": 2,
-  "src/trading/email/agent.ts": 2,
-  "src/trading/etrade/client.ts": 26,
-  "src/trading/etrade/platform.ts": 2,
-  "src/trading/etrade/quoteTrace.ts": 1,
   "src/trading/options/unifiedOptionsService.ts": 1,
-  "src/trading/platformHistory.ts": 1,
-  "src/trading/screenerPipeline.ts": 4,
-  "src/trading/slack/agent.ts": 7,
   "src/workflows/createWorkflowPorts.ts": 2,
   "src/workflows/manualOptionsScreen.ts": 9,
   "src/workflows/optionsScreenWorkflow.ts": 1,

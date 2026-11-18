@@ -33,6 +33,13 @@ import { AGENT_DIDS, createDidAttestationSync, getUserDid } from "../../agents/d
 import { isAuctionTimeInForce, type NormalizedTimeInForce } from "../timeInForce";
 import { validateReplaceOrder } from "../advancedOrders";
 import { computeBracketExits } from "../bracketPercent";
+import { createStructuredLogger } from "../../observability/structuredLogger";
+import { createObservabilitySink } from "../../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "trading/etrade/platform",
+});
 
 /**
  * Quote provenance (issue #118, audit F12/F13).
@@ -651,7 +658,10 @@ export class ETradeTradingPlatform implements ITradingPlatform {
         }
       } catch (err: any) {
         if (optionLegs.length) throw err;
-        console.warn("[ETradePlatform] upstream previewOrder notice:", err);
+        structuredLog.warn("etradePlatform.upstream_preview_order_notice", {
+          message: "[ETradePlatform] upstream previewOrder notice",
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
     }
 
@@ -745,7 +755,10 @@ export class ETradeTradingPlatform implements ITradingPlatform {
           updatedAt: new Date().toISOString(),
         });
       } catch (err) {
-        console.warn("Failed to persist trade draft to ORM:", err);
+        structuredLog.warn("etradePlatform.trade_draft_persist_failed", {
+          message: "Failed to persist trade draft to ORM",
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
     }
 

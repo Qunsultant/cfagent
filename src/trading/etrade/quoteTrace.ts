@@ -11,6 +11,14 @@
  * every exception is captured with context.
  */
 
+import { createStructuredLogger } from "../../observability/structuredLogger";
+import { createObservabilitySink } from "../../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "trading/etrade/quoteTrace",
+});
+
 export type QuoteFailureCategory =
   | "http_error"
   | "timeout"
@@ -175,13 +183,10 @@ export class QuoteTrace {
   }
 
   private log(event: string, data: Record<string, unknown>): void {
-    console.log(JSON.stringify({
-      traceId: this.traceId,
-      component: "quote-pipeline",
-      event,
-      timestamp: new Date().toISOString(),
+    structuredLog.info(`quoteTrace.${event}`, {
+      message: event,
       ...data,
-    }));
+    }, { traceId: this.traceId });
   }
 }
 

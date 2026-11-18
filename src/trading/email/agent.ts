@@ -37,6 +37,13 @@ import PostalMime from "postal-mime";
 import { SERVER_PALETTE } from "../../theme/serverPalette";
 import { createEmailSender } from "../../services/cloudflareEmailSender";
 import { actorGateway } from "../../services/cloudflareActorGateway";
+import { createStructuredLogger } from "../../observability/structuredLogger";
+import { createObservabilitySink } from "../../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "trading/email/agent",
+});
 
 function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (character) => ({
@@ -1049,7 +1056,10 @@ export async function handleCloudflareEmailMessage(
       }
     }
   } catch (err) {
-    console.warn("[CloudflareEmail] PostalMime parse failed, falling back to header inspect:", err);
+    structuredLog.warn("emailAgent.postal_mime_parse_failed", {
+      message: "[CloudflareEmail] PostalMime parse failed, falling back to header inspect",
+      error: err instanceof Error ? err.message : String(err),
+    });
     subject = message.headers?.get?.("subject") || "";
   }
 
@@ -1124,7 +1134,10 @@ export async function handleCloudflareEmailMessage(
         ).body
       );
     } catch (e) {
-      console.warn("[CloudflareEmail] message.reply error:", e);
+      structuredLog.warn("emailAgent.message_reply_failed", {
+        message: "[CloudflareEmail] message.reply error",
+        error: e instanceof Error ? e.message : String(e),
+      });
     }
   } else {
     const sender = new ETradeEmailTradingService(env);

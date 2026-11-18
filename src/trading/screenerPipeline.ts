@@ -89,6 +89,13 @@ import type {
   StockScreenerFilter,
   StockScreenResult,
 } from "../types";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "trading/screenerPipeline",
+});
 
 // ---------------------------------------------------------------------------
 // Serializable shapes — single source of truth for every consumer
@@ -705,9 +712,10 @@ export async function nasdaqUniverseSeamFromSql(
     });
     return { universeRoute: bundle };
   } catch (err) {
-    console.warn(
-      `[screener] universe seam unavailable, degrading to the missing-seam error result: ${err instanceof Error ? err.message : String(err)}`
-    );
+    structuredLog.warn("screenerPipeline.universe_seam_unavailable", {
+      message: `[screener] universe seam unavailable, degrading to the missing-seam error result: ${err instanceof Error ? err.message : String(err)}`,
+      error: err instanceof Error ? err.message : String(err),
+    });
     return undefined;
   }
 }
@@ -1278,10 +1286,11 @@ export async function fetchYahooQuotes(
           if (adapted) bySymbol.set(adapted.symbol.toUpperCase(), adapted);
         }
       } catch (err) {
-        console.warn(
-          `[yahooAcquisition] batch quote chunk failed (${chunk.length} symbols); falling back per-symbol:`,
-          err instanceof Error ? err.message : String(err)
-        );
+        structuredLog.warn("screenerPipeline.yahoo_batch_quote_chunk_failed", {
+          message: `[yahooAcquisition] batch quote chunk failed (${chunk.length} symbols); falling back per-symbol: ${err instanceof Error ? err.message : String(err)}`,
+          symbolCount: chunk.length,
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
     }
   }
@@ -1681,10 +1690,15 @@ export async function acquireUniverse(
       }
     }
     if (failed.length > 0) {
-      console.warn(
-        `[screenerPipeline] Live quote failures: ${failed.length}/${limited.length}. ` +
-          `Reasons: ${JSON.stringify(failureReasons)}. Samples: ${failureSamples.join("; ")}`
-      );
+      structuredLog.warn("screenerPipeline.live_quote_failures", {
+        message:
+          `[screenerPipeline] Live quote failures: ${failed.length}/${limited.length}. ` +
+          `Reasons: ${JSON.stringify(failureReasons)}. Samples: ${failureSamples.join("; ")}`,
+        failedCount: failed.length,
+        totalCount: limited.length,
+        failureReasons,
+        failureSamples,
+      });
     }
     const reasonSummary = Object.entries(failureReasons)
       .map(([reason, count]) => `${reason}=${count}`)
@@ -2040,10 +2054,15 @@ export async function acquireUniverse(
       }
     }
     if (failed.length > 0) {
-      console.warn(
-        `[screenerPipeline] ${quoteProviderName} quote failures: ${failed.length}/${limited.length}. ` +
-          `Reasons: ${JSON.stringify(failureReasons)}. Samples: ${failureSamples.join("; ")}`
-      );
+      structuredLog.warn("screenerPipeline.etrade_quote_failures", {
+        message:
+          `[screenerPipeline] ${quoteProviderName} quote failures: ${failed.length}/${limited.length}. ` +
+          `Reasons: ${JSON.stringify(failureReasons)}. Samples: ${failureSamples.join("; ")}`,
+        failedCount: failed.length,
+        totalCount: limited.length,
+        failureReasons,
+        failureSamples,
+      });
     }
     const reasonSummary = Object.entries(failureReasons)
       .map(([reason, count]) => `${reason}=${count}`)

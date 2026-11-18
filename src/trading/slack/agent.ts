@@ -52,6 +52,13 @@ import { ETradeBrowserService } from "../../services/browserAgent";
 import { validateEmailRecipient } from "../../security/webhookReplay";
 import { sanitizeInboundText } from "../../security/promptInjectionSanitize";
 import { getCfpayConfig, cfpayPostToSlack } from "../../services/cfpayA2A";
+import { createStructuredLogger } from "../../observability/structuredLogger";
+import { createObservabilitySink } from "../../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "trading/slack/agent",
+});
 
 function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (character) => ({
@@ -392,7 +399,11 @@ export class ETradeSlackTradingService {
               humanApproved: true,
             }, { channel });
           } catch (snapErr) {
-            console.warn("[ETradeSlackAgent] Could not deliver snap receipt:", snapErr);
+            structuredLog.warn("slackAgent.snap_receipt_delivery_failed", {
+              message: "[ETradeSlackAgent] Could not deliver snap receipt",
+              handler: "processSlackEvent",
+              error: snapErr instanceof Error ? snapErr.message : String(snapErr),
+            });
           }
         }
 
@@ -1236,7 +1247,11 @@ export class ETradeSlackTradingService {
             humanApproved: true,
           }, { channel: payload.channel?.id });
         } catch (snapErr) {
-          console.warn("[ETradeSlackAgent] Could not deliver snap receipt:", snapErr);
+          structuredLog.warn("slackAgent.snap_receipt_delivery_failed", {
+            message: "[ETradeSlackAgent] Could not deliver snap receipt",
+            handler: "processSlackInteraction",
+            error: snapErr instanceof Error ? snapErr.message : String(snapErr),
+          });
         }
       }
 
@@ -1429,9 +1444,11 @@ export class ETradeSlackTradingService {
               createdAt: timestamp,
             });
           } catch (auditErr) {
-            console.warn(
-              `[ETradeSlackAgent] Audit insertion failed (type=trade.options_draft_create_failed, draft=${draftId}): ${auditErr instanceof Error ? auditErr.message : String(auditErr)}`,
-            );
+            structuredLog.warn("slackAgent.options_draft_audit_failed", {
+              message: `[ETradeSlackAgent] Audit insertion failed (type=trade.options_draft_create_failed, draft=${draftId}): ${auditErr instanceof Error ? auditErr.message : String(auditErr)}`,
+              draftId,
+              error: auditErr instanceof Error ? auditErr.message : String(auditErr),
+            });
           }
         }
 
@@ -1963,7 +1980,10 @@ export class ETradeSlackTradingService {
           delivered = true;
         }
       } catch (err) {
-        console.warn("[ETradeSlackAgent] webhook delivery failed:", err);
+        structuredLog.warn("slackAgent.webhook_delivery_failed", {
+          message: "[ETradeSlackAgent] webhook delivery failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
     }
 
@@ -1982,7 +2002,10 @@ export class ETradeSlackTradingService {
           delivered = true;
         }
       } catch (err) {
-        console.warn("[ETradeSlackAgent] chat.postMessage failed:", err);
+        structuredLog.warn("slackAgent.chat_post_message_failed", {
+          message: "[ETradeSlackAgent] chat.postMessage failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
     }
 
@@ -1997,7 +2020,10 @@ export class ETradeSlackTradingService {
           delivered = true;
         }
       } catch (err) {
-        console.warn("[ETradeSlackAgent] cfpay A2A slack.post failed:", err);
+        structuredLog.warn("slackAgent.cfpay_slack_post_failed", {
+          message: "[ETradeSlackAgent] cfpay A2A slack.post failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
     }
 
@@ -2016,7 +2042,10 @@ export class ETradeSlackTradingService {
       });
       return res.ok;
     } catch (err) {
-      console.warn("[ETradeSlackAgent] postResponseUrl failed:", err);
+      structuredLog.warn("slackAgent.post_response_url_failed", {
+        message: "[ETradeSlackAgent] postResponseUrl failed",
+        error: err instanceof Error ? err.message : String(err),
+      });
       return false;
     }
   }
