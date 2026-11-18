@@ -149,6 +149,12 @@ import { ETradeWebhookService } from "../services/tradingWebhooks";
 import { createFollowupDeliveryPort } from "../services/screenerFollowupDelivery";
 import { createSqlDeliverySuppressionStore } from "../data/deliveryClaimsStore";
 import { createDeliverySuppressor } from "../workflows/screenDeliverySuppression";
+import {
+  createDeliveryClaimsDoor,
+  type DeliveryClaimInput,
+  type DeliveryClaimResult,
+  type DeliveryClaimsDoor,
+} from "../services/deliveryClaimsDoor";
 import { ScheduledTasksService, type AutonomousOptionsAnalysisOptions, type AutonomousStrategyDiscoveryOptions } from "../services/scheduledTasks";
 // Issue #278: durable scheduled-run reports for the NextGenTP agent.
 // Issue #308: the single generate→store seam + canonical report bodies.
@@ -2287,6 +2293,43 @@ export class OrchestratorAgent extends PortThink {
     input: ScheduledReportInput,
   ): Promise<CanonicalStoreResult | null> {
     return persistPipelineGenerateReportCanonical(this.reportDispatchContext(), input);
+  }
+
+  /**
+   * Issue #4438 (audit item E-3 from #3943's §15): door —
+   * the durable delivery-suppression claims door. The
+   * workflow residency has no DO SQLite of its own, so its
+   * deliver stage claims through this door, into this (the
+   * shared) Orchestrator instance's mas_delivery_claims —
+   * the SAME table the screener executor claims into — so a
+   * delivery suppressed once stays suppressed across a
+   * restart/retry in every residency. Thin wrappers over
+   * the one seam, like the generate door above: the claim
+   * lands in the DO's SQL store before the caller sends.
+   */
+  async tryClaimDelivery(
+    input: DeliveryClaimInput,
+  ): Promise<DeliveryClaimResult> {
+    return this.deliveryClaimsDoor().tryClaimDelivery(input);
+  }
+
+  async wasClaimedDelivery(
+    input: DeliveryClaimInput,
+  ): Promise<DeliveryClaimResult> {
+    return this.deliveryClaimsDoor().wasClaimedDelivery(input);
+  }
+
+  async releaseDeliveryClaim(input: DeliveryClaimInput): Promise<void> {
+    await this.deliveryClaimsDoor().releaseDeliveryClaim(input);
+  }
+
+  /** The claims door over this instance's durable claims store (#4438). */
+  private deliveryClaimsDoor(): DeliveryClaimsDoor {
+    return createDeliveryClaimsDoor(
+      createDeliverySuppressor(
+        createSqlDeliverySuppressionStore(() => this.ensureTables()),
+      ),
+    );
   }
 
   async deliverWorkflowScreenOutcome(

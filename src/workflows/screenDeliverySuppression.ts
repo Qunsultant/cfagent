@@ -143,3 +143,67 @@ export function createDeliverySuppressor(
     },
   };
 }
+
+/**
+ * Issue #4438 — the async seam: the same claim discipline
+ * over an async backing store, for residencies whose durable
+ * claims live behind a door (an RPC), where no sync store
+ * exists. The key shape, the claim/release discipline, and
+ * the module ownership are unchanged — only the backing
+ * call is awaited. The sync seam above stays the seam for
+ * DO residencies with local SQLite; the door-backed
+ * suppressor (src/services/deliveryClaimsDoor.ts) is the
+ * async seam's production backing.
+ */
+export interface AsyncDeliverySuppressionStore {
+  has(key: string): Promise<boolean>;
+  add(key: string): Promise<void>;
+  /** Optional: remove a claim (send-failure release). Absent = release is a no-op. */
+  delete?(key: string): Promise<void>;
+}
+
+export interface AsyncDeliverySuppressor {
+  /**
+   * Claim (runId, destination) for sending. Returns true on
+   * the first claim (proceed to send) and false when the pair
+   * was already claimed (suppress — do not send again).
+   */
+  tryClaim(runId: string, destination: string): Promise<boolean>;
+  /** True when the pair was already claimed. Does not claim. */
+  wasClaimed(runId: string, destination: string): Promise<boolean>;
+  /**
+   * Release a claim, so a later send may proceed. Used ONLY
+   * when the send itself failed (the sync release's rule,
+   * unchanged).
+   */
+  release(runId: string, destination: string): Promise<void>;
+}
+
+export function createAsyncDeliverySuppressor(
+  store?: AsyncDeliverySuppressionStore,
+): AsyncDeliverySuppressor {
+  const seen = new Set<string>();
+  const backing: AsyncDeliverySuppressionStore = store ?? {
+    has: async (key) => seen.has(key),
+    add: async (key) => {
+      seen.add(key);
+    },
+    delete: async (key) => {
+      seen.delete(key);
+    },
+  };
+  return {
+    async tryClaim(runId, destination) {
+      const key = deliverySuppressionKey(runId, destination);
+      if (await backing.has(key)) return false;
+      await backing.add(key);
+      return true;
+    },
+    async wasClaimed(runId, destination) {
+      return backing.has(deliverySuppressionKey(runId, destination));
+    },
+    async release(runId, destination) {
+      await backing.delete?.(deliverySuppressionKey(runId, destination));
+    },
+  };
+}

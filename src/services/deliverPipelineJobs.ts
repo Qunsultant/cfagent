@@ -47,7 +47,10 @@ import {
   type DeliverJobRegistry,
   type DeliverStatusView,
 } from "./deliverJobs";
-import type { DeliverySuppressor } from "../workflows/screenDeliverySuppression";
+import type {
+  AsyncDeliverySuppressor,
+  DeliverySuppressor,
+} from "../workflows/screenDeliverySuppression";
 import {
   feedShardSymbols,
   FEED_PIPELINE_CATALOG,
@@ -260,11 +263,13 @@ export interface DeliverStepDeps {
   unconfiguredReasons?: Partial<Record<DeliverChannel, string>>;
   /**
    * The duplicate-delivery suppressor for this residency
-   * (#3943): the ONE module, injected store. The step
-   * forwards it to the run (registerDeliverStep); absent ⇒
-   * the run builds a fresh in-memory suppressor.
+   * (#3943): the ONE module, injected store — sync seam on
+   * the host, door-backed async seam in the workflow
+   * residency (#4438). The step forwards it to the run
+   * (registerDeliverStep); absent ⇒ the run builds a fresh
+   * in-memory suppressor.
    */
-  suppressor?: DeliverySuppressor;
+  suppressor?: DeliverySuppressor | AsyncDeliverySuppressor;
   /**
    * The job's currently configured shard keys (its definition's
    * processing.shards, read at run time — the feed wiring's
@@ -395,8 +400,17 @@ export function registerDeliverStep(
         inputRunId: result.inputRunId,
         reportsDelivered: result.reportsDelivered,
         channelOutcomes: result.channelOutcomes,
+        // #4438: the suppression claims that suppressed a
+        // pair in this run — the run record's visibility
+        // for delivery suppression, carried on the step
+        // output into the run's artifacts.
+        suppressedClaims: result.suppressedClaims,
       },
-      descriptor: `deliver ${def.sourceId}/${def.dataset}: ${result.received}/${result.requested} channel deliveries recorded (artifact ${result.artifactId}, input run ${result.inputRunId})`,
+      descriptor: `deliver ${def.sourceId}/${def.dataset}: ${result.received}/${result.requested} channel deliveries recorded (artifact ${result.artifactId}, input run ${result.inputRunId})${
+        result.suppressedClaims.length > 0
+          ? `; ${result.suppressedClaims.length} pair(s) suppressed by delivery claim: ${result.suppressedClaims.join(", ")}`
+          : ""
+      }`,
     };
   });
 }
