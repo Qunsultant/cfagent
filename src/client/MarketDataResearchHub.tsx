@@ -450,7 +450,7 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
 
   const askInChat = (prompt = nlqQuery) => {
     const query = prompt.trim();
-    if (query) onSendPrompt?.(query, `Yahoo Finance Research · ${subTab}`);
+    if (query) onSendPrompt?.(query, `Market Data Research · ${subTab}`);
   };
 
   const copyDidToClipboard = (did: string) => {
