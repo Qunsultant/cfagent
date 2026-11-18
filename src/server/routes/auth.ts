@@ -73,11 +73,6 @@ import { commercialPath } from "../../data/commercialUrlCatalog";
 import { createStructuredLogger } from "../../observability/structuredLogger";
 import { createObservabilitySink } from "../../observability/createObservabilityPorts";
 
-/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
-const structuredLog = createStructuredLogger(createObservabilitySink({}), {
-  component: "server/routes/auth",
-});
-
 /**
  * Slice 3 of Qunsultant/cfagent#2902 (Auth & IAAA) — moves only.
  * The login family of handleFetch, verbatim and in original order:
@@ -729,6 +724,13 @@ export async function handleAuthMeRoutes(request: Request, env: Env, url: URL, p
  * next delegation exactly as the inline chain did.
  */
 export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL, path: string): Promise<Response | null> {
+    // Issue #3515 S3 batch 6, #5587 — env-wired logger: the sink is built
+    // from the request's env so events reach the Analytics Engine
+    // `observability` dataset; a module-level logger built with an empty
+    // env is console-only (the binding is construction-time).
+    const structuredLog = createStructuredLogger(createObservabilitySink(env), {
+      component: "server/routes/auth",
+    });
     // --- Access requests (issue #1274): request access + admin decide.
     // A signed-in member asks for tenant-admin; an admin approves or
     // denies. Requests NEVER auto-grant: approval calls grantMembership

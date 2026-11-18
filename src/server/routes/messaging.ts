@@ -43,11 +43,6 @@ import { ETradeWebhookService } from "../../services/tradingWebhooks";
 import { createStructuredLogger } from "../../observability/structuredLogger";
 import { createObservabilitySink } from "../../observability/createObservabilityPorts";
 
-/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
-const structuredLog = createStructuredLogger(createObservabilitySink({}), {
-  component: "server/routes/messaging",
-});
-
 /**
  * Slice 6 of Qunsultant/cfagent#2902 (Messaging & social) — moves only.
  * The NLQ inbound webhook's single-owner handler and its service
@@ -218,6 +213,13 @@ async function handleNlqWebhookRequest(
  * ingress throttle the NLQ branch passes to handleNlqWebhookRequest.
  */
 export async function handleMessagingSagaRoutes(request: Request, env: Env, url: URL, path: string, throttle: (route: string, maxRequests: number, windowMs: number) => Response | null): Promise<Response | null> {
+    // Issue #3515 S3 batch 6, #5587 — env-wired logger: the sink is built
+    // from the request's env so events reach the Analytics Engine
+    // `observability` dataset; a module-level logger built with an empty
+    // env is console-only (the binding is construction-time).
+    const structuredLog = createStructuredLogger(createObservabilitySink(env), {
+      component: "server/routes/messaging",
+    });
     // Issue #2041 S2: saga journey-gate routes (panel + chat
     // surfaces). Session login comes from requireAuth; the
     // handler 401s when absent (never a synthetic identity).
