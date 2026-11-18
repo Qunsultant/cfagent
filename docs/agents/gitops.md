@@ -774,7 +774,9 @@ Verify in tiers (issue #4052):
 - **Tier 2 — full suite, in CI:** the full test suite runs in CI on the PR head and on the merge-group commit. A merge requires the queue + required checks green; the local full run does not gate the push.
 - **Tier 2 locally** only when the change touches shared or censused surfaces (for example a doc under the neutrality census, shared routers/ports, workflow files) or when CI cannot run.
 
-One shared Tier 1 script (issue #4082): `scripts/verify-tier1.sh` implements the Tier 1 gate once, identical for every lane. Per-slice verify scripts are retired in place (deprecated, pointing at the shared script) — a lane does not re-implement the gate.
+One shared Tier 1 script (issue #4082): `scripts/verify-tier1.sh` implements the Tier 1 gate once, identical for every lane. It runs, in order: strict typecheck (`npm run typecheck`); the affected suites selected from the diff (changed test files, plus tests that reference a changed `src/` module); the pin suites (`npm run test:pins`); the migration latest-pin lint (`scripts/check-migration-pins.sh`); the changed-file lint ratchet (`scripts/lint-changed.mjs`); and the Policy Gate diff checks (`scripts/ci/policy_gate.py --diff-only --base origin/main --head HEAD`). `--list` prints the selected suites without running them; `--no-fetch` diffs against the local `origin/main` ref. It does **not** run the full suite or the build — those are Tier 2, in CI on the PR head and the merge-group commit.
+
+Per-slice verify scripts are retired in place (deprecated, pointing at the shared script) — a lane does not re-implement the gate.
 
 The merge gate is unchanged: the full suite still runs before any merge, in CI, on the exact merge-group commit.
 
