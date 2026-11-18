@@ -121,6 +121,14 @@ export interface RunSummary {
    *  (the exact de-duplication join); a scan-store row carries its own
    *  id; every other row null. */
   scanRunId: string | null;
+  /** Issue #4259 (FOLD): the §4 linkage ids the home store recorded
+   *  for this run (schedule, async job, workflow/run) — the exact join
+   *  key the one-ledger fold reads on. Null/absent when the home store
+   *  records none, never invented. A scan row carries its stamped
+   *  linkage; a ledger row carries the record's; other rows null. */
+  scheduleId?: string | null;
+  asyncJobId?: string | null;
+  workflowId?: string | null;
   /** Consolidation C4 (#1329): the mas_discovery_runs run id this row
    *  corresponds to, when known — the discovery twin of scanRunId. A
    *  canonical discovery row carries the id its body links to
@@ -183,6 +191,38 @@ export function canonicalScanRunId(body: unknown): string | null {
     strOrNull(parsed?.report?.result?.scanRunId) ??
     strOrNull(parsed?.result?.scanRunId) ??
     strOrNull(parsed?.scanRunId)
+  );
+}
+
+/**
+ * Issue #4259 (FOLD — options runs in the one ledger): the exact
+ * run-identity join between a scan-store row and its ledger row.
+ * One definition for every call site (the merge below, the Workflow
+ * Runs route) so the fold can never drift between surfaces. A match
+ * is a shared non-null run-scoped id — workflowId or asyncJobId — or
+ * the scan's own id being the ledger row's workflowId (the run-id
+ * identity: the persist stage stamps workflowId = the producing run's
+ * id). scheduleId NEVER matches on its own: it names a schedule, not
+ * a run — many firings share it. No run-scoped id on either side
+ * means no match, never a guessed one.
+ */
+type RunLinkageIdentity = {
+  runKey: string | null;
+  workflowId: string | null;
+  asyncJobId: string | null;
+};
+
+function linkageMatchesRun(scan: RunLinkageIdentity, ledger: RunLinkageIdentity): boolean {
+  if (scan.workflowId !== null && scan.workflowId === ledger.workflowId) return true;
+  if (scan.asyncJobId !== null && scan.asyncJobId === ledger.asyncJobId) return true;
+  if (ledger.workflowId !== null && scan.runKey !== null && scan.runKey === ledger.workflowId) return true;
+  return false;
+}
+
+export function scanRunMatchesLedgerRow(scan: ScanRunSummary, record: JobRunRecord): boolean {
+  return linkageMatchesRun(
+    { runKey: scan.id, workflowId: scan.workflowId ?? null, asyncJobId: scan.asyncJobId ?? null },
+    { runKey: null, workflowId: record.workflowId ?? null, asyncJobId: record.asyncJobId ?? null },
   );
 }
 
@@ -364,6 +404,12 @@ export function runSummaryFromReport(hit: ScheduledReportHit): RunSummary {
     reportId: hit.id,
     scanRunId: kind === "options_scanner" ? canonicalScanRunId(hit.body) : null,
     discoveryRunId: kind === "discovery" ? canonicalDiscoveryRunId(hit.body) : null,
+    // Issue #4259: a canonical row carries no §4 linkage of its own —
+    // the join rides the body's scan/discovery id above, never a
+    // re-stamped linkage.
+    scheduleId: null,
+    asyncJobId: null,
+    workflowId: null,
     source: hit.source,
     runSource: strOrNull(body?.runSource) ?? RUN_SOURCE_BY_KIND[kind] ?? null,
     // Issue #2910 (G3): a parent canonical row carries its
@@ -421,6 +467,12 @@ export function runSummaryFromScanRun(scan: ScanRunSummary): RunSummary {
     csvError: null,
     reportId: null,
     scanRunId: scan.id,
+    // Issue #4259: the scan row's stamped §4 linkage rides the
+    // summary, so the merge below can join it to its ledger row.
+    // Absent reads as null, never an invented id.
+    scheduleId: scan.scheduleId ?? null,
+    asyncJobId: scan.asyncJobId ?? null,
+    workflowId: scan.workflowId ?? null,
     source: "options_scanner",
     runSource: "options",
   };
@@ -454,6 +506,10 @@ export function runSummaryFromDiscoveryRun(run: DiscoveryRunSummary): RunSummary
     reportId: null,
     scanRunId: null,
     discoveryRunId: run.id,
+    // Issue #4259: discovery rows carry no §4 linkage.
+    scheduleId: null,
+    asyncJobId: null,
+    workflowId: null,
     source: "discovery",
     runSource: "strategy",
   };
@@ -493,6 +549,10 @@ export function runSummaryFromScreenerRun(run: ScreenerRunResult): RunSummary {
     csvError: run.csvError ?? null,
     reportId: null,
     scanRunId: null,
+    // Issue #4259: screener-feed rows carry no §4 linkage.
+    scheduleId: null,
+    asyncJobId: null,
+    workflowId: null,
     source: "screener",
     runSource: "stock",
   };
@@ -548,6 +608,12 @@ export function runSummaryFromJobRunRecord(record: JobRunRecord): RunSummary {
     csvError: null,
     reportId: null,
     scanRunId: null,
+    // Issue #4259: the ledger row's §4 linkage rides the summary, so
+    // the merge below can join it to its scan row. Absent reads as
+    // null, never an invented id.
+    scheduleId: record.scheduleId ?? null,
+    asyncJobId: record.asyncJobId ?? null,
+    workflowId: record.workflowId ?? null,
     source: "job-pipeline",
   };
 }
@@ -610,6 +676,49 @@ export function mergeRunSummaries(lists: RunSummary[][], limit: number): RunSumm
       }
     }
   }
+  // Issue #4259 (FOLD): the scan rows a D1 ledger row absorbs, keyed
+  // by the ledger row's dedup key — the exact run-identity join
+  // (linkageMatchesRun, the scanRunMatchesLedgerRow predicate),
+  // never scheduleId alone. A scan a canonical row already claims
+  // is never folded: the canonical row wins it, and the ledger row
+  // stays its own row. One scan folds into at most one ledger row,
+  // and one ledger row absorbs at most one scan payload (first
+  // match wins either way — the join is exact, so a second match
+  // would be a duplicate record, not a second payload).
+  const ledgerFold = new Map<string, RunSummary>();
+  const foldedScanKeys = new Set<string>();
+  {
+    const ledgerRows: RunSummary[] = [];
+    const foldableScans: RunSummary[] = [];
+    for (const list of lists) {
+      for (const row of list) {
+        if (row.reportId === null && row.source === "job-pipeline") ledgerRows.push(row);
+        if (row.reportId === null && row.kind === "options_scanner" && row.scanRunId) {
+          foldableScans.push(row);
+        }
+      }
+    }
+    for (const scan of foldableScans) {
+      if (canonicalScanIds.has(scan.id)) continue;
+      const scanIdentity: RunLinkageIdentity = {
+        runKey: scan.scanRunId,
+        workflowId: scan.workflowId ?? null,
+        asyncJobId: scan.asyncJobId ?? null,
+      };
+      const ledger = ledgerRows.find((candidate) =>
+        linkageMatchesRun(scanIdentity, {
+          runKey: null,
+          workflowId: candidate.workflowId ?? null,
+          asyncJobId: candidate.asyncJobId ?? null,
+        }),
+      );
+      if (!ledger) continue;
+      const ledgerKey = `${ledger.kind}:${ledger.id}`;
+      if (ledgerFold.has(ledgerKey)) continue;
+      ledgerFold.set(ledgerKey, scan);
+      foldedScanKeys.add(`${scan.kind}:${scan.id}`);
+    }
+  }
   const seen = new Set<string>();
   const merged: RunSummary[] = [];
   for (const list of lists) {
@@ -624,6 +733,12 @@ export function mergeRunSummaries(lists: RunSummary[][], limit: number): RunSumm
         continue; // the canonical twin wins
       }
       const key = `${row.kind}:${row.id}`;
+      // Issue #4259 (FOLD): a scan row folded into its ledger row is
+      // detail, not a top-level row — the ledger row below carries
+      // the payload. An unclaimed scan still renders as its own row.
+      if (row.reportId === null && row.kind === "options_scanner" && foldedScanKeys.has(key)) {
+        continue; // the ledger row wins; the scan row is its payload
+      }
       // Issue #2910 (G3): a child row absorbed by a parent
       // canonical row is detail, not a top-level row — the
       // parent row carries the shard linkage, and the child
@@ -637,6 +752,39 @@ export function mergeRunSummaries(lists: RunSummary[][], limit: number): RunSumm
       }
       if (seen.has(key)) continue;
       seen.add(key);
+      // Issue #4259 (FOLD): a ledger row that absorbed a scan row
+      // renders once, as the ledger run — its id, runId, trigger,
+      // createdAt, status and source are the record — with the scan's
+      // payload attached (scanRunId, pdf/xlsx/csv keys + urls,
+      // resultCount) and the scan's kind/title, so kind-filtered
+      // reads keep showing the run. A failed ledger outcome stays
+      // failed: the scan's derived status never overwrites it.
+      if (row.reportId === null && row.source === "job-pipeline") {
+        const twin = ledgerFold.get(key);
+        if (twin) {
+          merged.push({
+            ...row,
+            kind: twin.kind,
+            title: twin.title,
+            scanRunId: twin.scanRunId,
+            resultCount: twin.resultCount ?? row.resultCount,
+            partial: row.partial ?? twin.partial ?? null,
+            pdfKey: row.pdfKey ?? twin.pdfKey,
+            reportUrl: row.reportUrl ?? twin.reportUrl,
+            pdfStatus: row.pdfStatus ?? twin.pdfStatus,
+            pdfError: row.pdfError ?? twin.pdfError,
+            xlsxKey: row.xlsxKey ?? twin.xlsxKey,
+            xlsxUrl: row.xlsxUrl ?? twin.xlsxUrl,
+            xlsxStatus: row.xlsxStatus ?? twin.xlsxStatus,
+            xlsxError: row.xlsxError ?? twin.xlsxError,
+            csvKey: row.csvKey ?? twin.csvKey,
+            csvUrl: row.csvUrl ?? twin.csvUrl,
+            csvStatus: row.csvStatus ?? twin.csvStatus,
+            csvError: row.csvError ?? twin.csvError,
+          });
+          continue;
+        }
+      }
       if (row.reportId !== null) {
         const twin = row.kind === "options_scanner" && row.scanRunId
           ? scanTwins.get(row.scanRunId)

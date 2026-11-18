@@ -1180,7 +1180,12 @@ export async function handleReportsRoutes(
       }
       const { mergeRunSummaries } = await import("../../services/runSummaries");
       const merged = mergeRunSummaries(lists, 100);
-      let summary = merged.find((r) => r.runId === wanted || r.id === wanted);
+      // Issue #4259 (FOLD): an absorbed scan id stays addressable —
+      // the folded row rides the ledger row's id/runId, so a lookup
+      // by the old scan id matches the row's scanRunId and resolves
+      // to the ledger-backed detail (lineage.captureIds carries the
+      // scan id, formats carry the scan's documents).
+      let summary = merged.find((r) => r.runId === wanted || r.id === wanted || r.scanRunId === wanted);
       if (!summary && ledgerReadMode === "d1-only") {
         // A twin job-run-record id resolves to the canonical
         // report's detail — the twin is absorbed into it in
