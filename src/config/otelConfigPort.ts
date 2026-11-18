@@ -66,9 +66,19 @@ import {
   IAAA_AUDIT_POLICY_VERSION,
   type CreateIaaaAuditEventInput,
 } from "../security/iaaaAudit";
+import {
+  createOtelConfigOverridesStore,
+  OTEL_CONFIG_OVERRIDES_TABLE,
+  type OtelConfigOverridesD1,
+  type OtelConfigOverridesRow,
+  type OtelConfigOverridesStore,
+} from "../data/otelConfigOverridesStore";
 
-/** The D1 table holding the runtime overrides (migration 0070). */
-export const OTEL_CONFIG_OVERRIDES_TABLE = "otel_config_overrides" as const;
+/** The D1 table holding the runtime overrides (migration 0070) — owned by the data-layer store, re-exported here for the migration + tests. */
+export { OTEL_CONFIG_OVERRIDES_TABLE };
+
+/** The minimal D1 handle (owned by the data-layer store, re-exported here so existing import sites keep working). */
+export type { OtelConfigOverridesD1 as OtelConfigD1 } from "../data/otelConfigOverridesStore";
 
 /** The audit event type for runtime override changes. */
 export const OTEL_CONFIG_OVERRIDE_AUDIT_TYPE = "otel.config.runtime_override" as const;
@@ -192,19 +202,9 @@ export interface OtelRuntimeOverrideRecord {
   reason: string;
 }
 
-/** The minimal D1 surface the port needs (fakeable in tests; the real D1Database satisfies it). */
-export interface OtelConfigD1 {
-  prepare(sql: string): {
-    bind(...params: unknown[]): {
-      all<T>(): Promise<{ results: T[] }>;
-      run(): Promise<unknown>;
-    };
-  };
-}
-
 export interface OtelConfigPortDeps {
   /** The D1 database (env.AGENT_DB); null = unbound, reads fail closed to empty overrides. */
-  d1: OtelConfigD1 | null;
+  d1: OtelConfigOverridesD1 | null;
   /** The audit writer: records the change in the canonical audit store. */
   audit: (input: CreateIaaaAuditEventInput) => Promise<boolean>;
   /** The tenant the change is attributed to (the route resolves it from env). */
@@ -265,16 +265,7 @@ function normalizeOverrideValue(
   }
 }
 
-interface OverrideRow {
-  config_key: string;
-  value_json: string | null;
-  version: number;
-  updated_by: string;
-  updated_at_ms: number;
-  reason: string;
-}
-
-function toRecord(row: OverrideRow): OtelRuntimeOverrideRecord {
+function toRecord(row: OtelConfigOverridesRow): OtelRuntimeOverrideRecord {
   let value: unknown = null;
   if (row.value_json !== null) {
     try {
@@ -295,8 +286,8 @@ function toRecord(row: OverrideRow): OtelRuntimeOverrideRecord {
 }
 
 /** The latest row per key wins; a tombstone (value_json null) means no override is set. */
-function latestPerKey(rows: OverrideRow[]): OtelRuntimeOverrideRecord[] {
-  const latest = new Map<string, OverrideRow>();
+function latestPerKey(rows: OtelConfigOverridesRow[]): OtelRuntimeOverrideRecord[] {
+  const latest = new Map<string, OtelConfigOverridesRow>();
   for (const row of rows) {
     const current = latest.get(row.config_key);
     if (!current || row.version > current.version) latest.set(row.config_key, row);
@@ -311,24 +302,14 @@ function latestPerKey(rows: OverrideRow[]): OtelRuntimeOverrideRecord[] {
 export function createOtelConfigPort(deps: OtelConfigPortDeps): OtelConfigPort {
   const nowMs = deps.nowMs ?? Date.now;
   const { d1 } = deps;
+  // The SQL lives in the data layer (src/data/): the global
+  // D-D census (#2356, surface 3) pins prepare() sites outside
+  // src/data/ to an exact allow-list, so this port calls the
+  // store instead of prepare() itself.
+  const store: OtelConfigOverridesStore = createOtelConfigOverridesStore(d1);
 
-  async function readAllRows(): Promise<OverrideRow[]> {
-    if (!d1) return [];
-    try {
-      const result = await d1
-        .prepare(
-          `SELECT config_key, value_json, version, updated_by, updated_at_ms, reason FROM ${OTEL_CONFIG_OVERRIDES_TABLE}`,
-        )
-        .bind()
-        .all<OverrideRow>();
-      return result.results;
-    } catch {
-      // A missing table (migration not yet applied) or an
-      // unavailable D1 fails closed to empty overrides — the
-      // deploy-time values govern, and the read never throws
-      // into the caller.
-      return [];
-    }
+  async function readAllRows(): Promise<OtelConfigOverridesRow[]> {
+    return store.readAllRows();
   }
 
   async function readOverrides(): Promise<OtelRuntimeOverrideRecord[]> {
@@ -412,19 +393,14 @@ export function createOtelConfigPort(deps: OtelConfigPortDeps): OtelConfigPort {
       reason: input.reason.trim(),
     };
     try {
-      await d1
-        .prepare(
-          `INSERT INTO ${OTEL_CONFIG_OVERRIDES_TABLE} (config_key, value_json, version, updated_by, updated_at_ms, reason) VALUES (?, ?, ?, ?, ?, ?)`,
-        )
-        .bind(
-          record.key,
-          record.valueJson,
-          record.version,
-          record.updatedBy,
-          record.updatedAtMs,
-          record.reason,
-        )
-        .run();
+      await store.insertRow({
+        config_key: record.key,
+        value_json: record.valueJson,
+        version: record.version,
+        updated_by: record.updatedBy,
+        updated_at_ms: record.updatedAtMs,
+        reason: record.reason,
+      });
     } catch {
       return { ok: false, reason: "the runtime override store write failed" };
     }
@@ -462,12 +438,14 @@ export function createOtelConfigPort(deps: OtelConfigPortDeps): OtelConfigPort {
     }
     const version = latest.version + 1;
     try {
-      await d1
-        .prepare(
-          `INSERT INTO ${OTEL_CONFIG_OVERRIDES_TABLE} (config_key, value_json, version, updated_by, updated_at_ms, reason) VALUES (?, ?, ?, ?, ?, ?)`,
-        )
-        .bind(input.key, null, version, input.actor, nowMs(), input.reason.trim())
-        .run();
+      await store.insertRow({
+        config_key: input.key,
+        value_json: null,
+        version,
+        updated_by: input.actor,
+        updated_at_ms: nowMs(),
+        reason: input.reason.trim(),
+      });
     } catch {
       return { ok: false, reason: "the runtime override store write failed" };
     }
@@ -510,7 +488,7 @@ export function resetOtelRuntimeOverrideCache(): void {
  * Never throws.
  */
 export async function refreshOtelRuntimeOverrideCache(
-  d1: OtelConfigD1 | null,
+  d1: OtelConfigOverridesD1 | null,
   opts?: { force?: boolean; nowMs?: number },
 ): Promise<Record<string, OtelRuntimeOverrideRecord>> {
   const now = opts?.nowMs ?? Date.now();
@@ -580,9 +558,9 @@ export function otelRuntimeLevelByEnvName(
  * the override store's D1 from env — the alerting port, the
  * three OTel providers, and the config routes all use it.
  */
-export function otelConfigD1FromEnv(env: unknown): OtelConfigD1 | null {
+export function otelConfigD1FromEnv(env: unknown): OtelConfigOverridesD1 | null {
   if (!env || typeof env !== "object") return null;
   const d1 = (env as { AGENT_DB?: unknown }).AGENT_DB;
   if (!d1 || typeof d1 !== "object") return null;
-  return d1 as OtelConfigD1;
+  return d1 as OtelConfigOverridesD1;
 }
