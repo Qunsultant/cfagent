@@ -90,11 +90,51 @@ describe("quotes come from one source, failures are named (#3272)", () => {
 });
 
 describe("the neutral stock screen route (#3272)", () => {
+  // Issue #4433: the route screens through the one engine seam — the fake
+  // seam answers with a run over exactly the shard it was given.
+  function fakeAgent() {
+    return {
+      isScreenRunning: async () => ({ running: false, startedAt: null, runId: null, status: "idle" as const }),
+      chargeScreenQuota: async () => {},
+      getHistory: async () => [],
+    };
+  }
+
+  let seam: ReturnType<typeof vi.fn>;
+
+  function defaultSeam() {
+    return vi.fn(async (input: any) => {
+      const shardSymbols = input.commandOverrides.shards[0].symbols as Array<{ symbol: string }>;
+      return {
+        results: [
+          {
+            timestamp: "2026-11-18T00:00:00.000Z",
+            trigger: "manual",
+            provider: "alpaca",
+            universe: input.spec.universe,
+            sector: "ALL",
+            success: true,
+            totalScanned: shardSymbols.length,
+            matchedCount: shardSymbols.length,
+            opportunities: [],
+            allStocks: shardSymbols.map((s) => ({ symbol: s.symbol })),
+            discoveryMessage: "",
+          },
+        ],
+        collation: null,
+        jobId: "screener:manual:test:1",
+        workflowId: "wf-test",
+      };
+    });
+  }
+
   function ctx(): BrokerScreenRouteContext {
     return {
       env: { APP_ENV: "TEST" } as any,
       getOrm: () => undefined,
       readSettingRaw: () => null,
+      getScreenerAgent: () => fakeAgent() as any,
+      runStockScreenViaEngine: seam as any,
     };
   }
 
@@ -112,6 +152,7 @@ describe("the neutral stock screen route (#3272)", () => {
 
   beforeEach(() => {
     tenant.broker = "alpaca";
+    seam = defaultSeam();
     getPlatform = vi.spyOn(TradingPlatformRegistry, "getPlatform").mockImplementation(
       () => ({ getQuote: async (s: string) => quote(s) }) as any,
     );
@@ -129,19 +170,57 @@ describe("the neutral stock screen route (#3272)", () => {
     expect(body.broker).toBe("alpaca");
     expect(body.quotesRead).toBe(2);
     expect(body.failures).toEqual([]);
-    expect(getPlatform.mock.calls[0][0]).toBe("alpaca");
+    // Issue #4433: the broker names the run's provider + broker on the
+    // engine command, and the route constructs no platform itself.
+    expect(seam).toHaveBeenCalledTimes(1);
+    const input = seam.mock.calls[0][0];
+    expect(input.spec.provider).toBe("alpaca");
+    expect(input.commandOverrides.broker).toBe("alpaca");
+    expect(input.commandOverrides.shards[0].symbols.map((s: any) => s.symbol)).toEqual(["AAPL", "MSFT"]);
+    expect(getPlatform).not.toHaveBeenCalled();
   });
 
   it("surfaces a partial quote failure instead of hiding it", async () => {
-    getPlatform.mockImplementation(
-      () =>
-        ({
-          getQuote: async (s: string) => {
-            if (s === "NOPE") throw new Error("no such symbol");
-            return quote(s);
+    // Issue #4433: the engine run's own quote trace names the symbol
+    // whose read failed; the route surfaces it under its own name.
+    seam = vi.fn(async () => ({
+      results: [
+        {
+          timestamp: "2026-11-18T00:00:00.000Z",
+          trigger: "manual",
+          provider: "alpaca",
+          universe: "symbols",
+          sector: "ALL",
+          success: true,
+          totalScanned: 1,
+          matchedCount: 1,
+          opportunities: [],
+          allStocks: [{ symbol: "AAPL" }],
+          discoveryMessage: "",
+          quoteTrace: {
+            traceId: "t1",
+            symbolCount: 2,
+            batchCount: 1,
+            quotesReceived: 1,
+            quotesFailed: 1,
+            failuresByCategory: { unknown_symbol: 1 },
+            batches: [
+              {
+                batchIndex: 0,
+                symbolCount: 2,
+                httpStatus: 200,
+                quotesReceived: 1,
+                failures: [{ symbol: "NOPE", category: "unknown_symbol", detail: "no such symbol" }],
+                durationMs: 5,
+              },
+            ],
           },
-        }) as any,
-    );
+        },
+      ],
+      collation: null,
+      jobId: "screener:manual:test:2",
+      workflowId: "wf-test",
+    }));
     const { request, url } = post({ symbols: ["AAPL", "NOPE"] });
     const res = await handleBrokerScreenRoutes(request, url, url.pathname, "sid", ctx());
     const body = await res!.json();
@@ -154,6 +233,7 @@ describe("the neutral stock screen route (#3272)", () => {
     const tooManyRes = await handleBrokerScreenRoutes(tooMany.request, tooMany.url, tooMany.url.pathname, "sid", ctx());
     expect(tooManyRes!.status).toBe(400);
     expect((await tooManyRes!.json()).message).toContain(String(MAX_SCREEN_SYMBOLS));
+    expect(seam).not.toHaveBeenCalled();
   });
 
   it("resolves a default universe rather than demanding symbols", async () => {
@@ -175,6 +255,7 @@ describe("the neutral stock screen route (#3272)", () => {
       expect(res!.status).toBe(501);
       expect(await res!.json()).toMatchObject({ code: "provider_unsupported", broker: "alpaca" });
       expect(getPlatform).not.toHaveBeenCalled();
+      expect(seam).not.toHaveBeenCalled();
     } finally {
       (BROKER_CATALOG.alpaca.supports as { quote: boolean }).quote = original;
     }

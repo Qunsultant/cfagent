@@ -20,6 +20,7 @@
  *     the hard cap it is given.
  */
 import type { BrokerQuote, StockScreenerFilter, StockScreenResult } from "../types";
+import type { NasdaqStockListing } from "../services/nasdaqListings";
 import type { ITradingPlatform } from "./interfaces";
 
 /** What the stock screen needs from a broker: one quote per symbol. */
@@ -119,16 +120,18 @@ export async function screenSymbolsWithSource(
  *
  * Inside the trading layer so routes keep the #290 boundary. Throws when the
  * feed fails: the caller must answer coded, never substitute a curated table
- * (#1554).
+ * (#1554). Issue #4433: the capped listings ride too, so an engine-routed
+ * caller screens the feed's own rows instead of re-deriving membership.
  */
 export async function resolveUniverseSymbols(
   id: string,
   cap: number,
-): Promise<{ symbols: string[]; universeSize: number; truncated: boolean }> {
+): Promise<{ symbols: string[]; universeSize: number; truncated: boolean; listings: NasdaqStockListing[] }> {
   const { fetchAllUsStockListings } = await import("../services/nasdaqListings");
   const { resolveUniverse } = await import("./universes");
   const listings = await fetchAllUsStockListings();
   const resolved = resolveUniverse(id as never, listings);
-  const symbols = resolved.slice(0, cap).map((listing) => String(listing.symbol).toUpperCase());
-  return { symbols, universeSize: resolved.length, truncated: resolved.length > symbols.length };
+  const capped = resolved.slice(0, cap);
+  const symbols = capped.map((listing) => String(listing.symbol).toUpperCase());
+  return { symbols, universeSize: resolved.length, truncated: resolved.length > symbols.length, listings: capped };
 }

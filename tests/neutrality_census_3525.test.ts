@@ -1222,6 +1222,11 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/agents/routes/brokerRisk.ts", "alpaca", 1],
   ["src/agents/routes/brokerRisk.ts", "etrade", 3],
   ["src/agents/routes/brokerScreen.ts", "etrade", 4],
+  // #4433 NOT-PROVIDER: the explicit-symbols listing rows carry the
+  // listings-feed exchange enum's default member — a type-required
+  // placeholder, inert on the screening path (the live quote's data
+  // wins downstream); it names no provider integration.
+  ["src/agents/routes/brokerScreen.ts", "nasdaq", 1],
   // #3796 INTEGRATION: the surface voice routes host the desk
   // surface's broker gate, whose comparison names the desk broker.
   ["src/agents/routes/copilotChannels.ts", "etrade", 1],
