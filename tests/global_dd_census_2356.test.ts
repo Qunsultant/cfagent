@@ -270,7 +270,10 @@ const STEP4D_DATA_LAYER_FILES: Array<[string, number]> = [
   // live in the adapter; the DELETE reuses deleteRow and the
   // CREATE retry reuses one closure, so no further sites.
   ["src/data/doSqliteCanonicalReportStoreAdapter.ts", 25],
-  ["src/data/doSqliteUsageEventAdapter.ts", 4],
+  // 5 since #5235: the listAllWithDetail SELECT (unfiltered
+  // meter read for the revenue-summary coverage cut) lives in
+  // the data layer, behind the port.
+  ["src/data/doSqliteUsageEventAdapter.ts", 5],
   ["src/data/orchestratorTablePorts.ts", 0],
   ["src/data/canonicalReportStorePorts.ts", 0],
   ["src/data/createOrchestratorTablePorts.ts", 0],

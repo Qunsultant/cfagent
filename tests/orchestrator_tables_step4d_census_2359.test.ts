@@ -219,7 +219,9 @@ describe("4d family census: surface-1 execution sites", () => {
       // getRowByRunIdForOwner; 25 since #4507: the two dedupe
       // SELECTs (pair scan + per-pair row list).
       ["src/data/doSqliteCanonicalReportStoreAdapter.ts", 25],
-      ["src/data/doSqliteUsageEventAdapter.ts", 4],
+      // 5 since #5235: listAllWithDetail SELECT (revenue-summary
+      // coverage cut).
+      ["src/data/doSqliteUsageEventAdapter.ts", 5],
     ]);
     for (const [f, n] of layer) {
       expect(count(read(f), STORAGE_EXEC_PATTERN), f).toBe(n);

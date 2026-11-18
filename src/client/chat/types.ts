@@ -190,6 +190,11 @@ export interface ExternalAdItem {
   createdAt: string;
 }
 
+import type {
+  RevenueCoverageCut,
+  RevenueFamilyCut,
+} from "../../types";
+
 export interface RevenueSummaryData {
   grossRevenue: number;
   adNetworkRevenue: number;
@@ -200,6 +205,13 @@ export interface RevenueSummaryData {
   totalImpressions: number;
   totalAdClicks: number;
   averageRPM: number;
+  /** Issue #5235: see RevenueSummary in src/types.ts. */
+  subscriptionRevenue: number;
+  subscriptionCount: number;
+  payPerRunRevenue: number;
+  payPerRunByFamily: RevenueFamilyCut[];
+  runRevenueByCoverage: RevenueCoverageCut[];
+  costPerRun: number | null;
 }
 
 export interface TableMetadataItem {

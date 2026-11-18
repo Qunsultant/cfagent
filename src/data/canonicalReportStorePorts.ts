@@ -211,6 +211,10 @@ export interface InsertUsageEventRow extends UsageEventRow {
   detailJson: string | null;
 }
 
+export interface UsageEventDetailRow extends UsageEventRow {
+  detailJson: string | null;
+}
+
 export interface UsageEventPort {
   /** Base table + the per-tenant index. Idempotent. */
   ensureSchema(): void;
@@ -218,4 +222,14 @@ export interface UsageEventPort {
   insertEvent(row: InsertUsageEventRow): void;
   /** One tenant's events, newest first. */
   listByUser(userLogin: string, limit: number): UsageEventRow[];
+  /**
+   * Issue #5235 (slice 2.30): every metered event, oldest first,
+   * WITH the detail JSON (the coverage + price record the revenue
+   * summary aggregates over). Ensures the schema first, so a
+   * fresh instance with zero metered calls reads empty instead
+   * of throwing on a missing table. Platform-wide by design:
+   * the revenue summary is a platform aggregate, not a per-user
+   * view (per-user reads stay on listByUser).
+   */
+  listAllWithDetail(): UsageEventDetailRow[];
 }

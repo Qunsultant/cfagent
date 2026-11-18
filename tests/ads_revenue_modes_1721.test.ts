@@ -594,7 +594,9 @@ describe("routes: mode resolution on the REST surface", () => {
     // stub's fake { total: 0 } was never a real summary shape);
     // the pin still asserts the route passes the one computed
     // summary object through unmolested — here, the all-zero
-    // summary of the empty stub ports.
+    // summary of the empty stub ports. #5235: the shape grew
+    // by the subscription + pay-per-run cuts (zero-filled) and
+    // costPerRun null.
     const { ctx } = routeCtx();
     const res = await handleAdsRevenueReferralsRoutes(
       req("GET", "/revenue"),
@@ -613,6 +615,21 @@ describe("routes: mode resolution on the REST surface", () => {
       totalImpressions: 0,
       totalAdClicks: 0,
       averageRPM: 18.5,
+      subscriptionRevenue: 0,
+      subscriptionCount: 0,
+      payPerRunRevenue: 0,
+      payPerRunByFamily: [
+        { family: "stock", revenue: 0, runs: 0 },
+        { family: "options", revenue: 0, runs: 0 },
+        { family: "goal", revenue: 0, runs: 0 },
+        { family: "strategy", revenue: 0, runs: 0 },
+      ],
+      runRevenueByCoverage: [
+        { coverage: "paid", runs: 0, revenue: 0, listValue: 0 },
+        { coverage: "subscription_included", runs: 0, revenue: 0, listValue: 0 },
+        { coverage: "credits", runs: 0, revenue: 0, listValue: 0 },
+      ],
+      costPerRun: null,
     });
   });
 });

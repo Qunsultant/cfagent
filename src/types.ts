@@ -1214,6 +1214,33 @@ export interface ExternalAdRecord {
   createdAt: string;
 }
 
+export interface RevenueFamilyCut {
+  family: string;
+  revenue: number;
+  runs: number;
+}
+
+export type RevenueCoverageKind =
+  | "paid"
+  | "subscription_included"
+  | "credits"
+  | "unknown";
+
+export interface RevenueCoverageCut {
+  coverage: RevenueCoverageKind;
+  runs: number;
+  /**
+   * List-price value of paid runs in this bucket (covered runs
+   * charge 0). Settled cash is payPerRunRevenue, which can be
+   * lower when a run was part-paid by converted referral credit
+   * (slice 2.28): the meter row carries the run's list price,
+   * the ledger row carries the cash remainder.
+   */
+  revenue: number;
+  /** Sum of the runs' list prices, covered runs included at list price. */
+  listValue: number;
+}
+
 export interface RevenueSummary {
   grossRevenue: number;
   adNetworkRevenue: number;
@@ -1224,6 +1251,47 @@ export interface RevenueSummary {
   totalImpressions: number;
   totalAdClicks: number;
   averageRPM: number;
+  /**
+   * Issue #5235 (slice 2.30): settled subscription-purchase cash
+   * from mas_transactions receipt rows (billing-purchase writes
+   * one best-effort row per activation, id `tx_bill-…`). Pre-slice
+   * purchases have no row and are invisible here, by design.
+   * NOT folded into grossRevenue/netRevenue (those formulas are
+   * pinned to the ad/fee streams).
+   */
+  subscriptionRevenue: number;
+  /** Count of settled subscription receipt rows behind subscriptionRevenue. */
+  subscriptionCount: number;
+  /**
+   * Issue #5235: settled pay-per-run cash — cfpay charge rows plus
+   * x402/mpp inbound receipt rows. Simulated, draft, outbound,
+   * agent-to-agent, bundle, channel, and generic charge rows are
+   * excluded. NOT folded into grossRevenue/netRevenue.
+   */
+  payPerRunRevenue: number;
+  /**
+   * Issue #5235: pay-per-run revenue + run counts by screener
+   * family (stock, options, goal, strategy; `unknown` for rows
+   * whose family cannot be resolved — counted, never dropped).
+   */
+  payPerRunByFamily: RevenueFamilyCut[];
+  /**
+   * Issue #5235: served runs by coverage type, from the usage_events
+   * meter rows (paid = a protocol payment is in the detail;
+   * subscription_included = paidVia; credits = paidVia credits —
+   * no per-run credits row exists today, so that bucket is 0 until
+   * one does; unknown = malformed/missing detail, counted never
+   * dropped). `revenue` is settled cash; `listValue` is the runs'
+   * list-price sum.
+   */
+  runRevenueByCoverage: RevenueCoverageCut[];
+  /**
+   * Issue #5235: measured provider cost per run. NOT recorded
+   * anywhere in the codebase (rolloutBudget holds only
+   * caller-supplied budget/actual) — null means unavailable,
+   * never an estimate.
+   */
+  costPerRun: number | null;
 }
 
 // ==========================================

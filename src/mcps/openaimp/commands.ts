@@ -1589,8 +1589,18 @@ export class GetRevenueSummaryCommand implements IMcpToolCommand<{}> {
   async execute(_input: any, context: McpToolContext) {
     // #2345: the summary computes over the marketplace ports
     // (fleet counters when D1-bound) + the DO-resident ledger.
+    // Issue #5235: the coverage cut reads the DO-resident meter
+    // rows through the facade — no env read (this command is
+    // env-free by the #1644 bridge rule). The `?.` keeps older
+    // hand-built orm doubles working: absent meter rows mean
+    // zero served runs, never an error (the same contract as
+    // computeMarketplaceRevenueSummary's optional 3rd param).
     const mp = await context.orm.marketplacePorts(context.env);
-    return computeMarketplaceRevenueSummary(mp, context.orm.transactions);
+    return computeMarketplaceRevenueSummary(
+      mp,
+      context.orm.transactions,
+      context.orm.usageEvents?.listAllWithDetail() ?? [],
+    );
   }
 }
 

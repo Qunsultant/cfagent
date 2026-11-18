@@ -49,7 +49,31 @@ import { recordBillingSubscription } from "../src/services/billingService";
 import type { ProviderSubscription } from "../src/services/billingPorts";
 import { StripeBillingCheckoutAdapter } from "../src/services/stripeBillingCheckoutAdapter";
 import { StripePaymentStrategy } from "../src/patterns/paymentStrategies";
-import type { DatabaseORM } from "../src/orm";
+import { DatabaseORM } from "../src/orm";
+
+/** Test-local in-memory SqlStorage (same pattern as tests/orm_step3a_characterization_2345.test.ts). */
+class SqliteTestStorage {
+  readonly sqlite = new DatabaseSync(":memory:");
+  exec(query: string, ...params: unknown[]): unknown[] {
+    const stmt = this.sqlite.prepare(query);
+    if (/^\s*(SELECT|PRAGMA)/i.test(query)) {
+      return stmt.all(...(params as never[])) as unknown[];
+    }
+    stmt.run(...(params as never[]));
+    return [];
+  }
+  transactionSync<T>(closure: (txn: { sql: SqliteTestStorage }) => T): T {
+    this.sqlite.exec("BEGIN");
+    try {
+      const result = closure({ sql: this });
+      this.sqlite.exec("COMMIT");
+      return result;
+    } catch (err) {
+      this.sqlite.exec("ROLLBACK");
+      throw err;
+    }
+  }
+}
 
 /** Minimal D1Database stand-in over node:sqlite (test-only, mirrors slice0). */
 class MockD1Database {
@@ -706,6 +730,35 @@ describe("billing-purchase route", () => {
       checkoutSessionId: "cs_test_bill_1",
     });
     expect(replay?.status).toBe(409);
+  });
+
+  it("writes a best-effort subscription receipt row visible to the revenue summary (#5235)", async () => {
+    const s = await setup({ monetization: true, stripe: true });
+    stubBillingStripe();
+    await seedPlanAndPrice(s);
+    const storage = new SqliteTestStorage();
+    const orm = new DatabaseORM(storage);
+    orm.initializeSchema("sess-5235");
+    (s.ctx as unknown as { getOrm: () => DatabaseORM }).getOrm = () => orm;
+    const ok = await call(s.ctx, "POST", "/payments/agentic/commercial/subscription/billing-purchase", "u1", {
+      planId: "plan-pro",
+      tenantId: "t1",
+      checkoutRequestId: "bill-1",
+      checkoutSessionId: "cs_test_bill_1",
+    });
+    expect(ok?.status).toBe(200);
+    const rows = orm.transactions.findMany({ where: { id: "tx_bill-1" } });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      action: "agentic_payment",
+      gateway: "stripe",
+      amount: 20,
+      status: "completed",
+    });
+    expect(rows[0].note).toMatch(/^Subscription purchase plan plan-pro/);
+    const summary = orm.getRevenueSummary();
+    expect(summary.subscriptionRevenue).toBeCloseTo(20);
+    expect(summary.subscriptionCount).toBe(1);
   });
 
   it("refuses reference mismatch, unpaid sessions, and provider price mismatch with 402", async () => {
