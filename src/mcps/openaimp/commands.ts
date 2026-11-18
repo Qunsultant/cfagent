@@ -1160,6 +1160,24 @@ export class ListDatabaseTablesCommand implements IMcpToolCommand<{}> {
 }
 
 /**
+ * Allowlist of non-sensitive SQLite tables readable via `query_table_data` (#5041, H-15).
+ * Excludes audit/security/financial tables (`mas_events`, `mas_transactions`,
+ * `mas_trades`, `mas_policy_verdicts`, `mas_settings`).
+ */
+export const ALLOWED_QUERY_TABLES = new Set<string>([
+  "mas_categories",
+  "mas_referrals",
+  "mas_ads",
+  "mas_external_ads",
+  "mas_reports",
+  "mas_watchlists",
+  "mas_learnings",
+  "mas_jobs",
+  "mas_async_jobs",
+  "mas_job_outcomes",
+]);
+
+/**
  * 8. Query Table Data Command
  */
 export class QueryTableDataCommand implements IMcpToolCommand<{
@@ -1169,7 +1187,7 @@ export class QueryTableDataCommand implements IMcpToolCommand<{
   offset?: number;
 }> {
   readonly name = "query_table_data";
-  readonly description = "Query rows from any SQLite table (mas_categories, mas_referrals, mas_ads, mas_external_ads, mas_transactions, mas_messages, mas_memory, mas_events) with optional filtering and pagination via ORM.";
+  readonly description = "Query rows from allow-listed SQLite tables (mas_categories, mas_referrals, mas_ads, mas_external_ads, mas_reports, mas_watchlists, mas_learnings, mas_jobs, mas_async_jobs, mas_job_outcomes) with optional filtering and pagination via ORM.";
   readonly jsonSchema = {
     type: "object" as const,
     properties: {
@@ -1188,6 +1206,11 @@ export class QueryTableDataCommand implements IMcpToolCommand<{
   });
 
   async execute(input: { tableName: string; search?: string; limit?: number; offset?: number }, context: McpToolContext) {
+    if (!ALLOWED_QUERY_TABLES.has(input.tableName)) {
+      throw new Error(
+        `Table '${input.tableName}' is not in ALLOWED_QUERY_TABLES; sensitive audit/financial/settings tables cannot be queried via query_table_data.`,
+      );
+    }
     const result = context.orm.getTableData(input.tableName, {
       search: input.search,
       limit: input.limit,
