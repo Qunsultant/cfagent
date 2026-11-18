@@ -12,6 +12,7 @@ import {
   dispatchResearchEngineRun,
   executeResearchStageControl,
 } from "../src/workflows/researchScreenEngine";
+import { resolveResearchJobConfig } from "../src/config/researchJobConfig";
 
 describe("Issue #5237 — Nightly OODA J-stack engine cutover & view=ooda UX route", () => {
   it("executes analyze.ooda and evaluate.apply via JobPipelineControl.runJob and records observed stageVisibility", async () => {
@@ -157,5 +158,23 @@ describe("Issue #5237 — Nightly OODA J-stack engine cutover & view=ooda UX rou
     );
     expect(registry.has(ANALYZE_OODA_STEP)).toBe(true);
     expect(registry.has(EVALUATE_APPLY_STEP)).toBe(true);
+  });
+
+  it("defaults storageMode to durable and honors RESEARCH_STORAGE_MODE=in-memory (#5273)", async () => {
+    expect(resolveResearchJobConfig().storageMode).toBe("durable");
+    expect(resolveResearchJobConfig({ RESEARCH_STORAGE_MODE: "in-memory" }).storageMode).toBe(
+      "in-memory",
+    );
+
+    const res = await dispatchResearchEngineRun({
+      runId: "storage-mode-1",
+      userLogin: "alice",
+      trigger: "manual",
+      sql: {} as never,
+      env: { RESEARCH_STORAGE_MODE: "in-memory" },
+      execute: async () => ({ success: true }),
+    });
+    expect(res.storageMode).toBe("in-memory");
+    expect(res.outcome).toEqual({ success: true });
   });
 });

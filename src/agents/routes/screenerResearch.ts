@@ -547,6 +547,7 @@ export async function handleScreenerResearchRoutes(
           userLogin,
           trigger: "manual",
           sql: ctx.getOrm?.() as unknown as SqlStorage | undefined,
+          env: ctx.env as Record<string, string | undefined>,
           execute: () => triggerManualResearch(ctx.runResearchAndPublish, userLogin),
         });
         return Response.json(dispatched.outcome);
@@ -576,6 +577,7 @@ export async function handleScreenerResearchRoutes(
           op,
           userLogin,
           sql: ctx.getOrm?.() as unknown as SqlStorage | undefined,
+          env: ctx.env as Record<string, string | undefined>,
         });
         return Response.json(result);
       } catch (err: any) {
@@ -641,6 +643,7 @@ export async function handleScreenerResearchRoutes(
           userLogin,
           trigger: "scheduled",
           sql: ctx.getOrm?.() as unknown as SqlStorage | undefined,
+          env: ctx.env as Record<string, string | undefined>,
           execute: () => triggerScheduledResearch(ctx.runResearchAndPublish, userLogin),
         });
         const out = {
