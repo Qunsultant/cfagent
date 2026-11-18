@@ -55,11 +55,16 @@
  * correction, the batch-2 precedent: the `src/server/routes/queue.ts`
  * ceiling of 16 was stale (current main holds 14 real refs), so the
  * true remaining total before batch 6 was 141, not 143; 141 − 38 = 103,
- * and REMAINING_PIN sums to 103. The scheduled dispatcher's
- * in-function `structuredLog` shadows the new module logger inside
- * that function only (same name, narrower actor scope — left as is);
- * the queue file's #3121 comment about the ceiling of 16 now reads
- * migrated-to-zero. All 16 `auth.ts` warnings are the repeated
+ * and REMAINING_PIN sums to 103. Update (Venus hold, #5587): the five
+ * module loggers were built with an empty env and would have been
+ * console-only — events never reach the Analytics Engine
+ * `observability` dataset (the binding is construction-time). The
+ * loggers are now built per handler from the request's env, so the AE
+ * branch is live; the scheduled dispatcher's existing in-function
+ * logger is untouched, and no event name, message, or severity
+ * changed. The queue file's #3121 comment about the ceiling of 16
+ * now reads migrated-to-zero. All 16 `auth.ts` warnings are the
+ * repeated
  * session-rotation / granter-revocation blocks, migrated with one
  * event name per distinct message; two tests asserted on the raw
  * `console.warn` denied-dispatch line and were updated to the

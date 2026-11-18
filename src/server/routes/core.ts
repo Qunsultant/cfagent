@@ -46,11 +46,6 @@ import type { SlackDeliveryEnv } from "../../agents/social/delivery";
 import { createStructuredLogger } from "../../observability/structuredLogger";
 import { createObservabilitySink } from "../../observability/createObservabilityPorts";
 
-/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
-const structuredLog = createStructuredLogger(createObservabilitySink({}), {
-  component: "server/routes/core",
-});
-
 /**
  * Slice 2 of Qunsultant/cfagent#2902 (Core dispatcher) — moves only.
  * The early Core branches of handleFetch, verbatim and in original order:
@@ -133,6 +128,13 @@ export async function handleCoreHealthRoutes(request: Request, env: Env, url: UR
  * preceded the root branch stays inside this handler, at the same point.
  */
 export async function handleCoreLateRoutes(request: Request, env: Env, url: URL, path: string): Promise<Response> {
+    // Issue #3515 S3 batch 6, #5587 — env-wired logger: the sink is built
+    // from the request's env so events reach the Analytics Engine
+    // `observability` dataset; a module-level logger built with an empty
+    // env is console-only (the binding is construction-time).
+    const structuredLog = createStructuredLogger(createObservabilitySink(env), {
+      component: "server/routes/core",
+    });
     // --- OpenAPI + Swagger spike (issue #1024 Phase 1) ---
     // GET /openapi.json serves the generated spec; GET /api/docs serves
     // the Swagger UI page against it. PROVISIONAL gating: both routes
@@ -479,6 +481,14 @@ export function ensureBreakerDurability(env: Env): void {
     tripAlert: (envelope) => {
       void subscriber.handleEnvelope(envelope);
     },
+  });
+  // Issue #3515 S3 batch 6, #5587 — env-wired logger (same note as the
+  // route handlers above): the sink is built from the request's env so
+  // the event reaches the Analytics Engine `observability` dataset.
+  // Built here, after the configured/adapters guards, so no-op calls
+  // (already configured, or no adapter) never construct a sink.
+  const structuredLog = createStructuredLogger(createObservabilitySink(env), {
+    component: "server/routes/core",
   });
   void ensureBreakerStateSchema(adapter.db).catch((err: unknown) => {
     structuredLog.warn("core.breaker_schema_ensure_failed", {

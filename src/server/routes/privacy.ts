@@ -51,11 +51,6 @@ import type { SeedCanonicalReportsResult } from "../../data/auditReportProjectio
 import { createStructuredLogger } from "../../observability/structuredLogger";
 import { createObservabilitySink } from "../../observability/createObservabilityPorts";
 
-/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
-const structuredLog = createStructuredLogger(createObservabilitySink({}), {
-  component: "server/routes/privacy",
-});
-
 /**
  * Slice 4 of Qunsultant/cfagent#2902 (Privacy & compliance) — moves only.
  * The privacy family of handleFetch, verbatim and in original order:
@@ -252,6 +247,13 @@ export async function handlePrivacyRoutes(request: Request, env: Env, url: URL, 
  * chain did.
  */
 export async function handlePrivacyChainsRoutes(request: Request, env: Env, url: URL, path: string): Promise<Response | null> {
+    // Issue #3515 S3 batch 6, #5587 — env-wired logger: the sink is built
+    // from the request's env so events reach the Analytics Engine
+    // `observability` dataset; a module-level logger built with an empty
+    // env is console-only (the binding is construction-time).
+    const structuredLog = createStructuredLogger(createObservabilitySink(env), {
+      component: "server/routes/privacy",
+    });
     // --- Chain/schedule projection status (issue #1651, slice 1) ---
     // GET /api/chains/status?chainId=: tenant-scoped read of the
     // AgentDB projection ONLY — never the durable object. Gated

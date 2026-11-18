@@ -63,11 +63,6 @@ import { createScreenerQueueHandler } from "../../messaging/screenerQueueConsume
 import { renewAllStoredETradeTokens } from "../../services/etradeOAuth";
 import { ensureBreakerDurability } from "./core";
 
-/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
-const structuredLog = createStructuredLogger(createObservabilitySink({}), {
-  component: "server/routes/queue",
-});
-
 // Issue #1739 — per-subscriber dedup for screener-event delivery
 // batches. Module-level so it survives across batches in one
 // isolate; cross-isolate redelivery is possible under at-least-once
@@ -156,6 +151,13 @@ async function dispatchOptionsAnalysisQueueWork(opts: {
   runId?: string;
   unitId?: string;
 }): Promise<"dispatched" | "denied"> {
+  // Issue #3515 S3 batch 6, #5587 — env-wired logger: the sink is built
+  // from opts.env so the event reaches the Analytics Engine
+  // `observability` dataset; a module-level logger built with an empty
+  // env is console-only (the binding is construction-time).
+  const structuredLog = createStructuredLogger(createObservabilitySink(opts.env), {
+    component: "server/routes/queue",
+  });
   // Matches the pre-#2544 fallthrough exactly: a falsy payload
   // dispatches as an empty object, never as a falsy body.
   const payload = opts.payload || {};
@@ -224,10 +226,19 @@ async function dispatchOptionsAnalysisQueueWork(opts: {
  * port core turns the throw into "retry", so the platform
  * re-delivers up to max_retries and then DLQs the message.
  */
-async function dispatchRunLedgerProjectQueueWork(opts: {
+export async function dispatchRunLedgerProjectQueueWork(opts: {
   env: Env;
   project: RunLedgerProjectMessage;
 }): Promise<"projected" | "already-current"> {
+  const userLogin =
+    typeof opts.project.userLogin === "string" ? opts.project.userLogin.trim() : "";
+  const tenantId =
+    typeof opts.project.tenantId === "string" ? opts.project.tenantId.trim() : "";
+  if (!userLogin || !tenantId) {
+    throw new Error(
+      `run-ledger.project requires non-empty owner scoping (userLogin=${JSON.stringify(opts.project.userLogin)}, tenantId=${JSON.stringify(opts.project.tenantId)}); refusing shared-instance fallback (#5043).`,
+    );
+  }
   type ProjectQueuedRunLedger = {
     projectQueuedRunLedger: (input: {
       ledger: "reports" | "async_jobs";
@@ -239,12 +250,12 @@ async function dispatchRunLedgerProjectQueueWork(opts: {
   const input = {
     ledger: opts.project.ledger,
     naturalKey: opts.project.naturalKey,
-    tenantId: opts.project.tenantId,
-    userLogin: opts.project.userLogin,
+    tenantId,
+    userLogin,
   };
   const perUser = actorGateway.stub<ProjectQueuedRunLedger>(
     opts.env.ORCHESTRATOR_AGENT,
-    opts.project.userLogin,
+    userLogin,
   );
   const first = await perUser.projectQueuedRunLedger(input);
   if (first.status !== "missing-row") return first.status;
@@ -255,7 +266,7 @@ async function dispatchRunLedgerProjectQueueWork(opts: {
   const second = await shared.projectQueuedRunLedger(input);
   if (second.status !== "missing-row") return second.status;
   throw new Error(
-    `run-ledger.project row missing in both instances (${opts.project.ledger} ${opts.project.naturalKey}, owner ${opts.project.userLogin}) — the DO row should exist before its publish; retrying.`,
+    `run-ledger.project row missing in both instances (${opts.project.ledger} ${opts.project.naturalKey}, owner ${userLogin}) — the DO row should exist before its publish; retrying.`,
   );
 }
 
@@ -452,6 +463,13 @@ export async function handleScheduledEvent(event: any, env: Env, ctx?: any): Pro
  * options_analysis fallthrough.
  */
 export async function handleQueueBatch(batch: any, env: Env, ctx?: any): Promise<void> {
+    // Issue #3515 S3 batch 6, #5587 — env-wired logger: the sink is built
+    // from the request's env so events reach the Analytics Engine
+    // `observability` dataset; a module-level logger built with an empty
+    // env is console-only (the binding is construction-time).
+    const structuredLog = createStructuredLogger(createObservabilitySink(env), {
+      component: "server/routes/queue",
+    });
     // Phase 5 Slice 2 (#2000) — durable breaker production path (see ensureBreakerDurability).
     ensureBreakerDurability(env);
     // Issue #1739 — durable screener-event delivery. The delivery
