@@ -32,6 +32,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { controlJobStage } from "./jobsApi";
+import { withCsrfInit } from "./apiFetch";
 import { Badge, Button, Card, CardHeader, EmptyState, Grid, Modal, Notice, PageSection, PageShell, PillGroup, Stack, Table, type TableColumn, TextInput } from "./components/ui";
 import type {
   ShardStrategyEvidence,
@@ -1142,7 +1143,13 @@ export function RunDetail({
   // IS the chain id for a job-chain run, so no extra lookup is needed.
   const [chainRetryBusy, setChainRetryBusy] = useState(false);
   const [chainRetryMessage, setChainRetryMessage] = useState<string | null>(null);
-  const canRetryChain = run.source === "job-chain" && run.status === "failed";
+  // Issue #5242: a single async-job run (one stage standing for the run's
+  // own job id — e.g. an orphaned MCP tool run) retries through the
+  // single-job endpoint, never the chain retry, which would retry zero
+  // shard rows for it. The two buttons are mutually exclusive.
+  const isSingleJobRun =
+    run.source === "job-chain" && run.stages.length === 1 && run.stages[0]?.jobId === run.id;
+  const canRetryChain = run.source === "job-chain" && run.status === "failed" && !isSingleJobRun;
   const retryChain = async () => {
     setChainRetryMessage(null);
     setChainRetryBusy(true);
@@ -1166,6 +1173,38 @@ export function RunDetail({
       setChainRetryMessage(err instanceof Error ? err.message : String(err));
     } finally {
       setChainRetryBusy(false);
+    }
+  };
+  // Issue #5242: explicit operator retry for a failed single job through
+  // the existing single-job endpoint (`POST /api/jobs/<jobId>/retry` →
+  // `retryAsyncJob`, which refuses duplicates and consumed-payment
+  // retries per #3907). Auto re-arm stays withheld for side-effecting
+  // tools — this re-executes only when the operator taps it.
+  const [jobRetryBusy, setJobRetryBusy] = useState(false);
+  const [jobRetryMessage, setJobRetryMessage] = useState<string | null>(null);
+  const canRetryJob = isSingleJobRun && run.status === "failed";
+  const retryJob = async () => {
+    setJobRetryMessage(null);
+    setJobRetryBusy(true);
+    try {
+      const res = await fetch(
+        `/api/jobs/${encodeURIComponent(run.id)}/retry`,
+        withCsrfInit({ method: "POST" }),
+      );
+      const payload = (await res.json().catch(() => ({}))) as {
+        success?: boolean;
+        error?: string;
+        jobId?: string;
+      };
+      if (!res.ok || payload.success === false) {
+        throw new Error(payload.error ?? `Job retry failed (${res.status})`);
+      }
+      setJobRetryMessage(payload.jobId ? `Retried as job ${payload.jobId}.` : "Retried as a new job.");
+      onStageAction?.();
+    } catch (err) {
+      setJobRetryMessage(err instanceof Error ? err.message : String(err));
+    } finally {
+      setJobRetryBusy(false);
     }
   };
   const runStageAction = async (
@@ -1389,6 +1428,17 @@ export function RunDetail({
         }
         meta={
           <span className="ui-row">
+            {canRetryJob && (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => void retryJob()}
+                loading={jobRetryBusy}
+                disabled={jobRetryBusy}
+              >
+                Retry job
+              </Button>
+            )}
             {canRetryChain && (
               <Button
                 variant="secondary"
@@ -1426,6 +1476,12 @@ export function RunDetail({
       {chainRetryMessage && (
         <Notice tone="info" density="compact" variant="strip" title="Chain retry">
           {chainRetryMessage}
+        </Notice>
+      )}
+
+      {jobRetryMessage && (
+        <Notice tone="info" density="compact" variant="strip" title="Job retry">
+          {jobRetryMessage}
         </Notice>
       )}
 
