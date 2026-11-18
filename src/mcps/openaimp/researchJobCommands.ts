@@ -12,12 +12,18 @@ import type { IMcpToolCommand, McpToolContext } from "../../patterns/interfaces"
 import {
   dispatchResearchEngineRun,
   executeResearchStageControl,
+  resolveResearchEngineAdapters,
   type ResearchStageOp,
 } from "../../workflows/researchScreenEngine";
 import { RESEARCH_PIPELINE_STAGES } from "../../workflows/stageRuntimeIds";
-import { createInMemoryJobPipelineStores } from "../../data/inMemoryJobPipelineAdapter";
-import { InMemoryJobRunRecordStore } from "../../data/inMemoryJobRunRecordAdapter";
-import { JobPipelineControl, jobRunRecorderFromStore } from "../../services/jobPipelineEngine";
+import { researchEngineJobId } from "../../workflows/researchDataPorts";
+import {
+  ANALYZE_OODA_STEP,
+  EVALUATE_APPLY_STEP,
+  createDefaultResearchStepDeps,
+  registerResearchSteps,
+} from "../../services/researchPipelineJobs";
+import { JobPipelineControl } from "../../services/jobPipelineEngine";
 import { createBuiltinStepRegistry } from "../../services/jobPipelineSteps";
 import { codedMessage } from "../../outcomes/outcomeAspects";
 import type { SqlStorage } from "../../orm";
@@ -158,44 +164,87 @@ export class DefinePipelineChainCommand implements IMcpToolCommand<DefinePipelin
       throw new Error(codedMessage("FAILURE_RESEARCH_OWNER_MISSING"));
     }
 
-    const stores = createInMemoryJobPipelineStores();
+    const sql = context.orm as unknown as SqlStorage | undefined;
+    const envRecord = context.env as unknown as Record<string, string | undefined> | undefined;
+    const d1 = (context.env as { AGENT_DB?: D1Database } | undefined)?.AGENT_DB;
+
+    const { storageMode, ephemeralFallback, ephemeralReason, stores, runRecorder } =
+      resolveResearchEngineAdapters({
+        ...(sql ? { sql } : {}),
+        ...(d1 ? { d1 } : {}),
+        ...(envRecord ? { env: envRecord } : {}),
+      });
+
+    const runId = input.jobId.startsWith("research:")
+      ? input.jobId.slice("research:".length)
+      : input.jobId;
+    const engineJobId = researchEngineJobId(runId);
+
     const control = new JobPipelineControl({
       stores,
-      runRecorder: jobRunRecorderFromStore(new InMemoryJobRunRecordStore()),
+      runRecorder,
       publisher: null,
-      steps: createBuiltinStepRegistry(),
+      steps: registerResearchSteps(
+        createBuiltinStepRegistry(),
+        createDefaultResearchStepDeps({ allowTestStub: true }),
+      ),
       invocation: "sync",
     });
 
     const definition = await control.defineJob({
-      jobId: input.jobId,
+      jobId: engineJobId,
       name: input.name ?? `Chain — ${input.jobId}`,
       root: {
-        kind: "chain",
+        kind: "research",
         inputs: {
           sources: input.sources ?? ["primary-feed"],
           datasets: input.datasets ?? ["quotes"],
         },
+        steps: [{ step: "noop" }],
         schedule: input.cron ? { enabled: true, cron: input.cron } : { enabled: false },
         children: input.stages.map((kind) => ({
           kind,
-          steps: [],
+          steps:
+            kind === "analyze"
+              ? [
+                  {
+                    step: ANALYZE_OODA_STEP,
+                    params: { runId, userLogin: actingLogin, trigger: "manual" },
+                  },
+                ]
+              : kind === "evaluate"
+                ? [
+                    {
+                      step: EVALUATE_APPLY_STEP,
+                      params: { runId, userLogin: actingLogin },
+                    },
+                  ]
+                : [],
         })),
       },
     } as never);
 
     context.audit("mcp.tool_called", "orchestrator", {
       tool: this.name,
-      jobId: definition.jobId,
+      jobId: input.jobId,
+      engineJobId: definition.jobId,
+      runId,
       stages: input.stages,
+      storageMode,
+      ephemeralFallback,
     });
 
     return {
       ok: true,
-      jobId: definition.jobId,
+      jobId: input.jobId,
+      engineJobId: definition.jobId,
+      runId,
       version: definition.version,
       stages: input.stages,
       owner: actingLogin,
+      storageMode,
+      ephemeralFallback,
+      ...(ephemeralReason ? { ephemeralReason } : {}),
     };
   }
 }

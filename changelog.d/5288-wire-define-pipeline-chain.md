@@ -1,0 +1,2 @@
+### Changed
+- **Wire `define_pipeline_chain` onto durable stores & addressable execution (#5288)**: Updated `DefinePipelineChainCommand` in `src/mcps/openaimp/researchJobCommands.ts` to use `resolveResearchEngineAdapters` (supporting DO `SqlStorage` via `context.orm` and D1 via `context.env.AGENT_DB`), register `analyze.ooda` + `evaluate.apply`, and define chains under `research:<runId>` so `run_research_job` can address and execute them across requests.
