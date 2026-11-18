@@ -144,4 +144,61 @@ describe("Issue #5625 — Run research now on a plain-text 401", () => {
     expect(text).toContain("HTTP 502");
     expect(text).not.toContain("Unexpected token");
   });
+
+  it("polls 202 async-job responses from POST /api/research/run instead of showing Failed: unknown error (#5721)", async () => {
+    const mockReport = {
+      runId: "run_202",
+      trigger: "manual",
+      createdAt: "2026-11-18T23:00:00Z",
+      rulesVersion: "v1",
+      summary: "Research complete",
+      ideas: [],
+      watchlist: [],
+      rejected: [],
+      stats: { qualified: 0, watchlist: 0, rejected: 0, unverified: 0, durationMs: 120 },
+      configSnapshot: {},
+    };
+    vi.stubGlobal("fetch", async (url: string) => {
+      state.requests.push(String(url));
+      if (String(url).includes("/api/research/run")) {
+        return new Response(
+          JSON.stringify({ jobId: "job-123", status: "queued", statusUrl: "/api/jobs/job-123" }),
+          { status: 202, headers: { "content-type": "application/json" } },
+        );
+      }
+      if (String(url).includes("/api/jobs/job-123")) {
+        return new Response(
+          JSON.stringify({
+            jobId: "job-123",
+            status: "completed",
+            capability: "http.request",
+            responseStatus: 200,
+            result: {
+              body: JSON.stringify({ success: true, reportId: "rep_202", report: mockReport }),
+              headers: { "content-type": "application/json" },
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      return new Response(JSON.stringify({ config: {}, latest: null, history: [] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    });
+
+    const container = await render();
+    await act(async () => {
+      clickButton(container, "Run research now").click();
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 600));
+    });
+    await flush();
+
+    const text = container.textContent ?? "";
+    expect(state.requests).toContain("/api/jobs/job-123");
+    expect(text).toContain("Done — canonical report rep_202 stored.");
+    expect(text).not.toContain("unknown error");
+  });
 });

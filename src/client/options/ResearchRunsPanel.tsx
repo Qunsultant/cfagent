@@ -31,7 +31,7 @@ import {
   type TableColumn,
 } from "../components/ui";
 import { navigateToTab } from "../router";
-import { csrfHeaders } from "../apiFetch";
+import { apiFetch, csrfHeaders } from "../apiFetch";
 import { ScheduledOptionsRunForm } from "./ScheduledOptionsRunForm";
 import { AutonomousOptionsRuns } from "./AutonomousOptionsRuns";
 import { ScreeningActivityPanel } from "./ScreeningActivityPanel";
@@ -282,7 +282,7 @@ export function ResearchRunsPanel({ activeEnv, userLogin, onSendPrompt }: Resear
 
   const loadConfig = useCallback(async () => {
     try {
-      const res = await fetch("/api/research/settings", { headers: hdrs(userLogin) });
+      const res = await apiFetch("/api/research/settings", { headers: hdrs(userLogin) });
       if (!res.ok) return;
       const data = await readJson<{ config?: Record<string, unknown> }>(res);
       if (data.config) {
@@ -300,7 +300,7 @@ export function ResearchRunsPanel({ activeEnv, userLogin, onSendPrompt }: Resear
 
   const loadLatest = useCallback(async () => {
     try {
-      const res = await fetch("/api/research/latest", { headers: hdrs(userLogin) });
+      const res = await apiFetch("/api/research/latest", { headers: hdrs(userLogin) });
       if (!res.ok) return;
       const data = await readJson<{ latest?: ReportView | null }>(res);
       if (data.latest) setReport(data.latest);
@@ -311,7 +311,7 @@ export function ResearchRunsPanel({ activeEnv, userLogin, onSendPrompt }: Resear
 
   const loadHistory = useCallback(async () => {
     try {
-      const res = await fetch("/api/research/history", { headers: hdrs(userLogin) });
+      const res = await apiFetch("/api/research/history", { headers: hdrs(userLogin) });
       if (!res.ok) return;
       const data = await readJson<{ history?: RunSummaryView[] }>(res);
       if (Array.isArray(data.history)) setHistory(data.history);
@@ -337,7 +337,7 @@ export function ResearchRunsPanel({ activeEnv, userLogin, onSendPrompt }: Resear
         else if (f.type === "number") patch[f.key] = raw === "" ? null : Number(raw);
         else patch[f.key] = raw;
       }
-      const res = await fetch("/api/research/settings", {
+      const res = await apiFetch("/api/research/settings", {
         method: "POST",
         headers: { ...hdrs(userLogin), ...csrfHeaders() },
         body: JSON.stringify(patch),
@@ -360,14 +360,21 @@ export function ResearchRunsPanel({ activeEnv, userLogin, onSendPrompt }: Resear
     setRunning(true);
     setRunMsg("Running research…");
     try {
-      const res = await fetch("/api/research/run", { method: "POST", headers: { ...hdrs(userLogin), ...csrfHeaders() } });
-      const data = await readJson<{ success?: boolean; error?: string; report?: ReportView; reportId?: string }>(res);
+      const res = await apiFetch("/api/research/run", { method: "POST", headers: { ...hdrs(userLogin), ...csrfHeaders() } });
+      const data = await readJson<{
+        success?: boolean;
+        error?: string;
+        reason?: string;
+        message?: string;
+        report?: ReportView;
+        reportId?: string;
+      }>(res);
       if (data.success && data.report) {
         setReport(data.report);
         setRunMsg(`Done — canonical report ${data.reportId ?? ""} stored.`);
         void loadHistory();
       } else {
-        setRunMsg(`Failed: ${data.error ?? "unknown error"}`);
+        setRunMsg(`Failed: ${data.error ?? data.reason ?? data.message ?? "unknown error"}`);
       }
     } catch (err) {
       setRunMsg(`Failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -379,7 +386,7 @@ export function ResearchRunsPanel({ activeEnv, userLogin, onSendPrompt }: Resear
   const evaluate = async (runId: string) => {
     setRunMsg("Evaluating against later prices…");
     try {
-      const res = await fetch("/api/research/evaluate", {
+      const res = await apiFetch("/api/research/evaluate", {
         method: "POST",
         headers: { ...hdrs(userLogin), ...csrfHeaders() },
         body: JSON.stringify({ runId }),
