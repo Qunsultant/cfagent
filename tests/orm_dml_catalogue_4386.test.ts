@@ -225,7 +225,7 @@ describe("ORM-core DML catalogue coverage (#4386)", () => {
     const built = buildDoDmlCatalogue();
     expect(built.size()).toBe(DO_DML_CATALOGUE_ENTRIES.length);
     expect(DO_DML_CATALOGUE.size()).toBe(DO_DML_CATALOGUE_ENTRIES.length);
-    expect(DO_DML_CATALOGUE_ENTRIES.length).toBe(81);
+    expect(DO_DML_CATALOGUE_ENTRIES.length).toBe(83);
     expect(new Set(DO_DML_CATALOGUE_ENTRIES.map((e) => e.code)).size).toBe(
       DO_DML_CATALOGUE_ENTRIES.length,
     );
@@ -249,7 +249,7 @@ describe("ORM-core DML catalogue coverage (#4386)", () => {
       {} as Record<string, number>,
     );
     expect(forms.repository).toBe(64);
-    expect(forms.template).toBe(17);
+    expect(forms.template).toBe(19);
   });
 
   it("every template statement is byte-identical to the statement it replaced", () => {

@@ -145,8 +145,8 @@ describe("DO mechanism mix (#4385)", () => {
     expect(hits, "inline DML survives in a tranche file").toEqual([]);
   });
 
-  it("the catalogue holds the tranche + the ORM core + the route-held pair: 81 entries", () => {
-    expect(DO_DML_CATALOGUE.size()).toBe(81);
+  it("the catalogue holds the tranche + the ORM core + the route-held pair + P6e: 83 entries", () => {
+    expect(DO_DML_CATALOGUE.size()).toBe(83);
     for (const table of TRANCHE_TABLES) {
       expect(DO_DML_CATALOGUE.findByTable(table).length, table).toBeGreaterThan(0);
     }
@@ -155,7 +155,7 @@ describe("DO mechanism mix (#4385)", () => {
       {} as Record<string, number>,
     );
     expect(forms.repository).toBe(64);
-    expect(forms.template).toBe(17);
+    expect(forms.template).toBe(19);
   });
 
   it("repository-bound tables: 9 tranche + 5 ORM-core + 1 parameterized = 15", () => {
@@ -178,13 +178,14 @@ describe("DO mechanism mix (#4385)", () => {
     expect(catalogueTables.size).toBe(15);
   });
 
-  it("template-only tables are exactly the 8 with inexpressible shapes", () => {
+  it("template-only tables are exactly the 9 with inexpressible shapes", () => {
     const templateTables = new Set(
       DO_DML_CATALOGUE.entries()
         .filter((e) => e.form === "template")
         .map((e) => e.table),
     );
     expect([...templateTables].sort()).toEqual([
+      "mas_autopilot",
       "mas_discovery_runs",
       "mas_discovery_setup_runs",
       "mas_events",
@@ -196,7 +197,7 @@ describe("DO mechanism mix (#4385)", () => {
     ]);
   });
 
-  it("the remaining inline count is 250 (239 baseline + 11 #5034 migrated service-to-data DO adapters)", () => {
+  it("the remaining inline count is 248 (250 #5034 baseline − 2 P6e mas_autopilot)", () => {
     let write = 0;
     let read = 0;
     for (const file of doFiles()) {
@@ -204,9 +205,9 @@ describe("DO mechanism mix (#4385)", () => {
       write += counts.write;
       read += counts.read;
     }
-    expect(write).toBe(121);
-    expect(read).toBe(129);
-    expect(write + read).toBe(250);
+    expect(write).toBe(120);
+    expect(read).toBe(128);
+    expect(write + read).toBe(248);
   });
 
   it("the named exemptions hold their recorded counts, with reasons", () => {

@@ -338,4 +338,24 @@ export const DO_DML_CATALOGUE_ENTRIES: DoDmlCatalogueEntry[] = [
   { code: "dml.do.__table__.delete", table: "__table__", operation: "delete", form: "repository", method: "delete", parameterizedTable: true },
   { code: "dml.do.__table__.delete_where", table: "__table__", operation: "delete", form: "repository", method: "deleteWhere", parameterizedTable: true },
   { code: "dml.do.__table__.count", table: "__table__", operation: "read", form: "repository", method: "count", parameterizedTable: true },
+
+  // --- P6e (#5033): mas_autopilot (DoSqliteAutopilotStateStore) — 2 template ---
+  {
+    code: "dml.do.mas_autopilot.get_value",
+    table: "mas_autopilot",
+    operation: "read",
+    form: "template",
+    statement: "SELECT value FROM mas_autopilot WHERE key = ?",
+    params: ["key"],
+    mode: "all",
+  },
+  {
+    code: "dml.do.mas_autopilot.put_value",
+    table: "mas_autopilot",
+    operation: "insert",
+    form: "template",
+    statement: "INSERT OR REPLACE INTO mas_autopilot (key, value, updated_at) VALUES (?, ?, ?)",
+    params: ["key", "value", "updated_at"],
+    mode: "run",
+  },
 ];

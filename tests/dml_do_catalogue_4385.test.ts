@@ -213,7 +213,7 @@ describe("DO DML catalogue coverage (#4385)", () => {
     expect(built.size()).toBe(DO_DML_CATALOGUE_ENTRIES.length);
     expect(DO_DML_CATALOGUE.size()).toBe(DO_DML_CATALOGUE_ENTRIES.length);
     // 53 (P6b tranche) + 26 (P6c ORM-core) + 2 (P6d route-held) = 81.
-    expect(DO_DML_CATALOGUE_ENTRIES.length).toBe(81);
+    expect(DO_DML_CATALOGUE_ENTRIES.length).toBe(83);
     expect(new Set(DO_DML_CATALOGUE_ENTRIES.map((e) => e.code)).size).toBe(
       DO_DML_CATALOGUE_ENTRIES.length,
     );
@@ -238,9 +238,9 @@ describe("DO DML catalogue coverage (#4385)", () => {
       (acc, e) => ({ ...acc, [e.form]: (acc[e.form] ?? 0) + 1 }),
       {} as Record<string, number>,
     );
-    // 42 + 22 (P6c) repository; 11 + 4 (P6c) + 2 (P6d) template.
+    // 42 + 22 (P6c) repository; 11 + 4 (P6c) + 2 (P6d) + 2 (P6e) template.
     expect(forms.repository).toBe(64);
-    expect(forms.template).toBe(17);
+    expect(forms.template).toBe(19);
   });
 
   it("every template statement is byte-identical to the constant it replaced", () => {

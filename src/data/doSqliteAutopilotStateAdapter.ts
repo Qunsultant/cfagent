@@ -12,6 +12,8 @@ import type {
   OrchestratorTableSqlExecutor,
 } from "./orchestratorTablePorts";
 import { doTableSql } from "./schemaComponent/doCatalogue";
+import { DO_DML_CATALOGUE } from "./schemaComponent/doDmlCatalogue";
+import { executeDoDml } from "./schemaComponent/doDmlExecutor";
 
 export class DoSqliteAutopilotStateStore implements AutopilotStatePort {
   constructor(private readonly sql: OrchestratorTableSqlExecutor) {}
@@ -21,18 +23,21 @@ export class DoSqliteAutopilotStateStore implements AutopilotStatePort {
   }
 
   getValue(key: string): string | null {
-    const rows = Array.from(
-      this.sql.exec("SELECT value FROM mas_autopilot WHERE key = ?", key)
-    ) as Array<{ value: string }>;
+    const rows = executeDoDml<Array<{ value: string }>>(
+      DO_DML_CATALOGUE,
+      this.sql as never,
+      "dml.do.mas_autopilot.get_value",
+      { key },
+    );
     return rows[0]?.value ?? null;
   }
 
   putValue(key: string, value: string, updatedAt: string): void {
-    this.sql.exec(
-      "INSERT OR REPLACE INTO mas_autopilot (key, value, updated_at) VALUES (?, ?, ?)",
-      key,
-      value,
-      updatedAt
+    executeDoDml(
+      DO_DML_CATALOGUE,
+      this.sql as never,
+      "dml.do.mas_autopilot.put_value",
+      { key, value, updated_at: updatedAt },
     );
   }
 }
