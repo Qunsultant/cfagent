@@ -194,8 +194,8 @@ export interface FeatureEvaluationContext {
 /**
  * Issue #4260 ([3121] surface the scheduling-channel flags): the
  * result of a flag write through the port. A write is OPTIONAL on
- * the port — adapters whose source is operator-owned (the Cloudflare
- * Flagship dashboard, environment variables) cannot persist a
+ * the port — adapters whose source is operator-owned (the provider
+ * dashboard, environment variables) cannot persist a
  * runtime write and simply do not implement it; the caller reports
  * FLAG_WRITE_UNSUPPORTED instead of inventing a second store.
  */
@@ -225,7 +225,7 @@ export interface FeatureFlagPort {
    * Issue #4260: persist a flag value through the one flag mechanism.
    * Optional — only adapters with a writable backing (today the
    * in-memory adapter) implement it. Adapters over operator-owned
-   * sources (Flagship dashboard, env vars) leave it absent; callers
+   * sources (provider dashboard, env vars) leave it absent; callers
    * must treat the absence as FLAG_WRITE_UNSUPPORTED, never as a
    * reason to build a second flag store.
    */
