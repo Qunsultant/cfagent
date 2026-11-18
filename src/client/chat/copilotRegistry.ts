@@ -247,14 +247,14 @@ export const DEFAULT_COPILOTS: CopilotConfig[] = [
         category: "Platform Diagnostics",
       },
       {
-        label: "⚡ Generate strategy code",
-        prompt: "Generate quantitative trading strategy code for momentum breakout and save to workspace",
-        category: "Strategy Code & Sandbox",
+        label: "📝 Propose a new strategy (governed issue)",
+        prompt: "Propose a new trading strategy as a governed GitHub issue with the evidence behind it",
+        category: "Strategy Proposals",
       },
       {
-        label: "🧪 Run sandboxed backtest",
-        prompt: "Run the generated momentum breakout strategy in SandboxAgent and evaluate backtest performance",
-        category: "Strategy Code & Sandbox",
+        label: "🧪 What can the sandbox actually run?",
+        prompt: "What can SandboxAgent actually run today, and why is strategy backtesting not available?",
+        category: "Strategy Proposals",
       },
       {
         label: "💡 How can you improve yourself?",
@@ -267,8 +267,8 @@ export const DEFAULT_COPILOTS: CopilotConfig[] = [
         category: "Self-Improvement (RSI)",
       },
       {
-        label: "⚙️ Switch to Self-RSI mode",
-        prompt: "Set RSI mode to self",
+        label: "🔒 Why is Self-RSI unavailable?",
+        prompt: "Why is Self-RSI mode unavailable and what does the §7 pipeline still need?",
         category: "RSI Mode",
       },
       {
