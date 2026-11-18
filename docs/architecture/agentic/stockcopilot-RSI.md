@@ -108,6 +108,11 @@ flowchart TB
 | **`sandboxAgent`** | Platform | S8 Issue [#3492](https://github.com/Qunsultant/cfagent/issues/3492) | Compiles and executes synthesized TypeScript/Python quant strategies in isolated V8 sandbox environments. |
 | **`thinkWorkflow`** | Platform | S5 Issue [#3453](https://github.com/Qunsultant/cfagent/issues/3453) | Runs multi-turn Monte Carlo and historical backtest passes against historical market bars before live code promotion. |
 
+> **Catalogue writes (#5063):** no agent writes a pattern, preset, or skill today; the decision and the real promotion paths are recorded in [`rsi-catalogue-write-policy.md`](rsi-catalogue-write-policy.md).
+
+
+
+
 ---
 
 ## 4. Dual RSI Operational Modes
