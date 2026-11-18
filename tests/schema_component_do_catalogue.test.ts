@@ -18,10 +18,10 @@
  *    leading/trailing whitespace of the adapters' template literals.
  *  - The expected-model fixture
  *    (tests/schema_component_do_expected_model.json): the DO model
- *    built by executing the 104 catalogue statements (parameterized
+ *    built by executing the 107 catalogue statements (parameterized
  *    mas_reports entries resolved with their table) plus the two
  *    ORM-catalogue indexes the DO adapters execute, through the P0
- *    InMemorySchemaInstance — 67 tables, 39 indexes. Regenerate only
+ *    InMemorySchemaInstance — 69 tables, 40 indexes. Regenerate only
  *    with the generator script
  *    ~/workspace/w4282/evidence-p2b/gen-do-catalogue.ts run against
  *    the base tree, and review the refreshed fixture in the PR diff:
@@ -137,6 +137,7 @@ import {
   DoSqliteResearchEvaluationStore,
 } from "../src/data/doSqliteResearchStoreAdapter";
 import { DoSqliteReselectionStore } from "../src/data/doSqliteReselectionAdapter";
+import { DoSqliteRunRegistryStore } from "../src/data/doSqliteRunRegistryAdapter";
 import { SqlScanRunStore } from "../src/data/doSqliteScanRunAdapter";
 import {
   SCREEN_RUN_LOCK_SCHEMA_MIGRATION,
@@ -203,6 +204,8 @@ const DO_STATEMENT_SHA256: Record<string, string> = {
   "schema.do.mas_policy_verdicts.create_table": "d05f7fc4f9d4db430c9344d6a1e86422fb80770a3c7bb254128a321b640945ed",
   "schema.do.mas_report_confirmations.create_table": "9089cbc440a8c6f0bbd0859903e3ecb04b41bc15795fafc6fdbe3b225c2f5fa9",
   "schema.do.mas_reports.create_table": "6497bc8d4ea00782bdff77ed66ee52748cb14391f1b84e1fc18ca7970337ac6d",
+  "schema.do.mas_run_aliases.create_table": "d1613552463eac88e41d94194cfabfaca9aebcd5fc71d878c03b3df07d647fe6",
+  "schema.do.mas_runs.create_table": "bcf6c71ac4a370aaf0ba3b93f7a16517a9a6acc04b677b7631e4d9f1e3d770b7",
   "schema.do.mas_scenarios.create_table": "77a1cd6199041e19eb5c2a4e9f2c31a245c8e35c482fac2d421338cd1ff7c3f7",
   "schema.do.mas_schema_migrations.create_table": "2b72c0f1dad94ceab100307f43a9cb4ad09433b7769cf156d852c6f7b3f606b9",
   "schema.do.mas_screener_presets.create_table": "308aa3f367dba54e4e334e3d6a21794cdfd499f5c97ba12df1780e7721a9e536",
@@ -260,6 +263,7 @@ const DO_STATEMENT_SHA256: Record<string, string> = {
   "schema.index.mas_reports.create_index_idx_mas_reports_created": "57edb073991c2d894e22df47d762b1984114e0210a3fed590e28c8a27d570ac9",
   "schema.index.mas_reports.create_index_idx_mas_reports_user": "aea8f447c088a1973df99347a25c0de542704c03c8cf1a433a5da896f4e44989",
   "schema.index.mas_reports.create_unique_index_idx_mas_reports_generation": "67d1f62e148eb78e60c90f7bd9f7cea398187c9203eb36e9f2043f78874935f2",
+  "schema.index.mas_run_aliases.create_index_idx_mas_run_aliases_run_id": "0f232c999e68f6815447adefe872ee0ad862757f190a501ee7b6b3f88d29aae6",
   "schema.index.mas_scenarios.create_index_idx_mas_scenarios_user_goal": "99a7456ee829ea93b326e0cca7ac86a99f29362dffc01895a31892e169cd371c",
   "schema.index.mas_screening_activity.create_index_idx_screening_activity_user": "373d64333717cfefad92b52e7be1ee2db1820e72e3de8f76523733944a9c8216",
   "schema.index.mas_strategy_profiles.create_index_idx_mas_strategy_profiles_user_name": "77233cfae0409fab0b6e0fcb262ef2c9b78c89c86428d298b110e75d55a55220",
@@ -423,6 +427,8 @@ async function driveAll(): Promise<BaseCapture[]> {
     new DoSqliteResearchEvaluationStore(rec as never).ensureSchema());
   cap("DoSqliteReselectionStore", "doSqliteReselectionAdapter.ts", "ensureTable()", (rec) =>
     new DoSqliteReselectionStore(rec as never).ensureTable());
+  cap("DoSqliteRunRegistryStore", "doSqliteRunRegistryAdapter.ts", "ensureSchema()", (rec) =>
+    new DoSqliteRunRegistryStore(rec as never).ensureSchema());
   cap("SqlScanRunStore", "doSqliteScanRunAdapter.ts", "ensure() [private]", (rec) =>
     callEnsure(new SqlScanRunStore(rec as never) as unknown as AnyStore, "ensure"));
   cap("DoSqliteScreenRunLock", "doSqliteScreenRunLockAdapter.ts", "ensureSchema() [legacy]", (rec) =>
@@ -481,7 +487,7 @@ async function driveAll(): Promise<BaseCapture[]> {
   return captures;
 }
 
-/** The 49 delegated files (the DO adapters + the two schema-marker modules). */
+/** The 50 delegated files (the DO adapters + the two schema-marker modules). */
 const DO_DELEGATED_FILES: string[] = [
   "data/doSchemaMarker.ts",
   "data/doSchemaMigrations.ts",
@@ -518,6 +524,7 @@ const DO_DELEGATED_FILES: string[] = [
   "data/doSqliteReportConfirmationAdapter.ts",
   "data/doSqliteResearchStoreAdapter.ts",
   "data/doSqliteReselectionAdapter.ts",
+  "data/doSqliteRunRegistryAdapter.ts",
   "data/doSqliteScanRunAdapter.ts",
   "data/doSqliteScreenRunLockAdapter.ts",
   "data/doSqliteScreenerPresetAdapter.ts",
@@ -543,11 +550,11 @@ const DO_DELEGATED_FILES: string[] = [
 const DO_REMAINING_INLINE_DDL: string[] = [];
 
 describe("DO catalogue — adapters delegate (#4282 P2b)", () => {
-  it("catalogues all 104 DO statements: 67 table + 36 index + 1 unique-index", () => {
+  it("catalogues all 107 DO statements: 69 table + 37 index + 1 unique-index", () => {
     const catalogue = buildDoCatalogue();
-    expect(DO_CATALOGUE_ENTRIES.length).toBe(104);
-    expect(catalogue.size()).toBe(104);
-    expect(catalogue.byKind("schema").length).toBe(104);
+    expect(DO_CATALOGUE_ENTRIES.length).toBe(107);
+    expect(catalogue.size()).toBe(107);
+    expect(catalogue.byKind("schema").length).toBe(107);
     const verbs = new Map<string, number>();
     const classify = (statement: string): string => {
       const upper = statement.trim().toUpperCase();
@@ -567,23 +574,23 @@ describe("DO catalogue — adapters delegate (#4282 P2b)", () => {
       const verb = classify(entry.statement);
       verbs.set(verb, (verbs.get(verb) ?? 0) + 1);
     }
-    expect(verbs.get("CREATE TABLE")).toBe(67);
-    expect(verbs.get("CREATE INDEX")).toBe(36);
+    expect(verbs.get("CREATE TABLE")).toBe(69);
+    expect(verbs.get("CREATE INDEX")).toBe(37);
     expect(verbs.get("CREATE UNIQUE INDEX")).toBe(1);
     expect(verbs.get("OTHER")).toBeUndefined();
     // Every code is unique and every entry is reachable by its code.
     const codes = new Set(DO_CATALOGUE_ENTRIES.map((e) => e.code));
-    expect(codes.size).toBe(104);
+    expect(codes.size).toBe(107);
     for (const entry of DO_CATALOGUE_ENTRIES) {
       expect(catalogue.get(entry.code).statement).toBe(entry.statement);
     }
     // Planes: DO tables on "do", indexes on "index".
     expect(
       DO_CATALOGUE_ENTRIES.filter((e) => e.plane === "do").length,
-    ).toBe(67);
+    ).toBe(69);
     expect(
       DO_CATALOGUE_ENTRIES.filter((e) => e.plane === "index").length,
-    ).toBe(37);
+    ).toBe(38);
     // Exactly the four mas_reports entries are parameterized.
     const parameterized = DO_CATALOGUE_ENTRIES.filter(
       (e) => e.form === "parameterized",
@@ -606,7 +613,7 @@ describe("DO catalogue — adapters delegate (#4282 P2b)", () => {
   });
 
   it("each entry's statement is byte-identical to the base (sha256 pin)", () => {
-    expect(Object.keys(DO_STATEMENT_SHA256).length).toBe(104);
+    expect(Object.keys(DO_STATEMENT_SHA256).length).toBe(107);
     for (const entry of DO_CATALOGUE_ENTRIES) {
       const digest = createHash("sha256")
         .update(entry.statement, "utf8")
@@ -617,8 +624,8 @@ describe("DO catalogue — adapters delegate (#4282 P2b)", () => {
 
   it("equality pin: the catalogue builds the base DO schema exactly", () => {
     const expected = expectedDoModel();
-    expect(Object.keys(expected.tables).length).toBe(67);
-    expect(Object.keys(expected.indexes).length).toBe(39);
+    expect(Object.keys(expected.tables).length).toBe(69);
+    expect(Object.keys(expected.indexes).length).toBe(40);
     // runEqualityCheck passes no parameters, and the catalogue holds
     // parameterized entries — resolve them manually, exactly as the
     // adapters do at the call site.
@@ -644,9 +651,9 @@ describe("DO catalogue — adapters delegate (#4282 P2b)", () => {
 
   it("the delegated adapters execute exactly the base statement lists", async () => {
     const base = baseCaptures();
-    expect(base.length).toBe(56);
+    expect(base.length).toBe(57);
     const actual = await driveAll();
-    expect(actual.length).toBe(56);
+    expect(actual.length).toBe(57);
     for (let i = 0; i < base.length; i++) {
       expect(actual[i].adapter, `capture ${i} adapter`).toBe(base[i].adapter);
       expect(actual[i].file, `capture ${i} file`).toBe(base[i].file);

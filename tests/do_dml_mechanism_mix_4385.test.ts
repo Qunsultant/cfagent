@@ -23,8 +23,11 @@
  *    the revenue-summary coverage cut — plus the 4 templates #3251
  *    added: the STMT_AUDIT_TABLE_* templates in
  *    doSessionStoreAdapter.ts, the parameterized path for the
- *    iaaa_audit_events append-only table) — a later slice moves
- *    this number down and updates this pin in the same PR;
+ *    iaaa_audit_events append-only table) — plus the 4 statements
+ *    #5175 slice 2 adds: the run-registry adapter's 2 INSERT + 2
+ *    SELECT literals (doSqliteRunRegistryAdapter.ts) — a later
+ *    slice moves this number down and updates this pin in the
+ *    same PR;
  *  - the named exemptions are recorded here with their reasons
  *    (Q4): the doSchema* ledger (5) and the kv_store funnel (11);
  *  - the P6c boundary is CLOSED by #4386: doSqliteOrmAdapters.ts
@@ -193,7 +196,7 @@ describe("DO mechanism mix (#4385)", () => {
     ]);
   });
 
-  it("the remaining inline count is 235 (297 surveyed − 53 P6b − 16 P6c + 2 #4507 dedupe reads + 1 #5235 listAllWithDetail read + 4 #3251 audit-table templates)", () => {
+  it("the remaining inline count is 239 (297 surveyed − 53 P6b − 16 P6c + 2 #4507 dedupe reads + 1 #5235 listAllWithDetail read + 4 #3251 audit-table templates + 4 #5175 slice 2 run-registry statements)", () => {
     let write = 0;
     let read = 0;
     for (const file of doFiles()) {
@@ -201,9 +204,9 @@ describe("DO mechanism mix (#4385)", () => {
       write += counts.write;
       read += counts.read;
     }
-    expect(write).toBe(112);
-    expect(read).toBe(123);
-    expect(write + read).toBe(235);
+    expect(write).toBe(114);
+    expect(read).toBe(125);
+    expect(write + read).toBe(239);
   });
 
   it("the named exemptions hold their recorded counts, with reasons", () => {

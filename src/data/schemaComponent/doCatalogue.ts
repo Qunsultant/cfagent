@@ -3,14 +3,14 @@
  * home for statement text.
  *
  * The catalogue is the DO plane's single home for statement
- * text; the 49 DO adapters and the two schema-marker modules
+ * text; the 50 DO adapters and the two schema-marker modules
  * assemble their DDL from its codes and remain the executors
  * (delegation, not absorption). The DO execution idiom is
  * unchanged: `this.sql.exec(...)` against the DO SqlStorage
  * handle, with the catalogue statement as the argument.
  *
  * Scope (measured from the base tree b3062e2e, not the filing
- * counts): 103 statements — 66 table statements, 36 index
+ * counts): 107 statements — 69 table statements, 37 index
  * statements, 1 unique-index statement. The filing's "76
  * TABLE / 35 INDEX" is a grep count: 9 of the 77 TABLE lines
  * are comment mentions (one per file, see the build report),
@@ -674,6 +674,40 @@ export const DO_CATALOGUE_ENTRIES: CatalogueEntry[] = [
     kind: "schema",
     form: "parameterized",
     parameters: ["TABLE"],
+  },
+  {
+    // Issue #5175 slice 2: the run registry. One row per run,
+    // canonical run id as PK; family / job_kind / trigger record
+    // the why (§5: what / which / when is in the id, why is in
+    // the row). Legacy ids are never rows here — they live in
+    // mas_run_aliases, mapped to their canonical run.
+    code: "schema.do.mas_run_aliases.create_table",
+    plane: "do",
+    table: "mas_run_aliases",
+    statement: `
+      CREATE TABLE IF NOT EXISTS mas_run_aliases (
+    alias TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    // Issue #5175 slice 2: the run registry (see above).
+    code: "schema.do.mas_runs.create_table",
+    plane: "do",
+    table: "mas_runs",
+    statement: `
+      CREATE TABLE IF NOT EXISTS mas_runs (
+    run_id TEXT PRIMARY KEY,
+    family TEXT,
+    job_kind TEXT,
+    trigger TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`,
+    kind: "schema",
+    form: "literal",
   },
   {
     code: "schema.do.mas_scenarios.create_table",
@@ -1375,6 +1409,17 @@ export const DO_CATALOGUE_ENTRIES: CatalogueEntry[] = [
     kind: "schema",
     form: "parameterized",
     parameters: ["TABLE"],
+  },
+  {
+    // Issue #5175 slice 2: the alias reverse lookup — list the
+    // aliases of one run without scanning the alias table.
+    code: "schema.index.mas_run_aliases.create_index_idx_mas_run_aliases_run_id",
+    plane: "index",
+    table: "mas_run_aliases",
+    index: "idx_mas_run_aliases_run_id",
+    statement: `CREATE INDEX IF NOT EXISTS idx_mas_run_aliases_run_id ON mas_run_aliases (run_id)`,
+    kind: "schema",
+    form: "literal",
   },
   {
     code: "schema.index.mas_scenarios.create_index_idx_mas_scenarios_user_goal",

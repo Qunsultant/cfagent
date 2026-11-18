@@ -546,6 +546,9 @@ const PORTED_TABLES = [
   "mas_strategy_gates", "mas_strategy_bank_proposals", "mas_adaptation_audit",
   // step 4a (#2358)
   "mas_async_jobs",
+  // #5175 slice 2 (the run registry: canonical run rows + legacy
+  // aliases — the resolution half of the one id authority)
+  "mas_runs", "mas_run_aliases",
   // step 4d (#2359)
   "mas_autopilot", "mas_policy_verdicts", "mas_report_confirmations",
   "mas_screener_presets", "usage_events",
@@ -655,6 +658,8 @@ const PORTED_TABLE_WRITERS: Record<string, { layer: string[]; bypass?: Record<st
   mas_strategy_bank_proposals: { layer: ["src/data/doSqliteReselectionAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"] },
   mas_adaptation_audit: { layer: ["src/data/doSqliteAdaptationAuditAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"] },
   mas_async_jobs: { layer: ["src/data/doSqliteAsyncJobAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"] },
+  mas_runs: { layer: ["src/data/doSqliteRunRegistryAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"] },
+  mas_run_aliases: { layer: ["src/data/doSqliteRunRegistryAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"] },
   mas_autopilot: { layer: ["src/data/doSqliteAutopilotStateAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"] },
   mas_policy_verdicts: { layer: ["src/data/doSqlitePolicyVerdictAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"] },
   mas_report_confirmations: { layer: ["src/data/doSqliteReportConfirmationAdapter.ts", "src/data/schemaComponent/doCatalogue.ts"] },
