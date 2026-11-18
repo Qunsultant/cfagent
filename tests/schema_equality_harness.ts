@@ -10,7 +10,7 @@
  * test harness has no real SQLite).
  *
  * Combined catalogue: D1 + DO + ORM + remainder entries in plane
- * order, 401 entries, resolving to 412 statements (the mas_reports
+ * order, 414 entries, resolving to 425 statements (the mas_reports
  * generic ALTER expands to 11 pairs, the confirmations generic ALTER
  * to 2 — the pairs come from the frozen P3 base captures, the same
  * ground truth the P3 suite uses).
@@ -67,8 +67,9 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 /** sha256 of tests/schema_component_combined_expected_model.json as seeded. */
 /** Issue #5229 (migration 0069) re-seeds it: agent_referral_rules gains expiry_period_ms. */
+/** Issue #5175 slice 2 re-seeds it: mas_runs + mas_run_aliases + 1 index. */
 export const COMBINED_FIXTURE_SHA256 =
-  "b8518fc3cb845588efd74e4ced0684c675726754873565fe9acfcc28bc82c937";
+  "6ef03d72971a3b2bbf031fb74c5239dbf7acbcc600f7d473462978960095e92e";
 
 /** All four planes' entries in plane order: D1, DO, ORM, remainder. */
 export const COMBINED_CATALOGUE_ENTRIES: CatalogueEntry[] = [

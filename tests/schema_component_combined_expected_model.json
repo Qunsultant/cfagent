@@ -7464,6 +7464,56 @@
       ],
       "constraints": {}
     },
+    "mas_run_aliases": {
+      "columns": [
+        {
+          "name": "alias",
+          "type": "TEXT",
+          "pk": 1
+        },
+        {
+          "name": "run_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "pk": 0
+        }
+      ],
+      "constraints": {}
+    },
+    "mas_runs": {
+      "columns": [
+        {
+          "name": "run_id",
+          "type": "TEXT",
+          "pk": 1
+        },
+        {
+          "name": "family",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "job_kind",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "trigger",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "pk": 0
+        }
+      ],
+      "constraints": {}
+    },
     "mas_scenarios": {
       "columns": [
         {
@@ -9818,6 +9868,13 @@
       "table": "mas_reports",
       "columns": [
         "user_login"
+      ],
+      "unique": false
+    },
+    "idx_mas_run_aliases_run_id": {
+      "table": "mas_run_aliases",
+      "columns": [
+        "run_id"
       ],
       "unique": false
     },

@@ -12,6 +12,7 @@
  */
 import { ensureSharedTable, ensurePromotionsIndex, ensureTransactionTenantColumn } from "../../orm/schema";
 import { ensureAsyncJobTables } from "./asyncJobs";
+import { createRunRegistryPorts } from "../../data/createRunRegistryPorts";
 import { ensureMasRetentionIndexes } from "../../services/masRetentionIndexes";
 import { createOrchestratorTablePorts } from "../../data/createOrchestratorTablePorts";
 import { createOrmPorts } from "../../data/createOrmPorts";
@@ -34,6 +35,13 @@ export function ensureOrchestratorTables(sql: SqlStorage): SqlStorage {
   // migration (issue #1123: parent/sub-job tracking columns,
   // additive).
   ensureAsyncJobTables(sql);
+  // Issue #5175 slice 2: the run registry's DDL lives behind
+  // the registry record port (one owner per table, ADR 0022 D-A),
+  // co-located with the async-job tables — queue receipts
+  // reference run ids, and the registry must be reachable from
+  // the same DO handle. This one call runs the family's whole
+  // schema ensure: both tables + the alias reverse-lookup index.
+  createRunRegistryPorts(sql).record.ensureSchema();
   ensureSharedTable(sql, "mas_events");
   // Issue #2280 (slice 3): the nightly retention batches' covering indexes.
   // Both tables exist by now (mas_messages above, mas_events just created),

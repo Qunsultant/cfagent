@@ -396,6 +396,16 @@
       ]
     },
     {
+      "adapter": "DoSqliteRunRegistryStore",
+      "file": "doSqliteRunRegistryAdapter.ts",
+      "trigger": "ensureSchema()",
+      "queries": [
+        "\n      CREATE TABLE IF NOT EXISTS mas_runs (\n    run_id TEXT PRIMARY KEY,\n    family TEXT,\n    job_kind TEXT,\n    trigger TEXT,\n    created_at TEXT NOT NULL DEFAULT (datetime('now'))\n  )",
+        "\n      CREATE TABLE IF NOT EXISTS mas_run_aliases (\n    alias TEXT PRIMARY KEY,\n    run_id TEXT NOT NULL,\n    created_at TEXT NOT NULL DEFAULT (datetime('now'))\n  )",
+        "CREATE INDEX IF NOT EXISTS idx_mas_run_aliases_run_id ON mas_run_aliases (run_id)"
+      ]
+    },
+    {
       "adapter": "SqlScanRunStore",
       "file": "doSqliteScanRunAdapter.ts",
       "trigger": "ensure() [private]",
