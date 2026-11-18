@@ -175,17 +175,24 @@ export function registerResearchSteps(
  * always registered in `createPipelineStepRegistry`.
  */
 export function createDefaultResearchStepDeps(
-  overrides: Partial<ResearchStepDeps> = {},
+  overrides: Partial<ResearchStepDeps> & { allowTestStub?: boolean } = {},
 ): ResearchStepDeps {
   return {
     runOodaAnalysis:
       overrides.runOodaAnalysis ??
-      (async (ctx) => ({
-        ok: true,
-        runId: ctx.runId,
-        userLogin: ctx.userLogin,
-        trigger: ctx.trigger,
-      })),
+      (async (ctx) => {
+        if (!overrides.allowTestStub) {
+          throw new Error(
+            `FAILURE_RESEARCH_DEPS_MISSING: analyze.ooda for ${ctx.runId} requires explicit production researchDeps.`,
+          );
+        }
+        return {
+          ok: true,
+          runId: ctx.runId,
+          userLogin: ctx.userLogin,
+          trigger: ctx.trigger,
+        };
+      }),
     ...(overrides.runEvaluateStage ? { runEvaluateStage: overrides.runEvaluateStage } : {}),
     ...(overrides.evaluationStore ? { evaluationStore: overrides.evaluationStore } : {}),
   };

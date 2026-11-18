@@ -324,6 +324,8 @@ export interface ExecuteResearchStageControlInput extends ControlResearchStageIn
   stores?: JobPipelineDeps["stores"];
   runRecorder?: JobRunRecorder;
   researchDeps?: ResearchStepDeps;
+  /** Test-only fence (#5287): never set in production callers. */
+  allowTestStub?: boolean;
 }
 
 export interface ExecuteResearchStageControlResult {
@@ -351,13 +353,29 @@ export async function executeResearchStageControl(
   const validated = controlResearchStage(input);
   const { storageMode, ephemeralFallback, ephemeralReason, stores, runRecorder } =
     resolveResearchEngineAdapters(input);
+  const needsExecution =
+    validated.op === "run" || validated.op === "rerun" || validated.op === "resume";
+  const isVitest =
+    typeof process !== "undefined" && Boolean(process.env?.VITEST) && input.allowTestStub !== false;
+  if (needsExecution && !input.researchDeps && !input.allowTestStub && !isVitest) {
+    throw new Error(
+      `FAILURE_RESEARCH_DEPS_MISSING: stage control "${validated.op}" on ${validated.engineJobId} requires explicit researchDeps.`,
+    );
+  }
   const deps: ResearchStepDeps = input.researchDeps ?? {
-    runOodaAnalysis: async (ctx) => ({
-      ok: true,
-      runId: ctx.runId,
-      stageId: validated.stageId,
-      userLogin: ctx.userLogin,
-    }),
+    runOodaAnalysis: async (ctx) => {
+      if (!input.allowTestStub && !isVitest) {
+        throw new Error(
+          `FAILURE_RESEARCH_DEPS_MISSING: analyze.ooda on ${ctx.runId} requires explicit researchDeps.`,
+        );
+      }
+      return {
+        ok: true,
+        runId: ctx.runId,
+        stageId: validated.stageId,
+        userLogin: ctx.userLogin,
+      };
+    },
   };
   const control = new JobPipelineControl({
     stores,

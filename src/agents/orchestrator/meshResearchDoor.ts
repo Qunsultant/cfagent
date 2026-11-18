@@ -20,6 +20,7 @@ import { RESEARCH_PIPELINE_STAGES, type ResearchPipelineStage } from "../../work
 import {
   controlResearchStage,
   dispatchResearchEngineRun,
+  executeResearchStageControl,
 } from "../../workflows/researchScreenEngine";
 
 export interface ResearchDeliverGateResult {
@@ -153,6 +154,85 @@ export function runAgentComposedResearchViaDoor(input: {
       userLogin: login,
     });
   });
+
+  return {
+    mode: "agent_composed" as const,
+    runId: input.runId,
+    deliverGate,
+    stageResults,
+  };
+}
+
+/**
+ * Production async agent-composed door path (#5287): executes real
+ * `executeResearchStageControl` operations with explicit `researchDeps` and
+ * durable store threading (unlike the synchronous validation-only planner above).
+ */
+export async function executeAgentComposedResearchViaDoor(input: {
+  actingLogin: string | undefined;
+  runId: string;
+  stages?: readonly ResearchPipelineStage[];
+  hitlHold?: boolean;
+  approved?: boolean;
+  sql?: SqlStorage;
+  d1?: D1Database;
+  stores?: JobPipelineDeps["stores"];
+  runRecorder?: JobRunRecorder;
+  env?: Record<string, string | undefined>;
+  storageMode?: ResearchStorageMode;
+  researchDeps: ResearchStepDeps;
+}) {
+  const login = input.actingLogin?.trim() || "";
+  if (!login || login === "default") {
+    throw new Error(codedMessage("FAILURE_RESEARCH_OWNER_MISSING"));
+  }
+
+  const selectedStages = input.stages?.length ? input.stages : RESEARCH_PIPELINE_STAGES;
+  const deliverGate = evaluateResearchDeliverHitlGate({
+    hitlHold: Boolean(input.hitlHold),
+    approved: input.approved,
+  });
+
+  const stageResults = [];
+  for (const stageId of selectedStages) {
+    if (stageId === "deliver" && deliverGate.gateStatus === "held_for_approval") {
+      stageResults.push(
+        await executeResearchStageControl({
+          runId: input.runId,
+          stageId,
+          op: "stop",
+          userLogin: login,
+          ...(input.sql ? { sql: input.sql } : {}),
+          ...(input.d1 ? { d1: input.d1 } : {}),
+          ...(input.stores ? { stores: input.stores } : {}),
+          ...(input.runRecorder ? { runRecorder: input.runRecorder } : {}),
+          ...(input.env ? { env: input.env } : {}),
+          ...(input.storageMode ? { storageMode: input.storageMode } : {}),
+          researchDeps: input.researchDeps,
+        }).catch(() => ({
+          stageId,
+          op: "stop" as const,
+          gateStatus: deliverGate.gateStatus,
+        })),
+      );
+      continue;
+    }
+    stageResults.push(
+      await executeResearchStageControl({
+        runId: input.runId,
+        stageId,
+        op: "run",
+        userLogin: login,
+        ...(input.sql ? { sql: input.sql } : {}),
+        ...(input.d1 ? { d1: input.d1 } : {}),
+        ...(input.stores ? { stores: input.stores } : {}),
+        ...(input.runRecorder ? { runRecorder: input.runRecorder } : {}),
+        ...(input.env ? { env: input.env } : {}),
+        ...(input.storageMode ? { storageMode: input.storageMode } : {}),
+        researchDeps: input.researchDeps,
+      }),
+    );
+  }
 
   return {
     mode: "agent_composed" as const,
