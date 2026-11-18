@@ -25,7 +25,7 @@
  * - S2-P06 ledger helpers: merge (newest-first, legacy normalized),
  *   filter (schedule / run), null linkage renders as "—".
  * - S2-P07 queue gate probe: the 403/Forbidden refusal test.
- * - S2-P08 wiring pins: the home renders the six views, the queue
+ * - S2-P08 wiring pins: the home renders the seven views, the queue
  *   view probes before mounting, the focus prop exists, the redirect
  *   runs in the shell, the admin deep links land on the home.
  * - S2-P09 ledger panel: a legacy row (no linkage) and a linked row
@@ -33,7 +33,7 @@
  *   as "—" and its trigger as "unknown".
  * - S2-P10 queue view: a 403 overview probe shows the denied state
  *   and never mounts the wipe panel; a passing probe mounts it.
- * - S2-P11 home: the six tabs render, list is the default, the run
+ * - S2-P11 home: the seven tabs render, list is the default, the run
  *   ledger view loads over the S1 ledger.
  * - S2-P12 schedule deep link: `focusScheduleId` opens the detail
  *   dialog for a listed schedule and reports a missing id.
@@ -131,8 +131,8 @@ describe("S2-P01 sub-route parsing — view ids, ledger alias, deep links (#3121
     expect(parseSchedulesDeepLink("?tab=schedules&schedule=  ").scheduleId).toBeNull();
   });
 
-  it("the view vocabulary is exactly the six home views", () => {
-    expect([...SCHEDULES_HOME_VIEWS]).toEqual(["list", "runs", "goals", "queue", "background-tasks", "dead-letter-queue"]);
+  it("the view vocabulary is exactly the seven home views", () => {
+    expect([...SCHEDULES_HOME_VIEWS]).toEqual(["list", "runs", "goals", "queue", "background-tasks", "dead-letter-queue", "flags"]);
     expect(SCHEDULES_HOME_TAB).toBe("schedules");
     expect(isSchedulesHomeView("ledger")).toBe(false);
     expect(normalizeSchedulesHomeView("ledger")).toBe("runs");
@@ -376,7 +376,7 @@ describe("S2-P07 queue gate probe — the 403/Forbidden refusal test (#3121)", (
 });
 
 describe("S2-P08 wiring pins — the home, the gate, the focus, the redirect (#3121)", () => {
-  it("the home renders all six views through the ui primitives", () => {
+  it("the home renders all seven views through the ui primitives", () => {
     const home = read("src/client/SchedulesHome.tsx");
     expect(home).toContain("<SchedulesPanel");
     expect(home).toContain("<ScheduleRunLedgerPanel");
@@ -598,8 +598,8 @@ describe("S2-P10 queue view — denied without the probe, mounted with it (#3121
   });
 });
 
-describe("S2-P11 home — six tabs, list default, ledger view loads (#3121)", () => {
-  it("renders the six view tabs and the list view by default", async () => {
+describe("S2-P11 home — seven tabs, list default, ledger view loads (#3121)", () => {
+  it("renders the seven view tabs and the list view by default", async () => {
     fetchStub((url) => {
       if (url === "/api/schedules") return { status: 200, body: { schedules: [] } };
       return null;
@@ -613,7 +613,7 @@ describe("S2-P11 home — six tabs, list default, ledger view loads (#3121)", ()
     const tabs = Array.from(container.querySelectorAll('[role="tab"]')).map(
       (t) => t.textContent ?? "",
     );
-    expect(tabs).toEqual(["Schedules", "Run ledger", "Goal schedules", "Queue", "Background Tasks", "Dead-letter queue"]);
+    expect(tabs).toEqual(["Schedules", "Run ledger", "Goal schedules", "Queue", "Background Tasks", "Dead-letter queue", "Flags"]);
     expect(container.textContent).toContain("The one scheduling surface");
   });
 
