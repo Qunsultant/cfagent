@@ -65,9 +65,11 @@ import {
 import {
   COPILOT_RSI_MODE_SETTING_KEY,
   resolveStockCopilotRsiMode,
+  resolveStockCopilotRsiModeState,
   isStockCopilotRsiMode,
   type StockCopilotRsiMode,
 } from "../../services/stockCopilotRsiMode";
+import { isSelfRsiPipelineImplemented, selfRsiModeNotice } from "../../services/stockCopilotRsiCapabilities";
 import {
   COPILOT_UNIVERSE_SETTING_KEY,
   COPILOT_STRATEGIES_SETTING_KEY,
@@ -218,6 +220,8 @@ export interface StockCopilotControlResult {
   copilotExecutionMode: CopilotChatExecutionMode;
   autopilot: StockCopilotAutopilotSnapshot;
   rsiMode: StockCopilotRsiMode;
+  /** #5056: why a requested `self` mode is not in effect (absent when honoured). */
+  rsiModeNotice?: string;
   universe: string[];
   universePreset: string | null;
   strategies: string[];
@@ -490,10 +494,13 @@ export async function getStockCopilotStatusViaDoor(
     readSettingRaw: ctx.readSettingRaw,
     env: ctx.env,
   });
-  const rsiMode = resolveStockCopilotRsiMode({
+  // #5056: the status reports the mode in effect and, when the operator asked
+  // for the specified-only `self` pipeline, the one notice explaining the gate.
+  const rsiModeState = resolveStockCopilotRsiModeState({
     readSettingRaw: ctx.readSettingRaw,
     env: ctx.env,
   });
+  const rsiMode = rsiModeState.effective;
   const autopilot = readDoorAutopilotSnapshot(ctx.sql);
   const copilotExecutionMode = resolveCopilotChatExecutionMode({
     readSettingRaw: ctx.readSettingRaw,
@@ -516,6 +523,7 @@ export async function getStockCopilotStatusViaDoor(
     copilotExecutionMode,
     autopilot,
     rsiMode,
+    ...(rsiModeState.notice ? { rsiModeNotice: rsiModeState.notice } : {}),
     universe,
     // #3936: the preset comes from the resolution, not from matching the
     // symbol array — a stored 100-member list never equals a preset array,
@@ -554,6 +562,8 @@ export async function controlStockCopilotViaDoor(
   control.ensureSchema();
 
   let nowIso = new Date().toISOString();
+  /** #5056: set when a control write is refused by the capability gate. */
+  let rsiModeNotice: string | undefined;
 
   if (typeof input.paused === "boolean") {
     control.setControl({
@@ -674,17 +684,29 @@ export async function controlStockCopilotViaDoor(
   }
 
   if (typeof input.rsiMode === "string" && isStockCopilotRsiMode(input.rsiMode)) {
-    if (!ctx.writeSetting) {
-      throw new MeshDoorError(
-        "door_unavailable",
-        "Cannot update RSI mode: writeSetting is not configured on this door context.",
-      );
+    if (input.rsiMode === "self" && !isSelfRsiPipelineImplemented()) {
+      // #5056: the mode switch must not persist a mode that enables nothing.
+      // Refuse the write, keep the current mode, and say why; the audit line
+      // records the refusal so the attempt is traceable.
+      rsiModeNotice = selfRsiModeNotice();
+      ctx.audit?.("stock_copilot.control_rsi_mode_rejected", "orchestrator", {
+        userLogin: login,
+        requested: input.rsiMode,
+        reason: "self_rsi_pipeline_specified_only",
+      });
+    } else {
+      if (!ctx.writeSetting) {
+        throw new MeshDoorError(
+          "door_unavailable",
+          "Cannot update RSI mode: writeSetting is not configured on this door context.",
+        );
+      }
+      ctx.writeSetting(COPILOT_RSI_MODE_SETTING_KEY, input.rsiMode);
+      ctx.audit?.("stock_copilot.control_rsi_mode_via_door", "orchestrator", {
+        userLogin: login,
+        rsiMode: input.rsiMode,
+      });
     }
-    ctx.writeSetting(COPILOT_RSI_MODE_SETTING_KEY, input.rsiMode);
-    ctx.audit?.("stock_copilot.control_rsi_mode_via_door", "orchestrator", {
-      userLogin: login,
-      rsiMode: input.rsiMode,
-    });
   }
 
   if (typeof input.autopilotRunning === "boolean") {
@@ -761,10 +783,11 @@ export async function controlStockCopilotViaDoor(
     readSettingRaw: ctx.readSettingRaw,
     env: ctx.env,
   });
-  const rsiMode = resolveStockCopilotRsiMode({
+  const rsiModeState = resolveStockCopilotRsiModeState({
     readSettingRaw: ctx.readSettingRaw,
     env: ctx.env,
   });
+  const rsiMode = rsiModeState.effective;
   // Issue #3936: report the resolution the cycle runs, not the sync preset.
   const universeResolution = await resolveCopilotUniverseFull({
     readSettingRaw: ctx.readSettingRaw,
@@ -798,6 +821,9 @@ export async function controlStockCopilotViaDoor(
     copilotExecutionMode,
     autopilot,
     rsiMode,
+    ...(rsiModeNotice ?? rsiModeState.notice
+      ? { rsiModeNotice: rsiModeNotice ?? rsiModeState.notice ?? undefined }
+      : {}),
     universe,
     universePreset: universeResolution.preset,
     universeSource: universeResolution.source,

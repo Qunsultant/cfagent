@@ -54,6 +54,7 @@ import {
 } from "./stockCopilotLedger";
 import {
   resolveStockCopilotRsiMode,
+  resolveStockCopilotRsiModeState,
   type StockCopilotRsiMode,
 } from "./stockCopilotRsiMode";
 
@@ -116,6 +117,10 @@ export interface StockCopilotIntrospectionResult {
     universeFallbackReason?: string | null;
     strategies: readonly string[];
     rsiMode: StockCopilotRsiMode;
+    /** #5056: what the operator asked for, when the capability gate differs. */
+    rsiModeRequested?: StockCopilotRsiMode;
+    /** #5056: why `self` is not in effect (null when honoured). */
+    rsiModeNotice?: string | null;
     paused: boolean;
     pauseUntil: string | null;
   };
@@ -434,7 +439,10 @@ export async function introspectStockCopilot(
   const universe = universeResolution?.symbols ?? resolveCopilotUniverse({ readSettingRaw, env });
   const universePreset = universeResolution?.preset ?? resolveCopilotUniversePreset(universe);
   const strategies = resolveCopilotStrategies({ readSettingRaw, env });
-  const rsiMode = resolveStockCopilotRsiMode({ readSettingRaw, env });
+  // #5056: the gate lives in stockCopilotRsiMode; every surface reads its state
+  // so a specified-only `self` is never reported as the mode in effect.
+  const rsiModeState = resolveStockCopilotRsiModeState({ readSettingRaw, env });
+  const rsiMode = rsiModeState.effective;
 
   const control = controlPort.getControl(userLogin);
   const paused = control?.paused === true;
@@ -524,7 +532,10 @@ export async function introspectStockCopilot(
     `- **Cycle Cadence:** Configured as \`${cadence.configured}\` (Effective: \`${cadence.effective}\`).`,
     `- **Monitored Universe:** ${universePreset ? `\`${universePreset}\` (${universe.map((s) => `\`${s}\``).join(", ")})` : universe.map((s) => `\`${s}\``).join(", ")}.`,
     `- **Active Strategies:** ${strategies.map((s) => `\`${s}\``).join(", ")}.`,
-    `- **RSI Self-Improvement Mode:** \`${rsiMode.toUpperCase()}\` (${rsiMode === "governed" ? "Governed Mode [DEFAULT]: Capability proposals requiring code changes are formatted and published as GitHub issues for the agentic team (#ceo-aimp)" : "Self-RSI Mode: Improvements are developed and backtested autonomously via SandboxAgent upon approval"}).`,
+    `- **RSI Self-Improvement Mode:** \`${rsiMode.toUpperCase()}\` (${rsiMode === "governed" ? "Governed Mode [DEFAULT]: Capability proposals requiring code changes are formatted and published as GitHub issues for the agentic team (#ceo-aimp)" : "Self-RSI Mode: the §7 sandbox-synthesis pipeline (research → synthesis → backtest → StrategyCard → activation)"}).`,
+    rsiModeState.notice
+      ? `- **RSI Mode Notice:** ⚠️ Requested \`${rsiModeState.requested.toUpperCase()}\` — ${rsiModeState.notice}`
+      : "",
     `- **Execution State:** ${paused ? "⏸️ Paused (bracket exits active, new entries halted)" : "▶️ Active and running"}.`,
     ``,
     `---`,
@@ -552,7 +563,7 @@ export async function introspectStockCopilot(
     `---`,
     ``,
     `## 4. Recursive Self-Improvement (RSI) & Capability Gap Proposals`,
-    `Stock Copilot analyzed its telemetry, risk bounds, and tool set to formulate the following self-improvement proposals (Current Mode: **${rsiMode.toUpperCase()}**):`,
+    `Stock Copilot analyzed its telemetry, risk bounds, and tool set to formulate the following self-improvement proposals (Current Mode: **${rsiMode.toUpperCase()}**${rsiModeState.requested !== rsiMode ? ` — requested **${rsiModeState.requested.toUpperCase()}**, gated to governed` : ""}):`,
     ``,
     ...capabilityProposals.flatMap((p) => [
       `### 💡 ${p.title} *[${p.readiness.toUpperCase()}]*`,
@@ -596,6 +607,8 @@ export async function introspectStockCopilot(
         : {}),
       strategies,
       rsiMode,
+      rsiModeRequested: rsiModeState.requested,
+      rsiModeNotice: rsiModeState.notice,
       paused,
       pauseUntil,
     },

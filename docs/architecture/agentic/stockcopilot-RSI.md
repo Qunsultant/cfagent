@@ -101,7 +101,7 @@ flowchart TB
 | :--- | :--- | :--- | :--- |
 | **`screenerAgent`** | Domain | `src/agents/orchestrator/meshScreenerDoor.ts` | Dynamically scans market universe for high-volume, breakout symbols when static universe stagnates. |
 | **`cvarRiskGate`** | Domain | `src/services/cvarRiskEngine.ts` | Evaluates tail drawdown; proposes automated protective put/collar hedging to Options Copilot. |
-| **`patternSignals`** | Domain | `src/services/patternCatalog.ts` | Expands technical strategy catalog beyond SMA/RSI (e.g., Head & Shoulders, Bull Flag, VWAP Reversion). |
+| **`patternSignals`** | Domain | `src/services/patternSignals.ts` | Expands technical strategy catalog beyond SMA/RSI (e.g., Head & Shoulders, Bull Flag, VWAP Reversion). |
 | **`browserAgent`** | Platform | S9 Issue [#3493](https://github.com/Qunsultant/cfagent/issues/3493) | Navigates web and quant documentation (SSRN, arXiv, GitHub quant repos) to extract strategy formulas. |
 | **`sandboxAgent`** | Platform | S8 Issue [#3492](https://github.com/Qunsultant/cfagent/issues/3492) | Compiles and executes synthesized TypeScript/Python quant strategies in isolated V8 sandbox environments. |
 | **`thinkWorkflow`** | Platform | S5 Issue [#3453](https://github.com/Qunsultant/cfagent/issues/3453) | Runs multi-turn Monte Carlo and historical backtest passes against historical market bars before live code promotion. |
@@ -212,6 +212,22 @@ graph LR
 ---
 
 ## 7. Concrete Tool Synthesis Workflow: Sandboxed Code Generation
+
+> **Status (2026-11-18): specified, not implemented.** No `synthesizeStrategy` or
+> `StrategyCard` symbol exists in `src/`; `SandboxAgent` is a container-command
+> runner with no strategy-code synthesis (`src/agents/sandbox-agent.ts:108-110`);
+> there is no backtest-to-card seam and no 1-click activation seam for a
+> synthesized card. The diagram below is the target design, not current
+> behaviour.
+>
+> The `self` mode switch is therefore gated rather than offered as a working
+> mode (#5056): `resolveStockCopilotRsiModeState` reports a `self` request but
+> keeps `governed` in effect with one notice, and a door write of `self` is
+> refused rather than persisted. The single statement of implementation state
+> is `STOCK_COPILOT_RSI_CAPABILITIES` in
+> `src/services/stockCopilotRsiCapabilities.ts` — moving
+> `self_rsi_pipeline` to `implemented` there is what re-enables the mode once
+> the pipeline lands.
 
 When operating under **Self-RSI Mode** (`"self"`), code generation and strategy adaptation follow a strict 4-step sandboxed verification pipeline:
 
