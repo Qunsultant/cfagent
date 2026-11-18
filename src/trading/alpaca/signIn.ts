@@ -13,6 +13,13 @@
  * writing the pair into the env first would invert verify-before-store.
  */
 import { codedMessage } from "../../outcomes/outcomeAspects";
+import { createStructuredLogger } from "../../observability/structuredLogger";
+import { createObservabilitySink } from "../../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "trading/alpaca/signIn",
+});
 
 /** The three outcomes a sign-in attempt can have. */
 export type AlpacaVerifyOutcome =
@@ -49,14 +56,10 @@ export async function verifyAlpacaAccount(input: {
     });
   } catch (error) {
     // Technical detail stays here; the caller maps the reason to an outcome code.
-    console.error(
-      JSON.stringify({
-        component: "alpacaSignIn",
-        event: "verify_unreachable",
-        reason: error instanceof Error ? error.message : String(error),
-        timestamp: new Date().toISOString(),
-      }),
-    );
+    structuredLog.error("alpacaSignIn.verify_unreachable", {
+      message: "Alpaca sign-in verification unreachable",
+      error: error instanceof Error ? error.message : String(error),
+    });
     return { ok: false, reason: "unavailable" };
   }
 
@@ -69,19 +72,15 @@ export async function verifyAlpacaAccount(input: {
   }
 
   // Status only: the body may be HTML, and it never travels further than this line.
-  console.error(
-    JSON.stringify({
-      component: "alpacaSignIn",
-      event: "verify_refused",
-      httpStatus: response.status,
-      detail: codedMessage(
-        REJECTED_STATUSES.has(response.status)
-          ? "FAILURE_ALPACA_SIGNIN_REJECTED"
-          : "FAILURE_ALPACA_UPSTREAM",
-      ),
-      timestamp: new Date().toISOString(),
-    }),
-  );
+  structuredLog.error("alpacaSignIn.verify_refused", {
+    message: "Alpaca sign-in verification refused",
+    httpStatus: response.status,
+    detail: codedMessage(
+      REJECTED_STATUSES.has(response.status)
+        ? "FAILURE_ALPACA_SIGNIN_REJECTED"
+        : "FAILURE_ALPACA_UPSTREAM",
+    ),
+  });
 
   return {
     ok: false,

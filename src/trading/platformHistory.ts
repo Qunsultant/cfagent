@@ -55,6 +55,13 @@ import {
   type YahooDailyBar,
   type YahooTechnicals,
 } from "./technicals";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "trading/platformHistory",
+});
 
 /**
  * Bars requested per symbol. The old path fetched the configured
@@ -294,7 +301,10 @@ export async function resolveYahooHistoryDeps(args: {
     const provider = await resolveYahooHistoryProvider(args);
     return bindYahooHistoryDeps(provider, { runId: args.runId, userLogin: args.userLogin });
   } catch (err) {
-    console.warn("[platformHistory] History resolution failed — technicals degrade to null:", err);
+    structuredLog.warn("platformHistory.history_resolution_failed", {
+      message: "[platformHistory] History resolution failed — technicals degrade to null",
+      error: err instanceof Error ? err.message : String(err),
+    });
     return undefined;
   }
 }
