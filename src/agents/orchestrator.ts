@@ -29,6 +29,7 @@ import { LLMJudge } from "./judge";
 import { recordTurnEvaluation } from "../services/judgeScoreFeedback";
 import { rememberTurnOutcome } from "../services/vectorTurnMemory";
 import { runDailyMemoryConsolidation } from "../services/memoryConsolidation";
+import { runDailyMemoryConsolidation } from "../services/memoryConsolidation";
 import { planNLQ, executeNLQQuery, executeNLQQueryAsync, type NLQSchedulingPort, type NLQSocialBriefPort, type NLQStockScreenPort } from "./nlq";
 import { resolveErrorAspect, AgentErrorCode } from "../aspects/errorCodes";
 import { logAspectEvent } from "../aspects/loggingAspect";

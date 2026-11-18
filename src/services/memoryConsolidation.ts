@@ -275,6 +275,35 @@ export async function consolidateMemory(
   return report;
 }
 
+/**
+ * Turn-hook entry point: run the consolidation when the daily guard allows
+ * it. One call from the orchestrator — the agent class carries the decision
+ * to call, not the policy, guard, report and failure logging.
+ * Never throws.
+ */
+export async function runDailyMemoryConsolidation(params: {
+  env: Env | undefined | null;
+  sql: any;
+  memory: { listRecent(limit: number): ConsolidationFact[] };
+  vectorRemember?: (summary: string) => Promise<void>;
+  now?: () => Date;
+}): Promise<MemoryConsolidationReport | null> {
+  const policy = resolveMemoryConsolidationPolicy(params.env);
+  const now = (params.now ?? (() => new Date()))();
+  if (!shouldConsolidate(params.sql, policy, now)) return null;
+  const report = await consolidateMemory(
+    {
+      memory: params.memory,
+      sql: params.sql,
+      vectorRemember: params.vectorRemember,
+      now: () => now,
+    },
+    policy,
+  );
+  recordConsolidationRun(params.sql, report);
+  return report;
+}
+
 /** Record the run so the daily guard sees it. Best-effort. */
 export function recordConsolidationRun(
   sql: any,
