@@ -12,13 +12,9 @@
  * adapters keep their `prepare(...).run()` / `.bind().run()`
  * shape with the catalogue statement as the argument.
  *
- * Scope (re-measured on the base tree dd6df86a, not the filing
- * counts): 51 entries — 8 table statements, 2 index statements,
- * 39 reconciliation statements, 1 drop statement, 1 seed-form
- * entry. The filing's "~26 statements across ~17 files" was a
- * grep count: the 95 ALTER lines the census named are 39
- * distinct reconciliation statements (the rest are the same
- * statement executed once per trigger, or prose mentions), and
+ * Scope: 57 entries (reconciled from the historical dd6df86a baseline of
+ * 51 entries as subsequent migrations/reconciliations landed). The pin
+ * tests (`tests/schema_component_*`) are the live source of truth.
  * 6 D1-adapter tables delegate to entries that already exist
  * (mas_index_lists in the DO catalogue; quote_source_setting and
  * the three resource tables in the D1 catalogue).

@@ -9,16 +9,11 @@
  * index-schema modules assemble their DDL from the codes here and
  * remain the executors — delegation, not absorption.
  *
- * Contents (measured from the base helpers at 4161aaad, before the
- * delegation): 22 statements — 12 CREATE TABLE (7 shared + 5
- * ORM-only), 2 ALTER TABLE (the mas_events audit-chain columns),
- * 8 CREATE INDEX (3 framework-queue + 3 retention + 1
- * unified-schedule + 1 job-run-record). The filing said "~15
- * statements (7 + 5 real TABLE, 12 INDEX)"; the re-measurement
- * corrects it: the 12 INDEX is a grep count (4 of the 12 lines are
- * comment mentions — the executable count is 8), and the filing
- * never counted the 2 audit-chain ALTERs that
- * ensureAuditChainColumns executes.
+ * Contents: 26 statements — 13 CREATE TABLE, 3 ALTER TABLE, and 10
+ * CREATE [UNIQUE] INDEX. The pin tests (`tests/schema_component_*`) are
+ * the live source of truth for exact entry membership. (Historical
+ * baseline at 4161aaad was 22 statements; subsequent additions brought
+ * the live catalogue to 26 entries.)
  *
  * NOT catalogued here: the 3 guarded ALTERs
  * on mas_trades in ormFacade.initializeSchema (broker,

@@ -8,19 +8,11 @@
  * bookkeeping table is runner infrastructure (created by
  * `applyMigrations`) and is NOT catalogued.
  *
- * Contents (measured from the base runner at 534e8903, plus 0053
- * (#2781): 221 statements — 210 schema (101 CREATE TABLE,
- * 52 CREATE INDEX, 7 CREATE UNIQUE INDEX, 49 ALTER TABLE,
- * 1 DROP TABLE) + 11 seed
- * (7 INSERT OR IGNORE, 1 INSERT INTO, 3 UPDATE). The filing
- * counts said ~148 + 5; the re-measurement corrects them (the
- * filing counted only CREATE lines — the runner also carries 49
- * ALTERs, 1 DROP, and 5 more seed lines in the v58
- * product-versions data migration and the v62 rank update). Main
- * moved under the P1 build (7fbdf11c → 534e8903): migration 0066
- * (referral / invite codes, #3307 slice 1) landed on main and is
- * catalogued here too — 10 more statements (5 CREATE TABLE, 4
- * CREATE INDEX, 1 INSERT OR IGNORE seed).
+ * Contents: 225 statements (including 52 ALTER TABLE statements). The
+ * pin tests (`tests/schema_component_*`) are the live source of truth
+ * for exact entry membership as migrations land. (Historical baseline at
+ * 534e8903 + 0053 was 221 statements; 0066 added 10 more, and subsequent
+ * migrations updated the live catalogue to 225 entries.)
  *
  * Code naming (`<kind>.d1.<table>.<action>`):
  *  - CREATE TABLE: `create_table`. The one re-create of an

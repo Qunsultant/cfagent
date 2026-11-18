@@ -187,13 +187,17 @@ export function listMembershipsFromEntries(
   return found;
 }
 
-/** Durable MembershipStore backed by a KvLike store (production: SessionStore DO). */
 /**
- * #2433 (step 5b): this Kv factory remains the flag-off and
- * adapter-internal construction. Env-level composition goes
- * through session.ts wiredMembershipStore(env), which returns
- * the session family's membership port when
- * SESSION_PORTS_ENABLED is on and this factory when off.
+ * Durable MembershipStore backed by the `SessionStore` Durable Object
+ * (via its `KvLike` adapter — no Cloudflare KV binding exists in this repo,
+ * #5025). `createKvMembershipStore` is retained as a backwards-compatible
+ * alias for `createSessionMembershipStore`.
+ *
+ * #2433 (step 5b): this SessionStore-backed factory remains the flag-off
+ * and adapter-internal construction. Env-level composition goes through
+ * `session.ts` `wiredMembershipStore(env)`, which returns the session
+ * family's membership port when `SESSION_PORTS_ENABLED` is on and this
+ * factory when off.
  */
 export function createKvMembershipStore(kv: KvLike): MembershipStore {
   return {
@@ -331,3 +335,9 @@ export async function grantMembership(
     ...(input.email !== undefined ? { email: input.email } : {}),
   });
 }
+
+/**
+ * Alias for `createKvMembershipStore` clarifying that the backing store
+ * in production is the `SessionStore` Durable Object, not Cloudflare KV.
+ */
+export const createSessionMembershipStore = createKvMembershipStore;
