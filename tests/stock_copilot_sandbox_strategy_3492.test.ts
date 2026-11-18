@@ -178,20 +178,30 @@ describe("Capability S8 (#3492) — Strategy Code Generation & Sandbox Runner", 
 });
 
 describe("Stock Copilot Quick-Chips Registration (#3779)", () => {
-  it("registers strategy code generation and sandboxed backtest quick-chips", () => {
+  // Issue #5524: the two chips this suite pinned promised the §7 synthesis
+  // pipeline, which is specified-only (#5056/#5502) behind a generator with
+  // no caller in src/. They are replaced by the honest reach — the sandbox's
+  // real capability question and the governed proposal path (#5057).
+  it("registers the sandbox capability and governed-proposal chips", () => {
     const copilot = findCopilot("stock");
     expect(copilot).toBeDefined();
     const labels = copilot?.quickChips?.map((c) => c.label) || [];
-    expect(labels).toContain("⚡ Generate strategy code");
-    expect(labels).toContain("🧪 Run sandboxed backtest");
+    expect(labels).toContain("🧪 What can the sandbox actually run?");
+    expect(labels).toContain("📝 Propose a new strategy (governed issue)");
+    expect(labels).not.toContain("⚡ Generate strategy code");
+    expect(labels).not.toContain("🧪 Run sandboxed backtest");
 
-    const genChip = copilot?.quickChips?.find((c) => c.label === "⚡ Generate strategy code");
-    expect(genChip?.prompt).toContain("Generate quantitative trading strategy code");
-    expect(genChip?.category).toBe("Strategy Code & Sandbox");
+    const sandboxChip = copilot?.quickChips?.find(
+      (c) => c.label === "🧪 What can the sandbox actually run?",
+    );
+    expect(sandboxChip?.prompt).toContain("SandboxAgent");
+    expect(sandboxChip?.category).toBe("Strategy Proposals");
 
-    const backtestChip = copilot?.quickChips?.find((c) => c.label === "🧪 Run sandboxed backtest");
-    expect(backtestChip?.prompt).toContain("Run the generated momentum breakout strategy in SandboxAgent");
-    expect(backtestChip?.category).toBe("Strategy Code & Sandbox");
+    const proposalChip = copilot?.quickChips?.find(
+      (c) => c.label === "📝 Propose a new strategy (governed issue)",
+    );
+    expect(proposalChip?.prompt).toContain("governed GitHub issue");
+    expect(proposalChip?.category).toBe("Strategy Proposals");
   });
 });
 
