@@ -1,12 +1,19 @@
 /**
  * Issue #5081 (S1, observability program #5080) — the coded
- * OTel messages (OBS-####).
+ * OTel messages (OBS-####). Adopted and expanded by #5086 (S7)
+ * into the ONE message catalog for all of cfagent telemetry.
  *
- * This is the SEED of the S7 message catalog (#5086): the first
- * OBS codes, defined in one place so every OTel module names the
- * same code for the same failure. S7 will adopt and expand this
- * file into the one message catalog (stable codes + severity per
- * message); no OTel module invents a code inline.
+ * The catalog is the single source for message text: every log /
+ * audit / alert / trace event carries a catalog code, and the
+ * rendered message comes from the catalog's template — no
+ * free-form message string at a call site. Codes are stable
+ * across releases (never reused for a different meaning).
+ *
+ * Each entry carries a severity: the catalog's DEFAULT severity
+ * for the code. The config port (#5086, src/config/otelConfigPort.ts)
+ * may override a code's severity at runtime
+ * (`catalog.<OBS-code>.severity`); the catalog default is what
+ * a fresh deploy uses.
  *
  * Codes used in S1:
  *  OBS-1001 otel.config.invalid — a switch value failed closed.
@@ -62,11 +69,6 @@
  *    resource cap alert (a free-tier budget is at/over 70%).
  *  OBS-1019 otel.alerting.ci_failure — the CI failure alert
  *    (a GitHub Actions workflow failed on main).
- *  OBS-1017/1018/1019 are the S4 alert-subject codes (the
- *  code each consumer's alert is logged under). Their
- *  severity/rule mapping lands with the S7 catalog (#5086);
- *  S4 carries only the code identifiers, not a severity/rule
- *  schema.
  *
  * Codes added in S6 (#5085, recording — one runs ledger):
  *  OBS-1020 otel.ledger.write_failed — a runs-ledger write
@@ -74,9 +76,20 @@
  *    vanishing silently. The #4921 KV marker sink is the
  *    follow-up mechanism for naming a failure the SQL path
  *    cannot report; OBS-1020 names it on the audit/log path.
- *  Severity/rule mapping lands with the S7 catalog (#5086);
- *  S6 carries only the code identifier, not a severity/rule
- *  schema.
+ *
+ * Codes added in S7 (#5086, this slice — the catalog itself):
+ *  OBS-1021 otel.alerting.rule.unknown — an alert report
+ *    carried an unknown rule id (not a catalog rule and not a
+ *    placeholder-* rule). The report is rejected, never sent.
+ *  OBS-1022 otel.config.forbidden — a signed-in non-admin was
+ *    denied the OTel config (authenticated, not platform-admin).
+ *
+ * The three exporter codes (OBS-1002 / OBS-1006 / OBS-1012)
+ * carry a `{detail}` template: their message shape varies by
+ * failure stage (extraction vs serialization vs transport), so
+ * the call site supplies the stage detail and the catalog owns
+ * the code, the severity, and the routing. Every other code's
+ * template is fixed; its fields are the event's data.
  */
 
 /** A switch value failed closed to the safe default (OFF / none / 0). */
@@ -111,16 +124,298 @@ export const OBS_ALERTING_SEND_FAILED = "OBS-1014" as const;
 export const OBS_ALERTING_DESTINATION_MISSING = "OBS-1015" as const;
 /** The alerting free-tier guard dropped alerts for the day (max alerts per day reached). */
 export const OBS_ALERTING_FREE_TIER_GUARD = "OBS-1016" as const;
-/** The sweep stuck-run alert (a job has been RUNNING past the stuck threshold). S4 subject code; severity/rule mapping lands with S7. */
+/** The sweep stuck-run alert (a job has been RUNNING past the stuck threshold). */
 export const OBS_ALERTING_STUCK_RUN = "OBS-1017" as const;
-/** The SessionStore resource cap alert (a free-tier budget is at/over 70%). S4 subject code; severity/rule mapping lands with S7. */
+/** The SessionStore resource cap alert (a free-tier budget is at/over 70%). */
 export const OBS_ALERTING_CAP_BREACH = "OBS-1018" as const;
-/** The CI failure alert (a GitHub Actions workflow failed on main). S4 subject code; severity/rule mapping lands with S7. */
+/** The CI failure alert (a GitHub Actions workflow failed on main). */
 export const OBS_ALERTING_CI_FAILURE = "OBS-1019" as const;
-/** A runs-ledger write failed and was named (audited + logged) instead of vanishing silently. S6 code; severity/rule mapping lands with S7. */
+/** A runs-ledger write failed and was named (audited + logged) instead of vanishing silently. */
 export const OBS_LEDGER_WRITE_FAILED = "OBS-1020" as const;
+/** An alert report carried an unknown rule id (rejected, never sent). */
+export const OBS_ALERTING_RULE_UNKNOWN = "OBS-1021" as const;
+/** A signed-in non-admin was denied the OTel config. */
+export const OBS_CONFIG_FORBIDDEN = "OBS-1022" as const;
 
-/** Formats a coded message: `[OBS-####] <message>`. */
-export function formatOtelMessage(code: string, message: string): string {
-  return `[${code}] ${message}`;
+/**
+ * The severity scale for coded messages. The S4 placeholder
+ * severities ("info" | "warning" | "error" | "critical") are
+ * now the real catalog scale: S7 replaces the placeholders
+ * with catalog-resolved severities, keeping the same four
+ * values so no consumer changes shape.
+ */
+export type ObsSeverity = "info" | "warning" | "error" | "critical";
+
+/** One catalog entry: the code, its dotted event name, its template, and its default severity. */
+export interface ObsCatalogEntry {
+  code: string;
+  name: string;
+  template: string;
+  severity: ObsSeverity;
+}
+
+/** The template fields a call site supplies (string or number values only). */
+export type ObsTemplateFields = Record<string, string | number>;
+
+/**
+ * The one message catalog. Keyed by code; the key IS the code,
+ * so a lookup by an unknown code misses (never a silent pass).
+ */
+export const OBS_CATALOG: Readonly<Record<string, ObsCatalogEntry>> = {
+  [OBS_CONFIG_INVALID]: {
+    code: OBS_CONFIG_INVALID,
+    name: "otel.config.invalid",
+    template: `{switch} unrecognized value at {source}; failing closed to "{fallback}"`,
+    severity: "warning",
+  },
+  [OBS_EXPORT_FAILED]: {
+    code: OBS_EXPORT_FAILED,
+    name: "otel.export.failed",
+    template: "{detail}",
+    severity: "error",
+  },
+  [OBS_INGEST_FAILED]: {
+    code: OBS_INGEST_FAILED,
+    name: "otel.ingest.failed",
+    template: "OTLP ingestion failed writing {key} to R2: {error}",
+    severity: "error",
+  },
+  [OBS_INGEST_REJECTED]: {
+    code: OBS_INGEST_REJECTED,
+    name: "otel.ingest.rejected",
+    template: "OTLP ingestion rejected: {reason}",
+    severity: "warning",
+  },
+  [OBS_SINK_DEGRADED]: {
+    code: OBS_SINK_DEGRADED,
+    name: "otel.sink.degraded",
+    template: `OTel sink could not emit "{eventType}": {error}`,
+    severity: "warning",
+  },
+  [OBS_METRICS_EXPORT_FAILED]: {
+    code: OBS_METRICS_EXPORT_FAILED,
+    name: "otel.metrics.export.failed",
+    template: "{detail}",
+    severity: "error",
+  },
+  [OBS_METRICS_FREE_TIER_GUARD]: {
+    code: OBS_METRICS_FREE_TIER_GUARD,
+    name: "otel.metrics.free_tier_guard",
+    template:
+      "Analytics Engine daily write limit reached ({limit} writes for {day}); further metric writes are dropped for the rest of the day. The OTLP/R2 archive path is unaffected.",
+    severity: "warning",
+  },
+  [OBS_ARCHIVE_UNAVAILABLE]: {
+    code: OBS_ARCHIVE_UNAVAILABLE,
+    name: "otel.archive.unavailable",
+    template: "OTel archive unavailable: {reason}",
+    severity: "error",
+  },
+  [OBS_ARCHIVE_KEY_REJECTED]: {
+    code: OBS_ARCHIVE_KEY_REJECTED,
+    name: "otel.archive.key_rejected",
+    template: "OTel archive key rejected: {reason}",
+    severity: "warning",
+  },
+  [OBS_ARCHIVE_NOT_FOUND]: {
+    code: OBS_ARCHIVE_NOT_FOUND,
+    name: "otel.archive.not_found",
+    template: "OTel archive object not found: {key}",
+    severity: "info",
+  },
+  [OBS_ARCHIVE_FORBIDDEN]: {
+    code: OBS_ARCHIVE_FORBIDDEN,
+    name: "otel.archive.forbidden",
+    template: "OTel archive is available to platform admins only",
+    severity: "warning",
+  },
+  [OBS_TRACES_EXPORT_FAILED]: {
+    code: OBS_TRACES_EXPORT_FAILED,
+    name: "otel.traces.export.failed",
+    template: "{detail}",
+    severity: "error",
+  },
+  [OBS_TRACES_FREE_TIER_GUARD]: {
+    code: OBS_TRACES_FREE_TIER_GUARD,
+    name: "otel.traces.free_tier_guard",
+    template:
+      "Analytics Engine daily write limit reached ({limit} writes for {day}); further span writes are dropped for the rest of the day. The OTLP/R2 archive path is unaffected.",
+    severity: "warning",
+  },
+  [OBS_ALERTING_SEND_FAILED]: {
+    code: OBS_ALERTING_SEND_FAILED,
+    name: "otel.alerting.send.failed",
+    template: "Alert delivery failed: {detail}",
+    severity: "error",
+  },
+  [OBS_ALERTING_DESTINATION_MISSING]: {
+    code: OBS_ALERTING_DESTINATION_MISSING,
+    name: "otel.alerting.destination.missing",
+    template: "Alert had no configured destination: {detail}",
+    severity: "warning",
+  },
+  [OBS_ALERTING_FREE_TIER_GUARD]: {
+    code: OBS_ALERTING_FREE_TIER_GUARD,
+    name: "otel.alerting.free_tier_guard",
+    template:
+      "Alert free-tier guard dropped alerts for the day (max {maxAlertsPerDay} alerts per day reached)",
+    severity: "warning",
+  },
+  [OBS_ALERTING_STUCK_RUN]: {
+    code: OBS_ALERTING_STUCK_RUN,
+    name: "otel.alerting.stuck_run",
+    template: "Stuck run alert: {detail}",
+    severity: "warning",
+  },
+  [OBS_ALERTING_CAP_BREACH]: {
+    code: OBS_ALERTING_CAP_BREACH,
+    name: "otel.alerting.cap_breach",
+    template: "SessionStore resource cap alert: {detail}",
+    severity: "warning",
+  },
+  [OBS_ALERTING_CI_FAILURE]: {
+    code: OBS_ALERTING_CI_FAILURE,
+    name: "otel.alerting.ci_failure",
+    template: "CI failure alert: {detail}",
+    severity: "error",
+  },
+  [OBS_LEDGER_WRITE_FAILED]: {
+    code: OBS_LEDGER_WRITE_FAILED,
+    name: "otel.ledger.write_failed",
+    template: "ledger write failed for job {jobId}: {error}",
+    severity: "error",
+  },
+  [OBS_ALERTING_RULE_UNKNOWN]: {
+    code: OBS_ALERTING_RULE_UNKNOWN,
+    name: "otel.alerting.rule.unknown",
+    template: `Alert report rejected: unknown rule id "{ruleId}"`,
+    severity: "error",
+  },
+  [OBS_CONFIG_FORBIDDEN]: {
+    code: OBS_CONFIG_FORBIDDEN,
+    name: "otel.config.forbidden",
+    template: "OTel config is available to platform admins only",
+    severity: "warning",
+  },
+} as const;
+
+/** True when the code is in the catalog. */
+export function isKnownObsCode(code: string): boolean {
+  return Object.prototype.hasOwnProperty.call(OBS_CATALOG, code);
+}
+
+/** Renders a catalog template: `{field}` slots are filled from fields; an unsupplied field stays verbatim so a missing field is visible, never silently dropped. */
+export function renderCatalogTemplate(template: string, fields?: ObsTemplateFields): string {
+  return template.replace(/\{([A-Za-z0-9_]+)\}/g, (match, name: string) => {
+    const value = fields?.[name];
+    return value === undefined ? match : String(value);
+  });
+}
+
+/** The result of resolving a code through the catalog: ok with the entry + rendered message, or a fail-closed rejection for an unknown code. */
+export type CatalogMessageResolution =
+  | { ok: true; entry: ObsCatalogEntry; message: string }
+  | { ok: false; code: string; reason: string };
+
+/**
+ * Resolves a code through the catalog. An unknown code FAILS
+ * CLOSED (ok:false) — it is rejected, never silently passed
+ * as a valid message.
+ */
+export function resolveCatalogMessage(
+  code: string,
+  fields?: ObsTemplateFields,
+): CatalogMessageResolution {
+  const entry = OBS_CATALOG[code];
+  if (!entry) {
+    return { ok: false, code, reason: `${code} is not in the message catalog` };
+  }
+  return { ok: true, entry, message: `[${entry.code}] ${renderCatalogTemplate(entry.template, fields)}` };
+}
+
+/**
+ * Formats a coded message from the catalog: `[OBS-####] <rendered
+ * template>`. An unknown code renders fail-closed as
+ * `[OBS-UNKNOWN] <code> is not in the message catalog` — named
+ * explicitly, never a silent pass.
+ */
+export function formatCatalogMessage(code: string, fields?: ObsTemplateFields): string {
+  const resolved = resolveCatalogMessage(code, fields);
+  if (resolved.ok) return resolved.message;
+  return `[OBS-UNKNOWN] ${resolved.reason}`;
+}
+
+/**
+ * The effective severity for a code: the runtime override (a
+ * `catalog.<code>.severity` override record, when one is set)
+ * wins over the catalog default. An invalid override value is
+ * ignored (the catalog default governs — the override was
+ * rejected at write time, so this is a belt-and-braces check).
+ */
+export function resolveCatalogSeverity(
+  code: string,
+  severityOverrides?: Readonly<Record<string, string>>,
+): ObsSeverity {
+  const entry = OBS_CATALOG[code];
+  const override = severityOverrides?.[`catalog.${code}.severity`];
+  if (
+    override === "info" ||
+    override === "warning" ||
+    override === "error" ||
+    override === "critical"
+  ) {
+    return override;
+  }
+  return entry?.severity ?? "error";
+}
+
+/** One alert rule: the rule id a consumer passes, the catalog code it resolves to, and the severity (from the code's catalog entry). */
+export interface ObsAlertRule {
+  ruleId: string;
+  code: string;
+  severity: ObsSeverity;
+}
+
+/**
+ * The real alert rules (S7 replaces the S4 placeholders). The
+ * three first consumers (owner decision, S4) resolve through
+ * these; a rule's severity is the catalog severity of its code.
+ */
+export const OBS_ALERT_RULES: Readonly<Record<string, ObsAlertRule>> = {
+  "rule:stuck-run": {
+    ruleId: "rule:stuck-run",
+    code: OBS_ALERTING_STUCK_RUN,
+    severity: OBS_CATALOG[OBS_ALERTING_STUCK_RUN].severity,
+  },
+  "rule:cap-breach": {
+    ruleId: "rule:cap-breach",
+    code: OBS_ALERTING_CAP_BREACH,
+    severity: OBS_CATALOG[OBS_ALERTING_CAP_BREACH].severity,
+  },
+  "rule:ci-failure": {
+    ruleId: "rule:ci-failure",
+    code: OBS_ALERTING_CI_FAILURE,
+    severity: OBS_CATALOG[OBS_ALERTING_CI_FAILURE].severity,
+  },
+} as const;
+
+/** The result of resolving a rule id: ok with the rule, or a fail-closed rejection for an unknown rule. */
+export type AlertRuleResolution =
+  | { ok: true; rule: ObsAlertRule }
+  | { ok: false; ruleId: string; reason: string };
+
+/**
+ * Resolves an alert rule id through the catalog. An unknown
+ * rule id FAILS CLOSED (ok:false) — it is rejected, never
+ * silently passed as a valid rule. Placeholder rule ids
+ * ("placeholder-*") are NOT resolved here: they are the S4
+ * placeholder path, still valid for consumers not yet
+ * catalogued (the port reports them as placeholderRules:true).
+ */
+export function resolveAlertRule(ruleId: string): AlertRuleResolution {
+  const rule = OBS_ALERT_RULES[ruleId];
+  if (!rule) {
+    return { ok: false, ruleId, reason: `${ruleId} is not in the alert-rule catalog` };
+  }
+  return { ok: true, rule };
 }

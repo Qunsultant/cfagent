@@ -17,11 +17,22 @@
  *
  * S7 dependency (owner decision, option b): S4 builds ONLY the
  * owner module + port with PLACEHOLDER rules. The alert
- * rules/severities catalog lands with S7 (#5086). The port
- * accepts a severity + rule id from the caller but S4 does NOT
- * define the real rule/severity catalog — the values are
- * placeholders, clearly marked, to be replaced by S7. There is
- * no second catalog.
+ * rules/severities catalog lands with S7 (#5086) — AND IT IS
+ * HERE: the three real rules (rule:stuck-run -> OBS-1017,
+ * rule:cap-breach -> OBS-1018, rule:ci-failure -> OBS-1019)
+ * resolve through the catalog in src/observability/otelMessages.ts,
+ * and the effective severity comes from the catalog (with the
+ * runtime `catalog.<code>.severity` override applied). A
+ * placeholder-* rule id still works (placeholderRules: true)
+ * for consumers not yet catalogued; an unknown non-placeholder
+ * rule id is REJECTED with OBS-1021 and sends nothing. There
+ * is no second catalog.
+ *
+ * S7 runtime config: per alert, the port refreshes the
+ * override cache (TTL-guarded) from D1 and passes the runtime
+ * level into the alerting settings resolution, so flipping
+ * alerting.enabled / maxAlertsPerDay (or a catalog severity)
+ * applies without a redeploy.
  *
  * Credentials: Slack (SLACK_BOT_TOKEN / SLACK_WEBHOOK_URL) and
  * email (the EMAIL binding) come from GitHub secrets (Worker
@@ -49,12 +60,23 @@ import {
   resolveOtelAlertingSettings,
   type OtelScopeLevels,
 } from "../config/otelModes";
+import {
+  otelConfigD1FromEnv,
+  otelRuntimeLevel,
+  refreshOtelRuntimeOverrideCache,
+  type OtelRuntimeOverrideRecord,
+} from "../config/otelConfigPort";
 import { parseEmailPrincipals } from "../security/emailPrincipals";
 import {
   OBS_ALERTING_DESTINATION_MISSING,
   OBS_ALERTING_FREE_TIER_GUARD,
+  OBS_ALERTING_RULE_UNKNOWN,
   OBS_ALERTING_SEND_FAILED,
   OBS_CONFIG_INVALID,
+  formatCatalogMessage,
+  resolveAlertRule,
+  resolveCatalogSeverity,
+  type ObsSeverity,
 } from "./otelMessages";
 import { createStructuredLogger, type StructuredLogger } from "./structuredLogger";
 import { createObservabilitySink } from "./createObservabilityPorts";
@@ -78,28 +100,30 @@ import {
 export type AlertSource = "sweep" | "cap-alert" | "ci-failure" | "other";
 
 /**
- * PLACEHOLDER severity values (S4). S7 (#5086) defines the
- * real severity/rule catalog; until then the caller passes one
- * of these placeholders and the port marks the report as
- * placeholder-ruled (result.placeholderRules === true).
+ * The alert severity — the catalog severity type. (The S4
+ * name AlertSeverityPlaceholder is kept as an alias: S4 call
+ * sites passed the severity; S7 resolves it from the catalog
+ * rule when the report omits it.)
  */
-export type AlertSeverityPlaceholder = "info" | "warning" | "error" | "critical";
+export type AlertSeverityPlaceholder = ObsSeverity;
 
 /**
  * One alert report — the unit the port delivers.
- * severity + ruleId are PLACEHOLDERS in S4 (S7 replaces them
- * with the real catalog). ruleId MUST start with
- * "placeholder-" so a real rule id is never confused with a
- * placeholder.
+ * severity is OPTIONAL: for a catalog rule the port resolves
+ * it from the catalog (with the runtime severity override
+ * applied); a placeholder-* report still carries its own
+ * severity. ruleId is a catalog rule ("rule:<name>") or a
+ * placeholder ("placeholder-<name>"); an unknown
+ * non-placeholder rule id is rejected with OBS-1021.
  */
 export interface AlertReport {
   /** Which consumer raised the report. */
   source: AlertSource;
   /** The coded message for this alert (e.g. OBS-1014). */
   code: string;
-  /** PLACEHOLDER severity (S7 defines the real catalog). */
-  severity: AlertSeverityPlaceholder;
-  /** PLACEHOLDER rule id, "placeholder-<name>" (S7 replaces). */
+  /** Severity (optional: resolved from the catalog rule when absent). */
+  severity?: ObsSeverity;
+  /** Catalog rule id ("rule:<name>") or placeholder ("placeholder-<name>"). */
   ruleId: string;
   /** The short title shown in the Slack text + email subject. */
   title: string;
@@ -134,6 +158,8 @@ export interface AlertResult {
   email: AlertChannelResult;
   /** The OBS code describing this result (the report code, or OBS-1014/1015/1016 on failure). */
   code: string;
+  /** The effective severity of this alert (from the catalog rule, or the report's own severity for placeholders). */
+  severity: ObsSeverity;
   /** True: the severity + rule id are S4 placeholders (S7 defines the real catalog). */
   placeholderRules: boolean;
 }
@@ -195,18 +221,45 @@ export function createAlertingPort(deps: AlertingPortDeps): AlertingPort {
 
   async function reportAlert(report: AlertReport): Promise<AlertResult> {
     const logger = resolveLogger();
+    // S7: the runtime override cache is refreshed per alert
+    // (TTL-guarded), so a config flip applies without a
+    // redeploy. A missing/unbound D1 refreshes to empty
+    // overrides — the deploy-time values govern.
+    const d1 = otelConfigD1FromEnv(env);
+    const overrides = await refreshOtelRuntimeOverrideCache(d1);
+    const severityOverrides = overrideSeverityMap(overrides);
     const file = OTEL_FILE_CONFIG.alerting;
+    // The runtime level sits between user and env; an explicit
+    // scope-level object (tests / a run carrier) still wins.
+    const levelsFor = (
+      key: string,
+      explicit: OtelScopeLevels | undefined,
+      envValue: unknown,
+      fileValue: unknown,
+    ): OtelScopeLevels => ({
+      runtime: otelRuntimeLevel(overrides, key),
+      ...(explicit ?? { env: envValue, file: fileValue }),
+    });
     const { settings, invalid } = resolveOtelAlertingSettings({
-      enabled: deps.scopeLevels?.enabled ?? { env: env.OTEL_ALERTING_ENABLED, file: file.enabled },
-      slackEnabled:
-        deps.scopeLevels?.slackEnabled ?? { env: env.OTEL_ALERTING_SLACK_ENABLED, file: file.slackEnabled },
-      emailEnabled:
-        deps.scopeLevels?.emailEnabled ?? { env: env.OTEL_ALERTING_EMAIL_ENABLED, file: file.emailEnabled },
-      maxAlertsPerDay:
-        deps.scopeLevels?.maxAlertsPerDay ?? {
-          env: env.OTEL_ALERTING_MAX_ALERTS_PER_DAY,
-          file: file.maxAlertsPerDay,
-        },
+      enabled: levelsFor("alerting.enabled", deps.scopeLevels?.enabled, env.OTEL_ALERTING_ENABLED, file.enabled),
+      slackEnabled: levelsFor(
+        "alerting.slackEnabled",
+        deps.scopeLevels?.slackEnabled,
+        env.OTEL_ALERTING_SLACK_ENABLED,
+        file.slackEnabled,
+      ),
+      emailEnabled: levelsFor(
+        "alerting.emailEnabled",
+        deps.scopeLevels?.emailEnabled,
+        env.OTEL_ALERTING_EMAIL_ENABLED,
+        file.emailEnabled,
+      ),
+      maxAlertsPerDay: levelsFor(
+        "alerting.maxAlertsPerDay",
+        deps.scopeLevels?.maxAlertsPerDay,
+        env.OTEL_ALERTING_MAX_ALERTS_PER_DAY,
+        file.maxAlertsPerDay,
+      ),
     });
     if (invalid) {
       logger.warn("otel.alerting.config_invalid", {
@@ -216,7 +269,45 @@ export function createAlertingPort(deps: AlertingPortDeps): AlertingPort {
       });
     }
 
+    // S7: the rule resolves through the catalog. A
+    // placeholder-* rule id still delivers (placeholderRules:
+    // true) for consumers not yet catalogued; an unknown
+    // non-placeholder rule id is REJECTED with OBS-1021 and
+    // sends nothing — it never silently passes, and it does
+    // not consume the free-tier guard budget. Validation runs
+    // before the disabled check, so a bad rule is always
+    // rejected loudly, even when alerting is off.
     const placeholderRules = report.ruleId.startsWith("placeholder-");
+    let severity: ObsSeverity;
+    if (placeholderRules) {
+      severity = report.severity ?? "warning";
+    } else {
+      const resolved = resolveAlertRule(report.ruleId);
+      if (!resolved.ok) {
+        const rejectionSeverity = resolveCatalogSeverity(
+          OBS_ALERTING_RULE_UNKNOWN,
+          severityOverrides,
+        );
+        logger.warn("otel.alerting.rule_unknown", {
+          code: OBS_ALERTING_RULE_UNKNOWN,
+          message: formatCatalogMessage(OBS_ALERTING_RULE_UNKNOWN, { ruleId: report.ruleId }),
+          source: report.source,
+          ruleId: report.ruleId,
+        });
+        return {
+          delivered: false,
+          slack: { ok: false, skipped: "unknown alert rule" },
+          email: { ok: false, skipped: "unknown alert rule" },
+          code: OBS_ALERTING_RULE_UNKNOWN,
+          severity: rejectionSeverity,
+          placeholderRules: false,
+        };
+      }
+      // The effective severity comes from the catalog, with
+      // the runtime `catalog.<code>.severity` override applied
+      // — never from a hardcoded string at a call site.
+      severity = resolveCatalogSeverity(resolved.rule.code, severityOverrides);
+    }
 
     // Master off (or invalid -> OFF) = no alert is sent to
     // either channel. The alert is recorded, never silently
@@ -232,6 +323,7 @@ export function createAlertingPort(deps: AlertingPortDeps): AlertingPort {
         slack: { ok: false, skipped: "alerting disabled" },
         email: { ok: false, skipped: "alerting disabled" },
         code: report.code,
+        severity,
         placeholderRules,
       };
     }
@@ -257,6 +349,7 @@ export function createAlertingPort(deps: AlertingPortDeps): AlertingPort {
         slack: { ok: false, skipped: "free-tier guard (max alerts/day reached)" },
         email: { ok: false, skipped: "free-tier guard (max alerts/day reached)" },
         code: OBS_ALERTING_FREE_TIER_GUARD,
+        severity,
         placeholderRules,
       };
     }
@@ -353,7 +446,7 @@ export function createAlertingPort(deps: AlertingPortDeps): AlertingPort {
         slack: slack.ok ? "ok" : "failed",
         email: email.ok ? "ok" : "failed",
       });
-      return { delivered: true, slack, email, code: report.code, placeholderRules };
+      return { delivered: true, slack, email, code: report.code, severity, placeholderRules };
     }
 
     // Nothing delivered. When neither channel has a
@@ -372,6 +465,7 @@ export function createAlertingPort(deps: AlertingPortDeps): AlertingPort {
         slack,
         email,
         code: OBS_ALERTING_DESTINATION_MISSING,
+        severity,
         placeholderRules,
       };
     }
@@ -387,11 +481,28 @@ export function createAlertingPort(deps: AlertingPortDeps): AlertingPort {
       slack,
       email,
       code: OBS_ALERTING_SEND_FAILED,
+      severity,
       placeholderRules,
     };
   }
 
   return { reportAlert };
+}
+
+/**
+ * The cached runtime overrides as a `catalog.<code>.severity`
+ * string map for resolveCatalogSeverity (only string values
+ * pass through; anything else is ignored there and falls back
+ * to the catalog default).
+ */
+function overrideSeverityMap(
+  overrides: Record<string, OtelRuntimeOverrideRecord>,
+): Record<string, string> {
+  const map: Record<string, string> = {};
+  for (const [key, record] of Object.entries(overrides)) {
+    if (typeof record.value === "string") map[key] = record.value;
+  }
+  return map;
 }
 
 /** Escapes HTML in the email body (plain-text alert, never markup). */

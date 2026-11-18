@@ -104,7 +104,9 @@ describe("S4 CI failure alert route (POST /api/otel/v1/alerts)", () => {
     expect(fake.reports.length).toBe(1);
     expect(fake.reports[0].source).toBe("ci-failure");
     expect(fake.reports[0].code).toBe("OBS-1019");
-    expect(fake.reports[0].ruleId).toMatch(/^placeholder-/);
+    // S7 (#5086): the CI rule now resolves through the catalog
+    // (a real rule, OBS-1019 error) instead of the S4 placeholder.
+    expect(fake.reports[0].ruleId).toBe("rule:ci-failure");
   });
 
   it("with alerting OFF the route still accepts (200) but nothing is delivered (no network call)", async () => {

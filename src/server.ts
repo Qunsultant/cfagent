@@ -54,6 +54,7 @@ import { handleScheduleWebhookRoutes } from "./server/routes/scheduleWebhook";
 import { handlePlatformTelemetryRoutes, handlePlatformRetrievalRoutes, handlePlatformMcpRoutes, handlePlatformPaymentsRoutes, handlePlatformBrowserRoutes } from "./server/routes/platform";
 import { handleOtelRoutes } from "./server/routes/otel";
 import { handleOtelArchiveRoutes } from "./server/routes/otelArchive";
+import { handleOtelConfigRoutes } from "./server/routes/otelConfig";
 import { handleScheduledEvent, handleQueueBatch } from "./server/routes/queue";
 import { createStructuredLogger } from "./observability/structuredLogger";
 import { createObservabilitySink } from "./observability/createObservabilityPorts";
@@ -191,6 +192,13 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
     // Authenticated + platform-admin gated, audited, fail-closed.
     const otelArchiveResponse = await handleOtelArchiveRoutes(request, env, url, path);
     if (otelArchiveResponse) return otelArchiveResponse;
+    // Issue #5086 (S7, observability program #5080): the OTel
+    // config routes (GET/POST/DELETE /api/otel/v1/config) — the
+    // admin surface for the message catalog + the runtime
+    // config port. Authenticated + platform-admin gated,
+    // audited, fail-closed.
+    const otelConfigResponse = await handleOtelConfigRoutes(request, env, url, path);
+    if (otelConfigResponse) return otelConfigResponse;
     // Slice 4 (#2902): audit/reports moved to src/server/routes/privacy.ts —
     // /api/audit/history, /api/reports/list, /api/reports/seed-canonical.
     const privacyReportsResponse = await handlePrivacyReportsRoutes(request, env, url, path);

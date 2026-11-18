@@ -40,7 +40,7 @@ import {
   OBS_ARCHIVE_KEY_REJECTED,
   OBS_ARCHIVE_NOT_FOUND,
   OBS_ARCHIVE_UNAVAILABLE,
-  formatOtelMessage,
+  formatCatalogMessage,
 } from "./otelMessages";
 
 /** The OTel archive list route path. */
@@ -171,10 +171,7 @@ export async function listOtelArchive(input: OtelArchiveListInput): Promise<Otel
     };
   }
   if (!blobStore) {
-    const error = formatOtelMessage(
-      OBS_ARCHIVE_UNAVAILABLE,
-      "OTel archive unavailable: REPORTS_BUCKET is not bound",
-    );
+    const error = formatCatalogMessage(OBS_ARCHIVE_UNAVAILABLE, { reason: "REPORTS_BUCKET is not bound" });
     return {
       status: 503,
       archivingEnabled: true,
@@ -242,25 +239,16 @@ export async function serveOtelArchiveObject(
 ): Promise<OtelArchiveServeResult> {
   const { blobStore, key } = input;
   if (!isOtelArchiveKey(key)) {
-    const error = formatOtelMessage(
-      OBS_ARCHIVE_KEY_REJECTED,
-      "OTel archive key rejected: the key must be under otel-archive/",
-    );
+    const error = formatCatalogMessage(OBS_ARCHIVE_KEY_REJECTED, { reason: "the key must be under otel-archive/" });
     return { status: 400, error, code: OBS_ARCHIVE_KEY_REJECTED };
   }
   if (!blobStore) {
-    const error = formatOtelMessage(
-      OBS_ARCHIVE_UNAVAILABLE,
-      "OTel archive unavailable: REPORTS_BUCKET is not bound",
-    );
+    const error = formatCatalogMessage(OBS_ARCHIVE_UNAVAILABLE, { reason: "REPORTS_BUCKET is not bound" });
     return { status: 503, error, code: OBS_ARCHIVE_UNAVAILABLE };
   }
   const obj = await blobStore.get(key);
   if (!obj) {
-    const error = formatOtelMessage(
-      OBS_ARCHIVE_NOT_FOUND,
-      `OTel archive object not found: ${key}`,
-    );
+    const error = formatCatalogMessage(OBS_ARCHIVE_NOT_FOUND, { key });
     return { status: 404, error, code: OBS_ARCHIVE_NOT_FOUND };
   }
   return { status: 200, content: obj.bytes, contentType: "application/x-ndjson" };

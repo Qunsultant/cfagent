@@ -2974,6 +2974,22 @@ export const D1_CATALOGUE_ENTRIES: CatalogueEntry[] = [
     kind: "schema",
     form: "literal",
   },
+  {
+    code: "schema.d1.otel_config_overrides.create_table",
+    plane: "d1",
+    table: "otel_config_overrides",
+    statement: `CREATE TABLE IF NOT EXISTS otel_config_overrides (
+  config_key TEXT NOT NULL,
+  value_json TEXT,
+  version INTEGER NOT NULL,
+  updated_by TEXT NOT NULL,
+  updated_at_ms INTEGER NOT NULL,
+  reason TEXT NOT NULL,
+  PRIMARY KEY (config_key, version)
+)`,
+    kind: "schema",
+    form: "literal",
+  },
 ];
 
 /** Per-migration-version code lists, in statement order. */
@@ -3340,10 +3356,13 @@ export const D1_MIGRATION_CODES: Record<number, readonly string[]> = {
   69: [
     "schema.d1.agent_referral_rules.alter_table_add_column_expiry_period_ms",
   ],
+  70: [
+    "schema.d1.otel_config_overrides.create_table",
+  ],
 };
 
-/** Migration versions in the D1 section (1–69; 0069 added by #5229). */
-export const D1_MIGRATION_VERSIONS: readonly number[] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69];
+/** Migration versions in the D1 section (1–70; 0070 added by #5086). */
+export const D1_MIGRATION_VERSIONS: readonly number[] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70];
 
 export interface D1MigrationSqlShape {
   /** Text before the first statement: "\n" or "". */

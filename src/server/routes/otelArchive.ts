@@ -48,6 +48,12 @@ import {
   type OtelScopeLevels,
 } from "../../config/otelModes";
 import {
+  cachedOtelRuntimeOverrides,
+  otelConfigD1FromEnv,
+  otelRuntimeLevelByEnvName,
+  refreshOtelRuntimeOverrideCache,
+} from "../../config/otelConfigPort";
+import {
   OTEL_ARCHIVE_LIST_ROUTE,
   OTEL_ARCHIVE_OBJECT_ROUTE,
   listOtelArchive,
@@ -58,7 +64,7 @@ export { OTEL_ARCHIVE_LIST_ROUTE, OTEL_ARCHIVE_OBJECT_ROUTE };
 import {
   OBS_ARCHIVE_FORBIDDEN,
   OBS_ARCHIVE_UNAVAILABLE,
-  formatOtelMessage,
+  formatCatalogMessage,
 } from "../../observability/otelMessages";
 
 /** The audit event type for archive reads. */
@@ -82,6 +88,9 @@ export interface OtelArchiveRouteDeps {
 function defaultResolveState(env: Env): OtelArchiveRouteState {
   const envRecord = env as unknown as Record<string, unknown>;
   const levelsFor = (envName: string, fileValue: unknown): OtelScopeLevels => ({
+    // S7 (#5086): the runtime level from the override cache
+    // (refreshed per request by the handler below).
+    runtime: otelRuntimeLevelByEnvName(cachedOtelRuntimeOverrides(), envName),
     env: envRecord[envName],
     file: fileValue,
   });
@@ -100,7 +109,8 @@ function defaultResolveState(env: Env): OtelArchiveRouteState {
   };
 }
 
-async function defaultIsPlatformAdmin(session: SessionData, env: Env): Promise<boolean> {
+/** Shared with the OTel config routes (S7, #5086): the live platform-admin membership check (the IAAA admin pattern). */
+export async function defaultIsPlatformAdmin(session: SessionData, env: Env): Promise<boolean> {
   if (!session.internalUserId) return false;
   const overview = await buildAdminOverview(
     {
@@ -115,7 +125,8 @@ async function defaultIsPlatformAdmin(session: SessionData, env: Env): Promise<b
   return overview.allowed;
 }
 
-async function defaultAudit(env: Env, input: CreateIaaaAuditEventInput): Promise<boolean> {
+/** Shared with the OTel config routes (S7, #5086): the canonical audit writer. */
+export async function defaultAudit(env: Env, input: CreateIaaaAuditEventInput): Promise<boolean> {
   try {
     const result = await recordAuditEvent(createWiredAuditStore(env), input);
     return result.ok;
@@ -191,10 +202,7 @@ export async function handleOtelArchiveRoutes(
   try {
     admin = await deps.isPlatformAdmin(session, env);
   } catch {
-    const error = formatOtelMessage(
-      OBS_ARCHIVE_UNAVAILABLE,
-      "OTel archive unavailable: the platform-admin check failed",
-    );
+    const error = formatCatalogMessage(OBS_ARCHIVE_UNAVAILABLE, { reason: "the platform-admin check failed" });
     return jsonResponse(500, { error, code: OBS_ARCHIVE_UNAVAILABLE });
   }
   if (!admin) {
@@ -208,10 +216,7 @@ export async function handleOtelArchiveRoutes(
     } catch {
       /* denial attribution is best-effort; the deny stands */
     }
-    const error = formatOtelMessage(
-      OBS_ARCHIVE_FORBIDDEN,
-      "OTel archive is available to platform admins only",
-    );
+    const error = formatCatalogMessage(OBS_ARCHIVE_FORBIDDEN);
     return jsonResponse(403, { error, code: OBS_ARCHIVE_FORBIDDEN });
   }
 
@@ -221,14 +226,14 @@ export async function handleOtelArchiveRoutes(
     .audit(env, { ...auditBase, decision: "allow" as const, outcome: "succeeded" as const })
     .catch(() => false);
   if (!audited) {
-    const error = formatOtelMessage(
-      OBS_ARCHIVE_UNAVAILABLE,
-      "OTel archive unavailable: the audit record could not be written",
-    );
+    const error = formatCatalogMessage(OBS_ARCHIVE_UNAVAILABLE, { reason: "the audit record could not be written" });
     return jsonResponse(500, { error, code: OBS_ARCHIVE_UNAVAILABLE });
   }
 
   if (path === OTEL_ARCHIVE_LIST_ROUTE) {
+    // S7 (#5086): refresh the runtime override cache (TTL-guarded)
+    // so a pageSize/maxObjects flip applies to this request.
+    await refreshOtelRuntimeOverrideCache(otelConfigD1FromEnv(env));
     const state = deps.resolveState(env);
     const limitRaw = url.searchParams.get("limit");
     const limit = limitRaw === null ? undefined : Number(limitRaw);

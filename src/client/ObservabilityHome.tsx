@@ -5,7 +5,9 @@
  * renders directly from the shell (`Chat.tsx` `TAB_CONTENT`).
  * Its views are the sub-route scheme in `observabilityView.ts`:
  * archive (OtelArchivePanel) — the R2 archive file browser,
- * the interim view until the S8 dashboard (#5087) lands.
+ * the interim view until the S8 dashboard (#5087) lands — and
+ * config (OtelConfigPanel, S7 #5086) — the message catalog +
+ * runtime config port.
  *
  * View state follows the URL (`?view=`), the same pattern as
  * PlatformAdminPage, SchedulesHome, and SecurityHubHome: the
@@ -17,6 +19,7 @@
 import { useEffect, useState } from "react";
 import { Card, PageShell, Tabs, TabPanel, type TabOption } from "./components/ui";
 import { OtelArchivePanel } from "./OtelArchivePanel";
+import { OtelConfigPanel } from "./OtelConfigPanel";
 import { navigateToTab, subscribeToRouteChanges } from "./router";
 import {
   OBSERVABILITY_VIEW_LABELS,
@@ -72,6 +75,16 @@ export function ObservabilityHome() {
             <small>Archived OTLP objects in R2, by date</small>
           </div>
           <OtelArchivePanel />
+        </Card>
+      </TabPanel>
+
+      <TabPanel idBase="observability" tabId="config" active={deepLink.view === "config"}>
+        <Card>
+          <div className="section-label-row">
+            <span>Config</span>
+            <small>Message catalog + runtime config — no redeploy</small>
+          </div>
+          <OtelConfigPanel />
         </Card>
       </TabPanel>
     </PageShell>

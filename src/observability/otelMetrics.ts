@@ -57,12 +57,14 @@ import {
 } from "@opentelemetry/sdk-metrics";
 import { JsonMetricsSerializer } from "@opentelemetry/otlp-transformer";
 import type { OtelDestination, OtelDomain, OtelExporterKind } from "../config/otelModes";
+import { effectiveOtelDomainSwitches } from "../config/otelModes";
+import type { OtelRuntimeOverrideRecord } from "../config/otelConfigPort";
 import type { OtelDomainSwitches } from "./otelLogs";
 import { domainForComponent } from "./otelLogs";
 import {
   OBS_METRICS_EXPORT_FAILED,
   OBS_METRICS_FREE_TIER_GUARD,
-  formatOtelMessage,
+  formatCatalogMessage,
 } from "./otelMessages";
 import {
   newTraceContext,
@@ -106,15 +108,27 @@ export type OtelTransport = (
  * "none", and the component's domain is enabled. The log
  * level/sampling do not apply to metrics (see the module doc).
  */
+/**
+ * The per-domain gate (the AOP aspect). S7 (#5086): the
+ * optional runtime accessor lets the gate consult the runtime
+ * override cache per event — a domain on/off flip applies on
+ * the next event, with no redeploy. Without the accessor the
+ * gate reads the init-time config only.
+ */
 export function createOtelMetricsGate(
   config: OtelMetricsConfig,
+  opts?: { getRuntimeOverrides?: () => Record<string, OtelRuntimeOverrideRecord> },
 ): (component: string) => boolean {
   return (component: string): boolean => {
     if (!config.masterEnabled) return false;
     if (config.metricsExporter === "none") return false;
     const domain = domainForComponent(component);
-    const switches = config.domains[domain];
-    if (!switches || !switches.enabled) return false;
+    const base = config.domains[domain];
+    if (!base) return false;
+    const switches = opts?.getRuntimeOverrides
+      ? effectiveOtelDomainSwitches(domain, base, opts.getRuntimeOverrides())
+      : base;
+    if (!switches.enabled) return false;
     return true;
   };
 }
@@ -329,12 +343,7 @@ export function createOtlpHttpMetricExporter(
       if (!guardFired) {
         guardFired = true;
         onError?.(
-          formatOtelMessage(
-            OBS_METRICS_FREE_TIER_GUARD,
-            `Analytics Engine daily write limit reached (${limit} writes for ${day}); ` +
-              `further metric writes are dropped for the rest of the day. ` +
-              `The OTLP/R2 archive path is unaffected.`,
-          ),
+          formatCatalogMessage(OBS_METRICS_FREE_TIER_GUARD, { limit, day }),
         );
       }
       return;
@@ -366,10 +375,7 @@ export function createOtlpHttpMetricExporter(
         }
       } catch (error) {
         onError?.(
-          formatOtelMessage(
-            OBS_METRICS_EXPORT_FAILED,
-            `Metric series extraction failed: ${error instanceof Error ? error.message : String(error)}`,
-          ),
+          formatCatalogMessage(OBS_METRICS_EXPORT_FAILED, { detail: `Metric series extraction failed: ${error instanceof Error ? error.message : String(error)}` }),
         );
       }
       // The OTLP/HTTP archive path.
@@ -377,10 +383,7 @@ export function createOtlpHttpMetricExporter(
       try {
         body = JsonMetricsSerializer.serializeRequest(metrics);
       } catch (error) {
-        const message = formatOtelMessage(
-          OBS_METRICS_EXPORT_FAILED,
-          `OTLP metrics serialization failed: ${error instanceof Error ? error.message : String(error)}`,
-        );
+        const message = formatCatalogMessage(OBS_METRICS_EXPORT_FAILED, { detail: `OTLP metrics serialization failed: ${error instanceof Error ? error.message : String(error)}` });
         onError?.(message);
         resultCallback({ code: ExportResultCode.FAILED });
         return;
@@ -394,19 +397,13 @@ export function createOtlpHttpMetricExporter(
           if (status >= 200 && status < 300) {
             resultCallback({ code: ExportResultCode.SUCCESS });
           } else {
-            const message = formatOtelMessage(
-              OBS_METRICS_EXPORT_FAILED,
-              `OTLP metrics export rejected with HTTP status ${status}`,
-            );
+            const message = formatCatalogMessage(OBS_METRICS_EXPORT_FAILED, { detail: `OTLP metrics export rejected with HTTP status ${status}` });
             onError?.(message);
             resultCallback({ code: ExportResultCode.FAILED });
           }
         })
         .catch((error: unknown) => {
-          const message = formatOtelMessage(
-            OBS_METRICS_EXPORT_FAILED,
-            `OTLP metrics export failed: ${error instanceof Error ? error.message : String(error)}`,
-          );
+          const message = formatCatalogMessage(OBS_METRICS_EXPORT_FAILED, { detail: `OTLP metrics export failed: ${error instanceof Error ? error.message : String(error)}` });
           onError?.(message);
           resultCallback({ code: ExportResultCode.FAILED });
         });

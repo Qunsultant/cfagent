@@ -34,8 +34,11 @@
  * resolver exists for it — see config/otel.json's comment and
  * docs/OBSERVABILITY.md §6.
  *
- * RESOLUTION, in this order: run > session > user > env >
- * config-file > built-in safe default. The config file
+ * RESOLUTION, in this order: run > session > user > runtime >
+ * env > config-file > built-in safe default. The `runtime`
+ * level (issue #5086, S7) is the platform admin's override
+ * from the config port (D1 otel_config_overrides); it replaces
+ * the deploy-time env/file source at runtime. The config file
  * (config/otel.json) carries the OPERATIONAL defaults (master
  * ON, logs=otlp, j1j7 ON, others OFF); the built-in safe
  * default (used only when the file is missing or a value is
@@ -68,14 +71,15 @@
  * in resolution order and unit-pinned, but in production today
  * only env + the config file are settable — the same boundary
  * as #1721/#1722/#1723/#1724/#1727/#1728, whose route-ctx
- * carriers are populated by no production caller yet. A
- * runtime flip WITHOUT a redeploy (switches stored in KV/D1,
+ * carriers are populated by no production caller yet. The
+ * runtime flip WITHOUT a redeploy (switches stored in D1,
  * read by the Worker at runtime, manageable through an admin
- * UI) is a LATER slice (S7 config + S8 dashboard); the config
- * port here is designed so the runtime store can replace the
- * env/config-file source later without touching domain code.
- * The audit-store routing for config-invalid events lands with
- * S5 (the audit slice), which owns the audit store — S1 logs
+ * UI) lands with S7 (#5086, src/config/otelConfigPort.ts):
+ * the `runtime` level in OtelScopeLevels is the slot the
+ * runtime store fills, between user and env — the config port
+ * is designed so the runtime store replaces the env/config-file
+ * source without touching domain code. The audit-store routing
+ * for config-invalid events lands with S5 (the audit slice), which owns the audit store — S1 logs
  * the coded OBS-1001 message and does not write a second audit
  * path (the telemetry taxonomy's one-audit-store rule).
  *
@@ -88,7 +92,7 @@
 
 import { createStructuredLogger } from "../observability/structuredLogger";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
-import { OBS_CONFIG_INVALID, formatOtelMessage } from "../observability/otelMessages";
+import { OBS_CONFIG_INVALID, formatCatalogMessage } from "../observability/otelMessages";
 import rawOtelConfig from "../../config/otel.json";
 
 /**
@@ -332,12 +336,23 @@ export interface OtelScopeLevels {
   run?: unknown;
   session?: unknown;
   user?: unknown;
+  /**
+   * Issue #5086 (S7) — the runtime override level: the value a
+   * platform admin set through the config port (D1
+   * otel_config_overrides, managed through the admin UI), read
+   * at runtime without a redeploy. It sits between user and env:
+   * the execution-owner carriers (run/session/user) still win,
+   * and the runtime store replaces the deploy-time env/file
+   * source (a runtime flip beats a baked-in env var or the
+   * config file). Absent = no override set for this switch.
+   */
+  runtime?: unknown;
   env?: unknown;
   file?: unknown;
 }
 
 /** Which level won the resolution, or "builtin" when every level was blank. */
-export type OtelResolutionSource = "run" | "session" | "user" | "env" | "file" | "builtin";
+export type OtelResolutionSource = "run" | "session" | "user" | "runtime" | "env" | "file" | "builtin";
 
 /** The coded event emitted when a switch value fails closed. */
 export function otelConfigErrorEvent(): string {
@@ -351,10 +366,11 @@ function logInvalid(
   fallback: string,
 ): void {
   getStructuredLog().warn(otelConfigErrorEvent(), {
-    message: formatOtelMessage(
-      OBS_CONFIG_INVALID,
-      `${switchName} unrecognized value at ${source}; failing closed to "${fallback}"`,
-    ),
+    message: formatCatalogMessage(OBS_CONFIG_INVALID, {
+      switch: switchName,
+      source,
+      fallback,
+    }),
     code: OBS_CONFIG_INVALID,
     switch: switchName,
     level: source,
@@ -454,12 +470,30 @@ function normalizeRatio(raw: unknown): number | "invalid" | null {
   return value;
 }
 
+/**
+ * Issue #5086 (S7) — the normalizers, exported for the config
+ * port (src/config/otelConfigPort.ts): a runtime override value
+ * is validated by the SAME normalizer the deploy-time resolver
+ * uses, so an override that would fail closed at resolve time
+ * is rejected at write time instead. The names are the
+ * `normalizeOtel*` exports; the module-private `normalize*`
+ * functions above are the implementations.
+ */
+export const normalizeOtelBoolean = normalizeBoolean;
+export const normalizeOtelExporter = normalizeExporter;
+export const normalizeOtelLevel = normalizeLevel;
+export const normalizeOtelSampling = normalizeSampling;
+export const normalizeOtelPositiveInt = normalizePositiveInt;
+export const normalizeOtelNonNegativeInt = normalizeNonNegativeInt;
+export const normalizeOtelRatio = normalizeRatio;
+
 type LevelEntry = [OtelResolutionSource, unknown];
 function orderedLevels(levels: OtelScopeLevels): LevelEntry[] {
   return [
     ["run", levels.run],
     ["session", levels.session],
     ["user", levels.user],
+    ["runtime", levels.runtime],
     ["env", levels.env],
     ["file", levels.file],
   ];
@@ -727,6 +761,33 @@ export function resolveOtelDomainSampling(
     };
   }
   return { ratio: 0, invalid: false, raw: undefined, source: "builtin" };
+}
+
+/**
+ * Issue #5086 (S7) — the effective domain switches with the
+ * runtime overrides applied (per event, from the override
+ * cache). The overrides record is structural (only `.value`
+ * is read), so the three domain gates share this one helper
+ * without a new named type: the `base` shape is the
+ * OtelDomainSwitches the gates already read. A runtime value
+ * that is absent or invalid falls back to the init-time
+ * value — the override never breaks the gate, it only flips
+ * it.
+ */
+export function effectiveOtelDomainSwitches(
+  domain: OtelDomain,
+  base: { enabled: boolean; level: OtelLevel; samplingRatio: number },
+  overrides: Readonly<Record<string, { value: unknown }>>,
+): { enabled: boolean; level: OtelLevel; samplingRatio: number } {
+  const enabledRaw = normalizeBoolean(overrides[`domains.${domain}.enabled`]?.value);
+  const levelRaw = normalizeLevel(overrides[`domains.${domain}.level`]?.value);
+  const samplingRaw = normalizeSampling(overrides[`domains.${domain}.samplingRatio`]?.value);
+  return {
+    enabled: enabledRaw === "invalid" || enabledRaw === null ? base.enabled : enabledRaw,
+    level: levelRaw === "invalid" || levelRaw === null ? base.level : levelRaw,
+    samplingRatio:
+      samplingRaw === "invalid" || samplingRaw === null ? base.samplingRatio : samplingRaw,
+  };
 }
 
 export interface OtelMetricsSettingsInput {

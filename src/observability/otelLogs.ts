@@ -52,7 +52,9 @@ import {
 import { JsonLogsSerializer } from "@opentelemetry/otlp-transformer";
 import { ExportResultCode } from "@opentelemetry/core";
 import type { OtelDestination, OtelDomain, OtelExporterKind, OtelLevel } from "../config/otelModes";
-import { OBS_EXPORT_FAILED, OBS_SINK_DEGRADED, formatOtelMessage } from "./otelMessages";
+import { effectiveOtelDomainSwitches } from "../config/otelModes";
+import type { OtelRuntimeOverrideRecord } from "../config/otelConfigPort";
+import { OBS_EXPORT_FAILED, OBS_SINK_DEGRADED, formatCatalogMessage } from "./otelMessages";
 import type { ObservabilityEvent, ObservabilityLevel, ObservabilitySink } from "./observabilityPorts";
 
 /** One domain's resolved switch values (enabled + level + sampling). */
@@ -137,16 +139,29 @@ function severityThresholdForLevel(level: OtelLevel): number {
  * everything. The `random` source is injectable so sampling is
  * deterministic in tests (defaults to Math.random).
  */
+/**
+ * The per-domain gate (the AOP aspect). S7 (#5086): the
+ * optional runtime accessor lets the gate consult the runtime
+ * override cache per event — a domain on/off, level, or
+ * sampling flip applies on the next event, with no redeploy.
+ * Without the accessor the gate reads the init-time config
+ * only (the pre-S7 behavior).
+ */
 export function createOtelDomainGate(
   config: OtelLoggingConfig,
   random: () => number = Math.random,
+  opts?: { getRuntimeOverrides?: () => Record<string, OtelRuntimeOverrideRecord> },
 ): (event: ObservabilityEvent) => boolean {
   return (event: ObservabilityEvent): boolean => {
     if (!config.masterEnabled) return false;
     if (config.logsExporter === "none") return false;
     const domain = domainForComponent(event.component);
-    const switches = config.domains[domain];
-    if (!switches || !switches.enabled) return false;
+    const base = config.domains[domain];
+    if (!base) return false;
+    const switches = opts?.getRuntimeOverrides
+      ? effectiveOtelDomainSwitches(domain, base, opts.getRuntimeOverrides())
+      : base;
+    if (!switches.enabled) return false;
     const severity = otelSeverityForLevel(event.level);
     if (severity < severityThresholdForLevel(switches.level)) return false;
     if (switches.samplingRatio <= 0) return false;
@@ -172,10 +187,7 @@ export function createOtlpHttpLogExporter(
       try {
         body = JsonLogsSerializer.serializeRequest(logs);
       } catch (error) {
-        const message = formatOtelMessage(
-          OBS_EXPORT_FAILED,
-          `OTLP serialization failed: ${error instanceof Error ? error.message : String(error)}`,
-        );
+        const message = formatCatalogMessage(OBS_EXPORT_FAILED, { detail: `OTLP serialization failed: ${error instanceof Error ? error.message : String(error)}` });
         onError?.(message);
         resultCallback({ code: ExportResultCode.FAILED });
         return;
@@ -189,19 +201,13 @@ export function createOtlpHttpLogExporter(
           if (status >= 200 && status < 300) {
             resultCallback({ code: ExportResultCode.SUCCESS });
           } else {
-            const message = formatOtelMessage(
-              OBS_EXPORT_FAILED,
-              `OTLP export rejected with HTTP status ${status}`,
-            );
+            const message = formatCatalogMessage(OBS_EXPORT_FAILED, { detail: `OTLP export rejected with HTTP status ${status}` });
             onError?.(message);
             resultCallback({ code: ExportResultCode.FAILED });
           }
         })
         .catch((error: unknown) => {
-          const message = formatOtelMessage(
-            OBS_EXPORT_FAILED,
-            `OTLP export failed: ${error instanceof Error ? error.message : String(error)}`,
-          );
+          const message = formatCatalogMessage(OBS_EXPORT_FAILED, { detail: `OTLP export failed: ${error instanceof Error ? error.message : String(error)}` });
           onError?.(message);
           resultCallback({ code: ExportResultCode.FAILED });
         });
@@ -342,10 +348,7 @@ export function createOtelObservabilitySink(deps: {
         timestamp: record.timestamp,
       });
     } catch (error) {
-      const message = formatOtelMessage(
-        OBS_SINK_DEGRADED,
-        `OTel sink could not emit "${event.type}": ${error instanceof Error ? error.message : String(error)}`,
-      );
+      const message = formatCatalogMessage(OBS_SINK_DEGRADED, { eventType: event.type, error: error instanceof Error ? error.message : String(error) });
       onError?.(message);
     }
   };

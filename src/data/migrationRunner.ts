@@ -1219,6 +1219,21 @@ export const MIGRATION_0069_REFERRAL_EXPIRY: DataMigration = {
   sql: d1MigrationSql(69),
 };
 
+/**
+ * Issue #5086 (S7, observability program #5080): the runtime
+ * override store for the one OTel config port. Append-only and
+ * versioned — one row per change (config_key, version), a NULL
+ * value_json is the tombstone that clears an override (the
+ * deploy-time value governs again) while keeping the history.
+ * No seed rows: with no overrides the deploy-time config
+ * governs, exactly as before.
+ */
+export const MIGRATION_0070_OTEL_CONFIG_OVERRIDES: DataMigration = {
+  version: 70,
+  name: "0070_otel_config_overrides",
+  sql: d1MigrationSql(70),
+};
+
 export const MIGRATION_0058_PRODUCT_VERSIONS: DataMigration = {
   version: 58,
   name: "0058_product_versions",
@@ -1454,6 +1469,7 @@ export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANC
   MIGRATION_0067_JOB_PIPELINE_RUN_WORKFLOW_INSTANCE_ID,
   MIGRATION_0068_USER_PROFILE_EMAIL,
   MIGRATION_0069_REFERRAL_EXPIRY,
+  MIGRATION_0070_OTEL_CONFIG_OVERRIDES,
 ];
 
 function splitStatements(sqlText: string): string[] {

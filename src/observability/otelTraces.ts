@@ -67,13 +67,15 @@ import {
 } from "@opentelemetry/sdk-trace";
 import { JsonTraceSerializer } from "@opentelemetry/otlp-transformer";
 import type { OtelDestination, OtelDomain, OtelExporterKind } from "../config/otelModes";
+import { effectiveOtelDomainSwitches } from "../config/otelModes";
 import type { OtelTracesSettings } from "../config/otelModes";
+import type { OtelRuntimeOverrideRecord } from "../config/otelConfigPort";
 import type { OtelDomainSwitches } from "./otelLogs";
 import { domainForComponent } from "./otelLogs";
 import {
   OBS_TRACES_EXPORT_FAILED,
   OBS_TRACES_FREE_TIER_GUARD,
-  formatOtelMessage,
+  formatCatalogMessage,
 } from "./otelMessages";
 import {
   newTraceContext,
@@ -117,16 +119,29 @@ export type OtelTransport = (
  * `random` source is injectable so sampling is deterministic
  * in tests (defaults to Math.random).
  */
+/**
+ * The per-domain gate (the AOP aspect). S7 (#5086): the
+ * optional runtime accessor lets the gate consult the runtime
+ * override cache per event — a domain on/off, level, or
+ * sampling flip applies on the next event, with no redeploy.
+ * Without the accessor the gate reads the init-time config
+ * only.
+ */
 export function createOtelTracesGate(
   config: OtelTracesConfig,
   random: () => number = Math.random,
+  opts?: { getRuntimeOverrides?: () => Record<string, OtelRuntimeOverrideRecord> },
 ): (component: string) => boolean {
   return (component: string): boolean => {
     if (!config.masterEnabled) return false;
     if (config.tracesExporter === "none") return false;
     const domain = domainForComponent(component);
-    const switches = config.domains[domain];
-    if (!switches || !switches.enabled) return false;
+    const base = config.domains[domain];
+    if (!base) return false;
+    const switches = opts?.getRuntimeOverrides
+      ? effectiveOtelDomainSwitches(domain, base, opts.getRuntimeOverrides())
+      : base;
+    if (!switches.enabled) return false;
     if (switches.level === "OFF") return false;
     if (switches.samplingRatio <= 0) return false;
     if (switches.samplingRatio >= 1) return true;
@@ -278,12 +293,7 @@ export function createOtlpHttpSpanExporter(
       if (!guardFired) {
         guardFired = true;
         onError?.(
-          formatOtelMessage(
-            OBS_TRACES_FREE_TIER_GUARD,
-            `Analytics Engine daily write limit reached (${limit} writes for ${day}); ` +
-              `further span writes are dropped for the rest of the day. ` +
-              `The OTLP/R2 archive path is unaffected.`,
-          ),
+          formatCatalogMessage(OBS_TRACES_FREE_TIER_GUARD, { limit, day }),
         );
       }
       return;
@@ -315,10 +325,7 @@ export function createOtlpHttpSpanExporter(
         }
       } catch (error) {
         onError?.(
-          formatOtelMessage(
-            OBS_TRACES_EXPORT_FAILED,
-            `Span event conversion failed: ${error instanceof Error ? error.message : String(error)}`,
-          ),
+          formatCatalogMessage(OBS_TRACES_EXPORT_FAILED, { detail: `Span event conversion failed: ${error instanceof Error ? error.message : String(error)}` }),
         );
       }
       // The OTLP/HTTP archive path. An empty batch exports
@@ -331,10 +338,7 @@ export function createOtlpHttpSpanExporter(
       try {
         body = JsonTraceSerializer.serializeRequest(spans);
       } catch (error) {
-        const message = formatOtelMessage(
-          OBS_TRACES_EXPORT_FAILED,
-          `OTLP traces serialization failed: ${error instanceof Error ? error.message : String(error)}`,
-        );
+        const message = formatCatalogMessage(OBS_TRACES_EXPORT_FAILED, { detail: `OTLP traces serialization failed: ${error instanceof Error ? error.message : String(error)}` });
         onError?.(message);
         resultCallback({ code: ExportResultCode.FAILED });
         return;
@@ -348,19 +352,13 @@ export function createOtlpHttpSpanExporter(
           if (status >= 200 && status < 300) {
             resultCallback({ code: ExportResultCode.SUCCESS });
           } else {
-            const message = formatOtelMessage(
-              OBS_TRACES_EXPORT_FAILED,
-              `OTLP traces export rejected with HTTP status ${status}`,
-            );
+            const message = formatCatalogMessage(OBS_TRACES_EXPORT_FAILED, { detail: `OTLP traces export rejected with HTTP status ${status}` });
             onError?.(message);
             resultCallback({ code: ExportResultCode.FAILED });
           }
         })
         .catch((error: unknown) => {
-          const message = formatOtelMessage(
-            OBS_TRACES_EXPORT_FAILED,
-            `OTLP traces export failed: ${error instanceof Error ? error.message : String(error)}`,
-          );
+          const message = formatCatalogMessage(OBS_TRACES_EXPORT_FAILED, { detail: `OTLP traces export failed: ${error instanceof Error ? error.message : String(error)}` });
           onError?.(message);
           resultCallback({ code: ExportResultCode.FAILED });
         });

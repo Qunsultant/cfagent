@@ -10,6 +10,10 @@
  *   archive file browser (`OtelArchivePanel`) — the archived
  *   OTLP JSONL objects S1/S2 write, listed by date with signal
  *   and size, each linked to its raw content. Read-only.
+ * - `view=config` (S7, #5086): the message catalog + runtime
+ *   config port (`OtelConfigPanel`) — every overridable key
+ *   with its effective value and winning source, editable by a
+ *   platform admin (each change versioned + audited).
  *
  * This module is pure: URLSearchParams in, values out. No
  * window, no fetch, no Cloudflare — the same hexagonal shape as
@@ -21,12 +25,13 @@
 export const OBSERVABILITY_TAB = "observability";
 
 /** The consolidated home's views. */
-export type ObservabilityView = "archive";
+export type ObservabilityView = "archive" | "config";
 
-export const OBSERVABILITY_VIEWS: readonly ObservabilityView[] = ["archive"];
+export const OBSERVABILITY_VIEWS: readonly ObservabilityView[] = ["archive", "config"];
 
 export const OBSERVABILITY_VIEW_LABELS: Record<ObservabilityView, string> = {
   archive: "Archive",
+  config: "Config",
 };
 
 export function isObservabilityView(value: unknown): value is ObservabilityView {

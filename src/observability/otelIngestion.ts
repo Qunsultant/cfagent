@@ -34,7 +34,7 @@
 
 import type { BlobStore } from "../services/blobStorePorts";
 import type { StructuredLogger } from "./structuredLogger";
-import { OBS_INGEST_FAILED, OBS_INGEST_REJECTED, formatOtelMessage } from "./otelMessages";
+import { OBS_INGEST_FAILED, OBS_INGEST_REJECTED, formatCatalogMessage } from "./otelMessages";
 
 /** The R2 key prefix for the OTel archive. */
 export const OTEL_ARCHIVE_PREFIX = "otel-archive/" as const;
@@ -144,17 +144,14 @@ export async function handleOtelLogsIngestion(input: OtelIngestionInput): Promis
   try {
     payload = JSON.parse(text) as unknown;
   } catch {
-    const error = formatOtelMessage(OBS_INGEST_REJECTED, "OTLP ingestion rejected: malformed JSON");
+    const error = formatCatalogMessage(OBS_INGEST_REJECTED, { reason: "malformed JSON" });
     log.error(error);
     return { status: 400, received: 0, stored: false, error, code: OBS_INGEST_REJECTED };
   }
 
   const records = collectLogRecords(payload);
   if (records === null) {
-    const error = formatOtelMessage(
-      OBS_INGEST_REJECTED,
-      "OTLP ingestion rejected: payload has no resourceLogs array",
-    );
+    const error = formatCatalogMessage(OBS_INGEST_REJECTED, { reason: "payload has no resourceLogs array" });
     log.error(error);
     return { status: 400, received: 0, stored: false, error, code: OBS_INGEST_REJECTED };
   }
@@ -173,10 +170,7 @@ export async function handleOtelLogsIngestion(input: OtelIngestionInput): Promis
       contentType: "application/json",
     });
   } catch (error) {
-    const message = formatOtelMessage(
-      OBS_INGEST_FAILED,
-      `OTLP ingestion failed writing ${key} to R2: ${error instanceof Error ? error.message : String(error)}`,
-    );
+    const message = formatCatalogMessage(OBS_INGEST_FAILED, { key, error: error instanceof Error ? error.message : String(error) });
     log.error(message);
     return {
       status: 500,
@@ -244,17 +238,14 @@ export async function handleOtelMetricsIngestion(
   try {
     payload = JSON.parse(text) as unknown;
   } catch {
-    const error = formatOtelMessage(OBS_INGEST_REJECTED, "OTLP ingestion rejected: malformed JSON");
+    const error = formatCatalogMessage(OBS_INGEST_REJECTED, { reason: "malformed JSON" });
     log.error(error);
     return { status: 400, received: 0, stored: false, error, code: OBS_INGEST_REJECTED };
   }
 
   const records = collectMetricRecords(payload);
   if (records === null) {
-    const error = formatOtelMessage(
-      OBS_INGEST_REJECTED,
-      "OTLP ingestion rejected: payload has no resourceMetrics array",
-    );
+    const error = formatCatalogMessage(OBS_INGEST_REJECTED, { reason: "payload has no resourceMetrics array" });
     log.error(error);
     return { status: 400, received: 0, stored: false, error, code: OBS_INGEST_REJECTED };
   }
@@ -273,10 +264,7 @@ export async function handleOtelMetricsIngestion(
       contentType: "application/json",
     });
   } catch (error) {
-    const message = formatOtelMessage(
-      OBS_INGEST_FAILED,
-      `OTLP ingestion failed writing ${key} to R2: ${error instanceof Error ? error.message : String(error)}`,
-    );
+    const message = formatCatalogMessage(OBS_INGEST_FAILED, { key, error: error instanceof Error ? error.message : String(error) });
     log.error(message);
     return {
       status: 500,
@@ -345,17 +333,14 @@ export async function handleOtelTracesIngestion(
   try {
     payload = JSON.parse(text) as unknown;
   } catch {
-    const error = formatOtelMessage(OBS_INGEST_REJECTED, "OTLP ingestion rejected: malformed JSON");
+    const error = formatCatalogMessage(OBS_INGEST_REJECTED, { reason: "malformed JSON" });
     log.error(error);
     return { status: 400, received: 0, stored: false, error, code: OBS_INGEST_REJECTED };
   }
 
   const records = collectSpanRecords(payload);
   if (records === null) {
-    const error = formatOtelMessage(
-      OBS_INGEST_REJECTED,
-      "OTLP ingestion rejected: payload has no resourceSpans array",
-    );
+    const error = formatCatalogMessage(OBS_INGEST_REJECTED, { reason: "payload has no resourceSpans array" });
     log.error(error);
     return { status: 400, received: 0, stored: false, error, code: OBS_INGEST_REJECTED };
   }
@@ -374,10 +359,7 @@ export async function handleOtelTracesIngestion(
       contentType: "application/json",
     });
   } catch (error) {
-    const message = formatOtelMessage(
-      OBS_INGEST_FAILED,
-      `OTLP ingestion failed writing ${key} to R2: ${error instanceof Error ? error.message : String(error)}`,
-    );
+    const message = formatCatalogMessage(OBS_INGEST_FAILED, { key, error: error instanceof Error ? error.message : String(error) });
     log.error(message);
     return {
       status: 500,

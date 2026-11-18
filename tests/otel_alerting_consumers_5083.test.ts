@@ -158,7 +158,9 @@ describe("S4 consumers route through the one alerting port", () => {
     expect(fake.reports.length).toBeGreaterThanOrEqual(2);
     expect(fake.reports.every((r) => r.source === "cap-alert")).toBe(true);
     expect(fake.reports.every((r) => r.code === "OBS-1018")).toBe(true);
-    expect(fake.reports.every((r) => r.ruleId.startsWith("placeholder-"))).toBe(true);
+    // S7 (#5086): the cap alert now routes through the real
+    // catalog rule (the severity resolves from the catalog).
+    expect(fake.reports.every((r) => r.ruleId === "rule:cap-breach")).toBe(true);
     // The delivery outcome still drives the alert state.
     expect(result.alerted).toContain("rowsRead");
     expect(result.tierAlerted).toContain("rowsRead:90");
