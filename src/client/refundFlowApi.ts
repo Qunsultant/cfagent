@@ -75,7 +75,7 @@ async function callJson(path: string, init?: RequestInit): Promise<unknown> {
 }
 
 function isRefundKind(value: unknown): value is RefundKind {
-  return value === "subscription" || value === "pay_per_run";
+  return value === "subscription" || value === "pay_per_run" || value === "bundle";
 }
 
 function isRefundStatus(value: unknown): value is RefundStatus {
@@ -133,12 +133,14 @@ function assertRefundRecord(value: unknown): RefundRecord {
 /**
  * POST /refunds — owner-or-operator, flag-gated. The answer is
  * returned for its id only; callers MUST re-read by id and render
- * the fresh read.
+ * the fresh read. Issue #5227: amountUSD is optional — a bundle
+ * request omits it and the server computes the prorated unused
+ * remainder; the other kinds still require it.
  */
 export async function requestRefund(input: {
   kind: RefundKind;
   originalPaymentRef: string;
-  amountUSD: number;
+  amountUSD?: number;
   reason: string;
 }): Promise<RefundRecord> {
   const data = await callJson(`${BASE}/refunds`, {

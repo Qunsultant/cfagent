@@ -28,6 +28,16 @@
  *   from the resolved payment source, and a request whose source
  *   carries no tenant is refused with a typed error — no
  *   client-supplied tenant is ever read.
+ * - request (bundle, #5227): the decided bundle policy — a
+ *   bundle is refundable inside the window for its prorated
+ *   unused remainder, computed by the policy from the remaining
+ *   entitlement period (bundle run-consumption tracking does not
+ *   exist yet). A supplied amount that differs from the computed
+ *   amount is refused; a fully-used bundle has nothing
+ *   refundable. The payment intent resolves through the bundle
+ *   resolver (stored id, else the provider subscription's first
+ *   invoice); an unresolvable bundle is refused at request time,
+ *   not queued for an execution that can never resolve.
  * - decide: "requested" -> "approved" | "denied" only. The service
  *   records the approver; the route restricts approvers to the
  *   operator list (policy approver is operator_hitl only).
@@ -37,6 +47,8 @@
  *   best-effort journal post, and the executed mark. A journal or
  *   entitlement failure never un-moves money that already moved:
  *   both are loud-logged and recorded, and execution still marks.
+ *   A bundle execution revokes the purchase (remaining access
+ *   ends with the unused remainder it refunds).
  * - compensation XOR (#2549, owner decision 2026-10-31 — both
  *   mechanisms stand, one per failure): the automatic failure
  *   compensation for a paid run is a one-time replacement-run
@@ -51,9 +63,11 @@
  */
 import type { CommercialStore } from "../data/commercialPorts";
 import type { JournalEntryInput } from "../data/journalPorts";
+import type { BundlePurchaseRecord, ProductBundleStore } from "../data/productBundles";
 import {
   assertRefundKind,
   assertKindApproved,
+  computeBundleProratedRefund,
   CRYPTO_NON_REFUNDABLE_MESSAGE,
   round2,
   validateRefundRequest,
@@ -194,7 +208,7 @@ export async function requestRefund(
       : (() => {
           throw new Error("reason is required.");
         })();
-  const amountUSD = Number(input.amountUSD);
+  let amountUSD = Number(input.amountUSD);
 
   let source: RefundPaymentSource | null = null;
   if (kind === "subscription") {
@@ -218,6 +232,65 @@ export async function requestRefund(
         `Subscription ${source.subscriptionId ?? originalPaymentRef} has no determinable payment rail; the refund is refused rather than guessed.`,
       );
     }
+  } else if (kind === "bundle") {
+    // Issue #5227: the decided bundle policy. The amount is
+    // computed by the policy from the unused remainder — never
+    // chosen by the requester — so a supplied amount that differs
+    // from the computed amount is refused, and a fully-used bundle
+    // (no unused remainder) has nothing refundable. The resolver
+    // already tried the stored id and the first invoice; an
+    // unresolvable bundle is refused here, not queued.
+    if (!deps.sourceResolver) {
+      throw new Error("Bundle refunds require a payment-source resolver.");
+    }
+    source = await deps.sourceResolver.resolve(originalPaymentRef);
+    if (!source) throw new Error(`No bundle purchase found for payment reference ${originalPaymentRef}.`);
+    if (source.userId !== input.requesterLogin && !input.isOperator) {
+      throw new Error("Only the bundle owner or a store operator may request this refund.");
+    }
+    if (source.rail === "crypto") throw new Error(CRYPTO_NON_REFUNDABLE_MESSAGE);
+    if (!source.paymentIntentId) {
+      throw new Error(
+        `Bundle ${originalPaymentRef} has no stored Stripe payment-intent id ` +
+          `(no resolvable first invoice); the refund cannot be executed and is refused rather than guessed.`,
+      );
+    }
+    if (!source.rail) {
+      throw new Error(
+        `Bundle ${originalPaymentRef} has no determinable payment rail; the refund is refused rather than guessed.`,
+      );
+    }
+    if (
+      source.originalAmountUSD === null ||
+      source.bundlePeriodStartMs === null ||
+      source.bundlePeriodStartMs === undefined ||
+      source.bundlePeriodEndMs === null ||
+      source.bundlePeriodEndMs === undefined
+    ) {
+      throw new Error(
+        `Bundle ${originalPaymentRef} has no entitlement period: the prorated refund amount is required and cannot be computed.`,
+      );
+    }
+    const computedAmountUSD = computeBundleProratedRefund(
+      {
+        originalAmountUSD: source.originalAmountUSD,
+        periodStartMs: source.bundlePeriodStartMs,
+        periodEndMs: source.bundlePeriodEndMs,
+      },
+      nowMs,
+    );
+    if (computedAmountUSD <= 0) {
+      throw new Error(
+        `Bundle ${originalPaymentRef} has no unused remainder and is non-refundable: the full period was used.`,
+      );
+    }
+    if (Number.isFinite(amountUSD) && round2(amountUSD) !== computedAmountUSD) {
+      throw new Error(
+        `The bundle refund amount must be $${computedAmountUSD.toFixed(2)} (the prorated unused remainder); ` +
+          `the amount is computed by the policy, not chosen by the requester.`,
+      );
+    }
+    amountUSD = computedAmountUSD;
   } else if (deps.sourceResolver) {
     // Issue #3180: a pay-per-run request resolves its payment
     // source when the caller wires a resolver — the saga presents
@@ -230,7 +303,7 @@ export async function requestRefund(
   }
 
   const rail =
-    kind === "subscription"
+    kind === "subscription" || kind === "bundle"
       ? (source?.rail ?? "card")
       : input.rail === "card" || input.rail === "crypto" || input.rail === "cfpay-channel"
         ? input.rail
@@ -252,14 +325,14 @@ export async function requestRefund(
   if (!Number.isFinite(originalPaidAtMs) || originalPaidAtMs <= 0) {
     throw new Error("originalPaidAtMs is required and must be a positive epoch-ms timestamp.");
   }
-  validateRefundRequest(policy, { rail, amountUSD, originalAmountUSD, originalPaidAtMs }, nowMs);
+  validateRefundRequest(policy, { rail, amountUSD, originalAmountUSD, originalPaidAtMs }, nowMs, kind);
 
   const record = await deps.refundStore.createRefund({
     id: `refund-${crypto.randomUUID().slice(0, 8)}`,
     kind,
     rail,
     tenantId,
-    userId: kind === "subscription" && source?.userId ? source.userId : input.requesterLogin,
+    userId: kind !== "pay_per_run" && source?.userId ? source.userId : input.requesterLogin,
     originalPaymentRef,
     subscriptionId: source?.subscriptionId ?? null,
     paymentIntentId: source?.paymentIntentId ?? null,
@@ -313,6 +386,12 @@ export async function applyRefundEntitlements(
     commercialStore?: CommercialStore;
     sourceResolver?: RefundPaymentSourceResolver;
     /**
+     * Issue #5227: the bundle store a bundle execution revokes
+     * through. Absent, a bundle execution records the honest
+     * consequence (money already moved; no revocation is claimed).
+     */
+    bundleStore?: ProductBundleStore;
+    /**
      * Issue #2549: for a pay-per-run refund, whether the run's
      * automatic failure credit was issued — executeRefund always
      * resolves this through the XOR guard before calling here
@@ -335,6 +414,27 @@ export async function applyRefundEntitlements(
           ? "yes"
           : "no";
     base = `none:run_already_delivered;failure_credit_issued:${creditFact}`;
+  } else if (record.kind === "bundle") {
+    // Issue #5227: refunding the unused remainder ends the
+    // remaining access — the purchase (and its entitlements) is
+    // revoked immediately, never left usable after its remainder
+    // was refunded. Cancel-at-period-end would let the user keep
+    // using what was refunded. A store that cannot find the
+    // purchase (or is unwired) records the honest consequence.
+    let purchase: BundlePurchaseRecord | null = null;
+    if (deps.bundleStore) {
+      purchase = await deps.bundleStore.findBundlePurchaseByPaymentRef(record.originalPaymentRef).catch(() => null);
+    }
+    if (!purchase) {
+      base = deps.bundleStore
+        ? "bundle_not_found:entitlement_unchanged"
+        : "bundle_store_unavailable:entitlement_unchanged";
+    } else {
+      if (deps.bundleStore) {
+        await deps.bundleStore.revokeBundlePurchase(purchase.id, nowMs);
+      }
+      base = `bundle_revoked:period_ended_at_${nowMs}`;
+    }
   } else {
     let subId = record.subscriptionId;
     if (!subId && deps.sourceResolver) {
@@ -386,7 +486,8 @@ export async function applyRefundEntitlements(
 /** Balanced double-entry journal effect of a refund: Dr 5000 (refunds contra-revenue) / Cr 1000 (funds). */
 export function buildRefundJournalEntries(record: RefundRecord): JournalEntryInput[] {
   const transactionRef = `${record.id}:refund`;
-  const family = record.family ?? (record.kind === "subscription" ? "subscription" : "pay_per_run");
+  const family =
+    record.family ?? (record.kind === "subscription" ? "subscription" : record.kind === "bundle" ? "bundle" : "pay_per_run");
   return [
     {
       transactionRef,
@@ -418,6 +519,8 @@ export async function executeRefund(
     sourceResolver?: RefundPaymentSourceResolver;
     subscriptionStore?: SubscriptionStore;
     commercialStore?: CommercialStore;
+    /** Issue #5227: required for bundle execution (revocation). */
+    bundleStore?: ProductBundleStore;
     gateway: RefundGatewayExecutor;
     postJournal?: (entries: JournalEntryInput[]) => Promise<void>;
     /** Issue #2549: required for pay-per-run execution (XOR guard). */
@@ -446,7 +549,9 @@ export async function executeRefund(
   // approve and execute refuses execution before any gateway call.
   assertKindApproved(policy, record.kind);
   // Re-validate against the CURRENT policy: a policy change between
-  // approval and execution cannot widen an approved refund.
+  // approval and execution cannot widen an approved refund. The
+  // kind travels so a bundle's policy-computed amount is not
+  // refused by the full-only rule (#5227).
   validateRefundRequest(
     policy,
     {
@@ -456,6 +561,7 @@ export async function executeRefund(
       originalPaidAtMs: record.originalPaidAtMs,
     },
     nowMs,
+    record.kind,
   );
   let paymentIntentId = record.paymentIntentId;
   if (!paymentIntentId && deps.sourceResolver) {
@@ -522,6 +628,7 @@ export async function executeRefund(
         subscriptionStore: deps.subscriptionStore,
         commercialStore: deps.commercialStore,
         sourceResolver: deps.sourceResolver,
+        bundleStore: deps.bundleStore,
         failureCreditIssued,
       },
       record,

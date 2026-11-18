@@ -83,6 +83,19 @@ export interface BillingPort {
     priceId: string,
     prorationBehavior: ProrationBehavior,
   ): Promise<ProviderSubscription>;
+  /**
+   * Issue #5227 — the payment-intent id of the provider
+   * subscription's FIRST invoice (GET /v1/invoices, earliest
+   * `created` wins). A bundle purchase is a subscription-mode
+   * Checkout whose session carries no payment intent, so the
+   * charge lives on the first invoice; the earliest invoice IS
+   * the purchase invoice — a later invoice is a renewal and is
+   * never returned. Null when no invoice exists, or when the
+   * earliest invoice carries no payment-intent id (fail closed,
+   * never a guessed id). Throws on a provider error; callers
+   * treat a throw as unresolvable.
+   */
+  retrieveFirstInvoicePaymentIntent(providerSubscriptionId: string): Promise<string | null>;
 }
 
 /** The client shape the Stripe adapter delegates to (PaymentGatewayService satisfies this; tests inject a fake). */
@@ -96,4 +109,6 @@ export interface StripeBillingClient {
     priceId: string,
     prorationBehavior: ProrationBehavior,
   ): Promise<ProviderSubscription>;
+  /** Issue #5227: see BillingPort.retrieveFirstInvoicePaymentIntent. */
+  retrieveFirstInvoicePaymentIntent(providerSubscriptionId: string): Promise<string | null>;
 }

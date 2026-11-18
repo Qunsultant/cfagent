@@ -232,6 +232,16 @@ export class PaymentGatewayService {
   }
 
   /**
+   * Issue #5227 — first-invoice payment-intent lookup, via the
+   * Stripe strategy (the only Stripe API surface). Throws on
+   * missing configuration or transport failure (fail closed).
+   */
+  async retrieveFirstInvoicePaymentIntent(providerSubscriptionId: string): Promise<string | null> {
+    const stripeStrategy = PaymentStrategyFactory.getStrategy("stripe") as StripePaymentStrategy;
+    return stripeStrategy.retrieveFirstInvoicePaymentIntent(this.env, providerSubscriptionId);
+  }
+
+  /**
    * Captures an authorized payment order across Stripe or PayPal
    */
   async capturePayment(params: {

@@ -36,6 +36,7 @@ import {
 const KINDS: Array<{ kind: RefundKind; label: string; approveLabel: string }> = [
   { kind: "subscription", label: "Subscription refunds", approveLabel: "Approve subscription refunds" },
   { kind: "pay_per_run", label: "Pay-per-run refunds", approveLabel: "Approve pay-per-run refunds" },
+  { kind: "bundle", label: "Bundle refunds", approveLabel: "Approve bundle refunds" },
 ];
 
 function statusOf(error: unknown): number {
