@@ -16,6 +16,10 @@ import {
   IAAA_AUDIT_ARCHIVE_KEY_PREFIX,
   IAAA_AUDIT_LOG_KEY,
 } from "../src/security/iaaaAuditStore";
+import {
+  IAAA_AUDIT_KEY_PREFIX,
+  IAAA_AUDIT_TABLE_KEY_PREFIX,
+} from "../src/data/auditLogPorts";
 export interface FakeSessionStore {
   namespace: {
     idFromName: (name: string) => unknown;
@@ -23,6 +27,8 @@ export interface FakeSessionStore {
   };
   /** Seed or inspect raw entries. Keyed by `${ns}:${key}`. */
   store: Map<string, string>;
+  /** #3251 (O1) — the append-only table mirror: one row per event, chain order. Lives outside the kv map, exactly like the real DO's separate SQLite table. */
+  auditTable: Array<{ seq: number; eventJson: string }>;
   /** Seed one entry; objects are JSON-encoded. */
   seed: (ns: string, key: string, value: unknown) => void;
 }
@@ -33,6 +39,40 @@ export function makeFakeSessionStore(): FakeSessionStore {
   // per row; the fake's get/put ignore TTLs, so consume keeps its own
   // ledger — enough to mirror the single-flight semantics, #1245).
   const claims = new Map<string, number>();
+  // #3251 (O1) — the append-only table mirror (see the interface).
+  const auditTable: Array<{ seq: number; eventJson: string }> = [];
+  const parseAuditArray = (raw: string | undefined): IaaaAuditEvent[] | null => {
+    if (raw === undefined) return [];
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      return Array.isArray(parsed) ? (parsed as IaaaAuditEvent[]) : null;
+    } catch {
+      return null;
+    }
+  };
+  const migrateAuditSegments = ():
+    | { migrated: number; alreadyMigrated: boolean }
+    | { error: string } => {
+    if (auditTable.length > 0) return { migrated: 0, alreadyMigrated: true };
+    const live = parseAuditArray(store.get(`sessions:${IAAA_AUDIT_LOG_KEY}`));
+    if (live === null) return { error: "audit log corrupt" };
+    const archiveKeys = [...store.keys()]
+      .filter((kk) => kk.startsWith(`sessions:${IAAA_AUDIT_ARCHIVE_KEY_PREFIX}`))
+      .sort();
+    const segments: IaaaAuditEvent[][] = [];
+    for (const ak of archiveKeys) {
+      const seg = parseAuditArray(store.get(ak));
+      if (seg === null) return { error: "audit log corrupt" };
+      segments.push(seg);
+    }
+    const events = [...segments.flat(), ...live];
+    let seq = 0;
+    for (const event of events) {
+      seq += 1;
+      auditTable.push({ seq, eventJson: JSON.stringify(event) });
+    }
+    return { migrated: events.length, alreadyMigrated: false };
+  };
   const namespace = {
     idFromName: (name: string) => name,
     get: (_id: unknown) => ({
@@ -95,6 +135,7 @@ export function makeFakeSessionStore(): FakeSessionStore {
             liveMax?: number;
             segmentSize?: number;
             maxArchiveSegments?: number;
+            substrate?: string;
           };
           const clamp = (v: unknown, hard: number): number =>
             typeof v === "number" && Number.isInteger(v) && v > 0 ? Math.min(v, hard) : hard;
@@ -104,16 +145,34 @@ export function makeFakeSessionStore(): FakeSessionStore {
           if (body.ns !== "sessions" || body.key !== IAAA_AUDIT_LOG_KEY) {
             return Response.json({ error: "audit-append is restricted" }, { status: 400 });
           }
-          const parseArray = (raw: string | undefined): IaaaAuditEvent[] | null => {
-            if (raw === undefined) return [];
-            try {
-              const parsed: unknown = JSON.parse(raw);
-              return Array.isArray(parsed) ? (parsed as IaaaAuditEvent[]) : null;
-            } catch {
-              return null;
+          // #3251 (O1) — the table substrate mirror: lazy
+          // migration, then tail + COUNT(*) cap + one row insert.
+          if (caps.substrate === "table") {
+            const migration = migrateAuditSegments();
+            if ("error" in migration) {
+              return Response.json({ error: migration.error }, { status: 500 });
             }
-          };
-          const live = parseArray(store.get(k));
+            if (auditTable.length >= liveMax + maxSegments * segmentSize) {
+              return Response.json({ storeFull: true });
+            }
+            const input = JSON.parse(body.value ?? "") as Omit<
+              IaaaAuditEvent,
+              "id" | "previousEventHash" | "eventHash"
+            >;
+            const tail =
+              auditTable.length > 0
+                ? (JSON.parse(auditTable[auditTable.length - 1].eventJson) as IaaaAuditEvent)
+                : null;
+            const previousEventHash = tail ? tail.eventHash : null;
+            const unsigned = { ...input, id: crypto.randomUUID(), previousEventHash };
+            const event: IaaaAuditEvent = {
+              ...unsigned,
+              eventHash: await computeEventHash(unsigned),
+            };
+            auditTable.push({ seq: auditTable.length + 1, eventJson: JSON.stringify(event) });
+            return Response.json({ ok: true, event });
+          }
+          const live = parseAuditArray(store.get(k));
           if (live === null) {
             return Response.json({ error: "audit log corrupt" }, { status: 500 });
           }
@@ -122,7 +181,7 @@ export function makeFakeSessionStore(): FakeSessionStore {
             .sort();
           const segments: IaaaAuditEvent[][] = [];
           for (const ak of archiveKeys) {
-            const seg = parseArray(store.get(ak));
+            const seg = parseAuditArray(store.get(ak));
             if (seg === null) {
               return Response.json({ error: "audit log corrupt" }, { status: 500 });
             }
@@ -164,6 +223,49 @@ export function makeFakeSessionStore(): FakeSessionStore {
           store.set(k, JSON.stringify(live));
           return Response.json({ ok: true, event });
         }
+        if (body.op === "audit-list") {
+          // #3251 (O1) — mirrors the real DO's `audit-list` op:
+          // table rows while the table holds any, else the
+          // segment entries in key order; corrupt bytes fail loud.
+          if (body.ns !== "sessions" || body.key !== IAAA_AUDIT_LOG_KEY) {
+            return Response.json({ error: "audit-list is restricted" }, { status: 400 });
+          }
+          if (auditTable.length > 0) {
+            // Raw rows, unparsed: the client parses each event
+            // JSON and throws the corrupt error — the same split
+            // as the old `list` op.
+            return Response.json({
+              entries: auditTable.map(({ seq, eventJson }) => ({
+                key: `${IAAA_AUDIT_TABLE_KEY_PREFIX}${String(seq).padStart(6, "0")}`,
+                value: eventJson,
+              })),
+            });
+          }
+          const entries: Array<{ key: string; value: string }> = [];
+          for (const [kk, v] of store) {
+            if (!kk.startsWith(`${body.ns}:`)) continue;
+            const keyPart = kk.slice(body.ns.length + 1);
+            if (!keyPart.startsWith(IAAA_AUDIT_KEY_PREFIX)) continue;
+            entries.push({ key: keyPart, value: v });
+          }
+          entries.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+          return Response.json({ entries });
+        }
+        if (body.op === "audit-migrate") {
+          // #3251 (O1) — mirrors the real DO's `audit-migrate` op.
+          if (body.ns !== "sessions" || body.key !== IAAA_AUDIT_LOG_KEY) {
+            return Response.json({ error: "audit-migrate is restricted" }, { status: 400 });
+          }
+          const migration = migrateAuditSegments();
+          if ("error" in migration) {
+            return Response.json({ error: migration.error }, { status: 500 });
+          }
+          return Response.json({
+            ok: true,
+            migrated: migration.migrated,
+            alreadyMigrated: migration.alreadyMigrated,
+          });
+        }
         return Response.json({ error: "unknown op" }, { status: 400 });
       },
     }),
@@ -171,6 +273,7 @@ export function makeFakeSessionStore(): FakeSessionStore {
   return {
     namespace,
     store,
+    auditTable,
     seed: (ns: string, key: string, value: unknown) => {
       store.set(
         `${ns}:${key}`,

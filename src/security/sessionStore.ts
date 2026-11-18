@@ -4,6 +4,10 @@ import {
   DoSessionStoreAdapter,
   STMT_ARCHIVE_INSERT,
   STMT_ARCHIVE_LIST,
+  STMT_AUDIT_TABLE_COUNT,
+  STMT_AUDIT_TABLE_INSERT,
+  STMT_AUDIT_TABLE_LIST,
+  STMT_AUDIT_TABLE_TAIL,
   STMT_DELETE,
   STMT_EXPIRES_GET,
   STMT_LIST,
@@ -19,6 +23,10 @@ import {
   IAAA_AUDIT_ARCHIVE_KEY_PREFIX,
   IAAA_AUDIT_LOG_KEY,
 } from "./iaaaAuditStore";
+import {
+  IAAA_AUDIT_KEY_PREFIX,
+  IAAA_AUDIT_TABLE_KEY_PREFIX,
+} from "../data/auditLogPorts";
 
 /**
  * Session and credential store (issue #329 follow-up).
@@ -43,7 +51,7 @@ import {
  * value ever appears in the statement field.
  */
 interface StoreOp {
-  op: "get" | "put" | "delete" | "consume" | "list" | "audit-append";
+  op: "get" | "put" | "delete" | "consume" | "list" | "audit-append" | "audit-list" | "audit-migrate";
   ns: string;
   key: string;
   value?: string;
@@ -52,6 +60,13 @@ interface StoreOp {
   liveMax?: number;
   segmentSize?: number;
   maxArchiveSegments?: number;
+  /**
+   * #3251 (O1) — "table" selects the append-only table
+   * substrate for audit-append; absent (or any other value)
+   * keeps the segment substrate. Only the flag-ON composition
+   * sends it.
+   */
+  substrate?: string;
 }
 
 /**
@@ -168,6 +183,77 @@ export class SessionStore extends DurableObject<Env> {
       );
     }
     return this.kv;
+  }
+
+  /**
+   * #3251 (O1) — explode the segment rows into the append-only
+   * table, chain order preserved (archive segments in key
+   * order, then the live key), one row per event with the event
+   * JSON byte-identical to the segment bytes. Parse-first, then
+   * insert: a corrupt live or archive value throws before any
+   * row is written, and the segment bytes are left untouched
+   * (callers convert the throw into the 500 "audit log corrupt"
+   * reply the segments branch returns). Idempotent: a populated
+   * table migrates nothing (`alreadyMigrated`). Old segment rows
+   * are NOT deleted here — their removal is a separate named
+   * step, never part of the migration.
+   */
+  private migrateSegmentsToTable(): {
+    migrated: number;
+    alreadyMigrated: boolean;
+    rowsRead: number;
+    rowsWritten: number;
+  } {
+    let rowsRead = 0;
+    let rowsWritten = 0;
+    const countMeasured = this.store().exec<{ n: number }>(STMT_AUDIT_TABLE_COUNT);
+    rowsRead += countMeasured.rowsRead;
+    rowsWritten += countMeasured.rowsWritten;
+    if ((countMeasured.rows[0]?.n ?? 0) > 0) {
+      return { migrated: 0, alreadyMigrated: true, rowsRead, rowsWritten };
+    }
+    const liveMeasured = this.store().exec<{ value: string }>(STMT_POINT_GET, "sessions", IAAA_AUDIT_LOG_KEY);
+    rowsRead += liveMeasured.rowsRead;
+    rowsWritten += liveMeasured.rowsWritten;
+    const liveRow = liveMeasured.rows[0];
+    let live: IaaaAuditEvent[];
+    if (!liveRow) {
+      live = [];
+    } else {
+      try {
+        const parsed: unknown = JSON.parse(liveRow.value);
+        if (!Array.isArray(parsed)) throw new Error("not an array");
+        live = parsed as IaaaAuditEvent[];
+      } catch {
+        throw new Error("audit log corrupt");
+      }
+    }
+    const archiveMeasured = this.store().exec<{ key: string; value: string }>(
+      STMT_ARCHIVE_LIST,
+      "sessions",
+      `${IAAA_AUDIT_ARCHIVE_KEY_PREFIX}%`,
+    );
+    rowsRead += archiveMeasured.rowsRead;
+    rowsWritten += archiveMeasured.rowsWritten;
+    const segments: IaaaAuditEvent[][] = [];
+    for (const row of archiveMeasured.rows) {
+      try {
+        const parsed: unknown = JSON.parse(row.value);
+        if (!Array.isArray(parsed)) throw new Error("not an array");
+        segments.push(parsed as IaaaAuditEvent[]);
+      } catch {
+        throw new Error("audit log corrupt");
+      }
+    }
+    const events = [...segments.flat(), ...live];
+    let seq = 0;
+    for (const event of events) {
+      seq += 1;
+      const inserted = this.store().exec(STMT_AUDIT_TABLE_INSERT, seq, JSON.stringify(event));
+      rowsRead += inserted.rowsRead;
+      rowsWritten += inserted.rowsWritten;
+    }
+    return { migrated: events.length, alreadyMigrated: false, rowsRead, rowsWritten };
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -317,6 +403,92 @@ export class SessionStore extends DurableObject<Env> {
         const maxSegments = clampAuditCap(body.maxArchiveSegments, AUDIT_SEGMENTS_HARD);
         const totalCap = liveMax + maxSegments * segmentSize;
 
+        // #3251 (O1) — the append-only table substrate, behind
+        // the flag (the client sends substrate "table" only on
+        // the flag-ON composition). Same op, same input gate,
+        // same caps and chain — only the row shape differs: the
+        // tail is one indexed row, the cap is a COUNT(*), the
+        // write is one row insert. The segments branch below is
+        // untouched (flag-OFF keeps it). The first table append
+        // migrates the segment bytes inline, in this same
+        // serialized request, so the flag can flip before or
+        // after an explicit migration without forking the chain.
+        if (body.substrate === "table") {
+          let rowsRead = 0;
+          let rowsWritten = 0;
+          let migration: {
+            migrated: number;
+            alreadyMigrated: boolean;
+            rowsRead: number;
+            rowsWritten: number;
+          };
+          try {
+            migration = this.migrateSegmentsToTable();
+          } catch {
+            return Response.json({ error: "audit log corrupt" }, { status: 500 });
+          }
+          rowsRead += migration.rowsRead;
+          rowsWritten += migration.rowsWritten;
+          const tailMeasured = this.store().exec<{ seq: number; event_json: string }>(
+            STMT_AUDIT_TABLE_TAIL,
+          );
+          rowsRead += tailMeasured.rowsRead;
+          rowsWritten += tailMeasured.rowsWritten;
+          const tailRow = tailMeasured.rows[0];
+          let tailHash: string | null = null;
+          let nextSeq = 1;
+          if (tailRow) {
+            try {
+              const tailEvent: unknown = JSON.parse(tailRow.event_json);
+              if (
+                typeof tailEvent !== "object" ||
+                tailEvent === null ||
+                typeof (tailEvent as { eventHash?: unknown }).eventHash !== "string"
+              ) {
+                throw new Error("not an event");
+              }
+              tailHash = (tailEvent as { eventHash: string }).eventHash;
+            } catch {
+              return Response.json({ error: "audit log corrupt" }, { status: 500 });
+            }
+            nextSeq = tailRow.seq + 1;
+          }
+          const countMeasured = this.store().exec<{ n: number }>(STMT_AUDIT_TABLE_COUNT);
+          rowsRead += countMeasured.rowsRead;
+          rowsWritten += countMeasured.rowsWritten;
+          const stored = countMeasured.rows[0]?.n ?? 0;
+          if (stored >= totalCap) {
+            // Same bound, same signal as the segments branch:
+            // the client reports AUDIT_STORE_FULL, fail-visible,
+            // and no evidence is deleted.
+            return Response.json({
+              storeFull: true,
+              rowsRead,
+              rowsWritten,
+              statement: STMT_AUDIT_TABLE_COUNT,
+            });
+          }
+          const unsigned = {
+            ...auditEventFromInput(input),
+            id: crypto.randomUUID(),
+            previousEventHash: tailHash,
+          };
+          const event: IaaaAuditEvent = {
+            ...unsigned,
+            eventHash: await computeEventHash(unsigned),
+          };
+          const inserted = this.store().exec(STMT_AUDIT_TABLE_INSERT, nextSeq, JSON.stringify(event));
+          rowsRead += inserted.rowsRead;
+          rowsWritten += inserted.rowsWritten;
+          return Response.json({
+            ok: true,
+            event,
+            rowsRead,
+            rowsWritten,
+            statement: STMT_AUDIT_TABLE_INSERT,
+          });
+        }
+
         let rowsRead = 0;
         let rowsWritten = 0;
         const liveMeasured = this.store().exec<{ value: string }>(STMT_POINT_GET, ns, key);
@@ -413,6 +585,95 @@ export class SessionStore extends DurableObject<Env> {
           rowsRead,
           rowsWritten,
           statement: STMT_UPSERT,
+        });
+      }
+
+      if (op === "audit-list") {
+        // #3251 (O1) — list the IAAA chain for the flag-ON
+        // composition. One op, server-side substrate selection:
+        // table rows while the table holds any (the migrated /
+        // live chain), else the segment entries (pre-migration
+        // bytes, legacy shape included) — so bytes written
+        // before the cutover read identically. A corrupt row or
+        // segment fails loud with no partial evidence; the stale
+        // segment bytes behind a populated table are never
+        // parsed (they are retained, not live).
+        if (ns !== "sessions" || key !== IAAA_AUDIT_LOG_KEY) {
+          return Response.json(
+            { error: "audit-list is restricted to the sessions audit log key" },
+            { status: 400 },
+          );
+        }
+        let rowsRead = 0;
+        let rowsWritten = 0;
+        const countMeasured = this.store().exec<{ n: number }>(STMT_AUDIT_TABLE_COUNT);
+        rowsRead += countMeasured.rowsRead;
+        rowsWritten += countMeasured.rowsWritten;
+        if ((countMeasured.rows[0]?.n ?? 0) > 0) {
+          const listed = this.store().exec<{ seq: number; event_json: string }>(STMT_AUDIT_TABLE_LIST);
+          rowsRead += listed.rowsRead;
+          rowsWritten += listed.rowsWritten;
+          // Raw rows, unparsed: the client parses each event
+          // JSON and throws the corrupt error — the same split
+          // as the old `list` op, so a corrupt row surfaces as
+          // the corrupt error at the port, not a generic read
+          // failure.
+          return Response.json({
+            entries: listed.rows.map((row) => ({
+              key: `${IAAA_AUDIT_TABLE_KEY_PREFIX}${String(row.seq).padStart(6, "0")}`,
+              value: row.event_json,
+            })),
+            rowsRead,
+            rowsWritten,
+            statement: STMT_AUDIT_TABLE_LIST,
+          });
+        }
+        const listed = this.store().exec<{ key: string; value: string }>(
+          STMT_LIST,
+          ns,
+          `${IAAA_AUDIT_KEY_PREFIX.replace(/[\\%_]/g, "\\$&")}%`,
+          Date.now(),
+        );
+        rowsRead += listed.rowsRead;
+        rowsWritten += listed.rowsWritten;
+        return Response.json({
+          entries: listed.rows,
+          rowsRead,
+          rowsWritten,
+          statement: STMT_LIST,
+        });
+      }
+
+      if (op === "audit-migrate") {
+        // #3251 (O1) — explicit migration of the segment bytes
+        // into the append-only table: the cutover tool (the
+        // table-append branch migrates lazily the same way, so
+        // the flag can flip before or after this runs).
+        // Idempotent: a populated table migrates nothing.
+        if (ns !== "sessions" || key !== IAAA_AUDIT_LOG_KEY) {
+          return Response.json(
+            { error: "audit-migrate is restricted to the sessions audit log key" },
+            { status: 400 },
+          );
+        }
+        let migration: {
+          migrated: number;
+          alreadyMigrated: boolean;
+          rowsRead: number;
+          rowsWritten: number;
+        };
+        try {
+          migration = this.migrateSegmentsToTable();
+        } catch {
+          return Response.json({ error: "audit log corrupt" }, { status: 500 });
+        }
+        return Response.json({
+          ok: true,
+          migrated: migration.migrated,
+          alreadyMigrated: migration.alreadyMigrated,
+          rowsRead: migration.rowsRead,
+          rowsWritten: migration.rowsWritten,
+          statement: STMT_AUDIT_TABLE_INSERT,
         });
       }
 

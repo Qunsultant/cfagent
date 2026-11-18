@@ -18,6 +18,8 @@ import {
 } from "../src/security/iaaaAudit";
 import {
   AUDIT_PORTS_FLAG,
+  IAAA_AUDIT_KEY_PREFIX,
+  IAAA_AUDIT_TABLE_KEY_PREFIX,
   isAuditPortsEnabled,
 } from "../src/data/auditLogPorts";
 import {
@@ -45,15 +47,25 @@ import type { Env } from "../src/types";
  *  - the port's in-memory adapter, which mirrors the op's caps,
  *    clamps, rotation and storeFull signal over its own map.
  *
+ * #3251 (O1): the flag-ON composition now writes the
+ * append-only `iaaa_audit_events` TABLE in the same SessionStore
+ * DO SQLite instead of segments. The two substrates hold the
+ * same chain under different shapes: flag-OFF reads/writes
+ * segment bytes, flag-ON reads/writes table rows, and migration
+ * (lazy on first table append, or explicit via `audit-migrate`)
+ * is the bridge between them — never a sync. The in-memory
+ * adapter mirrors the table with its own `tableRows` array.
+ *
  * Rows: genesis chaining; verifyChain(list()) across rotation
  * boundaries; boundary pins at liveMax-1 / liveMax / totalCap /
  * totalCap+1; cap refusal as AUDIT_STORE_FULL data writing
  * nothing; corrupt live/archive bytes failing loud and left
  * untouched; the F-18 concurrency pin (parallel recordAuditEvent
  * calls produce one unforked chain) on the DO adapter over the
- * REAL SessionStore; cross-composition reads (bytes written by
- * one composition verify under the other, including segments
- * seeded in the pre-slice legacy byte shape); the atomic
+ * REAL SessionStore; cross-composition reads (bytes written
+ * flag-OFF verify flag-ON before migration and identically after
+ * it; the two substrates diverge after cutover by design,
+ * including segments seeded in the pre-slice legacy byte shape);
  * backend's append() refusing a caller-chained event; the
  * no-backend fail-visible parity; audit-access events recorded
  * through the port.
@@ -235,7 +247,16 @@ describe("audit log conformance — genesis and chaining (both compositions)", (
 });
 
 describe("audit log conformance — rotation and cap boundaries (both compositions)", () => {
-  async function boundaryRun(make: () => AuditStore, fake?: FakeSessionStore) {
+  // #3251 (O1): the two substrates store the same chain under
+  // different shapes. The segment substrate rotates into archive
+  // keys; the table substrate has no rotation at all — it appends
+  // rows, so the "rotation" checkpoints assert the table holds
+  // exactly the events written and no segment bytes exist.
+  async function boundaryRun(
+    make: () => AuditStore,
+    fake?: FakeSessionStore,
+    substrate: "segments" | "table" = "segments",
+  ) {
     const store = make();
     // liveMax-1 events: nothing has rotated.
     await appendN(store, CAPS.liveMax - 1, 0, 2_000_000);
@@ -247,6 +268,14 @@ describe("audit log conformance — rotation and cap boundaries (both compositio
         k.startsWith(`sessions:${IAAA_AUDIT_ARCHIVE_KEY_PREFIX}`),
       );
       expect(archiveKeys).toHaveLength(0);
+      if (substrate === "table") {
+        expect(fake.auditTable).toHaveLength(CAPS.liveMax - 1);
+        expect(
+          [...fake.store.keys()].filter((k) =>
+            k.startsWith(`sessions:${IAAA_AUDIT_KEY_PREFIX}`),
+          ),
+        ).toHaveLength(0);
+      }
     }
     // liveMax events: still no rotation (rotation is past liveMax).
     await appendN(store, 1, 4, 2_000_004);
@@ -258,6 +287,9 @@ describe("audit log conformance — rotation and cap boundaries (both compositio
         k.startsWith(`sessions:${IAAA_AUDIT_ARCHIVE_KEY_PREFIX}`),
       );
       expect(archiveKeys).toHaveLength(0);
+      if (substrate === "table") {
+        expect(fake.auditTable).toHaveLength(CAPS.liveMax);
+      }
     }
     // Past liveMax: rotation preserves order and the chain.
     await appendN(store, 1, 5, 2_000_005);
@@ -269,7 +301,12 @@ describe("audit log conformance — rotation and cap boundaries (both compositio
       const archiveKeys = [...fake.store.keys()].filter((k) =>
         k.startsWith(`sessions:${IAAA_AUDIT_ARCHIVE_KEY_PREFIX}`),
       );
-      expect(archiveKeys.length).toBeGreaterThanOrEqual(1);
+      if (substrate === "segments") {
+        expect(archiveKeys.length).toBeGreaterThanOrEqual(1);
+      } else {
+        expect(archiveKeys).toHaveLength(0);
+        expect(fake.auditTable).toHaveLength(CAPS.liveMax + 1);
+      }
     }
     // Up to totalCap (9): every append succeeds, nothing deleted.
     await appendN(store, 3, 6, 2_000_006);
@@ -304,6 +341,7 @@ describe("audit log conformance — rotation and cap boundaries (both compositio
     await boundaryRun(
       () => createAuditPortsFromNamespace(fake.namespace as never, CAPS),
       fake,
+      "table",
     );
   });
 
@@ -328,17 +366,24 @@ describe("audit log conformance — corruption fails loud, bytes untouched", () 
     expect(fake.store.get(`sessions:${IAAA_AUDIT_LOG_KEY}`)).toBe("{not json");
   });
 
+  // #3251 (O1): the flag-ON composition writes the table, never
+  // segments — so a corrupt archive segment can only reach it
+  // through a legacy segment store, seeded here through the
+  // flag-OFF composition. The flag-ON append's lazy migration
+  // must fail loud on the corrupt bytes before any row is written.
   it("corrupt archive segment: append refused, list throws, bytes untouched (flag-ON)", async () => {
     const fake = makeFakeSessionStore();
-    const store = createAuditPortsFromNamespace(fake.namespace as never, CAPS);
-    await appendN(store, 7, 0, 3_100_000);
+    const offStore = createAtomicAuditStore(fake.namespace as never, CAPS);
+    await appendN(offStore, 7, 0, 3_100_000);
     const segKey = `sessions:${IAAA_AUDIT_ARCHIVE_KEY_PREFIX}000000`;
     expect(fake.store.has(segKey)).toBe(true);
     fake.store.set(segKey, "{corrupt segment");
+    const store = createAuditPortsFromNamespace(fake.namespace as never, CAPS);
     const result = await recordAuditEvent(store, auditInput("event:7", 3_100_007));
     expect(result.ok).toBe(false);
     await expect(store.list()).rejects.toThrow(/corrupt/);
     expect(fake.store.get(segKey)).toBe("{corrupt segment");
+    expect(fake.auditTable).toHaveLength(0);
   });
 
   it("corrupt archive segment: in-memory adapter fails loud too", async () => {
@@ -373,31 +418,88 @@ describe("audit log conformance — append() can never store a caller-chained ev
 });
 
 describe("audit log conformance — cross-composition reads", () => {
-  it("bytes written flag-OFF verify flag-ON, and vice versa (rotations included)", async () => {
+  // #3251 (O1) — explicit migration of a SessionStore namespace
+  // through the fake DO's `audit-migrate` op (the real DO's op
+  // has the same shape).
+  async function migrateAuditLog(namespace: FakeSessionStore["namespace"]): Promise<{
+    ok: boolean;
+    migrated: number;
+    alreadyMigrated: boolean;
+  }> {
+    const res = await namespace.get("kv").fetch(
+      new Request("https://session-store.internal/kv", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          op: "audit-migrate",
+          ns: "sessions",
+          key: IAAA_AUDIT_LOG_KEY,
+        }),
+      }),
+    );
+    return (await res.json()) as {
+      ok: boolean;
+      migrated: number;
+      alreadyMigrated: boolean;
+    };
+  }
+
+  // #3251 (O1): the two compositions now write DIFFERENT
+  // substrates — flag-OFF writes segments, flag-ON writes the
+  // table — so a flag-ON write is NOT visible flag-OFF, and vice
+  // versa after migration. The bridge is migration: bytes
+  // written flag-OFF verify flag-ON before migration (the table
+  // is empty, so `audit-list` serves the segment entries), and
+  // identically after it (the table holds the same chain,
+  // byte-identical per event), while the old segment rows are
+  // retained.
+  it("bytes written flag-OFF verify flag-ON before migration, and identically after it", async () => {
     const fake = makeFakeSessionStore();
     const envOff = { SESSION_STORE: fake.namespace } as unknown as Env;
     const envOn = {
       SESSION_STORE: fake.namespace,
       AUDIT_PORTS_ENABLED: "1",
     } as unknown as Env;
-    // Write with small caps (the cap-carrying root factory) so
-    // rotations occur; read/append through the wired factories.
-    const writer = createAuditPortsFromNamespace(fake.namespace as never, CAPS);
-    await appendN(writer, 7, 0, 5_000_000);
+    // Write 7 events through the flag-OFF composition (segments,
+    // rotations included) with small caps.
+    const offWriter = createAtomicAuditStore(fake.namespace as never, CAPS);
+    await appendN(offWriter, 7, 0, 5_000_000);
+    // Flag-ON reads the segment bytes pre-migration: full chain,
+    // in order, verifies.
     const on = createWiredAuditStore(envOn);
-    // The wired store lists with default options over the same
-    // bytes: full chain, in order, verifies.
     const events = await on.list();
     expect(events).toHaveLength(7);
     expect(events[0].action).toBe("event:0");
     expect(await verifyChain(events)).toBe(true);
-    // And the flag-OFF wired store reads the flag-ON appends.
+    expect(fake.auditTable).toHaveLength(0);
+    // Explicit migration: the table now holds the same chain,
+    // byte-identical per event; the segment rows are retained.
+    const migrated = await migrateAuditLog(fake.namespace);
+    expect(migrated).toEqual({ ok: true, migrated: 7, alreadyMigrated: false });
+    const after = await on.list();
+    expect(after).toHaveLength(7);
+    expect(after.map((e) => JSON.stringify(e))).toEqual(
+      events.map((e) => JSON.stringify(e)),
+    );
+    expect(await verifyChain(after)).toBe(true);
+    expect(fake.auditTable).toHaveLength(7);
+    expect(fake.store.has(`sessions:${IAAA_AUDIT_LOG_KEY}`)).toBe(true);
+    // A flag-ON append chains from the migrated tail...
     const more = await recordAuditEvent(on, auditInput("event:7", 5_000_007));
     expect(more.ok).toBe(true);
+    if (more.ok) expect(more.event.previousEventHash).toBe(events[6].eventHash);
+    // ...while the flag-OFF composition still reads only the
+    // segment bytes: the two substrates diverge by design after
+    // cutover; migration is the bridge, not a sync.
     const offAgain = createWiredAuditStore(envOff);
-    const all = await offAgain.list();
-    expect(all).toHaveLength(8);
-    expect(await verifyChain(all)).toBe(true);
+    const offEvents = await offAgain.list();
+    expect(offEvents).toHaveLength(7);
+    const onEvents = await on.list();
+    expect(onEvents).toHaveLength(8);
+    expect(await verifyChain(onEvents)).toBe(true);
+    // Migration is idempotent: a second call migrates nothing.
+    const again = await migrateAuditLog(fake.namespace);
+    expect(again).toEqual({ ok: true, migrated: 0, alreadyMigrated: true });
   });
 
   it("pre-slice legacy-shape segments remain readable and verifiable (flag-ON)", async () => {
@@ -517,6 +619,34 @@ describe("audit log conformance — F-18 concurrency (real DO, flag-ON compositi
     const full = await recordAuditEvent(store, auditInput("event:9", 7_500_009));
     expect(full.ok).toBe(false);
     if (!full.ok) expect(full.code).toBe("AUDIT_STORE_FULL");
+    // #3251 (O1): the table substrate writes rows, never segment
+    // bytes. `audit-list` returns one row per event, table-keyed,
+    // in chain order — and the live segment key was never written.
+    const listedRaw = await doInstance.fetch(
+      new Request("https://session-store.internal/kv", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          op: "audit-list",
+          ns: "sessions",
+          key: IAAA_AUDIT_LOG_KEY,
+        }),
+      }),
+    );
+    const listedReply = (await listedRaw.json()) as {
+      entries: Array<{ key: string; value: string }>;
+    };
+    expect(listedReply.entries).toHaveLength(9);
+    expect(
+      listedReply.entries.every((e) =>
+        e.key.startsWith(IAAA_AUDIT_TABLE_KEY_PREFIX),
+      ),
+    ).toBe(true);
+    expect(
+      listedReply.entries.map(
+        (e) => (JSON.parse(e.value) as IaaaAuditEvent).action,
+      ),
+    ).toEqual(events.map((e) => e.action));
     const liveRaw = await doInstance.fetch(
       new Request("https://session-store.internal/kv", {
         method: "POST",
@@ -528,10 +658,8 @@ describe("audit log conformance — F-18 concurrency (real DO, flag-ON compositi
         }),
       }),
     );
-    const liveReply = (await liveRaw.json()) as { value: string };
-    expect(
-      (JSON.parse(liveReply.value) as unknown[]).length,
-    ).toBeLessThanOrEqual(CAPS.liveMax);
+    const liveReply = (await liveRaw.json()) as { value: string | null };
+    expect(liveReply.value).toBeNull();
   });
 });
 

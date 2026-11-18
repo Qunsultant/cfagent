@@ -1,5 +1,20 @@
 {
   "tables": {
+    "iaaa_audit_events": {
+      "columns": [
+        {
+          "name": "seq",
+          "type": "INTEGER",
+          "pk": 1
+        },
+        {
+          "name": "event_json",
+          "type": "TEXT",
+          "pk": 0
+        }
+      ],
+      "constraints": {}
+    },
     "job_analyzed_datasets": {
       "columns": [
         {

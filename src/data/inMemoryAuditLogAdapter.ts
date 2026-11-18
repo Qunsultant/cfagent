@@ -20,6 +20,16 @@
  * inspecting stored bytes (corrupt segments, legacy-shape
  * logs) — they are on the class, not on the port contract.
  *
+ * #3251 (O1) — the adapter mirrors the DO's table substrate
+ * too: when the append payload carries `substrate: "table"`
+ * (the flag-ON composition), appends run against `tableRows`
+ * (one row per event, seq = 1-based chain position) with the
+ * same caps, clamps and storeFull signal, and the first table
+ * append migrates the segment map inline — the same lazy
+ * migration the DO performs. `migrateSegmentsToTable()` is
+ * the explicit migration seam; `tableEvents()` exposes the
+ * table rows for tests. Old segment rows are retained.
+ *
  * #CDO-mha7
  */
 import {
@@ -43,10 +53,13 @@ import {
   createAuditLogStore,
   type AuditLogBackend,
 } from "./auditLogStoreImpl";
+import { IAAA_AUDIT_TABLE_KEY_PREFIX } from "./auditLogPorts";
 
 export class InMemoryAuditLogAdapter implements AuditLogPort {
   readonly legacyFallback = false as const;
   private readonly rows = new Map<string, string>();
+  /** #3251 (O1) — the append-only table mirror: one row per event. */
+  private readonly tableRows: Array<{ seq: number; event: IaaaAuditEvent }> = [];
   private readonly store: AuditLogPort;
   private gate: Promise<unknown> = Promise.resolve();
 
@@ -62,6 +75,15 @@ export class InMemoryAuditLogAdapter implements AuditLogPort {
         return run;
       },
       listEntries: async () => {
+        // #3251 (O1) — server-side substrate selection, mirroring
+        // the DO's `audit-list` op: table rows while the table
+        // holds any, else the segment entries.
+        if (this.tableRows.length > 0) {
+          return this.tableRows.map(({ seq, event }) => ({
+            key: `${IAAA_AUDIT_TABLE_KEY_PREFIX}${String(seq).padStart(6, "0")}`,
+            value: JSON.stringify(event),
+          }));
+        }
         const out: Array<{ key: string; value: string }> = [];
         for (const [key, value] of this.rows) {
           if (key.startsWith(IAAA_AUDIT_KEY_PREFIX)) out.push({ key, value });
@@ -95,6 +117,45 @@ export class InMemoryAuditLogAdapter implements AuditLogPort {
     return this.rows.get(key) ?? null;
   }
 
+  /**
+   * #3251 (O1) — explicit migration of the segment map into the
+   * table mirror: archive segments in key order, then the live
+   * key, one row per event, event JSON byte-identical.
+   * Parse-first, then insert: corrupt bytes fail before any row
+   * is written. Idempotent: a populated table migrates nothing.
+   * Old segment rows are retained.
+   */
+  migrateSegmentsToTable():
+    | { ok: true; migrated: number; alreadyMigrated: boolean }
+    | { ok: false; error: string } {
+    if (this.tableRows.length > 0) {
+      return { ok: true, migrated: 0, alreadyMigrated: true };
+    }
+    const live = parseSegmentArray(this.rows.get(IAAA_AUDIT_LOG_KEY));
+    if (live === null) return { ok: false, error: "audit log corrupt" };
+    const archiveKeys = [...this.rows.keys()]
+      .filter((k) => k.startsWith(IAAA_AUDIT_ARCHIVE_KEY_PREFIX))
+      .sort();
+    const segments: IaaaAuditEvent[][] = [];
+    for (const ak of archiveKeys) {
+      const seg = parseSegmentArray(this.rows.get(ak));
+      if (seg === null) return { ok: false, error: "audit log corrupt" };
+      segments.push(seg);
+    }
+    const events = [...segments.flat(), ...live];
+    let seq = 0;
+    for (const event of events) {
+      seq += 1;
+      this.tableRows.push({ seq, event: { ...event } });
+    }
+    return { ok: true, migrated: events.length, alreadyMigrated: false };
+  }
+
+  /** Test seam: the table rows in chain order (copies). */
+  tableEvents(): IaaaAuditEvent[] {
+    return this.tableRows.map(({ event }) => ({ ...event }));
+  }
+
   /** The audit-append op mirror (see header). */
   private async opAppend(
     payload: Record<string, unknown>,
@@ -115,23 +176,23 @@ export class InMemoryAuditLogAdapter implements AuditLogPort {
     if (payload.key !== IAAA_AUDIT_LOG_KEY) {
       return { error: "audit-append is restricted" };
     }
-    const parseArray = (raw: string | undefined): IaaaAuditEvent[] | null => {
-      if (raw === undefined) return [];
-      try {
-        const parsed: unknown = JSON.parse(raw);
-        return Array.isArray(parsed) ? (parsed as IaaaAuditEvent[]) : null;
-      } catch {
-        return null;
-      }
-    };
-    const live = parseArray(this.rows.get(IAAA_AUDIT_LOG_KEY));
+    // #3251 (O1) — the table substrate runs its own branch
+    // (lazy migration + tail + COUNT(*) cap + one row insert).
+    if (payload.substrate === "table") {
+      return this.opAppendTable(payload, {
+        liveMax,
+        segmentSize,
+        maxSegments,
+      });
+    }
+    const live = parseSegmentArray(this.rows.get(IAAA_AUDIT_LOG_KEY));
     if (live === null) return { error: "audit log corrupt" };
     const archiveKeys = [...this.rows.keys()]
       .filter((k) => k.startsWith(IAAA_AUDIT_ARCHIVE_KEY_PREFIX))
       .sort();
     const segments: IaaaAuditEvent[][] = [];
     for (const ak of archiveKeys) {
-      const seg = parseArray(this.rows.get(ak));
+      const seg = parseSegmentArray(this.rows.get(ak));
       if (seg === null) return { error: "audit log corrupt" };
       segments.push(seg);
     }
@@ -169,5 +230,46 @@ export class InMemoryAuditLogAdapter implements AuditLogPort {
     }
     this.rows.set(IAAA_AUDIT_LOG_KEY, JSON.stringify(live));
     return { ok: true, event };
+  }
+
+  /** #3251 (O1) — the audit-append op mirror for the table substrate. */
+  private async opAppendTable(
+    payload: Record<string, unknown>,
+    caps: { liveMax: number; segmentSize: number; maxSegments: number },
+  ): Promise<StoreReply | null> {
+    const migration = this.migrateSegmentsToTable();
+    if (!migration.ok) return { error: migration.error };
+    if (
+      this.tableRows.length >=
+      caps.liveMax + caps.maxSegments * caps.segmentSize
+    ) {
+      return { storeFull: true };
+    }
+    const input = JSON.parse(
+      typeof payload.value === "string" ? payload.value : "",
+    ) as Omit<IaaaAuditEvent, "id" | "previousEventHash" | "eventHash">;
+    const tail =
+      this.tableRows.length > 0
+        ? this.tableRows[this.tableRows.length - 1].event
+        : null;
+    const previousEventHash = tail ? tail.eventHash : null;
+    const unsigned = { ...input, id: crypto.randomUUID(), previousEventHash };
+    const event: IaaaAuditEvent = {
+      ...unsigned,
+      eventHash: await computeEventHash(unsigned),
+    };
+    this.tableRows.push({ seq: this.tableRows.length + 1, event });
+    return { ok: true, event };
+  }
+}
+
+/** Parse one stored segment value: an event array, or null when corrupt. */
+function parseSegmentArray(raw: string | undefined): IaaaAuditEvent[] | null {
+  if (raw === undefined) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as IaaaAuditEvent[]) : null;
+  } catch {
+    return null;
   }
 }

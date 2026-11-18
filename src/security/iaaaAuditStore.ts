@@ -77,8 +77,12 @@
  * (src/data/createAuditPorts.ts) when AUDIT_PORTS_ENABLED is on
  * (#1169 semantics; absence = off; not in wrangler); with the
  * flag off it returns createAtomicAuditStore exactly as before.
- * Both compositions run against the SAME Durable Object and
- * table — the flag switches the serving code path only.
+ * Both compositions run against the SAME Durable Object — the
+ * flag switches the serving code path AND the append substrate:
+ * flag-on appends and lists through the append-only
+ * `iaaa_audit_events` table (#3251 O1), flag-off through the
+ * segment keys. The old segment rows are retained; their
+ * removal is a separate named step.
  *
  * #5084 (observability S5) — one audit store: the client
  * implementation is single-sourced in the AuditLog family
