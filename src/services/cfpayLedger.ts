@@ -44,7 +44,11 @@
  */
 import type { Env, TransactionRecord } from "../types";
 import { AGENT_DIDS } from "../agents/did";
+import type { MembershipStore } from "../security/authorization";
+import { resolveLedgerWriteContextHeader } from "../security/commercialExecutionContext";
+import { createKvMembershipStore } from "../security/iaaaMembershipStore";
 import { getServiceUserLogin, SHARED_ORCHESTRATOR_INSTANCE } from "../security/serviceIdentity";
+import { sessionStore } from "../security/session";
 import { createStructuredLogger } from "../observability/structuredLogger";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
 
@@ -256,19 +260,98 @@ async function cfpayLedgerFetch(env: Env, path: string, init?: RequestInit): Pro
 }
 
 /**
+ * Composition seam for the GAP-5 observe-mode context carriage: a
+ * caller with a membership store handy passes it; tests pass a memory
+ * store plus a fixed clock. Production callers pass nothing and the
+ * store is built from the session KV, exactly as the handler-side
+ * gates build theirs.
+ */
+export interface RecordCfpayLedgerRowContextDeps {
+  membershipStore?: MembershipStore;
+  nowMs?: number;
+}
+
+/**
+ * GAP-5 (#5477): resolve the ledger-write ExecutionContext for this
+ * write and serialize it for the boundary header. OBSERVE MODE ONLY:
+ * any failure — no service identity, no verified tenant, no approval
+ * reference, a denied resolution, a store failure — logs and returns
+ * no headers, and the write proceeds exactly as it would without this
+ * call. Context carriage must never fail a paid run's workflow; the
+ * enforcement flip is the ledger-gate slice's separately reviewed step.
+ */
+async function ledgerWriteContextHeadersBestEffort(
+  env: Env,
+  kind: "charge" | "credit",
+  input: CfpayLedgerChargeInput | CfpayLedgerCreditInput,
+  contextDeps?: RecordCfpayLedgerRowContextDeps,
+): Promise<Record<string, string>> {
+  try {
+    const memberships =
+      contextDeps?.membershipStore ??
+      createKvMembershipStore(sessionStore(env));
+    const charge = input as CfpayLedgerChargeInput;
+    const result = await resolveLedgerWriteContextHeader({
+      memberships,
+      serviceLogin: getServiceUserLogin(env),
+      tenantId: input.tenantId ?? null,
+      kind,
+      runRequestId: input.runRequestId,
+      checkoutId: charge.checkoutId,
+      claimTxHash: charge.claimTxHash,
+      paymentIntentId: charge.paymentIntentId,
+      nowMs: contextDeps?.nowMs ?? Date.now(),
+    });
+    if (!result.attached) {
+      structuredLog.info("cfpayLedger.execution_context_not_attached", {
+        message: `[cfpay-ledger] no ExecutionContext attached for run=${input.runRequestId} (${result.reason}); write proceeds unchanged (observe mode).`,
+        runRequestId: input.runRequestId,
+        kind,
+        reason: result.reason,
+      });
+      return {};
+    }
+    return { [result.name]: result.value };
+  } catch (err) {
+    structuredLog.error("cfpayLedger.execution_context_failed", {
+      message: `[cfpay-ledger] ExecutionContext resolution failed for run=${input.runRequestId}; write proceeds unchanged (observe mode).`,
+      runRequestId: input.runRequestId,
+      kind,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return {};
+  }
+}
+
+/**
  * Record a cfpay charge or credit row. Idempotent per run+kind: a row
  * that already exists returns `{ duplicate: true }` with the existing
  * record instead of writing a second row. Throws (loud) when the
  * ledger cannot be reached.
+ *
+ * GAP-5 (#5477): when a validated ExecutionContext resolves for this
+ * write (verified tenant + service binding + approval evidence), it
+ * travels on the request header for the handler to revalidate in
+ * observe mode. Resolution never gates the write.
  */
 export async function recordCfpayLedgerRow(
   env: Env,
   kind: "charge" | "credit",
   input: CfpayLedgerChargeInput | CfpayLedgerCreditInput,
+  contextDeps?: RecordCfpayLedgerRowContextDeps,
 ): Promise<{ record: TransactionRecord; duplicate: boolean }> {
+  const contextHeaders = await ledgerWriteContextHeadersBestEffort(
+    env,
+    kind,
+    input,
+    contextDeps,
+  );
   const res = await cfpayLedgerFetch(env, "/payments/agentic/ledger/record-cfpay", {
     method: "POST",
     body: JSON.stringify({ kind, ...input }),
+    ...(Object.keys(contextHeaders).length > 0
+      ? { headers: contextHeaders }
+      : {}),
   });
   if (res.status === 409) {
     const body = (await res.json()) as { record: TransactionRecord };
