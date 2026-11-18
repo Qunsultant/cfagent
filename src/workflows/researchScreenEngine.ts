@@ -315,8 +315,17 @@ export async function executeResearchStageControl(
       : await control.runStage(validated.engineJobId, nodePath);
     if (dispatch.completion) await dispatch.completion;
   } else if (validated.op === "rerun") {
-    const dispatch = await control.rerunStage(validated.engineJobId, nodePath);
-    if (dispatch.completion) await dispatch.completion;
+    try {
+      const dispatch = await control.rerunStage(validated.engineJobId, nodePath);
+      if (dispatch.completion) await dispatch.completion;
+    } catch (err: any) {
+      if (err?.code === "stage_input_missing") {
+        const dispatch = await control.runJob(validated.engineJobId, { trigger: "manual" });
+        if (dispatch.completion) await dispatch.completion;
+      } else {
+        throw err;
+      }
+    }
   } else if (validated.op === "stop") {
     await control.stopStage(validated.engineJobId, nodePath);
   } else if (validated.op === "resume") {
