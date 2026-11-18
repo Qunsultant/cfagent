@@ -26,6 +26,10 @@ import {
 } from "./chatPrompt";
 import { resolveCopilotTradingSelection } from "./copilotTradingMode";
 import { LLMJudge } from "./judge";
+import {
+  recordJudgeScoreLearning,
+  resolveJudgeScoreFeedbackPolicy,
+} from "../services/judgeScoreFeedback";
 import { VectorMemory } from "../memory/vector-memory";
 import { planNLQ, executeNLQQuery, executeNLQQueryAsync, type NLQSchedulingPort, type NLQSocialBriefPort, type NLQStockScreenPort } from "./nlq";
 import { resolveErrorAspect, AgentErrorCode } from "../aspects/errorCodes";
@@ -2874,6 +2878,22 @@ export class OrchestratorAgent extends PortThink {
       safe: quality.safe,
       issues: quality.issues,
     });
+    // Issue #5058: a low score is no longer audit-only — it becomes a
+    // learning the weekly reflection job reads (domain `judge`), so a
+    // repeated pattern reaches the review queue. Best-effort: the writer
+    // swallows its own failures so a scoring write never fails the turn.
+    recordJudgeScoreLearning(
+      this.ctx.storage.sql,
+      {
+        score: quality.score,
+        grounded: quality.grounded,
+        safe: quality.safe,
+        issues: quality.issues,
+        agent: route.agent,
+        requestId: turn.requestId,
+      },
+      resolveJudgeScoreFeedbackPolicy(this.env),
+    );
     const vectorizeBinding = (this.env as any).VECTOR_MEMORY;
     try {
       if (this.env.AI && vectorizeBinding) {

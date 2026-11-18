@@ -85,3 +85,12 @@ GITHUB_ISSUE_REPO="Qunsultant/cfagent"
 AUTOPILOT_VERDICT_TREND_ENABLED="true"
 AUTOPILOT_VERDICT_TREND_WINDOW="25"
 AUTOPILOT_VERDICT_REPEAT_THRESHOLD="2"
+
+# LLM judge score feedback (#5058, AG-4). A turn scored below the
+# threshold becomes a `judge` learning the weekly reflection job reads;
+# repeated low scores become a review finding. Defaults live in
+# src/services/judgeScoreFeedback.ts.
+JUDGE_LEARNING_ENABLED="true"
+JUDGE_LEARNING_THRESHOLD="60"
+JUDGE_LEARNING_MIN_COUNT="3"
+JUDGE_LEARNING_WINDOW_DAYS="7"

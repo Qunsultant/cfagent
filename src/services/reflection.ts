@@ -1,4 +1,10 @@
 import { getActiveLearnings, recordLearning } from "./learnings";
+import {
+  buildJudgeScoreFinding,
+  resolveJudgeScoreFeedbackPolicy,
+  summarizeJudgeScoreLearnings,
+} from "./judgeScoreFeedback";
+import type { Env } from "../types";
 import { createEvidenceSatellitePorts } from "../data/createEvidenceSatellitePorts";
 import type { StrategyCandidateReview } from "../data/strategyReviewPorts";
 import { createStructuredLogger } from "../observability/structuredLogger";
@@ -144,7 +150,8 @@ export function createReflectionReviewCandidates(
 
 export function runReflection(
   sql: any,
-  now: Date = new Date()
+  now: Date = new Date(),
+  env?: Env
 ): {
   findings: ReflectionFinding[];
   learningsRecorded: number;
@@ -254,6 +261,25 @@ export function runReflection(
     analysisFailures++;
     structuredLog.error("reflection.stale_learning_analysis_failed", {
       message: `[Reflection] Stale-learning analysis failed; continuing without staleness findings: ${err instanceof Error ? err.message : String(err)}`,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  // 2.5. Issue #5058: repeated low judge scores become a finding. The judge
+  // scores every chat turn into `response.evaluated` and (since #5058) a
+  // low score into a `judge` learning; this is the consumer that turns a
+  // repeat pattern into a review candidate instead of a log line.
+  try {
+    const judgePolicy = resolveJudgeScoreFeedbackPolicy(env);
+    const judgeSummary = summarizeJudgeScoreLearnings(sql, {
+      windowDays: judgePolicy.windowDays,
+    });
+    const judgeFinding = buildJudgeScoreFinding(judgeSummary, judgePolicy);
+    if (judgeFinding) findings.push(judgeFinding);
+  } catch (err) {
+    analysisFailures++;
+    structuredLog.error("reflection.judge_score_analysis_failed", {
+      message: `[Reflection] Judge-score analysis failed; continuing without a judge finding: ${err instanceof Error ? err.message : String(err)}`,
       error: err instanceof Error ? err.message : String(err),
     });
   }
