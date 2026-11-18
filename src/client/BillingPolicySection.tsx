@@ -128,7 +128,9 @@ export function BillingPolicySection() {
         setSeedNote(fieldsResult.value.seedNote);
       } else if (operator) {
         setFields(null);
-        setLoadError(loadMessage(statusOf(fieldsResult.reason)));
+        if (fieldsResult.status === "rejected") {
+          setLoadError(loadMessage(statusOf(fieldsResult.reason)));
+        }
       } else {
         // Non-operator: no values, no edit controls. The policy
         // read refusal is expected, not an error to surface.

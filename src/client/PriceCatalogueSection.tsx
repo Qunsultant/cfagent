@@ -100,7 +100,9 @@ export function PriceCatalogueSection() {
         setDrafts(nextDrafts);
       } else if (operator) {
         setEntries(null);
-        setLoadError(loadMessage(statusOf(entriesResult.reason)));
+        if (entriesResult.status === "rejected") {
+          setLoadError(loadMessage(statusOf(entriesResult.reason)));
+        }
       } else {
         // Non-operator: no values, no edit controls. The prices
         // read refusal is expected, not an error to surface.
