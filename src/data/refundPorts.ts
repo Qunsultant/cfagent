@@ -34,8 +34,8 @@
  *   value is "operator_hitl".
  */
 
-/** What was paid for: a subscription period, or one pay-per-run charge. */
-export type RefundKind = "subscription" | "pay_per_run";
+/** What was paid for: a subscription period, one pay-per-run charge, or a bundle period (#5227). */
+export type RefundKind = "subscription" | "pay_per_run" | "bundle";
 
 /** Payment rail of the original payment. */
 export type RefundRail = "card" | "crypto" | "cfpay-channel";
@@ -55,7 +55,7 @@ export function assertApprovedKinds(value: unknown): RefundKind[] {
   if (!Array.isArray(value)) throw new Error("approvedKinds must be an array of refund kinds.");
   const seen = new Set<string>();
   for (const kind of value) {
-    if (kind !== "subscription" && kind !== "pay_per_run") {
+    if (kind !== "subscription" && kind !== "pay_per_run" && kind !== "bundle") {
       throw new Error(`Invalid approved refund kind: ${String(kind)}.`);
     }
     seen.add(kind);
@@ -87,8 +87,8 @@ export type RefundStatus =
   | "execution_failed";
 
 export function assertRefundKind(kind: unknown): RefundKind {
-  if (kind !== "subscription" && kind !== "pay_per_run") {
-    throw new Error(`Invalid refund kind: ${String(kind)} (must be subscription or pay_per_run).`);
+  if (kind !== "subscription" && kind !== "pay_per_run" && kind !== "bundle") {
+    throw new Error(`Invalid refund kind: ${String(kind)} (must be subscription, pay_per_run, or bundle).`);
   }
   return kind;
 }
@@ -227,6 +227,7 @@ export const REFUND_POLICY_COPY =
   "Refunds are available within 30 days of payment and require operator approval. " +
   "Refunds are never automatic: the automatic compensation for a failed paid run is a replacement-run credit, and a run that already received that credit is not also cash-refunded. " +
   "Card payments may be refunded in full (partial refunds only if the operator policy allows them). " +
+  "A bundle refund is the prorated unused remainder of the bundle period, computed by the policy — the amount is not chosen by the requester — and executing it ends the remaining bundle access. " +
   "Crypto (x402) payments are non-refundable; if a crypto-paid run fails to start, a replacement-run credit applies instead. " +
   "A refunded subscription period ends immediately and its included runs are removed, unless the operator policy keeps access to the end of the period. " +
   "Refund decisions are recorded and audited.";
@@ -360,7 +361,7 @@ export interface RefundRecord {
   tenantId: string;
   /** The payer's verified login (the refund requester, or the subscription owner). */
   userId: string;
-  /** The original payment reference: subscription id or provider payment ref, or a pay-per-run runRequestId. */
+  /** The original payment reference: subscription id or provider payment ref, a pay-per-run runRequestId, or a bundle draft id (`bbnd-…`). */
   originalPaymentRef: string;
   /** The refunded subscription's row id, when kind is subscription; null otherwise. */
   subscriptionId: string | null;
@@ -429,10 +430,42 @@ export function assertRefundRecord(input: RefundCreateInput): RefundCreateInput 
 }
 
 /**
+ * Issue #5227 (Monetization Phase 2.29) — bundle proration by the
+ * unused portion. Bundle run-consumption tracking does not exist
+ * yet (a named follow-up, not this slice), so the only computable
+ * basis for "unused" is the remaining entitlement period:
+ * original × remaining-period fraction, rounded to cents.
+ * A fully-used bundle (period elapsed, or a remainder below one
+ * cent) prorates to 0 — the caller refuses it as non-refundable.
+ * A degenerate period (end <= start) also prorates to 0 (fail
+ * closed, never a division by zero). A request before the period
+ * starts clamps to the full amount. Revisit the basis when bundle
+ * run-consumption tracking lands; until then this IS the policy.
+ */
+export function computeBundleProratedRefund(
+  input: { originalAmountUSD: number; periodStartMs: number; periodEndMs: number },
+  nowMs: number,
+): number {
+  const total = input.periodEndMs - input.periodStartMs;
+  if (!(total > 0)) return 0;
+  const remaining = input.periodEndMs - nowMs;
+  if (remaining <= 0) return 0;
+  const fraction = Math.min(1, remaining / total);
+  return round2(input.originalAmountUSD * fraction);
+}
+
+/**
  * Policy-dependent request rules, applied by the service at request
  * time AND re-applied at execution time against the current policy.
  * Crypto is refused first: a crypto refund is never a window or
  * amount question.
+ *
+ * Issue #5227: the bundle kind skips the full-only equality check.
+ * A bundle refund is ALWAYS partial-or-full by construction — the
+ * amount is the policy-computed prorated remainder, never a
+ * requester-chosen partial — so the allowPartial gate cannot apply
+ * to it. The window and exceeds checks still apply to bundles, and
+ * the other kinds are unchanged.
  */
 export function validateRefundRequest(
   policy: RefundPolicy,
@@ -443,6 +476,7 @@ export function validateRefundRequest(
     originalPaidAtMs: number;
   },
   nowMs: number,
+  kind?: RefundKind,
 ): void {
   if (input.rail === "crypto") {
     throw new Error(CRYPTO_NON_REFUNDABLE_MESSAGE);
@@ -452,7 +486,7 @@ export function validateRefundRequest(
   if (amountUSD > originalAmountUSD) {
     throw new Error(`Refund amount $${amountUSD} exceeds the original amount $${originalAmountUSD}.`);
   }
-  if (!policy.allowPartial && amountUSD !== originalAmountUSD) {
+  if (kind !== "bundle" && !policy.allowPartial && amountUSD !== originalAmountUSD) {
     throw new Error(
       `Partial refunds are not allowed by the current refund policy (requested $${amountUSD} of $${originalAmountUSD}); request the full amount.`,
     );
@@ -499,6 +533,14 @@ export interface RefundPaymentSource {
   tenantId: string | null;
   /** The subscription row id, when the source is a subscription. */
   subscriptionId: string | null;
+  /**
+   * Issue #5227: the bundle entitlement period, when the source is
+   * a bundle purchase — the proration basis. Null when the source
+   * is not a bundle (subscription and pay-per-run sources never
+   * carry it).
+   */
+  bundlePeriodStartMs?: number | null;
+  bundlePeriodEndMs?: number | null;
 }
 
 export interface RefundPaymentSourceResolver {

@@ -156,6 +156,12 @@ function stubBundleStripe(overrides: {
   providerPriceId?: string;
   providerStatus?: string;
   paymentStatus?: string;
+  /**
+   * Issue #5227: the first invoice's payment-intent id. Null
+   * means the provider subscription has no invoices at all (the
+   * bundle refund then fails closed as unresolvable).
+   */
+  invoicePaymentIntent?: string | null;
 } = {}) {
   const sessions = new Map<string, { draft: string; metadata: Record<string, string> }>();
   let counter = 0;
@@ -216,6 +222,35 @@ function stubBundleStripe(overrides: {
             items: { data: [{ price: { id: providerPriceId } }] },
           }),
         };
+      }
+      // Issue #5227: the bundle resolver's first-invoice lookup
+      // (GET /v1/invoices?subscription=…&limit=100) and the
+      // gateway refund (POST /v1/refunds). The invoice list
+      // carries exactly one invoice — the purchase invoice — with
+      // the scripted payment-intent id.
+      if (href.startsWith("https://api.stripe.com/v1/invoices") && method === "GET") {
+        const sub = new URL(href).searchParams.get("subscription");
+        if (sub !== "sub_prov_1" || overrides.invoicePaymentIntent === null) {
+          return { ok: true, status: 200, json: async () => ({ data: [] }) };
+        }
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            data: [
+              {
+                id: "in_test_1",
+                created: Math.floor(Date.now() / 1000),
+                payment_intent: overrides.invoicePaymentIntent ?? "pi_test_bundle_1",
+              },
+            ],
+          }),
+        };
+      }
+      if (href === "https://api.stripe.com/v1/refunds" && method === "POST") {
+        const params = new URLSearchParams(String(init.body));
+        const amount = Number(params.get("amount") ?? "0");
+        return { ok: true, status: 200, json: async () => ({ id: "re_test_1", amount }) };
       }
       return { ok: false, status: 404, json: async () => ({}) };
     }),
@@ -527,7 +562,7 @@ describe("subscription GET additive keys, cancel, refund refusal", () => {
     expect(replay?.status).toBe(409);
   });
 
-  it("a bundle payment ref is refused by the refund flow with the coded 422", async () => {
+  it("a bundle payment ref with a non-bundle kind is refused 400 and directed to kind bundle", async () => {
     const s = await setup({ monetization: true, stripe: true });
     stubBundleStripe();
     const { bundle, draft, sessionId } = await seedApprovedMappedBundle(s);
@@ -539,7 +574,143 @@ describe("subscription GET additive keys, cancel, refund refusal", () => {
       amountUSD: 0.06,
       reason: "changed my mind",
     });
+    expect(res?.status).toBe(400);
+    const body = await bodyOf(res);
+    expect(body.code).toBe("FAILURE_COMMERCIAL_REQUEST_INVALID");
+    expect(body.error).toContain('kind "bundle"');
+  });
+});
+
+describe("bundle refund flow (#5227)", () => {
+  async function approveBundleKind(s: Awaited<ReturnType<typeof setup>>) {
+    const res = await call(s.ctx, "POST", "/payments/agentic/commercial/refund-policy/approve", "op1", {
+      kind: "bundle",
+      approved: true,
+    });
+    expect(res?.status).toBe(200);
+  }
+
+  async function fulfillForRefund(s: Awaited<ReturnType<typeof setup>>) {
+    const { bundle, draft, sessionId } = await seedApprovedMappedBundle(s);
+    const fulfilled = await fulfillBundle(s, bundle.id, draft, sessionId);
+    expect(fulfilled.res?.status).toBe(200);
+    return { bundle, draft, purchase: fulfilled.body.purchase };
+  }
+
+  it("request -> approve -> execute -> lookup settles the prorated remainder and revokes the purchase", async () => {
+    const s = await setup({ monetization: true, stripe: true });
+    stubBundleStripe();
+    const { draft } = await fulfillForRefund(s);
+    await approveBundleKind(s);
+    const requested = await call(s.ctx, "POST", "/payments/agentic/commercial/refunds", "u1", {
+      kind: "bundle",
+      originalPaymentRef: draft,
+      reason: "changed my mind",
+    });
+    expect(requested?.status).toBe(200);
+    const requestedBody = await bodyOf(requested);
+    expect(requestedBody.code).toBe("SUCCESS_REFUND_REQUESTED");
+    expect(requestedBody.refund.kind).toBe("bundle");
+    // Fulfilled moments ago: the full 30-day remainder is unused.
+    expect(requestedBody.refund.amountUSD).toBe(0.06);
+    expect(requestedBody.refund.originalAmountUSD).toBe(0.06);
+    expect(requestedBody.refund.paymentIntentId).toBe("pi_test_bundle_1");
+    expect(requestedBody.refund.userId).toBe("u1");
+    const decided = await call(s.ctx, "POST", "/payments/agentic/commercial/refunds/approve", "op1", {
+      refundId: requestedBody.refund.id,
+      decision: "approve",
+    });
+    expect(decided?.status).toBe(200);
+    expect((await bodyOf(decided)).code).toBe("SUCCESS_REFUND_DECIDED");
+    const executed = await call(s.ctx, "POST", "/payments/agentic/commercial/refunds/execute", "op1", {
+      refundId: requestedBody.refund.id,
+    });
+    expect(executed?.status).toBe(200);
+    const executedBody = await bodyOf(executed);
+    expect(executedBody.code).toBe("SUCCESS_REFUND_EXECUTED");
+    expect(executedBody.refund.status).toBe("executed");
+    expect(executedBody.refund.gatewayRefundId).toBe("re_test_1");
+    expect(executedBody.refund.entitlementConsequence).toMatch(/bundle_revoked/);
+    const looked = await bodyOf(
+      await call(s.ctx, "GET", `/payments/agentic/commercial/refunds?refundId=${requestedBody.refund.id}`, "u1"),
+    );
+    expect(looked.refund.status).toBe("executed");
+    const sub = await bodyOf(await call(s.ctx, "GET", `/payments/agentic/commercial/subscription?userId=u1`, "u1"));
+    expect(sub.bundlePurchases).toHaveLength(1);
+    expect(sub.bundlePurchases[0].status).toBe("canceled");
+    expect(sub.bundleEntitlements.every((e: any) => e.status === "canceled")).toBe(true);
+  });
+
+  it("an unapproved bundle kind is refused 422 before any record is created", async () => {
+    const s = await setup({ monetization: true, stripe: true });
+    stubBundleStripe();
+    const { draft } = await fulfillForRefund(s);
+    const res = await call(s.ctx, "POST", "/payments/agentic/commercial/refunds", "u1", {
+      kind: "bundle",
+      originalPaymentRef: draft,
+      reason: "changed my mind",
+    });
     expect(res?.status).toBe(422);
-    expect((await bodyOf(res)).code).toBe("FAILURE_BUNDLE_REFUND_UNDECIDED");
+    expect((await bodyOf(res)).code).toBe("FAILURE_REFUND_POLICY_REFUSAL");
+  });
+
+  it("a supplied amount different from the computed remainder is refused 400", async () => {
+    const s = await setup({ monetization: true, stripe: true });
+    stubBundleStripe();
+    const { draft } = await fulfillForRefund(s);
+    await approveBundleKind(s);
+    const res = await call(s.ctx, "POST", "/payments/agentic/commercial/refunds", "u1", {
+      kind: "bundle",
+      originalPaymentRef: draft,
+      amountUSD: 0.03,
+      reason: "changed my mind",
+    });
+    expect(res?.status).toBe(400);
+    expect((await bodyOf(res)).code).toBe("FAILURE_COMMERCIAL_REQUEST_INVALID");
+  });
+
+  it("a non-owner non-operator cannot request a bundle refund", async () => {
+    const s = await setup({ monetization: true, stripe: true });
+    stubBundleStripe();
+    const { draft } = await fulfillForRefund(s);
+    await approveBundleKind(s);
+    const res = await call(s.ctx, "POST", "/payments/agentic/commercial/refunds", "u2", {
+      kind: "bundle",
+      originalPaymentRef: draft,
+      reason: "changed my mind",
+    });
+    expect(res?.status).toBe(400);
+    expect((await bodyOf(res)).code).toBe("FAILURE_COMMERCIAL_REQUEST_INVALID");
+  });
+
+  it("a bundle ref with kind pay_per_run is refused 400 and directed to kind bundle", async () => {
+    const s = await setup({ monetization: true, stripe: true });
+    stubBundleStripe();
+    const { draft } = await fulfillForRefund(s);
+    await approveBundleKind(s);
+    const res = await call(s.ctx, "POST", "/payments/agentic/commercial/refunds", "u1", {
+      kind: "pay_per_run",
+      originalPaymentRef: draft,
+      amountUSD: 0.06,
+      reason: "changed my mind",
+    });
+    expect(res?.status).toBe(400);
+    expect((await bodyOf(res)).error).toContain('kind "bundle"');
+  });
+
+  it("no resolvable first invoice refuses the bundle request 400 (fail closed, never guessed)", async () => {
+    const s = await setup({ monetization: true, stripe: true });
+    stubBundleStripe({ invoicePaymentIntent: null });
+    const { draft } = await fulfillForRefund(s);
+    await approveBundleKind(s);
+    const res = await call(s.ctx, "POST", "/payments/agentic/commercial/refunds", "u1", {
+      kind: "bundle",
+      originalPaymentRef: draft,
+      reason: "changed my mind",
+    });
+    expect(res?.status).toBe(400);
+    const body = await bodyOf(res);
+    expect(body.code).toBe("FAILURE_COMMERCIAL_REQUEST_INVALID");
+    expect(body.error).toContain("no stored");
   });
 });

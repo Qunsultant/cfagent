@@ -75,7 +75,7 @@ function parseApprovedKinds(raw: unknown): string[] {
   if (typeof raw !== "string") return [];
   try {
     const parsed: unknown = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.filter((k) => k === "subscription" || k === "pay_per_run") : [];
+    return Array.isArray(parsed) ? parsed.filter((k) => k === "subscription" || k === "pay_per_run" || k === "bundle") : [];
   } catch {
     return [];
   }
@@ -154,8 +154,8 @@ export class D1RefundPolicyAdapter implements RefundPolicyStore {
   async setKindApproval(kind: RefundPolicy["approvedKinds"][number], approved: boolean, byLogin: string): Promise<RefundPolicy> {
     const current = await this.getPolicy();
     if (!current) throw new Error("Refund policy is not configured: run the refund schema ensure first.");
-    if (kind !== "subscription" && kind !== "pay_per_run") {
-      throw new Error(`Invalid refund kind: ${String(kind)} (must be subscription or pay_per_run).`);
+    if (kind !== "subscription" && kind !== "pay_per_run" && kind !== "bundle") {
+      throw new Error(`Invalid refund kind: ${String(kind)} (must be subscription, pay_per_run, or bundle).`);
     }
     if (typeof byLogin !== "string" || !byLogin.trim()) {
       throw new Error("byLogin is required.");

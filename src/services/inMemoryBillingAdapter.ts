@@ -86,6 +86,15 @@ export class InMemoryBillingAdapter implements BillingPort {
     return { ...updated };
   }
 
+  /**
+   * Issue #5227: the in-memory adapter has no provider invoices —
+   * there is no first invoice to resolve, so this always returns
+   * null (fail closed, same as an unresolvable provider row).
+   */
+  async retrieveFirstInvoicePaymentIntent(_providerSubscriptionId: string): Promise<string | null> {
+    return null;
+  }
+
   /** Test-only: force a provider state (e.g. past_due) to drive webhook/transition tests. */
   setProviderState(providerSubscriptionId: string, patch: Partial<ProviderSubscription>): ProviderSubscription {
     const found = this.subs.get(providerSubscriptionId);

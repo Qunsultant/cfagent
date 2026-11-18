@@ -220,7 +220,7 @@ import {
   executeRefund,
   requestRefund,
 } from "../../services/refundService";
-import { createPayPerRunPaymentResolver } from "../../services/refundPaymentIntent";
+import { createPayPerRunPaymentResolver, createBundlePaymentResolver } from "../../services/refundPaymentIntent";
 import { PaymentGatewayService } from "../../services/payments";
 import {
   codedMessage,
@@ -7550,8 +7550,10 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
   // monetization flag (flag OFF refuses request, approval, and
   // execution). Crypto requests are refused as non-refundable by
   // the service; no route here can widen that. Execution resolves
-  // the Stripe payment-intent id from the subscription row (#2200)
-  // or fails closed when it cannot resolve one. Policy reads and
+  // the Stripe payment-intent id from the subscription row (#2200),
+  // the native ledger charge row (#2204 follow-up), or the bundle
+  // purchase's provider subscription's first invoice (#5227) — or
+  // fails closed when it cannot resolve one. Policy reads and
   // the operator policy update are NOT flag-gated: operators
   // configure policy before activation. Tenant is source-only
   // (#3180): the request body carries no tenant field, and the
@@ -7576,22 +7578,31 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       } catch (err: any) {
         return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_STORE_UNAVAILABLE") }, { status: 503 });
       }
-      // Issue #2781: a bundle purchase's payment ref is never
-      // refundable through the refund flow — the refund decision
-      // for bundles is undecided (owner decision pending). Refuse
-      // with the coded 422 rather than letting the resolver treat
-      // the ref as a subscription or pay-per-run payment. A bundle
+      // Issue #5227: the bundle refund decision is made — bundles
+      // ARE refundable under the decided policy (30-day window,
+      // prorated unused remainder, policy-computed amount). A
+      // bundle payment ref with any OTHER kind is refused with a
+      // named 400 directing the requester to kind "bundle", so the
+      // subscription/pay-per-run resolvers never misread it. A bundle
       // store that cannot be read lets the refund flow continue —
       // no bundle rows can exist without the table, and the operator
       // approval step is the backstop.
       const paymentRef = typeof body.originalPaymentRef === "string" ? body.originalPaymentRef : "";
-      if (paymentRef) {
+      if (paymentRef && body.kind !== "bundle") {
         try {
           const bundles = createProductBundleAdapter(ctx.env as { AGENT_DB?: unknown });
           if (bundles) {
             await ensureProductBundleSchema(bundles.db);
             const bundlePurchase = await bundles.findBundlePurchaseByPaymentRef(paymentRef);
-            if (bundlePurchase) return codedOutcomeResponse("FAILURE_BUNDLE_REFUND_UNDECIDED");
+            if (bundlePurchase) {
+              return Response.json(
+                {
+                  code: "FAILURE_COMMERCIAL_REQUEST_INVALID",
+                  error: `Payment reference ${paymentRef} is a bundle purchase; request the refund with kind "bundle".`,
+                },
+                { status: 400 },
+              );
+            }
           }
         } catch {
           ctx.audit("commercial.bundle.refund_check_unavailable", "payments", {
@@ -7608,6 +7619,13 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
         const ensured = await ensureStores(store, subs);
         if (ensured) return ensured;
         resolver = createSubscriptionPaymentResolver(subs);
+      } else if (body.kind === "bundle") {
+        const bundles = requireBundles();
+        if (bundles instanceof Response) return bundles;
+        const ensuredBundles = await ensureBundleStores(bundles);
+        if (ensuredBundles) return ensuredBundles;
+        const billing = createBillingPorts(ctx.env as unknown as BillingEnv, true);
+        resolver = createBundlePaymentResolver(bundles, billing);
       }
       const record = await requestRefund(
         { policyStore: ports.policy, refundStore: ports.store, sourceResolver: resolver },
@@ -7639,10 +7657,10 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       // failure (500).
       const status = /not owner-approved/.test(message)
         ? 422
-        : /required|must be|not allowed|exceeds|expired|non-refundable|No subscription|Only the|no stored|determinable|rail is required|resolver/.test(message)
+        : /required|must be|not allowed|exceeds|expired|non-refundable|No subscription|No bundle|Only the|no stored|determinable|rail is required|resolver/.test(message)
           ? 400
           : 500;
-      return Response.json({ ...(/not owner-approved/.test(message) ? { code: "FAILURE_REFUND_POLICY_REFUSAL" } : /required|must be|not allowed|exceeds|expired|non-refundable|No subscription|Only the|no stored|determinable|rail is required|resolver/.test(message) ? { code: "FAILURE_COMMERCIAL_REQUEST_INVALID" } : { code: "FAILURE_UNEXPECTED_ERROR" }), error: message }, { status });
+      return Response.json({ ...(/not owner-approved/.test(message) ? { code: "FAILURE_REFUND_POLICY_REFUSAL" } : /required|must be|not allowed|exceeds|expired|non-refundable|No subscription|No bundle|Only the|no stored|determinable|rail is required|resolver/.test(message) ? { code: "FAILURE_COMMERCIAL_REQUEST_INVALID" } : { code: "FAILURE_UNEXPECTED_ERROR" }), error: message }, { status });
     }
   }
 
@@ -7742,6 +7760,13 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       // The native adapter is null when AGENT_DB is unbound, in
       // which case only the subscription half is wired. The
       // check-payment section below is untouched (draft PR #3106).
+      // Issue #5227: the bundle half — stored id, else the provider
+      // subscription's first invoice (earliest invoice wins; a
+      // renewal's intent is never returned). The bundle store is
+      // null when AGENT_DB is unbound, in which case only the
+      // subscription + pay-per-run halves are wired and a bundle
+      // execution records the honest consequence instead of a
+      // revocation.
       const nativeLedger = createNativeLedgerAdapter(ctx.env as { AGENT_DB?: unknown });
       if (nativeLedger) {
         await ensureNativeLedgerSchema(nativeLedger.db);
@@ -7750,10 +7775,21 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       const payPerRunResolver = nativeLedger
         ? createPayPerRunPaymentResolver(nativeLedger)
         : null;
+      const bundleStore = createProductBundleAdapter(ctx.env as { AGENT_DB?: unknown });
+      if (bundleStore) {
+        await ensureProductBundleSchema(bundleStore.db);
+      }
+      const bundleResolver = bundleStore
+        ? createBundlePaymentResolver(
+            bundleStore,
+            createBillingPorts(ctx.env as unknown as BillingEnv, flagOn),
+          )
+        : null;
       const sourceResolver = {
         resolve: async (originalPaymentRef: string) =>
           (await subscriptionResolver.resolve(originalPaymentRef)) ??
-          (payPerRunResolver ? await payPerRunResolver.resolve(originalPaymentRef) : null),
+          (payPerRunResolver ? await payPerRunResolver.resolve(originalPaymentRef) : null) ??
+          (bundleResolver ? await bundleResolver.resolve(originalPaymentRef) : null),
       };
       const record = await executeRefund(
         {
@@ -7762,6 +7798,7 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
           sourceResolver,
           subscriptionStore: subs,
           commercialStore: store,
+          bundleStore: bundleStore ?? undefined,
           // Issue #2549: the XOR guard's failure-credit lookup
           // reads BOTH ledgers — a credit row in either one
           // (native D1 rows, or the cfpay mas_transactions rows
@@ -7946,8 +7983,8 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
         return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_STORE_UNAVAILABLE") }, { status: 503 });
       }
       const body = (await request.json().catch(() => ({}))) as { kind?: unknown; approved?: unknown };
-      if (body.kind !== "subscription" && body.kind !== "pay_per_run") {
-        return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: "kind must be subscription or pay_per_run." }, { status: 400 });
+      if (body.kind !== "subscription" && body.kind !== "pay_per_run" && body.kind !== "bundle") {
+        return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: "kind must be subscription, pay_per_run, or bundle." }, { status: 400 });
       }
       if (typeof body.approved !== "boolean") {
         return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: "approved must be a boolean." }, { status: 400 });

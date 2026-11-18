@@ -50,8 +50,8 @@ export class InMemoryRefundPolicyAdapter implements RefundPolicyStore {
 
   async setKindApproval(kind: RefundPolicy["approvedKinds"][number], approved: boolean, byLogin: string): Promise<RefundPolicy> {
     if (!this.policy) throw new Error("Refund policy is not configured: run the refund schema ensure first.");
-    if (kind !== "subscription" && kind !== "pay_per_run") {
-      throw new Error(`Invalid refund kind: ${String(kind)} (must be subscription or pay_per_run).`);
+    if (kind !== "subscription" && kind !== "pay_per_run" && kind !== "bundle") {
+      throw new Error(`Invalid refund kind: ${String(kind)} (must be subscription, pay_per_run, or bundle).`);
     }
     if (typeof byLogin !== "string" || !byLogin.trim()) {
       throw new Error("byLogin is required.");

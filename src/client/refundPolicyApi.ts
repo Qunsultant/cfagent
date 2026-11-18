@@ -21,7 +21,7 @@ import { withCsrfInit } from "./apiFetch";
 import { COMMERCIAL_API_BASE } from "../data/commercialUrlCatalog";
 const BASE = COMMERCIAL_API_BASE;
 
-export type RefundKind = "subscription" | "pay_per_run";
+export type RefundKind = "subscription" | "pay_per_run" | "bundle";
 
 export interface RefundPolicyView {
   windowDays: number;
@@ -72,7 +72,7 @@ async function callJson(path: string, init?: RequestInit): Promise<unknown> {
 }
 
 function isRefundKind(value: unknown): value is RefundKind {
-  return value === "subscription" || value === "pay_per_run";
+  return value === "subscription" || value === "pay_per_run" || value === "bundle";
 }
 
 function assertPolicy(value: unknown): RefundPolicyView {

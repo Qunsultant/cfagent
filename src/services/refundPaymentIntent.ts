@@ -9,11 +9,11 @@
  * wires the native ledger's run->PI lookup into the resolver seam.
  *
  * Port-first (ADR 0002 R1): this module depends only on port
- * interfaces (NativeLedgerPort, RefundPaymentSourceResolver) and
- * pure helpers. It imports no store client, no gateway SDK, no env
- * binding, and writes no SQL. The route (composition root) builds
- * the resolver from the D1 adapter; tests use the in-memory
- * adapter or a stub port.
+ * interfaces (NativeLedgerPort, ProductBundleStore, BillingPort,
+ * RefundPaymentSourceResolver) and pure helpers. It imports no
+ * store client, no gateway SDK, no env binding, and writes no SQL.
+ * The route (composition root) builds the resolvers from the D1
+ * adapters; tests use the in-memory adapters or stub ports.
  *
  * Resolution rules, all fail-closed:
  * - Charge row only: findRow(runRequestId, "charge"). A credit row
@@ -42,6 +42,10 @@ import type {
   NativeLedgerPort,
   NativeLedgerRow,
 } from "../data/nativeLedgerPorts";
+import type {
+  ProductBundleStore,
+} from "../data/productBundles";
+import type { BillingPort } from "./billingPorts";
 import type {
   RefundPaymentSource,
   RefundPaymentSourceResolver,
@@ -101,6 +105,69 @@ export function createPayPerRunPaymentResolver(
         userId: row.customer,
         tenantId: row.tenantId,
         subscriptionId: null,
+      };
+    },
+  };
+}
+
+/**
+ * Issue #5227 (Monetization Phase 2.29) — bundle payment-intent
+ * resolution over the product-bundle store + the Billing port.
+ *
+ * A bundle purchase is a subscription-mode Checkout, so its row
+ * carries NO payment intent (the session evidence has none, and
+ * Stripe's `payment_intent` on a subscription-mode session is
+ * null): the charge lives on the provider subscription's FIRST
+ * invoice. Resolution order, all fail-closed:
+ * - No purchase row for the ref -> null. A missing bundle price
+ *   also resolves to null (the amount cannot be known).
+ * - Stored `stripePaymentIntentId` (a row recorded with one, or a
+ *   later backfill) wins; the invoice lookup is never consulted.
+ * - Else the provider subscription's first invoice, via
+ *   `billing.retrieveFirstInvoicePaymentIntent` (earliest invoice
+ *   wins; a renewal's intent is never returned). A null billing
+ *   port, a missing provider subscription id, a provider error,
+ *   or a null first-invoice intent all leave `paymentIntentId`
+ *   null ON THE RETURNED SOURCE (the service refuses with the
+ *   named no-stored-PI error) — an id is never guessed, and no
+ *   session id is ever passed to the gateway as if it were a
+ *   payment intent.
+ * - Rail mapping mirrors the subscription resolver: "stripe" ->
+ *   card; "x402" -> crypto; anything else (legacy "cfpay" rows)
+ *   -> null rail, which the service refuses as unresolvable.
+ * - The bundle price is the source amount, the purchase creation
+ *   time is the window anchor, and the entitlement period is
+ *   carried so the service can compute the prorated remainder.
+ * - Tenant is carried on the resolved source so executeRefund can
+ *   refuse a cross-tenant match; this module itself performs no
+ *   scoping decision beyond returning the row's own tenantId.
+ */
+export function createBundlePaymentResolver(
+  bundleStore: ProductBundleStore,
+  billing: Pick<BillingPort, "retrieveFirstInvoicePaymentIntent"> | null,
+): RefundPaymentSourceResolver {
+  return {
+    async resolve(originalPaymentRef: string): Promise<RefundPaymentSource | null> {
+      const purchase = await bundleStore.findBundlePurchaseByPaymentRef(originalPaymentRef);
+      if (!purchase) return null;
+      const bundle = await bundleStore.getBundle(purchase.bundleId).catch(() => null);
+      if (!bundle) return null;
+      let paymentIntentId = purchase.stripePaymentIntentId;
+      if (!paymentIntentId && billing && purchase.providerSubscriptionId) {
+        paymentIntentId = await billing
+          .retrieveFirstInvoicePaymentIntent(purchase.providerSubscriptionId)
+          .catch(() => null);
+      }
+      return {
+        paymentIntentId,
+        rail: purchase.provider === "stripe" ? "card" : purchase.provider === "x402" ? "crypto" : null,
+        originalAmountUSD: bundle.priceUSD,
+        originalPaidAtMs: purchase.createdAtMs,
+        userId: purchase.userId,
+        tenantId: purchase.tenantId,
+        subscriptionId: null,
+        bundlePeriodStartMs: purchase.periodStartMs,
+        bundlePeriodEndMs: purchase.periodEndMs,
       };
     },
   };

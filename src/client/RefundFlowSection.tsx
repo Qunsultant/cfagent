@@ -21,12 +21,14 @@
  * keyed by HTTP status (and, for execute 422, by the client-known
  * kind); server error bodies are never rendered.
  *
- * Honest limits, stated in copy: pay-per-run execution is refused
- * today as not resolvable (a pay-per-run record never carries a
- * payment-intent id and no resolver exists) — the UI surfaces that
- * refusal, it does not fix it; crypto refunds are refused as
+ * Honest limits, stated in copy: a pay-per-run record whose
+ * charge row carries no payment-intent id is refused, never
+ * guessed (the resolver exists since the #2204 follow-up, over
+ * the native ledger); crypto refunds are refused as
  * non-refundable; legacy subscription rows without a stored
- * payment-intent id are refused, never guessed.
+ * payment-intent id are refused, never guessed. A bundle refund
+ * is the prorated unused remainder computed by the policy, and
+ * executing it ends the remaining bundle access.
  * ui primitives only, token-only styling.
  */
 import React, { useCallback, useEffect, useRef, useState } from "react";
@@ -96,7 +98,7 @@ function statusLabel(status: RefundStatus): string {
 function requestMessage(status: number): string {
   if (status === 403) return "Refunds are disabled while monetization is off.";
   if (status === 422) return "Refunds of this kind are not approved yet. An operator must approve this kind first.";
-  if (status === 400) return "The request was refused. Check the payment reference and amount: the amount must equal the full original payment.";
+  if (status === 400) return "The request was refused. Check the payment reference and amount: the amount must equal the full original payment — for a bundle, leave the amount blank and it is computed from the unused remainder.";
   if (status === 503) return "The refund service is temporarily unavailable. Try again later.";
   return "The refund could not be requested. Try again later.";
 }
@@ -118,7 +120,7 @@ function executeMessage(status: number, kind: RefundKind): string {
   if (status === 403) return "Only a store operator can execute refunds.";
   if (status === 409) return "Only an approved refund can be executed.";
   if (status === 422 && kind === "pay_per_run") {
-    return "Pay-per-run refunds cannot be executed yet: no payment-intent id can be resolved for pay-per-run records.";
+    return "Pay-per-run refunds cannot be executed for this record: no payment-intent id can be resolved for it.";
   }
   if (status === 422) return "This refund could not be executed. Check the refund window, the policy approval, and the original payment.";
   if (status === 503) return "The refund service is temporarily unavailable. Try again later.";
@@ -247,8 +249,16 @@ export function RefundFlowSection({ subscriptions, plans }: RefundFlowSectionPro
         return;
       }
       const amountUSD = Number(amountRaw);
-      if (amountRaw === "" || !Number.isFinite(amountUSD) || amountUSD <= 0) {
+      // Issue #5227: a bundle amount is policy-computed — blank
+      // means "compute it". A supplied bundle amount is passed
+      // through and the server refuses it when it differs from the
+      // computed remainder. The other kinds still require an amount.
+      if (kind !== "bundle" && (amountRaw === "" || !Number.isFinite(amountUSD) || amountUSD <= 0)) {
         setFieldErrors({ amount: "Enter a valid amount greater than zero." });
+        return;
+      }
+      if (kind === "bundle" && amountRaw !== "" && (!Number.isFinite(amountUSD) || amountUSD <= 0)) {
+        setFieldErrors({ amount: "Enter a valid amount greater than zero, or leave it blank." });
         return;
       }
       if (!reason) {
@@ -257,7 +267,12 @@ export function RefundFlowSection({ subscriptions, plans }: RefundFlowSectionPro
       }
       setRequestPending(true);
       try {
-        const posted = await requestRefund({ kind, originalPaymentRef, amountUSD, reason });
+        const posted = await requestRefund({
+          kind,
+          originalPaymentRef,
+          amountUSD: kind === "bundle" && amountRaw === "" ? undefined : amountUSD,
+          reason,
+        });
         // Fresh-read discipline: render only the GET result, never
         // the POST answer.
         setCurrent(await getRefund(posted.id));
@@ -356,13 +371,14 @@ export function RefundFlowSection({ subscriptions, plans }: RefundFlowSectionPro
         Request a refund, decide and execute it as operator, and verify its outcome — over the
         existing refund routes. A full subscription refund revokes access immediately and removes
         included runs. Partial refunds are not allowed: the amount must equal the full original
-        payment.
+        payment — except a bundle refund, whose amount is the prorated unused remainder computed
+        by the policy.
       </p>
       <p>
-        Limits: pay-per-run execution is refused today as not resolvable — a pay-per-run record
-        never carries a payment-intent id and no resolver exists; crypto refunds are refused as
-        non-refundable; legacy subscription rows without a stored payment-intent id are refused,
-        never guessed.
+        Limits: a pay-per-run record whose payment-intent id is not resolvable is refused, never
+        guessed; crypto refunds are refused as non-refundable; legacy subscription rows without
+        a stored payment-intent id are refused, never guessed. A bundle refund ends the remaining
+        bundle access.
       </p>
       <form onSubmit={submitRequest}>
         <Select
@@ -373,6 +389,7 @@ export function RefundFlowSection({ subscriptions, plans }: RefundFlowSectionPro
         >
           <option value="subscription">Subscription</option>
           <option value="pay_per_run">Pay-per-run</option>
+          <option value="bundle">Bundle</option>
         </Select>
         {kind === "subscription" && subscriptions && subscriptions.length > 0 && (
           <div>
@@ -399,14 +416,14 @@ export function RefundFlowSection({ subscriptions, plans }: RefundFlowSectionPro
         <TextInput
           id="refund-original-ref"
           label="Original payment reference"
-          hint="Stripe subscription id from Stripe Dashboard, or the subscription id"
+          hint={kind === "bundle" ? "Bundle draft id (bbnd-…)" : "Stripe subscription id from Stripe Dashboard, or the subscription id"}
           ref={refRef}
           error={fieldErrors.ref}
         />
         <TextInput
           id="refund-amount"
           label="Amount (USD)"
-          hint="Must equal the full original payment"
+          hint={kind === "bundle" ? "Leave blank — the prorated unused remainder is computed by the policy" : "Must equal the full original payment"}
           ref={amountRef}
           error={fieldErrors.amount}
         />

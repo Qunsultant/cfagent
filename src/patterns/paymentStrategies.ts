@@ -492,6 +492,40 @@ export class StripePaymentStrategy implements IPaymentGatewayStrategy {
     return this.parseProviderSubscription(data, providerSubscriptionId);
   }
 
+  /**
+   * Issue #5227 — the payment-intent id of the provider
+   * subscription's FIRST invoice. Lists the subscription's
+   * invoices (GET /v1/invoices?subscription=…&limit=100) and
+   * returns the `payment_intent` of the entry with the smallest
+   * `created` — the purchase invoice. A later invoice is a
+   * renewal and is never returned, and an earliest invoice with
+   * no payment-intent id resolves to null rather than skipping
+   * ahead to a renewal (fail closed). Null when no invoices
+   * exist. Throws on a provider error (the caller treats a throw
+   * as unresolvable) and on a missing id or configuration.
+   */
+  async retrieveFirstInvoicePaymentIntent(env: Env, providerSubscriptionId: string): Promise<string | null> {
+    if (!providerSubscriptionId?.trim()) throw new Error("A provider subscription id is required.");
+    const data = await this.stripeBillingRequest(
+      env,
+      "GET",
+      `/v1/invoices?subscription=${encodeURIComponent(providerSubscriptionId)}&limit=100`,
+    );
+    const invoices = Array.isArray(data.data) ? data.data : [];
+    let earliest: Record<string, unknown> | null = null;
+    for (const entry of invoices) {
+      if (typeof entry !== "object" || entry === null) continue;
+      const created = Number((entry as Record<string, unknown>).created);
+      if (!Number.isFinite(created)) continue;
+      if (!earliest || created < Number((earliest as Record<string, unknown>).created)) {
+        earliest = entry as Record<string, unknown>;
+      }
+    }
+    if (!earliest) return null;
+    const paymentIntent = (earliest as Record<string, unknown>).payment_intent;
+    return typeof paymentIntent === "string" && paymentIntent.trim() ? paymentIntent : null;
+  }
+
   async cancelProviderAtPeriodEnd(env: Env, providerSubscriptionId: string): Promise<ProviderSubscription> {
     if (!providerSubscriptionId?.trim()) throw new Error("A provider subscription id is required.");
     const body = new URLSearchParams({ cancel_at_period_end: "true" });

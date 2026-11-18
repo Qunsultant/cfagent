@@ -144,6 +144,9 @@ function fakeClient() {
       subs.set(id, updated);
       return { ...updated };
     },
+    async retrieveFirstInvoicePaymentIntent(_id: string) {
+      return "pi_fake_first";
+    },
   };
   return client;
 }
@@ -167,6 +170,13 @@ describe("billing port contract (Stripe fake + in-memory)", () => {
       expect(gone.status).toBe("canceled");
       await expect(billing.retrieveProviderSubscription("sub_missing")).rejects.toThrow(/No provider subscription/);
     }
+  });
+
+  it("first-invoice payment-intent lookup: the stripe fake delegates, the in-memory adapter has no provider invoices (#5227)", async () => {
+    const stripeFake = new StripeBillingAdapter(fakeClient());
+    expect(await stripeFake.retrieveFirstInvoicePaymentIntent("sub_fake_1")).toBe("pi_fake_first");
+    const inMemory = new InMemoryBillingAdapter(() => NOW);
+    expect(await inMemory.retrieveFirstInvoicePaymentIntent("sub_test_1")).toBeNull();
   });
 });
 
@@ -524,6 +534,57 @@ describe("stripe strategy billing REST mapping (fetch stub)", () => {
       vi.unstubAllGlobals();
     }
     await expect(strategy.retrieveProviderSubscription({} as Env, "sub_123")).rejects.toThrow(/not configured/);
+  });
+
+  it("resolves the first invoice's payment intent: earliest created wins, a null earliest fails closed (#5227)", async () => {
+    const invoices = {
+      data: [
+        { id: "in_later", created: 1702592000, payment_intent: "pi_later" },
+        { id: "in_first", created: 1700000000, payment_intent: "pi_first" },
+      ],
+    };
+    const calls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        calls.push(url);
+        return { ok: true, json: async () => invoices } as never;
+      }),
+    );
+    try {
+      expect(await strategy.retrieveFirstInvoicePaymentIntent(env, "sub_123")).toBe("pi_first");
+      expect(calls[0]).toBe("https://api.stripe.com/v1/invoices?subscription=sub_123&limit=100");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => ({ data: [] }) }) as never));
+    try {
+      expect(await strategy.retrieveFirstInvoicePaymentIntent(env, "sub_123")).toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    // The earliest invoice carries no payment intent: null, never
+    // skipping ahead to the renewal's intent.
+    const noPiFirst = {
+      data: [
+        { id: "in_first", created: 1700000000, payment_intent: null },
+        { id: "in_later", created: 1702592000, payment_intent: "pi_later" },
+      ],
+    };
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => noPiFirst }) as never));
+    try {
+      expect(await strategy.retrieveFirstInvoicePaymentIntent(env, "sub_123")).toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 402, statusText: "Payment Required", json: async () => ({ error: { message: "card declined" } }) }) as never));
+    try {
+      await expect(strategy.retrieveFirstInvoicePaymentIntent(env, "sub_123")).rejects.toThrow(/402/);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    await expect(strategy.retrieveFirstInvoicePaymentIntent(env, "")).rejects.toThrow(/required/);
+    await expect(strategy.retrieveFirstInvoicePaymentIntent({} as Env, "sub_123")).rejects.toThrow(/not configured/);
   });
 });
 

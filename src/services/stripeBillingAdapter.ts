@@ -56,4 +56,8 @@ export class StripeBillingAdapter implements BillingPort {
       prorationBehavior,
     );
   }
+
+  async retrieveFirstInvoicePaymentIntent(providerSubscriptionId: string): Promise<string | null> {
+    return this.client.retrieveFirstInvoicePaymentIntent(requireId(providerSubscriptionId, "providerSubscriptionId"));
+  }
 }
