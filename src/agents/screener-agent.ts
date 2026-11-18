@@ -3154,6 +3154,17 @@ export class ScreenerAgent extends PortThink {
       assetClasses: req.assetClasses,
       symbols: req.symbols,
       optionsWorkflow,
+      // Issue #4858: the goal leg's host-dispatch input — the
+      // Worker's env carries the residency bindings, the requested
+      // env is the one the leg's service was constructed with, and
+      // the universe descriptor travels only when live universe
+      // deps were built for the run (a discovery-mode leg without
+      // it stays on sync, exactly as today).
+      goalLegHost: {
+        env: this.env,
+        ...(req.environment ? { requestedEnv: req.environment } : {}),
+        ...(goalUniverseDeps ? { universe: { provider: "nasdaq" } } : {}),
+      },
       stockWorkflow: { env: this.env, agent: this },
       ...(req.environment ? { environment: req.environment } : {}),
       ...(req.provider ? { provider: req.provider } : {}),

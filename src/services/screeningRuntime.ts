@@ -66,6 +66,7 @@ import {
 } from "./goalDrivenScreen";
 import type { ScreenerTask, ScreenerTaskLedger } from "./screenerTaskLedger";
 import type { JobRunTrigger } from "../data/jobRunRecordPorts";
+import type { GoalLegHostInput } from "./goalLegHostDispatch";
 import {
   buildScenario,
   type ScenarioConstraints,
@@ -225,6 +226,9 @@ export async function runProductionGoalScreen(input: {
    *  (production always is); a Pick-only fake fails closed, never
    *  silently. Absent -> the registry path, unchanged. */
   optionsWorkflow?: Omit<OptionsWorkflowDeps, "screener">;
+  /** Issue #4858: the goal options leg's host-dispatch input,
+   *  threaded to the ledger run. Absent -> the leg stays on sync. */
+  goalLegHost?: GoalLegHostInput;
   /** Issue #4279 ([One engine] #3550 S4): the goal stock leg's
    *  engine deps (the S3 seam's env + agent). Absent -> the
    *  registry path, unchanged. */
@@ -261,6 +265,7 @@ export async function runProductionGoalScreen(input: {
     baseOptionsFilter: input.baseOptionsFilter,
     now: input.now,
     ...(optionsWorkflow ? { optionsWorkflow } : {}),
+    ...(input.goalLegHost ? { goalLegHost: input.goalLegHost } : {}),
     ...(input.stockWorkflow ? { stockWorkflow: input.stockWorkflow } : {}),
     ...(input.environment ? { environment: input.environment } : {}),
     ...(input.provider ? { provider: input.provider } : {}),

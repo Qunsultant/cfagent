@@ -836,6 +836,15 @@ function measure(): Map<string, number> {
  * the main-side accountBindings row); the INTEGRATION marker is
  * restated 700/7069 -> 707/7306 (direct recount — the marker was
  * stale before this change).
+ * Baseline update (#4858, 2026-11-17): the goal options leg cuts
+ * over to the goal workflow host, gated — the dispatch site stamps
+ * the universe descriptor literal, dispositioned NOT-PROVIDER (the
+ * descriptor names the listings feed the leg resolves through, not
+ * a serving provider): 1 raise (screener-agent.ts nasdaq 10->11).
+ * The shared dispatch module names no provider. Baseline totals
+ * move 1330/10827 -> 1330/10828; the NOT-PROVIDER marker is
+ * restated 74/291 -> 74/298 (direct recount — the marker was stale
+ * before this change).
  */
 const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (188 rows / 989 lines) ----
@@ -2019,7 +2028,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["docs/plans/rsi-tech-plan-2026-10-20.md", "yahoo", 1],
   ["docs/plans/pr_3719_body.md", "alpaca", 3],
   ["docs/plans/pr_3719_body.md", "etrade", 6],
-  // ---- NOT-PROVIDER (74 rows / 291 lines) ----
+  // ---- NOT-PROVIDER (74 rows / 298 lines) ----
   ["docs/ANALYSIS_AND_EXECUTION_WORKFLOWS.md", "nasdaq", 4],
   ["docs/CLOUDFLARE_SCHEDULING_AND_ETAPI_TUNING.md", "nasdaq", 1],
   ["docs/EXTERNAL_APIS_AND_ENDPOINTS_DIRECTORY.md", "nasdaq", 6],
@@ -2050,7 +2059,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/agents/routes/etradeBroker.ts", "nasdaq", 1],
   ["src/agents/routes/optionsProviderGate.ts", "nasdaq", 1],
   ["src/agents/routes/premium.ts", "nasdaq", 1],
-  ["src/agents/screener-agent.ts", "nasdaq", 10],
+  ["src/agents/screener-agent.ts", "nasdaq", 11],
   ["src/agents/trading-agent.ts", "nasdaq", 1],
   ["src/aspects/errorCodes.ts", "nasdaq", 1],
   ["src/breakers/breakerPorts.ts", "nasdaq", 1],
