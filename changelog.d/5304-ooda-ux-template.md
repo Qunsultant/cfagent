@@ -1,0 +1,2 @@
+### Changed
+- **OODA Research UX template & primitives compliance (#5304)**: Upgraded `src/client/OodaResearchPage.tsx` onto `PageTemplate` + `KpiRibbon` + `PageSection`, replaced all 31 inline `style={{ ... }}` attributes in `src/client/options/ResearchRunsPanel.tsx` with `src/client/components/ui` primitives (`Badge`, `Button`, `Card`, `CardHeader`, `DetailCard`, `EmptyState`, `Flex`, `Notice`, `Stack`, `Table`, `TextInput`, `Checkbox`) and `primitives.css` / `tokens.css` classes, and ratcheted `tests/ux_inline_baselines_3047.json` to `0` for `ResearchRunsPanel.tsx`.

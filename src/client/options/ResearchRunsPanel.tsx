@@ -14,7 +14,22 @@
  */
 
 import React, { useCallback, useEffect, useState } from "react";
-import { Button, CardHeader, Checkbox, PageSection, Table, TextInput, type TableColumn } from "../components/ui";
+import {
+  Badge,
+  Button,
+  Card,
+  CardHeader,
+  Checkbox,
+  DetailCard,
+  EmptyState,
+  Flex,
+  Notice,
+  PageSection,
+  Stack,
+  Table,
+  TextInput,
+  type TableColumn,
+} from "../components/ui";
 import { navigateToTab } from "../router";
 import { csrfHeaders } from "../apiFetch";
 import { ScheduledOptionsRunForm } from "./ScheduledOptionsRunForm";
@@ -113,14 +128,10 @@ function hdrs(userLogin?: string): HeadersInit {
 }
 
 function TriggerChip({ trigger }: { trigger: TriggerSource }) {
-  const style =
-    trigger === "scheduled"
-      ? { background: "var(--color-info-subtle)", color: "var(--color-info-text)" }
-      : { background: "var(--color-warning-subtle)", color: "var(--color-warning-text)" };
   return (
-    <span style={{ ...style, borderRadius: 4, padding: "var(--space-0-5) var(--space-2)", fontSize: 12, fontWeight: 600 }}>
+    <Badge tone={trigger === "scheduled" ? "info" : "warning"} size="sm">
       {trigger}
-    </span>
+    </Badge>
   );
 }
 
@@ -144,86 +155,87 @@ function TradeCardDetail({ card }: { card: TradeCardView }) {
     { key: "underlying", header: "Underlying", render: (s) => s.underlying.toFixed(2) },
     { key: "pnlunit", header: "P&L / unit",
       render: (s) => (
-        <span style={{ color: s.pnlPerUnit >= 0 ? "var(--color-success-text)" : "var(--color-danger-text)" }}>
+        <Badge tone={s.pnlPerUnit >= 0 ? "success" : "danger"} size="xs">
           {s.pnlPerUnit.toFixed(2)}
-        </span>
+        </Badge>
       ) },
     { key: "pnltotal", header: "P&L total",
       render: (s) => (
-        <span style={{ color: s.pnlTotal >= 0 ? "var(--color-success-text)" : "var(--color-danger-text)" }}>
+        <Badge tone={s.pnlTotal >= 0 ? "success" : "danger"} size="xs">
           {s.pnlTotal.toFixed(2)}
-        </span>
+        </Badge>
       ) },
   ];
   return (
-    <div style={{ border: "1px solid var(--color-border-medium)", borderRadius: 8, margin: "8px 0", padding: "var(--space-3)" }}>
-      <div
-        style={{ cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}
-        onClick={() => setOpen(!open)}
-      >
-        <strong>
-          #{card.rank} {card.symbol} — {card.structure} ({debitCredit}, max loss ${card.contractualMaxLoss.toFixed(2)})
-        </strong>
-        <span>{open ? "▾" : "▸"}</span>
-      </div>
-      <div style={{ fontSize: 13, color: "var(--color-text-secondary)", marginTop: 4 }}>{card.thesis}</div>
-      {open && (
-        <div style={{ marginTop: 8, fontSize: 13 }}>
-          <h5>Legs (exact contracts)</h5>
-          <Table
-            columns={legColumns}
-            rows={card.legs.map((l, i) => ({ ...l, _idx: i }))}
-            rowKey={(row) => String(row._idx)}
-          />
-          <h5>Economics (independently recomputed)</h5>
-          <div>
-            Max gain: {econ.maxGain === null ? "unbounded" : `$${econ.maxGain.toFixed(2)}`} · Breakevens:{" "}
-            {econ.breakevens.length > 0 ? econ.breakevens.join(", ") : "—"}
-            {card.pmcc && (
-              <span>
-                {" "}· PMCC max profit (modeled, long-call residual value) ${card.pmcc.maxProfit.toFixed(2)} near{" "}
-                ${card.pmcc.maxProfitSpot.toFixed(2)}
-              </span>
-            )}
-          </div>
-          <h5>Scenarios</h5>
-          <Table
-            columns={scenarioColumns}
-            rows={card.scenarios.map((s, i) => ({ ...s, _idx: i }))}
-            rowKey={(row) => String(row._idx)}
-          />
-          <div style={{ color: "var(--color-text-muted)", fontSize: 12 }}>{card.feesNote}</div>
-          <h5>Falsification (§4)</h5>
-          <ul>
-            <li><b>Why the market may be wrong:</b> {card.falsification.whyMarketWrong}</li>
-            <li><b>Resolution:</b> {card.falsification.resolutionTrigger} ({card.falsification.horizon})</li>
-            <li><b>Invalidation:</b> {card.falsification.invalidation}</li>
-            <li><b>Why this structure:</b> {card.falsification.whyThisStructure}</li>
-            {card.falsification.contradictingEvidence.map((e, i) => (
-              <li key={i}><b>Counter-evidence:</b> {e}</li>
+    <Card padding="sm">
+      <Stack gap="2">
+        <Flex justify="between" align="center">
+          <strong>
+            #{card.rank} {card.symbol} — {card.structure} ({debitCredit}, max loss ${card.contractualMaxLoss.toFixed(2)})
+          </strong>
+          <Button variant="secondary" size="sm" onClick={() => setOpen(!open)}>
+            {open ? "Hide ▾" : "Details ▸"}
+          </Button>
+        </Flex>
+        <div className="ui-meta">{card.thesis}</div>
+        {open && (
+          <Stack gap="2">
+            <h5>Legs (exact contracts)</h5>
+            <Table
+              columns={legColumns}
+              rows={card.legs.map((l, i) => ({ ...l, _idx: i }))}
+              rowKey={(row) => String(row._idx)}
+            />
+            <h5>Economics (independently recomputed)</h5>
+            <div>
+              Max gain: {econ.maxGain === null ? "unbounded" : `$${econ.maxGain.toFixed(2)}`} · Breakevens:{" "}
+              {econ.breakevens.length > 0 ? econ.breakevens.join(", ") : "—"}
+              {card.pmcc && (
+                <span>
+                  {" "}· PMCC max profit (modeled, long-call residual value) ${card.pmcc.maxProfit.toFixed(2)} near{" "}
+                  ${card.pmcc.maxProfitSpot.toFixed(2)}
+                </span>
+              )}
+            </div>
+            <h5>Scenarios</h5>
+            <Table
+              columns={scenarioColumns}
+              rows={card.scenarios.map((s, i) => ({ ...s, _idx: i }))}
+              rowKey={(row) => String(row._idx)}
+            />
+            <div className="ui-meta-sm">{card.feesNote}</div>
+            <h5>Falsification (§4)</h5>
+            <ul>
+              <li><b>Why the market may be wrong:</b> {card.falsification.whyMarketWrong}</li>
+              <li><b>Resolution:</b> {card.falsification.resolutionTrigger} ({card.falsification.horizon})</li>
+              <li><b>Invalidation:</b> {card.falsification.invalidation}</li>
+              <li><b>Why this structure:</b> {card.falsification.whyThisStructure}</li>
+              {card.falsification.contradictingEvidence.map((e, i) => (
+                <li key={i}><b>Counter-evidence:</b> {e}</li>
+              ))}
+            </ul>
+            {card.falsificationWarnings.map((w, i) => (
+              <Notice key={i} tone="warning">⚠ {w}</Notice>
             ))}
-          </ul>
-          {card.falsificationWarnings.map((w, i) => (
-            <div key={i} style={{ color: "var(--color-warning-text)", fontSize: 12 }}>⚠ {w}</div>
-          ))}
-          <h5>Pre-mortem (§7)</h5>
-          <div style={{ fontSize: 12, color: "var(--color-text-secondary)", marginBottom: 4 }}>{card.premortem.assumedFailure}</div>
-          <ul>
-            {card.premortem.causes.map((c, i) => (
-              <li key={i}><b>{c.category}:</b> {c.description}</li>
-            ))}
-          </ul>
-          <h5>Entry & limitations</h5>
-          <div>{card.entryCondition}</div>
-          <ul>
-            {card.limitations.map((l, i) => (
-              <li key={i} style={{ color: "var(--color-text-muted)" }}>{l}</li>
-            ))}
-          </ul>
-          <div style={{ color: "var(--color-text-dim)", fontSize: "var(--font-size-micro)" }}>Sources: {card.sources.join(", ")}</div>
-        </div>
-      )}
-    </div>
+            <h5>Pre-mortem (§7)</h5>
+            <div className="ui-meta-sm">{card.premortem.assumedFailure}</div>
+            <ul>
+              {card.premortem.causes.map((c, i) => (
+                <li key={i}><b>{c.category}:</b> {c.description}</li>
+              ))}
+            </ul>
+            <h5>Entry & limitations</h5>
+            <div>{card.entryCondition}</div>
+            <ul>
+              {card.limitations.map((l, i) => (
+                <li key={i} className="ui-meta-sm">{l}</li>
+              ))}
+            </ul>
+            <div className="ui-meta-sm">Sources: {card.sources.join(", ")}</div>
+          </Stack>
+        )}
+      </Stack>
+    </Card>
   );
 }
 
@@ -359,7 +371,8 @@ export function ResearchRunsPanel({ activeEnv, userLogin, onSendPrompt }: Resear
         title="Autonomous Options Research"
         description="Read-only — no order entry from this panel"
       >
-      <div style={{ display: "flex", gap: "var(--space-2)", marginBottom: 12, flexWrap: "wrap" }}>
+      <Stack gap="3">
+      <Flex gap="2" wrap={true}>
         <Button onClick={() => void runNow()} disabled={running} loading={running}>
           {"Run research now"}
         </Button>
@@ -380,15 +393,15 @@ export function ResearchRunsPanel({ activeEnv, userLogin, onSendPrompt }: Resear
             Ask about results
           </Button>
         )}
-      </div>
-      {runMsg && <div style={{ fontSize: 13, color: "var(--color-info-text)", marginBottom: 8 }}>{runMsg}</div>}
+      </Flex>
+      {runMsg && <Notice tone="info">{runMsg}</Notice>}
 
       {showFilters && config && (
-        <div style={{ border: "1px solid var(--color-border-medium)", borderRadius: 8, padding: "var(--space-3)", marginBottom: 12 }}>
-          <CardHeader title="Filters & thresholds — every run embeds the effective snapshot" />
+        <DetailCard title="Filters & thresholds — every run embeds the effective snapshot">
+          <Stack gap="2">
           {CONFIG_FIELDS.map((f) => (
-            <div key={f.key} style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", marginBottom: 6 }}>
-              <span id={`rrf-${f.key}`} style={{ width: 260, fontSize: 13 }}>{f.label}</span>
+            <Flex key={f.key} gap="2" align="center" wrap={true}>
+              <span id={`rrf-${f.key}`}>{f.label}</span>
               {f.type === "boolean" ? (
                 <Checkbox
                   aria-labelledby={`rrf-${f.key}`}
@@ -398,34 +411,38 @@ export function ResearchRunsPanel({ activeEnv, userLogin, onSendPrompt }: Resear
               ) : (
                 <TextInput
                   aria-labelledby={`rrf-${f.key}`}
-                  style={{ width: 200 }}
                   value={draft[f.key] ?? ""}
                   onChange={(e) => setDraft({ ...draft, [f.key]: e.target.value })}
                 />
               )}
-              <span style={{ fontSize: "var(--font-size-micro)", color: "var(--color-text-dim)" }}>{f.hint}</span>
-            </div>
+              <span className="ui-meta-sm">{f.hint}</span>
+            </Flex>
           ))}
-          <Button onClick={() => void save()} disabled={saving} loading={saving}>{"Save filters"}</Button>
-          {saveMsg && <span style={{ marginLeft: 8, fontSize: 13 }}>{saveMsg}</span>}
-        </div>
+          <Flex gap="2" align="center">
+            <Button onClick={() => void save()} disabled={saving} loading={saving}>{"Save filters"}</Button>
+            {saveMsg && <Notice tone="info">{saveMsg}</Notice>}
+          </Flex>
+          </Stack>
+        </DetailCard>
       )}
 
       {report ? (
-        <div>
-          <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", marginBottom: 8 }}>
+        <Stack gap="3">
+          <Flex gap="2" align="center" wrap={true}>
             <TriggerChip trigger={report.trigger} />
-            <span style={{ fontSize: 13, color: "var(--color-text-muted)" }}>
+            <span className="ui-meta">
               {new Date(report.createdAt).toLocaleString()} · rules {report.rulesVersion} · {report.stats.durationMs}ms
             </span>
-          </div>
+          </Flex>
           <p>{report.summary}</p>
 
           <CardHeader title={<>Qualified ideas ({report.ideas.length})</>} />
           {report.ideas.length === 0 && (
-            <div style={{ color: "var(--color-text-muted)" }}>
-              No qualifying opportunities — no candidate passed the evidence and risk gates. This is a valid outcome.
-            </div>
+            <EmptyState
+              title="No qualifying opportunities"
+              description="No candidate passed the evidence and risk gates. This is a valid outcome."
+              framed={true}
+            />
           )}
           {report.ideas.map((c) => (
             <TradeCardDetail key={c.rank} card={c} />
@@ -433,29 +450,31 @@ export function ResearchRunsPanel({ activeEnv, userLogin, onSendPrompt }: Resear
 
           <CardHeader title={<>Watchlist ({report.watchlist.length})</>} />
           {report.watchlist.map((w, i) => (
-            <div key={i} style={{ fontSize: 13, borderLeft: "3px solid var(--color-warning)", paddingLeft: "var(--space-2)", marginBottom: 6 }}>
+            <Notice key={i} tone="warning">
               <b>{w.symbol}</b> ({w.outlook}, {w.structure}) — {w.reason}
-              <div style={{ color: "var(--color-text-muted)" }}>Trigger: {w.triggerCondition}</div>
-            </div>
+              <div className="ui-meta-sm">Trigger: {w.triggerCondition}</div>
+            </Notice>
           ))}
 
           <CardHeader title={<>Rejected ({report.rejected.length})</>} />
+          <Stack gap="1">
           {report.rejected.slice(0, 10).map((r, i) => (
-            <div key={i} style={{ fontSize: 12, color: "var(--color-text-muted)", marginBottom: 4 }}>
+            <div key={i} className="ui-meta-sm">
               <b>{r.symbol}</b> [{r.gate}] {r.reason}
             </div>
           ))}
           {report.rejected.length > 10 && (
-            <div style={{ fontSize: 12, color: "var(--color-text-dim)" }}>…and {report.rejected.length - 10} more.</div>
+            <div className="ui-meta-sm">…and {report.rejected.length - 10} more.</div>
           )}
+          </Stack>
 
           {/* Issue #4262 (S3): options runs are listed in the ONE run ledger —
               this panel keeps its settings, controls and latest report, and
               links to the ledger filtered to Options instead of keeping a
               second run list. */}
           <CardHeader title="Run history" />
-          <div style={{ fontSize: 12, color: "var(--color-text-muted)", marginBottom: 4, display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap" }}>
-            <span>
+          <Flex gap="2" align="center" wrap={true}>
+            <span className="ui-meta-sm">
               {history.length > 0
                 ? `${history.length} recorded run${history.length === 1 ? "" : "s"} — listed in the one run ledger.`
                 : "No research run yet — the one run ledger lists every options run."}
@@ -463,13 +482,16 @@ export function ResearchRunsPanel({ activeEnv, userLogin, onSendPrompt }: Resear
             <Button variant="secondary" onClick={() => navigateToTab("schedules", "runs", { kind: "options" })}>
               Open the run ledger
             </Button>
-          </div>
-        </div>
+          </Flex>
+        </Stack>
       ) : (
-        <div style={{ color: "var(--color-text-muted)" }}>
-          No research run yet. Run one manually, or wait for the scheduled after-close run (21:00 UTC weekdays).
-        </div>
+        <EmptyState
+          title="No research run yet"
+          description="Run one manually, or wait for the scheduled after-close run (21:00 UTC weekdays)."
+          framed={true}
+        />
       )}
+      </Stack>
 
       </PageSection>
 
