@@ -1,0 +1,2 @@
+### Changed
+- **Configurable durable/in-memory OODA adapters (#5283)**: Externalized `storageMode` (`"durable"` default, `"in-memory"` via `RESEARCH_STORAGE_MODE`) in `src/config/researchJobConfig.ts`, added `resolveResearchEngineAdapters` in `src/workflows/researchScreenEngine.ts` to keep both durable SQL and in-memory adapters selectable, and forwarded `env: ctx.env` alongside `sql: ctx.getOrm?.()` in `src/agents/routes/screenerResearch.ts`.

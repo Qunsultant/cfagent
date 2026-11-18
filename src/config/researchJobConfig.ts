@@ -6,6 +6,8 @@
  * and §10 AOP rule flags live here rather than as inline literals.
  */
 
+export type ResearchStorageMode = "durable" | "in-memory";
+
 export interface ResearchJobConfig {
   /** Maximum wall-clock budget (ms) for one OODA analysis loop. */
   oodaBudgetMs: number;
@@ -19,6 +21,8 @@ export interface ResearchJobConfig {
   retryMaxAttempts: number;
   /** Minimum age (hours) before a published run is eligible for §9 evaluation. */
   evaluationLookbackHours: number;
+  /** Storage/processing adapter mode for `research:<runId>` (`durable` default, `in-memory` optional). */
+  storageMode: ResearchStorageMode;
 }
 
 export const DEFAULT_RESEARCH_JOB_CONFIG: Readonly<ResearchJobConfig> = {
@@ -28,6 +32,7 @@ export const DEFAULT_RESEARCH_JOB_CONFIG: Readonly<ResearchJobConfig> = {
   maxParallelCandidates: 4,
   retryMaxAttempts: 2,
   evaluationLookbackHours: 24,
+  storageMode: "durable",
 };
 
 /** Programme §10 AOP invariants pinned for the research engine job. */
@@ -92,6 +97,10 @@ export function resolveResearchJobConfig(
       1,
       168,
     ),
+    storageMode:
+      env?.RESEARCH_STORAGE_MODE === "in-memory"
+        ? "in-memory"
+        : DEFAULT_RESEARCH_JOB_CONFIG.storageMode,
   };
 }
 

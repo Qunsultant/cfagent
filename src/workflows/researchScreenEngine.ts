@@ -28,7 +28,10 @@ import {
   type ResearchPipelineStage,
   type ResearchStepDeps,
 } from "../services/researchPipelineJobs";
-import { resolveResearchJobConfig } from "../config/researchJobConfig";
+import {
+  resolveResearchJobConfig,
+  type ResearchStorageMode,
+} from "../config/researchJobConfig";
 import { researchEngineJobId } from "./researchDataPorts";
 import { codedMessage } from "../outcomes/outcomeAspects";
 import type { FeatureFlagPort } from "../features/featureFlagPorts";
@@ -59,6 +62,8 @@ export interface DispatchResearchEngineInput {
   userLogin: string;
   trigger: "manual" | "scheduled";
   sql?: SqlStorage;
+  env?: Record<string, string | undefined>;
+  storageMode?: ResearchStorageMode;
   stores?: JobPipelineDeps["stores"];
   runRecorder?: JobRunRecorder;
   flags?: Pick<FeatureFlagPort, "isEnabled">;
@@ -74,7 +79,40 @@ export interface DispatchResearchEngineResult {
   stages: readonly ResearchPipelineStage[];
   stageVisibility: ResearchStageVisibility[];
   cutoverMode: "engine" | "direct_rollback";
+  storageMode: ResearchStorageMode;
   outcome: Record<string, unknown>;
+}
+
+function resolveResearchEngineAdapters(input: {
+  sql?: SqlStorage;
+  env?: Record<string, string | undefined>;
+  storageMode?: ResearchStorageMode;
+  stores?: JobPipelineDeps["stores"];
+  runRecorder?: JobRunRecorder;
+}): {
+  storageMode: ResearchStorageMode;
+  stores: JobPipelineDeps["stores"];
+  runRecorder: JobRunRecorder;
+} {
+  const configuredMode =
+    input.storageMode ?? resolveResearchJobConfig(input.env).storageMode;
+  const useDurable = configuredMode === "durable" && Boolean(input.sql);
+  const effectiveMode: ResearchStorageMode = useDurable ? "durable" : "in-memory";
+  return {
+    storageMode: effectiveMode,
+    stores:
+      input.stores ??
+      (useDurable && input.sql
+        ? createJobPipelineStoresFromSql(input.sql)
+        : createInMemoryJobPipelineStores()),
+    runRecorder:
+      input.runRecorder ??
+      jobRunRecorderFromStore(
+        useDurable && input.sql
+          ? new SqlJobRunRecordStore(input.sql)
+          : new InMemoryJobRunRecordStore(),
+      ),
+  };
 }
 
 /**
@@ -87,7 +125,7 @@ export async function dispatchResearchEngineRun(
   if (!input.userLogin?.trim() || input.userLogin.trim() === "default") {
     throw new Error(codedMessage("FAILURE_RESEARCH_OWNER_MISSING"));
   }
-  const config = resolveResearchJobConfig();
+  const config = resolveResearchJobConfig(input.env);
   assertResearchAopCompliance(config, { userLogin: input.userLogin });
 
   const runId = input.runId?.trim() || crypto.randomUUID();
@@ -116,6 +154,7 @@ export async function dispatchResearchEngineRun(
       stages: RESEARCH_PIPELINE_STAGES,
       stageVisibility,
       cutoverMode: "direct_rollback",
+      storageMode: input.storageMode ?? config.storageMode,
       outcome,
     };
   }
@@ -133,14 +172,7 @@ export async function dispatchResearchEngineRun(
     },
   };
 
-  const stores =
-    input.stores ??
-    (input.sql ? createJobPipelineStoresFromSql(input.sql) : createInMemoryJobPipelineStores());
-  const runRecorder =
-    input.runRecorder ??
-    jobRunRecorderFromStore(
-      input.sql ? new SqlJobRunRecordStore(input.sql) : new InMemoryJobRunRecordStore(),
-    );
+  const { storageMode, stores, runRecorder } = resolveResearchEngineAdapters(input);
   const control = new JobPipelineControl({
     stores,
     runRecorder,
@@ -189,6 +221,7 @@ export async function dispatchResearchEngineRun(
     stages: RESEARCH_PIPELINE_STAGES,
     stageVisibility,
     cutoverMode: "engine",
+    storageMode,
     outcome: capturedOutcome ?? { engineRunId: dispatch.runId, state: dispatch.state },
   };
 }
@@ -232,6 +265,8 @@ export function controlResearchStage(input: ControlResearchStageInput): {
 
 export interface ExecuteResearchStageControlInput extends ControlResearchStageInput {
   sql?: SqlStorage;
+  env?: Record<string, string | undefined>;
+  storageMode?: ResearchStorageMode;
   stores?: JobPipelineDeps["stores"];
   runRecorder?: JobRunRecorder;
   researchDeps?: ResearchStepDeps;
@@ -244,6 +279,7 @@ export interface ExecuteResearchStageControlResult {
   stageId: ResearchPipelineStage;
   op: ResearchStageOp;
   userLogin: string;
+  storageMode: ResearchStorageMode;
   jobState: string;
   engineRunId: string | null;
   stage: JobStageView | null;
@@ -257,14 +293,7 @@ export async function executeResearchStageControl(
   input: ExecuteResearchStageControlInput,
 ): Promise<ExecuteResearchStageControlResult> {
   const validated = controlResearchStage(input);
-  const stores =
-    input.stores ??
-    (input.sql ? createJobPipelineStoresFromSql(input.sql) : createInMemoryJobPipelineStores());
-  const runRecorder =
-    input.runRecorder ??
-    jobRunRecorderFromStore(
-      input.sql ? new SqlJobRunRecordStore(input.sql) : new InMemoryJobRunRecordStore(),
-    );
+  const { storageMode, stores, runRecorder } = resolveResearchEngineAdapters(input);
   const deps: ResearchStepDeps = input.researchDeps ?? {
     runOodaAnalysis: async (ctx) => ({
       ok: true,
@@ -286,6 +315,7 @@ export async function executeResearchStageControl(
     if (validated.op === "status") {
       return {
         ...validated,
+        storageMode,
         jobState: "idle",
         engineRunId: null,
         stage: null,
@@ -339,6 +369,7 @@ export async function executeResearchStageControl(
   const stageAfter = after.stages.find((s) => s.kind === validated.stageId) ?? null;
   return {
     ...validated,
+    storageMode,
     jobState: after.instance?.state ?? "idle",
     engineRunId: after.instance?.currentRunId ?? after.latestRun?.operation ?? null,
     stage: stageAfter,
