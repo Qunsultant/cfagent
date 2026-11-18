@@ -1,11 +1,10 @@
 /**
- * Issue #5116 (#5109 Sub-issue 7: UX-URL) — OODA Research page, spliced into
- * Intelligence next to goal-screen. Reuses `ResearchRunsPanel` and `src/client/components/ui/`
- * primitives to surface latest report, run history + per-stage detail, Run now,
- * schedule/guard status (21:00 UTC), and evaluations/track record.
+ * Issue #5116 (#5109 Sub-issue 7: UX-URL) & #5304 — OODA Research page,
+ * built on `PageTemplate` and `src/client/components/ui/` primitives
+ * (`tokens.css` + `primitives.css`).
  */
 import React from "react";
-import { Badge, Flex, PageSection, PageShell } from "./components/ui";
+import { Badge, Flex, KpiRibbon, PageSection, PageTemplate } from "./components/ui";
 import { ResearchRunsPanel } from "./options/ResearchRunsPanel";
 
 export interface OodaResearchPageProps {
@@ -15,9 +14,19 @@ export interface OodaResearchPageProps {
 
 export function OodaResearchPage({ activeEnv = "PROD", userLogin }: OodaResearchPageProps) {
   return (
-    <PageShell
+    <PageTemplate
       title="OODA Nightly Research"
       scopeNote="Engine job research:<runId> · 21:00–21:30 UTC weekday guard · Reports tab remains the archive"
+      kpiRibbon={
+        <KpiRibbon
+          items={[
+            { label: "Engine Job", value: "research:<runId>", sub: "J-stack durable" },
+            { label: "Guard Window", value: "21:00–21:30 UTC", sub: "Weekdays" },
+            { label: "Pipeline", value: "6 stages", sub: "feed → evaluate" },
+            { label: "Environment", value: activeEnv, sub: userLogin ? `Owner: ${userLogin}` : "Owner scoped" },
+          ]}
+        />
+      }
     >
       <PageSection title="Nightly research & track record">
         <Flex gap="2" wrap={true}>
@@ -26,6 +35,6 @@ export function OodaResearchPage({ activeEnv = "PROD", userLogin }: OodaResearch
         </Flex>
         <ResearchRunsPanel activeEnv={activeEnv} userLogin={userLogin} />
       </PageSection>
-    </PageShell>
+    </PageTemplate>
   );
 }
