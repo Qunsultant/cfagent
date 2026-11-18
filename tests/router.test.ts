@@ -23,7 +23,7 @@ describe("router query params", () => {
 
   it("sets ?tab= while keeping only the destination's own params (#3238)", () => {
     expect(buildSearchWithTab("", "social")).toBe("?tab=social");
-    expect(buildSearchWithTab("?screenerTab=scanner", "screeners")).toBe("?screenerTab=scanner&tab=screeners");
+    expect(buildSearchWithTab("?screenerTab=scanner", "stock-hub")).toBe("?screenerTab=scanner&tab=stock-hub");
     // The old #1804 preserve-everything behavior was the leak: a
     // screener param followed the user to an unrelated page.
     expect(buildSearchWithTab("?tab=autopilot&screenerTab=scanner", "social")).toBe(
