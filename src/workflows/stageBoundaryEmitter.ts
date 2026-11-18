@@ -21,6 +21,13 @@
  */
 import { buildStageBoundaryMessage, publishStageBoundaryMessage, type StageQueueSend } from "./stageQueueTransport";
 import type { StageFamily } from "./stageMessage";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "workflows/stageBoundaryEmitter",
+});
+
 
 export type StageBoundaryEmitResult = "published" | "skipped" | "malformed";
 
@@ -43,7 +50,7 @@ export interface StageBoundaryEmitterOptions {
   /** A real login; the seam refuses "default" and an empty value. */
   readonly userLogin: string;
   readonly queue?: StageQueueSend | null;
-  /** Injected for tests; defaults to console.warn. */
+  /** Injected for tests; defaults to the structured logger. */
   readonly warn?: (message: string) => void;
 }
 
@@ -51,7 +58,7 @@ export interface StageBoundaryEmitterOptions {
  * Build the emitter for one workflow instance. Cheap: no I/O until called.
  */
 export function createStageBoundaryEmitter(options: StageBoundaryEmitterOptions): StageBoundaryEmitter {
-  const warn = options.warn ?? ((message: string) => console.warn(message));
+  const warn = options.warn ?? ((message: string) => structuredLog.warn("stageBoundaryEmitter.log", { message }));
   return async (input) => {
     const artifactKey = workflowStageArtifactKey({
       family: options.family,

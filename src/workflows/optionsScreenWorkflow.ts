@@ -30,6 +30,13 @@ import {
   type StageQueueSend,
 } from "./stageQueueTransport";
 import type { OptionsStageStorage } from "./optionsScreenPorts";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "workflows/optionsScreenWorkflow",
+});
+
 
 export interface OptionsStageInput {
   runId: string;
@@ -177,7 +184,7 @@ export async function runOptionsStageOnce(
   deps: OptionsScreenWorkflowDeps,
   block: BlockDefinition,
 ): Promise<OptionsStageRunResult> {
-  const warn = deps.warn ?? ((message: string) => console.warn(message));
+  const warn = deps.warn ?? ((message: string) => structuredLog.warn("optionsScreenWorkflow.log", { message }));
   const stageId = input.stageId;
   const key = stageIdempotencyKey(input.runId, stageId, "options");
   if (deps.claims.has(key)) {

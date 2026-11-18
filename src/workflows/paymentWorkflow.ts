@@ -340,10 +340,11 @@ export class PaymentWorkflow extends PortThinkWorkflow<
         freeRunCounter = counter;
       }
     } catch (err) {
-      console.error(
-        `[payment-workflow] free-run counter unavailable for run ${p.runRequestId} — gate keeps today's paid behavior for Free accounts:`,
-        err instanceof Error ? err.message : String(err),
-      );
+      structuredLog.error("paymentWorkflow.freeRunCounterUnavailable", {
+        message: `[payment-workflow] free-run counter unavailable for run ${p.runRequestId} — gate keeps today's paid behavior for Free accounts: ${err instanceof Error ? err.message : String(err)}`,
+        runRequestId: p.runRequestId,
+        error: err instanceof Error ? err.message : String(err),
+      });
       freeRunCounter = null;
     }
     // Issue #3263: the approved-free per-service quota, wired from
@@ -465,10 +466,11 @@ export class PaymentWorkflow extends PortThinkWorkflow<
         nativeLedger = adapter;
       }
     } catch (err) {
-      console.error(
-        `[payment-workflow] native ledger port unavailable for run ${p.runRequestId} — charge rows will be skipped, payment unaffected:`,
-        err instanceof Error ? err.message : String(err),
-      );
+      structuredLog.error("paymentWorkflow.nativeLedgerUnavailable", {
+        message: `[payment-workflow] native ledger port unavailable for run ${p.runRequestId} — charge rows will be skipped, payment unaffected: ${err instanceof Error ? err.message : String(err)}`,
+        runRequestId: p.runRequestId,
+        error: err instanceof Error ? err.message : String(err),
+      });
       nativeLedger = null;
     }
 
@@ -532,9 +534,10 @@ export class PaymentWorkflow extends PortThinkWorkflow<
             tenantId: p.tenantId,
           });
           if (duplicate) {
-            console.log(
-              `[payment-workflow] charge row already exists for run=${e.runRequestId} (retried step, deduped)`,
-            );
+            structuredLog.info("paymentWorkflow.chargeRowAlreadyExists", {
+              message: `[payment-workflow] charge row already exists for run=${e.runRequestId} (retried step, deduped)`,
+              runRequestId: e.runRequestId,
+            });
           }
           // Issue #2155: project the charge into the D1 double-entry
           // journal (Dr 1000 / Cr 4000). BEST-EFFORT, never thrown:
@@ -573,14 +576,18 @@ export class PaymentWorkflow extends PortThinkWorkflow<
             const rows = await listCfpayLedgerRows(this.env, e.runRequestId);
             const check = reconcileCfpayRun(rows, e.runRequestId, "fulfilled");
             if (!check.matched) {
-              console.error(
-                `[payment-workflow] ledger reconciliation mismatch for run=${e.runRequestId}: ${check.reasons.join("; ")}`,
-              );
+              structuredLog.error("paymentWorkflow.ledgerReconciliationMismatch", {
+                message: `[payment-workflow] ledger reconciliation mismatch for run=${e.runRequestId}: ${check.reasons.join("; ")}`,
+                runRequestId: e.runRequestId,
+                reasons: check.reasons,
+              });
             }
           } catch (err) {
-            console.error(
-              `[payment-workflow] ledger read-back failed for run=${e.runRequestId}: ${err instanceof Error ? err.message : String(err)}`,
-            );
+            structuredLog.error("paymentWorkflow.ledgerReadBackFailed", {
+              message: `[payment-workflow] ledger read-back failed for run=${e.runRequestId}: ${err instanceof Error ? err.message : String(err)}`,
+              runRequestId: e.runRequestId,
+              error: err instanceof Error ? err.message : String(err),
+            });
           }
         }
         await recordCfpayAuditEvent(this.env, { ...e, family: p.family });
@@ -619,9 +626,10 @@ export class PaymentWorkflow extends PortThinkWorkflow<
         try {
           const adapter = createCommercialAdapter(this.env as { AGENT_DB?: unknown });
           if (!adapter) {
-            console.error(
-              `[payment-workflow] D1 credit-claim write skipped for run ${runRequestId} (AGENT_DB unbound); no redeemable claim recorded.`,
-            );
+            structuredLog.error("paymentWorkflow.creditClaimWriteSkipped", {
+              message: `[payment-workflow] D1 credit-claim write skipped for run ${runRequestId} (AGENT_DB unbound); no redeemable claim recorded.`,
+              runRequestId,
+            });
             return;
           }
           await ensureCommercialSchema(adapter.db);
@@ -637,10 +645,11 @@ export class PaymentWorkflow extends PortThinkWorkflow<
             priceUSD,
           });
         } catch (err) {
-          console.error(
-            `[payment-workflow] D1 credit-claim write failed for run ${runRequestId} — claim missing, operator must re-issue from the payment record:`,
-            err,
-          );
+          structuredLog.error("paymentWorkflow.creditClaimWriteFailed", {
+            message: `[payment-workflow] D1 credit-claim write failed for run ${runRequestId} — claim missing, operator must re-issue from the payment record: ${err instanceof Error ? err.message : String(err)}`,
+            runRequestId,
+            error: err instanceof Error ? err.message : String(err),
+          });
         }
         // Issue #2155: project the failure credit into the D1
         // journal (Dr 4000 / Cr 2000), BEST-EFFORT like the claim
@@ -684,9 +693,10 @@ export class PaymentWorkflow extends PortThinkWorkflow<
         try {
           const adapter = createCommercialAdapter(this.env as { AGENT_DB?: unknown });
           if (!adapter) {
-            console.error(
-              `[payment-workflow] coverage consumption skipped for user ${use.userId} (AGENT_DB unbound); balance must be reconciled by an operator.`,
-            );
+            structuredLog.error("paymentWorkflow.coverageConsumptionSkipped", {
+              message: `[payment-workflow] coverage consumption skipped for user ${use.userId} (AGENT_DB unbound); balance must be reconciled by an operator.`,
+              userId: use.userId,
+            });
             return;
           }
           await ensureCommercialSchema(adapter.db);
@@ -707,10 +717,12 @@ export class PaymentWorkflow extends PortThinkWorkflow<
             await adapter.consumeCredits(use.userId, use.priceUSD);
           }
         } catch (err) {
-          console.error(
-            `[payment-workflow] coverage consumption failed for user ${use.userId} paidVia=${use.paidVia} — run proceeds, balance must be reconciled by an operator:`,
-            err,
-          );
+          structuredLog.error("paymentWorkflow.coverageConsumptionFailed", {
+            message: `[payment-workflow] coverage consumption failed for user ${use.userId} paidVia=${use.paidVia} — run proceeds, balance must be reconciled by an operator: ${err instanceof Error ? err.message : String(err)}`,
+            userId: use.userId,
+            paidVia: use.paidVia,
+            error: err instanceof Error ? err.message : String(err),
+          });
         }
       },
       recordUsage: async (usage: {

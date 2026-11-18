@@ -64,6 +64,13 @@
 
 import { parseTraceparent } from "../observability/observabilityPorts";
 import { ingestScreenRunEvent } from "../telemetry/screenRunStats";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "workflows/screenRunAspects",
+});
+
 
 export const SCREEN_RUN_ASPECTS = {
   logging: { joinPoint: "ScreenerAgent.runScreen via logScreenRunEvent (this module); chain submission via the same fn (engine seam submitStockScreenViaEngine, scheduledTasks autonomousMarketScreenSharded)" },
@@ -155,14 +162,15 @@ export interface ScreenRunLogEvent {
 }
 
 /**
- * One structured JSON log line per run event, carrying the
- * standards fields (docs/architecture/standards/standards.md):
- * trace_id, actor_id (the run's user login), agent_id.
- * tenant_id rides when the caller knows it (runScreen does
- * not — the workflow tenant is resolved at the workflow
- * layer, not inside the agent — so it is omitted, never
- * invented). Logging never throws: a logging failure must
- * not fail a screen.
+ * One structured event per run event, emitted through the S2
+ * structured logger (component workflows/screenRunAspects),
+ * carrying the standards fields
+ * (docs/architecture/standards/standards.md): trace_id,
+ * actor_id (the run's user login), agent_id ride the logger's
+ * scope overrides; tenant_id reads null — the workflow tenant
+ * is resolved at the workflow layer, not inside the agent, so
+ * it is never invented. Logging never throws: a logging
+ * failure must not fail a screen.
  */
 export function logScreenRunEvent(input: {
   event: ScreenRunLogEvent["event"];
@@ -177,19 +185,6 @@ export function logScreenRunEvent(input: {
   error?: string;
 }): void {
   try {
-    const line: Record<string, unknown> = {
-      trace_id: input.traceId,
-      agent_id: "screener-agent",
-      event: input.event,
-      trigger: input.trigger,
-      universe: input.universe,
-    };
-    if (input.userLogin) line.actor_id = input.userLogin;
-    if (input.success !== undefined) line.success = input.success;
-    if (input.matchedCount !== undefined) line.matched_count = input.matchedCount;
-    if (input.durationMs !== undefined) line.duration_ms = input.durationMs;
-    if (input.classification) line.classification = input.classification;
-    if (input.error) line.error = input.error;
     // Issue #2860 (Factor 14): the same event folds into the
     // screen-run metrics accumulator at this one join point, so
     // every funnel emission (runScreen + chain submission) is
@@ -202,7 +197,20 @@ export function logScreenRunEvent(input: {
       ...(input.durationMs !== undefined ? { durationMs: input.durationMs } : {}),
       ...(input.classification ? { classification: input.classification } : {}),
     });
-    console.log(JSON.stringify(line));
+    structuredLog.info("screenRunAspects.screen_run_event", {
+      event: input.event,
+      trigger: input.trigger,
+      universe: input.universe,
+      ...(input.success !== undefined ? { success: input.success } : {}),
+      ...(input.matchedCount !== undefined ? { matchedCount: input.matchedCount } : {}),
+      ...(input.durationMs !== undefined ? { durationMs: input.durationMs } : {}),
+      ...(input.classification ? { classification: input.classification } : {}),
+      ...(input.error ? { error: input.error } : {}),
+    }, {
+      traceId: input.traceId,
+      actorId: input.userLogin ?? null,
+      agentId: "screener-agent",
+    });
   } catch {
     // Logging never fails a screen.
   }

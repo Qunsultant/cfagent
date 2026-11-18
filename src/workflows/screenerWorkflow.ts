@@ -66,6 +66,13 @@ import {
   type WorkflowCollation,
   type WorkflowJobCommand,
 } from "./workflowPorts";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "workflows/screenerWorkflow",
+});
+
 
 /** The shared OrchestratorAgent stub (same addressing server.ts uses). */
 function orchestratorStub(env: Env): OrchestratorAgent {
@@ -363,9 +370,10 @@ function buildDeps(
     ndModeEnabled: (() => {
       const gate = resolveScreenerNdGateFromEnv(env);
       if (gate.invalid) {
-        console.warn(
-          `[screener-workflow] ${screenerNdConfigErrorEvent()}: SCREENER_ND_MODE value ${JSON.stringify(gate.raw)} is not "on"/"off" — failing closed to off.`,
-        );
+        structuredLog.warn("screenerWorkflow.nd_mode_invalid_value", {
+          message: `[screener-workflow] ${screenerNdConfigErrorEvent()}: SCREENER_ND_MODE value ${JSON.stringify(gate.raw)} is not "on"/"off" — failing closed to off.`,
+          rawValue: gate.raw,
+        });
       }
       return gate.enabled;
     })(),
@@ -412,9 +420,10 @@ export class ScreenerScreenWorkflow extends PortThinkWorkflow<
     // config row on the Workflow Runs page, and firings stay cheap.
     const scheduleBranch = resolveScheduleBranch(event);
     if (scheduleBranch.handled) {
-      console.log(
-        `[screener-workflow] binding-schedule firing (${scheduleBranch.cron}) — no binding-owned schedules due; skipping without executing (issue #3021).`,
-      );
+      structuredLog.info("screenerWorkflow.binding_schedule_firing_skipped", {
+        message: `[screener-workflow] binding-schedule firing (${scheduleBranch.cron}) — no binding-owned schedules due; skipping without executing (issue #3021).`,
+        cron: scheduleBranch.cron,
+      });
       return {
         scheduleFiring: true,
         cron: scheduleBranch.cron,

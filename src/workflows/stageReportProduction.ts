@@ -66,6 +66,13 @@ import { stageIdempotencyKey, stageMessage } from "./stageMessage";
 // local import serves this file's own internal use.
 import { stageAnalysisKey } from "./stageRuntimeIds";
 export { STAGE_ANALYSIS_KEY_PREFIX, stageAnalysisKey } from "./stageRuntimeIds";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "workflows/stageReportProduction",
+});
+
 
 /**
  * The run shape the PDF leg needs. Structural on purpose:
@@ -180,7 +187,10 @@ export async function consumeAnalysisDoneMessage(args: {
     readPersisted: async (key) => (await storage.get(key)) as PersistedAnalysis | null,
     generate,
     deadLetter: async ({ reason }) => {
-      console.warn("[stageReportProduction] stage message dead-lettered:", reason);
+      structuredLog.warn("stageReportProduction.stage_message_dead_lettered", {
+        message: "[stageReportProduction] stage message dead-lettered",
+        reason,
+      });
     },
   });
 }
@@ -198,7 +208,10 @@ export async function generateRunPdfViaStageConsumer(args: {
   const fail = (reason: string): StagePdfOutcome => {
     result.pdfStatus = "failed";
     result.pdfError = codedMessage("FAILURE_REPORT_PDF_GENERATION", reason);
-    console.error("[stageReportProduction] PDF leg failed:", result.pdfError);
+    structuredLog.error("stageReportProduction.pdf_leg_failed", {
+      message: "[stageReportProduction] PDF leg failed",
+      error: result.pdfError,
+    });
     return { status: "failed", reason };
   };
   try {

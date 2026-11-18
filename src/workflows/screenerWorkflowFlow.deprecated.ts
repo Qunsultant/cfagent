@@ -150,6 +150,13 @@ import {
   type ScreenerWorkflowDeps,
   type ShardScreenResult,
 } from "./screenerCollation";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "workflows/screenerWorkflowFlow",
+});
+
 
 /** Minimal step surface the flows need (fakeable in tests). */
 export interface ScreenerWorkflowStep {
@@ -244,7 +251,12 @@ function capSummaryJson(value: unknown): string {
  * untraceable from the panel's empty history. */
 function warnUnprojected(chainId: string, stage: string, result: { projected: boolean; error?: string }): void {
   if (!result.projected) {
-    console.warn(`[screener-workflow] projection failed for chain ${chainId} stage ${stage}: ${result.error ?? "unknown"}`);
+    structuredLog.warn("screenerWorkflowFlow.projection_failed", {
+      message: `[screener-workflow] projection failed for chain ${chainId} stage ${stage}: ${result.error ?? "unknown"}`,
+      chainId,
+      stage,
+      error: result.error ?? "unknown",
+    });
   }
 }
 
