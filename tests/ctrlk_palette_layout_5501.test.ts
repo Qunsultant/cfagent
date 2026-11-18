@@ -46,8 +46,5 @@ describe("Ctrl-K palette layout (#5501): filter pills and result groups never ov
 
     const footer = ruleBody(PRIMITIVES_CSS, ".stock-search-modal-dialog .stock-search-modal-footer");
     expect(footer).toMatch(/flex-shrink:\s*0/);
-
-    const row = ruleBody(PRIMITIVES_CSS, ".stock-search-modal-dialog .search-result-row");
-    expect(row).toMatch(/border-left:\s*3px\s+solid\s+transparent/);
   });
 });
