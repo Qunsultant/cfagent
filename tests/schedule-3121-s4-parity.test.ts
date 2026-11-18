@@ -645,7 +645,7 @@ describe("S4-P08 the recordJobOutcome sink check — trigger only, no chain path
     expect(portsSrc).not.toContain("asyncJobId");
     // The other outcome-sink callers stamp trigger only, too.
     const serveSrc = readFileSync("src/services/optionsServeRecord.ts", "utf8");
-    expect(serveSrc).toContain("trigger: run.trigger,");
+    expect(serveSrc).toContain("trigger: normalizeJobRunTrigger(run.trigger),");
     expect(serveSrc).not.toContain("scheduleId: run.");
   });
 });
