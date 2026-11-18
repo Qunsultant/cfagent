@@ -92,11 +92,11 @@ describe("neutrality S2 — chat and widget example copy", () => {
     expect(src).toContain("Market-data multiples + NBBO quotes available.");
   });
   it("Chat fallback research label is neutral", () => {
-    // Issue #4626: the research mount left Chat.tsx, so the neutral
-    // label lives on the research panel now; Chat carries no research
-    // label at all, and never the Yahoo-branded one.
-    expect(read("src/client/MarketDataResearchHub.tsx")).toContain(
-      "Market Data Research",
+    // Issue #4626 / #5185 (S-U8): the research mount lives inside StockHub
+    // and MarketDataResearchHub drops its nested PageShell; neither
+    // MarketDataResearchHub nor Chat carries the Yahoo-branded label.
+    expect(read("src/client/MarketDataResearchHub.tsx")).not.toContain(
+      "Yahoo Finance Research",
     );
     expect(read("src/client/Chat.tsx")).not.toContain("Yahoo Finance Research");
   });
