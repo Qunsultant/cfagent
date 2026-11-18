@@ -27,7 +27,7 @@ describe("#5043 silent no-ops", () => {
   });
 
   it("G-8: surfaces sync and async logger sink failures without throwing to the caller", async () => {
-    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
     const observed: Array<{ op: string; msg: string }> = [];
 
     const syncFailSink: ObservabilitySink = {
@@ -61,11 +61,12 @@ describe("#5043 silent no-ops", () => {
       { op: "test.sync_op", msg: "sync sink boom" },
       { op: "test.async_op", msg: "async sink boom" },
     ]);
-    expect(errSpy).toHaveBeenCalledTimes(2);
-    const firstPayload = JSON.parse(String(errSpy.mock.calls[0]?.[0])) as Record<string, unknown>;
+    expect(infoSpy).toHaveBeenCalledTimes(2);
+    const firstPayload = JSON.parse(String(infoSpy.mock.calls[0]?.[0])) as Record<string, unknown>;
     expect(firstPayload.type).toBe("structured_logger.sink_failed");
-    expect(firstPayload.originalOperation).toBe("test.sync_op");
-    expect((firstPayload.droppedEvent as ObservabilityEvent).operation).toBe("test.sync_op");
+    const fields = firstPayload.fields as Record<string, unknown>;
+    expect(fields.originalOperation).toBe("test.sync_op");
+    expect((fields.droppedEvent as ObservabilityEvent).operation).toBe("test.sync_op");
   });
 
   it("G-10: refuses blank userLogin or tenantId before trying shared-instance fallback", async () => {

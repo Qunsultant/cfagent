@@ -27,6 +27,7 @@
  * discipline): fields pass through untouched here.
  */
 import {
+  ConsoleObservabilitySink,
   newTraceContext,
   timestampIsoFor,
   type ObservabilityEvent,
@@ -91,23 +92,33 @@ export function createStructuredLogger(
   context: StructuredLogContext = {},
 ): StructuredLogger {
   const nowMs = context.nowMs ?? Date.now;
+  const fallbackSink = new ConsoleObservabilitySink();
 
   function reportSinkFailure(event: ObservabilityEvent, error: unknown): void {
     const message = error instanceof Error ? error.message : String(error);
     try {
-      console.error(
-        JSON.stringify({
-          type: "structured_logger.sink_failed",
-          level: "error",
+      const ts = nowMs();
+      fallbackSink.write({
+        type: "structured_logger.sink_failed",
+        level: "error",
+        operation: "structured_logger.sink_failed",
+        tenantId: event.tenantId,
+        actorId: event.actorId,
+        agentId: event.agentId,
+        component: event.component,
+        runId: event.runId,
+        sessionRef: event.sessionRef,
+        traceId: event.traceId,
+        timestampMs: ts,
+        timestampIso: timestampIsoFor(ts),
+        fields: {
           originalOperation: event.operation,
-          tenantId: event.tenantId,
-          traceId: event.traceId,
           error: message,
           droppedEvent: event,
-        }),
-      );
+        },
+      });
     } catch {
-      // stderr itself failed — nothing further we can emit without throwing.
+      // Fallback sink itself failed — nothing further we can emit without throwing.
     }
     if (context.onSinkFailure) {
       try {
