@@ -267,6 +267,26 @@ export const DEFAULT_COPILOTS: CopilotConfig[] = [
         category: "Self-Improvement (RSI)",
       },
       {
+        label: "🕵️ Why didn't you trade?",
+        prompt: "Why didn't you trade in the latest cycle? Explain the learning policy and the critic verdict",
+        category: "Learning & Memory",
+      },
+      {
+        label: "📚 What have you learned?",
+        prompt: "Show me the distilled learnings and the recent quality review findings",
+        category: "Learning & Memory",
+      },
+      {
+        label: "🚧 Any repeated risk blocks?",
+        prompt: "Are any policy checks repeatedly blocking? Show the verdict trend and the binding rules",
+        category: "Policy & Verdicts",
+      },
+      {
+        label: "🗂️ What do you remember about me?",
+        prompt: "What preferences and facts do you remember about me, and which of them are promoted learnings?",
+        category: "Learning & Memory",
+      },
+      {
         label: "🔒 Why is Self-RSI unavailable?",
         prompt: "Why is Self-RSI mode unavailable and what does the §7 pipeline still need?",
         category: "RSI Mode",

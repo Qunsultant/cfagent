@@ -1,0 +1,3 @@
+### Added
+
+- **Stock Copilot chips for the signals the loop now produces (#5523):** the chip set had sixteen entries and none asked what the new consumers can answer. Four chips added, each backed by a tool the chat already calls: **"Why didn't you trade?"** (the learning policy and critic verdict, #5055), **"What have you learned?"** (distilled learnings plus the quality review findings, #5058), **"Any repeated risk blocks?"** (the verdict trend and binding rules, #5061), and **"What do you remember about me?"** (session facts vs promoted `memory` learnings, #5060). Grouped as Learning & Memory and Policy & Verdicts. Pinned by `tests/stock_copilot_learning_chips_5523.test.ts`, including a distinct-prompt check so no chip duplicates another. #clo-arsi
