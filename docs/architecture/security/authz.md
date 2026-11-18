@@ -12,7 +12,8 @@ requires `role:assign` in scope, every binding is checked with
 `canGrantRole` before any write, and `grantedBy` is always overwritten
 with the granter — a caller cannot launder provenance.
 
-There are 17 permissions (spec §5). The full list lives in the module;
+There are 18 permissions: the 17 of spec §5 plus `ledger:record`
+(#5450, GAP-2 — recording a ledger row). The full list lives in the module;
 the ones that appear at enforcement points in this folder include
 `integration:connect` (link an integration) and `role:assign` (grant roles).
 
@@ -30,18 +31,18 @@ whole model — there are no ad-hoc permission checks outside it:
 | Role | Grants (within scope) | Scope notes |
 | --- | --- | --- |
 | `platform-admin` | `role:assign`, `audit:read`, `audit:export` — only these three | Platform scope only; this set **never** grants tenant permissions. Platform scope is a hard boundary: only a platform-admin binding at platform scope grants, whatever tenant roles the actor holds |
-| `tenant-admin` | All 17 permissions | Tenant scope; cannot grant platform privileges |
-| `workspace-admin` | All 17 permissions | Workspace scope (binding's `workspaceId`) |
+| `tenant-admin` | All 18 permissions | Tenant scope; cannot grant platform privileges |
+| `workspace-admin` | All 18 permissions | Workspace scope (binding's `workspaceId`) |
 | `member` | `task:create`, `task:read`, `task:cancel`, `artifact:read`, `artifact:edit`, `artifact:export`, `action:propose` | Propose, never approve or execute |
 | `approver` | `action:approve` | One permission: approve what others propose |
 | `auditor` | `task:read`, `artifact:read`, `audit:read` | Read-only, including audit |
 
-The 17 permissions are: `membership:invite`, `membership:revoke`,
+The 18 permissions are: `membership:invite`, `membership:revoke`,
 `role:assign`, `task:create`, `task:read`, `task:cancel`,
 `artifact:read`, `artifact:edit`, `artifact:export`,
 `integration:connect`, `integration:use`, `integration:manage`,
 `action:propose`, `action:approve`, `action:execute`, `audit:read`,
-`audit:export`.
+`audit:export`, `ledger:record`.
 
 Grant rules (`canGrantRole`, enforced for every binding before any
 write): a platform target (platform-admin role or platform scope)
@@ -53,7 +54,7 @@ and `grantedBy` is always overwritten with the granter.
 Two consequences worth stating plainly. First, **platform-admin is not
 omnipotent**: it is the only role that can grant platform privileges,
 but it holds only three permissions at platform scope, while
-tenant-admin and workspace-admin hold all seventeen inside their
+tenant-admin and workspace-admin hold all eighteen inside their
 scopes. "Highest privilege" means "can grant across the boundary", not
 "can do everything". Second, **revocation is a permission too**:
 `membership:revoke` is in the table, but the revocation *actions*
@@ -330,7 +331,7 @@ separate them, this section says so.
 
 | XACML concept | cfagent equivalent (verified on main) |
 | --- | --- |
-| PAP — Policy Administration Point: authors and manages policy | Three places, in decreasing order of permanence. (1) The policy itself, as code: the `ROLE_GRANTS` table in `src/security/authorization.ts` (with `PERMISSIONS` and `AUTHORIZATION_POLICY_VERSION = "iaaa-authorization-1"`). Changing a grant means changing this table and shipping it — there is no policy editor. Its portable form is the `PolicySnapshot` (`src/security/pdpPorts.ts`: `exportPolicySnapshot()` / validated `parsePolicySnapshot()`), served through the `PolicyProvider` port; the compiled tables are the default provider, and the only alternative source is a platform-configured snapshot (`IAAA_PDP_POLICY_SOURCE` = `snapshot` + `IAAA_PDP_POLICY_SNAPSHOT_JSON`, platform-only, invalid fails closed to compiled — see `docs/architecture/security/iaaa-pdp-architecture-1755.md`). (2) Bootstrap provisioning: `IAAA_BOOTSTRAP_ADMINS` parsing in `src/security/iaaaBootstrap.ts`, which seeds the first grants (§3). (3) Runtime grants: the IAAA admin panel (`src/client/IaaaAdminPanel.tsx`, "Access requests" section) driving `POST /api/iaaa/access-request/decision`, which calls `grantMembership` (`src/security/iaaaMembershipStore.ts`) under `canGrantRole` enforcement (`src/security/authorization.ts`). |
+| PAP — Policy Administration Point: authors and manages policy | Three places, in decreasing order of permanence. (1) The policy itself, as code: the `ROLE_GRANTS` table in `src/security/authorization.ts` (with `PERMISSIONS` and `AUTHORIZATION_POLICY_VERSION = "iaaa-authorization-2"`). Changing a grant means changing this table and shipping it — there is no policy editor. Its portable form is the `PolicySnapshot` (`src/security/pdpPorts.ts`: `exportPolicySnapshot()` / validated `parsePolicySnapshot()`), served through the `PolicyProvider` port; the compiled tables are the default provider, and the only alternative source is a platform-configured snapshot (`IAAA_PDP_POLICY_SOURCE` = `snapshot` + `IAAA_PDP_POLICY_SNAPSHOT_JSON`, platform-only, invalid fails closed to compiled — see `docs/architecture/security/iaaa-pdp-architecture-1755.md`). (2) Bootstrap provisioning: `IAAA_BOOTSTRAP_ADMINS` parsing in `src/security/iaaaBootstrap.ts`, which seeds the first grants (§3). (3) Runtime grants: the IAAA admin panel (`src/client/IaaaAdminPanel.tsx`, "Access requests" section) driving `POST /api/iaaa/access-request/decision`, which calls `grantMembership` (`src/security/iaaaMembershipStore.ts`) under `canGrantRole` enforcement (`src/security/authorization.ts`). |
 | PDP — Policy Decision Point: evaluates a request against policy | The PDP core is `authorizeWithPolicy()` in `src/security/authorization.ts`: policy from a `PolicyProvider`, attributes only through the PIP port, answering allow or deny for a subject, permission, and scope. `authorize()` is its back-compatible entry point (compiled policy + store adapted to the PIP), reached through the seam `checkPermission()` in `src/security/iaaaPdpSeam.ts`. The port is `PolicyDecisionPoint` in `src/security/pdpPorts.ts`, with a JSON-serializable request/response contract; the only live adapter is the in-process one. The PDP performs no enforcement and no side effects. |
 | PEP — Policy Enforcement Point: enforces the PDP's answer at the boundary | Several, one per surface — there is no single runtime gateway, by decision (#1755). (1) `requireAuth()` in `src/server.ts`: the session gate, which rejects unauthenticated callers before any permission is evaluated. (2) The four `integration:connect` gates (E*TRADE start, E*TRADE verifier, Public start, Public connect routes in `src/server.ts`) share one gateway pattern: `evaluateRoutePep()` in `src/security/pepGateway.ts`, which centralizes the `shouldEnforcePdp` check, the PDP decision through the port, and the grace mapping (403 on deny; see §6). It enforces for wired sessions and for legacy sessions past their §8 grace bound, and exempts only legacy sessions inside the bound; a grace-expired legacy denial carries code `legacy_pdp_grace_expired`. (3) The `canGrantRole` checks on the access-request decision route in `src/server.ts`. (4) The `requireAuth` gate at the top of the `/api/schedule/` block in `src/server.ts` (401 before the ScheduledAgent stub is reached). A PEP that cannot reach the PDP denies: a missing session, a legacy session past its grace bound (no internal id to evaluate), or an unresolvable tenant all fail closed. The one documented exception is a legacy session inside its grace bound (§8), which takes the pre-change path at the `integration:connect` gates. |
 | PIP — Policy Information Point: supplies the attributes the PDP reads | The `AttributeProvider` port in `src/security/authorization.ts` (`getMembershipsByUser`): the PDP reads attributes only through it, never through a store directly. The live attribute source is the SessionStore Durable Object, adapted to the port (`membershipStoreToAttributeProvider`): memberships under `iaaa-membership:` keys (`src/security/iaaaMembershipStore.ts`), identity bindings under `iaaa-binding:` keys (`src/security/iaaaLogin.ts`), migration aliases under `iaaa-alias:` keys (`src/security/iaaaMigration.ts`), and sessions via `sessionStore(env)`. The tenant attribute defaults to `"primary"` (`IAAA_DEFAULT_TENANT_ID` in `src/security/iaaaGithubEndToEnd.ts`; see §4). No federation, transformation, or caching layer exists yet — the port is where one lands. |
@@ -354,7 +355,7 @@ hardcoded, not policy.
 - **Policy is TypeScript tables, not portable XACML — partially
   closed (#1755).** The tables stay authoritative and are not
   XACML, and policy versioning is still the single string constant
-  (`iaaa-authorization-1`), carried on the snapshot — not a policy
+  (`iaaa-authorization-2`), carried on the snapshot — not a policy
   set with versioning semantics. What changed: the tables now have
   a portable JSON form (`PolicySnapshot`: version + permissions +
   role grants) with a validated parse and a `PolicyProvider` store

@@ -1,6 +1,7 @@
 import type { Env } from "../types";
 import {
   ALL_ROLES,
+  AUTHORIZATION_POLICY_VERSION,
   authorize,
   canGrantRole,
   createMemoryMembershipStore,
@@ -493,7 +494,7 @@ export async function authorizeServiceToken(
       principalId: verified.serviceInternalUserId,
       tenantId: requestTenantId,
       permission: String(permission),
-      policyVersion: "iaaa-authorization-1",
+      policyVersion: AUTHORIZATION_POLICY_VERSION,
     };
   }
   const store = createMemoryMembershipStore();

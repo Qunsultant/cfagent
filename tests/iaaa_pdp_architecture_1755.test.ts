@@ -66,7 +66,7 @@ describe("policy snapshot: portable form of the compiled tables (#1755a)", () =>
   it("exports the compiled tables with the current policy version", () => {
     const snapshot = exportPolicySnapshot();
     expect(snapshot.version).toBe(AUTHORIZATION_POLICY_VERSION);
-    expect(snapshot.version).toBe("iaaa-authorization-1");
+    expect(snapshot.version).toBe("iaaa-authorization-2");
     expect(snapshot.roleGrants["tenant-admin"]).toContain("role:assign");
     expect(snapshot.roleGrants.member).toContain("task:read");
     expect(snapshot.roleGrants.member).not.toContain("role:assign");
