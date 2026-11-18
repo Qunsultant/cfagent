@@ -36,6 +36,7 @@ import {
 } from "../../services/paidScreenSubmission";
 import type { NativeCommercialAccount } from "../../services/nativeMonetization";
 import { sagaCompensationDisclosure } from "../../workflows/sagaCompensation";
+import { newRunId } from "../../services/executionTreeIds";
 import { sagaWorkflowInstanceId } from "../../workflows/sagaJourneyGate";
 import { startManagedWorkflowInstance } from "../../workflows/workflowInstanceSeam";
 import type { SagaTradeIntent } from "../../workflows/sagaTradeLeg";
@@ -105,7 +106,12 @@ export function validateSagaEntryBody(
   const sagaId =
     typeof body["sagaId"] === "string" && body["sagaId"]
       ? (body["sagaId"] as string)
-      : `saga-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+      : // Issue #5175 slice 3: a client-supplied sagaId still wins; the
+        // server mint goes through the one leaf minter. No consumer
+        // parses the `saga-` prefix (status URL + workflow instance
+        // id are exact-match / sanitized), so the format change is
+        // safe. The saga run's family is `sagarun`.
+        newRunId();
   const runRequestId =
     typeof body["runRequestId"] === "string" && body["runRequestId"]
       ? (body["runRequestId"] as string)

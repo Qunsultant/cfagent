@@ -105,7 +105,13 @@ describe("id authority leaf minter (#5175 slice 1)", () => {
       ord: 2,
       proof: 2,
       goal: 2,
+      // Issue #5175 slice 3: `scen` / `outc` row ids mint through the
+      // leaf (`newPlatformRowId`), and `shard-scan` is adopted into
+      // the leaf as a derived builder (same format as before).
+      scen: 2,
+      outc: 2,
       sched: 2,
+      "shard-scan": 3,
       gen: 2,
       report: 2,
       outcome: 2,
@@ -132,6 +138,19 @@ describe("id authority leaf minter (#5175 slice 1)", () => {
     expect(parseId("pay:a1b2c3d4").runBody).toBeNull();
     expect(parseId("proof:a1b2c3d4e5f6").runBody).toBeNull();
     expect(parseId("goal:m9x2k-ab12cd").runBody).toBeNull();
+    expect(parseId("scen:550e8400-e29b-41d4-a716-446655440000").segments).toEqual([
+      "scen",
+      "550e8400-e29b-41d4-a716-446655440000",
+    ]);
+    expect(parseId("outc:550e8400-e29b-41d4-a716-446655440000").segments).toEqual([
+      "outc",
+      "550e8400-e29b-41d4-a716-446655440000",
+    ]);
+    expect(parseId("shard-scan:chain-x:AAPL").segments).toEqual([
+      "shard-scan",
+      "chain-x",
+      "AAPL",
+    ]);
     expect(parseId("gen:m9x-1").runBody).toBe("m9x-1");
     expect(parseId("delivery:m9x-1:slack-C12345").runBody).toBe("m9x-1");
     expect(parseId("stage:m9x-1:feed:-").runBody).toBe("m9x-1");

@@ -193,6 +193,7 @@
  */
 
 import type { DatabaseORM } from "../orm";
+import { generationId, newRunId } from "../services/executionTreeIds";
 // Issue #278: durable scheduled-run reports for the NextGenTP agent.
 
 /** Default retention window, days — matches the 90d the UI advertises. */
@@ -504,14 +505,19 @@ export function runStorageRetention(
   // Issue #278: persist the scheduled run's summary as a durable report
   // (mas_reports) so the NextGenTP agent can surface it later.
   // Issue #308: through the single generate→store seam — one canonical
-  // row per generation (generationId = run id).
+  // row per generation (the generation is derived from the run id).
+  // Issue #5175 slice 3: the run id + generation mint through the one
+  // leaf minter. The cutoff is now-based (fresh per call), so a fresh
+  // canonical id is behavior-identical; the cutoff payload rides the
+  // body + summary, unchanged.
   try {
     if (!options.userLogin) {
       console.warn("[storage-retention] No owning userLogin: pruning is recorded in mas_events, no report row written.");
     } else {
+    const runId = newRunId();
     orm.storeCanonicalReport({
-      runId: `retention:${cutoffIso}`,
-      generationId: `retention:${cutoffIso}`,
+      runId,
+      generationId: generationId(runId),
       title: `Nightly storage retention — ${windowDays}d window`,
       source: "retention",
       summary: `Pruned ${pruned} mas_messages rows older than ${cutoffIso} (${windowDays}d window${capped ? ", capped at per-run max" : ""}).`,

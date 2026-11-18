@@ -98,7 +98,7 @@ import {
 } from "./jobPipelineConfig";
 import type { JobStepContext, JobStepRegistry } from "./jobPipelineSteps";
 import { publishJobStatus, publishStageAction } from "./jobPipelineEvents";
-import { stepExecutionId } from "./executionTreeIds";
+import { newRunId, stepExecutionId } from "./executionTreeIds";
 import type { MessagePublisher, StageName } from "../messaging/messagingPorts";
 import {
   resolvePipelinePolicy,
@@ -723,10 +723,12 @@ export class JobPipelineControl {
     this.now = deps.now ?? (() => new Date());
     this.policy = deps.policy ?? resolvePipelinePolicy();
     this.sleep = deps.sleep ?? defaultSleep;
-    let counter = 0;
     this.newRunId =
-      deps.newRunId ??
-      (() => `run:${this.now().getTime().toString(36)}-${(++counter).toString(36)}`);
+      // Issue #5175 slice 3: the engine default mints through the one
+      // leaf minter — the same `run:<time36>-<counter36>` format, with
+      // the counter per module (per isolate) rather than per engine
+      // instance, so two engines in one isolate cannot collide.
+      deps.newRunId ?? newRunId;
   }
 
   private iso(): string {

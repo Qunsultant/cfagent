@@ -70,6 +70,7 @@ import {
 } from "../../workflows/screenDeliverySuppression";
 import { createStructuredLogger } from "../../observability/structuredLogger";
 import { createObservabilitySink } from "../../observability/createObservabilityPorts";
+import { generationId, newRunId } from "../../services/executionTreeIds";
 
 /** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
 const structuredLog = createStructuredLogger(createObservabilitySink({}), {
@@ -391,7 +392,11 @@ async function runUnifiedOpportunitiesViaPipeline(args: {
     return service.formatResponse(reqData, { error: profileError }, profileError, false);
   }
   const { engineClient, platformRunId } = await service.resolveEngineClient();
-  const runId = `options_scanner:unified:${new Date().toISOString()}:${reqData.thesis || "mixed"}`;
+  // Issue #5175 slice 3: the unified screen's run id mints through the
+  // one leaf minter. The thesis + timestamp payload rides the request
+  // (template.thesis) and the engine job id is opaque
+  // (`options-screen:run:<body>`), so nothing is lost.
+  const runId = newRunId();
   // Issue #4893 — the scan envelope, extracted verbatim so the host
   // dispatch and the sync dispatch below serve the same request.
   const request = {
@@ -767,11 +772,18 @@ export async function executeUnifiedOptions(args: {
     }
 
     const generatedAt = timestamp;
-    const generationId = `options_scanner:${generatedAt}:${reqData.thesis || "mixed"}`;
+    // Issue #5175 slice 3: the final scan row's run id + generation
+    // mint through the one leaf minter. The timestamp was fresh per
+    // execution and the row is stored once per execution, so a fresh
+    // canonical id is behavior-identical; the thesis + timestamp
+    // payload rides the title + body, unchanged. The outcome id
+    // below derives from the generation, as before.
+    const runId = newRunId();
+    const rowGenerationId = generationId(runId);
     const orm = ctx.getOrm();
     storeOptionsCanonicalReport(orm, {
-      runId: generationId,
-      generationId,
+      runId,
+      generationId: rowGenerationId,
       title: `Options scanner — ${reqData.thesis || "mixed"} (${generatedAt.slice(0, 10)})`,
       source: "options_scanner",
       summary: result.summary,
@@ -792,7 +804,7 @@ export async function executeUnifiedOptions(args: {
         ? ((orm as { getSql: () => unknown }).getSql() as any)
         : undefined,
       {
-        id: `options-unified:${generationId}`,
+        id: `options-unified:${rowGenerationId}`,
         trigger: "manual",
         status: "completed",
         scanned: typeof result.data?.scanned === "number" ? result.data.scanned : result.data?.totalScanned,
@@ -816,7 +828,14 @@ export async function executeUnifiedOptions(args: {
     const generatedAt = new Date().toISOString();
     const action = String(reqData.action || "strategies");
     const symbol = String(reqData.symbol || reqData.symbols?.[0] || "universe").toUpperCase();
-    const generationId = `options_strategy:${action}:${symbol}:${generatedAt}`;
+    // Issue #5175 slice 3: the strategy run's id + generation mint
+    // through the one leaf minter. The timestamp was fresh per
+    // execution and the row is stored once per execution, so a fresh
+    // canonical id is behavior-identical; the action + symbol +
+    // timestamp payload rides the title + body, unchanged. The
+    // outcome id below falls back to the generation, as before.
+    const strategyRunId = newRunId();
+    const strategyGenerationId = generationId(strategyRunId);
     const data = result.data as Record<string, any> | undefined;
     const ranked = Array.isArray(data?.ranked)
       ? data.ranked
@@ -842,8 +861,8 @@ export async function executeUnifiedOptions(args: {
     scannerCsvUrl = artifactLinks.csvUrl;
     const orm = ctx.getOrm();
     storeOptionsCanonicalReport(orm, {
-      runId: generationId,
-      generationId,
+      runId: strategyRunId,
+      generationId: strategyGenerationId,
       title: `Options strategy ${action === "llm_ideas" || action === "llm_evaluate" ? "AI" : "screener"} — ${symbol} (${action})`,
       source: "options_strategy",
       summary: result.summary,
@@ -874,7 +893,7 @@ export async function executeUnifiedOptions(args: {
         ? ((orm as { getSql: () => unknown }).getSql() as any)
         : undefined,
       {
-        id: ctx.asyncJobId ?? generationId,
+        id: ctx.asyncJobId ?? strategyGenerationId,
         trigger: "manual",
         status: "completed",
         matched,

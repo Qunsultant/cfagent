@@ -1103,7 +1103,22 @@ export class GetAsyncJobCommand implements IMcpToolCommand<{ jobId: string }> {
     properties: { jobId: { type: "string", description: "Async job ID returned when work was submitted" } },
     required: ["jobId"],
   };
-  readonly zodSchema = z.object({ jobId: z.string().uuid() });
+  // Issue #5175 slice 3: async-job ids mint as `job:<uuid>` through
+  // the one leaf minter, so the read path accepts the canonical form
+  // AND the legacy bare UUID (rows minted before the migration keep
+  // resolving). A `job:` prefix with a non-UUID body is still
+  // rejected, as is any other shape.
+  readonly zodSchema = z.object({
+    jobId: z
+      .string()
+      .refine(
+        (v) => {
+          const body = v.startsWith("job:") ? v.slice("job:".length) : v;
+          return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(body);
+        },
+        { message: "jobId must be a UUID or a job:<uuid> id" },
+      ),
+  });
 
   async execute(input: { jobId: string }, context: McpToolContext) {
     if (!context.getJob) throw new Error("Async job status is unavailable in this MCP context.");

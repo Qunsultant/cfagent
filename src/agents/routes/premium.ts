@@ -74,6 +74,7 @@ import { resolveEffectiveTier } from "../../data/subscriptionPorts";
 import type { MeteredGateOptions } from "../../services/meteredPaymentGate";
 import { screenAlreadyRunningDetails } from "../../services/screenInFlight";
 import { quotaExceededDetails } from "../../security/userRequestQuota";
+import { generationId, newRunId } from "../../services/executionTreeIds";
 import { PREMIUM_QUOTA_KINDS, chargePremiumQuota, premiumQuotaRefusalBody } from "../../services/premiumQuota";
 
 import { createStructuredLogger } from "../../observability/structuredLogger";
@@ -477,9 +478,14 @@ export async function handlePremiumRoutes(
           const symbols = Array.isArray(filter?.underlyingSymbols)
             ? filter.underlyingSymbols.join(",")
             : "";
+          // Issue #5175 slice 3: the scan's run id + generation mint
+          // through the one leaf minter — the timestamp was fresh per
+          // call, so a fresh canonical id is behavior-identical, and
+          // the run↔generation link rides the shared run body.
+          const runId = newRunId();
           ctx.getOrm().storeCanonicalReport({
-            runId: `options_scanner:${timestamp}`,
-            generationId: `options_scanner:${timestamp}`,
+            runId,
+            generationId: generationId(runId),
             title: `Options scan — ${symbols || "universe"} (${filter?.contractType || "BOTH"})`,
             source: "options_scanner",
             summary: failed

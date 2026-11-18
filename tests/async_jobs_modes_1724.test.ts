@@ -444,9 +444,16 @@ describe("M04 single-read contracts (unswitched, pinned)", () => {
       "Async job not found."
     );
   });
-  it("get_async_job validates jobId as a UUID", () => {
+  it("get_async_job validates jobId as a UUID or job:<uuid>", () => {
+    // Issue #5175 slice 3: the read path accepts the canonical
+    // `job:<uuid>` form AND the legacy bare UUID; anything else is
+    // still rejected.
     expect(getCmd.zodSchema.safeParse({ jobId: "not-a-uuid" }).success).toBe(false);
+    expect(getCmd.zodSchema.safeParse({ jobId: "job:not-a-uuid" }).success).toBe(false);
     expect(getCmd.zodSchema.safeParse({ jobId: full.jobId }).success).toBe(true);
+    expect(
+      getCmd.zodSchema.safeParse({ jobId: `job:${full.jobId}` }).success,
+    ).toBe(true);
   });
 });
 
@@ -455,11 +462,13 @@ describe("M04 single-read contracts (unswitched, pinned)", () => {
 /* ------------------------------------------------------------------ */
 
 describe("J01 system 1: mas_async_jobs contracts", () => {
-  it("submit returns {jobId uuid, status queued, statusUrl /api/jobs/{id}} and audits async_job.queued", async () => {
+  it("submit returns {jobId job:<uuid>, status queued, statusUrl /api/jobs/{id}} and audits async_job.queued", async () => {
     const sql = new FakeAsyncSql();
     const { ctx, audit } = makeAsyncCtx(sql);
     const out = await submitAsyncJob(ctx, { capability: "mcp.tool", payload: { toolName: "list_database_tables", arguments: {} } });
-    expect(out.jobId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+    // Issue #5175 slice 3: job ids mint as `job:<uuid>` through the
+    // one leaf minter (was a bare UUID).
+    expect(out.jobId).toMatch(/^job:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
     expect(out.status).toBe("queued");
     expect(out.statusUrl).toBe(`/api/jobs/${out.jobId}`);
     expect(audit).toHaveBeenCalledWith("async_job.queued", "orchestrator", expect.objectContaining({ jobId: out.jobId }));
