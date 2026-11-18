@@ -381,7 +381,7 @@ describe("recreate, tenant scope (#4383)", () => {
     // Two member instances (alice, bob), each planning the fresh DO leg.
     expect(body.instances).toHaveLength(2);
     for (const inst of body.instances) {
-      expect(inst.selected).toHaveLength(129);
+      expect(inst.selected).toHaveLength(132);
       // Issue #4623 adds one probed DO statement (mas_async_jobs.tenant_id).
       expect(inst.skipped).toHaveLength(36);
     }
@@ -442,7 +442,7 @@ describe("recreate, tenant scope (#4383)", () => {
     expect(body.instances).toHaveLength(2);
     for (const inst of body.instances) {
       expect(inst.report.outcome).toBe("succeeded");
-      expect(inst.report.executed).toHaveLength(129);
+      expect(inst.report.executed).toHaveLength(132);
       expect(inst.verification.ok).toBe(true);
     }
     expect(body.uncreatableLayers).toHaveLength(5);

@@ -131,12 +131,13 @@ describe("POST /api/maintenance/recreate-schema (#4383)", () => {
     expect(status).toBe(200);
     expect(body.preview).toBe(true);
     expect(body.leg).toBe("do");
-    // A fresh store selects the DO leg's fresh selection (129 steps,
-    // #3251 adds the iaaa_audit_events CREATE TABLE: 128 → 129);
+    // A fresh store selects the DO leg's fresh selection (132 steps,
+    // #3251 adds the iaaa_audit_events CREATE TABLE: 128 → 129;
+    // #5175 slice 2 adds mas_runs + mas_run_aliases + its index: 129 → 132);
     // the conditional index drop is among the skipped. Steps are
     // descriptors (code + params), not bare codes: the generic
     // column-add steps share one code and differ only by params.
-    expect(body.selected).toHaveLength(129);
+    expect(body.selected).toHaveLength(132);
     // Issue #4623 adds one probed DO statement (mas_async_jobs.tenant_id).
     expect(body.skipped).toHaveLength(36);
     expect(body.skipped.map((s: any) => s.code)).toContain(
@@ -156,7 +157,7 @@ describe("POST /api/maintenance/recreate-schema (#4383)", () => {
     expect(body.preview).toBe(false);
     expect(body.leg).toBe("do");
     expect(body.report.outcome).toBe("succeeded");
-    expect(body.report.executed).toHaveLength(129);
+    expect(body.report.executed).toHaveLength(132);
     expect(body.report.failed).toEqual([]);
     expect(body.verification.ok).toBe(true);
     expect(body.verification.failures).toEqual([]);
@@ -214,8 +215,8 @@ describe("POST /api/maintenance/recreate-schema (#4383)", () => {
     expect(body.preview).toBe(false);
     expect(body.report.outcome).toBe("succeeded");
     expect(body.report.executed).toHaveLength(0);
-    expect(body.planned).toHaveLength(129);
-    expect(body.notRequested).toHaveLength(129);
+    expect(body.planned).toHaveLength(132);
+    expect(body.notRequested).toHaveLength(132);
     expect(body.verification.ok).toBe(false); // fresh store, nothing executed
     expect(ctx.audit).toHaveBeenCalledTimes(1);
   });
@@ -230,8 +231,8 @@ describe("POST /api/maintenance/recreate-schema (#4383)", () => {
       codes: ["schema.do.mas_reports.create_table"],
     });
     expect(status).toBe(200);
-    expect(body.planned).toHaveLength(129);
-    expect(body.notRequested).toHaveLength(128);
+    expect(body.planned).toHaveLength(132);
+    expect(body.notRequested).toHaveLength(131);
     expect(body.notRequested.map((s: any) => s.code)).not.toContain(
       "schema.do.mas_reports.create_table",
     );
