@@ -12,14 +12,16 @@
  * said stays is removed as covered by Background Tasks, and the
  * dead-letter queue becomes the sixth view — the pins below now assert
  * six.)
+ * (Issue #4260, later: the scheduling-channel flags become the seventh
+ * view — the pins below now assert seven.)
  *
  * Pins:
- * - 4561-P01 the home resolves exactly six views, Background Tasks last.
+ * - 4561-P01 the home resolves exactly seven views, Flags last.
  * - 4561-P02 the Schedules left-nav item carries one sub-menu entry per
  *   view, each with a label, description, and a resolvable icon.
  * - 4561-P03 every Schedules view resolves through the deep-link catalog
  *   to `?tab=schedules&view=<view>` — no view falls back to autopilot.
- * - 4561-P04 the schedules surface lists the six views and the home
+ * - 4561-P04 the schedules surface lists the seven views and the home
  *   mounts a TabPanel for each.
  * - 4561-P05 background-tasks / scheduled-goals / jobs are gone from the
  *   platform-admin sub-menu, the config items, the deep-link overrides,
@@ -71,27 +73,27 @@ function read(rel: string): string {
   return readFileSync(join(here, rel), "utf8").replace(/\r\n/g, "\n");
 }
 
-const SIX_VIEWS = ["list", "runs", "goals", "queue", "background-tasks", "dead-letter-queue"] as const;
-const SIX_LABELS = ["Schedules", "Run ledger", "Goal schedules", "Queue", "Background Tasks", "Dead-letter queue"];
+const SEVEN_VIEWS = ["list", "runs", "goals", "queue", "background-tasks", "dead-letter-queue", "flags"] as const;
+const SEVEN_LABELS = ["Schedules", "Run ledger", "Goal schedules", "Queue", "Background Tasks", "Dead-letter queue", "Flags"];
 
-describe("4561-P01 the home resolves exactly six views (#4561)", () => {
-  it("SCHEDULES_HOME_VIEWS lists the six views, Dead-letter queue last", () => {
-    expect([...SCHEDULES_HOME_VIEWS]).toEqual([...SIX_VIEWS]);
-    expect(SIX_VIEWS.map((v) => SCHEDULES_HOME_VIEW_LABELS[v])).toEqual(SIX_LABELS);
+describe("4561-P01 the home resolves exactly seven views (#4561)", () => {
+  it("SCHEDULES_HOME_VIEWS lists the seven views, Flags last", () => {
+    expect([...SCHEDULES_HOME_VIEWS]).toEqual([...SEVEN_VIEWS]);
+    expect(SEVEN_VIEWS.map((v) => SCHEDULES_HOME_VIEW_LABELS[v])).toEqual(SEVEN_LABELS);
   });
 });
 
 describe("4561-P02 Schedules carries one sub-menu entry per view (#4561)", () => {
-  it("the Schedules item has six sub-items with labels, descriptions, and icons", () => {
+  it("the Schedules item has seven sub-items with labels, descriptions, and icons", () => {
     const platform = DEFAULT_LEFT_NAV_CONFIG.sections.find((s) => s.id === "section-platform");
     expect(platform).toBeDefined();
     const item = platform!.items.find((i) => i.id === "schedules");
     expect(item).toBeDefined();
-    expect(item!.subItems).toHaveLength(6);
-    for (const [index, view] of SIX_VIEWS.entries()) {
+    expect(item!.subItems).toHaveLength(7);
+    for (const [index, view] of SEVEN_VIEWS.entries()) {
       const sub = item!.subItems![index];
       expect(sub.id).toBe(view);
-      expect(sub.label).toBe(SIX_LABELS[index]);
+      expect(sub.label).toBe(SEVEN_LABELS[index]);
       expect(sub.description).toBeTruthy();
       expect(sub.description!.length).toBeGreaterThan(0);
       expect(sub.icon).toBeTruthy();
@@ -104,7 +106,7 @@ describe("4561-P02 Schedules carries one sub-menu entry per view (#4561)", () =>
 
 describe("4561-P03 every Schedules view resolves through the catalog (#4561)", () => {
   it("each view deep-links to ?tab=schedules&view=<view>", () => {
-    for (const view of SIX_VIEWS) {
+    for (const view of SEVEN_VIEWS) {
       expect(deepLinkForNavNode("schedules", view)).toEqual({
         tab: "schedules",
         view,
@@ -119,15 +121,15 @@ describe("4561-P03 every Schedules view resolves through the catalog (#4561)", (
   });
 });
 
-describe("4561-P04 the schedules surface lists the six views (#4561)", () => {
-  it("the surface def carries all six values and the home mounts a TabPanel for each", () => {
+describe("4561-P04 the schedules surface lists the seven views (#4561)", () => {
+  it("the surface def carries all seven values and the home mounts a TabPanel for each", () => {
     const surface = SURFACE_TAB_DEFS.find((d) => d.surface === "schedules");
     expect(surface).toBeDefined();
     expect(surface!.page).toBe("schedules");
     expect(surface!.param).toBe("view");
-    expect([...surface!.values]).toEqual([...SIX_VIEWS]);
+    expect([...surface!.values]).toEqual([...SEVEN_VIEWS]);
     const home = read("src/client/SchedulesHome.tsx");
-    for (const view of SIX_VIEWS) {
+    for (const view of SEVEN_VIEWS) {
       expect(home).toContain(`tabId="${view}"`);
       expect(home).toContain(`deepLink.view === "${view}"`);
     }
@@ -234,13 +236,13 @@ describe("4561-P07 the home renders the Background Tasks tab (#4561)", () => {
     const tabs = Array.from(container.querySelectorAll('[role="tab"]')).map(
       (t) => t.textContent ?? "",
     );
-    expect(tabs).toEqual(SIX_LABELS);
+    expect(tabs).toEqual(SEVEN_LABELS);
     expect(container.querySelector('[data-testid="async-jobs-panel"]')).toBeTruthy();
     expect(container.textContent).toContain("Background Tasks");
     expect(container.textContent).toContain("Async jobs & execution queue");
   });
 
-  it("the default list view still renders all six tabs", async () => {
+  it("the default list view still renders all seven tabs", async () => {
     window.history.pushState(null, "", "/?tab=schedules");
     await render(
       <ToastProvider>
@@ -251,6 +253,6 @@ describe("4561-P07 the home renders the Background Tasks tab (#4561)", () => {
     const tabs = Array.from(container.querySelectorAll('[role="tab"]')).map(
       (t) => t.textContent ?? "",
     );
-    expect(tabs).toEqual(SIX_LABELS);
+    expect(tabs).toEqual(SEVEN_LABELS);
   });
 });

@@ -10,13 +10,15 @@
  * redirects to it. This revises #4561's settled "Queues-page
  * async-jobs copy STAYS" decision — the condition in Ceos's directive
  * (coverage) is met, so the copy goes.
+ * (Issue #4260, later: the scheduling-channel flags become the seventh
+ * view — the pins below now assert seven.)
  *
  * Pins:
- * - 4574-P01 the home resolves exactly six views, Dead-letter queue last.
+ * - 4574-P01 the home resolves exactly seven views, Flags last.
  * - 4574-P02 the Schedules left-nav item carries one sub-menu entry per
  *   view, each with a label, description, and a resolvable icon.
  * - 4574-P03 the new view resolves through the deep-link catalog to
- *   `?tab=schedules&view=dead-letter-queue`, the surface lists six
+ *   `?tab=schedules&view=dead-letter-queue`, the surface lists seven
  *   values, and the home mounts a TabPanel for it carrying the DLQ.
  * - 4574-P04 `?tab=queues` redirects to the new view; no queues route,
  *   nav entry, or TAB_CONTENT entry remains; QueuesPage is deprecated
@@ -68,41 +70,43 @@ function read(rel: string): string {
   return readFileSync(join(here, rel), "utf8").replace(/\r\n/g, "\n");
 }
 
-const SIX_VIEWS = [
+const SEVEN_VIEWS = [
   "list",
   "runs",
   "goals",
   "queue",
   "background-tasks",
   "dead-letter-queue",
+  "flags",
 ] as const;
-const SIX_LABELS = [
+const SEVEN_LABELS = [
   "Schedules",
   "Run ledger",
   "Goal schedules",
   "Queue",
   "Background Tasks",
   "Dead-letter queue",
+  "Flags",
 ];
 
-describe("4574-P01 the home resolves exactly six views (#4574)", () => {
-  it("SCHEDULES_HOME_VIEWS lists the six views, Dead-letter queue last", () => {
-    expect([...SCHEDULES_HOME_VIEWS]).toEqual([...SIX_VIEWS]);
-    expect(SIX_VIEWS.map((v) => SCHEDULES_HOME_VIEW_LABELS[v])).toEqual(SIX_LABELS);
+describe("4574-P01 the home resolves exactly seven views (#4574)", () => {
+  it("SCHEDULES_HOME_VIEWS lists the seven views, Flags last", () => {
+    expect([...SCHEDULES_HOME_VIEWS]).toEqual([...SEVEN_VIEWS]);
+    expect(SEVEN_VIEWS.map((v) => SCHEDULES_HOME_VIEW_LABELS[v])).toEqual(SEVEN_LABELS);
   });
 });
 
 describe("4574-P02 Schedules carries one sub-menu entry per view (#4574)", () => {
-  it("the Schedules item has six sub-items with labels, descriptions, and icons", () => {
+  it("the Schedules item has seven sub-items with labels, descriptions, and icons", () => {
     const platform = DEFAULT_LEFT_NAV_CONFIG.sections.find((s) => s.id === "section-platform");
     expect(platform).toBeDefined();
     const item = platform!.items.find((i) => i.id === "schedules");
     expect(item).toBeDefined();
-    expect(item!.subItems).toHaveLength(6);
-    for (const [index, view] of SIX_VIEWS.entries()) {
+    expect(item!.subItems).toHaveLength(7);
+    for (const [index, view] of SEVEN_VIEWS.entries()) {
       const sub = item!.subItems![index];
       expect(sub.id).toBe(view);
-      expect(sub.label).toBe(SIX_LABELS[index]);
+      expect(sub.label).toBe(SEVEN_LABELS[index]);
       expect(sub.description).toBeTruthy();
       expect(sub.description!.length).toBeGreaterThan(0);
       expect(sub.icon).toBeTruthy();
@@ -127,12 +131,12 @@ describe("4574-P03 the new view resolves through the catalog (#4574)", () => {
     });
   });
 
-  it("the surface def carries all six values and the home mounts a TabPanel for it", () => {
+  it("the surface def carries all seven values and the home mounts a TabPanel for it", () => {
     const surface = SURFACE_TAB_DEFS.find((d) => d.surface === "schedules");
     expect(surface).toBeDefined();
     expect(surface!.page).toBe("schedules");
     expect(surface!.param).toBe("view");
-    expect([...surface!.values]).toEqual([...SIX_VIEWS]);
+    expect([...surface!.values]).toEqual([...SEVEN_VIEWS]);
     const home = read("src/client/SchedulesHome.tsx");
     expect(home).toContain('tabId="dead-letter-queue"');
     expect(home).toContain('deepLink.view === "dead-letter-queue"');
@@ -237,13 +241,13 @@ describe("4574-P06 the home renders the Dead-letter queue tab (#4574)", () => {
     const tabs = Array.from(container.querySelectorAll('[role="tab"]')).map(
       (t) => t.textContent ?? "",
     );
-    expect(tabs).toEqual(SIX_LABELS);
+    expect(tabs).toEqual(SEVEN_LABELS);
     expect(container.querySelector('[data-testid="dlq-panel"]')).toBeTruthy();
     expect(container.textContent).toContain("Dead-letter queue");
     expect(container.textContent).toContain("Unreplayed records");
   });
 
-  it("the default list view still renders all six tabs", async () => {
+  it("the default list view still renders all seven tabs", async () => {
     window.history.pushState(null, "", "/?tab=schedules");
     await render(
       <ToastProvider>
@@ -254,7 +258,7 @@ describe("4574-P06 the home renders the Dead-letter queue tab (#4574)", () => {
     const tabs = Array.from(container.querySelectorAll('[role="tab"]')).map(
       (t) => t.textContent ?? "",
     );
-    expect(tabs).toEqual(SIX_LABELS);
+    expect(tabs).toEqual(SEVEN_LABELS);
   });
 });
 

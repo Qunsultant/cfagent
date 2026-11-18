@@ -1071,6 +1071,13 @@
         "shortLabel": "Unreplayed records — replay to the source queue",
         "icon": "Jobs",
         "description": "Unreplayed records waiting for a replay to their source queue"
+      },
+      {
+        "id": "flags",
+        "label": "Flags",
+        "shortLabel": "Scheduling-channel flags",
+        "icon": "Settings",
+        "description": "Scheduling-channel flags — chat and NLQ entry points, one always on"
       }
     ],
     "sandbox": [
@@ -1657,6 +1664,10 @@
       "tab": "schedules",
       "view": "dead-letter-queue"
     },
+    "schedules:flags": {
+      "tab": "schedules",
+      "view": "flags"
+    },
     "options-screener:iv-history": {
       "tab": "options",
       "view": "iv-history"
@@ -2102,7 +2113,8 @@
         "goals",
         "queue",
         "background-tasks",
-        "dead-letter-queue"
+        "dead-letter-queue",
+        "flags"
       ]
     },
     {
