@@ -604,7 +604,17 @@ export interface AgentWorkflowStageScheduleAdapter {
   trigger?(id: string): Promise<unknown>;
   update?(
     id: string,
-    input: { timing?: AgentSdkTiming; reason?: string },
+    input: {
+      timing?: AgentSdkTiming;
+      reason?: string;
+      /**
+       * Issue #4235 — the explicit per-schedule opt-in for a sub-daily
+       * re-time (default at most once per day). The sdk/goal update
+       * variants do not carry it yet (follow-up: thread it through
+       * the capability's sdk + goal update paths and the A2A request).
+       */
+      subDailyOptIn?: boolean;
+    },
   ): Promise<UnifiedScheduleRecord>;
 }
 
@@ -704,6 +714,8 @@ export type AgentScheduleActionRequest =
       scheduleId: string;
       timing?: AgentSdkTiming;
       reason?: string;
+      /** Issue #4235 — the explicit per-schedule opt-in for a sub-daily re-time. */
+      subDailyOptIn?: boolean;
       /** As on create: the approve endpoint's gate-skip token. */
       approvedPendingId?: string;
     }
@@ -1300,7 +1312,13 @@ export async function executeAgentScheduleAction(
       if (request.action === "update") {
         if (!stages.update) return { ok: false, code: "unsupported", reason: "Update is not supported on this channel." };
         const updateReq = request as Extract<AgentScheduleActionRequest, { action: "update"; kind: "workflow-stage" }>;
-        const updated = await stages.update(scheduleId, { timing: updateReq.timing, reason: updateReq.reason });
+        const updated = await stages.update(scheduleId, {
+          timing: updateReq.timing,
+          reason: updateReq.reason,
+          // Issue #4235 — forward the explicit per-schedule opt-in
+          // for a sub-daily re-time.
+          ...(updateReq.subDailyOptIn === true ? { subDailyOptIn: true } : {}),
+        });
         await recordOutcome("success", scheduleId, `agent ${principal.agentId} (${principal.login}) updated stage-schedule ${scheduleId}`);
         deps.audit("schedule.updated", { scheduleId, agentId: principal.agentId, principal: principal.login, origin: "agent" });
         return { ok: true, scheduleId, schedule: updated };

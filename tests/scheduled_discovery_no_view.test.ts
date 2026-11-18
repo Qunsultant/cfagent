@@ -675,6 +675,9 @@ describe("POST /api/schedules/create with a no-view discovery payload (#534)", (
     const { status, body } = await postCreate(agent, {
       scheduleType: "interval",
       intervalSeconds: 3600,
+      // Issue #4235 — a 3600s interval is sub-daily, so creation
+      // carries the explicit per-schedule opt-in.
+      subDailyOptIn: true,
       callback: "autonomousStrategyDiscovery",
       payload: { inputModel: "no-view", constraintSets: [GOOD_SET] },
     });
@@ -709,6 +712,10 @@ describe("POST /api/schedules/create with a no-view discovery payload (#534)", (
     const { status, body } = await postCreate(agent, {
       scheduleType: "interval",
       intervalSeconds: 3600,
+      // Issue #4235 — a 3600s interval is sub-daily, so the request
+      // carries the explicit opt-in; the 400 under test then comes
+      // from the payload validator, as the test pins, not the cap.
+      subDailyOptIn: true,
       callback: "autonomousStrategyDiscovery",
       payload,
     });
@@ -722,6 +729,10 @@ describe("POST /api/schedules/create with a no-view discovery payload (#534)", (
     const { status, body } = await postCreate(agent, {
       scheduleType: "interval",
       intervalSeconds: 3600,
+      // Issue #4235 — a 3600s interval is sub-daily, so the request
+      // carries the explicit opt-in; the 400 under test then comes
+      // from the payload validator, as the test pins, not the cap.
+      subDailyOptIn: true,
       callback: "autonomousStrategyDiscovery",
       payload: { inputModel: "no-view", constraintSets: [{ ...GOOD_SET, thesis: "bullish" } as any] },
     });
