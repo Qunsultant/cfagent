@@ -3429,21 +3429,37 @@ export class ScheduledTasksService {
       );
       const scanData = response.data as any;
       auditRunId = scanData?.scanRunId || reportRunId;
-      // Issue #3314: stamp the arming schedule's Â§4 linkage onto the
-      // scan-store row once the run id is known â€” the persist stage
+      // Issue #3314: stamp the arming schedule's §4 linkage onto the
+      // scan-store row once the run id is known — the persist stage
       // inside the workflow cannot know it (the workflow command
       // carries no scheduleId; threading it through is #4198's
       // scope), so the stamp happens here, after the workflow
       // returns, where both the scan id and the schedule id are
-      // known. Failures warn only â€” a row without its linkage is
+      // known. Failures warn only — a row without its linkage is
       // still a recorded run. A run with no arming schedule records
       // the absence explicitly: the save already stamped nulls, so
       // no backfill runs for it.
+      // Issue #4259 (FOLD): the backfill takes the arming scheduleId
+      // but PRESERVES the run-scoped ids the persist stage already
+      // stamped (workflowId = the producing run's id) — the old
+      // literal `{scheduleId, asyncJobId: null, workflowId: null}`
+      // would clobber them through updateLedgerLinkage's overwrite,
+      // erasing the exact join key the one-ledger fold reads on.
+      // The stored row is read first (same visibility discipline);
+      // an unreadable row resolves as no linkage, i.e. today's
+      // behaviour, never a thrown stamp.
       if (options.scheduleId && typeof scanData?.scanRunId === "string" && scanData.scanRunId && this.scanRunStore) {
         try {
+          const { resolveScanBackfillLinkage } = await import("../data/scanRunPorts");
+          const stored = await this.scanRunStore.get(scanData.scanRunId, { userLogin }).catch(() => null);
           await this.scanRunStore.updateLedgerLinkage(
             scanData.scanRunId,
-            { scheduleId: options.scheduleId, asyncJobId: null, workflowId: null },
+            resolveScanBackfillLinkage(
+              stored
+                ? { scheduleId: stored.scheduleId ?? null, asyncJobId: stored.asyncJobId ?? null, workflowId: stored.workflowId ?? null }
+                : null,
+              options.scheduleId,
+            ),
             { userLogin },
           );
         } catch (stampErr) {

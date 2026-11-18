@@ -86,6 +86,33 @@ export function normalizeScanRunLinkage(
   };
 }
 
+/**
+ * Issue #4259 (FOLD — options runs in the one ledger): resolve the
+ * linkage a scheduled-path backfill stamps onto an already-saved scan
+ * row. The arming schedule's id is the one thing the backfill knows
+ * that the persist stage could not (#4198 scope), so it always wins
+ * the scheduleId slot — but the run-scoped ids the persist stage
+ * already stamped (workflowId = the producing run's id, asyncJobId)
+ * are PRESERVED, never clobbered with null: `updateLedgerLinkage`
+ * overwrites all three columns, so passing it the old
+ * `{scheduleId, asyncJobId: null, workflowId: null}` literal would
+ * erase the exact join key the fold reads on. A row with no linkage
+ * records explicit nulls for the run-scoped ids; a poisoned #3650
+ * literal ("undefined"/"null") reads as an explicit null, never a
+ * stamped id — the same cleaning `normalizeScanRunLinkage` applies.
+ */
+export function resolveScanBackfillLinkage(
+  existing: Pick<LedgerLinkage, "scheduleId" | "asyncJobId" | "workflowId"> | null | undefined,
+  scheduleId: string,
+): { scheduleId: string | null; asyncJobId: string | null; workflowId: string | null } {
+  const kept = normalizeScanRunLinkage(existing ?? undefined);
+  return normalizeScanRunLinkage({
+    scheduleId,
+    asyncJobId: kept.asyncJobId,
+    workflowId: kept.workflowId,
+  });
+}
+
 /** The listing projection of a stored run: everything a history view
  *  needs, without hauling the full result. */
 export interface ScanRunSummary {

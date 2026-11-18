@@ -580,6 +580,16 @@ export function createScannerScreenPorts(
           // caller threaded one (execute()'s opportunities case);
           // absent, the row records none.
           ...(classInput?.trigger ? { trigger: classInput.trigger } : {}),
+          // Issue #4259 (FOLD): stamp the §4 linkage at save time —
+          // workflowId IS the producing run's id (input.runId), the
+          // same id the ledger row carries as its workflowId, so the
+          // merged reads can join the scan row to its ledger row on
+          // an exact run identity. scheduleId/asyncJobId are explicit
+          // nulls here: the persist stage cannot know the arming
+          // schedule (#4198 scope) or the async job — the scheduled
+          // path backfills the scheduleId after the workflow returns
+          // (resolveScanBackfillLinkage preserves this stamp).
+          linkage: { scheduleId: null, asyncJobId: null, workflowId: input.runId },
         });
         return { terminal: "completed", saved: true, scanRunId: saved.id, persisted: true, result };
       } catch (err) {

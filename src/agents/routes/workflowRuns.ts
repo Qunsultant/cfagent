@@ -24,12 +24,12 @@ import { createAsyncJobPorts } from "../../data/createAsyncJobPorts";
 import type { ScanRunSummary } from "../../data/scanRunPorts";
 import { createShardJobAdapter } from "../../data/createShardJobPorts";
 import type { ShardJobReader, ShardJobRow } from "../../data/shardJobPorts";
-import { listD1JobRunRecords } from "../../services/jobRunRecordReads";
+import { d1JobRunRecordId, listD1JobRunRecords } from "../../services/jobRunRecordReads";
 import type { JobRunRecord } from "../../services/jobRunRecords";
 import { listJobOutcomes } from "../../services/jobOutcomes";
 import { listScreeningActivity } from "../../services/screeningActivity";
 import { listScheduledReports } from "../../services/scheduledReports";
-import { runSummaryFromReport, type RunSummary } from "../../services/runSummaries";
+import { runSummaryFromReport, scanRunMatchesLedgerRow, type RunSummary } from "../../services/runSummaries";
 import { resolveIaaaTenant } from "../../security/iaaaGithubEndToEnd";
 import { sagaAuditOwnerStub, type AuditOwnerStub } from "../../workflows/sagaJourneyGate";
 import type { SqlStorage } from "../../orm";
@@ -990,8 +990,32 @@ export async function handleWorkflowRunsRoutes(
       const scans = await reader(
         Math.min(MAX_LIMIT * 2, Math.max(50, (limit + offset) * 2)),
       );
+      // Issue #4259 (FOLD): a scan row whose §4 linkage joins a
+      // ledger row in this window is that ledger run's payload, not
+      // a second run — drop it from the scan list and attach its
+      // documents + options family to the ledger run (the ledger
+      // run keeps its own id, status, trigger and stages). The
+      // canonical claim above still wins first: a scan a canonical
+      // report claims never folds here, so its payload is never
+      // shown twice. An unclaimed scan still shows as its own run.
+      const ledgerClaimedScanIds = new Set<string>();
+      for (const record of keptJobRunRecords) {
+        const match = scans.find(
+          (scan) => !claimedScanIds.has(scan.id) && !ledgerClaimedScanIds.has(scan.id) && scanRunMatchesLedgerRow(scan, record),
+        );
+        if (!match) continue;
+        ledgerClaimedScanIds.add(match.id);
+        const ledgerRun = jobRunRecordRuns.find((run) => run.runId === d1JobRunRecordId(record));
+        if (ledgerRun) {
+          const scanRun = runFromScanRun(match);
+          ledgerRun.family = "options";
+          ledgerRun.workflow = scanRun.workflow;
+          ledgerRun.title = scanRun.title;
+          ledgerRun.documents = scanRun.documents;
+        }
+      }
       scanRuns = scans
-        .filter((scan) => !claimedScanIds.has(scan.id))
+        .filter((scan) => !claimedScanIds.has(scan.id) && !ledgerClaimedScanIds.has(scan.id))
         .map(runFromScanRun);
     } catch (err) {
       storeErrors.scanRuns = err instanceof Error ? err.message : String(err);
