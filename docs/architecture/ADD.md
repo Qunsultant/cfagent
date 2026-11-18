@@ -7,6 +7,16 @@ pending with its owning issue. Delivery rules live in
 [gitops](../agents/gitops.md); user journeys live in
 [ux-architecture](../UX/ux-architecture.md).
 
+**Technology, cloud, and vendor agnostic.** No section of this
+document prescribes a specific vendor, cloud, or framework as the
+architecture. Where a linked doc names a specific technology, it is
+one deployment option behind a port/adapter seam — never the
+architecture itself. Decisions are recorded as portable principles
+(ports/adapters, one security model, one implementation per rule); a
+named product is a compliant implementation of a principle,
+replaceable without rewriting the architecture. The packaging
+decision is in [Packaging and deployment](#packaging-and-deployment).
+
 ## UX architecture
 
 - [UX architecture](../UX/ux-architecture.md) — user journeys,
@@ -88,6 +98,30 @@ pending with its owning issue. Delivery rules live in
   issue #1453, closed).
 - Related assessment: [assessment-01](./infrastructure/assessment-01.md).
 
+## Packaging and deployment
+
+- The solution is packaged as containers, one per architectural
+  layer, and runs on Cloudflare Workers AND in Docker (multi-cloud,
+  cloud-agnostic). No new Cloudflare-proprietary API surface is
+  introduced in the new layer; the store behind a port is what makes
+  the Docker shape possible.
+- Layers and their code homes: services (`src/services/`), API
+  (`src/server/routes/` + `src/agents/routes/`), MCPs (`src/mcps/`),
+  frontend (`src/client/`, React), backend (`src/server/` + the Worker
+  entry `src/server.ts`), middleware (the IAAA/Hono middleware chain
+  — there is no middleware directory; the layer is the chain, not a
+  folder), data layer (`src/data/`, ports/adapters).
+- Decisions: [ADR 0034](./adr/0034-cbo-api-layer.md) (CBO lane, #5343),
+  D11 portability rule — per-piece verdicts (Hono, zod, jose,
+  chanfana, Drizzle, MCP SDK compliant; API Shield optional edge
+  adapter only; `@cloudflare/workers-oauth-provider` out for the
+  shared-server role). One API server (#5387) and one MCP server
+  (#5386), one security model (IAAA).
+- Container shape owner: #5277 (J-stack portability, CAIO lane, under
+  #5272) — Dockerfile + compose running the Worker under workerd; CI
+  runs the engine suite against it. This document records the
+  decision; it does not design the containers.
+
 ## Networking architecture
 
 - **Pending — owning issue #1454 (COO lane).** The consolidated
@@ -105,19 +139,19 @@ pending with its owning issue. Delivery rules live in
   [tech-standards](../agents/tech-standards.md).
 - SOLID / GRASP / GoF conformance anchor is issue #488.
 - Agentic patterns (ReAct, Reflection, Self-correction, Learning, Adaptive Router, Supervisor-Worker, Decentralized-Swarm, etc)
-- Security Models and Protocols (IAAA, 
+- Security Models and Protocols (IAAA)
 - Protocols (OIDC, MCP, A2A, ACP, UCP, etc)
 - 15-factor methodology.
 - AOP (Exception Handling, Coded Messages, Logging, Externalized Configuration, Security, Transaction Management, etc)
 - AI-native (perception-and-ingress, reasoning-and-planning, goal orientation and orchestration, memory and stateful, autonomous, adaptive, self-governing and RSI, action-and-tool layer, feedback-driven)
-- Cloud-native
+- Cloud-native and cloud-agnostic (portable across clouds and local containers)
 - API-native
 - Semantic Layer Standards
 - Contract-First & Composability Standards
 - Zero-Touch Operational Frameworks
 - Distributed Data & Continuous Learning Pipelines
 - CNCF Cloud Native Maturity Model
-- Well-Architected Frameworks (AWS, Azure, GCP)
+- Well-Architected Frameworks (cloud-neutral; the AWS, Azure, and GCP frameworks are assessment references, not the architecture)
 - OpenTelemetry & Cloud-Native Observability Standards
 - TOGAF, COBIT, ITIL
 - Ilities (Agility, RASUI, FURPS, RASR, ACID, RAMS)
@@ -136,6 +170,13 @@ pending with its owning issue. Delivery rules live in
 Every change to this container or to any doc it links gets a changelog
 entry here, newest first:
 
+- 2026-11-18 — Technology, cloud, and vendor-agnostic principle
+  stated; packaging and deployment section added — the solution is
+  containerized per architectural layer (services, API, MCPs,
+  frontend, backend, middleware, data layer), runnable on Cloudflare
+  Workers and in Docker (multi-cloud, cloud-agnostic) — decisions in
+  [ADR 0034](./adr/0034-cbo-api-layer.md) (D11), container shape owned
+  by #5277 (issue #5399).
 - 2026-11-09 — Agentic architecture: agents, workflows, schedules,
   queues, platforms and lifecycle target architecture added —
   [agents-workflows-schedules-queues-platforms-lifecycle](./agentic/agents-workflows-schedules-queues-platforms-lifecycle.md)
