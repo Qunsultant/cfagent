@@ -72,6 +72,8 @@ import type { TransactionLedgerPort } from "./transactionLedgerPorts";
 import type {
   CanonicalReportPort,
 } from "./canonicalReportPorts";
+import type { UsageEventPort } from "./canonicalReportStorePorts";
+import { DoSqliteUsageEventStore } from "./doSqliteUsageEventAdapter";
 import {
   marketplaceSeedData,
   type MarketplacePorts,
@@ -172,6 +174,14 @@ export class DatabaseORM {
   public ads: RepositoryPort<AdRecord>;
   public externalAds: RepositoryPort<ExternalAdRecord>;
   public transactions: TransactionLedgerPort;
+  /**
+   * Issue #5235 (slice 2.30): the usage_events meter port over
+   * this instance's own DO SQLite — the same store the paid gate
+   * writes through createCanonicalReportStorePorts(ctx.sql).usage.
+   * The revenue summary reads it for the coverage cut; nothing
+   * else reads it through the facade.
+   */
+  public usageEvents: UsageEventPort;
   public messages: MessagePort;
   public memory: MemoryPort;
   public events: EventLogPort;
@@ -233,6 +243,7 @@ export class DatabaseORM {
     this.ads = createDoAdRepository(sql);
     this.externalAds = createDoExternalAdRepository(sql);
     this.transactions = new DoSqliteTransactionLedgerAdapter(sql);
+    this.usageEvents = new DoSqliteUsageEventStore(sql);
     this.messages = new DoSqliteMessageAdapter(sql);
     this.memory = new DoSqliteMemoryAdapter(sql);
     this.events = new DoSqliteEventLogAdapter(sql);
@@ -546,6 +557,7 @@ export class DatabaseORM {
       ads: this.ads.findMany(),
       transactions: this.transactions.findMany(),
       referrals: this.referrals.findMany(),
+      usageEvents: this.usageEvents.listAllWithDetail(),
     });
   }
 

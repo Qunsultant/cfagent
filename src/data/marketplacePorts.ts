@@ -40,10 +40,14 @@ import type {
   CategoryRecord,
   ExternalAdRecord,
   ReferralRecord,
+  RevenueCoverageCut,
+  RevenueCoverageKind,
+  RevenueFamilyCut,
   RevenueSummary,
   TransactionRecord,
 } from "../types";
 import type { RepositoryPort, RepositoryQueryOptions } from "./repositoryPorts";
+import type { UsageEventDetailRow } from "./canonicalReportStorePorts";
 
 /** Async repository contract for the D1-resident tables. */
 export interface AsyncRepositoryPort<T extends Record<string, any>> {
@@ -275,12 +279,21 @@ export function marketplaceSeedData(now: string): {
  * payment platform fee = 2.5% of settled (completed|authorized)
  * charge volume; referral payouts = $10 per signup; averageRPM
  * defaults to 18.5 with zero impressions.
+ *
+ * Issue #5235 (slice 2.30) adds the subscription + pay-per-run
+ * cuts, aggregated from the same ledger of record
+ * (mas_transactions) plus the metering store of record
+ * (usage_events, optional input — absent means zero meter rows,
+ * never an error). The old lines' formulas are UNCHANGED; the
+ * new lines are additive and are NOT folded into gross/net.
  */
 export function computeRevenueSummaryFromRows(rows: {
   externalAds: ExternalAdRecord[];
   ads: AdRecord[];
   transactions: TransactionRecord[];
   referrals: ReferralRecord[];
+  /** Meter rows for the coverage cut; omit/empty = no served-run data. */
+  usageEvents?: UsageEventDetailRow[];
 }): RevenueSummary {
   const extAds = rows.externalAds;
   const adNetworkRevenue = extAds.reduce((sum, ad) => sum + (ad.earnings || 0), 0);
@@ -304,6 +317,10 @@ export function computeRevenueSummaryFromRows(rows: {
   const netRevenue = Math.max(0, grossRevenue - referralPayouts);
   const averageRPM = totalImpressions > 0 ? (adNetworkRevenue / totalImpressions) * 1000 : 18.5;
 
+  const { subscriptionRevenue, subscriptionCount } = summarizeSubscriptionRevenue(txs);
+  const { payPerRunRevenue, payPerRunByFamily } = summarizePayPerRunRevenue(txs);
+  const runRevenueByCoverage = summarizeCoverage(rows.usageEvents ?? []);
+
   return {
     grossRevenue,
     adNetworkRevenue,
@@ -314,12 +331,218 @@ export function computeRevenueSummaryFromRows(rows: {
     totalImpressions,
     totalAdClicks,
     averageRPM,
+    subscriptionRevenue,
+    subscriptionCount,
+    payPerRunRevenue,
+    payPerRunByFamily,
+    runRevenueByCoverage,
+    // Issue #5235: measured provider cost per run is NOT recorded
+    // anywhere (rolloutBudget holds only caller-supplied
+    // budget/actual) — null means unavailable, never an estimate.
+    costPerRun: null,
   };
+}
+
+/** Round money to the cent; anything finer is a caller bug. */
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+/**
+ * Issue #5235: screener families. The paid services catalogue
+ * (TRADING_PAID_SERVICES) is the source of truth for service
+ * ids, resources, and prices — this map only translates them
+ * to the #2022 family vocabulary: stock_signals ($0.02) is the
+ * stock family, options_screener ($0.05) the options family,
+ * market_research ($0.10) the goal family (the native gate's
+ * default family is "goal"). `strategy` has no paid service, so
+ * it stays zero until one exists. A row whose family cannot be
+ * resolved lands in `unknown` — counted, never dropped. If a new
+ * paid service is added without updating this map, its rows land
+ * in `unknown` (fail-safe), never silently in a wrong family.
+ */
+const SERVICE_ID_TO_FAMILY: Record<string, string> = {
+  stock_signals: "stock",
+  options_screener: "options",
+  market_research: "goal",
+};
+const RESOURCE_TO_FAMILY: Record<string, string> = {
+  "/api/premium/stock-signals": "stock",
+  "/api/premium/options-scan": "options",
+  "/api/premium/market-research": "goal",
+};
+const KNOWN_FAMILIES = ["stock", "options", "goal", "strategy"] as const;
+
+function normalizeFamily(raw: unknown): string {
+  const f = String(raw ?? "").trim();
+  return (KNOWN_FAMILIES as readonly string[]).includes(f) ? f : "unknown";
+}
+
+function isSettled(tx: TransactionRecord): boolean {
+  return tx.status === "completed" || tx.status === "authorized";
+}
+
+/**
+ * Issue #5235: the family of one settled pay-per-run payment,
+ * or null when the row is not a run payment at all.
+ * - cfpay charge rows carry the family in the code-owned note
+ *   (`<family> run <runId> via cfpay checkout`, built by
+ *   buildCfpayChargeTransaction) and the `screener-payment:`
+ *   session prefix (CFPAY_LEDGER_SESSION_PREFIX in
+ *   services/cfpayLedger.ts — the literal is repeated here so
+ *   this pure function stays free of the services layer; the
+ *   #5235 test builds rows through the real builder, so a
+ *   prefix change goes red here first).
+ * - x402/mpp inbound receipt rows carry the service resource
+ *   in checkoutUrl; the resource maps to the family.
+ * Everything else (simulated, drafts, outbound micropayments,
+ * agent-to-agent rows, bundle/channel receipts, generic
+ * charges) returns null.
+ */
+function payPerRunFamily(tx: TransactionRecord): string | null {
+  if (!isSettled(tx)) return null;
+  if (tx.action === "charge" && String(tx.sessionId ?? "").startsWith("screener-payment:")) {
+    const m = /^(\S+) run \S+ via cfpay checkout/.exec(String(tx.note ?? ""));
+    return m ? normalizeFamily(m[1]) : "unknown";
+  }
+  if (tx.action === "agentic_payment" && (tx.gateway === "x402" || tx.gateway === "mpp")) {
+    const url = String(tx.checkoutUrl ?? "");
+    for (const [resource, family] of Object.entries(RESOURCE_TO_FAMILY)) {
+      if (url === resource || url.endsWith(resource)) return family;
+    }
+    return "unknown";
+  }
+  return null;
+}
+
+function summarizePayPerRunRevenue(txs: TransactionRecord[]): {
+  payPerRunRevenue: number;
+  payPerRunByFamily: RevenueFamilyCut[];
+} {
+  const byFamily = new Map<string, { revenue: number; runs: number }>();
+  for (const f of KNOWN_FAMILIES) byFamily.set(f, { revenue: 0, runs: 0 });
+  let total = 0;
+  for (const tx of txs) {
+    const family = payPerRunFamily(tx);
+    if (family === null) continue;
+    const amount = Number(tx.amount) || 0;
+    total += amount;
+    const bucket = byFamily.get(family) ?? { revenue: 0, runs: 0 };
+    bucket.revenue += amount;
+    bucket.runs += 1;
+    byFamily.set(family, bucket);
+  }
+  const payPerRunByFamily: RevenueFamilyCut[] = [...KNOWN_FAMILIES].map((family) => ({
+    family,
+    revenue: round2(byFamily.get(family)?.revenue ?? 0),
+    runs: byFamily.get(family)?.runs ?? 0,
+  }));
+  const unknown = byFamily.get("unknown");
+  if (unknown && unknown.runs > 0) {
+    payPerRunByFamily.push({ family: "unknown", revenue: round2(unknown.revenue), runs: unknown.runs });
+  }
+  return { payPerRunRevenue: round2(total), payPerRunByFamily };
+}
+
+/**
+ * Issue #5235: settled subscription-purchase cash. A subscription
+ * receipt row is written best-effort by billing-purchase (bundle
+ * precedent): action agentic_payment, gateway stripe, id
+ * `tx_bill-<checkoutRequestId>`, note `Subscription purchase
+ * plan <planId> …`. Both the id prefix and the note prefix are
+ * required, so a bundle receipt (`tx_bbnd-…`) or a channel
+ * receipt (gateway cfpay-channel) can never count here.
+ * Pre-slice purchases have no row and are invisible to this
+ * line; renewals are not recorded in the ledger (no webhook
+ * ledger write) — both documented, not estimated.
+ */
+function summarizeSubscriptionRevenue(txs: TransactionRecord[]): {
+  subscriptionRevenue: number;
+  subscriptionCount: number;
+} {
+  let revenue = 0;
+  let count = 0;
+  for (const tx of txs) {
+    if (
+      isSettled(tx) &&
+      tx.action === "agentic_payment" &&
+      tx.gateway === "stripe" &&
+      String(tx.id ?? "").startsWith("tx_bill-") &&
+      String(tx.note ?? "").startsWith("Subscription purchase")
+    ) {
+      revenue += Number(tx.amount) || 0;
+      count += 1;
+    }
+  }
+  return { subscriptionRevenue: round2(revenue), subscriptionCount: count };
+}
+
+/**
+ * Issue #5235: served runs by coverage type, from the meter rows.
+ * The detail JSON is the record: paidVia `subscription_included`
+ * / `credits` names the coverage; a protocol field with no
+ * paidVia is a paid run; anything else (malformed JSON, missing
+ * detail, an unrecognised paidVia) is `unknown` — counted, never
+ * dropped, never blocking the summary. `revenue` is the
+ * list-price value of paid runs; settled cash is
+ * payPerRunRevenue (a part-converted run's cash remainder is
+ * lower than its list price). Credits-covered runs have no
+ * per-run row today (conversion is account-level), so the
+ * credits bucket is 0 until such rows exist.
+ */
+function summarizeCoverage(events: UsageEventDetailRow[]): RevenueCoverageCut[] {
+  const buckets = new Map<RevenueCoverageKind, { runs: number; revenue: number; listValue: number }>();
+  for (const c of ["paid", "subscription_included", "credits"] as const) {
+    buckets.set(c, { runs: 0, revenue: 0, listValue: 0 });
+  }
+  for (const row of events) {
+    let detail: Record<string, unknown> | null = null;
+    try {
+      detail = row.detailJson ? (JSON.parse(row.detailJson) as Record<string, unknown>) : null;
+    } catch {
+      detail = null;
+    }
+    const priceRaw = Number(detail?.priceUSD);
+    const price = Number.isFinite(priceRaw) && priceRaw > 0 ? priceRaw : 0;
+    const paidVia = typeof detail?.paidVia === "string" ? detail.paidVia : "";
+    let coverage: RevenueCoverageKind;
+    if (paidVia === "subscription_included" || paidVia === "credits") {
+      coverage = paidVia;
+    } else if (paidVia) {
+      coverage = "unknown";
+    } else if (typeof detail?.protocol === "string" && detail.protocol) {
+      coverage = "paid";
+    } else {
+      coverage = "unknown";
+    }
+    const bucket = buckets.get(coverage) ?? { runs: 0, revenue: 0, listValue: 0 };
+    bucket.runs += 1;
+    bucket.listValue += price;
+    if (coverage === "paid") bucket.revenue += price;
+    buckets.set(coverage, bucket);
+  }
+  const cuts: RevenueCoverageCut[] = (["paid", "subscription_included", "credits"] as const).map((coverage) => ({
+    coverage,
+    runs: buckets.get(coverage)?.runs ?? 0,
+    revenue: round2(buckets.get(coverage)?.revenue ?? 0),
+    listValue: round2(buckets.get(coverage)?.listValue ?? 0),
+  }));
+  const unknown = buckets.get("unknown");
+  if (unknown && unknown.runs > 0) {
+    cuts.push({ coverage: "unknown", runs: unknown.runs, revenue: round2(unknown.revenue), listValue: round2(unknown.listValue) });
+  }
+  return cuts;
 }
 
 export async function computeMarketplaceRevenueSummary(
   marketplace: MarketplacePorts,
   transactions: RepositoryPort<TransactionRecord>,
+  /**
+   * Issue #5235: meter rows for the coverage cut. Callers that
+   * cannot supply them (older call sites) get zero meter rows —
+   * the coverage buckets read empty, never an error.
+   */
+  usageEvents: UsageEventDetailRow[] = [],
 ): Promise<RevenueSummary> {
   const [externalAds, ads, referrals] = await Promise.all([
     marketplace.externalAds.findMany(),
@@ -331,6 +554,7 @@ export async function computeMarketplaceRevenueSummary(
     ads,
     transactions: transactions.findMany(),
     referrals,
+    usageEvents,
   });
 }
 

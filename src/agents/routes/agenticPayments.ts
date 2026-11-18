@@ -5076,6 +5076,42 @@ export async function handleAgenticPaymentsRoutes(
         productId: plan.productId,
         versionId: plan.id,
       }));
+      // Issue #5235 (slice 2.30): best-effort receipt row (gateway
+      // stripe) so the purchase surfaces in Billing receipts AND in
+      // the revenue summary's subscription line — mas_transactions
+      // is the ledger the summary aggregates, and until this row
+      // subscription purchases wrote nothing there (the bundle
+      // precedent above does the same for one-time purchases). A
+      // failure never blocks the purchase, which already
+      // activated. Pre-slice purchases have no row, and renewals
+      // are not recorded in the ledger (no webhook ledger write)
+      // — both documented on #5235, never estimated.
+      try {
+        const orm = ctx.getOrm();
+        const nowIso = new Date().toISOString();
+        await orm.transactions.create({
+          id: `tx_${checkoutRequestId}`,
+          sessionId: login,
+          action: "agentic_payment",
+          amount: plan.priceUSD,
+          currency: "USD",
+          customer: login,
+          gateway: "stripe",
+          gatewayRef: checkoutSessionId,
+          status: "completed",
+          proposerDid: `did:key:${login}`,
+          proofSignature: checkoutSessionId,
+          note: `Subscription purchase plan ${plan.id} (${plan.name}) via Billing checkout`,
+          createdAt: nowIso,
+          updatedAt: nowIso,
+        });
+      } catch (err) {
+        ctx.audit("commercial.subscription.receipt_row_failed", "payments", {
+          userId: login,
+          checkoutRequestId,
+          error: err instanceof Error ? err.message : "unknown",
+        });
+      }
       const effectiveTier = resolveEffectiveTier(afterAccount, [subscription], Date.now());
       return Response.json({ code: "SUCCESS_BILLING_PURCHASE_COMPLETED", subscription, account: afterAccount, effectiveTier });
     } catch (err: any) {

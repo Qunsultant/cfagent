@@ -11,6 +11,7 @@
 import type {
   CanonicalReportStoreSqlExecutor,
   InsertUsageEventRow,
+  UsageEventDetailRow,
   UsageEventPort,
   UsageEventRow,
 } from "./canonicalReportStorePorts";
@@ -54,6 +55,26 @@ export class DoSqliteUsageEventStore implements UsageEventPort {
       runId: String(r.run_id ?? ""),
       category: String(r.category ?? ""),
       createdAt: String(r.created_at ?? ""),
+    }));
+  }
+
+  listAllWithDetail(): UsageEventDetailRow[] {
+    // Issue #5235: ensure first — a fresh instance with zero
+    // metered calls reads empty instead of throwing on a
+    // missing table (the meter only ensures on first insert).
+    this.ensureSchema();
+    const rows = Array.from(
+      this.sql.exec(
+        `SELECT id, user_login, run_id, category, created_at, detail_json FROM ${TABLE} ORDER BY created_at ASC, id ASC`
+      )
+    ) as Array<Record<string, unknown>>;
+    return rows.map((r) => ({
+      id: String(r.id ?? ""),
+      userLogin: String(r.user_login ?? ""),
+      runId: String(r.run_id ?? ""),
+      category: String(r.category ?? ""),
+      createdAt: String(r.created_at ?? ""),
+      detailJson: r.detail_json == null ? null : String(r.detail_json),
     }));
   }
 }

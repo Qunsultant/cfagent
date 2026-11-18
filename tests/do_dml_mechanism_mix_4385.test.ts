@@ -12,12 +12,15 @@
  *    + the "__table__" parameterized placeholder (P6c, #4386) + the
  *    2 route-held tables (P6d, #4387: mas_job_outcomes_meta and
  *    mas_events, both template clears);
- *  - the remaining inline count is 230 (the 297-statement survey
+ *  - the remaining inline count is 231 (the 297-statement survey
  *    inventory on 1501f5f4, less the 53 migrated by P6b and the 16
  *    migrated by P6c, plus the 2 read sites #4507 added: the dedupe
  *    pair-scan and per-pair row-list SELECTs in
  *    doSqliteCanonicalReportStoreAdapter.ts — adapter-local
- *    reconciliation, not catalogue-migrated) — a later slice moves
+ *    reconciliation, not catalogue-migrated — plus the 1 read site
+ *    #5235 added: the listAllWithDetail SELECT in
+ *    doSqliteUsageEventAdapter.ts, the unfiltered meter read for
+ *    the revenue-summary coverage cut) — a later slice moves
  *    this number down and updates this pin in the same PR;
  *  - the named exemptions are recorded here with their reasons
  *    (Q4): the doSchema* ledger (5) and the kv_store funnel (7);
@@ -187,7 +190,7 @@ describe("DO mechanism mix (#4385)", () => {
     ]);
   });
 
-  it("the remaining inline count is 230 (297 surveyed − 53 P6b − 16 P6c + 2 #4507 dedupe reads)", () => {
+  it("the remaining inline count is 231 (297 surveyed − 53 P6b − 16 P6c + 2 #4507 dedupe reads + 1 #5235 listAllWithDetail read)", () => {
     let write = 0;
     let read = 0;
     for (const file of doFiles()) {
@@ -196,8 +199,8 @@ describe("DO mechanism mix (#4385)", () => {
       read += counts.read;
     }
     expect(write).toBe(111);
-    expect(read).toBe(119);
-    expect(write + read).toBe(230);
+    expect(read).toBe(120);
+    expect(write + read).toBe(231);
   });
 
   it("the named exemptions hold their recorded counts, with reasons", () => {

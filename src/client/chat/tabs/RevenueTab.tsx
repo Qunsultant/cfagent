@@ -215,7 +215,73 @@ export function RevenueTab({adBannerConfig, ads, browseTable, catErrorMsg, catSu
                 </div>
               </div>
             </Card>
+
+            <Card padding="none">
+              <div className="ui-row">
+                <span>📦</span>
+                <div className="ui-stack">
+                  <strong>${revenueSummary?.subscriptionRevenue?.toFixed(2) || "0.00"}</strong>
+                  <span className="ui-meta-sm">Subscription Revenue ({revenueSummary?.subscriptionCount ?? 0} purchases)</span>
+                </div>
+              </div>
+            </Card>
+
+            <Card padding="none">
+              <div className="ui-row">
+                <span>⚡</span>
+                <div className="ui-stack">
+                  <strong>${revenueSummary?.payPerRunRevenue?.toFixed(2) || "0.00"}</strong>
+                  <span className="ui-meta-sm">Pay-per-Run Revenue (settled runs)</span>
+                </div>
+              </div>
+            </Card>
+
+            <Card padding="none">
+              <div className="ui-row">
+                <span>🧮</span>
+                <div className="ui-stack">
+                  <strong>{revenueSummary?.costPerRun == null ? "Unavailable" : `$${revenueSummary.costPerRun.toFixed(2)}`}</strong>
+                  <span className="ui-meta-sm">Cost per Run (not recorded)</span>
+                </div>
+              </div>
+            </Card>
           </Grid>
+          </PageSection>
+          <PageSection title="Subscription & Pay-per-Run Revenue">
+            <p className="ui-meta">
+              Subscription and pay-per-run revenue from the transaction ledger of record. Subscription purchases are recorded from the first purchase after this release; renewals are not recorded in the ledger. Cost per run is not recorded anywhere, so it shows as unavailable rather than an estimate.
+            </p>
+            <div className="ui-stack">
+              <Card>
+                <div className="ui-stack">
+                  <CardHeader title="Pay-per-Run Revenue by Family" />
+                  <Table
+                    columns={[
+                      { key: "family", header: "Family", render: (row) => <strong>{row.family}</strong> },
+                      { key: "runs", header: "Runs", render: (row) => <>{row.runs}</> },
+                      { key: "revenue", header: "Revenue", render: (row) => <strong>${row.revenue.toFixed(2)}</strong> },
+                    ]}
+                    rows={revenueSummary?.payPerRunByFamily ?? []}
+                    rowKey={(row) => row.family}
+                  />
+                </div>
+              </Card>
+              <Card>
+                <div className="ui-stack">
+                  <CardHeader title="Served Runs by Coverage" />
+                  <Table
+                    columns={[
+                      { key: "coverage", header: "Coverage", render: (row) => <strong>{row.coverage === "paid" ? "Paid" : row.coverage === "subscription_included" ? "Subscription included" : row.coverage === "credits" ? "Referral credits" : "Unknown"}</strong> },
+                      { key: "runs", header: "Runs", render: (row) => <>{row.runs}</> },
+                      { key: "listValue", header: "List value", render: (row) => <>${row.listValue.toFixed(2)}</> },
+                      { key: "revenue", header: "Revenue", render: (row) => <strong>${row.revenue.toFixed(2)}</strong> },
+                    ]}
+                    rows={revenueSummary?.runRevenueByCoverage ?? []}
+                    rowKey={(row) => row.coverage}
+                  />
+                </div>
+              </Card>
+            </div>
           </PageSection>
         </TabPanel>
         <TabPanel idBase="revenue" tabId="placements" active={activeTab === "placements"} retain={visitedTabs.has("placements")}>

@@ -18,6 +18,7 @@ import type {
   CanonicalReportWritePort,
   InsertCanonicalReportRow,
   InsertUsageEventRow,
+  UsageEventDetailRow,
   UsageEventPort,
   UsageEventRow,
 } from "./canonicalReportStorePorts";
@@ -252,6 +253,19 @@ export class InMemoryUsageEventStore implements UsageEventPort {
         runId,
         category,
         createdAt,
+      }));
+  }
+
+  listAllWithDetail(): UsageEventDetailRow[] {
+    return [...this.rows]
+      .sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : a.seq - b.seq))
+      .map(({ id, userLogin, runId, category, createdAt, detailJson }) => ({
+        id,
+        userLogin,
+        runId,
+        category,
+        createdAt,
+        detailJson,
       }));
   }
 }
