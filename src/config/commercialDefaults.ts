@@ -12,6 +12,9 @@
  * - transactions list: default 50, both modes (`src/agents/routes/payments.ts`);
  * - ledger payments list: default 50 (`src/agents/routes/agenticPayments.ts`).
  *
+ * Issue #5230 adds one more (value unchanged from the inline literal):
+ * - marketplace ads list: 20 (`src/agents/routes/adsRevenueReferrals.ts`).
+ *
  * NOT here, by design: top-up bounds (operator-set via the billing
  * policy, never a code default); refund windows/proration (the
  * PROPOSED_SEED_POLICY store seed — an open owner decision); prices
@@ -28,6 +31,8 @@ export interface CommercialDefaults {
   transactionsDefaultLimit: number;
   /** Ledger payments list: rows returned when no `limit` is given (50). */
   ledgerPaymentsDefaultLimit: number;
+  /** Marketplace ads list: rows returned by the GET /ads fetch (20). */
+  adsListLimit: number;
 }
 
 export const COMMERCIAL_DEFAULTS: CommercialDefaults = raw as CommercialDefaults;

@@ -255,3 +255,109 @@ export async function setOfferRules(rules: OfferRulesView): Promise<OfferRulesVi
   if (!isRecord(data) || !isRecord(data.policy)) throw new BillingPolicyApiError(500);
   return assertOfferRulesView(data.policy.offerRules);
 }
+
+/**
+ * Issue #5230 — the remaining billing-policy fields view: the nine
+ * operator-data fields with no management surface before this slice
+ * (grace period, dunning schedule, proration, downgrade timing,
+ * billing period default/allowed, annual discount, repurchase
+ * migration, cfpay channel fixed price) plus the bundle Stripe Price
+ * mapping (same class: operator data, no surface). Top-up limits,
+ * offer rules, and the plan Stripe Price mapping already have their
+ * own sections and are NOT repeated here.
+ */
+export type BillingPeriod = "monthly" | "annual";
+export type DowngradeTiming = "period_end" | "immediate";
+export type ProrationBehavior = "none" | "create_prorations" | "always_invoice";
+export type RepurchaseMigration = "grandfather" | "expire" | "migrate";
+
+export interface BillingPolicyFieldsView {
+  billingPeriodDefault: BillingPeriod;
+  billingPeriodsAllowed: BillingPeriod[];
+  dunningRetryDelayDays: number[];
+  gracePeriodDays: number;
+  downgradeTiming: DowngradeTiming;
+  prorationBehavior: ProrationBehavior;
+  repurchaseMigration: RepurchaseMigration;
+  stripePriceByBundle: Record<string, string>;
+  cfpayChannelFixedPriceUSD: number | null;
+  annualDiscountPct: number;
+}
+
+export interface BillingPolicyFieldsResponse {
+  fields: BillingPolicyFieldsView;
+  seedNote: string;
+}
+
+function isBillingPeriod(value: unknown): value is BillingPeriod {
+  return value === "monthly" || value === "annual";
+}
+
+/** Validate the billing-policy fields shape from a policy read (the server assert is authoritative; this only guards the render against a half-shaped body). */
+export function assertBillingPolicyFieldsView(value: unknown): BillingPolicyFieldsView {
+  if (!isRecord(value)) throw new BillingPolicyApiError(500);
+  if (
+    !isBillingPeriod(value.billingPeriodDefault) ||
+    !Array.isArray(value.billingPeriodsAllowed) ||
+    !value.billingPeriodsAllowed.every(isBillingPeriod) ||
+    !Array.isArray(value.dunningRetryDelayDays) ||
+    !value.dunningRetryDelayDays.every((d) => typeof d === "number") ||
+    typeof value.gracePeriodDays !== "number" ||
+    (value.downgradeTiming !== "period_end" && value.downgradeTiming !== "immediate") ||
+    (value.prorationBehavior !== "none" &&
+      value.prorationBehavior !== "create_prorations" &&
+      value.prorationBehavior !== "always_invoice") ||
+    (value.repurchaseMigration !== "grandfather" &&
+      value.repurchaseMigration !== "expire" &&
+      value.repurchaseMigration !== "migrate") ||
+    (value.cfpayChannelFixedPriceUSD !== null &&
+      typeof value.cfpayChannelFixedPriceUSD !== "number") ||
+    typeof value.annualDiscountPct !== "number"
+  ) {
+    throw new BillingPolicyApiError(500);
+  }
+  return {
+    billingPeriodDefault: value.billingPeriodDefault,
+    billingPeriodsAllowed: [...value.billingPeriodsAllowed],
+    dunningRetryDelayDays: [...value.dunningRetryDelayDays],
+    gracePeriodDays: value.gracePeriodDays,
+    downgradeTiming: value.downgradeTiming,
+    prorationBehavior: value.prorationBehavior,
+    repurchaseMigration: value.repurchaseMigration,
+    stripePriceByBundle: assertStripePriceByPlanView(value.stripePriceByBundle),
+    cfpayChannelFixedPriceUSD: value.cfpayChannelFixedPriceUSD,
+    annualDiscountPct: value.annualDiscountPct,
+  };
+}
+
+/**
+ * Issue #5230 — GET billing-policy for the remaining fields block
+ * (operator-only). Callers MUST NOT render the POST answer as the
+ * new state: re-read after every save and render only the fresh read.
+ */
+export async function getBillingPolicyFields(): Promise<BillingPolicyFieldsResponse> {
+  const data = await callJson(`${BASE}/billing-policy`);
+  if (!isRecord(data) || !isRecord(data.policy)) throw new BillingPolicyApiError(500);
+  return {
+    fields: assertBillingPolicyFieldsView(data.policy),
+    seedNote: typeof data.seedNote === "string" ? data.seedNote : "",
+  };
+}
+
+/**
+ * Issue #5230 — POST billing-policy with a partial update of the
+ * remaining fields (operator-only, audited server-side). Returns the
+ * fields from the POST answer, which callers MUST NOT render as the
+ * new state: the section re-reads the policy after every save.
+ */
+export async function setBillingPolicyFields(
+  partial: Partial<BillingPolicyFieldsView>,
+): Promise<BillingPolicyFieldsView> {
+  const data = await callJson(`${BASE}/billing-policy`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(partial),
+  });
+  if (!isRecord(data) || !isRecord(data.policy)) throw new BillingPolicyApiError(500);
+  return assertBillingPolicyFieldsView(data.policy);
+}

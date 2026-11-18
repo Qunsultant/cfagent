@@ -30,11 +30,11 @@ import { TextInput } from "./components/ui/TextInput";
 import { Table, type TableColumn } from "./components/ui/Table";
 import { AmbientOfferCompare, type PlanChoice } from "./PlanCompare";
 import {
-  TEASER_CANDIDATE_CAP,
   type CatalogDisplayEntry,
   type MarketingChannel,
   type MarketingDraft,
 } from "../data/productMarketing";
+import { LIFECYCLE_DEFAULTS } from "../config/lifecycleDefaults";
 import {
   buildProductSelling,
   cfpayChannelOptions,
@@ -1182,7 +1182,7 @@ export function ProductCatalogPanel({
         >
           <Card>
             <Notice tone="info" title="Teaser Rule B1 (Issue 1076)">
-              Teasers show at most {TEASER_CANDIDATE_CAP} candidates from the
+              Teasers show at most {LIFECYCLE_DEFAULTS.teaserCandidateCap} candidates from the
               same screening pipeline and gates. Only gate-passing candidates
               with stated falsification criteria are shown; every entry is
               labeled as a teaser, never as a recommendation. Links appear

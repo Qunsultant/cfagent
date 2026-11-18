@@ -45,8 +45,8 @@ export interface DigestHighlightRow {
   createdAtMs: number;
 }
 
-/** Cap on a single highlight's summary in the digest line (chars). */
-export const DIGEST_HIGHLIGHT_SUMMARY_MAX = 280;
+/** Cap on a single highlight's summary in the digest line (chars). Lives in `config/lifecycle-defaults.json` (#5230). */
+import { LIFECYCLE_DEFAULTS } from "../config/lifecycleDefaults";
 
 /**
  * Start of the previous UTC day for nowMs (00:00 UTC yesterday).
@@ -61,8 +61,8 @@ export function digestWindowStartMs(nowMs: number): number {
 export function formatDigestHighlight(row: DigestHighlightRow): string {
   if (!row.summary) return row.title;
   const summary =
-    row.summary.length > DIGEST_HIGHLIGHT_SUMMARY_MAX
-      ? `${row.summary.slice(0, DIGEST_HIGHLIGHT_SUMMARY_MAX)}…`
+    row.summary.length > LIFECYCLE_DEFAULTS.digestHighlightSummaryMax
+      ? `${row.summary.slice(0, LIFECYCLE_DEFAULTS.digestHighlightSummaryMax)}…`
       : row.summary;
   return `${row.title}: ${summary}`;
 }

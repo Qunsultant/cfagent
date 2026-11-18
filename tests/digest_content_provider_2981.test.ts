@@ -10,13 +10,13 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import {
-  DIGEST_HIGHLIGHT_SUMMARY_MAX,
   buildDigestHighlights,
   createDigestContentProvider,
   digestWindowStartMs,
   formatDigestHighlight,
   type DigestHighlightRow,
 } from "../src/services/digestContentProvider";
+import { LIFECYCLE_DEFAULTS } from "../src/config/lifecycleDefaults";
 
 const NOW = Date.parse("2026-11-04T09:30:00Z");
 const WINDOW_START = Date.parse("2026-11-03T00:00:00Z");
@@ -84,9 +84,9 @@ describe("buildDigestHighlights (#2981)", () => {
   });
 
   it("truncates long summaries at the stated cap with an ellipsis", () => {
-    const long = "x".repeat(DIGEST_HIGHLIGHT_SUMMARY_MAX + 50);
+    const long = "x".repeat(LIFECYCLE_DEFAULTS.digestHighlightSummaryMax + 50);
     const line = formatDigestHighlight(row({ summary: long }));
-    expect(line).toBe(`Screener run: ${"x".repeat(DIGEST_HIGHLIGHT_SUMMARY_MAX)}…`);
+    expect(line).toBe(`Screener run: ${"x".repeat(LIFECYCLE_DEFAULTS.digestHighlightSummaryMax)}…`);
   });
 
   it("returns [] for no windowed reports (skip-on-empty input)", () => {

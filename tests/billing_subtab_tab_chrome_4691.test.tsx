@@ -52,6 +52,7 @@ const EXPECTED_TABS = [
   "top-up-limits",
   "offer-rules",
   "plan-stripe-price",
+  "billing-policy",
   "support-snapshot",
 ] as const;
 
@@ -65,6 +66,7 @@ const EXPECTED_LABELS = [
   "Top-up limits",
   "Offer rules",
   "Plan Stripe Price mappings",
+  "Billing policy",
   "Support snapshot",
 ];
 
@@ -82,6 +84,7 @@ const TAB_MODE_MARKERS: Record<string, string> = {
   "top-up-limits": "The top-up limits could not be loaded.",
   "offer-rules": "Only a store operator can view or change upgrade-offer rules",
   "plan-stripe-price": "Only a store operator can view or change plan Stripe Price mappings",
+  "billing-policy": "Only a store operator can view or change billing policy.",
   "support-snapshot": "Account: owner",
 };
 
@@ -302,6 +305,7 @@ describe("Billing sub-tabs render as a tab, not a page (#4691)", () => {
     ["TopUpLimitsSection", "Top-up limits", "<p>Top-up limits</p>"],
     ["OfferRulesSection", "Upgrade-offer rules", "<p>Upgrade-offer rules</p>"],
     ["PlanStripePriceSection", "Plan Stripe Price mappings", "<p>Plan Stripe Price mappings</p>"],
+    ["BillingPolicySection", "Billing policy", "<p>Billing policy</p>"],
   ])(
     "pins the %s title lives in PageShell, not a hand-rolled heading",
     (file, title, oldHeading) => {

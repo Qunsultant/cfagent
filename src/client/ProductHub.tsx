@@ -47,6 +47,7 @@ import {
   SellingSection,
 } from "./ProductCatalogPanel";
 import { ProductsSection } from "./ProductsSection";
+import { PriceCatalogueSection } from "./PriceCatalogueSection";
 import { FreeRunAllowanceSection } from "./FreeRunAllowanceSection";
 import {
   composeMarketingDraft,
@@ -285,6 +286,9 @@ export function ProductHub() {
         >
           <ErrorBoundary label="Admin Products panel">
             <ProductsSection isActive={activeTab === "admin-products"} />
+          </ErrorBoundary>
+          <ErrorBoundary label="Per-run prices panel">
+            <PriceCatalogueSection />
           </ErrorBoundary>
         </TabPanel>
       )}

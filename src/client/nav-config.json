@@ -1161,6 +1161,13 @@
         "description": "Plan Stripe Price mappings"
       },
       {
+        "id": "billing-policy",
+        "label": "Billing policy",
+        "shortLabel": "Billing policy",
+        "icon": "Billing",
+        "description": "Billing policy values: grace, dunning, proration, periods, discount, migration, cfpay price"
+      },
+      {
         "id": "support-snapshot",
         "label": "Support snapshot",
         "shortLabel": "Support",
@@ -1507,6 +1514,10 @@
     "billing:plan-stripe-price": {
       "tab": "billing",
       "view": "plan-stripe-price"
+    },
+    "billing:billing-policy": {
+      "tab": "billing",
+      "view": "billing-policy"
     },
     "billing:support-snapshot": {
       "tab": "billing",
