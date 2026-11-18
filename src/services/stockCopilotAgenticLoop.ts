@@ -440,7 +440,18 @@ export async function runStockCopilotAgenticCycle(
 
   // 6. Record Activity with Mode & Critic Verdict
   const outcome = result.entriesPlaced > 0 || result.exitsPlaced > 0 ? "traded" : "no_trade";
-  const detail = outcome === "traded" ? null : criticVerdict.reason;
+  // Issue #5525: the learning policy travels in the activity detail — the
+  // field the panel already renders as the cycle's "why". A policy sentence
+  // is appended only when the policy changed the plan, so a quiet cycle says
+  // which lesson held it back instead of only naming the critic's hurdle.
+  const policyNote =
+    learningsPolicy.blockEntries || learningsPolicy.requireLimitOrders
+      ? learningsPolicy.reason
+      : null;
+  const detail =
+    outcome === "traded"
+      ? null
+      : [criticVerdict.reason, policyNote].filter(Boolean).join(" — ");
 
   if (deps.activity) {
     deps.activity.ensureSchema();
