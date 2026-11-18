@@ -21,7 +21,10 @@
  * run is addressable after dispatch (the #4274 lesson: the goal leg
  * never persisted its job). A failed run throws the sync path's
  * failure shape; a run that completes without a screen artifact
- * refuses to answer from nothing, as the sync path does.
+ * refuses to answer from nothing, as the sync path does. Issue
+ * #5269 reads the residency record back FIRST: a resumed, replayed,
+ * or retried leg whose journaled run already settled returns the
+ * journaled screen artifact without a second dispatch.
  *
  * The caller's engine stores do not thread here: the host run records
  * over the residency's durable stores, and per-stage control over
@@ -36,11 +39,15 @@ import type { JobRunTrigger } from "../data/jobRunRecordPorts";
 import type { Env } from "../types";
 import { discoveryBrokerStageInput } from "./discoveryService";
 import type { JobRunRecorder } from "./jobPipelineEngine";
+import { JobPipelineError } from "./jobPipelineConfig";
 import {
   readTenantBrokerSelection,
   type TenantBrokerSelectionRead,
 } from "./providerConnections";
-import { optionsStageStorageFromArtifacts } from "../workflows/optionsScreenEngine";
+import {
+  optionsScreenJobId,
+  optionsStageStorageFromArtifacts,
+} from "../workflows/optionsScreenEngine";
 import { optionsArtifactKey } from "../workflows/optionsScreenPorts";
 import type {
   BrokerStageInput,
@@ -49,8 +56,10 @@ import type {
 import {
   awaitOptionsWorkflowRun,
   optionsWorkflowRunDepsFromEnv,
+  readOptionsWorkflowRun,
   startGoalOptionsLegWorkflow,
   type AwaitOptionsWorkflowRunOpts,
+  type OptionsWorkflowRunView,
   type StartOptionsScreenWorkflowOpts,
 } from "../workflows/optionsWorkflowHost";
 
@@ -147,6 +156,10 @@ export async function resolveGoalLegHostDispatch(
  * stores, the await options, and the tenant selection reader. Tests
  * inject fakes; production passes nothing and the dispatch derives
  * from env.
+ *
+ * Issue #5269 — `readRun` is the reuse check's read: the leg job's
+ * residency record, read back before dispatch. Defaults to
+ * readOptionsWorkflowRun over the residency stores.
  */
 export interface GoalLegHostSeams {
   startWorkflow?: StartOptionsScreenWorkflowOpts["startWorkflow"];
@@ -154,6 +167,7 @@ export interface GoalLegHostSeams {
   runRecorder?: JobRunRecorder;
   awaitOptions?: AwaitOptionsWorkflowRunOpts;
   readSelection?: (env: Env) => Promise<TenantBrokerSelectionRead>;
+  readRun?: (jobId: string) => Promise<OptionsWorkflowRunView>;
 }
 
 /**
@@ -171,6 +185,43 @@ export interface GoalLegHostInput {
 }
 
 /**
+ * Issue #5269 — read the leg's journaled result back, when one
+ * exists. The leg job's D1 residency record IS the leg's journal:
+ * a run that already settled completed with its screen artifact
+ * present yields the artifact's result, and the caller returns it
+ * without dispatching a second workflow instance. Anything else —
+ * no record, in flight, failed, cancelled, missing artifact —
+ * yields undefined and the caller dispatches as today (attach to
+ * an in-flight run and duplicate-instance semantics are #5270's).
+ * Only job_not_found is forgiven (the fresh-run case); any other
+ * read failure propagates fail-closed, never silently dispatching
+ * over an unreadable record.
+ */
+async function readReusedGoalLegResult(args: {
+  deps: { stores: JobPipelineStores; runRecorder: JobRunRecorder };
+  runId: string;
+  readRun: (jobId: string) => Promise<OptionsWorkflowRunView>;
+}): Promise<unknown | undefined> {
+  let view: OptionsWorkflowRunView;
+  try {
+    view = await args.readRun(optionsScreenJobId(args.runId));
+  } catch (err) {
+    if (err instanceof JobPipelineError && err.code === "job_not_found") return undefined;
+    throw err;
+  }
+  if (view.state !== "completed" || !view.engineRunId) return undefined;
+  const stageStorage = optionsStageStorageFromArtifacts(
+    args.deps.stores.artifacts,
+    view.engineRunId,
+  );
+  const screened = await stageStorage.get<{ result: unknown }>(
+    optionsArtifactKey(args.runId, "screen"),
+  );
+  if (!screened || screened.result === undefined) return undefined;
+  return screened.result;
+}
+
+/**
  * Issue #4858 — one goal options leg through the goal workflow host:
  * define the options job with the leg's broker pair stamped on the
  * stored request (the seam stamps the descriptor, so the resolving
@@ -183,6 +234,13 @@ export interface GoalLegHostInput {
  * chains is the same shape of work. A failed run throws the sync
  * path's failure shape; a run that completes without a screen
  * artifact refuses to answer from nothing, as the sync path does.
+ *
+ * Issue #5269 — read-back-first: a resumed, replayed, or retried leg
+ * re-enters with the same run id, and when the journaled run already
+ * settled with its screen artifact, the dispatch returns the
+ * journaled result without creating a second workflow instance. The
+ * gate evaluated exactly once in the caller; this check reads the
+ * record the gate's dispatch wrote, it does not re-decide.
  */
 export async function runGoalLegViaHost(args: {
   env: Env;
@@ -199,6 +257,10 @@ export async function runGoalLegViaHost(args: {
     args.seams?.stores && args.seams?.runRecorder
       ? { stores: args.seams.stores, runRecorder: args.seams.runRecorder }
       : optionsWorkflowRunDepsFromEnv(args.env);
+  const readRun =
+    args.seams?.readRun ?? ((id: string) => readOptionsWorkflowRun(deps, id));
+  const reused = await readReusedGoalLegResult({ deps, runId: args.runId, readRun });
+  if (reused !== undefined) return reused;
   const started = await startGoalOptionsLegWorkflow(
     args.env,
     {

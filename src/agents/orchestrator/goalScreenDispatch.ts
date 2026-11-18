@@ -78,6 +78,16 @@ export async function persistWorkflowGoalScreenReport(
   envelope: WorkflowGoalScreenEnvelope,
   userLogin: string,
 ): Promise<string> {
+  // Issue #5269 — a result-less envelope refuses by name: the
+  // canonical row embeds the result, so storing without one is
+  // never acceptable. The store stage records the refusal as
+  // stored:false + storeError, instead of a TypeError from
+  // dereferencing the absent result.
+  if (!envelope.result) {
+    throw new Error(
+      "goal_screen_report_requires_result: a goal screen report cannot be stored without its result — the run produced no result to record",
+    );
+  }
   const result = envelope.result;
   // Issue #1571: the recorded result carries the fallback
   // marker even if the agent did not stamp it — the canonical

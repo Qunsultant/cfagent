@@ -778,10 +778,15 @@ const TERMINAL_TASK_STATUSES = new Set(["completed", "failed", "escalated", "can
 /**
  * Run a goal-driven screen under the screener task ledger.
  *
- * Idempotency: any existing record carrying the run key — active or
- * terminal — is authoritative; a duplicate delivery returns it with
- * `executed: false` and the providers are never re-invoked. A fresh
- * run is claimed, started, and heartbeated before execution; total
+ * Idempotency: a TERMINAL record carrying the run key is
+ * authoritative; a duplicate delivery returns it with
+ * `executed: false` and the providers are never re-invoked. An
+ * ACTIVE record is an interrupted run of the same run id (pause
+ * + resume, workflow eviction replay, step retry): the wrapper
+ * adopts it through the ledger's legal transitions and re-enters
+ * the composition, so the resumed run yields a result instead of
+ * short-circuiting result-less (issue #5269). A fresh run is
+ * claimed, started, and heartbeated before execution; total
  * failure is failed-then-escalated (the ledger's human-visible
  * terminal state), partial completion completes with the ledger's
  * partial flag + deterministic evaluation.
@@ -813,20 +818,37 @@ export async function runGoalDrivenScreenWithLedger(input: {
   const existing = (await input.ledger.list(200)).find(
     (t) => t.idempotencyKey === input.idempotencyKey
   );
-  if (existing) return { task: existing, executed: false };
+  // Issue #5269 — only a TERMINAL record is a duplicate delivery:
+  // the run settled, and the record is the run. An ACTIVE record
+  // is an interrupted run of the same run id: adopt it through
+  // the ledger's legal transitions (claim when queued, start when
+  // claimed, heartbeat) and re-enter the composition below. The
+  // create-collision guard stays: a genuinely concurrent attempt
+  // still returns executed:false without executing.
+  if (existing && TERMINAL_TASK_STATUSES.has(existing.status)) {
+    return { task: existing, executed: false };
+  }
 
-  const { task, created } = await input.ledger.create({
-    trigger: input.trigger,
-    universe: `goal:${input.scenario.goalKind}`,
-    sector: input.scenario.direction,
-    userLogin: input.userLogin,
-    idempotencyKey: input.idempotencyKey,
-  });
-  if (!created) return { task, executed: false };
-
-  await input.ledger.claim(task.id);
-  await input.ledger.start(task.id);
-  await input.ledger.heartbeat(task.id);
+  let task: ScreenerTask;
+  if (existing) {
+    task = existing;
+    if (task.status === "queued") task = await input.ledger.claim(task.id);
+    if (task.status === "claimed") task = await input.ledger.start(task.id);
+    await input.ledger.heartbeat(task.id);
+  } else {
+    const created = await input.ledger.create({
+      trigger: input.trigger,
+      universe: `goal:${input.scenario.goalKind}`,
+      sector: input.scenario.direction,
+      userLogin: input.userLogin,
+      idempotencyKey: input.idempotencyKey,
+    });
+    if (!created.created) return { task: created.task, executed: false };
+    task = created.task;
+    await input.ledger.claim(task.id);
+    await input.ledger.start(task.id);
+    await input.ledger.heartbeat(task.id);
+  }
 
   let result: GoalDrivenScreenResult;
   try {
