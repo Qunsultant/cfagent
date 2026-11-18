@@ -74,6 +74,8 @@ describe("Workflows, Billings/Payments Nav & Products UI (issue #2843)", () => {
     expect(SUB_MENU_CONFIGS.orders.map((s) => s.id)).toEqual(["checkout", "ledger"]);
     // Issue #4638: the billing sub-menu is one entry per Billing
     // section tab plus the Revenue Analytics sibling route.
+    // Issue #5230 (slice 2.32): the eleventh tab is billing-policy,
+    // between plan-stripe-price and support-snapshot.
     expect(SUB_MENU_CONFIGS.billing.map((s) => s.id)).toEqual([
       "overview",
       "refund-policy",
@@ -84,6 +86,7 @@ describe("Workflows, Billings/Payments Nav & Products UI (issue #2843)", () => {
       "top-up-limits",
       "offer-rules",
       "plan-stripe-price",
+      "billing-policy",
       "support-snapshot",
       "revenue",
     ]);
