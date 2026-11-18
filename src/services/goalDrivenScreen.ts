@@ -77,6 +77,11 @@ import {
 } from "../workflows/optionsScreenPorts";
 import { runOptionsScreenViaEngine } from "../workflows/optionsScreenEngine";
 import {
+  resolveGoalLegHostDispatch,
+  runGoalLegViaHost,
+  type GoalLegHostInput,
+} from "./goalLegHostDispatch";
+import {
   aggregateShardResults,
   runStockScreenViaEngine,
   type RunStockScreenViaEngine,
@@ -139,10 +144,10 @@ function memoryStageClaimStore(): StageClaimStore {
  * Issue #4290 — the durable path for this leg is the goal seam
  * (startGoalOptionsLegWorkflow in optionsWorkflowHost.ts): the job
  * definition persists in the workflow residency and the workflow
- * step is the engine's journal. This sync dispatch stays until the
- * cutover gaps land — the residency binds one chain source while
- * this leg's source is broker-aware (#3960), and the workflow
- * binding's reachability from this residency is unverified.
+ * step is the engine's journal. Issue #4858 routes the leg through
+ * the seam when the host input travels with the run and the gate
+ * holds; the sync dispatch below stays as the gated fallback until
+ * live proof proves the cutover.
  * Universe deps travel as a stage input since #4473, so the seam
  * accepts a discovery-mode leg carrying the universe input and
  * refuses one carrying neither explicit symbols nor the input.
@@ -154,6 +159,10 @@ async function runGoalOptionsLegViaWorkflow(args: {
   userLogin?: string;
   trigger: JobRunTrigger;
   idempotencyKey?: string;
+  /** Issue #4858: the host-dispatch input — env, requested env,
+   *  and the universe descriptor when the caller built live
+   *  universe deps. Absent, the leg stays on sync. */
+  host?: GoalLegHostInput;
 }): Promise<ScreeningResult> {
   const { workflow } = args;
   if (!args.userLogin) {
@@ -162,49 +171,88 @@ async function runGoalOptionsLegViaWorkflow(args: {
     );
   }
   const legRunId = `goal-screen:${args.idempotencyKey ?? crypto.randomUUID()}:options`;
-  const ports = createOptionsScreenPorts({
-    screener: workflow.screener,
-    storage: workflow.storage,
-    canonical: workflow.canonical,
-    shapeReport: workflow.shapeReport,
-    deliver: workflow.deliver,
-  });
-  const outcome = await runOptionsScreenViaEngine(
-    {
-      runId: legRunId,
-      userLogin: args.userLogin,
-      trigger: args.trigger,
-      request: {
-        assetClass: "options",
-        runIdentity: { runId: legRunId },
-        trigger: args.trigger,
-        provenanceTrigger: "goal",
-        classInput: {
-          goalPlan: {
-            optionsFilter: args.plan.optionsFilter,
-            structures: args.plan.structures,
-          },
-        },
+  // Issue #4858 — the goal envelope, extracted verbatim so the host
+  // dispatch and the sync dispatch below serve the same request.
+  const request = {
+    assetClass: "options",
+    runIdentity: { runId: legRunId },
+    trigger: args.trigger,
+    provenanceTrigger: "goal",
+    classInput: {
+      goalPlan: {
+        optionsFilter: args.plan.optionsFilter,
+        structures: args.plan.structures,
       },
     },
-    {
-      stages: ports,
-      claims: workflow.claims ?? memoryStageClaimStore(),
-      queue: workflow.queue ?? null,
-    },
-  );
-  if (outcome.outcome === "failed") {
-    throw new Error(
-      `options leg failed at ${outcome.failedStage}: ${outcome.reason ?? "unknown reason"}`,
+  };
+  let screenedResult: unknown;
+  let hostServed = false;
+  if (args.host) {
+    const goalRunId = args.idempotencyKey ? `goal-screen:${args.idempotencyKey}` : null;
+    const symbols = args.plan.optionsFilter.underlyingSymbols;
+    const hasSymbols =
+      Array.isArray(symbols) &&
+      symbols.some((symbol) => typeof symbol === "string" && symbol.trim().length > 0);
+    const { decision, broker } = await resolveGoalLegHostDispatch(
+      args.host.env,
+      args.host.requestedEnv,
+      {
+        goalRunId,
+        hasSymbols,
+        ...(args.host.universe ? { universe: args.host.universe } : {}),
+      },
+      args.host.seams?.readSelection,
     );
+    if (decision.route === "host" && broker && goalRunId) {
+      screenedResult = await runGoalLegViaHost({
+        env: args.host.env,
+        request,
+        runId: legRunId,
+        goalRunId,
+        userLogin: args.userLogin,
+        trigger: args.trigger,
+        broker,
+        ...(args.host.universe ? { universe: args.host.universe } : {}),
+        ...(args.host.seams ? { seams: args.host.seams } : {}),
+      });
+      hostServed = true;
+    }
   }
-  const screened = await workflow.storage.get<{ result: unknown }>(
-    optionsArtifactKey(legRunId, "screen"),
-  );
-  if (!screened || screened.result === undefined) {
-    throw new Error(
-      `options leg completed but its screen artifact is missing for run ${legRunId}`,
+  if (!hostServed) {
+    const ports = createOptionsScreenPorts({
+      screener: workflow.screener,
+      storage: workflow.storage,
+      canonical: workflow.canonical,
+      shapeReport: workflow.shapeReport,
+      deliver: workflow.deliver,
+    });
+    const outcome = await runOptionsScreenViaEngine(
+      {
+        runId: legRunId,
+        userLogin: args.userLogin,
+        trigger: args.trigger,
+        request,
+      },
+      {
+        stages: ports,
+        claims: workflow.claims ?? memoryStageClaimStore(),
+        queue: workflow.queue ?? null,
+      },
     );
+    if (outcome.outcome === "failed") {
+      throw new Error(
+        `options leg failed at ${outcome.failedStage}: ${outcome.reason ?? "unknown reason"}`,
+      );
+    }
+    const screened = await workflow.storage.get<{ result: unknown }>(
+      optionsArtifactKey(legRunId, "screen"),
+    );
+    if (!screened || screened.result === undefined) {
+      throw new Error(
+        `options leg completed but its screen artifact is missing for run ${legRunId}`,
+      );
+    }
+    screenedResult = screened.result;
   }
   let providerId = "options-screen-workflow";
   try {
@@ -212,7 +260,7 @@ async function runGoalOptionsLegViaWorkflow(args: {
   } catch {
     // No options provider registered - the workflow is the provider.
   }
-  return { assetClass: "options", providerId, result: screened.result as never };
+  return { assetClass: "options", providerId, result: screenedResult as never };
 }
 
 /**
@@ -546,6 +594,11 @@ export async function runGoalDrivenScreen(input: {
   trigger?: JobRunTrigger;
   idempotencyKey?: string;
   optionsWorkflow?: OptionsWorkflowDeps;
+  /** Issue #4858: the goal options leg's host-dispatch input.
+   *  Present -> the leg dispatches through the goal workflow host
+   *  when the gate holds, else the sync dispatch; absent -> the
+   *  sync dispatch, unchanged. */
+  goalLegHost?: GoalLegHostInput;
   /** Issue #4279 ([One engine] #3550 S4): goal dispatch as a
    *  CALLER on the one stock engine (the S3 seam). Present -> the
    *  stock leg runs the engine; absent -> the registry path,
@@ -604,6 +657,7 @@ export async function runGoalDrivenScreen(input: {
                 userLogin: input.userLogin,
                 trigger: input.trigger ?? "manual",
                 idempotencyKey: input.idempotencyKey,
+                ...(input.goalLegHost ? { host: input.goalLegHost } : {}),
               })
             : await input.registry.screen({ assetClass: "options", filter: plan.optionsFilter });
       // Issue #1963: a leg is failed by its RESULT STATUS, not only
@@ -749,6 +803,8 @@ export async function runGoalDrivenScreenWithLedger(input: {
   now?: Date;
   /** Issue #3186 (step 3c): threaded to runGoalDrivenScreen - the options leg runs the pipeline when present. */
   optionsWorkflow?: OptionsWorkflowDeps;
+  /** Issue #4858: threaded to runGoalDrivenScreen - the options leg dispatches through the host when the gate holds. */
+  goalLegHost?: GoalLegHostInput;
   /** Issue #4279 ([One engine] #3550 S4): threaded to runGoalDrivenScreen - the stock leg runs the engine when present. */
   stockWorkflow?: StockWorkflowDeps;
   environment?: "TEST" | "PROD";
@@ -787,6 +843,7 @@ export async function runGoalDrivenScreenWithLedger(input: {
       trigger: input.trigger,
       idempotencyKey: input.idempotencyKey,
       ...(input.optionsWorkflow ? { optionsWorkflow: input.optionsWorkflow } : {}),
+      ...(input.goalLegHost ? { goalLegHost: input.goalLegHost } : {}),
       ...(input.stockWorkflow ? { stockWorkflow: input.stockWorkflow } : {}),
       ...(input.environment ? { environment: input.environment } : {}),
       ...(input.provider ? { provider: input.provider } : {}),
