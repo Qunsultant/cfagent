@@ -578,6 +578,15 @@ export async function handleScreenerResearchRoutes(
           userLogin,
           sql: ctx.getOrm?.() as unknown as SqlStorage | undefined,
           env: ctx.env as Record<string, string | undefined>,
+          researchDeps: {
+            runOodaAnalysis: (runCtx) =>
+              triggerManualResearch(ctx.runResearchAndPublish, runCtx.userLogin),
+            runEvaluateStage: async (evalCtx) => {
+              const agent = ctx.getResearchAgent?.(evalCtx.userLogin);
+              if (!agent?.evaluateRun) return null;
+              return (await agent.evaluateRun(evalCtx.runId, evalCtx.userLogin)) as any;
+            },
+          },
         });
         return Response.json(result);
       } catch (err: any) {
