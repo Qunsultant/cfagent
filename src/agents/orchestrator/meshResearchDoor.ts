@@ -10,7 +10,11 @@
 import {
   isWithinResearchGuardWindow,
   resolveResearchJobConfig,
+  type ResearchStorageMode,
 } from "../../config/researchJobConfig";
+import type { SqlStorage } from "../../orm";
+import type { JobPipelineDeps, JobRunRecorder } from "../../services/jobPipelineEngine";
+import type { ResearchStepDeps } from "../../services/researchPipelineJobs";
 import { codedMessage } from "../../outcomes/outcomeAspects";
 import { RESEARCH_PIPELINE_STAGES, type ResearchPipelineStage } from "../../workflows/stageRuntimeIds";
 import {
@@ -54,13 +58,20 @@ export async function runDeterministicResearchViaDoor(input: {
   hitlHold?: boolean;
   approved?: boolean;
   now?: Date;
+  sql?: SqlStorage;
+  d1?: D1Database;
+  stores?: JobPipelineDeps["stores"];
+  runRecorder?: JobRunRecorder;
+  env?: Record<string, string | undefined>;
+  storageMode?: ResearchStorageMode;
+  researchDeps?: ResearchStepDeps;
 }) {
   const login = input.actingLogin?.trim() || "";
   if (!login || login === "default") {
     throw new Error(codedMessage("FAILURE_RESEARCH_OWNER_MISSING"));
   }
 
-  const config = resolveResearchJobConfig();
+  const config = resolveResearchJobConfig(input.env);
   if (input.trigger === "scheduled") {
     const now = input.now ?? new Date();
     if (!isWithinResearchGuardWindow(now, config)) {
@@ -83,6 +94,13 @@ export async function runDeterministicResearchViaDoor(input: {
     runId: input.runId,
     userLogin: login,
     trigger: input.trigger,
+    ...(input.sql ? { sql: input.sql } : {}),
+    ...(input.d1 ? { d1: input.d1 } : {}),
+    ...(input.stores ? { stores: input.stores } : {}),
+    ...(input.runRecorder ? { runRecorder: input.runRecorder } : {}),
+    ...(input.env ? { env: input.env } : {}),
+    ...(input.storageMode ? { storageMode: input.storageMode } : {}),
+    ...(input.researchDeps ? { researchDeps: input.researchDeps } : {}),
     execute: async () => ({
       mode: "deterministic",
       deliverGate,
@@ -96,6 +114,9 @@ export async function runDeterministicResearchViaDoor(input: {
     runId: dispatched.runId,
     deliverGate,
     stages: dispatched.stages,
+    storageMode: dispatched.storageMode,
+    ephemeralFallback: dispatched.ephemeralFallback,
+    ...(dispatched.ephemeralReason ? { ephemeralReason: dispatched.ephemeralReason } : {}),
   };
 }
 

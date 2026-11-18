@@ -20,6 +20,7 @@ import { InMemoryJobRunRecordStore } from "../../data/inMemoryJobRunRecordAdapte
 import { JobPipelineControl, jobRunRecorderFromStore } from "../../services/jobPipelineEngine";
 import { createBuiltinStepRegistry } from "../../services/jobPipelineSteps";
 import { codedMessage } from "../../outcomes/outcomeAspects";
+import type { SqlStorage } from "../../orm";
 
 export interface RunResearchJobInput {
   trigger?: "manual" | "scheduled";
@@ -63,18 +64,27 @@ export class RunResearchJobCommand implements IMcpToolCommand<RunResearchJobInpu
       throw new Error(codedMessage("FAILURE_RESEARCH_OWNER_MISSING"));
     }
 
+    const sql = context.orm as unknown as SqlStorage | undefined;
+    const envRecord = context.env as unknown as Record<string, string | undefined> | undefined;
+    const d1 = (context.env as { AGENT_DB?: D1Database } | undefined)?.AGENT_DB;
+
     if (input.runId && input.stageId) {
       const stageResult = await executeResearchStageControl({
         runId: input.runId,
         stageId: input.stageId,
         op: input.op ?? "status",
         userLogin: actingLogin,
+        ...(sql ? { sql } : {}),
+        ...(d1 ? { d1 } : {}),
+        ...(envRecord ? { env: envRecord } : {}),
       });
       context.audit("mcp.tool_called", "orchestrator", {
         tool: this.name,
         engineJobId: stageResult.engineJobId,
         stageId: stageResult.stageId,
         op: stageResult.op,
+        storageMode: stageResult.storageMode,
+        ephemeralFallback: stageResult.ephemeralFallback,
       });
       return stageResult;
     }
@@ -84,6 +94,9 @@ export class RunResearchJobCommand implements IMcpToolCommand<RunResearchJobInpu
       runId: input.runId,
       userLogin: actingLogin,
       trigger,
+      ...(sql ? { sql } : {}),
+      ...(d1 ? { d1 } : {}),
+      ...(envRecord ? { env: envRecord } : {}),
       execute: async () => ({
         dispatched: true,
         trigger,

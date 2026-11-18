@@ -8,10 +8,18 @@
  * and exposes `(runId, stageId)` stage addressing via `controlResearchStage`.
  */
 import type { SqlStorage } from "../orm";
-import { createJobPipelineStoresFromSql } from "../data/createJobPipelinePorts";
+import {
+  createJobPipelineStoresFromD1,
+  createJobPipelineStoresFromSql,
+} from "../data/createJobPipelinePorts";
 import { createInMemoryJobPipelineStores } from "../data/inMemoryJobPipelineAdapter";
 import { InMemoryJobRunRecordStore } from "../data/inMemoryJobRunRecordAdapter";
 import { SqlJobRunRecordStore } from "../data/doSqliteJobRunRecordAdapter";
+import {
+  createD1JobRunRecordDb,
+  D1JobRunRecordStore,
+} from "../data/d1JobRunRecordAdapter";
+import { createStructuredLogger } from "../observability/structuredLogger";
 import {
   JobPipelineControl,
   jobRunRecorderFromStore,
@@ -62,6 +70,7 @@ export interface DispatchResearchEngineInput {
   userLogin: string;
   trigger: "manual" | "scheduled";
   sql?: SqlStorage;
+  d1?: D1Database;
   env?: Record<string, string | undefined>;
   storageMode?: ResearchStorageMode;
   stores?: JobPipelineDeps["stores"];
@@ -80,38 +89,75 @@ export interface DispatchResearchEngineResult {
   stageVisibility: ResearchStageVisibility[];
   cutoverMode: "engine" | "direct_rollback";
   storageMode: ResearchStorageMode;
+  ephemeralFallback: boolean;
+  ephemeralReason?: "no_durable_store_reachable";
   outcome: Record<string, unknown>;
 }
 
-function resolveResearchEngineAdapters(input: {
+const structuredLog = createStructuredLogger();
+
+export function resolveResearchEngineAdapters(input: {
   sql?: SqlStorage;
+  d1?: D1Database;
   env?: Record<string, string | undefined>;
   storageMode?: ResearchStorageMode;
   stores?: JobPipelineDeps["stores"];
   runRecorder?: JobRunRecorder;
 }): {
   storageMode: ResearchStorageMode;
+  ephemeralFallback: boolean;
+  ephemeralReason?: "no_durable_store_reachable";
   stores: JobPipelineDeps["stores"];
   runRecorder: JobRunRecorder;
 } {
   const configuredMode =
     input.storageMode ?? resolveResearchJobConfig(input.env).storageMode;
-  const useDurable = configuredMode === "durable" && Boolean(input.sql);
-  const effectiveMode: ResearchStorageMode = useDurable ? "durable" : "in-memory";
+  const hasDurableBacking = Boolean(input.stores || input.sql || input.d1);
+  if (configuredMode === "in-memory") {
+    return {
+      storageMode: "in-memory",
+      ephemeralFallback: false,
+      stores: input.stores ?? createInMemoryJobPipelineStores(),
+      runRecorder:
+        input.runRecorder ?? jobRunRecorderFromStore(new InMemoryJobRunRecordStore()),
+    };
+  }
+  if (!hasDurableBacking) {
+    structuredLog.warn("researchScreenEngine.ephemeral_fallback_no_durable_store", {
+      configuredMode,
+      reason: "no_durable_store_reachable",
+    });
+    return {
+      storageMode: "in-memory",
+      ephemeralFallback: true,
+      ephemeralReason: "no_durable_store_reachable",
+      stores: createInMemoryJobPipelineStores(),
+      runRecorder:
+        input.runRecorder ?? jobRunRecorderFromStore(new InMemoryJobRunRecordStore()),
+    };
+  }
+  const stores =
+    input.stores ??
+    (input.sql
+      ? createJobPipelineStoresFromSql(input.sql)
+      : createJobPipelineStoresFromD1(input.d1!));
+  const runRecorder =
+    input.runRecorder ??
+    (input.sql
+      ? jobRunRecorderFromStore(new SqlJobRunRecordStore(input.sql))
+      : (() => {
+          const d1Runs = new D1JobRunRecordStore(createD1JobRunRecordDb(input.d1!));
+          return {
+            recordRun: (record) => d1Runs.record(record),
+            listRuns: (jobId, limit) => d1Runs.listByJob(jobId, limit),
+            latestRun: (jobId) => d1Runs.latestByJob(jobId),
+          };
+        })());
   return {
-    storageMode: effectiveMode,
-    stores:
-      input.stores ??
-      (useDurable && input.sql
-        ? createJobPipelineStoresFromSql(input.sql)
-        : createInMemoryJobPipelineStores()),
-    runRecorder:
-      input.runRecorder ??
-      jobRunRecorderFromStore(
-        useDurable && input.sql
-          ? new SqlJobRunRecordStore(input.sql)
-          : new InMemoryJobRunRecordStore(),
-      ),
+    storageMode: "durable",
+    ephemeralFallback: false,
+    stores,
+    runRecorder,
   };
 }
 
@@ -155,6 +201,7 @@ export async function dispatchResearchEngineRun(
       stageVisibility,
       cutoverMode: "direct_rollback",
       storageMode: input.storageMode ?? config.storageMode,
+      ephemeralFallback: false,
       outcome,
     };
   }
@@ -172,7 +219,8 @@ export async function dispatchResearchEngineRun(
     },
   };
 
-  const { storageMode, stores, runRecorder } = resolveResearchEngineAdapters(input);
+  const { storageMode, ephemeralFallback, ephemeralReason, stores, runRecorder } =
+    resolveResearchEngineAdapters(input);
   const control = new JobPipelineControl({
     stores,
     runRecorder,
@@ -222,6 +270,8 @@ export async function dispatchResearchEngineRun(
     stageVisibility,
     cutoverMode: "engine",
     storageMode,
+    ephemeralFallback,
+    ...(ephemeralReason ? { ephemeralReason } : {}),
     outcome: capturedOutcome ?? { engineRunId: dispatch.runId, state: dispatch.state },
   };
 }
@@ -265,6 +315,7 @@ export function controlResearchStage(input: ControlResearchStageInput): {
 
 export interface ExecuteResearchStageControlInput extends ControlResearchStageInput {
   sql?: SqlStorage;
+  d1?: D1Database;
   env?: Record<string, string | undefined>;
   storageMode?: ResearchStorageMode;
   stores?: JobPipelineDeps["stores"];
@@ -280,6 +331,8 @@ export interface ExecuteResearchStageControlResult {
   op: ResearchStageOp;
   userLogin: string;
   storageMode: ResearchStorageMode;
+  ephemeralFallback: boolean;
+  ephemeralReason?: "no_durable_store_reachable";
   jobState: string;
   engineRunId: string | null;
   stage: JobStageView | null;
@@ -293,7 +346,8 @@ export async function executeResearchStageControl(
   input: ExecuteResearchStageControlInput,
 ): Promise<ExecuteResearchStageControlResult> {
   const validated = controlResearchStage(input);
-  const { storageMode, stores, runRecorder } = resolveResearchEngineAdapters(input);
+  const { storageMode, ephemeralFallback, ephemeralReason, stores, runRecorder } =
+    resolveResearchEngineAdapters(input);
   const deps: ResearchStepDeps = input.researchDeps ?? {
     runOodaAnalysis: async (ctx) => ({
       ok: true,
@@ -316,6 +370,8 @@ export async function executeResearchStageControl(
       return {
         ...validated,
         storageMode,
+        ephemeralFallback,
+        ...(ephemeralReason ? { ephemeralReason } : {}),
         jobState: "idle",
         engineRunId: null,
         stage: null,
@@ -370,6 +426,8 @@ export async function executeResearchStageControl(
   return {
     ...validated,
     storageMode,
+    ephemeralFallback,
+    ...(ephemeralReason ? { ephemeralReason } : {}),
     jobState: after.instance?.state ?? "idle",
     engineRunId: after.instance?.currentRunId ?? after.latestRun?.operation ?? null,
     stage: stageAfter,
