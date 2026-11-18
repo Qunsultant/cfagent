@@ -210,7 +210,7 @@ describe("4d family census: surface-1 execution sites", () => {
 
   it("the data layer carries exactly the moved statements; ports and in-memory adapters carry none", () => {
     const layer = new Map<string, number>([
-      ["src/data/doSqliteAutopilotStateAdapter.ts", 3],
+      ["src/data/doSqliteAutopilotStateAdapter.ts", 1],
       ["src/data/doSqlitePolicyVerdictAdapter.ts", 4],
       ["src/data/doSqliteReportConfirmationAdapter.ts", 9],
       ["src/data/doSqliteScreenerPresetAdapter.ts", 6],
@@ -250,8 +250,8 @@ describe("4d family census: writer sets", () => {
     // doIndexSql. The writer set is the adapter + the
     // statement's home.
     expect(writerSet("mas_autopilot")).toEqual([
-      "src/data/doSqliteAutopilotStateAdapter.ts",
       "src/data/schemaComponent/doCatalogue.ts",
+      "src/data/schemaComponent/doDmlEntries.ts",
     ]);
     expect(writerSet("mas_policy_verdicts")).toEqual([
       "src/data/doSqlitePolicyVerdictAdapter.ts",
