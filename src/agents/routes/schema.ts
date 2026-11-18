@@ -82,7 +82,8 @@ export async function handleSchemaRoutes(
         orm: ctx.getOrm(),
         sessionId,
         audit: ctx.audit ?? (() => {}),
-      });
+        allowUnlistedTables: true,
+      } as never);
       return Response.json(data);
     } catch (err) {
       return Response.json({ error: err instanceof Error ? err.message : "Failed to query table data" }, { status: 500 });

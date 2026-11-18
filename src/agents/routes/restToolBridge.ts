@@ -34,6 +34,8 @@ export interface RestToolParts {
   scopedMemoryModes?: McpToolContext["scopedMemoryModes"];
   /** #1728: agentic-payments carriers, forwarded likewise. */
   scopedPaymentsModes?: McpToolContext["scopedPaymentsModes"];
+  /** #5041: internal schema admin routes may query unlisted tables. */
+  allowUnlistedTables?: boolean;
 }
 
 /**
@@ -52,7 +54,8 @@ export function restToolContext(parts: RestToolParts): McpToolContext {
     scopedKnowledgeModes: parts.scopedKnowledgeModes,
     scopedMemoryModes: parts.scopedMemoryModes,
     scopedPaymentsModes: parts.scopedPaymentsModes,
-  };
+    ...(parts.allowUnlistedTables ? { allowUnlistedTables: true } : {}),
+  } as McpToolContext;
 }
 
 /** Execute one registered command with a route-built context. */
