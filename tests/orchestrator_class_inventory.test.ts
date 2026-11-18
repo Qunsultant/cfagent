@@ -342,8 +342,14 @@ const ORCH = "agents/orchestrator.ts";
  *  schedule-watchdog async context (+2 lines) — measured
  *  3,311 lines / 151,083 B on the merged tree, so budget
  *  lines rise to 3325, keeping similar headroom. Bytes
- *  unchanged — measured well under the 159,200 budget. */
-const BUDGET_LINES = 3325;
+ *  unchanged — measured well under the 159,200 budget.
+ *  #4438 adds the delivery-claims door methods (import
+ *  block + tryClaimDelivery/wasClaimedDelivery/
+ *  releaseDeliveryClaim + deliveryClaimsDoor(), +43 lines)
+ *  — measured 3,364 lines / 153,639 B on the merged tree,
+ *  so budget lines rise to 3380, keeping similar headroom.
+ *  Bytes unchanged — measured well under the 159,200 budget. */
+const BUDGET_LINES = 3380;
 const BUDGET_BYTES = 159_200;
 
 const count = (haystack: string, needle: string) =>
