@@ -26,11 +26,8 @@ import {
 } from "./chatPrompt";
 import { resolveCopilotTradingSelection } from "./copilotTradingMode";
 import { LLMJudge } from "./judge";
-import {
-  recordJudgeScoreLearning,
-  resolveJudgeScoreFeedbackPolicy,
-} from "../services/judgeScoreFeedback";
-import { VectorMemory } from "../memory/vector-memory";
+import { recordTurnEvaluation } from "../services/judgeScoreFeedback";
+import { rememberTurnOutcome } from "../services/vectorTurnMemory";
 import { planNLQ, executeNLQQuery, executeNLQQueryAsync, type NLQSchedulingPort, type NLQSocialBriefPort, type NLQStockScreenPort } from "./nlq";
 import { resolveErrorAspect, AgentErrorCode } from "../aspects/errorCodes";
 import { logAspectEvent } from "../aspects/loggingAspect";
@@ -2872,46 +2869,21 @@ export class OrchestratorAgent extends PortThink {
     this.recordMessage("assistant", text, route.agent);
     const judge = new LLMJudge(this.env);
     const quality = await judge.evaluate({ question: turn.userText, answer: text, agent: route.agent });
-    this.audit("response.evaluated", "judge", {
-      score: quality.score,
-      grounded: quality.grounded,
-      safe: quality.safe,
-      issues: quality.issues,
+    // #5058: the evaluation record + a low score's `judge` learning, one call.
+    recordTurnEvaluation({
+      env: this.env,
+      sql: this.ctx.storage.sql,
+      quality,
+      agent: route.agent,
+      requestId: turn.requestId,
+      audit: (type, agent, payload) => this.audit(type, agent, payload),
     });
-    // Issue #5058: a low score is no longer audit-only — it becomes a
-    // learning the weekly reflection job reads (domain `judge`), so a
-    // repeated pattern reaches the review queue. Best-effort: the writer
-    // swallows its own failures so a scoring write never fails the turn.
-    recordJudgeScoreLearning(
-      this.ctx.storage.sql,
-      {
-        score: quality.score,
-        grounded: quality.grounded,
-        safe: quality.safe,
-        issues: quality.issues,
-        agent: route.agent,
-        requestId: turn.requestId,
-      },
-      resolveJudgeScoreFeedbackPolicy(this.env),
-    );
-    const vectorizeBinding = (this.env as any).VECTOR_MEMORY;
-    try {
-      if (this.env.AI && vectorizeBinding) {
-        const vm = new VectorMemory(this.env.AI, vectorizeBinding, undefined);
-        await vm.remember({
-          jobId: turn.requestId,
-          operation: `chat:${route.agent}`,
-          summary: `Q: ${turn.userText.slice(0, 300)}\nA: ${text.slice(0, 500)}`,
-          success: quality.safe !== false && quality.grounded !== false,
-          timestamp: new Date().toISOString(),
-        });
-      }
-    } catch (err) {
-      structuredLog.warn("orchestrator.vector_remember_failed", {
-        message: "[VectorMemory] remember failed:",
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
+    await rememberTurnOutcome(this.env, {
+      requestId: turn.requestId,
+      operation: `chat:${route.agent}`,
+      summary: `Q: ${turn.userText.slice(0, 300)}\nA: ${text.slice(0, 500)}`,
+      success: quality.safe !== false && quality.grounded !== false,
+    });
   }
 
   /**
