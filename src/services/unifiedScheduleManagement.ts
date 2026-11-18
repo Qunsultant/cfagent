@@ -172,6 +172,20 @@ function fail(error: string, status: number): { ok: false; error: string; status
   return { ok: false, error, status };
 }
 
+/**
+ * Issue #3121 #4238 — the kinds the one management path serves
+ * like a screen: the list shows them, and pause / resume / delete /
+ * trigger / update operate on them. `screen` is the creatable set,
+ * `workflow-stage` the internal-only stage callback (#3310), and
+ * `internal` the internal-only callbacks (#4238: IV collection;
+ * token renewal and the sweeps/watchdog follow in #4239/#4242).
+ * Every other kind refuses with its own name (goal via its own
+ * surface, worker-duty and ticker-push as unmanageable here).
+ */
+function isManagedAlarmKind(kind: UnifiedScheduleKind): boolean {
+  return kind === "screen" || kind === "workflow-stage" || kind === "internal";
+}
+
 /* =================================================================
  * Projections: SDK schedule / goal / worker duty ↔ unified record.
  * ================================================================= */
@@ -273,6 +287,64 @@ export function strategyScanBaselineToRecord(
   );
   return {
     ...record,
+    definition: {
+      ...record.definition,
+      cron: input.cron,
+    },
+    provenance,
+    createdAt: existing?.createdAt ?? nowIso,
+    updatedAt: nowIso,
+  };
+}
+
+/**
+ * Issue #3121 #4238 — the IV history collection's origin, named
+ * once: the system-armed daily IV collection (collectIvHistory,
+ * weekdays 22:15 UTC). The ledger already carries the runs (#3394);
+ * the record and the armed payload carry this origin too, so the
+ * Schedules home can name it.
+ */
+export const IV_HISTORY_COLLECTION_ORIGIN = "iv-history-collection";
+
+/** The inputs an IV collection record needs beyond the armed alarm. */
+export interface IvHistoryCollectionRecordInput {
+  userLogin: string;
+  cron: string;
+}
+
+/**
+ * An IV history collection unified record, from its armed alarm
+ * (record id = alarm id, the #3123 screen precedent; kind
+ * `internal`, the seventh kind — an internal-only callback, never
+ * user-creatable). The armed payload is stamped with the system
+ * provenance — a no-op when already stamped, so a re-arm keeps the
+ * original creation time — and the record carries the same
+ * provenance value, so the record and the firing payload never
+ * disagree about the origin. An `existing` record keeps its
+ * creation time. The ledger join needs nothing new: the #3394
+ * recording stamps the firing alarm's id as the run's scheduleId,
+ * which is this record's id.
+ */
+export function ivHistoryCollectionToRecord(
+  alarm: ScheduleAlarmLike,
+  input: IvHistoryCollectionRecordInput,
+  nowIso: string,
+  existing?: UnifiedScheduleRecord | null,
+): UnifiedScheduleRecord {
+  const minted = systemProvenance(
+    IV_HISTORY_COLLECTION_ORIGIN,
+    new Date(nowIso),
+  );
+  const payload = stampScheduleProvenance(alarm.payload ?? {}, minted);
+  const provenance = provenanceFromPayload(payload) ?? minted;
+  const record = screenScheduleToRecord(
+    { ...alarm, payload },
+    existing?.createdAt ?? nowIso,
+    input.userLogin,
+  );
+  return {
+    ...record,
+    kind: "internal",
     definition: {
       ...record.definition,
       cron: input.cron,
@@ -609,7 +681,7 @@ export async function listUnifiedScheduleItems(
     // Issue #4351 — a deleted schedule's tombstone hides its alarm, in the
     // window before the next declaration prunes it.
     if (record && record.state === "deleted") continue;
-    if (record && record.kind !== "screen" && record.kind !== "workflow-stage") continue;
+    if (record && !isManagedAlarmKind(record.kind)) continue;
     if (record) {
       const item = unifiedRecordToListItem(record, alarm.nextRun);
       if (!typeParam || item.type === typeParam) items.push(item);
@@ -648,10 +720,7 @@ export async function listUnifiedScheduleItems(
     }
   }
   for (const record of records) {
-    if (
-      (record.kind !== "screen" && record.kind !== "workflow-stage") ||
-      record.state !== "paused"
-    ) {
+    if (!isManagedAlarmKind(record.kind) || record.state !== "paused") {
       continue;
     }
     if (record.alarmId && alarms.some((a) => a.id === record.alarmId)) continue;
@@ -680,7 +749,7 @@ export async function pauseUnifiedSchedule(
   const existing = await deps.store.get(id);
   if (existing) {
     if (existing.kind === "goal") return goalSurfaceError("pause");
-    if (existing.kind !== "screen" && existing.kind !== "workflow-stage") {
+    if (!isManagedAlarmKind(existing.kind)) {
       return fail(`Schedule kind '${existing.kind}' cannot be paused.`, 400);
     }
     if (existing.state === "paused") return { ok: true, record: existing };
@@ -720,7 +789,7 @@ export async function resumeUnifiedSchedule(
     return fail(`Schedule '${id}' is not paused`, 404);
   }
   if (record.kind === "goal") return goalSurfaceError("resume");
-  if (record.kind !== "screen" && record.kind !== "workflow-stage") {
+  if (!isManagedAlarmKind(record.kind)) {
     return fail(`Schedule kind '${record.kind}' cannot be resumed.`, 400);
   }
   if (record.state !== "paused") {
@@ -767,7 +836,7 @@ export async function deleteUnifiedSchedule(
   id: string,
 ): Promise<{ ok: true; cancelled: boolean }> {
   const record = await deps.store.get(id);
-  if (record && record.kind !== "screen" && record.kind !== "workflow-stage") {
+  if (record && !isManagedAlarmKind(record.kind)) {
     return { ok: true, cancelled: false };
   }
   const alarm = record ? undefined : await deps.alarms.get(id);
@@ -840,7 +909,7 @@ export async function triggerUnifiedSchedule(
   // Issue #4237 — a non-screen kind is refused with its own name:
   // the goal-surface text is wrong for a live feed (or a worker
   // duty), and a wrong refusal is worse than a terse one.
-  if (record && record.kind !== "screen" && record.kind !== "workflow-stage") {
+  if (record && !isManagedAlarmKind(record.kind)) {
     if (record.kind === "goal") return goalSurfaceError("trigger");
     return fail(`Schedule kind '${record.kind}' cannot be triggered.`, 400);
   }
@@ -1026,7 +1095,7 @@ export async function updateUnifiedSchedule(
   const record = await deps.store.get(id);
   // Issue #4237 — see triggerUnifiedSchedule: refuse a non-screen
   // kind with its own name, not the goal-surface text.
-  if (record && record.kind !== "screen" && record.kind !== "workflow-stage") {
+  if (record && !isManagedAlarmKind(record.kind)) {
     if (record.kind === "goal") return goalSurfaceError("update");
     return fail(`Schedule kind '${record.kind}' cannot be updated.`, 400);
   }
