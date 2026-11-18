@@ -213,7 +213,9 @@ describe("construction-path pin (#4933)", () => {
     for (const file of listTsFiles(srcDir)) {
       const code = stripComments(readFileSync(file, "utf-8"));
       if (/(?<![\w$.])drizzle\s*\(/.test(code)) {
-        directCallers.push(file.slice(srcDir.length + 1));
+        // Normalise separators: the pin asserts a repo-relative path
+        // ("data/d1QueryLogger.ts"), and Windows hands back backslashes.
+        directCallers.push(file.slice(srcDir.length + 1).split("\\").join("/"));
       }
     }
     // The one shared wiring point is the ONLY direct caller.
