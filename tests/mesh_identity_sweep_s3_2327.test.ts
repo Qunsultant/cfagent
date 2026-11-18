@@ -92,6 +92,36 @@ import { compileGoal } from "../src/orchestrate";
 import { DatabaseORM } from "../src/orm";
 import { MockSqlStorage } from "./mock-sql";
 import { handleAgenticPaymentsRoutes } from "../src/agents/routes/agenticPayments";
+import type {
+  Membership,
+  MembershipStore,
+} from "../src/security/authorization";
+import { serviceUserInternalUserId } from "../src/security/serviceIdentity";
+
+// #5572: the ledger gate requires the service identity to present a
+// provisioned tenant-admin binding. The fixture login must NOT be
+// the shared-orchestrator address (the gate denies addresses as
+// identities, #2331/#2681), and the handler ctx carries the
+// provisioned store + the same configured login.
+const GATE_SERVICE_LOGIN = "svc-test";
+function provisionedGateStore(): MembershipStore {
+  const membership: Membership = {
+    membershipId: "m-gate-1",
+    internalUserId: serviceUserInternalUserId(GATE_SERVICE_LOGIN),
+    tenantId: "tenant-a",
+    roleBindings: [
+      { role: "tenant-admin", scope: "tenant", grantedBy: "admin-1" },
+    ],
+    createdBy: "admin-1",
+    createdAtMs: Date.now(),
+  };
+  return {
+    getMembershipsByUser: async (id: string) =>
+      id === membership.internalUserId ? [membership] : [],
+    put: async () => {},
+    revokeMembership: async () => false,
+  };
+}
 
 beforeEach(() => {
   providerLogins.length = 0;
@@ -383,10 +413,15 @@ function makeLedgerEnv(): any {
   const sql = new MockSqlStorage();
   const orm = new DatabaseORM(sql);
   orm.initializeSchema("default_trader");
-  const routeCtx = { env: {}, getOrm: () => orm, audit: () => {} };
+  const routeCtx = {
+    env: { SERVICE_USER_LOGIN: GATE_SERVICE_LOGIN },
+    getOrm: () => orm,
+    audit: () => {},
+    executionContextMembershipStore: provisionedGateStore(),
+  };
   return {
     CF_WALLET_FACILITATOR: "https://facilitator.test",
-    SERVICE_USER_LOGIN: "default_trader",
+    SERVICE_USER_LOGIN: GATE_SERVICE_LOGIN,
     ORCHESTRATOR_AGENT: {
       idFromName: (name: string) => name,
       get: (_id: unknown) => ({

@@ -12,10 +12,12 @@
  * Differences from the cfpay twin, all deliberate:
  * - Store: D1 (via the Drizzle adapter) instead of the
  *   orchestrator DO's mas_transactions. D1 is shared across
- *   instances, so no canonical-instance hop is needed; the
- *   record-native endpoint and the webhook arm build the port
- *   straight from env.AGENT_DB. The DO ledger stays the cfpay
- *   record; native rows are a new, separate record.
+ *   instances, so no canonical-instance hop is needed; callers
+ *   build the port straight from env.AGENT_DB. The DO ledger
+ *   stays the cfpay record; native rows are a new, separate
+ *   record. (The `record-native` HTTP write-through was
+ *   removed by #5572; the port, its readers, the workflow's
+ *   port writer, and the webhook arm are untouched.)
  * - Session prefix `screener-payment-native:` (cfpay rows keep
  *   `screener-payment:`), so every report can tell the eras
  *   apart by prefix alone.

@@ -793,7 +793,10 @@ describe("handler observe wiring", () => {
     orm: DatabaseORM,
   ): AgenticPaymentsRouteContext {
     return {
-      env: {} as Env,
+      // #5572: the ledger gate requires the service identity, so the
+      // observe harness presents it; the observe assertions below
+      // pin observation alongside an allowing gate.
+      env: { SERVICE_USER_LOGIN: SERVICE_LOGIN } as unknown as Env,
       getOrm: () => orm,
       audit: (
         type: string,
@@ -837,6 +840,9 @@ describe("handler observe wiring", () => {
       method: "POST",
       headers: {
         "content-type": "application/json",
+        // #5572: the ledger gate requires the presented service
+        // identity; observation is pinned alongside an allowing gate.
+        "x-user-login": SERVICE_LOGIN,
         ...(headerValue === null
           ? {}
           : { [EXECUTION_CONTEXT_HEADER]: headerValue }),
@@ -956,7 +962,7 @@ describe("handler observe wiring", () => {
     ).toBe(true);
   });
 
-  it("record-native: observation runs and the response is unchanged by the header", async () => {
+  it("record-native: the route no longer exists (#5572) — no observation runs, nothing is answered", async () => {
     const store = createMemoryMembershipStore();
     await seedBinding(store);
     const nativeBody = {
@@ -967,32 +973,27 @@ describe("handler observe wiring", () => {
       family: "stock",
       priceUSD: 0.02,
     };
-    const withoutHeader: Array<{
+    const audits: Array<{
       type: string;
       payload: Record<string, unknown>;
     }> = [];
-    const plain = await callRoute(
-      fakeCtx(store, withoutHeader, fakeOrm().orm),
+    // With and without a carried context: the handler returns null
+    // (the dispatcher continues matching), and no observation,
+    // gate, or write audit fires for a route that does not exist.
+    const withoutHeader = await callRoute(
+      fakeCtx(store, audits, fakeOrm().orm),
       "/payments/agentic/ledger/record-native",
       nativeBody,
       null,
     );
-    const withHeader: Array<{
-      type: string;
-      payload: Record<string, unknown>;
-    }> = [];
-    const observed = await callRoute(
-      fakeCtx(store, withHeader, fakeOrm().orm),
+    const withHeader = await callRoute(
+      fakeCtx(store, audits, fakeOrm().orm),
       "/payments/agentic/ledger/record-native",
       nativeBody,
       await headerFor(store),
     );
-    expect(observed?.status).toBe(plain?.status);
-    expect(
-      withHeader.some((a) => a.type === "execution_context.revalidation"),
-    ).toBe(true);
-    expect(
-      withoutHeader.some((a) => a.type === "execution_context.revalidation"),
-    ).toBe(false);
+    expect(withoutHeader).toBeNull();
+    expect(withHeader).toBeNull();
+    expect(audits).toHaveLength(0);
   });
 });

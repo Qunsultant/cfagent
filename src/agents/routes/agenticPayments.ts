@@ -22,12 +22,10 @@
  *                                                  write-through — charge and
  *                                                  one-time credit rows, session
  *                                                  screener-payment:<runId>)
- *   POST     /payments/agentic/ledger/record-native (issue #2192: native
- *                                                  write-through — charge and
- *                                                  one-time credit rows in D1,
- *                                                  session screener-payment-native:
- *                                                  <runId>, same 409 dedupe
- *                                                  contract as record-cfpay)
+ *   (POST /payments/agentic/ledger/record-native, issue #2192, was
+ *    removed by #5572: zero production HTTP callers — the workflow
+ *    calls the native port directly. The port and its D1 rows are
+ *    untouched; only the HTTP write-through is gone.)
  *   GET      /payments/agentic/ledger/cfpay       (issue #2019: cfpay-origin
  *                                                  rows for one run, for
  *                                                  reconciliation)
@@ -168,7 +166,6 @@ import {
   createNativeLedgerAdapter,
   ensureNativeLedgerSchema,
 } from "../../data/createNativeLedgerPorts";
-import { parseNativeRail } from "../../data/nativeLedgerPorts";
 import {
   mapBundlePurchaseToJournalEntries,
   mapChargeToJournalEntries,
@@ -321,6 +318,7 @@ import { lookupInternalUserIdByLogin } from "../../security/iaaaMigration";
 import { createKvMembershipStore } from "../../security/iaaaMembershipStore";
 import { sessionStore } from "../../security/session";
 import { observeLedgerWriteContext } from "../../security/commercialExecutionContext";
+import { authorizeLedgerWrite } from "../../security/serviceDispatch";
 import type { MembershipStore } from "../../security/authorization";
 import type { KvLike } from "../../security/kvResilience";
 import {
@@ -506,6 +504,59 @@ export async function handleAgenticPaymentsRoutes(
     }
   }
 
+  // Ledger gate (#5572, hardening slice 1 — G-1): the PDP
+  // consultation for `ledger:record` over the system actor's
+  // binding, enforced before any ledger row is written. Returns
+  // a denial Response, or null when the gate allows. Fail-closed:
+  // any denial writes nothing; a store/PDP failure throws and is
+  // caught by the branch's try/catch as a 500 with no data. Both
+  // outcomes are audited as `payments_ledger.gate`, so the
+  // permission check leaves a trace even when the request then
+  // dedupes (409) or fails validation (400). The GAP-5 observe
+  // call in each branch stays observe-only; this gate is the
+  // enforcement.
+  const enforceLedgerWriteGate = async (
+    route: "record" | "record-cfpay",
+  ): Promise<Response | null> => {
+    const gate = await authorizeLedgerWrite(
+      ctx.executionContextMembershipStore ??
+        createKvMembershipStore(sessionStore(ctx.env)),
+      {
+        presentedLogin: request.headers.get("x-user-login"),
+        serviceLogin: getServiceUserLogin(ctx.env),
+        nowMs: Date.now(),
+      },
+    );
+    if (!gate.allowed) {
+      ctx.audit("payments_ledger.gate", "payments", {
+        route,
+        outcome: "denied",
+        reason: gate.reason,
+        ...(gate.detail !== undefined ? { detail: gate.detail } : {}),
+        tenantsEvaluated: gate.tenantsEvaluated,
+        ...(gate.anomaly !== undefined ? { anomaly: gate.anomaly } : {}),
+      });
+      return Response.json(
+        {
+          code: "FAILURE_COMMERCIAL_FORBIDDEN",
+          error:
+            "Forbidden: ledger recording requires the payment service identity.",
+        },
+        { status: 403 },
+      );
+    }
+    ctx.audit("payments_ledger.gate", "payments", {
+      route,
+      outcome: "allowed",
+      principalId: gate.principalId,
+      tenantId: gate.tenantId,
+      policyVersion: gate.decision.policyVersion,
+      tenantsEvaluated: gate.tenantsEvaluated,
+      ...(gate.anomaly !== undefined ? { anomaly: gate.anomaly } : {}),
+    });
+    return null;
+  };
+
   // Issue #896: PaymentsAgent ledger write-through. mas_transactions in
   // THIS instance's store is the single payment ledger of record; the
   // PaymentsAgent Durable Object no longer keeps its own blob ledger.
@@ -530,6 +581,8 @@ export async function handleAgenticPaymentsRoutes(
         audit: (type, payload) => ctx.audit(type, "payments", payload),
         log: structuredLog,
       });
+      const recordDenial = await enforceLedgerWriteGate("record");
+      if (recordDenial) return recordDenial;
       const body = (await request.json().catch(() => ({}))) as {
         agentId?: unknown;
         operation?: unknown;
@@ -645,6 +698,8 @@ export async function handleAgenticPaymentsRoutes(
         audit: (type, payload) => ctx.audit(type, "payments", payload),
         log: structuredLog,
       });
+      const cfpayDenial = await enforceLedgerWriteGate("record-cfpay");
+      if (cfpayDenial) return cfpayDenial;
       const body = (await request.json().catch(() => ({}))) as {
         kind?: unknown;
         runRequestId?: unknown;
@@ -695,113 +750,6 @@ export async function handleAgenticPaymentsRoutes(
         priceUSD,
       });
       return Response.json({ duplicate: false, record: tx });
-    } catch (err: any) {
-      return Response.json({ code: "FAILURE_UNEXPECTED_ERROR", error: codedMessage("FAILURE_UNEXPECTED_ERROR") }, { status: 500 });
-    }
-  }
-
-  // Issue #2192: native-origin rows for one run, written to
-  // D1 (not mas_transactions) via the NativeLedgerPort. The
-  // dedupe contract is IDENTICAL to record-cfpay above: one
-  // charge row and one credit row per run — a replayed write
-  // returns 409 with the existing row instead of a second
-  // row. Differences from record-cfpay, all deliberate: the
-  // gateway is truthful per rail (body `rail`, defaulting by
-  // reference — a claim tx hash means x402, otherwise card),
-  // the session prefix is screener-payment-native:, and
-  // tenantId is required (native rows are tenant-scoped from
-  // day one; the cfpay endpoint predates tenant scoping).
-  // This endpoint RECORDS ONLY: no gate reads these rows
-  // until slice 1, and no payment behavior changes here.
-  // An unbound AGENT_DB fails closed with 503 — the store
-  // cannot be verified, so no row is claimed recorded.
-  if (path.endsWith("/payments/agentic/ledger/record-native") && request.method === "POST") {
-    try {
-      // GAP-5 (#5477): observe-mode boundary check. A carried
-      // ExecutionContext is revalidated and the outcome logged +
-      // audited; absence is a silent no-op. Never denies, never
-      // throws — the request proceeds exactly as without this call.
-      await observeLedgerWriteContext({
-        getStore: () =>
-          ctx.executionContextMembershipStore ??
-          createKvMembershipStore(sessionStore(ctx.env)),
-        request,
-        nowMs: Date.now(),
-        audit: (type, payload) => ctx.audit(type, "payments", payload),
-        log: structuredLog,
-      });
-      const body = (await request.json().catch(() => ({}))) as {
-        kind?: unknown;
-        runRequestId?: unknown;
-        tenantId?: unknown;
-        userId?: unknown;
-        family?: unknown;
-        priceUSD?: unknown;
-        rail?: unknown;
-        sessionId?: unknown;
-        paymentIntentId?: unknown;
-        claimTxHash?: unknown;
-      };
-      const kind = body.kind === "credit" ? "credit" : body.kind === "charge" ? "charge" : "";
-      const runRequestId = typeof body.runRequestId === "string" ? body.runRequestId.trim() : "";
-      const tenantId = typeof body.tenantId === "string" ? body.tenantId.trim() : "";
-      const userId = typeof body.userId === "string" ? body.userId.trim() : "";
-      const family = typeof body.family === "string" ? body.family.trim() : "";
-      const priceUSD = Number(body.priceUSD);
-      const rail =
-        parseNativeRail(body.rail) ??
-        (typeof body.claimTxHash === "string" && body.claimTxHash.trim() ? "x402" : "stripe");
-      if (
-        !kind ||
-        !runRequestId ||
-        !tenantId ||
-        !userId ||
-        !family ||
-        !Number.isFinite(priceUSD) ||
-        priceUSD <= 0
-      ) {
-        return Response.json(
-          { error: "kind (charge|credit), runRequestId, tenantId, userId, family and a positive priceUSD are required" },
-          { status: 400 },
-        );
-      }
-      if (body.rail !== undefined && parseNativeRail(body.rail) === null) {
-        return Response.json(
-          { error: 'rail must be "stripe" or "x402" when supplied' },
-          { status: 400 },
-        );
-      }
-      const adapter = createNativeLedgerAdapter(ctx.env as { AGENT_DB?: unknown });
-      if (!adapter) {
-        return Response.json(
-          { error: "native ledger unavailable: AGENT_DB is not bound" },
-          { status: 503 },
-        );
-      }
-      await ensureNativeLedgerSchema(adapter.db);
-      const { row, duplicate } = await adapter.recordRow({
-        kind,
-        runRequestId,
-        tenantId,
-        userId,
-        family,
-        priceUSD,
-        rail,
-        sessionId: typeof body.sessionId === "string" ? body.sessionId : undefined,
-        paymentIntentId:
-          typeof body.paymentIntentId === "string" ? body.paymentIntentId : undefined,
-        claimTxHash: typeof body.claimTxHash === "string" ? body.claimTxHash : undefined,
-      });
-      if (duplicate) {
-        return Response.json({ duplicate: true, record: row }, { status: 409 });
-      }
-      ctx.audit("payments_native.recorded", "payments", {
-        transactionId: row.id,
-        runRequestId,
-        kind,
-        priceUSD,
-      });
-      return Response.json({ duplicate: false, record: row });
     } catch (err: any) {
       return Response.json({ code: "FAILURE_UNEXPECTED_ERROR", error: codedMessage("FAILURE_UNEXPECTED_ERROR") }, { status: 500 });
     }
