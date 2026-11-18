@@ -24,6 +24,7 @@ import {
   normalizeLedgerLinkage,
   resolveLedgerTrigger,
 } from "./consolidatedScheduling";
+import { RENEWAL_DISPATCH_CRON, TOKEN_RENEWAL_RECORD_ID } from "./heartbeatDueChecks";
 
 export type {
   JobRunLedgerTrigger,
@@ -245,6 +246,18 @@ export function resolveScheduleRunJobId(
     }
   }
   return `callback:${callback}`;
+}
+
+/**
+ * Issue #3121 #4239 — the ledger jobId a Schedules home id
+ * reads its runs under. Derived records have no alarm id of
+ * their own, so the runs routes cannot read `listByJob(id)`
+ * directly: the token-renewal record reads the renewal dispatch
+ * rows (jobId = its cron). Every other id reads its own rows.
+ */
+export function scheduleIdToLedgerJobId(scheduleId: string): string {
+  if (scheduleId === TOKEN_RENEWAL_RECORD_ID) return RENEWAL_DISPATCH_CRON;
+  return scheduleId;
 }
 
 /** The payload's trigger when it names one of the five dispatch modes; everything else is scheduled. */

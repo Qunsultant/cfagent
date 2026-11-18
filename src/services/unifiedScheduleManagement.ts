@@ -43,6 +43,10 @@ import {
   WORKER_CRON_TRIGGERS_INVENTORY,
 } from "./scheduleSystems";
 import { resolveCronEntryPoint } from "./consolidatedCronEntries";
+import { RENEWAL_DISPATCH_CRON, TOKEN_RENEWAL_RECORD_ID } from "./heartbeatDueChecks";
+
+/** Issue #4239 — re-exported beside the builder that uses it. */
+export { TOKEN_RENEWAL_RECORD_ID } from "./heartbeatDueChecks";
 import type { ScheduledGoal } from "../schedule";
 import { isSubDailyCron, isSubDailyInterval, isValidCron } from "../schedule";
 
@@ -355,6 +359,55 @@ export function ivHistoryCollectionToRecord(
   };
 }
 
+/**
+ * Issue #3121 #4239 — the token-renewal record's origin, named
+ * once. One shared duty (the heartbeat due-check renews the
+ * broker tokens daily), so one stable record id (the id itself
+ * lives in heartbeatDueChecks, beside the ledger job id).
+ */
+export const TOKEN_RENEWAL_ORIGIN = "token-renewal";
+
+/** The last renewal a token-renewal list item carries (ledger-joined). */
+export interface TokenRenewalLastRun {
+  started: string;
+  finished?: string;
+  outcome?: string;
+}
+
+/**
+ * A token-renewal unified record, DERIVED — not stored, not
+ * alarm-adopted. There is no steady-state alarm to adopt: the
+ * duty fires through the heartbeat due-check (#4234,
+ * runRenewTokensEntryPoint, RENEWAL_DISPATCH_CRON), and legacy
+ * alarms are removed by migrateLegacyScreenSchedules. The cron
+ * is read from RENEWAL_DISPATCH_CRON, never re-literalized, so
+ * the record and the firing check can never disagree about the
+ * cadence; the entry point is the ledger job id the runs join
+ * on. Kind `internal` (the #4238 seventh kind), state `active`
+ * — the duty IS live through the heartbeat, not disabled like
+ * the Worker-cron inventory rows. An `existing` record keeps its
+ * creation time.
+ */
+export function tokenRenewalToRecord(
+  nowIso: string,
+  existing?: UnifiedScheduleRecord | null,
+): UnifiedScheduleRecord {
+  return {
+    id: TOKEN_RENEWAL_RECORD_ID,
+    kind: "internal",
+    state: "active",
+    callback: "autoRenewETradeTokens",
+    definition: {
+      type: "cron",
+      cron: RENEWAL_DISPATCH_CRON,
+      entryPoint: "renewTokens",
+    },
+    provenance: systemProvenance(TOKEN_RENEWAL_ORIGIN, new Date(nowIso)),
+    createdAt: existing?.createdAt ?? nowIso,
+    updatedAt: nowIso,
+  };
+}
+
 /** True when an alarm payload carries a stage address (jobId + nodePath). */
 function isStageAlarmPayload(payload: unknown): boolean {
   if (!payload || typeof payload !== "object") return false;
@@ -545,6 +598,27 @@ export function tickerPushRecordToListItem(
   return {
     ...unifiedRecordToListItem(record),
     health: tickerPushHealth(record, nowMs, staleAfterIntervals),
+  };
+}
+
+/**
+ * A token-renewal record as a Schedules home list item: the shared
+ * list shape plus the last renewal joined from the ledger (issue
+ * #4239). The caller supplies the ledger's latest run, if any; a
+ * duty that has never fired carries no last run, and the home
+ * renders "never" — a missed renewal is visible, not silent.
+ */
+export function tokenRenewalRecordToListItem(
+  record: UnifiedScheduleRecord,
+  lastRun?: TokenRenewalLastRun | null,
+): ReturnType<typeof unifiedRecordToListItem> & {
+  lastRunAt?: string;
+  lastRunOutcome?: string;
+} {
+  return {
+    ...unifiedRecordToListItem(record),
+    ...(lastRun ? { lastRunAt: lastRun.started } : {}),
+    ...(lastRun?.outcome ? { lastRunOutcome: lastRun.outcome } : {}),
   };
 }
 
@@ -741,11 +815,35 @@ function goalSurfaceError(action: string): { ok: false; error: string; status: n
   );
 }
 
+/**
+ * Issue #4239 — the token-renewal record is derived, not stored:
+ * there is no alarm to pause, resume, trigger, or update, and
+ * nothing to delete. Management refuses with the record's own
+ * name instead of a 404 for a row the home lists (a 404 would
+ * say the schedule does not exist; it does — it is derived).
+ * The manual trigger stays on its existing route,
+ * POST /api/schedules/trigger-renew.
+ */
+function isDerivedTokenRenewalRecord(id: string): boolean {
+  return id === TOKEN_RENEWAL_RECORD_ID;
+}
+
+function derivedTokenRenewalError(
+  verb: string,
+): { ok: false; error: string; status: number } {
+  return fail(
+    `Schedule 'token-renewal' is a derived record with no alarm to ${verb}.`,
+    400,
+  );
+}
+
 export async function pauseUnifiedSchedule(
   deps: UnifiedManagementDeps,
   id: string,
   nowIso: string,
 ): Promise<UnifiedOpResult> {
+  // Issue #4239 — a derived record has no alarm to pause.
+  if (isDerivedTokenRenewalRecord(id)) return derivedTokenRenewalError("pause");
   const existing = await deps.store.get(id);
   if (existing) {
     if (existing.kind === "goal") return goalSurfaceError("pause");
@@ -784,6 +882,8 @@ export async function resumeUnifiedSchedule(
   id: string,
   nowIso: string,
 ): Promise<UnifiedOpResult> {
+  // Issue #4239 — a derived record has no alarm to resume.
+  if (isDerivedTokenRenewalRecord(id)) return derivedTokenRenewalError("resume");
   const record = await deps.store.get(id);
   if (!record) {
     return fail(`Schedule '${id}' is not paused`, 404);
@@ -835,6 +935,8 @@ export async function deleteUnifiedSchedule(
   deps: UnifiedManagementDeps,
   id: string,
 ): Promise<{ ok: true; cancelled: boolean }> {
+  // Issue #4239 — a derived record is a no-op delete (#4237 precedent).
+  if (isDerivedTokenRenewalRecord(id)) return { ok: true, cancelled: false };
   const record = await deps.store.get(id);
   if (record && !isManagedAlarmKind(record.kind)) {
     return { ok: true, cancelled: false };
@@ -905,6 +1007,8 @@ export async function triggerUnifiedSchedule(
   | { ok: true; scheduleId: string; callback: string }
   | { ok: false; error: string; status: number }
 > {
+  // Issue #4239 — a derived record has no alarm to trigger.
+  if (isDerivedTokenRenewalRecord(id)) return derivedTokenRenewalError("trigger");
   const record = await deps.store.get(id);
   // Issue #4237 — a non-screen kind is refused with its own name:
   // the goal-surface text is wrong for a live feed (or a worker
@@ -1091,6 +1195,8 @@ export async function updateUnifiedSchedule(
   body: ScheduleUpdateRequest,
   nowMs: number,
 ): Promise<UnifiedOpResult> {
+  // Issue #4239 — a derived record has no alarm to update.
+  if (isDerivedTokenRenewalRecord(id)) return derivedTokenRenewalError("update");
   const nowIso = new Date(nowMs).toISOString();
   const record = await deps.store.get(id);
   // Issue #4237 — see triggerUnifiedSchedule: refuse a non-screen

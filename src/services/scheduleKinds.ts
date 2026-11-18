@@ -43,6 +43,11 @@ export const SCHEDULE_KIND_RULES: readonly ScheduleKindRule[] = [
   { kind: "stocks", callbacks: ["marketscreen", "screener"], payloadUniverse: true },
   { kind: "goal", callbacks: ["goal"] },
   { kind: "payment", callbacks: ["payment", "checkout", "billing", "subscription"] },
+  // Issue #4239 — token renewal is system upkeep, not trading: the
+  // callback name contains "trade", so the trading rule below
+  // would shadow the system "token" entry. This rule runs first
+  // and names the one renewal callback exactly.
+  { kind: "system", callbacks: ["autorenewetradetokens"] },
   { kind: "trading", callbacks: ["trade", "order", "broker"] },
   // A stage schedule fires a workflow stage (callback runWorkflowStage); it is a
   // platform mechanism (#3121 #3310), not a family, so it stays `system`.
