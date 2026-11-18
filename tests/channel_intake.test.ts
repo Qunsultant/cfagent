@@ -190,12 +190,21 @@ describe("resolvePrincipal — email (CHANNEL_EMAIL_PRINCIPALS)", () => {
   });
 
   it("treats malformed CHANNEL_EMAIL_PRINCIPALS JSON as an empty map and logs loudly (never throws)", async () => {
-    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    // Issue #5083 (S4) — the loud log now goes through the structured
+    // logger (the console.* ratchet, #3515 S3, pins new files at zero
+    // unstructured console uses), whose console sink writes via
+    // console.info as a JSON event.
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
     const env = baseEnv({ CHANNEL_EMAIL_PRINCIPALS: "{not json" });
     const p = await resolvePrincipal(env, intake("boss@example.com", { dkimPass: true }));
     expect(p).toBeNull();
-    expect(errSpy).toHaveBeenCalled();
-    errSpy.mockRestore();
+    expect(infoSpy).toHaveBeenCalled();
+    expect(
+      infoSpy.mock.calls.some(([line]) =>
+        typeof line === "string" && line.includes("email_principals.invalid_json"),
+      ),
+    ).toBe(true);
+    infoSpy.mockRestore();
   });
 
   it("parseEmailPrincipals tolerates malformed entries (skips bad rows, keeps good ones)", () => {
