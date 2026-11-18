@@ -103,7 +103,6 @@ export function SearchMasTab({ pendingQuery, onHealth, onSearch }: SearchTabProp
       setQuery(pendingQuery.query);
       void run(pendingQuery.query);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingQuery]);
 
   return (

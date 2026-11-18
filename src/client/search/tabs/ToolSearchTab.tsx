@@ -67,7 +67,6 @@ export function ToolSearchTab({ pendingQuery, onHealth, onSearch }: SearchTabPro
       setQuery(pendingQuery.query);
       run(pendingQuery.query);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingQuery]);
 
   return (

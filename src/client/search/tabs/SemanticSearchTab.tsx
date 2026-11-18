@@ -73,7 +73,6 @@ export function SemanticSearchTab({ pendingQuery, onHealth, onSearch }: SearchTa
       setQuery(pendingQuery.query);
       void run(pendingQuery.query);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingQuery]);
 
   return (
