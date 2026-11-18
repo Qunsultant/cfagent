@@ -24,7 +24,7 @@ import type { RunSummary } from "../services/runSummaries";
 export type DocumentRunSource = "stock" | "options" | "goal" | "strategy";
 
 /** How the run was started. `null` when the home store recorded no trigger. */
-export type DocumentRunType = "manual" | "scheduled" | "triggered";
+export type DocumentRunType = "manual" | "scheduled" | "triggered" | "copilot";
 
 export interface DocumentRow {
   /** Stable row key (the RunSummary id — canonical report id or detail-store id). */
@@ -127,6 +127,8 @@ export function documentRunType(
   if (trigger.startsWith("manual")) return "manual";
   if (trigger.startsWith("schedul") || trigger === "cron") return "scheduled";
   if (trigger === "triggered") return "triggered";
+  // Issue #5053: a copilot run reads "copilot".
+  if (trigger === "copilot") return "copilot";
   return null;
 }
 

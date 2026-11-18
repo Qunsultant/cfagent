@@ -50,6 +50,7 @@ const RUN_TYPE_LABELS: Record<DocumentRunType, string> = {
   manual: "Manual",
   scheduled: "Scheduled",
   triggered: "Triggered",
+  copilot: "Copilot",
 };
 
 const SORT_LABELS: Record<DocumentSortKey, string> = {

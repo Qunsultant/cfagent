@@ -37,6 +37,7 @@
  *   bridge adds no retention machinery of its own.
  */
 import { createAsyncJobPorts, type AsyncJobPorts } from "../../data/createAsyncJobPorts";
+import type { JobRunTrigger } from "../../data/jobRunRecordPorts";
 import type { AgentContext } from "agents";
 
 /** Compose the async-job ports over a storage handle. */
@@ -56,7 +57,8 @@ export interface BridgeRunStartInput {
   capability: string;
   displayName: string;
   userLogin: string;
-  trigger: "manual" | "scheduled";
+  /** Issue #5053: the five dispatch modes — a mesh-door bridge row stamps "copilot". */
+  trigger: JobRunTrigger;
   /** The workflow / chain job the run belongs to, when known. */
   workflowId?: string | null;
   chainJobId?: string | null;

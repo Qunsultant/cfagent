@@ -1505,10 +1505,13 @@ async function runOpportunityScan(
   // The envelope is built once: the sync dispatch and the host
   // dispatch (#4469) send the same request — the host seam stamps
   // the broker pair over the provenance stamp below.
+  // Issue #5053: the NLQ chat scan is a copilot dispatch — the
+  // request stamps "copilot", never "manual". (The NLQ *panel*
+  // leg keeps "manual": it is a UX surface, not a copilot dispatch.)
   const scanRequest = {
     assetClass: "options",
     runIdentity: { runId: scanPipelineRunId },
-    trigger: "manual",
+    trigger: "copilot",
     classInput: {
       scan: {
         symbols,
@@ -1575,7 +1578,8 @@ async function runOpportunityScan(
       {
         runId: scanPipelineRunId,
         userLogin: scanUserLogin,
-        trigger: "manual",
+        // Issue #5053: the NLQ chat scan is a copilot dispatch.
+        trigger: "copilot",
         request: scanRequest,
       },
       {
