@@ -44,6 +44,15 @@ import { d1TableSql } from "./schemaComponent/d1Catalogue";
 import { DML_CATALOGUE } from "./schemaComponent/dmlCatalogue";
 import { executeDml } from "./schemaComponent/dmlExecutor";
 
+import {
+  createStructuredLogger,
+  type StructuredLogger,
+} from "../observability/structuredLogger";
+import {
+  ConsoleObservabilitySink,
+  type ObservabilitySink,
+} from "../observability/observabilityPorts";
+
 /** Drizzle D1 database object carrying the resource schemas. */
 export type ResourceD1Db = DrizzleD1Database<{
   resourceSqlOps: typeof resourceSqlOps;
@@ -68,8 +77,19 @@ const CREATE_TABLE_SQL = d1TableSql("resource_sql_ops");
 
 export class D1ResourceUsageAdapter implements ResourceUsagePort {
   private ensured = false;
-
-  constructor(private readonly db: ResourceD1Db) {}
+  // #3515 S3 batch 7 — optional sink injection (d1QueryLogger precedent);
+  // env-constructed sink from the composition root when it holds env,
+  // else the structured console fallback (never a `{}` sink, #5587).
+  private readonly log: StructuredLogger;
+  constructor(
+    private readonly db: ResourceD1Db,
+    options?: { sink?: ObservabilitySink },
+  ) {
+    this.log = createStructuredLogger(
+      options?.sink ?? new ConsoleObservabilitySink(),
+      { component: "data/d1ResourceUsageAdapter" },
+    );
+  }
 
   async record(event: ResourceUsageEvent): Promise<void> {
     try {
@@ -93,10 +113,12 @@ export class D1ResourceUsageAdapter implements ResourceUsagePort {
         },
       });
     } catch (error) {
-      console.warn(
-        "[resource-usage] D1 record failed:",
-        error instanceof Error ? error.message : String(error)
-      );
+      this.log.warn("d1ResourceUsageAdapter.d1_record_failed", {
+        message: "[resource-usage] D1 record failed:",
+        error: error instanceof Error ? error.message : String(error),
+        op: event.op,
+        ns: event.ns,
+      });
     }
   }
 

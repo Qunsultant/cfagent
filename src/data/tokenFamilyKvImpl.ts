@@ -50,6 +50,12 @@ import type {
 } from "../security/etradeOAuth";
 import type { PublicTokenSet } from "../security/publicOAuth";
 
+import { createStructuredLogger } from "../observability/structuredLogger";
+import {
+  ConsoleObservabilitySink,
+  type ObservabilitySink,
+} from "../observability/observabilityPorts";
+
 export type TokenLister = (
   prefix: string,
 ) => Promise<Array<{ key: string; value: string }> | null>;
@@ -107,7 +113,15 @@ async function readFirstParsable<T>(
 /** Build the family over any backend (the adapters' shared core). */
 export function createKvBackedTokenFamily(
   backend: TokenFamilyBackend,
+  options?: { sink?: ObservabilitySink },
 ): TokenFamilyPorts {
+  // #3515 S3 batch 7 — logger over the injected sink (d1QueryLogger
+  // precedent), else the structured console fallback (never a `{}` sink,
+  // #5587). The family has no env anywhere in its call chain.
+  const structuredLog = createStructuredLogger(
+    options?.sink ?? new ConsoleObservabilitySink(),
+    { component: "data/tokenFamilyKvImpl" },
+  );
   const kv = backend.etradeKv;
   const host = backend.host;
 
@@ -224,7 +238,7 @@ export function createKvBackedTokenFamily(
       // conformance suite's boundary pins (both compositions,
       // both boundary instants).
       if (isExpiredAtMidnightEt(tokens.storedAt)) {
-        console.warn(`E*TRADE tokens for ${userLogin} expired at midnight ET.`);
+        structuredLog.warn("tokenFamilyKv.tokens_expired_midnight_et", { message: `E*TRADE tokens for ${userLogin} expired at midnight ET.`, userLogin });
         await revokeStoredTokens(userLogin, opts);
         if (useCache) writeTokenCache(cacheKey, null, readEpoch);
         return null;

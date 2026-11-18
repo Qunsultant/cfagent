@@ -96,6 +96,15 @@ export type { RepositoryQueryOptions as QueryOptions } from "./repositoryPorts";
 import type { SqlStorage } from "./repositoryPorts";
 import { remainderAlterSql } from "./schemaComponent/remainderCatalogue";
 
+import {
+  createStructuredLogger,
+  type StructuredLogger,
+} from "../observability/structuredLogger";
+import {
+  ConsoleObservabilitySink,
+  type ObservabilitySink,
+} from "../observability/observabilityPorts";
+
 export interface TableMetadata {
   name: string;
   description: string;
@@ -232,12 +241,22 @@ export class DatabaseORM {
    * exactly as before — zero overhead, zero behavior change.
    */
   private readonly resourceSink?: ResourceUsagePort;
-
+  // #3515 S3 batch 7 — optional sink injection (d1QueryLogger precedent);
+  // env-constructed sink from the composition root when it holds env,
+  // else the structured console fallback (never a `{}` sink, #5587).
+  private readonly log: StructuredLogger;
   constructor(
     private sql: SqlStorage,
-    opts?: { resourceSink?: ResourceUsagePort },
+    opts?: { resourceSink?: ResourceUsagePort; sink?: ObservabilitySink },
   ) {
     this.resourceSink = opts?.resourceSink;
+    // #3515 S3 batch 7 — optional sink injection (d1QueryLogger
+    // precedent); without one the event goes to the structured console
+    // fallback (never a `{}` sink, #5587).
+    this.log = createStructuredLogger(
+      opts?.sink ?? new ConsoleObservabilitySink(),
+      { component: "data/ormFacade" },
+    );
     this.categories = createDoCategoryRepository(sql);
     this.referrals = createDoReferralRepository(sql);
     this.ads = createDoAdRepository(sql);
@@ -703,10 +722,10 @@ export class DatabaseORM {
       } catch (error) {
         // Recording never throws (port contract); a failing sink must not
         // fail the read. Warn, mirroring durableKv's sink-failure handling.
-        console.warn(
-          "[orm] resource sink failed:",
-          error instanceof Error ? error.message : String(error),
-        );
+        this.log.warn("ormFacade.resource_sink_failed", {
+          message: "[orm] resource sink failed:",
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
     }
     return rows;

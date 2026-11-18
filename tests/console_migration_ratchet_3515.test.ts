@@ -77,6 +77,34 @@
  * (shards 2/4 and 4/4), diagnosed from a local shard reproduction
  * with a completed OTel install; the fix rides with the slice.
  *
+ * Batch 7 (this slice) migrated `src/data` — all 22 files, 33 real
+ * sites — to the same logger, and moved them from REMAINING_PIN to
+ * MIGRATED_ZERO; after batch 7 the remaining total is 70. No pin
+ * correction: every data file held exactly its ceiling on current
+ * main (verified from code). Logger construction follows the #5587
+ * ruling (Venus 2026-11-18): no new `createObservabilitySink({})`
+ * module logger anywhere in the slice. The three files whose
+ * handlers already hold the request env (`createChainSchedulePorts`,
+ * `createGovernancePorts`, `createScreenRunLockPorts`) build their
+ * logger per function from that env, and `createGovernanceAdapter`
+ * passes the env-constructed sink into `D1GovernanceAdapter`;
+ * `providerCapturePorts` reuses its pre-existing module logger;
+ * every other file takes an optional `sink?: ObservabilitySink`
+ * (the `d1QueryLogger` precedent) and falls back to an explicit
+ * `ConsoleObservabilitySink` — the composition roots outside this
+ * slice that could pass the env-constructed sink
+ * (`createEvidenceSatellitePorts`, `createCanonicalReportStorePorts`,
+ * the `screeningActivity`/`jobOutcomes` services, the enrichment
+ * route, the retention/shard-job route wiring in `privacy.ts`) are
+ * not touched here; wiring them is the #5587 follow-up, recorded
+ * in the §15. Three tests asserted on raw `console.error` lines
+ * and were updated to the structured form (spy console.info, parse
+ * the JSON event, assert on operation + level + fields) —
+ * `ensure_schema_dedupe_guard_4507` and
+ * `report_generation_index_scope_2398` (canonical-report dedupe
+ * events) and `data_provider_capture_e1` (capture-write failure
+ * events); no behavior change.
+ *
  * Batch 3 (this slice) migrated `src/agents` — all 42 files, 180
  * real sites — to the same logger, and moved them from REMAINING_PIN
  * to MIGRATED_ZERO; after batch 3 the remaining total is 234. One
@@ -322,6 +350,28 @@ const MIGRATED_ZERO: readonly string[] = [
   "src/config/marketDataModes.ts",
   "src/config/paymentsFlowModes.ts",
   "src/config/quoteModes.ts",
+  "src/data/chainScheduleProjection.ts",
+  "src/data/createChainSchedulePorts.ts",
+  "src/data/createGovernancePorts.ts",
+  "src/data/createScreenRunLockPorts.ts",
+  "src/data/d1GovernanceAdapter.ts",
+  "src/data/d1ResourceUsageAdapter.ts",
+  "src/data/doSqliteCanonicalReportStoreAdapter.ts",
+  "src/data/doSqliteEnrichmentAdapter.ts",
+  "src/data/doSqliteJobOutcomeAdapter.ts",
+  "src/data/doSqliteScreeningActivityAdapter.ts",
+  "src/data/durableKv.ts",
+  "src/data/inMemoryGovernanceAdapter.ts",
+  "src/data/inMemoryJobOutcomeAdapter.ts",
+  "src/data/inMemoryScreeningActivityAdapter.ts",
+  "src/data/ormFacade.ts",
+  "src/data/productRollout.ts",
+  "src/data/providerCapturePorts.ts",
+  "src/data/retentionPurge.ts",
+  "src/data/retentionRoute.ts",
+  "src/data/shardJobRoute.ts",
+  "src/data/tokenFamilyKvImpl.ts",
+  "src/data/traceRecordPorts.ts",
   "src/config/restTwinsModes.ts",
   "src/enrichment/enrichmentPorts.ts",
   "src/enrichment/enrichmentService.ts",
@@ -452,31 +502,6 @@ const REMAINING_PIN: Readonly<Record<string, number>> = {
   "src/client/components/AutopilotControlCenter.tsx": 1,
   "src/client/firstRunApi.ts": 1,
   "src/client/options/StrategyDiscoveryPanel.tsx": 2,
-  "src/data/chainScheduleProjection.ts": 1,
-  "src/data/createChainSchedulePorts.ts": 1,
-  "src/data/createGovernancePorts.ts": 1,
-  "src/data/createScreenRunLockPorts.ts": 1,
-  "src/data/d1GovernanceAdapter.ts": 1,
-  "src/data/d1ResourceUsageAdapter.ts": 1,
-  // #4507: 2 -> 3 — the per-pair dedupe audit log (a data deletion
-  // must be auditable); the CREATE-retry log reuses the old silent
-  // path's slot. Ceiling raised deliberately, not drifted.
-  "src/data/doSqliteCanonicalReportStoreAdapter.ts": 3,
-  "src/data/doSqliteEnrichmentAdapter.ts": 2,
-  "src/data/doSqliteJobOutcomeAdapter.ts": 1,
-  "src/data/doSqliteScreeningActivityAdapter.ts": 2,
-  "src/data/durableKv.ts": 3,
-  "src/data/inMemoryGovernanceAdapter.ts": 1,
-  "src/data/inMemoryJobOutcomeAdapter.ts": 1,
-  "src/data/inMemoryScreeningActivityAdapter.ts": 2,
-  "src/data/ormFacade.ts": 1,
-  "src/data/productRollout.ts": 1,
-  "src/data/providerCapturePorts.ts": 4,
-  "src/data/retentionPurge.ts": 1,
-  "src/data/retentionRoute.ts": 1,
-  "src/data/shardJobRoute.ts": 2,
-  "src/data/tokenFamilyKvImpl.ts": 1,
-  "src/data/traceRecordPorts.ts": 1,
   "src/events/screenerEvents.ts": 1,
   "src/events/screenerPublishers.ts": 20,
   "src/observability/observabilityPorts.ts": 2,

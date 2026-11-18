@@ -26,6 +26,15 @@ import type {
 import { doStatementSql } from "./schemaComponent/doCatalogue";
 import { remainderStatementSql } from "./schemaComponent/remainderCatalogue";
 
+import {
+  createStructuredLogger,
+  type StructuredLogger,
+} from "../observability/structuredLogger";
+import {
+  ConsoleObservabilitySink,
+  type ObservabilitySink,
+} from "../observability/observabilityPorts";
+
 const TABLE = "mas_reports";
 const HIT_COLUMNS =
   "id, run_id, title, source, summary, body, created_at, generation_id, user_login, body_r2_key, fanout_outcome";
@@ -54,7 +63,19 @@ function ensureColumn(
 export class DoSqliteCanonicalReportStore
   implements CanonicalReportWritePort, CanonicalReportReadPort
 {
-  constructor(private readonly sql: CanonicalReportStoreSqlExecutor) {}
+  // #3515 S3 batch 7 — optional sink injection (d1QueryLogger precedent);
+  // env-constructed sink from the composition root when it holds env,
+  // else the structured console fallback (never a `{}` sink, #5587).
+  private readonly log: StructuredLogger;
+  constructor(
+    private readonly sql: CanonicalReportStoreSqlExecutor,
+    options?: { sink?: ObservabilitySink },
+  ) {
+    this.log = createStructuredLogger(
+      options?.sink ?? new ConsoleObservabilitySink(),
+      { component: "data/doSqliteCanonicalReportStoreAdapter" },
+    );
+  }
 
   // ------------------------------------------------------------------
   // Write role
@@ -129,10 +150,10 @@ export class DoSqliteCanonicalReportStore
           }),
         );
       } catch (err) {
-        console.error(
-          `[scheduledReports] ensureScheduledReportsTable: DROP INDEX idx_mas_reports_generation (pre-#2398 global shape) failed; continuing: ${err instanceof Error ? err.message : String(err)}`,
-          err
-        );
+        this.log.error("doSqliteCanonicalReportStore.drop_generation_index_failed", {
+          message: `[scheduledReports] ensureScheduledReportsTable: DROP INDEX idx_mas_reports_generation (pre-#2398 global shape) failed; continuing: ${err instanceof Error ? err.message : String(err)}`,
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
     }
     // Issue #876: the dedupe index is guarded — creating a UNIQUE
@@ -166,10 +187,11 @@ export class DoSqliteCanonicalReportStore
       createGenerationIndex();
     } catch (err) {
       const removed = this.dedupeGenerationIndexPairs();
-      console.error(
-        `[scheduledReports] ensureScheduledReportsTable: unique-index creation for idx_mas_reports_generation failed (${err instanceof Error ? err.message : String(err)}); deduped ${removed.length} duplicate row(s), retrying the CREATE`,
-        err
-      );
+      this.log.error("doSqliteCanonicalReportStore.unique_index_creation_failed", {
+        message: `[scheduledReports] ensureScheduledReportsTable: unique-index creation for idx_mas_reports_generation failed (${err instanceof Error ? err.message : String(err)}); deduped ${removed.length} duplicate row(s), retrying the CREATE`,
+        error: err instanceof Error ? err.message : String(err),
+        dedupedCount: removed.length,
+      });
       try {
         createGenerationIndex();
       } catch (retryErr) {
@@ -224,9 +246,14 @@ export class DoSqliteCanonicalReportStore
         this.deleteRow(id);
         removed.push(id);
       }
-      console.error(
-        `[scheduledReports] ensureScheduledReportsTable: deduped generation-index pair (${owner}, ${generationId}): kept ${kept}, removed ${victims.length} duplicate row(s): ${victims.map((r) => String(r.id ?? "")).join(", ")}`
-      );
+      this.log.error("doSqliteCanonicalReportStore.deduped_generation_index_pair", {
+        message: `[scheduledReports] ensureScheduledReportsTable: deduped generation-index pair (${owner}, ${generationId}): kept ${kept}, removed ${victims.length} duplicate row(s): ${victims.map((r) => String(r.id ?? "")).join(", ")}`,
+        owner,
+        generationId,
+        kept,
+        removed: victims.map((r) => String(r.id ?? "")),
+        removedCount: victims.length,
+      });
     }
     return removed;
   }

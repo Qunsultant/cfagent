@@ -19,6 +19,15 @@ import {
 } from "./screeningActivityPorts";
 import { doIndexSql, doTableSql } from "./schemaComponent/doCatalogue";
 
+import {
+  createStructuredLogger,
+  type StructuredLogger,
+} from "../observability/structuredLogger";
+import {
+  ConsoleObservabilitySink,
+  type ObservabilitySink,
+} from "../observability/observabilityPorts";
+
 function activityId(): string {
   return `sact_${
     typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -28,7 +37,19 @@ function activityId(): string {
 }
 
 export class DoSqliteScreeningActivityStore implements ScreeningActivityStore {
-  constructor(private readonly sql: ScreeningActivitySqlExecutor) {}
+  // #3515 S3 batch 7 — optional sink injection (d1QueryLogger precedent);
+  // env-constructed sink from the composition root when it holds env,
+  // else the structured console fallback (never a `{}` sink, #5587).
+  private readonly log: StructuredLogger;
+  constructor(
+    private readonly sql: ScreeningActivitySqlExecutor,
+    options?: { sink?: ObservabilitySink },
+  ) {
+    this.log = createStructuredLogger(
+      options?.sink ?? new ConsoleObservabilitySink(),
+      { component: "data/doSqliteScreeningActivityAdapter" },
+    );
+  }
 
   ensureTable(): void {
     const sql = this.sql;
@@ -56,10 +77,12 @@ export class DoSqliteScreeningActivityStore implements ScreeningActivityStore {
       );
       return id;
     } catch (err) {
-      console.error(
-        `[screeningActivity] record failed for ${input?.userLogin ?? "?"}: ${err instanceof Error ? err.message : String(err)}`,
-        err
-      );
+      this.log.error("doSqliteScreeningActivityAdapter.record_failed", {
+        message: `[screeningActivity] record failed for ${input?.userLogin ?? "?"}: ${err instanceof Error ? err.message : String(err)}`,
+        error: err instanceof Error ? err.message : String(err),
+        userLogin: input?.userLogin ?? null,
+        kind: input?.kind,
+      });
       return null;
     }
   }
@@ -97,10 +120,11 @@ export class DoSqliteScreeningActivityStore implements ScreeningActivityStore {
         };
       });
     } catch (err) {
-      console.error(
-        `[screeningActivity] list failed for ${userLogin}: ${err instanceof Error ? err.message : String(err)}`,
-        err
-      );
+      this.log.error("doSqliteScreeningActivityAdapter.list_failed", {
+        message: `[screeningActivity] list failed for ${userLogin}: ${err instanceof Error ? err.message : String(err)}`,
+        error: err instanceof Error ? err.message : String(err),
+        userLogin,
+      });
       return [];
     }
   }

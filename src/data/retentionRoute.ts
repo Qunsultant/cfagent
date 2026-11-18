@@ -15,6 +15,12 @@
  */
 import type { RetentionPurgeReport } from "./retentionPorts";
 
+import { createStructuredLogger } from "../observability/structuredLogger";
+import {
+  ConsoleObservabilitySink,
+  type ObservabilitySink,
+} from "../observability/observabilityPorts";
+
 export interface RetentionPurgeRouteInput {
   /** Wired session, or null when unauthenticated. */
   session: unknown;
@@ -25,11 +31,26 @@ export interface RetentionPurgeRouteInput {
   runPurge: (args: {
     tenantId: string;
   }) => Promise<RetentionPurgeReport>;
+  /**
+   * #3515 S3 batch 7 — optional observability sink (d1QueryLogger
+   * precedent): the composition root passes the env-constructed sink
+   * when it holds env; without one the event goes to the structured
+   * console fallback (never a `{}` sink, #5587).
+   */
+  sink?: ObservabilitySink;
 }
 
 export async function handleRetentionPurgeRoute(
   input: RetentionPurgeRouteInput,
 ): Promise<Response> {
+  // #3515 S3 batch 7 — logger over the injected sink (d1QueryLogger
+  // precedent), else the structured console fallback (never a `{}` sink,
+  // #5587). This pure handler has no env; the server wiring passes the
+  // env-constructed sink when it holds one (follow-up).
+  const structuredLog = createStructuredLogger(
+    input.sink ?? new ConsoleObservabilitySink(),
+    { component: "data/retentionRoute" },
+  );
   if (!input.session) {
     return new Response(JSON.stringify({ error: "unauthorized" }), {
       status: 401,
@@ -62,10 +83,11 @@ export async function handleRetentionPurgeRoute(
       headers: { "content-type": "application/json" },
     });
   } catch (err) {
-    console.error(
-      "[data-foundation] Retention purge failed:",
-      err instanceof Error ? err.message : String(err),
-    );
+    structuredLog.error("retentionRoute.retention_purge_failed", {
+      message: "[data-foundation] Retention purge failed:",
+      error: err instanceof Error ? err.message : String(err),
+      tenantId: input.tenantId,
+    });
     return new Response(JSON.stringify({ error: "retention_purge_failed" }), {
       status: 500,
       headers: { "content-type": "application/json" },

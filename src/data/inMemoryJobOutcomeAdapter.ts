@@ -15,6 +15,15 @@ import {
   type PruneJobOutcomesResult,
 } from "./jobOutcomePorts";
 
+import {
+  createStructuredLogger,
+  type StructuredLogger,
+} from "../observability/structuredLogger";
+import {
+  ConsoleObservabilitySink,
+  type ObservabilitySink,
+} from "../observability/observabilityPorts";
+
 function resolveDays(value: number | string | null | undefined): number {
   const parsed = typeof value === "number" ? value : Number.parseInt(String(value ?? ""), 10);
   return Number.isFinite(parsed) ? parsed : JOB_OUTCOMES_RETENTION_DEFAULT_DAYS;
@@ -23,6 +32,16 @@ function resolveDays(value: number | string | null | undefined): number {
 export class InMemoryJobOutcomeStore implements JobOutcomeStore {
   private rows = new Map<string, JobOutcomeRow>();
   private prunedAt: string | null = null;
+  // #3515 S3 batch 7 — optional sink injection (d1QueryLogger precedent);
+  // env-constructed sink from the composition root when it holds env,
+  // else the structured console fallback (never a `{}` sink, #5587).
+  private readonly log: StructuredLogger;
+  constructor(options?: { sink?: ObservabilitySink }) {
+    this.log = createStructuredLogger(
+      options?.sink ?? new ConsoleObservabilitySink(),
+      { component: "data/inMemoryJobOutcomeAdapter" },
+    );
+  }
 
   ensureTables(): void {
     // In-memory: nothing to ensure.
@@ -86,10 +105,10 @@ export class InMemoryJobOutcomeStore implements JobOutcomeStore {
     try {
       this.prune({ now: () => nowMs });
     } catch (err) {
-      console.warn(
-        "[job-outcomes] prune failed:",
-        err instanceof Error ? err.message : String(err)
-      );
+      this.log.warn("inMemoryJobOutcomeAdapter.prune_failed", {
+        message: "[job-outcomes] prune failed:",
+        error: err instanceof Error ? err.message : String(err),
+      });
       return false;
     }
     this.prunedAt = new Date(nowMs).toISOString();

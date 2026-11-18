@@ -33,6 +33,12 @@ import {
   DataFoundationCode,
 } from "../aspects/errorCodes";
 
+import { createStructuredLogger } from "../observability/structuredLogger";
+import {
+  ConsoleObservabilitySink,
+  type ObservabilitySink,
+} from "../observability/observabilityPorts";
+
 /** One trace record: a single cross-agent call / workflow step. */
 export interface TraceRecord {
   /** Caller-supplied id; replays of the same id are no-ops. */
@@ -87,16 +93,27 @@ export type RecordTraceResult =
 export async function recordTraceSafely(
   store: TraceRecordStore,
   record: TraceRecord,
+  options?: { sink?: ObservabilitySink },
 ): Promise<RecordTraceResult> {
+  // #3515 S3 batch 7 — logger over the injected sink (d1QueryLogger
+  // precedent), else the structured console fallback (never a `{}` sink,
+  // #5587). This port module has no env binding by design.
+  const structuredLog = createStructuredLogger(
+    options?.sink ?? new ConsoleObservabilitySink(),
+    { component: "data/traceRecordPorts" },
+  );
   try {
     await store.appendTrace(record);
     return { recorded: true };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    console.error(
-      `[data-foundation] Trace append failed (${DataFoundationCode.TRACE_APPEND_FAILED}) for ${record.actingAgent}/${record.operation}:`,
-      message,
-    );
+    structuredLog.error("traceRecordPorts.trace_append_failed", {
+      message: `[data-foundation] Trace append failed (${DataFoundationCode.TRACE_APPEND_FAILED}) for ${record.actingAgent}/${record.operation}:`,
+      error: message,
+      failureCode: DataFoundationCode.TRACE_APPEND_FAILED,
+      actingAgent: record.actingAgent,
+      operation: record.operation,
+    });
     return {
       recorded: false,
       failureCode: DataFoundationCode.TRACE_APPEND_FAILED,

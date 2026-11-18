@@ -23,6 +23,12 @@
  * beyond the caller-supplied writer, zero routes, zero activation.
  */
 
+import { createStructuredLogger } from "../observability/structuredLogger";
+import {
+  ConsoleObservabilitySink,
+  type ObservabilitySink,
+} from "../observability/observabilityPorts";
+
 export type RolloutRead = (key: string) => string | null;
 export type RolloutWrite = (key: string, value: string) => void;
 
@@ -44,15 +50,24 @@ export function isRolloutStage(v: unknown): v is RolloutStage {
 export function getProductRolloutStage(
   read: RolloutRead,
   productId: string,
+  options?: { sink?: ObservabilitySink },
 ): RolloutStage {
+  // #3515 S3 batch 7 — logger over the injected sink (d1QueryLogger
+  // precedent), else the structured console fallback (never a `{}` sink,
+  // #5587). This pure derivation has no env anywhere in its call chain.
+  const structuredLog = createStructuredLogger(
+    options?.sink ?? new ConsoleObservabilitySink(),
+    { component: "data/productRollout" },
+  );
   let raw: string | null;
   try {
     raw = read(rolloutKey(productId));
   } catch (err) {
-    console.error(
-      `[productRollout] read of ${rolloutKey(productId)} failed; applying the fail-safe value:`,
-      err,
-    );
+    structuredLog.error("productRollout.read_failed", {
+      message: `[productRollout] read of ${rolloutKey(productId)} failed; applying the fail-safe value:`,
+      error: err instanceof Error ? err.message : String(err),
+      productId,
+    });
     return "internal";
   }
   return isRolloutStage(raw) ? raw : "internal";

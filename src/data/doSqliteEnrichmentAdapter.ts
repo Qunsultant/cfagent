@@ -31,6 +31,15 @@ import { executeDoDml } from "./schemaComponent/doDmlExecutor";
 import { createSettingsPort } from "./createSettingsPorts";
 import type { SettingsPort } from "./settingsReadPorts";
 
+import {
+  createStructuredLogger,
+  type StructuredLogger,
+} from "../observability/structuredLogger";
+import {
+  ConsoleObservabilitySink,
+  type ObservabilitySink,
+} from "../observability/observabilityPorts";
+
 export interface EnrichmentSqlExecutor {
   exec(query: string, ...params: unknown[]): Iterable<unknown>;
 }
@@ -47,11 +56,19 @@ const CREATE_RUNS_INDEX_SQL = doIndexSql("idx_mas_enrichment_runs_job");
 export class SqlEnrichmentStore implements EnrichmentRunStore {
   /** The settings port over the same handle (killswitch key only). */
   private readonly settings: SettingsPort;
-
+  // #3515 S3 batch 7 — optional sink injection (d1QueryLogger precedent);
+  // env-constructed sink from the composition root when it holds env,
+  // else the structured console fallback (never a `{}` sink, #5587).
+  private readonly log: StructuredLogger;
   constructor(
     private readonly sql: EnrichmentSqlExecutor,
     private readonly audit?: EnrichmentAuditFn,
+    options?: { sink?: ObservabilitySink },
   ) {
+    this.log = createStructuredLogger(
+      options?.sink ?? new ConsoleObservabilitySink(),
+      { component: "data/doSqliteEnrichmentAdapter" },
+    );
     this.settings = createSettingsPort(sql);
   }
 
@@ -107,10 +124,10 @@ export class SqlEnrichmentStore implements EnrichmentRunStore {
       if (value === null) return "clear";
       return parseKillswitchValue(value);
     } catch (err) {
-      console.error(
-        "[Enrichment] Killswitch read failed; halting enrichment (fail-closed):",
-        err,
-      );
+      this.log.error("doSqliteEnrichmentAdapter.killswitch_read_failed", {
+        message: "[Enrichment] Killswitch read failed; halting enrichment (fail-closed):",
+        error: err instanceof Error ? err.message : String(err),
+      });
       return "halted";
     }
   }
@@ -132,7 +149,13 @@ export class SqlEnrichmentStore implements EnrichmentRunStore {
         reason,
       });
     } catch (err) {
-      console.error("[Enrichment] Killswitch audit failed (ignored):", err);
+      this.log.error("doSqliteEnrichmentAdapter.killswitch_audit_failed", {
+        message: "[Enrichment] Killswitch audit failed (ignored):",
+        error: err instanceof Error ? err.message : String(err),
+        state,
+        setBy,
+        reason,
+      });
     }
     return state;
   }
