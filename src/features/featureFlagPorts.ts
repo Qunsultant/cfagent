@@ -192,6 +192,20 @@ export interface FeatureEvaluationContext {
 }
 
 /**
+ * Issue #4260 ([3121] surface the scheduling-channel flags): the
+ * result of a flag write through the port. A write is OPTIONAL on
+ * the port — adapters whose source is operator-owned (the Cloudflare
+ * Flagship dashboard, environment variables) cannot persist a
+ * runtime write and simply do not implement it; the caller reports
+ * FLAG_WRITE_UNSUPPORTED instead of inventing a second store.
+ */
+export type FeatureFlagWriteCode = "FLAG_WRITE_UNSUPPORTED" | "UNKNOWN_FLAG";
+
+export type FeatureFlagWriteResult =
+  | { ok: true }
+  | { ok: false; code: FeatureFlagWriteCode; message: string };
+
+/**
  * Port interface for feature flag evaluation.
  * Conforms to OpenFeature provider evaluation semantics.
  */
@@ -206,4 +220,18 @@ export interface FeatureFlagPort {
    * Evaluates all known feature flags and returns a map of flag name to boolean status.
    */
   getAllFlags(context?: FeatureEvaluationContext): Promise<Record<FeatureFlag, boolean>>;
+
+  /**
+   * Issue #4260: persist a flag value through the one flag mechanism.
+   * Optional — only adapters with a writable backing (today the
+   * in-memory adapter) implement it. Adapters over operator-owned
+   * sources (Flagship dashboard, env vars) leave it absent; callers
+   * must treat the absence as FLAG_WRITE_UNSUPPORTED, never as a
+   * reason to build a second flag store.
+   */
+  setEnabled?(
+    flag: string,
+    enabled: boolean,
+    context?: FeatureEvaluationContext,
+  ): Promise<FeatureFlagWriteResult>;
 }

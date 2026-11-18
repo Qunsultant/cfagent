@@ -12,6 +12,7 @@ import {
   type FeatureEvaluationContext,
   type FeatureFlag,
   type FeatureFlagPort,
+  type FeatureFlagWriteResult,
   getFeatureFlagParent,
   isKnownFeatureFlag,
 } from "./featureFlagPorts";
@@ -54,6 +55,26 @@ export class InMemoryFeatureFlagAdapter implements FeatureFlagPort {
       this.flags.set(flag, enabled);
       this.explicit.add(flag);
     }
+  }
+
+  /**
+   * Issue #4260: the port write — the in-memory adapter is the one
+   * adapter with a writable backing, so the schedules-home toggle
+   * takes effect through it. Unknown flags are refused, never stored.
+   */
+  async setEnabled(
+    flag: string,
+    enabled: boolean,
+  ): Promise<FeatureFlagWriteResult> {
+    if (!isKnownFeatureFlag(flag)) {
+      return {
+        ok: false,
+        code: "UNKNOWN_FLAG",
+        message: `Unknown feature flag '${flag}': refusing the write.`,
+      };
+    }
+    this.setFlag(flag, enabled);
+    return { ok: true };
   }
 
   async isEnabled(flag: string, _context?: FeatureEvaluationContext): Promise<boolean> {

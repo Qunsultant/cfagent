@@ -504,6 +504,13 @@
  * deleted the #4672 exercise entry from this pin while removing no
  * such route from source, so CI read 487 against a pinned 486.
  * The entry is restored here; the route still exists in source.
+ *
+ * Issue #4260 added four — GET /schedules/flags and POST
+ * /schedules/flags (in handleSchedulesRoutes, after the approvals
+ * read, before the approvals decide match; bare + /api forms) —
+ * bringing the pinned inventory to 494 entries (490 measured on
+ * the slice base); the delegation sequence is unchanged (same
+ * handler, same position).
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
@@ -1130,6 +1137,13 @@ const EXPECTED_INVENTORY = [
   "handleSchedulesRoutes :: includes(\"/schedules/\")",
   "handleSchedulesRoutes :: endsWith(\"/schedules/approvals\")",
   "handleSchedulesRoutes :: endsWith(\"/api/schedules/approvals\")",
+  // Issue #4260 — the schedules-home flags surface (in
+  // handleSchedulesRoutes, after the approvals read, before the
+  // approvals decide match): GET then POST, bare + /api forms.
+  "handleSchedulesRoutes :: endsWith(\"/schedules/flags\")",
+  "handleSchedulesRoutes :: endsWith(\"/api/schedules/flags\")",
+  "handleSchedulesRoutes :: endsWith(\"/schedules/flags\")",
+  "handleSchedulesRoutes :: endsWith(\"/api/schedules/flags\")",
   "handleSchedulesRoutes :: endsWith(\"/schedules/cancel-all\")",
   "handleSchedulesRoutes :: === \"/schedules/runs\"",
   // Issue #3121 Phase 2 (#3123) — the ledger record route, placed

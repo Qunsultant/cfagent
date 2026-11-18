@@ -15,7 +15,8 @@
  * from Platform Admin in #4561; a separate tab from the queue view),
  * dead-letter-queue (DlqPanel — the dead-letter queue, moved from the
  * retired Queues page in #4574; the page's async-jobs copy is removed
- * as covered by Background Tasks).
+ * as covered by Background Tasks), flags (ScheduleChannelFlagsPanel —
+ * the scheduling-channel flags with live state, #4260).
  *
  * View state follows the URL (`?view=`, plus `?schedule=` / `?run=`
  * deep links), the same pattern as PlatformAdminPage: the component
@@ -40,6 +41,7 @@ import { Card, CardHeader, PageSection, PageShell, Tabs, TabPanel, type TabOptio
 import { SchedulesPanel } from "./SchedulesPanel";
 import { ScheduledGoalsPanel } from "./ScheduledGoalsPanel";
 import { ScheduleRunLedgerPanel } from "./ScheduleRunLedgerPanel";
+import { ScheduleChannelFlagsPanel } from "./ScheduleChannelFlagsPanel";
 import { ScheduleQueueView } from "./ScheduleQueueView";
 import { AsyncJobsPanel } from "./AsyncJobsPanel";
 import { DlqPanel } from "./DlqPanel";
@@ -186,6 +188,15 @@ export function SchedulesHome({ userLogin, onPreviewTrade }: SchedulesHomeProps 
             meta={<span className="ui-meta-sm">Unreplayed records — replay to the source queue</span>}
           />
           <DlqPanel />
+        </div>
+        </Card>
+      </TabPanel>
+
+      <TabPanel idBase="schedules-home" tabId="flags" active={deepLink.view === "flags"}>
+        <Card>
+          {/* Issue #4330 — the tab scrolls on both axes; the shell clips otherwise. */}
+          <div className="ui-scroll-frame">
+          <ScheduleChannelFlagsPanel />
         </div>
         </Card>
       </TabPanel>
