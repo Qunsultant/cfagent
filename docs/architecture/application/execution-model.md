@@ -185,7 +185,7 @@ The short id and the system id are not two ids: the short id is the **body** (th
 | OODA step | `ooda:<step>` | `ooda:observe` | Declared | Which loop step (candidate level) |
 | Research stage | `respipe:<stage>` | `respipe:observe` | Retired (confirmed 2026-11-17) | Which run-level stage (legacy namespace) |
 | Job definition | `job:<spec>` | `job:screener` | Declared | Which job spec |
-| Feed pipeline job | `pipe:<feed>-<dataset>` | `pipe:yahoo-nasdaq100-quotes` | Declared | Which feed pipeline |
+| Feed pipeline job | `pipe:<feed>-<dataset>` | `pipe:example-nasdaq100-quotes` | Declared | Which feed pipeline |
 | Job-definition node | `node:<spec>:<nodePath>` | `node:screener:root` | Declared | Which node of which job |
 | Run | `run:<time36>-<counter36>` | `run:m9x2k-1` | Minted (one per run) | Which run; when (mint time in the body) |
 | Async job | `job:<uuid>` | `job:550e8400-…` | Minted | Which async job / MCP receipt |
