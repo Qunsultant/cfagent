@@ -141,6 +141,8 @@ decision is in [Packaging and deployment](#packaging-and-deployment).
 
 - [Standards](./standards/standards.md) and
   [tech-standards](../agents/tech-standards.md).
+- [Technology stack](../technology/tech-stack.md) — every technology
+  in use, the decided pieces, and the FOSS-first must-use rule.
 - SOLID / GRASP / GoF conformance anchor is issue #488.
 - Agentic patterns (ReAct, Reflection, Self-correction, Learning, Adaptive Router, Supervisor-Worker, Decentralized-Swarm, etc)
 - Security Models and Protocols (IAAA)
@@ -174,6 +176,8 @@ decision is in [Packaging and deployment](#packaging-and-deployment).
 Every change to this container or to any doc it links gets a changelog
 entry here, newest first:
 
+- 2026-11-18 — Standards conformance: technology stack linked —
+  [tech-stack](../technology/tech-stack.md) (issue #5404).
 - 2026-11-18 — Technology, cloud, and vendor-agnostic principle
   stated; packaging and deployment section added — the solution is
   containerized per architectural layer (services, API, MCPs,
