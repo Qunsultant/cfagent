@@ -71,6 +71,14 @@ import {
 } from "../../services/stockCopilotRsiMode";
 import { isSelfRsiPipelineImplemented, selfRsiModeNotice } from "../../services/stockCopilotRsiCapabilities";
 import {
+  CopilotProposalFilingError,
+  COPILOT_PROPOSAL_FILER_UNAVAILABLE,
+  fileGovernedProposal,
+  resolveCopilotProposalFiler,
+} from "../../services/stockCopilotProposalFiling";
+import type { CapabilityImprovementProposal } from "../../services/stockCopilotIntrospection";
+import type { MeshProposalFiler } from "../../services/meshProposalPipeline";
+import {
   COPILOT_UNIVERSE_SETTING_KEY,
   COPILOT_STRATEGIES_SETTING_KEY,
   resolveCopilotUniverseFull,
@@ -96,6 +104,10 @@ export interface StockCopilotDoorContext {
   writeSetting?: (key: string, value: string) => void;
   commercial?: CommercialStore | null;
   loadBars?: (symbol: string) => Promise<number[]>;
+  /** #5057: the GitHub issue filer. Composed from env by
+   *  resolveCopilotProposalFiler when absent; null means the governed
+   *  pathway cannot dispatch and says so. */
+  proposalFiler?: MeshProposalFiler | null;
   audit?: (
     type: string,
     agent: "orchestrator",
@@ -886,6 +898,59 @@ export async function introspectStockCopilotViaDoor(
   });
 
   return result;
+}
+
+/**
+ * Issue #5057 (AG-3) — file one governed proposal after an explicit human
+ * approval. This is the governed pathway's dispatch: the proposal's own
+ * title, lane, and plan become a §5 task issue through the existing filer.
+ * Refusals are coded and happen before any network call.
+ */
+export async function fileStockCopilotProposalViaDoor(
+  ctx: StockCopilotDoorContext,
+  actingLogin: string | null | undefined,
+  input: { gapId: string; approve: boolean },
+  proposals?: readonly CapabilityImprovementProposal[],
+): Promise<{ gapId: string; number: number; url: string }> {
+  const login = requireActingLogin(actingLogin);
+  if (input.approve !== true) {
+    throw new MeshDoorError(
+      "proposal_approval_required",
+      "filing a governed proposal requires explicit approval — the agent proposes, the human disposes",
+    );
+  }
+  const available =
+    proposals ?? (await introspectStockCopilotViaDoor(ctx, login)).reflection.capabilityProposals;
+  const proposal = available.find((p) => p.gapId === input.gapId);
+  if (!proposal) {
+    throw new MeshDoorError(
+      "proposal_not_found",
+      `no capability proposal with gap id ${input.gapId}`,
+    );
+  }
+  const filer =
+    ctx.proposalFiler === undefined
+      ? resolveCopilotProposalFiler(ctx.env)
+      : ctx.proposalFiler;
+  try {
+    const filed = await fileGovernedProposal({
+      proposal,
+      approvedBy: login,
+      filer,
+      audit: ctx.audit,
+    });
+    return { gapId: proposal.gapId, ...filed };
+  } catch (err) {
+    if (err instanceof CopilotProposalFilingError) {
+      throw new MeshDoorError(
+        err.code === COPILOT_PROPOSAL_FILER_UNAVAILABLE
+          ? "proposal_filer_unavailable"
+          : "proposal_approval_required",
+        err.message,
+      );
+    }
+    throw err;
+  }
 }
 
 export async function evaluateStockCopilotViaDoor(

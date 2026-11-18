@@ -189,6 +189,7 @@ import {
   getStockCopilotStatusViaDoor,
   controlStockCopilotViaDoor,
   introspectStockCopilotViaDoor,
+  fileStockCopilotProposalViaDoor,
   getLearningsViaDoor,
   evaluateStockCopilotViaDoor,
   type StockCopilotDoorContext,
@@ -1773,24 +1774,46 @@ export class StockCopilotEvaluateCommand implements IMcpToolCommand<{ symbol: st
   }
 }
 
-export class StockCopilotIntrospectCommand implements IMcpToolCommand<Record<string, never>> {
+export class StockCopilotIntrospectCommand implements IMcpToolCommand<{
+  fileProposalGapId?: string;
+  approveProposalFiling?: boolean;
+}> {
   readonly name = "stock_copilot_introspect";
   readonly description =
     "Perform runtime tool-driven reflection and self-explanation of the Stock Copilot: inspects active tools mapped across the 5-stage execution pipeline (Feed, Enrich, Analyze, Generate, Deliver), live configuration state from DO SQLite (cadence, sessions, broker/mode, universe, pause), and distilled learnings from recent cycle executions.";
   readonly jsonSchema = {
     type: "object" as const,
-    properties: {},
+    properties: {
+      fileProposalGapId: {
+        type: "string" as const,
+        description:
+          "Optional: the gapId of a governed proposal to FILE as a GitHub issue after the introspection. Requires approveProposalFiling=true (#5057).",
+      },
+      approveProposalFiling: {
+        type: "boolean" as const,
+        description:
+          "Optional: explicit human approval for filing fileProposalGapId. Filing refuses without it — the agent proposes, the human disposes.",
+      },
+    },
   };
-  readonly zodSchema = z.object({});
+  readonly zodSchema = z.object({
+    fileProposalGapId: z.string().optional(),
+    approveProposalFiling: z.boolean().optional(),
+  });
 
   async execute(
-    _input: Record<string, never>,
+    input: { fileProposalGapId?: string; approveProposalFiling?: boolean },
     context: McpToolContext,
-  ): Promise<StockCopilotIntrospectionResult> {
+  ): Promise<
+    StockCopilotIntrospectionResult & {
+      filedProposal?: { gapId: string; number: number; url: string };
+    }
+  > {
     const actingLogin = context.actingLogin?.();
     await recordDoorHop(context, this.name, "OrchestratorAgent");
+    const doorContext = meshStockCopilotDoorContextFromMcp(context);
     const result = await introspectStockCopilotViaDoor(
-      meshStockCopilotDoorContextFromMcp(context),
+      doorContext,
       actingLogin,
     );
     context.audit("stock_copilot_introspect", "mcp", {
@@ -1799,7 +1822,17 @@ export class StockCopilotIntrospectCommand implements IMcpToolCommand<Record<str
       mode: result.configuration.mode,
       stagesCount: result.pipeline.length,
     });
-    return result;
+    if (!input.fileProposalGapId) return result;
+    const filed = await fileStockCopilotProposalViaDoor(
+      doorContext,
+      actingLogin,
+      {
+        gapId: input.fileProposalGapId,
+        approve: input.approveProposalFiling === true,
+      },
+      result.reflection.capabilityProposals,
+    );
+    return { ...result, filedProposal: filed };
   }
 }
 

@@ -160,6 +160,11 @@ import type { AsyncJobPorts } from "../../data/createAsyncJobPorts";
 export type MeshDoorErrorCode =
   | "identity_required"
   | "door_unavailable"
+  // Issue #5057: the governed proposal filing leg's refusals — no
+  // explicit human approval, no matching proposal, or no GitHub token.
+  | "proposal_approval_required"
+  | "proposal_not_found"
+  | "proposal_filer_unavailable"
   | "goal_not_found"
   | "asset_not_found"
   // Issue #3535: the feed-job door's unknown/ambiguous job name.
