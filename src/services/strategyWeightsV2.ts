@@ -27,10 +27,21 @@
  *
  * The bounds envelope now lives here (moved verbatim from v1 in the
  * #1257 retirement; WEIGHTS_V2_DEFAULTS reads it) — there is no
- * second bounds regime. Per
- * the #17 guardrail, no production ranking path reads v2 weights
- * until a reviewed change wires a consumer; promotion of a v2
- * change into live state is the champion/challenger gate's job
+ * second bounds regime.
+ *
+ * READ BOUNDARY (#5064, AG-10 — pinned by
+ * tests/strategy_weights_v2_read_boundary_5064.test.ts). The readers are
+ * declared once, in STRATEGY_WEIGHTS_V2_READERS below; adding an import
+ * without a line there fails the pin. In words:
+ *   - the reselection tick reads the regime's weights to build
+ *     PROPOSALS only (`proposal_only_not_promoted`) — it changes no live
+ *     ranking;
+ *   - the challenger evaluation and the fit-discovery runner read the
+ *     policy to score candidates;
+ *   - the reselection/challenger bridge reads the regime type only.
+ * The LIVE screen ranking does NOT read v2 weights at decision time —
+ * `src/agents/screener-agent.ts` is on the pin's never-list. Promotion of
+ * a v2 change into live state is the champion/challenger gate's job
  * (championChallenger.ts), not this module's.
  *
  * Issue #2357 (#1976 step 4b, ADR 0022 D-I step 4): the versioned
@@ -55,6 +66,31 @@ import type {
 } from "../data/strategyWeightsPorts";
 import type { CostAssumptions } from "./researchEconomics";
 import type { TrackRecord } from "./researchTrackRecord";
+
+/**
+ * Issue #5064 (AG-10) — the v2-weights read boundary, declared once.
+ *
+ * Every module allowed to import this file, with why (value read or
+ * type-only). The pin test enumerates the real import graph and fails on
+ * any difference, so a new reader cannot land without a deliberate line
+ * here — the header's claim and the call graph stay in step.
+ */
+export const STRATEGY_WEIGHTS_V2_READERS = [
+  { path: "src/agents/routes/screenerResearch.ts", purpose: "reselection tick proposals (proposal-only, never applied live)" },
+  { path: "src/services/championChallenger.ts", purpose: "challenger evaluation + weights-table bootstrap" },
+  { path: "src/services/fitDiscoveryRunner.ts", purpose: "fit-discovery runner: bounds and policy evaluation" },
+  { path: "src/services/proposalChallengerBridge.ts", purpose: "type-only: regime vocabulary" },
+] as const;
+
+/**
+ * Modules that must NEVER import this file: the live decision paths.
+ * A ranking change reaches production only through the champion/challenger
+ * gate, never by reading a weight at decision time.
+ */
+export const STRATEGY_WEIGHTS_V2_NEVER_READERS = [
+  "src/agents/screener-agent.ts",
+  "src/services/stockCopilotAgenticLoop.ts",
+] as const;
 
 export { weightsV2Key };
 export type { WeightVersionRecord, WeightsV2Regime };
