@@ -132,7 +132,7 @@ describe("catalog last-run column (#3130)", () => {
     await renderWith({ error: "boom" }, false);
     const text = container.textContent ?? "";
     expect(text).toContain("Run state unavailable");
-    expect(text).toContain("Timing:");
+    expect(text).toContain("Delivery:");
     expect(text).toContain("Feed (quotes)");
   });
 
