@@ -1576,7 +1576,3 @@ div.ui-drawer-title {
 .stock-search-modal-dialog .stock-search-modal-footer {
   flex-shrink: 0;
 }
-
-.stock-search-modal-dialog .search-result-row {
-  border-left: 3px solid transparent;
-}
