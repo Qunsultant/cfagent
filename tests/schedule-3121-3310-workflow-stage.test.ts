@@ -749,7 +749,9 @@ describe("3310-M the one management service serves the workflow-stage kind", () 
       ownerLogin: "OpenAIMP",
     });
     await h.adapter.pause!("alarm-1");
-    const updated = await h.adapter.update!("alarm-1", { timing: { type: "interval", intervalSeconds: 7200 } });
+    // Issue #4235 — the 7200s re-time is sub-daily, so the update
+    // carries the explicit per-schedule opt-in.
+    const updated = await h.adapter.update!("alarm-1", { timing: { type: "interval", intervalSeconds: 7200 }, subDailyOptIn: true });
     expect(updated.id).toBe("alarm-1");
     expect((updated.definition as Record<string, unknown>).jobId).toBe("two-child");
     expect((updated.definition as Record<string, unknown>).nodePath).toBe("0");

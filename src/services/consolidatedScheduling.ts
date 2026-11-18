@@ -27,13 +27,19 @@ import type {
   LedgerLinkage,
 } from "../data/jobRunRecordPorts";
 import type { ScheduleProvenance } from "../schedule";
-import { isDue, isValidCron, zonedDateParts } from "../schedule";
+import {
+  isDue,
+  isSubDailyCron,
+  isSubDailyInterval,
+  isValidCron,
+  zonedDateParts,
+} from "../schedule";
 import { WORKER_CRON_TRIGGERS_INVENTORY } from "./scheduleSystems";
 import type { ResolvedScheduleTiming } from "./unifiedScheduleManagement";
 
 export type { JobRunLedgerTrigger, JobRunTrigger, LedgerLinkage };
 export type { ScheduleProvenance };
-export { isDue, isValidCron, zonedDateParts };
+export { isDue, isSubDailyCron, isSubDailyInterval, isValidCron, zonedDateParts };
 
 /* =================================================================
  * O1 — the hung-timeout mechanism, located (inventory §7 O1 / D6).

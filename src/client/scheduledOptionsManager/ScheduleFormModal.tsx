@@ -370,6 +370,8 @@ export function ScheduleFormModal(props: ScheduleFormModalProps) {
                 setDelaySeconds={props.setDelaySeconds}
                 scheduledDate={props.scheduledDate}
                 setScheduledDate={props.setScheduledDate}
+                subDailyOptIn={props.subDailyOptIn}
+                setSubDailyOptIn={props.setSubDailyOptIn}
               />
               <ThesisRiskFields
                 jobType={props.jobType}

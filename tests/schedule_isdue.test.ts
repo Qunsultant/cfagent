@@ -12,7 +12,7 @@ const MON_0900_EST = new Date("2026-01-05T14:00:00Z");
 const WED_0900_EDT = new Date("2026-10-28T13:00:00Z");
 const TUE_0900_EDT = new Date("2026-10-27T13:00:00Z");
 
-describe("isDue without a timeZone — byte-identical old semantics", () => {
+describe("isDue without a timeZone — full five-field UTC matching (#4235)", () => {
   it("matches hour/minute in UTC", () => {
     expect(isDue("0 6 * * *", undefined, new Date("2026-10-26T06:00:00Z"))).toBe(true);
     expect(isDue("0 6 * * *", undefined, new Date("2026-10-26T05:59:00Z"))).toBe(false);
@@ -20,18 +20,23 @@ describe("isDue without a timeZone — byte-identical old semantics", () => {
     expect(isDue("30 6 * * *", undefined, new Date("2026-10-26T06:30:00Z"))).toBe(true);
   });
 
-  it("preserves the opportunity-hunt never-fires quirk: '0 */6' is never due", () => {
-    // Number("*/6") is NaN, so the old code returns false for every instant.
-    // This is a quirk, deliberately preserved — not fixed — by the new code.
+  it("fires step hours: the old never-fires quirk is gone (#4235)", () => {
+    // "0 */6 * * *" used to map the hour through Number() to NaN and
+    // never fire; #4235 honors all five fields, so the step hours
+    // fire — and only the step hours.
+    expect(isDue("0 */6 * * *", undefined, new Date("2026-10-26T06:00:00Z"))).toBe(true);
+    expect(isDue("0 */6 * * *", undefined, new Date("2026-10-26T12:00:00Z"))).toBe(true);
+    expect(isDue("0 */6 * * *", undefined, new Date("2026-10-26T07:00:00Z"))).toBe(false);
     expect(isDue("0 */6 * * *", undefined, MON_0900_EDT)).toBe(false);
-    expect(isDue("0 */6 * * *", undefined, new Date("2026-10-26T12:00:00Z"))).toBe(false);
-    expect(isDue("0 */6 * * *", undefined, new Date("2026-10-26T06:00:00Z"))).toBe(false);
   });
 
-  it("ignores day-of-month/month/weekday fields, like the old code", () => {
-    // The old code reads only the first two fields.
-    expect(isDue("0 6 * * 0", undefined, new Date("2026-10-26T06:00:00Z"))).toBe(true);
-    expect(isDue("0 6 15 3 2", undefined, new Date("2026-10-26T06:00:00Z"))).toBe(true);
+  it("honors day-of-month/month/weekday fields (#4235)", () => {
+    // 2026-10-26 is a Monday. The old code read only the first two
+    // fields, so both of these fired; now the day fields gate.
+    expect(isDue("0 6 * * 0", undefined, new Date("2026-10-26T06:00:00Z"))).toBe(false);
+    expect(isDue("0 6 * * 1", undefined, new Date("2026-10-26T06:00:00Z"))).toBe(true);
+    expect(isDue("0 6 15 3 2", undefined, new Date("2026-10-26T06:00:00Z"))).toBe(false);
+    expect(isDue("0 6 26 10 1", undefined, new Date("2026-10-26T06:00:00Z"))).toBe(true);
   });
 
   it("returns false for unparseable minute/hour", () => {

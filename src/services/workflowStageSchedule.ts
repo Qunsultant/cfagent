@@ -285,6 +285,10 @@ export function createWorkflowStageScheduleAdapter(
               ? { intervalSeconds: input.timing.intervalSeconds }
               : {}
           : {}),
+        // Issue #4235 — forward the explicit per-schedule opt-in
+        // for a sub-daily re-time; without it the default daily cap
+        // rejects the update.
+        ...(input.subDailyOptIn === true ? { subDailyOptIn: true } : {}),
       }, Date.now());
       if (!result.ok) throw new Error(result.error);
       return result.record;

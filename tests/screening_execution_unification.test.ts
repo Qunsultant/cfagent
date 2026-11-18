@@ -330,8 +330,10 @@ describe("#982 S2: one execution path for NLQ / MCP / premium", () => {
     }
 
     // Timing-only update: payload is not re-validated or rewritten
-    // (legacy payloads stay updatable).
-    const timingOnly = resolveScheduleUpdate(current, { intervalSeconds: 3600 }, Date.now());
+    // (legacy payloads stay updatable). Issue #4235 — a 3600s
+    // interval is sub-daily, so the update carries the explicit
+    // per-schedule opt-in.
+    const timingOnly = resolveScheduleUpdate(current, { intervalSeconds: 3600, subDailyOptIn: true }, Date.now());
     expect(timingOnly.ok).toBe(true);
     if (timingOnly.ok) expect(timingOnly.payload).toEqual(current.payload);
 

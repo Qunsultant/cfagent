@@ -66,11 +66,13 @@ describe("previousCronTickMs (#3788)", () => {
     );
   });
 
-  it("returns undefined for the never-due no-timeZone quirk cron", () => {
-    // schedule.ts preserves this deliberately: "0 */6 * * *" maps the
-    // hour through Number() to NaN and is NEVER due without a timeZone.
-    // The watchdog mirrors the firing predicate, so it never flags it.
-    expect(previousCronTickMs("0 */6 * * *", NOW)).toBeUndefined();
+  it("finds the previous step-hour tick without a timeZone (#4235)", () => {
+    // #4235 removed the old never-due quirk: "0 */6 * * *" fires on
+    // its step hours, so the watchdog mirrors that — the previous
+    // tick before Mon 02:35 UTC is 00:00 UTC (a */6 hour).
+    expect(previousCronTickMs("0 */6 * * *", NOW)).toBe(
+      Date.parse("2026-11-09T00:00:00.000Z"),
+    );
     expect(isValidCron("0 */6 * * *")).toBe(true);
   });
 

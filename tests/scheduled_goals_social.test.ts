@@ -260,6 +260,10 @@ describe("addGoal social schedules", () => {
       id: "social-mixed",
       name: "Social mixed",
       cron: "0,30 9 * * 1,3,5",
+      // Issue #4235 — this cron runs twice a day (09:00 + 09:30),
+      // so it is sub-daily and carries the explicit opt-in; the
+      // ranges/lists acceptance this test pins is unchanged.
+      subDailyOptIn: true,
       operation: "social.publish",
       budgetCents: 1,
     });

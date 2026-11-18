@@ -75,6 +75,21 @@ export interface EtCronIntent {
    * Defaults to "*".
    */
   daysOfWeek?: string;
+  /**
+   * Issue #4235 — cron day-of-month field as an ET intent (1-31).
+   * A dated intent cannot survive a UTC day roll: when the ET→UTC
+   * conversion would move the calendar day, etToUtcCron throws
+   * instead of arming a cron that fires on the wrong date.
+   */
+  dayOfMonth?: number;
+  /**
+   * Issue #4235 — cron month field as an ET intent ("*", a single
+   * month 1-12, a comma list, or a range, with an optional "/step").
+   * Carried as-is into the UTC cron; like dayOfMonth it throws
+   * with a day roll, since the rolled date may fall in another
+   * month. Defaults to "*".
+   */
+  month?: string;
 }
 
 function parseDaysOfWeek(spec: string): Set<number> {
@@ -135,6 +150,13 @@ function shiftDaysOfWeek(spec: string, dayShift: number): string {
  * wall-clock time, using the New York offset in effect at
  * `referenceDate` (default: now). See the module header for the DST
  * caveat this cannot escape.
+ *
+ * Issue #4235 — dated intents: `dayOfMonth` / `month` are carried
+ * into the UTC cron's day/month fields. When the conversion would
+ * roll the calendar day (a late-evening ET time converts to the next
+ * UTC day), a dated intent throws instead of arming a cron that
+ * fires on the wrong date; a weekday intent shifts instead (see
+ * shiftDaysOfWeek).
  */
 export function etToUtcCron(intent: EtCronIntent, referenceDate: Date = new Date()): string {
   if (!Number.isInteger(intent.hour) || intent.hour < 0 || intent.hour > 23) {
@@ -143,12 +165,57 @@ export function etToUtcCron(intent: EtCronIntent, referenceDate: Date = new Date
   if (!Number.isInteger(intent.minute) || intent.minute < 0 || intent.minute > 59) {
     throw new RangeError(`ET minute must be an integer 0-59, got ${intent.minute}`);
   }
+  if (
+    intent.dayOfMonth !== undefined &&
+    (!Number.isInteger(intent.dayOfMonth) || intent.dayOfMonth < 1 || intent.dayOfMonth > 31)
+  ) {
+    throw new RangeError(`ET day-of-month must be an integer 1-31, got ${intent.dayOfMonth}`);
+  }
+  const month = intent.month === undefined ? "*" : intent.month.trim();
+  if (month !== "*" && !isMonthField(month)) {
+    throw new RangeError(`Unsupported month field: "${intent.month}"`);
+  }
   const offsetMinutes = newYorkOffsetMinutes(referenceDate);
   const totalMinutes = intent.hour * 60 + intent.minute - offsetMinutes;
   const dayShift = Math.floor(totalMinutes / 1440);
   const utcMinutes = ((totalMinutes % 1440) + 1440) % 1440;
   const utcHour = Math.floor(utcMinutes / 60);
   const utcMinute = utcMinutes % 60;
+  if (dayShift !== 0 && (intent.dayOfMonth !== undefined || intent.month !== undefined)) {
+    throw new RangeError(
+      `ET→UTC conversion would roll the calendar day for a dated intent (dayOfMonth ${intent.dayOfMonth ?? "*"}, month ${month}): pick an earlier ET time so the UTC date stays the same.`,
+    );
+  }
   const days = shiftDaysOfWeek(intent.daysOfWeek ?? "*", dayShift);
-  return `${utcMinute} ${utcHour} * * ${days}`;
+  return `${utcMinute} ${utcHour} ${intent.dayOfMonth ?? "*"} ${month} ${days}`;
+}
+
+/**
+ * Whether a string is a valid cron month field: "*", a single month
+ * 1-12, a comma list, or an a-b range, each with an optional
+ * "/step". A field validator, not a parser — the server validates
+ * the assembled cron again at creation.
+ */
+function isMonthField(field: string): boolean {
+  for (const part of field.split(",")) {
+    if (part === "") return false;
+    const segments = part.split("/");
+    if (segments.length > 2) return false;
+    const step = segments.length === 2 ? Number(segments[1]) : 1;
+    if (!Number.isInteger(step) || step < 1) return false;
+    const base = segments[0];
+    if (base === "*") continue;
+    if (base.includes("-")) {
+      const bounds = base.split("-");
+      if (bounds.length !== 2) return false;
+      const start = Number(bounds[0]);
+      const end = Number(bounds[1]);
+      if (!Number.isInteger(start) || !Number.isInteger(end)) return false;
+      if (start < 1 || end > 12 || start > end) return false;
+      continue;
+    }
+    const value = Number(base);
+    if (!Number.isInteger(value) || value < 1 || value > 12) return false;
+  }
+  return true;
 }
