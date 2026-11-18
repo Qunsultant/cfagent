@@ -845,6 +845,19 @@ function measure(): Map<string, number> {
  * move 1330/10827 -> 1330/10828; the NOT-PROVIDER marker is
  * restated 74/291 -> 74/298 (direct recount — the marker was stale
  * before this change).
+ * Baseline update (#5344, 2026-11-18): the CBO parity inventory +
+ * audit record file under docs/architecture/survey/ as verbatim dated
+ * snapshots (2026-11-18) — the inventory report, its three evidence
+ * files, and the 28-issue audit record. The evidence files name the
+ * broker identifiers they surveyed (the ETradeTradingHub.tsx file
+ * name, the /etrade/... route paths, the paid-seam identifiers);
+ * neutralizing those mentions would falsify the evidence record, so
+ * all rows are dispositioned HISTORICAL: 3 new rows (ux-actions.md
+ * etrade 24; routes.md etrade 3; compliance.md etrade 2). The
+ * inventory report and the audit record carry no provider-brand
+ * rows. The HISTORICAL marker is restated 162/791 -> 165/820.
+ * Baseline totals move 1332/10848 -> 1335/10877 (direct recount on
+ * bc0222ee).
  */
 const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (188 rows / 989 lines) ----
@@ -1868,7 +1881,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["docs/agents/copilot-broker-capability.md", "yahoo", 1],
   ["src/agents/orchestrator.ts", "alpaca", 1],
   ["src/config/asyncJobModes.ts", "alpaca", 1],
-  // ---- HISTORICAL (162 rows / 791 lines) ----
+  // ---- HISTORICAL (165 rows / 820 lines) ----
   ["docs/Assessment.md", "etrade", 6],
   ["docs/Assessment.md", "yahoo", 2],
   ["docs/agents/options-report-inventory.md", "etrade", 4],
@@ -1943,6 +1956,10 @@ const BASELINE: Array<[string, string, number]> = [
   ["docs/architecture/survey/3122-s0-dedup-report.md", "etrade", 6],
   ["docs/architecture/survey/phase2-survey.md", "etrade", 1],
   ["docs/architecture/survey/phase2-survey.md", "yahoo", 1],
+  // #5344 HISTORICAL: dated CBO survey snapshots (parity inventory + audit record, 2026-11-18) naming the broker identifiers surveyed.
+  ["docs/architecture/survey/ux-actions.md", "etrade", 24],
+  ["docs/architecture/survey/routes.md", "etrade", 3],
+  ["docs/architecture/survey/compliance.md", "etrade", 2],
   ["docs/compliance/facts-n-findings-01.md", "alpaca", 2],
   ["docs/compliance/facts-n-findings-01.md", "etrade", 5],
   ["docs/compliance/facts-n-findings-01.md", "public.com", 1],
