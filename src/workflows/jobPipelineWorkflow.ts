@@ -74,6 +74,7 @@ import {
 } from "../trading";
 import type { OptionsWorkflowStepDeps } from "../services/optionsPipelineJobs";
 import { optionsChainStepDepsForWorkflow } from "../services/optionsChainPipelineJobs";
+import { createDefaultResearchStepDeps } from "../services/researchPipelineJobs";
 import { fetchWikipediaIndexHtml } from "../services/indexListJob";
 import type { JobPipelineDeps } from "../services/jobPipelineEngine";
 import { JobPipelineError } from "../services/jobPipelineConfig";
@@ -355,6 +356,9 @@ export function createJobPipelineWorkflowDeps(env: Env): JobPipelineDeps {
       // on the stored definition, so a chain dispatched here executes
       // durably, with the workflow step as the engine's journal.
       optionsChainStepDepsForWorkflow(env),
+      // Issue #5237: research steps (`analyze.ooda` and `evaluate.apply`) compose
+      // into the shared registry in the workflow residency.
+      createDefaultResearchStepDeps(),
     ),
     invocation: "workflow-shard",
   };

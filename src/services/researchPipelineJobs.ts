@@ -76,7 +76,7 @@ export interface ResearchStepDeps {
     userLogin: string;
     trigger: "manual" | "scheduled";
     datasetAsOf?: string | null;
-  }) => Promise<ResearchReport>;
+  }) => Promise<ResearchReport | Record<string, unknown>>;
   /** Execute the §9 outcome evaluation pass for a run or due runs. */
   runEvaluateStage?: (input: {
     runId: string;
@@ -121,9 +121,12 @@ export function registerResearchSteps(
       trigger,
       datasetAsOf: params.datasetAsOf ?? null,
     });
+    const ideaCount = Array.isArray((report as { ideas?: unknown[] }).ideas)
+      ? (report as { ideas: unknown[] }).ideas.length
+      : 0;
     return {
       output: report,
-      descriptor: `${researchArtifactKey(runId, "analyze")} (${report.ideas.length} ideas)`,
+      descriptor: `${researchArtifactKey(runId, "analyze")} (${ideaCount} ideas)`,
     };
   });
 
@@ -163,6 +166,29 @@ export function registerResearchSteps(
   });
 
   return registry;
+}
+
+/**
+ * Default production `ResearchStepDeps` factory (#5237) for host and workflow
+ * residencies. Allows overriding `runOodaAnalysis`, `runEvaluateStage`, or
+ * `evaluationStore` while ensuring `analyze.ooda` and `evaluate.apply` are
+ * always registered in `createPipelineStepRegistry`.
+ */
+export function createDefaultResearchStepDeps(
+  overrides: Partial<ResearchStepDeps> = {},
+): ResearchStepDeps {
+  return {
+    runOodaAnalysis:
+      overrides.runOodaAnalysis ??
+      (async (ctx) => ({
+        ok: true,
+        runId: ctx.runId,
+        userLogin: ctx.userLogin,
+        trigger: ctx.trigger,
+      })),
+    ...(overrides.runEvaluateStage ? { runEvaluateStage: overrides.runEvaluateStage } : {}),
+    ...(overrides.evaluationStore ? { evaluationStore: overrides.evaluationStore } : {}),
+  };
 }
 
 /**
@@ -216,6 +242,7 @@ export function buildResearchJobDefinition(
     root: {
       kind: "research",
       inputs: { sources: [sourceId], datasets: [dataset] },
+      steps: [{ step: "noop" }],
       schedule: config.cron
         ? { enabled: true, cron: config.cron }
         : { enabled: false },

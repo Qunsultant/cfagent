@@ -61,6 +61,7 @@ import { createObservabilitySink } from "../../observability/createObservability
 import {
   controlResearchStage,
   dispatchResearchEngineRun,
+  executeResearchStageControl,
   type ResearchStageOp,
 } from "../../workflows/researchScreenEngine";
 
@@ -568,7 +569,7 @@ export async function handleScreenerResearchRoutes(
         // default op = status
       }
       try {
-        const result = controlResearchStage({
+        const result = await executeResearchStageControl({
           runId: decodeURIComponent(stageMatch[1]),
           stageId: decodeURIComponent(stageMatch[2]),
           op,

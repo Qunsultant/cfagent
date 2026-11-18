@@ -12,13 +12,21 @@ import { createJobPipelineStoresFromSql } from "../data/createJobPipelinePorts";
 import { createInMemoryJobPipelineStores } from "../data/inMemoryJobPipelineAdapter";
 import { InMemoryJobRunRecordStore } from "../data/inMemoryJobRunRecordAdapter";
 import { SqlJobRunRecordStore } from "../data/doSqliteJobRunRecordAdapter";
-import { JobPipelineControl, jobRunRecorderFromStore } from "../services/jobPipelineEngine";
+import {
+  JobPipelineControl,
+  jobRunRecorderFromStore,
+  type JobPipelineDeps,
+  type JobRunRecorder,
+  type JobStageView,
+} from "../services/jobPipelineEngine";
 import { createBuiltinStepRegistry } from "../services/jobPipelineSteps";
 import {
   buildResearchJobDefinition,
   assertResearchAopCompliance,
+  registerResearchSteps,
   RESEARCH_PIPELINE_STAGES,
   type ResearchPipelineStage,
+  type ResearchStepDeps,
 } from "../services/researchPipelineJobs";
 import { resolveResearchJobConfig } from "../config/researchJobConfig";
 import { researchEngineJobId } from "./researchDataPorts";
@@ -51,6 +59,10 @@ export interface DispatchResearchEngineInput {
   userLogin: string;
   trigger: "manual" | "scheduled";
   sql?: SqlStorage;
+  stores?: JobPipelineDeps["stores"];
+  runRecorder?: JobRunRecorder;
+  flags?: Pick<FeatureFlagPort, "isEnabled">;
+  researchDeps?: ResearchStepDeps;
   execute: () => Promise<Record<string, unknown>>;
 }
 
@@ -81,16 +93,59 @@ export async function dispatchResearchEngineRun(
   const runId = input.runId?.trim() || crypto.randomUUID();
   const engineJobId = researchEngineJobId(runId);
 
-  const stores = input.sql
-    ? createJobPipelineStoresFromSql(input.sql)
-    : createInMemoryJobPipelineStores();
+  const cutoverEnabled = await isResearchEngineCutoverEnabled(input.flags);
+  if (!cutoverEnabled) {
+    const startedAt = new Date().toISOString();
+    const startMs = Date.now();
+    const outcome = await input.execute();
+    const finishedAt = new Date().toISOString();
+    const durationMs = Math.max(0, Date.now() - startMs);
+    const stageVisibility: ResearchStageVisibility[] = RESEARCH_PIPELINE_STAGES.map((stageId) => ({
+      stageId,
+      startedAt,
+      finishedAt,
+      durationMs,
+      status: "completed",
+    }));
+
+    return {
+      engineJobId,
+      runId,
+      trigger: input.trigger,
+      userLogin: input.userLogin,
+      stages: RESEARCH_PIPELINE_STAGES,
+      stageVisibility,
+      cutoverMode: "direct_rollback",
+      outcome,
+    };
+  }
+
+  let capturedOutcome: Record<string, unknown> | undefined;
+  const baseDeps: ResearchStepDeps = input.researchDeps ?? {
+    runOodaAnalysis: async () => input.execute(),
+  };
+  const wiredDeps: ResearchStepDeps = {
+    ...baseDeps,
+    runOodaAnalysis: async (ctx) => {
+      const result = await baseDeps.runOodaAnalysis(ctx);
+      capturedOutcome = result as Record<string, unknown>;
+      return result;
+    },
+  };
+
+  const stores =
+    input.stores ??
+    (input.sql ? createJobPipelineStoresFromSql(input.sql) : createInMemoryJobPipelineStores());
+  const runRecorder =
+    input.runRecorder ??
+    jobRunRecorderFromStore(
+      input.sql ? new SqlJobRunRecordStore(input.sql) : new InMemoryJobRunRecordStore(),
+    );
   const control = new JobPipelineControl({
     stores,
-    runRecorder: jobRunRecorderFromStore(
-      input.sql ? new SqlJobRunRecordStore(input.sql) : new InMemoryJobRunRecordStore(),
-    ),
+    runRecorder,
     publisher: null,
-    steps: createBuiltinStepRegistry(),
+    steps: registerResearchSteps(createBuiltinStepRegistry(), wiredDeps),
     invocation: "sync",
   });
   const definition = buildResearchJobDefinition(runId, {
@@ -99,18 +154,32 @@ export async function dispatchResearchEngineRun(
   });
   await control.defineJob(definition as never);
 
-  const startedAt = new Date().toISOString();
-  const startMs = Date.now();
-  const outcome = await input.execute();
-  const finishedAt = new Date().toISOString();
-  const durationMs = Math.max(0, Date.now() - startMs);
-  const stageVisibility: ResearchStageVisibility[] = RESEARCH_PIPELINE_STAGES.map((stageId) => ({
-    stageId,
-    startedAt,
-    finishedAt,
-    durationMs,
-    status: "completed",
-  }));
+  const fallbackStartedAt = new Date().toISOString();
+  const dispatch = await control.runJob(engineJobId, { trigger: input.trigger });
+  const runOutcome = dispatch.completion ? await dispatch.completion : null;
+  const fallbackFinishedAt = new Date().toISOString();
+  const jobView = await control.getJob(engineJobId);
+
+  if ((runOutcome?.state ?? dispatch.state) === "failed") {
+    throw new Error(jobView.instance?.lastError || `Research engine job ${engineJobId} failed.`);
+  }
+
+  const stageVisibility: ResearchStageVisibility[] = RESEARCH_PIPELINE_STAGES.map((stageId) => {
+    const sv = jobView.stages.find((s) => s.kind === stageId);
+    const startedAt = sv?.startedAt ?? fallbackStartedAt;
+    const finishedAt = sv?.endedAt ?? sv?.startedAt ?? fallbackFinishedAt;
+    const durationMs =
+      sv?.durationMs ??
+      Math.max(0, Date.parse(finishedAt) - Date.parse(startedAt) || 0);
+    const failed = sv?.units.some((u) => u.status === "failed") ?? false;
+    return {
+      stageId,
+      startedAt,
+      finishedAt,
+      durationMs,
+      status: failed ? "failed" : "completed",
+    };
+  });
 
   return {
     engineJobId,
@@ -120,7 +189,7 @@ export async function dispatchResearchEngineRun(
     stages: RESEARCH_PIPELINE_STAGES,
     stageVisibility,
     cutoverMode: "engine",
-    outcome,
+    outcome: capturedOutcome ?? { engineRunId: dispatch.runId, state: dispatch.state },
   };
 }
 
@@ -158,5 +227,111 @@ export function controlResearchStage(input: ControlResearchStageInput): {
     stageId: input.stageId as ResearchPipelineStage,
     op: input.op,
     userLogin: input.userLogin,
+  };
+}
+
+export interface ExecuteResearchStageControlInput extends ControlResearchStageInput {
+  sql?: SqlStorage;
+  stores?: JobPipelineDeps["stores"];
+  runRecorder?: JobRunRecorder;
+  researchDeps?: ResearchStepDeps;
+}
+
+export interface ExecuteResearchStageControlResult {
+  ok: true;
+  engineJobId: string;
+  runId: string;
+  stageId: ResearchPipelineStage;
+  op: ResearchStageOp;
+  userLogin: string;
+  jobState: string;
+  engineRunId: string | null;
+  stage: JobStageView | null;
+}
+
+/**
+ * Execute a real per-stage control operation (`status`, `run`, `rerun`, `stop`,
+ * `resume`, `cancel`) against `JobPipelineControl` for `research:<runId>`.
+ */
+export async function executeResearchStageControl(
+  input: ExecuteResearchStageControlInput,
+): Promise<ExecuteResearchStageControlResult> {
+  const validated = controlResearchStage(input);
+  const stores =
+    input.stores ??
+    (input.sql ? createJobPipelineStoresFromSql(input.sql) : createInMemoryJobPipelineStores());
+  const runRecorder =
+    input.runRecorder ??
+    jobRunRecorderFromStore(
+      input.sql ? new SqlJobRunRecordStore(input.sql) : new InMemoryJobRunRecordStore(),
+    );
+  const deps: ResearchStepDeps = input.researchDeps ?? {
+    runOodaAnalysis: async (ctx) => ({
+      ok: true,
+      runId: ctx.runId,
+      stageId: validated.stageId,
+      userLogin: ctx.userLogin,
+    }),
+  };
+  const control = new JobPipelineControl({
+    stores,
+    runRecorder,
+    publisher: null,
+    steps: registerResearchSteps(createBuiltinStepRegistry(), deps),
+    invocation: "sync",
+  });
+
+  const existingDef = await stores.definitions.getDefinition(validated.engineJobId);
+  if (!existingDef) {
+    if (validated.op === "status") {
+      return {
+        ...validated,
+        jobState: "idle",
+        engineRunId: null,
+        stage: null,
+      };
+    }
+    const definition = buildResearchJobDefinition(validated.runId, {
+      userLogin: validated.userLogin,
+      trigger: "manual",
+    });
+    await control.defineJob(definition as never);
+  }
+
+  const before = await control.getJob(validated.engineJobId);
+  const childIdx = (before.definition.root.children ?? []).findIndex(
+    (c) => c.kind === validated.stageId,
+  );
+  if (childIdx < 0) {
+    throw new Error(
+      `Stage "${validated.stageId}" not found on engine job "${validated.engineJobId}".`,
+    );
+  }
+  const nodePath = String(childIdx);
+
+  if (validated.op === "run") {
+    const dispatch = !before.instance?.currentRunId
+      ? await control.runJob(validated.engineJobId, { trigger: "manual" })
+      : await control.runStage(validated.engineJobId, nodePath);
+    if (dispatch.completion) await dispatch.completion;
+  } else if (validated.op === "rerun") {
+    const dispatch = await control.rerunStage(validated.engineJobId, nodePath);
+    if (dispatch.completion) await dispatch.completion;
+  } else if (validated.op === "stop") {
+    await control.stopStage(validated.engineJobId, nodePath);
+  } else if (validated.op === "resume") {
+    const dispatch = await control.resumeStage(validated.engineJobId, nodePath);
+    if (dispatch.completion) await dispatch.completion;
+  } else if (validated.op === "cancel") {
+    await control.cancelStage(validated.engineJobId, nodePath);
+  }
+
+  const after = await control.getJob(validated.engineJobId);
+  const stageAfter = after.stages.find((s) => s.kind === validated.stageId) ?? null;
+  return {
+    ...validated,
+    jobState: after.instance?.state ?? "idle",
+    engineRunId: after.instance?.currentRunId ?? after.latestRun?.operation ?? null,
+    stage: stageAfter,
   };
 }
