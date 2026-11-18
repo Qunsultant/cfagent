@@ -176,6 +176,9 @@ decision is in [Packaging and deployment](#packaging-and-deployment).
 Every change to this container or to any doc it links gets a changelog
 entry here, newest first:
 
+- 2026-11-18 — Packaging and deployment: canonical endpoints named —
+  the one MCP server at https://mcp.openaimp.com/mcp and the one API
+  server at https://api.openaimp.com/api (ADR 0034 D12) (issue #5411).
 - 2026-11-18 — Standards conformance: technology stack linked —
   [tech-stack](../technology/tech-stack.md) (issue #5404).
 - 2026-11-18 — Technology, cloud, and vendor-agnostic principle
