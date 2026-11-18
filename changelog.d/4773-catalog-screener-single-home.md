@@ -1,0 +1,3 @@
+### Fixed
+
+- **The catalog screener spec is the single execution-mode home (#4773):** the catalog literal stays — the mode belongs in the job definition, and the definition lives in the catalog. A new pin proves the constant derives from it, the env override overlays it, and the override reaches mesh-door runs. Two real gaps found while verifying are fixed: a spec-defined job ran on the engine default instead of the spec's mode (the builder wrote the mode to a top-level field the resolver never reads), and `set_job_execution_mode` reported success while changing nothing (same dead field). Both now land the mode on the root node, which is the only place the engine reads it.
