@@ -1160,7 +1160,15 @@ If a merge queue is required, enqueue the PR. Ensure GitHub Actions workflows ha
 
 **Merge-queue auto-merge enrollment (moved from repo AGENTS.md, #3816; corrected by #4305/#4313).**
 
-Enrollment is the **queue entry**. Put the PR in the queue (`gh pr merge <n>` with no flags, or the `enqueuePullRequest` GraphQL mutation); the queue owns the strategy and validates the group on current `main`.
+Enrollment is the **queue entry**, and the entry is made with the `enqueuePullRequest` GraphQL mutation (issue #5569):
+
+```bash
+gh api graphql -F id="$(gh pr view <n> --json id --jq .id)" -f query='mutation($id: ID!) {
+  enqueuePullRequest(input: { pullRequestId: $id }) { mergeQueueEntry { position state } }
+}'
+```
+
+`gh pr merge <n>` without flags is **not** equivalent. On a PR whose checks are still running the CLI falls back to `enablePullRequestAutoMerge`, which records the repository's default method — SQUASH — even though the ruleset is rebase-only. The request can never merge, the queue does not have the PR, and nothing reports the difference (observed on #5531 on 2026-11-18: the CLI printed nothing, `autoMergeRequest.mergeMethod` was `SQUASH`, and the explicit mutation then enqueued the same head at position 5). Check with `gh pr view <n> --json autoMergeRequest`: a method other than REBASE is a dead request. `node scripts/pr-delivery-state.mjs` reads one PR's payload and names the state.
 
 Do **not** rely on GitHub's auto-merge request to merge here, and never pass strategy flags to `gh pr merge --auto`:
 
