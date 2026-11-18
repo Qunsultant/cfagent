@@ -183,17 +183,53 @@ best-effort and attaches the serialized context as the
 (no service identity, a shared address, no verified tenant, no
 approval reference, a PDP denial) or a store failure logs and
 leaves the request byte-identical — the write always proceeds.
-The three ledger handlers (`record`, `record-cfpay`,
-`record-native`) revalidate a carried header, log, and audit the
-outcome as `execution_context.revalidation`; absence is a silent
-no-op that never builds the store, and a denial never denies the
-request. The contract's staged statement stands: no production
-caller evaluates or enforces a context yet, and the enforcement
-flip belongs to the ledger-gate slice. The G-1 hole stays open
-until it lands (ADR 0034 D2, owner's choice). Note the agent path
-(`record`) carries no tenant: no tenant-scoped context can
-resolve for it, so its handler observes only — the workflow path
-(`record-cfpay`) is the path the context travels.
+The two remaining ledger handlers (`record`, `record-cfpay`)
+revalidate a carried header, log, and audit the outcome as
+`execution_context.revalidation`; absence is a silent no-op that
+never builds the store, and a denial never denies the request.
+(The third handler, `record-native`, was removed by #5572 — see
+the ledger-write gate below.) The contract's staged statement
+stands: no production caller evaluates or enforces a context
+yet. Note the agent path (`record`) carries no tenant: no
+tenant-scoped context can resolve for it, so its handler
+observes only — the workflow path (`record-cfpay`) is the path
+the context travels.
+
+### The ledger-write gate (#5572; CISO coordination #5348/#5349/#5350)
+
+The G-1 hole is closed by the ledger-write gate (hardening
+slice 1, design #5343 / ADR 0034 D2 — no interim ever shipped;
+the hole stayed open until this slice landed, by the owner's
+explicit choice). Both remaining ledger write-through handlers
+(`record`, `record-cfpay`) enforce `authorizeLedgerWrite`
+(`src/security/serviceDispatch.ts`) before writing: entry
+requires the request to present the configured service login
+(the #2331 equality rule — the consultation evaluates the
+service principal's binding, so any other presenter must never
+reach it), and the permission is `ledger:record` (GAP-2) over
+the system actor's binding (GAP-3), consulted per tenant via
+`authorizeSystemPrincipal`. Candidate tenants derive from the
+service principal's own memberships in the store, never from
+the request — two legitimate write paths carry no tenant, and
+a body tenantId is client-supplied from the handler's
+perspective. The gate allows iff the PDP allows in at least
+one provisioned tenant; every other outcome denies with a
+coded 403 and a `payments_ledger.gate` audit record, and a
+store/PDP failure throws to the branch's 500 with no data.
+The derivation is a PROPOSAL put to CISO review on the slice
+PR, not a CISO decision; the residual is stated plainly: the
+gate authorizes the actor, not the actor-in-the-write's
+tenant. `record-native` was removed by the same slice on a
+re-verified zero-production-caller grep — the workflow calls
+the native port directly, and the port, its readers, and the
+webhook arm are untouched. Production precondition, recorded
+on the slice PR: the gate denies legitimate ledger writes
+until CISO provisions the tenant-admin binding for the
+service principal (fail-loud callers stall in retry, failure
+credits fail, verified x402 payments error unrecorded;
+recovery is automatic once the binding exists). The owner
+directed merge-enforcing on 2026-11-18 with that consequence
+stated.
 
 ## 3. Bootstrap and the genesis window
 
@@ -249,6 +285,7 @@ and the approval each independently allow.
 | API-key mint | Step-up (fresh authentication), not PDP | 403 for stale and legacy sessions until re-login |
 | `GET /api/iaaa/overview` | PDP platform-scope check (`role:assign`, seam A) + wired session, server-side, always enforced | 401 no session; 403 legacy session; 403 wired non-admin with no data; 500 generic on corrupt store |
 | Platform-admin surfaces (tenant queues, KV wipe, user admin, service-user admin, lifecycle platform ops, SecHub policy/PDP/PEP/PIP views, telemetry mutations, reconcile routes) | PDP platform-scope check (`role:assign`, seam A) + wired session, always enforced | 401 no session; 403 wired non-admin with no data |
+| Ledger write-throughs (`POST .../ledger/record`, `record-cfpay`) | PDP tenant-scope check (`ledger:record`, GAP-3 system-principal consultation per provisioned tenant) + presented service identity, always enforced (#5572) | 403 coded, nothing written; 500 with no data on store/PDP failure |
 | IAAA admin panel | Same gate, client-side | Shows "not an admin" on 403 |
 
 ## 7. Deliberately ungated — and why
