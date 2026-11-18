@@ -326,6 +326,15 @@ describe("orchestrator research publish entry (#2327)", () => {
 
 describe("research scheduled-tick route (#2327)", () => {
   function makeRouteCtx() {
+    // The tick route now evaluates ctx.getOrm() eagerly in the fire
+    // path (the #2037 outcome write + the engine dispatch take it as
+    // an argument), so a throwing stub made this pin time-dependent:
+    // it failed on weekdays from 21:00 UTC (the fire hour) while the
+    // skip path never reached it. A real in-memory ORM keeps the pin
+    // window-independent; the dispatch itself stays mocked.
+    const sql = new MockSqlStorage();
+    const orm = new DatabaseORM(sql);
+    orm.initializeSchema("default_trader");
     return {
       getScreenerAgent: () => {
         throw new Error("unused in this pin");
@@ -333,9 +342,7 @@ describe("research scheduled-tick route (#2327)", () => {
       getScreenerExecutionContext: async () => undefined,
       getResearchAgent: vi.fn((_userLogin?: string) => null),
       runResearchAndPublish: vi.fn(async () => ({ success: true })),
-      getOrm: () => {
-        throw new Error("unused in this pin");
-      },
+      getOrm: () => orm,
       readSettingRaw: () => null,
       writeSetting: () => {},
       env: {},
