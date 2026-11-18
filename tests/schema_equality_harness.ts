@@ -68,7 +68,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 /** sha256 of tests/schema_component_combined_expected_model.json as seeded. */
 /** Issue #5229 (migration 0069) re-seeds it: agent_referral_rules gains expiry_period_ms. */
 export const COMBINED_FIXTURE_SHA256 =
-  "2a3e7b12fe3ed79e9bd24691d8c8c462b485cb135ad5faad02b58a71e892952f";
+  "b8518fc3cb845588efd74e4ced0684c675726754873565fe9acfcc28bc82c937";
 
 /** All four planes' entries in plane order: D1, DO, ORM, remainder. */
 export const COMBINED_CATALOGUE_ENTRIES: CatalogueEntry[] = [

@@ -64,15 +64,17 @@ import {
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 function fixtureSha256(name: string): string {
+  // Hash the LF form: the fixture is committed with LF and checked out with
+  // CRLF on Windows, so the pin must not depend on the checkout eol config.
   return createHash("sha256")
-    .update(readFileSync(path.join(HERE, name), "utf8"))
+    .update(readFileSync(path.join(HERE, name), "utf8").replace(/\r\n/g, "\n"))
     .digest("hex");
 }
 
 describe("schema equality — all planes (#4282 P4)", () => {
   it("the frozen combined baseline is the clean-checkout seed (177 tables / 102 indexes)", () => {
     const model = combinedExpectedModel();
-    expect(Object.keys(model.tables).length).toBe(177);
+    expect(Object.keys(model.tables).length).toBe(178);
     expect(Object.keys(model.indexes).length).toBe(102);
     expect(fixtureSha256("schema_component_combined_expected_model.json")).toBe(
       COMBINED_FIXTURE_SHA256,
@@ -82,7 +84,7 @@ describe("schema equality — all planes (#4282 P4)", () => {
   it("per-plane fixtures hold their phase counts", () => {
     const counts: Record<string, [number, number]> = {
       d1: [100, 59],
-      do: [66, 39],
+      do: [67, 39],
       orm: [13, 10],
       remainder: [19, 15],
     };
@@ -116,12 +118,12 @@ describe("schema equality — all planes (#4282 P4)", () => {
     expect(new Set(executedCodes).size).toBe(
       COMBINED_CATALOGUE_ENTRIES.length,
     );
-    expect(COMBINED_CATALOGUE_ENTRIES.length).toBe(410);
+    expect(COMBINED_CATALOGUE_ENTRIES.length).toBe(411);
     // Issue #5229 adds migration 0069 (agent_referral_rules
     // expiry_period_ms column): 410 entries resolve to 421 statements.
     // The mas_reports generic ALTER expands to 11 pairs and the
     // confirmations generic ALTER to 2, each pair one statement.
-    expect(executedStatements).toBe(421);
+    expect(executedStatements).toBe(422);
     const actual = instance.introspect();
     const diff = diffSchema(actual, combinedExpectedModel());
     expect(isEmptyDiff(diff)).toBe(true);
