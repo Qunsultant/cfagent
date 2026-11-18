@@ -51,6 +51,7 @@ PR.
 | [0031](0031-legacy-chain-per-stage-scheduling.md) | Legacy shard chain per-stage scheduling is mooted by the workflow-host migration: one scheduling model, chain-stage scheduling lands with #4471 (#4426) | Accepted |
 | [0032](0032-data-access-mechanism-standard.md) | Drizzle is the data-access standard; the mini-ORM is the DO standard (#3260) | Proposed |
 | [0033](0033-cross-store-consistency-contract.md) | Cross-store consistency contract: DO + D1 dual-write discipline and read-your-writes rules (#4935) | Accepted |
+| [0034](0034-cbo-api-layer.md) | CBO API layer: one security model, one catalog, one auth module (#5343) | Accepted |
 
 **Note on ADR 0004:** the number 0004 was assigned twice — to the UX token
 architecture decision and to the screener decoupling decision. Both records
