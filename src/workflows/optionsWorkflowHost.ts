@@ -17,6 +17,16 @@
  * mirror. defineJob upserts, so re-starting a run id re-defines
  * (bumping the version) rather than failing.
  *
+ * Issue #5270 — the start is idempotent per run id. A re-dispatch
+ * of a job whose instance is still in flight attaches to that
+ * instance (no re-define, no second create) instead of minting a
+ * duplicate; a paused job refuses by name (resume goes through the
+ * control plane). The real-binding create rides the #2989 managed
+ * seam with the deterministic id `workflowIdForJob(jobId)`, so two
+ * dispatches racing past the residency check converge on one
+ * instance. No fallback id: the derived id is always valid for
+ * these job shapes and always the actual id.
+ *
  * The acting login rides the raw config beside the request, so the
  * resolving steps can rebuild owner-scoped ports per invocation
  * (see optionsPipelineJobs.ts). The read-back (readOptionsWorkflowRun)
@@ -89,6 +99,7 @@ import {
   type JobRunRecorder,
   type JobStageView,
 } from "../services/jobPipelineEngine";
+import { JobPipelineError } from "../services/jobPipelineConfig";
 import { createBuiltinStepRegistry } from "../services/jobPipelineSteps";
 import {
   buildOptionsChainJobDefinition,
@@ -118,6 +129,8 @@ import {
   type UniverseDepsStageInput,
 } from "./optionsStepPorts";
 import { OPTIONS_PIPELINE_STAGES } from "./stageRuntimeIds";
+import { startManagedWorkflowInstance } from "./workflowInstanceSeam";
+import { workflowIdForJob } from "./workflowPorts";
 
 /** What one durable options-screen start needs. */
 export interface StartOptionsScreenWorkflowInput {
@@ -167,6 +180,50 @@ export interface StartOptionsScreenWorkflowOpts {
 
 function workflowNotConfigured(reason: string): Error {
   return new Error(`job_pipeline_workflow_not_configured: ${reason}`);
+}
+
+/** The instance states a re-dispatch may attach to: the run is still in flight. */
+const ATTACHABLE_WORKFLOW_RUN_STATES = new Set(["queued", "running"]);
+
+/**
+ * Issue #5270 — attach a re-dispatch to the job's in-flight run,
+ * when one exists. Reads the residency record: queued/running
+ * attaches, returning the recorded workflow instance id, or the
+ * derived id when the instance has not stamped one yet (the
+ * derived id IS the actual id — the seam creates through the
+ * managed start with no fallback, so no other id is ever used);
+ * paused refuses by name (the settled instance cannot be attached
+ * to — resume goes through the control plane's resumeJob, which
+ * never routes through this seam); absent (job_not_found), idle,
+ * or terminal returns null and the caller dispatches as today. Any
+ * other read failure propagates fail-closed, never silently
+ * dispatching over an unreadable record.
+ */
+async function attachToInFlightRun(
+  control: JobPipelineControl,
+  jobId: string,
+): Promise<{ instanceId: string; jobId: string } | null> {
+  let view;
+  try {
+    view = await control.getJob(jobId);
+  } catch (err) {
+    if (err instanceof JobPipelineError && err.code === "job_not_found") return null;
+    throw err;
+  }
+  const instance = view.instance;
+  if (!instance) return null;
+  if (ATTACHABLE_WORKFLOW_RUN_STATES.has(instance.state)) {
+    return {
+      instanceId: instance.runWorkflowInstanceId ?? workflowIdForJob(jobId),
+      jobId,
+    };
+  }
+  if (instance.state === "paused") {
+    throw new Error(
+      `options_workflow_paused_resume_required: job ${jobId} is paused; resume it through the control plane (resumeJob) instead of re-dispatching — the settled workflow instance cannot be attached to`,
+    );
+  }
+  return null;
 }
 
 /** The D1-backed run recorder for the workflow residency — the same adapter the start seam builds. */
@@ -271,6 +328,11 @@ export async function startOptionsScreenWorkflow(
     steps: createBuiltinStepRegistry(),
     invocation: "workflow-shard",
   });
+  // Issue #5270 — attach before defining: a re-dispatch of an
+  // in-flight run returns the existing instance with no define
+  // (no version bump under a running run) and no create.
+  const attached = await attachToInFlightRun(defineControl, jobId);
+  if (attached) return attached;
   await defineControl.defineJob(definition);
 
   if (opts.startWorkflow) {
@@ -283,10 +345,17 @@ export async function startOptionsScreenWorkflow(
       "the JOB_PIPELINE_WORKFLOW binding is not configured in this deployment; the run was not dispatched.",
     );
   }
-  const created = await workflow.create({
+  // Issue #5270 — the create rides the #2989 managed seam with the
+  // deterministic id for this job: two dispatches racing past the
+  // residency check converge on one instance (the second adopts).
+  // No fallback id: the derived id is always valid for these job
+  // shapes and always the actual id, so attach's derived fallback
+  // is never wrong.
+  const started = await startManagedWorkflowInstance(workflow, {
+    id: workflowIdForJob(jobId),
     params: { jobId, trigger },
   });
-  return { instanceId: created.id, jobId };
+  return { instanceId: started.workflowId, jobId };
 }
 
 /** What one durable strategy-screen start needs: the options-screen start, minus the job kind (pinned to strategy). */
@@ -417,6 +486,12 @@ export async function startOptionsChainWorkflow(
     steps: createBuiltinStepRegistry(),
     invocation: "workflow-shard",
   });
+  // Issue #5270 — attach before defining, as in
+  // startOptionsScreenWorkflow: a re-dispatch of an in-flight
+  // chain returns the existing instance with no define and no
+  // create.
+  const attached = await attachToInFlightRun(defineControl, jobId);
+  if (attached) return attached;
   await defineControl.defineJob(definition);
 
   if (opts.startWorkflow) {
@@ -429,10 +504,13 @@ export async function startOptionsChainWorkflow(
       "the JOB_PIPELINE_WORKFLOW binding is not configured in this deployment; the chain was not dispatched.",
     );
   }
-  const created = await workflow.create({
+  // Issue #5270 — the create rides the #2989 managed seam with the
+  // deterministic id for this chain, as in startOptionsScreenWorkflow.
+  const started = await startManagedWorkflowInstance(workflow, {
+    id: workflowIdForJob(jobId),
     params: { jobId, trigger },
   });
-  return { instanceId: created.id, jobId };
+  return { instanceId: started.workflowId, jobId };
 }
 
 /**
