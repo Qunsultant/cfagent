@@ -296,6 +296,9 @@ export interface TelemetryReconcileRouteDeps {
   tenantId: string;
   store: TelemetryStore | null;
   loadTrackRecord: () => Promise<{ ideas: TrackRecordIdeaInput[] }>;
+  /** #5059: the calibration engine the post-import proposal pass uses.
+   *  Composed from the store when absent. */
+  engine?: TelemetryCalibrationEngine;
   /** Whose track record was imported (the research:<login> instance). */
   userLogin: string;
   limit?: number;
@@ -308,6 +311,12 @@ export interface TelemetryReconcileReport {
   imported: number;
   deferred: number;
   pendingSkipped: number;
+  /** #5059: calibration proposals created from the freshly imported
+   *  realizations (the table's content consumer). */
+  calibrationsCreated?: number;
+  /** #5059: why the proposal pass failed, when it did. The import
+   *  already landed; this is reported, never thrown. */
+  calibrationError?: string | null;
 }
 
 export async function handleTelemetryReconcileRoute(
@@ -333,6 +342,21 @@ export async function handleTelemetryReconcileRoute(
     const limit = deps.limit ?? 500;
     const batch = candidates.slice(0, limit);
     const result = await deps.store.recordRealizations(batch);
+    // Issue #5059 (AG-5): the realization rows are consumed for their
+    // CONTENT, not just deduped — the calibration engine reads the fresh
+    // window and proposes falsification-driven decisions for human review.
+    // Best-effort: the import has already landed, so a proposal-pass
+    // failure is reported in the response, never thrown.
+    let calibrationsCreated = 0;
+    let calibrationError: string | null = null;
+    try {
+      const engine =
+        deps.engine ?? new TelemetryCalibrationEngine(deps.store);
+      const proposed = await engine.proposeCalibrations(deps.tenantId);
+      calibrationsCreated = proposed.created.length;
+    } catch (err) {
+      calibrationError = err instanceof Error ? err.message : String(err);
+    }
     const report: TelemetryReconcileReport = {
       userLogin: deps.userLogin,
       total: rows.length,
@@ -340,6 +364,8 @@ export async function handleTelemetryReconcileRoute(
       imported: result.recorded,
       deferred: candidates.length - result.recorded,
       pendingSkipped,
+      calibrationsCreated,
+      calibrationError,
     };
     return Response.json(report);
   } catch {
