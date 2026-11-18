@@ -44,8 +44,27 @@ function quote(symbol: string): BrokerQuote {
   return { symbol, lastPrice: 100, changePercent: 1, volume: 1_000_000, week52High: 120, week52Low: 80 } as BrokerQuote;
 }
 
+// Issue #4433: the route screens through the one engine seam — the fake
+// seam answers with a run over exactly the shard it was given, so the
+// universe-resolution pins below observe the route's own disclosure.
+function fakeAgent() {
+  return {
+    isScreenRunning: async () => ({ running: false, startedAt: null, runId: null, status: "idle" as const }),
+    chargeScreenQuota: async () => {},
+    getHistory: async () => [],
+  };
+}
+
+let seam: ReturnType<typeof vi.fn>;
+
 function ctx(): BrokerScreenRouteContext {
-  return { env: { APP_ENV: "TEST" } as any, getOrm: () => undefined, readSettingRaw: () => null };
+  return {
+    env: { APP_ENV: "TEST" } as any,
+    getOrm: () => undefined,
+    readSettingRaw: () => null,
+    getScreenerAgent: () => fakeAgent() as any,
+    runStockScreenViaEngine: seam as any,
+  };
 }
 
 function post(body: unknown) {
@@ -64,6 +83,29 @@ beforeEach(() => {
   tenant.broker = "alpaca";
   listingsState.fail = false;
   listingsState.size = 40;
+  seam = vi.fn(async (input: any) => {
+    const shardSymbols = input.commandOverrides.shards[0].symbols as Array<{ symbol: string }>;
+    return {
+      results: [
+        {
+          timestamp: "2026-11-18T00:00:00.000Z",
+          trigger: "manual",
+          provider: "alpaca",
+          universe: input.spec.universe,
+          sector: "ALL",
+          success: true,
+          totalScanned: shardSymbols.length,
+          matchedCount: shardSymbols.length,
+          opportunities: [],
+          allStocks: shardSymbols.map((s) => ({ symbol: s.symbol })),
+          discoveryMessage: "",
+        },
+      ],
+      collation: null,
+      jobId: "screener:manual:test:1",
+      workflowId: "wf-test",
+    };
+  });
   getPlatform = vi
     .spyOn(TradingPlatformRegistry, "getPlatform")
     .mockImplementation(() => ({ getQuote: async (s: string) => quote(s) }) as any);
@@ -111,6 +153,7 @@ describe("a named universe resolves, bounded and disclosed (#3272)", () => {
     expect(body.code).toBe("LISTINGS_UNAVAILABLE");
     expect(body.message).toContain("No curated table is substituted");
     expect(getPlatform).not.toHaveBeenCalled();
+    expect(seam).not.toHaveBeenCalled();
   });
 
   it("still prefers an explicit symbol list", async () => {

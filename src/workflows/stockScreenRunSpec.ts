@@ -36,6 +36,13 @@
  *     spec is a canonical record of the leg, not an
  *     execution reroute: goal execution stays in
  *     goalDrivenScreen + goal dispatch.
+ *   - Broker route (issue #4433): source "broker", deliver
+ *     false, provider the tenant-resolved broker the route
+ *     stamps (the route screens the broker's own quotes, so
+ *     the broker names the provider), universe the resolved
+ *     universe id or "symbols" for an explicit list, delivery
+ *     = {} — the route has no deliver step, exactly as the
+ *     market-data divergence.
  *
  * Issue #4431 (S5/N3): the provider is never hardcoded per route
  * anymore. The routes resolve the tenant's effective data-provider
@@ -76,7 +83,7 @@ export interface StockScreenDelivery {
   generatePdf?: boolean;
 }
 
-export type StockScreenSource = "etrade" | "market-data" | "goal" | "nlq" | "mesh" | "research" | "premium" | "scheduled";
+export type StockScreenSource = "etrade" | "market-data" | "goal" | "nlq" | "mesh" | "research" | "premium" | "scheduled" | "broker";
 
 /**
  * Issue #2908 (G1 under #2764) — the run's trigger vocabulary.

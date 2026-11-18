@@ -564,6 +564,8 @@ export async function routeRequest(deps: RouteRequestDeps, request: Request): Pr
     env: deps.env,
     getOrm: () => deps.getOrm(),
     readSettingRaw: (key) => deps.readSettingRaw(key),
+    // Issue #4433: the agent the engine seam gates + reads back through.
+    getScreenerAgent: (userLogin) => deps.getScreenerAgent(userLogin),
   });
   if (brokerScreenResponse) return brokerScreenResponse;
 
