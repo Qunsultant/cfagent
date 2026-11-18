@@ -12,6 +12,7 @@ import {
   NavIcons,
   NAV_ICON_MAP,
   NAV_BADGE_TONES,
+  isNavIdVisible,
   type NavTabId,
 } from "./NavigationMenu";
 import { BRAND } from "../branding";
@@ -182,11 +183,9 @@ export function LeftNavBar({
     return isTabFeatureEnabled(sub.id as NavTabId);
   };
 
-  const isTabVisible = (id: string) => {
-    if (!isTabFeatureEnabled(id as NavTabId)) return false;
-    if (!visibleTabs) return true;
-    return visibleTabs[id] !== false;
-  };
+  // Issues 3696/3697: the one visibility lookup — fail-closed, shared
+  // with the top strip, so a hidden parent hides its subs in both modes.
+  const isTabVisible = (id: string) => isNavIdVisible(id, visibleTabs);
 
   const isSubActive = (subId: string): boolean => {
     const currentView =

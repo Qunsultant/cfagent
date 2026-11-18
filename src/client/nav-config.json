@@ -222,6 +222,14 @@
       }
     },
     {
+      "id": "nav-settings",
+      "navGroup": "nav-settings",
+      "crumb": "Navigation Settings",
+      "category": "Platform",
+      "icon": "Settings",
+      "description": "Navigation presets and visible tabs"
+    },
+    {
       "id": "observability",
       "navGroup": "observability",
       "crumb": "Observability",

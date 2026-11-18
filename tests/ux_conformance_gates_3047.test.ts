@@ -299,6 +299,10 @@ const CONFORMING_ROUTES: Record<string, string> = {
   // The three section panels keep their own entries below — they
   // still render PageShell inside the hub's tab chrome.
   "marketing-hub": "src/client/MarketingHubHome.tsx",
+  // Issues 3696/3697: the Navigation Settings page renders from the
+  // shell (Chat.tsx TAB_CONTENT → NavSettingsPage), which carries
+  // PageTemplate + PageSection, primitives only.
+  "nav-settings": "src/client/NavSettingsPage.tsx",
   ads: "src/client/chat/tabs/AdsTab.tsx",
   referrals: "src/client/chat/tabs/ReferralsTab.tsx",
   revenue: "src/client/chat/tabs/RevenueTab.tsx",
@@ -384,6 +388,9 @@ const EXPECTED_TAB_CONTENT_KEYS = [
   // Issue #5169: the Observability home renders from the shell —
   // its TAB_CONTENT entry joins the shell-conforming keys.
   "observability",
+  // Issues 3696/3697: the Navigation Settings page renders from the
+  // shell — its TAB_CONTENT entry joins the shell-conforming keys.
+  "nav-settings",
 ];
 
 const EXPECTED_SUB_TABS = [
@@ -495,6 +502,9 @@ const CONFORMING_INTERIORS: string[] = [
   // Issue #4825: the Audit & Vault page — 5 sections, zero bespoke,
   // kpiRibbon slot filled; its register entry is removed in the same PR.
   "src/client/AuditVaultPage.tsx",
+  // Issues 3696/3697: the Navigation Settings page (PageTemplate +
+  // PageSection + CardHeader compositions, zero bespoke).
+  "src/client/NavSettingsPage.tsx",
   // Issue #4927 (S-U5): the seven migrated interiors — Agents,
   // Docs & Reports, Platform Admin, Schedules, Approvals, Queues,
   // Endpoints; their register entries are removed in the same PR.
@@ -581,6 +591,8 @@ const INTERIOR_SURFACE_FILES: string[] = [
   "src/client/ObservabilityHome.tsx",
   // Issue 4682: the Marketing Hub home (route file).
   "src/client/MarketingHubHome.tsx",
+  // Issues 3696/3697: the Navigation Settings page (route file).
+  "src/client/NavSettingsPage.tsx",
   "src/client/chat/tabs/AdsTab.tsx",
   "src/client/chat/tabs/ReferralsTab.tsx",
   "src/client/chat/tabs/RevenueTab.tsx",

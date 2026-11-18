@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from "react";
 import type { ThemeMode } from "../theme";
 import { StockSearchBar } from "./StockSearchBar";
-import { Badge, Button, Menu, type BadgeTone, type MenuItem } from "./ui";
+import { Badge, Button, Flex, Menu, Notice, Stack, type BadgeTone, type MenuItem } from "./ui";
 import { ROUTES, DEFAULT_VISIBLE_NAV_TABS, getNavGroup, getRoute, hasNavEntry, type RouteId, type NavEntryMeta, type RouteCategory } from "../routes";
 import {
   DEFAULT_LEFT_NAV_CONFIG,
+  SUB_MENU_CONFIGS,
   findNavItemConfig,
   isNavItemOrSubItemActive,
   type NavMenuItemConfig,
@@ -81,6 +82,15 @@ export interface NavigationMenuProps {
   onCycleTheme?: () => void;
   onAskAgent?: (query: string) => void;
   visibleTabs?: Record<string, boolean>;
+  /**
+   * Issues 3696/3697: applying a preset from the top strip's empty
+   * state. The preset key travels with the map so the selection
+   * survives reload as the named preset, not a bare map.
+   */
+  onSetVisibleTabs?: (
+    tabs: Record<string, boolean>,
+    presetKey?: NavPresetKey | null,
+  ) => void;
   /** Issue #69: unread broker-alert count badged on the Portfolio item. */
   alertBadgeCount?: number;
   onRefresh?: () => void;
@@ -88,57 +98,258 @@ export interface NavigationMenuProps {
   lastRefreshedAt?: string;
 }
 
-export const NAV_TAB_PRESETS: Record<string, Record<string, boolean>> = {
-  all: { ...DEFAULT_VISIBLE_NAV_TABS },
-  traderFocus: {
-    autopilot: true,
-    order: true,
-    portfolio: true,
-    ledger: true,
-    "options-flows": true,
-    options: true,
-    screeners: true,
-    scanner: false,
-    research: true,
-    chat: true,
-    voice: false,
-    omnichannel: false,
-    workflows: false,
-    "workflow-runs": false,
-    endpoints: false,
-    nlq: false,
-    audit: false,
-    payments: false,
-    referrals: false,
-    ads: false,
-    "marketing-hub": false,
-    revenue: false,
-  },
-  minimal: {
-    autopilot: true,
-    order: true,
-    portfolio: true,
-    ledger: false,
-    "options-flows": false,
-    options: false,
-    screeners: false,
-    scanner: false,
-    research: true,
-    chat: true,
-    voice: false,
-    omnichannel: false,
-    workflows: false,
-    "workflow-runs": false,
-    endpoints: false,
-    nlq: false,
-    audit: false,
-    payments: false,
-    referrals: false,
-    ads: false,
-    "marketing-hub": false,
-    revenue: false,
-  },
+/**
+ * Nav presets (issues 3696 S1 + 3697 S2, subs of epic 3695).
+ *
+ * The preset source of truth is the left-nav config, not a hand-listed
+ * map: category presets are COMPUTED from `DEFAULT_LEFT_NAV_CONFIG` by
+ * section, so a config change (a new item, a section move) flows into
+ * the presets instead of silently drifting from them. `alltabs` is every
+ * config id; `none` is empty. Only `minimal` is a curated list, decided
+ * by Ceos 2026-11-17; `trading` is the Execution section plus `orders`,
+ * `payment` the Billing section plus `sandbox` — the two cross-section
+ * members the decided set names. The retired `all` / `traderFocus`
+ * keys are gone with the menu buttons that used them.
+ *
+ * A preset map is keyed by config id only (26 on main at build time).
+ * Route ids with a navEntry but no config entry resolve through their
+ * left-nav parent — see `routeOnlyNavParent` — so the map never has to
+ * list them.
+ */
+export type NavPresetKey =
+  | "alltabs"
+  | "research"
+  | "trading"
+  | "payment"
+  | "marketing"
+  | "platform"
+  | "minimal"
+  | "none";
+
+export const NAV_PRESET_KEYS: NavPresetKey[] = [
+  "alltabs",
+  "research",
+  "trading",
+  "payment",
+  "marketing",
+  "platform",
+  "minimal",
+  "none",
+];
+
+export const NAV_PRESET_LABELS: Record<NavPresetKey, string> = {
+  alltabs: "All Tabs",
+  research: "Research",
+  trading: "Trading",
+  payment: "Payment",
+  marketing: "Marketing",
+  platform: "Platform",
+  minimal: "Minimal",
+  none: "None",
 };
+
+/** localStorage key for the selected preset, written beside the map. */
+export const NAV_PRESET_STORAGE_KEY = "nextgentp_nav_preset";
+
+/** Every id the left-nav config renders, in config order. */
+export function leftNavConfigIds(): string[] {
+  return DEFAULT_LEFT_NAV_CONFIG.sections.flatMap((section) =>
+    section.items.map((item) => item.id),
+  );
+}
+
+/** The config ids of one nav section, by category. */
+export function leftNavSectionIds(category: RouteCategory): string[] {
+  return DEFAULT_LEFT_NAV_CONFIG.sections
+    .filter((section) => section.category === category)
+    .flatMap((section) => section.items.map((item) => item.id));
+}
+
+/** The curated minimal set (Ceos 2026-11-17): the five desk essentials. */
+const MINIMAL_PRESET_IDS = [
+  "autopilot",
+  "order",
+  "portfolio",
+  "stock-hub",
+  "chat",
+];
+
+export function buildPresetMap(key: NavPresetKey): Record<string, boolean> {
+  const ids = leftNavConfigIds();
+  const members = (members: string[]): Record<string, boolean> =>
+    Object.fromEntries(ids.map((id) => [id, members.includes(id)]));
+  switch (key) {
+    case "alltabs":
+      return Object.fromEntries(ids.map((id) => [id, true]));
+    case "research":
+      return members(leftNavSectionIds("Intelligence"));
+    case "trading":
+      return members([...leftNavSectionIds("Execution"), "orders"]);
+    case "payment":
+      return members([...leftNavSectionIds("Billing"), "sandbox"]);
+    case "marketing":
+      return members(leftNavSectionIds("Marketing"));
+    case "platform":
+      // The Sandbox section carries category Platform in the config,
+      // but the decided set puts sandbox in `payment`, not here.
+      return members(
+        leftNavSectionIds("Platform").filter((id) => id !== "sandbox"),
+      );
+    case "minimal":
+      return members(MINIMAL_PRESET_IDS);
+    case "none":
+      return Object.fromEntries(ids.map((id) => [id, false]));
+  }
+}
+
+export const NAV_TAB_PRESETS: Record<NavPresetKey, Record<string, boolean>> = {
+  alltabs: buildPresetMap("alltabs"),
+  research: buildPresetMap("research"),
+  trading: buildPresetMap("trading"),
+  payment: buildPresetMap("payment"),
+  marketing: buildPresetMap("marketing"),
+  platform: buildPresetMap("platform"),
+  minimal: buildPresetMap("minimal"),
+  none: buildPresetMap("none"),
+};
+
+export function isNavPresetKey(value: unknown): value is NavPresetKey {
+  return (
+    typeof value === "string" &&
+    (NAV_PRESET_KEYS as string[]).includes(value)
+  );
+}
+
+/**
+ * The preset a complete map exactly matches, or null for a custom
+ * selection. Compared over the config ids only.
+ */
+export function derivePresetKey(
+  tabs: Record<string, boolean>,
+): NavPresetKey | null {
+  for (const key of NAV_PRESET_KEYS) {
+    const preset = NAV_TAB_PRESETS[key];
+    if (leftNavConfigIds().every((id) => tabs[id] === preset[id])) {
+      return key;
+    }
+  }
+  return null;
+}
+
+/**
+ * Complete a persisted visible-tabs map over the current config ids.
+ * Missing ids fill from the saved preset when it is valid — and from
+ * `none` when every saved entry is false, so a legacy deselect-all
+ * (written before the preset key existed) never resurrects tabs with
+ * the alltabs default. Never-saved (`null`) starts at alltabs.
+ */
+export function completeVisibleTabs(
+  saved?: Record<string, boolean> | null,
+  savedPreset?: string | null,
+): Record<string, boolean> {
+  const ids = leftNavConfigIds();
+  if (!saved) return { ...NAV_TAB_PRESETS.alltabs };
+  const present = ids.filter((id) => id in saved);
+  const allPresentFalse =
+    present.length > 0 && present.every((id) => saved[id] === false);
+  const base = allPresentFalse
+    ? NAV_TAB_PRESETS.none
+    : isNavPresetKey(savedPreset)
+      ? NAV_TAB_PRESETS[savedPreset]
+      : NAV_TAB_PRESETS.alltabs;
+  const out: Record<string, boolean> = {};
+  for (const id of ids) {
+    out[id] = id in saved ? saved[id] === true : base[id];
+  }
+  return out;
+}
+
+/**
+ * The left-nav parent a route-only nav id follows. Route-only ids have
+ * a navEntry but no config entry (checkout, docs, endpoints, ledger,
+ * payment-assurance, revenue, workflows); each is a sub-menu entry of
+ * its parent in the nav config. Derived, not hand-listed: the parent is
+ * the sub-menu key that lists the id AND is itself a config item —
+ * `workflows` is listed under workflow-runs and workflow-catalog, and
+ * only workflow-runs is a config item, so it wins. Self-entries
+ * (agents and payments list themselves as their own first sub-item)
+ * are not parents.
+ */
+export function routeOnlyNavParent(id: string): string | undefined {
+  const configIds = leftNavConfigIds();
+  const parents = Object.entries(SUB_MENU_CONFIGS)
+    .filter(([key, items]) => key !== id)
+    .filter(([, items]) => items.some((item) => item.id === id))
+    .map(([key]) => key)
+    .filter((key) => configIds.includes(key));
+  return parents[0];
+}
+
+/**
+ * The one visibility lookup for every nav id, in both nav modes.
+ * Feature flags still gate first (a preset never bypasses them). A
+ * config id reads the map; a route-only id reads its parent. Absent
+ * from the map means hidden — never visible by default. No map at all
+ * (tests, unmounted shell) means everything is visible, as before.
+ * The optional flags override exists so tests can pin the parent
+ * following with the flags on, instead of through the test-env
+ * defaults (which gate autopilot, order, orders, voice, payments off).
+ */
+export function isNavIdVisible(
+  id: string,
+  visibleTabs?: Record<string, boolean>,
+  flags?: Record<string, boolean>,
+): boolean {
+  if (!isTabFeatureEnabled(id as NavTabId, flags)) return false;
+  if (!visibleTabs) return true;
+  // A route-only id follows its left-nav parent wholesale — the
+  // parent's flag gate and map entry decide, so a hidden parent hides
+  // the child even when the child itself is ungated. The direct map
+  // entry applies only to config ids (the completed map never carries
+  // route-only keys; a legacy map's stale ones must not override the
+  // parent).
+  const parent = routeOnlyNavParent(id);
+  if (parent) return isNavIdVisible(parent, visibleTabs, flags);
+  if (id in visibleTabs) return visibleTabs[id] === true;
+  return false;
+}
+
+/**
+ * The preset buttons, shared by the Navigation Settings page and the
+ * top strip's empty state. No bespoke classes: Button variant + tone
+ * carry the active state, with aria-pressed for assistive tech.
+ */
+export function NavPresetButtons({
+  activePreset,
+  onApplyPreset,
+}: {
+  activePreset: NavPresetKey | null;
+  onApplyPreset: (key: NavPresetKey) => void;
+}) {
+  return (
+    <Flex gap="2" wrap>
+      {NAV_PRESET_KEYS.map((key) => (
+        <Button
+          key={key}
+          type="button"
+          variant={activePreset === key ? "primary" : "secondary"}
+          size="sm"
+          onClick={() => onApplyPreset(key)}
+          aria-pressed={activePreset === key}
+          data-preset={key}
+          title={
+            key === "none"
+              ? "Hide every navigation tab"
+              : `Show the ${NAV_PRESET_LABELS[key]} tabs`
+          }
+        >
+          {activePreset === key ? "✓ " : ""}
+          {NAV_PRESET_LABELS[key]}
+        </Button>
+      ))}
+    </Flex>
+  );
+}
 
 // Crisp, modern SVG icons designed for institutional UI
 export const NavIcons = {
@@ -693,6 +904,7 @@ export function NavigationMenu({
   onCycleTheme,
   onAskAgent,
   visibleTabs,
+  onSetVisibleTabs,
   alertBadgeCount,
   onRefresh,
   isRefreshing,
@@ -721,21 +933,22 @@ export function NavigationMenu({
     navigateToDeepLink(deepLinkForNavNode(null, id));
   };
 
-  const isTabVisible = (id: string) => {
-    if (!isTabFeatureEnabled(id as NavTabId)) return false;
-    if (!visibleTabs) return true;
-    return visibleTabs[id] !== false;
-  };
+  const isTabVisible = (id: string) => isNavIdVisible(id, visibleTabs);
 
   const filteredNavItems = NAVIGATION_ITEMS.filter((i) => isTabVisible(i.id));
-  const fallbackEnabledItems = NAVIGATION_ITEMS.filter((i) => isTabFeatureEnabled(i.id as NavTabId));
-  const effectiveNavItems = filteredNavItems.length > 0 ? filteredNavItems : fallbackEnabledItems;
+
+  // Issue 3696: no silent fallback. When the filter empties the strip,
+  // the strip says so and offers the presets instead of re-showing
+  // items the user hid.
+  const handleApplyPreset = (key: NavPresetKey) => {
+    onSetVisibleTabs?.(NAV_TAB_PRESETS[key], key);
+  };
 
   // Group items by category for sidebar navigation
-  const executionItems = effectiveNavItems.filter((i) => i.category === "Execution");
-  const intelligenceItems = effectiveNavItems.filter((i) => i.category === "Intelligence");
-  const playbookItems = effectiveNavItems.filter((i) => i.category === "Playbooks");
-  const platformItems = effectiveNavItems.filter((i) => i.category === "Platform");
+  const executionItems = filteredNavItems.filter((i) => i.category === "Execution");
+  const intelligenceItems = filteredNavItems.filter((i) => i.category === "Intelligence");
+  const playbookItems = filteredNavItems.filter((i) => i.category === "Playbooks");
+  const platformItems = filteredNavItems.filter((i) => i.category === "Platform");
 
   // 1. LEFT SIDEBAR LAYOUT
   if (layout === "left") {
@@ -861,7 +1074,21 @@ export function NavigationMenu({
       {/* Tier 2: Dedicated Top Navigation Menu Bar with all items */}
       <nav className="top-nav-menu-strip" aria-label="Top Navigation Menu">
         <div className="top-menu-strip-inner">
-          {effectiveNavItems.map((item) => {
+          {filteredNavItems.length === 0 ? (
+            <Stack gap="2">
+              <Notice tone="info" title="No navigation tabs selected">
+                Nothing is selected — pick a preset below, or open
+                Navigation settings to choose the tabs shown here.
+              </Notice>
+              <NavPresetButtons
+                activePreset={derivePresetKey(
+                  visibleTabs ?? NAV_TAB_PRESETS.alltabs,
+                )}
+                onApplyPreset={handleApplyPreset}
+              />
+            </Stack>
+          ) : (
+            filteredNavItems.map((item) => {
             const active = isTabActive(item.id, activeTab);
             const Icon = item.icon;
             const itemLink = deepLinkForNavNode(null, item.id);
@@ -947,7 +1174,7 @@ export function NavigationMenu({
                 )}
               </Button>
             );
-          })}
+          }))}
           {/* Issue #2996: menu-only parents (no route entry) are not
               route items, so they need their own strip entries or
               their sub-menus stay unreachable in top mode. Their

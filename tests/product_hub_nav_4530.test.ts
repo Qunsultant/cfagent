@@ -32,7 +32,8 @@ describe("Product Hub nav (#4530)", () => {
     expect(ids).not.toContain("products");
     // Issue 4682: the Marketing Hub route joins the table; 44 → 45.
     // Issue #5169: the Observability route joins the table; 45 → 46.
-    expect(ids.length).toBe(46);
+    // Issues 3696/3697: the Navigation Settings route joins the table; 46 → 47.
+    expect(ids.length).toBe(47);
     const hub = routes.find((r) => r.id === "product-hub")!;
     expect(hub.navGroup).toBe("product-hub");
     // #4574 retired the queues route (navOrders 12..30 down one) and #4575

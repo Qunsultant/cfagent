@@ -25,7 +25,8 @@ import { BillingServicingPanel } from "./BillingServicingPanel";
 import { PageChromeContext } from "./components/ui/PageShell";
 import { AdBannerConfig, applyServerAdsConfig, getStoredAdBannerConfig, saveStoredAdBannerConfig, type ServerAdsConfig } from "./adBannerConfig";
 import { PartnerDealsModal } from "./components/PartnerDealsModal";
-import { NavigationMenu, NavTabId, NavLayoutMode, NavIcons, DEFAULT_VISIBLE_NAV_TABS } from "./components/NavigationMenu";
+import { NavigationMenu, NavTabId, NavLayoutMode, NavIcons, NAV_TAB_PRESETS, NAV_PRESET_STORAGE_KEY, completeVisibleTabs, derivePresetKey, type NavPresetKey } from "./components/NavigationMenu";
+import { NavSettingsPage } from "./NavSettingsPage";
 import { legacyAuditVaultRedirect, legacyDualHomeRedirect, legacyMarketingHubRedirect, legacyPlatformAdminHubRedirect, legacyProductRedirect, navigateToTab, readTabFromLocation, replaceToTab, subscribeToRouteChanges } from "./router";
 import { legacySchedulesRedirect } from "./schedulesHomeView";
 import { SchedulesHome } from "./SchedulesHome";
@@ -227,35 +228,56 @@ export function Chat({ user }: { user: User }) {
     }
   };
 
-  // Visible navbar tabs customization state (persisted across sessions)
+  // Visible navbar tabs customization state (persisted across sessions).
+  // Issues 3696/3697: the map is completed over the left-nav config on
+  // load — an explicitly saved empty selection (preset `none`) stays
+  // empty and is never merged back over with the alltabs default. The
+  // selected preset key is persisted beside the map so the page can show
+  // it as active after a reload.
   const [visibleTabs, setVisibleTabs] = useState<Record<string, boolean>>(() => {
     if (typeof window !== "undefined") {
       try {
         const saved = localStorage.getItem("nextgentp_visible_nav_tabs");
-        if (saved) return { ...DEFAULT_VISIBLE_NAV_TABS, ...JSON.parse(saved) };
+        const savedPreset = localStorage.getItem(NAV_PRESET_STORAGE_KEY);
+        if (saved) return completeVisibleTabs(JSON.parse(saved), savedPreset);
       } catch {}
     }
-    return DEFAULT_VISIBLE_NAV_TABS;
+    return { ...NAV_TAB_PRESETS.alltabs };
   });
 
-  const handleToggleTabVisibility = (tabId: string) => {
-    setVisibleTabs((prev) => {
-      const next = {
-        ...prev,
-        [tabId]: prev[tabId] === false ? true : false,
-      };
-      if (typeof window !== "undefined") {
-        localStorage.setItem("nextgentp_visible_nav_tabs", JSON.stringify(next));
+  const [navPresetKey, setNavPresetKey] = useState<NavPresetKey | null>(() =>
+    derivePresetKey(visibleTabs),
+  );
+
+  const applyVisibleTabs = (
+    next: Record<string, boolean>,
+    presetKey?: NavPresetKey | null,
+  ) => {
+    const key = presetKey ?? derivePresetKey(next);
+    setVisibleTabs(next);
+    setNavPresetKey(key);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("nextgentp_visible_nav_tabs", JSON.stringify(next));
+      if (key) {
+        localStorage.setItem(NAV_PRESET_STORAGE_KEY, key);
+      } else {
+        localStorage.removeItem(NAV_PRESET_STORAGE_KEY);
       }
-      return next;
+    }
+  };
+
+  const handleToggleTabVisibility = (tabId: string) => {
+    applyVisibleTabs({
+      ...visibleTabs,
+      [tabId]: visibleTabs[tabId] === false ? true : false,
     });
   };
 
-  const handleSetVisibleTabs = (newTabs: Record<string, boolean>) => {
-    setVisibleTabs(newTabs);
-    if (typeof window !== "undefined") {
-      localStorage.setItem("nextgentp_visible_nav_tabs", JSON.stringify(newTabs));
-    }
+  const handleSetVisibleTabs = (
+    newTabs: Record<string, boolean>,
+    presetKey?: NavPresetKey | null,
+  ) => {
+    applyVisibleTabs(newTabs, presetKey);
   };
 
   // Universal Workspace Refresh state (accessible everywhere from top bar)
@@ -1099,6 +1121,17 @@ export function Chat({ user }: { user: User }) {
     observability: (
       <ObservabilityHome />
     ),
+    // Issues 3696/3697: the Navigation Settings page — presets + pills
+    // live here, reached from the fixed trigger in the shell footer.
+    // A plain page: no retain, no shell-retain.
+    "nav-settings": (
+      <NavSettingsPage
+        visibleTabs={visibleTabs}
+        activePreset={navPresetKey}
+        onToggleTabVisibility={handleToggleTabVisibility}
+        onApplyPreset={(key) => handleSetVisibleTabs(NAV_TAB_PRESETS[key], key)}
+      />
+    ),
     // Issue #4530: the Product Hub is the ONLY place for
     // product-domain URLs — the standalone products entry retired
     // (its addresses redirect to the hub tabs).
@@ -1344,6 +1377,7 @@ export function Chat({ user }: { user: User }) {
           onCycleTheme={handleCycleTheme}
           onAskAgent={handleAskAgent}
           visibleTabs={visibleTabs}
+          onSetVisibleTabs={handleSetVisibleTabs}
         />
       )}
 
@@ -1418,9 +1452,6 @@ export function Chat({ user }: { user: User }) {
                 accountMode={accountMode}
                 onToggleAccountMode={handleToggleAccountMode}
                 handleSwitchEnvironment={(target) => void switchBrokerEnvironment(target)}
-                visibleTabs={visibleTabs}
-                onToggleTabVisibility={handleToggleTabVisibility}
-                onSetVisibleTabs={handleSetVisibleTabs}
                 autoRefreshEnabled={autoRefreshEnabled}
                 autoRefreshInterval={autoRefreshInterval}
                 onToggleAutoRefresh={handleToggleAutoRefresh}
@@ -1480,9 +1511,6 @@ export function Chat({ user }: { user: User }) {
                   accountMode={accountMode}
                   onToggleAccountMode={handleToggleAccountMode}
                   handleSwitchEnvironment={(target) => void switchBrokerEnvironment(target)}
-                  visibleTabs={visibleTabs}
-                  onToggleTabVisibility={handleToggleTabVisibility}
-                  onSetVisibleTabs={handleSetVisibleTabs}
                   autoRefreshEnabled={autoRefreshEnabled}
                   autoRefreshInterval={autoRefreshInterval}
                   onToggleAutoRefresh={handleToggleAutoRefresh}
@@ -1501,6 +1529,7 @@ export function Chat({ user }: { user: User }) {
               onCycleTheme={handleCycleTheme}
               onAskAgent={handleAskAgent}
               visibleTabs={visibleTabs}
+              onSetVisibleTabs={handleSetVisibleTabs}
             />
           </header>
         )}
@@ -1635,6 +1664,27 @@ export function Chat({ user }: { user: User }) {
         agentStatus={{ dotClass: statusDotClass, label: statusLabel }}
         activeTab={tab}
       />
+
+      {/* Navigation settings trigger (issues 3696/3697): fixed
+          bottom-left, rendered by the shell OUTSIDE both nav modes, so
+          it stays reachable under the `none` preset when every nav
+          item is hidden. Token-only inline style, following the
+          left-nav flyout precedent. */}
+      <Button
+        variant="secondary"
+        size="sm"
+        title="Navigation settings"
+        aria-label="Navigation settings"
+        onClick={() => handleSelectTab("nav-settings")}
+        style={{
+          position: "fixed",
+          left: "var(--space-3, 0.75rem)",
+          bottom: "var(--space-3, 0.75rem)",
+          zIndex: 1000,
+        }}
+      >
+        <NavIcons.Settings /> Nav settings
+      </Button>
 
       {/* Externalized Partner Deals & Showcase Modal */}
       <PartnerDealsModal

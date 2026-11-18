@@ -356,7 +356,8 @@ describe("nav-config keeps the retired routes, drops their nav entries (#4626)",
     };
     // Issue 4682: the Marketing Hub route joins the table; 44 → 45.
     // Issue #5169: the Observability route joins the table; 45 → 46.
-    expect(data.routes).toHaveLength(46);
+    // Issues 3696/3697: the Navigation Settings route joins the table; 46 → 47.
+    expect(data.routes).toHaveLength(47);
     const byId = new Map(data.routes.map((r) => [r.id, r]));
     for (const id of ["screeners", "research", "options-flows", "risk-analysis", "approvals"]) {
       expect(byId.has(id)).toBe(true);
