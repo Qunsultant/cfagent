@@ -1,1 +1,3 @@
+### Fixed
+
 - **Data model (#5043):** Wired `pruneAuditChainForTenant` into `/schedules/trigger-retention`, surfaced `structuredLogger` sink failures via `structured_logger.sink_failed` + `onSinkFailure`, and enforced/pinned owner+tenant scoping on the run-ledger queue shared-instance fallback.
