@@ -15,6 +15,7 @@
  */
 
 import type { Env } from "../../types";
+import { unauthorizedJson } from "./apiRefusals";
 import { resolveIaaaTenant } from "../../security/iaaaGithubEndToEnd";
 import { routeAgentRequest } from "agents";
 import { isFeatureEnabled, createFeatureDisabledResponse, matchFeatureForRoute } from "../../config/featureFlags";
@@ -292,13 +293,13 @@ export async function handleMessagingSagaRoutes(request: Request, env: Env, url:
         }
         const session = await requireAuth(req, env);
         if (!session) {
-          return new Response("Unauthorized", { status: 401 });
+          return unauthorizedJson();
         }
       },
       onBeforeRequest: async (req) => {
         const session = await requireAuth(req, env);
         if (!session) {
-          return new Response("Unauthorized", { status: 401 });
+          return unauthorizedJson();
         }
       },
     });

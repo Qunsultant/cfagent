@@ -15,6 +15,7 @@
  */
 
 import { sessionStore, SESSION_TTL, listSessionFamilyEntries, wiredMembershipStore, deleteSession, wiredAccessRequestStore } from "../../security/session";
+import { unauthorizedJson } from "./apiRefusals";
 import { createWiredAuditStore } from "../../security/iaaaAuditStore";
 import { createKvMembershipStore, listMembershipsFromEntries, grantMembership, readMembershipById } from "../../security/iaaaMembershipStore";
 import { createKvPermissionDenialStore } from "../../security/iaaaPermissionDenialStore";
@@ -176,7 +177,7 @@ export async function handleAuthLoginRoutes(request: Request, env: Env, url: URL
 
     if (path === "/auth/etrade/start" || path === "/api/etrade/oauth/start") {
       const session = await requireAuth(request, env);
-      if (!session) return new Response("Unauthorized", { status: 401 });
+      if (!session) return unauthorizedJson();
       // #945 GitHub end-to-end PDP gate: when IAAA_PDP_ENABLED is on
       // and the session is wired, starting an integration connection
       // requires integration:connect in the resolved tenant.
@@ -297,7 +298,7 @@ export async function handleAuthLoginRoutes(request: Request, env: Env, url: URL
 
     if (path === "/api/etrade/oauth/verifier" && request.method === "POST") {
       const session = await requireAuth(request, env);
-      if (!session) return new Response("Unauthorized", { status: 401 });
+      if (!session) return unauthorizedJson();
       // #945 GitHub end-to-end PDP gate: completing the integration
       // connection (verifier exchange, which stores broker tokens)
       // requires integration:connect, same rule as the start route, including the #1749 legacy grace bound.
@@ -334,7 +335,7 @@ export async function handleAuthLoginRoutes(request: Request, env: Env, url: URL
 
     if (path === "/api/etrade/oauth/renew" && request.method === "POST") {
       const session = await requireAuth(request, env);
-      if (!session) return new Response("Unauthorized", { status: 401 });
+      if (!session) return unauthorizedJson();
       try {
         // Issue #2386: the renew failure reason is distinguished
         // BEFORE the renew call, from the same identity-aware seam
@@ -372,7 +373,7 @@ export async function handleAuthLoginRoutes(request: Request, env: Env, url: URL
 
     if (path === "/api/etrade/oauth/revoke" && request.method === "POST") {
       const session = await requireAuth(request, env);
-      if (!session) return new Response("Unauthorized", { status: 401 });
+      if (!session) return unauthorizedJson();
       // Issue #2386: identity-aware revoke deletes the FULL resolved
       // key set (login + internal-id + alias); the result tells the
       // panel whether anything was actually deleted.
@@ -388,7 +389,7 @@ export async function handleAuthLoginRoutes(request: Request, env: Env, url: URL
     // credential and stores through the same token-set record.
     if (path === "/auth/public/start") {
       const session = await requireAuth(request, env);
-      if (!session) return new Response("Unauthorized", { status: 401 });
+      if (!session) return unauthorizedJson();
       // Same #945 PDP gate as the E*TRADE start route, including the #1749 legacy grace bound.
       // #1755: the four integration:connect gates share one PEP helper
       // (evaluateRoutePep) — same enforcement, same two 403 responses.
@@ -457,7 +458,7 @@ export async function handleAuthLoginRoutes(request: Request, env: Env, url: URL
 
     if (path === "/api/public/connect" && request.method === "POST") {
       const session = await requireAuth(request, env);
-      if (!session) return new Response("Unauthorized", { status: 401 });
+      if (!session) return unauthorizedJson();
       // Same #945 PDP gate as the E*TRADE verifier route (this stores
       // a broker credential), including the #1749 legacy grace bound.
       // #1755: the four integration:connect gates share one PEP helper
@@ -494,7 +495,7 @@ export async function handleAuthLoginRoutes(request: Request, env: Env, url: URL
 
     if (path === "/api/public/disconnect" && request.method === "POST") {
       const session = await requireAuth(request, env);
-      if (!session) return new Response("Unauthorized", { status: 401 });
+      if (!session) return unauthorizedJson();
       await disconnectPublic(env, session.githubLogin);
       return Response.json({ ok: true });
     }

@@ -402,7 +402,10 @@ describe("source pins (#154)", () => {
     // slack/test, voice turn/test, voice greeting, options forwarder,
     // schedules forwarder, voice WS — plus the E*TRADE diagnostics
     // route's JSON 401 and the pre-existing guards elsewhere.
-    const guards = server.match(/if \(!session\) return new Response\("Unauthorized", \{ status: 401 \}\);/g) || [];
+    // #5699: the refusal is JSON now; the census counts the guard, not its
+    // body shape, so the assertion keeps its meaning across the change.
+    const guards =
+      server.match(/if \(!session\) return (?:unauthorizedJson\(|new Response\("Unauthorized")/g) || [];
     expect(guards.length).toBeGreaterThanOrEqual(7);
   });
 });

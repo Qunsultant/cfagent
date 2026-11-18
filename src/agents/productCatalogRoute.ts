@@ -21,6 +21,7 @@
  * Phase 3 access records + created-product rows).
  */
 import { buildCreatedProductRows, buildProductCatalog, type ProductEntry } from "../data/productCatalogue";
+import { unauthorizedJson } from "../server/routes/apiRefusals";
 import { resolveProductAccess } from "../data/productAccess";
 import { buildCatalogDisplay } from "../data/productMarketing";
 import type { PriceEntry } from "../data/priceCataloguePorts";
@@ -42,7 +43,7 @@ export async function handleProductCatalogRoute(
   input: ProductCatalogRouteInput,
 ): Promise<Response> {
   if (!input.session) {
-    return new Response("unauthorized", { status: 401 });
+    return unauthorizedJson();
   }
   if (input.method !== "GET") {
     return new Response("method not allowed", { status: 405 });
