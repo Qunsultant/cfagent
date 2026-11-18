@@ -20,9 +20,10 @@ import {
   Badge,
   Button,
   Card,
+  CardHeader,
   Notice,
   PageSection,
-  PageShell,
+  PageTemplate,
 } from "./components/ui";
 import type { NavTabId } from "./components/NavigationMenu";
 import { isOptionsProductEnabled } from "./featureFlags";
@@ -126,8 +127,8 @@ export const OPTIONS_SCREENER_PRODUCTS: OptionsScreenerProduct[] = [
     id: "iv-history",
     label: "IV History",
     flag: "options_iv_history",
-    hostTab: "screeners",
-    hostNote: "Opens the Screeners hub, IV History section, via its own link.",
+    hostTab: "options",
+    hostNote: "Opens the Options hub, IV History section, via its own link.",
     description: "Historical and implied volatility percentile ranks.",
   },
 ];
@@ -168,7 +169,7 @@ export function OptionsScreenerPage({ onSelectTab }: OptionsScreenerPageProps) {
   const dataProviderLabel = labelForDataProvider(tenantProviders, tenantProviders.dataProviderId);
   const brokerLabel = labelForBroker(tenantProviders, tenantProviders.brokerId);
   return (
-    <PageShell
+    <PageTemplate
       title="Options Screener"
       scopeNote="Every options sub-product in one place. Each card links to the existing surface that hosts it — nothing here is a second copy."
     >
@@ -204,21 +205,19 @@ export function OptionsScreenerPage({ onSelectTab }: OptionsScreenerPageProps) {
                   gap: "var(--space-2, 0.5rem)",
                 }}
               >
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "var(--space-2, 0.5rem)",
-                  }}
-                >
-                  <strong>{product.label}</strong>
-                  <Badge tone={enabled ? "success" : "neutral"} size="sm">
-                    {enabled ? "ON" : "OFF"}
-                  </Badge>
-                  <Badge tone="neutral" size="sm">
-                    Flag: {product.flag}
-                  </Badge>
-                </div>
+                <CardHeader
+                  title={product.label}
+                  meta={
+                    <>
+                      <Badge tone={enabled ? "success" : "neutral"} size="sm">
+                        {enabled ? "ON" : "OFF"}
+                      </Badge>
+                      <Badge tone="neutral" size="sm">
+                        Flag: {product.flag}
+                      </Badge>
+                    </>
+                  }
+                />
                 <p style={{ margin: 0 }}>{product.description}</p>
                 <p style={{ margin: 0 }}>{product.hostNote}</p>
                 <div>
@@ -335,6 +334,6 @@ export function OptionsScreenerPage({ onSelectTab }: OptionsScreenerPageProps) {
           </div>
         </Card>
       </PageSection>
-    </PageShell>
+    </PageTemplate>
   );
 }

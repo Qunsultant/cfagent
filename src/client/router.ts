@@ -72,7 +72,7 @@ export const TAB_PARAM_OWNERS: Readonly<Record<string, readonly RouteId[]>> = {
   providerTab: ["platform-admin"],
   run: ["workflow-runs", "schedules"],
   q: ["workflow-runs"],
-  screenerTab: ["screeners", "options", "stock-hub"],
+  screenerTab: ["options", "stock-hub"],
   research: ["options"],
   discoveryView: ["options"],
   checkoutTab: ["checkout"],

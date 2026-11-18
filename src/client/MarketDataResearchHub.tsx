@@ -3,7 +3,7 @@ import { useUrlSyncedTabs } from "./useUrlSyncedTabs";
 import { apiFetch as fetch } from "./apiFetch";
 import { mapScreenErrorFromBody } from "./paidScreenSubmit";
 import { UpgradeOffer } from "./UpgradeOffer";
-import { Badge, Card, CardHeader, EmptyState, Spinner, Button, Notice, Select, Table, TextInput, PageShell, PageSection, FieldShell, Stack, Flex, Grid, type BadgeTone } from "./components/ui";
+import { Badge, Card, CardHeader, EmptyState, Spinner, Button, Notice, Select, Table, TextInput, PageSection, FieldShell, Stack, Flex, Grid, type BadgeTone } from "./components/ui";
 import { ResearchReportActions } from "./ResearchReportActions";
 import { replayReport, replaySummary, type ReplayResponse } from "./replayReport";
 import { TabHoverItem } from "./TabHoverItem";
@@ -470,10 +470,7 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
 
   return (
 
-      <PageShell
-        title="Market Data Research & Quoting Engine"
-        scopeNote="Zero-credential Yahoo Finance and Alpaca dual feed, fundamental peer comparison"
-      >
+      <>
       <div>
         <Flex gap="2" wrap>
           <Badge tone="info" dot>Yahoo Finance Engine</Badge>
@@ -1924,7 +1921,7 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
         </Stack>
       )}
     </PageSection>
-    </PageShell>
+    </>
 
   );
 }

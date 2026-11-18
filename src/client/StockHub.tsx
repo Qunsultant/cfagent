@@ -1226,7 +1226,7 @@ export function StockHub({
               </>
             )}
           </Card>
-          {/* Issue #2746: One-shot manual screen moved to its own page / view (?tab=screeners&view=new-screen). */}
+          {/* Issue #2746: One-shot manual screen moved to its own page / view (?tab=stock-hub&view=new-screen). */}
           <Stack gap="2">
             <Card>
               <CardHeader
