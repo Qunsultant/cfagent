@@ -55,10 +55,10 @@ describe("WorkflowCatalogPanel (#3074)", () => {
     ]) {
       expect(text).toContain(label);
     }
-    expect(text).toContain("Timing:");
+    expect(text).toContain("Delivery:");
     expect(text).toContain("Concurrency:");
-    expect(text).toContain("Volume:");
-    expect(text).toContain("Partitioning:");
+    expect(text).toContain("Pacing:");
+    expect(text).toContain("Shape:");
     expect(text).toContain("sync / async");
   });
 
