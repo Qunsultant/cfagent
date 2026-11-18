@@ -224,7 +224,7 @@ function runRecord(overrides: Partial<JobRunRecord> = {}): JobRunRecord {
 }
 
 describe("3123-P01 one ScheduleStore port (kinds/states census)", () => {
-  it("declares exactly the six kinds and three states, each once", () => {
+  it("declares exactly the seven kinds and three states, each once", () => {
     expect([...UNIFIED_SCHEDULE_KINDS]).toEqual([
       "screen",
       "goal",
@@ -234,6 +234,8 @@ describe("3123-P01 one ScheduleStore port (kinds/states census)", () => {
       "workflow-stage",
       // Issue #3121 #4237 — the sixth kind: the ticker-push live feed.
       "ticker-push",
+      // Issue #3121 #4238 — the seventh kind: internal-only callbacks.
+      "internal",
     ]);
     // Issue #4351 — the fourth state: a deletion's tombstone. A declared task
     // the user deleted keeps its id here so the next declaration does not
@@ -726,8 +728,8 @@ describe("3123-P12 scoping preserved", () => {
     );
   });
 
-  it("no new schedule kinds beyond the six", () => {
-    expect(UNIFIED_SCHEDULE_KINDS).toHaveLength(6);
+  it("no new schedule kinds beyond the seven", () => {
+    expect(UNIFIED_SCHEDULE_KINDS).toHaveLength(7);
     const kinds = new Set<string>(UNIFIED_SCHEDULE_KINDS as unknown as string[]);
     expect(kinds.has("screen")).toBe(true);
     expect(kinds.has("goal")).toBe(true);
@@ -735,6 +737,7 @@ describe("3123-P12 scoping preserved", () => {
     expect(kinds.has("worker-duty")).toBe(true);
     expect(kinds.has("workflow-stage")).toBe(true);
     expect(kinds.has("ticker-push")).toBe(true);
+    expect(kinds.has("internal")).toBe(true);
   });
 });
 

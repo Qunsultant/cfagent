@@ -96,7 +96,7 @@ import { handleJobStatusRoutes } from "./routes/jobStatus";
 import { handleJobDefinitionsRoutes } from "./routes/jobDefinitions";
 import { makeRunScheduleCallback, makeScheduleAlarmsPort } from "./routes/schedules";
 import { buildChatErrorFallback, type ChatErrorFallbackContext } from "./chatErrorFallback";
-import { getScreenerExecutionContext, migrateLegacyScreenSchedules, removeUnownedBaselineSchedules, ensureStrategyScanSchedule, resolveScheduledLogin, type ScheduleMaintenanceContext } from "./orchestrator/scheduleMaintenance";
+import { getScreenerExecutionContext, migrateLegacyScreenSchedules, removeUnownedBaselineSchedules, ensureIvHistoryCollectionRecord, ensureStrategyScanSchedule, resolveScheduledLogin, type ScheduleMaintenanceContext } from "./orchestrator/scheduleMaintenance";
 import { handleSettingsWebhook } from "./orchestrator/settingsWebhook";
 import { createStockCopilotActivityPort } from "../data/createStockCopilotStorePorts";
 import { declareStrategyScanObserveTasks, type ScheduledTasksObserveContext } from "./orchestrator/scheduledTasksObserve";
@@ -1297,6 +1297,10 @@ export class OrchestratorAgent extends PortThink {
         // Issue #275: the hourly full-catalog strategy scan rides the
         // same authenticated maintenance path (armed once per user).
         await this.ensureStrategyScanSchedule(context);
+        // Issue #3121 #4238: the armed IV history collection alarm
+        // rides the same path as a record-only adoption (never armed
+        // or cancelled here) so the home can list it.
+        await this.ensureIvHistoryCollectionRecord(context);
       } else await this.removeUnownedBaselineSchedules();
     } catch (schedErr) {
       structuredLog.warn("orchestrator.on_start_legacy_schedule_reconciliation_failed", {
@@ -1522,6 +1526,12 @@ export class OrchestratorAgent extends PortThink {
   // Issue #992: extracted to ./orchestrator/scheduleMaintenance.ts (ensureStrategyScanSchedule);
   async ensureStrategyScanSchedule(context: ScreenerExecutionContext): Promise<void> {
     return ensureStrategyScanSchedule(this.scheduleMaintenanceContext(), context);
+  }
+
+  // Issue #3121 #4238 — record-only adoption of the armed IV history
+  // collection alarm into the unified store (never arms or cancels).
+  async ensureIvHistoryCollectionRecord(context: ScreenerExecutionContext): Promise<void> {
+    return ensureIvHistoryCollectionRecord(this.scheduleMaintenanceContext(), context);
   }
 
   /**

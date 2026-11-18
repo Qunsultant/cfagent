@@ -509,7 +509,8 @@ describe("S7 survivor — the one schedule UI renders the union", () => {
     expect(text).toContain("Stock Market Screen");
     expect(text).toContain("Options Market Screen");
     // The other callbacks as generic cards on the same surface.
-    expect(text).toContain("collectIvHistory");
+    // Issue #3121 #4238 — the IV job reads its friendly name now.
+    expect(text).toContain("Scheduled IV collection");
     // Folded-in sections: the audit trail stays; the options-runs card moved
     // into the one run ledger (#4329 S3, pinned in 4332's tests).
     expect(text).toContain("Execution History & Audit Trail");
@@ -599,7 +600,8 @@ describe("S7 survivor — the one schedule UI renders the union", () => {
 
     await click(tab("System"));
     expect(container.textContent).not.toContain("Strategy Discovery · No-view");
-    expect(container.textContent).toContain("collectIvHistory");
+    // Issue #3121 #4238 — the IV job reads its friendly name now.
+    expect(container.textContent).toContain("Scheduled IV collection");
 
     // Issue #4331: strategy discovery is its own kind among the owner's ten
     // filters, so the Strategy tab shows it; Options no longer absorbs it.

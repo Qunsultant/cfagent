@@ -348,6 +348,13 @@ const ORCH = "agents/orchestrator.ts";
  *  releaseDeliveryClaim + deliveryClaimsDoor(), +43 lines)
  *  — measured 3,364 lines / 153,639 B on the merged tree,
  *  so budget lines rise to 3380, keeping similar headroom.
+ *  Bytes unchanged — measured well under the 159,200 budget.
+ *  #4238 (IV history collection as a unified-store record)
+ *  adds the ensureIvHistoryCollectionRecord delegating
+ *  wrapper + its import and the onStart adoption call
+ *  (execution in orchestrator/scheduleMaintenance.ts) —
+ *  measured 3,374 lines / 154,253 B after the addition;
+ *  budget lines stay 3380, keeping similar headroom.
  *  Bytes unchanged — measured well under the 159,200 budget. */
 const BUDGET_LINES = 3380;
 const BUDGET_BYTES = 159_200;
@@ -361,6 +368,8 @@ const DELEGATED_METHODS = [
   "migrateLegacyScreenSchedules",
   "removeUnownedBaselineSchedules",
   "ensureStrategyScanSchedule",
+  // Issue #3121 #4238 — the IV collection record adoption wrapper.
+  "ensureIvHistoryCollectionRecord",
   // scheduledCallbacks
   "autoRenewETradeTokens",
   "autonomousMarketScreen",

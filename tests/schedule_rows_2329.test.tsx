@@ -496,7 +496,7 @@ describe("#2329 one create entry point", () => {
         payload: { universe: "SP500", userLogin: "trader1", environment: "TEST" },
       },
     ]);
-    await waitForText("collectIvHistory");
+    await waitForText("Scheduled IV collection");
     const row = rowFor("system-iv-job");
     expect(row.textContent).toContain("System");
     expect(row.textContent).not.toContain("Discovery");
