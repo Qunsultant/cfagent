@@ -35,6 +35,8 @@ import {
   type AgentSdkTiming,
 } from "../../services/agentScheduleCapability";
 import { resolveIaaaTenant } from "../../security/iaaaGithubEndToEnd";
+import { createFeatureFlagPort } from "../../features/createFeatureFlagPort";
+import { authorizeScheduleChannel } from "../../features/scheduleChannelFlags";
 import { NLQExecutionDeps, NLQQueryResult, NLQSchedulingPort, type NLQSocialBriefPort, type NLQStockScreenPort, type NLQStockScreenRunResult } from "./types";
 import { SOCIAL_BRIEF_MAX_CHARS, resolveBriefDate } from "../social/briefStore";
 import { getUserDid } from "../did";
@@ -2499,6 +2501,32 @@ async function executeNLQQueryAsyncCore(
   }
 
   if (plan.domain === "scheduling") {
+    // Issue #4249 — the NLQ entry-point gate runs FIRST: NLQ
+    // schedule intents are the NLQ channel, gated by "schedule_nlq"
+    // (default OFF). A disabled channel refuses with the coded
+    // outcome (FEATURE_DISABLED, or SCHEDULE_CHANNELS_BOTH_OFF when
+    // both channels are off) before any port or capability is
+    // touched, so nothing is created, cancelled, or listed. The gate
+    // sits at this entry point only — the capability and the
+    // scheduling port stay ungated. Non-scheduling NLQ domains never
+    // reach this branch and are unaffected by the channel flag.
+    const authorization = await authorizeScheduleChannel(
+      deps?.flagPort ?? createFeatureFlagPort(env),
+      "nlq",
+    );
+    if (!authorization.allowed) {
+      const action = plan.scheduleData?.action || "list";
+      return {
+        plan,
+        domain: "scheduling",
+        targetTable: "cf_agent_schedules",
+        count: 0,
+        status: "error",
+        summary: `Scheduling (${action}): refused — ${authorization.code}: ${authorization.message} Nothing was created, cancelled, or listed.`,
+        rows: [],
+        executedAt,
+      };
+    }
     // Issue #109: real Agent schedules via the injected port (see
     // executeSchedulingAction). Handled here, never by the sync
     // executor, which can only refuse honestly.

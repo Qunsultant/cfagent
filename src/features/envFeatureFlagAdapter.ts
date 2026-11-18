@@ -15,6 +15,8 @@
 import {
   ALL_FEATURE_FLAGS,
   DEFAULT_MONETIZATION_FLAG_VALUE,
+  DEFAULT_SCHEDULE_CHAT_FLAG_VALUE,
+  DEFAULT_SCHEDULE_NLQ_FLAG_VALUE,
   type FeatureEvaluationContext,
   type FeatureFlag,
   type FeatureFlagPort,
@@ -153,6 +155,18 @@ export class EnvFeatureFlagAdapter implements FeatureFlagPort {
     // still wins. This reverses #1997's strictly-closed default.
     if (flag === "goal_workflow") {
       return true;
+    }
+
+    // Issue #4249: the scheduling-channel defaults are explicit, so
+    // they hold in a configured env too (where other unconfigured
+    // flags default OFF) and in a bare env (where they would
+    // otherwise default ON): chat ON (the default channel), NLQ OFF
+    // (secondary). Bulk JSON / direct vars above still win when set.
+    if (flag === "schedule_chat") {
+      return DEFAULT_SCHEDULE_CHAT_FLAG_VALUE;
+    }
+    if (flag === "schedule_nlq") {
+      return DEFAULT_SCHEDULE_NLQ_FLAG_VALUE;
     }
 
     // Issue #2054: payment_assurance is default-ON (owner direction).

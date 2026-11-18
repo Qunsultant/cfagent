@@ -611,7 +611,13 @@ describe("#959 cross-entry schedule parity (REST route / NLQ / builder)", () => 
   let scheduleCalls: any[];
   let orm: DatabaseORM;
   const sessionId = "parity_user";
-  const env = { APP_ENV: "TEST" } as any;
+  const env = {
+    APP_ENV: "TEST",
+    // Issue #4249: these tests drive the NLQ scheduling entry
+    // point, so the NLQ channel is explicitly on here (its default
+    // is OFF — unconfigured NLQ scheduling refuses FEATURE_DISABLED).
+    FEATURE_SCHEDULE_NLQ: "1",
+  } as any;
 
   beforeEach(() => {
     scheduleCalls = [];

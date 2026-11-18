@@ -85,14 +85,18 @@ describe("Cloudflare Feature Flags (Issue #1806)", () => {
       expect(enabled).toBe(false);
     });
 
-    it("defaults to closed (false) for all flags when feature configuration is set, except payment_assurance (issue #2054) and goal_workflow (issue #2051)", async () => {
+    it("defaults to closed (false) for all flags when feature configuration is set, except payment_assurance (issue #2054), goal_workflow (issue #2051), and schedule_chat (issue #4249)", async () => {
       const env = { FEATURE_SCREENER: "0" };
       for (const flag of ALL_FEATURE_FLAGS) {
         const enabled = await isFeatureEnabled(env, flag);
-        // #2051 + #2054: these two flags are default-ON (opt-out);
-        // every other flag defaults closed. This pin names the
-        // exceptions deliberately — a new default-ON flag must update it.
-        expect(enabled).toBe(flag === "payment_assurance" || flag === "goal_workflow");
+        // #2051 + #2054 + #4249: these three flags are default-ON
+        // (opt-out); every other flag defaults closed. This pin names
+        // the exceptions deliberately — a new default-ON flag must
+        // update it. schedule_chat is default-ON because chat is the
+        // default scheduling channel; schedule_nlq stays default-OFF.
+        expect(enabled).toBe(
+          flag === "payment_assurance" || flag === "goal_workflow" || flag === "schedule_chat",
+        );
       }
     });
 
