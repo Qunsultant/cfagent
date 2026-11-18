@@ -2,8 +2,8 @@
  * #4282 P4 — schema-equality pin: all planes, one clean instance.
  *
  * What this suite pins (measured, never assumed):
- *  - the combined catalogue (D1 + DO + ORM + remainder, 414 entries)
- *    builds the frozen combined model exactly: 180 tables / 103 indexes.
+ *  - the combined catalogue (D1 + DO + ORM + remainder, 415 entries)
+ *    builds the frozen combined model exactly: 181 tables / 103 indexes.
  *  - the frozen combined model is the deterministic union of the four
  *    per-plane fixtures, with ZERO cross-plane disagreements (column
  *    type / pk / constraint / index). The union is recomputed from the
@@ -72,9 +72,9 @@ function fixtureSha256(name: string): string {
 }
 
 describe("schema equality — all planes (#4282 P4)", () => {
-  it("the frozen combined baseline is the clean-checkout seed (180 tables / 103 indexes)", () => {
+  it("the frozen combined baseline is the clean-checkout seed (181 tables / 103 indexes)", () => {
     const model = combinedExpectedModel();
-    expect(Object.keys(model.tables).length).toBe(180);
+    expect(Object.keys(model.tables).length).toBe(181);
     expect(Object.keys(model.indexes).length).toBe(103);
     expect(fixtureSha256("schema_component_combined_expected_model.json")).toBe(
       COMBINED_FIXTURE_SHA256,
@@ -83,7 +83,7 @@ describe("schema equality — all planes (#4282 P4)", () => {
 
   it("per-plane fixtures hold their phase counts", () => {
     const counts: Record<string, [number, number]> = {
-      d1: [100, 59],
+      d1: [101, 59],
       do: [69, 40],
       orm: [13, 10],
       remainder: [19, 15],
@@ -118,14 +118,21 @@ describe("schema equality — all planes (#4282 P4)", () => {
     expect(new Set(executedCodes).size).toBe(
       COMBINED_CATALOGUE_ENTRIES.length,
     );
-    expect(COMBINED_CATALOGUE_ENTRIES.length).toBe(414);
+    expect(COMBINED_CATALOGUE_ENTRIES.length).toBe(415);
     // Issue #5229 adds migration 0069 (agent_referral_rules
     // expiry_period_ms column): 410 entries resolve to 421 statements.
+    // Issue #5086 adds migration 0070 (otel_config_overrides table):
+    // 412 entries resolve to 423 statements.
     // The mas_reports generic ALTER expands to 11 pairs and the
     // confirmations generic ALTER to 2, each pair one statement.
+    // Issue #5229 adds migration 0069 (agent_referral_rules
+    // expiry_period_ms column): 410 entries resolve to 421 statements.
+    // Issue #5086 adds migration 0070 (otel_config_overrides table):
+    // 412 entries resolve to 423 statements.
     // Issue #5175 slice 2 adds 3 entries (mas_runs, mas_run_aliases
     // + its index): 414 entries resolve to 425 statements.
-    expect(executedStatements).toBe(425);
+    // Merged: 415 entries resolve to 426 statements.
+    expect(executedStatements).toBe(426);
     const actual = instance.introspect();
     const diff = diffSchema(actual, combinedExpectedModel());
     expect(isEmptyDiff(diff)).toBe(true);
