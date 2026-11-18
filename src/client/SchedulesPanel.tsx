@@ -516,6 +516,18 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
                 Agent
               </Badge>
             ) : null}
+            {/* Issue #3121 #4236 — a system-armed strategy-scan
+                baseline names its origin (provenance reason on the
+                payload); user- and agent-created rows show no badge. */}
+            {s.payload?.provenance?.reason === "strategy-scan-baseline" ? (
+              <Badge
+                tone="neutral"
+                size="xs"
+                title="System-armed strategy-scan baseline"
+              >
+                System baseline
+              </Badge>
+            ) : null}
             <Badge tone="neutral" size="xs" uppercase>
               {s.type}
             </Badge>

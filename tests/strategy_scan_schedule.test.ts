@@ -95,6 +95,14 @@ describe("ensureStrategyScanSchedule (#275)", () => {
       universe: "NASDAQ100",
       maxItems: 100,
       trigger: "scheduled",
+      // Issue #3121 #4236 — the armed payload carries the system
+      // provenance the Schedules home badges on (createdAt is stamped
+      // at arm time, so only the stable fields are asserted here).
+      provenance: expect.objectContaining({
+        origin: "system",
+        createdBy: "system",
+        reason: "strategy-scan-baseline",
+      }),
     });
     expect(payload.allowedStrategies).toBeUndefined();
     expect(audits.some(([t]) => t === "schedule.created")).toBe(true);

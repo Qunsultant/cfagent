@@ -196,8 +196,16 @@ describe("ensureStrategyScanSchedule — baseline arm through the builder", () =
     if (expected.ok) {
       // The armed record is the builder's record — including the
       // creation-default maxItems stamp the service would otherwise
-      // apply itself at run time (same UNIVERSES default).
-      expect(armed[0].payload).toEqual(expected.value);
+      // apply itself at run time (same UNIVERSES default) — plus the
+      // #4236 system provenance the Schedules home badges on.
+      expect(armed[0].payload).toEqual({
+        ...expected.value,
+        provenance: expect.objectContaining({
+          origin: "system",
+          createdBy: "system",
+          reason: "strategy-scan-baseline",
+        }),
+      });
       expect((armed[0].payload as { maxItems?: number }).maxItems).toBeGreaterThan(0);
     }
   });
