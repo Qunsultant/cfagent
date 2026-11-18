@@ -57,7 +57,11 @@ import {
 } from "../services/generateJobs";
 import type { GenerateStepDeps } from "../services/generatePipelineJobs";
 import { buildDeliverJobRegistry, createDeliverChannelSenders } from "../services/deliverJobs";
-import { createDeliverySuppressor } from "../workflows/screenDeliverySuppression";
+import {
+  createDoorDeliverySuppressor,
+  type DeliveryClaimsDoor,
+} from "../services/deliveryClaimsDoor";
+import type { AsyncDeliverySuppressor } from "../workflows/screenDeliverySuppression";
 import { createFeedDatasetAdapter } from "../data/createFeedDatasetPorts";
 import { createProviderCaptureAdapter } from "../data/createProviderCapturePorts";
 import { createR2CaptureBlobStorage } from "../data/r2CaptureBlobAdapter";
@@ -186,6 +190,30 @@ export function feedStepDepsForWorkflow(
     userLogin: getServiceUserLogin(env) ?? undefined,
     env,
   };
+}
+
+/**
+ * The deliver-step suppressor for this workflow residency
+ * (#4438): the door-backed async suppressor — claims go
+ * through the shared Orchestrator instance's claims door
+ * into the ONE mas_delivery_claims table, so a delivery
+ * suppressed once stays suppressed across a restart/retry
+ * of the run in this residency too. The door resolves
+ * lazily on the first claim (the adapter memoizes it), so
+ * deps objects build without touching the DO namespace; an
+ * unbound namespace fails the first claim closed with the
+ * gateway's named error — there is no in-memory fallback
+ * in production wiring.
+ */
+export function createWorkflowDeliveryClaimsSuppressor(
+  env: Env,
+): AsyncDeliverySuppressor {
+  return createDoorDeliverySuppressor(() =>
+    actorGateway.stub<DeliveryClaimsDoor>(
+      env.ORCHESTRATOR_AGENT,
+      SHARED_ORCHESTRATOR_INSTANCE,
+    ),
+  );
 }
 
 /** Build the flow deps from the worker environment (adapter-side only). */
@@ -332,14 +360,17 @@ export function createJobPipelineWorkflowDeps(env: Env): JobPipelineDeps {
         generatedStore: createGeneratedDatasetPorts(env),
         deliveryStore: createDeliveryDatasetPorts(env),
         ...createDeliverChannelSenders(env as unknown as Record<string, unknown>),
-        // Duplicate-delivery suppression, re-homed (#3943):
-        // the ONE module; the workflow residency has no DO
-        // SQLite of its own, so the suppressor is in-memory
-        // for this execution (step retries within the run
-        // share it). The durable cross-run guard here is the
-        // delivery-store resume check; a durable claims door
-        // is follow-up work, recorded on #3943's §15.
-        suppressor: createDeliverySuppressor(),
+        // Duplicate-delivery suppression, re-homed (#3943)
+        // through the durable claims door (#4438): the
+        // workflow residency has no DO SQLite of its own,
+        // so the suppressor claims through the shared
+        // Orchestrator instance's door into the ONE
+        // mas_delivery_claims table — the delivery-store
+        // resume check is no longer the only durable
+        // cross-run guard. The door resolves lazily on
+        // the first claim; an unbound namespace fails
+        // that claim closed, never a silent send.
+        suppressor: createWorkflowDeliveryClaimsSuppressor(env),
         shardsFor: async (jobId) =>
           (await stores.definitions.getDefinition(jobId))?.config.processing
             .shards ?? [],

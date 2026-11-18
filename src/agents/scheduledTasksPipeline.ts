@@ -400,9 +400,11 @@ export function deliverStepDepsForScheduledAgent(
     // screener executor claims into, so a host re-run/replay
     // with the same run id never re-sends. The table is the
     // host DO's own SQLite (the orchestrator's claims table
-    // is a different DO's storage); sharing claims ACROSS
-    // those DOs needs a claims door, not a second suppressor
-    // — that door is follow-up work, recorded on #3943's §15.
+    // is a different DO's storage); the cross-residency
+    // claims door exists (#4438) and the workflow residency
+    // claims through it — adopting the door on this host,
+    // so all residencies share the one table, is follow-up
+    // work, not this slice.
     suppressor: createDeliverySuppressor(
       createSqlDeliverySuppressionStore(() => sql),
     ),
