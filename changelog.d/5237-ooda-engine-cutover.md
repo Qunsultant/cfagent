@@ -1,0 +1,3 @@
+### Changed
+- **Nightly OODA Research J-stack engine cutover (#5237)**: Wired `ResearchStepDeps` (`analyze.ooda` and `evaluate.apply`) into `createPipelineStepRegistry` in both worker/scheduled-agent and workflow residencies, switched `dispatchResearchEngineRun` to execute `JobPipelineControl.runJob` with observed per-stage `stageVisibility` (preserving `research_engine_cutover=false` rollback), and wired `executeResearchStageControl` across the API and MCP stage-control handlers.
+- **OODA Research UX route (#5237)**: Updated `Chat.tsx` so `?tab=options-screener&view=ooda` renders `OodaResearchPage`.

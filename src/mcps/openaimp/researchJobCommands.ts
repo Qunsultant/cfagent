@@ -10,8 +10,8 @@
 import { z } from "zod";
 import type { IMcpToolCommand, McpToolContext } from "../../patterns/interfaces";
 import {
-  controlResearchStage,
   dispatchResearchEngineRun,
+  executeResearchStageControl,
   type ResearchStageOp,
 } from "../../workflows/researchScreenEngine";
 import { RESEARCH_PIPELINE_STAGES } from "../../workflows/stageRuntimeIds";
@@ -64,7 +64,7 @@ export class RunResearchJobCommand implements IMcpToolCommand<RunResearchJobInpu
     }
 
     if (input.runId && input.stageId) {
-      const stageResult = controlResearchStage({
+      const stageResult = await executeResearchStageControl({
         runId: input.runId,
         stageId: input.stageId,
         op: input.op ?? "status",

@@ -113,6 +113,7 @@ import {
 import { screenerStepDepsForScheduledAgent } from "../services/screenerPipelineJobs";
 import type { OptionsWorkflowStepDeps } from "../services/optionsPipelineJobs";
 import { optionsChainStepDepsForScheduledAgent } from "../services/optionsChainPipelineJobs";
+import { createDefaultResearchStepDeps } from "../services/researchPipelineJobs";
 import { buildAnalyzeJobRegistry } from "../services/analyzeJobs";
 import {
   ensureAnalyzePipelineJobs,
@@ -598,6 +599,9 @@ export function createScheduledAgentPipelineControl(
       // on the stored definition, so a host-dispatched chain executes
       // in this residency.
       optionsChainStepDepsForScheduledAgent(ctx),
+      // Issue #5237: research steps (`analyze.ooda` and `evaluate.apply`) compose
+      // into the shared registry in the scheduled-agent residency.
+      createDefaultResearchStepDeps(),
     ),
     invocation: "sync",
   });
@@ -879,6 +883,9 @@ export async function startPipelineJobWorkflow(
       // Issue #4780: the options-chain steps compose here too, as in
       // the host control — the same registry in both compositions.
       optionsChainStepDepsForScheduledAgent(ctx),
+      // Issue #5237: research steps (`analyze.ooda` and `evaluate.apply`) compose
+      // into the shared registry in the scheduled-agent residency.
+      createDefaultResearchStepDeps(),
     ),
     invocation: "workflow-shard",
   });

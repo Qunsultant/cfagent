@@ -14,6 +14,7 @@ import { FirstRunGate } from "./FirstRunGate";
 import { BrokerDynamicMenu, SettingsMenu, type BrokerDynamicMenuProps, type ETradeDynamicMenuProps } from "./BrokerDynamicMenu";
 import { useBrokerEnvironment, switchBrokerEnvironment, fetchBrokerEnvironment, brokerModeLabel } from "./brokerEnvironment";
 import { OptionsScreenerPage } from "./OptionsScreenerPage";
+import { OodaResearchPage } from "./OodaResearchPage";
 import { PlatformAdminPage } from "./PlatformAdminPage";
 import { WorkflowsHub } from "./WorkflowsHub";
 import { WorkflowCatalogPage } from "./WorkflowCatalogPage";
@@ -63,6 +64,9 @@ import {
   FeatureDisabledNotice,
 } from "./featureFlags";
 export function Chat({ user }: { user: User }) {
+  const [routeSearch, setRouteSearch] = useState<string>(() =>
+    typeof window !== "undefined" ? window.location.search : "",
+  );
   const [tab, setTab] = useState<NavTabId>(() => {
     // S1 (#1808): the URL is the source of truth for navigation.
     const fromUrl = readTabFromLocation();
@@ -138,6 +142,9 @@ export function Chat({ user }: { user: User }) {
         }
       }
       setTab(readTabFromLocation());
+      if (typeof window !== "undefined") {
+        setRouteSearch(window.location.search);
+      }
     };
     applyRoute();
     return subscribeToRouteChanges(applyRoute);
@@ -1047,14 +1054,17 @@ export function Chat({ user }: { user: User }) {
     // not a retained trading-hub tab, so it lives in TAB_CONTENT
     // like the other standalone pages; its cards link to the
     // existing surfaces, they do not re-render them.
-    "options-screener": (
-      <OptionsScreenerPage
-        onSelectTab={(newTab) => {
-          handleSelectTab(newTab);
-          setTbdMenuOpen(false);
-        }}
-      />
-    ),
+    "options-screener":
+      new URLSearchParams(routeSearch).get("view") === "ooda" ? (
+        <OodaResearchPage userLogin={user.login} />
+      ) : (
+        <OptionsScreenerPage
+          onSelectTab={(newTab) => {
+            handleSelectTab(newTab);
+            setTbdMenuOpen(false);
+          }}
+        />
+      ),
     "platform-admin": (
       <PlatformAdminPage
         user={{ login: user.login, name: user.name, avatar: user.avatar }}
