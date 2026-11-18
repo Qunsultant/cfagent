@@ -78,7 +78,7 @@ step() { # step <label> <command...>
 BRANCH="$(git rev-parse --abbrev-ref HEAD)"
 [ "$BRANCH" != "main" ] || fail "refusing to run Tier 1 on main; run it on the PR branch"
 
-if [ -z "$(git status --porcelain)" ]; then
+if [ -z "$(git status --porcelain --untracked-files=no)" ]; then
   : # clean tree — the normal case
 else
   note "note: working tree has uncommitted changes; the gate runs against HEAD, not those files."
