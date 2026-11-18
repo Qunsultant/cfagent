@@ -1,0 +1,3 @@
+### Scheduling
+
+- Surface the scheduling-channel flags in the schedules home (Qunsultant/cfagent#4260): a new Flags view (`?tab=schedules&view=flags`) lists `schedule_chat`, `schedule_nlq` and the `schedules` surface flag with live state read through the existing `FeatureFlagPort`. A platform admin can toggle the two channel flags from the home through the port; the one-on invariant is enforced (turning the last channel off is refused with `SCHEDULE_CHANNELS_BOTH_OFF`), non-admins see the state read-only, and runtimes whose flag source is operator-owned (Flagship dashboard / environment variables) report `FLAG_WRITE_UNSUPPORTED` with where the flag is managed instead of a second flag store.

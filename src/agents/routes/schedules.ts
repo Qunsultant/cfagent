@@ -71,6 +71,15 @@ import {
 } from "../../services/auditChainVerification";
 import { createBlobStore } from "../../services/blobStoreR2Adapter";
 import { pruneJobOutcomes } from "../../services/jobOutcomes";
+import { createFeatureFlagPort } from "../../features/createFeatureFlagPort";
+import {
+  applyScheduleChannelToggle,
+  resolveScheduleChannelFlagsView,
+} from "../../features/scheduleChannelFlags";
+import { checkPlatformPermission } from "../../security/iaaaPdpSeam";
+import { lookupInternalUserIdByLogin } from "../../security/iaaaMigration";
+import { createKvMembershipStore } from "../../security/iaaaMembershipStore";
+import { sessionStore } from "../../security/session";
 import { SqlJobRunRecordStore } from "../../data/doSqliteJobRunRecordAdapter";
 import { nameLedgerWriteFailure, recordScheduleCallbackRun } from "../orchestrator/scheduleCallbackRunRecords";
 import {
@@ -247,6 +256,24 @@ export interface SchedulesRouteContext {
   accountScopedScheduleCallbacks: ReadonlySet<string>;
   /** Manual dispatch of a schedule's own callback (owner: OrchestratorAgent — a dynamic this[callback] invocation), used by POST /schedules/:id/trigger (#273). */
   runScheduleCallback(callback: string, payload: unknown): Promise<void>;
+  /**
+   * Issue #4260 — injectable flag port for the schedules/flags routes
+   * (tests and local in-memory runtimes). Absent, the routes resolve
+   * createFeatureFlagPort(ctx.env) per request.
+   */
+  featureFlagPort?: import("../../features/featureFlagPorts").FeatureFlagPort;
+  /**
+   * Issue #4260 — injectable membership store for the platform-admin
+   * probe behind the schedules/flags toggle (tests). Absent, the
+   * probe builds it from the session store, as AdminTenantQueues does.
+   */
+  flagMembershipStore?: import("../../security/authorization").MembershipStore;
+  /**
+   * Issue #4260 — injectable alias KV for the login→internal-id
+   * lookup behind the schedules/flags toggle (tests). Absent, the
+   * probe uses the session store.
+   */
+  flagAliasKv?: import("../../security/kvResilience").KvLike;
 }
 
 /**
@@ -376,6 +403,72 @@ export async function readTickerPushListItem(
       error: err instanceof Error ? err.message : String(err),
     });
     return null;
+  }
+}
+
+/**
+ * Issue #4260: where the surfaced flags are managed, for the home's
+ * read-only guidance. An injected port (tests / local in-memory
+ * runtimes) is the in-memory source; a FLAGS binding means the
+ * Cloudflare Flagship dashboard; otherwise environment variables.
+ */
+function resolveFlagManagedBy(ctx: SchedulesRouteContext): "flagship" | "environment" | "in-memory" {
+  if (ctx.featureFlagPort) return "in-memory";
+  const envRecord = ctx.env as unknown as Record<string, unknown>;
+  return envRecord.FLAGS ? "flagship" : "environment";
+}
+
+/**
+ * Issue #4260 — the platform-admin probe behind the
+ * schedules/flags toggle. The same PDP platform-scope decision
+ * AdminTenantQueues uses (live platform-admin binding at platform
+ * scope, unrevoked, unexpired; permission role:assign). Fail-closed
+ * throughout: any unresolvable identity, unwired session, denied
+ * decision or store failure resolves to "not an admin" — the GET
+ * read stays open (canToggle false) and the POST refuses 403, never
+ * 500s on an authorization lookup.
+ */
+type ScheduleFlagsCaller =
+  | { kind: "admin"; login: string; internalUserId: string }
+  | { kind: "unauthenticated" }
+  | { kind: "forbidden"; reason: string };
+
+async function resolveScheduleFlagsCaller(
+  request: Request,
+  ctx: SchedulesRouteContext,
+): Promise<ScheduleFlagsCaller> {
+  const login = request.headers.get("x-user-login") || "";
+  if (!isLoginShaped(login)) {
+    return { kind: "unauthenticated" };
+  }
+  try {
+    const kv = ctx.flagAliasKv ?? sessionStore(ctx.env);
+    const internalUserId = await lookupInternalUserIdByLogin(kv, login);
+    if (!internalUserId) {
+      return {
+        kind: "forbidden",
+        reason: "Forbidden: flag administration requires a wired session.",
+      };
+    }
+    const store =
+      ctx.flagMembershipStore ?? createKvMembershipStore(sessionStore(ctx.env));
+    const decision = await checkPlatformPermission(store, {
+      internalUserId,
+      permission: "role:assign",
+      nowMs: Date.now(),
+    });
+    if (decision.decision !== "allow") {
+      return {
+        kind: "forbidden",
+        reason: "Forbidden: flag administration requires platform-admin membership.",
+      };
+    }
+    return { kind: "admin", login, internalUserId };
+  } catch {
+    return {
+      kind: "forbidden",
+      reason: "Forbidden: flag administration could not be verified.",
+    };
   }
 }
 
@@ -662,6 +755,68 @@ export async function handleSchedulesRoutes(
       } catch (err: any) {
         return Response.json({ error: err.message || "Failed to list pending approvals" }, { status: 500 });
       }
+    }
+
+    // Issue #4260 — the schedules-home flags surface. GET reads the
+    // three surfaced flags live through the existing FeatureFlagPort
+    // (any caller may read; canToggle is true only for a platform
+    // admin). POST toggles one channel flag for a platform admin
+    // through the same port: the one-on invariant is enforced, the
+    // schedules surface flag is read-only, and a runtime whose flag
+    // source is operator-owned (Flagship dashboard / env vars)
+    // refuses with FLAG_WRITE_UNSUPPORTED instead of a second store.
+    // Both blocks sit before the get-by-id branch, which would
+    // otherwise swallow /schedules/flags as an id.
+    if (request.method === "GET" && (path.endsWith("/schedules/flags") || path.endsWith("/api/schedules/flags"))) {
+      try {
+        const port = ctx.featureFlagPort ?? createFeatureFlagPort(ctx.env);
+        const view = await resolveScheduleChannelFlagsView(port);
+        const caller = await resolveScheduleFlagsCaller(request, ctx);
+        return Response.json({
+          ...view,
+          canToggle: caller.kind === "admin",
+          managedBy: resolveFlagManagedBy(ctx),
+        });
+      } catch (err: any) {
+        return Response.json({ error: err.message || "Failed to read scheduling-channel flags" }, { status: 500 });
+      }
+    }
+    if (request.method === "POST" && (path.endsWith("/schedules/flags") || path.endsWith("/api/schedules/flags"))) {
+      const caller = await resolveScheduleFlagsCaller(request, ctx);
+      if (caller.kind === "unauthenticated") {
+        return Response.json({ error: "Unauthorized: a signed-in session is required." }, { status: 401 });
+      }
+      if (caller.kind !== "admin") {
+        return Response.json({ error: caller.reason }, { status: 403 });
+      }
+      const body = (await request.json().catch(() => null)) as unknown;
+      const flag = (body as { flag?: unknown } | null)?.flag;
+      const enabled = (body as { enabled?: unknown } | null)?.enabled;
+      if (typeof flag !== "string" || typeof enabled !== "boolean") {
+        return Response.json(
+          { error: "A flag name and an enabled boolean are required.", code: "INVALID_REQUEST" },
+          { status: 400 },
+        );
+      }
+      const port = ctx.featureFlagPort ?? createFeatureFlagPort(ctx.env);
+      const managedBy = resolveFlagManagedBy(ctx);
+      const result = await applyScheduleChannelToggle(port, flag, enabled);
+      if (!result.ok) {
+        const status = result.code === "UNKNOWN_FLAG" ? 400 : 409;
+        const error =
+          result.code === "FLAG_WRITE_UNSUPPORTED"
+            ? `${result.message} Manage it in the ${managedBy === "flagship" ? "Cloudflare Flagship dashboard" : "environment (FEATURE_FLAGS / FEATURE_SCHEDULE_CHAT / FEATURE_SCHEDULE_NLQ) and redeploy"}.`
+            : result.message;
+        return Response.json({ error, code: result.code }, { status });
+      }
+      ctx.audit("schedule.channel-flag-changed", "orchestrator", {
+        flag,
+        enabled,
+        changedBy: caller.login,
+        channels: result.state,
+      });
+      const view = await resolveScheduleChannelFlagsView(port);
+      return Response.json({ ...view, canToggle: true, managedBy });
     }
     const approvalsMatch = path.match(/\/schedules\/approvals\/([^/]+)\/(approve|reject)$/);
     if (request.method === "POST" && approvalsMatch) {

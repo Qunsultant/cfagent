@@ -194,7 +194,7 @@ describe("S6-P04 U-08 corrected", () => {
 });
 
 describe("S6-P05 six surfaces reachable through the consolidated path", () => {
-  it("the home resolves exactly the six views, ledger aliasing runs", () => {
+  it("the home resolves exactly the seven views, ledger aliasing runs", () => {
     expect([...SCHEDULES_HOME_VIEWS]).toEqual([
       "list",
       "runs",
@@ -202,8 +202,10 @@ describe("S6-P05 six surfaces reachable through the consolidated path", () => {
       "queue",
       "background-tasks",
       "dead-letter-queue",
+      // Issue #4260: the flags view joins the home (seventh view).
+      "flags",
     ]);
-    for (const view of ["list", "runs", "goals", "queue", "background-tasks", "dead-letter-queue"] as const) {
+    for (const view of ["list", "runs", "goals", "queue", "background-tasks", "dead-letter-queue", "flags"] as const) {
       expect(parseSchedulesDeepLink(`?tab=schedules&view=${view}`).view).toBe(
         view,
       );
@@ -226,12 +228,14 @@ describe("S6-P05 six surfaces reachable through the consolidated path", () => {
     expect(home).toContain("ScheduleQueueView");
     expect(home).toContain("AsyncJobsPanel");
     expect(home).toContain("DlqPanel");
+    expect(home).toContain("ScheduleChannelFlagsPanel");
     expect(home).toContain('deepLink.view === "list"');
     expect(home).toContain('deepLink.view === "runs"');
     expect(home).toContain('deepLink.view === "goals"');
     expect(home).toContain('deepLink.view === "queue"');
     expect(home).toContain('deepLink.view === "background-tasks"');
     expect(home).toContain('deepLink.view === "dead-letter-queue"');
+    expect(home).toContain('deepLink.view === "flags"');
   });
 
   it("all six retired addresses redirect to the home", () => {

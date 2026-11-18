@@ -2,10 +2,10 @@
  * Issue #4330 (parent #4329 S1) — every Schedules sub-tab scrolls.
  *
  * Pins:
- *  - 4330-P01 the six sub-tabs (list, runs, goals, queue, background-tasks,
- *    dead-letter-queue) each render inside the shared scroll frame — one
+ *  - 4330-P01 the seven sub-tabs (list, runs, goals, queue, background-tasks,
+ *    dead-letter-queue, flags) each render inside the shared scroll frame — one
  *    frame per tab, not one for the page. Background Tasks joined in
- *    #4561; Dead-letter queue joined in #4574.
+ *    #4561; Dead-letter queue joined in #4574; Flags joined in #4260.
  *  - 4330-P02 the frame gives BOTH axes: a long ledger scrolls vertically, a
  *    wide table horizontally.
  *  - 4330-P03 the height comes from the shared `--panel-scroll-max-height`
@@ -29,8 +29,8 @@ const primitives = readFileSync(
 
 describe("4330-P01 one frame per sub-tab", () => {
   it("wraps every tab panel's card content", () => {
-    expect(home.split('className="ui-scroll-frame"').length - 1).toBe(6);
-    for (const view of ["list", "runs", "goals", "queue", "background-tasks", "dead-letter-queue"]) {
+    expect(home.split('className="ui-scroll-frame"').length - 1).toBe(7);
+    for (const view of ["list", "runs", "goals", "queue", "background-tasks", "dead-letter-queue", "flags"]) {
       expect(home).toContain(`tabId="${view}"`);
     }
   });

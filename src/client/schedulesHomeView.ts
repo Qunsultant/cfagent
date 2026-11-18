@@ -5,7 +5,7 @@
  * Home: `?tab=schedules` (owner-decided, inventory §8.3). Sub-route
  * scheme, following the app's existing `?tab=` + `?view=` deep-link
  * pattern (`src/client/router.ts` `parseViewFromSearch`):
- * `?tab=schedules&view=list|runs|ledger|goals|queue|background-tasks|dead-letter-queue&schedule=<id>&run=<id>`.
+ * `?tab=schedules&view=list|runs|ledger|goals|queue|background-tasks|dead-letter-queue|flags&schedule=<id>&run=<id>`.
  *
  * - `view=list` (default): the schedule list (today's `SchedulesPanel`
  *   capabilities, incl. the embedded `ScheduledOptionsManager`).
@@ -34,6 +34,11 @@
  *   component, same props, same endpoint). The Queues page's
  *   trade-approvals link goes away with the page — the Approvals page
  *   is the one home per #4538.
+ * - `view=flags` (issue #4260): the scheduling-channel flags
+ *   (`ScheduleChannelFlagsPanel`) — schedule_chat, schedule_nlq and
+ *   the schedules surface flag with live state through the existing
+ *   FeatureFlagPort, and the platform-admin toggle for the two
+ *   channel flags (one-on invariant enforced server-side).
  *
  * Retired addresses (each maps to the home, or to null with the reason
  * recorded here — never silently kept):
@@ -84,7 +89,8 @@ export type SchedulesHomeView =
   | "goals"
   | "queue"
   | "background-tasks"
-  | "dead-letter-queue";
+  | "dead-letter-queue"
+  | "flags";
 
 export const SCHEDULES_HOME_VIEWS: readonly SchedulesHomeView[] = [
   "list",
@@ -93,6 +99,7 @@ export const SCHEDULES_HOME_VIEWS: readonly SchedulesHomeView[] = [
   "queue",
   "background-tasks",
   "dead-letter-queue",
+  "flags",
 ];
 
 export const SCHEDULES_HOME_VIEW_LABELS: Record<SchedulesHomeView, string> = {
@@ -102,6 +109,7 @@ export const SCHEDULES_HOME_VIEW_LABELS: Record<SchedulesHomeView, string> = {
   queue: "Queue",
   "background-tasks": "Background Tasks",
   "dead-letter-queue": "Dead-letter queue",
+  flags: "Flags",
 };
 
 /** `ledger` is accepted as an alias of `runs` (inventory §8.3 (ii)). */
