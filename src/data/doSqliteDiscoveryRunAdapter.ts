@@ -22,6 +22,7 @@ import { getTransactionRunner } from "./transactionRunnerProvider";
 import { doIndexSql, doTableSql } from "./schemaComponent/doCatalogue";
 import { DO_DML_CATALOGUE } from "./schemaComponent/doDmlCatalogue";
 import { executeDoDml } from "./schemaComponent/doDmlExecutor";
+import { newRunId } from "../services/executionTreeIds";
 import {
   DISCOVERY_RUN_MAX_ROWS,
   DISCOVERY_RUN_RETENTION_DAYS,
@@ -111,7 +112,12 @@ export class SqlDiscoveryRunStore implements DiscoveryRunStore {
      *  wrap on save (see the module header). */
     private readonly storage?: DoTransactionStorage,
   ) {
-    this.idFactory = options.idFactory ?? (() => crypto.randomUUID());
+    // Issue #5175 slice 3: the default run id mints through the one
+    // leaf minter (`run:<time36>-<counter36>`). An injected idFactory
+    // still wins (tests pin deterministic ids). No consumer validates
+    // the bare-UUID shape — the id is an opaque key (exact-match
+    // lookups via the discovery-runs read route).
+    this.idFactory = options.idFactory ?? newRunId;
     this.retentionDays = options.retentionDays ?? DISCOVERY_RUN_RETENTION_DAYS;
     this.maxRows = options.maxRows ?? DISCOVERY_RUN_MAX_ROWS;
   }

@@ -1,0 +1,6 @@
+### Issue #5175 slice 3: migrate legacy run-id call sites to the one leaf minter
+
+- 27 fresh-entropy mint points now mint through `src/services/executionTreeIds.ts` (engine default, async-job ids, saga entry, goal/scenario/outcome row ids, discovery-run idFactory default, discovery fallbacks, scheduled screens, premium/retention report rows, NLQ panel/scan legs, options-screen plain run, `shardScanRunId` adopted into the leaf). Where a run id and its generation shared one template they migrate together (`generationId(runId)`).
+- The two `z.string().uuid()` read-path validators for async-job ids (`get_async_job`, `get_scan_job`) now accept `job:<uuid>` and the legacy bare UUID, so receipts minted by this slice keep resolving.
+- Deterministic / idempotency-load-bearing sites are deferred unchanged to the resolve-or-mint follow-up (screener timestamp family, iv_collection, options per chain, goal-screen per task, pipeline-generate, and the manual-screen dual run+generation identity at `etradeOptionsScreen.ts:180`); research (`rsr_`) and the Cloudflare `instanceId` are excluded. No alias rows are written by this slice.
+- New pin `tests/run_id_migration_5175.test.ts` (8 pins); `test:pins` grows 20 → 21 files.

@@ -17,6 +17,7 @@ import {
   type DiscoverySymbolOutcome,
   type StoredDiscoveryRun,
 } from "./discoveryRunPorts";
+import { newRunId } from "../services/executionTreeIds";
 
 function summarize(input: DiscoveryRunInput, id: string): DiscoveryRunSummary {
   // An outcome counts as an abstention either by status (the
@@ -77,7 +78,9 @@ export class InMemoryDiscoveryRunStore implements DiscoveryRunStore {
   private readonly maxRows: number;
 
   constructor(options: DiscoveryRunStoreOptions = {}) {
-    this.idFactory = options.idFactory ?? (() => crypto.randomUUID());
+    // Issue #5175 slice 3: same default mint as the DO-SQLite
+    // adapter (see there) — the twin must agree, id for id.
+    this.idFactory = options.idFactory ?? newRunId;
     this.retentionDays = options.retentionDays ?? DISCOVERY_RUN_RETENTION_DAYS;
     this.maxRows = options.maxRows ?? DISCOVERY_RUN_MAX_ROWS;
   }

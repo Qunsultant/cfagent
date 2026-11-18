@@ -59,7 +59,12 @@
  *    #5175's migration slices (CFO lane owns the research surfaces).
  *    The minters below already exist — the call sites do NOT use
  *    them yet; migrating the 20 legacy run-id call sites is #5175
- *    slice 3, and the no-minting-elsewhere pin is slice 4.
+ *    slice 3, and the no-minting-elsewhere pin is slice 4. Slice 3
+ *    migrated the fresh-entropy sites to these minters; the
+ *    deterministic sites (report-row generation ids, stage-claim
+ *    keys, quota-charge keys, research) keep their legacy strings
+ *    until the resolve-or-mint follow-up — they are idempotency keys,
+ *    not fresh mints, and a fresh mint there would fork rows.
  *  - Persisting per-step instance ids as stored fields (they are
  *    derivable today from runId + qualified step + index).
  *
@@ -302,6 +307,8 @@ export const ID_FORMAT_ARITY = {
   ord: 2,
   proof: 2,
   goal: 2,
+  scen: 2,
+  outc: 2,
   sched: 2,
   gen: 2,
   report: 2,
@@ -309,6 +316,8 @@ export const ID_FORMAT_ARITY = {
   audit: 2,
   node: 3,
   delivery: 3,
+  /** #5175 slice 3: a shard scan's derived run id (see `shardScanRunId`). */
+  "shard-scan": 3,
   stage: 4,
   trace: 5,
   step: 6,
@@ -487,6 +496,29 @@ export function levelId(level: ExecutionTreeLevel): LevelId {
   return `lvl:${EXECUTION_TREE_LEVEL_SHORT_IDS[level]}` as LevelId;
 }
 
+/**
+ * One shard scan's derived run id: `shard-scan:<chainId>:<symbol>` —
+ * e.g. `shard-scan:550e8400-e29b-41d4-a716-446655440000:AAPL`.
+ *
+ * Issue #4420 — the engine job id that inner shard scan is defined and
+ * checkpointed as. Deriving it from the shard payload is what lets the
+ * checkpoint and the shard row name the same run; the reader derives it
+ * from the shard's own payload (chain id + shard key) instead of
+ * guessing. That determinism is load-bearing (a fresh mint would fork
+ * the checkpoint), so this builder KEEPS the legacy format — slice 3
+ * adopts the construction into the leaf (it lived in
+ * `optionsScreenEngine.ts`), it does not re-mint it. The chain id is a
+ * bare UUID today (#4780 left it that way); the symbol is colon-free
+ * by construction (asserted by the caller-side shard key).
+ */
+export type ShardScanRunId = BrandedId<"ShardScanRunId">;
+
+export function shardScanRunId(chainId: string, symbol: string): ShardScanRunId {
+  assertIdBodyPart(chainId, "shard-scan chain id");
+  assertIdBodyPart(symbol, "shard-scan symbol");
+  return `shard-scan:${chainId}:${symbol}` as ShardScanRunId;
+}
+
 /* --- The parser (the authority's shape check) --- */
 
 const RUN_BODY_PATTERN = /^[0-9a-z]+-[0-9a-z]+$/;
@@ -580,7 +612,9 @@ export function parseId(id: string): ParsedId {
       case "sched":
       case "report":
       case "outcome":
-      case "audit": {
+      case "audit":
+      case "scen":
+      case "outc": {
         if (!UUID_PATTERN.test(segments[1] as string)) {
           throw parseError(id, `segment 2 is not a UUID: "${segments[1]}"`);
         }

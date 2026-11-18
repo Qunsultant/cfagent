@@ -18,9 +18,23 @@ import {
   type ScenarioRecord,
 } from "./goalScenarioPorts";
 import { doIndexSql, doTableSql } from "./schemaComponent/doCatalogue";
+import {
+  newGoalRecordId,
+  newPlatformRowId,
+} from "../services/executionTreeIds";
 
-function newId(prefix: string): string {
-  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+/**
+ * Issue #5175 slice 3: row ids mint through the one leaf minter.
+ * `goal` records use the canonical goal-record id
+ * (`goal:<time36>-<rand6>`); scenario / outcome rows use the
+ * platform row id (`scen:<uuid>` / `outc:<uuid>`). The ids are opaque
+ * primary keys + foreign-key references — nothing parses the legacy
+ * `<prefix>_<time>_<rand>` shape — so the format change is safe.
+ * Stored rows keep their ids (never rewritten).
+ */
+function newId(prefix: "goal" | "scen" | "outc"): string {
+  if (prefix === "goal") return newGoalRecordId();
+  return newPlatformRowId(prefix);
 }
 
 function parseJson(text: unknown): unknown {

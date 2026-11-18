@@ -15,9 +15,18 @@ import {
   type RecordOutcomeInput,
   type ScenarioRecord,
 } from "./goalScenarioPorts";
+import {
+  newGoalRecordId,
+  newPlatformRowId,
+} from "../services/executionTreeIds";
 
-function newId(prefix: string): string {
-  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+/**
+ * Issue #5175 slice 3: same mint as the DO-SQLite adapter (see there)
+ * — the twin must agree with the production adapter, id for id.
+ */
+function newId(prefix: "goal" | "scen" | "outc"): string {
+  if (prefix === "goal") return newGoalRecordId();
+  return newPlatformRowId(prefix);
 }
 
 function byNewestFirst<T extends { createdAt: string }>(rows: T[]): T[] {

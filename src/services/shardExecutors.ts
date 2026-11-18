@@ -68,8 +68,8 @@ import {
 import {
   optionsEngineStoresFromSql,
   runStrategyScreenViaEngine,
-  shardScanRunId,
 } from "../workflows/optionsScreenEngine";
+import { shardScanRunId } from "./executionTreeIds";
 import { optionsArtifactKey } from "../workflows/optionsScreenPorts";
 import type { StageQueueSend } from "../workflows/stageQueueTransport";
 import { createStructuredLogger } from "../observability/structuredLogger";

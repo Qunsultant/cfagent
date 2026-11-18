@@ -66,6 +66,7 @@ import { executeMCPTool } from "../../mcps/openaimp";
 import { recordTraceHopBestEffort } from "../../data/createMeshTracePorts";
 import { childContextOfTraceparent } from "../../observability/meshTrace";
 import { executeNaturalLanguageQuery } from "../nlq";
+import { newAsyncJobId } from "../../services/executionTreeIds";
 import {
   NLQ_MODE_SWITCH,
   levelsForNlq,
@@ -440,7 +441,10 @@ export async function submitAsyncJob(ctx: AsyncJobsContext,
 ): Promise<{ jobId: string; status: "queued"; statusUrl: string }> {
   ctx.ensureTables();
   const queue = ports(ctx).queue;
-  const jobId = crypto.randomUUID();
+  // Issue #5175 slice 3: the async-job id mints through the one leaf
+  // minter (`job:<uuid>`) — the §4 rule (asyncJobId IS the row's own
+  // job_id) is unchanged, only the mint site moves.
+  const jobId = newAsyncJobId();
   // Issue #3121 S4 — the follow-up row's own id: a submission whose
   // payload carries ledgerLinkage (stamped by the follow-up planners
   // with the chain-parent main job id — the only id that exists at
@@ -1623,7 +1627,9 @@ export async function recordScreenerRunMainJob(
   },
 ): Promise<string> {
   ctx.ensureTables();
-  const jobId = crypto.randomUUID();
+  // Issue #5175 slice 3: see submitAsyncJob above — the bridge's main
+  // job id mints through the one leaf minter too.
+  const jobId = newAsyncJobId();
   const now = new Date().toISOString();
   const kindLabel = screenerKindLabel(outcome.kind);
   const scope = outcome.kind === "stock" ? outcome.universe : outcome.thesis;

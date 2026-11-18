@@ -101,9 +101,9 @@ import { createScannerScreenPorts } from "../workflows/strategyScreenPorts";
 import {
   optionsEngineStoresFromSql,
   runStrategyScreenViaEngine,
-  shardScanRunId,
   type OptionsEngineStores,
 } from "../workflows/optionsScreenEngine";
+import { shardScanRunId } from "./executionTreeIds";
 import { createD1JobRunRecordDb, D1JobRunRecordStore } from "../data/d1JobRunRecordAdapter";
 import type { JobRunRecorder } from "./jobPipelineEngine";
 import { resolveChainSourceForRequest } from "../workflows/brokerChainSourceResidency";

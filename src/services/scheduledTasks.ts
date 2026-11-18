@@ -56,6 +56,7 @@ import {
   type StockScreenProvider,
 } from "../trading";
 import { ETradeService } from "./etrade";
+import { generationId, newRunId } from "./executionTreeIds";
 import { hasActiveChain } from "./asyncJobGate";
 import { createAsyncJobPorts } from "../data/createAsyncJobPorts";
 import {
@@ -854,7 +855,7 @@ export class ScheduledTasksService {
           : {}),
         env: this.platformDeps.env as never,
         userLogin,
-        runId: crypto.randomUUID(),
+        runId: newRunId(),
       });
       const provider = nasdaqUniverseProviderFromRoute(
         bundle.registry,
@@ -1900,7 +1901,12 @@ export class ScheduledTasksService {
           `${options.universe || "NASDAQ100"} stock screen`,
           {
             scheduleId: options.scheduleId,
-            runId: `stock_scanner:${timestamp}:${options.universe || "NASDAQ100"}`,
+            // Issue #5175 slice 3: the auth-guard trace run id mints
+            // through the one leaf minter. It is an audit-payload
+            // correlation label (fresh per fire), not an idempotency
+            // key — the universe + timestamp payload rides the
+            // sibling fields, unchanged.
+            runId: newRunId(),
             workflow: "autonomousMarketScreen",
             trigger: options.trigger ?? "scheduled",
             stage: "auth guard",
@@ -1974,7 +1980,13 @@ export class ScheduledTasksService {
           // absent filter set is the empty filter, same semantics.
           filters: screenFilters ?? {},
           universe: scheduledPlan.universe,
-          jobId: `screener:scheduled:${scheduledPlan.universe}:${timestamp}`,
+          // Issue #5175 slice 3: the scheduled screen's job id mints
+          // through the one leaf minter. It is minted once per fire
+          // (the timestamp was fresh per fire) and flows to the
+          // engine job definition + `workflow:<jobId>` delivery id,
+          // both opaque — nothing parses the legacy
+          // `screener:scheduled:<universe>:<timestamp>` shape.
+          jobId: newRunId(),
           asyncRequested: false,
           delivery: {},
           userLogin,
@@ -2338,7 +2350,10 @@ export class ScheduledTasksService {
           "goal screen",
           {
             scheduleId: options.scheduleId,
-            runId: `goal_screen:${timestamp}:${scenario.goalKind}`,
+            // Issue #5175 slice 3: same leaf mint as the stock-screen
+            // auth-guard trace above — an audit-payload correlation
+            // label, fresh per fire.
+            runId: newRunId(),
             workflow: "autonomousGoalScreen",
             trigger: options.trigger ?? "scheduled",
             stage: "auth guard",
@@ -2947,7 +2962,15 @@ export class ScheduledTasksService {
       ...(reportScope.chains.dte.minDte !== null ? { minDte: reportScope.chains.dte.minDte } : {}),
       ...(reportScope.chains.dte.maxDte !== null ? { maxDte: reportScope.chains.dte.maxDte } : {}),
     };
-    const reportRunId = `options_scanner:${timestamp}:${targetThesis}`;
+    // Issue #5175 slice 3: the scheduled options analysis run's id
+    // mints through the one leaf minter. It is minted once, here,
+    // and threaded everywhere the run's identity is needed — the
+    // engine dispatch, the artifact keys, the audit events, the
+    // delivery claim — so the once-per-run threading is unchanged.
+    // The thesis payload rides the audit stamp + the report title.
+    // The report row's generation is derived from it at the store
+    // call below (gen:<run body>), not reused as the run id.
+    const reportRunId = newRunId();
     // Issue #2600: the schedule's strategy mode â€” an explicitly
     // stored strategyMode wins; otherwise the #2583 scope maps
     // (resolver "all" -> mode "all", "explicit" -> mode "thesis").
@@ -3092,7 +3115,7 @@ export class ScheduledTasksService {
             : {}),
           env: this.platformDeps.env as never,
           userLogin,
-          runId: crypto.randomUUID(),
+          runId: newRunId(),
         });
         const provider = nasdaqUniverseProviderFromRoute(
           bundle.registry,
@@ -3678,10 +3701,14 @@ export class ScheduledTasksService {
       // Store the searchable report once before any channel delivery. The
       // PDF remains in ScreenerAgent storage; mas_reports keeps its key/URL
       // and the complete structured scan payload for AI Search.
-      const generationId = reportRunId;
+      // Issue #5175 slice 3: the run id is canonical now, so the
+      // generation is DERIVED from it (gen:<run body>) — the row
+      // keeps one run↔generation link, and the dedupe key stays
+      // stable for the run's single store.
+      const reportGenerationId = generationId(reportRunId);
       const canonical = storeOptionsCanonicalReport(this.orm, {
-        runId: generationId,
-        generationId,
+        runId: reportRunId,
+        generationId: reportGenerationId,
         title: `Options scanner â€” ${targetThesis} (${timestamp.slice(0, 10)})`,
         source: "options_scanner",
         summary: response.summary,
@@ -4230,7 +4257,12 @@ export class ScheduledTasksService {
       });
       // Issue #1333: discovery outcomes into the job-outcome sink.
       this.recordDiscoveryOutcome({
-        id: runId ?? `discovery:${timestamp}:${symbols.join(",")}`,
+        // Issue #5175 slice 3: the outcome-sink row id mints through
+        // the one leaf minter. The fallback was fresh per invocation
+        // (the timestamp is minted per call) and the sink upserts
+        // (INSERT OR REPLACE), so a fresh canonical id is
+        // behavior-identical. A caller-supplied runId still wins.
+        id: runId ?? newRunId(),
         trigger: options.trigger || "scheduled",
         status: "failed",
         scanned: requests.length,
@@ -4478,8 +4510,14 @@ export class ScheduledTasksService {
         input: reportInput,
       });
       const stored = await storeReportStage(this.orm, {
-        runId: `discovery:${args.run.id}`,
-        generationId: `discovery:${args.run.id}`,
+        // Issue #5175 slice 3: the discovery run's id is canonical
+        // now (the run store mints through the leaf minter), so the
+        // report row uses it directly as its run id, with the
+        // generation derived from it — the run and its generation
+        // migrate together, and the shared run body keeps the
+        // run↔generation link.
+        runId: args.run.id,
+        generationId: generationId(args.run.id),
         title: `Strategy discovery â€” ${args.run.inputModel}`,
         source: "discovery",
         summary: args.summary,
@@ -4689,7 +4727,9 @@ export class ScheduledTasksService {
       // and through the unchanged engine-routed panel otherwise.
       // The run id mints once, here, so a host run and a sync run
       // carry the same job identity for the same symbol.
-      const runId = `options-panel:scheduled:${symbol}:${new Date().toISOString()}`;
+      // Issue #5175 slice 3: the mint goes through the one leaf
+      // minter; the once-per-fire threading is unchanged.
+      const runId = newRunId();
       const result =
         hostDispatch?.decision.route === "host" && hostDispatch.broker
           ? await runScheduledFirerPanelViaHost({
@@ -4841,7 +4881,9 @@ export class ScheduledTasksService {
       });
       // Issue #1333: profile-derived discovery outcomes into the sink.
       this.recordDiscoveryOutcome({
-        id: runId ?? `discovery:profile-derived:${attemptedSymbols.join(",")}`,
+        // Issue #5175 slice 3: same leaf mint as the saved-request
+        // fallback above — fresh per invocation, sink upserts.
+        id: runId ?? newRunId(),
         trigger: options.trigger || "scheduled",
         status: "failed",
         scanned: constructedCount,
@@ -5218,7 +5260,9 @@ export class ScheduledTasksService {
       });
       // Issue #1333: no-view discovery outcomes into the sink.
       this.recordDiscoveryOutcome({
-        id: runId ?? `discovery:no-view:${symbols.join(",")}`,
+        // Issue #5175 slice 3: same leaf mint as the saved-request
+        // fallback above — fresh per invocation, sink upserts.
+        id: runId ?? newRunId(),
         trigger: options.trigger || "scheduled",
         status: "failed",
         scanned: symbols.length,

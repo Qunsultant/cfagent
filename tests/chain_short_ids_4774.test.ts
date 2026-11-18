@@ -47,7 +47,8 @@
  *    levels; the trace recorders populate `shortId` on the OODA
  *    loop only.
  *  - 4774-P09 every run/transaction instance carries a unique id:
- *    the engine run-id generator mints `run:<time>-<counter>`; the
+ *    the engine run-id generator mints `run:<time>-<counter>`
+ *    through the one leaf minter (#5175 slice 3); the
  *    research generator still mints `rsr_<time>_<rand>` (legacy,
  *    pending #5175 migration); async jobs mint a UUID; ledger rows
  *    carry their `id` PK; the derived per-step instance id is
@@ -303,12 +304,16 @@ describe("chain short ids (#4774)", () => {
   });
 
   it("P09: every run/transaction instance carries a unique id", () => {
-    // Engine runs mint `run:<time>-<counter>`; research runs still
-    // mint `rsr_<time>_<rand>` (legacy, pending #5175 migration);
-    // async jobs mint a UUID; ledger rows carry their `id` PK. No
-    // instance level is id-less.
+    // Engine runs mint `run:<time>-<counter>` through the one leaf
+    // minter (#5175 slice 3 — the inline closure moved into
+    // `executionTreeIds.newRunId`, same format, module counter);
+    // research runs still mint `rsr_<time>_<rand>` (legacy, pending
+    // #5175 migration); async jobs mint a UUID; ledger rows carry
+    // their `id` PK. No instance level is id-less.
     const engine = src("services/jobPipelineEngine.ts");
-    expect(engine).toContain("`run:${this.now().getTime().toString(36)}-${(++counter).toString(36)}`");
+    expect(engine).toContain('import { newRunId, stepExecutionId } from "./executionTreeIds"');
+    expect(engine).toContain("deps.newRunId ?? newRunId");
+    expect(engine).not.toContain("`run:${this.now().getTime().toString(36)}-${(++counter).toString(36)}`");
     const research = src("services/researchPipeline.ts");
     expect(research).toContain("`rsr_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`");
     const asyncJobs = src("agents/orchestrator/asyncJobs.ts");

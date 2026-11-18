@@ -196,7 +196,22 @@ export class OptionsScannerMCP extends McpAgent<Env> {
     this.server.tool(
       "get_scan_job",
       "Get the status or completed result of a paid asynchronous options scan.",
-      { jobId: z.string().uuid().describe("Job ID returned by screen_options") },
+      // Issue #5175 slice 3: screen_options returns the orchestrator
+      // queue receipt's jobId, which mints as `job:<uuid>` through
+      // the one leaf minter — so the read path accepts the canonical
+      // form AND the legacy bare UUID (same rule as get_async_job).
+      {
+        jobId: z
+          .string()
+          .refine(
+            (v) => {
+              const body = v.startsWith("job:") ? v.slice("job:".length) : v;
+              return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(body);
+            },
+            { message: "jobId must be a UUID or a job:<uuid> id" },
+          )
+          .describe("Job ID returned by screen_options"),
+      },
       async ({ jobId }) => ({
         content: [{
           type: "text" as const,

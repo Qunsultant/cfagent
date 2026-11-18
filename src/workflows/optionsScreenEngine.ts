@@ -62,6 +62,7 @@ import {
   jobRunRecorderFromStore,
   type JobRunRecorder,
 } from "../services/jobPipelineEngine";
+import { newRunId, shardScanRunId } from "../services/executionTreeIds";
 import {
   createBuiltinStepRegistry,
   type JobStepContext,
@@ -204,14 +205,12 @@ export function strategyScreenJobId(runId: string): string {
 
 /**
  * Issue #4420 — the run id one options feed shard records its inner
- * per-symbol strategy scan under. The shard executor dispatches the scan
- * with this identity, so the checkpoint and the shard row name the same
- * run; the reader derives it from the shard's own payload (chain id +
- * shard key) instead of guessing.
+ * per-symbol strategy scan under. The builder lives in the leaf id
+ * authority now (#5175 slice 3); this re-export (of the local import
+ * above) keeps existing importers working. See `shardScanRunId` in
+ * `src/services/executionTreeIds.ts` for the determinism contract.
  */
-export function shardScanRunId(chainId: string, symbol: string): string {
-  return `shard-scan:${chainId}:${symbol}`;
-}
+export { shardScanRunId };
 
 /**
  * Issue #4420 — the engine job id that inner shard scan is defined and
@@ -807,7 +806,7 @@ export async function runOptionsPlainScreenViaEngine(
         "Specify underlying symbols or set the visible maximum-underlyings limit before scanning option chains.",
     };
   }
-  const runId = `options-screen:plain:${new Date().toISOString()}`;
+  const runId = newRunId();
   const storage = memoryStageStorage();
   const outcome = await runOptionsScreenViaEngine(
     {

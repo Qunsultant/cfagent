@@ -32,6 +32,7 @@ import type { ComparisonNlqRunner } from "../services/comparisonNlqRunner";
 import type { ProductionComparisonResult } from "../services/comparisonRunner";
 import type { Outlook } from "../services/researchGates";
 import type { GoalKind } from "../services/goalScenarioStore";
+import { newRunId } from "../services/executionTreeIds";
 import { validateStrategyRequest, type StrategyScreenFilter } from "../trading";
 import { parseScanRequestTemplate } from "../trading";
 import {
@@ -930,7 +931,10 @@ export async function runOptionsStrategyAction(
   // execution, mesh door) always thread a login, so the unscoped
   // path is a test/context fallback, exactly as on the scanner leg.
   const panelUserLogin = deps?.userLogin;
-  const panelRunId = `nlq-panel:${crypto.randomUUID()}`;
+  // Issue #5175 slice 3: the panel leg's run id mints through the one
+  // leaf minter; the engine job id is opaque
+  // (`strategy-screen:run:<body>`).
+  const panelRunId = newRunId();
   const panelStorage = deps?.pipelineStorage ?? memoryStageStorage();
   // Issue #4271: the panel is a strategy screen — it defines the
   // strategy job (strategy-screen:<runId>), not the options job.
@@ -1498,7 +1502,8 @@ async function runOpportunityScan(
   // hosts (NLQ execution, mesh door) always thread a login, so the
   // unscoped path is a test/context fallback, not a live behavior.
   const scanUserLogin = deps?.userLogin;
-  const scanPipelineRunId = `nlq-scan:${crypto.randomUUID()}`;
+  // Issue #5175 slice 3: same leaf mint as the panel leg above.
+  const scanPipelineRunId = newRunId();
   const scanStorage = deps?.pipelineStorage ?? memoryStageStorage();
   // Issue #4271: the scan is a strategy screen — it defines the
   // strategy job (strategy-screen:<runId>), not the options job.
