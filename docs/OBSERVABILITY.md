@@ -337,15 +337,16 @@ leaky producer envelope cannot leak through it.
   path and visible in the stream, with AE totals agreeing with
   the D1 rollup. Not fabricated here.
 
-## 6. OpenTelemetry (OTel) — the telemetry library (issues #5081 S1 + #5082 S2, program #5080)
+## 6. OpenTelemetry (OTel) — the telemetry library (issues #5081 S1 + #5082 S2 + #2808 S3 + #5083 S4, program #5080)
 
 OTel is the instrumentation library for logs, metrics, and traces
 (the S1 slice implements LOGGING; the S2 slice implements
-METRICS — issue #5082; tracing spans is S3, and #2808's
-harmonization program stays parked). No SigNoz, no ClickHouse,
-no VPS, no Workers Paid features, no D1 for telemetry. The stack
-is the stock JS 3.x logs + metrics lines: `@opentelemetry/api`
-1.10.0 + `@opentelemetry/sdk-logs` 3.1.1 +
+METRICS — issue #5082; tracing spans is S3 — issue #2808, and
+#2808's harmonization program stays parked; error-reporting is
+S4 — issue #5083, the one alerting port). No SigNoz, no
+ClickHouse, no VPS, no Workers Paid features, no D1 for
+telemetry. The stack is the stock JS 3.x logs + metrics lines:
+`@opentelemetry/api` 1.10.0 + `@opentelemetry/sdk-logs` 3.1.1 +
 `@opentelemetry/sdk-metrics` 3.1.1 + `@opentelemetry/otlp-transformer`
 0.301.2.
 
@@ -563,6 +564,74 @@ discipline (`src/observability/observabilityPorts.ts`,
 `meshTrace.ts`) is reused for span ids; S3 does not
 harmonize the seven trace kinds.
 
+### Error-reporting (S4 scope, issue #5083)
+
+One owner module + one alerting port — the single path every
+error report takes to reach a human:
+`src/observability/otelAlerting.ts` (`createAlertingPort`).
+Every alert goes to Slack (SCREENER_SLACK_CHANNEL) AND email
+(CHANNEL_EMAIL_PRINCIPALS) — both, every alert. Alerts are
+notifications, never approval cards: an alert never asks the
+recipient to approve anything, and no Block Kit action is ever
+attached. Credentials (SLACK_BOT_TOKEN / SLACK_WEBHOOK_URL,
+the EMAIL binding) come from GitHub secrets (Worker secrets),
+never hardcoded, never in config files.
+
+The port CONSUMES logs/metrics/audit: it reads them to enrich
+the alert (trace id / run id / context ride the report) and
+records every alert through the structured logger. It does not
+replace or duplicate them, and it writes no second store. The
+Slack leg reuses the one Slack text route
+(`postSlackText` in `src/agents/social/delivery.ts`, moved
+there from `src/agents/resourceGoals.ts` in S4 so the port can
+reuse it without a circular import; resourceGoals re-exports
+it, so its existing callers are unchanged). The email leg
+reuses the one `EmailSender` port
+(`src/services/emailSenderPorts.ts`); the recipients are the
+CHANNEL_EMAIL_PRINCIPALS keys (one email per principal).
+
+The three first consumers (owner decision: ALL wired first):
+the sweep stuck-run alert (#3784, orchestrator
+`notifyStuckRun`), the 70% SessionStore cap alert (#1819,
+`runResourceCapAlert` — the 70% watch and the 90%/100%
+tiers), and CI failure alerts (the Workflow Failure Watch
+workflow POSTs to `POST /api/otel/v1/alerts` when it files a
+new [QA self-heal] issue, under the same OTEL_INGEST_TOKEN
+gate as the OTLP routes; the alert is best-effort and never
+fails the workflow). What triggers each does not change —
+only the delivery path (they now go through the one port).
+#3765 S2 alerting is a consumer of this port, not a parallel
+alerter.
+
+**Placeholder rules (S7 dependency, option b).** S4 builds
+only the owner module + port with PLACEHOLDER rules. The
+port accepts a severity + rule id from the caller, but S4
+does NOT define the real rule/severity catalog — the values
+are placeholders (`ruleId` starts with `placeholder-`,
+`result.placeholderRules === true`), clearly marked, to be
+replaced by S7 (#5086). No second catalog. The alert-subject
+codes OBS-1017 (stuck run), OBS-1018 (cap breach), OBS-1019
+(CI failure) are S4 code identifiers; their severity/rule
+mapping lands with S7.
+
+**Config.** The `alerting` section of `config/otel.json` +
+env vars, resolved through the same five-level mechanism
+(run > session > user > env > file > builtin safe default):
+master `enabled` (builtin OFF), `slackEnabled` /
+`emailEnabled` (each channel individually on/off; builtin ON
+when alerting is on), and the free-tier guard
+`maxAlertsPerDay` (builtin 100). An invalid value fails
+closed to OFF with a coded OBS-1001 message + audit.
+
+**Free-tier guard.** The port counts alerts delivered per UTC
+day against `maxAlertsPerDay` (a config value, not
+hard-coded) and, when the cap is reached, drops further
+alerts with exactly one coded OBS-1016 per day. The guard
+state is module-level (shared across every port instance in
+the isolate, keyed by UTC day + cap) — a fresh port per alert
+must not reset it. A delivery failure on one channel never
+blocks the other; the port never throws.
+
 ### Coded messages (the S7 catalog seed)
 
 `OBS-1001` config invalid (fail-closed) · `OBS-1002` export
@@ -571,7 +640,11 @@ ingest rejected (malformed OTLP) · `OBS-1005` sink degraded ·
 `OBS-1006` metrics export failed · `OBS-1007` metrics free-tier
 guard (AE write limit reached) · `OBS-1012` traces export
 failed · `OBS-1013` traces free-tier guard (AE write limit
-reached). Defined in one place
+reached) · `OBS-1014` alerting send failed · `OBS-1015`
+alerting destination missing · `OBS-1016` alerting free-tier
+guard (max alerts/day reached) · `OBS-1017` stuck-run alert ·
+`OBS-1018` cap-breach alert · `OBS-1019` CI failure alert.
+Defined in one place
 (`src/observability/otelMessages.ts`); S7 adopts and expands it
 into the one message catalog.
 

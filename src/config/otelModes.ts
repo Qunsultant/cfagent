@@ -197,7 +197,42 @@ export interface OtelFileConfig {
   traces: OtelTracesFileConfig;
   /** Issue #5169 — the archive browser settings (all config values, externalized). */
   archive: OtelArchiveFileConfig;
+  /** Issue #5083 (S4) — the alerting settings (all config values, externalized). */
+  alerting: OtelAlertingFileConfig;
 }
+
+/** One alerting section in the config file (config/otel.json). */
+export interface OtelAlertingFileConfig {
+  enabled: boolean;
+  slackEnabled: boolean;
+  emailEnabled: boolean;
+  maxAlertsPerDay: number;
+}
+
+/** The resolved alerting settings (the operational values the alerting port consumes). */
+export interface OtelAlertingSettings {
+  enabled: boolean;
+  slackEnabled: boolean;
+  emailEnabled: boolean;
+  maxAlertsPerDay: number;
+}
+
+/**
+ * Issue #5083 (S4) — the BUILTIN safe defaults for the alerting
+ * settings (used only when the file is missing or a value is
+ * invalid). The master is OFF (safe default: no alert is sent
+ * unless alerting is explicitly enabled); when alerting is ON,
+ * both channels are ON (the owner decision: Slack AND email,
+ * both, every alert) and the free-tier guard caps at 100
+ * alerts/day. An invalid value fails closed to these, never
+ * to a value that would flood a channel or silently drop alerts.
+ */
+export const OTEL_ALERTING_SETTINGS_BUILTIN: OtelAlertingSettings = {
+  enabled: false,
+  slackEnabled: true,
+  emailEnabled: true,
+  maxAlertsPerDay: 100,
+} as const;
 
 /** One archive section in the config file (config/otel.json). */
 export interface OtelArchiveFileConfig {
@@ -885,6 +920,81 @@ export function resolveOtelArchiveSettings(
         input.maxObjects,
         normalizePositiveInt,
         OTEL_ARCHIVE_SETTINGS_BUILTIN.maxObjects,
+      ),
+    },
+    invalid,
+  };
+}
+
+export interface OtelAlertingSettingsInput {
+  enabled: OtelScopeLevels;
+  slackEnabled: OtelScopeLevels;
+  emailEnabled: OtelScopeLevels;
+  maxAlertsPerDay: OtelScopeLevels;
+}
+
+export interface ResolvedOtelAlertingSettings {
+  settings: OtelAlertingSettings;
+  /** True when any setting's winning level held an unrecognized value. */
+  invalid: boolean;
+}
+
+/**
+ * Issue #5083 (S4) — resolves the alerting settings over run >
+ * session > user > env > file > builtin (the safe defaults).
+ * Each setting resolves independently through the same
+ * five-level mechanism; an unrecognized winning value for a
+ * setting fails closed to that setting's builtin safe default
+ * with a coded OBS-1001 message and no fall-through.
+ * `invalid` is true when any setting failed closed.
+ */
+export function resolveOtelAlertingSettings(
+  input: OtelAlertingSettingsInput,
+): ResolvedOtelAlertingSettings {
+  let invalid = false;
+  const resolveOne = <T>(
+    switchName: string,
+    levels: OtelScopeLevels,
+    normalize: (raw: unknown) => T | "invalid" | null,
+    builtin: T,
+  ): T => {
+    for (const [source, value] of orderedLevels(levels)) {
+      const normalized = normalize(value);
+      if (normalized === null) continue;
+      if (normalized === "invalid") {
+        logInvalid(switchName, source, value, String(builtin));
+        invalid = true;
+        return builtin;
+      }
+      return normalized;
+    }
+    return builtin;
+  };
+  return {
+    settings: {
+      enabled: resolveOne(
+        "OTEL_ALERTING_ENABLED",
+        input.enabled,
+        normalizeBoolean,
+        OTEL_ALERTING_SETTINGS_BUILTIN.enabled,
+      ),
+      slackEnabled: resolveOne(
+        "OTEL_ALERTING_SLACK_ENABLED",
+        input.slackEnabled,
+        normalizeBoolean,
+        OTEL_ALERTING_SETTINGS_BUILTIN.slackEnabled,
+      ),
+      emailEnabled: resolveOne(
+        "OTEL_ALERTING_EMAIL_ENABLED",
+        input.emailEnabled,
+        normalizeBoolean,
+        OTEL_ALERTING_SETTINGS_BUILTIN.emailEnabled,
+      ),
+      maxAlertsPerDay: resolveOne(
+        "OTEL_ALERTING_MAX_ALERTS_PER_DAY",
+        input.maxAlertsPerDay,
+        normalizeNonNegativeInt,
+        OTEL_ALERTING_SETTINGS_BUILTIN.maxAlertsPerDay,
       ),
     },
     invalid,

@@ -236,7 +236,7 @@ itself is the umbrella, not a record.
 | S1 | Logging | #5081 | One structured logger: `src/observability/structuredLogger.ts`. Store: Workers Logs + R2 archive (S1). | **In build** |
 | S2 | Metrics | #5082 | One metrics model + store (S2). The #1819 resource rollup (`src/data/d1ResourceRollupAdapter.ts`, D1 `resource_daily_rollups`) lives here. Health + SLOs live here as metrics. | **Planned** (the #1819 rollup itself is Live) |
 | S3 | Tracing | #2808 | Trace spine: `traceparent` + D1 `agent_mesh_trace_hops` + `GET /api/traces`. OTel spans are the instrumentation; #2808's harmonization program stays parked. | **Built** (OTel span instrumentation merged; the mesh spine is Live, proof pending) |
-| S4 | Error-reporting | #5083 | One owner + one alerting path (named by S4). Consumes logs/metrics/audit; never replaces them. | **Planned** |
+| S4 | Error-reporting | #5083 | One owner + one alerting path (`src/observability/otelAlerting.ts`, `createAlertingPort`). Consumes logs/metrics/audit; never replaces them. Slack (SCREENER_SLACK_CHANNEL) AND email (CHANNEL_EMAIL_PRINCIPALS), both. First consumers: sweep stuck-run, cap alert, CI failure alerts. Placeholder rules (S7 defines the real catalog). | **Built** |
 | S5 | Audit | #5084 | One audit store. Today two layers exist (`iaaaAuditStore.ts` vs `auditLogPorts`/`auditLogStoreImpl` + `auditReportPorts`) — S5 decides the canonical store (rename-form deprecation, never deletion). | **Planned** (audit itself is Live) |
 | S6 | Recording | #5085 | One runs ledger / run-row model (the #4002 rule). Reconciles runs ledger vs Audit Vault vs Loop status into one source of truth for "did the run happen". | **Planned** (the ledger is Live) |
 | S7 | Coded messages + externalized config | #5086 | One message catalog (stable `OBS-####` codes + severity per message) and one config port. All thresholds, severities, retention, sampling, and the catalog live in config. | **Planned** |
@@ -569,25 +569,32 @@ the tenant-admin (tenant level, §8).
   Engine dataset). **Planned** — the one metrics model + store (S2
   #5082, its own slice after S1) and the OTel metrics instrumentation.
 
-### 6.4 Error-reporting — Planned (S4); alerts exist in pieces today
+### 6.4 Error-reporting — Built (S4 #5083); one owner + one alerting path
 
 - **What it is.** The alert that something failed, routed to a human
   who must act. It CONSUMES logs, metrics, and audit — it never
-  replaces them. Error-reporting has no single owner module today;
-  S4 names one owner + one alerting path.
-- **What the operator sees.** Today, alerts in pieces: the SessionStore
-  cap alert (Slack, hourly, 70%), the sweep's stuck-run alert (Slack,
-  exactly-once, runs >30 min; reaped as failed after 2h), CI alerts.
-  There is no single alerting path and no single owner — that is the
-  gap S4 closes. The #3765 S2 alerting slice is a consumer of the S4
-  port, not a parallel alerter.
+  replaces them. One owner module + one alerting port
+  (`src/observability/otelAlerting.ts`, `createAlertingPort`):
+  every alert goes to Slack (SCREENER_SLACK_CHANNEL) AND email
+  (CHANNEL_EMAIL_PRINCIPALS) — both, every alert. Alerts are
+  notifications, never approval cards.
+- **What the operator sees.** The three first consumers, all
+  through the one port: the SessionStore cap alert (Slack + email,
+  hourly, 70% watch + 90%/100% tiers), the sweep's stuck-run alert
+  (Slack + email, exactly-once, runs >30 min; reaped as failed
+  after 2h), and CI failure alerts (the Workflow Failure Watch
+  workflow POSTs to `POST /api/otel/v1/alerts` when it files a
+  new [QA self-heal] issue). The #3765 S2 alerting slice is a
+  consumer of the S4 port, not a parallel alerter.
 - **What action it drives.** A human acts: a cap alert drives a
   capacity decision; a stuck-run alert drives an investigation (and,
   for the 5-minute auto-heal, a provably-safe retry — read-only or
   idempotency-keyed jobs only, never order placement); a detection
   alert drives containment (human-only lift).
-- **Status.** **Planned** (S4 #5083). The individual alerts listed
-  above are Live; the unified owner + path is not.
+- **Status.** **Built** (S4 #5083). Placeholder rules only (S7
+  defines the real severity/rule catalog); the alert-subject codes
+  OBS-1017/1018/1019 are S4 identifiers. Credentials from GitHub
+  secrets (Worker secrets), never hardcoded.
 
 ### 6.5 Audit — Live (one store to consolidate, S5)
 

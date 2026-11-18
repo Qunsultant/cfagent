@@ -24,6 +24,11 @@ jobs:
     steps:
       - name: File issues for failed workflow runs
         uses: actions/github-script@v7
+        env:
+          # Issue #5083 (S4) — the CI failure alert token (the
+          # GitHub secret of the same name as the Worker secret;
+          # an owner step). Absent, the alert POST is skipped.
+          OTEL_INGEST_TOKEN: ${{ secrets.OTEL_INGEST_TOKEN }}
         with:
           script: |
             const SELF = "Workflow Failure Watch";
@@ -121,4 +126,38 @@ jobs:
                 labels: ["self-heal", "ci-failure"],
               });
               console.log(`Created issue #${issue.number} for run ${run.id} (${run.name})`);
+
+              // Issue #5083 (S4) — the CI failure alert routes
+              // through the one alerting port (Slack + email) via
+              // POST /api/otel/v1/alerts. The token is the GitHub
+              // secret OTEL_INGEST_TOKEN (the same value as the
+              // Worker secret of the same name; an owner step:
+              // `wrangler secret put OTEL_INGEST_TOKEN`). The
+              // alert is best-effort: a failed POST never fails
+              // this workflow (the issue above is the record).
+              try {
+                const token = process.env.OTEL_INGEST_TOKEN;
+                if (!token) {
+                  console.log("OTEL_INGEST_TOKEN not set; skipping the CI failure alert.");
+                } else {
+                  const alertRes = await fetch("https://agent.openaimp.com/api/otel/v1/alerts", {
+                    method: "POST",
+                    headers: {
+                      "Content-Type": "application/json",
+                      Authorization: `Bearer ${token}`,
+                    },
+                    body: JSON.stringify({
+                      source: "ci-failure",
+                      workflow: run.name,
+                      runId: String(run.id),
+                      runUrl,
+                      conclusion: run.conclusion,
+                      headBranch: run.head_branch,
+                    }),
+                  });
+                  console.log(`CI failure alert POST: ${alertRes.status}`);
+                }
+              } catch (e) {
+                console.log(`CI failure alert POST failed (best-effort, issue #${issue.number} stands): ${e.message}`);
+              }
             }

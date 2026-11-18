@@ -105,6 +105,8 @@ import { recordScheduleCallbackRun } from "./orchestrator/scheduleCallbackRunRec
 import { nlqSchedulingPort, nlqSocialBriefPort, nlqStockScreenPort, type NlqPortsContext } from "./orchestrator/nlqPorts";
 import { formatTraceparent, newTraceContext } from "../observability/observabilityPorts";
 import { observeDoRouteDispatch } from "../observability/scheduledJobOutcomes";
+import { createAlertingPort } from "../observability/otelAlerting";
+import { OBS_ALERTING_STUCK_RUN } from "../observability/otelMessages";
 import { recordTraceHopBestEffort } from "../data/createMeshTracePorts";
 import { createSocialBriefStoreFromNamespace } from "./social/briefStore";
 import { fetchSlackPost } from "./social/delivery";
@@ -749,28 +751,31 @@ export class OrchestratorAgent extends PortThink {
       deliverySuppressor: createDeliverySuppressor(createSqlDeliverySuppressionStore(() => this.ensureTables())), // Issue #2913 (G6): durable suppression — one claims table shared by every context built here (lazy store).
       serviceMembershipStore: createKvMembershipStore(sessionStore(this.env)),
       notifyStuckRun: async (info) => {
-        // Issue #2567: stuck-running alert via postSlackText (the #1819
-        // resource cap-alert seam; webhook first, bot token second).
-        // Text renders from the outcome catalog (#2975); the legacy
-        // text is the fallback. Detection + the exactly-once claim
-        // live in asyncJobs.maybeAlertStuckRunning.
+        // Issue #5083 (S4) — the stuck-running alert routes
+        // through the one alerting port (Slack + email). Text
+        // renders from the outcome catalog (#2975); detection +
+        // the exactly-once claim live in
+        // asyncJobs.maybeAlertStuckRunning.
         const text = renderChannelText("stuck_run_alert", "slack", {
           jobId: info.jobId, label: info.label, ageMin: Math.round(info.ageMs / 60000),
           thresholdMin: Math.round(info.thresholdMs / 60000), capability: info.capability,
           ownerLogin: info.ownerLogin, startedAt: info.startedAt,
-          // Issue #3811: the stall evidence rides the alert text —
-          // the executor's last activity, falling back to the claim
-          // instant for rows that predate heartbeats.
+          // Issue #3811: the stall evidence rides the alert text.
           lastActivityAt: info.lastActivityAt ?? info.startedAt,
           lastActivityMin: Math.round((info.heartbeatAgeMs ?? info.ageMs) / 60000),
         }, "legacy_stuck_run_alert");
-        const result = await postSlackText({ post: fetchSlackPost, env: this.env, text });
-        this.audit(result.ok ? "async_job.stuck_alert" : "async_job.stuck_alert_failed", "orchestrator", {
-          jobId: info.jobId,
-          capability: info.capability,
-          ownerLogin: info.ownerLogin,
-          ageMs: info.ageMs,
-          ...(result.ok ? { method: result.method } : { error: result.error }),
+        const result = await createAlertingPort({ env: this.env }).reportAlert({
+          source: "sweep", code: OBS_ALERTING_STUCK_RUN,
+          // PLACEHOLDER severity + rule id (S7 defines the real catalog).
+          severity: "warning", ruleId: "placeholder-sweep-stuck-run",
+          title: `Stuck run: ${info.jobId}`, text, runId: info.jobId,
+        });
+        this.audit(result.delivered ? "async_job.stuck_alert" : "async_job.stuck_alert_failed", "orchestrator", {
+          jobId: info.jobId, capability: info.capability,
+          ownerLogin: info.ownerLogin, ageMs: info.ageMs,
+          ...(result.delivered
+            ? { slack: result.slack.ok ? "ok" : "failed", email: result.email.ok ? "ok" : "failed" }
+            : { error: result.slack.error ?? result.email.error ?? result.code }),
         });
       },
     };

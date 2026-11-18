@@ -57,6 +57,8 @@ export interface SlackDeliveryEnv {
   SOCIAL_SLACK_CHANNEL?: string;
   SLACK_CHANNEL_ID?: string;
   SLACK_CHANNEL?: string;
+  /** Issue #5083 (S4) — the screener alert channel (the alerting destination). */
+  SCREENER_SLACK_CHANNEL?: string;
   SLACK_BOT_TOKEN?: string;
   SLACK_WEBHOOK_URL?: string;
   [key: string]: string | undefined;
@@ -65,6 +67,88 @@ export interface SlackDeliveryEnv {
 /** Channel resolution: social-specific first, then the shared Slack channel names. Never a hardcoded id. */
 export function resolveSocialSlackChannel(env: SlackDeliveryEnv): string | undefined {
   return env.SOCIAL_SLACK_CHANNEL || env.SLACK_CHANNEL_ID || env.SLACK_CHANNEL || undefined;
+}
+
+export type SlackTextResult =
+  | { ok: true; method: "webhook" | "bot" }
+  | { ok: false; error: string; noDestination?: boolean };
+
+/**
+ * Post plain text through the existing Slack route (webhook, else bot).
+ * Mirrors deliverApprovalCard's destination order; judges the bot reply
+ * by Slack's {ok} field, not just the HTTP status. Returns noDestination
+ * ONLY when neither a webhook nor a bot token is configured at all — a
+ * configured destination that fails is a failure, not a missing config.
+ *
+ * Issue #5083 (S4) — moved here from src/agents/resourceGoals.ts so
+ * the one alerting port (src/observability/otelAlerting.ts) can reuse
+ * this single Slack text route without a circular import
+ * (resourceGoals imports the port for the cap alert; the port imports
+ * this). resourceGoals re-exports it, so its existing callers are
+ * unchanged. The optional `channel` overrides the resolution: the
+ * alerting port passes SCREENER_SLACK_CHANNEL explicitly (the owner
+ * decision: Slack alerts go to SCREENER_SLACK_CHANNEL); when it is
+ * unset the shared resolution above applies.
+ */
+export async function postSlackText(deps: {
+  post: SlackPostFn;
+  env: SlackDeliveryEnv;
+  text: string;
+  channel?: string;
+}): Promise<SlackTextResult> {
+  const webhookUrl = deps.env.SLACK_WEBHOOK_URL;
+  let webhookError: string | undefined;
+  if (webhookUrl) {
+    try {
+      const res = await deps.post(
+        webhookUrl,
+        { "Content-Type": "application/json; charset=utf-8" },
+        JSON.stringify({ text: deps.text })
+      );
+      if (res.status >= 200 && res.status < 300) return { ok: true, method: "webhook" };
+      webhookError = `Slack webhook delivery failed: HTTP ${res.status}`;
+    } catch (err) {
+      webhookError = `Slack webhook delivery failed: ${err instanceof Error ? err.message : String(err)}`;
+    }
+  }
+  const token = deps.env.SLACK_BOT_TOKEN;
+  const channel = deps.channel || resolveSocialSlackChannel(deps.env);
+  if (!token) {
+    return {
+      ok: false,
+      error: webhookError ?? "No Slack webhook URL or bot token is configured for delivery",
+      noDestination: webhookUrl ? undefined : true,
+    };
+  }
+  if (!channel) {
+    return {
+      ok: false,
+      error: "No Slack channel is configured for delivery (set SOCIAL_SLACK_CHANNEL or SLACK_CHANNEL)",
+    };
+  }
+  try {
+    const res = await deps.post(
+      "https://slack.com/api/chat.postMessage",
+      { Authorization: `Bearer ${token}`, "Content-Type": "application/json; charset=utf-8" },
+      JSON.stringify({ channel, text: deps.text })
+    );
+    if (res.status < 200 || res.status >= 300) {
+      return { ok: false, error: `Slack chat.postMessage failed: HTTP ${res.status}` };
+    }
+    let data: { ok?: boolean; error?: string } = {};
+    try {
+      data = JSON.parse(res.body) as { ok?: boolean; error?: string };
+    } catch {
+      return { ok: false, error: "Slack chat.postMessage returned an unreadable response" };
+    }
+    if (data.ok) return { ok: true, method: "bot" };
+    return { ok: false, error: `Slack chat.postMessage failed: ${data.error ?? "unknown error"}` };
+  } catch (err) {
+    return {
+      ok: false,
+      error: `Slack chat.postMessage failed: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
 }
 
 export interface ApprovalCardInput {

@@ -55,11 +55,27 @@ import {
 } from "../telemetry/resourceRollupStore";
 import {
   fetchSlackPost,
+  postSlackText,
   resolveSocialSlackChannel,
   type SlackDeliveryEnv,
   type SlackPostFn,
+  type SlackTextResult,
 } from "./social/delivery";
+// Issue #5083 (S4) — postSlackText + SlackTextResult now live in
+// ./social/delivery.ts (the one Slack text route); re-exported here
+// so the existing callers (orchestrator, asyncJobs, dlq, routes)
+// keep importing them from this module unchanged.
+export { postSlackText, type SlackTextResult } from "./social/delivery";
 import { renderChannelText } from "../outcomes/outcomeAspects";
+import {
+  createAlertingPort,
+  type AlertingPort,
+} from "../observability/otelAlerting";
+import {
+  OBS_ALERTING_CAP_BREACH,
+  OBS_ALERTING_DESTINATION_MISSING,
+} from "../observability/otelMessages";
+import type { Env } from "../types";
 
 export type ResourceGoalDb = ResourceD1Db;
 
@@ -113,77 +129,6 @@ export async function runResourceRollup(deps: {
     { ops: 0, rowsRead: 0, rowsWritten: 0 }
   );
   return { day, groups: rows.length, ...sums };
-}
-
-export type SlackTextResult =
-  | { ok: true; method: "webhook" | "bot" }
-  | { ok: false; error: string; noDestination?: boolean };
-
-/**
- * Post plain text through the existing Slack route (webhook, else bot).
- * Mirrors deliverApprovalCard's destination order; judges the bot reply
- * by Slack's {ok} field, not just the HTTP status. Returns noDestination
- * ONLY when neither a webhook nor a bot token is configured at all — a
- * configured destination that fails is a failure, not a missing config.
- */
-export async function postSlackText(deps: {
-  post: SlackPostFn;
-  env: SlackDeliveryEnv;
-  text: string;
-}): Promise<SlackTextResult> {
-  const webhookUrl = deps.env.SLACK_WEBHOOK_URL;
-  let webhookError: string | undefined;
-  if (webhookUrl) {
-    try {
-      const res = await deps.post(
-        webhookUrl,
-        { "Content-Type": "application/json; charset=utf-8" },
-        JSON.stringify({ text: deps.text })
-      );
-      if (res.status >= 200 && res.status < 300) return { ok: true, method: "webhook" };
-      webhookError = `Slack webhook delivery failed: HTTP ${res.status}`;
-    } catch (err) {
-      webhookError = `Slack webhook delivery failed: ${err instanceof Error ? err.message : String(err)}`;
-    }
-  }
-  const token = deps.env.SLACK_BOT_TOKEN;
-  const channel = resolveSocialSlackChannel(deps.env);
-  if (!token) {
-    return {
-      ok: false,
-      error: webhookError ?? "No Slack webhook URL or bot token is configured for delivery",
-      noDestination: webhookUrl ? undefined : true,
-    };
-  }
-  if (!channel) {
-    return {
-      ok: false,
-      error: "No Slack channel is configured for delivery (set SOCIAL_SLACK_CHANNEL or SLACK_CHANNEL)",
-    };
-  }
-  try {
-    const res = await deps.post(
-      "https://slack.com/api/chat.postMessage",
-      { Authorization: `Bearer ${token}`, "Content-Type": "application/json; charset=utf-8" },
-      JSON.stringify({ channel, text: deps.text })
-    );
-    if (res.status < 200 || res.status >= 300) {
-      return { ok: false, error: `Slack chat.postMessage failed: HTTP ${res.status}` };
-    }
-    let data: { ok?: boolean; error?: string } = {};
-    try {
-      data = JSON.parse(res.body) as { ok?: boolean; error?: string };
-    } catch {
-      return { ok: false, error: "Slack chat.postMessage returned an unreadable response" };
-    }
-    if (data.ok) return { ok: true, method: "bot" };
-    return { ok: false, error: `Slack chat.postMessage failed: ${data.error ?? "unknown error"}` };
-  } catch (err) {
-    return {
-      ok: false,
-      error: `Slack chat.postMessage failed: ${err instanceof Error ? err.message : String(err)}`,
-    };
-  }
 }
 
 function buildAlertText(
@@ -240,11 +185,67 @@ export interface CapAlertResult {
  * budget, and never re-posts for its own tier-day. The 70%
  * behavior above is unchanged.
  */
+/**
+ * Issue #5083 (S4) — sends one cap alert through the one
+ * alerting port (Slack + email) and normalizes the port result
+ * to the old postSlackText shape (a discriminated union: ok
+ * carries the delivery method, failure carries the error) so
+ * the caller's dedup / retry branching is unchanged. What
+ * triggers the alert does not change — only the delivery path
+ * (it now goes through the port, so the alert also reaches
+ * email). The alert title is the rendered text's first line
+ * (the outcome catalog renders it — #2975 — so no hand-written
+ * cap-alert title literal lives here). The port is
+ * created from the caller's env + the injected Slack poster
+ * (the test seam); a caller may inject its own port instead.
+ */
+type CapAlertSendResult =
+  | { ok: true; method: string }
+  | { ok: false; error: string; noDestination?: boolean };
+
+async function sendCapAlert(
+  deps: { post: SlackPostFn; env: SlackDeliveryEnv; alertPort?: AlertingPort },
+  text: string,
+): Promise<CapAlertSendResult> {
+  const port =
+    deps.alertPort ??
+    createAlertingPort({
+      env: deps.env as unknown as Env,
+      slackPost: deps.post,
+    });
+  const result = await port.reportAlert({
+    source: "cap-alert",
+    code: OBS_ALERTING_CAP_BREACH,
+    // PLACEHOLDER severity + rule id (S7 defines the real catalog).
+    severity: "warning",
+    ruleId: "placeholder-cap-alert",
+    title: text.split("\n", 1)[0] ?? "Cap alert",
+    text,
+  });
+  if (result.delivered) {
+    const method = result.slack.ok
+      ? result.email.ok
+        ? `slack+email (${result.slack.method ?? "bot"})`
+        : `slack (${result.slack.method ?? "bot"})`
+      : "email";
+    return { ok: true, method };
+  }
+  if (result.code === OBS_ALERTING_DESTINATION_MISSING) {
+    return { ok: false, error: "no alert destination configured", noDestination: true };
+  }
+  return {
+    ok: false,
+    error: result.slack.error ?? result.email.error ?? result.code,
+  };
+}
+
 export async function runResourceCapAlert(deps: {
   db: ResourceGoalDb;
   nowMs: number;
   post: SlackPostFn;
   env: SlackDeliveryEnv;
+  /** Test seam: an injected alerting port. Production creates the real port from env. */
+  alertPort?: AlertingPort;
 }): Promise<CapAlertResult> {
   const day = utcDayOf(deps.nowMs);
   const { startMs } = utcDayBounds(day);
@@ -263,7 +264,9 @@ export async function runResourceCapAlert(deps: {
     for (const breach of breaches) {
       const existing = await getAlertState(deps.db, breach.budget, day);
       if (existing) continue;
-      const res = await postSlackText({ post: deps.post, env: deps.env, text });
+      // Issue #5083 (S4) — the cap alert routes through the one
+      // alerting port (Slack + email), not postSlackText directly.
+      const res = await sendCapAlert(deps, text);
       if (res.ok) {
         await markAlerted(deps.db, breach.budget, day, true, `delivered via ${res.method}`);
         alerted.push(breach.budget);
@@ -301,7 +304,9 @@ export async function runResourceCapAlert(deps: {
       pct: assessment.pct,
     };
     const text = buildTierAlertText(day, assessment.tier, [breach]);
-    const res = await postSlackText({ post: deps.post, env: deps.env, text });
+    // Issue #5083 (S4) — the tier alert routes through the one
+    // alerting port (Slack + email), not postSlackText directly.
+    const res = await sendCapAlert(deps, text);
     if (res.ok) {
       await markAlerted(deps.db, key, day, true, `delivered via ${res.method}`);
       tierAlerted.push(key);
