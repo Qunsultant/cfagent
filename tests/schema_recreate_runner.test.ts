@@ -116,6 +116,7 @@ function canonParams(params: Record<string, string>): string {
 describe("P5 runner — plan resolution (P4 finding 1: phased order)", () => {
   it("resolves 420 executable steps and skips the seed-form entry with its reason", () => {
     const p = plan();
+    // #5229 adds migration 0069 (referral expiry_period_ms): 419 → 420.
     expect(p.steps).toHaveLength(420);
     expect(p.skipped).toHaveLength(1);
     expect(p.skipped[0].code).toBe(SEED_FORM_CODE);
@@ -127,6 +128,7 @@ describe("P5 runner — plan resolution (P4 finding 1: phased order)", () => {
     const harness = resolveCombinedSteps().filter(
       (s) => s.code !== SEED_FORM_CODE,
     );
+    // #5229 adds migration 0069: 419 → 420.
     expect(harness).toHaveLength(420);
     // Production move 1: the rebuild CREATE for agent_price_catalogue
     // must stay after the RENAME that clears its table (a second
@@ -248,13 +250,15 @@ describe("P5 runner — delta-to-steps selection (P4 finding 3, P4 finding 2)", 
   it("selects every needed schema step and every seed on a fresh D1 store", () => {
     const legPlan = planForLeg(plan(), "d1");
     const selected = selectSteps(legPlan, emptySchemaModel(), []);
-    // 242 schema steps in the leg, minus 6 column-adds whose columns
+    // 243 schema steps in the leg (#5229 adds migration 0069: 242 → 243),
+    // minus 6 column-adds whose columns
     // a selected creation already provides (the ORM's tenant_id,
     // mas_events' hashes, mas_trades' broker/price_source/mode) — those
     // would fail on real SQLite as duplicate columns, so the
     // projected-model walk skips them. All 11 seeds run: their
     // tables' creations are selected.
-    expect(selected.schema).toHaveLength(236);
+    // #5229 adds migration 0069: 236 → 237.
+    expect(selected.schema).toHaveLength(237);
     expect(selected.seeds).toHaveLength(11);
     expect(selected.skipped).toHaveLength(8);
     expect(
@@ -268,13 +272,12 @@ describe("P5 runner — delta-to-steps selection (P4 finding 3, P4 finding 2)", 
   it("selects every needed schema step on a fresh DO store", () => {
     const legPlan = planForLeg(plan(), "do");
     const selected = selectSteps(legPlan, emptySchemaModel(), []);
-    // 164 schema steps in the leg (#3251 adds the iaaa_audit_events
-    // CREATE TABLE: 163 → 164), minus 2 superseded v1 creations
+    // 163 schema steps in the leg, minus 2 superseded v1 creations
     // (the full creation precedes them in the plan), 33 column-adds
     // whose columns a selected creation already provides, and the
     // conditional index drop (its index does not exist yet). No seeds
     // live on the DO leg.
-    expect(selected.schema).toHaveLength(129);
+    expect(selected.schema).toHaveLength(128);
     expect(selected.seeds).toHaveLength(0);
     expect(selected.skipped).toHaveLength(36);
     expect(codesOf(selected.skipped)).toContain(DROP_INDEX_CODE);
