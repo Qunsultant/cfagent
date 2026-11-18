@@ -492,12 +492,12 @@ describe("workflow-residency feed wiring (#3941)", () => {
     ]);
     const captures = await new D1ProviderCaptureAdapter(
       createD1ProviderCaptureDb(mock as never),
-    ).listCapturesByRun("default", dispatch.runId);
+    ).listCapturesByRun("primary", dispatch.runId);
     expect(captures.length).toBeGreaterThan(0);
     expect(captures[0]?.providerId).toBe("yahoo");
     expect(captures[0]?.capability).toBe("quotes");
     expect(captures[0]?.status).toBe("captured");
-    expect(captures[0]?.rawBlobRef).toMatch(/^data-capture:default:/);
+    expect(captures[0]?.rawBlobRef).toMatch(/^data-capture:primary:/);
     // The raw bytes are in R2 under the bare blob ref.
     const raw = await createBlobStore({ REPORTS_BUCKET: bucket as never })!.get(
       captures[0]!.rawBlobRef!,
@@ -537,7 +537,7 @@ describe("workflow-residency feed wiring (#3941)", () => {
       (await createFeedDatasetAdapter({ AGENT_DB: mock })!.latest("yahoo", "quotes"))!;
     const readCaptures = async (mock: MockD1Database, runId: string) =>
       new D1ProviderCaptureAdapter(createD1ProviderCaptureDb(mock as never)).listCapturesByRun(
-        "default",
+        "primary",
         runId,
       );
     const wfDataset = await readDataset(wf.mock);
@@ -558,7 +558,7 @@ describe("workflow-residency feed wiring (#3941)", () => {
       expect(hostCaptures[i]?.capability).toBe(wfCaptures[i]?.capability);
       expect(hostCaptures[i]?.status).toBe(wfCaptures[i]?.status);
       expect(hostCaptures[i]?.rawByteSize).toBe(wfCaptures[i]?.rawByteSize);
-      expect(hostCaptures[i]?.rawBlobRef).toMatch(/^data-capture:default:/);
+      expect(hostCaptures[i]?.rawBlobRef).toMatch(/^data-capture:primary:/);
     }
     // Cross-residency raw read: the host's DO-shaped storage never
     // saw the workflow run's metadata, but the bytes are in R2.
