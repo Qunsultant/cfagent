@@ -44,6 +44,7 @@ import {
 } from "./scheduleSystems";
 import { resolveCronEntryPoint } from "./consolidatedCronEntries";
 import type { ScheduledGoal } from "../schedule";
+import { isSubDailyCron, isSubDailyInterval, isValidCron } from "../schedule";
 
 /** A store surface the service accepts (sync or async — awaited). */
 export interface UnifiedStoreLike {
@@ -198,6 +199,12 @@ export interface ScheduleDefinitionLike {
   intervalSeconds?: number;
   time?: number;
   delayInSeconds?: number;
+  /**
+   * Issue #4235 — the schedule's recorded opt-in to a sub-daily
+   * cadence (see ScheduledGoal.subDailyOptIn). Absent means the
+   * default daily ceiling applies.
+   */
+  subDailyOptIn?: boolean;
 }
 
 export function screenScheduleToRecord(
@@ -216,6 +223,12 @@ export function screenScheduleToRecord(
     ...(schedule.time !== undefined ? { time: schedule.time } : {}),
     ...(schedule.delayInSeconds !== undefined
       ? { delayInSeconds: schedule.delayInSeconds }
+      : {}),
+    // Issue #4235 — the create route stamps the sub-daily opt-in
+    // onto the armed payload; the record lifts it to the definition
+    // top level so updates read it as the schedule's recorded opt-in.
+    ...((schedule.payload as Record<string, unknown> | undefined)?.subDailyOptIn === true
+      ? { subDailyOptIn: true }
       : {}),
   };
   return {
@@ -926,6 +939,13 @@ export interface ScheduleUpdateRequest {
   cron?: string;
   intervalSeconds?: number;
   payload?: unknown;
+  /**
+   * Issue #4235 — explicit owner opt-in to a sub-daily cadence for
+   * this schedule. The opt-in is per schedule and sticky: once
+   * recorded it authorizes later sub-daily timing changes on the
+   * same schedule without re-supplying it.
+   */
+  subDailyOptIn?: boolean;
 }
 
 export type ResolvedScheduleTiming =
@@ -934,8 +954,25 @@ export type ResolvedScheduleTiming =
   | { type: "scheduled" | "delayed"; time: number };
 
 export type ScheduleUpdateResolution =
-  | { ok: true; timing: ResolvedScheduleTiming; payload: unknown }
+  | {
+      ok: true;
+      timing: ResolvedScheduleTiming;
+      payload: unknown;
+      /**
+       * Issue #4235 — the schedule's opt-in after this update (only
+       * present when opted in). The writer persists it on the
+       * record; absent means no opt-in is recorded.
+       */
+      subDailyOptIn?: boolean;
+    }
   | { ok: false; error: string };
+
+/**
+ * Issue #4235 — the sub-daily opt-in error: a new sub-daily timing
+ * without a recorded opt-in is refused, never silently armed.
+ */
+const SUB_DAILY_OPT_IN_ERROR =
+  "Sub-daily cadence runs more than once per day: pass subDailyOptIn: true to opt-in explicitly.";
 
 /**
  * Validate an update against the current definition. A provided cron
@@ -943,6 +980,13 @@ export type ScheduleUpdateResolution =
  * timing is kept (payload-only update). One-time schedules whose time
  * has already passed cannot be re-armed — recreating them would fire
  * immediately or never, so the caller is told to create a new job.
+ *
+ * Issue #4235 — granularity first: a NEW sub-daily timing needs the
+ * explicit per-schedule opt-in (supplied in this update, or already
+ * recorded on the schedule — the opt-in is sticky per schedule).
+ * Keeping the current timing (payload-only or scheduleType-keep)
+ * never needs a fresh opt-in: the stored timing stays under its
+ * stored opt-in. A new timing that is daily-or-less needs none.
  */
 export function resolveScheduleUpdate(
   current: ScheduleDefinitionLike,
@@ -985,39 +1029,52 @@ export function resolveScheduleUpdate(
     payload = built.value;
   }
 
+  // Issue #4235 — the effective opt-in for this update: supplied
+  // in the body, or already recorded on the schedule (sticky per
+  // schedule). A new sub-daily timing needs it; keeping the current
+  // timing never needs a fresh one.
+  const effectiveOptIn = body.subDailyOptIn === true || current.subDailyOptIn === true;
+  const carryOptIn = effectiveOptIn ? { subDailyOptIn: true as const } : {};
+
   if (body.cron !== undefined) {
     const cron = String(body.cron).trim();
-    if (cron.split(/\s+/).filter(Boolean).length !== 5) {
-      return { ok: false, error: `Invalid cron expression '${body.cron}': expected 5 fields (minute hour day-of-month month day-of-week).` };
+    if (!isValidCron(cron)) {
+      return { ok: false, error: `Invalid cron expression '${body.cron}': expected a valid 5-field cron expression (minute hour day-of-month month day-of-week, each field in range).` };
     }
-    return { ok: true, timing: { type: "cron", cron }, payload };
+    if (isSubDailyCron(cron) && !effectiveOptIn) {
+      return { ok: false, error: SUB_DAILY_OPT_IN_ERROR };
+    }
+    return { ok: true, timing: { type: "cron", cron }, payload, ...carryOptIn };
   }
   if (body.intervalSeconds !== undefined) {
     const seconds = Number(body.intervalSeconds);
     if (!Number.isSafeInteger(seconds) || seconds <= 0) {
       return { ok: false, error: "intervalSeconds must be a positive whole number of seconds." };
     }
-    return { ok: true, timing: { type: "interval", intervalSeconds: seconds }, payload };
+    if (isSubDailyInterval(seconds) && !effectiveOptIn) {
+      return { ok: false, error: SUB_DAILY_OPT_IN_ERROR };
+    }
+    return { ok: true, timing: { type: "interval", intervalSeconds: seconds }, payload, ...carryOptIn };
   }
   if (body.scheduleType === "cron") {
     if (current.type !== "cron" || !current.cron) {
       return { ok: false, error: "This job has no cron expression to keep — provide one in 'cron'." };
     }
-    return { ok: true, timing: { type: "cron", cron: current.cron }, payload };
+    return { ok: true, timing: { type: "cron", cron: current.cron }, payload, ...carryOptIn };
   }
   if (body.scheduleType === "interval") {
     if (current.type !== "interval" || !current.intervalSeconds) {
       return { ok: false, error: "This job has no interval to keep — provide one in 'intervalSeconds'." };
     }
-    return { ok: true, timing: { type: "interval", intervalSeconds: current.intervalSeconds }, payload };
+    return { ok: true, timing: { type: "interval", intervalSeconds: current.intervalSeconds }, payload, ...carryOptIn };
   }
 
   // Payload-only update: keep the current timing.
   if (current.type === "cron" && current.cron) {
-    return { ok: true, timing: { type: "cron", cron: current.cron }, payload };
+    return { ok: true, timing: { type: "cron", cron: current.cron }, payload, ...carryOptIn };
   }
   if (current.type === "interval" && current.intervalSeconds) {
-    return { ok: true, timing: { type: "interval", intervalSeconds: current.intervalSeconds }, payload };
+    return { ok: true, timing: { type: "interval", intervalSeconds: current.intervalSeconds }, payload, ...carryOptIn };
   }
   if ((current.type === "scheduled" || current.type === "delayed") && current.time !== undefined) {
     if (current.time * 1000 <= nowMs) {
@@ -1066,6 +1123,9 @@ export async function updateUnifiedSchedule(
         ...(resolution.timing.type === "scheduled" || resolution.timing.type === "delayed"
           ? { time: resolution.timing.time }
           : {}),
+        // Issue #4235 — the update's opt-in is recorded on the
+        // schedule; absent means no opt-in is recorded.
+        ...(resolution.subDailyOptIn === true ? { subDailyOptIn: true } : {}),
       },
       updatedAt: nowIso,
     };
@@ -1084,14 +1144,32 @@ export async function updateUnifiedSchedule(
     ...(alarm.intervalSeconds !== undefined ? { intervalSeconds: alarm.intervalSeconds } : {}),
     ...(alarm.time !== undefined ? { time: alarm.time } : {}),
     ...(alarm.delayInSeconds !== undefined ? { delayInSeconds: alarm.delayInSeconds } : {}),
+    // Issue #4235 — the recorded opt-in for an armed schedule lives
+    // on the record's definition (lifted from the armed payload at
+    // adoption) or on the alarm payload itself; either source counts.
+    ...((record?.definition as Record<string, unknown> | undefined)?.subDailyOptIn === true ||
+    (alarm.payload as Record<string, unknown> | undefined)?.subDailyOptIn === true
+      ? { subDailyOptIn: true }
+      : {}),
   };
   const resolution = resolveScheduleUpdate(current, body, nowMs);
   if (!resolution.ok) return fail(resolution.error, 400);
   await deps.alarms.cancel(alarm.id);
+  // Issue #4235 — the re-armed alarm carries the recorded opt-in
+  // in its payload, exactly as creation stamps it, so a later
+  // update reads it back from the alarm (and the adopted record
+  // lifts it, as at creation).
+  const baseRearmedPayload = carryScheduleProvenance(alarm.payload, resolution.payload);
+  const rearmedPayload =
+    resolution.subDailyOptIn === true &&
+    baseRearmedPayload !== null &&
+    typeof baseRearmedPayload === "object"
+      ? { ...(baseRearmedPayload as Record<string, unknown>), subDailyOptIn: true }
+      : baseRearmedPayload;
   const rearmed = await deps.alarms.arm(
     resolution.timing,
     alarm.callback,
-    carryScheduleProvenance(alarm.payload, resolution.payload),
+    rearmedPayload,
   );
   // The record id is the id the user addressed (stable across the
   // cancel + re-arm); only the alarm id changes. A legacy alarm
@@ -1112,6 +1190,9 @@ export async function updateUnifiedSchedule(
           ...(resolution.timing.type === "scheduled" || resolution.timing.type === "delayed"
             ? { time: resolution.timing.time }
             : {}),
+          // Issue #4235 — the update's opt-in is recorded on the
+          // schedule (see the paused branch above).
+          ...(resolution.subDailyOptIn === true ? { subDailyOptIn: true } : {}),
         },
         updatedAt: nowIso,
       }

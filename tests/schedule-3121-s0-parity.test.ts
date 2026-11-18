@@ -362,11 +362,11 @@ describe("S0-P10 tick evaluation (B-T3-01): goals are tick-polled inside the one
     // one recurring SDK alarm (`scheduleEvery`, `onCron` in-process),
     // not via the Worker cron. No goal gets its own SDK schedule.
     expect(agent).toContain("via the one recurring SDK alarm");
-    expect(agent).toContain("isDue(goal.cron, goal.lastRun, now, goal.timeZone)");
+    expect(agent).toContain("isDue(goal.cron, goal.lastRun, now, goal.timeZone, { subDailyOptIn: goal.subDailyOptIn === true })");
   });
 });
 
-describe("S0-P11 isDue gates (B-T3-02): 23h guard, timezone mode, never throws, NaN quirk", () => {
+describe("S0-P11 isDue gates (B-T3-02): 23h guard, timezone mode, never throws, five-field match (#4235)", () => {
   it("fires in the target hour/minute window in UTC mode", () => {
     expect(isDue("0 6 * * *", undefined, new Date(Date.UTC(2026, 10, 5, 6, 5, 0)))).toBe(true);
     expect(isDue("0 6 * * *", undefined, new Date(Date.UTC(2026, 10, 5, 7, 5, 0)))).toBe(false);
@@ -379,9 +379,10 @@ describe("S0-P11 isDue gates (B-T3-02): 23h guard, timezone mode, never throws, 
     expect(isDue("0 6 * * *", "2026-11-04T06:05:00.000Z", now)).toBe(true);
   });
 
-  it("preserves the opportunity-hunt quirk: '0 */6 * * *' is NEVER due in UTC mode", () => {
-    expect(isDue("0 */6 * * *", undefined, new Date(Date.UTC(2026, 10, 5, 6, 0, 0)))).toBe(false);
-    expect(isDue("0 */6 * * *", undefined, new Date(Date.UTC(2026, 10, 5, 12, 0, 0)))).toBe(false);
+  it("fires step hours in UTC mode: the old never-fires quirk is gone (#4235)", () => {
+    expect(isDue("0 */6 * * *", undefined, new Date(Date.UTC(2026, 10, 5, 6, 0, 0)))).toBe(true);
+    expect(isDue("0 */6 * * *", undefined, new Date(Date.UTC(2026, 10, 5, 12, 0, 0)))).toBe(true);
+    expect(isDue("0 */6 * * *", undefined, new Date(Date.UTC(2026, 10, 5, 7, 0, 0)))).toBe(false);
   });
 
   it("never throws on an unparseable cron or an unknown zone", () => {
