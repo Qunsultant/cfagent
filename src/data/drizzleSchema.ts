@@ -893,6 +893,8 @@ export const agentReferralRules = sqliteTable("agent_referral_rules", {
   earnAmountUSD: real("earn_amount_usd").notNull(),
   vestingDelayMs: integer("vesting_delay_ms").notNull(),
   redemptionScope: text("redemption_scope").notNull(),
+  /** Issue #5229 (slice 2.31): ms from earn to expiry; 0 = never expires. Seeded 90 days by migration 0069. */
+  expiryPeriodMs: integer("expiry_period_ms").notNull(),
   updatedAtMs: integer("updated_at_ms").notNull(),
 });
 

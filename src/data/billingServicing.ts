@@ -46,6 +46,8 @@ export interface BillingPlanInput {
 export interface BillingReferralInput {
   redeemableUSD: number;
   totalEarnedUSD: number;
+  /** Issue #5229 (2.31): unspent remainder of expired credits. Optional (additive): callers without the field get 0. */
+  expiredUSD?: number;
   attribution: { referrerUserId: string } | null;
   rules: { earnAmountUSD: number; vestingDelayMs: number; redemptionScope: string };
 }
@@ -99,6 +101,8 @@ export interface BillingView {
   referral: {
     redeemableUSD: number;
     totalEarnedUSD: number;
+    /** Issue #5229 (2.31): expired credit, surfaced — never silently deducted. */
+    expiredUSD: number;
     attributedReferrer: string | null;
     rulesNote: string;
   };
@@ -142,6 +146,7 @@ export function buildBillingView(input: BillingViewInput): BillingView {
     referral: {
       redeemableUSD: input.referral.redeemableUSD,
       totalEarnedUSD: input.referral.totalEarnedUSD,
+      expiredUSD: input.referral.expiredUSD ?? 0,
       attributedReferrer: input.referral.attribution ? input.referral.attribution.referrerUserId : null,
       rulesNote: REFERRAL_RULES_NOTE,
     },

@@ -1,0 +1,3 @@
+### Added
+
+- **Referral credit expiry (Qunsultant/cfagent#5229):** the referral-credit rule gains an `expiryPeriodMs` (PROPOSED default 90 days from earn, operator-editable, 0 = never expires) via migration 0069; expired credits are excluded from redemption and conversion and surfaced as `expiredUSD` on the balance route and the Billing overview, never silently deducted; the referral-credit rules (earn amount, vesting delay, expiry period, redemption scope) are editable through a new operator management section on the Billing overview, backed by GET/POST `/payments/agentic/commercial/referral/rules`.

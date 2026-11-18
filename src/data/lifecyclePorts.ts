@@ -47,6 +47,14 @@ export function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
+/**
+ * Issue #5229 (slice 2.31): the PROPOSED default referral-credit
+ * expiry — 90 days from earn. Operator data, never a code
+ * constant: the rule row carries the live value; this constant
+ * is only the seed/default when no value is supplied.
+ */
+export const DEFAULT_REFERRAL_EXPIRY_PERIOD_MS = 90 * 24 * 60 * 60 * 1000;
+
 /** What a referral credit may be redeemed against. Only pay-per-run in this slice. */
 export type ReferralRedemptionScope = "pay-per-run";
 
@@ -55,6 +63,10 @@ export type ReferralRedemptionScope = "pay-per-run";
  * "default") exists; getRules returns it, setRules replaces it.
  * earnTrigger is descriptive: the earn event is a referred
  * user's first paid run (see recordFirstPaidRunEarning).
+ * expiryPeriodMs (#5229): milliseconds from earn after which
+ * the credit can no longer convert or redeem. 0 means never
+ * expires — an explicit operator choice, visible in the rules
+ * UX; the seeded default is 90 days.
  */
 export interface ReferralRules {
   id: string;
@@ -62,6 +74,8 @@ export interface ReferralRules {
   /** Milliseconds between earning and vesting (redemption eligibility). */
   vestingDelayMs: number;
   redemptionScope: ReferralRedemptionScope;
+  /** Milliseconds from earn to expiry; 0 = never expires. */
+  expiryPeriodMs: number;
   updatedAtMs: number;
 }
 
@@ -69,7 +83,13 @@ export function validateReferralRules(input: {
   earnAmountUSD: unknown;
   vestingDelayMs: unknown;
   redemptionScope: unknown;
-}): { earnAmountUSD: number; vestingDelayMs: number; redemptionScope: ReferralRedemptionScope } {
+  expiryPeriodMs?: unknown;
+}): {
+  earnAmountUSD: number;
+  vestingDelayMs: number;
+  redemptionScope: ReferralRedemptionScope;
+  expiryPeriodMs: number;
+} {
   const earnAmountUSD = round2(Number(input.earnAmountUSD));
   if (!Number.isFinite(earnAmountUSD) || earnAmountUSD <= 0) {
     throw new Error("Referral earnAmountUSD must be a positive finite number.");
@@ -81,7 +101,15 @@ export function validateReferralRules(input: {
   if (input.redemptionScope !== "pay-per-run") {
     throw new Error('Referral redemptionScope must be "pay-per-run" (subscription application is deferred).');
   }
-  return { earnAmountUSD, vestingDelayMs, redemptionScope: "pay-per-run" };
+  // #5229: absent means "keep the seeded default" — callers that
+  // predate expiry pass three fields and must not reset the value
+  // to an invented one. 0 is a valid explicit value (never expires).
+  const expiryPeriodMs =
+    input.expiryPeriodMs === undefined ? DEFAULT_REFERRAL_EXPIRY_PERIOD_MS : Number(input.expiryPeriodMs);
+  if (!Number.isFinite(expiryPeriodMs) || expiryPeriodMs < 0 || Math.floor(expiryPeriodMs) !== expiryPeriodMs) {
+    throw new Error("Referral expiryPeriodMs must be a finite non-negative integer (0 = never expires).");
+  }
+  return { earnAmountUSD, vestingDelayMs, redemptionScope: "pay-per-run", expiryPeriodMs };
 }
 
 /**
@@ -113,11 +141,38 @@ export function isEarningVested(earning: ReferralEarning, nowMs: number): boolea
   return nowMs >= earning.vestedAtMs;
 }
 
-/** Vested, unspent remainder across a user's earnings. */
-export function redeemableBalanceFor(earnings: ReferralEarning[], nowMs: number): number {
+/**
+ * Issue #5229 (slice 2.31): expiry is measured from EARN time
+ * (earnedAtMs), not vest time — a credit that vests late still
+ * dies on its earn anniversary. The boundary is inclusive: at
+ * exactly earnedAtMs + expiryPeriodMs the credit is expired.
+ * expiryPeriodMs 0 means never expires.
+ */
+export function isEarningExpired(earning: ReferralEarning, nowMs: number, expiryPeriodMs: number): boolean {
+  if (!expiryPeriodMs || expiryPeriodMs <= 0) return false;
+  return nowMs >= earning.earnedAtMs + expiryPeriodMs;
+}
+
+/** Unspent remainder of expired earnings — surfaced, never silently deducted. */
+export function expiredBalanceFor(earnings: ReferralEarning[], nowMs: number, expiryPeriodMs: number): number {
+  let total = 0;
+  for (const e of earnings) {
+    if (!isEarningExpired(e, nowMs, expiryPeriodMs)) continue;
+    total = round2(total + round2(e.amountUSD - e.redeemedAmountUSD));
+  }
+  return total;
+}
+
+/** Vested, unspent, unexpired remainder across a user's earnings. */
+export function redeemableBalanceFor(
+  earnings: ReferralEarning[],
+  nowMs: number,
+  expiryPeriodMs = 0,
+): number {
   let total = 0;
   for (const e of earnings) {
     if (!isEarningVested(e, nowMs)) continue;
+    if (isEarningExpired(e, nowMs, expiryPeriodMs)) continue;
     total = round2(total + round2(e.amountUSD - e.redeemedAmountUSD));
   }
   return total;
@@ -129,23 +184,33 @@ export interface ReferralAllocation {
 }
 
 /**
- * Pure oldest-first allocation over VESTED earnings only.
- * Unvested earnings are never allocated, even when the vested
- * balance is short: a shortfall throws, it never dips into
- * unvested credit. Throws before any write (adapters allocate
- * with this helper, then apply the allocation).
+ * Pure oldest-first allocation over VESTED, UNEXPIRED earnings
+ * only (#5229: expired earnings are never allocated, even when
+ * the unexpired balance is short). Unvested earnings are never
+ * allocated either. A shortfall throws, it never dips into
+ * unvested or expired credit — and the error names the expired
+ * amount when expiry is (part of) the reason, so the caller can
+ * surface it instead of failing silently. Throws before any
+ * write (adapters allocate with this helper, then apply the
+ * allocation).
  */
 export function allocateRedemption(
   earnings: ReferralEarning[],
   amountUSD: number,
   nowMs: number,
+  expiryPeriodMs = 0,
 ): ReferralAllocation[] {
   const amount = round2(amountUSD);
   if (!Number.isFinite(amount) || amount <= 0) {
     throw new Error("Referral redemption amountUSD must be a positive finite number.");
   }
   const vested = [...earnings]
-    .filter((e) => isEarningVested(e, nowMs) && round2(e.amountUSD - e.redeemedAmountUSD) > 0)
+    .filter(
+      (e) =>
+        isEarningVested(e, nowMs) &&
+        !isEarningExpired(e, nowMs, expiryPeriodMs) &&
+        round2(e.amountUSD - e.redeemedAmountUSD) > 0,
+    )
     .sort((a, b) => a.earnedAtMs - b.earnedAtMs || (a.id < b.id ? -1 : 1));
   let remaining = amount;
   const allocations: ReferralAllocation[] = [];
@@ -157,8 +222,11 @@ export function allocateRedemption(
     remaining = round2(remaining - take);
   }
   if (remaining > 0) {
+    const expired = expiredBalanceFor(earnings, nowMs, expiryPeriodMs);
     throw new Error(
-      `Insufficient vested referral balance: need ${amount}, vested available ${round2(amount - remaining)}.`,
+      expired > 0
+        ? `Insufficient vested referral balance: need ${amount}, vested available ${round2(amount - remaining)} (${expired} expired).`
+        : `Insufficient vested referral balance: need ${amount}, vested available ${round2(amount - remaining)}.`,
     );
   }
   return allocations;
@@ -189,6 +257,8 @@ export interface ReferralCreditPort {
     earnAmountUSD: unknown;
     vestingDelayMs: unknown;
     redemptionScope: unknown;
+    /** #5229: optional — absent keeps the seeded 90-day default. */
+    expiryPeriodMs?: unknown;
   }): Promise<ReferralRules>;
   /**
    * Record a referrer→referred attribution (#2657). Set-once: replaying the
@@ -231,19 +301,22 @@ export interface ReferralCreditPort {
   /** Vested, unspent referral balance for one user. */
   redeemableBalance(userId: string): Promise<number>;
   /**
-   * Redeem an exact amount against vested earnings, oldest
-   * first. Throws on insufficient vested balance, on a tenant
-   * mismatch (any allocated earning's tenant differs from the
-   * caller's tenant), or on a non-positive amount — before
-   * applying any allocation that would leave a partial spend
-   * unrecorded (allocation is computed pure-first).
+   * Redeem an exact amount against vested, unexpired earnings,
+   * oldest first (#5229: expired earnings are never allocated).
+   * Throws on insufficient vested balance, on a tenant mismatch
+   * (any allocated earning's tenant differs from the caller's
+   * tenant), or on a non-positive amount — before applying any
+   * allocation that would leave a partial spend unrecorded
+   * (allocation is computed pure-first). The returned expiredUSD
+   * is the unspent remainder of expired earnings at redeem time:
+   * surfaced, never silently deducted.
    */
   redeem(input: {
     userId: string;
     tenantId: string;
     amountUSD: number;
     runRequestId: string;
-  }): Promise<{ allocations: ReferralAllocation[]; redeemedUSD: number }>;
+  }): Promise<{ allocations: ReferralAllocation[]; redeemedUSD: number; expiredUSD: number }>;
 }
 
 /**

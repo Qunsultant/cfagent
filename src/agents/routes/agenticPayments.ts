@@ -315,7 +315,7 @@ import {
 import { sendDueDigests } from "../../services/lifecycleDigestPass";
 import { createDigestContentProvider } from "../../services/digestContentProvider";
 import { readReports } from "../../data/createAuditReportPorts";
-import { digestDayKey } from "../../data/lifecyclePorts";
+import { digestDayKey, expiredBalanceFor } from "../../data/lifecyclePorts";
 import { getServiceUserLogin } from "../../security/serviceIdentity";
 import { lookupInternalUserIdByLogin } from "../../security/iaaaMigration";
 import { createKvMembershipStore } from "../../security/iaaaMembershipStore";
@@ -8427,6 +8427,8 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       return Response.json({ code: "SUCCESS_REFERRAL_BALANCE_READ", 
         userId,
         redeemableUSD,
+        // #5229: expired credit is surfaced, never silently deducted.
+        expiredUSD: expiredBalanceFor(earnings, Date.now(), rules.expiryPeriodMs),
         totalEarnedUSD: earnings.reduce((s, e) => s + e.amountUSD, 0),
         // #2657: the referrer this user is attributed to, if any. The
         // attribution row is keyed by referred user, so a referrer's own
@@ -8436,6 +8438,78 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
           earnAmountUSD: rules.earnAmountUSD,
           vestingDelayMs: rules.vestingDelayMs,
           redemptionScope: rules.redemptionScope,
+          expiryPeriodMs: rules.expiryPeriodMs,
+        },
+      });
+    } catch (err: any) {
+      return Response.json({ code: "FAILURE_UNEXPECTED_ERROR", error: codedMessage("FAILURE_UNEXPECTED_ERROR") }, { status: 500 });
+    }
+  }
+
+  // GET /payments/agentic/commercial/referral/rules — any verified
+  // login reads the operator-owned rule row (values are operator
+  // data; the write below is operator-only). Issue #5229 (2.31).
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.referralRules) && request.method === "GET") {
+    try {
+      const login = commercialLogin();
+      if (!login) return Response.json({ code: "FAILURE_AUTH_NO_SESSION", error: "Unauthorized: verified login required." }, { status: 401 });
+      const lifecycle = requireLifecycle();
+      if (lifecycle instanceof Response) return lifecycle;
+      const ensured = await ensureLifecycle(lifecycle);
+      if (ensured) return ensured;
+      const rules = await lifecycle.getRules();
+      return Response.json({
+        code: "SUCCESS_REFERRAL_RULES_READ",
+        rules: {
+          earnAmountUSD: rules.earnAmountUSD,
+          vestingDelayMs: rules.vestingDelayMs,
+          redemptionScope: rules.redemptionScope,
+          expiryPeriodMs: rules.expiryPeriodMs,
+        },
+      });
+    } catch (err: any) {
+      return Response.json({ code: "FAILURE_UNEXPECTED_ERROR", error: codedMessage("FAILURE_UNEXPECTED_ERROR") }, { status: 500 });
+    }
+  }
+
+  // POST /payments/agentic/commercial/referral/rules (operator only).
+  // Replaces the rule row — including the expiry period (#5229).
+  // Validation is the port's validateReferralRules; a bad value is
+  // a 400, never a silent default.
+  if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.referralRules) && request.method === "POST") {
+    try {
+      const login = commercialLogin();
+      if (!login) return Response.json({ code: "FAILURE_AUTH_NO_SESSION", error: "Unauthorized: verified login required." }, { status: 401 });
+      if (!isStoreOperator(login)) return Response.json({ code: "FAILURE_COMMERCIAL_FORBIDDEN", error: "Forbidden: operator only." }, { status: 403 });
+      const body = (await request.json().catch(() => ({}))) as {
+        earnAmountUSD: unknown; vestingDelayMs: unknown; redemptionScope: unknown; expiryPeriodMs?: unknown;
+      };
+      const lifecycle = requireLifecycle();
+      if (lifecycle instanceof Response) return lifecycle;
+      const ensured = await ensureLifecycle(lifecycle);
+      if (ensured) return ensured;
+      let rules;
+      try {
+        rules = await lifecycle.setRules(body);
+      } catch (validationErr: any) {
+        return Response.json(
+          { code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: validationErr?.message ?? "Invalid referral rules." },
+          { status: 400 },
+        );
+      }
+      ctx.audit("commercial.referral.rules_updated", "payments", {
+        earnAmountUSD: rules.earnAmountUSD,
+        vestingDelayMs: rules.vestingDelayMs,
+        redemptionScope: rules.redemptionScope,
+        expiryPeriodMs: rules.expiryPeriodMs,
+      });
+      return Response.json({
+        code: "SUCCESS_REFERRAL_RULES_UPDATED",
+        rules: {
+          earnAmountUSD: rules.earnAmountUSD,
+          vestingDelayMs: rules.vestingDelayMs,
+          redemptionScope: rules.redemptionScope,
+          expiryPeriodMs: rules.expiryPeriodMs,
         },
       });
     } catch (err: any) {

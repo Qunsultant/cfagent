@@ -46,6 +46,7 @@ import { ErrorBoundary } from "./ErrorBoundary";
 import { fetchPlatformIdentity } from "./firstRunApi";
 import { receiptKindLabel } from "./agenticWalletApi";
 import { RefundPolicySection } from "./RefundPolicySection";
+import { ReferralCreditRulesSection } from "./ReferralCreditRulesSection";
 import { RefundFlowSection } from "./RefundFlowSection";
 import { ApprovedFreeQuotaSection } from "./ApprovedFreeQuotaSection";
 import { UsageBillingSection } from "./UsageBillingSection";
@@ -332,9 +333,13 @@ export function BillingServicingPanel() {
                   <p>Referral credits</p>
                   <p>Redeemable: ${view.referral.redeemableUSD.toFixed(2)} USD</p>
                   <p>Total earned: ${view.referral.totalEarnedUSD.toFixed(2)} USD</p>
+                  <p>Expired: ${view.referral.expiredUSD.toFixed(2)} USD</p>
                   <p>Attributed referrer: {view.referral.attributedReferrer ?? "none"}</p>
                   <p>{view.referral.rulesNote}</p>
                 </Card>
+                {/* Issue #5229 (2.31): the referral-credit rules editor
+                    lives next to the balance it governs. */}
+                <ReferralCreditRulesSection />
               </ErrorBoundary>
             </TabPanel>
           )}

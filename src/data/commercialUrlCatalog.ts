@@ -121,6 +121,7 @@ export const COMMERCIAL_ROUTES: CommercialRoute[] = [
   route("goalCommand", ["POST"], "/goal-command"),
   route("referralBalance", ["GET"], "/referral/balance"),
   route("referralRecordEarn", ["POST"], "/referral/record-earn"),
+  route("referralRules", ["GET", "POST"], "/referral/rules"),
   route("referralAttribute", ["POST"], "/referral/attribute"),
   route("lifecyclePreferences", ["GET", "POST"], "/lifecycle/preferences"),
   route("lifecycleWelcome", ["POST"], "/lifecycle/welcome"),
