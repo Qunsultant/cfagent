@@ -31,6 +31,7 @@ import { listScreeningActivity } from "../../services/screeningActivity";
 import { listScheduledReports } from "../../services/scheduledReports";
 import { runSummaryFromReport, scanRunMatchesLedgerRow, type RunSummary } from "../../services/runSummaries";
 import { resolveIaaaTenant } from "../../security/iaaaGithubEndToEnd";
+import { DEPLOYMENT_DEFAULT_TENANT_ID } from "../../config/tenantDefaults";
 import { sagaAuditOwnerStub, type AuditOwnerStub } from "../../workflows/sagaJourneyGate";
 import type { SqlStorage } from "../../orm";
 import {
@@ -658,7 +659,8 @@ export async function handleWorkflowRunsRoutes(
     await import("../../services/runLedgerReads");
   const ledgerReadMode =
     ctx.env !== undefined ? await resolveLedgerReadMode(ctx.env as never) : "merged";
-  const tenantId = ctx.env !== undefined ? resolveIaaaTenant(ctx.env as never) : "primary";
+  const tenantId =
+    ctx.env !== undefined ? resolveIaaaTenant(ctx.env as never) : DEPLOYMENT_DEFAULT_TENANT_ID;
   let linkedJobRunIds = new Set<string>();
 
   let jobs: WorkflowRunJobRow[] = [];

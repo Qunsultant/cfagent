@@ -45,6 +45,7 @@
  * literal wire-body capture is deliberately absent from the
  * vocabulary rather than claimed.
  */
+import { DEPLOYMENT_DEFAULT_TENANT_ID } from "../config/tenantDefaults";
 import type {
   DataProviderCapability,
   DataProviderId,
@@ -211,7 +212,11 @@ export function resolveCaptureUserLogin(
   if (typeof userLogin === "string" && userLogin.trim().length > 0) {
     return userLogin.trim();
   }
-  if (typeof tenantId === "string" && tenantId.trim().length > 0 && tenantId.trim() !== "default") {
+  if (
+    typeof tenantId === "string" &&
+    tenantId.trim().length > 0 &&
+    tenantId.trim() !== DEPLOYMENT_DEFAULT_TENANT_ID
+  ) {
     return tenantId.trim();
   }
   return "system";
@@ -221,14 +226,15 @@ export function resolveCaptureUserLogin(
  * Resolve a caller's optional run context to the concrete
  * attribution every capture carries: a missing runId becomes a
  * generated collection-run id, a missing tenant becomes
- * "default" (the platform's established default scope).
+ * `DEPLOYMENT_DEFAULT_TENANT_ID` (the platform's single
+ * deployment-default tenant, #5039).
  */
 export function resolveRunContext(
   ctx?: DataRunContext | null
 ): ResolvedRunContext {
   return {
     runId: ctx?.runId ?? generateCollectionRunId(),
-    tenantId: ctx?.tenantId ?? "default",
+    tenantId: ctx?.tenantId ?? DEPLOYMENT_DEFAULT_TENANT_ID,
     userLogin: ctx?.userLogin ?? null,
   };
 }

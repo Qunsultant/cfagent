@@ -95,9 +95,10 @@ import {
 import type { AuditStore } from "./iaaaAudit";
 import { SESSION_TTL } from "./session";
 import type { KvLike } from "./kvResilience";
+import { DEPLOYMENT_DEFAULT_TENANT_ID } from "../config/tenantDefaults";
 
 /** The documented single-tenant default tenant id. */
-export const IAAA_DEFAULT_TENANT_ID = "primary";
+export const IAAA_DEFAULT_TENANT_ID = DEPLOYMENT_DEFAULT_TENANT_ID;
 
 /** Prefix for the platform-admin genesis marker keys. */
 export const IAAA_PLATFORM_GENESIS_KEY_PREFIX = "iaaa-bootstrap:platform-genesis:";

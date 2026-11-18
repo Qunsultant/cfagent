@@ -8,7 +8,7 @@ describe("Require userLogin on mas_data_captures (#4617)", () => {
     expect(resolveCaptureUserLogin("  bob  ", "tenant-a")).toBe("bob");
     expect(resolveCaptureUserLogin(null, "tenant-a")).toBe("tenant-a");
     expect(resolveCaptureUserLogin("", "tenant-a")).toBe("tenant-a");
-    expect(resolveCaptureUserLogin(null, "default")).toBe("system");
+    expect(resolveCaptureUserLogin(null, "primary")).toBe("system");
     expect(resolveCaptureUserLogin(undefined, undefined)).toBe("system");
   });
 

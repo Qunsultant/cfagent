@@ -315,7 +315,7 @@ describe("provider capture store (issue #1133)", () => {
     expect(a).not.toBe(b);
     const resolved = resolveRunContext(undefined);
     expect(resolved.runId).toMatch(/^collection-/);
-    expect(resolved.tenantId).toBe("default");
+    expect(resolved.tenantId).toBe("primary");
     expect(resolved.userLogin).toBeNull();
     const supplied = resolveRunContext({
       runId: "run-9",
@@ -470,12 +470,12 @@ describe("etrade capture-on-fetch (issue #1133)", () => {
     const sql = freshSql();
     const provider = capturingProvider(sql);
     await provider.getQuote!("MSFT");
-    const byProvider = listCapturesByProvider(sql, "default", "etrade");
+    const byProvider = listCapturesByProvider(sql, "primary", "etrade");
     expect(byProvider).toHaveLength(1);
     expect(byProvider[0].runId).toMatch(/^collection-/);
-    expect(byProvider[0].tenantId).toBe("default");
+    expect(byProvider[0].tenantId).toBe("primary");
     // …and the generated id is a real run key: the run query finds it.
-    expect(listCapturesByRun(sql, "default", byProvider[0].runId)).toHaveLength(1);
+    expect(listCapturesByRun(sql, "primary", byProvider[0].runId)).toHaveLength(1);
   });
 
   it("queries separate captures exactly: by run, by provider, by capability", async () => {

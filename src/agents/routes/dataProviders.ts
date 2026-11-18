@@ -63,6 +63,7 @@
 
 import type { SqlStorage } from "../../orm";
 import type { Env } from "../../types";
+import { DEPLOYMENT_DEFAULT_TENANT_ID } from "../../config/tenantDefaults";
 import {
   AlpacaMarketDataProvider,
   YahooFinanceProvider,
@@ -459,10 +460,10 @@ async function providerView(
 
 /**
  * The tenant scope capture reads use on this surface: the
- * platform's established default (captureStore.resolveRunContext
- * attributes every run without an explicit tenant to "default").
+ * platform's single deployment-default tenant (reconciled with
+ * captureStore.resolveRunContext, #5039).
  */
-const CAPTURE_TENANT_ID = "default";
+const CAPTURE_TENANT_ID = DEPLOYMENT_DEFAULT_TENANT_ID;
 
 /* ------------------------------------------------------------------ */
 /* #3530 S1 — feed jobs: registry/wiring resolution + status view      */
