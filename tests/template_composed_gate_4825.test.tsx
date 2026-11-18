@@ -41,6 +41,7 @@ import { ProductHub } from "../src/client/ProductHub";
 import { AuditVaultPage } from "../src/client/AuditVaultPage";
 import { WorkflowCatalogPage } from "../src/client/WorkflowCatalogPage";
 import { NavSettingsPage } from "../src/client/NavSettingsPage";
+import { OptionsScreenerPage } from "../src/client/OptionsScreenerPage";
 import { leftNavConfigIds } from "../src/client/components/NavigationMenu";
 import { ToastProvider } from "../src/client/components/ui/Toast";
 import {
@@ -78,6 +79,7 @@ const STANDALONE_ROUTES: Record<string, React.ComponentType> = {
       onApplyPreset={() => {}}
     />
   ),
+  "options-screener": () => <OptionsScreenerPage onSelectTab={() => {}} />,
 };
 
 /** Canonical slot order (PageTemplate renders them in this order). */
