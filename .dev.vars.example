@@ -78,3 +78,10 @@ GITHUB_ISSUE_TOKEN="ghp_your_issues_write_token"
 # Optional: defaults to Qunsultant/cfagent (one constant in
 # src/services/stockCopilotProposalFiling.ts).
 GITHUB_ISSUE_REPO="Qunsultant/cfagent"
+
+# Autopilot verdict trend (#5061, AG-7). GET /autopilot aggregates the
+# recent policy verdicts and names a binding rule that keeps blocking.
+# Defaults live in src/services/autopilotVerdictTrend.ts.
+AUTOPILOT_VERDICT_TREND_ENABLED="true"
+AUTOPILOT_VERDICT_TREND_WINDOW="25"
+AUTOPILOT_VERDICT_REPEAT_THRESHOLD="2"

@@ -388,6 +388,8 @@ export async function routeRequest(deps: RouteRequestDeps, request: Request): Pr
   // the Persistent Memory endpoint); a non-null return matched.
   const autopilotResponse = await handleAutopilotRoutes(request, url, path, sessionId, {
     ensureTables: () => deps.ensureTables(),
+    // #5061: verdict-trend thresholds come from the deployment env.
+    env: deps.env,
     audit: (type, agent, payload) => deps.audit(type, agent, payload),
     getAutopilotState: () => deps.getAutopilotState(),
     writeAutopilotState: (patch) => deps.writeAutopilotState(patch),

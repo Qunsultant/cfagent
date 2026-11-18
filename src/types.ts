@@ -206,6 +206,13 @@ export interface Env {
   APP_NAME: string;
   GITHUB_CLIENT_ID: string;
   GITHUB_CLIENT_SECRET: string;
+  // #5061 (AG-7) — the monthly Autopilot evaluation's verdict consumer.
+  // GET /autopilot aggregates the recent verdicts and names a binding rule
+  // that keeps blocking; the envelope itself still changes by human edit
+  // (src/services/autopilotVerdictTrend.ts).
+  AUTOPILOT_VERDICT_TREND_ENABLED?: string;
+  AUTOPILOT_VERDICT_TREND_WINDOW?: string;
+  AUTOPILOT_VERDICT_REPEAT_THRESHOLD?: string;
   // #5057 (AG-3) — the governed RSI pathway's filing leg. When
   // GITHUB_ISSUE_TOKEN is set, an approved Stock Copilot proposal is filed
   // as a task issue through the existing proposal filer

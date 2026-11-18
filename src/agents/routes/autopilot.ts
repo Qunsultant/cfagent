@@ -25,7 +25,7 @@
 
 import { unauthenticatedResponse } from "./routeIdentity";
 import { createOrchestratorTablePorts } from "../../data/createOrchestratorTablePorts";
-import type { AgentName } from "../../types";
+import type { AgentName, Env } from "../../types";
 import type { SqlStorage } from "../../orm";
 import {
   normalizeAutopilotLimits,
@@ -35,6 +35,10 @@ import {
   type PolicyVerdictAttestation,
 } from "../../services/riskPolicyEngine";
 import { listJobOutcomes } from "../../services/jobOutcomes";
+import {
+  resolveAutopilotVerdictTrendPolicy,
+  summarizeAutopilotVerdictTrend,
+} from "../../services/autopilotVerdictTrend";
 
 /** Shape of the server-owned autopilot run state (see getAutopilotState). */
 export interface AutopilotState {
@@ -51,6 +55,8 @@ export interface AutopilotState {
 /** The subset of OrchestratorAgent surface the autopilot handlers need. */
 export interface AutopilotRouteContext {
   ensureTables(): SqlStorage;
+  /** #5061: the deployment env (verdict-trend thresholds). */
+  env?: Env;
   audit(
     type: string,
     agent: AgentName | "judge" | "nlq" | "orchestrator",
@@ -98,7 +104,23 @@ export async function handleAutopilotRoutes(
       } catch {
         recentVerdicts = [];
       }
-      return Response.json({ ...state, engine: "riskPolicyEngine", recentVerdicts });
+      // Issue #5061 (AG-7): the verdicts are read for their aggregate, not
+      // just listed — a binding rule that keeps blocking is named to the
+      // operator here. Evidence only: the envelope changes by human edit.
+      const verdictTrend = summarizeAutopilotVerdictTrend(
+        recentVerdicts as unknown as Array<{
+          passed: number;
+          binding_rule: string | null;
+          created_at: string;
+        }>,
+        resolveAutopilotVerdictTrendPolicy(ctx.env),
+      );
+      return Response.json({
+        ...state,
+        engine: "riskPolicyEngine",
+        recentVerdicts,
+        verdictTrend,
+      });
     } catch (err) {
       return Response.json({ error: err instanceof Error ? err.message : "Failed to read autopilot state" }, { status: 500 });
     }
