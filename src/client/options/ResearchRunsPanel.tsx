@@ -120,6 +120,36 @@ const CONFIG_FIELDS: { key: string; label: string; type: "number" | "boolean" | 
   { key: "emailTo", label: "Report email recipient", type: "string", hint: "Empty = no email." },
 ];
 
+/**
+ * Issue #5625 — parse a response as JSON only when it is JSON.
+ *
+ * `POST /api/research/run` used to answer a bare-text 401 (`Unauthorized`)
+ * from the generic `/api/*` forwarder. `res.json()` on that body throws
+ * `Unexpected token 'U', "Unauthorized" is not valid JSON`, and the panel
+ * rendered the parser's message as the failure reason. A 401 is now stated
+ * as a session problem; any other non-JSON body is stated as `HTTP <n>` plus
+ * the first line, so the next mis-typed gate is diagnosable from the UI.
+ */
+async function readJson<T>(res: Response): Promise<T> {
+  const contentType = res.headers.get("content-type") ?? "";
+  if (res.status === 401) {
+    throw new Error("Your session has expired — sign in again, then retry.");
+  }
+  if (!res.ok) {
+    if (contentType.includes("application/json")) {
+      const body = (await res.json().catch(() => null)) as { error?: string } | null;
+      throw new Error(body?.error ?? `HTTP ${res.status}`);
+    }
+    const text = (await res.text().catch(() => "")).trim().split("\n")[0];
+    throw new Error(`HTTP ${res.status}${text ? `: ${text.slice(0, 160)}` : ""}`);
+  }
+  if (!contentType.includes("application/json")) {
+    const text = (await res.text().catch(() => "")).trim().split("\n")[0];
+    throw new Error(`Expected JSON but got: ${text.slice(0, 160) || "(empty response)"}`);
+  }
+  return (await res.json()) as T;
+}
+
 function hdrs(userLogin?: string): HeadersInit {
   return {
     "Content-Type": "application/json",
@@ -254,7 +284,7 @@ export function ResearchRunsPanel({ activeEnv, userLogin, onSendPrompt }: Resear
     try {
       const res = await fetch("/api/research/settings", { headers: hdrs(userLogin) });
       if (!res.ok) return;
-      const data = (await res.json()) as { config?: Record<string, unknown> };
+      const data = await readJson<{ config?: Record<string, unknown> }>(res);
       if (data.config) {
         setConfig(data.config);
         const d: Record<string, string> = {};
@@ -272,7 +302,7 @@ export function ResearchRunsPanel({ activeEnv, userLogin, onSendPrompt }: Resear
     try {
       const res = await fetch("/api/research/latest", { headers: hdrs(userLogin) });
       if (!res.ok) return;
-      const data = (await res.json()) as { latest?: ReportView | null };
+      const data = await readJson<{ latest?: ReportView | null }>(res);
       if (data.latest) setReport(data.latest);
     } catch {
       /* empty */
@@ -283,7 +313,7 @@ export function ResearchRunsPanel({ activeEnv, userLogin, onSendPrompt }: Resear
     try {
       const res = await fetch("/api/research/history", { headers: hdrs(userLogin) });
       if (!res.ok) return;
-      const data = (await res.json()) as { history?: RunSummaryView[] };
+      const data = await readJson<{ history?: RunSummaryView[] }>(res);
       if (Array.isArray(data.history)) setHistory(data.history);
     } catch {
       /* empty */
@@ -312,7 +342,7 @@ export function ResearchRunsPanel({ activeEnv, userLogin, onSendPrompt }: Resear
         headers: { ...hdrs(userLogin), ...csrfHeaders() },
         body: JSON.stringify(patch),
       });
-      const data = (await res.json()) as { config?: Record<string, unknown>; errors?: string[] };
+      const data = await readJson<{ config?: Record<string, unknown>; errors?: string[] }>(res);
       if (data.errors && data.errors.length > 0) {
         setSaveMsg(`Rejected: ${data.errors.join("; ")}`);
       } else {
@@ -331,7 +361,7 @@ export function ResearchRunsPanel({ activeEnv, userLogin, onSendPrompt }: Resear
     setRunMsg("Running research…");
     try {
       const res = await fetch("/api/research/run", { method: "POST", headers: { ...hdrs(userLogin), ...csrfHeaders() } });
-      const data = (await res.json()) as { success?: boolean; error?: string; report?: ReportView; reportId?: string };
+      const data = await readJson<{ success?: boolean; error?: string; report?: ReportView; reportId?: string }>(res);
       if (data.success && data.report) {
         setReport(data.report);
         setRunMsg(`Done — canonical report ${data.reportId ?? ""} stored.`);
@@ -354,7 +384,7 @@ export function ResearchRunsPanel({ activeEnv, userLogin, onSendPrompt }: Resear
         headers: { ...hdrs(userLogin), ...csrfHeaders() },
         body: JSON.stringify({ runId }),
       });
-      const data = (await res.json()) as { evaluation?: { aggregates?: Record<string, unknown> } | null };
+      const data = await readJson<{ evaluation?: { aggregates?: Record<string, unknown> } | null }>(res);
       setRunMsg(
         data.evaluation
           ? `Evaluated (rules pinned, original untouched): ${JSON.stringify(data.evaluation.aggregates)}`
