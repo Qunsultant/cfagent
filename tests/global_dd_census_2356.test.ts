@@ -117,26 +117,13 @@ const STORAGE_ALLOW_LIST: Array<[string, number, string]> = [
   // #1776 (#1717 Adapter S2) retired orchestrator.ts's entry:
   // the ai-chat lift's 3 sites moved to SqlLegacyChatStore, so
   // the file no longer appears in the above-layer population.
-  ["src/services/learnings.ts", 7, "R-1 gated — NOT step 4c (two-host question open)"],
-  // Step 5e (#2436) retired sessionStore.ts's entry: the
-  // class's statements (constructor DDL + the execCounted
-  // funnel) moved to src/data/doSessionStoreAdapter.ts, so
-  // the file holds zero storage-exec sites (pinned in the
-  // step-5e section below, with the adapter's count).
+  // #5034 retired learnings.ts (7), cancelPreviewStore.ts (5),
+  // ladderStateStore.ts (4), and screenerResearch.ts mas_promotions (2)
+  // into src/data/ ports & adapters.
   ["src/actors/cfAgentsAdapter.ts", 1, "permanent — Agents-SDK shim (ADR-out)"],
-  // #3885: the cancel-all preview token owns its own one-row table in the
-  // caller's DO SQLite (single use, short TTL); the settings/outcome ports
-  // model key-value and run records, not a per-preview token with a used-at
-  // stamp, so a dedicated adapter is the honest home for these statements.
-  ["src/services/cancelPreviewStore.ts", 5, "issue #3885 cancel-all preview tokens: one-row table with a single-use stamp and TTL; no existing port models it"],
   ["src/services/receiptSurface.ts", 2, "issue #2543 receipt read-back: meter + tier reads over the sql seam (usage port drops detail_json; no port path exists)"],
   ["src/agents/routes/orchestratorMigration.ts", 3, "issue #2681 orchestrator migration: DO-internal table export/import — sqlite_master discovery, SELECT *, INSERT OR REPLACE; the migration driver must read the source instance's own storage, no port path exists for cross-instance table copy"],
   ["src/agents/routes/schedules.ts", 3, "issue #1766 nightly retention legs: DO-internal orphan-sweep read (body_r2_key), sqlite_master discovery, and per-table SELECT * for the R2 snapshot; the pass runs inside the DO and reads its own storage, no port path exists for own-instance table dump"],
-  ["src/agents/routes/screenerResearch.ts", 2, "issue #1257 live-check route: DO-internal SELECT-only read of the route's own instance mas_promotions table (in-flight stages + per-stage counts); no port path exists (the table has no adapter or D1 migration, and the stagedPromotion module that owned it was deleted); owner-directed landing, left in place until the owner directs removal"],
-  // #3887: the ladder state store owns its own one-row-per-ladder table in
-  // the caller's DO SQLite (spec + plan + placed rungs); no existing port
-  // models a resumable ladder, so the statements live here.
-  ["src/services/ladderStateStore.ts", 4, "issue #3887 ladder state: one row per ladder (spec/plan/placed) that a later observation resumes from; no port models it"],
   // Issue #2437: checkpointed audit-chain verification — one read-only
   // rowid-window SELECT (WHERE rowid > ?) over the DO's own mas_events.
   // No repository port can express a rowid window (the where-language
