@@ -206,6 +206,16 @@ export interface Env {
   APP_NAME: string;
   GITHUB_CLIENT_ID: string;
   GITHUB_CLIENT_SECRET: string;
+  // #5058 (AG-4) — the LLM judge score feedback loop. Each chat turn's
+  // score lands in `response.evaluated`; a score below THRESHOLD also
+  // becomes a `judge` learning that the weekly reflection job aggregates
+  // into a review finding (src/services/judgeScoreFeedback.ts).
+  // JUDGE_LEARNING_ENABLED is the kill switch; MIN_COUNT is how many
+  // low-score learnings in WINDOW_DAYS make a finding.
+  JUDGE_LEARNING_ENABLED?: string;
+  JUDGE_LEARNING_THRESHOLD?: string;
+  JUDGE_LEARNING_MIN_COUNT?: string;
+  JUDGE_LEARNING_WINDOW_DAYS?: string;
   // #5061 (AG-7) — the monthly Autopilot evaluation's verdict consumer.
   // GET /autopilot aggregates the recent verdicts and names a binding rule
   // that keeps blocking; the envelope itself still changes by human edit

@@ -150,7 +150,7 @@ export async function handleLearningsCreate(request: Request, ctx: EtradeBrokerR
 export async function handleReflectionRun(ctx: EtradeBrokerRouteContext): Promise<Response> {
   try {
     const { runReflection } = await import("../../services/reflection");
-    const result = runReflection(ctx.getOrm(), new Date());
+    const result = runReflection(ctx.getOrm(), new Date(), ctx.env);
     // Issue Qunsultant/cfagent#2037 — every outcome leaves a record
     // in the single sink, including the Tuesday skip that used to be
     // invisible everywhere except Cloudflare logs. Response shape
