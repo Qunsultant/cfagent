@@ -59,15 +59,21 @@
  *   stand in so the other six stages' ports can still be built.
  *   Panel/scanner shapes build their own shapeReport/deliver, so
  *   all eight stages are controllable for them.
- * - The goal leg's job record is not addressable from the chat host
- *   (decided-not-to, #4274): the goal leg runs over in-memory engine
- *   stores on the ScreenerAgent DO, so no durable job exists in this
- *   host's SQL — the control cannot find the job to drive a stage of
- *   it, and binding the ports alone cannot fix that (a cross-DO
- *   control path is needed). A goal shape refuses
- *   `stage_port_unavailable`. (The goal leg's shapeReport/deliver are
- *   pure functions of their inputs and ARE rebuildable — the blocker
- *   is the job record, not the ports.)
+ * - The goal leg's job record is addressable from the chat host
+ *   ONLY where the host seam persisted it in the D1 residency
+ *   (#4859): the goal leg dispatches through the workflow host
+ *   (#4858), which defines the job over the D1 stores before the
+ *   workflow instance runs — and the chat turn's env carries the
+ *   same AGENT_DB binding, so the control resolves the SAME record
+ *   the workflow instance drives (definitions, instances, run
+ *   records, artifacts) with no cross-DO path. The #4274
+ *   decided-not-to stands for any goal run whose record is NOT
+ *   D1-addressable: a goal-shape execution op on a record resolved
+ *   over the DO stores still refuses `stage_port_unavailable` by
+ *   name. (The goal leg's shapeReport/deliver are pure functions
+ *   of their inputs and ARE rebuildable — the blocker was the job
+ *   record, not the ports, and the host seam removed it for
+ *   host-dispatched runs.)
  * - A comparison run (#4276) is a single engine step, not a staged
  *   pipeline: the control resolves its `comparison:<runId>` job and
  *   decodes its shape, but run / re-run / resume refuse
@@ -75,8 +81,21 @@
  *   stop / cancel refuse the engine's `stage_vocabulary_unknown`
  *   (no stage node exists in the job) — both by name, never silent.
  * - Runs on other DOs, and in-memory paid-screen runs, have no
- *   durable record in this DO: the control refuses them by name
- *   (`job_not_found`), never by pretending they ran here.
+ *   durable record in this DO or the D1 residency: the control
+ *   refuses them by name (`job_not_found`), never by pretending
+ *   they ran here.
+ * - A run carrying a broker stage input (#3960) resolves its chain
+ *   source from the descriptor through the injected `chainSourceFor`
+ *   factory — the resolving steps' signature — never silently
+ *   through the turn's default client: a chainFetch re-run on a run
+ *   whose descriptor names another broker would otherwise fetch the
+ *   wrong broker's chains and overwrite the run's artifacts. With
+ *   no factory bound the run refuses by name, exactly as the
+ *   resolving steps refuse it. Only an object broker value is a
+ *   descriptor: the legacy string broker key keeps today's
+ *   behavior (the turn's client stands, the factory is never
+ *   consulted), and a run with no broker value at all likewise
+ *   never consults the factory.
  */
 
 import { JobPipelineControl } from "../services/jobPipelineEngine";
@@ -84,7 +103,7 @@ import { createBuiltinStepRegistry } from "../services/jobPipelineSteps";
 import { JobPipelineError } from "../services/jobPipelineConfig";
 import type { SqlStorage } from "../orm";
 import type { Env } from "../types";
-import type { DynamicOptionsScreener } from "../trading";
+import type { DynamicOptionsScreener, OptionChainSource } from "../trading";
 import type { ScanRunStore } from "../data/scanRunPorts";
 import {
   OPTIONS_ADDRESSABLE_STAGES,
@@ -99,6 +118,7 @@ import {
   optionsStageStorageFromArtifacts,
   registerOptionsScreenStep,
   strategyScreenJobId,
+  type OptionsEngineStores,
 } from "./optionsScreenEngine";
 import {
   optionsArtifactKey,
@@ -108,6 +128,8 @@ import {
   memoryStageStorage,
 } from "./optionsScreenWorkflow";
 import {
+  BROKER_STAGE_INPUT_KEY,
+  decodeBrokerStageInput,
   decodeOptionsRequestShape,
   rebuildOptionsStepDeps,
   type OptionsDecodedRequestShape,
@@ -125,22 +147,37 @@ export type OptionsStageControlRequestShape = OptionsRequestShape;
 
 /**
  * The shape a stored request decodes to — including the goal leg,
- * which a control action can name but cannot drive an execution op
- * for (its job record is not addressable from the chat host —
- * decided-not-to, #4274), the comparison leg, which a control
- * action can name but cannot drive a stage op for (a comparison
- * run is a single engine step, not a staged pipeline — #4276), and
- * "unknown" for a stop/cancel on a run whose definition carries no
- * request (the operation needs no ports, so the shape does not
- * matter there).
+ * which a control action can name but can drive an execution op for
+ * only where the record resolved over the D1 residency bundle
+ * (#4859; otherwise the #4274 decided-not-to stands), the
+ * comparison leg, which a control action can name but cannot drive
+ * a stage op for (a comparison run is a single engine step, not a
+ * staged pipeline — #4276), and "unknown" for a stop/cancel on a run
+ * whose definition carries no request (the operation needs no ports,
+ * so the shape does not matter there).
  */
 export type OptionsStageControlDecodedShape =
   | OptionsDecodedRequestShape
   | "unknown";
 
 export interface OptionsStageControlInput {
-  /** The host DO's raw SQLite handle — the engine stores are built over it. */
-  sql: SqlStorage;
+  /**
+   * The host DO's raw SQLite handle — the engine stores are built
+   * over it. Optional since #4859: a control variant over the D1
+   * residency bundle alone (d1Stores) needs no SQL handle. At least
+   * one of sql / d1Stores is required (stage_control_unavailable
+   * otherwise).
+   */
+  sql?: SqlStorage;
+  /**
+   * The pre-built engine stores bundle for the D1 residency
+   * (#4859) — production builds it from env.AGENT_DB via
+   * optionsWorkflowRunDepsFromEnv. Resolution tries the DO stores
+   * first, then this bundle; whichever holds the job record drives
+   * the stage. A goal-shape execution op lifts the #4274 guard
+   * only when the record resolved over this bundle.
+   */
+  d1Stores?: OptionsEngineStores;
   /**
    * The stage storage the original leg used (the host DO's storage in
    * a chat/MCP turn). Absent, the threaded storage stands in: the
@@ -166,6 +203,22 @@ export interface OptionsStageControlInput {
   userLogin?: string;
   /** The chain source the re-run fetches through (the turn's E*TRADE client). */
   etradeClient?: ConstructorParameters<typeof DynamicOptionsScreener>[0];
+  /**
+   * The chain source factory (#4859, the resolving steps' signature):
+   * consulted ONLY when the stored request carries a broker stage
+   * input as an object descriptor (a legacy string broker key never
+   * consults it), and its result is the source the re-run fetches
+   * through. The door binds it to resolveChainSourceForRequest (the
+   * #3960 residency factory); injected, never imported, so this
+   * module stays free of the server-only residency module (#4066
+   * discipline). A descriptor-carrying run with no factory bound
+   * refuses by name.
+   */
+  chainSourceFor?: (
+    userLogin: string | undefined,
+    request: unknown,
+    runId: string,
+  ) => OptionChainSource | undefined;
   /** The scan-run store, when the caller has one (scanner-shape persist re-runs). */
   scanRunStore?: ScanRunStore;
 }
@@ -221,9 +274,10 @@ function asControlError(error: unknown): OptionsStageControlError {
 /**
  * Drive one stage of one options run through the engine's control
  * plane. The stage is validated against the #4067 pin first; the job
- * must exist in this DO's engine stores; run / re-run / resume need
- * the stored dispatch request. Failures throw OptionsStageControlError
- * carrying the code + the stage + the reason — never a silent absence.
+ * must exist in the host DO's engine stores or the D1 residency
+ * stores (#4859); run / re-run / resume need the stored dispatch
+ * request. Failures throw OptionsStageControlError carrying the code
+ * + the stage + the reason — never a silent absence.
  */
 /**
  * Issue #4271: resolve which job a screen run defined. An options
@@ -280,21 +334,78 @@ export async function controlOptionsStage(
     );
   }
   const optionsStage = stage as OptionsPipelineStage;
-  const engineStores = optionsEngineStoresFromSql(input.sql);
+  // Issue #4859 — dual resolution: the DO stores first (the
+  // pre-existing path, unchanged), then the D1 residency bundle.
+  // Whichever holds the job record drives the stage, and the
+  // residency the record resolved over decides the #4274 guard.
+  const candidates: Array<{
+    stores: OptionsEngineStores;
+    addressedOver: "do" | "d1";
+  }> = [];
+  if (input.sql !== undefined) {
+    candidates.push({
+      stores: optionsEngineStoresFromSql(input.sql),
+      addressedOver: "do",
+    });
+  }
+  if (input.d1Stores !== undefined) {
+    candidates.push({ stores: input.d1Stores, addressedOver: "d1" });
+  }
+  if (candidates.length === 0) {
+    throw new OptionsStageControlError(
+      "stage_control_unavailable",
+      `options run ${runId}: stage ${stage} cannot be driven (${operation}) — neither the host DO's SQL handle nor the D1 residency stores are bound in this turn, so no engine record is addressable; re-dispatch the screen from a turn that binds one`,
+    );
+  }
   try {
     // Read first, over a control without the step: getJob executes
     // nothing, so the step is only registered when an execution op
     // needs it. Issue #4271: resolve which job this run defined — the
     // options job or the strategy job — so a strategy run stays
-    // controllable under its new job.
-    const reader = new JobPipelineControl({
-      stores: engineStores.stores,
-      runRecorder: engineStores.runRecorder,
-      publisher: null,
-      steps: createBuiltinStepRegistry(),
-      invocation: "sync",
-    });
-    const { jobId, view } = await resolveScreenJobId(reader, runId);
+    // controllable under its new job. Issue #4859: try each
+    // candidate store set in order; a job_not_found on one falls
+    // through to the next, and any other failure surfaces.
+    let resolved: {
+      stores: OptionsEngineStores;
+      addressedOver: "do" | "d1";
+      jobId: string;
+      view: Awaited<ReturnType<JobPipelineControl["getJob"]>>;
+      reader: JobPipelineControl;
+    } | null = null;
+    let lastNotFound: OptionsStageControlError | null = null;
+    for (const candidate of candidates) {
+      const reader = new JobPipelineControl({
+        stores: candidate.stores.stores,
+        runRecorder: candidate.stores.runRecorder,
+        publisher: null,
+        steps: createBuiltinStepRegistry(),
+        invocation: "sync",
+      });
+      try {
+        const { jobId, view } = await resolveScreenJobId(reader, runId);
+        resolved = { ...candidate, jobId, view, reader };
+        break;
+      } catch (error) {
+        if (error instanceof OptionsStageControlError && error.code === "job_not_found") {
+          lastNotFound = error;
+          continue;
+        }
+        throw error;
+      }
+    }
+    if (resolved === null) {
+      // One candidate searched: the pre-existing refusal, verbatim.
+      // Both searched: name both residencies, so the caller knows
+      // the record is in neither.
+      if (candidates.length === 1 && lastNotFound !== null) {
+        throw lastNotFound;
+      }
+      throw new OptionsStageControlError(
+        "job_not_found",
+        `options run ${runId}: no engine record for job ${optionsScreenJobId(runId)}, ${strategyScreenJobId(runId)}, or ${comparisonJobId(runId)} in this host's DO stores or the D1 residency stores — the run was dispatched on another host, in-memory, or before the engine routing; re-dispatch the screen from this turn`,
+      );
+    }
+    const { stores: engineStores, addressedOver, jobId, view, reader } = resolved;
     const rawConfig = (view.definition as { rawConfig?: unknown }).rawConfig;
     const request = (rawConfig as { request?: unknown } | null)?.request;
     const needsExecution =
@@ -311,11 +422,13 @@ export async function controlOptionsStage(
     const shape: OptionsStageControlDecodedShape =
       request === undefined ? "unknown" : decodeOptionsRequestShape(request, runId);
     // The goal leg's job record is not addressable from the chat
-    // host (decided-not-to, #4274): the goal leg runs over
-    // in-memory engine stores on the ScreenerAgent DO, so no durable
-    // job exists in this host's SQL — an execution op on a
-    // goal-shape run refuses by name.
-    if (shape === "goal" && needsExecution) {
+    // host (decided-not-to, #4274) — UNLESS the record resolved
+    // over the D1 residency bundle (#4859): the host seam
+    // persisted it there, so the record IS addressable and the
+    // guard lifts for exactly those runs. A goal-shape execution
+    // op on a record resolved over the DO stores still refuses by
+    // name, with the #4274 message unchanged.
+    if (shape === "goal" && needsExecution && addressedOver !== "d1") {
       throw new OptionsStageControlError(
         "stage_port_unavailable",
         `options run ${runId}: the goal leg's job record is not addressable from this turn (decided-not-to, #4274) — the goal leg runs over in-memory engine stores on the ScreenerAgent DO, so no durable job exists in this host; a goal-leg stage cannot be controlled from chat; re-dispatch from the goal leg`,
@@ -344,6 +457,36 @@ export async function controlOptionsStage(
         `options run ${runId}: stage ${stage} of a manual-shape run needs the manual route's delivery builders (PDF/XLSX/CSV via getScreenerAgent), which a chat/MCP turn cannot bind — re-dispatch the screen from the manual route`,
       );
     }
+    // Issue #4859 — a run carrying a broker stage input resolves
+    // its chain source from the descriptor, never silently through
+    // the turn's default client: a chainFetch re-run on a run whose
+    // descriptor names another broker would fetch the wrong
+    // broker's chains and overwrite the run's artifacts. Only an
+    // OBJECT broker value is a descriptor (#3960): the legacy
+    // string broker key (a scan request's `broker: "etrade"`, the
+    // #5194 ambiguity) keeps today's behavior — the turn's client
+    // stands, and the factory is never consulted. A descriptor
+    // with no factory bound refuses by name, exactly as the
+    // resolving steps refuse it (optionsPipelineJobs.ts); an
+    // invalid descriptor refuses rather than guessing.
+    let chainSource = input.etradeClient;
+    if (needsExecution) {
+      const brokerValue = (
+        request as { classInput?: Record<string, unknown> } | null | undefined
+      )?.classInput?.[BROKER_STAGE_INPUT_KEY];
+      if (brokerValue !== undefined && typeof brokerValue === "object" && brokerValue !== null) {
+        const brokerInput = decodeBrokerStageInput(request, runId);
+        if (brokerInput !== undefined) {
+          if (input.chainSourceFor === undefined) {
+            throw new OptionsStageControlError(
+              "stage_port_unavailable",
+              `options run ${runId}: the stored request carries a broker stage input (broker "${brokerInput.broker}", ${brokerInput.mode} mode) but this turn binds no chain source — the screener cannot resolve its chains; bind chainSourceFor (the #3960 residency factory) and re-dispatch`,
+            );
+          }
+          chainSource = input.chainSourceFor(input.userLogin, request, runId);
+        }
+      }
+    }
     // Issue #4400 — the stage storage: the caller's handle when
     // supplied (the contract the manual route and the direct legs
     // already keep: the SAME storage the original leg used), else
@@ -353,9 +496,15 @@ export async function controlOptionsStage(
     // the dispatch wrote. No current run means the engine refuses
     // downstream (stage_no_run); the fresh store stands in only so
     // that refusal, not a storage error, is what surfaces.
+    // Issue #4859 — over the D1 residency the caller's DO storage
+    // is never the run's store: a host dispatch wrote its artifacts
+    // to the residency's artifact store, so the threaded storage
+    // stands in and the #4400 probe below runs against it.
+    const effectiveStorageInput =
+      addressedOver === "d1" ? undefined : input.storage;
     const engineRunId = view.instance?.currentRunId ?? null;
     const storage =
-      input.storage ??
+      effectiveStorageInput ??
       (engineRunId
         ? optionsStageStorageFromArtifacts(engineStores.stores.artifacts, engineRunId)
         : memoryStageStorage());
@@ -369,7 +518,7 @@ export async function controlOptionsStage(
     // contract and is never probed.
     if (
       needsExecution &&
-      input.storage === undefined &&
+      effectiveStorageInput === undefined &&
       engineRunId !== null &&
       stage !== OPTIONS_PIPELINE_STAGES[0]
     ) {
@@ -404,7 +553,7 @@ export async function controlOptionsStage(
               shape: shape as OptionsStageControlRequestShape,
               storage,
               ...(input.env ? { env: input.env } : {}),
-              ...(input.etradeClient ? { chainSource: input.etradeClient } : {}),
+              ...(chainSource ? { chainSource } : {}),
               ...(input.scanRunStore ? { scanRunStore: input.scanRunStore } : {}),
             }),
           ),
