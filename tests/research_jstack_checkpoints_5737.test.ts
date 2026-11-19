@@ -98,8 +98,8 @@ describe("Issue #5737 / #5597 — OODA research runs on J-stack with durable SQL
       operation: "research.run",
       triggeredBy: "manual",
       outcome: "success",
-      startedAt: "2026-11-19T11:00:00.000Z",
-      endedAt: "2026-11-19T11:00:01.000Z",
+      started: "2026-11-19T11:00:00.000Z",
+      finished: "2026-11-19T11:00:01.000Z",
       durationMs: 1000,
     });
 
