@@ -102,6 +102,11 @@ import {
   extractStateReturnTarget,
 } from "./session";
 import { exchangeAuthorizationCodeConfidential, OAuth2Error } from "./oauth2Core";
+import {
+  createStructuredLogger,
+  type StructuredLogger,
+} from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
 
 /** Error carrying the HTTP status the callback should answer with. */
 export class OidcAuthError extends Error {
@@ -246,8 +251,11 @@ function redirectUri(env: Env, options: OidcProviderOptions): string {
  * and status go to the server log only, never to the user. The
  * fail-closed semantics are unchanged: no session, no binding.
  */
-function errorPage(message: string, status = 400): Response {
-  console.warn(`[auth] sign-in failed (status ${status}): ${message}`);
+function errorPage(message: string, status = 400, log: StructuredLogger): Response {
+  log.warn("oidcProvider.sign_in_failed", {
+    message: `[auth] sign-in failed (status ${status}): ${message}`,
+    status,
+  });
   return new Response(null, {
     status: 302,
     headers: { Location: authOutcomeLoginUrl("signin_failed") },
@@ -349,18 +357,23 @@ export function createOidcProvider(options: OidcProviderOptions): LoginProvider 
   const credentialsGate = options.requireConfiguredCredentials ?? true;
 
   async function startLogin(env: Env, returnTarget?: string): Promise<Response> {
+    // Issue #3515 S3 batch 8 — env-wired logger (never an empty-env sink, #5587).
+    const structuredLog = createStructuredLogger(createObservabilitySink(env), {
+      component: "security/oidcProvider",
+    });
     const clientId = readEnvString(env, options.clientIdEnv);
     const clientSecret = await resolveClientSecret(env, options);
     if (credentialsGate && (!clientId || !clientSecret)) {
       return errorPage(
         `${options.displayName} login is not configured (missing OAuth client credentials)`,
-        500
+        500,
+        structuredLog
       );
     }
     // #2686: a nonce with no ID-token profile has nothing to verify
     // against — misconfiguration, fail closed before redirecting.
     if (options.useStateAsNonce && !options.profileFromIdToken) {
-      return errorPage(`${options.displayName} login is misconfigured (nonce without ID-token profile)`, 500);
+      return errorPage(`${options.displayName} login is misconfigured (nonce without ID-token profile)`, 500, structuredLog);
     }
     // #3015: seal a validated return target into the signed state;
     // an absent or refused target starts a plain login (default
@@ -394,20 +407,24 @@ export function createOidcProvider(options: OidcProviderOptions): LoginProvider 
     request: Request,
     callbackOptions?: LoginCallbackOptions
   ): Promise<Response> {
+    // Issue #3515 S3 batch 8 — env-wired logger (never an empty-env sink, #5587).
+    const structuredLog = createStructuredLogger(createObservabilitySink(env), {
+      component: "security/oidcProvider",
+    });
     const url = new URL(request.url);
     const code = url.searchParams.get("code");
     const state = url.searchParams.get("state");
     const error = url.searchParams.get("error");
 
     if (error) {
-      return errorPage(`${options.displayName} authentication was cancelled or failed: ${error}`, 400);
+      return errorPage(`${options.displayName} authentication was cancelled or failed: ${error}`, 400, structuredLog);
     }
     if (!code || !state) {
-      return errorPage("Missing required authorization code or state parameter", 400);
+      return errorPage("Missing required authorization code or state parameter", 400, structuredLog);
     }
     const isValidState = await verifyState(env, state);
     if (!isValidState) {
-      return errorPage("Invalid or expired OAuth state session. Please try signing in again.", 403);
+      return errorPage("Invalid or expired OAuth state session. Please try signing in again.", 403, structuredLog);
     }
 
     // #3015: recover the return target from the signed state. The
@@ -428,7 +445,8 @@ export function createOidcProvider(options: OidcProviderOptions): LoginProvider 
       if (credentialsGate && (!clientId || !clientSecret)) {
         return errorPage(
           `${options.displayName} login is not configured (missing OAuth client credentials)`,
-          500
+          500,
+          structuredLog
         );
       }
       let tokenSet: Awaited<ReturnType<typeof exchangeAuthorizationCodeConfidential>>;
@@ -483,7 +501,7 @@ export function createOidcProvider(options: OidcProviderOptions): LoginProvider 
         });
         if (!normalized.ok) {
           if (normalized.kind === "emailVerified") {
-            return errorPage(normalized.error, 400);
+            return errorPage(normalized.error, 400, structuredLog);
           }
           return await completeWiredLogin(
             env,
@@ -527,7 +545,7 @@ export function createOidcProvider(options: OidcProviderOptions): LoginProvider 
       });
       if (!normalized.ok) {
         if (normalized.kind === "emailVerified") {
-          return errorPage(normalized.error, 400);
+          return errorPage(normalized.error, 400, structuredLog);
         }
         // Subject / login-key / unusable-document failures are the
         // generic wired tail's fail-closed rules (including the
@@ -546,9 +564,9 @@ export function createOidcProvider(options: OidcProviderOptions): LoginProvider 
       // creates the session. Nothing is persisted before this call.
       return await completeWiredLogin(env, options.issuer, normalized.profile, tailOptions);
     } catch (err) {
-      if (err instanceof OidcAuthError) return errorPage(err.message, err.status);
+      if (err instanceof OidcAuthError) return errorPage(err.message, err.status, structuredLog);
       const message = err instanceof Error ? err.message : "Unexpected OAuth authentication error";
-      return errorPage(message, 500);
+      return errorPage(message, 500, structuredLog);
     }
   }
 

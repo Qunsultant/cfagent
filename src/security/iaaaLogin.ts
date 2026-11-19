@@ -139,6 +139,11 @@ import {
   resolveIaaaTenant,
   runWiredPostLogin,
 } from "./iaaaGithubEndToEnd";
+import {
+  createStructuredLogger,
+  type StructuredLogger,
+} from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
 
 export const GITHUB_ISSUER = "https://github.com";
 export const IAAA_BINDING_KEY_PREFIX = "iaaa-binding:";
@@ -620,6 +625,12 @@ export async function completeWiredLogin(
   profile: NormalizedLoginProfile,
   options?: WiredLoginOptions
 ): Promise<Response> {
+  // Issue #3515 S3 batch 8 — env-wired logger: the sink is built from
+  // the request's env so the events reach the Analytics Engine
+  // `observability` dataset (never an empty-env sink, #5587).
+  const structuredLog = createStructuredLogger(createObservabilitySink(env), {
+    component: "security/iaaaLogin",
+  });
   const nowMs = options?.nowMs ?? Date.now();
   const store = options?.bindingStore ?? createWiredBindingStore(env);
 
@@ -637,10 +648,10 @@ export async function completeWiredLogin(
         })
       );
     }
-    return errorPage("Provider profile did not include a stable subject id; login cannot be bound", 400);
+    return errorPage("Provider profile did not include a stable subject id; login cannot be bound", 400, structuredLog);
   }
   if (typeof profile?.loginKey !== "string" || profile.loginKey.trim() === "") {
-    return errorPage("Provider profile did not include a usable login key; login cannot be bound", 400);
+    return errorPage("Provider profile did not include a usable login key; login cannot be bound", 400, structuredLog);
   }
 
   // #1182: migration always runs on wired login (default stores
@@ -671,7 +682,7 @@ export async function completeWiredLogin(
         })
       );
     }
-    return errorPage(bindingResult.error, 400);
+    return errorPage(bindingResult.error, 400, structuredLog);
   }
 
   // #1210: one-time repair of the stranded Oct 22 platform-admin
@@ -744,9 +755,10 @@ export async function completeWiredLogin(
       },
     });
     if (capResult.evictedSessionIds.length > 0) {
-      console.warn(
-        `[auth] session cap: evicted ${capResult.evictedSessionIds.length} oldest session(s) before a new login`,
-      );
+      structuredLog.warn("iaaaLogin.session_cap_evicted_sessions", {
+        message: `[auth] session cap: evicted ${capResult.evictedSessionIds.length} oldest session(s) before a new login`,
+        evictedCount: capResult.evictedSessionIds.length,
+      });
     }
   } catch (err) {
     if (options?.auditStore && options.auditTenantId && err instanceof SessionCapError) {
@@ -768,6 +780,7 @@ export async function completeWiredLogin(
     return errorOutcomePage(
       `session cap enforcement failed: ${err instanceof Error ? err.message : String(err)}`,
       "session_limit_unavailable",
+      structuredLog,
     );
   }
 
@@ -790,6 +803,10 @@ export async function completeWiredLogin(
           audit: options?.auditStore
             ? { store: options.auditStore, correlationId: sessionId }
             : undefined,
+          // #3515 S3 batch 8 — the post-login audit-failure warnings
+          // ride the same env-constructed sink as this login's own
+          // structured events (never an empty-env sink, #5587).
+          sink: createObservabilitySink(env),
         },
         {
           githubLogin: profile.loginKey,
@@ -862,8 +879,11 @@ export async function completeWiredLogin(
  * no binding. (The legacy callback's error-page shape is retired
  * with this change; its audit recording above is untouched.)
  */
-function errorPage(message: string, status = 400): Response {
-  console.warn(`[auth] sign-in failed (status ${status}): ${message}`);
+function errorPage(message: string, status = 400, log: StructuredLogger): Response {
+  log.warn("iaaaLogin.sign_in_failed", {
+    message: `[auth] sign-in failed (status ${status}): ${message}`,
+    status,
+  });
   return new Response(null, {
     status: 302,
     headers: { Location: authOutcomeLoginUrl("signin_failed") },
@@ -878,8 +898,11 @@ function errorPage(message: string, status = 400): Response {
  * (the #2402 rule); the technical cause goes to the log and
  * the failure audit at the call site.
  */
-function errorOutcomePage(message: string, code: AuthOutcomeCode): Response {
-  console.warn(`[auth] sign-in failed (${code}): ${message}`);
+function errorOutcomePage(message: string, code: AuthOutcomeCode, log: StructuredLogger): Response {
+  log.warn("iaaaLogin.sign_in_failed_outcome", {
+    message: `[auth] sign-in failed (${code}): ${message}`,
+    code,
+  });
   return new Response(null, {
     status: 302,
     headers: { Location: authOutcomeLoginUrl(code) },

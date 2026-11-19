@@ -71,6 +71,11 @@ import {
   tripSessionStoreBreaker,
 } from "./sessionQuotaResilience";
 import type { SessionData } from "../types";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import {
+  ConsoleObservabilitySink,
+  type ObservabilitySink,
+} from "../observability/observabilityPorts";
 
 /** Store operations the wired validation path needs, injectable for tests. */
 export interface WiredSessionStoreDeps {
@@ -118,6 +123,14 @@ export type WiredSessionValidation =
 export interface WiredSessionValidationOptions {
   /** Owner override for the idle window (default: the settled 8-hour config value). */
   idleTimeoutMs?: number;
+  /**
+   * Issue #3515 S3 batch 8 — optional observability sink for the
+   * degraded-serve warnings (the d1QueryLogger precedent). Absent,
+   * the structured console fallback; the caller that owns the
+   * request env can pass the env-constructed sink (the #5587
+   * follow-up) so the events reach the Analytics Engine dataset.
+   */
+  sink?: ObservabilitySink;
   /**
    * Issue #2444: ms since epoch when the cached copy was fetched from
    * the backing store (see getSessionCachedFetchedAt). Absent → the
@@ -173,6 +186,12 @@ export async function validateAndTouchWiredSession(
   nowMs: number,
   options?: WiredSessionValidationOptions,
 ): Promise<WiredSessionValidation> {
+  // #3515 S3 batch 8 — logger over the injected sink, else the structured
+  // console fallback (never an empty-env sink, #5587).
+  const structuredLog = createStructuredLogger(
+    options?.sink ?? new ConsoleObservabilitySink(),
+    { component: "security/iaaaEnforcement" },
+  );
   if (!cached?.internalUserId) {
     return { wired: false };
   }
@@ -214,9 +233,10 @@ export async function validateAndTouchWiredSession(
     noteSuppressedSessionStoreRead();
     const breakerValidated = getValidatedSession(cached, nowMs, options);
     if (breakerValidated.ok) {
-      console.warn(
-        `[iaaa] wired session ${sessionId} served degraded: session-store breaker open; revocation/step-up propagation delayed until the store recovers`,
-      );
+      structuredLog.warn("iaaaEnforcement.session_served_degraded_breaker_open", {
+        message: `[iaaa] wired session ${sessionId} served degraded: session-store breaker open; revocation/step-up propagation delayed until the store recovers`,
+        sessionId,
+      });
       return {
         wired: true,
         session: breakerValidated.session,
@@ -240,9 +260,10 @@ export async function validateAndTouchWiredSession(
     tripSessionStoreBreaker(error);
     const fallbackValidated = getValidatedSession(cached, nowMs, options);
     if (fallbackValidated.ok) {
-      console.warn(
-        `[iaaa] wired session ${sessionId} served degraded: session-store limit error; revocation/step-up propagation delayed until the store recovers`,
-      );
+      structuredLog.warn("iaaaEnforcement.session_served_degraded_limit_error", {
+        message: `[iaaa] wired session ${sessionId} served degraded: session-store limit error; revocation/step-up propagation delayed until the store recovers`,
+        sessionId,
+      });
       return {
         wired: true,
         session: fallbackValidated.session,

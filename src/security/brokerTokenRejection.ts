@@ -31,6 +31,8 @@ import {
   revokeStoredTokens,
   type ETradeTokenIdentity,
 } from "./etradeOAuth";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
 
 export interface BrokerTokenRejectionInput {
   broker: string;
@@ -52,6 +54,12 @@ export async function propagateBrokerTokenRejection(
   if (input.broker !== "etrade") {
     return { broker: input.broker, handled: false, dropped: false };
   }
+  // Issue #3515 S3 batch 8 — env-wired logger: the sink is built from
+  // the request's env so the event reaches the Analytics Engine
+  // `observability` dataset (never an empty-env sink, #5587).
+  const structuredLog = createStructuredLogger(createObservabilitySink(input.env), {
+    component: "security/brokerTokenRejection",
+  });
   try {
     await revokeStoredTokens(
       input.env,
@@ -61,11 +69,11 @@ export async function propagateBrokerTokenRejection(
     );
     return { broker: "etrade", handled: true, dropped: true };
   } catch (err) {
-    console.warn(
-      `[BrokerTokenRejection] etrade token drop failed for ${input.userLogin}: ${
-        err instanceof Error ? err.message : String(err)
-      }`
-    );
+    structuredLog.warn("brokerTokenRejection.token_drop_failed", {
+      message: `[BrokerTokenRejection] etrade token drop failed for ${input.userLogin}: ${err instanceof Error ? err.message : String(err)}`,
+      userLogin: input.userLogin,
+      error: err instanceof Error ? err.message : String(err),
+    });
     return { broker: "etrade", handled: true, dropped: false };
   }
 }

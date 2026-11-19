@@ -1,6 +1,20 @@
 import { isKvLimitError } from "./kvResilience";
 import { isSessionStoreLimitError } from "./sessionQuotaResilience";
 import { codedMessage } from "../outcomes/outcomeAspects";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { ConsoleObservabilitySink } from "../observability/observabilityPorts";
+
+/**
+ * Issue #3515 S3 batch 8 — the default `log` emits through the
+ * structured logger (the `log` option stays the injection point
+ * for callers/tests). Console-only by design — this module is
+ * kept free of Worker-only imports so it can be unit tested
+ * under Node, so the logger is built over an explicit
+ * ConsoleObservabilitySink (never an empty-env sink, #5587).
+ */
+const boundaryLog = createStructuredLogger(new ConsoleObservabilitySink(), {
+  component: "security/workerErrorBoundary",
+});
 
 /**
  * Last line of defence against Cloudflare error 1101.
@@ -67,7 +81,13 @@ export function withErrorBoundary<TEnv>(
   handler: (request: Request, env: TEnv) => Promise<Response>,
   options: ErrorBoundaryOptions = {}
 ): (request: Request, env: TEnv) => Promise<Response> {
-  const log = options.log ?? ((message: string, error: unknown) => console.error(message, error));
+  const log =
+    options.log ??
+    ((message: string, error: unknown) =>
+      boundaryLog.error("workerErrorBoundary.handler_failed", {
+        message,
+        error: error instanceof Error ? error.message : String(error),
+      }));
 
   return async (request: Request, env: TEnv): Promise<Response> => {
     try {

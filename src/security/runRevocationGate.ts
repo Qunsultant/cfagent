@@ -85,6 +85,11 @@ import type {
   RoleBinding,
 } from "./authorization";
 import type { Delegation } from "./delegation";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import {
+  ConsoleObservabilitySink,
+  type ObservabilitySink,
+} from "../observability/observabilityPorts";
 
 export type RunRevocationReason =
   | "SESSION_REVOKED"
@@ -162,16 +167,31 @@ export async function enforceOwnerDispatch(input: {
   resolveInternalUserId: (login: string) => Promise<string | null>;
   login: string;
   nowMs: number;
+  /**
+   * Issue #3515 S3 batch 8 — optional observability sink for the
+   * lookup-failure errors (the d1QueryLogger precedent). Absent,
+   * the structured console fallback; the caller that owns the
+   * request env can pass the env-constructed sink (the #5587
+   * follow-up) so the events reach the Analytics Engine dataset.
+   */
+  sink?: ObservabilitySink;
 }): Promise<RunAuthorityDecision> {
   if (!input.store) return { allowed: true };
+  // #3515 S3 batch 8 — logger over the injected sink, else the structured
+  // console fallback (never an empty-env sink, #5587).
+  const structuredLog = createStructuredLogger(
+    input.sink ?? new ConsoleObservabilitySink(),
+    { component: "security/runRevocationGate" },
+  );
   let internalUserId: string | null;
   try {
     internalUserId = await input.resolveInternalUserId(input.login);
   } catch (err) {
-    console.error(
-      `[runRevocationGate] owner identity resolution failed for login ${input.login}; preserving pre-existing behavior (allow):`,
-      err instanceof Error ? err.message : String(err),
-    );
+    structuredLog.error("runRevocationGate.owner_identity_resolution_failed", {
+      message: `[runRevocationGate] owner identity resolution failed for login ${input.login}; preserving pre-existing behavior (allow):`,
+      login: input.login,
+      error: err instanceof Error ? err.message : String(err),
+    });
     return { allowed: true };
   }
   if (internalUserId === null) return { allowed: true };
@@ -179,10 +199,11 @@ export async function enforceOwnerDispatch(input: {
   try {
     memberships = await input.store.getMembershipsByUser(internalUserId);
   } catch (err) {
-    console.error(
-      `[runRevocationGate] membership load failed for owner ${input.login}; preserving pre-existing behavior (allow):`,
-      err instanceof Error ? err.message : String(err),
-    );
+    structuredLog.error("runRevocationGate.membership_load_failed", {
+      message: `[runRevocationGate] membership load failed for owner ${input.login}; preserving pre-existing behavior (allow):`,
+      login: input.login,
+      error: err instanceof Error ? err.message : String(err),
+    });
     return { allowed: true };
   }
   return recheckRunAuthority({ memberships, nowMs: input.nowMs });

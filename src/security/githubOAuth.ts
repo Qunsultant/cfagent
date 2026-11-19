@@ -25,6 +25,8 @@ import {
   type AuthOutcomeCode,
 } from "./authOutcome";
 import { validateReturnTarget } from "./returnTarget";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
 
 /**
  * Audit seam for the logout hook (Phase 2b-part1). The caller —
@@ -44,6 +46,10 @@ export interface LogoutAuditOptions {
 }
 
 export async function handleLogout(env: Env, request: Request, options?: LogoutAuditOptions): Promise<Response> {
+  // Issue #3515 S3 batch 8 — env-wired logger (never an empty-env sink, #5587).
+  const structuredLog = createStructuredLogger(createObservabilitySink(env), {
+    component: "security/githubOAuth",
+  });
   // Issue #329: only a UUID-shaped cookie can name a session; skipping the
   // read (and the delete) for anything else keeps junk cookies off the
   // session store. A browser can send more than one `session_id` (a stale
@@ -107,9 +113,10 @@ export async function handleLogout(env: Env, request: Request, options?: LogoutA
               )
             : null;
         if (auditResult && !auditResult.ok) {
-          console.warn(
-            `[logout-audit] audit write failed (${auditResult.code}); logout proceeded unaudited`,
-          );
+          structuredLog.warn("githubOAuth.logout_audit_write_failed", {
+            message: `[logout-audit] audit write failed (${auditResult.code}); logout proceeded unaudited`,
+            code: auditResult.code,
+          });
         }
       }
     } catch {

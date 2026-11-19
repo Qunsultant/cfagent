@@ -105,6 +105,35 @@
  * events) and `data_provider_capture_e1` (capture-write failure
  * events); no behavior change.
  *
+ * Batch 8 (this slice) migrated `src/security` — all 14 files, 29 real
+ * sites — to the same logger, and moved them from REMAINING_PIN to
+ * MIGRATED_ZERO; after batch 8 the remaining total is 41. No pin
+ * correction: every security file held exactly its ceiling on current
+ * main (verified from code). Logger construction follows the #5587
+ * ruling (Venus 2026-11-18): no new `createObservabilitySink({})`
+ * module logger anywhere in the slice. The six functions that already
+ * hold the request env (`propagateBrokerTokenRejection`, `handleLogout`,
+ * `completeWiredLogin`, the five `etradeOAuth` functions, the OIDC
+ * `startLogin`/`handleCallback`) build their logger per function from
+ * that env, and `completeWiredLogin` passes the env-constructed sink
+ * into `runWiredPostLogin`; the SessionStore Durable Object builds its
+ * logger from `this.env` (test instances built via `Object.create`
+ * fall back to the console sink); every other file takes an optional
+ * `sink?: ObservabilitySink` (the `d1QueryLogger` precedent) and falls
+ * back to an explicit `ConsoleObservabilitySink`. The `storeMetrics`
+ * default sink now emits the record as the fields of one
+ * `storeMetrics.store_op` info event (the batch-5 `screenRunAspects`
+ * precedent for a hand-built JSON line); the T1/T2 aggregation
+ * queries in docs/OBSERVABILITY.md (§4) read the fields under
+ * `fields`. One test asserted on the old default-sink JSON line and
+ * was updated to the structured form (spy console.info, parse the
+ * JSON event, assert on operation + level + fields) — no behavior
+ * change. The neutrality census trips on exactly one row: the
+ * `etradeOAuth` event names and `component:` lines name the provider
+ * whose adapter this file is, so its baseline row is raised 124 -> 131
+ * with an INTEGRATION disposition, per the gitops §7 pin rule — the event
+ * names are not renamed to dodge it.
+ *
  * Batch 3 (this slice) migrated `src/agents` — all 42 files, 180
  * real sites — to the same logger, and moved them from REMAINING_PIN
  * to MIGRATED_ZERO; after batch 3 the remaining total is 234. One
@@ -406,6 +435,20 @@ const MIGRATED_ZERO: readonly string[] = [
   "src/server/routes/messaging.ts",
   "src/server/routes/privacy.ts",
   "src/server/routes/queue.ts",
+  "src/security/brokerTokenRejection.ts",
+  "src/security/etradeOAuth.ts",
+  "src/security/githubOAuth.ts",
+  "src/security/iaaaEnforcement.ts",
+  "src/security/iaaaGithubEndToEnd.ts",
+  "src/security/iaaaLogin.ts",
+  "src/security/kvResilience.ts",
+  "src/security/oidcProvider.ts",
+  "src/security/runRevocationGate.ts",
+  "src/security/sessionStore.ts",
+  "src/security/storageRetention.ts",
+  "src/security/storeMetrics.ts",
+  "src/security/webhookReplay.ts",
+  "src/security/workerErrorBoundary.ts",
   "src/services/adaptationAudit.ts",
   "src/services/agenticPayments.ts",
   "src/services/aiSearch.ts",
@@ -505,20 +548,6 @@ const REMAINING_PIN: Readonly<Record<string, number>> = {
   "src/events/screenerEvents.ts": 1,
   "src/events/screenerPublishers.ts": 20,
   "src/observability/observabilityPorts.ts": 2,
-  "src/security/brokerTokenRejection.ts": 1,
-  "src/security/etradeOAuth.ts": 10,
-  "src/security/githubOAuth.ts": 1,
-  "src/security/iaaaEnforcement.ts": 2,
-  "src/security/iaaaGithubEndToEnd.ts": 2,
-  "src/security/iaaaLogin.ts": 3,
-  "src/security/kvResilience.ts": 1,
-  "src/security/oidcProvider.ts": 1,
-  "src/security/runRevocationGate.ts": 2,
-  "src/security/sessionStore.ts": 1,
-  "src/security/storageRetention.ts": 2,
-  "src/security/storeMetrics.ts": 1,
-  "src/security/webhookReplay.ts": 1,
-  "src/security/workerErrorBoundary.ts": 1,
   "src/trading/channels/intake.ts": 3,
   "src/trading/options/unifiedOptionsService.ts": 1,
 };

@@ -9,7 +9,7 @@
  * `/schedules/trigger-retention` route. The pass deletes rows older than
  * their table's retention window, oldest first, in bounded batches, with a
  * per-run cap per table — and records one mas_events row per run summarizing
- * the work (plus a console.info line: pruning is never silent).
+ * the work (plus a structured info event: pruning is never silent).
  *
  * Design notes:
  * - Windows are env-configurable (string or number): MAS_MESSAGES_RETENTION_DAYS
@@ -194,6 +194,11 @@
 
 import type { DatabaseORM } from "../orm";
 import { generationId, newRunId } from "../services/executionTreeIds";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import {
+  ConsoleObservabilitySink,
+  type ObservabilitySink,
+} from "../observability/observabilityPorts";
 // Issue #278: durable scheduled-run reports for the NextGenTP agent.
 
 /** Default retention window, days — matches the 90d the UI advertises. */
@@ -254,6 +259,15 @@ export interface StorageRetentionOptions {
   maxPerRun?: number;
   /** Injectable clock (tests). */
   now?: () => number;
+  /**
+   * Issue #3515 S3 batch 8 — optional observability sink for the
+   * pass-summary info and no-owner warn (the d1QueryLogger
+   * precedent). Absent, the structured console fallback; the
+   * caller that owns the request env can pass the
+   * env-constructed sink (the #5587 follow-up) so the events
+   * reach the Analytics Engine dataset.
+   */
+  sink?: ObservabilitySink;
   /**
    * Owning tenant for the pass's canonical report row. Required for the
    * row; without it the pass still prunes, but writes no mas_reports
@@ -378,6 +392,12 @@ export function runStorageRetention(
     MAS_MEMORY_RETENTION_DEFAULT_DAYS
   );
   const nowMs = options.now ? options.now() : Date.now();
+  // #3515 S3 batch 8 — logger over the injected sink, else the structured
+  // console fallback (never an empty-env sink, #5587).
+  const structuredLog = createStructuredLogger(
+    options.sink ?? new ConsoleObservabilitySink(),
+    { component: "security/storageRetention" },
+  );
 
   if (!(windowDays > 0)) {
     // The messages window is the pass's master switch (#255 semantics):
@@ -496,11 +516,21 @@ export function runStorageRetention(
 
   // Never prune silently (issue #786): the audit row above is the durable
   // record; this line is the operator-visible one.
-  console.info(
-    `[storage-retention] mas_messages pruned ${pruned} (window ${windowDays}d, cutoff ${cutoffIso}); ` +
+  structuredLog.info("storageRetention.retention_pass_pruned", {
+    message:
+      `[storage-retention] mas_messages pruned ${pruned} (window ${windowDays}d, cutoff ${cutoffIso}); ` +
       `mas_events pruned ${eventsPruned} (window ${eventsWindowDays}d, cutoff ${eventsCutoffIso ?? "disabled"}); ` +
-      `mas_memory pruned ${memoryPruned} (window ${memoryWindowDays}d, cutoff ${memoryCutoffIso ?? "disabled"})`
-  );
+      `mas_memory pruned ${memoryPruned} (window ${memoryWindowDays}d, cutoff ${memoryCutoffIso ?? "disabled"})`,
+    pruned,
+    windowDays,
+    cutoffIso,
+    eventsPruned,
+    eventsWindowDays,
+    eventsCutoffIso,
+    memoryPruned,
+    memoryWindowDays,
+    memoryCutoffIso,
+  });
 
   // Issue #278: persist the scheduled run's summary as a durable report
   // (mas_reports) so the NextGenTP agent can surface it later.
@@ -512,7 +542,9 @@ export function runStorageRetention(
   // body + summary, unchanged.
   try {
     if (!options.userLogin) {
-      console.warn("[storage-retention] No owning userLogin: pruning is recorded in mas_events, no report row written.");
+      structuredLog.warn("storageRetention.no_owning_user_login", {
+        message: "[storage-retention] No owning userLogin: pruning is recorded in mas_events, no report row written.",
+      });
     } else {
     const runId = newRunId();
     orm.storeCanonicalReport({

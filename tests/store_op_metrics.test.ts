@@ -316,10 +316,10 @@ describe("SessionStore op metrics (#910)", () => {
     ).not.toThrow();
   });
 
-  it("the default sink emits one parseable JSON line per op to console.log", async () => {
+  it("the default sink emits one structured store_op event per op to console.info", async () => {
     setStoreOpSink(null); // back to the default sink
     const logged: string[] = [];
-    vi.spyOn(console, "log").mockImplementation((line: unknown) => {
+    vi.spyOn(console, "info").mockImplementation((line: unknown) => {
       logged.push(String(line));
     });
     const store = makeStore();
@@ -327,16 +327,30 @@ describe("SessionStore op metrics (#910)", () => {
 
     await kv.put("k", "v");
 
-    const parsed = logged
+    // #3515 S3 batch 8: the default sink emits the record as the fields
+    // of one structured `storeMetrics.store_op` info event on the
+    // console-info JSON fallback (spy console.info, parse the JSON
+    // event, assert on operation + level + fields) — no behavior change.
+    const events = logged
       .map((line) => {
         try {
-          return JSON.parse(line) as StoreOpRecord;
+          return JSON.parse(line) as {
+            operation?: string;
+            level?: string;
+            fields?: Record<string, unknown>;
+          };
         } catch {
           return null;
         }
       })
-      .filter((r) => r?.event === "store_op");
-    expect(parsed).toHaveLength(1);
-    expect(parsed[0]).toMatchObject({ ns: "sessions", op: "put", outcome: "ok" });
+      .filter((e) => e?.operation === "storeMetrics.store_op");
+    expect(events).toHaveLength(1);
+    expect(events[0]?.level).toBe("info");
+    expect(events[0]?.fields).toMatchObject({
+      event: "store_op",
+      ns: "sessions",
+      op: "put",
+      outcome: "ok",
+    });
   });
 });

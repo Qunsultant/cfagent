@@ -93,14 +93,20 @@ cause of a quota alert, and it shows up as request volume, not KV volume.
 
 Every op against the SessionStore Durable Object emits exactly one
 structured record from the client funnel in `src/security/durableKv.ts`
-(sink: `src/security/storeMetrics.ts`). The record is a bare JSON
-`console.log` line, so Workers Logs (§1, `head_sampling_rate: 1` — nothing
-is sampled away) lifts the fields out of the message and no free-text
-parsing is needed:
+(sink: `src/security/storeMetrics.ts`). The record rides as the `fields`
+of one structured `storeMetrics.store_op` info event (issue #3515 S3
+batch 8 — the default sink used to emit the record as a bare JSON
+`console.log` line), so Workers Logs (§1, `head_sampling_rate: 1` —
+nothing is sampled away) lifts the fields out of the event and no
+free-text parsing is needed:
 
 ```json
-{"event":"store_op","v":1,"ns":"sessions","op":"get","instance":"kv","outcome":"ok","latencyMs":3,"ts":1760000000000}
+{"type":"storeMetrics.store_op","level":"info","operation":"storeMetrics.store_op","component":"security/storeMetrics","timestampMs":1760000000000,"timestampIso":"2026-10-09T00:00:00.000Z","fields":{"event":"store_op","v":2,"ns":"sessions","op":"get","instance":"kv","outcome":"ok","latencyMs":3,"ts":1760000000000}}
 ```
+
+The `fields` object above is the record; the envelope carries
+`operation` = `storeMetrics.store_op`, `level` = `info`, and
+`component` = `security/storeMetrics`.
 
 | Field | Meaning |
 | --- | --- |
@@ -117,8 +123,13 @@ the DO could never see the timeouts and overload rejections that trigger T2
 exists to catch, because those requests never land.
 
 **Evaluating the #789 triggers.** Export the matching records (Workers
-Logs → filter on the structured field `event` = `store_op`, or a Logpush
-job on the same field) as newline-delimited JSON, then:
+Logs → filter on `operation` = `storeMetrics.store_op`, or a Logpush
+job on the same field) as newline-delimited JSON, extract the `fields`
+object per line, then run the queries over the extracted records:
+
+```bash
+jq -c '.fields' store_ops.ndjson > store_op_fields.ndjson
+```
 
 T2 — failures >0.1% of ops in 24 h (per bucket/op, and overall):
 
@@ -127,12 +138,12 @@ T2 — failures >0.1% of ops in 24 h (per bucket/op, and overall):
 jq -s 'group_by([.ns, .op]) | map({
   ns: .[0].ns, op: .[0].op, ops: length,
   failed: (map(select(.outcome == "failed" or .outcome == "unavailable")) | length)
-} | . + {failure_rate: (.failed / .ops)})' store_ops.ndjson
+} | . + {failure_rate: (.failed / .ops)})' store_op_fields.ndjson
 
 # T2 fires when this overall 24 h rate exceeds 0.001
 jq -s '{ops: length,
         failed: (map(select(.outcome == "failed" or .outcome == "unavailable")) | length)}
-       | . + {failure_rate: (.failed / .ops)}' store_ops.ndjson
+       | . + {failure_rate: (.failed / .ops)}' store_op_fields.ndjson
 ```
 
 T1 — >250 ops/s sustained, or >500 ops/s averaged over an hour, on the
@@ -144,13 +155,13 @@ T1 — >250 ops/s sustained, or >500 ops/s averaged over an hour, on the
 jq -s 'map(select(.instance == "kv")) | group_by(.ts / 60000 | floor)
        | map({minute_epoch: ((.[0].ts / 60000 | floor) * 60),
               ops: length, ops_per_sec: (length / 60)})
-       | map(select(.ops_per_sec > 250))' store_ops.ndjson
+       | map(select(.ops_per_sec > 250))' store_op_fields.ndjson
 
 # per-hour rate: T1 fires on any hour above 500 ops/s
 jq -s 'map(select(.instance == "kv")) | group_by(.ts / 3600000 | floor)
        | map({hour_epoch: ((.[0].ts / 3600000 | floor) * 3600),
               ops: length, ops_per_sec: (length / 3600)})
-       | map(select(.ops_per_sec > 500))' store_ops.ndjson
+       | map(select(.ops_per_sec > 500))' store_op_fields.ndjson
 ```
 
 Latency sanity (a rising p95 at flat volume is the early-warning shape of
@@ -158,7 +169,7 @@ a store under pressure, before either trigger fires):
 
 ```bash
 jq -s 'group_by([.ns, .op]) | map({ns: .[0].ns, op: .[0].op, n: length,
-  p95_latency_ms: (map(.latencyMs) | sort | .[((length * 0.95 | floor) - 1)])})' store_ops.ndjson
+  p95_latency_ms: (map(.latencyMs) | sort | .[((length * 0.95 | floor) - 1)])})' store_op_fields.ndjson
 ```
 
 Volume note: one line per op (~130 bytes). At the #789-measured load
