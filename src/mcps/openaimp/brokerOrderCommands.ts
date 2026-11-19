@@ -16,6 +16,7 @@ import type { IMcpToolCommand, McpToolContext } from "../../patterns/interfaces"
 import { cancelOrderViaSelectedBroker } from "../../services/brokerOrderCancel";
 import { replaceOrderViaSelectedBroker } from "../../services/brokerOrderReplace";
 import { previewOrderViaSelectedBroker } from "../../services/brokerOrderPreview";
+import { createOrderViaSelectedBroker } from "../../services/brokerOrderCreate";
 
 export interface BrokerOrderCancelToolInput {
   orderId: string;
@@ -234,6 +235,76 @@ export class BrokerOrderPreviewCommand
     context.audit("broker_order_preview", "mcp", {
       actingLogin: actingLogin ?? null,
       broker: result.broker,
+      symbol: input.symbol,
+      success: result.success,
+      ...(result.code ? { code: result.code } : {}),
+    });
+    return result;
+  }
+}
+
+export interface BrokerOrderCreateToolInput {
+  symbol: string;
+  action: string;
+  quantity: number;
+  order_type?: string;
+  limit_price?: number;
+  stop_price?: number;
+  provider?: string;
+}
+
+/**
+ * Issue #5767 — the neutral create surface: propose on the routed broker and
+ * submit the proposal to the approval workflow, in one synchronous call.
+ * It places nothing: placement happens only when a human decides the approval
+ * and the workflow's settle step executes. Composes the two existing door
+ * calls; no second proposal path, no placement path.
+ */
+export class BrokerOrderCreateCommand
+  implements IMcpToolCommand<BrokerOrderCreateToolInput>
+{
+  readonly name = "broker_order_create";
+  readonly description =
+    "Create a stock order on the platform-selected broker (or a named one) and submit it for approval, in one synchronous call. Returns the broker's pending-approval proposal and the approval run's id. PLACES NOTHING: a human decides the approval and the workflow's settle step executes; no order reaches the broker for execution from this tool. An invalid action/quantity/price is refused before the broker is called, and a broker that returns no proposal is reported with its status instead of an invented success. Requires the chat turn's acting identity.";
+  readonly jsonSchema = {
+    type: "object" as const,
+    properties: {
+      symbol: { type: "string", description: "Ticker symbol" },
+      action: { type: "string", enum: ["BUY", "SELL", "BUY_TO_COVER", "SELL_SHORT"] },
+      quantity: { type: "number", description: "Positive share quantity" },
+      order_type: { type: "string", enum: ["MARKET", "LIMIT", "STOP", "STOP_LIMIT"] },
+      limit_price: { type: "number", description: "Limit price for LIMIT/STOP_LIMIT" },
+      stop_price: { type: "number", description: "Stop trigger for STOP/STOP_LIMIT" },
+      provider: { type: "string", description: "Optional routed broker; omit for the selected broker" },
+    },
+    required: ["symbol", "action", "quantity"],
+  };
+  readonly zodSchema = z.object({
+    symbol: z.string().min(1),
+    action: z.enum(["BUY", "SELL", "BUY_TO_COVER", "SELL_SHORT"]),
+    quantity: z.number().positive(),
+    order_type: z.enum(["MARKET", "LIMIT", "STOP", "STOP_LIMIT"]).optional(),
+    limit_price: z.number().positive().optional(),
+    stop_price: z.number().positive().optional(),
+    provider: z.string().min(1).optional(),
+  });
+
+  async execute(input: BrokerOrderCreateToolInput, context: McpToolContext) {
+    const actingLogin = context.actingLogin?.();
+    const result = await createOrderViaSelectedBroker({
+      env: context.env,
+      userLogin: actingLogin ?? "",
+      symbol: input.symbol,
+      action: input.action,
+      quantity: input.quantity,
+      ...(input.order_type !== undefined ? { orderType: input.order_type } : {}),
+      ...(input.limit_price !== undefined ? { limitPrice: input.limit_price } : {}),
+      ...(input.stop_price !== undefined ? { stopPrice: input.stop_price } : {}),
+      ...(input.provider ? { provider: input.provider } : {}),
+    });
+    context.audit("broker_order_create", "mcp", {
+      actingLogin: actingLogin ?? null,
+      provider: result.provider ?? null,
       symbol: input.symbol,
       success: result.success,
       ...(result.code ? { code: result.code } : {}),

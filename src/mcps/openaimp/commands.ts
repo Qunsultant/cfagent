@@ -15,6 +15,7 @@ import { z } from "zod";
 import { GetJobStageStatusCommand, GetJobStatusCommand } from "./jobStatusCommands";
 import {
   BrokerOrderCancelCommand,
+  BrokerOrderCreateCommand,
   BrokerOrderPreviewCommand,
   BrokerOrderReplaceCommand,
 } from "./brokerOrderCommands";
@@ -1825,6 +1826,7 @@ export class McpToolFactory {
     this.registerTool(new BrokerOrderCancelCommand());
     this.registerTool(new BrokerOrderReplaceCommand());
     this.registerTool(new BrokerOrderPreviewCommand());
+    this.registerTool(new BrokerOrderCreateCommand());
     this.registerTool(new SetJobExecutionModeCommand());
     this.registerTool(new ListDatabaseTablesCommand());
     this.registerTool(new QueryTableDataCommand());

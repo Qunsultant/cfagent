@@ -312,6 +312,8 @@ export const SYNCHRONOUS_MCP_TOOLS = new Set<string>([
   "broker_order_replace",
   // #5767: a preview answers in the turn.
   "broker_order_preview",
+  // #5767: create answers in the turn with the proposal + approval run.
+  "broker_order_create",
   "set_job_execution_mode",
   "stock_copilot_status",
   "stock_copilot_control",

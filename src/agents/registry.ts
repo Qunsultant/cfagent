@@ -717,6 +717,7 @@ export const MESH_TOOL_FAMILIES: MeshToolFamilyEntry[] = [
       "broker_order_cancel",
       "broker_order_replace",
       "broker_order_preview",
+      "broker_order_create",
       "set_job_execution_mode",
       "list_database_tables",
       "query_table_data",
