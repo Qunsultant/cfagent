@@ -54,6 +54,7 @@ import {
 } from "../data/createJobPipelinePorts";
 import type { JobArtifactStore } from "../data/jobPipelinePorts";
 import type { JobRunTrigger } from "../data/jobRunRecordPorts";
+import { normalizeJobRunTrigger } from "../data/jobRunRecordPorts";
 import { createInMemoryJobPipelineStores } from "../data/inMemoryJobPipelineAdapter";
 import { SqlJobRunRecordStore } from "../data/doSqliteJobRunRecordAdapter";
 import { InMemoryJobRunRecordStore } from "../data/inMemoryJobRunRecordAdapter";
@@ -612,7 +613,8 @@ export function registerComparisonStep(
  */
 export interface PanelViaEngineOptions extends PipelineOptions {
   userLogin?: string;
-  trigger?: "manual" | "scheduled";
+  /** Issue #4767 — the panel run's dispatch trigger, all five modes. */
+  trigger?: JobRunTrigger;
   runId?: string;
   engineStores?: OptionsEngineStores | null;
   queue?: OptionsScreenWorkflowDeps["queue"];
@@ -639,7 +641,9 @@ export async function runOptionsPanelViaEngineWithAgents(
   options: PanelViaEngineOptions = {},
 ): Promise<PipelineResult> {
   const runId = options.runId ?? `options-panel:service:${request.symbol}:${new Date().toISOString()}`;
-  const trigger = options.trigger ?? "manual";
+  // Issue #4767 — the panel run's dispatch trigger, fail-closed
+  // through normalize (absent ⇒ "manual", the contract default).
+  const trigger = normalizeJobRunTrigger(options.trigger);
   // Issue #4400: over caller-supplied engine stores, the stages
   // write their artifacts into the stores' artifact store (scoped
   // by the executing engine run id, bound per step invocation), so
@@ -910,11 +914,15 @@ export async function runOptionsScanViaEngine(
     {
       runId,
       userLogin: options.userLogin,
-      trigger: "manual",
+      // Issue #4767 — the scan's dispatch trigger rides the
+      // strategy-screen run (the outer trigger) and the request,
+      // instead of a hardcoded "manual": a scheduled scan records
+      // "scheduled", a copilot scan records "copilot".
+      trigger: normalizeJobRunTrigger(options.trigger),
       request: {
         assetClass: "options",
         runIdentity: { runId },
-        trigger: "manual",
+        trigger: normalizeJobRunTrigger(options.trigger),
         classInput: {
           scan: { symbols, template, options: options.scanOptions ?? {} },
           ...(options.requestRecord ? { requestRecord: options.requestRecord } : {}),

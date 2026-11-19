@@ -60,6 +60,14 @@ import {
   type FeedDatasetStore,
   type FeedSentimentRow,
 } from "../data/feedDatasetPorts";
+import type {
+  JobRunKind,
+  JobRunTrigger,
+} from "../data/jobRunRecordPorts";
+import {
+  normalizeJobRunKind,
+  normalizeJobRunTrigger,
+} from "../data/jobRunRecordPorts";
 import {
   type EnrichedDatasetArtifact,
   type EnrichedDatasetStore,
@@ -1082,7 +1090,9 @@ export interface EnrichJobDeps {
 }
 
 export interface RunEnrichJobOptions {
-  trigger?: "manual" | "scheduled";
+  trigger?: JobRunTrigger;
+  /** Issue #4767 — the run kind (original / re-run / resume / replay). */
+  kind?: JobRunKind;
   /** The run id to record under (the pipeline engine's run id,
    *  when dispatched through the plane — one run, one id). */
   runId?: string;
@@ -1141,7 +1151,8 @@ export async function runEnrichJob(
   const startedMs = opts.nowMs ?? Date.now();
   const startedAt = new Date(startedMs).toISOString();
   const runId = opts.runId ?? `enrich-run-${crypto.randomUUID()}`;
-  const trigger = opts.trigger ?? "manual";
+  const trigger = normalizeJobRunTrigger(opts.trigger);
+  const kind = normalizeJobRunKind(opts.kind);
   const elements = validateEnrichElements(opts.elements ?? def.elements);
   const enrichFrom = opts.enrichFrom ?? def.enrichFrom;
 
@@ -1179,6 +1190,7 @@ export async function runEnrichJob(
       run: {
         runId,
         trigger,
+        kind,
         startedAt,
         finishedAt,
         status: partial.status,

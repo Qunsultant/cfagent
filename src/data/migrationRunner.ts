@@ -1234,6 +1234,32 @@ export const MIGRATION_0070_OTEL_CONFIG_OVERRIDES: DataMigration = {
   sql: d1MigrationSql(70),
 };
 
+/**
+ * Issue #4767 — the run kind + origin run id on the pipeline
+ * instance. Additive columns only; existing rows read back as
+ * NULL (kind unrecorded, origin unlinked — the read normalizer
+ * renders them as a first dispatch with no origin).
+ * Renumbered 0070 → 0071 at ship time: main already owns 0070
+ * (#5086 OTel config overrides).
+ */
+export const MIGRATION_0071_JOB_PIPELINE_RUN_KIND: DataMigration = {
+  version: 71,
+  name: "0071_job_pipeline_run_kind",
+  sql: d1MigrationSql(71),
+};
+
+/**
+ * Issue #4767 — the run kind + origin run id on the run record.
+ * Additive columns only; existing rows read back as NULL (the
+ * read normalizer renders them as kind "original" with no
+ * origin — a first dispatch, never an invented re-run).
+ * Renumbered 0071 → 0072 at ship time (see 0071 above).
+ */
+export const MIGRATION_0072_JOB_RUN_RECORDS_RUN_KIND: DataMigration = {
+  version: 72,
+  name: "0072_job_run_records_run_kind",
+  sql: d1MigrationSql(72),
+};
 export const MIGRATION_0058_PRODUCT_VERSIONS: DataMigration = {
   version: 58,
   name: "0058_product_versions",
@@ -1470,6 +1496,8 @@ export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANC
   MIGRATION_0068_USER_PROFILE_EMAIL,
   MIGRATION_0069_REFERRAL_EXPIRY,
   MIGRATION_0070_OTEL_CONFIG_OVERRIDES,
+  MIGRATION_0071_JOB_PIPELINE_RUN_KIND,
+  MIGRATION_0072_JOB_RUN_RECORDS_RUN_KIND,
 ];
 
 function splitStatements(sqlText: string): string[] {

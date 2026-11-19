@@ -52,11 +52,13 @@ import type { DataProviderId } from "../trading";
 import type {
   FeedDatasetRunStatus,
   FeedDatasetRunTrigger,
+  FeedDatasetRunKind,
   FeedDatasetUniverse,
 } from "./feedDatasetPorts";
 
 export type GeneratedDatasetRunStatus = FeedDatasetRunStatus;
 export type GeneratedDatasetRunTrigger = FeedDatasetRunTrigger;
+export type GeneratedDatasetRunKind = FeedDatasetRunKind;
 
 /** DO-SQLite / D1 table name for the generated-dataset store. */
 export const GENERATED_DATASETS_TABLE = "job_generated_datasets";
@@ -65,6 +67,8 @@ export const GENERATED_DATASETS_TABLE = "job_generated_datasets";
 export interface GeneratedDatasetRunRecord {
   runId: string;
   trigger: GeneratedDatasetRunTrigger;
+  /** Issue #4767 — the run kind of this leg run (original / re-run / resume / replay), the pipeline run's kind. Optional so artifacts stored before #4767 still parse. */
+  kind?: GeneratedDatasetRunKind;
   startedAt: string;
   finishedAt: string;
   status: GeneratedDatasetRunStatus;

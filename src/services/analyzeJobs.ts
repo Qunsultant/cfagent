@@ -46,6 +46,14 @@ import {
   type AnalyzedDatasetStore,
   type AnalyzedRuleGap,
 } from "../data/analyzedDatasetPorts";
+import type {
+  JobRunKind,
+  JobRunTrigger,
+} from "../data/jobRunRecordPorts";
+import {
+  normalizeJobRunKind,
+  normalizeJobRunTrigger,
+} from "../data/jobRunRecordPorts";
 import { buildEnrichJobRegistry } from "./enrichJobs";
 import { createStructuredLogger } from "../observability/structuredLogger";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
@@ -620,7 +628,9 @@ export interface AnalyzeJobDeps {
 }
 
 export interface RunAnalyzeJobOptions {
-  trigger?: "manual" | "scheduled";
+  trigger?: JobRunTrigger;
+  /** Issue #4767 — the run kind (original / re-run / resume / replay). */
+  kind?: JobRunKind;
   /** The run id to record under (the pipeline engine's run id,
    *  when dispatched through the plane — one run, one id). */
   runId?: string;
@@ -687,7 +697,8 @@ export async function runAnalyzeJob(
   const startedMs = opts.nowMs ?? Date.now();
   const startedAt = new Date(startedMs).toISOString();
   const runId = opts.runId ?? `analyze-run-${crypto.randomUUID()}`;
-  const trigger = opts.trigger ?? "manual";
+  const trigger = normalizeJobRunTrigger(opts.trigger);
+  const kind = normalizeJobRunKind(opts.kind);
   const ruleSets = validateAnalyzeRuleSets(opts.ruleSets ?? def.ruleSets);
   const thresholds = resolveAnalyzeThresholds(opts.thresholds);
 
@@ -728,6 +739,7 @@ export async function runAnalyzeJob(
       run: {
         runId,
         trigger,
+        kind,
         startedAt,
         finishedAt,
         status: partial.status,

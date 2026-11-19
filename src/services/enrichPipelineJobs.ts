@@ -361,7 +361,8 @@ export function registerEnrichStep(
       { datasetStore: deps.datasetStore, enrichedStore: deps.enrichedStore },
       def.id,
       {
-        trigger: "manual",
+        trigger: ctx.trigger,
+      kind: ctx.runKind,
         runId: ctx.runId,
         ...(stringParams(ctx.params.elements)
           ? { elements: stringParams(ctx.params.elements) }

@@ -310,7 +310,8 @@ export function registerAnalyzeStep(
       { enrichedStore: deps.enrichedStore, analyzedStore: deps.analyzedStore },
       def.id,
       {
-        trigger: "manual",
+        trigger: ctx.trigger,
+      kind: ctx.runKind,
         runId: ctx.runId,
         ...(stringParams(ctx.params.ruleSets)
           ? { ruleSets: stringParams(ctx.params.ruleSets) }

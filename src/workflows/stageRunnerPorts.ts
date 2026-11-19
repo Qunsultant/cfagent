@@ -35,6 +35,10 @@ import type { StageName } from "../messaging/messagingPorts";
 import type { PipelinePolicy, RetryPolicy } from "../services/pipelinePolicy";
 import type { StageStatus } from "../services/stageChain";
 import type { PipelineStage } from "../types";
+import type {
+  JobRunKind,
+  JobRunTrigger,
+} from "../data/jobRunRecordPorts";
 import {
   DEFAULT_MAX_PARALLEL_SHARDS,
   DEFAULT_SHARD_TIMEOUT_MS,
@@ -271,6 +275,19 @@ export interface StageUnitCheckpoint {
 export interface StageRunnerCheckpoint {
   runId: string;
   units: StageUnitCheckpoint[];
+  /**
+   * Issue #4767 (Q6) — the dispatch trigger and run kind of the
+   * run this checkpoint belongs to, stamped by the engine at plan
+   * time. Optional so checkpoints stored before #4767 still parse;
+   * the engine restamps them from the run on read. The trigger is
+   * the resume guard's consumer: a resume refuses a checkpoint
+   * whose trigger does not match the run's trigger. The kind is
+   * the stage read's consumer: getJobStages reports it as
+   * checkpointKind, so the stage list names the kind of execution
+   * its stages belong to.
+   */
+  trigger?: JobRunTrigger;
+  kind?: JobRunKind;
 }
 
 /**

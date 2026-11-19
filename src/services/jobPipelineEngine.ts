@@ -82,12 +82,17 @@ import type {
   JobScheduleConfig,
 } from "../data/jobPipelinePorts";
 import type {
+  JobRunKind,
   JobRunRecord,
   JobRunRecordStore,
   JobRunTrigger,
 } from "../data/jobRunRecordPorts";
+import {
+  normalizeJobRunKind,
+  normalizeJobRunTrigger,
+} from "../data/jobRunRecordPorts";
 import { createJobPipelineStageCheckpointStore } from "../data/jobPipelineStageCheckpoint";
-import { buildJobRunRecord } from "./jobRunRecords";
+import { buildJobRunRecord, isMissingIdLiteral } from "./jobRunRecords";
 import { recordLedgerRun } from "./unifiedLedger";
 import {
   JobPipelineError,
@@ -204,6 +209,45 @@ export function jobRunRecorderFromStore(store: JobRunRecordStore): JobRunRecorde
 }
 
 /**
+ * Issue #4767 — the Run-now trigger (Q4 ruling 2026-11-18): a
+ * Run-now records "triggered" UNCONDITIONALLY — a re-run is a
+ * triggered dispatch, full stop. The build first shipped a
+ * schedule-enabled check (an unscheduled job's Run-now recorded
+ * "manual"); the user ruled that wrong and the check is removed.
+ * The doors (runPipelineJob / runPipelineChain) and retryJob
+ * share this one rule — a dispatcher that knows the trigger
+ * passes it explicitly; a Run-now dispatcher that does not know
+ * it resolves it here. Schedule firings themselves never reach
+ * this helper: they derive "scheduled" via
+ * resolveScheduleRunTrigger (#4767 Q1). The `definition`
+ * parameter is kept (callers already pass it, and a future rule
+ * may read the definition again) — it is not consulted today.
+ */
+export function resolveRunNowTrigger(_definition: JobDefinition): JobRunTrigger {
+  return "triggered";
+}
+
+/**
+ * Issue #4767 — the origin-run-id boundary rule (the builder's
+ * #3650 honesty gate, applied at the dispatch boundary so a bad
+ * origin never reaches the instance stamp): null/undefined means
+ * no origin; a non-empty string that is not a missing-id literal
+ * passes through; anything else throws.
+ */
+export function normalizeOriginRunId(value: unknown): string | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "string" || !value.trim()) {
+    throw new Error("Job run originRunId must be a non-empty string or null.");
+  }
+  if (isMissingIdLiteral(value)) {
+    throw new Error(
+      'Job run originRunId must be a real id or null: a literal "undefined"/"null" id is a missing id (#3650).',
+    );
+  }
+  return value;
+}
+
+/**
  * The journal seam: on the workflow substrate each step
  * invocation is wrapped in step.do (journaled, replay-safe); in
  * direct execution the journal is the identity. Checkpointing to
@@ -301,6 +345,14 @@ export interface JobRunSettledInfo {
   trigger: JobRunTrigger;
   state: "completed" | "failed" | "cancelled";
   error?: string;
+  /**
+   * Issue #4767 — the settled run's kind and origin link, stamped
+   * by recordTerminal. Optional so observers constructed without
+   * them (tests, older callers) still compile; the engine always
+   * stamps both.
+   */
+  kind?: JobRunKind;
+  originRunId?: string | null;
 }
 
 /**
@@ -355,6 +407,15 @@ export interface JobStagesRead {
   stages: JobStageView[];
   /** The run id the checkpoint belongs to; null when no checkpoint is recorded. */
   checkpointRunId: string | null;
+  /**
+   * Issue #4767 — the kind of execution the checkpoint's stages
+   * belong to (original / re-run / resume / replay), read from
+   * the checkpoint when it carries one, else the instance's
+   * recorded kind; null when neither names one. The checkpoint
+   * kind's read consumer (the Q6 trigger's consumer is the resume
+   * guard in executeRun).
+   */
+  checkpointKind: JobRunKind | null;
 }
 
 export interface JobStatusView {
@@ -387,6 +448,10 @@ interface RunContext {
   definition: JobDefinition;
   jobId: string;
   runId: string;
+  /** The run's dispatch trigger (#4767): threaded into the step contexts so steps record it. */
+  trigger: JobRunTrigger;
+  /** The run's kind (#4767): threaded into the step contexts alongside the trigger. */
+  kind: JobRunKind;
   rootConfig: JobDefinition["config"];
   scopePath: string;
   resuming: boolean;
@@ -709,6 +774,10 @@ export async function readStagesFromPipelineStores(
   return {
     stages: projectStageViews(definition, instance),
     checkpointRunId: instance?.stageCheckpoint?.runId ?? null,
+    // Issue #4767 — as in getJobStages: the checkpoint's kind
+    // when it carries one, else the instance's recorded kind.
+    checkpointKind:
+      instance?.stageCheckpoint?.kind ?? instance?.runKind ?? null,
   };
 }
 
@@ -796,7 +865,7 @@ export class JobPipelineControl {
    */
   async runJob(
     jobId: string,
-    opts?: { trigger?: JobRunTrigger; scopePath?: string; scheduleId?: string; asyncJobId?: string; workflowInstanceId?: string },
+    opts?: { trigger?: JobRunTrigger; kind?: JobRunKind; originRunId?: string | null; scopePath?: string; scheduleId?: string; asyncJobId?: string; workflowInstanceId?: string },
   ): Promise<JobDispatchResult> {
     const definition = await this.requireDefinition(jobId);
     const instance = await this.requireInstance(jobId);
@@ -815,7 +884,12 @@ export class JobPipelineControl {
     const runId = this.newRunId();
     const completion = this.executeRun(definition, {
       runId,
-      trigger: opts?.trigger ?? "manual",
+      trigger: normalizeJobRunTrigger(opts?.trigger),
+      // Issue #4767 — a fresh dispatch is an original unless the
+      // caller is retryJob, which passes kind "re-run" + the origin
+      // run id it retried. The kind is normalized, never trusted.
+      kind: normalizeJobRunKind(opts?.kind),
+      originRunId: normalizeOriginRunId(opts?.originRunId),
       scopePath: opts?.scopePath ?? "",
       scheduleId: opts?.scheduleId ?? null,
       asyncJobId: opts?.asyncJobId ?? null,
@@ -873,7 +947,11 @@ export class JobPipelineControl {
     const runId = instance.currentRunId;
     const completion = this.executeRun(definition, {
       runId,
-      trigger: instance.runTrigger ?? "manual",
+      trigger: normalizeJobRunTrigger(instance.runTrigger),
+      // Issue #4767 — a resume is the SAME run continued: kind
+      // "resume", and the origin is the run itself.
+      kind: "resume",
+      originRunId: runId,
       scopePath: instance.checkpoint.scopePath,
       // A resumed run keeps the schedule id that dispatched it.
       scheduleId: instance.runScheduleId ?? null,
@@ -940,7 +1018,11 @@ export class JobPipelineControl {
     const runId = instance.currentRunId;
     const completion = this.executeRun(definition, {
       runId,
-      trigger: instance.runTrigger ?? "manual",
+      trigger: normalizeJobRunTrigger(instance.runTrigger),
+      // Issue #4767 — a replay is the SAME run re-entered: kind
+      // "replay", and the origin is the run itself.
+      kind: "replay",
+      originRunId: runId,
       scopePath: instance.checkpoint?.scopePath ?? opts.scopePath ?? "",
       scheduleId: instance.runScheduleId ?? null,
       asyncJobId: instance.runAsyncJobId ?? null,
@@ -1009,6 +1091,7 @@ export class JobPipelineControl {
 
   /** Retry: a NEW run from the start (fresh run id, checkpoints cleared), from a terminal or paused state. */
   async retryJob(jobId: string): Promise<JobDispatchResult> {
+    const definition = await this.requireDefinition(jobId);
     const instance = await this.requireInstance(jobId);
     if (instance.state === "running" || instance.state === "queued") {
       throw new JobPipelineError(
@@ -1016,6 +1099,10 @@ export class JobPipelineControl {
         `Job "${jobId}" is ${instance.state}; a live run cannot be retried — cancel it first.`,
       );
     }
+    // Issue #4767 — the origin link: capture the run id BEFORE
+    // the clear below wipes it. A retry is a NEW run (fresh run
+    // id) that records which run it retried.
+    const originRunId = instance.currentRunId;
     const cleared: JobInstanceRecord = {
       ...instance,
       state: "idle",
@@ -1026,13 +1113,19 @@ export class JobPipelineControl {
       currentRunId: null,
       runStartedAt: null,
       runTrigger: null,
+      runKind: null,
+      runOriginId: null,
       runScheduleId: null,
       runWorkflowInstanceId: null,
       lastError: null,
       updatedAt: this.iso(),
     };
     await this.deps.stores.instances.saveInstance(cleared);
-    return this.runJob(jobId, { trigger: "manual" });
+    return this.runJob(jobId, {
+      trigger: resolveRunNowTrigger(definition),
+      kind: "re-run",
+      originRunId,
+    });
   }
 
   /**
@@ -1093,6 +1186,16 @@ export class JobPipelineControl {
   }
 
   /**
+   * Issue #4767 — the definition read the Run-now doors need: a
+   * door resolves the Run-now trigger from the job's root
+   * schedule (resolveRunNowTrigger) without re-implementing the
+   * definition lookup. Thin wrapper over requireDefinition.
+   */
+  async getDefinition(jobId: string): Promise<JobDefinition> {
+    return this.requireDefinition(jobId);
+  }
+
+  /**
    * Issue #4359 — the stage views alone: the read the Workflow Runs
    * projection needs (definition + live instance), without the run
    * history getJob also loads. Same projection as getJob, one rule.
@@ -1103,6 +1206,11 @@ export class JobPipelineControl {
     return {
       stages: this.stageViews(definition, instance),
       checkpointRunId: instance?.stageCheckpoint?.runId ?? null,
+      // Issue #4767 — the checkpoint's kind when it carries one,
+      // else the instance's recorded kind (a legacy checkpoint
+      // predates the field); null when neither names one.
+      checkpointKind:
+        instance?.stageCheckpoint?.kind ?? instance?.runKind ?? null,
     };
   }
 
@@ -1966,6 +2074,10 @@ export class JobPipelineControl {
     await this.setInstance(running);
     const ctx = await this.buildContext(definition, {
       runId,
+      // Issue #4767 — a stage action is not a new run: it
+      // executes under the current run's trigger (Q5).
+      trigger: normalizeJobRunTrigger(running.runTrigger),
+      kind: normalizeJobRunKind(running.runKind),
       scopePath: "",
       resuming: true,
       instance: running,
@@ -2015,6 +2127,8 @@ export class JobPipelineControl {
       currentRunId: null,
       runStartedAt: null,
       runTrigger: null,
+      runKind: null,
+      runOriginId: null,
       runScheduleId: null,
       runAsyncJobId: null,
       runWorkflowInstanceId: null,
@@ -2064,7 +2178,13 @@ export class JobPipelineControl {
       finished: this.iso(),
       outcome:
         outcome === "completed" ? "success" : outcome === "failed" ? "failure" : "skipped",
-      triggeredBy: instance.runTrigger ?? "manual",
+      triggeredBy: normalizeJobRunTrigger(instance.runTrigger),
+      // Issue #4767 — the terminal record stamps the run's kind
+      // and origin link from the instance (a first dispatch reads
+      // "original" with no origin; a retry reads "re-run" + the
+      // run it retried).
+      kind: normalizeJobRunKind(instance.runKind),
+      originRunId: instance.runOriginId ?? null,
       // Issue #3310 — the terminal record joins to the dispatching
       // schedule and to the workflow instance (the pipeline run IS
       // the workflow instance on the direct-execution firing path).
@@ -2090,9 +2210,13 @@ export class JobPipelineControl {
         await observer({
           jobId: instance.jobId,
           runId: instance.currentRunId,
-          trigger: instance.runTrigger ?? "manual",
+          trigger: normalizeJobRunTrigger(instance.runTrigger),
           state: outcome,
           ...(error ? { error } : {}),
+          // Issue #4767 — the settle observer names the settled
+          // run's kind and origin link alongside its trigger.
+          kind: normalizeJobRunKind(instance.runKind),
+          originRunId: instance.runOriginId ?? null,
         });
       } catch {
         // Best-effort by contract (see JobPipelineDeps): the
@@ -2106,6 +2230,8 @@ export class JobPipelineControl {
     definition: JobDefinition,
     opts: {
       runId: string;
+      trigger: JobRunTrigger;
+      kind: JobRunKind;
       scopePath: string;
       resuming: boolean;
       instance: JobInstanceRecord;
@@ -2116,14 +2242,28 @@ export class JobPipelineControl {
       this.deps.stores.instances,
       definition.jobId,
     );
-    const ledger: StageRunnerCheckpoint = opts.resuming
-      ? ((await checkpoints.read(opts.runId)) ?? { runId: opts.runId, units: [] })
-      : { runId: opts.runId, units: [] };
+    // Issue #4767 (Q6) — the ledger carries the run's trigger and
+    // kind. A fresh run stamps both; a resumed run restamps the
+    // kind to the current execution's kind and fills a legacy
+    // trigger from the run (the guard in executeRun already
+    // proved a present trigger matches the run's).
+    const stored = opts.resuming
+      ? await checkpoints.read(opts.runId)
+      : null;
+    const ledger: StageRunnerCheckpoint = stored
+      ? {
+          ...stored,
+          trigger: stored.trigger ?? opts.trigger,
+          kind: opts.kind,
+        }
+      : { runId: opts.runId, trigger: opts.trigger, kind: opts.kind, units: [] };
     return {
       deps: this.deps,
       definition,
       jobId: definition.jobId,
       runId: opts.runId,
+      trigger: opts.trigger,
+      kind: opts.kind,
       rootConfig: definition.config,
       scopePath: opts.scopePath,
       resuming: opts.resuming,
@@ -2145,6 +2285,8 @@ export class JobPipelineControl {
     opts: {
       runId: string;
       trigger: JobRunTrigger;
+      kind: JobRunKind;
+      originRunId: string | null;
       scopePath: string;
       scheduleId: string | null;
       asyncJobId: string | null;
@@ -2156,6 +2298,25 @@ export class JobPipelineControl {
     const jobId = definition.jobId;
     const startedAt = this.iso();
     let instance = await this.requireInstance(jobId);
+    // Issue #4767 (Q6) — the resume guard: a resuming run refuses
+    // a stage checkpoint stamped under a different trigger than
+    // the run's own. A checkpoint belongs to exactly one
+    // execution's trigger lineage; resuming under the wrong
+    // trigger would silently restamp it. A checkpoint with no
+    // trigger (stored before #4767) is legacy, not a mismatch —
+    // it is restamped from the run below. Checked BEFORE the
+    // instance stamp, so a refusal leaves the instance untouched.
+    if (opts.resuming && instance.stageCheckpoint?.trigger !== undefined) {
+      const storedTrigger = normalizeJobRunTrigger(
+        instance.stageCheckpoint.trigger,
+      );
+      if (storedTrigger !== opts.trigger) {
+        throw new JobPipelineError(
+          "job_checkpoint_trigger_mismatch",
+          `Job "${jobId}" run ${opts.runId} cannot resume: its stage checkpoint was stamped under trigger "${storedTrigger}" but the run's trigger is "${opts.trigger}". Refusing rather than resuming under the wrong trigger.`,
+        );
+      }
+    }
     instance = {
       ...instance,
       state: "queued",
@@ -2163,6 +2324,11 @@ export class JobPipelineControl {
       currentRunId: opts.runId,
       runStartedAt: opts.resuming ? (instance.runStartedAt ?? startedAt) : startedAt,
       runTrigger: opts.trigger,
+      // Issue #4767 — the run kind and origin link, stamped on
+      // the instance so the terminal record (and any settle path)
+      // stamps the run they settle.
+      runKind: opts.kind,
+      runOriginId: opts.originRunId,
       runScheduleId: opts.scheduleId,
       // Issue #4357 — the join key: the async job that dispatched
       // this run, persisted on the instance so the terminal record
@@ -2174,9 +2340,21 @@ export class JobPipelineControl {
       // resumes. Null for a non-workflow dispatch; a resume
       // clears it (a new executor).
       runWorkflowInstanceId: opts.workflowInstanceId,
+      // Issue #4767 (Q6) — the checkpoint carries the run's
+      // trigger and kind. A fresh run stamps both; a resumed run
+      // restamps the kind to the current execution's kind (a
+      // resume IS a resume now) and fills a legacy trigger from
+      // the run — the trigger itself never changes across a
+      // resume (the guard above proved it).
       stageCheckpoint: opts.resuming
         ? instance.stageCheckpoint
-        : { runId: opts.runId, units: [] },
+          ? {
+              ...instance.stageCheckpoint,
+              trigger: instance.stageCheckpoint.trigger ?? opts.trigger,
+              kind: opts.kind,
+            }
+          : { runId: opts.runId, trigger: opts.trigger, kind: opts.kind, units: [] }
+        : { runId: opts.runId, trigger: opts.trigger, kind: opts.kind, units: [] },
       stageDesired: opts.resuming ? instance.stageDesired : null,
       lastError: null,
     };
@@ -2188,6 +2366,8 @@ export class JobPipelineControl {
 
     const ctx = await this.buildContext(definition, {
       runId: opts.runId,
+      trigger: opts.trigger,
+      kind: opts.kind,
       scopePath: opts.scopePath,
       resuming: opts.resuming,
       instance,
@@ -2395,8 +2575,13 @@ export class JobPipelineControl {
   }
 
   private async persistLedger(ctx: RunContext): Promise<void> {
+    // Issue #4767 (Q6) — the checkpoint write carries the run's
+    // trigger and kind with the units; the store persists the
+    // whole checkpoint object, so no adapter change is needed.
     await ctx.checkpoints.write({
       runId: ctx.runId,
+      trigger: ctx.trigger,
+      kind: ctx.kind,
       units: ctx.ledger.units.map((u) => ({ ...u })),
     });
   }
@@ -3287,6 +3472,8 @@ export class JobPipelineControl {
         params: stepConfig.params ?? {},
         input: stepInput,
         now: this.iso(),
+        trigger: ctx.trigger,
+        runKind: ctx.kind,
       };
       let result;
       try {

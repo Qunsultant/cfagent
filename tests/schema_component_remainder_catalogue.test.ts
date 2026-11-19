@@ -102,6 +102,8 @@ const REMAINDER_STATEMENT_SHA256 = {
   "schema.do.job_pipeline_instances.alter_table_add_column_run_async_job_id": "2f53b06113b1799ba1d1c6c6521c03ceefeda12c589f5912b2c54f012137f940",
   "schema.do.job_pipeline_instances.alter_table_add_column_run_workflow_instance_id": "d09afaa1e99e767617a2ca1822f3e7840c57a64926178916e811e5d084d2db21",
   "schema.do.job_pipeline_instances.alter_table_add_column_run_schedule_id": "169fd10000cea187259ba2897726d232e9d8712ac213adb663256eb1ded38f9f",
+  "schema.do.job_pipeline_instances.alter_table_add_column_run_kind": "02481f5e601ffdfda7b0a42d2f5a2d7da9c64bf62ff4f52b18478773aa969023",
+  "schema.do.job_pipeline_instances.alter_table_add_column_run_origin_id": "65af59ad2c4b6548849df5e692af46d2d9e89a32bb186c0ce86500a0e710f7a7",
   "schema.do.job_run_records.alter_table_add_column_async_job_id": "971fcbef16599175e193a2e080bc0bc0dfcf504b610ed01b59214ea692bc4204",
   "schema.do.job_run_records.alter_table_add_column_broker_id": "00782ec57efc29f19e0121600ab1328eda5f4b18d73361cbbe448231ddb5fada",
   "schema.do.job_run_records.alter_table_add_column_data_provider_id": "c01a18e42c963b3ae7a7b0dd203ee1f1395f4cee2e3f93249925b3c789f7139d",
@@ -110,6 +112,8 @@ const REMAINDER_STATEMENT_SHA256 = {
   "schema.do.job_run_records.alter_table_add_column_schedule_id": "2dcd58a376779545fcd1157f16c7508df1f938fc33de5463dc2c489f082dffaa",
   "schema.do.job_run_records.alter_table_add_column_trigger_text": "d4929f6197dda08fedb5a8bf84da0e7c5547e70e7b0db21a023db793536bbfdd",
   "schema.do.job_run_records.alter_table_add_column_workflow_id": "b80ea3a44cdb0d30b1f7da42b65543bbe6b28c27398a24b1a477c147605fc3ae",
+  "schema.do.job_run_records.alter_table_add_column_kind": "34c0ed18d0e392479b78e764eee8ca3469016ce6f7a16eb97b88c9cef79ea93a",
+  "schema.do.job_run_records.alter_table_add_column_origin_run_id": "a964ba093b55c66e2ae42db8ca854060dfde87d1f6885f83a15db01cce2b145d",
   "schema.do.mas_async_jobs.alter_table_add_column_chain_id": "6ce7bfa86fd12746c47e09735e8ca618df98cef7542c8c9612c6bc490b1afdc1",
   "schema.do.mas_async_jobs.alter_table_add_column_tenant_id": "f4ce90ba9f7582002a6ca54d40a3dccbd340e77bb829294e09e770cb8175487d",
   "schema.do.mas_async_jobs.alter_table_add_column_attempts_json": "70d5184ee37c16118cc5e47be2cdf6b602c130b1ff0301545ac210765251c580",
@@ -445,11 +449,11 @@ const P3_DELEGATED_FILES = [
 ];
 
 describe("remainder catalogue — P3 long tail + ALTER reconciliation (#4282 P3)", () => {
-  it("catalogues all 57 remainder statements: 8 table + 2 index + 45 alter + 1 drop + 1 seed-form", () => {
+  it("catalogues all 61 remainder statements: 8 table + 2 index + 49 alter + 1 drop + 1 seed-form", () => {
     const catalogue = buildRemainderCatalogue();
-    expect(REMAINDER_CATALOGUE_ENTRIES.length).toBe(57);
-    expect(catalogue.size()).toBe(57);
-    expect(catalogue.byKind("schema").length).toBe(56);
+    expect(REMAINDER_CATALOGUE_ENTRIES.length).toBe(61);
+    expect(catalogue.size()).toBe(61);
+    expect(catalogue.byKind("schema").length).toBe(60);
     expect(catalogue.byKind("seed").length).toBe(1);
     const verbs = new Map<string, number>();
     const classify = (statement: string): string => {
@@ -474,18 +478,18 @@ describe("remainder catalogue — P3 long tail + ALTER reconciliation (#4282 P3)
     }
     expect(verbs.get("CREATE TABLE")).toBe(8);
     expect(verbs.get("CREATE INDEX")).toBe(2);
-    expect(verbs.get("ALTER TABLE")).toBe(45);
+    expect(verbs.get("ALTER TABLE")).toBe(49);
     expect(verbs.get("DROP INDEX")).toBe(1);
     expect(verbs.get("INSERT OR REPLACE")).toBe(1);
     expect(verbs.get("OTHER")).toBeUndefined();
     // Every code is unique and every entry is reachable by its code.
     const codes = new Set(REMAINDER_CATALOGUE_ENTRIES.map((e) => e.code));
-    expect(codes.size).toBe(57);
+    expect(codes.size).toBe(61);
     for (const entry of REMAINDER_CATALOGUE_ENTRIES) {
       expect(catalogue.get(entry.code).statement).toBe(entry.statement);
     }
     // Planes: do 47, d1 1, orm 5, index 3, route 1.
-    expect(REMAINDER_CATALOGUE_ENTRIES.filter((e) => e.plane === "do").length).toBe(47);
+    expect(REMAINDER_CATALOGUE_ENTRIES.filter((e) => e.plane === "do").length).toBe(51);
     expect(REMAINDER_CATALOGUE_ENTRIES.filter((e) => e.plane === "d1").length).toBe(1);
     expect(REMAINDER_CATALOGUE_ENTRIES.filter((e) => e.plane === "orm").length).toBe(5);
     expect(REMAINDER_CATALOGUE_ENTRIES.filter((e) => e.plane === "index").length).toBe(3);
@@ -574,6 +578,12 @@ describe("remainder catalogue — P3 long tail + ALTER reconciliation (#4282 P3)
       "schema.do.job_pipeline_instances.alter_table_add_column_run_schedule_id",
       "schema.do.job_pipeline_instances.alter_table_add_column_run_async_job_id",
       "schema.do.job_pipeline_instances.alter_table_add_column_run_workflow_instance_id",
+      // Issue #4767 — the run-kind columns exist in both catalogues
+      // (same ALTER text, D1 migration + DO probe).
+      "schema.do.job_pipeline_instances.alter_table_add_column_run_kind",
+      "schema.do.job_pipeline_instances.alter_table_add_column_run_origin_id",
+      "schema.do.job_run_records.alter_table_add_column_kind",
+      "schema.do.job_run_records.alter_table_add_column_origin_run_id",
     ]);
     for (const entry of REMAINDER_CATALOGUE_ENTRIES) {
       if (crossPlane.has(entry.code)) continue;
@@ -582,7 +592,7 @@ describe("remainder catalogue — P3 long tail + ALTER reconciliation (#4282 P3)
   });
 
   it("each entry's statement is byte-identical to the base (sha256 pin)", () => {
-    expect(Object.keys(REMAINDER_STATEMENT_SHA256).length).toBe(57);
+    expect(Object.keys(REMAINDER_STATEMENT_SHA256).length).toBe(61);
     for (const entry of REMAINDER_CATALOGUE_ENTRIES) {
       const digest = createHash("sha256")
         .update(entry.statement, "utf8")

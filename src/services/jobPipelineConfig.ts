@@ -68,6 +68,9 @@ export type JobPipelineErrorCode =
   // the code onto its own error).
   | "stage_request_missing"
   | "stage_request_unrecognized"
+  // Issue #4767 (Q6): the resume guard refuses a stage checkpoint
+  // stamped under a different trigger than the run's trigger.
+  | "job_checkpoint_trigger_mismatch"
   | "stage_port_unavailable";
 
 export class JobPipelineError extends Error {

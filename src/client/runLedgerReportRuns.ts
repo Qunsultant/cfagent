@@ -10,7 +10,7 @@
  *   - A report run the ledger already carries (same runId as a row's
  *     `asyncJobId`/`workflowId`/`jobId`) is the same run: the ledger row wins.
  *   - A report run with no ledger twin becomes one ledger row stamped
- *     `system: "report-runs"` and `kind: "reports"`, carrying its
+ *     `system: "report-runs"` and `ledgerKind: "reports"`, carrying its
  *     `DocumentRow` so the panel renders the same artifact cells and the same
  *     details dialog.
  *
@@ -24,7 +24,7 @@ import { toDocumentRows, type DocumentRow } from "./docsAndReports";
 export const REPORT_RUNS_LEDGER_SYSTEM = "report-runs";
 
 export interface ReportLedgerEntry {
-  row: JobRunRecord & { kind?: RunLedgerKind };
+  row: JobRunRecord & { ledgerKind?: RunLedgerKind };
   docs: DocumentRow;
 }
 
@@ -68,7 +68,7 @@ export function attachReportRuns(
         workflowId: null,
         descriptor: docs.title,
         detail: failed ? (docs.pdfError ?? docs.xlsxError ?? docs.csvError ?? "failed") : undefined,
-        kind: "reports" as RunLedgerKind,
+        ledgerKind: "reports" as RunLedgerKind,
       },
     });
   }

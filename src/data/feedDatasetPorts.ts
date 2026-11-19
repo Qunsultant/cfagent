@@ -44,13 +44,23 @@ import type {
   BrokerOptionExpireDate,
 } from "../types";
 
+import type {
+  JobRunKind,
+  JobRunTrigger,
+} from "./jobRunRecordPorts";
+
 export type FeedDatasetRunStatus = "completed" | "partial" | "failed";
-export type FeedDatasetRunTrigger = "manual" | "scheduled";
+/** Issue #4767 — the dataset run trigger is the pipeline's five dispatch modes, not two. */
+export type FeedDatasetRunTrigger = JobRunTrigger;
+/** Issue #4767 — the dataset run kind is the pipeline's run kind, not a second vocabulary. */
+export type FeedDatasetRunKind = JobRunKind;
 
 /** One feed run's outcome — the record the status surface renders. */
 export interface FeedDatasetRunRecord {
   runId: string;
   trigger: FeedDatasetRunTrigger;
+  /** Issue #4767 — the run kind of this leg run (original / re-run / resume / replay), the pipeline run's kind. Optional so artifacts stored before #4767 still parse. */
+  kind?: JobRunKind;
   startedAt: string;
   finishedAt: string;
   status: FeedDatasetRunStatus;

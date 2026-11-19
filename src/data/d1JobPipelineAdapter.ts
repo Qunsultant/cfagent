@@ -24,6 +24,7 @@ import {
   MIGRATION_0061_JOB_PIPELINE_RUN_SCHEDULE_ID,
   MIGRATION_0065_JOB_PIPELINE_RUN_ASYNC_JOB_ID,
   MIGRATION_0067_JOB_PIPELINE_RUN_WORKFLOW_INSTANCE_ID,
+  MIGRATION_0071_JOB_PIPELINE_RUN_KIND,
   type MigrationDb,
 } from "./migrationRunner";
 import {
@@ -47,13 +48,14 @@ export function createD1JobPipelineDb(d1: D1Database): JobPipelineDb {
   });
 }
 
-/** Idempotent schema-ensure: applies migrations 0046 + 0061 + 0065 + 0067 if unapplied. */
+/** Idempotent schema-ensure: applies migrations 0046 + 0061 + 0065 + 0067 + 0071 if unapplied. */
 export async function ensureJobPipelineSchema(db: JobPipelineDb): Promise<number[]> {
   return applyMigrations(db as unknown as MigrationDb, [
     MIGRATION_0046_JOB_PIPELINE,
     MIGRATION_0061_JOB_PIPELINE_RUN_SCHEDULE_ID,
     MIGRATION_0065_JOB_PIPELINE_RUN_ASYNC_JOB_ID,
     MIGRATION_0067_JOB_PIPELINE_RUN_WORKFLOW_INSTANCE_ID,
+    MIGRATION_0071_JOB_PIPELINE_RUN_KIND,
   ]);
 }
 
@@ -67,6 +69,8 @@ function instanceToRow(record: JobInstanceRecord): JobInstanceRow {
     currentRunId: record.currentRunId,
     runStartedAt: record.runStartedAt,
     runTrigger: record.runTrigger,
+    runKind: record.runKind,
+    runOriginId: record.runOriginId,
     runScheduleId: record.runScheduleId,
     runAsyncJobId: record.runAsyncJobId,
     runWorkflowInstanceId: record.runWorkflowInstanceId,
@@ -86,6 +90,8 @@ function rowToInstance(row: JobInstanceRow): JobInstanceRecord {
     currentRunId: row.currentRunId,
     runStartedAt: row.runStartedAt,
     runTrigger: row.runTrigger as JobInstanceRecord["runTrigger"],
+    runKind: row.runKind as JobInstanceRecord["runKind"],
+    runOriginId: row.runOriginId ?? null,
     runScheduleId: row.runScheduleId ?? null,
     runAsyncJobId: row.runAsyncJobId ?? null,
     runWorkflowInstanceId: row.runWorkflowInstanceId ?? null,

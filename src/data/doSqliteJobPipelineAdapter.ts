@@ -55,6 +55,8 @@ export const JOB_PIPELINE_INSTANCE_COLUMNS: Record<keyof JobInstanceRow & string
   currentRunId: "current_run_id",
   runStartedAt: "run_started_at",
   runTrigger: "run_trigger",
+  runKind: "run_kind",
+  runOriginId: "run_origin_id",
   runScheduleId: "run_schedule_id",
   runAsyncJobId: "run_async_job_id",
   runWorkflowInstanceId: "run_workflow_instance_id",
@@ -169,6 +171,8 @@ function instanceToRow(record: JobInstanceRecord): JobInstanceRow {
     currentRunId: record.currentRunId,
     runStartedAt: record.runStartedAt,
     runTrigger: record.runTrigger,
+    runKind: record.runKind,
+    runOriginId: record.runOriginId,
     runScheduleId: record.runScheduleId,
     runAsyncJobId: record.runAsyncJobId,
     runWorkflowInstanceId: record.runWorkflowInstanceId,
@@ -188,6 +192,8 @@ function rowToInstance(row: JobInstanceRow): JobInstanceRecord {
     currentRunId: row.currentRunId,
     runStartedAt: row.runStartedAt,
     runTrigger: row.runTrigger as JobInstanceRecord["runTrigger"],
+    runKind: row.runKind as JobInstanceRecord["runKind"],
+    runOriginId: row.runOriginId ?? null,
     runScheduleId: row.runScheduleId ?? null,
     runAsyncJobId: row.runAsyncJobId ?? null,
     runWorkflowInstanceId: row.runWorkflowInstanceId ?? null,
@@ -255,6 +261,14 @@ export class DoSqliteJobPipelineStores implements JobPipelineStores {
     // additive-column probe).
     if (!names.has("run_workflow_instance_id")) {
       this.sql.exec(remainderAlterSql("job_pipeline_instances", "run_workflow_instance_id"));
+    }
+    // Issue #4767 — `run_kind` + `run_origin_id`, the run kind
+    // and the origin run id (same additive-column probe).
+    if (!names.has("run_kind")) {
+      this.sql.exec(remainderAlterSql("job_pipeline_instances", "run_kind"));
+    }
+    if (!names.has("run_origin_id")) {
+      this.sql.exec(remainderAlterSql("job_pipeline_instances", "run_origin_id"));
     }
   }
 

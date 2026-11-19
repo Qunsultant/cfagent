@@ -256,6 +256,10 @@ describe("S0-P08 per-run records (B-T2-07, B-T3-08): job_run_records shape and v
       "scheduleId",
       "asyncJobId",
       "workflowId",
+      // Issue #4767 — the run kind + origin run id, stamped at
+      // write time alongside the §4 linkage.
+      "kind",
+      "originRunId",
       "error",
       "detail",
       "descriptor",

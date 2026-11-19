@@ -22,11 +22,14 @@ export interface RunKindCandidate {
   system?: string | null;
   jobId?: string | null;
   /**
-   * Issue #4262 (S2) — a kind stamped by a folded source that knows its own
-   * family (the workflow-runs read records one). It wins over the rule table:
-   * the store that owns the run is more specific than its namespace.
+   * Issue #4262 (S2) — a ledger family stamped by a folded source that
+   * knows its own family (the workflow-runs read records one). It wins
+   * over the rule table: the store that owns the run is more specific
+   * than its namespace. Named `ledgerKind`, not `kind`: `kind` on a run
+   * record is the #4767 dispatch lineage (original / re-run / resume /
+   * replay), a different dimension from the ledger family.
    */
-  kind?: RunLedgerKind | null;
+  ledgerKind?: RunLedgerKind | null;
 }
 
 function matches(rule: RunLedgerKindRule, run: RunKindCandidate): boolean {
@@ -46,7 +49,7 @@ export function classifyRunKind(
   run: RunKindCandidate,
   rules: readonly RunLedgerKindRule[] = RUN_LEDGER_KIND_RULES,
 ): RunLedgerKind {
-  if (run.kind) return run.kind;
+  if (run.ledgerKind) return run.ledgerKind;
   for (const rule of rules) {
     if (matches(rule, run)) return rule.kind;
   }

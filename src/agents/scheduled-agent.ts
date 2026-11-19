@@ -175,6 +175,9 @@ import type {
   JobDefinition,
 } from "../data/jobPipelinePorts";
 import type { JobStagesRead, JobStatusView } from "../services/jobPipelineEngine";
+import { resolveRunNowTrigger } from "../services/jobPipelineEngine";
+import type { JobRunTrigger } from "../data/jobRunRecordPorts";
+import { normalizeJobRunTrigger } from "../data/jobRunRecordPorts";
 import { buildJobStatusReport, resolveSubJob } from "../services/jobStageStatus";
 import type { JobStageEventRecord } from "../data/jobStageEventPorts";
 import { resolveWorkflowRunsStageReadLimit } from "../config/workflowRunsStageRead";
@@ -1088,12 +1091,22 @@ export class ScheduledAgent extends PortThink {
   /** Run one pipeline job now and settle it; returns the outcome view. */
   async runPipelineJob(
     jobId: string,
-    opts?: { userLogin?: string },
+    opts?: { userLogin?: string; trigger?: JobRunTrigger },
   ): Promise<{ jobId: string; runId: string; state: string; error?: string }> {
     const ctx = this.pipelineContext();
     const control = createScheduledAgentPipelineControl(ctx, opts?.userLogin);
     await ensureScheduledAgentPipelineJobs(ctx, control);
-    const dispatch = await control.runJob(jobId, { trigger: "manual" });
+    // Issue #4767 — a Run-now records the dispatch trigger: an
+    // explicit trigger from a caller that knows it (a copilot
+    // dispatch passes "copilot"); otherwise the job's root
+    // schedule decides — "triggered" for a scheduled job, "manual"
+    // for an unscheduled one. Never a hardcoded "manual".
+    const definition = await control.getDefinition(jobId);
+    const trigger =
+      opts?.trigger !== undefined
+        ? normalizeJobRunTrigger(opts.trigger)
+        : resolveRunNowTrigger(definition);
+    const dispatch = await control.runJob(jobId, { trigger });
     if (!dispatch.completion) {
       return { jobId, runId: dispatch.runId, state: dispatch.state };
     }
@@ -1116,13 +1129,17 @@ export class ScheduledAgent extends PortThink {
    */
   async runPipelineStage(
     jobId: string,
-    opts?: { nodePath?: string; userLogin?: string; scheduleId?: string; trigger?: "manual" | "scheduled" },
+    opts?: { nodePath?: string; userLogin?: string; scheduleId?: string; trigger?: JobRunTrigger },
   ): Promise<{ jobId: string; runId: string; state: string; error?: string }> {
     const ctx = this.pipelineContext();
     const control = createScheduledAgentPipelineControl(ctx, opts?.userLogin);
     await ensureScheduledAgentPipelineJobs(ctx, control);
     const dispatch = await control.runJob(jobId, {
-      trigger: opts?.trigger ?? "scheduled",
+      // Issue #4767 — the scoped run inherits the dispatch trigger
+      // (Q5); the default caller is the schedule callback, so an
+      // absent trigger means the schedule fired it. Widened to the
+      // five modes: a Run-now of a stage passes "triggered".
+      trigger: normalizeJobRunTrigger(opts?.trigger ?? "scheduled"),
       scopePath: opts?.nodePath ?? "",
       ...(opts?.scheduleId ? { scheduleId: opts.scheduleId } : {}),
     });
@@ -1622,13 +1639,21 @@ export class ScheduledAgent extends PortThink {
    */
   async runPipelineChain(
     jobId: string,
-    opts?: { userLogin?: string },
+    opts?: { userLogin?: string; trigger?: JobRunTrigger },
   ): Promise<{ jobId: string; runId: string; state: string; error?: string }> {
     const ctx = this.pipelineContext();
     const control = createScheduledAgentPipelineControl(ctx, opts?.userLogin);
     await ensureScheduledAgentPipelineJobs(ctx, control);
     await refreshScheduledAgentChainDefinition(ctx, control, jobId);
-    const dispatch = await control.runJob(jobId, { trigger: "manual" });
+    // Issue #4767 — same Run-now rule as runPipelineJob, read
+    // after the chain definition refresh so the schedule check
+    // sees the refreshed definition.
+    const definition = await control.getDefinition(jobId);
+    const trigger =
+      opts?.trigger !== undefined
+        ? normalizeJobRunTrigger(opts.trigger)
+        : resolveRunNowTrigger(definition);
+    const dispatch = await control.runJob(jobId, { trigger });
     if (!dispatch.completion) {
       return { jobId, runId: dispatch.runId, state: dispatch.state };
     }
@@ -1779,7 +1804,7 @@ export class ScheduledAgent extends PortThink {
   /** Dispatch a run as a JobPipelineWorkflow instance (ids-only payload). */
   async startPipelineJobWorkflow(
     jobId: string,
-    opts?: { trigger?: "manual" | "scheduled"; scopePath?: string },
+    opts?: { trigger?: JobRunTrigger; scopePath?: string },
   ): Promise<{ instanceId: string }> {
     return startPipelineJobWorkflow(this.pipelineContext(), jobId, opts ?? {});
   }

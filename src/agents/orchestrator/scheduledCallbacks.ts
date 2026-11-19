@@ -35,6 +35,7 @@ import { enforceOwnerDispatch } from "../../security/runRevocationGate";
 import { sessionStore } from "../../security/session";
 import { lookupInternalUserIdByLogin } from "../../security/iaaaMigration";
 import type { JobRunOutcome, JobRunTrigger } from "../../data/jobRunRecordPorts";
+import { normalizeJobRunTrigger } from "../../data/jobRunRecordPorts";
 import { createStructuredLogger } from "../../observability/structuredLogger";
 import { createObservabilitySink } from "../../observability/createObservabilityPorts";
 
@@ -1050,7 +1051,7 @@ export async function runWorkflowStage(
     nodePath?: string;
     stageId?: string;
     scheduleId?: string;
-    trigger?: "manual" | "scheduled";
+    trigger?: JobRunTrigger;
     userLogin?: string;
   },
   schedule?: { id?: unknown },
@@ -1063,7 +1064,10 @@ export async function runWorkflowStage(
   if (!nodePath) {
     return { outcome: "failure", error: "A stage firing requires a nodePath naming its stage." };
   }
-  const trigger = payload?.trigger === "manual" ? "manual" : "scheduled";
+  // Issue #4767 — the stage firing's trigger, all five modes;
+  // an absent trigger means the schedule fired it ("scheduled"
+  // is the default caller), never a silent "manual".
+  const trigger = normalizeJobRunTrigger(payload?.trigger ?? "scheduled");
   const savedContext = await ctx.getScreenerExecutionContext();
   const userLogin = resolveScheduledLogin(payload?.userLogin, savedContext?.userLogin);
   const dispatch = await resolveCallbackDispatch(ctx, userLogin, false);

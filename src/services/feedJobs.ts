@@ -64,6 +64,14 @@ import {
   type PersistedSentiment,
 } from "../data/feedDatasetPorts";
 import type { IndexListStore } from "../data/indexListPorts";
+import type {
+  JobRunKind,
+  JobRunTrigger,
+} from "../data/jobRunRecordPorts";
+import {
+  normalizeJobRunKind,
+  normalizeJobRunTrigger,
+} from "../data/jobRunRecordPorts";
 import { executeIndexListRefreshJob } from "./indexListJob";
 import {
   resolveFeedJobTimeouts,
@@ -737,7 +745,10 @@ export interface FeedJobDeps {
 }
 
 export interface RunFeedJobOptions {
-  trigger?: "manual" | "scheduled";
+  /** Issue #4767 — the run's dispatch trigger, all five modes. */
+  trigger?: JobRunTrigger;
+  /** Issue #4767 — the run kind (original / re-run / resume / replay). */
+  kind?: JobRunKind;
   userLogin?: string;
   tenantId?: string;
   runId?: string;
@@ -944,7 +955,8 @@ export async function runFeedJob(
   const now = opts.now ?? (() => new Date());
   const startedAt = now();
   const runId = opts.runId ?? `feed-${crypto.randomUUID()}`;
-  const trigger = opts.trigger ?? "manual";
+  const trigger = normalizeJobRunTrigger(opts.trigger);
+  const kind = normalizeJobRunKind(opts.kind);
 
   /** Record the run's artifact (its metadata IS the run record)
    *  and shape the result. Every run — success or failure —
@@ -962,6 +974,7 @@ export async function runFeedJob(
     const run: FeedDatasetRunRecord = {
       runId,
       trigger,
+      kind,
       startedAt: startedAt.toISOString(),
       finishedAt: finishedAt.toISOString(),
       status: args.status,
@@ -1238,7 +1251,8 @@ export async function runFeedFundamentalsJob(
   const now = opts.now ?? (() => new Date());
   const startedAt = now();
   const runId = opts.runId ?? `feed-${crypto.randomUUID()}`;
-  const trigger = opts.trigger ?? "manual";
+  const trigger = normalizeJobRunTrigger(opts.trigger);
+  const kind = normalizeJobRunKind(opts.kind);
 
   const record = async (args: {
     status: FeedDatasetRunRecord["status"];
@@ -1256,6 +1270,7 @@ export async function runFeedFundamentalsJob(
     const run: FeedDatasetRunRecord = {
       runId,
       trigger,
+      kind,
       startedAt: startedAt.toISOString(),
       finishedAt: finishedAt.toISOString(),
       status: args.status,
@@ -1529,7 +1544,8 @@ export async function runFeedTechnicalsJob(
   const now = opts.now ?? (() => new Date());
   const startedAt = now();
   const runId = opts.runId ?? `feed-${crypto.randomUUID()}`;
-  const trigger = opts.trigger ?? "manual";
+  const trigger = normalizeJobRunTrigger(opts.trigger);
+  const kind = normalizeJobRunKind(opts.kind);
 
   const record = async (args: {
     status: FeedDatasetRunRecord["status"];
@@ -1547,6 +1563,7 @@ export async function runFeedTechnicalsJob(
     const run: FeedDatasetRunRecord = {
       runId,
       trigger,
+      kind,
       startedAt: startedAt.toISOString(),
       finishedAt: finishedAt.toISOString(),
       status: args.status,
@@ -1870,7 +1887,8 @@ export async function runFeedSentimentJob(
   const now = opts.now ?? (() => new Date());
   const startedAt = now();
   const runId = opts.runId ?? `feed-${crypto.randomUUID()}`;
-  const trigger = opts.trigger ?? "manual";
+  const trigger = normalizeJobRunTrigger(opts.trigger);
+  const kind = normalizeJobRunKind(opts.kind);
 
   const record = async (args: {
     status: FeedDatasetRunRecord["status"];
@@ -1888,6 +1906,7 @@ export async function runFeedSentimentJob(
     const run: FeedDatasetRunRecord = {
       runId,
       trigger,
+      kind,
       startedAt: startedAt.toISOString(),
       finishedAt: finishedAt.toISOString(),
       status: args.status,
@@ -2307,7 +2326,8 @@ export async function runFeedOptionsChainsJob(
   const now = opts.now ?? (() => new Date());
   const startedAt = now();
   const runId = opts.runId ?? `feed-${crypto.randomUUID()}`;
-  const trigger = opts.trigger ?? "manual";
+  const trigger = normalizeJobRunTrigger(opts.trigger);
+  const kind = normalizeJobRunKind(opts.kind);
 
   const record = async (args: {
     status: FeedDatasetRunRecord["status"];
@@ -2322,6 +2342,7 @@ export async function runFeedOptionsChainsJob(
     const run: FeedDatasetRunRecord = {
       runId,
       trigger,
+      kind,
       startedAt: startedAt.toISOString(),
       finishedAt: finishedAt.toISOString(),
       status: args.status,

@@ -210,6 +210,9 @@ export function JobsPanel({ embedded = false }: JobsPanelProps = {}) {
       render: (r: JobRunRecord) => <Badge tone={outcomeTone(r.outcome)}>{r.outcome}</Badge>,
     },
     { key: "triggeredBy", header: "Trigger", render: (r: JobRunRecord) => r.triggeredBy },
+    // Issue #4767 — the run kind next to its trigger; a legacy row
+    // with no kind reads as a first dispatch ("original").
+    { key: "kind", header: "Kind", render: (r: JobRunRecord) => r.kind ?? "original" },
     { key: "summary", header: "Result", render: (r: JobRunRecord) => runSummary(r) },
   ];
 

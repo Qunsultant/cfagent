@@ -377,12 +377,14 @@ describe("recreate, tenant scope (#4383)", () => {
     // Issue #5229 adds migration 0069 (agent_referral_rules expiry_period_ms
     // column): 247 → 248. Issue #5086 adds migration 0070
     // (otel_config_overrides table): 248 → 249.
-    expect(body.d1.selected).toHaveLength(249);
+    // Issue #4767 adds migrations 0071/0072 (4 D1 ALTERs): 249 → 253.
+    expect(body.d1.selected).toHaveLength(253);
     expect(body.d1.skipped).toHaveLength(8);
     // Two member instances (alice, bob), each planning the fresh DO leg.
     expect(body.instances).toHaveLength(2);
     for (const inst of body.instances) {
-      expect(inst.selected).toHaveLength(132);
+      // #4767 adds migrations 0071/0072 (4 remainder ALTERs): 132 → 136.
+      expect(inst.selected).toHaveLength(136);
       // Issue #4623 adds one probed DO statement (mas_async_jobs.tenant_id).
       expect(inst.skipped).toHaveLength(36);
     }
@@ -438,12 +440,14 @@ describe("recreate, tenant scope (#4383)", () => {
     expect(status).toBe(200);
     expect(body.confirmed).toBe(true);
     expect(body.d1.report.outcome).toBe("succeeded");
-    expect(body.d1.report.executed).toHaveLength(249);
+    // #4767 adds migrations 0071/0072 (4 D1 ALTERs): 249 → 253.
+    expect(body.d1.report.executed).toHaveLength(253);
     expect(body.d1.verification.ok).toBe(true);
     expect(body.instances).toHaveLength(2);
     for (const inst of body.instances) {
       expect(inst.report.outcome).toBe("succeeded");
-      expect(inst.report.executed).toHaveLength(132);
+      // #4767 adds migrations 0071/0072 (4 remainder ALTERs): 132 → 136.
+      expect(inst.report.executed).toHaveLength(136);
       expect(inst.verification.ok).toBe(true);
     }
     expect(body.uncreatableLayers).toHaveLength(5);

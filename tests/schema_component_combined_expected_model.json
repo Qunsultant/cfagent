@@ -5129,6 +5129,16 @@
           "name": "run_workflow_instance_id",
           "type": "TEXT",
           "pk": 0
+        },
+        {
+          "name": "run_kind",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "run_origin_id",
+          "type": "TEXT",
+          "pk": 0
         }
       ],
       "constraints": {}
@@ -5212,6 +5222,16 @@
         },
         {
           "name": "artifact_refs_json",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "origin_run_id",
           "type": "TEXT",
           "pk": 0
         },

@@ -2818,6 +2818,38 @@ export const D1_CATALOGUE_ENTRIES: CatalogueEntry[] = [
     form: "literal",
   },
   {
+    code: "schema.d1.job_pipeline_instances.alter_table_add_column_run_kind",
+    plane: "d1",
+    table: "job_pipeline_instances",
+    statement: `ALTER TABLE job_pipeline_instances ADD COLUMN run_kind TEXT`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    code: "schema.d1.job_pipeline_instances.alter_table_add_column_run_origin_id",
+    plane: "d1",
+    table: "job_pipeline_instances",
+    statement: `ALTER TABLE job_pipeline_instances ADD COLUMN run_origin_id TEXT`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    code: "schema.d1.job_run_records.alter_table_add_column_kind",
+    plane: "d1",
+    table: "job_run_records",
+    statement: `ALTER TABLE job_run_records ADD COLUMN kind TEXT`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    code: "schema.d1.job_run_records.alter_table_add_column_origin_run_id",
+    plane: "d1",
+    table: "job_run_records",
+    statement: `ALTER TABLE job_run_records ADD COLUMN origin_run_id TEXT`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
     code: "schema.d1.agent_referral_code_rules.create_table",
     plane: "d1",
     table: "agent_referral_code_rules",
@@ -3351,10 +3383,18 @@ export const D1_MIGRATION_CODES: Record<number, readonly string[]> = {
   70: [
     "schema.d1.otel_config_overrides.create_table",
   ],
+  71: [
+    "schema.d1.job_pipeline_instances.alter_table_add_column_run_kind",
+    "schema.d1.job_pipeline_instances.alter_table_add_column_run_origin_id",
+  ],
+  72: [
+    "schema.d1.job_run_records.alter_table_add_column_kind",
+    "schema.d1.job_run_records.alter_table_add_column_origin_run_id",
+  ],
 };
 
-/** Migration versions in the D1 section (1–70; 0070 added by #5086). */
-export const D1_MIGRATION_VERSIONS: readonly number[] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70];
+/** Migration versions in the D1 section (1–72; 0070 added by #5086, 0071–0072 added by #4767 — renumbered from 0070–0071 at ship time, main already owned 0070). */
+export const D1_MIGRATION_VERSIONS: readonly number[] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72];
 
 export interface D1MigrationSqlShape {
   /** Text before the first statement: "\n" or "". */

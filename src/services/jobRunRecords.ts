@@ -12,6 +12,8 @@
  */
 import {
   JOB_RUN_RECORDS_PER_JOB_CAP,
+  normalizeJobRunKind,
+  type JobRunKind,
   type JobRunLedgerTrigger,
   type JobRunOutcome,
   type JobRunRecord,
@@ -120,7 +122,7 @@ export function buildJobRunRecord(input: JobRunRecordInput): JobRunRecord {
   } else {
     trigger = resolveLedgerTrigger(undefined, input.triggeredBy);
   }
-  for (const key of ["scheduleId", "asyncJobId", "workflowId"] as const) {
+  for (const key of ["scheduleId", "asyncJobId", "workflowId", "originRunId"] as const) {
     const value = input[key];
     if (value !== undefined && value !== null && typeof value !== "string") {
       throw new Error(`Job run ${key} must be a string or null.`);
@@ -166,6 +168,11 @@ export function buildJobRunRecord(input: JobRunRecordInput): JobRunRecord {
     scheduleId: input.scheduleId ?? null,
     asyncJobId: input.asyncJobId ?? null,
     workflowId: input.workflowId ?? null,
+    // Issue #4767 — the run kind and origin link, stamped on
+    // every NEW row. An absent kind reads as "original" (a first
+    // dispatch); an absent origin reads as null (no lineage).
+    kind: normalizeJobRunKind(input.kind),
+    originRunId: input.originRunId ?? null,
     ...(input.error !== undefined ? { error: input.error } : {}),
     ...(input.detail !== undefined ? { detail: input.detail } : {}),
     ...(input.descriptor !== undefined ? { descriptor: input.descriptor } : {}),
@@ -194,6 +201,12 @@ export function buildJobRunRecord(input: JobRunRecordInput): JobRunRecord {
  * `String(row.job_id)` is the one String() coercion on the read
  * path) reads as jobless (""), never as an id, so the ledger renders
  * it as "—". A missing jobId key reads as jobless too.
+ *
+ * Issue #4767 — the kind and origin link read the same way: a row
+ * stored before #4767 carries neither, so it reads as kind
+ * "original" with no origin (a first dispatch — the fail-closed
+ * default, never an invented re-run); an origin that is not a
+ * real non-empty id reads as null, never as a link.
  */
 export function normalizeJobRunRecord(record: JobRunRecord): JobRunRecord {
   const linkage = normalizeLedgerLinkage({
@@ -208,7 +221,14 @@ export function normalizeJobRunRecord(record: JobRunRecord): JobRunRecord {
     !isMissingIdLiteral(record.jobId)
       ? record.jobId
       : "";
-  return { ...record, jobId, ...linkage };
+  const kind = normalizeJobRunKind(record.kind);
+  const originRunId =
+    typeof record.originRunId === "string" &&
+    record.originRunId.trim() &&
+    !isMissingIdLiteral(record.originRunId)
+      ? record.originRunId
+      : null;
+  return { ...record, jobId, kind, originRunId, ...linkage };
 }
 
 /** Keep the newest `cap` records of a newest-first list. */

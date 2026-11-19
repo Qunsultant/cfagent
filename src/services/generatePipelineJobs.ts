@@ -323,7 +323,8 @@ export function registerGenerateStep(
       },
       def.id,
       {
-        trigger: "manual",
+        trigger: ctx.trigger,
+      kind: ctx.runKind,
         runId: ctx.runId,
         ...(stringParams(ctx.params.reports)
           ? { reports: stringParams(ctx.params.reports) }

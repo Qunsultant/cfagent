@@ -1817,7 +1817,9 @@ export const jobPipelineDefinitions = sqliteTable("job_pipeline_definitions", {
  * per job id: management state, the resume-cursor view, and the
  * stage-runner checkpoint ledger (#3549). DDL: migration 0046;
  * `run_schedule_id` (#3310) arrives via D1 migration 0059 and
- * the DO probed additive column in ensureSchema.
+ * the DO probed additive column in ensureSchema; `run_kind` +
+ * `run_origin_id` (#4767) arrive via D1 migration 0071 and the
+ * DO probed additive columns in ensureSchema.
  */
 export const jobPipelineInstances = sqliteTable("job_pipeline_instances", {
   jobId: text("job_id").primaryKey(),
@@ -1826,6 +1828,8 @@ export const jobPipelineInstances = sqliteTable("job_pipeline_instances", {
   currentRunId: text("current_run_id"),
   runStartedAt: text("run_started_at"),
   runTrigger: text("run_trigger"),
+  runKind: text("run_kind"),
+  runOriginId: text("run_origin_id"),
   runScheduleId: text("run_schedule_id"),
   runAsyncJobId: text("run_async_job_id"),
   runWorkflowInstanceId: text("run_workflow_instance_id"),
@@ -1858,7 +1862,9 @@ export const jobPipelineArtifacts = sqliteTable("job_pipeline_artifacts", {
  * the workflow substrate needs is declared here, with the
  * (job_id, started DESC, id DESC) history index in the DDL.
  * Timestamps are ISO text — the record family's own shape.
- * DDL: migration 0047.
+ * DDL: migration 0047; `kind` + `origin_run_id` (#4767) arrive
+ * via D1 migration 0072 and the DO probed additive columns in
+ * ensureTable.
  */
 export const jobRunRecords = sqliteTable("job_run_records", {
   id: integer("id").primaryKey({ autoIncrement: true }),
@@ -1873,6 +1879,8 @@ export const jobRunRecords = sqliteTable("job_run_records", {
   scheduleId: text("schedule_id"),
   asyncJobId: text("async_job_id"),
   workflowId: text("workflow_id"),
+  kind: text("kind"),
+  originRunId: text("origin_run_id"),
   errorText: text("error_text"),
   detail: text("detail"),
   descriptor: text("descriptor"),
