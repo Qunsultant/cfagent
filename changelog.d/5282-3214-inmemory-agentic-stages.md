@@ -1,0 +1,3 @@
+### Added
+- **In-memory J-stack stage execution (#5282):** Added `durability?: "durable" | "in-memory"` and `EPHEMERAL_GUARANTEE_CONTRACT` (`src/data/jobPipelinePorts.ts`), `buildEphemeralGuaranteeNotice` (`src/services/jobPipelineConfig.ts`), and explicit opt-in `runStageInMemory` (`src/services/stageInMemoryExecution.ts`).
+- **Agentic stage control via chat (#3214):** Added `parseStageControlIntent` and `executeAgenticStageControl` (`src/services/agenticStageControl.ts`) supporting `run`, `rerun`, `pause`, `cancel`, `resume`, `stop`, `schedule`, `retire`, and `status` across one, some, or all stages.

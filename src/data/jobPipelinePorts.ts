@@ -67,13 +67,26 @@ export type JobPacingMode = "batch" | "online";
 export type JobDeliveryMode = "sync" | "async";
 /** monolith = one execution unit; sharded = one unit per configured shard key. */
 export type JobShapeMode = "monolith" | "sharded";
+/** durable = persistent DO/D1 checkpoints (default); in-memory = explicit opt-in ephemeral execution (#5282). */
+export type JobDurabilityMode = "durable" | "in-memory";
 
-/** The four execution-mode axes, resolved from configuration at dispatch. */
+/** Named ephemeral guarantee contract for opt-in in-memory stage execution (#5282). */
+export const EPHEMERAL_GUARANTEE_CONTRACT = {
+  durability: "in-memory",
+  durable: false,
+  resumable: false,
+  checkpointSurvivesRestart: false,
+  journalReuse: false,
+  optInOnly: true,
+} as const;
+
+/** The execution-mode axes, resolved from configuration at dispatch. */
 export interface JobExecutionMode {
   concurrency: JobConcurrencyMode;
   pacing: JobPacingMode;
   delivery: JobDeliveryMode;
   shape: JobShapeMode;
+  durability?: JobDurabilityMode;
 }
 
 /** Conservative default trajectory: one unit, in order, all items, async dispatch. */
