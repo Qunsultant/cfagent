@@ -195,12 +195,17 @@ export const MCP_TOOL_SCOPES: Record<string, McpScope> = {
   stock_copilot_job_control: "mcp:write",
   // Issue #5765 — cancelling an order is a trade action on the trade tier.
   broker_order_cancel: "mcp:trade",
+  // Issue #5806 — scoped cancel-ticker and cancel-all on the trade tier.
+  broker_order_cancel_ticker: "mcp:trade",
+  broker_order_cancel_all: "mcp:trade",
   // Issue #5766 — replacing an open order is a trade action too.
   broker_order_replace: "mcp:trade",
   // Issue #5767 — a broker-side preview moves no money; trade tier anyway.
   broker_order_preview: "mcp:trade",
   // Issue #5767 — creating a proposal is a trade action.
   broker_order_create: "mcp:trade",
+  // Issue #5806 — listing orders on the selected broker is a read.
+  broker_orders_list: "mcp:read",
   set_job_execution_mode: "mcp:write",
   list_async_jobs: "mcp:read",
   etrade_get_quote: "mcp:read",
