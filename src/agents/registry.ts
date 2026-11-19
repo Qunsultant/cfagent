@@ -715,6 +715,7 @@ export const MESH_TOOL_FAMILIES: MeshToolFamilyEntry[] = [
       "stock_copilot_stage_control",
       "stock_copilot_job_control",
       "broker_order_cancel",
+      "broker_order_replace",
       "set_job_execution_mode",
       "list_database_tables",
       "query_table_data",
