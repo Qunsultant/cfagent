@@ -153,6 +153,21 @@
   no-schedule firing records explicit nulls; source pin on the
   wrapper). No change to firing times, cadences, reminder
   behavior, or the S1 ledger shape.
+- **#4203 amendment (Slice #4203, #3121):** the direct
+  `GET /api/schedule/runs` parallel ledger read is a redirect, not
+  a retirement — it is now an alias of the merged read
+  `GET /api/ledger/runs` (same handler, same 200 JSON envelope with
+  the `partial` flag), so the merged read is literally the one
+  ledger read path: exactly one `listJobRuns` call site remains in
+  `src/server/routes/trading.ts`, inside the shared
+  `readMergedLedgerRuns` helper both routes call. The response-shape
+  change is named: before, the KV half only with no `partial` field
+  and an unmapped throw on a half failure (this route's instance of
+  the G6 gap, Qunsultant/cfagent#3645); after, both halves merged
+  newest-first with dedup on jobId+started+operation, and a failed
+  half degrades to `partial:true`. No change to the merged read
+  itself (extraction only, guarded by the #3124 parity tests); the
+  §9 row for the direct path now reads landed.
 - **#3313 amendment (Slice #3313, #3121):** the originating
   scheduleId/workflowId are now stamped onto `ScreenerRunOutcome` at
   run producers — the bus events carry them from the service methods
@@ -1307,7 +1322,7 @@ evaluation, evaluation latency, ledger read latency.
 | Single ledger read path: `listAllRuns` is the only client ledger read (JobsPanel, ScheduleRunLedgerPanel, ScheduledGoalsPanel); the merged read's halves each do one store read | #3124 | `GET /api/ledger/runs` + `src/client/jobsApi.ts` `listAllRuns` | #3124 — landed |
 | Index coverage: unfiltered-list ordering index on `unified_schedules`; recent-read ordering index on `job_run_records` (ordering/seek, not covering — both queries are `SELECT *` over wide rows) | #3124 | `src/data/unifiedScheduleIndexSchema.ts` + `src/data/jobRunRecordIndexSchema.ts` (#2280 pattern) | #3124 — landed |
 | Measured before/after (rows scanned, evaluation latency, ledger read latency) | #3124 | PR body measurement table | #3124 — landed |
-| Direct `GET /api/schedule/runs` parallel ledger path stays live (no client caller; redirecting it would change its response) | #3124 | — no home — | **Filed #4203 (open)** |
+| Direct `GET /api/schedule/runs` parallel ledger path redirected to the merged read (no client caller; response is now the merged payload + `partial` flag, same envelope) | #3124 | `GET /api/ledger/runs` via shared `readMergedLedgerRuns` in `src/server/routes/trading.ts` | #4203 — landed |
 | D1 `job_run_records` recent-read index not added (needs a new migration, never an edit to 0047) | #3124 | — no home — | **Filed #4204 (open)** |
 | Tick re-saves every goal on every tick (the dominant tick cost after the scan fix) not changed — writes, not scans; needs its own dirty-check slice | #3124 | — no home — | **Filed #4205 (open)** |
 
