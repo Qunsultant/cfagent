@@ -29,7 +29,15 @@
  * Fixtures are deterministic (fake surfaces / mocked fetch in the
  * E1 + #168 patterns). No live market data, no network.
  */
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
+import { __resetQuoteCache } from "../src/services/quoteCache";
+
+// Issue #5822: the quote binds serve fresh cached rows (quoteCache,
+// 5-min TTL). These tests assert live provider calls, captures, and
+// failures, so every test starts from a cold cache.
+beforeEach(() => {
+  __resetQuoteCache();
+});
 // Issue #3460 slice 3: the unified service reads the broker through the
 // presence-aware seam (no default). These tests drive the E*TRADE path,
 // so the selection is explicit here instead of relying on the default.
@@ -649,8 +657,11 @@ describe("bindEtradeQuoteDeps (issues #1157, #1356)", () => {
     expect(captures.every((c) => c.capability === "quotes")).toBe(true);
     expect(captures.every((c) => c.rawKind === "provider-response")).toBe(true);
 
-    const single = await quoteDeps.fetchQuote("AAPL");
-    expect(single.symbol).toBe("AAPL");
+    // Issue #5822: the single leg fetches a symbol the batch did not
+    // cover — a symbol the batch already fetched is served from the
+    // freshness cache with no provider call and no capture.
+    const single = await quoteDeps.fetchQuote("ADBE");
+    expect(single.symbol).toBe("ADBE");
     expect((single as any).raw).toBeUndefined();
     captures = listCapturesByRun(sql, "primary", "run-stock");
     expect(captures).toHaveLength(3);

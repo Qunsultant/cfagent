@@ -18,7 +18,15 @@
  *
  * Fixtures are deterministic stubs. No live market data, no network.
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
+import { __resetQuoteCache } from "../src/services/quoteCache";
+
+// Issue #5822: the quote binds serve fresh cached rows (quoteCache,
+// 5-min TTL). These tests assert live provider calls, captures, and
+// failures, so every test starts from a cold cache.
+beforeEach(() => {
+  __resetQuoteCache();
+});
 import {
   acquireUniverse,
   bindEtradeQuoteDeps,

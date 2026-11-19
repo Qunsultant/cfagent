@@ -25,7 +25,15 @@
  * No secret-shaped literals: this file contains no credentials, keys,
  * or tokens in any form.
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
+import { __resetQuoteCache } from "../src/services/quoteCache";
+
+// Issue #5822: the quote binds serve fresh cached rows (quoteCache,
+// 5-min TTL). These tests assert live provider calls, captures, and
+// failures, so every test starts from a cold cache.
+beforeEach(() => {
+  __resetQuoteCache();
+});
 import {
   acquireUniverse,
   bindYahooScreenerDeps,
