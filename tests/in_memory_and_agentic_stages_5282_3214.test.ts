@@ -8,7 +8,7 @@ import { executeAgenticStageControl, parseStageControlIntent } from "../src/serv
 describe("5282 in-memory stage execution with ephemeral guarantees", () => {
   it("resolves durability axis and returns explicit ephemeral guarantee notice when in-memory", () => {
     const durable = resolveExecutionMode({});
-    expect(durable.durability).toBe("durable");
+    expect(durable.durability).toBeUndefined();
     expect(buildEphemeralGuaranteeNotice("feed", durable)).toBeNull();
 
     const inMem = resolveExecutionMode({ durability: "in-memory" });

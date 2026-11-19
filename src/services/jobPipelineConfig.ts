@@ -129,12 +129,9 @@ export function resolveExecutionMode(raw: unknown): JobExecutionMode {
     pacing: modeField(raw.pacing, PACING, DEFAULT_JOB_EXECUTION_MODE.pacing, "pacing"),
     delivery: modeField(raw.delivery, DELIVERY, DEFAULT_JOB_EXECUTION_MODE.delivery, "delivery"),
     shape: modeField(raw.shape, SHAPE, DEFAULT_JOB_EXECUTION_MODE.shape, "shape"),
-    durability: modeField(
-      raw.durability,
-      DURABILITY,
-      "durable",
-      "durability",
-    ),
+    ...(raw.durability !== undefined
+      ? { durability: modeField(raw.durability, DURABILITY, "durable", "durability") }
+      : {}),
   };
 }
 
