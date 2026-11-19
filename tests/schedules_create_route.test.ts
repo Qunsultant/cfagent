@@ -184,7 +184,9 @@ describe("POST /api/schedules/create (#111)", () => {
     // Issue #3121 #4239 — the legacy token-renewal alarm stays retired
     // (it is not listed), but the derived token-renewal record IS listed:
     // the list appends the renewal row for the live heartbeat duty.
-    expect(body.schedules.map((schedule: any) => schedule.id)).toEqual(["legacy-stock-screen", "legacy-options-screen", "token-renewal"]);
+    // Issue #3121 #4240 — the derived retention record IS listed too:
+    // the list appends the retention row after the renewal row.
+    expect(body.schedules.map((schedule: any) => schedule.id)).toEqual(["legacy-stock-screen", "legacy-options-screen", "token-renewal", "retention"]);
   });
 
   it.each(["executeAsyncJob", "expireStaleOrderDraft"])(

@@ -38,6 +38,13 @@ export const TOKEN_RENEWAL_RECORD_ID = "token-renewal";
 export const RETENTION_DISPATCH_CRON = "0 4 * * *";
 
 /**
+ * Issue #3121 #4240 — the unified-store record id of the retention duty, named once here beside its ledger job id: the
+ * record is derived from this duty, so the id lives with the
+ * duty's identity, not with the management module.
+ */
+export const RETENTION_RECORD_ID = "retention";
+
+/**
  * The most recent due-hour instant at or before `now` (UTC). At
  * 02:00 with a 03:00 due hour the boundary is yesterday 03:00 —
  * the duty does not fire early.

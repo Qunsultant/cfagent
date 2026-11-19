@@ -62,6 +62,10 @@ export const SCHEDULE_KIND_RULES: readonly ScheduleKindRule[] = [
       "reminder",
       "watchdog",
       "workflowstage",
+      // Issue #4240 — the nightly retention pass is system upkeep,
+      // the same family as token renewal; without this it would
+      // read `other` (no rule matches "retention").
+      "retention",
     ],
   },
 ];

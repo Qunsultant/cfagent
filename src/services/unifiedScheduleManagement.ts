@@ -43,10 +43,13 @@ import {
   WORKER_CRON_TRIGGERS_INVENTORY,
 } from "./scheduleSystems";
 import { resolveCronEntryPoint } from "./consolidatedCronEntries";
-import { RENEWAL_DISPATCH_CRON, TOKEN_RENEWAL_RECORD_ID } from "./heartbeatDueChecks";
+import { RENEWAL_DISPATCH_CRON, RETENTION_DISPATCH_CRON, RETENTION_RECORD_ID, TOKEN_RENEWAL_RECORD_ID } from "./heartbeatDueChecks";
 
 /** Issue #4239 — re-exported beside the builder that uses it. */
 export { TOKEN_RENEWAL_RECORD_ID } from "./heartbeatDueChecks";
+
+/** Issue #4240 — re-exported beside the builder that uses it. */
+export { RETENTION_RECORD_ID } from "./heartbeatDueChecks";
 import type { ScheduledGoal } from "../schedule";
 import { isSubDailyCron, isSubDailyInterval, isValidCron } from "../schedule";
 
@@ -408,6 +411,57 @@ export function tokenRenewalToRecord(
   };
 }
 
+/**
+ * Issue #3121 #4240 — the retention record's origin, named
+ * once. One shared duty (the heartbeat due-check runs the
+ * retention pass daily), so one stable record id (the id itself
+ * lives in heartbeatDueChecks, beside the ledger job id).
+ */
+export const RETENTION_ORIGIN = "retention";
+
+/** The last pass a retention list item carries (ledger-joined). */
+export interface RetentionLastRun {
+  started: string;
+  finished?: string;
+  outcome?: string;
+  /** The pass-outcome summary the entry point stored as the dispatch detail. */
+  detail?: string;
+}
+
+/**
+ * A retention unified record, DERIVED — not stored, not
+ * alarm-adopted. There is no steady-state alarm to adopt: the
+ * duty fires through the heartbeat due-check (#4234,
+ * runRetentionEntryPoint, RETENTION_DISPATCH_CRON), and the
+ * Worker cron is OFF per #4112. The cron is read from
+ * RETENTION_DISPATCH_CRON, never re-literalized, so the record
+ * and the firing check can never disagree about the cadence; the
+ * entry point is the ledger job id the runs join on. Kind
+ * `internal` (the #4238 seventh kind), state `active` — the duty
+ * IS live through the heartbeat, not disabled like the
+ * Worker-cron inventory rows. An `existing` record keeps its
+ * creation time.
+ */
+export function retentionToRecord(
+  nowIso: string,
+  existing?: UnifiedScheduleRecord | null,
+): UnifiedScheduleRecord {
+  return {
+    id: RETENTION_RECORD_ID,
+    kind: "internal",
+    state: "active",
+    callback: "retention",
+    definition: {
+      type: "cron",
+      cron: RETENTION_DISPATCH_CRON,
+      entryPoint: "retention",
+    },
+    provenance: systemProvenance(RETENTION_ORIGIN, new Date(nowIso)),
+    createdAt: existing?.createdAt ?? nowIso,
+    updatedAt: nowIso,
+  };
+}
+
 /** True when an alarm payload carries a stage address (jobId + nodePath). */
 function isStageAlarmPayload(payload: unknown): boolean {
   if (!payload || typeof payload !== "object") return false;
@@ -619,6 +673,31 @@ export function tokenRenewalRecordToListItem(
     ...unifiedRecordToListItem(record),
     ...(lastRun ? { lastRunAt: lastRun.started } : {}),
     ...(lastRun?.outcome ? { lastRunOutcome: lastRun.outcome } : {}),
+  };
+}
+
+/**
+ * A retention record as a Schedules home list item: the shared
+ * list shape plus the last pass joined from the ledger (issue
+ * #4240). The caller supplies the ledger's latest run, if any; a
+ * duty that has never fired carries no last run, and the home
+ * renders "never" — a missed pass is visible, not silent. The
+ * pass-outcome summary rides `lastRunDetail`, rendered verbatim
+ * by the home — no second parser.
+ */
+export function retentionRecordToListItem(
+  record: UnifiedScheduleRecord,
+  lastRun?: RetentionLastRun | null,
+): ReturnType<typeof unifiedRecordToListItem> & {
+  lastRunAt?: string;
+  lastRunOutcome?: string;
+  lastRunDetail?: string;
+} {
+  return {
+    ...unifiedRecordToListItem(record),
+    ...(lastRun ? { lastRunAt: lastRun.started } : {}),
+    ...(lastRun?.outcome ? { lastRunOutcome: lastRun.outcome } : {}),
+    ...(lastRun?.detail ? { lastRunDetail: lastRun.detail } : {}),
   };
 }
 
@@ -837,6 +916,28 @@ function derivedTokenRenewalError(
   );
 }
 
+/**
+ * Issue #4240 — the retention record is derived, not stored:
+ * there is no alarm to pause, resume, trigger, or update, and
+ * nothing to delete. Management refuses with the record's own
+ * name instead of a 404 for a row the home lists (a 404 would
+ * say the schedule does not exist; it does — it is derived).
+ * The manual trigger stays on its existing route,
+ * POST /api/schedules/trigger-retention.
+ */
+function isDerivedRetentionRecord(id: string): boolean {
+  return id === RETENTION_RECORD_ID;
+}
+
+function derivedRetentionError(
+  verb: string,
+): { ok: false; error: string; status: number } {
+  return fail(
+    `Schedule 'retention' is a derived record with no alarm to ${verb}.`,
+    400,
+  );
+}
+
 export async function pauseUnifiedSchedule(
   deps: UnifiedManagementDeps,
   id: string,
@@ -844,6 +945,8 @@ export async function pauseUnifiedSchedule(
 ): Promise<UnifiedOpResult> {
   // Issue #4239 — a derived record has no alarm to pause.
   if (isDerivedTokenRenewalRecord(id)) return derivedTokenRenewalError("pause");
+  // Issue #4240 — a derived record has no alarm to pause.
+  if (isDerivedRetentionRecord(id)) return derivedRetentionError("pause");
   const existing = await deps.store.get(id);
   if (existing) {
     if (existing.kind === "goal") return goalSurfaceError("pause");
@@ -884,6 +987,8 @@ export async function resumeUnifiedSchedule(
 ): Promise<UnifiedOpResult> {
   // Issue #4239 — a derived record has no alarm to resume.
   if (isDerivedTokenRenewalRecord(id)) return derivedTokenRenewalError("resume");
+  // Issue #4240 — a derived record has no alarm to resume.
+  if (isDerivedRetentionRecord(id)) return derivedRetentionError("resume");
   const record = await deps.store.get(id);
   if (!record) {
     return fail(`Schedule '${id}' is not paused`, 404);
@@ -937,6 +1042,8 @@ export async function deleteUnifiedSchedule(
 ): Promise<{ ok: true; cancelled: boolean }> {
   // Issue #4239 — a derived record is a no-op delete (#4237 precedent).
   if (isDerivedTokenRenewalRecord(id)) return { ok: true, cancelled: false };
+  // Issue #4240 — a derived record is a no-op delete (#4237 precedent).
+  if (isDerivedRetentionRecord(id)) return { ok: true, cancelled: false };
   const record = await deps.store.get(id);
   if (record && !isManagedAlarmKind(record.kind)) {
     return { ok: true, cancelled: false };
@@ -1009,6 +1116,8 @@ export async function triggerUnifiedSchedule(
 > {
   // Issue #4239 — a derived record has no alarm to trigger.
   if (isDerivedTokenRenewalRecord(id)) return derivedTokenRenewalError("trigger");
+  // Issue #4240 — a derived record has no alarm to trigger.
+  if (isDerivedRetentionRecord(id)) return derivedRetentionError("trigger");
   const record = await deps.store.get(id);
   // Issue #4237 — a non-screen kind is refused with its own name:
   // the goal-surface text is wrong for a live feed (or a worker
@@ -1197,6 +1306,8 @@ export async function updateUnifiedSchedule(
 ): Promise<UnifiedOpResult> {
   // Issue #4239 — a derived record has no alarm to update.
   if (isDerivedTokenRenewalRecord(id)) return derivedTokenRenewalError("update");
+  // Issue #4240 — a derived record has no alarm to update.
+  if (isDerivedRetentionRecord(id)) return derivedRetentionError("update");
   const nowIso = new Date(nowMs).toISOString();
   const record = await deps.store.get(id);
   // Issue #4237 — see triggerUnifiedSchedule: refuse a non-screen

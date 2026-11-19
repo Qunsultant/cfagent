@@ -85,6 +85,8 @@ export interface ScheduleItem {
   /** Issue #3121 #4239 — the token-renewal row's last ledger run. */
   lastRunAt?: string;
   lastRunOutcome?: string;
+  /** Issue #3121 #4240 — the retention row's last pass summary (dispatch detail, verbatim). */
+  lastRunDetail?: string;
 }
 
 // Issue #4329 S2 (#4331): the owner's ten filters, configured in
@@ -563,7 +565,9 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
               ? `Last push: ${formatLastEvent(s.lastPushAt)}`
               : s.id === "token-renewal"
                 ? `Last renewal: ${formatLastEvent(s.lastRunAt)}${s.lastRunOutcome ? ` (${s.lastRunOutcome})` : ""}`
-                : `Next run: ${s.paused ? "paused" : formatNextRun(s)}`}
+                : s.id === "retention"
+                  ? `Last pass: ${formatLastEvent(s.lastRunAt)}${s.lastRunOutcome ? ` (${s.lastRunOutcome})` : ""}${s.lastRunDetail ? ` — ${s.lastRunDetail}` : ""}`
+                  : `Next run: ${s.paused ? "paused" : formatNextRun(s)}`}
           </span>
         </Stack>
       ),

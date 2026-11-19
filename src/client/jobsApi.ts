@@ -48,6 +48,8 @@ export interface ScheduleListItem {
   /** Issue #3121 #4239 — the token-renewal row's last ledger run. */
   lastRunAt?: string;
   lastRunOutcome?: string;
+  /** Issue #3121 #4240 — the retention row's last pass summary (dispatch detail, verbatim). */
+  lastRunDetail?: string;
 }
 
 /** A schedule detail: the raw SDK schedule, or a paused list item. */
