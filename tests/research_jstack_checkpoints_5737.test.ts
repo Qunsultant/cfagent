@@ -96,7 +96,7 @@ describe("Issue #5737 / #5597 — OODA research runs on J-stack with durable SQL
       runId: "test-1",
       label: "Research test-1",
       operation: "research.run",
-      trigger: "manual",
+      triggeredBy: "manual",
       outcome: "success",
       startedAt: "2026-11-19T11:00:00.000Z",
       endedAt: "2026-11-19T11:00:01.000Z",
