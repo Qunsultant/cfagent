@@ -663,14 +663,14 @@ export function BrokerDynamicMenu({
 
   return (
     <div
-      className="etrade-dynamic-menu-container settings-menu-container broker-dynamic-menu-container"
+      className="settings-menu-container broker-dynamic-menu-container"
       ref={menuRef}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
     >
       <Button
         type="button"
-        className={`etrade-dynamic-menu-trigger settings-menu-trigger icon-only-settings-btn ${isConnected ? "connected" : "disconnected"} ${isLive ? "prod" : "test"} ${isOpen ? "open" : ""} ${isPinned ? "pinned" : ""}`}
+        className={`broker-dynamic-menu-trigger settings-menu-trigger icon-only-settings-btn ${isConnected ? "connected" : "disconnected"} ${isLive ? "prod" : "test"} ${isOpen ? "open" : ""} ${isPinned ? "pinned" : ""}`}
         onClick={handleTriggerClick}
         aria-haspopup="menu"
         aria-expanded={isOpen}
@@ -691,9 +691,9 @@ export function BrokerDynamicMenu({
       </Button>
 
       {isOpen && (
-        <div className="etrade-dynamic-dropdown-panel settings-dropdown-panel broker-dynamic-dropdown-panel" role="menu">
+        <div className="settings-dropdown-panel broker-dynamic-dropdown-panel" role="menu">
           {/* Header: User Info (Top-Left) & Broker Info / Connection (Top-Right) */}
-          <div className="etrade-panel-header unified-menu-header">
+          <div className="broker-panel-header unified-menu-header">
             {/* Top-Left: User Info */}
             <div className="settings-user-card compact">
               <div className="settings-user-meta">
@@ -715,9 +715,9 @@ export function BrokerDynamicMenu({
             </div>
 
             {/* Top-Right: Broker Info / Connection */}
-            <div className="etrade-panel-brand broker-header-right">
-              <div className="etrade-brand-text-row">
-                <div className="etrade-brand-title">
+            <div className="broker-panel-brand broker-header-right">
+              <div className="broker-brand-text-row">
+                <div className="broker-brand-title">
                   <span className="brand-icon">{brokerIcon}</span>
                   <h5>{`${selectedBrokerLabel} Brokerage API`}</h5>
                 </div>
@@ -734,7 +734,7 @@ export function BrokerDynamicMenu({
                 </span>
               </div>
               <span
-                className={`etrade-env-badge broker-env-badge ${
+                className={`broker-env-badge ${
                   !isConnected ? "offline" : isLive ? "prod" : "test"
                 }`}
               >
@@ -746,7 +746,7 @@ export function BrokerDynamicMenu({
           </div>
 
           {/* Broker Selection (First Choice) */}
-          <div className="etrade-panel-section broker-select-section">
+          <div className="broker-panel-section broker-select-section">
             <div className="section-label-row">
               <span>Broker</span>
               <small>{selectedBrokerLabel} selected</small>
@@ -777,7 +777,7 @@ export function BrokerDynamicMenu({
               a data source (kind "broker"); Yahoo and Nasdaq are pure
               data providers (kind "pure", no trading). The kind rides
               the tooltip so the split is visible, not implied. */}
-          <div className="etrade-panel-section data-provider-select-section">
+          <div className="broker-panel-section data-provider-select-section">
             <div className="section-label-row">
               <span>Data provider</span>
               <small>{labelForDataProvider(tenantProviders, tenantProviders.dataProviderId)} selected</small>
@@ -801,7 +801,7 @@ export function BrokerDynamicMenu({
           </div>
 
           {/* Environment & Connection (Harmonized Single Line with Toggle Button) */}
-          <div className="etrade-panel-section">
+          <div className="broker-panel-section">
             <div className="section-label-row">
               <span>Environment &amp; Connection</span>
               <small>{brokerPresentation(selectedBrokerId).modeWord[isLive ? "live" : "paper"]}</small>
@@ -831,7 +831,7 @@ export function BrokerDynamicMenu({
                 </Button>
               </Notice>
             )}
-            <div className="etrade-controls-single-line broker-controls-single-line">
+            <div className="broker-controls-single-line">
               <Button
                 type="button"
                 size="sm"
@@ -945,7 +945,7 @@ export function BrokerDynamicMenu({
           </div>
 
           {/* Preferences & Appearance Settings */}
-          <div className="etrade-panel-section settings-pref-section">
+          <div className="broker-panel-section settings-pref-section">
             <div className="section-label-row">
               <span>Preferences &amp; Interface</span>
               <small>Theme &amp; navigation</small>
@@ -1173,7 +1173,7 @@ export function BrokerDynamicMenu({
           </div>
 
           {/* Ticker Tape Controls */}
-          <div className="etrade-panel-section ticker-tape-section">
+          <div className="broker-panel-section ticker-tape-section">
             <div className="section-label-row">
               <span>Market Data &amp; Ticker Tape</span>
               <small>Streaming benchmark ticker</small>
@@ -1263,7 +1263,7 @@ export function BrokerDynamicMenu({
           {/* Navigation Tabs (issues 3696/3697): presets + pills moved
               to the Navigation Settings page; this menu only links to it,
               so the two surfaces never diverge. */}
-          <div className="etrade-panel-section settings-nav-tabs-section">
+          <div className="broker-panel-section settings-nav-tabs-section">
             <div className="section-label-row">
               <span>Navigation Tabs</span>
               <small>Presets and visible tabs live on the Navigation Settings page</small>
@@ -1284,7 +1284,7 @@ export function BrokerDynamicMenu({
 
           {/* Banner message / alert */}
           {effectiveMsg && (
-            <div className="etrade-panel-message" role="status">
+            <div className="broker-panel-message" role="status">
               <div className="msg-content">{effectiveMsg}</div>
               <div className="msg-actions">
                 {(effectiveMsg.includes("SANDBOX") || effectiveMsg.includes("switch environment to TEST")) && (

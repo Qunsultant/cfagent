@@ -3556,7 +3556,7 @@ body {
   z-index: 9999;
 }
 
-.etrade-pin-modal {
+.trade-pin-modal {
   background: var(--color-surface-raised);
   border: 1px solid var(--color-border-medium, var(--color-accent-border));
   border-radius: var(--radius-xl, 16px);
@@ -6886,12 +6886,12 @@ body {
   z-index: 1001;
 }
 
-.etrade-dynamic-menu-container {
+.broker-dynamic-menu-container {
   position: relative;
   display: inline-block;
 }
 
-.etrade-dynamic-menu-trigger {
+.broker-dynamic-menu-trigger {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
@@ -6911,18 +6911,18 @@ body {
   flex-shrink: 0;
 }
 
-.etrade-dynamic-menu-trigger:hover,
-.etrade-dynamic-menu-trigger.open,
-.etrade-dynamic-menu-trigger.pinned {
+.broker-dynamic-menu-trigger:hover,
+.broker-dynamic-menu-trigger.open,
+.broker-dynamic-menu-trigger.pinned {
   background: var(--color-card-elevated);
   border-color: var(--color-accent);
   box-shadow: var(--shadow-glow-accent);
 }
 
-.etrade-dynamic-menu-trigger.prod {
+.broker-dynamic-menu-trigger.prod {
   border-color: var(--color-danger-border);
 }
-.etrade-dynamic-menu-trigger.prod:hover {
+.broker-dynamic-menu-trigger.prod:hover {
   border-color: var(--color-danger);
   box-shadow: var(--shadow-glow-danger);
 }
@@ -7018,7 +7018,7 @@ body {
 }
 
 /* Dropdown Panel */
-.etrade-dynamic-dropdown-panel {
+.broker-dynamic-dropdown-panel {
   position: absolute;
   top: calc(100% + 8px);
   right: 0;
@@ -7051,7 +7051,7 @@ body {
   to { opacity: 1; transform: translateY(0); }
 }
 
-.etrade-panel-header {
+.broker-panel-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -7060,20 +7060,20 @@ body {
   gap: 0.75rem;
 }
 
-.etrade-panel-header-actions {
+.broker-panel-header-actions {
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
   flex-shrink: 0;
 }
 
-.etrade-panel-brand {
+.broker-panel-brand {
   display: flex;
   align-items: center;
   gap: 0.6rem;
 }
 
-.etrade-brand-text-row {
+.broker-brand-text-row {
   display: flex;
   align-items: center;
   gap: 0.65rem;
@@ -7084,7 +7084,7 @@ body {
   font-size: 1.25rem;
 }
 
-.etrade-panel-brand h5 {
+.broker-panel-brand h5 {
   margin: 0;
   font-size: var(--font-size-body);
   font-weight: 700;
@@ -7112,21 +7112,21 @@ body {
   border: 1px solid var(--color-warning-border);
 }
 
-.etrade-env-badge {
+.broker-env-badge {
   font-size: var(--font-size-micro);
   font-weight: 800;
   padding: 0.2rem 0.5rem;
   border-radius: 5px;
 }
-.etrade-env-badge.test {
+.broker-env-badge.test {
   background: var(--color-warning-subtle);
   color: var(--color-warning-text);
 }
-.etrade-env-badge.prod {
+.broker-env-badge.prod {
   background: var(--color-sentiment-very-bearish-subtle);
   color: var(--color-danger-text);
 }
-.etrade-env-badge.offline {
+.broker-env-badge.offline {
   background: var(--color-surface-sunken);
   color: var(--color-text-muted);
   border: 1px solid var(--color-border-medium);
@@ -7212,7 +7212,7 @@ body {
 }
 
 /* Sections */
-.etrade-panel-section {
+.broker-panel-section {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
@@ -7272,7 +7272,7 @@ body {
 }
 
 /* Harmonized Single-Line Environment & Connection Controls (#2720) */
-.etrade-controls-single-line {
+.broker-controls-single-line {
   display: flex;
   flex-direction: row;
   align-items: center;
@@ -7533,7 +7533,7 @@ body {
 }
 
 /* Message */
-.etrade-panel-message {
+.broker-panel-message {
   background: var(--color-warning-subtle);
   border: 1px solid var(--color-warning-border);
   border-radius: 7px;
@@ -8365,7 +8365,7 @@ body {
 .tab-btn,
 .btn-menu-action,
 .btn-etapi-config-pill,
-.etrade-dynamic-menu-trigger,
+.broker-dynamic-menu-trigger,
 .btn-mask-mini,
 .btn-mask-toggle,
 .nlq-chip,

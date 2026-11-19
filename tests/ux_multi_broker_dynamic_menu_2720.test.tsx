@@ -35,15 +35,15 @@ describe("multi-broker dynamic menu harmonization (#2720)", () => {
     expect(tuningSrc).not.toContain("ETAPI Engine Tuning");
 
     // Single-line controls containers
-    expect(menuSrc).toContain("etrade-controls-single-line");
+    expect(menuSrc).toContain("broker-controls-single-line");
     expect(menuSrc).toContain("ticker-controls-single-line");
 
     // Scoped CSS styles exist
-    expect(stylesSrc).toContain(".etrade-controls-single-line");
+    expect(stylesSrc).toContain(".broker-controls-single-line");
     expect(stylesSrc).toContain(".btn-env-mini");
     expect(stylesSrc).toContain(".btn-action-mini");
     expect(stylesSrc).toContain(".ticker-controls-single-line");
-    expect(stylesSrc).toContain(".etrade-env-badge.offline");
+    expect(stylesSrc).toContain(".broker-env-badge.offline");
   });
 
   describe("component rendering and broker switching", () => {
@@ -55,7 +55,7 @@ describe("multi-broker dynamic menu harmonization (#2720)", () => {
       await act(async () => {
         root.render(<SettingsMenu />);
       });
-      const trigger = container.querySelector(".etrade-dynamic-menu-trigger") as HTMLButtonElement;
+      const trigger = container.querySelector(".broker-dynamic-menu-trigger") as HTMLButtonElement;
       expect(trigger).not.toBeNull();
       await act(async () => {
         trigger.dispatchEvent(new MouseEvent("click", { bubbles: true }));
@@ -71,7 +71,7 @@ describe("multi-broker dynamic menu harmonization (#2720)", () => {
     it("renders offline status badge when disconnected instead of PROD (LIVE)", async () => {
       await openMenu();
 
-      const badge = container.querySelector(".etrade-env-badge");
+      const badge = container.querySelector(".broker-env-badge");
       expect(badge).not.toBeNull();
       expect(badge?.classList.contains("offline")).toBe(true);
       expect(badge?.textContent).toContain("OFFLINE");
@@ -86,7 +86,7 @@ describe("multi-broker dynamic menu harmonization (#2720)", () => {
     it("renders compact single-line environment and connection buttons", async () => {
       await openMenu();
 
-      const singleLine = container.querySelector(".etrade-controls-single-line");
+      const singleLine = container.querySelector(".broker-controls-single-line");
       expect(singleLine).not.toBeNull();
 
       const testBtn = singleLine?.querySelector(".btn-env-mini");

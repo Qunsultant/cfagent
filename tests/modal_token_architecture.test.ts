@@ -10,7 +10,7 @@ describe("Universal Modal System & Diagnostics Token Architecture", () => {
   describe("Universal Modal System in tokens.css", () => {
     it("defines universal modal card containers using design tokens", () => {
       expect(tokensCss).toContain(".modal-dialog");
-      expect(tokensCss).toContain(".etrade-pin-modal");
+      expect(tokensCss).toContain(".trade-pin-modal");
       expect(tokensCss).toContain(".diagnostics-modal");
       expect(tokensCss).toContain(".quote-modal-content");
       expect(tokensCss).toContain("var(--color-surface-raised");
@@ -19,7 +19,7 @@ describe("Universal Modal System & Diagnostics Token Architecture", () => {
     });
 
     it("eliminates brittle modal light theme overrides in favor of semantic token resolution", () => {
-      expect(tokensCss).not.toContain('[data-theme="light"] .etrade-pin-modal');
+      expect(tokensCss).not.toContain('[data-theme="light"] .trade-pin-modal');
       expect(tokensCss).not.toContain('[data-theme="light"] .diagnostics-modal');
       expect(tokensCss).not.toContain('[data-theme="light"] .quote-modal-content');
     });
@@ -33,7 +33,7 @@ describe("Universal Modal System & Diagnostics Token Architecture", () => {
     });
 
     it("tokenizes E*TRADE OAuth PIN modal instructions with semantic tokens", () => {
-      expect(tokensCss).toContain(".etrade-pin-modal .step-instruction");
+      expect(tokensCss).toContain(".trade-pin-modal .step-instruction");
       expect(tokensCss).toContain("var(--color-text-secondary)");
     });
   });
@@ -67,8 +67,8 @@ describe("Universal Modal System & Diagnostics Token Architecture", () => {
   });
 
   describe("styles.css Deference to Design Tokens", () => {
-    it("does not hardcode dark background on .etrade-pin-modal", () => {
-      const pinModalMatch = stylesCss.match(/\.etrade-pin-modal\s*\{([^}]+)\}/);
+    it("does not hardcode dark background on .trade-pin-modal", () => {
+      const pinModalMatch = stylesCss.match(/\.trade-pin-modal\s*\{([^}]+)\}/);
       expect(pinModalMatch).not.toBeNull();
       const pinModalBody = pinModalMatch![1];
       expect(pinModalBody).not.toContain("background: #0f172a;");

@@ -1073,7 +1073,7 @@ code:not(.did-pill code) {
 /* Universal Modal Container Card */
 .modal-dialog,
 .modal-card,
-.etrade-pin-modal,
+.trade-pin-modal,
 .diagnostics-modal,
 .quote-modal-content,
 .partner-deals-modal-card,
@@ -1174,12 +1174,12 @@ code:not(.did-pill code) {
 }
 
 /* E*TRADE OAuth PIN Verification Modal (Authorize E*TRADE Application) */
-.etrade-pin-modal {
+.trade-pin-modal {
   width: 90% !important;
   max-width: 520px !important;
 }
 
-.etrade-pin-modal .step-instruction {
+.trade-pin-modal .step-instruction {
   display: flex;
   align-items: center;
   gap: var(--space-3, 0.75rem);

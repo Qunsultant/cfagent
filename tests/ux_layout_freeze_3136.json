@@ -904,11 +904,55 @@
     "file": "src/client/styles.deprecated.css",
     "wave": "S-U7"
   },
+  "broker-brand-text-row": {
+    "file": "src/client/styles.deprecated.css",
+    "wave": "S-U7"
+  },
+  "broker-controls-single-line": {
+    "file": "src/client/styles.deprecated.css",
+    "wave": "S-U7"
+  },
+  "broker-dynamic-dropdown-panel": {
+    "file": "src/client/styles.deprecated.css",
+    "wave": "S-U7"
+  },
+  "broker-dynamic-menu-container": {
+    "file": "src/client/styles.deprecated.css",
+    "wave": "S-U7"
+  },
+  "broker-dynamic-menu-trigger": {
+    "file": "src/client/styles.deprecated.css",
+    "wave": "S-U7"
+  },
+  "broker-env-badge": {
+    "file": "src/client/styles.deprecated.css",
+    "wave": "S-U7"
+  },
   "broker-logo-box": {
     "file": "src/client/styles.deprecated.css",
     "wave": "S-U7"
   },
   "broker-logo-icon": {
+    "file": "src/client/styles.deprecated.css",
+    "wave": "S-U7"
+  },
+  "broker-panel-brand": {
+    "file": "src/client/styles.deprecated.css",
+    "wave": "S-U7"
+  },
+  "broker-panel-header": {
+    "file": "src/client/styles.deprecated.css",
+    "wave": "S-U7"
+  },
+  "broker-panel-header-actions": {
+    "file": "src/client/styles.deprecated.css",
+    "wave": "S-U7"
+  },
+  "broker-panel-message": {
+    "file": "src/client/styles.deprecated.css",
+    "wave": "S-U7"
+  },
+  "broker-panel-section": {
     "file": "src/client/styles.deprecated.css",
     "wave": "S-U7"
   },
@@ -2355,31 +2399,7 @@
     "file": "src/client/styles.deprecated.css",
     "wave": "S-U7"
   },
-  "etrade-brand-text-row": {
-    "file": "src/client/styles.deprecated.css",
-    "wave": "S-U7"
-  },
   "etrade-connection-state": {
-    "file": "src/client/styles.deprecated.css",
-    "wave": "S-U7"
-  },
-  "etrade-controls-single-line": {
-    "file": "src/client/styles.deprecated.css",
-    "wave": "S-U7"
-  },
-  "etrade-dynamic-dropdown-panel": {
-    "file": "src/client/styles.deprecated.css",
-    "wave": "S-U7"
-  },
-  "etrade-dynamic-menu-container": {
-    "file": "src/client/styles.deprecated.css",
-    "wave": "S-U7"
-  },
-  "etrade-dynamic-menu-trigger": {
-    "file": "src/client/styles.deprecated.css",
-    "wave": "S-U7"
-  },
-  "etrade-env-badge": {
     "file": "src/client/styles.deprecated.css",
     "wave": "S-U7"
   },
@@ -2408,30 +2428,6 @@
     "wave": "S-U7"
   },
   "etrade-panel-account-card": {
-    "file": "src/client/styles.deprecated.css",
-    "wave": "S-U7"
-  },
-  "etrade-panel-brand": {
-    "file": "src/client/styles.deprecated.css",
-    "wave": "S-U7"
-  },
-  "etrade-panel-header": {
-    "file": "src/client/styles.deprecated.css",
-    "wave": "S-U7"
-  },
-  "etrade-panel-header-actions": {
-    "file": "src/client/styles.deprecated.css",
-    "wave": "S-U7"
-  },
-  "etrade-panel-message": {
-    "file": "src/client/styles.deprecated.css",
-    "wave": "S-U7"
-  },
-  "etrade-panel-section": {
-    "file": "src/client/styles.deprecated.css",
-    "wave": "S-U7"
-  },
-  "etrade-pin-modal": {
     "file": "src/client/styles.deprecated.css",
     "wave": "S-U7"
   },
@@ -10051,6 +10047,10 @@
       "src/client/options/strategyDiscovery.deprecated.css",
       "src/client/styles.deprecated.css"
     ],
+    "wave": "S-U7"
+  },
+  "trade-pin-modal": {
+    "file": "src/client/styles.deprecated.css",
     "wave": "S-U7"
   },
   "trading-header-banner": {

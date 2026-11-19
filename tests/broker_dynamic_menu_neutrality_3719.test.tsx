@@ -75,7 +75,7 @@ describe("BrokerDynamicMenu harmonization and neutrality (#3719)", () => {
     expect(brokerRight?.textContent).toContain("Alpaca");
 
     // Env badge shows OFFLINE without repeating broker name
-    const envBadge = brokerRight?.querySelector(".etrade-env-badge");
+    const envBadge = brokerRight?.querySelector(".broker-env-badge");
     expect(envBadge?.textContent).toBe("OFFLINE");
     expect(envBadge?.textContent).not.toContain("Alpaca · OFFLINE");
   });

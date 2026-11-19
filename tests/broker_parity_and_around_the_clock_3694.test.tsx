@@ -103,7 +103,7 @@ describe("Issue #3694 — Broker live/paper parity, Alpaca sync & mode buttons",
       root.render(<SettingsMenu accountMode="paper" />);
     });
 
-    const trigger = container.querySelector(".etrade-dynamic-menu-trigger") as HTMLButtonElement;
+    const trigger = container.querySelector(".broker-dynamic-menu-trigger") as HTMLButtonElement;
     expect(trigger).not.toBeNull();
     expect(trigger.title).toContain("Settings (Alpaca · Paper)");
 
@@ -112,7 +112,7 @@ describe("Issue #3694 — Broker live/paper parity, Alpaca sync & mode buttons",
       trigger.click();
     });
 
-    const envBadge = container.querySelector(".etrade-env-badge");
+    const envBadge = container.querySelector(".broker-env-badge");
     expect(envBadge?.textContent).toContain("PAPER");
 
     // Paper toggle button has active class, not prod
@@ -141,7 +141,7 @@ describe("Issue #3694 — Broker live/paper parity, Alpaca sync & mode buttons",
       root.render(<SettingsMenu accountMode="live" />);
     });
 
-    const trigger = container.querySelector(".etrade-dynamic-menu-trigger") as HTMLButtonElement;
+    const trigger = container.querySelector(".broker-dynamic-menu-trigger") as HTMLButtonElement;
     expect(trigger.title).toContain("Settings (Alpaca · Live)");
 
     // Open dropdown to inspect badge
@@ -149,7 +149,7 @@ describe("Issue #3694 — Broker live/paper parity, Alpaca sync & mode buttons",
       trigger.click();
     });
 
-    const envBadge = container.querySelector(".etrade-env-badge");
+    const envBadge = container.querySelector(".broker-env-badge");
     expect(envBadge?.textContent).toContain("LIVE");
 
     act(() => {
@@ -173,7 +173,7 @@ describe("Issue #3694 — Broker live/paper parity, Alpaca sync & mode buttons",
       );
     });
 
-    const singleLine = container.querySelector(".etrade-controls-single-line");
+    const singleLine = container.querySelector(".broker-controls-single-line");
     const buttons = singleLine?.querySelectorAll(".btn-env-mini");
     expect(buttons).toHaveLength(1);
 
