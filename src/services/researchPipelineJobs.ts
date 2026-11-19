@@ -38,6 +38,10 @@ const structuredLog = createStructuredLogger(createObservabilitySink({}), {
 
 export const ANALYZE_OODA_STEP = "analyze.ooda";
 export const EVALUATE_APPLY_STEP = "evaluate.apply";
+export const RESEARCH_FEED_STEP = "research.feed";
+export const RESEARCH_ENRICH_STEP = "research.enrich";
+export const RESEARCH_GENERATE_STEP = "research.generate";
+export const RESEARCH_DELIVER_STEP = "research.deliver";
 
 export { RESEARCH_PIPELINE_STAGES, type ResearchPipelineStage };
 
@@ -97,6 +101,22 @@ export function registerResearchSteps(
   registry: JobStepRegistry,
   deps: ResearchStepDeps,
 ): JobStepRegistry {
+  for (const [stepName, stageId] of [
+    [RESEARCH_FEED_STEP, "feed"],
+    [RESEARCH_ENRICH_STEP, "enrich"],
+    [RESEARCH_GENERATE_STEP, "generate"],
+    [RESEARCH_DELIVER_STEP, "deliver"],
+  ] as const) {
+    registry.register(stepName, async (ctx) => {
+      const params = (ctx.params ?? {}) as { runId?: string };
+      const runId = params.runId || ctx.jobId.replace(/^research:/, "");
+      return {
+        output: { stage: stageId, runId, status: "completed" },
+        descriptor: researchArtifactKey(runId, stageId),
+      };
+    });
+  }
+
   registry.register(ANALYZE_OODA_STEP, async (ctx) => {
     const params = (ctx.params ?? {}) as {
       runId?: string;
@@ -262,15 +282,25 @@ export function buildResearchJobDefinition(
     children?: Array<Record<string, unknown>>;
   };
   const children = (rawRoot.children ?? []).map((child) => {
-    if (child.kind === "feed" || child.kind === "enrich") {
+    if (child.kind === "feed") {
       return {
         ...child,
         inputs: { sources: [sourceId], datasets: [dataset] },
-        steps: [],
+        steps: [{ step: RESEARCH_FEED_STEP, params: { runId } }],
       };
     }
-    if (child.kind === "generate" || child.kind === "deliver") {
-      return { ...child, steps: [] };
+    if (child.kind === "enrich") {
+      return {
+        ...child,
+        inputs: { sources: [sourceId], datasets: [dataset] },
+        steps: [{ step: RESEARCH_ENRICH_STEP, params: { runId } }],
+      };
+    }
+    if (child.kind === "generate") {
+      return { ...child, steps: [{ step: RESEARCH_GENERATE_STEP, params: { runId } }] };
+    }
+    if (child.kind === "deliver") {
+      return { ...child, steps: [{ step: RESEARCH_DELIVER_STEP, params: { runId } }] };
     }
     return child;
   });

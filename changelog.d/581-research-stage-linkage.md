@@ -1,0 +1,5 @@
+### Changed
+- **Research stage linkage & unified run ID (#581, #5175):**
+  - Threaded `runId` from `dispatchResearchEngineRun` (`src/workflows/researchScreenEngine.ts`) through `triggerManualResearch` (`src/services/researchTriggers.ts`), `runResearchAndPublish` (`src/agents/orchestrator/researchPublish.ts`), and `ResearchAgent.runResearch` (`src/agents/research-agent.ts`) so canonical `mas_reports` rows and D1 `JobRunRecord` rows share the same `runId` instead of minting a separate `rsr_*` id.
+  - Registered real step handlers (`research.feed`, `research.enrich`, `research.generate`, `research.deliver`) in `src/services/researchPipelineJobs.ts` alongside `analyze.ooda` and `evaluate.apply`.
+  - Recorded `jobRunId`, 6-stage `stages` trace, `engineVersion`, `inputHash`, and `captureIds` in `researchReportToStoreInput` (`src/workflows/researchCanonicalLeg.ts`) and folded duplicate D1 `job-pipeline` rows onto the canonical report row in `mergeRunSummaries` (`src/services/runSummaries.ts`).

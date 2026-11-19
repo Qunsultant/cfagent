@@ -596,7 +596,12 @@ export async function handleScreenerResearchRoutes(
           sql: resolveResearchSql(),
           d1: resolveResearchD1(),
           env: ctx.env as Record<string, string | undefined>,
-          execute: () => triggerManualResearch(ctx.runResearchAndPublish, userLogin),
+          execute: (runCtx) =>
+            triggerManualResearch(
+              ctx.runResearchAndPublish,
+              userLogin,
+              runCtx ? { runId: runCtx.runId } : undefined,
+            ),
         });
         return Response.json({
           ...dispatched.outcome,
@@ -637,7 +642,7 @@ export async function handleScreenerResearchRoutes(
           env: ctx.env as Record<string, string | undefined>,
           researchDeps: {
             runOodaAnalysis: (runCtx) =>
-              triggerManualResearch(ctx.runResearchAndPublish, runCtx.userLogin),
+              triggerManualResearch(ctx.runResearchAndPublish, runCtx.userLogin, { runId: runCtx.runId }),
             runEvaluateStage: async (evalCtx) => {
               const agent = ctx.getResearchAgent?.(evalCtx.userLogin);
               if (!agent?.evaluateRun) return null;

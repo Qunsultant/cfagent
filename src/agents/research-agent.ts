@@ -114,6 +114,8 @@ const MAX_HISTORY = 20;
 export interface ResearchRunRequest {
   trigger: TriggerSource;
   userLogin?: string;
+  /** Optional engine runId so canonical report & D1 JobRunRecord share one ID (#581 / #5175). */
+  runId?: string;
   /** Optional one-off config overrides for this run (still validated). */
   configOverride?: Partial<ResearchConfig>;
 }
@@ -541,7 +543,7 @@ export class ResearchAgent extends PortThink {
       const report = await runResearchPipeline(
         { provider, ...(trackRecord ? { trackRecord } : {}) },
         config,
-        { trigger: req.trigger, userLogin }
+        { trigger: req.trigger, userLogin, ...(req.runId ? { runId: req.runId } : {}) }
       );
       await this.persistRun(report);
       return { success: true, report };

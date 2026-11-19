@@ -408,12 +408,11 @@ export function runSummaryFromReport(hit: ScheduledReportHit): RunSummary {
     reportId: hit.id,
     scanRunId: kind === "options_scanner" ? canonicalScanRunId(hit.body) : null,
     discoveryRunId: kind === "discovery" ? canonicalDiscoveryRunId(hit.body) : null,
-    // Issue #4259: a canonical row carries no §4 linkage of its own —
-    // the join rides the body's scan/discovery id above, never a
-    // re-stamped linkage.
+    // Issue #4259 / #581: research canonical rows carry body.jobRunId
+    // (`research:<runId>`) so the ledger folds the D1 twin onto the report.
     scheduleId: null,
     asyncJobId: null,
-    workflowId: null,
+    workflowId: strOrNull(body?.jobRunId) ?? null,
     source: hit.source,
     runSource: strOrNull(body?.runSource) ?? RUN_SOURCE_BY_KIND[kind] ?? null,
     // Issue #2910 (G3): a parent canonical row carries its
@@ -723,10 +722,28 @@ export function mergeRunSummaries(lists: RunSummary[][], limit: number): RunSumm
       foldedScanKeys.add(`${scan.kind}:${scan.id}`);
     }
   }
+  const canonicalWorkflowIds = new Set<string>();
+  for (const list of lists) {
+    for (const row of list) {
+      if (row.reportId !== null && row.workflowId) {
+        canonicalWorkflowIds.add(row.workflowId);
+      }
+    }
+  }
   const seen = new Set<string>();
   const merged: RunSummary[] = [];
   for (const list of lists) {
     for (const row of list) {
+      if (
+        row.reportId === null &&
+        row.source === "job-pipeline" &&
+        ((row.workflowId && canonicalWorkflowIds.has(row.workflowId)) ||
+          [...canonicalWorkflowIds].some(
+            (w) => row.id.startsWith(`d1:${w}:`) || row.title === `Job ${w}`,
+          ))
+      ) {
+        continue; // the canonical report row carries unified workflowId + artifacts + stages
+      }
       if (row.reportId === null && row.kind === "options_scanner" && canonicalScanIds.has(row.id)) {
         continue; // the canonical twin wins
       }

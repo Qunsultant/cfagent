@@ -78,7 +78,7 @@ export interface DispatchResearchEngineInput {
   runRecorder?: JobRunRecorder;
   flags?: Pick<FeatureFlagPort, "isEnabled">;
   researchDeps?: ResearchStepDeps;
-  execute: () => Promise<Record<string, unknown>>;
+  execute: (ctx?: { runId: string; engineJobId: string }) => Promise<Record<string, unknown>>;
 }
 
 export interface DispatchResearchEngineResult {
@@ -200,7 +200,7 @@ export async function dispatchResearchEngineRun(
   if (!cutoverEnabled) {
     const startedAt = new Date().toISOString();
     const startMs = Date.now();
-    const outcome = await input.execute();
+    const outcome = await input.execute({ runId, engineJobId });
     const finishedAt = new Date().toISOString();
     const durationMs = Math.max(0, Date.now() - startMs);
     const stageVisibility: ResearchStageVisibility[] = RESEARCH_PIPELINE_STAGES.map((stageId) => ({
@@ -227,7 +227,7 @@ export async function dispatchResearchEngineRun(
 
   let capturedOutcome: Record<string, unknown> | undefined;
   const baseDeps: ResearchStepDeps = input.researchDeps ?? {
-    runOodaAnalysis: async () => input.execute(),
+    runOodaAnalysis: async (ctx) => input.execute({ runId: ctx.runId, engineJobId }),
   };
   const wiredDeps: ResearchStepDeps = {
     ...baseDeps,
