@@ -25,9 +25,8 @@ type ParamBinder = (
 ) => JobDefinitionParams;
 
 /**
- * @deprecated Issue #5496 — per-family code binders are retired in place in
- * favor of declarative `JobDefinitionParameter` schemas (`enumSource`,
- * `default`, `derivation`) interpreted by `bindJobDefinitionParams`.
+ * @deprecated Issue #5496 — superseded by `bindJobDefinitionParams` and
+ * `src/config/jobDefinitionParamRegistry.ts` (`ENUM_SOURCES`, `PARAM_DERIVATIONS`).
  */
 export const BINDERS: Record<string, ParamBinder> = {};
 
