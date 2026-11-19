@@ -96,6 +96,11 @@ import type { AuditStore } from "./iaaaAudit";
 import { SESSION_TTL } from "./session";
 import type { KvLike } from "./kvResilience";
 import { DEPLOYMENT_DEFAULT_TENANT_ID } from "../config/tenantDefaults";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import {
+  ConsoleObservabilitySink,
+  type ObservabilitySink,
+} from "../observability/observabilityPorts";
 
 /** The documented single-tenant default tenant id. */
 export const IAAA_DEFAULT_TENANT_ID = DEPLOYMENT_DEFAULT_TENANT_ID;
@@ -283,6 +288,14 @@ export interface WiredPostLoginDeps {
    * work runs exactly as before and emits nothing.
    */
   audit?: { store: AuditStore; correlationId: string };
+  /**
+   * Issue #3515 S3 batch 8 — optional observability sink for the
+   * post-login audit-failure warnings (the d1QueryLogger precedent).
+   * Absent, the structured console fallback; the caller that owns
+   * the request env can pass the env-constructed sink (the #5587
+   * follow-up) so the events reach the Analytics Engine dataset.
+   */
+  sink?: ObservabilitySink;
 }
 
 export interface WiredPostLoginInput {
@@ -398,6 +411,12 @@ export async function runWiredPostLogin(
   deps: WiredPostLoginDeps,
   input: WiredPostLoginInput,
 ): Promise<WiredPostLoginResult> {
+  // #3515 S3 batch 8 — logger over the injected sink, else the structured
+  // console fallback (never an empty-env sink, #5587).
+  const structuredLog = createStructuredLogger(
+    deps.sink ?? new ConsoleObservabilitySink(),
+    { component: "security/iaaaGithubEndToEnd" },
+  );
   let aliasStatus: AliasRunStatus;
   try {
     const recorded = await recordLoginAlias(deps.kv, {
@@ -588,7 +607,10 @@ export async function runWiredPostLogin(
           }),
         );
         if (!recorded.ok) {
-          console.warn(`[post-login-audit] alias audit write failed (${recorded.code})`);
+          structuredLog.warn("iaaaGithubEndToEnd.alias_audit_write_failed", {
+            message: `[post-login-audit] alias audit write failed (${recorded.code})`,
+            code: recorded.code,
+          });
         }
       }
       if (
@@ -607,7 +629,10 @@ export async function runWiredPostLogin(
           }),
         );
         if (!granted.ok) {
-          console.warn(`[post-login-audit] bootstrap audit write failed (${granted.code})`);
+          structuredLog.warn("iaaaGithubEndToEnd.bootstrap_audit_write_failed", {
+            message: `[post-login-audit] bootstrap audit write failed (${granted.code})`,
+            code: granted.code,
+          });
         }
       }
     } catch {

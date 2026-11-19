@@ -26,7 +26,7 @@
  * server-side counter can never see, because the request never lands. The
  * funnel sees every outcome.
  *
- * Why one JSON log line per op: invocation logs are already enabled
+ * Why one structured event per op: invocation logs are already enabled
  * (`wrangler.jsonc`), Cloudflare parses a JSON log message into structured
  * fields, and no extra store round-trip is added to the op path. Volume is
  * one line per op — the same order as the warn logging the failure path
@@ -34,6 +34,9 @@
  * If volume ever becomes the problem, aggregate in-isolate behind this same
  * sink seam; the record shape is the contract, not the transport.
  */
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { ConsoleObservabilitySink } from "../observability/observabilityPorts";
+
 export type StoreOpOutcome = "ok" | "miss" | "failed" | "unavailable";
 
 export interface StoreOpRecord {
@@ -64,17 +67,32 @@ export interface StoreOpRecord {
 
 export type StoreOpSink = (record: StoreOpRecord) => void;
 
+/**
+ * Issue #3515 S3 batch 8 — the default sink emits the record as the
+ * fields of one structured `storeMetrics.store_op` info event (the
+ * batch-5 screenRunAspects precedent for a hand-built JSON line):
+ * Workers Logs still lifts the fields, and the T1/T2 aggregation
+ * queries in docs/OBSERVABILITY.md (§4) read them under `fields`.
+ * Console-only by design — this IS the Workers Logs transport —
+ * so the logger is built over an explicit ConsoleObservabilitySink
+ * (never an empty-env sink, #5587). `setStoreOpSink` remains the
+ * injection point for tests and a future metrics transport.
+ */
+const storeMetricsLog = createStructuredLogger(new ConsoleObservabilitySink(), {
+  component: "security/storeMetrics",
+});
+
 function defaultStoreOpSink(record: StoreOpRecord): void {
-  // A bare JSON line: Workers Logs lifts the fields out of the message, so
-  // the record is aggregable without parsing free text.
-  console.log(JSON.stringify(record));
+  // The record's fields ride the structured event (see above), so the
+  // record stays aggregable without parsing free text.
+  storeMetricsLog.info("storeMetrics.store_op", { ...record });
 }
 
 let activeSink: StoreOpSink = defaultStoreOpSink;
 
 /**
  * Replace the record sink (tests, or a future metrics transport). Pass null
- * to restore the default console.log sink.
+ * to restore the default structured sink.
  */
 export function setStoreOpSink(sink: StoreOpSink | null): void {
   activeSink = sink ?? defaultStoreOpSink;

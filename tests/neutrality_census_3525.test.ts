@@ -866,6 +866,16 @@ function measure(): Map<string, number> {
  * unifiedScheduleManagement.ts etrade 1) and 1 raise
  * (scheduleDetail.ts etrade 2 -> 3). No global-total restatement:
  * totals are not pinned (#3917).
+ * Baseline update (#3515 S3 batch 8, 2026-11-18): the console
+ * migration moves the E*TRADE OAuth adapter's ten warn/info sites to
+ * the structured logger, and the new event names (`etradeOAuth.*`)
+ * plus the per-function `component: "security/etradeOAuth"` lines
+ * name the provider whose adapter this file is — naming the
+ * provider is the adapter's job, so the row is dispositioned
+ * INTEGRATION: 1 raise (etradeOAuth.ts/etrade 124->131). The
+ * verbatim `E*TRADE` messages are unchanged (one message line per
+ * site, replacing exactly one such line). Baseline totals move
+ * 1335/10877 -> 1335/10884.
  */
 const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (188 rows / 989 lines) ----
@@ -1526,7 +1536,10 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/patterns/interfaces.ts", "etrade", 3],
   ["src/security/apiKeys.ts", "etrade", 2],
   ["src/security/brokerTokenRejection.ts", "etrade", 9],
-  ["src/security/etradeOAuth.ts", "etrade", 124],
+  // #3515 S3 batch 8 INTEGRATION: the E*TRADE OAuth adapter's own
+  // structured event names (`etradeOAuth.*`) + `component:` lines
+  // (124->131) — naming the provider is the adapter's job.
+  ["src/security/etradeOAuth.ts", "etrade", 131],
   ["src/security/etradeTokenCache.ts", "etrade", 3],
   ["src/security/githubOAuth.ts", "etrade", 1],
   ["src/security/grantProposals.ts", "etrade", 1],

@@ -18,6 +18,12 @@
  * object, including the Durable Object adapter in `durableKv.ts`.
  */
 
+import { createStructuredLogger } from "../observability/structuredLogger";
+import {
+  ConsoleObservabilitySink,
+  type ObservabilitySink,
+} from "../observability/observabilityPorts";
+
 export interface KvLike {
   get(key: string): Promise<string | null>;
   put(key: string, value: string, options?: { expirationTtl?: number }): Promise<void>;
@@ -87,18 +93,28 @@ export function kvHealth(label: string): Readonly<KvHealth> {
 export function createResilientKv(
   kv: KvLike | KVNamespace | null | undefined,
   label: string,
-  options: { blockMs?: number } = {}
+  // #3515 S3 batch 8 — optional observability sink for the quota
+  // warning (the d1QueryLogger precedent); absent, the structured
+  // console fallback (never an empty-env sink, #5587).
+  options: { blockMs?: number; sink?: ObservabilitySink } = {}
 ): KvLike {
   const blockMs = options.blockMs ?? DEFAULT_BLOCK_MS;
   const state = healthFor(label);
+  const structuredLog = createStructuredLogger(
+    options.sink ?? new ConsoleObservabilitySink(),
+    { component: "security/kvResilience" },
+  );
 
   const trip = (error: unknown): void => {
     state.lastError = error instanceof Error ? error.message : String(error);
     if (isKvLimitError(error)) {
       state.blockedUntil = Date.now() + blockMs;
-      console.warn(
-        `[kv:${label}] quota error — pausing KV reads for ${Math.round(blockMs / 1000)}s: ${state.lastError}`
-      );
+      structuredLog.warn("kvResilience.quota_error", {
+        message: `[kv:${label}] quota error — pausing KV reads for ${Math.round(blockMs / 1000)}s: ${state.lastError}`,
+        label,
+        blockSeconds: Math.round(blockMs / 1000),
+        error: state.lastError,
+      });
     }
   };
 

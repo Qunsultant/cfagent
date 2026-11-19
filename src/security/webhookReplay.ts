@@ -18,6 +18,11 @@
  */
 
 import type { DatabaseORM } from "../orm";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import {
+  ConsoleObservabilitySink,
+  type ObservabilitySink,
+} from "../observability/observabilityPorts";
 
 /** Nonce lifetime in durable storage: 24h, well beyond any timestamp window. */
 export const WEBHOOK_REPLAY_TTL_MS = 24 * 60 * 60 * 1000;
@@ -143,15 +148,25 @@ export type EmailRecipientCheck = { ok: true } | { ok: false; reason: string };
  * only) with a one-time warning so the missing allowlist is visible in
  * logs rather than silently assumed.
  */
-export function validateEmailRecipient(email: string, allowedDomainsCsv?: string): EmailRecipientCheck {
+export function validateEmailRecipient(
+  email: string,
+  allowedDomainsCsv?: string,
+  // #3515 S3 batch 8 — optional observability sink for the one-time
+  // allowlist-unset warning (the d1QueryLogger precedent); absent,
+  // the structured console fallback (never an empty-env sink, #5587).
+  sink?: ObservabilitySink,
+): EmailRecipientCheck {
   const addr = email.trim();
   if (!EMAIL_FORMAT_RE.test(addr)) return { ok: false, reason: "Invalid email address format." };
   if (!allowedDomainsCsv || !allowedDomainsCsv.trim()) {
     if (!warnedAllowlistUnset) {
       warnedAllowlistUnset = true;
-      console.warn(
-        "[webhookReplay] EMAIL_TO_ALLOWED_DOMAINS is not set; emailTo recipients are format-validated only (no domain allowlist)."
-      );
+      createStructuredLogger(sink ?? new ConsoleObservabilitySink(), {
+        component: "security/webhookReplay",
+      }).warn("webhookReplay.email_allowlist_unset", {
+        message:
+          "[webhookReplay] EMAIL_TO_ALLOWED_DOMAINS is not set; emailTo recipients are format-validated only (no domain allowlist).",
+      });
     }
     return { ok: true };
   }

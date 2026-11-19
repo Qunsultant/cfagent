@@ -35,6 +35,8 @@ import { ETradeError, ETradeErrorCode } from "../aspects/errorCodes";
 import { BusinessError, codedMessage } from "../outcomes/outcomeAspects";
 import { withAspects } from "../aspects/loggingAspect";
 import { createDidAttestationSync, AGENT_DIDS } from "../agents/did";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
 
 export interface ETradeTokenSet {
   accessToken: string;
@@ -621,6 +623,13 @@ export async function revokeRemoteAccessToken(
   overrideEnv?: string,
   identity?: ETradeTokenIdentity
 ): Promise<{ success: boolean; deleted: boolean; message: string }> {
+  // Issue #3515 S3 batch 8 — env-wired logger: the sink is built from
+  // the request's env so the events reach the Analytics Engine
+  // `observability` dataset (never an empty-env sink, #5587).
+  const structuredLog = createStructuredLogger(createObservabilitySink(env), {
+    component: "security/etradeOAuth",
+  });
+
   // Issue #2386: identity-aware read, so the upstream revoke targets
   // the token the session can actually reach, and `deleted` tells
   // the route (and the panel) whether anything was there to delete.
@@ -651,9 +660,9 @@ export async function revokeRemoteAccessToken(
         },
       });
 
-      console.log(`[ETradeOAuth] revoke_access_token status: ${res.status}`);
+      structuredLog.info("etradeOAuth.revoke_access_token_status", { message: `[ETradeOAuth] revoke_access_token status: ${res.status}`, status: res.status });
     } catch (err) {
-      console.warn(`[ETradeOAuth] revoke_access_token upstream fetch error:`, err);
+      structuredLog.warn("etradeOAuth.revoke_access_token_fetch_error", { message: "[ETradeOAuth] revoke_access_token upstream fetch error:", error: err instanceof Error ? err.message : String(err) });
     }
   }
 
@@ -677,6 +686,13 @@ export async function getETradeRequestToken(
   callbackUrl?: string,
   overrideEnv?: string
 ): Promise<ETradeRequestTokenResult> {
+  // Issue #3515 S3 batch 8 — env-wired logger: the sink is built from
+  // the request's env so the events reach the Analytics Engine
+  // `observability` dataset (never an empty-env sink, #5587).
+  const structuredLog = createStructuredLogger(createObservabilitySink(env), {
+    component: "security/etradeOAuth",
+  });
+
   const envConfig = resolveEnvironmentConfig(env, overrideEnv);
   const consumerKey = envConfig.etrade.apiKey;
   const consumerSecret = envConfig.etrade.apiSecret;
@@ -721,9 +737,11 @@ export async function getETradeRequestToken(
         // page) is logged server-side only — the surfaced error is
         // the outcome-catalog entry, whose message carries the
         // sandbox-key remediation the diagnostic note used to inline.
-        console.warn(
-          `[getETradeRequestToken] upstream rejected request_token: HTTP ${res.status}: ${errorBody.slice(0, 300)}`
-        );
+        structuredLog.warn("etradeOAuth.request_token_upstream_rejected", {
+          message: `[getETradeRequestToken] upstream rejected request_token: HTTP ${res.status}: ${errorBody.slice(0, 300)}`,
+          status: res.status,
+          errorBody,
+        });
         throw new BusinessError("FAILURE_ETRADE_OAUTH_REQUEST_TOKEN_FAILED");
       }
 
@@ -736,7 +754,7 @@ export async function getETradeRequestToken(
         // Issue #3197: same outcome as an upstream rejection. The
         // body is NOT logged here — a request_token response carries
         // the token secret itself.
-        console.warn("[getETradeRequestToken] upstream response missing oauth_token");
+        structuredLog.warn("etradeOAuth.request_token_missing_oauth_token", { message: "[getETradeRequestToken] upstream response missing oauth_token" });
         throw new BusinessError("FAILURE_ETRADE_OAUTH_REQUEST_TOKEN_FAILED");
       }
 
@@ -770,6 +788,13 @@ export async function exchangeETradeVerifier(
   overrideEnv?: string,
   identity?: ETradeTokenIdentity
 ): Promise<ETradeTokenSet> {
+  // Issue #3515 S3 batch 8 — env-wired logger: the sink is built from
+  // the request's env so the events reach the Analytics Engine
+  // `observability` dataset (never an empty-env sink, #5587).
+  const structuredLog = createStructuredLogger(createObservabilitySink(env), {
+    component: "security/etradeOAuth",
+  });
+
   const envConfig = resolveEnvironmentConfig(env, overrideEnv);
   const consumerKey = envConfig.etrade.apiKey;
   const consumerSecret = envConfig.etrade.apiSecret;
@@ -822,9 +847,11 @@ export async function exchangeETradeVerifier(
         // Issue #3197: the raw upstream body (the owner's 401 arrived
         // as an HTML dump) is logged server-side only — the surfaced
         // error is the outcome-catalog entry.
-        console.warn(
-          `[exchangeETradeVerifier] upstream rejected access_token: HTTP ${res.status}: ${errorBody.slice(0, 300)}`
-        );
+        structuredLog.warn("etradeOAuth.exchange_upstream_rejected", {
+          message: `[exchangeETradeVerifier] upstream rejected access_token: HTTP ${res.status}: ${errorBody.slice(0, 300)}`,
+          status: res.status,
+          errorBody,
+        });
         throw new BusinessError("FAILURE_ETRADE_OAUTH_EXCHANGE_FAILED");
       }
 
@@ -837,7 +864,7 @@ export async function exchangeETradeVerifier(
         // Issue #3197: same outcome as an upstream rejection. The
         // body is NOT logged here — an access_token response carries
         // the token secret itself.
-        console.warn("[exchangeETradeVerifier] upstream response missing access tokens");
+        structuredLog.warn("etradeOAuth.exchange_missing_access_tokens", { message: "[exchangeETradeVerifier] upstream response missing access tokens" });
         throw new BusinessError("FAILURE_ETRADE_OAUTH_EXCHANGE_FAILED");
       }
 
@@ -864,6 +891,13 @@ export async function renewETradeAccessToken(
   overrideEnv?: string,
   identity?: ETradeTokenIdentity
 ): Promise<ETradeTokenSet | null> {
+  // Issue #3515 S3 batch 8 — env-wired logger: the sink is built from
+  // the request's env so the events reach the Analytics Engine
+  // `observability` dataset (never an empty-env sink, #5587).
+  const structuredLog = createStructuredLogger(createObservabilitySink(env), {
+    component: "security/etradeOAuth",
+  });
+
   // Issue #2386: identity-aware read + identity-carrying expiry
   // delete + dual-write store, so a renewed token lands under the
   // internal-id key too and the next status read sees the same set
@@ -873,7 +907,7 @@ export async function renewETradeAccessToken(
   if (!tokens) return null;
 
   if (isTokenExpiredEt(tokens.storedAt)) {
-    console.warn(`Cannot renew E*TRADE token for ${userLogin}: already expired past midnight ET.`);
+    structuredLog.warn("etradeOAuth.renew_token_expired_past_midnight", { message: `Cannot renew E*TRADE token for ${userLogin}: already expired past midnight ET.`, userLogin });
     await revokeStoredTokens(env, userLogin, overrideEnv, identity);
     return null;
   }
@@ -900,7 +934,7 @@ export async function renewETradeAccessToken(
   if (claim === "unavailable") {
     // Lock service unreachable: fail OPEN to the pre-#1245 behavior
     // (renewal availability beats strict single-flight).
-    console.warn(`[renewETradeAccessToken] renewal lock unavailable for ${userLogin}; proceeding without single-flight`);
+    structuredLog.warn("etradeOAuth.renew_lock_unavailable", { message: `[renewETradeAccessToken] renewal lock unavailable for ${userLogin}; proceeding without single-flight`, userLogin });
   }
 
   const baseUrl = envConfig.etrade.baseUrl.replace(/\/v1\/?$/, "");
@@ -927,7 +961,7 @@ export async function renewETradeAccessToken(
         });
 
         if (!res.ok) {
-          console.warn(`E*TRADE renew_access_token failed [HTTP ${res.status}] for ${userLogin}`);
+          structuredLog.warn("etradeOAuth.renew_access_token_failed", { message: `E*TRADE renew_access_token failed [HTTP ${res.status}] for ${userLogin}`, status: res.status, userLogin });
           return null;
         }
 
@@ -1014,6 +1048,13 @@ export async function getValidTokens(
   overrideEnv?: string,
   identity?: ETradeTokenIdentity
 ): Promise<ETradeTokenSet | null> {
+  // Issue #3515 S3 batch 8 — env-wired logger: the sink is built from
+  // the request's env so the events reach the Analytics Engine
+  // `observability` dataset (never an empty-env sink, #5587).
+  const structuredLog = createStructuredLogger(createObservabilitySink(env), {
+    component: "security/etradeOAuth",
+  });
+
   // Issue #2434: with TOKEN_PORTS_ENABLED on, the decision
   // tree below is the port's getValidTokens contract — same
   // cache rules, epoch guard, seam order, unscoped guard,
@@ -1072,7 +1113,7 @@ export async function getValidTokens(
   }
 
   if (isTokenExpiredEt(tokens.storedAt)) {
-    console.warn(`E*TRADE tokens for ${userLogin} expired at midnight ET.`);
+    structuredLog.warn("etradeOAuth.tokens_expired_at_midnight", { message: `E*TRADE tokens for ${userLogin} expired at midnight ET.`, userLogin });
     await revokeStoredTokens(env, userLogin, overrideEnv, identity);
     if (useCache) writeTokenCache(cacheKey, null, readEpoch);
     return null;

@@ -27,6 +27,9 @@ import {
   IAAA_AUDIT_KEY_PREFIX,
   IAAA_AUDIT_TABLE_KEY_PREFIX,
 } from "../data/auditLogPorts";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+import { ConsoleObservabilitySink } from "../observability/observabilityPorts";
 
 /**
  * Session and credential store (issue #329 follow-up).
@@ -700,7 +703,19 @@ export class SessionStore extends DurableObject<Env> {
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      console.error("[SessionStore] op failed", op, message);
+      // #3515 S3 batch 8 — the DO's own env wires the sink to the
+      // Analytics Engine dataset; test instances built via
+      // Object.create (no constructor, no env) fall back to the
+      // structured console sink (never an empty-env sink, #5587).
+      const structuredLog = createStructuredLogger(
+        this.env ? createObservabilitySink(this.env) : new ConsoleObservabilitySink(),
+        { component: "security/sessionStore" },
+      );
+      structuredLog.error("sessionStore.op_failed", {
+        message: "[SessionStore] op failed",
+        op,
+        error: message,
+      });
       return Response.json({ error: message }, { status: 500 });
     }
   }
