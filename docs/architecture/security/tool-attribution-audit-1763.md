@@ -81,6 +81,7 @@ other doors. Scope column is #1843's declaration, consumed here.
 | `get_job_stage_status` | mcp:read | L (I / R on other doors) — one stage of an engine job by job id + stage address (#4361); unknown or ambiguous addresses refuse by name |
 | `set_job_execution_mode` | mcp:write | L (I / R on other doors) — sets a job's execution mode for its next run (#4363); a live run refuses with the next-run-only rule, online+sync is refused |
 | `stock_copilot_stage_control` | mcp:write | L (I / R on other doors) — drives one stage (run/rerun/stop/resume/cancel) of one stock run through the engine control plane (#4362); requires the acting identity, refuses unknown stages by name |
+| `stock_copilot_job_control` | mcp:write | L (I / R on other doors) — drives one WHOLE engine job (start/pause/resume/cancel/retry) through the same control plane (#5739); requires the acting identity before dispatch, refuses an unknown job by name |
 | `etrade_get_quote` | mcp:read | L (I / R on other doors) |
 | `etrade_get_positions` | mcp:read | L (I / R on other doors) |
 | `etrade_auth_status` | mcp:read | L (I / R on other doors) |
