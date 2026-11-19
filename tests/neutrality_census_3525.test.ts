@@ -876,6 +876,16 @@ function measure(): Map<string, number> {
  * verbatim `E*TRADE` messages are unchanged (one message line per
  * site, replacing exactly one such line). Baseline totals move
  * 1335/10877 -> 1335/10884.
+ * Baseline update (#5822, 2026-11-19): the quote freshness gate
+ * (#4437 slice 1) checks the quote cache in the four screen-run
+ * quote binds, so the binds' per-provider cache namespaces and
+ * comments name the provider they serve — dispositioned
+ * INTEGRATION (naming the provider is the binds' job): 3 raises
+ * (screenerPipeline.ts etrade 111->118 / yahoo 80->84 / alpaca
+ * 27->32). The doc prose was neutralized instead (the screener
+ * doc's freshness-rule paragraph names no provider and lists no
+ * namespace), so no docs row moves and no new row is created.
+ * Baseline totals move 1359/11049 -> 1359/11065.
  */
 const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (188 rows / 989 lines) ----
@@ -1815,8 +1825,8 @@ const BASELINE: Array<[string, string, number]> = [
   // `screenerPipeline.etrade_quote_failures` structured-log event
   // name; the other three migrated sites carry no brand term.
   // etrade 110->111.
-  ["src/trading/screenerPipeline.ts", "etrade", 111],
-  ["src/trading/screenerPipeline.ts", "yahoo", 80],
+  ["src/trading/screenerPipeline.ts", "etrade", 118],
+  ["src/trading/screenerPipeline.ts", "yahoo", 84],
   ["src/trading/screenerReportCsv.ts", "etrade", 1],
   ["src/trading/screenerReportPdf.ts", "alpaca", 3],
   ["src/trading/screenerReportPdf.ts", "etrade", 10],
@@ -1941,7 +1951,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/services/scheduledEffectiveMode.ts", "alpaca", 7],
   ["src/services/scheduledTasks.ts", "alpaca", 7],
   ["src/services/shardExecutors.ts", "alpaca", 3],
-  ["src/trading/screenerPipeline.ts", "alpaca", 27],
+  ["src/trading/screenerPipeline.ts", "alpaca", 32],
   ["src/trading/screeningSchemas.ts", "alpaca", 4],
   ["docs/agents/rca-aapl-bracket-order-3812.md", "alpaca", 20],
   ["docs/agents/rca-aapl-bracket-order-3812.md", "etrade", 11],

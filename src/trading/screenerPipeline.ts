@@ -35,6 +35,10 @@ import {
 import { DEFAULT_PIPELINE_POLICY, type RetryPolicy } from "../services/pipelinePolicy";
 import { withRetry } from "../services/resilience";
 import {
+  getCachedQuoteWithAge,
+  setCachedQuote,
+} from "../services/quoteCache";
+import {
   YFINANCE_MARKET_UNIVERSE,
   getCuratedStockBySymbol,
   type CuratedStockSecurity,
@@ -439,13 +443,60 @@ export function bindYahooScreenerDeps(
   provider: DataProvider,
   runContext: DataRunContext
 ): YahooScreenerDeps {
+  // Issue #5822 (#4437 slice 1): freshness gate — the provider
+  // seam checks the quoteCache before fetching live. A fresh
+  // cached row (within QUOTE_CACHE_TTL_MS) is served with zero
+  // provider calls; a miss fetches live once and writes through.
+  // The cached row is served as recorded: yahooQuoteToPipelineQuote
+  // refuses non-"live" rows, so re-stamping it "cached" would
+  // defeat the gate; the TTL is the staleness bound. Any job can
+  // fetch — it just needs to check how fresh the data is (owner
+  // principle 2026-11-19). Same idiom as the research path
+  // (marketDataResearch.ts); no new helper abstraction (#5822
+  // out of scope).
   return {
-    fetchYahooQuote: async (symbol: string) =>
-      (await provider.getQuote!(symbol, runContext)).result as MarketDataResearchQuote,
+    fetchYahooQuote: async (symbol: string) => {
+      const key = `yahoo:${symbol.toUpperCase()}`;
+      const cached =
+        getCachedQuoteWithAge<MarketDataResearchQuote>(key);
+      if (cached) return cached.value;
+      const row = (await provider.getQuote!(symbol, runContext))
+        .result as MarketDataResearchQuote;
+      setCachedQuote(key, row);
+      return row;
+    },
     ...(typeof provider.getQuotesBatch === "function"
       ? {
-          fetchYahooBatchQuotes: async (symbols: string[]) =>
-            (await provider.getQuotesBatch!(symbols, runContext)).result as MarketDataResearchQuote[],
+          fetchYahooBatchQuotes: async (symbols: string[]) => {
+            const bySymbol = new Map<string, MarketDataResearchQuote>();
+            const missing: string[] = [];
+            for (const symbol of symbols) {
+              const cached =
+                getCachedQuoteWithAge<MarketDataResearchQuote>(
+                  `yahoo:${symbol.toUpperCase()}`
+                );
+              if (cached) bySymbol.set(symbol.toUpperCase(), cached.value);
+              else missing.push(symbol);
+            }
+            if (missing.length > 0) {
+              const rows = (
+                await provider.getQuotesBatch!(missing, runContext)
+              ).result as MarketDataResearchQuote[];
+              for (const row of rows) {
+                const upper = String(row.symbol || "").toUpperCase();
+                if (!upper) continue;
+                setCachedQuote(`yahoo:${upper}`, row);
+                bySymbol.set(upper, row);
+              }
+            }
+            // Input order; symbols the live batch omitted stay
+            // absent, exactly as the ungated dep returned them.
+            return symbols
+              .map((s) => bySymbol.get(s.toUpperCase()))
+              .filter(
+                (r): r is MarketDataResearchQuote => r !== undefined
+              );
+          },
         }
       : {}),
   };
@@ -904,15 +955,54 @@ export function quotesProvidersFromRoute(
  */
 export function bindEtradeQuoteDeps(
   provider: DataProvider,
-  runContext: DataRunContext
+  runContext: DataRunContext,
+  providerId: "etrade" | "alpaca" | "public" = "etrade"
 ): QuoteScreenerDeps {
+  // Issue #5822: freshness gate, same idiom as
+  // bindYahooScreenerDeps above — the cache namespace is the
+  // provider id, so a row cached for one provider is never served
+  // to another. The alpaca/public binds pass their own id.
+  const keyFor = (symbol: string) =>
+    `${providerId}:${symbol.toUpperCase()}`;
   return {
-    fetchQuote: async (symbol: string) =>
-      (await provider.getQuote!(symbol, runContext)).result as ETradeQuote,
+    fetchQuote: async (symbol: string) => {
+      const key = keyFor(symbol);
+      const cached = getCachedQuoteWithAge<ETradeQuote>(key);
+      if (cached) return cached.value;
+      const row = (await provider.getQuote!(symbol, runContext))
+        .result as ETradeQuote;
+      setCachedQuote(key, row);
+      return row;
+    },
     ...(typeof provider.getQuotesBatch === "function"
       ? {
-          fetchQuotes: async (symbols: string[]) =>
-            (await provider.getQuotesBatch!(symbols, runContext)).result as ETradeQuote[],
+          fetchQuotes: async (symbols: string[]) => {
+            const bySymbol = new Map<string, ETradeQuote>();
+            const missing: string[] = [];
+            for (const symbol of symbols) {
+              const cached = getCachedQuoteWithAge<ETradeQuote>(
+                keyFor(symbol)
+              );
+              if (cached) bySymbol.set(symbol.toUpperCase(), cached.value);
+              else missing.push(symbol);
+            }
+            if (missing.length > 0) {
+              const rows = (
+                await provider.getQuotesBatch!(missing, runContext)
+              ).result as ETradeQuote[];
+              for (const row of rows) {
+                const upper = String(row.symbol || "").toUpperCase();
+                if (!upper) continue;
+                setCachedQuote(keyFor(upper), row);
+                bySymbol.set(upper, row);
+              }
+            }
+            // Input order; symbols the live batch omitted stay
+            // absent, exactly as the ungated dep returned them.
+            return symbols
+              .map((s) => bySymbol.get(s.toUpperCase()))
+              .filter((r): r is ETradeQuote => r !== undefined);
+          },
         }
       : {}),
   };
@@ -931,7 +1021,10 @@ export function bindAlpacaQuoteDeps(
   provider: DataProvider,
   runContext: DataRunContext
 ): QuoteScreenerDeps {
-  return bindEtradeQuoteDeps(provider, runContext);
+  // Issue #5822: the namespace matters now — the alpaca bind
+  // passes its own id so the freshness gate caches under
+  // "alpaca:", never under "etrade:".
+  return bindEtradeQuoteDeps(provider, runContext, "alpaca");
 }
 
 /**
@@ -947,7 +1040,10 @@ export function bindPublicQuoteDeps(
   provider: DataProvider,
   runContext: DataRunContext
 ): QuoteScreenerDeps {
-  return bindEtradeQuoteDeps(provider, runContext);
+  // Issue #5822: the namespace matters now — the public bind
+  // passes its own id so the freshness gate caches under
+  // "public:", never under "etrade:".
+  return bindEtradeQuoteDeps(provider, runContext, "public");
 }
 
 /**
@@ -1082,33 +1178,35 @@ export function bindLiveQuotesQuoteDeps(
   runContext: DataRunContext
 ): QuoteScreenerDeps {
   const primaryDeps = bindEtradeQuoteDeps(primary, runContext);
-  const gapQuote = gapFill
+  // Issue #5822: the gap-fill leg reads through the gated Yahoo
+  // bind, not the provider directly — the freshness gate applies
+  // to every quote fetch in the run, primary and gap-fill alike.
+  const gapDeps = gapFill ? bindYahooScreenerDeps(gapFill, runContext) : null;
+  const gapQuote = gapDeps
     ? async (symbol: string): Promise<ETradeQuote | null> => {
         try {
-          const row = (await gapFill.getQuote!(symbol, runContext)).result as MarketDataResearchQuote;
+          const row = await gapDeps.fetchYahooQuote(symbol);
           return yahooQuoteToPipelineQuote(row);
         } catch {
           return null;
         }
       }
     : null;
-  const gapQuotes =
-    gapFill && typeof gapFill.getQuotesBatch === "function"
-      ? async (symbols: string[]): Promise<Map<string, ETradeQuote>> => {
-          try {
-            const rows = (await gapFill.getQuotesBatch!(symbols, runContext))
-              .result as MarketDataResearchQuote[];
-            const out = new Map<string, ETradeQuote>();
-            for (const row of rows) {
-              const quote = yahooQuoteToPipelineQuote(row);
-              if (quote) out.set(quote.symbol.toUpperCase(), quote);
-            }
-            return out;
-          } catch {
-            return new Map();
+  const gapQuotes = gapDeps?.fetchYahooBatchQuotes
+    ? async (symbols: string[]): Promise<Map<string, ETradeQuote>> => {
+        try {
+          const rows = await gapDeps.fetchYahooBatchQuotes!(symbols);
+          const out = new Map<string, ETradeQuote>();
+          for (const row of rows) {
+            const quote = yahooQuoteToPipelineQuote(row);
+            if (quote) out.set(quote.symbol.toUpperCase(), quote);
           }
+          return out;
+        } catch {
+          return new Map();
         }
-      : null;
+      }
+    : null;
   return {
     fetchQuote: async (symbol: string) => {
       try {

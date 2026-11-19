@@ -134,6 +134,8 @@ To maintain architectural integrity across asset classes, the screening engine e
 ### 3.2 Deep-Dive Parity Gaps & Convergence Strategy
 
 1. **Caching & Feed Convergence**: Stock screening uses a 5-minute memory/KV cache for listings (`nasdaq_listings_cache.test.ts`). Options chain calls require real-time execution; jednak introducing a 1-minute TTL quote cache (`quote_cache.ts`) harmonizes subrequest behavior between stock and options sweeps.
+
+    **Quote freshness rule (#5822, owner principle 2026-11-19): any job can do a fetch — it just needs to check how fresh the data is.** The screen-run quote binds in `src/trading/screenerPipeline.ts` (one per provider, plus the live-quotes gap-fill leg) check the quote cache (`src/services/quoteCache.ts`, 5-minute TTL, per-provider namespaces) before fetching live: fresh data is served with zero provider calls; stale or missing data fetches live exactly once per symbol set and writes through. A cached row is served as recorded — the pipeline's provenance gate refuses non-`"live"` rows, so the TTL, not a re-stamp, is the staleness bound. The feed capture's `staleAfterMinutes` (31 days by default) is the persisted-dataset horizon, not the live-quote horizon: it does not make a month-old capture fresh for a screen run. Pinned behaviorally in `tests/quote_freshness_gate_5822.test.ts` (counting provider).
 2. **Indicator Standardization**: Technical indicators computed for stocks (RSI, MACD, SMA) are being injected directly into options underlying evaluation via `screeningIndicators.ts` to ensure option strategies are evaluated in context with underlying trend momentum.
 
 ---
