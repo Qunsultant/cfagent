@@ -1201,6 +1201,101 @@ export async function handleReportsRoutes(
     }
   }
 
+  // Issue #2862: Options report replay from stored captures + stored body.
+  if (path.endsWith("/runs/replay") && request.method === "POST") {
+    try {
+      const headerLogin = request.headers.get("x-user-login")?.trim() || "";
+      if (!headerLogin) {
+        return Response.json({ error: "x-user-login is required to replay a report" }, { status: 401 });
+      }
+      const body = (await request.json().catch(() => ({}))) as { sourceRunId?: string; replayRunId?: string };
+      const sourceRunId = typeof body?.sourceRunId === "string" ? body.sourceRunId.trim() : "";
+      if (!sourceRunId) {
+        return Response.json({ error: "sourceRunId is required" }, { status: 400 });
+      }
+      const sql = ctx.ensureTables();
+      const { ensureScheduledReportsTable, listScheduledReports } = await import("../../services/scheduledReports");
+      const { replayOptionsReport } = await import("../../services/optionsReportReplay");
+      ensureScheduledReportsTable(sql);
+      const tenantId = resolveIaaaTenant((ctx as any).env as { IAAA_TENANT_ID?: string } | null | undefined);
+      const result = await replayOptionsReport(
+        {
+          sql,
+          orm: (ctx.getOrm?.() ?? null) as any,
+          env: ((ctx as any).env ?? {}) as Record<string, unknown>,
+          findSourceReport: (wanted, owner) => {
+            const hits = listScheduledReports(sql, { userLogin: owner, limit: 100 });
+            return hits.find((h) => h.runId === wanted || h.id === wanted) ?? null;
+          },
+        },
+        {
+          sourceRunId,
+          replayRunId: body.replayRunId,
+          tenantId,
+          userLogin: headerLogin,
+        },
+      );
+      if (!result.ok) {
+        const status = result.code === "FAILURE_REPLAY_RUN_NOT_FOUND" ? 404 : 422;
+        return Response.json(result, { status });
+      }
+      return Response.json(result, { status: 201 });
+    } catch (err: any) {
+      return Response.json({ error: err?.message || "Failed to replay report" }, { status: 500 });
+    }
+  }
+
+  // Issue #2903: Timestamped recommendation portfolio snapshots & construction.
+  if (path.endsWith("/recommendation-snapshots") && request.method === "GET") {
+    try {
+      const headerLogin = request.headers.get("x-user-login")?.trim() || "";
+      if (!headerLogin) {
+        return Response.json({ error: "x-user-login is required" }, { status: 401 });
+      }
+      const sql = ctx.ensureTables();
+      const { listRecommendationSnapshots } = await import("../../services/recommendationPortfolios");
+      const tenantId = resolveIaaaTenant((ctx as any).env as { IAAA_TENANT_ID?: string } | null | undefined);
+      const limit = Math.max(1, Math.min(parseInt(url.searchParams.get("limit") || "50", 10) || 50, 200));
+      return Response.json({
+        snapshots: listRecommendationSnapshots(sql, tenantId, headerLogin, limit),
+      });
+    } catch (err: any) {
+      return Response.json({ error: err?.message || "Failed to list recommendation snapshots" }, { status: 500 });
+    }
+  }
+
+  if (path.endsWith("/recommendation-snapshots/construct") && request.method === "POST") {
+    try {
+      const headerLogin = request.headers.get("x-user-login")?.trim() || "";
+      if (!headerLogin) {
+        return Response.json({ error: "x-user-login is required" }, { status: 401 });
+      }
+      const body = (await request.json().catch(() => ({}))) as {
+        snapshotId?: string;
+        runId?: string;
+        sourceSnapshotIds?: string[];
+        thesis?: string | null;
+      };
+      const sql = ctx.ensureTables();
+      const { constructPortfolioFromSnapshots } = await import("../../services/recommendationPortfolios");
+      const tenantId = resolveIaaaTenant((ctx as any).env as { IAAA_TENANT_ID?: string } | null | undefined);
+      const result = constructPortfolioFromSnapshots(sql, {
+        snapshotId: body.snapshotId,
+        runId: typeof body.runId === "string" && body.runId.trim() ? body.runId.trim() : `portfolio-run:${crypto.randomUUID()}`,
+        userLogin: headerLogin,
+        tenantId,
+        sourceSnapshotIds: Array.isArray(body.sourceSnapshotIds) ? body.sourceSnapshotIds : [],
+        thesis: body.thesis,
+      });
+      if (!result.ok) {
+        return Response.json(result, { status: 422 });
+      }
+      return Response.json(result, { status: 201 });
+    } catch (err: any) {
+      return Response.json({ error: err?.message || "Failed to construct portfolio" }, { status: 500 });
+    }
+  }
+
   // Issue #1057 (consolidation S5): the one Runs read surface. Merges
   // run summaries from all five run stores (mas_reports,
   // mas_opportunity_scans, mas_discovery_runs, the ScreenerAgent

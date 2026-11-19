@@ -1,0 +1,3 @@
+### Added
+- **Options report replay (#2862):** Added `replayOptionsReport` (`src/services/optionsReportReplay.ts`) and `POST /runs/replay` (`src/agents/routes/reports.ts`) to reproduce any report strictly from stored `mas_data_captures` and stored canonical/R2 body into a new `replayedFrom`-linked run, refusing loudly with coded failures when captures or R2 objects are absent.
+- **Timestamped recommendation portfolios (#2903):** Added `mas_recommendation_snapshots` store and `constructPortfolioFromSnapshots` (`src/services/recommendationPortfolios.ts`) plus `GET /recommendation-snapshots` and `POST /recommendation-snapshots/construct` routes for immutable historical comparison and portfolio construction without live re-fetches.

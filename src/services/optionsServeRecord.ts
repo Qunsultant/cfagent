@@ -160,6 +160,13 @@ export interface UnifiedOptionsRunRecord {
   filter?: unknown;
   result?: Record<string, unknown>;
   provenance?: Record<string, unknown>;
+  /** Issue #2862 — lineage back to the original run when this row is a replay. */
+  replayedFrom?: {
+    runId: string;
+    reportId?: string | null;
+    captureIds?: string[];
+    bodyR2Key?: string | null;
+  };
 }
 
 /**
@@ -198,6 +205,7 @@ export function unifiedOptionsRunRecordToStoreInput(
       ...(input.filter !== undefined ? { filter: input.filter } : {}),
       ...(input.result !== undefined ? { result: input.result } : {}),
       ...(input.provenance !== undefined ? { provenance: input.provenance } : {}),
+      ...(input.replayedFrom !== undefined ? { replayedFrom: input.replayedFrom } : {}),
       ...(input.pdfKey ? { pdfKey: input.pdfKey } : {}),
       ...(input.pdfStatus ? { pdfStatus: input.pdfStatus } : {}),
       ...(input.pdfError ? { pdfError: input.pdfError } : {}),
