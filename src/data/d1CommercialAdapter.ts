@@ -10,7 +10,7 @@
  * (the account upsert in activation; the three settings upserts
  * in a tenant PATCH). Issue #5605 (G-2): those writes buffer
  * into an ambient D1 batch unit when the caller opened one
- * (bufferInAmbientUnit in the transaction aspect) and are
+ * (bufferD1Statement in transactionRunnerProvider, the client-safe seam over the aspect) and are
  * applied by one D1 batch(); without an ambient unit they
  * execute immediately, exactly as before. Each settings upsert
  * SETs only its own half, so three buffered upserts compose
@@ -25,7 +25,7 @@
 import { type DrizzleD1Database } from "drizzle-orm/d1";
 import { createDrizzleD1Db } from "./d1QueryLogger";
 import { and, asc, eq, isNull } from "drizzle-orm";
-import { bufferInAmbientUnit } from "../aspects/transactionAspect";
+import { bufferD1Statement } from "./transactionRunnerProvider";
 import {
   agentCommercialAccounts,
   agentCreditClaims,
@@ -245,7 +245,7 @@ export class D1CommercialAdapter implements CommercialStore {
         },
       });
     const { sql, params } = query.toSQL();
-    if (bufferInAmbientUnit(sql, ...params)) return record;
+    if (bufferD1Statement(sql, ...params)) return record;
     await query;
     return record;
   }
@@ -344,7 +344,7 @@ export class D1CommercialAdapter implements CommercialStore {
         set: { adsEnabled: adsEnabled ? 1 : 0, updatedAtMs: record.updatedAtMs },
       });
     const { sql, params } = query.toSQL();
-    if (bufferInAmbientUnit(sql, ...params)) return record;
+    if (bufferD1Statement(sql, ...params)) return record;
     await query;
     return record;
   }
@@ -411,7 +411,7 @@ export class D1CommercialAdapter implements CommercialStore {
         },
       });
     const { sql, params } = query.toSQL();
-    if (bufferInAmbientUnit(sql, ...params)) return record;
+    if (bufferD1Statement(sql, ...params)) return record;
     await query;
     return record;
   }
@@ -500,7 +500,7 @@ export class D1CommercialAdapter implements CommercialStore {
         },
       });
     const { sql, params } = query.toSQL();
-    if (bufferInAmbientUnit(sql, ...params)) return record;
+    if (bufferD1Statement(sql, ...params)) return record;
     await query;
     return record;
   }

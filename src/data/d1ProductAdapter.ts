@@ -9,7 +9,7 @@
  * composes with the subscription planId update into one pair.
  * Issue #5605 (G-2): the audit insert buffers into an ambient
  * D1 batch unit when the caller opened one
- * (bufferInAmbientUnit in the transaction aspect) and is applied
+ * (bufferD1Statement in transactionRunnerProvider, the client-safe seam over the aspect) and is applied
  * by one D1 batch() with the planId update; without an ambient
  * unit it executes immediately, exactly as before. No
  * multi-statement transaction is used here, for the reason
@@ -20,7 +20,7 @@
 import { type DrizzleD1Database } from "drizzle-orm/d1";
 import { createDrizzleD1Db } from "./d1QueryLogger";
 import { and, asc, desc, eq } from "drizzle-orm";
-import { bufferInAmbientUnit } from "../aspects/transactionAspect";
+import { bufferD1Statement } from "./transactionRunnerProvider";
 import { agentBulkMoves, agentProducts, agentVersionMoves } from "./drizzleSchema";
 import {
   applyMigrations,
@@ -283,7 +283,7 @@ export class D1ProductAdapter implements ProductStore {
       })
       .onConflictDoNothing();
     const { sql, params } = query.toSQL();
-    if (bufferInAmbientUnit(sql, ...params)) return record;
+    if (bufferD1Statement(sql, ...params)) return record;
     await query;
     return record;
   }
