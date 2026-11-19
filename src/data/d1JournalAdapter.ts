@@ -5,19 +5,32 @@
  * behind the port interface (ADR 0002 R2).
  *
  * Transactions: every operation is a single statement (one
- * INSERT, one SELECT), which is atomic on any store. No
- * multi-statement transaction is used here, for the reason
- * recorded in migrationRunner.ts (drizzle-orm/d1's
- * `db.transaction()` is sequential BEGIN/COMMIT, not
- * Postgres-equivalent atomicity on D1). The replay guard is a
- * read-before-write on transactionRef: a replayed post returns
- * the existing entries without writing. A crash between the two
- * statements of one post leaves a partial set, which
- * reconcileJournal reports (never silently corrects).
+ * INSERT, one SELECT), which is atomic on any store — except
+ * postEntries, which writes one row per entry. Issue #5605
+ * (G-2): the post's inserts run as ONE unit through the
+ * transaction aspect's D1 batch leg (`withTransaction` over
+ * `d1BatchTransactionBackend` on this db's `$client`): all
+ * statements in one batch, or none applied. The replay probe
+ * reads before the unit opens and the landing re-read runs
+ * after it applies — a D1 unit is write-only, so no read runs
+ * inside it. No multi-statement transaction is used anywhere
+ * else here, for the reason recorded in migrationRunner.ts
+ * (drizzle-orm/d1's `db.transaction()` is sequential
+ * BEGIN/COMMIT, not Postgres-equivalent atomicity on D1). The
+ * replay guard is a read-before-write on transactionRef: a
+ * replayed post returns the existing entries without writing.
+ * A crash between the two statements of one post leaves a
+ * partial set, which reconcileJournal reports (never silently
+ * corrects) — that window is pre-#5605 posts only; a batched
+ * post cannot leave one.
  */
 import { type DrizzleD1Database } from "drizzle-orm/d1";
 import { createDrizzleD1Db } from "./d1QueryLogger";
 import { and, asc, eq } from "drizzle-orm";
+import {
+  d1BatchTransactionBackend,
+  withTransaction,
+} from "../aspects/transactionAspect";
 import {
   bindTenantScope,
   tenantEq,
@@ -50,7 +63,7 @@ import {
 export type JournalDb = DrizzleD1Database<{
   agentJournalAccounts: typeof agentJournalAccounts;
   agentJournalEntries: typeof agentJournalEntries;
-}>;
+}> & { $client: D1Database };
 
 /** Build the Drizzle D1 database object from a bound D1 client. */
 export function createD1JournalDb(d1: D1Database): JournalDb {
@@ -125,44 +138,61 @@ export class D1JournalAdapter implements JournalPort {
     if (existing.length > 0) return existing;
     const now = Date.now();
     const written: JournalEntry[] = [];
-    for (const e of entries) {
-      const record: JournalEntry = {
-        id: journalEntryId(e.transactionRef, e.accountCode),
-        transactionRef: e.transactionRef,
-        accountCode: e.accountCode,
-        debitUSD: e.debitUSD,
-        creditUSD: e.creditUSD,
-        currency: e.currency,
-        tenantId: e.tenantId,
-        runRequestId: e.runRequestId,
-        family: e.family,
-        // Issue #3289: per-charge recording — null when the
-        // mapping carries none (top-up, legacy replays).
-        productId: e.productId ?? null,
-        versionId: e.versionId ?? null,
-        priceUSD: e.priceUSD ?? null,
-        createdAtMs: now,
-      };
-      await this.db
-        .insert(agentJournalEntries)
-        .values({
-          id: record.id,
-          transactionRef: record.transactionRef,
-          accountCode: record.accountCode,
-          debitUSD: record.debitUSD,
-          creditUSD: record.creditUSD,
-          currency: record.currency,
-          tenantId: record.tenantId,
-          runRequestId: record.runRequestId,
-          family: record.family,
-          productId: record.productId,
-          versionId: record.versionId,
-          priceUSD: record.priceUSD,
-          createdAtMs: record.createdAtMs,
-        })
-        .onConflictDoNothing();
-      written.push(record);
-    }
+    // Issue #5605 (G-2): the post's inserts are ONE batch unit —
+    // the statements are rendered with .toSQL() into the unit
+    // and applied by a single D1 batch() when the unit succeeds.
+    // A throw anywhere discards the buffer: no partial set can
+    // land. The probe above read before the unit opened and the
+    // landing re-read below runs after it applies (a D1 unit is
+    // write-only). `$client` is the logger-wrapped binding from
+    // createDrizzleD1Db — its batch() unwraps the prepared
+    // statements before the real batch (d1QueryLogger header).
+    await withTransaction(
+      d1BatchTransactionBackend(this.db.$client),
+      { operationName: "journal.postEntries", domain: "journal" },
+      (unit) => {
+        for (const e of entries) {
+          const record: JournalEntry = {
+            id: journalEntryId(e.transactionRef, e.accountCode),
+            transactionRef: e.transactionRef,
+            accountCode: e.accountCode,
+            debitUSD: e.debitUSD,
+            creditUSD: e.creditUSD,
+            currency: e.currency,
+            tenantId: e.tenantId,
+            runRequestId: e.runRequestId,
+            family: e.family,
+            // Issue #3289: per-charge recording — null when the
+            // mapping carries none (top-up, legacy replays).
+            productId: e.productId ?? null,
+            versionId: e.versionId ?? null,
+            priceUSD: e.priceUSD ?? null,
+            createdAtMs: now,
+          };
+          const { sql, params } = this.db
+            .insert(agentJournalEntries)
+            .values({
+              id: record.id,
+              transactionRef: record.transactionRef,
+              accountCode: record.accountCode,
+              debitUSD: record.debitUSD,
+              creditUSD: record.creditUSD,
+              currency: record.currency,
+              tenantId: record.tenantId,
+              runRequestId: record.runRequestId,
+              family: record.family,
+              productId: record.productId,
+              versionId: record.versionId,
+              priceUSD: record.priceUSD,
+              createdAtMs: record.createdAtMs,
+            })
+            .onConflictDoNothing()
+            .toSQL();
+          unit.exec(sql, ...params);
+          written.push(record);
+        }
+      },
+    );
     // #1761: the entry id is tenant-blind (`ref:account`), so a
     // post under another tenant for an already-posted ref would
     // silently no-op on the id conflict and return phantom rows

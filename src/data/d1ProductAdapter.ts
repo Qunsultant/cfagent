@@ -5,14 +5,22 @@
  * query builder) lives here, behind the port interface.
  *
  * Transactions: every operation is a single statement, which is
- * atomic on any store. No multi-statement transaction is used
- * here, for the reason recorded in migrationRunner.ts
- * (drizzle-orm/d1's `db.transaction()` is sequential
- * BEGIN/COMMIT, not Postgres-equivalent atomicity on D1).
+ * atomic on any store — except recordMove, which a version move
+ * composes with the subscription planId update into one pair.
+ * Issue #5605 (G-2): the audit insert buffers into an ambient
+ * D1 batch unit when the caller opened one
+ * (bufferInAmbientUnit in the transaction aspect) and is applied
+ * by one D1 batch() with the planId update; without an ambient
+ * unit it executes immediately, exactly as before. No
+ * multi-statement transaction is used here, for the reason
+ * recorded in migrationRunner.ts (drizzle-orm/d1's
+ * `db.transaction()` is sequential BEGIN/COMMIT, not
+ * Postgres-equivalent atomicity on D1).
  */
 import { type DrizzleD1Database } from "drizzle-orm/d1";
 import { createDrizzleD1Db } from "./d1QueryLogger";
 import { and, asc, desc, eq } from "drizzle-orm";
+import { bufferInAmbientUnit } from "../aspects/transactionAspect";
 import { agentBulkMoves, agentProducts, agentVersionMoves } from "./drizzleSchema";
 import {
   applyMigrations,
@@ -253,7 +261,13 @@ export class D1ProductAdapter implements ProductStore {
       reason: move.reason ?? null,
       movedAtMs: move.movedAtMs ?? Date.now(),
     };
-    await this.db
+    // Issue #5605 (G-2): when the caller opened a D1 batch unit
+    // (a version move), the audit insert buffers into it and the
+    // computed record returns. The (bulkMoveId, userId) backstop
+    // read above ran before the unit opened and sees committed
+    // state. Without an ambient unit the insert executes
+    // immediately, exactly as before.
+    const query = this.db
       .insert(agentVersionMoves)
       .values({
         id: record.id,
@@ -268,6 +282,9 @@ export class D1ProductAdapter implements ProductStore {
         movedAtMs: record.movedAtMs,
       })
       .onConflictDoNothing();
+    const { sql, params } = query.toSQL();
+    if (bufferInAmbientUnit(sql, ...params)) return record;
+    await query;
     return record;
   }
 

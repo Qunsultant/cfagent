@@ -278,6 +278,7 @@ import {
 import type { D1ProductAdapter } from "../../data/d1ProductAdapter";
 import { FREE_PRODUCT_ID, assertProductRank, perRunProductId, resolveEffectiveVersion } from "../../data/productPorts";
 import { moveSubscriptionToVersion, runBulkMove, setAccountSegment } from "../../services/versionMoves";
+import { createD1BatchRunner } from "../../data/d1BatchRunner";
 import {
   createOfferSuppressionAdapter,
   ensureOfferSuppressionSchema,
@@ -3105,6 +3106,12 @@ export async function handleAgenticPaymentsRoutes(
         providerPaymentRef: checkoutRequestId,
         stripeSessionId: evidence.sessionId,
         stripePaymentIntentId: evidence.paymentIntentId,
+        // Issue #5605 (G-2): the subscription-row + account-row
+        // pair runs as one D1 batch unit. AGENT_DB is bound here
+        // (requireStore/requireSubs above fail closed otherwise).
+        batch: createD1BatchRunner(
+          (ctx.env as { AGENT_DB?: unknown }).AGENT_DB as D1Database,
+        ),
       });
       // The activation creates the row that flips the effective
       // tier, so the new side is computed from the returned
@@ -4661,6 +4668,12 @@ export async function handleAgenticPaymentsRoutes(
         userId,
         plan,
         grantedBy: login,
+        // Issue #5605 (G-2): the subscription-row + account-row
+        // pair runs as one D1 batch unit (AGENT_DB bound here —
+        // requireStore/requireSubs above fail closed otherwise).
+        batch: createD1BatchRunner(
+          (ctx.env as { AGENT_DB?: unknown }).AGENT_DB as D1Database,
+        ),
       });
       const grantedSubscriptions = await subs.listSubscriptions(userId);
       const grantTransition = resolveTierTransition(
@@ -6258,6 +6271,11 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
         toVersionId,
         movedBy: login as string,
         reason,
+        // Issue #5605 (G-2): the planId update + audit-row pair
+        // runs as one D1 batch unit (AGENT_DB bound here).
+        batch: createD1BatchRunner(
+          (ctx.env as { AGENT_DB?: unknown }).AGENT_DB as D1Database,
+        ),
       });
       ctx.audit("commercial.product.move", "payments", {
         userId: result.subscription.userId,
@@ -7315,6 +7333,12 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
         ...(resumeBulkMoveId ? { resumeBulkMoveId } : {}),
         ...(limit !== undefined ? { limit } : {}),
         dryRun,
+        // Issue #5605 (G-2): forwarded to each per-customer
+        // move so each customer's pair runs as one D1 batch unit
+        // (AGENT_DB bound here).
+        batch: createD1BatchRunner(
+          (ctx.env as { AGENT_DB?: unknown }).AGENT_DB as D1Database,
+        ),
       });
       if (!dryRun && result.bulkMove) {
         ctx.audit("commercial.product.bulk_move", "payments", {

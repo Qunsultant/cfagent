@@ -5,17 +5,25 @@
  * query builder) lives here, behind the port interface.
  *
  * Transactions: every operation is a single statement, which is
- * atomic on any store. No multi-statement transaction is used
- * here, for the reason recorded in migrationRunner.ts
- * (drizzle-orm/d1's `db.transaction()` is sequential
- * BEGIN/COMMIT, not Postgres-equivalent atomicity on D1). The
- * payment-reference uniqueness is a single UNIQUE index: the
- * loser of a race gets a UNIQUE violation and re-checks, never a
- * double activation.
+ * atomic on any store — except the writes a service composes
+ * into a pair (createSubscription with the account upsert in
+ * activation; moveSubscriptionToVersion with the audit row in a
+ * version move). Issue #5605 (G-2): those writes buffer into an
+ * ambient D1 batch unit when the caller opened one
+ * (bufferInAmbientUnit in the transaction aspect) and are
+ * applied by one D1 batch(); without an ambient unit they
+ * execute immediately, exactly as before. No multi-statement
+ * transaction is used here, for the reason recorded in
+ * migrationRunner.ts (drizzle-orm/d1's `db.transaction()` is
+ * sequential BEGIN/COMMIT, not Postgres-equivalent atomicity
+ * on D1). The payment-reference uniqueness is a single UNIQUE
+ * index: the loser of a race gets a UNIQUE violation and
+ * re-checks, never a double activation.
  */
 import { type DrizzleD1Database } from "drizzle-orm/d1";
 import { createDrizzleD1Db } from "./d1QueryLogger";
 import { and, asc, eq, gt } from "drizzle-orm";
+import { bufferInAmbientUnit } from "../aspects/transactionAspect";
 import { BusinessError } from "../outcomes/outcomeAspects";
 import { agentSubscriptionPlans, agentSubscriptions } from "./drizzleSchema";
 import {
@@ -233,10 +241,22 @@ export class D1SubscriptionAdapter implements SubscriptionStore {
     if (!existing) throw new Error(`No subscription ${subscriptionId}.`);
     const target = await this.getPlan(versionId);
     if (!target) throw new Error(`No plan version ${versionId}.`);
-    await this.db
+    // Issue #5605 (G-2): the update's timestamp is captured once
+    // so the buffered and executed paths write the same value —
+    // and the buffered path can return the updated record without
+    // re-reading (a re-read inside a unit would see pre-batch
+    // state and return the old planId). Outside a unit the
+    // re-read below stays, exactly as before.
+    const nowMs = Date.now();
+    const query = this.db
       .update(agentSubscriptions)
-      .set({ planId: versionId, updatedAtMs: Date.now() })
+      .set({ planId: versionId, updatedAtMs: nowMs })
       .where(eq(agentSubscriptions.id, subscriptionId));
+    const { sql, params } = query.toSQL();
+    if (bufferInAmbientUnit(sql, ...params)) {
+      return { ...existing, planId: versionId, updatedAtMs: nowMs };
+    }
+    await query;
     const updated = await this.getSubscription(subscriptionId);
     if (!updated) throw new Error(`No subscription ${subscriptionId}.`);
     return updated;
@@ -319,25 +339,37 @@ export class D1SubscriptionAdapter implements SubscriptionStore {
       createdAtMs: now,
       updatedAtMs: now,
     };
+    // Issue #5605 (G-2): when the caller opened a D1 batch
+    // unit, the insert buffers into it and the computed record
+    // returns — the UNIQUE-violation backstop below cannot fire
+    // on a buffered statement (constraint failures surface when
+    // the batch applies, after this method returns); the
+    // service-level replay check runs before the unit opens, so
+    // a batched violation is a genuine race, and it still fails
+    // the whole unit with no partial state. Without an ambient
+    // unit the insert executes immediately, exactly as before.
+    const query = this.db.insert(agentSubscriptions).values({
+      id: record.id,
+      userId: record.userId,
+      tenantId: record.tenantId,
+      planId: record.planId,
+      provider: record.provider,
+      providerPaymentRef: record.providerPaymentRef,
+      stripeSessionId: record.stripeSessionId,
+      stripePaymentIntentId: record.stripePaymentIntentId,
+      providerSubscriptionId: record.providerSubscriptionId,
+      providerStatus: record.providerStatus,
+      status: record.status,
+      periodStartMs: record.periodStartMs,
+      periodEndMs: record.periodEndMs,
+      canceledAtMs: record.canceledAtMs,
+      createdAtMs: record.createdAtMs,
+      updatedAtMs: record.updatedAtMs,
+    });
+    const { sql, params } = query.toSQL();
+    if (bufferInAmbientUnit(sql, ...params)) return record;
     try {
-      await this.db.insert(agentSubscriptions).values({
-        id: record.id,
-        userId: record.userId,
-        tenantId: record.tenantId,
-        planId: record.planId,
-        provider: record.provider,
-        providerPaymentRef: record.providerPaymentRef,
-        stripeSessionId: record.stripeSessionId,
-        stripePaymentIntentId: record.stripePaymentIntentId,
-        providerSubscriptionId: record.providerSubscriptionId,
-        providerStatus: record.providerStatus,
-        status: record.status,
-        periodStartMs: record.periodStartMs,
-        periodEndMs: record.periodEndMs,
-        canceledAtMs: record.canceledAtMs,
-        createdAtMs: record.createdAtMs,
-        updatedAtMs: record.updatedAtMs,
-      });
+      await query;
     } catch {
       const existing = await this.findByPaymentRef(input.providerPaymentRef);
       if (existing) throw new Error(`Payment reference ${input.providerPaymentRef} already activated subscription ${existing.id}.`);

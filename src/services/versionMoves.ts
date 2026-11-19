@@ -51,6 +51,7 @@
  * move never trusts a client-supplied segment.
  */
 import type { CommercialAccountRecord, CommercialStore } from "../data/commercialPorts";
+import type { D1BatchRunner } from "../data/transactionRunnerProvider";
 import {
   assertSegment,
   DEFAULT_SEGMENT,
@@ -72,6 +73,15 @@ export interface MoveSubscriptionInput {
   /** The bulk move this move belongs to; null for a per-customer move. */
   bulkMoveId?: string | null;
   nowMs?: number;
+  /**
+   * Issue #5605 (G-2): the D1 batch runner, when the caller
+   * supplies one. The planId update + audit-row pair then runs
+   * as ONE batch unit; without it the pair applies
+   * sequentially, exactly as before. All reads (subscription,
+   * plans, account, effective-version check) run before the
+   * unit opens.
+   */
+  batch?: D1BatchRunner | null;
 }
 
 export interface MoveSubscriptionResult {
@@ -114,19 +124,35 @@ export async function moveSubscriptionToVersion(
   // Effective + approved for the holder's segment, at now.
   await assertPlanEffectiveAndApprovedForSegment(subs, target, segment, nowMs);
   // PlanId update first, then the audit row.
-  const updated = await subs.moveSubscriptionToVersion(subscriptionId, toVersionId);
-  await products.recordMove({
-    bulkMoveId: input.bulkMoveId ?? null,
-    userId: subscription.userId,
-    productId: target.productId,
-    fromVersionId: subscription.planId,
-    toVersionId,
-    segment,
-    movedBy,
-    reason: input.reason ?? null,
-    movedAtMs: nowMs,
-  });
-  return { subscription: updated, moved: true, fromVersionId: subscription.planId, toVersionId };
+  // Issue #5605 (G-2): the pair runs as one batch unit when
+  // the caller supplied a runner — the D1 adapters buffer both
+  // statements into the ambient unit, so a failing audit insert
+  // leaves no moved subscription behind (and vice versa).
+  // Without a runner the pair applies sequentially, exactly as
+  // before (the module header's "update first, then audit"
+  // order is preserved inside the unit).
+  const writePair = async (): Promise<MoveSubscriptionResult> => {
+    const updated = await subs.moveSubscriptionToVersion(subscriptionId, toVersionId);
+    await products.recordMove({
+      bulkMoveId: input.bulkMoveId ?? null,
+      userId: subscription.userId,
+      productId: target.productId,
+      fromVersionId: subscription.planId,
+      toVersionId,
+      segment,
+      movedBy,
+      reason: input.reason ?? null,
+      movedAtMs: nowMs,
+    });
+    return { subscription: updated, moved: true, fromVersionId: subscription.planId, toVersionId };
+  };
+  if (input.batch) {
+    return input.batch.runInBatch(
+      { operationName: "subscription.move", domain: "subscriptions" },
+      writePair,
+    );
+  }
+  return writePair();
 }
 
 export interface SetAccountSegmentInput {
@@ -226,6 +252,16 @@ export interface RunBulkMoveInput {
   /** Preview only: resolve targets + count the population, move nobody, write nothing. */
   dryRun?: boolean;
   nowMs?: number;
+  /**
+   * Issue #5605 (G-2): the D1 batch runner, forwarded to each
+   * per-customer move so each customer's pair runs as one batch
+   * unit. The job itself is NOT one unit: a per-customer
+   * failure stays recorded-and-counted, never fatal to the job,
+   * and the resume pass still skips already-moved customers.
+   * The summary-row create/update are single statements and
+   * stay outside any unit.
+   */
+  batch?: D1BatchRunner | null;
 }
 
 export interface RunBulkMoveResult {
@@ -432,6 +468,7 @@ export async function runBulkMove(input: RunBulkMoveInput): Promise<RunBulkMoveR
         reason: input.reason ?? null,
         bulkMoveId: bulkMove.id,
         nowMs,
+        batch: input.batch ?? null,
       });
       if (result.moved) moved += 1;
       else skipped += 1;
