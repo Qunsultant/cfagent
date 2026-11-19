@@ -160,6 +160,7 @@ export async function startPaymentWorkflowViaBinding(
   const started = await startManagedWorkflowInstance(binding, {
     id: params.runRequestId,
     params,
+    workflowName: PAYMENT_WORKFLOW_BINDING,
   });
   return { workflowId: started.workflowId };
 }

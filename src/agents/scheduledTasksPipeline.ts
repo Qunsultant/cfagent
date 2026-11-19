@@ -53,6 +53,10 @@ import type { JobStageEventStore } from "../data/jobStageEventPorts";
 import type { JobRunTrigger } from "../data/jobRunRecordPorts";
 import { normalizeJobRunTrigger } from "../data/jobRunRecordPorts";
 import { createJobPipelineStoresFromD1 } from "../data/createJobPipelinePorts";
+import {
+  startManagedWorkflowInstance,
+  type ManagedWorkflowBinding,
+} from "../workflows/workflowInstanceSeam";
 import { SqlJobRunRecordStore } from "../data/doSqliteJobRunRecordAdapter";
 import {
   createD1JobRunRecordDb,
@@ -902,14 +906,19 @@ export async function startPipelineJobWorkflow(
   ) {
     await workflowControl.defineJob(definition.rawConfig);
   }
-  const created = await workflow.create({
-    params: {
-      jobId,
-      trigger: opts.trigger ?? "manual",
-      ...(opts.scopePath ? { scopePath: opts.scopePath } : {}),
+  const started = await startManagedWorkflowInstance(
+    workflow as unknown as ManagedWorkflowBinding,
+    {
+      id: `${jobId.replace(/[^a-zA-Z0-9_-]/g, "-")}-${crypto.randomUUID().slice(0, 8)}`,
+      params: {
+        jobId,
+        trigger: opts.trigger ?? "manual",
+        ...(opts.scopePath ? { scopePath: opts.scopePath } : {}),
+      },
+      workflowName: "JOB_PIPELINE_WORKFLOW",
     },
-  });
-  return { instanceId: created.id };
+  );
+  return { instanceId: started.workflowId };
 }
 
 /**

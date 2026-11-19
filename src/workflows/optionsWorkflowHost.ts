@@ -354,6 +354,7 @@ export async function startOptionsScreenWorkflow(
   const started = await startManagedWorkflowInstance(workflow, {
     id: workflowIdForJob(jobId),
     params: { jobId, trigger },
+    workflowName: "JOB_PIPELINE_WORKFLOW",
   });
   return { instanceId: started.workflowId, jobId };
 }
@@ -509,6 +510,7 @@ export async function startOptionsChainWorkflow(
   const started = await startManagedWorkflowInstance(workflow, {
     id: workflowIdForJob(jobId),
     params: { jobId, trigger },
+    workflowName: "JOB_PIPELINE_WORKFLOW",
   });
   return { instanceId: started.workflowId, jobId };
 }
