@@ -43,6 +43,7 @@
  */
 import type { UserProfile } from "../data/profilePorts";
 import { PROFILE_LIMITS } from "../config/profileLimits";
+import { profileInputSchema, validateRequestShape } from "../api/requestValidation";
 
 /** A validated partial update: only keys the client sent. */
 export type ValidatedProfileInput = {
@@ -51,9 +52,9 @@ export type ValidatedProfileInput = {
   email?: string | null;
 };
 
-/** Structural failure: which field, and which kind — never a message. */
+/** Structural failure: which field, and which kind — never a message. `body` names a body that is not a JSON object (#5604). */
 export type ProfileValidationFailure = {
-  field: "displayName" | "phone" | "email";
+  field: "displayName" | "phone" | "email" | "body";
   kind: "wrongType" | "empty" | "tooLong" | "controlChars" | "badChars" | "noDigit" | "badFormat";
 };
 
@@ -147,8 +148,31 @@ function validateEmail(value: unknown): FieldResult {
  * client-supplied userLogin or tenantId — are ignored. The first
  * invalid field fails the whole input (one field error per
  * response; the client marks that field).
+ *
+ * #5604 (G-4 slice 3): the shape gate runs first through the
+ * shared helper (`profileInputSchema`, shape-only): a body that is
+ * not an object (a scalar, or an array — previously a throw on the
+ * `in` operator below, surfacing as a 500) fails as field `body`,
+ * wrongType. The business rules below run on the RAW input, so a
+ * field present with explicit `undefined` still fails wrongType
+ * exactly as before (zod treats it as absent; JSON cannot carry
+ * it, but direct callers are pinned). Previously-valid inputs
+ * produce identical outcomes.
  */
 export function validateProfileInput(body: unknown): ProfileValidationResult {
+  // Absent input is no update, exactly as the `(body ?? {})` below
+  // always treated null/undefined; only a present non-object body
+  // fails the shape gate.
+  if (body === null || body === undefined) return { ok: true, value: {} };
+  const shape = validateRequestShape(profileInputSchema, body);
+  if (!shape.ok) {
+    const first = shape.issues[0]!;
+    const field =
+      first.field === "displayName" || first.field === "phone" || first.field === "email"
+        ? first.field
+        : "body";
+    return { ok: false, failure: { field, kind: "wrongType" } };
+  }
   const input = (body ?? {}) as Record<string, unknown>;
   const validated: ValidatedProfileInput = {};
   if ("displayName" in input) {
@@ -177,9 +201,15 @@ export type IdempotencyKeyResult =
  * Extract the idempotency key (standards §7.2 Idempotent Receiver):
  * a non-empty string the client generates per save attempt. Absent
  * or non-string is a structural failure, never a throw.
+ *
+ * #5604: a body that is not an object (a scalar — previously a
+ * throw on the `in` operator below) reads as a missing key.
  */
 export function extractIdempotencyKey(body: unknown): IdempotencyKeyResult {
-  const input = (body ?? {}) as Record<string, unknown>;
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return { ok: false, kind: "missing" };
+  }
+  const input = body as Record<string, unknown>;
   if (!("idempotencyKey" in input)) return { ok: false, kind: "missing" };
   const key = input.idempotencyKey;
   if (typeof key !== "string") return { ok: false, kind: "wrongType" };

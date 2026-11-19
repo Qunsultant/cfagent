@@ -60,6 +60,14 @@ import { createTenantDirectoryAdapter } from "../../data/createTenantDirectoryPo
 import type { TenantDirectory } from "../../data/tenantDirectoryPorts";
 import { createStoreOperatorsAdapter } from "../../data/createStoreOperatorsPorts";
 import type { StoreOperators } from "../../data/storeOperatorsPorts";
+import {
+  channelPatchBodySchema,
+  isTenantIdShaped,
+  requestInvalidResponse,
+  slackChannelBodySchema,
+  validateRequestShape,
+  webhookUrlBodySchema,
+} from "../../api/requestValidation";
 
 export interface PlatformChannelRouteContext {
   /** Worker env (carries the AGENT_DB + COMMERCIAL_STORE_OPERATORS bindings). */
@@ -80,20 +88,6 @@ export interface PlatformChannelRouteContext {
 
 function jsonError(error: string, status: number): Response {
   return Response.json({ error }, { status });
-}
-
-/** Same shape rule as isTenantIdShaped (tenantQueueMapping): non-empty, <=512, no whitespace/control. */
-function isTenantIdShaped(value: unknown): value is string {
-  return (
-    typeof value === "string" &&
-    value.trim().length > 0 &&
-    value.trim().length <= 512 &&
-    !/[\s\x00-\x1F\x7F]/.test(value.trim())
-  );
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function parseEnvOperators(env: { AGENT_DB?: unknown }): Set<string> {
@@ -234,12 +228,19 @@ export async function handlePlatformChannelRoutes(
         return jsonError("Method not allowed", 405);
       }
       const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
-      if (!("webhookUrl" in body)) {
-        return jsonError("webhookUrl is required (non-empty HTTPS/HTTP URL string or null).", 400);
+      // #5604: the write-body shape goes through the shared helper
+      // (`webhookUrlBodySchema` — webhookUrl must be present). The
+      // `in` presence check below threw on a scalar body (500);
+      // the gate maps it to the existing coded 400 instead (#1768
+      // precedent). The normalizer still owns every value rule,
+      // with its messages unchanged; every 400 here is coded.
+      const bodyShape = validateRequestShape(webhookUrlBodySchema, body);
+      if (!bodyShape.ok) {
+        return requestInvalidResponse("webhookUrl is required (non-empty HTTPS/HTTP URL string or null).");
       }
       const normalized = normalizeTenantWebhookUrl(body["webhookUrl"]);
       if (!normalized.ok) {
-        return jsonError(normalized.error, 400);
+        return requestInvalidResponse(normalized.error);
       }
       const bodyScheduleId =
         typeof body["scheduleId"] === "string" && body["scheduleId"].trim()
@@ -273,12 +274,18 @@ export async function handlePlatformChannelRoutes(
         return jsonError("Method not allowed", 405);
       }
       const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
-      if (!("slackChannel" in body)) {
-        return jsonError("slackChannel is required (non-empty string or null).", 400);
+      // #5604: same boundary gate as the webhook-url write
+      // (`slackChannelBodySchema` — slackChannel must be present).
+      // The `in` presence check below threw on a scalar body (500);
+      // the gate maps it to the existing coded 400 instead. The
+      // normalizer still owns every value rule, unchanged.
+      const bodyShape = validateRequestShape(slackChannelBodySchema, body);
+      if (!bodyShape.ok) {
+        return requestInvalidResponse("slackChannel is required (non-empty string or null).");
       }
       const normalized = normalizeTenantSlackChannel(body["slackChannel"]);
       if (!normalized.ok) {
-        return jsonError(normalized.error, 400);
+        return requestInvalidResponse(normalized.error);
       }
       if (typeof channels.setTenantSlackChannel !== "function") {
         return jsonError("Slack channel mapping is not supported by the bound channel store.", 503);
@@ -291,35 +298,45 @@ export async function handlePlatformChannelRoutes(
     // action === "patch"
     if (request.method !== "PATCH") return jsonError("Method not allowed", 405);
     const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+    // #5604: the patch-body shape goes through the shared helper
+    // (`channelPatchBodySchema` — channels is a map of channel
+    // flags to booleans when present). The JSON-type checks below
+    // move into the schema; the known-channel allowlist and the
+    // "no flag supplied" rule stay here, with their messages
+    // unchanged; every 400 is coded. A body that is not an object
+    // fails the gate as "channels must be an object of channel
+    // flags.", exactly as before.
+    const bodyShape = validateRequestShape(channelPatchBodySchema, body);
+    if (!bodyShape.ok) {
+      const issue = bodyShape.issues[0]!;
+      if (issue.field === "channels" && issue.path.length > 1) {
+        return requestInvalidResponse(`Channel flag ${issue.path[1]} must be a boolean.`);
+      }
+      return requestInvalidResponse("channels must be an object of channel flags.");
+    }
     const hasSlackChannelField = "slackChannel" in body;
     let normalizedSlackChannel: string | null | undefined = undefined;
     if (hasSlackChannelField) {
       const normalized = normalizeTenantSlackChannel(body["slackChannel"]);
       if (!normalized.ok) {
-        return jsonError(normalized.error, 400);
+        return requestInvalidResponse(normalized.error);
       }
       normalizedSlackChannel = normalized.slackChannel;
     }
     const supplied = body["channels"];
     const patch: TenantChannelPatch = {};
     if (supplied !== undefined) {
-      if (!isRecord(supplied)) {
-        return jsonError("channels must be an object of channel flags.", 400);
-      }
-      for (const [key, value] of Object.entries(supplied)) {
+      for (const [key, value] of Object.entries(supplied as Record<string, boolean>)) {
         if (!(TENANT_CHANNEL_IDS as readonly string[]).includes(key)) {
-          return jsonError(`Unknown channel: ${key}.`, 400);
-        }
-        if (typeof value !== "boolean") {
-          return jsonError(`Channel flag ${key} must be a boolean.`, 400);
+          return requestInvalidResponse(`Unknown channel: ${key}.`);
         }
         patch[key as TenantChannelId] = value;
       }
     } else if (!hasSlackChannelField) {
-      return jsonError("channels must be an object of channel flags.", 400);
+      return requestInvalidResponse("channels must be an object of channel flags.");
     }
     if (Object.keys(patch).length === 0 && !hasSlackChannelField) {
-      return jsonError("No channel flag supplied.", 400);
+      return requestInvalidResponse("No channel flag supplied.");
     }
     const config: TenantChannelConfig =
       Object.keys(patch).length > 0

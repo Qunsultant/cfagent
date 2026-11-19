@@ -25,6 +25,7 @@
 import type { AgentName } from "../../types";
 import { DatabaseORM, type SqlStorage } from "../../orm";
 import { codedMessage, resolveOutcome } from "../../outcomes/outcomeAspects";
+import { requestInvalidResponse } from "../../api/requestValidation";
 import { runRestTool } from "./restToolBridge";
 import {
   resolveAuditWriteRestSwitch,
@@ -271,7 +272,8 @@ export async function handleAuditRoutes(
           "trading"
         );
         if (!validated.ok) {
-          return Response.json({ error: validated.error }, { status: 400 });
+          // #5604: the strict-validation 400 is coded; the message is unchanged.
+          return requestInvalidResponse(validated.error);
         }
         ctx.audit(
           validated.value.type,
@@ -315,7 +317,8 @@ export async function handleAuditRoutes(
       );
       const validated = validateStrictAuditWrite(body, "orchestrator");
       if (!validated.ok) {
-        return Response.json({ error: validated.error }, { status: 400 });
+        // #5604: the strict-validation 400 is coded; the message is unchanged.
+        return requestInvalidResponse(validated.error);
       }
       const record = ctx.recordAudit(validated.value.type, validated.value.agent, validated.value.payload);
       return Response.json(record, { status: 201 });
