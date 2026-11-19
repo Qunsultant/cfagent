@@ -71,6 +71,16 @@ import { createEnsuredAuditPolicyAdapter } from "../../data/createAuditPolicyPor
 import type { AuditPolicyPort } from "../../data/auditPolicyPorts";
 import { appendAuditChainBestEffort } from "../../services/auditGate";
 import { isLoginTenantId } from "../../services/platformIdentity";
+import {
+  isTenantIdShaped,
+  requestInvalidResponse,
+  tenantCreateBodySchema,
+  tenantSettingsBodySchema,
+  validateRequestShape,
+} from "../../api/requestValidation";
+
+/** Re-exported for the BizCopilot parsers, which import the predicate from this module. The single definition lives in the shared helper (#5604). */
+export { isTenantIdShaped };
 
 export interface PlatformTenantRouteContext {
   /** Worker env (carries the AGENT_DB + COMMERCIAL_STORE_OPERATORS bindings). */
@@ -111,20 +121,6 @@ function jsonError(error: string, status: number): Response {
  * account rows UNION settings rows.
  */
 export const TENANT_CREATION_MODE = "settings_row_only" as const;
-
-/** Same shape rule as isTenantIdShaped (tenantQueueMapping): non-empty, <=512, no whitespace/control. */
-export function isTenantIdShaped(value: unknown): value is string {
-  return (
-    typeof value === "string" &&
-    value.trim().length > 0 &&
-    value.trim().length <= 512 &&
-    !/[\s\x00-\x1F\x7F]/.test(value.trim())
-  );
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 function parseEnvOperators(env: { AGENT_DB?: unknown }): Set<string> {
   const raw = (env as unknown as Record<string, unknown>)["COMMERCIAL_STORE_OPERATORS"];
@@ -273,12 +269,21 @@ export async function handlePlatformTenantRoutes(
     if (action === "create") {
       if (request.method !== "POST") return jsonError("Method not allowed", 405);
       const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+      // #5604: the create-body shape goes through the shared helper
+      // (`tenantCreateBodySchema` — presence + string type of
+      // tenantId only). The id shape rule, the `login:` reservation,
+      // and the existence check stay below, with their messages
+      // unchanged; the 400 is coded.
+      const bodyShape = validateRequestShape(tenantCreateBodySchema, body);
+      if (!bodyShape.ok) {
+        return requestInvalidResponse("tenantId is required and must be a non-empty id without whitespace.");
+      }
       const newTenantId = body["tenantId"];
       if (!isTenantIdShaped(newTenantId)) {
-        return jsonError("tenantId is required and must be a non-empty id without whitespace.", 400);
+        return requestInvalidResponse("tenantId is required and must be a non-empty id without whitespace.");
       }
       if (isLoginTenantId(newTenantId.trim())) {
-        return jsonError("tenantId cannot use the reserved 'login:' personal-scope prefix.", 400);
+        return requestInvalidResponse("tenantId cannot use the reserved 'login:' personal-scope prefix.");
       }
       const existing = await directory.listTenantIds();
       if (existing.includes(newTenantId.trim())) {
@@ -339,24 +344,36 @@ export async function handlePlatformTenantRoutes(
     if (action === "settings") {
       if (request.method !== "PATCH") return jsonError("Method not allowed", 405);
       const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+      // #5604: the settings-body shape goes through the shared
+      // helper (`tenantSettingsBodySchema` — JSON types only). The
+      // JSON-type checks below move into the schema; the value
+      // bounds stay here (positive-integer intervalS, non-empty
+      // provider ids) with their messages unchanged; every 400 is
+      // coded. A body that is not an object fails the gate as
+      // "No settings field supplied.", exactly as before.
+      const bodyShape = validateRequestShape(tenantSettingsBodySchema, body);
+      if (!bodyShape.ok) {
+        const field = bodyShape.issues[0]!.field;
+        if (field === "adsEnabled") {
+          return requestInvalidResponse("adsEnabled must be a boolean.");
+        }
+        if (field === "autoRefresh") {
+          return requestInvalidResponse("autoRefresh must be { enabled: boolean, intervalS: positive integer }.");
+        }
+        if (field === "providers") {
+          return requestInvalidResponse("providers must be { dataProviderId: string, brokerId: string }.");
+        }
+        return requestInvalidResponse("No settings field supplied.");
+      }
       let applied = false;
       if (body["adsEnabled"] !== undefined) {
-        if (typeof body["adsEnabled"] !== "boolean") {
-          return jsonError("adsEnabled must be a boolean.", 400);
-        }
-        await commercial.setTenantAdsEnabled(tenantId, body["adsEnabled"]);
+        await commercial.setTenantAdsEnabled(tenantId, body["adsEnabled"] as boolean);
         applied = true;
       }
       if (body["autoRefresh"] !== undefined) {
-        const refresh = body["autoRefresh"];
-        if (
-          !isRecord(refresh) ||
-          typeof refresh["enabled"] !== "boolean" ||
-          typeof refresh["intervalS"] !== "number" ||
-          !Number.isInteger(refresh["intervalS"]) ||
-          refresh["intervalS"] <= 0
-        ) {
-          return jsonError("autoRefresh must be { enabled: boolean, intervalS: positive integer }.", 400);
+        const refresh = body["autoRefresh"] as { enabled: boolean; intervalS: number };
+        if (!Number.isInteger(refresh["intervalS"]) || refresh["intervalS"] <= 0) {
+          return requestInvalidResponse("autoRefresh must be { enabled: boolean, intervalS: positive integer }.");
         }
         await commercial.setTenantAutoRefresh(tenantId, {
           enabled: refresh["enabled"],
@@ -365,15 +382,9 @@ export async function handlePlatformTenantRoutes(
         applied = true;
       }
       if (body["providers"] !== undefined) {
-        const providers = body["providers"];
-        if (
-          !isRecord(providers) ||
-          typeof providers["dataProviderId"] !== "string" ||
-          !providers["dataProviderId"] ||
-          typeof providers["brokerId"] !== "string" ||
-          !providers["brokerId"]
-        ) {
-          return jsonError("providers must be { dataProviderId: string, brokerId: string }.", 400);
+        const providers = body["providers"] as { dataProviderId: string; brokerId: string };
+        if (!providers["dataProviderId"] || !providers["brokerId"]) {
+          return requestInvalidResponse("providers must be { dataProviderId: string, brokerId: string }.");
         }
         await commercial.setTenantProviders(tenantId, {
           dataProviderId: providers["dataProviderId"],
@@ -381,7 +392,7 @@ export async function handlePlatformTenantRoutes(
         });
         applied = true;
       }
-      if (!applied) return jsonError("No settings field supplied.", 400);
+      if (!applied) return requestInvalidResponse("No settings field supplied.");
       auditBestEffort(ctx, operator, "update-settings", tenantId);
       return Response.json({ tenant: await readSettings(commercial, tenantId) });
     }

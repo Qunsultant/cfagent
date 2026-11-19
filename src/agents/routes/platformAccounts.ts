@@ -107,6 +107,13 @@ import {
 } from "../../services/userProfile";
 import { BusinessError, getOutcome } from "../../outcomes/outcomeAspects";
 import { logAspectEvent } from "../../aspects/loggingAspect";
+import {
+  accountLookupQuerySchema,
+  onboardingSaveBodySchema,
+  profileSaveBodySchema,
+  requestInvalidResponse,
+  validateRequestShape,
+} from "../../api/requestValidation";
 import type { AgentName, Env } from "../../types";
 
 /**
@@ -333,8 +340,14 @@ export async function handlePlatformAccountRoutes(
         return Response.json({ error: "Forbidden: store operator required." }, { status: 403 });
       }
       const userId = url.searchParams.get("userId") ?? "";
-      if (!userId) {
-        return Response.json({ error: "userId is required." }, { status: 400 });
+      // #5604: the lookup query shape goes through the shared
+      // helper; the non-empty check stays here (a bound, not a
+      // shape). Message and status unchanged; the 400 is coded.
+      const queryShape = validateRequestShape(accountLookupQuerySchema, {
+        userId: url.searchParams.get("userId"),
+      });
+      if (!queryShape.ok || !userId) {
+        return requestInvalidResponse("userId is required.");
       }
       return Response.json(await buildAccountView(ports, userId));
     }
@@ -363,9 +376,18 @@ export async function handlePlatformAccountRoutes(
         completed?: unknown;
         trialPlanId?: unknown;
       };
+      // #5604: the save-body shape goes through the shared helper
+      // (`onboardingSaveBodySchema` — presence + JSON type of
+      // currentStep only). The 1..5 integer bound stays here, and
+      // `completed` / `trialPlanId` keep their existing coercions.
+      // Message and status unchanged; the 400 is coded.
+      const bodyShape = validateRequestShape(onboardingSaveBodySchema, body);
+      if (!bodyShape.ok) {
+        return requestInvalidResponse("currentStep must be an integer between 1 and 5.");
+      }
       const currentStep = body.currentStep;
       if (typeof currentStep !== "number" || !Number.isInteger(currentStep) || currentStep < 1 || currentStep > 5) {
-        return Response.json({ error: "currentStep must be an integer between 1 and 5." }, { status: 400 });
+        return requestInvalidResponse("currentStep must be an integer between 1 and 5.");
       }
       const completed = body.completed === true;
       const trialPlanId =
@@ -473,6 +495,34 @@ export async function handlePlatformAccountRoutes(
         email?: unknown;
         idempotencyKey?: unknown;
       };
+      // #5604: the save-body shape goes through the shared helper
+      // first (`profileSaveBodySchema` — key first in schema order,
+      // so a bad key still reports before a bad profile field).
+      // A body that is not an object (scalar or array) previously
+      // threw in the `in` checks below and surfaced as a 500; it
+      // now fails here as the coded 400, field `body` (#1768
+      // precedent). The gate checks shape only — the raw body
+      // flows on, so the key and profile checks below see exactly
+      // what they saw before. Enumerated attribution change: a
+      // body with an ABSENT key and an invalid profile field now
+      // reports the profile field (it previously reported the
+      // missing key); status and code are unchanged.
+      const bodyShape = validateRequestShape(profileSaveBodySchema, body);
+      if (!bodyShape.ok) {
+        const issue = bodyShape.issues[0]!;
+        logAspectEvent({
+          aspect: "Profile",
+          operationName: "profile.save",
+          code: "FAILURE_PROFILE_VALIDATION",
+          level: "warn",
+          message: "profile save body failed shape validation",
+          metadata: { userLogin: verifiedLogin, field: issue.field, kind: issue.kind },
+        });
+        return Response.json(
+          profileCodedBody("FAILURE_PROFILE_VALIDATION", { field: issue.field }),
+          { status: 400 },
+        );
+      }
       const key = extractIdempotencyKey(body);
       if (!key.ok) {
         logAspectEvent({

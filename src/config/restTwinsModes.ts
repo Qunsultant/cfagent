@@ -96,6 +96,7 @@
 
 import { createStructuredLogger } from "../observability/structuredLogger";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
+import { strictAuditWriteSchema, validateRequestShape } from "../api/requestValidation";
 
 /** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
 const structuredLog = createStructuredLogger(createObservabilitySink({}), {
@@ -251,6 +252,25 @@ export function validateStrictAuditWrite(
   body: StrictAuditWriteBody | null | undefined,
   defaultAgent: string
 ): StrictAuditWriteResult {
+  // #5604 (G-4 slice 3): the shape gate runs first through the
+  // shared helper (`strictAuditWriteSchema`, shape-only), with the
+  // existing messages: a non-object body and a non-string `type`
+  // fail here with the same errors the checks below produced.
+  // `agent`, `payload`, and `mode` are unknown in the schema by
+  // design (default / coerce-to-{} / switch-owned), so their
+  // outcomes are unchanged — the business rules below run on the
+  // RAW input.
+  const shape = validateRequestShape(strictAuditWriteSchema, body);
+  if (!shape.ok) {
+    const first = shape.issues[0]!;
+    return {
+      ok: false,
+      error:
+        first.field === "type"
+          ? "type (non-empty string) is required"
+          : "A JSON object body is required",
+    };
+  }
   if (!body || typeof body !== "object" || Array.isArray(body)) {
     return { ok: false, error: "A JSON object body is required" };
   }
