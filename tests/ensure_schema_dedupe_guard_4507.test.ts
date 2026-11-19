@@ -120,19 +120,36 @@ describe("#4507 [pin]: ensure dedupes legacy duplicate pairs and builds the inde
     // Tie pair: same created_at, greatest id wins.
     insertRaw(sql, "rep-tie-1", "run-t1", "2026-10-30T09:00:00.000Z", "gen-tie", "alice");
     insertRaw(sql, "rep-tie-2", "run-t2", "2026-10-30T09:00:00.000Z", "gen-tie", "alice");
-    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    // #3515 S3 batch 7: the dedupe log is now a structured event
+    // (doSqliteCanonicalReportStore.deduped_generation_index_pair) on
+    // the console-info JSON fallback, not a console.error line.
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
     const store = new DoSqliteCanonicalReportStore(sql as never);
     expect(() => store.ensureSchema()).not.toThrow();
     expect(generationIndexColumns(sql)).toEqual(["user_login", "generation_id"]);
     expect(rowIds(sql).sort()).toEqual(["rep-new", "rep-tie-2"]);
     expect(store.findIdByGeneration("gen-dup", "alice")).toBe("rep-new");
     expect(store.findIdByGeneration("gen-tie", "alice")).toBe("rep-tie-2");
-    const logged = errSpy.mock.calls
-      .map((args) => args.map((a) => String(a)).join(" "))
-      .join("\n");
-    expect(logged).toContain("rep-old");
-    expect(logged).toContain("rep-mid");
-    expect(logged).toContain("rep-tie-1");
+    const deduped = infoSpy.mock.calls
+      .map((c) => {
+        try {
+          return JSON.parse(String(c[0]));
+        } catch {
+          return null;
+        }
+      })
+      .filter(
+        (e) =>
+          e !== null &&
+          e.operation ===
+            "doSqliteCanonicalReportStore.deduped_generation_index_pair",
+      );
+    expect(deduped).toHaveLength(2);
+    expect(deduped[0].level).toBe("error");
+    const removed = deduped.flatMap((e) => e.fields?.removed ?? []);
+    expect(removed).toContain("rep-old");
+    expect(removed).toContain("rep-mid");
+    expect(removed).toContain("rep-tie-1");
     // The backstop is restored: a same-tenant duplicate INSERT throws again.
     expect(() =>
       store.insertRow({
@@ -214,14 +231,31 @@ describe("#4507 [pin]: ensure dedupes legacy duplicate pairs and builds the inde
       },
       sqlite: inner.sqlite,
     };
-    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    // #3515 S3 batch 7: the index-creation failure is now a structured
+    // event on the console-info JSON fallback, not a console.error line.
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
     const store = new DoSqliteCanonicalReportStore(refusing as never);
     expect(() => store.ensureSchema()).toThrow(
       /unique-index creation for idx_mas_reports_generation failed after dedupe/,
     );
     // The dedupe ran before the throw: the pair is already resolved.
     expect(rowIds(inner)).toEqual(["rep-2"]);
-    expect(errSpy.mock.calls.length).toBeGreaterThan(0);
+    const failed = infoSpy.mock.calls
+      .map((c) => {
+        try {
+          return JSON.parse(String(c[0]));
+        } catch {
+          return null;
+        }
+      })
+      .filter(
+        (e) =>
+          e !== null &&
+          e.operation ===
+            "doSqliteCanonicalReportStore.unique_index_creation_failed",
+      );
+    expect(failed.length).toBeGreaterThan(0);
+    expect(failed[0].level).toBe("error");
   });
 
   it("seam green on a deduped DO: same generation dedupes to the survivor, a new generation lands", () => {

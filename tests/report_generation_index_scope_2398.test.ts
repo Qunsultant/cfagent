@@ -207,14 +207,33 @@ describe("#2398 [shapes]: ensureSchema index reconciliation", () => {
     );
     insert.run("rep-dup-1", "run-1");
     insert.run("rep-dup-2", "run-2");
-    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    // #3515 S3 batch 7: the dedupe + index-creation logs are now
+    // structured events on the console-info JSON fallback, not
+    // console.error lines.
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
     const store = new DoSqliteCanonicalReportStore(sql as never);
     expect(() => store.ensureSchema()).not.toThrow();
-    const logged = errSpy.mock.calls
-      .map((args) => args.map((a) => String(a)).join(" "))
+    const events = infoSpy.mock.calls
+      .map((c) => {
+        try {
+          return JSON.parse(String(c[0]));
+        } catch {
+          return null;
+        }
+      })
+      .filter(
+        (e) =>
+          e !== null &&
+          String(e.operation ?? "").startsWith(
+            "doSqliteCanonicalReportStore.",
+          ),
+      );
+    const messages = events
+      .map((e) => String(e.fields?.message ?? ""))
       .join("\n");
-    expect(logged).toContain(INDEX);
-    expect(logged).toContain("rep-dup-1");
+    expect(messages).toContain(INDEX);
+    const removed = events.flatMap((e) => e.fields?.removed ?? []);
+    expect(removed).toContain("rep-dup-1");
     // Issue #4507: the silent degradation is gone — the duplicate
     // pair is resolved (newest survives; the two rows share a
     // created_at, so the greatest id wins) and the index is built.

@@ -39,6 +39,12 @@ import type {
   ScheduleRow,
 } from "./chainSchedulePorts";
 
+import { createStructuredLogger } from "../observability/structuredLogger";
+import {
+  ConsoleObservabilitySink,
+  type ObservabilitySink,
+} from "../observability/observabilityPorts";
+
 /** Structural subset of a persisted synthesized record. */
 export interface DoScheduleRecord {
   id: string;
@@ -133,6 +139,13 @@ export interface ProjectTransitionInput {
   record: DoScheduleRecord;
   transition: ChainScheduleTransition;
   nowMs: number;
+  /**
+   * #3515 S3 batch 7 — optional observability sink (d1QueryLogger
+   * precedent): the composition root passes the env-constructed sink
+   * when it holds env; without one the event goes to the structured
+   * console fallback (never a `{}` sink, #5587).
+   */
+  sink?: ObservabilitySink;
 }
 
 export interface ProjectTransitionResult {
@@ -149,6 +162,13 @@ export interface ProjectTransitionResult {
 export async function projectTransition(
   input: ProjectTransitionInput,
 ): Promise<ProjectTransitionResult> {
+  // #3515 S3 batch 7 — logger over the injected sink (the composition
+  // root passes the env-constructed sink), else the structured console
+  // fallback (never a `{}` sink, #5587).
+  const structuredLog = createStructuredLogger(
+    input.sink ?? new ConsoleObservabilitySink(),
+    { component: "data/chainScheduleProjection" },
+  );
   try {
     const latestChain = await input.store.latestChain(
       input.tenantId,
@@ -188,10 +208,15 @@ export async function projectTransition(
     return { projected: true };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    console.error(
-      "[data-foundation] Chain/schedule projection failed; transition already committed, reconcile later:",
-      message,
-    );
+    structuredLog.error("chainScheduleProjection.projection_failed", {
+      message:
+        "[data-foundation] Chain/schedule projection failed; transition already committed, reconcile later:",
+      error: message,
+      tenantId: input.tenantId,
+      workspaceId: input.workspaceId,
+      recordId: input.record.id,
+      transition: input.transition,
+    });
     return { projected: false, error: message };
   }
 }

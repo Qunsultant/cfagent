@@ -238,14 +238,6 @@ function input(over: Partial<ScheduledReportInput> = {}): ScheduledReportInput {
 let errSpy: ReturnType<typeof vi.spyOn>;
 let infoSpy: ReturnType<typeof vi.spyOn>;
 
-function loggedText(): string {
-  return errSpy.mock.calls
-    .map((args: unknown[]) =>
-      args.map((a) => (a instanceof Error ? a.message : String(a))).join(" ")
-    )
-    .join("\n");
-}
-
 // #3515 S3: the persist seams now log via the structured logger, whose
 // fallback sink writes every event as one JSON line via console.info.
 // Parse those lines into { operation, level, fields } events (batch-1
@@ -295,7 +287,15 @@ describe("issue #876 — persist seams surface the real error", () => {
     ]);
 
     expect(() => ensureScheduledReportsTable(sql)).not.toThrow();
-    expect(loggedText()).toContain("idx_mas_reports_generation");
+    // #3515 S3 batch 7: the index-failure log rides the S2 structured
+    // logger — the console-info JSON fallback carries the
+    // doSqliteCanonicalReportStore.unique_index_creation_failed error event.
+    const failed = structuredEvents().filter(
+      (e) => e.operation === "doSqliteCanonicalReportStore.unique_index_creation_failed",
+    );
+    expect(failed).toHaveLength(1);
+    expect(failed[0]?.level).toBe("error");
+    expect(String(failed[0]?.fields.message ?? "")).toContain("idx_mas_reports_generation");
 
     const id = persistScheduledReportSql(sql, input());
     expect(id).toBeTruthy();
@@ -463,7 +463,13 @@ describe("issue #876 — source pin", () => {
     expect(idxPos).toBeGreaterThan(-1);
     expect(ensureSrc.lastIndexOf("try {", idxPos)).toBeGreaterThan(-1);
     expect(ensureSrc.indexOf("catch (err)", idxPos)).toBeGreaterThan(idxPos);
-    expect(ensureSrc).toContain("console.error");
+    // #3515 S3 batch 7: the catch now logs via the S2 structured
+    // logger — the same guard, the same index name, the same message
+    // content, as the
+    // doSqliteCanonicalReportStore.unique_index_creation_failed error event.
+    expect(ensureSrc).toContain(
+      'this.log.error("doSqliteCanonicalReportStore.unique_index_creation_failed"',
+    );
     expect(ensureSrc).toContain("idx_mas_reports_generation");
     const catalogueSrc = readFileSync(
       fileURLToPath(

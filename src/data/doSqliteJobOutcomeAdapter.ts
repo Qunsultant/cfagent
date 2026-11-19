@@ -18,6 +18,15 @@ import {
 } from "./jobOutcomePorts";
 import { doIndexSql, doTableSql } from "./schemaComponent/doCatalogue";
 
+import {
+  createStructuredLogger,
+  type StructuredLogger,
+} from "../observability/structuredLogger";
+import {
+  ConsoleObservabilitySink,
+  type ObservabilitySink,
+} from "../observability/observabilityPorts";
+
 function rowFromRecord(r: Record<string, any>): JobOutcomeRow {
   let deliveryStates: Record<string, string> = {};
   try {
@@ -49,7 +58,19 @@ function resolveDays(value: number | string | null | undefined): number {
 }
 
 export class DoSqliteJobOutcomeStore implements JobOutcomeStore {
-  constructor(private readonly sql: JobOutcomeSqlExecutor) {}
+  // #3515 S3 batch 7 — optional sink injection (d1QueryLogger precedent);
+  // env-constructed sink from the composition root when it holds env,
+  // else the structured console fallback (never a `{}` sink, #5587).
+  private readonly log: StructuredLogger;
+  constructor(
+    private readonly sql: JobOutcomeSqlExecutor,
+    options?: { sink?: ObservabilitySink },
+  ) {
+    this.log = createStructuredLogger(
+      options?.sink ?? new ConsoleObservabilitySink(),
+      { component: "data/doSqliteJobOutcomeAdapter" },
+    );
+  }
 
   ensureTables(): void {
     this.sql.exec(doTableSql("mas_job_outcomes"));
@@ -158,10 +179,10 @@ export class DoSqliteJobOutcomeStore implements JobOutcomeStore {
     try {
       this.prune({ now: () => nowMs });
     } catch (err) {
-      console.warn(
-        "[job-outcomes] prune failed:",
-        err instanceof Error ? err.message : String(err)
-      );
+      this.log.warn("doSqliteJobOutcomeAdapter.prune_failed", {
+        message: "[job-outcomes] prune failed:",
+        error: err instanceof Error ? err.message : String(err),
+      });
       return false;
     }
     this.sql.exec(

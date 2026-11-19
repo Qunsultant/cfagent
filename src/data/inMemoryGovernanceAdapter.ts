@@ -14,8 +14,27 @@ import type {
   HaltReadOptions,
 } from "./governancePorts";
 
+import {
+  createStructuredLogger,
+  type StructuredLogger,
+} from "../observability/structuredLogger";
+import {
+  ConsoleObservabilitySink,
+  type ObservabilitySink,
+} from "../observability/observabilityPorts";
+
 export class InMemoryGovernanceAdapter implements GovernanceStore {
   private rows: GovernanceHaltRow[] = [];
+  // #3515 S3 batch 7 — optional sink injection (d1QueryLogger precedent);
+  // env-constructed sink from the composition root when it holds env,
+  // else the structured console fallback (never a `{}` sink, #5587).
+  private readonly log: StructuredLogger;
+  constructor(options?: { sink?: ObservabilitySink }) {
+    this.log = createStructuredLogger(
+      options?.sink ?? new ConsoleObservabilitySink(),
+      { component: "data/inMemoryGovernanceAdapter" },
+    );
+  }
 
   async recordHalt(row: GovernanceHaltRow): Promise<void> {
     if (this.rows.some((r) => r.eventId === row.eventId)) return;
@@ -50,10 +69,11 @@ export class InMemoryGovernanceAdapter implements GovernanceStore {
       const latest = await this.latestHalt(tenantId, opts);
       return latest !== null && latest.state === "halted";
     } catch (err) {
-      console.error(
-        "[data-foundation] Governance halt read failed; failing closed:",
-        err,
-      );
+      this.log.error("inMemoryGovernanceAdapter.halt_read_failed", {
+        message: "[data-foundation] Governance halt read failed; failing closed:",
+        error: err instanceof Error ? err.message : String(err),
+        tenantId,
+      });
       return true;
     }
   }

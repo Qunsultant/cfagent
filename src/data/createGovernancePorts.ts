@@ -17,14 +17,20 @@ import {
 } from "./d1GovernanceAdapter";
 import type { HaltReader } from "./governancePorts";
 
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
 /** Build the governance adapter from Worker env, or null if unbound. */
 export function createGovernanceAdapter(env: {
   AGENT_DB?: unknown;
+  OBSERVABILITY?: unknown;
 }): D1GovernanceAdapter | null {
   if (!env.AGENT_DB) return null;
-  return new D1GovernanceAdapter(
-    createD1GovernanceDb(env.AGENT_DB as D1Database),
-  );
+  // #3515 S3 batch 7 — env-constructed sink (#5587) for the adapter's
+  // halt-read event.
+  return new D1GovernanceAdapter(createD1GovernanceDb(env.AGENT_DB as D1Database), {
+    sink: createObservabilitySink(env),
+  });
 }
 
 /**
@@ -35,19 +41,24 @@ export function createGovernanceAdapter(env: {
  * schema-ensure step too, so no failure mode reads as clear.
  */
 export async function readAgentDbHalt(
-  env: { AGENT_DB?: unknown },
+  env: { AGENT_DB?: unknown; OBSERVABILITY?: unknown },
   tenantId: string,
 ): Promise<boolean> {
+  // #3515 S3 batch 7 — env-constructed sink (#5587).
+  const structuredLog = createStructuredLogger(createObservabilitySink(env), {
+    component: "data/createGovernancePorts",
+  });
   try {
     const adapter = createGovernanceAdapter(env);
     if (!adapter) return false;
     await ensureGovernanceSchema(adapter.db);
     return await adapter.isHalted(tenantId);
   } catch (err) {
-    console.error(
-      "[data-foundation] AgentDB halt read failed; failing closed:",
-      err,
-    );
+    structuredLog.error("createGovernancePorts.agent_db_halt_read_failed", {
+      message: "[data-foundation] AgentDB halt read failed; failing closed:",
+      error: err instanceof Error ? err.message : String(err),
+      tenantId,
+    });
     return true;
   }
 }

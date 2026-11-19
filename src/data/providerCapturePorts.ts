@@ -364,7 +364,11 @@ export async function getCaptureBlob(
       if (!obj) return null;
       return obj.bytes;
     } catch (err) {
-      console.warn("[dataProviders] capture blob R2 read failed:", err);
+      structuredLog.warn("providerCapturePorts.capture_blob_r2_read_failed", {
+        message: "[dataProviders] capture blob R2 read failed:",
+        error: err instanceof Error ? err.message : String(err),
+        key,
+      });
       return null;
     }
   }
@@ -478,7 +482,8 @@ export async function recordCaptureWithStore(
     return (await rows.getById(base.tenantId, base.id)) ?? record;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    console.error("[dataProviders] capture write failed", {
+    structuredLog.error("providerCapturePorts.capture_write_failed", {
+      message: "[dataProviders] capture write failed",
       captureId: base.id,
       providerId: base.providerId,
       capability: base.capability,
@@ -502,7 +507,8 @@ export async function recordCaptureWithStore(
       await rows.insertRow(marker);
       return (await rows.getById(base.tenantId, base.id)) ?? marker;
     } catch (markerErr) {
-      console.error("[dataProviders] capture failure marker write failed", {
+      structuredLog.error("providerCapturePorts.capture_failure_marker_write_failed", {
+        message: "[dataProviders] capture failure marker write failed",
         captureId: base.id,
         providerId: base.providerId,
         capability: base.capability,
@@ -553,7 +559,8 @@ export async function recordFetchFailureWithStore(
     await rows.insertRow(record);
     return (await rows.getById(record.tenantId, record.id)) ?? record;
   } catch (err) {
-    console.error("[dataProviders] fetch-failure record write failed", {
+    structuredLog.error("providerCapturePorts.fetch_failure_record_write_failed", {
+      message: "[dataProviders] fetch-failure record write failed",
       captureId: record.id,
       providerId: record.providerId,
       capability: record.capability,

@@ -23,6 +23,12 @@
 import type { ShardJobRow } from "./shardJobPorts";
 import type { ReconcileShardJobsReport } from "./shardJobProjection";
 
+import { createStructuredLogger } from "../observability/structuredLogger";
+import {
+  ConsoleObservabilitySink,
+  type ObservabilitySink,
+} from "../observability/observabilityPorts";
+
 export interface JobHistoryRouteInput {
   /** Wired session, or null when unauthenticated. */
   session: unknown;
@@ -30,11 +36,26 @@ export interface JobHistoryRouteInput {
   tenantId: string;
   chainId: string;
   readHistory: () => Promise<ShardJobRow[]>;
+  /**
+   * #3515 S3 batch 7 — optional observability sink (d1QueryLogger
+   * precedent): the composition root passes the env-constructed sink
+   * when it holds env; without one the event goes to the structured
+   * console fallback (never a `{}` sink, #5587).
+   */
+  sink?: ObservabilitySink;
 }
 
 export async function handleJobHistoryRoute(
   input: JobHistoryRouteInput,
 ): Promise<Response> {
+  // #3515 S3 batch 7 — logger over the injected sink (d1QueryLogger
+  // precedent), else the structured console fallback (never a `{}` sink,
+  // #5587). This pure handler has no env; the server wiring passes the
+  // env-constructed sink when it holds one (follow-up).
+  const structuredLog = createStructuredLogger(
+    input.sink ?? new ConsoleObservabilitySink(),
+    { component: "data/shardJobRoute" },
+  );
   if (!input.session) {
     return new Response(JSON.stringify({ error: "unauthorized" }), {
       status: 401,
@@ -77,10 +98,12 @@ export async function handleJobHistoryRoute(
       { status: 200, headers: { "content-type": "application/json" } },
     );
   } catch (err) {
-    console.error(
-      "[data-foundation] Job history read failed:",
-      err instanceof Error ? err.message : String(err),
-    );
+    structuredLog.error("shardJobRoute.job_history_read_failed", {
+      message: "[data-foundation] Job history read failed:",
+      error: err instanceof Error ? err.message : String(err),
+      tenantId: input.tenantId,
+      chainId: input.chainId,
+    });
     return new Response(JSON.stringify({ error: "job_history_failed" }), {
       status: 500,
       headers: { "content-type": "application/json" },
@@ -98,11 +121,26 @@ export interface ReconcileJobsRouteInput {
   runReconcile: (args: {
     tenantId: string;
   }) => Promise<ReconcileShardJobsReport>;
+  /**
+   * #3515 S3 batch 7 — optional observability sink (d1QueryLogger
+   * precedent): the composition root passes the env-constructed sink
+   * when it holds env; without one the event goes to the structured
+   * console fallback (never a `{}` sink, #5587).
+   */
+  sink?: ObservabilitySink;
 }
 
 export async function handleReconcileJobsRoute(
   input: ReconcileJobsRouteInput,
 ): Promise<Response> {
+  // #3515 S3 batch 7 — logger over the injected sink (d1QueryLogger
+  // precedent), else the structured console fallback (never a `{}` sink,
+  // #5587). This pure handler has no env; the server wiring passes the
+  // env-constructed sink when it holds one (follow-up).
+  const structuredLog = createStructuredLogger(
+    input.sink ?? new ConsoleObservabilitySink(),
+    { component: "data/shardJobRoute" },
+  );
   if (!input.session) {
     return new Response(JSON.stringify({ error: "unauthorized" }), {
       status: 401,
@@ -135,10 +173,11 @@ export async function handleReconcileJobsRoute(
       headers: { "content-type": "application/json" },
     });
   } catch (err) {
-    console.error(
-      "[data-foundation] Shard job reconcile failed:",
-      err instanceof Error ? err.message : String(err),
-    );
+    structuredLog.error("shardJobRoute.shard_job_reconcile_failed", {
+      message: "[data-foundation] Shard job reconcile failed:",
+      error: err instanceof Error ? err.message : String(err),
+      tenantId: input.tenantId,
+    });
     return new Response(JSON.stringify({ error: "reconcile_failed" }), {
       status: 500,
       headers: { "content-type": "application/json" },

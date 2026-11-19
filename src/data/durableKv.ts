@@ -5,6 +5,12 @@ import type {
   ResourceUsagePort,
 } from "../telemetry/resourceUsagePorts";
 
+import { createStructuredLogger } from "../observability/structuredLogger";
+import {
+  ConsoleObservabilitySink,
+  type ObservabilitySink,
+} from "../observability/observabilityPorts";
+
 /**
  * Durable Object-backed KV replacement (issue #329 follow-up).
  *
@@ -64,6 +70,13 @@ export interface StoreKvOptions {
    * throws and never adds a store round-trip.
    */
   resourceSink?: ResourceUsagePort;
+  /**
+   * #3515 S3 batch 7 — optional observability sink for the store
+   * failure events (d1QueryLogger precedent): the caller passes the
+   * env-constructed sink when it holds env; without one the events
+   * go to the structured console fallback (never a `{}` sink, #5587).
+   */
+  sink?: ObservabilitySink;
 }
 
 const STORE_URL = "https://session-store.internal/kv";
@@ -142,7 +155,11 @@ export function createStoreSender(
   namespace: DoNamespaceLike | null | undefined,
   namespaceName: string,
   instanceName: string,
-  resource?: { attribution?: ResourceAttribution; resourceSink?: ResourceUsagePort }
+  resource?: {
+    attribution?: ResourceAttribution;
+    resourceSink?: ResourceUsagePort;
+    sink?: ObservabilitySink;
+  }
 ): (payload: Record<string, unknown>) => Promise<StoreReply | null> {
   return createStoreClient(namespace, namespaceName, instanceName, resource);
 }
@@ -151,8 +168,18 @@ function createStoreClient(
   namespace: DoNamespaceLike | null | undefined,
   namespaceName: string,
   instanceName: string,
-  resource?: { attribution?: ResourceAttribution; resourceSink?: ResourceUsagePort }
+  resource?: {
+    attribution?: ResourceAttribution;
+    resourceSink?: ResourceUsagePort;
+    sink?: ObservabilitySink;
+  }
 ): (payload: Record<string, unknown>) => Promise<StoreReply | null> {
+  // #3515 S3 batch 7 — logger over the injected sink, else the structured
+  // console fallback (never a `{}` sink, #5587).
+  const structuredLog = createStructuredLogger(
+    resource?.sink ?? new ConsoleObservabilitySink(),
+    { component: "data/durableKv" },
+  );
   return async (payload: Record<string, unknown>): Promise<StoreReply | null> => {
     // One metrics record per op, emitted on every exit path (issue #910).
     // recordStoreOp never throws and adds no store round-trip, so the
@@ -187,7 +214,13 @@ function createStoreClient(
         })
       );
       if (!response.ok) {
-        console.warn(`[store:${namespaceName}] ${String(payload.op)} failed: HTTP ${response.status}`);
+        structuredLog.warn("durableKv.store_op_http_failed", {
+          message: `[store:${namespaceName}] ${String(payload.op)} failed: HTTP ${response.status}`,
+          namespace: namespaceName,
+          op: String(payload.op),
+          instance: instanceName,
+          httpStatus: response.status,
+        });
         recordStoreOp({
           event: "store_op",
           v: 2,
@@ -231,18 +264,23 @@ function createStoreClient(
             durationMs: Date.now() - startedAt,
           });
         } catch (error) {
-          console.warn(
-            `[store:${namespaceName}] resource sink failed:`,
-            error instanceof Error ? error.message : String(error)
-          );
+          structuredLog.warn("durableKv.resource_sink_failed", {
+            message: `[store:${namespaceName}] resource sink failed:`,
+            error: error instanceof Error ? error.message : String(error),
+            namespace: namespaceName,
+            op,
+          });
         }
       }
       return reply;
     } catch (error) {
-      console.warn(
-        `[store:${namespaceName}] ${String(payload.op)} failed:`,
-        error instanceof Error ? error.message : String(error)
-      );
+      structuredLog.warn("durableKv.store_op_failed", {
+        message: `[store:${namespaceName}] ${String(payload.op)} failed:`,
+        error: error instanceof Error ? error.message : String(error),
+        namespace: namespaceName,
+        op: String(payload.op),
+        instance: instanceName,
+      });
       recordStoreOp({
         event: "store_op",
         v: 2,
@@ -273,6 +311,7 @@ export function createStoreKv(options: StoreKvOptions): KvLike {
   const send = createStoreClient(namespace, namespaceName, instanceName, {
     attribution: options.attribution,
     resourceSink: options.resourceSink,
+    sink: options.sink,
   });
 
   return {
