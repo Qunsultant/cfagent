@@ -567,7 +567,9 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
                 ? `Last renewal: ${formatLastEvent(s.lastRunAt)}${s.lastRunOutcome ? ` (${s.lastRunOutcome})` : ""}`
                 : s.id === "retention"
                   ? `Last pass: ${formatLastEvent(s.lastRunAt)}${s.lastRunOutcome ? ` (${s.lastRunOutcome})` : ""}${s.lastRunDetail ? ` — ${s.lastRunDetail}` : ""}`
-                  : `Next run: ${s.paused ? "paused" : formatNextRun(s)}`}
+                  : s.id === "nightly-research"
+                    ? `Last research: ${formatLastEvent(s.lastRunAt)}${s.lastRunOutcome ? ` (${s.lastRunOutcome})` : ""}`
+                    : `Next run: ${s.paused ? "paused" : formatNextRun(s)}`}
           </span>
         </Stack>
       ),

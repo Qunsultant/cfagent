@@ -111,11 +111,14 @@ import {
   TICKER_PUSH_RECORD_ID,
   TOKEN_RENEWAL_RECORD_ID,
   RETENTION_RECORD_ID,
+  NIGHTLY_RESEARCH_RECORD_ID,
   tickerPushRecordToListItem,
   tokenRenewalRecordToListItem,
   tokenRenewalToRecord,
   retentionRecordToListItem,
   retentionToRecord,
+  nightlyResearchRecordToListItem,
+  nightlyResearchToRecord,
   triggerUnifiedSchedule,
   unifiedRecordToListItem,
   updateUnifiedSchedule,
@@ -474,6 +477,36 @@ export async function readRetentionListItem(
 }
 
 /**
+ * Issue #3121 #4241 — the nightly research row for the Schedules
+ * home list. The record is derived (nightlyResearchToRecord), never
+ * stored, and the last run is joined from the ledger's own
+ * nightly-research rows (jobId = NIGHTLY_RESEARCH_RECORD_ID, the
+ * row the scheduled-tick handler writes when the run fires), so
+ * the row shows the duty's last run — or none, when it has never
+ * fired. Best-effort: a failed ledger read omits the row and logs
+ * a warning — the list never fails because the ledger cannot be
+ * read. The `sql` is the agent's SqlStorage (the same seam the runs
+ * routes read through).
+ */
+export async function readNightlyResearchListItem(
+  sql: ConstructorParameters<typeof SqlJobRunRecordStore>[0],
+): Promise<ReturnType<typeof nightlyResearchRecordToListItem> | null> {
+  try {
+    const lastRun = new SqlJobRunRecordStore(sql).latestByJob(NIGHTLY_RESEARCH_RECORD_ID);
+    return nightlyResearchRecordToListItem(
+      nightlyResearchToRecord(new Date().toISOString()),
+      lastRun ? { started: lastRun.started, finished: lastRun.finished, outcome: lastRun.outcome } : undefined,
+    );
+  } catch (err) {
+    structuredLog.warn("schedules.nightly_research_read_failed", {
+      message: "[Schedules] nightly research list read failed; the row is omitted:",
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  }
+}
+
+/**
  * Issue #4260: where the surfaced flags are managed, for the home's
  * read-only guidance. An injected port (tests / local in-memory
  * runtimes) is the in-memory source; a FLAGS binding means the
@@ -765,6 +798,13 @@ export async function handleSchedulesRoutes(
         const retentionItem = await readRetentionListItem(ctx.agentCtx.storage.sql);
         if (retentionItem && (!typeParam || retentionItem.type === typeParam)) {
           items.push(retentionItem);
+        }
+        // Issue #3121 #4241 — the nightly research row is derived,
+        // not stored; append it with its last run joined from
+        // the ledger, under the same ?type= filter as the rest.
+        const nightlyResearchItem = await readNightlyResearchListItem(ctx.agentCtx.storage.sql);
+        if (nightlyResearchItem && (!typeParam || nightlyResearchItem.type === typeParam)) {
+          items.push(nightlyResearchItem);
         }
         return Response.json({
           count: items.length,
@@ -1253,6 +1293,16 @@ export async function handleSchedulesRoutes(
             return Response.json({ error: `Schedule '${scheduleId}' not found` }, { status: 404 });
           }
           return Response.json(retentionItem);
+        }
+        // Issue #4241 — the nightly research record is derived, not stored,
+        // so getUnifiedScheduleDetail would 404 it; answer it here
+        // from the same derived record + last-run join as the list.
+        if (scheduleId === NIGHTLY_RESEARCH_RECORD_ID) {
+          const nightlyResearchItem = await readNightlyResearchListItem(ctx.agentCtx.storage.sql);
+          if (!nightlyResearchItem) {
+            return Response.json({ error: `Schedule '${scheduleId}' not found` }, { status: 404 });
+          }
+          return Response.json(nightlyResearchItem);
         }
         const detail = await getUnifiedScheduleDetail({ store: unifiedStore(), alarms }, scheduleId);
         if (!detail.ok) {

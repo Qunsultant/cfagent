@@ -23,6 +23,28 @@ export const RESEARCH_SCHEDULED_FIRE_HOUR_UTC = 21;
 export const RESEARCH_SCHEDULED_LAST_RUN_KEY = "research_scheduled_last_run";
 
 /**
+ * Issue #3121 #4241 — the unified-store record id of the nightly
+ * research run, named once here beside its firing rule: the record
+ * is derived from this duty, so the id lives with the duty's
+ * identity, not with the management module. It doubles as the
+ * ledger jobId the run's rows join on (scheduleIdToLedgerJobId
+ * returns the record id itself — no cron mapping like token
+ * renewal / retention, whose ledger jobIds are their dispatch
+ * crons).
+ */
+export const NIGHTLY_RESEARCH_RECORD_ID = "nightly-research";
+
+/**
+ * Issue #3121 #4241 — the nightly research run's cadence as a cron,
+ * the cron form of this module's own rule (hour 21 + Mon-Fri UTC).
+ * The unified-store record reads this constant, never re-literalized,
+ * so the record and the firing guard can never disagree about the
+ * cadence. No Worker cron exists for it (the 5-trigger ceiling, #354)
+ * and none is added here — the run rides the every-30-minute tick.
+ */
+export const NIGHTLY_RESEARCH_DISPATCH_CRON = "0 21 * * 1-5";
+
+/**
  * YYYY-MM-DD date key for a moment, in UTC. Used both for the durable
  * last-fired marker and for comparing "already fired today".
  */

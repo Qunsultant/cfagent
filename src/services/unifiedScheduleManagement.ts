@@ -44,12 +44,16 @@ import {
 } from "./scheduleSystems";
 import { resolveCronEntryPoint } from "./consolidatedCronEntries";
 import { RENEWAL_DISPATCH_CRON, RETENTION_DISPATCH_CRON, RETENTION_RECORD_ID, TOKEN_RENEWAL_RECORD_ID } from "./heartbeatDueChecks";
+import { NIGHTLY_RESEARCH_DISPATCH_CRON, NIGHTLY_RESEARCH_RECORD_ID } from "./researchScheduleGuard";
 
 /** Issue #4239 — re-exported beside the builder that uses it. */
 export { TOKEN_RENEWAL_RECORD_ID } from "./heartbeatDueChecks";
 
 /** Issue #4240 — re-exported beside the builder that uses it. */
 export { RETENTION_RECORD_ID } from "./heartbeatDueChecks";
+
+/** Issue #4241 — re-exported beside the builder that uses it. */
+export { NIGHTLY_RESEARCH_RECORD_ID } from "./researchScheduleGuard";
 import type { ScheduledGoal } from "../schedule";
 import { isSubDailyCron, isSubDailyInterval, isValidCron } from "../schedule";
 
@@ -462,6 +466,60 @@ export function retentionToRecord(
   };
 }
 
+/**
+ * Issue #3121 #4241 — the nightly research record's origin, named
+ * once. One shared duty (the #354 daily options-research run,
+ * POST /research/scheduled-tick), so one stable record id (the id
+ * itself lives in researchScheduleGuard, beside the firing rule).
+ */
+export const NIGHTLY_RESEARCH_ORIGIN = "nightly-research";
+
+/** The last run a nightly research list item carries (ledger-joined). */
+export interface NightlyResearchLastRun {
+  started: string;
+  finished?: string;
+  outcome?: string;
+}
+
+/**
+ * A nightly research unified record, DERIVED — not stored, not
+ * alarm-adopted. There is no steady-state alarm to adopt: the duty
+ * fires through the every-30-minute tick rider (#354, dispatchTickRiders posts
+ * /research/scheduled-tick on every tick; the route's guard decides
+ * fire/no-fire), and the Worker cron is OFF per #4112. The cron is
+ * read from NIGHTLY_RESEARCH_DISPATCH_CRON, never re-literalized, so
+ * the record and the firing guard can never disagree about the
+ * cadence; the entry point is the ledger job id the runs join on
+ * (jobId = record id). Kind `internal` (the #4238 seventh kind),
+ * state `active` — the duty IS live through the tick, not disabled
+ * like the Worker-cron inventory rows. (The Nov-12 definition
+ * recorded `disabled` — "firing waits on #4234"; #4234 has since
+ * landed as 55e3e1f, the alarm tick dispatches the research POST,
+ * so the wait is over. A failed run writes no ledger row — its
+ * failure is recorded by the #2037 tick-outcome sink — so the
+ * last run shown is the last successful firing.) An `existing`
+ * record keeps its creation time.
+ */
+export function nightlyResearchToRecord(
+  nowIso: string,
+  existing?: UnifiedScheduleRecord | null,
+): UnifiedScheduleRecord {
+  return {
+    id: NIGHTLY_RESEARCH_RECORD_ID,
+    kind: "internal",
+    state: "active",
+    callback: "nightly-research",
+    definition: {
+      type: "cron",
+      cron: NIGHTLY_RESEARCH_DISPATCH_CRON,
+      entryPoint: "nightly-research",
+    },
+    provenance: systemProvenance(NIGHTLY_RESEARCH_ORIGIN, new Date(nowIso)),
+    createdAt: existing?.createdAt ?? nowIso,
+    updatedAt: nowIso,
+  };
+}
+
 /** True when an alarm payload carries a stage address (jobId + nodePath). */
 function isStageAlarmPayload(payload: unknown): boolean {
   if (!payload || typeof payload !== "object") return false;
@@ -698,6 +756,27 @@ export function retentionRecordToListItem(
     ...(lastRun ? { lastRunAt: lastRun.started } : {}),
     ...(lastRun?.outcome ? { lastRunOutcome: lastRun.outcome } : {}),
     ...(lastRun?.detail ? { lastRunDetail: lastRun.detail } : {}),
+  };
+}
+
+/**
+ * A nightly research record as a Schedules home list item: the shared
+ * list shape plus the last run joined from the ledger (issue #4241).
+ * The caller supplies the ledger's latest run, if any; a duty that
+ * has never fired carries no last run, and the home renders "never" —
+ * a missed run is visible, not silent.
+ */
+export function nightlyResearchRecordToListItem(
+  record: UnifiedScheduleRecord,
+  lastRun?: NightlyResearchLastRun | null,
+): ReturnType<typeof unifiedRecordToListItem> & {
+  lastRunAt?: string;
+  lastRunOutcome?: string;
+} {
+  return {
+    ...unifiedRecordToListItem(record),
+    ...(lastRun ? { lastRunAt: lastRun.started } : {}),
+    ...(lastRun?.outcome ? { lastRunOutcome: lastRun.outcome } : {}),
   };
 }
 
@@ -938,6 +1017,28 @@ function derivedRetentionError(
   );
 }
 
+/**
+ * Issue #4241 — the nightly research record is derived, not stored:
+ * there is no alarm to pause, resume, trigger, or update, and
+ * nothing to delete. Management refuses with the record's own
+ * name instead of a 404 for a row the home lists (a 404 would
+ * say the schedule does not exist; it does — it is derived).
+ * The run fires on the tick; there is no manual trigger route
+ * for it (the manual research route is unchanged).
+ */
+function isDerivedNightlyResearchRecord(id: string): boolean {
+  return id === NIGHTLY_RESEARCH_RECORD_ID;
+}
+
+function derivedNightlyResearchError(
+  verb: string,
+): { ok: false; error: string; status: number } {
+  return fail(
+    `Schedule 'nightly-research' is a derived record with no alarm to ${verb}.`,
+    400,
+  );
+}
+
 export async function pauseUnifiedSchedule(
   deps: UnifiedManagementDeps,
   id: string,
@@ -947,6 +1048,8 @@ export async function pauseUnifiedSchedule(
   if (isDerivedTokenRenewalRecord(id)) return derivedTokenRenewalError("pause");
   // Issue #4240 — a derived record has no alarm to pause.
   if (isDerivedRetentionRecord(id)) return derivedRetentionError("pause");
+  // Issue #4241 — a derived record has no alarm to pause.
+  if (isDerivedNightlyResearchRecord(id)) return derivedNightlyResearchError("pause");
   const existing = await deps.store.get(id);
   if (existing) {
     if (existing.kind === "goal") return goalSurfaceError("pause");
@@ -989,6 +1092,8 @@ export async function resumeUnifiedSchedule(
   if (isDerivedTokenRenewalRecord(id)) return derivedTokenRenewalError("resume");
   // Issue #4240 — a derived record has no alarm to resume.
   if (isDerivedRetentionRecord(id)) return derivedRetentionError("resume");
+  // Issue #4241 — a derived record has no alarm to resume.
+  if (isDerivedNightlyResearchRecord(id)) return derivedNightlyResearchError("resume");
   const record = await deps.store.get(id);
   if (!record) {
     return fail(`Schedule '${id}' is not paused`, 404);
@@ -1044,6 +1149,8 @@ export async function deleteUnifiedSchedule(
   if (isDerivedTokenRenewalRecord(id)) return { ok: true, cancelled: false };
   // Issue #4240 — a derived record is a no-op delete (#4237 precedent).
   if (isDerivedRetentionRecord(id)) return { ok: true, cancelled: false };
+  // Issue #4241 — a derived record is a no-op delete (#4237 precedent).
+  if (isDerivedNightlyResearchRecord(id)) return { ok: true, cancelled: false };
   const record = await deps.store.get(id);
   if (record && !isManagedAlarmKind(record.kind)) {
     return { ok: true, cancelled: false };
@@ -1118,6 +1225,8 @@ export async function triggerUnifiedSchedule(
   if (isDerivedTokenRenewalRecord(id)) return derivedTokenRenewalError("trigger");
   // Issue #4240 — a derived record has no alarm to trigger.
   if (isDerivedRetentionRecord(id)) return derivedRetentionError("trigger");
+  // Issue #4241 — a derived record has no alarm to trigger.
+  if (isDerivedNightlyResearchRecord(id)) return derivedNightlyResearchError("trigger");
   const record = await deps.store.get(id);
   // Issue #4237 — a non-screen kind is refused with its own name:
   // the goal-surface text is wrong for a live feed (or a worker
@@ -1308,6 +1417,8 @@ export async function updateUnifiedSchedule(
   if (isDerivedTokenRenewalRecord(id)) return derivedTokenRenewalError("update");
   // Issue #4240 — a derived record has no alarm to update.
   if (isDerivedRetentionRecord(id)) return derivedRetentionError("update");
+  // Issue #4241 — a derived record has no alarm to update.
+  if (isDerivedNightlyResearchRecord(id)) return derivedNightlyResearchError("update");
   const nowIso = new Date(nowMs).toISOString();
   const record = await deps.store.get(id);
   // Issue #4237 — see triggerUnifiedSchedule: refuse a non-screen

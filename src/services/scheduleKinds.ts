@@ -66,6 +66,11 @@ export const SCHEDULE_KIND_RULES: readonly ScheduleKindRule[] = [
       // the same family as token renewal; without this it would
       // read `other` (no rule matches "retention").
       "retention",
+      // Issue #4241 — the nightly research run is system upkeep,
+      // the same family; without this it would read `other` (no
+      // rule matches "research"). Earlier rules still win for a
+      // callback that also names a screening family.
+      "research",
     ],
   },
 ];

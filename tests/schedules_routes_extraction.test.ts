@@ -232,8 +232,10 @@ describe("schedules behavior (extraction #379)", () => {
     // the SDK-port rows stay first, the renewal row last.
     // Issue #3121 #4240 — the derived retention record is appended
     // after the renewal row (type "cron", same filter).
-    expect(body.count).toBe(4);
-    expect(body.schedules.map((s: any) => s.id)).toEqual(["a", "b", "token-renewal", "retention"]);
+    expect(body.count).toBe(5);
+    // Issue #3121 #4241 — the derived nightly research record is appended
+    // after the retention row.
+    expect(body.schedules.map((s: any) => s.id)).toEqual(["a", "b", "token-renewal", "retention", "nightly-research"]);
     expect(body.schedules.every((s: any) => s.type === "cron")).toBe(true);
   });
 
