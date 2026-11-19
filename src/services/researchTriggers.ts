@@ -10,15 +10,17 @@ import type { TriggerSource } from "./researchPipeline";
 
 export type PublishEntry<R> = (
   trigger: TriggerSource,
-  userLogin?: string
+  userLogin?: string,
+  opts?: { runId?: string },
 ) => Promise<R>;
 
 /** Thin trigger for the manual run route. */
 export function triggerManualResearch<R>(
   publish: PublishEntry<R>,
-  userLogin?: string
+  userLogin?: string,
+  opts?: { runId?: string },
 ): Promise<R> {
-  return publish("manual", userLogin);
+  return publish("manual", userLogin, opts);
 }
 
 /**
@@ -30,7 +32,8 @@ export function triggerManualResearch<R>(
  */
 export function triggerScheduledResearch<R>(
   publish: PublishEntry<R>,
-  userLogin?: string
+  userLogin?: string,
+  opts?: { runId?: string },
 ): Promise<R> {
-  return publish("scheduled", userLogin);
+  return publish("scheduled", userLogin, opts);
 }

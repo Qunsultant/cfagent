@@ -144,7 +144,8 @@ export async function generateAndStoreResearchReport(
  */
 export async function runResearchAndPublish(ctx: ResearchPublishContext, 
   trigger: "manual" | "scheduled",
-  userLogin?: string
+  userLogin?: string,
+  opts?: { runId?: string },
 ): Promise<{
   success: boolean;
   error?: string;
@@ -256,7 +257,11 @@ export async function runResearchAndPublish(ctx: ResearchPublishContext,
         previousRunId: previousRunId ?? "none",
         latestRunId: report?.runId ?? "none",
       });
-      const fallback = await agent.runResearch({ trigger, userLogin: login });
+      const fallback = await agent.runResearch({
+        trigger,
+        userLogin: login,
+        ...(opts?.runId ? { runId: opts.runId } : {}),
+      });
       if (!fallback.success || !fallback.report) {
         const failure = fallback.error || child.error || `Research agent finished with status ${child.status}.`;
         // Issue #577: a total failure escalates the task for a human
