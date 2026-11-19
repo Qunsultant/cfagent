@@ -3,14 +3,17 @@
  * historical comparison and portfolio construction from any stage at any time
  * without re-fetching, re-analysing from live data, or overwriting source
  * snapshots.
+ *
+ * Persists snapshots immutably in the existing canonical `mas_reports` store
+ * (`source = "recommendation_snapshot"`, `generationId = "rec-snap:<id>"`)
+ * via `scheduledReports.ts` so zero new DDL or raw SQL DML is introduced.
  */
 import type { SqlStorage } from "../orm";
 import {
-  ensureRecommendationSnapshotsTableAdapter,
-  insertRecommendationSnapshotIfAbsent,
-  listRecommendationSnapshotPayloads,
-  selectRecommendationSnapshotPayload,
-} from "../data/doSqliteRecommendationSnapshotAdapter";
+  ensureScheduledReportsTable,
+  listScheduledReports,
+  storeReportAtGeneration,
+} from "./scheduledReports";
 
 export type RecommendationSnapshotKind =
   | "individual"
@@ -67,14 +70,13 @@ export interface RecommendationSnapshot {
   lineage: RecommendationSnapshotLineage;
 }
 
-export function ensureRecommendationSnapshotsTable(sql: SqlStorage): void {
-  ensureRecommendationSnapshotsTableAdapter(sql);
-}
+const SNAPSHOT_SOURCE = "recommendation_snapshot";
 
-function parseSnapshot(payloadJson: string | null): RecommendationSnapshot | null {
-  if (!payloadJson) return null;
+function parseSnapshot(body: string): RecommendationSnapshot | null {
+  if (!body) return null;
   try {
-    return JSON.parse(payloadJson) as RecommendationSnapshot;
+    const parsed = JSON.parse(body) as RecommendationSnapshot;
+    return parsed && typeof parsed.snapshotId === "string" ? parsed : null;
   } catch {
     return null;
   }
@@ -88,20 +90,18 @@ export function createRecommendationSnapshot(
   sql: SqlStorage,
   snapshot: RecommendationSnapshot,
 ): { snapshotId: string; created: boolean } {
-  const created = insertRecommendationSnapshotIfAbsent(sql, {
-    snapshotId: snapshot.snapshotId,
+  ensureScheduledReportsTable(sql);
+  const stored = storeReportAtGeneration(sql, {
     runId: snapshot.runId,
+    generationId: `rec-snap:${snapshot.snapshotId}`,
+    title: `Recommendation Snapshot (${snapshot.symbols.join(", ")})`,
+    source: SNAPSHOT_SOURCE,
+    summary: snapshot.thesis ?? `${snapshot.kind} (${snapshot.legs.length} legs)`,
+    body: snapshot as unknown as Record<string, unknown>,
+    createdAt: snapshot.capturedAtUtc,
     userLogin: snapshot.userLogin,
-    tenantId: snapshot.tenantId,
-    recommendationId: snapshot.recommendationId,
-    kind: snapshot.kind,
-    symbolsJson: JSON.stringify(snapshot.symbols),
-    thesis: snapshot.thesis ?? null,
-    capturedAtUtc: snapshot.capturedAtUtc,
-    dataAsOf: snapshot.dataAsOf,
-    payloadJson: JSON.stringify(snapshot),
   });
-  return { snapshotId: snapshot.snapshotId, created };
+  return { snapshotId: snapshot.snapshotId, created: Boolean(stored?.created) };
 }
 
 export function getRecommendationSnapshot(
@@ -110,8 +110,10 @@ export function getRecommendationSnapshot(
   userLogin: string,
   snapshotId: string,
 ): RecommendationSnapshot | null {
-  return parseSnapshot(
-    selectRecommendationSnapshotPayload(sql, tenantId, userLogin, snapshotId),
+  return (
+    listRecommendationSnapshots(sql, tenantId, userLogin, 200).find(
+      (s) => s.snapshotId === snapshotId,
+    ) ?? null
   );
 }
 
@@ -121,9 +123,18 @@ export function listRecommendationSnapshots(
   userLogin: string,
   limit = 50,
 ): RecommendationSnapshot[] {
-  return listRecommendationSnapshotPayloads(sql, tenantId, userLogin, limit)
-    .map(parseSnapshot)
-    .filter((s): s is RecommendationSnapshot => s !== null);
+  ensureScheduledReportsTable(sql);
+  const hits = listScheduledReports(sql, {
+    sourceFilter: SNAPSHOT_SOURCE,
+    userLogin,
+    limit,
+  });
+  return hits
+    .map((h) => parseSnapshot(h.body))
+    .filter(
+      (s): s is RecommendationSnapshot =>
+        s !== null && s.tenantId === tenantId,
+    );
 }
 
 function sumNullable(values: Array<number | null>): number | null {
