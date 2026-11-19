@@ -4,16 +4,17 @@
  * The neutral route (`src/agents/routes/brokerOrders.ts`, `POST
  * /broker/order/cancel`) and the new MCP tool both call this function:
  * one routing rule, two surfaces, so they cannot give different answers
- * about one order (#3883's concern, extended past Alpaca).
+ * about one order (#3883's concern, now past a single provider).
  *
  * The rule, unchanged from the route:
  *  - the broker is RESOLVED (tenant selection), never supplied by a
  *    caller or a model — an order stays on the broker that holds it;
  *  - the broker must declare the `orderCancel` capability, else the
  *    refusal names it and no other broker is asked to cancel;
- *  - Alpaca runs the shared cancellation engine (`cancelSingleOrder`:
- *    bracket/OCO family semantics, leg detection, a filled order's
- *    refusal) — the same engine `alpaca_cancel_order` runs;
+ *  - where the platform has its own cancellation engine, that engine
+ *    runs (`cancelSingleOrder`: bracket/OCO family semantics, leg
+ *    detection, a filled order's refusal) so the surfaces that share it
+ *    cannot disagree;
  *  - every other broker goes through its platform adapter;
  *  - a cancel is recorded through `recordCancelOutcome` either way.
  */
