@@ -368,10 +368,17 @@ export function ResearchRunsPanel({ activeEnv, userLogin, onSendPrompt }: Resear
         message?: string;
         report?: ReportView;
         reportId?: string;
+        engineJobId?: string;
+        storageMode?: string;
+        cutoverMode?: string;
+        stages?: Array<{ stageId: string; status: string }>;
       }>(res);
       if (data.success && data.report) {
         setReport(data.report);
-        setRunMsg(`Done — canonical report ${data.reportId ?? ""} stored.`);
+        const engineSuffix = data.engineJobId
+          ? ` (${data.engineJobId} · ${data.cutoverMode ?? "engine"}/${data.storageMode ?? "durable"} · ${Array.isArray(data.stages) ? data.stages.length : 6}/6 stages)`
+          : "";
+        setRunMsg(`Done — canonical report ${data.reportId ?? ""} stored${engineSuffix}.`);
         void loadHistory();
       } else {
         setRunMsg(`Failed: ${data.error ?? data.reason ?? data.message ?? "unknown error"}`);
