@@ -109,6 +109,10 @@ export const AGENT_SCHEDULABLE_GOAL_OPERATIONS: readonly string[] = [
   // Issue #4411: the monthly Autopilot evaluation executes at firing
   // (dry-run policy-envelope check through the evaluate endpoint).
   "autopilot.evaluate",
+  // Issue #3652: the opportunity hunt executes at firing in the
+  // scheduled tick (src/services/opportunityHunt.ts), so it is an
+  // executing family, not a descriptor-only one.
+  "search.opportunity_hunt",
 ];
 
 /**

@@ -31,8 +31,13 @@ export const OPERATION_CATALOG: CatalogEntry[] = [
   {
     agent: "search",
     binding: "ORCHESTRATOR_AGENT",
-    operations: ["search.query"],
-    blurb: "Web and data search.",
+    // #3652: `search.opportunity_hunt` is the seeded `opportunity-hunt`
+    // goal's operation (daily 07:00, enabled). It was absent from this
+    // catalog, so every firing threw `Unknown operation` at createJob.
+    // Unlike #1655's `qa.run_sweep` (descriptor-only), this operation has
+    // an executor: src/services/opportunityHunt.ts.
+    operations: ["search.query", "search.opportunity_hunt"],
+    blurb: "Web and data search; the daily hunt scans the tradable universe.",
   },
   {
     agent: "payments",
