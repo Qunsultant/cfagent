@@ -41,6 +41,7 @@ import { handleMcpChatNlqRoutes } from "../routes/mcpChatNlq";
 import { handleSchemaRoutes } from "../routes/schema";
 import { handleAdsRevenueReferralsRoutes, handleReferralsAdsRoutes } from "../routes/adsRevenueReferrals";
 import { handleAuditRoutes } from "../routes/audit";
+import { handleIdResolveRoutes } from "../routes/idResolve";
 import { handleMeterRoutes } from "../routes/meter";
 import { handleDlqRoutes } from "../routes/dlq";
 import { handleDataProviderRoutes } from "../routes/dataProviders";
@@ -297,6 +298,16 @@ export async function routeRequest(deps: RouteRequestDeps, request: Request): Pr
     env: deps.env, // #1733: global-env fallback for AUDIT_WRITE_MODE.
   });
   if (auditResponse) return auditResponse;
+
+  // Issue #5175 slice 5: id-resolve route (GET /api/ids/resolve) is
+  // handled by src/agents/routes/idResolve.ts. Invoked at this exact
+  // position in the sequential path.endsWith matching sequence (after
+  // the audit handler, before the meter handler); a non-null return
+  // matched.
+  const idResolveResponse = await handleIdResolveRoutes(request, url, path, sessionId, {
+    ensureTables: () => deps.ensureTables(),
+  });
+  if (idResolveResponse) return idResolveResponse;
 
   const meter = await handleMeterRoutes(request, url, path, sessionId, { sql: deps.ctx.storage.sql, env: deps.env });
   if (meter) return meter;
