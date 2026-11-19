@@ -42,7 +42,10 @@ import {
 import {
   shouldFireResearchTick,
   RESEARCH_SCHEDULED_LAST_RUN_KEY,
+  NIGHTLY_RESEARCH_RECORD_ID,
 } from "../../services/researchScheduleGuard";
+import { recordLedgerRun } from "../../services/unifiedLedger";
+import { SqlJobRunRecordStore } from "../../data/doSqliteJobRunRecordAdapter";
 import { resolveScheduledJobAlertThreshold } from "../../config/scheduledJobAlert";
 import {
   recordScheduledJobOutcome,
@@ -153,6 +156,40 @@ async function recordTickJobOutcome(
     );
   } catch {
     // Observation never fails the response.
+  }
+}
+
+/**
+ * Issue #3121 #4241 — record one ledger row for a fired nightly
+ * research run (jobId = scheduleId = the record id, so the Schedules
+ * home's runs routes join on the record id with no mapping). The row
+ * is the single entry the one ledger carries for the run; the
+ * #2037 tick-outcome sink still records the run's mas_events outcome
+ * (ran / skipped / failed). Best-effort and total: a missing store
+ * (a mock ctx without getStorage, or a storage without .sql) is a
+ * no-op, and a failed write never throws — recording never fails
+ * the tick. Only successful firings are recorded here; a failed run
+ * is observable via the tick-outcome sink.
+ */
+export function recordNightlyResearchLedgerRun(
+  sql: ConstructorParameters<typeof SqlJobRunRecordStore>[0] | undefined | null,
+  started: string,
+  finished: string,
+): void {
+  if (!sql) return;
+  try {
+    recordLedgerRun(new SqlJobRunRecordStore(sql), {
+      system: "orchestrator-schedule",
+      jobId: NIGHTLY_RESEARCH_RECORD_ID,
+      operation: "nightly-research",
+      started,
+      finished,
+      outcome: "success",
+      triggeredBy: "scheduled",
+      scheduleId: NIGHTLY_RESEARCH_RECORD_ID,
+    });
+  } catch {
+    // Recording never fails the tick.
   }
 }
 
@@ -638,6 +675,9 @@ export async function handleScreenerResearchRoutes(
             dateKey: decision.dateKey,
           });
         }
+        // Issue #3121 #4241 — the run's start, for the one ledger row
+        // the handler writes after a successful firing (below).
+        const runStarted = new Date().toISOString();
         // Issue #1162 (epic #1096 Phase 6): the screening pause flag is
         // read once per tick and gates every #1096 autonomous step
         // below (discovery, re-selection, weights-v2, tick delivery).
@@ -860,6 +900,20 @@ export async function handleScreenerResearchRoutes(
           // Phase 6 steps are best-effort; the research run already succeeded.
         }
         ctx.writeSetting(RESEARCH_SCHEDULED_LAST_RUN_KEY, decision.dateKey);
+        // Issue #3121 #4241 — one ledger row for the fired run,
+        // recorded after the durable marker (same ordering as the
+        // tick outcome below: a lost row can never imply a run the
+        // guard would repeat). The row's jobId is the record id, so
+        // the Schedules home joins it with no mapping. Best-effort
+        // inside the helper: a missing store leaves the run
+        // unrecorded, never fails the tick.
+        recordNightlyResearchLedgerRun(
+          ctx.getStorage?.()?.sql as
+            | ConstructorParameters<typeof SqlJobRunRecordStore>[0]
+            | undefined,
+          runStarted,
+          new Date().toISOString(),
+        );
         // Issue Qunsultant/cfagent#2037 — the ran outcome, same sink
         // as the skip above. Recorded after the durable last-run
         // marker so a lost outcome row can never imply a run that

@@ -199,6 +199,12 @@ export function scheduleTitle(item: ScheduledTaskItem, _profiles?: StrategyProfi
   // it here, so its row reads "Scheduled retention pass" instead of
   // the raw callback.
   if (item.callback === "retention") return "Scheduled retention pass";
+  // Issue #3121 #4241 — the nightly research run is an internal-only
+  // job with no system-job registry entry (the registry is
+  // deliberately the three screening jobs); the Schedules home names
+  // it here, so its row reads "Scheduled nightly research run"
+  // instead of the raw callback.
+  if (item.callback === "nightly-research") return "Scheduled nightly research run";
   return systemJobFor(item.callback)?.label || item.callback;
 }
 

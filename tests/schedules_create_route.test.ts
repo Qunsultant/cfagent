@@ -186,7 +186,9 @@ describe("POST /api/schedules/create (#111)", () => {
     // the list appends the renewal row for the live heartbeat duty.
     // Issue #3121 #4240 — the derived retention record IS listed too:
     // the list appends the retention row after the renewal row.
-    expect(body.schedules.map((schedule: any) => schedule.id)).toEqual(["legacy-stock-screen", "legacy-options-screen", "token-renewal", "retention"]);
+    // Issue #3121 #4241 — the derived nightly research record IS listed too:
+    // the list appends the nightly research row after the retention row.
+    expect(body.schedules.map((schedule: any) => schedule.id)).toEqual(["legacy-stock-screen", "legacy-options-screen", "token-renewal", "retention", "nightly-research"]);
   });
 
   it.each(["executeAsyncJob", "expireStaleOrderDraft"])(
