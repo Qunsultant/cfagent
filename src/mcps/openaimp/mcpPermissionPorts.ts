@@ -197,6 +197,8 @@ export const MCP_TOOL_SCOPES: Record<string, McpScope> = {
   broker_order_cancel: "mcp:trade",
   // Issue #5766 — replacing an open order is a trade action too.
   broker_order_replace: "mcp:trade",
+  // Issue #5767 — a broker-side preview moves no money; trade tier anyway.
+  broker_order_preview: "mcp:trade",
   set_job_execution_mode: "mcp:write",
   list_async_jobs: "mcp:read",
   etrade_get_quote: "mcp:read",
