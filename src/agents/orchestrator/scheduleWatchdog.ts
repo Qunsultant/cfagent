@@ -7,8 +7,8 @@
  * the Slack seam.
  *
  * What it watches: durable schedules (listSchedules) whose callback is
- * in the recorded set (the four creatable callbacks plus the four
- * internal callbacks whose methods now record their own runs — see
+ * in the recorded set (the four creatable callbacks plus the internal
+ * callbacks whose methods now record their own runs — see
  * RECORDED_SCHEDULE_CALLBACKS). A schedule whose last callback-run
  * record is older than its expected tick + grace has missed its
  * firing. Schedules whose callback leaves no ledger record are

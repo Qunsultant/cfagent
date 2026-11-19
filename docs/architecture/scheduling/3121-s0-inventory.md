@@ -138,9 +138,21 @@
   manual trigger: exactly one row, the wrapper's, never a second
   invocation-level record) with pins 3394-P01–P04. The §9 row for the
   B-T2-07 internal-callback firing records now reads landed. Out of
-  scope, filed not dropped: `sendScheduledReminder` has no recording
-  wrapper — its SDK firings leave no per-run record
+  scope, filed not dropped — now closed by #4186 (see the #4186
+  amendment below): `sendScheduledReminder` had no recording
+  wrapper — its SDK firings left no per-run record
   (Qunsultant/cfagent#4186).
+- **#4186 amendment (Slice #4186, #3121):** the sixth internal-only
+  callback, `sendScheduledReminder` (NLQ-armed, not REST-creatable),
+  records the same way — a `recordScheduleCallbackRun` wrapper on
+  its orchestrator method, membership in
+  `INTERNAL_RECORDED_SCHEDULE_CALLBACKS` (so the trigger route
+  treats it as self-recording and manual triggers record exactly
+  once, and the watchdog now observes reminder schedules), and
+  the 3394 pins extended to it (SDK firing joins schedule to row;
+  no-schedule firing records explicit nulls; source pin on the
+  wrapper). No change to firing times, cadences, reminder
+  behavior, or the S1 ledger shape.
 - **#3313 amendment (Slice #3313, #3121):** the originating
   scheduleId/workflowId are now stamped onto `ScreenerRunOutcome` at
   run producers — the bus events carry them from the service methods
@@ -377,11 +389,11 @@ it does not re-inventory it.
   (the trigger route treats them as self-recording and does not add a
   second invocation-level record); #3394 proves the joinability (an
   SDK firing joins its schedule to its row; a firing with no
-  originating schedule records explicit nulls). Manual triggers of
+  originating schedule records explicit nulls), and #4186 extends
+  the same recording to the sixth internal-only callback,
+  `sendScheduledReminder` (NLQ-armed). Manual triggers of
   other non-creatable callbacks via the generic trigger route are
-  recorded invocation-level. Remaining gap, filed not dropped:
-  `sendScheduledReminder` has no recording wrapper — its SDK firings
-  leave no per-run record (Qunsultant/cfagent#4186). [S0-P08]
+  recorded invocation-level. [S0-P08]
 - B-T2-08 — Baseline reconciliation on agent start:
   `removeUnownedBaselineSchedules` removes baselines not owned by the
   instance. [S0-P09]
@@ -1179,7 +1191,7 @@ no home and no filed issue is a defect in the map.
 | System-job trigger routes (7) | B-T2-05 | Trigger routes | S2 — landed |
 | Per-schedule audit events (8, B-T2-06 funnel) | B-T2-06 | `SCHEDULE_LIFECYCLE_AUDIT_EVENTS` + `ctx.audit` | S1 (map); S2 — landed |
 | Per-run records for creatable callbacks + manual triggers | B-T2-07 | `recordScheduleCallbackRun` → `job_run_records` | S1 — landed |
-| Per-run records for SDK firings of internal-only callbacks | B-T2-07 (named gap) | `recordScheduleCallbackRun` → `job_run_records` | #3394 — landed (recording via #3788 wrappers; joinability proven per callback, SDK + no-schedule explicit nulls + route exactly-once) |
+| Per-run records for SDK firings of internal-only callbacks | B-T2-07 (named gap) | `recordScheduleCallbackRun` → `job_run_records` | #3394 — landed (recording via #3788 wrappers; joinability proven per callback, SDK + no-schedule explicit nulls + route exactly-once); #4186 — landed (reminder callback recorded the same way, 3394 pins extended) |
 | Per-stage workflow firing: SDK alarm → `runWorkflowStage` → `runPipelineStage` → `runJob` scoped to the stage | B-T2-07 | `runWorkflowStage` (`INTERNAL_RECORDED_SCHEDULE_CALLBACKS`, recorded via #3788 wrapper) + `runPipelineStage` door | #3310 — landed |
 | Ticker-push live feed as a unified record (kind ticker-push, record-only — NO per-push ledger rows; health from lastPushAt) | B-T2-07 | `tickerPushScheduleToRecord` + `tickerPushHealth` in the TickerAgent's own store; list read by typed RPC | #4237 — landed |
 | Baseline reconciliation on agent start | B-T2-08 | `removeUnownedBaselineSchedules` | S2 — landed |

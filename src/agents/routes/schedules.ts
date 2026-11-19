@@ -1528,7 +1528,7 @@ export async function handleSchedulesRoutes(
           async (callback, payload) => {
             // Issue #2964: record the manual run. Callbacks whose method
             // wrapper records its own runs (the creatable four, plus the
-            // four internal callbacks #3788 wrapped) record outcome-aware
+            // internal callbacks #3788/#3310/#4186 wrapped) record outcome-aware
             // runs themselves, so the route must not double-record them;
             // other callbacks have no wrapper, so the route records the
             // invocation itself (invocation-level success, since the

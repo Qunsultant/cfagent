@@ -68,7 +68,7 @@ describe("3122-P01 registry accounting: every catalog operation declared exactly
     }
   });
 
-  it("schedulable callbacks are exactly the creatable four; excluded callbacks are exactly the internal four plus system duties", () => {
+  it("schedulable callbacks are exactly the creatable four; excluded callbacks are the internal recorded callbacks plus system duties", () => {
     expect([...AGENT_SCHEDULABLE_CALLBACKS].sort()).toEqual(
       [...CREATABLE_SCHEDULE_CALLBACKS].sort(),
     );

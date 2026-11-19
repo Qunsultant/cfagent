@@ -1,0 +1,3 @@
+### Added
+
+- **Scheduling consolidation Slice #4186 — reminder firing records (#3121):** SDK firings of `sendScheduledReminder` now leave a per-run consolidated-ledger row — a `recordScheduleCallbackRun` wrapper on the orchestrator method (mirroring #3788) plus membership in `INTERNAL_RECORDED_SCHEDULE_CALLBACKS`, so the trigger route treats it as self-recording (manual triggers record exactly once) and the schedule watchdog now observes reminder schedules. Joinability proven by the 3394 pins extended to the reminder (SDK firing joins schedule to row; no-schedule firing records explicit nulls). No change to firing times, cadences, reminder behavior, or the S1 ledger shape.
