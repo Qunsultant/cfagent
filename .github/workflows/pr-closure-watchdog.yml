@@ -41,15 +41,38 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Mint App token
+        id: app-token
+        continue-on-error: true
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.AUTO_UPDATE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.AUTO_UPDATE_APP_PRIVATE_KEY }}
+
       - name: Verify unmerged diff and remediate
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          IS_FORK: ${{ github.event.pull_request.head.repo.fork }}
+          IS_SUPERSEDED: ${{ contains(github.event.pull_request.labels.*.name, 'superseded') }}
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_URL: ${{ github.event.pull_request.html_url }}
         run: |
           set -euo pipefail
+
+          delete_stale_branch() {
+            if [ "${IS_FORK}" != "true" ] && [ -n "${HEAD_REF:-}" ] && [ "${HEAD_REF}" != "main" ]; then
+              gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/heads/${HEAD_REF}" >/dev/null 2>&1 || true
+            fi
+          }
+
+          if [ "${IS_SUPERSEDED}" = "true" ]; then
+            echo "PR #$PR_NUMBER carries the 'superseded' label — skipping reopen and cleaning up stale branch."
+            delete_stale_branch
+            exit 0
+          fi
 
           echo "Evaluating closed PR #$PR_NUMBER ($HEAD_SHA)..."
           git fetch origin "$HEAD_SHA" || git fetch origin "+refs/pull/$PR_NUMBER/head:pr-$PR_NUMBER" || true
@@ -63,6 +86,7 @@ jobs:
 
           if [ $STATUS -eq 0 ]; then
             echo "PR closure verified: zero unmerged functional diff relative to origin/main."
+            delete_stale_branch
             exit 0
           fi
 
