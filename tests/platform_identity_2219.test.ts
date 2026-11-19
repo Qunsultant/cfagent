@@ -67,6 +67,24 @@ class MockD1Database {
       },
     };
   }
+  /** Issue #5605 (G-2): the D1 batch() primitive — the routes now
+   * run multi-write pairs through it. Sequential execution
+   * inside one transaction is the faithful node:sqlite stand-in
+   * for D1's all-or-nothing batch. */
+  async batch(statements: any[]) {
+    const results: any[] = [];
+    this.sqlite.exec("BEGIN");
+    try {
+      for (const stmt of statements) {
+        results.push(await stmt.run());
+      }
+      this.sqlite.exec("COMMIT");
+    } catch (err) {
+      this.sqlite.exec("ROLLBACK");
+      throw err;
+    }
+    return results;
+  }
 }
 
 async function setup(opts: { monetization?: boolean; stripe?: boolean } = {}) {
