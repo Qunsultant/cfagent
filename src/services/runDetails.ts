@@ -155,6 +155,25 @@ export interface RunDetail {
     catalogueVersion: string | null;
     rendererVersions: Record<string, string | null>;
     store: string;
+    /** Issue #2607 / #2611 — R2-pointer parity & full report lineage. */
+    storageMode: "r2-pointer" | "inline" | "unknown";
+    bodyR2Key: string | null;
+    origin: {
+      trigger: string | null;
+      channel: string | null;
+      interface: string | null;
+      actor: string | null;
+    };
+    artifactLinks: Array<{
+      format: "PDF" | "XLSX" | "CSV";
+      key: string | null;
+      url: string | null;
+      status: string | null;
+      reportId: string | null;
+      runId: string;
+      captureIds: string[];
+    }>;
+    incompleteFields: string[];
   };
   stages: RunDetailStage[];
   formats: Array<{
@@ -274,6 +293,7 @@ export function buildRunDetail(
     | "scanRunId"
     | "discoveryRunId"
     | "partial"
+    | "bodyR2Key"
   > & { body?: unknown },
   options: BuildRunDetailOptions = {},
 ): RunDetail {
@@ -567,19 +587,62 @@ export function buildRunDetail(
       workflowVersion: strOrNull(workflowBody.version ?? body?.workflowVersion) ?? null,
       workflowType: strOrNull(workflowBody.type ?? body?.workflowType) ?? null,
     },
-    lineage: {
-      inputHash: strOrNull(body?.inputHash ?? body?.input?.hash) ?? null,
-      captureIds,
-      captures,
-      engineVersion: strOrNull(body?.modelVersion ?? body?.engineVersion) ?? null,
-      catalogueVersion: strOrNull(body?.catalogueVersion ?? body?.catalogVersion) ?? null,
-      rendererVersions: {
-        pdf: strOrNull(body?.rendererVersions?.pdf) ?? null,
-        xlsx: strOrNull(body?.rendererVersions?.xlsx) ?? null,
-        csv: strOrNull(body?.rendererVersions?.csv) ?? null,
-      },
-      store,
-    },
+    lineage: (() => {
+      const inputHash = strOrNull(body?.inputHash ?? body?.input?.hash) ?? null;
+      const engineVersion = strOrNull(body?.modelVersion ?? body?.engineVersion) ?? null;
+      const catalogueVersion = strOrNull(body?.catalogueVersion ?? body?.catalogVersion) ?? null;
+      const bodyR2Key = strOrNull(summary.bodyR2Key ?? body?.bodyR2Key) ?? null;
+      const storageMode: "r2-pointer" | "inline" | "unknown" = bodyR2Key
+        ? "r2-pointer"
+        : body && typeof body === "object" && Object.keys(body).length > 0
+          ? "inline"
+          : "unknown";
+      const origin = {
+        trigger: strOrNull(summary.trigger ?? body?.trigger) ?? null,
+        channel: strOrNull(provenanceBody.submittedVia?.channel ?? provenanceBody.submittedVia ?? body?.submittedVia?.channel ?? body?.submittedVia) ?? null,
+        interface: strOrNull(provenanceBody.interface ?? body?.interface) ?? null,
+        actor: strOrNull(body?.userLogin ?? body?.actorId ?? provenanceBody.actorId) ?? null,
+      };
+      const artifactLinks = formats
+        .filter((f) => Boolean(f.key || f.url))
+        .map((f) => ({
+          format: f.format,
+          key: f.key,
+          url: f.url,
+          status: f.status,
+          reportId: summary.reportId ?? null,
+          runId: String(summary.runId),
+          captureIds: [...captureIds],
+        }));
+      const incompleteFields: string[] = [];
+      if (!inputHash) incompleteFields.push("inputHash");
+      if (captureIds.length === 0) incompleteFields.push("captureIds");
+      if (!engineVersion) incompleteFields.push("engineVersion");
+      if (bodyR2Key && (!body || typeof body !== "object" || Object.keys(body).length === 0)) {
+        incompleteFields.push("bodyR2Key:unresolved");
+      }
+      for (const c of captures) {
+        if (c.source === "unknown") incompleteFields.push(`capture.${c.field}`);
+      }
+      return {
+        inputHash,
+        captureIds,
+        captures,
+        engineVersion,
+        catalogueVersion,
+        rendererVersions: {
+          pdf: strOrNull(body?.rendererVersions?.pdf) ?? null,
+          xlsx: strOrNull(body?.rendererVersions?.xlsx) ?? null,
+          csv: strOrNull(body?.rendererVersions?.csv) ?? null,
+        },
+        store,
+        storageMode,
+        bodyR2Key,
+        origin,
+        artifactLinks,
+        incompleteFields,
+      };
+    })(),
     stages,
     formats,
     reasons,

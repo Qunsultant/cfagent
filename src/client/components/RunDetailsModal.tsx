@@ -97,6 +97,22 @@ export function RunDetailSections({
                 <FieldValue value={detail.lineage.engineVersion} store={detail.store} /> · Captures:{" "}
                 {detail.lineage.captureIds.length ? detail.lineage.captureIds.join(", ") : <Unknown store={detail.store} />}
               </p>
+              <p>
+                Storage: <span>{detail.lineage.storageMode}</span>
+                {detail.lineage.bodyR2Key ? <> (<code>{detail.lineage.bodyR2Key}</code>)</> : null}
+                {" · "}Origin:{" "}
+                <FieldValue value={detail.lineage.origin.trigger} store={detail.store} /> /{" "}
+                <FieldValue value={detail.lineage.origin.channel} store={detail.store} />
+                {detail.lineage.incompleteFields.length > 0 && (
+                  <> · Incomplete: <span>{detail.lineage.incompleteFields.join(", ")}</span></>
+                )}
+              </p>
+              {detail.lineage.artifactLinks.length > 0 && (
+                <p>
+                  Artifacts:{" "}
+                  {detail.lineage.artifactLinks.map((a) => `${a.format}:${a.key ?? a.url ?? "linked"}`).join(" · ")}
+                </p>
+              )}
               <Table
                 caption="Per-capture lineage"
                 columns={[
