@@ -38,6 +38,7 @@ import { codedMessage, resolveOutcome } from "../../outcomes/outcomeAspects";
 import {
   triggerManualResearch,
   triggerScheduledResearch,
+  runWithResearchRunId,
 } from "../../services/researchTriggers";
 import {
   shouldFireResearchTick,
@@ -597,11 +598,11 @@ export async function handleScreenerResearchRoutes(
           d1: resolveResearchD1(),
           env: ctx.env as Record<string, string | undefined>,
           execute: (runCtx) =>
-            triggerManualResearch(
-              ctx.runResearchAndPublish,
-              userLogin,
-              runCtx ? { runId: runCtx.runId } : undefined,
-            ),
+            runCtx
+              ? runWithResearchRunId(runCtx.runId, () =>
+                  triggerManualResearch(ctx.runResearchAndPublish, userLogin),
+                )
+              : triggerManualResearch(ctx.runResearchAndPublish, userLogin),
         });
         return Response.json({
           ...dispatched.outcome,
@@ -642,7 +643,9 @@ export async function handleScreenerResearchRoutes(
           env: ctx.env as Record<string, string | undefined>,
           researchDeps: {
             runOodaAnalysis: (runCtx) =>
-              triggerManualResearch(ctx.runResearchAndPublish, runCtx.userLogin, { runId: runCtx.runId }),
+              runWithResearchRunId(runCtx.runId, () =>
+                triggerManualResearch(ctx.runResearchAndPublish, runCtx.userLogin),
+              ),
             runEvaluateStage: async (evalCtx) => {
               const agent = ctx.getResearchAgent?.(evalCtx.userLogin);
               if (!agent?.evaluateRun) return null;
