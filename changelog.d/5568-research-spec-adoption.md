@@ -1,0 +1,2 @@
+### Changed
+- **Research spec adoption (#5568):** Declared the `research` (`oodares`) `JobDefinitionSpec` and its parameters (`runId`, `sourceId`, `dataset`, `trigger`, `cron`) in `src/config/jobDefinitionCatalog.ts` on top of the #5496 generic binder, and routed `buildResearchJobDefinition` in `src/services/researchPipelineJobs.ts` through `jobDefinitionSpec("research")`, `bindJobDefinitionParams`, and `buildJobConfigFromSpec`.

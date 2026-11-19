@@ -141,6 +141,76 @@ export const JOB_DEFINITION_SPECS: Readonly<Record<string, JobDefinitionSpec>> =
     },
     schedule: { enabled: false },
   },
+  research: {
+    id: "research",
+    shortId: "oodares",
+    name: "Nightly OODA research",
+    version: 1,
+    description:
+      "oodares — the six-stage nightly OODA options research pipeline: feed → enrich → analyze → generate → deliver → evaluate.",
+    stages: [
+      {
+        kind: "research",
+        step: "noop",
+        children: [
+          { kind: "feed", step: "noop" },
+          { kind: "enrich", step: "noop" },
+          { kind: "analyze", step: "analyze.ooda" },
+          { kind: "generate", step: "noop" },
+          { kind: "deliver", step: "noop" },
+          { kind: "evaluate", step: "evaluate.apply" },
+        ],
+      },
+    ],
+    parameters: [
+      {
+        name: "runId",
+        label: "Run ID",
+        type: "text",
+        required: false,
+        description: "Optional run identifier for the research:<runId> engine job.",
+      },
+      {
+        name: "sourceId",
+        label: "Source ID",
+        type: "text",
+        required: false,
+        default: "primary-feed",
+        description: "Primary market data source id.",
+      },
+      {
+        name: "dataset",
+        label: "Dataset",
+        type: "text",
+        required: false,
+        default: "quotes",
+        description: "Dataset name fed into the research pipeline.",
+      },
+      {
+        name: "trigger",
+        label: "Trigger",
+        type: "select",
+        required: false,
+        options: ["manual", "scheduled"],
+        default: "manual",
+        description: "How the research run was triggered.",
+      },
+      {
+        name: "cron",
+        label: "Cron",
+        type: "text",
+        required: false,
+        description: "Optional cron expression for scheduled runs.",
+      },
+    ],
+    executionMode: {
+      concurrency: "sequential",
+      pacing: "batch",
+      delivery: "async",
+      shape: "monolith",
+    },
+    schedule: { enabled: false },
+  },
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
