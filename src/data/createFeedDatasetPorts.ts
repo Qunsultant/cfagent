@@ -16,13 +16,29 @@ import {
   D1FeedDatasetStore,
 } from "./d1FeedDatasetAdapter";
 import type { FeedDatasetStore } from "./feedDatasetPorts";
+import { createAnalyticsLakePorts } from "./createAnalyticsLakePorts";
+import { withLakeArchive } from "../aspects/analyticsLakeAspect";
 
-/** Build the feed-dataset adapter from Worker env, or null if unbound. */
+/**
+ * Build the feed-dataset adapter from Worker env, or null if unbound.
+ *
+ * Analytics lake (Basin/Iceberg): when `ANALYTICS_LAKE_MODE=basin` is
+ * configured, the store is wrapped by the archiving aspect
+ * (`withLakeArchive`) here — one composition point, no call-site changes,
+ * and the domain never learns the lake exists. Off by default: the
+ * returned store is the plain adapter, byte-identical to before.
+ */
 export function createFeedDatasetAdapter(env: {
   AGENT_DB?: unknown;
-}): D1FeedDatasetStore | null {
+}): FeedDatasetStore | null {
   if (!env.AGENT_DB) return null;
-  return new D1FeedDatasetStore(createD1FeedDatasetDb(env.AGENT_DB as D1Database));
+  const store = new D1FeedDatasetStore(createD1FeedDatasetDb(env.AGENT_DB as D1Database));
+  const { config, lake } = createAnalyticsLakePorts(env);
+  if (config.mode !== "basin") return store;
+  return withLakeArchive(store, lake, {
+    datasets: config.datasets,
+    table: config.table,
+  });
 }
 
 export type { FeedDatasetStore };
