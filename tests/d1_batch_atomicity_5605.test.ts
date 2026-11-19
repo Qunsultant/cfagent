@@ -184,6 +184,40 @@ async function seedApprovedPlan(
 }
 
 /* ------------------------------------------------------------------ */
+/* Client-build pin: the aspect stays out of client-reachable        */
+/* adapters (#5605 v2)                                                 */
+/* ------------------------------------------------------------------ */
+
+describe("client-build pin: no aspect value-import in client-reachable adapters (#5605)", () => {
+  it("d1CommercialAdapter / d1SubscriptionAdapter / d1ProductAdapter never import the transaction aspect", async () => {
+    // The v1 slice imported bufferInAmbientUnit from the aspect
+    // into these adapters. The commercial and subscription
+    // adapters are reachable from the CLIENT bundle through the
+    // trading barrel (tenantProviders → createCommercialPorts /
+    // createSubscriptionPorts), and the aspect's node:async_hooks
+    // graph broke `vite build` (Fast gates red on PR #5731).
+    // The adapters buffer through the client-safe seam
+    // (bufferD1Statement in transactionRunnerProvider) instead;
+    // this pin fails CI if a value import of the aspect ever
+    // returns to any of the three. The journal adapter is NOT
+    // client-reachable and keeps its withTransaction import
+    // (same as the d1ProviderConfigAdapter precedent) — it is
+    // deliberately absent from this list.
+    const { readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    for (const file of [
+      "src/data/d1CommercialAdapter.ts",
+      "src/data/d1SubscriptionAdapter.ts",
+      "src/data/d1ProductAdapter.ts",
+    ]) {
+      const src = readFileSync(join(process.cwd(), file), "utf8");
+      expect(src).not.toContain('from "../aspects/transactionAspect"');
+      expect(src).toContain("bufferD1Statement");
+    }
+  });
+});
+
+/* ------------------------------------------------------------------ */
 /* Aspect helper                                                       */
 /* ------------------------------------------------------------------ */
 
