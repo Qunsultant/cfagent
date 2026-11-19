@@ -109,7 +109,7 @@ import {
 } from "../services/autopilotMonthlyEvaluation";
 import { SqlUnifiedScheduleStore } from "../data/doSqliteUnifiedScheduleAdapter";
 import type { UnifiedScheduleRecord } from "../data/unifiedSchedulePorts";
-import { goalToRecord, recordToGoal } from "../services/unifiedScheduleManagement";
+import { goalToRecord, isUnchangedGoalRecord, recordToGoal } from "../services/unifiedScheduleManagement";
 import {
   fetchLedgerRuns,
   mergeLedgerRuns,
@@ -690,6 +690,11 @@ export class ScheduledAgent extends PortThink {
    * for any caller without one). The snapshot must be the FULL loaded
    * list, including rows that do not map to a goal, so a malformed
    * row is still pruned exactly as the re-list pruned it.
+   *
+   * Issue #4205 — dirty-check saves: the re-save loop below writes
+   * only goals whose persisted fields changed since load
+   * (`isUnchangedGoalRecord`, ignoring the write stamp). Removal
+   * sync and the no-snapshot fallback are unchanged.
    */
   private async saveGoals(
     goals: ScheduledGoal[],
@@ -719,9 +724,30 @@ export class ScheduledAgent extends PortThink {
       // not reshuffle the list order under created_at ordering.
       const prev = existingById.get(goal.id);
       if (prev) record.createdAt = prev.createdAt;
+      // Issue #4205 — dirty-check saves: a goal whose persisted
+      // fields are unchanged since load is not re-written. The
+      // comparison ignores updatedAt (bumped below on a real
+      // write); a goal with no loaded row is always written, and
+      // removal sync above is unchanged — only the re-save loop
+      // skips. The write stamp is set only when the save happens,
+      // so an unchanged goal keeps its stored updatedAt.
+      if (prev && isUnchangedGoalRecord(prev, record)) continue;
       record.updatedAt = nowIso;
       try {
         store.save(record);
+        // Issue #4205 — the snapshot is the store's picture, so a
+        // write refreshes it: a second save in the same flow (the
+        // triggerGoal restore) compares against what the first save
+        // wrote, not the pre-flow load. Without this the restore
+        // would compare the reset lastRun against the stale
+        // pre-stamp snapshot, conclude "unchanged", and skip the
+        // write the store actually needs. A failed write leaves
+        // the snapshot (and the store) at the old row.
+        existingById.set(goal.id, record);
+        if (existing) {
+          const idx = existing.findIndex((r) => r.id === goal.id);
+          if (idx >= 0) existing[idx] = record;
+        }
       } catch {
         // A failed store write leaves the goal in the KV key, where
         // the next read's one-way import picks it up.
