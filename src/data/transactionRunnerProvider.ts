@@ -49,6 +49,28 @@ export interface TransactionRunner {
   ): T;
 }
 
+/**
+ * Issue #5605 (G-2) — the D1 batch runner seam, the D1-leg
+ * counterpart of TransactionRunner. A service that composes a
+ * multi-write pair across two D1 ports opens one unit through
+ * this runner; the ports' D1 adapters buffer their statements
+ * into the ambient unit (see bufferInAmbientUnit in the
+ * aspect). The runner is created from the same bound D1
+ * client the adapters use (src/data/d1BatchRunner.ts); a
+ * service constructed without one runs its writes
+ * sequentially, exactly as before — the same absence
+ * discipline as the DO runner above. The runner carries no
+ * store client and no Drizzle import, so this module stays
+ * client-safe: only the server-only factory imports the
+ * aspect.
+ */
+export interface D1BatchRunner {
+  runInBatch<T>(
+    context: TransactionContext,
+    fn: () => T | Promise<T>,
+  ): Promise<T>;
+}
+
 let registeredRunner: TransactionRunner | null = null;
 
 /** Register the production runner (server entry only). */

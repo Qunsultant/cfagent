@@ -31,6 +31,7 @@
  * grant's only tenant source.
  */
 import type { CommercialAccountRecord, CommercialStore } from "../data/commercialPorts";
+import type { D1BatchRunner } from "../data/transactionRunnerProvider";
 import {
   MS_PER_DAY,
   nextPeriodStartMs,
@@ -52,6 +53,14 @@ export interface ActivationInput {
   stripeSessionId?: string | null;
   stripePaymentIntentId?: string | null;
   nowMs?: number;
+  /**
+   * Issue #5605 (G-2): the D1 batch runner, when the caller
+   * supplies one. The subscription-row + account-row pair then
+   * runs as ONE batch unit; without it the pair applies
+   * sequentially, exactly as before. All reads (replay check,
+   * account, prior subscriptions) run before the unit opens.
+   */
+  batch?: D1BatchRunner | null;
 }
 
 export interface ActivationResult {
@@ -115,6 +124,8 @@ export interface GrantInput {
   /** Verified operator login performing the grant (recorded in the route audit, not on the row). */
   grantedBy: string;
   nowMs?: number;
+  /** Issue #5605 (G-2): the D1 batch runner — see ActivationInput. */
+  batch?: D1BatchRunner | null;
 }
 
 /**
@@ -161,27 +172,41 @@ export async function grantSubscription(input: GrantInput): Promise<ActivationRe
     nowMs,
   );
   const periodEndMs = periodStartMs + plan.periodDays * MS_PER_DAY;
-  const subscription = await subs.createSubscription({
-    id: `sub-${crypto.randomUUID().slice(0, 8)}`,
-    userId,
-    tenantId,
-    planId: plan.id,
-    provider: "operator",
-    providerPaymentRef: `grant-${crypto.randomUUID()}`,
-    stripeSessionId: null,
-    stripePaymentIntentId: null,
-    periodStartMs,
-    periodEndMs,
-  });
-  const account = await store.upsertAccount({
-    userId,
-    tenantId,
-    tier: existing.tier,
-    tierSource: "subscription",
-    creditsUSD: existing.creditsUSD,
-    includedRuns: existing.includedRuns + plan.includedRuns,
-  });
-  return { subscription, account };
+  // Issue #5605 (G-2): the pair — subscription row + account
+  // upsert — runs as one batch unit when the caller supplied a
+  // runner; the D1 adapters buffer their statements into the
+  // ambient unit. Without a runner the pair applies
+  // sequentially, exactly as before.
+  const writePair = async (): Promise<ActivationResult> => {
+    const subscription = await subs.createSubscription({
+      id: `sub-${crypto.randomUUID().slice(0, 8)}`,
+      userId,
+      tenantId,
+      planId: plan.id,
+      provider: "operator",
+      providerPaymentRef: `grant-${crypto.randomUUID()}`,
+      stripeSessionId: null,
+      stripePaymentIntentId: null,
+      periodStartMs,
+      periodEndMs,
+    });
+    const account = await store.upsertAccount({
+      userId,
+      tenantId,
+      tier: existing.tier,
+      tierSource: "subscription",
+      creditsUSD: existing.creditsUSD,
+      includedRuns: existing.includedRuns + plan.includedRuns,
+    });
+    return { subscription, account };
+  };
+  if (input.batch) {
+    return input.batch.runInBatch(
+      { operationName: "subscription.grant", domain: "subscriptions" },
+      writePair,
+    );
+  }
+  return writePair();
 }
 
 export async function activateSubscription(input: ActivationInput): Promise<ActivationResult> {
@@ -206,25 +231,39 @@ export async function activateSubscription(input: ActivationInput): Promise<Acti
     nowMs,
   );
   const periodEndMs = periodStartMs + plan.periodDays * MS_PER_DAY;
-  const subscription = await subs.createSubscription({
-    id: `sub-${crypto.randomUUID().slice(0, 8)}`,
-    userId,
-    tenantId,
-    planId: plan.id,
-    provider: input.provider ?? "cfpay",
-    providerPaymentRef,
-    stripeSessionId: input.stripeSessionId ?? null,
-    stripePaymentIntentId: input.stripePaymentIntentId ?? null,
-    periodStartMs,
-    periodEndMs,
-  });
-  const account = await store.upsertAccount({
-    userId,
-    tenantId,
-    tier: existing?.tier ?? "Free",
-    tierSource: "subscription",
-    creditsUSD: existing?.creditsUSD ?? 0,
-    includedRuns: (existing?.includedRuns ?? 0) + plan.includedRuns,
-  });
-  return { subscription, account };
+  // Issue #5605 (G-2): the pair — subscription row + account
+  // upsert — runs as one batch unit when the caller supplied a
+  // runner; the D1 adapters buffer their statements into the
+  // ambient unit. Without a runner the pair applies
+  // sequentially, exactly as before.
+  const writePair = async (): Promise<ActivationResult> => {
+    const subscription = await subs.createSubscription({
+      id: `sub-${crypto.randomUUID().slice(0, 8)}`,
+      userId,
+      tenantId,
+      planId: plan.id,
+      provider: input.provider ?? "cfpay",
+      providerPaymentRef,
+      stripeSessionId: input.stripeSessionId ?? null,
+      stripePaymentIntentId: input.stripePaymentIntentId ?? null,
+      periodStartMs,
+      periodEndMs,
+    });
+    const account = await store.upsertAccount({
+      userId,
+      tenantId,
+      tier: existing?.tier ?? "Free",
+      tierSource: "subscription",
+      creditsUSD: existing?.creditsUSD ?? 0,
+      includedRuns: (existing?.includedRuns ?? 0) + plan.includedRuns,
+    });
+    return { subscription, account };
+  };
+  if (input.batch) {
+    return input.batch.runInBatch(
+      { operationName: "subscription.activate", domain: "subscriptions" },
+      writePair,
+    );
+  }
+  return writePair();
 }

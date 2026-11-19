@@ -63,6 +63,7 @@
  */
 import { createCommercialAdapter } from "../../data/createCommercialPorts";
 import type { CommercialStore } from "../../data/commercialPorts";
+import { createD1BatchRunner } from "../../data/d1BatchRunner";
 import { createTenantDirectoryAdapter } from "../../data/createTenantDirectoryPorts";
 import type { TenantDirectory } from "../../data/tenantDirectoryPorts";
 import { createStoreOperatorsAdapter } from "../../data/createStoreOperatorsPorts";
@@ -365,34 +366,57 @@ export async function handlePlatformTenantRoutes(
         }
         return requestInvalidResponse("No settings field supplied.");
       }
+      // Issue #5605 (G-2): the PATCH's up-to-three settings
+      // writes run as ONE D1 batch unit when AGENT_DB is bound —
+      // the setters buffer their upserts into the ambient unit
+      // the runner opens. Without a binding (a test-seam store)
+      // they apply sequentially, exactly as before. A validation
+      // failure after an earlier setter buffered still commits
+      // that setter's write: the same outcome as the sequential
+      // path, which had already applied it before the failure.
+      // The final readSettings below re-reads after the unit
+      // commits, so the response carries the applied values.
       let applied = false;
-      if (body["adsEnabled"] !== undefined) {
-        await commercial.setTenantAdsEnabled(tenantId, body["adsEnabled"] as boolean);
-        applied = true;
-      }
-      if (body["autoRefresh"] !== undefined) {
-        const refresh = body["autoRefresh"] as { enabled: boolean; intervalS: number };
-        if (!Number.isInteger(refresh["intervalS"]) || refresh["intervalS"] <= 0) {
-          return requestInvalidResponse("autoRefresh must be { enabled: boolean, intervalS: positive integer }.");
+      const applySettings = async (): Promise<Response | null> => {
+        if (body["adsEnabled"] !== undefined) {
+          await commercial.setTenantAdsEnabled(tenantId, body["adsEnabled"] as boolean);
+          applied = true;
         }
-        await commercial.setTenantAutoRefresh(tenantId, {
-          enabled: refresh["enabled"],
-          intervalS: refresh["intervalS"],
-        });
-        applied = true;
-      }
-      if (body["providers"] !== undefined) {
-        const providers = body["providers"] as { dataProviderId: string; brokerId: string };
-        if (!providers["dataProviderId"] || !providers["brokerId"]) {
-          return requestInvalidResponse("providers must be { dataProviderId: string, brokerId: string }.");
+        if (body["autoRefresh"] !== undefined) {
+          const refresh = body["autoRefresh"] as { enabled: boolean; intervalS: number };
+          if (!Number.isInteger(refresh["intervalS"]) || refresh["intervalS"] <= 0) {
+            return requestInvalidResponse("autoRefresh must be { enabled: boolean, intervalS: positive integer }.");
+          }
+          await commercial.setTenantAutoRefresh(tenantId, {
+            enabled: refresh["enabled"],
+            intervalS: refresh["intervalS"],
+          });
+          applied = true;
         }
-        await commercial.setTenantProviders(tenantId, {
-          dataProviderId: providers["dataProviderId"],
-          brokerId: providers["brokerId"],
-        });
-        applied = true;
-      }
-      if (!applied) return requestInvalidResponse("No settings field supplied.");
+        if (body["providers"] !== undefined) {
+          const providers = body["providers"] as { dataProviderId: string; brokerId: string };
+          if (!providers["dataProviderId"] || !providers["brokerId"]) {
+            return requestInvalidResponse("providers must be { dataProviderId: string, brokerId: string }.");
+          }
+          await commercial.setTenantProviders(tenantId, {
+            dataProviderId: providers["dataProviderId"],
+            brokerId: providers["brokerId"],
+          });
+          applied = true;
+        }
+        if (!applied) return requestInvalidResponse("No settings field supplied.");
+        return null;
+      };
+      const batch = ctx.env.AGENT_DB
+        ? createD1BatchRunner(ctx.env.AGENT_DB as D1Database)
+        : null;
+      const early = batch
+        ? await batch.runInBatch(
+            { operationName: "tenant.settings.patch", domain: "tenants" },
+            applySettings,
+          )
+        : await applySettings();
+      if (early) return early;
       auditBestEffort(ctx, operator, "update-settings", tenantId);
       return Response.json({ tenant: await readSettings(commercial, tenantId) });
     }

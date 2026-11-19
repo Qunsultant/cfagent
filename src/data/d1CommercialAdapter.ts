@@ -5,16 +5,27 @@
  * builder) lives here, behind the port interface.
  *
  * Transactions: every operation is a single statement (one INSERT,
- * one SELECT, one UPDATE), which is atomic on any store. No
- * multi-statement transaction is used here, for the reason
- * recorded in migrationRunner.ts (drizzle-orm/d1's `db.transaction()`
- * is sequential BEGIN/COMMIT, not Postgres-equivalent atomicity on
- * D1). The redemption claim is a single PK insert: the loser of a
- * race gets a UNIQUE violation and re-checks, never a double spend.
+ * one SELECT, one UPDATE), which is atomic on any store — except
+ * the writes a service or route composes into a pair or triple
+ * (the account upsert in activation; the three settings upserts
+ * in a tenant PATCH). Issue #5605 (G-2): those writes buffer
+ * into an ambient D1 batch unit when the caller opened one
+ * (bufferInAmbientUnit in the transaction aspect) and are
+ * applied by one D1 batch(); without an ambient unit they
+ * execute immediately, exactly as before. Each settings upsert
+ * SETs only its own half, so three buffered upserts compose
+ * correctly even though each one's record was built from the
+ * pre-batch row. No multi-statement transaction is used here,
+ * for the reason recorded in migrationRunner.ts
+ * (drizzle-orm/d1's `db.transaction()` is sequential
+ * BEGIN/COMMIT, not Postgres-equivalent atomicity on D1). The
+ * redemption claim is a single PK insert: the loser of a race
+ * gets a UNIQUE violation and re-checks, never a double spend.
  */
 import { type DrizzleD1Database } from "drizzle-orm/d1";
 import { createDrizzleD1Db } from "./d1QueryLogger";
 import { and, asc, eq, isNull } from "drizzle-orm";
+import { bufferInAmbientUnit } from "../aspects/transactionAspect";
 import {
   agentCommercialAccounts,
   agentCreditClaims,
@@ -197,7 +208,13 @@ export class D1CommercialAdapter implements CommercialStore {
       segment,
       updatedAtMs: Date.now(),
     };
-    await this.db
+    // Issue #5605 (G-2): when the caller opened a D1 batch unit
+    // (activation), the upsert buffers into it and the computed
+    // record returns. The existing-account read above ran before
+    // the unit opened and sees committed state, which is what the
+    // preserve semantics need. Without an ambient unit the upsert
+    // executes immediately, exactly as before.
+    const query = this.db
       .insert(agentCommercialAccounts)
       .values({
         id: record.id,
@@ -227,6 +244,9 @@ export class D1CommercialAdapter implements CommercialStore {
           updatedAtMs: record.updatedAtMs,
         },
       });
+    const { sql, params } = query.toSQL();
+    if (bufferInAmbientUnit(sql, ...params)) return record;
+    await query;
     return record;
   }
 
@@ -300,7 +320,13 @@ export class D1CommercialAdapter implements CommercialStore {
       dataProviderId: providers.dataProviderId,
       brokerId: providers.brokerId,
     };
-    await this.db
+    // Issue #5605 (G-2): in a tenant-settings PATCH the route
+    // opens one batch unit for the three setters; this upsert
+    // buffers into it (its SET clause touches only the ads half,
+    // so it composes with the sibling upserts even though this
+    // record was built from the pre-batch row). Without an
+    // ambient unit it executes immediately, exactly as before.
+    const query = this.db
       .insert(agentTenantSettings)
       .values({
         tenantId,
@@ -317,6 +343,9 @@ export class D1CommercialAdapter implements CommercialStore {
         // is preserved because it is not in the update set.
         set: { adsEnabled: adsEnabled ? 1 : 0, updatedAtMs: record.updatedAtMs },
       });
+    const { sql, params } = query.toSQL();
+    if (bufferInAmbientUnit(sql, ...params)) return record;
+    await query;
     return record;
   }
 
@@ -357,7 +386,10 @@ export class D1CommercialAdapter implements CommercialStore {
       dataProviderId: providers.dataProviderId,
       brokerId: providers.brokerId,
     };
-    await this.db
+    // Issue #5605 (G-2): buffers into the PATCH unit when one
+    // is open (SETs only the auto-refresh half); executes
+    // immediately otherwise, exactly as before.
+    const query = this.db
       .insert(agentTenantSettings)
       .values({
         tenantId,
@@ -378,6 +410,9 @@ export class D1CommercialAdapter implements CommercialStore {
           updatedAtMs: record.updatedAtMs,
         },
       });
+    const { sql, params } = query.toSQL();
+    if (bufferInAmbientUnit(sql, ...params)) return record;
+    await query;
     return record;
   }
 
@@ -442,7 +477,10 @@ export class D1CommercialAdapter implements CommercialStore {
       dataProviderId: providers.dataProviderId,
       brokerId: providers.brokerId,
     };
-    await this.db
+    // Issue #5605 (G-2): buffers into the PATCH unit when one
+    // is open (SETs only the providers half); executes
+    // immediately otherwise, exactly as before.
+    const query = this.db
       .insert(agentTenantSettings)
       .values({
         tenantId,
@@ -461,6 +499,9 @@ export class D1CommercialAdapter implements CommercialStore {
           updatedAtMs: record.updatedAtMs,
         },
       });
+    const { sql, params } = query.toSQL();
+    if (bufferInAmbientUnit(sql, ...params)) return record;
+    await query;
     return record;
   }
 

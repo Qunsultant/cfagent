@@ -57,6 +57,16 @@
  * contract does not claim: it is refused with TX_CANNOT_HONOUR
  * rather than silently split.
  *
+ * ADAPTER JOINS (issue #5605, G-2): a D1 adapter write can join
+ * an ambient D1 batch unit through bufferInAmbientUnit below —
+ * the same nested-join rule, extended to port methods that
+ * render their statement into the unit instead of executing it.
+ * Only a d1-batch ambient unit is ever joined: D1 SQL is never
+ * rendered into a DO-leg unit. A method that finds no ambient
+ * unit (or a non-D1 one) executes immediately, exactly as
+ * before — the batched path is opt-in per call site, never a
+ * silent change to every adapter write.
+ *
  * PROOF STATUS (issue #2288): this module is exercised only by
  * the proof pins in tests/transaction_proof_2288.test.ts. No
  * production surface consumes it yet; D-I step 1 is the first
@@ -204,6 +214,25 @@ export async function withTransaction<T>(
       throw err;
     }
   });
+}
+
+/**
+ * Issue #5605 (G-2) — buffer one D1 statement into the ambient
+ * batch unit when one is open, so a D1 adapter write can join a
+ * unit opened by its caller (the cross-port pair: two adapters'
+ * writes in one batch, opened by the service that composes
+ * them). Returns true when the statement was buffered; false
+ * when no unit is open, or the ambient unit is another leg —
+ * the caller then executes immediately, exactly as before.
+ * D1 SQL is never rendered into a DO-leg unit: a D1 write
+ * inside a DO unit executes immediately (the legacy behavior),
+ * it does not join the DO transaction.
+ */
+export function bufferInAmbientUnit(query: string, ...params: unknown[]): boolean {
+  const ambient = ambientUnit.getStore();
+  if (!ambient || ambient.unit.backendKind !== "d1-batch") return false;
+  ambient.unit.exec(query, ...params);
+  return true;
 }
 
 /* ------------------------------------------------------------------ */
