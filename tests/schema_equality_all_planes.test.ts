@@ -2,7 +2,7 @@
  * #4282 P4 — schema-equality pin: all planes, one clean instance.
  *
  * What this suite pins (measured, never assumed):
- *  - the combined catalogue (D1 + DO + ORM + remainder, 415 entries)
+ *  - the combined catalogue (D1 + DO + ORM + remainder, 423 entries)
  *    builds the frozen combined model exactly: 181 tables / 103 indexes.
  *  - the frozen combined model is the deterministic union of the four
  *    per-plane fixtures, with ZERO cross-plane disagreements (column
@@ -118,7 +118,7 @@ describe("schema equality — all planes (#4282 P4)", () => {
     expect(new Set(executedCodes).size).toBe(
       COMBINED_CATALOGUE_ENTRIES.length,
     );
-    expect(COMBINED_CATALOGUE_ENTRIES.length).toBe(415);
+    expect(COMBINED_CATALOGUE_ENTRIES.length).toBe(423);
     // Issue #5229 adds migration 0069 (agent_referral_rules
     // expiry_period_ms column): 410 entries resolve to 421 statements.
     // Issue #5086 adds migration 0070 (otel_config_overrides table):
@@ -131,8 +131,9 @@ describe("schema equality — all planes (#4282 P4)", () => {
     // 412 entries resolve to 423 statements.
     // Issue #5175 slice 2 adds 3 entries (mas_runs, mas_run_aliases
     // + its index): 414 entries resolve to 425 statements.
-    // Merged: 415 entries resolve to 426 statements.
-    expect(executedStatements).toBe(426);
+    // Issue #4767 adds 8 entries (migrations 0071/0072: 4 D1 ALTERs
+    // + 4 remainder ALTERs): 423 entries resolve to 434 statements.
+    expect(executedStatements).toBe(434);
     const actual = instance.introspect();
     const diff = diffSchema(actual, combinedExpectedModel());
     expect(isEmptyDiff(diff)).toBe(true);

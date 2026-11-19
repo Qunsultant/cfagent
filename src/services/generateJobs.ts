@@ -73,6 +73,14 @@ import {
   type GeneratedFormatRecord,
   type GeneratedReportRecord,
 } from "../data/generatedDatasetPorts";
+import type {
+  JobRunKind,
+  JobRunTrigger,
+} from "../data/jobRunRecordPorts";
+import {
+  normalizeJobRunKind,
+  normalizeJobRunTrigger,
+} from "../data/jobRunRecordPorts";
 import { buildAnalyzeJobRegistry } from "./analyzeJobs";
 import { createStructuredLogger } from "../observability/structuredLogger";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
@@ -730,7 +738,9 @@ export interface GenerateJobDeps {
 }
 
 export interface RunGenerateJobOptions {
-  trigger?: "manual" | "scheduled";
+  trigger?: JobRunTrigger;
+  /** Issue #4767 — the run kind (original / re-run / resume / replay). */
+  kind?: JobRunKind;
   /** The run id to record under (the pipeline engine's run id,
    *  when dispatched through the plane — one run, one id). */
   runId?: string;
@@ -867,7 +877,8 @@ export async function runGenerateJob(
   const startedMs = opts.nowMs ?? Date.now();
   const startedAt = new Date(startedMs).toISOString();
   const runId = opts.runId ?? `generate-run-${crypto.randomUUID()}`;
-  const trigger = opts.trigger ?? "manual";
+  const trigger = normalizeJobRunTrigger(opts.trigger);
+  const kind = normalizeJobRunKind(opts.kind);
   const reports = validateGenerateReportKinds(opts.reports ?? def.reports);
   const formats = validateGenerateFormats(opts.formats ?? def.formats);
 
@@ -925,6 +936,7 @@ export async function runGenerateJob(
       run: {
         runId,
         trigger,
+        kind,
         startedAt,
         finishedAt,
         status: partial.status,

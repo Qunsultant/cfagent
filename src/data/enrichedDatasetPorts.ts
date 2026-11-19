@@ -43,11 +43,13 @@ import type { DataProviderId } from "../trading";
 import type {
   FeedDatasetRunStatus,
   FeedDatasetRunTrigger,
+  FeedDatasetRunKind,
   FeedDatasetUniverse,
 } from "./feedDatasetPorts";
 
 export type EnrichedDatasetRunStatus = FeedDatasetRunStatus;
 export type EnrichedDatasetRunTrigger = FeedDatasetRunTrigger;
+export type EnrichedDatasetRunKind = FeedDatasetRunKind;
 
 /** DO-SQLite / D1 table name for the enriched-dataset store. */
 export const ENRICHED_DATASETS_TABLE = "job_enriched_datasets";
@@ -56,6 +58,8 @@ export const ENRICHED_DATASETS_TABLE = "job_enriched_datasets";
 export interface EnrichedDatasetRunRecord {
   runId: string;
   trigger: EnrichedDatasetRunTrigger;
+  /** Issue #4767 — the run kind of this leg run (original / re-run / resume / replay), the pipeline run's kind. Optional so artifacts stored before #4767 still parse. */
+  kind?: EnrichedDatasetRunKind;
   startedAt: string;
   finishedAt: string;
   status: EnrichedDatasetRunStatus;

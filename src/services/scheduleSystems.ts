@@ -233,7 +233,7 @@ export const UNIFIED_JOBS_UI: {
   ],
 };
 
-/** The per-run record fields, in storage order (see data/jobRunRecordPorts.ts). Issue #3121 S1 extends the #2964 shape with the §4 ledger linkage (trigger, scheduleId, asyncJobId, workflowId) — extended, not rewritten. */
+/** The per-run record fields, in storage order (see data/jobRunRecordPorts.ts). Issue #3121 S1 extends the #2964 shape with the §4 ledger linkage (trigger, scheduleId, asyncJobId, workflowId) — extended, not rewritten. Issue #4767 extends it with the run kind + origin run id (kind, originRunId). */
 export const JOB_RUN_RECORD_FIELDS: readonly string[] = [
   "system",
   "jobId",
@@ -246,6 +246,8 @@ export const JOB_RUN_RECORD_FIELDS: readonly string[] = [
   "scheduleId",
   "asyncJobId",
   "workflowId",
+  "kind",
+  "originRunId",
   "error",
   "detail",
   "descriptor",

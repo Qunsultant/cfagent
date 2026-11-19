@@ -169,7 +169,7 @@ function FeedStatusBlock({
         {feed.state === "never-run" && <span>Never run — no local copy yet.</span>}
         {feed.state === "ready" && lastRun && (
           <span>
-            {`Last run: ${lastRun.status} · ${lastRun.trigger} · ${fmtDataProviderTime(lastRun.finishedAt)} · ${lastRun.received}/${lastRun.requested} rows`}
+            {`Last run: ${lastRun.status} · ${lastRun.trigger}${lastRun.kind ? ` · ${lastRun.kind}` : ""} · ${fmtDataProviderTime(lastRun.finishedAt)} · ${lastRun.received}/${lastRun.requested} rows`}
           </span>
         )}
         {feed.state === "ready" && lastRun?.codedError && (
@@ -807,7 +807,7 @@ export function DataProvidersPanel() {
                       <span>Never run</span>
                     ) : (
                       <span>
-                        {`Last run: ${lastRun.status} ${fmtDataProviderTime(lastRun.finishedAt)} (${lastRun.received}/${lastRun.requested} rows)`}
+                        {`Last run: ${lastRun.status} · ${lastRun.trigger}${lastRun.kind ? ` · ${lastRun.kind}` : ""} ${fmtDataProviderTime(lastRun.finishedAt)} (${lastRun.received}/${lastRun.requested} rows)`}
                       </span>
                     )}
                     {snapshot && (
@@ -928,7 +928,7 @@ export function DataProvidersPanel() {
                       <span>Never run</span>
                     ) : (
                       <span>
-                        {`Last run: ${lastRun.status} ${fmtDataProviderTime(lastRun.finishedAt)} (${lastRun.received}/${lastRun.requested} rows)`}
+                        {`Last run: ${lastRun.status} · ${lastRun.trigger}${lastRun.kind ? ` · ${lastRun.kind}` : ""} ${fmtDataProviderTime(lastRun.finishedAt)} (${lastRun.received}/${lastRun.requested} rows)`}
                       </span>
                     )}
                     {snapshot && (
@@ -1052,7 +1052,7 @@ export function DataProvidersPanel() {
                       <span>Never run</span>
                     ) : (
                       <span>
-                        {`Last run: ${lastRun.status} ${fmtDataProviderTime(lastRun.finishedAt)} (${lastRun.received}/${lastRun.requested} rows)`}
+                        {`Last run: ${lastRun.status} · ${lastRun.trigger}${lastRun.kind ? ` · ${lastRun.kind}` : ""} ${fmtDataProviderTime(lastRun.finishedAt)} (${lastRun.received}/${lastRun.requested} rows)`}
                       </span>
                     )}
                     {snapshot && (
@@ -1181,7 +1181,7 @@ export function DataProvidersPanel() {
                       <span>Never run</span>
                     ) : (
                       <span>
-                        {`Last run: ${lastRun.status} ${fmtDataProviderTime(lastRun.finishedAt)} (${lastRun.received}/${lastRun.requested} formats)`}
+                        {`Last run: ${lastRun.status} · ${lastRun.trigger}${lastRun.kind ? ` · ${lastRun.kind}` : ""} ${fmtDataProviderTime(lastRun.finishedAt)} (${lastRun.received}/${lastRun.requested} formats)`}
                       </span>
                     )}
                     {snapshot && (
@@ -1308,7 +1308,7 @@ export function DataProvidersPanel() {
                       <span>Never run</span>
                     ) : (
                       <span>
-                        {`Last run: ${lastRun.status} ${fmtDataProviderTime(lastRun.finishedAt)} (${lastRun.received}/${lastRun.requested} channels)`}
+                        {`Last run: ${lastRun.status} · ${lastRun.trigger}${lastRun.kind ? ` · ${lastRun.kind}` : ""} ${fmtDataProviderTime(lastRun.finishedAt)} (${lastRun.received}/${lastRun.requested} channels)`}
                       </span>
                     )}
                     {snapshot && (
@@ -1433,7 +1433,7 @@ export function DataProvidersPanel() {
                   <Stack gap="0" className="ui-meta">
                     {chain.pipeline?.lastRunStatus ? (
                       <span>
-                        {`Last run: ${chain.pipeline.lastRunStatus} ${fmtDataProviderTime(chain.pipeline.lastRunAt)}`}
+                        {`Last run: ${chain.pipeline.lastRunStatus}${chain.pipeline.lastRunTrigger ? ` · ${chain.pipeline.lastRunTrigger}` : ""}${chain.pipeline.lastRunKind ? ` · ${chain.pipeline.lastRunKind}` : ""} ${fmtDataProviderTime(chain.pipeline.lastRunAt)}`}
                       </span>
                     ) : (
                       <span>Never run</span>

@@ -24,6 +24,7 @@ import type { JobPipelineStores } from "../src/data/jobPipelinePorts";
 import {
   JobPipelineControl,
   jobRunRecorderFromStore,
+  type JobStatusView,
 } from "../src/services/jobPipelineEngine";
 import { resolveJobDefinition } from "../src/services/jobPipelineConfig";
 import { InMemoryMessagingAdapter } from "../src/messaging/inMemoryMessagingAdapter";
@@ -507,6 +508,10 @@ describe("pipeline chain status roll-up (#3540)", () => {
       nowMs: T0,
     });
     expect(view.pipeline?.lastRunStatus).toBe("success");
+    // Issue #4767 — the roll-up names the latest run's kind next
+    // to its trigger: a first dispatch is an original.
+    expect(view.pipeline?.lastRunKind).toBe("original");
+    expect(view.pipeline?.lastRunTrigger).toBe("manual");
     expect(view.frontier).toBeNull();
     expect(view.stages.map((s) => s.status)).toEqual([
       "completed",
@@ -518,5 +523,84 @@ describe("pipeline chain status roll-up (#3540)", () => {
     expect(view.nextScheduledRun).not.toBeNull();
     const artifact = await h.deliveryStore.latestUsable(DELIVER_ID);
     expect(artifact?.run.runId).toBe(dispatch.runId);
+  });
+
+  it("a retried chain run rolls up with lastRunKind re-run and trigger triggered", async () => {
+    const h = await makeHarness();
+    const dispatch = await h.control.runJob(CHAIN_ID);
+    await dispatch.completion!;
+    const retried = await h.control.retryJob(CHAIN_ID);
+    await retried.completion!;
+    const registry = buildPipelineChainRegistry({});
+    const chain = registry.forId(CHAIN_ID)!;
+    const entry = CHAIN_PIPELINE_CATALOG.find((e) => e.jobId === CHAIN_ID)!;
+    const stagePipelines: Record<string, Awaited<ReturnType<JobPipelineControl["getJob"]>>> = {};
+    for (const node of chain.nodes) {
+      stagePipelines[node.jobId] = await h.control.getJob(node.jobId);
+    }
+    const view = buildChainSurfaceView({
+      entry,
+      chain,
+      pipeline: await h.control.getJob(CHAIN_ID),
+      stagePipelines,
+      nowMs: T0,
+    });
+    expect(view.pipeline?.lastRunStatus).toBe("success");
+    expect(view.pipeline?.lastRunKind).toBe("re-run");
+    expect(view.pipeline?.lastRunTrigger).toBe("triggered");
+    expect(view.pipeline?.currentRunId).toBe(retried.runId);
+  });
+
+  // #4767 — direct unit pins of the same mapping: the roll-up reads
+  // the latest run's kind next to its trigger, and a never-run chain
+  // answers null for both.
+  it("buildChainSurfaceView shows the latest run's kind next to its trigger", () => {
+    const entry = CHAIN_PIPELINE_CATALOG[0];
+    const chain = buildPipelineChainRegistry({}).forId(entry.jobId)!;
+    const pipeline = {
+      definition: { config: { schedule: { enabled: false } } },
+      instance: { state: "completed", currentRunId: "run-2", lastError: null },
+      latestRun: {
+        outcome: "success",
+        triggeredBy: "triggered",
+        kind: "re-run",
+        started: iso(T0),
+        finished: iso(T0 + 1000),
+      },
+      history: [],
+      stages: [],
+    } as unknown as JobStatusView;
+    const view = buildChainSurfaceView({
+      entry,
+      chain,
+      pipeline,
+      stagePipelines: {},
+      nowMs: T0,
+    });
+    expect(view.pipeline?.lastRunStatus).toBe("success");
+    expect(view.pipeline?.lastRunKind).toBe("re-run");
+    expect(view.pipeline?.lastRunTrigger).toBe("triggered");
+    expect(view.pipeline?.currentRunId).toBe("run-2");
+  });
+
+  it("buildChainSurfaceView shows no kind for a never-run chain", () => {
+    const entry = CHAIN_PIPELINE_CATALOG[0];
+    const chain = buildPipelineChainRegistry({}).forId(entry.jobId)!;
+    const pipeline = {
+      definition: { config: { schedule: { enabled: false } } },
+      instance: { state: "idle", currentRunId: null, lastError: null },
+      latestRun: undefined,
+      history: [],
+      stages: [],
+    } as unknown as JobStatusView;
+    const view = buildChainSurfaceView({
+      entry,
+      chain,
+      pipeline,
+      stagePipelines: {},
+      nowMs: T0,
+    });
+    expect(view.pipeline?.lastRunKind).toBeNull();
+    expect(view.pipeline?.lastRunTrigger).toBeNull();
   });
 });

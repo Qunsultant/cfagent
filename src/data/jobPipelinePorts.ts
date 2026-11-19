@@ -37,6 +37,10 @@
  */
 
 import type { StageRunnerCheckpoint } from "../workflows/stageRunnerPorts";
+import type {
+  JobRunKind,
+  JobRunTrigger,
+} from "../data/jobRunRecordPorts";
 
 /** DO-SQLite / D1 table names for the pipeline job stores. */
 export const JOB_PIPELINE_DEFINITIONS_TABLE = "job_pipeline_definitions";
@@ -250,6 +254,23 @@ export interface JobInstanceRecord {
    * process, so the proof must survive the dispatching process.
    */
   runWorkflowInstanceId: string | null;
+  /**
+   * Issue #4767 — the kind of the live/last run (what this
+   * execution IS relative to the original: original / re-run /
+   * resume / replay), stamped onto its terminal run record.
+   * Required but nullable, like `runTrigger`: a run whose kind
+   * cannot be proven is null, never an invented kind.
+   */
+  runKind: JobRunKind | null;
+  /**
+   * Issue #4767 — the run this execution retried (re-run) or the
+   * run itself (resume/replay, same run id). Null for a first
+   * dispatch — an explicit null, never an invented link.
+   * Persisted on the instance (same class of fact as
+   * `runScheduleId`): cancel/settle paths stamp the id of the
+   * run they settle, so it must survive the dispatching process.
+   */
+  runOriginId: string | null;
   checkpoint: JobCheckpoint | null;
   /**
    * The run's stage-runner checkpoint (#3549): one entry per

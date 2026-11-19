@@ -684,6 +684,16 @@
           "name": "updated_at",
           "type": "TEXT",
           "pk": 0
+        },
+        {
+          "name": "run_kind",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "run_origin_id",
+          "type": "TEXT",
+          "pk": 0
         }
       ],
       "constraints": {}
@@ -787,6 +797,16 @@
         },
         {
           "name": "mode_source",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "origin_run_id",
           "type": "TEXT",
           "pk": 0
         }

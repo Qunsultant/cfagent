@@ -17,6 +17,10 @@
  * time, and the persisted artifact is simply rewritten.
  */
 import { JobPipelineError } from "./jobPipelineConfig";
+import type {
+  JobRunKind,
+  JobRunTrigger,
+} from "../data/jobRunRecordPorts";
 
 export interface JobStepContext {
   jobId: string;
@@ -36,6 +40,15 @@ export interface JobStepContext {
   /** The previous step's output (the hand-off), or the node's input artifact. */
   input: unknown;
   now: string;
+  /** Issue #4767 — the dispatch trigger of the run this step executes in, threaded by the engine. */
+  trigger: JobRunTrigger;
+  /**
+   * Issue #4767 — the run kind of the run this step executes in
+   * (original / re-run / resume / replay), threaded by the engine
+   * alongside the trigger. Named `runKind`, not `kind`: `kind` is
+   * already the NODE kind (e.g. "feed") on this context.
+   */
+  runKind: JobRunKind;
 }
 
 export interface JobStepResult {

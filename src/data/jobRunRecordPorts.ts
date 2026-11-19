@@ -81,6 +81,38 @@ export function normalizeJobRunTrigger(value: unknown): JobRunTrigger {
 }
 
 /**
+ * Issue #4767 — the run-kind vocabulary (user ruling 2026-11-18):
+ * kind and trigger are TWO dimensions. The trigger says what
+ * dispatched THIS execution; the kind says what this execution IS
+ * relative to the original: `original` = a first dispatch,
+ * `re-run` = a retry, a NEW run from the start (fresh run id, a
+ * pointer back to the run it retried); `resume` = a paused run
+ * continued under the SAME run id; `replay` = a still-running run
+ * re-entered under the SAME run id after an eviction. A re-run can
+ * be manual, scheduled, triggered, copilot, or autopilot — the kind
+ * never constrains the trigger, and the trigger never implies the
+ * kind. One tuple is the source of truth, as for the triggers.
+ * NOT runLedgerKinds.ts (the ledger-family classifier) — a
+ * different "kind" entirely.
+ */
+export const JOB_RUN_KINDS = ["original", "re-run", "resume", "replay"] as const;
+
+export type JobRunKind = (typeof JOB_RUN_KINDS)[number];
+
+/**
+ * Issue #4767 — normalize an untrusted run kind onto the four
+ * values: a known kind passes through, anything else (unknown
+ * string, missing value) reads as "original" — fail-closed: a run
+ * whose kind cannot be proven is read as a first dispatch. It
+ * never claims to be a re-run of a run it cannot name.
+ */
+export function normalizeJobRunKind(value: unknown): JobRunKind {
+  return (JOB_RUN_KINDS as readonly string[]).includes(value as string)
+    ? (value as JobRunKind)
+    : "original";
+}
+
+/**
  * Issue #3121 S1 — the consolidated run-ledger trigger vocabulary
  * (inventory §4; O4 decision: sits ALONGSIDE `triggeredBy`, it does
  * not supersede it). The eight-valued distinction `triggeredBy`
@@ -155,6 +187,18 @@ export interface JobRunRecord {
   asyncJobId?: string | null;
   /** Issue #3121 S1 — Cloudflare Workflow instance id; null = did not execute through a workflow. */
   workflowId?: string | null;
+  /**
+   * Issue #4767 — the run kind (what this execution IS relative
+   * to the original: original / re-run / resume / replay) and the
+   * origin run id. Optional on the interface so rows stored before
+   * #4767 still parse; the builder always fills them on new rows
+   * (see `src/services/jobRunRecords.ts`), and the read normalizer
+   * fills them as `original`/null on legacy rows. `originRunId` is
+   * the run this execution retried (re-run) or the run itself
+   * (resume/replay, same run id) — never an invented link.
+   */
+  kind?: JobRunKind;
+  originRunId?: string | null;
   /** Failure error text. Required when outcome is "failure". */
   error?: string;
   /** Skip reason. Required when outcome is "skipped". */

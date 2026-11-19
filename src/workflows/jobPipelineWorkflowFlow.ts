@@ -24,10 +24,12 @@ import {
   type JobRunOutcome,
 } from "../services/jobPipelineEngine";
 import { JobPipelineError } from "../services/jobPipelineConfig";
+import type { JobRunTrigger } from "../data/jobRunRecordPorts";
+import { normalizeJobRunTrigger } from "../data/jobRunRecordPorts";
 
 export interface JobPipelineWorkflowPayload {
   jobId: string;
-  trigger?: "manual" | "scheduled";
+  trigger?: JobRunTrigger;
   scopePath?: string;
 }
 
@@ -75,7 +77,9 @@ export async function runJobPipelineWorkflowFlow(
   let dispatch;
   try {
     dispatch = await control.runJob(payload.jobId, {
-      trigger: payload.trigger ?? "manual",
+      // Issue #4767 — the workflow payload's trigger, all five
+      // modes, fail-closed through normalize (absent ⇒ "manual").
+      trigger: normalizeJobRunTrigger(payload.trigger),
       ...(payload.scopePath ? { scopePath: payload.scopePath } : {}),
       ...(workflowInstanceId ? { workflowInstanceId } : {}),
     });

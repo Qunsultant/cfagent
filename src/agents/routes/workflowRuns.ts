@@ -601,7 +601,7 @@ export async function readInnerShardScanStages(
   for (const ref of refs) {
     try {
       const read = await readStagesFromPipelineStores(stores, ref.engineJobId);
-      out.set(ref.shardJobId, read ?? { stages: [], checkpointRunId: null });
+      out.set(ref.shardJobId, read ?? { stages: [], checkpointRunId: null, checkpointKind: null });
     } catch (err) {
       // A shard whose read fails keeps the page honest: the caller names
       // the failure once (storeErrors) and the row claims no inner stages.

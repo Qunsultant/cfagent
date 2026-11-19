@@ -580,7 +580,12 @@ export function createFeedStepRegistry(deps: FeedStepDeps): JobStepRegistry {
     }
 
     const runOpts = {
-      trigger: "manual" as const,
+      // Issue #4767 — the feed pull records the run's dispatch
+      // trigger, threaded in by the engine through the step
+      // context; a feed leg run is never an ad-hoc manual run
+      // merely because the step wrote it that way.
+      trigger: ctx.trigger,
+      kind: ctx.runKind,
       runId: ctx.runId,
       ...(deps.userLogin ? { userLogin: deps.userLogin } : {}),
       ...(universeParam ? { universe: effectiveUniverse } : {}),

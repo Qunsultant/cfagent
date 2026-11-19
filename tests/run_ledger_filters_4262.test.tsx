@@ -170,6 +170,17 @@ describe("4262-P01 kind classification", () => {
       classifyRunKind({ system: "scheduled-agent-goal", operation: "trading.screen_options" }),
     ).toBe("options");
   });
+
+  it("a folded source's stamped ledgerKind wins over the rule table (#4767)", () => {
+    // A workflow run whose family is "reports" but whose operation
+    // would classify as "pipeline": the stamp is the store that owns
+    // the run being more specific than its namespace. The field is
+    // `ledgerKind`, not `kind` — `kind` on a run record is the #4767
+    // dispatch lineage (original / re-run / resume / replay), a
+    // different dimension from the ledger family.
+    expect(classifyRunKind({ operation: "feed", ledgerKind: "reports" })).toBe("reports");
+    expect(classifyRunKind({ operation: "feed", ledgerKind: null })).toBe("pipeline");
+  });
 });
 
 describe("4262-P02 configured filter set and default", () => {

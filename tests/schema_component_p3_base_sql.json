@@ -285,7 +285,9 @@
         "PRAGMA table_info(job_pipeline_instances)",
         "ALTER TABLE job_pipeline_instances ADD COLUMN run_schedule_id TEXT",
         "ALTER TABLE job_pipeline_instances ADD COLUMN run_async_job_id TEXT",
-        "ALTER TABLE job_pipeline_instances ADD COLUMN run_workflow_instance_id TEXT"
+        "ALTER TABLE job_pipeline_instances ADD COLUMN run_workflow_instance_id TEXT",
+        "ALTER TABLE job_pipeline_instances ADD COLUMN run_kind TEXT",
+        "ALTER TABLE job_pipeline_instances ADD COLUMN run_origin_id TEXT"
       ]
     },
     {
@@ -314,6 +316,8 @@
         "ALTER TABLE job_run_records ADD COLUMN data_provider_id TEXT",
         "ALTER TABLE job_run_records ADD COLUMN mode TEXT",
         "ALTER TABLE job_run_records ADD COLUMN mode_source TEXT",
+        "ALTER TABLE job_run_records ADD COLUMN kind TEXT",
+        "ALTER TABLE job_run_records ADD COLUMN origin_run_id TEXT",
         "CREATE INDEX IF NOT EXISTS job_run_records_job_idx ON job_run_records (job_id, started DESC, id DESC)",
         "CREATE INDEX IF NOT EXISTS job_run_records_recent_idx ON job_run_records (started DESC, id DESC)",
         "SELECT * FROM job_run_records\n        ORDER BY started DESC, id DESC\n        LIMIT ?"

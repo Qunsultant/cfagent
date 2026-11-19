@@ -50,6 +50,8 @@ import {
 import { createJobPipelineStoresFromSql } from "../data/createJobPipelinePorts";
 import { createDoSqliteJobStageEventStore } from "../data/doSqliteJobStageEventAdapter";
 import type { JobStageEventStore } from "../data/jobStageEventPorts";
+import type { JobRunTrigger } from "../data/jobRunRecordPorts";
+import { normalizeJobRunTrigger } from "../data/jobRunRecordPorts";
 import { createJobPipelineStoresFromD1 } from "../data/createJobPipelinePorts";
 import { SqlJobRunRecordStore } from "../data/doSqliteJobRunRecordAdapter";
 import {
@@ -181,7 +183,7 @@ export interface ScheduledTasksPipelineContext {
   /** Composition seam (tests): the workflow starter. */
   startWorkflow?: (
     jobId: string,
-    opts: { trigger: "manual" | "scheduled"; scopePath?: string },
+    opts: { trigger: JobRunTrigger; scopePath?: string },
   ) => Promise<{ instanceId: string }>;
 }
 
@@ -826,11 +828,13 @@ export async function dispatchScheduledPipelineJob(
 export async function startPipelineJobWorkflow(
   ctx: ScheduledTasksPipelineContext,
   jobId: string,
-  opts: { trigger?: "manual" | "scheduled"; scopePath?: string } = {},
+  opts: { trigger?: JobRunTrigger; scopePath?: string } = {},
 ): Promise<{ instanceId: string }> {
   if (ctx.startWorkflow) {
     return ctx.startWorkflow(jobId, {
-      trigger: opts.trigger ?? "manual",
+      // Issue #4767 — the workflow payload's trigger, all five
+      // modes, fail-closed through normalize (absent ⇒ "manual").
+      trigger: normalizeJobRunTrigger(opts.trigger),
       ...(opts.scopePath ? { scopePath: opts.scopePath } : {}),
     });
   }

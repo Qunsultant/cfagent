@@ -50,11 +50,13 @@ import type { DataProviderId } from "../trading";
 import type {
   FeedDatasetRunStatus,
   FeedDatasetRunTrigger,
+  FeedDatasetRunKind,
   FeedDatasetUniverse,
 } from "./feedDatasetPorts";
 
 export type DeliveryDatasetRunStatus = FeedDatasetRunStatus;
 export type DeliveryDatasetRunTrigger = FeedDatasetRunTrigger;
+export type DeliveryDatasetRunKind = FeedDatasetRunKind;
 
 /** DO-SQLite / D1 table name for the delivery-dataset store. */
 export const DELIVERY_DATASETS_TABLE = "job_delivery_datasets";
@@ -63,6 +65,8 @@ export const DELIVERY_DATASETS_TABLE = "job_delivery_datasets";
 export interface DeliveryDatasetRunRecord {
   runId: string;
   trigger: DeliveryDatasetRunTrigger;
+  /** Issue #4767 — the run kind of this leg run (original / re-run / resume / replay), the pipeline run's kind. Optional so artifacts stored before #4767 still parse. */
+  kind?: DeliveryDatasetRunKind;
   startedAt: string;
   finishedAt: string;
   status: DeliveryDatasetRunStatus;

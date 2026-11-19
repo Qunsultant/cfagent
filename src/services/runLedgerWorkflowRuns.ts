@@ -28,7 +28,7 @@ export const WORKFLOW_RUNS_LEDGER_SYSTEM = "workflow-runs";
 
 /** A ledger row adapted from a workflow run, plus its source for the detail. */
 export interface WorkflowLedgerEntry {
-  row: JobRunRecord & { kind?: RunLedgerKind };
+  row: JobRunRecord & { ledgerKind?: RunLedgerKind };
   run: WorkflowRun;
 }
 
@@ -88,7 +88,7 @@ export function attachWorkflowRuns(
         ? `${run.completedStages}/${run.stageCount} stages`
         : "no stages recorded";
 
-    const row: JobRunRecord & { kind?: RunLedgerKind } = {
+    const row: JobRunRecord & { ledgerKind?: RunLedgerKind } = {
       // A projection: the row names the read that produced it. It is never
       // written back to job_run_records, so the writer's system domain is
       // untouched (#4262 keeps one store, one writer).
@@ -118,7 +118,7 @@ export function attachWorkflowRuns(
       brokerId: run.brokerId ?? null,
       mode: run.mode ?? null,
       modeSource: run.modeSource ?? null,
-      kind,
+      ledgerKind: kind,
     };
     out.push({ row, run });
   }

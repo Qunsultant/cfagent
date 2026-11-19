@@ -416,6 +416,10 @@ export interface PipelineChainSurfaceView {
     currentRunId: string | null;
     lastRunStatus: string | null;
     lastRunAt: string | null;
+    /** Issue #4767 — the latest run's dispatch trigger (the JobRunRecord's triggeredBy). */
+    lastRunTrigger: string | null;
+    /** Issue #4767 — the latest run's kind (the JobRunRecord's kind), next to its trigger. */
+    lastRunKind: string | null;
     lastError: string | null;
   } | null;
   nextScheduledRun: string | null;
@@ -517,6 +521,8 @@ export function buildChainSurfaceView(args: {
         lastRunStatus: pipeline.latestRun?.outcome ?? null,
         lastRunAt:
           pipeline.latestRun?.finished ?? pipeline.latestRun?.started ?? null,
+        lastRunTrigger: pipeline.latestRun?.triggeredBy ?? null,
+        lastRunKind: pipeline.latestRun?.kind ?? null,
         lastError: pipeline.instance?.lastError ?? null,
       }
     : null;

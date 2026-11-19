@@ -5,7 +5,7 @@
  * Pins:
  *  - 4262S4-P01 a report run the ledger already carries is the same run (the
  *    ledger row wins); a run with no ledger twin becomes one ledger row stamped
- *    `kind: "reports"` with its artifact states carried verbatim.
+ *    `ledgerKind: "reports"` with its artifact states carried verbatim.
  *  - 4262S4-P02 the artifact states survive the fold: a recorded key links, a
  *    missing key is an honest dash, a recorded leg failure keeps its reason.
  *  - 4262S4-P03 the Docs & Reports address is a folded view: `?tab=docs`
@@ -109,9 +109,9 @@ describe("4262S4-P01 attachment and kind", () => {
     expect(entries).toHaveLength(0);
   });
 
-  it("adapts a report run with no ledger twin as kind=reports", () => {
+  it("adapts a report run with no ledger twin as ledgerKind=reports", () => {
     const [entry] = attachReportRuns([ledgerRow()], [docRun()]);
-    expect(entry.row.kind).toBe("reports");
+    expect(entry.row.ledgerKind).toBe("reports");
     expect(entry.row.jobId).toBe("rep-1");
     expect(entry.row.descriptor).toBe("Docs run");
   });

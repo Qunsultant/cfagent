@@ -358,7 +358,8 @@ export function registerDeliverStep(
       },
       def.id,
       {
-        trigger: "manual",
+        trigger: ctx.trigger,
+      kind: ctx.runKind,
         runId: ctx.runId,
         ...(stringParams(ctx.params.channels)
           ? { channels: stringParams(ctx.params.channels) }

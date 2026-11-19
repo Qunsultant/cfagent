@@ -120,6 +120,7 @@ import type {
   JobScheduleConfig,
 } from "../../data/jobPipelinePorts";
 import type { JobStagesRead, JobStatusView } from "../../services/jobPipelineEngine";
+import type { JobRunTrigger } from "../../data/jobRunRecordPorts";
 import { JobPipelineError } from "../../services/jobPipelineConfig";
 import type { JobStageEventRecord } from "../../data/jobStageEventPorts";
 import {
@@ -246,7 +247,7 @@ export interface ScheduledAgentDoorStub {
   // ScheduledAgent host's control-plane RPC surface (#3543).
   runPipelineJob(
     jobId: string,
-    opts?: { userLogin?: string },
+    opts?: { userLogin?: string; trigger?: JobRunTrigger },
   ): Promise<{ jobId: string; runId: string; state: string; error?: string }>;
   pausePipelineJob(jobId: string): Promise<JobInstanceRecord>;
   /** Issue #3121 #3310 — the stage registry read for the stages adapter: one job's status view (carries its definition). */
@@ -261,7 +262,7 @@ export interface ScheduledAgentDoorStub {
   // terminal run record's linkage.
   runPipelineStage(
     jobId: string,
-    opts?: { nodePath?: string; userLogin?: string; scheduleId?: string; trigger?: "manual" | "scheduled" },
+    opts?: { nodePath?: string; userLogin?: string; scheduleId?: string; trigger?: JobRunTrigger },
   ): Promise<{ jobId: string; runId: string; state: string; error?: string }>;
   cancelPipelineJob(jobId: string): Promise<JobInstanceRecord>;
   retryPipelineJob(
@@ -302,7 +303,7 @@ export interface ScheduledAgentDoorStub {
   // generic pipeline RPCs above, like every job on the plane.
   runPipelineChain(
     jobId: string,
-    opts?: { userLogin?: string },
+    opts?: { userLogin?: string; trigger?: JobRunTrigger },
   ): Promise<{ jobId: string; runId: string; state: string; error?: string }>;
   resumePipelineChain(
     jobId: string,

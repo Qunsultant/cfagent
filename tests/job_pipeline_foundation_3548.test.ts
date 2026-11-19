@@ -139,6 +139,12 @@ const INSTANCE: JobInstanceRecord = {
   // null when no workflow instance dispatched it. The round-trip
   // below proves the column carries a value through every residency.
   runWorkflowInstanceId: "wf-inst-1",
+  // Issue #4767 — the run's kind (original / re-run / resume / replay)
+  // and the run it retried, if any; null origin when this run is not
+  // a retry. The round-trip below proves the columns carry values
+  // through every residency.
+  runKind: "original",
+  runOriginId: null,
   checkpoint: {
     runId: "run-1",
     nodePath: "",

@@ -103,6 +103,14 @@ import {
   type DeliveryDatasetStore,
   type DeliveryReportRecord,
 } from "../data/deliveryDatasetPorts";
+import type {
+  JobRunKind,
+  JobRunTrigger,
+} from "../data/jobRunRecordPorts";
+import {
+  normalizeJobRunKind,
+  normalizeJobRunTrigger,
+} from "../data/jobRunRecordPorts";
 import { buildGenerateJobRegistry } from "./generateJobs";
 import { deliverScreenerToSlack } from "./screenerSlackDelivery";
 import { cfpaySendEmail, cfpaySendEmailWithAttachments, getCfpayConfig } from "./cfpayA2A";
@@ -557,7 +565,9 @@ export interface DeliverJobDeps {
 }
 
 export interface RunDeliverJobOptions {
-  trigger?: "manual" | "scheduled";
+  trigger?: JobRunTrigger;
+  /** Issue #4767 — the run kind (original / re-run / resume / replay). */
+  kind?: JobRunKind;
   /** The run id to record under (the pipeline engine's run id,
    *  when dispatched through the plane — one run, one id). */
   runId?: string;
@@ -690,7 +700,8 @@ export async function runDeliverJob(
   const startedMs = opts.nowMs ?? Date.now();
   const startedAt = new Date(startedMs).toISOString();
   const runId = opts.runId ?? `deliver-run-${crypto.randomUUID()}`;
-  const trigger = opts.trigger ?? "manual";
+  const trigger = normalizeJobRunTrigger(opts.trigger);
+  const kind = normalizeJobRunKind(opts.kind);
   const channels = validateDeliverChannels(opts.channels ?? def.channels);
   const slackChannel = opts.slackChannel !== undefined ? opts.slackChannel : def.slackChannel;
   const emailTo = opts.emailTo !== undefined ? opts.emailTo : def.emailTo;
@@ -763,6 +774,7 @@ export async function runDeliverJob(
       run: {
         runId,
         trigger,
+        kind,
         startedAt,
         finishedAt,
         status: partial.status,

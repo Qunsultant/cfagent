@@ -21,6 +21,7 @@ import { jobRunRecords } from "./drizzleSchema";
 import {
   applyMigrations,
   MIGRATION_0047_JOB_RUN_RECORDS,
+  MIGRATION_0072_JOB_RUN_RECORDS_RUN_KIND,
   type MigrationDb,
 } from "./migrationRunner";
 import {
@@ -39,9 +40,12 @@ export function createD1JobRunRecordDb(d1: D1Database): JobRunRecordDb {
   return createDrizzleD1Db(d1, { schema: { jobRunRecords } });
 }
 
-/** Idempotent schema-ensure: applies migration 0047 if unapplied. */
+/** Idempotent schema-ensure: applies migrations 0047 + 0072 if unapplied. */
 export async function ensureJobRunRecordsSchema(db: JobRunRecordDb): Promise<number[]> {
-  return applyMigrations(db as unknown as MigrationDb, [MIGRATION_0047_JOB_RUN_RECORDS]);
+  return applyMigrations(db as unknown as MigrationDb, [
+    MIGRATION_0047_JOB_RUN_RECORDS,
+    MIGRATION_0072_JOB_RUN_RECORDS_RUN_KIND,
+  ]);
 }
 
 type JobRunRecordRow = typeof jobRunRecords.$inferSelect;
@@ -70,6 +74,12 @@ function rowToRecord(row: JobRunRecordRow): JobRunRecord {
     ...(row.scheduleId != null ? { scheduleId: row.scheduleId } : {}),
     ...(row.asyncJobId != null ? { asyncJobId: row.asyncJobId } : {}),
     ...(row.workflowId != null ? { workflowId: row.workflowId } : {}),
+    // Issue #4767 — a row stored before the kind columns existed
+    // reads back normalized (kind "original", origin null) by
+    // normalizeJobRunRecord; the spread passes the stored values
+    // through when present.
+    ...(row.kind != null ? { kind: row.kind as JobRunRecord["kind"] } : {}),
+    ...(row.originRunId != null ? { originRunId: row.originRunId } : {}),
     ...(row.errorText != null ? { error: row.errorText } : {}),
     ...(row.detail != null ? { detail: row.detail } : {}),
     ...(row.descriptor != null ? { descriptor: row.descriptor } : {}),
@@ -104,6 +114,8 @@ export class D1JobRunRecordStore {
       scheduleId: record.scheduleId ?? null,
       asyncJobId: record.asyncJobId ?? null,
       workflowId: record.workflowId ?? null,
+      kind: record.kind ?? null,
+      originRunId: record.originRunId ?? null,
       errorText: record.error ?? null,
       detail: record.detail ?? null,
       descriptor: record.descriptor ?? null,

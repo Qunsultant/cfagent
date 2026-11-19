@@ -129,6 +129,8 @@ export interface DataProviderView {
 export interface FeedJobRunRecordView {
   runId: string;
   trigger: string;
+  /** Issue #4767 — the run kind (original / re-run / resume / replay); absent on runs recorded before #4767. */
+  kind?: string | null;
   startedAt: string;
   finishedAt: string;
   status: "completed" | "partial" | "failed";
@@ -361,6 +363,8 @@ export async function postEnrichJobAction(
 export interface AnalyzeJobRunRecordView {
   runId: string;
   trigger: string;
+  /** Issue #4767 — the run kind (original / re-run / resume / replay); absent on runs recorded before #4767. */
+  kind?: string | null;
   startedAt: string;
   finishedAt: string;
   status: "completed" | "partial" | "failed";
@@ -452,6 +456,8 @@ export async function postAnalyzeJobAction(
 export interface GenerateJobRunRecordView {
   runId: string;
   trigger: string;
+  /** Issue #4767 — the run kind (original / re-run / resume / replay); absent on runs recorded before #4767. */
+  kind?: string | null;
   startedAt: string;
   finishedAt: string;
   status: "completed" | "partial" | "failed";
@@ -544,6 +550,8 @@ export async function postGenerateJobAction(
 export interface DeliverJobRunRecordView {
   runId: string;
   trigger: string;
+  /** Issue #4767 — the run kind (original / re-run / resume / replay); absent on runs recorded before #4767. */
+  kind?: string | null;
   startedAt: string;
   finishedAt: string;
   status: "completed" | "partial" | "failed";
@@ -681,6 +689,10 @@ export interface PipelineChainView {
     currentRunId: string | null;
     lastRunStatus: string | null;
     lastRunAt: string | null;
+    /** Issue #4767 — the latest run's dispatch trigger (mirrors PipelineChainSurfaceView.pipeline). */
+    lastRunTrigger: string | null;
+    /** Issue #4767 — the latest run's kind, next to its trigger. */
+    lastRunKind: string | null;
     lastError: string | null;
   } | null;
   nextScheduledRun: string | null;
