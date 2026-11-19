@@ -27,8 +27,9 @@
  *    (dataset stores, mas_reports, R2), which execute; they do
  *    not build the executeAsyncJob store executor and do not
  *    decide #3642.
- *  - Phantom operations (qa.run_sweep, qa.supervised_fix,
- *    search.opportunity_hunt) are never units — #4174 item 6.
+ *  - Phantom operations (qa.run_sweep, qa.supervised_fix) are never
+ *    units — #4174 item 6. (search.opportunity_hunt left that list
+ *    in #3652: it now executes in the scheduled tick, not as a unit.)
  *
  * Step 2 (Stock Copilot composition) turns these entry points
  * into invocations; this slice only proves the binding exists

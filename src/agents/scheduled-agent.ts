@@ -29,6 +29,16 @@ import {
   materializeSynthesizedRecord,
 } from "../agentic/chainFiring";
 import {
+  executeOpportunityHunt,
+  OPPORTUNITY_HUNT_OPERATION,
+  type OpportunityHuntResult,
+} from "../services/opportunityHunt";
+import {
+  readPersistedTechnicalsBars,
+  YAHOO_NASDAQ100_TECHNICALS_JOB_ID,
+} from "../services/feedJobs";
+
+import {
   type ScheduledGoal,
   type ScheduleTick,
 } from "../schedule";
@@ -530,6 +540,52 @@ export class ScheduledAgent extends PortThink {
     } catch {
       return null;
     }
+  }
+
+  /**
+   * Issue #3652 — execute the `search.opportunity_hunt` operation over the
+   * live persisted technicals bars. The bar source is the same artifact the
+   * screener reads; a missing or stale artifact is a named failure
+   * (`opportunity_hunt_no_bars`), never an empty "success".
+   */
+  private async huntOpportunities(now: Date): Promise<OpportunityHuntResult> {
+    const envStrings: Record<string, string> = {};
+    for (const [key, value] of Object.entries(
+      this.env as unknown as Record<string, unknown>,
+    )) {
+      if (typeof value === "string") envStrings[key] = value;
+    }
+    const technicalsDef = buildFeedJobRegistry(envStrings).get(
+      YAHOO_NASDAQ100_TECHNICALS_JOB_ID,
+    );
+    return executeOpportunityHunt({
+      now: () => now,
+      loadCloses: async () => {
+        const store = createFeedDatasetAdapter(this.env);
+        // An unbound store is a configuration state, not an empty universe:
+        // fail with its own name so the ledger row says which one it is.
+        if (!store) {
+          throw new Error(
+            "opportunity_hunt_store_unbound: AGENT_DB is not bound on this host",
+          );
+        }
+        const persisted = await readPersistedTechnicalsBars(store, {
+          ...(technicalsDef
+            ? { maxAgeSeconds: technicalsDef.staleAfterMinutes * 60 }
+            : {}),
+          nowMs: now.getTime(),
+        });
+        const closes = new Map<string, number[]>();
+        if (!persisted || persisted.stale) return closes;
+        for (const [symbol, bars] of persisted.barsBySymbol) {
+          const series = bars
+            .map((bar) => bar.close)
+            .filter((close) => Number.isFinite(close));
+          if (series.length > 0) closes.set(symbol, series);
+        }
+        return closes;
+      },
+    });
   }
 
   private async getGoals(): Promise<ScheduledGoal[]> {
@@ -2545,6 +2601,18 @@ export class ScheduledAgent extends PortThink {
               );
             }
           }
+          continue;
+        }
+
+        // Issue #3652: the opportunity hunt is not a descriptor-only job —
+        // it runs and records what it found. Registering the operation
+        // without this branch would have turned the old failure into a
+        // green row that did nothing.
+        if (goal.operation === OPPORTUNITY_HUNT_OPERATION) {
+          const hunt = await this.huntOpportunities(now);
+          goal.lastRun = now.toISOString();
+          tick.jobsCreated++;
+          await recordGoalRun("success", { descriptor: hunt.summary });
           continue;
         }
 

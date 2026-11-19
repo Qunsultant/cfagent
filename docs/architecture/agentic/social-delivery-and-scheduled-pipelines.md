@@ -202,7 +202,7 @@ aligns with and leverages each:
 | Agent (card capabilities) | How the solution uses it today | Leverage / gap |
 | --- | --- | --- |
 | orchestrator (planning, supervision, parallel-execution; ops `search.query`, `payments.draft`, `tasks.create`, `memory.remember`, `nlq.execute`) | ScheduledAgent creates orchestrator jobs for due goals; orchestrator step `dependsOn` is the staging primitive §3.1 reuses | Pipeline executor mirrors this step model for scheduled pipelines |
-| search (web-search, opportunity-hunt; `search.query`) | Feed research: the `opportunity-hunt` goal is already scheduled (`0 */6 * * *`, `search.opportunity_hunt`) | Digest content source for social feed (§2) — design intent, not wired |
+| search (web-search, opportunity-hunt; `search.query`, `search.opportunity_hunt`) | Feed research: the `opportunity-hunt` goal is scheduled daily 07:00 and executes its hunt at firing (#3652, `src/services/opportunityHunt.ts`) | Digest content source for social feed (§2) — design intent, not wired |
 | payments (payment-draft, payment-process, budget-check; `payments.draft`) | Every scheduled goal is budget-gated via PaymentsAgent `budgetCheck` before work; social posting spends nothing (1-cent cap, not a charge) | Pay-per-use tiers (x402/USDC) are the #1076 model, separate from posting |
 | tasks (task-create, task-list, task-update; `tasks.create`) | Not used by the social pipeline today | Proposed: record pipeline stage runs as tasks so stage completion is trackable through the card |
 | memory (remember, recall; `memory.remember`) | Not used by the social pipeline today (durable stores instead) | Proposed: recall past briefs/drafts through the memory agent |
