@@ -205,6 +205,14 @@ export function scheduleTitle(item: ScheduledTaskItem, _profiles?: StrategyProfi
   // it here, so its row reads "Scheduled nightly research run"
   // instead of the raw callback.
   if (item.callback === "nightly-research") return "Scheduled nightly research run";
+  // Issue #3121 #4242 — the three maintenance duties are
+  // internal-only jobs with no system-job registry entry (the
+  // registry is deliberately the three screening jobs); the
+  // Schedules home names them here, so their rows read by duty
+  // instead of the raw callback.
+  if (item.callback === "sweepStaleLedgerTasks") return "Scheduled stale-task sweep";
+  if (item.callback === "sweepStaleAsyncJobs") return "Scheduled stale async-job sweep";
+  if (item.callback === "watchdogMissedSchedules") return "Scheduled missed-schedule watchdog";
   return systemJobFor(item.callback)?.label || item.callback;
 }
 

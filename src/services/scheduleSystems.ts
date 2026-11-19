@@ -184,7 +184,7 @@ export const SCHEDULE_UNIFICATION_CARRIED: ScheduleUnificationCarried[] = [
     question: "Do SDK firings of framework sweep callbacks leave per-run records?",
     owner: "follow-up slice",
     reason:
-      "Not in this slice: sweepStaleAsyncJobs, sweepStaleLedgerTasks, and watchdogMissedSchedules return sweep-result objects, not callback outcomes, so wrapping them in the outcome-reporting recorder needs outcome-mapping surgery of its own. Their firings stay observable via their effects (rows transitioned, tasks closed, watchdog heartbeat rows) and the watchdog skips them by name rather than flagging schedules it cannot observe. The four internal-only callbacks (executeAsyncJob, expireStaleOrderDraft, collectIvHistory, autoRenewETradeTokens) WERE the carried gap here and are resolved by #3788: their orchestrator methods now record their own runs (RECORDED_SCHEDULE_CALLBACKS), so the watchdog watches them.",
+      "Resolved by #3121 #4242: the two sweeps now record their own runs (recordScheduleCallbackRun, the #3394 wrapper) with the sweep-result object mapped to an outcome by the pure helpers in sweepWatchdogSchedule (counts in detail), and the watchdog's per-sweep heartbeat row already was its run record — all three rows are keyed by record id and the Schedules home shows them. The watchdog still skips the three by name rather than flagging schedules it cannot observe: its lookup is by alarm id, and these rows are keyed by record id. The four internal-only callbacks (executeAsyncJob, expireStaleOrderDraft, collectIvHistory, autoRenewETradeTokens) WERE the carried gap here and are resolved by #3788: their orchestrator methods now record their own runs (RECORDED_SCHEDULE_CALLBACKS), so the watchdog watches them.",
   },
 ];
 

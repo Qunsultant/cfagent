@@ -45,6 +45,14 @@ import {
 import { resolveCronEntryPoint } from "./consolidatedCronEntries";
 import { RENEWAL_DISPATCH_CRON, RETENTION_DISPATCH_CRON, RETENTION_RECORD_ID, TOKEN_RENEWAL_RECORD_ID } from "./heartbeatDueChecks";
 import { NIGHTLY_RESEARCH_DISPATCH_CRON, NIGHTLY_RESEARCH_RECORD_ID } from "./researchScheduleGuard";
+import {
+  STALE_LEDGER_SWEEP_DISPATCH_CRON,
+  STALE_LEDGER_SWEEP_RECORD_ID,
+  STALE_ASYNC_JOB_SWEEP_DISPATCH_CRON,
+  STALE_ASYNC_JOB_SWEEP_RECORD_ID,
+  SCHEDULE_WATCHDOG_DISPATCH_CRON,
+  SCHEDULE_WATCHDOG_RECORD_ID,
+} from "./sweepWatchdogSchedule";
 
 /** Issue #4239 — re-exported beside the builder that uses it. */
 export { TOKEN_RENEWAL_RECORD_ID } from "./heartbeatDueChecks";
@@ -54,6 +62,13 @@ export { RETENTION_RECORD_ID } from "./heartbeatDueChecks";
 
 /** Issue #4241 — re-exported beside the builder that uses it. */
 export { NIGHTLY_RESEARCH_RECORD_ID } from "./researchScheduleGuard";
+
+/** Issue #4242 — re-exported beside the builders that use them. */
+export {
+  STALE_LEDGER_SWEEP_RECORD_ID,
+  STALE_ASYNC_JOB_SWEEP_RECORD_ID,
+  SCHEDULE_WATCHDOG_RECORD_ID,
+} from "./sweepWatchdogSchedule";
 import type { ScheduledGoal } from "../schedule";
 import { isSubDailyCron, isSubDailyInterval, isValidCron } from "../schedule";
 
@@ -520,6 +535,147 @@ export function nightlyResearchToRecord(
   };
 }
 
+/**
+ * Issue #3121 #4242 — the stale-ledger-task sweep record's origin,
+ * named once. One shared duty (the #618 sweep, armed once per user
+ * on a 6-hour interval), so one stable record id (the id itself
+ * lives in sweepWatchdogSchedule, beside the firing rule).
+ */
+export const STALE_LEDGER_SWEEP_ORIGIN = "sweep-stale-ledger-tasks";
+
+/**
+ * Issue #3121 #4242 — the stale-async-job sweep record's origin,
+ * named once. One shared duty (the #3784 sweep, armed once per
+ * instance on a 15-minute interval), so one stable record id (the
+ * id itself lives in sweepWatchdogSchedule, beside the firing rule).
+ */
+export const STALE_ASYNC_JOB_SWEEP_ORIGIN = "sweep-stale-async-jobs";
+
+/**
+ * Issue #3121 #4242 — the missed-schedule watchdog record's
+ * origin, named once. One shared duty (the #3788 watchdog, armed
+ * once per instance on the same 15-minute tick as the async-job
+ * sweep), so one stable record id (the id itself lives in
+ * sweepWatchdogSchedule, beside the firing rule).
+ */
+export const SCHEDULE_WATCHDOG_ORIGIN = "schedule-watchdog";
+
+/** The last run a stale-ledger-sweep list item carries (ledger-joined). */
+export interface StaleLedgerSweepLastRun {
+  started: string;
+  finished?: string;
+  outcome?: string;
+  detail?: string;
+}
+
+/** The last run a stale-async-job-sweep list item carries (ledger-joined). */
+export interface StaleAsyncJobSweepLastRun {
+  started: string;
+  finished?: string;
+  outcome?: string;
+  detail?: string;
+}
+
+/** The last run a schedule-watchdog list item carries (ledger-joined). */
+export interface ScheduleWatchdogLastRun {
+  started: string;
+  finished?: string;
+  outcome?: string;
+  detail?: string;
+}
+
+/**
+ * A stale-ledger-task sweep unified record, DERIVED — not stored,
+ * not alarm-adopted. The sweep IS live through its SDK alarm (armed
+ * once per user from onStart, 6-hour interval), so the record reads
+ * state `active`. The cron is read from
+ * STALE_LEDGER_SWEEP_DISPATCH_CRON, never re-literalized, so the
+ * record and the arming can never disagree about the cadence; the
+ * entry point is the ledger job id the runs join on (jobId =
+ * record id). Kind `internal` (the #4238 seventh kind). An
+ * `existing` record keeps its creation time.
+ */
+export function staleLedgerSweepToRecord(
+  nowIso: string,
+  existing?: UnifiedScheduleRecord | null,
+): UnifiedScheduleRecord {
+  return {
+    id: STALE_LEDGER_SWEEP_RECORD_ID,
+    kind: "internal",
+    state: "active",
+    callback: "sweepStaleLedgerTasks",
+    definition: {
+      type: "cron",
+      cron: STALE_LEDGER_SWEEP_DISPATCH_CRON,
+      entryPoint: "sweep-stale-ledger-tasks",
+    },
+    provenance: systemProvenance(STALE_LEDGER_SWEEP_ORIGIN, new Date(nowIso)),
+    createdAt: existing?.createdAt ?? nowIso,
+    updatedAt: nowIso,
+  };
+}
+
+/**
+ * A stale-async-job sweep unified record, DERIVED — not stored, not
+ * alarm-adopted. The sweep IS live through its SDK alarm (armed
+ * once per instance from onStart, 15-minute interval), so the
+ * record reads state `active`. The cron is read from
+ * STALE_ASYNC_JOB_SWEEP_DISPATCH_CRON, never re-literalized; the
+ * entry point is the ledger job id the runs join on (jobId =
+ * record id). Kind `internal` (the #4238 seventh kind). An
+ * `existing` record keeps its creation time.
+ */
+export function staleAsyncJobSweepToRecord(
+  nowIso: string,
+  existing?: UnifiedScheduleRecord | null,
+): UnifiedScheduleRecord {
+  return {
+    id: STALE_ASYNC_JOB_SWEEP_RECORD_ID,
+    kind: "internal",
+    state: "active",
+    callback: "sweepStaleAsyncJobs",
+    definition: {
+      type: "cron",
+      cron: STALE_ASYNC_JOB_SWEEP_DISPATCH_CRON,
+      entryPoint: "sweep-stale-async-jobs",
+    },
+    provenance: systemProvenance(STALE_ASYNC_JOB_SWEEP_ORIGIN, new Date(nowIso)),
+    createdAt: existing?.createdAt ?? nowIso,
+    updatedAt: nowIso,
+  };
+}
+
+/**
+ * A missed-schedule watchdog unified record, DERIVED — not stored,
+ * not alarm-adopted. The watchdog IS live through its SDK alarm
+ * (armed once per instance from onStart, 15-minute interval), so
+ * the record reads state `active`. The cron is read from
+ * SCHEDULE_WATCHDOG_DISPATCH_CRON, never re-literalized; the entry
+ * point is the record id (its runs join on the pre-existing
+ * heartbeat job id — see scheduleIdToLedgerJobId). Kind `internal`
+ * (the #4238 seventh kind). An `existing` record keeps its
+ * creation time.
+ */
+export function scheduleWatchdogToRecord(
+  nowIso: string,
+  existing?: UnifiedScheduleRecord | null,
+): UnifiedScheduleRecord {
+  return {
+    id: SCHEDULE_WATCHDOG_RECORD_ID,
+    kind: "internal",
+    state: "active",
+    callback: "watchdogMissedSchedules",
+    definition: {
+      type: "cron",
+      cron: SCHEDULE_WATCHDOG_DISPATCH_CRON,
+      entryPoint: "schedule-watchdog",
+    },
+    provenance: systemProvenance(SCHEDULE_WATCHDOG_ORIGIN, new Date(nowIso)),
+    createdAt: existing?.createdAt ?? nowIso,
+    updatedAt: nowIso,
+  };
+}
+
 /** True when an alarm payload carries a stage address (jobId + nodePath). */
 function isStageAlarmPayload(payload: unknown): boolean {
   if (!payload || typeof payload !== "object") return false;
@@ -777,6 +933,73 @@ export function nightlyResearchRecordToListItem(
     ...unifiedRecordToListItem(record),
     ...(lastRun ? { lastRunAt: lastRun.started } : {}),
     ...(lastRun?.outcome ? { lastRunOutcome: lastRun.outcome } : {}),
+  };
+}
+
+/**
+ * A stale-ledger-task sweep record as a Schedules home list item:
+ * the shared list shape plus the last run joined from the ledger
+ * (issue #4242). The caller supplies the ledger's latest run, if
+ * any; a duty that has never fired carries no last run, and the
+ * home renders "never" — a missed run is visible, not silent. The
+ * run's counts ride `lastRunDetail`, so the row shows them.
+ */
+export function staleLedgerSweepRecordToListItem(
+  record: UnifiedScheduleRecord,
+  lastRun?: StaleLedgerSweepLastRun | null,
+): ReturnType<typeof unifiedRecordToListItem> & {
+  lastRunAt?: string;
+  lastRunOutcome?: string;
+  lastRunDetail?: string;
+} {
+  return {
+    ...unifiedRecordToListItem(record),
+    ...(lastRun ? { lastRunAt: lastRun.started } : {}),
+    ...(lastRun?.outcome ? { lastRunOutcome: lastRun.outcome } : {}),
+    ...(lastRun?.detail ? { lastRunDetail: lastRun.detail } : {}),
+  };
+}
+
+/**
+ * A stale-async-job sweep record as a Schedules home list item, the
+ * same shape as the ledger sweep (issue #4242): last run joined
+ * from the ledger, counts in `lastRunDetail`.
+ */
+export function staleAsyncJobSweepRecordToListItem(
+  record: UnifiedScheduleRecord,
+  lastRun?: StaleAsyncJobSweepLastRun | null,
+): ReturnType<typeof unifiedRecordToListItem> & {
+  lastRunAt?: string;
+  lastRunOutcome?: string;
+  lastRunDetail?: string;
+} {
+  return {
+    ...unifiedRecordToListItem(record),
+    ...(lastRun ? { lastRunAt: lastRun.started } : {}),
+    ...(lastRun?.outcome ? { lastRunOutcome: lastRun.outcome } : {}),
+    ...(lastRun?.detail ? { lastRunDetail: lastRun.detail } : {}),
+  };
+}
+
+/**
+ * A schedule-watchdog record as a Schedules home list item, the
+ * same shape as the sweeps (issue #4242): last run joined from the
+ * ledger's heartbeat rows, examined/missed/skipped counts in
+ * `lastRunDetail`.
+ */
+export function scheduleWatchdogRecordToListItem(
+  record: UnifiedScheduleRecord,
+  lastRun?: ScheduleWatchdogLastRun | null,
+): ReturnType<typeof unifiedRecordToListItem> & {
+  lastRunAt?: string;
+  lastRunOutcome?: string;
+  lastRunDetail?: string;
+} {
+  return {
+    ...unifiedRecordToListItem(record),
+    ...(lastRun ? { lastRunAt: lastRun.started } : {}),
+    ...(lastRun?.outcome ? { lastRunOutcome: lastRun.outcome } : {}),
+    ...(lastRun?.detail ? { lastRunDetail: lastRun.detail } : {}),
   };
 }
 
@@ -1039,6 +1262,54 @@ function derivedNightlyResearchError(
   );
 }
 
+/**
+ * Issue #4242 — the three sweep/watchdog records are derived, not
+ * stored: there is no alarm to pause, resume, trigger, or update,
+ * and nothing to delete. Management refuses with the record's own
+ * name instead of a 404 for a row the home lists (a 404 would
+ * say the schedule does not exist; it does — it is derived). The
+ * duties fire on their own SDK alarms; there is no manual trigger
+ * route for them.
+ */
+function isDerivedStaleLedgerSweepRecord(id: string): boolean {
+  return id === STALE_LEDGER_SWEEP_RECORD_ID;
+}
+
+function isDerivedStaleAsyncJobSweepRecord(id: string): boolean {
+  return id === STALE_ASYNC_JOB_SWEEP_RECORD_ID;
+}
+
+function isDerivedScheduleWatchdogRecord(id: string): boolean {
+  return id === SCHEDULE_WATCHDOG_RECORD_ID;
+}
+
+function derivedStaleLedgerSweepError(
+  verb: string,
+): { ok: false; error: string; status: number } {
+  return fail(
+    `Schedule 'sweep-stale-ledger-tasks' is a derived record with no alarm to ${verb}.`,
+    400,
+  );
+}
+
+function derivedStaleAsyncJobSweepError(
+  verb: string,
+): { ok: false; error: string; status: number } {
+  return fail(
+    `Schedule 'sweep-stale-async-jobs' is a derived record with no alarm to ${verb}.`,
+    400,
+  );
+}
+
+function derivedScheduleWatchdogError(
+  verb: string,
+): { ok: false; error: string; status: number } {
+  return fail(
+    `Schedule 'schedule-watchdog' is a derived record with no alarm to ${verb}.`,
+    400,
+  );
+}
+
 export async function pauseUnifiedSchedule(
   deps: UnifiedManagementDeps,
   id: string,
@@ -1050,6 +1321,10 @@ export async function pauseUnifiedSchedule(
   if (isDerivedRetentionRecord(id)) return derivedRetentionError("pause");
   // Issue #4241 — a derived record has no alarm to pause.
   if (isDerivedNightlyResearchRecord(id)) return derivedNightlyResearchError("pause");
+  // Issue #4242 — derived records have no alarm to pause.
+  if (isDerivedStaleLedgerSweepRecord(id)) return derivedStaleLedgerSweepError("pause");
+  if (isDerivedStaleAsyncJobSweepRecord(id)) return derivedStaleAsyncJobSweepError("pause");
+  if (isDerivedScheduleWatchdogRecord(id)) return derivedScheduleWatchdogError("pause");
   const existing = await deps.store.get(id);
   if (existing) {
     if (existing.kind === "goal") return goalSurfaceError("pause");
@@ -1094,6 +1369,10 @@ export async function resumeUnifiedSchedule(
   if (isDerivedRetentionRecord(id)) return derivedRetentionError("resume");
   // Issue #4241 — a derived record has no alarm to resume.
   if (isDerivedNightlyResearchRecord(id)) return derivedNightlyResearchError("resume");
+  // Issue #4242 — derived records have no alarm to resume.
+  if (isDerivedStaleLedgerSweepRecord(id)) return derivedStaleLedgerSweepError("resume");
+  if (isDerivedStaleAsyncJobSweepRecord(id)) return derivedStaleAsyncJobSweepError("resume");
+  if (isDerivedScheduleWatchdogRecord(id)) return derivedScheduleWatchdogError("resume");
   const record = await deps.store.get(id);
   if (!record) {
     return fail(`Schedule '${id}' is not paused`, 404);
@@ -1151,6 +1430,10 @@ export async function deleteUnifiedSchedule(
   if (isDerivedRetentionRecord(id)) return { ok: true, cancelled: false };
   // Issue #4241 — a derived record is a no-op delete (#4237 precedent).
   if (isDerivedNightlyResearchRecord(id)) return { ok: true, cancelled: false };
+  // Issue #4242 — derived records are no-op deletes (#4237 precedent).
+  if (isDerivedStaleLedgerSweepRecord(id)) return { ok: true, cancelled: false };
+  if (isDerivedStaleAsyncJobSweepRecord(id)) return { ok: true, cancelled: false };
+  if (isDerivedScheduleWatchdogRecord(id)) return { ok: true, cancelled: false };
   const record = await deps.store.get(id);
   if (record && !isManagedAlarmKind(record.kind)) {
     return { ok: true, cancelled: false };
@@ -1227,6 +1510,10 @@ export async function triggerUnifiedSchedule(
   if (isDerivedRetentionRecord(id)) return derivedRetentionError("trigger");
   // Issue #4241 — a derived record has no alarm to trigger.
   if (isDerivedNightlyResearchRecord(id)) return derivedNightlyResearchError("trigger");
+  // Issue #4242 — derived records have no alarm to trigger.
+  if (isDerivedStaleLedgerSweepRecord(id)) return derivedStaleLedgerSweepError("trigger");
+  if (isDerivedStaleAsyncJobSweepRecord(id)) return derivedStaleAsyncJobSweepError("trigger");
+  if (isDerivedScheduleWatchdogRecord(id)) return derivedScheduleWatchdogError("trigger");
   const record = await deps.store.get(id);
   // Issue #4237 — a non-screen kind is refused with its own name:
   // the goal-surface text is wrong for a live feed (or a worker
@@ -1419,6 +1706,10 @@ export async function updateUnifiedSchedule(
   if (isDerivedRetentionRecord(id)) return derivedRetentionError("update");
   // Issue #4241 — a derived record has no alarm to update.
   if (isDerivedNightlyResearchRecord(id)) return derivedNightlyResearchError("update");
+  // Issue #4242 — derived records have no alarm to update.
+  if (isDerivedStaleLedgerSweepRecord(id)) return derivedStaleLedgerSweepError("update");
+  if (isDerivedStaleAsyncJobSweepRecord(id)) return derivedStaleAsyncJobSweepError("update");
+  if (isDerivedScheduleWatchdogRecord(id)) return derivedScheduleWatchdogError("update");
   const nowIso = new Date(nowMs).toISOString();
   const record = await deps.store.get(id);
   // Issue #4237 — see triggerUnifiedSchedule: refuse a non-screen

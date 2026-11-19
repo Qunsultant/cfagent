@@ -16,10 +16,12 @@
  * cannot observe them, and a watchdog that cries wolf on unobservable
  * schedules is worse than none. The framework sweeps themselves
  * (sweepStaleAsyncJobs, sweepStaleLedgerTasks, this watchdog) are in
- * that skipped set by construction — their firing is observable via
- * their own effects (rows transitioned, tasks closed, heartbeat rows)
- * and the watchdog's heartbeat covers the tick path. See the durable
- * doc docs/architecture/security/schedule-watchdog-3788.md for the
+ * that skipped set by construction — since #3121 #4242 their runs DO
+ * land in the ledger (the sweeps via the #3394 wrapper, this watchdog
+ * via its heartbeat), but keyed by record id, not alarm id, so the
+ * watchdog's alarm-id lookup still cannot observe them; the home
+ * shows their runs instead. See the durable doc
+ * docs/architecture/security/schedule-watchdog-3788.md for the
  * per-firing-type coverage table.
  *
  * Exactly-once: the missed-fire ledger record IS the claim. It is

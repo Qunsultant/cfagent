@@ -71,6 +71,10 @@ export const SCHEDULE_KIND_RULES: readonly ScheduleKindRule[] = [
       // rule matches "research"). Earlier rules still win for a
       // callback that also names a screening family.
       "research",
+      // Issue #4242 — the two maintenance sweeps are system upkeep,
+      // the same family; without this they would read `other` (no
+      // rule matches "sweep"). "watchdog" already sits in this rule.
+      "sweep",
     ],
   },
 ];
