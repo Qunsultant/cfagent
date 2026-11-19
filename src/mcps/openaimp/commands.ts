@@ -29,6 +29,11 @@ import {
 import { SetJobExecutionModeCommand } from "./jobExecutionModeCommands";
 import type { IMcpToolCommand, McpToolContext } from "../../patterns/interfaces";
 import { computeMarketplaceRevenueSummary } from "../../data/marketplacePorts";
+// Issue #5175 slice 5: the resolver reads through slice 2's resolve
+// port (never a second read path); the shared shape is idResolution.
+import { createRunRegistryPorts } from "../../data/createRunRegistryPorts";
+import type { RunRegistrySqlExecutor } from "../../data/runRegistryPorts";
+import { toIdResolution } from "../../services/idResolution";
 import {
   createProductionMcpPermissionPort,
   declareToolScope,
@@ -1140,6 +1145,35 @@ export class GetAsyncJobCommand implements IMcpToolCommand<{ jobId: string }> {
   }
 }
 
+// Issue #5175 slice 5 — resolve_id (mcp:read, synchronous): the MCP
+// door for the one id authority's resolution surface. Same resolver
+// as GET /api/ids/resolve, same shared shape (toIdResolution): a run,
+// alias, or derived id resolves to its canonical run via the mas_runs
+// registry; an unresolvable id answers found:false (never a throw,
+// never an invented row). Read-only — it never mints. The store is
+// the /mcp sync-path carrier (context.storage.sql, the
+// chainJobCommands precedent); a context without it fails closed,
+// exactly like the other storage-needing doors.
+export class ResolveIdCommand implements IMcpToolCommand<{ id: string }> {
+  readonly name = "resolve_id";
+  readonly description = "Resolve any run, alias, or derived id to its canonical run via the mas_runs registry. Read-only; never mints.";
+  readonly jsonSchema = {
+    type: "object" as const,
+    properties: { id: { type: "string", description: "Run, alias, or derived id to resolve (e.g. run:<time>-<counter>, a legacy screener:<timestamp> id, or stage:<runBody>:<stage>:<unit>)" } },
+    required: ["id"],
+  };
+  readonly zodSchema = z.object({
+    id: z.string().min(1, "id must not be empty"),
+  });
+
+  async execute(input: { id: string }, context: McpToolContext) {
+    const sql = (context.storage as { sql?: unknown } | undefined)?.sql;
+    if (!sql) throw new Error("Run registry is unavailable in this MCP context.");
+    const resolve = createRunRegistryPorts(sql as RunRegistrySqlExecutor).resolve;
+    return toIdResolution(input.id, resolve.resolveId(input.id));
+  }
+}
+
 export class ListAsyncJobsCommand implements IMcpToolCommand<{ envelope?: string }> {
   readonly name = "list_async_jobs";
   readonly description = "List recent asynchronous jobs and their status for this session.";
@@ -1821,6 +1855,8 @@ export class McpToolFactory {
     this.registerTool(new GetTransactionsCommand());
     this.registerTool(new ExecuteNlqCommand());
     this.registerTool(new GetAsyncJobCommand());
+    // Issue #5175 slice 5: the id resolver (mcp:read, synchronous).
+    this.registerTool(new ResolveIdCommand());
     this.registerTool(new ListAsyncJobsCommand());
     this.registerTool(new GetJobStatusCommand());
     this.registerTool(new GetJobStageStatusCommand());

@@ -300,6 +300,8 @@ export function shouldQueueApiRequest(opts: {
  */
 export const SYNCHRONOUS_MCP_TOOLS = new Set<string>([
   "get_async_job",
+  // Issue #5175 slice 5: the id resolver is a read, synchronous like get_async_job.
+  "resolve_id",
   "list_async_jobs",
   "get_job_status",
   "get_job_stage_status",

@@ -177,7 +177,7 @@ export interface ToolPermissionPort {
  * fails loudly instead of executing unscoped.
  */
 export const MCP_TOOL_SCOPES: Record<string, McpScope> = {
-  // read (42)
+  // read (43)
   knowledge_search: "mcp:read",
   // #2760 (tracker #2708 A3): the standalone web fetch — a pure
   // read of a public page through the webFetch service (no state
@@ -188,6 +188,8 @@ export const MCP_TOOL_SCOPES: Record<string, McpScope> = {
   // (src/services/webSearch.ts), not by scope.
   web_search: "mcp:read",
   get_async_job: "mcp:read",
+  // Issue #5175 slice 5: the id resolver — read-only, synchronous.
+  resolve_id: "mcp:read",
   get_job_status: "mcp:read",
   get_job_stage_status: "mcp:read",
   stock_copilot_stage_control: "mcp:write",
