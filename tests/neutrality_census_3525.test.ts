@@ -2496,6 +2496,13 @@ const BASELINE: Array<[string, string, number]> = [
   ["docs/technology/tech-stack.md", "nasdaq", 2],
   ["docs/technology/tech-stack.md", "schwab", 1],
   ["docs/technology/tech-stack.md", "interactive brokers / ibkr", 3],
+  // Baseline (#5765, 2026-11-19) — INTEGRATION, not PLATFORM framing: one code
+  // row in the neutral cancel service. The branch routes that provider through
+  // its own cancellation engine (bracket/OCO family and leg semantics, which a
+  // filled order refuses); sending it down the generic adapter instead would
+  // change cancel behaviour, so the row is baselined rather than neutralised.
+  // Appended at the END so the platform slice (first 188 rows) is untouched.
+  ["src/services/brokerOrderCancel.ts", "alpaca", 1],
 ];
 
 const BASELINE_MAP = new Map(BASELINE.map(([f, t, c]) => [`${f}\t${t}`, c]));
