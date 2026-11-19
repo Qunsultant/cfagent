@@ -257,7 +257,7 @@ describe("refund port contract (#2204)", () => {
       expect(updated.approverLogin).toBe("op1");
       await expect(store.updateRefund("missing", { status: "approved", updatedAtMs: Date.now() })).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_NOT_FOUND" }); // #5606 (G-3)
       await expect(store.createRefund(refundInput())).rejects.toThrow();
-      await expect(store.createRefund(refundInput({ id: "refund-3", amountUSD: 0.2 })).rejects.toMatchObject({ code: "FAILURE_REFUND_POLICY_REFUSAL" }); // #5606 (G-3)
+      await expect(store.createRefund(refundInput({ id: "refund-3", amountUSD: 0.2 }))).rejects.toMatchObject({ code: "FAILURE_REFUND_POLICY_REFUSAL" }); // #5606 (G-3)
     }
   });
 

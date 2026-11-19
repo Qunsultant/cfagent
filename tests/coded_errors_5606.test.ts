@@ -48,7 +48,7 @@ import { InMemoryCommercialAdapter } from "../src/data/inMemoryCommercialAdapter
 import { InMemorySubscriptionAdapter } from "../src/data/inMemorySubscriptionAdapter";
 import { InMemoryProductAdapter } from "../src/data/inMemoryProductAdapter";
 import { InMemoryBillingAdapter } from "../src/services/inMemoryBillingAdapter";
-import { InMemoryRefundPolicyAdapter } from "../src/data/inMemoryRefundPolicyAdapter";
+import { InMemoryRefundPolicyAdapter } from "../src/data/inMemoryRefundAdapter";
 import { InMemoryUsageEventStore } from "../src/data/inMemoryCanonicalReportStoreAdapters";
 import { DoSqliteUsageEventStore } from "../src/data/doSqliteUsageEventAdapter";
 import {
@@ -61,7 +61,7 @@ import { moveSubscriptionToVersion } from "../src/services/versionMoves";
 import { validateRefundRequest } from "../src/data/refundPorts";
 import { assertPriceFamily } from "../src/data/priceCataloguePorts";
 import { issueReferralCode } from "../src/services/referralCodes";
-import { codedMessage } from "../src/outcomes/outcomeAspects";
+import { getOutcome } from "../src/outcomes/outcomeAspects";
 import type { DatabaseORM } from "../src/orm";
 
 const NOW = 1_800_000_000_000;
@@ -88,10 +88,14 @@ describe("coded errors #5606: subscription activation throws carry catalog codes
     await expect(
       activateSubscription({ subs, store, userId: "u1", tenantId: "t1", plan: { ...plan, active: false }, providerPaymentRef: "sub-a", nowMs: NOW }),
     ).rejects.toMatchObject({ code: INVALID });
+    // v5: the mismatch guard only fires when an account already
+    // exists — the first activation auto-creates the account in
+    // the requested tenant, so a t2 attempt before any activation
+    // succeeds instead of mismatching. Activate in t1 first.
+    await activateSubscription({ subs, store, userId: "u1", tenantId: "t1", plan, providerPaymentRef: "sub-c", nowMs: NOW });
     await expect(
       activateSubscription({ subs, store, userId: "u1", tenantId: "t2", plan, providerPaymentRef: "sub-b", nowMs: NOW }),
     ).rejects.toMatchObject({ code: FORBIDDEN });
-    await activateSubscription({ subs, store, userId: "u1", tenantId: "t1", plan, providerPaymentRef: "sub-c", nowMs: NOW });
     await expect(
       activateSubscription({ subs, store, userId: "u1", tenantId: "t1", plan, providerPaymentRef: "sub-c", nowMs: NOW }),
     ).rejects.toMatchObject({ code: CONFLICT });
@@ -174,7 +178,10 @@ describe("coded errors #5606: version moves, credits, refunds, validators", () =
       expect.objectContaining({ code: "FAILURE_REFUND_POLICY_REFUSAL" }),
     );
     expect(() =>
-      validateRefundRequest(policy, { ...base, rail: "card" as const, originalPaidAtMs: NOW + MS_PER_DAY }, NOW),
+      // v5: a FULL refund — the seed policy disallows partials
+      // (allowPartial: false), and that refusal fires before the
+      // future-date check. Equal amounts isolate the date rule.
+      validateRefundRequest(policy, { ...base, rail: "card" as const, amountUSD: 10, originalPaidAtMs: NOW + MS_PER_DAY }, NOW),
     ).toThrowError(expect.objectContaining({ code: INVALID }));
   });
 
@@ -290,7 +297,10 @@ describe("coded errors #5606: routes answer coded bodies", () => {
     expect(res?.status).toBe(400);
     const body = (await res?.json()) as any;
     expect(body.code).toBe(INVALID);
-    expect(body.error ?? body.message).toBe(codedMessage(INVALID));
+    // v5: codedOutcomeResponse returns the PLAIN catalog business
+    // message (not the bracketed codedMessage rendering) — see the
+    // v2 billing-shape revert. Assert the plain message.
+    expect(body.error ?? body.message).toBe(getOutcome(INVALID)?.businessMessage);
     expect(JSON.stringify(body)).not.toContain("No commercial account");
   });
 
@@ -332,6 +342,11 @@ describe("coded errors #5606: grep pins on the other converted route files", () 
 
   it("no raw error text reaches a client from the other converted route files", () => {
     const bad: string[] = [];
+    // v5: payments.ts:995 is the slice's DOCUMENTED exception
+    // (comment at :992–994: MCP command throw, route answers a
+    // coded 404) — the sibling pin counts it as the exactly-one
+    // regex site, so it is excluded here, nowhere else.
+    const documentedExceptions = new Set(["src/agents/routes/payments.ts:995"]);
     for (const file of [
       "src/agents/routes/platformTenants.ts",
       "src/agents/routes/platformAccounts.ts",
@@ -343,6 +358,7 @@ describe("coded errors #5606: grep pins on the other converted route files", () 
       "src/agents/routes/audit.ts",
     ]) {
       readSrc(file).split("\n").forEach((line, idx) => {
+        if (documentedExceptions.has(`${file}:${idx + 1}`)) return;
         if (
           /Response\.json\([^)]*err\.message/.test(line) ||
           /error:\s*err\.message/.test(line) ||
@@ -359,7 +375,13 @@ describe("coded errors #5606: grep pins on the other converted route files", () 
 
   it("meter.ts classifies duplicates by type, never by storage-dialect text", () => {
     const src = readSrc("src/agents/routes/meter.ts");
-    expect(src).not.toMatch(/UNIQUE constraint|PRIMARY KEY/);
+    // v5: the dialect strings appear in the file's header COMMENT
+    // (prose about the table's UNIQUE/PRIMARY KEY shape), not in
+    // code — strip comments before matching, code only.
+    const code = src
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/(^|\s)\/\/.*$/gm, "$1");
+    expect(code).not.toMatch(/UNIQUE constraint|PRIMARY KEY/);
     expect(src).toContain("DuplicateUsageEventError");
   });
 
