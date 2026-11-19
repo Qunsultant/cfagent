@@ -15,6 +15,7 @@ import { z } from "zod";
 import type { IMcpToolCommand, McpToolContext } from "../../patterns/interfaces";
 import { cancelOrderViaSelectedBroker } from "../../services/brokerOrderCancel";
 import { replaceOrderViaSelectedBroker } from "../../services/brokerOrderReplace";
+import { previewOrderViaSelectedBroker } from "../../services/brokerOrderPreview";
 
 export interface BrokerOrderCancelToolInput {
   orderId: string;
@@ -142,6 +143,98 @@ export class BrokerOrderReplaceCommand
       actingLogin: actingLogin ?? null,
       broker: result.broker,
       orderId: result.orderId,
+      success: result.success,
+      ...(result.code ? { code: result.code } : {}),
+    });
+    return result;
+  }
+}
+
+export interface BrokerOrderPreviewToolInput {
+  symbol: string;
+  orderAction: string;
+  quantity: number;
+  orderType: string;
+  broker?: string;
+  limit_price?: number;
+  stop_price?: number;
+  time_in_force?: string;
+  asset_class?: string;
+  option_legs?: unknown[];
+  strategy_net_debit?: number;
+}
+
+/**
+ * Issue #5767 — the neutral preview surface. It returns the broker's own
+ * computed terms for the described order and PLACES NOTHING. It does not
+ * create an approvable draft: that needs the route's payload hash,
+ * proposer attestation, autopilot verdict and draft row, and creating one
+ * from chat would move the execute gate that the broker-tool mode config records as not
+ * switchable. Approvable creation stays on `propose_stock_trade` + the
+ * approval flow.
+ */
+export class BrokerOrderPreviewCommand
+  implements IMcpToolCommand<BrokerOrderPreviewToolInput>
+{
+  readonly name = "broker_order_preview";
+  readonly description =
+    "Preview an order at a broker and return the broker's own computed terms: symbol, action, quantity, order type, optional limit/stop, time-in-force, equity or options legs. The broker may be named or omitted (omitted = the platform's selected broker). PLACES NOTHING and stores no draft — this is a dry run. An order that a broker cannot preview refuses by name, an unconfigured broker returns its connect-flow code, and an invalid term (action, type, quantity, price, time-in-force, asset class/legs) is refused before the broker is called. To create an approvable order, use propose_stock_trade and the approval flow. Requires the chat turn's acting identity.";
+  readonly jsonSchema = {
+    type: "object" as const,
+    properties: {
+      symbol: { type: "string", description: "Ticker symbol (equity) or underlying (options)" },
+      orderAction: { type: "string", enum: ["BUY", "SELL", "BUY_TO_COVER", "SELL_SHORT"] },
+      quantity: { type: "number", description: "Positive whole number of shares/contracts" },
+      orderType: { type: "string", enum: ["MARKET", "LIMIT", "STOP", "STOP_LIMIT"] },
+      broker: { type: "string", description: "Optional routed broker; omit for the selected broker" },
+      limit_price: { type: "number", description: "Limit price for LIMIT/STOP_LIMIT" },
+      stop_price: { type: "number", description: "Stop trigger for STOP/STOP_LIMIT" },
+      time_in_force: { type: "string", description: "Optional time-in-force (DAY, GTC, ...)" },
+      asset_class: { type: "string", enum: ["equity", "options"] },
+      option_legs: { type: "array", description: "Option contract legs (options only)", items: { type: "object" } },
+      strategy_net_debit: { type: "number", description: "Optional net debit for a multi-leg strategy" },
+    },
+    required: ["symbol", "orderAction", "quantity", "orderType"],
+  };
+  readonly zodSchema = z.object({
+    symbol: z.string().min(1),
+    orderAction: z.enum(["BUY", "SELL", "BUY_TO_COVER", "SELL_SHORT"]),
+    quantity: z.number().int().positive(),
+    orderType: z.enum(["MARKET", "LIMIT", "STOP", "STOP_LIMIT"]),
+    broker: z.string().min(1).optional(),
+    limit_price: z.number().positive().optional(),
+    stop_price: z.number().positive().optional(),
+    time_in_force: z.string().min(1).optional(),
+    asset_class: z.enum(["equity", "options"]).optional(),
+    option_legs: z.array(z.record(z.string(), z.unknown())).optional(),
+    strategy_net_debit: z.number().optional(),
+  });
+
+  async execute(input: BrokerOrderPreviewToolInput, context: McpToolContext) {
+    const actingLogin = context.actingLogin?.();
+    const result = await previewOrderViaSelectedBroker({
+      env: context.env,
+      ...(context.orm ? { orm: context.orm } : {}),
+      userLogin: actingLogin ?? "",
+      sessionId: context.sessionId,
+      ...(input.broker ? { broker: input.broker } : {}),
+      symbol: input.symbol,
+      orderAction: input.orderAction,
+      quantity: input.quantity,
+      orderType: input.orderType,
+      ...(input.limit_price !== undefined ? { limitPrice: input.limit_price } : {}),
+      ...(input.stop_price !== undefined ? { stopPrice: input.stop_price } : {}),
+      ...(input.time_in_force !== undefined ? { timeInForce: input.time_in_force } : {}),
+      ...(input.asset_class !== undefined ? { assetClass: input.asset_class } : {}),
+      ...(input.option_legs ? { optionLegs: input.option_legs } : {}),
+      ...(input.strategy_net_debit !== undefined
+        ? { strategyNetDebit: input.strategy_net_debit }
+        : {}),
+    });
+    context.audit("broker_order_preview", "mcp", {
+      actingLogin: actingLogin ?? null,
+      broker: result.broker,
+      symbol: input.symbol,
       success: result.success,
       ...(result.code ? { code: result.code } : {}),
     });
