@@ -75,7 +75,7 @@ describe("tape source control (#2108)", () => {
       root!.render(React.createElement(SettingsMenu));
     });
     // The panel body renders only once opened (hover or pin).
-    const trigger = container.querySelector(".etrade-dynamic-menu-trigger") as HTMLButtonElement;
+    const trigger = container.querySelector(".broker-dynamic-menu-trigger") as HTMLButtonElement;
     expect(trigger).not.toBeNull();
     await act(async () => {
       trigger.dispatchEvent(new MouseEvent("click", { bubbles: true }));

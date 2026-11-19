@@ -2019,7 +2019,7 @@ export function TradeHub({
       </Modal>
       {/* OAuth PIN Verification Modal */}
       {showPinModal && (
-        <Modal open size="none" panelClassName="etrade-pin-modal" title="Authorize E*TRADE Application" onClose={() => setShowPinModal(false)}>
+        <Modal open size="none" panelClassName="trade-pin-modal" title="Authorize E*TRADE Application" onClose={() => setShowPinModal(false)}>
               <p className="ui-meta">
                 An E*TRADE authorization window has opened in a new tab. Log in, authorize application access, and enter the verification PIN provided by E*TRADE.
               </p>
@@ -2556,7 +2556,7 @@ export function TradeHub({
       )}
       {/* Live REST Diagnostics Modal */}
       {showDiagnosticsModal && (
-        <Modal open size="none" panelClassName="etrade-pin-modal diagnostics-modal" title={(diagnostics?.broker || selectedBroker) === "alpaca" ? `🦙 Alpaca Diagnostics [${diagnostics?.environment || activeEnv}]` : `⚡ E*TRADE Live REST Diagnostics [${diagnostics?.environment || activeEnv}]`} onClose={() => setShowDiagnosticsModal(false)}>
+        <Modal open size="none" panelClassName="trade-pin-modal diagnostics-modal" title={(diagnostics?.broker || selectedBroker) === "alpaca" ? `🦙 Alpaca Diagnostics [${diagnostics?.environment || activeEnv}]` : `⚡ E*TRADE Live REST Diagnostics [${diagnostics?.environment || activeEnv}]`} onClose={() => setShowDiagnosticsModal(false)}>
               {diagnostics ? (
                 <>
                   <Flex gap="2" align="center" justify="between" wrap>
