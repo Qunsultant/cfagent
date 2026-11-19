@@ -3221,9 +3221,9 @@ export class OrchestratorAgent extends PortThink {
     });
     if (statusRoute) return statusRoute;
 
-    const jobMatch = path.match(/(?:^|\/api)\/jobs\/([0-9a-f-]{36})$/i);
+    const jobMatch = path.match(/(?:^|\/api)\/jobs\/((?:job(?::|%3A))?[0-9a-f-]{36})$/i);
     if (jobMatch && request.method === "GET") {
-      const job = this.getAsyncJob(jobMatch[1]);
+      const job = this.getAsyncJob(decodeURIComponent(jobMatch[1]));
       return job
         ? Response.json(job)
         : Response.json({ error: "Async job not found." }, { status: 404 });
@@ -3248,10 +3248,10 @@ export class OrchestratorAgent extends PortThink {
       }
     }
 
-    const jobRetryMatch = path.match(/(?:^|\/api)\/jobs\/([0-9a-f-]{36})\/retry$/i);
+    const jobRetryMatch = path.match(/(?:^|\/api)\/jobs\/((?:job(?::|%3A))?[0-9a-f-]{36})\/retry$/i);
     if (jobRetryMatch && request.method === "POST") {
       try {
-        const retried = await this.retryAsyncJob(jobRetryMatch[1]);
+        const retried = await this.retryAsyncJob(decodeURIComponent(jobRetryMatch[1]));
         return Response.json({ success: true, ...retried });
       } catch (err: any) {
         const message = err?.message || "Retry failed.";
