@@ -8,6 +8,8 @@ import { normalizeAutopilotLimits, type AutopilotPolicyLimits } from "../../serv
 import type { TradeRecord } from "../../types";
 import type { JobRunTrigger } from "../../data/jobRunRecordPorts";
 import { csrfHeaders } from "../apiFetch";
+import type { RunDetail } from "../../services/runDetails";
+import { RunDetailsModal } from "./RunDetailsModal";
 
 /**
  * Limits are defined by the policy engine — the single source of truth shared
@@ -722,6 +724,33 @@ export function AutopilotControlCenter({
     }
   }, []);
 
+  const [runDetail, setRunDetail] = useState<RunDetail | null>(null);
+  const [runDetailLoading, setRunDetailLoading] = useState(false);
+  const [runDetailError, setRunDetailError] = useState<string | null>(null);
+  const [runDetailOpen, setRunDetailOpen] = useState(false);
+
+  const openRunDetail = useCallback(async (runId: string) => {
+    setRunDetailOpen(true);
+    setRunDetailLoading(true);
+    setRunDetailError(null);
+    setRunDetail(null);
+    try {
+      const res = await fetch(`/api/runs/details?runId=${encodeURIComponent(runId)}`);
+      if (!res.ok) {
+        const err = (await res.json().catch(() => null)) as { error?: string } | null;
+        setRunDetailError(err?.error || `HTTP ${res.status}`);
+        return;
+      }
+      const data = (await res.json().catch(() => null)) as { detail?: RunDetail } | null;
+      if (data?.detail) setRunDetail(data.detail);
+      else setRunDetailError("Run detail unavailable");
+    } catch (err) {
+      setRunDetailError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setRunDetailLoading(false);
+    }
+  }, []);
+
   // Issue #1333: the job-outcome sink (GET /autopilot/jobs). Never
   // throws into the feed: an empty list reads as "no outcomes yet",
   // never as a broken panel.
@@ -1249,6 +1278,14 @@ export function AutopilotControlCenter({
                   <Badge size="xs" tone="neutral" title={`Outcome origin: ${job.origin}`}>
                     {job.origin}
                   </Badge>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    type="button"
+                    onClick={() => void openRunDetail(job.id)}
+                  >
+                    Run Details
+                  </Button>
                 </>
               ),
             },
@@ -1268,6 +1305,13 @@ export function AutopilotControlCenter({
           )}
         />
       </DetailCard>
+      <RunDetailsModal
+        open={runDetailOpen}
+        detail={runDetail}
+        loading={runDetailLoading}
+        error={runDetailError}
+        onClose={() => setRunDetailOpen(false)}
+      />
       </PageSection>
       </TabPanel>
 

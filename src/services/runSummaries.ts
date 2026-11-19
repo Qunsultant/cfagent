@@ -113,6 +113,8 @@ export interface RunSummary {
   xlsxError?: string | null;
   csvStatus?: string | null;
   csvError?: string | null;
+  /** Canonical mas_reports R2 body pointer key when stored out-of-line (#2607). */
+  bodyR2Key?: string | null;
   /** The canonical mas_reports id when this run has a canonical row
    *  (the detail/download affordance key), else null. */
   reportId: string | null;
@@ -326,10 +328,12 @@ export function runSummaryFromReport(hit: ScheduledReportHit): RunSummary {
     const key = strOrNull(body?.key);
     return rowFormat === format && key ? key : null;
   };
+  const r2Pointer = hit.bodyR2Key ?? null;
   return {
     kind,
     id: hit.id,
     runId: hit.runId,
+    ...(r2Pointer ? { bodyR2Key: r2Pointer } : {}),
     title: hit.title,
     summary: hit.summary,
     trigger: strOrNull(body?.trigger),

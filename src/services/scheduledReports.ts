@@ -593,6 +593,12 @@ export const CANONICAL_ARTIFACT_BACKFILL_FIELDS = [
   "csvError",
   "reportUrl",
   "scanRunId",
+  "captureIds",
+  "lineage",
+  "inputHash",
+  "engineVersion",
+  "catalogueVersion",
+  "rendererVersions",
 ] as const;
 
 /**
@@ -1010,13 +1016,58 @@ export async function storeReportAtGenerationWithR2(
         );
         if (row) {
           if (row.bodyR2Key) {
-            // Issue #2602 — the R2 path never merges a redelivery into the
-            // body (the object is the record); name it rather than leaving
-            // the skip implicit.
-            structuredLog.warn("storeReportAtGenerationWithR2.backfill_skipped_body_in_r2", {
-              message: `[scheduledReports] storeReportAtGenerationWithR2: artifact-key backfill skipped for report ${id}: body-in-r2 (first-write-win; the R2 body is the record).`,
-              reportId: id,
-            });
+            // Issue #2607 — R2-pointer backfill parity: resolve the R2-backed
+            // body, run the same first-write-win planArtifactBackfill, and if
+            // missing artifact/lineage fields merged, write back to the SAME
+            // R2 pointer (never forking or inventing).
+            try {
+              const existingR2Body = await resolveCanonicalReportBody(env, {
+                id,
+                runId: input.runId ?? id,
+                title: row.title,
+                source: row.source,
+                summary: row.summary,
+                body: row.body,
+                bodyR2Key: row.bodyR2Key,
+                createdAt: "",
+                generationId: generationId ?? null,
+                fanoutOutcome: null,
+                userLogin: row.userLogin ?? null,
+              });
+              if (existingR2Body) {
+                const outcome = planArtifactBackfill(existingR2Body, input.body, {
+                  owner,
+                  ...(row.userLogin ? { storedOwner: row.userLogin } : {}),
+                });
+                if (outcome.status === "merged") {
+                  await publishDocument(
+                    env,
+                    {
+                      kind: "report",
+                      documentId: id,
+                      title: row.title,
+                      source: row.source,
+                      summary: row.summary,
+                      body: outcome.bodyJson,
+                      bodyR2Key: null,
+                    },
+                    {},
+                    { targets: ["r2-body"] },
+                  ).settled;
+                }
+              } else {
+                structuredLog.warn("storeReportAtGenerationWithR2.backfill_skipped_body_in_r2", {
+                  message: `[scheduledReports] storeReportAtGenerationWithR2: artifact-key backfill skipped for report ${id}: R2 body missing or unreadable.`,
+                  reportId: id,
+                });
+              }
+            } catch (err) {
+              structuredLog.warn("storeReportAtGenerationWithR2.r2_backfill_failed", {
+                message: `[scheduledReports] storeReportAtGenerationWithR2: R2 backfill failed for report ${id}: ${err instanceof Error ? err.message : String(err)}`,
+                reportId: id,
+                error: err instanceof Error ? err.message : String(err),
+              });
+            }
           }
           try {
             storePorts(sql).write.updateFanoutOutcome(id, JSON.stringify(dedupedFanout));
