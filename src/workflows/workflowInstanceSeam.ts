@@ -102,6 +102,43 @@ function errorText(err: unknown): string {
  * this value — never re-derive it — or a fallback-created run
  * becomes unaddressable.
  */
+export const DEFAULT_AGENT_BINDING = "ORCHESTRATOR_AGENT";
+export const DEFAULT_WORKFLOW_NAME = "JOB_PIPELINE_WORKFLOW";
+
+/**
+ * Issues #5776 / #5777 — ensure every `AgentWorkflow` (`PortThinkWorkflow` ->
+ * `ThinkWorkflow`) start carries `__agentName`, `__agentBinding`, and
+ * `__workflowName` in `params` so `AgentWorkflow._initAgent` succeeds before
+ * `run()` regardless of which host/route/broker/cron dispatched the workflow.
+ */
+export function withAgentWorkflowContext(
+  params: unknown,
+  opts?: { workflowName?: string; agentBinding?: string },
+): unknown {
+  if (!params || typeof params !== "object" || Array.isArray(params)) return params;
+  const record = params as Record<string, unknown>;
+  const rawName =
+    typeof record.__agentName === "string" && record.__agentName.trim()
+      ? record.__agentName
+      : typeof record.userLogin === "string" && record.userLogin.trim()
+        ? record.userLogin.trim()
+        : "system";
+  const rawBinding =
+    typeof record.__agentBinding === "string" && record.__agentBinding.trim()
+      ? record.__agentBinding
+      : opts?.agentBinding || DEFAULT_AGENT_BINDING;
+  const rawWorkflow =
+    typeof record.__workflowName === "string" && record.__workflowName.trim()
+      ? record.__workflowName
+      : opts?.workflowName || DEFAULT_WORKFLOW_NAME;
+  return {
+    ...record,
+    __agentName: rawName,
+    __agentBinding: rawBinding,
+    __workflowName: rawWorkflow,
+  };
+}
+
 export async function startManagedWorkflowInstance(
   binding: ManagedWorkflowBinding,
   options: {
@@ -110,11 +147,19 @@ export async function startManagedWorkflowInstance(
     /** Lazy fallback id factory; absent = no fallback (rethrow on adopt failure). */
     fallbackId?: () => Promise<string> | string;
     params: unknown;
+    /** Explicit AgentWorkflow binding name (e.g. JOB_PIPELINE_WORKFLOW, SAGA_WORKFLOW). */
+    workflowName?: string;
+    /** Explicit AgentWorkflow DO binding name (defaults to ORCHESTRATOR_AGENT). */
+    agentBinding?: string;
   },
 ): Promise<ManagedWorkflowStart> {
+  const paramsWithContext = withAgentWorkflowContext(options.params, {
+    workflowName: options.workflowName,
+    agentBinding: options.agentBinding,
+  });
   let firstError: unknown = null;
   try {
-    const instance = await binding.create({ id: options.id, params: options.params });
+    const instance = await binding.create({ id: options.id, params: paramsWithContext });
     return { workflowId: instance.id, existing: false };
   } catch (err) {
     firstError = err;
@@ -130,7 +175,7 @@ export async function startManagedWorkflowInstance(
   if (!options.fallbackId) throw firstError;
   const fallbackId = await options.fallbackId();
   try {
-    const instance = await binding.create({ id: fallbackId, params: options.params });
+    const instance = await binding.create({ id: fallbackId, params: paramsWithContext });
     structuredLog.warn("workflowInstanceSeam.start_used_fallback_instance", {
       message: `[workflows] start used fallback instance id ${fallbackId} after id ${options.id} failed: ${errorText(firstError)}`,
       fallbackId,

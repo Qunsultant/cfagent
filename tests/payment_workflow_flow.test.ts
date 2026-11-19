@@ -307,7 +307,10 @@ describe("payment workflow caller seam (#2043)", () => {
     const out = await startPaymentWorkflowViaBinding(binding, params);
     expect(out.workflowId).toBe("run-1");
     expect(created).toHaveLength(1);
-    expect(created[0].params).toBe(params);
+    expect(created[0].params).toMatchObject({
+      ...params,
+      __workflowName: "PAYMENT_WORKFLOW",
+    });
     await expect(startPaymentWorkflowViaBinding(undefined, params)).rejects.toThrow(
       /not configured/,
     );

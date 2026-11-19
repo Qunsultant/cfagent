@@ -1,0 +1,2 @@
+### Fixed
+- **AgentWorkflow context for J-stack & all workflows (#5776, #5777, #5778):** Added `withAgentWorkflowContext` in `startManagedWorkflowInstance` (`src/workflows/workflowInstanceSeam.ts`) to inject `__agentName`, `__agentBinding`, and `__workflowName` into workflow params before `binding.create()`, wired explicit `workflowName` across `optionsWorkflowHost.ts`, `sagaEntry.ts`, and `paymentWorkflowSubmission.ts`, and routed `scheduledTasksPipeline.ts` through `startManagedWorkflowInstance`.

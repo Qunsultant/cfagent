@@ -256,6 +256,7 @@ export async function startSagaViaBinding(
   const started = await startManagedWorkflowInstance(binding, {
     id: sagaWorkflowInstanceId(params.sagaId),
     params,
+    workflowName: "SAGA_WORKFLOW",
   });
   return { workflowId: started.workflowId, existing: started.existing };
 }
