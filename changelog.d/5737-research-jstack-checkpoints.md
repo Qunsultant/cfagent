@@ -1,0 +1,4 @@
+### Changed
+- Routed `/research/*` as an immediate J-stack dispatch (`isImmediateSync` in `src/server/routes/core.ts` and `isImmediateEndpoint` in `src/agents/orchestrator.ts`) instead of wrapping `POST /api/research/run` in an opaque `0/1 stages` `http.request` async job (#5737).
+- Safely guarded `ctx.getOrm?.()` (closing #5597) and passed `d1: ctx.env?.AGENT_DB` across manual, stage-control, and scheduled-tick `dispatchResearchEngineRun` calls in `src/agents/routes/screenerResearch.ts`, while returning `engineJobId`, `runId`, `trigger`, `stages`, `storageMode`, and `cutoverMode` from `POST /research/run` and surfacing them in `src/client/options/ResearchRunsPanel.tsx`.
+- Mirrored `recordRun` to `D1JobRunRecordStore` when both `sql` and `d1` are bound in `src/workflows/researchScreenEngine.ts`.

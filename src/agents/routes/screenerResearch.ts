@@ -540,17 +540,36 @@ export async function handleScreenerResearchRoutes(
     // ==========================================
 
     // Manual run (dashboard "Run now") — dispatches research:<runId> via #5120.
+    const resolveResearchSql = (): SqlStorage | undefined => {
+      try {
+        return ctx.getOrm?.() as unknown as SqlStorage | undefined;
+      } catch {
+        return undefined;
+      }
+    };
+    const resolveResearchD1 = (): D1Database | undefined =>
+      (ctx.env as Record<string, unknown> | undefined)?.AGENT_DB as D1Database | undefined;
+
     if (path.endsWith("/research/run") && request.method === "POST") {
       const userLogin = request.headers.get("x-user-login") || sessionId;
       try {
         const dispatched = await dispatchResearchEngineRun({
           userLogin,
           trigger: "manual",
-          sql: ctx.getOrm?.() as unknown as SqlStorage | undefined,
+          sql: resolveResearchSql(),
+          d1: resolveResearchD1(),
           env: ctx.env as Record<string, string | undefined>,
           execute: () => triggerManualResearch(ctx.runResearchAndPublish, userLogin),
         });
-        return Response.json(dispatched.outcome);
+        return Response.json({
+          ...dispatched.outcome,
+          engineJobId: dispatched.engineJobId,
+          runId: dispatched.runId,
+          trigger: dispatched.trigger,
+          stages: dispatched.stageVisibility,
+          storageMode: dispatched.storageMode,
+          cutoverMode: dispatched.cutoverMode,
+        });
       } catch (err: any) {
         return Response.json(
           { success: false, error: err?.message || "Research run failed." },
@@ -576,7 +595,8 @@ export async function handleScreenerResearchRoutes(
           stageId: decodeURIComponent(stageMatch[2]),
           op,
           userLogin,
-          sql: ctx.getOrm?.() as unknown as SqlStorage | undefined,
+          sql: resolveResearchSql(),
+          d1: resolveResearchD1(),
           env: ctx.env as Record<string, string | undefined>,
           researchDeps: {
             runOodaAnalysis: (runCtx) =>
@@ -651,7 +671,8 @@ export async function handleScreenerResearchRoutes(
         const dispatched = await dispatchResearchEngineRun({
           userLogin,
           trigger: "scheduled",
-          sql: ctx.getOrm?.() as unknown as SqlStorage | undefined,
+          sql: resolveResearchSql(),
+          d1: resolveResearchD1(),
           env: ctx.env as Record<string, string | undefined>,
           execute: () => triggerScheduledResearch(ctx.runResearchAndPublish, userLogin),
         });

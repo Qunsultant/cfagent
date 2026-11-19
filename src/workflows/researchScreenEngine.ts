@@ -147,7 +147,23 @@ export function resolveResearchEngineAdapters(input: {
   const runRecorder =
     input.runRecorder ??
     (input.sql
-      ? jobRunRecorderFromStore(new SqlJobRunRecordStore(input.sql))
+      ? (() => {
+          const sqlRecorder = jobRunRecorderFromStore(new SqlJobRunRecordStore(input.sql));
+          if (!input.d1) return sqlRecorder;
+          const d1Runs = new D1JobRunRecordStore(createD1JobRunRecordDb(input.d1));
+          return {
+            recordRun: async (record: Parameters<JobRunRecorder["recordRun"]>[0]) => {
+              await sqlRecorder.recordRun(record);
+              try {
+                await d1Runs.record(record);
+              } catch {
+                /* D1 mirror is best-effort when only DO SQLite tables exist */
+              }
+            },
+            listRuns: (jobId: string, limit?: number) => sqlRecorder.listRuns(jobId, limit),
+            latestRun: (jobId: string) => sqlRecorder.latestRun(jobId),
+          };
+        })()
       : (() => {
           const d1Runs = new D1JobRunRecordStore(createD1JobRunRecordDb(input.d1!));
           return {
