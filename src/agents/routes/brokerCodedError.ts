@@ -108,7 +108,7 @@ export function brokerFailureResponse(
 /**
  * The coded failure as a single `"[CODE] message"` string, for the
  * one route that keeps a 200 envelope with an `error` field
- * (`GET /etrade/positions`, consumed by `ETradeTradingHub.tsx`).
+ * (`GET /etrade/positions`, consumed by `TradeHub.tsx`).
  * Returns null when no failure is recorded.
  */
 export function codedBrokerMessage(

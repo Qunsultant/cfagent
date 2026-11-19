@@ -189,7 +189,7 @@ export function repairProposalToTradeContext(proposal: RepairProposal): TradeOrd
       {
         securityType: "OPTN",
         side: "BUY",
-        quantity: 1, // Unit ratio is 1; ETradeTradingHub multiplies leg.quantity * orderQuantity!
+        quantity: 1, // Unit ratio is 1; TradeHub multiplies leg.quantity * orderQuantity!
         optionType: "CALL",
         strike: proposal.legLong.strike,
         expirationDate: proposal.legLong.expirationDate,
@@ -197,7 +197,7 @@ export function repairProposalToTradeContext(proposal: RepairProposal): TradeOrd
       {
         securityType: "OPTN",
         side: "SELL",
-        quantity: 2, // Unit ratio is 2; ETradeTradingHub multiplies leg.quantity * orderQuantity!
+        quantity: 2, // Unit ratio is 2; TradeHub multiplies leg.quantity * orderQuantity!
         optionType: "CALL",
         strike: proposal.legShort.strike,
         expirationDate: proposal.legShort.expirationDate,

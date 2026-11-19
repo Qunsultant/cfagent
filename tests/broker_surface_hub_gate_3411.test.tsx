@@ -6,9 +6,9 @@
  *   1. isBrokerId recognizes all registered brokers (etrade, alpaca), refusing unknown ones.
  *   2. OptionsScreenerPage renders without FAILURE_BROKER_UNAVAILABLE when broker is alpaca.
  *   3. OptionsScreenerPage renders FAILURE_BROKER_UNAVAILABLE only for unrecognized brokers.
- *   4. Chat.tsx admits any valid routed broker into ETradeTradingHub rather than blocking on
+ *   4. Chat.tsx admits any valid routed broker into TradeHub rather than blocking on
  *      legacy `tenantProviders.brokerId !== "etrade"`.
- *   5. ETradeTradingHub subscribes to useTenantProviders() so broker switches reactively update.
+ *   5. TradeHub subscribes to useTenantProviders() so broker switches reactively update.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React, { act } from "react";
@@ -112,15 +112,15 @@ describe("OptionsScreenerPage broker availability gate (#3411)", () => {
   });
 });
 
-describe("Chat.tsx and ETradeTradingHub.tsx source pins (#3411)", () => {
+describe("Chat.tsx and TradeHub.tsx source pins (#3411)", () => {
   it("Chat.tsx does not block trading hub on tenantProviders.brokerId !== 'etrade'", () => {
     const chatSrc = readFileSync(join(__dirname, "../src/client/Chat.tsx"), "utf8");
     expect(chatSrc).not.toContain('tenantProviders.brokerId !== "etrade"');
     expect(chatSrc).toMatch(/!isBrokerId\(tenantProviders\.brokerId\)/);
   });
 
-  it("ETradeTradingHub.tsx subscribes to useTenantProviders for reactive broker updates", () => {
-    const hubSrc = readFileSync(join(__dirname, "../src/client/ETradeTradingHub.tsx"), "utf8");
+  it("TradeHub.tsx subscribes to useTenantProviders for reactive broker updates", () => {
+    const hubSrc = readFileSync(join(__dirname, "../src/client/TradeHub.tsx"), "utf8");
     expect(hubSrc).toContain("useTenantProviders");
     expect(hubSrc).toMatch(/useTenantProviders\(\)/);
   });

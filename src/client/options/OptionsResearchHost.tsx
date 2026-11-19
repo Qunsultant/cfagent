@@ -9,7 +9,7 @@
  * the "Symbol research / Autonomous runs" toggle over
  * OptionsResearchPanel and ResearchRunsPanel (issue #319: one
  * research-run surface for manual + scheduled runs). Extracted
- * verbatim from ETradeTradingHub, where it wrapped the hub's
+ * verbatim from TradeHub, where it wrapped the hub's
  * "options" subtab, so the one screening hub (ScreenersHub) hosts
  * the identical surface; the Trading Hub's options subtab is now a
  * redirect into the hub.

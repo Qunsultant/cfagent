@@ -34,7 +34,7 @@
  *   refresh) until the server load succeeds.
  *
  * Before this module, the toggle existed in two places (Chat
- * and ETradeDynamicMenu), each with its own state and three
+ * and BrokerDynamicMenu), each with its own state and three
  * localStorage key families, and only Chat's global timer
  * checked the switch at all. Every periodic live-data refresh
  * now reads this module and nothing else.

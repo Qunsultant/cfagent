@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import React from "react";
 import ReactDOMServer from "react-dom/server";
 import { accountsEndpoint } from "../src/client/brokerEndpoints";
-import { ETradeTradingHub } from "../src/client/ETradeTradingHub";
+import { TradeHub } from "../src/client/TradeHub";
 import { ToastProvider } from "../src/client/components/ui";
 import { setTenantProvidersStateForTest, resetTenantProvidersStateForTest } from "../src/client/tenantProviders";
 import { brokerPresentation } from "../src/trading";
@@ -172,7 +172,7 @@ describe("Sub-Issue 1 (#3417): Portfolio Tab Broker Neutrality", () => {
         React.createElement(
           ToastProvider,
           null,
-          React.createElement(ETradeTradingHub, {
+          React.createElement(TradeHub, {
             activeSubTab: "portfolio",
             user: { login: "test_user", name: "Test User" },
           })
@@ -190,7 +190,7 @@ describe("Sub-Issue 1 (#3417): Portfolio Tab Broker Neutrality", () => {
         React.createElement(
           ToastProvider,
           null,
-          React.createElement(ETradeTradingHub, {
+          React.createElement(TradeHub, {
             activeSubTab: "portfolio",
             user: { login: "test_user", name: "Test User" },
           })

@@ -7,7 +7,7 @@
  * each (mount the composed page, count h1s); this gate is the ONE
  * general version: it iterates the register's template-state routes,
  * mounts each page the way its live host mounts it (a hub sub-tab
- * through ETradeTradingHub, a standalone route directly under the
+ * through TradeHub, a standalone route directly under the
  * default "page" chrome), and asserts the composed invariants:
  * exactly one h1; exactly one template shell (`.ui-page-shell` —
  * no nested shell chrome); filled slots in canonical order
@@ -36,7 +36,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { ETradeTradingHub } from "../src/client/ETradeTradingHub";
+import { TradeHub } from "../src/client/TradeHub";
 import { ProductHub } from "../src/client/ProductHub";
 import { AuditVaultPage } from "../src/client/AuditVaultPage";
 import { WorkflowCatalogPage } from "../src/client/WorkflowCatalogPage";
@@ -215,7 +215,7 @@ async function mountRoute(id: string): Promise<"hub" | "standalone"> {
     await act(async () => {
       root!.render(
         <ToastProvider>
-          <ETradeTradingHub activeSubTab={hub.subTab as any} user={{ login: "alice" }} />
+          <TradeHub activeSubTab={hub.subTab as any} user={{ login: "alice" }} />
         </ToastProvider>,
       );
     });

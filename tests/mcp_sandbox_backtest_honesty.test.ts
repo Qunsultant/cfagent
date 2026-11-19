@@ -17,7 +17,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
-import { ETradeSandboxService } from "../src/services/sandboxAgent";
+import { SandboxService } from "../src/services/sandboxAgent";
 import { SandboxRunCommand, QuantBacktestCommand } from "../src/mcps/openaimp/cloudflareAgentCommands";
 
 const stubContext = (auditLog: any[]) =>
@@ -31,7 +31,7 @@ const stubContext = (auditLog: any[]) =>
 
 describe("run_sandbox_command — no backend bound (F6)", () => {
   it("service returns a not-executed result, never a bare exitCode-0 success", async () => {
-    const svc = new ETradeSandboxService(undefined, undefined);
+    const svc = new SandboxService(undefined, undefined);
     const result = await svc.runCommand({ command: "echo hello" });
 
     expect(result.executed).toBe(false);
@@ -43,7 +43,7 @@ describe("run_sandbox_command — no backend bound (F6)", () => {
   });
 
   it("every command shape gets the same honest result (no python/node/echo special cases)", async () => {
-    const svc = new ETradeSandboxService(undefined, undefined);
+    const svc = new SandboxService(undefined, undefined);
     for (const command of ["python3 calc.py", "node app.js", "ls -la", "rm -rf /tmp/x"]) {
       const result = await svc.runCommand({ command });
       expect(result.executed).toBe(false);
@@ -82,7 +82,7 @@ describe("run_sandbox_command — no backend bound (F6)", () => {
 
 describe("run_quant_backtest — synthetic, labelled, genuinely computed (F7)", () => {
   it("carries the synthetic label and a plain-language note", async () => {
-    const svc = new ETradeSandboxService(undefined, undefined);
+    const svc = new SandboxService(undefined, undefined);
     const result = await svc.runQuantBacktest({ symbol: "NVDA", strategy: "sma_crossover", startBars: 100 });
 
     expect(result.dataSource).toBe("synthetic");
@@ -93,7 +93,7 @@ describe("run_quant_backtest — synthetic, labelled, genuinely computed (F7)", 
   });
 
   it("is deterministic: identical inputs produce identical results", async () => {
-    const svc = new ETradeSandboxService(undefined, undefined);
+    const svc = new SandboxService(undefined, undefined);
     const a = await svc.runQuantBacktest({ symbol: "NVDA", strategy: "sma_crossover", startBars: 100 });
     const b = await svc.runQuantBacktest({ symbol: "NVDA", strategy: "sma_crossover", startBars: 100 });
     expect(b).toEqual(a);
@@ -104,7 +104,7 @@ describe("run_quant_backtest — synthetic, labelled, genuinely computed (F7)", 
   });
 
   it("pins the genuinely computed metrics for a fixed run (all three trades lose)", async () => {
-    const svc = new ETradeSandboxService(undefined, undefined);
+    const svc = new SandboxService(undefined, undefined);
     const result = await svc.runQuantBacktest({ symbol: "NVDA", strategy: "sma_crossover", startBars: 100 });
 
     // Hand-verifiable from the trade log: 3 closed trades, all losses.
@@ -119,7 +119,7 @@ describe("run_quant_backtest — synthetic, labelled, genuinely computed (F7)", 
   });
 
   it("reports uncomputable metrics as null instead of default-filling them", async () => {
-    const svc = new ETradeSandboxService(undefined, undefined);
+    const svc = new SandboxService(undefined, undefined);
     // 10 bars < 20-bar slow SMA warmup → the strategy can never trade.
     const result = await svc.runQuantBacktest({ symbol: "NVDA", strategy: "sma_crossover", startBars: 10 });
 
@@ -132,7 +132,7 @@ describe("run_quant_backtest — synthetic, labelled, genuinely computed (F7)", 
   });
 
   it("mean-reversion family runs the disclosed shared rule and ledgers the end-of-series close", async () => {
-    const svc = new ETradeSandboxService(undefined, undefined);
+    const svc = new SandboxService(undefined, undefined);
     const result = await svc.runQuantBacktest({ symbol: "AAPL", strategy: "mean_reversion", startBars: 100 });
 
     expect(result.dataSource).toBe("synthetic");

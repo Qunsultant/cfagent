@@ -5,7 +5,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import React from "react";
 import ReactDOMServer from "react-dom/server";
-import { SettingsMenu } from "../src/client/ETradeDynamicMenu";
+import { SettingsMenu } from "../src/client/BrokerDynamicMenu";
 import { ToastProvider } from "../src/client/components/ui";
 import { ToolResultView } from "../src/client/chat/ToolResultView";
 import { getTradingAgentConfig, TRADING_AGENT_CONFIG_BASELINE } from "../src/config/tradingAgentConfig";

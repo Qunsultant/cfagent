@@ -23,7 +23,7 @@ import {
 } from "../src/client/deepLinks";
 import { OPTIONS_HUB_TABS } from "../src/client/OptionsHub";
 
-const hubSrc = readFileSync(join(__dirname, "../src/client/ETradeTradingHub.tsx"), "utf8");
+const hubSrc = readFileSync(join(__dirname, "../src/client/TradeHub.tsx"), "utf8");
 
 describe("nav completeness (#2801)", () => {
   it("keeps Goal Screen as a top-level Intelligence item (#2896 moved the menu)", () => {

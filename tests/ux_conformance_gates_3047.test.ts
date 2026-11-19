@@ -52,7 +52,7 @@
  *     conforming, 62 registered (26 tracked by #3051 hub interiors,
  *     36 by the #3695 program). Worst offenders: MarketDataResearchHub
  *     364 bespoke classes, WorkflowsHub 178, ScannerPanel 152,
- *     ETradeTradingHub host 150, DataProvidersPanel 119.
+ *     TradeHub host 150, DataProvidersPanel 119.
  *     Scanner finding (confirmed 2026-11-10): ScannerPanel.tsx:615
  *     uses class `scanner-export-csv`, which has no definition in any
  *     client .css — a dead class. It counts as 1 bespoke token here;
@@ -117,7 +117,7 @@ import { routeConformance, templateRoutes } from "./template_route_tree";
 const HERE = join(__dirname, "..");
 const CLIENT_DIR = join(HERE, "src", "client");
 const TESTS_DIR = join(__dirname);
-const HUB_FILE = "src/client/ETradeTradingHub.tsx";
+const HUB_FILE = "src/client/TradeHub.tsx";
 
 function stripComments(text: string): string {
   return text
@@ -484,7 +484,7 @@ const CONFORMING_INTERIORS: string[] = [
   "src/client/components/AutopilotControlCenter.tsx",
   "src/client/options/OptionsResearchPanel.tsx",
   "src/client/ScannerPanel.tsx",
-  "src/client/ETradeTradingHub.tsx",
+  "src/client/TradeHub.tsx",
   "src/client/WorkflowsHub.tsx",
   "src/client/MarketDataResearchHub.tsx",
   // Issue #4530: the Product Hub page (PageTemplate + PageSection,
@@ -653,7 +653,7 @@ const INTERIOR_SURFACE_FILES: string[] = [
   "src/client/SchedulesPanel.tsx",
   // Non-nav surface + hub host.
   "src/client/FirstRunScreen.tsx",
-  "src/client/ETradeTradingHub.tsx",
+  "src/client/TradeHub.tsx",
 ];
 
 /** Read one quoted string literal starting at text[i]. */
@@ -918,7 +918,7 @@ describe("route shell conformance (#3047)", () => {
       closeIdx !== -1 &&
       branchIdx.every((i) => i > openIdx && i < closeIdx);
     for (const id of TRADING_ROUTES) {
-      check(id, wrapperOk, false, "ETradeTradingHub wrapper shell");
+      check(id, wrapperOk, false, "TradeHub wrapper shell");
     }
     for (const [id, entry] of Object.entries(register.routes)) {
       if (entry.kind === "migration") {

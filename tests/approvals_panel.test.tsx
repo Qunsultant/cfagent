@@ -151,7 +151,7 @@ describe("Issue #1705 — Approvals surface composes the existing queues", () =>
   });
 
   it("source pin: the queue's only home is the order page's approvals tab (#4538, #4626)", () => {
-    const hub = readFileSync("src/client/ETradeTradingHub.tsx", "utf8");
+    const hub = readFileSync("src/client/TradeHub.tsx", "utf8");
     expect(hub).not.toContain("TradingApprovalsQueue");
     const panel = readFileSync("src/client/ApprovalsPanel.tsx", "utf8");
     expect(panel).toContain("<TradingApprovalsQueue />");

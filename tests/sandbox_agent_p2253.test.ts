@@ -2,7 +2,7 @@
  * Issue #2253 — SandboxAgent behaviour pins.
  *
  * The agent is fleet registration plus a thin door over the existing
- * ETradeSandboxService, constructed with no container backend —
+ * SandboxService, constructed with no container backend —
  * exactly as the MCP facade (RunSandboxCommand) constructs it today.
  * These pins run the REAL service at the seam (no mocks): with no
  * backend bound, the run door must return the service's honest

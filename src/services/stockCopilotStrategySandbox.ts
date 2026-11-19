@@ -17,7 +17,7 @@ import {
 import * as sandboxModule from "./sandboxAgent";
 
 function getSandboxServiceClass(): new (container?: any, env?: any) => any {
-  return (sandboxModule as Record<string, any>)["E" + "Trade" + "SandboxService"];
+  return (sandboxModule as Record<string, any>)["SandboxService"];
 }
 
 export type StrategyAlgorithmType =

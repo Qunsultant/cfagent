@@ -219,8 +219,8 @@ describe("Issue #1327 — TradingApprovalsQueue", () => {
     expect(container.textContent || "").toContain("No pending approvals");
   });
 
-  it("ETradeTradingHub no longer wires the queue anywhere (#4538: the Approvals page is its only home)", () => {
-    const hub = readFileSync("src/client/ETradeTradingHub.tsx", "utf8");
+  it("TradeHub no longer wires the queue anywhere (#4538: the Approvals page is its only home)", () => {
+    const hub = readFileSync("src/client/TradeHub.tsx", "utf8");
     expect(hub).not.toContain("TradingApprovalsQueue");
     const panel = readFileSync("src/client/ApprovalsPanel.tsx", "utf8");
     expect(panel).toContain("<TradingApprovalsQueue />");

@@ -11,7 +11,7 @@ import {
 } from "../trading";
 import { BrokerSurfaceGate } from "./BrokerSurfaceGate";
 import { AlpacaSignInCard } from "./AlpacaSignInCard";
-import { AlpacaCancelAllControl } from "./AlpacaCancelAllControl";
+import { CancelAllControl } from "./CancelAllControl";
 
 /**
  * Issue #2853 (gap G2): the first non-E*TRADE panel under the broker panel contract.
@@ -275,7 +275,7 @@ function ReadFailure({ code, message }: { code: string | null; message: string }
   );
 }
 
-export interface AlpacaBrokerPanelProps {
+export interface BrokerPanelProps {
   /** Passed by the hub for parity; the server resolves the environment itself. */
   activeEnv?: string;
   /**
@@ -287,7 +287,7 @@ export interface AlpacaBrokerPanelProps {
   broker?: string;
 }
 
-export function AlpacaBrokerPanel({ activeEnv, broker = "alpaca" }: AlpacaBrokerPanelProps) {
+export function BrokerPanel({ activeEnv, broker = "alpaca" }: BrokerPanelProps) {
   // Issue #3390: a cancelled order must disappear from the table, so the read
   // is retriggered by a nonce instead of a page reload.
   const [orderHistoryNonce, setOrderHistoryNonce] = useState(0);
@@ -458,7 +458,7 @@ export function AlpacaBrokerPanel({ activeEnv, broker = "alpaca" }: AlpacaBroker
               its MCP surface (one cancel_order call per order). A Public
               panel renders no Alpaca control. */}
           {brokerId === "alpaca" && (
-            <AlpacaCancelAllControl
+            <CancelAllControl
               openOrders={
                 orderHistory.state === "ready"
                   ? (orderHistory.data.orders ?? []).filter((row) => row.status === "OPEN").length

@@ -25,7 +25,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { AutopilotControlCenter } from "../src/client/components/AutopilotControlCenter";
-import { ETradeTradingHub } from "../src/client/ETradeTradingHub";
+import { TradeHub } from "../src/client/TradeHub";
 import { ToastProvider } from "../src/client/components/ui/Toast";
 import {
   DEEP_LINK_OVERRIDES,
@@ -221,7 +221,7 @@ async function mountHub(search: string) {
   await act(async () => {
     root!.render(
       <ToastProvider>
-        <ETradeTradingHub activeSubTab={"autopilot" as any} user={{ login: "alice" }} />
+        <TradeHub activeSubTab={"autopilot" as any} user={{ login: "alice" }} />
       </ToastProvider>,
     );
   });

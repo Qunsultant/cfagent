@@ -3,7 +3,7 @@
  * functions over a close series (issue #3391, parent #3380).
  *
  * This module is the SINGLE implementation of the strategy rules that
- * `ETradeSandboxService.runQuantBacktest` (src/services/sandboxAgent.ts)
+ * `SandboxService.runQuantBacktest` (src/services/sandboxAgent.ts)
  * demonstrates over a synthetic series. The sandbox loop delegates its
  * per-bar decisions here, and the Stock Copilot cycle evaluates the
  * same functions over live bars — one implementation, two consumers,

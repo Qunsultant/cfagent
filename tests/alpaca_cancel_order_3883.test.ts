@@ -309,7 +309,7 @@ describe("#3883 — the tool and the route share one implementation", () => {
   });
 
   it("the order-history row only refreshes after the broker confirms", () => {
-    const panel = readFileSync("src/client/AlpacaBrokerPanel.tsx", "utf8");
+    const panel = readFileSync("src/client/BrokerPanel.tsx", "utf8");
     expect(panel).toContain("if (res.ok) setOrderHistoryNonce");
     expect(panel).toContain("body.message");
     expect(panel).toContain("The order may still be open");

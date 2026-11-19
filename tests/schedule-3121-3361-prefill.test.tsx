@@ -4,7 +4,7 @@
  * de-hubbed schedules home.
  *
  * S2 de-hubbed `?tab=schedules`: the home renders from the shell
- * (Chat.tsx), not through the retained ETradeTradingHub, and the hub
+ * (Chat.tsx), not through the retained TradeHub, and the hub
  * owned the order-ticket prefill (hub-local order state). The home's
  * `onPreviewTrade` dropped the candidate and navigated to the order
  * tab bare, so the ticket opened unprefilled.
@@ -256,7 +256,7 @@ describe("3361-P03 the shell handoff wiring (#3361)", () => {
   });
 
   it("the hub consumes the pending context through handleTradeOrder on the order sub-tab", () => {
-    const hub = read("src/client/ETradeTradingHub.tsx");
+    const hub = read("src/client/TradeHub.tsx");
     expect(hub).toContain("pendingOrderContext");
     expect(hub).toContain("onConsumePendingOrderContext");
     expect(hub).toContain("handleTradeOrder(pendingOrderContext)");
@@ -272,7 +272,7 @@ describe("3361-P03 the shell handoff wiring (#3361)", () => {
     for (const rel of [
       "src/client/Chat.tsx",
       "src/client/SchedulesHome.tsx",
-      "src/client/ETradeTradingHub.tsx",
+      "src/client/TradeHub.tsx",
       "src/client/SchedulesPanel.tsx",
       "src/client/ScheduledOptionsManager.tsx",
     ]) {
@@ -284,7 +284,7 @@ describe("3361-P03 the shell handoff wiring (#3361)", () => {
     const chat = read("src/client/Chat.tsx");
     expect(chat).toContain("schedules: (");
     expect(chat).toContain("<SchedulesHome");
-    const hub = read("src/client/ETradeTradingHub.tsx");
+    const hub = read("src/client/TradeHub.tsx");
     expect(hub).not.toContain('from "./SchedulesHome"');
     expect(hub).not.toContain('from "./SchedulesPanel"');
     expect(hub).not.toContain("<SchedulesHome");

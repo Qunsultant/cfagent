@@ -18,7 +18,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-const HUB = readFileSync(join(__dirname, "../src/client/ETradeTradingHub.tsx"), "utf8");
+const HUB = readFileSync(join(__dirname, "../src/client/TradeHub.tsx"), "utf8");
 
 /** Copy a tenant of any broker can reach — must follow the selection. */
 const BROKER_NEUTRAL_COPY = [

@@ -29,7 +29,7 @@ import { routeConformance } from "./template_route_tree";
 const HERE = join(__dirname, "..");
 const CLIENT_DIR = join(HERE, "src", "client");
 const TESTS_DIR = __dirname;
-const HUB_FILE = "src/client/ETradeTradingHub.tsx";
+const HUB_FILE = "src/client/TradeHub.tsx";
 const CHAT_FILE = "src/client/Chat.tsx";
 
 /** Routes whose panel file renders <PageTemplate> today. Wave 1 extends. */

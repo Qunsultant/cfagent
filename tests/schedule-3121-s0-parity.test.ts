@@ -650,7 +650,7 @@ describe("U-P01 URL inventory (§8 U-01): nav-config.json schedules route is de-
     const route = config.routes.find((r) => r.id === "schedules");
     expect(route).toBeDefined();
     // S2 (#3121): the home renders from the shell (Chat.tsx
-    // TAB_CONTENT), not through the retained ETradeTradingHub — the
+    // TAB_CONTENT), not through the retained TradeHub — the
     // route lost its retain flag.
     expect(route!.retain).toBeUndefined();
     expect(route!).not.toHaveProperty("navEntry");
@@ -724,7 +724,7 @@ describe("U-P04 URL inventory (§8 U-01): Chat.tsx renders schedules from the sh
       "schedules: (\n      <SchedulesHome",
     );
     expect(chat).toContain('import { SchedulesHome } from "./SchedulesHome";');
-    const hub = read("src/client/ETradeTradingHub.tsx");
+    const hub = read("src/client/TradeHub.tsx");
     expect(hub).not.toContain('{effectiveSubTab === "schedules" && (');
     expect(hub).not.toContain("<SchedulesPanel");
   });
@@ -746,7 +746,7 @@ describe("U-P05 URL inventory (§8 U-06): the IAAA admin Queue sub-tab is retire
 
 describe("U-P06 URL inventory (§8): the hub sub-tab is a local mirror of the URL-driven value", () => {
   it("pins the local subTab state synced from the activeSubTab prop", () => {
-    const hub = read("src/client/ETradeTradingHub.tsx");
+    const hub = read("src/client/TradeHub.tsx");
     expect(hub).toContain(
       "const [subTab, setSubTab] = useState<TradingSubTab>(activeSubTab || \"autopilot\");",
     );

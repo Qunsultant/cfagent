@@ -9,7 +9,7 @@
  * worse than an absent control: it reads as a broken page.
  *
  * The branch here is deliberately the SAME branch the hub uses to choose a
- * panel (`selectedBroker === "etrade" ? AccountPanels : AlpacaBrokerPanel`), so
+ * panel (`selectedBroker === "etrade" ? AccountPanels : BrokerPanel`), so
  * an unrecognised stored id gets Alpaca's list because it gets Alpaca's panel —
  * one rule, not two. This module holds no broker list of its own: it knows which
  * sections each of the two panels renders, and nothing about what a broker can
@@ -35,7 +35,7 @@ const ETRADE_SECTIONS: readonly BrokerSection[] = [
   { label: "Orders", id: "section-orders" },
 ];
 
-/** Sections `AlpacaBrokerPanel` renders, in document order. */
+/** Sections `BrokerPanel` renders, in document order. */
 const ALPACA_SECTIONS: readonly BrokerSection[] = [
   { label: "Positions", id: "section-positions" },
   { label: "Order history", id: "section-order-history" },

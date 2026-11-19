@@ -49,7 +49,7 @@ import { SCREENING_ASSET_CLASSES } from "../src/client/screeningAdapters";
 import { ScreenersHub } from "../src/client/ScreenersHub";
 import { OptionsHub } from "../src/client/OptionsHub";
 import { ToastProvider } from "../src/client/components/ui/Toast";
-import { ETradeTradingHub } from "../src/client/ETradeTradingHub";
+import { TradeHub } from "../src/client/TradeHub";
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -199,7 +199,7 @@ describe("S8 one construction path (source pins)", () => {
 describe("S8 hub inventory coverage (source pins)", () => {
   const hub = read("src/client/ScreenersHub.tsx");
   const optionsHub = read("src/client/OptionsHub.tsx");
-  const tradingHub = read("src/client/ETradeTradingHub.tsx");
+  const tradingHub = read("src/client/TradeHub.tsx");
 
   it("the options asset class is available in the hub — no longer PLANNED", () => {
     expect(SCREENING_ASSET_CLASSES.find((a) => a.id === "options")?.available).toBe(true);
@@ -318,7 +318,7 @@ describe("S8 render pins", () => {
   // redirect render pins are superseded by these.
   it("the Trading Hub renders the hub itself for the folded options subtab", async () => {
     await act(async () => {
-      root.render(<ToastProvider><ETradeTradingHub activeSubTab="options" user={{ login: "tester" }} /></ToastProvider>);
+      root.render(<ToastProvider><TradeHub activeSubTab="options" user={{ login: "tester" }} /></ToastProvider>);
     });
     expect(container.textContent).not.toContain("Screening Moved to the Screeners Hub");
     expect(container.textContent).toContain("Strategy Discovery & Payoff Analyzer");
@@ -326,7 +326,7 @@ describe("S8 render pins", () => {
 
   it("the Trading Hub renders the hub itself for the folded scanner subtab", async () => {
     await act(async () => {
-      root.render(<ToastProvider><ETradeTradingHub activeSubTab="scanner" user={{ login: "tester" }} /></ToastProvider>);
+      root.render(<ToastProvider><TradeHub activeSubTab="scanner" user={{ login: "tester" }} /></ToastProvider>);
     });
     expect(container.textContent).not.toContain("Screening Moved to the Screeners Hub");
     expect(container.textContent).toContain("Strategy/Symbol Scanner");

@@ -28,7 +28,7 @@ import {
   brokerPresentation,
   brokerPresentationIsComplete,
 } from "../src/trading/brokerPresentation";
-import { ETradeTradingHub } from "../src/client/ETradeTradingHub";
+import { TradeHub } from "../src/client/TradeHub";
 import { ToastProvider } from "../src/client/components/ui";
 import {
   resetTenantProvidersStateForTest,
@@ -195,7 +195,7 @@ describe("portfolio hero render follows the selection (#3417)", () => {
       React.createElement(
         ToastProvider,
         null,
-        React.createElement(ETradeTradingHub, { activeSubTab: "portfolio" }),
+        React.createElement(TradeHub, { activeSubTab: "portfolio" }),
       ),
     );
   }

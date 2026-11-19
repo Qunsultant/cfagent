@@ -12,7 +12,7 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import React from "react";
 import ReactDOMServer from "react-dom/server";
-import { SettingsMenu } from "../src/client/ETradeDynamicMenu";
+import { SettingsMenu } from "../src/client/BrokerDynamicMenu";
 import { ToastProvider } from "../src/client/components/ui";
 import { setTenantProvidersStateForTest, resetTenantProvidersStateForTest } from "../src/client/tenantProviders";
 

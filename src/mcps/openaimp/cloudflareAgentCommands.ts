@@ -21,7 +21,7 @@ import {
 } from "../../config/etradeModes";
 import { ETradeBrowserService } from "../../services/browserAgent";
 import { ETradeWebhookService } from "../../services/tradingWebhooks";
-import { ETradeSandboxService } from "../../services/sandboxAgent";
+import { SandboxService } from "../../services/sandboxAgent";
 import type {
   SandboxExecutionRequest,
   SandboxExecutionResult,
@@ -127,7 +127,7 @@ export class DispatchTradingWebhookCommand implements IMcpToolCommand<{
  * tracker #2708 item A4)
  *
  * The chat/MCP door onto SandboxAgent (#2253): until this slice,
- * this command constructed ETradeSandboxService directly, bypassing
+ * this command constructed SandboxService directly, bypassing
  * the fleet class every other door (A2A, HTTP onRequest) already
  * reaches the capability through — the census recorded SandboxAgent
  * as not-exposed on the chat-turn and mcp doors for exactly that
@@ -237,7 +237,7 @@ export class QuantBacktestCommand implements IMcpToolCommand<{
   });
 
   async execute(input: { symbol: string; strategy?: any; startBars?: number }, context: McpToolContext) {
-    const sandbox = new ETradeSandboxService(undefined, context.env);
+    const sandbox = new SandboxService(undefined, context.env);
     const result = await sandbox.runQuantBacktest({
       symbol: input.symbol,
       strategy: input.strategy || "sma_crossover",

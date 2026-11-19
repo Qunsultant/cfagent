@@ -9,7 +9,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import React from "react";
 import ReactDOMServer from "react-dom/server";
-import { ETradeTradingHub } from "../src/client/ETradeTradingHub";
+import { TradeHub } from "../src/client/TradeHub";
 import { ToastProvider } from "../src/client/components/ui";
 import {
   getBrokerEnvironment,
@@ -21,7 +21,7 @@ function renderPortfolioHub(): string {
     React.createElement(
       ToastProvider,
       null,
-      React.createElement(ETradeTradingHub, {
+      React.createElement(TradeHub, {
         activeSubTab: "portfolio",
         user: { login: "test_user", name: "Test User" },
       })
@@ -61,7 +61,7 @@ describe("#921 demo seeder live gate", () => {
   });
 
   it("source pins: the handler refuses when live, and both buttons are gated", () => {
-    const src = readFileSync("src/client/ETradeTradingHub.tsx", "utf8");
+    const src = readFileSync("src/client/TradeHub.tsx", "utf8");
     // Handler-level defense in depth: the seeder itself checks liveness.
     const handler = src.slice(src.indexOf("const handleSeedDemoPortfolio"));
     const handlerBody = handler.slice(0, handler.indexOf("setPositions(samplePositions)"));

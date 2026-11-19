@@ -32,7 +32,7 @@
  *   .chart-card-header :819); autopilot status/limits/actions cards
  *   (AutopilotControlCenter.tsx: .status-card-header,
  *   .limits-card-header, .actions-card-header); HITL card
- *   (ETradeTradingHub.tsx: .hitl-card-header); omnichannel card
+ *   (TradeHub.tsx: .hitl-card-header); omnichannel card
  *   (OmnichannelPanel.tsx: .omnichannel-card-header); deal card
  *   (PartnerDealsModal.tsx: .deal-card-header); options strategy card
  *   (chat/OptionsStrategyCard.tsx: .options-card-header); tool result

@@ -11,7 +11,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React, { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { ETradeTradingHub } from "../src/client/ETradeTradingHub";
+import { TradeHub } from "../src/client/TradeHub";
 import { OrderTicketPanel, type OrderTicketModel } from "../src/client/OrderTicketPanel";
 import { ToastProvider } from "../src/client/components/ui/Toast";
 import type { TradeAssetClass, TradeOrderContext } from "../src/client/trading/tradeOrderContext";
@@ -77,7 +77,7 @@ async function renderOrderPage(tab: string) {
   window.history.pushState(null, "", `?tab=order&orderTab=${tab}`);
   await renderNode(
     <ToastProvider>
-      <ETradeTradingHub activeSubTab="order" />
+      <TradeHub activeSubTab="order" />
     </ToastProvider>,
   );
 }

@@ -10,7 +10,7 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import React from "react";
 import ReactDOMServer from "react-dom/server";
-import { ETradeTradingHub } from "../src/client/ETradeTradingHub";
+import { TradeHub } from "../src/client/TradeHub";
 import { ToastProvider } from "../src/client/components/ui";
 import { saveTenantProviders } from "../src/client/tenantProviders";
 
@@ -31,7 +31,7 @@ function renderHub(activeSubTab: "voice" | "omnichannel"): string {
     React.createElement(
       ToastProvider,
       null,
-      React.createElement(ETradeTradingHub, {
+      React.createElement(TradeHub, {
         activeSubTab,
         user: { login: "test_user", name: "Test User" },
       }),

@@ -1,4 +1,4 @@
-import type { TradingSubTab } from "../ETradeTradingHub";
+import type { TradingSubTab } from "../TradeHub";
 import { ROUTES } from "../routes";
 export interface User {
   login: string;

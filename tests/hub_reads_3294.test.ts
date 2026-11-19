@@ -2,7 +2,7 @@
 /**
  * Issue #3294: the hub's four reads follow the broker selection.
  *
- * Before this, `ETradeTradingHub` called `/api/etrade/status|positions|quote|
+ * Before this, `TradeHub` called `/api/etrade/status|positions|quote|
  * diagnostics` directly, so an Alpaca tenant's hub read E*TRADE. Diagnostics
  * read E*TRADE OAuth state and have no neutral equivalent — the contract is
  * therefore `null` (do not call), not a silent E*TRADE request.
@@ -16,7 +16,7 @@ import {
   statusEndpoint,
 } from "../src/client/brokerEndpoints";
 
-const hub = readFileSync("src/client/ETradeTradingHub.tsx", "utf8");
+const hub = readFileSync("src/client/TradeHub.tsx", "utf8");
 
 describe("hub read selectors (#3294)", () => {
   it("keeps E*TRADE on its own routes", () => {

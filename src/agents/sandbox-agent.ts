@@ -5,7 +5,7 @@
  * What this class IS: a minimal PortThink Durable Object, bound as
  * SANDBOX_AGENT (wrangler migration v13), whose two doors — a status
  * surface and a run door — delegate to the ONE existing sandbox
- * implementation, ETradeSandboxService (src/services/sandboxAgent.ts).
+ * implementation, SandboxService (src/services/sandboxAgent.ts).
  * The agent adds no sandbox logic of its own; there is exactly one
  * implementation, and when a backend is ever bound, only the
  * service's construction changes (the #2215 bindings-first posture:
@@ -26,7 +26,7 @@
  * The owner step that lifts the degradation: add a Cloudflare
  * Containers configuration for this class (a "containers" entry in
  * wrangler.jsonc naming SandboxAgent, with an owner-chosen image)
- * and construct ETradeSandboxService with the bound container
+ * and construct SandboxService with the bound container
  * (this.ctx.container) instead of undefined. That is an
  * infrastructure decision (image, limits, network posture) — this
  * slice deliberately invents none of it.
@@ -52,7 +52,7 @@
  */
 
 import { PortThink } from "../actors/thinkAdapter";
-import { ETradeSandboxService } from "../services/sandboxAgent";
+import { SandboxService } from "../services/sandboxAgent";
 import {
   dispatchSandboxA2A,
   sandboxA2AOutcome,
@@ -94,7 +94,7 @@ const DEGRADED_DETAIL =
   "(executed:false, exitCode:null). Shell execution is not emulated and no " +
   "output is fabricated. Enablement is an owner step: add a Cloudflare " +
   "Containers configuration for SandboxAgent in wrangler.jsonc (owner-chosen " +
-  "image) and construct ETradeSandboxService with the bound container.";
+  "image) and construct SandboxService with the bound container.";
 
 /**
  * Issue #3934: this class hosts no chat turn, so the port's turn
@@ -117,14 +117,14 @@ const DEGRADED_DETAIL =
  * above does not apply to them.
  */
 export class SandboxAgent extends PortThink {
-  private sandboxService?: ETradeSandboxService;
+  private sandboxService?: SandboxService;
 
-  private getService(): ETradeSandboxService {
+  private getService(): SandboxService {
     if (!this.sandboxService) {
       // In Cloudflare Containers environments, container is bound at this.ctx.container.
       // When available, pass it to the sandbox service; otherwise fallback to undefined.
       const container = (this.ctx as any)?.container;
-      this.sandboxService = new ETradeSandboxService(container, this.env);
+      this.sandboxService = new SandboxService(container, this.env);
     }
     return this.sandboxService;
   }

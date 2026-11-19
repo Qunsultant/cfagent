@@ -116,7 +116,6 @@ export interface SettingsMenuProps {
 }
 
 export type BrokerDynamicMenuProps = SettingsMenuProps;
-export type ETradeDynamicMenuProps = SettingsMenuProps;
 
 export function BrokerDynamicMenu({
   activeEnv,

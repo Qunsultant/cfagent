@@ -156,7 +156,7 @@ describe("bespoke-styling ceiling (issue #2177)", () => {
     // 26); 5 checkbox-wrapper labels remain in those files by design
     // (Checkbox is a bare control), counted in the 121.
     // Ratcheted to 56 by chunk 3 (StrategyDiscoveryPanel 11,
-    // PortfolioRiskPanel 14, ETradeTradingHub 14, ScheduleFormModal 11,
+    // PortfolioRiskPanel 14, TradeHub 14, ScheduleFormModal 11,
     // ScreenersHub 10, FlowFiltersSidebar 5); 3 pill-row labels and 4
     // checkbox-row labels remain in those files by design, counted in
     // the 56.

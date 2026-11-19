@@ -15,7 +15,7 @@ import { describe, it, expect, afterEach, vi } from "vitest";
 
 import React from "react";
 import ReactDOMServer from "react-dom/server";
-import { ETradeTradingHub } from "../src/client/ETradeTradingHub";
+import { TradeHub } from "../src/client/TradeHub";
 import { ToastProvider } from "../src/client/components/ui";
 import { saveTenantProviders } from "../src/client/tenantProviders";
 
@@ -38,7 +38,7 @@ describe("issue #3796 — the Trading Desk voice tab renders its controls (desk-
       React.createElement(
         ToastProvider,
         null,
-        React.createElement(ETradeTradingHub, {
+        React.createElement(TradeHub, {
           activeSubTab: "voice",
           user: { login: "test_user", name: "Test User" },
         }),

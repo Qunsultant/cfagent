@@ -11,7 +11,7 @@
  *    publicQuoteProviderFromRoute);
  *  - the Public platform has no screenMarkets, so the catalog's
  *    marketScreening stays false;
- *  - AlpacaCancelAllControl renders for every broker the panel serves,
+ *  - CancelAllControl renders for every broker the panel serves,
  *    including public (there is no cancel-all on the Public MCP surface).
  *
  * Green when: the five public_* copilot tools are registered and route
@@ -50,7 +50,7 @@ import {
 } from "../src/trading/screenerPipeline";
 import { DataProviderRegistry } from "../src/trading/dataProviders/registry";
 import { createPublicDataProviderFromEnv } from "../src/trading/dataProviders/adapters";
-import { AlpacaBrokerPanel } from "../src/client/AlpacaBrokerPanel";
+import { BrokerPanel } from "../src/client/BrokerPanel";
 import { PublicTokenCard } from "../src/client/PublicTokenCard";
 import type { Env } from "../src/types";
 
@@ -436,7 +436,7 @@ describe("broker panel is broker-neutral for public (#3990 Slice D)", () => {
       vi.fn(async () => ({ ok: false, status: 404, json: async () => ({ code: "not_found" }) }) as unknown as Response),
     );
     await act(async () => {
-      root.render(<AlpacaBrokerPanel broker="public" activeEnv="TEST" />);
+      root.render(<BrokerPanel broker="public" activeEnv="TEST" />);
       await new Promise((resolve) => setTimeout(resolve, 50));
     });
     expect(container.textContent).not.toContain("Alpaca");

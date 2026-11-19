@@ -292,7 +292,7 @@ export const MESH_AGENTS: MeshAgentEntry[] = [
     base: "PortThink",
     bindings: ["SANDBOX_AGENT"],
     sourceFile: "src/agents/sandbox-agent.ts",
-    role: "Sandbox command agent (#2253): delegates execution to ETradeSandboxService.",
+    role: "Sandbox command agent (#2253): delegates execution to SandboxService.",
     status: "degraded",
     statusReason:
       "Degraded: no container backend is configured (no containers declared in wrangler.jsonc), so run_command honestly returns executed:false; the class and its A2A surface are live, the execution backend is absent (see notes).",
@@ -516,7 +516,7 @@ export const MESH_IDENTITIES: MeshIdentityRecord[] = [
     className: "SandboxAgent",
     did: null,
     identitySource:
-      "No acting identity: the class delegates to ETradeSandboxService constructed from env only, and adds no identity of its own.",
+      "No acting identity: the class delegates to SandboxService constructed from env only, and adds no identity of its own.",
     a2aSurfaces: ["sandbox"],
     meshCredentials: ["A2A_TOKEN_SANDBOX"],
     credentialPosture: PER_AGENT_CREDENTIAL_POSTURE,
@@ -989,7 +989,7 @@ export const MESH_TOOL_FAMILIES: MeshToolFamilyEntry[] = [
   {
     id: "sandbox-tools",
     name: "Sandbox execution",
-    source: "src/agents/sandbox-agent.ts + ETradeSandboxService",
+    source: "src/agents/sandbox-agent.ts + SandboxService",
     status: "degraded",
     commands: [],
     notes:
@@ -1938,7 +1938,7 @@ export const MESH_CAPABILITY_DOORS: MeshCapabilityDoorEntry[] = [
     operations: ["run_sandbox_command"],
     gate: "MCP permission scope mcp:execute (#1744) at the /mcp route + executor; the command itself consumes no caller identity (input parity: { command, timeoutMs } only).",
     notes:
-      "The same catalog command serves the chat turn (discovered via the SDK MCP client, #2496) and the external MCP surface — one registry, and since #2496 one enforcement surface: both arrive at the instance's /mcp route (registry MESH_DOORS). Wired by #2732 (tracker #2708 A4), the #2253 follow-up: SandboxRunCommand resolves this class on the SANDBOX_AGENT binding (service instance 'sandbox') and returns its runCommand result unchanged; a missing binding answers in the same honest shape from the command itself. The class delegates to the one ETradeSandboxService, so results carry the service's degraded posture verbatim (executed:false while no container backend is bound).",
+      "The same catalog command serves the chat turn (discovered via the SDK MCP client, #2496) and the external MCP surface — one registry, and since #2496 one enforcement surface: both arrive at the instance's /mcp route (registry MESH_DOORS). Wired by #2732 (tracker #2708 A4), the #2253 follow-up: SandboxRunCommand resolves this class on the SANDBOX_AGENT binding (service instance 'sandbox') and returns its runCommand result unchanged; a missing binding answers in the same honest shape from the command itself. The class delegates to the one SandboxService, so results carry the service's degraded posture verbatim (executed:false while no container backend is bound).",
   },
   {
     className: "SandboxAgent",

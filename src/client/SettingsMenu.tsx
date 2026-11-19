@@ -1,1 +1,1 @@
-export { SettingsMenu, ETradeDynamicMenu, type SettingsMenuProps, type ETradeDynamicMenuProps } from "./ETradeDynamicMenu";
+export { SettingsMenu, BrokerDynamicMenu, type SettingsMenuProps, type BrokerDynamicMenuProps } from "./BrokerDynamicMenu";

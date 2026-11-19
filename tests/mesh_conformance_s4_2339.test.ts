@@ -502,7 +502,7 @@ const MATRIX: MatrixRow[] = [
     className: "SandboxAgent",
     cells: {
       identity: NA(
-        "No acting identity: the class delegates to ETradeSandboxService constructed from env only, and adds no identity of its own.",
+        "No acting identity: the class delegates to SandboxService constructed from env only, and adds no identity of its own.",
       ),
       state: NA(
         "No ctx.storage use in the class (pinned below); the service is constructed with no container backend and holds no per-instance durable state.",

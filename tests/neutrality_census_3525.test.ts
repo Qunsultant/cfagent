@@ -294,7 +294,7 @@ function measure(): Map<string, number> {
  * header comment adds one etrade line back (11->12), and #3885's
  * cancel-all rows landed on main after this slice's base (brokerOrders
  * .ts alpaca 5->6, cancelOrderCommands.ts alpaca 3->5, 1 new row
- * AlpacaCancelAllControl.tsx alpaca 8 - #3885's own disposition).
+ * CancelAllControl.tsx alpaca 8 - #3885's own disposition).
  * Net composed vs the ship-time main (1127 rows / 8769 lines on the
  * tip's own baseline): rows 1127 -> 1127, lines 8769 -> 8770.
  * Baseline update (#3050, 2026-11-10): the hub's last four inline
@@ -322,10 +322,10 @@ function measure(): Map<string, number> {
  * (five prose mentions), and the cancel engine's own rows do not move.
  * Baseline update (#3937, 2026-11-10): the hub's diagnostics fallback is
  * the platform default (alpaca), not the legacy etrade fallback, so
- * ETradeTradingHub.tsx alpaca 23->24 while etrade 114->103 shrinks via
+ * TradeHub.tsx alpaca 23->24 while etrade 114->103 shrinks via
  * #3050's move. Dispositioned INTEGRATION — the fallback names the broker
  * the diagnostics run against, which is the hub integration's job. The
- * panel itself shrinks (AlpacaBrokerPanel.tsx alpaca 38->8, etrade 4->3)
+ * panel itself shrinks (BrokerPanel.tsx alpaca 38->8, etrade 4->3)
  * and needs no baseline change. The broker panel mount moved to
  * PortfolioPanel.tsx (#3050); the selected broker is passed there.
  * Baseline update (#4002, 2026-11-10): the feed-job monitoring rule
@@ -669,7 +669,7 @@ function measure(): Map<string, number> {
  * in the surface inventory; 2380-survey-draft.md/alpaca 1 — the
  * alpaca.ts route reference; 3238-param-survey.md/etrade 1 — the
  * etrade_auth / etrade_connect_error param names;
- * slice4-label-survey.md/etrade 4 — the ETradeTradingHub.tsx file
+ * slice4-label-survey.md/etrade 4 — the TradeHub.tsx file
  * name). ux-framework-survey.md carries no rows. Measured totals move
  * 1192/9360 -> 1196/9372 (re-based onto c334d9ae).
  * Baseline update (#4791, 2026-11-16; re-based onto 38c4115b):
@@ -849,7 +849,7 @@ function measure(): Map<string, number> {
  * audit record file under docs/architecture/survey/ as verbatim dated
  * snapshots (2026-11-18) — the inventory report, its three evidence
  * files, and the 28-issue audit record. The evidence files name the
- * broker identifiers they surveyed (the ETradeTradingHub.tsx file
+ * broker identifiers they surveyed (the TradeHub.tsx file
  * name, the /etrade/... route paths, the paid-seam identifiers);
  * neutralizing those mentions would falsify the evidence record, so
  * all rows are dispositioned HISTORICAL: 3 new rows (ux-actions.md
@@ -1118,7 +1118,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["docs/architecture/security/vendor-risk-1774.md", "etrade", 1],
   ["docs/architecture/security/vendor-risk-1774.md", "public.com", 1],
   // #3135 INTEGRATION: the token-mapping doc names the layout file
-  // ETradeTradingHub.tsx by its registered name (a data-bearing
+  // TradeHub.tsx by its registered name (a data-bearing
   // identifier) in the scope list and Used-by columns; neutralizing
   // the file name would break traceability to the file.
   ["docs/architecture/UX/token-mapping-order-options-autopilot.md", "etrade", 7],
@@ -1316,16 +1316,14 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/breakers/marketDataBreakerWrapper.ts", "alpaca", 1],
   ["src/breakers/marketDataBreakerWrapper.ts", "yahoo", 6],
   ["src/client/AdminQueueWipePanel.tsx", "etrade", 2],
-  ["src/client/AlpacaBrokerPanel.tsx", "alpaca", 38],
-  ["src/client/AlpacaBrokerPanel.tsx", "etrade", 4],
+  ["src/client/BrokerPanel.tsx", "alpaca", 38],
+  ["src/client/BrokerPanel.tsx", "etrade", 4],
   ["src/client/AlpacaSignInCard.tsx", "alpaca", 32],
-  ["src/client/ETradeDynamicMenu.tsx", "alpaca", 23],
-  ["src/client/ETradeDynamicMenu.tsx", "etrade", 37],
-  ["src/client/ETradeDynamicMenu.tsx", "yahoo", 6],
+  ["src/client/ETradeDynamicMenu.tsx", "etrade", 1],
   // #3937 INTEGRATION: the diagnostics fallback names the platform default
   // broker (the legacy etrade fallback is gone); the comment was neutralized.
-  ["src/client/ETradeTradingHub.tsx", "alpaca", 24],
-  ["src/client/ETradeTradingHub.tsx", "etrade", 103],
+  ["src/client/TradeHub.tsx", "alpaca", 24],
+  ["src/client/TradeHub.tsx", "etrade", 103],
   ["src/client/ProviderConnectivityDashboard.tsx", "etrade", 20],
   ["src/client/SchedulesPanel.tsx", "etrade", 7],
   ["src/client/TradingApprovalsQueue.tsx", "etrade", 7],
@@ -2134,7 +2132,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/aspects/errorCodes.ts", "nasdaq", 1],
   ["src/breakers/breakerPorts.ts", "nasdaq", 1],
   ["src/breakers/createBreakerPorts.ts", "nasdaq", 1],
-  ["src/client/ETradeTradingHub.tsx", "nasdaq", 1],
+  ["src/client/TradeHub.tsx", "nasdaq", 1],
   ["src/client/StockHub.tsx", "nasdaq", 2],
   ["src/client/components/AskAgentWidget.tsx", "nasdaq", 1],
   ["src/client/components/AutopilotControlCenter.tsx", "nasdaq", 1],
@@ -2213,7 +2211,7 @@ const BASELINE: Array<[string, string, number]> = [
   // environment resolver the order tools all call; its name carries the brand as
   // an identifier, so the row is baselined rather than the helper rewritten.
   ["src/mcps/openaimp/cancelOrderCommands.ts", "etrade", 2],
-  ["src/client/AlpacaCancelAllControl.tsx", "alpaca", 8],
+  ["src/client/CancelAllControl.tsx", "alpaca", 8],
   // #3866 INTEGRATION: the lifecycle table names the brokers it covers.
   ["docs/architecture/agentic/agents-workflows-schedules-queues-platforms-lifecycle.md", "etrade", 1],
   ["docs/architecture/agentic/agents-workflows-schedules-queues-platforms-lifecycle.md", "public.com", 1],
@@ -2456,12 +2454,13 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/config/channelBrokers.ts", "etrade", 2],
   ["src/trading/channelBroker.ts", "etrade", 3],
   // #5178 (S-U7 ledger): the styles.css ledger entry names its heaviest
-  // consumer file verbatim — ETradeTradingHub.tsx. The filename is the
+  // consumer file verbatim — TradeHub.tsx. The filename is the
   // provenance a reader needs to trace the 456 live selectors; neutralizing
   // it would make the consumer list unusable. Dispositioned INTEGRATION, as
   // in #4802/#4813/#5024. (The broker-naming sweep #5236 renames the panel
   // to TradeHub, which shrinks this row to 0 in its own slice.)
-  ["docs/architecture/transition/deprecations.md", "etrade", 1],
+  // #5236: +3 for the ETradeDynamicMenu.deprecated.tsx ledger entry.
+  ["docs/architecture/transition/deprecations.md", "etrade", 4],
   // #5404 INTEGRATION (tech-stack inventory, 5 rows / 5 matching lines):
   // docs/technology/tech-stack.md names the providers its data-provider
   // adapters integrate (E*TRADE live, Alpaca live, Yahoo delayed, Nasdaq

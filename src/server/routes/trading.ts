@@ -322,7 +322,7 @@ export async function handleTradingOmniRoutes(request: Request, env: Env, url: U
     // null session silently proceeded under a shared hard-coded fallback
     // identity, so an UNAUTHENTICATED caller could drive them. The
     // fallback identities are removed (the #149 pattern); the in-app
-    // callers (ETradeTradingHub, ResearchReportActions) are signed in
+    // callers (TradeHub, ResearchReportActions) are signed in
     // and unaffected.
     if (path === "/api/trading/email/inbound" && request.method === "POST") {
       const session = await requireAuth(request, env);

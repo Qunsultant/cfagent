@@ -72,7 +72,7 @@ const KNOWN_ORPHANS = [
   // Not mounted in the app; rendered only by
   // tests/memory_browser_search_button.test.tsx.
   "src/client/MemoryBrowser.tsx",
-  // The live SettingsMenu is exported from ETradeDynamicMenu.tsx; this
+  // The live SettingsMenu is exported from BrokerDynamicMenu.tsx; this
   // file is a legacy duplicate.
   "src/client/SettingsMenu.tsx",
   // Unreferenced on main as of #2083.
@@ -86,6 +86,9 @@ const KNOWN_ORPHANS = [
   // Deprecated in place in #2723 (superseded by DataProvidersPanel);
   // preserved under the zero-deletions policy gate (§22).
   "src/client/ProviderConnectivityDashboard.tsx",
+  // Deprecated in place in #5236 (superseded by BrokerDynamicMenu.tsx);
+  // preserved under the zero-deletions policy gate (§22).
+  "src/client/ETradeDynamicMenu.tsx",
   // Deprecated in place in #2954 (superseded by OptionsHub.tsx);
   // preserved under the zero-deletions policy gate (§22).
   "src/client/options/OptionsResearchHost.tsx",

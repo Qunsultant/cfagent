@@ -886,7 +886,7 @@ describe("C1: production callers exist (source pins)", () => {
   });
 
   it("the trading hub hosts the goal-screen surface (#2971: own page, not a hub tab)", () => {
-    const src = readSrc("client/ETradeTradingHub.tsx");
+    const src = readSrc("client/TradeHub.tsx");
     expect(src).toContain("GoalScreenPanel");
     expect(src).toContain('effectiveSubTab === "goal-screen"');
   });

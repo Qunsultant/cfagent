@@ -134,7 +134,7 @@ export function handleBrokerEnvironmentGet(ctx: BrokerEnvironmentSwitchContext):
 /**
  * Issue #314 — single-owner handler for the environment switcher.
  * Both spellings (`/environment/switch` and the advertised
- * `/broker/etrade/environment` from ETradeDynamicMenu.tsx) delegate here,
+ * `/broker/etrade/environment` from BrokerDynamicMenu.tsx) delegate here,
  * so the request/response contract, validation, and auth are identical.
  *
  * Issue #2482: the switch PERSISTS the selection to the caller's

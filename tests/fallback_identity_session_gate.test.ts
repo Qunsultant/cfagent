@@ -23,7 +23,7 @@
  * Fix (the #149 pattern): a session is REQUIRED — unauthenticated →
  * 401 with NO forwarding/processing — and the identity is the session
  * login only. Authenticated behaviour is unchanged: the same forward,
- * under the caller's own login. The in-app callers (ETradeTradingHub,
+ * under the caller's own login. The in-app callers (TradeHub,
  * ResearchReportActions, options/schedules panels) are signed in and
  * send their session cookie.
  *

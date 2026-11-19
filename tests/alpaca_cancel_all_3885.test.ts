@@ -231,8 +231,8 @@ describe("#3885 — records and surfaces", () => {
   });
 
   it("the panel mounts the cancel-all control", () => {
-    const panel = readFileSync("src/client/AlpacaBrokerPanel.tsx", "utf8");
-    expect(panel).toContain("<AlpacaCancelAllControl");
+    const panel = readFileSync("src/client/BrokerPanel.tsx", "utf8");
+    expect(panel).toContain("<CancelAllControl");
     expect(panel).toContain("onCancelled={() => setOrderHistoryNonce");
   });
 });

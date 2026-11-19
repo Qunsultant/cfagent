@@ -1,7 +1,7 @@
 /**
  * Issue #2419 — externalized polling cadences (AOP).
  * Issue #2513 — auto-refresh interval options externalized here too
- * (previously a hardcoded pill list in ETradeDynamicMenu.tsx and a
+ * (previously a hardcoded pill list in BrokerDynamicMenu.tsx and a
  * standalone 15s constant in autoRefresh.ts).
  *
  * Every tunable in the polling migration resolves through here. The

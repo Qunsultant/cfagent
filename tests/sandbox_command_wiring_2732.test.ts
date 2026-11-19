@@ -2,7 +2,7 @@
  * Issue #2732 (tracker #2708 item A4 — the #2253 follow-up) —
  * run_sandbox_command resolves through the SandboxAgent class.
  *
- * Until this slice, SandboxRunCommand constructed ETradeSandboxService
+ * Until this slice, SandboxRunCommand constructed SandboxService
  * directly, bypassing SandboxAgent — the fleet class #2253 built as
  * the sandbox's agent surface and the class every other door (A2A,
  * HTTP onRequest) already reaches the capability through. These pins
@@ -34,7 +34,7 @@ import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { SandboxRunCommand } from "../src/mcps/openaimp/cloudflareAgentCommands";
 import { SandboxAgent } from "../src/agents/sandbox-agent";
-import { ETradeSandboxService } from "../src/services/sandboxAgent";
+import { SandboxService } from "../src/services/sandboxAgent";
 import type { Env, SandboxExecutionResult } from "../src/types";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -74,12 +74,12 @@ describe("run_sandbox_command wiring (#2732)", () => {
     const start = src.indexOf("export class SandboxRunCommand");
     const end = src.indexOf("export class", start + 1);
     const classBody = src.slice(start, end === -1 ? undefined : end);
-    expect(classBody).not.toContain("ETradeSandboxService");
+    expect(classBody).not.toContain("SandboxService");
     expect(classBody).toContain("SANDBOX_AGENT");
     expect(classBody).toContain("runCommand");
     // The file's one remaining direct construction is
     // QuantBacktestCommand's — deliberate (see this suite's header).
-    expect(src.match(/new ETradeSandboxService/g)).toHaveLength(1);
+    expect(src.match(/new SandboxService/g)).toHaveLength(1);
   });
 
   it("resolution: resolves the service instance 'sandbox' and returns the stub's result verbatim", async () => {
@@ -135,7 +135,7 @@ describe("run_sandbox_command wiring (#2732)", () => {
     // The seam was actually used (this is what "wired" means) …
     expect(calls.idFromName).toEqual(["sandbox"]);
     // … and the answer is the direct-service answer, unchanged.
-    const direct = await new ETradeSandboxService(undefined, undefined).runCommand({
+    const direct = await new SandboxService(undefined, undefined).runCommand({
       command: "echo hello",
     });
     const { durationMs: _r, ...resultRest } = result;

@@ -17,7 +17,7 @@ import {
   evaluateLatestPatternSignal,
   evaluatePatternSignalAt,
 } from "../src/services/patternSignals";
-import { ETradeSandboxService } from "../src/services/sandboxAgent";
+import { SandboxService } from "../src/services/sandboxAgent";
 import {
   isStockCopilotPaperEnabled,
   runStockCopilotCycle,
@@ -209,7 +209,7 @@ describe("patternSignals — sandbox strategy rules", () => {
 
 describe("sandbox backtest parity after signal extraction", () => {
   it("keeps the pre-extraction metrics for every strategy", async () => {
-    const svc = new ETradeSandboxService();
+    const svc = new SandboxService();
     const sma = await svc.runQuantBacktest({ symbol: "NVDA", strategy: "sma_crossover" } as any);
     expect(sma.totalTrades).toBe(3);
     expect(sma.winRate).toBe(0);

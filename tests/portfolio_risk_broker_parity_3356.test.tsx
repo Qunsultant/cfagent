@@ -134,7 +134,7 @@ describe("the hub gates on the catalogue (#3356)", () => {
   it("asks the catalogue whether the broker can risk-report, and passes the broker", () => {
     // #3050 PR5: the portfolio sub-tab moved out of the hub into PortfolioPanel;
     // the catalogue gate travels with it. Same assertions, new host.
-    const hub = readFileSync("src/client/ETradeTradingHub.tsx", "utf8");
+    const hub = readFileSync("src/client/TradeHub.tsx", "utf8");
     const panel = readFileSync("src/client/PortfolioPanel.tsx", "utf8");
     const src = hub + panel;
     expect(src).toContain('brokerSupports(riskBroker, "portfolioRisk")');

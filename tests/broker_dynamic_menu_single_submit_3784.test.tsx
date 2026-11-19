@@ -14,7 +14,7 @@
  * The props below mimic the real parent wirings: Chat passes
  * `handleSwitchEnvironment={(t) => void switchBrokerEnvironment(t)}`
  * and `handleToggleAccountMode={() => void switchBrokerEnvironment(next)}`;
- * ETradeTradingHub passes its own `handleSwitchEnvironment` (POST +
+ * TradeHub passes its own `handleSwitchEnvironment` (POST +
  * status refetch) and `handleSwitchAndConnect` (switch + OAuth start).
  * The POST count is what is pinned, so the test doubles post once
  * through the real `switchBrokerEnvironment`.
@@ -156,7 +156,7 @@ describe("one switch action posts /environment/switch exactly once (#3784)", () 
     await renderMenu({
       oauthMsg: "Please switch environment to TEST to connect.",
       handleSwitchEnvironment: (target) => void switchBrokerEnvironment(target),
-      // ETradeTradingHub's handleSwitchAndConnect: switch, then OAuth start.
+      // TradeHub's handleSwitchAndConnect: switch, then OAuth start.
       handleSwitchAndConnect: async (target) => {
         await switchBrokerEnvironment(target);
       },

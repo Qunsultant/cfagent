@@ -37,7 +37,7 @@
  *
  * Mapping-table coverage: docs/architecture/UX/token-mapping-
  * order-options-autopilot.md must list every legacy class the three
- * layouts use (OrderTicketPanel, ETradeTradingHub,
+ * layouts use (OrderTicketPanel, TradeHub,
  * AutopilotControlCenter, plus the options components), 650 classes
  * on this slice's measurement (#4409 adds `ui-single-line`,
  * `ui-table-sort` and `ui-table-sort-indicator` to the used set, and
@@ -255,7 +255,7 @@ describe("token tiers for template surfaces (#3135)", () => {
 
 const LAYOUT_FILES = [
   "src/client/OrderTicketPanel.tsx",
-  "src/client/ETradeTradingHub.tsx",
+  "src/client/TradeHub.tsx",
   "src/client/components/AutopilotControlCenter.tsx",
   "src/client/OptionsCriteriaPanel.tsx",
   "src/client/OptionsHub.tsx",

@@ -18,7 +18,7 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { ETradeTradingHub } from "../src/client/ETradeTradingHub";
+import { TradeHub } from "../src/client/TradeHub";
 import { ToastProvider } from "../src/client/components/ui/Toast";
 import { setTenantProvidersStateForTest } from "../src/client/tenantProviders";
 
@@ -128,7 +128,7 @@ describe("E*TRADE disconnect panel truthfulness (#2386)", () => {
     mockFetch({ revokeMode: "fail", brokerAuthenticated: true });
     const captured: CapturedProps[] = [];
     await render(
-      <ETradeTradingHub
+      <TradeHub
         onBrokerPropsChange={(props) =>
           captured.push({ oauthStatus: props.oauthStatus, oauthMsg: props.oauthMsg })
         }
@@ -150,7 +150,7 @@ describe("E*TRADE disconnect panel truthfulness (#2386)", () => {
     mockFetch({ revokeMode: "ok", brokerAuthenticated: true });
     const captured: CapturedProps[] = [];
     await render(
-      <ETradeTradingHub
+      <TradeHub
         onBrokerPropsChange={(props) =>
           captured.push({ oauthStatus: props.oauthStatus, oauthMsg: props.oauthMsg })
         }
@@ -170,7 +170,7 @@ describe("E*TRADE disconnect panel truthfulness (#2386)", () => {
     mockFetch({ revokeMode: "ok", brokerAuthenticated: false });
     const captured: CapturedProps[] = [];
     await render(
-      <ETradeTradingHub
+      <TradeHub
         onBrokerPropsChange={(props) =>
           captured.push({ oauthStatus: props.oauthStatus, oauthMsg: props.oauthMsg })
         }

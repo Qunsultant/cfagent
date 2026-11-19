@@ -32,7 +32,7 @@ import {
 
 const oldHubSrc = readFileSync(join(__dirname, "../src/client/ScreenersHub.tsx"), "utf8");
 const stockHubSrc = readFileSync(join(__dirname, "../src/client/StockHub.tsx"), "utf8");
-const tradingHubSrc = readFileSync(join(__dirname, "../src/client/ETradeTradingHub.tsx"), "utf8");
+const tradingHubSrc = readFileSync(join(__dirname, "../src/client/TradeHub.tsx"), "utf8");
 
 describe("Stock Hub split (#2896)", () => {
   it("adds a stock-hub route with a nav entry and drops the screeners nav entry", () => {

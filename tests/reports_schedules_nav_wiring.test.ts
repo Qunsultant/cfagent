@@ -24,7 +24,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const chatTypesSrc = readFileSync(join(here, "..", "src", "client", "chat", "types.ts"), "utf8").replace(/\r\n/g, "\n");
 const chatSrc = readFileSync(join(here, "..", "src", "client", "Chat.tsx"), "utf8").replace(/\r\n/g, "\n");
 const hubSrc = readFileSync(
-  join(here, "..", "src", "client", "ETradeTradingHub.tsx"),
+  join(here, "..", "src", "client", "TradeHub.tsx"),
   "utf8",
 );
 
