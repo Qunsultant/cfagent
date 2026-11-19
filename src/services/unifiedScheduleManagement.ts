@@ -43,6 +43,7 @@ import {
   WORKER_CRON_TRIGGERS_INVENTORY,
 } from "./scheduleSystems";
 import { resolveCronEntryPoint } from "./consolidatedCronEntries";
+import { canonicalJson } from "./scheduleDedupe";
 import { RENEWAL_DISPATCH_CRON, RETENTION_DISPATCH_CRON, RETENTION_RECORD_ID, TOKEN_RENEWAL_RECORD_ID } from "./heartbeatDueChecks";
 import { NIGHTLY_RESEARCH_DISPATCH_CRON, NIGHTLY_RESEARCH_RECORD_ID } from "./researchScheduleGuard";
 import {
@@ -1060,6 +1061,30 @@ export function goalToRecord(goal: ScheduledGoal): UnifiedScheduleRecord {
     createdAt: nowIso,
     updatedAt: nowIso,
   };
+}
+
+/**
+ * Issue #4205 — dirty-check saves: whether a record-to-be-written
+ * carries any persisted change against the loaded record. The
+ * comparison is order-insensitive deep equality (`canonicalJson`
+ * from `./scheduleDedupe`, reused — no new equality helper) over
+ * every persisted field EXCEPT `updatedAt`, which the save always
+ * bumps on a real write and which therefore never counts as a
+ * change. `createdAt` IS compared: the caller preserves it from
+ * the loaded record before comparing, so a preserved stamp matches
+ * and a genuinely new record (no loaded row) is never "unchanged"
+ * — the caller only calls this when a loaded row exists. A goal
+ * whose definition, state, operation, or provenance differs is
+ * changed; an untouched goal compares equal and its re-save is
+ * skipped, so a tick over not-due goals writes nothing.
+ */
+export function isUnchangedGoalRecord(
+  prev: UnifiedScheduleRecord,
+  next: UnifiedScheduleRecord,
+): boolean {
+  const { updatedAt: _prevUpdatedAt, ...prevRest } = prev;
+  const { updatedAt: _nextUpdatedAt, ...nextRest } = next;
+  return canonicalJson(prevRest) === canonicalJson(nextRest);
 }
 
 /** A unified goal record back to the ScheduledGoal the routes return. */

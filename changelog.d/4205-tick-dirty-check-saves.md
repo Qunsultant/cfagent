@@ -1,0 +1,2 @@
+### Added
+- Tick dirty-check saves (#4205): `saveGoals` writes only goals whose persisted fields changed since load (compared with the reused `canonicalJson` order-insensitive equality, ignoring only the write stamp), so a tick over not-due goals writes nothing — measured on the #3124 harness (200 not-due goals, 350-row store), tick median 44.995ms → 26.363ms with write execs 400 → 0 and one scan still; lastRun stamping, createdAt preservation, removal sync, and the no-snapshot re-list fallback are unchanged.
