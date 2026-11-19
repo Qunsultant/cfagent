@@ -42,7 +42,15 @@ export class BasinLakeAdapter implements AnalyticsLakePort {
             "content-type": "application/json",
             authorization: `Bearer ${this.opts.token}`,
           },
-          body: JSON.stringify(batch),
+          // Issue #5830/#5816 — the stream schema is scalar-typed
+          // (string/int64/float64/bool), so the body rides as a JSON string:
+          // portable across Basin's schema and still queryable in Basin SQL.
+          body: JSON.stringify(
+            batch.map((event) => ({
+              ...event,
+              payload: JSON.stringify(event.payload),
+            })),
+          ),
         });
       } catch (err) {
         throw new Error(

@@ -16,8 +16,20 @@ export const ANALYTICS_LAKE_ENDPOINT_SETTING = "ANALYTICS_LAKE_STREAM_ENDPOINT";
 export const ANALYTICS_LAKE_TOKEN_SETTING = "ANALYTICS_LAKE_TOKEN";
 export const ANALYTICS_LAKE_DATASETS_SETTING = "ANALYTICS_LAKE_DATASETS";
 export const ANALYTICS_LAKE_TABLE_SETTING = "ANALYTICS_LAKE_TABLE";
+/** Issue #5816 — "dataset" archives one event per artifact; "bars" one per (run, symbol). */
+export const ANALYTICS_LAKE_GRANULARITY_SETTING = "ANALYTICS_LAKE_GRANULARITY";
+/** Issue #5816 — hard ceiling on events per artifact, so one run cannot flood the stream. */
+export const ANALYTICS_LAKE_MAX_EVENTS_SETTING = "ANALYTICS_LAKE_MAX_EVENTS";
 
 export type AnalyticsLakeMode = "off" | "basin";
+
+/**
+ * Archive granularity:
+ *  - `dataset` (default): one event per persisted artifact — counts + provenance.
+ *  - `bars` (#5816): one event per (run, symbol) carrying that symbol's bar
+ *    series, so the Iceberg table holds market history, not just run history.
+ */
+export type AnalyticsLakeGranularity = "dataset" | "bars";
 
 export interface AnalyticsLakeConfig {
   mode: AnalyticsLakeMode;
@@ -25,6 +37,10 @@ export interface AnalyticsLakeConfig {
   datasets: readonly string[];
   /** Iceberg table the pipeline writes (namespace.table). */
   table: string;
+  /** Archive granularity (#5816). */
+  granularity: AnalyticsLakeGranularity;
+  /** Max events emitted per artifact (#5816); extras are dropped with a reason. */
+  maxEvents: number;
   endpoint?: string;
   token?: string;
   /** Present when a requested mode was refused (fail-closed). */
@@ -38,6 +54,16 @@ function readString(env: unknown, key: string): string | undefined {
   const raw = (env as Record<string, unknown> | null | undefined)?.[key];
   const value = typeof raw === "string" ? raw.trim() : "";
   return value || undefined;
+}
+
+function readGranularity(env: unknown): AnalyticsLakeGranularity {
+  const raw = readString(env, ANALYTICS_LAKE_GRANULARITY_SETTING)?.toLowerCase();
+  return raw === "bars" ? "bars" : "dataset";
+}
+
+function readMaxEvents(env: unknown): number {
+  const raw = Number(readString(env, ANALYTICS_LAKE_MAX_EVENTS_SETTING));
+  return Number.isSafeInteger(raw) && raw > 0 ? raw : 500;
 }
 
 function readMode(env: unknown): AnalyticsLakeMode {
@@ -55,6 +81,8 @@ export function resolveAnalyticsLakeConfig(env: unknown): AnalyticsLakeConfig {
   const base = {
     datasets: datasets.length > 0 ? datasets : DEFAULT_DATASETS,
     table,
+    granularity: readGranularity(env),
+    maxEvents: readMaxEvents(env),
   };
   const mode = readMode(env);
   if (mode === "off") return { mode, ...base };

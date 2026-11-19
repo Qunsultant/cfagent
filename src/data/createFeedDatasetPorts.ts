@@ -38,6 +38,8 @@ export function createFeedDatasetAdapter(env: {
   return withLakeArchive(store, lake, {
     datasets: config.datasets,
     table: config.table,
+    granularity: config.granularity,
+    maxEvents: config.maxEvents,
   });
 }
 
