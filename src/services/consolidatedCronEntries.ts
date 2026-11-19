@@ -450,12 +450,78 @@ export async function runRenewTokensEntryPoint(
 }
 
 /**
+ * Issue #3121 #4240 — the retention pass's outcome as one stable
+ * line for the dispatch row's `detail`, built from the
+ * trigger-retention route's own response (no second source, no
+ * second parser — the Schedules home renders this string
+ * verbatim). Prune counts are the route's three windows summed
+ * (messages + events + memory); a skipped storage prune reads
+ * `pruned=skipped` (the master switch was off, not zero rows).
+ * The orphan sweep reads `orphans=<found>/<scanned> deleted=<n>`
+ * (or `orphanSweep=error: …` when the sweep itself failed), and
+ * the R2 snapshot export reads `snapshot=ok tables=<t> rows=<r>`
+ * (or `snapshot=skipped: …` / `snapshot=error: …`). Returns
+ * undefined when the body carries nothing to summarize — a
+ * success row with no detail is honest, a fabricated one is not.
+ */
+export function retentionPassSummary(body: unknown): string | undefined {
+  if (!body || typeof body !== "object") return undefined;
+  const b = body as Record<string, unknown>;
+  const num = (v: unknown): number | undefined =>
+    typeof v === "number" && Number.isFinite(v) ? v : undefined;
+  const parts: string[] = [];
+  if (b.skipped === true) {
+    parts.push("pruned=skipped");
+  } else {
+    const pruned = num(b.pruned) ?? 0;
+    const events = num(b.eventsPruned) ?? 0;
+    const memory = num(b.memoryPruned) ?? 0;
+    if ("pruned" in b || "eventsPruned" in b || "memoryPruned" in b) {
+      parts.push(`pruned=${pruned + events + memory}`);
+    }
+  }
+  const jobOutcomes = num(b.jobOutcomesPruned);
+  if (jobOutcomes !== undefined) parts.push(`jobOutcomes=${jobOutcomes}`);
+  const sweep = b.orphanSweep;
+  if (sweep && typeof sweep === "object") {
+    const s = sweep as Record<string, unknown>;
+    if (typeof s.error === "string" && s.error) {
+      parts.push(`orphanSweep=error: ${s.error}`);
+    } else if (num(s.scanned) !== undefined || num(s.orphans) !== undefined) {
+      parts.push(
+        `orphans=${num(s.orphans) ?? 0}/${num(s.scanned) ?? 0} deleted=${num(s.deleted) ?? 0}`,
+      );
+    }
+  }
+  const snap = b.snapshot;
+  if (snap && typeof snap === "object") {
+    const s = snap as Record<string, unknown>;
+    if (typeof s.error === "string" && s.error) {
+      parts.push(`snapshot=error: ${s.error}`);
+    } else if (typeof s.skipped === "string" && s.skipped) {
+      parts.push(`snapshot=skipped: ${s.skipped}`);
+    } else if (typeof s.key === "string" && s.key) {
+      parts.push(
+        `snapshot=ok tables=${num(s.tables) ?? 0} rows=${num(s.rows) ?? 0}`,
+      );
+    }
+  }
+  return parts.length > 0 ? parts.join(" ") : undefined;
+}
+
+/**
  * The `0 4` retention pass: POST the trigger-retention route under
  * the service identity. Moved verbatim from `handleScheduledEvent`,
  * plus the S5 response check the slice adds: a non-2xx response is
  * logged, never thrown — the retention pass's own outcome is its
  * route's business, and a failed dispatch must not fail the tick
  * layer that sent it.
+ *
+ * Issue #4240 — a 2xx response's body is summarized into the
+ * success row's `detail` (retentionPassSummary), so the Schedules
+ * home can show the pass's prune/export outcomes. The parse is
+ * best-effort: an unparseable body omits the detail, never fails
+ * the dispatch.
  */
 export async function runRetentionEntryPoint(
   deps: CronEntryPointDeps,
@@ -476,6 +542,7 @@ export async function runRetentionEntryPoint(
     return;
   }
   try {
+    let passSummary: string | undefined;
     const responsePromise = deps.orchestrator
       .fetch(
         new Request("https://agent.internal/schedules/trigger-retention", {
@@ -483,12 +550,23 @@ export async function runRetentionEntryPoint(
           headers: { ...backgroundDispatchHeaders(deps.serviceUserLogin) },
         }),
       )
-      .then((response) => {
+      .then(async (response) => {
         const status = (response as { status?: unknown } | null)?.status;
         if (typeof status !== "number" || status < 200 || status >= 300) {
           deps.logError(
             `[scheduled] retention dispatch returned non-2xx status ${String(status)} — the retention pass may not have run; see the orchestrator route result.`,
           );
+        } else {
+          try {
+            const json = (response as { json?: unknown })?.json;
+            if (typeof json === "function") {
+              passSummary = retentionPassSummary(
+                await (response as Response).json(),
+              );
+            }
+          } catch {
+            // Best-effort: an unparseable body omits the detail.
+          }
         }
         return response;
       });
@@ -499,6 +577,7 @@ export async function runRetentionEntryPoint(
       outcome: "success",
       started,
       finished: deps.now().toISOString(),
+      ...(passSummary !== undefined ? { detail: passSummary } : {}),
     });
   } catch (err) {
     await deps.recordDispatch({

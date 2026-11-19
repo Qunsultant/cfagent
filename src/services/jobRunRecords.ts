@@ -24,7 +24,7 @@ import {
   normalizeLedgerLinkage,
   resolveLedgerTrigger,
 } from "./consolidatedScheduling";
-import { RENEWAL_DISPATCH_CRON, TOKEN_RENEWAL_RECORD_ID } from "./heartbeatDueChecks";
+import { RENEWAL_DISPATCH_CRON, RETENTION_DISPATCH_CRON, RETENTION_RECORD_ID, TOKEN_RENEWAL_RECORD_ID } from "./heartbeatDueChecks";
 
 export type {
   JobRunLedgerTrigger,
@@ -254,9 +254,12 @@ export function resolveScheduleRunJobId(
  * their own, so the runs routes cannot read `listByJob(id)`
  * directly: the token-renewal record reads the renewal dispatch
  * rows (jobId = its cron). Every other id reads its own rows.
+ * Issue #4240 — the retention record reads the retention
+ * dispatch rows the same way (jobId = its cron).
  */
 export function scheduleIdToLedgerJobId(scheduleId: string): string {
   if (scheduleId === TOKEN_RENEWAL_RECORD_ID) return RENEWAL_DISPATCH_CRON;
+  if (scheduleId === RETENTION_RECORD_ID) return RETENTION_DISPATCH_CRON;
   return scheduleId;
 }
 

@@ -110,9 +110,12 @@ import {
   screenScheduleToRecord,
   TICKER_PUSH_RECORD_ID,
   TOKEN_RENEWAL_RECORD_ID,
+  RETENTION_RECORD_ID,
   tickerPushRecordToListItem,
   tokenRenewalRecordToListItem,
   tokenRenewalToRecord,
+  retentionRecordToListItem,
+  retentionToRecord,
   triggerUnifiedSchedule,
   unifiedRecordToListItem,
   updateUnifiedSchedule,
@@ -128,7 +131,7 @@ import type { TickerPushRecordStub } from "../../services/actorGatewayPorts";
 import { createUnifiedSchedulePorts } from "../../data/createUnifiedSchedulePorts";
 import { recordLedgerRun } from "../../services/unifiedLedger";
 import { buildJobRunRecord, scheduleIdToLedgerJobId, type JobRunRecordInput } from "../../services/jobRunRecords";
-import { RENEWAL_DISPATCH_CRON } from "../../services/heartbeatDueChecks";
+import { RENEWAL_DISPATCH_CRON, RETENTION_DISPATCH_CRON } from "../../services/heartbeatDueChecks";
 import { resolveActorAttribution } from "../../security/backgroundAttribution";
 import type { DatabaseORM } from "../../orm";
 import type { AgentName, AgentScheduleItem, Env } from "../../types";
@@ -440,6 +443,37 @@ export async function readTokenRenewalListItem(
 }
 
 /**
+ * Issue #3121 #4240 — the retention row for the Schedules
+ * home list. The record is derived (retentionToRecord), never
+ * stored, and the last pass is joined from the ledger's own
+ * retention-dispatch rows (jobId = RETENTION_DISPATCH_CRON), so
+ * the row shows the duty's last pass — or none, when it has never
+ * fired. The pass-outcome summary rides the row's lastRunDetail
+ * (the dispatch row's `detail`, rendered verbatim). Best-effort:
+ * a failed ledger read omits the row and logs a warning — the
+ * list never fails because the ledger cannot be read. The `sql`
+ * is the agent's SqlStorage (the same seam the runs routes read
+ * through).
+ */
+export async function readRetentionListItem(
+  sql: ConstructorParameters<typeof SqlJobRunRecordStore>[0],
+): Promise<ReturnType<typeof retentionRecordToListItem> | null> {
+  try {
+    const lastRun = new SqlJobRunRecordStore(sql).latestByJob(RETENTION_DISPATCH_CRON);
+    return retentionRecordToListItem(
+      retentionToRecord(new Date().toISOString()),
+      lastRun ? { started: lastRun.started, finished: lastRun.finished, outcome: lastRun.outcome, detail: lastRun.detail } : undefined,
+    );
+  } catch (err) {
+    structuredLog.warn("schedules.retention_read_failed", {
+      message: "[Schedules] retention list read failed; the row is omitted:",
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  }
+}
+
+/**
  * Issue #4260: where the surfaced flags are managed, for the home's
  * read-only guidance. An injected port (tests / local in-memory
  * runtimes) is the in-memory source; a FLAGS binding means the
@@ -724,6 +758,13 @@ export async function handleSchedulesRoutes(
         const renewalItem = await readTokenRenewalListItem(ctx.agentCtx.storage.sql);
         if (renewalItem && (!typeParam || renewalItem.type === typeParam)) {
           items.push(renewalItem);
+        }
+        // Issue #3121 #4240 — the retention row is derived,
+        // not stored; append it with its last pass joined from
+        // the ledger, under the same ?type= filter as the rest.
+        const retentionItem = await readRetentionListItem(ctx.agentCtx.storage.sql);
+        if (retentionItem && (!typeParam || retentionItem.type === typeParam)) {
+          items.push(retentionItem);
         }
         return Response.json({
           count: items.length,
@@ -1202,6 +1243,16 @@ export async function handleSchedulesRoutes(
             return Response.json({ error: `Schedule '${scheduleId}' not found` }, { status: 404 });
           }
           return Response.json(renewalItem);
+        }
+        // Issue #4240 — the retention record is derived, not stored,
+        // so getUnifiedScheduleDetail would 404 it; answer it here
+        // from the same derived record + last-pass join as the list.
+        if (scheduleId === RETENTION_RECORD_ID) {
+          const retentionItem = await readRetentionListItem(ctx.agentCtx.storage.sql);
+          if (!retentionItem) {
+            return Response.json({ error: `Schedule '${scheduleId}' not found` }, { status: 404 });
+          }
+          return Response.json(retentionItem);
         }
         const detail = await getUnifiedScheduleDetail({ store: unifiedStore(), alarms }, scheduleId);
         if (!detail.ok) {

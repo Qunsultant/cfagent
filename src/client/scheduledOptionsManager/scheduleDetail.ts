@@ -193,6 +193,12 @@ export function scheduleTitle(item: ScheduledTaskItem, _profiles?: StrategyProfi
   // the raw callback. The label is reused from workflowLifecycle.ts
   // ("Scheduled token renewal", family "other").
   if (item.callback === "autoRenewETradeTokens") return "Scheduled token renewal";
+  // Issue #3121 #4240 — the nightly retention pass is an internal-only
+  // job with no system-job registry entry (the registry is
+  // deliberately the three screening jobs); the Schedules home names
+  // it here, so its row reads "Scheduled retention pass" instead of
+  // the raw callback.
+  if (item.callback === "retention") return "Scheduled retention pass";
   return systemJobFor(item.callback)?.label || item.callback;
 }
 
