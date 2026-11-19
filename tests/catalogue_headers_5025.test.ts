@@ -27,7 +27,9 @@ describe("#5025 schemaComponent barrel & membership store naming", () => {
   it("reconciles live catalogue entry counts", () => {
     // #4767 adds migrations 0071/0072 (4 D1 ALTERs + 4 remainder ALTERs):
     // D1 225 → 229, remainder 57 → 61.
-    expect(D1_CATALOGUE_ENTRIES.length).toBe(229);
+    // #4204 adds migration 0073 (D1 job_run_records recent-read index):
+    // D1 229 → 230.
+    expect(D1_CATALOGUE_ENTRIES.length).toBe(230);
     expect(ORM_CATALOGUE_ENTRIES.length).toBe(26);
     expect(REMAINDER_CATALOGUE_ENTRIES.length).toBe(61);
     expect(DO_CATALOGUE_ENTRIES.length).toBe(107);

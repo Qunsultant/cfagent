@@ -2,7 +2,7 @@
  * #4282 P4 — schema-equality pin: all planes, one clean instance.
  *
  * What this suite pins (measured, never assumed):
- *  - the combined catalogue (D1 + DO + ORM + remainder, 423 entries)
+ *  - the combined catalogue (D1 + DO + ORM + remainder, 424 entries)
  *    builds the frozen combined model exactly: 181 tables / 103 indexes.
  *  - the frozen combined model is the deterministic union of the four
  *    per-plane fixtures, with ZERO cross-plane disagreements (column
@@ -82,8 +82,10 @@ describe("schema equality — all planes (#4282 P4)", () => {
   });
 
   it("per-plane fixtures hold their phase counts", () => {
+    // #4204 adds migration 0073 (D1 job_run_records recent-read
+    // index): D1 indexes 59 → 60, tables unchanged.
     const counts: Record<string, [number, number]> = {
-      d1: [101, 59],
+      d1: [101, 60],
       do: [69, 40],
       orm: [13, 10],
       remainder: [19, 15],
@@ -118,7 +120,7 @@ describe("schema equality — all planes (#4282 P4)", () => {
     expect(new Set(executedCodes).size).toBe(
       COMBINED_CATALOGUE_ENTRIES.length,
     );
-    expect(COMBINED_CATALOGUE_ENTRIES.length).toBe(423);
+    expect(COMBINED_CATALOGUE_ENTRIES.length).toBe(424);
     // Issue #5229 adds migration 0069 (agent_referral_rules
     // expiry_period_ms column): 410 entries resolve to 421 statements.
     // Issue #5086 adds migration 0070 (otel_config_overrides table):
@@ -133,7 +135,9 @@ describe("schema equality — all planes (#4282 P4)", () => {
     // + its index): 414 entries resolve to 425 statements.
     // Issue #4767 adds 8 entries (migrations 0071/0072: 4 D1 ALTERs
     // + 4 remainder ALTERs): 423 entries resolve to 434 statements.
-    expect(executedStatements).toBe(434);
+    // Issue #4204 adds migration 0073 (D1 job_run_records
+    // recent-read index): 424 entries resolve to 435 statements.
+    expect(executedStatements).toBe(435);
     const actual = instance.introspect();
     const diff = diffSchema(actual, combinedExpectedModel());
     expect(isEmptyDiff(diff)).toBe(true);

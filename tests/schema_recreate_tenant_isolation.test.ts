@@ -77,11 +77,12 @@ describe("recreate + tenant isolation (#4282 P4)", () => {
   // Issue #5175 slice 2 adds mas_runs + mas_run_aliases + its index: 422 → 425.
   // Issue #5086 adds migration 0070 (otel_config_overrides table): 425 → 426.
   // Issue #4767 adds migrations 0071/0072 (4 D1 + 4 remainder ALTERs): 426 → 434.
-    expect(first.summary.totalSteps).toBe(434);
-    expect(first.summary.executed).toBe(434);
+  // Issue #4204 adds migration 0073 (D1 job_run_records recent-read index): 434 → 435.
+    expect(first.summary.totalSteps).toBe(435);
+    expect(first.summary.executed).toBe(435);
     expect(first.summary.failed).toBe(0);
     expect(first.summary.skipped).toBe(0);
-    expect(first.executed).toHaveLength(434);
+    expect(first.executed).toHaveLength(435);
     expect(first.failed).toEqual([]);
     expect(first.skipped).toEqual([]);
     // Uncreatable layers are deployment facts, not changes: they are
@@ -211,7 +212,7 @@ describe("recreate + tenant isolation (#4282 P4)", () => {
     });
     // The report is truthful: everything before the failing step
     // executed, the failing step is named, everything after it is
-    // skipped — and the three counts sum to the 434 resolved steps.
+    // skipped — and the three counts sum to the 435 resolved steps.
     expect(partial.summary.failed).toBe(1);
     expect(partial.failed).toHaveLength(1);
     expect(partial.failed[0].code).toBe(UNIQUE_INDEX_CODE);
@@ -219,8 +220,8 @@ describe("recreate + tenant isolation (#4282 P4)", () => {
       partial.summary.executed +
         partial.summary.failed +
         partial.summary.skipped,
-    ).toBe(434);
-    expect(partial.summary.totalSteps).toBe(434);
+    ).toBe(435);
+    expect(partial.summary.totalSteps).toBe(435);
     // The degradation is VISIBLE, never silent: the post-run equality
     // check fails. The missing indexes are exactly the failed step's
     // index plus the indexes of the skipped steps (the run stopped in
@@ -230,9 +231,29 @@ describe("recreate + tenant isolation (#4282 P4)", () => {
     expect(isEmptyDiff(diff)).toBe(false);
     const catalogue = buildCombinedCatalogue();
     const expectedMissing = new Set<string>();
+    // Twin steps (#4204): the D1 migration step and the ORM plane's
+    // duplicate create the same index; when the D1 twin executes
+    // before the failure, the ORM twin lands in `skipped` but the
+    // index is present — so an index an executed CREATE step created
+    // is never missing, even when its twin was skipped. (CREATE
+    // only: the DROP entry carries the same index name but creates
+    // nothing, so it must not subtract — the failed generation
+    // unique index is missing even though its DROP executed.)
+    const executedIndexes = new Set<string>();
+    for (const code of partial.executed) {
+      const entry = catalogue.get(code);
+      if (
+        entry.index &&
+        /^CREATE (UNIQUE )?INDEX/i.test(entry.statement.trim())
+      ) {
+        executedIndexes.add(entry.index);
+      }
+    }
     for (const code of [partial.failed[0].code, ...partial.skipped]) {
       const entry = catalogue.get(code);
-      if (entry.index) expectedMissing.add(entry.index);
+      if (entry.index && !executedIndexes.has(entry.index)) {
+        expectedMissing.add(entry.index);
+      }
     }
     expect(expectedMissing.has("idx_mas_reports_generation")).toBe(true);
     expect(new Set(diff.missingIndexes)).toEqual(expectedMissing);
