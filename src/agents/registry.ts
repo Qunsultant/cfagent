@@ -709,6 +709,8 @@ export const MESH_TOOL_FAMILIES: MeshToolFamilyEntry[] = [
       "get_transactions",
       "execute_nlq",
       "get_async_job",
+      // Issue #5175 slice 5: the id resolver — core MCP command, mcp:read.
+      "resolve_id",
       "list_async_jobs",
       "get_job_status",
       "get_job_stage_status",

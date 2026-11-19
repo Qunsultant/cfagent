@@ -520,6 +520,11 @@
  * inventory to 494 entries (495 measured on the slice base);
  * the delegation sequence is unchanged (same handler, same
  * position).
+ *
+ * Issue #5175 slice 5 added one — GET /api/ids/resolve (in
+ * handleIdResolveRoutes, after the audit handler in the
+ * delegation sequence) — bringing the pinned inventory to 495
+ * entries.
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
@@ -534,6 +539,7 @@ const HANDLER_FILE: Record<string, string> = {
   "handleAdsRevenueReferralsRoutes": "adsRevenueReferrals.ts",
   "handleReferralsAdsRoutes": "adsRevenueReferrals.ts",
   "handleAuditRoutes": "audit.ts",
+  "handleIdResolveRoutes": "idResolve.ts",
   "handleMeterRoutes": "meter.ts",
   "handleDlqRoutes": "dlq.ts",
   "handleDataProviderRoutes": "dataProviders.ts",
@@ -593,6 +599,7 @@ const EXPECTED_DELEGATIONS = [
   "handleSchemaRoutes",
   "handleAdsRevenueReferralsRoutes",
   "handleAuditRoutes",
+  "handleIdResolveRoutes",
   "handleMeterRoutes",
   "handleDlqRoutes",
   "handleDataProviderRoutes",
@@ -687,6 +694,7 @@ const EXPECTED_INVENTORY = [
   "handleAuditRoutes :: endsWith(\"/audit\")",
   "handleAuditRoutes :: endsWith(\"/audit\")",
   "handleAuditRoutes :: endsWith(\"/audit/event\")",
+  "handleIdResolveRoutes :: endsWith(\"/ids/resolve\")",
   "handleMeterRoutes :: endsWith(\"/meter/event\")",
   "handleDlqRoutes :: endsWith(\"/ops/dlq/records\")",
   "handleDlqRoutes :: endsWith(\"/ops/dlq/replay\")",
