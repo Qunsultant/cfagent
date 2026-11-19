@@ -38,6 +38,15 @@ import {
   parseAuditChainVerificationRecord,
 } from "../../services/auditChainVerification";
 
+import { createStructuredLogger } from "../../observability/structuredLogger";
+import { createObservabilitySink } from "../../observability/createObservabilityPorts";
+
+/** Issue #5606 (G-3) — module logger on the structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "agents/routes/audit",
+});
+
+
 /** The subset of OrchestratorAgent surface the audit handlers need. */
 export interface AuditRouteContext {
   ensureTables(): SqlStorage;
@@ -181,7 +190,13 @@ export async function handleAuditRoutes(
       }
       return Response.json({ verified: true, ...record });
     } catch (err) {
-      return Response.json({ error: err instanceof Error ? err.message : "Failed to fetch audit chain verification" }, { status: 500 });
+      // #5606 (G-3): no raw store text reaches the client;
+      // the detail stays in the server log.
+      structuredLog.error("audit.fetch_audit_chain_verification", {
+        message: `[audit] fetch audit chain verification failed: ${err instanceof Error ? err.message : String(err)}`,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return Response.json({ error: "Failed to fetch audit chain verification", code: "FAILURE_UNEXPECTED_ERROR" }, { status: 500 });
     }
   }
 
@@ -201,7 +216,13 @@ export async function handleAuditRoutes(
       }
       return Response.json(projectAuditEvent(row as unknown as { id: string; type: string; agent: string; payload: string; createdAt: string }));
     } catch (err) {
-      return Response.json({ error: err instanceof Error ? err.message : "Failed to fetch audit event" }, { status: 500 });
+      // #5606 (G-3): no raw store text reaches the client;
+      // the detail stays in the server log.
+      structuredLog.error("audit.fetch_audit_event", {
+        message: `[audit] fetch audit event failed: ${err instanceof Error ? err.message : String(err)}`,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return Response.json({ error: "Failed to fetch audit event", code: "FAILURE_UNEXPECTED_ERROR" }, { status: 500 });
     }
   }
 
@@ -247,7 +268,13 @@ export async function handleAuditRoutes(
 
       return Response.json({ count: parsed.length, events: parsed });
     } catch (err) {
-      return Response.json({ error: err instanceof Error ? err.message : "Failed to fetch audit log" }, { status: 500 });
+      // #5606 (G-3): no raw store text reaches the client;
+      // the detail stays in the server log.
+      structuredLog.error("audit.fetch_audit_log", {
+        message: `[audit] fetch audit log failed: ${err instanceof Error ? err.message : String(err)}`,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return Response.json({ error: "Failed to fetch audit log", code: "FAILURE_UNEXPECTED_ERROR" }, { status: 500 });
     }
   }
 
@@ -288,7 +315,13 @@ export async function handleAuditRoutes(
       ctx.audit(type, agent, payload);
       return Response.json({ success: true, message: "Audit event recorded" });
     } catch (err) {
-      return Response.json({ error: err instanceof Error ? err.message : "Failed to record audit event" }, { status: 500 });
+      // #5606 (G-3): no raw store text reaches the client;
+      // the detail stays in the server log.
+      structuredLog.error("audit.record_failed", {
+        message: `[audit] record failed failed: ${err instanceof Error ? err.message : String(err)}`,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return Response.json({ error: "Failed to record audit event", code: "FAILURE_UNEXPECTED_ERROR" }, { status: 500 });
     }
   }
 
@@ -323,7 +356,13 @@ export async function handleAuditRoutes(
       const record = ctx.recordAudit(validated.value.type, validated.value.agent, validated.value.payload);
       return Response.json(record, { status: 201 });
     } catch (err) {
-      return Response.json({ error: err instanceof Error ? err.message : "Failed to record audit event" }, { status: 500 });
+      // #5606 (G-3): no raw store text reaches the client;
+      // the detail stays in the server log.
+      structuredLog.error("audit.record_event_failed", {
+        message: `[audit] record event failed failed: ${err instanceof Error ? err.message : String(err)}`,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return Response.json({ error: "Failed to record audit event", code: "FAILURE_UNEXPECTED_ERROR" }, { status: 500 });
     }
   }
 

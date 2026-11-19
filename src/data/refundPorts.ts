@@ -34,6 +34,8 @@
  *   value is "operator_hitl".
  */
 
+import { BusinessError } from "../outcomes/outcomeAspects";
+
 /** What was paid for: a subscription period, one pay-per-run charge, or a bundle period (#5227). */
 export type RefundKind = "subscription" | "pay_per_run" | "bundle";
 
@@ -52,11 +54,11 @@ export type RefundRail = "card" | "crypto" | "cfpay-channel";
  * through a value edit.
  */
 export function assertApprovedKinds(value: unknown): RefundKind[] {
-  if (!Array.isArray(value)) throw new Error("approvedKinds must be an array of refund kinds.");
+  if (!Array.isArray(value)) throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   const seen = new Set<string>();
   for (const kind of value) {
     if (kind !== "subscription" && kind !== "pay_per_run" && kind !== "bundle") {
-      throw new Error(`Invalid approved refund kind: ${String(kind)}.`);
+      throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     }
     seen.add(kind);
   }
@@ -88,14 +90,14 @@ export type RefundStatus =
 
 export function assertRefundKind(kind: unknown): RefundKind {
   if (kind !== "subscription" && kind !== "pay_per_run" && kind !== "bundle") {
-    throw new Error(`Invalid refund kind: ${String(kind)} (must be subscription, pay_per_run, or bundle).`);
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   return kind;
 }
 
 export function assertRefundRail(rail: unknown): RefundRail {
   if (rail !== "card" && rail !== "crypto" && rail !== "cfpay-channel") {
-    throw new Error(`Invalid refund rail: ${String(rail)} (must be card, crypto, or cfpay-channel).`);
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   return rail;
 }
@@ -108,7 +110,7 @@ export function assertRefundStatus(status: unknown): RefundStatus {
     status !== "executed" &&
     status !== "execution_failed"
   ) {
-    throw new Error(`Invalid refund status: ${String(status)}.`);
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   return status;
 }
@@ -121,14 +123,14 @@ export function round2(n: number): number {
 function assertMoney(value: unknown, field: string): number {
   const n = Number(value);
   if (!Number.isFinite(n) || n <= 0) {
-    throw new Error(`${field} must be a finite positive number.`);
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   return round2(n);
 }
 
 function assertNonEmptyString(value: unknown, field: string): string {
   if (typeof value !== "string" || !value.trim()) {
-    throw new Error(`${field} is required.`);
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   return value.trim();
 }
@@ -262,25 +264,25 @@ export function assertRefundPolicy(input: {
 }): Omit<RefundPolicy, "updatedAtMs"> {
   const windowDays = Number(input.windowDays);
   if (!Number.isFinite(windowDays) || Math.floor(windowDays) !== windowDays || windowDays < 1 || windowDays > 365) {
-    throw new Error("windowDays must be an integer between 1 and 365.");
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   if (input.approver !== "operator_hitl") {
-    throw new Error('approver must be "operator_hitl" (automatic refunds are not built in this slice).');
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   if (typeof input.allowPartial !== "boolean") {
-    throw new Error("allowPartial must be a boolean.");
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   if (input.subscriptionFullEffect !== "revoke_immediately" && input.subscriptionFullEffect !== "cancel_at_period_end") {
-    throw new Error('subscriptionFullEffect must be "revoke_immediately" or "cancel_at_period_end".');
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   if (input.subscriptionPartialEffect !== "keep_access" && input.subscriptionPartialEffect !== "revoke_immediately") {
-    throw new Error('subscriptionPartialEffect must be "keep_access" or "revoke_immediately".');
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   if (input.payPerRunEffect !== "none") {
-    throw new Error('payPerRunEffect must be "none" in this slice.');
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   if (input.creditEffect !== "none") {
-    throw new Error('creditEffect must be "none" in this slice.');
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   return {
     windowDays,
@@ -297,7 +299,7 @@ export function assertRefundPolicy(input: {
         : typeof input.approvedBy === "string" && input.approvedBy.trim()
           ? input.approvedBy.trim()
           : (() => {
-              throw new Error("approvedBy must be a non-empty login or null.");
+              throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
             })(),
     approvedAtMs:
       input.approvedAtMs === undefined || input.approvedAtMs === null
@@ -305,7 +307,7 @@ export function assertRefundPolicy(input: {
         : Number.isFinite(Number(input.approvedAtMs)) && Number(input.approvedAtMs) > 0
           ? Math.floor(Number(input.approvedAtMs))
           : (() => {
-              throw new Error("approvedAtMs must be a positive epoch-ms timestamp or null.");
+              throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
             })(),
   };
 }
@@ -317,7 +319,7 @@ export function assertRefundPolicyPatch(
 ): Omit<RefundPolicy, "updatedAtMs"> {
   for (const key of Object.keys(patch)) {
     if (!(POLICY_FIELDS as readonly string[]).includes(key)) {
-      throw new Error(`Unknown refund policy field: ${key}.`);
+      throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     }
   }
   const merged: Record<string, unknown> = { ...current };
@@ -347,9 +349,7 @@ export function assertKindApproved(policy: RefundPolicy, kind: RefundKind): void
   // unapproved (fail closed), never as approved by omission.
   const approved = policy.approvedKinds ?? [];
   if (!approved.includes(kind)) {
-    throw new Error(
-      `Refund policy for kind '${kind}' is not owner-approved: an operator must approve this kind's current policy values before refunds of this kind can be requested or executed.`,
-    );
+    throw new BusinessError("FAILURE_REFUND_POLICY_REFUSAL"); // #5606 (G-3)
   }
 }
 
@@ -406,7 +406,7 @@ export function assertRefundRecord(input: RefundCreateInput): RefundCreateInput 
   const originalAmountUSD = assertMoney(input.originalAmountUSD, "originalAmountUSD");
   const amountUSD = assertMoney(input.amountUSD, "amountUSD");
   if (amountUSD > originalAmountUSD) {
-    throw new Error(`Refund amount $${amountUSD} exceeds the original amount $${originalAmountUSD}.`);
+    throw new BusinessError("FAILURE_REFUND_POLICY_REFUSAL"); // #5606 (G-3)
   }
   return {
     ...input,
@@ -422,7 +422,7 @@ export function assertRefundRecord(input: RefundCreateInput): RefundCreateInput 
       Number.isFinite(input.originalPaidAtMs) && input.originalPaidAtMs > 0
         ? Math.floor(input.originalPaidAtMs)
         : (() => {
-            throw new Error("originalPaidAtMs must be a positive epoch-ms timestamp.");
+            throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
           })(),
     reason: assertNonEmptyString(input.reason, "reason"),
     status,
@@ -479,25 +479,21 @@ export function validateRefundRequest(
   kind?: RefundKind,
 ): void {
   if (input.rail === "crypto") {
-    throw new Error(CRYPTO_NON_REFUNDABLE_MESSAGE);
+    throw new BusinessError("FAILURE_REFUND_POLICY_REFUSAL"); // #5606 (G-3)
   }
   const amountUSD = round2(input.amountUSD);
   const originalAmountUSD = round2(input.originalAmountUSD);
   if (amountUSD > originalAmountUSD) {
-    throw new Error(`Refund amount $${amountUSD} exceeds the original amount $${originalAmountUSD}.`);
+    throw new BusinessError("FAILURE_REFUND_POLICY_REFUSAL"); // #5606 (G-3)
   }
   if (kind !== "bundle" && !policy.allowPartial && amountUSD !== originalAmountUSD) {
-    throw new Error(
-      `Partial refunds are not allowed by the current refund policy (requested $${amountUSD} of $${originalAmountUSD}); request the full amount.`,
-    );
+    throw new BusinessError("FAILURE_REFUND_POLICY_REFUSAL"); // #5606 (G-3)
   }
   if (!Number.isFinite(input.originalPaidAtMs) || input.originalPaidAtMs > nowMs) {
-    throw new Error("originalPaidAtMs must not be in the future.");
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   if (nowMs - input.originalPaidAtMs > policy.windowDays * MS_PER_DAY) {
-    throw new Error(
-      `Refund window expired: the original payment is older than the ${policy.windowDays}-day refund window.`,
-    );
+    throw new BusinessError("FAILURE_REFUND_POLICY_REFUSAL"); // #5606 (G-3)
   }
 }
 

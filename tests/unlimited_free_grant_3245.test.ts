@@ -91,12 +91,12 @@ describe("unlimited-free grant: port helpers (#3245)", () => {
     expect(assertUnlimitedFreeGrant(grant({ expiresAtMs: NOW + 1000 }))).toEqual(
       grant({ expiresAtMs: NOW + 1000 }),
     );
-    expect(() => assertUnlimitedFreeGrant({ ...grant(), grantedBy: "" })).toThrow(/must be/);
-    expect(() => assertUnlimitedFreeGrant({ ...grant(), grantedBy: 7 })).toThrow(/must be/);
-    expect(() => assertUnlimitedFreeGrant({ ...grant(), reason: "  " })).toThrow(/must be/);
-    expect(() => assertUnlimitedFreeGrant({ ...grant(), expiresAtMs: "soon" })).toThrow(/must be/);
-    expect(() => assertUnlimitedFreeGrant({ ...grant(), expiresAtMs: -1 })).toThrow(/must be/);
-    expect(() => assertUnlimitedFreeGrant(null)).toThrow(/must be/);
+    expect(() => assertUnlimitedFreeGrant({ ...grant(), grantedBy: "" })).toThrowError(expect.objectContaining({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" })); // #5606 (G-3)
+    expect(() => assertUnlimitedFreeGrant({ ...grant(), grantedBy: 7 })).toThrowError(expect.objectContaining({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" })); // #5606 (G-3)
+    expect(() => assertUnlimitedFreeGrant({ ...grant(), reason: "  " })).toThrowError(expect.objectContaining({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" })); // #5606 (G-3)
+    expect(() => assertUnlimitedFreeGrant({ ...grant(), expiresAtMs: "soon" })).toThrowError(expect.objectContaining({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" })); // #5606 (G-3)
+    expect(() => assertUnlimitedFreeGrant({ ...grant(), expiresAtMs: -1 })).toThrowError(expect.objectContaining({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" })); // #5606 (G-3)
+    expect(() => assertUnlimitedFreeGrant(null)).toThrowError(expect.objectContaining({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" })); // #5606 (G-3)
   });
 
   it("toCommercialAccount carries the grant onto the gate account", () => {

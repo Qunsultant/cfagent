@@ -63,6 +63,7 @@ import { buildPaymentWorkflowParams } from "./paymentWorkflowSubmission";
 import type { PaymentWorkflowEventParams } from "../workflows/paymentWorkflow";
 import type { WorkflowJobCommand } from "../workflows/workflowPorts";
 import type { Env } from "../types";
+import { BusinessError } from "../outcomes/outcomeAspects";
 
 /**
  * The gate's coverage-required reason, mirrored here so the caller's skip
@@ -194,6 +195,11 @@ export const TENANT_MISMATCH_HTTP_STATUS = 403 as const;
  * tenant-mismatch refusal (`"Tenant mismatch: ..."`).
  */
 export function isTenantMismatchError(err: unknown): boolean {
+  // Issue #5606 (G-3): a typed tenant-mismatch refusal is detected by its catalog code first.
+  // The message-text fallback covers the one remaining plain throw: resolvePaidScreenAccount's
+  // seam-level "Tenant mismatch: ..." (#4604 pins that throw's text for the gate/saga/mesh callers,
+  // so it stays plain until the seam conversion follow-up).
+  if (err instanceof BusinessError) return err.code === "FAILURE_COMMERCIAL_FORBIDDEN";
   const message =
     typeof err === "string"
       ? err

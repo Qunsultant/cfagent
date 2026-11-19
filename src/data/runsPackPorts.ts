@@ -43,6 +43,7 @@
  * field and no conversion anywhere in this slice.
  */
 import { assertSegment, DEFAULT_SEGMENT } from "./productPorts";
+import { BusinessError } from "../outcomes/outcomeAspects";
 import type { PlanPriceApprovalStatus } from "./subscriptionPorts";
 import { assertTopUpRail, type TopUpRail } from "./topUpPorts";
 
@@ -78,7 +79,7 @@ export interface RunsPackVersion {
 /** Validate a pack version's runs: a positive integer. */
 export function assertRunsPackRuns(value: unknown): number {
   if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
-    throw new Error("Pack runs must be a positive integer.");
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   return value;
 }
@@ -87,7 +88,7 @@ export function assertRunsPackRuns(value: unknown): number {
 export function assertRunsPackPriceUSD(value: unknown): number {
   const n = Number(value);
   if (typeof value === "string" || !Number.isFinite(n) || n <= 0) {
-    throw new Error("Pack priceUSD must be a finite positive number.");
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   // Whole cents only. The comparison uses a tolerance: binary
   // floats cannot represent most decimals exactly (2.49 * 100 is
@@ -95,7 +96,7 @@ export function assertRunsPackPriceUSD(value: unknown): number {
   // (The top-up amount assert carries the same exact-compare
   // shape; this one is written tolerant on purpose.)
   if (Math.abs(n * 100 - Math.round(n * 100)) > 1e-9) {
-    throw new Error("Pack priceUSD must be a value with at most two decimal places.");
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   return n;
 }
@@ -127,7 +128,7 @@ export function assertRunsPackVersionInput(
     typeof input.productId === "string" && input.productId.trim()
       ? input.productId.trim()
       : "";
-  if (!productId) throw new Error("Pack productId is required.");
+  if (!productId) throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   const segment =
     input.segment === undefined || input.segment === null
       ? DEFAULT_SEGMENT
@@ -139,13 +140,13 @@ export function assertRunsPackVersionInput(
       ? nowMs
       : Number(input.effectiveFromMs);
   if (!Number.isFinite(effectiveFromMs) || effectiveFromMs < 0) {
-    throw new Error("effectiveFromMs must be a non-negative epoch-ms number.");
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   let effectiveToMs: number | null = null;
   if (input.effectiveToMs !== undefined && input.effectiveToMs !== null) {
     effectiveToMs = Number(input.effectiveToMs);
     if (!Number.isFinite(effectiveToMs) || effectiveToMs <= effectiveFromMs) {
-      throw new Error("effectiveToMs must be an epoch-ms number after effectiveFromMs when present.");
+      throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     }
   }
   return { productId, segment, runs, priceUSD, effectiveFromMs, effectiveToMs };
@@ -170,7 +171,7 @@ export interface RunsPackVersionStore {
 /** Validate a pack-balance login: a non-empty string. */
 export function assertRunsPackLogin(value: unknown): string {
   if (typeof value !== "string" || !value.trim()) {
-    throw new Error("Runs-pack login must be a non-empty string.");
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   return value.trim();
 }
@@ -277,7 +278,7 @@ export class RunsPackClaimRefusedError extends Error {
 
 export function assertRunsPackDraftStatus(value: unknown): RunsPackDraftStatus {
   if (value !== "minted" && value !== "crediting" && value !== "credited") {
-    throw new Error(`Runs-pack draft status must be "minted", "crediting", or "credited".`);
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   return value;
 }

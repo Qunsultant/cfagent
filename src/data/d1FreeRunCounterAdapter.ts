@@ -41,6 +41,7 @@ import {
 import { DML_CATALOGUE } from "./schemaComponent/dmlCatalogue";
 import { dmlFragment } from "./schemaComponent/dmlExecutor";
 import { assertPriceFamily } from "./priceCataloguePorts";
+import { BusinessError } from "../outcomes/outcomeAspects";
 
 /** Drizzle D1 database object carrying the free-run counter schema. */
 export type FreeRunCounterDb = DrizzleD1Database<{
@@ -105,7 +106,7 @@ export class D1FreeRunCounterAdapter implements FreeRunCounter {
     const raw = rows[0]?.used;
     if (raw === undefined) return 0;
     if (!Number.isInteger(raw) || raw < 0) {
-      throw new Error(`Stored free-run count for ${input.login}/${family}/${input.month} is invalid: refusing to count from a corrupt row (fail-closed).`);
+      throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     }
     return raw;
   }

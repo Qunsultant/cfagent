@@ -824,11 +824,20 @@ export async function handlePremiumRoutes(
           // data provider being unavailable fails the fulfillment
           // visibly — no signals are fabricated from another
           // provider or from static data.
+          // #5606 (G-3): the pipeline's raw error stays server-side;
+          // the client gets the generic fallback only.
+          if (result.error) {
+            structuredLog.error("premium.screen_failed", {
+              message: `[premium] screen failed for ${tier.name}: ${result.error}`,
+              service: tier.name,
+              error: result.error,
+            });
+          }
           return {
             success: false,
             service: tier.name,
             receipt,
-            error: result.error || "The data provider is unavailable; no stock signals could be produced.",
+            error: "The data provider is unavailable; no stock signals could be produced.",
           };
         }
         // Signals are the pipeline's screened rows for the requested

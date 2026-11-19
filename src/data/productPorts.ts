@@ -37,15 +37,18 @@ export type ProductKind = "subscription" | "per_run" | "runs_pack";
 
 export function assertProductKind(kind: unknown): ProductKind {
   if (kind !== "subscription" && kind !== "per_run" && kind !== "runs_pack") {
-    throw new Error(`Invalid product kind: ${String(kind)} (must be subscription, per_run, or runs_pack).`);
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   return kind;
 }
 
 /** A segment is an operator-managed label: a non-empty string, free-form, no registry, no fixed list. */
+import { BusinessError } from "../outcomes/outcomeAspects";
+
 export function assertSegment(segment: unknown): string {
   if (typeof segment !== "string" || segment.trim().length === 0) {
-    throw new Error("segment must be a non-empty string.");
+    // Issue #5606 (G-3): typed refusal — the segment value never reaches a client in a raw message.
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID");
   }
   return segment.trim();
 }
@@ -222,9 +225,7 @@ export interface BulkMoveRecord {
 
 export function assertBulkMoveStatus(status: unknown): BulkMoveRecord["status"] {
   if (status !== "running" && status !== "complete" && status !== "complete_with_failures") {
-    throw new Error(
-      `Invalid bulk move status: ${String(status)} (must be running, complete, or complete_with_failures).`,
-    );
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   return status;
 }
@@ -239,7 +240,7 @@ export function assertProduct(input: {
 }): { id: string; name: string; kind: ProductKind; description: string | null; rank: number | null } {
   const id = typeof input.id === "string" && input.id.trim() ? input.id.trim() : "";
   const name = typeof input.name === "string" ? input.name.trim() : "";
-  if (!name) throw new Error("Product name is required.");
+  if (!name) throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   const kind = assertProductKind(input.kind);
   const description =
     input.description === undefined || input.description === null
@@ -247,7 +248,7 @@ export function assertProduct(input: {
       : typeof input.description === "string"
         ? input.description
         : (() => {
-            throw new Error("Product description must be a string when present.");
+            throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
           })();
   return { id, name, kind, description, rank: assertProductRank(input.rank) };
 }
@@ -263,7 +264,7 @@ export function assertProduct(input: {
 export function assertProductRank(value: unknown): number | null {
   if (value === undefined || value === null) return null;
   if (typeof value !== "number" || !Number.isFinite(value) || Math.floor(value) !== value || value < 1) {
-    throw new Error("Product rank must be a positive whole number or null.");
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   return value;
 }

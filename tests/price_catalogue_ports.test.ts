@@ -152,10 +152,10 @@ describe("price catalogue port contract (#2185)", () => {
 
   it("rejects invalid families and prices, rounds to the cent", async () => {
     for (const { catalogue } of await seededAdapters()) {
-      await expect(catalogue.setPrice({ family: "nope", priceUSD: 0.1 })).rejects.toThrow(/family/);
-      await expect(catalogue.setPrice({ family: "goal", priceUSD: 0 })).rejects.toThrow(/priceUSD/);
-      await expect(catalogue.setPrice({ family: "goal", priceUSD: -1 })).rejects.toThrow(/priceUSD/);
-      await expect(catalogue.setPrice({ family: "goal", priceUSD: Number.NaN })).rejects.toThrow(/priceUSD/);
+      await expect(catalogue.setPrice({ family: "nope", priceUSD: 0.1 })).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3)
+      await expect(catalogue.setPrice({ family: "goal", priceUSD: 0 })).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3)
+      await expect(catalogue.setPrice({ family: "goal", priceUSD: -1 })).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3)
+      await expect(catalogue.setPrice({ family: "goal", priceUSD: Number.NaN })).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3)
       const entry = await catalogue.setPrice({ family: "goal", priceUSD: 0.125 });
       expect(entry.priceUSD).toBe(0.13);
       expect(await catalogue.getPrice("goal")).toBe(0.13);

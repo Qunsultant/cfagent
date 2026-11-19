@@ -25,11 +25,14 @@
 /** Screener families with a per-run price. Mirrors the gate's family union. */
 export type PriceFamily = "stock" | "goal" | "options" | "strategy";
 
+import { BusinessError } from "../outcomes/outcomeAspects";
+
 export const PRICE_FAMILIES: readonly PriceFamily[] = ["stock", "goal", "options", "strategy"];
 
 export function assertPriceFamily(family: unknown): PriceFamily {
   if (family !== "stock" && family !== "goal" && family !== "options" && family !== "strategy") {
-    throw new Error(`Invalid price family: ${String(family)} (must be stock, goal, options, or strategy).`);
+    // Issue #5606 (G-3): typed refusal — the family value never reaches a client in a raw message.
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID");
   }
   return family;
 }
@@ -42,7 +45,7 @@ export function round2(n: number): number {
 export function assertPriceUSD(priceUSD: unknown): number {
   const value = Number(priceUSD);
   if (!Number.isFinite(value) || value <= 0) {
-    throw new Error("priceUSD must be a finite positive number.");
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   return round2(value);
 }
@@ -76,7 +79,7 @@ export const PROPOSED_SEED_PRICES: Record<PriceFamily, number> = {
 export type PriceApprovalStatus = "proposed" | "approved";
 export function assertPriceApprovalStatus(status: unknown): PriceApprovalStatus {
   if (status !== "proposed" && status !== "approved") {
-    throw new Error(`Invalid price approval status: ${String(status)} (must be proposed or approved).`);
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   return status;
 }
@@ -84,7 +87,7 @@ export function assertPriceApprovalStatus(status: unknown): PriceApprovalStatus 
 /** The approver is an audit identity: a blank approver approves nothing. */
 export function assertApproverId(approverId: unknown): string {
   if (typeof approverId !== "string" || approverId.trim().length === 0) {
-    throw new Error("approverId must be a non-empty string: an approval must name its approver.");
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   return approverId.trim();
 }

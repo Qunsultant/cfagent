@@ -124,6 +124,7 @@ const structuredLog = createStructuredLogger(createObservabilitySink({}), {
 });
 
 import { COMMERCIAL_DEFAULTS } from "../../config/commercialDefaults";
+import { codedMessage } from "../../outcomes/outcomeAspects";
 /** The subset of OrchestratorAgent surface the payments handlers need. */
 export interface PaymentsRouteContext {
   /** Worker environment (owner: OrchestratorAgent — was `this.env`). */
@@ -483,7 +484,13 @@ export async function handlePaymentsRoutes(
           },
         });
       } catch (err) {
-        return Response.json({ error: err instanceof Error ? err.message : "Failed to fetch transactions" }, { status: 500 });
+        // #5606 (G-3): no raw store text reaches the client;
+        // the detail stays in the server log.
+        structuredLog.error("payments.transactions_read_failed", {
+          message: `[payments] transactions read failed: ${err instanceof Error ? err.message : String(err)}`,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return Response.json({ error: "Failed to fetch transactions", code: "FAILURE_UNEXPECTED_ERROR" }, { status: 500 });
       }
     }
   }
@@ -788,7 +795,13 @@ export async function handlePaymentsRoutes(
         },
       });
     } catch (err) {
-      return Response.json({ error: err instanceof Error ? err.message : "Failed to create payment" }, { status: 500 });
+      // #5606 (G-3): no raw store text reaches the client;
+      // the detail stays in the server log.
+      structuredLog.error("payments.payment_create_failed", {
+        message: `[payments] payment create failed: ${err instanceof Error ? err.message : String(err)}`,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return Response.json({ error: "Failed to create payment", code: "FAILURE_UNEXPECTED_ERROR" }, { status: 500 });
     }
   }
 
@@ -976,8 +989,11 @@ export async function handlePaymentsRoutes(
         // The command throws on a missing draft before either decision
         // branch; that is a client error, not a 500 — and it replaces
         // the old route's silent success on a missing draft.
+        // #5606 (G-3): the command is an MCP command (FS-5 N/A), so
+        // its throw stays untyped; the route keeps the regex
+        // detection but answers a coded 404 with a generic message.
         if (err instanceof Error && /not found/i.test(err.message)) {
-          return Response.json({ error: err.message }, { status: 404 });
+          return Response.json({ code: "FAILURE_COMMERCIAL_NOT_FOUND", error: codedMessage("FAILURE_COMMERCIAL_NOT_FOUND") }, { status: 404 });
         }
         throw err;
       }
@@ -997,7 +1013,13 @@ export async function handlePaymentsRoutes(
       }
       return Response.json({ success: true, status: "rejected", draftId });
     } catch (err) {
-      return Response.json({ error: err instanceof Error ? err.message : "Failed to confirm payment draft" }, { status: 500 });
+      // #5606 (G-3): no raw store text reaches the client;
+      // the detail stays in the server log.
+      structuredLog.error("payments.payment_confirm_failed", {
+        message: `[payments] payment confirm failed: ${err instanceof Error ? err.message : String(err)}`,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return Response.json({ error: "Failed to confirm payment draft", code: "FAILURE_UNEXPECTED_ERROR" }, { status: 500 });
     }
   }
 
@@ -1032,8 +1054,14 @@ export async function handlePaymentsRoutes(
       }
 
       return Response.json(result);
-    } catch (err: any) {
-      return Response.json({ error: err.message || "Failed to capture payment" }, { status: 500 });
+    } catch (err) {
+      // #5606 (G-3): no raw store text reaches the client;
+      // the detail stays in the server log.
+      structuredLog.error("payments.payment_capture_failed", {
+        message: `[payments] payment capture failed: ${err instanceof Error ? err.message : String(err)}`,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return Response.json({ error: "Failed to capture payment", code: "FAILURE_UNEXPECTED_ERROR" }, { status: 500 });
     }
   }
 
@@ -1167,12 +1195,16 @@ export async function handlePaymentsRoutes(
               reason: "subscription draft; purchase recording belongs to slice 2",
             });
           }
-          const auditNativeUnrecorded = (reason: string): Response => {
+          // #5606 (G-3): `reason` is the client-visible generic
+          // text; `detail` (when given) carries the technical cause
+          // into the server log and audit only — never the response.
+          const auditNativeUnrecorded = (reason: string, detail?: string): Response => {
             structuredLog.error("payments.webhook_settlement_unrecorded", {
               message: `[payments] native webhook settlement unrecorded: draft=${draftId} reason=${reason}`,
               draftId,
               provider,
               reason,
+              ...(detail ? { error: detail } : {}),
               native: true,
             });
             ctx.audit("payment.settled_webhook_native_unrecorded", "payments", {
@@ -1180,6 +1212,7 @@ export async function handlePaymentsRoutes(
               provider,
               native: true,
               reason,
+              ...(detail ? { error: detail } : {}),
               raw: body?.type || body?.event_type,
             });
             return Response.json({
@@ -1218,7 +1251,10 @@ export async function handlePaymentsRoutes(
               duplicate,
             });
           } catch (err) {
-            return auditNativeUnrecorded(err instanceof Error ? err.message : String(err));
+            return auditNativeUnrecorded(
+              "native ledger record failed",
+              err instanceof Error ? err.message : String(err),
+            );
           }
         }
 

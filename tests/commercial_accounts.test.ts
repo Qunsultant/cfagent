@@ -87,13 +87,13 @@ describe("commercial account records (#2015)", () => {
       expect(await store.getAccount("u1")).toEqual(record);
       await expect(
         store.upsertAccount({ userId: "u2", tenantId: "t1", tier: "Premium" }),
-      ).rejects.toThrow(/Invalid tier/);
+      ).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3)
       await expect(
         store.upsertAccount({ userId: "u2", tenantId: "t1", tier: "Free", creditsUSD: -1 }),
-      ).rejects.toThrow(/creditsUSD/);
+      ).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3)
       await expect(
         store.upsertAccount({ userId: "", tenantId: "t1", tier: "Free" }),
-      ).rejects.toThrow(/userId and tenantId/);
+      ).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3)
     }
   });
 
@@ -102,12 +102,12 @@ describe("commercial account records (#2015)", () => {
     for (const store of [memory, d1]) {
       await store.upsertAccount({ userId: "u1", tenantId: "t1", tier: "PayPerUse", creditsUSD: 10, includedRuns: 2 });
       expect((await store.adjustCredits("u1", 5)).creditsUSD).toBe(15);
-      await expect(store.adjustCredits("u1", -20)).rejects.toThrow(/below zero/);
+      await expect(store.adjustCredits("u1", -20)).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3)
       expect((await store.consumeIncludedRun("u1")).includedRuns).toBe(1);
       expect((await store.consumeCredits("u1", 0.1)).creditsUSD).toBe(14.9);
-      await expect(store.consumeCredits("u1", 100)).rejects.toThrow(/Insufficient credits/);
-      await expect(store.adjustCredits("ghost", 1)).rejects.toThrow(/No commercial account/);
-      await expect(store.consumeIncludedRun("ghost")).rejects.toThrow(/No commercial account/);
+      await expect(store.consumeCredits("u1", 100)).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3)
+      await expect(store.adjustCredits("ghost", 1)).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3)
+      await expect(store.consumeIncludedRun("ghost")).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3)
     }
   });
 
@@ -209,7 +209,7 @@ describe("failure-credit claims and redemption (#2019)", () => {
       await seed(store);
       await store.redeemCredit("run-8", "run-10");
       expect(await store.findUnredeemedCredit("u1", "goal")).toEqual({ creditRunId: "run-9", amountUSD: 0.1, productId: null, versionId: null, priceUSD: null });
-      await expect(store.redeemCredit("run-8", "run-11")).rejects.toThrow(/already redeemed/);
+      await expect(store.redeemCredit("run-8", "run-11")).rejects.toMatchObject({ code: "FAILURE_CREDIT_ALREADY_REDEEMED" }); // #5606 (G-3)
       const again = await store.recordCreditClaim({ creditRunId: "run-9", userId: "u1", family: "goal", amountUSD: 0.1 });
       expect(again.creditRunId).toBe("run-9");
       expect(await store.findUnredeemedCredit("u1", "goal")).toEqual({ creditRunId: "run-9", amountUSD: 0.1, productId: null, versionId: null, priceUSD: null });

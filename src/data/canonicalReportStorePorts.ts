@@ -233,3 +233,18 @@ export interface UsageEventPort {
    */
   listAllWithDetail(): UsageEventDetailRow[];
 }
+
+/**
+ * Issue #5606 (G-3): a usage-event insert that collides on the
+ * receipt-scoped id is a duplicate retry, not a failure — the
+ * adapters raise this typed error at the storage boundary instead
+ * of leaking the storage dialect's constraint text to the route.
+ */
+export class DuplicateUsageEventError extends Error {
+  readonly eventId: string;
+  constructor(eventId: string) {
+    super(`Usage event ${eventId} already exists.`);
+    this.name = "DuplicateUsageEventError";
+    this.eventId = eventId;
+  }
+}

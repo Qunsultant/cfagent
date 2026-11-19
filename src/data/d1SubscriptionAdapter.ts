@@ -199,8 +199,8 @@ export class D1SubscriptionAdapter implements SubscriptionStore {
       });
     } catch {
       const existing = await this.getPlan(id);
-      if (existing) throw new Error(`Plan ${id} already exists.`);
-      throw new Error(`Failed to create plan ${id}.`);
+      if (existing) throw new BusinessError("FAILURE_COMMERCIAL_CONFLICT"); // #5606 (G-3)
+      throw new BusinessError("FAILURE_UNEXPECTED_ERROR"); // #5606 (G-3)
     }
     return record;
   }
@@ -238,9 +238,9 @@ export class D1SubscriptionAdapter implements SubscriptionStore {
     versionId: string,
   ): Promise<SubscriptionRecord> {
     const existing = await this.getSubscription(subscriptionId);
-    if (!existing) throw new Error(`No subscription ${subscriptionId}.`);
+    if (!existing) throw new BusinessError("FAILURE_COMMERCIAL_NOT_FOUND"); // #5606 (G-3)
     const target = await this.getPlan(versionId);
-    if (!target) throw new Error(`No plan version ${versionId}.`);
+    if (!target) throw new BusinessError("FAILURE_PLAN_NOT_FOUND"); // #5606 (G-3)
     // Issue #5605 (G-2): the update's timestamp is captured once
     // so the buffered and executed paths write the same value —
     // and the buffered path can return the updated record without
@@ -258,7 +258,7 @@ export class D1SubscriptionAdapter implements SubscriptionStore {
     }
     await query;
     const updated = await this.getSubscription(subscriptionId);
-    if (!updated) throw new Error(`No subscription ${subscriptionId}.`);
+    if (!updated) throw new BusinessError("FAILURE_COMMERCIAL_NOT_FOUND"); // #5606 (G-3)
     return updated;
   }
 
@@ -299,7 +299,7 @@ export class D1SubscriptionAdapter implements SubscriptionStore {
 
   async deactivatePlan(planId: string): Promise<SubscriptionPlanRecord> {
     const plan = await this.getPlan(planId);
-    if (!plan) throw new Error(`No plan ${planId}.`);
+    if (!plan) throw new BusinessError("FAILURE_PLAN_NOT_FOUND"); // #5606 (G-3)
     await this.db
       .update(agentSubscriptionPlans)
       .set({ active: 0, updatedAtMs: Date.now() })
@@ -322,10 +322,10 @@ export class D1SubscriptionAdapter implements SubscriptionStore {
     periodEndMs: number;
   }): Promise<SubscriptionRecord> {
     if (!input.id || !input.userId || !input.tenantId || !input.planId || !input.provider || !input.providerPaymentRef) {
-      throw new Error("id, userId, tenantId, planId, provider, and providerPaymentRef are required.");
+      throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     }
     if (!(input.periodEndMs > input.periodStartMs)) {
-      throw new Error("periodEndMs must be after periodStartMs.");
+      throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     }
     const now = Date.now();
     const record: SubscriptionRecord = {
@@ -372,8 +372,8 @@ export class D1SubscriptionAdapter implements SubscriptionStore {
       await query;
     } catch {
       const existing = await this.findByPaymentRef(input.providerPaymentRef);
-      if (existing) throw new Error(`Payment reference ${input.providerPaymentRef} already activated subscription ${existing.id}.`);
-      throw new Error(`Failed to create subscription ${input.id}.`);
+      if (existing) throw new BusinessError("FAILURE_COMMERCIAL_CONFLICT"); // #5606 (G-3)
+      throw new BusinessError("FAILURE_UNEXPECTED_ERROR"); // #5606 (G-3)
     }
     return record;
   }
@@ -416,7 +416,7 @@ export class D1SubscriptionAdapter implements SubscriptionStore {
 
   async updateProviderBilling(subscriptionId: string, patch: ProviderBillingPatch): Promise<SubscriptionRecord> {
     const existing = await this.getSubscription(subscriptionId);
-    if (!existing) throw new Error(`No subscription ${subscriptionId}.`);
+    if (!existing) throw new BusinessError("FAILURE_COMMERCIAL_NOT_FOUND"); // #5606 (G-3)
     const now = Date.now();
     const set: Record<string, unknown> = { updatedAtMs: now };
     if (patch.providerSubscriptionId !== undefined) set.providerSubscriptionId = patch.providerSubscriptionId;
@@ -431,7 +431,7 @@ export class D1SubscriptionAdapter implements SubscriptionStore {
       .set(set as never)
       .where(eq(agentSubscriptions.id, subscriptionId));
     const updated = await this.getSubscription(subscriptionId);
-    if (!updated) throw new Error(`No subscription ${subscriptionId}.`);
+    if (!updated) throw new BusinessError("FAILURE_COMMERCIAL_NOT_FOUND"); // #5606 (G-3)
     return updated;
   }
 

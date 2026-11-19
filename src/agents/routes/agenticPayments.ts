@@ -270,7 +270,6 @@ import {
 import { ensureUsageEventsTable } from "../../services/scheduledReports";
 import { activateSubscription, grantSubscription, assertPlanEffectiveAndApprovedForSegment } from "../../services/subscriptionActivation";
 import { activateTrialSubscription, trialStartedMessage } from "../../services/trialSubscriptionActivation";
-import { isTenantMismatchError, TENANT_MISMATCH_HTTP_STATUS } from "../../services/paidScreenSubmission";
 import {
   createProductAdapter,
   ensureProductSchema,
@@ -1371,8 +1370,15 @@ export async function handleAgenticPaymentsRoutes(
       }
       return Response.json({ code: "SUCCESS_ACCOUNT_UPDATED", record });
     } catch (err: any) {
-      const message = err.message || "Failed to upsert commercial account";
-      return Response.json({ ...(/requires|Invalid|must be/.test(message) ? { code: "FAILURE_COMMERCIAL_REQUEST_INVALID" } : { code: "FAILURE_UNEXPECTED_ERROR" }), error: message }, { status: /requires|Invalid|must be/.test(message) ? 400 : 500 });
+      // #5606 (G-3): typed failures render from the catalog;
+      // anything else logs server-side and answers the generic code.
+      if (err instanceof BusinessError) return codedOutcomeResponse(err.code);
+      structuredLog.error("agenticPayments.commercial_route_failed", {
+        route: "commercial.account.upsert",
+        message: `[payments] commercial.account.upsert failed: ${err?.message || "unknown error"}`,
+        error: err?.message || "unknown error",
+      });
+      return codedOutcomeResponse("FAILURE_UNEXPECTED_ERROR");
     }
   }
 
@@ -1395,8 +1401,15 @@ export async function handleAgenticPaymentsRoutes(
       ctx.audit("commercial.account.credits_adjusted", "payments", { userId, deltaUSD });
       return Response.json({ code: "SUCCESS_ACCOUNT_CREDITS_ADJUSTED", record });
     } catch (err: any) {
-      const message = err.message || "Failed to adjust credits";
-      return Response.json({ ...(/No commercial account|below zero/.test(message) ? { code: "FAILURE_COMMERCIAL_REQUEST_INVALID" } : { code: "FAILURE_UNEXPECTED_ERROR" }), error: message }, { status: /No commercial account|below zero/.test(message) ? 400 : 500 });
+      // #5606 (G-3): typed failures render from the catalog;
+      // anything else logs server-side and answers the generic code.
+      if (err instanceof BusinessError) return codedOutcomeResponse(err.code);
+      structuredLog.error("agenticPayments.commercial_route_failed", {
+        route: "commercial.account.credits",
+        message: `[payments] commercial.account.credits failed: ${err?.message || "unknown error"}`,
+        error: err?.message || "unknown error",
+      });
+      return codedOutcomeResponse("FAILURE_UNEXPECTED_ERROR");
     }
   }
 
@@ -1463,8 +1476,15 @@ export async function handleAgenticPaymentsRoutes(
       ctx.audit("commercial.free_run_allowance.set", "payments", { family, runs, operator: login });
       return Response.json({ code: "SUCCESS_FREE_RUN_ALLOWANCE_UPDATED", family, runs });
     } catch (err: any) {
-      const message = err.message || "Failed to set the free-run allowance";
-      return Response.json({ ...(/requires|Invalid|must be/.test(message) ? { code: "FAILURE_COMMERCIAL_REQUEST_INVALID" } : { code: "FAILURE_UNEXPECTED_ERROR" }), error: message }, { status: /requires|Invalid|must be/.test(message) ? 400 : 500 });
+      // #5606 (G-3): typed failures render from the catalog;
+      // anything else logs server-side and answers the generic code.
+      if (err instanceof BusinessError) return codedOutcomeResponse(err.code);
+      structuredLog.error("agenticPayments.commercial_route_failed", {
+        route: "commercial.free_run_allowance.set",
+        message: `[payments] commercial.free_run_allowance.set failed: ${err?.message || "unknown error"}`,
+        error: err?.message || "unknown error",
+      });
+      return codedOutcomeResponse("FAILURE_UNEXPECTED_ERROR");
     }
   }
 
@@ -1805,7 +1825,9 @@ export async function handleAgenticPaymentsRoutes(
           await store.redeemCredit(credit.creditRunId, runRequestId);
           redeemed = true;
         } catch (err: any) {
-          if (!/already redeemed/.test(err.message || "")) {
+          // #5606 (G-3): a replay is the typed already-redeemed code;
+          // any other failure is a store failure (503), never a leak.
+          if (!(err instanceof BusinessError && err.code === "FAILURE_CREDIT_ALREADY_REDEEMED")) {
             return Response.json({ code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE") }, { status: 503 });
           }
         }
@@ -2307,17 +2329,15 @@ export async function handleAgenticPaymentsRoutes(
       });
       return Response.json({ plan, code: "SUCCESS_PLAN_CREATED", message: created.businessMessage, retryable: created.entry?.retryable ?? false });
     } catch (err: any) {
-      // A catalog-coded failure renders from the catalog; pre-existing
-      // assertPlan failures keep their regex-mapped raw shape (out of
-      // scope for #3357 — the route existed before this slice).
+      // #5606 (G-3): typed failures render from the catalog;
+      // anything else logs server-side and answers the generic code.
       if (err instanceof BusinessError) return codedOutcomeResponse(err.code);
-      const message = err.message || "Failed to create plan";
-      return Response.json(
-        { ...(/No plan/.test(message) ? { code: "FAILURE_PLAN_NOT_FOUND" } : /already exists/.test(message) ? { code: "FAILURE_COMMERCIAL_CONFLICT" } : /required|must be/.test(message) ? { code: "FAILURE_COMMERCIAL_REQUEST_INVALID" } : { code: "FAILURE_UNEXPECTED_ERROR" }), error: message },
-        // Idempotent Receiver (tech-standards §7): a replay of a create
-        // (same plan id) is a 409, not a 400 — the id is the unique key.
-        { status: /No plan/.test(message) ? 404 : /already exists/.test(message) ? 409 : /required|must be/.test(message) ? 400 : 500 },
-      );
+      structuredLog.error("agenticPayments.commercial_route_failed", {
+        route: "commercial.plans.create",
+        message: `[payments] commercial.plans.create failed: ${err?.message || "unknown error"}`,
+        error: err?.message || "unknown error",
+      });
+      return codedOutcomeResponse("FAILURE_UNEXPECTED_ERROR");
     }
   }
 
@@ -2352,9 +2372,15 @@ export async function handleAgenticPaymentsRoutes(
       });
       return Response.json({ plan, code: "SUCCESS_PLAN_APPROVED", message: approved.businessMessage, retryable: approved.entry?.retryable ?? false });
     } catch (err: any) {
+      // #5606 (G-3): typed failures render from the catalog;
+      // anything else logs server-side and answers the generic code.
       if (err instanceof BusinessError) return codedOutcomeResponse(err.code);
-      const message = err.message || "Failed to approve plan";
-      return Response.json({ ...(/No plan/.test(message) ? { code: "FAILURE_PLAN_NOT_FOUND" } : { code: "FAILURE_UNEXPECTED_ERROR" }), error: message }, { status: /No plan/.test(message) ? 404 : 500 });
+      structuredLog.error("agenticPayments.commercial_route_failed", {
+        route: "commercial.plans.approve",
+        message: `[payments] commercial.plans.approve failed: ${err?.message || "unknown error"}`,
+        error: err?.message || "unknown error",
+      });
+      return codedOutcomeResponse("FAILURE_UNEXPECTED_ERROR");
     }
   }
 
@@ -2378,8 +2404,15 @@ export async function handleAgenticPaymentsRoutes(
       ctx.audit("commercial.plan.deactivated", "payments", { planId: plan.id });
       return Response.json({ code: "SUCCESS_PLAN_DEACTIVATED", plan });
     } catch (err: any) {
-      const message = err.message || "Failed to deactivate plan";
-      return Response.json({ ...(/No plan/.test(message) ? { code: "FAILURE_PLAN_NOT_FOUND" } : { code: "FAILURE_UNEXPECTED_ERROR" }), error: message }, { status: /No plan/.test(message) ? 404 : 500 });
+      // #5606 (G-3): typed failures render from the catalog;
+      // anything else logs server-side and answers the generic code.
+      if (err instanceof BusinessError) return codedOutcomeResponse(err.code);
+      structuredLog.error("agenticPayments.commercial_route_failed", {
+        route: "commercial.plans.deactivate",
+        message: `[payments] commercial.plans.deactivate failed: ${err?.message || "unknown error"}`,
+        error: err?.message || "unknown error",
+      });
+      return codedOutcomeResponse("FAILURE_UNEXPECTED_ERROR");
     }
   }
 
@@ -2461,9 +2494,15 @@ export async function handleAgenticPaymentsRoutes(
       });
       return Response.json({ bundle, code: created.code, message: created.businessMessage, retryable: created.entry?.retryable ?? false });
     } catch (err: any) {
+      // #5606 (G-3): typed failures render from the catalog;
+      // anything else logs server-side and answers the generic code.
       if (err instanceof BusinessError) return codedOutcomeResponse(err.code);
-      const message = err.message || "Failed to create bundle";
-      return Response.json({ error: message }, { status: 500 });
+      structuredLog.error("agenticPayments.commercial_route_failed", {
+        route: "commercial.bundles.create",
+        message: `[payments] commercial.bundles.create failed: ${err?.message || "unknown error"}`,
+        error: err?.message || "unknown error",
+      });
+      return codedOutcomeResponse("FAILURE_UNEXPECTED_ERROR");
     }
   }
 
@@ -2496,9 +2535,15 @@ export async function handleAgenticPaymentsRoutes(
       });
       return Response.json({ bundle, code: approved.code, message: approved.businessMessage, retryable: approved.entry?.retryable ?? false });
     } catch (err: any) {
+      // #5606 (G-3): typed failures render from the catalog;
+      // anything else logs server-side and answers the generic code.
       if (err instanceof BusinessError) return codedOutcomeResponse(err.code);
-      const message = err.message || "Failed to approve bundle";
-      return Response.json({ error: message }, { status: 500 });
+      structuredLog.error("agenticPayments.commercial_route_failed", {
+        route: "commercial.bundles.approve",
+        message: `[payments] commercial.bundles.approve failed: ${err?.message || "unknown error"}`,
+        error: err?.message || "unknown error",
+      });
+      return codedOutcomeResponse("FAILURE_UNEXPECTED_ERROR");
     }
   }
 
@@ -2520,9 +2565,15 @@ export async function handleAgenticPaymentsRoutes(
       ctx.audit("commercial.bundle.deactivated", "payments", { bundleId: bundle.id });
       return Response.json({ bundle });
     } catch (err: any) {
+      // #5606 (G-3): typed failures render from the catalog;
+      // anything else logs server-side and answers the generic code.
       if (err instanceof BusinessError) return codedOutcomeResponse(err.code);
-      const message = err.message || "Failed to deactivate bundle";
-      return Response.json({ error: message }, { status: 500 });
+      structuredLog.error("agenticPayments.commercial_route_failed", {
+        route: "commercial.bundles.deactivate",
+        message: `[payments] commercial.bundles.deactivate failed: ${err?.message || "unknown error"}`,
+        error: err?.message || "unknown error",
+      });
+      return codedOutcomeResponse("FAILURE_UNEXPECTED_ERROR");
     }
   }
 
@@ -2704,8 +2755,15 @@ export async function handleAgenticPaymentsRoutes(
       let evidence;
       try {
         evidence = await ports.retrieveSubscriptionSession(checkoutSessionId);
-      } catch {
-        return Response.json({ error: "Payment verification unavailable." }, { status: 503 });
+      } catch (err: any) {
+        // #5606 (G-3): the provider failure logs server-side; the
+        // client gets the coded 503.
+        structuredLog.error("agenticPayments.commercial_route_failed", {
+          route: "commercial.bundle.purchase.verify",
+          message: `[payments] commercial.bundle.purchase.verify failed: ${err?.message || "unknown error"}`,
+          error: err?.message || "unknown error",
+        });
+        return Response.json({ code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE") }, { status: 503 });
       }
       if (
         evidence.status !== "complete" ||
@@ -2721,8 +2779,15 @@ export async function handleAgenticPaymentsRoutes(
       let provider;
       try {
         provider = await billing.retrieveProviderSubscription(evidence.subscriptionId);
-      } catch {
-        return Response.json({ error: "Billing subscription verification unavailable." }, { status: 503 });
+      } catch (err: any) {
+        // #5606 (G-3): the provider failure logs server-side; the
+        // client gets the coded 503.
+        structuredLog.error("agenticPayments.commercial_route_failed", {
+          route: "commercial.bundle.purchase.provider_verify",
+          message: `[payments] commercial.bundle.purchase.provider_verify failed: ${err?.message || "unknown error"}`,
+          error: err?.message || "unknown error",
+        });
+        return Response.json({ code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE") }, { status: 503 });
       }
       if (provider.priceId !== priceId) {
         return codedOutcomeResponse("FAILURE_BUNDLE_PURCHASE_NOT_PAID");
@@ -2773,16 +2838,15 @@ export async function handleAgenticPaymentsRoutes(
           nowMs,
         });
       } catch (err: any) {
+        // #5606 (G-3): typed failures render from the catalog;
+        // anything else logs server-side and answers the generic code.
         if (err instanceof BusinessError) return codedOutcomeResponse(err.code);
-        const message = err.message || "Failed to record bundle purchase";
-        const status = isTenantMismatchError(message)
-          ? TENANT_MISMATCH_HTTP_STATUS
-          : /already|mismatch/.test(message)
-            ? 409
-            : /required|must be|not active/.test(message)
-              ? 400
-              : 500;
-        return Response.json({ error: message }, { status });
+        structuredLog.error("agenticPayments.commercial_route_failed", {
+          route: "commercial.bundle.purchase.record",
+          message: `[payments] commercial.bundle.purchase.record failed: ${err?.message || "unknown error"}`,
+          error: err?.message || "unknown error",
+        });
+        return codedOutcomeResponse("FAILURE_UNEXPECTED_ERROR");
       }
       await customers.recordCustomer({ userId: login, tenantId, stripeCustomerId: evidence.customerId });
       ctx.audit("commercial.bundle.billing_activated", "payments", {
@@ -2849,15 +2913,15 @@ export async function handleAgenticPaymentsRoutes(
         retryable: purchased.entry?.retryable ?? false,
       });
     } catch (err: any) {
-      const message = err.message || "Failed to activate bundle purchase";
-      const status = isTenantMismatchError(message)
-        ? TENANT_MISMATCH_HTTP_STATUS
-        : /already activated|already belongs|mismatch/.test(message)
-          ? 409
-          : /required|must be|not active/.test(message)
-            ? 400
-            : 500;
-      return Response.json({ error: message }, { status });
+      // #5606 (G-3): typed failures render from the catalog;
+      // anything else logs server-side and answers the generic code.
+      if (err instanceof BusinessError) return codedOutcomeResponse(err.code);
+      structuredLog.error("agenticPayments.commercial_route_failed", {
+        route: "commercial.bundle.purchase.activate",
+        message: `[payments] commercial.bundle.purchase.activate failed: ${err?.message || "unknown error"}`,
+        error: err?.message || "unknown error",
+      });
+      return codedOutcomeResponse("FAILURE_UNEXPECTED_ERROR");
     }
   }
 
@@ -2928,10 +2992,10 @@ export async function handleAgenticPaymentsRoutes(
           Date.now(),
         );
       } catch (err: any) {
-        return Response.json(
-          { error: err.message || "Plan is not the effective approved version for your segment." },
-          { status: 409 },
-        );
+        // #5606 (G-3): the assert throws a typed plan-state error;
+        // the checkout route refuses it as 409 with the catalog
+        // segment code — the raw message never reaches the client.
+        return codedOutcomeResponse("FAILURE_PLAN_NOT_EFFECTIVE_FOR_SEGMENT");
       }
       const ports = createCheckoutPorts(ctx.env as unknown as {
         STRIPE_SECRET_KEY?: string;
@@ -3165,15 +3229,15 @@ export async function handleAgenticPaymentsRoutes(
       const effectiveTier = resolveEffectiveTier(account, [subscription], Date.now());
       return Response.json({ code: "SUCCESS_SUBSCRIPTION_PURCHASED", subscription, account, effectiveTier });
     } catch (err: any) {
-      const message = err.message || "Failed to activate subscription";
-      const status = isTenantMismatchError(message)
-        ? TENANT_MISMATCH_HTTP_STATUS
-        : /already activated/.test(message)
-          ? 409
-          : /required|must be|not active/.test(message)
-            ? 400
-            : 500;
-      return Response.json({ ...(isTenantMismatchError(message) ? { code: "FAILURE_COMMERCIAL_FORBIDDEN" } : /already activated/.test(message) ? { code: "FAILURE_COMMERCIAL_CONFLICT" } : /required|must be|not active/.test(message) ? { code: "FAILURE_COMMERCIAL_REQUEST_INVALID" } : { code: "FAILURE_UNEXPECTED_ERROR" }), error: message }, { status });
+      // #5606 (G-3): typed failures render from the catalog;
+      // anything else logs server-side and answers the generic code.
+      if (err instanceof BusinessError) return codedOutcomeResponse(err.code);
+      structuredLog.error("agenticPayments.commercial_route_failed", {
+        route: "commercial.subscription.activate",
+        message: `[payments] commercial.subscription.activate failed: ${err?.message || "unknown error"}`,
+        error: err?.message || "unknown error",
+      });
+      return codedOutcomeResponse("FAILURE_UNEXPECTED_ERROR");
     }
   }
 
@@ -3219,14 +3283,15 @@ export async function handleAgenticPaymentsRoutes(
         headers: { "content-type": "application/json" },
       });
     }
-    const message = err instanceof Error ? err.message : "Runs-pack purchase failed.";
-    const status = /already credited/.test(message)
-      ? 409
-      : /required|must be|Unknown runs-pack draft/.test(message)
-        ? 400
-        : 500;
-    return new Response(JSON.stringify({ error: message }), {
-      status,
+    // #5606 (G-3): typed failures render from the catalog above;
+    // anything else logs server-side and answers the generic code.
+    structuredLog.error("agenticPayments.commercial_route_failed", {
+      route: "commercial.runs_pack",
+      message: `[payments] commercial.runs_pack failed: ${err instanceof Error ? err.message : "unknown error"}`,
+      error: err instanceof Error ? err.message : "unknown error",
+    });
+    return new Response(JSON.stringify({ error: codedMessage("FAILURE_UNEXPECTED_ERROR"), code: "FAILURE_UNEXPECTED_ERROR" }), {
+      status: 500,
       headers: { "content-type": "application/json" },
     });
   };
@@ -3742,7 +3807,7 @@ export async function handleAgenticPaymentsRoutes(
         try {
           rail = assertRunsPackRail(body.rail);
         } catch {
-          return Response.json({ error: "rail must be \"card\" or \"x402\"." }, { status: 400 });
+          return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: "rail must be \"card\" or \"x402\"." }, { status: 400 });
         }
       }
       const store = requireStore();
@@ -3813,7 +3878,14 @@ export async function handleAgenticPaymentsRoutes(
           challengeNonce: rail === "x402" ? (created.challenge?.nonce ?? null) : null,
         });
       } catch (err: any) {
-        return Response.json({ error: "Failed to record the runs-pack draft." }, { status: 500 });
+        // #5606 (G-3): the draft-record failure logs server-side;
+        // the client gets the generic coded 500.
+        structuredLog.error("agenticPayments.commercial_route_failed", {
+          route: "commercial.runs_pack.checkout",
+          message: `[payments] commercial.runs_pack.checkout failed: ${err?.message || "unknown error"}`,
+          error: err?.message || "unknown error",
+        });
+        return runsPackErrorResponse(new BusinessError("FAILURE_UNEXPECTED_ERROR"));
       }
       ctx.audit("commercial.runs_pack.checkout_created", "payments", {
         userId: login,
@@ -3858,9 +3930,15 @@ export async function handleAgenticPaymentsRoutes(
         challenge: created.challenge ?? null,
       });
     } catch (err: any) {
+      // #5606 (G-3): typed failures render from the catalog;
+      // anything else logs server-side and answers the generic code.
       if (err instanceof BusinessError) return runsPackErrorResponse(err);
-      const message = err.message || "Failed to create runs-pack checkout";
-      return Response.json({ error: message }, { status: 500 });
+      structuredLog.error("agenticPayments.commercial_route_failed", {
+        route: "commercial.runs_pack.checkout",
+        message: `[payments] commercial.runs_pack.checkout failed: ${err?.message || "unknown error"}`,
+        error: err?.message || "unknown error",
+      });
+      return runsPackErrorResponse(new BusinessError("FAILURE_UNEXPECTED_ERROR"));
     }
   }
 
@@ -4069,6 +4147,7 @@ export async function handleAgenticPaymentsRoutes(
             metadata: { userLogin: login, packRequestId: draft.id },
           });
           return Response.json({
+            code: "FAILURE_UNEXPECTED_ERROR",
             error: `Runs pack claimed but the credit failed and the claim could not be released: ${draft.id}.`,
           }, { status: 500 });
         }
@@ -4090,7 +4169,15 @@ export async function handleAgenticPaymentsRoutes(
         // `commercial.runs_pack.purchased` audit fires for it; the operator
         // reconciles from the claim audit + Stripe evidence. Never
         // silently swallow this.
-        return Response.json({ error: `Runs pack credited but the draft could not be marked: ${draft.id}.` }, { status: 500 });
+        // #5606 (G-3): the mark failure logs server-side; the
+        // response keeps the draft id (the operator's reconcile key)
+        // and gains the generic code.
+        structuredLog.error("agenticPayments.commercial_route_failed", {
+          route: "commercial.runs_pack.confirm",
+          message: `[payments] commercial.runs_pack.confirm failed: ${err?.message || "unknown error"}`,
+          error: err?.message || "unknown error",
+        });
+        return Response.json({ code: "FAILURE_UNEXPECTED_ERROR", error: `Runs pack credited but the draft could not be marked: ${draft.id}.` }, { status: 500 });
       }
       void marked;
       ctx.audit("commercial.runs_pack.purchased", "payments", {
@@ -4176,6 +4263,15 @@ export async function handleAgenticPaymentsRoutes(
   };
 
   const referralCodeErrorResponse = (err: unknown): Response => {
+    // #5606 (G-3): the referral service throws typed BusinessError
+    // (e.g. issuerLogin); render those from the catalog first.
+    if (err instanceof BusinessError) {
+      const outcome = resolveOutcome(err.code);
+      return new Response(JSON.stringify({ error: codedMessage(err.code), code: err.code }), {
+        status: outcome.entry?.httpStatus ?? 500,
+        headers: { "content-type": "application/json" },
+      });
+    }
     const catalogCode =
       err instanceof ReferralCodeInvalidError || err instanceof ReferralCodeScopeRefusedError
         ? "FAILURE_REFERRAL_CODE_INVALID"
@@ -4198,10 +4294,15 @@ export async function handleAgenticPaymentsRoutes(
         headers: { "content-type": "application/json" },
       });
     }
-    const message = err instanceof Error ? err.message : "Referral-code request failed.";
-    const status = /required|must be|Unknown referral/.test(message) ? 400 : 500;
-    return new Response(JSON.stringify({ error: message }), {
-      status,
+    // #5606 (G-3): anything untyped logs server-side and answers
+    // the generic code — no raw text reaches the client.
+    structuredLog.error("agenticPayments.commercial_route_failed", {
+      route: "commercial.referral_code",
+      message: `[payments] commercial.referral_code failed: ${err instanceof Error ? err.message : "unknown error"}`,
+      error: err instanceof Error ? err.message : "unknown error",
+    });
+    return new Response(JSON.stringify({ error: codedMessage("FAILURE_UNEXPECTED_ERROR"), code: "FAILURE_UNEXPECTED_ERROR" }), {
+      status: 500,
       headers: { "content-type": "application/json" },
     });
   };
@@ -4697,9 +4798,15 @@ export async function handleAgenticPaymentsRoutes(
       const effectiveTier = resolveEffectiveTier(account, [subscription], Date.now());
       return Response.json({ code: "SUCCESS_SUBSCRIPTION_GRANTED", subscription, account, effectiveTier });
     } catch (err: any) {
-      const message = err.message || "Failed to grant subscription";
-      const status = /No commercial account|required|must be|not active/.test(message) ? 400 : 500;
-      return Response.json({ ...(/No commercial account|required|must be|not active/.test(message) ? { code: "FAILURE_COMMERCIAL_REQUEST_INVALID" } : { code: "FAILURE_UNEXPECTED_ERROR" }), error: message }, { status });
+      // #5606 (G-3): typed failures render from the catalog;
+      // anything else logs server-side and answers the generic code.
+      if (err instanceof BusinessError) return codedOutcomeResponse(err.code);
+      structuredLog.error("agenticPayments.commercial_route_failed", {
+        route: "commercial.subscription.grant",
+        message: `[payments] commercial.subscription.grant failed: ${err?.message || "unknown error"}`,
+        error: err?.message || "unknown error",
+      });
+      return codedOutcomeResponse("FAILURE_UNEXPECTED_ERROR");
     }
   }
 
@@ -4785,15 +4892,15 @@ export async function handleAgenticPaymentsRoutes(
       });
       return Response.json({ code: "SUCCESS_SUBSCRIPTION_TRIAL_STARTED", subscription, account, effectiveTier, trialEndsAtMs, message });
     } catch (err: any) {
-      const message = err.message || "Failed to start trial";
-      const status = isTenantMismatchError(message)
-        ? TENANT_MISMATCH_HTTP_STATUS
-        : /already used|offers no trial|not active|not approved|not the effective version/.test(message)
-          ? 409
-          : /required|must be/.test(message)
-            ? 400
-            : 500;
-      return Response.json({ ...(isTenantMismatchError(message) ? { code: "FAILURE_COMMERCIAL_FORBIDDEN" } : /already used|offers no trial|not active/.test(message) ? { code: "FAILURE_COMMERCIAL_CONFLICT" } : /required|must be/.test(message) ? { code: "FAILURE_COMMERCIAL_REQUEST_INVALID" } : { code: "FAILURE_UNEXPECTED_ERROR" }), error: message }, { status });
+      // #5606 (G-3): typed failures render from the catalog;
+      // anything else logs server-side and answers the generic code.
+      if (err instanceof BusinessError) return codedOutcomeResponse(err.code);
+      structuredLog.error("agenticPayments.commercial_route_failed", {
+        route: "commercial.subscription.trial",
+        message: `[payments] commercial.subscription.trial failed: ${err?.message || "unknown error"}`,
+        error: err?.message || "unknown error",
+      });
+      return codedOutcomeResponse("FAILURE_UNEXPECTED_ERROR");
     }
   }
 
@@ -5125,15 +5232,15 @@ export async function handleAgenticPaymentsRoutes(
       const effectiveTier = resolveEffectiveTier(afterAccount, [subscription], Date.now());
       return Response.json({ code: "SUCCESS_BILLING_PURCHASE_COMPLETED", subscription, account: afterAccount, effectiveTier });
     } catch (err: any) {
-      const message = err.message || "Failed to activate Billing subscription";
-      const status = isTenantMismatchError(message)
-        ? TENANT_MISMATCH_HTTP_STATUS
-        : /already activated|already belongs|mismatch/.test(message)
-          ? 409
-          : /required|must be|not active/.test(message)
-            ? 400
-            : 500;
-      return Response.json({ ...(isTenantMismatchError(message) ? { code: "FAILURE_COMMERCIAL_FORBIDDEN" } : /already activated|already belongs|mismatch/.test(message) ? { code: "FAILURE_COMMERCIAL_CONFLICT" } : /required|must be|not active/.test(message) ? { code: "FAILURE_COMMERCIAL_REQUEST_INVALID" } : { code: "FAILURE_UNEXPECTED_ERROR" }), error: message }, { status });
+      // #5606 (G-3): typed failures render from the catalog;
+      // anything else logs server-side and answers the generic code.
+      if (err instanceof BusinessError) return codedOutcomeResponse(err.code);
+      structuredLog.error("agenticPayments.commercial_route_failed", {
+        route: "commercial.subscription.billing_activate",
+        message: `[payments] commercial.subscription.billing_activate failed: ${err?.message || "unknown error"}`,
+        error: err?.message || "unknown error",
+      });
+      return codedOutcomeResponse("FAILURE_UNEXPECTED_ERROR");
     }
   }
 
@@ -5214,7 +5321,14 @@ export async function handleAgenticPaymentsRoutes(
         try {
           provider = await billing.retrieveProviderSubscription(providerSubscriptionId);
         } catch (err: any) {
-          if (/HTTP 404/.test(err.message || "")) {
+          // #5606 (G-3): the retrieve throws a typed upstream error
+          // carrying the provider HTTP status in context; a 404
+          // means "no such provider subscription", not a failure.
+          if (
+            err instanceof BusinessError &&
+            err.code === "FAILURE_COMMERCIAL_UPSTREAM_FAILED" &&
+            err.context?.httpStatus === 404
+          ) {
             provider = null;
           } else {
             return Response.json({ code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", error: "Billing subscription verification unavailable." }, { status: 503 });
@@ -5278,7 +5392,14 @@ export async function handleAgenticPaymentsRoutes(
         partial = assertBillingPolicyPartial(body);
       } catch (err: any) {
         // Issue #3357: a catalog-coded discount failure renders from the catalog.
-        if (err instanceof BusinessError) return codedOutcomeResponse(err.code);
+        // #5606 (G-3): this endpoint's contract is {code, error} (its other
+        // returns all use it), so the BusinessError branch renders that
+        // shape instead of codedOutcomeResponse's {code, message}.
+        if (err instanceof BusinessError)
+          return Response.json(
+            { code: err.code, error: codedMessage(err.code) },
+            { status: resolveOutcome(err.code).entry?.httpStatus ?? 500 },
+          );
         return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: codedMessage("FAILURE_COMMERCIAL_REQUEST_INVALID") }, { status: 400 });
       }
       const updated = await policy.updatePolicy(partial);
@@ -5341,14 +5462,17 @@ export async function handleAgenticPaymentsRoutes(
         headers: { "content-type": "application/json" },
       });
     }
-    const message = err instanceof Error ? err.message : "Channel operation failed.";
-    const status = /email is required|Invalid price family|channel request id|must be a string|No commercial account/.test(
-      message,
-    )
-      ? 400
-      : 500;
-    return new Response(JSON.stringify({ error: message }), {
-      status,
+    // #5606 (G-3): the lattice is dead — every classified throw
+    // site is typed now (the "channel request id" / "must be a
+    // string" patterns had no throw site anywhere in src/). Anything
+    // untyped logs server-side and answers the generic code.
+    structuredLog.error("agenticPayments.commercial_route_failed", {
+      route: "commercial.channel",
+      message: `[payments] commercial.channel failed: ${err instanceof Error ? err.message : "unknown error"}`,
+      error: err instanceof Error ? err.message : "unknown error",
+    });
+    return new Response(JSON.stringify({ error: codedMessage("FAILURE_UNEXPECTED_ERROR"), code: "FAILURE_UNEXPECTED_ERROR" }), {
+      status: 500,
       headers: { "content-type": "application/json" },
     });
   };
@@ -5950,22 +6074,15 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       try {
         changed = await changeBillingPlanPrice({ billing, subs, policy: billingPolicy, subscriptionId, planId });
       } catch (err: any) {
-        // Issue #3357: a catalog-coded refusal (unapproved target plan)
-        // renders from the catalog with its catalog status (402).
+        // #5606 (G-3): typed failures render from the catalog;
+        // anything else logs server-side and answers the generic code.
         if (err instanceof BusinessError) return codedOutcomeResponse(err.code);
-        const message = err.message || "Failed to change plan";
-        const status = /No subscription|No plan/.test(message)
-          ? 404
-          : /already on price/.test(message)
-            ? 409
-            : /not active|repurchase|not active and unexpired/.test(message)
-              ? 400
-              : /no operator-mapped|not configured|Billing policy/.test(message)
-                ? 503
-                : /Stripe Billing request failed/.test(message)
-                  ? 502
-                  : 500;
-        return Response.json({ ...(/No subscription/.test(message) ? { code: "FAILURE_COMMERCIAL_NOT_FOUND" } : /No plan/.test(message) ? { code: "FAILURE_PLAN_NOT_FOUND" } : /already on price/.test(message) ? { code: "FAILURE_COMMERCIAL_CONFLICT" } : /not active|repurchase|not active and unexpired/.test(message) ? { code: "FAILURE_COMMERCIAL_REQUEST_INVALID" } : /no operator-mapped|not configured|Billing policy/.test(message) ? { code: "FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE" } : /Stripe Billing request failed/.test(message) ? { code: "FAILURE_COMMERCIAL_UPSTREAM_FAILED" } : { code: "FAILURE_UNEXPECTED_ERROR" }), error: message }, { status });
+        structuredLog.error("agenticPayments.commercial_route_failed", {
+          route: "commercial.subscription.change_plan",
+          message: `[payments] commercial.subscription.change_plan failed: ${err?.message || "unknown error"}`,
+          error: err?.message || "unknown error",
+        });
+        return codedOutcomeResponse("FAILURE_UNEXPECTED_ERROR");
       }
       const afterAccount = await store.getAccount(changed.record.userId);
       const afterSubscriptions = await subs.listSubscriptions(changed.record.userId);
@@ -6215,8 +6332,15 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       }
       return Response.json({ code: "SUCCESS_PRICE_ENTRY_SAVED", entry });
     } catch (err: any) {
-      const message = err.message || "Failed to set price";
-      return Response.json({ ...(/Invalid|must be/.test(message) ? { code: "FAILURE_COMMERCIAL_REQUEST_INVALID" } : { code: "FAILURE_UNEXPECTED_ERROR" }), error: message }, { status: /Invalid|must be/.test(message) ? 400 : 500 });
+      // #5606 (G-3): typed failures render from the catalog;
+      // anything else logs server-side and answers the generic code.
+      if (err instanceof BusinessError) return codedOutcomeResponse(err.code);
+      structuredLog.error("agenticPayments.commercial_route_failed", {
+        route: "commercial.prices.set",
+        message: `[payments] commercial.prices.set failed: ${err?.message || "unknown error"}`,
+        error: err?.message || "unknown error",
+      });
+      return codedOutcomeResponse("FAILURE_UNEXPECTED_ERROR");
     }
   }
 
@@ -6293,15 +6417,15 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
         toVersionId: result.toVersionId,
       });
     } catch (err: any) {
-      const message = err.message || "Failed to move subscription";
-      const status = /No subscription|No plan version/.test(message)
-        ? 404
-        : /Cannot move|not the effective version|not approved|not active/.test(message)
-          ? 409
-          : /required|must be/.test(message)
-            ? 400
-            : 500;
-      return Response.json({ error: message }, { status });
+      // #5606 (G-3): typed failures render from the catalog;
+      // anything else logs server-side and answers the generic code.
+      if (err instanceof BusinessError) return codedOutcomeResponse(err.code);
+      structuredLog.error("agenticPayments.commercial_route_failed", {
+        route: "commercial.subscriptions.move",
+        message: `[payments] commercial.subscriptions.move failed: ${err?.message || "unknown error"}`,
+        error: err?.message || "unknown error",
+      });
+      return codedOutcomeResponse("FAILURE_UNEXPECTED_ERROR");
     }
   }
 
@@ -6367,13 +6491,15 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
         segment: result.segment,
       });
     } catch (err: any) {
-      const message = err.message || "Failed to set account segment";
-      const status = /No commercial account/.test(message)
-        ? 404
-        : /required|must be|Invalid segment/.test(message)
-          ? 400
-          : 500;
-      return Response.json({ error: message }, { status });
+      // #5606 (G-3): typed failures render from the catalog;
+      // anything else logs server-side and answers the generic code.
+      if (err instanceof BusinessError) return codedOutcomeResponse(err.code);
+      structuredLog.error("agenticPayments.commercial_route_failed", {
+        route: "commercial.accounts.segment",
+        message: `[payments] commercial.accounts.segment failed: ${err?.message || "unknown error"}`,
+        error: err?.message || "unknown error",
+      });
+      return codedOutcomeResponse("FAILURE_UNEXPECTED_ERROR");
     }
   }
 
@@ -6481,9 +6607,15 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       });
       return Response.json({ product });
     } catch (err: any) {
-      const message = err.message || "Failed to create product.";
-      const status = /required|Invalid|must be/.test(message) ? 400 : /already exists/.test(message) ? 409 : 500;
-      return Response.json({ error: message }, { status });
+      // #5606 (G-3): typed failures render from the catalog;
+      // anything else logs server-side and answers the generic code.
+      if (err instanceof BusinessError) return codedOutcomeResponse(err.code);
+      structuredLog.error("agenticPayments.commercial_route_failed", {
+        route: "commercial.products.create",
+        message: `[payments] commercial.products.create failed: ${err?.message || "unknown error"}`,
+        error: err?.message || "unknown error",
+      });
+      return codedOutcomeResponse("FAILURE_UNEXPECTED_ERROR");
     }
   }
 
@@ -6569,7 +6701,7 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       try {
         trigger = assertOfferTrigger(body.trigger);
       } catch {
-        return Response.json({ error: "Unknown offer trigger." }, { status: 400 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: "Unknown offer trigger." }, { status: 400 });
       }
       if (trigger === "ambient") {
         return Response.json(
@@ -6584,7 +6716,7 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       try {
         family = assertPriceFamily(body.family);
       } catch {
-        return Response.json({ error: `Invalid price family: ${String(body.family)}.` }, { status: 400 });
+        return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: `Invalid price family: ${String(body.family)}.` }, { status: 400 });
       }
       const runRequestId =
         typeof body.runRequestId === "string" && body.runRequestId ? body.runRequestId : undefined;
@@ -6640,7 +6772,7 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
         try {
           family = assertPriceFamily(familyParam);
         } catch {
-          return Response.json({ error: `Invalid price family: ${familyParam}.` }, { status: 400 });
+          return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: `Invalid price family: ${familyParam}.` }, { status: 400 });
         }
       }
       const ports = await bindOfferPorts();
@@ -7006,9 +7138,15 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       });
       return Response.json({ plan });
     } catch (err: any) {
-      const message = err.message || "Failed to create version.";
-      const status = /required|must be|Invalid/.test(message) ? 400 : 500;
-      return Response.json({ error: message }, { status });
+      // #5606 (G-3): typed failures render from the catalog;
+      // anything else logs server-side and answers the generic code.
+      if (err instanceof BusinessError) return codedOutcomeResponse(err.code);
+      structuredLog.error("agenticPayments.commercial_route_failed", {
+        route: "commercial.products.version.create",
+        message: `[payments] commercial.products.version.create failed: ${err?.message || "unknown error"}`,
+        error: err?.message || "unknown error",
+      });
+      return codedOutcomeResponse("FAILURE_UNEXPECTED_ERROR");
     }
   }
 
@@ -7088,9 +7226,15 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       });
       return Response.json({ plan, code: approved.code, message: approved.businessMessage, retryable: approved.entry?.retryable ?? false });
     } catch (err: any) {
+      // #5606 (G-3): typed failures render from the catalog;
+      // anything else logs server-side and answers the generic code.
       if (err instanceof BusinessError) return codedOutcomeResponse(err.code);
-      const message = err.message || "Failed to approve version.";
-      return Response.json({ error: message }, { status: /No plan/.test(message) ? 404 : 500 });
+      structuredLog.error("agenticPayments.commercial_route_failed", {
+        route: "commercial.products.version.approve",
+        message: `[payments] commercial.products.version.approve failed: ${err?.message || "unknown error"}`,
+        error: err?.message || "unknown error",
+      });
+      return codedOutcomeResponse("FAILURE_UNEXPECTED_ERROR");
     }
   }
 
@@ -7158,8 +7302,15 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       ctx.audit("commercial.plan.deactivated", "payments", { planId: plan.id });
       return Response.json({ plan });
     } catch (err: any) {
-      const message = err.message || "Failed to deactivate version.";
-      return Response.json({ error: message }, { status: /No plan/.test(message) ? 404 : 500 });
+      // #5606 (G-3): typed failures render from the catalog;
+      // anything else logs server-side and answers the generic code.
+      if (err instanceof BusinessError) return codedOutcomeResponse(err.code);
+      structuredLog.error("agenticPayments.commercial_route_failed", {
+        route: "commercial.products.version.deactivate",
+        message: `[payments] commercial.products.version.deactivate failed: ${err?.message || "unknown error"}`,
+        error: err?.message || "unknown error",
+      });
+      return codedOutcomeResponse("FAILURE_UNEXPECTED_ERROR");
     }
   }
 
@@ -7251,8 +7402,15 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       ctx.audit("commercial.price.set", "payments", { family: entry.family, priceUSD: entry.priceUSD });
       return Response.json({ entry });
     } catch (err: any) {
-      const message = err.message || "Failed to create catalogue version.";
-      return Response.json({ error: message }, { status: /Invalid|must be/.test(message) ? 400 : 500 });
+      // #5606 (G-3): typed failures render from the catalog;
+      // anything else logs server-side and answers the generic code.
+      if (err instanceof BusinessError) return codedOutcomeResponse(err.code);
+      structuredLog.error("agenticPayments.commercial_route_failed", {
+        route: "commercial.catalogue.version.create",
+        message: `[payments] commercial.catalogue.version.create failed: ${err?.message || "unknown error"}`,
+        error: err?.message || "unknown error",
+      });
+      return codedOutcomeResponse("FAILURE_UNEXPECTED_ERROR");
     }
   }
 
@@ -7356,15 +7514,15 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       }
       return Response.json(result);
     } catch (err: any) {
-      const message = err.message || "Failed to run bulk move.";
-      const status = /No product|No bulk move/.test(message)
-        ? 404
-        : /only a running bulk move|belongs to product/.test(message)
-          ? 409
-          : /required|must be|subscription products only/.test(message)
-            ? 400
-            : 500;
-      return Response.json({ error: message }, { status });
+      // #5606 (G-3): typed failures render from the catalog;
+      // anything else logs server-side and answers the generic code.
+      if (err instanceof BusinessError) return codedOutcomeResponse(err.code);
+      structuredLog.error("agenticPayments.commercial_route_failed", {
+        route: "commercial.products.bulk_move",
+        message: `[payments] commercial.products.bulk_move failed: ${err?.message || "unknown error"}`,
+        error: err?.message || "unknown error",
+      });
+      return codedOutcomeResponse("FAILURE_UNEXPECTED_ERROR");
     }
   }
 
@@ -7504,8 +7662,15 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       ctx.audit("commercial.operator.added", "payments", { operatorLogin: operator.login, addedBy: login });
       return Response.json({ code: "SUCCESS_OPERATOR_ADDED", operator });
     } catch (err: any) {
-      const message = err.message || "Failed to add operator";
-      return Response.json({ ...(/must be/.test(message) ? { code: "FAILURE_COMMERCIAL_REQUEST_INVALID" } : { code: "FAILURE_UNEXPECTED_ERROR" }), error: message }, { status: /must be/.test(message) ? 400 : 500 });
+      // #5606 (G-3): typed failures render from the catalog;
+      // anything else logs server-side and answers the generic code.
+      if (err instanceof BusinessError) return codedOutcomeResponse(err.code);
+      structuredLog.error("agenticPayments.commercial_route_failed", {
+        route: "commercial.operators.add",
+        message: `[payments] commercial.operators.add failed: ${err?.message || "unknown error"}`,
+        error: err?.message || "unknown error",
+      });
+      return codedOutcomeResponse("FAILURE_UNEXPECTED_ERROR");
     }
   }
 
@@ -7561,8 +7726,15 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       ctx.audit("commercial.operator.removed", "payments", { operatorLogin: target, addedBy: login });
       return Response.json({ code: "SUCCESS_OPERATOR_REMOVED", removed: target });
     } catch (err: any) {
-      const message = err.message || "Failed to remove operator";
-      return Response.json({ ...(/must be/.test(message) ? { code: "FAILURE_COMMERCIAL_REQUEST_INVALID" } : { code: "FAILURE_UNEXPECTED_ERROR" }), error: message }, { status: /must be/.test(message) ? 400 : 500 });
+      // #5606 (G-3): typed failures render from the catalog;
+      // anything else logs server-side and answers the generic code.
+      if (err instanceof BusinessError) return codedOutcomeResponse(err.code);
+      structuredLog.error("agenticPayments.commercial_route_failed", {
+        route: "commercial.operators.remove",
+        message: `[payments] commercial.operators.remove failed: ${err?.message || "unknown error"}`,
+        error: err?.message || "unknown error",
+      });
+      return codedOutcomeResponse("FAILURE_UNEXPECTED_ERROR");
     }
   }
 
@@ -7672,16 +7844,15 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       });
       return Response.json({ code: "SUCCESS_REFUND_REQUESTED", refund: record });
     } catch (err: any) {
-      const message = err.message || "Failed to request refund";
-      // Issue #2662: unapproved-kind refusal is a policy-state refusal
-      // (422), distinct from a malformed request (400) or a server
-      // failure (500).
-      const status = /not owner-approved/.test(message)
-        ? 422
-        : /required|must be|not allowed|exceeds|expired|non-refundable|No subscription|No bundle|Only the|no stored|determinable|rail is required|resolver/.test(message)
-          ? 400
-          : 500;
-      return Response.json({ ...(/not owner-approved/.test(message) ? { code: "FAILURE_REFUND_POLICY_REFUSAL" } : /required|must be|not allowed|exceeds|expired|non-refundable|No subscription|No bundle|Only the|no stored|determinable|rail is required|resolver/.test(message) ? { code: "FAILURE_COMMERCIAL_REQUEST_INVALID" } : { code: "FAILURE_UNEXPECTED_ERROR" }), error: message }, { status });
+      // #5606 (G-3): typed failures render from the catalog;
+      // anything else logs server-side and answers the generic code.
+      if (err instanceof BusinessError) return codedOutcomeResponse(err.code);
+      structuredLog.error("agenticPayments.commercial_route_failed", {
+        route: "commercial.refunds.request",
+        message: `[payments] commercial.refunds.request failed: ${err?.message || "unknown error"}`,
+        error: err?.message || "unknown error",
+      });
+      return codedOutcomeResponse("FAILURE_UNEXPECTED_ERROR");
     }
   }
 
@@ -7720,9 +7891,15 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       });
       return Response.json({ code: "SUCCESS_REFUND_DECIDED", refund: record });
     } catch (err: any) {
-      const message = err.message || "Failed to decide refund";
-      const status = /No refund/.test(message) ? 404 : /cannot be decided/.test(message) ? 400 : 500;
-      return Response.json({ ...(/No refund/.test(message) ? { code: "FAILURE_COMMERCIAL_NOT_FOUND" } : /cannot be decided/.test(message) ? { code: "FAILURE_COMMERCIAL_REQUEST_INVALID" } : { code: "FAILURE_UNEXPECTED_ERROR" }), error: message }, { status });
+      // #5606 (G-3): typed failures render from the catalog;
+      // anything else logs server-side and answers the generic code.
+      if (err instanceof BusinessError) return codedOutcomeResponse(err.code);
+      structuredLog.error("agenticPayments.commercial_route_failed", {
+        route: "commercial.refunds.decide",
+        message: `[payments] commercial.refunds.decide failed: ${err?.message || "unknown error"}`,
+        error: err?.message || "unknown error",
+      });
+      return codedOutcomeResponse("FAILURE_UNEXPECTED_ERROR");
     }
   }
 
@@ -7880,17 +8057,15 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       });
       return Response.json({ code: "SUCCESS_REFUND_EXECUTED", refund: record });
     } catch (err: any) {
-      const message = err.message || "Failed to execute refund";
-      const status = /No refund/.test(message)
-        ? 404
-        : /Only an approved refund/.test(message)
-          ? 409
-          : /Gateway refund failed/.test(message)
-            ? 502
-            : /not resolvable|non-refundable|window expired|not allowed|exceeds|not configured|flag is OFF|already received its automatic replacement-run credit|failure-credit lookup|not owner-approved|cross-tenant/.test(message)
-              ? 422
-              : 500;
-      return Response.json({ ...(/No refund/.test(message) ? { code: "FAILURE_COMMERCIAL_NOT_FOUND" } : /Only an approved refund/.test(message) ? { code: "FAILURE_COMMERCIAL_CONFLICT" } : /Gateway refund failed/.test(message) ? { code: "FAILURE_COMMERCIAL_UPSTREAM_FAILED" } : /not resolvable|non-refundable|window expired|not allowed|exceeds|not configured|flag is OFF|already received its automatic replacement-run credit|failure-credit lookup|not owner-approved|cross-tenant/.test(message) ? { code: "FAILURE_REFUND_POLICY_REFUSAL" } : { code: "FAILURE_UNEXPECTED_ERROR" }), error: message }, { status });
+      // #5606 (G-3): typed failures render from the catalog;
+      // anything else logs server-side and answers the generic code.
+      if (err instanceof BusinessError) return codedOutcomeResponse(err.code);
+      structuredLog.error("agenticPayments.commercial_route_failed", {
+        route: "commercial.refunds.execute",
+        message: `[payments] commercial.refunds.execute failed: ${err?.message || "unknown error"}`,
+        error: err?.message || "unknown error",
+      });
+      return codedOutcomeResponse("FAILURE_UNEXPECTED_ERROR");
     }
   }
 
@@ -8702,8 +8877,15 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       });
       return Response.json({ granted, replaced });
     } catch (err: any) {
-      const message = err.message || "Failed to grant free access";
-      return Response.json({ error: message }, { status: /requires|Invalid|must be/.test(message) ? 400 : 500 });
+      // #5606 (G-3): typed failures render from the catalog;
+      // anything else logs server-side and answers the generic code.
+      if (err instanceof BusinessError) return codedOutcomeResponse(err.code);
+      structuredLog.error("agenticPayments.commercial_route_failed", {
+        route: "commercial.free_access.grant",
+        message: `[payments] commercial.free_access.grant failed: ${err?.message || "unknown error"}`,
+        error: err?.message || "unknown error",
+      });
+      return codedOutcomeResponse("FAILURE_UNEXPECTED_ERROR");
     }
   }
 
@@ -8750,8 +8932,15 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       });
       return Response.json({ revoked });
     } catch (err: any) {
-      const message = err.message || "Failed to revoke free access";
-      return Response.json({ error: message }, { status: /requires|Invalid|must be/.test(message) ? 400 : 500 });
+      // #5606 (G-3): typed failures render from the catalog;
+      // anything else logs server-side and answers the generic code.
+      if (err instanceof BusinessError) return codedOutcomeResponse(err.code);
+      structuredLog.error("agenticPayments.commercial_route_failed", {
+        route: "commercial.free_access.revoke",
+        message: `[payments] commercial.free_access.revoke failed: ${err?.message || "unknown error"}`,
+        error: err?.message || "unknown error",
+      });
+      return codedOutcomeResponse("FAILURE_UNEXPECTED_ERROR");
     }
   }
 

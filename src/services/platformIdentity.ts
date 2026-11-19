@@ -42,6 +42,7 @@ import {
   resolveEffectiveTier,
   type SubscriptionStore,
 } from "../data/subscriptionPorts";
+import { BusinessError } from "../outcomes/outcomeAspects";
 
 /** Paid-path failure message for a user with no resolved account. */
 export const NO_ACCOUNT_PAID_MESSAGE =
@@ -229,18 +230,16 @@ export async function resolvePlatformIdentity(
   },
 ): Promise<PlatformIdentity> {
   if (!ports.commercial || !ports.subscriptions) {
-    throw new Error(
-      "Commercial account store is unavailable; refusing to resolve platform identity without verified account data.",
-    );
+    // Issue #5606 (G-3): typed refusal — the store state never reaches a client in a raw message.
+    throw new BusinessError("FAILURE_COMMERCIAL_STORE_UNAVAILABLE");
   }
   const stored = await ports.commercial.getAccount(input.userId);
   let subscriptions: Array<{ periodEndMs: number }>;
   try {
     subscriptions = await ports.subscriptions.listSubscriptions(input.userId);
   } catch (err) {
-    throw new Error(
-      `Subscription state unavailable: ${err instanceof Error ? err.message : String(err)}`,
-    );
+    // Issue #5606 (G-3): the wrapped store detail stays server-side (pass as cause, never in the message).
+    throw new BusinessError("FAILURE_COMMERCIAL_STORE_UNAVAILABLE", {}, err);
   }
   const tier = resolveEffectiveTier(stored, subscriptions, input.nowMs);
   const accountTenantId = stored ? stored.tenantId : null;

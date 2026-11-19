@@ -157,9 +157,9 @@ describe("billing port contract (Stripe fake + in-memory)", () => {
       { name: "stripe-fake", billing: new StripeBillingAdapter(fakeClient()) },
       { name: "in-memory", billing: new InMemoryBillingAdapter(() => NOW) },
     ];
-    for (const { billing } of adapters) {
-      await expect(billing.createProviderSubscription({ customerId: "", priceId: "price_1" })).rejects.toThrow(/customerId/);
-      await expect(billing.createProviderSubscription({ customerId: "cus_1", priceId: "" })).rejects.toThrow(/priceId/);
+    for (const { name, billing } of adapters) {
+      await expect(billing.createProviderSubscription({ customerId: "", priceId: "price_1" })).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3)
+      await expect(billing.createProviderSubscription({ customerId: "cus_1", priceId: "" })).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3)
       const created = await billing.createProviderSubscription({ customerId: "cus_1", priceId: "price_1" });
       expect(created.status).toBe("active");
       expect(created.currentPeriodEndMs).toBeGreaterThan(created.currentPeriodStartMs as number);
@@ -168,7 +168,14 @@ describe("billing port contract (Stripe fake + in-memory)", () => {
       expect(atEnd.cancelAtPeriodEnd).toBe(true);
       const gone = await billing.cancelProviderImmediately(created.providerSubscriptionId);
       expect(gone.status).toBe("canceled");
-      await expect(billing.retrieveProviderSubscription("sub_missing")).rejects.toThrow(/No provider subscription/);
+      // #5606 (G-3): the in-memory adapter types its own missing-record
+      // error; the Stripe adapter delegates to the provider client, whose
+      // plain error propagates unchanged — the fake IS the provider stub.
+      if (name === "in-memory") {
+        await expect(billing.retrieveProviderSubscription("sub_missing")).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_NOT_FOUND" });
+      } else {
+        await expect(billing.retrieveProviderSubscription("sub_missing")).rejects.toThrow(/No provider subscription/);
+      }
     }
   });
 
@@ -200,16 +207,14 @@ describe("billing policy store contract (in-memory + Drizzle)", () => {
       expect(updated.gracePeriodDays).toBe(3);
       expect(updated.downgradeTiming).toBe("immediate");
       expect((await store.getPolicy()).gracePeriodDays).toBe(3);
-      await expect(store.updatePolicy({ gracePeriodDays: -1 } as never)).rejects.toThrow(/gracePeriodDays/);
-      await expect(store.updatePolicy({ downgradeTiming: "someday" } as never)).rejects.toThrow(/downgradeTiming/);
+      await expect(store.updatePolicy({ gracePeriodDays: -1 } as never)).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3)
+      await expect(store.updatePolicy({ downgradeTiming: "someday" } as never)).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3)
       const limits = await store.updatePolicy({ topUpMinUSD: 5, topUpMaxUSD: 100 });
       expect(limits.topUpMinUSD).toBe(5);
       expect(limits.topUpMaxUSD).toBe(100);
-      await expect(store.updatePolicy({ topUpMinUSD: 0 } as never)).rejects.toThrow(/topUpMinUSD/);
-      await expect(store.updatePolicy({ topUpMaxUSD: -1 } as never)).rejects.toThrow(/topUpMaxUSD/);
-      await expect(store.updatePolicy({ topUpMinUSD: 200, topUpMaxUSD: 100 } as never)).rejects.toThrow(
-        /topUpMinUSD.*topUpMaxUSD|min.*max/,
-      );
+      await expect(store.updatePolicy({ topUpMinUSD: 0 } as never)).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3)
+      await expect(store.updatePolicy({ topUpMaxUSD: -1 } as never)).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3)
+      await expect(store.updatePolicy({ topUpMinUSD: 200, topUpMaxUSD: 100 } as never)).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3)
     }
     // D1-only: re-ensure after an operator edit keeps the edit (INSERT OR IGNORE seeding).
     const mock = new MockD1Database();
@@ -248,7 +253,7 @@ describe("subscription record provider fields (in-memory + Drizzle)", () => {
       const patched = await subs.updateProviderBilling("b1", { providerStatus: "past_due" });
       expect(patched.providerStatus).toBe("past_due");
       expect(patched.status).toBe("active");
-      await expect(subs.updateProviderBilling("missing", { providerStatus: "active" })).rejects.toThrow(/No subscription/);
+      await expect(subs.updateProviderBilling("missing", { providerStatus: "active" })).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_NOT_FOUND" }); // #5606 (G-3)
     }
   });
 });
@@ -280,12 +285,12 @@ describe("billing service: create, externalized defaults, and grandfather", () =
         });
         await expect(
           createBillingSubscription({ billing, policyStore, subs, userId: "u1", tenantId: "t1", plan: { id: "pro" }, stripeCustomerId: "cus_1", nowMs: NOW }),
-        ).rejects.toThrow(/No operator-mapped Stripe Price/);
+        ).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_CONFLICT" }); // #5606 (G-3)
         await policyStore.updatePolicy({ stripePriceByPlan: { pro: "price_pro_monthly" } });
         // A disallowed period refuses even with a mapped price.
         await expect(
           createBillingSubscription({ billing, policyStore, subs, userId: "u1", tenantId: "t1", plan: { id: "pro" }, stripeCustomerId: "cus_1", billingPeriod: "weekly", nowMs: NOW }),
-        ).rejects.toThrow(/not in the allowed periods/);
+        ).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3) N19
         const { subscription, provider } = await createBillingSubscription({
           billing, policyStore, subs, userId: "u1", tenantId: "t1", plan: { id: "pro" }, stripeCustomerId: "cus_1", nowMs: NOW,
         });
@@ -300,7 +305,7 @@ describe("billing service: create, externalized defaults, and grandfather", () =
         await policyStore.updatePolicy({ repurchaseMigration: "migrate" });
         await expect(
           createBillingSubscription({ billing, policyStore, subs, userId: "u1", tenantId: "t1", plan: { id: "pro" }, stripeCustomerId: "cus_1", nowMs: NOW }),
-        ).rejects.toThrow(/only "grandfather" is implemented/);
+        ).rejects.toMatchObject({ code: "FAILURE_UNEXPECTED_ERROR" }); // #5606 (G-3)
         await policyStore.updatePolicy({ repurchaseMigration: "grandfather" });
       }
     }
@@ -348,7 +353,7 @@ describe("billing service: webhook transitions and access", () => {
         event: { type: "customer.subscription.deleted", providerSubscriptionId: provider.providerSubscriptionId, provider: null },
         subs, policy, nowMs: NOW,
       }),
-    ).rejects.toThrow(/unverified/);
+    ).rejects.toMatchObject({ code: "FAILURE_UNEXPECTED_ERROR" }); // #5606 (G-3)
     expect((await subs.getSubscription("b1"))?.providerStatus).toBe("active");
     expect((await subs.getSubscription("b1"))?.status).toBe("active");
   });
@@ -445,8 +450,8 @@ describe("billing service: webhook transitions and access", () => {
       id: "rep", userId: "u2", tenantId: "t1", planId: "pro", provider: "stripe",
       providerPaymentRef: "sub-rep-x", periodStartMs: NOW, periodEndMs: NOW + 30 * MS_PER_DAY,
     });
-    await expect(cancelBillingAtPeriodEnd({ billing, subs, subscriptionId: "rep" })).rejects.toThrow(/repurchase/);
-    await expect(cancelBillingImmediately({ billing, subs, subscriptionId: "rep", nowMs: NOW })).rejects.toThrow(/repurchase/);
+    await expect(cancelBillingAtPeriodEnd({ billing, subs, subscriptionId: "rep" })).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3)
+    await expect(cancelBillingImmediately({ billing, subs, subscriptionId: "rep", nowMs: NOW })).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3)
     const atEnd = await cancelBillingAtPeriodEnd({ billing, subs, subscriptionId: "b1" });
     expect(atEnd.status).toBe("canceled");
     expect(atEnd.periodEndMs).toBe(NOW + 30 * MS_PER_DAY);
@@ -529,11 +534,11 @@ describe("stripe strategy billing REST mapping (fetch stub)", () => {
     }
     vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 402, statusText: "Payment Required", json: async () => ({ error: { message: "card declined" } }) }) as never));
     try {
-      await expect(strategy.retrieveProviderSubscription(env, "sub_123")).rejects.toThrow(/402/);
+      await expect(strategy.retrieveProviderSubscription(env, "sub_123")).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_UPSTREAM_FAILED" }); // #5606 (G-3)
     } finally {
       vi.unstubAllGlobals();
     }
-    await expect(strategy.retrieveProviderSubscription({} as Env, "sub_123")).rejects.toThrow(/not configured/);
+    await expect(strategy.retrieveProviderSubscription({} as Env, "sub_123")).rejects.toMatchObject({ code: "FAILURE_UNEXPECTED_ERROR" }); // #5606 (G-3)
   });
 
   it("resolves the first invoice's payment intent: earliest created wins, a null earliest fails closed (#5227)", async () => {
@@ -579,12 +584,12 @@ describe("stripe strategy billing REST mapping (fetch stub)", () => {
     }
     vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 402, statusText: "Payment Required", json: async () => ({ error: { message: "card declined" } }) }) as never));
     try {
-      await expect(strategy.retrieveFirstInvoicePaymentIntent(env, "sub_123")).rejects.toThrow(/402/);
+      await expect(strategy.retrieveFirstInvoicePaymentIntent(env, "sub_123")).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_UPSTREAM_FAILED" }); // #5606 (G-3)
     } finally {
       vi.unstubAllGlobals();
     }
-    await expect(strategy.retrieveFirstInvoicePaymentIntent(env, "")).rejects.toThrow(/required/);
-    await expect(strategy.retrieveFirstInvoicePaymentIntent({} as Env, "sub_123")).rejects.toThrow(/not configured/);
+    await expect(strategy.retrieveFirstInvoicePaymentIntent(env, "")).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3)
+    await expect(strategy.retrieveFirstInvoicePaymentIntent({} as Env, "sub_123")).rejects.toMatchObject({ code: "FAILURE_UNEXPECTED_ERROR" }); // #5606 (G-3)
   });
 });
 
@@ -608,6 +613,6 @@ describe("billing webhook signature verification (existing Stripe HMAC verifier)
         event: { type: "customer.subscription.deleted", providerSubscriptionId: "sub_123", provider: null },
         subs, policy, nowMs: NOW,
       }),
-    ).rejects.toThrow(/unverified/);
+    ).rejects.toMatchObject({ code: "FAILURE_UNEXPECTED_ERROR" }); // #5606 (G-3)
   });
 });

@@ -50,6 +50,7 @@ import {
   perRunProductId,
   resolveEffectiveVersion,
 } from "./productPorts";
+import { BusinessError } from "../outcomes/outcomeAspects";
 
 /** Drizzle D1 database object carrying the price catalogue schema. */
 export type PriceCatalogueDb = DrizzleD1Database<{
@@ -252,11 +253,11 @@ export class D1PriceCatalogueAdapter implements PriceCatalogue {
     const segment = input.segment === undefined ? DEFAULT_SEGMENT : assertSegment(input.segment);
     const effectiveFromMs = input.effectiveFromMs ?? Date.now();
     if (!Number.isFinite(effectiveFromMs) || effectiveFromMs < 0) {
-      throw new Error("effectiveFromMs must be a non-negative epoch-ms number.");
+      throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     }
     const effectiveToMs = input.effectiveToMs ?? null;
     if (effectiveToMs !== null && (!Number.isFinite(effectiveToMs) || effectiveToMs <= effectiveFromMs)) {
-      throw new Error("effectiveToMs must be an epoch-ms number after effectiveFromMs when present.");
+      throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     }
     const productId = perRunProductId(family);
     // Two versions may share an effectiveFromMs (same-ms
@@ -324,9 +325,7 @@ export class D1PriceCatalogueAdapter implements PriceCatalogue {
     // family row" (there is no longer one row per family).
     const existing = await this.getEffectiveEntry(family, segment);
     if (!existing) {
-      throw new Error(
-        `No stored price for family ${family}: cannot approve a price that does not exist.`,
-      );
+      throw new BusinessError("FAILURE_COMMERCIAL_NOT_FOUND"); // #5606 (G-3)
     }
     const now = Date.now();
     await this.db

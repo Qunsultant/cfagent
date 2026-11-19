@@ -23,6 +23,7 @@ import {
   type BillingPolicy,
   type BillingPolicyStore,
 } from "./billingPolicyPorts";
+import { BusinessError } from "../outcomes/outcomeAspects";
 
 /** Drizzle D1 database object carrying the billing-policy schema. */
 export type BillingPolicyDb = DrizzleD1Database<{
@@ -113,7 +114,7 @@ export class D1BillingPolicyAdapter implements BillingPolicyStore {
       try {
         parsed = JSON.parse(raw);
       } catch {
-        throw new Error(`Billing policy row ${key} is not valid JSON: refusing to guess a policy (fail closed).`);
+        throw new BusinessError("FAILURE_COMMERCIAL_STORE_UNAVAILABLE"); // #5606 (G-3)
       }
       stored[field] = parsed;
     }

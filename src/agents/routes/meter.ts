@@ -41,11 +41,21 @@
 
 import { createCanonicalReportStorePorts } from "../../data/createCanonicalReportStorePorts";
 import type { CanonicalReportStoreSqlExecutor } from "../../data/canonicalReportStorePorts";
+import { DuplicateUsageEventError } from "../../data/canonicalReportStorePorts";
 import { createCommercialAdapter } from "../../data/createCommercialPorts";
 import { createSubscriptionAdapter } from "../../data/createSubscriptionPorts";
 import { resolveEffectiveTier } from "../../data/subscriptionPorts";
 import type { StoreTier } from "../../data/commercialPorts";
 import { resolveMeteredTier } from "../../services/meteredPaymentGate";
+
+import { createStructuredLogger } from "../../observability/structuredLogger";
+import { createObservabilitySink } from "../../observability/createObservabilityPorts";
+
+/** Issue #5606 (G-3) — module logger on the structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "agents/routes/meter",
+});
+
 
 export interface MeterRouteContext {
   sql: CanonicalReportStoreSqlExecutor;
@@ -134,15 +144,22 @@ export async function handleMeterRoutes(
     try {
       meter.insertEvent(row);
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      if (/UNIQUE constraint|PRIMARY KEY/i.test(message)) {
+      // #5606 (G-3): a duplicate id is a retried step — 201
+      // duplicate. Any other store failure propagates to the
+      // outer catch.
+      if (err instanceof DuplicateUsageEventError) {
         return Response.json({ id: row.id, duplicate: true }, { status: 201 });
       }
       throw err;
     }
     return Response.json({ id: row.id, duplicate: false }, { status: 201 });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Meter event failed.";
-    return Response.json({ error: message }, { status: 500 });
+    // #5606 (G-3): no raw store text reaches the caller; the
+    // detail stays in the server log.
+    structuredLog.error("meter.event_failed", {
+      message: `[meter] meter event failed: ${err instanceof Error ? err.message : String(err)}`,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return Response.json({ error: "Meter event failed.", code: "FAILURE_UNEXPECTED_ERROR" }, { status: 500 });
   }
 }

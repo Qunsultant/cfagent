@@ -42,6 +42,8 @@
  * from a client-supplied value.
  */
 
+import { BusinessError } from "../outcomes/outcomeAspects";
+
 /** A free-access grant kind: lifetime, or a limited window. */
 export type FreeAccessGrantKind = "lifetime" | "limited";
 
@@ -67,7 +69,7 @@ export interface FreeAccessGrantRecord {
 /** Validate a grant kind. */
 export function assertFreeAccessGrantKind(value: unknown): FreeAccessGrantKind {
   if (value !== "lifetime" && value !== "limited") {
-    throw new Error('Free-access grant kind must be "lifetime" or "limited".');
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   return value;
 }
@@ -100,30 +102,28 @@ export function assertFreeAccessGrantInput(
 } {
   const login = typeof input.login === "string" ? input.login.trim() : "";
   if (!login) {
-    throw new Error("Free-access grant login must be a non-empty string.");
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   const kind = assertFreeAccessGrantKind(input.kind);
   const grantedBy = typeof input.grantedBy === "string" ? input.grantedBy.trim() : "";
   if (!grantedBy) {
-    throw new Error("Free-access grant grantedBy must be a non-empty string.");
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   const reason = typeof input.reason === "string" ? input.reason.trim() : "";
   if (!reason) {
-    throw new Error("Free-access grant reason must be a non-empty string.");
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   const expiresAtMs = input.expiresAtMs === undefined ? null : input.expiresAtMs;
   if (kind === "lifetime") {
     if (expiresAtMs !== null) {
-      throw new Error("Free-access grant expiresAtMs must be null for a lifetime grant.");
+      throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     }
   } else if (
     typeof expiresAtMs !== "number" ||
     !Number.isInteger(expiresAtMs) ||
     expiresAtMs <= nowMs
   ) {
-    throw new Error(
-      "Free-access grant expiresAtMs must be an epoch-ms integer in the future for a limited grant.",
-    );
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   return { login, kind, expiresAtMs: expiresAtMs as number | null, reason, grantedBy };
 }

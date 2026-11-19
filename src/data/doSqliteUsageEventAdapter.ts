@@ -15,6 +15,7 @@ import type {
   UsageEventPort,
   UsageEventRow,
 } from "./canonicalReportStorePorts";
+import { DuplicateUsageEventError } from "./canonicalReportStorePorts";
 import { doIndexSql, doTableSql } from "./schemaComponent/doCatalogue";
 
 const TABLE = "usage_events";
@@ -30,15 +31,25 @@ export class DoSqliteUsageEventStore implements UsageEventPort {
   }
 
   insertEvent(row: InsertUsageEventRow): void {
-    this.sql.exec(
-      `INSERT INTO ${TABLE} (id, user_login, run_id, category, created_at, detail_json) VALUES (?, ?, ?, ?, ?, ?)`,
-      row.id,
-      row.userLogin,
-      row.runId,
-      row.category,
-      row.createdAt,
-      row.detailJson
-    );
+    try {
+      this.sql.exec(
+        `INSERT INTO ${TABLE} (id, user_login, run_id, category, created_at, detail_json) VALUES (?, ?, ?, ?, ?, ?)`,
+        row.id,
+        row.userLogin,
+        row.runId,
+        row.category,
+        row.createdAt,
+        row.detailJson
+      );
+    } catch (err) {
+      // #5606 (G-3): a PRIMARY KEY collision is a duplicate retry —
+      // the route answers 201 duplicate. Any other store failure
+      // propagates unchanged.
+      if (err instanceof Error && /UNIQUE constraint|PRIMARY KEY/i.test(err.message)) {
+        throw new DuplicateUsageEventError(row.id);
+      }
+      throw err;
+    }
   }
 
   listByUser(userLogin: string, limit: number): UsageEventRow[] {

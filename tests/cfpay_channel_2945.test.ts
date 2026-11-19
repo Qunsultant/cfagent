@@ -151,13 +151,13 @@ describe("mintChannelPurchase", () => {
         { drafts, catalogue: catalogue({ options: 0.05 }), channelFixedPriceUSD: 0.05, cfpay: stubClient() },
         { userLogin: "u1", tenantId: "u1", email: "u1@example.test", family: "bogus" },
       ),
-    ).rejects.toThrow(/Invalid price family/);
+    ).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3)
     await expect(
       mintChannelPurchase(
         { drafts, catalogue: catalogue({ options: 0.05 }), channelFixedPriceUSD: 0.05, cfpay: stubClient() },
         { userLogin: "u1", tenantId: "u1", email: "not-an-email", family: "options" },
       ),
-    ).rejects.toThrow(/email is required/);
+    ).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3)
     const failing = stubClient({ createCheckout: async () => ({ ok: false, error: "HTTP 500" }) });
     await expect(
       mintChannelPurchase(

@@ -104,11 +104,11 @@ describe("price approval state (#2547)", () => {
 
   it("approvePrice refuses an unknown family, a blank approver, and a family with no stored price", async () => {
     for (const { catalogue } of await catalogues()) {
-      await expect(catalogue.approvePrice({ family: "nope", approverId: "op" })).rejects.toThrow(/family/);
-      await expect(catalogue.approvePrice({ family: "stock", approverId: "  " })).rejects.toThrow(/approver/);
+      await expect(catalogue.approvePrice({ family: "nope", approverId: "op" })).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3)
+      await expect(catalogue.approvePrice({ family: "stock", approverId: "  " })).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3)
     }
     const empty = new InMemoryPriceCatalogueAdapter({});
-    await expect(empty.approvePrice({ family: "stock", approverId: "op" })).rejects.toThrow(/No stored price/);
+    await expect(empty.approvePrice({ family: "stock", approverId: "op" })).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_NOT_FOUND" }); // #5606 (G-3) N9
   });
 
   it("setPrice returns the entry to PROPOSED and clears the approval record", async () => {

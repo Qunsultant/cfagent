@@ -16,9 +16,10 @@ import type {
   ProviderSubscription,
   StripeBillingClient,
 } from "./billingPorts";
+import { BusinessError } from "../outcomes/outcomeAspects";
 
 function requireId(value: unknown, field: string): string {
-  if (typeof value !== "string" || !value.trim()) throw new Error(`${field} is required.`);
+  if (typeof value !== "string" || !value.trim()) throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   return value;
 }
 

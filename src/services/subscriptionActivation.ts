@@ -39,6 +39,7 @@ import {
   type SubscriptionRecord,
   type SubscriptionStore,
 } from "../data/subscriptionPorts";
+import { BusinessError } from "../outcomes/outcomeAspects";
 
 export interface ActivationInput {
   subs: SubscriptionStore;
@@ -80,11 +81,9 @@ export interface ActivationResult {
  * check is the route's job).
  */
 export function assertPlanApprovedAndActive(plan: SubscriptionPlanRecord): void {
-  if (!plan.active) throw new Error(`Plan ${plan.id} is not active.`);
+  if (!plan.active) throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   if (plan.approvalStatus !== "approved") {
-    throw new Error(
-      `Plan ${plan.id} is not approved (status: ${plan.approvalStatus}): refusing to activate an unapproved price (fail-closed).`,
-    );
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
 }
 
@@ -110,9 +109,7 @@ export async function assertPlanEffectiveAndApprovedForSegment(
   assertPlanApprovedAndActive(plan);
   const effective = await subs.getEffectiveVersion(plan.productId, segment, nowMs);
   if (!effective || effective.id !== plan.id) {
-    throw new Error(
-      `Plan ${plan.id} is not the effective version for product ${plan.productId} in segment ${segment}: refusing to activate a version the buyer cannot currently buy (fail-closed).`,
-    );
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
 }
 
@@ -157,13 +154,11 @@ export interface GrantInput {
 export async function grantSubscription(input: GrantInput): Promise<ActivationResult> {
   const { subs, store, userId, plan } = input;
   const nowMs = input.nowMs ?? Date.now();
-  if (!plan.active) throw new Error(`Plan ${plan.id} is not active.`);
-  if (!input.grantedBy) throw new Error("grantedBy is required.");
+  if (!plan.active) throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
+  if (!input.grantedBy) throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   const existing = await store.getAccount(userId);
   if (!existing) {
-    throw new Error(
-      "No commercial account exists for this user; an operator must create the account first.",
-    );
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   const tenantId = existing.tenantId;
   const prior = await subs.listSubscriptions(userId);
@@ -216,14 +211,14 @@ export async function activateSubscription(input: ActivationInput): Promise<Acti
   // assertPlanApprovedAndActive: a paid checkout must not
   // strand because a new version launched after mint.
   assertPlanApprovedAndActive(plan);
-  if (!providerPaymentRef) throw new Error("providerPaymentRef is required.");
+  if (!providerPaymentRef) throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   const replay = await subs.findByPaymentRef(providerPaymentRef);
   if (replay) {
-    throw new Error(`Payment reference ${providerPaymentRef} already activated subscription ${replay.id}.`);
+    throw new BusinessError("FAILURE_COMMERCIAL_CONFLICT"); // #5606 (G-3)
   }
   const existing = await store.getAccount(userId);
   if (existing && existing.tenantId !== tenantId) {
-    throw new Error("Tenant mismatch: subscription tenant must equal the verified account tenant.");
+    throw new BusinessError("FAILURE_COMMERCIAL_FORBIDDEN"); // #5606 (G-3)
   }
   const prior = await subs.listSubscriptions(userId);
   const periodStartMs = nextPeriodStartMs(

@@ -218,7 +218,7 @@ describe("bulk-move store methods (#3289 slice 2)", () => {
           targetVersionIdsJson: "{}",
           movedBy: "op1",
         }),
-      ).rejects.toThrow(/already exists/);
+      ).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_CONFLICT" }); // #5606 (G-3)
       const second = await stores.products.createBulkMove({
         id: "bulk-2",
         productId: product.id,
@@ -230,9 +230,7 @@ describe("bulk-move store methods (#3289 slice 2)", () => {
       // Newest first.
       expect((await stores.products.listBulkMoves(product.id)).map((b) => b.id)).toEqual(["bulk-2", "bulk-1"]);
       expect(await stores.products.getBulkMove("bulk-missing")).toBeNull();
-      await expect(stores.products.updateBulkMove("bulk-missing", { status: "complete" })).rejects.toThrow(
-        /No bulk move/,
-      );
+      await expect(stores.products.updateBulkMove("bulk-missing", { status: "complete" })).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_NOT_FOUND" }); // #5606 (G-3)
       const updated = await stores.products.updateBulkMove("bulk-1", {
         status: "complete",
         movedCount: 2,
@@ -474,7 +472,7 @@ describe("the bulk-move driver (#3289 §9)", () => {
       expect(result.failedCount).toBe(1);
       expect(result.failures).toHaveLength(1);
       expect(result.failures[0].userId).toBe("user-2");
-      expect(result.failures[0].error).toBe("Simulated per-customer failure.");
+      expect(result.failures[0].error).toBe("Move failed."); // #5606 (G-3) N8: catalog message, never the raw error
       expect((await stores.subs.getSubscription("sub-1"))?.planId).toBe(v2.id);
     }
   });
@@ -530,7 +528,7 @@ describe("the bulk-move driver (#3289 §9)", () => {
           resumeBulkMoveId: first.bulkMove!.id,
           nowMs: NOW + 7000,
         }),
-      ).rejects.toThrow(/only a running bulk move resumes/);
+      ).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_CONFLICT" }); // #5606 (G-3)
       await expect(
         runBulkMove({
           subs: stores.subs,
@@ -541,7 +539,7 @@ describe("the bulk-move driver (#3289 §9)", () => {
           resumeBulkMoveId: "bulk-missing",
           nowMs: NOW + 7000,
         }),
-      ).rejects.toThrow(/No bulk move/);
+      ).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_NOT_FOUND" }); // #5606 (G-3)
     }
   });
 
@@ -557,7 +555,7 @@ describe("the bulk-move driver (#3289 §9)", () => {
           movedBy: "op1",
           nowMs: NOW,
         }),
-      ).rejects.toThrow(/subscription products only/);
+      ).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3)
       await expect(
         runBulkMove({
           subs: stores.subs,
@@ -567,7 +565,7 @@ describe("the bulk-move driver (#3289 §9)", () => {
           movedBy: "op1",
           nowMs: NOW,
         }),
-      ).rejects.toThrow(/No product/);
+      ).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_NOT_FOUND" }); // #5606 (G-3)
     }
   });
 });

@@ -31,6 +31,7 @@ import type {
   PaymentRequiredCallback,
   TransactionRecord,
 } from "../types";
+import { BusinessError } from "../outcomes/outcomeAspects";
 // NOTE (issue #290): mppx/server is node-only (it imports node:util, which the
 // browser bundle cannot externalize). It is loaded lazily inside createMppx()
 // so that modules which (transitively) import this service — including the
@@ -646,10 +647,12 @@ export class ETradeAgenticPaymentService {
         error: message,
       });
       if (verification.receipt.txHash) await this.releaseTxHash(verification.receipt.txHash);
-      // assertStoreTier's message is the only invalid-tier source
-      // here; anything else is a tier-store failure.
-      if (message.startsWith("Invalid tier:")) {
-        return meteredGateRefusal(500, "TierInvalid", `The stored tier for this caller is invalid; the paid result was not served. (${message})`);
+      // #5606 (G-3): assertStoreTier throws a typed BusinessError
+      // now, so the invalid-tier source is the error type, not the
+      // message prefix; anything else is a tier-store failure. The
+      // stored tier value is never echoed to the client.
+      if (err instanceof BusinessError) {
+        return meteredGateRefusal(500, "TierInvalid", "The stored tier for this caller is invalid; the paid result was not served.");
       }
       return meteredGateRefusal(503, "TierUnavailable", "The tier store could not be read; the paid result was not served.");
     }
@@ -970,8 +973,8 @@ export class ETradeAgenticPaymentService {
         resource,
         error: message,
       });
-      if (message.startsWith("Invalid tier:")) {
-        return meteredGateRefusal(500, "TierInvalid", `The stored tier for this caller is invalid; the paid result was not served. (${message})`);
+      if (err instanceof BusinessError) {
+        return meteredGateRefusal(500, "TierInvalid", "The stored tier for this caller is invalid; the paid result was not served.");
       }
       return meteredGateRefusal(503, "TierUnavailable", "The tier store could not be read; the paid result was not served.");
     }

@@ -50,6 +50,7 @@
 import type { CommercialStore } from "../data/commercialPorts";
 import type { LifecycleStore } from "../data/lifecyclePorts";
 import { round2 } from "../data/lifecyclePorts";
+import { BusinessError } from "../outcomes/outcomeAspects";
 
 /** The earn event: a referred user's first paid run. Idempotent per referred user. */
 export async function recordFirstPaidRunEarning(
@@ -76,7 +77,7 @@ export async function convertReferralCreditsForRun(input: {
 }): Promise<{ redeemedUSD: number; allocations: Array<{ earningId: string; amountUSD: number }> }> {
   const existing = await input.commercial.getAccount(input.userId);
   if (existing && existing.tenantId !== input.tenantId) {
-    throw new Error("Tenant mismatch: referral conversion tenant must equal the account tenant.");
+    throw new BusinessError("FAILURE_COMMERCIAL_FORBIDDEN"); // #5606 (G-3)
   }
   const redeemed = await input.lifecycle.redeem({
     userId: input.userId,
@@ -96,9 +97,9 @@ export async function convertReferralCreditsForRun(input: {
     }
     await input.commercial.adjustCredits(input.userId, redeemed.redeemedUSD);
   } catch (err: any) {
-    throw new Error(
-      `Referral credit redeemed for run ${input.runRequestId} but commercial top-up failed (${err?.message ?? "unknown error"}); no run started, operator must reconcile from the referral earning rows.`,
-    );
+    // #5606 (G-3): the top-up failure detail stays server-side (cause);
+    // the client gets the catalog generic message, status unchanged (500).
+    throw new BusinessError("FAILURE_UNEXPECTED_ERROR", {}, err);
   }
   return redeemed;
 }

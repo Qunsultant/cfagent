@@ -45,6 +45,7 @@ import {
   type ProductStore,
   type VersionMoveRecord,
 } from "./productPorts";
+import { BusinessError } from "../outcomes/outcomeAspects";
 
 /** Drizzle D1 database object carrying the product schema. */
 export type ProductDb = DrizzleD1Database<{
@@ -161,8 +162,8 @@ export class D1ProductAdapter implements ProductStore {
       });
     } catch {
       const existing = await this.getProduct(id);
-      if (existing) throw new Error(`Product ${id} already exists.`);
-      throw new Error(`Failed to create product ${id}.`);
+      if (existing) throw new BusinessError("FAILURE_COMMERCIAL_CONFLICT"); // #5606 (G-3)
+      throw new BusinessError("FAILURE_UNEXPECTED_ERROR"); // #5606 (G-3)
     }
     return record;
   }
@@ -201,13 +202,13 @@ export class D1ProductAdapter implements ProductStore {
   async setProductRank(productId: string, rank: number | null): Promise<ProductRecord> {
     const validated = assertProductRank(rank);
     const existing = await this.getProduct(productId);
-    if (!existing) throw new Error(`No product ${productId}.`);
+    if (!existing) throw new BusinessError("FAILURE_COMMERCIAL_NOT_FOUND"); // #5606 (G-3)
     await this.db
       .update(agentProducts)
       .set({ rank: validated, updatedAtMs: Date.now() })
       .where(eq(agentProducts.id, productId));
     const updated = await this.getProduct(productId);
-    if (!updated) throw new Error(`No product ${productId}.`);
+    if (!updated) throw new BusinessError("FAILURE_COMMERCIAL_NOT_FOUND"); // #5606 (G-3)
     return updated;
   }
 
@@ -231,8 +232,8 @@ export class D1ProductAdapter implements ProductStore {
     reason?: string | null;
     movedAtMs?: number;
   }): Promise<VersionMoveRecord> {
-    if (!move.userId) throw new Error("Version move requires userId.");
-    if (!move.movedBy) throw new Error("Version move requires movedBy.");
+    if (!move.userId) throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
+    if (!move.movedBy) throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     const segment = assertSegment(move.segment);
     // The (bulkMoveId, userId) backstop, mirrored from the
     // in-memory adapter: a retry returns the EXISTING row,
@@ -316,11 +317,11 @@ export class D1ProductAdapter implements ProductStore {
     startedAtMs?: number;
   }): Promise<BulkMoveRecord> {
     const productId = typeof input.productId === "string" && input.productId.trim() ? input.productId.trim() : "";
-    if (!productId) throw new Error("Bulk move requires productId.");
+    if (!productId) throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     const movedBy = typeof input.movedBy === "string" && input.movedBy.trim() ? input.movedBy.trim() : "";
-    if (!movedBy) throw new Error("Bulk move requires movedBy.");
+    if (!movedBy) throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     if (typeof input.targetVersionIdsJson !== "string") {
-      throw new Error("Bulk move requires targetVersionIdsJson.");
+      throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     }
     const segmentScope =
       input.segmentScope === undefined || input.segmentScope === null ? null : assertSegment(input.segmentScope);
@@ -360,8 +361,8 @@ export class D1ProductAdapter implements ProductStore {
       // Same mapping as createProduct: a failed insert on an
       // existing id is a duplicate, not a raw query error.
       const existing = await this.getBulkMove(record.id);
-      if (existing) throw new Error(`Bulk move ${record.id} already exists.`);
-      throw new Error(`Failed to create bulk move ${record.id}.`);
+      if (existing) throw new BusinessError("FAILURE_COMMERCIAL_CONFLICT"); // #5606 (G-3)
+      throw new BusinessError("FAILURE_COMMERCIAL_STORE_UNAVAILABLE"); // #5606 (G-3)
     }
     return record;
   }
@@ -395,7 +396,7 @@ export class D1ProductAdapter implements ProductStore {
       await this.db.update(agentBulkMoves).set(set).where(eq(agentBulkMoves.id, bulkMoveId));
     }
     const updated = await this.getBulkMove(bulkMoveId);
-    if (!updated) throw new Error(`No bulk move ${bulkMoveId}.`);
+    if (!updated) throw new BusinessError("FAILURE_COMMERCIAL_NOT_FOUND"); // #5606 (G-3)
     return updated;
   }
 

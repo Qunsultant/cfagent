@@ -228,25 +228,25 @@ export const BILLING_POLICY_KEYS = {
 
 export function assertBillingPeriod(value: unknown, field: string): BillingPeriod {
   if (value !== "monthly" && value !== "annual") {
-    throw new Error(`${field} must be "monthly" or "annual".`);
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   return value;
 }
 
 export function assertBillingPeriodsAllowed(value: unknown): BillingPeriod[] {
   if (!Array.isArray(value) || value.length === 0) {
-    throw new Error("billingPeriodsAllowed must be a non-empty array.");
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   return value.map((v, i) => assertBillingPeriod(v, `billingPeriodsAllowed[${i}]`));
 }
 
 export function assertDunningRetryDelayDays(value: unknown): number[] {
   if (!Array.isArray(value) || value.length === 0) {
-    throw new Error("dunningRetryDelayDays must be a non-empty array of day counts.");
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   for (const v of value) {
     if (typeof v !== "number" || !Number.isFinite(v) || v < 0 || Math.floor(v) !== v) {
-      throw new Error("dunningRetryDelayDays entries must be non-negative whole days.");
+      throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     }
   }
   return [...(value as number[])];
@@ -255,28 +255,28 @@ export function assertDunningRetryDelayDays(value: unknown): number[] {
 export function assertGracePeriodDays(value: unknown): number {
   const n = Number(value);
   if (!Number.isFinite(n) || n < 0 || Math.floor(n) !== n) {
-    throw new Error("gracePeriodDays must be a non-negative whole number of days.");
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   return n;
 }
 
 export function assertDowngradeTiming(value: unknown): DowngradeTiming {
   if (value !== "period_end" && value !== "immediate") {
-    throw new Error('downgradeTiming must be "period_end" or "immediate".');
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   return value;
 }
 
 export function assertProrationBehavior(value: unknown): ProrationBehavior {
   if (value !== "none" && value !== "create_prorations" && value !== "always_invoice") {
-    throw new Error('prorationBehavior must be "none", "create_prorations", or "always_invoice".');
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   return value;
 }
 
 export function assertRepurchaseMigration(value: unknown): RepurchaseMigration {
   if (value !== "grandfather" && value !== "expire" && value !== "migrate") {
-    throw new Error('repurchaseMigration must be "grandfather", "expire", or "migrate".');
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   return value;
 }
@@ -404,7 +404,7 @@ export function assertCfpayChannelFixedPriceUSD(value: unknown): number | null {
   if (value === null || value === undefined) return null;
   const n = Number(value);
   if (!Number.isFinite(n) || n <= 0) {
-    throw new Error("cfpayChannelFixedPriceUSD must be null or a finite positive number.");
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   return n;
 }
@@ -413,7 +413,7 @@ export function assertCfpayChannelFixedPriceUSD(value: unknown): number | null {
 export function assertTopUpMinUSD(value: unknown): number {
   const n = Number(value);
   if (!Number.isFinite(n) || n <= 0) {
-    throw new Error("topUpMinUSD must be a finite positive number.");
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   return n;
 }
@@ -422,19 +422,19 @@ export function assertTopUpMinUSD(value: unknown): number {
 export function assertTopUpMaxUSD(value: unknown): number {
   const n = Number(value);
   if (!Number.isFinite(n) || n <= 0) {
-    throw new Error("topUpMaxUSD must be a finite positive number.");
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   return n;
 }
 
 export function assertStripePriceByPlan(value: unknown): Record<string, string> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new Error("stripePriceByPlan must be an object mapping plan id to Stripe Price id.");
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
     if (typeof v !== "string" || !v.trim()) {
-      throw new Error(`stripePriceByPlan[${k}] must be a non-empty Stripe Price id.`);
+      throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     }
     out[k] = v;
   }
@@ -444,12 +444,12 @@ export function assertStripePriceByPlan(value: unknown): Record<string, string> 
 /** Issue #2781: same contract as assertStripePriceByPlan, keyed by bundle id. */
 export function assertStripePriceByBundle(value: unknown): Record<string, string> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new Error("stripePriceByBundle must be an object mapping bundle id to Stripe Price id.");
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
     if (typeof v !== "string" || !v.trim()) {
-      throw new Error(`stripePriceByBundle[${k}] must be a non-empty Stripe Price id.`);
+      throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     }
     out[k] = v;
   }
@@ -459,7 +459,7 @@ export function assertStripePriceByBundle(value: unknown): Record<string, string
 /** Validate a full policy object (used when reading stored rows). */
 export function assertBillingPolicy(value: unknown): BillingPolicy {
   const v = value as Record<string, unknown>;
-  if (typeof v !== "object" || v === null) throw new Error("Billing policy must be an object.");
+  if (typeof v !== "object" || v === null) throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   const policy: BillingPolicy = {
     billingPeriodDefault: assertBillingPeriod(v.billingPeriodDefault, "billingPeriodDefault"),
     billingPeriodsAllowed: assertBillingPeriodsAllowed(v.billingPeriodsAllowed),
@@ -478,7 +478,7 @@ export function assertBillingPolicy(value: unknown): BillingPolicy {
   };
   // Issue #3262: the bounds must order — a min above the max is not a policy.
   if (policy.topUpMinUSD > policy.topUpMaxUSD) {
-    throw new Error("topUpMinUSD must not exceed topUpMaxUSD.");
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   return policy;
 }
@@ -486,7 +486,7 @@ export function assertBillingPolicy(value: unknown): BillingPolicy {
 /** Validate a partial policy update; unknown keys are rejected. */
 export function assertBillingPolicyPartial(value: unknown): Partial<BillingPolicy> {
   const v = value as Record<string, unknown>;
-  if (typeof v !== "object" || v === null) throw new Error("Billing policy update must be an object.");
+  if (typeof v !== "object" || v === null) throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   const allowed = new Set([
     "billingPeriodDefault",
     "billingPeriodsAllowed",
@@ -504,7 +504,7 @@ export function assertBillingPolicyPartial(value: unknown): Partial<BillingPolic
     "offerRules",
   ]);
   for (const k of Object.keys(v)) {
-    if (!allowed.has(k)) throw new Error(`Unknown billing policy field: ${k}.`);
+    if (!allowed.has(k)) throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   const out: Partial<BillingPolicy> = {};
   if (v.billingPeriodDefault !== undefined) out.billingPeriodDefault = assertBillingPeriod(v.billingPeriodDefault, "billingPeriodDefault");

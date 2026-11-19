@@ -171,7 +171,7 @@ describe("InMemoryProductBundleAdapter", () => {
   it("refuses a duplicate bundle id and a missing bundle approval", async () => {
     const store = new InMemoryProductBundleAdapter();
     await store.createBundle(validBundleInput());
-    await expect(store.createBundle(validBundleInput())).rejects.toThrow(/already exists/);
+    await expect(store.createBundle(validBundleInput())).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_CONFLICT" }); // #5606 (G-3)
     await expect(store.approveBundle("bnd-missing", "op1")).rejects.toThrowError(BusinessError);
   });
 
@@ -255,7 +255,7 @@ describe("InMemoryProductBundleAdapter", () => {
     // Subset (one member missing).
     await expect(
       store.createBundlePurchaseAtomic({ purchase: base, entitlements: full.slice(0, 1) }),
-    ).rejects.toThrow(/exactly the bundle member products/);
+    ).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3)
     // Extra member.
     await expect(
       store.createBundlePurchaseAtomic({
@@ -265,14 +265,14 @@ describe("InMemoryProductBundleAdapter", () => {
           { productId: "goal:PayPerUse", includedRuns: 10, periodStartMs: START, periodEndMs: END },
         ],
       }),
-    ).rejects.toThrow(/exactly the bundle member products/);
+    ).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3)
     // Unusable period.
     await expect(
       store.createBundlePurchaseAtomic({
         purchase: { ...base, periodEndMs: START },
         entitlements: full,
       }),
-    ).rejects.toThrow(/periodEndMs must be after periodStartMs/);
+    ).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3)
     // Unknown bundle.
     await expect(
       store.createBundlePurchaseAtomic({
@@ -408,7 +408,7 @@ describe("D1ProductBundleAdapter (real Drizzle over node:sqlite)", () => {
           { productId: "stock:PayPerUse", includedRuns: 10, periodStartMs: START, periodEndMs: END },
         ],
       }),
-    ).rejects.toThrow(/exactly the bundle member products/);
+    ).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3)
     expect(await store.listBundlePurchases("u1")).toEqual([]);
     expect(await store.listBundleEntitlements("u1")).toEqual([]);
   });

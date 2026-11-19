@@ -73,10 +73,10 @@ const NOW = 1_800_000_000_000;
 describe("subscription port contract", () => {
   it("rejects invalid plans", async () => {
     for (const { subs } of await adapters()) {
-      await expect(subs.createPlan({ name: "", priceUSD: 10, periodDays: 30, includedRuns: 0 })).rejects.toThrow(/name/);
-      await expect(subs.createPlan({ name: "P", priceUSD: 0, periodDays: 30, includedRuns: 0 })).rejects.toThrow(/priceUSD/);
-      await expect(subs.createPlan({ name: "P", priceUSD: 10, periodDays: 0, includedRuns: 0 })).rejects.toThrow(/periodDays/);
-      await expect(subs.createPlan({ name: "P", priceUSD: 10, periodDays: 30, includedRuns: -1 })).rejects.toThrow(/includedRuns/);
+      await expect(subs.createPlan({ name: "", priceUSD: 10, periodDays: 30, includedRuns: 0 })).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3)
+      await expect(subs.createPlan({ name: "P", priceUSD: 0, periodDays: 30, includedRuns: 0 })).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3)
+      await expect(subs.createPlan({ name: "P", priceUSD: 10, periodDays: 0, includedRuns: 0 })).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3)
+      await expect(subs.createPlan({ name: "P", priceUSD: 10, periodDays: 30, includedRuns: -1 })).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3)
     }
   });
 
@@ -86,14 +86,14 @@ describe("subscription port contract", () => {
       expect(plan.active).toBe(true);
       expect(plan.priceUSD).toBe(20);
       expect((await subs.getPlan("pro"))?.name).toBe("Pro");
-      await expect(subs.createPlan({ id: "pro", name: "Dup", priceUSD: 5, periodDays: 7, includedRuns: 0 })).rejects.toThrow(/already exists/);
+      await expect(subs.createPlan({ id: "pro", name: "Dup", priceUSD: 5, periodDays: 7, includedRuns: 0 })).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_CONFLICT" }); // #5606 (G-3)
       await subs.createPlan({ id: "basic", name: "Basic", priceUSD: 5, periodDays: 30, includedRuns: 0 });
       expect((await subs.listPlans(true)).map((p) => p.id).sort()).toEqual(["basic", "pro"]);
       const off = await subs.deactivatePlan("basic");
       expect(off.active).toBe(false);
       expect((await subs.listPlans(true)).map((p) => p.id)).toEqual(["pro"]);
       expect((await subs.listPlans(false)).map((p) => p.id).sort()).toEqual(["basic", "pro"]);
-      await expect(subs.deactivatePlan("missing")).rejects.toThrow(/No plan/);
+      await expect(subs.deactivatePlan("missing")).rejects.toMatchObject({ code: "FAILURE_PLAN_NOT_FOUND" }); // #5606 (G-3)
     }
   });
 
@@ -110,7 +110,7 @@ describe("subscription port contract", () => {
           id: "s2", userId: "u1", tenantId: "t1", planId: "pro", provider: "cfpay",
           providerPaymentRef: "sub-ref-1", periodStartMs: NOW, periodEndMs: NOW + 30 * MS_PER_DAY,
         }),
-      ).rejects.toThrow(/already activated/);
+      ).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_CONFLICT" }); // #5606 (G-3)
       expect((await subs.findByPaymentRef("sub-ref-1"))?.id).toBe("s1");
       await subs.createSubscription({
         id: "s3", userId: "u1", tenantId: "t1", planId: "pro", provider: "cfpay",
@@ -206,7 +206,7 @@ describe("activateSubscription", () => {
     expect(second.account.includedRuns).toBe(22);
     await expect(
       activateSubscription({ subs, store, userId: "u1", tenantId: "t1", plan, providerPaymentRef: "sub-a", nowMs: NOW }),
-    ).rejects.toThrow(/already activated/);
+    ).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_CONFLICT" }); // #5606 (G-3)
   });
 
   it("refuses inactive plans, tenant mismatch, and creates missing accounts", async () => {
@@ -214,17 +214,19 @@ describe("activateSubscription", () => {
     const store = new InMemoryCommercialAdapter();
     const plan = await subs.createPlan({ id: "pro", name: "Pro", priceUSD: 20, periodDays: 30, includedRuns: 5 });
     await subs.deactivatePlan("pro");
+    // #5606 (G-3): plan-state failures are typed BusinessError now.
     await expect(
       activateSubscription({ subs, store, userId: "u1", tenantId: "t1", plan: { ...plan, active: false }, providerPaymentRef: "sub-x", nowMs: NOW }),
-    ).rejects.toThrow(/not active/);
+    ).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" });
     const createdLive = await subs.createPlan({ id: "live", name: "Live", priceUSD: 5, periodDays: 7, includedRuns: 0 });
     // Issue #3289: approve the fixture plan so the tenant-mismatch
     // check below is reached (approval runs first, fail-closed).
     const live = await subs.approvePlan(createdLive.id, "op");
     await store.upsertAccount({ userId: "u1", tenantId: "t1", tier: "Free" });
+    // #5606 (G-3): the tenant-mismatch throw is typed now.
     await expect(
       activateSubscription({ subs, store, userId: "u1", tenantId: "t2", plan: live, providerPaymentRef: "sub-y", nowMs: NOW }),
-    ).rejects.toThrow(/Tenant mismatch/);
+    ).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_FORBIDDEN" });
     const fresh = await activateSubscription({ subs, store, userId: "u2", tenantId: "t9", plan: live, providerPaymentRef: "sub-z", nowMs: NOW });
     expect(fresh.account.id).toBe("u2");
     expect(fresh.account.tenantId).toBe("t9");

@@ -14,6 +14,7 @@ import type {
   CreateProviderSubscriptionInput,
   ProviderSubscription,
 } from "./billingPorts";
+import { BusinessError } from "../outcomes/outcomeAspects";
 
 const MS_PER_DAY = 86_400_000;
 
@@ -27,8 +28,8 @@ export class InMemoryBillingAdapter implements BillingPort {
   }
 
   async createProviderSubscription(input: CreateProviderSubscriptionInput): Promise<ProviderSubscription> {
-    if (!input.customerId?.trim()) throw new Error("customerId is required.");
-    if (!input.priceId?.trim()) throw new Error("priceId is required.");
+    if (!input.customerId?.trim()) throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
+    if (!input.priceId?.trim()) throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     const now = this.nowMs();
     const record: ProviderSubscription = {
       providerSubscriptionId: `sub_test_${++this.counter}`,
@@ -46,7 +47,7 @@ export class InMemoryBillingAdapter implements BillingPort {
 
   async retrieveProviderSubscription(providerSubscriptionId: string): Promise<ProviderSubscription> {
     const found = this.subs.get(providerSubscriptionId);
-    if (!found) throw new Error(`No provider subscription ${providerSubscriptionId}.`);
+    if (!found) throw new BusinessError("FAILURE_COMMERCIAL_NOT_FOUND"); // #5606 (G-3)
     return { ...found };
   }
 
@@ -78,9 +79,9 @@ export class InMemoryBillingAdapter implements BillingPort {
   ): Promise<ProviderSubscription> {
     const found = await this.retrieveProviderSubscription(providerSubscriptionId);
     if (found.status === "canceled") {
-      throw new Error(`Provider subscription ${providerSubscriptionId} is canceled and cannot change price.`);
+      throw new BusinessError("FAILURE_COMMERCIAL_CONFLICT"); // #5606 (G-3)
     }
-    if (!priceId?.trim()) throw new Error("priceId is required.");
+    if (!priceId?.trim()) throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     const updated: ProviderSubscription = { ...found, priceId };
     this.subs.set(providerSubscriptionId, updated);
     return { ...updated };
@@ -98,7 +99,7 @@ export class InMemoryBillingAdapter implements BillingPort {
   /** Test-only: force a provider state (e.g. past_due) to drive webhook/transition tests. */
   setProviderState(providerSubscriptionId: string, patch: Partial<ProviderSubscription>): ProviderSubscription {
     const found = this.subs.get(providerSubscriptionId);
-    if (!found) throw new Error(`No provider subscription ${providerSubscriptionId}.`);
+    if (!found) throw new BusinessError("FAILURE_COMMERCIAL_NOT_FOUND"); // #5606 (G-3)
     const updated = { ...found, ...patch };
     this.subs.set(providerSubscriptionId, updated);
     return { ...updated };

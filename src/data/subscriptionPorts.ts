@@ -186,15 +186,15 @@ export function assertPlan(input: {
   const priceUSD = Number(input.priceUSD);
   const periodDays = Number(input.periodDays);
   const includedRuns = Number(input.includedRuns);
-  if (!name) throw new Error("Plan name is required.");
+  if (!name) throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   if (!Number.isFinite(priceUSD) || priceUSD <= 0) {
-    throw new Error("priceUSD must be a finite positive number.");
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   if (!Number.isFinite(periodDays) || periodDays < 1 || Math.floor(periodDays) !== periodDays) {
-    throw new Error("periodDays must be a positive integer.");
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   if (!Number.isFinite(includedRuns) || includedRuns < 0 || Math.floor(includedRuns) !== includedRuns) {
-    throw new Error("includedRuns must be a non-negative integer.");
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   // Trial days are optional: null/absent/undefined = no trial.
   // A present value must be a positive integer; anything else
@@ -203,7 +203,7 @@ export function assertPlan(input: {
   if (input.trialDays !== undefined && input.trialDays !== null) {
     const days = Number(input.trialDays);
     if (!Number.isFinite(days) || days < 1 || Math.floor(days) !== days) {
-      throw new Error("trialDays must be a positive integer when present.");
+      throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     }
     trialDays = days;
   }
@@ -212,7 +212,7 @@ export function assertPlan(input: {
 
 export function assertSubscriptionStatus(status: unknown): SubscriptionStatus {
   if (status !== "active" && status !== "canceled") {
-    throw new Error(`Invalid subscription status: ${String(status)} (must be active or canceled).`);
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   return status;
 }
@@ -261,13 +261,13 @@ export function assertPlanVersionInput(
       ? nowMs
       : Number(input.effectiveFromMs);
   if (!Number.isFinite(effectiveFromMs) || effectiveFromMs < 0) {
-    throw new Error("effectiveFromMs must be a non-negative epoch-ms number.");
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   let effectiveToMs: number | null = null;
   if (input.effectiveToMs !== undefined && input.effectiveToMs !== null) {
     effectiveToMs = Number(input.effectiveToMs);
     if (!Number.isFinite(effectiveToMs) || effectiveToMs <= effectiveFromMs) {
-      throw new Error("effectiveToMs must be an epoch-ms number after effectiveFromMs when present.");
+      throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     }
   }
   const billingPeriod =
@@ -278,7 +278,7 @@ export function assertPlanVersionInput(
   if (input.featuresJson !== undefined && input.featuresJson !== null) {
     if (Array.isArray(input.featuresJson)) {
       if (!input.featuresJson.every((f) => typeof f === "string")) {
-        throw new Error("featuresJson must be a JSON array of strings.");
+        throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
       }
       featuresJson = JSON.stringify(input.featuresJson);
     } else if (typeof input.featuresJson === "string") {
@@ -286,14 +286,14 @@ export function assertPlanVersionInput(
       try {
         parsed = JSON.parse(input.featuresJson);
       } catch {
-        throw new Error("featuresJson must be a JSON array of strings.");
+        throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
       }
       if (!Array.isArray(parsed) || !parsed.every((f) => typeof f === "string")) {
-        throw new Error("featuresJson must be a JSON array of strings.");
+        throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
       }
       featuresJson = JSON.stringify(parsed);
     } else {
-      throw new Error("featuresJson must be a JSON array of strings.");
+      throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     }
   }
   const stripePriceId =

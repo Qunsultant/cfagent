@@ -54,6 +54,7 @@ import {
 } from "./referralCodePorts";
 import { DML_CATALOGUE } from "./schemaComponent/dmlCatalogue";
 import { dmlFragment } from "./schemaComponent/dmlExecutor";
+import { BusinessError } from "../outcomes/outcomeAspects";
 
 /** Drizzle D1 database object carrying the referral-code schema. */
 export type ReferralCodeDb = DrizzleD1Database<{
@@ -262,7 +263,7 @@ export class D1ReferralCodeAdapter implements ReferralCodeStore {
     nowMs: number;
   }): Promise<{ code: ReferralCode; plaintext: string }> {
     const referrer = assertReferrerForKind(input.kind, input.referrerUserId);
-    if (!input.issuerLogin.trim()) throw new Error("Referral code issuerLogin is required.");
+    if (!input.issuerLogin.trim()) throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     const expiresAtMs =
       input.rule.expiryDays === null ? null : input.nowMs + input.rule.expiryDays * 86_400_000;
     // A hash collision at 80 bits is a store-corruption signal,
@@ -313,11 +314,11 @@ export class D1ReferralCodeAdapter implements ReferralCodeStore {
         return { code: record, plaintext };
       } catch {
         const collision = await this.getCodeByHash(codeHash);
-        if (!collision) throw new Error("Failed to issue referral code.");
+        if (!collision) throw new BusinessError("FAILURE_UNEXPECTED_ERROR"); // #5606 (G-3)
         // A row already carries this hash — regenerate and retry.
       }
     }
-    throw new Error("Failed to issue referral code after 5 attempts.");
+    throw new BusinessError("FAILURE_UNEXPECTED_ERROR"); // #5606 (G-3)
   }
 
   async getCode(id: string): Promise<ReferralCode | null> {
@@ -567,7 +568,7 @@ export class D1CodeRunsBalanceAdapter implements CodeRunsBalancePort {
   }
 
   async addCodeRuns(login: string, runs: number): Promise<number> {
-    if (!login.trim()) throw new Error("Code-runs login must be a non-empty string.");
+    if (!login.trim()) throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     const validatedRuns = assertCodeRuns(runs);
     const now = Date.now();
     await this.db
@@ -596,7 +597,7 @@ export class D1CodeRunsBalanceAdapter implements CodeRunsBalancePort {
    */
   async consumeCodeRun(input: { login: string }): Promise<CodeRunsConsumption> {
     const login = input.login.trim();
-    if (!login) throw new Error("Code-runs login must be a non-empty string.");
+    if (!login) throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     const rows = await this.db
       .update(agentCodeRunBalances)
       .set({

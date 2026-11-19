@@ -13,6 +13,7 @@
  * Postgres-equivalent atomicity on D1).
  */
 import { type DrizzleD1Database } from "drizzle-orm/d1";
+import { BusinessError } from "../outcomes/outcomeAspects";
 import { createDrizzleD1Db } from "./d1QueryLogger";
 import { asc, eq } from "drizzle-orm";
 import { agentRefundPolicy, agentRefunds } from "./drizzleSchema";
@@ -133,7 +134,7 @@ export class D1RefundPolicyAdapter implements RefundPolicyStore {
 
   async setPolicy(patch: Record<string, unknown>): Promise<RefundPolicy> {
     const current = await this.getPolicy();
-    if (!current) throw new Error("Refund policy is not configured: run the refund schema ensure first.");
+    if (!current) throw new BusinessError("FAILURE_REFUND_POLICY_REFUSAL"); // #5606 (G-3)
     const validated = assertRefundPolicyPatch(patch, current);
     // Issue #2662 (#2547 rule): a value edit resets approval — approval
     // attaches to exact values, never survives an edit silently.
@@ -153,12 +154,12 @@ export class D1RefundPolicyAdapter implements RefundPolicyStore {
 
   async setKindApproval(kind: RefundPolicy["approvedKinds"][number], approved: boolean, byLogin: string): Promise<RefundPolicy> {
     const current = await this.getPolicy();
-    if (!current) throw new Error("Refund policy is not configured: run the refund schema ensure first.");
+    if (!current) throw new BusinessError("FAILURE_REFUND_POLICY_REFUSAL"); // #5606 (G-3)
     if (kind !== "subscription" && kind !== "pay_per_run" && kind !== "bundle") {
-      throw new Error(`Invalid refund kind: ${String(kind)} (must be subscription, pay_per_run, or bundle).`);
+      throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     }
     if (typeof byLogin !== "string" || !byLogin.trim()) {
-      throw new Error("byLogin is required.");
+      throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     }
     const kinds = new Set(current.approvedKinds);
     if (approved) kinds.add(kind);
@@ -267,7 +268,7 @@ export class D1RefundAdapter implements RefundStore {
     patch: Partial<RefundRecord> & { updatedAtMs: number },
   ): Promise<RefundRecord> {
     const current = await this.getRefund(refundId);
-    if (!current) throw new Error(`No refund ${refundId}.`);
+    if (!current) throw new BusinessError("FAILURE_COMMERCIAL_NOT_FOUND"); // #5606 (G-3)
     const merged = { ...current, ...patch, id: current.id };
     const validated = assertRefundRecord(merged);
     const updated: RefundRecord = { ...validated, createdAtMs: current.createdAtMs, updatedAtMs: patch.updatedAtMs };

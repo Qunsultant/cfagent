@@ -67,6 +67,7 @@ import {
   type TenantProviders,
   type TenantSettingsRecord,
 } from "./commercialPorts";
+import { BusinessError } from "../outcomes/outcomeAspects";
 
 /** Drizzle D1 database object carrying the commercial schema. */
 export type CommercialDb = DrizzleD1Database<{
@@ -171,7 +172,7 @@ export class D1CommercialAdapter implements CommercialStore {
     segment?: unknown;
   }): Promise<CommercialAccountRecord> {
     if (!input.userId || !input.tenantId) {
-      throw new Error("userId and tenantId are required.");
+      throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     }
     // tierSource omitted = preserve the existing grant, or
     // "operator" for a new row (every pre-subscription row was
@@ -252,7 +253,7 @@ export class D1CommercialAdapter implements CommercialStore {
 
   async setAccountSegment(userId: string, segment: string): Promise<CommercialAccountRecord> {
     const account = await this.getAccount(userId);
-    if (!account) throw new Error(`No commercial account for user ${userId}.`);
+    if (!account) throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     const next = assertSegment(segment);
     await this.db
       .update(agentCommercialAccounts)
@@ -263,9 +264,9 @@ export class D1CommercialAdapter implements CommercialStore {
 
   async adjustCredits(userId: string, deltaUSD: number): Promise<CommercialAccountRecord> {
     const account = await this.getAccount(userId);
-    if (!account) throw new Error(`No commercial account for user ${userId}.`);
+    if (!account) throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     const next = round2(account.creditsUSD + deltaUSD);
-    if (next < 0) throw new Error("Credits cannot go below zero.");
+    if (next < 0) throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     await this.db
       .update(agentCommercialAccounts)
       .set({ creditsUSD: next, updatedAtMs: Date.now() })
@@ -275,8 +276,8 @@ export class D1CommercialAdapter implements CommercialStore {
 
   async consumeIncludedRun(userId: string): Promise<CommercialAccountRecord> {
     const account = await this.getAccount(userId);
-    if (!account) throw new Error(`No commercial account for user ${userId}.`);
-    if (account.includedRuns <= 0) throw new Error("No included runs remaining.");
+    if (!account) throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
+    if (account.includedRuns <= 0) throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     await this.db
       .update(agentCommercialAccounts)
       .set({ includedRuns: account.includedRuns - 1, updatedAtMs: Date.now() })
@@ -286,12 +287,12 @@ export class D1CommercialAdapter implements CommercialStore {
 
   async consumeCredits(userId: string, amountUSD: number): Promise<CommercialAccountRecord> {
     const account = await this.getAccount(userId);
-    if (!account) throw new Error(`No commercial account for user ${userId}.`);
+    if (!account) throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     const amount = round2(amountUSD);
     if (!Number.isFinite(amount) || amount <= 0) {
-      throw new Error("amountUSD must be a positive finite number.");
+      throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     }
-    if (account.creditsUSD < amount) throw new Error("Insufficient credits.");
+    if (account.creditsUSD < amount) throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     await this.db
       .update(agentCommercialAccounts)
       .set({ creditsUSD: round2(account.creditsUSD - amount), updatedAtMs: Date.now() })
@@ -605,7 +606,7 @@ export class D1CommercialAdapter implements CommercialStore {
     runRequestId: string;
   }): Promise<PaidSubmissionRecord> {
     if (!input.workflowId || !input.userId || !input.runRequestId) {
-      throw new Error("workflowId, userId, and runRequestId are required.");
+      throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     }
     const record: PaidSubmissionRecord = {
       workflowId: input.workflowId,
@@ -672,8 +673,8 @@ export class D1CommercialAdapter implements CommercialStore {
         .from(agentCreditRedemptions)
         .where(eq(agentCreditRedemptions.creditRunId, creditRunId))
         .limit(1);
-      if (existing.length > 0) throw new Error(`Credit ${creditRunId} already redeemed.`);
-      throw new Error(`Failed to redeem credit ${creditRunId}.`);
+      if (existing.length > 0) throw new BusinessError("FAILURE_CREDIT_ALREADY_REDEEMED"); // #5606 (G-3)
+      throw new BusinessError("FAILURE_UNEXPECTED_ERROR"); // #5606 (G-3)
     }
     return record;
   }

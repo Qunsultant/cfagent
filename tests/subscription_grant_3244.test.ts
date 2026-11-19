@@ -207,14 +207,14 @@ describe("grantSubscription (service)", () => {
     await subs.deactivatePlan("pro");
     await expect(
       grantSubscription({ subs, store, userId: "u1", plan: { ...plan, active: false }, grantedBy: "op1", nowMs: NOW }),
-    ).rejects.toThrow(/not active/);
+    ).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3)
     const live = await subs.createPlan({ id: "live", name: "Live", priceUSD: 5, periodDays: 7, includedRuns: 0 });
     // No account row: there is no tenant to pin the row to, so the
     // grant fails closed instead of inventing one. The operator
     // creates the account first (existing Accounts UI flow).
     await expect(
       grantSubscription({ subs, store, userId: "u1", plan: live, grantedBy: "op1", nowMs: NOW }),
-    ).rejects.toThrow(/No commercial account/);
+    ).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3)
     expect(await subs.listSubscriptions("u1")).toEqual([]);
   });
 });
