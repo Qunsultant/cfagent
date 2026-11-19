@@ -108,10 +108,10 @@ describe("paid-submission port (#2137 follow-ups)", () => {
     for (const store of [memory, d1]) {
       await expect(
         store.recordPaidSubmission({ workflowId: "", userId: "u1", runRequestId: "run-1" }),
-      ).rejects.toThrow(/required/);
+      ).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3)
       await expect(
         store.recordPaidSubmission({ workflowId: "wf-3", userId: "", runRequestId: "run-1" }),
-      ).rejects.toThrow(/required/);
+      ).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3)
     }
   });
 });

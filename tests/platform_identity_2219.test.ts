@@ -268,7 +268,7 @@ describe("platform identity resolution unit (#2219)", () => {
     } as any;
     await expect(
       resolvePlatformIdentity({ commercial, subscriptions }, { userId: "u1", nowMs: 0 }),
-    ).rejects.toThrow(/Subscription state unavailable/);
+    ).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE" }); // #5606 (G-3)
   });
 });
 

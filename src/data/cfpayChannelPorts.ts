@@ -12,6 +12,7 @@
  * and the credit itself lives on the commercial account.
  */
 import type { PriceFamily } from "./priceCataloguePorts";
+import { BusinessError } from "../outcomes/outcomeAspects";
 
 export type ChannelDraftStatus = "minted" | "fulfilled";
 
@@ -46,7 +47,7 @@ export interface ChannelDraftStore {
 
 export function assertChannelDraftStatus(value: unknown): ChannelDraftStatus {
   if (value !== "minted" && value !== "fulfilled") {
-    throw new Error(`Channel draft status must be "minted" or "fulfilled".`);
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID");
   }
   return value;
 }

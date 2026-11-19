@@ -114,43 +114,31 @@ describe("free-access grant validators (#3247)", () => {
   });
 
   it("rejects an unknown kind", () => {
-    expect(() => assertFreeAccessGrantKind("forever")).toThrow(/must be "lifetime" or "limited"/);
-    expect(() => assertFreeAccessGrantInput(grantInput({ kind: "forever" }), NOW)).toThrow(
-      /must be "lifetime" or "limited"/,
-    );
+    expect(() => assertFreeAccessGrantKind("forever")).toThrowError(expect.objectContaining({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" })); // #5606 (G-3)
+    expect(() => assertFreeAccessGrantInput(grantInput({ kind: "forever" }), NOW)).toThrowError(expect.objectContaining({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" })); // #5606 (G-3)
   });
 
   it("a lifetime grant forbids expiresAtMs", () => {
-    expect(() => assertFreeAccessGrantInput(grantInput({ expiresAtMs: LATER }), NOW)).toThrow(
-      /must be null for a lifetime grant/,
-    );
+    expect(() => assertFreeAccessGrantInput(grantInput({ expiresAtMs: LATER }), NOW)).toThrowError(expect.objectContaining({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" })); // #5606 (G-3)
   });
 
   it("a limited grant requires a future integer expiry", () => {
-    expect(() => assertFreeAccessGrantInput(grantInput({ kind: "limited" }), NOW)).toThrow(
-      /must be an epoch-ms integer in the future/,
-    );
+    expect(() => assertFreeAccessGrantInput(grantInput({ kind: "limited" }), NOW)).toThrowError(expect.objectContaining({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" })); // #5606 (G-3)
     expect(() =>
       assertFreeAccessGrantInput(grantInput({ kind: "limited", expiresAtMs: NOW - 1 }), NOW),
-    ).toThrow(/must be an epoch-ms integer in the future/);
+    ).toThrowError(expect.objectContaining({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" })); // #5606 (G-3)
     expect(() =>
       assertFreeAccessGrantInput(grantInput({ kind: "limited", expiresAtMs: NOW }), NOW),
-    ).toThrow(/must be an epoch-ms integer in the future/);
+    ).toThrowError(expect.objectContaining({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" })); // #5606 (G-3)
     expect(() =>
       assertFreeAccessGrantInput(grantInput({ kind: "limited", expiresAtMs: NOW + 0.5 }), NOW),
-    ).toThrow(/must be an epoch-ms integer in the future/);
+    ).toThrowError(expect.objectContaining({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" })); // #5606 (G-3)
   });
 
   it("rejects a blank login, grantedBy, or reason (trimmed, no length cap — the #3245 shape)", () => {
-    expect(() => assertFreeAccessGrantInput(grantInput({ login: "  " }), NOW)).toThrow(
-      /login must be a non-empty string/,
-    );
-    expect(() => assertFreeAccessGrantInput(grantInput({ grantedBy: "" }), NOW)).toThrow(
-      /grantedBy must be a non-empty string/,
-    );
-    expect(() => assertFreeAccessGrantInput(grantInput({ reason: "   " }), NOW)).toThrow(
-      /reason must be a non-empty string/,
-    );
+    expect(() => assertFreeAccessGrantInput(grantInput({ login: "  " }), NOW)).toThrowError(expect.objectContaining({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" })); // #5606 (G-3)
+    expect(() => assertFreeAccessGrantInput(grantInput({ grantedBy: "" }), NOW)).toThrowError(expect.objectContaining({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" })); // #5606 (G-3)
+    expect(() => assertFreeAccessGrantInput(grantInput({ reason: "   " }), NOW)).toThrowError(expect.objectContaining({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" })); // #5606 (G-3)
     expect(assertFreeAccessGrantInput(grantInput({ reason: "  Pilot  " }), NOW).reason).toBe("Pilot");
   });
 
@@ -266,9 +254,7 @@ describe("free-access grant port parity (#3247)", () => {
 
   it("the adapters refuse an invalid grant before any write", async () => {
     for (const { name, port } of await adapters()) {
-      await expect(port.grant(grantInput({ kind: "limited" })), name).rejects.toThrow(
-        /must be an epoch-ms integer in the future/,
-      );
+      await expect(port.grant(grantInput({ kind: "limited" })), name).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3)
       expect(await port.listGrants("u1"), name).toEqual([]);
     }
   });
