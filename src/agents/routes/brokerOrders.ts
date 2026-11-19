@@ -46,12 +46,14 @@ import {
   cancelSingleOrder,
   cancelTickerOrders,
   createCancelBrokerPort,
-  createPlatformCancelPort,
   markDraftRowCancelledIfPresent,
   recordCancelOutcome,
   recordScopedCancelOutcome,
-  type CancelBrokerPort,
 } from "../../services/orderCancellation";
+import {
+  cancelPortForBroker,
+  scopedCancelLedger,
+} from "../../services/brokerOrderCancel";
 import { createSqlCancelPreviewStore } from "../../services/cancelPreviewStore";
 import { resolveTradingLimits } from "../../trading";
 import { resolveTenantBroker } from "../../services/tenantProviders";
@@ -92,38 +94,8 @@ export type BrokerOrderRouteContext = EtradeBrokerRouteContext;
  * BROKER_CAPABILITY_NOT_IMPLEMENTED, never provider_unsupported — the
  * capability is declared, the implementation is what is missing.
  */
-function cancelPortForBroker(
-  broker: BrokerId,
-  ctx: BrokerOrderRouteContext,
-  userLogin: string,
-  requestedEnv: "TEST" | "PROD" | undefined,
-): CancelBrokerPort | null {
-  if (broker === "alpaca") return createCancelBrokerPort(ctx.env);
-  const platform = TradingPlatformRegistry.getPlatform(broker, ctx.env, ctx.getOrm(), userLogin, requestedEnv);
-  if (typeof platform.getOrderHistory !== "function" || typeof platform.cancelOrderRemote !== "function") return null;
-  return createPlatformCancelPort(platform);
-}
-
-/**
- * Issue #3937 / #4532 (slice 2): the live/paper mode for a trade,
- * from the resolved trading environment (TEST is paper, PROD is
- * live). One derivation for every use in this file — the scoped
- * cancel ledger and the preview stamp below — so the two can never
- * disagree about what a trade's mode is.
- */
 function modeFromEnvironment(requestedEnv: "TEST" | "PROD" | undefined): "live" | "paper" {
   return requestedEnv === "PROD" ? "live" : "paper";
-}
-
-/**
- * Issue #3937: the ledger identity for a scoped cancel on a broker other
- * than the service-port broker — its own broker id, with the mode from
- * the resolved trading environment (TEST is paper, PROD is live).
- * Service-port rows keep their existing derivation (env vars) and do
- * not use this.
- */
-function scopedCancelLedger(broker: string, requestedEnv: "TEST" | "PROD" | undefined): { broker: string; mode: "live" | "paper" } {
-  return { broker, mode: modeFromEnvironment(requestedEnv) };
 }
 
 /**
@@ -732,7 +704,7 @@ export async function handleBrokerOrderRoutes(
         );
       }
 
-      const port = cancelPortForBroker(broker, ctx, userLogin, requestedEnv);
+      const port = cancelPortForBroker(broker, ctx.env, ctx.getOrm(), userLogin, requestedEnv);
       if (!port) {
         return Response.json(
           {
@@ -804,7 +776,7 @@ export async function handleBrokerOrderRoutes(
         );
       }
 
-      const port = cancelPortForBroker(broker, ctx, userLogin, requestedEnv);
+      const port = cancelPortForBroker(broker, ctx.env, ctx.getOrm(), userLogin, requestedEnv);
       if (!port) {
         return Response.json(
           {

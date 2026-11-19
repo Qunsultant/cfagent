@@ -308,6 +308,10 @@ export const SYNCHRONOUS_MCP_TOOLS = new Set<string>([
   "stock_copilot_job_control",
   // #5765: a cancel is answered in the turn, never queued.
   "broker_order_cancel",
+  // #5806: scoped cancels and order reads answer in the turn, never queued.
+  "broker_order_cancel_ticker",
+  "broker_order_cancel_all",
+  "broker_orders_list",
   // #5766: a replace is answered in the turn, never queued.
   "broker_order_replace",
   // #5767: a preview answers in the turn.

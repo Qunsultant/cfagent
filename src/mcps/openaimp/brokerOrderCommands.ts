@@ -13,7 +13,12 @@
  */
 import { z } from "zod";
 import type { IMcpToolCommand, McpToolContext } from "../../patterns/interfaces";
-import { cancelOrderViaSelectedBroker } from "../../services/brokerOrderCancel";
+import {
+  cancelAllViaSelectedBroker,
+  cancelOrderViaSelectedBroker,
+  cancelTickerViaSelectedBroker,
+  listOrdersViaSelectedBroker,
+} from "../../services/brokerOrderCancel";
 import { replaceOrderViaSelectedBroker } from "../../services/brokerOrderReplace";
 import { previewOrderViaSelectedBroker } from "../../services/brokerOrderPreview";
 import { createOrderViaSelectedBroker } from "../../services/brokerOrderCreate";
@@ -306,6 +311,207 @@ export class BrokerOrderCreateCommand
       actingLogin: actingLogin ?? null,
       provider: result.provider ?? null,
       symbol: input.symbol,
+      success: result.success,
+      ...(result.code ? { code: result.code } : {}),
+    });
+    return result;
+  }
+}
+
+export interface BrokerOrdersListToolInput {
+  status?: "open" | "all";
+  symbol?: string;
+}
+
+/**
+ * Issue #5806 — neutral orders list on the platform's selected broker.
+ */
+export class BrokerOrdersListCommand
+  implements IMcpToolCommand<BrokerOrdersListToolInput>
+{
+  readonly name = "broker_orders_list";
+  readonly description =
+    "List open or all orders on the platform's selected broker (never caller-supplied). Optional symbol filter returns matching orders only. Requires the chat turn's acting identity.";
+  readonly jsonSchema = {
+    type: "object" as const,
+    properties: {
+      status: { type: "string", enum: ["open", "all"], description: "Order status filter (default open)" },
+      symbol: { type: "string", description: "Optional ticker symbol filter" },
+    },
+    required: [],
+  };
+  readonly zodSchema = z.object({
+    status: z.enum(["open", "all"]).optional(),
+    symbol: z.string().min(1).optional(),
+  });
+
+  async execute(input: BrokerOrdersListToolInput, context: McpToolContext) {
+    const actingLogin = context.actingLogin?.();
+    const { resolveTradeEnvironmentFromSettings } = await import(
+      "../../agents/routes/brokerEnvironment"
+    );
+    const requestedEnv = resolveTradeEnvironmentFromSettings(
+      context.readSettingRaw,
+      context.env,
+    );
+    const result = await listOrdersViaSelectedBroker({
+      env: context.env,
+      ...(context.orm ? { orm: context.orm } : {}),
+      userLogin: actingLogin ?? "",
+      ...(input.status ? { status: input.status } : {}),
+      ...(input.symbol ? { symbol: input.symbol } : {}),
+      requestedEnv,
+    });
+    context.audit("broker_orders_list", "mcp", {
+      actingLogin: actingLogin ?? null,
+      broker: result.broker,
+      status: result.status,
+      count: result.count,
+      success: result.success,
+      ...(result.code ? { code: result.code } : {}),
+    });
+    return result;
+  }
+}
+
+export interface BrokerOrderCancelTickerToolInput {
+  symbol: string;
+  order_class?: string;
+  order_side?: string;
+  ladder_id?: string;
+  placed_after?: string;
+  dry_run?: boolean;
+  reason?: string;
+}
+
+/**
+ * Issue #5806 — neutral per-ticker open-order cancel on the selected broker.
+ */
+export class BrokerOrderCancelTickerCommand
+  implements IMcpToolCommand<BrokerOrderCancelTickerToolInput>
+{
+  readonly name = "broker_order_cancel_ticker";
+  readonly description =
+    "Cancel open orders for ONE ticker symbol on the platform's selected broker. A broker without orderCancel refuses by name. Supports dry_run and optional filters (order_class, order_side, ladder_id, placed_after). Requires the chat turn's acting identity.";
+  readonly jsonSchema = {
+    type: "object" as const,
+    properties: {
+      symbol: { type: "string", description: "Ticker symbol whose open orders should be cancelled" },
+      order_class: { type: "string", description: "Optional order class filter" },
+      order_side: { type: "string", description: "Optional order side filter" },
+      ladder_id: { type: "string", description: "Optional ladder id filter" },
+      placed_after: { type: "string", description: "Optional ISO timestamp filter" },
+      dry_run: { type: "boolean", description: "If true, previews matching orders without cancelling" },
+      reason: { type: "string", description: "Optional audit note" },
+    },
+    required: ["symbol"],
+  };
+  readonly zodSchema = z.object({
+    symbol: z.string().min(1),
+    order_class: z.string().min(1).optional(),
+    order_side: z.string().min(1).optional(),
+    ladder_id: z.string().min(1).optional(),
+    placed_after: z.string().min(1).optional(),
+    dry_run: z.boolean().optional(),
+    reason: z.string().max(500).optional(),
+  });
+
+  async execute(input: BrokerOrderCancelTickerToolInput, context: McpToolContext) {
+    const actingLogin = context.actingLogin?.();
+    const { resolveTradeEnvironmentFromSettings } = await import(
+      "../../agents/routes/brokerEnvironment"
+    );
+    const requestedEnv = resolveTradeEnvironmentFromSettings(
+      context.readSettingRaw,
+      context.env,
+    );
+    const result = await cancelTickerViaSelectedBroker({
+      env: context.env,
+      ...(context.orm ? { orm: context.orm } : {}),
+      userLogin: actingLogin ?? "",
+      symbol: input.symbol,
+      ...(input.order_class ? { orderClass: input.order_class } : {}),
+      ...(input.order_side ? { orderSide: input.order_side } : {}),
+      ...(input.ladder_id ? { ladderId: input.ladder_id } : {}),
+      ...(input.placed_after ? { placedAfter: input.placed_after } : {}),
+      ...(input.dry_run !== undefined ? { dryRun: input.dry_run } : {}),
+      ...(input.reason ? { reason: input.reason } : {}),
+      readSetting: context.readSettingRaw
+        ? (key) => {
+            const v = context.readSettingRaw?.(key);
+            return typeof v === "string" ? v : null;
+          }
+        : undefined,
+      requestedEnv,
+    });
+    context.audit("broker_order_cancel_ticker", "mcp", {
+      actingLogin: actingLogin ?? null,
+      broker: result.broker,
+      symbol: input.symbol,
+      success: result.success,
+      ...(result.code ? { code: result.code } : {}),
+    });
+    return result;
+  }
+}
+
+export interface BrokerOrderCancelAllToolInput {
+  confirm?: string;
+  dry_run?: boolean;
+  reason?: string;
+}
+
+/**
+ * Issue #5806 — neutral two-step cancel-all on the platform's selected broker (#3885).
+ */
+export class BrokerOrderCancelAllCommand
+  implements IMcpToolCommand<BrokerOrderCancelAllToolInput>
+{
+  readonly name = "broker_order_cancel_all";
+  readonly description =
+    "Cancel EVERY open order on the platform's selected broker in two steps: a bare call returns a preview and single-use confirm token and cancels NOTHING; a second call with confirm=<token> executes the cancellations. Requires the chat turn's acting identity.";
+  readonly jsonSchema = {
+    type: "object" as const,
+    properties: {
+      confirm: { type: "string", description: "Single-use confirmation token from the preview call" },
+      dry_run: { type: "boolean", description: "If true, returns the preview without cancelling" },
+      reason: { type: "string", description: "Optional audit note" },
+    },
+    required: [],
+  };
+  readonly zodSchema = z.object({
+    confirm: z.string().min(1).optional(),
+    dry_run: z.boolean().optional(),
+    reason: z.string().max(500).optional(),
+  });
+
+  async execute(input: BrokerOrderCancelAllToolInput, context: McpToolContext) {
+    const actingLogin = context.actingLogin?.();
+    const { resolveTradeEnvironmentFromSettings } = await import(
+      "../../agents/routes/brokerEnvironment"
+    );
+    const requestedEnv = resolveTradeEnvironmentFromSettings(
+      context.readSettingRaw,
+      context.env,
+    );
+    const result = await cancelAllViaSelectedBroker({
+      env: context.env,
+      ...(context.orm ? { orm: context.orm } : {}),
+      userLogin: actingLogin ?? "",
+      ...(input.confirm ? { confirm: input.confirm } : {}),
+      ...(input.dry_run !== undefined ? { dryRun: input.dry_run } : {}),
+      ...(input.reason ? { reason: input.reason } : {}),
+      readSetting: context.readSettingRaw
+        ? (key) => {
+            const v = context.readSettingRaw?.(key);
+            return typeof v === "string" ? v : null;
+          }
+        : undefined,
+      requestedEnv,
+    });
+    context.audit("broker_order_cancel_all", "mcp", {
+      actingLogin: actingLogin ?? null,
+      broker: result.broker,
       success: result.success,
       ...(result.code ? { code: result.code } : {}),
     });

@@ -79,6 +79,7 @@
  * pre-#3727 prompt (the fixtures' contract).
  */
 import type { Env } from "../types";
+import { BROKER_CATALOG, isBrokerId } from "../trading";
 
 export interface OrchestratorPromptRoute {
   agent: string;
@@ -177,8 +178,31 @@ export function resolvePromptBrokerTools(
   const rawBroker = String(input?.activeBroker ?? "").trim();
   const isEtrade = /^(etrade|e\*trade|e-trade)$/i.test(rawBroker);
   const isPublic = /^public(?:\.com)?$/i.test(rawBroker);
+  const isAlpaca = /^alpaca$/i.test(rawBroker);
+  const normalizedCatalogId = rawBroker.toLowerCase();
+  const isOtherCatalogBroker =
+    !isEtrade &&
+    !isPublic &&
+    !isAlpaca &&
+    rawBroker.length > 0 &&
+    isBrokerId(normalizedCatalogId);
   const isLive = /^(live|prod)$/i.test(String(input?.activeMode ?? "").trim());
   const executionPolicy = input?.copilotExecutionMode === "autonomous" ? "autonomous" : "hitl";
+  if (isOtherCatalogBroker) {
+    const entry = BROKER_CATALOG[normalizedCatalogId];
+    return {
+      brokerId: entry.id,
+      brokerLabel: entry.label,
+      modeId: isLive ? "live" : "paper",
+      modeLabel: isLive ? "Live" : "Paper",
+      quoteTool: "tool_openaimp_market_data_get_quote",
+      previewTool: "tool_openaimp_broker_order_preview",
+      executeTool: "tool_openaimp_broker_order_create",
+      ordersTool: "tool_openaimp_broker_orders_list",
+      cancelBracketTool: "tool_openaimp_broker_order_cancel",
+      executionPolicy,
+    };
+  }
   const [brokerId, brokerLabel, quoteTool, previewTool, executeTool] = isEtrade
     ? ["etrade", "E*TRADE", "tool_openaimp_etrade_get_quote", "tool_openaimp_etrade_preview_order", "tool_openaimp_etrade_execute_order"]
     : isPublic

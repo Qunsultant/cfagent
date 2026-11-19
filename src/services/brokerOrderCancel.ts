@@ -20,15 +20,23 @@
  */
 import {
   brokerSupports,
+  resolveTradingLimits,
   TradingPlatformRegistry,
   type BrokerId,
 } from "../trading";
 import { resolveTenantBroker } from "./tenantProviders";
+import { createSqlCancelPreviewStore } from "./cancelPreviewStore";
 import {
+  cancelAllOrders,
   cancelSingleOrder,
+  cancelTickerOrders,
   createCancelBrokerPort,
+  createPlatformCancelPort,
   markDraftRowCancelledIfPresent,
   recordCancelOutcome,
+  recordScopedCancelOutcome,
+  type CancelBrokerPort,
+  type ScopedCancelReceipt,
 } from "./orderCancellation";
 import type { Env } from "../types";
 import type { DatabaseORM } from "../orm";
@@ -152,5 +160,347 @@ export async function cancelOrderViaSelectedBroker(
           ? `Cancelled order ${orderId} on ${broker}.`
           : `${broker} refused to cancel order ${orderId}.`,
     receipt: cancelled,
+  };
+}
+
+/**
+ * Shared cancel port resolver across Alpaca and any ITradingPlatform broker
+ * that exposes `getOrderHistory` + `cancelOrderRemote` (#3937, #5806).
+ */
+export function cancelPortForBroker(
+  broker: BrokerId,
+  env: Env,
+  orm: DatabaseORM | undefined,
+  userLogin: string,
+  requestedEnv?: string,
+): CancelBrokerPort | null {
+  if (broker === "alpaca") return createCancelBrokerPort(env);
+  const platform = TradingPlatformRegistry.getPlatform(
+    broker,
+    env,
+    orm,
+    userLogin,
+    requestedEnv,
+  );
+  if (
+    typeof platform.getOrderHistory !== "function" ||
+    typeof platform.cancelOrderRemote !== "function"
+  ) {
+    return null;
+  }
+  return createPlatformCancelPort(platform);
+}
+
+/**
+ * Ledger identity for a scoped cancel on a non-Alpaca broker (#3937).
+ */
+export function scopedCancelLedger(
+  broker: string,
+  requestedEnv?: string,
+): { broker: string; mode: "live" | "paper" } {
+  return {
+    broker,
+    mode: requestedEnv === "PROD" || requestedEnv === "live" ? "live" : "paper",
+  };
+}
+
+export interface BrokerOrdersListInput {
+  env: Env;
+  orm?: DatabaseORM;
+  userLogin: string;
+  status?: "open" | "all";
+  symbol?: string;
+  requestedEnv?: string;
+}
+
+export interface BrokerOrdersListResult {
+  success: boolean;
+  broker: BrokerId | "unknown";
+  status: "open" | "all";
+  count: number;
+  orders: unknown[];
+  code?: string;
+  message: string;
+}
+
+/**
+ * List open or all orders on the tenant's selected broker (#5806).
+ */
+export async function listOrdersViaSelectedBroker(
+  input: BrokerOrdersListInput,
+): Promise<BrokerOrdersListResult> {
+  const login = typeof input.userLogin === "string" ? input.userLogin.trim() : "";
+  const status: "open" | "all" = input.status === "all" ? "all" : "open";
+  if (!login) {
+    return {
+      success: false,
+      broker: "unknown",
+      status,
+      count: 0,
+      orders: [],
+      code: "identity_required",
+      message: "Listing orders needs the acting login; nothing was queried.",
+    };
+  }
+  const broker = await resolveTenantBroker(input.env);
+  if (!brokerSupports(broker, "orderHistory")) {
+    return {
+      success: false,
+      broker,
+      status,
+      count: 0,
+      orders: [],
+      code: "provider_unsupported",
+      message: `${broker} does not declare orderHistory here; no other broker was queried.`,
+    };
+  }
+  const platform = TradingPlatformRegistry.getPlatform(
+    broker,
+    input.env,
+    input.orm,
+    login,
+    input.requestedEnv,
+  );
+  if (typeof platform.getOrderHistory !== "function") {
+    return {
+      success: false,
+      broker,
+      status,
+      count: 0,
+      orders: [],
+      code: "provider_unsupported",
+      message: `${broker} exposes no order history reader; no other broker was queried.`,
+    };
+  }
+  try {
+    const rawOrders = await platform.getOrderHistory(status);
+    const symbolFilter = input.symbol?.trim().toUpperCase();
+    const orders = symbolFilter
+      ? rawOrders.filter(
+          (o) => String((o as { symbol?: unknown }).symbol ?? "").trim().toUpperCase() === symbolFilter,
+        )
+      : rawOrders;
+    return {
+      success: true,
+      broker,
+      status,
+      count: orders.length,
+      orders,
+      message: `Retrieved ${orders.length} ${status} order${orders.length === 1 ? "" : "s"} from ${broker}.`,
+    };
+  } catch (err) {
+    return {
+      success: false,
+      broker,
+      status,
+      count: 0,
+      orders: [],
+      code: "order_history_failed",
+      message: err instanceof Error ? err.message : `Failed to list orders on ${broker}.`,
+    };
+  }
+}
+
+export interface BrokerOrderCancelTickerInput {
+  env: Env;
+  orm?: DatabaseORM;
+  userLogin: string;
+  symbol: string;
+  orderClass?: string;
+  orderSide?: string;
+  ladderId?: string;
+  placedAfter?: string;
+  dryRun?: boolean;
+  reason?: string;
+  readSetting?: (key: string) => string | null;
+  requestedEnv?: string;
+}
+
+export interface BrokerScopedCancelResult {
+  success: boolean;
+  broker: BrokerId | "unknown";
+  code?: string;
+  message: string;
+  receipt: ScopedCancelReceipt | null;
+}
+
+/**
+ * Cancel open orders for a single ticker on the tenant's selected broker (#5806).
+ */
+export async function cancelTickerViaSelectedBroker(
+  input: BrokerOrderCancelTickerInput,
+): Promise<BrokerScopedCancelResult> {
+  const login = typeof input.userLogin === "string" ? input.userLogin.trim() : "";
+  if (!login) {
+    return {
+      success: false,
+      broker: "unknown",
+      code: "identity_required",
+      message: "A ticker cancel needs the acting login; nothing was cancelled.",
+      receipt: null,
+    };
+  }
+  const symbol = String(input.symbol ?? "").trim().toUpperCase();
+  if (!symbol) {
+    return {
+      success: false,
+      broker: "unknown",
+      code: "no_orders_matched",
+      message: "A ticker cancel needs a symbol. Nothing was cancelled.",
+      receipt: null,
+    };
+  }
+  const broker = await resolveTenantBroker(input.env);
+  if (!brokerSupports(broker, "orderCancel")) {
+    return {
+      success: false,
+      broker,
+      code: "provider_unsupported",
+      message: `${broker} does not expose a per-symbol open-order cancel here; no other broker was asked to cancel ${symbol}.`,
+      receipt: null,
+    };
+  }
+  const port = cancelPortForBroker(broker, input.env, input.orm, login, input.requestedEnv);
+  if (!port) {
+    return {
+      success: false,
+      broker,
+      code: "BROKER_CAPABILITY_NOT_IMPLEMENTED",
+      message: `${broker} declares order cancellation but does not implement the reads it needs; no other broker was asked to cancel ${symbol}.`,
+      receipt: null,
+    };
+  }
+  const limits = resolveTradingLimits({
+    symbol,
+    env: input.env,
+    readSetting: input.readSetting,
+  });
+  const receipt = await cancelTickerOrders(port, {
+    symbol,
+    orderClass: input.orderClass as never,
+    orderSide: input.orderSide as never,
+    ladderId: input.ladderId,
+    placedAfter: input.placedAfter,
+    dryRun: input.dryRun === true,
+    reason: input.reason,
+    limits,
+  });
+  if (!receipt.dryRun) {
+    const sql = input.orm?.getSql?.();
+    if (broker === "alpaca") {
+      recordScopedCancelOutcome(sql, receipt, "broker_orders_cancel_ticker", input.env);
+    } else {
+      recordScopedCancelOutcome(
+        sql,
+        receipt,
+        "broker_orders_cancel_ticker",
+        input.env,
+        undefined,
+        scopedCancelLedger(broker, input.requestedEnv),
+      );
+    }
+  }
+  return {
+    success: receipt.success,
+    broker,
+    ...(receipt.code ? { code: receipt.code } : {}),
+    message: receipt.message,
+    receipt,
+  };
+}
+
+export interface BrokerOrderCancelAllInput {
+  env: Env;
+  orm?: DatabaseORM;
+  userLogin: string;
+  confirm?: string;
+  dryRun?: boolean;
+  reason?: string;
+  readSetting?: (key: string) => string | null;
+  requestedEnv?: string;
+}
+
+/**
+ * Cancel every open order on the tenant's selected broker using the two-step
+ * preview-token protocol (#3885, #5806).
+ */
+export async function cancelAllViaSelectedBroker(
+  input: BrokerOrderCancelAllInput,
+): Promise<BrokerScopedCancelResult> {
+  const login = typeof input.userLogin === "string" ? input.userLogin.trim() : "";
+  if (!login) {
+    return {
+      success: false,
+      broker: "unknown",
+      code: "identity_required",
+      message: "Cancel-all needs the acting login; nothing was cancelled.",
+      receipt: null,
+    };
+  }
+  const broker = await resolveTenantBroker(input.env);
+  if (!brokerSupports(broker, "orderCancel")) {
+    return {
+      success: false,
+      broker,
+      code: "provider_unsupported",
+      message: `${broker} does not expose a cancel-all here; no other broker was asked to cancel every open order.`,
+      receipt: null,
+    };
+  }
+  const port = cancelPortForBroker(broker, input.env, input.orm, login, input.requestedEnv);
+  if (!port) {
+    return {
+      success: false,
+      broker,
+      code: "BROKER_CAPABILITY_NOT_IMPLEMENTED",
+      message: `${broker} declares order cancellation but does not implement the reads it needs; no other broker was asked to cancel every open order.`,
+      receipt: null,
+    };
+  }
+  const sql = input.orm?.getSql?.();
+  if (!sql) {
+    return {
+      success: false,
+      broker,
+      code: "cancel_preview_store_unavailable",
+      message: "The preview store is unavailable, so cancel-all refused rather than cancel unbounded.",
+      receipt: null,
+    };
+  }
+  const limits = resolveTradingLimits({
+    env: input.env,
+    readSetting: input.readSetting,
+  });
+  const receipt = await cancelAllOrders(
+    port,
+    {
+      token: typeof input.confirm === "string" ? input.confirm : undefined,
+      dryRun: input.dryRun === true,
+      reason: input.reason,
+      limits,
+    },
+    createSqlCancelPreviewStore(sql),
+  );
+  if (receipt.success || receipt.cancelled.length > 0 || receipt.refused.length > 0) {
+    const suffix = `cancel_all:${receipt.preview?.expiresAt ?? new Date().toISOString()}`;
+    if (broker === "alpaca") {
+      recordScopedCancelOutcome(sql, receipt, "broker_orders_cancel_all", input.env, suffix);
+    } else {
+      recordScopedCancelOutcome(
+        sql,
+        receipt,
+        "broker_orders_cancel_all",
+        input.env,
+        suffix,
+        scopedCancelLedger(broker, input.requestedEnv),
+      );
+    }
+  }
+  return {
+    success: receipt.success,
+    broker,
+    ...(receipt.code ? { code: receipt.code } : {}),
+    message: receipt.message,
+    receipt,
   };
 }
