@@ -14,6 +14,7 @@
  */
 import type { JobExecutionMode } from "../data/jobPipelinePorts";
 import { assertExecutionModeSupported, resolveExecutionMode } from "../services/jobPipelineConfig";
+import { hasEnumSource, hasParamDerivation } from "./jobDefinitionParamRegistry";
 
 /** One stage (or sub-stage) of a definition spec. */
 export interface JobStageSpec {
@@ -46,15 +47,26 @@ export interface JobStageSpec {
   children?: JobStageSpec[];
 }
 
+/** Setting reference for declarative parameter defaults (resolved at bind time). */
+export interface JobParameterSettingRef {
+  setting: string;
+}
+
 /** One parameter the UX flow must collect before scheduling a definition. */
 export interface JobDefinitionParameter {
   name: string;
   label: string;
-  type: "select" | "text" | "number";
+  type: "select" | "text" | "number" | "boolean";
   required?: boolean;
   description?: string;
   /** Filled by the API for select parameters whose options come from a registry. */
   options?: string[];
+  /** Named enum source in `ENUM_SOURCES` (validated at load time). */
+  enumSource?: string;
+  /** Literal default or `{ setting: key }` reference resolved at bind time. */
+  default?: unknown;
+  /** Named derivation in `PARAM_DERIVATIONS` (validated at load time). */
+  derivation?: string;
 }
 
 /** A whole job definition, externalized and versioned. */
@@ -108,7 +120,17 @@ export const JOB_DEFINITION_SPECS: Readonly<Record<string, JobDefinitionSpec>> =
         label: "Universe",
         type: "select",
         required: true,
+        enumSource: "universes",
+        derivation: "shardsForUniverse",
         description: "The universe the scheduled screen runs over.",
+      },
+      {
+        name: "deliver",
+        label: "Deliver",
+        type: "boolean",
+        required: false,
+        default: false,
+        description: "Whether to deliver the report automatically after the scheduled screen completes.",
       },
     ],
     executionMode: {
@@ -276,10 +298,49 @@ function resolveParameter(raw: unknown, specId: string): JobDefinitionParameter 
     throw new Error(`Job definition "${specId}" is invalid: a parameter must be an object.`);
   }
   const name = text(raw.name, "parameter name", specId);
-  const type = raw.type === "number" || raw.type === "text" ? raw.type : "select";
+  const rawType = raw.type;
+  if (
+    rawType !== undefined &&
+    rawType !== "select" &&
+    rawType !== "text" &&
+    rawType !== "number" &&
+    rawType !== "boolean"
+  ) {
+    throw new Error(
+      `Job definition "${specId}" parameter "${name}" has unsupported type "${String(rawType)}".`,
+    );
+  }
+  const type = rawType ?? "select";
   const options = Array.isArray(raw.options)
     ? raw.options.filter((option): option is string => typeof option === "string" && option !== "")
     : undefined;
+  let enumSource: string | undefined;
+  if (raw.enumSource !== undefined) {
+    enumSource = text(raw.enumSource, `parameter "${name}" enumSource`, specId);
+    if (!hasEnumSource(enumSource)) {
+      throw new Error(
+        `Job definition "${specId}" parameter "${name}" references unknown enumSource "${enumSource}".`,
+      );
+    }
+  }
+  let derivation: string | undefined;
+  if (raw.derivation !== undefined) {
+    derivation = text(raw.derivation, `parameter "${name}" derivation`, specId);
+    if (!hasParamDerivation(derivation)) {
+      throw new Error(
+        `Job definition "${specId}" parameter "${name}" references unknown derivation "${derivation}".`,
+      );
+    }
+  }
+  let defaultValue = raw.default;
+  if (isRecord(defaultValue)) {
+    if (typeof defaultValue.setting !== "string" || defaultValue.setting.trim() === "") {
+      throw new Error(
+        `Job definition "${specId}" parameter "${name}" default setting reference must have a non-empty "setting" key.`,
+      );
+    }
+    defaultValue = { setting: defaultValue.setting.trim() };
+  }
   return {
     name,
     label: typeof raw.label === "string" && raw.label ? raw.label : name,
@@ -287,6 +348,9 @@ function resolveParameter(raw: unknown, specId: string): JobDefinitionParameter 
     ...(raw.required === true ? { required: true } : {}),
     ...(typeof raw.description === "string" ? { description: raw.description } : {}),
     ...(options && options.length > 0 ? { options } : {}),
+    ...(enumSource ? { enumSource } : {}),
+    ...(defaultValue !== undefined ? { default: defaultValue } : {}),
+    ...(derivation ? { derivation } : {}),
   };
 }
 

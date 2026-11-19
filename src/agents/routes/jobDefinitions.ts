@@ -12,6 +12,7 @@
  * same alarm machinery every other schedule uses.
  */
 import { jobDefinitionSpec, listJobDefinitionSpecs, type JobDefinitionSpec } from "../../config/jobDefinitionCatalog";
+import { resolveEnumSource } from "../../config/jobDefinitionParamRegistry";
 import { UNIVERSES } from "../../trading";
 import type { JobExecutionMode } from "../../data/jobPipelinePorts";
 
@@ -49,6 +50,9 @@ const LIST_PATH = /(?:^|\/api)\/job-definitions$/;
 function withSelectOptions(spec: JobDefinitionSpec): JobDefinitionSpec {
   const parameters = spec.parameters?.map((param) => {
     if (param.type !== "select" || (param.options && param.options.length > 0)) return param;
+    if (param.enumSource) {
+      return { ...param, options: resolveEnumSource(param.enumSource, spec.id) };
+    }
     if (param.name === "universe") return { ...param, options: Object.keys(UNIVERSES) };
     return param;
   });
