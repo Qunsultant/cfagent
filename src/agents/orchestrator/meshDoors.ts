@@ -1330,6 +1330,70 @@ export async function controlPipelineStageViaDoor(
 }
 
 /**
+ * Issue #5739 — drive one WHOLE engine job through the door: start /
+ * pause / resume / cancel / retry. The stage tool (#4362) addresses one
+ * stage of a run; this one addresses the job, and both reach the same
+ * control plane (`JobPipelineControl`) through the same host. Same
+ * operator gate: control is never anonymous.
+ */
+export const PIPELINE_JOB_OPERATIONS = [
+  "start",
+  "pause",
+  "resume",
+  "cancel",
+  "retry",
+] as const;
+
+export type PipelineJobOperation = (typeof PIPELINE_JOB_OPERATIONS)[number];
+
+export interface PipelineJobControlResult {
+  jobId: string;
+  operation: PipelineJobOperation;
+  /** The instance state after the operation (running / paused / cancelled / ...). */
+  state: string;
+  /** The run the operation concerned; null when the job has no live/last run. */
+  runId: string | null;
+  error?: string;
+}
+
+export async function controlPipelineJobViaDoor(
+  env: Env,
+  actingLogin: string | undefined | null,
+  jobId: string,
+  operation: PipelineJobOperation,
+): Promise<PipelineJobControlResult> {
+  const login = requireActingLogin(actingLogin);
+  const door = getScheduledAgentDoor(env);
+  // The three dispatch verbs share one result shape; pause/cancel are
+  // instance transitions below.
+  if (operation === "start" || operation === "resume" || operation === "retry") {
+    const dispatch =
+      operation === "start"
+        ? await door.runPipelineJob(jobId, { userLogin: login })
+        : operation === "resume"
+          ? await door.resumePipelineJob(jobId, { userLogin: login })
+          : await door.retryPipelineJob(jobId, { userLogin: login });
+    return {
+      jobId: dispatch.jobId,
+      operation,
+      state: dispatch.state,
+      runId: dispatch.runId,
+      ...(dispatch.error ? { error: dispatch.error } : {}),
+    };
+  }
+  const instance =
+    operation === "pause"
+      ? await door.pausePipelineJob(jobId)
+      : await door.cancelPipelineJob(jobId);
+  return {
+    jobId: instance.jobId,
+    operation,
+    state: instance.state,
+    runId: instance.currentRunId,
+  };
+}
+
+/**
  * Issue #4361 — one engine job's status view through the ScheduledAgent
  * door. A job the engine does not know reads null (the caller refuses by
  * name); a door outage throws, so a caller never reports "not found" for

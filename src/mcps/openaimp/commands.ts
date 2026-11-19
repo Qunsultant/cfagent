@@ -13,7 +13,10 @@
 
 import { z } from "zod";
 import { GetJobStageStatusCommand, GetJobStatusCommand } from "./jobStatusCommands";
-import { StockCopilotStageControlCommand } from "./jobStageControlCommands";
+import {
+  StockCopilotJobControlCommand,
+  StockCopilotStageControlCommand,
+} from "./jobStageControlCommands";
 import { SetJobExecutionModeCommand } from "./jobExecutionModeCommands";
 import type { IMcpToolCommand, McpToolContext } from "../../patterns/interfaces";
 import { computeMarketplaceRevenueSummary } from "../../data/marketplacePorts";
@@ -1813,6 +1816,7 @@ export class McpToolFactory {
     this.registerTool(new GetJobStatusCommand());
     this.registerTool(new GetJobStageStatusCommand());
     this.registerTool(new StockCopilotStageControlCommand());
+    this.registerTool(new StockCopilotJobControlCommand());
     this.registerTool(new SetJobExecutionModeCommand());
     this.registerTool(new ListDatabaseTablesCommand());
     this.registerTool(new QueryTableDataCommand());
