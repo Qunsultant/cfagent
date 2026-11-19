@@ -56,6 +56,24 @@ describe("Anti-Work-Loss Guardrail (scripts/ci/verify_pr_closure.py)", () => {
     runGit(["add", "."]);
     runGit(["commit", "-m", "feat(9999): work on superseded r1"]);
 
+    // 4a. Superseded branch with a BARE leading issue number in the subject
+    // (push-files convention, e.g. "3515 S3 batch 6: ...") and no number in
+    // the branch name — a SHA invocation must extract it from the subject.
+    runGit(["checkout", "main"]);
+    runGit(["checkout", "-b", "bare-subject-superseded-r1"]);
+    fs.writeFileSync(path.join(tempRepoDir, "src", "superseded_feature.ts"), "export const code = 9999;\n");
+    runGit(["add", "."]);
+    runGit(["commit", "-m", "9999 S3 batch 6: work on superseded r1"]);
+
+    // 4b. Superseded branch whose number lives ONLY in the branch name
+    // (subject carries no number) — a SHA invocation must be given the head
+    // ref via --head-ref to see it.
+    runGit(["checkout", "main"]);
+    runGit(["checkout", "-b", "issue-9999-name-only-r1"]);
+    fs.writeFileSync(path.join(tempRepoDir, "src", "superseded_feature.ts"), "export const code = 9999;\n");
+    runGit(["add", "."]);
+    runGit(["commit", "-m", "work on superseded r1 without a number in the subject"]);
+
     // Advance main with an unrelated commit
     runGit(["checkout", "main"]);
     fs.writeFileSync(path.join(tempRepoDir, "src", "unrelated.ts"), "export const unrelated = true;\n");
@@ -79,6 +97,20 @@ describe("Anti-Work-Loss Guardrail (scripts/ci/verify_pr_closure.py)", () => {
     fs.writeFileSync(path.join(tempRepoDir, "src", "other8888.ts"), "export const other = 8888;\n");
     runGit(["add", "."]);
     runGit(["commit", "-m", "feat(8888): issue 8888 landed without lost.ts"]);
+
+    // 6. SHA-invoked supersede whose issue did NOT land on main
+    runGit(["checkout", "main"]);
+    runGit(["checkout", "-b", "unlanded-bare-subject"]);
+    fs.writeFileSync(path.join(tempRepoDir, "src", "unlanded7777.ts"), "export const unlanded = 7777;\n");
+    runGit(["add", "."]);
+    runGit(["commit", "-m", "7777 S3 batch 6: unlanded work"]);
+
+    // 7. Date-like subject must not yield a phantom issue number
+    runGit(["checkout", "main"]);
+    runGit(["checkout", "-b", "dated-subject-feature"]);
+    fs.writeFileSync(path.join(tempRepoDir, "src", "dated.ts"), "export const dated = true;\n");
+    runGit(["add", "."]);
+    runGit(["commit", "-m", "2026-11-18 migrate dated feature"]);
 
     runGit(["checkout", "main"]);
   });
@@ -216,5 +248,93 @@ describe("Anti-Work-Loss Guardrail (scripts/ci/verify_pr_closure.py)", () => {
     expect(parsed.safe_to_close).toBe(false);
     expect(parsed.changed_files_count).toBe(1);
     expect(parsed.changed_files[0].path).toBe("src/lost.ts");
+  });
+
+  it("passes when evaluating a superseded branch BY ITS HEAD SHA with a bare leading issue number in the subject", () => {
+    const sha = runGit(["rev-parse", "bare-subject-superseded-r1"]);
+    const stdout = execFileSync(
+      "python3",
+      [scriptPath, sha, "--base", "main", "--json"],
+      { cwd: tempRepoDir, encoding: "utf-8" }
+    );
+    const parsed = JSON.parse(stdout);
+    expect(parsed.safe_to_close).toBe(true);
+    expect(parsed.changed_files_count).toBe(0);
+    expect(parsed.message).toContain("verified superseded without work loss");
+    expect(parsed.message).toContain("issue #9999 landed");
+  });
+
+  it("passes when evaluating a superseded branch BY ITS HEAD SHA with --head-ref where the number lives only in the head ref", () => {
+    const sha = runGit(["rev-parse", "issue-9999-name-only-r1"]);
+
+    // Without --head-ref the number is invisible: still unsafe (the known
+    // limitation of a bare SHA invocation).
+    let error: any = null;
+    try {
+      execFileSync(
+        "python3",
+        [scriptPath, sha, "--base", "main", "--json"],
+        { cwd: tempRepoDir, encoding: "utf-8" }
+      );
+    } catch (e) {
+      error = e;
+    }
+    expect(error).not.toBeNull();
+    expect(error.status).toBe(1);
+    expect(JSON.parse(error.stdout).safe_to_close).toBe(false);
+
+    // With --head-ref the branch name is in the extraction text: safe.
+    const stdout = execFileSync(
+      "python3",
+      [scriptPath, sha, "--base", "main", "--head-ref", "issue-9999-name-only-r1", "--json"],
+      { cwd: tempRepoDir, encoding: "utf-8" }
+    );
+    const parsed = JSON.parse(stdout);
+    expect(parsed.safe_to_close).toBe(true);
+    expect(parsed.changed_files_count).toBe(0);
+    expect(parsed.message).toContain("verified superseded without work loss");
+    expect(parsed.message).toContain("issue #9999 landed");
+  });
+
+  it("fails when evaluating a SHA-invoked supersede whose issue did not land on main", () => {
+    const sha = runGit(["rev-parse", "unlanded-bare-subject"]);
+    let error: any = null;
+    try {
+      execFileSync(
+        "python3",
+        [scriptPath, sha, "--base", "main", "--json"],
+        { cwd: tempRepoDir, encoding: "utf-8" }
+      );
+    } catch (e) {
+      error = e;
+    }
+
+    expect(error).not.toBeNull();
+    expect(error.status).toBe(1);
+    const parsed = JSON.parse(error.stdout);
+    expect(parsed.safe_to_close).toBe(false);
+    expect(parsed.changed_files_count).toBe(1);
+    expect(parsed.changed_files[0].path).toBe("src/unlanded7777.ts");
+  });
+
+  it("fails when evaluating a branch with a date-like subject and otherwise-unmerged content (no phantom issue)", () => {
+    const sha = runGit(["rev-parse", "dated-subject-feature"]);
+    let error: any = null;
+    try {
+      execFileSync(
+        "python3",
+        [scriptPath, sha, "--base", "main", "--json"],
+        { cwd: tempRepoDir, encoding: "utf-8" }
+      );
+    } catch (e) {
+      error = e;
+    }
+
+    expect(error).not.toBeNull();
+    expect(error.status).toBe(1);
+    const parsed = JSON.parse(error.stdout);
+    expect(parsed.safe_to_close).toBe(false);
+    expect(parsed.changed_files_count).toBe(1);
+    expect(parsed.changed_files[0].path).toBe("src/dated.ts");
   });
 });

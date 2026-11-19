@@ -14,7 +14,7 @@ Rules enforced:
    (fully absorbed by an earlier merge) may be closed without follow-up.
 
 Usage:
-    python3 scripts/ci/verify_pr_closure.py <branch_or_commit> [--base <base_ref>] [--ignore-changelog]
+    python3 scripts/ci/verify_pr_closure.py <branch_or_commit> [--base <base_ref>] [--ignore-changelog] [--head-ref <branch>]
 """
 
 import argparse
@@ -51,6 +51,7 @@ def check_unmerged_diff(
     target: str,
     base: str = "origin/main",
     ignore_changelog: bool = False,
+    head_ref: str = "",
 ) -> Tuple[bool, List[Dict[str, str]], str]:
     """Check whether target contains unmerged functional differences against base.
 
@@ -112,8 +113,24 @@ def check_unmerged_diff(
 
     # Check if target represents a superseded revision of an issue that landed on base
     code, log_out, _ = run_git(["log", f"{merge_base}..{sha}", "--format=%s %b"])
-    target_text = f"{target} {log_out}"
+    # The head branch name (watchdog passes it via --head-ref) carries the
+    # issue number when the caller invokes by bare SHA; an empty head ref
+    # (e.g. workflow_dispatch runs) contributes nothing.
+    target_text = " ".join(part for part in [target, head_ref, log_out] if part)
     issues = set(re.findall(r"(?:#|issue-|\bfeat\(|\bfix\(|\bdocs\()(\d{3,5})\b", target_text))
+
+    # Leading bare issue numbers in commit subjects (push-files message
+    # convention, e.g. "3515 S3 batch 6: ..."). The target string alone does
+    # not carry the number when the caller passes a bare SHA (the watchdog
+    # passes $HEAD_SHA), so extract from the commits themselves. Anchored to
+    # subject start + whitespace/colon so date-like subjects
+    # ("2026-11-18 ...") do NOT match.
+    code, subjects_out, _ = run_git(["log", f"{merge_base}..{sha}", "--format=%s"])
+    if code == 0 and subjects_out:
+        for subject in subjects_out.splitlines():
+            match = re.match(r"^(\d{3,5})[\s:]", subject)
+            if match:
+                issues.add(match.group(1))
 
     landed_issues: List[Tuple[str, str]] = []
     for issue in sorted(issues):
@@ -168,6 +185,13 @@ def main() -> int:
         help="Emergency override (logs a warning instead of failing)",
     )
     parser.add_argument("--json", action="store_true", help="Output machine-readable JSON result")
+    parser.add_argument(
+        "--head-ref",
+        default="",
+        help="Head branch name for a SHA target (e.g. the watchdog's "
+        "github.event.pull_request.head.ref); included in issue extraction. "
+        "Empty (workflow_dispatch runs) is ignored.",
+    )
 
     args = parser.parse_args()
 
@@ -175,6 +199,7 @@ def main() -> int:
         target=args.target,
         base=args.base,
         ignore_changelog=args.ignore_changelog,
+        head_ref=args.head_ref,
     )
 
     if args.json:
