@@ -360,8 +360,18 @@ const ORCH = "agents/orchestrator.ts";
  *  two wrapper methods + the unrecorded-body rename) —
  *  measured 3,418 lines / 156,852 B after the addition, so
  *  budget lines rise to 3435, keeping similar headroom.
- *  Bytes unchanged — measured well under the 159,200 budget. */
-const BUDGET_LINES = 3435;
+ *  Bytes unchanged — measured well under the 159,200 budget.
+ *  #4186 (the NLQ-armed reminder callback) wraps the
+ *  sendScheduledReminder method in the #3394 recorder (the
+ *  recordScheduleCallbackRun wrapper + its doc comment,
+ *  mirroring the #3788/#3310/#4242 internal-callback wrappers;
+ *  the recording logic itself lives in
+ *  orchestrator/scheduleCallbackRunRecords.ts, the class gains
+ *  only wiring) — measured 3,437 lines / 157,863 B after the
+ *  addition, so budget lines rise to 3450, keeping similar
+ *  headroom. Bytes unchanged — measured well under the 159,200
+ *  budget. */
+const BUDGET_LINES = 3450;
 const BUDGET_BYTES = 159_200;
 
 const count = (haystack: string, needle: string) =>
