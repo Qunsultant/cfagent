@@ -28,6 +28,15 @@ import type {
   HaltReadOptions,
 } from "./governancePorts";
 
+import {
+  createStructuredLogger,
+  type StructuredLogger,
+} from "../observability/structuredLogger";
+import {
+  ConsoleObservabilitySink,
+  type ObservabilitySink,
+} from "../observability/observabilityPorts";
+
 /** Drizzle D1 database object carrying the governance schema. */
 export type GovernanceDb = DrizzleD1Database<{
   agentGovernance: typeof agentGovernance;
@@ -66,7 +75,19 @@ function toRow(raw: typeof agentGovernance.$inferSelect): GovernanceHaltRow {
  * no unscoped read method exists on this class.
  */
 export class D1GovernanceAdapter implements GovernanceStore {
-  constructor(readonly db: GovernanceDb) {}
+  // #3515 S3 batch 7 — optional sink injection (d1QueryLogger precedent);
+  // env-constructed sink from the composition root when it holds env,
+  // else the structured console fallback (never a `{}` sink, #5587).
+  private readonly log: StructuredLogger;
+  constructor(
+    readonly db: GovernanceDb,
+    options?: { sink?: ObservabilitySink },
+  ) {
+    this.log = createStructuredLogger(
+      options?.sink ?? new ConsoleObservabilitySink(),
+      { component: "data/d1GovernanceAdapter" },
+    );
+  }
 
   async recordHalt(row: GovernanceHaltRow): Promise<void> {
     // INSERT OR IGNORE: replaying an event id is a no-op (R5).
@@ -124,10 +145,11 @@ export class D1GovernanceAdapter implements GovernanceStore {
       const latest = await this.latestHalt(tenantId, opts);
       return latest !== null && latest.state === "halted";
     } catch (err) {
-      console.error(
-        "[data-foundation] Governance halt read failed; failing closed:",
-        err,
-      );
+      this.log.error("d1GovernanceAdapter.halt_read_failed", {
+        message: "[data-foundation] Governance halt read failed; failing closed:",
+        error: err instanceof Error ? err.message : String(err),
+        tenantId,
+      });
       return true;
     }
   }

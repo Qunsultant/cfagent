@@ -591,7 +591,10 @@ describe("etrade capture-on-fetch (issue #1133)", () => {
 describe("capture failure semantics (issue #1133)", () => {
   it("a failed blob write leaves the fetch intact and records a queryable failure marker", async () => {
     const sql = freshSql();
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    // #3515 S3 batch 7: the capture-write failure is now a structured
+    // event (providerCapturePorts.capture_write_failed) on the
+    // console-info JSON fallback, not a console.error line.
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
     try {
       const provider = capturingProvider(
         sql,
@@ -615,14 +618,34 @@ describe("capture failure semantics (issue #1133)", () => {
       // trail shows the gap instead of silently missing the fetch.
       expect(listCapturesByRun(sql, "tenant-a", "run-fail")).toHaveLength(1);
       // The failure was logged in structured form, not swallowed.
-      expect(errorSpy).toHaveBeenCalled();
+      const failed = infoSpy.mock.calls
+        .map((c) => {
+          try {
+            return JSON.parse(String(c[0]));
+          } catch {
+            return null;
+          }
+        })
+        .filter(
+          (e) =>
+            e !== null &&
+            e.operation === "providerCapturePorts.capture_write_failed",
+        );
+      expect(failed).toHaveLength(1);
+      expect(failed[0].level).toBe("error");
+      expect(String(failed[0].fields?.message ?? "")).toContain(
+        "capture write failed",
+      );
     } finally {
-      errorSpy.mockRestore();
+      infoSpy.mockRestore();
     }
   });
 
   it("even a totally broken capture store cannot fail the fetch", async () => {
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    // #3515 S3 batch 7: the capture-write + marker-write failures are
+    // now structured events on the console-info JSON fallback, not
+    // console.error lines.
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
     try {
       const brokenSql: any = {
         exec: () => {
@@ -638,9 +661,25 @@ describe("capture failure semantics (issue #1133)", () => {
         tenantId: "tenant-a",
       });
       expect(envelope.result).toBe(etradeQuoteFixture);
-      expect(errorSpy).toHaveBeenCalled();
+      const failed = infoSpy.mock.calls
+        .map((c) => {
+          try {
+            return JSON.parse(String(c[0]));
+          } catch {
+            return null;
+          }
+        })
+        .filter(
+          (e) =>
+            e !== null &&
+            (e.operation === "providerCapturePorts.capture_write_failed" ||
+              e.operation ===
+                "providerCapturePorts.capture_failure_marker_write_failed"),
+        );
+      expect(failed).toHaveLength(2);
+      expect(failed.every((e) => e.level === "error")).toBe(true);
     } finally {
-      errorSpy.mockRestore();
+      infoSpy.mockRestore();
     }
   });
 });

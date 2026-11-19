@@ -42,6 +42,12 @@ import {
   type RetentionPurgeStore,
 } from "./retentionPorts";
 
+import { createStructuredLogger } from "../observability/structuredLogger";
+import {
+  ConsoleObservabilitySink,
+  type ObservabilitySink,
+} from "../observability/observabilityPorts";
+
 const DAY_MS = 86_400_000;
 
 /**
@@ -148,6 +154,13 @@ export interface RetentionPurgeJobInput {
   /** Halted (from the HaltRead the caller resolves, as the tick does). */
   halted?: boolean;
   options?: RetentionPurgeOptions;
+  /**
+   * #3515 S3 batch 7 — optional observability sink (d1QueryLogger
+   * precedent): the composition root passes the env-constructed sink
+   * when it holds env; without one the event goes to the structured
+   * console fallback (never a `{}` sink, #5587).
+   */
+  sink?: ObservabilitySink;
 }
 
 export interface RetentionPurgeJobResult {
@@ -166,6 +179,13 @@ export interface RetentionPurgeJobResult {
 export async function runRetentionPurgeJob(
   input: RetentionPurgeJobInput,
 ): Promise<RetentionPurgeJobResult> {
+  // #3515 S3 batch 7 — logger over the injected sink (d1QueryLogger
+  // precedent), else the structured console fallback (never a `{}` sink,
+  // #5587). The job has no production caller yet (operator activation).
+  const structuredLog = createStructuredLogger(
+    input.sink ?? new ConsoleObservabilitySink(),
+    { component: "data/retentionPurge" },
+  );
   if (input.halted) {
     return { skipped: true, reason: "halted" };
   }
@@ -178,10 +198,12 @@ export async function runRetentionPurgeJob(
     return { skipped: false, report };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    console.error(
-      "[data-foundation] Retention purge job failed (tenant scoped, no rows assumed purged):",
-      message,
-    );
+    structuredLog.error("retentionPurge.retention_purge_job_failed", {
+      message:
+        "[data-foundation] Retention purge job failed (tenant scoped, no rows assumed purged):",
+      error: message,
+      tenantId: input.tenantId,
+    });
     return { skipped: false, error: message };
   }
 }

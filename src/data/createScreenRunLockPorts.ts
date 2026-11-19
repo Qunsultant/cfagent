@@ -31,6 +31,9 @@ import type {
   ScreenRunLockSqlExecutor,
 } from "./screenRunLockPorts";
 
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
 /**
  * #1767 (parent #1717): composition options for the lock port.
  * Either pass a resolved mode directly, or pass the host's env
@@ -40,10 +43,12 @@ import type {
  * current behavior). An invalid env value fails closed to
  * legacy and is console-logged with the schema.config_error
  * event name: this sync composition root has no audit sink, so
- * the log line — not silence — is the misconfiguration signal.
+ * the structured event — not silence — is the misconfiguration
+ * signal (#3515 S3 batch 7: the console line is now a structured
+ * event on the env-constructed sink).
  */
 export interface CreateScreenRunLockPortOptions {
-  env?: { SCHEMA_MIGRATION_MODE?: unknown };
+  env?: { SCHEMA_MIGRATION_MODE?: unknown; OBSERVABILITY?: unknown };
   schemaMigrationMode?: SchemaMigrationMode;
 }
 
@@ -56,9 +61,15 @@ export function createScreenRunLockPort(
   if (options.schemaMigrationMode === undefined && options.env !== undefined) {
     const resolved = resolveSchemaMigrationModeFromEnv(options.env);
     if (resolved.invalid) {
-      console.warn(
-        `${schemaMigrationConfigErrorEvent()}: unrecognized SCHEMA_MIGRATION_MODE ${JSON.stringify(resolved.raw)} — failing closed to legacy`,
-      );
+      // #3515 S3 batch 7 — env-constructed sink (#5587): the host env
+      // carries the binding, so the misconfiguration event reaches
+      // the Analytics Engine dataset, not just console.
+      createStructuredLogger(createObservabilitySink(options.env), {
+        component: "data/createScreenRunLockPorts",
+      }).warn("createScreenRunLockPorts.schema_config_error", {
+        message: `${schemaMigrationConfigErrorEvent()}: unrecognized SCHEMA_MIGRATION_MODE ${JSON.stringify(resolved.raw)} — failing closed to legacy`,
+        rawValue: resolved.raw,
+      });
     }
     mode = resolved.mode;
   }

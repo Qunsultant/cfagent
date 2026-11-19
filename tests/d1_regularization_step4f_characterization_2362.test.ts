@@ -233,7 +233,10 @@ describe("characterization: D1 resource usage adapter (legacy surface)", () => {
   });
 
   it("record never throws when the store fails (warns and drops)", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    // #3515 S3 batch 7: the warn rides the S2 structured logger —
+    // the console-info JSON fallback carries the
+    // d1ResourceUsageAdapter.d1_record_failed warn event.
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
     const broken = {
       prepare() {
         throw new Error("d1 unavailable");
@@ -241,8 +244,31 @@ describe("characterization: D1 resource usage adapter (legacy surface)", () => {
     };
     const adapter = new D1ResourceUsageAdapter(createD1ResourceDb(broken as never));
     await expect(adapter.record(event)).resolves.toBeUndefined();
-    expect(warn).toHaveBeenCalled();
-    warn.mockRestore();
+    const events = info.mock.calls
+      .map((call) => {
+        try {
+          return JSON.parse(String(call[0])) as {
+            operation?: unknown;
+            level?: unknown;
+            fields?: Record<string, unknown>;
+          };
+        } catch {
+          return null;
+        }
+      })
+      .filter((e) => e?.operation === "d1ResourceUsageAdapter.d1_record_failed");
+    expect(events).toHaveLength(1);
+    expect(events[0]?.level).toBe("warn");
+    // The DML executor wraps the store failure, so fields.error is
+    // its "Failed to run the query ..." text naming the statement that
+    // failed (the underlying "d1 unavailable" cause is not chained into
+    // the message); the warn still names the failure and the op/ns.
+    expect(events[0]?.fields?.message).toBe("[resource-usage] D1 record failed:");
+    expect(String(events[0]?.fields?.error ?? "")).toContain("Failed to run the query");
+    expect(String(events[0]?.fields?.error ?? "")).toContain("resource_sql_ops");
+    expect(events[0]?.fields?.op).toBe(event.op);
+    expect(events[0]?.fields?.ns).toBe(event.ns);
+    info.mockRestore();
   });
 
   it("totals does NOT self-create and throws on DB error", async () => {
