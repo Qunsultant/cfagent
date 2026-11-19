@@ -12,6 +12,7 @@ import type { CanonicalReportStoreSeam } from "../services/canonicalReportLeg";
 import type { ScheduledReportInput } from "../services/scheduledReports";
 import type { ResearchReport } from "../services/researchPipeline";
 import type { ResearchReportArtifactOutcome } from "../trading";
+import { researchEngineJobId } from "./researchDataPorts";
 import { createStructuredLogger } from "../observability/structuredLogger";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
 
@@ -48,7 +49,7 @@ export function researchReportToStoreInput(
   const artifactKeys = [artifacts.pdfKey, artifacts.xlsxKey, artifacts.csvKey].filter(
     (k): k is string => typeof k === "string" && k.length > 0,
   );
-  const jobRunId = `research:${report.runId}`;
+  const jobRunId = researchEngineJobId(report.runId);
   const stages = [
     {
       stage: "feed",
