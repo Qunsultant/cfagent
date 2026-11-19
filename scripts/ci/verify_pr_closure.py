@@ -74,6 +74,20 @@ def check_unmerged_diff(
     if code != 0 or not merge_base:
         return False, [], f"No common ancestor between '{base}' and '{target}': {err}"
 
+    # If every commit on target is patch-equivalent to a commit on base (e.g.
+    # squash/cherry-pick landed earlier), no unique unmerged work remains.
+    cherry_code, cherry_out, _ = run_git(["cherry", base_sha, sha])
+    if cherry_code == 0 and cherry_out:
+        has_unmerged_commits = any(
+            line.startswith("+ ") for line in cherry_out.splitlines() if line.strip()
+        )
+        if not has_unmerged_commits:
+            return (
+                True,
+                [],
+                f"Safe to close: all commits in '{target}' are already patch-equivalent on '{base}'.",
+            )
+
     # Run git diff between merge base / base and target (three-dot diff)
     code, diff_out, err = run_git(["diff", f"{base}...{sha}", "--name-status"])
     if code != 0:
