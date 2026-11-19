@@ -44,6 +44,7 @@ import {
 import { assertApproverId, type PlanPriceApprovalStatus } from "./subscriptionPorts";
 import { DML_CATALOGUE } from "./schemaComponent/dmlCatalogue";
 import { dmlFragment } from "./schemaComponent/dmlExecutor";
+import { BusinessError } from "../outcomes/outcomeAspects";
 
 /** Drizzle D1 database object carrying the runs-pack schema. */
 export type RunsPackDb = DrizzleD1Database<{
@@ -199,8 +200,8 @@ export class D1RunsPackVersionAdapter implements RunsPackVersionStore {
       });
     } catch {
       const existing = await this.getVersion(id);
-      if (existing) throw new Error(`Runs-pack version ${id} already exists.`);
-      throw new Error(`Failed to create runs-pack version ${id}.`);
+      if (existing) throw new BusinessError("FAILURE_COMMERCIAL_CONFLICT"); // #5606 (G-3)
+      throw new BusinessError("FAILURE_UNEXPECTED_ERROR"); // #5606 (G-3)
     }
     return record;
   }
@@ -208,7 +209,7 @@ export class D1RunsPackVersionAdapter implements RunsPackVersionStore {
   async approveVersion(id: string, approverId: string): Promise<RunsPackVersion> {
     const approver = assertApproverId(approverId);
     const version = await this.getVersion(id);
-    if (!version) throw new Error(`No runs-pack version ${id}.`);
+    if (!version) throw new BusinessError("FAILURE_COMMERCIAL_NOT_FOUND"); // #5606 (G-3)
     const now = Date.now();
     await this.db
       .update(agentRunsPackVersions)
@@ -219,7 +220,7 @@ export class D1RunsPackVersionAdapter implements RunsPackVersionStore {
 
   async deactivateVersion(id: string): Promise<RunsPackVersion> {
     const version = await this.getVersion(id);
-    if (!version) throw new Error(`No runs-pack version ${id}.`);
+    if (!version) throw new BusinessError("FAILURE_COMMERCIAL_NOT_FOUND"); // #5606 (G-3)
     const now = Date.now();
     await this.db
       .update(agentRunsPackVersions)
@@ -360,7 +361,7 @@ export class D1RunsPackDraftAdapter implements RunsPackDraftStore {
       .returning();
     if (rows.length === 0) {
       const existing = await this.getDraft(id);
-      if (!existing) throw new Error(`Unknown runs-pack draft ${id}.`);
+      if (!existing) throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
       throw new RunsPackClaimRefusedError(id, existing.status, "claim");
     }
     return toDraft(rows[0]);
@@ -375,7 +376,7 @@ export class D1RunsPackDraftAdapter implements RunsPackDraftStore {
       .returning();
     if (rows.length === 0) {
       const existing = await this.getDraft(id);
-      if (!existing) throw new Error(`Unknown runs-pack draft ${id}.`);
+      if (!existing) throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
       throw new RunsPackClaimRefusedError(id, existing.status, "release");
     }
     return toDraft(rows[0]);
@@ -397,9 +398,9 @@ export class D1RunsPackDraftAdapter implements RunsPackDraftStore {
       .returning();
     if (rows.length === 0) {
       const existing = await this.getDraft(id);
-      if (!existing) throw new Error(`Unknown runs-pack draft ${id}.`);
-      if (existing.status === "credited") throw new Error(`Runs pack ${id} is already credited.`);
-      throw new Error(`Runs pack ${id} is not crediting.`);
+      if (!existing) throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
+      if (existing.status === "credited") throw new BusinessError("FAILURE_COMMERCIAL_CONFLICT"); // #5606 (G-3)
+      throw new BusinessError("FAILURE_COMMERCIAL_CONFLICT"); // #5606 (G-3)
     }
     return toDraft(rows[0]);
   }

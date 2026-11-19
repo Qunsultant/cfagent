@@ -169,10 +169,10 @@ describe("bundle kind is a first-class refund kind (#5227)", () => {
     if (!policy) throw new Error("seed policy missing");
     const input = { rail: "card" as const, amountUSD: 15, originalAmountUSD: 30, originalPaidAtMs: NOW };
     expect(() => validateRefundRequest(policy, input, NOW + 15 * DAY, "bundle")).not.toThrow();
-    expect(() => validateRefundRequest(policy, input, NOW + 15 * DAY, "subscription")).toThrow(/not allowed/);
-    expect(() => validateRefundRequest(policy, input, NOW + 15 * DAY)).toThrow(/not allowed/);
+    expect(() => validateRefundRequest(policy, input, NOW + 15 * DAY, "subscription")).toThrowError(expect.objectContaining({ code: "FAILURE_REFUND_POLICY_REFUSAL" })); // #5606 (G-3)
+    expect(() => validateRefundRequest(policy, input, NOW + 15 * DAY)).toThrowError(expect.objectContaining({ code: "FAILURE_REFUND_POLICY_REFUSAL" })); // #5606 (G-3)
     // The window still applies to bundles.
-    expect(() => validateRefundRequest(policy, input, NOW + 31 * DAY, "bundle")).toThrow(/expired/);
+    expect(() => validateRefundRequest(policy, input, NOW + 31 * DAY, "bundle")).toThrowError(expect.objectContaining({ code: "FAILURE_REFUND_POLICY_REFUSAL" })); // #5606 (G-3)
   });
 });
 
@@ -250,24 +250,24 @@ describe("bundle refund request (#5227)", () => {
 
   it("a supplied amount different from the computed amount is refused (the amount is policy-computed, not chosen)", async () => {
     const deps = await makeService();
-    await expect(requestBundle(deps, { nowMs: NOW + 15 * DAY, amountUSD: 3 })).rejects.toThrow(/must be/);
-    await expect(requestBundle(deps, { nowMs: NOW + 15 * DAY, amountUSD: 30 })).rejects.toThrow(/must be/);
+    await expect(requestBundle(deps, { nowMs: NOW + 15 * DAY, amountUSD: 3 })).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3)
+    await expect(requestBundle(deps, { nowMs: NOW + 15 * DAY, amountUSD: 30 })).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3)
   });
 
   it("an unapproved bundle kind is refused before any record is created", async () => {
     const deps = await makeService({ approveBundle: false });
-    await expect(requestBundle(deps)).rejects.toThrow(/not owner-approved/);
+    await expect(requestBundle(deps)).rejects.toMatchObject({ code: "FAILURE_REFUND_POLICY_REFUSAL" }); // #5606 (G-3)
     expect(await deps.refunds.listRefunds("u1")).toEqual([]);
   });
 
   it("an unknown bundle ref is refused", async () => {
     const deps = await makeService();
-    await expect(requestBundle(deps, { ref: "bbnd-missing" })).rejects.toThrow(/No bundle purchase found/);
+    await expect(requestBundle(deps, { ref: "bbnd-missing" })).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3)
   });
 
   it("a non-owner non-operator is refused", async () => {
     const deps = await makeService();
-    await expect(requestBundle(deps, { requesterLogin: "u2" })).rejects.toThrow(/Only the bundle owner/);
+    await expect(requestBundle(deps, { requesterLogin: "u2" })).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3)
   });
 
   it("an operator may request for the owner", async () => {
@@ -280,24 +280,24 @@ describe("bundle refund request (#5227)", () => {
     const deps = await makeService({
       purchase: bundlePurchase({ provider: "x402", stripePaymentIntentId: "pi_x_1" }),
     });
-    await expect(requestBundle(deps)).rejects.toThrow(/non-refundable/);
+    await expect(requestBundle(deps)).rejects.toMatchObject({ code: "FAILURE_REFUND_POLICY_REFUSAL" }); // #5606 (G-3)
   });
 
   it("an unresolvable payment intent is refused at request time, not queued", async () => {
     const deps = await makeService({ invoicePi: null });
-    await expect(requestBundle(deps)).rejects.toThrow(/no stored/);
+    await expect(requestBundle(deps)).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3)
   });
 
   it("outside the window is refused even when an unused remainder exists (90-day period, day 31)", async () => {
     const deps = await makeService({
       purchase: bundlePurchase({ periodEndMs: NOW + 90 * DAY }),
     });
-    await expect(requestBundle(deps, { nowMs: NOW + 31 * DAY })).rejects.toThrow(/expired/);
+    await expect(requestBundle(deps, { nowMs: NOW + 31 * DAY })).rejects.toMatchObject({ code: "FAILURE_REFUND_POLICY_REFUSAL" }); // #5606 (G-3)
   });
 
   it("a fully-used bundle has nothing refundable", async () => {
     const deps = await makeService();
-    await expect(requestBundle(deps, { nowMs: NOW + 30 * DAY + 1 })).rejects.toThrow(/non-refundable/);
+    await expect(requestBundle(deps, { nowMs: NOW + 30 * DAY + 1 })).rejects.toMatchObject({ code: "FAILURE_REFUND_POLICY_REFUSAL" }); // #5606 (G-3)
   });
 });
 

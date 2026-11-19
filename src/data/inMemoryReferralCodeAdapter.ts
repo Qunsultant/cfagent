@@ -25,6 +25,7 @@ import {
   type ReferralCodeRuleStore,
   type ReferralCodeStore,
 } from "./referralCodePorts";
+import { BusinessError } from "../outcomes/outcomeAspects";
 
 function randomId(prefix: string): string {
   return `${prefix}-${crypto.randomUUID().slice(0, 8)}`;
@@ -131,7 +132,7 @@ export class InMemoryReferralCodeAdapter implements ReferralCodeStore {
     nowMs: number;
   }): Promise<{ code: ReferralCode; plaintext: string }> {
     const referrer = assertReferrerForKind(input.kind, input.referrerUserId);
-    if (!input.issuerLogin.trim()) throw new Error("Referral code issuerLogin is required.");
+    if (!input.issuerLogin.trim()) throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     const expiresAtMs =
       input.rule.expiryDays === null ? null : input.nowMs + input.rule.expiryDays * 86_400_000;
     for (let attempt = 0; attempt < 5; attempt++) {
@@ -161,7 +162,7 @@ export class InMemoryReferralCodeAdapter implements ReferralCodeStore {
       this.codesByHash.set(record.codeHash, record);
       return { code: record, plaintext };
     }
-    throw new Error("Failed to issue referral code after 5 attempts.");
+    throw new BusinessError("FAILURE_UNEXPECTED_ERROR"); // #5606 (G-3)
   }
 
   async getCode(id: string): Promise<ReferralCode | null> {
@@ -311,7 +312,7 @@ export class InMemoryCodeRunsBalanceAdapter implements CodeRunsBalancePort {
   }
 
   async addCodeRuns(login: string, runs: number): Promise<number> {
-    if (!login.trim()) throw new Error("Code-runs login must be a non-empty string.");
+    if (!login.trim()) throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     const validatedRuns = assertCodeRuns(runs);
     const next = (this.balances.get(login.trim()) ?? 0) + validatedRuns;
     this.balances.set(login.trim(), next);
@@ -320,7 +321,7 @@ export class InMemoryCodeRunsBalanceAdapter implements CodeRunsBalancePort {
 
   async consumeCodeRun(input: { login: string }): Promise<CodeRunsConsumption> {
     const login = input.login.trim();
-    if (!login) throw new Error("Code-runs login must be a non-empty string.");
+    if (!login) throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     const current = this.balances.get(login) ?? 0;
     if (current <= 0) return { allowed: false, remaining: current };
     this.balances.set(login, current - 1);

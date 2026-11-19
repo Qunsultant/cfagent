@@ -79,6 +79,16 @@ import {
   tenantSettingsBodySchema,
   validateRequestShape,
 } from "../../api/requestValidation";
+import { BusinessError, codedMessage, resolveOutcome } from "../../outcomes/outcomeAspects";
+
+import { createStructuredLogger } from "../../observability/structuredLogger";
+import { createObservabilitySink } from "../../observability/createObservabilityPorts";
+
+/** Issue #5606 (G-3) — module logger on the structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "agents/routes/platformTenants",
+});
+
 
 /** Re-exported for the BizCopilot parsers, which import the predicate from this module. The single definition lives in the shared helper (#5604). */
 export { isTenantIdShaped };
@@ -423,6 +433,22 @@ export async function handlePlatformTenantRoutes(
 
     return jsonError("Method not allowed", 405);
   } catch (err) {
-    return jsonError(err instanceof Error ? err.message : "Tenant administration failed.", 500);
+    // #5606 (G-3): typed failures render from the catalog; anything
+    // else logs server-side and answers the generic code.
+    if (err instanceof BusinessError) {
+      const outcome = resolveOutcome(err.code);
+      return Response.json(
+        { code: err.code, error: codedMessage(err.code) },
+        { status: outcome.entry?.httpStatus ?? 500 },
+      );
+    }
+    structuredLog.error("platformTenants.tenant_administration_failed", {
+      message: `[tenants] tenant administration failed: ${err instanceof Error ? err.message : String(err)}`,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return Response.json(
+      { code: "FAILURE_UNEXPECTED_ERROR", error: codedMessage("FAILURE_UNEXPECTED_ERROR") },
+      { status: 500 },
+    );
   }
 }

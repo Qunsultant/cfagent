@@ -22,6 +22,7 @@ import type {
   UsageEventPort,
   UsageEventRow,
 } from "./canonicalReportStorePorts";
+import { DuplicateUsageEventError } from "./canonicalReportStorePorts";
 
 interface StoredReport extends CanonicalReportStoredRow {
   generation_id: string | null;
@@ -237,7 +238,9 @@ export class InMemoryUsageEventStore implements UsageEventPort {
 
   insertEvent(row: InsertUsageEventRow): void {
     if (this.rows.some((r) => r.id === row.id)) {
-      throw new Error(`UNIQUE constraint failed: usage_events.id`);
+      // #5606 (G-3): the duplicate is typed at the boundary — the
+      // route answers 201 duplicate without sniffing dialect text.
+      throw new DuplicateUsageEventError(row.id);
     }
     this.rows.push({ ...row, seq: this.seq++ });
   }

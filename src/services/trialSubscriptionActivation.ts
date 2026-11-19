@@ -59,6 +59,7 @@ import {
   type SubscriptionStore,
 } from "../data/subscriptionPorts";
 import { assertPlanEffectiveAndApprovedForSegment } from "./subscriptionActivation";
+import { BusinessError } from "../outcomes/outcomeAspects";
 
 export interface TrialActivationInput {
   subs: SubscriptionStore;
@@ -110,22 +111,32 @@ export async function activateTrialSubscription(
   // when no account exists yet) — never a superseded, future,
   // expired, or unapproved version. No payment has been taken,
   // so refusing costs the buyer nothing.
-  await assertPlanEffectiveAndApprovedForSegment(
-    subs,
-    plan,
-    existing?.segment ?? "default",
-    nowMs,
-  );
+  try {
+    await assertPlanEffectiveAndApprovedForSegment(
+      subs,
+      plan,
+      existing?.segment ?? "default",
+      nowMs,
+    );
+  } catch (err) {
+    // #5606 (G-3): the trial route refuses plan-state failures as 409
+    // CONFLICT (its documented contract); the purchase route keeps the
+    // same failures as 400 REQUEST_INVALID.
+    if (err instanceof BusinessError && err.code === "FAILURE_COMMERCIAL_REQUEST_INVALID") {
+      throw new BusinessError("FAILURE_COMMERCIAL_CONFLICT");
+    }
+    throw err;
+  }
   const trialDays = plan.trialDays;
   if (trialDays === null || trialDays === undefined || !Number.isInteger(trialDays) || trialDays < 1) {
-    throw new Error(`Plan ${plan.id} offers no trial.`);
+    throw new BusinessError("FAILURE_COMMERCIAL_CONFLICT"); // #5606 (G-3)
   }
   if (existing && existing.tenantId !== tenantId) {
-    throw new Error("Tenant mismatch: subscription tenant must equal the verified account tenant.");
+    throw new BusinessError("FAILURE_COMMERCIAL_FORBIDDEN"); // #5606 (G-3)
   }
   const prior = await subs.listSubscriptions(userId);
   if (prior.some((s) => s.planId === plan.id && isTrialSubscription(s))) {
-    throw new Error(`Trial for plan ${plan.id} already used.`);
+    throw new BusinessError("FAILURE_COMMERCIAL_CONFLICT"); // #5606 (G-3)
   }
   const periodStartMs = nowMs;
   const periodEndMs = periodStartMs + trialDays * MS_PER_DAY;

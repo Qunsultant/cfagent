@@ -162,7 +162,7 @@ describe("plan trialDays — port contract (#3243)", () => {
       for (const bad of [0, -1, 1.5, "seven", NaN]) {
         await expect(
           subs.createPlan({ id: "bad", name: "Bad", priceUSD: 5, periodDays: 30, includedRuns: 0, trialDays: bad }),
-        ).rejects.toThrow(/trialDays/);
+        ).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3)
       }
     }
   });
@@ -212,7 +212,7 @@ describe("trial activation service (#3243)", () => {
     const plan = (await subs.getPlan(created.id))!;
     await expect(
       activateTrialSubscription({ subs, store, userId: "u1", tenantId: "t1", plan, nowMs: NOW }),
-    ).rejects.toThrow(/no trial/);
+    ).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_CONFLICT" }); // #5606 (G-3)
     expect(await subs.listSubscriptions("u1")).toEqual([]);
   });
 
@@ -223,7 +223,7 @@ describe("trial activation service (#3243)", () => {
     expect(inactivePlan?.active).toBe(false);
     await expect(
       activateTrialSubscription({ subs, store, userId: "u1", tenantId: "t1", plan: inactivePlan!, nowMs: NOW }),
-    ).rejects.toThrow(/not active/);
+    ).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_CONFLICT" }); // #5606 (G-3)
     // Issue #3289: activation validates the STORED version is
     // effective + approved — the old spread-hack ({...plan,
     // active: true}) no longer reactivates a deactivated row, so
@@ -234,7 +234,7 @@ describe("trial activation service (#3243)", () => {
     await activateTrialSubscription({ subs, store, userId: "u1", tenantId: "t1", plan: activePlan, nowMs: NOW });
     await expect(
       activateTrialSubscription({ subs, store, userId: "u1", tenantId: "t1", plan: activePlan, nowMs: NOW }),
-    ).rejects.toThrow(/already used/);
+    ).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_CONFLICT" }); // #5606 (G-3)
     // A different trial plan for the same user is still allowed.
     const createdOther = await subs.createPlan({ id: "team", name: "Team", priceUSD: 40, periodDays: 30, includedRuns: 5, trialDays: 7 });
     await subs.approvePlan(createdOther.id, "test-operator");

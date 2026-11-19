@@ -60,6 +60,7 @@ import {
   type ReferralCodeRuleStore,
   type ReferralCodeStore,
 } from "../data/referralCodePorts";
+import { BusinessError } from "../outcomes/outcomeAspects";
 
 /** The route maps this to the generic 400 (FAILURE_REFERRAL_CODE_INVALID). */
 export class ReferralCodeInvalidError extends Error {
@@ -162,7 +163,7 @@ export async function issueReferralCode(
 ): Promise<{ code: PublicReferralCode; plaintext: string }> {
   const kind = assertReferralCodeKind(input.kind);
   const referrer = assertReferrerForKind(kind, input.referrerUserId);
-  if (!input.issuerLogin.trim()) throw new Error("Referral code issuerLogin is required.");
+  if (!input.issuerLogin.trim()) throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   const rule = await deps.rules.getRule(input.productId, input.issuerKind);
   if (!rule || !rule.active) {
     throw new ReferralCodeRuleUnavailableError(

@@ -255,7 +255,9 @@ describe("compensateFailedScreen (S3, #2041)", () => {
     const { deps, issueCredit, store } = baseDeps();
     const out = await compensateFailedScreen(deps, baseInput({ paidAtMs: NOW + 86_400_000 }));
     expect(out.form).toBe("credit");
-    expect(out.fallbackReason).toMatch(/future/i);
+    // #5606 (G-3) N20: the validation detail no longer surfaces in the
+    // recorded reason — only the catalog message does.
+    expect(out.fallbackReason).toMatch(/The request was invalid/);
     expect(issueCredit).toHaveBeenCalledTimes(1);
     expect(store.createRefund).not.toHaveBeenCalled();
   });
@@ -280,7 +282,9 @@ describe("compensateFailedScreen (S3, #2041)", () => {
     };
     const out = await compensateFailedScreen(deps, baseInput());
     expect(out.form).toBe("credit");
-    expect(out.fallbackReason).toMatch(/not owner-approved/i);
+    // #5606 (G-3) N20: the policy detail no longer surfaces in the
+    // recorded reason — only the catalog message does.
+    expect(out.fallbackReason).toMatch(/cannot proceed under the current refund policy/);
     expect(issueCredit).toHaveBeenCalledTimes(1);
     expect(store.createRefund).not.toHaveBeenCalled();
   });

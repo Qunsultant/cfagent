@@ -17,6 +17,7 @@ import {
   type RefundRecord,
   type RefundStore,
 } from "./refundPorts";
+import { BusinessError } from "../outcomes/outcomeAspects";
 
 /**
  * Policy store over a single in-memory row. By default the row is
@@ -35,7 +36,7 @@ export class InMemoryRefundPolicyAdapter implements RefundPolicyStore {
   }
 
   async setPolicy(patch: Record<string, unknown>): Promise<RefundPolicy> {
-    if (!this.policy) throw new Error("Refund policy is not configured: run the refund schema ensure first.");
+    if (!this.policy) throw new BusinessError("FAILURE_REFUND_POLICY_REFUSAL"); // #5606 (G-3)
     const validated = assertRefundPolicyPatch(patch, this.policy);
     // Issue #2662 (#2547 rule): a value edit resets approval.
     this.policy = {
@@ -49,12 +50,12 @@ export class InMemoryRefundPolicyAdapter implements RefundPolicyStore {
   }
 
   async setKindApproval(kind: RefundPolicy["approvedKinds"][number], approved: boolean, byLogin: string): Promise<RefundPolicy> {
-    if (!this.policy) throw new Error("Refund policy is not configured: run the refund schema ensure first.");
+    if (!this.policy) throw new BusinessError("FAILURE_REFUND_POLICY_REFUSAL"); // #5606 (G-3)
     if (kind !== "subscription" && kind !== "pay_per_run" && kind !== "bundle") {
-      throw new Error(`Invalid refund kind: ${String(kind)} (must be subscription, pay_per_run, or bundle).`);
+      throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     }
     if (typeof byLogin !== "string" || !byLogin.trim()) {
-      throw new Error("byLogin is required.");
+      throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     }
     const kinds = new Set(this.policy.approvedKinds);
     if (approved) kinds.add(kind);
@@ -79,7 +80,7 @@ export class InMemoryRefundAdapter implements RefundStore {
     input: Parameters<RefundStore["createRefund"]>[0],
   ): Promise<RefundRecord> {
     const validated = assertRefundRecord(input);
-    if (this.refunds.has(validated.id)) throw new Error(`Refund ${validated.id} already exists.`);
+    if (this.refunds.has(validated.id)) throw new BusinessError("FAILURE_COMMERCIAL_CONFLICT"); // #5606 (G-3)
     const record: RefundRecord = { ...validated, createdAtMs: input.createdAtMs, updatedAtMs: input.updatedAtMs };
     this.refunds.set(record.id, record);
     return { ...record };
@@ -102,7 +103,7 @@ export class InMemoryRefundAdapter implements RefundStore {
     patch: Partial<RefundRecord> & { updatedAtMs: number },
   ): Promise<RefundRecord> {
     const current = this.refunds.get(refundId);
-    if (!current) throw new Error(`No refund ${refundId}.`);
+    if (!current) throw new BusinessError("FAILURE_COMMERCIAL_NOT_FOUND"); // #5606 (G-3)
     const merged = { ...current, ...patch, id: current.id };
     const validated = assertRefundRecord(merged);
     const updated: RefundRecord = { ...validated, createdAtMs: current.createdAtMs, updatedAtMs: patch.updatedAtMs };

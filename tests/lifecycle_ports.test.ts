@@ -172,7 +172,7 @@ describe("lifecycle port conformance (#2208)", () => {
         expect((await store.listEarnings("ref")).length).toBe(1);
         await expect(
           store.recordEarning({ referrerUserId: "me", referredUserId: "me", tenantId: "t1" }),
-        ).rejects.toThrow(/cannot refer themselves/);
+        ).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3)
       });
 
       it("unvested credits are not redeemable, even when the total would cover", async () => {
@@ -182,7 +182,7 @@ describe("lifecycle port conformance (#2208)", () => {
         expect(await store.redeemableBalance("ref")).toBe(0);
         await expect(
           store.redeem({ userId: "ref", tenantId: "t1", amountUSD: 0.5, runRequestId: "run-1" }),
-        ).rejects.toThrow(/Insufficient vested/);
+        ).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3)
         expect((await store.listEarnings("ref"))[0].redeemedAmountUSD).toBe(0);
       });
 
@@ -198,7 +198,7 @@ describe("lifecycle port conformance (#2208)", () => {
         expect(await store.redeemableBalance("ref")).toBe(0.5);
         await expect(
           store.redeem({ userId: "ref", tenantId: "t2", amountUSD: 0.1, runRequestId: "run-10" }),
-        ).rejects.toThrow(/never cross tenants/);
+        ).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_FORBIDDEN" }); // #5606 (G-3)
         expect(await store.redeemableBalance("ref")).toBe(0.5);
       });
 
@@ -215,7 +215,7 @@ describe("lifecycle port conformance (#2208)", () => {
           expect(await store.redeemableBalance("ref")).toBe(0);
           await expect(
             store.redeem({ userId: "ref", tenantId: "t1", amountUSD: 0.5, runRequestId: "run-x" }),
-          ).rejects.toThrow(/Insufficient vested.*expired/);
+          ).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3)
           expect((await store.listEarnings("ref"))[0].redeemedAmountUSD).toBe(0);
         } finally {
           vi.useRealTimers();
@@ -331,8 +331,8 @@ describe("referral credit expiry helpers (#5229)", () => {
   it("allocateRedemption allocates unexpired oldest-first and names the expired amount on shortfall", () => {
     const es = [earning("old", NOW - 91 * DAY), earning("new", NOW - 2 * DAY)];
     expect(allocateRedemption(es, 1, NOW, EXPIRY)).toEqual([{ earningId: "new", amountUSD: 1 }]);
-    expect(() => allocateRedemption(es, 1.5, NOW, EXPIRY)).toThrow(/Insufficient vested.*1 expired/);
-    expect(() => allocateRedemption([earning("old", NOW - 91 * DAY)], 0.5, NOW, EXPIRY)).toThrow(/expired/);
+    expect(() => allocateRedemption(es, 1.5, NOW, EXPIRY)).toThrowError(expect.objectContaining({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" })); // #5606 (G-3)
+    expect(() => allocateRedemption([earning("old", NOW - 91 * DAY)], 0.5, NOW, EXPIRY)).toThrowError(expect.objectContaining({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" })); // #5606 (G-3)
   });
 });
 
@@ -451,7 +451,7 @@ describe("referral conversion into the coverage path (#2208)", () => {
       convertReferralCreditsForRun({
         lifecycle, commercial, userId: "ref", tenantId: "t1", amountUSD: 5, runRequestId: "run-2",
       }),
-    ).rejects.toThrow(/Insufficient vested/);
+    ).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3)
     expect(await lifecycle.redeemableBalance("ref")).toBe(0.9);
     expect((await commercial.getAccount("ref"))?.creditsUSD).toBe(0.1);
   });
@@ -465,7 +465,7 @@ describe("referral conversion into the coverage path (#2208)", () => {
       convertReferralCreditsForRun({
         lifecycle, commercial, userId: "ref", tenantId: "t2", amountUSD: 0.1, runRequestId: "run-1",
       }),
-    ).rejects.toThrow(/never cross tenants/);
+    ).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_FORBIDDEN" }); // #5606 (G-3)
   });
 
   it("conversion spends nothing when the only credit is expired (#5229)", async () => {
@@ -481,7 +481,7 @@ describe("referral conversion into the coverage path (#2208)", () => {
         convertReferralCreditsForRun({
           lifecycle, commercial, userId: "ref", tenantId: "t1", amountUSD: 0.1, runRequestId: "run-1",
         }),
-      ).rejects.toThrow(/Insufficient vested/);
+      ).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3)
       expect((await commercial.getAccount("ref"))?.creditsUSD ?? 0).toBe(0);
       expect((await lifecycle.listEarnings("ref"))[0].redeemedAmountUSD).toBe(0);
     } finally {
@@ -557,7 +557,7 @@ describe("partial referral conversion (#5228)", () => {
       convertReferralCreditsForRunPartial({
         lifecycle, commercial, userId: "ref", tenantId: "t2", amountUSD: 0.1, runRequestId: "run-1",
       }),
-    ).rejects.toThrow(/never cross tenants/);
+    ).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_FORBIDDEN" }); // #5606 (G-3)
     expect(await lifecycle.redeemableBalance("ref")).toBe(1);
     // Unvested earnings are invisible to the balance read, so a
     // fresh earning under a vesting delay converts nothing.

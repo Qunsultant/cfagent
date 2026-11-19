@@ -21,6 +21,7 @@ import {
   type ProductStore,
   type VersionMoveRecord,
 } from "./productPorts";
+import { BusinessError } from "../outcomes/outcomeAspects";
 
 export class InMemoryProductAdapter implements ProductStore {
   private products = new Map<string, ProductRecord>();
@@ -36,7 +37,7 @@ export class InMemoryProductAdapter implements ProductStore {
   }): Promise<ProductRecord> {
     const product = assertProduct(input);
     const id = product.id || `prod-${crypto.randomUUID().slice(0, 8)}`;
-    if (this.products.has(id)) throw new Error(`Product ${id} already exists.`);
+    if (this.products.has(id)) throw new BusinessError("FAILURE_COMMERCIAL_CONFLICT"); // #5606 (G-3)
     const now = Date.now();
     const record: ProductRecord = { ...product, id, createdAtMs: now, updatedAtMs: now };
     this.products.set(id, record);
@@ -69,7 +70,7 @@ export class InMemoryProductAdapter implements ProductStore {
   async setProductRank(productId: string, rank: number | null): Promise<ProductRecord> {
     const validated = assertProductRank(rank);
     const existing = this.products.get(productId);
-    if (!existing) throw new Error(`No product ${productId}.`);
+    if (!existing) throw new BusinessError("FAILURE_COMMERCIAL_NOT_FOUND"); // #5606 (G-3)
     const updated: ProductRecord = { ...existing, rank: validated, updatedAtMs: Date.now() };
     this.products.set(productId, updated);
     return updated;
@@ -93,8 +94,8 @@ export class InMemoryProductAdapter implements ProductStore {
     reason?: string | null;
     movedAtMs?: number;
   }): Promise<VersionMoveRecord> {
-    if (!move.userId) throw new Error("Version move requires userId.");
-    if (!move.movedBy) throw new Error("Version move requires movedBy.");
+    if (!move.userId) throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
+    if (!move.movedBy) throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     const segment = assertSegment(move.segment);
     // The (bulkMoveId, userId) unique index, mirrored: a retry
     // never moves the same customer twice in one bulk move.
@@ -143,17 +144,17 @@ export class InMemoryProductAdapter implements ProductStore {
     startedAtMs?: number;
   }): Promise<BulkMoveRecord> {
     const productId = typeof input.productId === "string" && input.productId.trim() ? input.productId.trim() : "";
-    if (!productId) throw new Error("Bulk move requires productId.");
+    if (!productId) throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     const movedBy = typeof input.movedBy === "string" && input.movedBy.trim() ? input.movedBy.trim() : "";
-    if (!movedBy) throw new Error("Bulk move requires movedBy.");
+    if (!movedBy) throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     if (typeof input.targetVersionIdsJson !== "string") {
-      throw new Error("Bulk move requires targetVersionIdsJson.");
+      throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     }
     const segmentScope =
       input.segmentScope === undefined || input.segmentScope === null ? null : assertSegment(input.segmentScope);
     const id =
       typeof input.id === "string" && input.id.trim() ? input.id.trim() : `bulk-${crypto.randomUUID().slice(0, 8)}`;
-    if (this.bulkMoves.has(id)) throw new Error(`Bulk move ${id} already exists.`);
+    if (this.bulkMoves.has(id)) throw new BusinessError("FAILURE_COMMERCIAL_CONFLICT"); // #5606 (G-3)
     const record: BulkMoveRecord = {
       id,
       productId,
@@ -187,7 +188,7 @@ export class InMemoryProductAdapter implements ProductStore {
     },
   ): Promise<BulkMoveRecord> {
     const existing = this.bulkMoves.get(bulkMoveId);
-    if (!existing) throw new Error(`No bulk move ${bulkMoveId}.`);
+    if (!existing) throw new BusinessError("FAILURE_COMMERCIAL_NOT_FOUND"); // #5606 (G-3)
     const updated: BulkMoveRecord = {
       ...existing,
       ...(patch.status !== undefined ? { status: assertBulkMoveStatus(patch.status) } : {}),

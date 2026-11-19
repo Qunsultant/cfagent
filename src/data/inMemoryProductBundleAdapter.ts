@@ -40,7 +40,7 @@ export class InMemoryProductBundleAdapter implements ProductBundleStore {
   }): Promise<ProductBundleRecord> {
     const bundle = assertBundle(input);
     const id = bundle.id || `bnd-${crypto.randomUUID().slice(0, 8)}`;
-    if (this.bundles.has(id)) throw new Error(`Bundle ${id} already exists.`);
+    if (this.bundles.has(id)) throw new BusinessError("FAILURE_COMMERCIAL_CONFLICT"); // #5606 (G-3)
     const now = Date.now();
     // A bundle is created PROPOSED — only an operator approval
     // through approveBundle makes its price chargeable.
@@ -120,10 +120,10 @@ export class InMemoryProductBundleAdapter implements ProductBundleStore {
       !purchase.bundleId ||
       !purchase.providerPaymentRef
     ) {
-      throw new Error("id, userId, tenantId, bundleId, and providerPaymentRef are required.");
+      throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     }
     if (!(purchase.periodEndMs > purchase.periodStartMs)) {
-      throw new Error("periodEndMs must be after periodStartMs.");
+      throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     }
     const bundle = await this.getBundle(purchase.bundleId);
     if (!bundle) throw new BusinessError("FAILURE_BUNDLE_NOT_FOUND", { bundleId: purchase.bundleId });
@@ -135,18 +135,18 @@ export class InMemoryProductBundleAdapter implements ProductBundleStore {
       ![...memberSet].every((m) => givenSet.has(m)) ||
       ![...givenSet].every((m) => memberSet.has(m))
     ) {
-      throw new Error("Entitlements must cover exactly the bundle member products — refusing a partial entitlement set.");
+      throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     }
     for (const e of entitlements) {
       if (!e.productId || !Number.isInteger(e.includedRuns) || e.includedRuns < 0) {
-        throw new Error("Each entitlement needs a productId and a non-negative integer includedRuns.");
+        throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
       }
       if (!(e.periodEndMs > e.periodStartMs)) {
-        throw new Error("Each entitlement periodEndMs must be after periodStartMs.");
+        throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
       }
     }
     if (this.purchases.has(purchase.id)) {
-      throw new Error(`Bundle purchase ${purchase.id} already exists.`);
+      throw new BusinessError("FAILURE_COMMERCIAL_CONFLICT"); // #5606 (G-3)
     }
     const purchaseRecord: BundlePurchaseRecord = {
       id: purchase.id,

@@ -116,6 +116,15 @@ import {
 } from "../../api/requestValidation";
 import type { AgentName, Env } from "../../types";
 
+import { createStructuredLogger } from "../../observability/structuredLogger";
+import { createObservabilitySink } from "../../observability/createObservabilityPorts";
+
+/** Issue #5606 (G-3) — module logger on the structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "agents/routes/platformAccounts",
+});
+
+
 /**
  * Issue #3261 — coded profile response bodies (AOP, #1969 program).
  *
@@ -698,8 +707,18 @@ export async function handlePlatformAccountRoutes(
       ...(await buildAccountView(ports, verifiedLogin)),
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    const status = /unavailable|Subscription state unavailable/.test(message) ? 503 : 500;
-    return Response.json({ error: message || "Failed to handle platform account request" }, { status });
+    // #5606 (G-3): typed failures render from the catalog (the
+    // store-unavailable throw keeps its 503 through its code);
+    // anything else logs server-side and answers the generic code.
+    if (err instanceof BusinessError) {
+      return Response.json(profileCodedBody(err.code), {
+        status: getOutcome(err.code)?.httpStatus ?? 500,
+      });
+    }
+    structuredLog.error("platformAccounts.account_request_failed", {
+      message: `[accounts] platform account request failed: ${err instanceof Error ? err.message : String(err)}`,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return Response.json(profileCodedBody("FAILURE_UNEXPECTED_ERROR"), { status: 500 });
   }
 }

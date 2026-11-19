@@ -40,7 +40,7 @@ export class InMemorySubscriptionAdapter implements SubscriptionStore {
   }): Promise<SubscriptionPlanRecord> {
     const plan = assertPlan(input);
     const id = plan.id || `plan-${crypto.randomUUID().slice(0, 8)}`;
-    if (this.plans.has(id)) throw new Error(`Plan ${id} already exists.`);
+    if (this.plans.has(id)) throw new BusinessError("FAILURE_COMMERCIAL_CONFLICT"); // #5606 (G-3)
     const now = Date.now();
     // Issue #3357: a plan is created PROPOSED — only an operator
     // approval through approvePlan makes its price chargeable.
@@ -92,9 +92,9 @@ export class InMemorySubscriptionAdapter implements SubscriptionStore {
     versionId: string,
   ): Promise<SubscriptionRecord> {
     const existing = this.subscriptions.get(subscriptionId);
-    if (!existing) throw new Error(`No subscription ${subscriptionId}.`);
+    if (!existing) throw new BusinessError("FAILURE_COMMERCIAL_NOT_FOUND"); // #5606 (G-3)
     const target = this.plans.get(versionId);
-    if (!target) throw new Error(`No plan version ${versionId}.`);
+    if (!target) throw new BusinessError("FAILURE_PLAN_NOT_FOUND"); // #5606 (G-3)
     const updated: SubscriptionRecord = { ...existing, planId: versionId, updatedAtMs: Date.now() };
     this.subscriptions.set(subscriptionId, updated);
     return updated;
@@ -129,7 +129,7 @@ export class InMemorySubscriptionAdapter implements SubscriptionStore {
 
   async deactivatePlan(planId: string): Promise<SubscriptionPlanRecord> {
     const plan = this.plans.get(planId);
-    if (!plan) throw new Error(`No plan ${planId}.`);
+    if (!plan) throw new BusinessError("FAILURE_PLAN_NOT_FOUND"); // #5606 (G-3)
     const updated = { ...plan, active: false, updatedAtMs: Date.now() };
     this.plans.set(planId, updated);
     return updated;
@@ -150,13 +150,13 @@ export class InMemorySubscriptionAdapter implements SubscriptionStore {
     periodEndMs: number;
   }): Promise<SubscriptionRecord> {
     if (!input.id || !input.userId || !input.tenantId || !input.planId || !input.provider || !input.providerPaymentRef) {
-      throw new Error("id, userId, tenantId, planId, provider, and providerPaymentRef are required.");
+      throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     }
     if (!(input.periodEndMs > input.periodStartMs)) {
-      throw new Error("periodEndMs must be after periodStartMs.");
+      throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     }
     const existing = await this.findByPaymentRef(input.providerPaymentRef);
-    if (existing) throw new Error(`Payment reference ${input.providerPaymentRef} already activated subscription ${existing.id}.`);
+    if (existing) throw new BusinessError("FAILURE_COMMERCIAL_CONFLICT"); // #5606 (G-3)
     const now = Date.now();
     const record: SubscriptionRecord = {
       ...input,
@@ -199,7 +199,7 @@ export class InMemorySubscriptionAdapter implements SubscriptionStore {
 
   async updateProviderBilling(subscriptionId: string, patch: ProviderBillingPatch): Promise<SubscriptionRecord> {
     const existing = this.subscriptions.get(subscriptionId);
-    if (!existing) throw new Error(`No subscription ${subscriptionId}.`);
+    if (!existing) throw new BusinessError("FAILURE_COMMERCIAL_NOT_FOUND"); // #5606 (G-3)
     const updated: SubscriptionRecord = { ...existing, ...patch, updatedAtMs: Date.now() };
     this.subscriptions.set(subscriptionId, updated);
     return updated;

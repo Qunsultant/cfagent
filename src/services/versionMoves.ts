@@ -60,6 +60,7 @@ import {
 } from "../data/productPorts";
 import type { SubscriptionRecord, SubscriptionStore } from "../data/subscriptionPorts";
 import { assertPlanEffectiveAndApprovedForSegment } from "./subscriptionActivation";
+import { BusinessError, codedMessage } from "../outcomes/outcomeAspects";
 
 export interface MoveSubscriptionInput {
   subs: SubscriptionStore;
@@ -97,12 +98,12 @@ export async function moveSubscriptionToVersion(
 ): Promise<MoveSubscriptionResult> {
   const { subs, store, products, subscriptionId, toVersionId, movedBy } = input;
   const nowMs = input.nowMs ?? Date.now();
-  if (!movedBy) throw new Error("movedBy is required.");
-  if (!toVersionId) throw new Error("toVersionId is required.");
+  if (!movedBy) throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
+  if (!toVersionId) throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   const subscription = await subs.getSubscription(subscriptionId);
-  if (!subscription) throw new Error(`No subscription ${subscriptionId}.`);
+  if (!subscription) throw new BusinessError("FAILURE_COMMERCIAL_NOT_FOUND"); // #5606 (G-3)
   const target = await subs.getPlan(toVersionId);
-  if (!target) throw new Error(`No plan version ${toVersionId}.`);
+  if (!target) throw new BusinessError("FAILURE_PLAN_NOT_FOUND"); // #5606 (G-3)
   // Same version = no-op success: a retried move never
   // double-moves, and the audit row is not duplicated.
   if (subscription.planId === toVersionId) {
@@ -114,15 +115,23 @@ export async function moveSubscriptionToVersion(
   // version repairs it.
   const current = await subs.getPlan(subscription.planId);
   if (current && current.productId !== target.productId) {
-    throw new Error(
-      `Cannot move subscription ${subscriptionId} from product ${current.productId} to ${target.productId}: a move changes the version, never the product.`,
-    );
+    throw new BusinessError("FAILURE_COMMERCIAL_CONFLICT"); // #5606 (G-3)
   }
   // The holder's segment, from the verified account row.
   const account = await store.getAccount(subscription.userId);
   const segment = account?.segment ?? DEFAULT_SEGMENT;
   // Effective + approved for the holder's segment, at now.
-  await assertPlanEffectiveAndApprovedForSegment(subs, target, segment, nowMs);
+  try {
+    await assertPlanEffectiveAndApprovedForSegment(subs, target, segment, nowMs);
+  } catch (err) {
+    // #5606 (G-3): the move route refuses version-state failures as 409
+    // CONFLICT (its documented contract); the purchase route keeps the
+    // same failures as 400 REQUEST_INVALID.
+    if (err instanceof BusinessError && err.code === "FAILURE_COMMERCIAL_REQUEST_INVALID") {
+      throw new BusinessError("FAILURE_COMMERCIAL_CONFLICT");
+    }
+    throw err;
+  }
   // PlanId update first, then the audit row.
   // Issue #5605 (G-2): the pair runs as one batch unit when
   // the caller supplied a runner — the D1 adapters buffer both
@@ -178,10 +187,10 @@ export async function setAccountSegment(
 ): Promise<SetAccountSegmentResult> {
   const { store, subs, products, userId } = input;
   const nowMs = input.nowMs ?? Date.now();
-  if (!input.movedBy) throw new Error("movedBy is required.");
+  if (!input.movedBy) throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   const segment = assertSegment(input.segment);
   const account = await store.getAccount(userId);
-  if (!account) throw new Error(`No commercial account for user ${userId}.`);
+  if (!account) throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   const previousSegment = account.segment ?? DEFAULT_SEGMENT;
   // The held version, for the audit row: the customer's live
   // subscription's plan, when one exists. The version does not
@@ -296,11 +305,9 @@ async function resolveBulkMovePopulation(
 }> {
   const { subs, store, products, productId } = input;
   const product = await products.getProduct(productId);
-  if (!product) throw new Error(`No product ${productId}.`);
+  if (!product) throw new BusinessError("FAILURE_COMMERCIAL_NOT_FOUND"); // #5606 (G-3)
   if (product.kind !== "subscription") {
-    throw new Error(
-      `Bulk move applies to subscription products only: ${productId} is a per-run product, and per-run customers always pay their segment's current price.`,
-    );
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   const segmentScope =
     input.segmentScope === undefined || input.segmentScope === null ? null : assertSegment(input.segmentScope);
@@ -374,9 +381,9 @@ async function resolveBulkMovePopulation(
 export async function runBulkMove(input: RunBulkMoveInput): Promise<RunBulkMoveResult> {
   const { subs, store, products, productId, movedBy } = input;
   const nowMs = input.nowMs ?? Date.now();
-  if (!movedBy) throw new Error("movedBy is required.");
+  if (!movedBy) throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   const limit = input.limit ?? BULK_MOVE_DEFAULT_LIMIT;
-  if (!Number.isInteger(limit) || limit <= 0) throw new Error("limit must be a positive integer.");
+  if (!Number.isInteger(limit) || limit <= 0) throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   const { preview, movable, targets } = await resolveBulkMovePopulation(input, nowMs);
 
   // Dry run: the preview is the whole result. Nothing moves,
@@ -404,12 +411,12 @@ export async function runBulkMove(input: RunBulkMoveInput): Promise<RunBulkMoveR
   let resumeTargets: Record<string, string> | null = null;
   if (input.resumeBulkMoveId) {
     const existing = await products.getBulkMove(input.resumeBulkMoveId);
-    if (!existing) throw new Error(`No bulk move ${input.resumeBulkMoveId}.`);
+    if (!existing) throw new BusinessError("FAILURE_COMMERCIAL_NOT_FOUND"); // #5606 (G-3)
     if (existing.productId !== productId) {
-      throw new Error(`Bulk move ${input.resumeBulkMoveId} belongs to product ${existing.productId}.`);
+      throw new BusinessError("FAILURE_COMMERCIAL_CONFLICT"); // #5606 (G-3)
     }
     if (existing.status !== "running") {
-      throw new Error(`Bulk move ${input.resumeBulkMoveId} is ${existing.status}; only a running bulk move resumes.`);
+      throw new BusinessError("FAILURE_COMMERCIAL_CONFLICT"); // #5606 (G-3)
     }
     bulkMove = existing;
     movedTotal = existing.movedCount;
@@ -418,7 +425,7 @@ export async function runBulkMove(input: RunBulkMoveInput): Promise<RunBulkMoveR
     try {
       resumeTargets = JSON.parse(existing.targetVersionIdsJson) as Record<string, string>;
     } catch {
-      throw new Error(`Bulk move ${input.resumeBulkMoveId} has unreadable target versions.`);
+      throw new BusinessError("FAILURE_UNEXPECTED_ERROR"); // #5606 (G-3)
     }
   } else {
     bulkMove = await products.createBulkMove({
@@ -480,7 +487,10 @@ export async function runBulkMove(input: RunBulkMoveInput): Promise<RunBulkMoveR
       failures.push({
         userId: holder.subscription.userId,
         subscriptionId: holder.subscription.id,
-        error: err?.message || "Move failed.",
+        error:
+          err instanceof BusinessError
+            ? codedMessage(err.code)
+            : "Move failed.",
       });
     }
   }

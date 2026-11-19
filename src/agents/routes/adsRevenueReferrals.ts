@@ -245,7 +245,13 @@ export async function handleAdsRevenueReferralsRoutes(
         const categories = await mp.categories.findMany(categoryListOptions());
         return Response.json({ count: categories.length, categories });
       } catch (err) {
-        return Response.json({ error: err instanceof Error ? err.message : "Failed to fetch categories" }, { status: 500 });
+        // #5606 (G-3): no raw store text reaches the client;
+        // the detail stays in the server log.
+        structuredLog.error("adsRevenueReferrals.fetch_categories_failed", {
+          message: `[ads] fetch categories failed: ${err instanceof Error ? err.message : String(err)}`,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return Response.json({ error: "Failed to fetch categories", code: "FAILURE_UNEXPECTED_ERROR" }, { status: 500 });
       }
     }
 
@@ -289,7 +295,13 @@ export async function handleAdsRevenueReferralsRoutes(
 
         return Response.json({ success: true, category });
       } catch (err) {
-        return Response.json({ error: err instanceof Error ? err.message : "Failed to save category" }, { status: 500 });
+        // #5606 (G-3): no raw store text reaches the client;
+        // the detail stays in the server log.
+        structuredLog.error("adsRevenueReferrals.save_category_failed", {
+          message: `[ads] save category failed: ${err instanceof Error ? err.message : String(err)}`,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return Response.json({ error: "Failed to save category", code: "FAILURE_UNEXPECTED_ERROR" }, { status: 500 });
       }
     }
 
@@ -308,7 +320,13 @@ export async function handleAdsRevenueReferralsRoutes(
           ? Response.json({ success: true, deleted: true, id })
           : Response.json({ success: true });
       } catch (err) {
-        return Response.json({ error: err instanceof Error ? err.message : "Failed to delete category" }, { status: 500 });
+        // #5606 (G-3): no raw store text reaches the client;
+        // the detail stays in the server log.
+        structuredLog.error("adsRevenueReferrals.delete_category_failed", {
+          message: `[ads] delete category failed: ${err instanceof Error ? err.message : String(err)}`,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return Response.json({ error: "Failed to delete category", code: "FAILURE_UNEXPECTED_ERROR" }, { status: 500 });
       }
     }
   }
@@ -326,7 +344,13 @@ export async function handleAdsRevenueReferralsRoutes(
       });
       return Response.json(summary);
     } catch (err) {
-      return Response.json({ error: err instanceof Error ? err.message : "Failed to calculate revenue" }, { status: 500 });
+      // #5606 (G-3): no raw store text reaches the client;
+      // the detail stays in the server log.
+      structuredLog.error("adsRevenueReferrals.calculate_revenue_failed", {
+        message: `[ads] calculate revenue failed: ${err instanceof Error ? err.message : String(err)}`,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return Response.json({ error: "Failed to calculate revenue", code: "FAILURE_UNEXPECTED_ERROR" }, { status: 500 });
     }
   }
 
@@ -349,7 +373,13 @@ export async function handleAdsRevenueReferralsRoutes(
         const ads = await mp.externalAds.findMany(externalAdListOptions(mode));
         return Response.json({ count: ads.length, ads });
       } catch (err) {
-        return Response.json({ error: err instanceof Error ? err.message : "Failed to fetch external ads" }, { status: 500 });
+        // #5606 (G-3): no raw store text reaches the client;
+        // the detail stays in the server log.
+        structuredLog.error("adsRevenueReferrals.fetch_external_ads_failed", {
+          message: `[ads] fetch external ads failed: ${err instanceof Error ? err.message : String(err)}`,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return Response.json({ error: "Failed to fetch external ads", code: "FAILURE_UNEXPECTED_ERROR" }, { status: 500 });
       }
     }
 
@@ -395,7 +425,13 @@ export async function handleAdsRevenueReferralsRoutes(
 
         return Response.json({ success: true, ad });
       } catch (err) {
-        return Response.json({ error: err instanceof Error ? err.message : "Failed to save external ad" }, { status: 500 });
+        // #5606 (G-3): no raw store text reaches the client;
+        // the detail stays in the server log.
+        structuredLog.error("adsRevenueReferrals.save_external_ad_failed", {
+          message: `[ads] save external ad failed: ${err instanceof Error ? err.message : String(err)}`,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return Response.json({ error: "Failed to save external ad", code: "FAILURE_UNEXPECTED_ERROR" }, { status: 500 });
       }
     }
   }
@@ -514,7 +550,13 @@ export async function handleReferralsAdsRoutes(
         });
         return Response.json({ count: referrals.length, referrals });
       } catch (err) {
-        return Response.json({ error: err instanceof Error ? err.message : "Failed to fetch referrals" }, { status: 500 });
+        // #5606 (G-3): no raw store text reaches the client;
+        // the detail stays in the server log.
+        structuredLog.error("adsRevenueReferrals.fetch_referrals_failed", {
+          message: `[ads] fetch referrals failed: ${err instanceof Error ? err.message : String(err)}`,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return Response.json({ error: "Failed to fetch referrals", code: "FAILURE_UNEXPECTED_ERROR" }, { status: 500 });
       }
     }
 
@@ -555,7 +597,13 @@ export async function handleReferralsAdsRoutes(
           referral: { id, userLogin: sessionId, title, url: targetUrl, category, rewardText, clicks: 0, signups: 0, createdAt: now },
         });
       } catch (err) {
-        return Response.json({ error: err instanceof Error ? err.message : "Failed to save referral link" }, { status: 500 });
+        // #5606 (G-3): no raw store text reaches the client;
+        // the detail stays in the server log.
+        structuredLog.error("adsRevenueReferrals.save_referral_link_failed", {
+          message: `[ads] save referral link failed: ${err instanceof Error ? err.message : String(err)}`,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return Response.json({ error: "Failed to save referral link", code: "FAILURE_UNEXPECTED_ERROR" }, { status: 500 });
       }
     }
 
@@ -579,7 +627,13 @@ export async function handleReferralsAdsRoutes(
           ? Response.json({ success: true, id })
           : Response.json({ success: true });
       } catch (err) {
-        return Response.json({ error: err instanceof Error ? err.message : "Failed to delete referral" }, { status: 500 });
+        // #5606 (G-3): no raw store text reaches the client;
+        // the detail stays in the server log.
+        structuredLog.error("adsRevenueReferrals.delete_referral_failed", {
+          message: `[ads] delete referral failed: ${err instanceof Error ? err.message : String(err)}`,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return Response.json({ error: "Failed to delete referral", code: "FAILURE_UNEXPECTED_ERROR" }, { status: 500 });
       }
     }
   }
@@ -733,7 +787,13 @@ export async function handleReferralsAdsRoutes(
         }));
         return Response.json({ count: ads.length, ads });
       } catch (err) {
-        return Response.json({ error: err instanceof Error ? err.message : "Failed to fetch ads" }, { status: 500 });
+        // #5606 (G-3): no raw store text reaches the client;
+        // the detail stays in the server log.
+        structuredLog.error("adsRevenueReferrals.fetch_ads_failed", {
+          message: `[ads] fetch ads failed: ${err instanceof Error ? err.message : String(err)}`,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return Response.json({ error: "Failed to fetch ads", code: "FAILURE_UNEXPECTED_ERROR" }, { status: 500 });
       }
     }
 
@@ -781,7 +841,13 @@ export async function handleReferralsAdsRoutes(
           ad: { id, title, tagline, sponsor, badge, url: targetUrl, ctaText, accentColor, impressions: 1, clicks: 0, createdAt: now },
         });
       } catch (err) {
-        return Response.json({ error: err instanceof Error ? err.message : "Failed to submit ad" }, { status: 500 });
+        // #5606 (G-3): no raw store text reaches the client;
+        // the detail stays in the server log.
+        structuredLog.error("adsRevenueReferrals.submit_ad_failed", {
+          message: `[ads] submit ad failed: ${err instanceof Error ? err.message : String(err)}`,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return Response.json({ error: "Failed to submit ad", code: "FAILURE_UNEXPECTED_ERROR" }, { status: 500 });
       }
     }
   }

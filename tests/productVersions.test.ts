@@ -343,25 +343,25 @@ describe("held-version grandfathering and the move primitive (#3289 §9)", () =>
       const unapproved = await stores.subs.createPlan({ name: "Basic", priceUSD: 59.99, periodDays: 30, includedRuns: 20, effectiveFromMs: NOW });
       await expect(
         moveSubscriptionToVersion({ subs: stores.subs, store: stores.store, products: stores.products, subscriptionId: sub.id, toVersionId: unapproved.id, movedBy: "test-operator", nowMs: NOW + 5000 }),
-      ).rejects.toThrow(/not approved/);
+      ).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_CONFLICT" }); // #5606 (G-3)
       // Approved but future v3.
       const future = await stores.subs.createPlan({ name: "Basic", priceUSD: 69.99, periodDays: 30, includedRuns: 20, effectiveFromMs: NOW + 100_000 });
       await stores.subs.approvePlan(future.id, "test-operator");
       await expect(
         moveSubscriptionToVersion({ subs: stores.subs, store: stores.store, products: stores.products, subscriptionId: sub.id, toVersionId: future.id, movedBy: "test-operator", nowMs: NOW + 5000 }),
-      ).rejects.toThrow(/not the effective version/);
+      ).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_CONFLICT" }); // #5606 (G-3)
       // Approved + effective, but in another segment.
       const eu = await stores.subs.createPlan({ name: "Basic", priceUSD: 39.99, periodDays: 30, includedRuns: 20, segment: "eu", effectiveFromMs: NOW });
       await stores.subs.approvePlan(eu.id, "test-operator");
       await expect(
         moveSubscriptionToVersion({ subs: stores.subs, store: stores.store, products: stores.products, subscriptionId: sub.id, toVersionId: eu.id, movedBy: "test-operator", nowMs: NOW + 5000 }),
-      ).rejects.toThrow(/not the effective version/);
+      ).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_CONFLICT" }); // #5606 (G-3)
       // Approved + effective, but another product.
       const premium = await stores.subs.createPlan({ name: "Premium", priceUSD: 59.99, periodDays: 30, includedRuns: 30, effectiveFromMs: NOW });
       await stores.subs.approvePlan(premium.id, "test-operator");
       await expect(
         moveSubscriptionToVersion({ subs: stores.subs, store: stores.store, products: stores.products, subscriptionId: sub.id, toVersionId: premium.id, movedBy: "test-operator", nowMs: NOW + 5000 }),
-      ).rejects.toThrow(/never the product/);
+      ).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_CONFLICT" }); // #5606 (G-3)
       // Nothing moved: the holder still holds v1.
       expect((await stores.subs.getSubscription(sub.id))?.planId).toBe(v1.id);
     }
@@ -704,7 +704,7 @@ describe("explicit product rank (#3246 §3.3)", () => {
     expect(assertProductRank(null)).toBeNull();
     expect(assertProductRank(undefined)).toBeNull();
     for (const bad of [0, -1, 1.5, NaN, Infinity, "2", true, {}]) {
-      expect(() => assertProductRank(bad)).toThrow(/positive whole number/);
+      expect(() => assertProductRank(bad)).toThrowError(expect.objectContaining({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" })); // #5606 (G-3)
     }
   });
 
@@ -734,8 +734,8 @@ describe("explicit product rank (#3246 §3.3)", () => {
       expect((await store.getProduct("prod-plain"))?.rank).toBe(4);
       const cleared = await store.setProductRank("prod-plain", null);
       expect(cleared.rank).toBeNull();
-      await expect(store.setProductRank("prod-missing", 2)).rejects.toThrow(/No product/);
-      await expect(store.setProductRank("prod-plain", 0)).rejects.toThrow(/positive whole number/);
+      await expect(store.setProductRank("prod-missing", 2)).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_NOT_FOUND" }); // #5606 (G-3)
+      await expect(store.setProductRank("prod-plain", 0)).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3)
     }
   });
 

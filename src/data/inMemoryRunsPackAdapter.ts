@@ -26,6 +26,7 @@ import {
   type RunsPackVersionStore,
 } from "./runsPackPorts";
 import { assertApproverId } from "./subscriptionPorts";
+import { BusinessError } from "../outcomes/outcomeAspects";
 
 export class InMemoryRunsPackVersionAdapter implements RunsPackVersionStore {
   private rows = new Map<string, RunsPackVersion>();
@@ -82,7 +83,7 @@ export class InMemoryRunsPackVersionAdapter implements RunsPackVersionStore {
   async approveVersion(id: string, approverId: string): Promise<RunsPackVersion> {
     const approver = assertApproverId(approverId);
     const row = this.rows.get(id);
-    if (!row) throw new Error(`No runs-pack version ${id}.`);
+    if (!row) throw new BusinessError("FAILURE_COMMERCIAL_NOT_FOUND"); // #5606 (G-3)
     const now = Date.now();
     const next: RunsPackVersion = {
       ...row,
@@ -97,7 +98,7 @@ export class InMemoryRunsPackVersionAdapter implements RunsPackVersionStore {
 
   async deactivateVersion(id: string): Promise<RunsPackVersion> {
     const row = this.rows.get(id);
-    if (!row) throw new Error(`No runs-pack version ${id}.`);
+    if (!row) throw new BusinessError("FAILURE_COMMERCIAL_NOT_FOUND"); // #5606 (G-3)
     const next: RunsPackVersion = { ...row, active: false, updatedAtMs: Date.now() };
     this.rows.set(id, { ...next });
     return { ...next };
@@ -149,7 +150,7 @@ export class InMemoryRunsPackDraftAdapter implements RunsPackDraftStore {
 
   async claimForCredit(id: string): Promise<RunsPackDraft> {
     const row = this.rows.get(id);
-    if (!row) throw new Error(`Unknown runs-pack draft ${id}.`);
+    if (!row) throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     if (row.status !== "minted") throw new RunsPackClaimRefusedError(id, row.status, "claim");
     const next: RunsPackDraft = { ...row, status: "crediting" };
     this.rows.set(id, next);
@@ -158,7 +159,7 @@ export class InMemoryRunsPackDraftAdapter implements RunsPackDraftStore {
 
   async releaseClaim(id: string): Promise<RunsPackDraft> {
     const row = this.rows.get(id);
-    if (!row) throw new Error(`Unknown runs-pack draft ${id}.`);
+    if (!row) throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     if (row.status !== "crediting") throw new RunsPackClaimRefusedError(id, row.status, "release");
     const next: RunsPackDraft = { ...row, status: "minted" };
     this.rows.set(id, next);
@@ -170,9 +171,9 @@ export class InMemoryRunsPackDraftAdapter implements RunsPackDraftStore {
     update: { creditedAtMs: number; paymentIntentId: string | null; checkoutSessionId: string | null },
   ): Promise<RunsPackDraft> {
     const row = this.rows.get(id);
-    if (!row) throw new Error(`Unknown runs-pack draft ${id}.`);
-    if (row.status === "credited") throw new Error(`Runs pack ${id} is already credited.`);
-    if (row.status !== "crediting") throw new Error(`Runs pack ${id} is not crediting.`);
+    if (!row) throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
+    if (row.status === "credited") throw new BusinessError("FAILURE_COMMERCIAL_CONFLICT"); // #5606 (G-3)
+    if (row.status !== "crediting") throw new BusinessError("FAILURE_COMMERCIAL_CONFLICT"); // #5606 (G-3)
     const next: RunsPackDraft = { ...row, status: "credited", ...update };
     this.rows.set(id, next);
     return { ...next };

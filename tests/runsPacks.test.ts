@@ -139,7 +139,7 @@ describe("runs-pack input validation (#3246 slice 3)", () => {
   it("runs must be a positive integer", () => {
     expect(assertRunsPackRuns(10)).toBe(10);
     for (const bad of [0, -1, 1.5, "10", null, undefined, NaN]) {
-      expect(() => assertRunsPackRuns(bad)).toThrow(/positive integer/);
+      expect(() => assertRunsPackRuns(bad)).toThrowError(expect.objectContaining({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" })); // #5606 (G-3)
     }
   });
 
@@ -176,19 +176,19 @@ describe("runs-pack input validation (#3246 slice 3)", () => {
     });
     expect(() =>
       assertRunsPackVersionInput({ productId: "  ", runs: 10, priceUSD: 4.99 }, NOW),
-    ).toThrow(/productId is required/);
+    ).toThrowError(expect.objectContaining({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" })); // #5606 (G-3)
     expect(() =>
       assertRunsPackVersionInput({ productId: "prod-pack-10", runs: 0, priceUSD: 4.99 }, NOW),
-    ).toThrow(/positive integer/);
+    ).toThrowError(expect.objectContaining({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" })); // #5606 (G-3)
     expect(() =>
       assertRunsPackVersionInput({ productId: "prod-pack-10", runs: 10, priceUSD: 10.555 }, NOW),
-    ).toThrow(/two decimal places/);
+    ).toThrowError(expect.objectContaining({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" })); // #5606 (G-3)
     expect(() =>
       assertRunsPackVersionInput(
         { productId: "prod-pack-10", runs: 10, priceUSD: 4.99, effectiveToMs: NOW - 1 },
         NOW,
       ),
-    ).toThrow(/after effectiveFromMs/);
+    ).toThrowError(expect.objectContaining({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" })); // #5606 (G-3)
   });
 });
 
@@ -255,21 +255,21 @@ describe("runs-pack versions (in-memory)", () => {
     const deactivated = await store.deactivateVersion(version.id);
     expect(deactivated.active).toBe(false);
     expect(deactivated.approvalStatus).toBe("approved");
-    await expect(store.approveVersion("packver-missing", "op1")).rejects.toThrow(/No runs-pack version/);
-    await expect(store.deactivateVersion("packver-missing")).rejects.toThrow(/No runs-pack version/);
+    await expect(store.approveVersion("packver-missing", "op1")).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_NOT_FOUND" }); // #5606 (G-3)
+    await expect(store.deactivateVersion("packver-missing")).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_NOT_FOUND" }); // #5606 (G-3)
   });
 
   it("createVersion rejects invalid terms (runs <= 0, price <= 0 or > 2 decimals)", async () => {
     const store = new InMemoryRunsPackVersionAdapter();
     await expect(
       store.createVersion({ productId: "prod-pack-10", runs: 0, priceUSD: 4.99 }),
-    ).rejects.toThrow(/positive integer/);
+    ).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3)
     await expect(
       store.createVersion({ productId: "prod-pack-10", runs: 10, priceUSD: 0 }),
-    ).rejects.toThrow(/positive number/);
+    ).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3)
     await expect(
       store.createVersion({ productId: "prod-pack-10", runs: 10, priceUSD: 10.555 }),
-    ).rejects.toThrow(/two decimal places/);
+    ).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3)
   });
 
   it("effective resolution picks the latest effective version and skips inactive and future ones", async () => {
@@ -328,8 +328,8 @@ describe("runs-pack balance (in-memory)", () => {
 
   it("addPackRuns rejects non-positive runs", async () => {
     const balance = new InMemoryRunsPackBalanceAdapter();
-    await expect(balance.addPackRuns("u1", 0)).rejects.toThrow(/positive integer/);
-    await expect(balance.addPackRuns("u1", -5)).rejects.toThrow(/positive integer/);
+    await expect(balance.addPackRuns("u1", 0)).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3)
+    await expect(balance.addPackRuns("u1", -5)).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3)
   });
 });
 
@@ -363,7 +363,7 @@ describe("runs-pack drafts (in-memory)", () => {
     await expect(drafts.claimForCredit("pack-1")).rejects.toThrowError(RunsPackClaimRefusedError);
     await expect(
       drafts.markCredited("pack-1", { creditedAtMs: NOW + 2000, paymentIntentId: null, checkoutSessionId: null }),
-    ).rejects.toThrow(/already credited/);
+    ).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_CONFLICT" }); // #5606 (G-3)
   });
 
   it("release-then-claim works; release on a minted draft is refused", async () => {
@@ -382,8 +382,8 @@ describe("runs-pack drafts (in-memory)", () => {
     await drafts.createDraft(makeDraft());
     await expect(
       drafts.markCredited("pack-1", { creditedAtMs: NOW, paymentIntentId: null, checkoutSessionId: null }),
-    ).rejects.toThrow(/not crediting/);
-    await expect(drafts.claimForCredit("pack-missing")).rejects.toThrow(/Unknown runs-pack draft/);
+    ).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_CONFLICT" }); // #5606 (G-3)
+    await expect(drafts.claimForCredit("pack-missing")).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3)
   });
 });
 
@@ -450,7 +450,7 @@ describe("migration 0063 — runs packs (#3246 slice 3)", () => {
     const released = await drafts.releaseClaim("pack-1");
     expect(released.status).toBe("minted");
     expect((await drafts.claimForCredit("pack-1")).status).toBe("crediting");
-    await expect(drafts.releaseClaim("pack-missing")).rejects.toThrow(/Unknown runs-pack draft/);
+    await expect(drafts.releaseClaim("pack-missing")).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3)
   });
 
   it("ensureRunsPackSchema alone on an empty store applies 0063 (carries 0058's prerequisites)", async () => {

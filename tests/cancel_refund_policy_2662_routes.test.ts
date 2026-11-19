@@ -291,7 +291,11 @@ describe("refund-policy approve route (2.7)", () => {
       reason: "run failed",
     });
     expect(res?.status).toBe(422);
-    expect((await bodyOf(res)).error).toMatch(/not owner-approved/);
+    // #5606 (G-3) N4: the raw policy detail no longer surfaces; the
+    // route renders the coded 422 body.
+    const rb = await bodyOf(res);
+    expect(rb.code).toBe("FAILURE_REFUND_POLICY_REFUSAL");
+    expect(rb.message).toBe("This refund cannot proceed under the current refund policy.");
   });
 
   it("unapproved request refuses 422 with no record; approved request succeeds", async () => {

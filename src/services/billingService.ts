@@ -82,9 +82,7 @@ export function nextDunningNoticeMs(policy: BillingPolicy, failureMs: number, at
 
 function assertGrandfatherOnly(policy: BillingPolicy): void {
   if (policy.repurchaseMigration !== "grandfather") {
-    throw new Error(
-      `Billing activation refuses repurchaseMigration "${policy.repurchaseMigration}": only "grandfather" is implemented in this slice; expire/migrate need a separate owner-approved activation slice.`,
-    );
+    throw new BusinessError("FAILURE_UNEXPECTED_ERROR"); // #5606 (G-3)
   }
 }
 
@@ -120,16 +118,18 @@ export async function createBillingSubscription(input: CreateBillingSubscription
 }> {
   const { billing, policyStore, subs, userId, tenantId, plan } = input;
   const nowMs = input.nowMs ?? Date.now();
-  if (!input.stripeCustomerId?.trim()) throw new Error("stripeCustomerId is required.");
+  if (!input.stripeCustomerId?.trim()) throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   const policy = await policyStore.getPolicy();
   assertGrandfatherOnly(policy);
   const priceId = policy.stripePriceByPlan[plan.id];
   if (!priceId) {
-    throw new Error(`No operator-mapped Stripe Price id for plan ${plan.id}: refusing a Billing create (fail closed).`);
+    throw new BusinessError("FAILURE_COMMERCIAL_CONFLICT"); // #5606 (G-3)
   }
   const period = input.billingPeriod ?? policy.billingPeriodDefault;
   if (!policy.billingPeriodsAllowed.includes(period as "monthly" | "annual")) {
-    throw new Error(`Billing period "${period}" is not in the allowed periods (${policy.billingPeriodsAllowed.join(", ")}).`);
+    // #5606 (G-3) N19: a requested period outside the allowed list
+    // is an invalid request, not a state conflict.
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID");
   }
   const provider = await billing.createProviderSubscription({
     customerId: input.stripeCustomerId,
@@ -137,11 +137,11 @@ export async function createBillingSubscription(input: CreateBillingSubscription
     defaultPaymentMethodId: input.defaultPaymentMethodId,
     metadata: { cfagent_tenant_id: tenantId, cfagent_user_id: userId, cfagent_plan_id: plan.id, billing_period: period },
   });
-  if (!provider.providerSubscriptionId) throw new Error("Provider returned no subscription id: refusing to record a Billing subscription.");
+  if (!provider.providerSubscriptionId) throw new BusinessError("FAILURE_COMMERCIAL_UPSTREAM_FAILED"); // #5606 (G-3)
   const periodStartMs = provider.currentPeriodStartMs ?? nowMs;
   const periodEndMs = provider.currentPeriodEndMs ?? periodStartMs;
   if (!(periodEndMs > periodStartMs)) {
-    throw new Error("Provider returned no usable current period: refusing to record a Billing subscription.");
+    throw new BusinessError("FAILURE_COMMERCIAL_UPSTREAM_FAILED"); // #5606 (G-3)
   }
   const subscription = await subs.createSubscription({
     id: `sub-${crypto.randomUUID().slice(0, 8)}`,
@@ -188,21 +188,19 @@ export async function recordBillingSubscription(input: {
   const nowMs = input.nowMs ?? Date.now();
   const providerId = provider.providerSubscriptionId;
   if (!providerId?.trim()) {
-    throw new Error("Provider returned no subscription id: refusing to record a Billing subscription.");
+    throw new BusinessError("FAILURE_COMMERCIAL_UPSTREAM_FAILED"); // #5606 (G-3)
   }
   const existing = await subs.findByProviderSubscriptionId(providerId);
   if (existing) {
     if (existing.userId !== userId || existing.tenantId !== tenantId) {
-      throw new Error(
-        `Billing subscription ${providerId} already belongs to another user/tenant: refusing to reassign (operator resolves).`,
-      );
+      throw new BusinessError("FAILURE_COMMERCIAL_CONFLICT"); // #5606 (G-3)
     }
     return existing;
   }
   const periodStartMs = provider.currentPeriodStartMs ?? nowMs;
   const periodEndMs = provider.currentPeriodEndMs ?? periodStartMs;
   if (!(periodEndMs > periodStartMs)) {
-    throw new Error("Provider returned no usable current period: refusing to record a Billing subscription.");
+    throw new BusinessError("FAILURE_COMMERCIAL_UPSTREAM_FAILED"); // #5606 (G-3)
   }
   return subs.createSubscription({
     id: `sub-${crypto.randomUUID().slice(0, 8)}`,
@@ -229,9 +227,9 @@ export async function cancelBillingAtPeriodEnd(input: {
   subscriptionId: string;
 }): Promise<SubscriptionRecord> {
   const record = await input.subs.getSubscription(input.subscriptionId);
-  if (!record) throw new Error(`No subscription ${input.subscriptionId}.`);
+  if (!record) throw new BusinessError("FAILURE_COMMERCIAL_NOT_FOUND"); // #5606 (G-3)
   if (!record.providerSubscriptionId) {
-    throw new Error("Refusing to Billing-cancel a repurchase subscription: use the repurchase cancel path instead.");
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   const provider = await input.billing.retrieveProviderSubscription(record.providerSubscriptionId);
   if (provider.status === "canceled") {
@@ -266,9 +264,9 @@ export async function cancelBillingImmediately(input: {
 }): Promise<SubscriptionRecord> {
   const nowMs = input.nowMs ?? Date.now();
   const record = await input.subs.getSubscription(input.subscriptionId);
-  if (!record) throw new Error(`No subscription ${input.subscriptionId}.`);
+  if (!record) throw new BusinessError("FAILURE_COMMERCIAL_NOT_FOUND"); // #5606 (G-3)
   if (!record.providerSubscriptionId) {
-    throw new Error("Refusing to Billing-cancel a repurchase subscription: use the repurchase cancel path instead.");
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   const provider = await input.billing.retrieveProviderSubscription(record.providerSubscriptionId);
   if (provider.status === "canceled") {
@@ -310,16 +308,16 @@ export async function changeBillingPlanPrice(input: {
   planId: string;
 }): Promise<{ record: SubscriptionRecord; fromPlanId: string; prorationBehavior: BillingPolicy["prorationBehavior"] }> {
   const record = await input.subs.getSubscription(input.subscriptionId);
-  if (!record) throw new Error(`No subscription ${input.subscriptionId}.`);
+  if (!record) throw new BusinessError("FAILURE_COMMERCIAL_NOT_FOUND"); // #5606 (G-3)
   if (!record.providerSubscriptionId) {
-    throw new Error("Refusing to change the plan of a repurchase subscription: repurchase rows have no provider subscription to update.");
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   if (record.status !== "active" || record.periodEndMs <= Date.now()) {
-    throw new Error(`Subscription ${input.subscriptionId} is not active and unexpired; only live Billing rows change plan.`);
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   const plan = await input.subs.getPlan(input.planId);
-  if (!plan) throw new Error(`No plan ${input.planId}.`);
-  if (!plan.active) throw new Error(`Plan ${input.planId} is not active.`);
+  if (!plan) throw new BusinessError("FAILURE_PLAN_NOT_FOUND"); // #5606 (G-3)
+  if (!plan.active) throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   // Issue #3357: only an APPROVED plan price may be charged — the
   // check runs before any provider call, so an unapproved target
   // never reaches Stripe. Catalog-coded, never a raw error: the
@@ -329,11 +327,11 @@ export async function changeBillingPlanPrice(input: {
   }
   const priceId = input.policy.stripePriceByPlan[input.planId];
   if (!priceId) {
-    throw new Error(`Plan ${input.planId} has no operator-mapped Stripe price id: refusing to invent one.`);
+    throw new BusinessError("FAILURE_COMMERCIAL_STORE_UNAVAILABLE"); // #5606 (G-3)
   }
   const provider = await input.billing.retrieveProviderSubscription(record.providerSubscriptionId);
   if (provider.priceId === priceId) {
-    throw new Error(`Subscription ${input.subscriptionId} is already on price ${priceId}; refusing a same-price change.`);
+    throw new BusinessError("FAILURE_COMMERCIAL_CONFLICT"); // #5606 (G-3)
   }
   const updated = await input.billing.updateProviderSubscriptionPrice(
     record.providerSubscriptionId,
@@ -385,7 +383,7 @@ export async function applyBillingWebhookEvent(input: {
   nowMs?: number;
 }): Promise<BillingWebhookResult> {
   if (!input.verified) {
-    throw new Error("Refusing to apply an unverified Billing webhook event: signature verification is required.");
+    throw new BusinessError("FAILURE_UNEXPECTED_ERROR"); // #5606 (G-3)
   }
   const nowMs = input.nowMs ?? Date.now();
   const record = await input.subs.findByProviderSubscriptionId(input.event.providerSubscriptionId);

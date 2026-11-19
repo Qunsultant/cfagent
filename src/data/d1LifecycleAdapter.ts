@@ -57,6 +57,7 @@ import {
   type ReferralEarning,
   type ReferralRules,
 } from "./lifecyclePorts";
+import { BusinessError } from "../outcomes/outcomeAspects";
 
 /** Drizzle D1 database object carrying the lifecycle schema. */
 export type LifecycleDb = DrizzleD1Database<{
@@ -131,9 +132,9 @@ export class D1LifecycleAdapter implements LifecycleStore {
       .from(agentReferralRules)
       .where(eq(agentReferralRules.id, "default"))
       .limit(1);
-    if (rows.length === 0) throw new Error("Referral rules not seeded: migration 0015 has not run.");
+    if (rows.length === 0) throw new BusinessError("FAILURE_UNEXPECTED_ERROR"); // #5606 (G-3)
     if (rows[0].redemptionScope !== "pay-per-run") {
-      throw new Error(`Unknown referral redemptionScope: ${rows[0].redemptionScope}.`);
+      throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     }
     return {
       id: rows[0].id,
@@ -182,10 +183,10 @@ export class D1LifecycleAdapter implements LifecycleStore {
     tenantId: string;
   }): Promise<ReferralEarning> {
     if (!input.referrerUserId || !input.referredUserId || !input.tenantId) {
-      throw new Error("referrerUserId, referredUserId, and tenantId are required.");
+      throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     }
     if (input.referrerUserId === input.referredUserId) {
-      throw new Error("A user cannot refer themselves.");
+      throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     }
     const rules = await this.getRules();
     const now = Date.now();
@@ -232,17 +233,15 @@ export class D1LifecycleAdapter implements LifecycleStore {
     source?: ReferralAttribution["source"];
   }): Promise<ReferralAttribution> {
     if (!input.referrerUserId || !input.referredUserId || !input.tenantId) {
-      throw new Error("referrerUserId, referredUserId, and tenantId are required.");
+      throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     }
     if (input.referrerUserId === input.referredUserId) {
-      throw new Error("A user cannot refer themselves.");
+      throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     }
     const existing = await this.getAttribution(input.referredUserId);
     if (existing) {
       if (existing.referrerUserId !== input.referrerUserId) {
-        throw new Error(
-          `User ${input.referredUserId} is already attributed to a different referrer; attribution is set-once and is never silently overwritten.`,
-        );
+        throw new BusinessError("FAILURE_COMMERCIAL_CONFLICT"); // #5606 (G-3)
       }
       return existing;
     }
@@ -268,11 +267,9 @@ export class D1LifecycleAdapter implements LifecycleStore {
       // Racing second attribution for the same user hit the PRIMARY KEY:
       // reconcile from the row, never a duplicate.
       const raced = await this.getAttribution(input.referredUserId);
-      if (!raced) throw new Error("Referral attribution insert failed.");
+      if (!raced) throw new BusinessError("FAILURE_UNEXPECTED_ERROR"); // #5606 (G-3)
       if (raced.referrerUserId !== input.referrerUserId) {
-        throw new Error(
-          `User ${input.referredUserId} is already attributed to a different referrer; attribution is set-once and is never silently overwritten.`,
-        );
+        throw new BusinessError("FAILURE_COMMERCIAL_CONFLICT"); // #5606 (G-3)
       }
       return raced;
     }
@@ -314,14 +311,14 @@ export class D1LifecycleAdapter implements LifecycleStore {
     runRequestId: string;
   }): Promise<{ allocations: ReferralAllocation[]; redeemedUSD: number; expiredUSD: number }> {
     if (!input.userId || !input.tenantId || !input.runRequestId) {
-      throw new Error("userId, tenantId, and runRequestId are required.");
+      throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     }
     const earnings = await this.listEarnings(input.userId);
     // Tenant isolation, checked before any write: every earning
     // redeemed here must belong to the caller's tenant.
     for (const e of earnings) {
       if (e.tenantId !== input.tenantId) {
-        throw new Error("Referral credits never cross tenants: earning tenant differs from run tenant.");
+        throw new BusinessError("FAILURE_COMMERCIAL_FORBIDDEN"); // #5606 (G-3)
       }
     }
     const rules = await this.getRules();
@@ -330,10 +327,10 @@ export class D1LifecycleAdapter implements LifecycleStore {
     const expiredUSD = expiredBalanceFor(earnings, now, rules.expiryPeriodMs);
     for (const a of allocations) {
       const earning = earnings.find((e) => e.id === a.earningId);
-      if (!earning) throw new Error(`Referral earning ${a.earningId} vanished mid-redeem.`);
+      if (!earning) throw new BusinessError("FAILURE_UNEXPECTED_ERROR"); // #5606 (G-3)
       const next = round2(earning.redeemedAmountUSD + a.amountUSD);
       if (next > earning.amountUSD) {
-        throw new Error(`Referral earning ${a.earningId} would over-redeem; redeem refused.`);
+        throw new BusinessError("FAILURE_UNEXPECTED_ERROR"); // #5606 (G-3)
       }
       await this.db
         .update(agentReferralEarnings)
@@ -377,7 +374,7 @@ export class D1LifecycleAdapter implements LifecycleStore {
     welcomeEnabled?: unknown;
   }): Promise<NotificationPreferences> {
     if (!input.userId || !input.tenantId) {
-      throw new Error("userId and tenantId are required.");
+      throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     }
     // #1761: the table's primary key is user_id alone, so the
     // upsert below would otherwise overwrite another tenant's

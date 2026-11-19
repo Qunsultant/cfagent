@@ -49,6 +49,7 @@
  */
 
 import type { PriceFamily } from "./priceCataloguePorts";
+import { BusinessError } from "../outcomes/outcomeAspects";
 
 /** Families with a free-run allowance. Mirrors the gate's family union. */
 export const FREE_RUN_FAMILIES: readonly PriceFamily[] = ["stock", "goal", "options", "strategy"];
@@ -56,7 +57,8 @@ export const FREE_RUN_FAMILIES: readonly PriceFamily[] = ["stock", "goal", "opti
 export function assertFreeRunAllowance(runs: unknown): number {
   const value = Number(runs);
   if (!Number.isInteger(value) || value < 0) {
-    throw new Error("free-run allowance must be a non-negative integer.");
+    // Issue #5606 (G-3): typed refusal — the value never reaches a client in a raw message.
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID");
   }
   return value;
 }

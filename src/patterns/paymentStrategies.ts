@@ -35,6 +35,7 @@ import { computeHmacSha256Hex } from "../services/cryptoUtils";
 import { resolveEnvironmentConfig } from "../config/environment";
 import { createStructuredLogger } from "../observability/structuredLogger";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
+import { BusinessError } from "../outcomes/outcomeAspects";
 
 /** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
 const structuredLog = createStructuredLogger(createObservabilitySink({}), {
@@ -444,7 +445,10 @@ export class StripePaymentStrategy implements IPaymentGatewayStrategy {
   ): Promise<Record<string, unknown>> {
     const { apiKey } = this.resolveApiKey(env);
     if (!apiKey) {
-      throw new Error("Stripe is not configured: a secret key is required for Stripe Billing.");
+      // #5606 (G-3): a missing Stripe secret is a server
+      // misconfiguration, not a store failure — UNEXPECTED (500),
+      // never STORE_UNAVAILABLE (503).
+      throw new BusinessError("FAILURE_UNEXPECTED_ERROR");
     }
     const res = await fetch(`https://api.stripe.com${path}`, {
       method,
@@ -456,9 +460,7 @@ export class StripePaymentStrategy implements IPaymentGatewayStrategy {
     });
     const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
     if (!res.ok) {
-      throw new Error(
-        `Stripe Billing request failed: HTTP ${res.status} (${(data.error as { message?: string } | undefined)?.message ?? res.statusText}).`,
-      );
+      throw new BusinessError("FAILURE_COMMERCIAL_UPSTREAM_FAILED", { httpStatus: res.status }); // #5606 (G-3)
     }
     return data;
   }
@@ -467,8 +469,8 @@ export class StripePaymentStrategy implements IPaymentGatewayStrategy {
     env: Env,
     input: CreateProviderSubscriptionInput,
   ): Promise<ProviderSubscription> {
-    if (!input.customerId?.trim()) throw new Error("customerId is required.");
-    if (!input.priceId?.trim()) throw new Error("priceId is required.");
+    if (!input.customerId?.trim()) throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
+    if (!input.priceId?.trim()) throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     const body = new URLSearchParams({
       customer: input.customerId,
       "items[0][price]": input.priceId,
@@ -483,7 +485,7 @@ export class StripePaymentStrategy implements IPaymentGatewayStrategy {
   }
 
   async retrieveProviderSubscription(env: Env, providerSubscriptionId: string): Promise<ProviderSubscription> {
-    if (!providerSubscriptionId?.trim()) throw new Error("A provider subscription id is required.");
+    if (!providerSubscriptionId?.trim()) throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     const data = await this.stripeBillingRequest(
       env,
       "GET",
@@ -505,7 +507,7 @@ export class StripePaymentStrategy implements IPaymentGatewayStrategy {
    * as unresolvable) and on a missing id or configuration.
    */
   async retrieveFirstInvoicePaymentIntent(env: Env, providerSubscriptionId: string): Promise<string | null> {
-    if (!providerSubscriptionId?.trim()) throw new Error("A provider subscription id is required.");
+    if (!providerSubscriptionId?.trim()) throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     const data = await this.stripeBillingRequest(
       env,
       "GET",
@@ -527,7 +529,7 @@ export class StripePaymentStrategy implements IPaymentGatewayStrategy {
   }
 
   async cancelProviderAtPeriodEnd(env: Env, providerSubscriptionId: string): Promise<ProviderSubscription> {
-    if (!providerSubscriptionId?.trim()) throw new Error("A provider subscription id is required.");
+    if (!providerSubscriptionId?.trim()) throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     const body = new URLSearchParams({ cancel_at_period_end: "true" });
     const data = await this.stripeBillingRequest(
       env,
@@ -539,7 +541,7 @@ export class StripePaymentStrategy implements IPaymentGatewayStrategy {
   }
 
   async cancelProviderImmediately(env: Env, providerSubscriptionId: string): Promise<ProviderSubscription> {
-    if (!providerSubscriptionId?.trim()) throw new Error("A provider subscription id is required.");
+    if (!providerSubscriptionId?.trim()) throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     const data = await this.stripeBillingRequest(
       env,
       "DELETE",
@@ -564,10 +566,10 @@ export class StripePaymentStrategy implements IPaymentGatewayStrategy {
     priceId: string,
     prorationBehavior: import("../data/billingPolicyPorts").ProrationBehavior,
   ): Promise<ProviderSubscription> {
-    if (!providerSubscriptionId?.trim()) throw new Error("A provider subscription id is required.");
-    if (!priceId?.trim()) throw new Error("A provider price id is required.");
+    if (!providerSubscriptionId?.trim()) throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
+    if (!priceId?.trim()) throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     if (prorationBehavior !== "none" && prorationBehavior !== "create_prorations" && prorationBehavior !== "always_invoice") {
-      throw new Error(`Invalid proration_behavior: ${String(prorationBehavior)}.`);
+      throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     }
     const current = await this.stripeBillingRequest(
       env,
@@ -577,7 +579,7 @@ export class StripePaymentStrategy implements IPaymentGatewayStrategy {
     const items = (current.items as { data?: Array<{ id?: unknown }> } | undefined)?.data;
     const itemId = Array.isArray(items) && items.length > 0 ? items[0]?.id : undefined;
     if (typeof itemId !== "string" || !itemId) {
-      throw new Error(`Provider subscription ${providerSubscriptionId} has no subscription item: refusing to guess an item id.`);
+      throw new BusinessError("FAILURE_UNEXPECTED_ERROR"); // #5606 (G-3)
     }
     const body = new URLSearchParams({
       "items[0][id]": itemId,

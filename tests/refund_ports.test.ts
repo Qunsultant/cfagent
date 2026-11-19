@@ -219,7 +219,7 @@ describe("refund port contract (#2204)", () => {
   it("reads an unseeded policy as null, never a guessed policy", async () => {
     for (const { policy } of await emptyPolicyAdapters()) {
       expect(await policy.getPolicy()).toBeNull();
-      await expect(policy.setPolicy({ windowDays: 14 })).rejects.toThrow(/not configured/);
+      await expect(policy.setPolicy({ windowDays: 14 })).rejects.toMatchObject({ code: "FAILURE_REFUND_POLICY_REFUSAL" }); // #5606 (G-3)
     }
   });
 
@@ -233,13 +233,11 @@ describe("refund port contract (#2204)", () => {
     expect((await policy.getPolicy())?.windowDays).toBe(14);
     expect((await policy.getPolicy())?.allowPartial).toBe(true);
     for (const { policy: p } of await seededAdapters()) {
-      await expect(p.setPolicy({ windowDays: 0 })).rejects.toThrow(/windowDays/);
-      await expect(p.setPolicy({ windowDays: 366 })).rejects.toThrow(/windowDays/);
-      await expect(p.setPolicy({ approver: "automatic" })).rejects.toThrow(/operator_hitl/);
-      await expect(p.setPolicy({ bogusField: 1 })).rejects.toThrow(/Unknown refund policy field/);
-      await expect(p.setPolicy({ subscriptionFullEffect: "keep_everything" })).rejects.toThrow(
-        /subscriptionFullEffect/,
-      );
+      await expect(p.setPolicy({ windowDays: 0 })).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3)
+      await expect(p.setPolicy({ windowDays: 366 })).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3)
+      await expect(p.setPolicy({ approver: "automatic" })).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3)
+      await expect(p.setPolicy({ bogusField: 1 })).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3)
+      await expect(p.setPolicy({ subscriptionFullEffect: "keep_everything" })).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3)
       const updated = await p.setPolicy({ subscriptionFullEffect: "cancel_at_period_end" });
       expect(updated.subscriptionFullEffect).toBe("cancel_at_period_end");
     }
@@ -257,13 +255,9 @@ describe("refund port contract (#2204)", () => {
       const updated = await store.updateRefund("refund-1", { status: "approved", approverLogin: "op1", updatedAtMs: Date.now() });
       expect(updated.status).toBe("approved");
       expect(updated.approverLogin).toBe("op1");
-      await expect(store.updateRefund("missing", { status: "approved", updatedAtMs: Date.now() })).rejects.toThrow(
-        /No refund/,
-      );
+      await expect(store.updateRefund("missing", { status: "approved", updatedAtMs: Date.now() })).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_NOT_FOUND" }); // #5606 (G-3)
       await expect(store.createRefund(refundInput())).rejects.toThrow();
-      await expect(store.createRefund(refundInput({ id: "refund-3", amountUSD: 0.2 }))).rejects.toThrow(
-        /exceeds the original amount/,
-      );
+      await expect(store.createRefund(refundInput({ id: "refund-3", amountUSD: 0.2 })).rejects.toMatchObject({ code: "FAILURE_REFUND_POLICY_REFUSAL" }); // #5606 (G-3)
     }
   });
 
@@ -397,7 +391,7 @@ describe("refund service lifecycle (#2204)", () => {
         requesterLogin: "u2",
         isOperator: false,
       }),
-    ).rejects.toThrow(/Only the subscription owner/);
+    ).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3)
     const byOperator = await requestRefund(base, {
       kind: "subscription",
       originalPaymentRef: "sub-draft-1",
@@ -423,7 +417,7 @@ describe("refund service lifecycle (#2204)", () => {
         requesterLogin: "u1",
         isOperator: false,
       }),
-    ).rejects.toThrow(CRYPTO_NON_REFUNDABLE_MESSAGE);
+    ).rejects.toMatchObject({ code: "FAILURE_REFUND_POLICY_REFUSAL" }); // #5606 (G-3)
     await expect(
       requestRefund({ ...base, sourceResolver: stubPayPerRunSource("t1") }, {
         kind: "pay_per_run",
@@ -436,7 +430,7 @@ describe("refund service lifecycle (#2204)", () => {
         requesterLogin: "u1",
         isOperator: false,
       }),
-    ).rejects.toThrow(/Partial refunds are not allowed/);
+    ).rejects.toMatchObject({ code: "FAILURE_REFUND_POLICY_REFUSAL" }); // #5606 (G-3)
     await expect(
       requestRefund({ ...base, sourceResolver: stubPayPerRunSource("t1") }, {
         kind: "pay_per_run",
@@ -449,7 +443,7 @@ describe("refund service lifecycle (#2204)", () => {
         requesterLogin: "u1",
         isOperator: false,
       }),
-    ).rejects.toThrow(/exceeds the original amount/);
+    ).rejects.toMatchObject({ code: "FAILURE_REFUND_POLICY_REFUSAL" }); // #5606 (G-3)
     await expect(
       requestRefund({ ...base, sourceResolver: stubPayPerRunSource("t1") }, {
         kind: "pay_per_run",
@@ -462,7 +456,7 @@ describe("refund service lifecycle (#2204)", () => {
         requesterLogin: "u1",
         isOperator: false,
       }),
-    ).rejects.toThrow(/window expired/);
+    ).rejects.toMatchObject({ code: "FAILURE_REFUND_POLICY_REFUSAL" }); // #5606 (G-3)
   });
 
   it("refuses a pay-per-run request whose resolved source carries no tenant, and records nothing (#3180)", async () => {
@@ -550,7 +544,7 @@ describe("refund service lifecycle (#2204)", () => {
         requesterLogin: "u1",
         isOperator: false,
       }),
-    ).rejects.toThrow(/no stored Stripe payment-intent id/);
+    ).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3)
   });
 
   it("refuses unapproved execution and flag-OFF execution before any gateway call", async () => {
@@ -563,16 +557,16 @@ describe("refund service lifecycle (#2204)", () => {
       requesterLogin: "u1",
       isOperator: false,
     });
-    await expect(executeRefund(base, { refundId: record.id })).rejects.toThrow(/Only an approved refund/);
+    await expect(executeRefund(base, { refundId: record.id })).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_CONFLICT" }); // #5606 (G-3)
     expect(gateway.calls).toEqual([]);
     await decideRefund({ refundStore: base.refundStore }, { refundId: record.id, decision: "approve", approverLogin: "op1" });
     await expect(
       executeRefund({ ...base, monetizationEnabled: false }, { refundId: record.id }),
-    ).rejects.toThrow(/flag is OFF/);
+    ).rejects.toMatchObject({ code: "FAILURE_REFUND_POLICY_REFUSAL" }); // #5606 (G-3)
     expect(gateway.calls).toEqual([]);
     await expect(
       decideRefund({ refundStore: base.refundStore }, { refundId: record.id, decision: "deny", approverLogin: "op1" }),
-    ).rejects.toThrow(/cannot be decided/);
+    ).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3)
   });
 
   it("executes an approved card refund via the payment-intent id with journal + revocation", async () => {
@@ -611,7 +605,7 @@ describe("refund service lifecycle (#2204)", () => {
       ["1000", 0, 20],
     ]);
     expect(new Set(journal.map((e: any) => e.transactionRef)).size).toBe(1);
-    await expect(executeRefund(base, { refundId: record.id })).rejects.toThrow(/Only an approved refund/);
+    await expect(executeRefund(base, { refundId: record.id })).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_CONFLICT" }); // #5606 (G-3)
   });
 
   it("gateway failure marks execution_failed and a retry succeeds", async () => {
@@ -626,7 +620,7 @@ describe("refund service lifecycle (#2204)", () => {
     });
     await decideRefund({ refundStore: base.refundStore }, { refundId: record.id, decision: "approve", approverLogin: "op1" });
     gateway.setResult({ success: false, refundId: "", amountRefunded: 0, message: "card declined at gateway" });
-    await expect(executeRefund(base, { refundId: record.id })).rejects.toThrow(/Gateway refund failed/);
+    await expect(executeRefund(base, { refundId: record.id })).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_UPSTREAM_FAILED" }); // #5606 (G-3)
     expect((await base.refundStore.getRefund(record.id))?.status).toBe("execution_failed");
     gateway.setResult({ success: true, refundId: "re_retry", amountRefunded: 20, message: "ok" });
     const retried = await executeRefund(base, { refundId: record.id });
@@ -648,7 +642,7 @@ describe("refund service lifecycle (#2204)", () => {
       isOperator: false,
     });
     await decideRefund({ refundStore: base.refundStore }, { refundId: record.id, decision: "approve", approverLogin: "op1" });
-    await expect(executeRefund(base, { refundId: record.id })).rejects.toThrow(/not resolvable/);
+    await expect(executeRefund(base, { refundId: record.id })).rejects.toMatchObject({ code: "FAILURE_REFUND_POLICY_REFUSAL" }); // #5606 (G-3)
     expect(gateway.calls).toEqual([]);
     expect((await base.refundStore.getRefund(record.id))?.status).toBe("approved");
   });
@@ -670,7 +664,7 @@ describe("refund service lifecycle (#2204)", () => {
     await policy.setKindApproval("subscription", true, "op1");
     await expect(
       executeRefund({ ...base, nowMs: Date.now() + 2 * 86_400_000 }, { refundId: record.id }),
-    ).rejects.toThrow(/window expired/);
+    ).rejects.toMatchObject({ code: "FAILURE_REFUND_POLICY_REFUSAL" }); // #5606 (G-3)
   });
 
   it("revokeSubscription ends one period immediately on both subscription adapters", async () => {
@@ -863,7 +857,7 @@ describe("refund routes (#2204)", () => {
       reason: "run failed",
     });
     expect(res?.status).toBe(400);
-    expect((await bodyOf(res)).error).toMatch(/tenantId is required/);
+    expect((await bodyOf(res)).code).toBe("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     const listed = await bodyOf(await call(ctx, "GET", "/payments/agentic/commercial/refunds", "u1"));
     expect(listed.refunds).toEqual([]);
   });
@@ -915,8 +909,8 @@ describe("refund routes (#2204)", () => {
       amountUSD: 20,
       reason: "crypto back",
     });
-    expect(crypto?.status).toBe(400);
-    expect((await bodyOf(crypto)).error).toContain("non-refundable");
+    expect(crypto?.status).toBe(422); // #5606 (G-3) N4: policy refusals are 422
+    expect((await bodyOf(crypto)).code).toBe("FAILURE_REFUND_POLICY_REFUSAL");
     const policy = await bodyOf(await call(ctx, "GET", "/payments/agentic/commercial/refund-policy", "u1"));
     expect(policy.policy.windowDays).toBe(30);
     expect(policy.disclosure).toContain("non-refundable");
@@ -969,8 +963,15 @@ describe("refund structural pins (#2204, ADR 0002 R1)", () => {
   }
 
   it("port module imports no store client and writes no SQL", () => {
+    // #5606 (G-3): the pin's intent is no store client / no SQL —
+    // the outcomes import (BusinessError, the typed-error mechanism)
+    // is neither, so the pin forbids store/SQL imports specifically
+    // instead of forbidding every import.
     const imports = importLines("data/refundPorts.ts").join("\n");
-    expect(imports).toBe("");
+    expect(imports).not.toContain("drizzle-orm");
+    expect(imports).not.toContain("D1Database");
+    expect(imports).not.toContain("Adapter");
+    expect(imports).not.toContain("AGENT_DB");
     const text = fullText("data/refundPorts.ts");
     expect(text).not.toContain("AGENT_DB");
     expect(text).not.toContain("drizzle-orm");

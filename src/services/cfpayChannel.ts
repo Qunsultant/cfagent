@@ -111,7 +111,7 @@ export async function mintChannelPurchase(
   const nowMs = deps.nowMs ?? Date.now();
   const family = assertPriceFamily(input.family);
   if (!isValidEmail(input.email)) {
-    throw new Error("email is required for a cfpay channel purchase.");
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   const email = (input.email as string).trim();
   const approved = await deps.catalogue.getApprovedPrice(family);

@@ -207,7 +207,7 @@ describe("metered-gate pure helpers (#2408)", () => {
   });
 
   it("rejects an invalid tier value instead of defaulting it away", async () => {
-    await expect(resolveMeteredTier(async () => "Gold" as unknown as StoreTier, "someone")).rejects.toThrow(/Invalid tier/);
+    await expect(resolveMeteredTier(async () => "Gold" as unknown as StoreTier, "someone")).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3)
   });
 
   it("builds the meter row from the receipt: runId = receipt id, category = service id", () => {

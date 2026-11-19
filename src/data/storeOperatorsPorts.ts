@@ -21,10 +21,13 @@
  * both the env list and the store list, not in this port.
  */
 
+import { BusinessError } from "../outcomes/outcomeAspects";
+
 /** A login is a non-empty trimmed string; blank approves nothing. */
 export function assertOperatorLogin(login: unknown): string {
   if (typeof login !== "string" || login.trim().length === 0) {
-    throw new Error("operator login must be a non-empty string.");
+    // Issue #5606 (G-3): typed refusal — the value never reaches a client in a raw message.
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID");
   }
   return login.trim();
 }

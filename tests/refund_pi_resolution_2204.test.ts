@@ -299,7 +299,7 @@ describe("executeRefund with a PI-resolved pay-per-run run", () => {
         },
         { refundId: record.id },
       ),
-    ).rejects.toThrow(refundNotResolvableMessage(RUN));
+    ).rejects.toMatchObject({ code: "FAILURE_REFUND_POLICY_REFUSAL" }); // #5606 (G-3)
     expect(calls).toEqual([]);
     expect((await store.getRefund(record.id))?.status).toBe("approved");
   });
@@ -323,7 +323,7 @@ describe("executeRefund with a PI-resolved pay-per-run run", () => {
         },
         { refundId: record.id },
       ),
-    ).rejects.toThrow(/cross-tenant/i);
+    ).rejects.toMatchObject({ code: "FAILURE_REFUND_POLICY_REFUSAL" }); // #5606 (G-3)
     expect(calls).toEqual([]);
   });
 
@@ -354,7 +354,7 @@ describe("executeRefund with a PI-resolved pay-per-run run", () => {
         },
         { refundId: record.id },
       ),
-    ).rejects.toThrow(/already received its automatic replacement-run credit/);
+    ).rejects.toMatchObject({ code: "FAILURE_REFUND_POLICY_REFUSAL" }); // #5606 (G-3)
     expect(calls).toEqual([]);
   });
 
@@ -383,7 +383,7 @@ describe("executeRefund with a PI-resolved pay-per-run run", () => {
         },
         { refundId: record.id },
       ),
-    ).rejects.toThrow(/failure-credit lookup/);
+    ).rejects.toMatchObject({ code: "FAILURE_REFUND_POLICY_REFUSAL" }); // #5606 (G-3)
     expect(calls).toEqual([]);
   });
 });

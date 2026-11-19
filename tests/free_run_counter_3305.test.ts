@@ -192,15 +192,16 @@ describe.each([
   it("rejects an invalid family and an invalid allowance", async () => {
     const { counter, setup } = make();
     if (setup) await setup();
-    await expect(counter.getUsed({ login: "u1", family: "nope", month: "2026-11" })).rejects.toThrow(
-      /Invalid price family/,
-    );
-    await expect(counter.setAllowance({ family: "goal", runs: -1 })).rejects.toThrow(
-      /non-negative integer/,
-    );
-    await expect(counter.setAllowance({ family: "goal", runs: 1.5 })).rejects.toThrow(
-      /non-negative integer/,
-    );
+    // #5606 (G-3): the family assert throws a typed BusinessError now.
+    await expect(counter.getUsed({ login: "u1", family: "nope", month: "2026-11" })).rejects.toMatchObject({
+      code: "FAILURE_COMMERCIAL_REQUEST_INVALID",
+    });
+    await expect(counter.setAllowance({ family: "goal", runs: -1 })).rejects.toMatchObject({
+      code: "FAILURE_COMMERCIAL_REQUEST_INVALID",
+    });
+    await expect(counter.setAllowance({ family: "goal", runs: 1.5 })).rejects.toMatchObject({
+      code: "FAILURE_COMMERCIAL_REQUEST_INVALID",
+    });
   });
 });
 

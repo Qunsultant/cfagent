@@ -311,43 +311,83 @@ describe("commercial outcome codes (#2846 §3)", () => {
     );
   });
 
-  it("no raw store error text reaches a commercial client (grep pin)", () => {
+  it("no raw store error text reaches a commercial client (grep pin, #5606)", () => {
+    // #5606 (G-3): the original pin matched only a direct
+    // `Response.json(...err.message` on one line, which the
+    // `const message = err.message` indirection evaded. The pin now
+    // also flags the indirection itself and any regex classification
+    // over message text — both are gone from this file.
     const handler = readSrc("src/agents/routes/agenticPayments.ts");
     const bad: string[] = [];
     handler.split("\n").forEach((line, idx) => {
-      if (/Response\.json\(.*err\.message/.test(line) || /error: `[^`]*\$\{err\.message/.test(line)) {
+      if (
+        /Response\.json\(.*err\.message/.test(line) ||
+        /error: `[^`]*\$\{err\.message/.test(line) ||
+        /const message = err\.message/.test(line) ||
+        /\.test\((message|err\.message)/.test(line)
+      ) {
         bad.push(`${idx + 1}: ${line.trim().slice(0, 120)}`);
       }
     });
     expect(bad, "Response.json sites leaking err.message").toEqual([]);
   });
 
-  it("every commercial Response.json body carries a resolving code (shape pin)", () => {
+  it("every error body in a catch block carries a resolving code (shape pin, #5606)", () => {
+    // #5606 (G-3): the original pin was vacuous — its region start
+    // literal (`path.endsWith("/payments/agentic/commercial/account")`)
+    // does not exist in the handler (routes use
+    // COMMERCIAL_ROUTE_SUFFIXES), so indexOf returned -1 and the
+    // region was the whole file; and as written it would also fail
+    // on legitimate codeless SUCCESS bodies. The rewrite scopes to
+    // error bodies only: every `Response.json({` literal inside a
+    // `catch` block must carry a `code` — a string literal that
+    // resolves in the catalog, or a variable code (e.g.
+    // schemaFailureCode) whose value is resolved at runtime.
+    // Coded-helper calls (codedOutcomeResponse, runsPackErrorResponse,
+    // topUpCodedResponse, quotaErrorBody, channelErrorResponse,
+    // referralCodeErrorResponse) are coded by construction and need
+    // no literal here.
     const handler = readSrc("src/agents/routes/agenticPayments.ts");
-    const start = handler.indexOf('path.endsWith("/payments/agentic/commercial/account")');
-    const region = handler.slice(start);
     const missing: string[] = [];
-    const re = /Response\.json\(\{/g;
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(region)) !== null) {
+    const catchRe = /\} catch[^{]*\{/g;
+    let cm: RegExpExecArray | null;
+    while ((cm = catchRe.exec(handler)) !== null) {
+      const open = handler.indexOf("{", cm.index);
       let depth = 0;
-      let i = m.index + "Response.json({".length - 1;
-      for (; i < region.length; i++) {
-        if (region[i] === "{") depth++;
-        else if (region[i] === "}") {
+      let end = open;
+      for (; end < handler.length; end++) {
+        if (handler[end] === "{") depth++;
+        else if (handler[end] === "}") {
           depth--;
           if (depth === 0) break;
         }
       }
-      const obj = region.slice(m.index, i + 1);
-      const codeMatch = obj.match(/\bcode:\s*"([A-Z_]+)"/);
-      if (!codeMatch) {
-        missing.push(obj.slice(0, 100).replace(/\n/g, " "));
-        continue;
+      const block = handler.slice(open, end + 1);
+      const jsonRe = /Response\.json\(\{/g;
+      let jm: RegExpExecArray | null;
+      while ((jm = jsonRe.exec(block)) !== null) {
+        const start = jm.index + "Response.json(".length;
+        let d = 0;
+        let i = start;
+        for (; i < block.length; i++) {
+          if (block[i] === "{") d++;
+          else if (block[i] === "}") {
+            d--;
+            if (d === 0) break;
+          }
+        }
+        const obj = block.slice(start, i + 1);
+        const codeMatch = obj.match(/\bcode:\s*"([A-Z_]+)"/);
+        if (!codeMatch && !/\bcode:/.test(obj)) {
+          missing.push(obj.slice(0, 100).replace(/\n/g, " "));
+          continue;
+        }
+        if (codeMatch) {
+          expect(resolveOutcome(codeMatch[1]).resolved, `${codeMatch[1]} resolves`).toBe(true);
+        }
       }
-      expect(resolveOutcome(codeMatch[1]).resolved, `${codeMatch[1]} resolves`).toBe(true);
     }
-    expect(missing, "Response.json bodies without a code").toEqual([]);
+    expect(missing, "catch-block Response.json bodies without a code").toEqual([]);
   });
 });
 

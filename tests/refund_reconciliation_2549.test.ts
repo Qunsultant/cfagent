@@ -254,7 +254,7 @@ describe("credit XOR refund at the execute gate (#2549)", () => {
         { policyStore: policy, refundStore: store, gateway, monetizationEnabled: true, failureCreditLookup },
         { refundId: record.id },
       ),
-    ).rejects.toThrow(/already received its automatic replacement-run credit/);
+    ).rejects.toMatchObject({ code: "FAILURE_REFUND_POLICY_REFUSAL" }); // #5606 (G-3)
     expect(calls).toEqual([]);
     expect((await store.getRefund(record.id))?.status).toBe("approved");
   });
@@ -282,7 +282,7 @@ describe("credit XOR refund at the execute gate (#2549)", () => {
         { policyStore: policy, refundStore: store, gateway, monetizationEnabled: true },
         { refundId: record.id },
       ),
-    ).rejects.toThrow(/failure-credit lookup/);
+    ).rejects.toMatchObject({ code: "FAILURE_REFUND_POLICY_REFUSAL" }); // #5606 (G-3)
     expect(calls).toEqual([]);
     expect((await store.getRefund(record.id))?.status).toBe("approved");
   });
@@ -534,7 +534,7 @@ describe("refund routes: operator gate + XOR wiring (#2549)", () => {
     const record = await seedApprovedPayPerRun("run-xor-route");
     const res = await call(ctx, "/payments/agentic/commercial/refunds/execute", "op1", { refundId: record.id });
     expect(res?.status).toBe(422);
-    expect((await bodyOf(res)).error).toContain("already received its automatic replacement-run credit");
+    expect((await bodyOf(res)).code).toBe("FAILURE_REFUND_POLICY_REFUSAL"); // #5606 (G-3)
     expect(stripeCalls).toEqual([]);
   });
 
@@ -544,7 +544,7 @@ describe("refund routes: operator gate + XOR wiring (#2549)", () => {
     const record = await seedApprovedPayPerRun("run-xor-native");
     const res = await call(ctx, "/payments/agentic/commercial/refunds/execute", "op1", { refundId: record.id });
     expect(res?.status).toBe(422);
-    expect((await bodyOf(res)).error).toContain("already received its automatic replacement-run credit");
+    expect((await bodyOf(res)).code).toBe("FAILURE_REFUND_POLICY_REFUSAL"); // #5606 (G-3)
     expect(stripeCalls).toEqual([]);
   });
 

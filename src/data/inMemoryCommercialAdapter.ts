@@ -25,6 +25,7 @@ import {
   type TenantProviders,
 } from "./commercialPorts";
 import { assertSegment, DEFAULT_SEGMENT } from "./productPorts";
+import { BusinessError } from "../outcomes/outcomeAspects";
 
 export class InMemoryCommercialAdapter implements CommercialStore {
   private accounts = new Map<string, CommercialAccountRecord>();
@@ -49,7 +50,7 @@ export class InMemoryCommercialAdapter implements CommercialStore {
     segment?: unknown;
   }): Promise<CommercialAccountRecord> {
     if (!input.userId || !input.tenantId) {
-      throw new Error("userId and tenantId are required.");
+      throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     }
     const existing = this.accounts.get(input.userId);
     const tierSource =
@@ -82,7 +83,7 @@ export class InMemoryCommercialAdapter implements CommercialStore {
 
   async setAccountSegment(userId: string, segment: string): Promise<CommercialAccountRecord> {
     const account = this.accounts.get(userId);
-    if (!account) throw new Error(`No commercial account for user ${userId}.`);
+    if (!account) throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     const updated = { ...account, segment: assertSegment(segment), updatedAtMs: Date.now() };
     this.accounts.set(userId, updated);
     return updated;
@@ -90,9 +91,9 @@ export class InMemoryCommercialAdapter implements CommercialStore {
 
   async adjustCredits(userId: string, deltaUSD: number): Promise<CommercialAccountRecord> {
     const account = this.accounts.get(userId);
-    if (!account) throw new Error(`No commercial account for user ${userId}.`);
+    if (!account) throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     const next = round2(account.creditsUSD + deltaUSD);
-    if (next < 0) throw new Error("Credits cannot go below zero.");
+    if (next < 0) throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     const updated = { ...account, creditsUSD: next, updatedAtMs: Date.now() };
     this.accounts.set(userId, updated);
     return updated;
@@ -100,8 +101,8 @@ export class InMemoryCommercialAdapter implements CommercialStore {
 
   async consumeIncludedRun(userId: string): Promise<CommercialAccountRecord> {
     const account = this.accounts.get(userId);
-    if (!account) throw new Error(`No commercial account for user ${userId}.`);
-    if (account.includedRuns <= 0) throw new Error("No included runs remaining.");
+    if (!account) throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
+    if (account.includedRuns <= 0) throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     const updated = { ...account, includedRuns: account.includedRuns - 1, updatedAtMs: Date.now() };
     this.accounts.set(userId, updated);
     return updated;
@@ -109,12 +110,12 @@ export class InMemoryCommercialAdapter implements CommercialStore {
 
   async consumeCredits(userId: string, amountUSD: number): Promise<CommercialAccountRecord> {
     const account = this.accounts.get(userId);
-    if (!account) throw new Error(`No commercial account for user ${userId}.`);
+    if (!account) throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     const amount = round2(amountUSD);
     if (!Number.isFinite(amount) || amount <= 0) {
-      throw new Error("amountUSD must be a positive finite number.");
+      throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     }
-    if (account.creditsUSD < amount) throw new Error("Insufficient credits.");
+    if (account.creditsUSD < amount) throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     const updated = { ...account, creditsUSD: round2(account.creditsUSD - amount), updatedAtMs: Date.now() };
     this.accounts.set(userId, updated);
     return updated;
@@ -263,7 +264,7 @@ export class InMemoryCommercialAdapter implements CommercialStore {
     runRequestId: string;
   }): Promise<PaidSubmissionRecord> {
     if (!input.workflowId || !input.userId || !input.runRequestId) {
-      throw new Error("workflowId, userId, and runRequestId are required.");
+      throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     }
     const existing = this.submissions.get(input.workflowId);
     if (existing) return existing;
@@ -283,7 +284,7 @@ export class InMemoryCommercialAdapter implements CommercialStore {
 
   async redeemCredit(creditRunId: string, redeemedByRunId: string): Promise<CreditRedemptionRecord> {
     if (this.redemptions.has(creditRunId)) {
-      throw new Error(`Credit ${creditRunId} already redeemed.`);
+      throw new BusinessError("FAILURE_CREDIT_ALREADY_REDEEMED"); // #5606 (G-3)
     }
     const record: CreditRedemptionRecord = {
       creditRunId,

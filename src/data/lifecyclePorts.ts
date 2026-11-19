@@ -42,6 +42,8 @@
  * never cross tenants.
  */
 
+import { BusinessError } from "../outcomes/outcomeAspects";
+
 /** Money is stored to the cent; anything finer is a caller bug, not a rounding policy. */
 export function round2(n: number): number {
   return Math.round(n * 100) / 100;
@@ -92,14 +94,14 @@ export function validateReferralRules(input: {
 } {
   const earnAmountUSD = round2(Number(input.earnAmountUSD));
   if (!Number.isFinite(earnAmountUSD) || earnAmountUSD <= 0) {
-    throw new Error("Referral earnAmountUSD must be a positive finite number.");
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   const vestingDelayMs = Number(input.vestingDelayMs);
   if (!Number.isFinite(vestingDelayMs) || vestingDelayMs < 0 || Math.floor(vestingDelayMs) !== vestingDelayMs) {
-    throw new Error("Referral vestingDelayMs must be a finite non-negative integer.");
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   if (input.redemptionScope !== "pay-per-run") {
-    throw new Error('Referral redemptionScope must be "pay-per-run" (subscription application is deferred).');
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   // #5229: absent means "keep the seeded default" — callers that
   // predate expiry pass three fields and must not reset the value
@@ -107,7 +109,7 @@ export function validateReferralRules(input: {
   const expiryPeriodMs =
     input.expiryPeriodMs === undefined ? DEFAULT_REFERRAL_EXPIRY_PERIOD_MS : Number(input.expiryPeriodMs);
   if (!Number.isFinite(expiryPeriodMs) || expiryPeriodMs < 0 || Math.floor(expiryPeriodMs) !== expiryPeriodMs) {
-    throw new Error("Referral expiryPeriodMs must be a finite non-negative integer (0 = never expires).");
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   return { earnAmountUSD, vestingDelayMs, redemptionScope: "pay-per-run", expiryPeriodMs };
 }
@@ -202,7 +204,7 @@ export function allocateRedemption(
 ): ReferralAllocation[] {
   const amount = round2(amountUSD);
   if (!Number.isFinite(amount) || amount <= 0) {
-    throw new Error("Referral redemption amountUSD must be a positive finite number.");
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   const vested = [...earnings]
     .filter(
@@ -223,11 +225,7 @@ export function allocateRedemption(
   }
   if (remaining > 0) {
     const expired = expiredBalanceFor(earnings, nowMs, expiryPeriodMs);
-    throw new Error(
-      expired > 0
-        ? `Insufficient vested referral balance: need ${amount}, vested available ${round2(amount - remaining)} (${expired} expired).`
-        : `Insufficient vested referral balance: need ${amount}, vested available ${round2(amount - remaining)}.`,
-    );
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   return allocations;
 }

@@ -148,8 +148,8 @@ describe("refund policy approval (2.7, per kind, fail-closed)", () => {
 
   it("approval can never be smuggled through setPolicy (unknown-field rule)", async () => {
     for (const { policy } of await seededPolicies()) {
-      await expect(policy.setPolicy({ approvedKinds: ["subscription"] })).rejects.toThrow(/Unknown refund policy field/);
-      await expect(policy.setPolicy({ approvedBy: "op1" })).rejects.toThrow(/Unknown refund policy field/);
+      await expect(policy.setPolicy({ approvedKinds: ["subscription"] })).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3)
+      await expect(policy.setPolicy({ approvedBy: "op1" })).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" }); // #5606 (G-3)
     }
   });
 });
@@ -186,7 +186,7 @@ describe("refund service approval gate (2.7)", () => {
             isOperator: false,
           },
         ),
-      ).rejects.toThrow(/not owner-approved/);
+      ).rejects.toMatchObject({ code: "FAILURE_REFUND_POLICY_REFUSAL" }); // #5606 (G-3)
       expect((await store.listRefunds("u1")).length).toBe(0);
     }
   });
@@ -227,7 +227,7 @@ describe("refund service approval gate (2.7)", () => {
           },
           { refundId: record.id },
         ),
-      ).rejects.toThrow(/not owner-approved/);
+      ).rejects.toMatchObject({ code: "FAILURE_REFUND_POLICY_REFUSAL" }); // #5606 (G-3)
       expect(gateway.calls.length).toBe(0);
     }
   });

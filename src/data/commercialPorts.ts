@@ -27,6 +27,7 @@ import type { CommercialAccount } from "../services/cfpayMonetization";
 // on the account row; the single segment rules live in
 // productPorts, never redeclared here.
 import { assertSegment, DEFAULT_SEGMENT } from "./productPorts";
+import { BusinessError } from "../outcomes/outcomeAspects";
 
 export type StoreTier = "Free" | "PayPerUse" | "Subscribed";
 
@@ -77,23 +78,23 @@ export function isUnlimitedFreeGrantActive(
  */
 export function assertUnlimitedFreeGrant(value: unknown): UnlimitedFreeGrant {
   if (typeof value !== "object" || value === null) {
-    throw new Error("Unlimited-free grant must be an object with grantedBy, reason, and expiresAtMs.");
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   const grant = value as Record<string, unknown>;
   const grantedBy = typeof grant.grantedBy === "string" ? grant.grantedBy.trim() : "";
   if (!grantedBy) {
-    throw new Error("Unlimited-free grant grantedBy must be a non-empty string.");
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   const reason = typeof grant.reason === "string" ? grant.reason.trim() : "";
   if (!reason) {
-    throw new Error("Unlimited-free grant reason must be a non-empty string.");
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   const expiresAtMs = grant.expiresAtMs;
   if (
     expiresAtMs !== null &&
     (typeof expiresAtMs !== "number" || !Number.isFinite(expiresAtMs) || expiresAtMs <= 0)
   ) {
-    throw new Error("Unlimited-free grant expiresAtMs must be null or a finite positive epoch-ms.");
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   return { grantedBy, reason, expiresAtMs: expiresAtMs as number | null };
 }
@@ -233,7 +234,7 @@ export interface PaidSubmissionRecord {
 
 export function assertStoreTier(tier: unknown): StoreTier {
   if (tier !== "Free" && tier !== "PayPerUse" && tier !== "Subscribed") {
-    throw new Error(`Invalid tier: ${String(tier)} (must be Free, PayPerUse, or Subscribed).`);
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   return tier;
 }
@@ -246,7 +247,7 @@ export function round2(n: number): number {
 export function assertNonNegativeCredits(creditsUSD: unknown): number {
   const value = Number(creditsUSD);
   if (!Number.isFinite(value) || value < 0) {
-    throw new Error("creditsUSD must be a finite non-negative number.");
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   return round2(value);
 }
@@ -254,7 +255,7 @@ export function assertNonNegativeCredits(creditsUSD: unknown): number {
 export function assertIncludedRuns(includedRuns: unknown): number {
   const value = Number(includedRuns);
   if (!Number.isFinite(value) || value < 0) {
-    throw new Error("includedRuns must be a finite non-negative integer.");
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   return Math.floor(value);
 }

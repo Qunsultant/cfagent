@@ -12,6 +12,7 @@ import {
   assertTenantScopeMatch,
   bindTenantScope,
 } from "./tenantScope";
+import { BusinessError } from "../outcomes/outcomeAspects";
 import {
   allocateRedemption,
   defaultPreferences,
@@ -68,10 +69,10 @@ export class InMemoryLifecycleAdapter implements LifecycleStore {
     tenantId: string;
   }): Promise<ReferralEarning> {
     if (!input.referrerUserId || !input.referredUserId || !input.tenantId) {
-      throw new Error("referrerUserId, referredUserId, and tenantId are required.");
+      throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     }
     if (input.referrerUserId === input.referredUserId) {
-      throw new Error("A user cannot refer themselves.");
+      throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     }
     const id = referralEarningId(input.referredUserId);
     const existing = this.earnings.get(id);
@@ -100,17 +101,15 @@ export class InMemoryLifecycleAdapter implements LifecycleStore {
     source?: ReferralAttribution["source"];
   }): Promise<ReferralAttribution> {
     if (!input.referrerUserId || !input.referredUserId || !input.tenantId) {
-      throw new Error("referrerUserId, referredUserId, and tenantId are required.");
+      throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     }
     if (input.referrerUserId === input.referredUserId) {
-      throw new Error("A user cannot refer themselves.");
+      throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     }
     const existing = this.attributions.get(input.referredUserId);
     if (existing) {
       if (existing.referrerUserId !== input.referrerUserId) {
-        throw new Error(
-          `User ${input.referredUserId} is already attributed to a different referrer; attribution is set-once and is never silently overwritten.`,
-        );
+        throw new BusinessError("FAILURE_COMMERCIAL_CONFLICT"); // #5606 (G-3)
       }
       return { ...existing };
     }
@@ -154,12 +153,12 @@ export class InMemoryLifecycleAdapter implements LifecycleStore {
     runRequestId: string;
   }): Promise<{ allocations: ReferralAllocation[]; redeemedUSD: number; expiredUSD: number }> {
     if (!input.userId || !input.tenantId || !input.runRequestId) {
-      throw new Error("userId, tenantId, and runRequestId are required.");
+      throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     }
     const earnings = await this.listEarnings(input.userId);
     for (const e of earnings) {
       if (e.tenantId !== input.tenantId) {
-        throw new Error("Referral credits never cross tenants: earning tenant differs from run tenant.");
+        throw new BusinessError("FAILURE_COMMERCIAL_FORBIDDEN"); // #5606 (G-3)
       }
     }
     const now = Date.now();
@@ -167,10 +166,10 @@ export class InMemoryLifecycleAdapter implements LifecycleStore {
     const expiredUSD = expiredBalanceFor(earnings, now, this.rules.expiryPeriodMs);
     for (const a of allocations) {
       const earning = this.earnings.get(a.earningId);
-      if (!earning) throw new Error(`Referral earning ${a.earningId} vanished mid-redeem.`);
+      if (!earning) throw new BusinessError("FAILURE_UNEXPECTED_ERROR"); // #5606 (G-3)
       const next = round2(earning.redeemedAmountUSD + a.amountUSD);
       if (next > earning.amountUSD) {
-        throw new Error(`Referral earning ${a.earningId} would over-redeem; redeem refused.`);
+        throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
       }
       this.earnings.set(a.earningId, {
         ...earning,

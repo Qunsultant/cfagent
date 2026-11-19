@@ -81,6 +81,7 @@ import {
 import type { SubscriptionStore } from "../data/subscriptionPorts";
 import { createStructuredLogger } from "../observability/structuredLogger";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
+import { BusinessError } from "../outcomes/outcomeAspects";
 
 /** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
 const structuredLog = createStructuredLogger(createObservabilitySink({}), {
@@ -168,15 +169,20 @@ export interface RequestRefundInput {
  * Issue #3180: the refund tenant could not be derived from the
  * resolved payment source. The request is refused — no record is
  * created, and no client-supplied tenant is ever trusted as a
- * fallback. The route maps this to 400 via the "required" text.
+ * fallback. #5606 (G-3): a BusinessError now, so the route renders
+ * 400 REQUEST_INVALID via its BusinessError-first branch (the old
+ * route mapped it via a regex on the "required" text). The detailed
+ * reason stays on err.message for server-side logs only:
+ * codedOutcomeResponse renders the catalog message, never
+ * err.message.
  */
-export class RefundTenantUnresolvableError extends Error {
+export class RefundTenantUnresolvableError extends BusinessError {
   constructor() {
-    super(
-      "tenantId is required: the refund tenant could not be derived " +
-        "from the resolved payment source; the refund is refused rather than recorded under a supplied tenant.",
-    );
+    super("FAILURE_COMMERCIAL_REQUEST_INVALID");
     this.name = "RefundTenantUnresolvableError";
+    this.message =
+      "tenantId is required: the refund tenant could not be derived " +
+      "from the resolved payment source; the refund is refused rather than recorded under a supplied tenant.";
   }
 }
 
@@ -191,7 +197,7 @@ export async function requestRefund(
 ): Promise<RefundRecord> {
   const nowMs = deps.nowMs ?? Date.now();
   const policy = await deps.policyStore.getPolicy();
-  if (!policy) throw new Error("Refund policy is not configured: run the refund schema ensure first.");
+  if (!policy) throw new BusinessError("FAILURE_REFUND_POLICY_REFUSAL"); // #5606 (G-3)
   const kind = assertRefundKind(input.kind);
   // Issue #2662: a seeded PROPOSED value is never an approval — refuse
   // before any record is created, before any store read beyond policy.
@@ -200,37 +206,32 @@ export async function requestRefund(
     typeof input.originalPaymentRef === "string" && input.originalPaymentRef.trim()
       ? input.originalPaymentRef.trim()
       : (() => {
-          throw new Error("originalPaymentRef is required.");
+          throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
         })();
   const reason =
     typeof input.reason === "string" && input.reason.trim()
       ? input.reason.trim()
       : (() => {
-          throw new Error("reason is required.");
+          throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
         })();
   let amountUSD = Number(input.amountUSD);
 
   let source: RefundPaymentSource | null = null;
   if (kind === "subscription") {
     if (!deps.sourceResolver) {
-      throw new Error("Subscription refunds require a payment-source resolver.");
+      throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     }
     source = await deps.sourceResolver.resolve(originalPaymentRef);
-    if (!source) throw new Error(`No subscription found for payment reference ${originalPaymentRef}.`);
+    if (!source) throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     if (source.userId !== input.requesterLogin && !input.isOperator) {
-      throw new Error("Only the subscription owner or a store operator may request this refund.");
+      throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     }
-    if (source.rail === "crypto") throw new Error(CRYPTO_NON_REFUNDABLE_MESSAGE);
+    if (source.rail === "crypto") throw new BusinessError("FAILURE_REFUND_POLICY_REFUSAL"); // #5606 (G-3)
     if (!source.paymentIntentId) {
-      throw new Error(
-        `Subscription ${source.subscriptionId ?? originalPaymentRef} has no stored Stripe payment-intent id ` +
-          `(legacy payment); the refund cannot be executed and is refused rather than guessed.`,
-      );
+      throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     }
     if (!source.rail) {
-      throw new Error(
-        `Subscription ${source.subscriptionId ?? originalPaymentRef} has no determinable payment rail; the refund is refused rather than guessed.`,
-      );
+      throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     }
   } else if (kind === "bundle") {
     // Issue #5227: the decided bundle policy. The amount is
@@ -241,24 +242,19 @@ export async function requestRefund(
     // already tried the stored id and the first invoice; an
     // unresolvable bundle is refused here, not queued.
     if (!deps.sourceResolver) {
-      throw new Error("Bundle refunds require a payment-source resolver.");
+      throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     }
     source = await deps.sourceResolver.resolve(originalPaymentRef);
-    if (!source) throw new Error(`No bundle purchase found for payment reference ${originalPaymentRef}.`);
+    if (!source) throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     if (source.userId !== input.requesterLogin && !input.isOperator) {
-      throw new Error("Only the bundle owner or a store operator may request this refund.");
+      throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     }
-    if (source.rail === "crypto") throw new Error(CRYPTO_NON_REFUNDABLE_MESSAGE);
+    if (source.rail === "crypto") throw new BusinessError("FAILURE_REFUND_POLICY_REFUSAL"); // #5606 (G-3)
     if (!source.paymentIntentId) {
-      throw new Error(
-        `Bundle ${originalPaymentRef} has no stored Stripe payment-intent id ` +
-          `(no resolvable first invoice); the refund cannot be executed and is refused rather than guessed.`,
-      );
+      throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     }
     if (!source.rail) {
-      throw new Error(
-        `Bundle ${originalPaymentRef} has no determinable payment rail; the refund is refused rather than guessed.`,
-      );
+      throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     }
     if (
       source.originalAmountUSD === null ||
@@ -267,9 +263,7 @@ export async function requestRefund(
       source.bundlePeriodEndMs === null ||
       source.bundlePeriodEndMs === undefined
     ) {
-      throw new Error(
-        `Bundle ${originalPaymentRef} has no entitlement period: the prorated refund amount is required and cannot be computed.`,
-      );
+      throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     }
     const computedAmountUSD = computeBundleProratedRefund(
       {
@@ -280,15 +274,10 @@ export async function requestRefund(
       nowMs,
     );
     if (computedAmountUSD <= 0) {
-      throw new Error(
-        `Bundle ${originalPaymentRef} has no unused remainder and is non-refundable: the full period was used.`,
-      );
+      throw new BusinessError("FAILURE_REFUND_POLICY_REFUSAL"); // #5606 (G-3)
     }
     if (Number.isFinite(amountUSD) && round2(amountUSD) !== computedAmountUSD) {
-      throw new Error(
-        `The bundle refund amount must be $${computedAmountUSD.toFixed(2)} (the prorated unused remainder); ` +
-          `the amount is computed by the policy, not chosen by the requester.`,
-      );
+      throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     }
     amountUSD = computedAmountUSD;
   } else if (deps.sourceResolver) {
@@ -308,7 +297,7 @@ export async function requestRefund(
       : input.rail === "card" || input.rail === "crypto" || input.rail === "cfpay-channel"
         ? input.rail
         : (() => {
-            throw new Error("rail is required for pay-per-run refunds (card, crypto, or cfpay-channel).");
+            throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
           })();
   // Issue #3180: the refund tenant comes from the resolved
   // payment source only. There is no client-supplied fallback:
@@ -320,10 +309,10 @@ export async function requestRefund(
   const originalAmountUSD = source?.originalAmountUSD ?? Number(input.originalAmountUSD);
   const originalPaidAtMs = source?.originalPaidAtMs ?? Number(input.originalPaidAtMs);
   if (!Number.isFinite(originalAmountUSD) || originalAmountUSD <= 0) {
-    throw new Error("originalAmountUSD is required and must be a finite positive number.");
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   if (!Number.isFinite(originalPaidAtMs) || originalPaidAtMs <= 0) {
-    throw new Error("originalPaidAtMs is required and must be a positive epoch-ms timestamp.");
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   validateRefundRequest(policy, { rail, amountUSD, originalAmountUSD, originalPaidAtMs }, nowMs, kind);
 
@@ -362,9 +351,9 @@ export async function decideRefund(
 ): Promise<RefundRecord> {
   const nowMs = deps.nowMs ?? Date.now();
   const record = await deps.refundStore.getRefund(input.refundId);
-  if (!record) throw new Error(`No refund ${input.refundId}.`);
+  if (!record) throw new BusinessError("FAILURE_COMMERCIAL_NOT_FOUND"); // #5606 (G-3)
   if (record.status !== "requested") {
-    throw new Error(`Refund ${input.refundId} cannot be decided from status ${record.status}.`);
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
   return deps.refundStore.updateRefund(input.refundId, {
     status: input.decision === "approve" ? "approved" : "denied",
@@ -532,17 +521,17 @@ export async function executeRefund(
 ): Promise<RefundRecord> {
   const nowMs = deps.nowMs ?? Date.now();
   if (!deps.monetizationEnabled) {
-    throw new Error("monetization flag is OFF; refund execution is disabled.");
+    throw new BusinessError("FAILURE_REFUND_POLICY_REFUSAL"); // #5606 (G-3)
   }
   const record = await deps.refundStore.getRefund(input.refundId);
-  if (!record) throw new Error(`No refund ${input.refundId}.`);
+  if (!record) throw new BusinessError("FAILURE_COMMERCIAL_NOT_FOUND"); // #5606 (G-3)
   if (record.status !== "approved" && record.status !== "execution_failed") {
-    throw new Error(`Only an approved refund may execute (refund ${input.refundId} is ${record.status}).`);
+    throw new BusinessError("FAILURE_COMMERCIAL_CONFLICT"); // #5606 (G-3)
   }
   const policy = await deps.policyStore.getPolicy();
-  if (!policy) throw new Error("Refund policy is not configured: run the refund schema ensure first.");
+  if (!policy) throw new BusinessError("FAILURE_REFUND_POLICY_REFUSAL"); // #5606 (G-3)
   if (policy.approver !== "operator_hitl") {
-    throw new Error('Refund approver policy must be "operator_hitl" in this slice.');
+    throw new BusinessError("FAILURE_UNEXPECTED_ERROR"); // #5606 (G-3)
   }
   // Issue #2662: re-validate approval against the CURRENT policy — an
   // approval withdrawn (or a value edit resetting approval) between
@@ -576,15 +565,12 @@ export async function executeRefund(
     // call — refund lookups never cross tenants.
     const source = await deps.sourceResolver.resolve(record.originalPaymentRef);
     if (source && source.tenantId !== record.tenantId) {
-      throw new Error(
-        `Cross-tenant payment source: the resolved payment belongs to a different tenant ` +
-          `than refund ${record.id}; refund refused — no cross-tenant lookup.`,
-      );
+      throw new BusinessError("FAILURE_REFUND_POLICY_REFUSAL"); // #5606 (G-3)
     }
     paymentIntentId = source?.paymentIntentId ?? null;
   }
   if (!paymentIntentId) {
-    throw new Error(refundNotResolvableMessage(record.originalPaymentRef));
+    throw new BusinessError("FAILURE_REFUND_POLICY_REFUSAL"); // #5606 (G-3)
   }
   // Issue #2549 — compensation XOR at the money gate: a
   // pay-per-run run that already received its automatic
@@ -595,18 +581,11 @@ export async function executeRefund(
   let failureCreditIssued = false;
   if (record.kind === "pay_per_run") {
     if (!deps.failureCreditLookup) {
-      throw new Error(
-        "Pay-per-run refund execution requires a failure-credit lookup (issue #2549): " +
-          "execution is refused rather than risk double compensation.",
-      );
+      throw new BusinessError("FAILURE_REFUND_POLICY_REFUSAL"); // #5606 (G-3)
     }
     failureCreditIssued = await deps.failureCreditLookup.hasFailureCredit(record.originalPaymentRef);
     if (failureCreditIssued) {
-      throw new Error(
-        `Run ${record.originalPaymentRef} already received its automatic replacement-run credit ` +
-          `for this failure; a cash refund on top would double-compensate the same failure ` +
-          `(credit XOR refund per failure, issue #2549). Refund refused.`,
-      );
+      throw new BusinessError("FAILURE_REFUND_POLICY_REFUSAL"); // #5606 (G-3)
     }
   }
   const result = await deps.gateway.executeRefund({
@@ -619,7 +598,7 @@ export async function executeRefund(
   });
   if (!result.success) {
     await deps.refundStore.updateRefund(record.id, { status: "execution_failed", updatedAtMs: nowMs });
-    throw new Error(`Gateway refund failed: ${result.message || "unknown gateway error"}`);
+    throw new BusinessError("FAILURE_COMMERCIAL_UPSTREAM_FAILED"); // #5606 (G-3)
   }
   let consequence: string;
   try {
