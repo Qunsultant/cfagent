@@ -41,6 +41,58 @@ import { createD1QuoteSourceDb } from "../../data/d1QuoteSourceAdapter";
 import { levelsForQuoteSwitch, resolveQuoteExpiryMode, resolveQuoteHttpProviderMode } from "../../config/quoteModes";
 
 /**
+ * Issue #3121 Phase 2 (#3123) — the one merged ledger read, shared by
+ * both routes that answer it. Session-gated by the caller (401 before
+ * dispatch); fans out to the per-login orchestrator
+ * (/api/schedules/runs, the DO-SQLite half) and the ScheduledAgent
+ * (listJobRuns, the KV half) and merges newest-first with dedup on
+ * jobId+started+operation; a failed half answers partial:true with the
+ * half that succeeded, never a bare failure. A jobId filter applies to
+ * the merged list (both halves carry it as jobId).
+ *
+ * Issue #4203 — `GET /api/schedule/runs` is an alias of this helper,
+ * not a second parallel read: the merged read is literally the one
+ * ledger read path. Extracted verbatim from the `/api/ledger/runs`
+ * branch (behavior-preserving; the #3124 parity tests stay the guard).
+ */
+async function readMergedLedgerRuns(request: Request, env: Env, userLogin: string): Promise<Response> {
+  const params = new URL(request.url).searchParams;
+  const jobId = params.get("jobId") || undefined;
+  const limit = Number(params.get("limit") || 50);
+  let orchRuns: JobRunRecord[] = [];
+  let goalRuns: JobRunRecord[] = [];
+  let partial = false;
+  try {
+    const targetUrl = new URL(
+      `/schedules/runs?limit=${limit}${jobId ? `&scheduleId=${encodeURIComponent(jobId)}` : ""}`,
+      "https://agent.internal",
+    );
+    const forwardReq = new Request(targetUrl, request);
+    forwardReq.headers.set("x-user-login", userLogin);
+    const res = await actorGateway.dispatch(env.ORCHESTRATOR_AGENT, userLogin, forwardReq);
+    const data = (await res.json().catch(() => null)) as { ok?: unknown; runs?: unknown } | null;
+    if (res.ok && data && Array.isArray(data.runs)) {
+      orchRuns = data.runs as JobRunRecord[];
+    } else {
+      partial = true;
+    }
+  } catch {
+    partial = true;
+  }
+  try {
+    const sched = actorGateway.stub<{
+      listJobRuns(jobId?: string, limit?: number): Promise<unknown[]>;
+    }>((env as any).SCHEDULED_AGENT, "default");
+    goalRuns = (await sched.listJobRuns(jobId, limit)) as JobRunRecord[];
+  } catch {
+    partial = true;
+  }
+  let runs = mergeLedgerRuns(orchRuns, goalRuns);
+  if (jobId) runs = runs.filter((run) => run.jobId === jobId);
+  return Response.json({ ok: true, runs: runs.slice(0, limit), partial });
+}
+
+/**
  * Slice 5 of Qunsultant/cfagent#2902 (Trading & market) — moves only.
  * The /api/schedule/* family of handleFetch, verbatim and in original
  * order: goals, operations, ticks, runs, systems (one combined block,
@@ -49,53 +101,14 @@ import { levelsForQuoteSwitch, resolveQuoteExpiryMode, resolveQuoteHttpProviderM
  * chain did.
  */
 export async function handleTradingScheduleRoutes(request: Request, env: Env, url: URL, path: string): Promise<Response | null> {
-    // Issue #3121 Phase 2 (#3123) — the one merged ledger read.
-    // Session-gated like every /api/schedule/* route below:
-    // unauthenticated → 401, before any DO stub. Fans out to the
-    // per-login orchestrator (/api/schedules/runs, the DO-SQLite
-    // half) and the ScheduledAgent (listJobRuns, the KV half) and
-    // merges newest-first with dedup on jobId+started+operation; a
-    // failed half answers partial:true with the half that
-    // succeeded, never a bare failure. A jobId filter applies to
-    // the merged list (both halves carry it as jobId).
+    // Issue #3121 Phase 2 (#3123) — the one merged ledger read
+    // (readMergedLedgerRuns above). Session-gated like every
+    // /api/schedule/* route below: unauthenticated → 401, before
+    // any DO stub.
     if (path === "/api/ledger/runs" && request.method === "GET") {
       const session = await requireAuth(request, env);
       if (!session) return Response.json({ error: "Unauthorized: Please log in." }, { status: 401 });
-      const params = new URL(request.url).searchParams;
-      const jobId = params.get("jobId") || undefined;
-      const limit = Number(params.get("limit") || 50);
-      const userLogin = session.githubLogin;
-      let orchRuns: JobRunRecord[] = [];
-      let goalRuns: JobRunRecord[] = [];
-      let partial = false;
-      try {
-        const targetUrl = new URL(
-          `/schedules/runs?limit=${limit}${jobId ? `&scheduleId=${encodeURIComponent(jobId)}` : ""}`,
-          "https://agent.internal",
-        );
-        const forwardReq = new Request(targetUrl, request);
-        forwardReq.headers.set("x-user-login", userLogin);
-        const res = await actorGateway.dispatch(env.ORCHESTRATOR_AGENT, userLogin, forwardReq);
-        const data = (await res.json().catch(() => null)) as { ok?: unknown; runs?: unknown } | null;
-        if (res.ok && data && Array.isArray(data.runs)) {
-          orchRuns = data.runs as JobRunRecord[];
-        } else {
-          partial = true;
-        }
-      } catch {
-        partial = true;
-      }
-      try {
-        const sched = actorGateway.stub<{
-          listJobRuns(jobId?: string, limit?: number): Promise<unknown[]>;
-        }>((env as any).SCHEDULED_AGENT, "default");
-        goalRuns = (await sched.listJobRuns(jobId, limit)) as JobRunRecord[];
-      } catch {
-        partial = true;
-      }
-      let runs = mergeLedgerRuns(orchRuns, goalRuns);
-      if (jobId) runs = runs.filter((run) => run.jobId === jobId);
-      return Response.json({ ok: true, runs: runs.slice(0, limit), partial });
+      return readMergedLedgerRuns(request, env, session.githubLogin);
     }
 
     // Issue #159 — ScheduledAgent dashboard API.
@@ -213,11 +226,16 @@ export async function handleTradingScheduleRoutes(request: Request, env: Env, ur
       // (newest first; jobId filters to one goal). The aggregate tick
       // history above stays as the aggregate view; this is the
       // per-run view the unified Jobs UI reads.
+      // Issue #4203 — redirect, not retire: this route is an alias of
+      // the merged read `GET /api/ledger/runs` (same handler, same
+      // 200 JSON envelope with the `partial` flag), not a second
+      // parallel read. The old branch answered the ScheduledAgent KV
+      // half only and let a half failure throw unmapped (this route's
+      // instance of the G6 gap, Qunsultant/cfagent#3645); the merged
+      // read degrades to `partial:true` instead. No change to the
+      // merged read itself (extraction only).
       if (path === "/api/schedule/runs" && request.method === "GET") {
-        const params = new URL(request.url).searchParams;
-        const jobId = params.get("jobId") || undefined;
-        const limit = Number(params.get("limit") || 50);
-        return Response.json({ ok: true, runs: await sched.listJobRuns(jobId, limit) });
+        return readMergedLedgerRuns(request, env, session.githubLogin);
       }
       // Issue #2964 — the schedule-systems inventory for the unified
       // Jobs UI: the three systems plus the Worker cron triggers,

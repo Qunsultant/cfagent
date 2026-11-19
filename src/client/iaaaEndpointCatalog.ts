@@ -452,7 +452,7 @@ export const API_ENDPOINT_CATALOG: ApiEndpointEntry[] = [
     aliases: [],
     kind: "http",
     auth: "session",
-    authNote: "401 unauthenticated (#1156); any signed-in user may read per-run job records. Forwards to the SCHEDULED_AGENT DO.",
+    authNote: "401 unauthenticated (#1156); any signed-in user may read per-run job records. Alias of the merged read /api/ledger/runs (#4203): same merged payload (both halves, partial flag), not a direct DO forward.",
     source: "src/server.ts branch: GET /api/schedule/runs",
   },
   {
