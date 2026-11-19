@@ -91,12 +91,12 @@ describe("Issue #5737 / #5597 — OODA research runs on J-stack with durable SQL
     expect(adapters.ephemeralFallback).toBe(false);
 
     await adapters.runRecorder.recordRun({
-      system: "j-stack",
+      system: "job-pipeline",
       jobId: "research:test-1",
       runId: "test-1",
       label: "Research test-1",
       trigger: "manual",
-      status: "completed",
+      outcome: "success",
       startedAt: "2026-11-19T11:00:00.000Z",
       endedAt: "2026-11-19T11:00:01.000Z",
       durationMs: 1000,
