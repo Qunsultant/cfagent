@@ -5,7 +5,7 @@ import path from "path";
 describe("Universal Modal System & Diagnostics Token Architecture", () => {
   const tokensCss = fs.readFileSync(path.resolve("src/client/tokens.css"), "utf8");
   const stylesCss = fs.readFileSync(path.resolve("src/client/styles.deprecated.css"), "utf8");
-  const tradingHub = fs.readFileSync(path.resolve("src/client/ETradeTradingHub.tsx"), "utf8");
+  const tradingHub = fs.readFileSync(path.resolve("src/client/TradeHub.tsx"), "utf8");
 
   describe("Universal Modal System in tokens.css", () => {
     it("defines universal modal card containers using design tokens", () => {
@@ -81,7 +81,7 @@ describe("Universal Modal System & Diagnostics Token Architecture", () => {
     });
   });
 
-  describe("ETradeTradingHub.tsx JSX Token Architecture", () => {
+  describe("TradeHub.tsx JSX Token Architecture", () => {
     it("uses semantic diagnostic classes rather than ad-hoc inline styles", () => {
       // S-U2 (#3051): the diagnostics modal no longer renders bespoke
       // diag-* source classes — it renders via the token-styled

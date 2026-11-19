@@ -9,7 +9,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 
-const source = readFileSync("src/client/AlpacaBrokerPanel.tsx", "utf8");
+const source = readFileSync("src/client/BrokerPanel.tsx", "utf8");
 
 describe("the Alpaca panel describes both credential paths (#3379)", () => {
   it("does not deny that the surface asks for a key pair", () => {

@@ -8,10 +8,10 @@ import { BRAND } from "./branding";
 import { apiFetch as fetch } from "./apiFetch";
 import { McpApiExplorer } from "./McpApiExplorer";
 import { GoogleAdUnit } from "./GoogleAdUnit";
-import { ETradeTradingHub } from "./ETradeTradingHub";
+import { TradeHub } from "./TradeHub";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { FirstRunGate } from "./FirstRunGate";
-import { BrokerDynamicMenu, SettingsMenu, type BrokerDynamicMenuProps, type ETradeDynamicMenuProps } from "./BrokerDynamicMenu";
+import { BrokerDynamicMenu, SettingsMenu, type BrokerDynamicMenuProps } from "./BrokerDynamicMenu";
 import { useBrokerEnvironment, switchBrokerEnvironment, fetchBrokerEnvironment, brokerModeLabel } from "./brokerEnvironment";
 import { OptionsScreenerPage } from "./OptionsScreenerPage";
 import { OodaResearchPage } from "./OodaResearchPage";
@@ -161,7 +161,7 @@ export function Chat({ user }: { user: User }) {
   );
   // Issue #3361: the schedules home's preview-trade handoff — seed the
   // shell's pending order context, then navigate to the order tab; the
-  // hub consumes the context on arrival (see ETradeTradingHub).
+  // hub consumes the context on arrival (see TradeHub).
   const handleSchedulesPreviewTrade = useCallback(
     (ctx: TradeOrderContext) => {
       setPendingOrderContext(ctx);
@@ -169,7 +169,7 @@ export function Chat({ user }: { user: User }) {
     },
     [handleSelectTab],
   );
-  const [brokerProps, setBrokerProps] = useState<ETradeDynamicMenuProps | null>(null);
+  const [brokerProps, setBrokerProps] = useState<BrokerDynamicMenuProps | null>(null);
   const [unreadAlerts, setUnreadAlerts] = useState(0);
   const [tbdMenuOpen, setTbdMenuOpen] = useState(false);
   const isTbdTab = tab === "chat" || tab === "payments" || tab === "marketing-hub" || tab === "revenue";
@@ -1017,7 +1017,7 @@ export function Chat({ user }: { user: User }) {
   // table-keyed lookup replaces the 14 inline {tab === ...} conditionals
   // that used to live in <main>; coverage is pinned against ROUTES in
   // tests/route_content_switch_1804.test.ts. Trading ids have no entry
-  // here — they render through the retained ETradeTradingHub below,
+  // here — they render through the retained TradeHub below,
   // hidden for non-trading tabs via isTradingTab (table-backed retain
   // flags, see routes.ts) — with one exception: "schedules" is
   // de-hubbed (#3121 S2) and renders its home here, not through the
@@ -1098,7 +1098,7 @@ export function Chat({ user }: { user: User }) {
     ),
     // Issue #3121 S2: the consolidated schedules home — the ONE
     // schedules surface. De-hubbed: it renders directly from the shell,
-    // not through the retained ETradeTradingHub (a broker-neutral home
+    // not through the retained TradeHub (a broker-neutral home
     // cannot live inside a broker hub, #3216).
     schedules: (
       <SchedulesHome userLogin={user.login} onPreviewTrade={handleSchedulesPreviewTrade} />
@@ -1630,7 +1630,7 @@ export function Chat({ user }: { user: User }) {
             </Notice>
           ) : (
           <ErrorBoundary label={`${selectedBrokerLabel} Trading Hub`}>
-          <ETradeTradingHub
+          <TradeHub
             user={user}
             activeSubTab={mapTabToTradingSubTab(tab)}
             pendingOrderContext={pendingOrderContext}

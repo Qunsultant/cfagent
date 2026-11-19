@@ -18,7 +18,7 @@ import { mapTabToTradingSubTab, isTradingTab } from "../src/client/chat/types";
 import { deepLinkForNavNode, deepLinkHrefForNavNode } from "../src/client/deepLinks";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const tradingHubSrc = readFileSync(join(here, "..", "src", "client", "ETradeTradingHub.tsx"), "utf8");
+const tradingHubSrc = readFileSync(join(here, "..", "src", "client", "TradeHub.tsx"), "utf8");
 // Issue #3050 PR1: the hub no longer imports the track-record dashboards
 // directly — it renders TrackRecordPanel, which composes them.
 const trackRecordSrc = readFileSync(join(here, "..", "src", "client", "TrackRecordPanel.tsx"), "utf8");

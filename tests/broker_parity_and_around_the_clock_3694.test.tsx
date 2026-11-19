@@ -7,7 +7,7 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { SettingsMenu } from "../src/client/ETradeDynamicMenu";
+import { SettingsMenu } from "../src/client/BrokerDynamicMenu";
 import { PlatformAdminPage } from "../src/client/PlatformAdminPage";
 import { DataHubHome } from "../src/client/DataHubHome";
 import {

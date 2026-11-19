@@ -130,7 +130,7 @@
       "inlineStyleBlocks": 4
     },
     {
-      "file": "src/client/ETradeTradingHub.tsx",
+      "file": "src/client/TradeHub.tsx",
       "hex": 5,
       "functional": 2,
       "inlineStyleBlocks": 61
@@ -154,7 +154,7 @@
       "inlineStyleBlocks": 17
     },
     {
-      "file": "src/client/ETradeDynamicMenu.tsx",
+      "file": "src/client/BrokerDynamicMenu.tsx",
       "hex": 4,
       "functional": 0,
       "inlineStyleBlocks": 0

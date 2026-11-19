@@ -1,7 +1,7 @@
 import { Badge, Button, Card, CardHeader, EmptyState, Flex, KpiRibbon, Notice, PageSection, PageShell, Spinner, Stack, Table } from "./components/ui";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { AccountPanels } from "./AccountPanels";
-import { AlpacaBrokerPanel } from "./AlpacaBrokerPanel";
+import { BrokerPanel } from "./BrokerPanel";
 import { PortfolioRiskPanel } from "./PortfolioRiskPanel";
 import { formatMoney, formatSignedMoney, portfolioSummary } from "./brokerPortfolio";
 import { safeNumberFormat, safePriceFormat } from "./formatters";
@@ -240,7 +240,7 @@ export function PortfolioPanel({
             {selectedBroker === "etrade" ? (
               <AccountPanels activeEnv={activeEnv} onUnreadAlertsChange={onUnreadAlertsChange} />
             ) : (
-              <AlpacaBrokerPanel broker={selectedBroker} activeEnv={activeEnv} />
+              <BrokerPanel broker={selectedBroker} activeEnv={activeEnv} />
             )}
           </ErrorBoundary>
 

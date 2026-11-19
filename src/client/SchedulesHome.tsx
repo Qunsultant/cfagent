@@ -3,7 +3,7 @@
  *
  * The ONE schedules surface (`?tab=schedules`, inventory §8.3): it
  * renders directly from the shell (`Chat.tsx` `TAB_CONTENT`), NOT
- * through the retained `ETradeTradingHub` — a broker-neutral home
+ * through the retained `TradeHub` — a broker-neutral home
  * cannot live inside a broker hub (#3216). Its views are the
  * sub-route scheme in `schedulesHome.ts`:
  * list (SchedulesPanel incl. ScheduledOptionsManager), runs/ledger

@@ -67,7 +67,7 @@ describe("repairProposalToTradeContext (HITL hand-off)", () => {
     expect(ctx.action).toBe("BUY");
     expect(ctx.quantity).toBe(3);
     expect(ctx.optionLegs).toHaveLength(2);
-    // Crucial: base leg quantities are 1 and 2 (ratio), because ETradeTradingHub multiplies leg.quantity * orderQuantity!
+    // Crucial: base leg quantities are 1 and 2 (ratio), because TradeHub multiplies leg.quantity * orderQuantity!
     expect(ctx.optionLegs![0].quantity).toBe(1);
     expect(ctx.optionLegs![0].side).toBe("BUY");
     expect(ctx.optionLegs![0].strike).toBe(80);

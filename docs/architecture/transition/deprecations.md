@@ -518,3 +518,12 @@ slice.
   port (`autonomousOptionsAnalysis`), which stays.
 - Deletion condition: zero consumers plus an owner decision plus a gate
   amendment; deletion is never part of a program slice.
+
+## 2026-11-18 — Broker-neutral naming sweep deprecates ETradeDynamicMenu.tsx in place (#5236)
+
+- File: `src/client/ETradeDynamicMenu.tsx` (marked `@deprecated` in place)
+- Date: 2026-11-18
+- Reason: Issue #5236 (Slice 1 of broker-neutral naming sweep) marks the legacy `ETradeDynamicMenu.tsx` shim `@deprecated` in place per gitops §22 (keeping the file in place to satisfy no-deletion), removes the `ETradeDynamicMenu` / `ETradeDynamicMenuProps` symbol aliases, and updates all callers to import `BrokerDynamicMenu` / `SettingsMenu` from `src/client/BrokerDynamicMenu.tsx`.
+- Replacement: `src/client/BrokerDynamicMenu.tsx` (`BrokerDynamicMenu`, `SettingsMenu`).
+- Consumers at deprecation: zero production consumers (`SettingsMenu.tsx` and all tests import `BrokerDynamicMenu.tsx` directly).
+- Deletion condition: zero consumers plus an owner decision plus a gate amendment; deletion is never part of a program slice.

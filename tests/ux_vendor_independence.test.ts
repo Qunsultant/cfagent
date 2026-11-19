@@ -36,12 +36,12 @@ describe("UX Vendor Independence & Capability Representation (Issues #1322 & #13
     expect(content).toContain("Upstream Subrequests &amp; Edge Execution Metrics");
   });
 
-  it("ETradeTradingHub.tsx presents omnichannel trading desks and institutional execution ledger", () => {
+  it("TradeHub.tsx presents omnichannel trading desks and institutional execution ledger", () => {
     // #3050 PR5: the omnichannel, voice, and ledger sub-tabs moved out of the
     // hub into their own panels. Same assertions, new hosts — the hub plus
     // the panels it renders.
     const content =
-      read("src/client/ETradeTradingHub.tsx") +
+      read("src/client/TradeHub.tsx") +
       read("src/client/OmnichannelPanel.tsx") +
       read("src/client/VoicePanel.tsx") +
       read("src/client/LedgerPanel.tsx");
@@ -74,8 +74,8 @@ describe("UX Vendor Independence & Capability Representation (Issues #1322 & #13
     expect(modal).toContain("autonomous persistent timer");
   });
 
-  it("ETradeDynamicMenu.tsx and MarketDataResearchHub.tsx express institutional ledgers", () => {
-    const menu = read("src/client/ETradeDynamicMenu.tsx");
+  it("BrokerDynamicMenu.tsx and MarketDataResearchHub.tsx express institutional ledgers", () => {
+    const menu = read("src/client/BrokerDynamicMenu.tsx");
     expect(menu).not.toContain("Durable Objects + SQLite");
     expect(menu).not.toContain("Persistent Distributed SQLite");
     // Issue #2624: the provenance prose moved with the admin sections into

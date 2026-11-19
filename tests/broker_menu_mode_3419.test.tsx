@@ -19,7 +19,7 @@ import React from "react";
 import ReactDOMServer from "react-dom/server";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { SettingsMenu } from "../src/client/ETradeDynamicMenu";
+import { SettingsMenu } from "../src/client/BrokerDynamicMenu";
 import { brokerPresentation } from "../src/trading/brokerPresentation";
 import { saveTenantProviders } from "../src/client/tenantProviders";
 

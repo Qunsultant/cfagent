@@ -9,7 +9,7 @@
  *
  * Posture (the class header's honesty rules, carried verbatim):
  * SandboxAgent delegates to the ONE sandbox implementation,
- * ETradeSandboxService, constructed with no container backend — so
+ * SandboxService, constructed with no container backend — so
  * run_command's result in this deployment is the honest
  * not-executed shape (#121: executed:false, exitCode:null, no
  * fabricated output). This dispatch adds no execution, emulation,

@@ -151,7 +151,7 @@ export const AGENT_CARDS: AgentCard[] = [
   {
     name: "sandbox",
     description:
-      "Reports the sandbox's backend status and runs shell commands through SandboxAgent's one service (ETradeSandboxService). Honestly degraded in this deployment: no container backend is bound, so run_command returns executed:false with exitCode:null and no fabricated output until an owner binds one — check sandbox.status first. Also fetches and searches the web through the fleet's web services (web_fetch / web_search, capability-gated); those operations do not use the sandbox backend and are not degraded by its absence.",
+      "Reports the sandbox's backend status and runs shell commands through SandboxAgent's one service (SandboxService). Honestly degraded in this deployment: no container backend is bound, so run_command returns executed:false with exitCode:null and no fabricated output until an owner binds one — check sandbox.status first. Also fetches and searches the web through the fleet's web services (web_fetch / web_search, capability-gated); those operations do not use the sandbox backend and are not degraded by its absence.",
     version: "1.0.0",
     endpoint: "/a2a/sandbox",
     cardPath: "/a2a/sandbox/agent-card.json",

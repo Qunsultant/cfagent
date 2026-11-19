@@ -22,7 +22,7 @@
 import { describe, expect, it, vi, afterEach, beforeEach } from "vitest";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { ETradeTradingHub } from "../src/client/ETradeTradingHub";
+import { TradeHub } from "../src/client/TradeHub";
 import { ToastProvider } from "../src/client/components/ui/Toast";
 import { DEFAULT_LEFT_NAV_CONFIG } from "../src/client/navConfig";
 import {
@@ -67,7 +67,7 @@ async function renderOrderPage() {
   await act(async () => {
     root.render(
       <ToastProvider>
-        <ETradeTradingHub activeSubTab="order" />
+        <TradeHub activeSubTab="order" />
       </ToastProvider>,
     );
   });

@@ -23,7 +23,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it, vi, afterEach, beforeEach } from "vitest";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { ETradeTradingHub } from "../src/client/ETradeTradingHub";
+import { TradeHub } from "../src/client/TradeHub";
 import { ToastProvider } from "../src/client/components/ui/Toast";
 import { ApprovalsPanel } from "../src/client/ApprovalsPanel";
 
@@ -92,7 +92,7 @@ async function renderOrderPage(tab: "stock" | "options" | "risk") {
   window.history.pushState(null, "", `?tab=order&orderTab=${tab}`);
   await renderNode(
     <ToastProvider>
-      <ETradeTradingHub activeSubTab="order" />
+      <TradeHub activeSubTab="order" />
     </ToastProvider>,
   );
 }
@@ -129,7 +129,7 @@ function queueDomMarkersAbsent(expectedHeadings: number) {
   // approvals" heading (its own title) on the order page, none on
   // the Queues page. NOTE: /api/broker/orders is NOT a queue
   // signal on the hub-rendered order page — the hub itself fetches
-  // it for its order history (ETradeTradingHub fetchOrders) — so
+  // it for its order history (TradeHub fetchOrders) — so
   // absence is pinned on DOM markers here, and on the fetch only
   // where the queue was the sole consumer (Queues page).
   const text = container.textContent ?? "";
@@ -213,7 +213,7 @@ describe("Approvals consolidation (issue #4538)", () => {
     expect(queues).not.toContain("TradingApprovalsQueue");
     expect(queues).toContain('href="?tab=order&orderTab=approvals"');
     expect(queues).not.toContain('href="?tab=approvals"');
-    const hub = readFileSync("src/client/ETradeTradingHub.tsx", "utf8");
+    const hub = readFileSync("src/client/TradeHub.tsx", "utf8");
     expect(hub).not.toContain("TradingApprovalsQueue");
     const panel = readFileSync("src/client/ApprovalsPanel.tsx", "utf8");
     expect(panel).toContain("<TradingApprovalsQueue />");

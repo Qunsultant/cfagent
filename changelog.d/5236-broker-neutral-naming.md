@@ -1,0 +1,2 @@
+### Changed
+- Renamed generic broker-named components and services to neutral names (#5236 Slice 1): `TradeHub` (`src/client/TradeHub.tsx`), `BrokerPanel` (`src/client/BrokerPanel.tsx`), `CancelAllControl` (`src/client/CancelAllControl.tsx`, with neutral error copy and `data-cancel-all-*` attributes), `SandboxService` (`src/services/sandboxAgent.ts`, including dynamic lookup in `stockCopilotStrategySandbox.ts`), and marked `ETradeDynamicMenu.tsx` deprecated in place in favor of `BrokerDynamicMenu.tsx` (`SettingsMenu`).

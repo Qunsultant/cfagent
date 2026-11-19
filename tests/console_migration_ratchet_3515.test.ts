@@ -494,7 +494,7 @@ const MIGRATED_ZERO: readonly string[] = [
  */
 const REMAINING_PIN: Readonly<Record<string, number>> = {
   "src/client/Chat.tsx": 1,
-  "src/client/ETradeTradingHub.tsx": 2,
+  "src/client/TradeHub.tsx": 2,
   "src/client/ErrorBoundary.tsx": 1,
   "src/client/FirstRunScreen.tsx": 2,
   "src/client/ScheduledOptionsManager.tsx": 2,

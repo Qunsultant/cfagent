@@ -6,7 +6,7 @@
  * Parity for the S2 slice of the scheduling consolidation program:
  * the `?tab=schedules` home with its sub-route scheme, the de-hubbing
  * (the home renders from the shell, not through the retained
- * ETradeTradingHub), the retired duplicate/outpost addresses
+ * TradeHub), the retired duplicate/outpost addresses
  * (redirects), the role-gated queue view, and the consolidated run
  * ledger view over the S1 ledger.
  *
@@ -254,7 +254,7 @@ describe("S2-P03 de-hub — the home renders from the shell, not the hub (#3121)
     const types = read("src/client/chat/types.ts");
     expect(types).not.toContain('case "schedules":\n      return "schedules";');
     expect(types).toContain("de-hubbed");
-    const hub = read("src/client/ETradeTradingHub.tsx");
+    const hub = read("src/client/TradeHub.tsx");
     expect(hub).not.toContain('effectiveSubTab === "schedules"');
     expect(hub).not.toContain('from "./SchedulesPanel"');
     expect(hub).toContain("#3121 S2: the schedules branch is gone");

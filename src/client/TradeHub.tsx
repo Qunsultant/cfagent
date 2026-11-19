@@ -48,7 +48,7 @@ import {
   heroTradingType,
 } from "./brokerPortfolio";
 import { AccountPanels } from "./AccountPanels";
-import { AlpacaBrokerPanel } from "./AlpacaBrokerPanel";
+import { BrokerPanel } from "./BrokerPanel";
 import { AlpacaSignInCard } from "./AlpacaSignInCard";
 import {
   accountsEndpoint,
@@ -73,7 +73,7 @@ import { OmnichannelPanel } from "./OmnichannelPanel";
 import { VoicePanel } from "./VoicePanel";
 import { OptionsHub, type OptionsHubTab } from "./OptionsHub";
 import { StockHub } from "./StockHub";
-import { ETradeDynamicMenu, type ETradeDynamicMenuProps } from "./ETradeDynamicMenu";
+import { BrokerDynamicMenu, type BrokerDynamicMenuProps } from "./BrokerDynamicMenu";
 import {
   fetchBrokerEnvironment,
   switchBrokerEnvironment,
@@ -125,12 +125,12 @@ export type TradingSubTab =
   | "omnichannel"
   | "voice";
 
-export interface ETradeTradingHubProps {
+export interface TradeHubProps {
   user?: User;
   onSendPrompt?: (prompt: string, sourceTab?: string) => void;
   activeSubTab?: TradingSubTab;
   onSelectSubTab?: (tab: TradingSubTab) => void;
-  onBrokerPropsChange?: (props: ETradeDynamicMenuProps) => void;
+  onBrokerPropsChange?: (props: BrokerDynamicMenuProps) => void;
   /** Issue #69: unread broker-alert count, reported up for the nav badge. */
   onUnreadAlertsChange?: (count: number) => void;
   /**
@@ -212,7 +212,7 @@ function outcomeCodeForStartFailure(code: unknown): string {
   return "FAILURE_ETRADE_OAUTH_START_FAILED";
 }
 
-export function ETradeTradingHub({
+export function TradeHub({
   user,
   onSendPrompt,
   activeSubTab,
@@ -220,7 +220,7 @@ export function ETradeTradingHub({
   onBrokerPropsChange, onUnreadAlertsChange,
   pendingOrderContext,
   onConsumePendingOrderContext,
-}: ETradeTradingHubProps) {
+}: TradeHubProps) {
   const toast = useToast();
   // Navigation subtabs: synchronized directly with activeSubTab prop from Chat navigation
   const [subTab, setSubTab] = useState<TradingSubTab>(activeSubTab || "autopilot");

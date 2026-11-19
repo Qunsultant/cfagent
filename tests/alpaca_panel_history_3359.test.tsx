@@ -13,7 +13,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { AlpacaBrokerPanel } from "../src/client/AlpacaBrokerPanel";
+import { BrokerPanel } from "../src/client/BrokerPanel";
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -129,7 +129,7 @@ describe("the Alpaca panel shows what Alpaca serves (#3359)", () => {
       "/broker/activities": ACTIVITY,
     });
 
-    act(() => root.render(<AlpacaBrokerPanel activeEnv="TEST" />));
+    act(() => root.render(<BrokerPanel activeEnv="TEST" />));
     await flush();
 
     const text = container.textContent ?? "";
@@ -159,7 +159,7 @@ describe("the Alpaca panel shows what Alpaca serves (#3359)", () => {
       },
     });
 
-    act(() => root.render(<AlpacaBrokerPanel activeEnv="TEST" />));
+    act(() => root.render(<BrokerPanel activeEnv="TEST" />));
     await flush();
 
     // Issue #3434: alerts stay a coded absence; watchlists are now data.
@@ -208,7 +208,7 @@ describe("the Alpaca panel shows what Alpaca serves (#3359)", () => {
       }),
     );
 
-    act(() => root.render(<AlpacaBrokerPanel activeEnv="TEST" />));
+    act(() => root.render(<BrokerPanel activeEnv="TEST" />));
     await flush();
 
     expect(container.textContent).toContain("BROKER_ORDER_HISTORY_FAILED");

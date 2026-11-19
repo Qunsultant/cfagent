@@ -8,7 +8,7 @@
  * `?tab=stock-hub&view=research` therefore landed on stocks (live), and
  * `?tab=assets-hub&view=futures` landed on forex.
  *
- * These pins mount the COMPOSED page — ETradeTradingHub with the URL
+ * These pins mount the COMPOSED page — TradeHub with the URL
  * preset, the way a fresh load arrives — and assert the tab the URL
  * names is the tab that is active. Per-hub unit tests (which mount
  * StockHub / ScreenersHub directly, with no initialTab) cannot catch
@@ -24,7 +24,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ToastProvider } from "../src/client/components/ui/Toast";
-import { ETradeTradingHub } from "../src/client/ETradeTradingHub";
+import { TradeHub } from "../src/client/TradeHub";
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -63,7 +63,7 @@ describe("fresh-load routing through the Trading Hub (#4627)", () => {
     await act(async () => {
       root?.render(
         <ToastProvider>
-          <ETradeTradingHub
+          <TradeHub
             activeSubTab={activeSubTab}
             user={{ login: "tester" }}
           />
@@ -133,7 +133,7 @@ describe("fresh-load routing through the Trading Hub (#4627)", () => {
 
 describe("host passes no hardcoded initialTab to either hub (#4627)", () => {
   it("the Trading Hub mounts StockHub / ScreenersHub without initialTab, so the URL selects the tab", () => {
-    const hub = read("src/client/ETradeTradingHub.tsx");
+    const hub = read("src/client/TradeHub.tsx");
     expect(hub).not.toContain('renderStockHub("stocks")');
     expect(hub).not.toContain('renderScreenersHub("forex")');
     expect(hub).toContain("renderStockHub()");

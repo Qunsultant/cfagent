@@ -15,7 +15,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { AlpacaCancelAllControl } from "../src/client/AlpacaCancelAllControl";
+import { CancelAllControl } from "../src/client/CancelAllControl";
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -45,7 +45,7 @@ describe("#3885 — the Portfolio confirmation dialog", () => {
     document.body.appendChild(container);
     root = createRoot(container);
     await act(async () => {
-      root!.render(React.createElement(AlpacaCancelAllControl, { openOrders, onCancelled }));
+      root!.render(React.createElement(CancelAllControl, { openOrders, onCancelled }));
     });
     return container;
   }

@@ -40,7 +40,7 @@ export function parseTabFromSearch(search: string): RouteId {
  * the navigation that carries it to the order page.
  *
  * Owners are the `?tab=<id>` values the owning component renders under
- * (verified against Chat.tsx / ETradeTradingHub / nav-config deep links):
+ * (verified against Chat.tsx / TradeHub / nav-config deep links):
  * `orderTab`/`assetClass` live on the order page; `riskTab` on the Risk
  * Analysis page and inside the order page's risk tab; `reportsTab` on
  * the hub's reports sub-tab; `iaaaTab` and `providerTab` on

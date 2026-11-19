@@ -17,7 +17,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { AlpacaBrokerPanel } from "../src/client/AlpacaBrokerPanel";
+import { BrokerPanel } from "../src/client/BrokerPanel";
 import { BrokerSurfaceGate } from "../src/client/BrokerSurfaceGate";
 import { BROKER_CATALOG } from "../src/trading/brokerCatalog";
 
@@ -85,7 +85,7 @@ describe("the Alpaca panel renders Alpaca (#2853)", () => {
   it("names the broker, the trading type and its own accounts", async () => {
     stubFetch({ "/broker/accounts": ACCOUNTS, "/broker/positions": POSITIONS });
     await act(async () => {
-      root.render(<AlpacaBrokerPanel />);
+      root.render(<BrokerPanel />);
     });
     await flush();
 
@@ -100,7 +100,7 @@ describe("the Alpaca panel renders Alpaca (#2853)", () => {
   it("shows no E*TRADE surface or label", async () => {
     stubFetch({ "/broker/accounts": ACCOUNTS, "/broker/positions": POSITIONS });
     await act(async () => {
-      root.render(<AlpacaBrokerPanel />);
+      root.render(<BrokerPanel />);
     });
     await flush();
     expect(container.textContent).not.toContain("E*TRADE");
@@ -119,7 +119,7 @@ describe("the Alpaca panel renders Alpaca (#2853)", () => {
       },
     });
     await act(async () => {
-      root.render(<AlpacaBrokerPanel />);
+      root.render(<BrokerPanel />);
     });
     await flush();
     expect(container.textContent).toContain("Broker panels are disabled");
@@ -133,7 +133,7 @@ describe("the Alpaca panel renders Alpaca (#2853)", () => {
       "/broker/positions": POSITIONS,
     });
     await act(async () => {
-      root.render(<AlpacaBrokerPanel />);
+      root.render(<BrokerPanel />);
     });
     await flush();
     expect(container.textContent).toContain("provider_unsupported");
@@ -202,7 +202,7 @@ describe("the connect surface asks Alpaca for a key pair (#3330)", () => {
   it("names the credential kind and the variables when unconfigured", async () => {
     stubFetch({ "/broker/accounts": ACCOUNTS, "/broker/positions": POSITIONS, "/broker/status": STATUS });
     await act(async () => {
-      root.render(<AlpacaBrokerPanel />);
+      root.render(<BrokerPanel />);
     });
     await flush();
 
@@ -221,7 +221,7 @@ describe("the connect surface asks Alpaca for a key pair (#3330)", () => {
       "/broker/status": { ...STATUS, body: { ...STATUS.body, status: { ...STATUS.body.status, configured: true } } },
     });
     await act(async () => {
-      root.render(<AlpacaBrokerPanel />);
+      root.render(<BrokerPanel />);
     });
     await flush();
     expect(container.textContent).toContain("Configured");

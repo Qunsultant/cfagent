@@ -11,7 +11,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { MarketTickerTape } from "../src/client/components/MarketTickerTape";
-import { SettingsMenu } from "../src/client/ETradeDynamicMenu";
+import { SettingsMenu } from "../src/client/BrokerDynamicMenu";
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 

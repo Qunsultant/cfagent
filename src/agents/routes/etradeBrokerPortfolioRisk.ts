@@ -82,7 +82,7 @@ export async function sizeCandidateForPortfolio(
 
 /**
  * Positions envelope (issue #2573): the portfolio error field is
- * user-facing (ETradeTradingHub renders it as the OAuth message), so
+ * user-facing (TradeHub renders it as the OAuth message), so
  * it carries the coded message, never the raw lastError string.
  * The 200 envelope shape is unchanged.
  */

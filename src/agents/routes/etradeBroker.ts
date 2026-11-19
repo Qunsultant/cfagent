@@ -188,7 +188,7 @@ export async function handleEtradeBrokerRoutes(
 
   // Environment Switcher API (allows client to toggle between Sandbox TEST and Live PROD)
   // Issue #314: the advertised /api/broker/etrade/environment spelling
-  // (ETradeDynamicMenu.tsx fallback) delegates to the same single-owner
+  // (BrokerDynamicMenu.tsx fallback) delegates to the same single-owner
   // handler, so both spellings share one contract.
   // Issue #2482: POST persists the selection; GET reads it back.
   if (path.endsWith("/environment/switch") && request.method === "POST") {

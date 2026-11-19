@@ -324,8 +324,8 @@ describe("Agent conformance (issue #1738)", () => {
     expect(src).not.toMatch(/getModel\(\)|getSystemPrompt\(\)|getTools\(\)/);
     // The agent delegates to the one service, constructed with the
     // bound container (this.ctx.container) or undefined fallback.
-    expect(src).toContain("ETradeSandboxService");
-    expect(src).toContain("new ETradeSandboxService(container, this.env)");
+    expect(src).toContain("SandboxService");
+    expect(src).toContain("new SandboxService(container, this.env)");
     // The header states the degraded posture in plain terms, so no
     // reader mistakes registration for a working sandbox.
     expect(src).toContain("no container backend is bound");

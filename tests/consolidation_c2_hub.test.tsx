@@ -30,7 +30,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { NAVIGATION_ITEMS, isTabActive } from "../src/client/components/NavigationMenu";
 import { ScreenersHub } from "../src/client/ScreenersHub";
-import { ETradeTradingHub } from "../src/client/ETradeTradingHub";
+import { TradeHub } from "../src/client/TradeHub";
 import { ToastProvider } from "../src/client/components/ui/Toast";
 import { ScreeningReviewPanel } from "../src/client/ScreeningReviewPanel";
 import { ScreeningOutcomesPanel } from "../src/client/ScreeningOutcomesPanel";
@@ -300,7 +300,7 @@ describe("C2 nav collapse", () => {
 
 describe("C2 source pins", () => {
   it("the Trading Hub renders the hub directly for its screening subtabs — no moved notices", () => {
-    const tradingHub = readSrc("client/ETradeTradingHub.tsx");
+    const tradingHub = readSrc("client/TradeHub.tsx");
     expect(tradingHub).not.toContain("ScreeningMovedNotice");
     expect(tradingHub).not.toContain("Screening Moved to the Screeners Hub");
     // Issue #2954: the options/scanner/iv-history subtabs render the
@@ -380,7 +380,7 @@ describe("C2 source pins", () => {
     expect(dropdown).toContain("OptionsDataDownloadDropdown");
     expect(dropdown).toContain('from "../runExport"');
     for (const importer of [
-      "client/ETradeDynamicMenu.tsx",
+      "client/BrokerDynamicMenu.tsx",
       "client/options/OptionsResearchPanel.tsx",
       "client/options/RawContractsScreener.tsx",
       "client/options/StrategyDiscoveryPanel.tsx",
@@ -433,7 +433,7 @@ describe("C2 hub + panels (render)", () => {
 
   it("the Trading Hub renders the hub itself for the folded options subtab — no notice", async () => {
     await act(async () => {
-      root.render(<ToastProvider><ETradeTradingHub activeSubTab="options" user={{ login: "alice" }} /></ToastProvider>);
+      root.render(<ToastProvider><TradeHub activeSubTab="options" user={{ login: "alice" }} /></ToastProvider>);
     });
     await flush();
     expect(container.textContent).not.toContain("Screening Moved to the Screeners Hub");

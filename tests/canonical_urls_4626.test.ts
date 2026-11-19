@@ -332,7 +332,7 @@ describe("retired mounts and links are gone from the sources (#4626)", () => {
   });
 
   it("the trading hub renders no screeners sub-tab", () => {
-    const hub = read("src/client/ETradeTradingHub.tsx");
+    const hub = read("src/client/TradeHub.tsx");
     expect(hub).not.toContain('effectiveSubTab === "screeners"');
     expect(hub).not.toContain('screeners: "Multi-Asset Screeners"');
     expect(hub).not.toContain('| "screeners"');

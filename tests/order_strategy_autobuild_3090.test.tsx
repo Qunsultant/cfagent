@@ -351,7 +351,7 @@ describe("strategy auto-build ticket wiring (issue #3090)", () => {
   });
 
   it("wires the hub's setOptionLegs and the panel's builder controls", () => {
-    const hub = readFileSync(join(HERE, "..", "src", "client", "ETradeTradingHub.tsx"), "utf8");
+    const hub = readFileSync(join(HERE, "..", "src", "client", "TradeHub.tsx"), "utf8");
     const panel = readFileSync(join(HERE, "..", "src", "client", "OrderTicketPanel.tsx"), "utf8");
     expect(hub).toContain("const setOptionLegs = (");
     expect(hub).toContain("setOptionLegs,");

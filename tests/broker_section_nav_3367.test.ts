@@ -48,7 +48,7 @@ describe("the section nav follows the broker (#3367)", () => {
     // the rest live in the hub and the account/risk panels. All of them are
     // part of "what E*TRADE renders".
     const etradeIds = new Set([
-      ...idsFor("src/client/ETradeTradingHub.tsx"),
+      ...idsFor("src/client/TradeHub.tsx"),
       ...idsFor("src/client/AccountPanels.tsx"),
       ...idsFor("src/client/PortfolioRiskPanel.tsx"),
       ...idsFor("src/client/PortfolioPanel.tsx"),
@@ -58,7 +58,7 @@ describe("the section nav follows the broker (#3367)", () => {
     }
 
     const alpacaIds = new Set([
-      ...idsFor("src/client/AlpacaBrokerPanel.tsx"),
+      ...idsFor("src/client/BrokerPanel.tsx"),
       ...idsFor("src/client/PortfolioRiskPanel.tsx"),
     ]);
     for (const section of brokerSectionNav("alpaca")) {
@@ -67,7 +67,7 @@ describe("the section nav follows the broker (#3367)", () => {
   });
 
   it("treats an unknown stored id the way the hub renders it — as Alpaca's panel", () => {
-    // The hub's branch is `selectedBroker === "etrade" ? AccountPanels : AlpacaBrokerPanel`,
+    // The hub's branch is `selectedBroker === "etrade" ? AccountPanels : BrokerPanel`,
     // so an unrecognised id renders the Alpaca panel and must get Alpaca's chips.
     // One rule, not two: this is the only place the nav could disagree with the panel.
     expect(brokerSectionNav("sandbox")).toEqual(brokerSectionNav("alpaca"));

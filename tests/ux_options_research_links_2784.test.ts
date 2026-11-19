@@ -29,7 +29,7 @@ import {
 
 const panelSrc = readFileSync(join(__dirname, "../src/client/options/OptionsResearchPanel.tsx"), "utf8");
 const catalogSrc = readFileSync(join(__dirname, "../src/client/OptionsScreenerPage.tsx"), "utf8");
-const hubSrc = readFileSync(join(__dirname, "../src/client/ETradeTradingHub.tsx"), "utf8");
+const hubSrc = readFileSync(join(__dirname, "../src/client/TradeHub.tsx"), "utf8");
 
 const KEPT_SUBS = [
   { id: "discovery", label: "Discovery" },

@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 
 const HERE = join(__dirname, "..");
 const PANEL = "src/client/GoalScreenPanel.tsx";
-const HUB = "src/client/ETradeTradingHub.tsx";
+const HUB = "src/client/TradeHub.tsx";
 const GATE = "tests/ux_conformance_gates_3047.test.ts";
 const REGISTER = "tests/ux_shell_exceptions_3047.json";
 

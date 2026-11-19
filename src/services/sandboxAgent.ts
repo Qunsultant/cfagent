@@ -33,7 +33,7 @@ import { evaluatePatternSignalAt } from "./patternSignals";
 const MAX_OUTPUT_CHARS = 10_000;
 const INACTIVITY_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
 
-export class ETradeSandboxService {
+export class SandboxService {
   constructor(private container?: any, private env?: Env) {}
 
   /**

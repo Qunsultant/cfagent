@@ -5,7 +5,7 @@
  * Before a trade executes, the approval surface must show the EXACT
  * execution payload, the fees, and the slippage limits — not a
  * summary. The exact payload is the body
- * ETradeTradingHub.handleExecuteDraft POSTs to
+ * TradeHub.handleExecuteDraft POSTs to
  * /api/broker/order/execute. Execution itself is driven by the
  * stored draft (src/agents/routes/etradeBroker.ts re-reads the
  * record and checks the body's action/symbol/quantity against it),

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import React from "react";
 import ReactDOMServer from "react-dom/server";
-import { ETradeTradingHub } from "../src/client/ETradeTradingHub";
+import { TradeHub } from "../src/client/TradeHub";
 import { NavigationMenu, isTabActive, NAVIGATION_ITEMS } from "../src/client/components/NavigationMenu";
 import { ToastProvider } from "../src/client/components/ui";
 
@@ -33,12 +33,12 @@ describe("Portfolio Tab Click & Render Inspection", () => {
     expect(html).toContain("active");
   });
 
-  it("renders ETradeTradingHub portfolio section with hero header and actions when activeSubTab is portfolio", () => {
+  it("renders TradeHub portfolio section with hero header and actions when activeSubTab is portfolio", () => {
     const html = ReactDOMServer.renderToString(
       React.createElement(
         ToastProvider,
         null,
-        React.createElement(ETradeTradingHub, {
+        React.createElement(TradeHub, {
           activeSubTab: "portfolio",
           user: { login: "test_user", name: "Test User" },
         })

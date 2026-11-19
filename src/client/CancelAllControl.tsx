@@ -25,7 +25,7 @@ export interface CancelAllPreviewView {
   expiresAt: string;
 }
 
-export interface AlpacaCancelAllControlProps {
+export interface CancelAllControlProps {
   /** How many OPEN rows the order-history table currently shows. */
   openOrders: number;
   /** Called after the server reports a completed cancel (refresh the table). */
@@ -39,7 +39,7 @@ function when(value: string | null): string {
   return new Date(parsed).toISOString().replace("T", " ").replace(".000Z", " UTC");
 }
 
-export function AlpacaCancelAllControl({ openOrders, onCancelled }: AlpacaCancelAllControlProps) {
+export function CancelAllControl({ openOrders, onCancelled }: CancelAllControlProps) {
   const [busy, setBusy] = useState<null | "preview" | "confirm">(null);
   const [preview, setPreview] = useState<CancelAllPreviewView | null>(null);
   const [token, setToken] = useState<string | null>(null);
@@ -71,7 +71,7 @@ export function AlpacaCancelAllControl({ openOrders, onCancelled }: AlpacaCancel
       }
     } catch {
       setTone("danger");
-      setMessage("Alpaca could not be reached, so no preview was produced and nothing was cancelled.");
+      setMessage("The broker could not be reached, so no preview was produced and nothing was cancelled.");
     } finally {
       setBusy(null);
     }
@@ -92,7 +92,7 @@ export function AlpacaCancelAllControl({ openOrders, onCancelled }: AlpacaCancel
       if (res.ok) onCancelled();
     } catch {
       setTone("danger");
-      setMessage("Alpaca could not be reached. Some orders may still be open.");
+      setMessage("The broker could not be reached. Some orders may still be open.");
     } finally {
       setPreview(null);
       setToken(null);
@@ -117,7 +117,7 @@ export function AlpacaCancelAllControl({ openOrders, onCancelled }: AlpacaCancel
 
       {message && (
         <Notice tone={tone === "danger" ? "danger" : "neutral"} title="Cancel all">
-          <span data-alpaca-cancel-all-message>{message}</span>
+          <span data-cancel-all-message>{message}</span>
         </Notice>
       )}
 
@@ -157,16 +157,16 @@ export function AlpacaCancelAllControl({ openOrders, onCancelled }: AlpacaCancel
       >
         {preview && (
           <Stack gap="2">
-            <p data-alpaca-cancel-all-count>
+            <p data-cancel-all-count>
               {preview.count} open order{preview.count === 1 ? "" : "s"} would be cancelled. Nothing has been cancelled
               yet.
             </p>
-            <p data-alpaca-cancel-all-symbols>Symbols: {preview.symbols.join(", ") || "not recorded"}</p>
-            <p data-alpaca-cancel-all-classes>Classes: {preview.classes.join(", ") || "not recorded"}</p>
-            <p data-alpaca-cancel-all-window>
+            <p data-cancel-all-symbols>Symbols: {preview.symbols.join(", ") || "not recorded"}</p>
+            <p data-cancel-all-classes>Classes: {preview.classes.join(", ") || "not recorded"}</p>
+            <p data-cancel-all-window>
               Oldest: {when(preview.oldest)} — newest: {when(preview.newest)}
             </p>
-            <p data-alpaca-cancel-all-expiry>This confirmation expires at {when(preview.expiresAt)}.</p>
+            <p data-cancel-all-expiry>This confirmation expires at {when(preview.expiresAt)}.</p>
           </Stack>
         )}
       </Modal>

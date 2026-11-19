@@ -11,7 +11,7 @@
  *
  *   - sandbox-tools is "degraded" BECAUSE both construction sites
  *     pass no container and wrangler.jsonc declares no containers
- *     configuration, so ETradeSandboxService returns executed:false.
+ *     configuration, so SandboxService returns executed:false.
  *     Bind a backend (the owner decision the registry notes name)
  *     and these pins fail until the status is updated in the same PR.
  *   - ai-search-platform is "degraded" BECAUSE, although the
@@ -204,10 +204,10 @@ describe("degraded status evidence (#2417)", () => {
   it("sandbox-tools: container is bound at SandboxAgent construction site and declared in wrangler.jsonc (#3492)", () => {
     // SandboxAgent constructs the service with the bound container (this.ctx.container).
     expect(read("src/agents/sandbox-agent.ts")).toContain(
-      "new ETradeSandboxService(container",
+      "new SandboxService(container",
     );
     expect(read("src/mcps/openaimp/cloudflareAgentCommands.ts")).toContain(
-      "new ETradeSandboxService(undefined",
+      "new SandboxService(undefined",
     );
     // #4112 (owner direction): no container is deployed. The class stays bound,
     // and re-enabling one is a wrangler.jsonc edit, not a code change.

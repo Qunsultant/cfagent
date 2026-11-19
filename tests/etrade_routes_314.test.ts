@@ -94,7 +94,7 @@ import { MockSqlStorage } from "./mock-sql";
  * Issue #314 — the two advertised E*TRADE routes.
  *
  * (1) POST /api/broker/etrade/environment — the fallback in
- * ETradeDynamicMenu.tsx posted here and 404'd. It now delegates to the same
+ * BrokerDynamicMenu.tsx posted here and 404'd. It now delegates to the same
  * single-owner handler as /api/environment/switch: same contract, same
  * validation, same auth.
  *

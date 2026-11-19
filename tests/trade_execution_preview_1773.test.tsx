@@ -14,7 +14,7 @@ import { TradeExecutionPreview } from "../src/client/TradeExecutionPreview";
  * before a trade executes, the approval surface must show the EXACT
  * execution payload, the fees, and the slippage limits — not a
  * summary. The exact payload is the body
- * ETradeTradingHub.handleExecuteDraft POSTs to /api/broker/order/execute
+ * TradeHub.handleExecuteDraft POSTs to /api/broker/order/execute
  * (orderId, draftId, decision, symbol, action, quantity, orderType,
  * limitPrice, previewId); execution itself is driven by the stored
  * draft (src/agents/routes/brokerOrders.ts), so the preview also

@@ -11,7 +11,7 @@
  * supported."), failing config processing for EVERY wrangler command.
  * That broke Deploy NextGenTP at its first wrangler invocation (the
  * "Ensure Vectorize index for VectorMemory" step) from bb24be82 on.
- * The image is supplied at runtime by ETradeSandboxService.runCommand
+ * The image is supplied at runtime by SandboxService.runCommand
  * via container.start({ image: "cloudflare/debian-trixie", ... })
  * (src/services/sandboxAgent.ts), so the config field carries nothing
  * the code uses. This pin fails while a DO-managed entry carries
@@ -108,10 +108,10 @@ describe("wrangler.jsonc containers config (#3789)", () => {
     }
   });
 
-  it("ETradeSandboxService passes the debian-trixie image at container.start() (runtime image source, #3789)", async () => {
+  it("SandboxService passes the debian-trixie image at container.start() (runtime image source, #3789)", async () => {
     // The image lives at the runtime start() call, not in wrangler.jsonc:
     // removing the config field must not lose the image the container runs.
-    const { ETradeSandboxService } = await import("../src/services/sandboxAgent");
+    const { SandboxService } = await import("../src/services/sandboxAgent");
     let startArgs: unknown;
     const container = {
       running: false,
@@ -126,7 +126,7 @@ describe("wrangler.jsonc containers config (#3789)", () => {
         }),
       }),
     };
-    const svc = new ETradeSandboxService(container as never);
+    const svc = new SandboxService(container as never);
     const result = await svc.runCommand({ command: "echo hi", timeoutMs: 5000 });
     expect(result.executed).toBe(true);
     expect(startArgs).toMatchObject({ image: "cloudflare/debian-trixie" });

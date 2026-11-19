@@ -15,7 +15,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { AlpacaBrokerPanel } from "../src/client/AlpacaBrokerPanel";
+import { BrokerPanel } from "../src/client/BrokerPanel";
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -136,7 +136,7 @@ describe("the broker panel speaks for the selected broker (#3937)", () => {
   it("under broker=etrade renders E*TRADE's label, its own data, and its alerts", async () => {
     stubFetch(ETRADE_PAYLOADS);
     await act(async () => {
-      root.render(<AlpacaBrokerPanel broker="etrade" />);
+      root.render(<BrokerPanel broker="etrade" />);
     });
     await flush();
 
@@ -176,7 +176,7 @@ describe("the broker panel speaks for the selected broker (#3937)", () => {
       },
     });
     await act(async () => {
-      root.render(<AlpacaBrokerPanel />);
+      root.render(<BrokerPanel />);
     });
     await flush();
 

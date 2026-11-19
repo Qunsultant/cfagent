@@ -101,7 +101,7 @@ describe("there is one cancel path (#3390)", () => {
   });
 
   it("the Alpaca order history offers cancel only for an OPEN order", () => {
-    const source = readFileSync("src/client/AlpacaBrokerPanel.tsx", "utf8");
+    const source = readFileSync("src/client/BrokerPanel.tsx", "utf8");
     expect(source).toContain('row.status === "OPEN"');
     expect(source).toContain('fetch("/api/broker/order/cancel"');
     expect(source).toContain("Cancel");
