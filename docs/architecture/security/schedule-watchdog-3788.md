@@ -108,7 +108,7 @@ prunes per job, so its heartbeat never evicts other jobs' records.
 | --- | --- | --- |
 | ScheduledAgent goal firing (terminal point) | Yes | `recordGoalRun` in `onCron` (pre-existing, #2964) |
 | Orchestrator creatable callback (4) | Yes | Method wrappers (pre-existing, #2964) |
-| Orchestrator internal-only callback (4 — see `RECORDED_SCHEDULE_CALLBACKS` in `src/agents/orchestrator/scheduleCallbacks.ts`) | Yes since #3788 | Method wrappers added here, mirroring the creatable four; the trigger route treats them as self-recording so manual triggers record exactly once |
+| Orchestrator internal-only callback (6 — see `RECORDED_SCHEDULE_CALLBACKS` in `src/agents/orchestrator/scheduleCallbacks.ts`) | Yes since #3788 (#3310 stage callback, #4186 reminder callback) | Method wrappers (#3788 four, #3310 stage callback, #4186 reminder callback), mirroring the creatable four; the trigger route treats them as self-recording so manual triggers record exactly once |
 | Copilot Think task firing | Yes since #3788 | `recordScheduleCallbackRun` around the cycle; `ok` → success, every refusal state → skipped with the cycle status as detail |
 | Copilot Think task non-declaration | Audit only | `stock_copilot.not_declared` with cause class `flag_off` / `no_login_context` / `context_error`, deduped on change of cause class (or 24h) in agent storage |
 | Copilot cycle early return (no SQL) | Audit only | `stock_copilot.no_sql_storage` with code `no_sql_storage` |

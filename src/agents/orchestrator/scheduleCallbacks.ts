@@ -50,6 +50,10 @@ export type CreatableScheduleCallback = (typeof CREATABLE_SCHEDULE_CALLBACKS)[nu
  * Manual triggers of these callbacks are recorded exactly once:
  * the trigger route treats this set like the creatable set (the
  * method wrapper records; the route must not wrap them again).
+ * Issue #4186 — the sixth member, `sendScheduledReminder` (the
+ * NLQ-armed reminder callback, not REST-creatable): its SDK
+ * firings left no per-run record until this slice wrapped its
+ * method the same way.
  */
 export const INTERNAL_RECORDED_SCHEDULE_CALLBACKS = [
   "executeAsyncJob",
@@ -58,6 +62,8 @@ export const INTERNAL_RECORDED_SCHEDULE_CALLBACKS = [
   "autoRenewETradeTokens",
   // Issue #3121 #3310 — the per-stage workflow firing callback.
   "runWorkflowStage",
+  // Issue #4186 — the NLQ-armed reminder callback.
+  "sendScheduledReminder",
 ] as const;
 
 /**

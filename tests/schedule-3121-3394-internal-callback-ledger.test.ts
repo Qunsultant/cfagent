@@ -9,6 +9,11 @@
  * schedule, and a firing with no originating schedule records
  * explicit nulls — never an absent field, never a guessed id.
  *
+ * Issue #4186 extends the set to the fifth internal-only callback,
+ * `sendScheduledReminder` (NLQ-armed, not REST-creatable): its
+ * wrapper landed here, mirroring #3788, so its SDK firings join
+ * the same way and its manual triggers record exactly once.
+ *
  * RED first: P01/P02 fail until the recorder's linkage is proven
  * per callback (they pass on the #3788 recorder as written — the
  * pins exist so a later refactor cannot silently drop a callback
@@ -18,7 +23,7 @@
  * Pins:
  * - 3394-P01: SDK-style firing per callback joins schedule <-> row.
  * - 3394-P02: no-schedule firing records explicit nulls per callback.
- * - 3394-P03: each of the four wrapper methods routes through
+ * - 3394-P03: each of the five wrapper methods routes through
  *   recordScheduleCallbackRun (source pin, mirroring S3-P07).
  */
 import { describe, it, expect } from "vitest";
@@ -48,6 +53,9 @@ const INTERNAL_CALLBACKS = [
   "expireStaleOrderDraft",
   "collectIvHistory",
   "autoRenewETradeTokens",
+  // Issue #4186 — the fifth internal-only callback: the NLQ-armed
+  // reminder callback, recorded the same way as the #3788 four.
+  "sendScheduledReminder",
 ] as const;
 
 describe("internal-callback SDK firings record a ledger row (#3394)", () => {

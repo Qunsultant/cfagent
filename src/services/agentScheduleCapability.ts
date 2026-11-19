@@ -80,9 +80,10 @@ export const AGENT_SCHEDULABLE_REMINDER_CALLBACK = "sendScheduledReminder";
 export const AGENT_SCHEDULABLE_CALLBACKS: readonly string[] = CREATABLE_SCHEDULE_CALLBACKS;
 
 /**
- * Excluded SDK callbacks: the four internal-only callbacks (REST already
- * refuses them with 400; NLQ must match — F1) plus the code-armed system
- * duties no agent may ever arm.
+ * Excluded SDK callbacks: the internal-only callbacks (REST already
+ * refuses them with 400; the reminder is NLQ-armed, never agent-armed
+ * — NLQ must match, F1) plus the code-armed system duties no agent
+ * may ever arm.
  */
 export const AGENT_EXCLUDED_CALLBACKS: readonly string[] = [
   ...INTERNAL_RECORDED_SCHEDULE_CALLBACKS,

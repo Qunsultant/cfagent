@@ -1946,8 +1946,27 @@ export class OrchestratorAgent extends PortThink {
   }
 
   // Issue #992: extracted to ./orchestrator/scheduledCallbacks.ts (sendScheduledReminder);
-  async sendScheduledReminder(payload: { reminderId: string; message: string; userLogin?: string }): Promise<void> {
-    return sendScheduledReminder(this.scheduledCallbacksContext(), payload);
+  // Issue #4186: records its own run — see the token-renewal wrapper above
+  // (the #3394 carried gap — the NLQ-armed reminder callback).
+  // The SDK fires this as method.call(this, payload, schedule), so the
+  // schedule object arrives as the second argument and the wrapper records
+  // the run against schedule.id (manual triggers resolve via the payload's
+  // stamped scheduleId instead). The delegate reports no outcome, so a
+  // completed invocation records success; a throw records failure and rethrows.
+  async sendScheduledReminder(payload: { reminderId: string; message: string; userLogin?: string }, schedule?: { id?: unknown }): Promise<void> {
+    return recordScheduleCallbackRun(
+      this.ctx.storage.sql,
+      "sendScheduledReminder",
+      payload,
+      schedule,
+      async () => {
+        await sendScheduledReminder(this.scheduledCallbacksContext(), payload);
+        return { outcome: "success", descriptor: "reminder dispatched" };
+      },
+      // Issue #5085 (S6): the audit sink names a failed ledger write
+      // (shared namer) like the sibling #3788 wrappers on current main.
+      { audit: (type, agent, payload) => this.audit(type, agent, payload) },
+    );
   }
 
   // Issue #992: extracted to ./orchestrator/nlqPorts.ts (nlqSchedulingPort);
