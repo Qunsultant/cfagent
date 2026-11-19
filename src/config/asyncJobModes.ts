@@ -306,6 +306,8 @@ export const SYNCHRONOUS_MCP_TOOLS = new Set<string>([
   "stock_copilot_stage_control",
   // #5739: whole-job control is immediate state/control, never a queued job.
   "stock_copilot_job_control",
+  // #5765: a cancel is answered in the turn, never queued.
+  "broker_order_cancel",
   "set_job_execution_mode",
   "stock_copilot_status",
   "stock_copilot_control",

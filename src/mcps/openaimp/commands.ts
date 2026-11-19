@@ -13,6 +13,7 @@
 
 import { z } from "zod";
 import { GetJobStageStatusCommand, GetJobStatusCommand } from "./jobStatusCommands";
+import { BrokerOrderCancelCommand } from "./brokerOrderCommands";
 import {
   StockCopilotJobControlCommand,
   StockCopilotStageControlCommand,
@@ -1817,6 +1818,7 @@ export class McpToolFactory {
     this.registerTool(new GetJobStageStatusCommand());
     this.registerTool(new StockCopilotStageControlCommand());
     this.registerTool(new StockCopilotJobControlCommand());
+    this.registerTool(new BrokerOrderCancelCommand());
     this.registerTool(new SetJobExecutionModeCommand());
     this.registerTool(new ListDatabaseTablesCommand());
     this.registerTool(new QueryTableDataCommand());
