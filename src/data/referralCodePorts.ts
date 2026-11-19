@@ -46,6 +46,7 @@
  */
 
 import type { Membership } from "../security/authorization";
+import { BusinessError } from "../outcomes/outcomeAspects";
 
 /** Who may issue codes under a rule. */
 export type ReferralCodeIssuer = "platform_admin" | "tenant_admin" | "user";
@@ -59,7 +60,7 @@ export type ReferralCodeAttributionMode = "ledger" | "none";
 /** Validate a code issuer value. */
 export function assertReferralCodeIssuer(value: unknown): ReferralCodeIssuer {
   if (value !== "platform_admin" && value !== "tenant_admin" && value !== "user") {
-    throw new Error('Referral code issuer must be "platform_admin", "tenant_admin", or "user".');
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID");
   }
   return value;
 }
@@ -67,7 +68,7 @@ export function assertReferralCodeIssuer(value: unknown): ReferralCodeIssuer {
 /** Validate a code kind value. */
 export function assertReferralCodeKind(value: unknown): ReferralCodeKind {
   if (value !== "referral" && value !== "invite") {
-    throw new Error('Referral code kind must be "referral" or "invite".');
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID");
   }
   return value;
 }
@@ -75,7 +76,7 @@ export function assertReferralCodeKind(value: unknown): ReferralCodeKind {
 /** Validate an attribution-mode value. */
 export function assertReferralCodeAttributionMode(value: unknown): ReferralCodeAttributionMode {
   if (value !== "ledger" && value !== "none") {
-    throw new Error('Referral code attribution mode must be "ledger" or "none".');
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID");
   }
   return value;
 }
@@ -83,7 +84,7 @@ export function assertReferralCodeAttributionMode(value: unknown): ReferralCodeA
 /** Validate a positive-integer runs count (runs per code, balance credits). */
 export function assertCodeRuns(value: unknown): number {
   if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
-    throw new Error("Code runs must be a positive integer.");
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID");
   }
   return value;
 }
@@ -92,7 +93,7 @@ export function assertCodeRuns(value: unknown): number {
 export function assertCodeCap(value: unknown, name: string): number | null {
   if (value === undefined || value === null) return null;
   if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
-    throw new Error(`${name} must be null or a non-negative integer.`);
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID");
   }
   return value;
 }
@@ -102,7 +103,7 @@ function assertFlag(value: unknown, name: string, fallback: boolean): boolean {
   if (value === undefined || value === null) return fallback;
   if (typeof value === "boolean") return value;
   if (value === 0 || value === 1) return value === 1;
-  throw new Error(`${name} must be a boolean or 0/1.`);
+  throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID");
 }
 
 /**
@@ -136,7 +137,7 @@ export function assertReferralCodeRuleInput(input: {
 } {
   const productId =
     typeof input.productId === "string" && input.productId.trim() ? input.productId.trim() : "";
-  if (!productId) throw new Error("Referral code rule productId is required.");
+  if (!productId) throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID");
   const issuer = assertReferralCodeIssuer(input.issuer);
   const runsPerCode = assertCodeRuns(input.runsPerCode);
   const reusable = assertFlag(input.reusable, "reusable", false);
@@ -147,7 +148,7 @@ export function assertReferralCodeRuleInput(input: {
       !Number.isInteger(input.expiryDays) ||
       input.expiryDays < 1
     ) {
-      throw new Error("expiryDays must be null or a positive integer number of days.");
+      throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID");
     }
     expiryDays = input.expiryDays;
   }
@@ -179,10 +180,10 @@ export function assertReferrerForKind(
   const referrer =
     typeof referrerUserId === "string" && referrerUserId.trim() ? referrerUserId.trim() : null;
   if (kind === "referral" && !referrer) {
-    throw new Error("A referral code requires a referrerUserId.");
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID");
   }
   if (kind === "invite" && referrer) {
-    throw new Error("An invite code must not carry a referrerUserId.");
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID");
   }
   return referrer;
 }
@@ -197,13 +198,13 @@ export const CROCKFORD_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
  * response, so a guessing attacker learns nothing.
  */
 export function normalizeCodeValue(value: unknown): string {
-  if (typeof value !== "string") throw new Error("Referral code must be a string.");
+  if (typeof value !== "string") throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID");
   const normalized = value.toUpperCase().replace(/[-\s]/g, "");
   if (
     normalized.length !== 16 ||
     [...normalized].some((ch) => !CROCKFORD_ALPHABET.includes(ch))
   ) {
-    throw new Error("Referral code must be 16 Crockford base32 characters.");
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID");
   }
   return normalized;
 }

@@ -441,6 +441,8 @@ describe("channel refund rail (#2945 on 2.7 machinery)", () => {
       rail: "cfpay-channel",
     });
     expect(res?.status).toBe(400);
-    expect((await bodyOf(res)).error).toMatch(/tenantId is required/);
+    const rb = await bodyOf(res);
+    expect(rb.code).toBe("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3): the tenant detail no longer surfaces
+    expect(rb.message).toBe("The request was invalid. Please check the values and try again.");
   });
 });

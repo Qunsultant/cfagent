@@ -711,6 +711,6 @@ describe("bundle refund flow (#5227)", () => {
     expect(res?.status).toBe(400);
     const body = await bodyOf(res);
     expect(body.code).toBe("FAILURE_COMMERCIAL_REQUEST_INVALID");
-    expect(body.error).toContain("no stored");
+    expect(body.message).toBe("The request was invalid. Please check the values and try again."); // #5606 (G-3): the no-stored-source detail no longer surfaces
   });
 });

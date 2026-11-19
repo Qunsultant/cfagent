@@ -554,7 +554,7 @@ describe("commercial routes carry coded outcomes (behavioral, #2846 §3)", () =>
     expect(res!.status).toBe(400);
     const body = (await res!.json()) as any;
     expect(body.code).toBe("FAILURE_COMMERCIAL_REQUEST_INVALID");
-    expect(body.error).toBe(codedMessage("FAILURE_COMMERCIAL_REQUEST_INVALID"));
+    expect(body.message).toBe(resolveOutcome("FAILURE_COMMERCIAL_REQUEST_INVALID").businessMessage); // #5606 (G-3): the BusinessError branch renders codedOutcomeResponse {code, message}
   });
 
   it("a forbidden account read fails with the coded forbidden outcome", async () => {

@@ -5392,14 +5392,7 @@ export async function handleAgenticPaymentsRoutes(
         partial = assertBillingPolicyPartial(body);
       } catch (err: any) {
         // Issue #3357: a catalog-coded discount failure renders from the catalog.
-        // #5606 (G-3): this endpoint's contract is {code, error} (its other
-        // returns all use it), so the BusinessError branch renders that
-        // shape instead of codedOutcomeResponse's {code, message}.
-        if (err instanceof BusinessError)
-          return Response.json(
-            { code: err.code, error: codedMessage(err.code) },
-            { status: resolveOutcome(err.code).entry?.httpStatus ?? 500 },
-          );
+        if (err instanceof BusinessError) return codedOutcomeResponse(err.code);
         return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: codedMessage("FAILURE_COMMERCIAL_REQUEST_INVALID") }, { status: 400 });
       }
       const updated = await policy.updatePolicy(partial);
@@ -5618,7 +5611,7 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
         typeof body?.channelRequestId === "string" && body.channelRequestId.trim()
           ? body.channelRequestId.trim()
           : (() => {
-              throw new Error("channel request id is required.");
+              throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
             })();
       const store = createCommercialAdapter(ctx.env as { AGENT_DB?: unknown });
       const subs = createSubscriptionAdapter(ctx.env as { AGENT_DB?: unknown });

@@ -177,7 +177,7 @@ describe("annual price derivation (#3357)", () => {
   it("policy validation accepts the new field and rejects an out-of-range value", () => {
     expect(assertBillingPolicyPartial({ annualDiscountPct: 20 })).toEqual({ annualDiscountPct: 20 });
     expectBusinessError(() => assertBillingPolicyPartial({ annualDiscountPct: 150 }), "FAILURE_ANNUAL_DISCOUNT_INVALID");
-    expect(() => assertBillingPolicyPartial({ annualDiscountPct: 20, nope: 1 })).toThrow(/Unknown billing policy field/);
+    expect(() => assertBillingPolicyPartial({ annualDiscountPct: 20, nope: 1 })).toThrowError(expect.objectContaining({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID" })); // #5606 (G-3)
     const seed = { ...PROPOSED_SEED_BILLING_POLICY };
     expect(assertBillingPolicy(seed).annualDiscountPct).toBe(15);
     expectBusinessError(() => assertBillingPolicy({ ...seed, annualDiscountPct: -5 }), "FAILURE_ANNUAL_DISCOUNT_INVALID");
@@ -894,7 +894,7 @@ describe("per-user within a tenant (#3357, #1069)", () => {
     await recordBillingSubscription({ subs, provider: provider as any, userId: "u1", tenantId: "tenant-a", planId: "p", nowMs: NOW });
     await expect(
       recordBillingSubscription({ subs, provider: provider as any, userId: "u2", tenantId: "tenant-b", planId: "p", nowMs: NOW }),
-    ).rejects.toThrow(/another user\/tenant/);
+    ).rejects.toMatchObject({ code: "FAILURE_COMMERCIAL_CONFLICT" }); // #5606 (G-3)
     expect((await subs.listSubscriptions("u2")).length).toBe(0);
     expect((await subs.listSubscriptions("u1")).length).toBe(1);
   });

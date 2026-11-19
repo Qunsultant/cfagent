@@ -261,7 +261,7 @@ async function buildAccountView(
   userId: string,
 ): Promise<AccountView> {
   if (!ports.commercial || !ports.subscriptions) {
-    throw new Error("Commercial account store is unavailable.");
+    throw new BusinessError("FAILURE_COMMERCIAL_STORE_UNAVAILABLE"); // #5606 (G-3)
   }
   const identity: PlatformIdentity = await resolvePlatformIdentity(
     { commercial: ports.commercial, subscriptions: ports.subscriptions },
