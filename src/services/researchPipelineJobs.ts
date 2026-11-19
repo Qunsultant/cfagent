@@ -28,6 +28,9 @@ import {
   researchEngineJobId,
   type ResearchEvaluationStorePort,
 } from "../workflows/researchDataPorts";
+import { jobDefinitionSpec } from "../config/jobDefinitionCatalog";
+import { bindJobDefinitionParams } from "./jobDefinitionParamBinders";
+import { buildJobConfigFromSpec } from "./jobDefinitionSpecBuilder";
 
 const structuredLog = createStructuredLogger(createObservabilitySink({}), {
   component: "services/researchPipelineJobs",
@@ -239,65 +242,50 @@ export function buildResearchJobDefinition(
   runId: string,
   config: ResearchJobDefinitionConfig,
 ) {
+  const spec = jobDefinitionSpec("research");
+  const bound = bindJobDefinitionParams(
+    spec,
+    {
+      runId,
+      ...(config.sourceId !== undefined ? { sourceId: config.sourceId } : {}),
+      ...(config.dataset !== undefined ? { dataset: config.dataset } : {}),
+      trigger: config.trigger,
+      ...(config.cron !== undefined ? { cron: config.cron } : {}),
+    },
+    config.userLogin,
+  );
   const jobId = researchEngineJobId(runId);
-  const sourceId = config.sourceId ?? "primary-feed";
-  const dataset = config.dataset ?? "quotes";
+  const sourceId = String(bound.sourceId ?? "primary-feed");
+  const dataset = String(bound.dataset ?? "quotes");
+  const built = buildJobConfigFromSpec(spec, jobId, bound);
+  const rawRoot = built.root as Record<string, unknown> & {
+    children?: Array<Record<string, unknown>>;
+  };
+  const children = (rawRoot.children ?? []).map((child) => {
+    if (child.kind === "feed" || child.kind === "enrich") {
+      return {
+        ...child,
+        inputs: { sources: [sourceId], datasets: [dataset] },
+        steps: [],
+      };
+    }
+    if (child.kind === "generate" || child.kind === "deliver") {
+      return { ...child, steps: [] };
+    }
+    return child;
+  });
 
   return {
-    jobId,
+    jobId: built.jobId,
     name: `Nightly OODA Research (${runId})`,
     root: {
-      kind: "research",
+      ...rawRoot,
       inputs: { sources: [sourceId], datasets: [dataset] },
       steps: [{ step: "noop" }],
-      schedule: config.cron
-        ? { enabled: true, cron: config.cron }
+      schedule: bound.cron
+        ? { enabled: true, cron: String(bound.cron) }
         : { enabled: false },
-      children: [
-        {
-          kind: "feed",
-          inputs: { sources: [sourceId], datasets: [dataset] },
-          steps: [],
-        },
-        {
-          kind: "enrich",
-          inputs: { sources: [sourceId], datasets: [dataset] },
-          steps: [],
-        },
-        {
-          kind: "analyze",
-          steps: [
-            {
-              step: ANALYZE_OODA_STEP,
-              params: {
-                runId,
-                userLogin: config.userLogin,
-                trigger: config.trigger,
-              },
-            },
-          ],
-        },
-        {
-          kind: "generate",
-          steps: [],
-        },
-        {
-          kind: "deliver",
-          steps: [],
-        },
-        {
-          kind: "evaluate",
-          steps: [
-            {
-              step: EVALUATE_APPLY_STEP,
-              params: {
-                runId,
-                userLogin: config.userLogin,
-              },
-            },
-          ],
-        },
-      ],
+      children,
     },
   };
 }
