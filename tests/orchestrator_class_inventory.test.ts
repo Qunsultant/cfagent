@@ -355,8 +355,13 @@ const ORCH = "agents/orchestrator.ts";
  *  (execution in orchestrator/scheduleMaintenance.ts) —
  *  measured 3,374 lines / 154,253 B after the addition;
  *  budget lines stay 3380, keeping similar headroom.
+ *  #4242 (sweeps + watchdog as unified-store records) wraps
+ *  the two sweep methods in the #3394 recorder (import +
+ *  two wrapper methods + the unrecorded-body rename) —
+ *  measured 3,418 lines / 156,852 B after the addition, so
+ *  budget lines rise to 3435, keeping similar headroom.
  *  Bytes unchanged — measured well under the 159,200 budget. */
-const BUDGET_LINES = 3380;
+const BUDGET_LINES = 3435;
 const BUDGET_BYTES = 159_200;
 
 const count = (haystack: string, needle: string) =>

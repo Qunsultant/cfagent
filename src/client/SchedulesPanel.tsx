@@ -569,7 +569,13 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
                   ? `Last pass: ${formatLastEvent(s.lastRunAt)}${s.lastRunOutcome ? ` (${s.lastRunOutcome})` : ""}${s.lastRunDetail ? ` — ${s.lastRunDetail}` : ""}`
                   : s.id === "nightly-research"
                     ? `Last research: ${formatLastEvent(s.lastRunAt)}${s.lastRunOutcome ? ` (${s.lastRunOutcome})` : ""}`
-                    : `Next run: ${s.paused ? "paused" : formatNextRun(s)}`}
+                    : s.id === "sweep-stale-ledger-tasks"
+                      ? `Last task sweep: ${formatLastEvent(s.lastRunAt)}${s.lastRunOutcome ? ` (${s.lastRunOutcome})` : ""}${s.lastRunDetail ? ` — ${s.lastRunDetail}` : ""}`
+                      : s.id === "sweep-stale-async-jobs"
+                        ? `Last job sweep: ${formatLastEvent(s.lastRunAt)}${s.lastRunOutcome ? ` (${s.lastRunOutcome})` : ""}${s.lastRunDetail ? ` — ${s.lastRunDetail}` : ""}`
+                        : s.id === "schedule-watchdog"
+                          ? `Last watchdog: ${formatLastEvent(s.lastRunAt)}${s.lastRunOutcome ? ` (${s.lastRunOutcome})` : ""}${s.lastRunDetail ? ` — ${s.lastRunDetail}` : ""}`
+                          : `Next run: ${s.paused ? "paused" : formatNextRun(s)}`}
           </span>
         </Stack>
       ),

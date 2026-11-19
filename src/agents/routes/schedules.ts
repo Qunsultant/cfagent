@@ -112,6 +112,9 @@ import {
   TOKEN_RENEWAL_RECORD_ID,
   RETENTION_RECORD_ID,
   NIGHTLY_RESEARCH_RECORD_ID,
+  STALE_LEDGER_SWEEP_RECORD_ID,
+  STALE_ASYNC_JOB_SWEEP_RECORD_ID,
+  SCHEDULE_WATCHDOG_RECORD_ID,
   tickerPushRecordToListItem,
   tokenRenewalRecordToListItem,
   tokenRenewalToRecord,
@@ -119,12 +122,19 @@ import {
   retentionToRecord,
   nightlyResearchRecordToListItem,
   nightlyResearchToRecord,
+  staleLedgerSweepRecordToListItem,
+  staleLedgerSweepToRecord,
+  staleAsyncJobSweepRecordToListItem,
+  staleAsyncJobSweepToRecord,
+  scheduleWatchdogRecordToListItem,
+  scheduleWatchdogToRecord,
   triggerUnifiedSchedule,
   unifiedRecordToListItem,
   updateUnifiedSchedule,
   type ScheduleAlarms,
   type ScheduleAlarmLike,
 } from "../../services/unifiedScheduleManagement";
+import { SCHEDULE_WATCHDOG_HEARTBEAT_JOB_ID } from "../../services/scheduleWatchdog";
 import {
   TICKER_INSTANCE_NAME,
   resolveTickerPushStaleAfterIntervals,
@@ -507,6 +517,89 @@ export async function readNightlyResearchListItem(
 }
 
 /**
+ * Issue #3121 #4242 — the stale-ledger-task sweep row for the
+ * Schedules home list. The record is derived
+ * (staleLedgerSweepToRecord), never stored, and the last run is
+ * joined from the ledger's own sweep rows (jobId =
+ * STALE_LEDGER_SWEEP_RECORD_ID, the row the #3394 wrapper writes
+ * when the sweep fires), so the row shows the duty's last run with
+ * its swept/pruned counts — or none, when it has never fired.
+ * Best-effort: a failed ledger read omits the row and logs a
+ * warning — the list never fails because the ledger cannot be
+ * read. The `sql` is the agent's SqlStorage (the same seam the runs
+ * routes read through).
+ */
+export async function readStaleLedgerSweepListItem(
+  sql: ConstructorParameters<typeof SqlJobRunRecordStore>[0],
+): Promise<ReturnType<typeof staleLedgerSweepRecordToListItem> | null> {
+  try {
+    const lastRun = new SqlJobRunRecordStore(sql).latestByJob(STALE_LEDGER_SWEEP_RECORD_ID);
+    return staleLedgerSweepRecordToListItem(
+      staleLedgerSweepToRecord(new Date().toISOString()),
+      lastRun ? { started: lastRun.started, finished: lastRun.finished, outcome: lastRun.outcome, detail: lastRun.detail } : undefined,
+    );
+  } catch (err) {
+    structuredLog.warn("schedules.stale_ledger_sweep_read_failed", {
+      message: "[Schedules] stale-ledger sweep list read failed; the row is omitted:",
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  }
+}
+
+/**
+ * Issue #3121 #4242 — the stale-async-job sweep row for the
+ * Schedules home list, the same shape as the ledger sweep: derived
+ * record, last run joined from the ledger's own sweep rows (jobId
+ * = STALE_ASYNC_JOB_SWEEP_RECORD_ID), counts in the row's detail.
+ * Best-effort like its siblings.
+ */
+export async function readStaleAsyncJobSweepListItem(
+  sql: ConstructorParameters<typeof SqlJobRunRecordStore>[0],
+): Promise<ReturnType<typeof staleAsyncJobSweepRecordToListItem> | null> {
+  try {
+    const lastRun = new SqlJobRunRecordStore(sql).latestByJob(STALE_ASYNC_JOB_SWEEP_RECORD_ID);
+    return staleAsyncJobSweepRecordToListItem(
+      staleAsyncJobSweepToRecord(new Date().toISOString()),
+      lastRun ? { started: lastRun.started, finished: lastRun.finished, outcome: lastRun.outcome, detail: lastRun.detail } : undefined,
+    );
+  } catch (err) {
+    structuredLog.warn("schedules.stale_async_job_sweep_read_failed", {
+      message: "[Schedules] stale async-job sweep list read failed; the row is omitted:",
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  }
+}
+
+/**
+ * Issue #3121 #4242 — the schedule-watchdog row for the Schedules
+ * home list. The record is derived (scheduleWatchdogToRecord),
+ * never stored, and the last run is joined from the ledger's
+ * heartbeat rows (jobId = SCHEDULE_WATCHDOG_HEARTBEAT_JOB_ID, the
+ * row the watchdog itself writes every sweep), so the row shows
+ * the duty's last sweep with its examined/missed/skipped counts —
+ * or none, when it has never fired. Best-effort like its siblings.
+ */
+export async function readScheduleWatchdogListItem(
+  sql: ConstructorParameters<typeof SqlJobRunRecordStore>[0],
+): Promise<ReturnType<typeof scheduleWatchdogRecordToListItem> | null> {
+  try {
+    const lastRun = new SqlJobRunRecordStore(sql).latestByJob(SCHEDULE_WATCHDOG_HEARTBEAT_JOB_ID);
+    return scheduleWatchdogRecordToListItem(
+      scheduleWatchdogToRecord(new Date().toISOString()),
+      lastRun ? { started: lastRun.started, finished: lastRun.finished, outcome: lastRun.outcome, detail: lastRun.detail } : undefined,
+    );
+  } catch (err) {
+    structuredLog.warn("schedules.schedule_watchdog_read_failed", {
+      message: "[Schedules] schedule watchdog list read failed; the row is omitted:",
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  }
+}
+
+/**
  * Issue #4260: where the surfaced flags are managed, for the home's
  * read-only guidance. An injected port (tests / local in-memory
  * runtimes) is the in-memory source; a FLAGS binding means the
@@ -805,6 +898,21 @@ export async function handleSchedulesRoutes(
         const nightlyResearchItem = await readNightlyResearchListItem(ctx.agentCtx.storage.sql);
         if (nightlyResearchItem && (!typeParam || nightlyResearchItem.type === typeParam)) {
           items.push(nightlyResearchItem);
+        }
+        // Issue #3121 #4242 — the three sweep/watchdog rows are
+        // derived, not stored; append each with its last run joined
+        // from the ledger, under the same ?type= filter as the rest.
+        const staleLedgerSweepItem = await readStaleLedgerSweepListItem(ctx.agentCtx.storage.sql);
+        if (staleLedgerSweepItem && (!typeParam || staleLedgerSweepItem.type === typeParam)) {
+          items.push(staleLedgerSweepItem);
+        }
+        const staleAsyncJobSweepItem = await readStaleAsyncJobSweepListItem(ctx.agentCtx.storage.sql);
+        if (staleAsyncJobSweepItem && (!typeParam || staleAsyncJobSweepItem.type === typeParam)) {
+          items.push(staleAsyncJobSweepItem);
+        }
+        const scheduleWatchdogItem = await readScheduleWatchdogListItem(ctx.agentCtx.storage.sql);
+        if (scheduleWatchdogItem && (!typeParam || scheduleWatchdogItem.type === typeParam)) {
+          items.push(scheduleWatchdogItem);
         }
         return Response.json({
           count: items.length,
@@ -1303,6 +1411,30 @@ export async function handleSchedulesRoutes(
             return Response.json({ error: `Schedule '${scheduleId}' not found` }, { status: 404 });
           }
           return Response.json(nightlyResearchItem);
+        }
+        // Issue #4242 — the sweep/watchdog records are derived, not stored,
+        // so getUnifiedScheduleDetail would 404 them; answer each here
+        // from the same derived record + last-run join as the list.
+        if (scheduleId === STALE_LEDGER_SWEEP_RECORD_ID) {
+          const staleLedgerSweepItem = await readStaleLedgerSweepListItem(ctx.agentCtx.storage.sql);
+          if (!staleLedgerSweepItem) {
+            return Response.json({ error: `Schedule '${scheduleId}' not found` }, { status: 404 });
+          }
+          return Response.json(staleLedgerSweepItem);
+        }
+        if (scheduleId === STALE_ASYNC_JOB_SWEEP_RECORD_ID) {
+          const staleAsyncJobSweepItem = await readStaleAsyncJobSweepListItem(ctx.agentCtx.storage.sql);
+          if (!staleAsyncJobSweepItem) {
+            return Response.json({ error: `Schedule '${scheduleId}' not found` }, { status: 404 });
+          }
+          return Response.json(staleAsyncJobSweepItem);
+        }
+        if (scheduleId === SCHEDULE_WATCHDOG_RECORD_ID) {
+          const scheduleWatchdogItem = await readScheduleWatchdogListItem(ctx.agentCtx.storage.sql);
+          if (!scheduleWatchdogItem) {
+            return Response.json({ error: `Schedule '${scheduleId}' not found` }, { status: 404 });
+          }
+          return Response.json(scheduleWatchdogItem);
         }
         const detail = await getUnifiedScheduleDetail({ store: unifiedStore(), alarms }, scheduleId);
         if (!detail.ok) {

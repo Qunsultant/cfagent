@@ -188,7 +188,9 @@ describe("POST /api/schedules/create (#111)", () => {
     // the list appends the retention row after the renewal row.
     // Issue #3121 #4241 — the derived nightly research record IS listed too:
     // the list appends the nightly research row after the retention row.
-    expect(body.schedules.map((schedule: any) => schedule.id)).toEqual(["legacy-stock-screen", "legacy-options-screen", "token-renewal", "retention", "nightly-research"]);
+    // Issue #3121 #4242 — the three derived sweep/watchdog records ARE listed too:
+    // the list appends the sweep rows and the watchdog row after the research row.
+    expect(body.schedules.map((schedule: any) => schedule.id)).toEqual(["legacy-stock-screen", "legacy-options-screen", "token-renewal", "retention", "nightly-research", "sweep-stale-ledger-tasks", "sweep-stale-async-jobs", "schedule-watchdog"]);
   });
 
   it.each(["executeAsyncJob", "expireStaleOrderDraft"])(

@@ -25,6 +25,8 @@ import {
   resolveLedgerTrigger,
 } from "./consolidatedScheduling";
 import { RENEWAL_DISPATCH_CRON, RETENTION_DISPATCH_CRON, RETENTION_RECORD_ID, TOKEN_RENEWAL_RECORD_ID } from "./heartbeatDueChecks";
+import { SCHEDULE_WATCHDOG_RECORD_ID } from "./sweepWatchdogSchedule";
+import { SCHEDULE_WATCHDOG_HEARTBEAT_JOB_ID } from "./scheduleWatchdog";
 
 export type {
   JobRunLedgerTrigger,
@@ -256,10 +258,17 @@ export function resolveScheduleRunJobId(
  * rows (jobId = its cron). Every other id reads its own rows.
  * Issue #4240 — the retention record reads the retention
  * dispatch rows the same way (jobId = its cron).
+ * Issue #4242 — the watchdog record reads the heartbeat rows its
+ * sweeps already write (jobId = schedule-watchdog-heartbeat).
  */
 export function scheduleIdToLedgerJobId(scheduleId: string): string {
   if (scheduleId === TOKEN_RENEWAL_RECORD_ID) return RENEWAL_DISPATCH_CRON;
   if (scheduleId === RETENTION_RECORD_ID) return RETENTION_DISPATCH_CRON;
+  // Issue #3121 #4242 — the watchdog record reads the heartbeat
+  // rows its sweeps already write (jobId =
+  // schedule-watchdog-heartbeat), the same mapping shape as token
+  // renewal / retention reading their dispatch rows.
+  if (scheduleId === SCHEDULE_WATCHDOG_RECORD_ID) return SCHEDULE_WATCHDOG_HEARTBEAT_JOB_ID;
   return scheduleId;
 }
 

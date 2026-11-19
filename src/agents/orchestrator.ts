@@ -104,6 +104,12 @@ import { declareStockCopilotTasks, type ScheduledTasksCopilotContext } from "./o
 import { buildOrchestratorSkillSources } from "./orchestrator/skillPacks";
 import { autoRenewETradeTokens, autonomousGoalScreen, autonomousMarketScreen, autonomousStrategyDiscovery, collectIvHistory, expireStaleOrderDraft, runWorkflowStage, sendScheduledReminder, type ScheduledCallbackOutcome, type ScheduledCallbacksContext } from "./orchestrator/scheduledCallbacks";
 import { recordScheduleCallbackRun } from "./orchestrator/scheduleCallbackRunRecords";
+import {
+  STALE_LEDGER_SWEEP_RECORD_ID,
+  STALE_ASYNC_JOB_SWEEP_RECORD_ID,
+  staleLedgerSweepOutcome,
+  staleAsyncJobSweepOutcome,
+} from "../services/sweepWatchdogSchedule";
 import { nlqSchedulingPort, nlqSocialBriefPort, nlqStockScreenPort, type NlqPortsContext } from "./orchestrator/nlqPorts";
 import { formatTraceparent, newTraceContext } from "../observability/observabilityPorts";
 import { observeDoRouteDispatch } from "../observability/scheduledJobOutcomes";
@@ -1440,13 +1446,32 @@ export class OrchestratorAgent extends PortThink {
   }
 
   /**
+   * Issue #3121 #4242: the sweep records its own run (recordScheduleCallbackRun, the #3394 wrapper, mirroring the internal-only callbacks) — before this slice, SDK firings of the sweep left no per-run ledger record, so the home could not show its last run. The sweep-result object maps to an outcome through staleLedgerSweepOutcome (counts in detail); the wrapper's schedule is the normalized record id, never the SDK alarm id (a substrate id that changes on re-arm). The execution stays in sweepStaleLedgerTasksUnrecorded below.
+   */
+  async sweepStaleLedgerTasks(payload?: { userLogin?: string }): Promise<{ userLogin: string | null; researchSwept: number; screenerSwept: number; researchPruned: number; screenerPruned: number }> {
+    let result: { userLogin: string | null; researchSwept: number; screenerSwept: number; researchPruned: number; screenerPruned: number } = { userLogin: null, researchSwept: 0, screenerSwept: 0, researchPruned: 0, screenerPruned: 0 };
+    await recordScheduleCallbackRun(
+      this.ctx.storage.sql,
+      "sweepStaleLedgerTasks",
+      payload,
+      { id: STALE_LEDGER_SWEEP_RECORD_ID },
+      async () => {
+        result = await this.sweepStaleLedgerTasksUnrecorded(payload);
+        return staleLedgerSweepOutcome(result);
+      },
+      { audit: (type, agent, payload) => this.audit(type, agent, payload) },
+    );
+    return result;
+  }
+
+  /**
    * Issue #618 (R4 follow-up): Cloudflare Agents Scheduled Callback
    * that closes stale research and screener task records (#615) for
    * this instance's user. Each ledger is swept in isolation so one
    * failure cannot block the other; swept tasks end escalated, never
    * auto-rerun.
    */
-  async sweepStaleLedgerTasks(payload?: { userLogin?: string }): Promise<{ userLogin: string | null; researchSwept: number; screenerSwept: number; researchPruned: number; screenerPruned: number }> {
+  private async sweepStaleLedgerTasksUnrecorded(payload?: { userLogin?: string }): Promise<{ userLogin: string | null; researchSwept: number; screenerSwept: number; researchPruned: number; screenerPruned: number }> {
     const context = await this.getScreenerExecutionContext();
     const userLogin = context?.userLogin || payload?.userLogin;
     if (!userLogin) {
@@ -2021,8 +2046,27 @@ export class OrchestratorAgent extends PortThink {
   // (sweepStaleAsyncJobs) — the scheduled callback that applies the
   // read path's reap + stuck alert to stale `running` rows without
   // a read. Armed from onStart beside the #618 ledger sweep.
-  async sweepStaleAsyncJobs(): Promise<{ examined: number; alerted: number; reaped: number }> {
-    return sweepStaleAsyncJobs(this.asyncJobsContext());
+  // Issue #3121 #4242: the method records its own run
+  // (recordScheduleCallbackRun, the #3394 wrapper, mirroring the
+  // ledger sweep) — before this slice, SDK firings of the sweep left
+  // no per-run ledger record, so the home could not show its last
+  // run. The sweep-result object maps to an outcome through
+  // staleAsyncJobSweepOutcome (counts in detail); the wrapper's
+  // schedule is the normalized record id, never the SDK alarm id.
+  async sweepStaleAsyncJobs(payload?: unknown): Promise<{ examined: number; alerted: number; reaped: number }> {
+    let result: { examined: number; alerted: number; reaped: number } = { examined: 0, alerted: 0, reaped: 0 };
+    await recordScheduleCallbackRun(
+      this.ctx.storage.sql,
+      "sweepStaleAsyncJobs",
+      payload,
+      { id: STALE_ASYNC_JOB_SWEEP_RECORD_ID },
+      async () => {
+        result = await sweepStaleAsyncJobs(this.asyncJobsContext());
+        return staleAsyncJobSweepOutcome(result);
+      },
+      { audit: (type, agent, payload) => this.audit(type, agent, payload) },
+    );
+    return result;
   }
 
   // Issue #3788: extracted to ./orchestrator/scheduleWatchdog.ts

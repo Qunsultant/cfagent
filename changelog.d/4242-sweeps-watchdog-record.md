@@ -1,0 +1,2 @@
+### Added
+- Sweeps and watchdog recorded in the single schedule (#4242): derived unified-store records (ids `sweep-stale-ledger-tasks`, `sweep-stale-async-jobs`, `schedule-watchdog`, kind `internal`, state `active`) with Schedules home rows showing cadence and last run with swept/pruned and missed counts, ledger join on the record ids (watchdog joins its heartbeat rows), and one ledger row written per sweep run through the #3394 wrapper.
