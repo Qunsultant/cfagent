@@ -98,16 +98,16 @@ export function RunDetailSections({
                 {detail.lineage.captureIds.length ? detail.lineage.captureIds.join(", ") : <Unknown store={detail.store} />}
               </p>
               <p>
-                Storage: <span>{detail.lineage.storageMode}</span>
+                Storage: <span>{detail.lineage.storageMode ?? "unknown"}</span>
                 {detail.lineage.bodyR2Key ? <> (<code>{detail.lineage.bodyR2Key}</code>)</> : null}
                 {" · "}Origin:{" "}
-                <FieldValue value={detail.lineage.origin.trigger} store={detail.store} /> /{" "}
-                <FieldValue value={detail.lineage.origin.channel} store={detail.store} />
-                {detail.lineage.incompleteFields.length > 0 && (
+                <FieldValue value={detail.lineage.origin?.trigger ?? null} store={detail.store} /> /{" "}
+                <FieldValue value={detail.lineage.origin?.channel ?? null} store={detail.store} />
+                {(detail.lineage.incompleteFields?.length ?? 0) > 0 && (
                   <> · Incomplete: <span>{detail.lineage.incompleteFields.join(", ")}</span></>
                 )}
               </p>
-              {detail.lineage.artifactLinks.length > 0 && (
+              {(detail.lineage.artifactLinks?.length ?? 0) > 0 && (
                 <p>
                   Artifacts:{" "}
                   {detail.lineage.artifactLinks.map((a) => `${a.format}:${a.key ?? a.url ?? "linked"}`).join(" · ")}
