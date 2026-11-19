@@ -1,0 +1,3 @@
+### Added
+
+- **D1 job_run_records recent-read index (#4204, sub-issue of #3124):** new D1 migration 0073 creates `job_run_records_recent_idx` on `job_run_records (started DESC, id DESC)` — the same index the DO-SQLite half got in #3124, now shared as one index across both residencies (migration 0073's statement lives in the D1 catalogue per #4282 P1 and is byte-identical to the DO half's index SQL; parity pinned by test 4204-P2). The unfiltered recent read (`listRecent`, Workflow Runs / `/api/runs`) no longer walks the whole D1 table and sorts it on every call; EXPLAIN QUERY PLAN shows the bounded index walk with no temp b-tree. Migration 0047 untouched. #3121

@@ -5939,6 +5939,14 @@
         "created_at_ms"
       ],
       "unique": false
+    },
+    "job_run_records_recent_idx": {
+      "table": "job_run_records",
+      "columns": [
+        "started DESC",
+        "id DESC"
+      ],
+      "unique": false
     }
   }
 }

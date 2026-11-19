@@ -32,6 +32,11 @@ function tableTargets(sql: string): string[] {
     // schema does not know is still caught — so INSERT targets
     // count exactly like DDL targets.
     /INSERT (?:OR (?:IGNORE|REPLACE) )?INTO (\w+)/g,
+    // Index-only migrations (#4204): migration 0073 adds only the
+    // recent-read index, no table. The indexed table is the
+    // target — an index on a table the drizzle schema does not
+    // know is still caught.
+    /CREATE (?:UNIQUE )?INDEX IF NOT EXISTS \w+ ON (\w+)/g,
   ]) {
     for (const m of sql.matchAll(re)) targets.add(m[1]);
   }

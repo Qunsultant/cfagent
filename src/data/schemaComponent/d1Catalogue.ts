@@ -1889,6 +1889,15 @@ export const D1_CATALOGUE_ENTRIES: CatalogueEntry[] = [
     form: "literal",
   },
   {
+    code: "schema.d1.job_run_records.create_index_job_run_records_recent_idx",
+    plane: "d1",
+    table: "job_run_records",
+    index: "job_run_records_recent_idx",
+    statement: `CREATE INDEX IF NOT EXISTS job_run_records_recent_idx ON job_run_records (started DESC, id DESC)`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
     code: "schema.d1.agent_top_up_drafts.create_table",
     plane: "d1",
     table: "agent_top_up_drafts",
@@ -3391,10 +3400,13 @@ export const D1_MIGRATION_CODES: Record<number, readonly string[]> = {
     "schema.d1.job_run_records.alter_table_add_column_kind",
     "schema.d1.job_run_records.alter_table_add_column_origin_run_id",
   ],
+  73: [
+    "schema.d1.job_run_records.create_index_job_run_records_recent_idx",
+  ],
 };
 
-/** Migration versions in the D1 section (1–72; 0070 added by #5086, 0071–0072 added by #4767 — renumbered from 0070–0071 at ship time, main already owned 0070). */
-export const D1_MIGRATION_VERSIONS: readonly number[] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72];
+/** Migration versions in the D1 section (1–73; 0070 added by #5086, 0071–0072 added by #4767 — renumbered from 0070–0071 at ship time, main already owned 0070; 0073 added by #4204). */
+export const D1_MIGRATION_VERSIONS: readonly number[] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73];
 
 export interface D1MigrationSqlShape {
   /** Text before the first statement: "\n" or "". */

@@ -22,6 +22,7 @@ import {
   applyMigrations,
   MIGRATION_0047_JOB_RUN_RECORDS,
   MIGRATION_0072_JOB_RUN_RECORDS_RUN_KIND,
+  MIGRATION_0073_JOB_RUN_RECORDS_RECENT_IDX,
   type MigrationDb,
 } from "./migrationRunner";
 import {
@@ -40,11 +41,12 @@ export function createD1JobRunRecordDb(d1: D1Database): JobRunRecordDb {
   return createDrizzleD1Db(d1, { schema: { jobRunRecords } });
 }
 
-/** Idempotent schema-ensure: applies migrations 0047 + 0072 if unapplied. */
+/** Idempotent schema-ensure: applies migrations 0047 + 0072 + 0073 if unapplied. */
 export async function ensureJobRunRecordsSchema(db: JobRunRecordDb): Promise<number[]> {
   return applyMigrations(db as unknown as MigrationDb, [
     MIGRATION_0047_JOB_RUN_RECORDS,
     MIGRATION_0072_JOB_RUN_RECORDS_RUN_KIND,
+    MIGRATION_0073_JOB_RUN_RECORDS_RECENT_IDX,
   ]);
 }
 

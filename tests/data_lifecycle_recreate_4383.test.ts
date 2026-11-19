@@ -378,8 +378,12 @@ describe("recreate, tenant scope (#4383)", () => {
     // column): 247 → 248. Issue #5086 adds migration 0070
     // (otel_config_overrides table): 248 → 249.
     // Issue #4767 adds migrations 0071/0072 (4 D1 ALTERs): 249 → 253.
+    // Issue #4204 adds migration 0073 (D1 job_run_records
+    // recent-read index): the D1 step is selected and the ORM
+    // plane's duplicate of the same index is skipped, so selected
+    // stays 253 and skipped grows 8 → 9.
     expect(body.d1.selected).toHaveLength(253);
-    expect(body.d1.skipped).toHaveLength(8);
+    expect(body.d1.skipped).toHaveLength(9);
     // Two member instances (alice, bob), each planning the fresh DO leg.
     expect(body.instances).toHaveLength(2);
     for (const inst of body.instances) {

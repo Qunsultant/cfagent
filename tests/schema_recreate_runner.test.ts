@@ -120,7 +120,8 @@ describe("P5 runner — plan resolution (P4 finding 1: phased order)", () => {
     // #5175 slice 2 adds mas_runs + mas_run_aliases + its index: 421 → 424.
     // #5086 adds migration 0070 (otel_config_overrides table): 424 → 425.
     // #4767 adds migrations 0071/0072 (4 D1 + 4 remainder ALTERs): 425 → 433.
-    expect(p.steps).toHaveLength(433);
+    // #4204 adds migration 0073 (D1 job_run_records recent-read index): 433 → 434.
+    expect(p.steps).toHaveLength(434);
     expect(p.skipped).toHaveLength(1);
     expect(p.skipped[0].code).toBe(SEED_FORM_CODE);
     expect(p.skipped[0].reason).toMatch(/call site/i);
@@ -135,7 +136,8 @@ describe("P5 runner — plan resolution (P4 finding 1: phased order)", () => {
     // #5175 slice 2 adds mas_runs + mas_run_aliases + its index: 421 → 424.
     // #5086 adds migration 0070: 424 → 425.
     // #4767 adds migrations 0071/0072 (4 D1 + 4 remainder ALTERs): 425 → 433.
-    expect(harness).toHaveLength(433);
+    // #4204 adds migration 0073 (D1 job_run_records recent-read index): 433 → 434.
+    expect(harness).toHaveLength(434);
     // Production move 1: the rebuild CREATE for agent_price_catalogue
     // must stay after the RENAME that clears its table (a second
     // table-creation for the same table cannot run before the rename
@@ -267,9 +269,13 @@ describe("P5 runner — delta-to-steps selection (P4 finding 3, P4 finding 2)", 
     // #5229 adds migration 0069: 236 → 237.
     // #5086 adds migration 0070: 237 → 238.
     // #4767 adds migrations 0071/0072 (4 D1 ALTERs): 238 → 242.
+    // #4204 adds migration 0073 (D1 job_run_records recent-read
+    // index): the D1 step is selected and the ORM plane's duplicate
+    // of the same index is skipped (the projected-model walk already
+    // has it), so selected stays 242 and skipped grows 8 → 9.
     expect(selected.schema).toHaveLength(242);
     expect(selected.seeds).toHaveLength(11);
-    expect(selected.skipped).toHaveLength(8);
+    expect(selected.skipped).toHaveLength(9);
     expect(
       codesOf(selected.skipped),
     ).toContain("schema.orm.mas_transactions.alter_table_add_column_tenant_id");

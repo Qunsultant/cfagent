@@ -1260,6 +1260,34 @@ export const MIGRATION_0072_JOB_RUN_RECORDS_RUN_KIND: DataMigration = {
   name: "0072_job_run_records_run_kind",
   sql: d1MigrationSql(72),
 };
+
+/**
+ * Migration 0073 — D1 job_run_records recent-read index (#4204,
+ * [Out-of-Scope] sub-issue of #3124, sub-issue of #3121).
+ *
+ * The DO-SQLite half of the ledger got this index in #3124
+ * (`jobRunRecordIndexSchema.ts`); the D1 half (`ensureJobRunRecordsSchema`,
+ * migration 0047) kept only the `(job_id, started DESC, id DESC)` index,
+ * so the unfiltered recent read (`listRecent` / `listD1JobRunRecords`:
+ * `SELECT * ... ORDER BY started DESC, id DESC LIMIT ?`) walked the
+ * whole D1 table and sorted it on every call. A new migration — never
+ * an edit to 0047.
+ *
+ * The index SQL is NOT duplicated here: the statement text lives in
+ * the D1 catalogue (`src/data/schemaComponent/d1Catalogue.ts`,
+ * `schema.d1.job_run_records.create_index_job_run_records_recent_idx`,
+ * #4282 P1 delegation) and is byte-identical to the DO half's
+ * `JOB_RUN_RECORD_INDEXES[0].sql` — one index, two residencies.
+ * The parity is pinned by 4204-P2 in
+ * tests/d1-job-run-records-recent-index-4204.test.ts, which fails if
+ * the two ever diverge. Additive only (CREATE INDEX IF NOT EXISTS);
+ * no table is altered and no row is deleted.
+ */
+export const MIGRATION_0073_JOB_RUN_RECORDS_RECENT_IDX: DataMigration = {
+  version: 73,
+  name: "0073_job_run_records_recent_idx",
+  sql: d1MigrationSql(73),
+};
 export const MIGRATION_0058_PRODUCT_VERSIONS: DataMigration = {
   version: 58,
   name: "0058_product_versions",
@@ -1498,6 +1526,7 @@ export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANC
   MIGRATION_0070_OTEL_CONFIG_OVERRIDES,
   MIGRATION_0071_JOB_PIPELINE_RUN_KIND,
   MIGRATION_0072_JOB_RUN_RECORDS_RUN_KIND,
+  MIGRATION_0073_JOB_RUN_RECORDS_RECENT_IDX,
 ];
 
 function splitStatements(sqlText: string): string[] {
