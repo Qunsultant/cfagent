@@ -2503,6 +2503,12 @@ const BASELINE: Array<[string, string, number]> = [
   // change cancel behaviour, so the row is baselined rather than neutralised.
   // Appended at the END so the platform slice (first 188 rows) is untouched.
   ["src/services/brokerOrderCancel.ts", "alpaca", 1],
+  // Baseline (#5766, 2026-11-19) — INTEGRATION, and a substring hit rather
+  // than a brand use: the neutral replace tool resolves the trade
+  // environment through the exported helper whose identifier contains the
+  // provider token. Renaming that shared helper would touch every broker
+  // route for a census spelling, so the row is baselined instead.
+  ["src/mcps/openaimp/brokerOrderCommands.ts", "etrade", 2],
 ];
 
 const BASELINE_MAP = new Map(BASELINE.map(([f, t, c]) => [`${f}\t${t}`, c]));
