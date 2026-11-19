@@ -125,13 +125,7 @@ export class BrokerOrderReplaceCommand
 
   async execute(input: BrokerOrderReplaceToolInput, context: McpToolContext) {
     const actingLogin = context.actingLogin?.();
-    const { resolveTradeEnvironmentFromSettings } = await import(
-      "../../agents/routes/brokerEnvironment"
-    );
-    const requestedEnv = resolveTradeEnvironmentFromSettings(
-      context.readSettingRaw,
-      context.env,
-    );
+    const requestedEnv = await resolveRequestedEnv(context);
     const result = await replaceOrderViaSelectedBroker({
       env: context.env,
       ...(context.orm ? { orm: context.orm } : {}),
@@ -318,6 +312,13 @@ export class BrokerOrderCreateCommand
   }
 }
 
+async function resolveRequestedEnv(context: McpToolContext) {
+  const { resolveTradeEnvironmentFromSettings } = await import(
+    "../../agents/routes/brokerEnvironment"
+  );
+  return resolveTradeEnvironmentFromSettings(context.readSettingRaw, context.env);
+}
+
 export interface BrokerOrdersListToolInput {
   status?: "open" | "all";
   symbol?: string;
@@ -347,13 +348,7 @@ export class BrokerOrdersListCommand
 
   async execute(input: BrokerOrdersListToolInput, context: McpToolContext) {
     const actingLogin = context.actingLogin?.();
-    const { resolveTradeEnvironmentFromSettings } = await import(
-      "../../agents/routes/brokerEnvironment"
-    );
-    const requestedEnv = resolveTradeEnvironmentFromSettings(
-      context.readSettingRaw,
-      context.env,
-    );
+    const requestedEnv = await resolveRequestedEnv(context);
     const result = await listOrdersViaSelectedBroker({
       env: context.env,
       ...(context.orm ? { orm: context.orm } : {}),
@@ -418,13 +413,7 @@ export class BrokerOrderCancelTickerCommand
 
   async execute(input: BrokerOrderCancelTickerToolInput, context: McpToolContext) {
     const actingLogin = context.actingLogin?.();
-    const { resolveTradeEnvironmentFromSettings } = await import(
-      "../../agents/routes/brokerEnvironment"
-    );
-    const requestedEnv = resolveTradeEnvironmentFromSettings(
-      context.readSettingRaw,
-      context.env,
-    );
+    const requestedEnv = await resolveRequestedEnv(context);
     const result = await cancelTickerViaSelectedBroker({
       env: context.env,
       ...(context.orm ? { orm: context.orm } : {}),
@@ -487,13 +476,7 @@ export class BrokerOrderCancelAllCommand
 
   async execute(input: BrokerOrderCancelAllToolInput, context: McpToolContext) {
     const actingLogin = context.actingLogin?.();
-    const { resolveTradeEnvironmentFromSettings } = await import(
-      "../../agents/routes/brokerEnvironment"
-    );
-    const requestedEnv = resolveTradeEnvironmentFromSettings(
-      context.readSettingRaw,
-      context.env,
-    );
+    const requestedEnv = await resolveRequestedEnv(context);
     const result = await cancelAllViaSelectedBroker({
       env: context.env,
       ...(context.orm ? { orm: context.orm } : {}),

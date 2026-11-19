@@ -85,6 +85,9 @@ other doors. Scope column is #1843's declaration, consumed here.
 | `broker_order_preview` | mcp:trade | L (I / R on other doors) — the broker's own preview terms for a described order (#5767); places nothing, stores no draft, and never substitutes for the approval flow's approvable draft |
 | `broker_order_replace` | mcp:trade | L (I / R on other doors) — replaces ONE open order on the platform-selected broker (#5766); only stated fields are sent, and a broker that cannot replace refuses by name instead of cancel-and-re-place |
 | `broker_order_cancel` | mcp:trade | L (I / R on other doors) — cancels ONE order on the platform-selected broker (#5765); the broker is resolved, never caller-supplied, and a broker without the cancel capability refuses by name |
+| `broker_order_cancel_ticker` | mcp:trade | L (I / R on other doors) — cancels open orders for ONE ticker on the platform-selected broker (#5806); requires acting identity and refuses unsupported brokers by name |
+| `broker_order_cancel_all` | mcp:trade | L (I / R on other doors) — two-step preview-token cancel-all on the platform-selected broker (#3885/#5806); requires acting identity and refuses unsupported brokers by name |
+| `broker_orders_list` | mcp:read | L (I / R on other doors) — lists open or all orders on the platform-selected broker (#5806); requires acting identity and refuses unsupported brokers by name |
 | `stock_copilot_job_control` | mcp:write | L (I / R on other doors) — drives one WHOLE engine job (start/pause/resume/cancel/retry) through the same control plane (#5739); requires the acting identity before dispatch, refuses an unknown job by name |
 | `etrade_get_quote` | mcp:read | L (I / R on other doors) |
 | `etrade_get_positions` | mcp:read | L (I / R on other doors) |

@@ -73,6 +73,10 @@ function refusal(
   return { success: false, broker, orderId, code, message, receipt: null };
 }
 
+function usesServiceCancelPort(broker: BrokerId): boolean {
+  return broker === "alpaca";
+}
+
 export async function cancelOrderViaSelectedBroker(
   input: BrokerOrderCancelInput,
 ): Promise<BrokerOrderCancelResult> {
@@ -117,7 +121,7 @@ export async function cancelOrderViaSelectedBroker(
 
   const sql = input.orm?.getSql?.();
 
-  if (broker === "alpaca") {
+  if (usesServiceCancelPort(broker)) {
     const receipt = await cancelSingleOrder(createCancelBrokerPort(input.env), {
       orderId,
       ...(input.reason ? { reason: input.reason } : {}),
@@ -164,8 +168,8 @@ export async function cancelOrderViaSelectedBroker(
 }
 
 /**
- * Shared cancel port resolver across Alpaca and any ITradingPlatform broker
- * that exposes `getOrderHistory` + `cancelOrderRemote` (#3937, #5806).
+ * Shared cancel port resolver across the service-port broker and any
+ * ITradingPlatform broker that exposes `getOrderHistory` + `cancelOrderRemote` (#3937, #5806).
  */
 export function cancelPortForBroker(
   broker: BrokerId,
@@ -174,7 +178,7 @@ export function cancelPortForBroker(
   userLogin: string,
   requestedEnv?: string,
 ): CancelBrokerPort | null {
-  if (broker === "alpaca") return createCancelBrokerPort(env);
+  if (usesServiceCancelPort(broker)) return createCancelBrokerPort(env);
   const platform = TradingPlatformRegistry.getPlatform(
     broker,
     env,
@@ -192,7 +196,7 @@ export function cancelPortForBroker(
 }
 
 /**
- * Ledger identity for a scoped cancel on a non-Alpaca broker (#3937).
+ * Ledger identity for a scoped cancel on a non-service-port broker (#3937).
  */
 export function scopedCancelLedger(
   broker: string,
@@ -387,7 +391,7 @@ export async function cancelTickerViaSelectedBroker(
   });
   if (!receipt.dryRun) {
     const sql = input.orm?.getSql?.();
-    if (broker === "alpaca") {
+    if (usesServiceCancelPort(broker)) {
       recordScopedCancelOutcome(sql, receipt, "broker_orders_cancel_ticker", input.env);
     } else {
       recordScopedCancelOutcome(
@@ -483,7 +487,7 @@ export async function cancelAllViaSelectedBroker(
   );
   if (receipt.success || receipt.cancelled.length > 0 || receipt.refused.length > 0) {
     const suffix = `cancel_all:${receipt.preview?.expiresAt ?? new Date().toISOString()}`;
-    if (broker === "alpaca") {
+    if (usesServiceCancelPort(broker)) {
       recordScopedCancelOutcome(sql, receipt, "broker_orders_cancel_all", input.env, suffix);
     } else {
       recordScopedCancelOutcome(

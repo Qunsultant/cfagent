@@ -178,17 +178,15 @@ export function resolvePromptBrokerTools(
   const rawBroker = String(input?.activeBroker ?? "").trim();
   const isEtrade = /^(etrade|e\*trade|e-trade)$/i.test(rawBroker);
   const isPublic = /^public(?:\.com)?$/i.test(rawBroker);
-  const isAlpaca = /^alpaca$/i.test(rawBroker);
-  const normalizedCatalogId = rawBroker.toLowerCase();
-  const isOtherCatalogBroker =
-    !isEtrade &&
-    !isPublic &&
-    !isAlpaca &&
-    rawBroker.length > 0 &&
-    isBrokerId(normalizedCatalogId);
   const isLive = /^(live|prod)$/i.test(String(input?.activeMode ?? "").trim());
   const executionPolicy = input?.copilotExecutionMode === "autonomous" ? "autonomous" : "hitl";
-  if (isOtherCatalogBroker) {
+  const [brokerId, brokerLabel, quoteTool, previewTool, executeTool] = isEtrade
+    ? ["etrade", "E*TRADE", "tool_openaimp_etrade_get_quote", "tool_openaimp_etrade_preview_order", "tool_openaimp_etrade_execute_order"]
+    : isPublic
+      ? ["public", "Public", "tool_openaimp_public_get_quote", "tool_openaimp_public_preview_order", "tool_openaimp_public_place_order"]
+      : ["alpaca", "Alpaca", "tool_openaimp_alpaca_get_quote", "tool_openaimp_alpaca_preview_order", "tool_openaimp_alpaca_place_order"];
+  const normalizedCatalogId = rawBroker.toLowerCase();
+  if (rawBroker.length > 0 && isBrokerId(normalizedCatalogId) && normalizedCatalogId !== brokerId) {
     const entry = BROKER_CATALOG[normalizedCatalogId];
     return {
       brokerId: entry.id,
@@ -203,11 +201,6 @@ export function resolvePromptBrokerTools(
       executionPolicy,
     };
   }
-  const [brokerId, brokerLabel, quoteTool, previewTool, executeTool] = isEtrade
-    ? ["etrade", "E*TRADE", "tool_openaimp_etrade_get_quote", "tool_openaimp_etrade_preview_order", "tool_openaimp_etrade_execute_order"]
-    : isPublic
-      ? ["public", "Public", "tool_openaimp_public_get_quote", "tool_openaimp_public_preview_order", "tool_openaimp_public_place_order"]
-      : ["alpaca", "Alpaca", "tool_openaimp_alpaca_get_quote", "tool_openaimp_alpaca_preview_order", "tool_openaimp_alpaca_place_order"];
   // Issue #4660 (matrix gap 8): the order list and the single-order cancel are
   // per-broker tools, not one shared pair. A session on the broker that owns
   // these tools must be steered at them, never at another broker's tools.
