@@ -227,8 +227,11 @@ describe("schedules behavior (extraction #379)", () => {
     // cannot see) — so the port is called with no arguments.
     expect(listSchedules).toHaveBeenCalledWith();
     const body = await (res as Response).json();
-    expect(body.count).toBe(2);
-    expect(body.schedules.map((s: any) => s.id)).toEqual(["a", "b"]);
+    // Issue #3121 #4239 — the derived token-renewal record is appended
+    // to the list (type "cron", so it survives the ?type=cron filter);
+    // the SDK-port rows stay first, the renewal row last.
+    expect(body.count).toBe(3);
+    expect(body.schedules.map((s: any) => s.id)).toEqual(["a", "b", "token-renewal"]);
     expect(body.schedules.every((s: any) => s.type === "cron")).toBe(true);
   });
 
