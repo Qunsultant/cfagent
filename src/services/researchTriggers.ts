@@ -8,19 +8,33 @@
 
 import type { TriggerSource } from "./researchPipeline";
 
+const runIdStack: string[] = [];
+
+/** Bind the active engine `runId` across async research dispatch without altering 2-arg trigger signatures (#581). */
+export async function runWithResearchRunId<T>(runId: string, fn: () => Promise<T>): Promise<T> {
+  runIdStack.push(runId);
+  try {
+    return await fn();
+  } finally {
+    runIdStack.pop();
+  }
+}
+
+export function currentResearchRunId(): string | undefined {
+  return runIdStack[runIdStack.length - 1];
+}
+
 export type PublishEntry<R> = (
   trigger: TriggerSource,
-  userLogin?: string,
-  opts?: { runId?: string },
+  userLogin?: string
 ) => Promise<R>;
 
 /** Thin trigger for the manual run route. */
 export function triggerManualResearch<R>(
   publish: PublishEntry<R>,
-  userLogin?: string,
-  opts?: { runId?: string },
+  userLogin?: string
 ): Promise<R> {
-  return publish("manual", userLogin, opts);
+  return publish("manual", userLogin);
 }
 
 /**
@@ -32,8 +46,7 @@ export function triggerManualResearch<R>(
  */
 export function triggerScheduledResearch<R>(
   publish: PublishEntry<R>,
-  userLogin?: string,
-  opts?: { runId?: string },
+  userLogin?: string
 ): Promise<R> {
-  return publish("scheduled", userLogin, opts);
+  return publish("scheduled", userLogin);
 }

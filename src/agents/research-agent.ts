@@ -70,6 +70,7 @@ import {
   type ResearchExecutionPath,
   type ResearchTaskStore,
 } from "../services/researchTaskLedger";
+import { currentResearchRunId } from "../services/researchTriggers";
 import { createStructuredLogger } from "../observability/structuredLogger";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
 
@@ -540,10 +541,11 @@ export class ResearchAgent extends PortThink {
       } catch {
         // No track record yet — pipeline runs without feedback.
       }
+      const effectiveRunId = req.runId ?? currentResearchRunId();
       const report = await runResearchPipeline(
         { provider, ...(trackRecord ? { trackRecord } : {}) },
         config,
-        { trigger: req.trigger, userLogin, ...(req.runId ? { runId: req.runId } : {}) }
+        { trigger: req.trigger, userLogin, ...(effectiveRunId ? { runId: effectiveRunId } : {}) }
       );
       await this.persistRun(report);
       return { success: true, report };
