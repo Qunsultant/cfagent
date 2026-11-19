@@ -13,9 +13,9 @@
  * - Chains the broker cannot serve are labeled `calibrated` (synthetic) —
  *   the quote-quality gate only ever lets `live` chains produce Qualified
  *   ideas. Calibrated chains are never presented as executable quotes.
- * - Catalysts: no catalyst feed is wired on the platform, so this provider
- *   returns null and the pipeline flags the limitation instead of
- *   inventing events.
+ * - Catalysts: wired to the platform event calendar (`eventCalendar.ts`);
+ *   returns `null` when uncovered so the pipeline flags the limitation
+ *   instead of treating failed retrieval as "no event".
  *
  * READ-ONLY: no order functions are imported or called.
  */
@@ -46,6 +46,7 @@ import type {
 } from "./researchPipeline";
 import { createStructuredLogger } from "../observability/structuredLogger";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
+import { getSymbolEventCalendar } from "./eventCalendar";
 
 /** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
 const structuredLog = createStructuredLogger(createObservabilitySink({}), {
@@ -379,11 +380,32 @@ export class EtradeResearchDataProvider implements ResearchDataProvider {
     }
   }
 
-  async getCatalysts(_symbol: string): Promise<CatalystInfo[] | null> {
-    // No catalyst feed is wired on the platform. Returning null keeps the
-    // pipeline honest: the thesis gate records the limitation instead of
-    // inventing events (spec §7: never treat failed retrieval as "no event").
-    return null;
+  async getCatalysts(symbol: string): Promise<CatalystInfo[] | null> {
+    const cal = await getSymbolEventCalendar(symbol);
+    if (!cal.covered) {
+      // Honesty contract (spec §7): never treat failed/uncovered retrieval as "no event".
+      return null;
+    }
+    const catalysts: CatalystInfo[] = [];
+    if (cal.earningsDate) {
+      catalysts.push({
+        description: `Upcoming earnings on ${cal.earningsDate}${
+          cal.daysToEarnings != null ? ` (${cal.daysToEarnings}d)` : ""
+        }`,
+        date: cal.earningsDate,
+        direction: "neutral",
+      });
+    }
+    if (cal.exDividendDate) {
+      catalysts.push({
+        description: `Upcoming ex-dividend on ${cal.exDividendDate}${
+          cal.daysToExDiv != null ? ` (${cal.daysToExDiv}d)` : ""
+        }`,
+        date: cal.exDividendDate,
+        direction: "neutral",
+      });
+    }
+    return catalysts;
   }
 
   async getRegime(): Promise<RegimeAssessment> {
