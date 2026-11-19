@@ -713,6 +713,7 @@ export const MESH_TOOL_FAMILIES: MeshToolFamilyEntry[] = [
       "get_job_status",
       "get_job_stage_status",
       "stock_copilot_stage_control",
+      "stock_copilot_job_control",
       "set_job_execution_mode",
       "list_database_tables",
       "query_table_data",

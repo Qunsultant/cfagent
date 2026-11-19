@@ -304,6 +304,8 @@ export const SYNCHRONOUS_MCP_TOOLS = new Set<string>([
   "get_job_status",
   "get_job_stage_status",
   "stock_copilot_stage_control",
+  // #5739: whole-job control is immediate state/control, never a queued job.
+  "stock_copilot_job_control",
   "set_job_execution_mode",
   "stock_copilot_status",
   "stock_copilot_control",
