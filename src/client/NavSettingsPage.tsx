@@ -16,6 +16,7 @@ import {
   leftNavConfigIds,
   type NavPresetKey,
 } from "./components/NavigationMenu";
+import { BrokerDynamicMenu, type SettingsMenuProps } from "./BrokerDynamicMenu";
 
 export interface NavSettingsPageProps {
   /** The completed visible-tabs map (all config ids present). */
@@ -24,6 +25,8 @@ export interface NavSettingsPageProps {
   activePreset: NavPresetKey | null;
   onToggleTabVisibility: (tabId: string) => void;
   onApplyPreset: (key: NavPresetKey) => void;
+  /** Dynamic settings menu props (#3828): rendered inline on this page. */
+  settingsMenuProps?: SettingsMenuProps;
 }
 
 /**
@@ -46,6 +49,7 @@ export function NavSettingsPage({
   activePreset,
   onToggleTabVisibility,
   onApplyPreset,
+  settingsMenuProps,
 }: NavSettingsPageProps) {
   const total = leftNavConfigIds().length;
   const visibleCount = leftNavConfigIds().filter(
@@ -53,9 +57,17 @@ export function NavSettingsPage({
   ).length;
   return (
     <PageTemplate
-      title="Navigation Settings"
-      scopeNote="Choose which navigation tabs are visible. Presets are computed from the left-nav configuration; per-product settings live in the header Settings menu."
+      title="Settings"
+      scopeNote="Manage broker, environment, display, ticker, and navigation visibility settings."
     >
+      {settingsMenuProps && (
+        <PageSection
+          title="Platform & Broker Settings"
+          description="Broker connection, trading mode, theme, layout, auto-refresh, and ticker tape controls."
+        >
+          <BrokerDynamicMenu {...settingsMenuProps} variant="page" />
+        </PageSection>
+      )}
       <PageSection
         title="Presets"
         description="A preset sets every tab at once. Any manual change after that makes the selection custom until a preset matches it again."

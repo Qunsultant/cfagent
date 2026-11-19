@@ -113,6 +113,8 @@ export interface SettingsMenuProps {
   onOpenPartnerDeals?: () => void;
   /** Force the dropdown panel open on initial render (e.g. tests). */
   initialOpen?: boolean;
+  /** Render inline as a full settings page instead of a header dropdown (#3828). */
+  variant?: "dropdown" | "page";
 }
 
 export type BrokerDynamicMenuProps = SettingsMenuProps;
@@ -158,6 +160,7 @@ export function BrokerDynamicMenu({
   onUpdateAdBannerConfig,
   onOpenPartnerDeals,
   initialOpen = false,
+  variant = "dropdown",
 }: SettingsMenuProps) {
   const [isHovered, setIsHovered] = useState(false);
   const [isPinned, setIsPinned] = useState(initialOpen);
@@ -660,38 +663,50 @@ export function BrokerDynamicMenu({
 
   const toggleKeyPairSignIn = () => setShowKeyPairSignIn((open) => !open);
   const isDiagnosticsRunning = diagnosticsLoading || localDiagLoading;
+  const isPage = variant === "page";
+  const showPanel = isPage || isOpen;
 
   return (
     <div
-      className="settings-menu-container broker-dynamic-menu-container"
+      className={
+        isPage
+          ? "broker-dynamic-menu-page"
+          : "settings-menu-container broker-dynamic-menu-container"
+      }
       ref={menuRef}
-      onMouseEnter={handleMouseEnter}
-      onMouseLeave={handleMouseLeave}
+      onMouseEnter={isPage ? undefined : handleMouseEnter}
+      onMouseLeave={isPage ? undefined : handleMouseLeave}
     >
-      <Button
-        type="button"
-        className={`broker-dynamic-menu-trigger settings-menu-trigger icon-only-settings-btn ${isConnected ? "connected" : "disconnected"} ${isLive ? "prod" : "test"} ${isOpen ? "open" : ""} ${isPinned ? "pinned" : ""}`}
-        onClick={handleTriggerClick}
-        aria-haspopup="menu"
-        aria-expanded={isOpen}
-        title={
-          isPinned
-            ? "Settings pinned open (click to unpin)"
-            : `Settings (${selectedBrokerLabel} · ${brokerPresentation(selectedBrokerId).modeShort[isLive ? "live" : "paper"]}) — Broker, preferences, layout & themes`
-        }
-        aria-label="Settings"
-      >
-        <span className="menu-settings-icon" aria-hidden="true">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="3" />
-            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
-          </svg>
-        </span>
-        <span className={`menu-status-dot ${isConnected ? "connected" : "disconnected"}`} />
-      </Button>
+      {!isPage && (
+        <Button
+          type="button"
+          className={`broker-dynamic-menu-trigger settings-menu-trigger icon-only-settings-btn ${isConnected ? "connected" : "disconnected"} ${isLive ? "prod" : "test"} ${isOpen ? "open" : ""} ${isPinned ? "pinned" : ""}`}
+          onClick={handleTriggerClick}
+          aria-haspopup="menu"
+          aria-expanded={isOpen}
+          title={
+            isPinned
+              ? "Settings pinned open (click to unpin)"
+              : `Settings (${selectedBrokerLabel} · ${brokerPresentation(selectedBrokerId).modeShort[isLive ? "live" : "paper"]}) — Broker, preferences, layout & themes`
+          }
+          aria-label="Settings"
+        >
+          <span className="menu-settings-icon" aria-hidden="true">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="3" />
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+            </svg>
+          </span>
+          <span className={`menu-status-dot ${isConnected ? "connected" : "disconnected"}`} />
+        </Button>
+      )}
 
-      {isOpen && (
-        <div className="settings-dropdown-panel broker-dynamic-dropdown-panel" role="menu">
+      {showPanel && (
+        <div
+          className="settings-dropdown-panel broker-dynamic-dropdown-panel"
+          role={isPage ? undefined : "menu"}
+          style={isPage ? { position: "static", width: "100%", maxWidth: "100%", boxShadow: "none" } : undefined}
+        >
           {/* Header: User Info (Top-Left) & Broker Info / Connection (Top-Right) */}
           <div className="broker-panel-header unified-menu-header">
             {/* Top-Left: User Info */}
@@ -1263,24 +1278,26 @@ export function BrokerDynamicMenu({
           {/* Navigation Tabs (issues 3696/3697): presets + pills moved
               to the Navigation Settings page; this menu only links to it,
               so the two surfaces never diverge. */}
-          <div className="broker-panel-section settings-nav-tabs-section">
-            <div className="section-label-row">
-              <span>Navigation Tabs</span>
-              <small>Presets and visible tabs live on the Navigation Settings page</small>
+          {!isPage && (
+            <div className="broker-panel-section settings-nav-tabs-section">
+              <div className="section-label-row">
+                <span>Navigation Tabs</span>
+                <small>Presets and visible tabs live on the Navigation Settings page</small>
+              </div>
+              <Button
+                type="button"
+                className="btn-preset-mini"
+                href="?tab=nav-settings"
+                onClick={(e) => {
+                  e.preventDefault();
+                  navigateToTab("nav-settings");
+                }}
+                title="Open Navigation Settings"
+              >
+                Open Navigation Settings
+              </Button>
             </div>
-            <Button
-              type="button"
-              className="btn-preset-mini"
-              href="?tab=nav-settings"
-              onClick={(e) => {
-                e.preventDefault();
-                navigateToTab("nav-settings");
-              }}
-              title="Open Navigation Settings"
-            >
-              Open Navigation Settings
-            </Button>
-          </div>
+          )}
 
           {/* Banner message / alert */}
           {effectiveMsg && (

@@ -11,7 +11,7 @@ import { GoogleAdUnit } from "./GoogleAdUnit";
 import { TradeHub } from "./TradeHub";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { FirstRunGate } from "./FirstRunGate";
-import { BrokerDynamicMenu, SettingsMenu, type BrokerDynamicMenuProps } from "./BrokerDynamicMenu";
+import { type BrokerDynamicMenuProps, type SettingsMenuProps } from "./BrokerDynamicMenu";
 import { useBrokerEnvironment, switchBrokerEnvironment, fetchBrokerEnvironment, brokerModeLabel } from "./brokerEnvironment";
 import { OptionsScreenerPage } from "./OptionsScreenerPage";
 import { OodaResearchPage } from "./OodaResearchPage";
@@ -1121,15 +1121,41 @@ export function Chat({ user }: { user: User }) {
     observability: (
       <ObservabilityHome />
     ),
-    // Issues 3696/3697: the Navigation Settings page — presets + pills
-    // live here, reached from the fixed trigger in the shell footer.
-    // A plain page: no retain, no shell-retain.
+    // Issues 3696/3697/3828: the Settings page — dynamic settings menu
+    // + navigation presets + visible-tabs pills live here, reached from
+    // the fixed bottom-left trigger (outside side-nav and top-nav).
     "nav-settings": (
       <NavSettingsPage
         visibleTabs={visibleTabs}
         activePreset={navPresetKey}
         onToggleTabVisibility={handleToggleTabVisibility}
         onApplyPreset={(key) => handleSetVisibleTabs(NAV_TAB_PRESETS[key], key)}
+        settingsMenuProps={{
+          userLogin: user.login,
+          userName: user.name,
+          userAvatar: user.avatar,
+          theme,
+          onCycleTheme: handleCycleTheme,
+          onSelectTheme: handleSelectTheme,
+          currentLayout: navLayout,
+          onToggleLayout: handleToggleNavLayout,
+          activeEnv: brokerEnv,
+          accountMode,
+          onToggleAccountMode: handleToggleAccountMode,
+          handleSwitchEnvironment: (target) => void switchBrokerEnvironment(target),
+          autoRefreshEnabled,
+          autoRefreshInterval,
+          onToggleAutoRefresh: handleToggleAutoRefresh,
+          reportDispatchHitl,
+          onToggleReportDispatchHitl: handleToggleReportDispatchHitl,
+          pendingReportConfirmations,
+          onRefreshReportConfirmations: refreshPendingReportConfirmations,
+          onDecideReportConfirmation: handleDecideReportConfirmation,
+          adBannerConfig: effectiveAdBannerConfig,
+          onUpdateAdBannerConfig: handleUpdateAdBannerConfig,
+          onOpenPartnerDeals: () => setShowPartnerDealsModal(true),
+          ...(brokerProps || {}),
+        } satisfies SettingsMenuProps}
       />
     ),
     // Issue #4530: the Product Hub is the ONLY place for
@@ -1438,34 +1464,6 @@ export function Chat({ user }: { user: User }) {
                 Trade
               </Button>
 
-              {/* Unified Settings & Broker Menu (Icon-only with hover) */}
-              <SettingsMenu
-                userLogin={user.login}
-                userName={user.name}
-                userAvatar={user.avatar}
-                theme={theme}
-                onCycleTheme={handleCycleTheme}
-                onSelectTheme={handleSelectTheme}
-                currentLayout={navLayout}
-                onToggleLayout={handleToggleNavLayout}
-                activeEnv={brokerEnv}
-                accountMode={accountMode}
-                onToggleAccountMode={handleToggleAccountMode}
-                handleSwitchEnvironment={(target) => void switchBrokerEnvironment(target)}
-                autoRefreshEnabled={autoRefreshEnabled}
-                autoRefreshInterval={autoRefreshInterval}
-                onToggleAutoRefresh={handleToggleAutoRefresh}
-                reportDispatchHitl={reportDispatchHitl}
-                onToggleReportDispatchHitl={handleToggleReportDispatchHitl}
-                pendingReportConfirmations={pendingReportConfirmations}
-                onRefreshReportConfirmations={refreshPendingReportConfirmations}
-                onDecideReportConfirmation={handleDecideReportConfirmation}
-                adBannerConfig={effectiveAdBannerConfig}
-                onUpdateAdBannerConfig={handleUpdateAdBannerConfig}
-                onOpenPartnerDeals={() => setShowPartnerDealsModal(true)}
-                {...(brokerProps || {})}
-              />
-
               {/* User Sign Out — Top Right Corner Fixed Icon with Hover Tooltip */}
               {user && (
                 <a
@@ -1497,34 +1495,6 @@ export function Chat({ user }: { user: User }) {
               onRefresh={handleGlobalRefresh}
               isRefreshing={isRefreshing}
               lastRefreshedAt={lastRefreshedAt}
-              headerChildren={
-                <SettingsMenu
-                  userLogin={user.login}
-                  userName={user.name}
-                  userAvatar={user.avatar}
-                  theme={theme}
-                  onCycleTheme={handleCycleTheme}
-                onSelectTheme={handleSelectTheme}
-                  currentLayout={navLayout}
-                  onToggleLayout={handleToggleNavLayout}
-                  activeEnv={brokerEnv}
-                  accountMode={accountMode}
-                  onToggleAccountMode={handleToggleAccountMode}
-                  handleSwitchEnvironment={(target) => void switchBrokerEnvironment(target)}
-                  autoRefreshEnabled={autoRefreshEnabled}
-                  autoRefreshInterval={autoRefreshInterval}
-                  onToggleAutoRefresh={handleToggleAutoRefresh}
-                reportDispatchHitl={reportDispatchHitl}
-                onToggleReportDispatchHitl={handleToggleReportDispatchHitl}
-                pendingReportConfirmations={pendingReportConfirmations}
-                onRefreshReportConfirmations={refreshPendingReportConfirmations}
-                onDecideReportConfirmation={handleDecideReportConfirmation}
-                  adBannerConfig={effectiveAdBannerConfig}
-                  onUpdateAdBannerConfig={handleUpdateAdBannerConfig}
-                  onOpenPartnerDeals={() => setShowPartnerDealsModal(true)}
-                  {...(brokerProps || {})}
-                />
-              }
               theme={theme}
               onCycleTheme={handleCycleTheme}
               onAskAgent={handleAskAgent}
@@ -1665,16 +1635,15 @@ export function Chat({ user }: { user: User }) {
         activeTab={tab}
       />
 
-      {/* Navigation settings trigger (issues 3696/3697): fixed
-          bottom-left, rendered by the shell OUTSIDE both nav modes, so
-          it stays reachable under the `none` preset when every nav
-          item is hidden. Token-only inline style, following the
-          left-nav flyout precedent. */}
+      {/* Settings trigger (issues 3696/3697/3828): fixed
+          bottom-left, rendered by the shell OUTSIDE both nav modes (not
+          in side-nav), so it stays reachable under any preset including
+          `none`. */}
       <Button
         variant="secondary"
         size="sm"
-        title="Navigation settings"
-        aria-label="Navigation settings"
+        title="Settings"
+        aria-label="Settings"
         onClick={() => handleSelectTab("nav-settings")}
         style={{
           position: "fixed",
@@ -1683,7 +1652,7 @@ export function Chat({ user }: { user: User }) {
           zIndex: 1000,
         }}
       >
-        <NavIcons.Settings /> Nav settings
+        <NavIcons.Settings /> Settings
       </Button>
 
       {/* Externalized Partner Deals & Showcase Modal */}
