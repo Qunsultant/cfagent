@@ -191,7 +191,12 @@ describe("screener + research behavior (extraction #378)", () => {
     const res = await handleScreenerResearchRoutes(req("POST", "/research/run"), urlOf("/research/run"), "/research/run", "sess-9", ctx);
     expect((res as Response).status).toBe(200);
     expect(runResearchAndPublish).toHaveBeenCalledWith("manual", "sess-9");
-    expect(await (res as Response).json()).toEqual({ success: true, reportId: "rep-1" });
+    expect(await (res as Response).json()).toMatchObject({
+      success: true,
+      reportId: "rep-1",
+      trigger: "manual",
+      cutoverMode: "engine",
+    });
   });
 
   it("POST /research/run uses x-user-login when present", async () => {
