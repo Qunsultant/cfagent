@@ -9,14 +9,14 @@
  * the broker's own shard derivation — the same function the mesh door uses,
  * never a second shard policy.
  */
-import { UNIVERSES } from "../trading";
-import { shardsForUniverse } from "../workflows/screenExecutionBroker";
-import type { JobDefinitionSpec } from "../config/jobDefinitionCatalog";
+import type { JobDefinitionParameter, JobDefinitionSpec, JobParameterSettingRef } from "../config/jobDefinitionCatalog";
+import { resolveEnumSource, resolveParamDerivation } from "../config/jobDefinitionParamRegistry";
 import type { JobExecutionMode } from "../data/jobPipelinePorts";
 import { assertExecutionModeSupported, resolveExecutionMode } from "./jobPipelineConfig";
 import type { JobDefinitionPerStage } from "./jobDefinitionSpecBuilder";
 
 export type JobDefinitionParams = Record<string, unknown>;
+export type SettingResolver = (settingKey: string) => unknown;
 
 type ParamBinder = (
   spec: JobDefinitionSpec,
@@ -24,37 +24,74 @@ type ParamBinder = (
   owner: string | undefined,
 ) => JobDefinitionParams;
 
-const BINDERS: Record<string, ParamBinder> = {
-  screener: (_spec, params, owner) => {
-    const universe = typeof params.universe === "string" ? params.universe.trim() : "";
-    if (!universe) {
+/**
+ * @deprecated Issue #5496 — per-family code binders are retired in place in
+ * favor of declarative `JobDefinitionParameter` schemas (`enumSource`,
+ * `default`, `derivation`) interpreted by `bindJobDefinitionParams`.
+ */
+export const BINDERS: Record<string, ParamBinder> = {};
+
+function isSettingRef(value: unknown): value is JobParameterSettingRef {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    typeof (value as JobParameterSettingRef).setting === "string"
+  );
+}
+
+function normalizeDeclaredValue(
+  specId: string,
+  param: JobDefinitionParameter,
+  raw: unknown,
+): unknown {
+  if (param.type === "number") {
+    if (typeof raw !== "number" || !Number.isFinite(raw)) {
       throw new Error(
-        'Job definition "screener" requires the "universe" parameter — the feed stage has no shard to screen without one.',
+        `Job definition "${specId}" parameter "${param.name}" must be a finite number.`,
       );
     }
-    if (!(universe in UNIVERSES)) {
+    return raw;
+  }
+  if (param.type === "boolean") {
+    if (typeof raw !== "boolean") {
       throw new Error(
-        `Job definition "screener": unknown universe "${universe}". The universes are: ${Object.keys(UNIVERSES).join(", ")}.`,
+        `Job definition "${specId}" parameter "${param.name}" must be a boolean.`,
       );
     }
-    return {
-      ...(owner ? { userLogin: owner } : {}),
-      trigger: "scheduled",
-      universe,
-      shards: shardsForUniverse(universe),
-      deliver: false,
-    };
-  },
-};
+    return raw;
+  }
+  if (typeof raw !== "string") {
+    throw new Error(
+      `Job definition "${specId}" parameter "${param.name}" must be a string.`,
+    );
+  }
+  const trimmed = raw.trim();
+  if (param.enumSource) {
+    const allowed = resolveEnumSource(param.enumSource, specId);
+    if (!allowed.includes(trimmed)) {
+      throw new Error(
+        `Job definition "${specId}": unknown ${param.name} "${trimmed}". The ${param.enumSource} are: ${allowed.join(", ")}.`,
+      );
+    }
+  } else if (param.options && param.options.length > 0 && !param.options.includes(trimmed)) {
+    throw new Error(
+      `Job definition "${specId}": unknown ${param.name} "${trimmed}". Allowed values: ${param.options.join(", ")}.`,
+    );
+  }
+  return trimmed;
+}
 
 /**
- * Validate and bind one definition's run parameters. Throws (never returns a
- * partially-bound set) with the spec, the parameter and the reason named.
+ * Validate and bind one definition's run parameters from its declarative
+ * `JobDefinitionParameter` schema. Throws (never returns a partially-bound set)
+ * with the spec, the parameter and the reason named.
  */
 export function bindJobDefinitionParams(
   spec: JobDefinitionSpec,
   params: JobDefinitionParams,
   owner: string | undefined,
+  resolveSetting?: SettingResolver,
 ): JobDefinitionParams {
   const declared = spec.parameters ?? [];
   const declaredNames = new Set(declared.map((param) => param.name));
@@ -67,20 +104,42 @@ export function bindJobDefinitionParams(
       );
     }
   }
+  const bound: JobDefinitionParams = {};
   for (const param of declared) {
-    const value = params[param.name];
-    const empty = value === undefined || value === null || value === "";
-    if (param.required && empty) {
-      throw new Error(
-        `Job definition "${spec.id}" requires the "${param.name}" parameter — none was supplied, and one is never invented.`,
+    let value = params[param.name];
+    let empty = value === undefined || value === null || value === "";
+    if (empty && param.default !== undefined) {
+      value = isSettingRef(param.default) ? resolveSetting?.(param.default.setting) : param.default;
+      empty = value === undefined || value === null || value === "";
+    }
+    if (empty) {
+      if (param.required) {
+        throw new Error(
+          `Job definition "${spec.id}" requires the "${param.name}" parameter — none was supplied, and one is never invented.`,
+        );
+      }
+      continue;
+    }
+    const normalized = normalizeDeclaredValue(spec.id, param, value);
+    bound[param.name] = normalized;
+    if (param.derivation) {
+      const derive = resolveParamDerivation(param.derivation, spec.id);
+      Object.assign(
+        bound,
+        derive(normalized, {
+          specId: spec.id,
+          paramName: param.name,
+          params: bound,
+          owner,
+        }),
       );
     }
   }
-  const binder = BINDERS[spec.id];
-  const bound = binder
-    ? binder(spec, params, owner)
-    : { ...(owner ? { userLogin: owner } : {}), trigger: "scheduled", ...params };
-  return bound;
+  return {
+    ...(owner ? { userLogin: owner } : {}),
+    trigger: "scheduled",
+    ...bound,
+  };
 }
 
 /**

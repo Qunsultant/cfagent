@@ -1,0 +1,2 @@
+### Changed
+- **Declarative job parameter schema & generic binder (#5496):** Added `enumSource`, `default` (literal or `{ setting }` ref), and `derivation` fields to `JobDefinitionParameter` with load-time validation against `src/config/jobDefinitionParamRegistry.ts`, replaced per-family `BINDERS` code with generic declarative binding in `bindJobDefinitionParams`, and migrated the `screener` spec to declare `universe` (`enumSource: "universes"`, `derivation: "shardsForUniverse"`) and `deliver` (`default: false`).
