@@ -119,7 +119,7 @@ function ResearchStageControl({
             <Badge tone={row.status === "failed" ? "danger" : row.status === "running" ? "info" : "neutral"} size="sm">
               {row.status}
             </Badge>
-            <span className="ui-mono">{row.stageId}</span>
+            <span className="ui-meta-sm">{row.stageId}</span>
             {(STAGE_ACTIONS[row.status] ?? []).map((action) => (
               <Button
                 key={action.op}
