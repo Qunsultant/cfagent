@@ -48,11 +48,24 @@
  *   the funnel (#5608) — so every channel mutation emits its
  *   `platform-channel-admin` record on both paths. The gate above
  *   is the control; the annotation is the audit trail, not a
- *   gate. Audit-before-write is an owner decision (#5608), not
- *   implemented here.
+ *   gate. Audit-before-write is implemented here (#5867, E5):
+ *   the IAAA audit record is written BEFORE the D1 write over
+ *   the wired store, and a failed audit write BLOCKS the
+ *   mutation — the funnel annotation above is a turn-level
+ *   mas_events record, NOT the IAAA chain, so it stays as the
+ *   after-write annotation alongside the before-write chain
+ *   record.
  */
 import { createTenantChannelAdapter } from "../../data/createTenantChannelPorts";
 import type { TenantChannelStore } from "../../data/tenantChannelPorts";
+import { createWiredAuditStore } from "../../security/iaaaAuditStore";
+import {
+  IAAA_AUDIT_POLICY_VERSION,
+  recordAuditEvent,
+  shouldBlockAction,
+  type AuditStore,
+} from "../../security/iaaaAudit";
+import type { Env } from "../../types";
 import {
   TENANT_CHANNEL_IDS,
   normalizeTenantSlackChannel,
@@ -85,14 +98,16 @@ const structuredLog = createStructuredLogger(createObservabilitySink({}), {
 
 
 export interface PlatformChannelRouteContext {
-  /** Worker env (carries the AGENT_DB + COMMERCIAL_STORE_OPERATORS bindings). */
-  env: { AGENT_DB?: unknown };
+  /** Worker env (carries the AGENT_DB + SESSION_STORE bindings). */
+  env: Env;
   /** Audit funnel (owner: OrchestratorAgent.audit). */
   audit?: (
     type: string,
     agent: "orchestrator",
     payload: Record<string, unknown>,
   ) => void;
+  /** Test seam: use this IAAA audit store instead of createWiredAuditStore(env). */
+  auditStore?: AuditStore | null;
   /** Test seam: use this store instead of the AGENT_DB adapter. */
   channels?: TenantChannelStore | null;
   /** Test seam: use this directory instead of the AGENT_DB adapter. */
@@ -179,6 +194,59 @@ function auditBestEffort(
       login,
     });
   }
+}
+
+/**
+ * Issue #5867 — audit-before-write (E5, audit-canonical-store-5084):
+ * the IAAA audit record for a channel mutation is written BEFORE the
+ * D1 write, over the wired store (`createWiredAuditStore`). The
+ * `ctx.audit` funnel is a turn-level mas_events annotation, NOT the
+ * IAAA chain — it stays as the after-write annotation
+ * (`auditBestEffort`); this is the chain record.
+ *
+ * Channel mutations are consequential, so a failed audit write BLOCKS
+ * the mutation: returns the coded 503 refusal and the caller must not
+ * write. The route has only the operator login, so actorPrincipalId is
+ * the login — the same fallback `dataLifecycle` uses
+ * (`actorInternalUserId ?? actorLogin`). Outcome is "pending": the
+ * write has not run yet (first use of "pending" in src; it is in the
+ * OUTCOMES enum); the funnel record after the write carries the
+ * outcome. Returns null when the record landed and the write may
+ * proceed.
+ *
+ * Residual (#5867, documented not solved): if the D1 write fails
+ * after this record lands, an audit record exists for a change that
+ * never landed — the chain has no rollback for this.
+ */
+async function auditBeforeWrite(
+  ctx: PlatformChannelRouteContext,
+  login: string,
+  action: string,
+  tenantId: string,
+): Promise<Response | null> {
+  const store = ctx.auditStore ?? createWiredAuditStore(ctx.env);
+  const result = await recordAuditEvent(store, {
+    timestamp: Date.now(),
+    type: "platform-channel-admin",
+    actorPrincipalId: login,
+    actorType: "human",
+    initiatingPrincipalId: login,
+    tenantId,
+    correlationId: crypto.randomUUID(),
+    action,
+    decision: "allow",
+    policyVersion: IAAA_AUDIT_POLICY_VERSION,
+    outcome: "pending",
+  });
+  if (shouldBlockAction("consequential", !result.ok)) {
+    return jsonError("FAILURE_COMMERCIAL_AUDIT_REQUIRED", 503, {
+      action,
+      tenantId,
+      login,
+      auditCode: result.ok ? undefined : result.code,
+    });
+  }
+  return null;
 }
 
 export async function handlePlatformChannelRoutes(
@@ -338,6 +406,10 @@ export async function handlePlatformChannelRoutes(
           login: operator,
         });
       }
+      // #5867: audit-before-write — a failed audit record blocks
+      // the mutation; no D1 write runs.
+      const webhookAudit = await auditBeforeWrite(ctx, operator, "update-webhook-url", tenantId);
+      if (webhookAudit) return webhookAudit;
       const saved = await channels.setTenantWebhookUrl(
         tenantId,
         normalized.webhookUrl,
@@ -397,6 +469,10 @@ export async function handlePlatformChannelRoutes(
           login: operator,
         });
       }
+      // #5867: audit-before-write — a failed audit record blocks
+      // the mutation; no D1 write runs.
+      const slackAudit = await auditBeforeWrite(ctx, operator, "update-slack-channel", tenantId);
+      if (slackAudit) return slackAudit;
       const saved = await channels.setTenantSlackChannel(tenantId, normalized.slackChannel);
       auditBestEffort(ctx, operator, "update-slack-channel", tenantId);
       structuredLog.info("platformChannels.slack_channel_updated", {
@@ -455,6 +531,11 @@ export async function handlePlatformChannelRoutes(
     if (Object.keys(patch).length === 0 && !hasSlackChannelField) {
       return requestInvalidResponse("No channel flag supplied.");
     }
+    // #5867: audit-before-write — one record per request, before the
+    // first D1 write, even when the patch writes both stores. A failed
+    // audit record blocks the mutation; no D1 write runs.
+    const patchAudit = await auditBeforeWrite(ctx, operator, "update-channels", tenantId);
+    if (patchAudit) return patchAudit;
     const config: TenantChannelConfig =
       Object.keys(patch).length > 0
         ? await channels.setTenantChannels(tenantId, patch)

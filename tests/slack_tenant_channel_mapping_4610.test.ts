@@ -8,6 +8,7 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { InMemoryTenantChannelAdapter } from "../src/data/inMemoryTenantChannelAdapter";
+import { createMemoryAuditStore } from "../src/security/iaaaAudit";
 import { InMemoryTenantDirectoryAdapter } from "../src/data/inMemoryTenantDirectoryAdapter";
 import {
   DEFAULT_TENANT_CHANNELS,
@@ -104,6 +105,8 @@ describe("Issue #4610 (G15): Per-tenant Slack channel mapping — store & route"
       env: { COMMERCIAL_STORE_OPERATORS: "op" },
       channels,
       directory,
+      // #5867: audit-before-write needs a working IAAA audit store.
+      auditStore: createMemoryAuditStore(),
       audit: (type: string, _agent: "orchestrator", payload: Record<string, unknown>) =>
         audits.push({ type, payload }),
     };

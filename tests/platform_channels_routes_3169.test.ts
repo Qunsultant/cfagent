@@ -16,6 +16,7 @@ import { handlePlatformChannelRoutes } from "../src/agents/routes/platformChanne
 import { InMemoryTenantChannelAdapter } from "../src/data/inMemoryTenantChannelAdapter";
 import { InMemoryTenantDirectoryAdapter } from "../src/data/inMemoryTenantDirectoryAdapter";
 import { DEFAULT_TENANT_CHANNELS } from "../src/data/tenantChannelPorts";
+import { createMemoryAuditStore } from "../src/security/iaaaAudit";
 
 function ctx(overrides: Record<string, unknown> = {}) {
   const channels = new InMemoryTenantChannelAdapter();
@@ -24,6 +25,10 @@ function ctx(overrides: Record<string, unknown> = {}) {
   return {
     channels,
     directory,
+    // #5867: audit-before-write needs a working IAAA audit store;
+    // without this seam the handler composes the wired store from
+    // an env with no SESSION_STORE and every mutation is blocked.
+    auditStore: createMemoryAuditStore(),
     operators: {
       listOperators: async () => [{ login: "op", addedBy: "seed", addedAtMs: 1 }],
     },

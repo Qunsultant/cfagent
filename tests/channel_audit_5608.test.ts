@@ -23,6 +23,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { handlePlatformChannelRoutes } from "../src/agents/routes/platformChannels";
 import { InMemoryTenantChannelAdapter } from "../src/data/inMemoryTenantChannelAdapter";
+import { createMemoryAuditStore } from "../src/security/iaaaAudit";
 import { InMemoryTenantDirectoryAdapter } from "../src/data/inMemoryTenantDirectoryAdapter";
 import { DEFAULT_TENANT_CHANNELS } from "../src/data/tenantChannelPorts";
 import {
@@ -39,13 +40,15 @@ function world() {
   directory.seedTenant("tenant-a", ["alice"]);
   directory.seedTenant("acme", ["alice"]);
   const audit = vi.fn();
+  // #5867: audit-before-write needs a working IAAA audit store.
+  const auditStore = createMemoryAuditStore();
   const operators = {
     listOperators: async () => [
       { login: OPERATOR, addedBy: "seed", addedAtMs: 1 },
       { login: BIZCOPILOT_OPERATOR, addedBy: "seed", addedAtMs: 1 },
     ],
   };
-  return { channels, directory, audit, operators };
+  return { channels, directory, audit, auditStore, operators };
 }
 
 function req(path: string, method: string, login: string | null, body?: unknown): Request {
@@ -74,6 +77,7 @@ async function call(
     {
       env: { COMMERCIAL_STORE_OPERATORS: "" },
       audit: audit === undefined ? w.audit : (audit as never),
+      auditStore: w.auditStore,
       channels: w.channels,
       directory: w.directory,
       operators: w.operators,
@@ -257,12 +261,14 @@ describe("channel audit funnel: BizCopilot path (#5608)", () => {
     const channels = new InMemoryTenantChannelAdapter();
     const directory = new InMemoryTenantDirectoryAdapter();
     directory.seedTenant("acme", ["alice"]);
+    // #5867: audit-before-write needs a working IAAA audit store.
+    const auditStore = createMemoryAuditStore();
     const operators = {
       listOperators: async () => [
         { login: BIZCOPILOT_OPERATOR, addedBy: "seed", addedAtMs: 1 },
       ],
     };
-    return { channels, directory, operators };
+    return { channels, directory, auditStore, operators };
   }
 
   it("a BizCopilot mutation emits BOTH the route record and the turn event", async () => {
@@ -274,6 +280,7 @@ describe("channel audit funnel: BizCopilot path (#5608)", () => {
       env: {},
       userLogin: BIZCOPILOT_OPERATOR,
       audit: (type, payload) => audits.push({ type, payload }),
+      auditStore: w.auditStore,
       channels: w.channels,
       directory: w.directory,
       operators: w.operators,
@@ -305,6 +312,7 @@ describe("channel audit funnel: BizCopilot path (#5608)", () => {
       env: {},
       userLogin: BIZCOPILOT_OPERATOR,
       audit: (type, payload) => audits.push({ type, payload }),
+      auditStore: w.auditStore,
       channels: w.channels,
       directory: w.directory,
       operators: w.operators,
@@ -323,6 +331,7 @@ describe("channel audit funnel: BizCopilot path (#5608)", () => {
         env: {},
         userLogin: BIZCOPILOT_OPERATOR,
         audit: (type, payload) => audits.push({ type, payload }),
+      auditStore: w.auditStore,
         channels: w.channels,
         directory: w.directory,
         operators: w.operators,

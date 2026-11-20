@@ -21,6 +21,7 @@ import {
   runBizCopilotChannelBranch,
 } from "../src/services/bizCopilotChannels";
 import { InMemoryTenantChannelAdapter } from "../src/data/inMemoryTenantChannelAdapter";
+import { createMemoryAuditStore } from "../src/security/iaaaAudit";
 import { InMemoryTenantDirectoryAdapter } from "../src/data/inMemoryTenantDirectoryAdapter";
 import {
   DEFAULT_TENANT_CHANNELS,
@@ -39,10 +40,20 @@ function makeWorld() {
     listOperators: async () =>
       [{ login: OPERATOR, addedBy: "seed", addedAtMs: 1 }] as unknown as StoreOperatorEntry[],
   };
+  // #5867: audit-before-write needs a working IAAA audit store.
+  const auditStore = createMemoryAuditStore();
   return {
     channels,
     directory,
-    deps: (userLogin: string) => ({ env: {}, userLogin, channels, directory, operators }),
+    auditStore,
+    deps: (userLogin: string) => ({
+      env: {},
+      userLogin,
+      auditStore,
+      channels,
+      directory,
+      operators,
+    }),
   };
 }
 
@@ -499,6 +510,8 @@ describe("BizCopilot channel turn branch (#4517)", () => {
       env: {},
       userLogin: OPERATOR,
       audit: (type, payload) => audits.push({ type, payload }),
+      // #5867: audit-before-write needs a working IAAA audit store.
+      auditStore: world.auditStore,
       channels: world.channels,
       directory: world.directory,
       operators: world.deps(OPERATOR).operators,

@@ -39,6 +39,7 @@ import type {
 import { InMemoryCommercialAdapter } from "../src/data/inMemoryCommercialAdapter";
 import { InMemoryTenantDirectoryAdapter } from "../src/data/inMemoryTenantDirectoryAdapter";
 import { InMemoryTenantChannelAdapter } from "../src/data/inMemoryTenantChannelAdapter";
+import { createMemoryAuditStore } from "../src/security/iaaaAudit";
 import { InMemoryOnboardingAdapter } from "../src/data/inMemoryOnboardingAdapter";
 import { InMemoryPriceCatalogueAdapter } from "../src/data/inMemoryPriceCatalogueAdapter";
 import { InMemoryStoreOperatorsAdapter } from "../src/data/inMemoryStoreOperatorsAdapter";
@@ -142,7 +143,7 @@ describe("module logging #5607: catalog codes", () => {
       expect(entry!.retryable).toBe(false);
       expect(codedMessage(code)).toBe(`[${code}] ${entry!.businessMessage}`);
     }
-    expect(Object.keys(outcomeCatalog.outcomes)).toHaveLength(261);
+    expect(Object.keys(outcomeCatalog.outcomes)).toHaveLength(262); // #5867: +1 FAILURE_COMMERCIAL_AUDIT_REQUIRED
   });
 
   it("the reused codes resolve with the correct httpStatus", () => {
@@ -432,6 +433,8 @@ function channelCtx(overrides: Record<string, unknown> = {}) {
   return {
     channels,
     directory,
+    // #5867: audit-before-write needs a working IAAA audit store.
+    auditStore: createMemoryAuditStore(),
     operators: {
       listOperators: async () => [{ login: "op", addedBy: "seed", addedAtMs: 1 }],
     },
@@ -456,6 +459,7 @@ async function callChannels(
       env: { COMMERCIAL_STORE_OPERATORS: "", ...envOverrides } as never,
       channels: c.channels as never,
       directory: c.directory as never,
+      auditStore: c.auditStore as never,
       operators: c.operators as never,
       ...(c as Record<string, unknown>).audit !== undefined
         ? { audit: (c as Record<string, unknown>).audit as never }

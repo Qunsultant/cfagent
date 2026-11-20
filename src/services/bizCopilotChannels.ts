@@ -59,6 +59,8 @@
 
 import { handlePlatformChannelRoutes } from "../agents/routes/platformChannels";
 import { isTenantIdShaped } from "../agents/routes/platformTenants";
+import type { AuditStore } from "../security/iaaaAudit";
+import type { Env } from "../types";
 import type { StoreOperators } from "../data/storeOperatorsPorts";
 import type { TenantDirectory } from "../data/tenantDirectoryPorts";
 import {
@@ -321,8 +323,8 @@ export function describeChannelEnforcement(
 }
 
 interface BizCopilotChannelExecutorDeps {
-  /** Worker env (carries the AGENT_DB binding) — the same env the HTTP dispatch passes. */
-  env: { AGENT_DB?: unknown };
+  /** Worker env (carries the AGENT_DB + SESSION_STORE bindings) — the same env the HTTP dispatch passes. */
+  env: Env;
   /** The turn's verified login (from the session, never client-supplied) — the operator identity the route gates on. */
   userLogin: string;
   /**
@@ -336,6 +338,12 @@ interface BizCopilotChannelExecutorDeps {
    * keep working; absent means no route-level record, as before.
    */
   audit?: (type: string, payload: Record<string, unknown>) => void;
+  /**
+   * Issue #5867 — test seam: the IAAA audit store the route handler
+   * writes its before-write record to. Absent, the handler composes
+   * the wired store from env, exactly as the HTTP dispatch does.
+   */
+  auditStore?: AuditStore | null;
   /** Test seams: the route handler composes the adapters from env when these are absent, exactly as the HTTP dispatch does. */
   channels?: TenantChannelStore | null;
   directory?: TenantDirectory | null;
@@ -367,6 +375,10 @@ async function callChannelRoute(
     // `bizcopilot.channel_action_executed` event below — the Accounts
     // executor's shape (bizCopilotAccounts.ts).
     audit: (type, _agent, payload) => deps.audit?.(type, payload),
+    // Issue #5867: pass the IAAA audit store seam through so the
+    // route handler's before-write record lands in the caller's
+    // store in tests; production composes the wired store from env.
+    auditStore: deps.auditStore,
     channels: deps.channels,
     directory: deps.directory,
     operators: deps.operators,
@@ -504,9 +516,11 @@ export async function executeBizCopilotChannelIntent(
 export async function runBizCopilotChannelBranch(deps: {
   sourceTab?: string;
   userText: string;
-  env: { AGENT_DB?: unknown };
+  env: Env;
   userLogin: string;
   audit: (type: string, payload: Record<string, unknown>) => void;
+  /** Issue #5867 — test seam: the IAAA audit store for the route handler's before-write record. */
+  auditStore?: AuditStore | null;
   /** Test seams: the route handler composes the adapters from env when these are absent, exactly as the HTTP dispatch does. */
   channels?: TenantChannelStore | null;
   directory?: TenantDirectory | null;
@@ -523,6 +537,9 @@ export async function runBizCopilotChannelBranch(deps: {
       // on this path (see callChannelRoute) — without it a BizCopilot
       // mutation emits no `platform-channel-admin` record.
       audit: deps.audit,
+      // Issue #5867: forward the IAAA audit store seam (see
+      // BizCopilotChannelExecutorDeps).
+      auditStore: deps.auditStore,
       channels: deps.channels,
       directory: deps.directory,
       operators: deps.operators,

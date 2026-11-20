@@ -17,6 +17,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   InMemoryTenantChannelAdapter,
 } from "../src/data/inMemoryTenantChannelAdapter";
+import { createMemoryAuditStore } from "../src/security/iaaaAudit";
 import {
   normalizeTenantWebhookUrl,
   DEFAULT_TENANT_CHANNELS,
@@ -100,6 +101,8 @@ describe("Webhook recipient URL binding: per-tenant/per-schedule URL + run check
       env: { COMMERCIAL_STORE_OPERATORS: "op" },
       channels,
       directory,
+      // #5867: audit-before-write needs a working IAAA audit store.
+      auditStore: createMemoryAuditStore(),
       operators: { listOperators: async () => [] },
     };
 
