@@ -110,6 +110,8 @@ function rowToInstance(row: JobInstanceRow): JobInstanceRecord {
 
 export class InMemoryJobPipelineStores implements JobPipelineStores {
   private readonly definitionsRepo = new JobDefinitionMemoryRepository();
+  /** Issue #5865 — append-only history, keyed `${jobId}:${version}`. */
+  private readonly definitionVersions = new Map<string, JobDefinition>();
   private readonly instancesRepo = new JobInstanceMemoryRepository();
   private readonly artifactsRepo = new JobArtifactMemoryRepository();
 
@@ -122,7 +124,16 @@ export class InMemoryJobPipelineStores implements JobPipelineStores {
         version: definition.version,
         updatedAt: definition.updatedAt,
       });
+      const key = `${definition.jobId}:${definition.version}`;
+      if (!this.definitionVersions.has(key)) {
+        this.definitionVersions.set(key, definition);
+      }
     },
+    getDefinitionVersion: async (
+      jobId: string,
+      version: number,
+    ): Promise<JobDefinition | null> =>
+      this.definitionVersions.get(`${jobId}:${version}`) ?? null,
     getDefinition: async (jobId: string): Promise<JobDefinition | null> => {
       const row = this.definitionsRepo.findById(jobId);
       return row ? (JSON.parse(row.definitionJson) as JobDefinition) : null;
