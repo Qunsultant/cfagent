@@ -176,6 +176,13 @@ import {
   buildScheduleWebhookMintRecord,
   SCHEDULE_WEBHOOK_AUDIT_EVENTS,
 } from "../../services/scheduleWebhookFollowup";
+import {
+  deriveScheduleWebhookIdempotencyKey,
+  OrmReplayStore,
+  resolveScheduleWebhookIdempotencyTtlMs,
+  sharedMemoryReplayStore,
+  type ReplayStore,
+} from "../../security/webhookReplay";
 import { createPendingScheduleApprovalPort } from "../../data/doSqlitePendingScheduleApprovalsAdapter";
 
 import { createStructuredLogger } from "../../observability/structuredLogger";
@@ -775,6 +782,50 @@ export async function handleSchedulesRoutes(
           });
           return Response.json({ error: "This webhook caller is not authorized to mint a schedule follow-up." }, { status: 403 });
         }
+        // #4223 — durable idempotency claim BEFORE the mint, so a
+        // re-delivered webhook is a 409 instead of a second mint.
+        // The key is derived from the whole parsed body (same
+        // delivery, same key — key order in the serialization does
+        // not matter); the claim lives in orm.webhookReplay (DO
+        // SQLite) and survives isolate restarts and redeploys, past
+        // the edge nonce's 24h. The claim is placed after PDP (a
+        // denied caller must not consume a key) and before the mint
+        // (a failed mint leaves the key claimed, so the retry is a
+        // 409, not a second mint). If the ORM is unavailable, the
+        // isolate-scoped memory store is the fallback guard — minting
+        // unguarded is never the fallback.
+        const idempotencyKey = await deriveScheduleWebhookIdempotencyKey(validBody);
+        const idempotencyTtlMs = resolveScheduleWebhookIdempotencyTtlMs(
+          ctx.env.SCHEDULE_WEBHOOK_IDEMPOTENCY_TTL_MS,
+        );
+        let replayStore: ReplayStore;
+        try {
+          replayStore = new OrmReplayStore(ctx.getOrm());
+        } catch {
+          replayStore = sharedMemoryReplayStore();
+        }
+        let isDuplicate: boolean;
+        try {
+          isDuplicate = await replayStore.claim(idempotencyKey, "schedule-webhook", idempotencyTtlMs);
+        } catch (err) {
+          // The durable claim failed (store unreachable): fall back
+          // to the isolate-scoped guard and say so in the log.
+          structuredLog.warn("schedules.webhook_idempotency_claim_failed", {
+            message: "[Schedules] schedule webhook durable idempotency claim failed; using memory fallback:",
+            error: err instanceof Error ? err.message : String(err),
+          });
+          replayStore = sharedMemoryReplayStore();
+          isDuplicate = await replayStore.claim(idempotencyKey, "schedule-webhook", idempotencyTtlMs);
+        }
+        if (isDuplicate) {
+          ctx.audit(SCHEDULE_WEBHOOK_AUDIT_EVENTS.duplicate, "orchestrator", {
+            userLogin,
+            workflowId: validBody.workflowId,
+            scheduleId: validBody.scheduleId ?? null,
+            capability: validBody.capability,
+          });
+          return Response.json({ error: "Duplicate schedule webhook delivery." }, { status: 409 });
+        }
         let submission: import("../../types").AsyncJobSubmission;
         try {
           submission = buildScheduleWebhookFollowupSubmission(validBody);
@@ -792,6 +843,14 @@ export async function handleSchedulesRoutes(
           return Response.json({ error: "Follow-up submission is not wired on this host." }, { status: 500 });
         }
         const submitted = await ctx.submitAsyncJob(submission);
+        // #4223 — retention hygiene, best-effort: spent idempotency
+        // keys are pruned on mint so the table does not grow forever.
+        // A prune failure never breaks the mint.
+        try {
+          await replayStore.pruneExpired();
+        } catch {
+          // Best-effort only.
+        }
         const nowIso = new Date().toISOString();
         try {
           recordLedgerRun(new SqlJobRunRecordStore(ctx.agentCtx.storage.sql), {
