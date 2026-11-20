@@ -10,6 +10,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { handlePaymentAssuranceLiveRoutes } from "../src/agents/routes/paymentAssuranceLive";
+import { codedMessage } from "../src/outcomes/outcomeAspects";
 
 type Binding = {
   created: Array<{ id: string; params: unknown }>;
@@ -116,7 +117,7 @@ describe("payment assurance live routes (issue #2059)", () => {
     expect(b.created).toHaveLength(0);
   });
 
-  it("refuses checkout mode when monetization or cfpay is missing, naming the piece", async () => {
+  it("refuses checkout mode when monetization or Stripe is missing", async () => {
     const b = makeBinding();
     const noMoney = await call(
       handlePaymentAssuranceLiveRoutes,
@@ -215,6 +216,8 @@ describe("payment assurance live routes (issue #2059)", () => {
     expect(res?.status).toBe(500);
     const text = await res?.text();
     expect(text).not.toContain("SECRET-INTERNAL-DETAIL");
-    expect(text).toContain("Internal error.");
+    // #5607 (G-5/G-6): the generic 500 is now the catalog-coded
+    // FAILURE_UNEXPECTED_ERROR — still generic, still no leak.
+    expect(text).toContain(codedMessage("FAILURE_UNEXPECTED_ERROR"));
   });
 });
