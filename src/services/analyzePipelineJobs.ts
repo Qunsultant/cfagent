@@ -36,11 +36,14 @@ import type { AnalyzedDatasetStore } from "../data/analyzedDatasetPorts";
 import {
   buildAnalyzeJobRegistry,
   buildAnalyzeStatus,
+  resolveScreenerHandOff,
   runAnalyzeJob,
+  AnalyzeJobError,
   ANALYZE_JOB_CODES,
   type AnalyzeJobDefinition,
   type AnalyzeJobRegistry,
   type AnalyzeStatusView,
+  type RunAnalyzeJobOptions,
 } from "./analyzeJobs";
 import {
   feedShardSymbols,
@@ -56,6 +59,11 @@ import { JobStepRegistry, type JobStepContext } from "./jobPipelineSteps";
 
 /** The step name an analyze job's configuration references. */
 export const ANALYZE_APPLY_STEP = "analyze.apply";
+
+/** The step name the screener analyze application references
+ *  (#5824 3a): the same analyze job, the same analyzed store —
+ *  but the input comes from the parent hand-off. */
+export const ANALYZE_SCREENER_STEP = "analyze.screener";
 
 /** One catalog entry: how the surfaces name and find an analyze job. */
 export interface AnalyzePipelineCatalogEntry {
@@ -265,6 +273,106 @@ function thresholdsParam(value: unknown): Partial<Record<string, unknown>> | und
   return value as Partial<Record<string, unknown>>;
 }
 
+/** Resolve the analyze job a step invocation names, or refuse
+ *  by name (a caller bug — the #3530 idiom). */
+function resolveAnalyzeStepJob(
+  deps: AnalyzeStepDeps,
+  stepName: string,
+  ctx: JobStepContext,
+): AnalyzeJobDefinition {
+  const analyzeJobId =
+    typeof ctx.params.analyzeJobId === "string" ? ctx.params.analyzeJobId : "";
+  const def = deps.registry.get(analyzeJobId);
+  if (!def) {
+    throw new Error(
+      `${ANALYZE_JOB_CODES.jobNotFound}: step "${stepName}" names analyze job "${analyzeJobId}", which is not in the analyze registry.`,
+    );
+  }
+  return def;
+}
+
+/** The shard partition for a run, from the input's symbols —
+ *  the same copy the run resolves, so partitions and the
+ *  whole-input run can never disagree on membership (the
+ *  enrich step's idiom). Absent without a shard key. */
+async function shardSymbolsForRun(
+  deps: AnalyzeStepDeps,
+  def: AnalyzeJobDefinition,
+  ctx: JobStepContext,
+  inputSymbols: readonly string[],
+): Promise<string[] | undefined> {
+  if (!ctx.shardKey) return undefined;
+  const shards =
+    (await deps.shardsFor?.(def.id)) ??
+    (Array.isArray(ctx.params.shards) ? (ctx.params.shards as string[]) : []);
+  return (
+    feedShardSymbols(
+      inputSymbols.map((s) => s.toUpperCase()),
+      shards,
+      ctx.shardKey,
+    ) ?? undefined
+  );
+}
+
+/** The shared tail of the analyze step handlers: run the job
+ *  with the resolved options and map the run result to the
+ *  step output. A failed run throws with the run's own coded
+ *  error so the job's run record and the dataset record agree. */
+async function executeAnalyzeStepRun(
+  deps: AnalyzeStepDeps,
+  def: AnalyzeJobDefinition,
+  ctx: JobStepContext,
+  extra: Omit<RunAnalyzeJobOptions, "trigger" | "kind" | "runId" | "nowMs">,
+) {
+  // The stores are non-null here by construction: the step
+  // handlers throw ANALYZE_JOB_NOT_CONFIGURED before reaching
+  // this tail when a store they need is unwired, and the
+  // hand-off run never reads the enriched store at all.
+  const result = await runAnalyzeJob(
+    deps.registry,
+    { enrichedStore: deps.enrichedStore!, analyzedStore: deps.analyzedStore! },
+    def.id,
+    {
+      trigger: ctx.trigger,
+      kind: ctx.runKind,
+      runId: ctx.runId,
+      ...(stringParams(ctx.params.ruleSets)
+        ? { ruleSets: stringParams(ctx.params.ruleSets) }
+        : {}),
+      ...(thresholdsParam(ctx.params.thresholds)
+        ? { thresholds: thresholdsParam(ctx.params.thresholds) }
+        : {}),
+      ...extra,
+    },
+  );
+  if (result.status === "failed") {
+    // The analyze run recorded its own failure in the analyzed
+    // store; the pipeline run fails with the same coded error
+    // so the job's run record and the dataset record agree.
+    throw new Error(
+      `${result.codedError ?? "ANALYZE_RUN_FAILED"}: analyze job "${def.id}" run ${result.runId} failed (${result.errorMessage ?? "no detail"})`,
+    );
+  }
+  return {
+    output: {
+      analyzeJobId: def.id,
+      enrichJobId: def.enrichJobId,
+      sourceId: def.sourceId,
+      dataset: def.dataset,
+      analyzeRunId: result.runId,
+      artifactId: result.artifactId,
+      status: result.status,
+      requested: result.requested,
+      received: result.received,
+      failed: result.failed,
+      inputArtifactId: result.inputArtifactId,
+      inputRunId: result.inputRunId,
+      ruleCoverage: result.ruleCoverage,
+    },
+    descriptor: `analyze ${def.sourceId}/${def.dataset}: ${result.received}/${result.requested} rows persisted (artifact ${result.artifactId}, input run ${result.inputRunId})`,
+  };
+}
+
 /**
  * Register the analyze step on a registry. Hosts compose the
  * FULL registry through createPipelineStepRegistry (in
@@ -277,14 +385,7 @@ export function registerAnalyzeStep(
   deps: AnalyzeStepDeps,
 ): void {
   registry.register(ANALYZE_APPLY_STEP, async (ctx: JobStepContext) => {
-    const analyzeJobId =
-      typeof ctx.params.analyzeJobId === "string" ? ctx.params.analyzeJobId : "";
-    const def = deps.registry.get(analyzeJobId);
-    if (!def) {
-      throw new Error(
-        `${ANALYZE_JOB_CODES.jobNotFound}: step "${ANALYZE_APPLY_STEP}" names analyze job "${analyzeJobId}", which is not in the analyze registry.`,
-      );
-    }
+    const def = resolveAnalyzeStepJob(deps, ANALYZE_APPLY_STEP, ctx);
     if (!deps.enrichedStore) throw analyzeNotConfigured(def.id, "the enriched-dataset store");
     if (!deps.analyzedStore) throw analyzeNotConfigured(def.id, "the analyzed-dataset store");
 
@@ -293,61 +394,87 @@ export function registerAnalyzeStep(
     // the stored copy — the same copy the run resolves, so
     // partitions and the whole-input run can never disagree on
     // membership; the enrich step's idiom).
-    let symbols: string[] | undefined;
-    if (ctx.shardKey) {
-      const shards =
-        (await deps.shardsFor?.(def.id)) ??
-        (Array.isArray(ctx.params.shards) ? (ctx.params.shards as string[]) : []);
+    const input = await deps.enrichedStore.latestUsable(def.enrichJobId);
+    const symbols = await shardSymbolsForRun(
+      deps,
+      def,
+      ctx,
+      input ? input.rows.map((r) => r.symbol) : [],
+    );
+    return executeAnalyzeStepRun(deps, def, ctx, {
+      ...(symbols ? { symbols } : {}),
+    });
+  });
+}
+
+/**
+ * Register the screener analyze application alongside
+ * analyze.apply (#5824 3a — the analyze.ooda precedent): the
+ * same analyze job, the same analyzed store, but the input
+ * comes from the parent hand-off (the gather stage's output)
+ * instead of the persisted enriched store, because the
+ * screener's factor grades need the quote fields (peRatio)
+ * the persisted rows do not carry.
+ *
+ * params.inputMode "handOff" selects the hand-off input; any
+ * other value (or absent) runs the persisted input, exactly
+ * like analyze.apply. The hand-off is refused by name when
+ * it is not the gather-output shape. The goal branch (3b)
+ * and the portfolio modifier (3c) are NOT here — the step
+ * runs the market analyze only, and the spec still points
+ * the screener's analyze node at screener.analysis until
+ * slice 6.
+ */
+export function registerScreenerAnalyzeStep(
+  registry: JobStepRegistry,
+  deps: AnalyzeStepDeps,
+): void {
+  registry.register(ANALYZE_SCREENER_STEP, async (ctx: JobStepContext) => {
+    const def = resolveAnalyzeStepJob(deps, ANALYZE_SCREENER_STEP, ctx);
+    if (!deps.analyzedStore) throw analyzeNotConfigured(def.id, "the analyzed-dataset store");
+
+    if (ctx.params.inputMode !== "handOff") {
+      if (!deps.enrichedStore) throw analyzeNotConfigured(def.id, "the enriched-dataset store");
       const input = await deps.enrichedStore.latestUsable(def.enrichJobId);
-      const inputSymbols = input
-        ? input.rows.map((r) => r.symbol.toUpperCase())
-        : [];
-      symbols = feedShardSymbols(inputSymbols, shards, ctx.shardKey) ?? undefined;
+      const symbols = await shardSymbolsForRun(
+        deps,
+        def,
+        ctx,
+        input ? input.rows.map((r) => r.symbol) : [],
+      );
+      return executeAnalyzeStepRun(deps, def, ctx, {
+        ...(symbols ? { symbols } : {}),
+      });
     }
 
-    const result = await runAnalyzeJob(
-      deps.registry,
-      { enrichedStore: deps.enrichedStore, analyzedStore: deps.analyzedStore },
-      def.id,
-      {
-        trigger: ctx.trigger,
-      kind: ctx.runKind,
-        runId: ctx.runId,
-        ...(stringParams(ctx.params.ruleSets)
-          ? { ruleSets: stringParams(ctx.params.ruleSets) }
-          : {}),
-        ...(thresholdsParam(ctx.params.thresholds)
-          ? { thresholds: thresholdsParam(ctx.params.thresholds) }
-          : {}),
-        ...(symbols ? { symbols } : {}),
-      },
-    );
-    if (result.status === "failed") {
-      // The analyze run recorded its own failure in the analyzed
-      // store; the pipeline run fails with the same coded error
-      // so the job's run record and the dataset record agree.
-      throw new Error(
-        `${result.codedError ?? "ANALYZE_RUN_FAILED"}: analyze job "${def.id}" run ${result.runId} failed (${result.errorMessage ?? "no detail"})`,
-      );
+    // The hand-off is refused by name: the mapper's coded
+    // error is rethrown in the step family's `${CODE}: ...`
+    // message form, so a caller reading the failure sees the
+    // code without importing the error class.
+    let handOff;
+    try {
+      handOff = resolveScreenerHandOff(ctx.input);
+    } catch (e) {
+      if (e instanceof AnalyzeJobError) {
+        throw new Error(`${e.code}: ${e.message}`);
+      }
+      throw e;
     }
-    return {
-      output: {
-        analyzeJobId: def.id,
-        enrichJobId: def.enrichJobId,
-        sourceId: def.sourceId,
-        dataset: def.dataset,
-        analyzeRunId: result.runId,
-        artifactId: result.artifactId,
-        status: result.status,
-        requested: result.requested,
-        received: result.received,
-        failed: result.failed,
-        inputArtifactId: result.inputArtifactId,
-        inputRunId: result.inputRunId,
-        ruleCoverage: result.ruleCoverage,
+    const symbols = await shardSymbolsForRun(
+      deps,
+      def,
+      ctx,
+      handOff.rows.map((r) => r.symbol),
+    );
+    return executeAnalyzeStepRun(deps, def, ctx, {
+      ...(symbols ? { symbols } : {}),
+      handOffRows: handOff.rows,
+      handOffLineage: {
+        inputArtifactId: handOff.inputArtifactId,
+        inputRunId: handOff.inputRunId,
+        inputAsOf: handOff.inputAsOf,
       },
-      descriptor: `analyze ${def.sourceId}/${def.dataset}: ${result.received}/${result.requested} rows persisted (artifact ${result.artifactId}, input run ${result.inputRunId})`,
-    };
+    });
   });
 }
 

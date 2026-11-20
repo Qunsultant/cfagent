@@ -132,6 +132,20 @@ bespoke flow (`runScreenInner` / `screenLive`) keeps its own bind
 until slice 7 (#5828) retires it; the feed stage is visible as a
 generic feed step in Workflow Runs.
 
+The screener's market analyze likewise runs as a generic analyze
+application (#5824, slice 3a): the `analyze.screener` step
+(`src/services/analyzePipelineJobs.ts`) applies the `screen` and
+`factors` rule sets over the gather output, mapped to enriched rows
+by `resolveScreenerHandOff` (`src/services/analyzeJobs.ts`) — the
+parent-hand-off input mode, because the factor grades read quote
+fields the persisted enriched rows do not carry. Standout selection
+is summary output, and parity with the bespoke analyze is pinned by
+`tests/screener_analyze_parity_5824.test.ts` (same quotes → same
+screen signals, momentum scores, factor grades, standouts). The
+spec still points the screener's analyze node at `screener.analysis`
+until slice 6 (#5827) re-points it; the goal branch and the
+portfolio modifier are separate slices (#5873, #5874).
+
 ### 1.3 The one-engine doctrine
 
 The governing rule is the one-engine consolidation doctrine (#3549):

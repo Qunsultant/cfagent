@@ -122,6 +122,15 @@ export {
 export * from "./universes";
 export * from "./screenerConfig";
 export * from "./screenerPipeline";
+// Issue #5824 (#4437 slice 3a): the screener analyze application
+// grades factors through computeFactorGrades — the capability
+// joins the boundary surface by name, so the analyze family
+// reads it through the index instead of a trading-internal path.
+export {
+  computeFactorGrades,
+  type FactorGrades,
+  type GradeableStock,
+} from "./factorGrades";
 export * from "./indexMembership";
 export * from "./screeningSchemas";
 export * from "./screenerReportPdf";

@@ -49,6 +49,7 @@ import {
 } from "./feedPipelineJobs";
 import {
   registerAnalyzeStep,
+  registerScreenerAnalyzeStep,
   type AnalyzeStepDeps,
 } from "./analyzePipelineJobs";
 import {
@@ -449,6 +450,7 @@ export function createPipelineStepRegistry(
   const registry = createFeedStepRegistry(feedDeps);
   registerEnrichStep(registry, enrichDeps);
   if (analyzeDeps) registerAnalyzeStep(registry, analyzeDeps);
+  if (analyzeDeps) registerScreenerAnalyzeStep(registry, analyzeDeps);
   if (generateDeps) registerGenerateStep(registry, generateDeps);
   if (deliverDeps) registerDeliverStep(registry, deliverDeps);
   if (screenerDeps) registerScreenerSteps(registry, screenerDeps);
