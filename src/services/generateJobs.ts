@@ -158,8 +158,16 @@ export class GenerateJobError extends Error {
  * - analysis: the analyzed dataset as a report — lineage,
  *   the recorded universe summary, per-symbol verdicts
  *   (signals + scores + composite), and the analysis gaps.
+ * - screener-report (#5825): the screener's report shape
+ *   over the analyzed dataset — the market-screen title
+ *   and summary, the opportunities (top by composite), the
+ *   screened symbols with their verdicts, and the gaps.
+ *   The rich per-symbol fields the bespoke screener report
+ *   carries (RSI-14, MACD histogram, P/E, company name,
+ *   sector, sentiment, factor grades) are not in the
+ *   analyzed artifact and are not in this document.
  */
-export const GENERATE_REPORT_KINDS = ["analysis"] as const;
+export const GENERATE_REPORT_KINDS = ["analysis", "screener-report"] as const;
 export type GenerateReportKind = (typeof GENERATE_REPORT_KINDS)[number];
 
 export const GENERATE_ALL_REPORT_KINDS: readonly string[] = [...GENERATE_REPORT_KINDS];
@@ -352,8 +360,11 @@ export const GENERATE_JOB_DEFAULTS = {
 } as const;
 
 /** The default generation configuration: the analysis report
- *  in every format this stage can produce. */
-export const GENERATE_DEFAULT_REPORTS: readonly string[] = [...GENERATE_REPORT_KINDS];
+ *  in every format this stage can produce. The screener-report
+ *  kind (#5825) is deliberately NOT a default: it is opt-in
+ *  per job (the REPORTS knob or the step params), so no
+ *  existing generate job silently gains a second report. */
+export const GENERATE_DEFAULT_REPORTS: readonly string[] = ["analysis"];
 export const GENERATE_DEFAULT_FORMATS: readonly string[] = [...GENERATE_FORMATS];
 
 /**
@@ -448,10 +459,69 @@ export function buildReportDocument(args: {
   rows: AnalyzedDatasetRow[];
   partitioned: boolean;
 }): GenerateReportDocument {
-  const { kind, def, inputArtifact, rows, partitioned } = args;
-  // Only the "analysis" kind exists today; validateGenerateReportKinds
-  // has already refused any other name before a run reaches here.
-  void kind;
+  if (args.kind === "screener-report") {
+    return buildScreenerReportDocument(args);
+  }
+  return buildAnalysisReportDocument(args);
+}
+
+/**
+ * The screener-report document (#5825): the screener's report
+ * shape over the analyzed artifact. The title and summary use
+ * the bespoke report's idiom ("Market screen — ...", "N symbols
+ * scanned"); the opportunities are the summary's top by
+ * composite; the rows, the recorded universe summary, the gaps
+ * and the lineage ride verbatim, as with analysis. No matched
+ * count is stated: the analyzed artifact carries no matched
+ * notion, and the document fabricates none.
+ */
+function buildScreenerReportDocument(args: {
+  kind: string;
+  def: GenerateJobDefinition;
+  inputArtifact: AnalyzedDatasetArtifact;
+  rows: AnalyzedDatasetRow[];
+  partitioned: boolean;
+}): GenerateReportDocument {
+  const { def, inputArtifact, rows, partitioned } = args;
+  const s = inputArtifact.summary;
+  const top = s.topByComposite.map((t) => `${t.symbol} (${t.score})`).join(", ") || "none";
+  const bottom =
+    s.bottomByComposite.map((t) => `${t.symbol} (${t.score})`).join(", ") || "none";
+  const summary =
+    `Market screen of ${inputArtifact.universe.label} ${def.dataset} from ${def.sourceId}: ` +
+    `${s.symbols} symbols scanned; breadth ${s.advancers} up / ${s.decliners} down / ${s.flat} flat; ` +
+    `mean composite ${fmtNum(s.meanCompositeScore)}; mean momentum ${fmtNum(s.meanMomentum)}. ` +
+    `Top by composite: ${top}. Bottom by composite: ${bottom}.`;
+  return {
+    kind: "screener-report",
+    title: `Market screen — ${def.sourceId} ${def.dataset} (${inputArtifact.universe.label})`,
+    summary,
+    sourceId: def.sourceId,
+    dataset: def.dataset,
+    universeLabel: inputArtifact.universe.label,
+    partitioned,
+    symbolsRendered: rows.length,
+    inputArtifactId: inputArtifact.id,
+    inputRunId: inputArtifact.run.runId,
+    inputAsOf: inputArtifact.createdAt,
+    analyzeJobId: def.analyzeJobId,
+    enrichJobId: def.enrichJobId,
+    feedJobId: def.feedJobId,
+    ruleSets: [...inputArtifact.ruleSets],
+    inputSummary: s,
+    gaps: inputArtifact.gaps,
+    rows,
+  };
+}
+
+function buildAnalysisReportDocument(args: {
+  kind: string;
+  def: GenerateJobDefinition;
+  inputArtifact: AnalyzedDatasetArtifact;
+  rows: AnalyzedDatasetRow[];
+  partitioned: boolean;
+}): GenerateReportDocument {
+  const { def, inputArtifact, rows, partitioned } = args;
   const s = inputArtifact.summary;
   const top = s.topByComposite.map((t) => `${t.symbol} (${t.score})`).join(", ") || "none";
   const bottom =
@@ -512,6 +582,14 @@ function renderMarkdown(document: GenerateReportDocument): string {
     lines.push(`- Partitioned render: ${document.symbolsRendered} symbols of the input artifact`);
   }
   lines.push("");
+  if (document.kind === "screener-report" && document.inputSummary.topByComposite.length > 0) {
+    lines.push("## Opportunities");
+    lines.push("");
+    for (const t of document.inputSummary.topByComposite) {
+      lines.push(`- ${t.symbol} (${t.score})`);
+    }
+    lines.push("");
+  }
   lines.push("## Symbols");
   lines.push("");
   const header = ["Symbol", "Last price", "Composite", ...document.ruleSets];
@@ -621,6 +699,12 @@ async function renderPdf(
     `Breadth: ${s.advancers} up / ${s.decliners} down / ${s.flat} flat · Mean composite: ${fmtNum(s.meanCompositeScore)} · Mean momentum: ${fmtNum(s.meanMomentum)}`,
     10,
   );
+  if (document.kind === "screener-report" && s.topByComposite.length > 0) {
+    draw(
+      `Opportunities: ${s.topByComposite.map((t) => `${t.symbol} (${t.score})`).join(", ")}`,
+      10,
+    );
+  }
   draw("Symbols:", 12, true);
   for (const row of document.rows) {
     const verdicts = document.ruleSets.map((r) => `${r}: ${signalCell(row, r)}`).join("  ");

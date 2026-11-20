@@ -79,6 +79,29 @@ families are the five pipeline jobs of the job system — see
   `src/services/analyzePipelineJobs.ts:58`);
 - **generate** shapes reports (`generate.apply`,
   `src/services/generatePipelineJobs.ts:61`);
+
+<!-- 5825: screener-report kind — begin -->
+The generate family produces two report kinds
+(`GENERATE_REPORT_KINDS`, `src/services/generateJobs.ts`):
+`analysis` (the analyzed dataset as a report) and
+`screener-report` (#5825, #4437 slice 4) — the screener's
+report shape over the analyzed artifact: the market-screen
+title and summary, the opportunities (top by composite), the
+screened symbols with their verdicts, and the gaps, rendered
+in every format and stored through the canonical leg (#3940)
+where a host wired it. The kind is opt-in per job (the
+`REPORTS` knob or the step params); the built-in default
+stays `analysis`, so no existing generate job silently gains
+a second report. The kind's renders carry only what the
+analyzed artifact carries: the bespoke report's rich
+per-symbol fields (RSI-14, MACD histogram, P/E, company
+name, sector, sentiment, factor grades) are not in the
+analyzed artifact and are not in this document — closing
+that gap needs the analyzed row to carry the screener's
+per-symbol fields (analyze/enrich schema work). No matched
+count is stated either: the analyzed artifact carries no
+matched notion, and the kind fabricates none.
+<!-- 5825: screener-report kind — end -->
 - **deliver** sends through channel senders (`deliver.apply`,
   `src/services/deliverPipelineJobs.ts:68`).
 
