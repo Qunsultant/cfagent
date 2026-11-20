@@ -1,1 +1,1 @@
-{"adsListLimit":20,"ledgerPaymentsDefaultLimit":50,"receiptsDefaultLimit":50,"receiptsMaxLimit":100,"transactionsDefaultLimit":50}
+{"adsListLimit":20,"auditDefaultLimit":50,"ledgerPaymentsDefaultLimit":50,"receiptsDefaultLimit":50,"receiptsMaxLimit":100,"transactionsDefaultLimit":50}
