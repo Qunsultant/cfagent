@@ -87,9 +87,8 @@ import {
   type WorkflowStageRegistry,
 } from "../services/workflowStageSchedule";
 import {
-  controlPipelineStageViaDoor,
-  replayPipelineRunViaDoor,
   definePipelineJobFromSpecViaDoor,
+  jobStatusRouteContext,
   getPipelineJobStatusViaDoor,
   getScheduledAgentDoor,
 } from "./orchestrator/meshDoors";
@@ -3277,29 +3276,12 @@ export class OrchestratorAgent extends PortThink {
     });
     if (definitionsRoute) return definitionsRoute;
 
-    const statusRoute = await handleJobStatusRoutes(request, url, path, {
-      readJobStatus: (engineJobId) => getPipelineJobStatusViaDoor(this.env, engineJobId),
-      // Issue #4362 — the per-stage control ops. The acting login rides
-      // the verified request header (never a body argument); the door
-      // refuses an anonymous call by name.
-      controlJobStage: (engineJobId, stage, operation) =>
-        controlPipelineStageViaDoor(
-          this.env,
-          request.headers.get("x-user-login"),
-          engineJobId,
-          stage,
-          operation,
-        ),
-      // Issue #4467 — replay a past run: a new run of the definition
-      // version the original executed, behind the same operator gate.
-      replayJobRun: (engineJobId, runId) =>
-        replayPipelineRunViaDoor(
-          this.env,
-          request.headers.get("x-user-login"),
-          engineJobId,
-          runId,
-        ),
-    });
+    const statusRoute = await handleJobStatusRoutes(
+      request,
+      url,
+      path,
+      jobStatusRouteContext(this.env, request),
+    );
     if (statusRoute) return statusRoute;
 
     const jobMatch = path.match(/(?:^|\/api)\/jobs\/((?:job(?::|%3A))?[0-9a-f-]{36})$/i);

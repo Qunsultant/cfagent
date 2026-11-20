@@ -107,6 +107,7 @@ import {
   AGENTIC_SPEND_AGENT_ID,
   type PaymentRecord,
 } from "../../payments/ledger";
+import type { JobStatusRouteContext } from "../routes/jobStatus";
 import { tradingAgentName } from "../trading-agent";
 import { getUserDid } from "../did";
 import {
@@ -414,6 +415,26 @@ function resolveStub<T>(
     );
   }
   return namespace.get(namespace.idFromName(instanceName)) as unknown as T;
+}
+
+/**
+ * Issue #4467 — the job-status route context, built where the doors live.
+ * The acting login rides the verified request header (never a body
+ * argument); the doors refuse an anonymous call by name. Kept out of
+ * orchestrator.ts so that file stays inside its standing size budget.
+ */
+export function jobStatusRouteContext(
+  env: Env,
+  request: Request,
+): JobStatusRouteContext {
+  const actingLogin = request.headers.get("x-user-login");
+  return {
+    readJobStatus: (jobId) => getPipelineJobStatusViaDoor(env, jobId),
+    controlJobStage: (jobId, stage, operation) =>
+      controlPipelineStageViaDoor(env, actingLogin, jobId, stage, operation),
+    replayJobRun: (jobId, runId) =>
+      replayPipelineRunViaDoor(env, actingLogin, jobId, runId),
+  };
 }
 
 export function getScheduledAgentDoor(env: Env): ScheduledAgentDoorStub {
