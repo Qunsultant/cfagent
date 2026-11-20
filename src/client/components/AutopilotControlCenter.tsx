@@ -10,6 +10,9 @@ import type { JobRunTrigger } from "../../data/jobRunRecordPorts";
 import { csrfHeaders } from "../apiFetch";
 import type { RunDetail } from "../../services/runDetails";
 import { RunDetailsModal } from "./RunDetailsModal";
+import { createClientLogger } from "../clientLogger";
+
+const log = createClientLogger("client/AutopilotControlCenter");
 
 /**
  * Limits are defined by the policy engine — the single source of truth shared
@@ -133,10 +136,10 @@ function verdictFlag(value: number | boolean | undefined): boolean {
  * (the #3825 precedent). Anything that cannot be parsed renders as
  * Unparseable or missing values render as "—" — a raw stored string must never
  * reach the page, which is how two rows in the same table ended up in different
- * formats. (No log line here by design: the console-migration ratchet
- * #3515 pins this file at 1 unstructured console.* use and there is no
- * sanctioned client-side logger; the stored value stays queryable server-side
- * in mas_policy_verdicts.)
+ * formats. (Batch 10: the file's one unstructured console.* use is
+ * migrated to the sanctioned client-side logger
+ * (`src/client/clientLogger.ts`); the stored value stays queryable
+ * server-side in mas_policy_verdicts.)
  */
 export function formatAutopilotTimestamp(value: string | number | null | undefined): string {
   if (value === null || value === undefined || value === "") return "—";
@@ -962,7 +965,10 @@ export function AutopilotControlCenter({
       setActions((prev) => [newAction, ...prev.filter((p) => p.id !== newAction.id).slice(0, 49)]);
       void fetchAutopilotState();
     } catch (err) {
-      console.warn("[Autopilot] Policy check failed:", err);
+      log.warn("autopilotControlCenter.policy_check_failed", {
+        message: "[Autopilot] Policy check failed",
+        error: err instanceof Error ? err.message : String(err),
+      });
       setIsServerBacked(false);
       toast.danger("Policy check failed: the policy engine did not answer, so no verdict was recorded.");
     } finally {

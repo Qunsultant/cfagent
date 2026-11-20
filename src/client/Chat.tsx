@@ -64,6 +64,10 @@ import {
   TAB_TO_FEATURE_MAP,
   FeatureDisabledNotice,
 } from "./featureFlags";
+import { createClientLogger } from "./clientLogger";
+
+const log = createClientLogger("client/Chat");
+
 export function Chat({ user }: { user: User }) {
   const [routeSearch, setRouteSearch] = useState<string>(() =>
     typeof window !== "undefined" ? window.location.search : "",
@@ -549,7 +553,10 @@ export function Chat({ user }: { user: User }) {
       setChatResetNotice(purge ? "Chat session and conversation history successfully reset." : "Agent connection re-established.");
       setTimeout(() => setChatResetNotice(null), 4000);
     } catch (err) {
-      console.warn("Failed to contact /api/clear:", err);
+      log.warn("chat.clear_contact_failed", {
+        message: "Failed to contact /api/clear",
+        error: err instanceof Error ? err.message : String(err),
+      });
       setChatResetNotice("Chat session reset locally.");
       setTimeout(() => setChatResetNotice(null), 3000);
     } finally {

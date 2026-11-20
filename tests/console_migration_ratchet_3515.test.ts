@@ -127,6 +127,35 @@
  * fetch failure events) and `screener_delivery_config_1770`
  * (email-skip warnings); no behavior change.
  *
+ * Batch 10 (this slice) migrated `src/client` — 9 files, 13 real
+ * sites — to the same logger, and moved them from REMAINING_PIN to
+ * MIGRATED_ZERO; after batch 10 the remaining total is 6. One pin
+ * correction, the batch-2/batch-6 precedent: the
+ * `src/client/TradeHub.tsx` ceiling of 2 was stale (current main
+ * holds 1 real ref — the only `console.*` line in the file), so the
+ * true remaining total before batch 10 was 19, not 20; 19 − 13 = 6,
+ * and REMAINING_PIN sums to 6. Logger construction follows the #5587
+ * ruling (Venus 2026-11-18): no new `createObservabilitySink({})`
+ * module logger anywhere in the slice. The browser has no Cloudflare
+ * env in scope, so the nine files share one new factory,
+ * `src/client/clientLogger.ts`, which builds each module logger over
+ * the EXPLICIT `ConsoleObservabilitySink` (the ScreenerEventBus /
+ * d1QueryLogger fallback precedent) — events emit as one structured
+ * JSON line on `console.info`, the same shape the server-side
+ * fallback emits. The transitive import graph is browser-safe
+ * (structuredLogger → observabilityPorts → resourceEventGuard, zero
+ * imports; only `crypto.getRandomValues`, `TextEncoder`, `Date`,
+ * `BigInt` at runtime; the one messaging import is type-only and
+ * erased) and the client already imports outside `src/client/`
+ * (`../trading`, `../services`, `../data`); `vite build` proves the
+ * bundle. The AutopilotControlCenter doc comment that said "there is
+ * no sanctioned client-side logger" is updated — the factory is the
+ * sanctioned logger now. No test asserted on the migrated lines (the
+ * whole-tree console-spy grep found none; `error_boundary.test.tsx`
+ * asserts on state/render only); no behavior change. The neutrality
+ * census does not trip: none of the new event names or `component:`
+ * lines contains a census term (`slack` is not a census term).
+ *
  * Batch 8 (this slice) migrated `src/security` — all 14 files, 29 real
  * sites — to the same logger, and moved them from REMAINING_PIN to
  * MIGRATED_ZERO; after batch 8 the remaining total is 41. No pin
@@ -393,6 +422,15 @@ const MIGRATED_ZERO: readonly string[] = [
   "src/breakers/breakerPorts.ts",
   "src/breakers/createBreakerPorts.ts",
   "src/breakers/durableBreakerAdapter.ts",
+  "src/client/Chat.tsx",
+  "src/client/ErrorBoundary.tsx",
+  "src/client/FirstRunScreen.tsx",
+  "src/client/ScheduledOptionsManager.tsx",
+  "src/client/TradeHub.tsx",
+  "src/client/chat/AgentChatTabContent.tsx",
+  "src/client/components/AutopilotControlCenter.tsx",
+  "src/client/firstRunApi.ts",
+  "src/client/options/StrategyDiscoveryPanel.tsx",
   "src/config/agenticPaymentsModes.ts",
   "src/config/apiIngressModes.ts",
   "src/config/etapiConfig.ts",
@@ -560,15 +598,6 @@ const MIGRATED_ZERO: readonly string[] = [
  * never exceed it; a file absent here must be at zero.
  */
 const REMAINING_PIN: Readonly<Record<string, number>> = {
-  "src/client/Chat.tsx": 1,
-  "src/client/TradeHub.tsx": 2,
-  "src/client/ErrorBoundary.tsx": 1,
-  "src/client/FirstRunScreen.tsx": 2,
-  "src/client/ScheduledOptionsManager.tsx": 2,
-  "src/client/chat/AgentChatTabContent.tsx": 2,
-  "src/client/components/AutopilotControlCenter.tsx": 1,
-  "src/client/firstRunApi.ts": 1,
-  "src/client/options/StrategyDiscoveryPanel.tsx": 2,
   "src/observability/observabilityPorts.ts": 2,
   "src/trading/channels/intake.ts": 3,
   "src/trading/options/unifiedOptionsService.ts": 1,

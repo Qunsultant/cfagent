@@ -39,6 +39,10 @@ import {
   TextInput,
 } from "../components/ui";
 import { CardHeader } from "../components/ui";
+import { createClientLogger } from "../clientLogger";
+
+const log = createClientLogger("client/AgentChatTabContent");
+
 /* Issue #5843 — the Griffel blocks became tokens-only classes in
    primitives.css; these maps keep every `styles.x` call site unchanged. */
 const composerStyles = { composerInput: "ui-chat-composer-input" };
@@ -260,7 +264,10 @@ export function AgentChatTabContentInner({
       } as any);
       return true;
     } catch (err) {
-      console.error("Failed to send chat message:", err);
+      log.error("agentChatTabContent.send_chat_message_failed", {
+        message: "Failed to send chat message",
+        error: err instanceof Error ? err.message : String(err),
+      });
       return false;
     }
   };
@@ -312,7 +319,10 @@ export function AgentChatTabContentInner({
         metadata: { sourceTab: effectiveSource, userLogin: user.login },
       } as any);
     } catch (err) {
-      console.error("Failed to send chip action:", err);
+      log.error("agentChatTabContent.send_chip_action_failed", {
+        message: "Failed to send chip action",
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   };
 

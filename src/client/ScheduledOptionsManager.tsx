@@ -100,6 +100,9 @@ export {
   parseSymbolsText,
   validateScheduleCriteriaClient,
 } from "./scheduledOptionsManager/payloadBuilders";
+import { createClientLogger } from "./clientLogger";
+
+const log = createClientLogger("client/ScheduledOptionsManager");
 
 export function ScheduledOptionsManager({
   activeEnv = "sandbox",
@@ -252,7 +255,10 @@ export function ScheduledOptionsManager({
       // fetch was untyped; the rows are the same endpoint's rows.
       setSchedules(items as unknown as ScheduledTaskItem[]);
     } catch (err: any) {
-      console.warn("[ScheduledOptionsManager] Note on fetching schedules:", err);
+      log.warn("scheduledOptionsManager.fetch_schedules_failed", {
+        message: "[ScheduledOptionsManager] Note on fetching schedules",
+        error: err instanceof Error ? err.message : String(err),
+      });
       setSchedules([]);
       // A server error message rides the thrown error (as before,
       // when the else branch read data.error); a bare transport
@@ -575,7 +581,10 @@ export function ScheduledOptionsManager({
         try {
           await cancelSchedule(editingScheduleId, authHeaders());
         } catch (priorErr) {
-          console.warn("[ScheduledOptionsManager] Note on prior schedule cancellation:", priorErr);
+          log.warn("scheduledOptionsManager.prior_schedule_cancel_failed", {
+            message: "[ScheduledOptionsManager] Note on prior schedule cancellation",
+            error: priorErr instanceof Error ? priorErr.message : String(priorErr),
+          });
         }
       }
 

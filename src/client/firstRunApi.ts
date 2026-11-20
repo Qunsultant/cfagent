@@ -57,6 +57,9 @@ import { apiFetch, asyncJobErrorCode } from "./apiFetch";
 import { codedMessage, resolveOutcome } from "../outcomes/outcomeAspects";
 
 import { COMMERCIAL_API_BASE } from "../data/commercialUrlCatalog";
+import { createClientLogger } from "./clientLogger";
+
+const log = createClientLogger("client/firstRunApi");
 const BASE = COMMERCIAL_API_BASE;
 
 /** The identity shape the #2219 self-only read endpoint returns. */
@@ -464,7 +467,9 @@ export function markFirstRunComplete(userLogin: string): void {
   try {
     globalThis.localStorage.setItem(firstRunStorageKey(userLogin), "1");
   } catch (err) {
-    // eslint-disable-next-line no-console
-    console.warn("first-run completion could not be persisted", err);
+    log.warn("firstRunApi.first_run_completion_persist_failed", {
+      message: "first-run completion could not be persisted",
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 }

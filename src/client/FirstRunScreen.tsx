@@ -77,6 +77,9 @@ import { codedMessage } from "../outcomes/outcomeAspects";
 import { NotificationPreferencesPanel } from "./NotificationPreferencesPanel";
 import { ProfileSection } from "./ProfileSection";
 import { fetchProfile, type UserProfileView } from "./profileApi";
+import { createClientLogger } from "./clientLogger";
+
+const log = createClientLogger("client/FirstRunScreen");
 
 export interface FirstRunScreenProps {
   /** Session login, used only as the completion-store key. */
@@ -326,8 +329,10 @@ export function FirstRunScreen({ userLogin, initialStep, onComplete, onDismiss, 
 
   const persistStep = (next: Step, extra?: { trialPlanId?: string }) => {
     void saveOnboardingState({ currentStep: next, ...(extra ?? {}) }).catch((err) => {
-      // eslint-disable-next-line no-console
-      console.warn("onboarding step could not be persisted", err);
+      log.warn("firstRunScreen.onboarding_step_persist_failed", {
+        message: "onboarding step could not be persisted",
+        error: err instanceof Error ? err.message : String(err),
+      });
     });
   };
 
@@ -365,8 +370,10 @@ export function FirstRunScreen({ userLogin, initialStep, onComplete, onDismiss, 
         // Server completion is best-effort at Finish: the
         // localStorage flag below is the fallback, and the screen
         // must never brick the hub on a state-store failure.
-        // eslint-disable-next-line no-console
-        console.warn("onboarding completion could not be persisted server-side", err);
+        log.warn("firstRunScreen.onboarding_completion_persist_failed", {
+          message: "onboarding completion could not be persisted server-side",
+          error: err instanceof Error ? err.message : String(err),
+        });
       })
       .finally(() => {
         markFirstRunComplete(userLogin);
