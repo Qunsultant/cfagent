@@ -44,8 +44,14 @@ const PRE_CHANGE_PROMPT_CHARS = 10_193;
  * or Alpaca on an activated Stock Copilot turn) and measured 6,164
  * chars; the pin moves to 6,200 to keep that money-path steering while
  * retaining the anti-bloat ceiling.
+ * #4741 adds the one BizCopilot tenant-administration steering line
+ * ('tool_openaimp_manage_tenants', 358 chars: the six activities, the
+ * tenant-id requirement, and the Tenants page link) and measures 6,546
+ * chars (pre-change 6,188 — 24 chars of drift since #3812); the pin
+ * moves to 6,600 to keep that filed steering while retaining the
+ * anti-bloat ceiling.
  */
-const PROMPT_SIZE_PIN_CHARS = 6_200;
+const PROMPT_SIZE_PIN_CHARS = 6_600;
 
 describe("issue #2719 — moved documentation bulk is out of the prompt", () => {
   it("drops the Platform Workflows & UI Navigation Map section", () => {

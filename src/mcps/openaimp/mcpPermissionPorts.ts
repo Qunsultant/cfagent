@@ -453,11 +453,16 @@ export const MCP_TOOL_SCOPES: Record<string, McpScope> = {
   // places nothing; the decision is what authorizes settlement).
   start_trade_approval: "mcp:trade",
   decide_trade_approval: "mcp:trade",
-  // admin (4)
+  // admin (5)
   get_audit_events: "mcp:admin",
   list_database_tables: "mcp:admin",
   query_table_data: "mcp:admin",
   get_revenue_summary: "mcp:admin",
+  // Issue #4741 (BizCopilot): tenant administration — platform-wide
+  // reads + writes (create, settings-update) through the Tenants page's
+  // own routes; the platform-privilege scope, so the GAP-4 adapter
+  // restricts it to roles holding audit:read / audit:export / role:assign.
+  manage_tenants: "mcp:admin",
 };
 
 /**
