@@ -1,0 +1,6 @@
+{
+  "_comment": "Issue #4424 — shard-chain dispatch pacing. One source for the numbers the options chain dispatcher uses; no module hardcodes them. inFlightCap: shards released in the initial burst of one chain dispatch; paceIntervalMs: spacing between the shards released after that burst (dispatch-rate backpressure); staggerMs: spacing between shard starts inside the burst (the value the dispatcher previously hardcoded as 1000).",
+  "inFlightCap": 8,
+  "paceIntervalMs": 2000,
+  "staggerMs": 1000
+}
