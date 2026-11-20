@@ -121,7 +121,7 @@ const STORAGE_ALLOW_LIST: Array<[string, number, string]> = [
   // ladderStateStore.ts (4), and screenerResearch.ts mas_promotions (2)
   // into src/data/ ports & adapters.
   ["src/actors/cfAgentsAdapter.ts", 1, "permanent — Agents-SDK shim (ADR-out)"],
-  ["src/services/receiptSurface.ts", 2, "issue #2543 receipt read-back: meter + tier reads over the sql seam (usage port drops detail_json; no port path exists)"],
+  ["src/services/receiptSurface.ts", 3, "issue #2543 receipt read-back: meter + tier reads over the sql seam (usage port drops detail_json; no port path exists); #3185 adds the tenant-scoped meter read beside the login read (#4601 keeps the route login-scoped)"],
   ["src/agents/routes/orchestratorMigration.ts", 3, "issue #2681 orchestrator migration: DO-internal table export/import — sqlite_master discovery, SELECT *, INSERT OR REPLACE; the migration driver must read the source instance's own storage, no port path exists for cross-instance table copy"],
   ["src/agents/routes/schedules.ts", 3, "issue #1766 nightly retention legs: DO-internal orphan-sweep read (body_r2_key), sqlite_master discovery, and per-table SELECT * for the R2 snapshot; the pass runs inside the DO and reads its own storage, no port path exists for own-instance table dump"],
   // Issue #2437: checkpointed audit-chain verification — one read-only
@@ -263,7 +263,11 @@ const STEP4D_DATA_LAYER_FILES: Array<[string, number]> = [
   // 9 since #3185: the ensure probe (PRAGMA table_info) +
   // conditional tenant_id ALTER + tenant index exec + the
   // listByTenant SELECT (tenant-filtered meter read).
-  ["src/data/doSqliteUsageEventAdapter.ts", 9],
+  // 13 since #3185 bridge: pruneBefore's COUNT + DELETE, the
+  // deleteByUser DELETE, and the countByUser COUNT (retention/
+  // DSAR legs in both DOs — prune must run in the instance
+  // that holds the rows, or tenant totals misstate).
+  ["src/data/doSqliteUsageEventAdapter.ts", 13],
   ["src/data/orchestratorTablePorts.ts", 0],
   ["src/data/canonicalReportStorePorts.ts", 0],
   ["src/data/createOrchestratorTablePorts.ts", 0],
@@ -345,7 +349,8 @@ describe("global D-D census: surface 1 — storage-shaped sites above the layer"
     // live-check route's 2 (DO-internal SELECT-only read, same
     // class) → 18; issue #2437 adds the checkpointed audit-chain
     // verification's 1 (bounded rowid-window read; no port can
-    // express a rowid window) → 19.
+    // express a rowid window) → 19; issue #3185 bridge adds
+    // the receipt surface's tenant-scoped meter read → 20.
     // #3917: derived from the allow-list, not a hand-bumped literal — a new
     // dispositioned slice adds sites and its allow-list row together.
     expect(total).toBe(STORAGE_ALLOW_LIST.reduce((sum, [, sites]) => sum + sites, 0));
@@ -1121,7 +1126,9 @@ const STEP5B_PORT_SITES: Array<[string, string, number]> = [
   ["src/server/routes/platform.ts", "wiredMembershipStore", 2],
   // #4116 (2026-11-12): the /api/ops/run-ledger-reconcile route composes
   // wiredMembershipStore once, following the IAAA admin pattern; 4 -> 5.
-  ["src/server/routes/privacy.ts", "wiredMembershipStore", 5],
+  // #3185 bridge (2026-11-20): the /api/ops/usage-events-reconcile
+  // route composes wiredMembershipStore once, same pattern; 5 -> 6.
+  ["src/server/routes/privacy.ts", "wiredMembershipStore", 6],
 ];
 
 describe("global D-D census: step 5b — session family port composition sites (#2433)", () => {

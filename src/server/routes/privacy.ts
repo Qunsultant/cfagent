@@ -41,10 +41,12 @@ import { actorGateway } from "../../services/cloudflareActorGateway";
 import { createRetentionPurgeStore, runRetentionPurgeForTenant } from "../../data/createRetentionPorts";
 import type { ReconcileShardJobsReport } from "../../data/shardJobProjection";
 import { resolveIaaaTenant } from "../../security/iaaaGithubEndToEnd";
-import { handleAuditHistoryRoute, handleReportsRoute, handleReconcileRunLedgerRoute, handleSeedReportsRoute } from "../../data/auditReportRoute";
+import { handleAuditHistoryRoute, handleReportsRoute, handleReconcileRunLedgerRoute, handleReconcileUsageEventsRoute, handleSeedReportsRoute } from "../../data/auditReportRoute";
 import { createAuditReportAdapter, readAuditHistory, readReports } from "../../data/createAuditReportPorts";
 import { createRunLedgerAdapter } from "../../data/createRunLedgerPorts";
 import type { ReconcileRunLedgerResult } from "../../agents/orchestrator/runLedgerReconcile";
+import type { ReconcileUsageEventsResult } from "../../agents/orchestrator/usageEventsReconcile";
+import { createUsageEventMirrorAdapter } from "../../data/createUsageEventMirrorPorts";
 import { isLoginShaped } from "../../security/serviceIdentity";
 import type { SeedCanonicalReportsResult } from "../../data/auditReportProjection";
 
@@ -185,6 +187,21 @@ export async function handlePrivacyRoutes(request: Request, env: Env, url: URL, 
         });
       }
       // /api/privacy/erasure
+      // Issue #3185 (bridge slice): usage_events is the first
+      // table with a per-subject delete RPC on the DOs
+      // (OrchestratorAgent.eraseUsageEventsData fans out to the
+      // login's ResearchAgent instance and the D1 mirror), so it
+      // gets a live leg below. The other DO legs stay deferred
+      // — no per-subject delete RPC exists for those stores on
+      // current main (#1765 follow-up) — and the report stays
+      // honestly incomplete until that follow-up wires them.
+      const usageEventsStub = (login: string) =>
+        actorGateway.stub<{
+          eraseUsageEventsData(
+            userLogin: string,
+          ): Promise<{ deleted: number; residual: number }>;
+          countUsageEventsData(userLogin: string): Promise<number>;
+        }>(env.ORCHESTRATOR_AGENT, login);
       const legs: ErasureLeg[] = [
         {
           name: "session",
@@ -195,6 +212,19 @@ export async function handlePrivacyRoutes(request: Request, env: Env, url: URL, 
             return { deleted: before ? 1 : 0, residual: after ? 1 : 0 };
           },
           count: async (s) => ((await kv.get(`privacy:prefs:${s}`).catch(() => null)) ? 1 : 0),
+        },
+        {
+          name: "usage_events",
+          erase: async () => {
+            const login = session?.githubLogin ?? "";
+            if (!login) throw new Error("usage-events erasure requires a wired session login.");
+            return usageEventsStub(login).eraseUsageEventsData(login);
+          },
+          count: async () => {
+            const login = session?.githubLogin ?? "";
+            if (!login) return 0;
+            return usageEventsStub(login).countUsageEventsData(login);
+          },
         },
         {
           name: "orchestrator",
@@ -799,6 +829,79 @@ export async function handlePrivacyReportsRoutes(request: Request, env: Env, url
         isPlatformAdmin,
         tenantId: resolveIaaaTenant(env),
         runReconcile: () => stub.reconcileRunLedgerProjection({ limit }),
+      });
+    }
+
+    // --- Usage-events reconcile (issue #3185, bridge slice, sweep
+    // carrier) --- POST /api/ops/usage-events-reconcile: the
+    // deliberate operator invocation point for the one-off
+    // usage-events backfill + 365d prune pass. Gating reuses the
+    // IAAA admin pattern exactly (requireAuth → wired session →
+    // live platform-admin membership, fail-closed, no data on
+    // 403). Never auto-run: no boot, deploy, or tick path calls
+    // it. Runs on the named Orchestrator instance (optional
+    // `instance` in the JSON body — a login for a per-user
+    // instance; default the shared instance, whose saga rows are
+    // the third split half). No instance enumeration exists, so
+    // the operator names the instance; a second call reconciles
+    // zero rows when everything is already current.
+    if (path === "/api/ops/usage-events-reconcile") {
+      const session = await requireAuth(request, env);
+      let isPlatformAdmin = false;
+      if (session?.internalUserId) {
+        try {
+          const overview = await buildAdminOverview(
+            {
+              membershipStore: wiredMembershipStore(env),
+              auditStore: createWiredAuditStore(env),
+              kv: sessionStore(env),
+              tenantId: resolveIaaaTenant(env),
+              nowMs: Date.now(),
+            },
+            { callerInternalUserId: session.internalUserId },
+          );
+          isPlatformAdmin = overview.allowed;
+        } catch {
+          return Response.json({ error: "Usage-events reconcile unavailable." }, { status: 500 });
+        }
+      }
+      if (!createUsageEventMirrorAdapter(env)) {
+        return Response.json(
+          { error: "Usage-events reconcile unavailable: AgentDB is not bound." },
+          { status: 503 },
+        );
+      }
+      let body: { instance?: unknown; limit?: unknown } = {};
+      try {
+        body = (await request.json()) as typeof body;
+      } catch {
+        body = {};
+      }
+      const instance =
+        typeof body.instance === "string" && body.instance.trim() !== ""
+          ? body.instance.trim()
+          : SHARED_ORCHESTRATOR_INSTANCE;
+      if (instance !== SHARED_ORCHESTRATOR_INSTANCE && !isLoginShaped(instance)) {
+        return Response.json(
+          { error: "Usage-events reconcile refused: instance must be a login or the shared instance." },
+          { status: 400 },
+        );
+      }
+      const limit =
+        typeof body.limit === "number" && Number.isFinite(body.limit)
+          ? body.limit
+          : undefined;
+      const stub = actorGateway.stub<{
+        reconcileUsageEventsProjection(args?: {
+          limit?: number;
+        }): Promise<ReconcileUsageEventsResult>;
+      }>(env.ORCHESTRATOR_AGENT, instance);
+      return handleReconcileUsageEventsRoute({
+        session,
+        method: request.method,
+        isPlatformAdmin,
+        tenantId: resolveIaaaTenant(env),
+        runReconcile: () => stub.reconcileUsageEventsProjection({ limit }),
       });
     }
   return null;

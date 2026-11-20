@@ -1323,6 +1323,21 @@ export const MIGRATION_0076_JOB_RUN_DEFINITION_VERSION: DataMigration = {
   name: "0076_job_run_definition_version",
   sql: d1MigrationSql(76),
 };
+
+/**
+ * Issue #3185 (bridge slice) — the D1 mirror of usage_events
+ * (agent_usage_events + tenant/user indexes). Additive: the table
+ * only, no seed — there is no D1 source table to backfill from
+ * (the #5865 D1→D1 seed does not fit: the source rows live only
+ * in DO SQLite), so the mirror fills through the projection hook
+ * (live) + the reconcile sweep (one-off backfill, POST
+ * /api/ops/usage-events-reconcile).
+ */
+export const MIGRATION_0077_USAGE_EVENTS_MIRROR: DataMigration = {
+  version: 77,
+  name: "0077_usage_events_mirror",
+  sql: d1MigrationSql(77),
+};
 export const MIGRATION_0058_PRODUCT_VERSIONS: DataMigration = {
   version: 58,
   name: "0058_product_versions",
@@ -1565,6 +1580,7 @@ export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANC
   MIGRATION_0074_JOB_PIPELINE_DEFINITION_VERSIONS,
   MIGRATION_0075_JOB_INSTANCE_DEFINITION_VERSION,
   MIGRATION_0076_JOB_RUN_DEFINITION_VERSION,
+  MIGRATION_0077_USAGE_EVENTS_MIRROR,
 ];
 
 function splitStatements(sqlText: string): string[] {

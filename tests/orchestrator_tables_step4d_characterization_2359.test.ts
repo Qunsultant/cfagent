@@ -117,6 +117,7 @@ import {
   storeReportAtGenerationWithR2,
 } from "../src/services/scheduledReports";
 import { runCanonicalIndexBackfillPage } from "../src/services/reportSemanticIndex";
+import { DoSqliteUsageEventStore } from "../src/data/doSqliteUsageEventAdapter";
 
 /** SqlStorage-shaped executor over node:sqlite (real semantics).
  *  Write results carry rowsWritten, mirroring the DO cursor. */
@@ -815,6 +816,32 @@ describe("characterization 4d [seam]: canonical report store", () => {
     expect(listUsageEventsByTenant(sql, "tenant-a").map((e) => e.runId)).toEqual(["run-1"]);
     const cols = Array.from(sql.exec("PRAGMA table_info(usage_events)")) as Array<{ name?: unknown }>;
     expect(cols.map((c) => String(c.name))).toContain("tenant_id");
+  });
+
+  it("retention prune + DSAR delete/count on the DO usage-event store (#3185 bridge)", () => {
+    const sql = seamSql();
+    const store = new DoSqliteUsageEventStore(sql);
+    const seed = (id: string, login: string, createdAt: string) =>
+      sql.exec(
+        `INSERT INTO usage_events (id, user_login, run_id, category, created_at, detail_json, tenant_id) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        id, login, `run-${id}`, "research_run", createdAt, null, "tenant-a",
+      );
+    // ensureSchema via a first record, then direct seeds with
+    // controlled timestamps (the store's prune is 365d).
+    recordUsageEvent(sql, { userLogin: "alice", runId: "run-seed", category: "research_run", tenantId: "tenant-a" });
+    seed("use_old_alice", "alice", "2025-01-01T00:00:00.000Z");
+    seed("use_new_alice", "alice", "2026-11-01T00:00:00.000Z");
+    seed("use_old_bob", "bob", "2025-01-01T00:00:00.000Z");
+    expect(store.countByUser("alice")).toBe(3);
+    expect(store.countByUser("bob")).toBe(1);
+    // The 365d prune drops only the old rows, both logins.
+    expect(store.pruneBefore("2026-01-01T00:00:00.000Z")).toBe(2);
+    expect(store.countByUser("alice")).toBe(2);
+    expect(store.countByUser("bob")).toBe(0);
+    // DSAR delete erases one login only.
+    expect(store.deleteByUser("alice")).toBe(2);
+    expect(store.countByUser("alice")).toBe(0);
+    expect(listUsageEvents(sql, "alice")).toEqual([]);
   });
 
   it("the index backfill page reads stored rows in creation order", async () => {

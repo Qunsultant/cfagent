@@ -222,8 +222,10 @@ describe("4d family census: surface-1 execution sites", () => {
       // 5 since #5235: listAllWithDetail SELECT (revenue-summary
       // coverage cut). 9 since #3185: the ensure probe (PRAGMA) +
       // conditional tenant_id ALTER + tenant index exec + the
-      // listByTenant SELECT.
-      ["src/data/doSqliteUsageEventAdapter.ts", 9],
+      // listByTenant SELECT. 13 since #3185 bridge: pruneBefore's
+      // COUNT + DELETE, the deleteByUser DELETE, and the
+      // countByUser COUNT (retention/DSAR legs).
+      ["src/data/doSqliteUsageEventAdapter.ts", 13],
     ]);
     for (const [f, n] of layer) {
       expect(count(read(f), STORAGE_EXEC_PATTERN), f).toBe(n);

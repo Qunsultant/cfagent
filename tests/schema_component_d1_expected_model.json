@@ -5499,6 +5499,56 @@
         }
       ],
       "constraints": {}
+    },
+    "agent_usage_events": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "pk": 1
+        },
+        {
+          "name": "user_login",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "run_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "category",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "detail_json",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "tenant_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "source_instance",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "projected_at",
+          "type": "TEXT",
+          "pk": 0
+        }
+      ],
+      "constraints": {}
     }
   },
   "indexes": {
@@ -5985,6 +6035,22 @@
       "columns": [
         "started DESC",
         "id DESC"
+      ],
+      "unique": false
+    },
+    "agent_usage_events_tenant_idx": {
+      "table": "agent_usage_events",
+      "columns": [
+        "tenant_id",
+        "created_at DESC"
+      ],
+      "unique": false
+    },
+    "agent_usage_events_user_idx": {
+      "table": "agent_usage_events",
+      "columns": [
+        "user_login",
+        "created_at DESC"
       ],
       "unique": false
     }

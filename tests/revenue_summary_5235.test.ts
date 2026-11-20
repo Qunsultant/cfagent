@@ -303,6 +303,56 @@ describe("2.30 revenue summary cuts (#5235)", () => {
     expect(orm.usageEvents.listByTenant("tenant-none", 10)).toEqual([]);
   });
 
+  it("tenant-scoped summary scopes ONLY the meter coverage cut (#3185 bridge)", () => {
+    const { orm } = freshOrm();
+    orm.usageEvents.insertEvent(
+      buildMeteredCallEvent({
+        receipt: {
+          receiptId: "rc1",
+          protocol: "x402",
+          payer: "0xpayer",
+          amount: 0.05,
+          currency: "USDC",
+          network: "base-sepolia",
+        } as never,
+        userLogin: "u1",
+        category: "options_screener",
+        priceUSD: 0.05,
+        tier: "Free",
+        tenantId: "tenant-a",
+      }),
+    );
+    orm.usageEvents.insertEvent(
+      buildCoveredCallEvent({
+        coverageId: "cov-1",
+        userLogin: "u2",
+        category: "stock_signals",
+        priceUSD: 0.02,
+        tier: "Subscribed",
+        tenantId: "tenant-b",
+      }),
+    );
+    const a = orm.getRevenueSummary("tenant-a");
+    expect(a.runRevenueByCoverage).toEqual([
+      { coverage: "paid", runs: 1, revenue: 0.05, listValue: 0.05 },
+      { coverage: "subscription_included", runs: 0, revenue: 0, listValue: 0 },
+      { coverage: "credits", runs: 0, revenue: 0, listValue: 0 },
+    ]);
+    const b = orm.getRevenueSummary("tenant-b");
+    expect(b.runRevenueByCoverage).toEqual([
+      { coverage: "paid", runs: 0, revenue: 0, listValue: 0 },
+      { coverage: "subscription_included", runs: 1, revenue: 0, listValue: 0.02 },
+      { coverage: "credits", runs: 0, revenue: 0, listValue: 0 },
+    ]);
+    // The other cuts stay platform-wide BY DESIGN: subscription /
+    // pay-per-run cuts read mas_transactions, whose tenant
+    // stamping is partial per #3182 (x402/drafts NULL), so
+    // scoping them would silently drop paid revenue. The ad cut
+    // proves it — identical under both tenant scopes.
+    expect(a.adNetworkRevenue).toBeCloseTo(62.81);
+    expect(b.adNetworkRevenue).toBeCloseTo(62.81);
+  });
+
   it("malformed meter detail never breaks the summary", () => {
     const { orm } = freshOrm();
     orm.usageEvents.insertEvent({

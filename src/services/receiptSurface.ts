@@ -131,6 +131,19 @@ export interface ReceiptsResult {
 export const METER_RECEIPTS_SQL =
   "SELECT id, user_login, run_id, category, created_at, detail_json FROM usage_events WHERE user_login = ? ORDER BY created_at DESC LIMIT ?";
 
+/**
+ * Issue #3185 (bridge slice) — the tenant-scoped meter read,
+ * beside the login read (SEARCHes idx_usage_events_tenant,
+ * stamped by the stamp slice). The session route stays
+ * login-scoped (RECEIPTS_SCOPE_BOUNDARY, #4601): this read is
+ * the operator/tenant side — one tenant's meter rows across
+ * every login that stamped it. DO-half only: the ResearchAgent
+ * half is visible through the D1 mirror's listByTenant, never
+ * through this DO sql.
+ */
+export const METER_RECEIPTS_BY_TENANT_SQL =
+  "SELECT id, user_login, run_id, category, created_at, detail_json FROM usage_events WHERE tenant_id = ? ORDER BY created_at DESC LIMIT ?";
+
 /** Exact tier-decision read (SEARCHes idx_mas_events_session_type). */
 export const TIER_DECISIONS_SQL =
   "SELECT * FROM mas_events WHERE session_id = ? AND type = ? ORDER BY created_at DESC LIMIT ?";
@@ -278,6 +291,31 @@ export interface ReceiptOrm {
 }
 
 /** Meter rows WITH detail_json (the usage port's listByUser drops it). */
+function toMeterReceiptRow(r: Record<string, unknown>): MeterReceiptRow {
+  let detail: Record<string, unknown> | null = null;
+  try {
+    const parsed: unknown = JSON.parse(String(r.detail_json ?? ""));
+    detail = parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : null;
+  } catch {
+    detail = null;
+  }
+  // runId is the receipt id by slice-2 construction, so it is the safe
+  // fallback when detail is corrupt; the row itself proves the served call.
+  return {
+    id: String(r.id ?? ""),
+    runId: String(r.run_id ?? ""),
+    category: String(r.category ?? ""),
+    createdAt: String(r.created_at ?? ""),
+    receiptId:
+      detail && detail.receiptId ? String(detail.receiptId) : String(r.run_id ?? ""),
+    priceUSD:
+      detail && typeof detail.priceUSD === "number" ? (detail.priceUSD as number) : null,
+    tier: detail && detail.tier ? String(detail.tier) : null,
+    protocol: detail && detail.protocol ? String(detail.protocol) : null,
+    detailAvailable: detail !== null,
+  };
+}
+
 export function readMeterRows(
   sql: ReceiptSqlExecutor,
   userLogin: string,
@@ -286,30 +324,23 @@ export function readMeterRows(
   const rows = Array.from(sql.exec(METER_RECEIPTS_SQL, userLogin, limit)) as Array<
     Record<string, unknown>
   >;
-  return rows.map((r) => {
-    let detail: Record<string, unknown> | null = null;
-    try {
-      const parsed: unknown = JSON.parse(String(r.detail_json ?? ""));
-      detail = parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : null;
-    } catch {
-      detail = null;
-    }
-    // runId is the receipt id by slice-2 construction, so it is the safe
-    // fallback when detail is corrupt; the row itself proves the served call.
-    return {
-      id: String(r.id ?? ""),
-      runId: String(r.run_id ?? ""),
-      category: String(r.category ?? ""),
-      createdAt: String(r.created_at ?? ""),
-      receiptId:
-        detail && detail.receiptId ? String(detail.receiptId) : String(r.run_id ?? ""),
-      priceUSD:
-        detail && typeof detail.priceUSD === "number" ? (detail.priceUSD as number) : null,
-      tier: detail && detail.tier ? String(detail.tier) : null,
-      protocol: detail && detail.protocol ? String(detail.protocol) : null,
-      detailAvailable: detail !== null,
-    };
-  });
+  return rows.map(toMeterReceiptRow);
+}
+
+/**
+ * Issue #3185 (bridge slice) — one tenant's meter rows, newest
+ * first. Same mapping as the login read; the caller is the
+ * tenant/operator side, never the session route.
+ */
+export function readMeterReceiptsByTenant(
+  sql: ReceiptSqlExecutor,
+  tenantId: string,
+  limit: number,
+): MeterReceiptRow[] {
+  const rows = Array.from(
+    sql.exec(METER_RECEIPTS_BY_TENANT_SQL, tenantId, limit),
+  ) as Array<Record<string, unknown>>;
+  return rows.map(toMeterReceiptRow);
 }
 
 /** Tier-decision rows for one login. Unparseable payloads are skipped: without the payload there is no tier evidence. */

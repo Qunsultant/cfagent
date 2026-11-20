@@ -2666,6 +2666,58 @@ export const D1_CATALOGUE_ENTRIES: CatalogueEntry[] = [
     form: "literal",
   },
   {
+    // Issue #3185 (bridge slice) — the D1 mirror of usage_events:
+    // the ONE queryable tenant surface across the split DOs
+    // (OrchestratorAgent research_run rows, per-login
+    // ResearchAgent research_evaluation rows, shared_orchestrator
+    // saga rows). Same columns as the DO table plus
+    // source_instance (which DO instance projected the row) and
+    // projected_at (when it landed here). The DO table stays
+    // authoritative; this mirror is a projection — rows are
+    // created, never updated, except the backfill's
+    // NULL-tenant stamp (a write-time NULL filled from the paid
+    // transaction's login). No #5865-style backfill seed lives
+    // here: there is no D1 source table to seed from, so the
+    // mirror fills through the projection hook + the reconcile
+    // sweep (migration 0077 creates the table only).
+    code: "schema.d1.agent_usage_events.create_table",
+    plane: "d1",
+    table: "agent_usage_events",
+    statement: `CREATE TABLE IF NOT EXISTS agent_usage_events (
+  id TEXT PRIMARY KEY,
+  user_login TEXT NOT NULL,
+  run_id TEXT NOT NULL,
+  category TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  detail_json TEXT,
+  tenant_id TEXT,
+  source_instance TEXT,
+  projected_at TEXT NOT NULL
+)`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    code: "schema.d1.agent_usage_events.create_index_agent_usage_events_tenant_idx",
+    plane: "d1",
+    table: "agent_usage_events",
+    index: "agent_usage_events_tenant_idx",
+    statement: `CREATE INDEX IF NOT EXISTS agent_usage_events_tenant_idx
+  ON agent_usage_events (tenant_id, created_at DESC)`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    code: "schema.d1.agent_usage_events.create_index_agent_usage_events_user_idx",
+    plane: "d1",
+    table: "agent_usage_events",
+    index: "agent_usage_events_user_idx",
+    statement: `CREATE INDEX IF NOT EXISTS agent_usage_events_user_idx
+  ON agent_usage_events (user_login, created_at DESC)`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
     code: "schema.d1.agent_tenant_projection_carriers.create_table",
     plane: "d1",
     table: "agent_tenant_projection_carriers",
@@ -3447,6 +3499,11 @@ export const D1_MIGRATION_CODES: Record<number, readonly string[]> = {
   ],
   76: [
     "schema.d1.job_run_records.alter_table_add_column_definition_version",
+  ],
+  77: [
+    "schema.d1.agent_usage_events.create_table",
+    "schema.d1.agent_usage_events.create_index_agent_usage_events_tenant_idx",
+    "schema.d1.agent_usage_events.create_index_agent_usage_events_user_idx",
   ],
   75: [
     "schema.d1.job_pipeline_instances.alter_table_add_column_run_definition_version",

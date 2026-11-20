@@ -42,6 +42,7 @@ import { ensureMasRetentionIndexes } from "../src/data/masRetentionIndexSchema";
 import {
   buildReceipts,
   readReceipts,
+  readMeterReceiptsByTenant,
   resolveGatewayProvenance,
   resolveMeterProvenance,
   METER_RECEIPTS_SQL,
@@ -320,6 +321,30 @@ describe("receipt readers (#2543)", () => {
     expect(out.receipts).toHaveLength(1);
     expect(out.receipts[0].amountUSD).toBeNull();
     expect(out.receipts[0].provenance).toBe("real");
+  });
+
+  it("tenant read returns only that tenant's meter rows; the login read is unchanged (#3185 bridge)", () => {
+    const store = makeStore();
+    const detail = { receiptId: "rcpt_1", priceUSD: 0.05, tier: "PayPerUse", protocol: "x402" };
+    seedMeter(store.sql, {
+      id: "use_a", userLogin: OWNER, runId: "r_a", category: "options_screener",
+      createdAt: "2026-10-31T10:00:00.000Z", detail, tenantId: "tenant-a",
+    });
+    seedMeter(store.sql, {
+      id: "use_b", userLogin: OTHER, runId: "r_b", category: "options_screener",
+      createdAt: "2026-10-31T10:00:00.000Z", detail, tenantId: "tenant-b",
+    });
+    seedMeter(store.sql, {
+      id: "use_null", userLogin: OWNER, runId: "r_n", category: "options_screener",
+      createdAt: "2026-10-31T10:00:00.000Z", detail, tenantId: null,
+    });
+    const tenantRows = readMeterReceiptsByTenant(store.sql, "tenant-a", 50);
+    expect(tenantRows.map((r) => r.id)).toEqual(["use_a"]);
+    // The login-scoped route read is untouched by the tenant read
+    // (#4601 boundary): the owner's rows still read back by login,
+    // including the NULL-tenant row.
+    const loginOut = readReceipts({ sql: store.sql, orm: store.orm }, OWNER, { limit: 50, kind: "meter" });
+    expect(loginOut.receipts.map((r) => r.id).sort()).toEqual(["use_a", "use_null"]);
   });
 });
 

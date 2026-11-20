@@ -383,6 +383,9 @@ describe("5175 slice 4 — no minting elsewhere", () => {
     // - src/server/routes/platform.ts:205 — `research:${userLogin}`
     // - src/agents/orchestrator/researchPublish.ts:196 — idempotency key
     // - src/services/recommendationKernel.ts:369 — baseId
+    // - src/agents/orchestrator.ts:1102 — `research:${login}` (#3185
+    //   bridge: mirror provenance label for the reconcile's research
+    //   leg, not a mint — the stub at :948 is the addressing site)
     // One prose mention — a backtick inside a `"..."` MCP tool
     // description string, not a template and not a mint:
     // - src/mcps/openaimp/researchJobCommands.ts:41
@@ -390,7 +393,7 @@ describe("5175 slice 4 — no minting elsewhere", () => {
     expect(
       countAll(/`research:/g),
       "research: templates: a new one is a new research-id mint outside the leaf",
-    ).toBe(6);
+    ).toBe(7);
   });
 
   it("P12 saga- family is exactly 7", () => {

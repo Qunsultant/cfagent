@@ -21,6 +21,16 @@ import { remainderAlterSql } from "./schemaComponent/remainderCatalogue";
 
 const TABLE = "usage_events";
 
+/**
+ * Issue #3185 (bridge slice) — the usage_events retention window,
+ * days. The ONE runtime value; the retention registries
+ * (storageRetention.ts, privacyDsar.ts) record the same 365d
+ * PRUNE-CLASS. A prune pass must run in every DO instance that
+ * holds rows plus the D1 mirror — a partial prune would misstate
+ * tenant totals.
+ */
+export const USAGE_EVENTS_RETENTION_MAX_AGE_DAYS = 365;
+
 export class DoSqliteUsageEventStore implements UsageEventPort {
   constructor(private readonly sql: CanonicalReportStoreSqlExecutor) {}
 
@@ -122,5 +132,50 @@ export class DoSqliteUsageEventStore implements UsageEventPort {
       detailJson: r.detail_json == null ? null : String(r.detail_json),
       tenantId: r.tenant_id == null ? null : String(r.tenant_id),
     }));
+  }
+
+  /**
+   * Issue #3185 (bridge slice) — retention prune (365d,
+   * PRUNE-CLASS): deletes this instance's rows older than the
+   * cutoff. Returns the deleted count (count-then-delete on the
+   * same connection — exact inside a single-threaded DO turn).
+   * The caller prunes the D1 mirror in the same pass.
+   */
+  pruneBefore(cutoffIso: string): number {
+    this.ensureSchema();
+    const rows = Array.from(
+      this.sql.exec(
+        `SELECT COUNT(*) AS count FROM ${TABLE} WHERE created_at < ?`,
+        cutoffIso
+      )
+    ) as Array<{ count?: unknown }>;
+    const n = rows[0]?.count;
+    const count = typeof n === "number" ? n : 0;
+    if (count > 0) {
+      this.sql.exec(`DELETE FROM ${TABLE} WHERE created_at < ?`, cutoffIso);
+    }
+    return count;
+  }
+
+  /** Issue #3185 (bridge slice) — DSAR erasure for one login. */
+  deleteByUser(userLogin: string): number {
+    this.ensureSchema();
+    const count = this.countByUser(userLogin);
+    if (count > 0) {
+      this.sql.exec(`DELETE FROM ${TABLE} WHERE user_login = ?`, userLogin);
+    }
+    return count;
+  }
+
+  countByUser(userLogin: string): number {
+    this.ensureSchema();
+    const rows = Array.from(
+      this.sql.exec(
+        `SELECT COUNT(*) AS count FROM ${TABLE} WHERE user_login = ?`,
+        userLogin
+      )
+    ) as Array<{ count?: unknown }>;
+    const n = rows[0]?.count;
+    return typeof n === "number" ? n : 0;
   }
 }

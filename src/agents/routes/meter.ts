@@ -50,6 +50,8 @@ import { createSubscriptionAdapter } from "../../data/createSubscriptionPorts";
 import { resolveEffectiveTier } from "../../data/subscriptionPorts";
 import type { StoreTier } from "../../data/commercialPorts";
 import { resolveMeteredTier } from "../../services/meteredPaymentGate";
+import { projectUsageEventBestEffort } from "../../services/usageEventProjectionHooks";
+import type { Env } from "../../types";
 
 import { createStructuredLogger } from "../../observability/structuredLogger";
 import { createObservabilitySink } from "../../observability/createObservabilityPorts";
@@ -163,10 +165,23 @@ export async function handleMeterRoutes(
       // duplicate. Any other store failure propagates to the
       // outer catch.
       if (err instanceof DuplicateUsageEventError) {
+        // Issue #3185 (bridge slice): the row already exists in
+        // this DO — project it anyway (INSERT OR IGNORE in the
+        // mirror): the first attempt's live hook may have missed
+        // it, and a retried step is the repair path for it.
+        await projectUsageEventBestEffort({ env: ctx.env as Env, row });
         return Response.json({ id: row.id, duplicate: true }, { status: 201 });
       }
       throw err;
     }
+    // Issue #3185 (bridge slice): project the row into the D1
+    // mirror. Best-effort, never a gate condition — the hook
+    // never throws, so a projection failure cannot turn this
+    // 201 into a 500 (the reconcile sweep backstops it).
+    // sourceInstance is unknown here — the route carries no
+    // instance label — so the mirror row records null; the
+    // reconcile sweep labels its own instance.
+    await projectUsageEventBestEffort({ env: ctx.env as Env, row });
     return Response.json({ id: row.id, duplicate: false }, { status: 201 });
   } catch (err) {
     // #5606 (G-3): no raw store text reaches the caller; the

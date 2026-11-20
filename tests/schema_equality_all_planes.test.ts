@@ -2,8 +2,8 @@
  * #4282 P4 — schema-equality pin: all planes, one clean instance.
  *
  * What this suite pins (measured, never assumed):
- *  - the combined catalogue (D1 + DO + ORM + remainder, 424 entries)
- *    builds the frozen combined model exactly: 181 tables / 103 indexes.
+ *  - the combined catalogue (D1 + DO + ORM + remainder, 436 entries)
+ *    builds the frozen combined model exactly: 183 tables / 106 indexes.
  *  - the frozen combined model is the deterministic union of the four
  *    per-plane fixtures, with ZERO cross-plane disagreements (column
  *    type / pk / constraint / index). The union is recomputed from the
@@ -72,10 +72,10 @@ function fixtureSha256(name: string): string {
 }
 
 describe("schema equality — all planes (#4282 P4)", () => {
-  it("the frozen combined baseline is the clean-checkout seed (182 tables / 104 indexes)", () => {
+  it("the frozen combined baseline is the clean-checkout seed (183 tables / 106 indexes)", () => {
     const model = combinedExpectedModel();
-    expect(Object.keys(model.tables).length).toBe(182);
-    expect(Object.keys(model.indexes).length).toBe(104);
+    expect(Object.keys(model.tables).length).toBe(183);
+    expect(Object.keys(model.indexes).length).toBe(106);
     expect(fixtureSha256("schema_component_combined_expected_model.json")).toBe(
       COMBINED_FIXTURE_SHA256,
     );
@@ -85,8 +85,10 @@ describe("schema equality — all planes (#4282 P4)", () => {
     // #5865 adds migration 0074 (definition history) in the D1 and DO
     // residencies: d1 tables 101 → 102, do tables 69 → 70, no index change.
     // #3185 (stamp slice): do indexes 40 → 41 (idx_usage_events_tenant).
+    // #3185 bridge adds migration 0077 (agent_usage_events mirror
+    // table + 2 indexes): d1 tables 102 → 103, d1 indexes 60 → 62.
     const counts: Record<string, [number, number]> = {
-      d1: [102, 60],
+      d1: [103, 62],
       do: [70, 41],
       orm: [13, 10],
       remainder: [19, 15],
@@ -121,7 +123,7 @@ describe("schema equality — all planes (#4282 P4)", () => {
     expect(new Set(executedCodes).size).toBe(
       COMBINED_CATALOGUE_ENTRIES.length,
     );
-    expect(COMBINED_CATALOGUE_ENTRIES.length).toBe(433);
+    expect(COMBINED_CATALOGUE_ENTRIES.length).toBe(436);
     // Issue #5229 adds migration 0069 (agent_referral_rules
     // expiry_period_ms column): 410 entries resolve to 421 statements.
     // Issue #5086 adds migration 0070 (otel_config_overrides table):
@@ -142,7 +144,9 @@ describe("schema equality — all planes (#4282 P4)", () => {
     // Issue #3185 (stamp slice) adds 2 entries (the usage_events
     // tenant index in DO + the tenant_id ALTER in remainder),
     // each one statement: 442 → 444 statements.
-    expect(executedStatements).toBe(444);
+    // Issue #3185 bridge adds 3 entries (migration 0077: the
+    // agent_usage_events mirror table + 2 indexes): 444 → 447.
+    expect(executedStatements).toBe(447);
     const actual = instance.introspect();
     const diff = diffSchema(actual, combinedExpectedModel());
     expect(isEmptyDiff(diff)).toBe(true);

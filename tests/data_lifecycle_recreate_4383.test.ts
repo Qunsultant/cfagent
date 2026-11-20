@@ -384,7 +384,9 @@ describe("recreate, tenant scope (#4383)", () => {
     // recent-read index): the D1 step is selected and the ORM
     // plane's duplicate of the same index is skipped, so selected
     // stays 253 and skipped grows 8 → 9.
-    expect(body.d1.selected).toHaveLength(257);
+    // Issue #3185 bridge adds migration 0077 (agent_usage_events
+    // mirror table + 2 indexes): 257 → 260.
+    expect(body.d1.selected).toHaveLength(260);
     expect(body.d1.skipped).toHaveLength(9);
     // Two member instances (alice, bob), each planning the fresh DO leg.
     expect(body.instances).toHaveLength(2);
@@ -451,7 +453,9 @@ describe("recreate, tenant scope (#4383)", () => {
     expect(body.confirmed).toBe(true);
     expect(body.d1.report.outcome).toBe("succeeded");
     // #4767 adds migrations 0071/0072 (4 D1 ALTERs): 249 → 253.
-    expect(body.d1.report.executed).toHaveLength(257);
+    // #3185 bridge adds migration 0077 (agent_usage_events mirror
+    // table + 2 indexes): 257 → 260.
+    expect(body.d1.report.executed).toHaveLength(260);
     expect(body.d1.verification.ok).toBe(true);
     expect(body.instances).toHaveLength(2);
     for (const inst of body.instances) {

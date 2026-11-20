@@ -352,6 +352,18 @@ describe("usage/billing reader route (#2667)", () => {
       detail: { receiptId: "run-2", priceUSD: 0.02, tier: "PayPerUse", protocol: "x402" },
       tenantId: "tenant-2667",
     });
+    // #3185 bridge scope call: NO tenant variant on this surface —
+    // a row for a different login in the SAME tenant must not leak
+    // into the caller's login-scoped view.
+    seedMeter(s.sql, {
+      id: "meter-3",
+      userLogin: OTHER,
+      runId: "run-3",
+      category: "stock",
+      createdAt: "2026-11-01T12:00:00.000Z",
+      detail: { receiptId: "run-3", priceUSD: 0.02, tier: "PayPerUse", protocol: "x402" },
+      tenantId: "tenant-2667",
+    });
     seedTx(s.orm, {
       id: "tx_sim_1",
       customer: OWNER,
@@ -386,7 +398,8 @@ describe("usage/billing reader route (#2667)", () => {
     expect(meter.provenance).toBe("real");
     expect(meter.amountUSD).toBe(0.02);
     // Issue #3185: both meter rows read back — the stamped one
-    // included — on the login-scoped surface.
+    // included — on the login-scoped surface. The same-tenant
+    // row for the other login stays out: no tenant variant here.
     expect(body.usage.receipts.filter((r: any) => r.kind === "meter")).toHaveLength(2);
     const simulated = body.usage.receipts.find((r: any) => r.kind === "transaction");
     expect(simulated).toBeDefined();
