@@ -19,10 +19,10 @@ import {
  *    runs already surface in Workflow Runs through `D1JobRunRecordStore`.
  */
 describe("#5834 — options-chain workflowCatalog decided-not-to pin", () => {
-  it("keeps WORKFLOW_CATALOG at the 7 ruled families with optionsscr owned by options-screener", () => {
+  it("keeps WORKFLOW_CATALOG at the 7 ruled families with optionsscr owned by chain:optionsscr", () => {
     expect(WORKFLOW_CATALOG).toHaveLength(7);
     expect(workflowById("options-chain")).toBeNull();
-    expect(workflowByShortId(OPTIONS_CHAIN_SHORT_ID)?.id).toBe("options-screener");
+    expect(workflowByShortId(OPTIONS_CHAIN_SHORT_ID)?.id).toBe("chain:optionsscr");
   });
 
   it("preserves the 6-stage options-chain definition outside WORKFLOW_CATALOG", () => {
