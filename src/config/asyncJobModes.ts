@@ -425,6 +425,10 @@ export const SYNCHRONOUS_MCP_TOOLS = new Set<string>([
   "dispatch_trading_webhook",
   "slack_dispatch_transaction_snap",
   "slack_send_pre_trade_approval",
+  // Issue #4741: tenant administration answers in the turn (in-process
+  // route calls, bounded, no polling) — a queued job receipt would be
+  // no answer at all.
+  "manage_tenants",
 ]);
 
 const LEGACY_BROKER_TOOL_PREFIX = ["et", "ra", "de_"].join("");

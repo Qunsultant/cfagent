@@ -209,6 +209,31 @@ export const MCP_TOOLS_CATALOG: McpToolMeta[] = [
     sampleArgs: { action: "list" },
   },
   {
+    name: "manage_tenants",
+    category: "System & Audit",
+    description:
+      "Tenant administration through BizCopilot chat — list, create, detail, settings read/update; membership writes are read-only and refused — via the Tenants page's own routes, with the same store-operator gate as the page path.",
+    schema: {
+      type: "object",
+      properties: {
+        action: {
+          type: "string",
+          enum: ["list", "create", "detail", "settings-read", "settings-update", "membership-write-refused"],
+          description: "Tenant administration operation",
+        },
+        tenantId: { type: "string", description: "Tenant id (required for every action except list)" },
+        userId: { type: "string", description: "User id for membership-write-refused" },
+        adsEnabled: { type: "boolean", description: "Settings-update: turn ads on/off" },
+        autoRefreshEnabled: { type: "boolean", description: "Settings-update: turn auto-refresh on/off" },
+        autoRefreshIntervalS: { type: "number", description: "Settings-update: auto-refresh interval in seconds" },
+        dataProviderId: { type: "string", description: "Settings-update: data provider id" },
+        brokerId: { type: "string", description: "Settings-update: broker id" },
+      },
+      required: ["action"],
+    },
+    sampleArgs: { action: "list" },
+  },
+  {
     name: "get_revenue_summary",
     category: "Monetization & Ads",
     description: "Retrieve comprehensive platform revenue breakdown across ad network CPM/CPC earnings, marketplace listings, and processing fees.",

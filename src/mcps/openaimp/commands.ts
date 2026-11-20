@@ -210,6 +210,7 @@ import {
   ListPipelineChainsCommand,
   ManagePipelineChainCommand,
 } from "./chainJobCommands";
+import { ManageTenantsCommand } from "./bizCopilotTenantCommands";
 
 import { searchPlatformKnowledge } from "../../services/platformKnowledge";
 // Issue #3342: the "search" contract's AI-search attempt reads the
@@ -1878,6 +1879,11 @@ export class McpToolFactory {
     this.registerTool(new GetRevenueSummaryCommand());
     this.registerTool(new ManageSessionMemoryCommand());
     this.registerTool(new GetAuditEventsCommand());
+    // Issue #4741 (BizCopilot, umbrella #4514): the tenant-administration
+    // tool — the MCP primary path through chat via the LLM; the
+    // deterministic branch in src/services/bizCopilotTenants.ts stays
+    // as the option for exact commands.
+    this.registerTool(new ManageTenantsCommand());
 
     // E*TRADE Trading & Screening Commands
     this.registerTool(new ETradeMarketScanCommand());

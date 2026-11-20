@@ -11,7 +11,7 @@ and `tests/a2a_entrypoint_auth_1763.test.ts`).
 ## Method and scope
 
 - Inventory source: `src/mcps/openaimp/mcpPermissionPorts.ts`
-  `MCP_TOOL_SCOPES` (134 tools: 125 canonical + 9 deprecated #1906
+  `MCP_TOOL_SCOPES` (156 tools: 147 canonical + 9 deprecated #1906
   aliases, completeness-pinned against the live
   factory registry in both directions by #1843's tests) plus the
   scanner surface (`src/services/cloudflareWalletsScanner.ts`) and
@@ -244,7 +244,7 @@ other doors. Scope column is #1843's declaration, consumed here.
 | `start_trade_approval` | mcp:trade | L via door 2 only — acting identity required (#2375); refused on doors 1/3 (no acting-identity carrier there). Submission only: starts the TradingTradeWorkflow approval run for an existing proposal; places nothing without an approved decision |
 | `decide_trade_approval` | mcp:trade | L via door 2 only — acting identity required (#2375); refused on doors 1/3 (no acting-identity carrier there). The authorizer DID is derived server-side from the acting identity; an approved decision is what authorizes the run's settle |
 
-### mcp:admin (4)
+### mcp:admin (5)
 
 | Tool | Scope | /mcp verdict |
 |---|---|---|
@@ -252,6 +252,7 @@ other doors. Scope column is #1843's declaration, consumed here.
 | `list_database_tables` | mcp:admin | L (I / R on other doors) |
 | `query_table_data` | mcp:admin | L (I / R on other doors) |
 | `get_revenue_summary` | mcp:admin | L (I / R on other doors) |
+| `manage_tenants` | mcp:admin | L (I / R on other doors) |
 
 Note on the sensitive tools: `etrade_execute_order`,
 `alpaca_place_order` (and its deprecated #1906 alias

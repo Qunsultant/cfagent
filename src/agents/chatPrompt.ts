@@ -77,6 +77,14 @@
  * override in the chatNlqModes chain). Absent/false keeps the
  * flagged-off line and the prompt stays byte-identical to the
  * pre-#3727 prompt (the fixtures' contract).
+ *
+ * Issue #4741 (BizCopilot, umbrella #4514): the tenant-administration
+ * tool 'tool_openaimp_manage_tenants' is the MCP primary path through
+ * chat via the LLM; the deterministic branch stays as the option for
+ * exact commands. The steering line below names the tool on every
+ * turn (the catalog auto-merges it into every turn, #2496) and
+ * scopes its use to BizCopilot tenant administration. The fixtures
+ * were re-pointed to the new line in the same PR.
  */
 import type { Env } from "../types";
 import { BROKER_CATALOG, isBrokerId } from "../trading";
@@ -288,6 +296,7 @@ Sub-agent & MCP capabilities directly available to you (the tool_openaimp_* tool
 - 'tool_openaimp_confirm_payment_draft': Approve, authorize, or cancel a pending payment or task draft only upon explicit user confirmation.
 - 'tool_openaimp_execute_nlq': ${input.chatNlqEnabled ? "(Enabled in chat turns by CHAT_NLQ_MODE) Submit a natural-language database, market-data, or options-strategy query as an asynchronous job." : "(Flagged OFF in chat turns by CHAT_NLQ_MODE, default off — not available in this turn; use the structured tools and door commands.)"}
 - 'tool_openaimp_manage_session_memory' / 'rememberFact': Session facts; rule 5 governs when to remember.
+- 'tool_openaimp_manage_tenants': Tenant administration in BizCopilot chat — list, create, detail, settings read/update (membership writes are read-only and refused). For every action except 'list' the tenant id is required: ask the user for it when it is missing instead of calling without it. Report the outcome with the Tenants page link from the result.
 - 'createTaskDraft': Draft actionable tasks with priorities and deadlines.
 - 'tool_openaimp_run_stock_screen': THE universe-screen tool — run a stock screen over a named universe (NASDAQ100, SP500, SP100, RUSSELL2000, TECH, ETF, LEV_ETF, or ALL) as a durable screener workflow.
 - 'tool_openaimp_run_options_strategy_screen': THE options-strategy-screen tool — screen options strategies over a named universe by structured constraints (strategy type from the strategy catalog, maxLoss, minProfit, minRewardRisk, DTE window); never deflect that request to a UI workflow (rule 6).
