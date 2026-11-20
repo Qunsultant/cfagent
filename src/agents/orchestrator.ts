@@ -134,6 +134,7 @@ import { submitChatTurn, awaitChatTurnSubmission, type DurableTurnContext, type 
 import type { ScreenerRunOutcome } from "../services/screenerFollowups";
 import { marketDateKey, readAutopilotStateRaw, getAutopilotState, writeAutopilotState, incrementAutopilotOrdersToday, fetchBrokerBalanceSnapshot, openNotionalForSymbol, evaluateAndRecordAutopilotVerdict, type AutopilotContext } from "./orchestrator/autopilot";
 import { readSettingRaw, writeSetting, getReportDispatchHitl, setReportDispatchHitl, createReportConfirmation, getReportConfirmation, decideReportConfirmation, storeResearchReportCanonicalAsync, confirmationDeliveryMeta, deliverStoredReportEmail, deliverStoredReportWebhook, persistScreenerReportCanonical, persistParentScreenReportCanonical, persistPipelineGenerateReportCanonical, persistOptionsServeReport, refreshCanonicalPdfFields, sendReportEmail, sendReportWebhook, type ReportDispatchContext } from "./orchestrator/reportDispatch";
+import { assessReplyCompleteness } from "./orchestrator/replyCompleteness";
 import { extractMessageText, createTurnTools, deriveTurn, assembleGrounding, type ChatTurnHelpersContext } from "./orchestrator/chatTurnHelpers";
 import { createOpenaimpMcpFetch, ensureOpenaimpMcpConnection, chatNlqTurnGate, resolveStockCopilotMcpActivation, STOCK_COPILOT_SOURCE_TAB, type ChatNlqTurnGateResult, type EnsureOpenaimpMcpResult } from "./orchestrator/meshMcpClient";
 import { logChatActivity, enqueueHttpRequest, type HttpEntryContext } from "./orchestrator/httpEntry";
@@ -2988,6 +2989,16 @@ export class OrchestratorAgent extends PortThink {
     const turn = this.pendingTurn;
     this.pendingTurn = undefined;
     if (!turn || result.status === "error" || !result.message) return;
+    // #5899: every turn is checked against the final-reply contract.
+    const completeness = assessReplyCompleteness(result.message);
+    if (!completeness.complete) {
+      this.audit("chat.reply_incomplete", "orchestrator", {
+        requestId: turn.requestId,
+        agent: turn.route?.agent,
+        reason: completeness.reason,
+        toolCalls: completeness.toolCalls,
+      });
+    }
     const text = this.extractMessageText(result.message);
     if (!text || !turn.route) return;
     const route = turn.route;
