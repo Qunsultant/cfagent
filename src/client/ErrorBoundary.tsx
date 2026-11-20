@@ -19,6 +19,9 @@
  */
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import { Button } from "./components/ui";
+import { createClientLogger } from "./clientLogger";
+
+const log = createClientLogger("client/ErrorBoundary");
 
 interface ErrorBoundaryProps {
   /** Human label naming the wrapped area, shown in the fallback. */
@@ -40,8 +43,13 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
 
   componentDidCatch(error: Error, info: ErrorInfo): void {
     this.setState({ componentStack: info.componentStack ?? null });
-    // Keep the failure visible in the console as well.
-    console.error(`[ErrorBoundary:${this.props.label}]`, error, info.componentStack);
+    // The failure stays visible in the console as a structured event
+    // (the client logger's console sink emits one JSON line).
+    log.error("errorBoundary.component_error", {
+      message: `[ErrorBoundary:${this.props.label}]`,
+      error: error.message,
+      componentStack: info.componentStack ?? null,
+    });
   }
 
   private handleRetry = (): void => {

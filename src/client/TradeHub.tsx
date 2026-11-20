@@ -98,6 +98,9 @@ import type { RiskSubject } from "./options/riskManagementEngine";
  */
 import { ResearchReportActions } from "./ResearchReportActions";
 import { AutopilotControlCenter } from "./components/AutopilotControlCenter";
+import { createClientLogger } from "./clientLogger";
+
+const log = createClientLogger("client/TradeHub");
 
 export interface User {
   login: string;
@@ -588,7 +591,10 @@ export function TradeHub({
       fetchOrders();
       fetchPositions();
     } catch (err: any) {
-      console.warn("Slack button action failed:", err);
+      log.warn("tradeHub.slack_button_action_failed", {
+        message: "Slack button action failed",
+        error: err instanceof Error ? err.message : String(err),
+      });
     } finally {
       setSlackActionLoading(false);
     }

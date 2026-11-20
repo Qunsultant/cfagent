@@ -49,6 +49,9 @@ import type { TradeOrderContext } from "../trading/tradeOrderContext";
 import "./strategyDiscovery.deprecated.css";
 import { StrategyLibraryModal, type StrategyInfo } from "./StrategyLibraryModal";
 import { Button, CardHeader, FieldShell, PillGroup, SegmentedControl, Select, Table, TextInput, Modal, useToast } from "../components/ui";
+import { createClientLogger } from "../clientLogger";
+
+const log = createClientLogger("client/StrategyDiscoveryPanel");
 
 const SENTIMENT_ITEMS: Array<{
   id: SentimentType;
@@ -641,7 +644,12 @@ export function StrategyDiscoveryPanel({
   useEffect(() => {
     fetchServerCatalog()
       .then((cat) => setServerCatalog(cat))
-      .catch((err) => console.warn("[StrategyDiscoveryPanel] Failed to fetch server strategy catalog:", err));
+      .catch((err) =>
+        log.warn("strategyDiscoveryPanel.fetch_server_strategy_catalog_failed", {
+          message: "[StrategyDiscoveryPanel] Failed to fetch server strategy catalog",
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      );
   }, []);
 
   const catalogCount = serverCatalog?.count ?? 74;
@@ -841,7 +849,10 @@ export function StrategyDiscoveryPanel({
       })
       .catch((err) => {
         if (!cancelled) {
-          console.warn("[StrategyDiscoveryPanel] Server discovery failed:", err);
+          log.warn("strategyDiscoveryPanel.server_discovery_failed", {
+            message: "[StrategyDiscoveryPanel] Server discovery failed",
+            error: err instanceof Error ? err.message : String(err),
+          });
           setDiscoveredStrategies([]);
           setDiscoveryDataSource("unavailable");
           setDiscoveryError(err instanceof Error ? err.message : "Server options discovery failed.");
