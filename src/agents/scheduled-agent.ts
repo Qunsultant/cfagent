@@ -1362,6 +1362,30 @@ export class ScheduledAgent extends PortThink {
     };
   }
 
+  /**
+   * Issue #4467 — replay a past run: a NEW run of the definition version
+   * the original executed, with the original's trigger. The engine's own
+   * `replayRun` does the work; this is the host seam behind the door, and
+   * it shares `createScheduledAgentPipelineControl` with every other
+   * control verb, so the operator identity and store residency are the
+   * same as stage control.
+   */
+  async replayPipelineRun(
+    jobId: string,
+    runId: string,
+    opts?: { userLogin?: string },
+  ): Promise<{ jobId: string; replayedRunId: string; runId: string; state: string }> {
+    const ctx = this.pipelineContext();
+    const control = createScheduledAgentPipelineControl(ctx, opts?.userLogin);
+    const dispatch = await control.replayRun(jobId, runId);
+    return {
+      jobId,
+      replayedRunId: runId,
+      runId: dispatch.runId,
+      state: dispatch.state,
+    };
+  }
+
   /** Issue #4360 — a run's recorded stage events, in recorded order. */
   async listStageEvents(runId: string): Promise<JobStageEventRecord[]> {
     const ctx = this.pipelineContext();

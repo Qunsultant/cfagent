@@ -179,6 +179,12 @@ export interface WorkflowRun {
   id: string;
   /** The run id the producing store records (chain id / outcome id). */
   runId: string;
+  /**
+   * Issue #4467 — the engine job id this row belongs to, when the row is a
+   * pipeline run record. Absent on chain/report/schedule rows, which have no
+   * single engine job; the Replay action addresses it.
+   */
+  engineJobId?: string | null;
   workflow: string;
   family: WorkflowRunFamily;
   title: string;
@@ -2036,6 +2042,8 @@ export function runFromJobRunRecord(
   return {
     id: d1JobRunRecordId(record),
     runId: d1JobRunRecordId(record),
+    // Issue #4467 — the engine job id, so the row can offer Replay.
+    engineJobId: record.jobId,
     workflow: FAMILY_WORKFLOW["other"],
     family: "other",
     title: `Job ${record.jobId}`,

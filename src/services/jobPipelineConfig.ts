@@ -72,6 +72,14 @@ export type JobPipelineErrorCode =
   // Issue #4767 (Q6): the resume guard refuses a stage checkpoint
   // stamped under a different trigger than the run's trigger.
   | "job_checkpoint_trigger_mismatch"
+  // Issue #4467 — the replay refusals, each naming the fact that is
+  // missing rather than substituting a plausible run:
+  //  - the run id is not among the job's retained runs;
+  //  - the run predates the definition-version stamp (#5887);
+  //  - the stamped version is no longer resolvable.
+  | "job_run_not_found"
+  | "replay_pre_retention_run"
+  | "replay_definition_version_unresolved"
   | "stage_port_unavailable";
 
 export class JobPipelineError extends Error {

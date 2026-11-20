@@ -348,6 +348,15 @@ export interface ScheduledAgentDoorStub {
    * Issue #4362 — drive one stage of one engine run (run / rerun / stop /
    * resume / cancel), addressed by stage id, kind or node path.
    */
+  /**
+   * Issue #4467 — replay one past run as a new run of its recorded
+   * definition version.
+   */
+  replayPipelineRun(
+    jobId: string,
+    runId: string,
+    opts?: { userLogin?: string },
+  ): Promise<{ jobId: string; replayedRunId: string; runId: string; state: string }>;
   controlPipelineStage(
     jobId: string,
     stage: string,
@@ -1326,6 +1335,24 @@ export async function controlPipelineStageViaDoor(
 }> {
   const login = requireActingLogin(actingLogin);
   return getScheduledAgentDoor(env).controlPipelineStage(jobId, stage, operation, {
+    userLogin: login,
+  });
+}
+
+/**
+ * Issue #4467 — replay one past run through the door: the engine mints a
+ * new run from that run's recorded definition version. Same operator
+ * gate as stage control — control is never anonymous — and the same host
+ * seam, so there is no second execution path.
+ */
+export async function replayPipelineRunViaDoor(
+  env: Env,
+  actingLogin: string | undefined | null,
+  jobId: string,
+  runId: string,
+): Promise<{ jobId: string; replayedRunId: string; runId: string; state: string }> {
+  const login = requireActingLogin(actingLogin);
+  return getScheduledAgentDoor(env).replayPipelineRun(jobId, runId, {
     userLogin: login,
   });
 }
