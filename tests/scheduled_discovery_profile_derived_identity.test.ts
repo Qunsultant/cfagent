@@ -102,11 +102,23 @@ let savedProcessEnv: Record<string, string | undefined> = {};
 
 const USER = "derived_trader";
 
+// Same date rule as the #533 fixture: the chain expiry must stay in the
+// future relative to the real clock — evaluateContracts drops chains
+// whose selectedExpiry is past, so a hardcoded expiry silently empties
+// the discovery run once the date passes. 30 days out is inside the
+// profile DTE window used here.
+const FIXTURE_EXPIRY_DATE = new Date(Date.now() + 30 * 86_400_000);
+const FIXTURE_EXPIRY = {
+  year: FIXTURE_EXPIRY_DATE.getUTCFullYear(),
+  month: FIXTURE_EXPIRY_DATE.getUTCMonth() + 1,
+  day: FIXTURE_EXPIRY_DATE.getUTCDate(),
+};
+
 const NVDA_CHAIN: ETradeOptionChain = {
   symbol: "NVDA",
   underlyingPrice: 130,
   quoteTime: Date.now(),
-  selectedExpiry: { year: 2027, month: 6, day: 18 },
+  selectedExpiry: FIXTURE_EXPIRY,
   pairs: [
     {
       call: {

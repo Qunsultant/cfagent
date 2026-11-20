@@ -321,7 +321,7 @@ export interface ScreenerEngineRunState {
 
 export interface ScreenerFeedStageInput {
   request: ScreenerRunRequest;
-  /** Bound by the step handler when present; the agent binds them itself when omitted (#4192). */
+  /** Bound by the step handler over the #3941 capture-wired provider (#5823); absent ⇒ the stage refuses SCREENER_QUOTE_DEPS_MISSING by name. */
   quoteDeps?: ScreenerQuoteDepsBundle;
   /** This unit's symbols (the shard's row, or the flat list under monolith). */
   symbols: NasdaqStockListing[];
@@ -350,7 +350,7 @@ export interface ScreenerFeedStageOutput {
 
 export interface ScreenerGatherStageInput {
   request: ScreenerRunRequest;
-  /** Bound by the step handler when present; the agent binds them itself when omitted (#4192). */
+  /** Bound by the step handler over the #3941 Yahoo provider (#5823); absent ⇒ the stage refuses SCREENER_HISTORY_DEPS_MISSING by name. */
   historyDeps?: YahooHistoryDeps;
   feedOutput: ScreenerFeedStageOutput;
   goalScreen?: GoalScreenCommand;
@@ -2075,15 +2075,16 @@ export class ScreenerAgent extends PortThink {
 
   /**
    * Issue #4192 — bind the platform quote deps for the planned
-   * provider, shared by runScreenInner and screenFeedStage.
+   * provider, for runScreenInner (the bespoke flow). The engine
+   * stages no longer call it: since #5823 the step handler binds
+   * the deps over the #3941 capture-wired provider and the stages
+   * refuse by name when they are absent. runScreenInner keeps
+   * this bind until slice 7 retires the bespoke flow.
    * The binding lives on the agent (the DO instance holds the
-   * platform bootstrap / config / capture deps); the workflow
-   * / host step-handler process cannot reach it, so the agent
-   * binds the deps itself when the input omits them. One
-   * binding, moved not copied: the provider mentions in this
-   * file are unchanged (the neutrality census counts them).
-   * A missing leg for the planned provider is a named refusal,
-   * never a fallback.
+   * platform bootstrap / config / capture deps). One binding,
+   * moved not copied: the provider mentions in this file are
+   * unchanged (the neutrality census counts them). A missing leg
+   * for the planned provider is a named refusal, never a fallback.
    */
   async bindScreenerQuoteDeps(
     provider: StockScreenProvider,
@@ -2265,12 +2266,14 @@ export class ScreenerAgent extends PortThink {
   }
 
   /**
-   * Issue #4192 — bind the platform history deps, shared by
-   * runScreenInner and screenGatherStage. Resolution failure
-   * degrades to a null-fetching deps object, so the batch
-   * still runs and every symbol gets honest null technicals
-   * — the screen itself never fails on history resolution
-   * (see resolveYahooHistoryDeps).
+   * Issue #4192 — bind the platform history deps, for
+   * runScreenInner (the bespoke flow). The engine stages no
+   * longer call it (#5823 — the step handler binds over the
+   * #3941 Yahoo provider and the gather stage refuses by name
+   * when they are absent). Resolution failure degrades to a
+   * null-fetching deps object, so the batch still runs and every
+   * symbol gets honest null technicals — the screen itself never
+   * fails on history resolution (see resolveYahooHistoryDeps).
    */
   async bindScreenerHistoryDeps(opts: {
     userLogin: string;
@@ -2292,11 +2295,12 @@ export class ScreenerAgent extends PortThink {
 
   /**
    * FEED stage (catalog: feed — quotes): plan + universe
-   * resolution + provider quote-deps binding + acquireUniverse.
+   * resolution + acquireUniverse over the pre-bound quote deps.
    * The same service calls runScreenInner makes today, in the
    * same order; the quote deps arrive pre-bound from the step
-   * handler (the platform binding blocks stay in runScreenInner
-   * until the S2 cutover wires them into the handler's deps).
+   * handler, over the #3941 capture-wired provider (#5823 —
+   * the S2 cutover wired them into the handler's deps, so the
+   * agent no longer binds them at stage time).
    * A goal command resolves its symbols from the goal
    * descriptor instead of the market universe.
    */
@@ -2427,22 +2431,18 @@ export class ScreenerAgent extends PortThink {
     const expectedCount = selectedSymbols.length;
     state.quoteTrace.setNasdaqSymbols(selectedSymbols.map((s) => (typeof s === "string" ? s : s.symbol)));
 
-    // Provider-scoped acquisition (#261, #1007). The deps arrive
-    // pre-bound from the step handler when present; otherwise the
-    // agent binds them itself from the platform (the handler
-    // process cannot reach the agent's platform binding — issue
-    // #4192). A missing leg for the planned provider is a named
-    // refusal, never a fallback.
-    const bundle =
-      input.quoteDeps ??
-      (await this.bindScreenerQuoteDeps(provider, {
-        userLogin,
-        platformRunId: state.platformRunId,
-        ...(req.yahooDeps ? { yahooDepsOverride: req.yahooDeps } : {}),
-        ...(state.etrade
-          ? { etradeService: state.etrade, quoteTrace: state.quoteTrace }
-          : {}),
-      }));
+    // Provider-scoped acquisition (#261, #1007). Issue #5823:
+    // the deps arrive pre-bound from the step handler, over the
+    // #3941 capture-wired provider — the agent no longer binds
+    // them itself at stage time. Absent = a named refusal, never
+    // a fallback (and never an unwired fetch). A missing leg for
+    // the planned provider is likewise a named refusal.
+    const bundle = input.quoteDeps;
+    if (!bundle) {
+      throw new Error(
+        "SCREENER_QUOTE_DEPS_MISSING: no quote deps bound for this run — the feed stage reads through the #3941 capture-wired provider, bound by the step handler (#5823); the agent no longer binds them at stage time.",
+      );
+    }
     const acquired =
       provider === "yahoo"
         ? await acquireUniverse({
@@ -2509,17 +2509,16 @@ export class ScreenerAgent extends PortThink {
     state.acquired = feedOutput.acquired;
 
     // Issue #1331: bars come through the platform history deps.
-    // The handler supplies the bound deps when present; otherwise
-    // the agent binds them itself from the platform (the handler
-    // process cannot reach the agent's platform binding — issue
-    // #4192). The persisted-first reads below are best-effort,
-    // exactly as in runScreenInner.
-    let historyDeps =
-      input.historyDeps ??
-      (await this.bindScreenerHistoryDeps({
-        userLogin: state.userLogin,
-        platformRunId: feedOutput.platformRunId,
-      }));
+    // Issue #5823: the handler supplies the bound deps, over the
+    // #3941 Yahoo provider — the agent no longer binds them itself
+    // at stage time. Absent = a named refusal. The persisted-first
+    // reads below are best-effort, exactly as in runScreenInner.
+    let historyDeps = input.historyDeps;
+    if (!historyDeps) {
+      throw new Error(
+        "SCREENER_HISTORY_DEPS_MISSING: no history deps bound for this run — the gather stage reads through the #3941 capture-wired provider, bound by the step handler (#5823); the agent no longer binds them at stage time.",
+      );
+    }
     try {
       const datasetStore = createFeedDatasetAdapter(this.env);
       if (datasetStore) {

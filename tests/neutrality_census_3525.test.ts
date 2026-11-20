@@ -886,6 +886,20 @@ function measure(): Map<string, number> {
  * doc's freshness-rule paragraph names no provider and lists no
  * namespace), so no docs row moves and no new row is created.
  * Baseline totals move 1359/11049 -> 1359/11065.
+ * Baseline update (#5823, 2026-11-19): the screener's feed stage
+ * reads through the #3941 capture-wired provider (#4437 slice 2),
+ * so the step handler binds the quote/history deps over the
+ * provider construction — dispositioned INTEGRATION (naming the
+ * provider is the registry's and the wiring's job): 4 new rows
+ * (screenerPipelineJobs.ts etrade 4 / alpaca 3 / yahoo 12,
+ * jobPipelineWorkflow.ts yahoo 1) and 4 raises
+ * (scheduledTasksPipeline.ts yahoo 1->2, screener-agent.ts yahoo
+ * 68->71, feedPipelineJobs.ts yahoo 85->86, feedProviderWiring.ts
+ * yahoo 3->7). The doc prose was neutralized instead (the j-stack
+ * doc's feed-path paragraph names no provider brand), so no docs
+ * row moves. The screener-agent etrade row shrinks 95->93 (the
+ * stage-time bind fallback is gone) — a decrease, which passes.
+ * Baseline totals move 1359/11065 -> 1363/11094.
  */
 const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (188 rows / 989 lines) ----
@@ -1117,7 +1131,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/services/platformKnowledge.ts", "etrade", 51],
   ["src/services/platformKnowledge.ts", "yahoo", 12],
   ["src/trading/interfaces.ts", "etrade", 2],
-  // ---- INTEGRATION (707 rows / 7306 lines) ----
+  // ---- INTEGRATION (711 rows / 7521 lines) ----
   ["docs/CLOUDFLARE_SCHEDULING_AND_ETAPI_TUNING.md", "etrade", 12],
   ["docs/CLOUDFLARE_SCHEDULING_AND_ETAPI_TUNING.md", "yahoo", 1],
   ["docs/EXTERNAL_APIS_AND_ENDPOINTS_DIRECTORY.md", "alpaca", 3],
@@ -1319,10 +1333,10 @@ const BASELINE: Array<[string, string, number]> = [
   // provider's client directly (the shared residency factory
   // does) — only the pre-existing header line remains.
   ["src/agents/scheduledTasksPipeline.ts", "etrade", 1],
-  ["src/agents/scheduledTasksPipeline.ts", "yahoo", 1],
+  ["src/agents/scheduledTasksPipeline.ts", "yahoo", 2],
   ["src/agents/screener-agent.ts", "alpaca", 24],
   ["src/agents/screener-agent.ts", "etrade", 95],
-  ["src/agents/screener-agent.ts", "yahoo", 68],
+  ["src/agents/screener-agent.ts", "yahoo", 71],
   ["src/agents/screenerA2aDispatch.ts", "etrade", 2],
   ["src/agents/screenerA2aDispatch.ts", "yahoo", 5],
   ["src/agents/slackA2aDispatch.ts", "etrade", 11],
@@ -1622,11 +1636,11 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/services/feedPipelineJobs.ts", "etrade", 8],
   ["src/services/feedPipelineJobs.ts", "nasdaq", 23],
   ["src/services/feedPipelineJobs.ts", "public.com", 3],
-  ["src/services/feedPipelineJobs.ts", "yahoo", 85],
+  ["src/services/feedPipelineJobs.ts", "yahoo", 86],
   ["src/services/feedProviderWiring.ts", "alpaca", 2],
   ["src/services/feedProviderWiring.ts", "etrade", 4],
   ["src/services/feedProviderWiring.ts", "nasdaq", 1],
-  ["src/services/feedProviderWiring.ts", "yahoo", 3],
+  ["src/services/feedProviderWiring.ts", "yahoo", 7],
   ["src/services/feedSnapshotJob.ts", "etrade", 4],
   ["src/services/fitDiscoveryRunner.ts", "etrade", 4],
   ["src/services/gatedSlackDelivery.ts", "etrade", 1],
@@ -1691,6 +1705,13 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/services/scheduledTasks.ts", "yahoo", 17],
   ["src/services/screenerFollowupDelivery.ts", "etrade", 6],
   ["src/services/screenerFollowups.ts", "etrade", 1],
+  // #5823 INTEGRATION: the screener step registry binds the feed-stage
+  // quote/history deps over the #3941 capture-wired provider — naming the
+  // provider is the registry's job (the per-provider binds + the refusal
+  // names + the factory's doc comment).
+  ["src/services/screenerPipelineJobs.ts", "alpaca", 3],
+  ["src/services/screenerPipelineJobs.ts", "etrade", 4],
+  ["src/services/screenerPipelineJobs.ts", "yahoo", 12],
   ["src/services/screeningDelivery.ts", "etrade", 6],
   ["src/services/screeningRuntime.ts", "etrade", 5],
   ["src/services/screeningRuntime.ts", "yahoo", 15],
@@ -1878,6 +1899,10 @@ const BASELINE: Array<[string, string, number]> = [
   // provider). Naming the provider is the legacy binding's job;
   // the module's prose names none.
   ["src/workflows/brokerChainSourceResidency.ts", "etrade", 2],
+  // #5823 INTEGRATION: the workflow residency's feed-deps closure
+  // forwards the Yahoo breaker override into the #3941 factory —
+  // the doc line naming it is the wiring's job.
+  ["src/workflows/jobPipelineWorkflow.ts", "yahoo", 1],
   ["src/workflows/legalApplicability.ts", "alpaca", 1],
   ["src/workflows/legalApplicability.ts", "etrade", 1],
   ["src/workflows/manualOptionsRecordBuilder.ts", "etrade", 1],

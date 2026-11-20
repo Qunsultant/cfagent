@@ -535,6 +535,19 @@ describe("getIvHistoryEntry — honest warming-up surface", () => {
 // Service wiring
 // ---------------------------------------------------------------------------
 
+// Same date rule as the #533 fixture: the chain expiry must stay in the
+// future relative to the real clock — evaluateContracts drops chains
+// whose selectedExpiry is past, so a hardcoded expiry silently empties
+// the collection once the date passes. 30 days out is inside the
+// collection's DTE window.
+const IV_FIXTURE_EXPIRY_DATE = new Date(Date.now() + 30 * 86_400_000);
+const IV_FIXTURE_EXPIRY = {
+  year: IV_FIXTURE_EXPIRY_DATE.getUTCFullYear(),
+  month: IV_FIXTURE_EXPIRY_DATE.getUTCMonth() + 1,
+  day: IV_FIXTURE_EXPIRY_DATE.getUTCDate(),
+};
+const IV_FIXTURE_EXPIRY_ISO = `${IV_FIXTURE_EXPIRY.year}-${String(IV_FIXTURE_EXPIRY.month).padStart(2, "0")}-${String(IV_FIXTURE_EXPIRY.day).padStart(2, "0")}`;
+
 describe("ScheduledTasksService.collectDailyIvHistory", () => {
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ["Date"] });
@@ -560,7 +573,7 @@ describe("ScheduledTasksService.collectDailyIvHistory", () => {
       symbol: "AAPL",
       underlyingPrice: 100,
       quoteTime: Date.now(),
-      selectedExpiry: { year: 2026, month: 11, day: 20 },
+      selectedExpiry: IV_FIXTURE_EXPIRY,
       pairs: [
         {
           call: {
@@ -591,7 +604,7 @@ describe("ScheduledTasksService.collectDailyIvHistory", () => {
     expect(coverage.observations).toBe(1);
     const stored = await store.get("AAPL", coverage.lastDate!);
     expect(stored?.atmIv).toBeCloseTo(0.31, 6); // (0.30 call + 0.32 put) / 2
-    expect(stored?.expiryDate).toBe("2026-11-20");
+    expect(stored?.expiryDate).toBe(IV_FIXTURE_EXPIRY_ISO);
 
     const second = await service.collectDailyIvHistory({ symbols: ["AAPL"] });
     expect(second.data?.recorded).toBe(0);

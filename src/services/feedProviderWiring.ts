@@ -23,6 +23,7 @@
  */
 import type { Env } from "../types";
 import type { SqlStorage } from "../orm";
+import type { CircuitBreaker } from "../breakers/breakerPorts";
 import type {
   CaptureBlobStorage,
   ProviderCaptureStore,
@@ -59,6 +60,15 @@ export interface FeedProviderWiringDeps {
   capturePort?: ProviderCaptureStore | null;
   /** A real acting login for the per-login providers, when the host has one. */
   userLogin?: string;
+  /**
+   * Issue #5823 (#4437 slice 2): the Yahoo breaker (#1745), threaded
+   * into the Yahoo adapter only. Feed jobs do not set it — a feed
+   * pull behind the breaker would persist stale-cache rows as a
+   * fresh capture; the screener's quote/history binds set it so a
+   * screen during a Yahoo outage serves the stale cache instead of
+   * failing the run. Absent ⇒ the raw provider, exactly as before.
+   */
+  yahooBreaker?: CircuitBreaker;
 }
 
 /**
@@ -87,7 +97,13 @@ export function createCaptureWiredFeedProvider(
       return createYahooDataProvider(
         new YahooFinanceProvider(deps.env),
         deps.env,
-        { capture },
+        {
+          capture,
+          // Issue #5823: the Yahoo breaker (#1745) rides only when
+          // the caller supplied one (the screener's binds); feed
+          // jobs pass none, so their provider is unchanged.
+          ...(deps.yahooBreaker ? { breaker: deps.yahooBreaker } : {}),
+        },
       );
     case "alpaca":
       return createAlpacaDataProvider(
