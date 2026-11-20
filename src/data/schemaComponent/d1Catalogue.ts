@@ -3050,6 +3050,24 @@ export const D1_CATALOGUE_ENTRIES: CatalogueEntry[] = [
     kind: "schema",
     form: "literal",
   },
+  {
+    // Issue #5887 — the definition version a run executed (replay reads it).
+    code: "schema.d1.job_run_records.alter_table_add_column_definition_version",
+    plane: "d1",
+    table: "job_run_records",
+    statement: `ALTER TABLE job_run_records ADD COLUMN definition_version INTEGER`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    // Issue #5887 — the run-stamp on the instance, captured at dispatch.
+    code: "schema.d1.job_pipeline_instances.alter_table_add_column_run_definition_version",
+    plane: "d1",
+    table: "job_pipeline_instances",
+    statement: `ALTER TABLE job_pipeline_instances ADD COLUMN run_definition_version INTEGER`,
+    kind: "schema",
+    form: "literal",
+  },
 ];
 
 /** Per-migration-version code lists, in statement order. */
@@ -3426,6 +3444,12 @@ export const D1_MIGRATION_CODES: Record<number, readonly string[]> = {
   72: [
     "schema.d1.job_run_records.alter_table_add_column_kind",
     "schema.d1.job_run_records.alter_table_add_column_origin_run_id",
+  ],
+  76: [
+    "schema.d1.job_run_records.alter_table_add_column_definition_version",
+  ],
+  75: [
+    "schema.d1.job_pipeline_instances.alter_table_add_column_run_definition_version",
   ],
   74: [
     "schema.d1.job_pipeline_definition_versions.create_table",

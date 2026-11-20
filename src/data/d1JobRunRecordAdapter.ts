@@ -23,6 +23,7 @@ import {
   MIGRATION_0047_JOB_RUN_RECORDS,
   MIGRATION_0072_JOB_RUN_RECORDS_RUN_KIND,
   MIGRATION_0073_JOB_RUN_RECORDS_RECENT_IDX,
+  MIGRATION_0076_JOB_RUN_DEFINITION_VERSION,
   type MigrationDb,
 } from "./migrationRunner";
 import {
@@ -47,6 +48,7 @@ export async function ensureJobRunRecordsSchema(db: JobRunRecordDb): Promise<num
     MIGRATION_0047_JOB_RUN_RECORDS,
     MIGRATION_0072_JOB_RUN_RECORDS_RUN_KIND,
     MIGRATION_0073_JOB_RUN_RECORDS_RECENT_IDX,
+    MIGRATION_0076_JOB_RUN_DEFINITION_VERSION,
   ]);
 }
 
@@ -82,6 +84,9 @@ function rowToRecord(row: JobRunRecordRow): JobRunRecord {
     // through when present.
     ...(row.kind != null ? { kind: row.kind as JobRunRecord["kind"] } : {}),
     ...(row.originRunId != null ? { originRunId: row.originRunId } : {}),
+    ...(row.definitionVersion != null
+      ? { definitionVersion: row.definitionVersion }
+      : {}),
     ...(row.errorText != null ? { error: row.errorText } : {}),
     ...(row.detail != null ? { detail: row.detail } : {}),
     ...(row.descriptor != null ? { descriptor: row.descriptor } : {}),
@@ -118,6 +123,7 @@ export class D1JobRunRecordStore {
       workflowId: record.workflowId ?? null,
       kind: record.kind ?? null,
       originRunId: record.originRunId ?? null,
+      definitionVersion: record.definitionVersion ?? null,
       errorText: record.error ?? null,
       detail: record.detail ?? null,
       descriptor: record.descriptor ?? null,

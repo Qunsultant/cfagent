@@ -30,10 +30,11 @@ describe("#5025 schemaComponent barrel & membership store naming", () => {
     // #4204 adds migration 0073 (D1 job_run_records recent-read index):
     // D1 229 → 230.
     // #5865 adds migration 0074 (definition history) to both residencies:
-    // D1 230 → 232 (table + backfill), DO 107 → 108.
-    expect(D1_CATALOGUE_ENTRIES.length).toBe(232);
+    // D1 230 → 234 (table + backfill + #5887's two ALTERs), DO 107 → 108,
+    // remainder 57 → 63 (#4767 + #5887).
+    expect(D1_CATALOGUE_ENTRIES.length).toBe(234);
     expect(ORM_CATALOGUE_ENTRIES.length).toBe(26);
-    expect(REMAINDER_CATALOGUE_ENTRIES.length).toBe(61);
+    expect(REMAINDER_CATALOGUE_ENTRIES.length).toBe(63);
     expect(DO_CATALOGUE_ENTRIES.length).toBe(108);
   });
 

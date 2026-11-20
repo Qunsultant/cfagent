@@ -234,6 +234,26 @@ export const REMAINDER_CATALOGUE_ENTRIES: CatalogueEntry[] = [
     form: "literal",
   },
   {
+    // Issue #5887 — the definition version a run executed, so a replay
+    // can resolve the exact configuration the run used.
+    code: "schema.do.job_run_records.alter_table_add_column_definition_version",
+    plane: "do",
+    table: "job_run_records",
+    statement: `ALTER TABLE job_run_records ADD COLUMN definition_version INTEGER`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    // Issue #5887 — the run-stamp on the instance: captured at dispatch,
+    // read at settle, so a mid-run reconfigure cannot restamp the run.
+    code: "schema.do.job_pipeline_instances.alter_table_add_column_run_definition_version",
+    plane: "do",
+    table: "job_pipeline_instances",
+    statement: `ALTER TABLE job_pipeline_instances ADD COLUMN run_definition_version INTEGER`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
     code: "schema.do.mas_async_jobs.alter_table_add_column_tenant_id",
     plane: "do",
     table: "mas_async_jobs",

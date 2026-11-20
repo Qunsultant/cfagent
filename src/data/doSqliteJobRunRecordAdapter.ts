@@ -67,6 +67,10 @@ function ensureTable(sql: SqlStorage): void {
   if (!names.has("origin_run_id")) {
     sql.exec(remainderAlterSql("job_run_records", "origin_run_id"));
   }
+  // Issue #5887 — the definition version the run executed (same probe).
+  if (!names.has("definition_version")) {
+    sql.exec(remainderAlterSql("job_run_records", "definition_version"));
+  }
   sql.exec(doIndexSql("job_run_records_job_idx"));
   // Issue #3121 Phase 2 (#3124) — the recent-read ordering index
   // (src/data/jobRunRecordIndexSchema.ts, #2280 pattern).
@@ -106,6 +110,9 @@ function rowToRecord(row: Record<string, unknown>): JobRunRecord {
     // normalizeJobRunRecord.
     ...(row.kind != null ? { kind: String(row.kind) as JobRunRecord["kind"] } : {}),
     ...(row.origin_run_id != null ? { originRunId: String(row.origin_run_id) } : {}),
+    ...(row.definition_version != null
+      ? { definitionVersion: Number(row.definition_version) }
+      : {}),
     ...(row.error_text != null ? { error: String(row.error_text) } : {}),
     ...(row.detail != null ? { detail: String(row.detail) } : {}),
     ...(row.descriptor != null ? { descriptor: String(row.descriptor) } : {}),
@@ -121,8 +128,8 @@ function recordSync(sql: SqlStorage, record: JobRunRecord): void {
   ensureTable(sql);
   sql.exec(
     `INSERT INTO ${JOB_RUN_RECORDS_TABLE}
-         (system, job_id, operation, started, finished, outcome, triggered_by, trigger_text, schedule_id, async_job_id, workflow_id, kind, origin_run_id, error_text, detail, descriptor, artifact_refs_json, broker_id, data_provider_id, mode, mode_source)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (system, job_id, operation, started, finished, outcome, triggered_by, trigger_text, schedule_id, async_job_id, workflow_id, kind, origin_run_id, definition_version, error_text, detail, descriptor, artifact_refs_json, broker_id, data_provider_id, mode, mode_source)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     record.system,
     record.jobId,
     record.operation,
@@ -136,6 +143,7 @@ function recordSync(sql: SqlStorage, record: JobRunRecord): void {
     record.workflowId ?? null,
     record.kind ?? null,
     record.originRunId ?? null,
+    record.definitionVersion ?? null,
     record.error ?? null,
     record.detail ?? null,
     record.descriptor ?? null,

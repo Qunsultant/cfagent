@@ -114,6 +114,8 @@ const REMAINDER_STATEMENT_SHA256 = {
   "schema.do.job_run_records.alter_table_add_column_workflow_id": "b80ea3a44cdb0d30b1f7da42b65543bbe6b28c27398a24b1a477c147605fc3ae",
   "schema.do.job_run_records.alter_table_add_column_kind": "34c0ed18d0e392479b78e764eee8ca3469016ce6f7a16eb97b88c9cef79ea93a",
   "schema.do.job_run_records.alter_table_add_column_origin_run_id": "a964ba093b55c66e2ae42db8ca854060dfde87d1f6885f83a15db01cce2b145d",
+  "schema.do.job_run_records.alter_table_add_column_definition_version": "6a99fcb4f160d062d91fac0db4db22e87e2dde046df28ef12a2ba22d956ff87d",
+  "schema.do.job_pipeline_instances.alter_table_add_column_run_definition_version": "79adb986bb037badc60f653bce7f99084930e6fd05fac0da3d8f6e2e83da6719",
   "schema.do.mas_async_jobs.alter_table_add_column_chain_id": "6ce7bfa86fd12746c47e09735e8ca618df98cef7542c8c9612c6bc490b1afdc1",
   "schema.do.mas_async_jobs.alter_table_add_column_tenant_id": "f4ce90ba9f7582002a6ca54d40a3dccbd340e77bb829294e09e770cb8175487d",
   "schema.do.mas_async_jobs.alter_table_add_column_attempts_json": "70d5184ee37c16118cc5e47be2cdf6b602c130b1ff0301545ac210765251c580",
@@ -449,11 +451,11 @@ const P3_DELEGATED_FILES = [
 ];
 
 describe("remainder catalogue — P3 long tail + ALTER reconciliation (#4282 P3)", () => {
-  it("catalogues all 61 remainder statements: 8 table + 2 index + 49 alter + 1 drop + 1 seed-form", () => {
+  it("catalogues all 63 remainder statements: 8 table + 2 index + 51 alter + 1 drop + 1 seed-form", () => {
     const catalogue = buildRemainderCatalogue();
-    expect(REMAINDER_CATALOGUE_ENTRIES.length).toBe(61);
-    expect(catalogue.size()).toBe(61);
-    expect(catalogue.byKind("schema").length).toBe(60);
+    expect(REMAINDER_CATALOGUE_ENTRIES.length).toBe(63);
+    expect(catalogue.size()).toBe(63);
+    expect(catalogue.byKind("schema").length).toBe(62);
     expect(catalogue.byKind("seed").length).toBe(1);
     const verbs = new Map<string, number>();
     const classify = (statement: string): string => {
@@ -478,18 +480,18 @@ describe("remainder catalogue — P3 long tail + ALTER reconciliation (#4282 P3)
     }
     expect(verbs.get("CREATE TABLE")).toBe(8);
     expect(verbs.get("CREATE INDEX")).toBe(2);
-    expect(verbs.get("ALTER TABLE")).toBe(49);
+    expect(verbs.get("ALTER TABLE")).toBe(51);
     expect(verbs.get("DROP INDEX")).toBe(1);
     expect(verbs.get("INSERT OR REPLACE")).toBe(1);
     expect(verbs.get("OTHER")).toBeUndefined();
     // Every code is unique and every entry is reachable by its code.
     const codes = new Set(REMAINDER_CATALOGUE_ENTRIES.map((e) => e.code));
-    expect(codes.size).toBe(61);
+    expect(codes.size).toBe(63);
     for (const entry of REMAINDER_CATALOGUE_ENTRIES) {
       expect(catalogue.get(entry.code).statement).toBe(entry.statement);
     }
-    // Planes: do 47, d1 1, orm 5, index 3, route 1.
-    expect(REMAINDER_CATALOGUE_ENTRIES.filter((e) => e.plane === "do").length).toBe(51);
+    // Planes: do 53, d1 1, orm 5, index 3, route 1.
+    expect(REMAINDER_CATALOGUE_ENTRIES.filter((e) => e.plane === "do").length).toBe(53);
     expect(REMAINDER_CATALOGUE_ENTRIES.filter((e) => e.plane === "d1").length).toBe(1);
     expect(REMAINDER_CATALOGUE_ENTRIES.filter((e) => e.plane === "orm").length).toBe(5);
     expect(REMAINDER_CATALOGUE_ENTRIES.filter((e) => e.plane === "index").length).toBe(3);
@@ -584,6 +586,10 @@ describe("remainder catalogue — P3 long tail + ALTER reconciliation (#4282 P3)
       "schema.do.job_pipeline_instances.alter_table_add_column_run_origin_id",
       "schema.do.job_run_records.alter_table_add_column_kind",
       "schema.do.job_run_records.alter_table_add_column_origin_run_id",
+      // Issue #5887 — the definition-version stamp exists in both
+      // catalogues (same ALTER text, D1 migration + DO probe).
+      "schema.do.job_run_records.alter_table_add_column_definition_version",
+      "schema.do.job_pipeline_instances.alter_table_add_column_run_definition_version",
     ]);
     for (const entry of REMAINDER_CATALOGUE_ENTRIES) {
       if (crossPlane.has(entry.code)) continue;
@@ -592,7 +598,7 @@ describe("remainder catalogue — P3 long tail + ALTER reconciliation (#4282 P3)
   });
 
   it("each entry's statement is byte-identical to the base (sha256 pin)", () => {
-    expect(Object.keys(REMAINDER_STATEMENT_SHA256).length).toBe(61);
+    expect(Object.keys(REMAINDER_STATEMENT_SHA256).length).toBe(63);
     for (const entry of REMAINDER_CATALOGUE_ENTRIES) {
       const digest = createHash("sha256")
         .update(entry.statement, "utf8")

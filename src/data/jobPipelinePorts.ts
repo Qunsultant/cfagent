@@ -292,6 +292,13 @@ export interface JobInstanceRecord {
    * run they settle, so it must survive the dispatching process.
    */
   runOriginId: string | null;
+  /**
+   * Issue #5887 — the definition version this run was dispatched with,
+   * captured at dispatch (never re-read at settle: a reconfigure during
+   * the run must not change what the run records it used). Null on a
+   * row written before the column existed.
+   */
+  runDefinitionVersion?: number | null;
   checkpoint: JobCheckpoint | null;
   /**
    * The run's stage-runner checkpoint (#3549): one entry per

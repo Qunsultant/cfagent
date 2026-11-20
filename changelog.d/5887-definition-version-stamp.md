@@ -1,0 +1,3 @@
+### Added
+
+- **Every run records the definition version it executed (#5887):** `job_run_records.definition_version`, stamped at dispatch from the definition the engine resolved and carried through settle via `job_pipeline_instances.run_definition_version` — so a mid-run reconfigure cannot restamp a run that already started. Both columns are nullable and additive: a row written before this migration reads `null`, which a replay must refuse by name rather than resolving to today's configuration. DO gains both columns through the remainder catalogue's probed ALTERs; D1 through migrations 0075 (the instance stamp) and 0076 (the record stamp), each applied by the store that owns its table. This is the last storage prerequisite for historical replay (#4467). #ceo-aimp

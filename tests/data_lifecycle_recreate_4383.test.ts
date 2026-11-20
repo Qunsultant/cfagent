@@ -384,13 +384,13 @@ describe("recreate, tenant scope (#4383)", () => {
     // recent-read index): the D1 step is selected and the ORM
     // plane's duplicate of the same index is skipped, so selected
     // stays 253 and skipped grows 8 → 9.
-    expect(body.d1.selected).toHaveLength(255);
+    expect(body.d1.selected).toHaveLength(257);
     expect(body.d1.skipped).toHaveLength(9);
     // Two member instances (alice, bob), each planning the fresh DO leg.
     expect(body.instances).toHaveLength(2);
     for (const inst of body.instances) {
       // #4767 adds migrations 0071/0072 (4 remainder ALTERs): 132 → 136.
-      expect(inst.selected).toHaveLength(137);
+      expect(inst.selected).toHaveLength(139);
       // Issue #4623 adds one probed DO statement (mas_async_jobs.tenant_id).
       expect(inst.skipped).toHaveLength(36);
     }
@@ -447,13 +447,13 @@ describe("recreate, tenant scope (#4383)", () => {
     expect(body.confirmed).toBe(true);
     expect(body.d1.report.outcome).toBe("succeeded");
     // #4767 adds migrations 0071/0072 (4 D1 ALTERs): 249 → 253.
-    expect(body.d1.report.executed).toHaveLength(255);
+    expect(body.d1.report.executed).toHaveLength(257);
     expect(body.d1.verification.ok).toBe(true);
     expect(body.instances).toHaveLength(2);
     for (const inst of body.instances) {
       expect(inst.report.outcome).toBe("succeeded");
       // #4767 adds migrations 0071/0072 (4 remainder ALTERs): 132 → 136.
-      expect(inst.report.executed).toHaveLength(137);
+      expect(inst.report.executed).toHaveLength(139);
       expect(inst.verification.ok).toBe(true);
     }
     expect(body.uncreatableLayers).toHaveLength(5);
