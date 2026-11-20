@@ -414,6 +414,37 @@
 
 .ui-input::placeholder { color: var(--color-text-dim); }
 
+/* #5843 — a field with a trailing control inside the box (the chat
+   composer's mic/audio, #3794). The shell owns the border and focus
+   ring; the inner input is bare and flexes. Tokens only. */
+.ui-input-shell {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1-5);
+  background: var(--color-input);
+  border: 1px solid var(--color-border-medium);
+  color: var(--color-input-foreground);
+  border-radius: var(--radius-md);
+  width: 100%;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.ui-input-shell.size-sm { padding: var(--space-1-5) var(--space-2-5); }
+.ui-input-shell.size-md { padding: var(--space-2) var(--space-3); }
+.ui-input-shell:focus-within {
+  border-color: var(--color-border-focus);
+  box-shadow: var(--shadow-focus-ring);
+}
+.ui-input-shell.invalid { border-color: var(--color-danger); }
+.ui-input-bare {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  outline: none;
+}
+
 .ui-input:focus, .ui-select:focus {
   border-color: var(--color-border-focus);
   box-shadow: var(--shadow-focus-ring);
@@ -1175,6 +1206,77 @@ div.ui-drawer-title {
 /* ---------- Layout primitives (#3048) ---------- */
 .ui-stack { display: flex; flex-direction: column; }
 .ui-flex { display: flex; }
+/* Generic padding utilities (#5843): tokens only, so a migrated
+   surface keeps its spacing without a bespoke component class. */
+.ui-pad-x-3 { padding-left: var(--space-3); padding-right: var(--space-3); }
+.ui-pad-y-1 { padding-top: var(--space-1); padding-bottom: var(--space-1); }
+.ui-pad-t-1 { padding-top: var(--space-1); }
+/* Chat surface layout (#5843): the Griffel blocks this file used to carry,
+   as tokens-only classes. Same declarations, no runtime style engine. */
+.ui-chat-composer-input { flex-grow: 1; min-width: 0; }
+.ui-chat-nav-right { display: flex; align-items: center; gap: var(--space-2); }
+.ui-chat-viewport { display: flex; flex-direction: column; flex-grow: 1; min-height: 0; }
+.ui-chat-chips-bar {
+  display: flex;
+  gap: var(--space-1-5);
+  padding: var(--space-1) var(--space-3);
+  overflow-x: auto;
+  border-top: 1px solid var(--color-border-subtle);
+  background: var(--color-surface-sunken);
+  white-space: nowrap;
+  align-items: center;
+}
+.ui-chat-chips-toggle { font-weight: 600; font-size: var(--font-size-micro); }
+.ui-chat-split {
+  display: flex;
+  flex-direction: row;
+  flex-grow: 1;
+  flex-shrink: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+@media (max-width: 900px) {
+  .ui-chat-split { flex-direction: column; }
+}
+.ui-chat-dashboard-pane {
+  display: flex;
+  flex-direction: column;
+  flex-basis: 50%;
+  flex-grow: 1;
+  flex-shrink: 1;
+  min-height: 0;
+  min-width: 0;
+  border-right: 1px solid var(--color-border-subtle);
+  overflow-y: auto;
+}
+@media (max-width: 900px) {
+  .ui-chat-dashboard-pane {
+    flex-basis: 45%;
+    border-right: none;
+    border-bottom: 1px solid var(--color-border-subtle);
+  }
+}
+.ui-chat-chat-pane {
+  display: flex;
+  flex-direction: column;
+  flex-basis: 50%;
+  flex-grow: 1;
+  flex-shrink: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+@media (max-width: 900px) {
+  .ui-chat-chat-pane { flex-basis: 55%; }
+}
+.ui-chat-full-area {
+  display: flex;
+  flex-direction: column;
+  flex-grow: 1;
+  flex-shrink: 1;
+  min-height: 0;
+  overflow: hidden;
+}
 .ui-flex.inline { display: inline-flex; }
 .ui-flex.wrap { flex-wrap: wrap; }
 .ui-grid { display: grid; }

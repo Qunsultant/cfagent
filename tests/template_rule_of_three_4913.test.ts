@@ -33,12 +33,11 @@
  *   (landing.ts is the C10 #4739 surface, out of scope). h5/h6 are the
  *   known leftover, pinned at 46: CardHeader renders h4, so migrating
  *   h5s would GROW them — they need a small-header decision (follow-up).
- * - Fluent: NOT migrated. AgentChatTabContent + ChatComposerVoiceControl
- *   are the Ceos-directed Fluent v9 chat chrome experiment (#3146,
- *   CLOSED), pinned by tests/ux_primitives_exceptions_1772.test.ts
- *   (assertFluent). This test pins the Fluent surface as the contained
- *   exception: exactly these 2 files may import @fluentui/react-components.
- *   Ending the experiment needs Ceos's explicit decision.
+ * - Fluent: REMOVED (#5843, owner decision 2026-11-20: tokens.css and
+ *   primitives.css only). AgentChatTabContent and ChatComposerVoiceControl
+ *   were the #3146 experiment; both now use ui/ primitives, so zero client
+ *   files may import @fluentui/react-components. The exception list in
+ *   tests/ux_primitives_exceptions_1772.test.ts shrinks with the migration.
  * - Truncation: TWO mechanisms, by scope — ui-single-line (block ellipsis,
  *   className= only) and ui-cell-nowrap (table-cell no-wrap,
  *   cellClassName: only, scoped to `.ui-table td`). Neither can replace
@@ -91,7 +90,11 @@ function walkTsx(dir: string, out: string[] = []): string[] {
 }
 
 function repoRel(abs: string): string {
-  return abs.startsWith(ROOT) ? abs.slice(ROOT.length + 1) : abs;
+  // Issue #5843: repo-relative paths are POSIX on every platform, so the
+  // src/client/components/ui/ exclusion below holds on Windows too (the
+  // backslash form made ui/ files look like page files, counting their h2s).
+  const rel = abs.startsWith(ROOT) ? abs.slice(ROOT.length + 1) : abs;
+  return rel.replaceAll(String.fromCharCode(92), "/");
 }
 
 /** All .tsx files under src/client, repo-relative, sorted. */
@@ -435,14 +438,14 @@ describe("rule of three: headers (#4913)", () => {
 });
 
 describe("rule of three: Fluent containment (#4913, #3146)", () => {
-  it("exactly the two #3146 experiment files import @fluentui/react-components", () => {
+  it("no client file imports @fluentui/react-components (the #3146 experiment ended, #5843)", () => {
     const importing: string[] = [];
     for (const f of clientTsx()) {
       if (stripComments(read(f)).includes("@fluentui/react-components")) {
         importing.push(f);
       }
     }
-    expect(importing.sort()).toEqual([...FLUENT_FILES].sort());
+    expect(importing.sort(), "the chat chrome now uses ui/ primitives + tokens").toEqual([]);
   });
 });
 

@@ -44,12 +44,7 @@
  * — the same treatment as the desk control's.
  */
 import React, { useEffect, useRef, useState } from "react";
-import {
-  Badge,
-  Button,
-  makeStyles,
-} from "@fluentui/react-components";
-import { Notice } from "../components/ui";
+import { Badge, Button, Flex, Notice } from "../components/ui";
 import type { VoiceBackend, VoiceCaptureHandle } from "../voiceBackend";
 import { extractText } from "./types";
 
@@ -61,32 +56,6 @@ const STATUS_LABEL: Record<VoiceStatus, string> = {
   thinking: "Thinking",
   speaking: "Speaking",
 };
-
-const useStyles = makeStyles({
-  bar: {
-    display: "flex",
-    alignItems: "center",
-    gap: "var(--space-1-5)",
-    paddingTop: "var(--space-1)",
-    paddingBottom: "var(--space-1)",
-    paddingLeft: "var(--space-3)",
-    paddingRight: "var(--space-3)",
-  },
-  inline: {
-    display: "flex",
-    alignItems: "center",
-    gap: "var(--space-1-5)",
-    flexShrink: 0,
-  },
-  statusRow: {
-    display: "flex",
-    alignItems: "center",
-    gap: "var(--space-1-5)",
-    paddingTop: "var(--space-1)",
-    paddingLeft: "var(--space-3)",
-    paddingRight: "var(--space-3)",
-  },
-});
 
 export interface ChatComposerVoiceControlProps {
   /** The send path is unavailable (e.g. the session is resetting). */
@@ -272,7 +241,6 @@ export function useChatComposerVoice(
  * renders nothing here; its controls sit in the box).
  */
 export function ChatComposerVoiceFeedback(props: { voice: ChatComposerVoice }) {
-  const styles = useStyles();
   const { voice } = props;
   const showStatus = voice.status !== "idle" || voice.interim !== null;
   if (!voice.unsupported && !voice.failureCode && !voice.playbackFailureCode && !showStatus) {
@@ -298,11 +266,10 @@ export function ChatComposerVoiceFeedback(props: { voice: ChatComposerVoice }) {
         </Notice>
       )}
       {showStatus && (
-        <div className={styles.statusRow}>
+        <Flex gap="1-5" align="center" className="ui-pad-x-3 ui-pad-t-1">
           <Badge
-            size="small"
-            appearance="tint"
-            color={voice.status === "idle" ? "subtle" : "informative"}
+            size="xs"
+            tone={voice.status === "idle" ? "neutral" : "info"}
           >
             {STATUS_LABEL[voice.status]}
           </Badge>
@@ -311,7 +278,7 @@ export function ChatComposerVoiceFeedback(props: { voice: ChatComposerVoice }) {
               🎙️ <em>{voice.interim}…</em>
             </span>
           )}
-        </div>
+        </Flex>
       )}
     </div>
   );
@@ -328,14 +295,14 @@ export function ChatComposerVoiceFeedback(props: { voice: ChatComposerVoice }) {
  * unmistakable via the primary appearance and the stop glyph.
  */
 export function ChatComposerVoiceButtons(props: { voice: ChatComposerVoice }) {
-  const styles = useStyles();
   const { voice } = props;
   return (
-    <div className={styles.inline} data-testid="chat-composer-voice">
+    <Flex inline gap="1-5" align="center" data-testid="chat-composer-voice">
       <Button
         type="button"
-        appearance={voice.status === "listening" ? "primary" : "subtle"}
-        size="small"
+        variant={voice.status === "listening" ? "primary" : "secondary"}
+        tone={voice.status === "listening" ? "solid" : "subtle"}
+        size="sm"
         disabled={voice.micDisabled}
         onClick={voice.toggleRecording}
         title="Start or stop voice input"
@@ -345,15 +312,16 @@ export function ChatComposerVoiceButtons(props: { voice: ChatComposerVoice }) {
       </Button>
       <Button
         type="button"
-        appearance="subtle"
-        size="small"
+        variant="secondary"
+        tone="subtle"
+        size="sm"
         onClick={voice.toggleMuted}
         title="Toggle spoken replies"
         aria-label="Toggle spoken replies"
       >
         {voice.muted ? "🔇" : "🔊"}
       </Button>
-    </div>
+    </Flex>
   );
 }
 
@@ -365,14 +333,13 @@ export function ChatComposerVoiceButtons(props: { voice: ChatComposerVoice }) {
  * Input's contentAfter slot).
  */
 export function ChatComposerVoiceControl(props: ChatComposerVoiceControlProps) {
-  const styles = useStyles();
   const voice = useChatComposerVoice(props);
   return (
     <div>
       <ChatComposerVoiceFeedback voice={voice} />
-      <div className={styles.bar}>
+      <Flex gap="1-5" align="center" className="ui-pad-x-3 ui-pad-y-1">
         <ChatComposerVoiceButtons voice={voice} />
-      </div>
+      </Flex>
     </div>
   );
 }
