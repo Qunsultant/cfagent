@@ -16,6 +16,44 @@ function makeDeps(agent: unknown) {
   return { env: { SCREENER_AGENT: ns }, userLogin: "tester" } as any;
 }
 
+// #3515 S3 batch 9: fetchScreenerPdf now logs via the structured
+// logger, whose fallback sink writes every event as one JSON line via
+// console.info. Parse those lines into structured events (batch-3
+// pattern) instead of reading raw console.warn/error lines.
+function structuredEvents(info: ReturnType<typeof vi.spyOn>): Array<{
+  operation: string;
+  level: string;
+  fields: Record<string, unknown>;
+}> {
+  const events: Array<{
+    operation: string;
+    level: string;
+    fields: Record<string, unknown>;
+  }> = [];
+  for (const call of info.mock.calls) {
+    try {
+      const parsed = JSON.parse(String(call[0])) as {
+        operation?: unknown;
+        level?: unknown;
+        fields?: unknown;
+      };
+      if (parsed && typeof parsed.operation === "string") {
+        events.push({
+          operation: parsed.operation,
+          level: typeof parsed.level === "string" ? parsed.level : "",
+          fields:
+            parsed.fields && typeof parsed.fields === "object"
+              ? (parsed.fields as Record<string, unknown>)
+              : {},
+        });
+      }
+    } catch {
+      // Non-JSON console.info lines are not structured events.
+    }
+  }
+  return events;
+}
+
 describe("#333 fetchScreenerPdf", () => {
   it("returns the run PDF by key on a healthy path", async () => {
     const agent = {
@@ -41,21 +79,24 @@ describe("#333 fetchScreenerPdf", () => {
   });
 
   it("logs the error and returns null when pdfStatus is failed (#822)", async () => {
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
     const agent = {
       getPdfByKey: async () => ({ bytes: PDF_BYTES, fileName: "should-not-fetch.pdf" }),
       getLatestPdf: async () => ({ bytes: PDF_BYTES, fileName: "latest.pdf" }),
     };
     const pdf = await fetchScreenerPdf(makeDeps(agent), undefined, "failed", "PDF lib crashed");
     expect(pdf).toBeNull();
-    expect(errorSpy).toHaveBeenCalledWith(
-      expect.stringContaining("PDF generation failed")
+    const failed = structuredEvents(info).filter(
+      (e) => e.operation === "screenerPublishers.pdf_generation_failed"
     );
-    errorSpy.mockRestore();
+    expect(failed).toHaveLength(1);
+    expect(failed[0]?.level).toBe("error");
+    expect(String(failed[0]?.fields?.message ?? "")).toContain("PDF generation failed");
+    info.mockRestore();
   });
 
   it("returns null (not throw) when the agent errors, and logs it", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
     const agent = {
       getPdfByKey: async () => {
         throw new Error("DO unreachable");
@@ -64,15 +105,24 @@ describe("#333 fetchScreenerPdf", () => {
     };
     const pdf = await fetchScreenerPdf(makeDeps(agent), "k");
     expect(pdf).toBeNull();
-    expect(warn).toHaveBeenCalled();
-    warn.mockRestore();
+    const failed = structuredEvents(info).filter(
+      (e) => e.operation === "screenerPublishers.fetch_screener_pdf_failed"
+    );
+    expect(failed).toHaveLength(1);
+    expect(failed[0]?.level).toBe("warn");
+    expect(failed[0]?.fields?.error).toBe("DO unreachable");
+    info.mockRestore();
   });
 
   it("returns null with a warning when the binding is missing", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
     const pdf = await fetchScreenerPdf({ env: {}, userLogin: "t" } as any, "k");
     expect(pdf).toBeNull();
-    expect(warn).toHaveBeenCalled();
-    warn.mockRestore();
+    const missing = structuredEvents(info).filter(
+      (e) => e.operation === "screenerPublishers.screener_agent_binding_missing"
+    );
+    expect(missing).toHaveLength(1);
+    expect(missing[0]?.level).toBe("warn");
+    info.mockRestore();
   });
 });

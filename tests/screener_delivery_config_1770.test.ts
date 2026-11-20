@@ -28,6 +28,45 @@ vi.mock("../src/services/cfpayA2A", () => ({
   cfpayPostFileToSlack: vi.fn(async () => ({ ok: true })),
 }));
 
+// #3515 S3 batch 9: the publishers now log via the structured logger,
+// whose fallback sink writes every event as one JSON line via
+// console.info. Parse those lines into structured events (batch-3
+// pattern) instead of reading raw console.warn lines.
+function structuredEvents(): Array<{
+  operation: string;
+  level: string;
+  fields: Record<string, unknown>;
+}> {
+  const info = console.info as unknown as { mock: { calls: unknown[][] } };
+  const events: Array<{
+    operation: string;
+    level: string;
+    fields: Record<string, unknown>;
+  }> = [];
+  for (const call of info.mock.calls) {
+    try {
+      const parsed = JSON.parse(String(call[0])) as {
+        operation?: unknown;
+        level?: unknown;
+        fields?: unknown;
+      };
+      if (parsed && typeof parsed.operation === "string") {
+        events.push({
+          operation: parsed.operation,
+          level: typeof parsed.level === "string" ? parsed.level : "",
+          fields:
+            parsed.fields && typeof parsed.fields === "object"
+              ? (parsed.fields as Record<string, unknown>)
+              : {},
+        });
+      }
+    } catch {
+      // Non-JSON console.info lines are not structured events.
+    }
+  }
+  return events;
+}
+
 describe("checkScreenerDeliveryConfig (#1770 slice B)", () => {
   it("reports unconfigured with a named reason when no transport exists", () => {
     const status = checkScreenerDeliveryConfig({ APP_BASE_URL: "https://example.invalid" });
@@ -87,7 +126,7 @@ describe("checkScreenerDeliveryConfig (#1770 slice B)", () => {
 describe("bus publishers surface missing email transport (#1770 slice B)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(console, "info").mockImplementation(() => {});
   });
 
   const completedEvent = (overrides: Partial<ScreenerCompletedEvent> = {}): ScreenerCompletedEvent => ({
@@ -117,16 +156,29 @@ describe("bus publishers surface missing email transport (#1770 slice B)", () =>
     await publishScreenerCompleted({ env, userLogin: "trader1" }, completedEvent());
     expect(mockCfpaySendEmail).not.toHaveBeenCalled();
     expect(mockCfpaySendEmailWithAttachments).not.toHaveBeenCalled();
-    const warns = (console.warn as any).mock.calls.map((c: any[]) => String(c.join(" ")));
-    expect(warns.some((w: string) => w.includes("No email transport is configured"))).toBe(true);
+    // The missing-transport skip must surface as a named structured event.
+    const skip = structuredEvents().filter(
+      (e) => e.operation === "screenerPublishers.email_delivery_skipped"
+    );
+    expect(skip).toHaveLength(1);
+    expect(skip[0]?.level).toBe("warn");
+    expect(String(skip[0]?.fields?.message ?? "")).toContain(
+      "No email transport is configured"
+    );
   });
 
   it("failed: skips email with a named warning and issues no send when unconfigured", async () => {
     const env = { APP_BASE_URL: "https://example.invalid" } as any;
     await publishScreenerFailed({ env, userLogin: "trader1" }, failedEvent());
     expect(mockCfpaySendEmail).not.toHaveBeenCalled();
-    const warns = (console.warn as any).mock.calls.map((c: any[]) => String(c.join(" ")));
-    expect(warns.some((w: string) => w.includes("No email transport is configured"))).toBe(true);
+    const skip = structuredEvents().filter(
+      (e) => e.operation === "screenerPublishers.email_failure_notify_skipped"
+    );
+    expect(skip).toHaveLength(1);
+    expect(skip[0]?.level).toBe("warn");
+    expect(String(skip[0]?.fields?.message ?? "")).toContain(
+      "No email transport is configured"
+    );
   });
 
   it("completed: still sends via cfpay when configured (no skip warning)", async () => {
@@ -136,7 +188,11 @@ describe("bus publishers surface missing email transport (#1770 slice B)", () =>
     } as any;
     await publishScreenerCompleted({ env, userLogin: "trader1" }, completedEvent());
     expect(mockCfpaySendEmail).toHaveBeenCalled();
-    const warns = (console.warn as any).mock.calls.map((c: any[]) => String(c.join(" ")));
-    expect(warns.some((w: string) => w.includes("No email transport is configured"))).toBe(false);
+    // The cfpay transport is configured, so no missing-transport
+    // skip event is emitted for the completed publish.
+    const skip = structuredEvents().filter(
+      (e) => e.operation === "screenerPublishers.email_delivery_skipped"
+    );
+    expect(skip).toHaveLength(0);
   });
 });

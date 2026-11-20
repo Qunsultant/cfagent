@@ -368,6 +368,44 @@ describe("D8 audit vs telemetry on the goal path (#1999)", () => {
 /* D2 fixed site 3 — screener failure-notify audit insert              */
 /* ------------------------------------------------------------------ */
 
+// #3515 S3 batch 9: publishFailed now logs via the structured logger,
+// whose fallback sink writes every event as one JSON line via
+// console.info. Parse those lines into structured events (batch-3
+// pattern) instead of reading raw console.warn/error lines.
+function structuredEvents(info: ReturnType<typeof vi.spyOn>): Array<{
+  operation: string;
+  level: string;
+  fields: Record<string, unknown>;
+}> {
+  const events: Array<{
+    operation: string;
+    level: string;
+    fields: Record<string, unknown>;
+  }> = [];
+  for (const call of info.mock.calls) {
+    try {
+      const parsed = JSON.parse(String(call[0])) as {
+        operation?: unknown;
+        level?: unknown;
+        fields?: unknown;
+      };
+      if (parsed && typeof parsed.operation === "string") {
+        events.push({
+          operation: parsed.operation,
+          level: typeof parsed.level === "string" ? parsed.level : "",
+          fields:
+            parsed.fields && typeof parsed.fields === "object"
+              ? (parsed.fields as Record<string, unknown>)
+              : {},
+        });
+      }
+    } catch {
+      // Non-JSON console.info lines are not structured events.
+    }
+  }
+  return events;
+}
+
 describe("D2 fixed site: failure-notify audit insert (#1999)", () => {
   const failedEvent: ScreenerFailedEvent = {
     type: "screener.failed",
@@ -379,7 +417,11 @@ describe("D2 fixed site: failure-notify audit insert (#1999)", () => {
   };
 
   it("a lost failure-notify audit insert warns with type + login (#1999 D2)", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    // #3515 S3 batch 9: publishFailed now warns via the structured
+    // logger, whose fallback sink writes every event as one JSON line
+    // via console.info. Parse those lines into structured events
+    // (batch-3 pattern) instead of reading raw console.warn lines.
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
     const orm = {
       events: {
         create: () => {
@@ -393,9 +435,14 @@ describe("D2 fixed site: failure-notify audit insert (#1999)", () => {
       { env: {} as Env, orm: orm as never, userLogin: "alice" },
       failedEvent,
     );
-    const text = warn.mock.calls.map((c) => c.map(String).join(" ")).join("\n");
-    expect(text).toMatch(/screener\.failure_notify_skipped/);
-    expect(text).toMatch(/alice/);
+    const failed = structuredEvents(info).find(
+      (e) =>
+        e.operation === "screenerPublishers.audit_insertion_failed" &&
+        e.level === "warn",
+    );
+    expect(failed).toBeDefined();
+    expect(failed?.fields.type).toBe("screener.failure_notify_skipped");
+    expect(failed?.fields.login).toBe("alice");
   });
 
   it("a stored failure-notify audit insert records the skip (#1999 D2)", async () => {
