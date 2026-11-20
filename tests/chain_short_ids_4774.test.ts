@@ -54,9 +54,17 @@
  *    carry their `id` PK; the derived per-step instance id is
  *    `trace:<runBody>:<loop>:<step>:<index>` (distinct per run, per
  *    step, per index).
+ *  - 5430-P10 the ruled family ids are wired, not just the short
+ *    ids: every catalog id is `chain:<family>` (built by
+ *    `chainId()`), every feed-chain job id is
+ *    `pipe:<feed>-<dataset>` (built by `pipeId()`), every
+ *    labelKey is `workflow:<shortId>` — and a scoped source scan
+ *    proves no old hyphenated workflow id remains in the catalog
+ *    or the chain files. (Nav/tab ids keep the old strings — a
+ *    different namespace — so the scan is scoped, never global.)
  */
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import {
@@ -81,7 +89,9 @@ import {
 import {
   EXECUTION_TREE_LEVEL_SHORT_IDS,
   OODA_LOOP_SHORT_ID,
+  chainId,
   oodaStepShortId,
+  pipeId,
   qualifyExecutionId,
   runIdBody,
   stageActionEventId,
@@ -101,13 +111,13 @@ describe("chain short ids (#4774)", () => {
   it("P01: the ruled short ids are wired in the workflow catalog", () => {
     assertWorkflowCatalog();
     const ruled: Array<[string, string]> = [
-      ["stockscr", "stock-screener"],
-      ["optionsscr", "options-screener"],
-      ["goalscr", "goal-screen"],
-      ["strategyscr", "strategy-discovery"],
-      ["tradrun", "trading-leg"],
-      ["payrun", "payment-run"],
-      ["sagarun", "saga-run"],
+      ["stockscr", "chain:stockscr"],
+      ["optionsscr", "chain:optionsscr"],
+      ["goalscr", "chain:goalscr"],
+      ["strategyscr", "chain:strategyscr"],
+      ["tradrun", "chain:tradrun"],
+      ["payrun", "chain:payrun"],
+      ["sagarun", "chain:sagarun"],
     ];
     for (const [shortId, id] of ruled) {
       expect(workflowById(id)?.shortId).toBe(shortId);
@@ -156,7 +166,7 @@ describe("chain short ids (#4774)", () => {
   });
 
   it("P05: every catalog family carries its ruled short id; research has none yet", () => {
-    for (const id of ["trading-leg", "payment-run", "saga-run"]) {
+    for (const id of ["chain:tradrun", "chain:payrun", "chain:sagarun"]) {
       expect(workflowById(id)?.shortId).not.toBeUndefined();
     }
     const catalog = src("workflows/workflowCatalog.ts");
@@ -222,7 +232,7 @@ describe("chain short ids (#4774)", () => {
     ]);
     expect(qualifyExecutionId("chain", "feedsrc")).toBe("chain:feedsrc");
     expect(qualifyExecutionId("run", "m9x-1")).toBe("run:m9x-1");
-    expect(qualifyExecutionId("job", "stock-screener")).toBe("job:stock-screener");
+    expect(qualifyExecutionId("job", "screener")).toBe("job:screener");
     // The same local string at two levels is two different ids.
     expect(qualifyExecutionId("stage", "feed")).not.toBe(qualifyExecutionId("unit", "feed"));
     // Bodies, not full ids, are embedded: the `run:` and `job:`
@@ -244,7 +254,7 @@ describe("chain short ids (#4774)", () => {
     // The stage-action event id shares the stage id's run-body /
     // stage / unit segments (segment equality, not a string prefix).
     const event = jobStageActionEvent({
-      jobId: "stock-screener",
+      jobId: "chain:stockscr",
       runId: "run:m9x-1",
       stageId: "job:feed",
       unitId: "AAPL",
@@ -328,5 +338,90 @@ describe("chain short ids (#4774)", () => {
     expect(traceStepInstanceId("run:m9x-2", "ooda:observe", 0)).not.toBe(a);
     expect(traceStepInstanceId("run:m9x-1", "ooda:orient", 0)).not.toBe(a);
     expect(() => traceStepInstanceId("run:m9x-1", "observe", 0)).toThrow();
+  });
+});
+
+describe("ruled family ids (#5430)", () => {
+  it("P10: the catalog carries the ruled family ids and the feed chains carry the ruled pipe ids", () => {
+    // #5430 — the workflow catalog key is the family id `chain:<family>`
+    // (the job name lives in the job-definition catalog as `job:<spec>`),
+    // and every feed-chain job id is `pipe:<feed>-<dataset>`. No old
+    // hyphenated workflow id remains in the catalog or the chain files.
+    const ruled = new Set([
+      "chain:stockscr",
+      "chain:optionsscr",
+      "chain:goalscr",
+      "chain:strategyscr",
+      "chain:tradrun",
+      "chain:payrun",
+      "chain:sagarun",
+    ]);
+    for (const workflow of WORKFLOW_CATALOG) {
+      expect(workflow.shortId).toBeDefined();
+      expect(workflow.id).toBe(chainId(workflow.shortId!));
+      expect(ruled.has(workflow.id)).toBe(true);
+      expect(workflow.labelKey).toBe(`workflow.${workflow.shortId}`);
+    }
+    expect(WORKFLOW_CATALOG.length).toBe(7);
+    for (const entry of CHAIN_PIPELINE_CATALOG) {
+      const stem = entry.feedJobId.replace(new RegExp(`-${entry.dataset}$`), "");
+      expect(entry.jobId).toBe(pipeId(stem, entry.dataset));
+      expect(entry.jobId.startsWith("pipe:")).toBe(true);
+    }
+    // Scoped source scan (#5430 (c)): the old ids appear nowhere in
+    // the files that carry the renamed ids — every file under
+    // src/workflows/, the two chain-job files, and the catalog tests
+    // themselves. The list is assembled from fragments so this file
+    // carries no old-id literal of its own (it is one of the scanned
+    // files). Nav/tab ids keep the old strings — a different
+    // namespace — so this is scoped, never a global ban. The scan
+    // matches the exact quoted literal: run ids (`goal-screen:<id>`),
+    // step names (`execute-goal-screen`), route paths and prose
+    // mentions are other namespaces and do not trip it.
+    const oldIds = [
+      ["stock", "screener"],
+      ["options", "screener"],
+      ["trading", "leg"],
+      ["payment", "run"],
+      ["saga", "run"],
+      ["goal", "screen"],
+      ["strategy", "discovery"],
+    ].map((parts) => parts.join("-"));
+    const quoted = (id: string) => `"${id}"`;
+    const sourceFiles = (dir: string): string[] => {
+      const out: string[] = [];
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const path = join(dir, entry.name);
+        if (entry.isDirectory()) out.push(...sourceFiles(path));
+        else if (entry.isFile() && /\.(ts|tsx)$/.test(entry.name)) out.push(path);
+      }
+      return out;
+    };
+    const scanned: string[] = [
+      ...sourceFiles(join(here, "..", "src", "workflows")),
+      join(here, "..", "src", "services", "chainPipelineJobs.ts"),
+      join(here, "..", "src", "services", "feedPipelineJobs.ts"),
+      ...[
+        "chain_short_ids_4774.test.ts",
+        "workflow_catalog_3071.test.ts",
+        "workflow_catalog_runtime_parity_3166.test.ts",
+        "options_trading_stage_ids_3191.test.ts",
+      ].map((test) => join(here, test)),
+    ];
+    expect(scanned.length).toBeGreaterThan(0);
+    for (const file of scanned) {
+      const text = readFileSync(file, "utf8");
+      for (const old of oldIds) {
+        expect(text, `${file} still carries the old workflow id "${old}"`).not.toContain(
+          quoted(old),
+        );
+      }
+    }
+    const chains = src("services/chainPipelineJobs.ts");
+    expect(chains).not.toContain("}-pipeline");
+    expect(chains).not.toContain('"-pipeline"');
+    const registry = src("services/pipelineChains.ts");
+    expect(registry).not.toContain("}-pipeline");
+    expect(registry).not.toContain('"-pipeline"');
   });
 });

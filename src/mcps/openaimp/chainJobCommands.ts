@@ -37,7 +37,7 @@ import { createRunBridgePorts } from "../../agents/orchestrator/runBridge";
 const SOURCE_PROPERTY = {
   type: "string",
   description:
-    "The feedsrc chain's source or name: a qualified source + universe (\"yahoo nasdaq100 pipeline\", \"sp100 pipeline\"), \"pipeline\" plus a single-job source (\"alpaca pipeline\", \"etrade pipeline\", \"public pipeline\"), or an exact feedsrc chain job id (e.g. yahoo-nasdaq100-quotes-pipeline).",
+    "The feedsrc chain's source or name: a qualified source + universe (\"yahoo nasdaq100 pipeline\", \"sp100 pipeline\"), \"pipeline\" plus a single-job source (\"alpaca pipeline\", \"etrade pipeline\", \"public pipeline\"), or an exact feedsrc chain job id (e.g. pipe:yahoo-nasdaq100-quotes).",
 } as const;
 
 const STAGE_PROPERTY = {

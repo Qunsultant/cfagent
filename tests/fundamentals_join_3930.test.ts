@@ -791,25 +791,25 @@ describe("the chains fold the parameterized fundamentals node (#3930)", () => {
     for (const chain of registry.list()) {
       expect(chain.fundamentalsJobId).toBe(FUND_ID);
     }
-    expect(registry.forId("yahoo-nasdaq100-quotes-pipeline")!.universeIndex).toBe("nasdaq100");
-    expect(registry.forId("yahoo-sp100-quotes-pipeline")!.universeIndex).toBe("sp100");
-    expect(registry.forId("yahoo-sp500-quotes-pipeline")!.universeIndex).toBe("sp500");
-    expect(registry.forId("yahoo-dow-quotes-pipeline")!.universeIndex).toBe("dow");
-    expect(registry.forId("yahoo-sp400-quotes-pipeline")!.universeIndex).toBe("sp400");
-    expect(registry.forId("yahoo-sector-energy-quotes-pipeline")!.universeIndex).toBe("sector-energy");
-    expect(registry.forId("yahoo-sector-materials-quotes-pipeline")!.universeIndex).toBe("sector-materials");
-    expect(registry.forId("yahoo-sector-industrials-quotes-pipeline")!.universeIndex).toBe("sector-industrials");
-    expect(registry.forId("yahoo-sector-consumer-discretionary-quotes-pipeline")!.universeIndex).toBe("sector-consumer-discretionary");
-    expect(registry.forId("yahoo-sector-consumer-staples-quotes-pipeline")!.universeIndex).toBe("sector-consumer-staples");
-    expect(registry.forId("yahoo-sector-health-care-quotes-pipeline")!.universeIndex).toBe("sector-health-care");
-    expect(registry.forId("yahoo-sector-financials-quotes-pipeline")!.universeIndex).toBe("sector-financials");
-    expect(registry.forId("yahoo-sector-information-technology-quotes-pipeline")!.universeIndex).toBe("sector-information-technology");
-    expect(registry.forId("yahoo-sector-communication-services-quotes-pipeline")!.universeIndex).toBe("sector-communication-services");
-    expect(registry.forId("yahoo-sector-utilities-quotes-pipeline")!.universeIndex).toBe("sector-utilities");
-    expect(registry.forId("yahoo-sector-real-estate-quotes-pipeline")!.universeIndex).toBe("sector-real-estate");
-    expect(registry.forId("alpaca-nasdaq100-quotes-pipeline")!.universeIndex).toBe("nasdaq100");
-    expect(registry.forId("etrade-nasdaq100-quotes-pipeline")!.universeIndex).toBe("nasdaq100");
-    expect(registry.forId("public-nasdaq100-quotes-pipeline")!.universeIndex).toBe("nasdaq100");
+    expect(registry.forId("pipe:yahoo-nasdaq100-quotes")!.universeIndex).toBe("nasdaq100");
+    expect(registry.forId("pipe:yahoo-sp100-quotes")!.universeIndex).toBe("sp100");
+    expect(registry.forId("pipe:yahoo-sp500-quotes")!.universeIndex).toBe("sp500");
+    expect(registry.forId("pipe:yahoo-dow-quotes")!.universeIndex).toBe("dow");
+    expect(registry.forId("pipe:yahoo-sp400-quotes")!.universeIndex).toBe("sp400");
+    expect(registry.forId("pipe:yahoo-sector-energy-quotes")!.universeIndex).toBe("sector-energy");
+    expect(registry.forId("pipe:yahoo-sector-materials-quotes")!.universeIndex).toBe("sector-materials");
+    expect(registry.forId("pipe:yahoo-sector-industrials-quotes")!.universeIndex).toBe("sector-industrials");
+    expect(registry.forId("pipe:yahoo-sector-consumer-discretionary-quotes")!.universeIndex).toBe("sector-consumer-discretionary");
+    expect(registry.forId("pipe:yahoo-sector-consumer-staples-quotes")!.universeIndex).toBe("sector-consumer-staples");
+    expect(registry.forId("pipe:yahoo-sector-health-care-quotes")!.universeIndex).toBe("sector-health-care");
+    expect(registry.forId("pipe:yahoo-sector-financials-quotes")!.universeIndex).toBe("sector-financials");
+    expect(registry.forId("pipe:yahoo-sector-information-technology-quotes")!.universeIndex).toBe("sector-information-technology");
+    expect(registry.forId("pipe:yahoo-sector-communication-services-quotes")!.universeIndex).toBe("sector-communication-services");
+    expect(registry.forId("pipe:yahoo-sector-utilities-quotes")!.universeIndex).toBe("sector-utilities");
+    expect(registry.forId("pipe:yahoo-sector-real-estate-quotes")!.universeIndex).toBe("sector-real-estate");
+    expect(registry.forId("pipe:alpaca-nasdaq100-quotes")!.universeIndex).toBe("nasdaq100");
+    expect(registry.forId("pipe:etrade-nasdaq100-quotes")!.universeIndex).toBe("nasdaq100");
+    expect(registry.forId("pipe:public-nasdaq100-quotes")!.universeIndex).toBe("nasdaq100");
   });
 
   it("the chain's fundamentals node runs with the chain's universe", () => {
@@ -840,19 +840,19 @@ describe("the chains fold the parameterized fundamentals node (#3930)", () => {
     }
     const byId = new Map(raws.map((r) => [r.jobId, r]));
     expect(
-      walk(byId.get("alpaca-nasdaq100-quotes-pipeline")!).find(
+      walk(byId.get("pipe:alpaca-nasdaq100-quotes")!).find(
         (n) => n.params?.feedJobId === FUND_ID,
       )?.params,
     ).toMatchObject({ feedJobId: FUND_ID, universe: "nasdaq100" });
     expect(
-      walk(byId.get("yahoo-sp100-quotes-pipeline")!).find(
+      walk(byId.get("pipe:yahoo-sp100-quotes")!).find(
         (n) => n.params?.feedJobId === FUND_ID,
       )?.params,
     ).toMatchObject({ feedJobId: FUND_ID, universe: "sp100" });
     // The alpaca chain now carries eight nodes (fundamentals,
     // technicals, and sentiment fold in, #3931/#3932).
-    expect(walk(byId.get("alpaca-nasdaq100-quotes-pipeline")!)).toHaveLength(8);
-    expect(walk(byId.get("yahoo-nasdaq100-quotes-pipeline")!)).toHaveLength(8);
+    expect(walk(byId.get("pipe:alpaca-nasdaq100-quotes")!)).toHaveLength(8);
+    expect(walk(byId.get("pipe:yahoo-nasdaq100-quotes")!)).toHaveLength(8);
     expect(CHAIN_PIPELINE_CATALOG).toHaveLength(19);
   });
 });

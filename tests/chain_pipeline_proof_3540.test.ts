@@ -104,7 +104,7 @@ const ENRICH_ID = `${FEED_ID}-enrich`;
 const ANALYZE_ID = `${ENRICH_ID}-analyze`;
 const GENERATE_ID = `${ANALYZE_ID}-generate`;
 const DELIVER_ID = `${GENERATE_ID}-deliver`;
-const CHAIN_ID = `${FEED_ID}-pipeline`;
+const CHAIN_ID = "pipe:yahoo-nasdaq100-quotes";
 
 function quote(symbol: string, price = 100): MarketDataResearchQuote {
   return {

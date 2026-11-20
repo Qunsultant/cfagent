@@ -19,13 +19,13 @@ const read = (path: string) => readFileSync(path, "utf8");
 
 describe("declared seam state matches the code (#3072/#3073)", () => {
   it("the four newly wired families are flagged wired", () => {
-    for (const id of ["options-screener", "trading-leg", "payment-run", "saga-run", "stock-screener"]) {
+    for (const id of ["chain:optionsscr", "chain:tradrun", "chain:payrun", "chain:sagarun", "chain:stockscr"]) {
       expect(workflowById(id)!.stageSeam).toBe(true);
     }
   });
 
   it("the families that run on someone else's seam stay unwired and say so", () => {
-    for (const id of ["goal-screen", "strategy-discovery"]) {
+    for (const id of ["chain:goalscr", "chain:strategyscr"]) {
       const workflow = workflowById(id)!;
       expect(workflow.stageSeam).toBe(false);
       expect(workflow.stages.every((stage) => stage.publishes.length === 0)).toBe(true);
@@ -44,11 +44,11 @@ describe("declared seam state matches the code (#3072/#3073)", () => {
 
   it("the catalog's per-family ids are the ones the seam validates against", () => {
     const familyOf: Record<string, keyof typeof STAGE_IDS_BY_FAMILY> = {
-      "stock-screener": "stock",
-      "options-screener": "options",
-      "trading-leg": "trading",
-      "payment-run": "payment",
-      "saga-run": "saga",
+      "chain:stockscr": "stock",
+      "chain:optionsscr": "options",
+      "chain:tradrun": "trading",
+      "chain:payrun": "payment",
+      "chain:sagarun": "saga",
     };
     for (const [workflowId, family] of Object.entries(familyOf)) {
       const declared = workflowById(workflowId)!.stages.flatMap((stage) => stage.runtimeStageIds ?? []);

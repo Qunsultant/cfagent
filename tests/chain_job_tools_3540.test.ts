@@ -86,7 +86,7 @@ import type { Env } from "../src/types";
 const T0 = Date.parse("2026-11-07T12:00:00.000Z");
 const FEED_ID = "yahoo-nasdaq100-quotes";
 const DELIVER_ID = `${FEED_ID}-enrich-analyze-generate-deliver`;
-const CHAIN_ID = `${FEED_ID}-pipeline`;
+const CHAIN_ID = "pipe:yahoo-nasdaq100-quotes";
 
 function quote(symbol: string): MarketDataResearchQuote {
   return {
@@ -388,7 +388,7 @@ describe("pipeline-chain copilot tools (#3540)", () => {
       { source: "alpaca pipeline" },
       context,
     )) as any;
-    expect(view.jobId).toBe("alpaca-nasdaq100-quotes-pipeline");
+    expect(view.jobId).toBe("pipe:alpaca-nasdaq100-quotes");
     expect(view.frontier).toBe("feed");
     expect(view.stages).toHaveLength(5);
     expect(view.stages.every((s: { status: string }) => s.status === "not-run")).toBe(true);
@@ -398,25 +398,25 @@ describe("pipeline-chain copilot tools (#3540)", () => {
     const { context } = await makeContext();
     const result = (await new ListPipelineChainsCommand().execute({}, context)) as any;
     expect(result.jobs.map((j: { jobId: string }) => j.jobId)).toEqual([
-      "yahoo-nasdaq100-quotes-pipeline",
-      "yahoo-sp100-quotes-pipeline",
-      "yahoo-sp500-quotes-pipeline",
-      "yahoo-dow-quotes-pipeline",
-      "yahoo-sp400-quotes-pipeline",
-      "yahoo-sector-energy-quotes-pipeline",
-      "yahoo-sector-materials-quotes-pipeline",
-      "yahoo-sector-industrials-quotes-pipeline",
-      "yahoo-sector-consumer-discretionary-quotes-pipeline",
-      "yahoo-sector-consumer-staples-quotes-pipeline",
-      "yahoo-sector-health-care-quotes-pipeline",
-      "yahoo-sector-financials-quotes-pipeline",
-      "yahoo-sector-information-technology-quotes-pipeline",
-      "yahoo-sector-communication-services-quotes-pipeline",
-      "yahoo-sector-utilities-quotes-pipeline",
-      "yahoo-sector-real-estate-quotes-pipeline",
-      "alpaca-nasdaq100-quotes-pipeline",
-      "etrade-nasdaq100-quotes-pipeline",
-      "public-nasdaq100-quotes-pipeline",
+      "pipe:yahoo-nasdaq100-quotes",
+      "pipe:yahoo-sp100-quotes",
+      "pipe:yahoo-sp500-quotes",
+      "pipe:yahoo-dow-quotes",
+      "pipe:yahoo-sp400-quotes",
+      "pipe:yahoo-sector-energy-quotes",
+      "pipe:yahoo-sector-materials-quotes",
+      "pipe:yahoo-sector-industrials-quotes",
+      "pipe:yahoo-sector-consumer-discretionary-quotes",
+      "pipe:yahoo-sector-consumer-staples-quotes",
+      "pipe:yahoo-sector-health-care-quotes",
+      "pipe:yahoo-sector-financials-quotes",
+      "pipe:yahoo-sector-information-technology-quotes",
+      "pipe:yahoo-sector-communication-services-quotes",
+      "pipe:yahoo-sector-utilities-quotes",
+      "pipe:yahoo-sector-real-estate-quotes",
+      "pipe:alpaca-nasdaq100-quotes",
+      "pipe:etrade-nasdaq100-quotes",
+      "pipe:public-nasdaq100-quotes",
     ]);
   });
 

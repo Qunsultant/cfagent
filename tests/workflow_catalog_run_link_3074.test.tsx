@@ -47,7 +47,7 @@ describe("catalog Run action (#3074 R8)", () => {
   });
 
   it("offers no Run link for a workflow that is not runnable", () => {
-    // trading-leg is the read-only one
+    // chain:tradrun is the read-only one
     expect(runLinks()).toHaveLength(3);
     expect(container.textContent).toContain("No submission path yet");
   });
@@ -60,7 +60,7 @@ describe("catalog Run action (#3074 R8)", () => {
   });
 
   it("refuses a runnable workflow with no runPath, and a runPath on a non-runnable one", () => {
-    const stock = WORKFLOW_CATALOG.find((w) => w.id === "stock-screener")!;
+    const stock = WORKFLOW_CATALOG.find((w) => w.id === "chain:stockscr")!;
     expect(() =>
       assertWorkflowCatalog([{ ...stock, runPath: null }]),
     ).toThrow(/names no runPath/i);

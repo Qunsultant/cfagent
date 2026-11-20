@@ -95,7 +95,7 @@ import type { Env } from "../src/types";
 const ACTOR = "octocat";
 const T0 = Date.parse("2026-11-07T12:00:00.000Z");
 const FEED_ID = "yahoo-nasdaq100-quotes";
-const CHAIN_ID = `${FEED_ID}-pipeline`;
+const CHAIN_ID = "pipe:yahoo-nasdaq100-quotes";
 
 function quote(symbol: string): MarketDataResearchQuote {
   return {
@@ -453,28 +453,28 @@ describe("pipeline-chain routes (#3540)", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { jobs: PipelineChainSurfaceView[] };
     expect(body.jobs.map((j) => j.jobId)).toEqual([
-      "yahoo-nasdaq100-quotes-pipeline",
-      "yahoo-sp100-quotes-pipeline",
-      "yahoo-sp500-quotes-pipeline",
-      "yahoo-dow-quotes-pipeline",
-      "yahoo-sp400-quotes-pipeline",
-      "yahoo-sector-energy-quotes-pipeline",
-      "yahoo-sector-materials-quotes-pipeline",
-      "yahoo-sector-industrials-quotes-pipeline",
-      "yahoo-sector-consumer-discretionary-quotes-pipeline",
-      "yahoo-sector-consumer-staples-quotes-pipeline",
-      "yahoo-sector-health-care-quotes-pipeline",
-      "yahoo-sector-financials-quotes-pipeline",
-      "yahoo-sector-information-technology-quotes-pipeline",
-      "yahoo-sector-communication-services-quotes-pipeline",
-      "yahoo-sector-utilities-quotes-pipeline",
-      "yahoo-sector-real-estate-quotes-pipeline",
+      "pipe:yahoo-nasdaq100-quotes",
+      "pipe:yahoo-sp100-quotes",
+      "pipe:yahoo-sp500-quotes",
+      "pipe:yahoo-dow-quotes",
+      "pipe:yahoo-sp400-quotes",
+      "pipe:yahoo-sector-energy-quotes",
+      "pipe:yahoo-sector-materials-quotes",
+      "pipe:yahoo-sector-industrials-quotes",
+      "pipe:yahoo-sector-consumer-discretionary-quotes",
+      "pipe:yahoo-sector-consumer-staples-quotes",
+      "pipe:yahoo-sector-health-care-quotes",
+      "pipe:yahoo-sector-financials-quotes",
+      "pipe:yahoo-sector-information-technology-quotes",
+      "pipe:yahoo-sector-communication-services-quotes",
+      "pipe:yahoo-sector-utilities-quotes",
+      "pipe:yahoo-sector-real-estate-quotes",
     ]);
     expect(body.jobs[0].frontier).toBe("feed");
     expect(body.jobs[0].stages).toHaveLength(5);
     const alpaca = await callRoute(ctx, "GET", "/data-providers/alpaca/pipeline-chains");
     const alpacaBody = (await alpaca.json()) as { jobs: PipelineChainSurfaceView[] };
-    expect(alpacaBody.jobs.map((j) => j.jobId)).toEqual(["alpaca-nasdaq100-quotes-pipeline"]);
+    expect(alpacaBody.jobs.map((j) => j.jobId)).toEqual(["pipe:alpaca-nasdaq100-quotes"]);
   });
 
   it("the provider list view carries the pipelineChains array", async () => {
@@ -484,22 +484,22 @@ describe("pipeline-chain routes (#3540)", () => {
     const body = (await res.json()) as any;
     const yahoo = body.providers.find((p: any) => p.id === "yahoo");
     expect(yahoo.pipelineChains.map((j: any) => j.jobId)).toEqual([
-      "yahoo-nasdaq100-quotes-pipeline",
-      "yahoo-sp100-quotes-pipeline",
-      "yahoo-sp500-quotes-pipeline",
-      "yahoo-dow-quotes-pipeline",
-      "yahoo-sp400-quotes-pipeline",
-      "yahoo-sector-energy-quotes-pipeline",
-      "yahoo-sector-materials-quotes-pipeline",
-      "yahoo-sector-industrials-quotes-pipeline",
-      "yahoo-sector-consumer-discretionary-quotes-pipeline",
-      "yahoo-sector-consumer-staples-quotes-pipeline",
-      "yahoo-sector-health-care-quotes-pipeline",
-      "yahoo-sector-financials-quotes-pipeline",
-      "yahoo-sector-information-technology-quotes-pipeline",
-      "yahoo-sector-communication-services-quotes-pipeline",
-      "yahoo-sector-utilities-quotes-pipeline",
-      "yahoo-sector-real-estate-quotes-pipeline",
+      "pipe:yahoo-nasdaq100-quotes",
+      "pipe:yahoo-sp100-quotes",
+      "pipe:yahoo-sp500-quotes",
+      "pipe:yahoo-dow-quotes",
+      "pipe:yahoo-sp400-quotes",
+      "pipe:yahoo-sector-energy-quotes",
+      "pipe:yahoo-sector-materials-quotes",
+      "pipe:yahoo-sector-industrials-quotes",
+      "pipe:yahoo-sector-consumer-discretionary-quotes",
+      "pipe:yahoo-sector-consumer-staples-quotes",
+      "pipe:yahoo-sector-health-care-quotes",
+      "pipe:yahoo-sector-financials-quotes",
+      "pipe:yahoo-sector-information-technology-quotes",
+      "pipe:yahoo-sector-communication-services-quotes",
+      "pipe:yahoo-sector-utilities-quotes",
+      "pipe:yahoo-sector-real-estate-quotes",
     ]);
   });
 
@@ -576,7 +576,7 @@ describe("pipeline-chain routes (#3540)", () => {
     const cross = await callRoute(
       ctx,
       "POST",
-      "/data-providers/yahoo/pipeline-chains/alpaca-nasdaq100-quotes-pipeline/run",
+      "/data-providers/yahoo/pipeline-chains/pipe:alpaca-nasdaq100-quotes/run",
     );
     expect(cross.status).toBe(404);
     const badAction = await callRoute(

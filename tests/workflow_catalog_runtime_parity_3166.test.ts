@@ -14,7 +14,7 @@ import {
   workflowById,
 } from "../src/workflows/workflowCatalog";
 
-const stock = () => workflowById("stock-screener")!;
+const stock = () => workflowById("chain:stockscr")!;
 
 describe("catalog <-> runtime stage parity (#3166)", () => {
   it("every runtime stock stage id is assigned to exactly one declared stage", () => {
@@ -41,7 +41,7 @@ describe("catalog <-> runtime stage parity (#3166)", () => {
     // Issue #3191 mapped options and trading, so the families still carrying a
     // named gap are goal and strategy - both of which run on another family's
     // seam and must say so rather than borrow its ids.
-    for (const id of ["goal-screen", "strategy-discovery"]) {
+    for (const id of ["chain:goalscr", "chain:strategyscr"]) {
       const workflow = workflowById(id)!;
       expect(workflow.stages.every((stage) => stage.runtimeStageIds === undefined)).toBe(true);
       expect((workflow.runtimeMappingGap ?? "").trim().length).toBeGreaterThan(10);

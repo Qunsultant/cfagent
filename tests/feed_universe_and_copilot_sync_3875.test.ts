@@ -66,12 +66,12 @@ describe("Issue #3875 — Feed universe auto-bootstrap, Wikipedia egress resilie
     }
   });
 
-  it("resolves 'nasdaq100 pipeline' and 'pipeline nasdaq100' to yahoo-nasdaq100-quotes-pipeline", () => {
+  it("resolves 'nasdaq100 pipeline' and 'pipeline nasdaq100' to pipe:yahoo-nasdaq100-quotes", () => {
     expect(resolvePipelineChain("nasdaq100 pipeline")?.jobId).toBe(
-      "yahoo-nasdaq100-quotes-pipeline",
+      "pipe:yahoo-nasdaq100-quotes",
     );
     expect(resolvePipelineChain("pipeline nasdaq100")?.jobId).toBe(
-      "yahoo-nasdaq100-quotes-pipeline",
+      "pipe:yahoo-nasdaq100-quotes",
     );
   });
 

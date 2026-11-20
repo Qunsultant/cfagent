@@ -12,7 +12,7 @@ import {
   type WorkflowDeclaration,
 } from "../src/workflows/workflowCatalog";
 
-const stock = () => workflowById("stock-screener")!;
+const stock = () => workflowById("chain:stockscr")!;
 
 describe("the catalog declares what can be run (#3071)", () => {
   it("is valid and lists every workflow by id", () => {
@@ -72,7 +72,7 @@ describe("the catalog declares what can be run (#3071)", () => {
   });
 
   it("carries the approval gate on the consequential leg (#3073 preview)", () => {
-    const trading = workflowById("trading-leg")!;
+    const trading = workflowById("chain:tradrun")!;
     const store = trading.stages.find((s) => s.stage === "store")!;
     expect(store.requiresApproval).toBe(true);
     expect(trading.runnable).toBe(false);

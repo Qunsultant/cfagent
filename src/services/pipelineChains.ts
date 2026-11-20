@@ -26,6 +26,7 @@
  * special case here.
  */
 import { buildFeedJobRegistry } from "./feedJobs";
+import { pipeId } from "./executionTreeIds";
 import type { IndexId } from "../trading";
 import { buildEnrichJobRegistry } from "./enrichJobs";
 import { buildAnalyzeJobRegistry } from "./analyzeJobs";
@@ -76,11 +77,12 @@ export interface PipelineChainNodeRef {
 }
 
 /**
- * One composed pipeline chain. `id` is the chain JOB's id (the
- * lineage's feed job id + "-pipeline"); the stage job ids are
- * the lineage's own job ids, unchanged. Issue #4774: the chain
- * SHAPE's short id is "feedsrc" (FEED_CHAIN_SHORT_ID in
- * chainPipelineJobs.ts) — one name for every lineage's chain.
+ * One composed pipeline chain. `id` is the chain JOB's id
+ * (`pipe:<feed>-<dataset>`, built by `pipeId()` — issue #5430);
+ * the stage job ids are the lineage's own job ids, unchanged.
+ * Issue #4774: the chain SHAPE's short id is "feedsrc"
+ * (FEED_CHAIN_SHORT_ID in chainPipelineJobs.ts) — one name for
+ * every lineage's chain.
  */
 export interface PipelineChainDefinition {
   id: string;
@@ -256,7 +258,11 @@ export function buildPipelineChainRegistry(
     const sentimentJobId =
       enrich.enrichFrom.find((s) => s.dataset === "sentiment")?.feedJobId ??
       null;
-    const id = `${feed.id}-pipeline`;
+    // Issue #5430 — same ruled form as the catalog's jobId
+    // (chainPipelineJobs.ts); the registry and the catalog must
+    // agree, or `forId()` and the catalog lookup diverge.
+    const feedStem = feed.id.replace(new RegExp(`-${feed.dataset}$`), "");
+    const id = pipeId(feedStem, feed.dataset);
     const orderedNodes: Array<{
       stage: PipelineChainStageKind;
       jobId: string;
