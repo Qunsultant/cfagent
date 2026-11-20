@@ -114,7 +114,7 @@ function canonParams(params: Record<string, string>): string {
 }
 
 describe("P5 runner — plan resolution (P4 finding 1: phased order)", () => {
-  it("resolves 441 executable steps and skips the seed-form entry with its reason", () => {
+  it("resolves 443 executable steps and skips the seed-form entry with its reason", () => {
     const p = plan();
     // #5229 adds migration 0069 (referral expiry_period_ms): 419 → 420.
     // #5175 slice 2 adds mas_runs + mas_run_aliases + its index: 421 → 424.
@@ -123,7 +123,9 @@ describe("P5 runner — plan resolution (P4 finding 1: phased order)", () => {
     // #4204 adds migration 0073 (D1 job_run_records recent-read index): 433 → 434.
     // #5865 adds migration 0074 (definition history table in D1 + DO, plus
     // the D1 backfill seed): 434 → 437.
-    expect(p.steps).toHaveLength(441);
+    // Issue #3185 adds the usage_events tenant stamp (DO index +
+    // remainder ALTER): 441 → 443.
+    expect(p.steps).toHaveLength(443);
     expect(p.skipped).toHaveLength(1);
     expect(p.skipped[0].code).toBe(SEED_FORM_CODE);
     expect(p.skipped[0].reason).toMatch(/call site/i);
@@ -141,7 +143,9 @@ describe("P5 runner — plan resolution (P4 finding 1: phased order)", () => {
     // #4204 adds migration 0073 (D1 job_run_records recent-read index): 433 → 434.
     // #5865 adds migration 0074 (definition history table in D1 + DO, plus
     // the D1 backfill seed): 434 → 437.
-    expect(harness).toHaveLength(441);
+    // Issue #3185 adds the usage_events tenant stamp (DO index +
+    // remainder ALTER): 441 → 443.
+    expect(harness).toHaveLength(443);
     // Production move 1: the rebuild CREATE for agent_price_catalogue
     // must stay after the RENAME that clears its table (a second
     // table-creation for the same table cannot run before the rename
@@ -300,9 +304,13 @@ describe("P5 runner — delta-to-steps selection (P4 finding 3, P4 finding 2)", 
     // live on the DO leg.
     // #4767 adds migrations 0071/0072 (4 remainder ALTERs): 132 → 136.
     // #5865 adds migration 0074 (definition history): 136 → 137.
-    expect(selected.schema).toHaveLength(139);
+    // Issue #3185 adds the usage_events tenant index to the DO leg: 139 → 140.
+    expect(selected.schema).toHaveLength(140);
     expect(selected.seeds).toHaveLength(0);
-    expect(selected.skipped).toHaveLength(36);
+    // Issue #3185 adds one probed DO statement (usage_events.tenant_id):
+    // the fresh CREATE TABLE already carries the column, so the ALTER
+    // is probed-and-skipped: 36 → 37.
+    expect(selected.skipped).toHaveLength(37);
     expect(codesOf(selected.skipped)).toContain(DROP_INDEX_CODE);
   });
 

@@ -581,8 +581,11 @@ describe("saga flow Leg 0/1 (S1, #2041) and gate entry (S2)", () => {
     // #2041 G-METERING: the payment workflow meters one usage row
     // after confirm-paid succeeds, only when this context is
     // present — non-saga payment runs carry no such context and
-    // meter nothing.
-    expect(paymentParams["meterContext"]).toEqual({ category: "saga", userLogin: "u1login" });
+    // meter nothing. Issue #3185: the context also carries the
+    // saga's validated account tenant (params.tenantId), threaded
+    // so the row is stamped with the tenant the payment was
+    // authorized under.
+    expect(paymentParams["meterContext"]).toEqual({ category: "saga", userLogin: "u1login", tenantId: "t1" });
   });
 
   it.each(["payment_required", "coverage_required", "approval_rejected", "expired", "quota_exhausted"])(
