@@ -133,9 +133,12 @@ export interface PaymentWorkflowParams {
    * today's behavior exactly (no rows). The saga Leg 0 sets this;
    * no other caller does, so non-saga runs are never labeled
    * saga. The category is literal "saga" because the meter route
-   * rejects any other category.
+   * rejects any other category. Issue #3185 (stamp slice):
+   * tenantId is the saga's validated account tenant
+   * (params.tenantId) — threaded, never re-resolved — so the
+   * row carries the tenant the payment was authorized under.
    */
-  meterContext?: { category: "saga"; userLogin: string };
+  meterContext?: { category: "saga"; userLogin: string; tenantId: string | null };
   /**
    * Issue #2762 — W3C traceparent for the run (#1743's field, the
    * WorkflowJobCommand contract): buildPaymentWorkflowParams stamps
@@ -305,6 +308,8 @@ export interface PaymentWorkflowDeps {
     protocol: "stripe" | "x402";
     userLogin: string;
     priceUSD: number;
+    /** Issue #3185: the saga's validated account tenant, threaded from meterContext. */
+    tenantId: string | null;
   }) => Promise<void>;
   /**
    * Issue #2192 follow-up (umbrella #2146): gate → native-ledger
@@ -786,6 +791,7 @@ export async function runPaymentWorkflowFlow(
           ...receipt,
           userLogin: params.meterContext!.userLogin,
           priceUSD: gateDecision.priceUSD,
+          tenantId: params.meterContext!.tenantId,
         }),
       );
       await traceStep(deps, "record-usage");

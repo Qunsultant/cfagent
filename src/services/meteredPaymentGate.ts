@@ -108,8 +108,14 @@ export function buildMeteredCallEvent(input: {
   category: string;
   priceUSD: number;
   tier: StoreTier;
+  /**
+   * Issue #3185 (stamp slice): the stamped account tenant.
+   * Null for anonymous x402/MPP traffic (payer-scope identity
+   * only) — never invented.
+   */
+  tenantId: string | null;
 }): InsertUsageEventRow {
-  const { receipt, userLogin, category, priceUSD, tier } = input;
+  const { receipt, userLogin, category, priceUSD, tier, tenantId } = input;
   return {
     // Deterministic per payment: a retry after a meter failure
     // re-inserts under the same id only if the first insert
@@ -127,6 +133,7 @@ export function buildMeteredCallEvent(input: {
       tier,
       protocol: receipt.protocol,
     }),
+    tenantId,
   };
 }
 
@@ -149,8 +156,14 @@ export function buildCoveredCallEvent(input: {
   category: string;
   priceUSD: number;
   tier: StoreTier;
+  /**
+   * Issue #3185 (stamp slice): the stamped account tenant for
+   * this session login — resolved by the caller at serve time.
+   * Null when the session login holds no account row.
+   */
+  tenantId: string | null;
 }): InsertUsageEventRow {
-  const { coverageId, userLogin, category, priceUSD, tier } = input;
+  const { coverageId, userLogin, category, priceUSD, tier, tenantId } = input;
   return {
     id: `use_${coverageId}`,
     userLogin,
@@ -163,6 +176,7 @@ export function buildCoveredCallEvent(input: {
       priceUSD,
       tier,
     }),
+    tenantId,
   };
 }
 

@@ -250,25 +250,42 @@ export class InMemoryUsageEventStore implements UsageEventPort {
       .filter((r) => r.userLogin === userLogin)
       .sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : b.seq - a.seq))
       .slice(0, limit)
-      .map(({ id, userLogin: u, runId, category, createdAt }) => ({
+      .map(({ id, userLogin: u, runId, category, createdAt, tenantId }) => ({
         id,
         userLogin: u,
         runId,
         category,
         createdAt,
+        tenantId,
+      }));
+  }
+
+  listByTenant(tenantId: string, limit: number): UsageEventRow[] {
+    return this.rows
+      .filter((r) => r.tenantId === tenantId)
+      .sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : b.seq - a.seq))
+      .slice(0, limit)
+      .map(({ id, userLogin, runId, category, createdAt, tenantId: t }) => ({
+        id,
+        userLogin,
+        runId,
+        category,
+        createdAt,
+        tenantId: t,
       }));
   }
 
   listAllWithDetail(): UsageEventDetailRow[] {
     return [...this.rows]
       .sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : a.seq - b.seq))
-      .map(({ id, userLogin, runId, category, createdAt, detailJson }) => ({
+      .map(({ id, userLogin, runId, category, createdAt, detailJson, tenantId }) => ({
         id,
         userLogin,
         runId,
         category,
         createdAt,
         detailJson,
+        tenantId,
       }));
   }
 }

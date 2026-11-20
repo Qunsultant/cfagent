@@ -16,7 +16,10 @@
  * The row's userLogin comes from the VALIDATED BODY, never from
  * that header: the header carries the forwarder service identity,
  * and taking it would misattribute every row to the service
- * account.
+ * account. The tenantId rides the same validated body from the
+ * server-side workflow caller (issue #3185 stamp slice) — the
+ * saga's validated account tenant, threaded, never re-resolved
+ * here; absent stamps NULL.
  *
  * Payload shape follows buildMeteredCallEvent
  * (src/services/meteredPaymentGate.ts) exactly — id
@@ -93,6 +96,7 @@ interface MeterEventBody {
   userLogin?: unknown;
   priceUSD?: unknown;
   category?: unknown;
+  tenantId?: unknown;
 }
 
 export async function handleMeterRoutes(
@@ -108,7 +112,7 @@ export async function handleMeterRoutes(
     if (!body || typeof body !== "object") {
       return Response.json({ error: "Meter event body must be a JSON object." }, { status: 400 });
     }
-    const { receiptId, protocol, userLogin, priceUSD, category } = body;
+    const { receiptId, protocol, userLogin, priceUSD, category, tenantId } = body;
     if (typeof receiptId !== "string" || !receiptId) {
       return Response.json({ error: "receiptId is required." }, { status: 400 });
     }
@@ -118,6 +122,16 @@ export async function handleMeterRoutes(
     if (typeof userLogin !== "string" || !userLogin) {
       return Response.json({ error: "userLogin is required." }, { status: 400 });
     }
+    // Issue #3185 (stamp slice): the tenant rides the validated
+    // body from the server-side workflow caller (recordMeterUsageEvent),
+    // exactly like userLogin — never from the forwarder header.
+    // Absent or null stamps NULL (unattributed); a non-string
+    // value is a malformed body.
+    if (tenantId !== undefined && tenantId !== null && typeof tenantId !== "string") {
+      return Response.json({ error: "tenantId must be a string." }, { status: 400 });
+    }
+    const stampedTenantId =
+      typeof tenantId === "string" && tenantId.trim().length > 0 ? tenantId.trim() : null;
     if (typeof priceUSD !== "number" || !Number.isFinite(priceUSD) || priceUSD <= 0) {
       return Response.json({ error: "priceUSD must be a positive number." }, { status: 400 });
     }
@@ -140,6 +154,7 @@ export async function handleMeterRoutes(
       category: "saga",
       createdAt: new Date().toISOString(),
       detailJson: JSON.stringify({ receiptId, priceUSD, tier, protocol }),
+      tenantId: stampedTenantId,
     };
     try {
       meter.insertEvent(row);

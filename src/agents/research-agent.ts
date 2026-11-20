@@ -1082,15 +1082,24 @@ export class ResearchAgent extends PortThink {
         evaluationJson: JSON.stringify(evaluation),
       });
       // #584 EP-009: meter the evaluation — attributed to tenant + task.
+      // Issue #3185 (stamp slice): the account tenant is resolved
+      // from the login here — the env-wide resolveIaaaTenant below
+      // is useless as a per-login stamp, so the meter uses the
+      // account row (best-effort: no row stamps NULL).
       try {
         const { recordUsageEvent } = await import(
           "../services/scheduledReports"
         );
+        const { resolveAccountTenantId } = await import(
+          "../services/accountTenant"
+        );
+        const tenantId = await resolveAccountTenantId(this.env, login);
         recordUsageEvent(this.ctx.storage.sql, {
           userLogin: login,
           runId,
           category: "research_evaluation",
           detail: { ideas: evaluation.ideas.length },
+          tenantId,
         });
       } catch {
         // Metering is advisory.

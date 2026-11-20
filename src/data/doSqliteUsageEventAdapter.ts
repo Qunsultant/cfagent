@@ -17,6 +17,7 @@ import type {
 } from "./canonicalReportStorePorts";
 import { DuplicateUsageEventError } from "./canonicalReportStorePorts";
 import { doIndexSql, doTableSql } from "./schemaComponent/doCatalogue";
+import { remainderAlterSql } from "./schemaComponent/remainderCatalogue";
 
 const TABLE = "usage_events";
 
@@ -25,21 +26,35 @@ export class DoSqliteUsageEventStore implements UsageEventPort {
 
   ensureSchema(): void {
     this.sql.exec(doTableSql("usage_events"));
+    // Issue #3185 (stamp slice): the tenant stamp, added when
+    // missing so existing DO tables upgrade in place (the #3182
+    // probed additive-column precedent). Legacy rows stay NULL.
+    const cols = Array.from(
+      this.sql.exec(`PRAGMA table_info(${TABLE})`)
+    ) as Array<{ name?: unknown }>;
+    const names = new Set(cols.map((c) => String(c?.name ?? "")));
+    if (!names.has("tenant_id")) {
+      this.sql.exec(remainderAlterSql("usage_events", "tenant_id"));
+    }
     this.sql.exec(
       doIndexSql("idx_usage_events_user")
+    );
+    this.sql.exec(
+      doIndexSql("idx_usage_events_tenant")
     );
   }
 
   insertEvent(row: InsertUsageEventRow): void {
     try {
       this.sql.exec(
-        `INSERT INTO ${TABLE} (id, user_login, run_id, category, created_at, detail_json) VALUES (?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO ${TABLE} (id, user_login, run_id, category, created_at, detail_json, tenant_id) VALUES (?, ?, ?, ?, ?, ?, ?)`,
         row.id,
         row.userLogin,
         row.runId,
         row.category,
         row.createdAt,
-        row.detailJson
+        row.detailJson,
+        row.tenantId
       );
     } catch (err) {
       // #5606 (G-3): a PRIMARY KEY collision is a duplicate retry —
@@ -55,7 +70,7 @@ export class DoSqliteUsageEventStore implements UsageEventPort {
   listByUser(userLogin: string, limit: number): UsageEventRow[] {
     const rows = Array.from(
       this.sql.exec(
-        `SELECT id, user_login, run_id, category, created_at FROM ${TABLE} WHERE user_login = ? ORDER BY created_at DESC LIMIT ?`,
+        `SELECT id, user_login, run_id, category, created_at, tenant_id FROM ${TABLE} WHERE user_login = ? ORDER BY created_at DESC LIMIT ?`,
         userLogin,
         limit
       )
@@ -66,6 +81,25 @@ export class DoSqliteUsageEventStore implements UsageEventPort {
       runId: String(r.run_id ?? ""),
       category: String(r.category ?? ""),
       createdAt: String(r.created_at ?? ""),
+      tenantId: r.tenant_id == null ? null : String(r.tenant_id),
+    }));
+  }
+
+  listByTenant(tenantId: string, limit: number): UsageEventRow[] {
+    const rows = Array.from(
+      this.sql.exec(
+        `SELECT id, user_login, run_id, category, created_at, tenant_id FROM ${TABLE} WHERE tenant_id = ? ORDER BY created_at DESC LIMIT ?`,
+        tenantId,
+        limit
+      )
+    ) as Array<Record<string, unknown>>;
+    return rows.map((r) => ({
+      id: String(r.id ?? ""),
+      userLogin: String(r.user_login ?? ""),
+      runId: String(r.run_id ?? ""),
+      category: String(r.category ?? ""),
+      createdAt: String(r.created_at ?? ""),
+      tenantId: r.tenant_id == null ? null : String(r.tenant_id),
     }));
   }
 
@@ -76,7 +110,7 @@ export class DoSqliteUsageEventStore implements UsageEventPort {
     this.ensureSchema();
     const rows = Array.from(
       this.sql.exec(
-        `SELECT id, user_login, run_id, category, created_at, detail_json FROM ${TABLE} ORDER BY created_at ASC, id ASC`
+        `SELECT id, user_login, run_id, category, created_at, detail_json, tenant_id FROM ${TABLE} ORDER BY created_at ASC, id ASC`
       )
     ) as Array<Record<string, unknown>>;
     return rows.map((r) => ({
@@ -86,6 +120,7 @@ export class DoSqliteUsageEventStore implements UsageEventPort {
       category: String(r.category ?? ""),
       createdAt: String(r.created_at ?? ""),
       detailJson: r.detail_json == null ? null : String(r.detail_json),
+      tenantId: r.tenant_id == null ? null : String(r.tenant_id),
     }));
   }
 }

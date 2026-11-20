@@ -271,7 +271,7 @@ describe("issue #2762 — PaymentWorkflow step hops join the carried trace", () 
 
   it("a metered (saga) paid run records the record-usage hop after record-native-ledger", async () => {
     const env: Record<string, unknown> = {};
-    const params = tracedParams({ meterContext: { category: "saga", userLogin: "alice" } });
+    const params = tracedParams({ meterContext: { category: "saga", userLogin: "alice", tenantId: "tenant-2762" } });
     const { deps } = wiredDeps(env, params, checkoutGate(paidConfirm), {
       recordUsage: async () => {},
     });

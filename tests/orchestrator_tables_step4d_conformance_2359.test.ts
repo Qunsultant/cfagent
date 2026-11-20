@@ -372,20 +372,27 @@ for (const [name, make] of STORE_ADAPTERS) {
     it("insert + per-tenant listing, newest first; duplicate id throws", () => {
       const p = make();
       p.usage.ensureSchema();
-      const event = (id: string, user: string, createdAt: string) => ({
+      const event = (id: string, user: string, createdAt: string, tenantId: string | null = null) => ({
         id,
         userLogin: user,
         runId: `run-${id}`,
         category: "research_run",
         createdAt,
         detailJson: null,
+        tenantId,
       });
-      p.usage.insertEvent(event("u1", "alice", T0));
-      p.usage.insertEvent(event("u2", "alice", T1));
-      p.usage.insertEvent(event("u3", "bob", T2));
+      p.usage.insertEvent(event("u1", "alice", T0, "tenant-a"));
+      p.usage.insertEvent(event("u2", "alice", T1, "tenant-a"));
+      p.usage.insertEvent(event("u3", "bob", T2, "tenant-b"));
       expect(p.usage.listByUser("alice", 10).map((e) => e.id)).toEqual(["u2", "u1"]);
       expect(p.usage.listByUser("carol", 10)).toEqual([]);
       expect(() => p.usage.insertEvent(event("u1", "alice", T2))).toThrow();
+      // Issue #3185: the tenant read sees exactly its own rows,
+      // newest first; NULL-stamped rows match no tenant.
+      expect(p.usage.listByTenant("tenant-a", 10).map((e) => e.id)).toEqual(["u2", "u1"]);
+      expect(p.usage.listByTenant("tenant-b", 10).map((e) => e.id)).toEqual(["u3"]);
+      expect(p.usage.listByTenant("tenant-none", 10)).toEqual([]);
+      expect(p.usage.listByUser("alice", 10).map((e) => e.tenantId)).toEqual(["tenant-a", "tenant-a"]);
     });
   });
 }

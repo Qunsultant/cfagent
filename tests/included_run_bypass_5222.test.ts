@@ -89,7 +89,13 @@ class CapturingMeter implements UsageEventPort {
     return this.rows
       .filter((r) => r.userLogin === userLogin)
       .slice(-limit)
-      .map(({ id, userLogin: u, runId, category, createdAt }) => ({ id, userLogin: u, runId, category, createdAt }));
+      .map(({ id, userLogin: u, runId, category, createdAt, tenantId }) => ({ id, userLogin: u, runId, category, createdAt, tenantId }));
+  }
+  listByTenant(tenantId: string, limit: number) {
+    return this.rows
+      .filter((r) => r.tenantId === tenantId)
+      .slice(-limit)
+      .map(({ id, userLogin, runId, category, createdAt, tenantId: t }) => ({ id, userLogin, runId, category, createdAt, tenantId: t }));
   }
 }
 
@@ -155,11 +161,14 @@ describe("buildCoveredCallEvent (#5222) — pure helper", () => {
       category: "options_screener",
       priceUSD: 0.05,
       tier: "Subscribed",
+      tenantId: "tenant-5222",
     });
     expect(row.id).toBe("use_cov_abc123");
     expect(row.runId).toBe("cov_abc123");
     expect(row.category).toBe("options_screener");
     expect(row.userLogin).toBe(LOGIN);
+    // Issue #3185: the covered path carries the resolved account tenant.
+    expect(row.tenantId).toBe("tenant-5222");
     const detail = meterDetail(row);
     expect(detail.coverageId).toBe("cov_abc123");
     expect(detail.paidVia).toBe("subscription_included");

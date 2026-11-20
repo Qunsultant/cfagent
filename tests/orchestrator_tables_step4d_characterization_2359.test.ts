@@ -110,6 +110,7 @@ import {
   getScheduledReportById,
   listScheduledReports,
   listUsageEvents,
+  listUsageEventsByTenant,
   recordUsageEvent,
   searchScheduledReports,
   storeReportAtGeneration,
@@ -771,12 +772,49 @@ describe("characterization 4d [seam]: canonical report store", () => {
 
   it("usage metering round-trips per tenant and refuses bad input", () => {
     const sql = seamSql();
-    const id = recordUsageEvent(sql, { userLogin: "alice", runId: "run-1", category: "research_run", detail: { n: 1 } });
+    const id = recordUsageEvent(sql, { userLogin: "alice", runId: "run-1", category: "research_run", detail: { n: 1 }, tenantId: "tenant-a" });
     expect(id).toMatch(/^use_/);
-    recordUsageEvent(sql, { userLogin: "bob", runId: "run-2", category: "research_evaluation" });
+    recordUsageEvent(sql, { userLogin: "bob", runId: "run-2", category: "research_evaluation", tenantId: "tenant-b" });
     expect(listUsageEvents(sql, "alice").map((e) => e.category)).toEqual(["research_run"]);
     expect(listUsageEvents(sql, "alice")[0].runId).toBe("run-1");
+    expect(listUsageEvents(sql, "alice")[0].tenantId).toBe("tenant-a");
     expect(recordUsageEvent(sql, { userLogin: "", runId: "r", category: "c" })).toBeNull();
+    // Issue #3185: the tenant read is the same rows, tenant-scoped.
+    expect(listUsageEventsByTenant(sql, "tenant-a").map((e) => e.runId)).toEqual(["run-1"]);
+    expect(listUsageEventsByTenant(sql, "tenant-b").map((e) => e.runId)).toEqual(["run-2"]);
+  });
+
+  it("a legacy usage_events table without tenant_id upgrades in place, legacy rows stay NULL (issue #3185)", () => {
+    const sql = seamSql();
+    // The pre-#3185 shape: no tenant_id column at all.
+    sql.exec(`CREATE TABLE IF NOT EXISTS usage_events (
+      id TEXT PRIMARY KEY,
+      user_login TEXT NOT NULL,
+      run_id TEXT NOT NULL,
+      category TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      detail_json TEXT
+    )`);
+    sql.exec(
+      `INSERT INTO usage_events (id, user_login, run_id, category, created_at, detail_json) VALUES (?, ?, ?, ?, ?, ?)`,
+      "use_legacy",
+      "alice",
+      "run-legacy",
+      "research_run",
+      "2026-11-01T00:00:00.000Z",
+      null,
+    );
+    // The ensure path probes and ALTERs the column in place.
+    const stamped = recordUsageEvent(sql, { userLogin: "alice", runId: "run-1", category: "research_run", tenantId: "tenant-a" });
+    expect(stamped).toMatch(/^use_/);
+    const events = listUsageEvents(sql, "alice");
+    // Newest first: the stamped row, then the legacy row.
+    expect(events.map((e) => e.runId)).toEqual(["run-1", "run-legacy"]);
+    expect(events[0].tenantId).toBe("tenant-a");
+    expect(events[1].tenantId).toBeNull();
+    expect(listUsageEventsByTenant(sql, "tenant-a").map((e) => e.runId)).toEqual(["run-1"]);
+    const cols = Array.from(sql.exec("PRAGMA table_info(usage_events)")) as Array<{ name?: unknown }>;
+    expect(cols.map((c) => String(c.name))).toContain("tenant_id");
   });
 
   it("the index backfill page reads stored rows in creation order", async () => {

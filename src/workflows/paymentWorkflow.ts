@@ -730,6 +730,7 @@ export class PaymentWorkflow extends PortThinkWorkflow<
         protocol: "stripe" | "x402";
         userLogin: string;
         priceUSD: number;
+        tenantId: string | null;
       }) => {
         // #2041 G-METERING: endpoint-mediated meter write, same
         // ORCHESTRATOR_AGENT channel as the audit forwarder above

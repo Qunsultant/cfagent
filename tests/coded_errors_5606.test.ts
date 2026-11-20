@@ -207,7 +207,7 @@ describe("coded errors #5606: version moves, credits, refunds, validators", () =
 
   it("a usage-event duplicate is typed at the adapter boundary on both stores", () => {
     const row = {
-      id: "evt-1", userLogin: "u1", runId: "run-1", category: "screen", createdAt: "2026-11-19T00:00:00.000Z", detailJson: null,
+      id: "evt-1", userLogin: "u1", runId: "run-1", category: "screen", createdAt: "2026-11-19T00:00:00.000Z", detailJson: null, tenantId: null,
     };
     const mem = new InMemoryUsageEventStore();
     mem.insertEvent(row);

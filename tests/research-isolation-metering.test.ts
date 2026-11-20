@@ -12,6 +12,7 @@ import {
   listScheduledReports,
   recordUsageEvent,
   listUsageEvents,
+  listUsageEventsByTenant,
   type ScheduledReportInput,
 } from "../src/services/scheduledReports";
 
@@ -93,11 +94,14 @@ describe("#584 usage metering (EP-009)", () => {
       userLogin: "alice",
       runId: "run-1",
       category: "research_run",
+      tenantId: "tenant-a",
     });
     const events = listUsageEvents(sql, "alice");
     expect(events.length).toBe(1);
     expect(events[0].runId).toBe("run-1");
     expect(events[0].category).toBe("research_run");
+    // Issue #3185: the stamp rides the event through the service seam.
+    expect(events[0].tenantId).toBe("tenant-a");
   });
 
   it("usage events are scoped per user", () => {
@@ -106,14 +110,52 @@ describe("#584 usage metering (EP-009)", () => {
       userLogin: "alice",
       runId: "run-1",
       category: "research_run",
+      tenantId: "tenant-a",
     });
     recordUsageEvent(sql, {
       userLogin: "bob",
       runId: "run-2",
       category: "research_evaluation",
+      tenantId: "tenant-b",
     });
     expect(listUsageEvents(sql, "alice").length).toBe(1);
     expect(listUsageEvents(sql, "bob").length).toBe(1);
     expect(listUsageEvents(sql, "carol").length).toBe(0);
+  });
+
+  it("usage events are scoped per tenant, and an absent stamp matches no tenant (issue #3185)", () => {
+    const sql = new MockSqlStorage();
+    recordUsageEvent(sql, {
+      userLogin: "alice",
+      runId: "run-1",
+      category: "research_run",
+      tenantId: "tenant-a",
+    });
+    recordUsageEvent(sql, {
+      userLogin: "alice",
+      runId: "run-2",
+      category: "research_evaluation",
+      tenantId: "tenant-a",
+    });
+    recordUsageEvent(sql, {
+      userLogin: "bob",
+      runId: "run-3",
+      category: "research_run",
+      tenantId: "tenant-b",
+    });
+    // No tenantId: legacy / unattributed — visible by login, invisible by tenant.
+    recordUsageEvent(sql, {
+      userLogin: "carol",
+      runId: "run-4",
+      category: "research_run",
+    });
+    expect(listUsageEventsByTenant(sql, "tenant-a").map((e) => e.runId).sort()).toEqual([
+      "run-1",
+      "run-2",
+    ]);
+    expect(listUsageEventsByTenant(sql, "tenant-b").map((e) => e.runId)).toEqual(["run-3"]);
+    expect(listUsageEventsByTenant(sql, "tenant-none")).toEqual([]);
+    expect(listUsageEventsByTenant(sql, "")).toEqual([]);
+    expect(listUsageEvents(sql, "carol")[0].tenantId).toBeNull();
   });
 });

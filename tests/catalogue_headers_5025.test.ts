@@ -32,10 +32,12 @@ describe("#5025 schemaComponent barrel & membership store naming", () => {
     // #5865 adds migration 0074 (definition history) to both residencies:
     // D1 230 → 234 (table + backfill + #5887's two ALTERs), DO 107 → 108,
     // remainder 57 → 63 (#4767 + #5887).
+    // #3185 (stamp slice): DO 108 → 109 (usage_events tenant index),
+    // remainder 63 → 64 (usage_events tenant_id ALTER).
     expect(D1_CATALOGUE_ENTRIES.length).toBe(234);
     expect(ORM_CATALOGUE_ENTRIES.length).toBe(26);
-    expect(REMAINDER_CATALOGUE_ENTRIES.length).toBe(63);
-    expect(DO_CATALOGUE_ENTRIES.length).toBe(108);
+    expect(REMAINDER_CATALOGUE_ENTRIES.length).toBe(64);
+    expect(DO_CATALOGUE_ENTRIES.length).toBe(109);
   });
 
   it("exposes createSessionMembershipStore as an alias for createKvMembershipStore", () => {

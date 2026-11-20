@@ -1114,7 +1114,8 @@ export const DO_CATALOGUE_ENTRIES: CatalogueEntry[] = [
       run_id TEXT NOT NULL,
       category TEXT NOT NULL,
       created_at TEXT NOT NULL,
-      detail_json TEXT
+      detail_json TEXT,
+      tenant_id TEXT
     )`,
     kind: "schema",
     form: "literal",
@@ -1504,6 +1505,18 @@ export const DO_CATALOGUE_ENTRIES: CatalogueEntry[] = [
     table: "usage_events",
     index: "idx_usage_events_user",
     statement: `CREATE INDEX IF NOT EXISTS idx_usage_events_user ON usage_events (user_login, created_at DESC)`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    // Issue #3185 (stamp slice): the per-tenant meter index —
+    // the tenant-filtered metering view reads (tenant_id,
+    // created_at) without scanning the login index.
+    code: "schema.index.usage_events.create_index_idx_usage_events_tenant",
+    plane: "index",
+    table: "usage_events",
+    index: "idx_usage_events_tenant",
+    statement: `CREATE INDEX IF NOT EXISTS idx_usage_events_tenant ON usage_events (tenant_id, created_at DESC)`,
     kind: "schema",
     form: "literal",
   },

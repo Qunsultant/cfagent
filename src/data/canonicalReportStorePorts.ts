@@ -205,6 +205,13 @@ export interface UsageEventRow {
   runId: string;
   category: string;
   createdAt: string;
+  /**
+   * Issue #3185 (stamp slice): the ACCOUNT tenant
+   * (getAccount(login).tenantId) stamped at event time. Null =
+   * unattributed — legacy rows, anonymous paid traffic, and
+   * logins with no commercial account row. Never invented.
+   */
+  tenantId: string | null;
 }
 
 export interface InsertUsageEventRow extends UsageEventRow {
@@ -222,6 +229,12 @@ export interface UsageEventPort {
   insertEvent(row: InsertUsageEventRow): void;
   /** One tenant's events, newest first. */
   listByUser(userLogin: string, limit: number): UsageEventRow[];
+  /**
+   * Issue #3185 (stamp slice): one tenant's metered events,
+   * newest first, by the stamped tenantId. Legacy and anonymous
+   * rows (tenantId NULL) never match a tenant.
+   */
+  listByTenant(tenantId: string, limit: number): UsageEventRow[];
   /**
    * Issue #5235 (slice 2.30): every metered event, oldest first,
    * WITH the detail JSON (the coverage + price record the revenue

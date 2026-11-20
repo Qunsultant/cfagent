@@ -120,7 +120,13 @@ class CapturingMeter implements UsageEventPort {
     return this.rows
       .filter((r) => r.userLogin === userLogin)
       .slice(-limit)
-      .map(({ id, userLogin: u, runId, category, createdAt }) => ({ id, userLogin: u, runId, category, createdAt }));
+      .map(({ id, userLogin: u, runId, category, createdAt, tenantId }) => ({ id, userLogin: u, runId, category, createdAt, tenantId }));
+  }
+  listByTenant(tenantId: string, limit: number) {
+    return this.rows
+      .filter((r) => r.tenantId === tenantId)
+      .slice(-limit)
+      .map(({ id, userLogin, runId, category, createdAt, tenantId: t }) => ({ id, userLogin, runId, category, createdAt, tenantId: t }));
   }
 }
 
@@ -212,11 +218,13 @@ describe("metered-gate pure helpers (#2408)", () => {
 
   it("builds the meter row from the receipt: runId = receipt id, category = service id", () => {
     const receipt = sampleReceipt();
-    const row = buildMeteredCallEvent({ receipt, userLogin: payerScopeId(PAYER), category: "options_screener", priceUSD: 0.05, tier: "Free" });
+    const row = buildMeteredCallEvent({ receipt, userLogin: payerScopeId(PAYER), category: "options_screener", priceUSD: 0.05, tier: "Free", tenantId: null });
     expect(row.id).toBe(`use_${receipt.receiptId}`);
     expect(row.runId).toBe(receipt.receiptId);
     expect(row.category).toBe("options_screener");
     expect(row.userLogin).toBe(payerScopeId(PAYER));
+    // Issue #3185: anonymous x402 traffic stamps NULL.
+    expect(row.tenantId).toBeNull();
     const detail = JSON.parse(row.detailJson ?? "{}") as Record<string, unknown>;
     expect(detail.receiptId).toBe(receipt.receiptId);
     expect(detail.priceUSD).toBe(0.05);
@@ -513,10 +521,16 @@ describe("premium-route wiring (#2408)", () => {
       category: "options_screener",
       createdAt: new Date().toISOString(),
       detailJson: JSON.stringify({ receiptId: "rcpt_x402_roundtrip", priceUSD: 0.05, tier: "Free", protocol: "x402" }),
+      tenantId: "tenant-roundtrip",
     });
     const rows = opts.meter!.listByUser("owner-login", 10);
     expect(rows).toHaveLength(1);
     expect(rows[0].runId).toBe("rcpt_x402_roundtrip");
     expect(rows[0].category).toBe("options_screener");
+    // Issue #3185: the stamp round-trips on the login read…
+    expect(rows[0].tenantId).toBe("tenant-roundtrip");
+    // …and the tenant read finds the same row.
+    expect(opts.meter!.listByTenant("tenant-roundtrip", 10).map((r) => r.id)).toEqual(["use_roundtrip_1"]);
+    expect(opts.meter!.listByTenant("other-tenant", 10)).toEqual([]);
   });
 });

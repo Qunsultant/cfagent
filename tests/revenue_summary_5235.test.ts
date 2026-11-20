@@ -254,6 +254,7 @@ describe("2.30 revenue summary cuts (#5235)", () => {
         category: "options_screener",
         priceUSD: 0.05,
         tier: "Free",
+        tenantId: "tenant-a",
       }),
     );
     orm.usageEvents.insertEvent(
@@ -270,6 +271,7 @@ describe("2.30 revenue summary cuts (#5235)", () => {
         category: "market_research",
         priceUSD: 0.1,
         tier: "Free",
+        tenantId: "tenant-a",
       }),
     );
     orm.usageEvents.insertEvent(
@@ -279,6 +281,7 @@ describe("2.30 revenue summary cuts (#5235)", () => {
         category: "stock_signals",
         priceUSD: 0.02,
         tier: "Subscribed",
+        tenantId: "tenant-b",
       }),
     );
     const s = orm.getRevenueSummary();
@@ -288,6 +291,16 @@ describe("2.30 revenue summary cuts (#5235)", () => {
       { coverage: "credits", runs: 0, revenue: 0, listValue: 0 },
     ]);
     expect(s.costPerRun).toBeNull();
+    // Issue #3185: the stamp does not change the platform
+    // aggregate — the same rows read back per tenant. (Sorted:
+    // both rows share a millisecond createdAt, so newest-first
+    // order between them is not pinned.)
+    expect(orm.usageEvents.listByTenant("tenant-a", 10).map((r) => r.id).sort()).toEqual([
+      "use_rc1",
+      "use_rc2",
+    ]);
+    expect(orm.usageEvents.listByTenant("tenant-b", 10).map((r) => r.id)).toEqual(["use_cov-1"]);
+    expect(orm.usageEvents.listByTenant("tenant-none", 10)).toEqual([]);
   });
 
   it("malformed meter detail never breaks the summary", () => {
@@ -299,6 +312,7 @@ describe("2.30 revenue summary cuts (#5235)", () => {
       category: "options_screener",
       createdAt: NOW,
       detailJson: "not-json{{{",
+      tenantId: null,
     });
     orm.usageEvents.insertEvent({
       id: "use_nodetail",
@@ -307,6 +321,7 @@ describe("2.30 revenue summary cuts (#5235)", () => {
       category: "stock_signals",
       createdAt: NOW,
       detailJson: null,
+      tenantId: null,
     });
     const s = orm.getRevenueSummary();
     const unknown = s.runRevenueByCoverage.find((c) => c.coverage === "unknown");
