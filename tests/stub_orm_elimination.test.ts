@@ -274,6 +274,8 @@ describe("issue #781: stub-ORM elimination", () => {
   });
 
   it("scheduled: collectDailyIvHistory without an ORM still records through the real data path", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-20T12:00:00.000Z"));
     DynamicOptionsScreener.setTestChainsFixture({ AAPL: chainFixture("AAPL", 100) });
     try {
       const store = new InMemoryIvHistoryStore();
@@ -284,6 +286,7 @@ describe("issue #781: stub-ORM elimination", () => {
       expect(result.data?.failed).toBe(0);
     } finally {
       DynamicOptionsScreener.clearTestChainsFixture();
+      vi.useRealTimers();
     }
   });
 });

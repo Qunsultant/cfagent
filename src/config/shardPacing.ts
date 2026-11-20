@@ -1,4 +1,8 @@
 /**
+ * @deprecated Issue #5833 (leftover from #4780) — unreferenced in `src/`;
+ * superseded by src/services/optionsChainPipelineJobs.ts (journaled workflow
+ * steps). Retained on disk per Policy Gate §22 no-deletion rule.
+ *
  * Issue #4424 — shard-chain dispatch pacing, the single source of truth.
  *
  * The values live in `config/shard-pacing.json`; this module reads them and

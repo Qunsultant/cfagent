@@ -48,11 +48,9 @@
  * body — verify Workflow Runs lists jobs from the definitions
  * store, not the catalog, when the first chain lands.
  *
- * The serve-record summary row (recordOptionsServeReport) is NOT
- * written by the engine path: it needs a DatabaseORM and the
- * residency has none. The per-format canonical rows from the store
- * step carry the run's provenance; the summary row's absence is a
- * known gap with a follow-up under #3550 (see the #4780 PR body).
+ * Issue #5170 — the serve step now writes the serve-record summary
+ * row (`recordOptionsServeReport`) through the orchestrator's
+ * `recordOptionsServeSummary` door (`DatabaseORM` + DO storage).
  */
 import { recordOptionsRun } from "../agents/optionsRuns";
 import { actorGateway } from "./cloudflareActorGateway";
@@ -83,6 +81,7 @@ import { SHARD_RETRY_BUCKET } from "./shardJobs";
 import { withRetry } from "./resilience";
 import { getReportPdf, putReportPdf } from "./reportBlobStore";
 import type { PipelineGenerateReportDoor } from "./canonicalReportLeg";
+import type { ScreenerRunOutcome } from "./screenerFollowups";
 import type { ScheduledReportInput } from "./scheduledReports";
 import {
   assembleOptionsResultForServe,
@@ -169,6 +168,8 @@ export interface OptionsChainStepDeps {
   blobGet: (key: string) => Promise<{ bytes: Uint8Array; fileName: string } | undefined>;
   /** Write one per-format canonical mas_reports row through the orchestrator door. */
   storeReport: (input: ScheduledReportInput) => Promise<unknown>;
+  /** Write the serve-record summary row (`recordOptionsServeReport`) through the orchestrator door (#5170). */
+  recordServeReport?: (outcome: ScreenerRunOutcome & { userLogin?: string }) => Promise<boolean>;
   /** Deliver the assembled outcome through the orchestrator door. */
   deliverOutcome: (
     payload: unknown,
@@ -188,6 +189,7 @@ export interface OptionsChainStepDeps {
 /** The orchestrator door the chain's store/deliver steps write through (the shared instance). */
 function orchestratorDoor(env: Env): {
   recordPipelineGenerateReport: PipelineGenerateReportDoor["recordPipelineGenerateReport"];
+  recordOptionsServeSummary: (outcome: ScreenerRunOutcome & { userLogin?: string }) => Promise<boolean>;
   deliverWorkflowScreenOutcome: (
     payload: unknown,
     userLogin: string,
@@ -202,6 +204,7 @@ function orchestratorDoor(env: Env): {
   }
   return actorGateway.stub<{
     recordPipelineGenerateReport: PipelineGenerateReportDoor["recordPipelineGenerateReport"];
+    recordOptionsServeSummary: (outcome: ScreenerRunOutcome & { userLogin?: string }) => Promise<boolean>;
     deliverWorkflowScreenOutcome: (
       payload: unknown,
       userLogin: string,
@@ -291,6 +294,7 @@ export function optionsChainStepDepsForWorkflow(env: Env): OptionsChainStepDeps 
     blobPut: defaultBlobPut(env),
     blobGet: defaultBlobGet(env),
     storeReport: (input) => orchestratorDoor(env).recordPipelineGenerateReport(input),
+    recordServeReport: (outcome) => orchestratorDoor(env).recordOptionsServeSummary(outcome),
     deliverOutcome: (payload, userLogin, deliveryId, chainId) =>
       orchestratorDoor(env).deliverWorkflowScreenOutcome(payload, userLogin, deliveryId, chainId),
     optionsRunStorage: undefined,
@@ -310,6 +314,7 @@ export function optionsChainStepDepsForScheduledAgent(
     blobPut: defaultBlobPut(env),
     blobGet: defaultBlobGet(env),
     storeReport: (input) => orchestratorDoor(env).recordPipelineGenerateReport(input),
+    recordServeReport: (outcome) => orchestratorDoor(env).recordOptionsServeSummary(outcome),
     deliverOutcome: (payload, userLogin, deliveryId, chainId) =>
       orchestratorDoor(env).deliverWorkflowScreenOutcome(payload, userLogin, deliveryId, chainId),
     optionsRunStorage: undefined,
@@ -799,6 +804,42 @@ async function runOptionsChainServe(
     if (!checked.verified) {
       throw new Error(`options-chain.serve verification failed for ${format}: ${checked.reason}`);
     }
+  }
+  if (deps.recordServeReport) {
+    const pdfArtifact = outcome.artifacts.pdf;
+    const xlsxArtifact = outcome.artifacts.xlsx;
+    const csvArtifact = outcome.artifacts.csv;
+    const symbols = Array.isArray(dataset.symbols) ? (dataset.symbols as string[]) : [];
+    const opportunities = Array.isArray(dataset.opportunities)
+      ? (dataset.opportunities as ScreenerRunOutcome["opportunities"])
+      : [];
+    const matchedCount =
+      typeof dataset.withTrades === "number"
+        ? dataset.withTrades
+        : typeof dataset.matchedCount === "number"
+          ? dataset.matchedCount
+          : opportunities?.length ?? 0;
+    await deps.recordServeReport({
+      kind: "options",
+      success: outcome.generatedFormats.length > 0,
+      trigger: chain.trigger ?? "scheduled",
+      timestamp: chain.timestamp,
+      thesis: typeof dataset.thesis === "string" ? dataset.thesis : "bullish",
+      symbols,
+      matchedCount,
+      opportunities,
+      summary: typeof dataset.summary === "string" ? dataset.summary : undefined,
+      pdfKeys: pdfArtifact?.key ? [pdfArtifact.key] : [],
+      xlsxKey: xlsxArtifact?.key,
+      csvKey: csvArtifact?.key,
+      pdfStatus: pdfArtifact?.status,
+      ...(pdfArtifact?.error ? { pdfError: pdfArtifact.error } : {}),
+      xlsxStatus: xlsxArtifact?.status,
+      ...(xlsxArtifact?.error ? { xlsxError: xlsxArtifact.error } : {}),
+      csvStatus: csvArtifact?.status,
+      ...(csvArtifact?.error ? { csvError: csvArtifact.error } : {}),
+      userLogin: chain.userLogin,
+    });
   }
   return {
     output: outcome,

@@ -132,9 +132,11 @@ const structuredLog = createStructuredLogger(createObservabilitySink({}), {
  * the single outcome resolver — the businessMessage is the one
  * rendering in every channel, never a hand-written variant. An
  * unknown code is a programming error and fails closed as a coded
- * 500 (BusinessError), never an uncoded message. Only the profile
- * paths use this helper; the other account routes keep their
- * existing fixed strings, untouched.
+ * 500 (BusinessError), never an uncoded message. Issue #5607
+ * (G-5/G-6) extends this helper to the remaining account routes:
+ * the non-profile error returns below go through
+ * `codedErrorResponse`, which renders the same {code, message}
+ * shape and logs the refusal.
  */
 function profileCodedBody(
   code: string,
@@ -143,6 +145,26 @@ function profileCodedBody(
   const entry = getOutcome(code);
   if (!entry) throw new BusinessError("FAILURE_UNEXPECTED_ERROR");
   return { code: entry.code, message: entry.businessMessage, ...(extra ?? {}) };
+}
+
+/**
+ * Issue #5607 (G-5/G-6) — the coded refusal helper for the
+ * non-profile account routes: logs the refusal (warn, with code
+ * + status) and returns the same {code, message} shape the
+ * profile paths use. Statuses are unchanged from the pre-slice
+ * literals.
+ */
+function codedErrorResponse(
+  code: string,
+  status: number,
+  fields: Record<string, unknown> = {},
+): Response {
+  structuredLog.warn("platformAccounts.request_refused", {
+    code,
+    status,
+    ...fields,
+  });
+  return Response.json(profileCodedBody(code), { status });
 }
 
 /** Port inputs for the account routes (adapters satisfy these structurally). */
@@ -252,6 +274,9 @@ async function isOperator(ctx: PlatformAccountRouteContext, ports: PlatformAccou
     const entries = (await ports.operators?.listOperators()) ?? [];
     return entries.some((entry) => entry.login === login);
   } catch {
+    // #5607 (G-5): the degrade was silent; log it. A store-read
+    // failure degrades to env-only (checked above), never a 500.
+    structuredLog.warn("platformAccounts.operator_list_degraded", { login });
     return false;
   }
 }
@@ -283,6 +308,10 @@ async function buildAccountView(
       }));
       catalogueAvailable = true;
     } catch {
+      // #5607 (G-5): the degrade was silent; log it. An unbound
+      // catalogue is reported honestly (catalogueAvailable
+      // false) rather than as an empty price list.
+      structuredLog.warn("platformAccounts.catalogue_read_failed", { login: userId });
       catalogue = [];
       catalogueAvailable = false;
     }
@@ -320,20 +349,50 @@ export async function handlePlatformAccountRoutes(
   const isProfileGet = path.endsWith("/platform/accounts/profile") && request.method === "GET";
   const isProfileSave = path.endsWith("/platform/accounts/profile") && request.method === "POST";
   if (!isSelf && !isSetup && !isLookup && !isOnboardingGet && !isOnboardingSave && !isProfileGet && !isProfileSave) return null;
+  const route = isSelf
+    ? "self"
+    : isSetup
+      ? "setup"
+      : isLookup
+        ? "lookup"
+        : isOnboardingGet
+          ? "onboarding-get"
+          : isOnboardingSave
+            ? "onboarding-save"
+            : isProfileGet
+              ? "profile-get"
+              : "profile-save";
 
   const login = request.headers.get("x-user-login");
   const verifiedLogin = login && login.trim() ? login.trim() : null;
   if (!verifiedLogin) {
-    // Profile paths get the coded 401; the other account routes
-    // keep their existing fixed string, untouched.
+    // #5607 (G-5/G-6): one warn for the 401, whichever code the
+    // route answers — profile paths keep
+    // FAILURE_PROFILE_NOT_SIGNED_IN, the other routes answer
+    // FAILURE_COMMERCIAL_UNAUTHORIZED.
+    const code =
+      isProfileGet || isProfileSave
+        ? "FAILURE_PROFILE_NOT_SIGNED_IN"
+        : "FAILURE_COMMERCIAL_UNAUTHORIZED";
+    structuredLog.warn("platformAccounts.request_refused", {
+      code,
+      status: 401,
+      route,
+      login: null,
+    });
     if (isProfileGet || isProfileSave) {
       return Response.json(profileCodedBody("FAILURE_PROFILE_NOT_SIGNED_IN"), { status: 401 });
     }
-    return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
+    return Response.json(profileCodedBody("FAILURE_COMMERCIAL_UNAUTHORIZED"), { status: 401 });
   }
   const ports = resolvePorts(ctx);
 
   try {
+    // #5607 (G-5): entry event — route name + verified login.
+    structuredLog.info("platformAccounts.request_started", {
+      route,
+      login: verifiedLogin,
+    });
     if (isLookup) {
       if (!ports.commercial || !ports.subscriptions) {
         // Fail closed before the gate would otherwise leak nothing:
@@ -341,12 +400,21 @@ export async function handlePlatformAccountRoutes(
         // alike only once the gate passes; the gate itself runs
         // first so availability is never disclosed to strangers.
         if (!(await isOperator(ctx, ports, verifiedLogin))) {
-          return Response.json({ error: "Forbidden: store operator required." }, { status: 403 });
+          return codedErrorResponse("FAILURE_COMMERCIAL_OPERATOR_REQUIRED", 403, {
+            route,
+            login: verifiedLogin,
+          });
         }
-        return Response.json({ error: "Commercial account store is unavailable." }, { status: 503 });
+        return codedErrorResponse("FAILURE_COMMERCIAL_STORE_UNAVAILABLE", 503, {
+          route,
+          login: verifiedLogin,
+        });
       }
       if (!(await isOperator(ctx, ports, verifiedLogin))) {
-        return Response.json({ error: "Forbidden: store operator required." }, { status: 403 });
+        return codedErrorResponse("FAILURE_COMMERCIAL_OPERATOR_REQUIRED", 403, {
+          route,
+          login: verifiedLogin,
+        });
       }
       const userId = url.searchParams.get("userId") ?? "";
       // #5604: the lookup query shape goes through the shared
@@ -358,14 +426,27 @@ export async function handlePlatformAccountRoutes(
       if (!queryShape.ok || !userId) {
         return requestInvalidResponse("userId is required.");
       }
-      return Response.json(await buildAccountView(ports, userId));
+      const view = await buildAccountView(ports, userId);
+      structuredLog.info("platformAccounts.account_lookup_succeeded", {
+        route,
+        login: verifiedLogin,
+      });
+      return Response.json(view);
     }
 
     if (isSelf) {
       if (!ports.commercial || !ports.subscriptions) {
-        return Response.json({ error: "Commercial account store is unavailable." }, { status: 503 });
+        return codedErrorResponse("FAILURE_COMMERCIAL_STORE_UNAVAILABLE", 503, {
+          route,
+          login: verifiedLogin,
+        });
       }
-      return Response.json(await buildAccountView(ports, verifiedLogin));
+      const selfView = await buildAccountView(ports, verifiedLogin);
+      structuredLog.info("platformAccounts.account_self_read", {
+        route,
+        login: verifiedLogin,
+      });
+      return Response.json(selfView);
     }
 
     // Onboarding state (#3256) — self only, keyed by the verified
@@ -375,10 +456,18 @@ export async function handlePlatformAccountRoutes(
     // resolved platform identity (null when no account exists yet).
     if (isOnboardingGet || isOnboardingSave) {
       if (!ports.onboarding) {
-        return Response.json({ error: "Onboarding state store is unavailable." }, { status: 503 });
+        return codedErrorResponse("FAILURE_COMMERCIAL_STORE_UNAVAILABLE", 503, {
+          route,
+          login: verifiedLogin,
+        });
       }
       if (isOnboardingGet) {
-        return Response.json({ state: await ports.onboarding.getOnboardingState(verifiedLogin) });
+        const state = await ports.onboarding.getOnboardingState(verifiedLogin);
+        structuredLog.info("platformAccounts.onboarding_state_read", {
+          route,
+          login: verifiedLogin,
+        });
+        return Response.json({ state });
       }
       const body = (await request.json().catch(() => ({}))) as {
         currentStep?: unknown;
@@ -412,7 +501,12 @@ export async function handlePlatformAccountRoutes(
           );
           if (identity.tenantId) tenantId = identity.tenantId;
         } catch {
+          // #5607 (G-5): the fallback was silent; log it.
           // Identity unavailable: keep the previously stamped tenant.
+          structuredLog.warn("platformAccounts.identity_resolve_degraded", {
+            route,
+            login: verifiedLogin,
+          });
         }
       }
       const state = await ports.onboarding.saveOnboardingState({
@@ -436,6 +530,10 @@ export async function handlePlatformAccountRoutes(
           tenantId,
         });
       }
+      structuredLog.info("platformAccounts.onboarding_state_saved", {
+        route,
+        login: verifiedLogin,
+      });
       return Response.json({ state });
     }
 
@@ -493,6 +591,10 @@ export async function handlePlatformAccountRoutes(
         if (!read.ok) {
           return Response.json(profileCodedBody("FAILURE_PROFILE_STORE_UNAVAILABLE"), { status: 503 });
         }
+        structuredLog.info("platformAccounts.profile_read", {
+          route,
+          login: verifiedLogin,
+        });
         return Response.json({
           ...profileCodedBody("SUCCESS_PROFILE_READ"),
           ...toUserProfileView(verifiedLogin, read.profile),
@@ -572,6 +674,11 @@ export async function handlePlatformAccountRoutes(
       }
       const input = validated.value;
       if (!("displayName" in input) && !("phone" in input) && !("email" in input)) {
+        structuredLog.info("platformAccounts.profile_read", {
+          route,
+          login: verifiedLogin,
+          noop: true,
+        });
         return Response.json({
           ...profileCodedBody("SUCCESS_PROFILE_READ"),
           ...toUserProfileView(verifiedLogin, previous.profile),
@@ -628,6 +735,10 @@ export async function handlePlatformAccountRoutes(
         emailChanged: (previous.profile?.email ?? null) !== next.email,
         updatedAtMs: nowMs,
       });
+      structuredLog.info("platformAccounts.profile_updated", {
+        route,
+        login: verifiedLogin,
+      });
       return Response.json({
         ...profileCodedBody("SUCCESS_PROFILE_UPDATED"),
         ...toUserProfileView(verifiedLogin, next),
@@ -636,7 +747,10 @@ export async function handlePlatformAccountRoutes(
 
     // POST /platform/accounts/setup — self-service, idempotent.
     if (!ports.commercial || !ports.subscriptions) {
-      return Response.json({ error: "Commercial account store is unavailable." }, { status: 503 });
+      return codedErrorResponse("FAILURE_COMMERCIAL_STORE_UNAVAILABLE", 503, {
+        route,
+        login: verifiedLogin,
+      });
     }
     // The body is never trusted for identity: a client-supplied
     // tenantId is not read here at all, in any path. The only body
@@ -647,9 +761,15 @@ export async function handlePlatformAccountRoutes(
       { userId: verifiedLogin, nowMs: Date.now() },
     );
     if (identity.hasAccount) {
+      const existingView = await buildAccountView(ports, verifiedLogin);
+      structuredLog.info("platformAccounts.account_setup_succeeded", {
+        route,
+        login: verifiedLogin,
+        created: false,
+      });
       return Response.json({
         created: false,
-        ...(await buildAccountView(ports, verifiedLogin)),
+        ...existingView,
       });
     }
     // Same derivation as the subscription-purchase auto-create:
@@ -699,12 +819,28 @@ export async function handlePlatformAccountRoutes(
           });
         }
       } catch {
+        // #5607 (G-5): the skip was silent; log it and audit it.
         // Attribution must never block account creation.
+        structuredLog.warn("platformAccounts.signup_attribution_failed", {
+          route,
+          login: verifiedLogin,
+          tenantId,
+        });
+        ctx.audit("platform.account.referral_attribution_failed", "payments", {
+          userLogin: verifiedLogin,
+          tenantId,
+        });
       }
     }
+    const createdView = await buildAccountView(ports, verifiedLogin);
+    structuredLog.info("platformAccounts.account_setup_succeeded", {
+      route,
+      login: verifiedLogin,
+      created: true,
+    });
     return Response.json({
       created: true,
-      ...(await buildAccountView(ports, verifiedLogin)),
+      ...createdView,
     });
   } catch (err) {
     // #5606 (G-3): typed failures render from the catalog (the

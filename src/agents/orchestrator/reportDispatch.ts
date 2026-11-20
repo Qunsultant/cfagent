@@ -32,6 +32,8 @@ import {
 import { createStructuredLogger } from "../../observability/structuredLogger";
 import { createObservabilitySink } from "../../observability/createObservabilityPorts";
 import { projectCanonicalReportBestEffort } from "../../services/runLedgerProjectionHooks";
+import { recordOptionsServeReport } from "../../services/optionsServeRecord";
+import type { ScreenerRunOutcome } from "../../services/screenerFollowups";
 
 /** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
 const structuredLog = createStructuredLogger(createObservabilitySink({}), {
@@ -49,6 +51,7 @@ export interface ReportDispatchContext {
   env: Env;
   ensureTables: () => AgentContext["storage"]["sql"];
   getOrm: () => DatabaseORM;
+  storage?: AgentContext["storage"];
   reportDispatchHitlKey: string;
   reportConfirmationTtlMs: number;
   /**
@@ -483,6 +486,27 @@ export async function persistPipelineGenerateReportCanonical(
     });
   }
   return stored;
+}
+
+/**
+ * Issue #5170 — door for the engine options chain's serve step to write the
+ * `recordOptionsServeReport` summary row through this DO's `DatabaseORM`
+ * and `storage`. Never throws (`recordOptionsServeReport` warns and continues).
+ */
+export async function persistOptionsServeReport(
+  ctx: ReportDispatchContext,
+  outcome: ScreenerRunOutcome & { userLogin?: string },
+): Promise<boolean> {
+  if (!outcome?.userLogin) {
+    structuredLog.warn("reportDispatch.options_serve_report_skipped_no_login", {
+      message: "[reportDispatch] Options serve summary skipped: no owning userLogin.",
+    });
+    return false;
+  }
+  return recordOptionsServeReport(
+    { orm: ctx.getOrm() as never, storage: ctx.storage },
+    outcome,
+  );
 }
 
 /**

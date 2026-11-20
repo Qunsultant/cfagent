@@ -96,8 +96,24 @@ export interface PlatformChannelRouteContext {
   operators?: Pick<StoreOperators, "listOperators"> | null;
 }
 
-function jsonError(error: string, status: number): Response {
-  return Response.json({ error }, { status });
+/**
+ * Issue #5607 (G-5/G-6) — the coded refusal helper: every error
+ * return in this module goes through here, so the refusal is
+ * logged (warn, with code + status) and the body carries the
+ * catalog code + message. Statuses are unchanged from the
+ * pre-slice literals.
+ */
+function jsonError(
+  code: string,
+  status: number,
+  fields: Record<string, unknown> = {},
+): Response {
+  structuredLog.warn("platformChannels.request_refused", {
+    code,
+    status,
+    ...fields,
+  });
+  return Response.json({ code, error: codedMessage(code) }, { status });
 }
 
 function parseEnvOperators(env: { AGENT_DB?: unknown }): Set<string> {
@@ -118,7 +134,7 @@ async function resolveOperator(
 ): Promise<string | Response> {
   const login = request.headers.get("x-user-login")?.trim() ?? "";
   if (!login) {
-    return jsonError("Unauthorized: a signed-in session is required.", 401);
+    return jsonError("FAILURE_COMMERCIAL_UNAUTHORIZED", 401, { login: null });
   }
   const effective = parseEnvOperators(ctx.env);
   const adapter = ctx.operators ?? createStoreOperatorsAdapter(ctx.env);
@@ -126,13 +142,17 @@ async function resolveOperator(
     try {
       for (const entry of await adapter.listOperators()) effective.add(entry.login);
     } catch {
+      // #5607 (G-5): the degrade was silent; log it.
+      structuredLog.warn("platformChannels.operator_list_degraded", {
+        login: login || null,
+      });
       // Store-list failure degrades to env-only, exactly as the
       // commercial price routes behave — never a lockout, never
       // a silent widening (the operator check below still applies).
     }
   }
   if (!effective.has(login)) {
-    return jsonError("Forbidden: channel administration requires a store operator.", 403);
+    return jsonError("FAILURE_COMMERCIAL_OPERATOR_REQUIRED", 403, { login });
   }
   return login;
 }
@@ -146,7 +166,13 @@ function auditBestEffort(
   try {
     ctx.audit?.("platform-channel-admin", "orchestrator", { actorLogin: login, action, tenantId });
   } catch {
+    // #5607 (G-5): the swallow was silent; log it.
     // Best-effort annotation only; see the module header.
+    structuredLog.warn("platformChannels.audit_annotation_failed", {
+      action,
+      tenantId,
+      login,
+    });
   }
 }
 
@@ -179,21 +205,51 @@ export async function handlePlatformChannelRoutes(
     return null;
   }
 
+  // #5607 (G-5): entry event — after the route matched, before
+  // the operator gate, so unauthenticated probes on real admin
+  // paths are logged; the gate verdict is the refusal warn.
+  const entryLogin = request.headers.get("x-user-login")?.trim() || null;
+  structuredLog.info("platformChannels.request_started", {
+    action,
+    method: request.method,
+    tenantId: tenantId || null,
+    login: entryLogin,
+  });
+
   const operator = await resolveOperator(request, ctx);
   if (operator instanceof Response) return operator;
   const channels = ctx.channels ?? createTenantChannelAdapter(ctx.env);
   const directory = ctx.directory ?? createTenantDirectoryAdapter(ctx.env);
   if (!channels || !directory) {
-    return jsonError("Channel administration unavailable: AGENT_DB is not bound.", 503);
+    return jsonError("FAILURE_COMMERCIAL_STORE_UNAVAILABLE", 503, {
+      action,
+      tenantId: tenantId || null,
+      login: operator,
+    });
   }
 
   try {
-    if (!isTenantIdShaped(tenantId)) return jsonError("Unknown tenant.", 404);
+    if (!isTenantIdShaped(tenantId))
+      return jsonError("FAILURE_COMMERCIAL_NOT_FOUND", 404, {
+        action,
+        tenantId,
+        login: operator,
+      });
     const known = await directory.listTenantIds();
-    if (!known.includes(tenantId)) return jsonError("Unknown tenant.", 404);
+    if (!known.includes(tenantId))
+      return jsonError("FAILURE_COMMERCIAL_NOT_FOUND", 404, {
+        action,
+        tenantId,
+        login: operator,
+      });
 
     if (action === "read") {
-      if (request.method !== "GET") return jsonError("Method not allowed", 405);
+      if (request.method !== "GET")
+        return jsonError("FAILURE_COMMERCIAL_METHOD_NOT_ALLOWED", 405, {
+          action,
+          tenantId,
+          login: operator,
+        });
       const config = await channels.getTenantChannels(tenantId);
       const slackChannel =
         typeof channels.getTenantSlackChannel === "function"
@@ -207,6 +263,11 @@ export async function handlePlatformChannelRoutes(
         typeof channels.getTenantScheduleWebhookUrls === "function"
           ? await channels.getTenantScheduleWebhookUrls(tenantId)
           : {};
+      structuredLog.info("platformChannels.channels_read", {
+        action,
+        tenantId,
+        login: operator,
+      });
       return Response.json({
         tenantId,
         channels: config,
@@ -227,6 +288,11 @@ export async function handlePlatformChannelRoutes(
           typeof channels.getTenantScheduleWebhookUrls === "function"
             ? await channels.getTenantScheduleWebhookUrls(tenantId)
             : {};
+        structuredLog.info("platformChannels.webhook_url_read", {
+          action,
+          tenantId,
+          login: operator,
+        });
         return Response.json({
           tenantId,
           ...(queryScheduleId ? { scheduleId: queryScheduleId } : {}),
@@ -235,7 +301,11 @@ export async function handlePlatformChannelRoutes(
         });
       }
       if (request.method !== "PUT" && request.method !== "PATCH") {
-        return jsonError("Method not allowed", 405);
+        return jsonError("FAILURE_COMMERCIAL_METHOD_NOT_ALLOWED", 405, {
+          action,
+          tenantId,
+          login: operator,
+        });
       }
       const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
       // #5604: the write-body shape goes through the shared helper
@@ -257,7 +327,11 @@ export async function handlePlatformChannelRoutes(
           ? body["scheduleId"].trim()
           : queryScheduleId;
       if (typeof channels.setTenantWebhookUrl !== "function") {
-        return jsonError("Webhook URL binding is not supported by the bound channel store.", 503);
+        return jsonError("FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", 503, {
+          action,
+          tenantId,
+          login: operator,
+        });
       }
       const saved = await channels.setTenantWebhookUrl(
         tenantId,
@@ -265,6 +339,11 @@ export async function handlePlatformChannelRoutes(
         bodyScheduleId,
       );
       auditBestEffort(ctx, operator, "update-webhook-url", tenantId);
+      structuredLog.info("platformChannels.webhook_url_updated", {
+        action,
+        tenantId,
+        login: operator,
+      });
       return Response.json({
         tenantId,
         ...(bodyScheduleId ? { scheduleId: bodyScheduleId } : {}),
@@ -278,10 +357,19 @@ export async function handlePlatformChannelRoutes(
           typeof channels.getTenantSlackChannel === "function"
             ? await channels.getTenantSlackChannel(tenantId)
             : null;
+        structuredLog.info("platformChannels.slack_channel_read", {
+          action,
+          tenantId,
+          login: operator,
+        });
         return Response.json({ tenantId, slackChannel });
       }
       if (request.method !== "PUT" && request.method !== "PATCH") {
-        return jsonError("Method not allowed", 405);
+        return jsonError("FAILURE_COMMERCIAL_METHOD_NOT_ALLOWED", 405, {
+          action,
+          tenantId,
+          login: operator,
+        });
       }
       const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
       // #5604: same boundary gate as the webhook-url write
@@ -298,15 +386,29 @@ export async function handlePlatformChannelRoutes(
         return requestInvalidResponse(normalized.error);
       }
       if (typeof channels.setTenantSlackChannel !== "function") {
-        return jsonError("Slack channel mapping is not supported by the bound channel store.", 503);
+        return jsonError("FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", 503, {
+          action,
+          tenantId,
+          login: operator,
+        });
       }
       const saved = await channels.setTenantSlackChannel(tenantId, normalized.slackChannel);
       auditBestEffort(ctx, operator, "update-slack-channel", tenantId);
+      structuredLog.info("platformChannels.slack_channel_updated", {
+        action,
+        tenantId,
+        login: operator,
+      });
       return Response.json({ tenantId, slackChannel: saved });
     }
 
     // action === "patch"
-    if (request.method !== "PATCH") return jsonError("Method not allowed", 405);
+    if (request.method !== "PATCH")
+      return jsonError("FAILURE_COMMERCIAL_METHOD_NOT_ALLOWED", 405, {
+        action,
+        tenantId,
+        login: operator,
+      });
     const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
     // #5604: the patch-body shape goes through the shared helper
     // (`channelPatchBodySchema` — channels is a map of channel
@@ -360,6 +462,11 @@ export async function handlePlatformChannelRoutes(
       );
     }
     auditBestEffort(ctx, operator, "update-channels", tenantId);
+    structuredLog.info("platformChannels.channels_updated", {
+      action,
+      tenantId,
+      login: operator,
+    });
     return Response.json({
       tenantId,
       channels: config,
