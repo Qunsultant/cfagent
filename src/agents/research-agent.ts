@@ -118,7 +118,7 @@ export interface ResearchRunRequest {
   userLogin?: string;
   /**
    * Issue #5912 — which venue to quote from and in which mode. Unset uses
-   * the configured default (E*TRADE, deployment environment). An unknown
+   * the configured default (the deployment environment). An unknown
    * broker id refuses by name in the platform registry, before any quote.
    */
   brokerId?: TradingPlatformId;
