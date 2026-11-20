@@ -63,7 +63,12 @@ export async function isResearchEngineCutoverEnabled(
   flags?: Pick<FeatureFlagPort, "isEnabled">,
 ): Promise<boolean> {
   if (!flags) return true;
-  return flags.isEnabled("research_engine_cutover");
+  // Issue #5915 — inverted on purpose. The engine is the default and the
+  // only supported path; the direct branch exists solely behind the explicit
+  // emergency flag (a declared-incident rollback), so `research_engine_cutover`
+  // is no longer read and ordinary configuration cannot produce
+  // `direct_rollback` (which fabricates stage rows and has no stage control).
+  return !(await flags.isEnabled("research_engine_direct_rollback"));
 }
 
 export interface DispatchResearchEngineInput {

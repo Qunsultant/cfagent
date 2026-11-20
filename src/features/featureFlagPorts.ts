@@ -60,6 +60,14 @@ export type FeatureFlag =
   // OODA research engine job (`research:<runId>`). OFF rolls back to
   // the direct pipeline entry.
   | "research_engine_cutover"
+  /**
+   * Issue #5915 — the ONLY way to run the nightly research job outside the
+   * engine. Named for what it does (a direct rollback), default off, and
+   * deliberately not the old cutover flag: ordinary configuration can no
+   * longer turn the engine off, because the direct path fabricates stage
+   * rows and has no stage control.
+   */
+  | "research_engine_direct_rollback"
   // Issue #4249 ([3122] agentic scheduling): one flag per scheduling
   // entry point. schedule_chat gates schedule requests from the chat
   // (the schedule.* A2A ops); schedule_nlq gates the NLQ schedule
@@ -120,6 +128,7 @@ export const ALL_FEATURE_FLAGS: readonly FeatureFlag[] = [
   "broker_panel_contract",
   // Issue #5122: flagship cutover flag for research:<runId>.
   "research_engine_cutover",
+  "research_engine_direct_rollback",
   // Issue #4249: agentic-scheduling channels — chat (default ON) and
   // NLQ (default OFF). Registered here; evaluated through the
   // FeatureFlagPort; no second flag mechanism.

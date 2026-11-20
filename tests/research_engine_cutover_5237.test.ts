@@ -45,7 +45,8 @@ describe("Issue #5237 — Nightly OODA J-stack engine cutover & view=ooda UX rou
       trigger: "manual",
       stores,
       runRecorder,
-      flags: { isEnabled: async () => true },
+      // Issue #5915 — no emergency rollback declared: the engine path is the default.
+      flags: { isEnabled: async () => false },
       researchDeps: {
         runOodaAnalysis: oodaSpy,
         runEvaluateStage: evalSpy,
@@ -87,13 +88,13 @@ describe("Issue #5237 — Nightly OODA J-stack engine cutover & view=ooda UX rou
     expect(evaluateVis!.durationMs).toBeGreaterThanOrEqual(5);
   });
 
-  it("rolls back to direct execution when research_engine_cutover flag is false", async () => {
+  it("rolls back to direct execution only behind the explicit emergency flag (#5915)", async () => {
     const directSpy = vi.fn(async () => ({ success: true, mode: "direct" }));
     const result = await dispatchResearchEngineRun({
       runId: "rollback-run-1",
       userLogin: "alice",
       trigger: "scheduled",
-      flags: { isEnabled: async () => false },
+      flags: { isEnabled: async (flag) => flag === "research_engine_direct_rollback" },
       execute: directSpy,
     });
 

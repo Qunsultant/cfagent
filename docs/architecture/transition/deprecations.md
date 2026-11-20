@@ -33,6 +33,13 @@ journal is the retry record; the blob seam refuses by name
 (`OPTIONS_CHAIN_REPORTS_BUCKET_UNBOUND`) when `REPORTS_BUCKET` is
 unbound, rather than silently dropping bytes to legacy DO storage.
 
+## 2026-11-20 — #5915 supersedes the research cutover flag
+
+- Name: `research_engine_cutover` (feature flag key)
+- Superseded by: `research_engine_direct_rollback` — same capability, inverted meaning and an explicit name
+- Date: 2026-11-20
+- Reason: Issue #5915. While the cutover flag could be turned off, the nightly research job took the direct path, which maps every stage to `completed` without running an engine stage and therefore has no retry/pause/cancel. The engine is now the default and the only supported path; the direct branch is reachable solely through the explicitly named emergency flag, so ordinary configuration cannot produce `direct_rollback`. `research_engine_cutover` is no longer read.
+
 ## 2026-11-18 — #4253 retires the red probe by rename
 
 - File: `tests/scheduled_goals_removal_red_4253.test.ts` → `tests/scheduled_goals_removal_red_4253.deprecated.ts`
