@@ -96,7 +96,10 @@ import {
   scanExportRunFromResult,
   scanExportRunFromStored,
 } from "./runExport";
-import type { TradeOrderContext } from "./trading/tradeOrderContext";
+import {
+  candidateToTradeContext,
+  type TradeOrderContext,
+} from "./trading/tradeOrderContext";
 import type { ExpectedIvDirection, OptionThesis } from "../trading";
 import type { UnifiedOptionsRequest } from "../trading";
 
@@ -267,14 +270,16 @@ export function topRejectionReason(
 
 /**
  * Build the HITL-preview handoff for a matrix cell's best candidate.
- * Faithful replication of OptionsResearchPanel's module-local
- * toTradeContext (same field mapping, same label format, quantity 1)
- * for the flattened ScanMatrixCellBest shape: the symbol comes from
- * the matrix row (the cell best carries none) and the action follows
- * the run's thesis exactly as the research panel derives it. The cell
- * best carries no spot price, so underlyingPrice is omitted — the
- * research panel's value comes from its own screened chain, not from
- * the candidate, and inventing one here would misstate the preview.
+ * A thin caller of the canonical `candidateToTradeContext` (issue
+ * #4214): the symbol comes from the matrix row (the cell best carries
+ * none), the action follows the run's thesis exactly as the research
+ * panel derives it, and a missing thesis behaves like a neutral one
+ * (BUY). The cell best carries no spot price, so underlyingPrice is
+ * omitted — the research panel's value comes from its own screened
+ * chain, not from the candidate, and inventing one here would
+ * misstate the preview. Delegating (instead of replicating the
+ * mapping) also inherits the canonical null-max-loss label
+ * ("unlimited", never "$null").
  */
 export function matrixCellTradeContext(
   row: ScanMatrixRow,
@@ -282,24 +287,17 @@ export function matrixCellTradeContext(
   thesis?: OptionThesis,
 ): TradeOrderContext {
   const best = cell.best as ScanMatrixCellBest;
-  const optionLegs = best.legs.map((leg) => ({
-    securityType: leg.optionType === "STOCK" ? "EQ" as const : "OPTN" as const,
-    side: leg.side,
-    quantity: leg.quantity,
-    optionType: leg.optionType === "STOCK" ? undefined : leg.optionType,
-    strike: leg.optionType === "STOCK" ? undefined : leg.strike,
-    expirationDate: leg.optionType === "STOCK" ? undefined : leg.expirationDate,
-  }));
-  return {
-    assetClass: optionLegs.some((leg) => leg.securityType === "OPTN") ? "options" : "equity",
-    symbol: row.symbol,
-    action: thesis === "bearish" ? "SELL_SHORT" : "BUY",
-    quantity: 1,
-    label: `${best.label} (${best.expirationDate}), max loss $${best.maxLoss}`,
-    legs: best.legs.map((leg) => `${leg.side} ${leg.quantity} ${leg.symbol} @ $${leg.entryPrice.toFixed(2)}`),
-    optionLegs,
-    strategyNetDebit: best.netDebit,
-  };
+  return candidateToTradeContext(
+    {
+      symbol: row.symbol,
+      label: best.label,
+      expirationDate: best.expirationDate,
+      maxLoss: best.maxLoss,
+      netDebit: best.netDebit,
+      legs: best.legs,
+    },
+    thesis ?? "neutral",
+  );
 }
 
 // Slice 5 view-model helpers (exported for tests) ------------------------

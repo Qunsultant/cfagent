@@ -29,19 +29,31 @@ export interface TradeOrderContext {
 }
 
 /**
+ * The fields the canonical mapping reads. A full StrategyCandidate
+ * satisfies this, and so does a flattened matrix cell best (issue
+ * #4214): the matrix delegate passes exactly these fields, so the
+ * matrix path can never drift from the canonical one again. `maxLoss`
+ * is `number | null` here (the interface types it `number`, but a null
+ * max loss is labelled "unlimited", never "$null").
+ */
+export type TradeOrderCandidate = Pick<
+  StrategyCandidate,
+  "symbol" | "label" | "expirationDate" | "netDebit" | "legs"
+> & { maxLoss: number | null };
+
+/**
  * Build the HITL-preview handoff for a screening candidate.
  *
- * The canonical candidate → order-context mapping, field-for-field
- * the same as OptionsResearchPanel.toTradeContext (and
- * ScannerPanel.matrixCellTradeContext for the flattened matrix shape):
- * the symbol comes from the candidate, the action follows the run's
- * thesis (bearish → SELL_SHORT, anything else → BUY), quantity is 1,
- * the label carries the expiry and max loss, and the legs map
- * optionType STOCK → EQ (no strike/expiry) and anything else → OPTN.
- * The underlying price is the caller's spot when known; an unknown
- * price is omitted, never invented — the research panel's value comes
- * from its own screened chain, not from the candidate, and inventing
- * one here would misstate the preview.
+ * The canonical candidate → order-context mapping (issue #4214 unified
+ * the former OptionsResearchPanel and ScannerPanel copies into this
+ * one function): the symbol comes from the candidate, the action
+ * follows the run's thesis (bearish → SELL_SHORT, anything else →
+ * BUY), quantity is 1, the label carries the expiry and max loss, and
+ * the legs map optionType STOCK → EQ (no strike/expiry) and anything
+ * else → OPTN. The underlying price is the caller's spot when known;
+ * an unknown price is omitted, never invented — the research panel's
+ * value comes from its own screened chain, not from the candidate,
+ * and inventing one here would misstate the preview.
  *
  * Issue #3361 (#3121 S2 follow-up): the de-hubbed schedules home
  * hands the live-result preview candidate to the order ticket through
@@ -50,10 +62,10 @@ export interface TradeOrderContext {
  * so the ticket got symbol + limit price but no side, quantity, or
  * legs; this converter is the prefill as intended. Unifying the three
  * copies of this mapping (here, OptionsResearchPanel, ScannerPanel)
- * into one is out of scope for #3361 — see the PR body.
+ * into one was out of scope for #3361 — it landed as #4214.
  */
 export function candidateToTradeContext(
-  candidate: StrategyCandidate,
+  candidate: TradeOrderCandidate,
   thesis: OptionThesis | "neutral" | "directional",
   underlyingPrice?: number,
 ): TradeOrderContext {
