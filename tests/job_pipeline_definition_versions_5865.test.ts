@@ -97,3 +97,15 @@ describe("5865-P05 the D1 migration 0074 creates the table", () => {
     expect(sql).toContain("definition_json TEXT NOT NULL");
   });
 });
+
+describe("5865-P06 the D1 residency backfills too, not just the DO one", () => {
+  it("migration 0074 carries the idempotent backfill after the CREATE", () => {
+    const sql = d1MigrationSql(74);
+    expect(sql).toContain("INSERT OR IGNORE INTO job_pipeline_definition_versions");
+    expect(sql).toContain("FROM job_pipeline_definitions");
+    // The table must exist before the backfill selects from the pointer.
+    expect(sql.indexOf("CREATE TABLE IF NOT EXISTS")).toBeLessThan(
+      sql.indexOf("INSERT OR IGNORE INTO"),
+    );
+  });
+});

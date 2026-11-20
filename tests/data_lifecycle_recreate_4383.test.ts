@@ -372,18 +372,19 @@ describe("recreate, tenant scope (#4383)", () => {
     expect(body.confirmRequired).toBe(true);
     expect(typeof body.previewToken).toBe("string");
     expect(body.previewToken).toHaveLength(64);
-    // D1 leg: the fresh selection (237 schema + 11 seeds). Issue #4654 adds one
+    // D1 leg: the fresh selection (238 schema + 12 seeds). Issue #4654 adds one
     // more ORM-plane entry to the catalogue, so the D1 leg skips one more.
     // Issue #5229 adds migration 0069 (agent_referral_rules expiry_period_ms
     // column): 247 → 248. Issue #5086 adds migration 0070
     // (otel_config_overrides table): 248 → 249.
     // Issue #4767 adds migrations 0071/0072 (4 D1 ALTERs): 249 → 253.
-    // Issue #5865 adds migration 0074 (definition-version history): 253 → 254.
+    // Issue #5865 adds migration 0074 (definition history table + D1
+    // backfill seed): 253 → 255.
     // Issue #4204 adds migration 0073 (D1 job_run_records
     // recent-read index): the D1 step is selected and the ORM
     // plane's duplicate of the same index is skipped, so selected
     // stays 253 and skipped grows 8 → 9.
-    expect(body.d1.selected).toHaveLength(254);
+    expect(body.d1.selected).toHaveLength(255);
     expect(body.d1.skipped).toHaveLength(9);
     // Two member instances (alice, bob), each planning the fresh DO leg.
     expect(body.instances).toHaveLength(2);
@@ -446,7 +447,7 @@ describe("recreate, tenant scope (#4383)", () => {
     expect(body.confirmed).toBe(true);
     expect(body.d1.report.outcome).toBe("succeeded");
     // #4767 adds migrations 0071/0072 (4 D1 ALTERs): 249 → 253.
-    expect(body.d1.report.executed).toHaveLength(254);
+    expect(body.d1.report.executed).toHaveLength(255);
     expect(body.d1.verification.ok).toBe(true);
     expect(body.instances).toHaveLength(2);
     for (const inst of body.instances) {

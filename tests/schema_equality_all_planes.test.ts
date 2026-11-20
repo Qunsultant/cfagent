@@ -72,9 +72,9 @@ function fixtureSha256(name: string): string {
 }
 
 describe("schema equality — all planes (#4282 P4)", () => {
-  it("the frozen combined baseline is the clean-checkout seed (181 tables / 103 indexes)", () => {
+  it("the frozen combined baseline is the clean-checkout seed (182 tables / 103 indexes)", () => {
     const model = combinedExpectedModel();
-    expect(Object.keys(model.tables).length).toBe(181);
+    expect(Object.keys(model.tables).length).toBe(182);
     expect(Object.keys(model.indexes).length).toBe(103);
     expect(fixtureSha256("schema_component_combined_expected_model.json")).toBe(
       COMBINED_FIXTURE_SHA256,
@@ -82,11 +82,11 @@ describe("schema equality — all planes (#4282 P4)", () => {
   });
 
   it("per-plane fixtures hold their phase counts", () => {
-    // #4204 adds migration 0073 (D1 job_run_records recent-read
-    // index): D1 indexes 59 → 60, tables unchanged.
+    // #5865 adds migration 0074 (definition history) in the D1 and DO
+    // residencies: d1 tables 101 → 102, do tables 69 → 70, no index change.
     const counts: Record<string, [number, number]> = {
-      d1: [101, 60],
-      do: [69, 40],
+      d1: [102, 60],
+      do: [70, 40],
       orm: [13, 10],
       remainder: [19, 15],
     };
@@ -103,11 +103,11 @@ describe("schema equality — all planes (#4282 P4)", () => {
     const { union, disagreements, overlapTables, overlapIndexes } =
       computeCombinedUnion();
     expect(disagreements).toEqual([]);
-    // 18 tables and 19 indexes appear in more than one plane; every
+    // 19 tables and 19 indexes appear in more than one plane; every
     // overlap agrees (the union absorbs column-set differences from
     // ALTER reconciliation — e.g. job_run_records gains broker_id /
     // data_provider_id / mode / mode_source from DO ALTERs).
-    expect(overlapTables).toBe(18);
+    expect(overlapTables).toBe(19);
     expect(overlapIndexes).toBe(19);
     expect(union).toEqual(combinedExpectedModel());
   });
@@ -120,7 +120,7 @@ describe("schema equality — all planes (#4282 P4)", () => {
     expect(new Set(executedCodes).size).toBe(
       COMBINED_CATALOGUE_ENTRIES.length,
     );
-    expect(COMBINED_CATALOGUE_ENTRIES.length).toBe(424);
+    expect(COMBINED_CATALOGUE_ENTRIES.length).toBe(427);
     // Issue #5229 adds migration 0069 (agent_referral_rules
     // expiry_period_ms column): 410 entries resolve to 421 statements.
     // Issue #5086 adds migration 0070 (otel_config_overrides table):
@@ -135,9 +135,10 @@ describe("schema equality — all planes (#4282 P4)", () => {
     // + its index): 414 entries resolve to 425 statements.
     // Issue #4767 adds 8 entries (migrations 0071/0072: 4 D1 ALTERs
     // + 4 remainder ALTERs): 423 entries resolve to 434 statements.
-    // Issue #4204 adds migration 0073 (D1 job_run_records
-    // recent-read index): 424 entries resolve to 435 statements.
-    expect(executedStatements).toBe(435);
+    // Issue #5865 adds 3 entries (migration 0074: the definition history
+    // table in both residencies, plus the D1 backfill seed): 427 entries
+    // resolve to 438 statements.
+    expect(executedStatements).toBe(438);
     const actual = instance.introspect();
     const diff = diffSchema(actual, combinedExpectedModel());
     expect(isEmptyDiff(diff)).toBe(true);

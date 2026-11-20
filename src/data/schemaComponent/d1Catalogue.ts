@@ -1826,6 +1826,18 @@ export const D1_CATALOGUE_ENTRIES: CatalogueEntry[] = [
     form: "literal",
   },
   {
+    // Issue #5865 — every existing job's current definition becomes its
+    // first history row. INSERT OR IGNORE: idempotent, so a retry (or a
+    // recreation) never duplicates a version. DML lives here as a seed,
+    // the same way the other data migrations in this plane do.
+    code: "seed.d1.job_pipeline_definition_versions.backfill_from_definitions",
+    plane: "d1",
+    table: "job_pipeline_definition_versions",
+    statement: `INSERT OR IGNORE INTO job_pipeline_definition_versions (id, job_id, version, definition_json, updated_at) SELECT job_id || ':' || version, job_id, version, definition_json, updated_at FROM job_pipeline_definitions`,
+    kind: "seed",
+    form: "literal",
+  },
+  {
     code: "schema.d1.job_pipeline_instances.create_table",
     plane: "d1",
     table: "job_pipeline_instances",
@@ -3415,7 +3427,10 @@ export const D1_MIGRATION_CODES: Record<number, readonly string[]> = {
     "schema.d1.job_run_records.alter_table_add_column_kind",
     "schema.d1.job_run_records.alter_table_add_column_origin_run_id",
   ],
-  74: ["schema.d1.job_pipeline_definition_versions.create_table"],
+  74: [
+    "schema.d1.job_pipeline_definition_versions.create_table",
+    "seed.d1.job_pipeline_definition_versions.backfill_from_definitions",
+  ],
   73: [
     "schema.d1.job_run_records.create_index_job_run_records_recent_idx",
   ],

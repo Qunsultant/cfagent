@@ -114,14 +114,16 @@ function canonParams(params: Record<string, string>): string {
 }
 
 describe("P5 runner — plan resolution (P4 finding 1: phased order)", () => {
-  it("resolves 433 executable steps and skips the seed-form entry with its reason", () => {
+  it("resolves 437 executable steps and skips the seed-form entry with its reason", () => {
     const p = plan();
     // #5229 adds migration 0069 (referral expiry_period_ms): 419 → 420.
     // #5175 slice 2 adds mas_runs + mas_run_aliases + its index: 421 → 424.
     // #5086 adds migration 0070 (otel_config_overrides table): 424 → 425.
     // #4767 adds migrations 0071/0072 (4 D1 + 4 remainder ALTERs): 425 → 433.
     // #4204 adds migration 0073 (D1 job_run_records recent-read index): 433 → 434.
-    expect(p.steps).toHaveLength(434);
+    // #5865 adds migration 0074 (definition history table in D1 + DO, plus
+    // the D1 backfill seed): 434 → 437.
+    expect(p.steps).toHaveLength(437);
     expect(p.skipped).toHaveLength(1);
     expect(p.skipped[0].code).toBe(SEED_FORM_CODE);
     expect(p.skipped[0].reason).toMatch(/call site/i);
@@ -137,7 +139,9 @@ describe("P5 runner — plan resolution (P4 finding 1: phased order)", () => {
     // #5086 adds migration 0070: 424 → 425.
     // #4767 adds migrations 0071/0072 (4 D1 + 4 remainder ALTERs): 425 → 433.
     // #4204 adds migration 0073 (D1 job_run_records recent-read index): 433 → 434.
-    expect(harness).toHaveLength(434);
+    // #5865 adds migration 0074 (definition history table in D1 + DO, plus
+    // the D1 backfill seed): 434 → 437.
+    expect(harness).toHaveLength(437);
     // Production move 1: the rebuild CREATE for agent_price_catalogue
     // must stay after the RENAME that clears its table (a second
     // table-creation for the same table cannot run before the rename
@@ -269,12 +273,13 @@ describe("P5 runner — delta-to-steps selection (P4 finding 3, P4 finding 2)", 
     // #5229 adds migration 0069: 236 → 237.
     // #5086 adds migration 0070: 237 → 238.
     // #4767 adds migrations 0071/0072 (4 D1 ALTERs): 238 → 242.
+    // #5865 adds migration 0074 (definition history): 242 → 243.
     // #4204 adds migration 0073 (D1 job_run_records recent-read
     // index): the D1 step is selected and the ORM plane's duplicate
     // of the same index is skipped (the projected-model walk already
     // has it), so selected stays 242 and skipped grows 8 → 9.
-    expect(selected.schema).toHaveLength(242);
-    expect(selected.seeds).toHaveLength(11);
+    expect(selected.schema).toHaveLength(243);
+    expect(selected.seeds).toHaveLength(12);
     expect(selected.skipped).toHaveLength(9);
     expect(
       codesOf(selected.skipped),
@@ -294,7 +299,8 @@ describe("P5 runner — delta-to-steps selection (P4 finding 3, P4 finding 2)", 
     // conditional index drop (its index does not exist yet). No seeds
     // live on the DO leg.
     // #4767 adds migrations 0071/0072 (4 remainder ALTERs): 132 → 136.
-    expect(selected.schema).toHaveLength(136);
+    // #5865 adds migration 0074 (definition history): 136 → 137.
+    expect(selected.schema).toHaveLength(137);
     expect(selected.seeds).toHaveLength(0);
     expect(selected.skipped).toHaveLength(36);
     expect(codesOf(selected.skipped)).toContain(DROP_INDEX_CODE);

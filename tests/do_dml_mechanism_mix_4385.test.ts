@@ -197,7 +197,7 @@ describe("DO mechanism mix (#4385)", () => {
     ]);
   });
 
-  it("the remaining inline count is 248 (250 #5034 baseline − 2 P6e mas_autopilot)", () => {
+  it("the remaining inline count is 250 (250 #5034 baseline − 2 P6e mas_autopilot + 2 #5865)", () => {
     let write = 0;
     let read = 0;
     for (const file of doFiles()) {
@@ -205,9 +205,9 @@ describe("DO mechanism mix (#4385)", () => {
       write += counts.write;
       read += counts.read;
     }
-    expect(write).toBe(120);
-    expect(read).toBe(128);
-    expect(write + read).toBe(248);
+    expect(write).toBe(121);
+    expect(read).toBe(129);
+    expect(write + read).toBe(250);
   });
 
   it("the named exemptions hold their recorded counts, with reasons", () => {

@@ -1283,22 +1283,22 @@ export const MIGRATION_0072_JOB_RUN_RECORDS_RUN_KIND: DataMigration = {
  * the two ever diverge. Additive only (CREATE INDEX IF NOT EXISTS);
  * no table is altered and no row is deleted.
  */
+export const MIGRATION_0073_JOB_RUN_RECORDS_RECENT_IDX: DataMigration = {
+  version: 73,
+  name: "0073_job_run_records_recent_idx",
+  sql: d1MigrationSql(73),
+};
+
 /**
  * Issue #5865 — the append-only definition history that historical replay
- * (#4467) needs. Additive; the backfill that seeds it lives in the DO
- * migration (the D1 runner has no data-migration seam, and the table is
- * written on every save from here on).
+ * (#4467) needs. Additive: the table, then one idempotent backfill that
+ * seeds every existing job's current definition as its first version (a
+ * seed statement, the same way this plane's other data migrations land).
  */
 export const MIGRATION_0074_JOB_PIPELINE_DEFINITION_VERSIONS: DataMigration = {
   version: 74,
   name: "0074_job_pipeline_definition_versions",
   sql: d1MigrationSql(74),
-};
-
-export const MIGRATION_0073_JOB_RUN_RECORDS_RECENT_IDX: DataMigration = {
-  version: 73,
-  name: "0073_job_run_records_recent_idx",
-  sql: d1MigrationSql(73),
 };
 export const MIGRATION_0058_PRODUCT_VERSIONS: DataMigration = {
   version: 58,
