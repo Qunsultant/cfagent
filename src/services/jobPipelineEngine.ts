@@ -887,6 +887,71 @@ export class JobPipelineControl {
     opts?: { trigger?: JobRunTrigger; kind?: JobRunKind; originRunId?: string | null; scopePath?: string; scheduleId?: string; asyncJobId?: string; workflowInstanceId?: string },
   ): Promise<JobDispatchResult> {
     const definition = await this.requireDefinition(jobId);
+    return this.dispatchResolved(definition, opts ?? {});
+  }
+
+  /**
+   * Issue #4467 — replay a past run: start a NEW run of the definition
+   * version the original executed, with the original's trigger. The
+   * original run and its artifacts are read, never touched.
+   *
+   * Not to be confused with `replayJob` (#4454), which re-enters the
+   * SAME run id after a workflow eviction. This one mints a new run.
+   *
+   * Refusals are named, never guessed:
+   *  - the id is not among the job's retained runs → `job_run_not_found`;
+   *  - the original predates the definition-version stamp (#5887) →
+   *    `replay_pre_retention_run` (its exact configuration was never
+   *    retained; "closest version" would be a false reproduction);
+   *  - the stamped version is no longer resolvable →
+   *    `replay_definition_version_unresolved`.
+   */
+  async replayRun(jobId: string, runId: string): Promise<JobDispatchResult> {
+    const history = await this.deps.runRecorder.listRuns(jobId);
+    const original = history.find((record) => record.workflowId === runId);
+    if (!original) {
+      throw new JobPipelineError(
+        "job_run_not_found",
+        `Job "${jobId}" has no run "${runId}" among its retained runs; there is nothing to replay.`,
+      );
+    }
+    if (original.definitionVersion == null) {
+      throw new JobPipelineError(
+        "replay_pre_retention_run",
+        `Run "${runId}" of job "${jobId}" predates the definition-version stamp; its exact configuration was not retained, so it cannot be replayed. A replay refuses rather than substituting the closest version.`,
+      );
+    }
+    const definition = await this.deps.stores.definitions.getDefinitionVersion(
+      jobId,
+      original.definitionVersion,
+    );
+    if (!definition) {
+      throw new JobPipelineError(
+        "replay_definition_version_unresolved",
+        `Run "${runId}" of job "${jobId}" recorded definition version ${original.definitionVersion}, which is no longer resolvable; refusing rather than replaying a different configuration.`,
+      );
+    }
+    // The original's trigger is the replay's trigger; its schedule and
+    // async-job links belong to that dispatch, so they are NOT copied —
+    // a replay is the operator's new run, not a second firing.
+    return this.dispatchResolved(definition, {
+      trigger: normalizeJobRunTrigger(original.trigger),
+      kind: "replay",
+      originRunId: runId,
+    });
+  }
+
+  /**
+   * The one dispatch tail: guard the instance, assert the mode, mint a
+   * fresh run id, execute, and return the sync outcome or the handle.
+   * Shared by `runJob` and `replayRun` so a replay cannot drift into a
+   * second execution path.
+   */
+  private async dispatchResolved(
+    definition: JobDefinition,
+    opts: { trigger?: JobRunTrigger; kind?: JobRunKind; originRunId?: string | null; scopePath?: string; scheduleId?: string; asyncJobId?: string; workflowInstanceId?: string },
+  ): Promise<JobDispatchResult> {
+    const jobId = definition.jobId;
     const instance = await this.requireInstance(jobId);
     if (
       instance.state === "queued" ||
@@ -899,20 +964,20 @@ export class JobPipelineControl {
       );
     }
     assertExecutionModeSupported(definition.config.executionMode);
-    this.assertScopeNotRetired(definition, opts?.scopePath ?? "");
+    this.assertScopeNotRetired(definition, opts.scopePath ?? "");
     const runId = this.newRunId();
     const completion = this.executeRun(definition, {
       runId,
-      trigger: normalizeJobRunTrigger(opts?.trigger),
+      trigger: normalizeJobRunTrigger(opts.trigger),
       // Issue #4767 — a fresh dispatch is an original unless the
       // caller is retryJob, which passes kind "re-run" + the origin
       // run id it retried. The kind is normalized, never trusted.
-      kind: normalizeJobRunKind(opts?.kind),
-      originRunId: normalizeOriginRunId(opts?.originRunId),
-      scopePath: opts?.scopePath ?? "",
-      scheduleId: opts?.scheduleId ?? null,
-      asyncJobId: opts?.asyncJobId ?? null,
-      workflowInstanceId: opts?.workflowInstanceId ?? null,
+      kind: normalizeJobRunKind(opts.kind),
+      originRunId: normalizeOriginRunId(opts.originRunId),
+      scopePath: opts.scopePath ?? "",
+      scheduleId: opts.scheduleId ?? null,
+      asyncJobId: opts.asyncJobId ?? null,
+      workflowInstanceId: opts.workflowInstanceId ?? null,
       resuming: false,
     });
     this.inflight.set(runId, completion);

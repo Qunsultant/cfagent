@@ -88,6 +88,7 @@ import {
 } from "../services/workflowStageSchedule";
 import {
   controlPipelineStageViaDoor,
+  replayPipelineRunViaDoor,
   definePipelineJobFromSpecViaDoor,
   getPipelineJobStatusViaDoor,
   getScheduledAgentDoor,
@@ -3288,6 +3289,15 @@ export class OrchestratorAgent extends PortThink {
           engineJobId,
           stage,
           operation,
+        ),
+      // Issue #4467 — replay a past run: a new run of the definition
+      // version the original executed, behind the same operator gate.
+      replayJobRun: (engineJobId, runId) =>
+        replayPipelineRunViaDoor(
+          this.env,
+          request.headers.get("x-user-login"),
+          engineJobId,
+          runId,
         ),
     });
     if (statusRoute) return statusRoute;

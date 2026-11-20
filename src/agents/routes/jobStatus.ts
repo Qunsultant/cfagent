@@ -29,6 +29,16 @@ export interface JobStageControlResult {
   runId: string | null;
 }
 
+/** Issue #4467 — a replayed run: the original it came from and the new run. */
+export interface JobRunReplayResult {
+  jobId: string;
+  /** The run whose definition version and trigger were replayed. */
+  replayedRunId: string;
+  /** The new run id the replay minted (never the original's). */
+  runId: string;
+  state: string;
+}
+
 export interface JobStatusRouteContext {
   /** The engine's status view for one job id, or null when no such job exists. */
   readJobStatus: (jobId: string) => Promise<JobStatusView | null>;
@@ -42,11 +52,19 @@ export interface JobStatusRouteContext {
     stage: string,
     operation: JobStageOperation,
   ) => Promise<JobStageControlResult>;
+  /**
+   * Issue #4467 — replay a past run as a NEW run of its recorded
+   * definition version. Required for the POST route; absent means the
+   * surface refuses by name rather than pretending a replay happened.
+   */
+  replayJobRun?: (jobId: string, runId: string) => Promise<JobRunReplayResult>;
 }
 
 const STATUS_PATH = /(?:^|\/api)\/jobs\/([^/]+)\/status$/;
 const STAGE_PATH = /(?:^|\/api)\/jobs\/([^/]+)\/stages\/([^/]+)$/;
 const CONTROL_PATH = /(?:^|\/api)\/jobs\/([^/]+)\/stages\/([^/]+)\/(run|rerun|stop|resume|cancel)$/;
+/** Issue #4467 — replay one past run as a new run. */
+const REPLAY_PATH = /(?:^|\/api)\/jobs\/([^/]+)\/runs\/([^/]+)\/replay$/;
 
 function decode(value: string): string {
   try {
@@ -77,6 +95,35 @@ export async function handleJobStatusRoutes(
   path: string,
   ctx: JobStatusRouteContext,
 ): Promise<Response | null> {
+  const replayMatch = request.method === "POST" ? REPLAY_PATH.exec(path) : null;
+  if (replayMatch) {
+    const jobId = decode(replayMatch[1]);
+    const runId = decode(replayMatch[2]);
+    if (!ctx.replayJobRun) {
+      return Response.json(
+        {
+          error: `Replay for job "${jobId}" is unavailable: this surface has no control door configured.`,
+        },
+        { status: 503 },
+      );
+    }
+    try {
+      return Response.json(await ctx.replayJobRun(jobId, runId));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      // The refusals are the contract: an unknown run or job is 404; a
+      // run whose configuration was not retained, or one that cannot be
+      // replayed right now, is a 409; anything else is unavailable.
+      const status = /job_run_not_found|No job with id|not found/i.test(message)
+        ? 404
+        : /replay_pre_retention_run|replay_definition_version_unresolved|already_running|already/i.test(
+              message,
+            )
+          ? 409
+          : 503;
+      return Response.json({ error: message, jobId, runId }, { status });
+    }
+  }
   const controlMatch = request.method === "POST" ? CONTROL_PATH.exec(path) : null;
   if (controlMatch) {
     const jobId = decode(controlMatch[1]);

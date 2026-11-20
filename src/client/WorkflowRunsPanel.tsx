@@ -1186,6 +1186,39 @@ export function RunDetail({
   const [jobRetryBusy, setJobRetryBusy] = useState(false);
   const [jobRetryMessage, setJobRetryMessage] = useState<string | null>(null);
   const canRetryJob = isSingleJobRun && run.status === "failed";
+  // Issue #4467 — replay a past engine run: a NEW run of that run's
+  // recorded definition version. Offered only where the row names both
+  // ids the route needs, and never for a run still in flight.
+  const [replayBusy, setReplayBusy] = useState(false);
+  const [replayMessage, setReplayMessage] = useState<string | null>(null);
+  const canReplayRun =
+    run.source === "job-outcome" &&
+    Boolean(run.engineJobId) &&
+    Boolean(run.workflowId) &&
+    run.status !== "running";
+  const replayRun = async () => {
+    setReplayMessage(null);
+    setReplayBusy(true);
+    try {
+      const res = await fetch(
+        `/api/jobs/${encodeURIComponent(run.engineJobId!)}/runs/${encodeURIComponent(run.workflowId!)}/replay`,
+        withCsrfInit({ method: "POST" }),
+      );
+      const payload = (await res.json().catch(() => ({}))) as {
+        runId?: string;
+        error?: string;
+      };
+      if (!res.ok) {
+        throw new Error(payload.error ?? `Replay failed (${res.status})`);
+      }
+      setReplayMessage(payload.runId ? `Replayed as run ${payload.runId}.` : "Replayed as a new run.");
+      onStageAction?.();
+    } catch (err) {
+      setReplayMessage(err instanceof Error ? err.message : String(err));
+    } finally {
+      setReplayBusy(false);
+    }
+  };
   const retryJob = async () => {
     setJobRetryMessage(null);
     setJobRetryBusy(true);
@@ -1464,6 +1497,17 @@ export function RunDetail({
                 Retry failed shards
               </Button>
             )}
+            {canReplayRun && (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => void replayRun()}
+                loading={replayBusy}
+                disabled={replayBusy}
+              >
+                Replay
+              </Button>
+            )}
             <Badge tone={TRIGGER_TONE[run.trigger]} size="sm">
               {TRIGGER_LABEL[run.trigger]}
             </Badge>
@@ -1496,6 +1540,12 @@ export function RunDetail({
       {jobRetryMessage && (
         <Notice tone="info" density="compact" variant="strip" title="Job retry">
           {jobRetryMessage}
+        </Notice>
+      )}
+
+      {replayMessage && (
+        <Notice tone="info" density="compact" variant="strip" title="Replay">
+          {replayMessage}
         </Notice>
       )}
 
