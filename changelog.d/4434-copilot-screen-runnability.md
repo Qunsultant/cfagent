@@ -1,0 +1,3 @@
+### Changed
+
+- Copilot screen runnability (#4434, S6/N5): `run_stock_screen` accepts `presetId` + `screenMode`/`screenIntent`; the door resolves a preset at run time against the acting user's own presets (explicit filters win, `presetRef` stamped on the run record, missing/foreign presets refuse coded instead of running unfiltered); a tenant whose effective data provider is not a stock-screen provider is refused pre-start with the coded `FAILURE_NO_SCREENING_PROVIDER` refusal; and the copilot capabilities block offers `run_stock_screen` on every broker/mode, not only Alpaca/paper. Does NOT build the async dispatch leg (follow-up under #4148), does NOT touch #4136's loop config, and does NOT rebuild the #4431 provider fill.
