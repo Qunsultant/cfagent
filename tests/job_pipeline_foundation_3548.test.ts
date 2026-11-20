@@ -146,6 +146,10 @@ const INSTANCE: JobInstanceRecord = {
   // through every residency.
   runKind: "original",
   runOriginId: null,
+  // Issue #5887 — the definition version this run executed; the
+  // round-trip below proves the column carries it through every
+  // residency.
+  runDefinitionVersion: 3,
   checkpoint: {
     runId: "run-1",
     nodePath: "",

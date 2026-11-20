@@ -74,6 +74,7 @@ export const JOB_PIPELINE_INSTANCE_COLUMNS: Record<keyof JobInstanceRow & string
   runScheduleId: "run_schedule_id",
   runAsyncJobId: "run_async_job_id",
   runWorkflowInstanceId: "run_workflow_instance_id",
+  runDefinitionVersion: "run_definition_version",
   checkpointJson: "checkpoint_json",
   stageCheckpointJson: "stage_checkpoint_json",
   stageDesiredJson: "stage_desired_json",
@@ -227,6 +228,7 @@ function instanceToRow(record: JobInstanceRecord): JobInstanceRow {
     runScheduleId: record.runScheduleId,
     runAsyncJobId: record.runAsyncJobId,
     runWorkflowInstanceId: record.runWorkflowInstanceId,
+    runDefinitionVersion: record.runDefinitionVersion ?? null,
     checkpointJson: record.checkpoint ? JSON.stringify(record.checkpoint) : null,
     stageCheckpointJson: record.stageCheckpoint ? JSON.stringify(record.stageCheckpoint) : null,
     stageDesiredJson: record.stageDesired ? JSON.stringify(record.stageDesired) : null,
@@ -248,6 +250,7 @@ function rowToInstance(row: JobInstanceRow): JobInstanceRecord {
     runScheduleId: row.runScheduleId ?? null,
     runAsyncJobId: row.runAsyncJobId ?? null,
     runWorkflowInstanceId: row.runWorkflowInstanceId ?? null,
+    runDefinitionVersion: row.runDefinitionVersion ?? null,
     checkpoint: row.checkpointJson
       ? (JSON.parse(row.checkpointJson) as JobInstanceRecord["checkpoint"])
       : null,
@@ -327,6 +330,11 @@ export class DoSqliteJobPipelineStores implements JobPipelineStores {
     }
     if (!names.has("run_origin_id")) {
       this.sql.exec(remainderAlterSql("job_pipeline_instances", "run_origin_id"));
+    }
+    // Issue #5887 — `run_definition_version`, the version this run was
+    // dispatched with (same additive-column probe).
+    if (!names.has("run_definition_version")) {
+      this.sql.exec(remainderAlterSql("job_pipeline_instances", "run_definition_version"));
     }
   }
 

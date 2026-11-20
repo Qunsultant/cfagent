@@ -74,7 +74,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
  *  job_run_records. Merged sha recomputed from the merged fixture file
  *  (sha256 of the file bytes, CRLF-normalized). */
 export const COMBINED_FIXTURE_SHA256 =
-  "2e859662ecf9f6f01f45289d3b6eb4cde34e7df9e17d6d1a3a85db71c8ee850a";
+  "51f428ba95e9313fda974a9c4a0cde787bd46677a168881d4690ae7b942848a4";
 
 /** All four planes' entries in plane order: D1, DO, ORM, remainder. */
 export const COMBINED_CATALOGUE_ENTRIES: CatalogueEntry[] = [

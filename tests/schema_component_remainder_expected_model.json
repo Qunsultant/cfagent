@@ -694,6 +694,11 @@
           "name": "run_origin_id",
           "type": "TEXT",
           "pk": 0
+        },
+        {
+          "name": "run_definition_version",
+          "type": "INTEGER",
+          "pk": 0
         }
       ],
       "constraints": {}
@@ -808,6 +813,11 @@
         {
           "name": "origin_run_id",
           "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "definition_version",
+          "type": "INTEGER",
           "pk": 0
         }
       ],

@@ -199,6 +199,12 @@ export interface JobRunRecord {
    */
   kind?: JobRunKind;
   originRunId?: string | null;
+  /**
+   * Issue #5887 — the definition version this run executed, stamped at
+   * dispatch. Null (or absent) means the row predates the stamp: a
+   * replay must refuse it by name, never guess the closest version.
+   */
+  definitionVersion?: number | null;
   /** Failure error text. Required when outcome is "failure". */
   error?: string;
   /** Skip reason. Required when outcome is "skipped". */

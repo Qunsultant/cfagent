@@ -1300,6 +1300,29 @@ export const MIGRATION_0074_JOB_PIPELINE_DEFINITION_VERSIONS: DataMigration = {
   name: "0074_job_pipeline_definition_versions",
   sql: d1MigrationSql(74),
 };
+
+/**
+ * Issue #5887 — the definition-version stamp, both halves of it: the
+ * terminal record's version and the instance's run-stamp (captured at
+ * dispatch, read at settle). Additive and nullable: a row written
+ * before this migration reads null, which a replay refuses by name.
+ */
+export const MIGRATION_0075_JOB_INSTANCE_DEFINITION_VERSION: DataMigration = {
+  version: 75,
+  name: "0075_job_instance_definition_version",
+  sql: d1MigrationSql(75),
+};
+
+/**
+ * Issue #5887 — the terminal record's definition version. Its own
+ * migration because the run-record store owns this table: a shared
+ * migration would run this ALTER before that store created the table.
+ */
+export const MIGRATION_0076_JOB_RUN_DEFINITION_VERSION: DataMigration = {
+  version: 76,
+  name: "0076_job_run_definition_version",
+  sql: d1MigrationSql(76),
+};
 export const MIGRATION_0058_PRODUCT_VERSIONS: DataMigration = {
   version: 58,
   name: "0058_product_versions",
@@ -1540,6 +1563,8 @@ export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANC
   MIGRATION_0072_JOB_RUN_RECORDS_RUN_KIND,
   MIGRATION_0073_JOB_RUN_RECORDS_RECENT_IDX,
   MIGRATION_0074_JOB_PIPELINE_DEFINITION_VERSIONS,
+  MIGRATION_0075_JOB_INSTANCE_DEFINITION_VERSION,
+  MIGRATION_0076_JOB_RUN_DEFINITION_VERSION,
 ];
 
 function splitStatements(sqlText: string): string[] {

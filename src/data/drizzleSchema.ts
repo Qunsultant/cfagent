@@ -1848,6 +1848,8 @@ export const jobPipelineInstances = sqliteTable("job_pipeline_instances", {
   runScheduleId: text("run_schedule_id"),
   runAsyncJobId: text("run_async_job_id"),
   runWorkflowInstanceId: text("run_workflow_instance_id"),
+  /** Issue #5887 — the definition version this run was dispatched with. */
+  runDefinitionVersion: integer("run_definition_version"),
   checkpointJson: text("checkpoint_json"),
   stageCheckpointJson: text("stage_checkpoint_json"),
   stageDesiredJson: text("stage_desired_json"),
@@ -1896,6 +1898,8 @@ export const jobRunRecords = sqliteTable("job_run_records", {
   workflowId: text("workflow_id"),
   kind: text("kind"),
   originRunId: text("origin_run_id"),
+  /** Issue #5887 — the definition version the run executed (null = pre-retention row). */
+  definitionVersion: integer("definition_version"),
   errorText: text("error_text"),
   detail: text("detail"),
   descriptor: text("descriptor"),

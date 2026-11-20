@@ -1134,6 +1134,7 @@ export class JobPipelineControl {
       runTrigger: null,
       runKind: null,
       runOriginId: null,
+      runDefinitionVersion: null,
       runScheduleId: null,
       runWorkflowInstanceId: null,
       lastError: null,
@@ -2148,6 +2149,7 @@ export class JobPipelineControl {
       runTrigger: null,
       runKind: null,
       runOriginId: null,
+      runDefinitionVersion: null,
       runScheduleId: null,
       runAsyncJobId: null,
       runWorkflowInstanceId: null,
@@ -2204,6 +2206,7 @@ export class JobPipelineControl {
       // run it retried).
       kind: normalizeJobRunKind(instance.runKind),
       originRunId: instance.runOriginId ?? null,
+      definitionVersion: instance.runDefinitionVersion ?? null,
       // Issue #3310 — the terminal record joins to the dispatching
       // schedule and to the workflow instance (the pipeline run IS
       // the workflow instance on the direct-execution firing path).
@@ -2351,6 +2354,11 @@ export class JobPipelineControl {
       // stamps the run they settle.
       runKind: opts.kind,
       runOriginId: opts.originRunId,
+      // Issue #5887 — the definition version this run executes, captured
+      // from the definition the engine just resolved. Settle reads the
+      // instance, never the current pointer: a reconfigure during the run
+      // must not change what the run records it used.
+      runDefinitionVersion: definition.version,
       runScheduleId: opts.scheduleId,
       // Issue #4357 — the join key: the async job that dispatched
       // this run, persisted on the instance so the terminal record

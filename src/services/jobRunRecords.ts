@@ -139,6 +139,16 @@ export function buildJobRunRecord(input: JobRunRecordInput): JobRunRecord {
       );
     }
   }
+  // Issue #5887 — the definition version a run executed with is a
+  // non-negative integer or an explicit null (a row written before the
+  // stamp). Anything else is a bug at the call site, not a value to store.
+  if (
+    input.definitionVersion !== undefined &&
+    input.definitionVersion !== null &&
+    (!Number.isInteger(input.definitionVersion) || input.definitionVersion < 0)
+  ) {
+    throw new Error("Job run definitionVersion must be a non-negative integer or null.");
+  }
   const startedMs = Date.parse(input.started);
   const finishedMs = Date.parse(input.finished);
   if (!Number.isFinite(startedMs)) {
@@ -173,6 +183,7 @@ export function buildJobRunRecord(input: JobRunRecordInput): JobRunRecord {
     // dispatch); an absent origin reads as null (no lineage).
     kind: normalizeJobRunKind(input.kind),
     originRunId: input.originRunId ?? null,
+    definitionVersion: input.definitionVersion ?? null,
     ...(input.error !== undefined ? { error: input.error } : {}),
     ...(input.detail !== undefined ? { detail: input.detail } : {}),
     ...(input.descriptor !== undefined ? { descriptor: input.descriptor } : {}),
@@ -222,13 +233,21 @@ export function normalizeJobRunRecord(record: JobRunRecord): JobRunRecord {
       ? record.jobId
       : "";
   const kind = normalizeJobRunKind(record.kind);
+  // Issue #5887 — a version that is not a non-negative integer reads as
+  // null (pre-retention), never as a guessed number.
+  const definitionVersion =
+    typeof record.definitionVersion === "number" &&
+    Number.isInteger(record.definitionVersion) &&
+    record.definitionVersion >= 0
+      ? record.definitionVersion
+      : null;
   const originRunId =
     typeof record.originRunId === "string" &&
     record.originRunId.trim() &&
     !isMissingIdLiteral(record.originRunId)
       ? record.originRunId
       : null;
-  return { ...record, jobId, kind, originRunId, ...linkage };
+  return { ...record, jobId, kind, originRunId, definitionVersion, ...linkage };
 }
 
 /** Keep the newest `cap` records of a newest-first list. */

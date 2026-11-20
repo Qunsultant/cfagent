@@ -28,6 +28,7 @@ import {
   MIGRATION_0071_JOB_PIPELINE_RUN_KIND,
   type MigrationDb,
   MIGRATION_0074_JOB_PIPELINE_DEFINITION_VERSIONS,
+  MIGRATION_0075_JOB_INSTANCE_DEFINITION_VERSION,
 } from "./migrationRunner";
 import {
   jobPipelineArtifactId,
@@ -64,6 +65,7 @@ export async function ensureJobPipelineSchema(db: JobPipelineDb): Promise<number
     MIGRATION_0067_JOB_PIPELINE_RUN_WORKFLOW_INSTANCE_ID,
     MIGRATION_0071_JOB_PIPELINE_RUN_KIND,
     MIGRATION_0074_JOB_PIPELINE_DEFINITION_VERSIONS,
+    MIGRATION_0075_JOB_INSTANCE_DEFINITION_VERSION,
   ]);
 }
 
@@ -82,6 +84,7 @@ function instanceToRow(record: JobInstanceRecord): JobInstanceRow {
     runScheduleId: record.runScheduleId,
     runAsyncJobId: record.runAsyncJobId,
     runWorkflowInstanceId: record.runWorkflowInstanceId,
+    runDefinitionVersion: record.runDefinitionVersion ?? null,
     checkpointJson: record.checkpoint ? JSON.stringify(record.checkpoint) : null,
     stageCheckpointJson: record.stageCheckpoint ? JSON.stringify(record.stageCheckpoint) : null,
     stageDesiredJson: record.stageDesired ? JSON.stringify(record.stageDesired) : null,
@@ -103,6 +106,7 @@ function rowToInstance(row: JobInstanceRow): JobInstanceRecord {
     runScheduleId: row.runScheduleId ?? null,
     runAsyncJobId: row.runAsyncJobId ?? null,
     runWorkflowInstanceId: row.runWorkflowInstanceId ?? null,
+    runDefinitionVersion: row.runDefinitionVersion ?? null,
     checkpoint: row.checkpointJson
       ? (JSON.parse(row.checkpointJson) as JobInstanceRecord["checkpoint"])
       : null,
@@ -237,6 +241,7 @@ export class D1JobPipelineStores implements JobPipelineStores {
             // exists: executeRun stamps it on the running instance
             // through this conflict path.
             runWorkflowInstanceId: row.runWorkflowInstanceId,
+            runDefinitionVersion: row.runDefinitionVersion,
             checkpointJson: row.checkpointJson,
             stageCheckpointJson: row.stageCheckpointJson,
             stageDesiredJson: row.stageDesiredJson,
