@@ -214,6 +214,31 @@ describe("goal-screen command validation (#1996)", () => {
     expect(() => assertWorkflowJobCommand(cmd)).toThrow(WorkflowError);
   });
 
+  it("accepts a goal command carrying either Yahoo data mode (#4436)", () => {
+    for (const yahooDataMode of ["gap-fill", "full-dataset"] as const) {
+      const cmd = goalParentCommand({
+        goalScreen: {
+          scenario: buildScenario({ goalKind: "income", portfolioRef: { kind: "hypothetical" } }),
+          scenarioSource: "built",
+          provider: "yahoo",
+          yahooDataMode,
+        },
+      });
+      expect(assertWorkflowJobCommand(cmd)).toBeDefined();
+    }
+  });
+
+  it("rejects a goal command with an unknown Yahoo data mode (#4436)", () => {
+    const cmd = goalParentCommand({
+      goalScreen: {
+        scenario: buildScenario({ goalKind: "income", portfolioRef: { kind: "hypothetical" } }),
+        scenarioSource: "built",
+        yahooDataMode: "yahoo-only" as never,
+      },
+    });
+    expect(() => assertWorkflowJobCommand(cmd)).toThrow(WorkflowError);
+  });
+
   it("leaves market commands unaffected", () => {
     const cmd = goalParentCommand();
     delete cmd.goalScreen;

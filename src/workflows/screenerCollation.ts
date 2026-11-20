@@ -635,10 +635,7 @@ export interface GoalShardRequest {
   assetClasses?: ("stocks" | "options")[];
   symbols?: string[];
   provider?: "yahoo";
-  providerFallback?: {
-    from: "etrade";
-    reason: string;
-  };
+  yahooDataMode?: import("./stockScreenPlanner").YahooDataMode;
 }
 
 /** Executes one shard's screen (the agent stub, adapted, in production). */
@@ -807,7 +804,7 @@ export function goalShardRequest(
     ...(g.assetClasses ? { assetClasses: g.assetClasses } : {}),
     ...(g.symbols ? { symbols: g.symbols } : {}),
     ...(g.provider ? { provider: g.provider } : {}),
-    ...(g.providerFallback ? { providerFallback: g.providerFallback } : {}),
+    ...(g.yahooDataMode ? { yahooDataMode: g.yahooDataMode } : {}),
   };
 }
 
@@ -829,12 +826,9 @@ export function goalResultToShardResult(input: {
   result: GoalDrivenScreenResult;
   /** Issue #1998: caller run id (D2) the run's captures are keyed by. */
   idempotencyKey?: string;
-  /** Issue #1571: carried so the store door can stamp it when the result lacks it. */
+  /** Issue #4436: carried so the store door can stamp it when the result lacks it. */
   provider?: "yahoo";
-  providerFallback?: {
-    from: "etrade";
-    reason: string;
-  };
+  yahooDataMode?: import("./stockScreenPlanner").YahooDataMode;
 }): ShardScreenResult {
   const { result } = input;
   const totalScanned =
@@ -858,7 +852,7 @@ export function goalResultToShardResult(input: {
       result,
       ...(input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : {}),
       ...(input.provider ? { provider: input.provider } : {}),
-      ...(input.providerFallback ? { providerFallback: input.providerFallback } : {}),
+      ...(input.yahooDataMode ? { yahooDataMode: input.yahooDataMode } : {}),
     },
   };
 }

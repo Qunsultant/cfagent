@@ -109,11 +109,12 @@ export interface ScreenerCompletedEvent {
   /** Summary of criteria applied during screening. */
   filterSummary?: string;
   /**
-   * Issue #1527: whole-run fallback marker — the run fell back to
-   * its provider because the configured provider's auth was dead.
-   * Carried so deliveries and report bodies name the fallback.
+   * Issue #4436: the run's explicit data mode, when one
+   * applies — the run screened under it because the mode was
+   * named, never an implicit fallback. Carried so deliveries
+   * and report bodies name the mode.
    */
-  providerFallback?: { from: string; reason: string };
+  yahooDataMode?: import("../workflows/stockScreenPlanner").YahooDataMode;
   /** Direct recipient email (enables email dispatch via cfpay A2A or local fallback). */
   emailTo?: string;
   /** Explicit Slack channel destination. */

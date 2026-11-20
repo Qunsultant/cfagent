@@ -16,6 +16,7 @@
 
 import { PDFDocument, PDFFont, PDFPage, rgb, StandardFonts } from "pdf-lib";
 import type { ScreenerRunResult } from "../agents/screener-agent";
+import { yahooDataModeLabel } from "../workflows/stockScreenPlanner";
 import {
   SCREENER_PDF_COLUMNS,
   buildScreenerPdfSections,
@@ -230,44 +231,48 @@ export function screenerProvenanceLines(result: {
    *  legacy runs; the artifact then states the broker without a mode. */
   environment?: "TEST" | "PROD";
   /**
-   * Issue #1527: whole-run fallback marker. A fallback run's lines
-   * name the fallback explicitly — a plain-Yahoo line would hide
-   * that the run was configured for another provider, and the
-   * E*TRADE line would be false.
+   * Issue #4436: the run's explicit data mode, when one
+   * applies. A mode run's lines name the mode explicitly — a
+   * plain-provider line would hide that the run ran the full dataset
+   * as a test, and a broker line would be false.
    */
-  providerFallback?: { from: string; reason: string };
+  yahooDataMode?: import("../workflows/stockScreenPlanner").YahooDataMode;
   technicalsCoverage?: { symbols: number; withMacd: number; withGap: number };
 }): { quotesLine: string; methodologyQuotes: string; technicalsNote?: string } {
   const yahoo = result.provider === "yahoo";
-  const fallback = yahoo && !!result.providerFallback;
+  const mode = result.yahooDataMode;
   const broker = result.broker === "alpaca" ? "alpaca" : "etrade";
   const brokerLabel = broker === "alpaca" ? "Alpaca" : "E*TRADE";
   // The mode is stated only when the run recorded it: a legacy run that never
   // carried an environment must not acquire one on the way to paper.
   const modeLabel =
     result.environment === "TEST" ? " (paper)" : result.environment === "PROD" ? " (live)" : "";
-  const fromLabel =
-    result.providerFallback?.from === "etrade"
-      ? "E*TRADE"
-      : (result.providerFallback?.from ?? "the configured provider");
-  const lines: { quotesLine: string; methodologyQuotes: string; technicalsNote?: string } = fallback
-    ? {
-        quotesLine: `Quotes: Yahoo Finance quotes (delayed) — fallback (${fromLabel} auth unavailable)`,
-        methodologyQuotes:
-          `Quotes: Yahoo Finance (delayed) — fallback because ${fromLabel} auth was unavailable ` +
-          `for this scheduled run; the quote source for this run is Yahoo, not ${fromLabel} live.`,
-      }
-    : yahoo
+  const lines: { quotesLine: string; methodologyQuotes: string; technicalsNote?: string } =
+    mode === "full-dataset" && yahoo
       ? {
-          quotesLine: "Quotes: Yahoo Finance quotes (delayed)",
+          quotesLine: `Quotes: ${yahooDataModeLabel("full-dataset")}`,
           methodologyQuotes:
-            "Quotes: Yahoo Finance (delayed) — the quote source for this run.",
+            "Quotes: Yahoo Finance (delayed) — full-dataset testing mode (stocks only); " +
+            "the quote source for this run is Yahoo.",
         }
-      : {
-          // Issue #3331: the broker the run recorded, not a hardcoded one.
-          quotesLine: `Quotes: ${brokerLabel} live snapshots${modeLabel}`,
-          methodologyQuotes: `Quotes: ${brokerLabel} live snapshots${modeLabel} (primary). No fallback data substituted.`,
-        };
+      : mode === "gap-fill"
+        ? {
+            quotesLine: `Quotes: ${brokerLabel} live snapshots${modeLabel} — Yahoo gap-fill (delayed) for missing quotes`,
+            methodologyQuotes:
+              `Quotes: ${brokerLabel} live snapshots${modeLabel} (primary) — Yahoo Finance (delayed) ` +
+              `filled gaps the primary missed; filled rows carry delayed quotes, not ${brokerLabel} live.`,
+          }
+        : yahoo
+          ? {
+              quotesLine: "Quotes: Yahoo Finance quotes (delayed)",
+              methodologyQuotes:
+                "Quotes: Yahoo Finance (delayed) — the quote source for this run.",
+            }
+          : {
+              // Issue #3331: the broker the run recorded, not a hardcoded one.
+              quotesLine: `Quotes: ${brokerLabel} live snapshots${modeLabel}`,
+              methodologyQuotes: `Quotes: ${brokerLabel} live snapshots${modeLabel} (primary). No fallback data substituted.`,
+            };
   const cov = result.technicalsCoverage;
   if (cov && cov.symbols > 0 && (cov.withMacd < cov.symbols || cov.withGap < cov.symbols)) {
     lines.technicalsNote =

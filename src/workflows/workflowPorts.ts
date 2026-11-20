@@ -103,6 +103,7 @@ import type { OptionScreenerFilter, StageChainConfig, StockScreenerFilter } from
 import type { BrokerId } from "../trading";
 import type { StockScreenDelivery } from "./stockScreenRunSpec";
 import type { JobRunTrigger } from "../data/jobRunRecordPorts";
+import { isYahooDataMode } from "./stockScreenPlanner";
 
 /** Re-exported for workflow callers (single import surface). */
 export type { StageName };
@@ -220,13 +221,10 @@ export interface GoalScreenCommand {
    * delivering directly. Absent = the unchained direct delivery.
    */
   stageChain?: StageChainConfig;
-  /** Issue #1571: "yahoo" runs the stock leg on the Yahoo engine (scheduled fallback runs). */
+  /** Issue #4436: "yahoo" runs the stock leg on the Yahoo engine (scheduled full-dataset runs). */
   provider?: "yahoo";
-  /** Issue #1571: fallback marker, stamped onto the result before artifact generation. */
-  providerFallback?: {
-    from: "etrade";
-    reason: string;
-  };
+  /** Issue #4436: the run's explicit data mode, stamped onto the result before artifact generation. */
+  yahooDataMode?: import("./stockScreenPlanner").YahooDataMode;
   /**
    * Issue #4279 ([One engine] #3550 S4): caller base filters, merged
    * per-field over the plan defaults (the A2A entry's
@@ -588,15 +586,10 @@ export function assertWorkflowJobCommand(
     if (g.provider !== undefined && g.provider !== "yahoo") {
       throw new WorkflowError("invalid_command", 'Goal-screen provider must be "yahoo" when present.');
     }
-    if (
-      g.providerFallback !== undefined &&
-      (typeof g.providerFallback !== "object" ||
-        g.providerFallback.from !== "etrade" ||
-        typeof g.providerFallback.reason !== "string")
-    ) {
+    if (g.yahooDataMode !== undefined && !isYahooDataMode(g.yahooDataMode)) {
       throw new WorkflowError(
         "invalid_command",
-        "Goal-screen providerFallback requires { from: \"etrade\", reason: string }.",
+        'Goal-screen yahooDataMode must be "gap-fill" or "full-dataset".',
       );
     }
   }

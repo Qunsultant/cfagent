@@ -195,9 +195,9 @@ describe("dispatchScreenerA2A (#2223 final slice)", () => {
     expect(input.commandOverrides.maxItems).toBe(5);
     expect(calls.find((c) => c.method === "isScreenRunning")).toBeDefined();
     expect(calls.find((c) => c.method === "chargeScreenQuota")).toBeDefined();
-    // The scheduled layer's fallback-provenance marker and the test
+    // The scheduled layer's Yahoo data-mode label and the test
     // seam are never accepted from an A2A caller.
-    expect(input.spec.providerFallback).toBeUndefined();
+    expect(input.spec.yahooDataMode).toBeUndefined();
     expect(input.spec.yahooDeps).toBeUndefined();
   });
 

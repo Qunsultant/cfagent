@@ -13,29 +13,31 @@
  * and fails per-class on auth-dead; it is unchanged by this slice
  * (stocks only, per the 2026-10-25 ruling).
  *
- * Contract pins (same semantics as #1527):
+ * Contract pins (same semantics as #1527, restated for the #4436
+ * explicit Yahoo data mode — the E*TRADE-named fallback marker is
+ * replaced by the mode; the behavior is unchanged):
  * - A guard-blocked goal-screen run with stocks requested completes
  *   via Yahoo (the agent runs the stock leg on the Yahoo engine)
  *   instead of failing/partial-failing silently.
- * - The fallback run carries an explicit providerFallback marker on
- *   the agent request, the returned data, the run_completed audit,
+ * - The mode run carries an explicit yahooDataMode ("full-dataset")
+ *   on the agent request, the returned data, the run_completed audit,
  *   and the stage-chain bridge payload — and the goal PDF provenance
- *   names it as a Yahoo fallback, not plain Yahoo and never
+ *   names the testing mode, not plain Yahoo and never
  *   E*TRADE live.
- * - A fallback completion emits NO failure notice (no
- *   goal_screen.run_failed audit); the fallback labeling is the
+ * - A mode-run completion emits NO failure notice (no
+ *   goal_screen.run_failed audit); the mode labeling is the
  *   signal. The guard's deduped episode alert already fired inside
  *   the guard.
- * - A fallback that itself fails goes through the normal failure
- *   path (run_failed audit naming the fallback).
+ * - A mode run that itself fails goes through the normal failure
+ *   path (run_failed audit naming the mode).
  * - E*TRADE-live runs and options-only runs are unchanged: no
- *   marker, and the guard is not even consulted for options-only
- *   runs (no stock leg to fall back).
+ *   mode, and the guard is not even consulted for options-only
+ *   runs (no stock leg to run on Yahoo).
  *
  * Issue #4279 (#3550 S4): the unchained scheduled path no longer
  * runs the agent inline — it submits the goal command to the one
- * engine. The guard + fallback still run first, and the fallback
- * rides the submission (provider "yahoo" + the marker) into the
+ * engine. The guard + mode still run first, and the mode rides the
+ * submission (provider "yahoo" + yahooDataMode) into the
  * engine job; a run failure now lives on the engine job, not on
  * the tick. S5 #4280 removed the direct path for chain mode too:
  * the chained test below pins the submission, like the rest.
@@ -74,7 +76,7 @@ const HANDLE = {
   statusUrl: "/api/jobs/history?chainId=goal-screen%3Ascheduled%3Atest_trader%3Aincome%3A2026-11-12T00%3A00%3A00.000Z",
 };
 
-const FALLBACK_MARKER = { from: "etrade", reason: "etrade-auth-dead" } as const;
+const YAHOO_MODE = "full-dataset" as const;
 
 function fakeGoalResult(overrides: Partial<GoalDrivenScreenResult> = {}): GoalDrivenScreenResult {
   return {
@@ -118,12 +120,12 @@ function goalService(opts: {
     : { blocked: false as const }));
   const runGoalScreen = vi.fn(async (req: any) => {
     // Faithful stub of the agent contract: the agent echoes the
-    // fallback marker onto the result it returns.
+    // Yahoo data mode onto the result it returns.
     const result = opts.agentResult();
     return {
       task: { id: "task-1", status: "completed" },
       executed: true,
-      result: req.providerFallback ? { ...result, providerFallback: req.providerFallback } : result,
+      result: req.yahooDataMode ? { ...result, yahooDataMode: req.yahooDataMode } : result,
     };
   });
   (service as any).audit = audit;
@@ -133,8 +135,8 @@ function goalService(opts: {
   return { service, audit, guard, runGoalScreen };
 }
 
-describe("goal-screen Yahoo fallback (#1571)", () => {
-  it("a guard-blocked run with stocks requested submits to the engine carrying the Yahoo fallback marker (#4280: chain mode rides the workflow now)", async () => {
+describe("goal-screen Yahoo data mode (#1571, #4436)", () => {
+  it("a guard-blocked run with stocks requested submits to the engine carrying the Yahoo data mode (#4280: chain mode rides the workflow now)", async () => {
     mockedStart.mockResolvedValue(HANDLE as never);
     const bridge = vi.fn(async () => {});
     const { service, audit, guard, runGoalScreen } = goalService({
@@ -151,22 +153,22 @@ describe("goal-screen Yahoo fallback (#1571)", () => {
     // The guard is consulted for the stock leg, exactly once.
     expect(guard).toHaveBeenCalledTimes(1);
     expect(guard.mock.calls[0][2]).toBe("stock");
-    // The direct agent is never consulted — the fallback rides the
+    // The direct agent is never consulted — the mode rides the
     // submission into the engine job, where the stock leg runs it.
     expect(runGoalScreen).not.toHaveBeenCalled();
     expect(mockedBuild).toHaveBeenCalledTimes(1);
     const submitted = mockedBuild.mock.calls[0][0] as Record<string, unknown>;
     expect(submitted.provider).toBe("yahoo");
-    expect(submitted.providerFallback).toEqual({ ...FALLBACK_MARKER });
+    expect(submitted.yahooDataMode).toBe(YAHOO_MODE);
     expect(submitted.stageChain).toEqual({});
-    // No failure notice on fallback submission success; the run's
+    // No failure notice on mode-run submission success; the run's
     // failure, if any, lives on the engine job.
     expect(audit.mock.calls.find((c) => c[0] === "goal_screen.run_failed")).toBeUndefined();
     // The bridge lives in the deliver stage now, not on this path.
     expect(bridge).not.toHaveBeenCalled();
   });
 
-  it("a fallback that itself fails is submitted to the engine carrying the marker (#4279: the run failure now lives on the engine job, not the tick)", async () => {
+  it("a mode run that itself fails is submitted to the engine carrying the mode (#4279: the run failure now lives on the engine job, not the tick)", async () => {
     mockedStart.mockResolvedValue(HANDLE as never);
     const { service, audit, runGoalScreen } = goalService({
       blocked: true,
@@ -177,17 +179,17 @@ describe("goal-screen Yahoo fallback (#1571)", () => {
     expect((result as any).data.status).toBe("queued");
     // The direct agent is never consulted on the unchained path.
     expect(runGoalScreen).not.toHaveBeenCalled();
-    // The fallback rides the submission into the engine job.
+    // The mode rides the submission into the engine job.
     expect(mockedBuild).toHaveBeenCalledTimes(1);
     const submitted = mockedBuild.mock.calls[0][0] as Record<string, unknown>;
     expect(submitted.provider).toBe("yahoo");
-    expect(submitted.providerFallback).toEqual({ ...FALLBACK_MARKER });
+    expect(submitted.yahooDataMode).toBe(YAHOO_MODE);
     // No tick-level failure audit: the run's failure, if any, is
     // the engine job's (the goal result carries the marker there).
     expect(audit.mock.calls.find((c) => c[0] === "goal_screen.run_failed")).toBeUndefined();
   });
 
-  it("an E*TRADE-live run is unchanged: no marker anywhere (#4279: the submission carries no provider override)", async () => {
+  it("an E*TRADE-live run is unchanged: no mode anywhere (#4279: the submission carries no provider override)", async () => {
     mockedStart.mockResolvedValue(HANDLE as never);
     const { service, audit, guard, runGoalScreen } = goalService({
       blocked: false,
@@ -200,14 +202,14 @@ describe("goal-screen Yahoo fallback (#1571)", () => {
     expect(runGoalScreen).not.toHaveBeenCalled();
     const submitted = mockedBuild.mock.calls[0][0] as Record<string, unknown>;
     expect(submitted.provider).toBeUndefined();
-    expect(submitted.providerFallback).toBeUndefined();
-    expect((result as any).data.providerFallback).toBeUndefined();
+    expect(submitted.yahooDataMode).toBeUndefined();
+    expect((result as any).data.yahooDataMode).toBeUndefined();
     const submitted_audit = audit.mock.calls.find((c) => c[0] === "goal_screen.workflow_submitted");
     expect(submitted_audit).toBeDefined();
-    expect((submitted_audit[1] as Record<string, unknown>).providerFallback).toBeUndefined();
+    expect((submitted_audit[1] as Record<string, unknown>).yahooDataMode).toBeUndefined();
   });
 
-  it("an options-only run never consults the guard and carries no marker (#4279)", async () => {
+  it("an options-only run never consults the guard and carries no mode (#4279)", async () => {
     mockedStart.mockResolvedValue(HANDLE as never);
     const { service, guard, runGoalScreen } = goalService({
       blocked: true,
@@ -223,10 +225,10 @@ describe("goal-screen Yahoo fallback (#1571)", () => {
     expect(runGoalScreen).not.toHaveBeenCalled();
     const submitted = mockedBuild.mock.calls[0][0] as Record<string, unknown>;
     expect(submitted.provider).toBeUndefined();
-    expect(submitted.providerFallback).toBeUndefined();
+    expect(submitted.yahooDataMode).toBeUndefined();
   });
 
-  it("executeGoalScreenRun stamps the marker onto the recorded result when the agent did not", async () => {
+  it("executeGoalScreenRun stamps the Yahoo data mode onto the recorded result when the agent did not", async () => {
     const mockOrm = new DatabaseORM(new MockSqlStorage() as any);
     const agent = {
       runGoalScreen: vi.fn(async () => ({
@@ -245,11 +247,11 @@ describe("goal-screen Yahoo fallback (#1571)", () => {
       trigger: "scheduled",
       idempotencyKey: "goal-screen:test:1571:stamp",
       provider: "yahoo",
-      providerFallback: { ...FALLBACK_MARKER },
+      yahooDataMode: YAHOO_MODE,
     } as any);
     expect(out.executed).toBe(true);
-    expect((out.result as any)?.providerFallback).toEqual({ ...FALLBACK_MARKER });
-    expect((out as any).providerFallback).toEqual({ ...FALLBACK_MARKER });
+    expect((out.result as any)?.yahooDataMode).toBe(YAHOO_MODE);
+    expect((out as any).yahooDataMode).toBe(YAHOO_MODE);
   });
 
   it("the Yahoo stock screener screens live Yahoo quotes, not the listings feed", async () => {
@@ -279,7 +281,7 @@ describe("goal-screen Yahoo fallback (#1571)", () => {
     expect(result.stocks.map((s: any) => s.symbol)).toContain("AAPL");
   });
 
-  it("the goal PDF provenance names a fallback run as a Yahoo fallback, never as E*TRADE live", async () => {
+  it("the goal PDF provenance names a Yahoo-mode run as a testing mode, never as E*TRADE live", async () => {
     // pdf-lib draws text as hex strings inside Flate-compressed
     // content streams: inflate every stream, decode the hex runs,
     // and search the decoded text. This asserts on the PDF's actual
@@ -310,14 +312,23 @@ describe("goal-screen Yahoo fallback (#1571)", () => {
     }
     const text = pdfText(
       await generateGoalScreenPdf(
-        fakeGoalResult({ providerFallback: { ...FALLBACK_MARKER } } as any)
+        fakeGoalResult({ yahooDataMode: YAHOO_MODE } as any)
       )
     );
     expect(text).toMatch(/Yahoo/);
-    expect(text).toMatch(/fallback/i);
+    expect(text).toMatch(/full-dataset testing mode/i);
+    expect(text).toMatch(/delayed/);
     expect(text).not.toMatch(/E\*TRADE live/);
-    // Control: a plain run carries no fallback line.
+    // Control: a plain run carries no mode line.
     const plain = pdfText(await generateGoalScreenPdf(fakeGoalResult()));
-    expect(plain).not.toMatch(/fallback/i);
+    expect(plain).not.toMatch(/testing mode/i);
+    // Gap-fill mode names the mode too, without the testing framing.
+    const gapFill = pdfText(
+      await generateGoalScreenPdf(
+        fakeGoalResult({ yahooDataMode: "gap-fill" } as any)
+      )
+    );
+    expect(gapFill).toMatch(/gap-fill mode/i);
+    expect(gapFill).not.toMatch(/testing mode/i);
   });
 });

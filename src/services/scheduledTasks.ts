@@ -2245,21 +2245,25 @@ export class ScheduledTasksService {
     status?: string;
     hits?: number;
     goalKind?: string;
-    /** Issue #1571: the fallback marker when the stock leg fell back
-     *  to Yahoo (mirrors the #1527 market-screen data shape). */
-    providerFallback?: {
-      from: "etrade";
-      reason: string;
-    };
+    /** Issue #4436: the run's explicit data mode, when the
+     *  stock leg runs under one (replaces the #1571/#1527
+     *  E*TRADE-named fallback marker — the mode is named on the
+     *  run, never a fallback from a named broker). */
+    yahooDataMode?: import("../workflows/stockScreenPlanner").YahooDataMode;
     /** Issue #1996: workflow run id when the run was submitted to
      *  the unified run-request path instead of executing direct. */
     workflowId?: string;
   }>> {
     const timestamp = new Date().toISOString();
-    // Issue #1571: whole-run fallback marker, set when the E*TRADE
-    // guard blocks a stocks-requesting goal run. Declared here so the
-    // catch below can name it on a fallback-run failure.
-    let providerFallback: { from: "etrade"; reason: string } | undefined;
+    // Issue #4436 (replaces the #1571 whole-run fallback marker):
+    // the explicit data mode for this run, set when the
+    // E*TRADE guard blocks a stocks-requesting goal run. The run
+    // then runs its stock leg entirely on the delayed-quote
+    // provider under the full-dataset testing mode — delayed
+    // quotes, stocks only — named on the run, never an implicit
+    // substitution from a named broker. Declared here so the catch
+    // below can name it on a mode-run failure.
+    let yahooDataMode: import("../workflows/stockScreenPlanner").YahooDataMode | undefined;
     try {
       const userLogin = options.userLogin || this.userLogin;
       if (!userLogin) {
@@ -2329,18 +2333,21 @@ export class ScheduledTasksService {
       // share the immediate-send posture, so chaining changes
       // timing (deliverDelaySeconds) and text format (generic
       // followup text, no hit list), not the hold semantics.
-      // Issue #1571: the goal path never went through the scheduled
-      // auth guard â€” unlike the market and options screens, which
-      // both pre-flight it. A stocks-requesting goal run now guards
-      // too: when E*TRADE auth is dead it falls back to a whole-run
-      // Yahoo stock leg (the agent's provider-"yahoo" goal path),
-      // with the #1527 marker semantics. The guard's deduped episode
-      // alert already fired inside the guard; a fallback success
-      // emits no failure notice. Options-only runs never consult the
-      // guard â€” there is no stock leg to fall back, and the options
-      // path is unchanged (stocks only, per the 2026-10-25 ruling).
-      // A fallback that itself fails takes the normal failure path
-      // in the catch below.
+      // Issue #4436 (replaces the #1571 E*TRADE-to-Yahoo fallback):
+      // the goal path never went through the scheduled auth guard
+      // - unlike the market and options screens, which both
+      // pre-flight it. A stocks-requesting goal run now guards
+      // too: when E*TRADE auth is dead it runs its stock leg
+      // entirely on the delayed-quote provider under the explicit
+      // full-dataset testing mode (delayed quotes, stocks only),
+      // with the mode named on the run. The guard's deduped
+      // episode alert already fired inside the guard; a mode-run
+      // success emits no failure notice. Options-only runs never
+      // consult the guard - there is no stock leg to run on the
+      // delayed-quote provider, and the options path is unchanged
+      // (stocks only, per the 2026-10-25 ruling). A mode run that
+      // itself fails takes the normal failure path in the catch
+      // below.
       const stocksRequested = !options.assetClasses || options.assetClasses.includes("stocks");
       if (stocksRequested) {
         const guard = await this.guardScheduledAuth(
@@ -2362,12 +2369,11 @@ export class ScheduledTasksService {
           }
         );
         if (guard.blocked) {
-          providerFallback = { from: "etrade", reason: "etrade-auth-dead" };
+          yahooDataMode = "full-dataset";
           this.audit("goal_screen.run_fallback", {
             kind: "stock",
             goalKind: scenario.goalKind,
-            from: "etrade",
-            to: "yahoo",
+            yahooDataMode,
             reason: "etrade-auth-dead",
             error: guard.error,
           });
@@ -2536,7 +2542,7 @@ export class ScheduledTasksService {
           ...(directChannels.length > 0 ? { deliverChannels: directChannels } : {}),
           ...(options.emailTo ? { emailTo: options.emailTo } : {}),
           ...(options.environment ? { environment: options.environment } : {}),
-          ...(providerFallback ? { provider: "yahoo" as const, providerFallback } : {}),
+          ...(yahooDataMode ? { provider: "yahoo" as const, yahooDataMode } : {}),
         });
         const params = buildPaidScreenSubmission({
           runRequestId: idempotencyKey,
@@ -2571,7 +2577,7 @@ export class ScheduledTasksService {
             status: "payment_started",
             workflowId: started.workflowId,
             goalKind: scenario.goalKind,
-            ...(providerFallback ? { providerFallback } : {}),
+            ...(yahooDataMode ? { yahooDataMode } : {}),
           },
         };
       }
@@ -2636,7 +2642,7 @@ export class ScheduledTasksService {
           ...(options.slackChannel ? { slackChannel: options.slackChannel } : {}),
           ...(options.stageChain ? { stageChain: options.stageChain } : {}),
           ...(options.environment ? { environment: options.environment } : {}),
-          ...(providerFallback ? { provider: "yahoo" as const, providerFallback } : {}),
+          ...(yahooDataMode ? { provider: "yahoo" as const, yahooDataMode } : {}),
         }),
         createObservabilitySink(this.env),
       );
@@ -2660,7 +2666,7 @@ export class ScheduledTasksService {
           status: "queued",
           workflowId: handle.workflowId,
           goalKind: scenario.goalKind,
-          ...(providerFallback ? { providerFallback } : {}),
+          ...(yahooDataMode ? { yahooDataMode } : {}),
         },
       };
       // Issue #4280 ([One engine] #3550 S5): the direct path is
@@ -2681,7 +2687,7 @@ export class ScheduledTasksService {
         // Issue #2065 (remainder): the typed failure code rides the
         // audit, so a failed start is diagnosable without log access.
         ...(typeof err?.code === "string" ? { errorCode: err.code } : {}),
-        ...(providerFallback ? { providerFallback } : {}),
+        ...(yahooDataMode ? { yahooDataMode } : {}),
       });
       if (this.orm?.messages) {
         try {
@@ -2689,7 +2695,7 @@ export class ScheduledTasksService {
             id: crypto.randomUUID(),
             sessionId: this.userLogin,
             role: "assistant",
-            content: `âš ï¸ Scheduled Goal Screen failed: ${err.message || "Goal screen execution error"}${providerFallback ? " (Yahoo fallback after E*TRADE auth failure)" : ""}`,
+            content: `âš ï¸ Scheduled Goal Screen failed: ${err.message || "Goal screen execution error"}${yahooDataMode ? " (Yahoo full-dataset testing mode - delayed quotes, stocks only)" : ""}`,
             agent: "orchestrator",
             createdAt: timestamp,
           });

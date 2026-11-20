@@ -121,10 +121,10 @@ export interface ScreenerRunOutcome {
   /** Top opportunities for delivery content (stock screens). */
   opportunities?: ScreenerOutcomeOpportunity[];
   /**
-   * Issue #1527: whole-run fallback marker, carried from the event /
-   * run result so the report body records the fallback.
+   * Issue #4436: the run's explicit data mode, carried from
+   * the event / run result so the report body records the mode.
    */
-  providerFallback?: { from: string; reason: string };
+  yahooDataMode?: import("../workflows/stockScreenPlanner").YahooDataMode;
   /** Per-task channel overrides (scheduled tasks may name their own
    *  recipients — the bus events carry them; S5b). Honored by the
    *  delivery planner/port; the email allowlist still applies. */
@@ -695,7 +695,7 @@ export function screenerOutcomeFromEvent(
         totalScanned: event.totalScanned,
         universe: event.universe,
         opportunities: asOpportunities(event.opportunities as unknown),
-        providerFallback: event.providerFallback,
+        yahooDataMode: event.yahooDataMode,
         emailTo: event.emailTo,
         slackChannel: event.slackChannel,
         webhookUrl: event.webhookUrl,
@@ -834,7 +834,7 @@ export function screenerOutcomeFromRunResult(
     thesis: typeof result.thesis === "string" ? result.thesis : undefined,
     summary: typeof result.summary === "string" ? result.summary : undefined,
     opportunities: asOpportunities(result.opportunities),
-    providerFallback: asProviderFallback(result.providerFallback),
+    yahooDataMode: asYahooDataMode(result.yahooDataMode),
     ...(typeof result.scanRunId === "string" && result.scanRunId ? { scanRunId: result.scanRunId } : {}),
     // Issue #3313: the originating ids ride the run-result record
     // (producers that know them stamp them; a record with none
@@ -997,12 +997,10 @@ function asOpportunities(value: unknown): ScreenerOutcomeOpportunity[] | undefin
 }
 
 /** Issue #1527: validate a provider-fallback marker off an untyped run result. */
-function asProviderFallback(value: unknown): { from: string; reason: string } | undefined {
-  if (!value || typeof value !== "object") return undefined;
-  const v = value as Record<string, unknown>;
-  return typeof v.from === "string" && typeof v.reason === "string"
-    ? { from: v.from, reason: v.reason }
-    : undefined;
+function asYahooDataMode(
+  value: unknown,
+): import("../workflows/stockScreenPlanner").YahooDataMode | undefined {
+  return value === "gap-fill" || value === "full-dataset" ? value : undefined;
 }
 
 /**

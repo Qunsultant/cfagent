@@ -22,6 +22,7 @@ import type { DatabaseORM } from "../../orm";
 import type { GoalDrivenScreenResult } from "../../services/goalDrivenScreen";
 import { recordGoalRunOutcome } from "../../services/goalScreenReports";
 import { recordScreeningActivity } from "../../services/screeningActivity";
+import { yahooDataModeLabel } from "../../workflows/stockScreenPlanner";
 import {
   createScreeningDeliverySenders,
   deliverScreeningContent,
@@ -48,12 +49,9 @@ export interface WorkflowGoalScreenEnvelope {
   result: GoalDrivenScreenResult;
   /** Issue #1998: caller run id (D2) the run's captures are keyed by. */
   idempotencyKey?: string;
-  /** Issue #1571: carried so the store can stamp it when the result lacks it. */
+  /** Issue #4436: carried so the store can stamp it when the result lacks it. */
   provider?: "yahoo";
-  providerFallback?: {
-    from: "etrade";
-    reason: string;
-  };
+  yahooDataMode?: import("../../workflows/stockScreenPlanner").YahooDataMode;
 }
 
 /**
@@ -89,14 +87,14 @@ export async function persistWorkflowGoalScreenReport(
     );
   }
   const result = envelope.result;
-  // Issue #1571: the recorded result carries the fallback
-  // marker even if the agent did not stamp it — the canonical
+  // Issue #4436: the recorded result carries the explicit data
+  // mode even if the agent did not stamp it — the canonical
   // report body embeds `result`, so this is what the Runs
   // read surface and the PDF generator see. Caller-side
   // guarantee, not a second source of truth (mirrors the
   // direct path).
-  if (envelope.providerFallback && !result.providerFallback) {
-    result.providerFallback = envelope.providerFallback;
+  if (envelope.yahooDataMode && !result.yahooDataMode) {
+    result.yahooDataMode = envelope.yahooDataMode;
   }
   if (envelope.provider && !result.provider) {
     result.provider = envelope.provider;
@@ -104,7 +102,12 @@ export async function persistWorkflowGoalScreenReport(
   const summary =
     `Goal screen (${result.goalKind}/${result.outlook}) ${result.status}: ` +
     `${result.counts.hits} hit(s) from ${result.counts.stocksScanned} stocks + ` +
-    `${result.counts.optionsUnderlyingsScanned} option underlyings.`;
+    `${result.counts.optionsUnderlyingsScanned} option underlyings.` +
+    // Issue #4436: the mode rides the summary text, so the Runs
+    // UI lists (Docs & Reports, Workflow Runs) label a mode run
+    // the same way the record and the PDF do — delayed quotes,
+    // stocks only, testing framing for full-dataset.
+    (result.yahooDataMode ? ` ${yahooDataModeLabel(result.yahooDataMode)}.` : "");
   const orm = ctx.getOrm();
   const stored = orm.storeCanonicalReport({
     runId: `goal-screen:${envelope.taskId}`,

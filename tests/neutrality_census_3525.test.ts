@@ -900,6 +900,33 @@ function measure(): Map<string, number> {
  * row moves. The screener-agent etrade row shrinks 95->93 (the
  * stage-time bind fallback is gone) — a decrease, which passes.
  * Baseline totals move 1359/11065 -> 1363/11094.
+ * Baseline update (#4436, 2026-11-20): the E*TRADE-named
+ * fallback marker is replaced by the explicit broker-neutral data
+ * mode (yahooDataMode), so the E*TRADE-named marker lines go and
+ * the mode's prose names no provider — every comment that said
+ * "Yahoo data mode" now says "the data mode", and the only
+ * provider-brand lines the mode adds are the ones that must name
+ * the serving source: the planner's two UI/record label strings
+ * ("Yahoo full-dataset testing mode (delayed quotes, stocks
+ * only)" / "Yahoo gap-fill mode (delayed quotes, stocks only)")
+ * and the provider-id literal the full-dataset value resolves
+ * to. Dispositioned INTEGRATION — provenance naming the actual
+ * serving source, the same reason the adapters' and registries'
+ * rows are INTEGRATION: the label is the run's provenance, and
+ * neutralizing it would falsify what served the run's quotes.
+ * 1 raise (stockScreenPlanner.ts yahoo 2->3) and 13 shrinks
+ * (goalScreenDispatch.ts etrade 1->0, screener-agent.ts etrade
+ * 95->91 / yahoo 71->70, goalDrivenScreen.ts etrade 3->2 /
+ * yahoo 2->1, goalScreenReports.ts etrade 2->0 / yahoo 3->2,
+ * scheduledTasks.ts etrade 91->87 / yahoo 17->15,
+ * screeningRuntime.ts etrade 5->3 / yahoo 15->13,
+ * screenerReportPdf.ts etrade 10->7, screenerCollation.ts
+ * etrade 2->0, workflowPorts.ts etrade 5->2). Three rows vanish
+ * (goalScreenDispatch etrade, goalScreenReports etrade,
+ * screenerCollation etrade). (Rebased onto a8aa5b67 first: #5912
+ * added one row / one line, so this update starts at 1364/11095;
+ * #5610 touched no census row.)
+ * Baseline totals move 1364/11095 -> 1361/11067.
  */
 const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (188 rows / 989 lines) ----
@@ -1203,7 +1230,6 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/agents/orchestrator.ts", "etrade", 20],
   ["src/agents/orchestrator/asyncJobs.ts", "etrade", 12],
   ["src/agents/orchestrator/autopilot.ts", "etrade", 4],
-  ["src/agents/orchestrator/goalScreenDispatch.ts", "etrade", 1],
   ["src/agents/orchestrator/goalScreenDispatch.ts", "yahoo", 1],
   ["src/agents/orchestrator/meshDoors.ts", "alpaca", 12],
   ["src/agents/orchestrator/meshDoors.ts", "etrade", 30],
@@ -1335,8 +1361,8 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/agents/scheduledTasksPipeline.ts", "etrade", 1],
   ["src/agents/scheduledTasksPipeline.ts", "yahoo", 2],
   ["src/agents/screener-agent.ts", "alpaca", 24],
-  ["src/agents/screener-agent.ts", "etrade", 95],
-  ["src/agents/screener-agent.ts", "yahoo", 71],
+  ["src/agents/screener-agent.ts", "etrade", 91],
+  ["src/agents/screener-agent.ts", "yahoo", 70],
   ["src/agents/screenerA2aDispatch.ts", "etrade", 2],
   ["src/agents/screenerA2aDispatch.ts", "yahoo", 5],
   ["src/agents/slackA2aDispatch.ts", "etrade", 11],
@@ -1651,12 +1677,11 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/services/gatedSlackDelivery.ts", "etrade", 1],
   ["src/services/generatePipelineJobs.ts", "alpaca", 2],
   ["src/services/generatePipelineJobs.ts", "yahoo", 3],
-  ["src/services/goalDrivenScreen.ts", "etrade", 3],
-  ["src/services/goalDrivenScreen.ts", "yahoo", 2],
+  ["src/services/goalDrivenScreen.ts", "etrade", 2],
+  ["src/services/goalDrivenScreen.ts", "yahoo", 1],
   ["src/services/goalGather.ts", "etrade", 10],
   ["src/services/goalGather.ts", "yahoo", 19],
-  ["src/services/goalScreenReports.ts", "etrade", 2],
-  ["src/services/goalScreenReports.ts", "yahoo", 3],
+  ["src/services/goalScreenReports.ts", "yahoo", 2],
   ["src/services/goalScreenWorkflowSubmission.ts", "etrade", 1],
   ["src/services/goalScreenWorkflowSubmission.ts", "yahoo", 2],
   ["src/services/hedgeProposals.ts", "etrade", 10],
@@ -1706,8 +1731,8 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/services/riskPolicyEngine.ts", "etrade", 1],
   ["src/services/sandboxAgent.ts", "etrade", 1],
   ["src/services/scheduleSystems.ts", "etrade", 1],
-  ["src/services/scheduledTasks.ts", "etrade", 91],
-  ["src/services/scheduledTasks.ts", "yahoo", 17],
+  ["src/services/scheduledTasks.ts", "etrade", 87],
+  ["src/services/scheduledTasks.ts", "yahoo", 15],
   ["src/services/screenerFollowupDelivery.ts", "etrade", 6],
   ["src/services/screenerFollowups.ts", "etrade", 1],
   // #5823 INTEGRATION: the screener step registry binds the feed-stage
@@ -1718,8 +1743,8 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/services/screenerPipelineJobs.ts", "etrade", 4],
   ["src/services/screenerPipelineJobs.ts", "yahoo", 12],
   ["src/services/screeningDelivery.ts", "etrade", 6],
-  ["src/services/screeningRuntime.ts", "etrade", 5],
-  ["src/services/screeningRuntime.ts", "yahoo", 15],
+  ["src/services/screeningRuntime.ts", "etrade", 3],
+  ["src/services/screeningRuntime.ts", "yahoo", 13],
   ["src/services/shardExecutors.ts", "etrade", 39],
   ["src/services/shardExecutors.ts", "yahoo", 9],
   ["src/services/shardJobs.ts", "etrade", 9],
@@ -1855,7 +1880,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/trading/screenerPipeline.ts", "yahoo", 84],
   ["src/trading/screenerReportCsv.ts", "etrade", 1],
   ["src/trading/screenerReportPdf.ts", "alpaca", 3],
-  ["src/trading/screenerReportPdf.ts", "etrade", 10],
+  ["src/trading/screenerReportPdf.ts", "etrade", 7],
   ["src/trading/screenerReportPdf.ts", "yahoo", 13],
   ["src/trading/screenerReportTemplate.ts", "etrade", 1],
   ["src/trading/screenerReportXlsx.ts", "etrade", 6],
@@ -1931,14 +1956,13 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/workflows/sagaWorkflowFlow.ts", "etrade", 4],
   ["src/workflows/screenExecutionBroker.ts", "etrade", 5],
   ["src/workflows/screenRunFinalize.ts", "etrade", 3],
-  ["src/workflows/screenerCollation.ts", "etrade", 2],
   ["src/workflows/screenerCollation.ts", "yahoo", 2],
   ["src/workflows/stageRuntimeIds.ts", "etrade", 4],
   ["src/workflows/stockCleanupRegister.ts", "etrade", 1],
   ["src/workflows/stockScreenCapability.ts", "etrade", 9],
   ["src/workflows/stockScreenCapability.ts", "yahoo", 4],
   ["src/workflows/stockScreenPlanner.ts", "etrade", 4],
-  ["src/workflows/stockScreenPlanner.ts", "yahoo", 2],
+  ["src/workflows/stockScreenPlanner.ts", "yahoo", 3],
   ["src/workflows/stockScreenRunSpec.ts", "etrade", 8],
   ["src/workflows/stockScreenRunSpec.ts", "yahoo", 4],
   ["src/workflows/strategyScreenPorts.ts", "alpaca", 1],
@@ -1949,7 +1973,7 @@ const BASELINE: Array<[string, string, number]> = [
   // names it so the run record says what could not resolve.
   ["src/workflows/universeDepsResidency.ts", "nasdaq", 2],
   ["src/workflows/workflowCatalog.ts", "etrade", 2],
-  ["src/workflows/workflowPorts.ts", "etrade", 5],
+  ["src/workflows/workflowPorts.ts", "etrade", 2],
   ["src/workflows/workflowPorts.ts", "yahoo", 5],
   ["wrangler.jsonc", "alpaca", 1],
   ["wrangler.jsonc", "etrade", 5],
