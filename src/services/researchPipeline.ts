@@ -246,6 +246,12 @@ export interface ResearchReport {
   userLogin: string;
   createdAt: string;
   rulesVersion: string;
+  /**
+   * Issue #5912 — the venue and mode this run actually quoted from, recorded
+   * on the report so the row can name them. Absent = the configured default.
+   */
+  brokerId?: string;
+  mode?: string;
   /** Amendment 1: the effective filter/config snapshot this run used. */
   configSnapshot: ResearchConfig;
   regime: RegimeAssessment;
@@ -268,6 +274,9 @@ export interface ResearchReport {
 export interface ResearchRunOptions {
   trigger: TriggerSource;
   userLogin: string;
+  /** Issue #5912 — the venue/mode this run quoted from (recorded, not inferred). */
+  brokerId?: string;
+  mode?: string;
   runId?: string;
   now?: number;
 }
@@ -1108,6 +1117,9 @@ function finishReport(args: {
     userLogin: opts.userLogin,
     createdAt: new Date(now).toISOString(),
     rulesVersion: config.rulesVersion,
+    // Issue #5912 — the venue/mode this run used, recorded once here.
+    ...(opts.brokerId ? { brokerId: opts.brokerId } : {}),
+    ...(opts.mode ? { mode: opts.mode } : {}),
     // Amendment 1: the effective filter/config snapshot this run used.
     configSnapshot: JSON.parse(JSON.stringify(config)) as ResearchConfig,
     regime,

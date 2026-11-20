@@ -45,6 +45,7 @@ import {
   type StoredIdeaRecord,
 } from "../services/researchPipeline";
 import { EtradeResearchDataProvider } from "../services/researchProviders";
+import type { TradingPlatformId } from "../trading";
 import {
   resolveYahooHistoryDeps,
   nasdaqUniverseRouteBundle,
@@ -115,6 +116,13 @@ const MAX_HISTORY = 20;
 export interface ResearchRunRequest {
   trigger: TriggerSource;
   userLogin?: string;
+  /**
+   * Issue #5912 — which venue to quote from and in which mode. Unset uses
+   * the configured default (E*TRADE, deployment environment). An unknown
+   * broker id refuses by name in the platform registry, before any quote.
+   */
+  brokerId?: TradingPlatformId;
+  mode?: string;
   /** Optional engine runId so canonical report & D1 JobRunRecord share one ID (#581 / #5175). */
   runId?: string;
   /** Optional one-off config overrides for this run (still validated). */
@@ -532,7 +540,8 @@ export class ResearchAgent extends PortThink {
         this.env,
         userLogin,
         historyDeps,
-        universeDeps
+        universeDeps,
+        { ...(req.brokerId ? { brokerId: req.brokerId } : {}), ...(req.mode ? { mode: req.mode } : {}) }
       );
       // Issue #773: feed historical evaluation outcomes into the pipeline's Decide stage.
       let trackRecord: import("../services/researchTrackRecord").TrackRecord | undefined;
@@ -545,7 +554,15 @@ export class ResearchAgent extends PortThink {
       const report = await runResearchPipeline(
         { provider, ...(trackRecord ? { trackRecord } : {}) },
         config,
-        { trigger: req.trigger, userLogin, ...(effectiveRunId ? { runId: effectiveRunId } : {}) }
+        {
+          trigger: req.trigger,
+          userLogin,
+          ...(effectiveRunId ? { runId: effectiveRunId } : {}),
+          // Issue #5912 — the run records the venue/mode it used, so the row
+          // and the report can name them instead of guessing.
+          ...(req.brokerId ? { brokerId: req.brokerId } : {}),
+          ...(req.mode ? { mode: req.mode } : {}),
+        }
       );
       await this.persistRun(report);
       // Issue #5909 — the report is published either way (it is the

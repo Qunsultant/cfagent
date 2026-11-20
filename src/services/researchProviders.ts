@@ -29,8 +29,10 @@ import {
   type ITradingPlatform,
   type NasdaqUniverseDeps,
   type YahooHistoryDeps,
+  type TradingPlatformId,
 } from "../trading";
 import { resolveEnvironmentConfig } from "../config/environment";
+import { DEFAULT_RESEARCH_BROKER_ID } from "../config/researchJobConfig";
 import { isDemoCalibratedChainsEnabled } from "../config/demoMode";
 import type { Env, ETradeOptionChain } from "../types";
 import type { NasdaqStockListing } from "./nasdaqListings";
@@ -141,6 +143,12 @@ function chainToSnapshot(
   return { expiry: expiryIso, dte, legs };
 }
 
+/**
+ * Issue #5912 — the research data provider over whichever trading platform
+ * the run selected. The platform seam was always generic (`ITradingPlatform`);
+ * only the resolution was hardcoded, so the name is kept and the selection
+ * is a constructor option: unset resolves E*TRADE, exactly as before.
+ */
 export class EtradeResearchDataProvider implements ResearchDataProvider {
   private readonly platform: ITradingPlatform;
   private listingsCache: NasdaqStockListing[] | null = null;
@@ -167,12 +175,25 @@ export class EtradeResearchDataProvider implements ResearchDataProvider {
      * naming the missing seam — the #1331 null-technicals
      * precedent — never a direct fetch and never a throw.
      */
-    private readonly universeDeps?: NasdaqUniverseDeps
+    private readonly universeDeps?: NasdaqUniverseDeps,
+    /**
+     * Issue #5912 — the venue this run quotes from: a broker id the platform
+     * registry knows, plus the mode that overrides its environment
+     * ("live" / "paper" / "sandbox", per the platform's own vocabulary).
+     * Unset = E*TRADE in the deployment's environment (today's behaviour).
+     */
+    private readonly selection?: { brokerId?: TradingPlatformId; mode?: string }
   ) {
     // #291 Q2: resolved through the platform registry (was a direct
     // ETradeService construction — the T0 ledger's researchProviders
     // entry). ORM-free, exactly as before.
-    this.platform = TradingPlatformRegistry.getPlatform("etrade", env, undefined, userLogin);
+    this.platform = TradingPlatformRegistry.getPlatform(
+      (selection?.brokerId ?? DEFAULT_RESEARCH_BROKER_ID) as TradingPlatformId,
+      env,
+      undefined,
+      userLogin,
+      selection?.mode,
+    );
   }
 
   private async listings(): Promise<NasdaqStockListing[]> {

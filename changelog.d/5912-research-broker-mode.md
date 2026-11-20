@@ -1,0 +1,3 @@
+### Added
+
+- **A research run names its venue and mode (#5912, slice 1):** the research data provider no longer hardcodes E*TRADE. Its platform seam was always the generic `ITradingPlatform`, so the run now passes `{ brokerId, mode }` into `TradingPlatformRegistry.getPlatform` — E*TRADE by default (one config value, `DEFAULT_RESEARCH_BROKER_ID`), Alpaca available because `AlpacaTradingPlatform` already implements the same interface, and an unknown broker refuses by name in the registry before any quote is attempted. `mode` is the platform's own environment vocabulary (`live` / `paper` / `sandbox`). The run reports the pair it used on `ResearchReport.brokerId` / `.mode`, so a row can name the venue instead of showing `—`. #ceo-aimp
