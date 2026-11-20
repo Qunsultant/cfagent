@@ -105,6 +105,28 @@
  * events) and `data_provider_capture_e1` (capture-write failure
  * events); no behavior change.
  *
+ * Batch 9 (this slice) migrated `src/events` — both files, 21 real
+ * sites — to the same logger, and moved them from REMAINING_PIN to
+ * MIGRATED_ZERO; after batch 9 the remaining total is 20. No pin
+ * correction: both files held exactly their ceilings on current
+ * main (verified from code). Logger construction follows the #5587
+ * ruling (Venus 2026-11-18): no new `createObservabilitySink({})`
+ * module logger anywhere in the slice. Every publisher function
+ * already holds the request env in `deps`, so each builds its logger
+ * per function from that env (`fetchScreenerPdf`,
+ * `deliverPdfToSlack`, `deliverPdfToEmail`, `publishCompleted`,
+ * `publishFailed`); the `ScreenerEventBus` takes an optional
+ * `sink?: ObservabilitySink` at construction and falls back to an
+ * explicit `ConsoleObservabilitySink` — its two construction sites
+ * (`screenerQueueConsumer`, `scheduledTasks`) are outside this slice
+ * and not rewired; wiring the env-constructed sink through them is
+ * the #5587 follow-up, recorded in the §15. Two tests asserted on
+ * raw `console.warn`/`console.error` lines and were updated to the
+ * structured form (spy console.info, parse the JSON event, assert on
+ * operation + level + fields) — `screener-publishers-pdf` (PDF
+ * fetch failure events) and `screener_delivery_config_1770`
+ * (email-skip warnings); no behavior change.
+ *
  * Batch 8 (this slice) migrated `src/security` — all 14 files, 29 real
  * sites — to the same logger, and moved them from REMAINING_PIN to
  * MIGRATED_ZERO; after batch 8 the remaining total is 41. No pin
@@ -405,6 +427,8 @@ const MIGRATED_ZERO: readonly string[] = [
   "src/enrichment/enrichmentPorts.ts",
   "src/enrichment/enrichmentService.ts",
   "src/errors/errorAspects.deprecated.ts",
+  "src/events/screenerEvents.ts",
+  "src/events/screenerPublishers.ts",
   "src/features/cfFlagshipAdapter.ts",
   "src/gateway/gatewayPorts.ts",
   "src/mcps/openaimp/agenticPaymentCommands.ts",
@@ -545,8 +569,6 @@ const REMAINING_PIN: Readonly<Record<string, number>> = {
   "src/client/components/AutopilotControlCenter.tsx": 1,
   "src/client/firstRunApi.ts": 1,
   "src/client/options/StrategyDiscoveryPanel.tsx": 2,
-  "src/events/screenerEvents.ts": 1,
-  "src/events/screenerPublishers.ts": 20,
   "src/observability/observabilityPorts.ts": 2,
   "src/trading/channels/intake.ts": 3,
   "src/trading/options/unifiedOptionsService.ts": 1,

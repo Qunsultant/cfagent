@@ -40,6 +40,14 @@
  */
 
 import type { JobRunTrigger } from "../data/jobRunRecordPorts";
+import {
+  createStructuredLogger,
+  type StructuredLogger,
+} from "../observability/structuredLogger";
+import {
+  ConsoleObservabilitySink,
+  type ObservabilitySink,
+} from "../observability/observabilityPorts";
 
 export interface ScreenerOpportunity {
   symbol: string;
@@ -247,6 +255,23 @@ export type ScreenerEventHandler = (event: ScreenerEvent) => Promise<void> | voi
  */
 export class ScreenerEventBus {
   private handlers = new Map<ScreenerEventType, ScreenerEventHandler[]>();
+  private readonly log: StructuredLogger;
+
+  /**
+   * #3515 S3 batch 9 — optional sink injection (the `d1QueryLogger`
+   * precedent): the bus has no env in scope, so a caller may pass an
+   * env-constructed sink; otherwise events fall back to the explicit
+   * console sink (honest console-only, never an empty-env sink).
+   * The two construction sites
+   * (`screenerQueueConsumer`, `scheduledTasks`) are outside this
+   * slice and not rewired; wiring the env-constructed sink through
+   * them is the #5587 follow-up.
+   */
+  constructor(sink?: ObservabilitySink) {
+    this.log = createStructuredLogger(sink ?? new ConsoleObservabilitySink(), {
+      component: "events/screenerEvents",
+    });
+  }
 
   /**
    * Subscribe to an event type. Returns an unsubscribe function.
@@ -273,10 +298,10 @@ export class ScreenerEventBus {
       try {
         await handler(event);
       } catch (err) {
-        console.warn(
-          `[ScreenerEventBus] subscriber failed for ${event.type}:`,
-          err instanceof Error ? err.message : String(err)
-        );
+        this.log.warn("screenerEvents.subscriber_failed", {
+          message: `[ScreenerEventBus] subscriber failed for ${event.type}:`,
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
     }
   }
