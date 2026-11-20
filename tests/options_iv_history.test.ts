@@ -30,7 +30,7 @@
  * paths with explicit dates — the product never backfills, and
  * neither do these tests pretend otherwise.
  */
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   InMemoryIvHistoryStore,
   SqlIvHistoryStore,
@@ -536,7 +536,13 @@ describe("getIvHistoryEntry — honest warming-up surface", () => {
 // ---------------------------------------------------------------------------
 
 describe("ScheduledTasksService.collectDailyIvHistory", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-20T12:00:00.000Z"));
+  });
+
   afterEach(() => {
+    vi.useRealTimers();
     DynamicOptionsScreener.clearTestChainsFixture();
   });
 
