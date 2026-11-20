@@ -47,6 +47,16 @@
  * disclosed leg difference, pinned by
  * tests/orm_repository_create_or_replace_4386.test.ts.
  *
+ * #4751 (#4282 P6c follow-on): the where language gains `$or`
+ * (an array of where objects, OR-joined) and `$like`
+ * (case-insensitive LIKE), on both legs — one language for
+ * findMany/count/updateWhere/deleteWhere, so the table
+ * browser's search (lower(col) LIKE ? OR-joined across TEXT
+ * columns) is a findMany-style call, not an inline SELECT.
+ * findMany also gains a `raw` read option (storage rows
+ * unmapped) for the browser, which must return exactly what
+ * storage holds.
+ *
  * Port modules import no store client (ADR 0022 D-B): this file
  * is types + the seam interface only.
  *
@@ -62,14 +72,24 @@ export interface SqlStorage {
  * A where value: a plain scalar (equality — the legacy shape) or a
  * comparison-operator object. The `$` prefix distinguishes an
  * operator object from a plain record value. Multiple operators on
- * one column combine with AND ({ $gte: a, $lt: b }).
+ * one column combine with AND ({ $gte: a, $lt: b }). #4751: `$like`
+ * is a case-insensitive LIKE — the DO leg emits
+ * `lower(col) LIKE ?` with the pattern lowered at bind time, the
+ * twin lowercases both sides.
  */
 export type RepositoryWhereValue =
   | unknown
-  | { $lt?: unknown; $lte?: unknown; $gt?: unknown; $gte?: unknown };
+  | { $lt?: unknown; $lte?: unknown; $gt?: unknown; $gte?: unknown; $like?: unknown };
 
-/** A where predicate: a conjunction of per-column values. */
-export type RepositoryWhere = Record<string, RepositoryWhereValue>;
+/**
+ * A where predicate: a conjunction of per-column values. #4751: a
+ * `$or` key holds an array of where objects, each a conjunction;
+ * the groups are OR-joined (each group parenthesised, so the AND
+ * with the other top-level conditions stays correct).
+ */
+export type RepositoryWhere = Record<string, RepositoryWhereValue> & {
+  $or?: RepositoryWhere[];
+};
 
 /** Read options for repository finds (the legacy QueryOptions). */
 export interface RepositoryQueryOptions {
@@ -77,6 +97,13 @@ export interface RepositoryQueryOptions {
   orderBy?: string;
   limit?: number;
   offset?: number;
+  /**
+   * #4751: return storage rows unmapped — no camelCase renaming
+   * and no is_* boolean coercion. For raw reads (the table
+   * browser), which must return exactly what storage holds. The
+   * in-memory twin stores records as-is, so raw is a no-op there.
+   */
+  raw?: boolean;
 }
 
 /** The generic per-aggregate repository contract (ADR 0022 D-E). */
