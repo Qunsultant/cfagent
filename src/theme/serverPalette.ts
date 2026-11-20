@@ -111,7 +111,7 @@ export const SERVER_PALETTE = {
   // --- No token counterpart: translucent tints ---
   accentAlpha10: "rgba(56, 189, 248, 0.1)",
   accentAlpha20: "rgba(56, 189, 248, 0.2)",
-  /** Also the colour component of --shadow-focus-ring, but no colour token holds it. */
+  /** #3606: the dark --shadow-focus-ring no longer uses this value (now rgba(56, 189, 248, 0.6)); no colour token holds it. */
   accentAlpha30: "rgba(56, 189, 248, 0.3)",
   dangerAlpha10: "rgba(239, 68, 68, 0.1)",
   roseAlpha20: "rgba(244, 63, 94, 0.2)",

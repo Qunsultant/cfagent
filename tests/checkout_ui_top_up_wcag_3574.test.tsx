@@ -19,9 +19,8 @@
  *  - the checkout link is a token link that names the new tab;
  *  - keyboard order: no positive tabindex, no unreachable controls;
  *  - contrast: the journey's text pairs (≥4.5:1) and non-text pairs (≥3:1)
- *    computed from the same tokens prod uses, in all three themes — with
- *    the known 1.4.11 token gaps pinned as documented known-fails (see
- *    FOLLOW_UP below);
+ *    computed from the same tokens prod uses, in all three themes —
+ *    including the 1.4.11 input-border / focus pairs fixed by #3606;
  *  - target sizes: the primitives' declared sizes meet the 24px AA minimum
  *    and the tab uses the default (md) sizes.
  */
@@ -35,13 +34,11 @@ import { CheckoutPanel } from "../src/client/CheckoutPanel";
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
 /**
- * Known 1.4.11 gaps, shared tokens — NOT fixed by this slice (the fix is a
- * token change shared by every input in the app, outside the Top up tab;
- * see the PR body). Pinned here so a token change that fixes them fails
- * loudly and this list moves to the passing assertions.
- * FOLLOW_UP: #3606 (filed under #3256 from this slice).
+ * The 1.4.11 token gaps this file used to pin as known-fails (unfocused
+ * input border below 3:1 in dark/light; light focus indicator below 3:1)
+ * were fixed by #3606 in the shared tokens (src/client/tokens.css) and
+ * are now asserted passing in the contrast test below.
  */
-const KNOWN_TOKEN_GAPS = "#3606 (1.4.11 input-border / light focus tokens)";
 
 let container: HTMLDivElement;
 let root: Root;
@@ -606,7 +603,7 @@ describe("top-up journey contrast + target sizes (#3574)", () => {
     }
   });
 
-  it("non-text indicators meet WCAG AA 3:1 where the tokens allow it", () => {
+  it("non-text indicators meet WCAG AA 3:1 in all three themes", () => {
     for (const [theme, vars] of Object.entries(THEMES)) {
       const card = colorOf(vars, "--color-card");
       const inputBg = effective(vars, "--color-card", "--color-input");
@@ -621,34 +618,18 @@ describe("top-up journey contrast + target sizes (#3574)", () => {
         ratio(colorOf(vars, "--color-accent"), colorOf(vars, "--color-surface")),
         `${theme}: selected tab accent vs surface`,
       ).toBeGreaterThanOrEqual(3);
-      // Focused border passes in the default (dark) and high-contrast themes.
-      if (theme !== "light") {
-        expect(ratio(focusedBorderOnInput, inputBg), `${theme}: focused border vs input bg`).toBeGreaterThanOrEqual(3);
-        expect(ratio(focusedBorderOnCard, card), `${theme}: focused border vs card`).toBeGreaterThanOrEqual(3);
-      }
-    }
-  });
-
-  it(`pins the known 1.4.11 token gaps below 3:1 (${KNOWN_TOKEN_GAPS})`, () => {
-    // Documented known-fails: when the follow-up lands, move these pairs
-    // to the passing assertions above.
-    for (const [theme, vars] of Object.entries(THEMES)) {
-      const card = colorOf(vars, "--color-card");
-      const inputBg = effective(vars, "--color-card", "--color-input");
-      const unfocusedBorder = paintOver(vars, "--color-input-border", inputBg);
-      const focusedBorder = paintOver(vars, "--color-border-focus", inputBg);
-      const ring = paintOver(vars, "--shadow-focus-ring", card);
-      if (theme === "high-contrast") {
-        expect(ratio(unfocusedBorder, inputBg), `${theme}: unfocused border vs input bg`).toBeGreaterThanOrEqual(3);
-        expect(ratio(focusedBorder, inputBg), `${theme}: focused border vs input bg`).toBeGreaterThanOrEqual(3);
-        expect(ratio(ring, card), `${theme}: focus ring vs card`).toBeGreaterThanOrEqual(3);
-      } else {
-        expect(ratio(unfocusedBorder, inputBg), `${theme}: unfocused border vs input bg`).toBeLessThan(3);
-        expect(ratio(ring, card), `${theme}: focus ring vs card`).toBeLessThan(3);
-        if (theme === "light") {
-          expect(ratio(focusedBorder, inputBg), `${theme}: focused border vs input bg`).toBeLessThan(3);
-        }
-      }
+      // #3606: the 1.4.11 token gaps are fixed — the unfocused border and
+      // the focus indicator (border + ring) meet 3:1 in every theme.
+      expect(
+        ratio(paintOver(vars, "--color-input-border", inputBg), inputBg),
+        `${theme}: unfocused border vs input bg`,
+      ).toBeGreaterThanOrEqual(3);
+      expect(ratio(focusedBorderOnInput, inputBg), `${theme}: focused border vs input bg`).toBeGreaterThanOrEqual(3);
+      expect(ratio(focusedBorderOnCard, card), `${theme}: focused border vs card`).toBeGreaterThanOrEqual(3);
+      expect(
+        ratio(paintOver(vars, "--shadow-focus-ring", card), card),
+        `${theme}: focus ring vs card`,
+      ).toBeGreaterThanOrEqual(3);
     }
   });
 

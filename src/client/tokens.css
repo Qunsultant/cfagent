@@ -359,7 +359,7 @@
   /* Inputs & Controls */
   --color-input: rgba(15, 23, 42, 0.85);
   --color-input-foreground: #f8fafc;
-  --color-input-border: rgba(255, 255, 255, 0.12);
+  --color-input-border: rgba(255, 255, 255, 0.35); /* #3606: 3.20:1 vs input fill (WCAG 2.2 SC 1.4.11, ≥3:1) — do not soften */
   --color-input-focus-border: rgba(56, 189, 248, 0.6);
 
   /* Muted & Subdued Elements */
@@ -431,7 +431,7 @@
   --color-trade-subtle: rgba(234, 88, 12, 0.14);
   --color-trade: #ea580c;
   --color-trade-deep: #c2410c;
-  --shadow-focus-ring: 0 0 0 3px rgba(56, 189, 248, 0.3);
+  --shadow-focus-ring: 0 0 0 3px rgba(56, 189, 248, 0.6); /* #3606: 3.80:1 vs card (WCAG 2.2 SC 1.4.11, ≥3:1) */
   --shadow-inner: inset 0 2px 6px rgba(0, 0, 0, 0.4);
   --shadow-sidebar: 2px 0 12px rgba(0, 0, 0, 0.4);
   --shadow-drawer: 0 20px 50px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(16, 185, 129, 0.2);
@@ -545,7 +545,7 @@
   /* Inputs & Controls */
   --color-input: #ffffff;
   --color-input-foreground: #0f172a;
-  --color-input-border: #cbd5e1;
+  --color-input-border: #64748b; /* #3606: 4.76:1 vs input fill (WCAG 2.2 SC 1.4.11, ≥3:1) — do not soften */
   --color-input-focus-border: rgba(2, 132, 199, 0.65);
 
   /* Muted & Subdued Elements */
@@ -565,7 +565,7 @@
   --color-border-subtle: #e2e8f0;
   --color-border-medium: #cbd5e1;
   --color-border-strong: #94a3b8;
-  --color-border-focus: rgba(2, 132, 199, 0.65);
+  --color-border-focus: #0284c7; /* #3606: 4.10:1 vs input fill + card (WCAG 2.2 SC 1.4.11, ≥3:1) — do not soften */
   --color-overlay: rgba(15, 23, 42, 0.5); /* modal scrim */
 
   /* Semantic Status & Accents (Surface & Foreground Paired) */
@@ -617,7 +617,7 @@
   --color-trade-subtle: rgba(194, 65, 12, 0.1);
   --color-trade: #9a3412;
   --color-trade-deep: #9a3412;
-  --shadow-focus-ring: 0 0 0 3px rgba(2, 132, 199, 0.35);
+  --shadow-focus-ring: 0 0 0 3px rgba(2, 132, 199, 0.85); /* #3606: 3.31:1 vs card (WCAG 2.2 SC 1.4.11, ≥3:1) */
   --shadow-inner: inset 0 2px 6px rgba(15, 23, 42, 0.12);
   --shadow-sidebar: 2px 0 12px rgba(15, 23, 42, 0.08);
   --shadow-drawer: 0 20px 50px rgba(15, 23, 42, 0.18), 0 0 0 1px rgba(5, 150, 105, 0.25);
