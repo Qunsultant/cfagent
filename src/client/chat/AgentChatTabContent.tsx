@@ -32,153 +32,29 @@ import { findCopilot, getRegisteredCopilots, hasCustomSurface, isRegisteredCopil
 import {
   Badge,
   Button,
-  Dialog,
-  DialogActions,
-  DialogBody,
-  DialogContent,
-  DialogSurface,
-  DialogTitle,
-  FluentProvider,
-  Input,
-  makeStyles,
-  MessageBar,
-  MessageBarBody,
+  Flex,
+  Modal,
+  Notice,
   Spinner,
-  Toast,
-  Toaster,
-  ToastTitle,
-  useToastController,
-  webDarkTheme,
-  webLightTheme,
-} from "@fluentui/react-components";
+  TextInput,
+} from "../components/ui";
 import { CardHeader } from "../components/ui";
+/* Issue #5843 — the Griffel blocks became tokens-only classes in
+   primitives.css; these maps keep every `styles.x` call site unchanged. */
+const composerStyles = { composerInput: "ui-chat-composer-input" };
+const navRightStyles = { group: "ui-chat-nav-right" };
+const providerStyles = { provider: "ui-chat-viewport" };
+const quickChipsStyles = {
+  chipsBar: "ui-chat-chips-bar",
+  toggleButton: "ui-chat-chips-toggle",
+};
+const surfaceStyles = {
+  splitLayout: "ui-chat-split",
+  dashboardPane: "ui-chat-dashboard-pane",
+  chatPane: "ui-chat-chat-pane",
+  fullChatArea: "ui-chat-full-area",
+};
 export type ChatSubView = "general" | "options" | "stock" | (string & {});
-
-// #3230: Fluent v9 Input renders a wrapper root around the inner
-// <input>, so the old `.chat-input-bar input { flex: 1 }` rule no
-// longer stretches the composer — the rule lands on the inner input,
-// which is not a flex item of the form, while the Fluent root has no
-// flex growth and collapses to intrinsic width. Grow the Fluent root
-// itself with Griffel (no .css change, no inline style): the composer
-// stretches full length across the bar minus the Send button, as
-// before #3146. minWidth: 0 lets it shrink below its content width.
-const useComposerStyles = makeStyles({
-  composerInput: {
-    flexGrow: 1,
-    minWidth: 0,
-  },
-});
-
-// Owner surface pass (with #3794): the nav bar's right-side
-// group — Clear chat sits immediately left of the copilot Info
-// badge in one right-aligned flex row, so the chat area keeps
-// the vertical space the old action-bar row consumed.
-const useNavRightStyles = makeStyles({
-  group: {
-    display: "flex",
-    alignItems: "center",
-    gap: "var(--space-2)",
-  },
-});
-
-// #3407 (incident — chat stopped scrolling after #3146): Fluent v9's
-// FluentProvider renders a plain block <div> root (its Griffel styles
-// set only color/background/typography), so it broke the flex height
-// chain tab-viewport → .chat-view → .messages-stream: .chat-view's
-// flex: 1 went inert against a block parent, the stream grew with
-// content and never overflowed, and the scrollIntoView effect scrolled
-// the document instead of the pane. Grow the Fluent root itself with
-// Griffel (same pattern as the #3230 composer fix): the wrapper takes
-// over the flex-item role .chat-view used to have, and the theme
-// background is preserved (a real box, not display: contents).
-// minHeight: 0 lets it shrink below its content height so the stream
-// can overflow and scroll.
-const useProviderStyles = makeStyles({
-  provider: {
-    display: "flex",
-    flexDirection: "column",
-    flexGrow: 1,
-    minHeight: 0,
-  },
-});
-
-// #3656: Persistent collapsible copilot prompt chips bar above composer
-const useQuickChipsStyles = makeStyles({
-  chipsBar: {
-    display: "flex",
-    gap: "var(--space-1-5)",
-    paddingTop: "var(--space-1)",
-    paddingBottom: "var(--space-1)",
-    paddingLeft: "var(--space-3)",
-    paddingRight: "var(--space-3)",
-    overflowX: "auto",
-    borderTop: "1px solid var(--color-border-subtle)",
-    background: "var(--color-surface-sunken)",
-    whiteSpace: "nowrap",
-    alignItems: "center",
-  },
-  toggleButton: {
-    fontWeight: 600,
-    fontSize: "var(--font-size-micro)",
-  },
-});
-
-// #3449, #3521, #3541: copilots with custom surfaces (e.g. Stock Copilot)
-// render a side-by-side workspace on desktop:
-// - Left pane: dedicated copilot dashboard (StockCopilotPanel) with its own scrolling
-// - Right pane: conversational chat stream and composer with its own scrolling
-// Eliminates the vertical 50% squishing and dual scrollbars on the same axis,
-// while enabling direct interactive chat and autonomous loop adjustments.
-const useSurfaceStyles = makeStyles({
-  splitLayout: {
-    display: "flex",
-    flexDirection: "row",
-    flexGrow: 1,
-    flexShrink: 1,
-    minHeight: 0,
-    overflow: "hidden",
-    "@media (max-width: 900px)": {
-      flexDirection: "column",
-    },
-  },
-  dashboardPane: {
-    display: "flex",
-    flexDirection: "column",
-    flexBasis: "50%",
-    flexGrow: 1,
-    flexShrink: 1,
-    minHeight: 0,
-    minWidth: 0,
-    borderRight: "1px solid var(--color-border-subtle)",
-    overflowY: "auto",
-    "@media (max-width: 900px)": {
-      flexBasis: "45%",
-      borderRight: "none",
-      borderBottom: "1px solid var(--color-border-subtle)",
-    },
-  },
-  chatPane: {
-    display: "flex",
-    flexDirection: "column",
-    flexBasis: "50%",
-    flexGrow: 1,
-    flexShrink: 1,
-    minHeight: 0,
-    minWidth: 0,
-    overflow: "hidden",
-    "@media (max-width: 900px)": {
-      flexBasis: "55%",
-    },
-  },
-  fullChatArea: {
-    display: "flex",
-    flexDirection: "column",
-    flexGrow: 1,
-    flexShrink: 1,
-    minHeight: 0,
-    overflow: "hidden",
-  },
-});
 
 export function isValidChatSubView(view: unknown): view is ChatSubView {
   return typeof view === "string" && (view === "general" || view === "options" || view === "stock" || isRegisteredCopilotId(view));
@@ -216,13 +92,8 @@ export function AgentChatTabContentInner({
   showSponsorSpotlight = false,
 }: AgentChatTabContentProps) {
   const [input, setInput] = useState("");
-  const composerStyles = useComposerStyles();
-  const surfaceStyles = useSurfaceStyles();
-  const quickChipsStyles = useQuickChipsStyles();
-  const navRightStyles = useNavRightStyles();
   const [isPromptChipsExpanded, setIsPromptChipsExpanded] = useState(true);
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
-  const { dispatchToast } = useToastController();
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const { activeTab: activeView, handleTabChange: handleViewChange } = useUrlSyncedTabs<ChatSubView>({
@@ -471,7 +342,7 @@ export function AgentChatTabContentInner({
           </div>
           <div className="sponsor-actions">
             <Button
-              appearance="primary"
+              variant="primary"
               className="sponsor-cta-btn"
               style={{ background: ads[0].accentColor }}
               onClick={() => onAdClick(ads[0])}
@@ -479,8 +350,8 @@ export function AgentChatTabContentInner({
               {ads[0].ctaText}
             </Button>
             <Button
-              appearance="secondary"
-              size="small"
+              variant="secondary"
+              size="sm"
               onClick={onOpenAdsTab}
               title="View all partner offers"
             >
@@ -491,16 +362,14 @@ export function AgentChatTabContentInner({
       )}
 
       {resetNotice && (
-        <MessageBar intent="success">
-          <MessageBarBody>
+        <Notice tone="success">
             <span className="notice-text">{resetNotice}</span>
             {authExpired && (
               <a href="/login" className="notice-link-btn">
                 Log In Again ➔
               </a>
             )}
-          </MessageBarBody>
-        </MessageBar>
+          </Notice>
       )}
 
       {/* Messages Stream */}
@@ -517,8 +386,8 @@ export function AgentChatTabContentInner({
                 {currentCopilot.quickChips.map((chip, idx) => (
                   <Button
                     key={idx}
-                    appearance="subtle"
-                    size="small"
+                    variant="secondary" tone="subtle"
+                    size="sm"
                     disabled={isBusy || isResetting}
                     onClick={() =>
                       handleChipClick(
@@ -627,14 +496,13 @@ export function AgentChatTabContentInner({
 
       {/* Aspect-Oriented Error Diagnostic Card with Code, Cause & Actionable Resolution Playbook */}
       {errorAspect && (
-        <MessageBar intent="error" className="chat-error-diagnostic-card">
-          <MessageBarBody>
+        <Notice tone="danger" variant="box">
             <div className="chat-error-card-header">
               <div className="error-title-group">
               <div className="error-badge-row">
-                <Badge size="extra-small" color="danger" appearance="filled">{errorAspect.code}</Badge>
+                <Badge size="xs" tone="danger">{errorAspect.code}</Badge>
                 {errorAspect.isAiQuota && (
-                  <Badge size="extra-small" style={{ textTransform: "uppercase" }} color="warning" appearance="tint">Daily Free Quota Limit</Badge>
+                  <Badge size="xs" tone="warning" uppercase>Daily Free Quota Limit</Badge>
                 )}
               </div>
               <strong className="error-headline">{errorAspect.title}</strong>
@@ -653,8 +521,7 @@ export function AgentChatTabContentInner({
               ))}
             </ol>
           </div>
-          </MessageBarBody>
-        </MessageBar>
+          </Notice>
       )}
 
       {/* Persistent Copilot Quick Prompt Chips Strip during ongoing conversation (#3656).
@@ -665,8 +532,8 @@ export function AgentChatTabContentInner({
           data-testid="copilot-quick-chips-bar"
         >
           <Button
-            appearance="subtle"
-            size="small"
+            variant="secondary" tone="subtle"
+            size="sm"
             className={quickChipsStyles.toggleButton}
             data-testid="toggle-copilot-chips"
             onClick={() => setIsPromptChipsExpanded((prev) => !prev)}
@@ -678,8 +545,8 @@ export function AgentChatTabContentInner({
             currentCopilot.quickChips.map((chip, idx) => (
               <Button
                 key={idx}
-                appearance="subtle"
-                size="small"
+                variant="secondary" tone="subtle"
+                size="sm"
                 disabled={isBusy || isResetting}
                 onClick={() =>
                   handleChipClick(
@@ -712,8 +579,8 @@ export function AgentChatTabContentInner({
           💡 Guides:
         </span>
         <Button
-          appearance="subtle"
-          size="small"
+          variant="secondary" tone="subtle"
+          size="sm"
           disabled={isBusy || isResetting}
           onClick={() => handleChipClick("What are the capabilities of this platform and how do I use the 8 core workflows?", "Platform Capabilities")}
           title="Overview of all 8 platform workflows"
@@ -721,8 +588,8 @@ export function AgentChatTabContentInner({
           ⚡ Platform Capabilities
         </Button>
         <Button
-          appearance="subtle"
-          size="small"
+          variant="secondary" tone="subtle"
+          size="sm"
           disabled={isBusy || isResetting}
           onClick={() => handleChipClick("How do I use the Stock Screener to find equities and what fallback logic does it use?", "Stock Screener Guide")}
           title="Stock screener steps & fallback logic"
@@ -730,8 +597,8 @@ export function AgentChatTabContentInner({
           📈 Stock Screener
         </Button>
         <Button
-          appearance="subtle"
-          size="small"
+          variant="secondary" tone="subtle"
+          size="sm"
           disabled={isBusy || isResetting}
           onClick={() => handleChipClick("How do I screen for options strategies with max profit > 0 and max loss <= $30?", "Options Strategy Guide")}
           title="Screen options with budget risk limits"
@@ -739,8 +606,8 @@ export function AgentChatTabContentInner({
           🎯 Options: Max Profit & Loss
         </Button>
         <Button
-          appearance="subtle"
-          size="small"
+          variant="secondary" tone="subtle"
+          size="sm"
           disabled={isBusy || isResetting}
           onClick={() => handleChipClick("Explain how the PickBestTrades algorithm evaluates and scores setups.", "PickBestTrades Engine")}
           title="Multivariate opportunity scoring"
@@ -748,8 +615,8 @@ export function AgentChatTabContentInner({
           🧠 PickBestTrades Logic
         </Button>
         <Button
-          appearance="secondary"
-          size="small"
+          variant="secondary"
+          size="sm"
           disabled={isBusy || isResetting}
           onClick={() => handleChipClick("How does Human-in-the-Loop (HITL) order execution and DID attestation work?", "Trading Safety Guide")}
           title="Safe trading with DID attestations"
@@ -757,8 +624,8 @@ export function AgentChatTabContentInner({
           🛡️ HITL Trading Guardrails
         </Button>
         <Button
-          appearance="subtle"
-          size="small"
+          variant="secondary" tone="subtle"
+          size="sm"
           disabled={isBusy || isResetting}
           onClick={() => handleChipClick("How does the real-time Options Flow tracker identify institutional sweeps and sentiment?", "Options Flow Guide")}
           title="Smart money sweeps and sentiment"
@@ -780,17 +647,12 @@ export function AgentChatTabContentInner({
 
       {/* Chat Input Bar */}
       <form className="chat-input-bar" onSubmit={handleSendChat}>
-        <Input
+        <TextInput
           className={composerStyles.composerInput}
           type="text"
           aria-label="Ask the agent"
           value={input}
-          contentAfter={
-            voiceOn ? (
-              <ChatComposerVoiceButtons voice={composerVoice} />
-            ) : undefined
-          }
-          onChange={(_e, data) => setInput(data.value)}
+          onChange={(e) => setInput(e.target.value)}
           placeholder={
             isResetting
               ? "Resetting session…"
@@ -804,13 +666,14 @@ export function AgentChatTabContentInner({
           }
           disabled={isBusy || isResetting}
           autoFocus
+          trailing={voiceOn ? <ChatComposerVoiceButtons voice={composerVoice} /> : undefined}
         />
         <Button
           type="submit"
-          appearance="primary"
+          variant="primary"
           disabled={!input.trim() || isBusy || isResetting}
         >
-{isBusy ? (<><Spinner size="tiny" />{"Send ➔"}</>) : ("Send ➔")}
+{isBusy ? (<><Spinner size="sm" />{"Send ➔"}</>) : ("Send ➔")}
         </Button>
       </form>
     </>
@@ -837,15 +700,15 @@ export function AgentChatTabContentInner({
                   just this button. */}
               {messages.length > 0 && (
                 <Button
-                  appearance="subtle"
-                  size="small"
+                  variant="secondary" tone="subtle"
+                  size="sm"
                   onClick={handleClearWithConfirm}
                   disabled={isResetting}
                   title="Clear conversation and reset session"
                 >
                   {isResetting ? (
                     <>
-                      <Spinner size="tiny" />
+                      <Spinner size="sm" />
                       {"🗑️ Clear chat"}
                     </>
                   ) : (
@@ -860,53 +723,49 @@ export function AgentChatTabContentInner({
                   title={currentCopilot.tooltip?.title || currentCopilot.label}
                   description={currentCopilot.banner?.description || currentCopilot.tooltip?.description || ""}
                 >
-                  <Badge
-                    className="copilot-hover-info-badge"
-                    appearance="tint"
-                    color="brand"
-                    size="small"
+                  <span
                     tabIndex={0}
                     role="note"
                     aria-label={`${currentCopilot.label} details`}
                   >
+                  <Badge
+                    className="copilot-hover-info-badge"
+                    tone="accent"
+                    size="sm"
+                  >
                     ℹ️ {currentCopilot.label} Info
                   </Badge>
+                  </span>
                 </TabHoverItem>
               )}
             </div>
           ) : undefined
         }
       />
-      <Dialog
+      <Modal
         open={clearConfirmOpen}
-        onOpenChange={(_e, data) => {
-          if (!data.open) setClearConfirmOpen(false);
-        }}
+        onClose={() => setClearConfirmOpen(false)}
+        title="Clear conversation history?"
+        footer={
+          <>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => {
+                setClearConfirmOpen(false);
+                onResetSession(true);
+              }}
+            >
+              Clear history
+            </Button>
+            <Button type="button" variant="secondary" onClick={() => setClearConfirmOpen(false)}>
+              Cancel
+            </Button>
+          </>
+        }
       >
-        <DialogSurface>
-          <DialogBody>
-            <DialogTitle>Clear conversation history?</DialogTitle>
-            <DialogContent>
-              <p>Clear this conversation history? This cannot be undone.</p>
-            </DialogContent>
-            <DialogActions>
-              <Button
-                type="button"
-                appearance="secondary"
-                onClick={() => {
-                  setClearConfirmOpen(false);
-                  onResetSession(true);
-                }}
-              >
-                Clear history
-              </Button>
-              <Button type="button" appearance="secondary" onClick={() => setClearConfirmOpen(false)}>
-                Cancel
-              </Button>
-            </DialogActions>
-          </DialogBody>
-        </DialogSurface>
-      </Dialog>
+        <p>Clear this conversation history? This cannot be undone.</p>
+      </Modal>
       {/* #3449, #3521, #3541 — side-by-side copilot workspace:
           When a copilot declares a custom surface (e.g. Stock Copilot),
           render its telemetry/controls in a dedicated dashboard pane alongside
@@ -936,25 +795,10 @@ export function AgentChatTabContentInner({
   );
 }
 
-function readFluentTheme() {
-  if (typeof document === "undefined") return webLightTheme;
-  return document.documentElement.getAttribute("data-theme") === "dark"
-    ? webDarkTheme
-    : webLightTheme;
-}
-
 export function AgentChatTabContent(props: AgentChatTabContentProps) {
-  const [fluentTheme, setFluentTheme] = useState(readFluentTheme);
-  const providerStyles = useProviderStyles();
-  useEffect(() => {
-    const update = () => setFluentTheme(readFluentTheme());
-    window.addEventListener("theme-changed", update);
-    return () => window.removeEventListener("theme-changed", update);
-  }, []);
   return (
-    <FluentProvider theme={fluentTheme} className={providerStyles.provider}>
-      <Toaster />
+    <div className={providerStyles.provider}>
       <AgentChatTabContentInner {...props} />
-    </FluentProvider>
+    </div>
   );
 }

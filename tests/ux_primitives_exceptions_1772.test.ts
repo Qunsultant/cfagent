@@ -127,12 +127,12 @@ const ALREADY_COMPLIANT_2 = [
   "src/client/components/PartnerDealsModal.tsx",
 ];
 
-/** The #3146 Fluent experiment surface (moved out of zero-primitive). */
-const FLUENT_EXPERIMENT_3146 = [
-  "src/client/chat/AgentChatTabContent.tsx",
-];
-
-const ALL_44 = [...ZERO_PRIMITIVE_27, ...PARTIAL_16, ...FLUENT_EXPERIMENT_3146];
+/**
+ * Issue #5843 — the #3146 Fluent experiment is over: AgentChatTabContent
+ * and ChatComposerVoiceControl moved to ui/ primitives, so there is no
+ * Fluent exception list any more and the total drops 44 → 43.
+ */
+const ALL_43 = [...ZERO_PRIMITIVE_27, ...PARTIAL_16];
 
 function assertConverted(file: string): void {
   const full = join(ROOT, file);
@@ -176,24 +176,17 @@ describe("countRawControls1772 (#1772)", () => {
 });
 
 describe("UX primitives exceptions pin (#1772 phases 1-3)", () => {
-  it("the 44 exception files are exactly 27 zero-primitive + 16 partial + 1 Fluent experiment", () => {
+  it("the 43 exception files are exactly 27 zero-primitive + 16 partial (the Fluent experiment ended, #5843)", () => {
     expect(ZERO_PRIMITIVE_27).toHaveLength(27);
     expect(PARTIAL_16).toHaveLength(16);
-    expect(FLUENT_EXPERIMENT_3146).toHaveLength(1);
-    expect(ALL_44).toHaveLength(44);
-    expect(new Set(ALL_44).size, "no file listed twice").toBe(44);
-    expect(ALL_44.filter((f) => ALREADY_COMPLIANT_2.includes(f))).toEqual([]);
+    expect(ALL_43).toHaveLength(43);
+    expect(new Set(ALL_43).size, "no file listed twice").toBe(43);
+    expect(ALL_43.filter((f) => ALREADY_COMPLIANT_2.includes(f))).toEqual([]);
   });
 
   it("every zero-primitive exception file is converted (0 raw controls, imports a primitive)", () => {
     for (const file of ZERO_PRIMITIVE_27) {
       assertConverted(file);
-    }
-  });
-
-  it("the Fluent experiment file is converted (0 raw controls, imports Fluent)", () => {
-    for (const file of FLUENT_EXPERIMENT_3146) {
-      assertFluent(file);
     }
   });
 
@@ -203,14 +196,14 @@ describe("UX primitives exceptions pin (#1772 phases 1-3)", () => {
     }
   });
 
-  it("the 2 Category 3 files excluded from the 44 are also compliant", () => {
+  it("the 2 Category 3 files excluded from the 43 are also compliant", () => {
     for (const file of ALREADY_COMPLIANT_2) {
       assertConverted(file);
     }
   });
 
-  it("no exception file is silently dropped: all 44 + 2 still exist under src/client", () => {
-    for (const file of [...ALL_44, ...ALREADY_COMPLIANT_2]) {
+  it("no exception file is silently dropped: all 43 + 2 still exist under src/client", () => {
+    for (const file of [...ALL_43, ...ALREADY_COMPLIANT_2]) {
       expect(existsSync(join(ROOT, file)), file).toBe(true);
       expect(relative(CLIENT_DIR, join(ROOT, file)).startsWith(".."), `${file} must live under src/client`).toBe(false);
     }
