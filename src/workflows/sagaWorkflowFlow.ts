@@ -596,8 +596,10 @@ export async function runSagaWorkflowFlow(
         // succeeds, only when this context is present — so non-saga
         // payment runs are never labeled saga, and the saga entry
         // route (which never observes the payment outcome) stays
-        // out of metering entirely.
-        meterContext: { category: "saga", userLogin: params.userLogin },
+        // out of metering entirely. Issue #3185: tenantId is the
+        // saga's validated tenant (params.tenantId, checked at
+        // entry against the account row) — threaded, not resolved.
+        meterContext: { category: "saga", userLogin: params.userLogin, tenantId: params.tenantId },
       }),
     );
     const payTerminal = await pollLegToTerminal(

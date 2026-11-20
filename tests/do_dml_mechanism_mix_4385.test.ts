@@ -20,7 +20,10 @@
  *    reconciliation, not catalogue-migrated — plus the 1 read site
  *    #5235 added: the listAllWithDetail SELECT in
  *    doSqliteUsageEventAdapter.ts, the unfiltered meter read for
- *    the revenue-summary coverage cut — plus the 4 templates #3251
+ *    the revenue-summary coverage cut — plus the 1 read site
+ *    #3185 added: the listByTenant SELECT in
+ *    doSqliteUsageEventAdapter.ts, the tenant-filtered meter read
+ *    for the stamped tenantId — plus the 4 templates #3251
  *    added: the STMT_AUDIT_TABLE_* templates in
  *    doSessionStoreAdapter.ts, the parameterized path for the
  *    iaaa_audit_events append-only table) — plus the 4 statements
@@ -197,7 +200,7 @@ describe("DO mechanism mix (#4385)", () => {
     ]);
   });
 
-  it("the remaining inline count is 250 (250 #5034 baseline − 2 P6e mas_autopilot + 2 #5865)", () => {
+  it("the remaining inline count is 251 (250 #5034 baseline − 2 P6e mas_autopilot + 2 #5865 + 1 #3185 listByTenant read)", () => {
     let write = 0;
     let read = 0;
     for (const file of doFiles()) {
@@ -206,8 +209,8 @@ describe("DO mechanism mix (#4385)", () => {
       read += counts.read;
     }
     expect(write).toBe(121);
-    expect(read).toBe(129);
-    expect(write + read).toBe(250);
+    expect(read).toBe(130);
+    expect(write + read).toBe(251);
   });
 
   it("the named exemptions hold their recorded counts, with reasons", () => {

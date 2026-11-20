@@ -220,8 +220,10 @@ describe("4d family census: surface-1 execution sites", () => {
       // SELECTs (pair scan + per-pair row list).
       ["src/data/doSqliteCanonicalReportStoreAdapter.ts", 25],
       // 5 since #5235: listAllWithDetail SELECT (revenue-summary
-      // coverage cut).
-      ["src/data/doSqliteUsageEventAdapter.ts", 5],
+      // coverage cut). 9 since #3185: the ensure probe (PRAGMA) +
+      // conditional tenant_id ALTER + tenant index exec + the
+      // listByTenant SELECT.
+      ["src/data/doSqliteUsageEventAdapter.ts", 9],
     ]);
     for (const [f, n] of layer) {
       expect(count(read(f), STORAGE_EXEC_PATTERN), f).toBe(n);

@@ -260,7 +260,10 @@ const STEP4D_DATA_LAYER_FILES: Array<[string, number]> = [
   // 5 since #5235: the listAllWithDetail SELECT (unfiltered
   // meter read for the revenue-summary coverage cut) lives in
   // the data layer, behind the port.
-  ["src/data/doSqliteUsageEventAdapter.ts", 5],
+  // 9 since #3185: the ensure probe (PRAGMA table_info) +
+  // conditional tenant_id ALTER + tenant index exec + the
+  // listByTenant SELECT (tenant-filtered meter read).
+  ["src/data/doSqliteUsageEventAdapter.ts", 9],
   ["src/data/orchestratorTablePorts.ts", 0],
   ["src/data/canonicalReportStorePorts.ts", 0],
   ["src/data/createOrchestratorTablePorts.ts", 0],

@@ -145,7 +145,13 @@ class CapturingMeter implements UsageEventPort {
     return this.rows
       .filter((r) => r.userLogin === userLogin)
       .slice(-limit)
-      .map(({ id, userLogin: u, runId, category, createdAt }) => ({ id, userLogin: u, runId, category, createdAt }));
+      .map(({ id, userLogin: u, runId, category, createdAt, tenantId }) => ({ id, userLogin: u, runId, category, createdAt, tenantId }));
+  }
+  listByTenant(tenantId: string, limit: number) {
+    return this.rows
+      .filter((r) => r.tenantId === tenantId)
+      .slice(-limit)
+      .map(({ id, userLogin, runId, category, createdAt, tenantId: t }) => ({ id, userLogin, runId, category, createdAt, tenantId: t }));
   }
 }
 

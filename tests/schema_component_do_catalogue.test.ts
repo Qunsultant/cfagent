@@ -18,10 +18,10 @@
  *    leading/trailing whitespace of the adapters' template literals.
  *  - The expected-model fixture
  *    (tests/schema_component_do_expected_model.json): the DO model
- *    built by executing the 107 catalogue statements (parameterized
+ *    built by executing the 109 catalogue statements (parameterized
  *    mas_reports entries resolved with their table) plus the two
  *    ORM-catalogue indexes the DO adapters execute, through the P0
- *    InMemorySchemaInstance — 69 tables, 40 indexes. Regenerate only
+ *    InMemorySchemaInstance — 70 tables, 41 indexes. Regenerate only
  *    with the generator script
  *    ~/workspace/w4282/evidence-p2b/gen-do-catalogue.ts run against
  *    the base tree, and review the refreshed fixture in the PR diff:
@@ -233,7 +233,7 @@ const DO_STATEMENT_SHA256: Record<string, string> = {
   "schema.do.stock_copilot_learnings.create_table": "9f5f6ab3cb8ebadc7f8ad38f686f0c3c9f7b51b2c1ca2e1552ce76bfb47aaf5d",
   "schema.do.stock_copilot_positions.create_table": "b8a30f4e31a09c2a6761984d8075c5a2d22bf8038f1cfb0a560c2cf7e79a876e",
   "schema.do.unified_schedules.create_table": "a380b367f6f2c907456a3e689ceaeae0b239b927fa81c504d1c54ac0e4fab14c",
-  "schema.do.usage_events.create_table": "39928d777a615301df03c022d2ead4deeff205f3e5c843f607cd0ba0d14b1801",
+  "schema.do.usage_events.create_table": "3e1d0e5f1e3fbd975b5e7d72632330975c46db94bbc33811a178947d1358bed1",
   "schema.do.user_request_quota_charges.create_table": "5ad5ffeac557a26afc06def41a1d3de3d818cdbefb66e561bc39d05e55032499",
   "schema.do.user_request_quota_overrides.create_table": "cd0d6cfa079309a60b904c95caa9cf34301d53a369eb0139085e3e421ea17380",
   "schema.index.job_analyzed_datasets.create_index_idx_job_analyzed_datasets_job": "c167804c3c6bbec4bc4ceff29ae60f6fb389004027a666667f4679c1370e735d",
@@ -274,6 +274,7 @@ const DO_STATEMENT_SHA256: Record<string, string> = {
   "schema.index.unified_schedules.create_index_unified_schedules_kind_idx": "777e049a05fde276b484bb3a7b2c90d65f89d4e0ea9aa8a2a428e9ef03dbf1de",
   "schema.index.unified_schedules.create_index_unified_schedules_state_idx": "f0a8ccc3aca646a2effb847bdd363174ea01896f1486a62c28020e7a50454f70",
   "schema.index.usage_events.create_index_idx_usage_events_user": "a51856829519f0695692fb0c51bae86da2432e538055442f127d8ae3525626f4",
+  "schema.index.usage_events.create_index_idx_usage_events_tenant": "4605d0c5ea4b62b54fdba1395880fca14120d37c0a555c7f99c93638694268aa",
 };
 
 /** sha256 of the two frozen JobPipeline v1 migration copies (history — never the live consts). */
@@ -552,11 +553,11 @@ const DO_DELEGATED_FILES: string[] = [
 const DO_REMAINING_INLINE_DDL: string[] = [];
 
 describe("DO catalogue — adapters delegate (#4282 P2b)", () => {
-  it("catalogues all 108 DO statements: 70 table + 37 index + 1 unique-index", () => {
+  it("catalogues all 109 DO statements: 70 table + 38 index + 1 unique-index", () => {
     const catalogue = buildDoCatalogue();
-    expect(DO_CATALOGUE_ENTRIES.length).toBe(108);
-    expect(catalogue.size()).toBe(108);
-    expect(catalogue.byKind("schema").length).toBe(108);
+    expect(DO_CATALOGUE_ENTRIES.length).toBe(109);
+    expect(catalogue.size()).toBe(109);
+    expect(catalogue.byKind("schema").length).toBe(109);
     const verbs = new Map<string, number>();
     const classify = (statement: string): string => {
       const upper = statement.trim().toUpperCase();
@@ -577,12 +578,12 @@ describe("DO catalogue — adapters delegate (#4282 P2b)", () => {
       verbs.set(verb, (verbs.get(verb) ?? 0) + 1);
     }
     expect(verbs.get("CREATE TABLE")).toBe(70);
-    expect(verbs.get("CREATE INDEX")).toBe(37);
+    expect(verbs.get("CREATE INDEX")).toBe(38);
     expect(verbs.get("CREATE UNIQUE INDEX")).toBe(1);
     expect(verbs.get("OTHER")).toBeUndefined();
     // Every code is unique and every entry is reachable by its code.
     const codes = new Set(DO_CATALOGUE_ENTRIES.map((e) => e.code));
-    expect(codes.size).toBe(108);
+    expect(codes.size).toBe(109);
     for (const entry of DO_CATALOGUE_ENTRIES) {
       expect(catalogue.get(entry.code).statement).toBe(entry.statement);
     }
@@ -592,7 +593,7 @@ describe("DO catalogue — adapters delegate (#4282 P2b)", () => {
     ).toBe(70);
     expect(
       DO_CATALOGUE_ENTRIES.filter((e) => e.plane === "index").length,
-    ).toBe(38);
+    ).toBe(39);
     // Exactly the four mas_reports entries are parameterized.
     const parameterized = DO_CATALOGUE_ENTRIES.filter(
       (e) => e.form === "parameterized",
@@ -615,7 +616,7 @@ describe("DO catalogue — adapters delegate (#4282 P2b)", () => {
   });
 
   it("each entry's statement is byte-identical to the base (sha256 pin)", () => {
-    expect(Object.keys(DO_STATEMENT_SHA256).length).toBe(108);
+    expect(Object.keys(DO_STATEMENT_SHA256).length).toBe(109);
     for (const entry of DO_CATALOGUE_ENTRIES) {
       const digest = createHash("sha256")
         .update(entry.statement, "utf8")
@@ -627,7 +628,7 @@ describe("DO catalogue — adapters delegate (#4282 P2b)", () => {
   it("equality pin: the catalogue builds the base DO schema exactly", () => {
     const expected = expectedDoModel();
     expect(Object.keys(expected.tables).length).toBe(70);
-    expect(Object.keys(expected.indexes).length).toBe(40);
+    expect(Object.keys(expected.indexes).length).toBe(41);
     // runEqualityCheck passes no parameters, and the catalogue holds
     // parameterized entries — resolve them manually, exactly as the
     // adapters do at the call site.

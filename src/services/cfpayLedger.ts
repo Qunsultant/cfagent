@@ -460,6 +460,12 @@ export interface MeterUsageInput {
   protocol: "stripe" | "x402";
   userLogin: string;
   priceUSD: number;
+  /**
+   * Issue #3185 (stamp slice): the saga's validated account
+   * tenant, threaded from the saga params — never re-resolved
+   * here, never client-supplied.
+   */
+  tenantId: string | null;
 }
 
 /**

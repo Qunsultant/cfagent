@@ -183,16 +183,20 @@ const bodyOf = async (res: Response | null) => (await res?.json()) as any;
 
 function seedMeter(
   sql: any,
-  row: { id: string; userLogin: string; runId: string; category: string; createdAt: string; detail: unknown },
+  row: { id: string; userLogin: string; runId: string; category: string; createdAt: string; detail: unknown; tenantId?: string | null },
 ) {
+  // Issue #3185: the stamp column is part of the seeded row —
+  // the login-scoped usage read below must stay transparent
+  // to it (a stamped row still reads back by login).
   sql.exec(
-    "INSERT INTO usage_events (id, user_login, run_id, category, created_at, detail_json) VALUES (?, ?, ?, ?, ?, ?)",
+    "INSERT INTO usage_events (id, user_login, run_id, category, created_at, detail_json, tenant_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
     row.id,
     row.userLogin,
     row.runId,
     row.category,
     row.createdAt,
     typeof row.detail === "string" ? row.detail : JSON.stringify(row.detail),
+    row.tenantId ?? null,
   );
 }
 
@@ -337,6 +341,17 @@ describe("usage/billing reader route (#2667)", () => {
       createdAt: "2026-11-01T10:00:00.000Z",
       detail: { receiptId: "run-1", priceUSD: 0.02, tier: "PayPerUse", protocol: "x402" },
     });
+    // Issue #3185: a tenant-stamped meter row still reads back
+    // on the login-scoped usage surface.
+    seedMeter(s.sql, {
+      id: "meter-2",
+      userLogin: OWNER,
+      runId: "run-2",
+      category: "stock",
+      createdAt: "2026-11-01T11:00:00.000Z",
+      detail: { receiptId: "run-2", priceUSD: 0.02, tier: "PayPerUse", protocol: "x402" },
+      tenantId: "tenant-2667",
+    });
     seedTx(s.orm, {
       id: "tx_sim_1",
       customer: OWNER,
@@ -370,6 +385,9 @@ describe("usage/billing reader route (#2667)", () => {
     expect(meter).toBeDefined();
     expect(meter.provenance).toBe("real");
     expect(meter.amountUSD).toBe(0.02);
+    // Issue #3185: both meter rows read back — the stamped one
+    // included — on the login-scoped surface.
+    expect(body.usage.receipts.filter((r: any) => r.kind === "meter")).toHaveLength(2);
     const simulated = body.usage.receipts.find((r: any) => r.kind === "transaction");
     expect(simulated).toBeDefined();
     expect(simulated.provenance).toBe("simulated");

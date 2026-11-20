@@ -69,16 +69,20 @@ function makeStore() {
 
 function seedMeter(
   sql: any,
-  row: { id: string; userLogin: string; runId: string; category: string; createdAt: string; detail: unknown },
+  row: { id: string; userLogin: string; runId: string; category: string; createdAt: string; detail: unknown; tenantId?: string | null },
 ) {
+  // Issue #3185: the stamp column is part of the seeded row —
+  // the login-scoped receipt read below must stay transparent
+  // to it (a stamped row still reads back by login).
   sql.exec(
-    "INSERT INTO usage_events (id, user_login, run_id, category, created_at, detail_json) VALUES (?, ?, ?, ?, ?, ?)",
+    "INSERT INTO usage_events (id, user_login, run_id, category, created_at, detail_json, tenant_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
     row.id,
     row.userLogin,
     row.runId,
     row.category,
     row.createdAt,
     typeof row.detail === "string" ? row.detail : JSON.stringify(row.detail),
+    row.tenantId ?? null,
   );
 }
 
@@ -164,6 +168,8 @@ describe("receipts read-back (#2543)", () => {
       id: "use_rcpt_2", userLogin: OWNER, runId: "rcpt_2", category: "stock_signals",
       createdAt: "2026-10-31T11:00:00.000Z",
       detail: { receiptId: "rcpt_2", priceUSD: 0.02, tier: "Free", protocol: "mpp" },
+      // Issue #3185: a tenant-stamped row still reads back by login.
+      tenantId: "tenant-2543",
     });
     seedMeter(store.sql, {
       id: "use_rcpt_9", userLogin: OTHER, runId: "rcpt_9", category: "options_screener",

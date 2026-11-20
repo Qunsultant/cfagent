@@ -8241,6 +8241,11 @@
           "name": "detail_json",
           "type": "TEXT",
           "pk": 0
+        },
+        {
+          "name": "tenant_id",
+          "type": "TEXT",
+          "pk": 0
         }
       ],
       "constraints": {}
@@ -9994,6 +9999,14 @@
         "state",
         "created_at ASC",
         "id ASC"
+      ],
+      "unique": false
+    },
+    "idx_usage_events_tenant": {
+      "table": "usage_events",
+      "columns": [
+        "tenant_id",
+        "created_at DESC"
       ],
       "unique": false
     },

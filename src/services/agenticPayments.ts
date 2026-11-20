@@ -72,6 +72,7 @@ import {
   resolveMeteredTier,
   type MeteredGateOptions,
 } from "./meteredPaymentGate";
+import { resolveAccountTenantId } from "./accountTenant";
 import type { StoreTier } from "../data/commercialPorts";
 import {
   createBucketPorts,
@@ -678,6 +679,10 @@ export class ETradeAgenticPaymentService {
         category: metered.category,
         priceUSD,
         tier,
+        // Issue #3185 (stamp slice): the x402 paid gate is
+        // anonymous traffic — payer-scope identity only — so
+        // the row stays unattributed (NULL, never invented).
+        tenantId: null,
       }));
     } catch (err) {
       structuredLog.error("agenticPayments.metered_gate_usage_meter_failed", {
@@ -791,12 +796,18 @@ export class ETradeAgenticPaymentService {
     // result is discarded, never served unmetered.
     try {
       meter.ensureSchema();
+      // Issue #3185 (stamp slice): the covered path is
+      // session-only, so the account tenant is definable — one
+      // indexed D1 read for the session login (best-effort:
+      // no account row reads as NULL, never invented).
+      const tenantId = await resolveAccountTenantId(this.env, userLogin);
       meter.insertEvent(buildCoveredCallEvent({
         coverageId,
         userLogin,
         category,
         priceUSD,
         tier: "Subscribed",
+        tenantId,
       }));
     } catch (err) {
       structuredLog.error("agenticPayments.covered_call_usage_meter_failed", {
@@ -988,6 +999,10 @@ export class ETradeAgenticPaymentService {
         category: metered.category,
         priceUSD,
         tier,
+        // Issue #3185 (stamp slice): the MPP paid gate is
+        // anonymous traffic — payer-scope identity only — so
+        // the row stays unattributed (NULL, never invented).
+        tenantId: null,
       }));
     } catch (err) {
       structuredLog.error("agenticPayments.mpp_metered_gate_usage_meter_failed", {

@@ -1677,8 +1677,11 @@ export function getScheduledReportById(
 /* mas_events is the session-scoped audit/observability log (owner:     */
 /* OrchestratorAgent.recordAudit, #270; session_id / type / agent /     */
 /* payload). Usage metering is tenant-scoped instead: WHO (user_login), */
-/* WHAT TASK (run_id), WHAT KIND (category), with an index on           */
-/* (user_login, created_at) for per-tenant listing. mas_events cannot   */
+/* WHAT TASK (run_id), WHAT KIND (category), WITH the account tenant    */
+/* (tenant_id, issue #3185 stamp slice — stamped from resolved          */
+/* identity at event time, NULL when unattributed, never invented),     */
+/* with indexes on (user_login, created_at) for per-login listing and   */
+/* (tenant_id, created_at) for per-tenant listing. mas_events cannot    */
 /* carry this data with its existing shape — no user_login/run_id       */
 /* columns, no tenant index, and its session_id is the orchestrator     */
 /* instance's session key, not a tenant identity. Writers: the          */
@@ -1686,11 +1689,10 @@ export function getScheduledReportById(
 /* "research_run") and ResearchAgent meters evaluations                 */
 /* ("research_evaluation"), each into its OWN DO's database through     */
 /* this module — so no single database holds a tenant's whole usage     */
-/* picture, and no production reader consumes the rows yet              */
-/* (listUsageEvents is exercised by tests only). Both facts are the     */
-/* known price of the split; the first production usage/billing reader  */
-/* must solve the placement question, and that is the trigger to        */
-/* re-open consolidation. Do not add a third event log meanwhile.       */
+/* picture (the cross-DO bridge is the #3185 follow-up slice, not      */
+/* this one); listUsageEventsByTenant reads one DO's rows by the        */
+/* stamped tenant, and listUsageEvents is exercised by tests only.      */
+/* Do not add a third event log meanwhile.                              */
 /*                                                                      */
 /* Issue #786 retention decision: usage_events is PRUNE-CLASS at 365d,   */
 /* recorded in src/security/storageRetention.ts (the retention record   */
@@ -1713,6 +1715,13 @@ export interface UsageEventInput {
   category: string;
   /** Optional detail payload (JSON-serializable). */
   detail?: unknown;
+  /**
+   * Issue #3185 (stamp slice): the ACCOUNT tenant
+   * (getAccount(login).tenantId), resolved by the writer at event
+   * time — never client-supplied. Null = unattributed (legacy,
+   * anonymous, or no account row); absent reads as null.
+   */
+  tenantId?: string | null;
 }
 
 export interface UsageEvent {
@@ -1721,6 +1730,7 @@ export interface UsageEvent {
   runId: string;
   category: string;
   createdAt: string;
+  tenantId: string | null;
 }
 
 /** Idempotent DDL for usage_events. Never throws. The DDL's
@@ -1760,6 +1770,7 @@ export function recordUsageEvent(
       category: input.category,
       createdAt: new Date().toISOString(),
       detailJson: input.detail === undefined ? null : JSON.stringify(input.detail),
+      tenantId: input.tenantId ?? null,
     });
     return id;
   } catch (err) {
@@ -1785,6 +1796,27 @@ export function listUsageEvents(
     ensureUsageEventsTable(sql);
     const capped = Math.max(1, Math.min(Math.floor(limit) || 100, 500));
     return storePorts(sql).usage.listByUser(userLogin, capped);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Issue #3185 (stamp slice): list usage events for one tenant
+ * by the stamped tenantId, newest first. Never throws. Rows
+ * stamped NULL never match a tenant; an empty tenantId reads
+ * empty, never as "all tenants".
+ */
+export function listUsageEventsByTenant(
+  sql: SqlStorage,
+  tenantId: string,
+  limit = 100
+): UsageEvent[] {
+  try {
+    if (!tenantId) return [];
+    ensureUsageEventsTable(sql);
+    const capped = Math.max(1, Math.min(Math.floor(limit) || 100, 500));
+    return storePorts(sql).usage.listByTenant(tenantId, capped);
   } catch {
     return [];
   }

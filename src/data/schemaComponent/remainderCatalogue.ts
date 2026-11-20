@@ -620,6 +620,18 @@ export const REMAINDER_CATALOGUE_ENTRIES: CatalogueEntry[] = [
     form: "literal",
   },
   {
+    // Issue #3185 (stamp slice): the account-tenant stamp on
+    // usage_events — NULL on legacy rows (never invented), added
+    // when missing so existing DO tables upgrade in place (the
+    // #3182 probed additive-column precedent).
+    code: "schema.do.usage_events.alter_table_add_column_tenant_id",
+    plane: "do",
+    table: "usage_events",
+    statement: `ALTER TABLE usage_events ADD COLUMN tenant_id TEXT`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
     code: "seed.route.orchestrator_migration.insert_or_replace",
     plane: "route",
     table: "orchestrator_migration",

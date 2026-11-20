@@ -337,13 +337,20 @@ export async function runResearchAndPublish(ctx: ResearchPublishContext,
     }
     // #584 EP-009: meter the research run — attribute compute to tenant + task.
     // Best-effort and never throws; metering must not break the run.
+    // Issue #3185 (stamp slice): the account tenant is resolved
+    // from the run's login — a scheduled tick's service identity
+    // holds no account row, so its rows stamp NULL (unattributed,
+    // never invented), exactly as the #3182 rule requires.
     try {
       const { recordUsageEvent } = await import("../../services/scheduledReports");
+      const { resolveAccountTenantId } = await import("../../services/accountTenant");
+      const tenantId = await resolveAccountTenantId(ctx.env, login);
       recordUsageEvent(ctx.agentCtx.storage.sql, {
         userLogin: login,
         runId: report.runId,
         category: "research_run",
         detail: { trigger, ideas: report.ideas.length, taskId },
+        tenantId,
       });
     } catch {
       // Metering is advisory; the published result stands either way.

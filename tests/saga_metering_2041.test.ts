@@ -46,7 +46,7 @@ function paidParams(over: Partial<PaymentWorkflowParams> = {}): PaymentWorkflowP
     tenantId: "t1",
     userId: "u1",
     email: "u1@example.com",
-    meterContext: { category: "saga", userLogin: "u1login" },
+    meterContext: { category: "saga", userLogin: "u1login", tenantId: "t1" },
     ...over,
   };
 }
@@ -137,7 +137,7 @@ describe("payment flow meterUsage (issue #2041 G-METERING)", () => {
     expect(outcome.status).toBe("started");
     expect(capture.startScreenerCalls).toBe(1);
     expect(capture.recordUsageCalls).toEqual([
-      { receiptId: "cs_test_1", protocol: "stripe", userLogin: "u1login", priceUSD: 0.1 },
+      { receiptId: "cs_test_1", protocol: "stripe", userLogin: "u1login", priceUSD: 0.1, tenantId: "t1" },
     ]);
   });
 
@@ -150,7 +150,7 @@ describe("payment flow meterUsage (issue #2041 G-METERING)", () => {
     );
     expect(outcome.status).toBe("started");
     expect(capture.recordUsageCalls).toEqual([
-      { receiptId: "proof-abc", protocol: "x402", userLogin: "u1login", priceUSD: 0.1 },
+      { receiptId: "proof-abc", protocol: "x402", userLogin: "u1login", priceUSD: 0.1, tenantId: "t1" },
     ]);
   });
 
@@ -232,6 +232,10 @@ class FakeSql {
 
   exec(query: string, ...params: unknown[]): unknown[] {
     if (query.startsWith("CREATE TABLE") || query.startsWith("CREATE INDEX")) return [];
+    // Issue #3185: the ensure probe + additive-column ALTER.
+    // The fake holds no prior schema, so the probe reads empty
+    // and the ALTER fires — both no-op here.
+    if (query.startsWith("PRAGMA") || query.startsWith("ALTER TABLE")) return [];
     if (query.startsWith("INSERT INTO")) {
       if (this.throwOnInsert) throw this.throwOnInsert;
       const id = params[0] as string;
@@ -243,6 +247,7 @@ class FakeSql {
         category: params[3],
         createdAt: params[4],
         detailJson: params[5],
+        tenantId: params[6],
       });
       return [];
     }
@@ -290,12 +295,42 @@ describe("meter route (issue #2041 G-METERING)", () => {
     expect(row.userLogin).toBe("u1login");
     expect(row.runId).toBe("cs_test_1");
     expect(row.category).toBe("saga");
+    // Issue #3185: no tenantId in the body stamps NULL.
+    expect(row.tenantId).toBeNull();
     expect(JSON.parse(row.detailJson as string)).toEqual({
       receiptId: "cs_test_1",
       priceUSD: 0.1,
       tier: "Free",
       protocol: "stripe",
     });
+  });
+
+  it("stamps the body's tenantId on the row (issue #3185)", async () => {
+    const sql = new FakeSql();
+    const res = await postMeter(sql, {
+      receiptId: "cs_test_1",
+      protocol: "stripe",
+      userLogin: "u1login",
+      priceUSD: 0.1,
+      category: "saga",
+      tenantId: "t1",
+    });
+    expect(res!.status).toBe(201);
+    expect(sql.rows.get("use_cs_test_1")!.tenantId).toBe("t1");
+  });
+
+  it("rejects a non-string tenantId as a malformed body (issue #3185)", async () => {
+    const sql = new FakeSql();
+    const res = await postMeter(sql, {
+      receiptId: "cs_test_1",
+      protocol: "stripe",
+      userLogin: "u1login",
+      priceUSD: 0.1,
+      category: "saga",
+      tenantId: 42,
+    });
+    expect(res!.status).toBe(400);
+    expect(sql.rows.size).toBe(0);
   });
 
   it("x402 happy path records protocol x402 with the proof as receipt", async () => {
