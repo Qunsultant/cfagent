@@ -139,6 +139,7 @@ const D1_MIGRATION_SQL_SHA256: Record<number, string> = {
   71: "c19368069237661aadf7af1f6a8eb015f12b705deed9f59af621482d896ea4bf",
   72: "9786cf1c24503046615b3bba4270cd79732e70d8127d8c17c03e7c190b0987f7",
   73: "6048450ab44e1b4f8e39ee9b428a42f23ff7f2a7385d350f52544fba8793a634",
+  74: "dbc0c1b36651ac77bde2bdcffac483c0637ddb51696835084712e3669b3578d8",
 };
 
 /** Per-version statement counts, measured from the base runner. */
@@ -216,6 +217,7 @@ const D1_MIGRATION_STATEMENT_COUNTS: Record<number, number> = {
   71: 2,
   72: 2,
   73: 1,
+  74: 1,
 };
 
 /** The 11 seed-DML statements, exact text, measured from the base runner. */
@@ -255,14 +257,15 @@ function expectedD1Model(): SchemaModel {
 }
 
 describe("D1 catalogue — migrationRunner delegates (#4282 P1)", () => {
-  it("catalogues all 230 runner statements: 219 schema + 11 seed", () => {
+  it("catalogues all 231 runner statements: 220 schema + 11 seed", () => {
     const catalogue = buildD1Catalogue();
     // #5086 adds migration 0070 (otel_config_overrides table): 224 → 225.
     // #4767 adds migrations 0071/0072 (4 D1 ALTERs): 225 → 229.
     // #4204 adds migration 0073 (D1 job_run_records recent-read index): 229 → 230.
-    expect(D1_CATALOGUE_ENTRIES.length).toBe(230);
-    expect(catalogue.size()).toBe(230);
-    expect(catalogue.byKind("schema").length).toBe(219);
+    // #5865 adds migration 0074 (definition-version history table): 230 → 231.
+    expect(D1_CATALOGUE_ENTRIES.length).toBe(231);
+    expect(catalogue.size()).toBe(231);
+    expect(catalogue.byKind("schema").length).toBe(220);
     expect(catalogue.byKind("seed").length).toBe(11);
     const verbs = new Map<string, number>();
     const classify = (statement: string): string => {
@@ -287,7 +290,7 @@ describe("D1 catalogue — migrationRunner delegates (#4282 P1)", () => {
       const verb = classify(entry.statement);
       verbs.set(verb, (verbs.get(verb) ?? 0) + 1);
     }
-    expect(verbs.get("CREATE TABLE")).toBe(102);
+    expect(verbs.get("CREATE TABLE")).toBe(103);
     expect(verbs.get("CREATE INDEX")).toBe(53);
     expect(verbs.get("CREATE UNIQUE INDEX")).toBe(7);
     expect(verbs.get("ALTER TABLE")).toBe(56);
@@ -302,7 +305,7 @@ describe("D1 catalogue — migrationRunner delegates (#4282 P1)", () => {
       .map(Number)
       .sort((a, b) => a - b);
     expect(versions).toEqual(
-      Array.from({ length: 73 }, (_, i) => i + 1),
+      Array.from({ length: 74 }, (_, i) => i + 1),
     );
     const allCodes = new Set<string>();
     for (const version of versions) {

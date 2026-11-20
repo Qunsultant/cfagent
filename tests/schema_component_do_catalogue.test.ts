@@ -172,6 +172,8 @@ const DO_STATEMENT_SHA256: Record<string, string> = {
   "schema.do.job_generated_datasets.create_table": "ff6c2c27c5d78fa8f43e69823ab661957db54e23f1184a3e84468fc8fc04ca84",
   "schema.do.job_pipeline_artifacts.create_table": "7b6f844398cf553abd6377e3f5a0e6d024945cc5a7a1995ff2cfa562479c715a",
   "schema.do.job_pipeline_definitions.create_table": "63e75c48b6a9568f8b746518374b1ea721667aa8c19f6911589ace3db38d59c6",
+  "schema.do.job_pipeline_definition_versions.create_table":
+    "e3f5565bed6c75f3abce7cac93815261d1c529eb8c9fd0b59192bba31c882ba9",
   "schema.do.job_pipeline_instances.create_table": "0f25e6a8c9861f24a934cd21c82e8974d6f7e6756fcc94973fad6ebec9c1b11a",
   "schema.do.job_run_records.create_table": "13ece01aa0866f3c8ae8c317ab922c8a6491aa6cd6bd4963b0e259fbfa2c915b",
   "schema.do.job_stage_events.create_table": "35c76adfe72cfa7a970a51db32c0c53ea7e3d3a97a50f3d631882f9448840aca",
@@ -550,11 +552,11 @@ const DO_DELEGATED_FILES: string[] = [
 const DO_REMAINING_INLINE_DDL: string[] = [];
 
 describe("DO catalogue — adapters delegate (#4282 P2b)", () => {
-  it("catalogues all 107 DO statements: 69 table + 37 index + 1 unique-index", () => {
+  it("catalogues all 108 DO statements: 70 table + 37 index + 1 unique-index", () => {
     const catalogue = buildDoCatalogue();
-    expect(DO_CATALOGUE_ENTRIES.length).toBe(107);
-    expect(catalogue.size()).toBe(107);
-    expect(catalogue.byKind("schema").length).toBe(107);
+    expect(DO_CATALOGUE_ENTRIES.length).toBe(108);
+    expect(catalogue.size()).toBe(108);
+    expect(catalogue.byKind("schema").length).toBe(108);
     const verbs = new Map<string, number>();
     const classify = (statement: string): string => {
       const upper = statement.trim().toUpperCase();
@@ -574,20 +576,20 @@ describe("DO catalogue — adapters delegate (#4282 P2b)", () => {
       const verb = classify(entry.statement);
       verbs.set(verb, (verbs.get(verb) ?? 0) + 1);
     }
-    expect(verbs.get("CREATE TABLE")).toBe(69);
+    expect(verbs.get("CREATE TABLE")).toBe(70);
     expect(verbs.get("CREATE INDEX")).toBe(37);
     expect(verbs.get("CREATE UNIQUE INDEX")).toBe(1);
     expect(verbs.get("OTHER")).toBeUndefined();
     // Every code is unique and every entry is reachable by its code.
     const codes = new Set(DO_CATALOGUE_ENTRIES.map((e) => e.code));
-    expect(codes.size).toBe(107);
+    expect(codes.size).toBe(108);
     for (const entry of DO_CATALOGUE_ENTRIES) {
       expect(catalogue.get(entry.code).statement).toBe(entry.statement);
     }
     // Planes: DO tables on "do", indexes on "index".
     expect(
       DO_CATALOGUE_ENTRIES.filter((e) => e.plane === "do").length,
-    ).toBe(69);
+    ).toBe(70);
     expect(
       DO_CATALOGUE_ENTRIES.filter((e) => e.plane === "index").length,
     ).toBe(38);
@@ -613,7 +615,7 @@ describe("DO catalogue — adapters delegate (#4282 P2b)", () => {
   });
 
   it("each entry's statement is byte-identical to the base (sha256 pin)", () => {
-    expect(Object.keys(DO_STATEMENT_SHA256).length).toBe(107);
+    expect(Object.keys(DO_STATEMENT_SHA256).length).toBe(108);
     for (const entry of DO_CATALOGUE_ENTRIES) {
       const digest = createHash("sha256")
         .update(entry.statement, "utf8")
@@ -624,7 +626,7 @@ describe("DO catalogue — adapters delegate (#4282 P2b)", () => {
 
   it("equality pin: the catalogue builds the base DO schema exactly", () => {
     const expected = expectedDoModel();
-    expect(Object.keys(expected.tables).length).toBe(69);
+    expect(Object.keys(expected.tables).length).toBe(70);
     expect(Object.keys(expected.indexes).length).toBe(40);
     // runEqualityCheck passes no parameters, and the catalogue holds
     // parameterized entries — resolve them manually, exactly as the

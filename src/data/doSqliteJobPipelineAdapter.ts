@@ -147,13 +147,9 @@ export const JOB_PIPELINE_SCHEMA_MIGRATION: DoSchemaMigration = {
  */
 export const JOB_PIPELINE_DEFINITION_VERSIONS_TABLE = "job_pipeline_definition_versions";
 
-export const JOB_PIPELINE_DEFINITION_VERSIONS_DDL = `CREATE TABLE IF NOT EXISTS job_pipeline_definition_versions (
-  id TEXT PRIMARY KEY,
-  job_id TEXT NOT NULL,
-  version INTEGER NOT NULL,
-  definition_json TEXT NOT NULL,
-  updated_at TEXT NOT NULL
-)`;
+export const JOB_PIPELINE_DEFINITION_VERSIONS_DDL = doTableSql(
+  "job_pipeline_definition_versions",
+);
 
 /** Every existing job's current definition becomes its first history row. */
 export const JOB_PIPELINE_DEFINITION_VERSIONS_BACKFILL =

@@ -27,6 +27,7 @@ import {
   MIGRATION_0067_JOB_PIPELINE_RUN_WORKFLOW_INSTANCE_ID,
   MIGRATION_0071_JOB_PIPELINE_RUN_KIND,
   type MigrationDb,
+  MIGRATION_0074_JOB_PIPELINE_DEFINITION_VERSIONS,
 } from "./migrationRunner";
 import {
   jobPipelineArtifactId,
@@ -45,7 +46,12 @@ export type JobPipelineDb = DrizzleD1Database<{
 /** Build the Drizzle D1 database object from a bound D1 client. */
 export function createD1JobPipelineDb(d1: D1Database): JobPipelineDb {
   return createDrizzleD1Db(d1, {
-    schema: { jobPipelineDefinitions, jobPipelineInstances, jobPipelineArtifacts },
+    schema: {
+      jobPipelineDefinitions,
+      jobPipelineDefinitionVersions,
+      jobPipelineInstances,
+      jobPipelineArtifacts,
+    },
   });
 }
 
@@ -57,6 +63,7 @@ export async function ensureJobPipelineSchema(db: JobPipelineDb): Promise<number
     MIGRATION_0065_JOB_PIPELINE_RUN_ASYNC_JOB_ID,
     MIGRATION_0067_JOB_PIPELINE_RUN_WORKFLOW_INSTANCE_ID,
     MIGRATION_0071_JOB_PIPELINE_RUN_KIND,
+    MIGRATION_0074_JOB_PIPELINE_DEFINITION_VERSIONS,
   ]);
 }
 
