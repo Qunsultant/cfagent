@@ -138,9 +138,13 @@ describe("POST /api/maintenance/recreate-schema (#4383)", () => {
     // the conditional index drop is among the skipped. Steps are
     // descriptors (code + params), not bare codes: the generic
     // column-add steps share one code and differ only by params.
-    expect(body.selected).toHaveLength(139);
+    // Issue #3185 adds the usage_events tenant index to the DO leg: 139 → 140.
+    expect(body.selected).toHaveLength(140);
     // Issue #4623 adds one probed DO statement (mas_async_jobs.tenant_id).
-    expect(body.skipped).toHaveLength(36);
+    // Issue #3185 adds one probed DO statement (usage_events.tenant_id):
+    // the fresh CREATE TABLE already carries the column, so the ALTER
+    // is probed-and-skipped: 36 → 37.
+    expect(body.skipped).toHaveLength(37);
     expect(body.skipped.map((s: any) => s.code)).toContain(
       "schema.index.mas_reports.drop_index_idx_mas_reports_generation",
     );
@@ -159,7 +163,8 @@ describe("POST /api/maintenance/recreate-schema (#4383)", () => {
     expect(body.leg).toBe("do");
     expect(body.report.outcome).toBe("succeeded");
     // #4767 adds migrations 0071/0072 (4 remainder ALTERs): 132 → 136.
-    expect(body.report.executed).toHaveLength(139);
+    // Issue #3185 adds the usage_events tenant index to the DO leg: 139 → 140.
+    expect(body.report.executed).toHaveLength(140);
     expect(body.report.failed).toEqual([]);
     expect(body.verification.ok).toBe(true);
     expect(body.verification.failures).toEqual([]);
@@ -217,8 +222,9 @@ describe("POST /api/maintenance/recreate-schema (#4383)", () => {
     expect(body.preview).toBe(false);
     expect(body.report.outcome).toBe("succeeded");
     expect(body.report.executed).toHaveLength(0);
-    expect(body.planned).toHaveLength(139);
-    expect(body.notRequested).toHaveLength(139);
+    // Issue #3185 adds the usage_events tenant index to the DO leg: 139 → 140.
+    expect(body.planned).toHaveLength(140);
+    expect(body.notRequested).toHaveLength(140);
     expect(body.verification.ok).toBe(false); // fresh store, nothing executed
     expect(ctx.audit).toHaveBeenCalledTimes(1);
   });
@@ -233,8 +239,9 @@ describe("POST /api/maintenance/recreate-schema (#4383)", () => {
       codes: ["schema.do.mas_reports.create_table"],
     });
     expect(status).toBe(200);
-    expect(body.planned).toHaveLength(139);
-    expect(body.notRequested).toHaveLength(138);
+    // Issue #3185 adds the usage_events tenant index to the DO leg: 139 → 140.
+    expect(body.planned).toHaveLength(140);
+    expect(body.notRequested).toHaveLength(139);
     expect(body.notRequested.map((s: any) => s.code)).not.toContain(
       "schema.do.mas_reports.create_table",
     );
