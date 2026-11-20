@@ -52,7 +52,7 @@ function outcomeOf(run: WorkflowRun): JobRunOutcome {
 
 function linkageKeys(run: WorkflowRun): string[] {
   const keys = new Set<string>();
-  for (const value of [run.id, run.runId]) {
+  for (const value of [run.id, run.runId, run.asyncJobId, run.workflowId]) {
     if (typeof value === "string" && value.trim()) keys.add(value.trim());
   }
   return [...keys];
@@ -109,9 +109,14 @@ export function attachWorkflowRuns(
         isLedgerTrigger(run.trigger) && run.trigger !== "unknown"
           ? run.trigger
           : undefined,
-      scheduleId: null,
-      asyncJobId: run.source === "job-chain" || run.source === "job-outcome" ? run.runId : null,
-      workflowId: run.source === "job-chain" ? run.runId : null,
+      scheduleId: run.scheduleId ?? null,
+      asyncJobId:
+        run.asyncJobId ??
+        (run.source === "job-chain" ||
+        (run.source === "job-outcome" && !run.runId.startsWith("d1:"))
+          ? run.runId
+          : null),
+      workflowId: run.workflowId ?? (run.source === "job-chain" ? run.runId : null),
       error: run.error ?? undefined,
       detail: stageNote,
       descriptor: run.title,

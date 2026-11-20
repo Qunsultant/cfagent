@@ -62,7 +62,8 @@ import {
   type JobStageView,
   type JobStagesRead,
 } from "../../services/jobPipelineEngine";
-import { createJobPipelineStoresFromSql } from "../../data/createJobPipelinePorts";
+import { createJobPipelineStoresFromD1, createJobPipelineStoresFromSql } from "../../data/createJobPipelinePorts";
+import { isInnerShardScanJobId } from "../../workflows/optionsScreenEngine";
 
 export interface WorkflowRunsSql {
   exec: (query: string, ...args: unknown[]) => Iterable<unknown>;
@@ -594,13 +595,17 @@ export async function readPipelineRunStagesFromScheduledAgent(
 export async function readInnerShardScanStages(
   sql: SqlStorage,
   refs: Array<{ shardJobId: string; engineJobId: string }>,
+  d1Db?: D1Database | null,
 ): Promise<Map<string, JobStagesRead>> {
   const out = new Map<string, JobStagesRead>();
   if (refs.length === 0) return out;
   const stores = createJobPipelineStoresFromSql(sql);
+  const d1Stores = d1Db ? createJobPipelineStoresFromD1(d1Db) : null;
   for (const ref of refs) {
     try {
-      const read = await readStagesFromPipelineStores(stores, ref.engineJobId);
+      const read =
+        (await readStagesFromPipelineStores(stores, ref.engineJobId)) ??
+        (d1Stores ? await readStagesFromPipelineStores(d1Stores, ref.engineJobId) : null);
       out.set(ref.shardJobId, read ?? { stages: [], checkpointRunId: null, checkpointKind: null });
     } catch (err) {
       // A shard whose read fails keeps the page honest: the caller names
@@ -876,7 +881,9 @@ export async function handleWorkflowRunsRoutes(
       // bridge row is absent from the window still renders
       // standalone; unlinked records (asyncJobId null) are
       // untouched, so pre-slice rows render as today.
-      keptRecords = keptRecords.filter((r) => !d1RecordLinkedToJobs(r, jobs));
+      keptRecords = keptRecords.filter(
+        (r) => !isInnerShardScanJobId(r.jobId) && !d1RecordLinkedToJobs(r, jobs),
+      );
       keptJobRunRecords = keptRecords;
     } catch (err) {
       storeErrors.jobRunRecords = err instanceof Error ? err.message : String(err);
@@ -936,7 +943,11 @@ export async function handleWorkflowRunsRoutes(
       const reader =
         ctx.innerShardStageReader ??
         ((items: Array<{ shardJobId: string; engineJobId: string }>) =>
-          readInnerShardScanStages(ctx.ensureTables(), items));
+          readInnerShardScanStages(
+            ctx.ensureTables(),
+            items,
+            (ctx.env as { AGENT_DB?: D1Database } | undefined)?.AGENT_DB ?? null,
+          ));
       for (const [shardJobId, read] of await reader(refs)) {
         const engineJobId = innerRefs.get(shardJobId);
         if (!engineJobId) continue;

@@ -51,6 +51,7 @@ import type { ScreenerRunResult } from "../agents/screener-agent";
 // Runs surface through this module's mapper, beside the DO stores.
 import { d1JobRunRecordId, listD1JobRunRecords } from "./jobRunRecordReads";
 import type { JobRunRecord } from "./jobRunRecords";
+import { isInnerShardScanJobId } from "../workflows/optionsScreenEngine";
 
 export type RunKind = "screener" | "options_scanner" | "discovery" | "goal" | "report";
 
@@ -631,7 +632,9 @@ export async function listD1JobRunRecordSummaries(
   limit: number,
 ): Promise<RunSummary[]> {
   const records = await listD1JobRunRecords(env, limit);
-  return records.map(runSummaryFromJobRunRecord);
+  return records
+    .filter((r) => !isInnerShardScanJobId(r.jobId))
+    .map(runSummaryFromJobRunRecord);
 }
 
 /**

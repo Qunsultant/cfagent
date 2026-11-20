@@ -232,6 +232,9 @@ export interface WorkflowRun {
    * surfacing (#4359) builds on it.
    */
   workflowId?: string | null;
+  /** Issue #5892 — recorded schedule / async-job linkage when carried by a D1 run record. */
+  scheduleId?: string | null;
+  asyncJobId?: string | null;
   startedAt: string;
   finishedAt: string | null;
   durationMs: number | null;
@@ -2050,6 +2053,12 @@ export function runFromJobRunRecord(
     status,
     lifecycle: lifecycleStateForRun({ status, stages }),
     schedule: scheduleProvenanceForTrigger(trigger),
+    ...(record.scheduleId ? { scheduleId: record.scheduleId } : {}),
+    ...(record.asyncJobId ? { asyncJobId: record.asyncJobId } : {}),
+    ...(record.workflowId ? { workflowId: record.workflowId } : {}),
+    ...(record.brokerId ? { brokerId: record.brokerId } : {}),
+    ...(record.mode ? { mode: record.mode } : {}),
+    ...(record.modeSource ? { modeSource: record.modeSource } : {}),
     startedAt: record.started,
     finishedAt: record.finished,
     durationMs:
