@@ -8,11 +8,13 @@
  * configuration gate, session-retrieve fulfilled test — against
  * a fake card port, with no Stripe network and no cfpay call.
  * The pre-existing tests/payment_assurance_live.test.ts suite
- * (allowlist, live-test- prefix, 409 naming) stays green
- * unchanged alongside this file.
+ * (allowlist, live-test- prefix, 409 statuses) stays green
+ * alongside this file; the 409 bodies are catalog-coded since
+ * #5607 (FAILURE_PAYMENT_ASSURANCE_UNAVAILABLE).
  */
 import { describe, expect, it } from "vitest";
 import { handlePaymentAssuranceLiveRoutes } from "../src/agents/routes/paymentAssuranceLive";
+import { codedMessage } from "../src/outcomes/outcomeAspects";
 import type {
   CardSessionEvidence,
   CheckoutPort,
@@ -140,8 +142,11 @@ describe("payment assurance live routes, native rework (issue #2197)", () => {
       null,
     );
     expect(res?.status).toBe(409);
-    const text = await res?.text();
-    expect(text).toContain("native Stripe is not configured");
+    const body = (await res?.json()) as { code: string; error: string };
+    // #5607 (G-5/G-6): the 409 is now catalog-coded; the status
+    // and the refusal are unchanged.
+    expect(body.code).toBe("FAILURE_PAYMENT_ASSURANCE_UNAVAILABLE");
+    expect(body.error).toBe(codedMessage("FAILURE_PAYMENT_ASSURANCE_UNAVAILABLE"));
   });
 
   it("checkout mode refuses with 409 when the flag is OFF even though a card port exists", async () => {
@@ -152,8 +157,9 @@ describe("payment assurance live routes, native rework (issue #2197)", () => {
       cardPorts({}),
     );
     expect(res?.status).toBe(409);
-    const text = await res?.text();
-    expect(text).toContain("monetization flag is OFF");
+    const flagBody = (await res?.json()) as { code: string; error: string };
+    expect(flagBody.code).toBe("FAILURE_PAYMENT_ASSURANCE_UNAVAILABLE");
+    expect(flagBody.error).toBe(codedMessage("FAILURE_PAYMENT_ASSURANCE_UNAVAILABLE"));
   });
 
   it("coverage mode still starts when native Stripe is unconfigured", async () => {
@@ -177,7 +183,9 @@ describe("payment assurance live routes, native rework (issue #2197)", () => {
       cardPorts({}),
     );
     expect(refused?.status).toBe(409);
-    expect(await refused?.text()).toContain("monetization flag is OFF");
+    const refusedBody = (await refused?.json()) as { code: string; error: string };
+    expect(refusedBody.code).toBe("FAILURE_PAYMENT_ASSURANCE_UNAVAILABLE");
+    expect(refusedBody.error).toBe(codedMessage("FAILURE_PAYMENT_ASSURANCE_UNAVAILABLE"));
 
     // No env var at all, Flagship says ON, card port present -> starts.
     const started = await call(

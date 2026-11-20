@@ -121,8 +121,24 @@ interface TenantSettingsView {
   brokerId: string;
 }
 
-function jsonError(error: string, status: number): Response {
-  return Response.json({ error }, { status });
+/**
+ * Issue #5607 (G-5/G-6) — the coded refusal helper: every error
+ * return in this module goes through here, so the refusal is
+ * logged (warn, with code + status) and the body carries the
+ * catalog code + message. Statuses are unchanged from the
+ * pre-slice literals.
+ */
+function jsonError(
+  code: string,
+  status: number,
+  fields: Record<string, unknown> = {},
+): Response {
+  structuredLog.warn("platformTenants.request_refused", {
+    code,
+    status,
+    ...fields,
+  });
+  return Response.json({ code, error: codedMessage(code) }, { status });
 }
 
 /**
@@ -151,7 +167,7 @@ async function resolveOperator(
 ): Promise<string | Response> {
   const login = request.headers.get("x-user-login")?.trim() ?? "";
   if (!login) {
-    return jsonError("Unauthorized: a signed-in session is required.", 401);
+    return jsonError("FAILURE_COMMERCIAL_UNAUTHORIZED", 401, { login: null });
   }
   const effective = parseEnvOperators(ctx.env);
   const adapter = ctx.operators ?? createStoreOperatorsAdapter(ctx.env);
@@ -159,6 +175,10 @@ async function resolveOperator(
     try {
       for (const entry of await adapter.listOperators()) effective.add(entry.login);
     } catch {
+      // #5607 (G-5): the degrade was silent; log it.
+      structuredLog.warn("platformTenants.operator_list_degraded", {
+        login: login || null,
+      });
       // Store-list failure degrades to env-only, exactly as the
       // commercial price routes behave — never a lockout, never
       // a silent widening (env-only is the narrower set here
@@ -167,7 +187,7 @@ async function resolveOperator(
     }
   }
   if (!effective.has(login)) {
-    return jsonError("Forbidden: tenant administration requires a store operator.", 403);
+    return jsonError("FAILURE_COMMERCIAL_OPERATOR_REQUIRED", 403, { login });
   }
   return login;
 }
@@ -208,7 +228,13 @@ function auditBestEffort(
   try {
     ctx.audit?.("platform-tenant-admin", "orchestrator", payload);
   } catch {
+    // #5607 (G-5): the swallow was silent; log it.
     // Best-effort annotation only; see the module header.
+    structuredLog.warn("platformTenants.audit_annotation_failed", {
+      action,
+      tenantId,
+      login,
+    });
   }
   void appendAuditChainBestEffort(
     () =>
@@ -256,17 +282,37 @@ export async function handlePlatformTenantRoutes(
     return null;
   }
 
+  // #5607 (G-5): entry event — after the route matched, before
+  // the operator gate, so unauthenticated probes on real admin
+  // paths are logged; the gate verdict is the refusal warn.
+  const entryLogin = request.headers.get("x-user-login")?.trim() || null;
+  structuredLog.info("platformTenants.request_started", {
+    action,
+    method: request.method,
+    tenantId: tenantId || null,
+    login: entryLogin,
+  });
+
   const operator = await resolveOperator(request, ctx);
   if (operator instanceof Response) return operator;
   const commercial = ctx.commercial ?? createCommercialAdapter(ctx.env);
   const directory = ctx.directory ?? createTenantDirectoryAdapter(ctx.env);
   if (!commercial || !directory) {
-    return jsonError("Tenant administration unavailable: AGENT_DB is not bound.", 503);
+    return jsonError("FAILURE_COMMERCIAL_STORE_UNAVAILABLE", 503, {
+      action,
+      tenantId: tenantId || null,
+      login: operator,
+    });
   }
 
   try {
     if (action === "list") {
-      if (request.method !== "GET") return jsonError("Method not allowed", 405);
+      if (request.method !== "GET")
+        return jsonError("FAILURE_COMMERCIAL_METHOD_NOT_ALLOWED", 405, {
+          action,
+          tenantId: tenantId || null,
+          login: operator,
+        });
       const ids = await directory.listTenantIds();
       const tenants = [];
       for (const id of ids) {
@@ -274,11 +320,21 @@ export async function handlePlatformTenantRoutes(
         const members = await directory.listTenantMembers(id);
         tenants.push({ ...settings, memberCount: members.length });
       }
+      structuredLog.info("platformTenants.tenants_listed", {
+        action,
+        login: operator,
+        tenantCount: tenants.length,
+      });
       return Response.json({ tenants });
     }
 
     if (action === "create") {
-      if (request.method !== "POST") return jsonError("Method not allowed", 405);
+      if (request.method !== "POST")
+        return jsonError("FAILURE_COMMERCIAL_METHOD_NOT_ALLOWED", 405, {
+          action,
+          tenantId: tenantId || null,
+          login: operator,
+        });
       const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
       // #5604: the create-body shape goes through the shared helper
       // (`tenantCreateBodySchema` — presence + string type of
@@ -302,6 +358,12 @@ export async function handlePlatformTenantRoutes(
         // re-creating an existing tenant returns its current
         // settings instead of failing, so a retried create
         // cannot duplicate anything.
+        structuredLog.info("platformTenants.tenant_created", {
+          action,
+          tenantId: newTenantId.trim(),
+          login: operator,
+          created: false,
+        });
         return Response.json({
           tenant: await readSettings(commercial, newTenantId.trim()),
           creationMode: TENANT_CREATION_MODE,
@@ -311,6 +373,12 @@ export async function handlePlatformTenantRoutes(
       // directory lists it from that row on the next read.
       const settings = await commercial.setTenantAdsEnabled(newTenantId.trim(), true);
       auditBestEffort(ctx, operator, "create", newTenantId.trim());
+      structuredLog.info("platformTenants.tenant_created", {
+        action,
+        tenantId: newTenantId.trim(),
+        login: operator,
+        created: true,
+      });
       return Response.json(
         {
           tenant: settingsView(
@@ -325,12 +393,27 @@ export async function handlePlatformTenantRoutes(
       );
     }
 
-    if (!isTenantIdShaped(tenantId)) return jsonError("Unknown tenant.", 404);
+    if (!isTenantIdShaped(tenantId))
+      return jsonError("FAILURE_COMMERCIAL_NOT_FOUND", 404, {
+        action,
+        tenantId,
+        login: operator,
+      });
     const known = await directory.listTenantIds();
-    if (!known.includes(tenantId)) return jsonError("Unknown tenant.", 404);
+    if (!known.includes(tenantId))
+      return jsonError("FAILURE_COMMERCIAL_NOT_FOUND", 404, {
+        action,
+        tenantId,
+        login: operator,
+      });
 
     if (action === "detail") {
-      if (request.method !== "GET") return jsonError("Method not allowed", 405);
+      if (request.method !== "GET")
+        return jsonError("FAILURE_COMMERCIAL_METHOD_NOT_ALLOWED", 405, {
+          action,
+          tenantId,
+          login: operator,
+        });
       const settings = await readSettings(commercial, tenantId);
       const memberUserIds = await directory.listTenantMembers(tenantId);
       const members = [];
@@ -349,11 +432,21 @@ export async function handlePlatformTenantRoutes(
           includedRuns: account ? account.includedRuns : 0,
         });
       }
+      structuredLog.info("platformTenants.tenant_detail_read", {
+        action,
+        tenantId,
+        login: operator,
+      });
       return Response.json({ tenant: { ...settings, members } });
     }
 
     if (action === "settings") {
-      if (request.method !== "PATCH") return jsonError("Method not allowed", 405);
+      if (request.method !== "PATCH")
+        return jsonError("FAILURE_COMMERCIAL_METHOD_NOT_ALLOWED", 405, {
+          action,
+          tenantId,
+          login: operator,
+        });
       const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
       // #5604: the settings-body shape goes through the shared
       // helper (`tenantSettingsBodySchema` — JSON types only). The
@@ -428,10 +521,19 @@ export async function handlePlatformTenantRoutes(
         : await applySettings();
       if (early) return early;
       auditBestEffort(ctx, operator, "update-settings", tenantId);
+      structuredLog.info("platformTenants.tenant_settings_updated", {
+        action,
+        tenantId,
+        login: operator,
+      });
       return Response.json({ tenant: await readSettings(commercial, tenantId) });
     }
 
-    return jsonError("Method not allowed", 405);
+    return jsonError("FAILURE_COMMERCIAL_METHOD_NOT_ALLOWED", 405, {
+      action,
+      tenantId: tenantId || null,
+      login: operator,
+    });
   } catch (err) {
     // #5606 (G-3): typed failures render from the catalog; anything
     // else logs server-side and answers the generic code.

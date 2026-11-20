@@ -65,6 +65,7 @@ import {
   type PaymentWorkflowHost,
 } from "../../services/paymentWorkflowSubmission";
 
+import { codedMessage } from "../../outcomes/outcomeAspects";
 import { createStructuredLogger } from "../../observability/structuredLogger";
 import { createObservabilitySink } from "../../observability/createObservabilityPorts";
 
@@ -96,6 +97,26 @@ function json(data: unknown, status = 200): Response {
   });
 }
 
+/**
+ * Issue #5607 (G-5/G-6) — the coded refusal helper: logs the
+ * refusal (warn, with code + status) and returns the same
+ * {code, error} shape the G2/G4 modules use. Statuses are
+ * unchanged from the pre-slice literals. The `json` helper stays
+ * for success payloads.
+ */
+function jsonError(
+  code: string,
+  status: number,
+  fields: Record<string, unknown> = {},
+): Response {
+  structuredLog.warn("paymentAssuranceLive.request_refused", {
+    code,
+    status,
+    ...fields,
+  });
+  return json({ code, error: codedMessage(code) }, status);
+}
+
 function envRecord(ctx: PaymentAssuranceLiveContext): EnvRecord {
   return (ctx.env ?? {}) as EnvRecord;
 }
@@ -121,18 +142,22 @@ function liveLogins(env: EnvRecord): string[] {
   return raw.split(",").map((s) => s.trim()).filter(Boolean);
 }
 
-async function guard(request: Request, ctx: PaymentAssuranceLiveContext): Promise<{ login: string } | Response> {
+async function guard(
+  request: Request,
+  ctx: PaymentAssuranceLiveContext,
+  route: string,
+): Promise<{ login: string } | Response> {
   const env = envRecord(ctx);
   const flagOn = await createFeatureFlagPort(ctx.env).isEnabled("payment_assurance");
   if (!flagOn) {
-    return json({ error: "payment_assurance flag is OFF; live testing is disabled." }, 403);
+    return jsonError("FAILURE_PAYMENT_ASSURANCE_DISABLED", 403, { route, login: null });
   }
   const login = callerLogin(request, ctx);
   if (!login) {
-    return json({ error: "Missing caller identity (x-user-login); refusing to start a live test run." }, 401);
+    return jsonError("FAILURE_COMMERCIAL_UNAUTHORIZED", 401, { route, login: null });
   }
   if (!liveLogins(env).includes(login)) {
-    return json({ error: `Live testing is not configured for this login. Ask the owner to add it to PAYMENT_ASSURANCE_LIVE_LOGINS.` }, 403);
+    return jsonError("FAILURE_PAYMENT_ASSURANCE_NOT_ALLOWED", 403, { route, login });
   }
   return { login };
 }
@@ -219,14 +244,14 @@ async function readBody(request: Request): Promise<Record<string, unknown> | nul
 async function handleStart(request: Request, ctx: PaymentAssuranceLiveContext, login: string): Promise<Response> {
   const env = envRecord(ctx);
   const body = await readBody(request);
-  if (!body) return json({ error: "Request body must be a JSON object." }, 400);
+  if (!body) return jsonError("FAILURE_COMMERCIAL_REQUEST_INVALID", 400, { route: "start", login });
   const mode = body.mode;
   if (mode !== "coverage" && mode !== "checkout") {
-    return json({ error: "mode must be \"coverage\" or \"checkout\"." }, 400);
+    return jsonError("FAILURE_COMMERCIAL_REQUEST_INVALID", 400, { route: "start", login });
   }
   const scheduleKind = body.scheduleKind ?? "one_off";
   if (scheduleKind !== "one_off" && scheduleKind !== "recurring") {
-    return json({ error: "scheduleKind must be \"one_off\" or \"recurring\"." }, 400);
+    return jsonError("FAILURE_COMMERCIAL_REQUEST_INVALID", 400, { route: "start", login });
   }
   const authorizedAtSubmission = body.authorizedAtSubmission === true;
 
@@ -240,10 +265,10 @@ async function handleStart(request: Request, ctx: PaymentAssuranceLiveContext, l
   const nativeStripeConfigured = Boolean(checkoutPorts?.card);
   if (mode === "checkout") {
     if (!monetizationEnabled) {
-      return json({ error: "Checkout-mode live test refused: the monetization flag is OFF (FeatureFlagPort)." }, 409);
+      return jsonError("FAILURE_PAYMENT_ASSURANCE_UNAVAILABLE", 409, { route: "start", login });
     }
     if (!nativeStripeConfigured) {
-      return json({ error: "Checkout-mode live test refused: native Stripe is not configured (no Stripe key for the card CheckoutPort in the deployed env)." }, 409);
+      return jsonError("FAILURE_PAYMENT_ASSURANCE_UNAVAILABLE", 409, { route: "start", login });
     }
   }
 
@@ -283,7 +308,7 @@ async function handleStart(request: Request, ctx: PaymentAssuranceLiveContext, l
   });
   const binding = bindingFrom(env);
   if (!binding) {
-    return json({ error: "PAYMENT_WORKFLOW binding is not configured; refusing to start a live test run." }, 503);
+    return jsonError("FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", 503, { route: "start", login });
   }
   try {
     const started = await startPaymentWorkflowViaBinding(binding, params);
@@ -307,24 +332,24 @@ async function handleStart(request: Request, ctx: PaymentAssuranceLiveContext, l
     });
   } catch (err) {
     logError(err);
-    return json({ error: "Internal error." }, 500);
+    return jsonError("FAILURE_UNEXPECTED_ERROR", 500, { route: "start", login });
   }
 }
 
 async function handleEvent(request: Request, ctx: PaymentAssuranceLiveContext, login: string): Promise<Response> {
   const env = envRecord(ctx);
   const body = await readBody(request);
-  if (!body) return json({ error: "Request body must be a JSON object." }, 400);
+  if (!body) return jsonError("FAILURE_COMMERCIAL_REQUEST_INVALID", 400, { route: "event", login });
   if (!isLiveTestId(body.workflowId)) {
-    return json({ error: "Only live-test workflow ids can receive events through this endpoint." }, 403);
+    return jsonError("FAILURE_PAYMENT_ASSURANCE_LIVE_TEST_ONLY", 403, { route: "event", login });
   }
   const binding = bindingFrom(env);
-  if (!binding) return json({ error: "PAYMENT_WORKFLOW binding is not configured." }, 503);
+  if (!binding) return jsonError("FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", 503, { route: "event", login });
   const host = bindingHost(binding);
   try {
     if (body.type === "approval") {
       if (typeof body.approved !== "boolean") {
-        return json({ error: "approval events require a boolean \"approved\" field." }, 400);
+        return jsonError("FAILURE_COMMERCIAL_REQUEST_INVALID", 400, { route: "event", login });
       }
       await deliverPaymentApprovalViaHost(host, body.workflowId, {
         approved: body.approved,
@@ -336,7 +361,7 @@ async function handleEvent(request: Request, ctx: PaymentAssuranceLiveContext, l
         paymentIntentId: typeof body.paymentIntentId === "string" ? body.paymentIntentId : undefined,
       });
     } else {
-      return json({ error: "type must be \"approval\" or \"payment_verified\"." }, 400);
+      return jsonError("FAILURE_COMMERCIAL_REQUEST_INVALID", 400, { route: "event", login });
     }
     structuredLog.info("paymentAssuranceLive.event_delivered", {
       message: `[payment-assurance-live] event type=${body.type} workflow=${body.workflowId} login=${login}`,
@@ -347,15 +372,15 @@ async function handleEvent(request: Request, ctx: PaymentAssuranceLiveContext, l
     return json({ delivered: true, workflowId: body.workflowId, type: body.type });
   } catch (err) {
     logError(err);
-    return json({ error: "Internal error." }, 500);
+    return jsonError("FAILURE_UNEXPECTED_ERROR", 500, { route: "event", login });
   }
 }
 
-async function handleStatus(_request: Request, url: URL, ctx: PaymentAssuranceLiveContext): Promise<Response> {
+async function handleStatus(_request: Request, url: URL, ctx: PaymentAssuranceLiveContext, login: string): Promise<Response> {
   const env = envRecord(ctx);
   const workflowId = url.searchParams.get("workflowId");
   if (!isLiveTestId(workflowId)) {
-    return json({ error: "Only live-test workflow ids can be queried through this endpoint." }, 403);
+    return jsonError("FAILURE_PAYMENT_ASSURANCE_LIVE_TEST_ONLY", 403, { route: "status", login });
   }
   const binding = bindingFrom(env);
   let instanceStatus: unknown = "unknown";
@@ -373,6 +398,12 @@ async function handleStatus(_request: Request, url: URL, ctx: PaymentAssuranceLi
               : result ?? "unknown";
       }
     } catch {
+      // #5607 (G-5): the degrade was silent; log it.
+      structuredLog.warn("paymentAssuranceLive.instance_status_degraded", {
+        route: "status",
+        login,
+        workflowId,
+      });
       instanceStatus = "unknown";
     }
   }
@@ -399,25 +430,32 @@ async function handleStatus(_request: Request, url: URL, ctx: PaymentAssuranceLi
       checkout = { error: "Stripe session retrieve failed" };
     }
   }
+  // #5607 (G-5): outcome event for the status read (the start
+  // and event outcomes already log above).
+  structuredLog.info("paymentAssuranceLive.status_read", {
+    route: "status",
+    login,
+    workflowId,
+  });
   return json({ workflowId, instanceStatus, checkout });
 }
 
-async function handleCheckPayment(request: Request, ctx: PaymentAssuranceLiveContext): Promise<Response> {
+async function handleCheckPayment(request: Request, ctx: PaymentAssuranceLiveContext, login: string): Promise<Response> {
   const env = envRecord(ctx);
   const body = await readBody(request);
-  if (!body) return json({ error: "Request body must be a JSON object." }, 400);
+  if (!body) return jsonError("FAILURE_COMMERCIAL_REQUEST_INVALID", 400, { route: "check-payment", login });
   if (!isLiveTestId(body.workflowId)) {
-    return json({ error: "Only live-test workflow ids can be checked through this endpoint." }, 403);
+    return jsonError("FAILURE_PAYMENT_ASSURANCE_LIVE_TEST_ONLY", 403, { route: "check-payment", login });
   }
   // Issue #2197: native state only — the card CheckoutPort's
   // session retrieve replaces cfpay checkout.status. No card port
   // refuses instead of faking fulfillment.
   const card = resolveCheckoutPorts(ctx)?.card ?? null;
   if (!card) {
-    return json({ error: "Native Stripe is not configured in the deployed env; cannot re-read checkout status." }, 409);
+    return jsonError("FAILURE_PAYMENT_ASSURANCE_UNAVAILABLE", 409, { route: "check-payment", login });
   }
   const binding = bindingFrom(env);
-  if (!binding) return json({ error: "PAYMENT_WORKFLOW binding is not configured." }, 503);
+  if (!binding) return jsonError("FAILURE_COMMERCIAL_SERVICE_UNAVAILABLE", 503, { route: "check-payment", login });
   let evidence: CardSessionEvidence | null = null;
   try {
     evidence = await card.retrieveCardSession({
@@ -432,16 +470,28 @@ async function handleCheckPayment(request: Request, ctx: PaymentAssuranceLiveCon
   // else delivers nothing — the wake-up event is never sent for
   // an unfulfilled or mis-bound session.
   if (!evidence || !isNativeFulfilled(evidence, body.workflowId as string)) {
+    structuredLog.info("paymentAssuranceLive.check_payment_not_fulfilled", {
+      route: "check-payment",
+      login,
+      workflowId: body.workflowId as string,
+      delivered: false,
+    });
     return json({ delivered: false, checkout: evidence, reason: "Checkout session is not fulfilled for this run; no payment_verified event was delivered." });
   }
   try {
     await deliverPaymentVerifiedViaHost(bindingHost(binding), body.workflowId, {
       paymentIntentId: evidence.paymentIntentId,
     });
+    structuredLog.info("paymentAssuranceLive.check_payment_delivered", {
+      route: "check-payment",
+      login,
+      workflowId: body.workflowId as string,
+      delivered: true,
+    });
     return json({ delivered: true, workflowId: body.workflowId, checkout: evidence });
   } catch (err) {
     logError(err);
-    return json({ error: "Internal error." }, 500);
+    return jsonError("FAILURE_UNEXPECTED_ERROR", 500, { route: "check-payment", login });
   }
 }
 
@@ -454,24 +504,41 @@ export async function handlePaymentAssuranceLiveRoutes(
 ): Promise<Response | null> {
   const method = request.method.toUpperCase();
   if (method === "POST" && path.endsWith("/api/assurance/payment-workflow/start")) {
-    const guarded = await guard(request, ctx);
+    const guarded = await guard(request, ctx, "start");
     if (guarded instanceof Response) return guarded;
+    // #5607 (G-5): entry event, after the guard passes.
+    structuredLog.info("paymentAssuranceLive.request_started", {
+      route: "start",
+      login: guarded.login,
+    });
     return handleStart(request, ctx, guarded.login);
   }
   if (method === "POST" && path.endsWith("/api/assurance/payment-workflow/event")) {
-    const guarded = await guard(request, ctx);
+    const guarded = await guard(request, ctx, "event");
     if (guarded instanceof Response) return guarded;
+    structuredLog.info("paymentAssuranceLive.request_started", {
+      route: "event",
+      login: guarded.login,
+    });
     return handleEvent(request, ctx, guarded.login);
   }
   if (method === "GET" && path.endsWith("/api/assurance/payment-workflow/status")) {
-    const guarded = await guard(request, ctx);
+    const guarded = await guard(request, ctx, "status");
     if (guarded instanceof Response) return guarded;
-    return handleStatus(request, url, ctx);
+    structuredLog.info("paymentAssuranceLive.request_started", {
+      route: "status",
+      login: guarded.login,
+    });
+    return handleStatus(request, url, ctx, guarded.login);
   }
   if (method === "POST" && path.endsWith("/api/assurance/payment-workflow/check-payment")) {
-    const guarded = await guard(request, ctx);
+    const guarded = await guard(request, ctx, "check-payment");
     if (guarded instanceof Response) return guarded;
-    return handleCheckPayment(request, ctx);
+    structuredLog.info("paymentAssuranceLive.request_started", {
+      route: "check-payment",
+      login: guarded.login,
+    });
+    return handleCheckPayment(request, ctx, guarded.login);
   }
   return null;
 }
