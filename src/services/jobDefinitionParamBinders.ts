@@ -154,6 +154,8 @@ export function bindStageOverrides(
     stageModes?: Record<string, Partial<JobExecutionMode>>;
     /** Issue #4479 — a stage's cadence, as minutes or a cron expression. */
     stageSchedules?: Record<string, { intervalMinutes?: number; cron?: string }>;
+    /** Issue #4775 S1 — a stage's per-unit deadline, in milliseconds. */
+    stageTimeouts?: Record<string, number>;
   },
 ): JobDefinitionPerStage {
   const stages = new Map(spec.stages.map((stage) => [stage.kind, stage]));
@@ -237,9 +239,27 @@ export function bindStageOverrides(
       ...(minutes !== undefined ? { interval: `every ${minutes} minutes` } : {}),
     };
   }
+  // Issue #4775 S1 — a stage's per-unit deadline, in milliseconds.
+  // Refused by name (unknown stage, or a value that is not a
+  // positive finite number); nothing partial is returned.
+  const timeouts: Record<string, number> = {};
+  for (const [kind, timeoutMs] of Object.entries(input.stageTimeouts ?? {})) {
+    if (!stages.has(kind)) {
+      throw new Error(
+        `Job definition "${spec.id}" has no stage "${kind}". Its stages are: ${[...stages.keys()].join(", ")}.`,
+      );
+    }
+    if (typeof timeoutMs !== "number" || !Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+      throw new Error(
+        `Stage "${kind}" of job definition "${spec.id}" has an invalid timeout ${String(timeoutMs)}: the stage timeout must be a positive finite number of milliseconds.`,
+      );
+    }
+    timeouts[kind] = timeoutMs;
+  }
   return {
     ...(Object.keys(params).length > 0 ? { params } : {}),
     ...(Object.keys(modes).length > 0 ? { modes } : {}),
     ...(Object.keys(schedules).length > 0 ? { schedules } : {}),
+    ...(Object.keys(timeouts).length > 0 ? { timeouts } : {}),
   };
 }

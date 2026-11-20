@@ -161,6 +161,14 @@ export interface JobNodeConfig {
   outputs?: JobOutputsConfig;
   /** Per-node execution-mode overrides, merged over the job's resolved mode. */
   executionMode?: Partial<JobExecutionMode>;
+  /**
+   * Per-node stage deadline, in milliseconds (#4775 S1). Wins over
+   * the env-resolved global stage default (resolveStageTimeoutMs);
+   * absent, the default applies, clamped to the run deadline
+   * whenever one applies (feed jobs). Must be a positive finite
+   * number — anything else is refused by name at resolve time.
+   */
+  timeoutMs?: number;
   schedule?: JobScheduleConfig;
   /**
    * Retired (#3944): the stage never executes again in any run
