@@ -272,6 +272,16 @@ function resolveNode(raw: unknown, path: string): JobNodeConfig {
     resolveExecutionMode(raw.executionMode);
     node.executionMode = raw.executionMode as JobNodeConfig["executionMode"];
   }
+  if (raw.timeoutMs !== undefined) {
+    // Issue #4775 S1 — the per-node stage deadline: a positive
+    // finite number of milliseconds, refused by name otherwise.
+    if (typeof raw.timeoutMs !== "number" || !Number.isFinite(raw.timeoutMs) || raw.timeoutMs <= 0) {
+      throw invalid(
+        `Node ${path} "timeoutMs" must be a positive finite number of milliseconds.`,
+      );
+    }
+    node.timeoutMs = raw.timeoutMs;
+  }
   if (raw.schedule !== undefined) {
     node.schedule = resolveSchedule(raw.schedule);
   }

@@ -49,11 +49,12 @@
  * door's matching order). No new store, no new read surface: every
  * site already holds the agent the read-back goes through.
  *
- * Await bound: the workflow's own per-shard deadline
- * (DEFAULT_SHARD_TIMEOUT_MS) — a run cannot legitimately outlive
- * its shards' deadlines by much, and the bound is the workflow's
- * named constant, not a new literal. Poll cadence is the shared
- * chat await cadence (CHAT_AWAIT_POLL_INTERVAL_MS).
+ * Await bound: the resolved global stage deadline
+ * (resolveStageTimeoutMs(env), #4775 S1) — a run cannot
+ * legitimately outlive its stages' deadline by much, and the
+ * bound is the stage timeouts module's resolution, not a new
+ * literal. Poll cadence is the shared chat await cadence
+ * (CHAT_AWAIT_POLL_INTERVAL_MS).
  */
 import type { Env } from "../types";
 import type { ScreenerRunResult } from "../agents/screener-agent";
@@ -69,9 +70,9 @@ import {
 import type { StockScreenRunSpec } from "./stockScreenRunSpec";
 import type { BrokerId } from "../trading";
 import { workflowTriggerForSpec } from "./stockScreenRunSpec";
+import { resolveStockScreenAwaitDeadlineMs } from "../services/stageTimeouts";
 import {
   assertWorkflowJobCommand,
-  DEFAULT_SHARD_TIMEOUT_MS,
   workflowStatusUrl,
   WorkflowError,
   type WorkflowCollation,
@@ -537,7 +538,7 @@ export async function runStockScreenViaEngine(
   const sleep =
     input.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const pollIntervalMs = input.pollIntervalMs ?? CHAT_AWAIT_POLL_INTERVAL_MS;
-  const deadline = nowMs() + (input.awaitDeadlineMs ?? DEFAULT_SHARD_TIMEOUT_MS);
+  const deadline = nowMs() + (input.awaitDeadlineMs ?? resolveStockScreenAwaitDeadlineMs(env as unknown as Record<string, unknown>));
   // A terminal instance whose collation has not projected yet
   // gets a few extra polls — projection lag is not a failure.
   let terminalPolls = 0;

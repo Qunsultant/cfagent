@@ -114,6 +114,7 @@ import {
   resolveFeedJobTimeouts,
   withFeedDeadline,
 } from "./feedJobTimeouts";
+import { resolveStageTimeoutMs, resolveStageTimeoutMsForNode } from "./stageTimeouts";
 import { FEED_JOB_CODES } from "./feedJobCodes";
 
 /**
@@ -153,7 +154,6 @@ export function resolveFeedExecutionDeadlineMs(
     : resolveFeedJobTimeouts(env).executionMs;
 }
 import {
-  DEFAULT_STAGE_TIMEOUT_MS,
   isJobStageId,
   jobStageId,
   resolveStageRetryBudget,
@@ -310,6 +310,17 @@ export interface JobPipelineDeps {
    * bound.
    */
   feedExecutionDeadlineMs?: number;
+  /**
+   * The env-resolved global stage default (#4775 S1): the host's
+   * resolveStageTimeoutMs(env), 600s when no knob is set. A stage
+   * with no node timeoutMs runs under this bound, clamped to the
+   * run deadline whenever one applies (feed jobs). Resolved
+   * through stageDefaultMs — absent / non-positive / non-finite
+   * means the recorded default, so hosts that never set this are
+   * bounded by default. Non-feed jobs are never raced by the run
+   * deadline, so their stages carry this bound alone.
+   */
+  stageTimeoutMs?: number;
   /** The schedule host stage scheduling registers with. registerSchedules takes its host explicitly; scheduleStage falls back to this. */
   scheduleHost?: JobScheduleHost;
 }
@@ -454,6 +465,14 @@ interface RunContext {
   kind: JobRunKind;
   rootConfig: JobDefinition["config"];
   scopePath: string;
+  /**
+   * The run bound the stage deadlines clamp to (#4775 S1,
+   * Decision 1): a feed job's whole-execution deadline, resolved
+   * once in executeRun. Undefined when no run deadline applies
+   * (non-feed jobs, stage actions) — then a stage's timeout
+   * stands alone.
+   */
+  runDeadlineMs?: number;
   resuming: boolean;
   /** The run's stage-runner checkpoint — the one resume truth, persisted via checkpoints. */
   ledger: StageRunnerCheckpoint;
@@ -2236,6 +2255,8 @@ export class JobPipelineControl {
       resuming: boolean;
       instance: JobInstanceRecord;
       forceStage: string | null;
+      /** Issue #4775 S1 — the run bound the stage deadlines clamp to; absent when none applies. */
+      runDeadlineMs?: number;
     },
   ): Promise<RunContext> {
     const checkpoints = createJobPipelineStageCheckpointStore(
@@ -2266,6 +2287,7 @@ export class JobPipelineControl {
       kind: opts.kind,
       rootConfig: definition.config,
       scopePath: opts.scopePath,
+      runDeadlineMs: opts.runDeadlineMs,
       resuming: opts.resuming,
       ledger,
       checkpoints,
@@ -2364,6 +2386,14 @@ export class JobPipelineControl {
     await this.setInstance(instance);
     await publishJobStatus(publisher, { jobId, runId: opts.runId, state: "running", at: this.iso() });
 
+    // Issue #4775 S1 (Decision 1) — the run bound the stage
+    // deadlines clamp to: a feed job's whole-execution deadline;
+    // a non-feed job has no run deadline, so its stages carry
+    // their own timeout alone. Resolved once here so the race
+    // below and the stage compilation agree on the bound.
+    const runDeadlineMs = jobTreeInvokesStep(definition.root, FEED_PULL_STEP_NAME)
+      ? resolveFeedExecutionDeadlineMs(this.deps.feedExecutionDeadlineMs)
+      : undefined;
     const ctx = await this.buildContext(definition, {
       runId: opts.runId,
       trigger: opts.trigger,
@@ -2372,6 +2402,7 @@ export class JobPipelineControl {
       resuming: opts.resuming,
       instance,
       forceStage: null,
+      runDeadlineMs,
     });
     if (!opts.resuming) await this.persistLedger(ctx);
 
@@ -2389,10 +2420,10 @@ export class JobPipelineControl {
       // path — so the settled outcome cannot flip. Non-feed jobs
       // execute exactly as before.
       const execution = this.execNode(ctx, scopeNode, opts.scopePath, null);
-      if (jobTreeInvokesStep(definition.root, FEED_PULL_STEP_NAME)) {
+      if (runDeadlineMs !== undefined) {
         await withFeedDeadline(
           execution,
-          resolveFeedExecutionDeadlineMs(this.deps.feedExecutionDeadlineMs),
+          runDeadlineMs,
           FEED_JOB_CODES.deadlineExceeded,
         );
       } else {
@@ -2591,6 +2622,7 @@ export class JobPipelineControl {
     node: JobNodeConfig,
     path: string,
     mode: JobExecutionMode,
+    runDeadlineMs?: number,
   ): StageRunnerStage {
     const kind = node.kind as PipelineStage;
     // Kinds naming a chain stage retry under that stage's bucket
@@ -2604,10 +2636,29 @@ export class JobPipelineControl {
     return {
       stage: jobStageId(path),
       execution: mode.concurrency,
-      timeoutMs: DEFAULT_STAGE_TIMEOUT_MS,
+      // Issue #4775 S1 — the effective stage deadline: the node's
+      // own timeoutMs, else the env-resolved global default,
+      // clamped to the run deadline whenever one applies (a stage
+      // unit can never outlive its run). A run without a deadline
+      // passes no bound, so the stage timeout stands alone.
+      timeoutMs: resolveStageTimeoutMsForNode(node, this.stageDefaultMs(), runDeadlineMs),
       pacing: mode.pacing,
       ...(retryBucket ? { retryBucket } : {}),
     };
+  }
+
+  /**
+   * Issue #4775 S1 (Decision 2) — the env-resolved global stage
+   * default: a positive finite injected value (the host's
+   * resolveStageTimeoutMs(env)) wins; absent / non-positive /
+   * non-finite falls back to the recorded 600s default, so hosts
+   * that never set this are bounded by default.
+   */
+  private stageDefaultMs(): number {
+    const injected = this.deps.stageTimeoutMs;
+    return typeof injected === "number" && Number.isFinite(injected) && injected > 0
+      ? injected
+      : resolveStageTimeoutMs({});
   }
 
   private async clearStageDesired(jobId: string, stageId: string): Promise<void> {
@@ -2969,7 +3020,7 @@ export class JobPipelineControl {
           `Node "${path || "root"}" (kind "${node.kind}") is configured for the sharded execution shape but names no shard keys (processing.shards). Refusing rather than silently running monolith.`,
         );
       }
-      const stage = this.stageForNode(node, path, mode);
+      const stage = this.stageForNode(node, path, mode, ctx.runDeadlineMs);
       const plan = planRun({
         runId: ctx.runId,
         invocation: this.deps.invocation ?? "sync",

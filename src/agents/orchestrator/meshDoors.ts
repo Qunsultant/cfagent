@@ -1410,6 +1410,8 @@ export async function definePipelineJobFromSpecViaDoor(
     stageParams?: Record<string, Record<string, unknown>>;
     stageModes?: Record<string, Partial<import("../../data/jobPipelinePorts").JobExecutionMode>>;
     stageSchedules?: Record<string, { intervalMinutes?: number; cron?: string }>;
+    /** Issue #4775 S1 — per-stage per-unit deadline, in milliseconds. */
+    stageTimeouts?: Record<string, number>;
   } = {},
 ): Promise<{ jobId: string; name: string; version: number; stages: number }> {
   const login = requireActingLogin(actingLogin);
@@ -1419,6 +1421,7 @@ export async function definePipelineJobFromSpecViaDoor(
     ...(overrides.stageParams ? { stageParams: overrides.stageParams } : {}),
     ...(overrides.stageModes ? { stageModes: overrides.stageModes } : {}),
     ...(overrides.stageSchedules ? { stageSchedules: overrides.stageSchedules } : {}),
+    ...(overrides.stageTimeouts ? { stageTimeouts: overrides.stageTimeouts } : {}),
   });
 }
 

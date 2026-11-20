@@ -17,6 +17,8 @@ export interface JobDefinitionPerStage {
   modes?: Record<string, Partial<JobExecutionMode>>;
   /** Issue #4479 — a stage's own cadence (engine `JobScheduleConfig` shape). */
   schedules?: Record<string, { enabled: boolean; cron?: string; interval?: string }>;
+  /** Issue #4775 S1 — a stage's own per-unit deadline, in milliseconds. */
+  timeouts?: Record<string, number>;
 }
 
 export interface RawJobConfig {
@@ -47,6 +49,7 @@ function nodeFromStage(stage: JobStageSpec, perStage: JobDefinitionPerStage): Re
   const stageParams = { ...(stage.params ?? {}), ...(perStage.params?.[stage.kind] ?? {}) };
   const mode = { ...(stage.executionMode ?? {}), ...(perStage.modes?.[stage.kind] ?? {}) };
   const schedule = { ...(stage.schedule ?? {}), ...(perStage.schedules?.[stage.kind] ?? {}) };
+  const timeoutMs = perStage.timeouts?.[stage.kind];
   return {
     kind: stage.kind,
     steps: [
@@ -57,6 +60,7 @@ function nodeFromStage(stage: JobStageSpec, perStage: JobDefinitionPerStage): Re
     ],
     ...(Object.keys(mode).length > 0 ? { executionMode: mode } : {}),
     ...(schedule.enabled ? { schedule } : {}),
+    ...(timeoutMs !== undefined ? { timeoutMs } : {}),
     ...(children ? { children } : {}),
   };
 }

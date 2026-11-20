@@ -104,6 +104,7 @@ import {
 } from "../observability/otelJobPipelineTraces";
 import { buildFeedJobRegistry, buildFeedStatus } from "../services/feedJobs";
 import { resolveFeedJobTimeouts } from "../services/feedJobTimeouts";
+import { resolveStageTimeoutMs } from "../services/stageTimeouts";
 import {
   ensureFeedPipelineJobs,
   FEED_PIPELINE_CATALOG,
@@ -601,6 +602,10 @@ export function createScheduledAgentPipelineControl(
     // (FEED_JOB_EXECUTION_MS, 240s when no knob is set), so the
     // host's whole-run deadline is operator-configurable.
     feedExecutionDeadlineMs: resolveFeedJobTimeouts(envStrings(ctx.env)).executionMs,
+    // Issue #4775 S1 — the global stage default resolves from env
+    // here too (STAGE_TIMEOUT_MS, 600s when no knob is set), so a
+    // stage with no node timeoutMs runs under the operator's bound.
+    stageTimeoutMs: resolveStageTimeoutMs(envStrings(ctx.env)),
     steps: createPipelineStepRegistry(
       feedDeps,
       enrichStepDepsForScheduledAgent(ctx),

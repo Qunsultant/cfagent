@@ -80,6 +80,9 @@ export function WorkflowDefinitionFlow() {
   const [stageSchedules, setStageSchedules] = useState<
     Record<string, { intervalMinutes?: number; cron?: string }>
   >({});
+  // Issue #4775 S1 — per-stage per-unit deadline, in milliseconds,
+  // as typed (the server parses and refuses an invalid value by name).
+  const [stageTimeouts, setStageTimeouts] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [scheduled, setScheduled] = useState<{ jobId: string; intervalSeconds: number } | null>(null);
@@ -120,6 +123,7 @@ export function WorkflowDefinitionFlow() {
     setStageModes({});
     setStageParams({});
     setStageSchedules({});
+    setStageTimeouts({});
     setActionError(null);
     setScheduled(null);
   };
@@ -129,6 +133,13 @@ export function WorkflowDefinitionFlow() {
     setBusy(true);
     setActionError(null);
     try {
+      // Issue #4775 S1 — per-stage timeouts post as milliseconds;
+      // a non-numeric value posts through as NaN (null in JSON)
+      // and the server refuses it by name, surfaced below.
+      const timeoutValues: Record<string, number> = {};
+      for (const [kind, value] of Object.entries(stageTimeouts)) {
+        if (value.trim()) timeoutValues[kind] = Number(value);
+      }
       const defined = await fetch(`/api/job-definitions/${encodeURIComponent(target.id)}/define`, {
         method: "POST",
         headers: {
@@ -136,7 +147,7 @@ export function WorkflowDefinitionFlow() {
           Accept: "application/json",
           ...csrfHeaders(),
         },
-        body: JSON.stringify({ jobId, params: paramValues, stageModes, stageParams, stageSchedules }),
+        body: JSON.stringify({ jobId, params: paramValues, stageModes, stageParams, stageSchedules, stageTimeouts: timeoutValues }),
       });
       const definedBody = (await defined.json().catch(() => ({}))) as { error?: string };
       if (!defined.ok) {
@@ -183,7 +194,7 @@ export function WorkflowDefinitionFlow() {
         </Notice>
         <Notice tone="info" density="compact">
           Every definition is validated before it is defined: a spec with an unknown stage, a
-          missing step or an invalid mode refuses by name, a required parameter with no value
+          missing step or an invalid mode or timeout refuses by name, a required parameter with no value
           refuses by name, and nothing is scheduled.
         </Notice>
         {loadError && (
@@ -332,6 +343,22 @@ export function WorkflowDefinitionFlow() {
                       }
                     />
                   )}
+                </div>
+                <div>
+                  <span>{`${stage.kind} — timeout (ms)`}</span>
+                  <TextInput
+                    aria-label={`${stage.kind} timeout (ms)`}
+                    value={stageTimeouts[stage.kind] ?? ""}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      setStageTimeouts((current) => {
+                        const next = { ...current };
+                        if (value) next[stage.kind] = value;
+                        else delete next[stage.kind];
+                        return next;
+                      });
+                    }}
+                  />
                 </div>
                 {(stage.parameters ?? []).map((param) => (
                   <TextInput

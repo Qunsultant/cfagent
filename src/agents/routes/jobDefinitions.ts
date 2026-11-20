@@ -36,6 +36,8 @@ export interface JobDefinitionsRouteContext {
       stageParams?: Record<string, Record<string, unknown>>;
       stageModes?: Record<string, Partial<JobExecutionMode>>;
       stageSchedules?: Record<string, { intervalMinutes?: number; cron?: string }>;
+      /** Issue #4775 S1 — per-stage per-unit deadline, in milliseconds. */
+      stageTimeouts?: Record<string, number>;
     },
   ) => Promise<JobDefinitionDefineResult>;
 }
@@ -83,6 +85,30 @@ function readStageMap(value: unknown): Record<string, Record<string, unknown>> |
     if (entry && typeof entry === "object" && !Array.isArray(entry)) {
       out[kind] = entry as Record<string, unknown>;
     }
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/**
+ * Issue #4775 S1 — read the flow's per-stage timeouts, keyed by
+ * stage kind. A value is milliseconds, as a number or a numeric
+ * string (the flow posts text input). An invalid value is refused
+ * by NAME (naming the stage and the raw value) — the caller
+ * maps it to 400 — never silently dropped or defaulted.
+ */
+function readStageTimeouts(value: unknown): Record<string, number> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const out: Record<string, number> = {};
+  for (const [kind, raw] of Object.entries(value as Record<string, unknown>)) {
+    const parsed =
+      typeof raw === "number" ? raw : typeof raw === "string" ? Number(raw) : Number.NaN;
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      const shown = typeof raw === "string" ? `"${raw}"` : String(raw);
+      throw new Error(
+        `Stage "${kind}" timeout ${shown} must be a positive finite number of milliseconds.`,
+      );
+    }
+    out[kind] = parsed;
   }
   return Object.keys(out).length > 0 ? out : undefined;
 }
@@ -154,10 +180,14 @@ export async function handleJobDefinitionsRoutes(
     | undefined;
   const stageSchedules = readStageSchedules(body.stageSchedules);
   try {
+    // Issue #4775 S1 — read inside the try: an invalid timeout
+    // refuses by name here and maps to 400 below.
+    const stageTimeouts = readStageTimeouts(body.stageTimeouts);
     const defined = await ctx.defineJobFromSpec(spec.id, jobId, params, {
       ...(stageParams ? { stageParams } : {}),
       ...(stageModes ? { stageModes } : {}),
       ...(stageSchedules ? { stageSchedules } : {}),
+      ...(stageTimeouts ? { stageTimeouts } : {}),
     });
     return Response.json({
       ...defined,

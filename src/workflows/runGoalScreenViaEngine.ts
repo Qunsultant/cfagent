@@ -21,10 +21,11 @@
  * `existing`) returns the existing run's outcome with
  * `executed: false`, exactly like the ledger's duplicate rule.
  *
- * Await bound: twice the workflow's per-shard deadline
- * (2 x DEFAULT_SHARD_TIMEOUT_MS) — the goal job composes two legs
- * sequentially (stock leg, then options leg), each bounded by the
- * shard deadline, so one shard deadline cannot bound the goal job.
+ * Await bound: twice the resolved global stage deadline
+ * (2 x resolveStageTimeoutMs(env), #4775 S1) — the goal job
+ * composes two legs sequentially (stock leg, then options leg),
+ * each bounded by the stage deadline, so one stage deadline
+ * cannot bound the goal job.
  * Poll cadence is the shared chat await cadence
  * (CHAT_AWAIT_POLL_INTERVAL_MS). A deadline expiry, or a terminal
  * workflow without a projected collation, returns an honest
@@ -49,7 +50,10 @@ import type { ScreenerTask } from "../services/screenerTaskLedger";
 import { collationFromRows } from "./runStockScreenViaEngine";
 import { workflowTenantId } from "./screenerWorkflowRoutes";
 import {
-  DEFAULT_SHARD_TIMEOUT_MS,
+  resolveGoalScreenAwaitDeadlineMs,
+  resolveStageTimeoutMs,
+} from "../services/stageTimeouts";
+import {
   workflowStatusUrl,
   WorkflowError,
   type WorkflowCollation,
@@ -59,8 +63,8 @@ import {
 import { CHAT_AWAIT_POLL_INTERVAL_MS } from "../agents/orchestrator/chatAwaitBudget";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
 
-/** A goal job composes two legs sequentially — twice one shard deadline. */
-export const GOAL_SCREEN_AWAIT_DEADLINE_MS = 2 * DEFAULT_SHARD_TIMEOUT_MS;
+/** A goal job composes two legs sequentially — twice one stage deadline (#4775 S1). */
+export const GOAL_SCREEN_AWAIT_DEADLINE_MS = 2 * resolveStageTimeoutMs({});
 
 export interface RunGoalScreenViaEngineInput {
   env: Env;
@@ -140,7 +144,7 @@ export async function runGoalScreenViaEngine(
   const sleep =
     input.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const pollIntervalMs = input.pollIntervalMs ?? CHAT_AWAIT_POLL_INTERVAL_MS;
-  const deadline = nowMs() + (input.awaitDeadlineMs ?? GOAL_SCREEN_AWAIT_DEADLINE_MS);
+  const deadline = nowMs() + (input.awaitDeadlineMs ?? resolveGoalScreenAwaitDeadlineMs(input.env as unknown as Record<string, unknown>));
   let terminalPolls = 0;
   for (;;) {
     const rows = await readHistory(tenantId, command.jobId).catch(() => null);
