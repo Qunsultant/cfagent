@@ -57,6 +57,7 @@
 
 import { createCommercialAdapter } from "../../data/createCommercialPorts";
 import type { CommercialStore } from "../../data/commercialPorts";
+import { PLATFORM_ROUTE_SUFFIXES } from "../../data/platformUrlCatalog";
 import { createSubscriptionAdapter } from "../../data/createSubscriptionPorts";
 import type { SubscriptionStore } from "../../data/subscriptionPorts";
 import {
@@ -255,9 +256,9 @@ export async function handlePlatformUsersRoutes(
 ): Promise<Response | null> {
   void sessionId;
   let action: "me" | "lookup" | null = null;
-  if (path.endsWith("/admin/platform-users/me")) {
+  if (path.endsWith(PLATFORM_ROUTE_SUFFIXES.userMe)) {
     action = "me";
-  } else if (path.endsWith("/admin/platform-users/lookup")) {
+  } else if (path.endsWith(PLATFORM_ROUTE_SUFFIXES.userLookup)) {
     action = "lookup";
   } else {
     return null;

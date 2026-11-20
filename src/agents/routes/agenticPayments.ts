@@ -348,7 +348,13 @@ const structuredLog = createStructuredLogger(createObservabilitySink({}), {
 });
 
 import { COMMERCIAL_DEFAULTS } from "../../config/commercialDefaults";
-import { COMMERCIAL_BARE_BASE, COMMERCIAL_ROUTE_SUFFIXES, commercialBarePath } from "../../data/commercialUrlCatalog";
+import {
+  COMMERCIAL_ROUTE_SUFFIXES,
+  commercialBarePath,
+  commercialRouteById,
+  extractCatalogParams,
+  matchCatalogRoute,
+} from "../../data/commercialUrlCatalog";
 /** The subset of OrchestratorAgent surface the agentic-payments handlers need. */
 export interface AgenticPaymentsRouteContext {
   /** Worker environment (owner: OrchestratorAgent - was `this.env`). */
@@ -6376,24 +6382,16 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
   // for the holder's segment; a move onto a superseded, future, expired, deactivated, or
   // unapproved version refuses (409), as does a move across products. A move onto the version
   // already held is a no-op success ({ moved: false }). Runs and credits are untouched.
-  if (
-    path.includes(`${COMMERCIAL_BARE_BASE}/subscriptions/`) &&
-    path.endsWith("/move") &&
-    request.method === "POST"
-  ) {
+  if (request.method === "POST" && matchCatalogRoute(commercialRouteById("subscriptionMove"), path)) {
     try {
       const login = commercialLogin();
       if (!isStoreOperator(login)) {
         return Response.json({ error: "Forbidden: store operator required." }, { status: 403 });
       }
-      const parts = path.split("/");
-      const rawId = parts[parts.indexOf("subscriptions") + 1] ?? "";
-      let subscriptionId = rawId;
-      try {
-        subscriptionId = decodeURIComponent(rawId);
-      } catch {
-        subscriptionId = rawId;
-      }
+      const { subscriptionId } = extractCatalogParams(
+        commercialRouteById("subscriptionMove"),
+        path,
+      );
       const body = (await request.json().catch(() => ({}))) as { toVersionId?: unknown; reason?: unknown };
       const toVersionId = typeof body.toVersionId === "string" ? body.toVersionId.trim() : "";
       if (!subscriptionId) return Response.json({ error: "subscriptionId is required." }, { status: 400 });
@@ -6458,24 +6456,13 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
   // (operator only). The segment changes what the NEXT per-run charge resolves to (and what a
   // future move may target); it changes nothing about held versions, runs, or credits. The
   // move audit records the held version when one exists.
-  if (
-    path.includes(`${COMMERCIAL_BARE_BASE}/accounts/`) &&
-    path.endsWith("/segment") &&
-    request.method === "POST"
-  ) {
+  if (request.method === "POST" && matchCatalogRoute(commercialRouteById("accountSegment"), path)) {
     try {
       const login = commercialLogin();
       if (!isStoreOperator(login)) {
         return Response.json({ error: "Forbidden: store operator required." }, { status: 403 });
       }
-      const parts = path.split("/");
-      const rawId = parts[parts.indexOf("accounts") + 1] ?? "";
-      let userId = rawId;
-      try {
-        userId = decodeURIComponent(rawId);
-      } catch {
-        userId = rawId;
-      }
+      const { userId } = extractCatalogParams(commercialRouteById("accountSegment"), path);
       const body = (await request.json().catch(() => ({}))) as { segment?: unknown; reason?: unknown };
       const segment = typeof body.segment === "string" ? body.segment.trim() : "";
       if (!userId) return Response.json({ error: "userId is required." }, { status: 400 });
@@ -6893,24 +6880,14 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
   // (prod-free) carries the definitional ladder floor, rank 1,
   // and refuses with the same code at 409. Audited
   // commercial.product.rank.set with the old and new rank.
-  if (
-    path.includes(`${commercialBarePath("products")}/`) &&
-    path.endsWith("/rank") &&
-    request.method === "POST"
-  ) {
+  if (request.method === "POST" && matchCatalogRoute(commercialRouteById("productRank"), path)) {
     try {
       const login = commercialLogin();
       if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
       if (!isStoreOperator(login)) {
         return Response.json({ error: "Forbidden: store operator required." }, { status: 403 });
       }
-      const parts = path.split("/");
-      let productId = parts[parts.indexOf("products") + 1] ?? "";
-      try {
-        productId = decodeURIComponent(productId);
-      } catch {
-        // Keep the raw segment; the lookup below 404s on it.
-      }
+      const { productId } = extractCatalogParams(commercialRouteById("productRank"), path);
       const rawBody: unknown = await request.json().catch(() => ({}));
       const body = (
         typeof rawBody === "object" && rawBody !== null && !Array.isArray(rawBody) ? rawBody : {}
@@ -6966,24 +6943,14 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
   // optionally narrowed to one segment (?segment=). The admin
   // chain read; buyers never see it (GET /plans stays the
   // effective-only per-segment buyer read).
-  if (
-    path.includes(`${commercialBarePath("products")}/`) &&
-    path.endsWith("/versions") &&
-    request.method === "GET"
-  ) {
+  if (request.method === "GET" && matchCatalogRoute(commercialRouteById("productVersions"), path)) {
     try {
       const login = commercialLogin();
       if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
       if (!isStoreOperator(login)) {
         return Response.json({ error: "Forbidden: store operator required." }, { status: 403 });
       }
-      const parts = path.split("/");
-      let productId = parts[parts.indexOf("products") + 1] ?? "";
-      try {
-        productId = decodeURIComponent(productId);
-      } catch {
-        // Keep the raw segment; the lookup below 404s on it.
-      }
+      const { productId } = extractCatalogParams(commercialRouteById("productVersions"), path);
       const products = requireProducts();
       if (products instanceof Response) return products;
       const subs = requireSubs();
@@ -7009,24 +6976,14 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
   // version. The Free baseline (prod-free) carries no versions
   // and refuses. A pack version's terms are (runs, price) —
   // never derived from a per-run price.
-  if (
-    path.includes(`${commercialBarePath("products")}/`) &&
-    path.endsWith("/versions") &&
-    request.method === "POST"
-  ) {
+  if (request.method === "POST" && matchCatalogRoute(commercialRouteById("productVersions"), path)) {
     try {
       const login = commercialLogin();
       if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
       if (!isStoreOperator(login)) {
         return Response.json({ error: "Forbidden: store operator required." }, { status: 403 });
       }
-      const parts = path.split("/");
-      let productId = parts[parts.indexOf("products") + 1] ?? "";
-      try {
-        productId = decodeURIComponent(productId);
-      } catch {
-        // Keep the raw segment; the lookup below 404s on it.
-      }
+      const { productId } = extractCatalogParams(commercialRouteById("productVersions"), path);
       const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
       const priceUSD = body.priceUSD;
       if (typeof priceUSD !== "number" || !Number.isFinite(priceUSD) || priceUSD < 0) {
@@ -7180,26 +7137,17 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
   // the existing approve action, addressed by version id. The
   // audit event and outcome shape match POST /plans/approve
   // exactly — one approval action, not a second one.
-  if (
-    path.includes(`${commercialBarePath("products")}/`) &&
-    path.endsWith("/approve") &&
-    request.method === "POST"
-  ) {
+  if (request.method === "POST" && matchCatalogRoute(commercialRouteById("versionApprove"), path)) {
     try {
       const login = commercialLogin();
       if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
       if (!isStoreOperator(login)) {
         return Response.json({ error: "Forbidden: store operator required." }, { status: 403 });
       }
-      const parts = path.split("/");
-      let productId = parts[parts.indexOf("products") + 1] ?? "";
-      let versionId = parts[parts.indexOf("versions") + 1] ?? "";
-      try {
-        productId = decodeURIComponent(productId);
-        versionId = decodeURIComponent(versionId);
-      } catch {
-        // Keep the raw segments; the lookups below 404 on them.
-      }
+      const { productId, versionId } = extractCatalogParams(
+        commercialRouteById("versionApprove"),
+        path,
+      );
       const products = requireProducts();
       if (products instanceof Response) return products;
       const subs = requireSubs();
@@ -7267,26 +7215,17 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
   // (operator only) — deactivate a version: blocks NEW
   // purchases only; holders ride to period end or plan change.
   // Mirrors POST /plans/deactivate exactly.
-  if (
-    path.includes(`${commercialBarePath("products")}/`) &&
-    path.endsWith("/deactivate") &&
-    request.method === "POST"
-  ) {
+  if (request.method === "POST" && matchCatalogRoute(commercialRouteById("versionDeactivate"), path)) {
     try {
       const login = commercialLogin();
       if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
       if (!isStoreOperator(login)) {
         return Response.json({ error: "Forbidden: store operator required." }, { status: 403 });
       }
-      const parts = path.split("/");
-      let productId = parts[parts.indexOf("products") + 1] ?? "";
-      let versionId = parts[parts.indexOf("versions") + 1] ?? "";
-      try {
-        productId = decodeURIComponent(productId);
-        versionId = decodeURIComponent(versionId);
-      } catch {
-        // Keep the raw segments; the lookups below 404 on them.
-      }
+      const { productId, versionId } = extractCatalogParams(
+        commercialRouteById("versionDeactivate"),
+        path,
+      );
       const products = requireProducts();
       if (products instanceof Response) return products;
       const subs = requireSubs();
@@ -7451,24 +7390,14 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
   // are recorded and counted, never fatal. Audited
   // commercial.product.bulk_move (real runs only — a dry run
   // is a read and writes nothing).
-  if (
-    path.includes(`${commercialBarePath("products")}/`) &&
-    path.endsWith("/bulk-move") &&
-    request.method === "POST"
-  ) {
+  if (request.method === "POST" && matchCatalogRoute(commercialRouteById("productBulkMove"), path)) {
     try {
       const login = commercialLogin();
       if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
       if (!isStoreOperator(login)) {
         return Response.json({ error: "Forbidden: store operator required." }, { status: 403 });
       }
-      const parts = path.split("/");
-      let productId = parts[parts.indexOf("products") + 1] ?? "";
-      try {
-        productId = decodeURIComponent(productId);
-      } catch {
-        // Keep the raw segment; the driver 404s on it.
-      }
+      const { productId } = extractCatalogParams(commercialRouteById("productBulkMove"), path);
       const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
       const reason = typeof body.reason === "string" ? body.reason.trim() : "";
       if (!reason) {
@@ -7554,24 +7483,14 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
   // GET /payments/agentic/commercial/products/:productId/bulk-moves
   // (operator only) — the bulk-move summaries for one product,
   // newest first.
-  if (
-    path.includes(`${commercialBarePath("products")}/`) &&
-    path.endsWith("/bulk-moves") &&
-    request.method === "GET"
-  ) {
+  if (request.method === "GET" && matchCatalogRoute(commercialRouteById("productBulkMoves"), path)) {
     try {
       const login = commercialLogin();
       if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
       if (!isStoreOperator(login)) {
         return Response.json({ error: "Forbidden: store operator required." }, { status: 403 });
       }
-      const parts = path.split("/");
-      let productId = parts[parts.indexOf("products") + 1] ?? "";
-      try {
-        productId = decodeURIComponent(productId);
-      } catch {
-        // Keep the raw segment; the lookup below 404s on it.
-      }
+      const { productId } = extractCatalogParams(commercialRouteById("productBulkMoves"), path);
       const products = requireProducts();
       if (products instanceof Response) return products;
       const product = await products.getProduct(productId);
@@ -7587,26 +7506,17 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
   // (operator only) — one bulk-move summary plus its
   // per-customer move rows (the audit that answers "who moved,
   // from what, to what").
-  if (
-    path.includes(`${commercialBarePath("products")}/`) &&
-    path.includes("/bulk-moves/") &&
-    request.method === "GET"
-  ) {
+  if (request.method === "GET" && matchCatalogRoute(commercialRouteById("productBulkMoveDetail"), path)) {
     try {
       const login = commercialLogin();
       if (!login) return Response.json({ error: "Unauthorized: verified login required." }, { status: 401 });
       if (!isStoreOperator(login)) {
         return Response.json({ error: "Forbidden: store operator required." }, { status: 403 });
       }
-      const parts = path.split("/");
-      let productId = parts[parts.indexOf("products") + 1] ?? "";
-      let bulkMoveId = parts[parts.indexOf("bulk-moves") + 1] ?? "";
-      try {
-        productId = decodeURIComponent(productId);
-        bulkMoveId = decodeURIComponent(bulkMoveId);
-      } catch {
-        // Keep the raw segments; the lookups below 404 on them.
-      }
+      const { productId, bulkMoveId } = extractCatalogParams(
+        commercialRouteById("productBulkMoveDetail"),
+        path,
+      );
       const products = requireProducts();
       if (products instanceof Response) return products;
       const bulkMove = await products.getBulkMove(bulkMoveId);

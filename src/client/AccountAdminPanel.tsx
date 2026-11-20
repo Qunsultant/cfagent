@@ -35,6 +35,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Button, CardHeader, EmptyState, Notice, PageSection, Select, Spinner, Stack, Table, TextInput } from "./components/ui";
 import { apiFetch } from "./apiFetch";
+import { platformPath } from "../data/platformUrlCatalog";
 import { SubscriptionGrantSection } from "./SubscriptionGrantSection";
 import { UnlimitedFreeGrantSection } from "./UnlimitedFreeGrantSection";
 import { FreeAccessGrantSection } from "./FreeAccessGrantSection";
@@ -151,7 +152,7 @@ export function AccountAdminPanel() {
     setLoading(true);
     setError("");
     try {
-      const res = await apiFetch("/api/platform/accounts/self");
+      const res = await apiFetch(platformPath("accountSelf"));
       const data = await readJson(res);
       if (!res.ok) {
         setError(data.error as string || "Could not load your account.");
@@ -180,7 +181,7 @@ export function AccountAdminPanel() {
     setSettingUp(true);
     setSetupNote("");
     try {
-      const res = await apiFetch("/api/platform/accounts/setup", { method: "POST" });
+      const res = await apiFetch(platformPath("accountSetup"), { method: "POST" });
       const data = await readJson(res);
       if (!res.ok) {
         setSetupNote(data.error as string || "Account setup failed.");
@@ -210,7 +211,7 @@ export function AccountAdminPanel() {
     setLookup(null);
     setMutationNote("");
     try {
-      const res = await apiFetch(`/api/platform/accounts/lookup?userId=${encodeURIComponent(target)}`);
+      const res = await apiFetch(`${platformPath("accountLookup")}?userId=${encodeURIComponent(target)}`);
       const data = await readJson(res);
       if (!res.ok) {
         setLookupError(

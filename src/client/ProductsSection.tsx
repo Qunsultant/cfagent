@@ -37,7 +37,7 @@ import { Button, CardHeader, Notice, Select, Stack, TextInput } from "./componen
 import { Tabs, TabPanel, type TabOption } from "./components/ui/Tabs";
 import { apiFetch } from "./apiFetch";
 import { codedMessage } from "../outcomes/outcomeAspects";
-import { COMMERCIAL_API_BASE, commercialPath } from "../data/commercialUrlCatalog";
+import { COMMERCIAL_API_BASE, commercialPath, commercialPathParams } from "../data/commercialUrlCatalog";
 import {
   DEFAULT_SEGMENT,
   FREE_PRODUCT_ID,
@@ -242,7 +242,7 @@ function ProductRankEditor({
     setError("");
     try {
       await apiJson(
-        `${commercialPath("products")}/${encodeURIComponent(product.id)}/rank`,
+        commercialPathParams("productRank", { productId: product.id }),
         {
           method: "POST",
           body: JSON.stringify({ rank }),
@@ -1047,7 +1047,7 @@ function ProductDetail({
     setActionError("");
     try {
       await apiJson(
-        `${commercialPath("products")}/${encodeURIComponent(product.id)}/versions/${encodeURIComponent(version.id)}/approve`,
+        commercialPathParams("versionApprove", { productId: product.id, versionId: version.id }),
         { method: "POST", body: JSON.stringify({}) },
       );
       onNote(`Version v${version.version} (${version.segment}) approved.`);
@@ -1064,7 +1064,7 @@ function ProductDetail({
     setActionError("");
     try {
       await apiJson(
-        `${commercialPath("products")}/${encodeURIComponent(product.id)}/versions/${encodeURIComponent(version.id)}/deactivate`,
+        commercialPathParams("versionDeactivate", { productId: product.id, versionId: version.id }),
         { method: "POST", body: JSON.stringify({}) },
       );
       // A pack has no holders or period: deactivation blocks new
@@ -1329,7 +1329,7 @@ function NewVersionForm({
     setFormError("");
     try {
       const body = await apiJson<{ plan: PlanVersionView }>(
-        `${commercialPath("products")}/${encodeURIComponent(product.id)}/versions`,
+        commercialPathParams("productVersions", { productId: product.id }),
         {
           method: "POST",
           body: JSON.stringify({
@@ -1585,7 +1585,7 @@ function BulkMovePanel({
   const loadHistory = useCallback(async () => {
     try {
       const body = await apiJson<{ bulkMoves: BulkMoveRecord[] }>(
-        `${commercialPath("products")}/${encodeURIComponent(product.id)}/bulk-moves`,
+        commercialPathParams("productBulkMoves", { productId: product.id }),
       );
       setHistory(body.bulkMoves ?? []);
     } catch {
@@ -1599,7 +1599,7 @@ function BulkMovePanel({
   }, [loadHistory]);
 
   const postBulkMove = async (body: Record<string, unknown>): Promise<BulkMoveResult> =>
-    apiJson<BulkMoveResult>(`${commercialPath("products")}/${encodeURIComponent(product.id)}/bulk-move`, {
+    apiJson<BulkMoveResult>(commercialPathParams("productBulkMove", { productId: product.id }), {
       method: "POST",
       body: JSON.stringify(body),
     });
@@ -1651,7 +1651,7 @@ function BulkMovePanel({
     setDetail(null);
     try {
       const body = await apiJson<{ bulkMove: BulkMoveRecord; moves: VersionMoveRecord[] }>(
-        `${commercialPath("products")}/${encodeURIComponent(product.id)}/bulk-moves/${encodeURIComponent(bulkMoveId)}`,
+        commercialPathParams("productBulkMoveDetail", { productId: product.id, bulkMoveId }),
       );
       setDetail(body);
     } catch (err: any) {
@@ -1870,7 +1870,7 @@ function NewRunsPackVersionForm({
     setFormError("");
     try {
       const body = await apiJson<{ version: RunsPackVersionView }>(
-        `${commercialPath("products")}/${encodeURIComponent(product.id)}/versions`,
+        commercialPathParams("productVersions", { productId: product.id }),
         {
           method: "POST",
           body: JSON.stringify({

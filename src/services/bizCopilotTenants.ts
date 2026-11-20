@@ -51,6 +51,7 @@
  */
 
 import { handlePlatformTenantRoutes, isTenantIdShaped } from "../agents/routes/platformTenants";
+import { platformPath, platformPathParams } from "../data/platformUrlCatalog";
 import type { CommercialStore } from "../data/commercialPorts";
 import type { TenantDirectory } from "../data/tenantDirectoryPorts";
 import type { StoreOperators } from "../data/storeOperatorsPorts";
@@ -320,11 +321,11 @@ type TenantRouteResult = { ok: boolean; status: number; body: Record<string, unk
 
 async function callTenantRoute(
   method: string,
-  suffix: string,
+  path: string,
   body: Record<string, unknown> | undefined,
   deps: BizCopilotTenantExecutorDeps,
 ): Promise<TenantRouteResult> {
-  const url = new URL(`https://bizcopilot.internal/api/platform-tenants${suffix}`);
+  const url = new URL(`https://bizcopilot.internal${path}`);
   const request = new Request(url.toString(), {
     method,
     headers: {
@@ -510,20 +511,25 @@ export async function executeBizCopilotTenantIntent(
   }
 
   if (intent.action === "list") {
-    return resultContext(intent, await callTenantRoute("GET", "", undefined, deps));
+    return resultContext(intent, await callTenantRoute("GET", platformPath("tenants"), undefined, deps));
   }
 
   if (intent.action === "create") {
     return resultContext(
       intent,
-      await callTenantRoute("POST", "", { tenantId: intent.tenantId }, deps),
+      await callTenantRoute("POST", platformPath("tenants"), { tenantId: intent.tenantId }, deps),
     );
   }
 
   if (intent.action === "detail" || intent.action === "settings-read") {
     return resultContext(
       intent,
-      await callTenantRoute("GET", `/${encodeURIComponent(intent.tenantId)}`, undefined, deps),
+      await callTenantRoute(
+        "GET",
+        platformPathParams("tenantDetail", { tenantId: intent.tenantId }),
+        undefined,
+        deps,
+      ),
     );
   }
 
@@ -543,7 +549,7 @@ export async function executeBizCopilotTenantIntent(
       intent,
       await callTenantRoute(
         "PATCH",
-        `/${encodeURIComponent(intent.tenantId)}/settings`,
+        platformPathParams("tenantSettings", { tenantId: intent.tenantId }),
         { adsEnabled: patch.adsEnabled },
         deps,
       ),
@@ -552,7 +558,7 @@ export async function executeBizCopilotTenantIntent(
 
   const current = await callTenantRoute(
     "GET",
-    `/${encodeURIComponent(intent.tenantId)}`,
+    platformPathParams("tenantDetail", { tenantId: intent.tenantId }),
     undefined,
     deps,
   );
@@ -576,7 +582,7 @@ export async function executeBizCopilotTenantIntent(
     intent,
     await callTenantRoute(
       "PATCH",
-      `/${encodeURIComponent(intent.tenantId)}/settings`,
+      platformPathParams("tenantSettings", { tenantId: intent.tenantId }),
       body,
       deps,
     ),

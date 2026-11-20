@@ -23,7 +23,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Button, CardHeader, Notice, Select, Stack, TextInput } from "./components/ui";
 import { apiFetch } from "./apiFetch";
 import { DEFAULT_SEGMENT, resolveEffectiveVersion } from "../data/productPorts";
-import { COMMERCIAL_API_BASE, commercialPath } from "../data/commercialUrlCatalog";
+import { commercialPath, commercialPathParams } from "../data/commercialUrlCatalog";
 import type { AccountSubscriptionView } from "./AccountAdminPanel";
 import type { PlanVersionView, ProductEntry } from "./ProductsSection";
 
@@ -107,7 +107,7 @@ export function AccountVersionMoveSection({
     setNote("");
     try {
       const body = await apiJson<{ moved: boolean; fromVersionId: string; toVersionId: string }>(
-        `${COMMERCIAL_API_BASE}/subscriptions/${encodeURIComponent(subscription.id)}/move`,
+        commercialPathParams("subscriptionMove", { subscriptionId: subscription.id }),
         { method: "POST", body: JSON.stringify({ toVersionId, reason: reason.trim() || null }) },
       );
       const from = planVersions.get(body.fromVersionId);
@@ -135,7 +135,7 @@ export function AccountVersionMoveSection({
     setNote("");
     try {
       const body = await apiJson<{ previousSegment: string; segment: string }>(
-        `${COMMERCIAL_API_BASE}/accounts/${encodeURIComponent(userId)}/segment`,
+        commercialPathParams("accountSegment", { userId }),
         {
           method: "POST",
           body: JSON.stringify({ segment: effectiveSegmentChoice, reason: reason.trim() || null }),

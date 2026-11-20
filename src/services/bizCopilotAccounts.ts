@@ -59,9 +59,10 @@
 import { handlePlatformAccountRoutes } from "../agents/routes/platformAccounts";
 import { handleAgenticPaymentsRoutes } from "../agents/routes/agenticPayments";
 import {
-  COMMERCIAL_BARE_BASE,
   commercialBarePath,
+  commercialBarePathParams,
 } from "../data/commercialUrlCatalog";
+import { platformPath } from "../data/platformUrlCatalog";
 import {
   resolveEffectiveVersion,
   type VersionLike,
@@ -336,7 +337,7 @@ async function callLookup(
   userId: string,
 ): Promise<AccountRouteResult> {
   const url = new URL(
-    `https://bizcopilot.internal/platform/accounts/lookup?userId=${encodeURIComponent(userId)}`,
+    `https://bizcopilot.internal${platformPath("accountLookup")}?userId=${encodeURIComponent(userId)}`,
   );
   const response = await handlePlatformAccountRoutes(
     buildRequest("GET", url, deps.userLogin),
@@ -387,7 +388,7 @@ async function callMove(
   toVersionId: string,
   reason: string | null,
 ): Promise<AccountRouteResult> {
-  const bare = `${COMMERCIAL_BARE_BASE}/subscriptions/${encodeURIComponent(subscriptionId)}/move`;
+  const bare = commercialBarePathParams("subscriptionMove", { subscriptionId });
   const url = new URL(`https://bizcopilot.internal${bare}`);
   const response = await handleAgenticPaymentsRoutes(
     buildRequest("POST", url, deps.userLogin, {

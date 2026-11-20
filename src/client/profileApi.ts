@@ -26,6 +26,7 @@
  */
 import { apiFetch, asyncJobErrorCode } from "./apiFetch";
 import { codedMessage } from "../outcomes/outcomeAspects";
+import { platformPath } from "../data/platformUrlCatalog";
 
 /** One user profile, as the #3261 self-only routes return it. */
 export interface UserProfileView {
@@ -172,7 +173,7 @@ function parseUserProfile(value: unknown): UserProfileView {
 
 /** Read the caller's profile; nulls when no profile was ever set. */
 export async function fetchProfile(): Promise<UserProfileView> {
-  const { status, data } = await callRaw("/api/platform/accounts/profile", undefined, LOAD_FALLBACK);
+  const { status, data } = await callRaw(platformPath("accountProfile"), undefined, LOAD_FALLBACK);
   if (status !== 200) throw toProfileApiError(data, status, LOAD_FALLBACK);
   return parseUserProfile(data);
 }
@@ -193,7 +194,7 @@ export async function saveProfile(
   if (input.phone !== undefined) body.phone = input.phone;
   if (input.email !== undefined) body.email = input.email;
   const { status, data } = await callRaw(
-    "/api/platform/accounts/profile",
+    platformPath("accountProfile"),
     { method: "POST", body: JSON.stringify(body) },
     SAVE_FALLBACK,
   );

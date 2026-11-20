@@ -18,6 +18,18 @@
  * an invented request/response schema. WebSocket routes are listed
  * with an x-transport marker and no invented REST operation.
  *
+ * Issue #5610 (G-8) — the CBO set: the commercial + platform catalog
+ * routes carry GENERATED schemas, from the shared registry
+ * (`src/api/commercialSchemas.ts`), never hand-written here. The
+ * `payments-agentic` wildcard entry is skipped (per-route items
+ * replace it); the `premium` wildcard stays (out of scope for #5610).
+ * Per-route authorization is NOT documented per operation — the
+ * handlers own authorization; the spec carries shapes (request
+ * bodies / query params / response fields) plus the family-standard
+ * error responses (400/401/403/404/405). The two non-session gates
+ * are noted on their operations: the Stripe billing webhook
+ * (signature-gated) and lifecycle unsubscribe (token-gated).
+ *
  * Stock-set boundary: the stock set covers the canonical stock
  * routes above. The AgentDB projection read GET /api/reports/list
  * and the operator seed POST /api/reports/seed-canonical stay
@@ -40,6 +52,18 @@ import {
   API_ENDPOINT_CATALOG,
   type ApiEndpointEntry,
 } from "../client/iaaaEndpointCatalog";
+import {
+  COMMERCIAL_ROUTES,
+  type CommercialRoute,
+} from "../data/commercialUrlCatalog";
+import {
+  PLATFORM_ROUTES,
+  type PlatformRoute,
+} from "../data/platformUrlCatalog";
+import {
+  cboSchemasFor,
+  zodSchemaToJsonSchema,
+} from "../api/commercialSchemas";
 
 export const OPENAPI_NOT_SPECIFIED =
   "schema: not yet specified (spike pilot coverage)";
@@ -832,6 +856,86 @@ export function stockSchemas(): Record<string, unknown> {
 }
 
 /**
+ * Issue #5610 (G-8) — CBO path items generated from the shared schemas
+ * registry. One operation per (catalog entry, method); the spec path is
+ * the canonical `/api` path with `:param` segments as `{param}` OpenAPI
+ * path parameters. GET operations carry the request schema's fields as
+ * query parameters; POST/PATCH/PUT carry it as the request body. The
+ * success response carries the response schema; every operation also
+ * carries the family-standard coded error responses (400/401/403/404/405).
+ * `cboSchemasFor` throws when the registry has no entry — a catalog route
+ * without schemas fails the build, never ships un-schematized.
+ */
+function specPathFor(bare: string): string {
+  return `/api${bare.replace(/:([A-Za-z]+)/g, "{$1}")}`;
+}
+
+/** Operations whose handlers do not gate on the session (description note + no session security). */
+const NON_SESSION_OPERATIONS: Record<string, string> = {
+  "commercial:billingWebhook:POST":
+    "Stripe-signature gated (no session): the handler verifies the Stripe webhook signature.",
+  "commercial:lifecycleUnsubscribe:POST":
+    "Token gated (no session): the handler verifies the signed unsubscribe token.",
+};
+
+function catalogOperation(
+  catalog: "commercial" | "platform",
+  route: CommercialRoute | PlatformRoute,
+  method: string,
+): Operation {
+  const schemas = cboSchemasFor(catalog, route.id, method);
+  const requestJson = zodSchemaToJsonSchema(schemas.request);
+  const responseJson = zodSchemaToJsonSchema(schemas.response);
+  const nonSessionNote = NON_SESSION_OPERATIONS[`${catalog}:${route.id}:${method}`];
+  const operation: Operation = {
+    description:
+      `CBO route (${catalog} catalog, issue #5610). Generated from the shared ` +
+      `request/response schemas — the spec carries shapes; authorization lives in the handler.` +
+      (nonSessionNote ? ` ${nonSessionNote}` : ""),
+    ...(nonSessionNote ? {} : { security: [{ sessionCookie: [] }] }),
+  };
+  const parameters: Array<Record<string, unknown>> = (route.params ?? []).map((param) => ({
+    name: param.name,
+    in: "path",
+    required: true,
+    schema: { type: "string" },
+  }));
+  if (method === "GET") {
+    // GET: the request schema is the query schema.
+    const properties = (requestJson.properties ?? {}) as Record<string, Record<string, unknown>>;
+    const required = new Set((requestJson.required ?? []) as string[]);
+    for (const [name, schema] of Object.entries(properties)) {
+      parameters.push({
+        name,
+        in: "query",
+        required: required.has(name),
+        schema,
+      });
+    }
+  } else {
+    const required = ((requestJson.required ?? []) as string[]).length > 0;
+    operation.requestBody = {
+      required,
+      content: { "application/json": { schema: requestJson } },
+    };
+  }
+  if (parameters.length > 0) operation.parameters = parameters;
+  const success = String(schemas.successStatus ?? 200);
+  operation.responses = {
+    [success]: {
+      description: "Success response (shape from the shared schemas registry).",
+      content: { "application/json": { schema: responseJson } },
+    },
+    "400": errorResponse,
+    "401": errorResponse,
+    "403": errorResponse,
+    "404": errorResponse,
+    "405": errorResponse,
+  };
+  return operation;
+}
+
+/**
  * Build the full OpenAPI document. Pure function of the catalog (plus
  * the two spike routes, which the catalog predates and therefore does
  * not contain — they are added explicitly, with their real behavior).
@@ -841,6 +945,10 @@ export function buildOpenApiSpec(): Record<string, unknown> {
 
   for (const entry of API_ENDPOINT_CATALOG) {
     if (entry.kind === "catchall" || entry.kind === "static") continue;
+    // Issue #5610 (G-8): the payments-agentic wildcard is replaced by
+    // per-route items generated from the catalogs below — the wildcard
+    // path item (`/api/payments/agentic/*`) is not emitted.
+    if (entry.id === "payments-agentic") continue;
     const urls = [entry.path, ...entry.aliases];
     if (entry.kind === "websocket") {
       for (const url of urls) {
@@ -871,6 +979,29 @@ export function buildOpenApiSpec(): Record<string, unknown> {
       }
       paths[url] = item;
     }
+  }
+
+  // Issue #5610 (G-8): the CBO set, generated from the shared schemas
+  // registry — one path item per catalog operation (99 commercial +
+  // 21 platform operations). The `premium` wildcard above stays (out of
+  // scope); no path here collides with a catalog or stock path.
+  for (const route of COMMERCIAL_ROUTES) {
+    const path = specPathFor(route.bare);
+    const item: PathItem = paths[path] ?? {};
+    for (const method of route.methods) {
+      item[method.toLowerCase()] = catalogOperation("commercial", route, method);
+    }
+    item.description = "CBO commercial routes (catalog #5610).";
+    paths[path] = item;
+  }
+  for (const route of PLATFORM_ROUTES) {
+    const path = specPathFor(route.bare);
+    const item: PathItem = paths[path] ?? {};
+    for (const method of route.methods) {
+      item[method.toLowerCase()] = catalogOperation("platform", route, method);
+    }
+    item.description = "CBO platform routes (catalog #5610).";
+    paths[path] = item;
   }
 
   // Issue #2860 (Factor 13): the stock set is declared explicitly
@@ -937,6 +1068,9 @@ export function buildOpenApiSpec(): Record<string, unknown> {
         "(#2860 Factor 13: /api/market-data/screen, /api/reports, " +
         "/api/reports/{id}, /api/reports/replay, /api/screener/presets, " +
         "/api/screener/report.pdf|xlsx|csv, /api/screener/report/regenerate). " +
+        "The CBO set (issue #5610) is generated from the shared request/response " +
+        "schemas registry (commercial + platform catalogs) — one operation per " +
+        "catalog operation, replacing the payments-agentic wildcard. " +
         "Every other path is marked not yet specified — the marker, not an invented schema, is the honest state.",
     },
     servers: [{ url: "https://agent.openaimp.com" }],
