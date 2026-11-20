@@ -723,8 +723,8 @@ function buildDeliverDoor(env: Env): ScreenerStepDeps["deliverOutcome"] {
               }
             : {}),
           stageChain: opts.goalScreen.stageChain,
-          ...(opts.goalScreen.providerFallback
-            ? { providerFallback: opts.goalScreen.providerFallback }
+          ...(opts.goalScreen.yahooDataMode
+            ? { yahooDataMode: opts.goalScreen.yahooDataMode }
             : {}),
         };
         await orchestrator.deliverWorkflowScreenOutcome(

@@ -66,6 +66,7 @@ import {
 } from "./goalDrivenScreen";
 import type { ScreenerTask, ScreenerTaskLedger } from "./screenerTaskLedger";
 import type { JobRunTrigger } from "../data/jobRunRecordPorts";
+import { yahooDataModeLabel } from "../workflows/stockScreenPlanner";
 import type { GoalLegHostInput } from "./goalLegHostDispatch";
 import {
   buildScenario,
@@ -177,13 +178,10 @@ export interface GoalScreenRunRequest {
    *  the listings-feed leg). "yahoo" runs the stock leg on the Yahoo
    *  engine. Serializable — the request crosses the agent RPC stub. */
   provider?: "yahoo";
-  /** Issue #1571: set when the run fell back to Yahoo because the
-   *  configured provider's auth was dead. Carried onto the result
-   *  so the PDF provenance names it as a Yahoo fallback. */
-  providerFallback?: {
-    from: "etrade";
-    reason: string;
-  };
+  /** Issue #4436: set when the run's stock leg runs under an explicit
+   *  data mode. Carried onto the result so the PDF provenance
+   *  names the mode. Replaces the #1571 E*TRADE-named fallback marker. */
+  yahooDataMode?: import("../workflows/stockScreenPlanner").YahooDataMode;
   /** Issue #1571: Yahoo fetcher override for the stock leg (test
    *  seam, mirroring runScreen's req.yahooDeps). Production binds
    *  the platform Yahoo provider inside the agent. */
@@ -314,12 +312,9 @@ export interface GoalScreenRunOutcome {
    *  this run (the serve stage verifies it). Undefined when the run
    *  was not executed or the store write was skipped. */
   canonicalReportId?: string;
-  /** Issue #1571: the fallback marker for this run, when the stock
-   *  leg fell back to Yahoo. Mirrors the marker on the result. */
-  providerFallback?: {
-    from: "etrade";
-    reason: string;
-  };
+  /** Issue #4436: the explicit data mode for this run, when the
+   *  stock leg runs under one. Mirrors the mode on the result. */
+  yahooDataMode?: import("../workflows/stockScreenPlanner").YahooDataMode;
 }
 
 /**
@@ -345,13 +340,10 @@ export async function executeGoalScreenRun(input: {
   deliver?: ScreeningChannel[];
   emailTo?: string;
   actor?: string;
-  /** Issue #1571: provider + fallback marker for the stock leg,
+  /** Issue #4436: the explicit Yahoo data mode for the stock leg,
    *  forwarded to the agent request (see GoalScreenRunRequest). */
   provider?: "yahoo";
-  providerFallback?: {
-    from: "etrade";
-    reason: string;
-  };
+  yahooDataMode?: import("../workflows/stockScreenPlanner").YahooDataMode;
   yahooDeps?: YahooScreenerDeps;
 }): Promise<GoalScreenRunOutcome> {
   const run = await input.agent.runGoalScreen({
@@ -365,21 +357,21 @@ export async function executeGoalScreenRun(input: {
     baseStockFilter: input.baseStockFilter,
     baseOptionsFilter: input.baseOptionsFilter,
     ...(input.provider ? { provider: input.provider } : {}),
-    ...(input.providerFallback ? { providerFallback: input.providerFallback } : {}),
+    ...(input.yahooDataMode ? { yahooDataMode: input.yahooDataMode } : {}),
     ...(input.yahooDeps ? { yahooDeps: input.yahooDeps } : {}),
   });
   if (!run.executed || !run.result) {
     return { taskId: run.task.id, taskStatus: run.task.status, executed: false };
   }
   const result = run.result;
-  // Issue #1571: the recorded result carries the fallback marker even
-  // if the agent did not stamp it — the canonical report body embeds
-  // `result`, so this is what the Runs read surface and the PDF
-  // generator see. The agent stamps it too, before generating
-  // artifacts; this is the caller-side guarantee, not a second
-  // source of truth.
-  if (input.providerFallback && !result.providerFallback) {
-    result.providerFallback = input.providerFallback;
+  // Issue #4436: the recorded result carries the explicit data
+  // mode even if the agent did not stamp it — the canonical
+  // report body embeds `result`, so this is what the Runs read
+  // surface and the PDF generator see. The agent stamps it too,
+  // before generating artifacts; this is the caller-side
+  // guarantee, not a second source of truth.
+  if (input.yahooDataMode && !result.yahooDataMode) {
+    result.yahooDataMode = input.yahooDataMode;
   }
   if (input.provider && !result.provider) {
     result.provider = input.provider;
@@ -387,7 +379,11 @@ export async function executeGoalScreenRun(input: {
   const summary =
     `Goal screen (${result.goalKind}/${result.outlook}) ${result.status}: ` +
     `${result.counts.hits} hit(s) from ${result.counts.stocksScanned} stocks + ` +
-    `${result.counts.optionsUnderlyingsScanned} option underlyings.`;
+    `${result.counts.optionsUnderlyingsScanned} option underlyings.` +
+    // Issue #4436: the mode rides the summary text, so the Runs
+    // UI lists label a mode run the same way the record
+    // and the PDF do (mirrors the workflow store door).
+    (result.yahooDataMode ? ` ${yahooDataModeLabel(result.yahooDataMode)}.` : "");
   const canonical = input.orm.storeCanonicalReport({
     runId: `goal-screen:${run.task.id}`,
     generationId: `goal-screen:${run.task.id}`,
@@ -483,7 +479,7 @@ export async function executeGoalScreenRun(input: {
     result,
     ...(delivery ? { delivery } : {}),
     ...(canonical?.reportId ? { canonicalReportId: canonical.reportId } : {}),
-    ...(input.providerFallback ? { providerFallback: input.providerFallback } : {}),
+    ...(input.yahooDataMode ? { yahooDataMode: input.yahooDataMode } : {}),
   };
 }
 

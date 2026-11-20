@@ -18,6 +18,7 @@ import type { GoalDrivenScreenResult } from "./goalDrivenScreen";
 import { recordJobOutcome } from "./jobOutcomes";
 import type { JobRunTrigger } from "../data/jobRunRecordPorts";
 import type { SqlStorage } from "../orm";
+import { yahooDataModeLabel } from "../workflows/stockScreenPlanner";
 import { createStructuredLogger } from "../observability/structuredLogger";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
 
@@ -119,11 +120,11 @@ export async function generateGoalScreenPdf(
   };
   draw(`Goal screen — ${result.goalKind} (${result.outlook})`, 16, true);
   draw(`Status: ${result.status}  ·  Completed: ${result.completedAt}`, 10);
-  // Issue #1571: a fallback run's PDF provenance names it as a Yahoo
-  // fallback — the market-screen wording verbatim — never as E*TRADE
-  // live and never as plain Yahoo. Plain runs carry no such line.
-  if (result.providerFallback) {
-    draw("Quotes: Yahoo Finance quotes (delayed) — fallback (E*TRADE auth unavailable)", 10);
+  // Issue #4436: a Yahoo-mode run's PDF provenance names the mode
+  // — the market-screen wording verbatim — never as a broker's live
+  // run and never as plain Yahoo. Plain runs carry no such line.
+  if (result.yahooDataMode) {
+    draw(`Quotes: ${yahooDataModeLabel(result.yahooDataMode)}`, 10);
   }
   draw(
     `Stocks scanned: ${result.counts.stocksScanned}  ·  Stocks matched: ${result.counts.stocksMatched}`,

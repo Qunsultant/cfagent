@@ -66,7 +66,7 @@ import {
   type PortfolioContextMarker,
 } from "../services/portfolioContextRanking";
 import { DynamicMarketScreener } from "../trading";
-import { planStockScreenRun, type StockScreenPlan } from "../workflows/stockScreenPlanner";
+import { planStockScreenRun, type StockScreenPlan, type YahooDataMode } from "../workflows/stockScreenPlanner";
 import { paretoFrontierForScreen } from "../workflows/paretoFrontier";
 import {
   classifyScreenFailure,
@@ -237,16 +237,13 @@ export interface ScreenerRunRequest {
    */
   traceparent?: string;
   /**
-   * Issue #1527: explicit whole-run fallback marker — set by the
-   * scheduled layer when it falls back to Yahoo because the
-   * configured provider's auth is dead. Carried onto the result so
-   * every provenance surface (PDF, event, outcome) can name the run
-   * as a fallback, never as the configured provider's live run.
+   * Issue #4436: the run's explicit data mode — set by the
+   * scheduled layer when a run screens under one (full-dataset
+   * testing mode, or gap-fill). Carried onto the result so every
+   * provenance surface (PDF, event, outcome) can name the mode,
+   * never the configured provider's live run.
    */
-  providerFallback?: {
-    from: StockScreenProvider;
-    reason: string;
-  };
+  yahooDataMode?: YahooDataMode;
   /**
    * Issue #1007: test seam — an injected Yahoo quote fetcher for
    * provider "yahoo" runs (mirrors the pipeline's yahooDeps). Absent
@@ -335,7 +332,7 @@ export interface ScreenerFeedStageOutput {
   universe: string;
   sector: string;
   provider: StockScreenProvider;
-  providerFallback?: ScreenerRunRequest["providerFallback"];
+  yahooDataMode?: ScreenerRunRequest["yahooDataMode"];
   symbols: NasdaqStockListing[];
   expectedCount: number;
   acquired: AcquiredUniverse;
@@ -376,7 +373,7 @@ export interface ScreenerGoalRunner {
     assetClasses?: ("stocks" | "options")[];
     symbols?: string[];
     provider?: "yahoo";
-    providerFallback?: { from: "etrade"; reason: string };
+    yahooDataMode?: YahooDataMode;
     /** Issue #4279: caller base filters, carried from the goal command (see GoalScreenCommand). */
     baseStockFilter?: StockScreenerFilter;
     baseOptionsFilter?: OptionScreenerFilter;
@@ -501,13 +498,11 @@ export interface ScreenerRunResult {
   /** Issue #3655 (effective mode): which resolver leg produced the mode — pin | selection | inference. */
   modeSource?: "pin" | "selection" | "inference";
   /**
-   * Issue #1527: whole-run fallback marker, carried from the request
-   * when the run fell back to its provider (see the request field).
+   * Issue #4436: the run's explicit data mode, carried from
+   * the request when the run screened under one (see the request
+   * field).
    */
-  providerFallback?: {
-    from: StockScreenProvider;
-    reason: string;
-  };
+  yahooDataMode?: YahooDataMode;
   /** Universe screened (issue #270). */
   universe: UniverseId;
   sector: string;
@@ -1387,7 +1382,7 @@ export class ScreenerAgent extends PortThink {
     });
     const universe: UniverseId = plan.universe;
     const provider: StockScreenProvider = plan.provider;
-    const providerFallback = plan.providerFallback;
+    const yahooDataMode = plan.yahooDataMode;
     let expectedCount = 0;
 
     // Issue #607: durable task record for this run (mandate §6; design
@@ -1443,7 +1438,7 @@ export class ScreenerAgent extends PortThink {
           timestamp,
           trigger: req.trigger,
           provider,
-          ...(providerFallback ? { providerFallback } : {}),
+          ...(yahooDataMode ? { yahooDataMode } : {}),
           universe,
           sector,
           success: false,
@@ -1808,7 +1803,7 @@ export class ScreenerAgent extends PortThink {
         ...(req.environment ? { environment: req.environment } : {}),
         ...(req.mode ? { mode: req.mode } : {}),
         ...(req.modeSource ? { modeSource: req.modeSource } : {}),
-        ...(providerFallback ? { providerFallback } : {}),
+        ...(yahooDataMode ? { yahooDataMode } : {}),
         universe,
         sector,
         success: true,
@@ -1934,7 +1929,7 @@ export class ScreenerAgent extends PortThink {
         ...(req.environment ? { environment: req.environment } : {}),
         ...(req.mode ? { mode: req.mode } : {}),
         ...(req.modeSource ? { modeSource: req.modeSource } : {}),
-        ...(providerFallback ? { providerFallback } : {}),
+        ...(yahooDataMode ? { yahooDataMode } : {}),
         universe,
         sector,
         success: false,
@@ -2312,7 +2307,7 @@ export class ScreenerAgent extends PortThink {
     const userLogin = state.userLogin;
     const universe = plan.universe;
     const provider = plan.provider;
-    const providerFallback = plan.providerFallback;
+    const yahooDataMode = plan.yahooDataMode;
     const sector = plan.sector;
 
     // Issue #607 (scheduled): a duplicate scheduled delivery is
@@ -2323,7 +2318,7 @@ export class ScreenerAgent extends PortThink {
         timestamp,
         trigger: req.trigger,
         provider,
-        ...(providerFallback ? { providerFallback } : {}),
+        ...(yahooDataMode ? { yahooDataMode } : {}),
         universe,
         sector,
         success: false,
@@ -2349,7 +2344,7 @@ export class ScreenerAgent extends PortThink {
         universe,
         sector,
         provider,
-        ...(providerFallback ? { providerFallback } : {}),
+        ...(yahooDataMode ? { yahooDataMode } : {}),
         symbols: input.symbols,
         expectedCount: 0,
         acquired: { quotes: [], discovery: { mode: "live_quotes", candidateCount: 0, listingCount: 0, message: dupResult.discoveryMessage } },
@@ -2385,7 +2380,7 @@ export class ScreenerAgent extends PortThink {
         universe,
         sector,
         provider,
-        ...(providerFallback ? { providerFallback } : {}),
+        ...(yahooDataMode ? { yahooDataMode } : {}),
         symbols: goalSymbols,
         expectedCount: goalSymbols.length,
         acquired: { quotes: [], discovery: { mode: "live_quotes", candidateCount: 0, listingCount: 0, message: "Goal run — quotes are the goal runner's stock leg." } },
@@ -2479,7 +2474,7 @@ export class ScreenerAgent extends PortThink {
       universe,
       sector,
       provider,
-      ...(providerFallback ? { providerFallback } : {}),
+      ...(yahooDataMode ? { yahooDataMode } : {}),
       symbols: selectedSymbols,
       expectedCount,
       acquired,
@@ -2635,7 +2630,7 @@ export class ScreenerAgent extends PortThink {
         ...(input.goalScreen.assetClasses ? { assetClasses: input.goalScreen.assetClasses } : {}),
         ...(gatherOutput.goalSymbols?.length ? { symbols: gatherOutput.goalSymbols } : {}),
         ...(input.goalScreen.provider ? { provider: input.goalScreen.provider } : {}),
-        ...(input.goalScreen.providerFallback ? { providerFallback: input.goalScreen.providerFallback } : {}),
+        ...(input.goalScreen.yahooDataMode ? { yahooDataMode: input.goalScreen.yahooDataMode } : {}),
         ...(input.goalScreen.baseStockFilter ? { baseStockFilter: input.goalScreen.baseStockFilter } : {}),
         ...(input.goalScreen.baseOptionsFilter ? { baseOptionsFilter: input.goalScreen.baseOptionsFilter } : {}),
       });
@@ -2789,7 +2784,7 @@ export class ScreenerAgent extends PortThink {
       ...(req.environment ? { environment: req.environment } : {}),
       ...(req.mode ? { mode: req.mode } : {}),
       ...(req.modeSource ? { modeSource: req.modeSource } : {}),
-      ...(analysisOutput.providerFallback ? { providerFallback: analysisOutput.providerFallback } : {}),
+      ...(analysisOutput.yahooDataMode ? { yahooDataMode: analysisOutput.yahooDataMode } : {}),
       universe: analysisOutput.universe as UniverseId,
       sector: analysisOutput.sector,
       success: true,
@@ -3171,8 +3166,8 @@ export class ScreenerAgent extends PortThink {
       ...(req.baseOptionsFilter ? { baseOptionsFilter: req.baseOptionsFilter } : {}),
     });
     if (out.executed && out.result) {
-      if (req.providerFallback && !out.result.providerFallback) {
-        out.result.providerFallback = req.providerFallback;
+      if (req.yahooDataMode && !out.result.yahooDataMode) {
+        out.result.yahooDataMode = req.yahooDataMode;
       }
       if (req.provider && !out.result.provider) {
         out.result.provider = req.provider;
@@ -3224,12 +3219,10 @@ export class ScreenerAgent extends PortThink {
      *  (see createYahooStockScreener). Absent keeps the default
      *  listings-feed leg. */
     provider?: "yahoo";
-    /** Issue #1571: fallback marker, stamped onto the result before
-     *  artifact generation so the PDF provenance names the fallback. */
-    providerFallback?: {
-      from: "etrade";
-      reason: string;
-    };
+    /** Issue #4436: the run's explicit data mode, stamped
+     *  onto the result before artifact generation so the PDF
+     *  provenance names the mode. */
+    yahooDataMode?: YahooDataMode;
     /** Issue #1571: Yahoo fetcher override (test seam, mirroring
      *  runScreen's req.yahooDeps). Production binds the platform
      *  Yahoo provider below. */
@@ -3501,8 +3494,8 @@ export class ScreenerAgent extends PortThink {
     if (out.executed && out.result) {
       // Issue #1571: stamp the fallback marker BEFORE artifact
       // generation so the goal PDF provenance names the fallback.
-      if (req.providerFallback && !out.result.providerFallback) {
-        out.result.providerFallback = req.providerFallback;
+      if (req.yahooDataMode && !out.result.yahooDataMode) {
+        out.result.yahooDataMode = req.yahooDataMode;
       }
       if (req.provider && !out.result.provider) {
         out.result.provider = req.provider;

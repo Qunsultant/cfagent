@@ -1,0 +1,3 @@
+### Changed
+
+- Stock screen: the marked E*TRADE-to-Yahoo fallback on the goal/scheduled path is replaced by the explicit broker-neutral Yahoo data mode (#4436, D2). A run names its mode — `gap-fill` (Yahoo fills gaps in the configured provider's data) or `full-dataset` (the entire dataset from Yahoo, delayed quotes, stocks only, as a testing mode) — on the plan, the goal command, the run record, the run summary shown in the Runs UI, and the PDF provenance. No silent E*TRADE substitution remains on this path. The designed index-leg gap-fill in `screenerPipeline.ts` (`bindLiveQuotesQuoteDeps`, #1356) is deliberately untouched.

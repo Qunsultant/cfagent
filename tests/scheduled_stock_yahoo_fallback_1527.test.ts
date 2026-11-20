@@ -12,16 +12,17 @@
  *   normal screener.failed event carries the guard error.
  * - A guard-blocked sharded ask likewise fails loud and never
  *   submits a shard chain.
- * - The fallback marker / PDF provenance / bridge-outcome pins below
- *   still hold for the goal-screen stock leg, which keeps the #1527
- *   fallback, and for the marker wording itself.
- * - A goal-leg fallback completion emits NO failure notice (no
- *   screener.failed); the fallback labeling is the signal. The
+ * - The Yahoo data mode / PDF provenance / bridge-outcome pins
+ *   below still hold for the goal-screen stock leg, which keeps the
+ *   #1527 behavior under the #4436 explicit mode, and for the mode
+ *   wording itself.
+ * - A goal-leg mode-run completion emits NO failure notice (no
+ *   screener.failed); the mode labeling is the signal. The
  *   guard's deduped episode alert already fired inside the guard.
- * - A fallback that itself fails goes through the normal failure path
+ * - A mode run that itself fails goes through the normal failure path
  *   (audit + session message + screener.failed).
  * - Deliberate Yahoo runs (provider "yahoo" configured) carry NO
- *   fallback marker; E*TRADE-live runs are unchanged.
+ *   Yahoo data mode; E*TRADE-live runs are unchanged.
  *
  * Supersession note: #1369 pinned "blocked → screener.failed". #1527
  * supersedes that pin for the case where the Yahoo fallback succeeds;
@@ -34,9 +35,10 @@
  * run now fails LOUD with the guard's coded error instead of
  * completing via Yahoo. The three fallback-behaviour pins below are
  * re-pinned to that contract. The fallback MARKER machinery itself
- * (PDF provenance lines, bridge outcome) is unchanged and stays
- * pinned here: the goal-screen stock leg still carries the #1527
- * fallback, and the marker wording is shared.
+ * (PDF provenance lines, bridge outcome) is replaced by the explicit
+ * Yahoo data mode in #4436 and stays pinned here in its new form:
+ * the goal-screen stock leg still runs under the mode, and the
+ * mode wording is shared.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ScheduledTasksService } from "../src/services/scheduledTasks";
@@ -45,7 +47,7 @@ import type { Env } from "../src/types";
 import { screenerProvenanceLines } from "../src/trading/screenerReportPdf";
 import { screenerOutcomeFromEvent } from "../src/services/screenerFollowups";
 
-const FALLBACK_MARKER = { from: "etrade", reason: "etrade-auth-dead" } as const;
+const YAHOO_MODE = "full-dataset" as const;
 
 function yahooSuccessResult() {
   return {
@@ -128,15 +130,16 @@ const delegateSeamFake = (runScreen: (req: any) => Promise<any>) => async (input
     return { service, publish, audit, runScreen };
   }
 
-  it("PDF provenance names a fallback run as a Yahoo fallback, not plain Yahoo and never E*TRADE", () => {
+  it("PDF provenance names a full-dataset run as a Yahoo testing mode, not plain Yahoo and never E*TRADE (#4436)", () => {
     const lines = screenerProvenanceLines({
       provider: "yahoo",
-      providerFallback: { ...FALLBACK_MARKER },
+      yahooDataMode: YAHOO_MODE,
     } as any);
     expect(lines.quotesLine).toMatch(/Yahoo/);
-    expect(lines.quotesLine).toMatch(/fallback/i);
+    expect(lines.quotesLine).toMatch(/full-dataset testing mode/i);
+    expect(lines.quotesLine).toMatch(/delayed/);
     expect(lines.quotesLine).not.toMatch(/E\*TRADE live/);
-    expect(lines.methodologyQuotes).toMatch(/fallback/i);
+    expect(lines.methodologyQuotes).toMatch(/full-dataset testing mode/i);
     expect(lines.methodologyQuotes).not.toMatch(/No fallback data substituted/);
     // Controls: plain Yahoo and E*TRADE wording are unchanged.
     expect(screenerProvenanceLines({ provider: "yahoo" } as any).quotesLine).toBe(
@@ -166,8 +169,8 @@ const delegateSeamFake = (runScreen: (req: any) => Promise<any>) => async (input
     const failed = events.find((e: any) => e.type === "screener.failed");
     expect(failed).toBeDefined();
     expect(failed.error).toContain("FAILURE_AUTH_NO_SESSION");
-    expect((result as any).data?.providerFallback).toBeUndefined();
-    expect(failed.providerFallback).toBeUndefined();
+    expect((result as any).data?.yahooDataMode).toBeUndefined();
+    expect(failed.yahooDataMode).toBeUndefined();
     const fallbackAudits = audit.mock.calls.filter((c) => c[0] === "screener.run_fallback");
     expect(fallbackAudits.length).toBe(0);
   });
@@ -226,10 +229,10 @@ const delegateSeamFake = (runScreen: (req: any) => Promise<any>) => async (input
     const result = await service.autonomousMarketScreen({});
     expect(result.success).toBe(true);
     const req = runScreen.mock.calls[0][0];
-    expect(req.providerFallback).toBeUndefined();
+    expect(req.yahooDataMode).toBeUndefined();
     expect(req.provider).not.toBe("yahoo");
     const completed = publish.mock.calls.map((c) => c[0]).find((e: any) => e.type === "screener.completed");
-    expect(completed.providerFallback).toBeUndefined();
+    expect(completed.yahooDataMode).toBeUndefined();
   });
 
   it("a deliberately configured Yahoo run carries no fallback marker and skips the guard", async () => {
@@ -246,12 +249,12 @@ const delegateSeamFake = (runScreen: (req: any) => Promise<any>) => async (input
     expect(result.success).toBe(true);
     expect(guard).not.toHaveBeenCalled();
     expect(runScreen.mock.calls[0][0].provider).toBe("yahoo");
-    expect(runScreen.mock.calls[0][0].providerFallback).toBeUndefined();
+    expect(runScreen.mock.calls[0][0].yahooDataMode).toBeUndefined();
     const completed = publish.mock.calls.map((c) => c[0]).find((e: any) => e.type === "screener.completed");
-    expect(completed.providerFallback).toBeUndefined();
+    expect(completed.yahooDataMode).toBeUndefined();
   });
 
-  it("the bridge outcome carries the fallback marker on completed events", () => {
+  it("the bridge outcome carries the Yahoo data mode on completed events (#4436)", () => {
     const outcome = screenerOutcomeFromEvent({
       type: "screener.completed",
       timestamp: new Date().toISOString(),
@@ -261,9 +264,9 @@ const delegateSeamFake = (runScreen: (req: any) => Promise<any>) => async (input
       totalScanned: 10,
       matchedCount: 2,
       opportunities: [],
-      providerFallback: { ...FALLBACK_MARKER },
+      yahooDataMode: YAHOO_MODE,
     } as any);
-    expect((outcome as any).providerFallback).toEqual({ ...FALLBACK_MARKER });
+    expect((outcome as any).yahooDataMode).toBe(YAHOO_MODE);
     const plain = screenerOutcomeFromEvent({
       type: "screener.completed",
       timestamp: new Date().toISOString(),
@@ -274,6 +277,6 @@ const delegateSeamFake = (runScreen: (req: any) => Promise<any>) => async (input
       matchedCount: 2,
       opportunities: [],
     } as any);
-    expect((plain as any).providerFallback).toBeUndefined();
+    expect((plain as any).yahooDataMode).toBeUndefined();
   });
 });

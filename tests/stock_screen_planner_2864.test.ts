@@ -54,18 +54,18 @@ describe("planStockScreenRun", () => {
     );
   });
 
-  it("claims scheduled duplicates on stock:<universe> and carries the fallback marker", () => {
+  it("claims scheduled duplicates on stock:<universe> and carries the Yahoo data mode (#4436)", () => {
     const plan = planStockScreenRun(
       {
         trigger: "scheduled",
         universe: "NASDAQ100",
         provider: "yahoo",
-        providerFallback: { from: "etrade", reason: "auth dead" },
+        yahooDataMode: "full-dataset",
       },
       TS,
     );
     expect(plan.scheduledClaimKey).toBe("stock:NASDAQ100");
-    expect(plan.providerFallback).toEqual({ from: "etrade", reason: "auth dead" });
+    expect(plan.yahooDataMode).toBe("full-dataset");
   });
 });
 

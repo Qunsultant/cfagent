@@ -32,7 +32,7 @@
  *     universe ALL, caller-supplied provider — issue #4431
  *     removed the planner default, so no provider is implied
  *     here; NOT the leg's actual provider, which stays in the
- *     goal result's provider / providerFallback fields).
+ *     goal result's provider / yahooDataMode fields).
  * No order placement, no options-leg change, no screening
  * semantics change: the filter is copied, never recomputed.
  */

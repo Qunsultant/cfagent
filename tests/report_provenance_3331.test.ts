@@ -45,14 +45,29 @@ describe("the screener artifact names its broker (#3331)", () => {
     expect(lines.quotesLine).not.toContain("E*TRADE");
   });
 
-  it("a fallback run still names the provider it fell back from", () => {
+  it("a full-dataset run names the testing mode, never a broker (#4436)", () => {
     const lines = screenerProvenanceLines({
       provider: "yahoo",
-      providerFallback: { from: "etrade", reason: "auth" },
+      yahooDataMode: "full-dataset",
       broker: "alpaca",
     });
-    expect(lines.quotesLine).toContain("fallback");
+    expect(lines.quotesLine).toContain("full-dataset testing mode");
+    expect(lines.quotesLine).toContain("delayed");
+    expect(lines.quotesLine).not.toContain("Alpaca");
+    expect(lines.quotesLine).not.toContain("E*TRADE");
+    expect(lines.methodologyQuotes).toContain("full-dataset testing mode");
+  });
+
+  it("a gap-fill run names the primary plus the Yahoo gap-fill (#4436)", () => {
+    const lines = screenerProvenanceLines({
+      provider: "etrade",
+      broker: "etrade",
+      yahooDataMode: "gap-fill",
+    });
     expect(lines.quotesLine).toContain("E*TRADE");
+    expect(lines.quotesLine).toContain("gap-fill");
+    expect(lines.quotesLine).toContain("delayed");
+    expect(lines.methodologyQuotes).toContain("gap-fill");
   });
 
   it("the CSV stays provenance-free (a comment line would break parsers)", () => {

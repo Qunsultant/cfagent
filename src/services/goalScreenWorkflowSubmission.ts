@@ -73,12 +73,16 @@ export interface GoalScreenSubmissionInput {
    */
   stageChain?: import("../types").StageChainConfig;
   environment?: "TEST" | "PROD";
-  /** Issue #1571: "yahoo" runs the stock leg on the Yahoo engine (scheduled fallback runs). */
+  /** Issue #4436: "yahoo" runs the stock leg on the Yahoo engine (scheduled full-dataset runs). */
   provider?: "yahoo";
-  providerFallback?: {
-    from: "etrade";
-    reason: string;
-  };
+  /**
+   * Issue #4436: the run's explicit data mode (replaces the
+   * #1571 E*TRADE-named fallback marker). "full-dataset" runs the
+   * whole stock leg on the delayed-quote provider as a testing
+   * mode; "gap-fill" keeps the configured provider with its gaps
+   * filled from the same provider.
+   */
+  yahooDataMode?: import("../workflows/stockScreenPlanner").YahooDataMode;
   /** Issue #4279 ([One engine] #3550 S4): caller base filters, carried onto the goal command (see GoalScreenCommand). */
   baseStockFilter?: import("../types").StockScreenerFilter;
   baseOptionsFilter?: import("../types").OptionScreenerFilter;
@@ -117,7 +121,7 @@ export function buildGoalScreenCommand(
       ...(input.slackChannel ? { slackChannel: input.slackChannel } : {}),
       ...(input.stageChain ? { stageChain: input.stageChain } : {}),
       ...(input.provider ? { provider: input.provider } : {}),
-      ...(input.providerFallback ? { providerFallback: input.providerFallback } : {}),
+      ...(input.yahooDataMode ? { yahooDataMode: input.yahooDataMode } : {}),
       ...(input.baseStockFilter ? { baseStockFilter: input.baseStockFilter } : {}),
       ...(input.baseOptionsFilter ? { baseOptionsFilter: input.baseOptionsFilter } : {}),
     },

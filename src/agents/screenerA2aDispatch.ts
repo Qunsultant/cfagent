@@ -14,9 +14,9 @@
  * never trusted — and fail closed (not_configured) when no service
  * identity exists, instead of letting the class throw on a virgin
  * instance or attribute the run to nobody. The request's test seam
- * (yahooDeps) and the scheduled layer's fallback-provenance marker
- * (providerFallback) are not in the accepted field set: an A2A caller
- * cannot inject a fetcher or stamp a run as a fallback.
+ * (yahooDeps) and the scheduled layer's data-mode label
+ * (yahooDataMode) are not in the accepted field set: an A2A caller
+ * cannot inject a fetcher or stamp a run with a data mode.
  *
  * A completed run whose own record says success:false (e.g. zero
  * quotes — the class "fails honestly" with success:false + error,

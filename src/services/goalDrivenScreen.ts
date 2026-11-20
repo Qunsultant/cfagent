@@ -547,14 +547,12 @@ export interface GoalDrivenScreenResult {
   /** Issue #1571: the data provider that produced this run's stock
    *  leg. Absent keeps the default (listings-feed) shape. */
   provider?: string;
-  /** Issue #1571: set when the run's stock leg fell back to Yahoo
-   *  because the configured provider's auth was dead — carried so
-   *  the PDF provenance names it as a Yahoo fallback, never as
-   *  E*TRADE live. Mirrors the #1527 market-screen marker. */
-  providerFallback?: {
-    from: "etrade";
-    reason: string;
-  };
+  /** Issue #4436: the run's explicit Yahoo data mode, when the stock
+   *  leg ran under one — carried so the PDF provenance and the Runs
+   *  read surface name the mode (delayed quotes, stocks only,
+   *  testing framing for full-dataset), never a broker's live run.
+   *  Replaces the #1571 E*TRADE-named fallback marker. */
+  yahooDataMode?: import("../workflows/stockScreenPlanner").YahooDataMode;
   /** Issue #1998: persisted-gather summary for the stock leg, when
    *  the leg ran through the gather hook. Absent = no gather (the
    *  leg refused technical filters or did not need them). */

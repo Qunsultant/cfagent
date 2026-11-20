@@ -120,7 +120,7 @@ describe("buildGoalScreenCommand (#1996)", () => {
     expect(cmd.goalScreen?.deliver).toBeUndefined();
   });
 
-  it("carries the scheduled Yahoo fallback marker through", () => {
+  it("carries the Yahoo data mode through (#4436)", () => {
     const cmd = buildGoalScreenCommand({
       jobId: "goal-screen:scheduled:alice:income:2026-10-27T12:00",
       source: "scheduled-tasks",
@@ -129,10 +129,10 @@ describe("buildGoalScreenCommand (#1996)", () => {
       scenario: scenario(),
       scenarioSource: "built",
       provider: "yahoo",
-      providerFallback: { from: "etrade", reason: "etrade-auth-dead" },
+      yahooDataMode: "full-dataset",
     });
     expect(cmd.goalScreen?.provider).toBe("yahoo");
-    expect(cmd.goalScreen?.providerFallback).toEqual({ from: "etrade", reason: "etrade-auth-dead" });
+    expect(cmd.goalScreen?.yahooDataMode).toBe("full-dataset");
   });
 });
 
@@ -243,11 +243,11 @@ describe("persistWorkflowGoalScreenReport (#1996)", () => {
     expect((activity.detail as Record<string, unknown>).taskId).toBe("task-1");
   });
 
-  it("stamps the fallback marker + provider defensively when the result lacks them", async () => {
+  it("stamps the Yahoo data mode + provider defensively when the result lacks them (#4436)", async () => {
     const storeCanonicalReport = vi.fn(() => ({ reportId: "rep-1" }));
     const orm = { storeCanonicalReport } as never;
     const result = fakeGoalResult();
-    expect(result.providerFallback).toBeUndefined();
+    expect(result.yahooDataMode).toBeUndefined();
     await persistWorkflowGoalScreenReport(
       { env: {}, getOrm: () => orm },
       {
@@ -256,7 +256,7 @@ describe("persistWorkflowGoalScreenReport (#1996)", () => {
         trigger: "scheduled",
         result,
         provider: "yahoo",
-        providerFallback: { from: "etrade", reason: "etrade-auth-dead" },
+        yahooDataMode: "full-dataset",
       },
       "alice",
     );
@@ -264,7 +264,7 @@ describe("persistWorkflowGoalScreenReport (#1996)", () => {
     const body = row.body as Record<string, unknown>;
     const stored = body.result as GoalDrivenScreenResult;
     expect(stored.provider).toBe("yahoo");
-    expect(stored.providerFallback).toEqual({ from: "etrade", reason: "etrade-auth-dead" });
+    expect(stored.yahooDataMode).toBe("full-dataset");
   });
 });
 

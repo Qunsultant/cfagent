@@ -124,7 +124,7 @@ export function stockPlanBlock(): PlanBlock {
         classPlan: defined({
           sector: stockPlan.sector,
           universe: stockPlan.universe,
-          providerFallback: stockPlan.providerFallback,
+          yahooDataMode: stockPlan.yahooDataMode,
           scheduledClaimKey: stockPlan.scheduledClaimKey,
         }),
       };
