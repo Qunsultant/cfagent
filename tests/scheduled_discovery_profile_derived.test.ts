@@ -187,6 +187,8 @@ function makeOrm(watchlistRows: Array<Record<string, unknown>> = []) {
 }
 
 beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-10-20T12:00:00.000Z"));
   savedProcessEnv = {};
   for (const k of SCRUBBED_ENV_KEYS) {
     savedProcessEnv[k] = process.env[k];
@@ -200,6 +202,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   for (const k of SCRUBBED_ENV_KEYS) {
     if (savedProcessEnv[k] === undefined) delete process.env[k];
     else process.env[k] = savedProcessEnv[k];
