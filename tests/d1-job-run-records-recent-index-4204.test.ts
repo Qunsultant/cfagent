@@ -136,11 +136,12 @@ describe("4204 migration 0073 — D1 job_run_records recent-read index", () => {
     );
   });
 
-  it("4204-D1 ensure applies 0047 + 0072 + 0073 and lands the index, idempotently", async () => {
+  it("4204-D1 ensure applies 0047 + 0072 + 0073 (and #5887's 0076) and lands the index, idempotently", async () => {
     const mock = new MockD1Database();
     const db = createD1JobRunRecordDb(mock as any);
     const applied = await ensureJobRunRecordsSchema(db);
-    expect(applied).toEqual([47, 72, 73]);
+    // Issue #5887 adds 0076 (the definition-version stamp) to the same store.
+    expect(applied).toEqual([47, 72, 73, 76]);
     const indexes = mock.sqlite
       .prepare(
         "SELECT name, tbl_name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'job_run_records'",
