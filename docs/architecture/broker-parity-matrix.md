@@ -39,3 +39,15 @@ yahoo declares quotes + historicalBars + fundamentals, nasdaq screenUniverse,
 alpaca quotes + historicalBars + fundamentals. A tenant whose selected provider
 cannot serve a capability is served by a capable provider with the substitution
 recorded (`requestedDataProviderId`, #4014).
+
+## Runtime-configurable Broker, Asset-Type & Account-Type Registry (#5094 / #5097)
+
+Extending the `#3855` registry-driven broker list, `src/config/brokerRegistry.ts`
+and `src/services/accountBindings.ts` expose a runtime-configurable registry
+persisted in `SessionStore` (`account_bindings` namespace) holding per-broker
+supported modes, asset types, account types per asset type, and capabilities.
+Operators and tenants can add, enable, disable, or edit brokers, asset types,
+and account types directly through `/api/broker/account-binding` (`registryPatch`),
+the `broker_account_binding` MCP tool (`registry_get` / `registry_update`), and
+the `AccountBindingSelector` UX without code changes or redeploys.
+

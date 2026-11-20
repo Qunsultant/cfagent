@@ -12,17 +12,42 @@ import {
   ACCOUNT_BINDING_SCOPES,
   ACCOUNT_TYPES,
 } from "../config/accountBindings";
+import {
+  applyBrokerRegistryPatch,
+  buildDefaultRegistryWithHosted,
+  DEFAULT_ASSET_TYPES,
+  type BrokerAssetAccountRegistry,
+  type BrokerAssetAccountRegistryPatch,
+  type BrokerRegistryEntry,
+} from "../config/brokerRegistry";
 import { IBKR_CONFIG } from "../config/ibkr";
 import { isBrokerId, type BrokerId, type TradingType } from "./brokerCatalog";
 
-export type AccountType = (typeof ACCOUNT_TYPES)[number];
+export {
+  applyBrokerRegistryPatch,
+  DEFAULT_ASSET_TYPES,
+  type BrokerAssetAccountRegistry,
+  type BrokerAssetAccountRegistryPatch,
+  type BrokerRegistryEntry,
+};
+
+/**
+ * Seeds the default registry from `BROKER_CATALOG` (#3855) plus the hosted
+ * MCP broker and `ACCOUNT_TYPES`.
+ */
+export function buildDefaultBrokerAssetAccountRegistry(): BrokerAssetAccountRegistry {
+  return buildDefaultRegistryWithHosted(IBKR_CONFIG);
+}
+
+export type AccountType = (typeof ACCOUNT_TYPES)[number] | (string & {});
 export type AccountBindingScope = (typeof ACCOUNT_BINDING_SCOPES)[number];
 
 /**
  * Broker identifier accepted by account bindings. Includes registered
- * `BrokerId` values as well as the hosted MCP broker (`IBKR_CONFIG.serverId`).
+ * `BrokerId` values, the hosted MCP broker, and any
+ * custom broker configured in the runtime registry (#5097).
  */
-export type AccountBindingBroker = BrokerId | typeof IBKR_CONFIG.serverId;
+export type AccountBindingBroker = BrokerId | typeof IBKR_CONFIG.serverId | (string & {});
 
 export interface AccountBindingKey {
   readonly broker: AccountBindingBroker;
@@ -44,21 +69,38 @@ export interface AccountBindingResolution {
   readonly resolvedFromScope: AccountBindingScope | null;
 }
 
-export function isAccountBindingBroker(value: unknown): value is AccountBindingBroker {
+export function isAccountBindingBroker(
+  value: unknown,
+  registry?: BrokerAssetAccountRegistry,
+): value is AccountBindingBroker {
   if (typeof value !== "string") return false;
   const normalized = value.trim().toLowerCase();
+  if (!normalized) return false;
+  if (registry) {
+    return registry.brokers.some((b) => b.id === normalized && b.enabled);
+  }
   return normalized === IBKR_CONFIG.serverId || isBrokerId(normalized);
 }
 
-export function isAccountType(value: unknown): value is AccountType {
+export function isAccountType(
+  value: unknown,
+  registry?: BrokerAssetAccountRegistry,
+): value is AccountType {
   if (typeof value !== "string") return false;
-  return (ACCOUNT_TYPES as readonly string[]).includes(value.trim().toLowerCase());
+  const normalized = value.trim().toLowerCase();
+  if (registry) {
+    return registry.accountTypes.includes(normalized);
+  }
+  return (ACCOUNT_TYPES as readonly string[]).includes(normalized);
 }
 
-export function normalizeAccountType(value: unknown): AccountType | null {
+export function normalizeAccountType(
+  value: unknown,
+  registry?: BrokerAssetAccountRegistry,
+): AccountType | null {
   if (typeof value !== "string") return null;
   const normalized = value.trim().toLowerCase();
-  return isAccountType(normalized) ? normalized : null;
+  return isAccountType(normalized, registry) ? normalized : null;
 }
 
 export function isAccountBindingScope(value: unknown): value is AccountBindingScope {
@@ -91,11 +133,12 @@ export function validateAccountBindingInput(input: {
   accountId: unknown;
   accountName?: unknown;
   updatedBy?: string;
+  registry?: BrokerAssetAccountRegistry;
 }):
   | { readonly ok: true; readonly binding: AccountBinding }
   | { readonly ok: false; readonly error: string } {
   const rawBroker = typeof input.broker === "string" ? input.broker.trim().toLowerCase() : "";
-  if (!isAccountBindingBroker(rawBroker)) {
+  if (!isAccountBindingBroker(rawBroker, input.registry)) {
     return { ok: false, error: `Unsupported broker "${String(input.broker ?? "")}".` };
   }
 
@@ -103,15 +146,25 @@ export function validateAccountBindingInput(input: {
   if (!isTradingType(rawMode)) {
     return { ok: false, error: `Invalid trading mode "${String(input.mode ?? "")}"; expected "paper" or "live".` };
   }
+  if (input.registry) {
+    const brokerEntry = input.registry.brokers.find((b) => b.id === rawBroker && b.enabled);
+    if (brokerEntry && !brokerEntry.modes.includes(rawMode)) {
+      return {
+        ok: false,
+        error: `Broker "${rawBroker}" does not support mode "${rawMode}" (supported: ${brokerEntry.modes.join(", ")}).`,
+      };
+    }
+  }
 
+  const allowedTypes = input.registry ? input.registry.accountTypes : ACCOUNT_TYPES;
   const accountType =
     input.accountType === undefined
       ? ACCOUNT_BINDING_CONFIG.defaultAccountType
-      : normalizeAccountType(input.accountType);
+      : normalizeAccountType(input.accountType, input.registry);
   if (!accountType) {
     return {
       ok: false,
-      error: `Invalid accountType "${String(input.accountType ?? "")}"; expected one of ${ACCOUNT_TYPES.join(", ")}.`,
+      error: `Invalid accountType "${String(input.accountType ?? "")}"; expected one of ${allowedTypes.join(", ")}.`,
     };
   }
 

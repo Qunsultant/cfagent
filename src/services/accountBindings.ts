@@ -11,6 +11,8 @@ import { ACCOUNT_BINDING_CONFIG } from "../config/accountBindings";
 import { createStoreKv, type DoNamespaceLike } from "../data/durableKv";
 import {
   accountBindingSlotId,
+  applyBrokerRegistryPatch,
+  buildDefaultBrokerAssetAccountRegistry,
   isAccountBindingBroker,
   normalizeAccountBindingScope,
   normalizeAccountType,
@@ -22,6 +24,8 @@ import {
   type AccountBindingResolution,
   type AccountBindingScope,
   type AccountType,
+  type BrokerAssetAccountRegistry,
+  type BrokerAssetAccountRegistryPatch,
   type TradingType,
 } from "../trading";
 
@@ -37,6 +41,55 @@ function getBindingKv(env: Env) {
 
 function userBindingsKey(userLogin: string): string {
   return `${ACCOUNT_BINDING_CONFIG.keyPrefix}${userLogin.trim().toLowerCase()}`;
+}
+
+function userRegistryKey(userLogin: string): string {
+  return `${ACCOUNT_BINDING_CONFIG.registryKeyPrefix}${userLogin.trim().toLowerCase()}`;
+}
+
+export async function getBrokerAssetAccountRegistry(
+  env: Env,
+  userLogin: string,
+): Promise<BrokerAssetAccountRegistry> {
+  const defaults = buildDefaultBrokerAssetAccountRegistry();
+  const kv = getBindingKv(env);
+  if (!kv || !userLogin.trim()) return defaults;
+  const raw = await kv.get(userRegistryKey(userLogin));
+  if (!raw) return defaults;
+  try {
+    const parsed = JSON.parse(raw) as Partial<BrokerAssetAccountRegistry> | null;
+    if (!parsed || typeof parsed !== "object" || !Array.isArray(parsed.brokers)) {
+      return defaults;
+    }
+    return {
+      brokers: parsed.brokers,
+      assetTypes: Array.isArray(parsed.assetTypes) ? parsed.assetTypes : defaults.assetTypes,
+      accountTypes: Array.isArray(parsed.accountTypes) ? parsed.accountTypes : defaults.accountTypes,
+      updatedAt: typeof parsed.updatedAt === "string" ? parsed.updatedAt : defaults.updatedAt,
+      updatedBy: typeof parsed.updatedBy === "string" ? parsed.updatedBy : defaults.updatedBy,
+    };
+  } catch {
+    return defaults;
+  }
+}
+
+export async function updateBrokerAssetAccountRegistry(
+  env: Env,
+  userLogin: string,
+  patch: BrokerAssetAccountRegistryPatch,
+): Promise<{ readonly ok: true; readonly registry: BrokerAssetAccountRegistry } | { readonly ok: false; readonly error: string }> {
+  const kv = getBindingKv(env);
+  if (!kv) {
+    return {
+      ok: false,
+      error: "SessionStore Durable Object is not bound; cannot persist broker registry.",
+    };
+  }
+  const current = await getBrokerAssetAccountRegistry(env, userLogin);
+  const patched = applyBrokerRegistryPatch(current, patch, userLogin);
+  if (!patched.ok) return patched;
+  await kv.put(userRegistryKey(userLogin), JSON.stringify(patched.registry));
+  return patched;
 }
 
 export async function listAccountBindings(env: Env, userLogin: string): Promise<AccountBinding[]> {
@@ -73,9 +126,11 @@ export async function upsertAccountBinding(
     accountName?: unknown;
   },
 ): Promise<{ readonly ok: true; readonly binding: AccountBinding } | { readonly ok: false; readonly error: string }> {
+  const registry = await getBrokerAssetAccountRegistry(env, userLogin);
   const validated = validateAccountBindingInput({
     ...input,
     updatedBy: userLogin,
+    registry,
   });
   if (!validated.ok) return validated;
 
@@ -139,11 +194,12 @@ export async function resolveExecutionAccountContext(
     explicitAccountId?: unknown;
   },
 ): Promise<ExecutionAccountContext | null> {
+  const registry = await getBrokerAssetAccountRegistry(env, userLogin);
   const normBroker = input.broker.trim().toLowerCase();
-  if (!isAccountBindingBroker(normBroker)) return null;
+  if (!isAccountBindingBroker(normBroker, registry)) return null;
 
   const accountType =
-    normalizeAccountType(input.accountType) ?? ACCOUNT_BINDING_CONFIG.defaultAccountType;
+    normalizeAccountType(input.accountType, registry) ?? ACCOUNT_BINDING_CONFIG.defaultAccountType;
   const scope = normalizeAccountBindingScope(input.scope, "copilot");
 
   const explicit =

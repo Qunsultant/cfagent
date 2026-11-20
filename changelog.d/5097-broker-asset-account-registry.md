@@ -1,0 +1,3 @@
+### Added
+
+- **Runtime-configurable broker, asset-type & account-type registry (#5097, Slice F0 of #5094):** extended the `#3855` registry-driven broker catalog with `src/config/brokerRegistry.ts` and `SessionStore`-backed persistence (`getBrokerAssetAccountRegistry` / `updateBrokerAssetAccountRegistry` in `src/services/accountBindings.ts`), holding per-broker modes, asset types, account types per asset type, and capabilities. Managed at runtime via `PUT /api/broker/account-binding` (`registryPatch`), the `broker_account_binding` MCP tool (`registry_get` / `registry_update`), and the `AccountBindingSelector` UX manager panel without code changes or redeploys.

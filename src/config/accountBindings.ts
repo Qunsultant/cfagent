@@ -23,6 +23,7 @@ export const ACCOUNT_BINDING_SCOPES = [
 export const ACCOUNT_BINDING_CONFIG = {
   namespace: "account_bindings",
   keyPrefix: "acctbind:v1:",
+  registryKeyPrefix: "acctreg:v1:",
   defaultAccountType: "stock" as (typeof ACCOUNT_TYPES)[number],
   defaultScope: "tenant" as (typeof ACCOUNT_BINDING_SCOPES)[number],
 } as const;
