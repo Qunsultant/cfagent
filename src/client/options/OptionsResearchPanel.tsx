@@ -27,7 +27,10 @@ import { RawContractsScreener } from "./RawContractsScreener";
 import { RiskAnalysisModal } from "./RiskAnalysisModal";
 import { ThreeWayComparison, type ThreeWayComparisonData } from "./ThreeWayComparison";
 import type { RiskSubject } from "./riskManagementEngine";
-import type { TradeOrderContext } from "../trading/tradeOrderContext";
+import {
+  candidateToTradeContext,
+  type TradeOrderContext,
+} from "../trading/tradeOrderContext";
 import { TabHoverItem } from "../TabHoverItem";
 import { CapabilityNavBar, CopilotTriggerButton, type CapabilityTabItem } from "../components/CapabilityNavBar";
 import { OptionsDataDownloadDropdown } from "./OptionsDataDownloadDropdown";
@@ -56,28 +59,6 @@ interface OptionsResearchPanelProps {
 }
 
 export type { TradeOrderContext } from "../trading/tradeOrderContext";
-
-function toTradeContext(candidate: StrategyCandidate, thesis: OptionThesis, underlyingPrice?: number): TradeOrderContext {
-  const optionLegs = candidate.legs.map((leg) => ({
-    securityType: leg.optionType === "STOCK" ? "EQ" as const : "OPTN" as const,
-    side: leg.side,
-    quantity: leg.quantity,
-    optionType: leg.optionType === "STOCK" ? undefined : leg.optionType,
-    strike: leg.optionType === "STOCK" ? undefined : leg.strike,
-    expirationDate: leg.optionType === "STOCK" ? undefined : leg.expirationDate,
-  }));
-  return {
-    assetClass: optionLegs.some((leg) => leg.securityType === "OPTN") ? "options" : "equity",
-    symbol: candidate.symbol,
-    action: thesis === "bearish" ? "SELL_SHORT" : "BUY",
-    quantity: 1,
-    underlyingPrice,
-    label: `${candidate.label} (${candidate.expirationDate}), max loss ${candidate.maxLoss === null ? "unlimited" : `$${candidate.maxLoss}`}`,
-    legs: candidate.legs.map((leg) => `${leg.side} ${leg.quantity} ${leg.symbol} @ $${leg.entryPrice.toFixed(2)}`),
-    optionLegs,
-    strategyNetDebit: candidate.netDebit,
-  };
-}
 
 function candidateToRiskSubject(candidate: StrategyCandidate): RiskSubject {
   return {
@@ -933,7 +914,7 @@ export function OptionsResearchPanel({ activeEnv, userLogin, onPreviewTrade, onJ
   }, [loading, hasResults, onJobStateChange]);
 
   const previewTrade: PreviewTrade | undefined = onPreviewTrade
-    ? (candidate) => onPreviewTrade(toTradeContext(
+    ? (candidate) => onPreviewTrade(candidateToTradeContext(
       candidate,
       thesis,
       Number(screenedContracts.find((c) => typeof c.underlyingPrice === "number")?.underlyingPrice) || undefined,
