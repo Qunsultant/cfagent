@@ -20,8 +20,7 @@ import { recordJobOutcome } from "../services/jobOutcomes";
 import type { JobOutcomeInput } from "../data/jobOutcomePorts";
 import type { JobRunTrigger } from "../data/jobRunRecordPorts";
 import {
-  buildOrchestratorSystemPrompt,
-  resolveShadowMaxSteps,
+  buildOrchestratorSystemPrompt, FINAL_REPLY_CONTRACT, withFinalReplyContract, resolveShadowMaxSteps,
   type StockCopilotPromptCapability,
 } from "./chatPrompt";
 import { resolveCopilotTradingSelection } from "./copilotTradingMode";
@@ -134,7 +133,7 @@ import { submitChatTurn, awaitChatTurnSubmission, type DurableTurnContext, type 
 import type { ScreenerRunOutcome } from "../services/screenerFollowups";
 import { marketDateKey, readAutopilotStateRaw, getAutopilotState, writeAutopilotState, incrementAutopilotOrdersToday, fetchBrokerBalanceSnapshot, openNotionalForSymbol, evaluateAndRecordAutopilotVerdict, type AutopilotContext } from "./orchestrator/autopilot";
 import { readSettingRaw, writeSetting, getReportDispatchHitl, setReportDispatchHitl, createReportConfirmation, getReportConfirmation, decideReportConfirmation, storeResearchReportCanonicalAsync, confirmationDeliveryMeta, deliverStoredReportEmail, deliverStoredReportWebhook, persistScreenerReportCanonical, persistParentScreenReportCanonical, persistPipelineGenerateReportCanonical, persistOptionsServeReport, refreshCanonicalPdfFields, sendReportEmail, sendReportWebhook, type ReportDispatchContext } from "./orchestrator/reportDispatch";
-import { assessReplyCompleteness } from "./orchestrator/replyCompleteness";
+import { auditReplyCompleteness } from "./orchestrator/replyCompleteness";
 import { extractMessageText, createTurnTools, deriveTurn, assembleGrounding, type ChatTurnHelpersContext } from "./orchestrator/chatTurnHelpers";
 import { createOpenaimpMcpFetch, ensureOpenaimpMcpConnection, chatNlqTurnGate, resolveStockCopilotMcpActivation, STOCK_COPILOT_SOURCE_TAB, type ChatNlqTurnGateResult, type EnsureOpenaimpMcpResult } from "./orchestrator/meshMcpClient";
 import { logChatActivity, enqueueHttpRequest, type HttpEntryContext } from "./orchestrator/httpEntry";
@@ -2641,13 +2640,13 @@ export class OrchestratorAgent extends PortThink {
    * builder with a neutral route, mirroring the live prompt's shape.
    */
   getSystemPrompt(): string {
-    return buildOrchestratorSystemPrompt({
+    return withFinalReplyContract(buildOrchestratorSystemPrompt({
       route: { agent: "orchestrator", confidence: 1, reason: "Direct chat turn" },
       memoryContext: "",
       vectorContext: "",
       optionsResearchContext: "",
       isAutoOptionsResearchRequest: false,
-    });
+    }));
   }
 
   /** Actor configuration: the live per-turn tool factory (#312 single owner). */
@@ -2684,6 +2683,7 @@ export class OrchestratorAgent extends PortThink {
           return rows.map((m) => `- ${m.key}: "${m.value}"`).join("\n");
         },
       },
+      { label: "final-reply-contract", description: "Standing final-reply completeness contract (#5899).", resolve: async () => FINAL_REPLY_CONTRACT },
     ];
   }
 
@@ -2989,16 +2989,7 @@ export class OrchestratorAgent extends PortThink {
     const turn = this.pendingTurn;
     this.pendingTurn = undefined;
     if (!turn || result.status === "error" || !result.message) return;
-    // #5899: every turn is checked against the final-reply contract.
-    const completeness = assessReplyCompleteness(result.message);
-    if (!completeness.complete) {
-      this.audit("chat.reply_incomplete", "orchestrator", {
-        requestId: turn.requestId,
-        agent: turn.route?.agent,
-        reason: completeness.reason,
-        toolCalls: completeness.toolCalls,
-      });
-    }
+    auditReplyCompleteness(result.message, turn, (t, a, p) => this.audit(t, a, p));
     const text = this.extractMessageText(result.message);
     if (!text || !turn.route) return;
     const route = turn.route;

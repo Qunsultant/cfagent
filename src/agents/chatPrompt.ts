@@ -288,11 +288,16 @@ export const FINAL_REPLY_CONTRACT = `Final-reply contract (applies to EVERY resp
 - Never end a turn on an announcement, a colon, or "Submitting…" — a reply that only promises work is incomplete.
 - If you ran out of steps or a tool is still pending, say exactly what completed, what did not, and what the user should do next.`;
 
-export function buildOrchestratorSystemPrompt(input: OrchestratorPromptInput): string {
-  return `${buildRoutePrompt(input)}\n\n${FINAL_REPLY_CONTRACT}`;
+/**
+ * Appended at the single point a turn's prompt is prepared for inference,
+ * NOT inside the builders — the builders' byte-identity and size pins
+ * (#686, #879, #2719, #3838) stay untouched.
+ */
+export function withFinalReplyContract(prompt: string): string {
+  return prompt.includes(FINAL_REPLY_CONTRACT) ? prompt : `${prompt}\n\n${FINAL_REPLY_CONTRACT}`;
 }
 
-function buildRoutePrompt(input: OrchestratorPromptInput): string {
+export function buildOrchestratorSystemPrompt(input: OrchestratorPromptInput): string {
   if (input.stockCopilotMcpActive) {
     return buildStockCopilotSystemPrompt(input);
   }

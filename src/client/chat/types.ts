@@ -194,6 +194,7 @@ import type {
   RevenueCoverageCut,
   RevenueFamilyCut,
 } from "../../types";
+import { synthesizeToolTurnSummary } from "../../agents/orchestrator/replyCompleteness";
 
 export interface RevenueSummaryData {
   grossRevenue: number;
@@ -224,10 +225,13 @@ export interface TableMetadataItem {
 export function extractText(message: any): string {
   if (typeof message.content === "string") return message.content;
   if (Array.isArray(message.parts)) {
-    return message.parts
+    const text = message.parts
       .filter((p: any) => p && p.type === "text" && typeof p.text === "string")
       .map((p: any) => p.text)
       .join("") || "";
+    const synth = message.role === "user" ? null : synthesizeToolTurnSummary(message);
+    if (text && synth) return `${text.trim()}\n\n${synth}`;
+    return text || synth || "";
   }
   return "";
 }
