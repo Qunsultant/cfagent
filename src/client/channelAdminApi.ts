@@ -12,6 +12,7 @@
  * All calls go through src/client/apiFetch.ts (the #71 rule).
  */
 import { apiFetch } from "./apiFetch";
+import { platformPathParams } from "../data/platformUrlCatalog";
 import type { TenantChannelConfig } from "../data/tenantChannelPorts";
 
 export type { TenantChannelConfig };
@@ -48,7 +49,7 @@ async function send<T>(path: string, init?: RequestInit): Promise<T> {
 
 export async function fetchTenantChannels(tenantId: string): Promise<TenantChannelConfig> {
   const data = await send<{ channels?: unknown }>(
-    `/api/platform-channels/${encodeURIComponent(tenantId)}`,
+    platformPathParams("channelRead", { tenantId }),
   );
   if (!isChannels(data.channels)) throw new Error("Unexpected channel config response.");
   return data.channels;
@@ -61,7 +62,7 @@ export async function updateTenantChannels(
   patch: TenantChannelPatch,
 ): Promise<TenantChannelConfig> {
   const data = await send<{ channels?: unknown }>(
-    `/api/platform-channels/${encodeURIComponent(tenantId)}/channels`,
+    platformPathParams("channelPatch", { tenantId }),
     {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },

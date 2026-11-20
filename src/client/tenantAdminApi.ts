@@ -18,6 +18,7 @@
  * opt in.
  */
 import { apiFetch } from "./apiFetch";
+import { platformPath, platformPathParams } from "../data/platformUrlCatalog";
 
 /**
  * Per-request bound for tenant administration calls (issue
@@ -78,7 +79,7 @@ async function send<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export async function fetchTenants(): Promise<TenantListRow[]> {
-  const data = await send<{ tenants?: unknown }>("/api/platform-tenants");
+  const data = await send<{ tenants?: unknown }>(platformPath("tenants"));
   if (!Array.isArray(data.tenants)) throw new Error("Unexpected tenant list response.");
   return data.tenants.filter(
     (row): row is TenantListRow => isSettings(row) && typeof (row as { memberCount?: unknown }).memberCount === "number",
@@ -86,7 +87,7 @@ export async function fetchTenants(): Promise<TenantListRow[]> {
 }
 
 export async function createTenant(tenantId: string): Promise<TenantSettingsView> {
-  const data = await send<{ tenant?: unknown }>("/api/platform-tenants", {
+  const data = await send<{ tenant?: unknown }>(platformPath("tenants"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ tenantId }),
@@ -96,7 +97,9 @@ export async function createTenant(tenantId: string): Promise<TenantSettingsView
 }
 
 export async function fetchTenantDetail(tenantId: string): Promise<TenantDetail> {
-  const data = await send<{ tenant?: unknown }>(`/api/platform-tenants/${encodeURIComponent(tenantId)}`);
+  const data = await send<{ tenant?: unknown }>(
+    platformPathParams("tenantDetail", { tenantId }),
+  );
   if (!isSettings(data.tenant) || !Array.isArray((data.tenant as { members?: unknown }).members)) {
     throw new Error("Unexpected tenant detail response.");
   }
@@ -114,7 +117,7 @@ export async function updateTenantSettings(
   patch: TenantSettingsPatch,
 ): Promise<TenantSettingsView> {
   const data = await send<{ tenant?: unknown }>(
-    `/api/platform-tenants/${encodeURIComponent(tenantId)}/settings`,
+    platformPathParams("tenantSettings", { tenantId }),
     {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },

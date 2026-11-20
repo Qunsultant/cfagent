@@ -80,6 +80,13 @@ import {
   validateRequestShape,
 } from "../../api/requestValidation";
 import { BusinessError, codedMessage, resolveOutcome } from "../../outcomes/outcomeAspects";
+import {
+  PLATFORM_ROUTE_SUFFIXES,
+  PLATFORM_ROUTE_TAILS,
+  matchCatalogRoute,
+  platformRouteById,
+  segmentsAfterMarker,
+} from "../../data/platformUrlCatalog";
 
 import { createStructuredLogger } from "../../observability/structuredLogger";
 import { createObservabilitySink } from "../../observability/createObservabilityPorts";
@@ -261,18 +268,21 @@ export async function handlePlatformTenantRoutes(
   type Action = "list" | "create" | "detail" | "settings" | null;
   let action: Action = null;
   let tenantId = "";
-  if (path.endsWith("/platform-tenants")) {
+  if (path.endsWith(PLATFORM_ROUTE_SUFFIXES.tenants)) {
     // A method mismatch on a matched collection path is still a
     // match: it falls into the list branch, which answers 405,
     // instead of falling through to the next handler.
     action = request.method === "POST" ? "create" : "list";
-  } else if (path.includes("/platform-tenants/")) {
-    const rest = path.split("/platform-tenants/")[1] ?? "";
-    const segments = rest.split("/");
+  } else if (matchCatalogRoute(platformRouteById("tenantDetail"), path)) {
+    const segments = segmentsAfterMarker(path, platformRouteById("tenantDetail"));
     if (segments.length === 1 && segments[0]) {
       tenantId = decodeURIComponent(segments[0]);
       action = "detail";
-    } else if (segments.length === 2 && segments[0] && segments[1] === "settings") {
+    } else if (
+      segments.length === 2 &&
+      segments[0] &&
+      segments[1] === PLATFORM_ROUTE_TAILS.tenantSettings
+    ) {
       tenantId = decodeURIComponent(segments[0]);
       action = "settings";
     } else {

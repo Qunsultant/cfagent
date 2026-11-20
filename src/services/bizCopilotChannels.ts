@@ -58,6 +58,7 @@
  */
 
 import { handlePlatformChannelRoutes } from "../agents/routes/platformChannels";
+import { platformPathParams } from "../data/platformUrlCatalog";
 import { isTenantIdShaped } from "../agents/routes/platformTenants";
 import type { AuditStore } from "../security/iaaaAudit";
 import type { Env } from "../types";
@@ -354,11 +355,11 @@ type ChannelRouteResult = { ok: boolean; status: number; body: Record<string, un
 
 async function callChannelRoute(
   method: string,
-  suffix: string,
+  path: string,
   body: Record<string, unknown> | undefined,
   deps: BizCopilotChannelExecutorDeps,
 ): Promise<ChannelRouteResult> {
-  const url = new URL(`https://bizcopilot.internal/platform-channels${suffix}`);
+  const url = new URL(`https://bizcopilot.internal${path}`);
   const request = new Request(url.toString(), {
     method,
     headers: {
@@ -469,7 +470,12 @@ export async function executeBizCopilotChannelIntent(
   if (intent.action === "show" || intent.action === "enforcement") {
     return resultContext(
       intent,
-      await callChannelRoute("GET", `/${encodeURIComponent(intent.tenantId)}`, undefined, deps),
+      await callChannelRoute(
+        "GET",
+        platformPathParams("channelRead", { tenantId: intent.tenantId }),
+        undefined,
+        deps,
+      ),
     );
   }
 
@@ -494,7 +500,7 @@ export async function executeBizCopilotChannelIntent(
     intent,
     await callChannelRoute(
       "PATCH",
-      `/${encodeURIComponent(intent.tenantId)}/channels`,
+      platformPathParams("channelPatch", { tenantId: intent.tenantId }),
       { channels: { [intent.channel]: intent.action === "enable" } },
       deps,
     ),

@@ -57,6 +57,7 @@ import { apiFetch, asyncJobErrorCode } from "./apiFetch";
 import { codedMessage, resolveOutcome } from "../outcomes/outcomeAspects";
 
 import { COMMERCIAL_API_BASE } from "../data/commercialUrlCatalog";
+import { platformPath } from "../data/platformUrlCatalog";
 import { createClientLogger } from "./clientLogger";
 
 const log = createClientLogger("client/firstRunApi");
@@ -362,7 +363,7 @@ export function referralCodeFromSearch(search: string): string | null {
 export async function setupAccount(
   referralCode?: string,
 ): Promise<{ created: boolean; identity: PlatformIdentityView }> {
-  const body = await callAbsolute<unknown>("/api/platform/accounts/setup", {
+  const body = await callAbsolute<unknown>(platformPath("accountSetup"), {
     method: "POST",
     body: JSON.stringify(referralCode ? { referralCode } : {}),
   });
@@ -372,7 +373,7 @@ export async function setupAccount(
 
 /** Read the server-side onboarding state; null when the flow never started (#3256). */
 export async function fetchOnboardingState(): Promise<OnboardingStateView | null> {
-  return parseOnboardingState(await callAbsolute<unknown>("/api/platform/onboarding/state"));
+  return parseOnboardingState(await callAbsolute<unknown>(platformPath("onboardingState")));
 }
 
 /**
@@ -387,7 +388,7 @@ export async function saveOnboardingState(
   if (input.completed !== undefined) body.completed = input.completed;
   if (input.trialPlanId !== undefined) body.trialPlanId = input.trialPlanId;
   return parseOnboardingState(
-    await callAbsolute<unknown>("/api/platform/onboarding/state", {
+    await callAbsolute<unknown>(platformPath("onboardingState"), {
       method: "POST",
       body: JSON.stringify(body),
     }),
@@ -410,7 +411,7 @@ export function startETradeOAuth(): void {
 
 /** Self account view with subscription rows — the summary's trial source (#3256 step 5). */
 export async function fetchAccountSelf(): Promise<AccountSelfView> {
-  return parseAccountSelf(await callAbsolute<unknown>("/api/platform/accounts/self"));
+  return parseAccountSelf(await callAbsolute<unknown>(platformPath("accountSelf")));
 }
 
 /** Read notification preferences through the existing lifecycle route. */

@@ -4,7 +4,8 @@
  *
  * Pins, in the order of the issue's three sections:
  * 1. One commercial URL catalog is the single source of truth: the route
- *    table's (method, matchSuffix) set equals the handler's endsWith set;
+ *    table's (method, match) set equals the handler's match set (endsWith
+ *    for fixed routes, the catalog helper for parameterized routes, #5610);
  *    no hardcoded commercial path literal survives outside the catalog
  *    module (comments stripped before scanning); the IAAA explorer entry
  *    derives its prefixes + source from the catalog.
@@ -25,10 +26,16 @@ import {
   COMMERCIAL_BARE_BASE,
   COMMERCIAL_BARE_PREFIX,
   COMMERCIAL_ROUTES,
+  COMMERCIAL_ROUTE_INCLUDES,
   COMMERCIAL_ROUTE_SUFFIXES,
   PAYMENTS_API_PREFIX,
-  commercialPath,
   commercialBarePath,
+  commercialBarePathParams,
+  commercialPath,
+  commercialPathParams,
+  commercialRouteById,
+  extractCatalogParams,
+  matchCatalogRoute,
 } from "../src/data/commercialUrlCatalog";
 import { COMMERCIAL_DEFAULTS } from "../src/config/commercialDefaults";
 import { codedMessage, resolveOutcome } from "../src/outcomes/outcomeAspects";
@@ -156,14 +163,31 @@ describe("commercial URL catalog (#2846 §1)", () => {
     const ids = COMMERCIAL_ROUTES.map((r) => r.id);
     expect(new Set(ids).size).toBe(ids.length);
     expect(COMMERCIAL_ROUTES.length).toBeGreaterThan(40);
+    // Issue #5610 (G-8): 73 fixed routes + the 9 parameterized routes
+    // (10 Group C branches — productVersions GET + POST share one entry).
+    expect(COMMERCIAL_ROUTES.length).toBe(82);
+    expect(COMMERCIAL_ROUTES.filter((r) => r.params?.length).length).toBe(9);
     for (const r of COMMERCIAL_ROUTES) {
       expect(r.methods.length).toBeGreaterThan(0);
       for (const m of r.methods) expect(["GET", "POST"]).toContain(m);
       expect(r.bare.startsWith(COMMERCIAL_BARE_BASE), `${r.id} bare`).toBe(true);
-      expect(commercialPath(r.id)).toBe(`/api${r.bare}`);
-      expect(commercialBarePath(r.id)).toBe(r.bare);
-      expect(r.matchSuffix.length).toBeGreaterThan(0);
       expect(COMMERCIAL_ROUTE_SUFFIXES[r.id]).toBe(r.matchSuffix);
+      if (r.params?.length) {
+        // Parameterized (#5610): the template builders throw — a `:param`
+        // template is not a URL; the params builders fill it.
+        expect(() => commercialPath(r.id)).toThrow(/parameterized/);
+        expect(() => commercialBarePath(r.id)).toThrow(/parameterized/);
+        expect(r.matchSuffix.length + (r.matchIncludes?.length ?? 0)).toBeGreaterThan(0);
+        expect(COMMERCIAL_ROUTE_INCLUDES[r.id]).toEqual(r.matchIncludes);
+        for (const p of r.params) {
+          expect(r.bare, `${r.id} param ${p.name}`).toContain(`:${p.name}`);
+          expect(p.after.length).toBeGreaterThan(0);
+        }
+      } else {
+        expect(commercialPath(r.id)).toBe(`/api${r.bare}`);
+        expect(commercialBarePath(r.id)).toBe(r.bare);
+        expect(r.matchSuffix.length).toBeGreaterThan(0);
+      }
     }
     expect(COMMERCIAL_API_BASE).toBe("/api/payments/agentic/commercial");
     expect(COMMERCIAL_BARE_BASE).toBe("/payments/agentic/commercial");
@@ -184,7 +208,11 @@ describe("commercial URL catalog (#2846 §1)", () => {
     expect(COMMERCIAL_ROUTE_SUFFIXES.account).toBe("/payments/agentic/commercial/account");
   });
 
-  it("the route table's (method, matchSuffix) set equals the handler's endsWith set", () => {
+  it("the route table's (method, match) set equals the handler's match set", () => {
+    // The match key is the endsWith suffix, or — for the one includes-only
+    // route (productBulkMoveDetail, #5610) — the includes strings.
+    const matchKey = (r: (typeof COMMERCIAL_ROUTES)[number]): string =>
+      r.matchSuffix.length > 0 ? r.matchSuffix : `includes:${(r.matchIncludes ?? []).join("+")}`;
     const handler = readSrc("src/agents/routes/agenticPayments.ts");
     const fromHandler = new Set<string>();
     for (const line of handler.split("\n")) {
@@ -197,17 +225,28 @@ describe("commercial URL catalog (#2846 §1)", () => {
       ) {
         throw new Error(`handler matches a literal commercial suffix: ${line.trim()}`);
       }
-      const m = line.match(/path\.endsWith\(COMMERCIAL_ROUTE_SUFFIXES\.([A-Za-z]+)\)/);
-      if (!m) continue;
-      const suffix = COMMERCIAL_ROUTE_SUFFIXES[m[1] as keyof typeof COMMERCIAL_ROUTE_SUFFIXES];
-      expect(suffix, `unknown catalog id on endsWith line: ${line.trim()}`).toBeTruthy();
       const methods = [...line.matchAll(/request\.method === "(GET|POST)"/g)].map((x) => x[1]);
-      expect(methods.length, `no method on endsWith line: ${line.trim()}`).toBeGreaterThan(0);
-      for (const method of methods) fromHandler.add(`${method} ${suffix}`);
+      const ends = line.match(/path\.endsWith\(COMMERCIAL_ROUTE_SUFFIXES\.([A-Za-z]+)\)/);
+      if (ends) {
+        const suffix = COMMERCIAL_ROUTE_SUFFIXES[ends[1] as keyof typeof COMMERCIAL_ROUTE_SUFFIXES];
+        expect(suffix, `unknown catalog id on endsWith line: ${line.trim()}`).toBeTruthy();
+        expect(methods.length, `no method on endsWith line: ${line.trim()}`).toBeGreaterThan(0);
+        for (const method of methods) fromHandler.add(`${method} ${suffix}`);
+        continue;
+      }
+      // Issue #5610: parameterized branches match through the catalog
+      // helper instead of an endsWith.
+      const helper = line.match(/matchCatalogRoute\(commercialRouteById\("([A-Za-z]+)"\), path\)/);
+      if (helper) {
+        const entry = COMMERCIAL_ROUTES.find((r) => r.id === helper[1]);
+        expect(entry, `unknown catalog id on match line: ${line.trim()}`).toBeTruthy();
+        expect(methods.length, `no method on match line: ${line.trim()}`).toBeGreaterThan(0);
+        for (const method of methods) fromHandler.add(`${method} ${matchKey(entry!)}`);
+      }
     }
     const fromCatalog = new Set<string>();
     for (const r of COMMERCIAL_ROUTES) {
-      for (const method of r.methods) fromCatalog.add(`${method} ${r.matchSuffix}`);
+      for (const method of r.methods) fromCatalog.add(`${method} ${matchKey(r)}`);
     }
     expect([...fromCatalog].sort()).toEqual([...fromHandler].sort());
   });
@@ -229,6 +268,108 @@ describe("commercial URL catalog (#2846 §1)", () => {
     expect(entry).toBeTruthy();
     expect(entry!.prefixes).toEqual([PAYMENTS_API_PREFIX, COMMERCIAL_BARE_PREFIX]);
     expect(entry!.source).toContain("commercialUrlCatalog");
+  });
+});
+
+describe("parameterized commercial routes (#5610 G-8)", () => {
+  const CASES: Array<{ id: string; path: string; params: Record<string, string> }> = [
+    {
+      id: "subscriptionMove",
+      path: "/api/payments/agentic/commercial/subscriptions/sub-1/move",
+      params: { subscriptionId: "sub-1" },
+    },
+    {
+      id: "accountSegment",
+      path: "/api/payments/agentic/commercial/accounts/alice/segment",
+      params: { userId: "alice" },
+    },
+    {
+      id: "productRank",
+      path: "/api/payments/agentic/commercial/products/prod-free/rank",
+      params: { productId: "prod-free" },
+    },
+    {
+      id: "productVersions",
+      path: "/api/payments/agentic/commercial/products/prod-free/versions",
+      params: { productId: "prod-free" },
+    },
+    {
+      id: "versionApprove",
+      path: "/api/payments/agentic/commercial/products/prod-free/versions/v3/approve",
+      params: { productId: "prod-free", versionId: "v3" },
+    },
+    {
+      id: "versionDeactivate",
+      path: "/api/payments/agentic/commercial/products/prod-free/versions/v3/deactivate",
+      params: { productId: "prod-free", versionId: "v3" },
+    },
+    {
+      id: "productBulkMove",
+      path: "/api/payments/agentic/commercial/products/prod-free/bulk-move",
+      params: { productId: "prod-free" },
+    },
+    {
+      id: "productBulkMoves",
+      path: "/api/payments/agentic/commercial/products/prod-free/bulk-moves",
+      params: { productId: "prod-free" },
+    },
+    {
+      id: "productBulkMoveDetail",
+      path: "/api/payments/agentic/commercial/products/prod-free/bulk-moves/bm-9",
+      params: { productId: "prod-free", bulkMoveId: "bm-9" },
+    },
+  ];
+
+  it("every parameterized route matches its real path and extracts its params", () => {
+    for (const c of CASES) {
+      const route = commercialRouteById(c.id);
+      expect(matchCatalogRoute(route, c.path)).toBe(true);
+      expect(extractCatalogParams(route, c.path)).toEqual(c.params);
+      // The builders round-trip the same path.
+      expect(commercialPathParams(c.id, c.params)).toBe(c.path);
+      expect(commercialBarePathParams(c.id, c.params)).toBe(c.path.slice("/api".length));
+    }
+  });
+
+  it("the matcher rejects wrong tails, wrong families, and the bare template", () => {
+    const move = commercialRouteById("subscriptionMove");
+    expect(matchCatalogRoute(move, "/api/payments/agentic/commercial/subscriptions/sub-1/move")).toBe(true);
+    expect(matchCatalogRoute(move, "/api/payments/agentic/commercial/subscriptions/sub-1/moved")).toBe(false);
+    expect(matchCatalogRoute(move, "/api/payments/agentic/commercial/accounts/sub-1/move")).toBe(false);
+    expect(matchCatalogRoute(move, "/api/payments/agentic/commercial/subscriptions/sub-1")).toBe(false);
+    const detail = commercialRouteById("productBulkMoveDetail");
+    expect(matchCatalogRoute(detail, "/api/payments/agentic/commercial/products/p/bulk-moves/bm-1")).toBe(true);
+    // The list shape (no id segment) is the sibling route's, never the detail's.
+    expect(matchCatalogRoute(detail, "/api/payments/agentic/commercial/products/p/bulk-moves")).toBe(false);
+    const approve = commercialRouteById("versionApprove");
+    // The old branch required only the products stem (no "/versions/"
+    // include): a products-scoped approve path matches, exactly as before.
+    expect(matchCatalogRoute(approve, "/api/payments/agentic/commercial/products/p/approve")).toBe(true);
+    expect(extractCatalogParams(approve, "/api/payments/agentic/commercial/products/p/approve")).toEqual({
+      productId: "p",
+      versionId: "",
+    });
+  });
+
+  it("extraction keeps a malformed segment raw, never throws", () => {
+    const route = commercialRouteById("productRank");
+    const bad = "/api/payments/agentic/commercial/products/%E0%A4%A/rank";
+    expect(matchCatalogRoute(route, bad)).toBe(true);
+    expect(extractCatalogParams(route, bad)).toEqual({ productId: "%E0%A4%A" });
+    expect(extractCatalogParams(route, "/api/payments/agentic/commercial/rank")).toEqual({
+      productId: "",
+    });
+  });
+
+  it("the params builders encode once and throw on a missing param or unknown id", () => {
+    expect(commercialPathParams("productRank", { productId: "a b/c" })).toBe(
+      "/api/payments/agentic/commercial/products/a%20b%2Fc/rank",
+    );
+    expect(() => commercialPathParams("productRank", {})).toThrow(/Missing path param productId/);
+    expect(() => commercialPathParams("nope", {})).toThrow(/Unknown commercial route id/);
+    expect(() => commercialBarePathParams("versionApprove", { productId: "p" })).toThrow(
+      /Missing path param versionId/,
+    );
   });
 });
 

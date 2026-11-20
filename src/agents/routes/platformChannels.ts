@@ -87,6 +87,12 @@ import {
   webhookUrlBodySchema,
 } from "../../api/requestValidation";
 import { BusinessError, codedMessage, resolveOutcome } from "../../outcomes/outcomeAspects";
+import {
+  PLATFORM_ROUTE_TAILS,
+  matchCatalogRoute,
+  platformRouteById,
+  segmentsAfterMarker,
+} from "../../data/platformUrlCatalog";
 
 import { createStructuredLogger } from "../../observability/structuredLogger";
 import { createObservabilitySink } from "../../observability/createObservabilityPorts";
@@ -257,21 +263,32 @@ export async function handlePlatformChannelRoutes(
   ctx: PlatformChannelRouteContext,
 ): Promise<Response | null> {
   void sessionId;
-  if (!path.includes("/platform-channels/")) return null;
-  const rest = path.split("/platform-channels/")[1] ?? "";
-  const segments = rest.split("/");
+  if (!matchCatalogRoute(platformRouteById("channelRead"), path)) return null;
+  const segments = segmentsAfterMarker(path, platformRouteById("channelRead"));
   let action: "read" | "patch" | "slack-channel" | "webhook-url" | null = null;
   let tenantId = "";
   if (segments.length === 1 && segments[0]) {
     tenantId = decodeURIComponent(segments[0]);
     action = "read";
-  } else if (segments.length === 2 && segments[0] && segments[1] === "channels") {
+  } else if (
+    segments.length === 2 &&
+    segments[0] &&
+    segments[1] === PLATFORM_ROUTE_TAILS.channelPatch
+  ) {
     tenantId = decodeURIComponent(segments[0]);
     action = "patch";
-  } else if (segments.length === 2 && segments[0] && segments[1] === "slack-channel") {
+  } else if (
+    segments.length === 2 &&
+    segments[0] &&
+    segments[1] === PLATFORM_ROUTE_TAILS.channelSlackChannel
+  ) {
     tenantId = decodeURIComponent(segments[0]);
     action = "slack-channel";
-  } else if (segments.length === 2 && segments[0] && segments[1] === "webhook-url") {
+  } else if (
+    segments.length === 2 &&
+    segments[0] &&
+    segments[1] === PLATFORM_ROUTE_TAILS.channelWebhookUrl
+  ) {
     tenantId = decodeURIComponent(segments[0]);
     action = "webhook-url";
   } else {

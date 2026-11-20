@@ -85,6 +85,7 @@ import { createProfileAdapter } from "../../data/createProfilePorts";
 import { createReferralCodeAdapters } from "../../data/createReferralCodePorts";
 import { createStoreOperatorsAdapter } from "../../data/createStoreOperatorsPorts";
 import { createSubscriptionAdapter } from "../../data/createSubscriptionPorts";
+import { PLATFORM_ROUTE_SUFFIXES } from "../../data/platformUrlCatalog";
 import type { CommercialStore } from "../../data/commercialPorts";
 import type { ReferralCreditPort } from "../../data/lifecyclePorts";
 import type { ReferralCodeRuleStore, ReferralCodeStore } from "../../data/referralCodePorts";
@@ -341,13 +342,13 @@ export async function handlePlatformAccountRoutes(
   ctx: PlatformAccountRouteContext,
 ): Promise<Response | null> {
   void sessionId;
-  const isSelf = path.endsWith("/platform/accounts/self") && request.method === "GET";
-  const isSetup = path.endsWith("/platform/accounts/setup") && request.method === "POST";
-  const isLookup = path.endsWith("/platform/accounts/lookup") && request.method === "GET";
-  const isOnboardingGet = path.endsWith("/platform/onboarding/state") && request.method === "GET";
-  const isOnboardingSave = path.endsWith("/platform/onboarding/state") && request.method === "POST";
-  const isProfileGet = path.endsWith("/platform/accounts/profile") && request.method === "GET";
-  const isProfileSave = path.endsWith("/platform/accounts/profile") && request.method === "POST";
+  const isSelf = path.endsWith(PLATFORM_ROUTE_SUFFIXES.accountSelf) && request.method === "GET";
+  const isSetup = path.endsWith(PLATFORM_ROUTE_SUFFIXES.accountSetup) && request.method === "POST";
+  const isLookup = path.endsWith(PLATFORM_ROUTE_SUFFIXES.accountLookup) && request.method === "GET";
+  const isOnboardingGet = path.endsWith(PLATFORM_ROUTE_SUFFIXES.onboardingState) && request.method === "GET";
+  const isOnboardingSave = path.endsWith(PLATFORM_ROUTE_SUFFIXES.onboardingState) && request.method === "POST";
+  const isProfileGet = path.endsWith(PLATFORM_ROUTE_SUFFIXES.accountProfile) && request.method === "GET";
+  const isProfileSave = path.endsWith(PLATFORM_ROUTE_SUFFIXES.accountProfile) && request.method === "POST";
   if (!isSelf && !isSetup && !isLookup && !isOnboardingGet && !isOnboardingSave && !isProfileGet && !isProfileSave) return null;
   const route = isSelf
     ? "self"

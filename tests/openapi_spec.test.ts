@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { buildOpenApiSpec, STOCK_SPEC_PATHS } from "../src/security/openapiSpec";
 import { API_ENDPOINT_CATALOG } from "../src/client/iaaaEndpointCatalog";
+import { COMMERCIAL_ROUTES } from "../src/data/commercialUrlCatalog";
+import { PLATFORM_ROUTES } from "../src/data/platformUrlCatalog";
 
 /**
  * #1024 Phase 1 — OpenAPI + Swagger spike (no framework change).
@@ -12,6 +14,27 @@ import { API_ENDPOINT_CATALOG } from "../src/client/iaaaEndpointCatalog";
 const NOT_SPECIFIED = "schema: not yet specified (spike pilot coverage)";
 
 const HTTP_METHODS = ["get", "post", "delete"] as const;
+
+/** The spec path for a catalog bare path: `/api` + `:param` as `{param}`. */
+const specPathFor = (bare: string): string => `/api${bare.replace(/:([A-Za-z]+)/g, "{$1}")}`;
+
+/** Every CBO spec path (#5610), with its catalog entry's methods. */
+function cboExpectedPaths(): Map<string, { catalog: string; methods: string[] }> {
+  const expected = new Map<string, { catalog: string; methods: string[] }>();
+  for (const r of COMMERCIAL_ROUTES) {
+    expected.set(specPathFor(r.bare), {
+      catalog: "commercial",
+      methods: r.methods.map((m) => m.toLowerCase()),
+    });
+  }
+  for (const r of PLATFORM_ROUTES) {
+    expected.set(specPathFor(r.bare), {
+      catalog: "platform",
+      methods: r.methods.map((m) => m.toLowerCase()),
+    });
+  }
+  return expected;
+}
 
 function operationKeys(pathItem: Record<string, unknown>): string[] {
   return Object.keys(pathItem).filter((k) => (HTTP_METHODS as readonly string[]).includes(k));
@@ -35,6 +58,10 @@ describe("OpenAPI spec document", () => {
     const paths = spec.paths as Record<string, Record<string, any>>;
     for (const entry of API_ENDPOINT_CATALOG) {
       if (entry.kind !== "http") continue;
+      // Issue #5610: the payments-agentic wildcard is gone — its
+      // per-route items (generated from the schemas registry) replace
+      // it. The premium wildcard stays (out of scope).
+      if (entry.id === "payments-agentic") continue;
       for (const p of [entry.path, ...entry.aliases]) {
         expect(paths[p], `missing path item for ${p}`).toBeDefined();
         const ops = operationKeys(paths[p]);
@@ -116,14 +143,15 @@ describe("OpenAPI spec document", () => {
     expect(auditView.required).toContain("action");
   });
 
-  it("marks every non-pilot, non-stock path as not yet specified, and no pilot or stock path as such", () => {
+  it("marks every non-pilot, non-stock, non-CBO path as not yet specified, and no pilot, stock, or CBO path as such", () => {
     const spec = buildOpenApiSpec();
     const paths = spec.paths as Record<string, Record<string, any>>;
     const pilot = new Set(["/api/me", "/health", "/api/health", "/api/iaaa/overview"]);
     const spikeMeta = new Set(["/openapi.json", "/api/docs"]);
+    const cbo = new Set(cboExpectedPaths().keys());
     for (const [p, item] of Object.entries(paths)) {
       const text = (item.description as string) || "";
-      if (pilot.has(p) || spikeMeta.has(p) || STOCK_SPEC_PATHS.has(p)) {
+      if (pilot.has(p) || spikeMeta.has(p) || STOCK_SPEC_PATHS.has(p) || cbo.has(p)) {
         expect(text).not.toContain(NOT_SPECIFIED);
       } else {
         expect(text, `missing marker on ${p}`).toContain(NOT_SPECIFIED);
@@ -228,5 +256,167 @@ describe("OpenAPI spec document", () => {
     // the projection read and the operator seed stay not-yet-specified.
     expect(paths["/api/reports/list"].get.description).toContain(NOT_SPECIFIED);
     expect(paths["/api/reports/seed-canonical"].post.description).toContain(NOT_SPECIFIED);
+  });
+});
+
+describe("OpenAPI CBO set (#5610 G-8)", () => {
+  const CBO_METHODS = ["get", "post", "patch", "put"] as const;
+
+  function cboOperationKeys(pathItem: Record<string, unknown>): string[] {
+    return Object.keys(pathItem).filter((k) => (CBO_METHODS as readonly string[]).includes(k));
+  }
+
+  it("covers every catalog operation: 120 operations on 96 paths", () => {
+    const spec = buildOpenApiSpec();
+    const paths = spec.paths as Record<string, Record<string, any>>;
+    const expected = cboExpectedPaths();
+    expect(expected.size).toBe(96);
+    const ops = [...expected.values()].reduce((n, e) => n + e.methods.length, 0);
+    expect(ops).toBe(120);
+    for (const [p, { methods }] of expected) {
+      const item = paths[p];
+      expect(item, `missing CBO path ${p}`).toBeDefined();
+      expect(cboOperationKeys(item).sort()).toEqual([...methods].sort());
+    }
+  });
+
+  it("every spec CBO path maps to a catalog entry (drift check)", () => {
+    const spec = buildOpenApiSpec();
+    const paths = spec.paths as Record<string, Record<string, any>>;
+    const expected = cboExpectedPaths();
+    const prefixes = [
+      "/api/payments/agentic/commercial",
+      "/api/platform-tenants",
+      "/api/platform-channels",
+      "/api/platform/accounts",
+      "/api/platform/onboarding",
+      "/api/admin/platform-users",
+    ];
+    const specCbo = Object.keys(paths).filter((p) => prefixes.some((prefix) => p.startsWith(prefix)));
+    expect(specCbo.sort()).toEqual([...expected.keys()].sort());
+  });
+
+  it("carries no payments-agentic wildcard; the premium wildcard stays", () => {
+    const spec = buildOpenApiSpec();
+    const paths = spec.paths as Record<string, unknown>;
+    expect(paths["/api/payments/agentic/*"]).toBeUndefined();
+    expect(paths["/api/premium/*"]).toBeDefined();
+  });
+
+  it("carries no not-yet-specified marker on CBO paths or operations", () => {
+    const spec = buildOpenApiSpec();
+    const paths = spec.paths as Record<string, Record<string, any>>;
+    for (const p of cboExpectedPaths().keys()) {
+      const item = paths[p];
+      expect((item.description as string) || "").not.toContain(NOT_SPECIFIED);
+      expect(JSON.stringify(item)).not.toContain(NOT_SPECIFIED);
+    }
+  });
+
+  it("every operation carries its request/response shapes plus the coded errors", () => {
+    const spec = buildOpenApiSpec();
+    const paths = spec.paths as Record<string, Record<string, any>>;
+    for (const [p, { methods }] of cboExpectedPaths()) {
+      for (const m of methods) {
+        const op = paths[p][m];
+        expect(op, `${p} missing ${m}`).toBeDefined();
+        expect(op.description as string).toContain("issue #5610");
+        if (m === "get") {
+          expect(op.requestBody, `${p} ${m} carries a requestBody`).toBeUndefined();
+        } else {
+          const body = op.requestBody;
+          expect(body, `${p} ${m} missing requestBody`).toBeDefined();
+          expect(body.content["application/json"].schema).toBeDefined();
+        }
+        const success = op.responses["201"] ?? op.responses["200"];
+        expect(success, `${p} ${m} missing a success response`).toBeDefined();
+        expect(success.content["application/json"].schema).toBeDefined();
+        for (const code of ["400", "401", "403", "404", "405"]) {
+          const err = op.responses[code];
+          expect(err, `${p} ${m} missing ${code}`).toBeDefined();
+          expect(err.content["application/json"].schema.$ref).toBe(
+            "#/components/schemas/ErrorResponse",
+          );
+        }
+      }
+    }
+  });
+
+  it("declares path parameters for parameterized routes", () => {
+    const spec = buildOpenApiSpec();
+    const paths = spec.paths as Record<string, Record<string, any>>;
+    const cases: Array<{ path: string; params: string[] }> = [
+      { path: "/api/payments/agentic/commercial/subscriptions/{subscriptionId}/move", params: ["subscriptionId"] },
+      { path: "/api/payments/agentic/commercial/products/{productId}/versions/{versionId}/approve", params: ["productId", "versionId"] },
+      { path: "/api/payments/agentic/commercial/products/{productId}/bulk-moves/{bulkMoveId}", params: ["productId", "bulkMoveId"] },
+      { path: "/api/platform-tenants/{tenantId}", params: ["tenantId"] },
+      { path: "/api/platform-tenants/{tenantId}/settings", params: ["tenantId"] },
+      { path: "/api/platform-channels/{tenantId}/slack-channel", params: ["tenantId"] },
+    ];
+    for (const c of cases) {
+      const item = paths[c.path];
+      expect(item, `missing parameterized path ${c.path}`).toBeDefined();
+      for (const m of cboOperationKeys(item)) {
+        const params = (item[m].parameters ?? []) as Array<Record<string, unknown>>;
+        for (const name of c.params) {
+          const param = params.find((x) => x.name === name && x.in === "path");
+          expect(param, `${c.path} ${m} missing path param ${name}`).toBeDefined();
+          expect(param!.required).toBe(true);
+        }
+      }
+    }
+  });
+
+  it("non-session operations carry no session security; session operations do", () => {
+    const spec = buildOpenApiSpec();
+    const paths = spec.paths as Record<string, Record<string, any>>;
+    const webhook = paths["/api/payments/agentic/commercial/billing/webhook"].post;
+    expect(webhook.security).toBeUndefined();
+    expect(webhook.description as string).toContain("Stripe-signature gated");
+    const unsubscribe = paths["/api/payments/agentic/commercial/lifecycle/unsubscribe"].post;
+    expect(unsubscribe.security).toBeUndefined();
+    expect(unsubscribe.description as string).toContain("Token gated");
+    const self = paths["/api/platform/accounts/self"].get;
+    expect(self.security).toEqual([{ sessionCookie: [] }]);
+  });
+
+  it("only tenant create and channel checkout answer 201", () => {
+    const spec = buildOpenApiSpec();
+    const paths = spec.paths as Record<string, Record<string, any>>;
+    const with201: string[] = [];
+    for (const [p, { methods }] of cboExpectedPaths()) {
+      for (const m of methods) {
+        if (paths[p][m].responses["201"]) with201.push(`${p} ${m}`);
+      }
+    }
+    expect(with201.sort()).toEqual([
+      "/api/payments/agentic/commercial/channel/checkout post",
+      "/api/platform-tenants post",
+    ]);
+  });
+
+  it("every $ref in CBO operations resolves to a component schema", () => {
+    const spec = buildOpenApiSpec();
+    const paths = spec.paths as Record<string, Record<string, any>>;
+    const components = spec.components as Record<string, Record<string, any>>;
+    const schemas = components.schemas as Record<string, unknown>;
+    const refs = new Set<string>();
+    const collect = (node: unknown): void => {
+      if (Array.isArray(node)) {
+        for (const v of node) collect(v);
+      } else if (node && typeof node === "object") {
+        for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
+          if (k === "$ref" && typeof v === "string") refs.add(v);
+          else collect(v);
+        }
+      }
+    };
+    for (const p of cboExpectedPaths().keys()) collect(paths[p]);
+    expect(refs.size).toBeGreaterThan(0);
+    for (const ref of refs) {
+      const name = ref.replace("#/components/schemas/", "");
+      expect(schemas[name], `unresolved $ref ${ref}`).toBeDefined();
+    }
+    expect(schemas.ErrorResponse).toBeDefined();
   });
 });

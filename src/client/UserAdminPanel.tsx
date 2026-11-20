@@ -36,6 +36,7 @@ import {
   TextInput,
 } from "./components/ui";
 import { apiFetch } from "./apiFetch";
+import { platformPath } from "../data/platformUrlCatalog";
 
 export interface PlatformUserMembershipView {
   membershipId: string;
@@ -112,7 +113,7 @@ async function send<T>(path: string): Promise<T> {
 
 /** Fetch the caller's own profile; throws on 401/503 with the server message. */
 export async function fetchOwnUserView(): Promise<PlatformUserView> {
-  const data = await send<unknown>("/api/admin/platform-users/me");
+  const data = await send<unknown>(platformPath("userMe"));
   if (!isPlatformUserView(data)) throw new Error("Unexpected user view response.");
   return data;
 }
@@ -120,7 +121,7 @@ export async function fetchOwnUserView(): Promise<PlatformUserView> {
 /** Operator lookup by login; throws on 401/403/400 with the server message. */
 export async function fetchUserViewByLogin(login: string): Promise<PlatformUserView> {
   const data = await send<unknown>(
-    `/api/admin/platform-users/lookup?login=${encodeURIComponent(login)}`,
+    `${platformPath("userLookup")}?login=${encodeURIComponent(login)}`,
   );
   if (!isPlatformUserView(data)) throw new Error("Unexpected user view response.");
   return data;
