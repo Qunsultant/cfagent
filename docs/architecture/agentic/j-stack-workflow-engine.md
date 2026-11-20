@@ -146,6 +146,24 @@ spec still points the screener's analyze node at `screener.analysis`
 until slice 6 (#5827) re-points it; the goal branch and the
 portfolio modifier are separate slices (#5873, #5874).
 
+The screener's deliver stage likewise runs through the generic deliver
+machinery (#5826): `deliver.apply` gains a screener application
+(params `screener: true`) that delivers a screen outcome through the
+orchestrator sink — the same door the bespoke `screener.deliver` step
+calls (`deliverWorkflowScreenOutcome` for market outcomes,
+`deliverWorkflowGoalScreenOutcome` for goal outcomes), with the same
+`workflow:<jobId>` delivery id, goal/delivery/stage-chain threading,
+and canonical report id. The bespoke deliver rules carry over (a
+scheduled duplicate passes through untouched, `deliver: false` skips,
+a sink refusal is recorded never a failed run, an unwired sink refuses
+`DELIVER_SCREENER_SINK_NOT_CONFIGURED` by name), and the screener
+application never consults the channel stores. The screener definition
+still names `screener.deliver` — the redefinition (slice 6, #5827)
+moves its deliver node onto this step and wires the sink in the
+residencies. Parity is pinned by
+`tests/screener_deliver_generic_5826.test.ts`.
+
+
 ### 1.3 The one-engine doctrine
 
 The governing rule is the one-engine consolidation doctrine (#3549):
