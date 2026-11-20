@@ -37,6 +37,12 @@
  */
 import { scrubFailureMessage, type DataProviderId, type IndexId } from "../trading";
 import {
+  calculateDynamicRsi,
+  computeFactorGrades,
+  computeScreeningIndicators,
+  type GradeableStock,
+} from "../trading";
+import {
   type EnrichedDatasetArtifact,
   type EnrichedDatasetRow,
   type EnrichedDatasetStore,
@@ -69,6 +75,9 @@ export const ANALYZE_JOB_CODES = {
   inputMissing: "ANALYZE_INPUT_MISSING",
   ruleSetUnknown: "ANALYZE_RULE_SET_UNKNOWN",
   thresholdUnknown: "ANALYZE_THRESHOLD_UNKNOWN",
+  /** The parent hand-off (gather output) is not the shape the
+   *  screener analyze application reads. */
+  handoffMalformed: "ANALYZE_HANDOFF_MALFORMED",
 } as const;
 export type AnalyzeJobCode = (typeof ANALYZE_JOB_CODES)[keyof typeof ANALYZE_JOB_CODES];
 
@@ -98,8 +107,17 @@ export class AnalyzeJobError extends Error {
  * - volume: relative volume — conviction behind the move.
  * - value: analyst upside (fundamentals join) or the
  *   screening value zone — price versus value.
+ * - screen (#5824 3a): the screener's per-row screen — the
+ *   signal label (OVERBOUGHT / OVERSOLD_BOUNCE /
+ *   BULLISH_MOMENTUM / RANGE_BOUND, the screenWithQuotes rule)
+ *   and the momentum score, from the momentum feature and the
+ *   quote's RSI.
+ * - factors (#5824 3a): the SA-style factor grades
+ *   (computeFactorGrades) — percentile-relative across the
+ *   universe, so this rule set is a second, cross-row pass over
+ *   the rows the per-row pass built.
  */
-export const ANALYZE_RULE_SETS = ["momentum", "range", "volume", "value"] as const;
+export const ANALYZE_RULE_SETS = ["momentum", "range", "volume", "value", "screen", "factors"] as const;
 export type AnalyzeRuleSet = (typeof ANALYZE_RULE_SETS)[number];
 
 export const ANALYZE_ALL_RULE_SETS: readonly string[] = [...ANALYZE_RULE_SETS];
@@ -166,6 +184,13 @@ export interface AnalyzeThresholds {
   undervaluedUpsidePercent: number;
   /** Analyst upside % at/below which value is "overvalued". */
   overvaluedUpsidePercent: number;
+  /** Standout selection (#5824 3a): the most standouts the
+   *  summary carries. */
+  standoutMaxItems: number;
+  /** Standout selection (#5824 3a): a row is a standout when
+   *  its screen signal is OVERSOLD_BOUNCE / BULLISH_MOMENTUM
+   *  or its screen momentum score reaches this value. */
+  standoutMinMomentumScore: number;
   /** Composite weights per rule set (the composite is the
    *  weighted mean over the rule sets that evaluated). */
   weights: Record<AnalyzeRuleSet, number>;
@@ -183,7 +208,9 @@ export const ANALYZE_DEFAULT_THRESHOLDS: AnalyzeThresholds = {
   deepValueUpsidePercent: 25,
   undervaluedUpsidePercent: 10,
   overvaluedUpsidePercent: -10,
-  weights: { momentum: 1, range: 1, volume: 1, value: 1 },
+  standoutMaxItems: 5,
+  standoutMinMomentumScore: 60,
+  weights: { momentum: 1, range: 1, volume: 1, value: 1, screen: 1, factors: 1 },
 };
 
 const NUMERIC_THRESHOLD_KEYS = [
@@ -198,6 +225,8 @@ const NUMERIC_THRESHOLD_KEYS = [
   "deepValueUpsidePercent",
   "undervaluedUpsidePercent",
   "overvaluedUpsidePercent",
+  "standoutMaxItems",
+  "standoutMinMomentumScore",
 ] as const;
 
 /** Merge a configured threshold override over the defaults;
@@ -349,8 +378,18 @@ export const ANALYZE_JOB_DEFAULTS = {
   staleAfterMinutes: 180,
 } as const;
 
-/** The default rule-set configuration: every rule set. */
-export const ANALYZE_DEFAULT_RULE_SETS: readonly string[] = [...ANALYZE_RULE_SETS];
+/** The default rule-set configuration: the four generic sets.
+ *  The screener sets ("screen", "factors", #5824 3a) are NOT
+ *  default — they run only where the screener application asks
+ *  for them (analyze.screener passes ruleSets explicitly),
+ *  because they read screener features no generic dataset
+ *  carries. */
+export const ANALYZE_DEFAULT_RULE_SETS: readonly string[] = [
+  "momentum",
+  "range",
+  "volume",
+  "value",
+];
 
 /**
  * The built-in registry: one analyze job per enrich job in
@@ -546,26 +585,53 @@ export function computeAnalysis(input: AnalyzeComputationInput): AnalyzeComputat
           );
           break;
         }
+        case "screen": {
+          // #5824 3a — the screener's per-row screen, the
+          // screenWithQuotes rule verbatim: the quote's RSI
+          // (when the hand-off carried one) decides
+          // overbought/oversold; otherwise the day move does.
+          // The score is the screener's momentum score, NOT
+          // clamped to [-100, 100] — the bespoke path does not
+          // clamp it either, and parity is the contract.
+          const momentum = numFeature(row, "momentum");
+          if (momentum === null) {
+            markUnavailable(ruleSet, missingReason(row, ["momentum"]));
+            break;
+          }
+          const rsi14 = calculateDynamicRsi(
+            row.symbol,
+            row.lastPrice,
+            numFeature(row, "week52High") ?? undefined,
+            numFeature(row, "week52Low") ?? undefined,
+            momentum,
+            numFeature(row, "rsi") ?? undefined,
+          );
+          signals.screen =
+            rsi14 !== undefined && rsi14 > 70
+              ? "OVERBOUGHT"
+              : rsi14 !== undefined && rsi14 < 35
+                ? "OVERSOLD_BOUNCE"
+                : momentum > 0.5
+                  ? "BULLISH_MOMENTUM"
+                  : "RANGE_BOUND";
+          scores.screen = Math.round(50 + momentum * 5);
+          coverage.screen.evaluated++;
+          break;
+        }
+        case "factors": {
+          // Cross-row: graded in the second pass below, over
+          // the whole universe — nothing per-row to do here.
+          break;
+        }
         default:
           // validateAnalyzeRuleSets already refused unknown names.
           markUnavailable(ruleSet, ANALYZE_GAP_REASONS.featureNotInArtifact);
       }
     }
 
-    // Composite: the weighted mean over the rule sets that
-    // evaluated for THIS symbol — a missing rule set narrows
-    // the basis (and is named unavailable), never zero-filled.
-    let weighted = 0;
-    let weightSum = 0;
-    for (const ruleSet of ruleSets) {
-      const score = scores[ruleSet];
-      if (score === undefined) continue;
-      const weight = t.weights[ruleSet as AnalyzeRuleSet] ?? 1;
-      weighted += score * weight;
-      weightSum += weight;
-    }
-    const compositeScore = weightSum > 0 ? round6(weighted / weightSum) : null;
-
+    // The composite is computed after the cross-row pass so
+    // the factors score feeds it like every other rule set's
+    // score (see below); the row is pushed with a placeholder.
     const momentum = numFeature(row, "momentum");
     if (momentum !== null) {
       momentumSum += momentum;
@@ -574,20 +640,106 @@ export function computeAnalysis(input: AnalyzeComputationInput): AnalyzeComputat
       else if (momentum < 0) decliners++;
       else flat++;
     }
-    if (compositeScore !== null) {
-      compositeSum += compositeScore;
-      compositeCount++;
-    }
 
     rows.push({
       symbol: row.symbol,
       lastPrice: row.lastPrice,
       signals,
       scores,
-      compositeScore,
+      compositeScore: null,
       unavailable,
     });
   }
+
+  // #5824 3a — the factor grades are a second, cross-row pass:
+  // computeFactorGrades grades each stock percentile-relative
+  // across the universe, so it runs once over the whole input,
+  // not once per row. A row is gradeable when it carries the
+  // momentum + screenScore features; a row without them is
+  // unavailable for "factors" — never graded on a partial
+  // basis. The peer pool is the gradeable set, and the bespoke
+  // path grades the same rows from the same indicators.
+  if (ruleSets.includes("factors")) {
+    const inputRows = input.inputArtifact.rows;
+    const gradeable: GradeableStock[] = [];
+    const gradeableIndex: number[] = [];
+    inputRows.forEach((inputRow, i) => {
+      const momentum = numFeature(inputRow, "momentum");
+      const screenScore = numFeature(inputRow, "screenScore");
+      if (momentum === null || screenScore === null) {
+        coverage.factors.unavailable++;
+        rows[i].unavailable.push("factors");
+        noteGap(
+          "factors",
+          missingReason(inputRow, ["momentum", "screenScore"]),
+          inputRow.symbol,
+        );
+        return;
+      }
+      gradeable.push({
+        symbol: inputRow.symbol,
+        peRatio: numFeature(inputRow, "peRatio"),
+        rangePosition: numFeature(inputRow, "rangePosition52w"),
+        changePercent: momentum,
+        intradayPosition: numFeature(inputRow, "intradayPosition"),
+        screenScore,
+      });
+      gradeableIndex.push(i);
+    });
+    const grades = computeFactorGrades(gradeable);
+    for (let k = 0; k < gradeable.length; k++) {
+      const row = rows[gradeableIndex[k]];
+      const g = grades.get(gradeable[k].symbol)!;
+      if (g.value !== null) row.signals.factors_value = g.value;
+      if (g.momentum !== null) row.signals.factors_momentum = g.momentum;
+      if (g.quantRating !== null) row.signals.factors_quant = g.quantRating;
+      if (g.valueScore !== null) row.scores.factors_value = g.valueScore;
+      if (g.momentumScore !== null) row.scores.factors_momentum = g.momentumScore;
+      if (g.compositeScore !== null) row.scores.factors = g.compositeScore;
+      coverage.factors.evaluated++;
+    }
+  }
+
+  // Composite: the weighted mean over the rule sets that
+  // evaluated for THIS symbol — a missing rule set narrows
+  // the basis (and is named unavailable), never zero-filled.
+  for (const row of rows) {
+    let weighted = 0;
+    let weightSum = 0;
+    for (const ruleSet of ruleSets) {
+      const score = row.scores[ruleSet];
+      if (score === undefined) continue;
+      const weight = t.weights[ruleSet as AnalyzeRuleSet] ?? 1;
+      weighted += score * weight;
+      weightSum += weight;
+    }
+    row.compositeScore = weightSum > 0 ? round6(weighted / weightSum) : null;
+    if (row.compositeScore !== null) {
+      compositeSum += row.compositeScore;
+      compositeCount++;
+    }
+  }
+
+  // #5824 3a — standout selection (the selectStandouts rule,
+  // verbatim): a row the screen flagged, in input order, at
+  // most the configured count. Empty when the screen rule set
+  // did not run.
+  const standouts = ruleSets.includes("screen")
+    ? rows
+        .filter(
+          (r) =>
+            r.signals.screen === "OVERSOLD_BOUNCE" ||
+            r.signals.screen === "BULLISH_MOMENTUM" ||
+            (r.scores.screen !== undefined &&
+              r.scores.screen >= t.standoutMinMomentumScore),
+        )
+        .slice(0, t.standoutMaxItems)
+        .map((r) => ({
+          symbol: r.symbol,
+          signal: r.signals.screen,
+          momentumScore: r.scores.screen ?? 0,
+        }))
+    : [];
 
   for (const [key, symbols] of gapSymbols) {
     const [ruleSet, reason] = key.split("|");
@@ -612,7 +764,129 @@ export function computeAnalysis(input: AnalyzeComputationInput): AnalyzeComputat
       meanCompositeScore: compositeCount > 0 ? round6(compositeSum / compositeCount) : null,
       topByComposite: byComposite.slice(0, 5),
       bottomByComposite: byComposite.slice(-5).reverse(),
+      standouts,
     },
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/* The parent-hand-off input mode (#5824 3a)                           */
+/* ------------------------------------------------------------------ */
+
+/**
+ * What the screener analyze application reads off the parent
+ * hand-off (the gather stage's output): the mapped rows plus
+ * the lineage the analyzed artifact records. The shape is
+ * read structurally — the analyze family does not import the
+ * screener agent's stage types.
+ */
+export interface ScreenerHandOffInput {
+  /** The gather output's quotes, mapped to enriched rows. */
+  rows: EnrichedDatasetRow[];
+  /** The gather run's platform run id (the analyzed
+   *  artifact's input artifact id). */
+  inputArtifactId: string;
+  /** The gather run's task id (the analyzed artifact's input
+   *  run id). */
+  inputRunId: string;
+  /** The gather run's timestamp (the analyzed artifact's
+   *  input as-of). */
+  inputAsOf: string;
+}
+
+const isHandOffRecord = (v: unknown): v is Record<string, unknown> =>
+  typeof v === "object" && v !== null && !Array.isArray(v);
+
+const handOffNum = (v: unknown): number | null =>
+  typeof v === "number" && Number.isFinite(v) ? v : null;
+
+/**
+ * Map the gather output to enriched rows (#5824 3a). The
+ * features are the ones the screener rule sets read, computed
+ * by the ONE indicator function the enrich stage and the
+ * bespoke path both use (computeScreeningIndicators) — the
+ * mapper adds nothing of its own, so a hand-off row and the
+ * persisted row for the same quote carry the same features.
+ * The one feature the persisted rows do NOT carry is peRatio:
+ * it lives in the quote fields, so only the hand-off (which
+ * carries the quotes) can supply it — which is why the
+ * screener analyze application reads the parent hand-off
+ * instead of the persisted enriched store.
+ *
+ * A quote without a symbol cannot become a row and is
+ * skipped; a quote without a last price reads as 0 (the
+ * bespoke path's toScannedStock default). A hand-off that is
+ * not the gather-output shape at all refuses by name.
+ */
+export function resolveScreenerHandOff(input: unknown): ScreenerHandOffInput {
+  const malformed = (detail: string): AnalyzeJobError =>
+    new AnalyzeJobError(
+      ANALYZE_JOB_CODES.handoffMalformed,
+      `The screener analyze hand-off is not a gather output: ${detail}.`,
+    );
+  if (!isHandOffRecord(input)) {
+    throw malformed("expected an object with an acquired.quotes array");
+  }
+  const acquired = input.acquired;
+  if (!isHandOffRecord(acquired) || !Array.isArray(acquired.quotes)) {
+    throw malformed("expected an object with an acquired.quotes array");
+  }
+  const rows: EnrichedDatasetRow[] = [];
+  for (const quote of acquired.quotes as unknown[]) {
+    if (!isHandOffRecord(quote)) continue;
+    const symbol =
+      typeof quote.symbol === "string" ? quote.symbol.toUpperCase().trim() : "";
+    if (!symbol) continue;
+    const lastPrice = handOffNum(quote.lastPrice) ?? 0;
+    const changePercent = handOffNum(quote.changePercent) ?? 0;
+    const open = handOffNum(quote.open) ?? lastPrice;
+    const high = handOffNum(quote.high) ?? lastPrice;
+    const low = handOffNum(quote.low) ?? lastPrice;
+    const week52High = handOffNum(quote.week52High) ?? 0;
+    const week52Low = handOffNum(quote.week52Low) ?? 0;
+    const peRatio = handOffNum(quote.peRatio);
+    const volume = handOffNum(quote.volume) ?? 0;
+    const averageVolume = handOffNum(quote.averageVolume);
+    const indicators = computeScreeningIndicators({
+      lastPrice,
+      changePercent,
+      open,
+      high,
+      low,
+      week52High,
+      week52Low,
+      peRatio: peRatio ?? undefined,
+      volume,
+      averageVolume: averageVolume ?? undefined,
+    });
+    const features: Record<string, number | string> = {
+      momentum: indicators.momentum,
+      screenScore: indicators.screenScore,
+    };
+    if (indicators.rangePosition !== null) {
+      features.rangePosition52w = indicators.rangePosition;
+    }
+    if (indicators.intradayPosition !== null) {
+      features.intradayPosition = indicators.intradayPosition;
+    }
+    if (peRatio !== null) features.peRatio = peRatio;
+    const week52HighField = handOffNum(quote.week52High);
+    if (week52HighField !== null) features.week52High = week52HighField;
+    const week52LowField = handOffNum(quote.week52Low);
+    if (week52LowField !== null) features.week52Low = week52LowField;
+    const rsi = handOffNum(quote.rsi);
+    if (rsi !== null) features.rsi = rsi;
+    const unavailable: string[] = [];
+    if (indicators.rangePosition === null) unavailable.push("rangePosition52w");
+    if (indicators.intradayPosition === null) unavailable.push("intradayPosition");
+    rows.push({ symbol, lastPrice, features, unavailable });
+  }
+  return {
+    rows,
+    inputArtifactId:
+      typeof input.platformRunId === "string" ? input.platformRunId : "",
+    inputRunId: typeof input.taskId === "string" ? input.taskId : "",
+    inputAsOf: typeof input.timestamp === "string" ? input.timestamp : "",
   };
 }
 
@@ -644,6 +918,17 @@ export interface RunAnalyzeJobOptions {
   /** Shard partition: analyze only these symbols of the input
    *  artifact (the plane's sharded shape). */
   symbols?: readonly string[];
+  /** Parent-hand-off input (#5824 3a): rows the step mapped
+   *  from the gather output. When present, the run analyzes
+   *  these rows instead of resolving the persisted enriched
+   *  input. */
+  handOffRows?: readonly EnrichedDatasetRow[];
+  /** Lineage for a hand-off run (the gather run's ids). */
+  handOffLineage?: {
+    inputArtifactId: string;
+    inputRunId: string;
+    inputAsOf: string;
+  };
 }
 
 export interface AnalyzeRunResult {
@@ -673,6 +958,7 @@ const EMPTY_SUMMARY: AnalyzedDatasetArtifact["summary"] = {
   meanCompositeScore: null,
   topByComposite: [],
   bottomByComposite: [],
+  standouts: [],
 };
 
 /**
@@ -710,7 +996,17 @@ export async function runAnalyzeJob(
       rows: AnalyzedDatasetArtifact["rows"];
       gaps: AnalyzedRuleGap[];
       summary: AnalyzedDatasetArtifact["summary"];
-      inputArtifact: EnrichedDatasetArtifact | undefined;
+      /** Lineage for the analyzed artifact: the persisted
+       *  input's, the hand-off's, or absent (a failed run
+       *  with no input at all). */
+      inputLineage:
+        | {
+            artifactId: string;
+            runId: string;
+            asOf: string;
+            universe: EnrichedDatasetArtifact["universe"];
+          }
+        | undefined;
     },
   ): Promise<AnalyzeRunResult> => {
     const finishedAt = new Date(opts.nowMs ?? Date.now()).toISOString();
@@ -720,7 +1016,7 @@ export async function runAnalyzeJob(
       feedJobId: def.feedJobId,
       sourceId: def.sourceId,
       dataset: def.dataset,
-      universe: partial.inputArtifact?.universe ?? {
+      universe: partial.inputLineage?.universe ?? {
         kind: "index",
         index: def.universe.index,
         label: def.universe.label,
@@ -728,9 +1024,9 @@ export async function runAnalyzeJob(
         sourceLabel: null,
         size: 0,
       },
-      inputArtifactId: partial.inputArtifact?.id ?? "",
-      inputRunId: partial.inputArtifact?.run.runId ?? "",
-      inputAsOf: partial.inputArtifact?.createdAt ?? "",
+      inputArtifactId: partial.inputLineage?.artifactId ?? "",
+      inputRunId: partial.inputLineage?.runId ?? "",
+      inputAsOf: partial.inputLineage?.asOf ?? "",
       ruleSets,
       gaps: partial.gaps,
       ruleCoverage: partial.ruleCoverage,
@@ -769,16 +1065,38 @@ export async function runAnalyzeJob(
       failed: partial.failed,
       codedError: partial.codedError,
       errorMessage: partial.errorMessage,
-      inputArtifactId: partial.inputArtifact?.id ?? null,
-      inputRunId: partial.inputArtifact?.run.runId ?? null,
+      inputArtifactId: partial.inputLineage?.artifactId ?? null,
+      inputRunId: partial.inputLineage?.runId ?? null,
       ruleCoverage: partial.ruleCoverage,
     };
   };
 
   // The input: the enrich job's newest USABLE persisted
-  // artifact, by its exact job id — reads never fetch.
-  const inputArtifact = await deps.enrichedStore.latestUsable(def.enrichJobId);
-  if (!inputArtifact) {
+  // artifact, by its exact job id — reads never fetch — or,
+  // in hand-off mode (#5824 3a), the rows the step mapped
+  // from the parent hand-off.
+  const handOff = opts.handOffRows
+    ? {
+        rows: opts.handOffRows,
+        lineage: {
+          artifactId: opts.handOffLineage?.inputArtifactId ?? "",
+          runId: opts.handOffLineage?.inputRunId ?? "",
+          asOf: opts.handOffLineage?.inputAsOf ?? "",
+          universe: {
+            kind: "index" as const,
+            index: def.universe.index,
+            label: def.universe.label,
+            snapshotDate: null,
+            sourceLabel: null,
+            size: opts.handOffRows.length,
+          },
+        },
+      }
+    : null;
+  const inputArtifact = handOff
+    ? undefined
+    : await deps.enrichedStore.latestUsable(def.enrichJobId);
+  if (!handOff && !inputArtifact) {
     return finish({
       status: "failed",
       requested: 0,
@@ -794,21 +1112,19 @@ export async function runAnalyzeJob(
       ruleCoverage: Object.fromEntries(
         ruleSets.map((r) => [r, { evaluated: 0, unavailable: 0 }]),
       ),
-      inputArtifact: undefined,
+      inputLineage: undefined,
     });
   }
 
   // A sharded unit analyzes its partition of the input only
   // (its lineage still names the whole input artifact).
+  const sourceRows = handOff ? handOff.rows : inputArtifact!.rows;
   const effectiveRows = opts.symbols
-    ? inputArtifact.rows.filter((r) =>
+    ? sourceRows.filter((r) =>
         opts.symbols!.some((s) => s.toUpperCase() === r.symbol.toUpperCase()),
       )
-    : inputArtifact.rows;
-  const effectiveInput: EnrichedDatasetArtifact = {
-    ...inputArtifact,
-    rows: effectiveRows,
-  };
+    : [...sourceRows];
+  const effectiveInput = { rows: effectiveRows } as EnrichedDatasetArtifact;
 
   const computation = computeAnalysis({
     inputArtifact: effectiveInput,
@@ -832,7 +1148,14 @@ export async function runAnalyzeJob(
     gaps: computation.gaps,
     summary: computation.summary,
     ruleCoverage: computation.ruleCoverage,
-    inputArtifact,
+    inputLineage: handOff
+      ? handOff.lineage
+      : {
+          artifactId: inputArtifact!.id,
+          runId: inputArtifact!.run.runId,
+          asOf: inputArtifact!.createdAt,
+          universe: inputArtifact!.universe,
+        },
   });
 }
 

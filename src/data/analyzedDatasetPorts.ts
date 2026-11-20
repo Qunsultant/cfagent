@@ -126,6 +126,15 @@ export interface AnalyzedDatasetSummary {
   topByComposite: Array<{ symbol: string; score: number }>;
   /** Lowest composites, worst first (at most 5). */
   bottomByComposite: Array<{ symbol: string; score: number }>;
+  /**
+   * Standout selection (#5824 3a): the rows the screen rule set
+   * flagged (OVERSOLD_BOUNCE / BULLISH_MOMENTUM, or a momentum
+   * score at/above the standout threshold), in input order, at
+   * most the configured standout count. Empty when the screen
+   * rule set did not run. The generate stage reads this list
+   * rather than re-deriving it from a different copy.
+   */
+  standouts: Array<{ symbol: string; signal: string; momentumScore: number }>;
 }
 
 export interface AnalyzedDatasetArtifact {

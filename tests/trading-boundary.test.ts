@@ -91,6 +91,9 @@ describe("trading boundary (issue #290)", () => {
       "buildTypeRollup",
       "generateScreenerPdf",
       "screenerPdfFileName",
+      // Issue #5824 (#4437 slice 3a): the screener analyze
+      // application grades factors through the index.
+      "computeFactorGrades",
     ]) {
       expect(index[name], `index should export ${name}`).toBeDefined();
     }

@@ -215,6 +215,7 @@ async function conformance(make: () => AnalyzedDatasetStore) {
         meanCompositeScore: null,
         topByComposite: [],
         bottomByComposite: [],
+        standouts: [],
       },
       run: {
         runId: "run-3",

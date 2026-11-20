@@ -86,6 +86,7 @@ function analyzedInput(
       meanCompositeScore: 8.5,
       topByComposite: [{ symbol: "AAPL", score: 40 }],
       bottomByComposite: [{ symbol: "AAPL", score: 40 }],
+      standouts: [],
     },
     rows: [
       {
