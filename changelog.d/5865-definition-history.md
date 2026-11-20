@@ -1,0 +1,3 @@
+### Added
+
+- **Append-only job definition history, in both residencies (#5865):** `job_pipeline_definition_versions` keeps every version a job has ever been saved with, while `job_pipeline_definitions` stays the current pointer — so a past run's configuration survives a reconfigure, which is the storage prerequisite for historical replay (#4467). `saveDefinition` appends the row (idempotent per version, so a retry never forks history) and `getDefinitionVersion` reads it back, answering `null` for an unknown version rather than today's definition. DO migration v2 creates the table and backfills each job's current definition as its first row; D1 migration 0074 lands the same shape through the catalogue, so both residencies agree. #ceo-aimp
