@@ -257,6 +257,12 @@ export interface ResearchReport {
   oodaTrace: OodaStep[];
   /** Issue #774: pipeline stage trace — the 8 stages from the design doc. */
   stageTrace: PipelineStageStep[];
+  /**
+   * Issue #5909 — a total data outage: the run retrieved no quote at all for
+   * a non-empty universe. The report is still published (it is the evidence),
+   * but the caller must record the run as failed, not as "nothing qualified".
+   */
+  dataRefusal?: { code: "research_data_unavailable"; message: string };
 }
 
 export interface ResearchRunOptions {
@@ -1053,14 +1059,26 @@ export async function runResearchPipeline(
   stats.rejected = rejected.length;
   stats.unverified = unverified;
 
+  // Issue #5909 — "nothing qualified" and "we fetched no data at all" must
+  // never read alike: a non-empty universe with zero quotes is an outage, and
+  // the caller fails the run on it. The report is still built and published.
+  const dataRefusal =
+    stats.universeSize > 0 && stats.quotesRetrieved === 0
+      ? {
+          code: "research_data_unavailable" as const,
+          message: `No quotes retrieved for a ${stats.universeSize}-symbol universe (quotes 0 / evaluated 0) — the run produced no data; check the live quote session before the next run.`,
+        }
+      : undefined;
   const summary =
-    ideas.length > 0
+    dataRefusal?.message ??
+    (ideas.length > 0
       ? `${ideas.length} qualified idea(s); ${watchlist.length} watchlist; ${rejected.length} rejected.`
-      : "No qualifying opportunities — no candidate passed the evidence and risk gates.";
+      : "No qualifying opportunities — no candidate passed the evidence and risk gates.");
 
   return finishReport({
     runId, config, opts, now, started, trace, stageTrace, regime,
     ideas, watchlist, rejected, stats, summary,
+    ...(dataRefusal ? { dataRefusal } : {}),
   });
 }
 
@@ -1078,6 +1096,7 @@ function finishReport(args: {
   rejected: RejectedEntry[];
   stats: RunStats;
   summary: string;
+  dataRefusal?: { code: "research_data_unavailable"; message: string };
 }): ResearchReport {
   const { runId, config, opts, now, started, trace, stageTrace, regime, ideas, watchlist, rejected, stats, summary } = args;
   stats.durationMs = Date.now() - started;
@@ -1099,6 +1118,7 @@ function finishReport(args: {
     stats,
     oodaTrace: trace,
     stageTrace,
+    ...(args.dataRefusal ? { dataRefusal: args.dataRefusal } : {}),
   };
 }
 

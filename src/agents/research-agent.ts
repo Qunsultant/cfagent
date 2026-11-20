@@ -548,6 +548,17 @@ export class ResearchAgent extends PortThink {
         { trigger: req.trigger, userLogin, ...(effectiveRunId ? { runId: effectiveRunId } : {}) }
       );
       await this.persistRun(report);
+      // Issue #5909 — the report is published either way (it is the
+      // evidence), but a run that fetched no data is NOT a success: the
+      // engine records it failed with the coded reason, so a data outage
+      // can never be mistaken for "nothing qualified".
+      if (report.dataRefusal) {
+        return {
+          success: false,
+          report,
+          error: `${report.dataRefusal.code}: ${report.dataRefusal.message}`,
+        };
+      }
       return { success: true, report };
     } catch (err) {
       return {
