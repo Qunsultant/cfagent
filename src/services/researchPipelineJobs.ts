@@ -247,6 +247,8 @@ export function assertResearchAopCompliance(
 }
 
 export interface ResearchJobDefinitionConfig {
+  /** Issue #5916 — per-stage execution-mode overrides (config-driven). */
+  stageModes?: import("../config/researchJobConfig").ResearchStageModes;
   userLogin: string;
   trigger: "manual" | "scheduled";
   sourceId?: string;
@@ -281,28 +283,36 @@ export function buildResearchJobDefinition(
   const rawRoot = built.root as Record<string, unknown> & {
     children?: Array<Record<string, unknown>>;
   };
+  // Issue #5916 — a stage's own mode wins over the job's, per axis.
+  const stageModes = config.stageModes ?? {};
+  const withStageMode = <T extends Record<string, unknown>>(node: T): T => {
+    const override = stageModes[node.kind as keyof typeof stageModes];
+    if (!override) return node;
+    const existing = (node.executionMode ?? {}) as Record<string, unknown>;
+    return { ...node, executionMode: { ...existing, ...override } };
+  };
   const children = (rawRoot.children ?? []).map((child) => {
     if (child.kind === "feed") {
-      return {
+      return withStageMode({
         ...child,
         inputs: { sources: [sourceId], datasets: [dataset] },
         steps: [{ step: RESEARCH_FEED_STEP, params: { runId } }],
-      };
+      });
     }
     if (child.kind === "enrich") {
-      return {
+      return withStageMode({
         ...child,
         inputs: { sources: [sourceId], datasets: [dataset] },
         steps: [{ step: RESEARCH_ENRICH_STEP, params: { runId } }],
-      };
+      });
     }
     if (child.kind === "generate") {
-      return { ...child, steps: [{ step: RESEARCH_GENERATE_STEP, params: { runId } }] };
+      return withStageMode({ ...child, steps: [{ step: RESEARCH_GENERATE_STEP, params: { runId } }] });
     }
     if (child.kind === "deliver") {
-      return { ...child, steps: [{ step: RESEARCH_DELIVER_STEP, params: { runId } }] };
+      return withStageMode({ ...child, steps: [{ step: RESEARCH_DELIVER_STEP, params: { runId } }] });
     }
-    return child;
+    return withStageMode(child);
   });
 
   return {
