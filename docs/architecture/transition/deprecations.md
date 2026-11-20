@@ -263,7 +263,8 @@ unbound, rather than silently dropping bytes to legacy DO storage.
   "planFeedStart has no callers" is read as no LIVE callers.
   `staggerRunAt` stays (the in-flight executor's generate/store
   shards still use it). `src/config/shardPacing.ts` and
-  `config/shard-pacing.json` were removed by #5833 (2026-11-19).
+  `config/shard-pacing.json` are deprecated in place by #5833 (2026-11-19,
+  kept on disk per §22 no-deletion rule; zero `src/` importers).
   The two `.deprecated.ts` files stay in place.
 - Known gaps (recorded, not blockers): the engine path does not write
   the serve-record summary row (`recordOptionsServeReport` needs a
