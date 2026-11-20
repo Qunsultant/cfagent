@@ -56,6 +56,7 @@ import { buildAllEnrichPipelineJobDefinitions } from "./enrichPipelineJobs";
 import { buildAllAnalyzePipelineJobDefinitions } from "./analyzePipelineJobs";
 import { buildAllGeneratePipelineJobDefinitions } from "./generatePipelineJobs";
 import { buildAllDeliverPipelineJobDefinitions } from "./deliverPipelineJobs";
+import { pipeId } from "./executionTreeIds";
 import {
   buildPipelineChainRegistry,
   PIPELINE_CHAIN_STAGE_ORDER,
@@ -108,11 +109,13 @@ for (const entry of QUOTES_FEED_ENTRIES) {
 
 /**
  * The chain catalog — one entry per quotes lineage, in
- * feed-catalog order. Aliases follow the family idiom: the
- * dataset-qualified "<source>-<dataset>-pipeline" form for
- * every chain, the bare "<source> pipeline" forms only for a
- * source with ONE quotes job (never an ambiguous invention),
- * and the feed aliases suffixed with "pipeline".
+ * feed-catalog order. Issue #5430 — the job id is the ruled
+ * `pipe:<feed>-<dataset>` form (built by `pipeId()`); the old
+ * "<source>-<dataset>-pipeline" exact ids retired with it.
+ * Aliases follow the family idiom: the bare "<source> pipeline"
+ * forms only for a source with ONE quotes job (never an
+ * ambiguous invention), and the feed aliases suffixed with
+ * "pipeline" — natural-language names, never the old id.
  */
 export const CHAIN_PIPELINE_CATALOG: readonly ChainPipelineCatalogEntry[] =
   QUOTES_FEED_ENTRIES.map((feed) => {
@@ -124,8 +127,12 @@ export const CHAIN_PIPELINE_CATALOG: readonly ChainPipelineCatalogEntry[] =
           .map((a) => a.replace(/ quotes$/, "")),
       ]),
     );
+    // Issue #5430 — the feed stem is the job id minus the trailing
+    // "-<dataset>" (e.g. "<source>-<universe>"); `pipeId` validates
+    // both parts are colon-free and mints `pipe:<feed>-<dataset>`.
+    const feedStem = feed.jobId.replace(new RegExp(`-${feed.dataset}$`), "");
     const registryEntry = {
-      jobId: `${feed.jobId}-pipeline`,
+      jobId: pipeId(feedStem, feed.dataset),
       feedJobId: feed.jobId,
       enrichJobId: `${feed.jobId}-enrich`,
       analyzeJobId: `${feed.jobId}-enrich-analyze`,
@@ -139,9 +146,6 @@ export const CHAIN_PIPELINE_CATALOG: readonly ChainPipelineCatalogEntry[] =
         ...((SOURCE_JOB_COUNT.get(feed.sourceId) ?? 0) === 1
           ? [`${feed.sourceId} pipeline`, `pipeline ${feed.sourceId}`]
           : []),
-        `${feed.sourceId}-${feed.dataset}-pipeline`,
-        `${feed.jobId.replace(/-quotes$/, "")}-pipeline`,
-        `${feed.jobId}-pipeline`,
         ...baseAliases.map((a) => `${a} pipeline`),
         ...baseAliases.map((a) => `pipeline ${a}`),
       ],

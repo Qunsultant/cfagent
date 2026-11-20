@@ -39,7 +39,7 @@ export interface PlatformWorkflowSummary {
 
 export const PLATFORM_WORKFLOWS_KNOWLEDGE: PlatformWorkflowSummary[] = [
   {
-    id: "stock-screener",
+    id: "chain:stockscr",
     number: 1,
     title: "Stock Screener & Multi-Exchange Equity Discovery",
     category: "stocks",
@@ -734,7 +734,7 @@ export interface PlatformCapabilitiesDeskSummary {
 export function getPlatformCapabilitiesDeskSummary(): PlatformCapabilitiesDeskSummary {
   const workflows = [
     {
-      id: "stock-screener",
+      id: "chain:stockscr",
       title: "Stock Screener & Market Movers",
       category: "Stocks",
       targetTab: "trading",

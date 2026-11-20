@@ -33,7 +33,7 @@ describe("payment stage ids (#3191)", () => {
   });
 
   it("the catalog declares an exact partition of them", () => {
-    const declared = declaredIds("payment-run");
+    const declared = declaredIds("chain:payrun");
     expect([...declared].sort()).toEqual([...PAYMENT_STEP_IDS].sort());
     expect(new Set(declared).size).toBe(declared.length);
   });
@@ -45,7 +45,7 @@ describe("saga stage ids (#3191)", () => {
   });
 
   it("the catalog declares an exact partition of them", () => {
-    const declared = declaredIds("saga-run");
+    const declared = declaredIds("chain:sagarun");
     expect([...declared].sort()).toEqual([...SAGA_STEP_IDS].sort());
     expect(new Set(declared).size).toBe(declared.length);
   });
@@ -53,7 +53,7 @@ describe("saga stage ids (#3191)", () => {
 
 describe("every family is either mapped or names its gap (#3191)", () => {
   it("options and trading are mapped too now (#3191 second half)", () => {
-    for (const id of ["options-screener", "trading-leg"]) {
+    for (const id of ["chain:optionsscr", "chain:tradrun"]) {
       const workflow = workflowById(id)!;
       const ids = workflow.stages.flatMap((stage) => stage.runtimeStageIds ?? []);
       expect(ids.length).toBeGreaterThan(0);
@@ -62,7 +62,7 @@ describe("every family is either mapped or names its gap (#3191)", () => {
   });
 
   it("a mapped family carries no gap note", () => {
-    for (const id of ["stock-screener", "options-screener", "trading-leg", "payment-run", "saga-run"]) {
+    for (const id of ["chain:stockscr", "chain:optionsscr", "chain:tradrun", "chain:payrun", "chain:sagarun"]) {
       const workflow = workflowById(id)!;
       expect(workflow.runtimeMappingGap).toBeUndefined();
     }

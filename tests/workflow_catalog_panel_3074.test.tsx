@@ -37,9 +37,9 @@ describe("WorkflowCatalogPanel (#3074)", () => {
   it("lists every declared workflow", async () => {
     await render();
     const text = container.textContent ?? "";
-    expect(text).toContain("stock-screener");
-    expect(text).toContain("options-screener");
-    expect(text).toContain("trading-leg");
+    expect(text).toContain("chain:stockscr");
+    expect(text).toContain("chain:optionsscr");
+    expect(text).toContain("chain:tradrun");
   });
 
   it("shows the stock screener's six stages with all four mode axes", async () => {

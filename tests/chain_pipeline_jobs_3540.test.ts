@@ -94,7 +94,7 @@ const ENRICH_ID = `${FEED_ID}-enrich`;
 const ANALYZE_ID = `${ENRICH_ID}-analyze`;
 const GENERATE_ID = `${ANALYZE_ID}-generate`;
 const DELIVER_ID = `${GENERATE_ID}-deliver`;
-const CHAIN_ID = `${FEED_ID}-pipeline`;
+const CHAIN_ID = "pipe:yahoo-nasdaq100-quotes";
 
 function quote(symbol: string, price = 100): MarketDataResearchQuote {
   return {
@@ -271,25 +271,25 @@ describe("pipeline chain registry + catalog (#3540)", () => {
   it("derives one chain per quotes lineage, with the fundamentals node from the enrich join", () => {
     const registry = buildPipelineChainRegistry({});
     expect(registry.list().map((c) => c.id)).toEqual([
-      "yahoo-nasdaq100-quotes-pipeline",
-      "yahoo-sp100-quotes-pipeline",
-      "yahoo-sp500-quotes-pipeline",
-      "yahoo-dow-quotes-pipeline",
-      "yahoo-sp400-quotes-pipeline",
-      "yahoo-sector-energy-quotes-pipeline",
-      "yahoo-sector-materials-quotes-pipeline",
-      "yahoo-sector-industrials-quotes-pipeline",
-      "yahoo-sector-consumer-discretionary-quotes-pipeline",
-      "yahoo-sector-consumer-staples-quotes-pipeline",
-      "yahoo-sector-health-care-quotes-pipeline",
-      "yahoo-sector-financials-quotes-pipeline",
-      "yahoo-sector-information-technology-quotes-pipeline",
-      "yahoo-sector-communication-services-quotes-pipeline",
-      "yahoo-sector-utilities-quotes-pipeline",
-      "yahoo-sector-real-estate-quotes-pipeline",
-      "alpaca-nasdaq100-quotes-pipeline",
-      "etrade-nasdaq100-quotes-pipeline",
-      "public-nasdaq100-quotes-pipeline",
+      "pipe:yahoo-nasdaq100-quotes",
+      "pipe:yahoo-sp100-quotes",
+      "pipe:yahoo-sp500-quotes",
+      "pipe:yahoo-dow-quotes",
+      "pipe:yahoo-sp400-quotes",
+      "pipe:yahoo-sector-energy-quotes",
+      "pipe:yahoo-sector-materials-quotes",
+      "pipe:yahoo-sector-industrials-quotes",
+      "pipe:yahoo-sector-consumer-discretionary-quotes",
+      "pipe:yahoo-sector-consumer-staples-quotes",
+      "pipe:yahoo-sector-health-care-quotes",
+      "pipe:yahoo-sector-financials-quotes",
+      "pipe:yahoo-sector-information-technology-quotes",
+      "pipe:yahoo-sector-communication-services-quotes",
+      "pipe:yahoo-sector-utilities-quotes",
+      "pipe:yahoo-sector-real-estate-quotes",
+      "pipe:alpaca-nasdaq100-quotes",
+      "pipe:etrade-nasdaq100-quotes",
+      "pipe:public-nasdaq100-quotes",
     ]);
     const yahoo = registry.forId(CHAIN_ID)!;
     expect(yahoo.fundamentalsJobId).toBe(FUND_ID);
@@ -319,7 +319,7 @@ describe("pipeline chain registry + catalog (#3540)", () => {
     expect(chainStageNodePath(yahoo, "feed")).toBe("");
     expect(chainStageNodePath(yahoo, "enrich")).toBe("0/0/0/0");
     expect(chainStageNodePath(yahoo, "deliver")).toBe("0/0/0/0/0/0/0");
-    const alpaca = registry.forId("alpaca-nasdaq100-quotes-pipeline")!;
+    const alpaca = registry.forId("pipe:alpaca-nasdaq100-quotes")!;
     // #3930: every chain folds the parameterized fundamentals
     // node in — the alpaca chain's fundamentals node runs the
     // same job with the chain's universe as its input.
@@ -348,9 +348,12 @@ describe("pipeline chain registry + catalog (#3540)", () => {
     expect(CHAIN_PIPELINE_CATALOG).toHaveLength(19);
     expect(resolvePipelineChain(CHAIN_ID)?.jobId).toBe(CHAIN_ID);
     expect(resolvePipelineChain("yahoo nasdaq100 pipeline")?.jobId).toBe(CHAIN_ID);
-    expect(resolvePipelineChain("yahoo-nasdaq100-pipeline")?.jobId).toBe(CHAIN_ID);
+    // Issue #5430 — the bare-feed "-pipeline" alias retired with
+    // the old exact ids; the natural-language forms above still
+    // resolve, the hyphenated id form does not.
+    expect(resolvePipelineChain("yahoo-nasdaq100-pipeline")).toBeNull();
     expect(resolvePipelineChain("alpaca pipeline")?.jobId).toBe(
-      "alpaca-nasdaq100-quotes-pipeline",
+      "pipe:alpaca-nasdaq100-quotes",
     );
     // The feed catalog's exact-unique bare "yahoo" (the Nasdaq-100
     // quotes job) inherits here, exactly as in every family.
@@ -361,10 +364,10 @@ describe("pipeline chain registry + catalog (#3540)", () => {
 
   it("the chain cadence knob overrides the head feed job's cadence", () => {
     const registry = buildPipelineChainRegistry({
-      PIPELINE_CHAIN_YAHOO_NASDAQ100_QUOTES_PIPELINE_CADENCE_MINUTES: "15",
+      PIPELINE_CHAIN_PIPE_YAHOO_NASDAQ100_QUOTES_CADENCE_MINUTES: "15",
     });
     expect(registry.forId(CHAIN_ID)?.cadenceMinutes).toBe(15);
-    expect(registry.forId("alpaca-nasdaq100-quotes-pipeline")?.cadenceMinutes).toBe(43200);
+    expect(registry.forId("pipe:alpaca-nasdaq100-quotes")?.cadenceMinutes).toBe(43200);
   });
 });
 
@@ -446,7 +449,7 @@ describe("pipeline chain definitions (#3540)", () => {
     // sentiment job (one definition, folded into every chain).
     // #4065 pin update: three options-chains jobs join the plane.
     expect(registrations).toHaveLength(121);
-    const chainRegs = registrations.filter((r) => r.jobId.endsWith("-pipeline"));
+    const chainRegs = registrations.filter((r) => r.jobId.startsWith("pipe:"));
     expect(chainRegs).toHaveLength(19);
     expect(chainRegs.every((r) => r.nodePath === "")).toBe(true);
   });

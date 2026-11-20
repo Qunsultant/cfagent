@@ -17,14 +17,15 @@
  * Issue #4774 — every workflow also carries its chain short id (user
  * ruling, comment 6912854849, 2026-11-16): stockscr, optionsscr, goalscr,
  * strategyscr, feedsrc (the feed chain, whose short id is declared in
- * chainPipelineJobs.ts). The short id is the alias a run is named, traced,
- * and surfaced under; the stable `id` is unchanged (renaming it would move
- * every lookup). A family with no ruled short id yet (trading-leg,
- * payment-run, saga-run) carries none — the #4774 build proposes theirs
- * in the PR body for the user's ruling, and does not wire one silently.
+ * chainPipelineJobs.ts). Issue #5430 — the `id` itself is now the ruled
+ * family id `chain:<shortId>` (built by `chainId()`); the short id is its
+ * body. The remaining three short ids (tradrun, payrun, sagarun) were
+ * ruled 2026-11-17 and wired by the #4774 rework — the "carries none"
+ * note below is stale history, kept only in the field doc.
  */
 
 import { STAGE_NAMES, type StageName } from "../messaging/messagingPorts";
+import { chainId } from "../services/executionTreeIds";
 import {
   OPTIONS_PIPELINE_STAGES,
   PAYMENT_STEP_IDS,
@@ -108,11 +109,14 @@ export interface WorkflowDeclaration {
   id: string;
   /**
    * Issue #4774 — the chain's short id (user ruling, comment 6912854849,
-   * 2026-11-16): stockscr, optionsscr, goalscr, strategyscr. The alias a
-   * run is named, traced, and surfaced under; the stable `id` is
-   * unchanged. Absent exactly where the user has not ruled one yet
-   * (trading-leg, payment-run, saga-run) — do not wire a proposed one
-   * silently; the proposal lives in the #4774 PR body for the ruling.
+   * 2026-11-16): stockscr, optionsscr, goalscr, strategyscr. The body of
+   * the ruled family id — the alias a run is named, traced, and surfaced
+   * under. Issue #5430 — the `id` is `chain:<shortId>`, built by
+   * `chainId()`; the short id is never a second id, it is the body's
+   * name. (History: the #4774 build kept the old hyphenated `id` and
+   * carried the short id as an alias because trading-leg, payment-run,
+   * and saga-run had no ruled short id yet; the 2026-11-17 ruling gave
+   * them tradrun, payrun, sagarun, and #5430 moved the `id` itself.)
    */
   shortId?: string;
   family: WorkflowFamily;
@@ -191,10 +195,10 @@ function stage(
  * order, each a producer/consumer on the #2869 seam.
  */
 const STOCK_SCREENER: WorkflowDeclaration = {
-  id: "stock-screener",
+  id: chainId("stockscr"),
   shortId: "stockscr",
   family: "stock",
-  labelKey: "workflow.stock-screener",
+  labelKey: "workflow.stockscr",
   label: "Stock screener",
   stageSeam: true,
   runtimeSteps: [
@@ -238,10 +242,10 @@ const STOCK_SCREENER: WorkflowDeclaration = {
  * A failed report format is partial + marked, never
  * stranding the formats that generated (#3072's per-format rule). */
 const OPTIONS_SCREENER: WorkflowDeclaration = {
-  id: "options-screener",
+  id: chainId("optionsscr"),
   shortId: "optionsscr",
   family: "options",
-  labelKey: "workflow.options-screener",
+  labelKey: "workflow.optionsscr",
   label: "Options screener",
   stageSeam: true,
   runtimeSteps: OPTIONS_PIPELINE_STAGES,
@@ -277,10 +281,10 @@ const OPTIONS_SCREENER: WorkflowDeclaration = {
 
 /** The trading leg: approval-gated before execution (#3073). */
 const TRADING_LEG: WorkflowDeclaration = {
-  id: "trading-leg",
+  id: chainId("tradrun"),
   shortId: "tradrun",
   family: "trading",
-  labelKey: "workflow.trading-leg",
+  labelKey: "workflow.tradrun",
   label: "Trading leg",
   stageSeam: true,
   runtimeSteps: TRADE_APPROVAL_STEP_IDS,
@@ -308,10 +312,10 @@ const TRADING_LEG: WorkflowDeclaration = {
 
 /** Payment: the charged path, gate-checked before anything is confirmed. */
 const PAYMENT_RUN: WorkflowDeclaration = {
-  id: "payment-run",
+  id: chainId("payrun"),
   shortId: "payrun",
   family: "payment",
-  labelKey: "workflow.payment-run",
+  labelKey: "workflow.payrun",
   label: "Payment run",
   stageSeam: true,
   runtimeSteps: [
@@ -363,10 +367,10 @@ const PAYMENT_RUN: WorkflowDeclaration = {
 
 /** Saga: one cross-domain journey, payment leg then screen leg, compensable. */
 const SAGA_RUN: WorkflowDeclaration = {
-  id: "saga-run",
+  id: chainId("sagarun"),
   shortId: "sagarun",
   family: "saga",
-  labelKey: "workflow.saga-run",
+  labelKey: "workflow.sagarun",
   label: "Goal saga",
   stageSeam: true,
   runtimeSteps: [
@@ -404,10 +408,10 @@ const SAGA_RUN: WorkflowDeclaration = {
 
 /** Goal screen: runs on the screener workflow, goal-shaped request. */
 const GOAL_SCREEN: WorkflowDeclaration = {
-  id: "goal-screen",
+  id: chainId("goalscr"),
   shortId: "goalscr",
   family: "goal",
-  labelKey: "workflow.goal-screen",
+  labelKey: "workflow.goalscr",
   label: "Goal screen",
   stageSeam: false,
   runtimeSteps: [],
@@ -425,10 +429,10 @@ const GOAL_SCREEN: WorkflowDeclaration = {
 
 /** Strategy discovery: ranked strategies, no artifacts by design. */
 const STRATEGY_DISCOVERY: WorkflowDeclaration = {
-  id: "strategy-discovery",
+  id: chainId("strategyscr"),
   shortId: "strategyscr",
   family: "strategy",
-  labelKey: "workflow.strategy-discovery",
+  labelKey: "workflow.strategyscr",
   label: "Strategy discovery",
   stageSeam: false,
   runtimeSteps: ["feed", "analysis", "generation", "delivery"],

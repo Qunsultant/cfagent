@@ -69,7 +69,7 @@ function makeHostContext(env: Partial<Env> = {}) {
   return { ctx, sql };
 }
 
-const CHAIN_ID = "yahoo-nasdaq100-quotes-pipeline";
+const CHAIN_ID = "pipe:yahoo-nasdaq100-quotes";
 
 async function pollRecords(
   sql: SqliteTestStorage,
@@ -87,25 +87,25 @@ async function pollRecords(
 describe("the composed chains on the host (#3540)", () => {
   it("the host manages the nineteen chains, one per quotes lineage", () => {
     expect(pipelineChainJobIds()).toEqual([
-      "yahoo-nasdaq100-quotes-pipeline",
-      "yahoo-sp100-quotes-pipeline",
-      "yahoo-sp500-quotes-pipeline",
-      "yahoo-dow-quotes-pipeline",
-      "yahoo-sp400-quotes-pipeline",
-      "yahoo-sector-energy-quotes-pipeline",
-      "yahoo-sector-materials-quotes-pipeline",
-      "yahoo-sector-industrials-quotes-pipeline",
-      "yahoo-sector-consumer-discretionary-quotes-pipeline",
-      "yahoo-sector-consumer-staples-quotes-pipeline",
-      "yahoo-sector-health-care-quotes-pipeline",
-      "yahoo-sector-financials-quotes-pipeline",
-      "yahoo-sector-information-technology-quotes-pipeline",
-      "yahoo-sector-communication-services-quotes-pipeline",
-      "yahoo-sector-utilities-quotes-pipeline",
-      "yahoo-sector-real-estate-quotes-pipeline",
-      "alpaca-nasdaq100-quotes-pipeline",
-      "etrade-nasdaq100-quotes-pipeline",
-      "public-nasdaq100-quotes-pipeline",
+      "pipe:yahoo-nasdaq100-quotes",
+      "pipe:yahoo-sp100-quotes",
+      "pipe:yahoo-sp500-quotes",
+      "pipe:yahoo-dow-quotes",
+      "pipe:yahoo-sp400-quotes",
+      "pipe:yahoo-sector-energy-quotes",
+      "pipe:yahoo-sector-materials-quotes",
+      "pipe:yahoo-sector-industrials-quotes",
+      "pipe:yahoo-sector-consumer-discretionary-quotes",
+      "pipe:yahoo-sector-consumer-staples-quotes",
+      "pipe:yahoo-sector-health-care-quotes",
+      "pipe:yahoo-sector-financials-quotes",
+      "pipe:yahoo-sector-information-technology-quotes",
+      "pipe:yahoo-sector-communication-services-quotes",
+      "pipe:yahoo-sector-utilities-quotes",
+      "pipe:yahoo-sector-real-estate-quotes",
+      "pipe:alpaca-nasdaq100-quotes",
+      "pipe:etrade-nasdaq100-quotes",
+      "pipe:public-nasdaq100-quotes",
     ]);
   });
 
@@ -138,7 +138,7 @@ describe("the composed chains on the host (#3540)", () => {
     // #3930/#3931/#3932: the alpaca chain folds the fundamentals,
     // technicals, and sentiment nodes in, so its deliver stage
     // sits three levels deeper than the five-node chain.
-    expect(pipelineChainStageNodePath(ctx, "alpaca-nasdaq100-quotes-pipeline", "deliver")).toBe("0/0/0/0/0/0/0");
+    expect(pipelineChainStageNodePath(ctx, "pipe:alpaca-nasdaq100-quotes", "deliver")).toBe("0/0/0/0/0/0/0");
     expect(() => pipelineChainStageNodePath(ctx, CHAIN_ID, "publish")).toThrow(
       /PIPELINE_CHAIN_STAGE_UNKNOWN/,
     );

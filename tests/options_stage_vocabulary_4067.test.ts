@@ -58,7 +58,7 @@ describe("options stage vocabulary (#4067)", () => {
   });
 
   it("the catalog's options entry partitions the 8 under the 4 display stages", () => {
-    const entry = WORKFLOW_CATALOG.find((e) => e.id === "options-screener");
+    const entry = WORKFLOW_CATALOG.find((e) => e.id === "chain:optionsscr");
     expect(entry).toBeDefined();
     expect([...(entry?.runtimeSteps ?? [])]).toEqual([...EIGHT]);
     expect((entry?.stages ?? []).map((s) => s.stage)).toEqual([...FOUR]);

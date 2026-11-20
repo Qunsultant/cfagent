@@ -80,7 +80,7 @@ export const PLATFORM_WORKFLOWS: WorkflowItem[] = [
   // ANALYSIS TRACK (A1 - A8)
   // =========================================================================
   {
-    id: "stock-screener",
+    id: "chain:stockscr",
     codeId: "A1",
     number: 1,
     track: "analysis",
@@ -953,7 +953,7 @@ export function WorkflowsHub({ onNavigateTab, onSendPrompt }: WorkflowsHubProps)
   const [trackFilter, setTrackFilter] = useState<"all" | "analysis" | "execution">("all");
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState<string>("");
-  const [expandedId, setExpandedId] = useState<string>("stock-screener");
+  const [expandedId, setExpandedId] = useState<string>("chain:stockscr");
 
   // FAQs Tab State
   const [faqCategory, setFaqCategory] = useState<string>("all");

@@ -36,13 +36,13 @@ describe("trading leg runtime ids (#3191)", () => {
   });
 
   it("the catalog declares an exact partition of them", () => {
-    const declared = workflowById("trading-leg")!.stages.flatMap((s) => s.runtimeStageIds ?? []);
+    const declared = workflowById("chain:tradrun")!.stages.flatMap((s) => s.runtimeStageIds ?? []);
     expect([...declared].sort()).toEqual([...TRADE_APPROVAL_STEP_IDS].sort());
     expect(new Set(declared).size).toBe(declared.length);
   });
 
   it("keeps the approval gate on the stage that waits for it", () => {
-    const workflow = workflowById("trading-leg")!;
+    const workflow = workflowById("chain:tradrun")!;
     const waiting = workflow.stages.find((s) => (s.runtimeStageIds ?? []).includes("await-approval"));
     expect(waiting?.requiresApproval).toBe(true);
   });
@@ -75,11 +75,11 @@ describe("options screen phases (#3191, retired by #3186 step 3d)", () => {
 
   it("declares no step ids, because the pipeline is not a step.do workflow", () => {
     expect(handler).not.toMatch(/step\.do\(/);
-    expect(workflowById("options-screener")!.runtimeMappingGap).toBeUndefined();
+    expect(workflowById("chain:optionsscr")!.runtimeMappingGap).toBeUndefined();
   });
 
   it("the catalog declares an exact partition of the pipeline stages", () => {
-    const declared = workflowById("options-screener")!.stages.flatMap((s) => s.runtimeStageIds ?? []);
+    const declared = workflowById("chain:optionsscr")!.stages.flatMap((s) => s.runtimeStageIds ?? []);
     expect([...declared].sort()).toEqual([...OPTIONS_PIPELINE_STAGES].sort());
   });
 });
@@ -98,13 +98,13 @@ describe("the catalog stays importable from the browser (#3191)", () => {
 
 describe("no family is left without either ids or a named gap (#3191)", () => {
   it("every family is mapped or says why not", () => {
-    for (const id of ["stock-screener", "options-screener", "trading-leg", "payment-run", "saga-run"]) {
+    for (const id of ["chain:stockscr", "chain:optionsscr", "chain:tradrun", "chain:payrun", "chain:sagarun"]) {
       const workflow = workflowById(id)!;
       const ids = workflow.stages.flatMap((s) => s.runtimeStageIds ?? []);
       expect(ids.length).toBeGreaterThan(0);
       expect(workflow.runtimeMappingGap).toBeUndefined();
     }
-    for (const id of ["goal-screen", "strategy-discovery"]) {
+    for (const id of ["chain:goalscr", "chain:strategyscr"]) {
       expect((workflowById(id)!.runtimeMappingGap ?? "").trim().length).toBeGreaterThan(10);
     }
   });

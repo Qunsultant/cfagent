@@ -35,7 +35,7 @@ describe("Platform Capabilities & Chat Knowledge Retrieval Suite", () => {
     it("indexes all 8 core platform workflows with full details", () => {
       expect(PLATFORM_WORKFLOWS_KNOWLEDGE.length).toBe(8);
       const workflowIds = PLATFORM_WORKFLOWS_KNOWLEDGE.map((w) => w.id);
-      expect(workflowIds).toContain("stock-screener");
+      expect(workflowIds).toContain("chain:stockscr");
       expect(workflowIds).toContain("options-strategy-discovery");
       expect(workflowIds).toContain("options-flows");
       expect(workflowIds).toContain("strategy-builder");
@@ -57,7 +57,7 @@ describe("Platform Capabilities & Chat Knowledge Retrieval Suite", () => {
     it("retrieves stock screener instructions and fallback hierarchy", () => {
       const result = searchPlatformKnowledge("How do I use the stock screener?");
       expect(result.count).toBeGreaterThan(0);
-      const hasStockWorkflow = result.results.some((r) => r.id === "stock-screener" || r.id === "stock-screener-logic");
+      const hasStockWorkflow = result.results.some((r) => r.id === "chain:stockscr" || r.id === "stock-screener-logic");
       expect(hasStockWorkflow).toBe(true);
       expect(result.formattedAnswer).toContain("trading");
       expect(result.formattedAnswer).toMatch(/nasdaq|fallback|rsi/i);

@@ -156,7 +156,7 @@ describe("run bridge (#3787): mas_async_jobs rows for non-async-job runs", () =>
     const { db, sql, sessionId } = makeBridgeStore();
     const ports = createAsyncJobPorts(sql as never);
     bridgeRunStart(ports, {
-      jobId: "chain:yahoo-nasdaq100-quotes-pipeline:run-1",
+      jobId: "chain:pipe:yahoo-nasdaq100-quotes:run-1",
       sessionId,
       capability: "pipeline.chain",
       displayName: "Pipeline chain — Yahoo quotes — Nasdaq-100",
@@ -166,11 +166,11 @@ describe("run bridge (#3787): mas_async_jobs rows for non-async-job runs", () =>
     });
     const written = bridgeRunFail(
       ports,
-      "chain:yahoo-nasdaq100-quotes-pipeline:run-1",
+      "chain:pipe:yahoo-nasdaq100-quotes:run-1",
       "ENRICH_INPUT_MISSING: enrich job \"yahoo-nasdaq100-quotes-enrich\" run x failed (No usable persisted dataset)",
     );
     expect(written).toBe(1);
-    const row = bridgeRow(db, "chain:yahoo-nasdaq100-quotes-pipeline:run-1");
+    const row = bridgeRow(db, "chain:pipe:yahoo-nasdaq100-quotes:run-1");
     expect(row?.status).toBe("failed");
     expect(String(row?.error ?? "")).toContain("ENRICH_INPUT_MISSING");
   });
@@ -214,7 +214,7 @@ describe("run bridge (#3787): mas_async_jobs rows for non-async-job runs", () =>
       bridgeRow(db, "screener:chat:NASDAQ100:2026-11-13T10:22:40.000Z:abcd1234")?.parent_job_id,
     ).toBe(wrapperId);
     const unlinked = bridgeRunStart(ports, {
-      jobId: "chain:yahoo-nasdaq100-quotes-pipeline:run-1",
+      jobId: "chain:pipe:yahoo-nasdaq100-quotes:run-1",
       sessionId,
       capability: "pipeline.chain",
       displayName: "Pipeline chain — Yahoo quotes — Nasdaq-100",
@@ -223,7 +223,7 @@ describe("run bridge (#3787): mas_async_jobs rows for non-async-job runs", () =>
       nowIso: new Date().toISOString(),
     });
     expect(unlinked).toBe(true);
-    expect(bridgeRow(db, "chain:yahoo-nasdaq100-quotes-pipeline:run-1")?.parent_job_id).toBeNull();
+    expect(bridgeRow(db, "chain:pipe:yahoo-nasdaq100-quotes:run-1")?.parent_job_id).toBeNull();
   });
 
   it("complete/fail on an unknown id write nothing (guarded transitions)", async () => {
@@ -535,7 +535,7 @@ import type { MarketDataResearchCompanyFundamentals, MarketDataResearchHistorica
 
 const T0 = Date.parse("2026-11-07T12:00:00.000Z");
 const FEED_ID = "yahoo-nasdaq100-quotes";
-const CHAIN_ID = `${FEED_ID}-pipeline`;
+const CHAIN_ID = "pipe:yahoo-nasdaq100-quotes";
 const ENRICH_ID = `${FEED_ID}-enrich`;
 
 function chainQuote(symbol: string): MarketDataResearchQuote {

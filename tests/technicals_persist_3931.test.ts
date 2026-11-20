@@ -900,19 +900,19 @@ describe("every chain folds the technicals node in (#3931)", () => {
     }
     const byId = new Map(raws.map((r) => [r.jobId, r]));
     expect(
-      walk(byId.get("alpaca-nasdaq100-quotes-pipeline")!).find(
+      walk(byId.get("pipe:alpaca-nasdaq100-quotes")!).find(
         (n) => n.params?.feedJobId === TECH_ID,
       )?.params,
     ).toMatchObject({ feedJobId: TECH_ID, universe: "nasdaq100" });
     expect(
-      walk(byId.get("yahoo-sp100-quotes-pipeline")!).find(
+      walk(byId.get("pipe:yahoo-sp100-quotes")!).find(
         (n) => n.params?.feedJobId === TECH_ID,
       )?.params,
     ).toMatchObject({ feedJobId: TECH_ID, universe: "sp100" });
     // The alpaca chain now carries eight nodes (fundamentals,
     // technicals, and sentiment fold in, #3932).
-    expect(walk(byId.get("alpaca-nasdaq100-quotes-pipeline")!)).toHaveLength(8);
-    expect(walk(byId.get("yahoo-nasdaq100-quotes-pipeline")!)).toHaveLength(8);
+    expect(walk(byId.get("pipe:alpaca-nasdaq100-quotes")!)).toHaveLength(8);
+    expect(walk(byId.get("pipe:yahoo-nasdaq100-quotes")!)).toHaveLength(8);
   });
 });
 

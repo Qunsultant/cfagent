@@ -33,12 +33,12 @@ const wf = (id: string) => {
 
 describe("neutrality S4 — platformKnowledge generic workflow framing", () => {
   it("stock screener badge names the capability, not the providers", () => {
-    expect(wf("stock-screener").badge).toBe("Dual-Engine (Listings & Quotes)");
-    expect(wf("stock-screener").badge).not.toContain("Nasdaq & Yahoo");
+    expect(wf("chain:stockscr").badge).toBe("Dual-Engine (Listings & Quotes)");
+    expect(wf("chain:stockscr").badge).not.toContain("Nasdaq & Yahoo");
   });
 
   it("stock screener provider-flexibility feature is framed neutrally", () => {
-    const features = wf("stock-screener").keyFeatures.join("\n");
+    const features = wf("chain:stockscr").keyFeatures.join("\n");
     expect(features).toContain(
       "Dual provider flexibility: connected-broker mode or 100% zero-credential market-data mode."
     );
@@ -113,7 +113,7 @@ describe("neutrality S4 — agent description and contract prose examples", () =
 
 describe("neutrality S4 — deferred provenance pinned unchanged", () => {
   it("data-bearing route paths in apiEndpoint fields are untouched", () => {
-    expect(wf("stock-screener").apiEndpoint).toContain("POST /api/etrade/screen");
+    expect(wf("chain:stockscr").apiEndpoint).toContain("POST /api/etrade/screen");
     expect(wf("options-strategy-discovery").apiEndpoint).toContain(
       "POST /api/etrade/options/strategy"
     );
@@ -126,7 +126,7 @@ describe("neutrality S4 — deferred provenance pinned unchanged", () => {
   });
 
   it("data sources naming the actual serving source stay (provenance)", () => {
-    const screenerSources = wf("stock-screener").dataSources.join("\n");
+    const screenerSources = wf("chain:stockscr").dataSources.join("\n");
     expect(screenerSources).toContain("Nasdaq Official Screener API (api.nasdaq.com/api/screener/stocks)");
     expect(screenerSources).toContain("E*TRADE Market Quote & Orders API (api.etrade.com/v1/market/quote)");
     const flowSources = wf("options-flows").dataSources.join("\n");

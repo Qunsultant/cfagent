@@ -19,7 +19,7 @@
  *    is the pipeline's feed input, fundamentals only a join
  *    source; prefer run_pipeline_chain for the yahoo chain.
  * 2. Chain prerequisite (pin): the derived chain definition
- *    for yahoo-nasdaq100-quotes-pipeline already orders enrich
+ *    for pipe:yahoo-nasdaq100-quotes already orders enrich
  *    between feed and analyze with the quotes job as its feed
  *    stage — the chain was never broken; the copilot skipped it.
  * 3. Stage seam (pin): a standalone feed run's persisted
@@ -70,7 +70,7 @@ const TECH_ID = "yahoo-nasdaq100-technicals";
 const SENT_ID = "yahoo-nasdaq100-sentiment";
 const ENRICH_ID = `${FEED_ID}-enrich`;
 const ANALYZE_ID = `${ENRICH_ID}-analyze`;
-const CHAIN_ID = `${FEED_ID}-pipeline`;
+const CHAIN_ID = "pipe:yahoo-nasdaq100-quotes";
 
 const PROMPT_BASE = {
   route: { agent: "search" as const, confidence: 0.92, reason: "test route" },
@@ -103,7 +103,7 @@ function expectStageOrderRule(prompt: string): void {
   expect(prompt).toContain("never skipping a stage");
   expect(prompt).toMatch(/never run analyze directly after feed/i);
   expect(prompt).toContain("yahoo-nasdaq100-quotes");
-  expect(prompt).toContain("yahoo-nasdaq100-quotes-pipeline");
+  expect(prompt).toContain("pipe:yahoo-nasdaq100-quotes");
   expect(prompt).toContain("run_pipeline_chain");
   expect(prompt).toMatch(/fundamentals.*join source/i);
   expect(prompt).toMatch(/fundamentals.*never.*feed input/i);

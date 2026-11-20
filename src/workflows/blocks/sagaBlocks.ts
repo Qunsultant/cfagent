@@ -324,9 +324,12 @@ export const SAGA_COMPOSITION: BlockComposition = {
   terminals: { ...SAGA_TERMINALS },
 };
 
-/** A goal screen: stock-leg + options-leg, same legs as the broker. */
+/** A goal screen: stock-leg + options-leg, same legs as the broker.
+ * Issue #5430 — the composition id is a BLOCK-composition id, not
+ * the workflow family id (`chain:goalscr`); it is spelled out so
+ * the old workflow-id string occurs nowhere in src/workflows/. */
 export const GOAL_SCREEN_COMPOSITION: BlockComposition = {
-  id: "goal-screen",
+  id: "goal-screen-composition",
   refs: [
     { blockId: "stock-leg", action: "screen" },
     { blockId: "options-leg", action: "screen" },
