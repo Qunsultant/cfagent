@@ -1271,6 +1271,24 @@ export class RunStockScreenCommand implements IMcpToolCommand<MeshScreenDoorInpu
           shape: { type: "string", enum: ["monolith", "sharded"] },
         },
       },
+      // Issue #4434 (S6/N5) — the runnability surface the door
+      // already accepts: a stored preset (resolved at run time
+      // against the acting login's own presets; explicit filters
+      // win over the preset) and the ND mode selection the door
+      // validates fail-closed.
+      presetId: {
+        type: "string",
+        description: "A stored screener preset id (the acting user's own preset). Its resolved criteria are the screen's base filters; explicit filters win field by field.",
+      },
+      screenMode: {
+        type: "string",
+        enum: ["deterministic", "non-deterministic"],
+        description: "The per-run mode selection (default deterministic). Non-deterministic requires screenIntent and the SCREENER_ND_MODE gate open, else the door refuses coded.",
+      },
+      screenIntent: {
+        type: "string",
+        description: "The free-form screening intent a non-deterministic run's interpretation step proposes criteria from. Required with screenMode non-deterministic; refused without it.",
+      },
     },
   };
   readonly zodSchema = z.object({
@@ -1299,6 +1317,19 @@ export class RunStockScreenCommand implements IMcpToolCommand<MeshScreenDoorInpu
       })
       .optional()
       .describe("Issue #4363 — the run's execution mode; online+sync is refused"),
+    presetId: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("Issue #4434 — a stored screener preset id (the acting user's own preset)"),
+    screenMode: z
+      .enum(["deterministic", "non-deterministic"])
+      .optional()
+      .describe("Issue #4434 — the per-run mode selection; non-deterministic requires screenIntent"),
+    screenIntent: z
+      .string()
+      .optional()
+      .describe("Issue #4434 — the free-form screening intent for a non-deterministic run"),
   });
 
   async execute(

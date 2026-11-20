@@ -131,6 +131,7 @@ export function buildStockCopilotCapabilities(
   return `Sub-agent & MCP capabilities directly available to you (the tool_openaimp_* tools are the platform MCP server's catalog, discovered at runtime via the Agents SDK MCP client; each discovered tool carries its own description):
 - 'tool_openaimp_query_platform_knowledge': platform documentation and navigation.
 - 'tool_openaimp_stock_copilot_status' / 'control' / 'introspect' / 'learnings' / 'evaluate': the copilot's own loop state, controls, workflow, learnings, and read-only strategy evaluation.
+- 'tool_openaimp_run_stock_screen': THE universe-screen tool — run a stock screen over a named universe (NASDAQ100, SP500, SP100, RUSSELL2000, TECH, ETF, LEV_ETF, or ALL) as a durable screener workflow. Offered on every broker/mode: the run is provider-carried from the tenant's selection, never broker-gated (#4434).
 - '${tool(cap.tools.quote)}': the live quote for ${cap.brokerLabel}. Never present a price without a named source + timestamp.
 - '${tool(cap.tools.preview)}': draft an order with Agent DID attestation. NO SHARES ARE BOUGHT OR SOLD; human confirmation is required.
 - '${tool(cap.tools.place)}': place a confirmed draft ONLY after explicit human authorization. It executes synchronously.

@@ -111,6 +111,9 @@ import {
 } from "./chatAwaitBudget";
 import { CREDITS_TOP_UP_HINT } from "../../services/providerUxLinks";
 import { resolveScreenProviderForRun } from "../../services/tenantProviders";
+import { resolvePresetFilter } from "../../services/screenerPresetResolution";
+import { codedMessage } from "../../outcomes/outcomeAspects";
+import type { StockScreenPresetRef } from "../../workflows/stockScreenRunSpec";
 import {
   listScheduledReports,
   resolveCanonicalReportBody,
@@ -207,6 +210,17 @@ export interface MeshScreenDoorInput {
   universe?: string;
   /** Structured screener filters, passed through to the workflow command. */
   filters?: StockScreenerFilter;
+  /**
+   * Issue #4434 (S6/N5) — a stored screener preset id, resolved
+   * at run time against the acting login's own presets via the
+   * existing resolvePresetFilter (user-scoped; missing/foreign
+   * refuses coded preset_not_found, never a silent unfiltered
+   * run). The resolved criteria are the screen's base filters —
+   * explicit `filters` win over the preset field by field — and
+   * the resolution is stamped as presetRef on the run record.
+   * An options preset on this stock screen refuses coded.
+   */
+  presetId?: string;
   /**
    * Issue #4363 — the run's execution mode (all four axes), chosen at
    * start. Validated here before any run; absent = the family default
@@ -408,7 +422,7 @@ export async function runStockScreenViaDoor(
   // The read-back is this door's result path; a context that
   // cannot supply the instance store fails here, before any
   // start, not after a run nobody can read.
-  ctx.ensureTables();
+  const sql = ctx.ensureTables();
 
   // Issue #2530 — mode selection at the seam, before any
   // start. An ND request is admissible only with the gate
@@ -470,7 +484,50 @@ export async function runStockScreenViaDoor(
     }
     universeId = rawUniverse as UniverseId;
   }
+
+  // Issue #4434 (S6/N5) — preset resolution, before any start:
+  // a presetId resolves against the acting login's own presets
+  // at run time (edits apply to future runs without re-arming).
+  // A missing or foreign preset refuses coded preset_not_found;
+  // an unreadable preset, an unknown asset class, or an options
+  // preset on this stock screen refuses coded door_unavailable.
+  // Nothing here ever falls back to an unfiltered run.
+  let presetCriteria: StockScreenerFilter | undefined;
+  let presetRef: StockScreenPresetRef | undefined;
+  if (input.presetId !== undefined) {
+    const presetId = input.presetId.trim();
+    if (!presetId) {
+      throw new MeshDoorError(
+        "preset_not_found",
+        "run_stock_screen refused: presetId was supplied blank — a preset run names a stored preset id. No workflow was started.",
+      );
+    }
+    const resolved = resolvePresetFilter(sql, login, presetId);
+    if (!resolved.ok) {
+      throw new MeshDoorError(
+        resolved.error === "Preset not found." ? "preset_not_found" : "door_unavailable",
+        `run_stock_screen refused: preset "${presetId}" cannot be used (${resolved.error}) No workflow was started and no screen ran unfiltered.`,
+      );
+    }
+    if (resolved.assetClass !== "stocks") {
+      throw new MeshDoorError(
+        "door_unavailable",
+        `run_stock_screen refused: preset "${presetId}" is an options preset and cannot filter a stock screen. No workflow was started.`,
+      );
+    }
+    presetCriteria = resolved.criteria as StockScreenerFilter;
+    presetRef = {
+      presetId,
+      resolvedAt: new Date((ctx.nowMs ?? Date.now)()).toISOString(),
+    };
+  }
+
   const filters: StockScreenerFilter = {
+    // Issue #4434 (S6/N5) — the preset's criteria are the base;
+    // explicit filters win over the preset field by field, and
+    // the run's universe always wins over any universe the
+    // preset row carries.
+    ...(presetCriteria ?? {}),
     ...(input.filters ?? {}),
     universe: universeId,
   } as StockScreenerFilter;
@@ -506,10 +563,11 @@ export async function runStockScreenViaDoor(
     }
   }
   const execFields = executionMode ? { executionMode } : {};
+  const presetFields = presetRef ? { presetRef } : {};
   if (await screenMonetizationOn(ctx)) {
-    return runPaidScreen(ctx, { filters, userLogin: login, universeId, ...modeFields, ...execFields });
+    return runPaidScreen(ctx, { filters, userLogin: login, universeId, ...modeFields, ...execFields, ...presetFields });
   }
-  return runFreeScreen(ctx, { filters, userLogin: login, universeId, ...modeFields, ...execFields });
+  return runFreeScreen(ctx, { filters, userLogin: login, universeId, ...modeFields, ...execFields, ...presetFields });
 }
 
 /** The pieces of one door screen run, shared by the free and paid paths. */
@@ -540,6 +598,8 @@ async function buildScreenCommand(
     screenIntent?: string;
     /** Issue #4363 — the validated execution mode, when the caller chose one. */
     executionMode?: import("../../data/jobPipelinePorts").JobExecutionMode;
+    /** Issue #4434 (S6/N5): the resolved preset reference, stamped on the run record. */
+    presetRef?: StockScreenPresetRef;
   },
 ): Promise<ScreenCommandParts> {
   // Issue #2867: shard derivation is the broker's one policy.
@@ -556,12 +616,23 @@ async function buildScreenCommand(
   // Issue #4431 (S5/N3): the command carries the tenant's
   // effective data-provider selection (resolveScreenProviderForRun)
   // so the planner's required provider is met — the door screen
-  // is a provider-carrying run, never a silent default. A
-  // selection that is not a stock-screen provider leaves the
-  // command without one, and the planner refuses the run loud
-  // and coded. The full door carry (schema, preset, steering)
-  // is N5 (#4434); this is only the command's provider fill.
+  // is a provider-carrying run, never a silent default.
+  // Issue #4434 (S6/N5): a selection that is not a stock-screen
+  // provider refuses HERE, before any workflow starts, with the
+  // planner's coded refusal in the message (the MCP wire carries
+  // only the message text, so the code rides in it): starting a
+  // workflow the planner is guaranteed to refuse would surface
+  // only the catalog's bare business message — or the generic
+  // "ended before its outcome was projected" fallback when no
+  // collation projects. The planner keeps refusing direct
+  // starts; this is the chat path's surfacing, not a second fill.
   const provider = await resolveScreenProviderForRun(ctx.env);
+  if (provider === null) {
+    throw new MeshDoorError(
+      "door_unavailable",
+      `run_stock_screen refused: ${codedMessage("FAILURE_NO_SCREENING_PROVIDER")} No workflow was started — the run cannot screen without a provider, and no other provider's data is substituted.`,
+    );
+  }
   const command: WorkflowJobCommand = buildParentScreenCommand({
     jobId,
     source: "mesh-door",
@@ -580,7 +651,12 @@ async function buildScreenCommand(
       ? { screenMode: req.screenMode, screenIntent: req.screenIntent }
       : {}),
     ...(req.executionMode ? { executionMode: req.executionMode } : {}),
-    ...(provider !== null ? { provider } : {}),
+    // Issue #4434 (S6/N5): the resolved preset reference rides the
+    // command so the run record names the preset that filtered it.
+    ...(req.presetRef ? { presetRef: req.presetRef } : {}),
+    // Issue #4434: provider is never null here — the refusal above
+    // throws first — so the command always carries one.
+    provider,
     ...(traceparent ? { traceparent } : {}),
   });
   return { command, jobId, tenantId, shards, startedAtIso };
@@ -728,6 +804,10 @@ async function runFreeScreen(
     universeId: UniverseId;
     screenMode?: "non-deterministic";
     screenIntent?: string;
+    /** Issue #4363 — the validated execution mode, when the caller chose one. */
+    executionMode?: import("../../data/jobPipelinePorts").JobExecutionMode;
+    /** Issue #4434 (S6/N5): the resolved preset reference, stamped on the run record. */
+    presetRef?: StockScreenPresetRef;
   },
 ): Promise<MeshScreenRunResult> {
   const ports: WorkflowPort | null =
@@ -967,6 +1047,8 @@ async function runPaidScreen(
     screenMode?: "non-deterministic";
     screenIntent?: string;
     executionMode?: import("../../data/jobPipelinePorts").JobExecutionMode;
+    /** Issue #4434 (S6/N5): the resolved preset reference, stamped on the run record. */
+    presetRef?: StockScreenPresetRef;
   },
 ): Promise<MeshScreenRunResult> {
   const parts = await buildScreenCommand(ctx, req);

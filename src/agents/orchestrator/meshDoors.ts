@@ -205,7 +205,13 @@ export type MeshDoorErrorCode =
   // invalid_strategy_type (the requested strategy type does not
   // resolve against the engine's strategy catalog; refused
   // before any engine call).
-  | "invalid_strategy_type";
+  | "invalid_strategy_type"
+  // Issue #4434 (S6/N5): the screen door's preset refusal —
+  // preset_not_found (the requested presetId has no row for
+  // the acting login — missing and foreign read identically,
+  // no existence oracle; refused before any workflow start,
+  // never a silent unfiltered run).
+  | "preset_not_found";
 
 export class MeshDoorError extends Error {
   readonly code: MeshDoorErrorCode;
