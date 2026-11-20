@@ -31,6 +31,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { CheckoutPanel } from "../src/client/CheckoutPanel";
+import { codedMessage } from "../src/outcomes/outcomeAspects";
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -360,9 +361,14 @@ describe("top-up journey WCAG 2.2 AA (#3574)", () => {
     });
     await flush();
     const statuses = Array.from(container.querySelectorAll('[role="status"]'));
-    expect(statuses.some((s) => (s.textContent || "").includes("Top-up credited: $25.00. New credit balance: $35.00."))).toBe(
+    // Issue #3571 (residual): the credited milestone announces the
+    // catalog message with the amounts as data — the mock body carries
+    // no code, so the panel's guarded fallback renders it.
+    expect(statuses.some((s) => (s.textContent || "").includes(codedMessage("SUCCESS_TOP_UP_CREDITED")))).toBe(
       true,
     );
+    expect(statuses.some((s) => (s.textContent || "").includes("Credited $25.00"))).toBe(true);
+    expect(statuses.some((s) => (s.textContent || "").includes("Top-up credited:"))).toBe(false);
     for (const input of Array.from(container.querySelectorAll("input"))) {
       expect(input.getAttribute("aria-invalid")).toBeNull();
     }

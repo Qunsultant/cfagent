@@ -27,7 +27,10 @@ export class InMemoryTopUpAdapter implements TopUpDraftStore {
    */
   async claimForCredit(id: string): Promise<TopUpDraft> {
     const row = this.rows.get(id);
-    if (!row) throw new Error(`Unknown top-up draft ${id}.`);
+    // Issue #3571 (residual): an unknown draft is a typed, catalog-coded
+    // failure (FAILURE_TOP_UP_NOT_FOUND), never a raw Error — the same
+    // pattern markCredited already uses.
+    if (!row) throw new BusinessError("FAILURE_TOP_UP_NOT_FOUND");
     if (row.status !== "minted") throw new TopUpClaimRefusedError(id, row.status, "claim");
     const next: TopUpDraft = { ...row, status: "crediting" };
     this.rows.set(id, next);
@@ -37,7 +40,7 @@ export class InMemoryTopUpAdapter implements TopUpDraftStore {
   /** Release a claim (crediting → minted); same synchronous mechanism. */
   async releaseClaim(id: string): Promise<TopUpDraft> {
     const row = this.rows.get(id);
-    if (!row) throw new Error(`Unknown top-up draft ${id}.`);
+    if (!row) throw new BusinessError("FAILURE_TOP_UP_NOT_FOUND");
     if (row.status !== "crediting") throw new TopUpClaimRefusedError(id, row.status, "release");
     const next: TopUpDraft = { ...row, status: "minted" };
     this.rows.set(id, next);

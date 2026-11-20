@@ -23,14 +23,19 @@ import {
   BillingPolicyApiError,
 } from "../src/client/billingPolicyApi";
 import { TopUpLimitsSection } from "../src/client/TopUpLimitsSection";
+import { codedMessage } from "../src/outcomes/outcomeAspects";
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
 function ok(body: unknown) {
   return { ok: true, status: 200, json: async () => body };
 }
-function err(status: number) {
-  return { ok: false, status, json: async () => ({ error: "typed server detail" }) };
+function err(status: number, code?: string) {
+  return {
+    ok: false,
+    status,
+    json: async () => (code ? { code, error: "typed server detail" } : { error: "typed server detail" }),
+  };
 }
 
 interface MockState {
@@ -38,7 +43,9 @@ interface MockState {
   maxUSD: number;
   operatorsStatus: number;
   policyStatus: number | null;
+  policyCode: string | null;
   postStatus: number | null;
+  postCode: string | null;
   pricingLimits: { minUSD: number; maxUSD: number } | null;
   posts: Array<{ topUpMinUSD: number; topUpMaxUSD: number }>;
 }
@@ -48,14 +55,14 @@ interface MockState {
 function limitsFetch(state: MockState) {
   return async (url: string, init?: RequestInit) => {
     if (url === "/api/payments/agentic/commercial/billing-policy" && (!init || init.method === undefined || init.method === "GET")) {
-      if (state.policyStatus) return err(state.policyStatus);
+      if (state.policyStatus) return err(state.policyStatus, state.policyCode ?? undefined);
       return ok({
         policy: { topUpMinUSD: state.minUSD, topUpMaxUSD: state.maxUSD },
         seedNote: "Values not yet edited by an operator are PROPOSED seed values pending owner approval.",
       });
     }
     if (url === "/api/payments/agentic/commercial/billing-policy" && init?.method === "POST") {
-      if (state.postStatus) return err(state.postStatus);
+      if (state.postStatus) return err(state.postStatus, state.postCode ?? undefined);
       const body = JSON.parse(String(init.body)) as { topUpMinUSD: number; topUpMaxUSD: number };
       state.posts.push(body);
       const stale = { topUpMinUSD: state.minUSD, topUpMaxUSD: state.maxUSD };
@@ -137,7 +144,9 @@ function baseState(over: Partial<MockState> = {}): MockState {
     maxUSD: 500,
     operatorsStatus: 200,
     policyStatus: null,
+    policyCode: null,
     postStatus: null,
+    postCode: null,
     pricingLimits: { minUSD: 1, maxUSD: 500 },
     posts: [],
     ...over,
@@ -160,6 +169,23 @@ describe("billing policy api (top-up limits)", () => {
     await expect(setTopUpLimits(5, 100)).rejects.toMatchObject({ status: 403 });
     expect(state.posts).toHaveLength(0);
     expect(new BillingPolicyApiError(403).message).toContain("403");
+    vi.unstubAllGlobals();
+  });
+
+  it("surfaces the server outcome code on failure (#3571 residual)", async () => {
+    const state = baseState({ postStatus: 400, postCode: "FAILURE_COMMERCIAL_REQUEST_INVALID" });
+    vi.stubGlobal("fetch", limitsFetch(state));
+    await expect(setTopUpLimits(5, 100)).rejects.toMatchObject({
+      status: 400,
+      code: "FAILURE_COMMERCIAL_REQUEST_INVALID",
+    });
+    vi.unstubAllGlobals();
+  });
+
+  it("a body without a code keeps the code undefined (#3571 residual)", async () => {
+    const state = baseState({ postStatus: 403 });
+    vi.stubGlobal("fetch", limitsFetch(state));
+    await expect(setTopUpLimits(5, 100)).rejects.toMatchObject({ status: 403, code: undefined });
     vi.unstubAllGlobals();
   });
 });
@@ -228,6 +254,34 @@ describe("top-up limits section", () => {
     await act(async () => {});
     expect(container!.textContent || "").toContain("Only a store operator can change top-up limits.");
     expect(container!.textContent || "").toContain("Current limits: $1.00 – $500.00 per top-up.");
+  });
+
+  it("renders a save 400 with a server code as the catalog message, not the fixed string (#3571 residual)", async () => {
+    const state = baseState({ postStatus: 400, postCode: "FAILURE_COMMERCIAL_REQUEST_INVALID" });
+    await renderSection(state);
+    await act(async () => {
+      setInputValue(inputForLabel("Minimum top-up (USD)"), "5");
+      setInputValue(inputForLabel("Maximum top-up (USD)"), "100");
+    });
+    await act(async () => {
+      clickButton("Save top-up limits");
+    });
+    await act(async () => {});
+    await act(async () => {});
+    expect(container!.textContent || "").toContain(codedMessage("FAILURE_COMMERCIAL_REQUEST_INVALID"));
+    expect(container!.textContent || "").not.toContain("minimum must be a positive amount");
+    expect(container!.textContent || "").toContain("Current limits: $1.00 – $500.00 per top-up.");
+  });
+
+  it("renders a load 503 with a server code as the catalog message (#3571 residual)", async () => {
+    const state = baseState({
+      policyStatus: 503,
+      policyCode: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE",
+      pricingLimits: null,
+    });
+    await renderSection(state);
+    expect(container!.textContent || "").toContain(codedMessage("FAILURE_COMMERCIAL_STORE_UNAVAILABLE"));
+    expect(container!.textContent || "").not.toContain("The top-up limits are not configured yet.");
   });
 
   it("offers no top-up action", async () => {

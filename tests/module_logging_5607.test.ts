@@ -143,7 +143,7 @@ describe("module logging #5607: catalog codes", () => {
       expect(entry!.retryable).toBe(false);
       expect(codedMessage(code)).toBe(`[${code}] ${entry!.businessMessage}`);
     }
-    expect(Object.keys(outcomeCatalog.outcomes)).toHaveLength(262); // #5867: +1 FAILURE_COMMERCIAL_AUDIT_REQUIRED
+    expect(Object.keys(outcomeCatalog.outcomes)).toHaveLength(263); // #5867: +1 FAILURE_COMMERCIAL_AUDIT_REQUIRED; +1 (#3571 residual: SUCCESS_TOP_UP_CLAIMED)
   });
 
   it("the reused codes resolve with the correct httpStatus", () => {

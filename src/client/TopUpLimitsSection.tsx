@@ -13,11 +13,12 @@
  *
  * After every save the section re-reads the policy and renders ONLY
  * the fresh read, never the POST answer and never an optimistic
- * assertion. Failures render as fixed strings keyed by HTTP status;
- * server error bodies are never rendered. The limits are PROPOSED
- * seeds ($1–$500, owner-decided 2026-11-06) until an operator edits
- * them; the section never invents a value. ui primitives only,
- * token-only styling.
+ * assertion. Failures render the catalog message for the server's
+ * outcome code when one arrives, falling back to fixed strings
+ * keyed by HTTP status; server error bodies are never rendered.
+ * The limits are PROPOSED seeds ($1–$500, owner-decided 2026-11-06)
+ * until an operator edits them; the section never invents a value.
+ * ui primitives only, token-only styling.
  */
 import React, { useCallback, useEffect, useState } from "react";
 import { Button } from "./components/ui/Button";
@@ -27,6 +28,7 @@ import { Notice } from "./components/ui/Notice";
 import { TextInput } from "./components/ui/TextInput";
 import { getPricing, formatUSD } from "./commercialApi";
 import { listOperators } from "./refundPolicyApi";
+import { codedMessage, resolveOutcome } from "../outcomes/outcomeAspects";
 import {
   getBillingPolicy,
   setTopUpLimits,
@@ -38,16 +40,28 @@ function statusOf(error: unknown): number {
   return error instanceof BillingPolicyApiError ? error.status : 0;
 }
 
-function loadMessage(status: number): string {
-  if (status === 503) return "The top-up limits are not configured yet.";
-  return "The top-up limits could not be loaded.";
+function codeOf(error: unknown): string | undefined {
+  return error instanceof BillingPolicyApiError ? error.code : undefined;
 }
 
-function actionMessage(status: number): string {
-  if (status === 400) return "The limits are invalid: the minimum must be a positive amount no greater than the maximum.";
-  if (status === 403) return "Only a store operator can change top-up limits.";
-  if (status === 503) return "The billing service is temporarily unavailable. Try again later.";
-  return "The limits could not be saved. Try again later.";
+// Issue #3571 (residual): a resolving server code renders its catalog
+// message; anything without a code keeps the fixed per-status string
+// (network failure, legacy body). The client-side min/max validation
+// in save() is not a server outcome and keeps its own string.
+function catalogOr(code: string | undefined, fallback: string): string {
+  return code && resolveOutcome(code).entry ? codedMessage(code) : fallback;
+}
+
+function loadMessage(status: number, code?: string): string {
+  if (status === 503) return catalogOr(code, "The top-up limits are not configured yet.");
+  return catalogOr(code, "The top-up limits could not be loaded.");
+}
+
+function actionMessage(status: number, code?: string): string {
+  if (status === 400) return catalogOr(code, "The limits are invalid: the minimum must be a positive amount no greater than the maximum.");
+  if (status === 403) return catalogOr(code, "Only a store operator can change top-up limits.");
+  if (status === 503) return catalogOr(code, "The billing service is temporarily unavailable. Try again later.");
+  return catalogOr(code, "The limits could not be saved. Try again later.");
 }
 
 export function TopUpLimitsSection() {
@@ -96,7 +110,7 @@ export function TopUpLimitsSection() {
         setMaxInput(String(shown.maxUSD));
       } else if (policyResult.status === "rejected") {
         setLimits(null);
-        setLoadError(loadMessage(statusOf(policyResult.reason)));
+        setLoadError(loadMessage(statusOf(policyResult.reason), codeOf(policyResult.reason)));
       } else {
         setLimits(null);
         setLoadError("The top-up limits are currently unavailable.");
@@ -137,7 +151,7 @@ export function TopUpLimitsSection() {
       setMinInput(String(fresh.limits.topUpMinUSD));
       setMaxInput(String(fresh.limits.topUpMaxUSD));
     } catch (err) {
-      setActionError(actionMessage(statusOf(err)));
+      setActionError(actionMessage(statusOf(err), codeOf(err)));
     } finally {
       setSaving(false);
     }

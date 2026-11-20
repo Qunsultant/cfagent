@@ -41,6 +41,7 @@ import {
   D1JournalAdapter,
   ensureJournalSchema,
 } from "../src/data/d1JournalAdapter";
+import { resolveOutcome } from "../src/outcomes/outcomeAspects";
 
 /** Minimal D1Database stand-in over node:sqlite (test-only, mirrors slice0). */
 class MockD1Database {
@@ -729,7 +730,13 @@ describe("top-up claim-before-credit (#3572)", () => {
     expect(audit).toHaveBeenCalledWith(
       "commercial.top_up.claim_stuck",
       "payments",
-      expect.objectContaining({ topUpRequestId: body.topUpRequestId }),
+      expect.objectContaining({
+        topUpRequestId: body.topUpRequestId,
+        // Issue #3571 (residual): the stuck-claim audit carries the
+        // catalog code + message of the reconcile outcome it signals.
+        code: "FAILURE_TOP_UP_RECONCILE_REQUIRED",
+        message: resolveOutcome("FAILURE_TOP_UP_RECONCILE_REQUIRED").businessMessage,
+      }),
     );
   });
 });

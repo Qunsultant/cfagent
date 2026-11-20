@@ -10,8 +10,10 @@
  * whether the viewer is a store operator.
  *
  * Error contract: every failure surfaces as BillingPolicyApiError
- * carrying the HTTP status. Callers map statuses to FIXED
- * caller-facing strings; server error bodies are never rendered.
+ * carrying the HTTP status and the server's outcome code when the
+ * failure body carries one. Callers render the catalog message for
+ * a resolving code and fall back to FIXED caller-facing strings
+ * keyed by status otherwise; server error bodies are never rendered.
  * GET/POST billing-policy are operator-only server-side (the UI is
  * never the access control, only the affordance). The top-up limits
  * themselves are also served to any verified login on the pricing
@@ -66,9 +68,12 @@ export interface OfferRulesResponse {
 
 export class BillingPolicyApiError extends Error {
   readonly status: number;
-  constructor(status: number) {
+  /** Issue #3571 (residual): the server's outcome code when the failure body carries one. */
+  readonly code?: string;
+  constructor(status: number, code?: string) {
     super(`billing policy request failed: ${status}`);
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -83,7 +88,14 @@ async function callJson(path: string, init?: RequestInit): Promise<unknown> {
   } catch {
     throw new BillingPolicyApiError(0);
   }
-  if (!res.ok) throw new BillingPolicyApiError(res.status);
+  if (!res.ok) {
+    // Issue #3571 (residual): propagate the server's outcome code so
+    // callers render the catalog message; a body without a code keeps
+    // the caller's fixed per-status fallback.
+    const body = (await res.json().catch(() => ({}))) as unknown;
+    const code = isRecord(body) && typeof body.code === "string" ? body.code : undefined;
+    throw new BillingPolicyApiError(res.status, code);
+  }
   return (await res.json().catch(() => ({}))) as unknown;
 }
 
