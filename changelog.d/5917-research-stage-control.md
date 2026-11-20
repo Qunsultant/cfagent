@@ -1,0 +1,3 @@
+### Added
+
+- **Stage control for every research stage (#5917):** the OODA page now reads a run's six stages from `GET /research/runs/:runId/stages` (pipeline order, statuses taken from the engine's own stage views, `pending` for a stage that never ran — never an invented status) and offers each stage the operations its state allows: **Run** (pending), **Re-run** (completed / failed), **Stop** (running), **Resume** (stopped), **Cancel** (non-terminal). Each action posts the existing engine-backed route `POST /research/runs/:runId/stages/:stageId` with an op and refreshes the list; a refusal is rendered as the server's message, never swallowed. #ceo-aimp

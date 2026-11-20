@@ -337,6 +337,89 @@ export function controlResearchStage(input: ControlResearchStageInput): {
   };
 }
 
+export interface ReadResearchStagesInput {
+  runId: string;
+  userLogin: string;
+  sql?: import("../orm").SqlStorage;
+  d1?: D1Database;
+  env?: Record<string, string | undefined>;
+  /** Injected residency (tests reuse one store); production resolves from sql/d1. */
+  stores?: JobPipelineDeps["stores"];
+  runRecorder?: JobRunRecorder;
+}
+
+export interface ResearchStageRow {
+  stageId: ResearchPipelineStage;
+  /** The engine's recorded status, or "pending" when the stage never ran. */
+  status: string;
+  startedAt: string | null;
+  endedAt: string | null;
+  durationMs: number | null;
+}
+
+/**
+ * Issue #5917 — the six stages of one research run, in pipeline order.
+ *
+ * The per-stage control route already answers one stage at a time; without
+ * this read a page cannot know which stages exist to act on, so it could only
+ * render a dead control. An unknown run answers the six stages "pending" —
+ * never an invented status.
+ */
+export async function readResearchStages(
+  input: ReadResearchStagesInput,
+): Promise<{
+  engineJobId: string;
+  jobState: string;
+  engineRunId: string | null;
+  storageMode: ResearchStorageMode;
+  stages: ResearchStageRow[];
+}> {
+  const engineJobId = researchEngineJobId(input.runId);
+  const { storageMode, stores, runRecorder } = resolveResearchEngineAdapters(input);
+  const control = new JobPipelineControl({
+    stores,
+    runRecorder,
+    publisher: null,
+    steps: createBuiltinStepRegistry(),
+    invocation: "sync",
+  });
+  // No definition yet = the run never started; the six stages are pending,
+  // not missing (the page still shows what can be started).
+  const view = await control.getJob(engineJobId).catch(() => null);
+  const stages: ResearchStageRow[] = RESEARCH_PIPELINE_STAGES.map((stageId) => {
+    const found = view?.stages.find((stage) => stage.kind === stageId) ?? null;
+    const units = found?.units ?? [];
+    const failed = units.some((unit) => unit.status === "failed");
+    const running = units.some((unit) => unit.status === "running");
+    const stopped = units.some((unit) => unit.status === "stopped");
+    const status = !found
+      ? "pending"
+      : failed
+        ? "failed"
+        : running
+          ? "running"
+          : stopped
+            ? "stopped"
+            : units.length === 0
+              ? "pending"
+              : "completed";
+    return {
+      stageId,
+      status,
+      startedAt: found?.startedAt ?? null,
+      endedAt: found?.endedAt ?? null,
+      durationMs: found?.durationMs ?? null,
+    };
+  });
+  return {
+    engineJobId,
+    jobState: view?.instance?.state ?? "idle",
+    engineRunId: view?.instance?.currentRunId ?? null,
+    storageMode,
+    stages,
+  };
+}
+
 export interface ExecuteResearchStageControlInput extends ControlResearchStageInput {
   sql?: SqlStorage;
   d1?: D1Database;

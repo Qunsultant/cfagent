@@ -66,6 +66,7 @@ import {
   controlResearchStage,
   dispatchResearchEngineRun,
   executeResearchStageControl,
+  readResearchStages,
   type ResearchStageOp,
 } from "../../workflows/researchScreenEngine";
 
@@ -618,6 +619,25 @@ export async function handleScreenerResearchRoutes(
           { success: false, error: err?.message || "Research run failed." },
           { status: 500 }
         );
+      }
+    }
+
+    // Issue #5917 — the stage list for one run, so the page can gate each
+    // stage's actions on its real status (GET /research/runs/:runId/stages).
+    const stagesListMatch = path.match(/\/research\/runs\/([^/]+)\/stages$/);
+    if (stagesListMatch && request.method === "GET") {
+      const userLogin = request.headers.get("x-user-login") || sessionId;
+      try {
+        const stages = await readResearchStages({
+          runId: decodeURIComponent(stagesListMatch[1]),
+          userLogin,
+          sql: resolveResearchSql(),
+          d1: resolveResearchD1(),
+          env: ctx.env as Record<string, string | undefined>,
+        });
+        return Response.json(stages);
+      } catch (err: any) {
+        return Response.json({ error: err?.message || "Failed to read research stages." }, { status: 503 });
       }
     }
 

@@ -36,6 +36,111 @@ import { ScheduledOptionsRunForm } from "./ScheduledOptionsRunForm";
 import { AutonomousOptionsRuns } from "./AutonomousOptionsRuns";
 import { ScreeningActivityPanel } from "./ScreeningActivityPanel";
 
+/**
+ * Issue #5917 — per-stage control for the run on screen.
+ *
+ * The six stages and their statuses come from the run's own stage read
+ * (`GET /research/runs/:runId/stages`); the actions post the engine-backed
+ * route (`POST /research/runs/:runId/stages/:stageId` with an op). Which
+ * action a stage offers is gated by its recorded status — the server stays
+ * the authority, so a refusal is rendered, never swallowed.
+ */
+const STAGE_ACTIONS: Record<string, Array<{ op: string; label: string }>> = {
+  pending: [{ op: "run", label: "Run" }, { op: "cancel", label: "Cancel" }],
+  running: [{ op: "stop", label: "Stop" }, { op: "cancel", label: "Cancel" }],
+  stopped: [{ op: "resume", label: "Resume" }, { op: "cancel", label: "Cancel" }],
+  completed: [{ op: "rerun", label: "Re-run" }],
+  failed: [{ op: "rerun", label: "Re-run" }],
+};
+
+function ResearchStageControl({
+  runId,
+  userLogin,
+  onAfterAction,
+}: {
+  runId: string | null;
+  userLogin?: string;
+  onAfterAction?: () => void;
+}) {
+  const [rows, setRows] = useState<Array<{ stageId: string; status: string }>>([]);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [msg, setMsg] = useState("");
+
+  const load = useCallback(async () => {
+    if (!runId) return;
+    try {
+      const res = await apiFetch(
+        `/api/research/runs/${encodeURIComponent(runId)}/stages`,
+        { headers: hdrs(userLogin) },
+      );
+      const data = await readJson<{ stages?: Array<{ stageId: string; status: string }> }>(res);
+      setRows(Array.isArray(data.stages) ? data.stages : []);
+      setMsg("");
+    } catch (err) {
+      setMsg(`Stage status unavailable: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }, [runId, userLogin]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const act = async (stageId: string, op: string) => {
+    if (!runId) return;
+    setBusy(`${stageId}:${op}`);
+    setMsg("");
+    try {
+      const res = await apiFetch(
+        `/api/research/runs/${encodeURIComponent(runId)}/stages/${encodeURIComponent(stageId)}`,
+        {
+          method: "POST",
+          headers: { ...hdrs(userLogin), ...csrfHeaders() },
+          body: JSON.stringify({ op }),
+        },
+      );
+      const data = await readJson<{ error?: string; stage?: { status?: string } }>(res);
+      setMsg(`${stageId}: ${data.stage?.status ?? "done"}.`);
+      await load();
+      onAfterAction?.();
+    } catch (err) {
+      setMsg(`${stageId} ${op} refused: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  if (!runId) return null;
+  return (
+    <DetailCard title="Stage control — feed → enrich → analyze → generate → deliver → evaluate">
+      <Stack gap="2">
+        {rows.length === 0 && <span className="ui-meta-sm">No stages recorded for this run yet.</span>}
+        {rows.map((row) => (
+          <Flex key={row.stageId} gap="2" align="center" wrap={true}>
+            <Badge tone={row.status === "failed" ? "danger" : row.status === "running" ? "info" : "neutral"} size="sm">
+              {row.status}
+            </Badge>
+            <span className="ui-mono">{row.stageId}</span>
+            {(STAGE_ACTIONS[row.status] ?? []).map((action) => (
+              <Button
+                key={action.op}
+                variant="secondary"
+                size="sm"
+                loading={busy === `${row.stageId}:${action.op}`}
+                disabled={busy !== null}
+                onClick={() => void act(row.stageId, action.op)}
+              >
+                {action.label}
+              </Button>
+            ))}
+          </Flex>
+        ))}
+        {msg && <Notice tone="info" density="compact" variant="strip" title="Stage control">{msg}</Notice>}
+      </Stack>
+    </DetailCard>
+  );
+}
+
+
 interface ResearchRunsPanelProps {
   activeEnv: "TEST" | "PROD";
   userLogin?: string;
@@ -439,6 +544,12 @@ export function ResearchRunsPanel({ activeEnv, userLogin, onSendPrompt }: Resear
         )}
       </Flex>
       {runMsg && <Notice tone="info">{runMsg}</Notice>}
+
+      <ResearchStageControl
+        runId={report?.runId ?? history[0]?.runId ?? null}
+        userLogin={userLogin}
+        onAfterAction={() => void loadHistory()}
+      />
 
       {showFilters && config && (
         <DetailCard title="Filters & thresholds — every run embeds the effective snapshot">
