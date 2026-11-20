@@ -8,6 +8,75 @@
 
 export type ResearchStorageMode = "durable" | "in-memory";
 
+/** Issue #5916 — the six research stages, in execution order. */
+export const RESEARCH_STAGE_KINDS = [
+  "feed",
+  "enrich",
+  "analyze",
+  "generate",
+  "deliver",
+  "evaluate",
+] as const;
+export type ResearchStageKind = (typeof RESEARCH_STAGE_KINDS)[number];
+
+/** Issue #5916 — the four execution-mode axes a stage may override. */
+export const EXECUTION_MODE_AXES = ["concurrency", "pacing", "delivery", "shape"] as const;
+export type ExecutionModeAxis = (typeof EXECUTION_MODE_AXES)[number];
+
+/**
+ * Issue #5916 — per-stage overrides, keyed by stage kind. Unset stages run
+ * the job's mode; nothing is inferred and no stage gets a different default.
+ */
+export type ResearchStageModes = Partial<
+  Record<ResearchStageKind, Partial<Record<ExecutionModeAxis, string>>>
+>;
+
+/**
+ * Issue #5916 — read the per-stage overrides from one config value
+ * (`RESEARCH_STAGE_MODES`, JSON). An unknown stage kind or axis refuses by
+ * name instead of being dropped: a typo must not silently keep the job mode.
+ */
+export function resolveResearchStageModes(
+  env?: Record<string, string | undefined>,
+): ResearchStageModes {
+  const raw = env?.RESEARCH_STAGE_MODES;
+  if (!raw || !raw.trim()) return {};
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error("RESEARCH_STAGE_MODES is not valid JSON; expected { <stage>: { <axis>: <value> } }.");
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("RESEARCH_STAGE_MODES must be an object keyed by research stage kind.");
+  }
+  const out: ResearchStageModes = {};
+  for (const [stage, value] of Object.entries(parsed as Record<string, unknown>)) {
+    if (!(RESEARCH_STAGE_KINDS as readonly string[]).includes(stage)) {
+      throw new Error(
+        `Unknown research stage "${stage}" in RESEARCH_STAGE_MODES. Expected one of: ${RESEARCH_STAGE_KINDS.join(", ")}`,
+      );
+    }
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new Error(`RESEARCH_STAGE_MODES.${stage} must be an object keyed by execution-mode axis.`);
+    }
+    const axes: Partial<Record<ExecutionModeAxis, string>> = {};
+    for (const [axis, mode] of Object.entries(value as Record<string, unknown>)) {
+      if (!(EXECUTION_MODE_AXES as readonly string[]).includes(axis)) {
+        throw new Error(
+          `Unknown execution-mode axis "${axis}" for research stage "${stage}". Expected one of: ${EXECUTION_MODE_AXES.join(", ")}`,
+        );
+      }
+      if (typeof mode !== "string" || !mode.trim()) {
+        throw new Error(`RESEARCH_STAGE_MODES.${stage}.${axis} must be a non-empty string.`);
+      }
+      axes[axis as ExecutionModeAxis] = mode;
+    }
+    out[stage as ResearchStageKind] = axes;
+  }
+  return out;
+}
+
 export interface ResearchJobConfig {
   /** Maximum wall-clock budget (ms) for one OODA analysis loop. */
   oodaBudgetMs: number;
