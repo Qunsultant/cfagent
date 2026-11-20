@@ -25,6 +25,13 @@ export interface ResearchJobConfig {
   storageMode: ResearchStorageMode;
 }
 
+/**
+ * Issue #5912 — the venue a run uses when it names none. E*TRADE is the
+ * historical provider; the selection is per run, the default is one config
+ * value so no surface hardcodes a broker id.
+ */
+export const DEFAULT_RESEARCH_BROKER_ID = "etrade";
+
 export const DEFAULT_RESEARCH_JOB_CONFIG: Readonly<ResearchJobConfig> = {
   oodaBudgetMs: 90_000,
   scheduleUtcHour: 21,
