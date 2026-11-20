@@ -1212,7 +1212,8 @@ export function RunDetail({
   };
   const runStageAction = async (
     stage: WorkflowRunStage,
-    operation: "rerun" | "stop" | "resume",
+    // Issue #5837 — cancel joins the engine's stage operations (cancelStage).
+    operation: "rerun" | "stop" | "resume" | "cancel",
   ) => {
     if (!stage.engineJobId) return;
     setStageActionError(null);
@@ -1382,6 +1383,16 @@ export function RunDetail({
                 title="Resume this stage from its checkpoint"
               >
                 Resume
+              </Button>
+              <Button
+                variant="secondary"
+                tone="subtle"
+                size="sm"
+                loading={stageActionBusy === `${stage.key}:cancel`}
+                onClick={() => void runStageAction(stage, "cancel")}
+                title="Cancel this stage — terminal; downstream stages do not run"
+              >
+                Cancel
               </Button>
             </>
           ) : null,
