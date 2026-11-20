@@ -15,6 +15,9 @@
  * Issue #5230 adds one more (value unchanged from the inline literal):
  * - marketplace ads list: 20 (`src/agents/routes/adsRevenueReferrals.ts`).
  *
+ * Issue #5611 adds one more (value unchanged from the inline literal):
+ * - audit list: default 50 (`src/agents/routes/audit.ts`).
+ *
  * NOT here, by design: top-up bounds (operator-set via the billing
  * policy, never a code default); refund windows/proration (the
  * PROPOSED_SEED_POLICY store seed — an open owner decision); prices
@@ -33,6 +36,8 @@ export interface CommercialDefaults {
   ledgerPaymentsDefaultLimit: number;
   /** Marketplace ads list: rows returned by the GET /ads fetch (20). */
   adsListLimit: number;
+  /** Audit list: rows returned when no `limit` query param is given (50). */
+  auditDefaultLimit: number;
 }
 
 export const COMMERCIAL_DEFAULTS: CommercialDefaults = raw as CommercialDefaults;

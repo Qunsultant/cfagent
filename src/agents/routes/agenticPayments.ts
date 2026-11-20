@@ -872,8 +872,27 @@ export async function handleAgenticPaymentsRoutes(
       const entries = await operatorsAdapter.listOperators();
       storeOperatorLogins = new Set(entries.map((entry) => entry.login));
     }
-  } catch {
+  } catch (err) {
     storeOperatorLogins = new Set();
+    // #5611 (G-9): the degrade is LOUD — structured log + audit
+    // record, behavior unchanged (env-only, no lockout, no 500).
+    // The audit goes through this file's funnel (ctx.audit, agent
+    // "payments") — the IAAA chain (recordAuditEvent) requires a
+    // non-empty tenantId and none is known at handler setup, so
+    // recording there would fabricate one. Precedents: the
+    // config-error path (resolveAgenticRouteMode) and the ledger
+    // gate (payments_ledger.gate) audit the same way. The funnel
+    // is void/best-effort, so a failed audit write cannot change
+    // the degrade.
+    structuredLog.error("agenticPayments.store_operator_read_failed", {
+      message: `[payments] store operator read failed — degrading to env-only operators: ${err instanceof Error ? err.message : String(err)}`,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    ctx.audit("payments.store_operator_read_failed", "payments", {
+      error: err instanceof Error ? err.message : String(err),
+      login: commercialLogin(),
+      envOperatorCount: envOperators.size,
+    });
   }
   const isStoreOperator = (login: string | null): boolean => {
     if (!login) return false;

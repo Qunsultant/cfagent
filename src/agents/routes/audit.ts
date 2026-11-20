@@ -32,6 +32,7 @@ import {
   validateStrictAuditWrite,
   type RestTwinsScopedModes,
 } from "../../config/restTwinsModes";
+import { COMMERCIAL_DEFAULTS } from "../../config/commercialDefaults";
 import { settingReadFromSql } from "../../services/screeningFlags";
 import {
   AUDIT_CHAIN_LAST_VERIFICATION_KEY,
@@ -241,7 +242,10 @@ export async function handleAuditRoutes(
   // slices to zero rows (pinned by audit_routes_extraction.test.ts).
   if (path.endsWith("/audit") && request.method === "GET") {
     try {
-      const limitParam = Number(url.searchParams.get("limit") || 50);
+      // #5611 (G-14): the default limit reads from COMMERCIAL_DEFAULTS;
+      // the value stays 50, only its home moved. `||` is preserved so
+      // the empty-string param behaves exactly as before.
+      const limitParam = Number(url.searchParams.get("limit") || COMMERCIAL_DEFAULTS.auditDefaultLimit);
       const limit = Math.max(1, Math.min(100, limitParam));
       const offset = Math.max(0, Number(url.searchParams.get("offset") || 0) || 0);
       const type = url.searchParams.get("type") ?? url.searchParams.get("event_type") ?? undefined;
