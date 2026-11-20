@@ -23,6 +23,7 @@ import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const composerPath = join(here, "..", "src", "client", "chat", "AgentChatTabContent.tsx");
+const cssPath = join(here, "..", "src", "client", "components", "ui", "primitives.css");
 
 function composerForm(): string {
   const src = readFileSync(composerPath, "utf8");
@@ -34,12 +35,13 @@ function composerForm(): string {
 }
 
 describe("Chat composer full width (#3230)", () => {
-  it("the composer Input carries a flex-growing class on its Fluent root", () => {
+  it("the composer input carries a flex-growing class (#5843: tokens-only, no Griffel)", () => {
     const src = readFileSync(composerPath, "utf8");
-    expect(src).toContain("makeStyles");
-    expect(src).toMatch(/composerInput:\s*\{\s*flexGrow:\s*1,\s*minWidth:\s*0,/);
+    expect(src).toContain('composerInput: "ui-chat-composer-input"');
     const form = composerForm();
-    expect(form).toContain("<Input");
-    expect(form).toMatch(/className=\{[^}]*composerInput[^}]*\}/);
+    expect(form).toContain("<TextInput");
+    expect(form).toMatch(/className=\{composerStyles\.composerInput\}/);
+    const css = readFileSync(cssPath, "utf8");
+    expect(css).toMatch(/\.ui-chat-composer-input\s*\{[^}]*flex-grow:\s*1[^}]*min-width:\s*0/);
   });
 });
