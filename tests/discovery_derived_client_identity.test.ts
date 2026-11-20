@@ -58,7 +58,7 @@ const NVDA_CHAIN: ETradeOptionChain = {
   symbol: "NVDA",
   underlyingPrice: 130,
   quoteTime: Date.now(),
-  selectedExpiry: { year: 2026, month: 11, day: 20 },
+  selectedExpiry: { year: 2027, month: 6, day: 18 },
   pairs: [
     {
       call: {
