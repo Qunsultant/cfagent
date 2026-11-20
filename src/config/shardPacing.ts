@@ -1,7 +1,7 @@
 /**
- * @deprecated Issue #5833 (leftover from #4780) — unreferenced in `src/`.
- * Retained on disk per Policy Gate §22 no-deletion rule; feed pacing now runs
- * on journaled workflow steps (#4780). Do not add new importers.
+ * @deprecated Issue #5833 (leftover from #4780) — unreferenced in `src/`;
+ * superseded by src/services/optionsChainPipelineJobs.ts (journaled workflow
+ * steps). Retained on disk per Policy Gate §22 no-deletion rule.
  *
  * Issue #4424 — shard-chain dispatch pacing, the single source of truth.
  *
