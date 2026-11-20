@@ -29,6 +29,12 @@
 #
 # EXIT: 0 = Tier 1 green; non-zero = stop, fix, re-run. Never bypass a failure
 # by publishing anyway; the merge gate is the queue plus required checks.
+#
+# Node heap: typecheck OOMs at ~2 GB with Node's default heap on machines
+# like this VM (probe 2026-11-19, #5907 follow-up to #4082), so the script
+# sets its own heap for its child processes (npm/vitest/tsc) instead of
+# relying on the caller's environment.
+export NODE_OPTIONS="--max-old-space-size=4096"
 set -uo pipefail
 
 cd "$(dirname "$0")/.."
