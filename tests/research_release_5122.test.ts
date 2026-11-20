@@ -6,10 +6,18 @@ import {
 } from "../src/workflows/researchScreenEngine";
 
 describe("Issue #5122 (Sub-issue 8 of #5109) — Research Release & Operations", () => {
-  it("registers research_engine_cutover flag and supports rollback when disabled", async () => {
+  it("runs the engine by default; only the explicit rollback flag disables it", async () => {
     expect(ALL_FEATURE_FLAGS).toContain("research_engine_cutover");
-    expect(await isResearchEngineCutoverEnabled({ isEnabled: async () => true })).toBe(true);
-    expect(await isResearchEngineCutoverEnabled({ isEnabled: async () => false })).toBe(false);
+    expect(ALL_FEATURE_FLAGS).toContain("research_engine_direct_rollback");
+    // Ordinary config — including the old cutover flag being off — cannot
+    // turn the engine off (#5915).
+    expect(await isResearchEngineCutoverEnabled({ isEnabled: async () => false })).toBe(true);
+    // The named emergency lever is the only way to the direct path.
+    expect(
+      await isResearchEngineCutoverEnabled({
+        isEnabled: async (flag) => flag === "research_engine_direct_rollback",
+      }),
+    ).toBe(false);
   });
 
   it("emits stageVisibility with start/end/duration for Workflow Runs", async () => {
