@@ -25,6 +25,8 @@ import {
   type ScreenerCompletedEvent,
   type ScreenerFailedEvent,
 } from "./screenerEvents";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
 import { getServiceUserLogin } from "../security/serviceIdentity";
 import { ETradeSlackTradingService } from "../trading";
 import { ETradeEmailTradingService } from "../trading";
@@ -264,20 +266,32 @@ export async function fetchScreenerPdf(
   pdfStatus?: "generated" | "failed" | "skipped",
   pdfError?: string
 ): Promise<ScreenerPdf | null> {
+  // #3515 S3 batch 9 — env-wired logger: the sink is built from the
+  // request's env so the events reach the Analytics Engine
+  // `observability` dataset (never an empty-env sink, #5587).
+  const log = createStructuredLogger(createObservabilitySink(deps.env), {
+    component: "events/screenerPublishers",
+  });
   try {
     const ns = (deps.env as any).SCREENER_AGENT;
     if (!ns) {
-      console.warn("[ScreenerPublishers] SCREENER_AGENT binding missing — cannot fetch PDF.");
+      log.warn("screenerPublishers.screener_agent_binding_missing", {
+        message: "[ScreenerPublishers] SCREENER_AGENT binding missing — cannot fetch PDF.",
+      });
       return null;
     }
     // Issue #822: if PDF generation failed, log the reason and do NOT fall back
     // to a stale PDF. The failure is already recorded in the result.
     if (pdfStatus === "failed") {
-      console.error(`[ScreenerPublishers] PDF generation failed for this run: ${pdfError || "unknown"}. Skipping attachment (not falling back to stale).`);
+      log.error("screenerPublishers.pdf_generation_failed", {
+        message: `[ScreenerPublishers] PDF generation failed for this run: ${pdfError || "unknown"}. Skipping attachment (not falling back to stale).`,
+      });
       return null;
     }
     if (!pdfKey) {
-      console.warn("[ScreenerPublishers] No pdfKey on event — skipping PDF attachment.");
+      log.warn("screenerPublishers.pdf_key_missing", {
+        message: "[ScreenerPublishers] No pdfKey on event — skipping PDF attachment.",
+      });
       return null;
     }
     // Issue #1185: the bare "default" instance name belongs to the
@@ -289,7 +303,10 @@ export async function fetchScreenerPdf(
     const agent = actorGateway.stub<ScreenerPdfStub>(ns, agentName);
     return await agent.getPdfByKey(pdfKey);
   } catch (err) {
-    console.warn("[ScreenerPublishers] fetchScreenerPdf failed:", err instanceof Error ? err.message : String(err));
+    log.warn("screenerPublishers.fetch_screener_pdf_failed", {
+      message: "[ScreenerPublishers] fetchScreenerPdf failed:",
+      error: err instanceof Error ? err.message : String(err),
+    });
     return null;
   }
 }
@@ -304,6 +321,10 @@ async function deliverPdfToSlack(
   event: ScreenerCompletedEvent,
   plainText: string
 ): Promise<void> {
+  // #3515 S3 batch 9 — env-wired logger (see fetchScreenerPdf).
+  const log = createStructuredLogger(createObservabilitySink(deps.env), {
+    component: "events/screenerPublishers",
+  });
   const botToken = deps.env.SLACK_BOT_TOKEN;
   const channel = (deps.env as any).SCREENER_SLACK_CHANNEL || (deps.env as any).SLACK_CHANNEL;
   const reportUrl = event.pdfKey
@@ -320,7 +341,10 @@ async function deliverPdfToSlack(
           channel,
         } as any);
       } catch (err) {
-        console.warn("[ScreenerPublishers] Slack PDF link failed:", err instanceof Error ? err.message : String(err));
+        log.warn("screenerPublishers.slack_pdf_link_failed", {
+          message: "[ScreenerPublishers] Slack PDF link failed:",
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
     }
     return;
@@ -366,7 +390,10 @@ async function deliverPdfToSlack(
     const doneData = (await complete.json()) as any;
     if (!doneData.ok) throw new Error(doneData.error || "completeUploadExternal failed");
   } catch (err) {
-    console.warn("[ScreenerPublishers] Slack PDF upload failed:", err instanceof Error ? err.message : String(err));
+    log.warn("screenerPublishers.slack_pdf_upload_failed", {
+      message: "[ScreenerPublishers] Slack PDF upload failed:",
+      error: err instanceof Error ? err.message : String(err),
+    });
     // Fallback: link.
     try {
       const slack = new ETradeSlackTradingService(deps.env, deps.orm, deps.userLogin);
@@ -390,6 +417,11 @@ async function deliverPdfToEmail(
 ): Promise<void> {
   const { emailTo, allowed } = await resolveAndVerifyPublisherEmailTo(deps, event);
   if (!emailTo || !allowed) return;
+  // #3515 S3 batch 9 — env-wired logger, built after the guard so
+  // no-op calls never construct a sink (batch-6 core.ts precedent).
+  const log = createStructuredLogger(createObservabilitySink(deps.env), {
+    component: "events/screenerPublishers",
+  });
   try {
     let base64 = "";
     const chunk = 8192;
@@ -405,7 +437,10 @@ async function deliverPdfToEmail(
       { fileName: pdf.fileName, contentType: "application/pdf", contentBase64: btoa(base64) }
     );
   } catch (err) {
-    console.warn("[ScreenerPublishers] Email PDF delivery failed:", err instanceof Error ? err.message : String(err));
+    log.warn("screenerPublishers.email_pdf_delivery_failed", {
+      message: "[ScreenerPublishers] Email PDF delivery failed:",
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 }
 
@@ -537,6 +572,10 @@ async function publishCompleted(
   deps: ScreenerPublisherDeps,
   event: ScreenerCompletedEvent
 ): Promise<void> {
+  // #3515 S3 batch 9 — env-wired logger (see fetchScreenerPdf).
+  const log = createStructuredLogger(createObservabilitySink(deps.env), {
+    component: "events/screenerPublishers",
+  });
   const { text, html } = formatOpportunities(event);
   const plainText = text.replace(/\*/g, "");
 
@@ -570,7 +609,10 @@ async function publishCompleted(
       } : {}),
     });
     if (!slackDelivery.ok) {
-      console.warn("[ScreenerPublishers] Slack delivery failed:", slackDelivery.error);
+      log.warn("screenerPublishers.slack_delivery_failed", {
+        message: "[ScreenerPublishers] Slack delivery failed:",
+        error: slackDelivery.error,
+      });
     }
   }
 
@@ -582,9 +624,11 @@ async function publishCompleted(
   if (emailTo && emailAllowed) {
     const deliveryConfig = checkScreenerDeliveryConfig(deps.env);
     if (!deliveryConfig.emailConfigured) {
-      console.warn(
-        `[ScreenerPublishers] Email delivery skipped for ${event.universe || event.sector}: ${deliveryConfig.emailMissingReason}`
-      );
+      log.warn("screenerPublishers.email_delivery_skipped", {
+        message: `[ScreenerPublishers] Email delivery skipped for ${event.universe || event.sector}: ${deliveryConfig.emailMissingReason}`,
+        universe: event.universe || event.sector,
+        reason: deliveryConfig.emailMissingReason,
+      });
     } else {
       let emailOk = false;
       if (cfpay) {
@@ -604,7 +648,10 @@ async function publishCompleted(
         }
         emailOk = r.ok;
         if (!r.ok) {
-          console.warn("[ScreenerPublishers] cfpay Email failed, falling back to local:", r.error);
+          log.warn("screenerPublishers.cfpay_email_failed", {
+            message: "[ScreenerPublishers] cfpay Email failed, falling back to local:",
+            error: r.error,
+          });
         }
       }
       if (!emailOk) {
@@ -625,10 +672,15 @@ async function publishCompleted(
           // to be dropped silently — a missing EMAIL binding looked
           // exactly like a delivered email. Name it.
           if (!sent) {
-            console.warn("[ScreenerPublishers] Local email send failed (env.EMAIL binding is not configured or send failed) — email not delivered.");
+            log.warn("screenerPublishers.local_email_send_failed", {
+              message: "[ScreenerPublishers] Local email send failed (env.EMAIL binding is not configured or send failed) — email not delivered.",
+            });
           }
         } catch (err) {
-          console.warn("[ScreenerPublishers] Email publish failed:", err instanceof Error ? err.message : String(err));
+          log.warn("screenerPublishers.email_publish_failed", {
+            message: "[ScreenerPublishers] Email publish failed:",
+            error: err instanceof Error ? err.message : String(err),
+          });
         }
       }
     }
@@ -652,7 +704,10 @@ async function publishCompleted(
         webhookUrl
       );
     } catch (err) {
-      console.warn("[ScreenerPublishers] Webhook publish failed:", err instanceof Error ? err.message : String(err));
+      log.warn("screenerPublishers.webhook_publish_failed", {
+        message: "[ScreenerPublishers] Webhook publish failed:",
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 }
@@ -661,6 +716,10 @@ async function publishFailed(
   deps: ScreenerPublisherDeps,
   event: ScreenerFailedEvent
 ): Promise<void> {
+  // #3515 S3 batch 9 — env-wired logger (see fetchScreenerPdf).
+  const log = createStructuredLogger(createObservabilitySink(deps.env), {
+    component: "events/screenerPublishers",
+  });
   const triggerLabel = event.trigger === "manual" ? "Manual" : "Scheduled";
   const text = `⚠️ Market Screen FAILED — ${event.universe || "TECH"}${event.sector && event.sector !== "ALL" ? ` · ${event.sector}` : ""} · ${triggerLabel}\nError: ${event.error}\n_Time: ${event.timestamp}_`;
 
@@ -692,7 +751,10 @@ async function publishFailed(
       scheduleId: event.scheduleId,
       recipientBinding: event.recipientBinding,
     });
-    if (!result.ok) console.warn("[ScreenerPublishers] Slack failure-notify failed:", result.error);
+    if (!result.ok) log.warn("screenerPublishers.slack_failure_notify_failed", {
+      message: "[ScreenerPublishers] Slack failure-notify failed:",
+      error: result.error,
+    });
   }
   attempted = attempted || slackConfigured;
 
@@ -705,21 +767,31 @@ async function publishFailed(
       // silently drop the failure notice.
       const deliveryConfig = checkScreenerDeliveryConfig(deps.env);
       if (!deliveryConfig.emailConfigured) {
-        console.warn(
-          `[ScreenerPublishers] Email failure-notify skipped for ${event.universe || "TECH"}: ${deliveryConfig.emailMissingReason}`
-        );
+        log.warn("screenerPublishers.email_failure_notify_skipped", {
+          message: `[ScreenerPublishers] Email failure-notify skipped for ${event.universe || "TECH"}: ${deliveryConfig.emailMissingReason}`,
+          universe: event.universe || "TECH",
+          reason: deliveryConfig.emailMissingReason,
+        });
       } else if (cfpay) {
         const r = await cfpaySendEmail(cfpay, emailTo, `⚠️ Market Screen FAILED — ${event.universe || "TECH"}`, text);
-        if (!r.ok) console.warn("[ScreenerPublishers] cfpay Email failure-notify failed:", r.error);
+        if (!r.ok) log.warn("screenerPublishers.cfpay_email_failure_notify_failed", {
+          message: "[ScreenerPublishers] cfpay Email failure-notify failed:",
+          error: r.error,
+        });
       } else {
         try {
           const email = new ETradeEmailTradingService(deps.env, deps.orm, deps.userLogin);
           const sent = await email.sendOutboundEmail(emailTo, `⚠️ Market Screen FAILED — ${event.universe || "TECH"}`, `<p>${text}</p>`, text);
           if (!sent) {
-            console.warn("[ScreenerPublishers] Local email failure-notify failed (env.EMAIL binding is not configured or send failed) — notice not delivered.");
+            log.warn("screenerPublishers.local_email_failure_notify_failed", {
+              message: "[ScreenerPublishers] Local email failure-notify failed (env.EMAIL binding is not configured or send failed) — notice not delivered.",
+            });
           }
         } catch (err) {
-          console.warn("[ScreenerPublishers] Email failure-notify failed:", err instanceof Error ? err.message : String(err));
+          log.warn("screenerPublishers.email_failure_notify_failed", {
+            message: "[ScreenerPublishers] Email failure-notify failed:",
+            error: err instanceof Error ? err.message : String(err),
+          });
         }
       }
     }
@@ -741,7 +813,10 @@ async function publishFailed(
           webhookUrl
         );
       } catch (err) {
-        console.warn("[ScreenerPublishers] Webhook failure-notify failed:", err instanceof Error ? err.message : String(err));
+        log.warn("screenerPublishers.webhook_failure_notify_failed", {
+          message: "[ScreenerPublishers] Webhook failure-notify failed:",
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
     }
   }
@@ -768,9 +843,12 @@ async function publishFailed(
       // Issue #1999 (D2): #424 put this audit on the record so the
       // skip is diagnosable — a lost insert must warn, not
       // re-introduce the exact silence #424 fixed.
-      console.warn(
-        `[screener-publishers] Audit insertion failed (type=screener.failure_notify_skipped, login=${deps.userLogin}): ${err instanceof Error ? err.message : String(err)}`,
-      );
+      log.warn("screenerPublishers.audit_insertion_failed", {
+        message: `[screener-publishers] Audit insertion failed (type=screener.failure_notify_skipped, login=${deps.userLogin}): ${err instanceof Error ? err.message : String(err)}`,
+        type: "screener.failure_notify_skipped",
+        login: deps.userLogin,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 }
