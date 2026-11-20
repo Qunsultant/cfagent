@@ -29,10 +29,12 @@ describe("#5025 schemaComponent barrel & membership store naming", () => {
     // D1 225 → 229, remainder 57 → 61.
     // #4204 adds migration 0073 (D1 job_run_records recent-read index):
     // D1 229 → 230.
-    expect(D1_CATALOGUE_ENTRIES.length).toBe(230);
+    // #5865 adds migration 0074 (definition history) to both residencies:
+    // D1 230 → 232 (table + backfill), DO 107 → 108.
+    expect(D1_CATALOGUE_ENTRIES.length).toBe(232);
     expect(ORM_CATALOGUE_ENTRIES.length).toBe(26);
     expect(REMAINDER_CATALOGUE_ENTRIES.length).toBe(61);
-    expect(DO_CATALOGUE_ENTRIES.length).toBe(107);
+    expect(DO_CATALOGUE_ENTRIES.length).toBe(108);
   });
 
   it("exposes createSessionMembershipStore as an alias for createKvMembershipStore", () => {

@@ -12,7 +12,7 @@
  *    value, even whitespace — fails this pin. Migrations are immutable;
  *    a new migration adds one hash line here.
  *  - D1_MIGRATION_STATEMENT_COUNTS: per-version statement counts.
- *  - D1_SEED_STATEMENTS: the 11 seed-DML statements, exact text.
+ *  - D1_SEED_STATEMENTS: the 12 seed-DML statements, exact text.
  *    Seeds do not change the schema model, so the equality pin cannot
  *    see them — this list is their anchor.
  *  - The expected-model fixture
@@ -139,7 +139,7 @@ const D1_MIGRATION_SQL_SHA256: Record<number, string> = {
   71: "c19368069237661aadf7af1f6a8eb015f12b705deed9f59af621482d896ea4bf",
   72: "9786cf1c24503046615b3bba4270cd79732e70d8127d8c17c03e7c190b0987f7",
   73: "6048450ab44e1b4f8e39ee9b428a42f23ff7f2a7385d350f52544fba8793a634",
-  74: "dbc0c1b36651ac77bde2bdcffac483c0637ddb51696835084712e3669b3578d8",
+  74: "7b53a58d4917e8118af27ed53ff5611a9b6846b69499959de5c61b5fa9c51c18",
 };
 
 /** Per-version statement counts, measured from the base runner. */
@@ -217,7 +217,7 @@ const D1_MIGRATION_STATEMENT_COUNTS: Record<number, number> = {
   71: 2,
   72: 2,
   73: 1,
-  74: 1,
+  74: 2,
 };
 
 /** The 11 seed-DML statements, exact text, measured from the base runner. */
@@ -232,7 +232,8 @@ const D1_SEED_STATEMENTS: string[] = [
   "UPDATE agent_subscription_plans SET\n  product_id = 'prod-sub-' || lower(replace(trim(name), ' ', '-')),\n  segment = 'default',\n  version = (\n    SELECT COUNT(*) FROM agent_subscription_plans AS p2\n    WHERE 'prod-sub-' || lower(replace(trim(p2.name), ' ', '-')) = 'prod-sub-' || lower(replace(trim(agent_subscription_plans.name), ' ', '-'))\n      AND (p2.created_at_ms < agent_subscription_plans.created_at_ms OR (p2.created_at_ms = agent_subscription_plans.created_at_ms AND p2.id <= agent_subscription_plans.id))\n  ),\n  effective_from_ms = created_at_ms + (\n    SELECT COUNT(*) FROM agent_subscription_plans AS p2\n    WHERE 'prod-sub-' || lower(replace(trim(p2.name), ' ', '-')) = 'prod-sub-' || lower(replace(trim(agent_subscription_plans.name), ' ', '-'))\n      AND (p2.created_at_ms < agent_subscription_plans.created_at_ms OR (p2.created_at_ms = agent_subscription_plans.created_at_ms AND p2.id < agent_subscription_plans.id))\n  ),\n  effective_to_ms = NULL,\n  billing_period = CASE WHEN period_days = 365 THEN 'annual' ELSE 'monthly' END,\n  features_json = NULL,\n  stripe_price_id = NULL",
   "INSERT INTO agent_price_catalogue (id, family, price_usd, updated_at_ms, approval_status, approved_by, approved_at_ms, product_id, segment, version, effective_from_ms, effective_to_ms)\n  SELECT 'cat-' || family || '-default-v1', family, price_usd, updated_at_ms, approval_status, approved_by, approved_at_ms, 'prod-per-run-' || family, 'default', 1, updated_at_ms, NULL\n  FROM agent_price_catalogue_legacy",
   "UPDATE agent_products SET rank = 1 WHERE id = 'prod-free'",
-  "INSERT OR IGNORE INTO agent_referral_code_rules (id, product_id, issuer, runs_per_code, reusable, expiry_days, attribution_mode, max_redemptions_per_code, max_redemptions_per_login, global_cap, redemption_count, active, created_at_ms, updated_at_ms)\n  VALUES\n    ('coderule-seed-prod-per-run-stock', 'prod-per-run-stock', 'platform_admin', 5, 0, 30, 'ledger', 1, 1, NULL, 0, 0, 0, 0),\n    ('coderule-seed-prod-per-run-goal', 'prod-per-run-goal', 'platform_admin', 5, 0, 30, 'ledger', 1, 1, NULL, 0, 0, 0, 0),\n    ('coderule-seed-prod-per-run-options', 'prod-per-run-options', 'platform_admin', 5, 0, 30, 'ledger', 1, 1, NULL, 0, 0, 0, 0),\n    ('coderule-seed-prod-per-run-strategy', 'prod-per-run-strategy', 'platform_admin', 5, 0, 30, 'ledger', 1, 1, NULL, 0, 0, 0, 0)"
+  "INSERT OR IGNORE INTO agent_referral_code_rules (id, product_id, issuer, runs_per_code, reusable, expiry_days, attribution_mode, max_redemptions_per_code, max_redemptions_per_login, global_cap, redemption_count, active, created_at_ms, updated_at_ms)\n  VALUES\n    ('coderule-seed-prod-per-run-stock', 'prod-per-run-stock', 'platform_admin', 5, 0, 30, 'ledger', 1, 1, NULL, 0, 0, 0, 0),\n    ('coderule-seed-prod-per-run-goal', 'prod-per-run-goal', 'platform_admin', 5, 0, 30, 'ledger', 1, 1, NULL, 0, 0, 0, 0),\n    ('coderule-seed-prod-per-run-options', 'prod-per-run-options', 'platform_admin', 5, 0, 30, 'ledger', 1, 1, NULL, 0, 0, 0, 0),\n    ('coderule-seed-prod-per-run-strategy', 'prod-per-run-strategy', 'platform_admin', 5, 0, 30, 'ledger', 1, 1, NULL, 0, 0, 0, 0)",
+  "INSERT OR IGNORE INTO job_pipeline_definition_versions (id, job_id, version, definition_json, updated_at) SELECT job_id || ':' || version, job_id, version, definition_json, updated_at FROM job_pipeline_definitions"
 ];
 
 const FIXTURE_PATH = path.join(
@@ -257,16 +258,16 @@ function expectedD1Model(): SchemaModel {
 }
 
 describe("D1 catalogue — migrationRunner delegates (#4282 P1)", () => {
-  it("catalogues all 231 runner statements: 220 schema + 11 seed", () => {
+  it("catalogues all 232 runner statements: 220 schema + 12 seed", () => {
     const catalogue = buildD1Catalogue();
     // #5086 adds migration 0070 (otel_config_overrides table): 224 → 225.
     // #4767 adds migrations 0071/0072 (4 D1 ALTERs): 225 → 229.
     // #4204 adds migration 0073 (D1 job_run_records recent-read index): 229 → 230.
-    // #5865 adds migration 0074 (definition-version history table): 230 → 231.
-    expect(D1_CATALOGUE_ENTRIES.length).toBe(231);
-    expect(catalogue.size()).toBe(231);
+    // #5865 adds migration 0074 (definition history: table + backfill): 230 → 232.
+    expect(D1_CATALOGUE_ENTRIES.length).toBe(232);
+    expect(catalogue.size()).toBe(232);
     expect(catalogue.byKind("schema").length).toBe(220);
-    expect(catalogue.byKind("seed").length).toBe(11);
+    expect(catalogue.byKind("seed").length).toBe(12);
     const verbs = new Map<string, number>();
     const classify = (statement: string): string => {
       const upper = statement.trim().toUpperCase();
@@ -295,7 +296,7 @@ describe("D1 catalogue — migrationRunner delegates (#4282 P1)", () => {
     expect(verbs.get("CREATE UNIQUE INDEX")).toBe(7);
     expect(verbs.get("ALTER TABLE")).toBe(56);
     expect(verbs.get("DROP TABLE")).toBe(1);
-    expect(verbs.get("INSERT OR IGNORE")).toBe(7);
+    expect(verbs.get("INSERT OR IGNORE")).toBe(8);
     expect(verbs.get("INSERT INTO")).toBe(1);
     expect(verbs.get("UPDATE")).toBe(3);
   });

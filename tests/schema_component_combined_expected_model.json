@@ -9230,6 +9230,36 @@
         }
       ],
       "constraints": {}
+    },
+    "job_pipeline_definition_versions": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "pk": 1
+        },
+        {
+          "name": "job_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "version",
+          "type": "INTEGER",
+          "pk": 0
+        },
+        {
+          "name": "definition_json",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "pk": 0
+        }
+      ],
+      "constraints": {}
     }
   },
   "indexes": {

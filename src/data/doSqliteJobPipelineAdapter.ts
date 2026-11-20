@@ -343,8 +343,8 @@ export class DoSqliteJobPipelineStores implements JobPipelineStores {
       });
       // Issue #5865 — append-only history: the current pointer above can be
       // overwritten, this row cannot. Same version re-saved is a no-op
-      // (createOrReplace), so a retry never forks the history.
-      this.definitionVersionsRepo.createOrReplace({
+      // (createOrIgnore): first write wins, so a retry never forks or rewrites it.
+      this.definitionVersionsRepo.createOrIgnore({
         id: `${definition.jobId}:${definition.version}`,
         jobId: definition.jobId,
         version: definition.version,
