@@ -278,7 +278,21 @@ export function withRetrievedContentRule(system: string, hasRetrievedContent: bo
   return hasRetrievedContent ? `${system}\n\n${RETRIEVED_CONTENT_RULE}` : system;
 }
 
+/**
+ * Issue #5899: the ONE final-reply contract, applied to every orchestrator
+ * turn (stock copilot and generic alike) — never per-agent copies.
+ */
+export const FINAL_REPLY_CONTRACT = `Final-reply contract (applies to EVERY response, every agent):
+- After any tool call in a turn, finish with one complete final reply that reports the result of EVERY tool call you made — what was attempted, the concrete values returned (symbols, quantities, prices with source, IDs, links, statuses), and any failure or refusal stated plainly. Never omit a call or its failure.
+- Any count you state (orders, jobs, rows, symbols) MUST equal the number of calls/results actually made or returned; never announce a count or an action before the tool results exist.
+- Never end a turn on an announcement, a colon, or "Submitting…" — a reply that only promises work is incomplete.
+- If you ran out of steps or a tool is still pending, say exactly what completed, what did not, and what the user should do next.`;
+
 export function buildOrchestratorSystemPrompt(input: OrchestratorPromptInput): string {
+  return `${buildRoutePrompt(input)}\n\n${FINAL_REPLY_CONTRACT}`;
+}
+
+function buildRoutePrompt(input: OrchestratorPromptInput): string {
   if (input.stockCopilotMcpActive) {
     return buildStockCopilotSystemPrompt(input);
   }
