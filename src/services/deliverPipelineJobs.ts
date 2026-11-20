@@ -35,6 +35,9 @@
 import type { DataProviderId } from "../trading";
 import type { GeneratedDatasetStore } from "../data/generatedDatasetPorts";
 import type { DeliveryDatasetStore } from "../data/deliveryDatasetPorts";
+import type { GoalScreenCommand } from "../workflows/workflowPorts";
+import type { StockScreenDelivery } from "../workflows/stockScreenRunSpec";
+import type { StageChainConfig } from "../types";
 import {
   buildDeliverJobRegistry,
   buildDeliverStatus,
@@ -62,7 +65,7 @@ import type {
   JobStatusView,
 } from "./jobPipelineEngine";
 import { withSchedulePreserved } from "./jobPipelineEngine";
-import { JobStepRegistry, type JobStepContext } from "./jobPipelineSteps";
+import { JobStepRegistry, type JobStepContext, type JobStepResult } from "./jobPipelineSteps";
 
 /** The step name a deliver job's configuration references. */
 export const DELIVER_APPLY_STEP = "deliver.apply";
@@ -276,10 +279,47 @@ export interface DeliverStepDeps {
    * idiom). Absent ⇒ step params may carry "shards" instead.
    */
   shardsFor?: (jobId: string) => Promise<readonly string[]>;
+  /**
+   * Issue #5826 (#4437 slice 5) — the screener orchestrator sink
+   * for the screener application of this step (params
+   * `screener: true`). Absent ⇒ a screener application refuses
+   * DELIVER_SCREENER_SINK_NOT_CONFIGURED by name. The channel
+   * path never consults it; the screener application never
+   * consults the channel stores. Wired by the redefinition
+   * (slice 6, #5827) when the screener definition's deliver node
+   * moves onto this step; until then a test registry wires it.
+   */
+  screenerDeliverOutcome?: ScreenerDeliverOutcome;
 }
 
 /** The coded refusal every unwired deliver step fails its run with. */
 export const DELIVER_NOT_CONFIGURED = "DELIVER_JOB_NOT_CONFIGURED";
+
+/**
+ * Issue #5826 (#4437 slice 5) — the screener orchestrator sink:
+ * the door the screener's deliver stage calls (market outcomes
+ * through deliverWorkflowScreenOutcome, goal outcomes through
+ * deliverWorkflowGoalScreenOutcome, both behind the one door in
+ * src/services/screenerPipelineJobs.ts). The signature mirrors
+ * ScreenerStepDeps["deliverOutcome"] structurally; the parity
+ * test (tests/screener_deliver_generic_5826.test.ts) pins the two
+ * together by passing one fake sink to both.
+ */
+export type ScreenerDeliverOutcome = (
+  payload: unknown,
+  userLogin: string,
+  opts?: {
+    goalScreen?: GoalScreenCommand;
+    deliveryId?: string;
+    delivery?: StockScreenDelivery;
+    stageChain?: StageChainConfig;
+    chainId?: string;
+    canonicalReportId?: string;
+  },
+) => Promise<void>;
+
+/** The coded refusal a screener application fails with when the sink is unwired. */
+export const DELIVER_SCREENER_SINK_NOT_CONFIGURED = "DELIVER_SCREENER_SINK_NOT_CONFIGURED";
 export function deliverNotConfigured(jobId: string, missing: string): Error {
   return new Error(
     `${DELIVER_NOT_CONFIGURED}: deliver job "${jobId}" cannot run on this host — ${missing} is not wired. The run was refused rather than reading or writing through an unwired path.`,
@@ -298,6 +338,109 @@ function stringParam(value: unknown): string | null | undefined {
 }
 
 /**
+ * Issue #5826 — this unit's serve output: the hand-off itself,
+ * or its shard's entry of the per-shard map the engine hands a
+ * sharded unit (the bespoke screener step's priorFor idiom,
+ * src/services/screenerPipelineJobs.ts — the map read, not a
+ * rule, so it lives here rather than as a cross-module import).
+ */
+function screenerPriorFor(input: unknown, shardKey: string | null): Record<string, unknown> {
+  if (
+    shardKey &&
+    input !== null &&
+    typeof input === "object" &&
+    shardKey in (input as Record<string, unknown>)
+  ) {
+    return (input as Record<string, Record<string, unknown>>)[shardKey]!;
+  }
+  return input as Record<string, unknown>;
+}
+
+/** A scheduled duplicate passes through untouched from feed to deliver. */
+function isDupServeOutput(value: unknown): boolean {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    (value as { duplicate?: unknown }).duplicate === true
+  );
+}
+
+function requireScreenerUserLogin(params: Record<string, unknown>): string {
+  const login = params.userLogin;
+  if (typeof login !== "string" || !login.trim()) {
+    throw new Error(
+      "SCREENER_STEP_NO_USER: a screener step needs a userLogin param — refusing a screen with no owner (issue #1185).",
+    );
+  }
+  return login;
+}
+
+/**
+ * Issue #5826 — the screener application of deliver.apply: the
+ * screener's deliver stage as a generic deliver application.
+ * The params carry the screener hand-off contract (the same
+ * params the bespoke screener.deliver step reads); the serve
+ * output rides ctx.input. The sink call is the bespoke step's
+ * call, verbatim: the same payload, login, `workflow:<jobId>`
+ * delivery id (#3943 suppression key), goal/delivery/
+ * stage-chain threading, and canonical report id — and the
+ * bespoke deliver rules (duplicate pass-through, deliver-flag
+ * skip, a refusal recorded never a failed run).
+ */
+async function deliverScreenerOutcome(
+  ctx: JobStepContext,
+  deps: DeliverStepDeps,
+): Promise<JobStepResult> {
+  const sink = deps.screenerDeliverOutcome;
+  if (!sink) {
+    throw new Error(
+      `${DELIVER_SCREENER_SINK_NOT_CONFIGURED}: step "${DELIVER_APPLY_STEP}" names a screener delivery, but no screener orchestrator sink is wired on this host — refusing rather than delivering through an unwired door.`,
+    );
+  }
+  const prior = screenerPriorFor(ctx.input, ctx.shardKey);
+  if (isDupServeOutput(prior)) {
+    return { output: { ...prior, delivered: false, deliverSkipped: true } };
+  }
+  const params = ctx.params;
+  const userLogin = requireScreenerUserLogin(params);
+  if (params.deliver !== true) {
+    return { output: { ...prior, delivered: false, deliverSkipped: true } };
+  }
+  const goalScreen =
+    params.goalScreen && typeof params.goalScreen === "object"
+      ? (params.goalScreen as GoalScreenCommand)
+      : undefined;
+  let delivered = false;
+  let deliverError: string | undefined;
+  try {
+    await sink(prior.payload, userLogin, {
+      ...(goalScreen ? { goalScreen } : {}),
+      deliveryId: `workflow:${ctx.jobId}`,
+      ...(params.delivery && typeof params.delivery === "object"
+        ? { delivery: params.delivery as StockScreenDelivery }
+        : {}),
+      ...(params.stageChain && typeof params.stageChain === "object"
+        ? { stageChain: params.stageChain as StageChainConfig }
+        : {}),
+      chainId: ctx.jobId,
+      ...(typeof prior.reportId === "string" && prior.reportId
+        ? { canonicalReportId: prior.reportId }
+        : {}),
+    });
+    delivered = true;
+  } catch (err) {
+    // The flow's rule: a deliver refusal is recorded, never a
+    // failed run.
+    delivered = false;
+    deliverError = err instanceof Error ? err.message : String(err);
+  }
+  return {
+    output: { ...prior, delivered, ...(deliverError ? { deliverError } : {}) },
+    descriptor: `deliver ${ctx.jobId}: screener outcome ${delivered ? "delivered" : "not delivered"} via orchestrator sink`,
+  };
+}
+
+/**
  * Register the deliver step on a registry. Hosts compose the
  * FULL registry through createPipelineStepRegistry (in
  * enrichPipelineJobs.ts, which takes these deps as its fifth
@@ -309,6 +452,12 @@ export function registerDeliverStep(
   deps: DeliverStepDeps,
 ): void {
   registry.register(DELIVER_APPLY_STEP, async (ctx: JobStepContext) => {
+    // Issue #5826 — the screener application routes before the
+    // channel path: it names no deliver job and consults neither
+    // the generated nor the delivery store.
+    if (ctx.params.screener === true) {
+      return deliverScreenerOutcome(ctx, deps);
+    }
     const deliverJobId =
       typeof ctx.params.deliverJobId === "string" ? ctx.params.deliverJobId : "";
     const def = deps.registry.get(deliverJobId);
