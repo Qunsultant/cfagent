@@ -39,6 +39,7 @@ import {
 } from "../services/researchPipelineJobs";
 import {
   resolveResearchJobConfig,
+  resolveResearchStageModes,
   type ResearchStorageMode,
 } from "../config/researchJobConfig";
 import { researchEngineJobId } from "./researchDataPorts";
@@ -255,6 +256,8 @@ export async function dispatchResearchEngineRun(
   const definition = buildResearchJobDefinition(runId, {
     userLogin: input.userLogin,
     trigger: input.trigger,
+    // Issue #5916 — per-stage overrides come from one config value.
+    stageModes: resolveResearchStageModes(input.env),
   });
   await control.defineJob(definition as never);
 
