@@ -38,14 +38,14 @@
  * facade's 3 browse/count reads. The pin is RED on that base
  * by design.
  *
- * The facade's browse SELECT (ormFacade.ts getTableData) is the
- * one ruled point that does not move: its WHERE is dynamic
- * (lower(col) LIKE ? OR-joined across TEXT columns discovered
- * at runtime from PRAGMA, plus conditional ORDER BY and
- * interpolated LIMIT/OFFSET) — it cannot be a static template
- * or a repository entry, and per-table baked entries would be
- * ~44 near-duplicates fragile to DDL drift. It stays as the
- * facade's single remaining DML exec site (census 19 → 17).
+ * #4751 (P6c follow-on) moves the ruled point: the shared
+ * where-language now expresses the dynamic WHERE ($or of $like
+ * across the runtime-discovered TEXT columns), so the browse
+ * SELECT is a findMany-style call — getTableData is no longer
+ * an inline exec site, and the facade census moves 21 → 20.
+ * The per-table-baked-entries and whole-table-fetch alternatives
+ * stay ruled out (near-duplicates fragile to DDL drift; a full
+ * fetch would load the whole table to filter in JS).
  */
 import { DatabaseSync } from "node:sqlite";
 import { readFileSync } from "node:fs";

@@ -71,23 +71,35 @@ export class Repository<T extends Record<string, any>>
    * A plain object with at least one $lt/$lte/$gt/$gte key —
    * the `$` prefix is what distinguishes it from a plain
    * record value (which binds as equality, as before).
+   * #4751: `$like` joins the operator set (case-insensitive LIKE).
    */
   private static isOperatorValue(val: unknown): val is {
     $lt?: unknown;
     $lte?: unknown;
     $gt?: unknown;
     $gte?: unknown;
+    $like?: unknown;
   } {
     if (val === null || typeof val !== "object" || Array.isArray(val)) return false;
     const keys = Object.keys(val);
     return (
       keys.length > 0 &&
-      keys.every((k) => k === "$lt" || k === "$lte" || k === "$gt" || k === "$gte")
+      keys.every((k) => k === "$lt" || k === "$lte" || k === "$gt" || k === "$gte" || k === "$like")
     );
   }
 
-  /** #4385: one where language for findMany/count/updateWhere/deleteWhere. */
-  private buildWhereClause(where: RepositoryWhere): { clauses: string[]; args: unknown[] } {
+  /**
+   * #4385: one where language for findMany/count/updateWhere/deleteWhere.
+   * #4751: `$or` groups (each branch a conjunction, OR-joined as one
+   * parenthesised clause) and `$like` (case-insensitive LIKE — the
+   * column lowered by SQLite, the pattern lowered at bind time).
+   * Each `$or` branch is built by the same group builder, so the
+   * language is one language at every depth. An empty branch
+   * contributes nothing (it is skipped); a malformed `$or`
+   * (non-array, non-object branch) or a non-string `$like` throws
+   * rather than binding a shape the store cannot honour.
+   */
+  private buildWhereGroup(where: RepositoryWhere): { clauses: string[]; args: unknown[] } {
     const clauses: string[] = [];
     const args: unknown[] = [];
     const operators: Array<[string, string]> = [
@@ -98,6 +110,27 @@ export class Repository<T extends Record<string, any>>
     ];
     for (const [key, val] of Object.entries(where)) {
       if (val === undefined || val === null) continue;
+      if (key === "$or") {
+        if (!Array.isArray(val)) {
+          throw new Error(
+            `Repository where $or must be an array of where objects on ${this.tableName}`,
+          );
+        }
+        const groups: string[] = [];
+        for (const branch of val) {
+          if (branch === null || typeof branch !== "object" || Array.isArray(branch)) {
+            throw new Error(
+              `Repository where $or branch must be a where object on ${this.tableName}`,
+            );
+          }
+          const sub = this.buildWhereGroup(branch as RepositoryWhere);
+          if (sub.clauses.length === 0) continue;
+          groups.push(`(${sub.clauses.join(" AND ")})`);
+          args.push(...sub.args);
+        }
+        if (groups.length > 0) clauses.push(`(${groups.join(" OR ")})`);
+        continue;
+      }
       const col = this.toDbCol(key);
       if (Repository.isOperatorValue(val)) {
         for (const [op, sqlOp] of operators) {
@@ -106,12 +139,33 @@ export class Repository<T extends Record<string, any>>
           clauses.push(`${col} ${sqlOp} ?`);
           args.push(typeof opVal === "boolean" ? (opVal ? 1 : 0) : opVal);
         }
+        const likeVal = (val as Record<string, unknown>)["$like"];
+        if (likeVal !== undefined && likeVal !== null) {
+          if (typeof likeVal !== "string") {
+            throw new Error(
+              `Repository where $like pattern must be a string on ${this.tableName}.${key}`,
+            );
+          }
+          // #4751: case-insensitive LIKE — the column is lowered
+          // by SQLite, the pattern is lowered at bind time, so
+          // the emitted shape is `lower(col) LIKE ?` (the shape
+          // the pre-#4751 browse query used, and the shape the
+          // test double understands). A pattern the caller already
+          // lowered binds unchanged.
+          clauses.push(`lower(${col}) LIKE ?`);
+          args.push(likeVal.toLowerCase());
+        }
         continue;
       }
       clauses.push(`${col} = ?`);
       args.push(typeof val === "boolean" ? (val ? 1 : 0) : val);
     }
     return { clauses, args };
+  }
+
+  /** #4385: one where language for findMany/count/updateWhere/deleteWhere. */
+  private buildWhereClause(where: RepositoryWhere): { clauses: string[]; args: unknown[] } {
+    return this.buildWhereGroup(where);
   }
 
   /** #4385: drain a write cursor, returning its rowsWritten when reported. */
@@ -150,6 +204,11 @@ export class Repository<T extends Record<string, any>>
 
     const query = `SELECT * FROM ${this.tableName} ${whereClause} ${orderClause} ${limitClause} ${offsetClause}`.trim();
     const rows = Array.from(this.sql.exec(query, ...args)) as any[];
+    // #4751: a raw read returns storage rows unmapped — the table
+    // browser's contract (byte-identical to the inline SELECT it
+    // replaces, including numeric is_* values the record mapping
+    // would coerce to booleans).
+    if (options.raw) return rows as T[];
     return rows.map((r) => this.fromDbRow(r));
   }
 

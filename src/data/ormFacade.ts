@@ -64,7 +64,8 @@ import {
   DoSqliteMessageAdapter,
   DoSqliteTransactionLedgerAdapter,
 } from "./doSqliteOrmAdapters";
-import type { RepositoryPort } from "./repositoryPorts";
+import { Repository } from "./ormRepositoryCore";
+import type { RepositoryPort, RepositoryWhere } from "./repositoryPorts";
 import type { MessagePort } from "./messagePorts";
 import type { EventLogPort } from "./eventLogPorts";
 import type { MemoryPort } from "./memoryPorts";
@@ -506,23 +507,13 @@ export class DatabaseORM {
     const offset = Math.max(options.offset || 0, 0);
 
     // #4386: the count is a parameterized operation entry (see
-    // listTables). The browse SELECT below stays inline: its
-    // WHERE is dynamic (lower(col) LIKE ? OR-joined across TEXT
-    // columns discovered at runtime from PRAGMA, plus conditional
-    // ORDER BY and interpolated LIMIT/OFFSET) — it cannot be a
-    // static template or a repository entry, and per-table baked
-    // entries would be ~44 near-duplicates fragile to DDL drift.
-    // Recorded on #4386 as the one ruled point that does not
-    // move; the census pins the facade at 17 exec sites.
+    // listTables).
     const total = executeDoDml<number>(
       DO_DML_CATALOGUE,
       this.sql,
       `dml.do.${cleanTable}.count`,
       { table: cleanTable },
     );
-
-    let query = `SELECT * FROM ${cleanTable}`;
-    const args: unknown[] = [];
 
     // #1968: the column inventory is read for every browse, not just for
     // search — a table with a created_at column reads newest-first, so a
@@ -534,24 +525,31 @@ export class DatabaseORM {
     const infoRaw = Array.from(this.sql.exec(`PRAGMA table_info(${cleanTable})`)) as Array<{ name: string; type: string }>;
     const hasCreatedAt = infoRaw.some((c) => c.name === "created_at");
 
+    // #4751: the browse SELECT runs as a findMany-style call on the
+    // shared where-language — the search is one $or group of $like
+    // clauses over the TEXT columns discovered at runtime from
+    // PRAGMA. The inline SELECT is gone (its WHERE was the one ruled
+    // point from #4386 that did not move; the facade census moves
+    // 21 → 20). raw: true keeps the rows byte-identical to the
+    // inline read, including numeric is_* values the record mapping
+    // would coerce to booleans.
+    const where: RepositoryWhere = {};
     if (options.search && options.search.trim()) {
       // Find text columns to filter
       const textCols = infoRaw.filter((c) => c.type.toUpperCase().includes("CHAR") || c.type.toUpperCase().includes("TEXT"));
 
       if (textCols.length > 0) {
-        const searchClauses = textCols.map((c) => `lower(${c.name}) LIKE ?`);
-        query += ` WHERE ${searchClauses.join(" OR ")}`;
-        for (let i = 0; i < textCols.length; i++) {
-          args.push(`%${options.search.trim().toLowerCase()}%`);
-        }
+        const pattern = `%${options.search.trim().toLowerCase()}%`;
+        where.$or = textCols.map((c) => ({ [c.name]: { $like: pattern } }));
       }
     }
-
-    if (hasCreatedAt) {
-      query += ` ORDER BY created_at DESC`;
-    }
-    query += ` LIMIT ${limit} OFFSET ${offset}`;
-    const rows = Array.from(this.sql.exec(query, ...args)) as any[];
+    const rows = new Repository<Record<string, any>>(this.sql, cleanTable, "id", {}).findMany({
+      where,
+      orderBy: hasCreatedAt ? "created_at DESC" : undefined,
+      limit,
+      offset,
+      raw: true,
+    });
 
     return {
       tableName: cleanTable,

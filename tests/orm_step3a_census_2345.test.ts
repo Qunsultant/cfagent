@@ -75,7 +75,10 @@ const DATA_LAYER_FILES: Array<[string, number]> = [
   // WHERE is dynamic; see #4386 and the facade comment).
   // Issue #4654: the guarded mas_trades stop_price reconciliation adds one
   // PRAGMA probe and one ALTER exec, the same shape as broker/price_source/mode.
-  ["src/data/ormFacade.ts", 21],
+  // 20 since #4751 moved the browse SELECT onto the shared
+  // where-language (findMany-style $or/$like) — the facade's
+  // last inline SELECT is gone, not kept alongside.
+  ["src/data/ormFacade.ts", 20],
   // 4 at 3a; 5 since #4412 added the mas_promotions index exec
   // (sql.exec(MAS_PROMOTIONS_INDEX_DDL) in ensurePromotionsIndex());
   // 8 since #3182 added the mas_transactions tenant column's

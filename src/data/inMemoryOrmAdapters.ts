@@ -78,16 +78,42 @@ export class InMemoryRepository<T extends Record<string, any>>
     return as < bs ? -1 : as > bs ? 1 : 0;
   }
 
+  /**
+   * #4751: case-insensitive LIKE — the twin of the DO leg's
+   * `lower(col) LIKE ?` (pattern lowered at bind time there;
+   * lowered here in the matcher, same result for ASCII
+   * patterns — SQLite's lower() is ASCII-only, the twin's
+   * lowercasing is Unicode, so a non-ASCII uppercase pattern
+   * is the one disclosed leg difference). `%` matches any run
+   * (including newlines), `_` matches one character,
+   * everything else is literal. A non-string pattern throws,
+   * exactly like the DO leg's builder.
+   */
+  private static likeMatches(fieldVal: unknown, pattern: unknown): boolean {
+    if (typeof pattern !== "string") {
+      throw new Error("Repository where $like pattern must be a string");
+    }
+    const text = String(fieldVal ?? "").toLowerCase();
+    const escaped = pattern
+      .toLowerCase()
+      .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp(`^${escaped.replace(/%/g, ".*").replace(/_/g, ".")}$`, "s").test(text);
+  }
+
   /** #4385: does one row satisfy one where value (equality or operator object)? */
   private matchesValue(fieldVal: unknown, val: unknown): boolean {
     if (val === null || typeof val !== "object" || Array.isArray(val)) {
       return fieldVal === val;
     }
     const ops = val as Record<string, unknown>;
-    const hasOp = ["$lt", "$lte", "$gt", "$gte"].some((k) => k in ops);
+    const hasOp = ["$lt", "$lte", "$gt", "$gte", "$like"].some((k) => k in ops);
     if (!hasOp) return fieldVal === val;
     for (const [op, bound] of Object.entries(ops)) {
       if (bound === undefined || bound === null) continue;
+      if (op === "$like") {
+        if (!InMemoryRepository.likeMatches(fieldVal, bound)) return false;
+        continue;
+      }
       const cmp = InMemoryRepository.compareForOperator(fieldVal, bound);
       if (op === "$lt" && !(cmp < 0)) return false;
       if (op === "$lte" && !(cmp <= 0)) return false;
@@ -97,10 +123,33 @@ export class InMemoryRepository<T extends Record<string, any>>
     return true;
   }
 
-  /** #4385: the shared where predicate — a conjunction of per-column values. */
+  /**
+   * #4385: the shared where predicate — a conjunction of per-column values.
+   * #4751: a `$or` key holds an array of where objects; at least one
+   * branch with an effective predicate must match. Branches without
+   * an effective predicate are skipped, exactly like the DO leg's
+   * clause builder skips empty branches — so an all-empty `$or`
+   * constrains nothing on either leg.
+   */
   protected matchesWhere(row: T, where: RepositoryWhere): boolean {
     for (const [key, val] of Object.entries(where)) {
       if (val === undefined || val === null) continue;
+      if (key === "$or") {
+        if (!Array.isArray(val)) {
+          throw new Error("Repository where $or must be an array of where objects");
+        }
+        const branches: RepositoryWhere[] = [];
+        for (const branch of val as unknown[]) {
+          if (branch === null || typeof branch !== "object" || Array.isArray(branch)) {
+            throw new Error("Repository where $or branch must be a where object");
+          }
+          branches.push(branch as RepositoryWhere);
+        }
+        const effective = branches.filter((b) => InMemoryRepository.hasEffectivePredicate(b));
+        if (effective.length === 0) continue;
+        if (!effective.some((b) => this.matchesWhere(row, b))) return false;
+        continue;
+      }
       if (!this.matchesValue(this.fieldOf(row, key), val)) return false;
     }
     return true;
@@ -213,18 +262,30 @@ export class InMemoryRepository<T extends Record<string, any>>
    * operator? Mirrors the DO leg's clause builder: a where whose
    * values all skip produces no clause, and an empty clause set is
    * refused by updateWhere/deleteWhere on both legs.
+   * #4751: `$like` joins the operator set; a `$or` is effective
+   * when any branch is (recursively) — a malformed `$or`
+   * (non-array) counts as effective so the precise error surfaces
+   * from matchesWhere instead of the refusal.
    */
   private static hasEffectivePredicate(where: RepositoryWhere): boolean {
-    for (const val of Object.values(where)) {
+    for (const [key, val] of Object.entries(where)) {
       if (val === undefined || val === null) continue;
+      if (key === "$or") {
+        if (!Array.isArray(val)) return true;
+        for (const branch of val as unknown[]) {
+          if (branch !== null && typeof branch === "object" && !Array.isArray(branch)) {
+            if (InMemoryRepository.hasEffectivePredicate(branch as RepositoryWhere)) return true;
+          }
+        }
+        continue;
+      }
       if (typeof val === "object" && !Array.isArray(val)) {
         const ops = val as Record<string, unknown>;
-        const hasOp = ["$lt", "$lte", "$gt", "$gte"].some(
-          (k) => k in ops && ops[k] !== undefined && ops[k] !== null,
-        );
+        const opKeys = ["$lt", "$lte", "$gt", "$gte", "$like"];
+        const hasOp = opKeys.some((k) => k in ops && ops[k] !== undefined && ops[k] !== null);
         if (hasOp) return true;
         // A plain object with no operator key binds as equality.
-        if (!["$lt", "$lte", "$gt", "$gte"].some((k) => k in ops)) return true;
+        if (!opKeys.some((k) => k in ops)) return true;
         continue;
       }
       return true;
