@@ -1821,6 +1821,21 @@ export const jobPipelineDefinitions = sqliteTable("job_pipeline_definitions", {
  * `run_origin_id` (#4767) arrive via D1 migration 0071 and the
  * DO probed additive columns in ensureSchema.
  */
+/**
+ * Issue #5865 — the append-only definition history that historical replay
+ * (#4467) needs. `job_pipeline_definitions` keeps ONE row per job (its
+ * current definition); this table keeps every version ever saved, so a past
+ * run's configuration can be resolved after a reconfigure. `id` is the
+ * surrogate `${jobId}:${version}` key the ORM Repository core addresses.
+ */
+export const jobPipelineDefinitionVersions = sqliteTable("job_pipeline_definition_versions", {
+  id: text("id").primaryKey(),
+  jobId: text("job_id").notNull(),
+  version: integer("version").notNull(),
+  definitionJson: text("definition_json").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
 export const jobPipelineInstances = sqliteTable("job_pipeline_instances", {
   jobId: text("job_id").primaryKey(),
   state: text("state").notNull(),

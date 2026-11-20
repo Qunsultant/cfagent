@@ -319,6 +319,12 @@ export interface JobInstanceRecord {
 export interface JobDefinitionStore {
   saveDefinition(definition: JobDefinition): Promise<void>;
   getDefinition(jobId: string): Promise<JobDefinition | null>;
+  /**
+   * Issue #5865 — one historical version of a job's definition, or null.
+   * Append-only history: a version is never rewritten, so a resolved
+   * version is exactly what a run dispatched with it used.
+   */
+  getDefinitionVersion(jobId: string, version: number): Promise<JobDefinition | null>;
   listDefinitions(): Promise<JobDefinition[]>;
 }
 

@@ -22,6 +22,7 @@ import { doIndexSql, doTableSql } from "./schemaComponent/doCatalogue";
 import { Repository } from "./ormRepositoryCore";
 import type {
   jobPipelineArtifacts,
+  jobPipelineDefinitionVersions,
   jobPipelineDefinitions,
   jobPipelineInstances,
 } from "./drizzleSchema";
@@ -37,6 +38,7 @@ import {
 import { remainderAlterSql, remainderFrozenTableSql } from "./schemaComponent/remainderCatalogue";
 
 type JobDefinitionRow = typeof jobPipelineDefinitions.$inferSelect;
+type JobDefinitionVersionRow = typeof jobPipelineDefinitionVersions.$inferSelect;
 type JobInstanceRow = typeof jobPipelineInstances.$inferSelect;
 type JobArtifactRow = typeof jobPipelineArtifacts.$inferSelect;
 
@@ -45,6 +47,18 @@ export const JOB_PIPELINE_DEFINITION_COLUMNS: Record<keyof JobDefinitionRow & st
   name: "name",
   definitionJson: "definition_json",
   version: "version",
+  updatedAt: "updated_at",
+};
+
+/** Issue #5865 — the append-only definition history's column map. */
+export const JOB_PIPELINE_DEFINITION_VERSION_COLUMNS: Record<
+  keyof JobDefinitionVersionRow & string,
+  string
+> = {
+  id: "id",
+  jobId: "job_id",
+  version: "version",
+  definitionJson: "definition_json",
   updatedAt: "updated_at",
 };
 
@@ -124,6 +138,35 @@ export const JOB_PIPELINE_SCHEMA_MIGRATION: DoSchemaMigration = {
   ],
 };
 
+/**
+ * Issue #5865 — the append-only definition history. `job_pipeline_definitions`
+ * keeps one row per job (the current definition); this table keeps every
+ * version ever saved, so a past run's configuration survives a reconfigure
+ * and historical replay (#4467) can resolve it. Migration-only on purpose:
+ * the base catalogue pins the 0046 schema byte-for-byte and must not grow.
+ */
+export const JOB_PIPELINE_DEFINITION_VERSIONS_TABLE = "job_pipeline_definition_versions";
+
+export const JOB_PIPELINE_DEFINITION_VERSIONS_DDL = `CREATE TABLE IF NOT EXISTS job_pipeline_definition_versions (
+  id TEXT PRIMARY KEY,
+  job_id TEXT NOT NULL,
+  version INTEGER NOT NULL,
+  definition_json TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+)`;
+
+/** Every existing job's current definition becomes its first history row. */
+export const JOB_PIPELINE_DEFINITION_VERSIONS_BACKFILL =
+  `INSERT OR IGNORE INTO job_pipeline_definition_versions (id, job_id, version, definition_json, updated_at) ` +
+  `SELECT job_id || ':' || version, job_id, version, definition_json, updated_at FROM job_pipeline_definitions`;
+
+export const JOB_PIPELINE_DEFINITION_VERSIONS_MIGRATION: DoSchemaMigration = {
+  version: 2,
+  name: "0002_job_pipeline_definition_versions",
+  up: [JOB_PIPELINE_DEFINITION_VERSIONS_DDL, JOB_PIPELINE_DEFINITION_VERSIONS_BACKFILL],
+  down: [`DROP TABLE IF EXISTS ${JOB_PIPELINE_DEFINITION_VERSIONS_TABLE}`],
+};
+
 /** Options for the DO migration-framework wiring; unset = legacy. */
 export interface DoSqliteJobPipelineOptions {
   schemaMigrationMode?: SchemaMigrationMode;
@@ -143,6 +186,18 @@ class JobDefinitionRepository extends Repository<JobDefinitionRow> {
   save(row: JobDefinitionRow): void {
     if (this.findById(row.jobId)) this.update(row.jobId, row);
     else this.create(row);
+  }
+}
+
+/** Issue #5865 — append-only: rows are created, never updated or deleted. */
+class JobDefinitionVersionRepository extends Repository<JobDefinitionVersionRow> {
+  constructor(sql: SqlStorage) {
+    super(
+      sql,
+      JOB_PIPELINE_DEFINITION_VERSIONS_TABLE,
+      "id",
+      JOB_PIPELINE_DEFINITION_VERSION_COLUMNS,
+    );
   }
 }
 
@@ -214,6 +269,7 @@ function rowToInstance(row: JobInstanceRow): JobInstanceRecord {
 /** The DO-SQLite pipeline stores over a host agent's own SQLite. */
 export class DoSqliteJobPipelineStores implements JobPipelineStores {
   private readonly definitionsRepo: JobDefinitionRepository;
+  private readonly definitionVersionsRepo: JobDefinitionVersionRepository;
   private readonly instancesRepo: JobInstanceRepository;
   private readonly artifactsRepo: JobArtifactRepository;
 
@@ -222,18 +278,24 @@ export class DoSqliteJobPipelineStores implements JobPipelineStores {
     private readonly options: DoSqliteJobPipelineOptions = {},
   ) {
     this.definitionsRepo = new JobDefinitionRepository(sql);
+    this.definitionVersionsRepo = new JobDefinitionVersionRepository(sql);
     this.instancesRepo = new JobInstanceRepository(sql);
     this.artifactsRepo = new JobArtifactRepository(sql);
   }
 
   private ensureSchema(): void {
     if (this.options.schemaMigrationMode === "managed") {
-      applyDoSchemaMigrations(this.sql, "job_pipeline", [JOB_PIPELINE_SCHEMA_MIGRATION]);
+      applyDoSchemaMigrations(this.sql, "job_pipeline", [
+        JOB_PIPELINE_SCHEMA_MIGRATION,
+        JOB_PIPELINE_DEFINITION_VERSIONS_MIGRATION,
+      ]);
     } else {
       this.sql.exec(JOB_PIPELINE_DEFINITIONS_DDL);
       this.sql.exec(JOB_PIPELINE_INSTANCES_DDL);
       this.sql.exec(JOB_PIPELINE_ARTIFACTS_DDL);
       this.sql.exec(JOB_PIPELINE_ARTIFACTS_INDEX_DDL);
+      this.sql.exec(JOB_PIPELINE_DEFINITION_VERSIONS_DDL);
+      this.sql.exec(JOB_PIPELINE_DEFINITION_VERSIONS_BACKFILL);
     }
     // Issue #3310 — `run_schedule_id`, added when missing so
     // existing tables upgrade in place (the probed
@@ -275,17 +337,36 @@ export class DoSqliteJobPipelineStores implements JobPipelineStores {
   readonly definitions = {
     saveDefinition: async (definition: JobDefinition): Promise<void> => {
       this.ensureSchema();
+      const definitionJson = JSON.stringify(definition);
       this.definitionsRepo.save({
         jobId: definition.jobId,
         name: definition.name,
-        definitionJson: JSON.stringify(definition),
+        definitionJson,
         version: definition.version,
+        updatedAt: definition.updatedAt,
+      });
+      // Issue #5865 — append-only history: the current pointer above can be
+      // overwritten, this row cannot. Same version re-saved is a no-op
+      // (createOrReplace), so a retry never forks the history.
+      this.definitionVersionsRepo.createOrReplace({
+        id: `${definition.jobId}:${definition.version}`,
+        jobId: definition.jobId,
+        version: definition.version,
+        definitionJson,
         updatedAt: definition.updatedAt,
       });
     },
     getDefinition: async (jobId: string): Promise<JobDefinition | null> => {
       this.ensureSchema();
       const row = this.definitionsRepo.findById(jobId);
+      return row ? (JSON.parse(row.definitionJson) as JobDefinition) : null;
+    },
+    getDefinitionVersion: async (
+      jobId: string,
+      version: number,
+    ): Promise<JobDefinition | null> => {
+      this.ensureSchema();
+      const row = this.definitionVersionsRepo.findById(`${jobId}:${version}`);
       return row ? (JSON.parse(row.definitionJson) as JobDefinition) : null;
     },
     listDefinitions: async (): Promise<JobDefinition[]> => {

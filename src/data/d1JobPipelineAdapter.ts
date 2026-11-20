@@ -15,6 +15,7 @@ import { createDrizzleD1Db } from "./d1QueryLogger";
 import { and, asc, eq } from "drizzle-orm";
 import {
   jobPipelineArtifacts,
+  jobPipelineDefinitionVersions,
   jobPipelineDefinitions,
   jobPipelineInstances,
 } from "./drizzleSchema";
@@ -144,6 +145,31 @@ export class D1JobPipelineStores implements JobPipelineStores {
             updatedAt: row.updatedAt,
           },
         });
+      // Issue #5865 — append-only history: the pointer row above can be
+      // overwritten, this one cannot. A re-save of the same version is a
+      // no-op, so a retry never forks the history.
+      await this.db
+        .insert(jobPipelineDefinitionVersions)
+        .values({
+          id: `${definition.jobId}:${definition.version}`,
+          jobId: definition.jobId,
+          version: definition.version,
+          definitionJson: row.definitionJson,
+          updatedAt: definition.updatedAt,
+        })
+        .onConflictDoNothing();
+    },
+    getDefinitionVersion: async (
+      jobId: string,
+      version: number,
+    ): Promise<JobDefinition | null> => {
+      await this.ensure();
+      const rows = await this.db
+        .select()
+        .from(jobPipelineDefinitionVersions)
+        .where(eq(jobPipelineDefinitionVersions.id, `${jobId}:${version}`))
+        .limit(1);
+      return rows.length ? (JSON.parse(rows[0].definitionJson) as JobDefinition) : null;
     },
     getDefinition: async (jobId: string): Promise<JobDefinition | null> => {
       await this.ensure();
