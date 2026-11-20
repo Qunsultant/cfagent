@@ -133,7 +133,7 @@ import { routeRequest, type RouteRequestDeps } from "./orchestrator/routeRequest
 import { submitChatTurn, awaitChatTurnSubmission, type DurableTurnContext, type SubmittedTurnHandle } from "./orchestrator/durableTurnSubmission";
 import type { ScreenerRunOutcome } from "../services/screenerFollowups";
 import { marketDateKey, readAutopilotStateRaw, getAutopilotState, writeAutopilotState, incrementAutopilotOrdersToday, fetchBrokerBalanceSnapshot, openNotionalForSymbol, evaluateAndRecordAutopilotVerdict, type AutopilotContext } from "./orchestrator/autopilot";
-import { readSettingRaw, writeSetting, getReportDispatchHitl, setReportDispatchHitl, createReportConfirmation, getReportConfirmation, decideReportConfirmation, storeResearchReportCanonicalAsync, confirmationDeliveryMeta, deliverStoredReportEmail, deliverStoredReportWebhook, persistScreenerReportCanonical, persistParentScreenReportCanonical, persistPipelineGenerateReportCanonical, refreshCanonicalPdfFields, sendReportEmail, sendReportWebhook, type ReportDispatchContext } from "./orchestrator/reportDispatch";
+import { readSettingRaw, writeSetting, getReportDispatchHitl, setReportDispatchHitl, createReportConfirmation, getReportConfirmation, decideReportConfirmation, storeResearchReportCanonicalAsync, confirmationDeliveryMeta, deliverStoredReportEmail, deliverStoredReportWebhook, persistScreenerReportCanonical, persistParentScreenReportCanonical, persistPipelineGenerateReportCanonical, persistOptionsServeReport, refreshCanonicalPdfFields, sendReportEmail, sendReportWebhook, type ReportDispatchContext } from "./orchestrator/reportDispatch";
 import { extractMessageText, createTurnTools, deriveTurn, assembleGrounding, type ChatTurnHelpersContext } from "./orchestrator/chatTurnHelpers";
 import { createOpenaimpMcpFetch, ensureOpenaimpMcpConnection, chatNlqTurnGate, resolveStockCopilotMcpActivation, STOCK_COPILOT_SOURCE_TAB, type ChatNlqTurnGateResult, type EnsureOpenaimpMcpResult } from "./orchestrator/meshMcpClient";
 import { logChatActivity, enqueueHttpRequest, type HttpEntryContext } from "./orchestrator/httpEntry";
@@ -840,6 +840,7 @@ export class OrchestratorAgent extends PortThink {
       env: this.env,
       ensureTables: () => this.ensureTables(),
       getOrm: () => this.getOrm(),
+      storage: this.ctx.storage,
       reportDispatchHitlKey: OrchestratorAgent.REPORT_DISPATCH_HITL_KEY,
       reportConfirmationTtlMs: REPORT_CONFIRMATION_TTL_MS,
       sendReportEmail: (recipient, title, fileName, attachmentBase64, userLogin) =>
@@ -2366,6 +2367,13 @@ export class OrchestratorAgent extends PortThink {
     input: ScheduledReportInput,
   ): Promise<CanonicalStoreResult | null> {
     return persistPipelineGenerateReportCanonical(this.reportDispatchContext(), input);
+  }
+
+  /** #5170: door — write the serve-record summary row for the engine options chain. */
+  async recordOptionsServeSummary(
+    outcome: Parameters<typeof persistOptionsServeReport>[1],
+  ): Promise<boolean> {
+    return persistOptionsServeReport(this.reportDispatchContext(), outcome);
   }
 
   /**

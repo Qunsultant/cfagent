@@ -22,7 +22,7 @@ an owner decision plus a gate amendment) and get no tracker rows.
 |---|---|---|---|---|
 | L1 | The options sharded chain still runs through the bespoke `shardSubmit` async-job port (`autonomousOptionsAnalysis`) | #4280 | #4780 | RESOLVED 2026-11-17 (PR #5142) |
 | L2 | `runPanelWithAgents` at `src/services/scheduledTasks.ts:4183` (the scheduled firer) — routing it needed the engine panel helper to accept pre-built agents | #4068 | #4275 | RESOLVED 2026-11-12 |
-| L3 | The engine options chain does not write the serve-record summary row (`recordOptionsServeReport` needs a `DatabaseORM` the step residency has no handle to) | #4780 | #5170 | OPEN (filed, not started) |
+| L3 | The engine options chain does not write the serve-record summary row (`recordOptionsServeReport` needs a `DatabaseORM` the step residency has no handle to) | #4780 | #5170 | RESOLVED 2026-11-19 |
 | L4 | The chain job is not in `workflowCatalog` (its six stages differ from the options-screener family's eight), so it has no Workflow Runs visibility | #4780 | #5834 | OPEN (filed 2026-11-19, not started) |
 | L5 | `src/config/shardPacing.ts` (+ `config/shard-pacing.json`) is unreferenced by `src/` — its only consumer is `tests/sharded_jobs_p1355.test.ts:33,773-776` | #4780 | #5833 | OPEN (filed 2026-11-19, not started) |
 | L6 | `planFeedStart` (`src/services/shardJobs.ts`) is unreachable in live code — its only caller is the frozen deprecated module | #4280 | — | KEPT (by design; #4776 removes the frozen module, its only caller) |
