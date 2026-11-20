@@ -22,6 +22,7 @@ import { createObservabilitySink } from "../../observability/createObservability
 import { createStructuredLogger } from "../../observability/structuredLogger";
 import { McpSystemFacade } from "../../patterns/facade";
 import { createAgentMcpTools } from "../mcpAdapter";
+import { synthesizeToolTurnSummary } from "./replyCompleteness";
 
 /** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
 const structuredLog = createStructuredLogger(createObservabilitySink({}), {
@@ -91,7 +92,10 @@ export function extractMessageText(message: unknown): string {
       .map((p) => p.text)
       .join("")
       .trim();
+    const synth = synthesizeToolTurnSummary(message);
+    if (extracted && synth) return `${extracted}\n\n${synth}`;
     if (extracted) return extracted;
+    if (synth) return synth;
   }
 
   if (typeof m.text === "string" && m.text.trim()) {

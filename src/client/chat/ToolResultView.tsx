@@ -215,26 +215,28 @@ export function ToolResultView({
   if (
     normalizedType.includes("trade") ||
     normalizedType.includes("etrade") ||
+    normalizedType.includes("order") ||
     data?.orderId?.startsWith("ord_") ||
     data?.draftId?.startsWith("ord_") ||
     (data?.action && (data.action === "BUY" || data.action === "SELL" || data.action === "BUY_TO_COVER" || data.action === "SELL_SHORT")) ||
+    (data?.side && (data.side === "buy" || data.side === "sell" || data.side === "BUY" || data.side === "SELL")) ||
     data?.resultsFoundStocks
   ) {
-    const isExecution = normalizedType.includes("execute") || data?.executionId || data?.brokerOrderRef;
+    const isExecution = normalizedType.includes("execute") || normalizedType.includes("place_order") || data?.executionId || data?.brokerOrderRef;
     const isQuote = normalizedType.includes("quote") || (data?.symbol && data?.lastPrice && !data?.orderId && !data?.action);
     const orderId = data?.orderId || data?.draftId;
     const symbol = data?.symbol || data?.input?.symbol;
-    const action = data?.action || data?.input?.action || "BUY";
-    const quantity = data?.quantity || data?.input?.quantity || 1;
+    const action = String(data?.action || data?.side || data?.input?.action || data?.input?.side || "BUY").toUpperCase();
+    const quantity = data?.quantity ?? data?.qty ?? data?.input?.quantity ?? data?.input?.qty ?? 1;
     const status = data?.status || "previewed";
     // Issue #3782: an estimated price must never render as the order
     // price. The quote card below keeps showing lastPrice (a quote
     // display, not an order price); the ORDER price is only a real
     // limit price carried on the draft. `price` stays the quote
     // display value; `orderPrice` is the only order price.
-    const price = data?.limitPrice || data?.estimatedPrice || data?.executionPrice || data?.lastPrice;
-    const orderPrice = data?.limitPrice;
-    const orderType = data?.orderType || data?.input?.orderType;
+    const price = data?.limitPrice || data?.limit_price || data?.estimatedPrice || data?.executionPrice || data?.lastPrice;
+    const orderPrice = data?.limitPrice ?? data?.limit_price;
+    const orderType = String(data?.orderType || data?.type || data?.order_type || data?.input?.orderType || data?.input?.type || "").toUpperCase() || undefined;
     const priceSource = data?.priceSource;
     // Issue #3782: Approve stays disabled until a real price is
     // attached — a LIMIT/STOP_LIMIT draft needs a finite limit price,
