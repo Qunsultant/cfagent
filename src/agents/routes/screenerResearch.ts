@@ -591,6 +591,23 @@ export async function handleScreenerResearchRoutes(
 
     if (path.endsWith("/research/run") && request.method === "POST") {
       const userLogin = request.headers.get("x-user-login") || sessionId;
+      // Issue #5912 — the run may name its venue/mode; unset = the default.
+      const selectionBody = (await request.json().catch(() => ({}))) as {
+        brokerId?: string;
+        mode?: string;
+      };
+      const selection =
+        (typeof selectionBody.brokerId === "string" && selectionBody.brokerId.trim()) ||
+        (typeof selectionBody.mode === "string" && selectionBody.mode.trim())
+          ? {
+              ...(typeof selectionBody.brokerId === "string" && selectionBody.brokerId.trim()
+                ? { brokerId: selectionBody.brokerId.trim() }
+                : {}),
+              ...(typeof selectionBody.mode === "string" && selectionBody.mode.trim()
+                ? { mode: selectionBody.mode.trim() }
+                : {}),
+            }
+          : undefined;
       try {
         const dispatched = await dispatchResearchEngineRun({
           userLogin,
@@ -598,12 +615,13 @@ export async function handleScreenerResearchRoutes(
           sql: resolveResearchSql(),
           d1: resolveResearchD1(),
           env: ctx.env as Record<string, string | undefined>,
+          ...selection,
           execute: (runCtx) =>
             runCtx
               ? runWithResearchRunId(runCtx.runId, () =>
-                  triggerManualResearch(ctx.runResearchAndPublish, userLogin),
+                  triggerManualResearch(ctx.runResearchAndPublish, userLogin, selection),
                 )
-              : triggerManualResearch(ctx.runResearchAndPublish, userLogin),
+              : triggerManualResearch(ctx.runResearchAndPublish, userLogin, selection),
         });
         return Response.json({
           ...dispatched.outcome,
@@ -662,10 +680,20 @@ export async function handleScreenerResearchRoutes(
           d1: resolveResearchD1(),
           env: ctx.env as Record<string, string | undefined>,
           researchDeps: {
-            runOodaAnalysis: (runCtx) =>
-              runWithResearchRunId(runCtx.runId, () =>
-                triggerManualResearch(ctx.runResearchAndPublish, runCtx.userLogin),
-              ),
+            runOodaAnalysis: (runCtx) => {
+              const selection =
+                runCtx.brokerId || runCtx.mode
+                  ? {
+                      ...(runCtx.brokerId ? { brokerId: runCtx.brokerId } : {}),
+                      ...(runCtx.mode ? { mode: runCtx.mode } : {}),
+                    }
+                  : undefined;
+              return runWithResearchRunId(runCtx.runId, () =>
+                selection
+                  ? triggerManualResearch(ctx.runResearchAndPublish, runCtx.userLogin, selection)
+                  : triggerManualResearch(ctx.runResearchAndPublish, runCtx.userLogin),
+              );
+            },
             runEvaluateStage: async (evalCtx) => {
               const agent = ctx.getResearchAgent?.(evalCtx.userLogin);
               if (!agent?.evaluateRun) return null;

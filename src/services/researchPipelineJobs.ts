@@ -83,6 +83,9 @@ export interface ResearchStepDeps {
     userLogin: string;
     trigger: "manual" | "scheduled";
     datasetAsOf?: string | null;
+    /** Issue #5912 — the venue/mode this run names, when it named one. */
+    brokerId?: string;
+    mode?: string;
   }) => Promise<ResearchReport | Record<string, unknown>>;
   /** Execute the §9 outcome evaluation pass for a run or due runs. */
   runEvaluateStage?: (input: {
@@ -123,6 +126,9 @@ export function registerResearchSteps(
       userLogin?: string;
       trigger?: "manual" | "scheduled";
       datasetAsOf?: string | null;
+      /** Issue #5912 — the venue/mode this run names. */
+      brokerId?: string;
+      mode?: string;
     };
     const runId = params.runId || ctx.jobId.replace(/^research:/, "");
     const userLogin = params.userLogin || "";
@@ -143,6 +149,8 @@ export function registerResearchSteps(
       userLogin,
       trigger,
       datasetAsOf: params.datasetAsOf ?? null,
+      ...(typeof params.brokerId === "string" && params.brokerId ? { brokerId: params.brokerId } : {}),
+      ...(typeof params.mode === "string" && params.mode ? { mode: params.mode } : {}),
     });
     const ideaCount = Array.isArray((report as { ideas?: unknown[] }).ideas)
       ? (report as { ideas: unknown[] }).ideas.length
@@ -157,6 +165,8 @@ export function registerResearchSteps(
     const params = (ctx.params ?? {}) as {
       runId?: string;
       userLogin?: string;
+      brokerId?: string;
+      mode?: string;
     };
     const runId = params.runId || ctx.jobId.replace(/^research:/, "");
     const userLogin = params.userLogin || "";
@@ -247,6 +257,9 @@ export function assertResearchAopCompliance(
 }
 
 export interface ResearchJobDefinitionConfig {
+  /** Issue #5912 — the venue/mode this run names (carried to analyze.ooda). */
+  brokerId?: string;
+  mode?: string;
   /** Issue #5916 — per-stage execution-mode overrides (config-driven). */
   stageModes?: import("../config/researchJobConfig").ResearchStageModes;
   userLogin: string;
@@ -311,6 +324,21 @@ export function buildResearchJobDefinition(
     }
     if (child.kind === "deliver") {
       return withStageMode({ ...child, steps: [{ step: RESEARCH_DELIVER_STEP, params: { runId } }] });
+    }
+    if (child.kind === "analyze") {
+      // Issue #5912 — the venue/mode ride this stage's params: it is the
+      // stage that runs the research loop, so the run it names is its own.
+      const analyze = child as Record<string, unknown> & {
+        steps?: Array<Record<string, unknown>>;
+      };
+      const steps = Array.isArray(analyze.steps) ? analyze.steps : [];
+      const [first, ...rest] = steps;
+      const stepParams = {
+        ...((first?.params ?? {}) as Record<string, unknown>),
+        ...(config.brokerId ? { brokerId: config.brokerId } : {}),
+        ...(config.mode ? { mode: config.mode } : {}),
+      };
+      return withStageMode({ ...analyze, steps: [{ ...first, params: stepParams }, ...rest] });
     }
     return withStageMode(child);
   });

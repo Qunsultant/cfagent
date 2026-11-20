@@ -47,7 +47,15 @@ export interface ResearchPublishContext {
   getResearchAgent: (userLogin?: string) => ResearchAgent | null;
   runAgentTool: (
     cls: unknown,
-    options: { input: { trigger: "manual" | "scheduled"; userLogin: string } }
+    options: {
+      input: {
+        trigger: "manual" | "scheduled";
+        userLogin: string;
+        /** Issue #5912 — the venue/mode this run names, when it named one. */
+        brokerId?: string;
+        mode?: string;
+      };
+    }
   ) => Promise<{ status: string; error?: string }>;
   getReportDispatchHitl: () => boolean;
   createReportConfirmation: (kind: "email" | "webhook", payloadJson: string, reportId?: string | null, createdBy?: string | null) => string;
@@ -144,7 +152,9 @@ export async function generateAndStoreResearchReport(
  */
 export async function runResearchAndPublish(ctx: ResearchPublishContext, 
   trigger: "manual" | "scheduled",
-  userLogin?: string
+  userLogin?: string,
+  /** Issue #5912 — the venue/mode this run names, if any. */
+  selection?: { brokerId?: string; mode?: string }
 ): Promise<{
   success: boolean;
   error?: string;
@@ -231,7 +241,12 @@ export async function runResearchAndPublish(ctx: ResearchPublishContext,
     let child: { status: string; error?: string };
     try {
       child = await ctx.runAgentTool(ResearchAgent, {
-        input: { trigger, userLogin: login },
+        input: {
+          trigger,
+          userLogin: login,
+          ...(selection?.brokerId ? { brokerId: selection.brokerId } : {}),
+          ...(selection?.mode ? { mode: selection.mode } : {}),
+        },
       });
     } catch (err) {
       child = {
@@ -256,7 +271,12 @@ export async function runResearchAndPublish(ctx: ResearchPublishContext,
         previousRunId: previousRunId ?? "none",
         latestRunId: report?.runId ?? "none",
       });
-      const fallback = await agent.runResearch({ trigger, userLogin: login });
+      const fallback = await agent.runResearch({
+        trigger,
+        userLogin: login,
+        ...(selection?.brokerId ? { brokerId: selection.brokerId as never } : {}),
+        ...(selection?.mode ? { mode: selection.mode } : {}),
+      });
       if (!fallback.success || !fallback.report) {
         const failure = fallback.error || child.error || `Research agent finished with status ${child.status}.`;
         // Issue #577: a total failure escalates the task for a human

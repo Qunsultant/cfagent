@@ -182,7 +182,7 @@ export class EtradeResearchDataProvider implements ResearchDataProvider {
      * ("live" / "paper" / "sandbox", per the platform's own vocabulary).
      * Unset = the configured default in the deployment's environment.
      */
-    private readonly selection?: { brokerId?: TradingPlatformId; mode?: string }
+    private readonly selection?: { brokerId?: string; mode?: string }
   ) {
     // #291 Q2: resolved through the platform registry (was a direct
     // ETradeService construction — the T0 ledger's researchProviders
