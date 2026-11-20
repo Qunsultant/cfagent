@@ -73,6 +73,7 @@ import {
   type MeteredGateOptions,
 } from "./meteredPaymentGate";
 import { resolveAccountTenantId } from "./accountTenant";
+import { projectUsageEventBestEffort } from "./usageEventProjectionHooks";
 import type { StoreTier } from "../data/commercialPorts";
 import {
   createBucketPorts,
@@ -671,19 +672,20 @@ export class ETradeAgenticPaymentService {
     // A meter failure refuses with a typed error — the computed
     // result is discarded, never served unmetered — and releases
     // the tx hash so the payer can retry.
+    const meteredEvent = buildMeteredCallEvent({
+      receipt: verification.receipt,
+      userLogin,
+      category: metered.category,
+      priceUSD,
+      tier,
+      // Issue #3185 (stamp slice): the x402 paid gate is
+      // anonymous traffic — payer-scope identity only — so
+      // the row stays unattributed (NULL, never invented).
+      tenantId: null,
+    });
     try {
       meter.ensureSchema();
-      meter.insertEvent(buildMeteredCallEvent({
-        receipt: verification.receipt,
-        userLogin,
-        category: metered.category,
-        priceUSD,
-        tier,
-        // Issue #3185 (stamp slice): the x402 paid gate is
-        // anonymous traffic — payer-scope identity only — so
-        // the row stays unattributed (NULL, never invented).
-        tenantId: null,
-      }));
+      meter.insertEvent(meteredEvent);
     } catch (err) {
       structuredLog.error("agenticPayments.metered_gate_usage_meter_failed", {
         message: `[payments] metered gate refused ${resource}: usage meter failed: ${err instanceof Error ? err.message : String(err)}`,
@@ -693,6 +695,11 @@ export class ETradeAgenticPaymentService {
       if (verification.receipt.txHash) await this.releaseTxHash(verification.receipt.txHash);
       return meteredGateRefusal(503, "MeteringUnavailable", "The usage meter failed; the paid result was not served. Retry the payment.");
     }
+    // Issue #3185 (bridge slice): project the row into the D1
+    // mirror. Best-effort, never a gate condition — outside the
+    // refusal try, so a hook failure never refuses a verified,
+    // metered payment (the reconcile sweep backstops it).
+    await projectUsageEventBestEffort({ env: this.env, row: meteredEvent });
 
     // Issue #2522: tier-decision audit. Best-effort, NEVER a gate
     // condition: the meter row above is the authoritative per-call
@@ -794,21 +801,22 @@ export class ETradeAgenticPaymentService {
     // Issue #2408: meter the SERVED call only, before serving it.
     // A meter failure refuses with a typed error — the computed
     // result is discarded, never served unmetered.
+    // Issue #3185 (stamp slice): the covered path is
+    // session-only, so the account tenant is definable — one
+    // indexed D1 read for the session login (best-effort:
+    // no account row reads as NULL, never invented).
+    const tenantId = await resolveAccountTenantId(this.env, userLogin);
+    const coveredEvent = buildCoveredCallEvent({
+      coverageId,
+      userLogin,
+      category,
+      priceUSD,
+      tier: "Subscribed",
+      tenantId,
+    });
     try {
       meter.ensureSchema();
-      // Issue #3185 (stamp slice): the covered path is
-      // session-only, so the account tenant is definable — one
-      // indexed D1 read for the session login (best-effort:
-      // no account row reads as NULL, never invented).
-      const tenantId = await resolveAccountTenantId(this.env, userLogin);
-      meter.insertEvent(buildCoveredCallEvent({
-        coverageId,
-        userLogin,
-        category,
-        priceUSD,
-        tier: "Subscribed",
-        tenantId,
-      }));
+      meter.insertEvent(coveredEvent);
     } catch (err) {
       structuredLog.error("agenticPayments.covered_call_usage_meter_failed", {
         message: `[payments] covered call refused ${resource}: usage meter failed: ${err instanceof Error ? err.message : String(err)}`,
@@ -817,6 +825,10 @@ export class ETradeAgenticPaymentService {
       });
       return meteredGateRefusal(503, "MeteringUnavailable", "The usage meter failed; the covered result was not served. Retry the call.");
     }
+    // Issue #3185 (bridge slice): project the row into the D1
+    // mirror — best-effort, never a gate condition (outside the
+    // refusal try; the reconcile sweep backstops a miss).
+    await projectUsageEventBestEffort({ env: this.env, row: coveredEvent });
 
     // Issue #2522: tier-decision audit. Best-effort, NEVER a gate
     // condition — same posture as the paid path.
@@ -991,19 +1003,20 @@ export class ETradeAgenticPaymentService {
     }
 
     const data = await fulfill(receipt);
+    const mppEvent = buildMeteredCallEvent({
+      receipt,
+      userLogin,
+      category: metered.category,
+      priceUSD,
+      tier,
+      // Issue #3185 (stamp slice): the MPP paid gate is
+      // anonymous traffic — payer-scope identity only — so
+      // the row stays unattributed (NULL, never invented).
+      tenantId: null,
+    });
     try {
       meter.ensureSchema();
-      meter.insertEvent(buildMeteredCallEvent({
-        receipt,
-        userLogin,
-        category: metered.category,
-        priceUSD,
-        tier,
-        // Issue #3185 (stamp slice): the MPP paid gate is
-        // anonymous traffic — payer-scope identity only — so
-        // the row stays unattributed (NULL, never invented).
-        tenantId: null,
-      }));
+      meter.insertEvent(mppEvent);
     } catch (err) {
       structuredLog.error("agenticPayments.mpp_metered_gate_usage_meter_failed", {
         message: `[payments] metered gate refused ${resource}: usage meter failed: ${err instanceof Error ? err.message : String(err)}`,
@@ -1012,6 +1025,10 @@ export class ETradeAgenticPaymentService {
       });
       return meteredGateRefusal(503, "MeteringUnavailable", "The usage meter failed; the paid result was not served. Retry the payment.");
     }
+    // Issue #3185 (bridge slice): project the row into the D1
+    // mirror — best-effort, never a gate condition (outside the
+    // refusal try; the reconcile sweep backstops a miss).
+    await projectUsageEventBestEffort({ env: this.env, row: mppEvent });
 
     // Issue #2522: tier-decision audit, same rule as the x402
     // branch — best-effort, never a gate condition.

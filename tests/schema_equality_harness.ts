@@ -74,8 +74,9 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
  *  job_run_records. Merged sha recomputed from the merged fixture file
  *  (sha256 of the file bytes, CRLF-normalized). */
 /** Issue #3185 (stamp slice) re-seeds it: tenant_id on usage_events + idx_usage_events_tenant. */
+/** Issue #3185 (bridge slice) re-seeds it: agent_usage_events mirror table + 2 indexes. */
 export const COMBINED_FIXTURE_SHA256 =
-  "68879172c5439879e3657ad47924ac8b82f3bc7d038227110cfa6bfdb0e371db";
+  "9e96a1f26910768000be8081b3f0b826b49378e53d68a063b09761f987d793d3";
 
 /** All four planes' entries in plane order: D1, DO, ORM, remainder. */
 export const COMBINED_CATALOGUE_ENTRIES: CatalogueEntry[] = [

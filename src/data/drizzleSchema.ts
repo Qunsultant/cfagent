@@ -1949,6 +1949,27 @@ export const agentAsyncJobs = sqliteTable("agent_async_jobs", {
 });
 
 /**
+ * Issue #3185 (bridge slice) — the D1 mirror of usage_events: the
+ * ONE queryable tenant surface across the split DOs. Same columns
+ * as the DO table plus source_instance (which DO instance
+ * projected the row) and projected_at (ISO text, when it landed
+ * here). Rows are immutable once projected, except the backfill's
+ * NULL-tenant stamp (a write-time NULL filled from the paid
+ * transaction's login). The DO table stays authoritative.
+ */
+export const agentUsageEvents = sqliteTable("agent_usage_events", {
+  id: text("id").primaryKey(),
+  userLogin: text("user_login").notNull(),
+  runId: text("run_id").notNull(),
+  category: text("category").notNull(),
+  createdAt: text("created_at").notNull(),
+  detailJson: text("detail_json"),
+  tenantId: text("tenant_id"),
+  sourceInstance: text("source_instance"),
+  projectedAt: text("projected_at").notNull(),
+});
+
+/**
  * Pipeline J3 (#3536) — the enriched-dataset store's table: one
  * row per enrich run, keyed by enrich job id (the derived
  * product's precise identity — no (source, dataset) bucket

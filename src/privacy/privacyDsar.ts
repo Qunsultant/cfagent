@@ -588,8 +588,8 @@ const RETENTION_RULES: Record<string, RetentionRule> = {
     maxAgeDays: 365,
     action: "bound",
     reason: "issue #792 deferral: metering companion rows (one small row per research run/evaluation); PRUNE-CLASS at 365d",
-    enforcement: "carried",
-    enforcementNote: "carried, not enforced: rows are split across two DOs' databases (Orchestrator + ResearchAgent), so a pass on one instance cannot prune the other copy, and the metering readers' old-row window is unconfirmed; enforcement is deferred to its first production reader's window decision",
+    enforcement: "at_source",
+    enforcementNote: "at_source since #3185 (bridge slice): the prune runs in every instance that holds rows — the per-login Orchestrator instance + the D1 mirror in its maintenance leg (OrchestratorAgent.pruneUsageEvents), the ResearchAgent instance via its stub leg (ResearchAgent.pruneUsageEvents), and the shared_orchestrator instance via the reconcile route (POST /api/ops/usage-events-reconcile, which prunes DO + mirror in the same pass). A partial prune would misstate tenant totals, so no pass prunes one side alone.",
   },
   // --- Research / screener stores ---
   research_task_store: {

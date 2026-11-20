@@ -114,7 +114,7 @@ function canonParams(params: Record<string, string>): string {
 }
 
 describe("P5 runner — plan resolution (P4 finding 1: phased order)", () => {
-  it("resolves 443 executable steps and skips the seed-form entry with its reason", () => {
+  it("resolves 446 executable steps and skips the seed-form entry with its reason", () => {
     const p = plan();
     // #5229 adds migration 0069 (referral expiry_period_ms): 419 → 420.
     // #5175 slice 2 adds mas_runs + mas_run_aliases + its index: 421 → 424.
@@ -125,7 +125,9 @@ describe("P5 runner — plan resolution (P4 finding 1: phased order)", () => {
     // the D1 backfill seed): 434 → 437.
     // Issue #3185 adds the usage_events tenant stamp (DO index +
     // remainder ALTER): 441 → 443.
-    expect(p.steps).toHaveLength(443);
+    // Issue #3185 bridge adds migration 0077 (agent_usage_events
+    // mirror table + 2 indexes): 443 → 446.
+    expect(p.steps).toHaveLength(446);
     expect(p.skipped).toHaveLength(1);
     expect(p.skipped[0].code).toBe(SEED_FORM_CODE);
     expect(p.skipped[0].reason).toMatch(/call site/i);
@@ -145,7 +147,9 @@ describe("P5 runner — plan resolution (P4 finding 1: phased order)", () => {
     // the D1 backfill seed): 434 → 437.
     // Issue #3185 adds the usage_events tenant stamp (DO index +
     // remainder ALTER): 441 → 443.
-    expect(harness).toHaveLength(443);
+    // Issue #3185 bridge adds migration 0077 (agent_usage_events
+    // mirror table + 2 indexes): 443 → 446.
+    expect(harness).toHaveLength(446);
     // Production move 1: the rebuild CREATE for agent_price_catalogue
     // must stay after the RENAME that clears its table (a second
     // table-creation for the same table cannot run before the rename
@@ -282,7 +286,9 @@ describe("P5 runner — delta-to-steps selection (P4 finding 3, P4 finding 2)", 
     // index): the D1 step is selected and the ORM plane's duplicate
     // of the same index is skipped (the projected-model walk already
     // has it), so selected stays 242 and skipped grows 8 → 9.
-    expect(selected.schema).toHaveLength(245);
+    // #3185 bridge adds migration 0077 (agent_usage_events mirror
+    // table + 2 indexes): 245 → 248.
+    expect(selected.schema).toHaveLength(248);
     expect(selected.seeds).toHaveLength(12);
     expect(selected.skipped).toHaveLength(9);
     expect(

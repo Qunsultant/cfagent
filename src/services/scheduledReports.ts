@@ -1751,6 +1751,13 @@ export function ensureUsageEventsTable(sql: SqlStorage): void {
 /**
  * Record one metered consumption event, attributed to tenant + task.
  * Never throws — metering must not break the metered operation.
+ *
+ * Issue #3185 (bridge slice): this site is synchronous and carries
+ * no env, so it does NOT call the projection hook — the research
+ * run/evaluation rows it writes project into the D1 mirror only
+ * through the reconcile sweep (POST /api/ops/usage-events-reconcile,
+ * once per instance). The live hook covers the async sites (the
+ * meter route, agenticPayments).
  */
 export function recordUsageEvent(
   sql: SqlStorage,

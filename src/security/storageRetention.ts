@@ -185,11 +185,12 @@
  *   No purge exists for them — the retention slice enforces
  *   only the BOUNDED table (agent_shard_jobs).
  * - usage_events (not a mas_* table) — PRUNE-CLASS, 365d, recorded here
- *   per issue #792's deferral, implementation deferred to its first
- *   production reader: rows are split across two DOs' databases
- *   (orchestrator + ResearchAgent), so a pass on one instance cannot
- *   prune the other copy; one small row per research run/evaluation
- *   until then.
+ *   per issue #792's deferral, implemented by #3185 (bridge slice):
+ *   the prune runs in every instance that holds rows (per-login
+ *   Orchestrator + D1 mirror in the maintenance leg, ResearchAgent
+ *   via its stub leg, shared_orchestrator via the reconcile
+ *   route) — a pass on one instance alone would misstate tenant
+ *   totals, so no pass prunes one side alone.
  */
 
 import type { DatabaseORM } from "../orm";

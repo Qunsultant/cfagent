@@ -6,6 +6,13 @@
  */
 import { describe, it, expect } from "vitest";
 import { MockSqlStorage } from "./mock-sql";
+import { MockD1Database } from "./mock-d1";
+import { reconcileUsageEventsProjection } from "../src/agents/orchestrator/usageEventsReconcile";
+import {
+  createD1UsageEventMirrorDb,
+  D1UsageEventMirrorAdapter,
+  ensureUsageEventMirrorSchema,
+} from "../src/data/d1UsageEventMirrorAdapter";
 import {
   storeReportAtGeneration,
   searchScheduledReports,
@@ -157,5 +164,34 @@ describe("#584 usage metering (EP-009)", () => {
     expect(listUsageEventsByTenant(sql, "tenant-none")).toEqual([]);
     expect(listUsageEventsByTenant(sql, "")).toEqual([]);
     expect(listUsageEvents(sql, "carol")[0].tenantId).toBeNull();
+  });
+
+  it("the ResearchAgent half (research_evaluation, sync write) reaches the mirror only through the reconcile sweep (#3185 bridge)", async () => {
+    const sql = new MockSqlStorage();
+    // The sync recordUsageEvent site carries no env and never calls
+    // the live hook — the row exists only in this instance until
+    // the sweep projects it.
+    recordUsageEvent(sql, {
+      userLogin: "alice",
+      runId: "run-eval-1",
+      category: "research_evaluation",
+      tenantId: "tenant-a",
+    });
+    const mock = new MockD1Database();
+    const mirror = new D1UsageEventMirrorAdapter(createD1UsageEventMirrorDb(mock as never));
+    await ensureUsageEventMirrorSchema(mirror.db);
+    expect(await mirror.listByTenant("tenant-a")).toEqual([]);
+    const result = await reconcileUsageEventsProjection({
+      env: { AGENT_DB: mock as never },
+      sql: sql as never,
+      sourceInstance: "research:alice",
+      nowMs: Date.parse("2026-11-20T00:00:00.000Z"),
+    });
+    expect(result.errors).toEqual([]);
+    expect(result.reconciled).toBe(1);
+    const mirrored = await mirror.listByTenant("tenant-a");
+    expect(mirrored.map((r) => r.runId)).toEqual(["run-eval-1"]);
+    expect(mirrored[0].category).toBe("research_evaluation");
+    expect(mirrored[0].sourceInstance).toBe("research:alice");
   });
 });

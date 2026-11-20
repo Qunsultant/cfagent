@@ -560,20 +560,31 @@ export class DatabaseORM {
 
   /**
    * Computes comprehensive platform revenue analytics across all streams.
+   *
+   * Issue #3185 (bridge slice): an optional tenantId scopes the
+   * meter coverage cut to that tenant (the core filters this
+   * instance's DO-half rows; the ResearchAgent half needs the
+   * D1 mirror — see the MCP resource). All other cuts stay
+   * platform-wide (see computeRevenueSummaryFromRows). Omit it
+   * for the platform-wide summary.
    */
-  getRevenueSummary(): RevenueSummary {
+  getRevenueSummary(tenantId?: string): RevenueSummary {
     // #2345: the computation is the shared pure core in
     // data/marketplacePorts (computeRevenueSummaryFromRows) so
     // the sync facade summary and the async ports summary can
     // never drift; this method only supplies the rows from this
     // instance's own repositories, as before.
-    return computeRevenueSummaryFromRows({
-      externalAds: this.externalAds.findMany(),
-      ads: this.ads.findMany(),
-      transactions: this.transactions.findMany(),
-      referrals: this.referrals.findMany(),
-      usageEvents: this.usageEvents.listAllWithDetail(),
-    });
+    const usageEvents = this.usageEvents.listAllWithDetail();
+    return computeRevenueSummaryFromRows(
+      {
+        externalAds: this.externalAds.findMany(),
+        ads: this.ads.findMany(),
+        transactions: this.transactions.findMany(),
+        referrals: this.referrals.findMany(),
+        usageEvents,
+      },
+      tenantId != null ? { tenantId } : undefined,
+    );
   }
 
   // =========================================================================

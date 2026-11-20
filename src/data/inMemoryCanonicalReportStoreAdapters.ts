@@ -288,4 +288,32 @@ export class InMemoryUsageEventStore implements UsageEventPort {
         tenantId,
       }));
   }
+
+  /** Issue #3185 (bridge slice) — retention prune (365d, PRUNE-CLASS). */
+  pruneBefore(cutoffIso: string): number {
+    let removed = 0;
+    for (let i = this.rows.length - 1; i >= 0; i--) {
+      if (this.rows[i].createdAt < cutoffIso) {
+        this.rows.splice(i, 1);
+        removed++;
+      }
+    }
+    return removed;
+  }
+
+  /** Issue #3185 (bridge slice) — DSAR erasure for one login. */
+  deleteByUser(userLogin: string): number {
+    let removed = 0;
+    for (let i = this.rows.length - 1; i >= 0; i--) {
+      if (this.rows[i].userLogin === userLogin) {
+        this.rows.splice(i, 1);
+        removed++;
+      }
+    }
+    return removed;
+  }
+
+  countByUser(userLogin: string): number {
+    return this.rows.filter((r) => r.userLogin === userLogin).length;
+  }
 }

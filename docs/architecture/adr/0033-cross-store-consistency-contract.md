@@ -269,7 +269,7 @@ Dual-write call sites (DO-first verified by reading each site):
 | Audit events | `createChainSchedulePorts.ts` `projectAfterTransition` (per-transition chain+schedule events); `createShardJobPorts.ts:66` (`projectRunLegs` audit event); `shardJobReconcile.ts:93`; `scheduled-agent.ts:2815` (reconcile event) | Conform, except F-4 (silent drop on failure) |
 | Telemetry realizations | `research-agent.ts:1106` (`evaluateRun`, try/catch + log); `telemetryRoute.ts:335` (admin-gated reconcile import) | Conform, except F-2 (no `ON CONFLICT`) |
 | Canonical seed | `canonicalReportSeed.ts:75` (operator one-time seed, idempotent) | Conform |
-| Reconciles | Run-ledger sweep (admin POST `/api/ops/run-ledger-reconcile`); shard-job reconcile (`privacy.ts:476`, platform-admin gated); chain-schedule reconcile (`scheduled-agent.ts:2805`, admin-gated route) | Conform (operator-only) |
+| Reconciles | Run-ledger sweep (admin POST `/api/ops/run-ledger-reconcile`); usage-events sweep (#3185 bridge, operator POST `/api/ops/usage-events-reconcile` — projects both DO halves into the `agent_usage_events` D1 mirror, oldest-first, 100 rows/call, prune-before-project 365d; the live hook covers async insertEvent sites only, sync research run/evaluation rows project only through the sweep); shard-job reconcile (`privacy.ts:476`, platform-admin gated); chain-schedule reconcile (`scheduled-agent.ts:2805`, admin-gated route) | Conform (operator-only) |
 
 Read side: `resolveLedgerReadMode` ("d1-only" iff the tenant's stored
 readMode says so; default "merged"; the mode rides the response).

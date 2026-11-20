@@ -28,6 +28,7 @@ import type {
 } from "./auditReportPorts";
 import type { SeedCanonicalReportsResult } from "./auditReportProjection";
 import type { ReconcileRunLedgerResult } from "../agents/orchestrator/runLedgerReconcile";
+import type { ReconcileUsageEventsResult } from "../agents/orchestrator/usageEventsReconcile";
 
 export interface AuditHistoryRouteSession {
   internalUserId?: string;
@@ -185,6 +186,68 @@ export async function handleReconcileRunLedgerRoute(
     // new rows when all rows are already current).
     return Response.json(
       { error: "Run-ledger reconcile unavailable." },
+      { status: 500 },
+    );
+  }
+}
+
+export interface ReconcileUsageEventsRouteDeps {
+  session: SeedReportsRouteSession | null;
+  method: string;
+  isPlatformAdmin: boolean;
+  tenantId: string;
+  runReconcile: (input: {
+    tenantId: string;
+    setBy: string;
+    limit?: number;
+  }) => Promise<ReconcileUsageEventsResult>;
+}
+
+/**
+ * Issue #3185 (bridge slice) — POST /api/ops/usage-events-reconcile:
+ * the deliberate operator invocation point for the one-off
+ * usage-events backfill (mirror of handleReconcileRunLedgerRoute).
+ * Gating mirrors the seed route exactly (requireAuth → wired
+ * session → live platform-admin membership, fail-closed, no data
+ * on 403). Never auto-run: no boot, deploy, or tick path calls
+ * it. A refused sweep (AGENT_DB unbound) returns 200 with the
+ * refusal named in the result — the operator sees why nothing
+ * was reconciled instead of a silent zero-row pass.
+ */
+export async function handleReconcileUsageEventsRoute(
+  deps: ReconcileUsageEventsRouteDeps,
+): Promise<Response> {
+  if (!deps.session) {
+    return Response.json({ error: "Unauthorized: Please log in." }, { status: 401 });
+  }
+  if (deps.method !== "POST") {
+    return Response.json({ error: "Method not allowed" }, { status: 405 });
+  }
+  if (!deps.session.internalUserId) {
+    return Response.json(
+      { error: "Forbidden: usage-events reconcile requires a wired session." },
+      { status: 403 },
+    );
+  }
+  if (!deps.isPlatformAdmin) {
+    return Response.json(
+      { error: "Forbidden: usage-events reconcile requires platform-admin membership." },
+      { status: 403 },
+    );
+  }
+  try {
+    const result = await deps.runReconcile({
+      tenantId: deps.tenantId,
+      setBy: deps.session.githubLogin ?? deps.session.internalUserId,
+    });
+    return Response.json(result);
+  } catch {
+    // Generic error only: a failed invoke does not prove
+    // nothing happened, so the operator diagnoses projection
+    // state before retrying (the second invoke reports zero
+    // new rows when all rows are already current).
+    return Response.json(
+      { error: "Usage-events reconcile unavailable." },
       { status: 500 },
     );
   }

@@ -72,6 +72,14 @@ import {
   type ResearchTaskStore,
 } from "../services/researchTaskLedger";
 import { currentResearchRunId } from "../services/researchTriggers";
+import {
+  DoSqliteUsageEventStore,
+  USAGE_EVENTS_RETENTION_MAX_AGE_DAYS,
+} from "../data/doSqliteUsageEventAdapter";
+import {
+  reconcileUsageEventsProjection,
+  type ReconcileUsageEventsResult,
+} from "./orchestrator/usageEventsReconcile";
 import { createStructuredLogger } from "../observability/structuredLogger";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
 
@@ -435,6 +443,65 @@ export class ResearchAgent extends PortThink {
   /** Issue #635: delete terminal task records past the retention tiers. */
   async pruneExpiredResearchTasks(): Promise<string[]> {
     return this.taskLedger().pruneExpired();
+  }
+
+  /**
+   * Issue #3185 (bridge slice) — the retention prune's DO door
+   * for THIS (ResearchAgent) instance: deletes usage_events rows
+   * older than 365d. Driven by the OrchestratorAgent maintenance
+   * path, beside pruneExpiredResearchTasks. Returns the deleted
+   * count. The D1 mirror prunes in the orchestrator's own leg.
+   */
+  async pruneUsageEvents(args?: { nowMs?: number }): Promise<number> {
+    const nowMs = args?.nowMs ?? Date.now();
+    const cutoffIso = new Date(
+      nowMs - USAGE_EVENTS_RETENTION_MAX_AGE_DAYS * 24 * 60 * 60 * 1000,
+    ).toISOString();
+    const store = new DoSqliteUsageEventStore(this.ctx.storage.sql as never);
+    return store.pruneBefore(cutoffIso);
+  }
+
+  /**
+   * Issue #3185 (bridge slice) — the DSAR erasure door for THIS
+   * (ResearchAgent) instance's usage_events rows. Called by the
+   * OrchestratorAgent's fan-out; the mirror is the
+   * orchestrator's leg, never this instance's.
+   */
+  async eraseUsageEventsData(
+    userLogin: string,
+  ): Promise<{ deleted: number; residual: number }> {
+    const store = new DoSqliteUsageEventStore(this.ctx.storage.sql as never);
+    const deleted = store.deleteByUser(userLogin);
+    return { deleted, residual: store.countByUser(userLogin) };
+  }
+
+  /** Issue #3185 (bridge slice) — the DSAR count door for this instance. */
+  async countUsageEventsData(userLogin: string): Promise<number> {
+    const store = new DoSqliteUsageEventStore(this.ctx.storage.sql as never);
+    return store.countByUser(userLogin);
+  }
+
+  /**
+   * Issue #3185 (bridge slice) — the sweep carrier's DO door for
+   * THIS (ResearchAgent) instance's usage_events rows. Called by
+   * the OrchestratorAgent's reconcile fan-out; the mirror prune
+   * is the orchestrator leg's (pruneMirror:false), never this
+   * instance's. Returns this instance's counts only — the
+   * orchestrator merges them.
+   */
+  async reconcileUsageEventsProjection(args: {
+    limit?: number;
+    /** The mirror provenance label — the orchestrator fan-out passes research:<login>. */
+    sourceInstance: string;
+  }): Promise<ReconcileUsageEventsResult> {
+    return reconcileUsageEventsProjection({
+      env: this.env,
+      sql: this.ctx.storage.sql as never,
+      sourceInstance: args.sourceInstance,
+      limit: args?.limit,
+      nowMs: Date.now(),
+      pruneMirror: false,
+    });
   }
 
   /** Typed config read (amendment 1: the single config owner). */

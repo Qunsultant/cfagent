@@ -16,6 +16,11 @@
 import type { AsyncJobSubmission, Env } from "../../types";
 import type { DatabaseORM } from "../../orm";
 import { computeMarketplaceRevenueSummary } from "../../data/marketplacePorts";
+import {
+  createUsageEventMirrorAdapter,
+  ensureUsageEventMirrorTables,
+} from "../../data/createUsageEventMirrorPorts";
+import { mergeMeterRows } from "../../data/d1UsageEventMirrorAdapter";
 import { McpToolFactory } from "./commands";
 import { createObservabilitySink } from "../../observability/createObservabilityPorts";
 import type { ObservabilitySink } from "../../observability/observabilityPorts";
@@ -322,8 +327,29 @@ export async function readMCPResource(
     case "sqlite://revenue/summary": {
       // #2345: revenue computes over the marketplace ports
       // (fleet counters when D1-bound) + the DO-resident ledger.
+      // Issue #3185 (bridge slice): the meter rows are passed
+      // explicitly now — omitting them silently zeroed the
+      // coverage cut. The rows are the union of this DO
+      // instance's table and the D1 mirror (when AGENT_DB is
+      // bound), deduped by id: the mirror carries the
+      // ResearchAgent half this instance cannot see, and the DO
+      // rows cover anything not yet projected. When AGENT_DB is
+      // unbound the coverage cut is this instance's half only,
+      // and the mirror read is skipped (never a silent zero —
+      // the DO rows are always passed).
       const mp = await orm.marketplacePorts(context.env ?? {});
-      const summary = await computeMarketplaceRevenueSummary(mp, orm.transactions);
+      let meterRows = [...orm.usageEvents.listAllWithDetail()];
+      const mirror = createUsageEventMirrorAdapter(context.env ?? {});
+      if (mirror) {
+        try {
+          await ensureUsageEventMirrorTables(mirror);
+          meterRows = mergeMeterRows(meterRows, await mirror.listAll());
+        } catch {
+          // Mirror read failure never fails the resource: the DO
+          // rows above still answer the coverage cut.
+        }
+      }
+      const summary = await computeMarketplaceRevenueSummary(mp, orm.transactions, meterRows);
       return {
         uri,
         mimeType: "application/json",

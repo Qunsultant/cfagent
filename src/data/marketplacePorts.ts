@@ -287,14 +287,31 @@ export function marketplaceSeedData(now: string): {
  * never an error). The old lines' formulas are UNCHANGED; the
  * new lines are additive and are NOT folded into gross/net.
  */
-export function computeRevenueSummaryFromRows(rows: {
-  externalAds: ExternalAdRecord[];
-  ads: AdRecord[];
-  transactions: TransactionRecord[];
-  referrals: ReferralRecord[];
-  /** Meter rows for the coverage cut; omit/empty = no served-run data. */
-  usageEvents?: UsageEventDetailRow[];
-}): RevenueSummary {
+export function computeRevenueSummaryFromRows(
+  rows: {
+    externalAds: ExternalAdRecord[];
+    ads: AdRecord[];
+    transactions: TransactionRecord[];
+    referrals: ReferralRecord[];
+    /** Meter rows for the coverage cut; omit/empty = no served-run data. */
+    usageEvents?: UsageEventDetailRow[];
+  },
+  /**
+   * Issue #3185 (bridge slice) — optional tenant scope. It
+   * scopes ONLY the meter coverage cut (runRevenueByCoverage):
+   * rows whose stamped tenantId matches, NULL-tenant rows
+   * excluded (unattributed is no tenant's). Every other cut
+   * stays platform-wide BY DESIGN: the subscription /
+   * pay-per-run cuts read mas_transactions, whose tenant
+   * stamping is partial by #3182 design (x402 wallet receipts
+   * and drafts stamp NULL), so scoping them would silently
+   * drop paid revenue; the ad / referral cuts carry no tenant
+   * column at all. A full tenant revenue summary is a
+   * follow-up once transaction tenant stamping covers the paid
+   * paths. Omit tenantId for the platform-wide summary.
+   */
+  opts?: { tenantId?: string },
+): RevenueSummary {
   const extAds = rows.externalAds;
   const adNetworkRevenue = extAds.reduce((sum, ad) => sum + (ad.earnings || 0), 0);
   const totalImpressions = extAds.reduce((sum, ad) => sum + (ad.impressions || 0), 0);
@@ -319,7 +336,11 @@ export function computeRevenueSummaryFromRows(rows: {
 
   const { subscriptionRevenue, subscriptionCount } = summarizeSubscriptionRevenue(txs);
   const { payPerRunRevenue, payPerRunByFamily } = summarizePayPerRunRevenue(txs);
-  const runRevenueByCoverage = summarizeCoverage(rows.usageEvents ?? []);
+  const coverageEvents =
+    opts?.tenantId != null
+      ? (rows.usageEvents ?? []).filter((e) => e.tenantId === opts.tenantId)
+      : (rows.usageEvents ?? []);
+  const runRevenueByCoverage = summarizeCoverage(coverageEvents);
 
   return {
     grossRevenue,
@@ -543,18 +564,27 @@ export async function computeMarketplaceRevenueSummary(
    * the coverage buckets read empty, never an error.
    */
   usageEvents: UsageEventDetailRow[] = [],
+  /**
+   * Issue #3185 (bridge slice): scopes the meter coverage cut
+   * to one tenant (see computeRevenueSummaryFromRows); all
+   * other cuts stay platform-wide.
+   */
+  opts?: { tenantId?: string },
 ): Promise<RevenueSummary> {
   const [externalAds, ads, referrals] = await Promise.all([
     marketplace.externalAds.findMany(),
     marketplace.ads.findMany(),
     marketplace.referrals.findMany(),
   ]);
-  return computeRevenueSummaryFromRows({
-    externalAds,
-    ads,
-    transactions: transactions.findMany(),
-    referrals,
-    usageEvents,
-  });
+  return computeRevenueSummaryFromRows(
+    {
+      externalAds,
+      ads,
+      transactions: transactions.findMany(),
+      referrals,
+      usageEvents,
+    },
+    opts,
+  );
 }
 
