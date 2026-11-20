@@ -7,7 +7,7 @@
  * Copilot layer).
  */
 export const IBKR_CONFIG = {
-  serverId: "ibkr",
+  serverId: "ibkr", label: "Interactive Brokers", icon: "🏛️",
   mcpServerUrl: "https://api.ibkr.com/v1/api/mcp-public",
   callbackPath: "/auth/ibkr/callback",
   readOnlyScopes: "mcp.read",

@@ -1,18 +1,20 @@
 /**
- * Issue #5113 (Sub-issue 4 of #5094) — HTTP routes for `{ broker, mode, accountType, accountId }`
- * account bindings:
+ * Issue #5113 & #5097 (Sub-issues of #5094) — HTTP routes for `{ broker, mode, accountType, accountId }`
+ * account bindings and the runtime-configurable broker / asset-type / account-type registry:
  *   GET    /broker/account-binding
- *   PUT    /broker/account-binding (also accepts POST)
+ *   PUT    /broker/account-binding (also accepts POST, including `registryPatch`)
  *   DELETE /broker/account-binding
  */
 import type { Env } from "../../types";
-import { ACCOUNT_BINDING_SCOPES, ACCOUNT_TYPES } from "../../config/accountBindings";
+import { ACCOUNT_BINDING_SCOPES } from "../../config/accountBindings";
 import {
+  getBrokerAssetAccountRegistry,
   listAccountBindings,
   removeAccountBinding,
+  updateBrokerAssetAccountRegistry,
   upsertAccountBinding,
 } from "../../services/accountBindings";
-import { isAccountBindingBroker } from "../../trading";
+import { isAccountBindingBroker, type BrokerAssetAccountRegistryPatch } from "../../trading";
 
 export async function handleAccountBindingRoutes(
   request: Request,
@@ -35,7 +37,10 @@ export async function handleAccountBindingRoutes(
   const method = request.method.toUpperCase();
 
   if (method === "GET") {
-    const bindings = await listAccountBindings(ctx.env, sessionId);
+    const [bindings, registry] = await Promise.all([
+      listAccountBindings(ctx.env, sessionId),
+      getBrokerAssetAccountRegistry(ctx.env, sessionId),
+    ]);
     const brokerFilter = url.searchParams.get("broker")?.trim().toLowerCase();
     const modeFilter = url.searchParams.get("mode")?.trim().toLowerCase();
     const typeFilter = url.searchParams.get("accountType")?.trim().toLowerCase();
@@ -47,7 +52,10 @@ export async function handleAccountBindingRoutes(
     });
     return Response.json({
       bindings: filtered,
-      supportedAccountTypes: ACCOUNT_TYPES,
+      registry,
+      supportedAccountTypes: registry.accountTypes,
+      supportedAssetTypes: registry.assetTypes,
+      supportedBrokers: registry.brokers,
       supportedScopes: ACCOUNT_BINDING_SCOPES,
     });
   }
@@ -56,6 +64,17 @@ export async function handleAccountBindingRoutes(
     const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
     if (!body) {
       return Response.json({ code: "invalid_request", message: "JSON body is required." }, { status: 400 });
+    }
+    if (body.registryPatch && typeof body.registryPatch === "object") {
+      const regRes = await updateBrokerAssetAccountRegistry(
+        ctx.env,
+        sessionId,
+        body.registryPatch as BrokerAssetAccountRegistryPatch,
+      );
+      if (!regRes.ok) {
+        return Response.json({ code: "invalid_request", message: regRes.error }, { status: 400 });
+      }
+      return Response.json({ ok: true, registry: regRes.registry });
     }
     const res = await upsertAccountBinding(ctx.env, sessionId, {
       broker: body.broker,
@@ -77,8 +96,9 @@ export async function handleAccountBindingRoutes(
     const mode = String(body.mode ?? url.searchParams.get("mode") ?? "").trim().toLowerCase();
     const accountType = String(body.accountType ?? url.searchParams.get("accountType") ?? "stock").trim().toLowerCase();
     const scope = String(body.scope ?? url.searchParams.get("scope") ?? "tenant").trim().toLowerCase();
+    const registry = await getBrokerAssetAccountRegistry(ctx.env, sessionId);
 
-    if (!isAccountBindingBroker(broker) || (mode !== "paper" && mode !== "live")) {
+    if (!isAccountBindingBroker(broker, registry) || (mode !== "paper" && mode !== "live")) {
       return Response.json(
         { code: "invalid_request", message: "Valid broker and mode are required." },
         { status: 400 },
@@ -88,7 +108,7 @@ export async function handleAccountBindingRoutes(
     const removed = await removeAccountBinding(ctx.env, sessionId, {
       broker,
       mode,
-      accountType: accountType as (typeof ACCOUNT_TYPES)[number],
+      accountType,
       scope: scope as (typeof ACCOUNT_BINDING_SCOPES)[number],
     });
     return Response.json({ ok: true, removed });

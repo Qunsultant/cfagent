@@ -19,6 +19,7 @@
 import {
   BROKER_CATALOG,
   brokerPresentation,
+  type BrokerAssetAccountRegistry,
   type BrokerCredentialKind,
   type BrokerPresentation,
 } from "../trading";
@@ -28,6 +29,8 @@ export interface BrokerOptionSource {
   readonly id: string;
   readonly label: string;
   readonly credentialKind: BrokerCredentialKind;
+  readonly icon?: string;
+  readonly enabled?: boolean;
 }
 
 /** One broker in the settings list. */
@@ -48,10 +51,30 @@ export function brokerOptions(
   catalog: Readonly<Record<string, BrokerOptionSource>> = BROKER_CATALOG,
   present: PresentationFor = brokerPresentation,
 ): BrokerOption[] {
-  return Object.values(catalog).map((entry) => ({
-    id: entry.id,
-    label: entry.label,
-    credentialKind: entry.credentialKind,
-    icon: present(entry.id).icon,
-  }));
+  return Object.values(catalog)
+    .filter((entry) => entry.enabled !== false)
+    .map((entry) => ({
+      id: entry.id,
+      label: entry.label,
+      credentialKind: entry.credentialKind,
+      icon: entry.icon ?? present(entry.id).icon,
+    }));
+}
+
+/**
+ * Issue #5097 (Slice F0): derives the selectable broker options from the
+ * runtime-configurable `BrokerAssetAccountRegistry` (#3855 extension).
+ */
+export function brokerOptionsFromRegistry(
+  registry: BrokerAssetAccountRegistry,
+  present: PresentationFor = brokerPresentation,
+): BrokerOption[] {
+  return registry.brokers
+    .filter((entry) => entry.enabled)
+    .map((entry) => ({
+      id: entry.id,
+      label: entry.label,
+      credentialKind: entry.credentialKind,
+      icon: entry.icon || present(entry.id).icon,
+    }));
 }

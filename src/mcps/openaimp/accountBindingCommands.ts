@@ -5,21 +5,44 @@
 import { z } from "zod";
 import { ACCOUNT_BINDING_SCOPES, ACCOUNT_TYPES } from "../../config/accountBindings";
 import {
+  getBrokerAssetAccountRegistry,
   listAccountBindings,
   removeAccountBinding,
   resolveUserAccountBinding,
+  updateBrokerAssetAccountRegistry,
   upsertAccountBinding,
 } from "../../services/accountBindings";
 import type { IMcpToolCommand, McpToolContext } from "../../patterns/interfaces";
 
 const BrokerAccountBindingInputSchema = z.object({
-  action: z.enum(["list", "get", "set", "clear"]).default("list"),
+  action: z
+    .enum(["list", "get", "set", "clear", "registry_get", "registry_update"])
+    .default("list"),
   broker: z.string().optional(),
   mode: z.enum(["paper", "live"]).optional(),
-  accountType: z.enum(ACCOUNT_TYPES).optional(),
+  accountType: z.string().optional(),
   scope: z.enum(ACCOUNT_BINDING_SCOPES).optional(),
   accountId: z.string().optional(),
   accountName: z.string().optional(),
+  registryPatch: z
+    .object({
+      upsertBroker: z
+        .object({
+          id: z.string(),
+          label: z.string().optional(),
+          icon: z.string().optional(),
+          enabled: z.boolean().optional(),
+          modes: z.array(z.enum(["paper", "live"])).optional(),
+          assetTypes: z.array(z.string()).optional(),
+        })
+        .optional(),
+      removeBrokerId: z.string().optional(),
+      addAssetType: z.string().optional(),
+      removeAssetType: z.string().optional(),
+      addAccountType: z.string().optional(),
+      removeAccountType: z.string().optional(),
+    })
+    .optional(),
 });
 
 export class BrokerAccountBindingCommand implements IMcpToolCommand {
@@ -48,8 +71,27 @@ export class BrokerAccountBindingCommand implements IMcpToolCommand {
     const parsed = BrokerAccountBindingInputSchema.parse(input ?? {});
     const userLogin = context.sessionId;
 
+    if (parsed.action === "registry_get") {
+      const registry = await getBrokerAssetAccountRegistry(context.env, userLogin);
+      return { ok: true, action: "registry_get", registry };
+    }
+
+    if (parsed.action === "registry_update") {
+      if (!parsed.registryPatch) {
+        return { ok: false, action: "registry_update", error: "registryPatch is required for action='registry_update'." };
+      }
+      const res = await updateBrokerAssetAccountRegistry(context.env, userLogin, parsed.registryPatch);
+      if (!res.ok) {
+        return { ok: false, action: "registry_update", error: res.error };
+      }
+      return { ok: true, action: "registry_update", registry: res.registry };
+    }
+
     if (parsed.action === "list") {
-      const all = await listAccountBindings(context.env, userLogin);
+      const [all, registry] = await Promise.all([
+        listAccountBindings(context.env, userLogin),
+        getBrokerAssetAccountRegistry(context.env, userLogin),
+      ]);
       const filtered = all.filter((b) => {
         if (parsed.broker && b.broker !== parsed.broker.trim().toLowerCase()) return false;
         if (parsed.mode && b.mode !== parsed.mode) return false;
@@ -61,7 +103,9 @@ export class BrokerAccountBindingCommand implements IMcpToolCommand {
         ok: true,
         action: "list",
         bindings: filtered,
-        supportedAccountTypes: ACCOUNT_TYPES,
+        registry,
+        supportedAccountTypes: registry.accountTypes,
+        supportedAssetTypes: registry.assetTypes,
         supportedScopes: ACCOUNT_BINDING_SCOPES,
       };
     }
@@ -71,8 +115,9 @@ export class BrokerAccountBindingCommand implements IMcpToolCommand {
         throw new Error("broker and mode are required for action='get'.");
       }
       const { isAccountBindingBroker } = await import("../../trading");
+      const registry = await getBrokerAssetAccountRegistry(context.env, userLogin);
       const normBroker = parsed.broker.trim().toLowerCase();
-      if (!isAccountBindingBroker(normBroker)) {
+      if (!isAccountBindingBroker(normBroker, registry)) {
         throw new Error(`Unsupported broker "${parsed.broker}".`);
       }
       const res = await resolveUserAccountBinding(context.env, userLogin, {
@@ -110,8 +155,9 @@ export class BrokerAccountBindingCommand implements IMcpToolCommand {
       throw new Error("broker and mode are required for action='clear'.");
     }
     const { isAccountBindingBroker } = await import("../../trading");
+    const registry = await getBrokerAssetAccountRegistry(context.env, userLogin);
     const normBroker = parsed.broker.trim().toLowerCase();
-    if (!isAccountBindingBroker(normBroker)) {
+    if (!isAccountBindingBroker(normBroker, registry)) {
       throw new Error(`Unsupported broker "${parsed.broker}".`);
     }
     const removed = await removeAccountBinding(context.env, userLogin, {
