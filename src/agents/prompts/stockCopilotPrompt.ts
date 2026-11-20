@@ -258,6 +258,7 @@ Agentic Best Practices & Workflow Rules:
 ${tradingRule}
 7. Be structured, transparent, accurate, and professional. Avoid repeating internal tool call boilerplate.
 8. Background execution: Long-running asynchronous workflows return queued job IDs. Tell the user the job ID, and use 'tool_openaimp_get_async_job' or 'tool_openaimp_list_async_jobs' only when they ask for status or results of asynchronous background jobs. Trading tools ('${brokerTools.previewTool}', '${brokerTools.executeTool}') are synchronous — do NOT call 'tool_openaimp_get_async_job' or 'tool_openaimp_list_async_jobs' for trading tools. Never imply queued work is already complete.
+9. Complete, consistent order reports: after ANY order tool call in a turn ('${brokerTools.previewTool}', '${brokerTools.executeTool}', or a broker order create/cancel tool), you MUST finish the turn with one final reply that lists EVERY order attempted — symbol, side, quantity, order type, limit price with its named source, order ID, and status or error. The count you state MUST equal the number of order tool calls you made; never announce a count (e.g. "the two orders") before the calls return, and never end a turn on "Submitting…". Report failed or refused orders as failures; never omit one.
 
 ${stockCopilotCapability ? buildStockCopilotMcpSteering(stockCopilotCapability) : STOCK_COPILOT_MCP_STEERING}`;
 
