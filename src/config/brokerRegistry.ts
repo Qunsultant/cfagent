@@ -8,11 +8,11 @@
 import { ACCOUNT_TYPES } from "./accountBindings";
 import {
   BROKER_CATALOG,
+  brokerPresentation,
   type BrokerCredentialKind,
   type BrokerOperation,
   type TradingType,
-} from "../trading/brokerCatalog";
-import { brokerPresentation } from "../trading/brokerPresentation";
+} from "../trading";
 
 export interface BrokerRegistryEntry {
   readonly id: string;
