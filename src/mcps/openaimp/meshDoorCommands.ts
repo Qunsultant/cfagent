@@ -1238,7 +1238,7 @@ const SCREEN_UNIVERSE_IDS = Object.keys(UNIVERSES) as UniverseId[];
 export class RunStockScreenCommand implements IMcpToolCommand<MeshScreenDoorInput> {
   readonly name = "run_stock_screen";
   readonly description =
-    "Run a stock screen over a named universe (NASDAQ100, SP500, SP100, RUSSELL2000, TECH, ETF, LEV_ETF, or ALL universes) through the mesh screen door: a durable ScreenerScreenWorkflow run whose standout picks are read back from the canonical report store. This is the universe-screen path — for raw listings rows by price/cap/gainers filters use etrade_market_scan instead. When monetization is on, the door runs the paid path (budget check, then a PaymentWorkflow run — one charge per run-request). Requires the chat turn's acting identity; the result is the completed run's stored result.";
+    "Run a stock screen over a named universe (NASDAQ100, SP500, SP100, RUSSELL2000, TECH, ETF, LEV_ETF, or ALL universes) through the mesh screen door: a durable ScreenerScreenWorkflow run whose standout picks are read back from the canonical report store. This is the universe-screen path — for raw listings rows by price/cap/gainers filters use etrade_market_scan instead. When monetization is on, the door runs the paid path (budget check, then a PaymentWorkflow run — one charge per run-request). A paid screen needs a receipt email: if none is known, ask the user for it in the chat turn instead of calling without one — pass the address the user replies with as receiptEmail. Requires the chat turn's acting identity; the result is the completed run's stored result.";
   readonly jsonSchema = {
     type: "object" as const,
     properties: {
@@ -1289,6 +1289,15 @@ export class RunStockScreenCommand implements IMcpToolCommand<MeshScreenDoorInpu
         type: "string",
         description: "The free-form screening intent a non-deterministic run's interpretation step proposes criteria from. Required with screenMode non-deterministic; refused without it.",
       },
+      // Issue #4435 — the receipt email for a paid screen,
+      // supplied by the user in the chat turn. When monetization
+      // is on and no receipt email is known, ask the user for
+      // it instead of calling without it; pass the address the
+      // user replies with. Omit for free screens.
+      receiptEmail: {
+        type: "string",
+        description: "The receipt email for a paid screen, supplied by the user in the chat turn. When monetization is on and no receipt email is known, ask the user for it instead of calling without it; pass the address the user replies with. Omit for free screens.",
+      },
     },
   };
   readonly zodSchema = z.object({
@@ -1330,6 +1339,14 @@ export class RunStockScreenCommand implements IMcpToolCommand<MeshScreenDoorInpu
       .string()
       .optional()
       .describe("Issue #4434 — the free-form screening intent for a non-deterministic run"),
+    receiptEmail: z
+      .string()
+      .trim()
+      .min(1)
+      .optional()
+      .describe(
+        "Issue #4435 — the receipt email for a paid screen, supplied by the user in the chat turn. When monetization is on and no receipt email is known, ask the user for it instead of calling without it; pass the address the user replies with.",
+      ),
   });
 
   async execute(
@@ -1349,6 +1366,10 @@ export class RunStockScreenCommand implements IMcpToolCommand<MeshScreenDoorInpu
       success: result.success,
       matchedCount: result.matchedCount,
       totalScanned: result.totalScanned,
+      // Issue #4435: the audit trail names where a paid run's
+      // receipt email came from (in-turn vs seam) — the address
+      // itself stays in the PaymentWorkflow submission.
+      ...(result.receiptEmailSource ? { receiptEmailSource: result.receiptEmailSource } : {}),
     });
     return result;
   }

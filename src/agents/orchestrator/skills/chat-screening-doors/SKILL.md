@@ -111,9 +111,7 @@ never report results the door did not return.
   the refusal; do not split the request to evade the budget.
 - price_unavailable — no stored catalogue price exists for the
   paid run. Do not fabricate a price.
-- checkout_email_required — a chat turn has no checkout email
-  source, so the paid path cannot complete. Report the honest
-  stop; do not claim a charge or a completion.
+- checkout_email_required — the paid path needs a receipt email the user supplies in the chat turn: ask for it (receiptEmail on the tool call); if none is supplied the door refuses coded. Report the honest stop; do not claim a charge or a completion.
 
 ## The never-deflect rule
 

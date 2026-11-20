@@ -1,0 +1,3 @@
+### Changed
+
+- Paid chat screens can now proceed with a receipt email the user supplies in the chat turn: `run_stock_screen` accepts `receiptEmail`, and the mesh screen door uses it (validated) before the composed checkout-email seam. With no address at all the paid path refuses coded `checkout_email_required`, naming the missing contact and the action (reply with the receipt email address). The run record names the email's source (`receiptEmailSource` "in-turn" | "seam") on the result and in the MCP audit; the address itself rides the PaymentWorkflow submission. The NLQ chat path takes no in-turn address — its refusal carries `[checkout_email_required]` and names the same action.

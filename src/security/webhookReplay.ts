@@ -216,6 +216,17 @@ export function sharedMemoryReplayStore(): MemoryReplayStore {
 const EMAIL_FORMAT_RE = /^[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+$/;
 let warnedAllowlistUnset = false;
 
+/**
+ * Issue #4435 — format-only email check, for caller-supplied
+ * contacts that are NOT outbound notification recipients (a
+ * checkout receipt email is any customer address, so the
+ * EMAIL_TO_ALLOWED_DOMAINS allowlist must never gate it).
+ * validateEmailRecipient stays the outbound-recipient check.
+ */
+export function isValidEmailFormat(email: string): boolean {
+  return EMAIL_FORMAT_RE.test(email.trim());
+}
+
 export type EmailRecipientCheck = { ok: true } | { ok: false; reason: string };
 
 /**
