@@ -26,9 +26,9 @@ export interface ResearchJobConfig {
 }
 
 /**
- * Issue #5912 — the venue a run uses when it names none. E*TRADE is the
- * historical provider; the selection is per run, the default is one config
- * value so no surface hardcodes a broker id.
+ * Issue #5912 — the venue a run uses when it names none. The historical
+ * provider's id is the default; the selection is per run, and one config
+ * value means no other surface hardcodes a broker id.
  */
 export const DEFAULT_RESEARCH_BROKER_ID = "etrade";
 

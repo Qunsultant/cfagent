@@ -147,7 +147,7 @@ function chainToSnapshot(
  * Issue #5912 — the research data provider over whichever trading platform
  * the run selected. The platform seam was always generic (`ITradingPlatform`);
  * only the resolution was hardcoded, so the name is kept and the selection
- * is a constructor option: unset resolves E*TRADE, exactly as before.
+ * is a constructor option: unset resolves the configured default, as before.
  */
 export class EtradeResearchDataProvider implements ResearchDataProvider {
   private readonly platform: ITradingPlatform;
@@ -180,7 +180,7 @@ export class EtradeResearchDataProvider implements ResearchDataProvider {
      * Issue #5912 — the venue this run quotes from: a broker id the platform
      * registry knows, plus the mode that overrides its environment
      * ("live" / "paper" / "sandbox", per the platform's own vocabulary).
-     * Unset = E*TRADE in the deployment's environment (today's behaviour).
+     * Unset = the configured default in the deployment's environment.
      */
     private readonly selection?: { brokerId?: TradingPlatformId; mode?: string }
   ) {

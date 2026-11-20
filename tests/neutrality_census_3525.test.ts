@@ -1432,6 +1432,11 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/config/quoteModes.ts", "alpaca", 12],
   ["src/config/quoteModes.ts", "etrade", 14],
   ["src/config/quoteModes.ts", "yahoo", 15],
+  // Issue #5912 — census disposition: the research run's default venue id is
+  // now one externalized config value (DEFAULT_RESEARCH_BROKER_ID) instead of
+  // the hardcoded platform name inside the provider. This is the value that
+  // replaces a hardcode, so the row is a replacement, not a new brand use.
+  ["src/config/researchJobConfig.ts", "etrade", 1],
   ["src/config/reportGeneratorModes.ts", "etrade", 1],
   ["src/config/reportGeneratorModes.ts", "yahoo", 3],
   ["src/config/restTwinsModes.ts", "alpaca", 1],
