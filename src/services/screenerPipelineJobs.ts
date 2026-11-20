@@ -52,7 +52,18 @@ import type {
   ScreenerServeStageOutput,
   ScreenerStoreStageOutput,
 } from "../agents/screener-agent";
-import type { YahooHistoryDeps } from "../trading";
+import type { YahooHistoryDeps, DataProvider } from "../trading";
+import {
+  bindAlpacaQuoteDeps,
+  bindEtradeQuoteDeps,
+  bindPublicQuoteDeps,
+  bindYahooScreenerDeps,
+  bindYahooHistoryDeps,
+} from "../trading";
+import { defaultBreakerRegistry } from "../breakers/createBreakerPorts";
+import type { CircuitBreaker } from "../breakers/breakerPorts";
+import type { FeedJobDefinition } from "./feedJobs";
+import type { FeedStepDeps } from "./feedPipelineJobs";
 import type { NasdaqStockListing } from "../services/nasdaqListings";
 import type {
   GoalScreenCommand,
@@ -89,21 +100,38 @@ export const SCREENER_NODE_STEPS: Record<(typeof SCREENER_NODE_KINDS)[number], s
  * (FeedStepDeps et al.): the agent resolution, the bound quote /
  * history deps for one request, and the store / deliver doors.
  * The quote/history deps are resolved per request because the
- * platform binding is per-provider (and per-run in production).
- * Both are OPTIONAL: when a host omits them the agent binds
- * them itself from the platform (bindScreenerQuoteDeps /
- * bindScreenerHistoryDeps, issue #4192) — a host that cannot
- * bind them refuses by name at execution (never an unwired
- * fetch), exactly as the feed step refuses
- * FEED_JOB_NOT_CONFIGURED.
+ * provider is per-request (and the run context per-run).
+ * Both are OPTIONAL in the interface so stage-scoped test
+ * registries may omit them — but a host that omits them gets a
+ * named refusal at execution, never an unwired fetch: the feed
+ * stage refuses SCREENER_QUOTE_DEPS_MISSING and the gather stage
+ * SCREENER_HISTORY_DEPS_MISSING (issue #5823 — the agent no
+ * longer binds them itself from the platform at stage time;
+ * #4192's fallback is gone on the engine path, and the bespoke
+ * flow keeps its own bind until slice 7 retires it).
  */
 export interface ScreenerStepDeps {
   /** The ScreenerAgent port for one owner login (a DO stub in production). */
   agentFor: (userLogin: string) => ScreenerAgentPort;
-  /** The bound quote deps for one screen request (test override seam; omitted = agent binds them). */
-  quoteDepsFor?: (req: ScreenerRunRequest) => ScreenerQuoteDepsBundle;
-  /** The bound history deps for one screen request (test override seam; omitted = agent binds them). */
-  historyDepsFor?: (req: ScreenerRunRequest) => YahooHistoryDeps;
+  /**
+   * Issue #5823 — the bound quote deps for one screen request,
+   * over the #3941 capture-wired provider (built by
+   * createScreenerFeedDepsFactories from the feed deps). The run
+   * id rides the capture context. Omitted = the feed stage
+   * refuses SCREENER_QUOTE_DEPS_MISSING by name.
+   */
+  quoteDepsFor?: (req: ScreenerRunRequest, runId: string) => ScreenerQuoteDepsBundle;
+  /**
+   * Issue #5823 — the bound history deps for one screen request,
+   * over the #3941 Yahoo provider (same factories). Omitted = the
+   * gather stage refuses SCREENER_HISTORY_DEPS_MISSING by name.
+   * The factory itself degrades an unwired history provider to
+   * null-fetching deps (#1331's contract, preserved).
+   */
+  historyDepsFor?: (
+    req: ScreenerRunRequest,
+    runId: string,
+  ) => YahooHistoryDeps | Promise<YahooHistoryDeps>;
   /**
    * The canonical-store door (the flow's storeReport, moved
    * here): market payloads go through recordWorkflowScreenReport,
@@ -148,6 +176,112 @@ export interface ScreenerStepDeps {
    * Tests inject a fake; production never overrides it.
    */
   goalRunner?: ScreenerGoalRunner;
+}
+
+/**
+ * Issue #5823 (#4437 slice 2) — the screener's feed-stage deps over
+ * the #3941 capture-wired provider: the quote/history deps the step
+ * handler binds per request, from the feed deps' registry +
+ * providerFor (the SAME construction feed jobs run through —
+ * `createCaptureWiredFeedProvider`, not a second fetch path).
+ *
+ * - The quotes job is resolved per request source from the feed
+ *   registry (dataset "quotes"). Only its sourceId is consumed by
+ *   the factory, so the job's universe is not load-bearing here —
+ *   the provider fetches the request's own symbols either way;
+ *   a source with no quotes job refuses by name, never another
+ *   source's job (the #2144 no-silent-substitution rule).
+ * - The provider is built per request with the RUN's login (the
+ *   per-login providers fetch as the run's user, never the host's
+ *   wiring login) and the Yahoo breaker (#1745) when supplied —
+ *   the slice-1 gated binds (`bindYahooScreenerDeps` et al.) sit
+ *   on top, so fresh capture serves with zero live calls and a
+ *   miss fetches live once and writes through.
+ * - History rides the same Yahoo provider through
+ *   `bindYahooHistoryDeps` (the factory's Yahoo adapter exposes
+ *   getHistoricalBars); an unwired history provider degrades to
+ *   null-fetching deps, exactly as the agent's bind did (#1331).
+ * - A missing leg for the planned provider is a named refusal
+ *   (SCREENER_QUOTE_DEPS_MISSING), never a fallback.
+ */
+export function createScreenerFeedDepsFactories(
+  feedDeps: FeedStepDeps,
+  yahooBreaker?: CircuitBreaker,
+): Pick<ScreenerStepDeps, "quoteDepsFor" | "historyDepsFor"> {
+  /** The registered quotes job for a source — the factory's key. */
+  function quotesJobForSource(sourceId: string): FeedJobDefinition {
+    if (!feedDeps?.registry) {
+      throw new Error(
+        "SCREENER_QUOTE_DEPS_MISSING: the screener step deps were wired without feed deps — the feed stage reads through the #3941 capture-wired provider, so a host that cannot supply feed deps cannot serve a screen (#5823).",
+      );
+    }
+    const def = feedDeps.registry
+      .list()
+      .find((job) => job.sourceId === sourceId && job.dataset === "quotes");
+    if (!def) {
+      throw new Error(
+        `SCREENER_QUOTE_DEPS_MISSING: no quotes feed job is registered for source "${sourceId}" — the screener's feed stage reads through the #3941 capture-wired provider, so a source with no quotes job cannot serve a screen (#5823).`,
+      );
+    }
+    return def;
+  }
+
+  /** The #3941 provider for a source, built for this run's login. */
+  function providerForSource(sourceId: string, req: ScreenerRunRequest): DataProvider {
+    // The job lookup runs first (and carries the no-feed-deps guard):
+    // a callee-side `feedDeps.providerFor(...)` read would throw a
+    // TypeError before the arguments — and the guard — are evaluated.
+    const def = quotesJobForSource(sourceId);
+    const provider = feedDeps.providerFor(def, {
+      userLogin: req.userLogin,
+      ...(yahooBreaker ? { yahooBreaker } : {}),
+    });
+    if (!provider) {
+      throw new Error(
+        `SCREENER_QUOTE_DEPS_MISSING: no capture-wired provider for source "${sourceId}" — the feed host cannot wire it for this run (#5823).`,
+      );
+    }
+    return provider;
+  }
+
+  return {
+    quoteDepsFor: (req, runId) => {
+      const provider = req.provider;
+      if (!provider) {
+        throw new Error(
+          "SCREENER_QUOTE_DEPS_MISSING: the screen request names no provider — the feed stage reads through the #3941 capture-wired provider, so a provider-less request cannot serve a screen (#5823).",
+        );
+      }
+      const runContext = { runId, userLogin: req.userLogin };
+      const source = providerForSource(provider, req);
+      switch (provider) {
+        case "yahoo":
+          return { yahoo: bindYahooScreenerDeps(source, runContext) };
+        case "etrade":
+          return { etrade: bindEtradeQuoteDeps(source, runContext) };
+        case "alpaca":
+          return { alpaca: bindAlpacaQuoteDeps(source, runContext) };
+        case "public":
+          return { public: bindPublicQuoteDeps(source, runContext) };
+        default:
+          throw new Error(
+            `SCREENER_QUOTE_DEPS_MISSING: provider "${provider}" has no screener quote bind — the feed stage reads through the #3941 capture-wired provider for yahoo / etrade / alpaca / public only (#5823).`,
+          );
+      }
+    },
+    historyDepsFor: async (req, runId) => {
+      try {
+        const source = providerForSource("yahoo", req);
+        return bindYahooHistoryDeps(source, { runId, userLogin: req.userLogin });
+      } catch {
+        // Issue #1331: history resolution degrades to null-fetching
+        // deps, so the batch still runs and every symbol gets honest
+        // null technicals — the screen itself never fails on history
+        // resolution. The persisted-first wrap below still applies.
+        return { fetchBars: async () => null };
+      }
+    },
+  };
 }
 
 function requireUserLogin(params: Record<string, unknown>): string {
@@ -256,7 +390,11 @@ export function registerScreenerSteps(registry: JobStepRegistry, deps: ScreenerS
     const goalScreen = goalScreenParam(params);
     const output = await agent.screenFeedStage(ctx.runId, {
       request: req,
-      ...(deps.quoteDepsFor ? { quoteDeps: goalScreen ? {} : deps.quoteDepsFor(req) } : {}),
+      // Issue #5823: the quote deps arrive bound over the #3941
+      // capture-wired provider (createScreenerFeedDepsFactories);
+      // a goal run needs none (its quotes are the goal runner's
+      // stock leg). Omitted = the stage refuses by name.
+      ...(deps.quoteDepsFor ? { quoteDeps: goalScreen ? {} : deps.quoteDepsFor(req, ctx.runId) } : {}),
       symbols,
       timestamp: ctx.now,
       ...(goalScreen ? { goalScreen } : {}),
@@ -273,7 +411,10 @@ export function registerScreenerSteps(registry: JobStepRegistry, deps: ScreenerS
     const req = screenRequestFromParams(params, shardSymbolsFor(params, ctx.shardKey), ctx.shardKey);
     const output = await agent.screenGatherStage(ctx.runId, {
       request: req,
-      ...(deps.historyDepsFor ? { historyDeps: deps.historyDepsFor(req) } : {}),
+      // Issue #5823: the history deps arrive bound over the #3941
+      // Yahoo provider (createScreenerFeedDepsFactories). Omitted
+      // = the stage refuses by name.
+      ...(deps.historyDepsFor ? { historyDeps: await deps.historyDepsFor(req, ctx.runId) } : {}),
       feedOutput: prior,
       ...(goalScreenParam(params) ? { goalScreen: goalScreenParam(params)! } : {}),
     });
@@ -618,16 +759,24 @@ function buildDeliverDoor(env: Env): ScreenerStepDeps["deliverOutcome"] {
 
 /**
  * The screener-step wiring for the ScheduledAgent host — the
- * mirror of the host's feedStepDepsForScheduledAgent. The quote
- * / history deps are omitted here: the agent binds them itself
- * from the platform at stage time (bindScreenerQuoteDeps /
- * bindScreenerHistoryDeps, issue #4192). The store / deliver
- * doors are real (the orchestrator stub, lazy).
+ * mirror of the host's feedStepDepsForScheduledAgent. Issue
+ * #5823: the quote / history deps are bound here, over the
+ * #3941 capture-wired provider from the feed deps
+ * (createScreenerFeedDepsFactories, with the Yahoo breaker
+ * #1745) — the agent no longer binds them at stage time. The
+ * store / deliver doors are real (the orchestrator stub, lazy).
  */
-export function screenerStepDepsForScheduledAgent(ctx: { env: Env }): ScreenerStepDeps {
+export function screenerStepDepsForScheduledAgent(
+  ctx: { env: Env },
+  feedDeps: FeedStepDeps,
+): ScreenerStepDeps {
   const env = ctx.env;
   return {
     agentFor: (userLogin) => screenerAgentStub(env, userLogin),
+    ...createScreenerFeedDepsFactories(
+      feedDeps,
+      defaultBreakerRegistry().breakerFor("yahoo"),
+    ),
     storeReport: buildStoreDoor(env),
     deliverOutcome: buildDeliverDoor(env),
   };
@@ -636,12 +785,16 @@ export function screenerStepDepsForScheduledAgent(ctx: { env: Env }): ScreenerSt
 /**
  * The screener-step wiring for the workflow residency — the
  * mirror of feedStepDepsForWorkflow. Same rule as the host
- * (the agent binds the quote/history deps at stage time,
- * #4192); same real doors.
+ * (#5823): the quote / history deps are bound over the #3941
+ * provider from the feed deps; same real doors.
  */
-export function screenerStepDepsForWorkflow(env: Env): ScreenerStepDeps {
+export function screenerStepDepsForWorkflow(env: Env, feedDeps: FeedStepDeps): ScreenerStepDeps {
   return {
     agentFor: (userLogin) => screenerAgentStub(env, userLogin),
+    ...createScreenerFeedDepsFactories(
+      feedDeps,
+      defaultBreakerRegistry().breakerFor("yahoo"),
+    ),
     storeReport: buildStoreDoor(env),
     deliverOutcome: buildDeliverDoor(env),
   };

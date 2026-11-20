@@ -30,6 +30,7 @@ import type { DataProvider, DataProviderId } from "../trading";
 import type { Env } from "../types";
 import type { IndexListStore } from "../data/indexListPorts";
 import type { FeedDatasetStore } from "../data/feedDatasetPorts";
+import type { FeedProviderWiringDeps } from "./feedProviderWiring";
 import {
   buildFeedJobRegistry,
   buildFeedStatus,
@@ -443,8 +444,18 @@ export interface FeedStepDeps {
    * The capture-wired provider for a feed job's source. Undefined
    * ⇒ the step refuses FEED_JOB_NOT_CONFIGURED (a run is never
    * fetched through an unwired, uncaptured path).
+   *
+   * Issue #5823 (#4437 slice 2): the per-request override the
+   * screener's feed deps bind through — the run's own login (the
+   * per-login providers fetch as the run's user, never the host's
+   * wiring login) and the Yahoo breaker (#1745, screener binds
+   * only). The feed step passes no override, so its provider is
+   * exactly as before.
    */
-  providerFor: (def: FeedJobDefinition) => DataProvider | undefined;
+  providerFor: (
+    def: FeedJobDefinition,
+    opts?: Pick<FeedProviderWiringDeps, "userLogin" | "yahooBreaker">,
+  ) => DataProvider | undefined;
   /** The stored index-list store (universes). Null ⇒ not configured. */
   universeStore: IndexListStore | null;
   /** The feed-dataset store (the local copy). Null ⇒ not configured. */

@@ -92,6 +92,23 @@ stock screener still runs bespoke steps (`screener.feed`,
 likewise uses bespoke steps. No family has yet been redefined onto the
 generic steps.
 
+The screener's feed stage nevertheless reads through the generic feed
+machinery for its quotes (#5823): the step handler binds the quote /
+history deps over the #3941 capture-wired provider
+(`createScreenerFeedDepsFactories`,
+`src/services/screenerPipelineJobs.ts:208`), so a screen run's feed
+stage executes via the same provider construction the feed jobs run
+through (`createCaptureWiredFeedProvider`,
+`src/services/feedProviderWiring.ts`), freshness-gated per #5822
+(fresh capture serves with zero live provider calls; stale or missing
+capture fetches live once and writes through). The agent no longer
+binds quote/history deps at stage time on the engine path — the stages
+refuse by name (`SCREENER_QUOTE_DEPS_MISSING` /
+`SCREENER_HISTORY_DEPS_MISSING`) when the handler omits them. The
+bespoke flow (`runScreenInner` / `screenLive`) keeps its own bind
+until slice 7 (#5828) retires it; the feed stage is visible as a
+generic feed step in Workflow Runs.
+
 ### 1.3 The one-engine doctrine
 
 The governing rule is the one-engine consolidation doctrine (#3549):

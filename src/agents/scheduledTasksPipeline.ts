@@ -224,13 +224,21 @@ export function feedStepDepsForScheduledAgent(
     : null;
   return {
     registry: buildFeedJobRegistry(envStrings(ctx.env)),
-    providerFor: (def) =>
+    // Issue #5823: the per-request override rides through to the
+    // #3941 factory — the run's own login for the per-login
+    // providers (never the host's wiring login) and the Yahoo
+    // breaker (screener binds only). The feed step passes no
+    // override, so its provider is exactly as before.
+    providerFor: (def, opts) =>
       createCaptureWiredFeedProvider(def, {
         env: ctx.env,
         sql,
         blobStorage: ctx.agentCtx.storage as unknown as CaptureBlobStorage,
         capturePort,
-        ...(userLogin ? { userLogin } : {}),
+        ...(opts?.userLogin ?? userLogin
+          ? { userLogin: (opts?.userLogin ?? userLogin) as string }
+          : {}),
+        ...(opts?.yahooBreaker ? { yahooBreaker: opts.yahooBreaker } : {}),
       }),
     universeStore,
     datasetStore: createFeedDatasetAdapter(ctx.env),
@@ -522,6 +530,10 @@ export function createScheduledAgentPipelineControl(
   const sql = pipelineSql(ctx);
   const stores = createJobPipelineStoresFromSql(sql);
   const messaging = createJobPipelineMessaging(ctx.env);
+  // Issue #5823: the feed deps are built once and shared — the feed
+  // steps run through them, and the screener steps bind their
+  // quote/history deps over the same #3941 provider construction.
+  const feedDeps = feedStepDepsForScheduledAgent(ctx, userLogin);
   // Issue #5081 (S1): the OTel J1–J7 logging stack for this
   // host's control plane. The OTel run-settled observer is
   // CHAINED after the feed-run observer (the feed observer is
@@ -590,14 +602,15 @@ export function createScheduledAgentPipelineControl(
     // host's whole-run deadline is operator-configurable.
     feedExecutionDeadlineMs: resolveFeedJobTimeouts(envStrings(ctx.env)).executionMs,
     steps: createPipelineStepRegistry(
-      feedStepDepsForScheduledAgent(ctx, userLogin),
+      feedDeps,
       enrichStepDepsForScheduledAgent(ctx),
       analyzeStepDepsForScheduledAgent(ctx),
       generateStepDepsForScheduledAgent(ctx),
       deliverStepDepsForScheduledAgent(ctx),
-      // Issue #4190 (#3550 S1, wired in #4192): the screener steps compose here
-      // too — the agent binds the quote/history deps itself at stage time.
-      screenerStepDepsForScheduledAgent(ctx),
+      // Issue #4190 (#3550 S1, wired in #4192; #5823): the screener steps
+      // compose here too — their quote/history deps are bound over the
+      // #3941 provider from the feed deps, not at stage time.
+      screenerStepDepsForScheduledAgent(ctx, feedDeps),
       // Issue #4452: the options steps compose here too — the
       // resolving registration over the host's own stores, so a
       // host-dispatched options job executes in this residency.
@@ -866,6 +879,9 @@ export async function startPipelineJobWorkflow(
   const d1Stores = createJobPipelineStoresFromD1(ctx.env.AGENT_DB);
   const d1Runs = new D1JobRunRecordStore(createD1JobRunRecordDb(ctx.env.AGENT_DB));
   const messaging = createJobPipelineMessaging(ctx.env);
+  // Issue #5823: the feed deps are built once and shared, as in the
+  // host control — the screener steps bind over the same provider.
+  const mirrorFeedDeps = feedStepDepsForScheduledAgent(ctx);
   const workflowControl = new JobPipelineControl({
     stores: d1Stores,
     // The D1 run-record adapter is async; wrap it in the async
@@ -877,14 +893,15 @@ export async function startPipelineJobWorkflow(
     },
     publisher: messaging.ports?.publisher ?? null,
     steps: createPipelineStepRegistry(
-      feedStepDepsForScheduledAgent(ctx),
+      mirrorFeedDeps,
       enrichStepDepsForScheduledAgent(ctx),
       analyzeStepDepsForScheduledAgent(ctx),
       generateStepDepsForScheduledAgent(ctx),
       deliverStepDepsForScheduledAgent(ctx),
-      // Issue #4190 (#3550 S1, wired in #4192): the screener steps compose here
-      // too — the agent binds the quote/history deps itself at stage time.
-      screenerStepDepsForScheduledAgent(ctx),
+      // Issue #4190 (#3550 S1, wired in #4192; #5823): the screener steps
+      // compose here too — their quote/history deps are bound over the
+      // #3941 provider from the feed deps, not at stage time.
+      screenerStepDepsForScheduledAgent(ctx, mirrorFeedDeps),
       // Issue #4452: the options steps compose here too, as in the
       // host control — the same registry in both compositions.
       // (This control only mirrors the definition; the steps never

@@ -106,11 +106,24 @@ let savedProcessEnv: Record<string, string | undefined> = {};
 const USER = "derived_trader";
 const OTHER_USER = "other_trader";
 
+// The fixture chain's expiry must stay in the future relative to the
+// real clock: evaluateContracts drops chains whose selectedExpiry is
+// past (daysToExpiration < 0), so a hardcoded expiry silently expires
+// the whole service-level suite once the date passes. 30 days out sits
+// inside every profile DTE window used below (1-365).
+const FIXTURE_EXPIRY_DATE = new Date(Date.now() + 30 * 86_400_000);
+const FIXTURE_EXPIRY = {
+  year: FIXTURE_EXPIRY_DATE.getUTCFullYear(),
+  month: FIXTURE_EXPIRY_DATE.getUTCMonth() + 1,
+  day: FIXTURE_EXPIRY_DATE.getUTCDate(),
+};
+const FIXTURE_EXPIRY_ISO = `${FIXTURE_EXPIRY.year}-${String(FIXTURE_EXPIRY.month).padStart(2, "0")}-${String(FIXTURE_EXPIRY.day).padStart(2, "0")}`;
+
 const NVDA_CHAIN: ETradeOptionChain = {
   symbol: "NVDA",
   underlyingPrice: 130,
   quoteTime: Date.now(),
-  selectedExpiry: { year: 2026, month: 11, day: 20 },
+  selectedExpiry: FIXTURE_EXPIRY,
   pairs: [
     {
       call: {
@@ -914,12 +927,12 @@ describe("ScheduledTasksService.autonomousStrategyDiscovery — profile-derived 
     expect(derivation.spot).toBe(130);
     expect(derivation.spotSource).toBe("chain");
     expect(derivation.atmIv).toBe(0.45);
-    expect(derivation.windowExpiry).toBe("2026-11-20");
+    expect(derivation.windowExpiry).toBe(FIXTURE_EXPIRY_ISO);
     expect(derivation.emMultiple).toBe(0.6);
     expect(derivation.thesis).toBe("bullish");
     // The window is counted from the run's own timestamp to the
     // chosen expiry; EM and target follow the pinned formula.
-    const days = Math.ceil((Date.parse("2026-11-20T00:00:00.000Z") - Date.parse(stored!.createdAt)) / 86_400_000);
+    const days = Math.ceil((Date.parse(`${FIXTURE_EXPIRY_ISO}T00:00:00.000Z`) - Date.parse(stored!.createdAt)) / 86_400_000);
     expect(derivation.windowDays).toBe(days);
     const pct = 0.45 * Math.sqrt(days / 365);
     expect(derivation.expectedMovePct).toBeCloseTo(pct, 10);
@@ -931,7 +944,7 @@ describe("ScheduledTasksService.autonomousStrategyDiscovery — profile-derived 
       symbol: "NVDA",
       thesis: "bullish",
       targetPrice: derivation.targetPrice,
-      targetDate: "2026-11-20",
+      targetDate: FIXTURE_EXPIRY_ISO,
       expectedIvDirection: "unchanged",
       maxPlannedLoss: 500,
       minRewardRisk: 1,

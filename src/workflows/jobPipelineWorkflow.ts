@@ -162,12 +162,18 @@ export function feedStepDepsForWorkflow(
   const blobStorage = createR2CaptureBlobStorage(env) ?? undefined;
   return {
     registry: buildFeedJobRegistry(workflowEnvStrings(env)),
-    providerFor: (def) =>
+    // Issue #5823: the per-request override rides through to the
+    // #3941 factory — the run's own login for the per-login
+    // providers (never the host's service login) and the Yahoo
+    // breaker (screener binds only). The feed step passes no
+    // override, so its provider is exactly as before.
+    providerFor: (def, opts) =>
       createCaptureWiredFeedProvider(def, {
         env,
         blobStorage,
         capturePort,
-        userLogin: getServiceUserLogin(env) ?? undefined,
+        userLogin: opts?.userLogin ?? getServiceUserLogin(env) ?? undefined,
+        ...(opts?.yahooBreaker ? { yahooBreaker: opts.yahooBreaker } : {}),
       }),
     universeStore,
     datasetStore: createFeedDatasetAdapter(env),
@@ -278,6 +284,10 @@ export function createJobPipelineWorkflowDeps(env: Env): JobPipelineDeps {
   }
   const db = env.AGENT_DB;
   const stores = createJobPipelineStoresFromD1(db);
+  // Issue #5823: the feed deps are built once and shared — the feed
+  // steps run through them, and the screener steps bind their
+  // quote/history deps over the same #3941 provider construction.
+  const feedDeps = feedStepDepsForWorkflow(env, stores);
   const runRecords = new D1JobRunRecordStore(createD1JobRunRecordDb(db));
   const messaging = createJobPipelineMessaging(env);
   const envStrings = workflowEnvStrings(env);
@@ -327,9 +337,10 @@ export function createJobPipelineWorkflowDeps(env: Env): JobPipelineDeps {
     // also executes fully; a transport this deployment does not
     // configure records its channel not_configured per report
     // (deliverJobs.ts carries the rule). The screener steps
-    // compose here too (#4190, wired in #4192): the agent binds
-    // the quote/history deps itself at stage time, so a screener
-    // job dispatched here executes fully in this residency. The
+    // compose here too (#4190, wired in #4192; #5823): their
+    // quote/history deps are bound over the #3941 provider from
+    // the feed deps, so a screener job dispatched here executes
+    // fully in this residency. The
     // options steps compose here too (#4289): the resolving
     // registration reads the dispatch request back out of the
     // stored definition and rebuilds the stage ports per
@@ -337,7 +348,7 @@ export function createJobPipelineWorkflowDeps(env: Env): JobPipelineDeps {
     // options job dispatched here executes durably, with the
     // workflow step as the engine's journal.
     steps: createPipelineStepRegistry(
-      feedStepDepsForWorkflow(env, stores),
+      feedDeps,
       {
         registry: buildEnrichJobRegistry(envStrings),
         datasetStore: createFeedDatasetAdapter(env),
@@ -375,9 +386,10 @@ export function createJobPipelineWorkflowDeps(env: Env): JobPipelineDeps {
           (await stores.definitions.getDefinition(jobId))?.config.processing
             .shards ?? [],
       },
-      // Issue #4190 (#3550 S1, wired in #4192): the screener steps compose here
-      // too — the agent binds the quote/history deps itself at stage time.
-      screenerStepDepsForWorkflow(env),
+      // Issue #4190 (#3550 S1, wired in #4192; #5823): the screener steps
+      // compose here too — their quote/history deps are bound over the
+      // #3941 provider from the feed deps, not at stage time.
+      screenerStepDepsForWorkflow(env, feedDeps),
       // Issue #4289: the options steps compose here too — the
       // resolving registration, over the D1 definition + artifact
       // stores, so an options job dispatched here executes durably.
