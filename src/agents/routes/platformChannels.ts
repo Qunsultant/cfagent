@@ -42,9 +42,14 @@
  * - Audit funnel: operator writes are audit-annotated
  *   best-effort when the caller supplies a funnel (an audit
  *   failure never fails the write), the same posture as the
- *   tenant slice; the orchestrator dispatch supplies no funnel
- *   today, so this annotation is a follow-up, not a control —
- *   the gate above is the control.
+ *   tenant slice; the orchestrator dispatch supplies the funnel
+ *   (routeRequest.ts passes `audit` into this handler), and the
+ *   BizCopilot channel executor passes the turn audit through as
+ *   the funnel (#5608) — so every channel mutation emits its
+ *   `platform-channel-admin` record on both paths. The gate above
+ *   is the control; the annotation is the audit trail, not a
+ *   gate. Audit-before-write is an owner decision (#5608), not
+ *   implemented here.
  */
 import { createTenantChannelAdapter } from "../../data/createTenantChannelPorts";
 import type { TenantChannelStore } from "../../data/tenantChannelPorts";
