@@ -67,6 +67,7 @@ import { InMemoryProfileAdapter } from "../src/data/inMemoryProfileAdapter";
 import { InMemoryStoreOperatorsAdapter } from "../src/data/inMemoryStoreOperatorsAdapter";
 import { InMemorySubscriptionAdapter } from "../src/data/inMemorySubscriptionAdapter";
 import { InMemoryTenantChannelAdapter } from "../src/data/inMemoryTenantChannelAdapter";
+import { createMemoryAuditStore } from "../src/security/iaaaAudit";
 import { InMemoryTenantDirectoryAdapter } from "../src/data/inMemoryTenantDirectoryAdapter";
 
 // Shared helper -------------------------------------------------------------
@@ -541,6 +542,8 @@ function channelCtx() {
   return {
     channels,
     directory,
+    // #5867: audit-before-write needs a working IAAA audit store.
+    auditStore: createMemoryAuditStore(),
     operators: {
       listOperators: async () => [{ login: "op", addedBy: "seed", addedAtMs: 1 }],
     },
