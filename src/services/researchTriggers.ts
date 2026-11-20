@@ -24,17 +24,25 @@ export function currentResearchRunId(): string | undefined {
   return runIdStack[runIdStack.length - 1];
 }
 
+/** Issue #5912 — the venue/mode a run names (both optional). */
+export interface ResearchRunSelection {
+  brokerId?: string;
+  mode?: string;
+}
+
 export type PublishEntry<R> = (
   trigger: TriggerSource,
-  userLogin?: string
+  userLogin?: string,
+  selection?: ResearchRunSelection
 ) => Promise<R>;
 
 /** Thin trigger for the manual run route. */
 export function triggerManualResearch<R>(
   publish: PublishEntry<R>,
-  userLogin?: string
+  userLogin?: string,
+  selection?: ResearchRunSelection
 ): Promise<R> {
-  return publish("manual", userLogin);
+  return selection ? publish("manual", userLogin, selection) : publish("manual", userLogin);
 }
 
 /**

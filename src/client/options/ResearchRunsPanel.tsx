@@ -382,6 +382,9 @@ export function ResearchRunsPanel({ activeEnv, userLogin, onSendPrompt }: Resear
   const [report, setReport] = useState<ReportView | null>(null);
   const [history, setHistory] = useState<RunSummaryView[]>([]);
   const [running, setRunning] = useState(false);
+  // Issue #5912 — the venue/mode this run names; empty = the configured default.
+  const [brokerId, setBrokerId] = useState("");
+  const [mode, setMode] = useState("");
   const [runMsg, setRunMsg] = useState("");
   const [showFilters, setShowFilters] = useState(false);
 
@@ -465,7 +468,15 @@ export function ResearchRunsPanel({ activeEnv, userLogin, onSendPrompt }: Resear
     setRunning(true);
     setRunMsg("Running research…");
     try {
-      const res = await apiFetch("/api/research/run", { method: "POST", headers: { ...hdrs(userLogin), ...csrfHeaders() } });
+      const selection = {
+        ...(brokerId.trim() ? { brokerId: brokerId.trim() } : {}),
+        ...(mode.trim() ? { mode: mode.trim() } : {}),
+      };
+      const res = await apiFetch("/api/research/run", {
+        method: "POST",
+        headers: { ...hdrs(userLogin), ...csrfHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify(selection),
+      });
       const data = await readJson<{
         success?: boolean;
         error?: string;
@@ -535,6 +546,18 @@ export function ResearchRunsPanel({ activeEnv, userLogin, onSendPrompt }: Resear
         >
           ↻ Refresh
         </Button>
+        <TextInput
+          aria-label="Broker / venue"
+          placeholder="Broker (default configured)"
+          value={brokerId}
+          onChange={(e) => setBrokerId(e.target.value)}
+        />
+        <TextInput
+          aria-label="Mode"
+          placeholder="Mode (paper / live)"
+          value={mode}
+          onChange={(e) => setMode(e.target.value)}
+        />
         <Button onClick={() => setShowFilters(!showFilters)}>{showFilters ? "Hide filters" : "Edit filters"}</Button>
         {report && <Button onClick={() => void evaluate(report.runId)}>Evaluate this run (§9)</Button>}
         {onSendPrompt && (
