@@ -1237,17 +1237,132 @@ const COND_RE = /path\.(endsWith|includes|startsWith)\("([^"]+)"\)|path === "([^
 //     -> COMMERCIAL_BARE_BASE + <tail>;
 //   path.includes(`${commercialBarePath("<id>")}<tail>`)
 //     -> the route's bare path + <tail>.
+// Issue #5610 — the catalog pattern extended to parameterized routes and
+// the platform families; the same resolution, so EXPECTED_INVENTORY is
+// unchanged:
+//   matchCatalogRoute(commercialRouteById("<id>"), path)
+//     -> the route's matchIncludes (each as path.includes) in order,
+//        then path.endsWith(matchSuffix) when the suffix is non-empty;
+//   matchCatalogRoute(platformRouteById("<id>"), path)
+//     -> the same, from the platform catalog (src/data/platformUrlCatalog.ts);
+//   path.endsWith(PLATFORM_ROUTE_SUFFIXES.<id>)
+//     -> the platform route's matchSuffix.
 // The catalog is parsed as SOURCE TEXT via the same readFileSync
 // approach this test already uses — the test never imports the catalog
 // at runtime, so a catalog that fails to parse (or an id the catalog
 // does not define) fails this test loudly instead of silently
 // shrinking the inventory. If a resolved value ever differs from its
 // old literal, that is a route change and this pin fails; it is never
-// silently absorbed.
+// silently absorbed. The `route(...)` calls are parsed with a
+// paren-balancing scanner (string/template aware), so multi-line calls
+// with options objects parse exactly like single-line ones.
+/** Split a `route(...)` call's argument list on top-level commas. */
+function splitTopLevelArgs(args: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let quote: string | null = null;
+  let current = "";
+  for (let i = 0; i < args.length; i++) {
+    const c = args[i];
+    if (quote) {
+      current += c;
+      if (c === "\\") {
+        current += args[i + 1] ?? "";
+        i++;
+        continue;
+      }
+      if (c === quote) quote = null;
+      continue;
+    }
+    if (c === '"' || c === "'" || c === "`") {
+      quote = c;
+      current += c;
+      continue;
+    }
+    if (c === "(" || c === "[" || c === "{") depth++;
+    else if (c === ")" || c === "]" || c === "}") depth--;
+    if (c === "," && depth === 0) {
+      parts.push(current);
+      current = "";
+      continue;
+    }
+    current += c;
+  }
+  if (current.trim().length > 0) parts.push(current);
+  return parts;
+}
+
+/** Every `route(...)` call inside a catalog array, as its split argument list. */
+function catalogRouteCalls(catalogSrc: string, arrayName: string): string[][] {
+  const arrayStart = catalogSrc.indexOf(arrayName);
+  if (arrayStart < 0) throw new Error(`${arrayName} not found in the catalog`);
+  const arrayEnd = catalogSrc.indexOf("\n];", arrayStart);
+  const body = arrayEnd < 0 ? catalogSrc.slice(arrayStart) : catalogSrc.slice(arrayStart, arrayEnd);
+  const calls: string[][] = [];
+  let from = 0;
+  for (;;) {
+    const at = body.indexOf("route(", from);
+    if (at < 0) break;
+    let depth = 0;
+    let i = at + "route(".length - 1;
+    let quote: string | null = null;
+    for (; i < body.length; i++) {
+      const c = body[i];
+      if (quote) {
+        if (c === "\\") {
+          i++;
+          continue;
+        }
+        if (c === quote) quote = null;
+        continue;
+      }
+      if (c === '"' || c === "'" || c === "`") {
+        quote = c;
+        continue;
+      }
+      if (c === "(") depth++;
+      else if (c === ")") {
+        depth--;
+        if (depth === 0) break;
+      }
+    }
+    if (depth !== 0) throw new Error(`unbalanced route( call in ${arrayName}`);
+    calls.push(splitTopLevelArgs(body.slice(at + "route(".length, i)));
+    from = i + 1;
+  }
+  return calls;
+}
+
+/** The first `"..."` string in an argument, or null when there is none. */
+function firstString(arg: string | undefined): string | null {
+  if (arg === undefined) return null;
+  const m = arg.match(/"([^"]*)"/);
+  return m ? m[1] : null;
+}
+
+/**
+ * The `matchIncludes` strings of one argument: every `"..."` / `` `...` ``
+ * segment in order, with `${COMMERCIAL_BARE_BASE}` expanded. Any other
+ * template interpolation fails loudly — the resolver must never guess.
+ */
+function includesStrings(arg: string | undefined, bareBase: string): string[] {
+  if (arg === undefined) return [];
+  const out: string[] = [];
+  for (const m of arg.matchAll(/`([^`]*)`|"([^"]*)"/g)) {
+    const raw = m[1] ?? m[2] ?? "";
+    if (raw.includes("${") && !raw.includes("${COMMERCIAL_BARE_BASE}"))
+      throw new Error(`unsupported template interpolation in matchIncludes: ${raw}`);
+    out.push(raw.replaceAll("${COMMERCIAL_BARE_BASE}", bareBase));
+  }
+  return out;
+}
+
 interface CommercialCatalog {
   bareBase: string;
   suffixById: Map<string, string>;
   bareById: Map<string, string>;
+  /** matchSuffix + matchIncludes per id — the #5610 `matchCatalogRoute` form. */
+  matchById: Map<string, { suffix: string; includes: string[] }>;
 }
 
 let commercialCatalogCache: CommercialCatalog | null = null;
@@ -1261,22 +1376,103 @@ function commercialCatalog(): CommercialCatalog {
   const bareBase = bareBaseMatch[1];
   const suffixById = new Map<string, string>();
   const bareById = new Map<string, string>();
-  for (const m of catalogSrc.matchAll(
-    /route\("([A-Za-z0-9_]+)",\s*\[[^\]]*\],\s*"([^"]+)"(?:,\s*"([^"]+)")?\)/g,
-  )) {
-    const bare = bareBase + m[2];
-    bareById.set(m[1], bare);
-    suffixById.set(m[1], m[3] ?? bare);
+  const matchById = new Map<string, { suffix: string; includes: string[] }>();
+  for (const args of catalogRouteCalls(catalogSrc, "COMMERCIAL_ROUTES")) {
+    const id = firstString(args[0]);
+    const stem = firstString(args[2]);
+    if (id === null || stem === null)
+      throw new Error(`unparseable commercial route call: ${args.join(",")}`);
+    const bare = bareBase + stem;
+    const suffix = firstString(args[3]) ?? bare;
+    bareById.set(id, bare);
+    suffixById.set(id, suffix);
+    matchById.set(id, { suffix, includes: includesStrings(args[4], bareBase) });
   }
   if (suffixById.size === 0)
     throw new Error("the URL catalog must define at least one route");
-  commercialCatalogCache = { bareBase, suffixById, bareById };
+  commercialCatalogCache = { bareBase, suffixById, bareById, matchById };
   return commercialCatalogCache;
 }
 
+interface PlatformCatalog {
+  suffixById: Map<string, string>;
+  /** matchSuffix + matchIncludes per id — the #5610 `matchCatalogRoute` form. */
+  matchById: Map<string, { suffix: string; includes: string[] }>;
+}
+
+let platformCatalogCache: PlatformCatalog | null = null;
+
+function platformCatalog(): PlatformCatalog {
+  if (platformCatalogCache) return platformCatalogCache;
+  const catalogSrc = src("data/platformUrlCatalog.ts");
+  const suffixById = new Map<string, string>();
+  const matchById = new Map<string, { suffix: string; includes: string[] }>();
+  for (const args of catalogRouteCalls(catalogSrc, "PLATFORM_ROUTES")) {
+    const id = firstString(args[0]);
+    const bare = firstString(args[2]);
+    if (id === null || bare === null)
+      throw new Error(`unparseable platform route call: ${args.join(",")}`);
+    const suffix = firstString(args[3]) ?? bare;
+    suffixById.set(id, suffix);
+    // The options object (5th arg) carries matchIncludes, when present.
+    const options = args[4] ?? "";
+    const includesMatch = options.match(/matchIncludes:\s*\[([^\]]*)\]/);
+    const includes = includesMatch
+      ? [...includesMatch[1].matchAll(/"([^"]*)"/g)].map((m) => m[1])
+      : [];
+    matchById.set(id, { suffix, includes });
+  }
+  if (suffixById.size === 0)
+    throw new Error("the platform URL catalog must define at least one route");
+  platformCatalogCache = { suffixById, matchById };
+  return platformCatalogCache;
+}
+
 function resolveCommercialRefs(text: string): string {
-  const { bareBase, suffixById, bareById } = commercialCatalog();
+  const { bareBase, suffixById, bareById, matchById } = commercialCatalog();
+  const { suffixById: platformSuffixById, matchById: platformMatchById } = platformCatalog();
+  // The #5610 `matchCatalogRoute` form expands to the route's old
+  // literals: its includes first (in catalog order), then the endsWith
+  // tail when the suffix is non-empty — the order the old branches
+  // wrote them in.
+  const matchConditions = (match: { suffix: string; includes: string[] }, id: string): string => {
+    const parts = match.includes.map((inc) => `path.includes("${inc}")`);
+    if (match.suffix.length > 0) parts.push(`path.endsWith("${match.suffix}")`);
+    if (parts.length === 0) throw new Error(`route ${id} has no match conditions`);
+    return parts.join(" && ");
+  };
   return text
+    .replace(
+      /matchCatalogRoute\(commercialRouteById\("([A-Za-z0-9_]+)"\), path\)/g,
+      (_m, id) => {
+        const match = matchById.get(id);
+        if (match === undefined) throw new Error(`unknown commercialRouteById id: ${id}`);
+        return matchConditions(match, id);
+      },
+    )
+    .replace(
+      /matchCatalogRoute\(platformRouteById\("([A-Za-z0-9_]+)"\), path\)/g,
+      (_m, id) => {
+        const match = platformMatchById.get(id);
+        if (match === undefined) throw new Error(`unknown platformRouteById id: ${id}`);
+        return matchConditions(match, id);
+      },
+    )
+    .replace(
+      /path\.(endsWith|includes|startsWith)\(PLATFORM_ROUTE_SUFFIXES\.([A-Za-z0-9_]+)\)/g,
+      (_m, method, id) => {
+        const suffix = platformSuffixById.get(id);
+        if (suffix === undefined)
+          throw new Error(`unknown PLATFORM_ROUTE_SUFFIXES id: ${id}`);
+        return `path.${method}("${suffix}")`;
+      },
+    )
+    .replace(/path === PLATFORM_ROUTE_SUFFIXES\.([A-Za-z0-9_]+)/g, (_m, id) => {
+      const suffix = platformSuffixById.get(id);
+      if (suffix === undefined)
+        throw new Error(`unknown PLATFORM_ROUTE_SUFFIXES id: ${id}`);
+      return `path === "${suffix}"`;
+    })
     .replace(
       /path\.(endsWith|includes|startsWith)\(COMMERCIAL_ROUTE_SUFFIXES\.([A-Za-z0-9_]+)\)/g,
       (_m, method, id) => {
