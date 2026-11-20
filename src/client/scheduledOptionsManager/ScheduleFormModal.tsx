@@ -4,6 +4,7 @@ import { useTenantProviders } from "../tenantProviders";
 import { useBrokerEnvironment } from "../brokerEnvironment";
 import { listPresets, type ScreenerPreset } from "../ScreenerPresetManager";
 import type { CreatableJob } from "./types";
+import { creatableJobCatalogueEntries } from "../../config/jobCatalogue";
 import {
   DiscoveryFormSections,
   type DiscoveryFormSectionsProps,
@@ -132,7 +133,11 @@ export function ScheduleFormModal(props: ScheduleFormModalProps) {
             </header>
 
             <form onSubmit={handleCreateSchedule} style={{ display: "flex", flexDirection: "column", gap: "var(--space-4)" }}>
-              {/* Job Picker */}
+              {/* Job Picker — Issue #5880: the options come from the
+                  one externalized job catalogue
+                  (`config/job-catalogue.json`), not hardcoded
+                  <option>s. Adding a job to the picker is one
+                  catalogue entry with a formJob — no code change here. */}
               {!editingScheduleId && (
                 <div className="sched-form-group">
                   <Select label="Job" hint={`What runs when this schedule fires`} id="sched-job-type"
@@ -143,9 +148,11 @@ export function ScheduleFormModal(props: ScheduleFormModalProps) {
                       if (nextJobType === "marketScreen" && !targetUniverse) setTargetUniverse("NASDAQ100");
                     }}
                   >
-                    <option value="optionsAnalysis">Autonomous Options Analysis</option>
-                    <option value="marketScreen">Autonomous Market Screen (Stocks)</option>
-                    <option value="strategyDiscovery">Saved-View Strategy Discovery</option>
+                    {creatableJobCatalogueEntries().map((job) => (
+                      <option key={job.formJob} value={job.formJob}>
+                        {job.label}
+                      </option>
+                    ))}
                   </Select>
                 </div>
               )}
