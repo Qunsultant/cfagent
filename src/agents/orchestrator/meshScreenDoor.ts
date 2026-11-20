@@ -78,10 +78,15 @@
  * payments-internal and unchanged by this slice, and that
  * operation names the chat-screen spend category whose limits
  * the operator configured (the S10 chat path charged against
- * it for the same reason). Checkout email has NO production
- * source for a chat turn (the S10 gap, unchanged): with
- * monetization on and no email seam composed in, the paid path
- * refuses honestly with `checkout_email_required`.
+ * it for the same reason). Checkout email (issue #4435): the
+ * receipt email is the user-supplied contact for this run —
+ * the tool call's `receiptEmail` (asked for in the chat turn
+ * when none was known) wins, else the composed seam, when one
+ * is composed in. With monetization on and no address at all,
+ * the paid path refuses honestly with `checkout_email_required`,
+ * naming the missing contact and the action (reply with the
+ * receipt email address) — never a bare refusal, never a
+ * screen that silently runs free.
  */
 
 import type { AgentContext } from "agents";
@@ -113,6 +118,7 @@ import { CREDITS_TOP_UP_HINT } from "../../services/providerUxLinks";
 import { resolveScreenProviderForRun } from "../../services/tenantProviders";
 import { resolvePresetFilter } from "../../services/screenerPresetResolution";
 import { codedMessage } from "../../outcomes/outcomeAspects";
+import { isValidEmailFormat } from "../../security/webhookReplay";
 import type { StockScreenPresetRef } from "../../workflows/stockScreenRunSpec";
 import {
   listScheduledReports,
@@ -188,6 +194,16 @@ export interface MeshScreenRunResult {
   discoveryMessage: string;
   error?: string;
   pdfKey?: string;
+  /**
+   * Issue #4435 — where the paid run's receipt email came
+   * from: "in-turn" (the user supplied it in the chat turn,
+   * via the tool call) or "seam" (a composed checkout-email
+   * seam). Absent on free runs and on paid runs that never
+   * reached the email step. The address itself rides the
+   * PaymentWorkflow submission (the run's durable record),
+   * never this read-back.
+   */
+  receiptEmailSource?: "in-turn" | "seam";
   rejections?: Array<{ symbol: string; reason: string }>;
   allStocks: Array<{
     symbol: string;
@@ -244,6 +260,16 @@ export interface MeshScreenDoorInput {
    * silently ignored, so the door refuses instead).
    */
   screenIntent?: string;
+  /**
+   * Issue #4435 — the receipt (checkout) email for a paid
+   * screen, supplied by the user in the chat turn. The agent
+   * asks for it when monetization is on and no receipt email
+   * is known, and passes the address the user replies with.
+   * Only the paid path reads it; a free screen ignores it.
+   * A supplied address that is not a well-formed email
+   * refuses coded before any start.
+   */
+  receiptEmail?: string;
 }
 
 /* ------------------------------------------------------------------ */
@@ -286,7 +312,12 @@ export interface MeshScreenDoorSeams {
     actingLogin: string,
     input: { operation: string; amountCents: number },
   ) => Promise<{ allowed: boolean; reason?: string }>;
-  /** Checkout email source. NO production default exists (see the header). */
+  /**
+   * Checkout email source. NO production default exists (see
+   * the header). Issue #4435: the tool call's `receiptEmail`
+   * is consulted before this seam — the seam is the fallback
+   * for a composed source, never the in-turn address.
+   */
   checkoutEmail?: () => string | null | Promise<string | null>;
   /** Commercial + subscription stores. Absent → the env adapters; store-less resolution refuses. */
   paidScreenStores?: PaidScreenStorePorts | null;
@@ -564,8 +595,11 @@ export async function runStockScreenViaDoor(
   }
   const execFields = executionMode ? { executionMode } : {};
   const presetFields = presetRef ? { presetRef } : {};
+  // Issue #4435 — the in-turn receipt email rides only the
+  // paid path (the free path never reads it).
+  const receiptFields = input.receiptEmail !== undefined ? { receiptEmail: input.receiptEmail } : {};
   if (await screenMonetizationOn(ctx)) {
-    return runPaidScreen(ctx, { filters, userLogin: login, universeId, ...modeFields, ...execFields, ...presetFields });
+    return runPaidScreen(ctx, { filters, userLogin: login, universeId, ...modeFields, ...execFields, ...presetFields, ...receiptFields });
   }
   return runFreeScreen(ctx, { filters, userLogin: login, universeId, ...modeFields, ...execFields, ...presetFields });
 }
@@ -1049,6 +1083,8 @@ async function runPaidScreen(
     executionMode?: import("../../data/jobPipelinePorts").JobExecutionMode;
     /** Issue #4434 (S6/N5): the resolved preset reference, stamped on the run record. */
     presetRef?: StockScreenPresetRef;
+    /** Issue #4435: the receipt email the user supplied in the chat turn for this paid run. */
+    receiptEmail?: string;
   },
 ): Promise<MeshScreenRunResult> {
   const parts = await buildScreenCommand(ctx, req);
@@ -1084,15 +1120,49 @@ async function runPaidScreen(
     );
   }
 
-  // 3. Checkout contact. No verified email source exists for
-  // a chat turn today, so this refuses honestly until one is
-  // composed in through the seam (the S10 gap, unchanged).
-  const email = ((await ctx.checkoutEmail?.()) ?? "").trim();
+  // 3. Checkout contact (issue #4435). The receipt email is
+  // the user-supplied contact for this run: the tool call's
+  // receiptEmail (asked for in the chat turn when none was
+  // known) wins; else the composed seam, when one is composed
+  // in. A supplied address that is not a well-formed email
+  // refuses coded before any start — never a checkout minted
+  // to a malformed contact. With no address at all the door
+  // refuses coded checkout_email_required, naming the missing
+  // contact and the action (reply with the receipt email
+  // address) — never a bare refusal, never a screen that
+  // silently runs free.
+  const inTurnEmail = typeof req.receiptEmail === "string" ? req.receiptEmail.trim() : "";
+  let email = "";
+  let receiptEmailSource: "in-turn" | "seam" | undefined;
+  if (inTurnEmail) {
+    if (!isValidEmailFormat(inTurnEmail)) {
+      throw new MeshDoorError(
+        "checkout_email_required",
+        "Paid screen refused: the receipt email supplied in the chat turn is not a well-formed email address " +
+          "(reply with a valid receipt email address for this paid screen). No workflow was started and no screen ran.",
+      );
+    }
+    email = inTurnEmail;
+    receiptEmailSource = "in-turn";
+  } else {
+    email = ((await ctx.checkoutEmail?.()) ?? "").trim();
+    if (email) {
+      if (!isValidEmailFormat(email)) {
+        throw new MeshDoorError(
+          "checkout_email_required",
+          "Paid screen refused: the composed checkout email source returned an address that is not a well-formed email. " +
+            "No workflow was started and no screen ran.",
+        );
+      }
+      receiptEmailSource = "seam";
+    }
+  }
   if (!email) {
     throw new MeshDoorError(
       "checkout_email_required",
-      "Paid screen requires a checkout email when monetization is on, and no checkout email source is configured for chat " +
-        "in this deployment. No workflow was started and no screen ran.",
+      "Paid screen requires a receipt email when monetization is on, and none was supplied for this chat turn: " +
+        "reply with the receipt email address for this paid screen and the run will proceed. " +
+        "No workflow was started and no screen ran.",
     );
   }
 
@@ -1146,6 +1216,9 @@ async function runPaidScreen(
     tenantId,
     workflowId: started.workflowId,
     bridge,
+    // Issue #4435: the run record names where its receipt
+    // email came from (in-turn vs seam).
+    receiptEmailSource,
   });
 }
 
@@ -1204,6 +1277,8 @@ async function awaitPaidScreenOutcome(
     workflowId: string;
     /** Issue #3787: settled only on terminal observation, never on deadline expiry. */
     bridge: ScreenBridge | null;
+    /** Issue #4435: where the paid run's receipt email came from — stamped on every outcome. */
+    receiptEmailSource?: "in-turn" | "seam";
   },
 ): Promise<MeshScreenRunResult> {
   const readHistory =
@@ -1218,20 +1293,26 @@ async function awaitPaidScreenOutcome(
     ((id: string) => defaultPaymentWorkflowStatus(ctx.env, id));
   // Issue #3787: same settle rule as the free path — the
   // deadline return below does NOT settle the bridge row.
+  // Issue #4435: every outcome carries the receipt-email
+  // source, so the run record names it even on deadline.
+  const withSource = (result: MeshScreenRunResult): MeshScreenRunResult =>
+    args.receiptEmailSource ? { ...result, receiptEmailSource: args.receiptEmailSource } : result;
   const finish = async (assembleArgs: {
     collation: WorkflowCollation | null;
     rows: ShardJobRow[] | null;
     terminalNote: string;
   }): Promise<MeshScreenRunResult> => {
-    const result = await assembleScreenResult(ctx, {
-      shards: args.shards,
-      userLogin: args.userLogin,
-      startedAtIso: args.startedAtIso,
-      collation: assembleArgs.collation,
-      rows: assembleArgs.rows,
-      jobId: args.jobId,
-      terminalNote: assembleArgs.terminalNote,
-    });
+    const result = withSource(
+      await assembleScreenResult(ctx, {
+        shards: args.shards,
+        userLogin: args.userLogin,
+        startedAtIso: args.startedAtIso,
+        collation: assembleArgs.collation,
+        rows: assembleArgs.rows,
+        jobId: args.jobId,
+        terminalNote: assembleArgs.terminalNote,
+      }),
+    );
     settleScreenBridge(args.bridge, result);
     return result;
   };
@@ -1263,17 +1344,19 @@ async function awaitPaidScreenOutcome(
       // deadline, exactly as the free path awaits its run.
     }
     if (nowMs() >= deadline) {
-      return assembleScreenResult(ctx, {
-        shards: args.shards,
-        userLogin: args.userLogin,
-        startedAtIso: args.startedAtIso,
-        collation: null,
-        rows,
-        jobId: args.jobId,
-        terminalNote:
-          `payment run ${args.jobId} (payment workflow ${args.workflowId}) produced no screen result within the chat await window — ` +
-          "no second run was started",
-      });
+      return withSource(
+        await assembleScreenResult(ctx, {
+          shards: args.shards,
+          userLogin: args.userLogin,
+          startedAtIso: args.startedAtIso,
+          collation: null,
+          rows,
+          jobId: args.jobId,
+          terminalNote:
+            `payment run ${args.jobId} (payment workflow ${args.workflowId}) produced no screen result within the chat await window — ` +
+            "no second run was started",
+        }),
+      );
     }
     await sleep(pollIntervalMs);
   }

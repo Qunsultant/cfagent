@@ -189,8 +189,9 @@ export type MeshDoorErrorCode =
   // Issue #2488: the mesh screen door's (meshScreenDoor.ts)
   // fail-closed refusal codes — budget_denied (the S5 budget
   // door refused the paid path), price_unavailable (no stored
-  // catalogue price), checkout_email_required (no checkout
-  // email source for a chat turn).
+  // catalogue price), checkout_email_required (no receipt
+  // email supplied for the chat turn — ask the user for it;
+  // issue #4435).
   | "budget_denied"
   | "price_unavailable"
   | "checkout_email_required"

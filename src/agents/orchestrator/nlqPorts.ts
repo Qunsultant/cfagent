@@ -42,6 +42,7 @@ import {
 } from "../../services/scheduledReports";
 import { createFeatureFlagPort } from "../../features/createFeatureFlagPort";
 import { checkPaymentBudgetViaDoor } from "./meshDoors";
+import { isValidEmailFormat } from "../../security/webhookReplay";
 import {
   buildPaidScreenSubmission,
   resolvePaidScreenAccount,
@@ -162,10 +163,12 @@ export interface NlqPortsContext {
    * Checkout contact email for a chat paid request. NO
    * production default exists: no verified email is carried
    * by a chat turn in this codebase (the routes take the
-   * caller's checkout contact for the same reason), so until
-   * a chat email source is composed in, the paid branch
-   * refuses honestly when monetization is on rather than
-   * inventing one.
+   * caller's checkout contact for the same reason). Issue
+   * #4435: the in-turn receipt email rides the mesh door's
+   * tool call, not this port — this seam is the fallback for
+   * a composed source only. Until one is composed in, the
+   * paid branch refuses honestly when monetization is on
+   * rather than inventing one.
    */
   checkoutEmail?: () => string | null | Promise<string | null>;
   /**
@@ -668,15 +671,33 @@ async function runChatPaidScreen(
     );
   }
 
-  // 3. Checkout contact. The submission params refuse to
-  // build without an email; no verified email source exists
-  // for a chat turn today, so this refuses honestly until
-  // one is composed in through the seam.
+  // 3. Checkout contact (issue #4435). The submission params
+  // refuse to build without an email. This port takes no
+  // in-turn address — the in-turn receipt email rides the
+  // mesh door's tool call — so the only source here is the
+  // composed seam. A seam address that is not a well-formed
+  // email refuses coded before any start, and with no address
+  // at all this refuses with [checkout_email_required],
+  // naming the missing contact and the action (reply with the
+  // receipt email address for this paid screen in the chat
+  // turn) — never a bare refusal, never a screen that
+  // silently runs free.
   const email = ((await ctx.checkoutEmail?.()) ?? "").trim();
+  let receiptEmailSource: "seam" | undefined;
+  if (email) {
+    if (!isValidEmailFormat(email)) {
+      throw new Error(
+        "[checkout_email_required] Chat paid screen refused: the composed checkout email source returned an address " +
+          "that is not a well-formed email. No workflow was started and no screen ran.",
+      );
+    }
+    receiptEmailSource = "seam";
+  }
   if (!email) {
     throw new Error(
-      "Chat paid screen requires a checkout email when monetization is on, and no checkout email source is configured for chat " +
-        "in this deployment. No workflow was started and no screen ran.",
+      "[checkout_email_required] Chat paid screen requires a receipt email when monetization is on, and none was supplied " +
+        "for this chat turn: reply with the receipt email address for this paid screen in the chat turn and the run will proceed. " +
+        "No workflow was started and no screen ran.",
     );
   }
 
@@ -726,6 +747,9 @@ async function runChatPaidScreen(
     jobId,
     tenantId,
     workflowId: started.workflowId,
+    // Issue #4435: the run record names where its receipt
+    // email came from (here always the composed seam).
+    receiptEmailSource,
   });
 }
 
@@ -782,6 +806,8 @@ async function awaitChatPaidScreenOutcome(
     jobId: string;
     tenantId: string;
     workflowId: string;
+    /** Issue #4435: where the paid run's receipt email came from — stamped on every outcome. */
+    receiptEmailSource?: "seam";
   },
 ): Promise<NLQStockScreenRunResult> {
   const readHistory =
@@ -794,19 +820,25 @@ async function awaitChatPaidScreenOutcome(
   const readPaymentStatus =
     ctx.paymentWorkflowStatus ??
     ((id: string) => defaultPaymentWorkflowStatus(ctx.env, id));
+  // Issue #4435: every outcome carries the receipt-email
+  // source, so the run record names it even on deadline.
+  const withSource = (result: NLQStockScreenRunResult): NLQStockScreenRunResult =>
+    args.receiptEmailSource ? { ...result, receiptEmailSource: args.receiptEmailSource } : result;
   for (;;) {
     const rows = await readHistory(args.tenantId, args.jobId).catch(() => null);
     const collation = collationFromRows(rows, args.jobId);
     if (collation) {
-      return assembleChatScreenResult(ctx, {
-        shards: args.shards,
-        userLogin: args.userLogin,
-        startedAtIso: args.startedAtIso,
-        collation,
-        rows,
-        jobId: args.jobId,
-        terminalNote: "completed",
-      });
+      return withSource(
+        await assembleChatScreenResult(ctx, {
+          shards: args.shards,
+          userLogin: args.userLogin,
+          startedAtIso: args.startedAtIso,
+          collation,
+          rows,
+          jobId: args.jobId,
+          terminalNote: "completed",
+        }),
+      );
     }
     const pStatus = await readPaymentStatus(args.workflowId).catch(() => null);
     if (
@@ -815,32 +847,36 @@ async function awaitChatPaidScreenOutcome(
     ) {
       const outcome = paymentOutcomeStatus(pStatus.output);
       if (outcome !== "started") {
-        return assembleChatScreenResult(ctx, {
-          shards: args.shards,
-          userLogin: args.userLogin,
-          startedAtIso: args.startedAtIso,
-          collation: null,
-          rows,
-          jobId: args.jobId,
-          terminalNote: paymentTerminalNote(outcome, pStatus.status, args.jobId),
-        });
+        return withSource(
+          await assembleChatScreenResult(ctx, {
+            shards: args.shards,
+            userLogin: args.userLogin,
+            startedAtIso: args.startedAtIso,
+            collation: null,
+            rows,
+            jobId: args.jobId,
+            terminalNote: paymentTerminalNote(outcome, pStatus.status, args.jobId),
+          }),
+        );
       }
       // Outcome "started": the screener is running under its
       // own workflow; keep polling the collation until the
       // deadline, exactly as the free path awaits its run.
     }
     if (nowMs() >= deadline) {
-      return assembleChatScreenResult(ctx, {
-        shards: args.shards,
-        userLogin: args.userLogin,
-        startedAtIso: args.startedAtIso,
-        collation: null,
-        rows,
-        jobId: args.jobId,
-        terminalNote:
-          `payment run ${args.jobId} (payment workflow ${args.workflowId}) produced no screen result within the chat await window — ` +
-          "no second run was started",
-      });
+      return withSource(
+        await assembleChatScreenResult(ctx, {
+          shards: args.shards,
+          userLogin: args.userLogin,
+          startedAtIso: args.startedAtIso,
+          collation: null,
+          rows,
+          jobId: args.jobId,
+          terminalNote:
+            `payment run ${args.jobId} (payment workflow ${args.workflowId}) produced no screen result within the chat await window — ` +
+            "no second run was started",
+        }),
+      );
     }
     await sleep(pollIntervalMs);
   }

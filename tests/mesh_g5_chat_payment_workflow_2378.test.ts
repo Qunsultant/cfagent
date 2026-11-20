@@ -430,9 +430,17 @@ describe("issue #2378 — chat paid request as a PaymentWorkflow run (G5)", () =
   it("no checkout email resolvable: honest refusal, zero starts (the route's 400, in chat shape)", async () => {
     const h = makeHarness({ monetizationOn: true, checkoutEmail: null });
     const port = nlqStockScreenPort(h.ctx);
-    await expect(
-      port.runScreen({ filters: FILTERS, userLogin: LOGIN }),
-    ).rejects.toThrow(/checkout email/i);
+    // Issue #4435: the refusal names the missing contact and the
+    // action (reply with the receipt email address), and carries
+    // the code in the message text — the wire carries only the
+    // message, so the code rides in it.
+    const err = await port
+      .runScreen({ filters: FILTERS, userLogin: LOGIN })
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).toContain("[checkout_email_required]");
+    expect((err as Error).message).toMatch(/receipt email/i);
+    expect((err as Error).message).toMatch(/reply with the receipt email address/);
     expect(h.paymentCreates).toHaveLength(0);
     expect(h.screenerStarts).toHaveLength(0);
     expect(h.agentCalls).toHaveLength(0);

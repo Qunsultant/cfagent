@@ -96,6 +96,16 @@ export interface NLQStockScreenRunResult {
   discoveryMessage: string;
   error?: string;
   pdfKey?: string;
+  /**
+   * Issue #4435 — where the paid run's receipt email came
+   * from ("seam": a composed checkout-email seam; the NLQ
+   * port takes no in-turn address — the in-turn source rides
+   * the mesh door's tool call). Absent on free runs and on
+   * paid runs that never reached the email step. The address
+   * itself rides the PaymentWorkflow submission (the run's
+   * durable record), never this read-back.
+   */
+  receiptEmailSource?: "in-turn" | "seam";
   rejections?: Array<{ symbol: string; reason: string }>;
   allStocks: Array<{
     symbol: string;
