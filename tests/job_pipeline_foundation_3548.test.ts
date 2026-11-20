@@ -29,6 +29,7 @@ import {
 } from "../src/data/d1JobRunRecordAdapter";
 import {
   DoSqliteJobPipelineStores,
+  JOB_PIPELINE_DEFINITION_VERSIONS_MIGRATION,
   JOB_PIPELINE_SCHEMA_MIGRATION,
 } from "../src/data/doSqliteJobPipelineAdapter";
 import {
@@ -245,8 +246,14 @@ describe("DO residency migration discipline", () => {
         "SELECT version, name FROM mas_schema_migrations WHERE store = 'job_pipeline'",
       )
       .all() as Array<{ version: number; name: string }>;
+    // Issue #5865 adds the definition-version history as v2: the ledger
+    // records every applied migration, in order.
     expect(ledger).toEqual([
       { version: JOB_PIPELINE_SCHEMA_MIGRATION.version, name: JOB_PIPELINE_SCHEMA_MIGRATION.name },
+      {
+        version: JOB_PIPELINE_DEFINITION_VERSIONS_MIGRATION.version,
+        name: JOB_PIPELINE_DEFINITION_VERSIONS_MIGRATION.name,
+      },
     ]);
   });
 });
