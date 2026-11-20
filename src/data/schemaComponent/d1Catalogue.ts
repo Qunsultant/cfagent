@@ -1811,6 +1811,21 @@ export const D1_CATALOGUE_ENTRIES: CatalogueEntry[] = [
     form: "literal",
   },
   {
+    // Issue #5865 — the append-only definition history (historical replay).
+    code: "schema.d1.job_pipeline_definition_versions.create_table",
+    plane: "d1",
+    table: "job_pipeline_definition_versions",
+    statement: `CREATE TABLE IF NOT EXISTS job_pipeline_definition_versions (
+      id TEXT PRIMARY KEY,
+      job_id TEXT NOT NULL,
+      version INTEGER NOT NULL,
+      definition_json TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
     code: "schema.d1.job_pipeline_instances.create_table",
     plane: "d1",
     table: "job_pipeline_instances",
@@ -3400,6 +3415,7 @@ export const D1_MIGRATION_CODES: Record<number, readonly string[]> = {
     "schema.d1.job_run_records.alter_table_add_column_kind",
     "schema.d1.job_run_records.alter_table_add_column_origin_run_id",
   ],
+  74: ["schema.d1.job_pipeline_definition_versions.create_table"],
   73: [
     "schema.d1.job_run_records.create_index_job_run_records_recent_idx",
   ],

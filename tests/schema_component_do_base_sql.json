@@ -220,7 +220,7 @@
     {
       "adapter": "DoSqliteJobOutcomeStore.maybePrune",
       "file": "doSqliteJobOutcomeAdapter.ts",
-      "trigger": "maybePrune(0) — non-ensure path: ensureMetaTable()",
+      "trigger": "maybePrune(0) \u2014 non-ensure path: ensureMetaTable()",
       "queries": [
         "CREATE TABLE IF NOT EXISTS mas_job_outcomes_meta (k TEXT PRIMARY KEY, v TEXT)",
         "SELECT v FROM mas_job_outcomes_meta WHERE k = 'pruned_at'",
@@ -242,6 +242,8 @@
         "CREATE TABLE IF NOT EXISTS job_pipeline_instances (\n      job_id TEXT PRIMARY KEY,\n      state TEXT NOT NULL,\n      desired_state TEXT NOT NULL,\n      current_run_id TEXT,\n      run_started_at TEXT,\n      run_trigger TEXT,\n      run_schedule_id TEXT,\n      run_async_job_id TEXT,\n      run_workflow_instance_id TEXT,\n      checkpoint_json TEXT,\n      stage_checkpoint_json TEXT,\n      stage_desired_json TEXT,\n      last_error TEXT,\n      updated_at TEXT NOT NULL\n    )",
         "CREATE TABLE IF NOT EXISTS job_pipeline_artifacts (\n      id TEXT PRIMARY KEY,\n      run_id TEXT NOT NULL,\n      artifact_key TEXT NOT NULL,\n      value_json TEXT NOT NULL\n    )",
         "CREATE INDEX IF NOT EXISTS idx_job_pipeline_artifacts_run\n      ON job_pipeline_artifacts (run_id, artifact_key)",
+        "CREATE TABLE IF NOT EXISTS job_pipeline_definition_versions (\n      id TEXT PRIMARY KEY,\n      job_id TEXT NOT NULL,\n      version INTEGER NOT NULL,\n      definition_json TEXT NOT NULL,\n      updated_at TEXT NOT NULL\n    )",
+        "INSERT OR IGNORE INTO job_pipeline_definition_versions (id, job_id, version, definition_json, updated_at) SELECT job_id || ':' || version, job_id, version, definition_json, updated_at FROM job_pipeline_definitions",
         "PRAGMA table_info(job_pipeline_instances)",
         "ALTER TABLE job_pipeline_instances ADD COLUMN run_schedule_id TEXT",
         "ALTER TABLE job_pipeline_instances ADD COLUMN run_async_job_id TEXT",

@@ -1283,6 +1283,18 @@ export const MIGRATION_0072_JOB_RUN_RECORDS_RUN_KIND: DataMigration = {
  * the two ever diverge. Additive only (CREATE INDEX IF NOT EXISTS);
  * no table is altered and no row is deleted.
  */
+/**
+ * Issue #5865 — the append-only definition history that historical replay
+ * (#4467) needs. Additive; the backfill that seeds it lives in the DO
+ * migration (the D1 runner has no data-migration seam, and the table is
+ * written on every save from here on).
+ */
+export const MIGRATION_0074_JOB_PIPELINE_DEFINITION_VERSIONS: DataMigration = {
+  version: 74,
+  name: "0074_job_pipeline_definition_versions",
+  sql: d1MigrationSql(74),
+};
+
 export const MIGRATION_0073_JOB_RUN_RECORDS_RECENT_IDX: DataMigration = {
   version: 73,
   name: "0073_job_run_records_recent_idx",
@@ -1527,6 +1539,7 @@ export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANC
   MIGRATION_0071_JOB_PIPELINE_RUN_KIND,
   MIGRATION_0072_JOB_RUN_RECORDS_RUN_KIND,
   MIGRATION_0073_JOB_RUN_RECORDS_RECENT_IDX,
+  MIGRATION_0074_JOB_PIPELINE_DEFINITION_VERSIONS,
 ];
 
 function splitStatements(sqlText: string): string[] {

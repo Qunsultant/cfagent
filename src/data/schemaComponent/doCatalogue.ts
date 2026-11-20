@@ -160,6 +160,21 @@ export const DO_CATALOGUE_ENTRIES: CatalogueEntry[] = [
     form: "literal",
   },
   {
+    // Issue #5865 — the append-only definition history (historical replay).
+    code: "schema.do.job_pipeline_definition_versions.create_table",
+    plane: "do",
+    table: "job_pipeline_definition_versions",
+    statement: `CREATE TABLE IF NOT EXISTS job_pipeline_definition_versions (
+      id TEXT PRIMARY KEY,
+      job_id TEXT NOT NULL,
+      version INTEGER NOT NULL,
+      definition_json TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
     code: "schema.do.job_pipeline_instances.create_table",
     plane: "do",
     table: "job_pipeline_instances",
