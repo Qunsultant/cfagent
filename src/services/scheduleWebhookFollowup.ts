@@ -43,6 +43,7 @@ export const SCHEDULE_WEBHOOK_AUDIT_EVENTS = {
   denied: "schedule.webhook.denied",
   minted: "schedule.webhook.followup_minted",
   mintLedgerFailed: "schedule.webhook.mint_ledger_failed",
+  duplicate: "schedule.webhook.duplicate",
 } as const;
 
 /** The mint ledger row's operation (the follow-up's own execution rows carry the chain's operations). */

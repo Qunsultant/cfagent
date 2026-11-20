@@ -18,6 +18,8 @@
  */
 
 import type { DatabaseORM } from "../orm";
+import type { ScheduleWebhookFollowupBody } from "../api/ingressSchemas";
+import { canonicalJson } from "../services/scheduleDedupe";
 import { createStructuredLogger } from "../observability/structuredLogger";
 import {
   ConsoleObservabilitySink,
@@ -68,6 +70,56 @@ export async function deriveScheduleWebhookNonce(
   return "schedule-webhook:" + (await sha256Hex(`schedule-webhook|${signature ?? ""}|${rawBody}`));
 }
 
+// ---------------------------------------------------------------------------
+// #4223 — persistent schedule-webhook idempotency keys
+// ---------------------------------------------------------------------------
+
+/**
+ * Durable schedule-webhook idempotency retention: 30 days, longer than
+ * the 24h edge nonce TTL (WEBHOOK_REPLAY_TTL_MS) so a delivery
+ * re-sent after the edge nonce expires is still recognised as a
+ * duplicate. The edge nonce guards the 5-minute signature window;
+ * this key guards the whole retry horizon.
+ */
+export const SCHEDULE_WEBHOOK_IDEMPOTENCY_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
+/**
+ * Resolve the durable idempotency TTL from an operator override
+ * (env SCHEDULE_WEBHOOK_IDEMPOTENCY_TTL_MS, milliseconds). Any
+ * missing, blank, non-numeric, non-finite, or non-positive value
+ * fails safe to the 30-day default — a bad override must never
+ * shorten the guard to nothing or break the claim.
+ */
+export function resolveScheduleWebhookIdempotencyTtlMs(value: unknown): number {
+  if (typeof value === "number") {
+    return Number.isFinite(value) && value > 0 ? value : SCHEDULE_WEBHOOK_IDEMPOTENCY_TTL_MS;
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (trimmed === "") return SCHEDULE_WEBHOOK_IDEMPOTENCY_TTL_MS;
+    const parsed = Number(trimmed);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : SCHEDULE_WEBHOOK_IDEMPOTENCY_TTL_MS;
+  }
+  return SCHEDULE_WEBHOOK_IDEMPOTENCY_TTL_MS;
+}
+
+/**
+ * Derive the durable idempotency key for one parsed webhook delivery.
+ * The key is the SHA-256 of the canonical JSON of the whole parsed
+ * body (keys sorted by the reused `canonicalJson`, so the same
+ * delivery re-serialized with a different key order maps to the same
+ * key), namespaced by the `schedule-webhook-idem:` prefix so it can
+ * never collide with an edge nonce (`schedule-webhook:`). Any field
+ * that changes the delivery — timestamp, workflow, capability,
+ * outcome, channel — changes the key; the same delivery re-sent
+ * verbatim claims the same key.
+ */
+export async function deriveScheduleWebhookIdempotencyKey(
+  body: ScheduleWebhookFollowupBody,
+): Promise<string> {
+  return "schedule-webhook-idem:" + (await sha256Hex(`schedule-webhook-idem|${canonicalJson(body)}`));
+}
+
 /**
  * Durable nonce-claim store. `claim` returns true when the nonce was
  * already claimed and has not expired — i.e. the event is a REPLAY and
@@ -79,6 +131,13 @@ export async function deriveScheduleWebhookNonce(
  */
 export interface ReplayStore {
   claim(nonce: string, source: string, ttlMs?: number): Promise<boolean>;
+  /**
+   * #4223: remove every expired claim and report how many were
+   * removed. Retention hygiene — spent keys must not accumulate
+   * forever. Source-agnostic: any expired row goes, whatever
+   * claimed it.
+   */
+  pruneExpired(): Promise<number>;
 }
 
 export class OrmReplayStore implements ReplayStore {
@@ -107,6 +166,13 @@ export class OrmReplayStore implements ReplayStore {
     }
     return false;
   }
+
+  async pruneExpired(): Promise<number> {
+    // One Repository call, not a template: the port's where language
+    // (expiresAt <= now, ISO strings order chronologically) deletes
+    // every spent row in one pass, whatever source claimed it.
+    return this.orm.webhookReplay.deleteWhere({ expiresAt: { $lte: new Date().toISOString() } });
+  }
 }
 
 export class MemoryReplayStore implements ReplayStore {
@@ -121,6 +187,18 @@ export class MemoryReplayStore implements ReplayStore {
       for (const [k, v] of this.claimed) if (v <= now) this.claimed.delete(k);
     }
     return false;
+  }
+
+  async pruneExpired(): Promise<number> {
+    const now = Date.now();
+    let removed = 0;
+    for (const [k, v] of this.claimed) {
+      if (v <= now) {
+        this.claimed.delete(k);
+        removed += 1;
+      }
+    }
+    return removed;
   }
 }
 

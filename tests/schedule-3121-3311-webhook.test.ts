@@ -74,6 +74,13 @@ import {
   type SchedulesRouteContext,
 } from "../src/agents/routes/schedules";
 import { SqlJobRunRecordStore } from "../src/data/doSqliteJobRunRecordAdapter";
+import { DatabaseORM } from "../src/orm";
+import { MockSqlStorage } from "./mock-sql";
+import {
+  SCHEDULE_WEBHOOK_IDEMPOTENCY_TTL_MS,
+  deriveScheduleWebhookIdempotencyKey,
+  OrmReplayStore,
+} from "../src/security/webhookReplay";
 import { makeFakeSessionStore } from "./fake-session-store";
 import type { Env } from "../src/types";
 
@@ -476,13 +483,25 @@ class SqliteTestStorage {
   }
 }
 
+function makeOrm(): DatabaseORM {
+  const orm = new DatabaseORM(new MockSqlStorage());
+  orm.initializeSchema("sess_3311_webhook");
+  return orm;
+}
+
 function doCtx(overrides: Partial<SchedulesRouteContext> = {}): {
   ctx: SchedulesRouteContext;
   sql: SqliteTestStorage;
+  orm: DatabaseORM;
   audits: Array<{ type: string; agent: string; payload: Record<string, unknown> }>;
   submitted: Array<Record<string, unknown>>;
 } {
   const sql = new SqliteTestStorage();
+  // Issue #4223: the DO route claims the durable idempotency key
+  // through ctx.getOrm(), so the harness provides a real ORM (not the
+  // bare {} stub) — the same MockSqlStorage-backed ORM the replay
+  // tests use.
+  const orm = makeOrm();
   const audits: Array<{ type: string; agent: string; payload: Record<string, unknown> }> = [];
   const submitted: Array<Record<string, unknown>> = [];
   const { namespace } = makeFakeSessionStore();
@@ -498,7 +517,7 @@ function doCtx(overrides: Partial<SchedulesRouteContext> = {}): {
     schedule: vi.fn(async () => ({ id: "sched-1" })),
     scheduleEvery: vi.fn(async () => ({ id: "sched-every" })),
     getScreenerExecutionContext: vi.fn(async () => undefined),
-    getOrm: vi.fn(() => ({})),
+    getOrm: vi.fn(() => orm),
     autonomousMarketScreen: vi.fn(async () => undefined),
     autoRenewETradeTokens: vi.fn(async () => undefined),
     creatableScheduleCallbacks: ["autonomousOptionsAnalysis", "autonomousMarketScreen"],
@@ -509,7 +528,7 @@ function doCtx(overrides: Partial<SchedulesRouteContext> = {}): {
     }),
     ...overrides,
   } as unknown as SchedulesRouteContext;
-  return { ctx, sql, audits, submitted };
+  return { ctx, sql, orm, audits, submitted };
 }
 
 const doReq = (body: unknown, headers: Record<string, string> = {}) =>
@@ -635,5 +654,126 @@ describe("handleSchedulesRoutes — POST /schedules/webhook/followup (#3311)", (
     expect(res!.status).toBe(200);
     expect(submitted).toHaveLength(1);
     expect(audits.map((a) => a.type)).toContain("schedule.webhook.mint_ledger_failed");
+  });
+});
+
+// ===========================================================================
+// 6. DO route — durable idempotency (#4223)
+// ===========================================================================
+
+describe("handleSchedulesRoutes — durable webhook idempotency (#4223)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("rejects a replayed delivery with 409, mints only once, and stores a durable key", async () => {
+    const { ctx, orm, audits, submitted } = doCtx();
+    // The same serialized body twice: one delivery, replayed.
+    const body = validBody({ workflowId: "wf-4223-replay" });
+    const first = await handleSchedulesRoutes(
+      doReq(body),
+      urlOf("/schedules/webhook/followup"),
+      "/schedules/webhook/followup",
+      "test-session",
+      ctx,
+    );
+    expect(first!.status).toBe(200);
+    const second = await handleSchedulesRoutes(
+      doReq(body),
+      urlOf("/schedules/webhook/followup"),
+      "/schedules/webhook/followup",
+      "test-session",
+      ctx,
+    );
+    expect(second!.status).toBe(409);
+    expect(submitted).toHaveLength(1);
+    expect(audits.map((a) => a.type)).toContain("schedule.webhook.duplicate");
+    // The key is a durable row in the ORM table with the 30-day retention.
+    const key = await deriveScheduleWebhookIdempotencyKey(scheduleWebhookFollowupBodySchema.parse(body));
+    const row = orm.webhookReplay.findOne({ nonce: key });
+    expect(row).toBeTruthy();
+    expect(row!.source).toBe("schedule-webhook");
+    expect(Date.parse(row!.expiresAt) - Date.parse(row!.createdAt)).toBe(SCHEDULE_WEBHOOK_IDEMPOTENCY_TTL_MS);
+  });
+
+  it("mints a delivery whose content differs (new timestamp, new key)", async () => {
+    const { ctx, submitted } = doCtx();
+    const first = await handleSchedulesRoutes(
+      doReq(validBody({ workflowId: "wf-4223-distinct" })),
+      urlOf("/schedules/webhook/followup"),
+      "/schedules/webhook/followup",
+      "test-session",
+      ctx,
+    );
+    expect(first!.status).toBe(200);
+    const second = await handleSchedulesRoutes(
+      doReq(
+        validBody({
+          workflowId: "wf-4223-distinct",
+          timestamp: new Date(Date.now() + 60_000).toISOString(),
+        }),
+      ),
+      urlOf("/schedules/webhook/followup"),
+      "/schedules/webhook/followup",
+      "test-session",
+      ctx,
+    );
+    expect(second!.status).toBe(200);
+    expect(submitted).toHaveLength(2);
+  });
+
+  it("reclaims an expired durable key (the delivery mints again)", async () => {
+    const { ctx, orm, submitted } = doCtx();
+    const body = validBody({ workflowId: "wf-4223-expired" });
+    const key = await deriveScheduleWebhookIdempotencyKey(scheduleWebhookFollowupBodySchema.parse(body));
+    await new OrmReplayStore(orm).claim(key, "schedule-webhook", 0);
+    const res = await handleSchedulesRoutes(
+      doReq(body),
+      urlOf("/schedules/webhook/followup"),
+      "/schedules/webhook/followup",
+      "test-session",
+      ctx,
+    );
+    expect(res!.status).toBe(200);
+    expect(submitted).toHaveLength(1);
+  });
+
+  it("claim-before-mint: a failed mint leaves the key claimed, so the retry is a 409, not a second mint", async () => {
+    const failingMint = vi.fn(async () => {
+      throw new Error("mint boom");
+    });
+    const { ctx } = doCtx({ submitAsyncJob: failingMint } as Partial<SchedulesRouteContext>);
+    const body = validBody({ workflowId: "wf-4223-mintfail" });
+    const first = await handleSchedulesRoutes(
+      doReq(body),
+      urlOf("/schedules/webhook/followup"),
+      "/schedules/webhook/followup",
+      "test-session",
+      ctx,
+    );
+    expect(first!.status).toBe(500);
+    const second = await handleSchedulesRoutes(
+      doReq(body),
+      urlOf("/schedules/webhook/followup"),
+      "/schedules/webhook/followup",
+      "test-session",
+      ctx,
+    );
+    expect(second!.status).toBe(409);
+    expect(failingMint).toHaveBeenCalledTimes(1);
+  });
+
+  it("prunes spent keys best-effort on mint (an expired row is gone afterwards)", async () => {
+    const { ctx, orm } = doCtx();
+    await new OrmReplayStore(orm).claim("stale-schedule-key", "schedule-webhook", 0);
+    const res = await handleSchedulesRoutes(
+      doReq(validBody({ workflowId: "wf-4223-prune" })),
+      urlOf("/schedules/webhook/followup"),
+      "/schedules/webhook/followup",
+      "test-session",
+      ctx,
+    );
+    expect(res!.status).toBe(200);
+    expect(orm.webhookReplay.findOne({ nonce: "stale-schedule-key" })).toBeFalsy();
   });
 });
