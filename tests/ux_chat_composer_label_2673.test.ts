@@ -5,10 +5,9 @@
  * user types and is not a persistent accessible name) and no label,
  * hint, error, or aria-label, so assistive tech announced an
  * unnamed text field. The fix adds an aria-label to the composer's
- * input (Fluent Input forwards aria-label to the input element),
- * with zero visual change. #3146 migrated the composer from our
- * TextInput to Fluent Input; the accessible-name guarantee is
- * unchanged, only the component name in this pin moved with it.
+ * input, with zero visual change. #5843 retired the Fluent experiment,
+ * so the composer is the ui/ TextInput again — the accessible-name
+ * guarantee is unchanged; only the component name in this pin moved.
  *
  * Pin style is a focused source assertion: the composer is inline
  * in AgentChatTabContent, whose agent hooks (@cloudflare/ai-chat,
@@ -37,7 +36,7 @@ function composerForm(): string {
 describe("Chat composer accessible name (#2673 slice 6)", () => {
   it("the composer input carries an aria-label (not placeholder-only)", () => {
     const form = composerForm();
-    expect(form).toContain("<Input");
+    expect(form).toContain("<TextInput");
     expect(form).toMatch(/aria-label="[^"]+"/);
   });
 });

@@ -29,29 +29,28 @@ function readChat(): string {
 }
 
 function providerStylesBlock(): string {
-  const src = readChat();
-  const start = src.indexOf("const useProviderStyles = makeStyles({");
+  const css = readFileSync(join(here, "..", "src", "client", "components", "ui", "primitives.css"), "utf8");
+  const start = css.indexOf(".ui-chat-viewport {");
   expect(start).toBeGreaterThan(-1);
-  const end = src.indexOf("});", start);
+  const end = css.indexOf("}", start);
   expect(end).toBeGreaterThan(-1);
-  return src.slice(start, end);
+  return css.slice(start, end);
 }
 
 describe("chat scroll chain survives the Fluent provider (#3407)", () => {
-  it("FluentProvider root carries the flex-constraining Griffel class", () => {
+  it("the viewport wrapper carries the flex-constraining class (#5843: no provider)", () => {
     const src = readChat();
-    expect(src).toContain("const providerStyles = useProviderStyles();");
-    expect(src).toContain(
-      '<FluentProvider theme={fluentTheme} className={providerStyles.provider}>'
-    );
+    expect(src).toContain('provider: "ui-chat-viewport"');
+    expect(src).toContain("<div className={providerStyles.provider}>");
+    expect(src).not.toContain("FluentProvider");
   });
 
-  it("the provider styles make the root a shrinking flex column", () => {
+  it("the viewport class makes the root a shrinking flex column", () => {
     const block = providerStylesBlock();
-    expect(block).toContain('display: "flex"');
-    expect(block).toContain('flexDirection: "column"');
-    expect(block).toContain("flexGrow: 1");
-    expect(block).toContain("minHeight: 0");
+    expect(block).toContain("display: flex");
+    expect(block).toContain("flex-direction: column");
+    expect(block).toContain("flex-grow: 1");
+    expect(block).toContain("min-height: 0");
   });
 
   it("the scroll effect and stream container are intact", () => {

@@ -99,7 +99,10 @@ describe("Phase 4 CI enforcement pin (#1772)", () => {
     // experiment list, so the list name drops 28 -> 27.
     const pin = readFileSync(EXCEPTIONS_PIN, "utf8");
     expect(pin).toContain("ZERO_PRIMITIVE_27");
-    expect(pin).toContain("FLUENT_EXPERIMENT_3146");
+    // #5843: the Fluent experiment ended, so the list is gone and the
+    // total shrank 44 -> 43.
+    expect(pin).toContain("ALL_43");
+    expect(pin).not.toContain("FLUENT_EXPERIMENT_3146");
   });
 
   it("a new raw-control file is flagged, a nested one too, primitives and mentions are not", () => {
