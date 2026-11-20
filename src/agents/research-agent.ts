@@ -121,7 +121,7 @@ export interface ResearchRunRequest {
    * the configured default (the deployment environment). An unknown
    * broker id refuses by name in the platform registry, before any quote.
    */
-  brokerId?: TradingPlatformId;
+  brokerId?: string;
   mode?: string;
   /** Optional engine runId so canonical report & D1 JobRunRecord share one ID (#581 / #5175). */
   runId?: string;
@@ -235,6 +235,9 @@ export class ResearchAgent extends PortThink {
         inputSchema: z.object({
           trigger: z.enum(["manual", "scheduled"]),
           userLogin: z.string().optional(),
+          // Issue #5912 — the venue/mode this run names (optional).
+          brokerId: z.string().optional(),
+          mode: z.string().optional(),
         }),
         execute: async (input) => {
           const result = await this.runResearch(input);
