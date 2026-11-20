@@ -325,6 +325,17 @@ interface BizCopilotChannelExecutorDeps {
   env: { AGENT_DB?: unknown };
   /** The turn's verified login (from the session, never client-supplied) — the operator identity the route gates on. */
   userLogin: string;
+  /**
+   * Issue #5608 (G-11) — audit funnel (the branch's 2-arg shape; adapted to
+   * each handler's 3-arg ctx.audit below). The route handler's
+   * auditBestEffort is a no-op without it, so a BizCopilot channel mutation
+   * would emit only the turn-level `bizcopilot.channel_action_executed`
+   * event and no `platform-channel-admin` record — the same pass-through the
+   * Accounts executor already does (bizCopilotAccounts.ts). Optional so
+   * direct `executeBizCopilotChannelIntent` callers without a turn audit
+   * keep working; absent means no route-level record, as before.
+   */
+  audit?: (type: string, payload: Record<string, unknown>) => void;
   /** Test seams: the route handler composes the adapters from env when these are absent, exactly as the HTTP dispatch does. */
   channels?: TenantChannelStore | null;
   directory?: TenantDirectory | null;
@@ -350,6 +361,12 @@ async function callChannelRoute(
   });
   const response = await handlePlatformChannelRoutes(request, url, url.pathname, "bizcopilot-chat", {
     env: deps.env,
+    // Issue #5608 (G-11): pass the turn audit through as the route
+    // handler's funnel, so a BizCopilot mutation emits the
+    // `platform-channel-admin` record as well as the turn-level
+    // `bizcopilot.channel_action_executed` event below — the Accounts
+    // executor's shape (bizCopilotAccounts.ts).
+    audit: (type, _agent, payload) => deps.audit?.(type, payload),
     channels: deps.channels,
     directory: deps.directory,
     operators: deps.operators,
@@ -502,6 +519,10 @@ export async function runBizCopilotChannelBranch(deps: {
     const context = await executeBizCopilotChannelIntent(intent, {
       env: deps.env,
       userLogin: deps.userLogin,
+      // Issue #5608 (G-11): the turn audit is the route handler's funnel
+      // on this path (see callChannelRoute) — without it a BizCopilot
+      // mutation emits no `platform-channel-admin` record.
+      audit: deps.audit,
       channels: deps.channels,
       directory: deps.directory,
       operators: deps.operators,

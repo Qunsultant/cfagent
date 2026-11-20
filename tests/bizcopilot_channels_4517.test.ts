@@ -504,8 +504,15 @@ describe("BizCopilot channel turn branch (#4517)", () => {
       operators: world.deps(OPERATOR).operators,
     });
     expect(context.startsWith("BIZCOPILOT_CHANNEL_RESULT: ")).toBe(true);
-    expect(audits).toHaveLength(1);
-    expect(audits[0]).toMatchObject({
+    // Issue #5608 (G-11): a BizCopilot mutation now emits BOTH the route
+    // record (the turn audit passed through as the handler's funnel) and
+    // the turn event — the Accounts executor's shape.
+    expect(audits).toHaveLength(2);
+    expect(audits[0]).toEqual({
+      type: "platform-channel-admin",
+      payload: { actorLogin: OPERATOR, action: "update-channels", tenantId: "acme" },
+    });
+    expect(audits[1]).toMatchObject({
       type: "bizcopilot.channel_action_executed",
       payload: {
         sourceTab: "BizCopilot",
