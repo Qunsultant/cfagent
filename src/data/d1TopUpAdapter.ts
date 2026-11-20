@@ -110,7 +110,7 @@ export class D1TopUpAdapter implements TopUpDraftStore {
       .returning();
     if (rows.length === 0) {
       const existing = await this.getDraft(id);
-      if (!existing) throw new Error(`Unknown top-up draft ${id}.`);
+      if (!existing) throw new BusinessError("FAILURE_TOP_UP_NOT_FOUND");
       throw new TopUpClaimRefusedError(id, existing.status, "claim");
     }
     return toDraft(rows[0]);
@@ -125,7 +125,7 @@ export class D1TopUpAdapter implements TopUpDraftStore {
       .returning();
     if (rows.length === 0) {
       const existing = await this.getDraft(id);
-      if (!existing) throw new Error(`Unknown top-up draft ${id}.`);
+      if (!existing) throw new BusinessError("FAILURE_TOP_UP_NOT_FOUND");
       throw new TopUpClaimRefusedError(id, existing.status, "release");
     }
     return toDraft(rows[0]);

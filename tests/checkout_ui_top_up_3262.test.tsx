@@ -20,7 +20,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { CheckoutPanel } from "../src/client/CheckoutPanel";
-import { codedMessage, resolveOutcome } from "../src/outcomes/outcomeAspects";
+import { codedMessage } from "../src/outcomes/outcomeAspects";
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -153,10 +153,10 @@ function mockFetch(opts: MockOpts = {}) {
         status: 200,
         json: async () =>
           opts.checkout ?? {
-            // Issue #3571: the mint body carries the catalog code +
-            // message (the panel renders codedMessage(code)).
+            // Issue #3571: the mint body carries the catalog code
+            // (success bodies carry no message field; the panel
+            // renders codedMessage(code)).
             code: "SUCCESS_TOP_UP_CHECKOUT_CREATED",
-            message: resolveOutcome("SUCCESS_TOP_UP_CHECKOUT_CREATED").businessMessage,
             topUpRequestId: "topup-1",
             rail: "card",
             amountUSD: body.amountUSD,
@@ -181,8 +181,9 @@ function mockFetch(opts: MockOpts = {}) {
         status: 200,
         json: async () =>
           opts.confirm ?? {
-            // Issue #3571: the confirm body carries the catalog code +
-            // message (the panel renders codedMessage(code)).
+            // Issue #3571: the confirm body carries the catalog code
+            // (success bodies carry no message field; the panel
+            // renders codedMessage(code)).
             code: "SUCCESS_TOP_UP_CREDITED",
             account: { creditsUSD: 35 },
             topUpRequestId: "topup-1",
@@ -260,10 +261,12 @@ describe("checkout panel top-up tab (#3262)", () => {
     });
     await flush();
     const text = container.textContent || "";
-    // Issue #3571: the confirm success renders the catalog message
-    // with the amounts as data — the old sentence is gone.
-    expect(text).toContain("Top-up credited:");
-    expect(text).toContain("New credit balance: $35.00.");
+    // Issue #3571 (residual): the confirm success renders the catalog
+    // message with the amounts as data — the old sentence is gone.
+    expect(text).toContain(codedMessage("SUCCESS_TOP_UP_CREDITED"));
+    expect(text).toContain("Credited $25.00");
+    expect(text).toContain("new balance $35.00");
+    expect(text).not.toContain("Top-up credited:");
     expect(posts.filter((p) => p.url.endsWith("/top-up/confirm"))).toHaveLength(1);
   });
 
@@ -319,8 +322,10 @@ describe("checkout panel top-up tab (#3262)", () => {
       });
     });
     await flush();
-    expect(container.textContent || "").toContain("Top-up credited:");
-    expect(container.textContent || "").toContain("Top-up credited: $25.00");
+    // Issue #3571 (residual): the credited milestone renders the catalog message.
+    expect(container.textContent || "").toContain(codedMessage("SUCCESS_TOP_UP_CREDITED"));
+    expect(container.textContent || "").toContain("Credited $25.00");
+    expect(container.textContent || "").not.toContain("Top-up credited:");
   });
 
   it("x402 is offered only when the scope and network allow it, and verify uses the pasted proof", async () => {
@@ -331,7 +336,6 @@ describe("checkout panel top-up tab (#3262)", () => {
       }),
       checkout: {
         code: "SUCCESS_TOP_UP_CHECKOUT_CREATED",
-        message: resolveOutcome("SUCCESS_TOP_UP_CHECKOUT_CREATED").businessMessage,
         topUpRequestId: "topup-2",
         rail: "x402",
         amountUSD: 25,
@@ -379,9 +383,10 @@ describe("checkout panel top-up tab (#3262)", () => {
       clickButton("I have paid — verify");
     });
     await flush();
-    expect(container.textContent || "").toContain("Top-up credited:");
-    expect(container.textContent || "").toContain("Top-up credited: $25.00");
-    expect(container.textContent || "").toContain("Top-up credited:");
+    // Issue #3571 (residual): the credited milestone renders the catalog message.
+    expect(container.textContent || "").toContain(codedMessage("SUCCESS_TOP_UP_CREDITED"));
+    expect(container.textContent || "").toContain("Credited $25.00");
+    expect(container.textContent || "").not.toContain("Top-up credited:");
   });
 
   it("x402 is not offered on a card-only scope", async () => {

@@ -646,7 +646,7 @@ describe("top-up audit payloads carry code + message (#3571)", () => {
     );
   });
 
-  it("credit audit carries the credited code and message", async () => {
+  it("credit audit carries the credited code, message, and checkoutSessionId", async () => {
     const { ctx, audit } = await setup({ monetization: true, stripe: true });
     stubPayments();
     await createAccount(ctx, "u1");
@@ -661,6 +661,28 @@ describe("top-up audit payloads carry code + message (#3571)", () => {
       expect.objectContaining({
         code: "SUCCESS_TOP_UP_CREDITED",
         message: catalogMessage("SUCCESS_TOP_UP_CREDITED"),
+        topUpRequestId: body.topUpRequestId,
+        amountUSD: 25,
+        checkoutSessionId: body.checkoutSessionId,
+      }),
+    );
+  });
+
+  it("claim audit carries the claimed code and message", async () => {
+    const { ctx, audit } = await setup({ monetization: true, stripe: true });
+    stubPayments();
+    await createAccount(ctx, "u1");
+    const { body } = await mintCard(ctx, 25);
+    await call(ctx, "POST", "/payments/agentic/commercial/top-up/confirm", "u1", {
+      topUpRequestId: body.topUpRequestId,
+      checkoutSessionId: body.checkoutSessionId,
+    });
+    expect(audit).toHaveBeenCalledWith(
+      "commercial.top_up.claimed",
+      "payments",
+      expect.objectContaining({
+        code: "SUCCESS_TOP_UP_CLAIMED",
+        message: catalogMessage("SUCCESS_TOP_UP_CLAIMED"),
         topUpRequestId: body.topUpRequestId,
         amountUSD: 25,
       }),

@@ -3258,7 +3258,9 @@ export async function handleAgenticPaymentsRoutes(
   const requireTopUpDrafts = (): D1TopUpAdapter | Response => {
     const adapter = createTopUpDraftAdapter(ctx.env as { AGENT_DB?: unknown });
     if (!adapter) {
-      return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: "Top-up store unavailable: AGENT_DB is not bound." }, { status: 503 });
+      // Issue #3571 (residual): the store-unavailable failure renders
+      // from the catalog, never a hand-written string.
+      return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_STORE_UNAVAILABLE") }, { status: 503 });
     }
     return adapter;
   };
@@ -3650,12 +3652,20 @@ export async function handleAgenticPaymentsRoutes(
         }
         throw err;
       }
+      // Issue #3571 (residual): the claim audit carries the catalog
+      // code + message for the claim outcome (#1969 acceptance: the
+      // record alone answers which code, what happened, for which
+      // login). The claim is the confirm step whose outcome the
+      // credited / claim-stuck audits close.
+      const claimedOutcome = resolveOutcome("SUCCESS_TOP_UP_CLAIMED");
       ctx.audit("commercial.top_up.claimed", "payments", {
         userId: login,
         tenantId: draft.tenantId,
         topUpRequestId: draft.id,
         amountUSD: draft.amountUSD,
         rail: draft.rail,
+        code: claimedOutcome.code,
+        message: claimedOutcome.businessMessage,
       });
       // Verified: ensure the account row exists (created on verified payment when
       // missing), then credit exactly the draft amount — never the evidence amount,
@@ -3677,12 +3687,19 @@ export async function handleAgenticPaymentsRoutes(
         try {
           await drafts.releaseClaim(draft.id);
         } catch (releaseErr: any) {
+          // Issue #3571 (residual): the stuck-claim audit carries the
+          // catalog code + message of the reconcile outcome it
+          // signals (#1969 acceptance) — the same code the route
+          // throws immediately below.
+          const stuckOutcome = resolveOutcome("FAILURE_TOP_UP_RECONCILE_REQUIRED");
           ctx.audit("commercial.top_up.claim_stuck", "payments", {
             userId: login,
             tenantId: draft.tenantId,
             topUpRequestId: draft.id,
             amountUSD: draft.amountUSD,
             rail: draft.rail,
+            code: stuckOutcome.code,
+            message: stuckOutcome.businessMessage,
           });
           logAspectEvent({
             aspect: "TopUp",
@@ -3734,6 +3751,10 @@ export async function handleAgenticPaymentsRoutes(
         rail: draft.rail,
         creditsUSD: credited.creditsUSD,
         paymentIntentId,
+        // Issue #3571 (residual): the credited audit carries the
+        // payment ref that exists at confirm (null for the x402 rail,
+        // same as the mint audit).
+        checkoutSessionId,
         code: creditedOutcome.code,
         message: creditedOutcome.businessMessage,
       });
@@ -5397,7 +5418,12 @@ export async function handleAgenticPaymentsRoutes(
       }
       const updated = await policy.updatePolicy(partial);
       // Issue #3357: the discount change is audited with code + message + login
-      // (#1969 acceptance). Other policy fields keep the pre-existing audit shape.
+      // (#1969 acceptance). Issue #3571 (residual): the generic branch —
+      // the one top-up-limits edits take — carries the same code +
+      // message + login for the policy-updated outcome, so every
+      // policy_set record answers which code, what happened, for
+      // which login from the record alone.
+      const policyUpdated = resolveOutcome("SUCCESS_BILLING_POLICY_UPDATED");
       if (partial.annualDiscountPct !== undefined) {
         const discountUpdated = resolveOutcome("SUCCESS_ANNUAL_DISCOUNT_UPDATED");
         ctx.audit("commercial.billing.policy_set", "payments", {
@@ -5420,7 +5446,13 @@ export async function handleAgenticPaymentsRoutes(
           policy: updated,
         });
       } else {
-        ctx.audit("commercial.billing.policy_set", "payments", { userId: login, policy: updated });
+        ctx.audit("commercial.billing.policy_set", "payments", {
+          code: policyUpdated.code,
+          message: policyUpdated.businessMessage,
+          login,
+          userId: login,
+          policy: updated,
+        });
       }
       return Response.json({ code: "SUCCESS_BILLING_POLICY_UPDATED", policy: updated });
     } catch (err: any) {

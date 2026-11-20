@@ -50,6 +50,7 @@ import type { ProviderSubscription } from "../src/services/billingPorts";
 import { StripeBillingCheckoutAdapter } from "../src/services/stripeBillingCheckoutAdapter";
 import { StripePaymentStrategy } from "../src/patterns/paymentStrategies";
 import { DatabaseORM } from "../src/orm";
+import { resolveOutcome } from "../src/outcomes/outcomeAspects";
 
 /** Test-local in-memory SqlStorage (same pattern as tests/orm_step3a_characterization_2345.test.ts). */
 class SqliteTestStorage {
@@ -933,6 +934,18 @@ describe("billing-policy routes", () => {
       gracePeriodDays: 3,
     });
     expect(after?.status).toBe(200);
+    // Issue #3571 (residual): the generic policy_set branch — the one
+    // top-up-limits edits take — audits with code + message + login,
+    // like the discount and offer-rules branches.
+    expect(s.ctx.audit).toHaveBeenCalledWith(
+      "commercial.billing.policy_set",
+      "payments",
+      expect.objectContaining({
+        code: "SUCCESS_BILLING_POLICY_UPDATED",
+        message: resolveOutcome("SUCCESS_BILLING_POLICY_UPDATED").businessMessage,
+        login: "op1",
+      }),
+    );
     const stored = await bodyOf(await call(s.ctx, "GET", "/payments/agentic/commercial/billing-policy", "op1"));
     expect(stored.policy.billingPeriodDefault).toBe("annual");
     expect(stored.policy.gracePeriodDays).toBe(3);

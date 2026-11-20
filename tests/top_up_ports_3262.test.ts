@@ -188,7 +188,10 @@ describe.each([
     // First claim wins; the draft is crediting and a second claim refuses.
     expect((await store.claimForCredit("topup-draft-1")).status).toBe("crediting");
     await expect(store.claimForCredit("topup-draft-1")).rejects.toThrow(/not minted/);
-    await expect(store.claimForCredit("topup-missing")).rejects.toThrow(/Unknown top-up draft/);
+    // Issue #3571 (residual): an unknown draft is a typed, catalog-coded
+    // failure on the claim/release paths too, never a raw Error.
+    expect(await rejectedCode(store.claimForCredit("topup-missing"))).toBe("FAILURE_TOP_UP_NOT_FOUND");
+    expect(await rejectedCode(store.releaseClaim("topup-missing"))).toBe("FAILURE_TOP_UP_NOT_FOUND");
     // Release returns the draft to minted, so a retry can claim and proceed.
     expect((await store.releaseClaim("topup-draft-1")).status).toBe("minted");
     expect((await store.claimForCredit("topup-draft-1")).status).toBe("crediting");

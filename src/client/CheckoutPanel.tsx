@@ -760,12 +760,13 @@ export function CheckoutPanel({ userLogin }: { userLogin: string }) {
           ? { checkoutSessionId: topUpMint.checkoutSessionId ?? undefined }
           : { paymentProof: topUpProof.trim() }),
       });
-      // Issue #3571: the confirm success renders the catalog message
-      // for the outcome the 200 already proves — never a hand-written
-      // sentence. Amounts stay as data after the message, not message
-      // text. The guarded fallback covers a legacy body without a code.
+      // Issue #3571 (residual): the confirm success renders the catalog
+      // message for the outcome the 200 already proves — never a
+      // hand-written sentence. Amounts stay as data after the message,
+      // not message text. The guarded fallback covers a legacy body
+      // without a code.
       setTopUpDone(
-        `Top-up credited: ${formatUSD(res.creditedUSD)}. New credit balance: ${formatUSD(res.account.creditsUSD ?? 0)}.`
+        `${codedMessage(res.code ?? "SUCCESS_TOP_UP_CREDITED")} Credited ${formatUSD(res.creditedUSD)} — new balance ${formatUSD(res.account.creditsUSD ?? 0)}.`
       );
       setTopUpMint(null);
       setTopUpProof("");
