@@ -399,9 +399,27 @@ async function runOptionsChainFeedUnit(
   const policy = resolvePipelinePolicy(deps.env as unknown as Record<string, unknown>).retry[
     SHARD_RETRY_BUCKET.feed
   ];
+  type RecordedRun = Parameters<JobRunRecorder["recordRun"]>[0];
+  const rawEngineStores = deps.engineStores;
+  const realRunRecorder = rawEngineStores?.runRecorder;
+  let bufferedRecord: RecordedRun | null = null;
   try {
     const result = await withRetry(async () => {
       const storage = memoryStageStorage();
+      const captured: { record: RecordedRun | null } = { record: null };
+      const attemptEngineStores =
+        rawEngineStores && realRunRecorder
+          ? {
+              ...rawEngineStores,
+              runRecorder: {
+                ...realRunRecorder,
+                recordRun: async (record: RecordedRun) => {
+                  captured.record = record;
+                  bufferedRecord = record;
+                },
+              },
+            }
+          : rawEngineStores;
       const outcome = await runStrategyScreenViaEngine(
         {
           runId: shardRunId,
@@ -420,7 +438,7 @@ async function runOptionsChainFeedUnit(
           }),
           claims: memoryStageClaims(),
           queue: deps.queue,
-          engineStores: deps.engineStores,
+          engineStores: attemptEngineStores,
         },
       );
       if (outcome.outcome !== "completed") {
@@ -430,10 +448,21 @@ async function runOptionsChainFeedUnit(
         optionsArtifactKey(shardRunId, "shapeReport"),
       );
       if (!stored) {
-        throw new Error(`strategy screen ${shardRunId} completed without a shapeReport artifact`);
+        const missingMessage = `strategy screen ${shardRunId} completed without a shapeReport artifact`;
+        if (captured.record) {
+          bufferedRecord = { ...captured.record, outcome: "failure", error: missingMessage };
+        }
+        throw new Error(missingMessage);
       }
       if (stored.matrix?.[0]?.verdict === "skipped") {
-        throw new Error(stored.matrix[0].skipReason || `symbol ${symbol} skipped`);
+        const skipMessage = stored.matrix[0].skipReason || `symbol ${symbol} skipped`;
+        if (captured.record) {
+          bufferedRecord = { ...captured.record, outcome: "skipped", detail: skipMessage };
+        }
+        throw new Error(skipMessage);
+      }
+      if (realRunRecorder && captured.record) {
+        await realRunRecorder.recordRun(captured.record);
       }
       return stored;
     }, policy);
@@ -441,6 +470,9 @@ async function runOptionsChainFeedUnit(
     return { output, descriptor: `options-chain feed ${symbol}: scanned` };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    if (realRunRecorder && bufferedRecord) {
+      await realRunRecorder.recordRun(bufferedRecord);
+    }
     const output: OptionsChainFeedUnitOutput = { symbol, status: "failed", error: message };
     return { output, descriptor: `options-chain feed ${symbol}: failed — ${message}` };
   }

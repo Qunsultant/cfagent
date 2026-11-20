@@ -1439,10 +1439,13 @@ export async function handleReportsRoutes(
           const { listD1JobRunRecordSummaries, runSummaryFromJobRunRecord } = await import(
             "../../services/runSummaries"
           );
+          const { isInnerShardScanJobId } = await import("../../workflows/optionsScreenEngine");
           let rows: RunSummary[];
           if (ctx.jobRunRecordReader) {
             const records = await ctx.jobRunRecordReader(limit);
-            rows = records.map(runSummaryFromJobRunRecord);
+            rows = records
+              .filter((r) => !isInnerShardScanJobId(r.jobId))
+              .map(runSummaryFromJobRunRecord);
           } else {
             rows = await listD1JobRunRecordSummaries(ctx.env, limit);
           }

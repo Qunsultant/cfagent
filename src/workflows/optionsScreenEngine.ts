@@ -223,6 +223,18 @@ export function shardScanJobId(chainId: string, symbol: string): string {
   return strategyScreenJobId(shardScanRunId(chainId, symbol));
 }
 
+export const SHARD_SCAN_JOB_ID_PREFIX = `${STRATEGY_SCREEN_JOB_ID_PREFIX}:shard-scan:`;
+
+/**
+ * Issue #5892 — whether an engine job id is an inner per-symbol feed shard scan
+ * (`strategy-screen:shard-scan:<chainId>:<symbol>`, #4420). Inner shard scans
+ * belong to their parent options chain's feed stage (`innerJobId` / `innerStages`)
+ * and are never standalone top-level runs.
+ */
+export function isInnerShardScanJobId(jobId: string | null | undefined): boolean {
+  return typeof jobId === "string" && jobId.startsWith(SHARD_SCAN_JOB_ID_PREFIX);
+}
+
 /**
  * The options screen job definition, as raw configuration for
  * JobPipelineControl.defineJob: a root with one child per options stage,
