@@ -30,7 +30,6 @@ import {
   withRetry,
 } from "../src/services/resilience";
 import { resolvePipelinePolicy } from "../src/services/pipelinePolicy";
-import { resolveShardPacing, SHARD_PACING } from "../src/config/shardPacing";
 import {
   assessFeedGate,
   planAssembleShard,
@@ -762,17 +761,6 @@ describe("schedule schema + RunSummary surfacing (issues #1355, #1346)", () => {
     expect(row.csvUrl).toBe("/api/screener/report.csv?key=screener%3Acsv%3Aabc");
   });
 });
-describe("shard-chain dispatch pacing (#4424)", () => {
-  // Issue #4780: applyShardPacing is gone — the dispatch pacing moved
-  // to the engine (the chain job's feed node shards by symbol with
-  // sequential units; each unit is its own journaled workflow step).
-  // The pacing proof is the definition test above plus the #4780 pin
-  // (tests/options_chain_engine_4780.test.ts). Only the config
-  // resolution remains here.
-  it("reads the knobs from config and honours the environment overrides", () => {
-    expect(SHARD_PACING).toMatchObject({ inFlightCap: 8, paceIntervalMs: 2000, staggerMs: 1000 });
-    expect(resolveShardPacing({ SHARD_CHAIN_IN_FLIGHT_CAP: "5" }).inFlightCap).toBe(5);
-    expect(resolveShardPacing({ SHARD_CHAIN_PACE_INTERVAL_MS: "750" }).paceIntervalMs).toBe(750);
-    expect(resolveShardPacing({ SHARD_CHAIN_STAGGER_MS: "nonsense" }).staggerMs).toBe(1000);
-  });
-});
+// Issue #5833 (leftover from #4780): src/config/shardPacing.ts and
+// config/shard-pacing.json were removed because the engine chain's feed
+// node uses journaled workflow steps for pacing (#4780).
