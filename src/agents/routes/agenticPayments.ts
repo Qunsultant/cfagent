@@ -866,6 +866,17 @@ export async function handleAgenticPaymentsRoutes(
   };
   const envOperators = envOperatorLogins();
   let storeOperatorLogins = new Set<string>();
+  // #5611 (G-9): the preload failure is RECORDED, not reported yet.
+  // The degrade is reported lazily, on first USE of the operator
+  // check (reportOperatorDegradeOnce). Routes that never consult the
+  // operator list (e.g. the removed record-native route, whose
+  // inertness the ledger gate pins) stay silent; every route that
+  // does consult it reports the degrade exactly once per request.
+  // Reporting at setup would audit on requests the operator list
+  // never serves — the setup-time form broke the record-native
+  // inertness pin (tests/native_ledger_routes.test.ts:140) on the
+  // first CI run of this slice.
+  let storeOperatorReadError: unknown = null;
   try {
     const operatorsAdapter = createStoreOperatorsAdapter(ctx.env as { AGENT_DB?: unknown });
     if (operatorsAdapter) {
@@ -874,8 +885,13 @@ export async function handleAgenticPaymentsRoutes(
     }
   } catch (err) {
     storeOperatorLogins = new Set();
-    // #5611 (G-9): the degrade is LOUD — structured log + audit
-    // record, behavior unchanged (env-only, no lockout, no 500).
+    storeOperatorReadError = err;
+  }
+  let operatorDegradeReported = false;
+  const reportOperatorDegradeOnce = (): void => {
+    if (storeOperatorReadError === null || operatorDegradeReported) return;
+    operatorDegradeReported = true;
+    const err = storeOperatorReadError;
     // The audit goes through this file's funnel (ctx.audit, agent
     // "payments") — the IAAA chain (recordAuditEvent) requires a
     // non-empty tenantId and none is known at handler setup, so
@@ -893,8 +909,9 @@ export async function handleAgenticPaymentsRoutes(
       login: commercialLogin(),
       envOperatorCount: envOperators.size,
     });
-  }
+  };
   const isStoreOperator = (login: string | null): boolean => {
+    reportOperatorDegradeOnce();
     if (!login) return false;
     return envOperators.has(login) || storeOperatorLogins.has(login);
   };
@@ -906,6 +923,9 @@ export async function handleAgenticPaymentsRoutes(
   // yields the env rows alone — the env list is meaningful
   // without a store. Callers handle ensure failures (503).
   const listEffectiveOperators = async (): Promise<EffectiveOperatorEntry[]> => {
+    // #5611 (G-9): this consults the operator list, so it reports a
+    // failed preload the same once-per-request way isStoreOperator does.
+    reportOperatorDegradeOnce();
     const storeAdapter = createStoreOperatorsAdapter(ctx.env as { AGENT_DB?: unknown });
     const byLogin = new Map<string, EffectiveOperatorEntry>();
     for (const login of [...envOperators].sort()) {

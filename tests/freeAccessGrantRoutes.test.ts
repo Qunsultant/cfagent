@@ -207,10 +207,16 @@ describe("POST /free-access/grant (#3247)", () => {
     expect(body.replaced.revokedAtMs).not.toBeNull();
     expect(body.granted.kind).toBe("limited");
     const calls = (ctx.audit as any).mock.calls as unknown[][];
-    expect(calls).toHaveLength(2);
-    expect(calls[0][0]).toBe("commercial.free_access.revoked");
-    expect(calls[0][2]).toMatchObject({ userId: "u1", tenantId: "t1", revokedBy: "op1", kind: "lifetime" });
-    expect(calls[1][0]).toBe("commercial.free_access.granted");
+    // #5611 (G-9): this fixture's store is unmigrated, so the operator
+    // gate reports the degrade first; the business sequence is revoked
+    // then granted, with the degrade notice ahead of both.
+    expect(calls).toHaveLength(3);
+    expect(calls[0][0]).toBe("payments.store_operator_read_failed");
+    const business = calls.filter((call) => call[0] !== "payments.store_operator_read_failed");
+    expect(business).toHaveLength(2);
+    expect(business[0][0]).toBe("commercial.free_access.revoked");
+    expect(business[0][2]).toMatchObject({ userId: "u1", tenantId: "t1", revokedBy: "op1", kind: "lifetime" });
+    expect(business[1][0]).toBe("commercial.free_access.granted");
   });
 
   it("401 without a verified login, 403 for a non-operator", async () => {
@@ -343,7 +349,13 @@ describe("GET /free-access (#3247)", () => {
     const operator = await call(ctx, "GET", `${READ}?userId=u1`, "op1");
     expect(operator?.status).toBe(200);
     expect(await bodyOf(operator)).toEqual(selfBody);
-    expect((ctx.audit as any).mock.calls).toHaveLength(0);
+    // #5611 (G-9): the read itself writes no business audit. The one
+    // call is the degrade notice: this fixture's store is unmigrated,
+    // so the operator gate on the op1 read reports it once.
+    const calls = (ctx.audit as any).mock.calls as unknown[][];
+    expect(calls).toHaveLength(1);
+    expect(calls[0][0]).toBe("payments.store_operator_read_failed");
+    expect(calls.filter((call) => call[0] !== "payments.store_operator_read_failed")).toHaveLength(0);
   });
 
   it("401 without a verified login, 400 without userId, 403 for another non-operator login", async () => {

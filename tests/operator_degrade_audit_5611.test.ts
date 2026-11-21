@@ -201,6 +201,51 @@ describe("operator-list degrade is loud (#5611 G-9)", () => {
       ),
     ).toHaveLength(0);
   });
+
+  it("a route that never consults the operator list stays silent even with a failing store", async () => {
+    // Lazy reporting: the degrade is reported on first USE of the
+    // operator check. The removed record-native route never consults
+    // it, so its inertness pin (tests/native_ledger_routes.test.ts)
+    // holds — no log, no audit, null result.
+    const ctx = payCtx({
+      env: {
+        AGENT_DB: unmigratedAgentDb(),
+        COMMERCIAL_STORE_OPERATORS: "alice",
+      },
+    });
+    const body = {
+      kind: "charge",
+      runRequestId: "run-1",
+      tenantId: "tenant-a",
+      userId: "u1",
+      family: "goal",
+      priceUSD: 0.1,
+      rail: "stripe",
+      sessionId: "cs_test_1",
+      paymentIntentId: "pi_1",
+    };
+    const res = await handleAgenticPaymentsRoutes(
+      new Request("https://agent.internal/payments/agentic/ledger/record-native", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-user-login": "alice" },
+        body: JSON.stringify(body),
+      }),
+      new URL("https://agent.internal/payments/agentic/ledger/record-native"),
+      "/payments/agentic/ledger/record-native",
+      "s",
+      ctx,
+    );
+    expect(res).toBeNull();
+    const events = structuredLogEvents(infoSpy);
+    expect(
+      events.filter((e) => e.operation === "agenticPayments.store_operator_read_failed"),
+    ).toHaveLength(0);
+    expect(
+      (ctx.audit as unknown as ReturnType<typeof vi.fn>).mock.calls.filter(
+        (call: unknown[]) => call[0] === "payments.store_operator_read_failed",
+      ),
+    ).toHaveLength(0);
+  });
 });
 
 const makeSql = (tables: Record<string, any[]>) =>
