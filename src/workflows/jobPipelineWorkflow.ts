@@ -74,8 +74,10 @@ import { createDeliveryDatasetPorts } from "../data/createDeliveryDatasetPorts";
 import { createD1IndexListDb, D1IndexListStore } from "../data/d1IndexListAdapter";
 import {
   createIndexMembershipService,
+  createListingsDerivedIndexMembershipAdapter,
   createWikipediaIndexMembershipAdapter,
 } from "../trading";
+import { fetchAllUsStockListings } from "../services/nasdaqListings";
 import type { OptionsWorkflowStepDeps } from "../services/optionsPipelineJobs";
 import { optionsChainStepDepsForWorkflow } from "../services/optionsChainPipelineJobs";
 import { createDefaultResearchStepDeps } from "../services/researchPipelineJobs";
@@ -188,6 +190,12 @@ export function feedStepDepsForWorkflow(
             );
           },
         },
+        // #5956 — the listings-derived adapter (tech / etf /
+        // lev_etf): bound for real, never a stub — a cold-store
+        // hydration for one of those universes calls it.
+        listings: createListingsDerivedIndexMembershipAdapter(
+          fetchAllUsStockListings,
+        ),
       }),
     },
     shardsFor: async (jobId) =>

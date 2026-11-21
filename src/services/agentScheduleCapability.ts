@@ -105,6 +105,7 @@ export const AGENT_SCHEDULABLE_GOAL_OPERATIONS: readonly string[] = [
   "resource.dashboard_comparison",
   "index.refresh_wikipedia",
   "index.refresh_holdings",
+  "index.refresh_listings",
   "chain.execute",
   "pipeline:*",
   // Issue #4411: the monthly Autopilot evaluation executes at firing

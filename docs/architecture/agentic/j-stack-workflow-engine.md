@@ -288,12 +288,49 @@ across all shard keys would silently drop most of the universe
 (an ALL unit fetched one-sixth of nasdaq100 before this slice).
 A shard universe with no stored index list (ETF / LEV_ETF — no
 `IndexId`) refuses by name (`FEED_UNIVERSE_UNKNOWN`) before any
-fetch; that coverage is 6b2's slice. Parity is pinned by
+fetch; that coverage is 6b2's slice (#5956, next section). Parity is pinned by
 `tests/feed_per_shard_universe_5955.test.ts` (each ALL unit
 fetches its own whole universe; monolith single-universe runs
 unchanged; explicit symbols still win; partition sharding
 unchanged).
 <!-- /5955: per-shard universe in feed.pull -->
+
+<!-- 5956: non-index universe coverage in feed.pull -->
+The three screener universes with no stored index list — TECH,
+ETF, LEV_ETF — resolve and screen on the generic chain (#5956,
+#4437 slice 6b2). They are selectors over the live listings
+directory (`resolveUniverse`: TECH keyword discovery over
+company names, ETF flag/name match, the leveraged-ETF subset),
+not published tables or holdings files, so the coverage is a
+third adapter of the #1852 port family — the listings-derived
+adapter (`createListingsDerivedIndexMembershipAdapter`) — which
+runs the SAME selectors the bespoke feed runs and stores the
+result as a snapshot-dated index list (source `listings`,
+snapshot date the fetch date, 10-day freshness budget, the
+table budget). One port, three adapters, one store: no second
+universe system. The listings fetch happens in the refresh
+(the scheduled goal, or a cold-store hydration), never in the
+run — the runner still pulls a stored list — and a selector
+that yields no members is refused, never stored as an empty
+list. `IndexId` gains `tech | etf | lev_etf`; the refresh gains
+the `listings` group and the `index.refresh_listings`
+operation, catalogued and executable (forced trigger /
+operator-added goal); the built-in weekly goal entry is a
+follow-up activation, not this slice. The listings adapter is
+bound for real at all three host sites (workflow residency,
+scheduled-tasks pipeline, scheduled-agent executor) — never a
+stub: a cold-store hydration for one of those universes calls
+it. TECH stays a stored selector-computed list rather than a
+mapping onto the sector list: keyword discovery and the sector
+list are different memberships, and the flip must screen what
+the bespoke feed screened. The vocabulary governs declared
+universe names; the feed runner governs stored-list names.
+Parity is pinned by `tests/feed_non_index_universes_5956.test.ts`
+(each of the three commands resolves and screens; a seeded
+list is used as-is with no listings fetch; the node universe
+param works; unknown universes still refuse; explicit symbols
+still win).
+<!-- /5956: non-index universe coverage in feed.pull -->
 
 
 ### 1.3 The one-engine doctrine

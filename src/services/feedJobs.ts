@@ -109,7 +109,9 @@ export class FeedJobError extends Error {
 
 /**
  * #3930 — the known index ids at runtime (the IndexId union's
- * mirror: the base indices plus the sector keys). A run input
+ * mirror: the base indices plus the sector keys, plus — since
+ * #5956 — the three listings-derived keys, whose lists the
+ * refresh stores from the listings directory). A run input
  * naming anything outside this set is refused by name
  * (FEED_UNIVERSE_UNKNOWN) — never resolved against a stored
  * list it cannot name.
@@ -123,6 +125,9 @@ const KNOWN_INDEX_IDS: ReadonlySet<string> = new Set<string>([
   "russell1000",
   "sp400",
   "russell3000",
+  "tech",
+  "etf",
+  "lev_etf",
   ...SECTOR_IDS,
 ]);
 
