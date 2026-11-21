@@ -126,6 +126,10 @@ export interface RunDetailProvenance {
   asyncJobId: string | null;
   jobType: string | null;
   strategyMode: string | null;
+  brokerId: string | null;
+  tradingMode: string | null;
+  accountType: string | null;
+  accountId: string | null;
   workflowId: string | null;
   workflowName: string | null;
   workflowVersion: string | null;
@@ -586,6 +590,10 @@ export function buildRunDetail(
       asyncJobId: strOrNull(body?.asyncJobId ?? provenanceBody.asyncJobId) ?? null,
       jobType: strOrNull(body?.jobType ?? provenanceBody.jobType) ?? null,
       strategyMode: strOrNull(body?.strategyMode ?? (body?.evaluateAllStrategies === true ? "all" : null)) ?? null,
+      brokerId: strOrNull(mergedBody?.brokerId) ?? null,
+      tradingMode: strOrNull(mergedBody?.mode) ?? null,
+      accountType: strOrNull(mergedBody?.accountType) ?? null,
+      accountId: strOrNull(mergedBody?.accountId) ?? null,
       workflowId: strOrNull(workflowBody.id ?? body?.workflowId) ?? null,
       workflowName: strOrNull(workflowBody.name ?? body?.workflowName) ?? null,
       workflowVersion: strOrNull(workflowBody.version ?? body?.workflowVersion) ?? null,

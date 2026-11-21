@@ -43,6 +43,7 @@ import type {
 } from "./researchFalsification";
 import { buildFalsification, buildPremortem } from "./researchFalsification";
 import { newRunId as mintRunId, oodaStepShortId } from "./executionTreeIds";
+import { maskAccountId } from "../config/accountBindings";
 
 export type TriggerSource = "manual" | "scheduled";
 
@@ -1279,7 +1280,7 @@ function finishReport(args: {
     ...(opts.mode ? { mode: opts.mode } : {}),
     assetType: opts.assetType ?? "options",
     ...(opts.accountType ? { accountType: opts.accountType } : {}),
-    ...(opts.accountId ? { accountId: opts.accountId } : {}),
+    ...(opts.accountId ? { accountId: maskAccountId(opts.accountId) } : {}),
     // Amendment 1: the effective filter/config snapshot this run used.
     configSnapshot: JSON.parse(JSON.stringify(config)) as ResearchConfig,
     regime,

@@ -28,6 +28,10 @@ import { tool, type ToolSet } from "ai";
 import { z } from "zod";
 import { resolveAiModelName } from "./model";
 import type { Env } from "../types";
+import { getTenantAccountBinding } from "../services/accountBindings";
+import { isBrokerId } from "../trading/brokerCatalog";
+import { isTradingType } from "../trading/accountBindings";
+import { resolveResearchJobConfig } from "../config/researchJobConfig";
 import { createResearchStorePorts } from "../data/createResearchStorePorts";
 import type { ResearchStorePorts } from "../data/researchStorePorts";
 import {
@@ -623,6 +627,23 @@ export class ResearchAgent extends PortThink {
         // No track record yet — pipeline runs without feedback.
       }
       const effectiveRunId = req.runId ?? currentResearchRunId();
+      let accountBinding: { accountType: string; accountId: string } | null = null;
+      if (isBrokerId(req.brokerId) && isTradingType(req.mode)) {
+        try {
+          const tuple = await getTenantAccountBinding(this.env, userLogin, {
+            broker: req.brokerId,
+            mode: req.mode,
+            accountType: resolveResearchJobConfig(this.env).accountBindingType,
+          });
+          if (tuple) accountBinding = { accountType: tuple.accountType, accountId: tuple.accountId };
+        } catch (err) {
+          structuredLog.warn("researchAgent.account_binding_unavailable", {
+            brokerId: req.brokerId,
+            mode: req.mode,
+            message: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
       const report = await runResearchPipeline(
         { provider, ...(trackRecord ? { trackRecord } : {}) },
         config,
@@ -634,6 +655,7 @@ export class ResearchAgent extends PortThink {
           // and the report can name them instead of guessing.
           ...(req.brokerId ? { brokerId: req.brokerId } : {}),
           ...(req.mode ? { mode: req.mode } : {}),
+          ...(accountBinding ? accountBinding : {}),
         }
       );
       await this.persistRun(report);
