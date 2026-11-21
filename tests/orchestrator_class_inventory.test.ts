@@ -370,9 +370,20 @@ const ORCH = "agents/orchestrator.ts";
  *  only wiring) — measured 3,437 lines / 157,863 B after the
  *  addition, so budget lines rise to 3450, keeping similar
  *  headroom. Bytes unchanged — measured well under the 159,200
- *  budget. */
-const BUDGET_LINES = 3450;
-const BUDGET_BYTES = 159_200;
+ *  budget.
+ *  #3185 (bridge slice, PR #5935) moves the five usage-events
+ *  doors + the maintenance prune leg out of orchestrator.ts into
+ *  orchestrator/usageEventsDoors.ts (thin wrappers left inline,
+ *  per the #992 pattern) — measured 3,449 lines / 159,461 B after
+ *  the extraction, so budget lines rise to 3500 and bytes rise to
+ *  159_500, keeping similar headroom. The raise is the owner's
+ *  explicit decision 2026-11-20 (option (b)): the bridge adds the
+ *  #3185 tenant-mirror integration (migration 0077, reconcile
+ *  sweep, retention/DSAR) and main already had only 11 lines /
+ *  1,061 bytes of headroom — a deliberate raise to measured +
+ *  headroom, not drift. */
+const BUDGET_LINES = 3500;
+const BUDGET_BYTES = 159_500;
 
 const count = (haystack: string, needle: string) =>
   haystack.split(needle).length - 1;

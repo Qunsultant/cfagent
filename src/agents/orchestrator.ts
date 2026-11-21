@@ -144,18 +144,7 @@ import { runGovernanceSeed } from "./orchestrator/governanceSeed";
 import { runShardJobReconcile, type ReconcileShardJobsReport } from "./orchestrator/shardJobReconcile";
 import { runCanonicalReportSeed, type SeedCanonicalReportsResult } from "./orchestrator/canonicalReportSeed";
 import { reconcileRunLedgerProjection, type ReconcileRunLedgerResult } from "./orchestrator/runLedgerReconcile";
-import {
-  reconcileUsageEventsProjection,
-  type ReconcileUsageEventsResult,
-} from "./orchestrator/usageEventsReconcile";
-import {
-  DoSqliteUsageEventStore,
-  USAGE_EVENTS_RETENTION_MAX_AGE_DAYS,
-} from "../data/doSqliteUsageEventAdapter";
-import {
-  createUsageEventMirrorAdapter,
-  ensureUsageEventMirrorTables,
-} from "../data/createUsageEventMirrorPorts";
+import { countUsageEvents, eraseUsageEvents, pruneUsageEvents, pruneUsageEventsMaintenance, reconcileUsageEvents, type UsageEventsDoorsContext } from "./orchestrator/usageEventsDoors";
 import {
   deliverWorkflowGoalScreenOutcome as deliverGoalScreenOutcome,
   persistWorkflowGoalScreenReport,
@@ -1059,164 +1048,11 @@ export class OrchestratorAgent extends PortThink {
     });
   }
 
-  /**
-   * Issue #3185 (bridge slice) — the sweep carrier's DO door: a
-   * one-off backfill + repair pass projecting THIS instance's
-   * usage_events rows into the D1 mirror, with the 365d prune in
-   * the same pass (DO + mirror). Thin wrapper over
-   * reconcileUsageEventsProjection (./orchestrator/
-   * usageEventsReconcile). Invoked by the admin-gated POST
-   * /api/ops/usage-events-reconcile route; never auto-run (no
-   * boot, deploy, or tick path calls it). A second call
-   * reconciles zero rows when everything is already current.
-   * The shared_orchestrator instance has no automatic
-   * maintenance driver, so its prune rides this route too.
-   */
-  async reconcileUsageEventsProjection(args?: {
-    limit?: number;
-  }): Promise<ReconcileUsageEventsResult> {
-    this.ensureTables();
-    const local = await reconcileUsageEventsProjection({
-      env: this.env,
-      sql: this.ctx.storage.sql as never,
-      sourceInstance: this.sessionKey(),
-      limit: args?.limit,
-      nowMs: Date.now(),
-    });
-    // A refused local leg (AGENT_DB unbound) refuses the whole
-    // call: the ResearchAgent leg would refuse for the same
-    // reason, so there is nothing to fan out to.
-    if (local.refused) return local;
-    // Per-login instances fan out to their ResearchAgent
-    // instance (research:<login>): one route call reconciles
-    // BOTH split halves for that login. The shared instance has
-    // no per-login research agent, so it reconciles alone.
-    const login = this.sessionKey();
-    if (!isLoginShaped(login)) return local;
-    const research = this.getResearchAgent(login);
-    if (!research) return local;
-    let researchResult: ReconcileUsageEventsResult;
-    try {
-      researchResult = await research.reconcileUsageEventsProjection({
-        limit: args?.limit,
-        sourceInstance: `research:${login}`,
-      });
-    } catch (err) {
-      local.errors.push({
-        id: "<research>",
-        error: err instanceof Error ? err.message : String(err),
-      });
-      return local;
-    }
-    if (researchResult.refused) {
-      local.errors.push({ id: "<research>", error: researchResult.refused });
-      return local;
-    }
-    // Merge: the mirror prune is the local leg's alone (the
-    // research leg runs with pruneMirror:false), so prunedMirror
-    // is not summed.
-    return {
-      checked: local.checked + researchResult.checked,
-      reconciled: local.reconciled + researchResult.reconciled,
-      alreadyCurrent: local.alreadyCurrent + researchResult.alreadyCurrent,
-      tenantDeterministic: local.tenantDeterministic + researchResult.tenantDeterministic,
-      tenantApproximate: local.tenantApproximate + researchResult.tenantApproximate,
-      tenantUnattributed: local.tenantUnattributed + researchResult.tenantUnattributed,
-      prunedDo: local.prunedDo + researchResult.prunedDo,
-      prunedMirror: local.prunedMirror,
-      errors: [...local.errors, ...researchResult.errors],
-    };
-  }
-
-  /**
-   * Issue #3185 (bridge slice) — the retention prune's DO door:
-   * deletes THIS instance's usage_events rows older than 365d
-   * and the same window from the D1 mirror, in one pass. Called
-   * by the per-login maintenance path below (this instance) and
-   * by the ResearchAgent leg through its own stub. Returns the
-   * two counts; the mirror count is -1 when the driver reports
-   * no count (unknown, never silently zero).
-   */
-  async pruneUsageEvents(args?: {
-    nowMs?: number;
-  }): Promise<{ prunedDo: number; prunedMirror: number }> {
-    this.ensureTables();
-    const nowMs = args?.nowMs ?? Date.now();
-    const cutoffIso = new Date(
-      nowMs - USAGE_EVENTS_RETENTION_MAX_AGE_DAYS * 24 * 60 * 60 * 1000,
-    ).toISOString();
-    const store = new DoSqliteUsageEventStore(this.ctx.storage.sql as never);
-    const prunedDo = store.pruneBefore(cutoffIso);
-    let prunedMirror = -1;
-    const adapter = createUsageEventMirrorAdapter(this.env);
-    if (adapter) {
-      await ensureUsageEventMirrorTables(adapter);
-      prunedMirror = await adapter.pruneBefore(cutoffIso);
-    }
-    return { prunedDo, prunedMirror };
-  }
-
-  /**
-   * Issue #3185 (bridge slice) — the DSAR erasure door for
-   * usage_events: deletes one login's rows from THIS instance,
-   * fans out to the login's ResearchAgent instance, and deletes
-   * the login's rows from the D1 mirror. Returns the deleted
-   * total and the residual count (0 when the erasure is
-   * complete). THROWS when any of the three legs fails, so the
-   * DSAR cascade records the leg as failed instead of reporting
-   * a false erasure. Anonymous x402/MPP payer rows (x402:<payer>)
-   * are NOT erasable by a subject login — a different identity
-   * key with no proof mapping — so a login-shaped subject never
-   * matches them, and they never count in the residual.
-   */
-  async eraseUsageEventsData(
-    userLogin: string,
-  ): Promise<{ deleted: number; residual: number }> {
-    this.ensureTables();
-    const sql = this.ctx.storage.sql as never;
-    const store = new DoSqliteUsageEventStore(sql);
-    const deleted = store.deleteByUser(userLogin);
-    const research = this.getResearchAgent(userLogin);
-    const researchErased = research
-      ? await research.eraseUsageEventsData(userLogin)
-      : { deleted: 0, residual: 0 };
-    const adapter = createUsageEventMirrorAdapter(this.env);
-    let mirrorDeleted = 0;
-    if (adapter) {
-      await ensureUsageEventMirrorTables(adapter);
-      mirrorDeleted = await adapter.deleteByUser(userLogin);
-    }
-    const residual =
-      store.countByUser(userLogin) +
-      researchErased.residual +
-      (await this.countMirrorUsageEventsByUser(userLogin));
-    return { deleted: deleted + researchErased.deleted + mirrorDeleted, residual };
-  }
-
-  /** Issue #3185 (bridge slice) — the DSAR count door for usage_events. */
-  async countUsageEventsData(userLogin: string): Promise<number> {
-    this.ensureTables();
-    const store = new DoSqliteUsageEventStore(this.ctx.storage.sql as never);
-    const research = this.getResearchAgent(userLogin);
-    const researchCount = research ? await research.countUsageEventsData(userLogin) : 0;
-    return (
-      store.countByUser(userLogin) +
-      researchCount +
-      (await this.countMirrorUsageEventsByUser(userLogin))
-    );
-  }
-
-  private async countMirrorUsageEventsByUser(userLogin: string): Promise<number> {
-    try {
-      const adapter = createUsageEventMirrorAdapter(this.env);
-      if (!adapter) return 0;
-      await ensureUsageEventMirrorTables(adapter);
-      return await adapter.countByUser(userLogin);
-    } catch {
-      return 0;
-    }
-  }
-
+  private usageEventsCtx(): UsageEventsDoorsContext { return { env: this.env, sql: this.ctx.storage.sql, sessionKey: () => this.sessionKey(), getResearchAgent: (login) => this.getResearchAgent(login), ensureTables: () => this.ensureTables() }; }
+  async reconcileUsageEventsProjection(args?: { limit?: number }) { return reconcileUsageEvents(this.usageEventsCtx(), args); }
+  async pruneUsageEvents(args?: { nowMs?: number }) { return pruneUsageEvents(this.usageEventsCtx(), args); }
+  async eraseUsageEventsData(userLogin: string) { return eraseUsageEvents(this.usageEventsCtx(), userLogin); }
+  async countUsageEventsData(userLogin: string) { return countUsageEvents(this.usageEventsCtx(), userLogin); }
   /**
    * Issue #4116 — the queue carrier's DO door: re-read one DO
    * row named by a run-ledger.project claim-check message and
@@ -1695,39 +1531,7 @@ export class OrchestratorAgent extends PortThink {
         error: error instanceof Error ? error.message : String(error),
       });
     }
-    // Issue #3185 (bridge slice): usage_events retention pruning
-    // rides the same maintenance path, in its own isolated legs —
-    // a prune failure never affects sweeps. This instance's leg
-    // prunes its own DO rows AND the D1 mirror in one pass; the
-    // ResearchAgent leg prunes that instance's rows. The
-    // shared_orchestrator instance has no maintenance driver, so
-    // its prune rides the reconcile route instead. A partial
-    // prune would misstate tenant totals, so the two counts land
-    // in the summary log below.
-    let usageEventsPrunedDo = 0;
-    let usageEventsPrunedMirror = -1;
-    try {
-      const pruned = await this.pruneUsageEvents();
-      usageEventsPrunedDo = pruned.prunedDo;
-      usageEventsPrunedMirror = pruned.prunedMirror;
-    } catch (error) {
-      structuredLog.warn("orchestrator.usage_events_retention_prune_failed", {
-        message: `[OrchestratorAgent] Usage-events retention prune failed for ${userLogin}:`,
-        userLogin,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-    let usageEventsPrunedResearch = 0;
-    try {
-      const research = this.getResearchAgent(userLogin);
-      if (research) usageEventsPrunedResearch = await research.pruneUsageEvents();
-    } catch (error) {
-      structuredLog.warn("orchestrator.research_usage_events_retention_prune_failed", {
-        message: `[OrchestratorAgent] Research usage-events retention prune failed for ${userLogin}:`,
-        userLogin,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
+    const [usageEventsPrunedDo, usageEventsPrunedMirror, usageEventsPrunedResearch] = await pruneUsageEventsMaintenance(this.usageEventsCtx(), userLogin);
     if (researchSwept > 0 || screenerSwept > 0 || researchPruned > 0 || screenerPruned > 0 || usageEventsPrunedDo > 0 || usageEventsPrunedResearch > 0) {
       structuredLog.info("orchestrator.task_maintenance_summary", {
         message: `[OrchestratorAgent] Task maintenance for ${userLogin}: research swept=${researchSwept} pruned=${researchPruned}; screener swept=${screenerSwept} pruned=${screenerPruned}; usage-events pruned do=${usageEventsPrunedDo} research=${usageEventsPrunedResearch} mirror=${usageEventsPrunedMirror}.`,
