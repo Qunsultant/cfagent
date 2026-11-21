@@ -36,6 +36,13 @@ export interface TenantSettingsView {
   autoRefreshIntervalS: number;
   dataProviderId: string;
   brokerId: string;
+  /**
+   * Issue #5423 (#3515 S4): per-step timeout for the MAS turn
+   * loop, in milliseconds. Null = UNCONFIGURED — turns for the
+   * tenant refuse (named refusal) instead of running unbounded.
+   * The server always returns the field (null when unconfigured).
+   */
+  turnStepTimeoutMs: number | null;
 }
 
 export interface TenantListRow extends TenantSettingsView {
@@ -67,7 +74,8 @@ function isSettings(value: unknown): value is TenantSettingsView {
     typeof value.autoRefreshEnabled === "boolean" &&
     typeof value.autoRefreshIntervalS === "number" &&
     typeof value.dataProviderId === "string" &&
-    typeof value.brokerId === "string"
+    typeof value.brokerId === "string" &&
+    (value.turnStepTimeoutMs === null || typeof value.turnStepTimeoutMs === "number")
   );
 }
 
@@ -110,6 +118,8 @@ export interface TenantSettingsPatch {
   adsEnabled?: boolean;
   autoRefresh?: { enabled: boolean; intervalS: number };
   providers?: { dataProviderId: string; brokerId: string };
+  /** Issue #5423 (#3515 S4): per-step timeout for the MAS turn loop, in milliseconds (1000–600000). */
+  turnStepTimeoutMs?: number;
 }
 
 export async function updateTenantSettings(

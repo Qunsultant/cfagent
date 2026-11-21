@@ -44,6 +44,7 @@ const TENANTS = {
       autoRefreshIntervalS: 15,
       dataProviderId: "etrade",
       brokerId: "etrade",
+      turnStepTimeoutMs: null,
       memberCount: 2,
     },
   ],

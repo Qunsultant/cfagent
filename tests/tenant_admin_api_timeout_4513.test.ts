@@ -46,6 +46,7 @@ describe("tenantAdminApi request bound (#4513)", () => {
             autoRefreshIntervalS: 15,
             dataProviderId: "etrade",
             brokerId: "etrade",
+            turnStepTimeoutMs: null,
           },
         },
         { status: 201 },

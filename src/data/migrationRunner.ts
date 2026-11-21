@@ -1338,6 +1338,20 @@ export const MIGRATION_0077_USAGE_EVENTS_MIRROR: DataMigration = {
   name: "0077_usage_events_mirror",
   sql: d1MigrationSql(77),
 };
+
+/**
+ * Migration 0078 — per-tenant MAS turn-loop step timeout (#5423,
+ * #3515 S4). Adds the nullable `turn_step_timeout_ms` column to
+ * `agent_tenant_settings`: null / absent row = UNCONFIGURED, and
+ * turns for the tenant refuse (named refusal) instead of running
+ * unbounded. Marker-gated like the other ALTER migrations, so a
+ * re-apply is skipped.
+ */
+export const MIGRATION_0078_TENANT_TURN_STEP_TIMEOUT: DataMigration = {
+  version: 78,
+  name: "0078_tenant_turn_step_timeout",
+  sql: d1MigrationSql(78),
+};
 export const MIGRATION_0058_PRODUCT_VERSIONS: DataMigration = {
   version: 58,
   name: "0058_product_versions",
@@ -1581,6 +1595,7 @@ export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANC
   MIGRATION_0075_JOB_INSTANCE_DEFINITION_VERSION,
   MIGRATION_0076_JOB_RUN_DEFINITION_VERSION,
   MIGRATION_0077_USAGE_EVENTS_MIRROR,
+  MIGRATION_0078_TENANT_TURN_STEP_TIMEOUT,
 ];
 
 function splitStatements(sqlText: string): string[] {

@@ -47,6 +47,7 @@ import {
   MIGRATION_0040_UNLIMITED_FREE_GRANT,
   MIGRATION_0058_PRODUCT_VERSIONS,
   MIGRATION_0062_OFFER_SUPPRESSIONS_RANK,
+  MIGRATION_0078_TENANT_TURN_STEP_TIMEOUT,
   type MigrationDb,
 } from "./migrationRunner";
 import { assertSegment, DEFAULT_SEGMENT } from "./productPorts";
@@ -103,6 +104,9 @@ export function createD1CommercialDb(d1: D1Database): CommercialDb {
  * 0058 adds the account segment column and the claim
  * per-charge columns, so its prerequisites (0008 plans, 0009
  * journal, 0011 + 0027 catalogue, 0012 native ledger) ride along.
+ * 0078 (#5423) adds the per-step timeout column to the tenant
+ * settings row, same pattern — a commercial call site is also
+ * an ensure site for the timeout.
  */
 export async function ensureCommercialSchema(db: CommercialDb): Promise<number[]> {
   return applyMigrations(db as unknown as MigrationDb, [
@@ -118,6 +122,7 @@ export async function ensureCommercialSchema(db: CommercialDb): Promise<number[]
     MIGRATION_0012_NATIVE_LEDGER,
     MIGRATION_0058_PRODUCT_VERSIONS,
     MIGRATION_0062_OFFER_SUPPRESSIONS_RANK,
+    MIGRATION_0078_TENANT_TURN_STEP_TIMEOUT,
   ]);
 }
 
@@ -320,6 +325,7 @@ export class D1CommercialAdapter implements CommercialStore {
       autoRefreshIntervalS: existing.intervalS,
       dataProviderId: providers.dataProviderId,
       brokerId: providers.brokerId,
+      turnStepTimeoutMs: await this.getTenantTurnStepTimeoutMs(tenantId),
     };
     // Issue #5605 (G-2): in a tenant-settings PATCH the route
     // opens one batch unit for the three setters; this upsert
@@ -386,6 +392,7 @@ export class D1CommercialAdapter implements CommercialStore {
       autoRefreshIntervalS: autoRefresh.intervalS,
       dataProviderId: providers.dataProviderId,
       brokerId: providers.brokerId,
+      turnStepTimeoutMs: await this.getTenantTurnStepTimeoutMs(tenantId),
     };
     // Issue #5605 (G-2): buffers into the PATCH unit when one
     // is open (SETs only the auto-refresh half); executes
@@ -477,6 +484,7 @@ export class D1CommercialAdapter implements CommercialStore {
       autoRefreshIntervalS: autoRefresh.intervalS,
       dataProviderId: providers.dataProviderId,
       brokerId: providers.brokerId,
+      turnStepTimeoutMs: await this.getTenantTurnStepTimeoutMs(tenantId),
     };
     // Issue #5605 (G-2): buffers into the PATCH unit when one
     // is open (SETs only the providers half); executes
@@ -499,6 +507,55 @@ export class D1CommercialAdapter implements CommercialStore {
           brokerId: record.brokerId,
           updatedAtMs: record.updatedAtMs,
         },
+      });
+    const { sql, params } = query.toSQL();
+    if (bufferD1Statement(sql, ...params)) return record;
+    await query;
+    return record;
+  }
+
+  /** Issue #5423 (#3515 S4) — the stored per-step timeout, or null when unconfigured (no row / null column — NO default applied). */
+  async getTenantTurnStepTimeoutMs(tenantId: string): Promise<number | null> {
+    const rows = await this.db
+      .select()
+      .from(agentTenantSettings)
+      .where(eq(agentTenantSettings.tenantId, tenantId))
+      .limit(1);
+    if (rows.length === 0) return null;
+    const row = rows[0] as typeof rows[0] & { turnStepTimeoutMs?: number | null };
+    return typeof row.turnStepTimeoutMs === "number" ? row.turnStepTimeoutMs : null;
+  }
+
+  /** Issue #5423 (#3515 S4) — store the tenant's per-step timeout (ms). Mirrors setTenantProviders: the record is built from the current row's other halves, and the upsert's SET clause touches only the timeout half. */
+  async setTenantTurnStepTimeoutMs(tenantId: string, timeoutMs: number): Promise<TenantSettingsRecord> {
+    const adsEnabled = await this.getTenantAdsEnabled(tenantId);
+    const autoRefresh = await this.getTenantAutoRefresh(tenantId);
+    const providers = await this.getTenantProviders(tenantId);
+    const record: TenantSettingsRecord = {
+      tenantId,
+      adsEnabled,
+      updatedAtMs: Date.now(),
+      autoRefreshEnabled: autoRefresh.enabled,
+      autoRefreshIntervalS: autoRefresh.intervalS,
+      dataProviderId: providers.dataProviderId,
+      brokerId: providers.brokerId,
+      turnStepTimeoutMs: timeoutMs,
+    };
+    const query = this.db
+      .insert(agentTenantSettings)
+      .values({
+        tenantId,
+        adsEnabled: adsEnabled ? 1 : 0,
+        updatedAtMs: record.updatedAtMs,
+        autoRefreshEnabled: record.autoRefreshEnabled ? 1 : 0,
+        autoRefreshIntervalS: record.autoRefreshIntervalS,
+        dataProviderId: record.dataProviderId,
+        brokerId: record.brokerId,
+        turnStepTimeoutMs: timeoutMs,
+      })
+      .onConflictDoUpdate({
+        target: agentTenantSettings.tenantId,
+        set: { turnStepTimeoutMs: timeoutMs, updatedAtMs: record.updatedAtMs },
       });
     const { sql, params } = query.toSQL();
     if (bufferD1Statement(sql, ...params)) return record;

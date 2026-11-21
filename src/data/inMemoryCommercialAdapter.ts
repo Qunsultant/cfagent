@@ -135,6 +135,7 @@ export class InMemoryCommercialAdapter implements CommercialStore {
       autoRefreshIntervalS: existing?.autoRefreshIntervalS ?? DEFAULT_TENANT_AUTO_REFRESH.intervalS,
       dataProviderId: existing?.dataProviderId ?? DEFAULT_TENANT_PROVIDERS.dataProviderId,
       brokerId: existing?.brokerId ?? DEFAULT_TENANT_PROVIDERS.brokerId,
+      turnStepTimeoutMs: existing?.turnStepTimeoutMs ?? null,
     };
     this.tenantSettings.set(tenantId, record);
     return record;
@@ -163,6 +164,7 @@ export class InMemoryCommercialAdapter implements CommercialStore {
       autoRefreshIntervalS: autoRefresh.intervalS,
       dataProviderId: existing?.dataProviderId ?? DEFAULT_TENANT_PROVIDERS.dataProviderId,
       brokerId: existing?.brokerId ?? DEFAULT_TENANT_PROVIDERS.brokerId,
+      turnStepTimeoutMs: existing?.turnStepTimeoutMs ?? null,
     };
     this.tenantSettings.set(tenantId, record);
     return record;
@@ -200,6 +202,30 @@ export class InMemoryCommercialAdapter implements CommercialStore {
       autoRefreshIntervalS: existing?.autoRefreshIntervalS ?? DEFAULT_TENANT_AUTO_REFRESH.intervalS,
       dataProviderId: providers.dataProviderId,
       brokerId: providers.brokerId,
+      turnStepTimeoutMs: existing?.turnStepTimeoutMs ?? null,
+    };
+    this.tenantSettings.set(tenantId, record);
+    return record;
+  }
+
+  /** Issue #5423 (#3515 S4) — the stored per-step timeout, or null when unconfigured (NO default applied). */
+  async getTenantTurnStepTimeoutMs(tenantId: string): Promise<number | null> {
+    const existing = this.tenantSettings.get(tenantId);
+    return existing?.turnStepTimeoutMs ?? null;
+  }
+
+  /** Issue #5423 (#3515 S4) — store the tenant's per-step timeout (ms); the other halves of the shared row are preserved. */
+  async setTenantTurnStepTimeoutMs(tenantId: string, timeoutMs: number): Promise<TenantSettingsRecord> {
+    const existing = this.tenantSettings.get(tenantId);
+    const record: TenantSettingsRecord = {
+      tenantId,
+      adsEnabled: existing?.adsEnabled ?? true,
+      updatedAtMs: Date.now(),
+      autoRefreshEnabled: existing?.autoRefreshEnabled ?? DEFAULT_TENANT_AUTO_REFRESH.enabled,
+      autoRefreshIntervalS: existing?.autoRefreshIntervalS ?? DEFAULT_TENANT_AUTO_REFRESH.intervalS,
+      dataProviderId: existing?.dataProviderId ?? DEFAULT_TENANT_PROVIDERS.dataProviderId,
+      brokerId: existing?.brokerId ?? DEFAULT_TENANT_PROVIDERS.brokerId,
+      turnStepTimeoutMs: timeoutMs,
     };
     this.tenantSettings.set(tenantId, record);
     return record;

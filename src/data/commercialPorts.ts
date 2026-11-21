@@ -151,6 +151,13 @@ export interface TenantSettingsRecord {
   dataProviderId: string;
   /** Per-tenant broker selection. Absent row = alpaca (DEFAULT_TENANT_PROVIDERS, #3812/#3937). */
   brokerId: string;
+  /**
+   * Issue #5423 (#3515 S4): per-step timeout for the MAS turn
+   * loop, in milliseconds. Null = UNCONFIGURED — the turn refuses
+   * (named refusal) instead of running unbounded. Adapters apply
+   * NO default: the absent value is meaningful, not a gap.
+   */
+  turnStepTimeoutMs: number | null;
 }
 
 /** Issue #2481: the auto-refresh half of a tenant settings row. */
@@ -356,6 +363,20 @@ export interface CommercialStore {
   setTenantProviders(
     tenantId: string,
     providers: TenantProviders,
+  ): Promise<TenantSettingsRecord>;
+  /**
+   * Issue #5423 (#3515 S4): the tenant's STORED per-step timeout
+   * for the MAS turn loop, in milliseconds — or null when no
+   * timeout is configured (no settings row, or a row whose
+   * turnStepTimeoutMs is null). Applies NO default: null is the
+   * unconfigured state, and the turn refuses (named refusal)
+   * rather than running unbounded.
+   */
+  getTenantTurnStepTimeoutMs(tenantId: string): Promise<number | null>;
+  /** Issue #5423 (#3515 S4): store the tenant's per-step timeout (ms). */
+  setTenantTurnStepTimeoutMs(
+    tenantId: string,
+    timeoutMs: number,
   ): Promise<TenantSettingsRecord>;
   /** Idempotent: re-recording the same claim is a no-op (the DO ledger row is the audit). Issue #3289: the optional productId/versionId/priceUSD record which charge the credit replaces (§3.9). */
   recordCreditClaim(claim: {

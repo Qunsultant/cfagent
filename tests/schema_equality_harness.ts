@@ -75,8 +75,9 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
  *  (sha256 of the file bytes, CRLF-normalized). */
 /** Issue #3185 (stamp slice) re-seeds it: tenant_id on usage_events + idx_usage_events_tenant. */
 /** Issue #3185 (bridge slice) re-seeds it: agent_usage_events mirror table + 2 indexes. */
+/** Issue #5423 (migration 0078) re-seeds it: turn_step_timeout_ms on agent_tenant_settings. */
 export const COMBINED_FIXTURE_SHA256 =
-  "9e96a1f26910768000be8081b3f0b826b49378e53d68a063b09761f987d793d3";
+  "764c51475b869b7bf05c70367d18464a1d2a428066969702b75c6e37911e9cdb";
 
 /** All four planes' entries in plane order: D1, DO, ORM, remainder. */
 export const COMBINED_CATALOGUE_ENTRIES: CatalogueEntry[] = [

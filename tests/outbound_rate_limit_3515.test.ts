@@ -357,6 +357,7 @@ describe("outgoing throttle at the LLM model-turn seams (#3515 S1)", () => {
       system: "sys",
       messages: [{ role: "user", content: "hi" }],
       tools: {},
+      stepTimeoutMs: 30_000,
     } as any;
 
     const first = await generateTextModelTurn(turn);
@@ -382,6 +383,7 @@ describe("outgoing throttle at the LLM model-turn seams (#3515 S1)", () => {
       system: "sys",
       messages: [{ role: "user", content: "hi" }],
       tools: {},
+      stepTimeoutMs: 30_000,
     } as any;
     const res = await generateTextModelTurn(turn);
     expect(res.text).toBe("hello");
