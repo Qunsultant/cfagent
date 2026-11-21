@@ -325,7 +325,8 @@ describe("S3 (b) — market-data route persists a canonical report with provider
     expect(hits[0].runId).toBe("screener:2026-10-22T12:00:00.000Z");
     expect(JSON.parse(hits[0].body).provider).toBe("yahoo");
     expect(JSON.parse(hits[0].body).trigger).toBe("manual");
-    // An E*TRADE run (no provider named) records the etrade default.
+    // Issue #5516: a run that names no provider records the externalized
+    // default provider (config/vocabulary.json → provider), not a literal.
     // (Distinct timestamp: the seam dedupes on screener:<timestamp>.)
     const { provider: _drop, ...etradeResult } = marketDataResult({
       timestamp: "2026-10-22T12:05:00.000Z",
@@ -334,7 +335,7 @@ describe("S3 (b) — market-data route persists a canonical report with provider
     hits = listScheduledReports(sql as any, {});
     expect(hits).toHaveLength(2);
     const etradeHit = hits.find((h) => h.runId === "screener:2026-10-22T12:05:00.000Z");
-    expect(JSON.parse(etradeHit!.body).provider).toBe("etrade");
+    expect(JSON.parse(etradeHit!.body).provider).toBe("alpaca");
   });
 
   it("Yahoo failure → visible 502, and the failed run is still stored (REST idiom)", async () => {

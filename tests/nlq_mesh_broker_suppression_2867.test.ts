@@ -39,13 +39,13 @@ describe("shardsForUniverse (broker shard policy)", () => {
 });
 
 describe("NLQ fallback planning", () => {
-  it("defaults an absent universe to TECH, like runScreenInner", () => {
+  it("defaults an absent universe to the externalized default (#5516)", () => {
     const plan = planStockScreenRun(
       // Issue #4431 (S5/N3): the planner requires a provider now.
       { trigger: "manual", provider: "etrade", filters: {} },
       "2026-11-02T13:00:00.000Z",
     );
-    expect(plan.universe).toBe("TECH");
+    expect(plan.universe).toBe("NASDAQ100");
   });
 
   it("carries an explicit universe through unchanged", () => {
