@@ -101,6 +101,7 @@ describe("Issue #5237 — Nightly OODA J-stack engine cutover & view=ooda UX rou
     expect(result.cutoverMode).toBe("direct_rollback");
     expect(directSpy).toHaveBeenCalledTimes(1);
     expect(result.outcome).toEqual({ success: true, mode: "direct" });
+    expect(result.stageVisibility.every((stage) => stage.status === "unknown" && stage.startedAt === null && stage.finishedAt === null)).toBe(true);
   });
 
   it("executes real stage control operations (status, run, rerun) against JobPipelineControl", async () => {

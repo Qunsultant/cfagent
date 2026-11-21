@@ -53,7 +53,7 @@ describe("581 / 5175 research stage linkage & unified run id", () => {
     ]);
   });
 
-  it("stamps jobRunId, stages, captureIds, inputHash, engineVersion onto canonical research reports and folds D1 twin", () => {
+  it("stamps canonical run linkage without fabricating J-stack stage outcomes", () => {
     const storedInput = researchReportToStoreInput(
       sampleReport,
       {
@@ -70,14 +70,7 @@ describe("581 / 5175 research stage linkage & unified run id", () => {
     expect(body.jobRunId).toBe("research:778ad3bf-7044-4ef9-9be9-38744ac8aa86");
     expect(body.engineVersion).toBe("rules-1.0.0");
     expect(body.captureIds).toEqual(["778ad3bf-7044-4ef9-9be9-38744ac8aa86"]);
-    expect((body.stages as any[]).map((s) => s.stage)).toEqual([
-      "feed",
-      "gather",
-      "analysis",
-      "generation",
-      "recording",
-      "delivery",
-    ]);
+    expect(body.stages).toBeUndefined();
 
     const canonicalSummary = runSummaryFromReport({
       id: "rep-581",
@@ -107,14 +100,7 @@ describe("581 / 5175 research stage linkage & unified run id", () => {
     expect(merged[0].workflowId).toBe("research:778ad3bf-7044-4ef9-9be9-38744ac8aa86");
 
     const detail = buildRunDetail({ ...merged[0], body });
-    expect(detail.stages.map((s) => s.stage)).toEqual([
-      "feed",
-      "gather",
-      "analysis",
-      "generation",
-      "recording",
-      "delivery",
-    ]);
+    expect(detail.stages.filter((s) => s.stage !== "recording").every((s) => s.status === "unknown")).toBe(true);
     expect(detail.lineage.engineVersion).toBe("rules-1.0.0");
     expect(detail.lineage.captureIds).toEqual(["778ad3bf-7044-4ef9-9be9-38744ac8aa86"]);
   });

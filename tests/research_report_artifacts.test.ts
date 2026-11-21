@@ -154,6 +154,17 @@ function report(over: Partial<ResearchReport> = {}): ResearchReport {
     } as any,
     oodaTrace: [] as any,
     stageTrace: [] as any,
+    brokerId: "alpaca",
+    mode: "paper",
+    assetType: "options",
+    symbolEvaluations: [
+      {
+        symbol: "NVDA", outcome: "evaluated", reason: "chain pulled", outlook: "bullish", selectedStrategy: "call_debit_spread",
+        quote: { price: 180, timestamp: 1, quoteStatus: "live", source: "alpaca" },
+        chain: { outcome: "retrieved", source: "alpaca", provenance: "live", asOf: 2, expiryCount: 2, legCount: 12 },
+        strategies: [{ strategy: "call_debit_spread", outcome: "qualified", legs: [] as any }],
+      },
+    ],
     ...over,
   };
 }
@@ -202,6 +213,16 @@ describe("research report row model (#2167)", () => {
     expect(rows[0].max_gain).toBeNull();
   });
 
+  it("projects every symbol's quote, chain and strategy outcome", () => {
+    const csv = generateResearchReportCsv(report());
+    expect(csv).toContain("symbol_evaluation");
+    expect(csv).toContain("alpaca");
+    expect(csv).toContain("call_debit_spread");
+    const wb = XLSX.read(generateResearchReportXlsx(report()), { type: "buffer" });
+    const evaluations = XLSX.utils.sheet_to_json(wb.Sheets["Symbol Evaluations"]) as Array<Record<string, unknown>>;
+    expect(evaluations[0]).toMatchObject({ symbol: "NVDA", outcome: "evaluated", quote_source: "alpaca", chain_provenance: "live", selected_strategy: "call_debit_spread" });
+  });
+
   it("survives a report with no ideas, watchlist or rejects", () => {
     const rows = researchIdeaRows(report({ ideas: [] as any, watchlist: [] as any, rejected: [] as any }));
     expect(rows).toEqual([]);
@@ -224,19 +245,18 @@ describe("research report renderers (#2167)", () => {
   it("CSV carries the idea table with the run's values", () => {
     const csv = generateResearchReportCsv(report());
     const lines = csv.trim().split("\n");
-    expect(lines[0]).toBe(
-      "rank,symbol,outlook,structure,score,thesis,net_debit,net_credit,max_loss,max_gain,contractual_max_loss,breakevens,entry_condition,invalidation,legs",
-    );
-    expect(lines).toHaveLength(2);
-    expect(lines[1]).toContain("NVDA");
+    expect(lines[0]).toContain("record_type,rank,symbol,outlook,structure,score");
+    expect(lines).toHaveLength(3);
+    expect(lines[1]).toContain("idea,1,NVDA");
     expect(lines[1]).toContain("call_debit_spread");
     expect(lines[1]).toContain("82.5");
     expect(lines[1]).toContain("184.15");
+    expect(lines[2]).toContain("symbol_evaluation");
   });
 
-  it("XLSX has Ideas, Legs, Trade Cards, Watchlist, Rejected and Run Summary tabs", () => {
+  it("XLSX has idea, outcome, symbol evaluation and run provenance tabs", () => {
     const wb = XLSX.read(generateResearchReportXlsx(report()), { type: "buffer" });
-    expect(wb.SheetNames).toEqual(["Ideas", "Legs", "Trade Cards", "Watchlist", "Rejected", "Run Summary"]);
+    expect(wb.SheetNames).toEqual(["Ideas", "Legs", "Trade Cards", "Watchlist", "Rejected", "Symbol Evaluations", "Run Summary"]);
 
     const ideas = XLSX.utils.sheet_to_json(wb.Sheets.Ideas) as Array<Record<string, unknown>>;
     expect(ideas).toHaveLength(1);
@@ -258,6 +278,8 @@ describe("research report renderers (#2167)", () => {
     expect(byField.get("run_id")).toBe("run-1");
     expect(byField.get("qualified")).toBe(1);
     expect(byField.get("regime")).toBe("risk_on");
+    expect(byField.get("broker")).toBe("alpaca");
+    expect(byField.get("mode")).toBe("paper");
   });
 
   it("names the workbook and CSV after the run, like the PDF", () => {

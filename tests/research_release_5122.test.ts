@@ -30,10 +30,16 @@ describe("Issue #5122 (Sub-issue 8 of #5109) — Research Release & Operations",
     expect(res.cutoverMode).toBe("engine");
     expect(res.stageVisibility).toHaveLength(6);
     for (const stage of res.stageVisibility) {
-      expect(stage.startedAt).toBeTruthy();
-      expect(stage.finishedAt).toBeTruthy();
-      expect(stage.durationMs).toBeGreaterThanOrEqual(0);
-      expect(stage.status).toBe("completed");
+      if (stage.status === "completed") {
+        expect(stage.startedAt).toBeTruthy();
+        expect(stage.finishedAt).toBeTruthy();
+        expect(stage.durationMs).toBeGreaterThanOrEqual(0);
+      } else {
+        expect(stage.status).toBe("unknown");
+        expect(stage.startedAt).toBeNull();
+        expect(stage.finishedAt).toBeNull();
+        expect(stage.durationMs).toBeNull();
+      }
     }
   });
 });

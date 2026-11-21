@@ -57,6 +57,35 @@ export const RESEARCH_TRADE_CARD_COLUMNS = [
   "sources",
 ] as const;
 
+export const RESEARCH_SYMBOL_EVALUATION_COLUMNS = [
+  "symbol",
+  "outcome",
+  "reason",
+  "quote_price",
+  "quote_timestamp",
+  "quote_status",
+  "quote_source",
+  "market_cap",
+  "is_etf",
+  "chain_outcome",
+  "chain_source",
+  "chain_provenance",
+  "chain_as_of",
+  "expiry_count",
+  "leg_count",
+  "outlook",
+  "selected_strategy",
+  "strategies",
+] as const;
+
+export type ResearchSymbolEvaluationRow = Record<(typeof RESEARCH_SYMBOL_EVALUATION_COLUMNS)[number], string | number | boolean | null>;
+
+export const RESEARCH_CSV_COLUMNS = [
+  "record_type",
+  ...RESEARCH_IDEA_COLUMNS,
+  ...RESEARCH_SYMBOL_EVALUATION_COLUMNS,
+] as const;
+
 export type ResearchTradeCardRow = Record<(typeof RESEARCH_TRADE_CARD_COLUMNS)[number], string | number | null>;
 
 export interface ResearchLegRow {
@@ -252,6 +281,29 @@ export function researchRejectedRows(report: ResearchReport): ResearchRejectedRo
   }));
 }
 
+export function researchSymbolEvaluationRows(report: ResearchReport): ResearchSymbolEvaluationRow[] {
+  return (report?.symbolEvaluations ?? []).map((evaluation) => ({
+    symbol: String(evaluation.symbol ?? ""),
+    outcome: String(evaluation.outcome ?? "unknown"),
+    reason: String(evaluation.reason ?? ""),
+    quote_price: finite(evaluation.quote?.price),
+    quote_timestamp: finite(evaluation.quote?.timestamp),
+    quote_status: evaluation.quote?.quoteStatus ?? null,
+    quote_source: evaluation.quote?.source ?? null,
+    market_cap: finite(evaluation.quote?.marketCap),
+    is_etf: typeof evaluation.quote?.isEtf === "boolean" ? evaluation.quote.isEtf : null,
+    chain_outcome: evaluation.chain?.outcome ?? null,
+    chain_source: evaluation.chain?.source ?? null,
+    chain_provenance: evaluation.chain?.provenance ?? null,
+    chain_as_of: finite(evaluation.chain?.asOf),
+    expiry_count: finite(evaluation.chain?.expiryCount),
+    leg_count: finite(evaluation.chain?.legCount),
+    outlook: evaluation.outlook ?? null,
+    selected_strategy: evaluation.selectedStrategy ?? null,
+    strategies: JSON.stringify(evaluation.strategies ?? []),
+  }));
+}
+
 /** The run-level field/value rows, mirroring the PDF's config page. */
 export function researchSummaryRows(report: ResearchReport): Array<[string, string | number | null]> {
   const stats = report?.stats;
@@ -260,11 +312,20 @@ export function researchSummaryRows(report: ResearchReport): Array<[string, stri
     ["trigger", String(report?.trigger ?? "")],
     ["created_at", String(report?.createdAt ?? "")],
     ["rules_version", String(report?.rulesVersion ?? "")],
+    ["broker", String(report?.brokerId ?? "not recorded")],
+    ["mode", String(report?.mode ?? "not recorded")],
+    ["asset_type", String(report?.assetType ?? "not recorded")],
+    ["account_type", String(report?.accountType ?? "not recorded")],
+    ["account_id", String(report?.accountId ?? "not recorded")],
+    ["quote_sources", [...new Set((report?.symbolEvaluations ?? []).map((evaluation) => evaluation.quote?.source).filter(Boolean))].join(", ")],
+    ["chain_sources", [...new Set((report?.symbolEvaluations ?? []).map((evaluation) => evaluation.chain?.source).filter(Boolean))].join(", ")],
     ["regime", String(report?.regime?.regime ?? "")],
     ["summary", String(report?.summary ?? "")],
     ["universe", finite(stats?.universeSize)],
     ["quotes_retrieved", finite(stats?.quotesRetrieved)],
     ["candidates_evaluated", finite(stats?.candidatesEvaluated)],
+    ["chains_attempted", finite(stats?.chainsAttempted)],
+    ["chains_fetched", finite(stats?.chainsFetched)],
     ["qualified", finite(stats?.qualified)],
     ["watchlist", finite(stats?.watchlist)],
     ["rejected", finite(stats?.rejected)],

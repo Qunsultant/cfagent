@@ -51,10 +51,10 @@ export type ResearchStageOp = "status" | "run" | "rerun" | "stop" | "resume" | "
 
 export interface ResearchStageVisibility {
   stageId: ResearchPipelineStage;
-  startedAt: string;
-  finishedAt: string;
-  durationMs: number;
-  status: "completed" | "failed";
+  startedAt: string | null;
+  finishedAt: string | null;
+  durationMs: number | null;
+  status: "completed" | "failed" | "running" | "pending" | "unknown";
 }
 
 /**
@@ -208,17 +208,15 @@ export async function dispatchResearchEngineRun(
 
   const cutoverEnabled = await isResearchEngineCutoverEnabled(input.flags);
   if (!cutoverEnabled) {
-    const startedAt = new Date().toISOString();
-    const startMs = Date.now();
     const outcome = await input.execute({ runId, engineJobId });
-    const finishedAt = new Date().toISOString();
-    const durationMs = Math.max(0, Date.now() - startMs);
     const stageVisibility: ResearchStageVisibility[] = RESEARCH_PIPELINE_STAGES.map((stageId) => ({
       stageId,
-      startedAt,
-      finishedAt,
-      durationMs,
-      status: "completed",
+      startedAt: null,
+      finishedAt: null,
+      durationMs: null,
+      // Direct rollback has no durable per-stage checkpoint. The enclosing
+      // run window is not evidence that each configured stage completed.
+      status: "unknown",
     }));
 
     return {
@@ -276,10 +274,8 @@ export async function dispatchResearchEngineRun(
   });
   await control.defineJob(definition as never);
 
-  const fallbackStartedAt = new Date().toISOString();
   const dispatch = await control.runJob(engineJobId, { trigger: input.trigger });
   const runOutcome = dispatch.completion ? await dispatch.completion : null;
-  const fallbackFinishedAt = new Date().toISOString();
   const jobView = await control.getJob(engineJobId);
 
   if ((runOutcome?.state ?? dispatch.state) === "failed") {
@@ -288,18 +284,27 @@ export async function dispatchResearchEngineRun(
 
   const stageVisibility: ResearchStageVisibility[] = RESEARCH_PIPELINE_STAGES.map((stageId) => {
     const sv = jobView.stages.find((s) => s.kind === stageId);
-    const startedAt = sv?.startedAt ?? fallbackStartedAt;
-    const finishedAt = sv?.endedAt ?? sv?.startedAt ?? fallbackFinishedAt;
-    const durationMs =
-      sv?.durationMs ??
-      Math.max(0, Date.parse(finishedAt) - Date.parse(startedAt) || 0);
-    const failed = sv?.units.some((u) => u.status === "failed") ?? false;
+    const statuses = sv?.units.map((unit) => unit.status) ?? [];
+    const failed = statuses.some((status) => ["failed", "timed_out", "cancelled"].includes(status));
+    const completed = statuses.length > 0 && statuses.every((status) => status === "completed");
+    const running = statuses.some((status) => status === "running");
+    const pending = statuses.some((status) => ["queued", "never-attempted"].includes(status));
     return {
       stageId,
-      startedAt,
-      finishedAt,
-      durationMs,
-      status: failed ? "failed" : "completed",
+      startedAt: sv?.startedAt ?? null,
+      finishedAt: sv?.endedAt ?? null,
+      durationMs: sv?.durationMs ?? null,
+      status: !sv || statuses.length === 0
+        ? "unknown"
+        : failed
+          ? "failed"
+          : completed
+            ? "completed"
+            : running
+              ? "running"
+              : pending
+                ? "pending"
+                : "unknown",
     };
   });
 

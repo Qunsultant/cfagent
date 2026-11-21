@@ -366,13 +366,17 @@ export function buildRunDetail(
   const anyFailed =
     summary.pdfStatus === "failed" || summary.xlsxStatus === "failed" || summary.csvStatus === "failed";
   const isDiscovery = summary.kind === "discovery";
-  const analysisStatus: RunDetailStageStatus =
-    summary.status === "failed"
+  const isOodaResearch = summary.source === "options_research";
+  const analysisStatus: RunDetailStageStatus = isOodaResearch
+    ? "unknown"
+    : summary.status === "failed"
       ? "failed"
       : summary.resultCount !== null || summary.status === "completed"
         ? "completed"
         : "unknown";
-  const generationStatus: RunDetailStageStatus = isDiscovery
+  const generationStatus: RunDetailStageStatus = isOodaResearch
+    ? "unknown"
+    : isDiscovery
     ? "never-attempted"
     : anyGenerated
       ? "completed"
@@ -430,7 +434,7 @@ export function buildRunDetail(
     : [
     {
       stage: "feed",
-      status: analysisStatus === "completed" || anyGenerated ? "completed" : analysisStatus === "failed" ? "failed" : "unknown",
+      status: analysisStatus === "completed" || (!isOodaResearch && anyGenerated) ? "completed" : analysisStatus === "failed" ? "failed" : "unknown",
       durationMs: null,
       inputIds: request.filter((f) => f.value).map((f) => `${f.field}:${f.value}`),
       outputIds: captureIds,
@@ -440,7 +444,7 @@ export function buildRunDetail(
     },
     {
       stage: "gather",
-      status: analysisStatus === "completed" || anyGenerated ? "completed" : analysisStatus === "failed" ? "failed" : "unknown",
+      status: analysisStatus === "completed" || (!isOodaResearch && anyGenerated) ? "completed" : analysisStatus === "failed" ? "failed" : "unknown",
       durationMs: null,
       inputIds: captureIds,
       outputIds: captureIds,

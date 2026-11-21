@@ -319,6 +319,7 @@ export class EtradeResearchDataProvider implements ResearchDataProvider {
           underlyingPrice,
           asOf: now,
           provenance: "live",
+          source: this.selection?.brokerId ?? DEFAULT_TENANT_PROVIDERS.brokerId,
           expiries: chainExpiries.sort((a, b) => a.dte - b.dte),
         };
       }
@@ -333,7 +334,7 @@ export class EtradeResearchDataProvider implements ResearchDataProvider {
     // has no "calibrated-demo" member; downstream layers map "calibrated"
     // to the "calibrated-demo" dataSource).
     if (!isDemoCalibratedChainsEnabled()) {
-      return { symbol, underlyingPrice: 0, asOf: now, provenance: "unavailable", expiries: [] };
+      return { symbol, underlyingPrice: 0, asOf: now, provenance: "unavailable", source: this.selection?.brokerId ?? DEFAULT_TENANT_PROVIDERS.brokerId, expiries: [] };
     }
     // Calibrated fallback: explicitly synthetic, never an executable quote.
     // Issue #353 — mirror the two live bands: the builder's DTE grid now
@@ -371,13 +372,14 @@ export class EtradeResearchDataProvider implements ResearchDataProvider {
           underlyingPrice,
           asOf: now,
           provenance: "calibrated",
+          source: "calibrated",
           expiries: chainExpiries.sort((a, b) => a.dte - b.dte),
         };
       }
     } catch {
       // fall through
     }
-    return { symbol, underlyingPrice: 0, asOf: now, provenance: "unavailable", expiries: [] };
+    return { symbol, underlyingPrice: 0, asOf: now, provenance: "unavailable", source: this.selection?.brokerId ?? DEFAULT_TENANT_PROVIDERS.brokerId, expiries: [] };
   }
 
   async getTechnicals(symbol: string): Promise<Technicals | null> {
