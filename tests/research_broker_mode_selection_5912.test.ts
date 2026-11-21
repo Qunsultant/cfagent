@@ -17,7 +17,7 @@ import { TradingPlatformRegistry } from "../src/trading";
 import { EtradeResearchDataProvider } from "../src/services/researchProviders";
 import { runResearchPipeline, type ResearchDataProvider } from "../src/services/researchPipeline";
 import { RESEARCH_CONFIG_DEFAULTS, type ResearchConfig } from "../src/services/researchConfig";
-import { DEFAULT_RESEARCH_BROKER_ID } from "../src/config/researchJobConfig";
+import { DEFAULT_TENANT_PROVIDERS } from "../src/data/commercialPorts";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -64,8 +64,8 @@ describe("5912-P01 the provider resolves the selected broker and mode", () => {
   });
 });
 
-describe("5912-P02 no selection keeps today's behaviour", () => {
-  it("resolves the configured default with no mode override", () => {
+describe("5974-P02 no selection uses the shared platform default", () => {
+  it("resolves the shared broker default in paper mode", () => {
     const spy = vi
       .spyOn(TradingPlatformRegistry, "getPlatform")
       .mockReturnValue({} as never);
@@ -73,11 +73,11 @@ describe("5912-P02 no selection keeps today's behaviour", () => {
     new EtradeResearchDataProvider({} as never, "trader@example.com");
 
     expect(spy).toHaveBeenCalledWith(
-      DEFAULT_RESEARCH_BROKER_ID,
+      DEFAULT_TENANT_PROVIDERS.brokerId,
       expect.anything(),
       undefined,
       "trader@example.com",
-      undefined,
+      "paper",
     );
   });
 });

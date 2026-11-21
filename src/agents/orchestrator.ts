@@ -953,11 +953,10 @@ export class OrchestratorAgent extends PortThink {
     const trimmed = typeof userLogin === "string" ? userLogin.trim() : "";
     if (!trimmed || trimmed === "default") return null;
     const login = userLogin as string;
-    // Addressing rides the ActorGateway (#1779); the null guards above are unchanged.
+    // Resolve this user's actor gateway stub.
     return actorGateway.stub<ResearchAgent>(ns, `research:${login}`);
   }
 
-  // Issue #992: extracted to ./orchestrator/researchPublish.ts (runResearchAndPublish);
   async runResearchAndPublish(
     trigger: "manual" | "scheduled",
     userLogin?: string,
