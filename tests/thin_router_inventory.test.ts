@@ -525,6 +525,11 @@
  * handleIdResolveRoutes, after the audit handler in the
  * delegation sequence) — bringing the pinned inventory to 495
  * entries.
+ *
+ * Issue #5878 added three — POST /schedules/pause, /resume and
+ * /trigger (in handleSchedulesRoutes, immediately before the
+ * single-row pause/resume/trigger branches they must precede) —
+ * bringing the pinned inventory to 498 entries.
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
@@ -1170,6 +1175,11 @@ const EXPECTED_INVENTORY = [
   "handleSchedulesRoutes :: endsWith(\"/schedules/runs/record\")",
   "handleSchedulesRoutes :: === \"/schedules/callbacks\"",
   "handleSchedulesRoutes :: includes(\"/schedules/\")",
+  // Issue #5878 — bulk pause / resume / run-now by scope, placed
+  // immediately before the single-row branches they must precede.
+  "handleSchedulesRoutes :: endsWith(\"/schedules/pause\")",
+  "handleSchedulesRoutes :: endsWith(\"/schedules/resume\")",
+  "handleSchedulesRoutes :: endsWith(\"/schedules/trigger\")",
   "handleSchedulesRoutes :: includes(\"/schedules/\")",
   "handleSchedulesRoutes :: endsWith(\"/pause\")",
   "handleSchedulesRoutes :: includes(\"/schedules/\")",
