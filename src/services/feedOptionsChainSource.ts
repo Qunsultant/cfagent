@@ -105,6 +105,8 @@ export function createDatasetOptionChainSource(
 
 /** One persisted-chains read: rows by symbol + provenance. */
 export interface PersistedOptionsChainsRead {
+  /** Full persisted snapshot used to build the shared OptionChainSource. */
+  artifact: FeedDatasetArtifact;
   /** Chain rows per symbol (the producing run's rows, verbatim). */
   chainsBySymbol: Map<string, FeedOptionsChainRow>;
   /** The label for these rows (names the persisted source). */
@@ -155,6 +157,7 @@ export async function readPersistedOptionsChains(
     ? 0
     : Math.max(0, Math.floor((args.nowMs - asOfMs) / 1000));
   return {
+    artifact,
     chainsBySymbol,
     label: `Persisted ${sourceId} option chains (as of ${artifact.asOf.slice(0, 10)})`,
     asOf: artifact.asOf,

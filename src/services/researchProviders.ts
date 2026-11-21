@@ -30,6 +30,8 @@ import {
   type NasdaqUniverseDeps,
   type YahooHistoryDeps,
   type TradingPlatformId,
+  type DataProviderId,
+  type OptionChainSource,
 } from "../trading";
 import { DEFAULT_TENANT_PROVIDERS } from "../data/commercialPorts";
 import { isDemoCalibratedChainsEnabled } from "../config/demoMode";
@@ -48,6 +50,13 @@ import type {
 import { createStructuredLogger } from "../observability/structuredLogger";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
 import { getSymbolEventCalendar } from "./eventCalendar";
+import {
+  createDatasetOptionChainSource,
+  readPersistedOptionsChains,
+  type PersistedOptionsChainsRead,
+} from "./feedOptionsChainSource";
+import type { FeedDatasetStore, FeedOptionsChainRow } from "../data/feedDatasetPorts";
+import { RESEARCH_CONFIG_DEFAULTS, type ResearchConfig } from "./researchConfig";
 
 /** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
 const structuredLog = createStructuredLogger(createObservabilitySink({}), {
@@ -69,22 +78,14 @@ function dteOf(year: number, month: number, day: number, now: number): number {
   return Math.max(0, Math.round((expiry - now) / 86_400_000));
 }
 
-/**
- * Issue #353 — research chain expiry selection windows. getChain covers TWO
- * working windows instead of the first four expirations only: the near band
- * the short-dated structures use, and the LEAPS band the PMCC long leg
- * requires (>=180 DTE, per the catalog's poor_mans_covered_call farMinDte).
- * Selection is bounded per band so wide option chains stay cheap.
- */
-const NEAR_EXPIRY_MIN_DTE = 30;
-const NEAR_EXPIRY_MAX_DTE = 45;
-const LEAPS_EXPIRY_MIN_DTE = 180;
-const MAX_EXPIRIES_PER_BAND = 4;
-
-/** Calibrated-fallback DTE windows mirror the two live bands. */
-const CALIBRATED_NEAR_MAX_DTE = 120;
-const CALIBRATED_LEAPS_MIN_DTE = 180;
-const CALIBRATED_LEAPS_MAX_DTE = 400;
+type ResearchChainRules = Pick<ResearchConfig,
+  | "nearExpiryMinDte"
+  | "nearExpiryMaxDte"
+  | "leapsExpiryMinDte"
+  | "maxExpiriesPerBand"
+  | "calibratedNearMaxDte"
+  | "calibratedLeapsMaxDte"
+>;
 
 function toProviderLeg(
   optionType: "call" | "put",
@@ -151,6 +152,7 @@ function chainToSnapshot(
 export class EtradeResearchDataProvider implements ResearchDataProvider {
   private readonly platform: ITradingPlatform;
   private listingsCache: NasdaqStockListing[] | null = null;
+  private persistedChainsPromise?: Promise<PersistedOptionsChainsRead | undefined>;
 
   constructor(
     private readonly env: Env,
@@ -181,7 +183,12 @@ export class EtradeResearchDataProvider implements ResearchDataProvider {
      * ("live" / "paper" / "sandbox", per the platform's own vocabulary).
      * Unset = the configured default in the deployment's environment.
      */
-    private readonly selection?: { brokerId?: string; mode?: string }
+    private readonly selection?: {
+      brokerId?: string;
+      mode?: string;
+      chainFeed?: { datasetStore: FeedDatasetStore | null; maxAgeSeconds: number };
+      chainRules?: ResearchChainRules;
+    }
   ) {
     // #291 Q2: resolved through the platform registry (was a direct
     // ETradeService construction — the T0 ledger's researchProviders
@@ -269,12 +276,47 @@ export class EtradeResearchDataProvider implements ResearchDataProvider {
 
   async getChain(symbol: string): Promise<ChainSnapshot> {
     const now = Date.now();
+    const rules = { ...RESEARCH_CONFIG_DEFAULTS, ...this.selection?.chainRules };
+    const brokerSource = this.selection?.brokerId ?? DEFAULT_TENANT_PROVIDERS.brokerId;
+    let source = brokerSource;
+    let sourceAsOf = now;
+    let chainSource: OptionChainSource | ITradingPlatform = this.platform;
+    let persistedRow: FeedOptionsChainRow | undefined;
+    let persistedFetchErrors: string[] = [];
+    let failureReason: string | undefined;
+    const feed = this.selection?.chainFeed;
+    if (feed?.datasetStore) {
+      try {
+        this.persistedChainsPromise ??= readPersistedOptionsChains(
+          feed.datasetStore,
+          brokerSource as DataProviderId,
+          { maxAgeSeconds: feed.maxAgeSeconds, nowMs: now },
+        );
+        const persisted = await this.persistedChainsPromise;
+        const row = persisted?.chainsBySymbol.get(symbol.toUpperCase());
+        if (persisted && !persisted.stale && row?.chains.length) {
+          chainSource = createDatasetOptionChainSource(persisted.artifact);
+          persistedRow = row;
+          source = persisted.label;
+          const persistedAsOf = Date.parse(persisted.asOf);
+          sourceAsOf = Number.isNaN(persistedAsOf) ? now : persistedAsOf;
+        } else if (persisted && !persisted.stale && row) {
+          persistedFetchErrors = row.fetchErrors;
+        }
+      } catch (error) {
+        structuredLog.warn("researchProviders.options_chain_feed_read_failed", {
+          brokerId: brokerSource,
+          symbol,
+          error: safeChainError(error),
+        });
+      }
+    }
     // Live path first.
     try {
-      if (!this.platform.getOptionExpireDates || !this.platform.getOptionChains) {
-        throw new Error("platform lacks the options data plane");
+      if (!chainSource.getOptionExpireDates || !chainSource.getOptionChains) {
+        throw new Error(`${brokerSource} options feed does not expose the option-chain data plane.`);
       }
-      const expiries = await this.platform.getOptionExpireDates(symbol);
+      const expiries = await chainSource.getOptionExpireDates(symbol);
       // Issue #353 — select expiries across the near band (30–45 DTE) AND the
       // LEAPS band (>=180 DTE); the old slice(0, 4) cut every LEAPS expiry,
       // which made the PMCC branch unreachable.
@@ -284,47 +326,79 @@ export class EtradeResearchDataProvider implements ResearchDataProvider {
       }));
       const nearBand = withDte
         .filter(
-          (e) => e.dte >= NEAR_EXPIRY_MIN_DTE && e.dte <= NEAR_EXPIRY_MAX_DTE
+          (e) => e.dte >= rules.nearExpiryMinDte && e.dte <= rules.nearExpiryMaxDte
         )
         .sort((a, b) => a.dte - b.dte)
-        .slice(0, MAX_EXPIRIES_PER_BAND);
+        .slice(0, rules.maxExpiriesPerBand);
       const leapsBand = withDte
-        .filter((e) => e.dte >= LEAPS_EXPIRY_MIN_DTE)
+        .filter((e) => e.dte >= rules.leapsExpiryMinDte)
         .sort((a, b) => a.dte - b.dte)
-        .slice(0, MAX_EXPIRIES_PER_BAND);
+        .slice(0, rules.maxExpiriesPerBand);
       const picked = [...nearBand, ...leapsBand].map((e) => e.exp);
+      if (expiries.length === 0) {
+        failureReason = persistedRow
+          ? `${source} has no eligible option expirations for ${symbol}.`
+          : `${source} returned no option expirations for ${symbol}.`;
+        if (persistedRow?.fetchErrors.length) {
+          failureReason = [...persistedRow.fetchErrors].join("; ");
+        }
+      } else if (picked.length === 0) {
+        failureReason = `${source} returned ${expiries.length} expiration(s) for ${symbol}, but none were in the configured near-term (${rules.nearExpiryMinDte}–${rules.nearExpiryMaxDte} DTE) or LEAPS (≥${rules.leapsExpiryMinDte} DTE) bands.`;
+      }
       const chainExpiries: ProviderChainExpiry[] = [];
+      const chainErrors: string[] = [];
       let underlyingPrice = 0;
       for (const exp of picked) {
         const dte = dteOf(exp.year, exp.month, exp.day, now);
-        const chain = await this.platform.getOptionChains({
-          symbol,
-          expiryYear: exp.year,
-          expiryMonth: exp.month,
-          expiryDay: exp.day,
-          chainType: "CALLPUT",
-        });
-        if (!chain) continue;
-        if (!underlyingPrice && chain.underlyingPrice > 0) {
-          underlyingPrice = chain.underlyingPrice;
+        try {
+          const chain = await chainSource.getOptionChains({
+            symbol,
+            expiryYear: exp.year,
+            expiryMonth: exp.month,
+            expiryDay: exp.day,
+            chainType: "CALLPUT",
+          });
+          if (!chain) {
+            chainErrors.push(`${formatExpiry(exp)}: provider returned no chain.`);
+            continue;
+          }
+          if (!underlyingPrice && chain.underlyingPrice > 0) {
+            underlyingPrice = chain.underlyingPrice;
+          }
+          const iso = `${exp.year}-${String(exp.month).padStart(2, "0")}-${String(exp.day).padStart(2, "0")}`;
+          const snapshot = chainToSnapshot(symbol, chain, iso, dte, sourceAsOf, "live");
+          if (snapshot.legs.length === 0) {
+            chainErrors.push(`${formatExpiry(exp)}: contracts were returned without usable option quotes.`);
+            continue;
+          }
+          chainExpiries.push(snapshot);
+        } catch (error) {
+          chainErrors.push(`${formatExpiry(exp)}: ${safeChainError(error)}`);
         }
-        const iso = `${exp.year}-${String(exp.month).padStart(2, "0")}-${String(exp.day).padStart(2, "0")}`;
-        chainExpiries.push(
-          chainToSnapshot(symbol, chain, iso, dte, now, "live")
-        );
       }
       if (chainExpiries.length > 0) {
         return {
           symbol,
           underlyingPrice,
-          asOf: now,
+          asOf: sourceAsOf,
           provenance: "live",
-          source: this.selection?.brokerId ?? DEFAULT_TENANT_PROVIDERS.brokerId,
+          source,
+          ...([...chainErrors, ...(persistedRow?.fetchErrors ?? [])].length
+            ? { failureReason: [...chainErrors, ...(persistedRow?.fetchErrors ?? [])].join("; ") }
+            : {}),
           expiries: chainExpiries.sort((a, b) => a.dte - b.dte),
         };
       }
-    } catch {
-      // Fall through to the calibrated path — labeled, never live.
+      if (chainErrors.length > 0) {
+        failureReason = [...chainErrors, ...(persistedRow?.fetchErrors ?? []), ...persistedFetchErrors].join("; ");
+      } else if (persistedRow && persistedRow.chains.length === 0) {
+        failureReason = `${source} contains no eligible option contracts for ${symbol}.`;
+      }
+    } catch (error) {
+      failureReason = safeChainError(error);
+    }
+    if (persistedFetchErrors.length) {
+      failureReason = [...persistedFetchErrors, ...(failureReason ? [failureReason] : [])].join("; ");
     }
     // #928 (parent #913 S10) — calibrated fallback is demo-gated, exactly
     // like every other calibrated consumer (issue #65). Gate off (PROD
@@ -334,7 +408,15 @@ export class EtradeResearchDataProvider implements ResearchDataProvider {
     // has no "calibrated-demo" member; downstream layers map "calibrated"
     // to the "calibrated-demo" dataSource).
     if (!isDemoCalibratedChainsEnabled()) {
-      return { symbol, underlyingPrice: 0, asOf: now, provenance: "unavailable", source: this.selection?.brokerId ?? DEFAULT_TENANT_PROVIDERS.brokerId, expiries: [] };
+      return {
+        symbol,
+        underlyingPrice: 0,
+        asOf: now,
+        provenance: "unavailable",
+        source,
+        failureReason: failureReason ?? `${source} returned no usable option chains for ${symbol}.`,
+        expiries: [],
+      };
     }
     // Calibrated fallback: explicitly synthetic, never an executable quote.
     // Issue #353 — mirror the two live bands: the builder's DTE grid now
@@ -344,12 +426,12 @@ export class EtradeResearchDataProvider implements ResearchDataProvider {
         ...buildCalibratedOptionChains(
           [symbol],
           0,
-          CALIBRATED_NEAR_MAX_DTE
+          rules.calibratedNearMaxDte
         ),
         ...buildCalibratedOptionChains(
           [symbol],
-          CALIBRATED_LEAPS_MIN_DTE,
-          CALIBRATED_LEAPS_MAX_DTE
+          rules.leapsExpiryMinDte,
+          rules.calibratedLeapsMaxDte
         ),
       ];
       const chainExpiries: ProviderChainExpiry[] = [];
@@ -379,7 +461,15 @@ export class EtradeResearchDataProvider implements ResearchDataProvider {
     } catch {
       // fall through
     }
-    return { symbol, underlyingPrice: 0, asOf: now, provenance: "unavailable", source: this.selection?.brokerId ?? DEFAULT_TENANT_PROVIDERS.brokerId, expiries: [] };
+    return {
+      symbol,
+      underlyingPrice: 0,
+      asOf: now,
+      provenance: "unavailable",
+      source,
+      failureReason: failureReason ?? `${source} returned no usable option chains for ${symbol}.`,
+      expiries: [],
+    };
   }
 
   async getTechnicals(symbol: string): Promise<Technicals | null> {
@@ -463,4 +553,18 @@ export class EtradeResearchDataProvider implements ResearchDataProvider {
       return { regime: "unknown", notes: ["Regime assessment failed."], asOf: now };
     }
   }
+}
+
+function formatExpiry(expiry: { year: number; month: number; day: number }): string {
+  return `${expiry.year}-${String(expiry.month).padStart(2, "0")}-${String(expiry.day).padStart(2, "0")}`;
+}
+
+/** Keep provider refusal details useful while excluding credentials and bounding report text. */
+function safeChainError(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error);
+  return raw
+    .replace(/Bearer\s+\S+/gi, "Bearer [redacted]")
+    .replace(/(APCA-API-(?:KEY-ID|SECRET-KEY))\s*[:=]\s*\S+/gi, "$1=[redacted]")
+    .replace(/(api[_-]?key|secret|token)\s*[:=]\s*\S+/gi, "$1=[redacted]")
+    .slice(0, 300);
 }

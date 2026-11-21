@@ -32,6 +32,7 @@ import { getTenantAccountBinding } from "../services/accountBindings";
 import { isBrokerId, isTradingType } from "../trading";
 import { resolveResearchJobConfig } from "../config/researchJobConfig";
 import { createResearchStorePorts } from "../data/createResearchStorePorts";
+import { createFeedDatasetAdapter } from "../data/createFeedDatasetPorts";
 import type { ResearchStorePorts } from "../data/researchStorePorts";
 import {
   ResearchConfigService,
@@ -616,7 +617,15 @@ export class ResearchAgent extends PortThink {
         userLogin,
         historyDeps,
         universeDeps,
-        { ...(req.brokerId ? { brokerId: req.brokerId } : {}), ...(req.mode ? { mode: req.mode } : {}) }
+        {
+          ...(req.brokerId ? { brokerId: req.brokerId } : {}),
+          ...(req.mode ? { mode: req.mode } : {}),
+          chainFeed: {
+            datasetStore: createFeedDatasetAdapter(this.env),
+            maxAgeSeconds: config.quoteFreshnessSeconds,
+          },
+          chainRules: config,
+        }
       );
       // Issue #773: feed historical evaluation outcomes into the pipeline's Decide stage.
       let trackRecord: import("../services/researchTrackRecord").TrackRecord | undefined;

@@ -87,6 +87,8 @@ export interface ChainSnapshot {
   provenance: ChainProvenance;
   /** Selected broker or feed identity, when the provider can record it. */
   source?: string;
+  /** Safe, actionable chain retrieval details when the provider could not supply a usable chain. */
+  failureReason?: string;
   expiries: ProviderChainExpiry[];
 }
 
@@ -221,6 +223,7 @@ export interface ResearchSymbolEvaluation {
     asOf?: number;
     expiryCount?: number;
     legCount?: number;
+    failureReason?: string;
   };
   outlook?: Outlook;
   strategies: ResearchStrategyEvaluation[];
@@ -963,7 +966,7 @@ export async function runResearchPipeline(
       if (chain.provenance === "unavailable" || chain.expiries.length === 0) {
         symbolEvaluation.outcome = "chain_failed";
         symbolEvaluation.outlook = draft.outlook;
-        symbolEvaluation.reason = "Option chain source returned no expirations or contracts.";
+        symbolEvaluation.reason = chain.failureReason ?? "Option chain source returned no expirations or contracts.";
         symbolEvaluation.chain = {
           outcome: "failed",
           source: chain.source ?? "not recorded",
@@ -971,18 +974,20 @@ export async function runResearchPipeline(
           asOf: chain.asOf,
           expiryCount: chain.expiries.length,
           legCount: chain.expiries.reduce((count, expiry) => count + expiry.legs.length, 0),
+          ...(chain.failureReason ? { failureReason: chain.failureReason } : {}),
         };
         rejected.push({ symbol, outlook: draft.outlook, structure: "-", gate: "quote_quality", reason: symbolEvaluation.reason });
         continue;
       }
       stats.chainsFetched++;
       if (chain.provenance === "calibrated") stats.chainsCalibrated++;
-    } catch {
+    } catch (error) {
       symbolEvaluation.outcome = "chain_failed";
       symbolEvaluation.outlook = draft.outlook;
-      symbolEvaluation.reason = "Option chain retrieval failed.";
-      symbolEvaluation.chain = { outcome: "failed", source: quote.source };
-      rejected.push({ symbol, outlook: draft.outlook, structure: "-", gate: "quote_quality", reason: "Chain retrieval failed." });
+      const reason = error instanceof Error ? error.message : String(error);
+      symbolEvaluation.reason = reason;
+      symbolEvaluation.chain = { outcome: "failed", source: quote.source, failureReason: reason };
+      rejected.push({ symbol, outlook: draft.outlook, structure: "-", gate: "quote_quality", reason });
       continue;
     }
     stats.candidatesEvaluated++;
@@ -996,6 +1001,7 @@ export async function runResearchPipeline(
       asOf: chain.asOf,
       expiryCount: chain.expiries.length,
       legCount: chain.expiries.reduce((count, expiry) => count + expiry.legs.length, 0),
+      ...(chain.failureReason ? { failureReason: chain.failureReason } : {}),
     };
 
     // BUILD-AND-PRICE — construct candidate structures per the §6 table; keep the best
