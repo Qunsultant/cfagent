@@ -113,6 +113,18 @@ export function resolveAlpacaTradingBase(
   env: Env,
   overrideEnv?: string,
 ): { baseUrl: string; isLive: boolean; source: "pin" | "selection" | "inference" } {
+  const selection = String(overrideEnv ?? "").trim().toUpperCase();
+  // Issue #3277 — an explicit OODA paper run is a per-run safety downshift;
+  // resolve it before the deployment-wide mode pin.
+  if (selection === "PAPER") {
+    const configured = configuredAlpacaBase(env);
+    return {
+      baseUrl: configured.includes("paper-api") ? configured : ALPACA_PAPER_HOST,
+      isLive: false,
+      source: "selection",
+    };
+  }
+
   // Issue #3233: an explicit trading type wins over inference. Without it the
   // legacy rule stands (paper host = paper), so nothing silently changes for
   // an environment that only sets ALPACA_BASE_URL.
@@ -129,7 +141,6 @@ export function resolveAlpacaTradingBase(
   // same mapping the catalog declares for every broker (#3232), so the hub
   // switch now means the same thing on both brokers instead of being an
   // E*TRADE-only control that Alpaca silently ignored.
-  const selection = String(overrideEnv ?? "").trim().toUpperCase();
   if (selection === "TEST" || selection === "PAPER" || selection === "SANDBOX") {
     return { baseUrl: configured.includes("paper-api") ? configured : ALPACA_PAPER_HOST, isLive: false, source: "selection" };
   }

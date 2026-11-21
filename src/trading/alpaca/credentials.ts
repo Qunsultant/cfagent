@@ -43,10 +43,14 @@ export function normalizeAlpacaBaseUrl(raw: unknown, fallback = "https://paper-a
 
 /** Which trading side this env/selection is on. */
 export function alpacaTradingSide(env: Env, overrideEnv?: string): AlpacaSide {
+  const selection = String(overrideEnv ?? "").trim().toUpperCase();
+  // Issue #3277 — a research run's explicit paper selection is a scoped
+  // downshift and must be honored even when the Worker is pinned to live.
+  if (selection === "PAPER") return "paper";
+
   const pin = String(env.ALPACA_TRADING_TYPE ?? "").trim().toLowerCase();
   if (pin === "paper" || pin === "live") return pin;
 
-  const selection = String(overrideEnv ?? "").trim().toUpperCase();
   if (selection === "TEST") return "paper";
   if (selection === "PROD") return "live";
 
@@ -56,6 +60,53 @@ export function alpacaTradingSide(env: Env, overrideEnv?: string): AlpacaSide {
 
 /** Map the deployed pair for this env's side onto the generic names. */
 export function withAlpacaCredentials(env: Env, overrideEnv?: string): Env {
+  const selection = String(overrideEnv ?? "").trim().toUpperCase();
+  if (selection === "PAPER") {
+    const paperKey = env.ALPACA_PAPER_API_KEY;
+    const paperSecret = env.ALPACA_PAPER_SECRET_KEY;
+    const hasModeSpecificPair = Boolean(
+      paperKey || paperSecret || env.ALPACA_LIVE_API_KEY || env.ALPACA_LIVE_SECRET_KEY || env.ALPACA_LIVE_URL,
+    );
+    const pin = String(env.ALPACA_TRADING_TYPE ?? "").trim().toLowerCase();
+    const pinnedLive = pin === "live" || pin === "prod";
+    const baseLooksLive = Boolean(
+      env.ALPACA_BASE_URL && !env.ALPACA_BASE_URL.toLowerCase().includes("paper-api"),
+    );
+    // The generic pair is a legacy single-mode fallback only when no explicit
+    // mode pair or live deployment pin could make it a live credential.
+    const useLegacyPair = !hasModeSpecificPair && !pinnedLive && !baseLooksLive;
+    const selectedKey = paperKey && paperSecret
+      ? paperKey
+      : useLegacyPair
+        ? env.ALPACA_API_KEY || env.ALPACA_API_KEY_ID
+        : undefined;
+    const selectedSecret = paperKey && paperSecret
+      ? paperSecret
+      : useLegacyPair
+        ? env.ALPACA_SECRET_KEY || env.ALPACA_API_SECRET_KEY
+        : undefined;
+    const paperBase = env.ALPACA_PAPER_URL || (
+      env.ALPACA_BASE_URL?.toLowerCase().includes("paper-api")
+        ? env.ALPACA_BASE_URL
+        : undefined
+    );
+
+    return {
+      ...env,
+      ALPACA_TRADING_TYPE: "paper",
+      ALPACA_API_KEY: selectedKey,
+      ALPACA_SECRET_KEY: selectedSecret,
+      ALPACA_API_KEY_ID: undefined,
+      ALPACA_API_SECRET_KEY: undefined,
+      ALPACA_BASE_URL: normalizeAlpacaBaseUrl(paperBase),
+      // Remove the opposite-mode pair from this adapter instance so the
+      // market-data client cannot fall back to live credentials.
+      ALPACA_LIVE_API_KEY: undefined,
+      ALPACA_LIVE_SECRET_KEY: undefined,
+      ALPACA_LIVE_URL: undefined,
+    } as Env;
+  }
+
   const side = alpacaTradingSide(env, overrideEnv);
   const isLive = side === "live";
 
