@@ -133,7 +133,8 @@ export function isKnownIndexId(value: unknown): value is IndexId {
 /**
  * #3930 — resolve the stored index list a run pulls: the run
  * input when the job is parameterized (the gap-filling jobs —
- * fundamentals, technicals, and sentiment), else the definition's universe. A
+ * fundamentals, technicals, and sentiment — plus, since #5955,
+ * the four nasdaq100 quotes jobs), else the definition's universe. A
  * universe input on a non-parameterized job, and an input
  * naming no known index, both refuse by name (a caller or
  * configuration bug — never a silent default, never a list
@@ -194,9 +195,13 @@ export interface FeedJobDefinition {
    * #3930 — the job's universe is a RUN INPUT, not a fixed
    * property: the definition's universe is the DEFAULT input
    * (nasdaq100 for the gap-filling jobs); a run may name any stored
-   * index list instead. Only the gap-filling jobs set this
+   * index list instead. The gap-filling jobs set this
    * (fundamentals, #3930; technicals, #3931; sentiment, #3932) —
-   * quotes jobs stay one definition per universe.
+   * and #5955 extends the idiom to the four nasdaq100 quotes jobs
+   * (one job per provider, parameterized), so one job definition
+   * serves multi-universe commands. The per-universe quotes jobs
+   * (sp100, sp500, dow, sp400, sectors) stay fixed-universe
+   * definitions for their existing callers.
    */
   parameterizedUniverse?: boolean;
   /** Declared pull cadence — the scheduling slice's input. */
@@ -318,6 +323,16 @@ export const FEED_JOB_DEFAULTS = {
  * (S1: Yahoo; S2: E*TRADE + Alpaca; #3535: Public). The definition
  * is data; the run/read/status machinery is shared, never forked
  * per source.
+ * #5955 — parameterized on the #3930 idiom: the id names the
+ * DEFAULT universe (nasdaq100, kept for lineage), and a run's
+ * `universe` input names the stored index list it actually pulls
+ * (the per-shard universe of a multi-universe command). Only one
+ * source keeps per-universe quotes jobs (sp100, sp500, dow,
+ * sp400, sectors); the other three sources have no such jobs, so
+ * the parameterized nasdaq100 job is what serves their
+ * multi-universe runs. Backwards-compatible: no existing caller
+ * passes a universe input to a quotes job today (it threw), and
+ * an absent input still resolves to the job's default.
  */
 function nasdaq100QuotesJob(
   env: Record<string, string | undefined>,
@@ -330,6 +345,7 @@ function nasdaq100QuotesJob(
     dataset: "quotes",
     elements: ["quotes"],
     universe: { kind: "index", index: "nasdaq100", label: "Nasdaq-100" },
+    parameterizedUniverse: true,
     cadenceMinutes: resolveFeedJobCadenceMinutes(
       env,
       id,

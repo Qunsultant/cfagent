@@ -511,6 +511,32 @@ export function feedShardSymbols(
 }
 
 /**
+ * #5955 — this unit's shard-table row: the row in `ctx.params.shards`
+ * whose shardId is the unit's shard key, else undefined (monolith,
+ * or no row for the key). The one shard-table reader in this file:
+ * both `explicitSymbolsFor` (6b0) and `shardUniverseFor` (6b1)
+ * read through it, so the two can never disagree on which row is
+ * this unit's. Rows are the `WorkflowShard` shape (`{ shardId,
+ * universe?, symbols? }`) the screener builder puts on every
+ * node's params; a row without the field being read behaves as
+ * if the row carried none (the agent then resolves the other
+ * field instead).
+ */
+function shardRowFor(
+  ctx: JobStepContext,
+): { shardId?: unknown; universe?: unknown; symbols?: unknown } | undefined {
+  if (!ctx.shardKey || !Array.isArray(ctx.params.shards)) return undefined;
+  return ctx.params.shards.find(
+    (entry) =>
+      entry !== null &&
+      typeof entry === "object" &&
+      (entry as { shardId?: unknown }).shardId === ctx.shardKey,
+  ) as
+    | { shardId?: unknown; universe?: unknown; symbols?: unknown }
+    | undefined;
+}
+
+/**
  * #5954 — this unit's explicit symbols, read the bespoke way
  * (shardSymbolsFor in screenerPipelineJobs.ts): the shard
  * table's row for this unit's shard key, else the flat list
@@ -545,17 +571,27 @@ function explicitSymbolsFor(ctx: JobStepContext): string[] {
   };
   const flat = read(ctx.params.symbols);
   if (!ctx.shardKey) return flat;
-  if (Array.isArray(ctx.params.shards)) {
-    const row = ctx.params.shards.find(
-      (entry) =>
-        entry !== null &&
-        typeof entry === "object" &&
-        (entry as { shardId?: unknown }).shardId === ctx.shardKey,
-    ) as { symbols?: unknown } | undefined;
-    const rowSymbols = read(row?.symbols);
-    if (rowSymbols.length > 0) return rowSymbols;
-  }
+  const rowSymbols = read(shardRowFor(ctx)?.symbols);
+  if (rowSymbols.length > 0) return rowSymbols;
   return flat;
+}
+
+/**
+ * #5955 — this unit's shard universe, read the bespoke way
+ * (`screenRequestFromParams` in screenerPipelineJobs.ts reads
+ * the same row's `universe`): the shard table's row for this
+ * unit's shard key, lowercased like the node param below.
+ * Undefined ⇒ the unit names no universe of its own (monolith,
+ * or a partition shard whose row carries no universe) and the
+ * node's `universe` param decides, as before. A shard universe
+ * with no stored index list (ETF / LEV_ETF — no `IndexId`)
+ * refuses by name in `resolveRunUniverse` below, never a
+ * silent default (that coverage is 6b2's slice).
+ */
+function shardUniverseFor(ctx: JobStepContext): string | undefined {
+  const universe = shardRowFor(ctx)?.universe;
+  if (typeof universe !== "string" || universe.trim() === "") return undefined;
+  return universe.trim().toLowerCase();
 }
 
 /**
@@ -612,10 +648,18 @@ export function createFeedStepRegistry(deps: FeedStepDeps): JobStepRegistry {
     // the membership check only. A "symbols" universe with no
     // explicit symbols falls through here and refuses by name
     // below, never silently pulling the default list.
+    // #5955: the unit's shard universe wins over the node's
+    // `universe` param — one job definition serves
+    // multi-universe commands, and the run input the runner
+    // resolves is the shard's stored list (the quotes jobs are
+    // parameterized since #5955, so the input is accepted).
+    // Absent ⇒ the node param, as before.
+    const shardUniverse = shardUniverseFor(ctx);
     const universeParam =
-      typeof ctx.params.universe === "string" && ctx.params.universe.trim() !== ""
+      shardUniverse ??
+      (typeof ctx.params.universe === "string" && ctx.params.universe.trim() !== ""
         ? ctx.params.universe.trim().toLowerCase()
-        : undefined;
+        : undefined);
     const effectiveUniverse = symbolsMode
       ? undefined
       : resolveRunUniverse(def, universeParam);
@@ -658,8 +702,16 @@ export function createFeedStepRegistry(deps: FeedStepDeps): JobStepRegistry {
     // the whole-universe pull can never disagree on membership).
     // #5954: skipped in symbols mode — the explicit list is the
     // fetch set, not a partition of a stored list.
+    // #5955: skipped for a universe shard — the shard IS the
+    // universe, so the unit pulls its WHOLE universe (the
+    // bespoke feed resolves the shard's universe to its full
+    // list, no partitioning). Partitioning a universe shard
+    // across all shard keys would silently drop most of the
+    // universe. The partition below applies only when the row
+    // carries no universe (the feed family's own s0/s1
+    // sharding, splitting ONE universe across units).
     let symbols: string[] | undefined;
-    if (!symbolsMode && ctx.shardKey) {
+    if (!symbolsMode && shardUniverse === undefined && ctx.shardKey) {
       const shards =
         (await deps.shardsFor?.(def.id)) ??
         (Array.isArray(ctx.params.shards) ? (ctx.params.shards as string[]) : []);
