@@ -20,6 +20,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Badge, Button, Card, CardHeader, Flex, Notice, Stack, Table, type TableColumn } from "./components/ui";
 import { navigateToTab } from "./router";
+import { downloadTextFile } from "./runExport";
 import type { BadgeTone } from "./components/ui/Badge";
 import {
   fetchDataProviders,
@@ -146,15 +147,12 @@ export function FeedsPanel() {
   }, []);
 
   const downloadOutput = (view: FeedArtifactPreviewView) => {
-    const blob = new Blob([JSON.stringify(view.preview.sample, null, 2)], {
-      type: "application/json",
-    });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `${view.jobId}-${view.preview.dataset}-preview.json`;
-    link.click();
-    URL.revokeObjectURL(url);
+    // The one exporter (#1065): no second blob-URL implementation in the client.
+    downloadTextFile(
+      `${view.jobId}-${view.preview.dataset}-preview.json`,
+      JSON.stringify(view.preview.sample, null, 2),
+      "application/json",
+    );
   };
 
   const columns = useMemo<TableColumn<FeedJobView>[]>(() => {
