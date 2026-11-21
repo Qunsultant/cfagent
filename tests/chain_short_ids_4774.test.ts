@@ -317,15 +317,19 @@ describe("chain short ids (#4774)", () => {
     // Engine runs mint `run:<time>-<counter>` through the one leaf
     // minter (#5175 slice 3 — the inline closure moved into
     // `executionTreeIds.newRunId`, same format, module counter);
-    // research runs still mint `rsr_<time>_<rand>` (legacy, pending
-    // #5175 migration); async jobs mint a UUID; ledger rows carry
-    // their `id` PK. No instance level is id-less.
+    // research runs ADOPT the id the engine minted and mint only for a
+    // direct call with none — through that same leaf authority, never a
+    // private `rsr_` template (#5911 retired the last one); async jobs
+    // mint a UUID; ledger rows carry their `id` PK. No instance level is
+    // id-less.
     const engine = src("services/jobPipelineEngine.ts");
     expect(engine).toContain('import { newRunId, stepExecutionId } from "./executionTreeIds"');
     expect(engine).toContain("deps.newRunId ?? newRunId");
     expect(engine).not.toContain("`run:${this.now().getTime().toString(36)}-${(++counter).toString(36)}`");
     const research = src("services/researchPipeline.ts");
-    expect(research).toContain("`rsr_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`");
+    expect(research).not.toContain("`rsr_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`");
+    expect(research).toContain("import { newRunId as mintRunId, oodaStepShortId } from \"./executionTreeIds\"");
+    expect(research).toContain("const runId = opts.runId ?? newRunId()");
     const asyncJobs = src("agents/orchestrator/asyncJobs.ts");
     expect(asyncJobs).toContain("crypto.randomUUID()");
     const orm = src("data/doSqliteOrmAdapters.ts");

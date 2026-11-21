@@ -410,13 +410,16 @@ describe("5175 slice 4 — no minting elsewhere", () => {
     ).toBe(7);
   });
 
-  it("P13 rsr_ research ids are exactly 1", () => {
-    // EXCLUDED (CFO lane, #5118) — the only `rsr_` mint outside the leaf:
-    // - src/services/researchPipeline.ts:701
+  it("P13 rsr_ research ids are exactly 0 (retired by #5911)", () => {
+    // #5911 removed the last `rsr_` mint outside the leaf: the research
+    // pipeline adopts the run id the engine minted and, only when a direct
+    // call names none, mints through executionTreeIds.newRunId (#5175) —
+    // the CFO-lane exception this pin used to allow is gone with it. A new
+    // `rsr_` template would be a new private research run-id mint.
     expect(
       countAll(/`rsr_/g),
       "rsr_ templates: a new one is a new research run-id mint outside the leaf",
-    ).toBe(1);
+    ).toBe(0);
   });
 
   it("P14 iv_collection: / pipeline-generate: deferred sites are exactly 3", () => {
