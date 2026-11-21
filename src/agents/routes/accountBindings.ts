@@ -10,11 +10,18 @@ import { ACCOUNT_BINDING_SCOPES } from "../../config/accountBindings";
 import {
   getBrokerAssetAccountRegistry,
   listAccountBindings,
+  migrateTenantAccountBinding,
   removeAccountBinding,
   updateBrokerAssetAccountRegistry,
   upsertAccountBinding,
+  validateAndUpsertAccountBinding,
 } from "../../services/accountBindings";
-import { isAccountBindingBroker, type BrokerAssetAccountRegistryPatch } from "../../trading";
+import {
+  isAccountBindingBroker,
+  validateAccountAgainstBroker,
+  type BrokerAccountRecordLike,
+  type BrokerAssetAccountRegistryPatch,
+} from "../../trading";
 
 export async function handleAccountBindingRoutes(
   request: Request,
@@ -76,6 +83,96 @@ export async function handleAccountBindingRoutes(
       }
       return Response.json({ ok: true, registry: regRes.registry });
     }
+    if (body.action === "validate") {
+      const registry = await getBrokerAssetAccountRegistry(ctx.env, sessionId);
+      const valRes = validateAccountAgainstBroker({
+        broker: body.broker,
+        mode: body.mode,
+        accountType: body.accountType,
+        scope: body.scope,
+        accountId: body.accountId,
+        accountName: body.accountName,
+        availableAccounts: (Array.isArray(body.availableAccounts) ? body.availableAccounts : []) as BrokerAccountRecordLike[],
+        registry,
+        updatedBy: sessionId,
+      });
+      if (!valRes.ok) {
+        const status =
+          valRes.code === "FAILURE_ACCOUNT_UNKNOWN"
+            ? 404
+            : valRes.code === "FAILURE_ACCOUNT_UNOWNED"
+              ? 403
+              : valRes.code === "FAILURE_ACCOUNT_BROKER_MISMATCH"
+                ? 409
+                : 400;
+        return Response.json({ ok: false, code: valRes.code, error: valRes.error }, { status });
+      }
+      return Response.json({
+        ok: true,
+        tuple: valRes.tuple,
+        binding: valRes.binding,
+        account: valRes.account,
+      });
+    }
+
+    if (body.action === "migrate") {
+      const migRes = await migrateTenantAccountBinding(ctx.env, sessionId, {
+        broker: body.broker,
+        mode: body.mode,
+        targetAccountType: body.accountType ?? body.targetAccountType,
+        scope: body.scope,
+        availableAccounts: (Array.isArray(body.availableAccounts) ? body.availableAccounts : []) as BrokerAccountRecordLike[],
+      });
+      if (!migRes.ok) {
+        const status =
+          migRes.code === "FAILURE_ACCOUNT_UNKNOWN"
+            ? 404
+            : migRes.code === "FAILURE_ACCOUNT_MIGRATION_AMBIGUOUS"
+              ? 409
+              : 400;
+        return Response.json(
+          {
+            ok: false,
+            code: migRes.code,
+            error: migRes.error,
+            ...(migRes.candidateAccountIds ? { candidateAccountIds: migRes.candidateAccountIds } : {}),
+          },
+          { status },
+        );
+      }
+      return Response.json({
+        ok: true,
+        migrated: true,
+        tuple: migRes.tuple,
+        binding: migRes.binding,
+        account: migRes.account,
+      });
+    }
+
+    if (Array.isArray(body.availableAccounts)) {
+      const res = await validateAndUpsertAccountBinding(ctx.env, sessionId, {
+        broker: body.broker,
+        mode: body.mode,
+        accountType: body.accountType,
+        scope: body.scope,
+        accountId: body.accountId,
+        accountName: body.accountName,
+        availableAccounts: body.availableAccounts as BrokerAccountRecordLike[],
+      });
+      if (!res.ok) {
+        const status =
+          res.code === "FAILURE_ACCOUNT_UNKNOWN"
+            ? 404
+            : res.code === "FAILURE_ACCOUNT_UNOWNED"
+              ? 403
+              : res.code === "FAILURE_ACCOUNT_BROKER_MISMATCH"
+                ? 409
+                : 400;
+        return Response.json({ ok: false, code: res.code, error: res.error }, { status });
+      }
+      return Response.json({ ok: true, binding: res.binding, tuple: res.tuple });
+    }
+
     const res = await upsertAccountBinding(ctx.env, sessionId, {
       broker: body.broker,
       mode: body.mode,

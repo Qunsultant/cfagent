@@ -7,16 +7,22 @@ import { ACCOUNT_BINDING_SCOPES, ACCOUNT_TYPES } from "../../config/accountBindi
 import {
   getBrokerAssetAccountRegistry,
   listAccountBindings,
+  migrateTenantAccountBinding,
   removeAccountBinding,
   resolveUserAccountBinding,
   updateBrokerAssetAccountRegistry,
   upsertAccountBinding,
 } from "../../services/accountBindings";
+import {
+  isAccountBindingBroker,
+  validateAccountAgainstBroker,
+  type BrokerAccountRecordLike,
+} from "../../trading";
 import type { IMcpToolCommand, McpToolContext } from "../../patterns/interfaces";
 
 const BrokerAccountBindingInputSchema = z.object({
   action: z
-    .enum(["list", "get", "set", "clear", "registry_get", "registry_update"])
+    .enum(["list", "get", "set", "clear", "validate", "migrate", "registry_get", "registry_update"])
     .default("list"),
   broker: z.string().optional(),
   mode: z.enum(["paper", "live"]).optional(),
@@ -24,6 +30,7 @@ const BrokerAccountBindingInputSchema = z.object({
   scope: z.enum(ACCOUNT_BINDING_SCOPES).optional(),
   accountId: z.string().optional(),
   accountName: z.string().optional(),
+  availableAccounts: z.array(z.record(z.string(), z.unknown())).optional(),
   registryPatch: z
     .object({
       upsertBroker: z
@@ -132,6 +139,58 @@ export class BrokerAccountBindingCommand implements IMcpToolCommand {
         found: res.found,
         binding: res.binding,
         resolvedFromScope: res.resolvedFromScope,
+      };
+    }
+
+    if (parsed.action === "validate") {
+      const registry = await getBrokerAssetAccountRegistry(context.env, userLogin);
+      const valRes = validateAccountAgainstBroker({
+        broker: parsed.broker,
+        mode: parsed.mode,
+        accountType: parsed.accountType,
+        scope: parsed.scope,
+        accountId: parsed.accountId,
+        accountName: parsed.accountName,
+        availableAccounts: (parsed.availableAccounts ?? []) as unknown as BrokerAccountRecordLike[],
+        registry,
+        updatedBy: userLogin,
+      });
+      if (!valRes.ok) {
+        return { ok: false, action: "validate", code: valRes.code, error: valRes.error };
+      }
+      return {
+        ok: true,
+        action: "validate",
+        tuple: valRes.tuple,
+        binding: valRes.binding,
+        account: valRes.account,
+      };
+    }
+
+    if (parsed.action === "migrate") {
+      const migRes = await migrateTenantAccountBinding(context.env, userLogin, {
+        broker: parsed.broker,
+        mode: parsed.mode,
+        targetAccountType: parsed.accountType,
+        scope: parsed.scope,
+        availableAccounts: (parsed.availableAccounts ?? []) as unknown as BrokerAccountRecordLike[],
+      });
+      if (!migRes.ok) {
+        return {
+          ok: false,
+          action: "migrate",
+          code: migRes.code,
+          error: migRes.error,
+          ...(migRes.candidateAccountIds ? { candidateAccountIds: migRes.candidateAccountIds } : {}),
+        };
+      }
+      return {
+        ok: true,
+        action: "migrate",
+        migrated: true,
+        tuple: migRes.tuple,
+        binding: migRes.binding,
+        account: migRes.account,
       };
     }
 

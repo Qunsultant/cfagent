@@ -9,24 +9,35 @@
 import type { Env } from "../types";
 import { ACCOUNT_BINDING_CONFIG } from "../config/accountBindings";
 import { createStoreKv, type DoNamespaceLike } from "../data/durableKv";
+import { codedMessage } from "../outcomes/outcomeAspects";
 import {
   accountBindingSlotId,
   applyBrokerRegistryPatch,
   buildDefaultBrokerAssetAccountRegistry,
   isAccountBindingBroker,
+  isAccountBindingTuple,
+  migrateLegacyBrokerSelectionToTuple,
   normalizeAccountBindingScope,
   normalizeAccountType,
   resolveEffectiveAccountBinding,
+  toAccountBindingTuple,
+  validateAccountAgainstBroker,
   validateAccountBindingInput,
   type AccountBinding,
   type AccountBindingBroker,
   type AccountBindingKey,
   type AccountBindingResolution,
   type AccountBindingScope,
+  type AccountBindingTuple,
   type AccountType,
+  type BrokerAccountRecordLike,
   type BrokerAssetAccountRegistry,
   type BrokerAssetAccountRegistryPatch,
+  type MigrateLegacyBrokerSelectionInput,
+  type MigrateLegacyBrokerSelectionResult,
   type TradingType,
+  type ValidateAccountAgainstBrokerInput,
+  type ValidateAccountAgainstBrokerResult,
 } from "../trading";
 
 function getBindingKv(env: Env) {
@@ -151,6 +162,197 @@ export async function upsertAccountBinding(
   return { ok: true, binding: validated.binding };
 }
 
+/**
+ * Validates a proposed binding against actual accounts (if provided) and persists
+ * the `{ broker, mode, accountType, accountId }` tuple in SessionStore.
+ */
+export async function validateAndUpsertAccountBinding(
+  env: Env,
+  userLogin: string,
+  input: {
+    broker: unknown;
+    mode: unknown;
+    accountType?: unknown;
+    scope?: unknown;
+    accountId: unknown;
+    accountName?: unknown;
+    availableAccounts?: readonly BrokerAccountRecordLike[];
+  },
+): Promise<
+  | { readonly ok: true; readonly binding: AccountBinding; readonly tuple: AccountBindingTuple }
+  | { readonly ok: false; readonly code: string; readonly error: string }
+> {
+  const registry = await getBrokerAssetAccountRegistry(env, userLogin);
+  if (Array.isArray(input.availableAccounts)) {
+    const valRes = validateAccountAgainstBroker({
+      broker: input.broker,
+      mode: input.mode,
+      accountType: input.accountType,
+      scope: input.scope,
+      accountId: input.accountId,
+      accountName: input.accountName,
+      availableAccounts: input.availableAccounts,
+      registry,
+      updatedBy: userLogin,
+    });
+    if (!valRes.ok) return valRes;
+
+    const kv = getBindingKv(env);
+    if (!kv) {
+      return {
+        ok: false,
+        code: "FAILURE_SESSION_STORE_UNBOUND",
+        error: "SessionStore Durable Object is not bound; cannot persist account binding.",
+      };
+    }
+    const existing = await listAccountBindings(env, userLogin);
+    const slotId = accountBindingSlotId(valRes.binding);
+    const next = existing.filter((b) => accountBindingSlotId(b) !== slotId);
+    next.push(valRes.binding);
+    await kv.put(userBindingsKey(userLogin), JSON.stringify(next));
+    return { ok: true, binding: valRes.binding, tuple: valRes.tuple };
+  }
+
+  const upsertRes = await upsertAccountBinding(env, userLogin, input);
+  if (!upsertRes.ok) {
+    return {
+      ok: false,
+      code: ACCOUNT_BINDING_CONFIG.failureCodes.bindingMissing,
+      error: upsertRes.error,
+    };
+  }
+  return {
+    ok: true,
+    binding: upsertRes.binding,
+    tuple: toAccountBindingTuple(upsertRes.binding),
+  };
+}
+
+/**
+ * Migrates a legacy broker/mode-only selection to an explicit tuple in SessionStore
+ * following the unambiguous default rule (issue #5094 F1 / #5098).
+ */
+export async function migrateTenantAccountBinding(
+  env: Env,
+  userLogin: string,
+  input: {
+    broker: unknown;
+    mode: unknown;
+    targetAccountType?: unknown;
+    scope?: unknown;
+    availableAccounts: readonly BrokerAccountRecordLike[];
+  },
+): Promise<MigrateLegacyBrokerSelectionResult> {
+  const registry = await getBrokerAssetAccountRegistry(env, userLogin);
+  const migRes = migrateLegacyBrokerSelectionToTuple({
+    broker: input.broker,
+    mode: input.mode,
+    targetAccountType: input.targetAccountType,
+    scope: input.scope,
+    availableAccounts: input.availableAccounts,
+    registry,
+    updatedBy: userLogin,
+  });
+  if (!migRes.ok) return migRes;
+
+  const kv = getBindingKv(env);
+  if (!kv) {
+    return {
+      ok: false,
+      code: "FAILURE_SESSION_STORE_UNBOUND",
+      error: "SessionStore Durable Object is not bound; cannot persist account binding.",
+    };
+  }
+
+  const existing = await listAccountBindings(env, userLogin);
+  const slotId = accountBindingSlotId(migRes.binding);
+  const next = existing.filter((b) => accountBindingSlotId(b) !== slotId);
+  next.push(migRes.binding);
+  await kv.put(userBindingsKey(userLogin), JSON.stringify(next));
+
+  return migRes;
+}
+
+/**
+ * Resolves the tenant-level default account tuple { broker, mode, accountType, accountId }.
+ */
+export async function getTenantAccountBinding(
+  env: Env,
+  userLogin: string,
+  query: {
+    broker: AccountBindingBroker;
+    mode: TradingType;
+    accountType?: AccountType;
+  },
+): Promise<AccountBindingTuple | null> {
+  const accountType = query.accountType ?? ACCOUNT_BINDING_CONFIG.defaultAccountType;
+  const res = await resolveUserAccountBinding(env, userLogin, {
+    broker: query.broker,
+    mode: query.mode,
+    accountType,
+    scope: "tenant",
+  });
+  return res.found && res.binding ? toAccountBindingTuple(res.binding) : null;
+}
+
+/**
+ * Resolves the effective account binding tuple across tenant and per-surface scopes.
+ * Fails loud with `FAILURE_ACCOUNT_BINDING_MISSING` if unbound.
+ */
+export async function resolveExecutionAccountTuple(
+  env: Env,
+  userLogin: string,
+  query: {
+    broker: AccountBindingBroker;
+    mode: TradingType;
+    accountType?: AccountType;
+    scope?: AccountBindingScope;
+  },
+): Promise<
+  | {
+      readonly found: true;
+      readonly tuple: AccountBindingTuple;
+      readonly binding: AccountBinding;
+      readonly resolvedFromScope: AccountBindingScope;
+    }
+  | {
+      readonly found: false;
+      readonly tuple: null;
+      readonly code: string;
+      readonly error: string;
+    }
+> {
+  const accountType = query.accountType ?? ACCOUNT_BINDING_CONFIG.defaultAccountType;
+  const scope = normalizeAccountBindingScope(query.scope, "tenant");
+
+  const res = await resolveUserAccountBinding(env, userLogin, {
+    broker: query.broker,
+    mode: query.mode,
+    accountType,
+    scope,
+  });
+
+  if (res.found && res.binding) {
+    return {
+      found: true,
+      tuple: toAccountBindingTuple(res.binding),
+      binding: res.binding,
+      resolvedFromScope: res.resolvedFromScope ?? res.binding.scope,
+    };
+  }
+
+  const code = ACCOUNT_BINDING_CONFIG.failureCodes.bindingMissing;
+  return {
+    found: false,
+    tuple: null,
+    code,
+    error: codedMessage(
+      code,
+      `No binding found for ${query.broker}:${query.mode}:${accountType}:${scope}. Silent fallback is disallowed.`,
+    ),
+  };
+}
+
 export async function removeAccountBinding(
   env: Env,
   userLogin: string,
@@ -181,6 +383,7 @@ export interface ExecutionAccountContext {
   readonly scope: AccountBindingScope;
   readonly resolvedFromScope: AccountBindingScope | null;
   readonly source: "explicit" | "binding" | "unset";
+  readonly tuple?: AccountBindingTuple;
 }
 
 export async function resolveExecutionAccountContext(
@@ -215,6 +418,12 @@ export async function resolveExecutionAccountContext(
       scope,
       resolvedFromScope: null,
       source: "explicit",
+      tuple: {
+        broker: normBroker,
+        mode: input.mode,
+        accountType,
+        accountId: explicit,
+      },
     };
   }
 
@@ -234,6 +443,7 @@ export async function resolveExecutionAccountContext(
       scope,
       resolvedFromScope: resolved.resolvedFromScope,
       source: "binding",
+      tuple: toAccountBindingTuple(resolved.binding),
     };
   }
 
