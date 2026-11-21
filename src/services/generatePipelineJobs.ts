@@ -367,6 +367,13 @@ export function registerGenerateStep(
         inputRunId: result.inputRunId,
         reportsGenerated: result.reportsGenerated,
         canonical: result.canonical,
+        // Issue #5885 (6c): the deliver node reads these —
+        // the payload rides as `payload`, the canonical row id
+        // as `reportId`. Both are omitted when absent (an
+        // analysis run carries neither), so downstream readers
+        // can tell "no payload" from "empty payload".
+        ...(result.reportId ? { reportId: result.reportId } : {}),
+        ...(result.deliveryPayload ? { payload: result.deliveryPayload } : {}),
       },
       descriptor: `generate ${def.sourceId}/${def.dataset}: ${result.received}/${result.requested} report formats persisted (artifact ${result.artifactId}, input run ${result.inputRunId})`,
     };

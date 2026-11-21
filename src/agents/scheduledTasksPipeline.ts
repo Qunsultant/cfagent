@@ -118,7 +118,10 @@ import {
   ENRICH_PIPELINE_CATALOG,
   type EnrichStepDeps,
 } from "../services/enrichPipelineJobs";
-import { screenerStepDepsForScheduledAgent } from "../services/screenerPipelineJobs";
+import {
+  buildDeliverDoor,
+  screenerStepDepsForScheduledAgent,
+} from "../services/screenerPipelineJobs";
 import type { OptionsWorkflowStepDeps } from "../services/optionsPipelineJobs";
 import { optionsChainStepDepsForScheduledAgent } from "../services/optionsChainPipelineJobs";
 import { createDefaultResearchStepDeps } from "../services/researchPipelineJobs";
@@ -431,6 +434,12 @@ export function deliverStepDepsForScheduledAgent(
           .shards ?? []
       );
     },
+    // Issue #5885 (6c): the flipped deliver node runs generic
+    // deliver.apply, so the host wires the real sink — the
+    // deliver door — instead of leaving the screener sink
+    // unwired (an unwired sink refuses by name and fails the
+    // run). Same door the screener steps already ride.
+    screenerDeliverOutcome: buildDeliverDoor(ctx.env),
   };
 }
 

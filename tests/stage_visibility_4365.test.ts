@@ -159,15 +159,16 @@ describe("4365-P05 stage parameters merge over the run's", () => {
     expect(spec.stages[1].params).toEqual({ channel: "email" });
     // Since the 6b3 flip #5884 the screener's stages DO carry
     // params: analyze carries ruleSets + inputMode, generate
-    // carries reports; feed/enrich/deliver carry none. The
+    // carries reports; feed/enrich carry none. Since the 6c
+    // flip #5885 deliver carries the screener marker. The
     // run's params still ride as-is underneath.
     const byKind = new Map(
       jobDefinitionSpec("screener").stages.map((s) => [s.kind, s.params]),
     );
     expect(byKind.get("analyze")).toEqual({ ruleSets: ["screen", "factors"], inputMode: "handOff" });
     expect(byKind.get("generate")).toEqual({ reports: ["screener-report"] });
+    expect(byKind.get("deliver")).toEqual({ screener: true });
     expect(byKind.get("feed")).toBeUndefined();
     expect(byKind.get("enrich")).toBeUndefined();
-    expect(byKind.get("deliver")).toBeUndefined();
   });
 });
