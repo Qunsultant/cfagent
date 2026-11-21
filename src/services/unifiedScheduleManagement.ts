@@ -39,6 +39,14 @@ import type {
   UnifiedScheduleState,
 } from "../data/unifiedSchedulePorts";
 import { carryScheduleProvenance, provenanceFromPayload, stampScheduleProvenance, systemProvenance } from "./consolidatedScheduling";
+import type { ScheduleProvenance } from "../schedule";
+import { isBuiltinScheduledGoalId } from "../config/builtinScheduledGoals";
+import {
+  jobCatalogueEntryForCallback,
+  jobCatalogueEntryForId,
+  jobCatalogueEntryForOperation,
+} from "../config/jobCatalogue";
+import type { ScheduleSource } from "../config/scheduleSourceModes";
 import {
   WORKER_CRON_TRIGGERS_INVENTORY,
 } from "./scheduleSystems";
@@ -133,6 +141,220 @@ export function declaredTaskIdOf(
   if (!payload || typeof payload !== "object") return null;
   const taskId = (payload as { taskId?: unknown }).taskId;
   return typeof taskId === "string" && taskId.trim() ? taskId : null;
+}
+
+/* =================================================================
+ * Issue #5889 — schedule provenance: one source per row.
+ *
+ * The Schedules home merges at least seven sources into one table
+ * with no source identity. The derivation below is the one reader
+ * that attributes a row: it runs over the list shape
+ * (`unifiedRecordToListItem`, the route-appended derived rows, and
+ * the no-record alarm branch), so the row, its Source column, its
+ * filter value and its detail dialog can never disagree. Pure and
+ * total: every input yields exactly one source — a row whose
+ * creation was never recorded reads "unknown" / "not recorded",
+ * never a fabricated source.
+ *
+ * Rule order is load-bearing (first match wins): a ticker-push row
+ * IS a derived-record catalogue entry, so the kind check precedes
+ * the catalogue check; a sweep interval alarm runs under the same
+ * callback as the derived sweep record, so the derived-record check
+ * (stable id, provenance reason) precedes the callback check. The
+ * #5880 job catalogue is the home of job identity: a derived
+ * record resolves by its catalogue id, a callback/operation row by
+ * its catalogue entry — no second id scheme is invented here.
+ * ================================================================= */
+
+/** The three sweep/watchdog `scheduleEvery` guard callbacks (`src/agents/orchestrator.ts`). */
+const SWEEP_ALARM_CALLBACKS: readonly string[] = [
+  "sweepStaleLedgerTasks",
+  "sweepStaleAsyncJobs",
+  "watchdogMissedSchedules",
+];
+
+/** The shapes a schedule, alarm, record or goal definition arrives in. */
+export interface ScheduleSourceInput {
+  id: string;
+  kind?: string;
+  callback?: string;
+  operation?: string;
+  payload?: unknown;
+  provenance?: unknown;
+  jobId?: string;
+  definition?: Record<string, unknown> | unknown;
+}
+
+/** The validated provenance a payload or a record carries, if any. */
+function scheduleSourceProvenance(input: ScheduleSourceInput): ScheduleProvenance | undefined {
+  const definition =
+    input.definition && typeof input.definition === "object"
+      ? (input.definition as Record<string, unknown>)
+      : undefined;
+  const payload = input.payload ?? definition?.payload;
+  return (
+    provenanceFromPayload(payload) ?? provenanceFromPayload({ provenance: input.provenance })
+  );
+}
+
+function scheduleSourceJobId(input: ScheduleSourceInput, payload: unknown): string | undefined {
+  if (typeof input.jobId === "string" && input.jobId) return input.jobId;
+  const definition =
+    input.definition && typeof input.definition === "object"
+      ? (input.definition as Record<string, unknown>)
+      : undefined;
+  if (typeof definition?.jobId === "string" && definition.jobId) {
+    return definition.jobId as string;
+  }
+  if (payload && typeof payload === "object") {
+    const jobId = (payload as Record<string, unknown>).jobId;
+    if (typeof jobId === "string" && jobId) return jobId;
+  }
+  return undefined;
+}
+
+/** The catalogue job an input names (callback, operation, then id), or null. */
+function catalogueJobOf(
+  callback: string,
+  operation: string | undefined,
+  id: string,
+): string | null {
+  if (callback) {
+    const byCallback = jobCatalogueEntryForCallback(callback);
+    if (byCallback) return byCallback.id;
+  }
+  if (operation) {
+    const byOperation = jobCatalogueEntryForOperation(operation);
+    if (byOperation) return byOperation.id;
+  }
+  const byId = jobCatalogueEntryForId(id);
+  if (byId) return byId.id;
+  return null;
+}
+
+/** The arming origin a provenance value states, in plain words. */
+function provenanceOrigin(provenance: ScheduleProvenance | undefined): string {
+  if (!provenance) return "not recorded";
+  if (provenance.origin === "user") {
+    return provenance.createdBy ? `user ${provenance.createdBy}` : "user";
+  }
+  if (provenance.origin === "agent") {
+    return `agent ${provenance.agentId ?? "unknown"}`;
+  }
+  return provenance.reason ? `system · ${provenance.reason}` : "system";
+}
+
+/**
+ * The one source for a schedule row: kind + job identity + arming
+ * origin (+ owning agent / workflow when the row names one).
+ * Deterministic; the rule order above is part of the contract.
+ */
+export function resolveScheduleSource(input: ScheduleSourceInput): ScheduleSource {
+  const definition =
+    input.definition && typeof input.definition === "object"
+      ? (input.definition as Record<string, unknown>)
+      : undefined;
+  const callback =
+    typeof input.callback === "string"
+      ? input.callback
+      : typeof definition?.callback === "string"
+        ? (definition.callback as string)
+        : "";
+  const operation =
+    typeof input.operation === "string"
+      ? input.operation
+      : typeof definition?.operation === "string"
+        ? (definition.operation as string)
+        : undefined;
+  const payload = input.payload ?? definition?.payload;
+  const provenance = scheduleSourceProvenance(input);
+  const jobId = scheduleSourceJobId(input, payload);
+  const catalogueJob = catalogueJobOf(callback, operation, input.id);
+
+  // The live feed's own row: the TickerAgent's push, not a due-check record.
+  if (input.kind === "ticker-push") {
+    return { kind: "ticker-push", job: input.id, origin: "TickerAgent feed", agent: "TickerAgent" };
+  }
+  // A derived record, by its stable catalogue id — or, for the IV
+  // collection (whose record id is its alarm id), by the provenance
+  // reason the builder stamps on the record and the payload.
+  const derivedById = jobCatalogueEntryForId(input.id);
+  if (derivedById?.source === "derived-record") {
+    return { kind: "derived", job: input.id, origin: "system due-check" };
+  }
+  if (typeof provenance?.reason === "string" && provenance.reason) {
+    const derivedByReason = jobCatalogueEntryForId(provenance.reason);
+    if (derivedByReason?.source === "derived-record") {
+      return { kind: "derived", job: provenance.reason, origin: "system due-check" };
+    }
+  }
+  // A seeded built-in goal: tick-polled by the ScheduledAgent.
+  if (input.kind === "goal" && isBuiltinScheduledGoalId(input.id)) {
+    return { kind: "seeded", job: input.id, origin: "ScheduledAgent tick", agent: "ScheduledAgent" };
+  }
+  // A Think declared task: the payload's task id is the job identity.
+  const declared = declaredTaskIdOf({ callback, payload });
+  if (declared) {
+    return {
+      kind: "declared-task",
+      job: declared,
+      origin: "OrchestratorAgent declaration",
+      agent: "OrchestratorAgent",
+    };
+  }
+  // A workflow-stage schedule: the job id is the workflow it belongs to.
+  if (input.kind === "workflow-stage" || callback === "runWorkflowStage") {
+    return {
+      kind: "workflow",
+      job: jobId ?? input.id,
+      origin: provenanceOrigin(provenance),
+      ...(jobId ? { workflow: jobId } : {}),
+    };
+  }
+  // A pipeline job schedule: the jobdef id is the job identity.
+  if (callback === "runPipelineJobSchedule" || (jobId !== undefined && jobId.startsWith("jobdef:"))) {
+    return { kind: "pipeline-job", job: jobId ?? input.id, origin: provenanceOrigin(provenance) };
+  }
+  // A sweep/watchdog interval alarm: the same job as the derived
+  // row, a different row — the callback names the duty, never the
+  // derived record's id.
+  if ((SWEEP_ALARM_CALLBACKS as readonly string[]).includes(callback)) {
+    return {
+      kind: "sweep-alarm",
+      job: callback,
+      origin: "OrchestratorAgent interval guard",
+      agent: "OrchestratorAgent",
+    };
+  }
+  // A worker duty: deployment config, state disabled while Worker crons are OFF (#4112).
+  if (input.kind === "worker-duty") {
+    return { kind: "worker-duty", job: input.id, origin: "Worker cron (disabled)" };
+  }
+  // Provenance, where the record carries it: user, agent, system.
+  if (provenance?.origin === "user") {
+    return {
+      kind: "user-created",
+      job: catalogueJob ?? callback ?? input.id,
+      origin: provenance.createdBy ? `user ${provenance.createdBy}` : "user",
+    };
+  }
+  if (provenance?.origin === "agent") {
+    return {
+      kind: "agent-created",
+      job: catalogueJob ?? callback ?? input.id,
+      origin: `agent ${provenance.agentId ?? "unknown"}`,
+      agent: provenance.agentId,
+    };
+  }
+  if (provenance?.origin === "system") {
+    return {
+      kind: "system",
+      job: catalogueJob ?? callback ?? input.id,
+      origin: provenance.reason ? `system · ${provenance.reason}` : "system",
+    };
+  }
+  // No provenance, no structural rule: not recorded, never invented.
+  return { kind: "unknown", job: catalogueJob ?? callback ?? input.id, origin: "not recorded" };
 }
 
 /**
@@ -1011,6 +1233,14 @@ export function unifiedRecordToListItem(record: UnifiedScheduleRecord, nextRun?:
   const def = record.definition as Partial<ScheduleDefinitionLike> & {
     type?: string;
   };
+  // Issue #5889 — the record's provenance rides the list item (the
+  // payload's stamp wins; a record-only stamp, like the derived
+  // builders', is the fallback), and the row's source is derived
+  // from it once, here, so the column, the filters and the detail
+  // dialog can never disagree.
+  const provenance =
+    provenanceFromPayload(def.payload) ??
+    provenanceFromPayload({ provenance: record.provenance });
   return {
     id: record.id,
     kind: record.kind,
@@ -1029,6 +1259,20 @@ export function unifiedRecordToListItem(record: UnifiedScheduleRecord, nextRun?:
     paused: record.state === "paused",
     ...(record.pausedAt ? { pausedAt: record.pausedAt } : {}),
     ...(nextRun !== undefined ? { nextRun } : {}),
+    ...(provenance !== undefined ? { provenance } : {}),
+    source: resolveScheduleSource({
+      id: record.id,
+      kind: record.kind,
+      callback: record.callback,
+      operation: record.operation,
+      payload: def.payload,
+      provenance: record.provenance,
+      jobId:
+        typeof (def as Record<string, unknown>).jobId === "string"
+          ? ((def as Record<string, unknown>).jobId as string)
+          : undefined,
+      definition: record.definition as Record<string, unknown>,
+    }),
     // Issue #3310 — a stage-schedule names its workflow + stage, so
     // the home renders the stage, not just the firing callback.
     ...(typeof (def as Record<string, unknown>).jobId === "string"
@@ -1181,6 +1425,10 @@ export async function listUnifiedScheduleItems(
         alarm.type === "delayed"
           ? alarm.type
           : undefined;
+      // Issue #5889 — a legacy alarm with no record carries its
+      // source too, derived from the alarm alone (its payload's
+      // stamp, if any); a row with no provenance reads Unknown.
+      const alarmProvenance = provenanceFromPayload(alarm.payload);
       items.push({
         id: alarm.id,
         kind: "screen",
@@ -1198,6 +1446,12 @@ export async function listUnifiedScheduleItems(
         ...(typeof def.time === "number" ? { time: def.time } : {}),
         paused: false,
         ...(alarm.nextRun !== undefined ? { nextRun: alarm.nextRun } : {}),
+        ...(alarmProvenance !== undefined ? { provenance: alarmProvenance } : {}),
+        source: resolveScheduleSource({
+          id: alarm.id,
+          callback: alarm.callback,
+          payload: alarm.payload,
+        }),
       });
     }
   }
