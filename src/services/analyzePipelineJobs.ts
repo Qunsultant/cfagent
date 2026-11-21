@@ -408,6 +408,28 @@ export function registerAnalyzeStep(
 }
 
 /**
+ * Issue #5884 (6b3) — this unit's hand-off: the hand-off
+ * itself, or its shard's entry of the per-shard map the
+ * engine hands a sharded unit (the bespoke screener step's
+ * priorFor idiom, src/services/screenerPipelineJobs.ts — the
+ * map read, not a rule, so it lives here rather than as a
+ * cross-module import; the deliver step's screenerPriorFor
+ * is the same idiom). Without the unwrap, a sharded run's
+ * analyze node receives the map and refuses it as malformed.
+ */
+function screenerHandOffFor(input: unknown, shardKey: string | null): unknown {
+  if (
+    shardKey &&
+    input !== null &&
+    typeof input === "object" &&
+    shardKey in (input as Record<string, unknown>)
+  ) {
+    return (input as Record<string, unknown>)[shardKey];
+  }
+  return input;
+}
+
+/**
  * Register the screener analyze application alongside
  * analyze.apply (#5824 3a — the analyze.ooda precedent): the
  * same analyze job, the same analyzed store, but the input
@@ -421,9 +443,8 @@ export function registerAnalyzeStep(
  * like analyze.apply. The hand-off is refused by name when
  * it is not the gather-output shape. The goal branch (3b)
  * and the portfolio modifier (3c) are NOT here — the step
- * runs the market analyze only, and the spec still points
- * the screener's analyze node at screener.analysis until
- * slice 6.
+ * runs the market analyze only. Since slice 6b3 (#5884) the
+ * screener spec points its analyze node at this step.
  */
 export function registerScreenerAnalyzeStep(
   registry: JobStepRegistry,
@@ -453,7 +474,7 @@ export function registerScreenerAnalyzeStep(
     // code without importing the error class.
     let handOff;
     try {
-      handOff = resolveScreenerHandOff(ctx.input);
+      handOff = resolveScreenerHandOff(screenerHandOffFor(ctx.input, ctx.shardKey));
     } catch (e) {
       if (e instanceof AnalyzeJobError) {
         throw new Error(`${e.code}: ${e.message}`);

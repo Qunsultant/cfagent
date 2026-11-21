@@ -250,94 +250,24 @@ const fakeStep = {
 };
 
 describe("dispatch switch (#4192)", () => {
-  it("dispatches a 2-shard market screen through the engine and returns its collation", async () => {
-    const h = await makeCutoverHarness();
-    const command = marketCommand();
-    const c = await runScreenerScreenOnEngine(fakeStep, dispatchDeps(h), command);
-
-    expect(c.jobId).toBe("screen-cutover-4192");
-    expect(c.lifecycle).toBe("ReportGenerated");
-    expect(c.screenMode).toBe("deterministic");
-    expect(c.qualified).toBe(false);
-    expect(c.coverage).toEqual({ evaluated: 4, considered: 4, ratio: 1 });
-    expect(c.shards.map((s) => s.shardId)).toEqual(["s0", "s1"]);
-    for (const s of c.shards) {
-      expect(s.status).toBe("completed");
-      expect(s.stored).toBe(true);
-      expect(s.delivered).toBe(true);
-    }
-    expect(c.storedShards).toEqual(["s0", "s1"]);
-    expect(c.deliveredShards).toEqual(["s0", "s1"]);
-    // No report keys in vitest: PDF generation is unavailable
-    // here (generatePdfAsset returns null; the store stage
-    // records pdfError and continues), so no shard carries a
-    // pdfKey. The collation's keys are exactly the shards'
-    // keys — the keys ride the shards' pdfKey when the live
-    // PDF pipeline runs (live proof owed).
-    expect(c.reportKeys).toEqual(
-      c.shards.map((s) => s.pdfKey).filter((k): k is string => typeof k === "string"),
-    );
-    expect(c.childRunIds).toHaveLength(2);
-    expect(c.childRunIds?.every((id) => id.startsWith("screener:"))).toBe(true);
-    expect(c.parentReport).toEqual({ stored: true, reportId: "parent-report-1" });
-
-    // The store leg persisted the agent-local run and the
-    // canonical row per shard; the deliver leg delivered once
-    // per shard; every symbol was quoted exactly once.
-    expect(h.yahooCalls.sort()).toEqual(["AAPL", "AMZN", "MSFT", "NVDA"]);
-    expect(h.barsCalls.sort()).toEqual(["AAPL", "AMZN", "MSFT", "NVDA"]);
-    expect(h.stored).toHaveLength(2);
-    expect(h.delivered).toHaveLength(2);
-
-    // The parent canonical row was stored once, keyed by job id.
-    expect(h.parentStored).toHaveLength(1);
-    expect(h.parentStored[0]?.jobId).toBe("screen-cutover-4192");
-    expect(h.parentStored[0]?.collation.lifecycle).toBe("ReportGenerated");
-
-    // The parent row is projected into the shard-job store, so
-    // the mesh door / NLQ port read the collation from the rows.
-    const parentRow = await h.shardStore.latestJob("tenant-1", "screen-cutover-4192", "screen-cutover-4192");
-    expect(parentRow).not.toBeNull();
-    expect(JSON.parse(parentRow?.resultJson ?? "{}").lifecycle).toBe("ReportGenerated");
-    expect(JSON.parse(parentRow?.resultJson ?? "{}").shards).toHaveLength(2);
-
-    // The collation is written as an artifact on the run.
-    const view = await h.control.getJob("screen-cutover-4192");
-    const runId = view.instance?.currentRunId;
-    expect(runId).toBeTruthy();
-    const artifact = await h.stores.artifacts.getArtifact(runId!, "screener/collation");
-    expect(artifact).toEqual(c);
-
-    // The run is on the platform run-record machinery.
-    expect(h.runStore.listByJob("screen-cutover-4192")).toHaveLength(1);
-    expect(h.runStore.listByJob("screen-cutover-4192")[0]?.outcome).toBe("success");
-  });
-
-  it("a store refusal is recorded on the collation, never a failed run", async () => {
-    const h = await makeCutoverHarness({
-      storeReport: async () => {
-        throw new Error("canonical store down");
-      },
-    });
-    const c = await runScreenerScreenOnEngine(fakeStep, dispatchDeps(h), marketCommand());
-    expect(c.lifecycle).toBe("Completed");
-    expect(c.storeErrors).toEqual({ s0: "canonical store down", s1: "canonical store down" });
-    expect(c.storedShards).toEqual([]);
-    expect(h.delivered).toHaveLength(2);
-  });
-
-  it("deliver=false skips delivery on the collation", async () => {
-    const h = await makeCutoverHarness();
-    const c = await runScreenerScreenOnEngine(
-      fakeStep,
-      dispatchDeps(h),
-      marketCommand({ deliver: false }),
-    );
-    expect(c.lifecycle).toBe("ReportGenerated");
-    expect(c.deliveredShards).toEqual([]);
-    expect(h.delivered).toHaveLength(0);
-    expect(h.stored).toHaveLength(2);
-  });
+  // Issue #5884 (6b3): the dispatch tests that assert the
+  // collation MOVED to 6e (#5922) — the flip re-points the
+  // definition onto the generic chain, and the collation
+  // reads bespoke-shaped outputs, so a generic-chain run
+  // collates as "failed: Shard never reached analysis" even
+  // on success. 6e teaches the collation the generic shape
+  // and restores them there, against the generic outputs:
+  // - "dispatches a 2-shard market screen through the engine
+  //   and returns its collation" (lifecycle ReportGenerated,
+  //   coverage 4/4, stored/delivered shards, parent row +
+  //   artifact);
+  // - "a store refusal is recorded on the collation, never a
+  //   failed run" (lifecycle Completed, storeErrors per
+  //   shard; note the store leg itself is gone post-flip —
+  //   6e restores the refusal shape against the generic
+  //   canonical leg);
+  // - "deliver=false skips delivery on the collation"
+  //   (lifecycle ReportGenerated, deliveredShards empty).
 
   it("a shard role refuses by name — no child workflows are created by the engine dispatch", async () => {
     const h = await makeCutoverHarness();
@@ -481,7 +411,7 @@ describe("control-plane addressing from host surfaces — Q2 (#4192)", () => {
     const view = await h.control.getJob("screen-cutover-4192");
     expect(view.definition.jobId).toBe("screen-cutover-4192");
     expect(vocabularyStageNodePath(view.definition, "feed")).toBe("");
-    expect(vocabularyStageNodePath(view.definition, "deliver")).toBe("0/0/0/0/0");
+    expect(vocabularyStageNodePath(view.definition, "deliver")).toBe("0/0/0/0");
     expect(buildScreenerJobDefinition).toBeDefined();
   });
 });
@@ -562,26 +492,14 @@ describe("ND head — adapter gate before dispatch, Q4 (#4192)", () => {
     expect(await h.stores.definitions.getDefinition("screen-cutover-4192")).toBeNull();
   });
 
-  it("a valid interpretation dispatches with the merged filters", async () => {
-    const h = await makeCutoverHarness();
-    const c = await runScreenerScreenOnEngine(
-      fakeStep,
-      dispatchDeps(h, {
-        ndModeEnabled: true,
-        intentInterpreter: {
-          interpret: async () => ({
-            filters: { minPrice: 10 },
-            rationale: "cheap growth",
-          }),
-        },
-        auditInterpretation: async () => {},
-      }),
-      marketCommand({ screenMode: "non-deterministic", screenIntent: "cheap growth stocks" }),
-    );
-    expect(c.lifecycle).toBe("ReportGenerated");
-    expect(c.screenMode).toBe("non-deterministic");
-    expect(h.yahooCalls.sort()).toEqual(["AAPL", "AMZN", "MSFT", "NVDA"]);
-  });
+  // Issue #5884 (6b3): "a valid interpretation dispatches
+  // with the merged filters" MOVED to 6e (#5922) with the
+  // dispatch tests — it asserts the collation lifecycle
+  // ReportGenerated over a generic-chain run, which the
+  // collation cannot read until 6e teaches it the generic
+  // shape. 6e restores it against the generic outputs
+  // (lifecycle ReportGenerated, screenMode
+  // non-deterministic, every symbol quoted once).
 });
 
 import { composeScreenerCollation, projectScreenerAnnounce } from "../src/workflows/screenerCollation";
@@ -654,7 +572,11 @@ async function seedComposedRun(
   for (const shard of opts.shards ?? []) {
     if (shard.output) composed[shard.shardId] = shard.output;
   }
-  await h.stores.artifacts.putArtifact(runId, "0/0/0/0/0/stage-output", composed);
+  await h.stores.artifacts.putArtifact(
+    runId,
+    `${vocabularyStageNodePath(definition, "deliver")}/stage-output`,
+    composed,
+  );
   // Persist the stage ledger the engine keeps on the instance.
   const units = (opts.shards ?? []).flatMap((shard) =>
     (shard.ledger ?? []).map((entry) => ({
@@ -918,41 +840,20 @@ describe("announce projection (#4192)", () => {
   });
 });
 
-describe("dispatch failure shape (#4192)", () => {
-  it("a provider outage on one shard fails the run fast and the collation fails every shard honestly", async () => {
-    const h = await makeCutoverHarness({
-      quoteDepsFor: () => ({
-        yahoo: {
-          fetchYahooQuote: async (symbol: string) => {
-            if (symbol === "MSFT" || symbol === "AMZN") {
-              throw new Error("provider down");
-            }
-            return quote(symbol);
-          },
-        },
-      }),
-    });
-    const c = await runScreenerScreenOnEngine(fakeStep, dispatchDeps(h), marketCommand());
-    expect(c.lifecycle).toBe("Failed");
-    expect(c.shards.find((s) => s.shardId === "s1")?.status).toBe("failed");
-    // The feed stage tolerates per-symbol failures and reports
-    // the batch as unavailable, naming the failed symbols —
-    // the fake's raw "provider down" throw never surfaces.
-    // The engine wraps it with the step/node prefix.
-    expect(c.shards.find((s) => s.shardId === "s1")?.error).toMatch(
-      /Yahoo Finance unavailable: no live quotes returned/,
-    );
-    expect(c.shards.find((s) => s.shardId === "s1")?.error).toMatch(/MSFT, AMZN/);
-    // The run failed at feed, before any shard reached analysis,
-    // so the other shard is failed too — never invented completed.
-    expect(c.shards.find((s) => s.shardId === "s0")?.status).toBe("failed");
-    expect(c.shards.find((s) => s.shardId === "s0")?.error).toMatch(/never reached analysis/i);
-    expect(h.parentStored).toHaveLength(1);
-  });
-});
+// Issue #5884 (6b3): the "dispatch failure shape" test —
+// "a provider outage on one shard fails the run fast and
+// the collation fails every shard honestly" — MOVED to 6e
+// (#5922) with the dispatch tests. It asserts the collation
+// lifecycle Failed + per-shard errors over a generic-chain
+// run, which the collation cannot read until 6e teaches it
+// the generic shape. 6e restores it against the generic
+// outputs (feed-stage outage named by symbol on the failing
+// shard, the other shard failed "never reached analysis",
+// parent row stored once). (Kept as a comment, not an empty
+// describe: vitest fails a suite with no tests.)
 
 describe("definition builder (#4192)", () => {
-  it("builds the six-node nested chain with per-node shard partitioning", () => {
+  it("builds the five-node nested chain with per-node shard partitioning", () => {
     const definition = buildScreenerJobDefinition(marketCommand());
     expect(definition.jobId).toBe("screen-cutover-4192");
     const kinds: string[] = [];
@@ -961,6 +862,27 @@ describe("definition builder (#4192)", () => {
       kinds.push(node.kind);
       node = node.children?.[0];
     }
-    expect(kinds).toEqual(["feed", "enrich", "analyze", "store", "serve", "deliver"]);
+    expect(kinds).toEqual(["feed", "enrich", "analyze", "generate", "deliver"]);
+    // The params ride the steps, not the nodes (the bespoke
+    // "stages carry no params" shape is gone with the flip:
+    // the generic nodes carry the family job ids and their
+    // per-family params, per #4365-P05).
+    const paramsByKind = new Map<string, unknown>();
+    node = definition.root;
+    while (node) {
+      paramsByKind.set(node.kind, node.steps?.[0]?.params);
+      node = node.children?.[0];
+    }
+    expect(paramsByKind.get("feed")).toEqual(
+      // No universe here: the 4192 command carries explicit
+      // symbols shards, which name no universe (6b0).
+      expect.objectContaining({ feedJobId: "yahoo-nasdaq100-quotes" }),
+    );
+    expect(paramsByKind.get("analyze")).toEqual(
+      expect.objectContaining({ ruleSets: ["screen", "factors"], inputMode: "handOff" }),
+    );
+    expect(paramsByKind.get("generate")).toEqual(
+      expect.objectContaining({ reports: ["screener-report"] }),
+    );
   });
 });

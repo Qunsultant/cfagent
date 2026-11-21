@@ -3,14 +3,15 @@
  * one workflow engine (#4192, #3550 S2 cutover).
  *
  * The second adapter behind the port: it runs a screen through
- * the engine (defineJob + runJob over the six screener nodes)
- * with in-memory stores, and returns the collation the
+ * the engine (defineJob + runJob over the screener nodes — five
+ * generic for market since the 6b3 flip #5884, six bespoke for
+ * goal) with in-memory stores, and returns the collation the
  * composer builds from the persisted stage outputs + stage
  * ledger. It is the standing proof that a second
  * implementation plugs in cleanly, and the execution engine
  * for port-level tests.
  *
- * The screen itself is CANNED, not computed: the six step
+ * The screen itself is CANNED, not computed: the canned step
  * handlers below drive the injected ScreenRunner (the same
  * fake the old child-workflow flows called) and map its
  * ShardScreenResult onto the six stage outputs. Port-level
@@ -59,6 +60,10 @@ import {
 } from "../services/jobPipelineEngine";
 import { createBuiltinStepRegistry } from "../services/jobPipelineSteps";
 import type { JobStepContext } from "../services/jobPipelineSteps";
+import { FEED_PULL_STEP } from "../services/feedPipelineJobs";
+import { ENRICH_SCREENER_STEP } from "../services/enrichPipelineJobs";
+import { ANALYZE_SCREENER_STEP } from "../services/analyzePipelineJobs";
+import { GENERATE_APPLY_STEP } from "../services/generatePipelineJobs";
 import {
   SCREENER_ANALYSIS_STEP,
   SCREENER_DELIVER_STEP,
@@ -188,18 +193,22 @@ export class InMemoryWorkflowAdapter implements WorkflowPort {
   }
 
   /**
-   * The seven canned steps: the injected ScreenRunner's result,
-   * mapped onto the six stage outputs the composer reads. The
+   * The canned steps: the injected ScreenRunner's result,
+   * mapped onto the stage outputs the composer reads. The
    * runner's counts drive the collation's coverage (the
    * analyze step overwrites the feed's symbol-count
    * expectedCount with the runner's), its keys ride the
    * served formats, and its store/deliver flags ride the
    * shard outcome — exactly as the retired child flow did.
+   * The seven bespoke handlers serve the goal definition;
+   * the four generic handlers serve the flipped market
+   * definition (#5884, 6b3): feed/gather/analysis share the
+   * bespoke handlers, and generate composes store + serve.
    */
   private registerCannedSteps(
     registry: ReturnType<typeof createBuiltinStepRegistry>,
   ): void {
-    registry.register(SCREENER_FEED_STEP, async (ctx: JobStepContext) => {
+    const feedHandler = async (ctx: JobStepContext) => {
       const command = this.commandFor(ctx.jobId);
       const table = (ctx.params.shards ?? []) as {
         shardId: string;
@@ -236,9 +245,15 @@ export class InMemoryWorkflowAdapter implements WorkflowPort {
             : {}),
         },
       };
-    });
+    };
 
-    registry.register(SCREENER_GATHER_STEP, async (ctx: JobStepContext) => {
+    registry.register(SCREENER_FEED_STEP, feedHandler);
+    // #5884 (6b3): the flipped market definition's feed node is
+    // feed.pull — the same canned handler; the market definition
+    // no longer names screener.feed.
+    registry.register(FEED_PULL_STEP, feedHandler);
+
+    const gatherHandler = async (ctx: JobStepContext) => {
       const prior = priorFor<Record<string, unknown>>(ctx.input, ctx.shardKey);
       if (isDupOutput(prior)) return { output: prior };
       return {
@@ -249,9 +264,15 @@ export class InMemoryWorkflowAdapter implements WorkflowPort {
           persistedSentiment: null,
         },
       };
-    });
+    };
 
-    registry.register(SCREENER_ANALYSIS_STEP, async (ctx: JobStepContext) => {
+    registry.register(SCREENER_GATHER_STEP, gatherHandler);
+    // #5884 (6b3): the flipped market definition's enrich node
+    // is enrich.screener — the same canned pass-through; the
+    // market definition no longer names screener.gather.
+    registry.register(ENRICH_SCREENER_STEP, gatherHandler);
+
+    const analysisHandler = async (ctx: JobStepContext) => {
       const prior = priorFor<Record<string, unknown>>(ctx.input, ctx.shardKey);
       if (isDupOutput(prior)) return { output: prior };
       const command = this.commandFor(ctx.jobId);
@@ -308,7 +329,14 @@ export class InMemoryWorkflowAdapter implements WorkflowPort {
           runnerResult: result,
         },
       };
-    });
+    };
+
+    registry.register(SCREENER_ANALYSIS_STEP, analysisHandler);
+    // #5884 (6b3): the flipped market definition's analyze node
+    // is analyze.screener — the same canned handler (the
+    // market-only runner call; the goal branch never reaches
+    // it, exactly as the bespoke analysis never did).
+    registry.register(ANALYZE_SCREENER_STEP, analysisHandler);
 
     registry.register(SCREENER_GOAL_STEP, async (ctx: JobStepContext) => {
       const prior = priorFor<Record<string, unknown>>(ctx.input, ctx.shardKey);
@@ -375,9 +403,13 @@ export class InMemoryWorkflowAdapter implements WorkflowPort {
       };
     });
 
-    registry.register(SCREENER_STORE_STEP, async (ctx: JobStepContext) => {
+    // The store leg as a value (not a registration), so the
+    // canned generate step below can compose store + serve.
+    const storeOutput = async (
+      ctx: JobStepContext,
+    ): Promise<Record<string, unknown>> => {
       const prior = priorFor<Record<string, unknown>>(ctx.input, ctx.shardKey);
-      if (isDupOutput(prior)) return { output: prior };
+      if (isDupOutput(prior)) return prior;
       const command = this.commandFor(ctx.jobId);
       if (!command) {
         throw new Error(
@@ -416,19 +448,21 @@ export class InMemoryWorkflowAdapter implements WorkflowPort {
       }
       await this.traceStep(command, "store-shard");
       return {
-        output: {
-          ...prior,
-          payload,
-          stored,
-          ...(reportId ? { reportId } : {}),
-          ...(storeError ? { storeError } : {}),
-        },
+        ...prior,
+        payload,
+        stored,
+        ...(reportId ? { reportId } : {}),
+        ...(storeError ? { storeError } : {}),
       };
-    });
+    };
 
-    registry.register(SCREENER_SERVE_STEP, async (ctx: JobStepContext) => {
-      const prior = priorFor<Record<string, unknown>>(ctx.input, ctx.shardKey);
-      if (isDupOutput(prior)) return { output: prior };
+    registry.register(SCREENER_STORE_STEP, async (ctx: JobStepContext) => ({
+      output: await storeOutput(ctx),
+    }));
+
+    // The serve leg as a value over a prior output, so the
+    // canned generate step below can compose store + serve.
+    const serveOutput = (prior: Record<string, unknown>) => {
       const payload = (prior.payload ?? {}) as Record<string, unknown>;
       const formats: { format: string; key: string }[] = [];
       for (const format of ["pdf", "xlsx", "csv"] as const) {
@@ -438,11 +472,26 @@ export class InMemoryWorkflowAdapter implements WorkflowPort {
         }
       }
       return {
-        output: {
-          ...prior,
-          servedReport: { formats },
-        },
+        ...prior,
+        servedReport: { formats },
       };
+    };
+
+    registry.register(SCREENER_SERVE_STEP, async (ctx: JobStepContext) => {
+      const prior = priorFor<Record<string, unknown>>(ctx.input, ctx.shardKey);
+      if (isDupOutput(prior)) return { output: prior };
+      return { output: serveOutput(prior) };
+    });
+
+    // #5884 (6b3): the flipped market definition's generate
+    // node is generate.apply — the store + serve legs composed
+    // into one node (the canonical report is stored and served
+    // there; the deliver node reads the served output exactly
+    // as it read the bespoke serve output).
+    registry.register(GENERATE_APPLY_STEP, async (ctx: JobStepContext) => {
+      const prior = priorFor<Record<string, unknown>>(ctx.input, ctx.shardKey);
+      if (isDupOutput(prior)) return { output: prior };
+      return { output: serveOutput(await storeOutput(ctx)) };
     });
 
     registry.register(SCREENER_DELIVER_STEP, async (ctx: JobStepContext) => {

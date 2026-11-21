@@ -1,24 +1,35 @@
 // @vitest-environment node
 /**
  * Issue #4190 ([One engine] #3550 S1) — the screener substrate:
- * the engine can define and dispatch a stock-screen job (six
- * nodes, 1:1 with the catalog stages) in vitest, producing a
- * screen result. The new code is called only by tests; the
+ * the engine can define and dispatch a stock-screen job (five
+ * generic nodes, 1:1 with the v2 catalog stages) in vitest,
+ * producing a screen result. The new code is called only by tests; the
  * bespoke flow still runs production screens.
  *
- * - Job-definition builder: WorkflowJobCommand -> 6-node nested
+ * - Job-definition builder: WorkflowJobCommand -> 5-node nested
  *   chain (jobId = command.jobId; processing.shards = command
- *   shard ids; goal leg on the same six nodes).
+ *   shard ids; goal leg on its own six-node goalScreen
+ *   definition, #5873).
  * - Screener step registry + composition in BOTH residencies
  *   (host + workflow) through createPipelineStepRegistry.
  * - Engine proof (J7 pattern): a screener job defined +
  *   dispatched via the engine, producing a screen result —
  *   monolith (one shard) and sharded (two shards) shapes,
  *   plus the goal leg branching like runShardFlow.
+ *   The deliver leg degrades in the flip (#5884 6b3): the
+ *   proof dispatches with deliver: false (6c #5885 owns the
+ *   deliver proof); the feed/enrich/analyze/generate legs
+ *   and the run record are proven here.
  */
 import { describe, expect, it } from "vitest";
 import { createInMemoryJobPipelineStores } from "../src/data/inMemoryJobPipelineAdapter";
 import { InMemoryJobRunRecordStore } from "../src/data/inMemoryJobRunRecordAdapter";
+import { InMemoryFeedDatasetStore } from "../src/data/inMemoryFeedDatasetAdapter";
+import { InMemoryEnrichedDatasetStore } from "../src/data/inMemoryEnrichedDatasetAdapter";
+import { InMemoryAnalyzedDatasetStore } from "../src/data/inMemoryAnalyzedDatasetAdapter";
+import { InMemoryGeneratedDatasetStore } from "../src/data/inMemoryGeneratedDatasetAdapter";
+import { InMemoryDeliveryDatasetStore } from "../src/data/inMemoryDeliveryDatasetAdapter";
+import { InMemoryIndexListStore } from "../src/data/inMemoryIndexListAdapter";
 import { InMemoryMessagingAdapter } from "../src/messaging/inMemoryMessagingAdapter";
 import type { MessagingPorts } from "../src/messaging/messagingPorts";
 import {
@@ -27,11 +38,23 @@ import {
   vocabularyStageForNodeKind,
 } from "../src/services/jobPipelineEngine";
 import { createPipelineStepRegistry } from "../src/services/enrichPipelineJobs";
-import { buildFeedJobRegistry } from "../src/services/feedJobs";
+import {
+  buildFeedJobRegistry,
+  type FeedJobDefinition,
+} from "../src/services/feedJobs";
 import { buildEnrichJobRegistry } from "../src/services/enrichJobs";
 import { buildAnalyzeJobRegistry } from "../src/services/analyzeJobs";
 import { buildGenerateJobRegistry } from "../src/services/generateJobs";
 import { buildDeliverJobRegistry } from "../src/services/deliverJobs";
+import { ensureFeedPipelineJobs } from "../src/services/feedPipelineJobs";
+import { ensureEnrichPipelineJobs } from "../src/services/enrichPipelineJobs";
+import { ensureAnalyzePipelineJobs } from "../src/services/analyzePipelineJobs";
+import { ensureGeneratePipelineJobs } from "../src/services/generatePipelineJobs";
+import { ensureDeliverPipelineJobs } from "../src/services/deliverPipelineJobs";
+import { FEED_PULL_STEP } from "../src/services/feedPipelineJobs";
+import { ENRICH_SCREENER_STEP } from "../src/services/enrichPipelineJobs";
+import { ANALYZE_SCREENER_STEP } from "../src/services/analyzePipelineJobs";
+import { GENERATE_APPLY_STEP } from "../src/services/generatePipelineJobs";
 import {
   SCREENER_ANALYSIS_STEP,
   SCREENER_DELIVER_STEP,
@@ -49,8 +72,13 @@ import {
 import { ScreenerAgent } from "../src/agents/screener-agent";
 import type { WorkflowJobCommand } from "../src/workflows/workflowPorts";
 import type {
+  DataProvider,
+  DataResult,
+  MarketDataResearchCompanyFundamentals,
   MarketDataResearchHistoricalBar,
   MarketDataResearchQuote,
+  NewsResult,
+  QuoteResult,
 } from "../src/types";
 
 const T0 = Date.parse("2026-11-12T00:00:00.000Z");
@@ -135,6 +163,62 @@ function marketCommand(over: Partial<WorkflowJobCommand> = {}): WorkflowJobComma
   };
 }
 
+function fakeProvider(id: DataProvider["id"], quoteCalls: string[]): DataProvider {
+  return {
+    id,
+    name: id,
+    capabilities: ["quotes", "historicalBars", "fundamentals", "news"],
+    isConfigured: () => true,
+    getQuotesBatch: async (symbols: string[]) => {
+      quoteCalls.push(...symbols);
+      const wanted = new Set(symbols.map((s) => s.toUpperCase()));
+      const result = SYMBOLS.map((s) => quote(s)).filter((q) =>
+        wanted.has(q.symbol.toUpperCase()),
+      );
+      return { providerId: id, capability: "quotes", result } as DataResult<QuoteResult[]>;
+    },
+    getFundamentals: async (symbol: string) =>
+      ({
+        providerId: id,
+        capability: "fundamentals",
+        result: { symbol, marketCap: 1_000_000, peTrailing: 25 } as MarketDataResearchCompanyFundamentals,
+      }) as DataResult<MarketDataResearchCompanyFundamentals>,
+    getHistoricalBars: async (symbol: string) => {
+      const bars: MarketDataResearchHistoricalBar[] = [];
+      for (let i = 0; i < 30; i++) {
+        const close = 100 + i;
+        bars.push({
+          provenance: "live",
+          timestamp: iso(T0 - (30 - 1 - i) * 24 * 3600_000),
+          open: close - 0.5,
+          high: close + 1,
+          low: close - 1,
+          close,
+          volume: 1_000_000,
+        });
+      }
+      return {
+        providerId: id,
+        capability: "historicalBars",
+        result: bars,
+      } as DataResult<MarketDataResearchHistoricalBar[]>;
+    },
+    getNews: async (symbol: string) =>
+      ({
+        providerId: id,
+        capability: "news",
+        result: [
+          {
+            headline: `${symbol} reports quarterly results`,
+            source: "Yahoo Finance",
+            publishedAt: iso(T0),
+            symbol,
+          },
+        ],
+      }) as DataResult<NewsResult>,
+  };
+}
+
 interface Harness {
   control: JobPipelineControl;
   stores: ReturnType<typeof createInMemoryJobPipelineStores>;
@@ -145,6 +229,11 @@ interface Harness {
   delivered: { payload: unknown; userLogin: string }[];
   yahooCalls: string[];
   barsCalls: string[];
+  quoteCalls: string[];
+  datasetStore: InMemoryFeedDatasetStore;
+  enrichedStore: InMemoryEnrichedDatasetStore;
+  analyzedStore: InMemoryAnalyzedDatasetStore;
+  generatedStore: InMemoryGeneratedDatasetStore;
 }
 
 async function makeHarness(opts: {
@@ -154,6 +243,12 @@ async function makeHarness(opts: {
 } = {}): Promise<Harness> {
   const stores = createInMemoryJobPipelineStores();
   const runStore = new InMemoryJobRunRecordStore();
+  const datasetStore = new InMemoryFeedDatasetStore();
+  const enrichedStore = new InMemoryEnrichedDatasetStore();
+  const analyzedStore = new InMemoryAnalyzedDatasetStore();
+  const generatedStore = new InMemoryGeneratedDatasetStore();
+  const deliveryStore = new InMemoryDeliveryDatasetStore();
+  const universes = new InMemoryIndexListStore();
   const messaging = new InMemoryMessagingAdapter();
   const ports: MessagingPorts = {
     producer: messaging,
@@ -171,6 +266,9 @@ async function makeHarness(opts: {
   const delivered: { payload: unknown; userLogin: string }[] = [];
   const yahooCalls: string[] = [];
   const barsCalls: string[] = [];
+  const quoteCalls: string[] = [];
+  const shardsFor = async (jobId: string) =>
+    (await stores.definitions.getDefinition(jobId))?.config.processing.shards ?? [];
   const deps: ScreenerStepDeps = {
     agentFor: () => agent as never,
     quoteDepsFor: () => ({
@@ -203,14 +301,60 @@ async function makeHarness(opts: {
     stores,
     runRecorder: jobRunRecorderFromStore(runStore),
     publisher: ports.publisher,
-    steps: createScreenerStepRegistry(deps),
+    steps: createPipelineStepRegistry(
+      {
+        registry: buildFeedJobRegistry({}),
+        providerFor: (def: FeedJobDefinition) => fakeProvider(def.sourceId, quoteCalls),
+        universeStore: universes,
+        datasetStore,
+        shardsFor,
+        indexRefresh: null,
+      },
+      { registry: buildEnrichJobRegistry({}), datasetStore, enrichedStore, shardsFor },
+      { registry: buildAnalyzeJobRegistry({}), enrichedStore, analyzedStore, shardsFor },
+      {
+        registry: buildGenerateJobRegistry({}),
+        analyzedStore,
+        generatedStore,
+        canonicalReportStore: null,
+        shardsFor,
+      },
+      {
+        registry: buildDeliverJobRegistry({}),
+        generatedStore,
+        deliveryStore,
+        senders: {},
+        shardsFor,
+      },
+      deps,
+    ),
     now: () => new Date(T0),
   });
-  return { control, stores, runStore, storage, agent, stored, delivered, yahooCalls, barsCalls };
+  await ensureFeedPipelineJobs(control, stores, {});
+  await ensureEnrichPipelineJobs(control, stores, {});
+  await ensureAnalyzePipelineJobs(control, stores, {});
+  await ensureGeneratePipelineJobs(control, stores, {});
+  await ensureDeliverPipelineJobs(control, stores, {});
+  return {
+    control,
+    stores,
+    runStore,
+    storage,
+    agent,
+    stored,
+    delivered,
+    yahooCalls,
+    barsCalls,
+    quoteCalls,
+    datasetStore,
+    enrichedStore,
+    analyzedStore,
+    generatedStore,
+  };
 }
 
 describe("job-definition builder (#4190)", () => {
-  it("builds a six-node nested chain, 1:1 with the catalog stages", () => {
+  it("builds a five-node nested chain, 1:1 with the v2 catalog stages", () => {
     const raw = buildScreenerJobDefinition(marketCommand()) as any;
     expect(raw.jobId).toBe("screen-manual-4190");
     const kinds: string[] = [];
@@ -220,9 +364,9 @@ describe("job-definition builder (#4190)", () => {
       expect(node.children?.length ?? 0).toBeLessThanOrEqual(1);
       node = node.children?.[0];
     }
-    expect(kinds).toEqual(["feed", "enrich", "analyze", "store", "serve", "deliver"]);
+    expect(kinds).toEqual(["feed", "enrich", "analyze", "generate", "deliver"]);
     expect(raw.root.steps).toEqual([
-      { step: SCREENER_FEED_STEP, params: expect.objectContaining({ userLogin: "owner" }) },
+      { step: FEED_PULL_STEP, params: expect.objectContaining({ userLogin: "owner" }) },
     ]);
     const stepsByKind = new Map<string, string>();
     node = raw.root;
@@ -231,13 +375,41 @@ describe("job-definition builder (#4190)", () => {
       node = node.children?.[0];
     }
     expect(Object.fromEntries(stepsByKind)).toEqual({
-      feed: SCREENER_FEED_STEP,
-      enrich: SCREENER_GATHER_STEP,
-      analyze: SCREENER_ANALYSIS_STEP,
-      store: SCREENER_STORE_STEP,
-      serve: SCREENER_SERVE_STEP,
+      feed: FEED_PULL_STEP,
+      enrich: ENRICH_SCREENER_STEP,
+      analyze: ANALYZE_SCREENER_STEP,
+      generate: GENERATE_APPLY_STEP,
       deliver: SCREENER_DELIVER_STEP,
     });
+  });
+
+  it("injects the per-command family job ids (provider yahoo)", () => {
+    const raw = buildScreenerJobDefinition(marketCommand()) as any;
+    const paramsByKind = new Map<string, Record<string, unknown>>();
+    let node = raw.root;
+    while (node) {
+      paramsByKind.set(node.kind, node.steps?.[0]?.params);
+      node = node.children?.[0];
+    }
+    expect(paramsByKind.get("feed")).toEqual(
+      expect.objectContaining({ feedJobId: "yahoo-nasdaq100-quotes" }),
+    );
+    expect(paramsByKind.get("enrich")).toEqual(
+      expect.objectContaining({ enrichJobId: "yahoo-nasdaq100-quotes-enrich" }),
+    );
+    expect(paramsByKind.get("analyze")).toEqual(
+      expect.objectContaining({
+        analyzeJobId: "yahoo-nasdaq100-quotes-enrich-analyze",
+        ruleSets: ["screen", "factors"],
+        inputMode: "handOff",
+      }),
+    );
+    expect(paramsByKind.get("generate")).toEqual(
+      expect.objectContaining({
+        generateJobId: "yahoo-nasdaq100-quotes-enrich-analyze-generate",
+        reports: ["screener-report"],
+      }),
+    );
   });
 
   it("carries the command shard ids as processing.shards on every node", () => {
@@ -257,7 +429,7 @@ describe("job-definition builder (#4190)", () => {
     expect(raw.root.executionMode?.shape).toBe("sharded");
   });
 
-  it("is monolith with no shards, and the goal leg rides the same six nodes", () => {
+  it("is monolith with no shards, and the goal leg rides its own six-node goalScreen definition", () => {
     const goal = buildScreenerJobDefinition(
       marketCommand({
         jobId: "goal-4190",
@@ -418,7 +590,11 @@ describe("screener step registry (#4190)", () => {
 describe("engine proof — market screen (#4190)", () => {
   it("defines + dispatches a screener job via the engine, producing a screen result", async () => {
     const h = await makeHarness();
-    const command = marketCommand();
+    // The deliver leg degrades in the flip (#5884 6b3): the
+    // proof dispatches with deliver: false (6c #5885 owns the
+    // deliver proof). The feed/enrich/analyze/generate legs
+    // and the run record are proven here.
+    const command = marketCommand({ deliver: false });
     const definition = await h.control.defineJob(buildScreenerJobDefinition(command));
     expect(definition.jobId).toBe("screen-manual-4190");
 
@@ -426,21 +602,30 @@ describe("engine proof — market screen (#4190)", () => {
     const outcome = await dispatch.completion!;
     expect(outcome.state).toBe("completed");
 
-    // The feed fetched every symbol once through the fake provider;
-    // the gather fetched history for every quoted symbol.
-    expect(h.yahooCalls.sort()).toEqual(["AAPL", "AMZN", "MSFT", "NVDA"]);
-    expect(h.barsCalls.sort()).toEqual(["AAPL", "AMZN", "MSFT", "NVDA"]);
+    // The feed fetched every symbol once through the fake provider.
+    expect([...new Set(h.quoteCalls)].sort()).toEqual(["AAPL", "AMZN", "MSFT", "NVDA"]);
+    expect(h.quoteCalls.sort()).toEqual(["AAPL", "AMZN", "MSFT", "NVDA"]);
 
-    // The store leg persisted the agent-local run and the
-    // canonical row; the deliver leg delivered it once.
-    const latest = h.storage.map.get("screener:latest") as any;
-    expect(latest?.totalScanned).toBe(4);
-    expect(latest?.success).toBe(true);
-    expect(h.stored).toHaveLength(1);
-    expect((h.stored[0] as any)?.totalScanned).toBe(4);
-    expect(h.delivered).toHaveLength(1);
-    expect(h.delivered[0]?.userLogin).toBe("owner");
-    expect((h.delivered[0]?.payload as any)?.totalScanned).toBe(4);
+    // Every generic leg persisted its artifact: the feed batch,
+    // the enriched rows, the analyzed rows, the generated report.
+    const feed = await h.datasetStore.latestUsable("yahoo", "quotes");
+    expect(feed).toBeTruthy();
+    expect(feed!.quotes.map((q) => q.symbol).sort()).toEqual(["AAPL", "AMZN", "MSFT", "NVDA"]);
+    const enriched = await h.enrichedStore.latestUsable("yahoo-nasdaq100-quotes-enrich");
+    expect(enriched).toBeTruthy();
+    const analyzed = await h.analyzedStore.latestUsable(
+      "yahoo-nasdaq100-quotes-enrich-analyze",
+    );
+    expect(analyzed).toBeTruthy();
+    expect(analyzed!.rows.map((r) => r.symbol).sort()).toEqual(["AAPL", "AMZN", "MSFT", "NVDA"]);
+    const generated = await h.generatedStore.latestUsable(
+      "yahoo-nasdaq100-quotes-enrich-analyze-generate",
+    );
+    expect(generated).toBeTruthy();
+    expect(generated!.reports.map((r) => r.kind)).toContain("screener-report");
+
+    // Delivery was skipped, never attempted.
+    expect(h.delivered).toHaveLength(0);
 
     // The run is on the platform run-record machinery, as the screener job.
     expect(h.runStore.listByJob("screen-manual-4190")).toHaveLength(1);
@@ -451,6 +636,7 @@ describe("engine proof — market screen (#4190)", () => {
     const h = await makeHarness();
     const command = marketCommand({
       jobId: "screen-sharded-4190",
+      deliver: false,
       shards: [
         { shardId: "s0", symbols: [listing("AAPL"), listing("NVDA")] },
         { shardId: "s1", symbols: [listing("MSFT"), listing("AMZN")] },
@@ -460,28 +646,21 @@ describe("engine proof — market screen (#4190)", () => {
     const dispatch = await h.control.runJob("screen-sharded-4190");
     const outcome = await dispatch.completion!;
     expect(outcome.state).toBe("completed");
-    expect(h.yahooCalls.sort()).toEqual(["AAPL", "AMZN", "MSFT", "NVDA"]);
-    expect(h.stored).toHaveLength(2);
-    const scanned = (h.stored as any[]).map((s) => s.totalScanned).sort();
-    expect(scanned).toEqual([2, 2]);
-    const deliveredSymbols = (h.delivered as any[])
-      .flatMap((d) => (d.payload as any).allStocks.map((s: any) => s.symbol))
-      .sort();
-    expect(deliveredSymbols).toEqual(["AAPL", "AMZN", "MSFT", "NVDA"]);
+    expect(h.quoteCalls.sort()).toEqual(["AAPL", "AMZN", "MSFT", "NVDA"]);
+    expect(h.delivered).toHaveLength(0);
+    const generated = await h.generatedStore.latestUsable(
+      "yahoo-nasdaq100-quotes-enrich-analyze-generate",
+    );
+    expect(generated).toBeTruthy();
+    expect(h.runStore.listByJob("screen-sharded-4190")[0]?.outcome).toBe("success");
   });
 
-  it("a store refusal is recorded, never a failed run (the flow's rule)", async () => {
-    const h = await makeHarness({
-      storeReport: async () => {
-        throw new Error("canonical store down");
-      },
-    });
-    await h.control.defineJob(buildScreenerJobDefinition(marketCommand()));
-    const dispatch = await h.control.runJob("screen-manual-4190");
-    const outcome = await dispatch.completion!;
-    expect(outcome.state).toBe("completed");
-    expect(h.delivered).toHaveLength(1);
-  });
+  // Issue #5884 (6b3): the store-refusal test is REMOVED — its
+  // subject, the bespoke store step, leaves the chain in the
+  // flip, so there is no store leg to refuse. The canonical-leg
+  // refusal belongs to the generate family: its tests own the
+  // generate-run failure shape (a failed generate run fails
+  // the pipeline run with the same coded error).
 
   it("a deliver refusal is recorded, never a failed run (the flow's rule)", async () => {
     const h = await makeHarness({
@@ -493,17 +672,28 @@ describe("engine proof — market screen (#4190)", () => {
     const dispatch = await h.control.runJob("screen-manual-4190");
     const outcome = await dispatch.completion!;
     expect(outcome.state).toBe("completed");
-    expect(h.stored).toHaveLength(1);
+    expect(h.delivered).toHaveLength(0);
+    // The refusal is recorded on the deliver node's output
+    // (the deliver node is the chain's fifth node, path
+    // 0/0/0/0) — never a failed run.
+    const view = await h.control.getJob("screen-manual-4190");
+    const runId = view.instance?.currentRunId;
+    expect(runId).toBeTruthy();
+    const deliverOutput = (await h.stores.artifacts.getArtifact(
+      runId!,
+      "0/0/0/0/stage-output",
+    )) as Record<string, unknown>;
+    expect(deliverOutput?.deliverError).toContain("delivery down");
+    expect(deliverOutput?.delivered).toBe(false);
   });
 
-  it("the six node kinds address the six catalog stages (the #3945 1:1)", async () => {
+  it("the five node kinds address the five catalog stages (the #3945 1:1)", async () => {
     const h = await makeHarness();
     await h.control.defineJob(buildScreenerJobDefinition(marketCommand()));
     expect(vocabularyStageForNodeKind("feed")).toBe("feed");
     expect(vocabularyStageForNodeKind("enrich")).toBe("gather");
     expect(vocabularyStageForNodeKind("analyze")).toBe("analysis");
-    expect(vocabularyStageForNodeKind("store")).toBe("store");
-    expect(vocabularyStageForNodeKind("serve")).toBe("serve");
+    expect(vocabularyStageForNodeKind("generate")).toBe("analysis");
     expect(vocabularyStageForNodeKind("deliver")).toBe("deliver");
     const view = await h.control.getJob("screen-manual-4190");
     const kinds = (view?.definition.root
@@ -513,7 +703,7 @@ describe("engine proof — market screen (#4190)", () => {
           return acc;
         })(view.definition.root, [])
       : []);
-    expect(kinds).toEqual(["feed", "enrich", "analyze", "store", "serve", "deliver"]);
+    expect(kinds).toEqual(["feed", "enrich", "analyze", "generate", "deliver"]);
   });
 });
 

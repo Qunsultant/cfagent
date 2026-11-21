@@ -366,7 +366,10 @@ describe("command carries delivery + stageChain (#4280)", () => {
       const children = (node as { children?: Array<typeof def.root> }).children;
       node = children?.[0];
     }
-    expect(paramsList).toHaveLength(6);
+    // Five nodes since the 6b3 flip #5884 (six before it);
+    // delivery/stageChain/deliver still ride every node's
+    // step params, unchanged by the flip.
+    expect(paramsList).toHaveLength(5);
     for (const params of paramsList) {
       expect(params.delivery).toEqual(delivery);
       expect(params.stageChain).toEqual(stageChain);
