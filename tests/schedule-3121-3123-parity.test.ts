@@ -616,7 +616,7 @@ describe("3123-P09 worker duties as records", () => {
 
 describe("3123-P10 before/after counts", () => {
   it("one unified table; zero live paused_schedules references; one ledger record route", () => {
-    // The table-name literal lives in exactly seven declared places:
+    // The table-name literal lives in exactly eight declared places:
     // the port const (the definition), the maintenance wipe surface
     // (route + client table list, keyed by table name), the
     // retention registry (keyed by table name), and — since #4282 P2a
@@ -625,10 +625,12 @@ describe("3123-P10 before/after counts", () => {
     // `table` field, and — since #4282 P2b — the DO catalogue
     // (src/data/schemaComponent/doCatalogue.ts), whose
     // unified-schedules table + index entries name the table in
-    // their `table` fields and codes. (The index-schema module the
-    // ORM entry replaced referenced the table only via the
-    // UNIFIED_SCHEDULES_TABLE const, so the literal did not live
-    // there.) Adapters reference the const, never the literal.
+    // their `table` fields and codes, and — since #5893 — the
+    // Schedules home's empty action, which passes the table name to
+    // the same clear-table client the wipe panel uses. (The
+    // index-schema module the ORM entry replaced referenced the table
+    // only via the UNIFIED_SCHEDULES_TABLE const, so the literal did
+    // not live there.) Adapters reference the const, never the literal.
     const literalHomes = liveSrcFiles()
       .filter((f) =>
         readFileSync(join(REPO_ROOT, f), "utf8").includes('"unified_schedules"'),
@@ -637,6 +639,7 @@ describe("3123-P10 before/after counts", () => {
     expect(literalHomes).toEqual([
       "src/agents/routes/maintenance.ts",
       "src/client/AdminQueueWipePanel.tsx",
+      "src/client/SchedulesPanel.tsx",
       "src/client/adminQueueApi.ts",
       "src/data/schemaComponent/doCatalogue.ts",
       "src/data/schemaComponent/ormCatalogue.ts",
