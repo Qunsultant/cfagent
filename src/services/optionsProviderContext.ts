@@ -153,13 +153,26 @@ export function showEtradeBrokerSurface(context: TenantProviderContext): boolean
   return context.brokerId === "etrade";
 }
 
+/**
+ * Issue #5493 — the capabilities a provider DECLARES, or undefined when the
+ * projection does not know the provider at all. The distinction matters to a
+ * bind-time check: "declares capabilities, none of them this one" is a
+ * refusable mismatch, while "not in the projection" is a question the
+ * run-time registry answers (#5494) — a data-only provider addition must not
+ * be refused by a static map that has not learned it yet.
+ */
+export function dataProviderDeclaredCapabilities(
+  providerId: string,
+): readonly DataProviderCapability[] | undefined {
+  return (DATA_PROVIDER_CAPABILITIES as Record<string, readonly DataProviderCapability[] | undefined>)[providerId];
+}
+
 /** Capability lookup over the declared matrix only. Unknown providers support nothing. */
 export function dataProviderSupportsCapability(
   providerId: string,
   capability: DataProviderCapability,
 ): boolean {
-  const caps = (DATA_PROVIDER_CAPABILITIES as Record<string, readonly DataProviderCapability[] | undefined>)[providerId];
-  return caps !== undefined && caps.includes(capability);
+  return dataProviderDeclaredCapabilities(providerId)?.includes(capability) ?? false;
 }
 
 /**

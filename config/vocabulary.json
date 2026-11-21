@@ -95,6 +95,22 @@
         ]
       },
       {
+        "id": "russell1000",
+        "label": "Russell 1000",
+        "kind": "index",
+        "aliases": [
+          "RUSSELL1000"
+        ]
+      },
+      {
+        "id": "russell3000",
+        "label": "Russell 3000",
+        "kind": "index",
+        "aliases": [
+          "RUSSELL3000"
+        ]
+      },
+      {
         "id": "etf",
         "label": "ETFs",
         "kind": "screener",
