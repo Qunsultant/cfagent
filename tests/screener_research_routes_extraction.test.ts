@@ -190,7 +190,11 @@ describe("screener + research behavior (extraction #378)", () => {
     const ctx = baseCtx({ runResearchAndPublish: runResearchAndPublish as any });
     const res = await handleScreenerResearchRoutes(req("POST", "/research/run"), urlOf("/research/run"), "/research/run", "sess-9", ctx);
     expect((res as Response).status).toBe(200);
-    expect(runResearchAndPublish).toHaveBeenCalledWith("manual", "sess-9");
+    // Issue #5911 — the dispatched run id is handed to the pipeline, so the
+    // report cannot mint a second one.
+    expect(runResearchAndPublish).toHaveBeenCalledWith("manual", "sess-9", {
+      runId: expect.stringMatching(/^[0-9a-f-]{36}$/),
+    });
     expect(await (res as Response).json()).toMatchObject({
       success: true,
       reportId: "rep-1",
@@ -210,7 +214,9 @@ describe("screener + research behavior (extraction #378)", () => {
       ctx
     );
     expect((res as Response).status).toBe(200);
-    expect(runResearchAndPublish).toHaveBeenCalledWith("manual", "trader42");
+    expect(runResearchAndPublish).toHaveBeenCalledWith("manual", "trader42", {
+      runId: expect.stringMatching(/^[0-9a-f-]{36}$/),
+    });
   });
 
   it("POST /research/scheduled-tick skips without running when the guard says no", async () => {

@@ -82,7 +82,8 @@ describe("Issue #5287 — Real researchDeps wiring & stub-unreachable pins", () 
       ctx,
     );
     expect((res as Response).status).toBe(200);
-    expect(runResearchAndPublish).toHaveBeenCalledWith("manual", "alice");
+    // Issue #5911 — the stage's run id is the publish entry's run id.
+    expect(runResearchAndPublish).toHaveBeenCalledWith("manual", "alice", { runId: "r-5287" });
 
     const stores = createInMemoryJobPipelineStores();
     const runRecorder = jobRunRecorderFromStore(new InMemoryJobRunRecordStore());

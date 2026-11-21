@@ -619,7 +619,10 @@ export async function handleScreenerResearchRoutes(
           execute: (runCtx) =>
             runCtx
               ? runWithResearchRunId(runCtx.runId, () =>
-                  triggerManualResearch(ctx.runResearchAndPublish, userLogin, selection),
+                  triggerManualResearch(ctx.runResearchAndPublish, userLogin, {
+                    ...selection,
+                    runId: runCtx.runId,
+                  }),
                 )
               : triggerManualResearch(ctx.runResearchAndPublish, userLogin, selection),
         });
@@ -681,17 +684,14 @@ export async function handleScreenerResearchRoutes(
           env: ctx.env as Record<string, string | undefined>,
           researchDeps: {
             runOodaAnalysis: (runCtx) => {
-              const selection =
-                runCtx.brokerId || runCtx.mode
-                  ? {
-                      ...(runCtx.brokerId ? { brokerId: runCtx.brokerId } : {}),
-                      ...(runCtx.mode ? { mode: runCtx.mode } : {}),
-                    }
-                  : undefined;
+              // Issue #5911 — the run id the step already holds is THE id:
+              // the pipeline must not mint a second one.
               return runWithResearchRunId(runCtx.runId, () =>
-                selection
-                  ? triggerManualResearch(ctx.runResearchAndPublish, runCtx.userLogin, selection)
-                  : triggerManualResearch(ctx.runResearchAndPublish, runCtx.userLogin),
+                triggerManualResearch(ctx.runResearchAndPublish, runCtx.userLogin, {
+                  runId: runCtx.runId,
+                  ...(runCtx.brokerId ? { brokerId: runCtx.brokerId } : {}),
+                  ...(runCtx.mode ? { mode: runCtx.mode } : {}),
+                }),
               );
             },
             runEvaluateStage: async (evalCtx) => {

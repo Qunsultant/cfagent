@@ -42,7 +42,7 @@ import type {
   Premortem,
 } from "./researchFalsification";
 import { buildFalsification, buildPremortem } from "./researchFalsification";
-import { oodaStepShortId } from "./executionTreeIds";
+import { newRunId as mintRunId, oodaStepShortId } from "./executionTreeIds";
 
 export type TriggerSource = "manual" | "scheduled";
 
@@ -712,8 +712,14 @@ export interface PipelineDeps {
   trackRecord?: import("./researchTrackRecord").TrackRecord;
 }
 
+/**
+ * Issue #5911 — one job, one run id. A research run dispatched by the engine
+ * already HAS a run id (the engine mints it); this fallback exists only for a
+ * direct invocation with none, and even then it goes through the platform's
+ * one id authority (#5175) — never a private `rsr_…` mint.
+ */
 function newRunId(): string {
-  return `rsr_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+  return mintRunId();
 }
 
 /**

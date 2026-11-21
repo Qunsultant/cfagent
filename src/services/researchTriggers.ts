@@ -28,6 +28,12 @@ export function currentResearchRunId(): string | undefined {
 export interface ResearchRunSelection {
   brokerId?: string;
   mode?: string;
+  /**
+   * Issue #5911 — the run id when the caller already has one (an engine
+   * dispatch minted it). The pipeline then runs under THAT id: one job, one
+   * run id, no second mint.
+   */
+  runId?: string;
 }
 
 export type PublishEntry<R> = (

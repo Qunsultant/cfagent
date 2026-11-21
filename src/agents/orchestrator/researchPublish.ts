@@ -51,6 +51,8 @@ export interface ResearchPublishContext {
       input: {
         trigger: "manual" | "scheduled";
         userLogin: string;
+        /** Issue #5911 — the run id the engine minted for this run. */
+        runId?: string;
         /** Issue #5912 — the venue/mode this run names, when it named one. */
         brokerId?: string;
         mode?: string;
@@ -154,7 +156,7 @@ export async function runResearchAndPublish(ctx: ResearchPublishContext,
   trigger: "manual" | "scheduled",
   userLogin?: string,
   /** Issue #5912 — the venue/mode this run names, if any. */
-  selection?: { brokerId?: string; mode?: string }
+  selection?: { brokerId?: string; mode?: string; runId?: string }
 ): Promise<{
   success: boolean;
   error?: string;
@@ -244,6 +246,7 @@ export async function runResearchAndPublish(ctx: ResearchPublishContext,
         input: {
           trigger,
           userLogin: login,
+          ...(selection?.runId ? { runId: selection.runId } : {}),
           ...(selection?.brokerId ? { brokerId: selection.brokerId } : {}),
           ...(selection?.mode ? { mode: selection.mode } : {}),
         },
@@ -274,6 +277,7 @@ export async function runResearchAndPublish(ctx: ResearchPublishContext,
       const fallback = await agent.runResearch({
         trigger,
         userLogin: login,
+        ...(selection?.runId ? { runId: selection.runId } : {}),
         ...(selection?.brokerId ? { brokerId: selection.brokerId as never } : {}),
         ...(selection?.mode ? { mode: selection.mode } : {}),
       });
