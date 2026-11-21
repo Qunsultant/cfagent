@@ -511,6 +511,54 @@ export function feedShardSymbols(
 }
 
 /**
+ * #5954 — this unit's explicit symbols, read the bespoke way
+ * (shardSymbolsFor in screenerPipelineJobs.ts): the shard
+ * table's row for this unit's shard key, else the flat list
+ * under monolith (or when the row carries no explicit
+ * symbols — the agent then resolves the row's universe
+ * instead). Items are listing objects ({symbol}) or bare
+ * strings; the result is normalized (uppercase, trimmed,
+ * deduped). Empty ⇒ the run has no explicit symbols and
+ * resolves its universe from the stored list, as before.
+ * The helper lives here (not shared with shardSymbolsFor):
+ * the bespoke step returns the listing objects and retires
+ * in slice 7, while the feed step needs symbol strings — the
+ * behavior contract is pinned by tests on both sides.
+ */
+function explicitSymbolsFor(ctx: JobStepContext): string[] {
+  const read = (value: unknown): string[] => {
+    if (!Array.isArray(value)) return [];
+    const out: string[] = [];
+    for (const item of value) {
+      const symbol =
+        typeof item === "string"
+          ? item
+          : item !== null && typeof item === "object"
+            ? (item as { symbol?: unknown }).symbol
+            : undefined;
+      if (typeof symbol === "string") {
+        const s = symbol.toUpperCase().trim();
+        if (s.length > 0 && !out.includes(s)) out.push(s);
+      }
+    }
+    return out;
+  };
+  const flat = read(ctx.params.symbols);
+  if (!ctx.shardKey) return flat;
+  if (Array.isArray(ctx.params.shards)) {
+    const row = ctx.params.shards.find(
+      (entry) =>
+        entry !== null &&
+        typeof entry === "object" &&
+        (entry as { shardId?: unknown }).shardId === ctx.shardKey,
+    ) as { symbols?: unknown } | undefined;
+    const rowSymbols = read(row?.symbols);
+    if (rowSymbols.length > 0) return rowSymbols;
+  }
+  return flat;
+}
+
+/**
  * The feed step registry: the J1 built-ins plus the two feed
  * steps. Hosts compose this wherever a pipeline control plane is
  * built for feed work (the ScheduledAgent host, the workflow
@@ -533,17 +581,44 @@ export function createFeedStepRegistry(deps: FeedStepDeps): JobStepRegistry {
     const provider = deps.providerFor(def);
     if (!provider) throw feedNotConfigured(def.id, `a capture-wired provider for "${def.sourceId}"`);
 
+    // #5954 — explicit symbols (the premium path): the unit's
+    // own symbols, read the bespoke way (explicitSymbolsFor
+    // above — the shard table's row for this unit's shard key,
+    // else the flat list). Present ⇒ the run is symbols-fed:
+    // the stored list is never consulted, so `resolveRunUniverse`
+    // is skipped below (it would refuse "symbols" — no stored
+    // list by that name exists) and no partition is computed
+    // (the explicit list IS the fetch set). Explicit symbols win
+    // over the universe param, exactly as in the bespoke feed
+    // stage. Symbols-fed fetching is a quotes-run mode: any
+    // other dataset refuses by name rather than fetching a
+    // stored list the caller did not name.
+    const explicitSymbols = explicitSymbolsFor(ctx);
+    const symbolsMode = explicitSymbols.length > 0;
+    if (symbolsMode && def.dataset !== "quotes") {
+      throw new Error(
+        `${FEED_JOB_CODES.symbolsUnsupported}: feed job "${def.id}" (dataset "${def.dataset}") cannot run a symbols-fed fetch; explicit symbols are a quotes-run mode.`,
+      );
+    }
+
     // #3930: the run's universe input (a parameterized job —
     // fundamentals, technicals, sentiment): the step param names the stored index
     // list; absent ⇒ the definition's universe. Resolved (and
     // refused by name when unknown or unsupported) BEFORE any
     // refresh or fetch, so the refresh, the shard partition,
     // and the run all read the same list.
+    // #5954: in symbols mode there is no stored universe to
+    // resolve — the runner resolves the job's default list for
+    // the membership check only. A "symbols" universe with no
+    // explicit symbols falls through here and refuses by name
+    // below, never silently pulling the default list.
     const universeParam =
       typeof ctx.params.universe === "string" && ctx.params.universe.trim() !== ""
         ? ctx.params.universe.trim().toLowerCase()
         : undefined;
-    const effectiveUniverse = resolveRunUniverse(def, universeParam);
+    const effectiveUniverse = symbolsMode
+      ? undefined
+      : resolveRunUniverse(def, universeParam);
 
     // #3976: hydration lives in the RUNNERS now — the host's
     // indexRefresh wiring is passed into the runner deps below,
@@ -557,14 +632,17 @@ export function createFeedStepRegistry(deps: FeedStepDeps): JobStepRegistry {
     // pin: one run per unit, pulling only its partition), so a
     // cold store must be hydrated before that read. Its failure
     // is thrown NAMED — never swallowed.
-    if (ctx.shardKey && deps.indexRefresh) {
-      const existingList = await deps.universeStore.latest(effectiveUniverse);
+    // #5954: skipped in symbols mode — there is no stored list
+    // to hydrate for the partition read (the explicit list IS
+    // the fetch set).
+    if (!symbolsMode && ctx.shardKey && deps.indexRefresh) {
+      const existingList = await deps.universeStore.latest(effectiveUniverse!);
       if (!existingList || existingList.symbols.length === 0) {
         try {
           await executeIndexListRefreshJob({
             store: deps.indexRefresh.store,
             service: deps.indexRefresh.service,
-            indices: [effectiveUniverse],
+            indices: [effectiveUniverse!],
           });
         } catch (err) {
           throw new Error(
@@ -578,12 +656,14 @@ export function createFeedStepRegistry(deps: FeedStepDeps): JobStepRegistry {
     // universe (the partition is computed from the stored list —
     // the same list the run itself resolves, so partitions and
     // the whole-universe pull can never disagree on membership).
+    // #5954: skipped in symbols mode — the explicit list is the
+    // fetch set, not a partition of a stored list.
     let symbols: string[] | undefined;
-    if (ctx.shardKey) {
+    if (!symbolsMode && ctx.shardKey) {
       const shards =
         (await deps.shardsFor?.(def.id)) ??
         (Array.isArray(ctx.params.shards) ? (ctx.params.shards as string[]) : []);
-      const list = await deps.universeStore.latest(effectiveUniverse);
+      const list = await deps.universeStore.latest(effectiveUniverse!);
       const universeSymbols = list
         ? list.symbols.map((m) => m.symbol.toUpperCase().trim()).filter(Boolean)
         : [];
@@ -599,8 +679,16 @@ export function createFeedStepRegistry(deps: FeedStepDeps): JobStepRegistry {
       kind: ctx.runKind,
       runId: ctx.runId,
       ...(deps.userLogin ? { userLogin: deps.userLogin } : {}),
-      ...(universeParam ? { universe: effectiveUniverse } : {}),
-      ...(symbols ? { symbols } : {}),
+      // #5954: symbols mode passes the explicit list and no
+      // universe (the runner resolves the job's default list
+      // for the membership check only); the index path passes
+      // the resolved universe and the shard partition, as before.
+      ...(symbolsMode
+        ? { explicitSymbols }
+        : {
+            ...(universeParam ? { universe: effectiveUniverse! } : {}),
+            ...(symbols ? { symbols } : {}),
+          }),
       // #4065 — the chains run's fetch window rides the step
       // params (the composition passes the screen's DTE window
       // in); absent ⇒ the runner's defaults. A non-numeric

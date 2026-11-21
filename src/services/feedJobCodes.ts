@@ -36,6 +36,13 @@ export const FEED_JOB_CODES = {
   fetchTimeout: "FEED_FETCH_TIMEOUT",
   captureTimeout: "FEED_CAPTURE_TIMEOUT",
   deadlineExceeded: "FEED_DEADLINE_EXCEEDED",
+  /**
+   * #5954 — explicit symbols arrived for a feed job whose
+   * dataset has no symbols-fed mode (quotes only): the run
+   * refuses by name rather than fetching a stored list the
+   * caller did not name.
+   */
+  symbolsUnsupported: "FEED_SYMBOLS_UNSUPPORTED",
   /** #4304 — the provider verify probe exceeded its named bound. */
   verifyTimeout: "FEED_VERIFY_TIMEOUT",
 } as const;
