@@ -257,6 +257,11 @@ async function makeHarness(): Promise<Harness> {
         deliveryStore,
         senders: {},
         shardsFor,
+        // Issue #5885 (6c): the flipped deliver node runs
+        // generic deliver.apply, so the harness must wire the
+        // sink — without it the run fails
+        // DELIVER_SCREENER_SINK_NOT_CONFIGURED.
+        screenerDeliverOutcome: screenerDeps.deliverOutcome,
       },
       screenerDeps,
     ),

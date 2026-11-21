@@ -149,7 +149,7 @@ export const JOB_DEFINITION_SPECS: Readonly<Record<string, JobDefinitionSpec>> =
     name: "Stock screener",
     version: 2,
     description:
-      "stockscr — the five-node generic stock screen: feed → enrich → analyze → generate → deliver. Each stage is one engine node running a generic family step; the run's parameters ride every stage, and the builder computes the family job ids per command (provider + universe → feed job → derived chain) and injects them into the per-node params. The deliver node stays the bespoke screener.deliver step until 6c (#5885) flips it.",
+      "stockscr — the five-node generic stock screen: feed → enrich → analyze → generate → deliver. Each stage is one engine node running a generic family step; the run's parameters ride every stage, and the builder computes the family job ids per command (provider + universe → feed job → derived chain) and injects them into the per-node params. The deliver node runs generic deliver.apply with the screener marker (flipped in 6c #5885); the generate node hands it the delivery payload + canonical report id, and the door stamps the id onto the market outcome.",
     stages: [
       { kind: "feed", step: "feed.pull" },
       { kind: "enrich", step: "enrich.screener" },
@@ -159,7 +159,7 @@ export const JOB_DEFINITION_SPECS: Readonly<Record<string, JobDefinitionSpec>> =
         params: { ruleSets: ["screen", "factors"], inputMode: "handOff" },
       },
       { kind: "generate", step: "generate.apply", params: { reports: ["screener-report"] } },
-      { kind: "deliver", step: "screener.deliver" },
+      { kind: "deliver", step: "deliver.apply", params: { screener: true } },
     ],
     parameters: [
       {

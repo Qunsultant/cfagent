@@ -9,7 +9,9 @@
  * - Five nodes, 1:1 with the v2 "screener" spec: feed
  *   `feed.pull`, enrich `enrich.screener`, analyze
  *   `analyze.screener`, generate `generate.apply`, deliver
- *   `screener.deliver` (bespoke until 6c #5885 flips it).
+ *   `deliver.apply` (flipped in 6c #5885; bespoke
+ *   `screener.deliver` no longer rides the market
+ *   definition).
  * - Job ids derive per command: provider =
  *   `command.provider ?? DEFAULT_TENANT_PROVIDERS.dataProviderId`
  *   (the #5517 default — since #5516 the externalized
@@ -35,10 +37,8 @@ import { FEED_PULL_STEP } from "../src/services/feedPipelineJobs";
 import { ENRICH_SCREENER_STEP } from "../src/services/enrichPipelineJobs";
 import { ANALYZE_SCREENER_STEP } from "../src/services/analyzePipelineJobs";
 import { GENERATE_APPLY_STEP } from "../src/services/generatePipelineJobs";
-import {
-  SCREENER_DELIVER_STEP,
-  buildScreenerJobDefinition,
-} from "../src/services/screenerPipelineJobs";
+import { DELIVER_APPLY_STEP } from "../src/services/deliverPipelineJobs";
+import { buildScreenerJobDefinition } from "../src/services/screenerPipelineJobs";
 import type { WorkflowJobCommand } from "../src/workflows/workflowPorts";
 
 function listing(symbol: string) {
@@ -114,7 +114,10 @@ describe("generic definition builder (#5884)", () => {
       ENRICH_SCREENER_STEP,
       ANALYZE_SCREENER_STEP,
       GENERATE_APPLY_STEP,
-      SCREENER_DELIVER_STEP,
+      // Issue #5885 (6c): the deliver node is flipped onto
+      // generic deliver.apply — the bespoke screener.deliver
+      // step no longer rides the market definition.
+      DELIVER_APPLY_STEP,
     ]);
     expect(nodes.map((n) => n.kind)).toEqual(spec.stages.map((s) => s.kind));
     expect(nodes.map((n) => n.step)).toEqual(spec.stages.map((s) => s.step));
@@ -142,8 +145,11 @@ describe("generic definition builder (#5884)", () => {
         reports: ["screener-report"],
       }),
     );
-    // The deliver node stays bespoke in this slice (6c flips
-    // it): no family job id rides it.
+    // Issue #5885 (6c): the deliver node is flipped onto
+    // generic deliver.apply with the screener marker — and
+    // still no family job id rides it (deliver.apply's
+    // screener application names no deliver job).
+    expect(byKind.get("deliver")).toEqual(expect.objectContaining({ screener: true }));
     expect(byKind.get("deliver")).not.toHaveProperty("deliverJobId");
   });
 

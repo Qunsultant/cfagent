@@ -16,10 +16,11 @@
  *   dispatched via the engine, producing a screen result —
  *   monolith (one shard) and sharded (two shards) shapes,
  *   plus the goal leg branching like runShardFlow.
- *   The deliver leg degrades in the flip (#5884 6b3): the
- *   proof dispatches with deliver: false (6c #5885 owns the
- *   deliver proof); the feed/enrich/analyze/generate legs
- *   and the run record are proven here.
+ *   The deliver leg is flipped in 6c (#5885): the proof
+ *   dispatches with deliver: true and the deliver node runs
+ *   generic deliver.apply against the harness sink; the
+ *   feed/enrich/analyze/generate legs and the run record are
+ *   proven here alongside it.
  */
 import { describe, expect, it } from "vitest";
 import { createInMemoryJobPipelineStores } from "../src/data/inMemoryJobPipelineAdapter";
@@ -55,6 +56,7 @@ import { FEED_PULL_STEP } from "../src/services/feedPipelineJobs";
 import { ENRICH_SCREENER_STEP } from "../src/services/enrichPipelineJobs";
 import { ANALYZE_SCREENER_STEP } from "../src/services/analyzePipelineJobs";
 import { GENERATE_APPLY_STEP } from "../src/services/generatePipelineJobs";
+import { DELIVER_APPLY_STEP } from "../src/services/deliverPipelineJobs";
 import {
   SCREENER_ANALYSIS_STEP,
   SCREENER_DELIVER_STEP,
@@ -325,6 +327,12 @@ async function makeHarness(opts: {
         deliveryStore,
         senders: {},
         shardsFor,
+        // Issue #5885 (6c): the flipped deliver node runs
+        // generic deliver.apply, so the harness must wire the
+        // sink — without it a deliver: true dispatch throws
+        // DELIVER_SCREENER_SINK_NOT_CONFIGURED and fails the
+        // run (the step never falls back to the bespoke path).
+        screenerDeliverOutcome: deps.deliverOutcome,
       },
       deps,
     ),
@@ -379,7 +387,10 @@ describe("job-definition builder (#4190)", () => {
       enrich: ENRICH_SCREENER_STEP,
       analyze: ANALYZE_SCREENER_STEP,
       generate: GENERATE_APPLY_STEP,
-      deliver: SCREENER_DELIVER_STEP,
+      // Issue #5885 (6c): the deliver node is flipped onto
+      // generic deliver.apply — the bespoke screener.deliver
+      // step no longer rides the market definition.
+      deliver: DELIVER_APPLY_STEP,
     });
   });
 
@@ -590,11 +601,11 @@ describe("screener step registry (#4190)", () => {
 describe("engine proof — market screen (#4190)", () => {
   it("defines + dispatches a screener job via the engine, producing a screen result", async () => {
     const h = await makeHarness();
-    // The deliver leg degrades in the flip (#5884 6b3): the
-    // proof dispatches with deliver: false (6c #5885 owns the
-    // deliver proof). The feed/enrich/analyze/generate legs
-    // and the run record are proven here.
-    const command = marketCommand({ deliver: false });
+    // Issue #5885 (6c): the deliver leg is flipped — the proof
+    // dispatches with deliver: true (the marketCommand default)
+    // and the deliver node runs generic deliver.apply against
+    // the harness sink.
+    const command = marketCommand();
     const definition = await h.control.defineJob(buildScreenerJobDefinition(command));
     expect(definition.jobId).toBe("screen-manual-4190");
 
@@ -624,8 +635,19 @@ describe("engine proof — market screen (#4190)", () => {
     expect(generated).toBeTruthy();
     expect(generated!.reports.map((r) => r.kind)).toContain("screener-report");
 
-    // Delivery was skipped, never attempted.
-    expect(h.delivered).toHaveLength(0);
+    // Delivery ran through the flipped node: one sink call
+    // carrying the converter payload for the run's document —
+    // the generic shape (no matchedCount, no artifact keys),
+    // and no canonical report id (this harness leaves the
+    // canonical seam unwired).
+    expect(h.delivered).toHaveLength(1);
+    const delivered = h.delivered[0]?.payload as Record<string, unknown>;
+    expect(h.delivered[0]?.userLogin).toBe("owner");
+    expect(delivered?.success).toBe(true);
+    expect(delivered?.totalScanned).toBe(4);
+    expect(delivered?.universe).toBe("Nasdaq-100");
+    expect(delivered).not.toHaveProperty("matchedCount");
+    expect(delivered).not.toHaveProperty("canonicalReportId");
 
     // The run is on the platform run-record machinery, as the screener job.
     expect(h.runStore.listByJob("screen-manual-4190")).toHaveLength(1);

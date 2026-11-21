@@ -112,8 +112,8 @@ stock screener is redefined onto the generic steps (#5884,
 #4437 slice 6b3, the flip): the `screener` spec (v2,
 `src/config/jobDefinitionCatalog.ts:147`) is five generic nodes
 — `feed.pull`, `enrich.screener`, `analyze.screener`,
-`generate.apply`, and `screener.deliver` (the deliver node stays
-bespoke until slice 6c, #5885, flips it onto `deliver.apply`).
+`generate.apply`, and `deliver.apply` (the deliver node flipped
+onto the generic step in slice 6c, #5885).
 The options-chain family likewise uses bespoke steps; no other
 family has yet been redefined onto the generic steps.
 
@@ -205,7 +205,8 @@ chain (#5884, #4437 slice 6b3): the `screener` spec goes v1 → v2,
 five nodes — `feed.pull`, `enrich.screener`, `analyze.screener`
 (params `ruleSets: ["screen", "factors"]`, `inputMode: "handOff"`),
 `generate.apply` (params `reports: ["screener-report"]`), and
-`screener.deliver` (bespoke until 6c). The family job ids are
+`screener.deliver` (bespoke; flipped onto `deliver.apply` in 6c,
+#5885). The family job ids are
 computed per command, never pinned in the spec: provider =
 the command's provider, falling back to the tenant default
 data provider (a static spec literal would pin one provider
@@ -219,9 +220,8 @@ shard naming one agrees (`screenerFeedNodeUniverse`); per-shard
 universes govern per unit (6b1), explicit-symbols shards name
 none (6b0). Goal commands build the untouched `goalScreen` spec
 — a goal param on a market definition is refused, never
-dropped. The deliver leg degrades until 6c (the engine proof
-dispatches with `deliver: false`); the collation degrades until
-6e (#5922) teaches it the generic shape. The flip also fixed
+dropped. The deliver leg is flipped in 6c (#5885, below);
+the collation degrades until 6e (#5922) teaches it the generic shape. The flip also fixed
 `analyze.screener`'s hand-off for sharded runs: the engine hands
 a sharded unit the per-shard map, and the step unwraps its own
 shard's entry (the bespoke `priorFor` idiom) before resolving
@@ -235,6 +235,67 @@ param refused) and the moved pins in
 `tests/screener_substrate_4190.test.ts` /
 `tests/stage_visibility_4365.test.ts`.
 <!-- /5884: the flip — screener spec onto the generic chain -->
+
+<!-- 5885: the deliver flip — generate→deliver payload mapping + sink wiring -->
+Slice 6c (#5885) flips the deliver node onto generic
+`deliver.apply` (params `screener: true`) and wires the real
+sink at both residencies — the ScheduledAgent host's
+`deliverStepDepsForScheduledAgent` and the workflow host's
+inline deliver deps in `createJobPipelineWorkflowDeps` both set
+`screenerDeliverOutcome: buildDeliverDoor(env)` (the door,
+exported from `src/services/screenerPipelineJobs.ts`); without
+it a `deliver: true` dispatch refuses
+`DELIVER_SCREENER_SINK_NOT_CONFIGURED` and fails the run. The
+engine proof now dispatches with `deliver: true`. The payload
+mapping is generate-output payload + door stamp, not a door-side
+conversion: the door has no store access (orchestrator stub
+only), the deliver step must not consult the channel path's
+stores (#5826 pin), and the generate run is the only place where
+the document, the format records and the canonical record coexist
+without a store read. So `runGenerateJob` builds the delivery
+payload in its per-report loop (`buildScreenerDeliveryPayload`,
+`src/services/generateJobs.ts`) — trigger, success, timestamp
+(the run's finishedAt), totalScanned, universe (the document's
+label), summary, thesis (the document's title), the top-by-composite
+opportunities joined with their rows (signal from the row's
+"screen" signal, momentum from the row's composite score, price
+from the row; a top symbol with no row still rides, scored from
+the summary alone), and the canonical report id when the leg stored
+(or deduped) a row — and carries it on the run result as
+`deliveryPayload` (screener-report runs only) alongside `reportId`
+(the first stored/deduped canonical record's id, in configuration
+order; null when no leg stored a row). `generate.apply` passes
+both through as `payload` + `reportId` on its step output, which
+the deliver step already reads (`prior.payload`,
+`prior.reportId`). The door converts via
+`screenerOutcomeFromRunResult` (unchanged) and stamps the
+payload-carried canonical report id onto the market outcome
+(`buildScreenerMarketOutcome`, pure and unit-tested) — the stamp
+fires only for payloads that carry the field, so the bespoke path
+is unchanged and a bespoke market run with PDFs still takes the
+PDF-adoption branch downstream (the C4 canonical branch sits
+after the pdf-failed branch and before the no-keys branch in
+`asyncJobs.ts`; stamping from `opts.canonicalReportId` instead
+would have diverted those runs). Without the stamp a generic
+delivery is dead on arrival: no pdfKeys and no canonical id hits
+"no artifact" → `FAILURE_REPORT_ARTIFACT_MISSING`. What the
+document does not carry, the payload does not invent: no
+matchedCount (the analyzed artifact carries no matched notion),
+no pdfKey/xlsxKey/csvKey (the generic formats are inline bodies,
+not artifact keys) — rich per-symbol parity is #5875, owned by
+slice 7. Known limitation, pinned by test: the generate output
+carries no `duplicate` field, so the scheduled-duplicate
+pass-through never fires in the generic chain — delivering the
+same generate output twice calls the sink twice with the same
+`workflow:<jobId>` delivery id (wasted work, not double delivery;
+the sink converges on the delivery id). Pinned by
+`tests/screener_generate_delivery_payload_5885.test.ts`
+(converter, run result, step pass-through, door stamp), the
+restored full-chain + step parity tests in
+`tests/screener_deliver_generic_5826.test.ts`, and the flipped
+proof + definition pin in `tests/screener_substrate_4190.test.ts` /
+`tests/screener_generic_definition_5884.test.ts`.
+<!-- /5885: the deliver flip — generate→deliver payload mapping + sink wiring -->
 
 The screener's deliver stage likewise runs through the generic deliver
 machinery (#5826): `deliver.apply` gains a screener application

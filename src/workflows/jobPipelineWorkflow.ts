@@ -47,7 +47,10 @@ import { resolveChainSourceForRequest } from "./brokerChainSourceResidency";
 import { stageQueueSendFromEnv } from "./stageQueueTransport";
 import { envStrings as envStringsFromEnv } from "./envStrings";
 import { createPipelineStepRegistry } from "../services/enrichPipelineJobs";
-import { screenerStepDepsForWorkflow } from "../services/screenerPipelineJobs";
+import {
+  buildDeliverDoor,
+  screenerStepDepsForWorkflow,
+} from "../services/screenerPipelineJobs";
 import { buildFeedJobRegistry } from "../services/feedJobs";
 import { buildEnrichJobRegistry } from "../services/enrichJobs";
 import { buildAnalyzeJobRegistry } from "../services/analyzeJobs";
@@ -387,6 +390,11 @@ export function createJobPipelineWorkflowDeps(env: Env): JobPipelineDeps {
         shardsFor: async (jobId) =>
           (await stores.definitions.getDefinition(jobId))?.config.processing
             .shards ?? [],
+        // Issue #5885 (6c): the flipped deliver node runs
+        // generic deliver.apply — the workflow residency wires
+        // the real sink (the deliver door) here, mirroring the
+        // host's deliverStepDepsForScheduledAgent.
+        screenerDeliverOutcome: buildDeliverDoor(env),
       },
       // Issue #4190 (#3550 S1, wired in #4192; #5823): the screener steps
       // compose here too — their quote/history deps are bound over the
