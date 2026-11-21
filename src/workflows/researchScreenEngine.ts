@@ -42,6 +42,7 @@ import {
   resolveResearchStageModes,
   type ResearchStorageMode,
 } from "../config/researchJobConfig";
+import { newRunId } from "../services/executionTreeIds";
 import { researchEngineJobId } from "./researchDataPorts";
 import { codedMessage } from "../outcomes/outcomeAspects";
 import type { FeatureFlagPort } from "../features/featureFlagPorts";
@@ -202,7 +203,7 @@ export async function dispatchResearchEngineRun(
   const config = resolveResearchJobConfig(input.env);
   assertResearchAopCompliance(config, { userLogin: input.userLogin });
 
-  const runId = input.runId?.trim() || crypto.randomUUID();
+  const runId = input.runId?.trim() || newRunId();
   const engineJobId = researchEngineJobId(runId);
 
   const cutoverEnabled = await isResearchEngineCutoverEnabled(input.flags);
@@ -252,6 +253,10 @@ export async function dispatchResearchEngineRun(
   const control = new JobPipelineControl({
     stores,
     runRecorder,
+    // The OODA job and its durable J-stack execution are one run. Reuse
+    // JobPipelineControl's existing ID factory seam so the report/run ID
+    // minted above is also the engine's persisted workflow run ID.
+    newRunId: () => runId,
     publisher: null,
     steps: registerResearchSteps(createBuiltinStepRegistry(), wiredDeps),
     invocation: "sync",
