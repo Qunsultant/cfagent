@@ -138,6 +138,8 @@ export async function screenStoredIndexList(args: {
     symbols: membersToListings(fresh),
     maxSymbols: args.maxSymbols,
     quoteDeps: args.quoteDeps,
+    // Issue #4439: the caller's exchange scope rides the acquisition.
+    exchange: args.filter?.exchange,
   });
   return screenUniverse(new DynamicMarketScreener(), acquired, args.filter ?? {});
 }

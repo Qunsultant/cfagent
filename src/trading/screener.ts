@@ -158,6 +158,12 @@ export class DynamicMarketScreener implements IMarketScreener {
     if (filter.sector && filter.sector !== "all" && filter.sector !== "Any") {
       summaryParts.push(`Sector: ${filter.sector}`);
     }
+    // Issue #4439: the applied exchange rides the run record's filter
+    // summary, next to the sector — the record states the scope the
+    // run actually applied.
+    if (filter.exchange && filter.exchange !== "ALL") {
+      summaryParts.push(`Exchange: ${filter.exchange}`);
+    }
     if (filter.minPrice !== undefined) summaryParts.push(`Min price: $${filter.minPrice}`);
     if (filter.maxPrice !== undefined) summaryParts.push(`Max price: $${filter.maxPrice}`);
     if (filter.minMarketCap !== undefined && filter.minMarketCap > 0) {
@@ -255,6 +261,27 @@ export class DynamicMarketScreener implements IMarketScreener {
           rejections.push({
             symbol: stock.symbol,
             reason: `Search mismatch for "${filter.search.trim()}"`,
+            price: stock.price,
+            changePercent: stock.changePercent,
+          });
+          continue;
+        }
+      }
+
+      // 2. Exchange check (issue #4439): a requested exchange filters on
+      // the item's listing exchange. No listing exchange on the item
+      // means no verdict — pass, never reject (issue #950 sector
+      // precedent). Acquisition is the enforcement point for pipeline
+      // runs, which always attach the listing exchange; this gate is
+      // the backstop for any caller that reaches the evaluator with
+      // exchange-carrying quotes.
+      if (filter.exchange && filter.exchange !== "ALL") {
+        const wanted = filter.exchange.toUpperCase();
+        const itemExchange = stock.listingExchange?.toUpperCase();
+        if (itemExchange && itemExchange !== wanted) {
+          rejections.push({
+            symbol: stock.symbol,
+            reason: `Exchange "${stock.listingExchange}" does not match requested "${filter.exchange}"`,
             price: stock.price,
             changePercent: stock.changePercent,
           });

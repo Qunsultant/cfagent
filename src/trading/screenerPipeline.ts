@@ -220,7 +220,9 @@ export interface AcquireUniverseOptions {
   mode: UniverseMode;
   /** Tunables (defaults to DEFAULT_SCREENER_CONFIG). */
   config?: ScreenerConfig;
-  /** all-listings: exchange scope filter ("ALL" or exchange code). */
+  /** Exchange scope filter ("ALL" or exchange code). Issue #4439: every
+   * mode honours it — the live-quote modes filter the resolved listings
+   * by it before fetching quotes, exactly like all-listings. */
   exchange?: string;
   /** live-quotes / etrade-only / yahoo: pre-filtered listings (default: tech-keyword filter; yahoo: the curated Yahoo universe). */
   symbols?: NasdaqStockListing[];
@@ -1475,6 +1477,23 @@ export function yahooUniverseListings(): NasdaqStockListing[] {
 }
 
 /**
+ * Issue #4439: scope a listings array to one exchange ("ALL" or absent
+ * means the whole directory). The manual path's predicate, shared by
+ * every mode: a listing matches when its exchange code matches the
+ * requested code, compared case-insensitively on both sides. Typed
+ * structurally — it only reads `.exchange` — so call sites keep their
+ * own listing types.
+ */
+function applyExchangeScope<T extends { exchange: string }>(
+  listings: T[],
+  exchange?: string
+): T[] {
+  if (!exchange || exchange === "ALL") return listings;
+  const wanted = exchange.toUpperCase();
+  return listings.filter((listing) => listing.exchange.toUpperCase() === wanted);
+}
+
+/**
  * Acquire the screening universe. Manual uses all-listings; the
  * screener agent and scheduled runs use etrade-only; live-quotes is
  * the composed E*TRADE-primary + Yahoo gap-fill mode (#1356).
@@ -1500,11 +1519,15 @@ export async function acquireUniverse(
       throw new Error("yahoo mode requires yahooDeps.fetchYahooQuote");
     }
     const cfg = opts.config ?? DEFAULT_SCREENER_CONFIG;
-    const symbols = opts.symbols ?? yahooUniverseListings();
+    const symbols = applyExchangeScope(opts.symbols ?? yahooUniverseListings(), opts.exchange);
     const maxSymbols = opts.maxSymbols ?? cfg.acquisition.defaultMaxSymbols;
     const limited = maxSymbols > 0 ? symbols.slice(0, maxSymbols) : symbols;
     if (limited.length === 0) {
-      throw new Error("The selected Yahoo universe contains no listings; no static symbols were substituted.");
+      throw new Error(
+        "The selected Yahoo universe contains no listings" +
+          (opts.exchange && opts.exchange !== "ALL" ? ` in exchange scope ${opts.exchange}` : "") +
+          "; no static symbols were substituted."
+      );
     }
     // Issue #1770: the run's subrequest budget bounds Yahoo
     // acquisition exactly like the E*TRADE legs below; deferred
@@ -1521,6 +1544,15 @@ export async function acquireUniverse(
         onBudgetDeferred: (symbols) => budgetDeferred.push(...symbols),
       }
     );
+    // Issue #4439: stamp each quote with its listing exchange, so the
+    // filter stage can see the scope the acquisition applied.
+    const listingsBySymbol = new Map(
+      limited.map((listing) => [listing.symbol.toUpperCase(), listing])
+    );
+    for (const quote of quotes) {
+      const listing = listingsBySymbol.get(quote.symbol.toUpperCase());
+      if (listing) quote.listingExchange = listing.exchange.toUpperCase();
+    }
     const quotedSymbols = new Set(quotes.map((q) => q.symbol.toUpperCase()));
     const failed = limited
       .map((l) => l.symbol)
@@ -1594,8 +1626,10 @@ export async function acquireUniverse(
       cfg.acquisition.maxSubrequestsPerRun
     );
     const budgetDeferred = new Set<string>();
-    const symbols =
-      opts.symbols ?? filterTechnologySymbols(await resolveUniverseListings(opts, "live-quotes"));
+    const symbols = applyExchangeScope(
+      opts.symbols ?? filterTechnologySymbols(await resolveUniverseListings(opts, "live-quotes")),
+      opts.exchange
+    );
     const maxSymbols = opts.maxSymbols ?? cfg.acquisition.defaultMaxSymbols;
     const limited = maxSymbols > 0 ? symbols.slice(0, maxSymbols) : symbols;
     const gapFillLabel = opts.quoteDeps.gapFillLabel;
@@ -1608,7 +1642,7 @@ export async function acquireUniverse(
           mode: "live_quotes",
           candidateCount: symbols.length,
           listingCount: 0,
-          message: `E*TRADE-primary live quotes${gapFillLabel ? ` with ${gapFillLabel} gap-fill` : ""}; 0 of 0 symbols quoted.`,
+          message: `E*TRADE-primary live quotes${gapFillLabel ? ` with ${gapFillLabel} gap-fill` : ""}; 0 of 0 symbols quoted${opts.exchange && opts.exchange !== "ALL" ? ` in exchange scope ${opts.exchange}` : ""}.`,
         },
       };
     }
@@ -1640,6 +1674,8 @@ export async function acquireUniverse(
         ...live,
         symbol: listing.symbol,
         companyName: live.companyName || listing.companyName,
+        // Issue #4439: the listing row is the authority for exchange.
+        listingExchange: listing.exchange.toUpperCase(),
         sector: resolveStockSector(listing.symbol, live.companyName || listing.companyName, live.sector || listing.sector),
         source: live.source ?? "unknown",
         quoteStatus: live.quoteStatus || "LIVE",
@@ -1958,12 +1994,18 @@ export async function acquireUniverse(
       cfg.acquisition.maxSubrequestsPerRun
     );
     const budgetDeferred = new Set<string>();
-    const symbols =
-      opts.symbols ?? filterTechnologySymbols(await resolveUniverseListings(opts, opts.mode === "etrade-only" ? "etrade-only" : opts.mode));
+    const symbols = applyExchangeScope(
+      opts.symbols ?? filterTechnologySymbols(await resolveUniverseListings(opts, opts.mode === "etrade-only" ? "etrade-only" : opts.mode)),
+      opts.exchange
+    );
     const maxSymbols = opts.maxSymbols ?? cfg.acquisition.defaultMaxSymbols;
     const limited = maxSymbols > 0 ? symbols.slice(0, maxSymbols) : symbols;
     if (limited.length === 0) {
-      throw new Error("The selected live universe contains no listings; no static symbols were substituted.");
+      throw new Error(
+        "The selected live universe contains no listings" +
+          (opts.exchange && opts.exchange !== "ALL" ? ` in exchange scope ${opts.exchange}` : "") +
+          "; no static symbols were substituted."
+      );
     }
     const quotes: ETradeQuote[] = [];
     const quotedSymbols = new Set<string>();
@@ -1991,6 +2033,8 @@ export async function acquireUniverse(
         ...live,
         symbol: listing.symbol,
         companyName: live.companyName || listing.companyName,
+        // Issue #4439: the listing row is the authority for exchange.
+        listingExchange: listing.exchange.toUpperCase(),
         // This provider's quote payloads do not reliably include sector. The
         // dynamically fetched Nasdaq listing row does, and resolveStockSector
         // provides curated/inferred enrichment.
@@ -2267,12 +2311,10 @@ export async function acquireUniverse(
   for (const listing of listings)
     sourceCounts[listing.exchange] = (sourceCounts[listing.exchange] || 0) + 1;
   sourceCounts.uniqueListings = listings.length;
-  let selectedListings =
-    opts.exchange && opts.exchange !== "ALL"
-      ? listings.filter(
-          (listing) => listing.exchange.toUpperCase() === opts.exchange
-        )
-      : listings;
+  // Issue #4439: the same exchange-scope predicate as the live-quote
+  // modes, via the shared helper. The empty-selection fallback below
+  // is this branch's pre-existing behaviour, unchanged by this slice.
+  let selectedListings = applyExchangeScope(listings, opts.exchange);
   // This non-E*TRADE discovery view displays the listings feed's last sale as
   // its price. Keep symbol-only rows for universe resolution elsewhere, but do
   // not render a made-up zero-price quote in this view.
