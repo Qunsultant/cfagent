@@ -114,6 +114,56 @@ function testConfig(overrides: Partial<ResearchConfig> = {}): ResearchConfig {
 }
 
 describe("runResearchPipeline", () => {
+  it("records every universe symbol, budget exclusion, data source and structure outcome", async () => {
+    const base = fixtureProvider();
+    const provider: ResearchDataProvider = {
+      ...base,
+      getUniverseSymbols: async () => ["AAA", "BBB", "CCC", "DDD"],
+      getQuote: async (symbol) => symbol === "BBB" ? null : {
+        symbol, price: 100, timestamp: NOW, marketCap: symbol === "CCC" ? 1_000_000_000 : 10_000_000_000,
+        isEtf: false, quoteStatus: "live", source: "alpaca",
+      },
+      getChain: async (symbol) => ({
+        symbol, underlyingPrice: 100, asOf: NOW, provenance: "live", source: "alpaca",
+        expiries: [{ expiry: "2026-12-18", dte: 35, legs: chainLegs() }],
+      }),
+    };
+    const report = await runResearchPipeline(
+      { provider },
+      testConfig({ maxCandidates: 1, maxChainsPerRun: 1 }),
+      { trigger: "manual", userLogin: "tester", brokerId: "alpaca", mode: "paper", runId: "audit-test", now: NOW },
+    );
+    expect(report.symbolEvaluations).toHaveLength(4);
+    expect(report.symbolEvaluations?.map(({ symbol, outcome }) => [symbol, outcome])).toEqual([
+      ["AAA", "evaluated"], ["BBB", "quote_unavailable"], ["CCC", "filtered"], ["DDD", "not_screened"],
+    ]);
+    expect(report.symbolEvaluations?.[0].quote?.source).toBe("alpaca");
+    expect(report.symbolEvaluations?.[0].chain?.source).toBe("alpaca");
+    expect(report.symbolEvaluations?.[0].strategies.length).toBeGreaterThan(0);
+    expect(report.stats.chainsAttempted).toBe(1);
+    expect(report.brokerId).toBe("alpaca");
+    expect(report.mode).toBe("paper");
+  });
+
+  it("counts empty option-chain responses as attempted refusals within the chain budget", async () => {
+    const base = fixtureProvider();
+    const report = await runResearchPipeline(
+      {
+        provider: {
+          ...base,
+          getUniverseSymbols: async () => ["AAA", "BBB"],
+          getChain: async (symbol) => ({ symbol, underlyingPrice: 0, asOf: NOW, provenance: "unavailable", source: "alpaca", expiries: [] }),
+        },
+      },
+      testConfig({ maxChainsPerRun: 1 }),
+      { trigger: "manual", userLogin: "tester", runId: "empty-chain-test", now: NOW },
+    );
+    expect(report.stats.chainsAttempted).toBe(1);
+    expect(report.stats.chainsFetched).toBe(0);
+    expect(report.symbolEvaluations?.[0]).toMatchObject({ outcome: "chain_failed", chain: { outcome: "failed", source: "alpaca", expiryCount: 0 } });
+    expect(report.symbolEvaluations?.[1]).toMatchObject({ outcome: "not_evaluated" });
+  });
+
   it("qualifies ideas on clean fixture data", async () => {
     const report = await runResearchPipeline(
       { provider: fixtureProvider() },

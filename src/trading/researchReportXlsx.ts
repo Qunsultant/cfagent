@@ -23,6 +23,8 @@ import {
   researchIdeaRows,
   researchLegRows,
   researchRejectedRows,
+  RESEARCH_SYMBOL_EVALUATION_COLUMNS,
+  researchSymbolEvaluationRows,
   researchSummaryRows,
   researchTradeCardRows,
   researchWatchlistRows,
@@ -64,6 +66,7 @@ export function generateResearchReportXlsx(report: ResearchReport): Uint8Array {
   );
   XLSX.utils.book_append_sheet(wb, sheet(researchWatchlistRows(report) as any, WATCHLIST_COLUMNS), "Watchlist");
   XLSX.utils.book_append_sheet(wb, sheet(researchRejectedRows(report) as any, REJECTED_COLUMNS), "Rejected");
+  XLSX.utils.book_append_sheet(wb, sheet(researchSymbolEvaluationRows(report), RESEARCH_SYMBOL_EVALUATION_COLUMNS), "Symbol Evaluations");
 
   const summary = XLSX.utils.aoa_to_sheet([["field", "value"], ...researchSummaryRows(report)]);
   XLSX.utils.book_append_sheet(wb, summary, "Run Summary");
