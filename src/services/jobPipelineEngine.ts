@@ -106,6 +106,8 @@ import { publishJobStatus, publishStageAction } from "./jobPipelineEvents";
 import { newRunId, stepExecutionId } from "./executionTreeIds";
 import type { MessagePublisher, StageName } from "../messaging/messagingPorts";
 import {
+  RETRY_BUCKET_NAMES,
+  isRetryBucketName,
   resolvePipelinePolicy,
   type PipelinePolicy,
 } from "./pipelinePolicy";
@@ -2698,14 +2700,37 @@ export class JobPipelineControl {
     runDeadlineMs?: number,
   ): StageRunnerStage {
     const kind = node.kind as PipelineStage;
+    // Issue #4781 S2 — the node's own fan-out cap and retry bucket
+    // win; absent, the contract's defaults apply (stageMaxParallel
+    // → 4; stageRetryBucket → the table / "report"). An invalid
+    // value that somehow reaches the engine is refused by name —
+    // never silently the default, and never a mid-run TypeError on
+    // budget.maxAttempts. A cap on a sequential node is inert, not
+    // an error (the runner returns 1 for sequential stages).
+    if (
+      node.maxParallel !== undefined &&
+      (typeof node.maxParallel !== "number" ||
+        !Number.isInteger(node.maxParallel) ||
+        node.maxParallel < 1)
+    ) {
+      throw new Error(
+        `Stage "${path}" maxParallel ${String(node.maxParallel)} must be a positive integer.`,
+      );
+    }
+    if (node.retryBucket !== undefined && !isRetryBucketName(node.retryBucket)) {
+      throw new Error(
+        `Stage "${path}" retryBucket ${JSON.stringify(node.retryBucket)} is invalid — a stage retries under one of: ${RETRY_BUCKET_NAMES.join(", ")}.`,
+      );
+    }
     // Kinds naming a chain stage retry under that stage's bucket
     // (the contract's own tables); any other kind takes the
-    // contract's job-stage default ("report").
-    const retryBucket = (
-      ["feed", "generate", "store", "serve", "deliver"] as const
-    ).includes(kind)
-      ? STAGE_RETRY_BUCKET[runnerStageForPipelineStage(kind)]
-      : undefined;
+    // contract's job-stage default ("report"). The node's own
+    // bucket wins over both.
+    const retryBucket =
+      node.retryBucket ??
+      ((["feed", "generate", "store", "serve", "deliver"] as const).includes(kind)
+        ? STAGE_RETRY_BUCKET[runnerStageForPipelineStage(kind)]
+        : undefined);
     return {
       stage: jobStageId(path),
       execution: mode.concurrency,
@@ -2716,6 +2741,7 @@ export class JobPipelineControl {
       // passes no bound, so the stage timeout stands alone.
       timeoutMs: resolveStageTimeoutMsForNode(node, this.stageDefaultMs(), runDeadlineMs),
       pacing: mode.pacing,
+      ...(node.maxParallel !== undefined ? { maxParallel: node.maxParallel } : {}),
       ...(retryBucket ? { retryBucket } : {}),
     };
   }

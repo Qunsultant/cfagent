@@ -1444,6 +1444,15 @@ export class ScheduledAgent extends PortThink {
       stageSchedules?: Record<string, { intervalMinutes?: number; cron?: string }>;
       /** Issue #4775 S1 — per-stage per-unit deadline, in milliseconds. */
       stageTimeouts?: Record<string, number>;
+      /** Issue #4781 S2 — per-stage fan-out cap. */
+      stageMaxParallel?: Record<string, number>;
+      /** Issue #4781 S2 — per-stage retry bucket. */
+      stageRetryBuckets?: Record<
+        string,
+        import("../workflows/stageRunnerPorts").StageRetryBucket
+      >;
+      /** Issue #4781 S2 — per-stage processing overrides (checkpoint interval). */
+      stageProcessing?: Record<string, { checkpointEverySteps?: number }>;
     },
   ): Promise<{ jobId: string; name: string; version: number; stages: number }> {
     const spec = jobDefinitionSpec(specId);
@@ -1470,6 +1479,9 @@ export class ScheduledAgent extends PortThink {
       stageModes: opts?.stageModes,
       stageSchedules: opts?.stageSchedules,
       stageTimeouts: opts?.stageTimeouts,
+      stageMaxParallel: opts?.stageMaxParallel,
+      stageRetryBuckets: opts?.stageRetryBuckets,
+      stageProcessing: opts?.stageProcessing,
     });
     const definition = await control.defineJob(
       buildJobConfigFromSpec(spec, id, runParams, perStage),

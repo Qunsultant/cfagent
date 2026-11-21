@@ -70,6 +70,11 @@ const CADENCES: ReadonlyArray<{ id: string; label: string; intervalSeconds: numb
 
 export function WorkflowDefinitionFlow() {
   const [definitions, setDefinitions] = useState<DefinitionSpec[] | null>(null);
+  // Issue #4781 S2 — the retry-bucket names the server offers per
+  // stage (GET /api/job-definitions carries them, from the same
+  // pipelinePolicy source the server validates against), so the
+  // client never hard-codes a list.
+  const [retryBuckets, setRetryBuckets] = useState<string[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [target, setTarget] = useState<DefinitionSpec | null>(null);
   const [jobId, setJobId] = useState("");
@@ -83,6 +88,12 @@ export function WorkflowDefinitionFlow() {
   // Issue #4775 S1 — per-stage per-unit deadline, in milliseconds,
   // as typed (the server parses and refuses an invalid value by name).
   const [stageTimeouts, setStageTimeouts] = useState<Record<string, string>>({});
+  // Issue #4781 S2 — per-stage fan-out cap, retry bucket, and
+  // checkpoint interval, as typed (the server parses and refuses an
+  // invalid value by name). Empty means "the default applies".
+  const [stageMaxParallel, setStageMaxParallel] = useState<Record<string, string>>({});
+  const [stageRetryBuckets, setStageRetryBuckets] = useState<Record<string, string>>({});
+  const [stageProcessing, setStageProcessing] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [scheduled, setScheduled] = useState<{ jobId: string; intervalSeconds: number } | null>(null);
@@ -92,8 +103,14 @@ export function WorkflowDefinitionFlow() {
     fetch("/api/job-definitions", { headers: { Accept: "application/json" } })
       .then(async (res) => {
         if (!res.ok) throw new Error(`status ${res.status}`);
-        const payload = (await res.json()) as { definitions?: DefinitionSpec[] };
-        if (!cancelled) setDefinitions(Array.isArray(payload.definitions) ? payload.definitions : []);
+        const payload = (await res.json()) as {
+          definitions?: DefinitionSpec[];
+          retryBuckets?: string[];
+        };
+        if (!cancelled) {
+          setDefinitions(Array.isArray(payload.definitions) ? payload.definitions : []);
+          setRetryBuckets(Array.isArray(payload.retryBuckets) ? payload.retryBuckets : []);
+        }
       })
       .catch((err) => {
         if (!cancelled) {
@@ -124,6 +141,9 @@ export function WorkflowDefinitionFlow() {
     setStageParams({});
     setStageSchedules({});
     setStageTimeouts({});
+    setStageMaxParallel({});
+    setStageRetryBuckets({});
+    setStageProcessing({});
     setActionError(null);
     setScheduled(null);
   };
@@ -140,6 +160,22 @@ export function WorkflowDefinitionFlow() {
       for (const [kind, value] of Object.entries(stageTimeouts)) {
         if (value.trim()) timeoutValues[kind] = Number(value);
       }
+      // Issue #4781 S2 — per-stage fan-out caps and checkpoint
+      // intervals post as numbers (a non-numeric value posts
+      // through as NaN and the server refuses it by name);
+      // retry buckets post as the bucket name the server offered.
+      const maxParallelValues: Record<string, number> = {};
+      for (const [kind, value] of Object.entries(stageMaxParallel)) {
+        if (value.trim()) maxParallelValues[kind] = Number(value);
+      }
+      const retryBucketValues: Record<string, string> = {};
+      for (const [kind, value] of Object.entries(stageRetryBuckets)) {
+        if (value.trim()) retryBucketValues[kind] = value;
+      }
+      const processingValues: Record<string, { checkpointEverySteps: number }> = {};
+      for (const [kind, value] of Object.entries(stageProcessing)) {
+        if (value.trim()) processingValues[kind] = { checkpointEverySteps: Number(value) };
+      }
       const defined = await fetch(`/api/job-definitions/${encodeURIComponent(target.id)}/define`, {
         method: "POST",
         headers: {
@@ -147,7 +183,7 @@ export function WorkflowDefinitionFlow() {
           Accept: "application/json",
           ...csrfHeaders(),
         },
-        body: JSON.stringify({ jobId, params: paramValues, stageModes, stageParams, stageSchedules, stageTimeouts: timeoutValues }),
+        body: JSON.stringify({ jobId, params: paramValues, stageModes, stageParams, stageSchedules, stageTimeouts: timeoutValues, stageMaxParallel: maxParallelValues, stageRetryBuckets: retryBucketValues, stageProcessing: processingValues }),
       });
       const definedBody = (await defined.json().catch(() => ({}))) as { error?: string };
       if (!defined.ok) {
@@ -194,8 +230,9 @@ export function WorkflowDefinitionFlow() {
         </Notice>
         <Notice tone="info" density="compact">
           Every definition is validated before it is defined: a spec with an unknown stage, a
-          missing step or an invalid mode or timeout refuses by name, a required parameter with no value
-          refuses by name, and nothing is scheduled.
+          missing step or an invalid mode, timeout, fan-out cap, retry bucket, or checkpoint
+          interval refuses by name, a required parameter with no value refuses by name, and
+          nothing is scheduled.
         </Notice>
         {loadError && (
           <Notice tone="warning" density="compact" title="Definitions unavailable">
@@ -352,6 +389,61 @@ export function WorkflowDefinitionFlow() {
                     onChange={(event) => {
                       const value = event.target.value;
                       setStageTimeouts((current) => {
+                        const next = { ...current };
+                        if (value) next[stage.kind] = value;
+                        else delete next[stage.kind];
+                        return next;
+                      });
+                    }}
+                  />
+                </div>
+                <div>
+                  <span>{`${stage.kind} — fan-out cap`}</span>
+                  <TextInput
+                    aria-label={`${stage.kind} fan-out cap`}
+                    value={stageMaxParallel[stage.kind] ?? ""}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      setStageMaxParallel((current) => {
+                        const next = { ...current };
+                        if (value) next[stage.kind] = value;
+                        else delete next[stage.kind];
+                        return next;
+                      });
+                    }}
+                  />
+                </div>
+                <div>
+                  <span>{`${stage.kind} — retry bucket`}</span>
+                  <Select
+                    aria-label={`${stage.kind} retry bucket`}
+                    value={stageRetryBuckets[stage.kind] ?? ""}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      setStageRetryBuckets((current) => {
+                        const next = { ...current };
+                        if (value) next[stage.kind] = value;
+                        else delete next[stage.kind];
+                        return next;
+                      });
+                    }}
+                  >
+                    <option value="">Retry bucket: default</option>
+                    {retryBuckets.map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+                <div>
+                  <span>{`${stage.kind} — checkpoint interval (steps)`}</span>
+                  <TextInput
+                    aria-label={`${stage.kind} checkpoint interval (steps)`}
+                    value={stageProcessing[stage.kind] ?? ""}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      setStageProcessing((current) => {
                         const next = { ...current };
                         if (value) next[stage.kind] = value;
                         else delete next[stage.kind];

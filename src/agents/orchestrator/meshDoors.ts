@@ -1466,6 +1466,12 @@ export async function definePipelineJobFromSpecViaDoor(
     stageSchedules?: Record<string, { intervalMinutes?: number; cron?: string }>;
     /** Issue #4775 S1 — per-stage per-unit deadline, in milliseconds. */
     stageTimeouts?: Record<string, number>;
+    /** Issue #4781 S2 — per-stage fan-out cap. */
+    stageMaxParallel?: Record<string, number>;
+    /** Issue #4781 S2 — per-stage retry bucket. */
+    stageRetryBuckets?: Record<string, import("../../workflows/stageRunnerPorts").StageRetryBucket>;
+    /** Issue #4781 S2 — per-stage processing overrides (checkpoint interval). */
+    stageProcessing?: Record<string, { checkpointEverySteps?: number }>;
   } = {},
 ): Promise<{ jobId: string; name: string; version: number; stages: number }> {
   const login = requireActingLogin(actingLogin);
@@ -1476,6 +1482,9 @@ export async function definePipelineJobFromSpecViaDoor(
     ...(overrides.stageModes ? { stageModes: overrides.stageModes } : {}),
     ...(overrides.stageSchedules ? { stageSchedules: overrides.stageSchedules } : {}),
     ...(overrides.stageTimeouts ? { stageTimeouts: overrides.stageTimeouts } : {}),
+    ...(overrides.stageMaxParallel ? { stageMaxParallel: overrides.stageMaxParallel } : {}),
+    ...(overrides.stageRetryBuckets ? { stageRetryBuckets: overrides.stageRetryBuckets } : {}),
+    ...(overrides.stageProcessing ? { stageProcessing: overrides.stageProcessing } : {}),
   });
 }
 

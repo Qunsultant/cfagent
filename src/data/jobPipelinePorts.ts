@@ -36,7 +36,7 @@
  * the in-memory adapter the foundation's InMemoryRepository.
  */
 
-import type { StageRunnerCheckpoint } from "../workflows/stageRunnerPorts";
+import type { StageRetryBucket, StageRunnerCheckpoint } from "../workflows/stageRunnerPorts";
 import type {
   JobRunKind,
   JobRunTrigger,
@@ -169,6 +169,22 @@ export interface JobNodeConfig {
    * number — anything else is refused by name at resolve time.
    */
   timeoutMs?: number;
+  /**
+   * Per-node fan-out cap for a parallel stage (#4781 S2). Wins
+   * over DEFAULT_MAX_PARALLEL_SHARDS (4); absent, the default
+   * applies. Sequential stages ignore it. Must be a positive
+   * integer — anything else is refused by name at resolve time.
+   */
+  maxParallel?: number;
+  /**
+   * Per-node retry bucket (#4781 S2). Wins over the per-kind
+   * table (STAGE_RETRY_BUCKET) for chain kinds and over
+   * "report" for job stages. Must be one of the pipelinePolicy
+   * retry keys — anything else is refused by name at resolve
+   * time, because an unknown bucket would throw a TypeError
+   * mid-run on budget.maxAttempts.
+   */
+  retryBucket?: StageRetryBucket;
   schedule?: JobScheduleConfig;
   /**
    * Retired (#3944): the stage never executes again in any run
