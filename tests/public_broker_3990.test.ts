@@ -532,7 +532,7 @@ describe("Slice C — catalog, registry, presentation, identities carry public",
     // FAILURE_IDENTITY_READ_FAILED) + 4 (#5119 research codes) + 2
     // (#5229: SUCCESS_REFERRAL_RULES_READ +
     // SUCCESS_REFERRAL_RULES_UPDATED).
-    expect(Object.keys((outcomeCatalog as { outcomes: Record<string, unknown> }).outcomes)).toHaveLength(263); // #5607 (G-5/G-6): +7 payment-assurance / commercial codes; +1 (#5867: FAILURE_COMMERCIAL_AUDIT_REQUIRED); +1 (#3571 residual: SUCCESS_TOP_UP_CLAIMED)
+    expect(Object.keys((outcomeCatalog as { outcomes: Record<string, unknown> }).outcomes)).toHaveLength(269); // #5607 (G-5/G-6): +7 payment-assurance / commercial codes; +1 (#5867: FAILURE_COMMERCIAL_AUDIT_REQUIRED); +1 (#3571 residual: SUCCESS_TOP_UP_CLAIMED); +6 (#5098 tuple model: the six FAILURE_TUPLE_* validation codes)
   });
 
   it("the OAuth scopes request trading.write (the connect grant must cover placement)", () => {
