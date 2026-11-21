@@ -121,6 +121,7 @@ import {
 } from "../../services/feedJobTimeouts";
 import {
   FEED_PIPELINE_CATALOG,
+  buildFeedJobSurfaceView,
   type FeedJobSurfaceView,
 } from "../../services/feedPipelineJobs";
 import { ENRICH_JOB_CODES } from "../../services/enrichJobs";
@@ -644,18 +645,64 @@ async function feedJobsViewFor(
   providerId: DataProviderId,
 ): Promise<FeedJobSurfaceView[]> {
   const door = feedPipelineDoorFor(ctx);
-  if (!door) return [];
-  try {
-    const all = await door.listFeedJobSurfaceStatuses();
-    return all.filter((v) => v.sourceId === providerId);
-  } catch (error) {
-    structuredLog.warn("data_providers.feed_jobs_status_read_failed", {
-      message: `[data-providers] feed-jobs status read for "${providerId}" failed: ${error instanceof Error ? error.message : String(error)}`,
-      providerId,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return [];
+  if (door) {
+    try {
+      const all = await door.listFeedJobSurfaceStatuses();
+      const mine = all.filter((v) => v.sourceId === providerId);
+      if (mine.length > 0) return mine;
+    } catch (error) {
+      structuredLog.warn("data_providers.feed_jobs_status_read_failed", {
+        message: `[data-providers] feed-jobs status read for "${providerId}" failed: ${error instanceof Error ? error.message : String(error)}`,
+        providerId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
+  // Issue #6046 — an unbound or empty door read must not render "no jobs":
+  // the catalog is the truth of which jobs exist, and the dataset store is
+  // the truth of what each stored. Pipeline-only fields stay honestly null.
+  const rows = await buildCatalogFeedJobSurfaceViews({
+    providerId,
+    registry: feedRegistryFor(ctx),
+    datasetStore: feedDatasetStoreFor(ctx),
+    nowMs: Date.now(),
+  });
+  if (rows.length > 0) {
+    structuredLog.info("data_providers.feed_jobs_catalog_fallback", {
+      message: `[data-providers] feed-jobs list for "${providerId}" served from the catalog (${rows.length} jobs); the pipeline door returned no statuses.`,
+      providerId,
+      jobs: rows.length,
+    });
+  }
+  return rows;
+}
+
+/**
+ * The catalog's feed jobs for one provider, joined with the dataset read
+ * only (no pipeline door). This is the honest fallback for #6046: every
+ * registered job is listed, `feed` is the real stored status, and the
+ * pipeline-only fields are null (unknown) rather than fabricated.
+ */
+export async function buildCatalogFeedJobSurfaceViews(input: {
+  providerId: DataProviderId;
+  registry: FeedJobRegistry;
+  datasetStore: FeedDatasetStore | null;
+  nowMs: number;
+}): Promise<FeedJobSurfaceView[]> {
+  const rows: FeedJobSurfaceView[] = [];
+  for (const entry of FEED_PIPELINE_CATALOG) {
+    if (entry.sourceId !== input.providerId) continue;
+    rows.push(
+      await buildFeedJobSurfaceView({
+        entry,
+        datasetStore: input.datasetStore,
+        registry: input.registry,
+        pipeline: null,
+        nowMs: input.nowMs,
+      }),
+    );
+  }
+  return rows;
 }
 
 /**

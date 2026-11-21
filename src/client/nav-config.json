@@ -136,7 +136,7 @@
       "crumb": "DataHub",
       "category": "Platform",
       "icon": "Database",
-      "description": "Market-data providers, data lifecycle, and parameters & export — one menu, three views",
+      "description": "Market-data providers, feeds, data lifecycle, and parameters & export — one menu, four views",
       "navEntry": {
         "label": "DataHub",
         "shortLabel": "DataHub",
@@ -948,6 +948,13 @@
         "description": "Provisioning lifecycle for market-data providers"
       },
       {
+        "id": "feeds",
+        "label": "Feeds",
+        "shortLabel": "Stored-index feed jobs on the pipeline",
+        "icon": "DataProviders",
+        "description": "Stored-index feed family: run, pause, resume, cancel, retry, schedule, output"
+      },
+      {
         "id": "data-lifecycle",
         "label": "Data Lifecycle",
         "shortLabel": "Clean state, platform bootstrap & tenant bootstrap",
@@ -1753,6 +1760,10 @@
       "tab": "data-hub",
       "view": "data-providers"
     },
+    "data-hub:feeds": {
+      "tab": "data-hub",
+      "view": "feeds"
+    },
     "data-hub:data-lifecycle": {
       "tab": "data-hub",
       "view": "data-lifecycle"
@@ -1937,6 +1948,7 @@
       "param": "view",
       "values": [
         "data-providers",
+        "feeds",
         "data-lifecycle",
         "downloads"
       ]
