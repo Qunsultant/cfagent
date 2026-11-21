@@ -97,6 +97,25 @@ const ATTEMPTS_MAX = 10;
 const DELAY_MIN_MS = 0;
 const DELAY_MAX_MS = 120_000;
 
+/**
+ * Issue #4781 S2 — the retry-bucket names: the single source for
+ * which buckets exist. Derived from the policy's own retry table
+ * (whose keys are fixed by the `PipelinePolicy` interface — env
+ * and settings only tune the values, never the keys), never a
+ * second list. The define route, the binder, the resolver, and
+ * the engine all validate against these names.
+ */
+export const RETRY_BUCKET_NAMES: ReadonlyArray<keyof PipelinePolicy["retry"]> =
+  Object.keys(DEFAULT_PIPELINE_POLICY.retry) as Array<keyof PipelinePolicy["retry"]>;
+
+/** Issue #4781 S2 — membership in the policy's retry keys. */
+export function isRetryBucketName(value: unknown): value is keyof PipelinePolicy["retry"] {
+  return (
+    typeof value === "string" &&
+    (RETRY_BUCKET_NAMES as ReadonlyArray<string>).includes(value)
+  );
+}
+
 function parseIntClamped(
   raw: string | undefined,
   min: number,

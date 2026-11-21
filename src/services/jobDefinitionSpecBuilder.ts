@@ -10,6 +10,7 @@
  */
 import type { JobDefinitionSpec, JobStageSpec } from "../config/jobDefinitionCatalog";
 import type { JobExecutionMode } from "../data/jobPipelinePorts";
+import type { StageRetryBucket } from "../workflows/stageRunnerPorts";
 
 /** Issue #4466 — per-stage overrides the flow collects, keyed by stage kind. */
 export interface JobDefinitionPerStage {
@@ -19,6 +20,16 @@ export interface JobDefinitionPerStage {
   schedules?: Record<string, { enabled: boolean; cron?: string; interval?: string }>;
   /** Issue #4775 S1 — a stage's own per-unit deadline, in milliseconds. */
   timeouts?: Record<string, number>;
+  /** Issue #4781 S2 — a stage's own fan-out cap. */
+  maxParallel?: Record<string, number>;
+  /** Issue #4781 S2 — a stage's own retry bucket. */
+  retryBuckets?: Record<string, StageRetryBucket>;
+  /**
+   * Issue #4781 S2 — a stage's own processing overrides (checkpoint
+   * interval). The spec declares no `processing`, so this is the
+   * only way a spec-built node gets `checkpointEverySteps`.
+   */
+  processing?: Record<string, { checkpointEverySteps?: number }>;
 }
 
 export interface RawJobConfig {
@@ -50,6 +61,9 @@ function nodeFromStage(stage: JobStageSpec, perStage: JobDefinitionPerStage): Re
   const mode = { ...(stage.executionMode ?? {}), ...(perStage.modes?.[stage.kind] ?? {}) };
   const schedule = { ...(stage.schedule ?? {}), ...(perStage.schedules?.[stage.kind] ?? {}) };
   const timeoutMs = perStage.timeouts?.[stage.kind];
+  const maxParallel = perStage.maxParallel?.[stage.kind];
+  const retryBucket = perStage.retryBuckets?.[stage.kind];
+  const processing = perStage.processing?.[stage.kind];
   return {
     kind: stage.kind,
     steps: [
@@ -61,6 +75,9 @@ function nodeFromStage(stage: JobStageSpec, perStage: JobDefinitionPerStage): Re
     ...(Object.keys(mode).length > 0 ? { executionMode: mode } : {}),
     ...(schedule.enabled ? { schedule } : {}),
     ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+    ...(maxParallel !== undefined ? { maxParallel } : {}),
+    ...(retryBucket !== undefined ? { retryBucket } : {}),
+    ...(processing !== undefined ? { processing: { ...processing } } : {}),
     ...(children ? { children } : {}),
   };
 }

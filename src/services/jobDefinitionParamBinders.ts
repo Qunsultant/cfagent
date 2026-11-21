@@ -14,6 +14,8 @@ import { resolveEnumSource, resolveParamDerivation } from "../config/jobDefiniti
 import type { JobExecutionMode } from "../data/jobPipelinePorts";
 import { assertExecutionModeSupported, resolveExecutionMode } from "./jobPipelineConfig";
 import type { JobDefinitionPerStage } from "./jobDefinitionSpecBuilder";
+import { RETRY_BUCKET_NAMES, isRetryBucketName } from "./pipelinePolicy";
+import type { StageRetryBucket } from "../workflows/stageRunnerPorts";
 
 export type JobDefinitionParams = Record<string, unknown>;
 export type SettingResolver = (settingKey: string) => unknown;
@@ -156,6 +158,12 @@ export function bindStageOverrides(
     stageSchedules?: Record<string, { intervalMinutes?: number; cron?: string }>;
     /** Issue #4775 S1 — a stage's per-unit deadline, in milliseconds. */
     stageTimeouts?: Record<string, number>;
+    /** Issue #4781 S2 — a stage's fan-out cap. */
+    stageMaxParallel?: Record<string, number>;
+    /** Issue #4781 S2 — a stage's retry bucket. */
+    stageRetryBuckets?: Record<string, StageRetryBucket>;
+    /** Issue #4781 S2 — a stage's processing overrides (checkpoint interval). */
+    stageProcessing?: Record<string, { checkpointEverySteps?: number }>;
   },
 ): JobDefinitionPerStage {
   const stages = new Map(spec.stages.map((stage) => [stage.kind, stage]));
@@ -256,10 +264,77 @@ export function bindStageOverrides(
     }
     timeouts[kind] = timeoutMs;
   }
+  // Issue #4781 S2 — a stage's fan-out cap. Refused by name
+  // (unknown stage, or a value that is not a positive integer);
+  // nothing partial is returned.
+  const maxParallel: Record<string, number> = {};
+  for (const [kind, cap] of Object.entries(input.stageMaxParallel ?? {})) {
+    if (!stages.has(kind)) {
+      throw new Error(
+        `Job definition "${spec.id}" has no stage "${kind}". Its stages are: ${[...stages.keys()].join(", ")}.`,
+      );
+    }
+    if (typeof cap !== "number" || !Number.isInteger(cap) || cap < 1) {
+      throw new Error(
+        `Stage "${kind}" of job definition "${spec.id}" has an invalid fan-out cap ${String(cap)}: the stage maxParallel must be a positive integer.`,
+      );
+    }
+    maxParallel[kind] = cap;
+  }
+  // Issue #4781 S2 — a stage's retry bucket. Refused by name
+  // (unknown stage, or a bucket outside the pipelinePolicy retry
+  // keys); nothing partial is returned.
+  const retryBuckets: Record<string, StageRetryBucket> = {};
+  for (const [kind, bucket] of Object.entries(input.stageRetryBuckets ?? {})) {
+    if (!stages.has(kind)) {
+      throw new Error(
+        `Job definition "${spec.id}" has no stage "${kind}". Its stages are: ${[...stages.keys()].join(", ")}.`,
+      );
+    }
+    if (!isRetryBucketName(bucket)) {
+      throw new Error(
+        `Stage "${kind}" of job definition "${spec.id}" has an invalid retryBucket ${JSON.stringify(bucket)}: a stage retries under one of: ${RETRY_BUCKET_NAMES.join(", ")}.`,
+      );
+    }
+    retryBuckets[kind] = bucket;
+  }
+  // Issue #4781 S2 — a stage's processing overrides (checkpoint
+  // interval). Refused by name (unknown stage, or a value that is
+  // not a positive integer); nothing partial is returned.
+  const processing: Record<string, { checkpointEverySteps?: number }> = {};
+  for (const [kind, entry] of Object.entries(input.stageProcessing ?? {})) {
+    if (!stages.has(kind)) {
+      throw new Error(
+        `Job definition "${spec.id}" has no stage "${kind}". Its stages are: ${[...stages.keys()].join(", ")}.`,
+      );
+    }
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new Error(
+        `Stage "${kind}" of job definition "${spec.id}" has an invalid processing override: it must be an object.`,
+      );
+    }
+    const checkpointEverySteps = (entry as { checkpointEverySteps?: unknown }).checkpointEverySteps;
+    if (
+      checkpointEverySteps !== undefined &&
+      (typeof checkpointEverySteps !== "number" ||
+        !Number.isInteger(checkpointEverySteps) ||
+        checkpointEverySteps < 1)
+    ) {
+      throw new Error(
+        `Stage "${kind}" of job definition "${spec.id}" has an invalid checkpoint interval ${String(checkpointEverySteps)}: processing.checkpointEverySteps must be a positive integer.`,
+      );
+    }
+    processing[kind] = {
+      ...(checkpointEverySteps !== undefined ? { checkpointEverySteps } : {}),
+    };
+  }
   return {
     ...(Object.keys(params).length > 0 ? { params } : {}),
     ...(Object.keys(modes).length > 0 ? { modes } : {}),
     ...(Object.keys(schedules).length > 0 ? { schedules } : {}),
     ...(Object.keys(timeouts).length > 0 ? { timeouts } : {}),
+    ...(Object.keys(maxParallel).length > 0 ? { maxParallel } : {}),
+    ...(Object.keys(retryBuckets).length > 0 ? { retryBuckets } : {}),
+    ...(Object.keys(processing).length > 0 ? { processing } : {}),
   };
 }

@@ -24,6 +24,7 @@ import {
   type JobScheduleConfig,
   type ResolvedJobConfig,
 } from "../data/jobPipelinePorts";
+import { RETRY_BUCKET_NAMES, isRetryBucketName } from "./pipelinePolicy";
 
 /** Coded pipeline errors (AOP coded messages): the code is the contract, the message is for humans. */
 export type JobPipelineErrorCode =
@@ -289,6 +290,27 @@ function resolveNode(raw: unknown, path: string): JobNodeConfig {
       );
     }
     node.timeoutMs = raw.timeoutMs;
+  }
+  if (raw.maxParallel !== undefined) {
+    // Issue #4781 S2 — the per-node fan-out cap: a positive
+    // integer, refused by name otherwise (never clamped).
+    if (typeof raw.maxParallel !== "number" || !Number.isInteger(raw.maxParallel) || raw.maxParallel < 1) {
+      throw invalid(`Node ${path} "maxParallel" must be a positive integer.`);
+    }
+    node.maxParallel = raw.maxParallel;
+  }
+  if (raw.retryBucket !== undefined) {
+    // Issue #4781 S2 — the per-node retry bucket: one of the
+    // pipelinePolicy retry keys, refused by name otherwise. An
+    // unknown bucket would flow to policy.retry[unknown] =
+    // undefined and throw a TypeError mid-run on
+    // budget.maxAttempts, so it can never reach a run.
+    if (!isRetryBucketName(raw.retryBucket)) {
+      throw invalid(
+        `Node ${path} "retryBucket" ${JSON.stringify(raw.retryBucket)} is invalid — a stage retries under one of: ${RETRY_BUCKET_NAMES.join(", ")}.`,
+      );
+    }
+    node.retryBucket = raw.retryBucket;
   }
   if (raw.schedule !== undefined) {
     node.schedule = resolveSchedule(raw.schedule);
