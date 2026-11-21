@@ -486,6 +486,20 @@ describe("#2329 one create entry point", () => {
     expect(creates).toHaveLength(1);
   });
 
+  // Issue #5895: the page gains a second, bulk create entry point —
+  // Quick create (one action creates schedules for each job with
+  // defaults). The rule is now exactly one single-create action AND
+  // exactly one bulk-create action, not one create action total.
+  it("renders exactly one bulk-create action beside the single create", async () => {
+    await renderPanel([optionsItem, screenItem]);
+    await waitForText("Options Market Screen");
+
+    const bulkCreates = [...document.querySelectorAll("button")].filter((b) =>
+      /quick create/i.test(b.textContent ?? "")
+    );
+    expect(bulkCreates).toHaveLength(1);
+  });
+
   it("describes a generic system schedule without dressing it as a screening kind", async () => {
     await renderPanel([
       {

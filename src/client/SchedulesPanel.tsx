@@ -13,8 +13,10 @@
  * control (the full form, cadence included), one Details dialog
  * (scheduleDetail.ts's canonical model), one cadence dialog for the
  * generic rows, one confirmation dialog for destructive actions, and
- * exactly one create action on the page (the screening section's hero
- * button). The page's one Refresh control refetches both surfaces.
+ * two create actions on the page (the screening section's hero
+ * buttons: New Schedule for one schedule, Quick create for one
+ * schedule per job with defaults — issue #5895). The page's one
+ * Refresh control refetches both surfaces.
  *
  * Issue #309: Schedules Panel with tabbed grouping.
  * Issue #273: full schedules management UI — pause/resume, per-job

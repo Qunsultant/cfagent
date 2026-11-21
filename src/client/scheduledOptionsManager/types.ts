@@ -42,7 +42,8 @@ export interface ScheduledOptionsManagerProps {
   /** S7: bumped by the host's ONE Refresh control to ask the section
    *  to refetch everything it reads (list, latest runs, audit). The
    *  create form is opened by the section's own hero button — the
-   *  page has exactly one create action (issue #2329). */
+   *  page has two create actions (issue #2329's one single-create
+   *  plus issue #5895's Quick create for bulk create with defaults). */
   refreshSignal?: number;
   /**
    * Issue #4331 (#4329 S2): false when the schedules home hosts the one list —
