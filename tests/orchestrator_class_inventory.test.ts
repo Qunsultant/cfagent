@@ -381,9 +381,23 @@ const ORCH = "agents/orchestrator.ts";
  *  #3185 tenant-mirror integration (migration 0077, reconcile
  *  sweep, retention/DSAR) and main already had only 11 lines /
  *  1,061 bytes of headroom — a deliberate raise to measured +
- *  headroom, not drift. */
-const BUDGET_LINES = 3500;
-const BUDGET_BYTES = 159_500;
+ *  headroom, not drift.
+ *  #5890 (one row per job, #3121 program) adds the
+ *  pruneSupersededDeclaredTaskAlarms wrapper + its import and
+ *  the three ensure-guard rewrites (fail-closed list +
+ *  planGuardAlarm + surplus cancel; the pure helpers
+ *  planGuardAlarm / supersededDeclaredTaskAlarmIds already live
+ *  in src/services/unifiedScheduleManagement.ts, the class gains
+ *  only call-site logic + the one prune wrapper) — measured
+ *  3,560 lines / 163,471 B on the branch tree (main alone sat at
+ *  3,449 lines / 159,393 B, 107 B under the byte budget, so any
+ *  growth tripped it; CI shard 4/4 failed on this pin only,
+ *  PR #6013 head 60e4351e). Budget lines rise to 3740 and bytes
+ *  rise to 171_700 — measured + ~5% headroom, the pin's
+ *  convention — so the pin still fails on any further
+ *  unintentional regrowth. */
+const BUDGET_LINES = 3740;
+const BUDGET_BYTES = 171_700;
 
 const count = (haystack: string, needle: string) =>
   haystack.split(needle).length - 1;
