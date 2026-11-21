@@ -2006,23 +2006,44 @@ export async function resumeUnifiedSchedule(
   return { ok: true, record: resumed, alarm, previousId: id };
 }
 
+/**
+ * Issue #5891 — the result of a delete: either the row is gone
+ * (`cancelled: true`) or the delete is refused with the named
+ * error, like pause / resume / trigger / update refuse. There is
+ * no silent `{ok: true, cancelled: false}` any more: that shape
+ * told the UI the delete had succeeded while the row stayed.
+ */
+export type DeleteUnifiedScheduleResult =
+  | { ok: true; cancelled: boolean }
+  | { ok: false; error: string; status: number };
+
 export async function deleteUnifiedSchedule(
   deps: UnifiedManagementDeps,
   id: string,
-): Promise<{ ok: true; cancelled: boolean }> {
-  // Issue #4239 — a derived record is a no-op delete (#4237 precedent).
-  if (isDerivedTokenRenewalRecord(id)) return { ok: true, cancelled: false };
-  // Issue #4240 — a derived record is a no-op delete (#4237 precedent).
-  if (isDerivedRetentionRecord(id)) return { ok: true, cancelled: false };
-  // Issue #4241 — a derived record is a no-op delete (#4237 precedent).
-  if (isDerivedNightlyResearchRecord(id)) return { ok: true, cancelled: false };
-  // Issue #4242 — derived records are no-op deletes (#4237 precedent).
-  if (isDerivedStaleLedgerSweepRecord(id)) return { ok: true, cancelled: false };
-  if (isDerivedStaleAsyncJobSweepRecord(id)) return { ok: true, cancelled: false };
-  if (isDerivedScheduleWatchdogRecord(id)) return { ok: true, cancelled: false };
+): Promise<DeleteUnifiedScheduleResult> {
+  // Issue #5891 — a derived record refuses delete with a named
+  // error, like pause / resume / trigger / update refuse it
+  // (#4239–#4242). The #4237 no-op precedent is retired: it told
+  // the UI the delete had succeeded while the row re-derived on
+  // every list.
+  if (isDerivedTokenRenewalRecord(id)) return derivedTokenRenewalError("delete");
+  // Issue #5891 — a derived record refuses delete (see above).
+  if (isDerivedRetentionRecord(id)) return derivedRetentionError("delete");
+  // Issue #5891 — a derived record refuses delete (see above).
+  if (isDerivedNightlyResearchRecord(id)) return derivedNightlyResearchError("delete");
+  // Issue #5891 — derived records refuse delete (see above).
+  if (isDerivedStaleLedgerSweepRecord(id)) return derivedStaleLedgerSweepError("delete");
+  if (isDerivedStaleAsyncJobSweepRecord(id)) return derivedStaleAsyncJobSweepError("delete");
+  if (isDerivedScheduleWatchdogRecord(id)) return derivedScheduleWatchdogError("delete");
   const record = await deps.store.get(id);
-  if (record && !isManagedAlarmKind(record.kind)) {
-    return { ok: true, cancelled: false };
+  if (record) {
+    // Issue #5891 — a goal deletes through the goals surface, and
+    // any other non-managed kind names itself, like trigger refuses
+    // it — never a silent no-op.
+    if (record.kind === "goal") return goalSurfaceError("delete");
+    if (!isManagedAlarmKind(record.kind)) {
+      return fail(`Schedule kind '${record.kind}' cannot be deleted.`, 400);
+    }
   }
   const alarm = record ? undefined : await deps.alarms.get(id);
   const alarmId = record?.alarmId ?? id;
@@ -2047,7 +2068,13 @@ export async function deleteUnifiedSchedule(
   }
   let recordRemoved = false;
   if (record) recordRemoved = await deps.store.remove(id);
-  return { ok: true, cancelled: alarmCancelled || recordRemoved };
+  // Issue #5891 — nothing was there to delete: a 404 names the
+  // id instead of the silent `{ok: true, cancelled: false}` the
+  // route used to answer 200 with.
+  if (!alarmCancelled && !recordRemoved) {
+    return fail(`Schedule '${id}' not found`, 404);
+  }
+  return { ok: true, cancelled: true };
 }
 
 /**

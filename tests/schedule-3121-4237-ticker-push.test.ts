@@ -341,10 +341,15 @@ describe("4237 management refuses the live feed with coded errors", () => {
     }
   });
 
-  it("delete is a no-op for the live feed record", async () => {
+  it("delete refuses the live feed record at the service level (#5891: the route pauses it instead)", async () => {
     const store = await storeWithTicker();
     const deleted = await deleteUnifiedSchedule({ store, alarms }, "ticker-push");
-    expect(deleted).toEqual({ ok: true, cancelled: false });
+    expect(deleted.ok).toBe(false);
+    if (!deleted.ok) {
+      expect(deleted.status).toBe(400);
+      expect(deleted.error).toContain("ticker-push");
+      expect(deleted.error).toContain("cannot be deleted");
+    }
     expect(await store.get("ticker-push")).toBeDefined();
   });
 });

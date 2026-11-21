@@ -1200,9 +1200,20 @@ export async function handleSchedulesRoutes(
           return Response.json({ scheduleId, cancelled: true });
         }
         const deleted = await deleteUnifiedSchedule({ store: unifiedStore(), alarms }, scheduleId);
-        const cancelled = deleted.cancelled;
-        ctx.audit("schedule.cancelled", "orchestrator", { scheduleId, success: cancelled });
-        return Response.json({ scheduleId, cancelled });
+        if (!deleted.ok) {
+          // Issue #5891 — the refusal is audited truthfully
+          // (success:false + the named error) and answered with
+          // the refusal's status, never the silent 200 +
+          // cancelled:false.
+          ctx.audit("schedule.cancelled", "orchestrator", {
+            scheduleId,
+            success: false,
+            error: deleted.error,
+          });
+          return Response.json({ error: deleted.error }, { status: deleted.status });
+        }
+        ctx.audit("schedule.cancelled", "orchestrator", { scheduleId, success: true });
+        return Response.json({ scheduleId, cancelled: deleted.cancelled });
       } catch (err: any) {
         return Response.json({ error: err.message || "Failed to cancel schedule" }, { status: 500 });
       }

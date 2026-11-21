@@ -439,14 +439,27 @@ export async function bulkScheduleAction(
   });
 }
 
+/**
+ * Issue #5891 — the client checks `cancelled`: a 200 that answers
+ * cancelled:false is a failed delete, never a success. The server
+ * now refuses those rows with a named error, but a stale or foreign
+ * 200 + cancelled:false must still never read as deleted.
+ */
 export async function deleteSchedule(
   id: string,
   headers?: Record<string, string>,
-): Promise<void> {
-  await api(`/api/schedules/${encodeURIComponent(id)}`, {
-    method: "DELETE",
-    headers,
-  });
+): Promise<{ scheduleId: string; cancelled: boolean }> {
+  const res = await api<{ scheduleId: string; cancelled: boolean }>(
+    `/api/schedules/${encodeURIComponent(id)}`,
+    {
+      method: "DELETE",
+      headers,
+    },
+  );
+  if (!res.cancelled) {
+    throw new Error(`Schedule '${id}' was not deleted.`);
+  }
+  return res;
 }
 
 /**

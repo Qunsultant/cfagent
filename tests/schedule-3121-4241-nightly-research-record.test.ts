@@ -24,8 +24,8 @@
  * the tick like #4239/#4240 — active, not disabled. No new kind: the
  * record uses `internal`, the #4238 seventh kind for internal-only
  * callbacks. Management ops refuse with a coded error naming the
- * derived record (pause / resume / trigger / update); delete is a
- * no-op. There is no manual trigger route for the research run — the
+ * derived record (pause / resume / trigger / update / delete —
+ * #5891 retired the delete no-op). There is no manual trigger route for the research run — the
  * run fires on the tick; the manual research route is unchanged.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -203,10 +203,16 @@ describe("4241 management refuses the derived record with coded errors", () => {
     }
   });
 
-  it("delete is a no-op for the derived record", async () => {
+  it("delete refuses the derived record with a named error (#5891)", async () => {
     const store = new InMemoryUnifiedScheduleStore();
     const deleted = await deleteUnifiedSchedule({ store, alarms }, "nightly-research");
-    expect(deleted).toEqual({ ok: true, cancelled: false });
+    expect(deleted.ok).toBe(false);
+    if (!deleted.ok) {
+      expect(deleted.status).toBe(400);
+      expect(deleted.error).toContain("nightly-research");
+      expect(deleted.error).toContain("derived record");
+      expect(deleted.error).not.toContain("Goal schedules");
+    }
   });
 });
 

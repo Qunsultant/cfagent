@@ -443,7 +443,7 @@ export function JobsPanel({ embedded = false }: JobsPanelProps = {}) {
         <Stack gap="2">
           <p>Deleting {scheduleDeleteTarget?.id} cancels the schedule. Past run records stay readable.</p>
           <div>
-            <Button variant="danger" disabled={!!busy} onClick={() => { const t = scheduleDeleteTarget; setScheduleDeleteTarget(null); if (t) void withBusy(`delete-${t.id}`, () => deleteSchedule(t.id)); }}>
+            <Button variant="danger" disabled={!!busy} onClick={() => { const t = scheduleDeleteTarget; setScheduleDeleteTarget(null); if (t) void withBusy(`delete-${t.id}`, () => deleteSchedule(t.id).then(() => {})); }}>
               Delete
             </Button>{" "}
             <Button variant="secondary" onClick={() => setScheduleDeleteTarget(null)}>

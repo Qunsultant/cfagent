@@ -258,6 +258,44 @@ export function scheduleDisplayName(s: ScheduleItem): string {
   return scheduleTitle(s as unknown as ScheduledTaskItem);
 }
 
+/**
+ * Issue #5891 — the six derived rows Delete cannot remove (they
+ * re-derive from code), keyed by the same literal ids the cadence
+ * column already reads below. A row Delete cannot remove reports
+ * its refusal here so the button can be disabled with the reason —
+ * the owner's rule is no new button: Delete either deletes or is
+ * disabled with the reason. The sentences are the server's own
+ * refusal sentences, so the button and the route never disagree.
+ */
+const DERIVED_SCHEDULE_IDS = new Set([
+  "token-renewal",
+  "retention",
+  "nightly-research",
+  "sweep-stale-ledger-tasks",
+  "sweep-stale-async-jobs",
+  "schedule-watchdog",
+]);
+
+/** The reason Delete cannot remove this row, or null when it can. */
+export function deleteRefusalReason(s: ScheduleItem): string | null {
+  if (DERIVED_SCHEDULE_IDS.has(s.id)) {
+    return `Schedule '${s.id}' is a derived record with no alarm to delete.`;
+  }
+  if (s.kind === "goal") {
+    return "Goal schedules delete through the goals surface (/api/schedule/goals/:id), not the SDK schedule routes.";
+  }
+  if (
+    s.kind !== undefined &&
+    s.kind !== "screen" &&
+    s.kind !== "workflow-stage" &&
+    s.kind !== "internal" &&
+    s.kind !== "ticker-push"
+  ) {
+    return `Schedule kind '${s.kind}' cannot be deleted.`;
+  }
+  return null;
+}
+
 /** Last-event rendering for a derived row (never a fabricated time). */
 function formatLastEvent(lastAt?: string): string {
   if (!lastAt) return "never";
@@ -804,13 +842,18 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
       header: SCHEDULE_ROW_COLUMN_LABELS.actions,
       align: "right",
       headerClassName: "schedule-row-actions-head",
-      render: (s) => (
-        // Issue #4389 — ONE button set, one vocabulary, for every kind: Edit ·
-        // Details · Trigger Now · Pause/Resume · Delete. Edit opens the row's
-        // own editor (a screening row's schedule form, whose cadence lives
-        // there; any other row's cadence dialog, interval-only for the live
-        // feed). No kind gets a shorter list and no kind gets a second word.
-        <Flex gap="1" align="center" justify="end">
+      render: (s) => {
+        // Issue #5891 — Delete either deletes or is disabled with
+        // the reason (no new button); the title carries the reason,
+        // the Trigger Now disabled+title precedent.
+        const deleteRefusal = deleteRefusalReason(s);
+        return (
+          // Issue #4389 — ONE button set, one vocabulary, for every kind: Edit ·
+          // Details · Trigger Now · Pause/Resume · Delete. Edit opens the row's
+          // own editor (a screening row's schedule form, whose cadence lives
+          // there; any other row's cadence dialog, interval-only for the live
+          // feed). No kind gets a shorter list and no kind gets a second word.
+          <Flex gap="1" align="center" justify="end">
           <Button
             type="button"
             variant="secondary"
@@ -868,13 +911,15 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
             variant="danger"
             tone="subtle"
             size="sm"
+            disabled={deleteRefusal !== null}
             onClick={() => setDeleteTarget(s)}
-            title="Delete this schedule"
+            title={deleteRefusal ?? "Delete this schedule"}
           >
             Delete
           </Button>
         </Flex>
-      ),
+        );
+      },
     },
     {
       // Issue #4389 — status is its own column, not a badge in the name cell.
@@ -954,17 +999,26 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
           }
         }}
       >
-        <p>
-          <code>{deleteTarget?.callback}</code> (<code>{deleteTarget?.id}</code>) is removed from
-          the schedule store and will not fire again. This cannot be undone.
-        </p>
-        {deleteTarget?.kind === "ticker-push" && (
+        {/* Issue #5891 — the modal promises only what the path can
+            do: the removal sentence renders only for a row Delete
+            can actually remove. A refused row names its refusal
+            (unreachable in practice — its Delete is disabled — but
+            the modal must never promise removal for it); ticker-push
+            keeps its #4389 feed note and promises no removal. */}
+        {deleteTarget !== null && deleteRefusalReason(deleteTarget) !== null ? (
+          <p>{deleteRefusalReason(deleteTarget)}</p>
+        ) : deleteTarget?.kind === "ticker-push" ? (
           // Issue #4389 — the live feed has no stored definition to remove: its
           // record is the feed's own state, so deleting it stops the push for
           // every connected client (Resume brings it back).
           <p>
             The live feed has no stored definition to remove: deleting it stops the push for
             every connected client, and <strong>Resume</strong> brings it back.
+          </p>
+        ) : (
+          <p>
+            <code>{deleteTarget?.callback}</code> (<code>{deleteTarget?.id}</code>) is removed from
+            the schedule store and will not fire again. This cannot be undone.
           </p>
         )}
       </ConfirmModal>

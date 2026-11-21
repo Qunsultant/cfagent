@@ -29,7 +29,8 @@
  * id, and these rows are keyed by record id — it still cannot
  * observe them by schedule.id, so watching them would cry wolf.
  * Management ops refuse with a coded error naming the derived
- * record (pause / resume / trigger / update); delete is a no-op.
+ * record (pause / resume / trigger / update / delete — #5891
+ * retired the delete no-op).
  * Sweep behavior is unchanged; no new firing is added.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -388,10 +389,16 @@ describe("4242 management refuses the derived records with coded errors", () => 
     }
   });
 
-  it.each(DERIVED_IDS)("delete is a no-op for the derived record %s", async (id) => {
+  it.each(DERIVED_IDS)("delete refuses the derived record %s with a named error (#5891)", async (id) => {
     const store = new InMemoryUnifiedScheduleStore();
     const deleted = await deleteUnifiedSchedule({ store, alarms }, id);
-    expect(deleted).toEqual({ ok: true, cancelled: false });
+    expect(deleted.ok).toBe(false);
+    if (!deleted.ok) {
+      expect(deleted.status).toBe(400);
+      expect(deleted.error).toContain(id);
+      expect(deleted.error).toContain("derived record");
+      expect(deleted.error).not.toContain("Goal schedules");
+    }
   });
 });
 
