@@ -165,6 +165,29 @@ describe("4262-P01 kind classification", () => {
     expect(classifyRunKind({})).toBe("other");
   });
 
+  it("classifies the copilot loop's own cycle rows as copilot (#6003)", () => {
+    // The Think task records its firings with operation (and jobId)
+    // `stock-copilot-paper-cycle` (#3788): the loop's own runs.
+    expect(classifyRunKind({ operation: "stock-copilot-paper-cycle" })).toBe("copilot");
+    expect(
+      classifyRunKind({
+        system: "orchestrator-schedule",
+        jobId: "stock-copilot-paper-cycle",
+        operation: "stock-copilot-paper-cycle",
+      }),
+    ).toBe("copilot");
+  });
+
+  it("leaves autopilot.evaluate in 'other' and copilot-dispatched screens in their family (#6003)", () => {
+    // No `autopilot.` backstop rule: the monthly-evaluation goal
+    // operation must not move, and Autopilot rows arrive stamped.
+    expect(classifyRunKind({ operation: "autopilot.evaluate" })).toBe("other");
+    // A screen the copilot dispatched is a stock run: kind answers what
+    // ran (the classifier never reads triggeredBy), the Triggered by
+    // column says who dispatched it.
+    expect(classifyRunKind({ operation: "trading.screen_stocks" })).toBe("stock");
+  });
+
   it("a goal that screens options is an options run (what ran wins)", () => {
     expect(
       classifyRunKind({ system: "scheduled-agent-goal", operation: "trading.screen_options" }),
@@ -187,6 +210,14 @@ describe("4262-P02 configured filter set and default", () => {
   it("defaults to every kind, all first, default all", () => {
     expect(resolveRunLedgerFilters()).toEqual([...DEFAULT_RUN_LEDGER_FILTERS]);
     expect(resolveRunLedgerDefaultFilter()).toBe(DEFAULT_RUN_LEDGER_FILTER);
+  });
+
+  it("defaults include the Autopilot and Copilot filters, other last (#6003)", () => {
+    const filters = resolveRunLedgerFilters();
+    expect(filters).toContain("autopilot");
+    expect(filters).toContain("copilot");
+    expect(filters[filters.length - 1]).toBe("other");
+    expect(filters.indexOf("autopilot")).toBeLessThan(filters.indexOf("copilot"));
   });
 
   it("honours the environment, drops unknown ids, and always leads with all", () => {
@@ -224,6 +255,18 @@ describe("4262-P03 filtering", () => {
     expect(counts.pipeline).toBe(1);
     expect(counts.reports).toBe(0);
   });
+
+  it("counts the new kinds too, starting at zero (#6003)", () => {
+    const counts = countRunsByKind(ALL_ROWS);
+    expect(counts.autopilot).toBe(0);
+    expect(counts.copilot).toBe(0);
+    const copilotRow = {
+      ...RUNS.stock,
+      jobId: "stock-copilot-paper-cycle",
+      operation: "stock-copilot-paper-cycle",
+    };
+    expect(countRunsByKind([...ALL_ROWS, copilotRow]).copilot).toBe(1);
+  });
 });
 
 describe("4262-P04/P05 the panel's filter buttons and Kind column", () => {
@@ -235,6 +278,23 @@ describe("4262-P04/P05 the panel's filter buttons and Kind column", () => {
     expect(radio("Stock")).toBeDefined();
     expect(radio("Options")).toBeDefined();
     expect((radio("All")!.textContent ?? "").replace(/\s+/g, "")).toBe("All4");
+  });
+
+  it("renders Autopilot and Copilot filter buttons, empty until a row arrives (#6003)", async () => {
+    ledgerStub(ALL_ROWS);
+    await render(<ScheduleRunLedgerPanel />);
+    await settle();
+    expect(radio("Autopilot")).toBeDefined();
+    expect(radio("Copilot")).toBeDefined();
+    expect((radio("Autopilot")!.textContent ?? "").replace(/\s+/g, "")).toBe("Autopilot0");
+    expect((radio("Copilot")!.textContent ?? "").replace(/\s+/g, "")).toBe("Copilot0");
+  });
+
+  it("an Autopilot filter with no autopilot rows says so honestly (#6003)", async () => {
+    ledgerStub(ALL_ROWS);
+    await render(<ScheduleRunLedgerPanel kind="autopilot" />);
+    await settle();
+    expect(bodyText()).toContain("No Autopilot run is recorded in the ledger");
   });
 
   it("an options filter shows only options runs", async () => {

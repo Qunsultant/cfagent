@@ -1,0 +1,3 @@
+### Added
+
+- Run ledger: add Autopilot and Copilot options to the kind list, and include every Autopilot outcome row in the ledger losslessly (issue #6003). Autopilot rows arrive stamped `ledgerKind: "autopilot"` via a client fold of the existing `/api/autopilot/jobs` read, deduplicated against ledger, workflow, and report rows by linkage — a row with a ledger twin stays under its existing kind, a twin-less row (corpus-sync, reports-index-backfill, trading-order, feed) becomes one ledger row. Copilot cycle rows, already recorded in the ledger, now classify as Copilot by their `stock-copilot-` operation. Nothing already in the ledger is removed or changed.

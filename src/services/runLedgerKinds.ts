@@ -70,6 +70,10 @@ export function countRunsByKind<T extends RunKindCandidate>(
     workflow: 0,
     pipeline: 0,
     ops: 0,
+    // Issue #6003 — every kind id needs its key here: the object is cast
+    // to the full Record, so a missing key would silently badge 0.
+    autopilot: 0,
+    copilot: 0,
     other: 0,
   } as Record<RunLedgerKind, number>;
   for (const run of runs) counts[classifyRunKind(run, rules)] += 1;
