@@ -895,6 +895,7 @@ export class OrchestratorAgent extends PortThink {
   private researchPublishContext(): ResearchPublishContext {
     return {
       env: this.env,
+      readSettingRaw: (key) => this.readSettingRaw(key),
       agentCtx: this.ctx,
       ensureTables: () => this.ensureTables(),
       getOrm: () => this.getOrm(),
@@ -958,7 +959,8 @@ export class OrchestratorAgent extends PortThink {
   // Issue #992: extracted to ./orchestrator/researchPublish.ts (runResearchAndPublish);
   async runResearchAndPublish(
     trigger: "manual" | "scheduled",
-    userLogin?: string
+    userLogin?: string,
+    selection?: { brokerId?: string; mode?: string; runId?: string }
   ): Promise<{
     success: boolean;
     error?: string;
@@ -969,7 +971,7 @@ export class OrchestratorAgent extends PortThink {
     taskId?: string | null;
     executionPath?: ResearchExecutionPath;
   }> {
-    return runResearchAndPublish(this.researchPublishContext(), trigger, userLogin);
+    return runResearchAndPublish(this.researchPublishContext(), trigger, userLogin, selection);
   }
 
   // Issue #992: extracted to ./orchestrator/researchPublish.ts (deliverResearchReport);

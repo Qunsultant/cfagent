@@ -95,11 +95,11 @@ export interface ResearchJobConfig {
 }
 
 /**
- * Issue #5912 — the venue a run uses when it names none. The historical
- * provider's id is the default; the selection is per run, and one config
- * value means no other surface hardcodes a broker id.
+ * Issue #5974 — the venue a research run uses when no tenant or run
+ * selection is present. This is the platform's Alpaca default; mode is
+ * resolved through the shared trading-selection policy and defaults to paper.
  */
-export const DEFAULT_RESEARCH_BROKER_ID = "etrade";
+export const DEFAULT_RESEARCH_BROKER_ID = "alpaca";
 
 export const DEFAULT_RESEARCH_JOB_CONFIG: Readonly<ResearchJobConfig> = {
   oodaBudgetMs: 90_000,
