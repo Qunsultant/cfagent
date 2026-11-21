@@ -64,6 +64,7 @@ import { defaultBreakerRegistry } from "../breakers/createBreakerPorts";
 import {
   applyPortfolioContextToOpportunities,
   type PortfolioContextMarker,
+  type PortfolioContextSnapshot,
 } from "../services/portfolioContextRanking";
 import { DynamicMarketScreener } from "../trading";
 import { planStockScreenRun, type StockScreenPlan, type YahooDataMode } from "../workflows/stockScreenPlanner";
@@ -361,6 +362,20 @@ export interface ScreenerGatherStageOutput extends ScreenerFeedStageOutput {
     & { entries: [string, FeedSentimentRow][] }
     & Omit<PersistedSentimentRead, "sentimentBySymbol">
   ) | null;
+  /**
+   * Issue #5874: the portfolio book for the analyze stage's
+   * portfolio-context modifier, carried as a JSON snapshot on the
+   * parent hand-off (positions ride the hand-off — option (i)).
+   * Present whenever the run asked for the modifier
+   * (portfolioContext: true) on a market run: the fetched book on
+   * success, a `{ ok: false, reason }` snapshot when there is no
+   * broker in scope (`no-broker`) or the fetch failed
+   * (`positions-unavailable`). Absent when the flag is off or the
+   * run is a goal run (the goal leg never consumes positions).
+   * The modifier reads this, never the broker — see
+   * `loadPortfolioBook` and `screenAnalysisStage`.
+   */
+  portfolioBook?: PortfolioContextSnapshot;
 }
 
 export interface ScreenerGoalRunner {
@@ -637,6 +652,43 @@ const OPTIONS_PDF_LATEST_KEY = "options:latest.pdf";
 const OPTIONS_XLSX_KEY_PREFIX = "options:xlsx:";
 const OPTIONS_XLSX_LATEST_KEY = "options:latest.xlsx";
 const OPTIONS_CSV_LATEST_KEY = "options:latest.csv";
+
+/**
+ * Issue #5874 ([One engine] #4437 slice 3c) — the gather leg's
+ * portfolio fetch: the ONE live broker leg for the portfolio
+ * modifier, fetched in the gather stage so the analyze stage
+ * reads the book off the hand-off instead of the broker
+ * (option (i); option (ii), a live fetch inside analyze, was
+ * rejected — analyze's input model is persisted/hand-off data).
+ * Best-effort, exactly like the gather stage's persisted reads:
+ * no broker in scope ⇒ the `no-broker` snapshot (Yahoo runs never
+ * touch the broker); a failed fetch ⇒ `positions-unavailable`.
+ * The caller never has to catch — the snapshot always answers.
+ */
+export async function loadPortfolioBook(
+  provider: StockScreenProvider,
+  broker: ETradeService | null,
+): Promise<PortfolioContextSnapshot> {
+  if (provider !== "etrade" || !broker) {
+    return { ok: false, reason: "no-broker" };
+  }
+  try {
+    const { account, positions } = await broker.fetchPortfolioRemote(
+      undefined,
+      true,
+    );
+    return {
+      ok: true,
+      accountId: account.accountId,
+      positions: positions.map((p) => ({
+        symbol: p.symbol,
+        marketValue: p.marketValue,
+      })),
+    };
+  } catch {
+    return { ok: false, reason: "positions-unavailable" };
+  }
+}
 
 export class ScreenerAgent extends PortThink {
   private orm: DatabaseORM | null = null;
@@ -2576,6 +2628,18 @@ export class ScreenerAgent extends PortThink {
     }
     state.persistedSentiment = persistedSentiment;
 
+    // Issue #5874: portfolio book (opt-in). The gather stage fetches
+    // the book — the one live broker leg — and carries the JSON
+    // snapshot on the hand-off; analyze applies the modifier purely
+    // from it. A goal run skips the fetch (the goal leg never
+    // consumes positions). Best-effort by construction:
+    // loadPortfolioBook always answers with a snapshot, so this leg
+    // can never fail the stage.
+    let portfolioBook: PortfolioContextSnapshot | undefined;
+    if (req.portfolioContext === true && !input.goalScreen) {
+      portfolioBook = await loadPortfolioBook(feedOutput.provider, state.etrade);
+    }
+
     // Issue #269: Yahoo history complement — real RSI/MACD/gaps.
     const technicalsBySymbol = await fetchPlatformTechnicalsBatch(
       historyDeps,
@@ -2593,6 +2657,7 @@ export class ScreenerAgent extends PortThink {
       ...feedOutput,
       technicalsBySymbol: Object.fromEntries(technicalsBySymbol),
       technicalsCoverage,
+      ...(portfolioBook ? { portfolioBook } : {}),
       persistedSentiment: persistedSentiment
         ? {
             entries: [...persistedSentiment.sentimentBySymbol.entries()],
@@ -2741,27 +2806,23 @@ export class ScreenerAgent extends PortThink {
     state.opportunities = opportunities;
 
     // Issue #17: portfolio context (opt-in). The modifier runs
-    // only on E*TRADE-provider runs with a broker in scope —
-    // Yahoo runs never touch the broker. Every failure degrades
-    // to the unmodified ranking plus a marker reason.
+    // purely from the gather stage's hand-off snapshot (#5874):
+    // positions ride the parent hand-off as `portfolioBook`, so
+    // this stage never touches the broker — a hand-off without
+    // the field degrades to `positions-unavailable`, never a
+    // failure. The fetch lives in the gather stage
+    // (`loadPortfolioBook`); a goal run carries no book.
     let portfolioContext: PortfolioContextMarker | undefined;
     if (req.portfolioContext === true) {
-      if (gatherOutput.provider !== "etrade" || !state.etrade) {
-        portfolioContext = { applied: false, reason: "no-broker" };
-      } else {
-        try {
-          const { account, positions } = await state.etrade.fetchPortfolioRemote(undefined, true);
-          const outcome = applyPortfolioContextToOpportunities(opportunities, {
-            ok: true,
-            accountId: account.accountId,
-            positions: positions.map((p) => ({ symbol: p.symbol, marketValue: p.marketValue })),
-          });
-          opportunities = outcome.ranked;
-          portfolioContext = outcome.marker;
-        } catch {
-          portfolioContext = { applied: false, reason: "positions-unavailable" };
-        }
-      }
+      const outcome = applyPortfolioContextToOpportunities(
+        opportunities,
+        gatherOutput.portfolioBook ?? {
+          ok: false,
+          reason: "positions-unavailable",
+        },
+      );
+      opportunities = outcome.ranked;
+      portfolioContext = outcome.marker;
     }
     state.opportunities = opportunities;
     return {
