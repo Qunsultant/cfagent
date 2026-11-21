@@ -11,10 +11,18 @@
  * Validation is the contract (#1069): an unknown stage, a missing step, an
  * invalid mode or an empty stage list refuses BY NAME at load/validation
  * time — before any run starts, never as a silent fallback.
+ *
+ * Issue #5493 — a spec may also declare the AXES it runs on (provider,
+ * dataset, universe, sector, exchange, …). An axis value is never a free
+ * string: it resolves through the one vocabulary (#5515) on every read, so
+ * an unknown axis or an unknown/conflated value refuses BY NAME with the
+ * vocabulary's own code, and a parameter whose value names an axis binds
+ * through the same resolver.
  */
 import type { JobExecutionMode } from "../data/jobPipelinePorts";
 import { assertExecutionModeSupported, resolveExecutionMode } from "../services/jobPipelineConfig";
 import { hasEnumSource, hasParamDerivation } from "./jobDefinitionParamRegistry";
+import { AXES, isAxis, resolveValue, type Axis } from "./vocabulary";
 
 /** One stage (or sub-stage) of a definition spec. */
 export interface JobStageSpec {
@@ -56,9 +64,22 @@ export interface JobParameterSettingRef {
 export interface JobDefinitionParameter {
   name: string;
   label: string;
-  type: "select" | "text" | "number" | "boolean";
+  /**
+   * `multi-select` and `list` are arrays of strings (#5493): a multi-select
+   * is declared over a vocabulary axis (each value resolves through it), a
+   * list carries free strings (e.g. shard keys).
+   */
+  type: "select" | "multi-select" | "text" | "list" | "number" | "boolean";
   required?: boolean;
   description?: string;
+  /**
+   * Issue #5493 — the vocabulary axis the value names. Resolved through
+   * `src/config/vocabulary.ts` at bind time: an alias binds to its canonical
+   * id, an unknown value refuses by name, and a conflated value refuses with
+   * the pointer to the axis it belongs to. One list, one reader — a
+   * parameter never carries its own copy of an axis's values.
+   */
+  axis?: Axis;
   /** Filled by the API for select parameters whose options come from a registry. */
   options?: string[];
   /** Named enum source in `ENUM_SOURCES` (validated at load time). */
@@ -67,6 +88,22 @@ export interface JobDefinitionParameter {
   default?: unknown;
   /** Named derivation in `PARAM_DERIVATIONS` (validated at load time). */
   derivation?: string;
+  /** Issue #5493 — inclusive bounds of a number parameter, declared by the spec. */
+  minimum?: number;
+  maximum?: number;
+  /**
+   * Issue #5493 — this number parameter may not sit below the named
+   * parameter's bound value (`maxDte` never below `minDte`). Enforced only
+   * when both are bound; nothing is invented for an absent one.
+   */
+  atLeast?: string;
+  /**
+   * Issue #5493 — each value must serve the capability the named parameter
+   * names (a provider set against its dataset). Checked at bind time against
+   * the adapters' declared capabilities; a provider the declaration
+   * projection does not know is left to the run-time registry (#5494).
+   */
+  capabilityFrom?: string;
 }
 
 /** A whole job definition, externalized and versioned. */
@@ -82,6 +119,13 @@ export interface JobDefinitionSpec {
   name: string;
   /** Bumped whenever the spec changes; the engine versions the resolved definition too. */
   version: number;
+  /**
+   * Issue #5493 — the axes this definition declares (its default subset),
+   * resolved through the one vocabulary (#5515) on every read. An axis the
+   * vocabulary does not have refuses by name, and so does a value that is
+   * unknown or conflated — with the vocabulary's own code.
+   */
+  axes?: Partial<Record<Axis, string>>;
   /** Stages in execution order (linear; a stage may carry children). */
   stages: JobStageSpec[];
   /** The family's default execution mode; a run may override axis by axis. */
@@ -139,6 +183,83 @@ export const JOB_DEFINITION_SPECS: Readonly<Record<string, JobDefinitionSpec>> =
       delivery: "async",
       shape: "monolith",
     },
+    schedule: { enabled: false },
+  },
+  feed: {
+    id: "feed",
+    name: "Feed pull",
+    version: 1,
+    description:
+      "The feed family's one stage: feed.pull over a registered feed job, with the run parameters a feed input carries — the job to pull, the universe a parameterized job pulls, the sources and dataset a composing run names, the shard keys, and the chain DTE window.",
+    // Issue #5493 — the family's declared axes, resolved through the one
+    // vocabulary (#5515) on every read. The provider axis is declared by
+    // `sources` below, not here: a job's own source is the feed registry's
+    // record, and repeating it as a family default would be a second
+    // statement of what the registry already says.
+    axes: { dataset: "quotes", universe: "nasdaq100" },
+    // The step name is FEED_PULL_STEP (src/services/feedPipelineJobs.ts).
+    // Spelled here to keep config free of the services graph; the #5493 pin
+    // asserts the two declarations are the same string, so drift fails
+    // loudly rather than silently running a non-feed stage.
+    stages: [{ kind: "feed", step: "feed.pull" }],
+    parameters: [
+      {
+        name: "feedJobId",
+        label: "Feed job",
+        type: "text",
+        required: true,
+        description:
+          "The registered feed job the stage pulls (a feed job id, e.g. the default quotes job). An unregistered id refuses at run time by name; one is never invented.",
+      },
+      {
+        name: "universe",
+        label: "Universe",
+        type: "select",
+        axis: "universe",
+        description:
+          "The stored index list a parameterized feed job pulls. Absent ⇒ the job's own universe; a fixed-universe job refuses a universe input by name.",
+      },
+      {
+        name: "sources",
+        label: "Sources",
+        type: "multi-select",
+        axis: "provider",
+        capabilityFrom: "dataset",
+        description:
+          "The data providers a composing run may pull from. Absent ⇒ the job's registered source. Each named provider must serve the requested dataset.",
+      },
+      {
+        name: "dataset",
+        label: "Dataset",
+        type: "select",
+        axis: "dataset",
+        description:
+          "The dataset the named sources are asked for. Absent ⇒ the job's registered dataset.",
+      },
+      {
+        name: "shards",
+        label: "Shards",
+        type: "list",
+        description:
+          "The shard keys a sharded run partitions the universe by. Absent ⇒ the job's configured processing.shards.",
+      },
+      {
+        name: "minDte",
+        label: "Minimum DTE",
+        type: "number",
+        minimum: 0,
+        description: "Options-chains jobs only: the shortest days-to-expiry a chain pull may include.",
+      },
+      {
+        name: "maxDte",
+        label: "Maximum DTE",
+        type: "number",
+        minimum: 0,
+        atLeast: "minDte",
+        description:
+          "Options-chains jobs only: the longest days-to-expiry a chain pull may include; never below minDte.",
+      },
+    ],
     schedule: { enabled: false },
   },
   research: {
@@ -338,9 +459,25 @@ export function resolveJobDefinitionSpec(raw: unknown): JobDefinitionSpec {
       );
     }
   }
+  const axes = resolveSpecAxes(raw.axes, id);
   const parameters = Array.isArray(raw.parameters)
     ? raw.parameters.map((param) => resolveParameter(param, id))
     : undefined;
+  // Issue #5493 — a cross-parameter rule may only name a parameter the spec
+  // declares; a typo refuses at load time, never as a silently unenforced rule.
+  if (parameters) {
+    const names = new Set(parameters.map((param) => param.name));
+    for (const param of parameters) {
+      for (const field of ["atLeast", "capabilityFrom"] as const) {
+        const target = param[field];
+        if (target !== undefined && !names.has(target)) {
+          throw new Error(
+            `Job definition "${id}" parameter "${param.name}" ${field} names "${target}", which the definition does not declare — it declares: ${[...names].join(", ")}.`,
+          );
+        }
+      }
+    }
+  }
   const schedule = isRecord(raw.schedule)
     ? {
         enabled: raw.schedule.enabled === true,
@@ -356,11 +493,49 @@ export function resolveJobDefinitionSpec(raw: unknown): JobDefinitionSpec {
     name,
     version,
     stages,
+    ...(axes ? { axes } : {}),
     ...(parameters && parameters.length > 0 ? { parameters } : {}),
     ...(executionMode ? { executionMode } : {}),
     ...(schedule ? { schedule } : {}),
     ...(typeof raw.description === "string" ? { description: raw.description } : {}),
   };
+}
+
+/**
+ * Issue #5493 — resolve a spec's declared axis set through the one vocabulary.
+ * An unknown axis refuses by name; an unknown or conflated value refuses with
+ * the vocabulary's own code, so the spec and the API speak one refusal
+ * language. An alias resolves to its canonical id — the spec stores the
+ * canonical value, never the spelling a caller happened to use.
+ */
+function resolveSpecAxes(raw: unknown, specId: string): Partial<Record<Axis, string>> | undefined {
+  if (raw === undefined) return undefined;
+  if (!isRecord(raw)) {
+    throw new Error(
+      `Job definition "${specId}" is invalid: axes must be an object of axis → value.`,
+    );
+  }
+  const resolved: Partial<Record<Axis, string>> = {};
+  for (const [axis, value] of Object.entries(raw)) {
+    if (!isAxis(axis)) {
+      throw new Error(
+        `Job definition "${specId}" is invalid: "${axis}" is not a vocabulary axis (#5515). The axes are: ${AXES.join(", ")}.`,
+      );
+    }
+    if (typeof value !== "string" || value.trim() === "") {
+      throw new Error(
+        `Job definition "${specId}" is invalid: axis "${axis}" must name a value as a non-empty string.`,
+      );
+    }
+    const one = resolveValue(axis, value);
+    if (!one.ok) {
+      throw new Error(
+        `Job definition "${specId}" is invalid: axis "${axis}": ${one.code}: ${one.message}`,
+      );
+    }
+    resolved[axis] = one.value;
+  }
+  return Object.keys(resolved).length > 0 ? resolved : undefined;
 }
 
 function resolveParameter(raw: unknown, specId: string): JobDefinitionParameter {
@@ -372,7 +547,9 @@ function resolveParameter(raw: unknown, specId: string): JobDefinitionParameter 
   if (
     rawType !== undefined &&
     rawType !== "select" &&
+    rawType !== "multi-select" &&
     rawType !== "text" &&
+    rawType !== "list" &&
     rawType !== "number" &&
     rawType !== "boolean"
   ) {
@@ -402,6 +579,53 @@ function resolveParameter(raw: unknown, specId: string): JobDefinitionParameter 
       );
     }
   }
+  // Issue #5493 — a parameter that names a vocabulary axis holds only that
+  // axis's values: one source per parameter (an axis plus its own
+  // options/enumSource would be a second list), and an axis value is a
+  // select or a multi-select.
+  let axis: Axis | undefined;
+  if (raw.axis !== undefined) {
+    const axisName = text(raw.axis, `parameter "${name}" axis`, specId);
+    if (!isAxis(axisName)) {
+      throw new Error(
+        `Job definition "${specId}" parameter "${name}" references unknown vocabulary axis "${axisName}". The axes are: ${AXES.join(", ")}.`,
+      );
+    }
+    if (type !== "select" && type !== "multi-select") {
+      throw new Error(
+        `Job definition "${specId}" parameter "${name}" declares the vocabulary axis "${axisName}" with type "${type}" — an axis value is a select or a multi-select.`,
+      );
+    }
+    if (enumSource !== undefined || (options !== undefined && options.length > 0)) {
+      throw new Error(
+        `Job definition "${specId}" parameter "${name}" declares both the vocabulary axis "${axisName}" and its own options/enumSource — one source per parameter, and the vocabulary is the one list.`,
+      );
+    }
+    axis = axisName;
+  }
+  const minimum = resolveNumberField(raw.minimum, specId, name, "minimum");
+  const maximum = resolveNumberField(raw.maximum, specId, name, "maximum");
+  if ((minimum !== undefined || maximum !== undefined) && type !== "number") {
+    throw new Error(
+      `Job definition "${specId}" parameter "${name}" declares bounds with type "${type}" — minimum/maximum belong to a number parameter.`,
+    );
+  }
+  if (minimum !== undefined && maximum !== undefined && minimum > maximum) {
+    throw new Error(
+      `Job definition "${specId}" parameter "${name}" declares minimum ${minimum} above maximum ${maximum} — refusing rather than an empty range.`,
+    );
+  }
+  const atLeast =
+    raw.atLeast !== undefined ? text(raw.atLeast, `parameter "${name}" atLeast`, specId) : undefined;
+  if (atLeast !== undefined && type !== "number") {
+    throw new Error(
+      `Job definition "${specId}" parameter "${name}" declares atLeast with type "${type}" — a lower-bound relation belongs to a number parameter.`,
+    );
+  }
+  const capabilityFrom =
+    raw.capabilityFrom !== undefined
+      ? text(raw.capabilityFrom, `parameter "${name}" capabilityFrom`, specId)
+      : undefined;
   let defaultValue = raw.default;
   if (isRecord(defaultValue)) {
     if (typeof defaultValue.setting !== "string" || defaultValue.setting.trim() === "") {
@@ -417,11 +641,32 @@ function resolveParameter(raw: unknown, specId: string): JobDefinitionParameter 
     type,
     ...(raw.required === true ? { required: true } : {}),
     ...(typeof raw.description === "string" ? { description: raw.description } : {}),
+    ...(axis ? { axis } : {}),
     ...(options && options.length > 0 ? { options } : {}),
     ...(enumSource ? { enumSource } : {}),
     ...(defaultValue !== undefined ? { default: defaultValue } : {}),
     ...(derivation ? { derivation } : {}),
+    ...(minimum !== undefined ? { minimum } : {}),
+    ...(maximum !== undefined ? { maximum } : {}),
+    ...(atLeast !== undefined ? { atLeast } : {}),
+    ...(capabilityFrom !== undefined ? { capabilityFrom } : {}),
   };
+}
+
+/** Issue #5493 — a declared numeric bound: absent ⇒ absent; anything else must be finite. */
+function resolveNumberField(
+  raw: unknown,
+  specId: string,
+  paramName: string,
+  field: string,
+): number | undefined {
+  if (raw === undefined) return undefined;
+  if (typeof raw !== "number" || !Number.isFinite(raw)) {
+    throw new Error(
+      `Job definition "${specId}" parameter "${paramName}" ${field} must be a finite number.`,
+    );
+  }
+  return raw;
 }
 
 /** The validated catalogue, addressable by id. */

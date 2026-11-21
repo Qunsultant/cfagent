@@ -1,18 +1,18 @@
 /**
  * Issue #5965 — picker options read the whole-set vocabulary (#5515).
  *
- * Every surface used to carry its own list of what a job may select. The
- * scheduled run forms are the smallest honest slice: they offered `TECH` as a
- * *universe* (a sector, per #5515) and hardcoded the seven screener ids in each
- * file. Options now come from the one reader, so a value added to
- * `config/vocabulary.json` appears here with no component change and a value
- * that is not a universe cannot be offered.
+ * Every surface used to carry its own list of what a job may select: the
+ * scheduled-run forms offered `TECH` as a *universe* (a sector, per #5515) and
+ * hardcoded the seven screener ids in each file; the tenant settings panel took
+ * the data provider as free text. Options now come from the one reader, so a
+ * value added to `config/vocabulary.json` appears here with no component change
+ * and a value that is not on the axis cannot be offered.
  *
  * Client-safe by construction: `src/config/vocabulary.ts` imports only the JSON
  * and types (no env, no DOM, no node APIs), which is why a client picker and a
  * Worker handler can share it.
  */
-import { universeValues, type VocabularyEntry } from "../config/vocabulary";
+import { axisEntries, universeValues, type Axis, type VocabularyEntry } from "../config/vocabulary";
 
 export interface AxisOption {
   /** What the surface submits — the spelling the API already accepts. */
@@ -58,6 +58,43 @@ export function universeOptions(kind: "screener" | "index"): AxisOption[] {
     value: kind === "index" ? e.id : submittedValue(e),
     label: e.label,
   }));
+}
+
+/**
+ * Options for a plain axis: one entry per registry value, with the registry's
+ * label. `current` is the value the surface holds — when the registry no longer
+ * offers it, it stays visible as a legacy row (never silently blanked).
+ */
+export function axisOptions(axis: Axis, current?: string): AxisOption[] {
+  return withLegacyValue(
+    axisEntries(axis).map((entry) => ({ value: entry.id, label: entry.label })),
+    current,
+  );
+}
+
+/**
+ * The data-provider axis (#5993): what a tenant's jobs may read from.
+ *
+ * The option value is the canonical id the tenant settings PATCH already
+ * accepts, so making the field a picker changes *which values are offered*,
+ * never how a chosen value travels.
+ */
+export function providerOptions(current?: string): AxisOption[] {
+  return axisOptions("provider", current);
+}
+
+/**
+ * The broker axis — which brokers a job may select.
+ *
+ * Not the same question as `src/client/brokerOptions.ts`: that module answers
+ * "which brokers does this platform hold credentials for" (catalog order,
+ * credential kind, icon) for the Settings connection surface. This one answers
+ * "which brokers may a job select" — the #5515 axis, its labels, and the modes
+ * each entry declares. A surface that selects a broker for a run reads this; a
+ * surface that connects one reads the catalog.
+ */
+export function brokerOptions(current?: string): AxisOption[] {
+  return axisOptions("broker", current);
 }
 
 /**

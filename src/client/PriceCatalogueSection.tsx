@@ -35,6 +35,7 @@ import {
   getPriceEntries,
   setPrice,
   approvePrice,
+  isPremiumPriceFamily,
   PriceCatalogueApiError,
   type PriceEntryView,
   type PriceFamily,
@@ -194,15 +195,18 @@ export function PriceCatalogueSection() {
       {!loading && !loadError && isOperator && entries && (
         <>
           <p>
-            Per-run prices for the four families. A price edit lands as
-            Proposed and is not chargeable until an operator approves it;
-            approval records the approving operator.
+            Per-run prices for the four families, plus the three premium
+            services (options-scan, market-research, stock-signals),
+            each priced per call. A price edit lands as Proposed and is
+            not chargeable until an operator approves it; approval
+            records the approving operator.
           </p>
           {entries.length === 0 && <p>No prices yet.</p>}
           {entries.map((entry) => (
             <div key={entry.id}>
               <p>
-                {entry.family} — {formatUSD(entry.priceUSD)} per run
+                {entry.family} — {formatUSD(entry.priceUSD)}{" "}
+                {isPremiumPriceFamily(entry.family) ? "per call" : "per run"}
                 (version {entry.version}, {entry.segment})
               </p>
               <p>{approvalLabel(entry)}</p>

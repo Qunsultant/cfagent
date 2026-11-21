@@ -25,9 +25,40 @@
 /** Screener families with a per-run price. Mirrors the gate's family union. */
 export type PriceFamily = "stock" | "goal" | "options" | "strategy";
 
+/**
+ * #5609 (G-7): premium families with a per-call price. These are NOT
+ * per-run families: they name the three paid premium services
+ * (options-scan, market-research, stock-signals), whose prices live in
+ * this same catalogue under the seed decision's own keys — but they
+ * must never leak into per-run-only surfaces (free-run allowances,
+ * cfpay channels, upgrade offers, approved-free quotas), all of which
+ * validate through assertPriceFamily / PRICE_FAMILIES. The catalogue
+ * (7 families) is the union; the per-run namespace (4) stays closed.
+ */
+export type PremiumPriceFamily = "options-scan" | "market-research" | "stock-signals";
+
+export const PREMIUM_PRICE_FAMILIES: readonly PremiumPriceFamily[] = [
+  "options-scan",
+  "market-research",
+  "stock-signals",
+];
+
+/** Every family the price catalogue can hold a row for. */
+export type CataloguePriceFamily = PriceFamily | PremiumPriceFamily;
+
+export function isPremiumPriceFamily(family: unknown): family is PremiumPriceFamily {
+  return family === "options-scan" || family === "market-research" || family === "stock-signals";
+}
+
 import { BusinessError } from "../outcomes/outcomeAspects";
 
 export const PRICE_FAMILIES: readonly PriceFamily[] = ["stock", "goal", "options", "strategy"];
+
+/** Every family the price catalogue can hold a row for (per-run + premium). */
+export const CATALOGUE_PRICE_FAMILIES: readonly CataloguePriceFamily[] = [
+  ...PRICE_FAMILIES,
+  ...PREMIUM_PRICE_FAMILIES,
+];
 
 export function assertPriceFamily(family: unknown): PriceFamily {
   if (family !== "stock" && family !== "goal" && family !== "options" && family !== "strategy") {
@@ -35,6 +66,38 @@ export function assertPriceFamily(family: unknown): PriceFamily {
     throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID");
   }
   return family;
+}
+
+/**
+ * #5609 (G-7): validate a catalogue family (per-run or premium).
+ * This is the ONLY validator that accepts premium families; the
+ * per-run validator above stays closed so premium families can
+ * never leak into free-run allowances, cfpay channels, upgrade
+ * offers, or approved-free quotas.
+ */
+export function assertCataloguePriceFamily(family: unknown): CataloguePriceFamily {
+  if (
+    family !== "stock" &&
+    family !== "goal" &&
+    family !== "options" &&
+    family !== "strategy" &&
+    family !== "options-scan" &&
+    family !== "market-research" &&
+    family !== "stock-signals"
+  ) {
+    // Issue #5606 (G-3): typed refusal — the family value never reaches a client in a raw message.
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID");
+  }
+  return family;
+}
+
+/**
+ * #5609 (G-7): the catalogue product id for a family. Premium
+ * families are premium products, not per-run products — their id
+ * must not lie about what the product is.
+ */
+export function catalogueProductId(family: CataloguePriceFamily): string {
+  return isPremiumPriceFamily(family) ? `prod-premium-${family}` : perRunProductId(family);
 }
 
 /** Money is stored to the cent; anything finer is a caller bug, not a rounding policy. */
@@ -55,14 +118,19 @@ export function assertPriceUSD(priceUSD: unknown): number {
  * Seeded into the store at ensure time (migration 0011) so a
  * fresh store has prices to read; the gate never reads this
  * constant. An owner-approved price replaces these rows in
- * operator data, not in code. Values: stock $0.02, goal $0.10,
- * options $0.05, strategy $0.10.
+ * operator data, not in code. Per-run values: stock $0.02, goal
+ * $0.10, options $0.05, strategy $0.10. Premium values (#5609,
+ * owner seed decision 2026-11-20, comment 7055099801 on #5609):
+ * options-scan $5, market-research $10, stock-signals $2.
  */
-export const PROPOSED_SEED_PRICES: Record<PriceFamily, number> = {
+export const PROPOSED_SEED_PRICES: Record<CataloguePriceFamily, number> = {
   stock: 0.02,
   goal: 0.1,
   options: 0.05,
   strategy: 0.1,
+  "options-scan": 5,
+  "market-research": 10,
+  "stock-signals": 2,
 };
 
 /**
@@ -105,7 +173,7 @@ import {
 export interface PriceEntry {
   /** Version id, e.g. `cat-stock-default-v1` (migration 0058). */
   id: string;
-  family: PriceFamily;
+  family: CataloguePriceFamily;
   priceUSD: number;
   updatedAtMs: number;
   /**
@@ -123,7 +191,7 @@ export interface PriceEntry {
   approvalStatus: PriceApprovalStatus;
   approvedBy: string | null;
   approvedAtMs: number | null;
-  /** Issue #3289 — the per-run product this price belongs to. */
+  /** Issue #3289 — the product this price belongs to (per-run or premium, #5609). */
   productId: string;
   /** Issue #3289 — the segment this price is sellable to. */
   segment: string;
@@ -173,7 +241,7 @@ export interface PriceCatalogue {
    * product+segment throws.
    */
   createVersion(input: {
-    family: PriceFamily;
+    family: CataloguePriceFamily;
     priceUSD: number;
     segment?: string;
     effectiveFromMs?: number;

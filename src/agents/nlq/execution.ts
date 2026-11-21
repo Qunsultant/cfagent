@@ -8,6 +8,7 @@ import {
   resolveChannelBroker,
 } from "../../trading";
 import { ETradeAgenticPaymentService, TRADING_PAID_SERVICES } from "../../services/agenticPayments";
+import { getApprovedPremiumPrice } from "../../data/createPriceCataloguePorts";
 import { describeX402PaymentPath } from "../../services/x402PaymentPath";
 import { ETradeBrowserService } from "../../services/browserAgent";
 import { ETradeService } from "../../services/etrade";
@@ -294,7 +295,12 @@ function stockScreenEnvelopeFromServiceRun(
 function nlqPaidActionRefusal(
   plan: NLQPlan,
   serviceLabel: string,
-  tier: { priceUSD: number; resource: string },
+  // #5609 (G-7): the price is the resolved APPROVED catalogue price,
+  // or null when this request could not establish one (the sync
+  // executor cannot await the catalogue; the async executor resolves
+  // it and passes null on unapproved/missing/unbound). A null price
+  // renders WITHOUT a figure — never a guessed amount.
+  tier: { priceUSD: number | null; resource: string },
   executedAt: string,
   // #2406 (Phase 1.1): the refusal states the payment path next to the
   // price. Default is the gate's default network (base-sepolia,
@@ -304,6 +310,14 @@ function nlqPaidActionRefusal(
   network?: string,
 ): NLQQueryResult {
   const pathLabel = describeX402PaymentPath(network || "base-sepolia").label;
+  const priceText =
+    tier.priceUSD === null
+      ? "at the approved catalogue price"
+      : `($${tier.priceUSD.toFixed(2)} USDC)`;
+  const payText =
+    tier.priceUSD === null
+      ? "you pay the approved catalogue price from your wallet there"
+      : `you pay $${tier.priceUSD.toFixed(2)} USDC from your wallet there`;
   return {
     plan,
     domain: "agentic_payments",
@@ -311,10 +325,10 @@ function nlqPaidActionRefusal(
     count: 0,
     status: "error",
     summary:
-      `${serviceLabel} ($${tier.priceUSD.toFixed(2)} USDC) requires a verified x402 payment, ` +
+      `${serviceLabel} ${priceText} requires a verified x402 payment, ` +
       `and no payment can be collected from this request — nothing was executed and nothing was recorded. ` +
       `Payment path: ${pathLabel} ` +
-      `To use it, open ${tier.resource} in the signed-in app: you pay $${tier.priceUSD.toFixed(2)} USDC from your wallet there, ` +
+      `To use it, open ${tier.resource} in the signed-in app: ${payText}, ` +
       `the payment is verified, and only then does the service run.`,
     rows: [],
     executedAt,
@@ -400,9 +414,12 @@ function executeNLQQueryCore(
       // nlqPaidActionRefusal). Without this branch the plan fell
       // through to the conversation-history default below and answered
       // a paid request with chat records.
+      // #5609 (G-7): the sync executor cannot await the catalogue,
+      // so the refusal carries no price figure (never a guessed
+      // amount); the async executor below resolves the approved price.
       return action === "paid_scan"
-        ? nlqPaidActionRefusal(plan, "Paid Options Screener", TRADING_PAID_SERVICES.OPTIONS_SCREENER, executedAt, env?.X402_NETWORK)
-        : nlqPaidActionRefusal(plan, "Paid Market Research", TRADING_PAID_SERVICES.MARKET_RESEARCH, executedAt, env?.X402_NETWORK);
+        ? nlqPaidActionRefusal(plan, "Paid Options Screener", { priceUSD: null, resource: TRADING_PAID_SERVICES.OPTIONS_SCREENER.resource }, executedAt, env?.X402_NETWORK)
+        : nlqPaidActionRefusal(plan, "Paid Market Research", { priceUSD: null, resource: TRADING_PAID_SERVICES.MARKET_RESEARCH.resource }, executedAt, env?.X402_NETWORK);
     }
 
     if (action === "wallet_status") {
@@ -2472,7 +2489,10 @@ async function executeNLQQueryAsyncCore(
       // x402 payment the tier requires (see nlqPaidActionRefusal). The
       // scan no longer runs unpaid and no simulated receipt is minted
       // or recorded.
-      return nlqPaidActionRefusal(plan, "Paid Options Screener", TRADING_PAID_SERVICES.OPTIONS_SCREENER, executedAt, env?.X402_NETWORK);
+      // #5609 (G-7): the refusal states the resolved approved price;
+      // null (unapproved/missing/unbound) renders without a figure.
+      const priceUSD = env ? await getApprovedPremiumPrice(env, "options-scan") : null;
+      return nlqPaidActionRefusal(plan, "Paid Options Screener", { priceUSD, resource: TRADING_PAID_SERVICES.OPTIONS_SCREENER.resource }, executedAt, env?.X402_NETWORK);
     }
 
     if (action === "paid_research") {
@@ -2496,7 +2516,10 @@ async function executeNLQQueryAsyncCore(
       // collected on this path (see nlqPaidActionRefusal). The report
       // no longer generates unpaid and no simulated receipt is minted
       // or recorded.
-      return nlqPaidActionRefusal(plan, "Paid Market Research", TRADING_PAID_SERVICES.MARKET_RESEARCH, executedAt, env?.X402_NETWORK);
+      // #5609 (G-7): the refusal states the resolved approved price;
+      // null (unapproved/missing/unbound) renders without a figure.
+      const priceUSD = env ? await getApprovedPremiumPrice(env, "market-research") : null;
+      return nlqPaidActionRefusal(plan, "Paid Market Research", { priceUSD, resource: TRADING_PAID_SERVICES.MARKET_RESEARCH.resource }, executedAt, env?.X402_NETWORK);
     }
   }
 

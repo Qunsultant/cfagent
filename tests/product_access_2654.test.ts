@@ -34,6 +34,7 @@ import {
 } from "../src/agents/orchestrator/meshScreenDoor";
 import { getAgentByClass } from "../src/agents/registry";
 import { TRADING_PAID_SERVICES } from "../src/services/agenticPayments";
+import { PROPOSED_SEED_PRICES } from "../src/data/priceCataloguePorts";
 import { InMemoryWorkflowAdapter } from "../src/workflows/inMemoryWorkflowAdapter";
 import { InMemoryShardJobAdapter } from "../src/data/inMemoryShardJobAdapter";
 import { InMemoryMeshTraceStore } from "../src/data/inMemoryMeshTraceAdapter";
@@ -56,7 +57,13 @@ import { MockSqlStorage } from "./mock-sql";
 const LOGIN = "alice";
 
 function seededCatalog(): ProductEntry[] {
-  return buildProductCatalog([]);
+  // #5609 (G-7): the gated family rows charge the APPROVED premium
+  // catalogue price — the catalog is built with approved premium
+  // rows, never the old hardcoded gate price.
+  return buildProductCatalog([
+    premiumPriceRow("stock-signals", 2, "approved"),
+    premiumPriceRow("options-scan", 5, "approved"),
+  ]);
 }
 
 function stockEntry(catalog: ProductEntry[]): ProductEntry {
@@ -79,6 +86,18 @@ function stockPriceRow(priceUSD: number, approvalStatus: string): PriceEntry {
   } as unknown as PriceEntry;
 }
 
+function premiumPriceRow(
+  family: "stock-signals" | "options-scan" | "market-research",
+  priceUSD: number,
+  approvalStatus: string,
+): PriceEntry {
+  return {
+    family,
+    priceUSD,
+    approvalStatus,
+  } as unknown as PriceEntry;
+}
+
 describe("product access resolution (listed products)", () => {
   it("stock×PayPerUse resolves to the screener chat door + gated API", () => {
     const access = resolveProductAccess(stockEntry(seededCatalog()), [
@@ -94,7 +113,7 @@ describe("product access resolution (listed products)", () => {
     expect(access.chat?.workflowBinding).toBe("SCREENER_WORKFLOW");
     expect(access.chat?.durable).toBe(true);
     expect(access.api?.gateEndpoint).toBe("/api/premium/stock-signals");
-    expect(access.api?.priceUSD).toBe(0.02);
+    expect(access.api?.priceUSD).toBe(2);
     expect(access.panel.runStatusSurface).toBe(
       "AsyncJobsPanel / WorkflowRunsPanel",
     );
@@ -108,11 +127,13 @@ describe("product access resolution (listed products)", () => {
     expect(access.parity.dimensions.gate.verdict).toBe("divergent");
     expect(access.parity.dimensions.operation.verdict).toBe("divergent");
     expect(access.parity.dimensions.agent.verdict).toBe("agree");
-    // Price VALUES agree as seeded — but the sources differ, and the
-    // note must say so; a silent "agree" would hide the divergence risk.
-    expect(access.parity.dimensions.price.verdict).toBe("agree");
+    // #5609 (G-7): the price dimension diverges in VALUE now, not
+    // just in source — the chat path charges the raw per-run price
+    // ($0.02, F3) while the API charges the approved premium price
+    // ($2). The note must name the approved catalogue price.
+    expect(access.parity.dimensions.price.verdict).toBe("divergent");
     expect(access.parity.dimensions.price.note).toMatch(
-      /sources differ|raw operator catalogue/,
+      /approved catalogue price/,
     );
   });
 
@@ -137,12 +158,14 @@ describe("product access resolution (listed products)", () => {
   });
 
   it("options×PayPerUse parity holds on gate, price, and envelope", () => {
-    const access = resolveProductAccess(optionsEntry(seededCatalog()), []);
+    const access = resolveProductAccess(optionsEntry(seededCatalog()), [
+      premiumPriceRow("options-scan", 5, "approved"),
+    ]);
     expect(access.routable).toBe(true);
     expect(access.servingAgent).toBe("trading");
     expect(access.chat?.command).toBe("paid_options_screener");
     expect(access.api?.gateEndpoint).toBe("/api/premium/options-scan");
-    expect(access.api?.priceUSD).toBe(0.05);
+    expect(access.api?.priceUSD).toBe(5);
     expect(access.parity.verdict).toBe("parity");
     expect(access.parity.dimensions.gate.verdict).toBe("agree");
     expect(access.parity.dimensions.price.verdict).toBe("agree");
@@ -226,8 +249,21 @@ describe("drift pins", () => {
     );
     expect(PRODUCT_CHAT_ROUTES.goal).toBeNull();
     expect(PRODUCT_CHAT_ROUTES.strategy).toBeNull();
-    expect(TRADING_PAID_SERVICES.STOCK_SIGNALS.priceUSD).toBe(0.02);
-    expect(TRADING_PAID_SERVICES.OPTIONS_SCREENER.priceUSD).toBe(0.05);
+    // #5609 (G-7): the descriptor carries no price — the price lives
+    // in the catalogue. The descriptor's resource + rate limit pins
+    // stay; the price pins move to the catalogue seeds.
+    expect(TRADING_PAID_SERVICES.STOCK_SIGNALS.resource).toBe(
+      "/api/premium/stock-signals",
+    );
+    expect(TRADING_PAID_SERVICES.STOCK_SIGNALS.rateLimitPerMin).toBe(120);
+    expect(TRADING_PAID_SERVICES.OPTIONS_SCREENER.resource).toBe(
+      "/api/premium/options-scan",
+    );
+    expect(TRADING_PAID_SERVICES.OPTIONS_SCREENER.rateLimitPerMin).toBe(60);
+    expect("priceUSD" in TRADING_PAID_SERVICES.STOCK_SIGNALS).toBe(false);
+    expect("priceUSD" in TRADING_PAID_SERVICES.OPTIONS_SCREENER).toBe(false);
+    expect(PROPOSED_SEED_PRICES["stock-signals"]).toBe(2);
+    expect(PROPOSED_SEED_PRICES["options-scan"]).toBe(5);
     expect(getAgentByClass("ScreenerAgent")).toBeDefined();
     expect(getAgentByClass("TradingAgent")).toBeDefined();
   });

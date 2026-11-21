@@ -51,26 +51,56 @@ describe("product catalog derivation (#2640)", () => {
     }
   });
 
-  it("lists exactly the gate-backed PayPerUse products with gate prices", () => {
-    const catalog = buildProductCatalog(PROPOSED_SEEDS);
+  it("lists the gated PayPerUse products at their APPROVED premium prices", () => {
+    // #5609 (G-7): there is no gate price anymore — a gated family
+    // charges the APPROVED catalogue price of its premium service
+    // (stock → stock-signals, options → options-scan). The premium
+    // entries must be approved; the per-run entries are irrelevant
+    // to the gated price.
+    const catalog = buildProductCatalog([
+      ...PROPOSED_SEEDS,
+      entry("stock-signals", 2, "approved"),
+      entry("options-scan", 5, "approved"),
+    ]);
     const listed = listedProducts(catalog);
     expect(listed.map((p) => p.id).sort()).toEqual([
       "options:PayPerUse",
       "stock:PayPerUse",
     ]);
     const stock = getProduct(catalog, "stock:PayPerUse")!;
-    expect(stock.priceUSD).toBe(0.02);
-    expect(stock.priceSource).toBe("gate");
+    expect(stock.priceUSD).toBe(2);
+    expect(stock.priceSource).toBe("catalogue-approved");
     expect(stock.gateEndpoint).toBe("/api/premium/stock-signals");
     expect(stock.canonicalName).toBe("Real-Time Quant Anomaly Signals");
     expect(stock.servingAgent).toBe("screener");
     const options = getProduct(catalog, "options:PayPerUse")!;
-    expect(options.priceUSD).toBe(0.05);
+    expect(options.priceUSD).toBe(5);
+    expect(options.priceSource).toBe("catalogue-approved");
     expect(options.gateEndpoint).toBe("/api/premium/options-scan");
     expect(options.canonicalName).toBe(
       "E*TRADE Institutional Options & Greeks Screener",
     );
     expect(options.servingAgent).toBe("trading");
+  });
+
+  it("a PROPOSED-only premium price never lists: the gated product is unpriced until approval", () => {
+    // #5609 (G-7): the same fail-closed rule goal/strategy already
+    // live under — a PROPOSED seed is never presented as chargeable,
+    // so with PROPOSED-only premium seeds the gated PayPerUse rows
+    // are unlisted with a named price reason.
+    const catalog = buildProductCatalog([
+      ...PROPOSED_SEEDS,
+      entry("stock-signals", 2, "proposed"),
+      entry("options-scan", 5, "proposed"),
+    ]);
+    expect(listedProducts(catalog)).toEqual([]);
+    const stock = getProduct(catalog, "stock:PayPerUse")!;
+    expect(stock.priceUSD).toBeNull();
+    expect(stock.listed).toBe(false);
+    expect(stock.unlistedReasons.join(" ")).toMatch(/price/i);
+    const options = getProduct(catalog, "options:PayPerUse")!;
+    expect(options.priceUSD).toBeNull();
+    expect(options.listed).toBe(false);
   });
 
   it("the MARKET_RESEARCH service has no family row: it is gate-sold, not a family product", () => {
@@ -110,16 +140,30 @@ describe("product catalog derivation (#2640)", () => {
     expect(goal.unlistedReasons.join(" ")).toMatch(/gate endpoint/i);
   });
 
-  it("a gate price always wins over an approved catalogue price", () => {
+  it("the approved premium price is the price; the per-run approved price never substitutes", () => {
+    // #5609 (G-7): the old rule ("a gate price always wins over an
+    // approved catalogue price") is gone with the gate price. The
+    // gated family charges its premium service's APPROVED price —
+    // never the per-run price for the same family label, however
+    // it is approved.
     const catalog = buildProductCatalog([
       entry("stock", 0.99, "approved"),
+      entry("stock-signals", 2, "approved"),
       entry("goal", 0.1, "proposed"),
       entry("options", 0.05, "proposed"),
       entry("strategy", 0.1, "proposed"),
     ]);
     const stock = getProduct(catalog, "stock:PayPerUse")!;
-    expect(stock.priceUSD).toBe(0.02);
-    expect(stock.priceSource).toBe("gate");
+    expect(stock.priceUSD).toBe(2);
+    expect(stock.priceSource).toBe("catalogue-approved");
+    const unapprovedPremium = buildProductCatalog([
+      entry("stock", 0.99, "approved"),
+      entry("stock-signals", 2, "proposed"),
+      entry("goal", 0.1, "proposed"),
+      entry("options", 0.05, "proposed"),
+      entry("strategy", 0.1, "proposed"),
+    ]);
+    expect(getProduct(unapprovedPremium, "stock:PayPerUse")!.priceUSD).toBeNull();
   });
 
   it("Subscribed rows are registered, never listed as purchasable, no price asserted", () => {

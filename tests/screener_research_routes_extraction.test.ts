@@ -131,7 +131,9 @@ describe("screener + research route inventory (extraction #378)", () => {
     expect(mineIdx, "delegation must come after the market-data screening delegation").toBeGreaterThan(compareScreenIdx);
     // Context wiring is present: orchestrator-owned helpers arrive via the object.
     expect(dispatchSrc).toContain("getScreenerAgent: (userLogin?: string) => deps.getScreenerAgent(userLogin)");
-    expect(dispatchSrc).toContain("runResearchAndPublish: (trigger, userLogin) => deps.runResearchAndPublish(trigger, userLogin)");
+    expect(dispatchSrc).toContain(
+      "runResearchAndPublish: (trigger, userLogin, selection) =>\n      deps.runResearchAndPublish(trigger, userLogin, selection)",
+    );
     expect(dispatchSrc).toContain("if (screenerResearchResponse) return screenerResearchResponse;");
   });
 

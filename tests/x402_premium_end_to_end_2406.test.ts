@@ -32,6 +32,27 @@ import {
 import { DatabaseORM } from "../src/orm";
 import { MockSqlStorage } from "./mock-sql";
 import type { Env, X402PaymentProof } from "../src/types";
+import { APPROVED_PREMIUM_PRICES } from "./premiumPriceCatalogueFixture";
+import { PROPOSED_SEED_PRICES } from "../src/data/priceCataloguePorts";
+
+// #5609 (G-7): the premium routes resolve their price from the
+// catalogue (getApprovedPremiumPrice). This suite binds no D1, so
+// the catalogue resolves from the approved in-memory fixture —
+// the real port semantics, with the binding stubbed, never the price.
+const OPTIONS_SCAN_PRICE = APPROVED_PREMIUM_PRICES["options-scan"];
+const MARKET_RESEARCH_PRICE = APPROVED_PREMIUM_PRICES["market-research"];
+const STOCK_SIGNALS_PRICE = APPROVED_PREMIUM_PRICES["stock-signals"];
+
+vi.mock("../src/data/createPriceCataloguePorts", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../src/data/createPriceCataloguePorts")>();
+  const { approvedPremiumCatalogue } = await import("./premiumPriceCatalogueFixture");
+  return {
+    ...actual,
+    getApprovedPremiumPrice: (_env: unknown, family: string) =>
+      approvedPremiumCatalogue.getApprovedPrice(family),
+  };
+});
 
 const PAYER = "0x1111111111111111111111111111111111111111";
 const RECIPIENT = "0x71C8363837918a211797E3c76A8B3C4258759550";
@@ -79,22 +100,30 @@ function paidRequest(service: ETradeAgenticPaymentService, tier: { resource: str
   });
 }
 
+// #5609 (G-7): tier prices are the APPROVED catalogue prices
+// (owner seeds), resolved from the catalogue — never literals.
 const TIERS = [
-  { key: "OPTIONS_SCREENER", path: "/api/premium/options-scan", price: 0.05 },
-  { key: "MARKET_RESEARCH", path: "/api/premium/market-research", price: 0.10 },
-  { key: "STOCK_SIGNALS", path: "/api/premium/stock-signals", price: 0.02 },
+  { key: "OPTIONS_SCREENER", path: "/api/premium/options-scan", price: OPTIONS_SCAN_PRICE },
+  { key: "MARKET_RESEARCH", path: "/api/premium/market-research", price: MARKET_RESEARCH_PRICE },
+  { key: "STOCK_SIGNALS", path: "/api/premium/stock-signals", price: STOCK_SIGNALS_PRICE },
 ] as const;
 
 describe("x402 end-to-end verification, Phase 1.1 (#2406)", () => {
   describe("price pins (prices stand unless the owner changes them)", () => {
     it("pins all three tier prices, resources, and rate limits", () => {
-      expect(TRADING_PAID_SERVICES.OPTIONS_SCREENER.priceUSD).toBe(0.05);
+      // #5609 (G-7): prices live in the catalogue, not on the
+      // descriptor — the approved price is the owner seed; the
+      // descriptor keeps resource + rate limit.
+      expect(APPROVED_PREMIUM_PRICES["options-scan"]).toBe(PROPOSED_SEED_PRICES["options-scan"]);
+      expect(APPROVED_PREMIUM_PRICES["market-research"]).toBe(PROPOSED_SEED_PRICES["market-research"]);
+      expect(APPROVED_PREMIUM_PRICES["stock-signals"]).toBe(PROPOSED_SEED_PRICES["stock-signals"]);
+      expect("priceUSD" in TRADING_PAID_SERVICES.OPTIONS_SCREENER).toBe(false);
+      expect("priceUSD" in TRADING_PAID_SERVICES.MARKET_RESEARCH).toBe(false);
+      expect("priceUSD" in TRADING_PAID_SERVICES.STOCK_SIGNALS).toBe(false);
       expect(TRADING_PAID_SERVICES.OPTIONS_SCREENER.resource).toBe("/api/premium/options-scan");
       expect(TRADING_PAID_SERVICES.OPTIONS_SCREENER.rateLimitPerMin).toBe(60);
-      expect(TRADING_PAID_SERVICES.MARKET_RESEARCH.priceUSD).toBe(0.10);
       expect(TRADING_PAID_SERVICES.MARKET_RESEARCH.resource).toBe("/api/premium/market-research");
       expect(TRADING_PAID_SERVICES.MARKET_RESEARCH.rateLimitPerMin).toBe(30);
-      expect(TRADING_PAID_SERVICES.STOCK_SIGNALS.priceUSD).toBe(0.02);
       expect(TRADING_PAID_SERVICES.STOCK_SIGNALS.resource).toBe("/api/premium/stock-signals");
       expect(TRADING_PAID_SERVICES.STOCK_SIGNALS.rateLimitPerMin).toBe(120);
     });
@@ -104,7 +133,7 @@ describe("x402 end-to-end verification, Phase 1.1 (#2406)", () => {
     for (const tier of TIERS) {
       it(`${tier.key}: unpaid request gets a labeled 402 at the tier price and serves nothing`, async () => {
         const { orm, service } = makeService(verifyingClaim);
-        const def = TRADING_PAID_SERVICES[tier.key];
+        const def = { ...TRADING_PAID_SERVICES[tier.key], priceUSD: tier.price };
         const fulfill = vi.fn().mockResolvedValue({ served: true });
         const res = await service.handleGatedEndpoint(
           new Request(`https://agent.internal${tier.path}`, { method: "GET" }),
@@ -128,7 +157,7 @@ describe("x402 end-to-end verification, Phase 1.1 (#2406)", () => {
 
       it(`${tier.key}: verified payment serves the result with receipt headers and a completed ledger row`, async () => {
         const { orm, service } = makeService(verifyingClaim);
-        const def = TRADING_PAID_SERVICES[tier.key];
+        const def = { ...TRADING_PAID_SERVICES[tier.key], priceUSD: tier.price };
         const txHash = nextTxHash();
         const fulfill = vi.fn().mockResolvedValue({ served: true, service: def.id });
         // Issue #2408: served calls are metered — the slice-1
@@ -173,7 +202,7 @@ describe("x402 end-to-end verification, Phase 1.1 (#2406)", () => {
 
     it("simulated proofs are refused with a typed error, serve nothing, and write no ledger row", async () => {
       const { orm, service } = makeService(verifyingClaim);
-      const def = TRADING_PAID_SERVICES.OPTIONS_SCREENER;
+      const def = { ...TRADING_PAID_SERVICES.OPTIONS_SCREENER, priceUSD: OPTIONS_SCAN_PRICE };
       const challenge = service.createX402Challenge(def.resource, def.priceUSD);
       const proof: X402PaymentProof = {
         payer: PAYER,
@@ -200,7 +229,7 @@ describe("x402 end-to-end verification, Phase 1.1 (#2406)", () => {
 
     it("a replayed transaction hash is refused and fulfills only once", async () => {
       const { service } = makeService(verifyingClaim);
-      const def = TRADING_PAID_SERVICES.STOCK_SIGNALS;
+      const def = { ...TRADING_PAID_SERVICES.STOCK_SIGNALS, priceUSD: STOCK_SIGNALS_PRICE };
       const txHash = nextTxHash();
       const fulfill = vi.fn().mockResolvedValue({ served: true });
       // Issue #2408: the first serve meters; the replay meters nothing more.
@@ -218,7 +247,7 @@ describe("x402 end-to-end verification, Phase 1.1 (#2406)", () => {
 
     it("failed claim verification is refused with a typed error and serves nothing", async () => {
       const { orm, service } = makeService(failingClaim);
-      const def = TRADING_PAID_SERVICES.MARKET_RESEARCH;
+      const def = { ...TRADING_PAID_SERVICES.MARKET_RESEARCH, priceUSD: MARKET_RESEARCH_PRICE };
       const fulfill = vi.fn().mockResolvedValue({ served: true });
       const res = await service.handleGatedEndpoint(paidRequest(service, def, nextTxHash()), def.resource, def.priceUSD, def.description, fulfill);
       expect(res.status).toBe(402);

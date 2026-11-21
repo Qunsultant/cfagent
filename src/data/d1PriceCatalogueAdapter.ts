@@ -35,19 +35,19 @@ import {
 } from "./migrationRunner";
 import {
   assertApproverId,
-  assertPriceFamily,
+  assertCataloguePriceFamily,
   assertPriceUSD,
-  PRICE_FAMILIES,
+  CATALOGUE_PRICE_FAMILIES,
+  catalogueProductId,
   PROPOSED_SEED_PRICES,
+  type CataloguePriceFamily,
   type PriceCatalogue,
   type PriceEntry,
-  type PriceFamily,
 } from "./priceCataloguePorts";
 import {
   assertSegment,
   catalogueVersionId,
   DEFAULT_SEGMENT,
-  perRunProductId,
   resolveEffectiveVersion,
 } from "./productPorts";
 import { BusinessError } from "../outcomes/outcomeAspects";
@@ -90,7 +90,7 @@ export async function ensurePriceCatalogueSchema(db: PriceCatalogueDb): Promise<
   ]);
   const now = Date.now();
   for (const [family, priceUSD] of Object.entries(PROPOSED_SEED_PRICES)) {
-    const familyKey = assertPriceFamily(family);
+    const familyKey = assertCataloguePriceFamily(family);
     await db
       .insert(agentPriceCatalogue)
       .values({
@@ -101,7 +101,7 @@ export async function ensurePriceCatalogueSchema(db: PriceCatalogueDb): Promise<
         approvalStatus: "proposed",
         approvedBy: null,
         approvedAtMs: null,
-        productId: perRunProductId(familyKey),
+        productId: catalogueProductId(familyKey),
         segment: DEFAULT_SEGMENT,
         version: 1,
         effectiveFromMs: now,
@@ -123,7 +123,7 @@ function toEntry(raw: typeof agentPriceCatalogue.$inferSelect): PriceEntry {
   // a row written before the migration ran; read it as the
   // backfill would have written it (v1, default segment,
   // effective at update time, product from the family).
-  const family = assertPriceFamily(raw.family);
+  const family = assertCataloguePriceFamily(raw.family);
   return {
     id:
       typeof raw.id === "string" && raw.id.length > 0
@@ -138,7 +138,7 @@ function toEntry(raw: typeof agentPriceCatalogue.$inferSelect): PriceEntry {
     productId:
       typeof raw.productId === "string" && raw.productId.length > 0
         ? raw.productId
-        : perRunProductId(family),
+        : catalogueProductId(family),
     segment:
       typeof raw.segment === "string" && raw.segment.length > 0 ? raw.segment : DEFAULT_SEGMENT,
     version: typeof raw.version === "number" && raw.version >= 1 ? raw.version : 1,
@@ -182,8 +182,8 @@ export class D1PriceCatalogueAdapter implements PriceCatalogue {
     // effective entry (null), never a throw — the old getPrice
     // contract ("nope" → null) is preserved. The write path
     // (createVersion/setPrice) still validates the family.
-    if (!(PRICE_FAMILIES as readonly string[]).includes(family)) return null;
-    const familyKey = family as PriceFamily;
+    if (!(CATALOGUE_PRICE_FAMILIES as readonly string[]).includes(family)) return null;
+    const familyKey = family as CataloguePriceFamily;
     const seg = assertSegment(segment);
     const versions = await this.listVersions(familyKey, seg);
     return resolveEffectiveVersion(versions, seg, nowMs ?? Date.now());
@@ -194,7 +194,7 @@ export class D1PriceCatalogueAdapter implements PriceCatalogue {
     // version per family for the default segment — one row per
     // family, never a stale or future version.
     const rows = await this.db.select().from(agentPriceCatalogue);
-    const byFamily = new Map<PriceFamily, PriceEntry[]>();
+    const byFamily = new Map<CataloguePriceFamily, PriceEntry[]>();
     for (const raw of rows) {
       const entry = toEntry(raw);
       const list = byFamily.get(entry.family) ?? [];
@@ -211,8 +211,8 @@ export class D1PriceCatalogueAdapter implements PriceCatalogue {
   }
 
   async listVersions(family: string, segment?: string): Promise<PriceEntry[]> {
-    const familyKey = assertPriceFamily(family);
-    const productId = perRunProductId(familyKey);
+    const familyKey = assertCataloguePriceFamily(family);
+    const productId = catalogueProductId(familyKey);
     const rows =
       segment === undefined
         ? await this.db
@@ -242,13 +242,13 @@ export class D1PriceCatalogueAdapter implements PriceCatalogue {
   }
 
   async createVersion(input: {
-    family: PriceFamily;
+    family: CataloguePriceFamily;
     priceUSD: number;
     segment?: string;
     effectiveFromMs?: number;
     effectiveToMs?: number | null;
   }): Promise<PriceEntry> {
-    const family = assertPriceFamily(input.family);
+    const family = assertCataloguePriceFamily(input.family);
     const priceUSD = assertPriceUSD(input.priceUSD);
     const segment = input.segment === undefined ? DEFAULT_SEGMENT : assertSegment(input.segment);
     const effectiveFromMs = input.effectiveFromMs ?? Date.now();
@@ -259,7 +259,7 @@ export class D1PriceCatalogueAdapter implements PriceCatalogue {
     if (effectiveToMs !== null && (!Number.isFinite(effectiveToMs) || effectiveToMs <= effectiveFromMs)) {
       throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     }
-    const productId = perRunProductId(family);
+    const productId = catalogueProductId(family);
     // Two versions may share an effectiveFromMs (same-ms
     // creation is a race, not a caller error — see the 0058
     // header note): the resolver tiebreaks ties by greatest
@@ -307,7 +307,7 @@ export class D1PriceCatalogueAdapter implements PriceCatalogue {
     // segment, effective now). The operator price route keeps
     // its shape; the old row is never edited in place.
     return this.createVersion({
-      family: assertPriceFamily(input.family),
+      family: assertCataloguePriceFamily(input.family),
       priceUSD: assertPriceUSD(input.priceUSD),
     });
   }
@@ -317,7 +317,7 @@ export class D1PriceCatalogueAdapter implements PriceCatalogue {
     approverId: unknown;
     segment?: unknown;
   }): Promise<PriceEntry> {
-    const family = assertPriceFamily(input.family);
+    const family = assertCataloguePriceFamily(input.family);
     const approverId = assertApproverId(input.approverId);
     const segment = input.segment === undefined || input.segment === null ? DEFAULT_SEGMENT : assertSegment(input.segment);
     // Issue #3289: approval targets the EFFECTIVE version for

@@ -8,6 +8,7 @@ import { z } from "zod";
 import { optionScreenerFilterFields, parseOptionScreenerFilter } from "../../trading";
 import type { IMcpToolCommand, McpToolContext } from "../../patterns/interfaces";
 import { ETradeAgenticPaymentService, TRADING_PAID_SERVICES } from "../../services/agenticPayments";
+import { getApprovedPremiumPrice } from "../../data/createPriceCataloguePorts";
 import { UnifiedOptionsService } from "../../trading";
 import { MarketDataResearchService } from "../../services/marketDataResearch";
 import {
@@ -74,7 +75,7 @@ const AGENTIC_PAYMENTS_SWITCH_NAMES: Record<keyof PaymentsModeValues, string> = 
 };
 
 /**
- * 1. Paid Options Screener Command ($0.05 USDC)
+ * 1. Paid Options Screener Command (price: approved catalogue price for "options-scan")
  */
 export class PaidOptionsScreenerCommand implements IMcpToolCommand<{
   underlying?: string;
@@ -96,7 +97,7 @@ export class PaidOptionsScreenerCommand implements IMcpToolCommand<{
 }> {
   readonly name = "paid_options_screener";
   readonly description =
-    "Screen live option chains with explicit DTE, Greeks, liquidity, spread, and quote-age inputs. Supply an underlying or a maximum-underlyings limit. Requires Cloudflare Agentic Payment ($0.05 USDC).";
+    "Screen live option chains with explicit DTE, Greeks, liquidity, spread, and quote-age inputs. Supply an underlying or a maximum-underlyings limit. Requires Cloudflare Agentic Payment at the approved catalogue price.";
   readonly jsonSchema = {
     type: "object" as const,
     properties: {
@@ -169,8 +170,19 @@ export class PaidOptionsScreenerCommand implements IMcpToolCommand<{
     const screenerMode = resolveAgenticPaymentsCommandMode(context, "screener", input.mode, "mcp");
     const paymentService = new ETradeAgenticPaymentService(context.orm, context.env, context.sessionId);
     const serviceDef = TRADING_PAID_SERVICES.OPTIONS_SCREENER;
+    // #5609 (G-7): the price is the approved catalogue price for
+    // "options-scan". No approved price → refuse before minting a
+    // challenge: a challenge cannot be minted without a price.
+    const priceUSD = await getApprovedPremiumPrice(context.env, "options-scan");
+    if (priceUSD === null) {
+      return {
+        status: 503,
+        error: "PriceUnavailable",
+        message: "No approved price is set for this premium service; the tool cannot charge.",
+      };
+    }
     const extractedNonce = paymentService.extractNonce(input.paymentSignature);
-    const challenge = paymentService.createX402Challenge(serviceDef.resource, serviceDef.priceUSD, serviceDef.description, extractedNonce);
+    const challenge = paymentService.createX402Challenge(serviceDef.resource, priceUSD, serviceDef.description, extractedNonce);
 
     // If no payment proof supplied, return 402 challenge
     if (!input.paymentSignature) {
@@ -178,11 +190,11 @@ export class PaidOptionsScreenerCommand implements IMcpToolCommand<{
         status: 402,
         paid: false,
         error: "Payment Required",
-        priceUSD: serviceDef.priceUSD,
+        priceUSD,
         currency: challenge.currency,
         challenge,
         paymentHeader: "PAYMENT-SIGNATURE",
-        message: `Tool 'paid_options_screener' requires $${serviceDef.priceUSD.toFixed(2)} ${challenge.currency}. Sign the challenge and retry with paymentSignature.`,
+        message: `Tool 'paid_options_screener' requires $${priceUSD.toFixed(2)} ${challenge.currency}. Sign the challenge and retry with paymentSignature.`,
       };
     }
 
@@ -206,7 +218,7 @@ export class PaidOptionsScreenerCommand implements IMcpToolCommand<{
     // trace (tool_executed audits only on success, below).
     context.audit("agentic_payment.tool_paid_started", "trading", {
       tool: "paid_options_screener",
-      price: serviceDef.priceUSD,
+      price: priceUSD,
       receiptId: verification.receipt.receiptId,
       txHash: verification.receipt.txHash,
     });
@@ -260,7 +272,7 @@ export class PaidOptionsScreenerCommand implements IMcpToolCommand<{
 
     context.audit("agentic_payment.tool_executed", "trading", {
       tool: "paid_options_screener",
-      price: serviceDef.priceUSD,
+      price: priceUSD,
       receiptId: verification.receipt.receiptId,
       txHash: verification.receipt.txHash,
     });
@@ -312,7 +324,7 @@ export class PaidOptionsScreenerCommand implements IMcpToolCommand<{
 }
 
 /**
- * 2. Paid Market Research Command ($0.10 USDC)
+ * 2. Paid Market Research Command (price: approved catalogue price for "market-research")
  */
 export class PaidMarketResearchCommand implements IMcpToolCommand<{
   symbol?: string;
@@ -321,7 +333,7 @@ export class PaidMarketResearchCommand implements IMcpToolCommand<{
 }> {
   readonly name = "paid_market_research";
   readonly description =
-    "Generate deep institutional equity research report. Requires Cloudflare Agentic Payment ($0.10 USDC). Supply paymentSignature or call without to receive 402 challenge.";
+    "Generate deep institutional equity research report. Requires Cloudflare Agentic Payment at the approved catalogue price. Supply paymentSignature or call without to receive 402 challenge.";
   readonly jsonSchema = {
     type: "object" as const,
     properties: {
@@ -342,19 +354,30 @@ export class PaidMarketResearchCommand implements IMcpToolCommand<{
     const researchMode = resolveAgenticPaymentsCommandMode(context, "research", input.mode, "mcp");
     const paymentService = new ETradeAgenticPaymentService(context.orm, context.env, context.sessionId);
     const serviceDef = TRADING_PAID_SERVICES.MARKET_RESEARCH;
+    // #5609 (G-7): the price is the approved catalogue price for
+    // "market-research". No approved price → refuse before minting a
+    // challenge: a challenge cannot be minted without a price.
+    const priceUSD = await getApprovedPremiumPrice(context.env, "market-research");
+    if (priceUSD === null) {
+      return {
+        status: 503,
+        error: "PriceUnavailable",
+        message: "No approved price is set for this premium service; the tool cannot charge.",
+      };
+    }
     const extractedNonce = paymentService.extractNonce(input.paymentSignature);
-    const challenge = paymentService.createX402Challenge(serviceDef.resource, serviceDef.priceUSD, serviceDef.description, extractedNonce);
+    const challenge = paymentService.createX402Challenge(serviceDef.resource, priceUSD, serviceDef.description, extractedNonce);
 
     if (!input.paymentSignature) {
       return {
         status: 402,
         paid: false,
         error: "Payment Required",
-        priceUSD: serviceDef.priceUSD,
+        priceUSD,
         currency: challenge.currency,
         challenge,
         paymentHeader: "PAYMENT-SIGNATURE",
-        message: `Tool 'paid_market_research' requires $${serviceDef.priceUSD.toFixed(2)} ${challenge.currency}. Sign the challenge and retry with paymentSignature.`,
+        message: `Tool 'paid_market_research' requires $${priceUSD.toFixed(2)} ${challenge.currency}. Sign the challenge and retry with paymentSignature.`,
       };
     }
 
@@ -377,7 +400,7 @@ export class PaidMarketResearchCommand implements IMcpToolCommand<{
     // trace (tool_executed audits only on success, below).
     context.audit("agentic_payment.tool_paid_started", "research", {
       tool: "paid_market_research",
-      price: serviceDef.priceUSD,
+      price: priceUSD,
       receiptId: verification.receipt.receiptId,
       txHash: verification.receipt.txHash,
     });
@@ -387,7 +410,7 @@ export class PaidMarketResearchCommand implements IMcpToolCommand<{
 
     context.audit("agentic_payment.tool_executed", "research", {
       tool: "paid_market_research",
-      price: serviceDef.priceUSD,
+      price: priceUSD,
       receiptId: verification.receipt.receiptId,
       symbol: input.symbol || "NVDA",
     });

@@ -141,7 +141,17 @@ describe("checkout UI pricing route (#2137, native rework #2196)", () => {
       failurePolicy: string;
     };
     expect(body.monetizationEnabled).toBe(false);
-    expect(body.prices).toEqual({ stock: 0.02, goal: 0.1, options: 0.05, strategy: 0.1 });
+    // #5609 (G-7): the server-truth prices are the whole catalogue —
+    // the four per-run families plus the three premium families.
+    expect(body.prices).toEqual({
+      stock: 0.02,
+      goal: 0.1,
+      options: 0.05,
+      strategy: 0.1,
+      "options-scan": 5,
+      "market-research": 10,
+      "stock-signals": 2,
+    });
     // Nothing configured: fail-closed to the testnet presentation,
     // derived from the marker — not a hardcoded testnetOnly: true.
     expect(body.network).toEqual({ stripeMode: "unconfigured", x402Network: null, acceptsMainnet: false });

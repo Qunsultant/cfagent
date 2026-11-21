@@ -26,6 +26,7 @@ import {
   AGENTIC_WALLET_STARTING_CREDIT_USD,
   SIMULATED_PROOF_SIGNATURE,
 } from "../src/services/agenticPayments";
+import { PROPOSED_SEED_PRICES } from "../src/data/priceCataloguePorts";
 import { DatabaseORM } from "../src/orm";
 import { MockSqlStorage } from "./mock-sql";
 import type { Env, X402PaymentProof } from "../src/types";
@@ -302,7 +303,10 @@ describe("Issue #122: agentic payments balance / proof / receipt honesty", () =>
 
       const result: any = await executeNLQQueryAsync(orm, "session_trader", plan, mockEnv, "session_trader");
       expect(result.status).toBe("error");
-      expect(result.summary).toContain("Paid Options Screener ($0.05 USDC)");
+      // #5609 (G-7): the async refusal states the resolved approved
+      // price — this env binds no catalogue, so no figure is stated
+      // (never a guessed amount).
+      expect(result.summary).toContain("Paid Options Screener at the approved catalogue price");
       expect(result.summary).toContain("requires a verified x402 payment");
       expect(result.summary).toContain("nothing was executed and nothing was recorded");
       expect(result.summary).toContain("/api/premium/options-scan");
@@ -333,9 +337,19 @@ describe("Issue #122: agentic payments balance / proof / receipt honesty", () =>
 
   describe("paid service catalogue sanity", () => {
     it("tiers unchanged (the defect was never the pricing)", () => {
-      expect(TRADING_PAID_SERVICES.OPTIONS_SCREENER.priceUSD).toBe(0.05);
-      expect(TRADING_PAID_SERVICES.MARKET_RESEARCH.priceUSD).toBe(0.10);
-      expect(TRADING_PAID_SERVICES.STOCK_SIGNALS.priceUSD).toBe(0.02);
+      // #5609 (G-7): prices live in the catalogue, not the descriptor —
+      // the descriptor still names the same three services with the
+      // same resources and rate limits.
+      expect(TRADING_PAID_SERVICES.OPTIONS_SCREENER.resource).toBe("/api/premium/options-scan");
+      expect(TRADING_PAID_SERVICES.OPTIONS_SCREENER.rateLimitPerMin).toBe(60);
+      expect(TRADING_PAID_SERVICES.MARKET_RESEARCH.resource).toBe("/api/premium/market-research");
+      expect(TRADING_PAID_SERVICES.MARKET_RESEARCH.rateLimitPerMin).toBe(30);
+      expect(TRADING_PAID_SERVICES.STOCK_SIGNALS.resource).toBe("/api/premium/stock-signals");
+      expect(TRADING_PAID_SERVICES.STOCK_SIGNALS.rateLimitPerMin).toBe(120);
+      expect("priceUSD" in TRADING_PAID_SERVICES.OPTIONS_SCREENER).toBe(false);
+      expect(PROPOSED_SEED_PRICES["options-scan"]).toBe(5);
+      expect(PROPOSED_SEED_PRICES["market-research"]).toBe(10);
+      expect(PROPOSED_SEED_PRICES["stock-signals"]).toBe(2);
     });
   });
 });

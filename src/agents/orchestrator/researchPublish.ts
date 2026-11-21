@@ -22,6 +22,10 @@ import {
 import type { ResearchAgent } from "../research-agent";
 import type { ResearchReport } from "../../services/researchPipeline";
 import type { ResearchReportArtifactOutcome, ResearchWorkbookOutcome } from "../../trading";
+import { resolveCopilotTradingSelection } from "../copilotTradingMode";
+import { resolveTenantBroker } from "../../services/tenantProviders";
+import { resolveSharedTradingEnvironment } from "../routes/brokerEnvironment";
+import { tradingTypeFor } from "../../trading";
 import { createStructuredLogger } from "../../observability/structuredLogger";
 import { createObservabilitySink } from "../../observability/createObservabilityPorts";
 
@@ -41,6 +45,7 @@ const structuredLog = createStructuredLogger(createObservabilitySink({}), {
  */
 export interface ResearchPublishContext {
   env: Env;
+  readSettingRaw?: (key: string) => string | null;
   agentCtx: AgentContext;
   ensureTables: () => AgentContext["storage"]["sql"];
   getOrm: () => DatabaseORM;
@@ -190,6 +195,34 @@ export async function runResearchAndPublish(ctx: ResearchPublishContext,
   if (!agent) {
     return { success: false, error: "ResearchAgent binding not configured." };
   }
+  // Research uses the same tenant broker + paper/live selection as Copilot.
+  // Resolve missing fields once at the publish boundary so manual and
+  // scheduled runs carry the identical selection through J-stack and the
+  // ResearchAgent; an explicit per-run value still takes precedence.
+  let effectiveSelection = selection;
+  if (!selection?.brokerId || !selection.mode) {
+    const resolved = await resolveCopilotTradingSelection({
+      env: ctx.env,
+      readSettingRaw: ctx.readSettingRaw,
+    });
+    const fallbackSelection = resolved.resolved
+      ? resolved.selection
+      : await (async () => {
+          // OODA is read-only. If the optional commercial settings adapter is
+          // unbound, use the platform's documented broker default and the
+          // shared TEST/paper trade-environment default; never deployment PROD.
+          const brokerId = await resolveTenantBroker(ctx.env);
+          const environment = resolveSharedTradingEnvironment(
+            ctx.readSettingRaw,
+            ctx.env,
+          );
+          return {
+            brokerId,
+            mode: tradingTypeFor(brokerId, environment),
+          };
+        })();
+    effectiveSelection = { ...fallbackSelection, ...selection };
+  }
   // Dispatch discovery through the SDK agent-tool run. The child
   // invokes its deterministic, read-only pipeline tool and persists the
   // typed report before returning its summary.
@@ -246,9 +279,9 @@ export async function runResearchAndPublish(ctx: ResearchPublishContext,
         input: {
           trigger,
           userLogin: login,
-          ...(selection?.runId ? { runId: selection.runId } : {}),
-          ...(selection?.brokerId ? { brokerId: selection.brokerId } : {}),
-          ...(selection?.mode ? { mode: selection.mode } : {}),
+          ...(effectiveSelection?.runId ? { runId: effectiveSelection.runId } : {}),
+          ...(effectiveSelection?.brokerId ? { brokerId: effectiveSelection.brokerId } : {}),
+          ...(effectiveSelection?.mode ? { mode: effectiveSelection.mode } : {}),
         },
       });
     } catch (err) {
@@ -277,9 +310,9 @@ export async function runResearchAndPublish(ctx: ResearchPublishContext,
       const fallback = await agent.runResearch({
         trigger,
         userLogin: login,
-        ...(selection?.runId ? { runId: selection.runId } : {}),
-        ...(selection?.brokerId ? { brokerId: selection.brokerId as never } : {}),
-        ...(selection?.mode ? { mode: selection.mode } : {}),
+        ...(effectiveSelection?.runId ? { runId: effectiveSelection.runId } : {}),
+        ...(effectiveSelection?.brokerId ? { brokerId: effectiveSelection.brokerId as never } : {}),
+        ...(effectiveSelection?.mode ? { mode: effectiveSelection.mode } : {}),
       });
       if (!fallback.success || !fallback.report) {
         const failure = fallback.error || child.error || `Research agent finished with status ${child.status}.`;

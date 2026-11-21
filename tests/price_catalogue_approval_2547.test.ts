@@ -79,13 +79,21 @@ describe("price approval state (#2547)", () => {
   it("seeds land as PROPOSED with no approver recorded", async () => {
     for (const { catalogue } of await catalogues()) {
       const entries = await catalogue.getAllPrices();
-      expect(entries.length).toBe(4);
+      // #5609 (G-7): seven seeds — the four per-run families plus the
+      // three premium families (options-scan, market-research,
+      // stock-signals). All land PROPOSED; approval is a separate
+      // explicit operator action, never implied by seeding.
+      expect(entries.length).toBe(7);
+      expect(entries.map((e) => e.family).sort()).toEqual(
+        ["goal", "market-research", "options", "options-scan", "stock", "stock-signals", "strategy"].sort(),
+      );
       for (const entry of entries) {
         expect(entry.approvalStatus).toBe("proposed");
         expect(entry.approvedBy).toBeNull();
         expect(entry.approvedAtMs).toBeNull();
       }
       expect(await catalogue.getApprovedPrice("stock")).toBeNull();
+      expect(await catalogue.getApprovedPrice("options-scan")).toBeNull();
     }
   });
 

@@ -55,6 +55,27 @@ vi.mock("../src/services/providerConnections", async (importOriginal) => {
     }),
   };
 });
+import { APPROVED_PREMIUM_PRICES } from "./premiumPriceCatalogueFixture";
+
+// #5609 (G-7): the gate takes its price as an argument — the caller
+// resolves the APPROVED catalogue price. These tests drive the gate
+// directly, so the price comes from the approved premium catalogue.
+const OPTIONS_SCAN_PRICE = APPROVED_PREMIUM_PRICES["options-scan"];
+
+// #5609 (G-7): the premium routes resolve their price from the
+// catalogue (getApprovedPremiumPrice). This suite binds no D1, so
+// the catalogue resolves from the approved in-memory fixture —
+// the real port semantics, with the binding stubbed, never the price.
+vi.mock("../src/data/createPriceCataloguePorts", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../src/data/createPriceCataloguePorts")>();
+  const { approvedPremiumCatalogue } = await import("./premiumPriceCatalogueFixture");
+  return {
+    ...actual,
+    getApprovedPremiumPrice: (_env: unknown, family: string) =>
+      approvedPremiumCatalogue.getApprovedPrice(family),
+  };
+});
 
 
 // ---------------------------------------------------------------------------
@@ -225,7 +246,7 @@ async function payWithMpp(orm: DatabaseORM, env: Env = mockEnv) {
   const res = await service.handleGatedEndpoint(
     mppRequest(),
     RESOURCE,
-    TRADING_PAID_SERVICES.OPTIONS_SCREENER.priceUSD,
+    OPTIONS_SCAN_PRICE,
     TRADING_PAID_SERVICES.OPTIONS_SCREENER.description,
     fulfill,
     { meter, category: TRADING_PAID_SERVICES.OPTIONS_SCREENER.id },

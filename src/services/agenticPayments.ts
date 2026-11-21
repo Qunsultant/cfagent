@@ -27,7 +27,7 @@ import type {
   MppPaymentProof,
   AgenticPaymentReceipt,
   AgenticWalletStatus,
-  PaidTradingServiceTier,
+  PaidTradingServiceDescriptor,
   PaymentRequiredCallback,
   TransactionRecord,
 } from "../types";
@@ -121,15 +121,20 @@ export function payerScopeId(payer: string): string {
 }
 
 /**
- * Catalogue of Paid Trading Services offered by E*TRADE Trading Agent
+ * Catalogue of Paid Trading Services offered by E*TRADE Trading Agent.
+ * #5609 (G-7): price-less descriptors — the price for each service
+ * lives in the price catalogue under its premium family
+ * (options-scan $5, market-research $10, stock-signals $2 as PROPOSED
+ * seeds; only an APPROVED catalogue price may be charged) and is
+ * resolved via getApprovedPrice at every charge site. There is no
+ * price field here anymore: a second price source is not kept.
  */
-export const TRADING_PAID_SERVICES: Record<string, PaidTradingServiceTier> = {
+export const TRADING_PAID_SERVICES: Record<string, PaidTradingServiceDescriptor> = {
   OPTIONS_SCREENER: {
     id: "options_screener",
     resource: "/api/premium/options-scan",
     name: "E*TRADE Institutional Options & Greeks Screener",
     description: "Deep options screening with Delta, Gamma, Theta, IV percentile, and volume/OI flow analysis.",
-    priceUSD: 0.05,
     rateLimitPerMin: 60,
   },
   MARKET_RESEARCH: {
@@ -137,7 +142,6 @@ export const TRADING_PAID_SERVICES: Record<string, PaidTradingServiceTier> = {
     resource: "/api/premium/market-research",
     name: "E*TRADE Autonomous Equity Research Report",
     description: "Multi-ticker valuation metrics, fundamentals, and algorithmic trade signals with DID proof.",
-    priceUSD: 0.10,
     rateLimitPerMin: 30,
   },
   STOCK_SIGNALS: {
@@ -145,7 +149,6 @@ export const TRADING_PAID_SERVICES: Record<string, PaidTradingServiceTier> = {
     resource: "/api/premium/stock-signals",
     name: "Real-Time Quant Anomaly Signals",
     description: "Live capital flow anomaly detection, unusual volume, and momentum breakouts.",
-    priceUSD: 0.02,
     rateLimitPerMin: 120,
   },
 };
@@ -249,11 +252,15 @@ export class ETradeAgenticPaymentService {
   }
 
   /**
-   * Create an x402-compliant payment challenge
+   * Create an x402-compliant payment challenge.
+   * #5609 (G-7): priceUSD is REQUIRED — there is no default price.
+   * Every caller passes the resolved approved catalogue price; a
+   * forgotten price must fail at compile time, never silently mint
+   * a challenge for a hardcoded amount.
    */
   createX402Challenge(
     resource: string,
-    priceUSD: number = 0.05,
+    priceUSD: number,
     description: string = "E*TRADE Trading Intelligence Access",
     nonce?: string
   ): X402PaymentChallenge {
@@ -275,11 +282,13 @@ export class ETradeAgenticPaymentService {
   }
 
   /**
-   * Create an MPP-compliant payment challenge
+   * Create an MPP-compliant payment challenge.
+   * #5609 (G-7): priceUSD is REQUIRED — no default price (see
+   * createX402Challenge).
    */
   createMppChallenge(
     resource: string,
-    priceUSD: number = 0.05,
+    priceUSD: number,
     description: string = "E*TRADE Trading Intelligence Access"
   ): MppChallenge {
     return {
