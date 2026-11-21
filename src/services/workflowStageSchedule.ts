@@ -257,6 +257,7 @@ export function createWorkflowStageScheduleAdapter(
     },
     cancel: async (id) => {
       const result = await deleteUnifiedSchedule(management, id);
+      if (!result.ok) throw new Error(result.error);
       return result.cancelled;
     },
     pause: async (id) => {
