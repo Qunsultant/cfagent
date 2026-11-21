@@ -12,7 +12,7 @@ entry — never an engine code change.
 |---|---|---|
 | `provider` | `etrade`, `public`, `yahoo`, `nasdaq`, `alpaca` | Each carries `kind: broker \| pure`. `nasdaq` is a **provider** (it serves the listings dataset) and is never a universe. |
 | `dataset` | `quotes`, `optionsChains`, `screenUniverse`, `historicalBars`, `fundamentals`, `news` | The capability vocabulary. The provider × dataset matrix becomes data in the consumer slice. |
-| `universe` | `nasdaq100`, `sp100`, `sp500`, `russell2000`, `etf`, `lev_etf`, `all`, `dow`, `sp400` | The screener sets and the stored index lists in **one** id space. Aliases carry today's spellings (`NASDAQ100` → `nasdaq100`). `TECH` is absent. |
+| `universe` | `nasdaq100`, `sp100`, `sp500`, `russell2000`, `russell1000`, `russell3000`, `etf`, `lev_etf`, `all`, `dow`, `sp400` | The screener sets and the stored index lists in **one** id space. Aliases carry today's spellings (`NASDAQ100` → `nasdaq100`). `TECH` is absent. |
 | `sector` | the 11 GICS `sector-*` ids | The single home for sectors **and** for sector-as-list universes: `universeValues()` derives one `sector-*` universe per sector, so a sector cannot exist in one list and be missing in the other. `TECH` = `sector-information-technology`. |
 | `exchange` | `all`, `nasdaq`, `nyse`, `amex` | First-class run axis; the screen filter's four values, alias-preserving. |
 | `broker` | `etrade`, `alpaca`, `public`, `tastytrade` | Carries the modes each broker offers, so `public` + `paper` refuses as a pair. |
@@ -66,13 +66,39 @@ never disagree about why a value is wrong.
    an alias that collides inside its axis, an unknown axis, a default naming a
    missing value, or a conflation that shadows a real value all throw on read —
    the previous registry stays in force.
-3. No component, picker, route or resolver changes.
+3. No component, picker, route or resolver changes — the definition route's
+   pickers and the parameter binder read the registry at call time (the
+   `setVocabulary` seam is the pin for that).
+
+## A definition declares axes, a parameter names one (#5493)
+
+`JobDefinitionSpec.axes` declares the axes a family runs on — the feed family
+declares `{ dataset: "quotes", universe: "nasdaq100" }` — and is resolved
+through this reader on every read. An unknown axis refuses by name, and an
+unknown or conflated value refuses with the code below; the spec stores the
+canonical id, never the spelling a caller happened to use.
+
+A parameter whose value names an axis declares it (`{ name: "universe", axis:
+"universe" }`), so the binder resolves it the same way: an alias binds
+canonically, an unknown value refuses by name, and a conflated one refuses with
+its pointer. A `multi-select` parameter declares one axis for each of its
+values; a `list` carries free strings (shard keys). `universe` resolves the
+sector-as-list universes too, so a feed run may name `sector-energy` without a
+second list.
+
+Refusals carry the code in the message (`REFUSAL_VOCABULARY_UNKNOWN_VALUE`,
+`…_NOT_A_VALUE`, `…_UNSUPPORTED_PAIR`), so a route's 400 and a picker's
+explanation say the same thing. A provider set declares `capabilityFrom:
+"dataset"`: a provider that declares capabilities and lacks the dataset refuses
+as a pair, while a provider the declaration projection has not learned yet (a
+data-only addition) is left to the run-time registry
+[Qunsultant/cfagent#5494](https://github.com/Qunsultant/cfagent/issues/5494).
 
 ## Where this is consumed
 
 - **Chat / NLQ** — [Qunsultant/cfagent#5500](https://github.com/Qunsultant/cfagent/issues/5500), the data-provider axis from a chat turn.
 - **UX pickers** — [Qunsultant/cfagent#5965](https://github.com/Qunsultant/cfagent/issues/5965), every axis picker reads this reader instead of its own list.
-- **Engine consumers** — the feed spec (#5493), capability resolution (#5494), the generic binder (#5496), the universe step (#5499) and the defaults change.
+- **Engine consumers** — the feed spec (#5493: `JobDefinitionSpec.axes` and axis-backed parameters, `src/config/jobDefinitionCatalog.ts` + `src/services/jobDefinitionParamBinders.ts`), capability resolution (#5494), the generic binder (#5496), the universe step (#5499) and the defaults change.
 
 Until those land, the existing constants (`DATA_PROVIDER_IDS`, `UNIVERSES`,
 `SECTOR_IDS`, the exchange filter) remain in force and the pins prove the

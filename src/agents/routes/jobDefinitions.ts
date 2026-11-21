@@ -13,8 +13,8 @@
  */
 import { jobDefinitionSpec, listJobDefinitionSpecs, type JobDefinitionSpec } from "../../config/jobDefinitionCatalog";
 import { resolveEnumSource } from "../../config/jobDefinitionParamRegistry";
+import { axisValueIds } from "../../config/vocabulary";
 import { RETRY_BUCKET_NAMES, isRetryBucketName } from "../../services/pipelinePolicy";
-import { UNIVERSES } from "../../trading";
 import type { JobExecutionMode } from "../../data/jobPipelinePorts";
 import type { StageRetryBucket } from "../../workflows/stageRunnerPorts";
 
@@ -54,16 +54,19 @@ const DEFINE_PATH = /(?:^|\/api)\/job-definitions\/([^/]+)\/define$/;
 const LIST_PATH = /(?:^|\/api)\/job-definitions$/;
 
 /**
- * Fill a select parameter's options from the registry that owns them
- * (today: the universe ids), so the client never hard-codes a list.
+ * Fill a select/multi-select parameter's options from the registry that owns
+ * them, so the client never hard-codes a list: a vocabulary axis reads the
+ * one reader (#5515), an enum source reads `ENUM_SOURCES`. A parameter with
+ * neither carries its own options (or none), never a guess.
  */
 function withSelectOptions(spec: JobDefinitionSpec): JobDefinitionSpec {
   const parameters = spec.parameters?.map((param) => {
-    if (param.type !== "select" || (param.options && param.options.length > 0)) return param;
+    if (param.type !== "select" && param.type !== "multi-select") return param;
+    if (param.options && param.options.length > 0) return param;
+    if (param.axis) return { ...param, options: axisValueIds(param.axis) };
     if (param.enumSource) {
       return { ...param, options: resolveEnumSource(param.enumSource, spec.id) };
     }
-    if (param.name === "universe") return { ...param, options: Object.keys(UNIVERSES) };
     return param;
   });
   return parameters ? { ...spec, parameters } : spec;

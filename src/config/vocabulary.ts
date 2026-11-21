@@ -176,6 +176,27 @@ export function axisIds(axis: Axis): string[] {
   return getVocabulary().axes[axis].map((e) => e.id);
 }
 
+/** True when `value` names a declared axis (an unknown axis refuses by name). */
+export function isAxis(value: unknown): value is Axis {
+  return typeof value === "string" && (AXES as readonly string[]).includes(value);
+}
+
+/**
+ * The entries a CONSUMER may declare on an axis: the plain axis list, and for
+ * `universe` also the sector-as-list universes derived from the sector axis —
+ * a feed run's universe input names a stored index list, and every sector list
+ * IS a stored index list (#4216). One source: a sector is declared once and
+ * served on both axes.
+ */
+function entriesFor(axis: Axis): VocabularyEntry[] {
+  return axis === "universe" ? universeValues() : getVocabulary().axes[axis];
+}
+
+/** Every id a consumer may declare on an axis (universe includes the sector lists). */
+export function axisValueIds(axis: Axis): string[] {
+  return entriesFor(axis).map((e) => e.id);
+}
+
 /** Every entry on an axis, labelled for a picker. */
 export function axisEntries(axis: Axis): VocabularyEntry[] {
   return getVocabulary().axes[axis].map((e) => ({ ...e, aliases: [...(e.aliases ?? [])] }));
@@ -211,9 +232,9 @@ function findConflation(axis: Axis, value: string): Conflation | undefined {
   return getVocabulary().conflations.find((c) => c.axis === axis && canon(c.value) === canon(value));
 }
 
-function findEntry(axis: Axis, value: string): VocabularyEntry | undefined {
+function findEntryIn(entries: VocabularyEntry[], value: string): VocabularyEntry | undefined {
   const wanted = canon(value);
-  return getVocabulary().axes[axis].find(
+  return entries.find(
     (e) => canon(e.id) === wanted || (e.aliases ?? []).some((a) => canon(a) === wanted),
   );
 }
@@ -221,10 +242,13 @@ function findEntry(axis: Axis, value: string): VocabularyEntry | undefined {
 /**
  * Resolve one declared value: an id or an alias resolves to the canonical id;
  * a declared conflation refuses with its own message and pointer; anything
- * else refuses by name.
+ * else refuses by name. The one resolver — `resolveValue` and every consumer
+ * (the job-definition binder, the definition route's picker) read through it.
+ * `universe` resolves over the axis plus the derived sector lists, so the two
+ * views of a universe cannot disagree.
  */
 export function resolveValue(axis: Axis, value: string): Resolved<string> {
-  if (!(AXES as readonly string[]).includes(axis)) {
+  if (!isAxis(axis)) {
     return {
       ok: false,
       code: VOCABULARY_CODES.unknownAxis,
@@ -240,12 +264,12 @@ export function resolveValue(axis: Axis, value: string): Resolved<string> {
       message: `${conflation.message}${pointer}`,
     };
   }
-  const entry = findEntry(axis, value);
+  const entry = findEntryIn(entriesFor(axis), value);
   if (entry) return { ok: true, value: entry.id };
   return {
     ok: false,
     code: VOCABULARY_CODES.unknownValue,
-    message: `"${value}" is not a ${axis} (#5515). Known ${axis} values: ${axisIds(axis).join(", ")}.`,
+    message: `"${value}" is not a ${axis} (#5515). Known ${axis} values: ${axisValueIds(axis).join(", ")}.`,
   };
 }
 

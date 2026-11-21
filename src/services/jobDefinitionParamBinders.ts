@@ -8,12 +8,22 @@
  * The screener's feed stage needs shards, so `universe` is translated to
  * the broker's own shard derivation — the same function the mesh door uses,
  * never a second shard policy.
+ *
+ * Issue #5493 — a parameter that names a vocabulary axis resolves through
+ * the one reader (#5515) at bind time: an alias binds to its canonical id,
+ * an unknown value refuses by name, and a conflated value refuses with the
+ * pointer to the axis it belongs to. The family carries no copy of an
+ * axis's values, so a data-only vocabulary addition reaches this binder
+ * with no code change.
  */
 import type { JobDefinitionParameter, JobDefinitionSpec, JobParameterSettingRef } from "../config/jobDefinitionCatalog";
 import { resolveEnumSource, resolveParamDerivation } from "../config/jobDefinitionParamRegistry";
+import { VOCABULARY_CODES, resolveValue } from "../config/vocabulary";
 import type { JobExecutionMode } from "../data/jobPipelinePorts";
+import type { DataProviderCapability } from "../trading";
 import { assertExecutionModeSupported, resolveExecutionMode } from "./jobPipelineConfig";
 import type { JobDefinitionPerStage } from "./jobDefinitionSpecBuilder";
+import { dataProviderDeclaredCapabilities } from "./optionsProviderContext";
 import { RETRY_BUCKET_NAMES, isRetryBucketName } from "./pipelinePolicy";
 import type { StageRetryBucket } from "../workflows/stageRunnerPorts";
 
@@ -41,6 +51,20 @@ function isSettingRef(value: unknown): value is JobParameterSettingRef {
   );
 }
 
+/**
+ * Issue #5493 — one axis value through the one vocabulary reader. The
+ * refusal carries the vocabulary's own code, so the binder, the API and a
+ * picker speak the same refusal language, and an alias binds canonically.
+ */
+function assertAxisValue(specId: string, param: JobDefinitionParameter, raw: string): string {
+  if (!param.axis) return raw;
+  const resolved = resolveValue(param.axis, raw);
+  if (resolved.ok) return resolved.value;
+  throw new Error(
+    `Job definition "${specId}" parameter "${param.name}" is invalid: ${resolved.code}: ${resolved.message}`,
+  );
+}
+
 function normalizeDeclaredValue(
   specId: string,
   param: JobDefinitionParameter,
@@ -50,6 +74,17 @@ function normalizeDeclaredValue(
     if (typeof raw !== "number" || !Number.isFinite(raw)) {
       throw new Error(
         `Job definition "${specId}" parameter "${param.name}" must be a finite number.`,
+      );
+    }
+    // Issue #5493 — the spec's declared bounds, never a constant here.
+    if (param.minimum !== undefined && raw < param.minimum) {
+      throw new Error(
+        `Job definition "${specId}" parameter "${param.name}" (${raw}) is below its declared minimum ${param.minimum}.`,
+      );
+    }
+    if (param.maximum !== undefined && raw > param.maximum) {
+      throw new Error(
+        `Job definition "${specId}" parameter "${param.name}" (${raw}) is above its declared maximum ${param.maximum}.`,
       );
     }
     return raw;
@@ -62,12 +97,42 @@ function normalizeDeclaredValue(
     }
     return raw;
   }
+  if (param.type === "multi-select" || param.type === "list") {
+    if (!Array.isArray(raw)) {
+      throw new Error(
+        `Job definition "${specId}" parameter "${param.name}" must be an array of strings.`,
+      );
+    }
+    const values: string[] = [];
+    for (const item of raw) {
+      if (typeof item !== "string" || item.trim() === "") {
+        throw new Error(
+          `Job definition "${specId}" parameter "${param.name}" must be an array of non-empty strings.`,
+        );
+      }
+      values.push(item.trim());
+    }
+    if (param.axis) return values.map((value) => assertAxisValue(specId, param, value));
+    if (param.options && param.options.length > 0) {
+      for (const value of values) {
+        if (!param.options.includes(value)) {
+          throw new Error(
+            `Job definition "${specId}": unknown ${param.name} "${value}". Allowed values: ${param.options.join(", ")}.`,
+          );
+        }
+      }
+    }
+    return values;
+  }
   if (typeof raw !== "string") {
     throw new Error(
       `Job definition "${specId}" parameter "${param.name}" must be a string.`,
     );
   }
   const trimmed = raw.trim();
+  // Issue #5493 — an axis value outranks enumSource/options: a parameter
+  // declares one source, and the vocabulary is that one list.
+  if (param.axis) return assertAxisValue(specId, param, trimmed);
   if (param.enumSource) {
     const allowed = resolveEnumSource(param.enumSource, specId);
     if (!allowed.includes(trimmed)) {
@@ -134,6 +199,40 @@ export function bindJobDefinitionParams(
           owner,
         }),
       );
+    }
+  }
+  // Issue #5493 — the declared cross-parameter rules. Both read values that
+  // were already bound (nothing new is invented): a number may not sit below
+  // another bound number, and a provider set may only name providers that
+  // serve the requested capability.
+  for (const param of declared) {
+    const value = bound[param.name];
+    if (value === undefined) continue;
+    if (param.atLeast !== undefined) {
+      const floor = bound[param.atLeast];
+      if (typeof floor === "number" && typeof value === "number" && value < floor) {
+        throw new Error(
+          `Job definition "${spec.id}" parameter "${param.name}" is invalid: ${value} is below "${param.atLeast}" (${floor}) — refusing rather than running an empty range.`,
+        );
+      }
+    }
+    if (param.capabilityFrom !== undefined) {
+      const capability = bound[param.capabilityFrom];
+      if (typeof capability !== "string") continue;
+      for (const providerId of Array.isArray(value) ? value : [value]) {
+        if (typeof providerId !== "string") continue;
+        const declaredCapabilities = dataProviderDeclaredCapabilities(providerId);
+        // A provider the declaration projection does not know is left to the
+        // run-time registry (#5494): refusing it here would turn a typo in a
+        // later adapter into a vocabulary the binder cannot accept, and a
+        // data-only vocabulary addition must reach this binder unchanged.
+        if (declaredCapabilities === undefined) continue;
+        if (!declaredCapabilities.includes(capability as DataProviderCapability)) {
+          throw new Error(
+            `Job definition "${spec.id}" parameter "${param.name}" is invalid: provider "${providerId}" does not serve "${capability}" (${VOCABULARY_CODES.unsupportedPair}). It declares: ${declaredCapabilities.join(", ") || "nothing"}.`,
+          );
+        }
+      }
     }
   }
   return {
