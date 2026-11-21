@@ -26,7 +26,7 @@
  * nasdaq100 — the stored index list IS the platform's persisted
  * Nasdaq-100 universe copy, the copy every quotes job reads.
  */
-import type { DataProvider, DataProviderId } from "../trading";
+import type { DataProvider, DataProviderId, IndexId } from "../trading";
 import type { Env } from "../types";
 import type { IndexListStore } from "../data/indexListPorts";
 import type { FeedDatasetStore } from "../data/feedDatasetPorts";
@@ -48,6 +48,7 @@ import {
   type FeedStatusView,
 } from "./feedJobs";
 import {
+  INDEX_REFRESH_INDICES,
   executeIndexListRefreshJob,
   type IndexListJobResult,
 } from "./indexListJob";
@@ -818,16 +819,11 @@ export function createFeedStepRegistry(deps: FeedStepDeps): JobStepRegistry {
     if (!deps.indexRefresh) {
       throw feedNotConfigured(NASDAQ100_UNIVERSE_JOB_ID, "the index-refresh wiring");
     }
-    const index = typeof ctx.params.index === "string" ? ctx.params.index : "nasdaq100";
-    if (index !== "nasdaq100") {
-      throw new Error(
-        `${FEED_JOB_CODES.jobNotFound}: step "${FEED_UNIVERSE_STEP}" maintains the nasdaq100 list only; got "${index}".`,
-      );
-    }
+    const index = resolveUniverseIndex(ctx.params);
     const result: IndexListJobResult = await executeIndexListRefreshJob({
       store: deps.indexRefresh.store,
       service: deps.indexRefresh.service,
-      indices: ["nasdaq100"],
+      indices: [index],
     });
     // executeIndexListRefreshJob throws when every index failed,
     // so reaching here means the stored list was refreshed (a
@@ -835,17 +831,19 @@ export function createFeedStepRegistry(deps: FeedStepDeps): JobStepRegistry {
     const artifact = result.artifacts[0];
     return {
       output: {
-        feedJobId: NASDAQ100_UNIVERSE_JOB_ID,
+        // #5499: the nasdaq100 job keeps its constant id byte-for-byte; a
+        // run of any other index names its own job, never the nasdaq100 one.
+        feedJobId: index === "nasdaq100" ? NASDAQ100_UNIVERSE_JOB_ID : ctx.jobId,
         sourceId: "nasdaq",
         dataset: "universe",
-        index: "nasdaq100",
+        index,
         status: result.status,
         artifactId: artifact?.artifactId ?? null,
         memberCount: artifact?.memberCount ?? 0,
         snapshotDate: artifact?.snapshotDate ?? null,
         failures: result.failures,
       },
-      descriptor: `nasdaq100 universe refreshed: ${artifact?.memberCount ?? 0} members (snapshot ${artifact?.snapshotDate ?? "unknown"})`,
+      descriptor: `${index} universe refreshed: ${artifact?.memberCount ?? 0} members (snapshot ${artifact?.snapshotDate ?? "unknown"})`,
     };
   });
 
@@ -961,4 +959,28 @@ export async function buildFeedJobSurfaceView(args: {
         }
       : null,
   };
+}
+
+
+/**
+ * Issue #5499 — the universe step serves every index the refresh service can
+ * serve, not nasdaq100 only. The known set is the refresh registry itself
+ * (Wikipedia + holdings lists), so a new index reaches this step by being
+ * added to that one list; an unknown id refuses by name with the known ones.
+ * Absent means nasdaq100, the historical default, resolved here (not in the
+ * handler) so the rule is one function.
+ */
+export function resolveUniverseIndex(params: Record<string, unknown>): IndexId {
+  const raw = typeof params?.index === "string" ? params.index.trim() : "";
+  const index = raw === "" ? "nasdaq100" : raw;
+  const known: readonly string[] = [
+    ...INDEX_REFRESH_INDICES.wikipedia,
+    ...INDEX_REFRESH_INDICES.holdings,
+  ];
+  if (!known.includes(index)) {
+    throw new Error(
+      `${FEED_JOB_CODES.jobNotFound}: step "${FEED_UNIVERSE_STEP}" does not know index "${index}"; known: ${known.join(", ")}.`,
+    );
+  }
+  return index as IndexId;
 }
