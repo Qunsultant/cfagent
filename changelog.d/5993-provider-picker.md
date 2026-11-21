@@ -1,0 +1,3 @@
+### Changed
+
+- **The tenant-settings data-provider field is a picker over the vocabulary (#5965 slice 2):** `TenantAdminPanel` no longer takes the provider as free text. The select renders `providerOptions()` from `src/client/vocabularyOptions.ts`, which reads `src/config/vocabulary.ts`, so the options are the registry's providers with the registry's labels and an operator cannot store an id the catalogue does not hold. A tenant whose stored id is no longer offered still shows it, labelled `(legacy)`, instead of blanking; picking a known provider saves as before (`dataProviderId` unchanged). Adding a provider to `config/vocabulary.json` puts it in the picker with no component change. `brokerOptions()` joins the same reader for the broker axis. #CAIO-quns
