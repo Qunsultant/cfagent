@@ -1,0 +1,3 @@
+### Added
+
+- Quick-create schedules for each job with defaults, then edit (#5895): the Schedules home hero gains a Quick create action that lists the catalogue's form jobs (options analysis, market screen, strategy discovery) with their default schedule (weekdays 9:30 AM ET), universe (NASDAQ100) and Slack delivery (#options-alerts), all creatable jobs ticked by default, and creates the ticked jobs in one action through the existing POST /api/schedules/create route (one call per job, per-job results, failures reported without stopping the rest). Strategy discovery is listed but blocked — it needs a saved discovery view, and none is invented. Created rows are ordinary rows, editable with the existing Edit control.

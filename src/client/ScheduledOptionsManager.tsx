@@ -53,6 +53,13 @@ import { LatestRunsSection } from "./scheduledOptionsManager/LatestRunsSection";
 import { SchedulesSection } from "./scheduledOptionsManager/SchedulesSection";
 import { AuditTrailSection } from "./scheduledOptionsManager/AuditTrailSection";
 import { ScheduleFormModal } from "./scheduledOptionsManager/ScheduleFormModal";
+import { QuickCreateModal } from "./scheduledOptionsManager/QuickCreateModal";
+import {
+  quickCreateJobs,
+  runQuickCreate,
+  type QuickCreateJob,
+  type QuickCreateResultItem,
+} from "./scheduledOptionsManager/quickCreate";
 import { ScheduleDetailModal } from "./scheduledOptionsManager/ScheduleDetailModal";
 import { ConfirmModal } from "./scheduledOptionsManager/ConfirmModal";
 
@@ -134,6 +141,12 @@ export function ScheduledOptionsManager({
 
   // Modal State
   const [modalOpen, setModalOpen] = useState(false);
+  // Issue #5895 — quick create: one action creates schedules for each
+  // job with defaults (the catalogue's form jobs, all creatable ones
+  // ticked). Results stay in the dialog until it closes.
+  const [quickCreateOpen, setQuickCreateOpen] = useState(false);
+  const [quickCreateSubmitting, setQuickCreateSubmitting] = useState(false);
+  const [quickCreateResults, setQuickCreateResults] = useState<QuickCreateResultItem[] | null>(null);
   // Destructive actions confirm in one dialog that names the schedule
   // (Details and Edit are non-destructive, so they are separate dialogs).
   const [deleteTarget, setDeleteTarget] = useState<ScheduledTaskItem | null>(null);
@@ -405,6 +418,46 @@ export function ScheduledOptionsManager({
     // daily ceiling); the owner opts in per schedule, explicitly.
     setSubDailyOptIn(false);
     setModalOpen(true);
+  };
+
+  // Issue #5895 — open the quick-create modal (fresh results each time).
+  const openQuickCreateModal = () => {
+    setQuickCreateResults(null);
+    setQuickCreateOpen(true);
+  };
+
+  // Issue #5895 — create the ticked jobs in one action through the
+  // existing POST /api/schedules/create wrapper (one call per job,
+  // per-job results). Created rows refetch into the one list, where
+  // the existing Edit control edits them like any other row.
+  const handleQuickCreateSubmit = async (selected: QuickCreateJob[]) => {
+    setQuickCreateSubmitting(true);
+    setError(null);
+    setSuccessMsg(null);
+    try {
+      const results = await runQuickCreate(
+        selected,
+        (body) => createSchedule(body, authHeaders()),
+        activeEnv,
+      );
+      setQuickCreateResults(results);
+      const created = results.filter((r) => r.ok).length;
+      const failed = results.filter((r) => !r.ok);
+      if (created > 0) {
+        setSuccessMsg(`✓ Quick create: ${created} of ${results.length} schedules created.`);
+        fetchSchedules();
+        fetchAudit();
+      }
+      if (failed.length > 0) {
+        setError(
+          `Quick create: ${failed
+            .map((r) => `${r.label}: ${r.error ?? "Create failed"}`)
+            .join("; ")}`,
+        );
+      }
+    } finally {
+      setQuickCreateSubmitting(false);
+    }
   };
 
   // Edit a user-created stock screen, options screen, or discovery schedule.
@@ -916,6 +969,14 @@ export function ScheduledOptionsManager({
           >
             <span aria-hidden="true">+</span> New Schedule
           </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={openQuickCreateModal}
+            title="Create schedules for each job with defaults, in one action"
+          >
+            Quick create
+          </Button>
         </div>
       </div>
 
@@ -971,6 +1032,17 @@ export function ScheduledOptionsManager({
         auditLogs={auditLogs}
         loadingAudit={loadingAudit}
       />
+
+      {/* Quick Create Modal (issue #5895) */}
+      {quickCreateOpen && (
+        <QuickCreateModal
+          jobs={quickCreateJobs()}
+          submitting={quickCreateSubmitting}
+          results={quickCreateResults}
+          onClose={() => setQuickCreateOpen(false)}
+          onSubmit={handleQuickCreateSubmit}
+        />
+      )}
 
       {/* Create Schedule Modal */}
       {modalOpen && (
