@@ -1,0 +1,3 @@
+### Changed
+
+- **OODA survey moved to its one home, `docs/architecture/survey/` (#5973):** `docs/research/ooda.md` is now a pointer to `docs/architecture/survey/5973-ooda-stage-surface-configuration.md`. The survey also records the findings filed since it was first published: #6039 (signed-out deep link returns the marketing shell), #6040 (the MCP execute and Copilot door report a run that never happened) and #6041 (the production host is a hardcoded fallback in 75 places), plus the explicit acceptance criteria added to #6029, #6034, #6035 and #5976 for the items previously folded into them. Docs only — no product code. #CAIO-quns
