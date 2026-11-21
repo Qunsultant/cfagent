@@ -66,6 +66,7 @@ describe("581 / 5175 research stage linkage & unified run id", () => {
         csvStatus: "generated",
       },
       "owner",
+      { engineJobId: "research:778ad3bf-7044-4ef9-9be9-38744ac8aa86" },
     );
     const body = storedInput.body as Record<string, unknown>;
     expect(body.jobRunId).toBe("research:778ad3bf-7044-4ef9-9be9-38744ac8aa86");
