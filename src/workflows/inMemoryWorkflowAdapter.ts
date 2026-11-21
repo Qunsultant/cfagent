@@ -64,6 +64,7 @@ import { FEED_PULL_STEP } from "../services/feedPipelineJobs";
 import { ENRICH_SCREENER_STEP } from "../services/enrichPipelineJobs";
 import { ANALYZE_SCREENER_STEP } from "../services/analyzePipelineJobs";
 import { GENERATE_APPLY_STEP } from "../services/generatePipelineJobs";
+import { DELIVER_APPLY_STEP } from "../services/deliverPipelineJobs";
 import {
   SCREENER_ANALYSIS_STEP,
   SCREENER_DELIVER_STEP,
@@ -494,7 +495,10 @@ export class InMemoryWorkflowAdapter implements WorkflowPort {
       return { output: serveOutput(await storeOutput(ctx)) };
     });
 
-    registry.register(SCREENER_DELIVER_STEP, async (ctx: JobStepContext) => {
+    // #5885 (6c): the flipped market definition's deliver node
+    // is deliver.apply — the same canned handler (the goal spec
+    // still runs the bespoke step, so both names stay registered).
+    const deliverHandler = async (ctx: JobStepContext) => {
       const prior = priorFor<Record<string, unknown>>(ctx.input, ctx.shardKey);
       if (isDupOutput(prior)) {
         return { output: { ...prior, delivered: false, deliverSkipped: true } };
@@ -525,7 +529,9 @@ export class InMemoryWorkflowAdapter implements WorkflowPort {
           ...(ctx.params.deliver === true ? {} : { deliverSkipped: true }),
         },
       };
-    });
+    };
+    registry.register(SCREENER_DELIVER_STEP, deliverHandler);
+    registry.register(DELIVER_APPLY_STEP, deliverHandler);
   }
 
   /** Fake step: do executes immediately (the engine owns pacing; there is no sleep loop). */
