@@ -190,3 +190,16 @@ export function useBrokerEnvironment(): BrokerEnvironment {
   }, []);
   return env;
 }
+
+/**
+ * Test-only: set the single environment value directly (issue #5879).
+ * Follows setTenantProvidersStateForTest: tests drive the module value
+ * instead of passing a prop, because the menu reads this value and no
+ * other source. Broadcasts so mounted subscribers converge; a render
+ * after the call reads the new value from the hook's initial state.
+ * Tests that flip the value must reset it to TEST afterwards — the
+ * module is process-global and leaks across tests in a file.
+ */
+export function setBrokerEnvironmentForTest(env: BrokerEnvironment): void {
+  setCurrent(env, true);
+}

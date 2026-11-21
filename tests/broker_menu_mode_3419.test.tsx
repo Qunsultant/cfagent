@@ -93,3 +93,27 @@ describe("one active mode per broker (#3419)", () => {
     expect(MENU_SRC).toContain("useBrokerEnvironment()");
   });
 });
+
+describe("menu cannot show an environment the server does not hold (#5879)", () => {
+  it("has no localEnv override shadowing the persisted selection", () => {
+    expect(MENU_SRC).not.toContain("localEnv");
+    expect(MENU_SRC).not.toContain("setLocalEnv");
+  });
+
+  it("derives the effective environment from the server-mirrored hook value", () => {
+    expect(MENU_SRC).toContain("const effectiveEnv = brokerEnv");
+  });
+
+  it("ignores a stale activeEnv prop: the hook value decides (#5879)", async () => {
+    // The module value is TEST (paper) — no test in this file switches it.
+    // Passing activeEnv="PROD" must NOT flip the panel to live: the prop
+    // used to be a fallback source the panel could disagree with the
+    // server on (a failed switch left localEnv pinned at the target).
+    await selectBroker("alpaca");
+    const html = ReactDOMServer.renderToString(
+      React.createElement(SettingsMenu, { activeEnv: "PROD", initialOpen: true }),
+    );
+    expect(html).toContain("🧪 Paper");
+    expect(html).not.toContain("🔴 Live");
+  });
+});
