@@ -105,6 +105,7 @@ import {
 import { ScheduledTasksService } from "../../services/scheduledTasks";
 import { pickFeedLoadParams } from "../../services/feedSnapshotStore";
 import {
+  collapseScheduleListItems,
   deleteUnifiedSchedule,
   getUnifiedScheduleDetail,
   isBulkScheduleScope,
@@ -770,7 +771,12 @@ export async function handleSchedulesRoutes(
       if (scheduleWatchdogItem && (!typeParam || scheduleWatchdogItem.type === typeParam)) {
         items.push(scheduleWatchdogItem);
       }
-      return items;
+      // Issue #5890 — one row per job: the derived row and its live
+      // alarm are the same job (a sweep's derived record and the
+      // interval alarm the guard armed), so the appended rows collapse
+      // through the same reader as the service list above — the home
+      // and the bulk scopes built on this list can never disagree.
+      return collapseScheduleListItems(items);
     };
 
     // Issue #5878 — the manual-run runner, shared by the single-row

@@ -197,18 +197,22 @@ describe("5175 slice 4 — no minting elsewhere", () => {
     ).toBe(2);
   });
 
-  it("P02 job: goal-run descriptors + stage addresses only (5)", () => {
+  it("P02 job: goal-run descriptors + stage addresses only (7)", () => {
     // - src/agents/scheduled-agent.ts:2527, 2561, 3617 — descriptors
     //   `job:${job.jobId}` (the async job's own id, not a mint).
     // - src/workflows/stageRunnerPorts.ts:137 — the JobStageId type.
     // - src/workflows/stageRunnerPorts.ts:141 — the node address
     //   `job:${nodePath}` (root is the plain string "job:root").
+    // - src/services/unifiedScheduleManagement.ts:170, 175 — the
+    //   #5890 list-collapse key `job:${catalogueId}` (a grouping key
+    //   built from an EXISTING catalogue id, not a mint: the live
+    //   alarm and the derived record for one duty share the key).
     // The `job:<uuid>` mint itself lives in the leaf (newAsyncJobId);
     // slice-3 P02 pins it.
     expect(
       countAll(/`job:\$\{/g),
       "job: templates: a new one is a new job-id mint outside the leaf",
-    ).toBe(5);
+    ).toBe(7);
   });
 
   it("P03 goal: deterministic labels only (2)", () => {
