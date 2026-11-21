@@ -18,6 +18,8 @@ import {
   buildOptionsDiscoveryPorts,
   createOptionsDiscoveryPorts,
 } from "../../data/createOptionsDiscoveryPorts";
+import { defaultStockScreenProvider } from "../../trading";
+import { defaultUniverseId } from "../../config/defaultUniverse";
 import { resolveScheduledLogin, type ScreenerExecutionContext } from "./scheduleMaintenance";
 import { getScheduledAgentDoor } from "./meshDoors";
 import { workflowStageId } from "../../services/workflowStageSchedule";
@@ -346,7 +348,7 @@ export async function autonomousMarketScreen(ctx: ScheduledCallbacksContext, pay
   presetId?: string;
   /** Issue #2908 (G1): the arming schedule's id, when the caller knows it — rides the canonical body (see run below). */
   scheduleId?: string;
-  /** Issue #1007: data provider for the scheduled run (default "etrade"). */
+  /** Issue #1007: data provider for the scheduled run (#5516: absent → the externalized default). */
   provider?: import("../../trading").StockScreenProvider;
   /** Issue #3655: broker + data provider + mode recorded on the schedule
    *  at creation (server-stamped). Read for the run record only — the
@@ -382,7 +384,7 @@ export async function autonomousMarketScreen(ctx: ScheduledCallbacksContext, pay
   let outcome: ScheduledCallbackOutcome = { outcome: "skipped", detail: "callback did not run" };
   const runScreen = async (): Promise<ScheduledCallbackOutcome> => {
     const trigger = payload?.trigger || "scheduled";
-    const universe = payload?.universe || "NASDAQ100";
+    const universe = payload?.universe || defaultUniverseId();
     const savedContext = await ctx.getScreenerExecutionContext();
     const userLogin = resolveScheduledLogin(payload?.userLogin, savedContext?.userLogin);
     const environment = payload?.environment || savedContext?.environment;
@@ -452,10 +454,10 @@ export async function autonomousMarketScreen(ctx: ScheduledCallbacksContext, pay
         // fabricated when it does not.
         ...(typeof payload?.scheduleId === "string" ? { scheduleId: payload.scheduleId } : {}),
         sector: res.data?.sector || payload?.sector || "ALL",
-        universe: res.data?.universe || payload?.universe || "NASDAQ100",
+        universe: res.data?.universe || payload?.universe || defaultUniverseId(),
         // Issue #1007: provider provenance rides into the stored run
         // and the canonical report body below.
-        provider: res.data?.provider || payload?.provider || "etrade",
+        provider: res.data?.provider || payload?.provider || defaultStockScreenProvider(),
         // Issue #3655: broker + data-provider + mode provenance rides
         // the stored run too (result first, stored payload second —
         // never a fresh ambient read at record time).
@@ -516,7 +518,7 @@ export async function autonomousMarketScreen(ctx: ScheduledCallbacksContext, pay
       const stored = orm.storeCanonicalReport({
         runId: `screener:${res.timestamp}`,
         generationId: `screener:${res.timestamp}`,
-        title: `Autonomous market screen — ${res.data?.universe || payload?.universe || "NASDAQ100"}`,
+        title: `Autonomous market screen — ${res.data?.universe || payload?.universe || defaultUniverseId()}`,
         source: "screener",
         summary: res.success
           ? `Scanned ${run.totalScanned} symbols, ${run.matchedCount} matched, ${run.opportunities.length} opportunities.`

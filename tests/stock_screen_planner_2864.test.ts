@@ -25,9 +25,11 @@ describe("planStockScreenRun", () => {
     expect(planStockScreenRun({ trigger: "manual", provider: "etrade" }, TS).sector).toBe("ALL");
   });
 
-  it("defaults universe to TECH", () => {
+  it("defaults universe to the externalized default (#5516: nasdaq100)", () => {
+    // Issue #5516: TECH was a sector, and the planner defaulted to it. The
+    // absent-selection universe now resolves config/vocabulary.json → universe.
     const plan = planStockScreenRun({ trigger: "manual", provider: "yahoo" }, TS);
-    expect(plan.universe).toBe("TECH");
+    expect(plan.universe).toBe("NASDAQ100");
     expect(plan.provider).toBe("yahoo");
   });
 

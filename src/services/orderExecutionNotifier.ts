@@ -11,6 +11,7 @@
  * - Honest status reporting: returns `delivered`, `not_configured`, `disabled`, or `failed` per channel.
  */
 
+import { vocabularyDefaults } from "../config/vocabulary";
 import { createDeliverChannelSenders } from "./deliverJobs";
 import { getStoredEmailDestination, resolveEmailDestination } from "./userEmailDestination";
 import { channelDisabledError, resolveTenantChannelGate } from "./tenantChannelGate";
@@ -113,7 +114,7 @@ export function formatOrderNotificationPayload(input: OrderExecutionNotification
   const qty = Number.isFinite(input.quantity) ? input.quantity : 0;
   const orderType = (input.orderType || "MARKET").toUpperCase();
   const broker = (input.broker || "BROKER").toUpperCase();
-  const mode = (input.mode || "paper").toUpperCase();
+  const mode = (input.mode || vocabularyDefaults().mode).toUpperCase();
   const status = (input.status || "executed").toUpperCase();
   const timestamp = input.timestamp || new Date().toISOString();
 

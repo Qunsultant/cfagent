@@ -1,7 +1,8 @@
 {
   "version": 1,
-  "note": "Issue #5515 — the whole set a job may select, one list per axis. Every axis is an OPEN registry: adding a provider, dataset, universe, sector, exchange, broker, asset or mode is an entry here, never an engine code change. Ids are canonical and lower-case (except the stored index lists' historical spelling, carried as aliases so today's strings resolve identically). Sectors are the single home for both the sector axis and the sector-list universes: the universe axis derives one entry per sector at read time. Conflations are declared, not commented: a value that used to be accepted on the wrong axis is refused by name with a pointer to the axis it belongs to.",
+  "note": "Issue #5515 — the whole set a job may select, one list per axis. Every axis is an OPEN registry: adding a provider, dataset, universe, sector, exchange, broker, asset or mode is an entry here, never an engine code change. Ids are canonical and lower-case (except the stored index lists' historical spelling, carried as aliases so today's strings resolve identically). Sectors are the single home for both the sector axis and the sector-list universes: the universe axis derives one entry per sector at read time. Issue #5516 — the `defaults` block is the ONE home for every run-level default: a surface with no selection resolves here (src/config/vocabulary.ts), never from its own literal. Conflations are declared, not commented: a value that used to be accepted on the wrong axis is refused by name with a pointer to the axis it belongs to.",
   "defaults": {
+    "provider": "alpaca",
     "broker": "alpaca",
     "mode": "paper",
     "asset": "equity",

@@ -29,6 +29,7 @@ import { createStructuredLogger } from "../observability/structuredLogger";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
 import { getServiceUserLogin } from "../security/serviceIdentity";
 import { ETradeSlackTradingService } from "../trading";
+import { defaultUniverseId } from "../config/defaultUniverse";
 import { ETradeEmailTradingService } from "../trading";
 import { ETradeWebhookService } from "../services/tradingWebhooks";
 import {
@@ -478,7 +479,7 @@ export async function generateScreenerDigest(
   ).join("\n");
   const prompt = `Summarize these screener results in one sentence for a trader. ` +
     `Lead with the count and the top names. Be specific, no hype.\n\n` +
-    `Universe: ${event.universe || "TECH"}\n${summary}`;
+    `Universe: ${event.universe || defaultUniverseId()}\n${summary}`;
   try {
     // #1741: summarize-chain failover now lives in the gateway port.
     const gateway = requireGatewayPorts(env);
@@ -500,7 +501,7 @@ function formatOpportunities(
       `momentum ${o.momentumScore.toFixed(0)} | $${o.lastPrice.toFixed(2)} ` +
       `(${o.changePercent >= 0 ? "+" : ""}${o.changePercent.toFixed(2)}%)`
   );
-  const universe = event.universe || "TECH";
+  const universe = event.universe || defaultUniverseId();
   const sectorLabel = event.sector && event.sector !== "ALL" ? ` · ${event.sector}` : "";
   const triggerLabel = event.trigger === "manual" ? "Manual" : "Scheduled";
   const scanned = event.expectedCount && event.expectedCount > event.totalScanned
@@ -603,7 +604,7 @@ async function publishCompleted(
       ...(pdf ? {
         pdf: {
           ...pdf,
-          title: `Market Screen — ${event.universe || "TECH"} ${event.timestamp.slice(0, 10)}`,
+          title: `Market Screen — ${event.universe || defaultUniverseId()} ${event.timestamp.slice(0, 10)}`,
           comment: plainTextWithDigest,
         },
       } : {}),
@@ -721,7 +722,7 @@ async function publishFailed(
     component: "events/screenerPublishers",
   });
   const triggerLabel = event.trigger === "manual" ? "Manual" : "Scheduled";
-  const text = `⚠️ Market Screen FAILED — ${event.universe || "TECH"}${event.sector && event.sector !== "ALL" ? ` · ${event.sector}` : ""} · ${triggerLabel}\nError: ${event.error}\n_Time: ${event.timestamp}_`;
+  const text = `⚠️ Market Screen FAILED — ${event.universe || defaultUniverseId()}${event.sector && event.sector !== "ALL" ? ` · ${event.sector}` : ""} · ${triggerLabel}\nError: ${event.error}\n_Time: ${event.timestamp}_`;
 
   const cfpay = getCfpayConfig(deps.env);
   let attempted = false;
@@ -768,12 +769,12 @@ async function publishFailed(
       const deliveryConfig = checkScreenerDeliveryConfig(deps.env);
       if (!deliveryConfig.emailConfigured) {
         log.warn("screenerPublishers.email_failure_notify_skipped", {
-          message: `[ScreenerPublishers] Email failure-notify skipped for ${event.universe || "TECH"}: ${deliveryConfig.emailMissingReason}`,
-          universe: event.universe || "TECH",
+          message: `[ScreenerPublishers] Email failure-notify skipped for ${event.universe || defaultUniverseId()}: ${deliveryConfig.emailMissingReason}`,
+          universe: event.universe || defaultUniverseId(),
           reason: deliveryConfig.emailMissingReason,
         });
       } else if (cfpay) {
-        const r = await cfpaySendEmail(cfpay, emailTo, `⚠️ Market Screen FAILED — ${event.universe || "TECH"}`, text);
+        const r = await cfpaySendEmail(cfpay, emailTo, `⚠️ Market Screen FAILED — ${event.universe || defaultUniverseId()}`, text);
         if (!r.ok) log.warn("screenerPublishers.cfpay_email_failure_notify_failed", {
           message: "[ScreenerPublishers] cfpay Email failure-notify failed:",
           error: r.error,
@@ -781,7 +782,7 @@ async function publishFailed(
       } else {
         try {
           const email = new ETradeEmailTradingService(deps.env, deps.orm, deps.userLogin);
-          const sent = await email.sendOutboundEmail(emailTo, `⚠️ Market Screen FAILED — ${event.universe || "TECH"}`, `<p>${text}</p>`, text);
+          const sent = await email.sendOutboundEmail(emailTo, `⚠️ Market Screen FAILED — ${event.universe || defaultUniverseId()}`, `<p>${text}</p>`, text);
           if (!sent) {
             log.warn("screenerPublishers.local_email_failure_notify_failed", {
               message: "[ScreenerPublishers] Local email failure-notify failed (env.EMAIL binding is not configured or send failed) — notice not delivered.",

@@ -11,7 +11,8 @@
  * it by hand:
  *   - sector: request sector, else filter sector, else "ALL"
  *     (issue #421: no sector selected means every sector).
- *   - universe: request universe, else "TECH".
+ *   - universe: request universe, else the externalized default
+ *     (#5516: config/vocabulary.json → universe; nasdaq100 today).
  *   - provider: REQUIRED (issue #4431, S5/N3) — the caller
  *     supplies the tenant-resolved provider; a missing provider
  *     refuses with FAILURE_NO_SCREENING_PROVIDER (the F6 #3655
@@ -50,47 +51,19 @@
  */
 
 import type { StockScreenProvider, UniverseId } from "../trading";
+import { defaultUniverseId } from "../config/defaultUniverse";
 import { normalizeJobRunTrigger, type JobRunTrigger } from "../data/jobRunRecordPorts";
 import { BusinessError } from "../outcomes/outcomeAspects";
 import type { StockScreenRunSpec } from "./stockScreenRunSpec";
+import type { YahooDataMode } from "../config/yahooDataMode";
 
 /**
- * Issue #4436 (F8, D2 2026-11-13) — the explicit broker-neutral
- * Data mode for a stock-screen run. The two values are the
- * two D2 shapes, named on the run instead of implied by a
- * broker-named fallback marker:
- *   - "gap-fill": gaps in the configured provider's data are
- *     filled from the delayed-quote provider. The run's provider
- *     stays the configured one; the filling is the designed
- *     live-quotes composition (screenerPipeline
- *     bindLiveQuotesQuoteDeps, #1356), untouched by this slice.
- *   - "full-dataset": the entire dataset comes from the delayed-quote provider —
- *     delayed quotes, stocks only — as a testing mode on the live
- *     system (e.g. run the entire pipeline on just the delayed-quote provider).
- * Stocks-only by construction: the planner plans stock screens,
- * and the only producer (the goal-screen guard) consults it only
- * for stocks-requesting runs.
+ * Issue #4436 — the data-mode vocabulary and its label live in a leaf module
+ * (config/yahooDataMode) so this workflow and the trading-layer PDF renderer
+ * can both name them without importing each other (#5516 broke that cycle).
+ * Re-exported here so every existing importer keeps its path.
  */
-export type YahooDataMode = "gap-fill" | "full-dataset";
-
-/** True when a value is a data mode (command validation). */
-export function isYahooDataMode(value: unknown): value is YahooDataMode {
-  return value === "gap-fill" || value === "full-dataset";
-}
-
-/**
- * Issue #4436 — the one UI/record label for a data mode.
- * Every surface that names the mode (run summary, PDF provenance,
- * failure notice) uses this wording so the mode reads the same
- * everywhere: the mode, that quotes are delayed, and the
- * stocks-only scope; the full-dataset value adds the testing
- * framing.
- */
-export function yahooDataModeLabel(mode: YahooDataMode): string {
-  return mode === "full-dataset"
-    ? "Yahoo full-dataset testing mode (delayed quotes, stocks only)"
-    : "Yahoo gap-fill mode (delayed quotes, stocks only)";
-}
+export { isYahooDataMode, yahooDataModeLabel, type YahooDataMode } from "../config/yahooDataMode";
 
 /** The resolved execution plan for one stock-screen run. */
 export interface StockScreenPlan {
@@ -117,7 +90,7 @@ export interface StockScreenPlanInput {
 
 function buildPlan(input: StockScreenPlanInput, timestamp: string): StockScreenPlan {
   const sector = input.sector || input.filters?.sector || "ALL";
-  const universe: UniverseId = input.universe ?? "TECH";
+  const universe: UniverseId = input.universe ?? defaultUniverseId();
   // Issue #4431 (S5/N3): the provider is required — a missing
   // provider refuses with the F6 (#3655) coded outcome instead of
   // screening another provider's data. The issue text names this

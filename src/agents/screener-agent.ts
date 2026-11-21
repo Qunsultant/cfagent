@@ -186,7 +186,7 @@ export interface ScreenerRunRequest {
   filters?: StockScreenerFilter;
   /** Scheduled: sector label (issue #421: "ALL" when none was selected). */
   sector?: string;
-  /** Universe to screen (default "TECH"). "ALL" auto-shards (see runSharded). */
+  /** Universe to screen (#5516: absent → the externalized default). "ALL" auto-shards (see runSharded). */
   universe?: UniverseId;
   /** Scheduled: max standout opportunities (default 5). */
   maxItems?: number;
@@ -224,7 +224,8 @@ export interface ScreenerRunRequest {
   /** E*TRADE environment selected by the signed-in user. */
   environment?: "TEST" | "PROD";
   /**
-   * Issue #1007: data provider for this run (default "etrade"). The
+   * Issue #1007: data provider for this run (#5516: absent → the
+   * externalized default). The
    * Yahoo provider quotes through the platform yahoo provider
    * (#1317); it never touches E*TRADE and never falls back to it.
    */

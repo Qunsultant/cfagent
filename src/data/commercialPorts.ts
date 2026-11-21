@@ -28,6 +28,7 @@ import type { CommercialAccount } from "../services/cfpayMonetization";
 // productPorts, never redeclared here.
 import { assertSegment, DEFAULT_SEGMENT } from "./productPorts";
 import { BusinessError } from "../outcomes/outcomeAspects";
+import { vocabularyDefaults } from "../config/vocabulary";
 
 export type StoreTier = "Free" | "PayPerUse" | "Subscribed";
 
@@ -190,10 +191,18 @@ export interface TenantProviders {
  * design (ADR 0019; the registry's fundamentals route is Yahoo).
  * Paper is not stored here: it is the mode default (TEST) applied by the
  * trade-environment resolver, so live remains an explicit act.
+ *
+ * Issue #5516: the two ids are read through to the one externalized block
+ * (`config/vocabulary.json` → `provider` / `broker`) on every access, so a
+ * config change moves them and this is not a second default table.
  */
 export const DEFAULT_TENANT_PROVIDERS: TenantProviders = {
-  dataProviderId: "alpaca",
-  brokerId: "alpaca",
+  get dataProviderId() {
+    return vocabularyDefaults().provider;
+  },
+  get brokerId() {
+    return vocabularyDefaults().broker;
+  },
 };
 
 export interface CreditClaimRecord {

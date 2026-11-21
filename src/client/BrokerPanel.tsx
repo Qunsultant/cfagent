@@ -9,6 +9,7 @@ import {
   type BrokerId,
   type TradingEnvironment,
 } from "../trading";
+import { vocabularyDefaults } from "../config/vocabulary";
 import { BrokerSurfaceGate } from "./BrokerSurfaceGate";
 import { AlpacaSignInCard } from "./AlpacaSignInCard";
 import { CancelAllControl } from "./CancelAllControl";
@@ -397,7 +398,7 @@ export function BrokerPanel({ activeEnv, broker = "alpaca" }: BrokerPanelProps) 
                   {guidance.kind === "api_key_pair"
                     ? "Sign in above with your own key pair to trade your own "
                     : "Sign in with your own account to trade your own "}
-                  {label} account, or configure {guidanceEnvNames.join(", ")} for {tradingType ?? "paper"} trading.
+                  {label} account, or configure {guidanceEnvNames.join(", ")} for {tradingType ?? vocabularyDefaults().mode} trading.
                   The server verifies credentials before storing them and never shows the secret again.
                 </span>
               </Notice>

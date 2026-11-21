@@ -16,7 +16,8 @@
 
 import { PDFDocument, PDFFont, PDFPage, rgb, StandardFonts } from "pdf-lib";
 import type { ScreenerRunResult } from "../agents/screener-agent";
-import { yahooDataModeLabel } from "../workflows/stockScreenPlanner";
+import { yahooDataModeLabel } from "../config/yahooDataMode";
+import { defaultUniverseId } from "../config/defaultUniverse";
 import {
   SCREENER_PDF_COLUMNS,
   buildScreenerPdfSections,
@@ -241,6 +242,9 @@ export function screenerProvenanceLines(result: {
 }): { quotesLine: string; methodologyQuotes: string; technicalsNote?: string } {
   const yahoo = result.provider === "yahoo";
   const mode = result.yahooDataMode;
+  // Issue #5516: a run with no recorded broker predates provenance — the
+  // stored-value legacy reading is kept deliberately (pinned by
+  // tests/run_defaults_5516.test.ts), not re-defaulted to the new broker.
   const broker = result.broker === "alpaca" ? "alpaca" : "etrade";
   const brokerLabel = broker === "alpaca" ? "Alpaca" : "E*TRADE";
   // The mode is stated only when the run recorded it: a legacy run that never
@@ -295,7 +299,7 @@ export async function generateScreenerPdf(
   const triggerLabel = result.trigger === "manual" ? "Manual Screen" : "Autonomous Screen";
 
   // Header
-  const universeLabel = (result.universe || "TECH").replace(/_/g, " ");
+  const universeLabel = (result.universe || defaultUniverseId()).replace(/_/g, " ");
   text(ctx, `Stock Screener Report — ${universeLabel}`, { size: 16, bold: true });
   const sectorSegment = result.sector && result.sector !== "ALL" ? `  •  ${result.sector} sector` : "  •  All Sectors";
   text(ctx, `${triggerLabel}${sectorSegment}`, { size: 10, color: PRINT_MUTED });
@@ -421,7 +425,7 @@ export function screenerPdfFileName(result: ScreenerRunResult): string {
   // Format: market-screen_{universe}_hourly-{mm}_{timestamp}_{jobId}.pdf
   // The schedule and jobId are appended by the caller when available.
   const ts = new Date(result.timestamp).toISOString().replace(/[:.]/g, "-").slice(0, 19) + "Z";
-  const u = (result.universe || "NASDAQ100").toLowerCase().replace(/_/g, "-");
+  const u = (result.universe || defaultUniverseId()).toLowerCase().replace(/_/g, "-");
   const schedule = (result as any).schedule || result.trigger;
   const jobId = (result as any).jobId || "adhoc";
   return `market-screen_${u}_${schedule}_${ts}_${jobId}.pdf`;

@@ -13,6 +13,7 @@
  * preview or placement into a failure. The caller keeps its own result; a
  * console warning names the lost trace.
  */
+import { vocabularyDefaults } from "../config/vocabulary";
 
 import { DoSqliteJobOutcomeStore } from "../data/doSqliteJobOutcomeAdapter";
 import { createStructuredLogger } from "../observability/structuredLogger";
@@ -110,8 +111,8 @@ export function recordTradingRunOutcome(
       matched: input.matched ?? (input.status === "completed" ? 1 : 0),
       ...(input.codedError ? { codedError: input.codedError } : {}),
       deliveryStates: {
-        broker: input.broker ?? "alpaca",
-        mode: input.mode ?? "paper",
+        broker: input.broker ?? vocabularyDefaults().broker,
+        mode: input.mode ?? vocabularyDefaults().mode,
         action: input.action,
         symbol: input.symbol ?? "",
         quantity: input.quantity !== undefined ? String(input.quantity) : "",

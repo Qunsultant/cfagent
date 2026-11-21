@@ -25,6 +25,8 @@
  */
 
 /** Brokers with a registered `ITradingPlatform`. Never an environment. */
+import { vocabularyDefaults } from "../config/vocabulary";
+
 export type BrokerId = "etrade" | "alpaca" | "public" | "tastytrade";
 
 /** The platform environment token carried by routes/settings today. */
@@ -525,6 +527,22 @@ export interface BrokerSelection {
   readonly tradingType: TradingType;
   /** True when the input used a legacy alias (e.g. `sandbox`). */
   readonly legacy: boolean;
+}
+
+/**
+ * Issue #5516 — the configured default broker, read on every call from the one
+ * externalized block (`config/vocabulary.json` → `broker`), so a seam change
+ * moves it and no surface carries its own copy. Fail closed: a configured
+ * default that is not a catalogued broker refuses by name instead of running
+ * against a broker the operator never configured.
+ */
+export function defaultBrokerId(): BrokerId {
+  const configured = vocabularyDefaults().broker;
+  if (isBrokerId(configured)) return configured;
+  throw new Error(
+    `[brokerCatalog] configured default broker "${configured}" is not a broker (#5516). ` +
+      `Brokers: ${Object.keys(BROKER_CATALOG).join(", ")}.`,
+  );
 }
 
 export function isBrokerId(value: unknown): value is BrokerId {

@@ -74,6 +74,7 @@ import {
 } from "./dataProviders/registry";
 import { computeScreeningIndicators } from "./screeningIndicators";
 import { DEFAULT_SCREENER_CONFIG, type ScreenerConfig } from "./screenerConfig";
+import { vocabularyDefaults } from "../config/vocabulary";
 import type { YahooTechnicals } from "./technicals";
 import {
   computeFactorGrades,
@@ -199,8 +200,31 @@ export type UniverseMode = "all-listings" | "live-quotes" | "etrade-only" | "yah
  * data provenance only — never semantics, scoring, result shape, or
  * persistence. Recorded on ScreenerRunResult and in the canonical
  * report body so every run states which provider produced it.
+ *
+ * Issue #3990 — the providers a stock screen may run on: the four that serve
+ * quotes. The listings-only provider is excluded by design (it serves the
+ * universe listing, never a run's quotes). Issue #5516 derives the type from
+ * this one list so
+ * the default bridge reads the same members the type declares.
  */
-export type StockScreenProvider = "etrade" | "yahoo" | "alpaca" | "public"; // Issue #3990: Public screens record their own provider.
+export const STOCK_SCREEN_PROVIDERS = ["etrade", "yahoo", "alpaca", "public"] as const;
+export type StockScreenProvider = (typeof STOCK_SCREEN_PROVIDERS)[number];
+
+/**
+ * Issue #5516 — the configured default screen provider, read on every call
+ * from the one externalized block (`config/vocabulary.json` → `provider`), so
+ * a seam change moves it and no surface carries its own copy. Fail closed: a
+ * configured default that cannot run a screen refuses by name instead of
+ * screening under a provider the run never selected.
+ */
+export function defaultStockScreenProvider(): StockScreenProvider {
+  const configured = vocabularyDefaults().provider;
+  if (isStockScreenProvider(configured)) return configured;
+  throw new Error(
+    `[screener] configured default provider "${configured}" cannot run a stock screen (#5516). ` +
+      `Screen-capable providers: ${STOCK_SCREEN_PROVIDERS.join(", ")}.`,
+  );
+}
 
 /**
  * Issue #4431 (S5/N3): the stock-screen provider guard — the four
@@ -211,9 +235,7 @@ export type StockScreenProvider = "etrade" | "yahoo" | "alpaca" | "public"; // I
  * provider's data.
  */
 export function isStockScreenProvider(value: unknown): value is StockScreenProvider {
-  return (
-    value === "etrade" || value === "yahoo" || value === "alpaca" || value === "public"
-  );
+  return (STOCK_SCREEN_PROVIDERS as readonly unknown[]).includes(value);
 }
 
 export interface AcquireUniverseOptions {

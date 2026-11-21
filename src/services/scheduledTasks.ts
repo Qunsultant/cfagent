@@ -49,6 +49,7 @@ import {
 } from "../workflows/runStockScreenViaEngine";
 import { classifyScreenFailure, logScreenRunEvent } from "../workflows/screenRunAspects";
 import { DynamicMarketScreener } from "../trading";
+import { defaultUniverseId } from "../config/defaultUniverse";
 import { TradingPlatformRegistry, platformChainSource } from "../trading";
 import {
   type ScannedStock,
@@ -1299,7 +1300,8 @@ export class ScheduledTasksService {
   ): Promise<ReturnType<ScheduledTasksService["autonomousMarketScreen"]>> {
     // Issue #2866: the sharded scheduled run is planned through
     // the one planner, like the monolithic path (Slice 5) â€” same
-    // values (universe default TECH, sector precedence request >
+    // values (universe default from the externalized block, #5516,
+    // sector precedence request >
     // filters > ALL), derived once instead of by hand. Issue
     // #4280 ([One engine] #3550 S5): the submission below is the
     // engine seam's submit-only entry (submitStockScreenViaEngine)
@@ -1722,7 +1724,7 @@ export class ScheduledTasksService {
           }
           const skipStock = (status: string, reason: string) => {
             this.audit("stock_screen.skipped_uncovered", {
-              universe: options.universe || "NASDAQ100",
+              universe: options.universe || defaultUniverseId(),
               sector: options.sector || "ALL",
               sharded: Boolean(options.sharded),
               trigger: effectiveTrigger,
@@ -1736,7 +1738,7 @@ export class ScheduledTasksService {
               skipped: true,
               skippedReason: status,
               timestamp,
-              data: { status, reason, priceUSD: stockPriceUSD, universe: options.universe || "NASDAQ100" },
+              data: { status, reason, priceUSD: stockPriceUSD, universe: options.universe || defaultUniverseId() },
             } as any;
           };
           const { createCommercialAdapter, ensureCommercialSchema } =
@@ -1898,7 +1900,7 @@ export class ScheduledTasksService {
           userLogin,
           options.environment,
           "stock",
-          `${options.universe || "NASDAQ100"} stock screen`,
+          `${options.universe || defaultUniverseId()} stock screen`,
           {
             scheduleId: options.scheduleId,
             // Issue #5175 slice 3: the auth-guard trace run id mints
@@ -1912,7 +1914,7 @@ export class ScheduledTasksService {
             stage: "auth guard",
             firedAt: timestamp,
             runAs: userLogin,
-            universe: options.universe || "NASDAQ100",
+            universe: options.universe || defaultUniverseId(),
           }
         );
         if (guard.blocked) {
@@ -2169,12 +2171,12 @@ export class ScheduledTasksService {
       const deliveryConfig = await this.publishScreenerEvent({
         type: "screener.failed",
         timestamp,
-        universe: options.universe || "TECH",
+        universe: options.universe || defaultUniverseId(),
         trigger: options.trigger || "scheduled",
         deliveryId: scheduledDeliveryIdentity({
           tenantId: deliveryTenantId,
           trigger: options.trigger || "scheduled",
-          universe: options.universe || "TECH",
+          universe: options.universe || defaultUniverseId(),
           timestamp,
         }),
         sector: options.sector || "ALL",
@@ -4059,7 +4061,7 @@ export class ScheduledTasksService {
             id: crypto.randomUUID(),
             sessionId: this.userLogin,
             role: "assistant",
-            content: `âš ï¸ Scheduled Options Intelligence failed for ${symbols.join(", ") || options.universe || "NASDAQ100"}: ${err.message || "Scheduled options analysis failed"}`,
+            content: `âš ï¸ Scheduled Options Intelligence failed for ${symbols.join(", ") || options.universe || defaultUniverseId()}: ${err.message || "Scheduled options analysis failed"}`,
             agent: "orchestrator",
             createdAt: timestamp,
           });
@@ -4073,7 +4075,7 @@ export class ScheduledTasksService {
       // suppressed (same exactly-once rule as the success path).
       if (shouldNotifySlack && !options.stageChain) {
         const failureText = optionsFailureAlertText({
-          universe: options.universe || symbols.join(", ") || "NASDAQ100",
+          universe: options.universe || symbols.join(", ") || defaultUniverseId(),
           thesis: targetThesis,
           context: {
             trigger: options.trigger,

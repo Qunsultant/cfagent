@@ -16,6 +16,7 @@
 import { useEffect, useState } from "react";
 import { csrfHeaders } from "./apiFetch";
 import { isBrokerId, type BrokerId } from "../trading";
+import { vocabularyDefaults } from "../config/vocabulary";
 import { brokerOptions } from "./brokerOptions";
 import {
   DATA_PROVIDER_IDS,
@@ -77,16 +78,16 @@ function identityFieldsOf(identity: ServedProviderIdentity | undefined): Partial
 }
 
 export const DEFAULT_TENANT_PROVIDERS_STATE: TenantProvidersState = {
-  // Issue #3990: the data default is Alpaca (matching the broker
-  // default; the reason is on the server default in
-  // src/data/commercialPorts.ts). This mirror is what a fresh browser
-  // shows before the server row loads; the server default is pinned
-  // equal.
-  dataProviderId: "alpaca",
-  // Issue #3812: the platform's default broker is Alpaca in paper mode
-  // (owner rule on #3451). This mirror is what a fresh browser shows
-  // before the server row loads; the server default is pinned equal.
-  brokerId: "alpaca",
+  // Issue #5516: what a fresh browser shows before the server row loads is
+  // read from the one externalized block (`config/vocabulary.json`), the same
+  // reader the server default uses — no second copy to drift, and a config
+  // change moves both.
+  get dataProviderId() {
+    return vocabularyDefaults().provider;
+  },
+  get brokerId() {
+    return vocabularyDefaults().broker;
+  },
 };
 
 /**
