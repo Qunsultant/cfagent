@@ -155,7 +155,7 @@ function ivFixture(date: string, atmIv: number): never {
     date,
     atmIv,
     spot: 200,
-    expiryDate: "2026-11-20",
+    expiryDate: new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 10),
     dte: 30,
     collectedAt: `${date}T14:00:00.000Z`,
   } as never;
