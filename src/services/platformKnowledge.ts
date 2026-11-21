@@ -592,7 +592,7 @@ function getAnalysisAndExecutionWorkflowsMarkdown(): string {
     `   - **Endpoints**: \`POST /slack/events\`, \`POST /slack/interactions\`, \`GET /trade/approve\`, \`POST /api/trading/reports/webhook\`.`,
     ``,
     `5. **E5: Agentic Micropayments, Gateways & x402 Protocol Settlement**`,
-    `   - **Scope**: Payment intent drafting across Stripe, PayPal, Lemon Squeezy, and HTTP 402 (x402) on-chain crypto micropayments ($0.05 USDC).`,
+    `   - **Scope**: Payment intent drafting across Stripe, PayPal, Lemon Squeezy, and HTTP 402 (x402) on-chain crypto micropayments (approved catalogue price).`,
     `   - **Components**: \`PaymentGatewayService\`, \`PaymentStrategyFactory\`, \`x402Verifier\`, \`OptionsScannerMCP\`.`,
     `   - **APIs Leveraged**: \`api.stripe.com/v1/payment_intents\`, \`api-m.paypal.com\`, \`api.lemonsqueezy.com\`, Base / Ethereum RPC nodes.`,
     `   - **Endpoints**: \`POST /api/payments/create\`, \`POST /api/payments/confirm\`, \`POST /mcp/scanner\`.`,

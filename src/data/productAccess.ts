@@ -15,11 +15,15 @@
  *   2. Mesh registry (src/agents/registry.ts, #2225 S1/S15/S18):
  *      serving-agent registration + capability×door census + workflow
  *      bindings. READ ONLY here; the registry file is mesh-owned.
- *   3. Gate triple (TRADING_PAID_SERVICES, #2405 slices 1–5): the
- *      operative per-run price + endpoint for gated families.
+ *   3. Premium service descriptors (TRADING_PAID_SERVICES, #2405
+ *      slices 1–5): the endpoint for gated families. Descriptors
+ *      carry NO price (#5609): the price is the approved catalogue
+ *      price of the family's premium service.
  *   4. Operator price-catalogue rows (PriceEntry, #2012 #2185/#2189
  *      + #2547 approval), supplied by the caller: the chat paid
- *      stock screen reads the RAW stored price (see F3 below).
+ *      stock screen reads the RAW stored price (see F3 below); the
+ *      options chat paid price is the APPROVED "options-scan" row
+ *      (#5609).
  *   5. Chat door commands (meshScreenDoor #2488, meshOptionsStrategyDoor
  *      #2581, agenticPaymentCommands paid_options_screener, G1 doors
  *      #2341/#2349/#2351) and panel surfaces (WorkflowsHub,
@@ -31,8 +35,8 @@
  * are pinned by tests, never smoothed over. Findings (full audit in
  * ~/workspace/cfagent-platform-p3-notes/PHASE3-INVENTORY.md):
  *   F1 options×PayPerUse PARITY: chat paid_options_screener uses the
- *      OPTIONS_SCREENER x402 gate ($0.05) and returns exactly the
- *      REST options-scan envelope.
+ *      OPTIONS_SCREENER x402 gate (approved "options-scan" catalogue
+ *      price, #5609) and returns exactly the REST options-scan envelope.
  *   F2 stock×PayPerUse DIVERGENT: API = anomaly signals via x402;
  *      chat = universe screen via ScreenerScreenWorkflow; panel =
  *      provider endpoints. One family label, three mechanisms.
@@ -55,7 +59,6 @@
  *      never monetized). Card and workflow are named separately.
  */
 
-import { TRADING_PAID_SERVICES } from "../services/agenticPayments";
 import type { PriceEntry, PriceFamily } from "./priceCataloguePorts";
 import type { ProductEntry, ProductTier } from "./productCatalogue";
 
@@ -106,7 +109,7 @@ export const PRODUCT_CHAT_ROUTES: Record<PriceFamily, ChatRoute | null> = {
     workflowBinding: null,
     durable: "route-level",
     paidPath: "x402 OPTIONS_SCREENER gate",
-    paidPriceSource: "gate (TRADING_PAID_SERVICES)",
+    paidPriceSource: "catalogue-approved (options-scan premium price)",
     apiOperationAgrees: true,
     operationNote:
       "chat paid command returns exactly the REST options-scan envelope",
@@ -188,7 +191,7 @@ export interface ChatSurface {
 export interface ApiSurface {
   gateEndpoint: string | null;
   priceUSD: number | null;
-  priceSource: "gate" | "catalogue-approved" | "plan-approved" | null;
+  priceSource: "catalogue-approved" | "plan-approved" | null;
 }
 
 export type DimensionVerdictValue = "agree" | "divergent" | "not-applicable";
@@ -376,7 +379,7 @@ export function resolveProductAccess(
           note: `chat door serves ${route.servingAgent}, catalog names ${entry.servingAgent}`,
         };
   const gate: DimensionVerdict =
-    route.paidPriceSource.startsWith("gate")
+    route.paidPath.startsWith("x402")
       ? {
           verdict: "agree",
           note: "chat paid path uses the same x402 gate as the API route",
@@ -386,21 +389,27 @@ export function resolveProductAccess(
           note:
             "chat paid path is the PaymentWorkflow budget path, not the x402 gate the API route enforces",
         };
-  // Chat paid price: options charges the gate price; stock charges
-  // the RAW operator catalogue price (F3 — no approval check).
+  // Chat paid price: options charges the APPROVED catalogue price
+  // for "options-scan" (#5609); stock charges the RAW operator
+  // catalogue price (F3 — no approval check).
   const rawStockRow = catalogueEntries.find((e) => e.family === "stock");
   const rawStockPrice =
     typeof rawStockRow?.priceUSD === "number" ? rawStockRow.priceUSD : null;
+  const approvedOptionsScanRow = catalogueEntries.find(
+    (e) => e.family === "options-scan" && e.approvalStatus === "approved",
+  );
+  const approvedOptionsScanPrice =
+    typeof approvedOptionsScanRow?.priceUSD === "number" ? approvedOptionsScanRow.priceUSD : null;
   const chatPaidPrice =
     entry.family === "stock"
       ? rawStockPrice
-      : TRADING_PAID_SERVICES.OPTIONS_SCREENER.priceUSD;
+      : approvedOptionsScanPrice;
   let price: DimensionVerdict;
   if (chatPaidPrice === null) {
     price = {
       verdict: "divergent",
       note:
-        "no stored catalogue price — chat paid path fails closed while the API gate price stands",
+        "no approved catalogue price — both paid paths fail closed",
     };
   } else if (entry.priceUSD !== null && chatPaidPrice === entry.priceUSD) {
     price =
@@ -408,16 +417,16 @@ export function resolveProductAccess(
         ? {
             verdict: "agree",
             note:
-              "values agree as seeded; sources differ (raw operator catalogue vs gate constant) — an operator price change diverges them",
+              "values agree; sources differ (raw operator catalogue vs approved catalogue price) — an operator price change diverges them",
           }
         : {
             verdict: "agree",
-            note: "chat and API both charge the gate price",
+            note: "chat and API both charge the approved catalogue price",
           };
   } else {
     price = {
       verdict: "divergent",
-      note: `chat paid price $${chatPaidPrice} ≠ gate price $${entry.priceUSD}`,
+      note: `chat paid price $${chatPaidPrice} ≠ approved catalogue price $${entry.priceUSD}`,
     };
   }
   const operation: DimensionVerdict = route.apiOperationAgrees

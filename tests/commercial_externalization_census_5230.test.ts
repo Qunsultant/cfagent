@@ -59,12 +59,14 @@ interface PatternDef {
 }
 
 /**
- * Named patterns. Counts in the baseline are the post-#5230 counts:
- * the four externalized values are 0; the rest are the known-remaining
- * follow-up items (TRADING_PAID_SERVICES, wallet starting credit, x402
- * challenge defaults, referral seeds) and the single named seed
- * constants (refund window, billing policy seeds, catalogue seed
- * prices, offer cooldown).
+ * Named patterns. Counts in the baseline are the post-#5230 counts as
+ * updated by #5609: the premium prices (tradingPrice) and the x402/MPP
+ * challenge default params are externalized (0); the remaining
+ * follow-up items are the wallet starting credit, referral seeds,
+ * the rate limits (kept in the descriptor by #5609 decision), and
+ * the single generic client challenge fallback. Seed constants are
+ * the allowed set (one occurrence each): the PROPOSED_SEED_PRICES
+ * object now holds seven rows (four per-run + three premium).
  */
 const PATTERNS: Record<string, PatternDef> = {
   // Externalized by #5230 — baseline 0.
@@ -89,15 +91,20 @@ const PATTERNS: Record<string, PatternDef> = {
     note: "Marketplace ads list page size — lives in config/commercial-defaults.json (adsListLimit).",
   },
   // Follow-up: files touched by in-flight slices 2.26 (#5222).
+  // #5609 (G-7): the premium prices are externalized — the
+  // descriptor carries no price and the challenge price params are
+  // required. Rate limits stay in the descriptor by decision
+  // (service metadata, not prices); the one challengeCall hit is
+  // the generic client fallback, not a premium price.
   tradingPrice: {
     files: ["src/services/agenticPayments.ts"],
     regex: /priceUSD:\s*0\.(02|05|10)\b/,
-    note: "FOLLOW-UP (2.26's file): TRADING_PAID_SERVICES prices — belong in the price catalogue.",
+    note: "Externalized by #5609: TRADING_PAID_SERVICES carries no price — premium prices live in the price catalogue (getApprovedPrice).",
   },
   tradingRateLimit: {
     files: ["src/services/agenticPayments.ts"],
     regex: /rateLimitPerMin:\s*\d+/,
-    note: "FOLLOW-UP (2.26's file): TRADING_PAID_SERVICES rate limits — belong with the catalogue entry.",
+    note: "#5609 decision: rate limits stay in the price-less premium service descriptor (service metadata, not prices).",
   },
   walletStartingCredit: {
     files: ["src/services/agenticPayments.ts"],
@@ -107,12 +114,12 @@ const PATTERNS: Record<string, PatternDef> = {
   challengeDefaultParam: {
     files: ["src/services/agenticPayments.ts"],
     regex: /priceUSD[^=]*=\s*0\.05/,
-    note: "FOLLOW-UP (2.26's file): x402/MPP challenge default price params — must equal the catalogue price for the family.",
+    note: "Externalized by #5609: x402/MPP challenge price params are required — no default price exists.",
   },
   challengeCall: {
     files: ["src/services/agenticPayments.ts"],
     regex: /createX402Challenge\([^,]+,\s*0\.05/,
-    note: "FOLLOW-UP (2.26's file): hardcoded 0.05 challenge amount — must equal the catalogue price for the family.",
+    note: "#5609: the one remaining hit is the generic client-side fallback in requestWithAgenticPayment (a header-less 402 for an arbitrary URL), not a premium price.",
   },
   autoApproveFallback: {
     files: ["src/services/agenticPayments.ts"],
@@ -148,8 +155,8 @@ const PATTERNS: Record<string, PatternDef> = {
   },
   seedPrices: {
     files: ["src/data/priceCataloguePorts.ts"],
-    regex: /^\s*(stock|goal|options|strategy):\s*0\.\d+/,
-    note: "Allowed: the single PROPOSED_SEED_PRICES object (stock 0.02, goal 0.10, options 0.05, strategy 0.10).",
+    regex: /^\s*"?(stock|goal|options|strategy|options-scan|market-research|stock-signals)"?:\s*[\d.]+/,
+    note: "Allowed: the single PROPOSED_SEED_PRICES object (stock 0.02, goal 0.10, options 0.05, strategy 0.10; options-scan 5, market-research 10, stock-signals 2 — #5609).",
   },
   offerCooldownSeed: {
     files: ["src/data/billingPolicyPorts.ts"],

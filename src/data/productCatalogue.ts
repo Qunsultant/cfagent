@@ -10,8 +10,11 @@
  * Sources (exactly three, plus the tier model — no hand-maintained list):
  *   1. Mesh registry (src/agents/registry.ts, #2225 S1 #2325): serving-agent
  *      registration. READ ONLY here; the registry file is mesh-owned.
- *   2. Gate triple (TRADING_PAID_SERVICES, #2405 slices 1–4): the operative
- *      per-run price + endpoint + product name for gated families.
+ *   2. Premium service descriptors (TRADING_PAID_SERVICES, #2405 slices
+ *      1–4): the endpoint + product name for gated families. Descriptors
+ *      carry NO price (#5609): the price is the approved catalogue price
+ *      of the family's premium service (stock → stock-signals, options →
+ *      options-scan), resolved from the catalogue entry the caller passes.
  *   3. Price catalogue approval state (src/data/priceCataloguePorts.ts,
  *      #2012 #2185/#2189 + #2547 approval): only an APPROVED catalogue price
  *      may be charged; a PROPOSED seed is never presented as chargeable.
@@ -19,21 +22,21 @@
  *     Subscribed.
  *
  * Families are the price catalogue's PriceFamily union (stock | goal |
- * options | strategy). The gate's MARKET_RESEARCH service ($0.10) is a
- * gate-sold paid service WITHOUT a price-catalogue family, so it is
- * outside this family catalog by construction — not dropped, not renamed:
- * its price, gate, metering, and receipt path are unchanged from slices
- * 1–4, and it stays sold through the gate. If a research family is ever
- * defined in the price catalogue, the machinery below lists it with no
- * gate-logic change.
+ * options | strategy). The premium families (options-scan, market-research,
+ * stock-signals, #5609) are catalogue families, not catalog families: they
+ * name the paid premium services whose approved prices the gated family
+ * rows charge, and they never become per-run product rows themselves.
+ * Market-research has no per-run family row — it is sold through its gate
+ * only, priced by its own catalogue family.
  *
  * Price resolution order (never a guess, never a fallback to a seed):
- *   gate price (where a gated endpoint exists) → approved catalogue price →
- *   null (unpriced → unlisted with a named reason).
+ *   approved catalogue price (the premium entry for gated families, the
+ *   family's own entry otherwise) → null (unpriced → unlisted with a
+ *   named reason).
  *
  * Two deliberate distinctions, documented so they cannot be misread:
  *   - requirements.price means "a chargeable price exists for this FAMILY"
- *     (gate or approved catalogue). priceUSD means "the price charged for
+ *     (approved catalogue price). priceUSD means "the price charged for
  *     THIS TIER" — null unless PayPerUse with a chargeable price, because
  *     no subscription price has been asserted (owner decision, #1076) and
  *     Free has no price. A Subscribed row can therefore show all wiring
@@ -72,6 +75,7 @@
 import { TRADING_PAID_SERVICES } from "../services/agenticPayments";
 import {
   PRICE_FAMILIES,
+  type PremiumPriceFamily,
   type PriceEntry,
   type PriceFamily,
 } from "./priceCataloguePorts";
@@ -115,6 +119,20 @@ export const FAMILY_GATE_KEY: Record<
   strategy: null,
 };
 
+/**
+ * #5609 (G-7): the premium catalogue family whose APPROVED price a
+ * per-run family charges (null = the family's own catalogue entry).
+ * Gated families sell their premium service, so their catalog price
+ * is the premium price — never the per-run native-gate price for the
+ * same family label.
+ */
+export const PREMIUM_FAMILY_FOR_PER_RUN: Record<PriceFamily, PremiumPriceFamily | null> = {
+  stock: "stock-signals",
+  options: "options-scan",
+  goal: null,
+  strategy: null,
+};
+
 /** Product → serving agent card name (null = no serving card exists). */
 export const PRODUCT_SERVING_AGENTS: Record<PriceFamily, string | null> = {
   stock: "screener",
@@ -132,14 +150,14 @@ const SERVING_AGENT_CLASS: Record<string, string> = {
 export function resolveProductPrice(
   family: PriceFamily,
   catalogueEntry: PriceEntry | null,
-): { priceUSD: number | null; source: "gate" | "catalogue-approved" | null } {
-  const gateKey = FAMILY_GATE_KEY[family];
-  if (gateKey) {
-    return {
-      priceUSD: TRADING_PAID_SERVICES[gateKey].priceUSD,
-      source: "gate",
-    };
-  }
+): { priceUSD: number | null; source: "catalogue-approved" | null } {
+  // #5609 (G-7): the price is the APPROVED catalogue price of the
+  // entry the caller resolved for this family — the premium
+  // service's entry for gated families (stock → stock-signals,
+  // options → options-scan), the family's own entry otherwise.
+  // There is no gate price anymore: the gate table carries no
+  // price. A PROPOSED-only or missing entry is unpriced (null),
+  // never a fallback to a seed or to the per-run price.
   if (catalogueEntry && catalogueEntry.approvalStatus === "approved") {
     return { priceUSD: catalogueEntry.priceUSD, source: "catalogue-approved" };
   }
@@ -192,7 +210,7 @@ export interface ProductEntry {
    * version's APPROVED plan price, not a price-catalogue price.
    * Never "catalogue-approved" for a created row.
    */
-  priceSource: "gate" | "catalogue-approved" | "plan-approved" | null;
+  priceSource: "catalogue-approved" | "plan-approved" | null;
   /**
    * Issue #4696 — the effective version's period in days; null
    * for family rows (their price is per call, not per period).
@@ -221,7 +239,10 @@ export function buildProductCatalog(
   for (const family of PRICE_FAMILIES) {
     const gateKey = FAMILY_GATE_KEY[family];
     const gate = gateKey ? TRADING_PAID_SERVICES[gateKey] : null;
-    const resolved = resolveProductPrice(family, byFamily.get(family) ?? null);
+    // #5609 (G-7): the price comes from the premium entry for gated
+    // families, the family's own entry otherwise — never the gate.
+    const priceFamily = PREMIUM_FAMILY_FOR_PER_RUN[family] ?? family;
+    const resolved = resolveProductPrice(family, byFamily.get(priceFamily) ?? null);
     const servingAgent = PRODUCT_SERVING_AGENTS[family];
     const card =
       servingAgent !== null

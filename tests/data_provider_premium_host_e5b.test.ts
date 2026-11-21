@@ -55,6 +55,20 @@ vi.mock("../src/services/providerConnections", async (importOriginal) => {
 
 import { DatabaseORM } from "../src/orm";
 import { MockSqlStorage } from "./mock-sql";
+// #5609 (G-7): the premium routes resolve their price from the
+// catalogue (getApprovedPremiumPrice). This suite binds no D1, so
+// the catalogue resolves from the approved in-memory fixture —
+// the real port semantics, with the binding stubbed, never the price.
+vi.mock("../src/data/createPriceCataloguePorts", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../src/data/createPriceCataloguePorts")>();
+  const { approvedPremiumCatalogue } = await import("./premiumPriceCatalogueFixture");
+  return {
+    ...actual,
+    getApprovedPremiumPrice: (_env: unknown, family: string) =>
+      approvedPremiumCatalogue.getApprovedPrice(family),
+  };
+});
 import { makeFakeSessionStore } from "./fake-session-store";
 import { storeAccessTokens } from "../src/security/etradeOAuth";
 import {

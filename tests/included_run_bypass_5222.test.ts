@@ -51,6 +51,12 @@ import type { X402ClaimVerifier } from "../src/services/x402Verifier";
 import type { UsageEventPort, InsertUsageEventRow } from "../src/data/canonicalReportStorePorts";
 import { DatabaseORM } from "../src/orm";
 import { MockSqlStorage } from "./mock-sql";
+import { APPROVED_PREMIUM_PRICES } from "./premiumPriceCatalogueFixture";
+
+// #5609 (G-7): the gate takes its price as an argument — the caller
+// resolves the APPROVED catalogue price. These tests drive the gate
+// directly, so the price comes from the approved premium catalogue.
+const OPTIONS_SCAN_PRICE = APPROVED_PREMIUM_PRICES["options-scan"];
 import type { Env, X402PaymentProof } from "../src/types";
 import {
   createD1CommercialDb,
@@ -159,7 +165,7 @@ describe("buildCoveredCallEvent (#5222) — pure helper", () => {
       coverageId: "cov_abc123",
       userLogin: LOGIN,
       category: "options_screener",
-      priceUSD: 0.05,
+      priceUSD: OPTIONS_SCAN_PRICE,
       tier: "Subscribed",
       tenantId: "tenant-5222",
     });
@@ -172,7 +178,7 @@ describe("buildCoveredCallEvent (#5222) — pure helper", () => {
     const detail = meterDetail(row);
     expect(detail.coverageId).toBe("cov_abc123");
     expect(detail.paidVia).toBe("subscription_included");
-    expect(detail.priceUSD).toBe(0.05);
+    expect(detail.priceUSD).toBe(OPTIONS_SCAN_PRICE);
     expect(detail.tier).toBe("Subscribed");
     expect(detail.protocol).toBeUndefined();
     expect(detail.receiptId).toBeUndefined();
@@ -180,7 +186,7 @@ describe("buildCoveredCallEvent (#5222) — pure helper", () => {
 });
 
 describe("handleGatedEndpoint: Subscribed included-run bypass (#5222)", () => {
-  const def = TRADING_PAID_SERVICES.OPTIONS_SCREENER;
+  const def = { ...TRADING_PAID_SERVICES.OPTIONS_SCREENER, priceUSD: OPTIONS_SCAN_PRICE };
 
   it("serves a Subscribed caller with included runs without a 402 and records exactly one coverage meter row", async () => {
     const { service } = makeService();
@@ -210,7 +216,7 @@ describe("handleGatedEndpoint: Subscribed included-run bypass (#5222)", () => {
     const detail = meterDetail(row);
     expect(detail.paidVia).toBe("subscription_included");
     expect(detail.tier).toBe("Subscribed");
-    expect(detail.priceUSD).toBe(0.05);
+    expect(detail.priceUSD).toBe(OPTIONS_SCAN_PRICE);
     expect(detail.coverageId).toBe(row.runId);
     const body = (await res.json()) as any;
     expect(body.served).toBe(true);

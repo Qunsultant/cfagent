@@ -821,10 +821,10 @@ export const PLATFORM_WORKFLOWS: WorkflowItem[] = [
     badge: "HTTP 402 & Gateways",
     badgeColor: "orange",
     subtitle: "Payment intent drafting across Stripe, PayPal, Lemon Squeezy, plus HTTP 402 pay-per-query access to compute-heavy MCP tools with on-chain receipts.",
-    overview: "Multi-processor payment intent drafting and execution with human confirmation across traditional gateways (Stripe, PayPal, Lemon Squeezy) and next-generation HTTP 402 (x402) pay-per-use micropayments. Enables external MCP clients to access premium scanning tools by paying $0.05 USDC per query with verifiable cryptographic receipts.",
+    overview: "Multi-processor payment intent drafting and execution with human confirmation across traditional gateways (Stripe, PayPal, Lemon Squeezy) and next-generation HTTP 402 (x402) pay-per-use micropayments. Enables external MCP clients to access premium scanning tools by paying the approved catalogue price per query with verifiable cryptographic receipts.",
     apiEndpoint: "POST /api/payments/create · POST /mcp/scanner (x402)",
     targetTab: "payments",
-    keyParameters: "amount: $0.05 USDC, protocol: x402, chains: Base|Ethereum|Solana",
+    keyParameters: "amount: approved catalogue price, protocol: x402, chains: Base|Ethereum|Solana",
     governingDecisionRuleId: "additional-decisioning-gates",
     steps: [
       {

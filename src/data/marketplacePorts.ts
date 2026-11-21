@@ -371,16 +371,17 @@ function round2(n: number): number {
 
 /**
  * Issue #5235: screener families. The paid services catalogue
- * (TRADING_PAID_SERVICES) is the source of truth for service
- * ids, resources, and prices — this map only translates them
- * to the #2022 family vocabulary: stock_signals ($0.02) is the
- * stock family, options_screener ($0.05) the options family,
- * market_research ($0.10) the goal family (the native gate's
- * default family is "goal"). `strategy` has no paid service, so
- * it stays zero until one exists. A row whose family cannot be
- * resolved lands in `unknown` — counted, never dropped. If a new
- * paid service is added without updating this map, its rows land
- * in `unknown` (fail-safe), never silently in a wrong family.
+ * (TRADING_PAID_SERVICES, #5609: price-less descriptors — the price
+ * lives in the price catalogue under the premium family) is the
+ * source of truth for service ids and resources — this map only
+ * translates them to the #2022 family vocabulary: stock_signals is
+ * the stock family, options_screener the options family,
+ * market_research the goal family (the native gate's default family
+ * is "goal"). `strategy` has no paid service, so it stays zero until
+ * one exists. A row whose family cannot be resolved lands in
+ * `unknown` — counted, never dropped. If a new paid service is added
+ * without updating this map, its rows land in `unknown` (fail-safe),
+ * never silently in a wrong family.
  */
 const SERVICE_ID_TO_FAMILY: Record<string, string> = {
   stock_signals: "stock",

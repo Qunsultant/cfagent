@@ -32,6 +32,26 @@ import { McpToolFactory } from "../src/mcps/openaimp/commands";
 import { planNLQ, executeNLQQuery, executeNLQQueryAsync } from "../src/agents/nlq";
 import { ETradeVoiceTradingService } from "../src/trading/voice/agent";
 import { DynamicOptionsScreener } from "../src/trading/optionsScreener";
+import { APPROVED_PREMIUM_PRICES } from "./premiumPriceCatalogueFixture";
+
+// #5609 (G-7): the MCP paid tools and the NLQ async refusal resolve
+// their price from the catalogue (getApprovedPremiumPrice). This
+// suite binds no D1, so the catalogue resolves from the approved
+// in-memory fixture — the real port semantics, with the binding
+// stubbed, never the price.
+const OPTIONS_SCAN_PRICE = APPROVED_PREMIUM_PRICES["options-scan"];
+const MARKET_RESEARCH_PRICE = APPROVED_PREMIUM_PRICES["market-research"];
+
+vi.mock("../src/data/createPriceCataloguePorts", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../src/data/createPriceCataloguePorts")>();
+  const { approvedPremiumCatalogue } = await import("./premiumPriceCatalogueFixture");
+  return {
+    ...actual,
+    getApprovedPremiumPrice: (_env: unknown, family: string) =>
+      approvedPremiumCatalogue.getApprovedPrice(family),
+  };
+});
 
 // On-chain verification is covered in x402_verifier.test.ts; here the verifier accepts any claim except from a known-bad payer.
 vi.mock("../src/services/x402Verifier", () => ({
@@ -244,7 +264,7 @@ describe("Cloudflare Agentic Payments (x402 & MPP Standards)", () => {
       const res = await paymentService.handleGatedEndpoint(
         req,
         TRADING_PAID_SERVICES.OPTIONS_SCREENER.resource,
-        TRADING_PAID_SERVICES.OPTIONS_SCREENER.priceUSD,
+        OPTIONS_SCAN_PRICE,
         TRADING_PAID_SERVICES.OPTIONS_SCREENER.description,
         async () => ({ data: "should_not_be_reached" })
       );
@@ -511,7 +531,7 @@ describe("Cloudflare Agentic Payments (x402 & MPP Standards)", () => {
 
       expect(res.status).toBe(402);
       expect(res.paid).toBe(false);
-      expect(res.priceUSD).toBe(0.05);
+      expect(res.priceUSD).toBe(OPTIONS_SCAN_PRICE);
       expect(res.challenge).toBeDefined();
       expect(res.challenge.resource).toBe("/api/premium/options-scan");
     });
@@ -551,7 +571,7 @@ describe("Cloudflare Agentic Payments (x402 & MPP Standards)", () => {
       });
 
       expect(unpaidRes.status).toBe(402);
-      expect(unpaidRes.priceUSD).toBe(0.10);
+      expect(unpaidRes.priceUSD).toBe(MARKET_RESEARCH_PRICE);
 
       const challenge = paymentService.createX402Challenge("/api/premium/market-research", 0.10);
       const proof: X402PaymentProof = {
@@ -780,7 +800,7 @@ describe("Cloudflare Agentic Payments (x402 & MPP Standards)", () => {
       const result = await executeNLQQueryAsync(orm, "session_trader", plan, mockEnv, "session_trader");
       expect(result.domain).toBe("agentic_payments");
       expect(result.status).toBe("error");
-      expect(result.summary).toContain("Paid Options Screener ($0.05 USDC)");
+      expect(result.summary).toContain(`Paid Options Screener ($${OPTIONS_SCAN_PRICE.toFixed(2)} USDC)`);
       expect(result.summary).toContain("requires a verified x402 payment");
       expect(result.summary).toContain("/api/premium/options-scan");
       expect(result.rows.length).toBe(0);

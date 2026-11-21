@@ -51,6 +51,11 @@ const PRICE_FIXTURE: PriceEntry[] = [
   { family: "goal", priceUSD: 0.1, updatedAtMs: 1, approvalStatus: "proposed", approvedBy: null, approvedAtMs: null },
   { family: "options", priceUSD: 0.05, updatedAtMs: 1, approvalStatus: "approved", approvedBy: "op", approvedAtMs: 1 },
   { family: "strategy", priceUSD: 0.1, updatedAtMs: 1, approvalStatus: "proposed", approvedBy: null, approvedAtMs: null },
+  // #5609 (G-7): gated families charge their premium service's
+  // APPROVED price — the fixture approves the premium seeds so the
+  // gated PayPerUse products list, as they did under the old gate price.
+  { family: "stock-signals", priceUSD: 2, updatedAtMs: 1, approvalStatus: "approved", approvedBy: "op", approvedAtMs: 1 },
+  { family: "options-scan", priceUSD: 5, updatedAtMs: 1, approvalStatus: "approved", approvedBy: "op", approvedAtMs: 1 },
 ];
 
 function catalogEntry(id: string): ProductEntry {
@@ -169,9 +174,12 @@ describe("catalog display derivation (#2695)", () => {
     const access = resolveProductAccess(entry, PRICE_FIXTURE);
     const [display] = buildCatalogDisplay([entry], [access]);
     expect(display.listed).toBe(true);
-    expect(display.priceUSD).toBe(0.05);
-    expect(display.priceSource).toBe("gate");
-    expect(display.priceLabel).toContain("0.05");
+    // #5609 (G-7): the gated product charges its premium service's
+    // APPROVED catalogue price ($5 options-scan), per call — no gate price.
+    expect(display.priceUSD).toBe(5);
+    expect(display.priceSource).toBe("catalogue-approved");
+    expect(display.priceLabel).toContain("5.00");
+    expect(display.priceLabel).toContain("per call");
     expect(display.realVsSimulated).toContain("testnet");
     expect(display.purchasePath?.route).toBe(entry.gateEndpoint);
     expect(display.parityVerdict).toBe("parity");
@@ -228,7 +236,8 @@ describe("marketing draft composition + copy validation (#2695)", () => {
     const draft = composeMarketingDraft(listed(), "facebook");
     expect(draft.productName).toBe(listed().canonicalName);
     expect(draft.text).toContain(listed().canonicalName);
-    expect(draft.text).toContain("0.05");
+    // #5609 (G-7): the draft carries the approved premium price ($5).
+    expect(draft.text).toContain("5.00");
     expect(draft.requiresApproval).toBe(true);
     expect(draft.publishable).toBe(false);
     expect(draft.citation).toBeNull();
@@ -335,7 +344,7 @@ describe("catalog read route (#2695)", () => {
     const options = body.products.find((p) => p.id === "options:PayPerUse");
     const goal = body.products.find((p) => p.id === "goal:PayPerUse");
     expect(options?.listed).toBe(true);
-    expect(options?.priceUSD).toBe(0.05);
+    expect(options?.priceUSD).toBe(5);
     expect(goal?.listed).toBe(false);
     expect(goal?.priceUSD).toBeNull();
   });

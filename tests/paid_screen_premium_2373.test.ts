@@ -52,6 +52,24 @@ import { DatabaseORM } from "../src/orm";
 import { MockSqlStorage } from "./mock-sql";
 import type { Env, X402PaymentProof } from "../src/types";
 import type { X402ClaimVerifier } from "../src/services/x402Verifier";
+import { APPROVED_PREMIUM_PRICES, approvedPremiumCatalogue } from "./premiumPriceCatalogueFixture";
+
+// #5609 (G-7): the premium routes resolve their price from the
+// catalogue (getApprovedPremiumPrice). This suite binds no D1, so
+// the catalogue resolves from the approved in-memory fixture —
+// the real port semantics, with the binding stubbed, never the price.
+const STOCK_SIGNALS_PRICE = APPROVED_PREMIUM_PRICES["stock-signals"];
+
+vi.mock("../src/data/createPriceCataloguePorts", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../src/data/createPriceCataloguePorts")>();
+  const { approvedPremiumCatalogue } = await import("./premiumPriceCatalogueFixture");
+  return {
+    ...actual,
+    getApprovedPremiumPrice: (_env: unknown, family: string) =>
+      approvedPremiumCatalogue.getApprovedPrice(family),
+  };
+});
 
 // On-chain verification is covered in x402_verifier.test.ts; here the
 // verifier accepts any claim except from a known-bad payer.
@@ -322,13 +340,18 @@ describe("stock-signals paid shape on current main (#2373 Slice B)", () => {
     expect(serverSrc).toContain('forwardReq.headers.delete("x-user-login")');
   });
 
-  it("gate price agrees with the operator-catalogue stock price ($0.02) — numerically, not by linkage", () => {
-    // The gate charges its own constant; the catalogue seed (a PROPOSED,
-    // not owner-approved, value) is never read by the gate — so a future
-    // catalogue change would diverge the two unless the gate is updated.
-    expect(STOCK.priceUSD).toBe(0.02);
+  it("gate price IS the approved catalogue stock-signals price ($2) — by linkage, not numerically", async () => {
+    // #5609 (G-7): the gate no longer carries its own constant — the
+    // route resolves the APPROVED catalogue price for the premium
+    // family, so a catalogue change moves the gate with it. The
+    // per-run stock seed is a different price for a different family
+    // and is untouched by this slice.
+    expect("priceUSD" in STOCK).toBe(false);
+    expect(APPROVED_PREMIUM_PRICES["stock-signals"]).toBe(PROPOSED_SEED_PRICES["stock-signals"]);
+    expect(await approvedPremiumCatalogue.getApprovedPrice("stock-signals")).toBe(
+      APPROVED_PREMIUM_PRICES["stock-signals"],
+    );
     expect(PROPOSED_SEED_PRICES.stock).toBe(0.02);
-    expect(STOCK.priceUSD).toBe(PROPOSED_SEED_PRICES.stock);
   });
 });
 
@@ -483,7 +506,7 @@ describe("stock-signals gate: tier never waives payment (#2373 Slice B)", () => 
   }
 
   function gatePaidRequest(service: ETradeAgenticPaymentService, txHash: string, login?: string): Request {
-    const challenge = service.createX402Challenge(STOCK.resource, STOCK.priceUSD);
+    const challenge = service.createX402Challenge(STOCK.resource, STOCK_SIGNALS_PRICE);
     const proof: X402PaymentProof = {
       payer: PAYER,
       signature: `0x${"b".repeat(64)}`,
@@ -512,7 +535,7 @@ describe("stock-signals gate: tier never waives payment (#2373 Slice B)", () => 
       const res = await service.handleGatedEndpoint(
         req,
         STOCK.resource,
-        STOCK.priceUSD,
+        STOCK_SIGNALS_PRICE,
         STOCK.description,
         fulfill,
         { meter, category: STOCK.id, resolveTier: async () => "Subscribed" },
@@ -522,14 +545,14 @@ describe("stock-signals gate: tier never waives payment (#2373 Slice B)", () => 
       expect(meter.rows).toHaveLength(0);
     });
 
-    it(`Subscribed resolver + verified payment -> served, meter row records Subscribed at $0.02 (flag ${flagOn ? "ON" : "OFF"})`, async () => {
+    it(`Subscribed resolver + verified payment -> served, meter row records Subscribed at $2 (flag ${flagOn ? "ON" : "OFF"})`, async () => {
       const service = gateService(flagOn);
       const meter = new CapturingMeter();
       const fulfill = vi.fn().mockResolvedValue({ async: false, signals: [{ symbol: "NVDA" }] });
       const res = await service.handleGatedEndpoint(
         gatePaidRequest(service, nextTxHash(), "owner-login"),
         STOCK.resource,
-        STOCK.priceUSD,
+        STOCK_SIGNALS_PRICE,
         STOCK.description,
         fulfill,
         { meter, category: STOCK.id, resolveTier: async () => "Subscribed" },
@@ -541,7 +564,7 @@ describe("stock-signals gate: tier never waives payment (#2373 Slice B)", () => 
       expect(meter.rows[0].userLogin).toBe("owner-login");
       const detail = JSON.parse(meter.rows[0].detailJson ?? "{}") as any;
       expect(detail.tier).toBe("Subscribed");
-      expect(detail.priceUSD).toBe(0.02);
+      expect(detail.priceUSD).toBe(STOCK_SIGNALS_PRICE);
       expect(detail.protocol).toBe("x402");
     });
   }
@@ -553,7 +576,7 @@ describe("stock-signals gate: tier never waives payment (#2373 Slice B)", () => 
     const res = await service.handleGatedEndpoint(
       gatePaidRequest(service, nextTxHash()),
       STOCK.resource,
-      STOCK.priceUSD,
+      STOCK_SIGNALS_PRICE,
       STOCK.description,
       fulfill,
       { meter, category: STOCK.id },

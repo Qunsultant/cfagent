@@ -25,19 +25,19 @@
  */
 import {
   assertApproverId,
-  assertPriceFamily,
+  assertCataloguePriceFamily,
   assertPriceUSD,
-  PRICE_FAMILIES,
+  CATALOGUE_PRICE_FAMILIES,
+  catalogueProductId,
   PROPOSED_SEED_PRICES,
+  type CataloguePriceFamily,
   type PriceCatalogue,
   type PriceEntry,
-  type PriceFamily,
 } from "./priceCataloguePorts";
 import {
   assertSegment,
   catalogueVersionId,
   DEFAULT_SEGMENT,
-  perRunProductId,
   resolveEffectiveVersion,
 } from "./productPorts";
 import { BusinessError } from "../outcomes/outcomeAspects";
@@ -45,13 +45,13 @@ import { BusinessError } from "../outcomes/outcomeAspects";
 export class InMemoryPriceCatalogueAdapter implements PriceCatalogue {
   private entries = new Map<string, PriceEntry>();
 
-  constructor(initial?: Partial<Record<PriceFamily, number>>, options?: { approvedBy?: string }) {
-    const seed: Partial<Record<PriceFamily, number>> = initial ?? { ...PROPOSED_SEED_PRICES };
+  constructor(initial?: Partial<Record<CataloguePriceFamily, number>>, options?: { approvedBy?: string }) {
+    const seed: Partial<Record<CataloguePriceFamily, number>> = initial ?? { ...PROPOSED_SEED_PRICES };
     const approvedBy = options?.approvedBy !== undefined ? assertApproverId(options.approvedBy) : null;
     const now = Date.now();
     for (const [family, priceUSD] of Object.entries(seed)) {
       if (priceUSD === undefined) continue;
-      const familyKey = assertPriceFamily(family);
+      const familyKey = assertCataloguePriceFamily(family);
       this.entries.set(catalogueVersionId(familyKey, DEFAULT_SEGMENT, 1), {
         id: catalogueVersionId(familyKey, DEFAULT_SEGMENT, 1),
         family: familyKey,
@@ -60,7 +60,7 @@ export class InMemoryPriceCatalogueAdapter implements PriceCatalogue {
         approvalStatus: approvedBy ? "approved" : "proposed",
         approvedBy,
         approvedAtMs: approvedBy ? now : null,
-        productId: perRunProductId(familyKey),
+        productId: catalogueProductId(familyKey),
         segment: DEFAULT_SEGMENT,
         version: 1,
         effectiveFromMs: now,
@@ -95,8 +95,8 @@ export class InMemoryPriceCatalogueAdapter implements PriceCatalogue {
     // effective entry (null), never a throw — the old getPrice
     // contract ("nope" → null) is preserved. The write path
     // (createVersion/setPrice) still validates the family.
-    if (!(PRICE_FAMILIES as readonly string[]).includes(family)) return null;
-    const familyKey = family as PriceFamily;
+    if (!(CATALOGUE_PRICE_FAMILIES as readonly string[]).includes(family)) return null;
+    const familyKey = family as CataloguePriceFamily;
     const seg = assertSegment(segment);
     const versions = await this.listVersions(familyKey, seg);
     return resolveEffectiveVersion(versions, seg, nowMs ?? Date.now());
@@ -106,7 +106,7 @@ export class InMemoryPriceCatalogueAdapter implements PriceCatalogue {
     // Issue #3289: the operator price list is the effective
     // version per family for the default segment — one row per
     // family, never a stale or future version.
-    const byFamily = new Map<PriceFamily, PriceEntry[]>();
+    const byFamily = new Map<CataloguePriceFamily, PriceEntry[]>();
     for (const entry of this.entries.values()) {
       const list = byFamily.get(entry.family) ?? [];
       list.push(entry);
@@ -121,8 +121,8 @@ export class InMemoryPriceCatalogueAdapter implements PriceCatalogue {
   }
 
   async listVersions(family: string, segment?: string): Promise<PriceEntry[]> {
-    const familyKey = assertPriceFamily(family);
-    const productId = perRunProductId(familyKey);
+    const familyKey = assertCataloguePriceFamily(family);
+    const productId = catalogueProductId(familyKey);
     return [...this.entries.values()]
       .filter((e) => e.productId === productId && (segment === undefined || e.segment === segment))
       .sort(
@@ -135,13 +135,13 @@ export class InMemoryPriceCatalogueAdapter implements PriceCatalogue {
   }
 
   async createVersion(input: {
-    family: PriceFamily;
+    family: CataloguePriceFamily;
     priceUSD: number;
     segment?: string;
     effectiveFromMs?: number;
     effectiveToMs?: number | null;
   }): Promise<PriceEntry> {
-    const family = assertPriceFamily(input.family);
+    const family = assertCataloguePriceFamily(input.family);
     const priceUSD = assertPriceUSD(input.priceUSD);
     const segment = input.segment === undefined ? DEFAULT_SEGMENT : assertSegment(input.segment);
     const effectiveFromMs = input.effectiveFromMs ?? Date.now();
@@ -152,7 +152,7 @@ export class InMemoryPriceCatalogueAdapter implements PriceCatalogue {
     if (effectiveToMs !== null && (!Number.isFinite(effectiveToMs) || effectiveToMs <= effectiveFromMs)) {
       throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
     }
-    const productId = perRunProductId(family);
+    const productId = catalogueProductId(family);
     // Two versions may share an effectiveFromMs (same-ms
     // creation is a race, not a caller error — see the 0058
     // header note): the resolver tiebreaks ties by greatest
@@ -183,7 +183,7 @@ export class InMemoryPriceCatalogueAdapter implements PriceCatalogue {
   async setPrice(input: { family: unknown; priceUSD: unknown }): Promise<PriceEntry> {
     // Issue #3289: set a price = create a new version.
     return this.createVersion({
-      family: assertPriceFamily(input.family),
+      family: assertCataloguePriceFamily(input.family),
       priceUSD: assertPriceUSD(input.priceUSD),
     });
   }
@@ -193,7 +193,7 @@ export class InMemoryPriceCatalogueAdapter implements PriceCatalogue {
     approverId: unknown;
     segment?: unknown;
   }): Promise<PriceEntry> {
-    const family = assertPriceFamily(input.family);
+    const family = assertCataloguePriceFamily(input.family);
     const approverId = assertApproverId(input.approverId);
     const segment =
       input.segment === undefined || input.segment === null ? DEFAULT_SEGMENT : assertSegment(input.segment);

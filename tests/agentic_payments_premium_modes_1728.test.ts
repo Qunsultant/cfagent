@@ -58,6 +58,24 @@ vi.mock("../src/services/marketDataResearch", async (importOriginal) => ({
 import { DatabaseORM } from "../src/orm";
 import { MockSqlStorage } from "./mock-sql";
 import { InMemoryAuditPolicyAdapter } from "../src/data/inMemoryAuditPolicyAdapter";
+import { APPROVED_PREMIUM_PRICES, approvedPremiumCatalogue } from "./premiumPriceCatalogueFixture";
+import { PROPOSED_SEED_PRICES } from "../src/data/priceCataloguePorts";
+
+// #5609 (G-7): the premium routes and MCP paid tools resolve their
+// price from the catalogue (getApprovedPremiumPrice). This suite
+// binds no D1, so the catalogue resolves from the approved in-memory
+// fixture — the real port semantics, with the binding stubbed, never
+// the price.
+vi.mock("../src/data/createPriceCataloguePorts", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../src/data/createPriceCataloguePorts")>();
+  const { approvedPremiumCatalogue } = await import("./premiumPriceCatalogueFixture");
+  return {
+    ...actual,
+    getApprovedPremiumPrice: (_env: unknown, family: string) =>
+      approvedPremiumCatalogue.getApprovedPrice(family),
+  };
+});
 import { McpToolFactory } from "../src/mcps/openaimp/commands";
 import {
   DraftPaymentCommand,
@@ -549,10 +567,18 @@ describe("#1728 P-5 agentic wallet: input, validation, audit, shape", () => {
 });
 
 describe("#1728 P-6 premium gating: tiers, envelopes, and the boundaries that do NOT move", () => {
-  it("tier catalogue is shared: screener $0.05, research $0.10, signals $0.02; no paid_stock_signals command exists", () => {
-    expect(TRADING_PAID_SERVICES.OPTIONS_SCREENER.priceUSD).toBe(0.05);
-    expect(TRADING_PAID_SERVICES.MARKET_RESEARCH.priceUSD).toBe(0.10);
-    expect(TRADING_PAID_SERVICES.STOCK_SIGNALS.priceUSD).toBe(0.02);
+  it("premium prices come from the approved catalogue: screener $5, research $10, signals $2; no paid_stock_signals command exists", async () => {
+    // #5609 (G-7): the price lives in the catalogue, not on the
+    // service descriptor — the approved price is the owner seed.
+    expect(APPROVED_PREMIUM_PRICES["options-scan"]).toBe(PROPOSED_SEED_PRICES["options-scan"]);
+    expect(APPROVED_PREMIUM_PRICES["market-research"]).toBe(PROPOSED_SEED_PRICES["market-research"]);
+    expect(APPROVED_PREMIUM_PRICES["stock-signals"]).toBe(PROPOSED_SEED_PRICES["stock-signals"]);
+    expect("priceUSD" in TRADING_PAID_SERVICES.OPTIONS_SCREENER).toBe(false);
+    expect("priceUSD" in TRADING_PAID_SERVICES.MARKET_RESEARCH).toBe(false);
+    expect("priceUSD" in TRADING_PAID_SERVICES.STOCK_SIGNALS).toBe(false);
+    expect(await approvedPremiumCatalogue.getApprovedPrice("options-scan")).toBe(
+      APPROVED_PREMIUM_PRICES["options-scan"],
+    );
     const names = McpToolFactory.getAllTools().map((t) => t.name);
     expect(names).toContain("paid_options_screener");
     expect(names).toContain("paid_market_research");
