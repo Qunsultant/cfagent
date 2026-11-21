@@ -92,12 +92,46 @@ const T0 = Date.parse("2026-11-07T12:00:00.000Z");
 const iso = (ms: number) => new Date(ms).toISOString();
 const SYMBOLS = ["AAPL", "MSFT"];
 
-/** Expiries the stub serves (DTE from T0: 41, 86, 377). */
+/**
+ * Run-time-relative expiries (#5947): computed from the current date so the
+ * fixtures never go stale. The user's ruling is current date + 90 days for
+ * the fixture expiry; the stub serves three expiries — +30d, +90d, +400d —
+ * preserving the file's two-in-window / one-out structure. All three are
+ * UTC-midnight dates, so the screener/runner DTE math (Math.ceil over
+ * UTC-midnight diffs) yields exactly 30 / 90 / 400 from real today.
+ */
+function expiryDaysOut(days: number): ETradeOptionExpireDate {
+  const d = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+  return { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate() };
+}
+
+/** The stub's served expiries: +30d, +90d (the #5947 fixture expiry), +400d. */
 const STUB_EXPIRIES: ETradeOptionExpireDate[] = [
-  { year: 2026, month: 12, day: 18 },
-  { year: 2027, month: 2, day: 1 },
-  { year: 2027, month: 11, day: 19 },
+  expiryDaysOut(30),
+  expiryDaysOut(90),
+  expiryDaysOut(400),
 ];
+
+/**
+ * DTE of an expiry measured from the run anchor T0, exactly as
+ * runFeedOptionsChainsJob computes it (UTC-midnight diff, Math.ceil).
+ * T0 stays fixed by the #5947 brief, so the window tests below derive
+ * their bounds from this — the windows track the relative expiries
+ * forever instead of naming fixed DTE numbers that would drift.
+ */
+function dteFromT0(expiry: ETradeOptionExpireDate): number {
+  const t0 = new Date(T0);
+  const todayUtc = Date.UTC(t0.getUTCFullYear(), t0.getUTCMonth(), t0.getUTCDate());
+  return Math.ceil(
+    (Date.UTC(expiry.year, expiry.month - 1, expiry.day) - todayUtc) /
+      (24 * 60 * 60 * 1000),
+  );
+}
+
+/** "YYYY-MM-DD" for an expiry date (Alpaca contract expiration_date). */
+function isoDate(expiry: ETradeOptionExpireDate): string {
+  return `${expiry.year}-${String(expiry.month).padStart(2, "0")}-${String(expiry.day).padStart(2, "0")}`;
+}
 
 function stubChain(
   symbol: string,
@@ -134,7 +168,7 @@ interface StubKnobs {
   throwExpiriesFor?: Set<string>;
   /** Symbols whose expiries fetch returns []. */
   emptyExpiriesFor?: Set<string>;
-  /** Symbols whose chain fetch throws for one expiry (the Dec 18 expiry). */
+  /** Symbols whose chain fetch throws for one expiry (the first served expiry). */
   throwChainFor?: Set<string>;
   /** Symbols whose second chain carries a WRONG selectedExpiry. */
   mismatchFor?: Set<string>;
@@ -174,19 +208,18 @@ function stubChainsProvider(knobs: StubKnobs = {}): DataProvider {
       )!;
       if (
         knobs.throwChainFor?.has(request.symbol) &&
-        expiry.day === 18 &&
-        expiry.month === 12
+        expiry === STUB_EXPIRIES[0]
       ) {
         throw new Error(`stub chain failure for ${request.symbol}`);
       }
       let chain = stubChain(request.symbol, expiry);
-      // The second served expiry (STUB_EXPIRIES[1]); the first (Dec 18)
-      // is the replacement value, so the wrong-expiry chain must be a
+      // The second served expiry (STUB_EXPIRIES[1]); the first served
+      // expiry is the replacement value, so the wrong-expiry chain must be a
       // different one — applying this to the first would be a no-op.
       if (knobs.mismatchFor?.has(request.symbol) && expiry === STUB_EXPIRIES[1]) {
         chain = {
           ...chain,
-          selectedExpiry: { year: 2026, month: 12, day: 18 },
+          selectedExpiry: { ...STUB_EXPIRIES[0]! },
         };
       }
       return {
@@ -351,18 +384,11 @@ describe("the options-chains runner (#4065)", () => {
     expect(artifact.elements).toEqual(["optionsChains"]);
     expect(artifact.chains).toHaveLength(2);
     const aapl = artifact.chains!.find((r) => r.symbol === "AAPL")!;
-    // Default window 0–365 DTE from T0: the 377-DTE expiry is out.
-    expect(aapl.expiries).toEqual([
-      { year: 2026, month: 12, day: 18 },
-      { year: 2027, month: 2, day: 1 },
-    ]);
+    // Default window 0–365 DTE from T0: the far (+400d) expiry is out.
+    expect(aapl.expiries).toEqual([STUB_EXPIRIES[0], STUB_EXPIRIES[1]]);
     expect(aapl.chains).toHaveLength(2);
     expect(aapl.fetchErrors).toEqual([]);
-    expect(aapl.chains[0]?.selectedExpiry).toEqual({
-      year: 2026,
-      month: 12,
-      day: 18,
-    });
+    expect(aapl.chains[0]?.selectedExpiry).toEqual(STUB_EXPIRIES[0]);
     expect(feedDatasetRowCount(artifact)).toBe(2);
   });
 
@@ -401,23 +427,27 @@ describe("the options-chains runner (#4065)", () => {
   });
 
   it("the DTE window filters expiries (screener semantics)", async () => {
+    // Window isolates the +90-day expiry as measured from the run anchor
+    // T0: the bounds are derived from that expiry's own T0-DTE, so the
+    // test tracks the run-time-relative fixtures forever. The +30-day
+    // expiry sits 60 days below the window and the far expiry far above it.
+    const dte90 = dteFromT0(STUB_EXPIRIES[1]!);
     const { artifact } = await runChains(
       {},
-      // Window follows the moved nearest expiry (DTE 86 from T0):
-      // it catches only the Feb 1 2027 expiry; Dec 18 (41) and
-      // Nov 19 2027 (377) stay out. Feb 1 — not Jan 15 — is the moved
-      // expiry because Jan 15 is the dataset test's miss-query date.
-      { symbols: ["AAPL"], minDte: 75, maxDte: 95 },
+      { symbols: ["AAPL"], minDte: dte90 - 10, maxDte: dte90 + 10 },
     );
     const aapl = artifact.chains!.find((r) => r.symbol === "AAPL")!;
-    expect(aapl.expiries).toEqual([{ year: 2027, month: 2, day: 1 }]);
+    expect(aapl.expiries).toEqual([STUB_EXPIRIES[1]]);
     expect(aapl.chains).toHaveLength(1);
   });
 
   it("expirations exist but none in-window is a legitimate empty row", async () => {
+    // Window sits beyond every served expiry (derived from the far
+    // expiry's T0-DTE), so the run legitimately returns empty rows.
+    const dteFar = dteFromT0(STUB_EXPIRIES[2]!);
     const { result, artifact } = await runChains(
       {},
-      { symbols: ["AAPL", "MSFT"], minDte: 100, maxDte: 200 },
+      { symbols: ["AAPL", "MSFT"], minDte: dteFar + 10, maxDte: dteFar + 100 },
     );
     expect(result.status).toBe("completed");
     expect(result.received).toBe(2);
@@ -439,10 +469,7 @@ describe("the options-chains runner (#4065)", () => {
       },
     );
     const aapl = artifact.chains!.find((r) => r.symbol === "AAPL")!;
-    expect(aapl.expiries).toEqual([
-      { year: 2026, month: 12, day: 18 },
-      { year: 2027, month: 2, day: 1 },
-    ]);
+    expect(aapl.expiries).toEqual([STUB_EXPIRIES[0], STUB_EXPIRIES[1]]);
     expect(aapl.chains).toHaveLength(2);
   });
 
@@ -498,11 +525,7 @@ describe("the options-chains runner (#4065)", () => {
     expect(result.status).toBe("partial");
     const aapl = artifact.chains!.find((r) => r.symbol === "AAPL")!;
     expect(aapl.chains).toHaveLength(1);
-    expect(aapl.chains[0]?.selectedExpiry).toEqual({
-      year: 2026,
-      month: 12,
-      day: 18,
-    });
+    expect(aapl.chains[0]?.selectedExpiry).toEqual(STUB_EXPIRIES[0]);
     expect(aapl.fetchErrors).toHaveLength(1);
     expect(aapl.fetchErrors[0]).toContain("different expiry");
   });
@@ -614,17 +637,17 @@ describe("the dataset-backed source serves fetchChains identically (#4065)", () 
     const artifact = await datasetStore.latest("alpaca", "options-chains");
     const source = createDatasetOptionChainSource(artifact!);
     expect(await source.getOptionExpireDates("AAPL")).toEqual([
-      { year: 2026, month: 12, day: 18 },
-      { year: 2027, month: 2, day: 1 },
+      STUB_EXPIRIES[0],
+      STUB_EXPIRIES[1],
     ]);
     expect(await source.getOptionExpireDates("MSFT")).toEqual([]);
     const scoped = await source.getOptionChains({
       symbol: "AAPL",
-      expiryYear: 2026,
-      expiryMonth: 12,
-      expiryDay: 18,
+      expiryYear: STUB_EXPIRIES[0]!.year,
+      expiryMonth: STUB_EXPIRIES[0]!.month,
+      expiryDay: STUB_EXPIRIES[0]!.day,
     });
-    expect(scoped?.selectedExpiry).toEqual({ year: 2026, month: 12, day: 18 });
+    expect(scoped?.selectedExpiry).toEqual(STUB_EXPIRIES[0]);
     expect(
       await source.getOptionChains({
         symbol: "AAPL",
@@ -634,7 +657,7 @@ describe("the dataset-backed source serves fetchChains identically (#4065)", () 
       }),
     ).toBeNull();
     const unscoped = await source.getOptionChains({ symbol: "AAPL" });
-    expect(unscoped?.selectedExpiry).toEqual({ year: 2026, month: 12, day: 18 });
+    expect(unscoped?.selectedExpiry).toEqual(STUB_EXPIRIES[0]);
     expect(await source.getOptionChains({ symbol: "MSFT" })).toBeNull();
   });
 });
@@ -775,7 +798,7 @@ function makeDoStorage() {
 function alpacaContracts(symbol: string) {
   const strikes = symbol === "AAPL" ? [150, 155] : [300, 305];
   const rows: Array<Record<string, unknown>> = [];
-  for (const expiry of ["2026-12-18", "2027-02-01"]) {
+  for (const expiry of [isoDate(STUB_EXPIRIES[0]!), isoDate(STUB_EXPIRIES[1]!)]) {
     for (const strike of strikes) {
       for (const type of ["call", "put"]) {
         const tag = expiry.replaceAll("-", "").slice(2);
@@ -920,10 +943,7 @@ describe("the chains job across residencies (#4065)", () => {
     expect(dataset!.jobId).toBe(ALPACA_OPTIONS_CHAINS_JOB_ID);
     expect(dataset!.chains).toHaveLength(2);
     for (const row of dataset!.chains!) {
-      expect(row.expiries).toEqual([
-        { year: 2026, month: 12, day: 18 },
-        { year: 2027, month: 2, day: 1 },
-      ]);
+      expect(row.expiries).toEqual([STUB_EXPIRIES[0], STUB_EXPIRIES[1]]);
       expect(row.chains).toHaveLength(2);
       expect(row.fetchErrors).toEqual([]);
       for (const chain of row.chains) {
