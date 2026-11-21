@@ -64,6 +64,7 @@ import {
   SCREENER_DELIVER_STEP,
   SCREENER_FEED_STEP,
   SCREENER_GATHER_STEP,
+  SCREENER_GOAL_STEP,
   SCREENER_SERVE_STEP,
   SCREENER_STORE_STEP,
 } from "../services/screenerPipelineJobs";
@@ -187,7 +188,7 @@ export class InMemoryWorkflowAdapter implements WorkflowPort {
   }
 
   /**
-   * The six canned steps: the injected ScreenRunner's result,
+   * The seven canned steps: the injected ScreenRunner's result,
    * mapped onto the six stage outputs the composer reads. The
    * runner's counts drive the collation's coverage (the
    * analyze step overwrites the feed's symbol-count
@@ -259,48 +260,90 @@ export class InMemoryWorkflowAdapter implements WorkflowPort {
           `InMemoryWorkflowAdapter: no command for job "${ctx.jobId}" — refusing an uncommanded analysis.`,
         );
       }
+      // #5873: market-only — the goal branch moved to the canned
+      // goal step below, mirroring production's market-only
+      // screenAnalysisStage. A goal command never reaches this
+      // handler: the goal definition's analyze node is
+      // screener.goal.
       const shard = this.shardFor(command, ctx);
-      const result: ShardScreenResult = command.goalScreen
-        ? await (async () => {
-            const runGoalScreen = this.deps.screenRunner.runGoalScreen;
-            if (!runGoalScreen) {
-              throw new Error(
-                "Goal-screen workflow command reached a runner without runGoalScreen — refusing a market-screen fallback for a goal run (issue #1996).",
-              );
-            }
-            return runGoalScreen(goalShardRequest(command));
-          })()
-        : await this.deps.screenRunner.runScreen(
-            // #4192: the ND head merges interpreted filters into
-            // the command before defineJob, so the definition's
-            // params carry the merged set while the stored command
-            // still has the original filters — the canned step
-            // reads the merged filters from ctx.params, exactly
-            // as the production steps do via
-            // screenRequestFromParams.
-            {
-              ...shardScreenRequest(shardCommandFor(command, shard)),
-              ...(ctx.params.filters !== undefined
-                ? { filters: ctx.params.filters as Record<string, unknown> }
-                : {}),
-            },
-          );
+      const result: ShardScreenResult = await this.deps.screenRunner.runScreen(
+        // #4192: the ND head merges interpreted filters into
+        // the command before defineJob, so the definition's
+        // params carry the merged set while the stored command
+        // still has the original filters — the canned step
+        // reads the merged filters from ctx.params, exactly
+        // as the production steps do via
+        // screenRequestFromParams.
+        {
+          ...shardScreenRequest(shardCommandFor(command, shard)),
+          ...(ctx.params.filters !== undefined
+            ? { filters: ctx.params.filters as Record<string, unknown> }
+            : {}),
+        },
+      );
       // A market failure throws at analysis: the unit fails,
       // the ledger names the cause, and the composer fails
       // the shard — there is no child to store a failed
       // screen's payload (the attempt record is the failed
-      // leg row + the Failed collation). The goal leg instead
-      // returns its failed goalResult as data: the unit
-      // continues to store/deliver, and the composer fails
-      // the shard on the goal verdict (the real agent's
-      // screenAnalysisStage behaves the same way).
-      if (!command.goalScreen && !result.success) {
+      // leg row + the Failed collation).
+      if (!result.success) {
         throw new Error(result.error ?? "screen failed");
       }
-      await this.traceStep(
-        command,
-        command.goalScreen ? "execute-goal-screen" : "execute-screen",
+      await this.traceStep(command, "execute-screen");
+      return {
+        output: {
+          ...prior,
+          screenResult: {
+            totalScanned: result.totalScanned,
+            expectedCount: result.expectedCount,
+            matchedCount: result.matchedCount,
+            filterSummary: {},
+          },
+          expectedCount: result.expectedCount,
+          allStocks: [],
+          opportunities: [],
+          // The canned result itself, for the store step's
+          // payload (full ?? summary, exactly as the retired
+          // child flow built it).
+          runnerResult: result,
+        },
+      };
+    });
+
+    registry.register(SCREENER_GOAL_STEP, async (ctx: JobStepContext) => {
+      const prior = priorFor<Record<string, unknown>>(ctx.input, ctx.shardKey);
+      if (isDupOutput(prior)) return { output: prior };
+      const command = this.commandFor(ctx.jobId);
+      if (!command) {
+        throw new Error(
+          `InMemoryWorkflowAdapter: no command for job "${ctx.jobId}" — refusing an uncommanded goal dispatch.`,
+        );
+      }
+      // #5873: the goal branch moved out of the canned analysis
+      // step into this canned goal step, mirroring production's
+      // screener.goal (screenGoalStage). A goal command's analyze
+      // node is screener.goal, so without this handler the
+      // engine refuses the unit job_step_unknown and the fake
+      // goal runner is never called.
+      if (!command.goalScreen) {
+        throw new Error(
+          "SCREENER_GOAL_STEP_NO_GOAL: the goal step ran without a goalScreen command — refusing to run a goal dispatch with no goal command.",
+        );
+      }
+      const runGoalScreen = this.deps.screenRunner.runGoalScreen;
+      if (!runGoalScreen) {
+        throw new Error(
+          "Goal-screen workflow command reached a runner without runGoalScreen — refusing a market-screen fallback for a goal run (issue #1996).",
+        );
+      }
+      const result: ShardScreenResult = await runGoalScreen(
+        goalShardRequest(command),
       );
+      // The goal leg returns its failed goalResult as data: the
+      // unit continues to store/deliver, and the composer fails
+      // the shard on the goal verdict (the real agent's
+      // screenGoalStage behaves the same way).
+      await this.traceStep(command, "execute-goal-screen");
       // The goal result rides the canned result's `full`
       // envelope (goalResultToShardResult) when present; else
       // the runner's success flag is the goal verdict.
@@ -323,15 +366,11 @@ export class InMemoryWorkflowAdapter implements WorkflowPort {
           // payload (full ?? summary, exactly as the retired
           // child flow built it).
           runnerResult: result,
-          ...(command.goalScreen
-            ? {
-                goalResult: goalFull ?? {
-                  status: result.success ? "success" : "failed",
-                  ...(result.error ? { message: result.error } : {}),
-                },
-                goalExecuted: true,
-              }
-            : {}),
+          goalResult: goalFull ?? {
+            status: result.success ? "success" : "failed",
+            ...(result.error ? { message: result.error } : {}),
+          },
+          goalExecuted: true,
         },
       };
     });

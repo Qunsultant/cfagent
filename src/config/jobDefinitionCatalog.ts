@@ -262,6 +262,40 @@ export const JOB_DEFINITION_SPECS: Readonly<Record<string, JobDefinitionSpec>> =
     ],
     schedule: { enabled: false },
   },
+
+  goalScreen: {
+    id: "goalScreen",
+    shortId: "goalscr",
+    name: "Goal screen",
+    version: 1,
+    description:
+      "goalscr — the goal screen: feed → enrich → goal → store → serve → deliver. The goal leg's own definition (#5873): the analyze node is the goal dispatch (screener.goal), never the market analyze step — a goal command is a dispatch (quota charge, trade client, goal universe deps, options leg, production goal screen), not a computation expressible as a generic analyze rule set.",
+    stages: [
+      { kind: "feed", step: "screener.feed" },
+      { kind: "enrich", step: "screener.gather" },
+      { kind: "analyze", step: "screener.goal" },
+      { kind: "store", step: "screener.store" },
+      { kind: "serve", step: "screener.serve" },
+      { kind: "deliver", step: "screener.deliver" },
+    ],
+    parameters: [
+      {
+        name: "deliver",
+        label: "Deliver",
+        type: "boolean",
+        required: false,
+        default: false,
+        description: "Whether to deliver the report automatically after the goal screen completes.",
+      },
+    ],
+    executionMode: {
+      concurrency: "sequential",
+      pacing: "batch",
+      delivery: "async",
+      shape: "monolith",
+    },
+    schedule: { enabled: false },
+  },
   research: {
     id: "research",
     shortId: "oodares",
