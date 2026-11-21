@@ -195,7 +195,7 @@ describe("screener + research behavior (extraction #378)", () => {
     // Issue #5911 — the dispatched run id is handed to the pipeline, so the
     // report cannot mint a second one.
     expect(runResearchAndPublish).toHaveBeenCalledWith("manual", "sess-9", {
-      runId: expect.stringMatching(/^[0-9a-f-]{36}$/),
+      runId: expect.stringMatching(/^run:[a-z0-9]+-[a-z0-9]+$/),
     });
     expect(await (res as Response).json()).toMatchObject({
       success: true,
@@ -217,7 +217,7 @@ describe("screener + research behavior (extraction #378)", () => {
     );
     expect((res as Response).status).toBe(200);
     expect(runResearchAndPublish).toHaveBeenCalledWith("manual", "trader42", {
-      runId: expect.stringMatching(/^[0-9a-f-]{36}$/),
+      runId: expect.stringMatching(/^run:[a-z0-9]+-[a-z0-9]+$/),
     });
   });
 
