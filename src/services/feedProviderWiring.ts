@@ -20,6 +20,17 @@
  * scheduled firing threads the platform's named service login
  * when configured). No login ⇒ no wiring ⇒ named refusal, never
  * another identity's credential.
+ *
+ * Issue #5494 (G7) — provider selection is no longer a
+ * `switch (def.sourceId)`: the pair is resolved through ONE
+ * capability lookup built on the #5515 vocabulary
+ * (`resolveProviderDataset`, reading `providerDatasets` from
+ * `config/vocabulary.json`), and a small builder registry answers
+ * only "how is that provider constructed in this residency". So a
+ * provider × dataset pair the matrix does not declare is REFUSED
+ * BY NAME — it is never re-routed to another provider that happens
+ * to serve the dataset (never broker-for-broker, #5515), and a new
+ * pair is a data-only change.
  */
 import type { Env } from "../types";
 import type { SqlStorage } from "../orm";
@@ -34,7 +45,9 @@ import {
   createPublicDataProviderFromEnv,
   createYahooDataProvider,
   type DataProvider,
+  type DataProviderId,
 } from "../trading";
+import { resolveProviderDataset } from "../config/vocabulary";
 import {
   AlpacaMarketDataProvider,
   YahooFinanceProvider,
@@ -72,6 +85,57 @@ export interface FeedProviderWiringDeps {
 }
 
 /**
+ * The capture deps every feed adapter is constructed with. Present by the
+ * factory's guard: a capture with nowhere to record its metadata is a silent
+ * provenance gap, so the factory refuses before any builder runs.
+ */
+interface FeedCaptureWiring {
+  sql: SqlStorage | undefined;
+  blobStorage: CaptureBlobStorage;
+  env: Env;
+  capturePort: ProviderCaptureStore | null | undefined;
+}
+
+/**
+ * How each provider is constructed in a residency — a registry keyed by the
+ * platform provider id, not a selection switch. WHETHER a provider serves a
+ * dataset is the matrix's decision (data, #5494); this map only knows the
+ * constructor.
+ *
+ * A provider the matrix serves but this map does not build — the listings
+ * provider, whose dataset is the stored universe job rather than a
+ * capture-wired pull — resolves to undefined: a named refusal, never a
+ * substitute.
+ */
+const FEED_PROVIDER_BUILDERS: Partial<
+  Record<
+    DataProviderId,
+    (deps: FeedProviderWiringDeps, capture: FeedCaptureWiring) => DataProvider | undefined
+  >
+> = {
+  yahoo: (deps, capture) =>
+    createYahooDataProvider(new YahooFinanceProvider(deps.env), deps.env, {
+      capture,
+      // Issue #5823: the Yahoo breaker (#1745) rides only when
+      // the caller supplied one (the screener's binds); feed
+      // jobs pass none, so their provider is unchanged.
+      ...(deps.yahooBreaker ? { breaker: deps.yahooBreaker } : {}),
+    }),
+  alpaca: (deps, capture) =>
+    createAlpacaDataProvider(new AlpacaMarketDataProvider(deps.env), deps.env, {
+      capture,
+    }),
+  etrade: (deps, capture) =>
+    deps.userLogin
+      ? createETradeDataProviderFromEnv(deps.env, deps.userLogin, { capture })
+      : undefined,
+  public: (deps, capture) =>
+    deps.userLogin
+      ? createPublicDataProviderFromEnv(deps.env, deps.userLogin, { capture })
+      : undefined,
+};
+
+/**
  * Build the capture-wired provider for one feed job's source, or
  * undefined when this host cannot wire it honestly.
  */
@@ -86,44 +150,17 @@ export function createCaptureWiredFeedProvider(
   // exists; never build a provider whose first capture write
   // would drop provenance silently.
   if ((!deps.capturePort && !deps.sql) || !deps.blobStorage) return undefined;
-  const capture = {
+  // #5494 — the ONE capability lookup: the matrix decides whether this
+  // provider serves this dataset at all. An unserved pair stops here; it is
+  // never re-routed to a provider that does serve the dataset.
+  const pair = resolveProviderDataset(def.sourceId, def.dataset);
+  if (!pair.ok) return undefined;
+  const build = FEED_PROVIDER_BUILDERS[pair.value.provider as DataProviderId];
+  if (!build) return undefined;
+  return build(deps, {
     sql: deps.sql,
     blobStorage: deps.blobStorage,
     env: deps.env,
     capturePort: deps.capturePort,
-  };
-  switch (def.sourceId) {
-    case "yahoo":
-      return createYahooDataProvider(
-        new YahooFinanceProvider(deps.env),
-        deps.env,
-        {
-          capture,
-          // Issue #5823: the Yahoo breaker (#1745) rides only when
-          // the caller supplied one (the screener's binds); feed
-          // jobs pass none, so their provider is unchanged.
-          ...(deps.yahooBreaker ? { breaker: deps.yahooBreaker } : {}),
-        },
-      );
-    case "alpaca":
-      return createAlpacaDataProvider(
-        new AlpacaMarketDataProvider(deps.env),
-        deps.env,
-        { capture },
-      );
-    case "etrade":
-      if (!deps.userLogin) return undefined;
-      return createETradeDataProviderFromEnv(deps.env, deps.userLogin, {
-        capture,
-      });
-    case "public":
-      if (!deps.userLogin) return undefined;
-      return createPublicDataProviderFromEnv(deps.env, deps.userLogin, {
-        capture,
-      });
-    default:
-      // "nasdaq" declares screenUniverse only — it has no feed
-      // pull provider; its dataset is the stored index list.
-      return undefined;
-  }
+  });
 }

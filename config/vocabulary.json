@@ -38,27 +38,45 @@
     "dataset": [
       {
         "id": "quotes",
-        "label": "Quotes"
+        "label": "Quotes",
+        "capability": "quotes"
       },
       {
         "id": "optionsChains",
-        "label": "Options chains"
+        "label": "Options chains",
+        "capability": "optionsChains",
+        "aliases": [
+          "options-chains"
+        ]
       },
       {
         "id": "screenUniverse",
-        "label": "Screen universe"
+        "label": "Screen universe",
+        "capability": "screenUniverse",
+        "aliases": [
+          "universe"
+        ]
       },
       {
         "id": "historicalBars",
-        "label": "Historical bars"
+        "label": "Historical bars",
+        "capability": "historicalBars",
+        "aliases": [
+          "technicals"
+        ]
       },
       {
         "id": "fundamentals",
-        "label": "Fundamentals"
+        "label": "Fundamentals",
+        "capability": "fundamentals"
       },
       {
         "id": "news",
-        "label": "News"
+        "label": "News",
+        "capability": "news",
+        "aliases": [
+          "sentiment"
+        ]
       }
     ],
     "universe": [
@@ -281,6 +299,19 @@
       }
     ]
   },
+  "providerDatasets": [
+    { "provider": "yahoo", "dataset": "quotes", "batch": true },
+    { "provider": "yahoo", "dataset": "fundamentals" },
+    { "provider": "yahoo", "dataset": "historicalBars" },
+    { "provider": "yahoo", "dataset": "news" },
+    { "provider": "etrade", "dataset": "quotes", "batch": true },
+    { "provider": "etrade", "dataset": "optionsChains" },
+    { "provider": "alpaca", "dataset": "quotes", "batch": true },
+    { "provider": "alpaca", "dataset": "optionsChains" },
+    { "provider": "public", "dataset": "quotes", "batch": true },
+    { "provider": "public", "dataset": "optionsChains" },
+    { "provider": "nasdaq", "dataset": "screenUniverse" }
+  ],
   "conflations": [
     {
       "axis": "universe",

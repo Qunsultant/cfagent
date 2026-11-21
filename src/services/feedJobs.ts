@@ -34,6 +34,7 @@
  * contract violations throw (unknown job id — a caller bug).
  */
 import { DEPLOYMENT_DEFAULT_TENANT_ID } from "../config/tenantDefaults";
+import { resolveProviderDataset } from "../config/vocabulary";
 import {
   HISTORY_BAR_LIMIT,
   classifyNewsSentiment,
@@ -192,7 +193,13 @@ export function labelForRunUniverse(
 export interface FeedJobDefinition {
   id: string;
   sourceId: DataProviderId;
-  /** Dataset id within the source (S1: "quotes"). */
+  /**
+   * Dataset id within the source (S1: "quotes"). Issue #5494: the pair
+   * (`sourceId` × this) is resolved through the vocabulary's provider × dataset
+   * matrix before any fetch — an undeclared pair refuses by name, and the
+   * spellings used here (`technicals`, `options-chains`) are aliases on the
+   * dataset axis.
+   */
   dataset: string;
   elements: readonly DataProviderCapability[];
   universe: { kind: "index"; index: IndexId; label: string };
@@ -1219,14 +1226,28 @@ export async function runFeedJob(
 
   // 2. The batch contract: the job maintains its dataset in one
   //    batch pull per run (the provider's own batching discipline).
-  if (typeof deps.provider.getQuotesBatch !== "function") {
+  //    #5494 — batch capability is a MATRIX fact (the pair's declared
+  //    batch flag), not a duck-typed method read; the method check stays
+  //    as a conformance guard, so a pair the matrix declares batch-capable
+  //    whose adapter carries no batch leg refuses by name instead of
+  //    throwing mid-fetch. Every branch names BOTH axes.
+  const pair = resolveProviderDataset(def.sourceId, def.dataset);
+  let batchGap: string | undefined;
+  if (!pair.ok) {
+    batchGap = `${pair.code}: ${pair.message}`;
+  } else if (!pair.value.batch) {
+    batchGap = `Dataset "${def.dataset}" is not declared in batch form for provider "${def.sourceId}" (#5494); the feed job cannot pull its dataset in one batch pull.`;
+  } else if (typeof deps.provider.getQuotesBatch !== "function") {
+    batchGap = `Provider "${def.sourceId}" declares the batch form for dataset "${def.dataset}" but its adapter carries no batch quotes (#5494); the feed job cannot pull its dataset.`;
+  }
+  if (batchGap !== undefined) {
     return record({
       status: "failed",
       quotes: [],
       requested: symbols.length,
       missingSymbols: symbols,
       codedError: FEED_JOB_CODES.batchUnsupported,
-      errorMessage: `Provider "${def.sourceId}" does not implement batch quotes; the feed job cannot pull its dataset.`,
+      errorMessage: batchGap,
       universe,
     });
   }
@@ -1239,7 +1260,9 @@ export async function runFeedJob(
   let envelope;
   try {
     envelope = await withFeedDeadline(
-      deps.provider.getQuotesBatch(symbols, {
+      // The matrix declares this pair batch-capable and the guard above proved
+      // the adapter carries the leg (#5494) — bound once, at the call site.
+      deps.provider.getQuotesBatch!(symbols, {
         runId,
         tenantId: opts.tenantId ?? DEPLOYMENT_DEFAULT_TENANT_ID,
         ...(opts.userLogin ? { userLogin: opts.userLogin } : {}),
