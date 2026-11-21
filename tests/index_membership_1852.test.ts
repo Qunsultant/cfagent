@@ -21,6 +21,15 @@ import {
 } from "../src/trading/indexMembership";
 import type { ETradeQuote } from "../src/types";
 
+/** #5956 — the listings adapter is not exercised here; an unbound call throws by name. */
+const unboundListings = {
+  getMembers: async (): Promise<never> => {
+    throw new Error(
+      "listings adapter not bound — this test serves no listings-derived index",
+    );
+  },
+};
+
 /** Minimal Wikipedia-style table: real Dow layout Company | Exchange | Symbol | ISIN | Sector. */
 const DOW_HTML = `<table class="wikitable"><tbody>
 <tr><th>Company</th><th>Exchange</th><th>Symbol</th><th>ISIN</th><th>Sector</th></tr>
@@ -173,6 +182,7 @@ describe("staleness (#1852): labelled or refused, never silently served", () => 
   };
   it("flags an old snapshot as stale", () => {
     const svc = createIndexMembershipService({
+      listings: unboundListings,
       wikipedia: createWikipediaIndexMembershipAdapter(async () => DOW_HTML),
       holdings: createEtfHoldingsIndexMembershipAdapter(async () => IWM_CSV),
     });
@@ -183,6 +193,7 @@ describe("staleness (#1852): labelled or refused, never silently served", () => 
   });
   it("requireFresh throws StaleIndexMembershipError on a stale list", () => {
     const svc = createIndexMembershipService({
+      listings: unboundListings,
       wikipedia: createWikipediaIndexMembershipAdapter(async () => DOW_HTML),
       holdings: createEtfHoldingsIndexMembershipAdapter(async () => IWM_CSV),
     });

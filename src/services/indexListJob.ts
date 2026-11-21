@@ -19,7 +19,13 @@
  * DISABLED (no holdings fetcher binding in code — see
  * src/schedule.ts), so russell3000's stored refresh is a
  * carried item until that binding lands, exactly like the two
- * older Russell legs.
+ * older Russell legs. #5956: the listings group (tech, etf,
+ * lev_etf) refreshes weekly on the table budget (10-day cap) —
+ * its lists are selectors over the listings directory, fetched
+ * once per refresh, never per run. The operation is catalogued
+ * and executable now (forced trigger / operator-added goal);
+ * the built-in weekly goal entry is a follow-up activation,
+ * not this slice.
  */
 import type { IndexListStore } from "../data/indexListPorts";
 import { getCuratedStockUniverse } from "../config/curatedStockUniverse";
@@ -91,16 +97,22 @@ export async function fetchWikipediaIndexHtml(url: string): Promise<string> {
 export const INDEX_REFRESH_INDICES: {
   wikipedia: IndexId[];
   holdings: IndexId[];
+  listings: IndexId[];
 } = {
   wikipedia: ["dow", "sp500", "sp100", "nasdaq100", "sp400", ...SECTOR_IDS],
   holdings: ["russell2000", "russell1000", "russell3000"],
+  listings: ["tech", "etf", "lev_etf"],
 };
 
-export type IndexRefreshOperation = "index.refresh_wikipedia" | "index.refresh_holdings";
+export type IndexRefreshOperation =
+  | "index.refresh_wikipedia"
+  | "index.refresh_holdings"
+  | "index.refresh_listings";
 
 export function indicesForRefreshOperation(operation: string): IndexId[] {
   if (operation === "index.refresh_wikipedia") return [...INDEX_REFRESH_INDICES.wikipedia];
   if (operation === "index.refresh_holdings") return [...INDEX_REFRESH_INDICES.holdings];
+  if (operation === "index.refresh_listings") return [...INDEX_REFRESH_INDICES.listings];
   throw new Error(`Unknown index refresh operation: ${operation}`);
 }
 

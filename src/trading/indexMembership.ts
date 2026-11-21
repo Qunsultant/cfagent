@@ -14,8 +14,13 @@
  * no Cloudflare imports, no I/O, no network. Adapters take injected
  * fetchers, so the port, the parsers, and the conformance suite run
  * identically in tests and in production; only the composition root
- * binds real fetchers. A third adapter can be added without consumer
+ * binds real fetchers. A further adapter can be added without consumer
  * changes: it only has to satisfy `IndexMembershipPort`.
+ *
+ * #5956 adds the third adapter (listings-derived, below): the three
+ * screener universes with no published table or holdings file are
+ * selectors over the live listings directory, stored as index lists
+ * through the same port — one port, three adapters, one store.
  *
  * Honesty rules, enforced by the types and the tests:
  * - No hardcoded symbol lists in code. Every list comes from a fetch.
@@ -55,6 +60,7 @@
  */
 import type { NasdaqExchange, NasdaqStockListing } from "../services/nasdaqListings";
 import type { ETradeQuote, StockScreenerFilter } from "../types";
+import { resolveUniverse, type UniverseId } from "./universes";
 import { DynamicMarketScreener } from "./screener";
 import {
   acquireUniverse,
@@ -145,6 +151,10 @@ export const SECTOR_SPDR_ETF: Record<SectorId, string> = {
 /**
  * Indexes this port serves. `sp100` is the S&P 100 (100 names).
  * #2962 adds `sp400`, `russell3000`, and the 11 `sector-*` keys.
+ * #5956 adds `tech`, `etf`, `lev_etf` — the three screener
+ * universes with no published component table or holdings file,
+ * served by the listings-derived adapter below (selectors over
+ * the live listings directory, stored as index lists).
  */
 export type IndexId =
   | "dow"
@@ -155,6 +165,9 @@ export type IndexId =
   | "russell1000"
   | "sp400"
   | "russell3000"
+  | "tech"
+  | "etf"
+  | "lev_etf"
   | SectorId;
 
 export interface IndexMember {
@@ -584,7 +597,7 @@ export type HoldingsFetcher = (etf: string) => Promise<string>;
  * IWV would mislabel the cross-check as the primary.
  */
 export const HOLDINGS_ETF_BY_INDEX: Record<
-  Exclude<IndexId, "russell3000">,
+  Exclude<IndexId, "russell3000" | "tech" | "etf" | "lev_etf">,
   string
 > = {
   dow: "DIA",
@@ -727,6 +740,14 @@ export function createEtfHoldingsIndexMembershipAdapter(
           derivedFromHoldings: true,
         };
       }
+      // #5956 — the listings-derived keys have no holdings file;
+      // they route to the listings adapter, never here. Refuse
+      // by name (and narrow `index` onto the map's key type).
+      if (index === "tech" || index === "etf" || index === "lev_etf") {
+        throw new UnknownIndexError(
+          `${index} is not served by the holdings adapter (it serves the holdings-file indices)`,
+        );
+      }
       const etf = HOLDINGS_ETF_BY_INDEX[index];
       if (!etf) throw new UnknownIndexError(index);
       const text = await fetchCsv(etf);
@@ -753,12 +774,101 @@ export function createEtfHoldingsIndexMembershipAdapter(
 }
 
 // ---------------------------------------------------------------------------
+// Listings-derived lists (adapter 3, #5956)
+// ---------------------------------------------------------------------------
+
+/** The listings-directory fetcher: one fetch, all exchanges, cached upstream. */
+export type ListingsFetcher = () => Promise<NasdaqStockListing[]>;
+
+/** IndexId → the screener selector that computes its list. */
+const LISTINGS_SELECTOR_BY_INDEX: Record<
+  "tech" | "etf" | "lev_etf",
+  UniverseId
+> = {
+  tech: "TECH",
+  etf: "ETF",
+  lev_etf: "LEV_ETF",
+};
+
+/** Human label per listings-derived list (the selector's name, never a fabricated list name). */
+const LISTINGS_SOURCE_LABEL_BY_INDEX: Record<"tech" | "etf" | "lev_etf", string> = {
+  tech: "Technology keyword discovery",
+  etf: "ETF flag/name match",
+  lev_etf: "leveraged-ETF subset",
+};
+
+/**
+ * Adapter 3 — listings-derived lists (#5956). The three screener
+ * universes with no published component table or holdings file
+ * (TECH / ETF / LEV_ETF) are selectors over the live listings
+ * directory; this adapter runs the SAME selectors the bespoke
+ * feed runs (`resolveUniverse`) and returns the result as a
+ * snapshot-dated index list, so the generic chain screens
+ * exactly the list the bespoke feed would have computed. The
+ * listings fetch happens here (the refresh), never in the run:
+ * the runner still pulls a stored list, and a selector that
+ * yields no members is refused, never stored as an empty list.
+ * The snapshot date is the fetch date, as for the table
+ * adapter — the listings directory carries no as-of date of
+ * its own. Freshness budget is the table budget (10 days):
+ * the stored consumer treats a non-holdings list that way.
+ */
+export function createListingsDerivedIndexMembershipAdapter(
+  fetchListings: ListingsFetcher,
+  today: string = new Date().toISOString().slice(0, 10)
+): IndexMembershipPort {
+  return {
+    async getMembers(index: IndexId): Promise<IndexMembership> {
+      const selector =
+        LISTINGS_SELECTOR_BY_INDEX[index as "tech" | "etf" | "lev_etf"];
+      if (!selector) {
+        throw new UnknownIndexError(
+          `${index} is not served by the listings-derived adapter (it serves tech, etf, lev_etf)`
+        );
+      }
+      const listings = await fetchListings();
+      const selected = resolveUniverse(selector, listings);
+      const symbols: IndexMember[] = [];
+      for (const l of selected) {
+        let symbol: string;
+        try {
+          symbol = normalizeTicker(l.symbol);
+        } catch {
+          continue;
+        }
+        symbols.push({
+          symbol,
+          name: l.companyName || undefined,
+          sector: l.sector || undefined,
+          exchange: l.exchange,
+        });
+      }
+      if (symbols.length === 0) {
+        throw new Error(
+          `Listings-directory selector for ${index} yielded no members — refusing an empty list`
+        );
+      }
+      return {
+        index,
+        snapshotDate: today,
+        symbols,
+        source: "listings",
+        sourceLabel: `Listings-directory ${LISTINGS_SOURCE_LABEL_BY_INDEX[index as "tech" | "etf" | "lev_etf"]}, fetched ${today}`,
+        derivedFromHoldings: false,
+      };
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Service: routing, staleness, cross-check, screener wiring
 // ---------------------------------------------------------------------------
 
 export interface IndexMembershipServiceDeps {
   wikipedia: IndexMembershipPort;
   holdings: IndexMembershipPort;
+  /** #5956 — the listings-derived adapter (tech / etf / lev_etf). */
+  listings: IndexMembershipPort;
 }
 
 export interface IndexCrossCheck {
@@ -790,6 +900,10 @@ export function createIndexMembershipService(deps: IndexMembershipServiceDeps) {
       case "russell1000":
       case "russell3000":
         return deps.holdings;
+      case "tech":
+      case "etf":
+      case "lev_etf":
+        return deps.listings;
       default:
         if (isSectorIndex(index)) return deps.wikipedia;
         throw new UnknownIndexError(index);
@@ -928,11 +1042,13 @@ export async function screenIndexMembers(
 /** Live wiring shape (composition root binds real fetchers). */
 export function createLiveIndexMembershipService(
   fetchHtml: WikipediaFetcher,
-  fetchCsv: HoldingsFetcher
+  fetchCsv: HoldingsFetcher,
+  fetchListings: ListingsFetcher
 ) {
   return createIndexMembershipService({
     wikipedia: createWikipediaIndexMembershipAdapter(fetchHtml),
     holdings: createEtfHoldingsIndexMembershipAdapter(fetchCsv),
+    listings: createListingsDerivedIndexMembershipAdapter(fetchListings),
   });
 }
 

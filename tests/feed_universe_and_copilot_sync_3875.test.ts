@@ -23,6 +23,15 @@ import {
   createIndexMembershipService,
   createWikipediaIndexMembershipAdapter,
 } from "../src/trading/indexMembership";
+
+/** #5956 — the listings adapter is not exercised here; an unbound call throws by name. */
+const unboundListings = {
+  getMembers: async (): Promise<never> => {
+    throw new Error(
+      "listings adapter not bound — this test serves no listings-derived index",
+    );
+  },
+};
 import type { DataProvider, DataResult, QuoteResult } from "../src/trading/dataProviders/contract";
 import {
   resolveCopilotUniversePreset,
@@ -160,6 +169,7 @@ describe("Issue #3875 — Feed universe auto-bootstrap, Wikipedia egress resilie
 
     // Verify the fallback HTML parses cleanly through createWikipediaIndexMembershipAdapter
     const service = createIndexMembershipService({
+      listings: unboundListings,
       wikipedia: createWikipediaIndexMembershipAdapter(
         async (url) => buildCuratedWikipediaFallbackHtml(url),
         "2026-11-09",

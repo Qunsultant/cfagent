@@ -2432,7 +2432,8 @@ export class ScheduledAgent extends PortThink {
 
         if (
           goal.operation === "index.refresh_wikipedia" ||
-          goal.operation === "index.refresh_holdings"
+          goal.operation === "index.refresh_holdings" ||
+          goal.operation === "index.refresh_listings"
         ) {
           // #1980 index-list refresh goals execute directly
           // through the refresh job (the social.publish /
@@ -2447,7 +2448,12 @@ export class ScheduledAgent extends PortThink {
           // via AGENT_DB (the resource-goal binding read) +
           // global fetch over the #1852 adapter's own Wikipedia
           // URLs — the fetcher is fetch(url).text(), the URLs
-          // are the adapter's, nothing invented. The holdings
+          // are the adapter's, nothing invented. The listings
+          // goal (#5956) runs the same production path with the
+          // listings-derived adapter bound to the live listings
+          // feed — its fetcher IS bound in code, so the goal is
+          // executable (its built-in entry is a follow-up
+          // activation). The holdings
           // goal has no production fetcher binding in code (no
           // ETF holdings-file URL is established anywhere in
           // the repo): it fails visibly and stays due instead
@@ -2487,12 +2493,16 @@ export class ScheduledAgent extends PortThink {
             );
             const {
               createIndexMembershipService,
+              createListingsDerivedIndexMembershipAdapter,
               createWikipediaIndexMembershipAdapter,
             } = await import("../trading");
             const {
               createIndexListRefreshExecutor,
               fetchWikipediaIndexHtml,
             } = await import("../services/indexListJob");
+            const { fetchAllUsStockListings } = await import(
+              "../services/nasdaqListings"
+            );
             const service = createIndexMembershipService({
               wikipedia: createWikipediaIndexMembershipAdapter(fetchWikipediaIndexHtml),
               holdings: {
@@ -2502,6 +2512,12 @@ export class ScheduledAgent extends PortThink {
                   );
                 },
               },
+              // #5956 — the listings-derived adapter (tech / etf /
+              // lev_etf): bound for real, never a stub — the
+              // listings goal refreshes through it.
+              listings: createListingsDerivedIndexMembershipAdapter(
+                fetchAllUsStockListings,
+              ),
             });
             refreshResult = await createIndexListRefreshExecutor({
               store: new D1IndexListStore(createD1IndexListDb(db as D1Database)),

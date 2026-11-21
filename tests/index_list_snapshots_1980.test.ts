@@ -65,8 +65,18 @@ CASH,US Dollar Cash,Cash and/or Derivatives,,,
 GKOS,Glaukos Corporation,Equity,Health Care,NYSE,0.35
 `;
 
+/** #5956 — the listings adapter is not exercised here; an unbound call throws by name. */
+const unboundListings = {
+  getMembers: async (): Promise<never> => {
+    throw new Error(
+      "listings adapter not bound — this test serves no listings-derived index",
+    );
+  },
+};
+
 function makeService() {
   return createIndexMembershipService({
+    listings: unboundListings,
     wikipedia: createWikipediaIndexMembershipAdapter(async () => DOW_HTML, "2026-11-02"),
     holdings: createEtfHoldingsIndexMembershipAdapter(async () => IWM_CSV, "2026-11-02"),
   });
