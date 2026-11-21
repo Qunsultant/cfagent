@@ -46,25 +46,37 @@ import {
   type TableColumn,
 } from "./components/ui";
 import {
+  addBuiltinGoals,
   bulkScheduleAction,
   deleteSchedule,
   getSchedule,
+  listBuiltinGoals,
   listSchedules,
   pauseSchedule,
   resumeSchedule,
   triggerSchedule,
   updateSchedule,
   type BulkScheduleResult,
+  type PresetGoalResult,
+  type ScheduledGoal,
 } from "./jobsApi";
 import {
   confirmCancelAll,
   confirmClearTable,
   previewCancelAll,
   previewClearTable,
+  recreateTrack1,
+  track1RecreatePlan,
   type CancelAllPreview,
   type CancelAllResult,
   type ClearTablePreview,
+  type RecreateResultItem,
+  type Track1PlanItem,
 } from "./adminQueueApi";
+import {
+  jobCatalogueEntryForCallback,
+  jobCatalogueEntryForOperation,
+} from "../config/jobCatalogue";
 import { fetchAdminOverview } from "./iaaaAdminApi";
 import { CadenceModal } from "./scheduledOptionsManager/CadenceModal";
 import { ConfirmModal } from "./scheduledOptionsManager/ConfirmModal";
@@ -353,6 +365,97 @@ export interface EmptyListResult {
   unexpectedRemaining: string[];
 }
 
+/**
+ * Issue #5894 — the needed set a reset plants, in one place. The
+ * seedable built-in goal ids come from the server (GET
+ * /api/schedule/builtin-goals — the config read, owner-removed goals
+ * subtracted, never a client copy); the Track 1 labels come from
+ * `track1RecreatePlan()`; the comeback classes reuse #5893's
+ * `emptyListComeback`. Gone-for-good is every current row the reset
+ * neither re-plants nor expects back on its own — including a goal
+ * row the server no longer seeds (owner-removed, or user-created).
+ */
+export interface ResetNeededSet {
+  /** Built-in goal ids the reset will re-seed (the server's seedable list). */
+  seededGoals: string[];
+  /** Owner-removed built-in goal ids: they stay removed, named so the preview proves it. */
+  removedGoals: string[];
+  /** Track 1 labels the reset will re-create. */
+  track1: string[];
+  /** Derived rows that come back on their own (re-derived from code). */
+  derived: string[];
+  /** Declared tasks that re-arm on the next Think reconcile. */
+  declaredTasks: string[];
+  /** Current rows that go and stay gone. */
+  goneForGood: string[];
+}
+
+/**
+ * Issue #5894 — classify the needed set for a reset, against the one
+ * job catalogue (#5880): every planted job must resolve there — a
+ * seedable goal by its operation, a Track 1 item by its callback —
+ * or the preview refuses instead of planting a job no list knows.
+ * Throws on an uncatalogued planted job; that is the fail-closed
+ * enforcement that the needed set is expressed against the catalogue,
+ * not a second list.
+ */
+export function resetNeededSet(
+  schedules: ScheduleItem[],
+  seedableGoals: Array<{ id: string; operation: string }>,
+  removedGoalIds: string[],
+  track1Plan: Track1PlanItem[],
+): ResetNeededSet {
+  for (const goal of seedableGoals) {
+    if (!jobCatalogueEntryForOperation(goal.operation)) {
+      throw new Error(
+        `Reset needed set names a job outside the one catalogue: ${goal.id} (${goal.operation})`,
+      );
+    }
+  }
+  for (const item of track1Plan) {
+    if (!jobCatalogueEntryForCallback(item.requestBody.callback)) {
+      throw new Error(
+        `Reset needed set names a job outside the one catalogue: ${item.label} (${item.requestBody.callback})`,
+      );
+    }
+  }
+  const comeback = emptyListComeback(schedules);
+  const seeded = new Set(seedableGoals.map((goal) => goal.id));
+  const backOnOwn = new Set([...comeback.derived, ...comeback.declaredTasks]);
+  return {
+    seededGoals: seedableGoals.map((goal) => goal.id),
+    removedGoals: [...removedGoalIds],
+    track1: track1Plan.map((item) => item.label),
+    derived: comeback.derived,
+    declaredTasks: comeback.declaredTasks,
+    goneForGood: schedules
+      .filter((s) => !backOnOwn.has(s.id) && !seeded.has(s.id))
+      .map((s) => s.id),
+  };
+}
+
+/** The verified outcome of one Reset-to-defaults run, for the result notice. */
+export interface ResetToDefaultsResult {
+  cancelled: number;
+  pausedDeleted: number;
+  /** Alarms the cancel step failed to cancel (they stay listed). */
+  failed: CancelAllResult["failed"];
+  /** The clear-table step's failure, when the wipe was partial. */
+  clearError?: string;
+  /** Per-goal re-seed outcomes, from the Seed-all machinery. */
+  seeded: PresetGoalResult[];
+  /** Per-item Track 1 recreation outcomes. */
+  track1: RecreateResultItem[];
+  /** Row ids still listed after the verifying re-fetch. */
+  remaining: string[];
+  /** Planted rows (seeded goals, Track 1 creates) absent from the verify re-fetch. */
+  missingPlanted: string[];
+  /** Declared tasks not yet re-armed (Think reconcile pending — expected, not a failure). */
+  pendingDeclared: string[];
+  /** Remaining rows that were neither planted nor expected back on their own. */
+  unexpectedRemaining: string[];
+}
+
 /** Last-event rendering for a derived row (never a fabricated time). */
 function formatLastEvent(lastAt?: string): string {
   if (!lastAt) return "never";
@@ -424,6 +527,21 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
   const [emptyModalOpen, setEmptyModalOpen] = useState(false);
   const [emptyBusy, setEmptyBusy] = useState(false);
   const [emptyResult, setEmptyResult] = useState<EmptyListResult | null>(null);
+  // Issue #5894 — wipe-and-reseed: the same gate as the empty
+  // action, the preview (wipe previews + the server's seedable list
+  // + the Track 1 plan), and the verified result. The wipe itself is
+  // the empty action's two steps; the reseed plants the needed set
+  // through the Seed-all machinery and the Track 1 recreate.
+  const [resetPreview, setResetPreview] = useState<{
+    cancel: CancelAllPreview;
+    clear: ClearTablePreview;
+    builtin: { goals: ScheduledGoal[]; removedBuiltinGoalIds: string[] };
+    track1: Track1PlanItem[];
+    needed: ResetNeededSet;
+  } | null>(null);
+  const [resetModalOpen, setResetModalOpen] = useState(false);
+  const [resetBusy, setResetBusy] = useState(false);
+  const [resetResult, setResetResult] = useState<ResetToDefaultsResult | null>(null);
   const [cadenceTarget, setCadenceTarget] = useState<ScheduleItem | null>(null);
   const [cadenceBusy, setCadenceBusy] = useState(false);
   const [cadenceError, setCadenceError] = useState<string | null>(null);
@@ -578,16 +696,50 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
     }
   };
 
+  /**
+   * Issue #5893 — the wipe both destructive home actions share: both
+   * previews, fail-closed. The clear-table call names the one unified
+   * table here, once; the reset (#5894) calls this instead of passing
+   * the table name a second time.
+   */
+  const previewEmptyWipe = async () => {
+    const [cancel, clear] = await Promise.all([
+      previewCancelAll(),
+      previewClearTable("unified_schedules"),
+    ]);
+    return { cancel, clear };
+  };
+
+  /**
+   * Issue #5893 — the wipe confirm both destructive home actions
+   * share: cancel the alarms, then clear the paused records. A clear
+   * failure after a successful cancel is a partial wipe: the error is
+   * returned, not thrown, so the caller can still reseed (#5894) and
+   * report the partial wipe honestly instead of claiming "empty".
+   */
+  const confirmEmptyWipe = async (): Promise<{
+    cancelResult: CancelAllResult;
+    pausedDeleted: number;
+    clearError?: string;
+  }> => {
+    const cancelResult = await confirmCancelAll();
+    let pausedDeleted = 0;
+    let clearError: string | undefined;
+    try {
+      pausedDeleted = (await confirmClearTable("unified_schedules")).deleted;
+    } catch (err) {
+      clearError = err instanceof Error ? err.message : String(err);
+    }
+    return { cancelResult, pausedDeleted, ...(clearError !== undefined ? { clearError } : {}) };
+  };
+
   /** Issue #5893 — the empty preview: both wipe previews, fail-closed. */
   const onPreviewEmpty = async () => {
     setActionError(null);
     setEmptyResult(null);
     setEmptyBusy(true);
     try {
-      const [cancel, clear] = await Promise.all([
-        previewCancelAll(),
-        previewClearTable("unified_schedules"),
-      ]);
+      const { cancel, clear } = await previewEmptyWipe();
       setEmptyPreview({ cancel, clear });
       setEmptyModalOpen(true);
     } catch (err) {
@@ -598,25 +750,14 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
   };
 
   /**
-   * Issue #5893 — the empty confirm: cancel the alarms, then clear
-   * the paused records. The two steps have separate audits already
-   * (schedules.cancelled.all, maintenance.table.cleared); a clear
-   * failure after a successful cancel is a partial wipe and is
-   * reported as one — the result never claims "empty" it did not
-   * verify. Verification is the re-fetched list, classified against
-   * the comeback the preview promised.
+   * Issue #5893 — the empty confirm: the shared wipe, then verify.
+   * Verification is the re-fetched list, classified against the
+   * comeback the preview promised.
    */
   const runEmptyConfirm = async () => {
     setEmptyBusy(true);
     try {
-      const cancelResult = await confirmCancelAll();
-      let pausedDeleted = 0;
-      let clearError: string | undefined;
-      try {
-        pausedDeleted = (await confirmClearTable("unified_schedules")).deleted;
-      } catch (err) {
-        clearError = err instanceof Error ? err.message : String(err);
-      }
+      const { cancelResult, pausedDeleted, clearError } = await confirmEmptyWipe();
       const fresh = (await listSchedules(envHeaders)) as unknown as ScheduleItem[];
       setSchedules(fresh);
       setRefreshSignal((n) => n + 1);
@@ -636,6 +777,92 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
       setEmptyBusy(false);
       setEmptyModalOpen(false);
       setEmptyPreview(null);
+    }
+  };
+
+  /**
+   * Issue #5894 — the reset preview: the shared wipe previews plus
+   * the server's seedable list (the built-in half of the needed set,
+   * owner-removed goals subtracted by the server) and the Track 1
+   * plan. Fail-closed on any of the three: a preview that cannot name
+   * the needed set opens no modal and cancels nothing. The catalogue
+   * check inside `resetNeededSet` refuses a needed set that names a
+   * job outside the one catalogue.
+   */
+  const onPreviewReset = async () => {
+    setActionError(null);
+    setResetResult(null);
+    setResetBusy(true);
+    try {
+      const [{ cancel, clear }, builtin] = await Promise.all([
+        previewEmptyWipe(),
+        listBuiltinGoals(),
+      ]);
+      const track1 = track1RecreatePlan();
+      const needed = resetNeededSet(schedules, builtin.goals, builtin.removedBuiltinGoalIds, track1);
+      setResetPreview({ cancel, clear, builtin, track1, needed });
+      setResetModalOpen(true);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setResetBusy(false);
+    }
+  };
+
+  /**
+   * Issue #5894 — the reset confirm: the shared wipe, then re-seed
+   * the needed set, then verify. The reseed runs even after a partial
+   * wipe (a failed clear leaves rows the Seed-all batch skips as
+   * already-existing, never duplicates), and every step reports
+   * per-item so the result never claims a reset it did not verify.
+   * Verification is the re-fetched list: planted rows (seeded goals
+   * added or skipped, Track 1 creates) must be listed — a planted row
+   * that is absent is a failure, named; declared tasks still absent
+   * are pending Think reconcile, named, not a failure; anything else
+   * listed is unexpected.
+   */
+  const runResetConfirm = async () => {
+    const preview = resetPreview;
+    if (!preview) return;
+    setResetBusy(true);
+    try {
+      const { cancelResult, pausedDeleted, clearError } = await confirmEmptyWipe();
+      const seeded = await addBuiltinGoals(preview.builtin.goals, []);
+      const track1 = await recreateTrack1();
+      const fresh = (await listSchedules(envHeaders)) as unknown as ScheduleItem[];
+      setSchedules(fresh);
+      setRefreshSignal((n) => n + 1);
+      const freshIds = new Set(fresh.map((s) => s.id));
+      const plantedGoalIds = seeded
+        .filter((r) => r.status === "added" || r.status === "skipped")
+        .map((r) => r.id);
+      const plantedTrack1Ids = track1
+        .filter((r) => r.ok && r.scheduleId !== undefined)
+        .map((r) => r.scheduleId as string);
+      const planted = [...plantedGoalIds, ...plantedTrack1Ids];
+      const expected = new Set([
+        ...planted,
+        ...preview.needed.derived,
+        ...preview.needed.declaredTasks,
+      ]);
+      setResetResult({
+        cancelled: cancelResult.cancelled,
+        pausedDeleted,
+        failed: cancelResult.failed,
+        ...(clearError !== undefined ? { clearError } : {}),
+        seeded,
+        track1,
+        remaining: fresh.map((s) => s.id),
+        missingPlanted: planted.filter((id) => !freshIds.has(id)),
+        pendingDeclared: preview.needed.declaredTasks.filter((id) => !freshIds.has(id)),
+        unexpectedRemaining: fresh.filter((s) => !expected.has(s.id)).map((s) => s.id),
+      });
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setResetBusy(false);
+      setResetModalOpen(false);
+      setResetPreview(null);
     }
   };
 
@@ -1278,6 +1505,76 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
         )}
       </ConfirmModal>
 
+      {/* Issue #5894 — wipe-and-reseed: the preview names what will
+          exist after the reset (the needed set: seedable built-ins +
+          Track 1), what comes back on its own, what stays gone for
+          good, and which owner-removed goals stay removed — so a
+          reset is never a surprise either. */}
+      <ConfirmModal
+        open={resetModalOpen}
+        title="Reset to defaults?"
+        confirmLabel="Reset to defaults"
+        cancelLabel="Keep schedules"
+        busy={resetBusy}
+        onClose={() => {
+          setResetModalOpen(false);
+          setResetPreview(null);
+        }}
+        onConfirm={() => void runResetConfirm()}
+      >
+        {resetPreview && (
+          <div>
+            <p>
+              {resetPreview.cancel.wouldCancelCount} alarm(s) will be cancelled;{" "}
+              {resetPreview.clear.wouldDelete} paused record(s) will be deleted.
+            </p>
+            {resetPreview.cancel.pausedPreserved > 0 && (
+              <p>
+                Cancel-all alone would preserve {resetPreview.cancel.pausedPreserved} paused
+                record(s); this action also clears them, so they go too.
+              </p>
+            )}
+            <p>
+              After the reset, the list will hold the needed set:{" "}
+              {resetPreview.needed.seededGoals.length} built-in goal(s) will be re-seeded:{" "}
+              {resetPreview.needed.seededGoals.join(", ")}.{" "}
+              {resetPreview.needed.track1.length} Track 1 screen(s) will be re-created:{" "}
+              {resetPreview.needed.track1.join(", ")}.
+            </p>
+            {resetPreview.needed.derived.length > 0 && (
+              <p>
+                {resetPreview.needed.derived.length} derived row(s) will come back on their own
+                — they are derived from code and re-appear on the next list:{" "}
+                {resetPreview.needed.derived.join(", ")}.
+              </p>
+            )}
+            {resetPreview.needed.declaredTasks.length > 0 && (
+              <p>
+                {resetPreview.needed.declaredTasks.length} declared task(s) will re-arm on the
+                next Think reconcile: {resetPreview.needed.declaredTasks.join(", ")}.
+              </p>
+            )}
+            {resetPreview.needed.goneForGood.length > 0 && (
+              <p>
+                {resetPreview.needed.goneForGood.length} row(s) will go and stay gone:{" "}
+                {resetPreview.needed.goneForGood.join(", ")}.
+              </p>
+            )}
+            {resetPreview.needed.removedGoals.length > 0 && (
+              <p>
+                {resetPreview.needed.removedGoals.length} built-in goal(s) stay removed — the
+                owner removed them, so the reset never re-seeds them:{" "}
+                {resetPreview.needed.removedGoals.join(", ")}.
+              </p>
+            )}
+            <p>
+              Own instance only — KV is never touched; nothing platform-wide is wiped. This
+              cannot be undone.
+            </p>
+          </div>
+        )}
+      </ConfirmModal>
+
       {userLogin && (
         <div className="ui-meta">
           Schedules for <strong>{userLogin}</strong>{activeEnv ? ` · E*TRADE ${activeEnv}` : ""}
@@ -1426,20 +1723,40 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
             Empty the list
           </Button>
         )}
+        {/* Issue #5894 — wipe-and-reseed: the reset consumes the
+            empty action, so it sits beside it under the same gate —
+            the admin queue holds the same wipe, and the wipe panel
+            holds the Track 1 recreate this action calls. */}
+        {emptyGate === "allowed" && (
+          <Button
+            type="button"
+            variant="danger"
+            size="sm"
+            disabled={resetBusy || loading}
+            onClick={() => void onPreviewReset()}
+            title="Reset to defaults — wipe the list, then re-seed the needed set. Preview what will exist after the reset, then confirm. Own instance only; KV is never touched."
+          >
+            Reset to defaults
+          </Button>
+        )}
       </Flex>
 
       {/* Issue #5893 — the gate, said plainly: emptying the list is
           a platform-admin action, and the admin queue holds the same
           wipe. A probe failure names itself instead of hiding the
-          action silently. */}
+          action silently. Issue #5894 — the reset shares the gate and
+          the probe, so the same note covers it. */}
       {emptyGate === "denied" && (
         <p className="ui-meta">
-          Emptying the list is a platform-admin action — this account is not a platform admin.
-          The admin queue (?tab=schedules&amp;view=queue) holds the same wipe.
+          Emptying the list and resetting to defaults are platform-admin actions — this account
+          is not a platform admin. The admin queue (?tab=schedules&amp;view=queue) holds the
+          same wipe.
         </p>
       )}
       {emptyGate === "error" && emptyGateError && (
-        <p className="ui-meta">Empty the list is unavailable: {emptyGateError}</p>
+        <p className="ui-meta">
+          Empty the list and reset to defaults are unavailable: {emptyGateError}
+        </p>
       )}
 
       {bulkResult && (
@@ -1512,6 +1829,92 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
           )}
         </Notice>
       )}
+
+      {/* Issue #5894 — the verified reset result: what the wipe did,
+          what the reseed planted per item, and what the re-fetched
+          list holds. A partial reset (clear failure, failed cancels,
+          a planted row that is not listed, a failed seed or create,
+          unexpected remainders) is a warning that names the gap,
+          never a success that claims "defaults". Declared tasks still
+          absent are pending Think reconcile — expected, not a gap. */}
+      {resetResult &&
+        (() => {
+          const seededAdded = resetResult.seeded.filter((r) => r.status === "added").length;
+          const seededSkipped = resetResult.seeded.filter((r) => r.status === "skipped").length;
+          const seededFailed = resetResult.seeded.filter((r) => r.status === "failed");
+          const track1Ok = resetResult.track1.filter((r) => r.ok).length;
+          const track1Failed = resetResult.track1.filter((r) => !r.ok);
+          const incomplete =
+            resetResult.clearError !== undefined ||
+            resetResult.failed.length > 0 ||
+            resetResult.missingPlanted.length > 0 ||
+            resetResult.unexpectedRemaining.length > 0 ||
+            seededFailed.length > 0 ||
+            track1Failed.length > 0;
+          return (
+            <Notice
+              tone={incomplete ? "warning" : "success"}
+              title={incomplete ? "Reset incomplete" : "Reset to defaults"}
+              onDismiss={() => setResetResult(null)}
+            >
+              <p>
+                Cancelled {resetResult.cancelled} alarm(s), deleted {resetResult.pausedDeleted}{" "}
+                paused record(s).
+              </p>
+              {resetResult.failed.length > 0 && (
+                <p>
+                  Failed to cancel:{" "}
+                  {resetResult.failed.map((f) => `${f.id} (${f.error})`).join(", ")}.
+                </p>
+              )}
+              {resetResult.clearError !== undefined && (
+                <p>
+                  The paused-records clear failed: {resetResult.clearError} — the alarms were
+                  cancelled but the paused records were not deleted.
+                </p>
+              )}
+              <p>
+                Re-seeded {resetResult.seeded.length} built-in goal(s) ({seededAdded} added
+                {seededSkipped > 0 ? `, ${seededSkipped} already present` : ""}).
+              </p>
+              {seededFailed.length > 0 && (
+                <p>
+                  Failed to re-seed:{" "}
+                  {seededFailed.map((r) => `${r.id} (${r.error})`).join(", ")}.
+                </p>
+              )}
+              <p>
+                Re-created {track1Ok} of {resetResult.track1.length} Track 1 screen(s).
+              </p>
+              {track1Failed.length > 0 && (
+                <p>
+                  Failed to re-create:{" "}
+                  {track1Failed.map((r) => `${r.label} (${r.error ?? "failed"})`).join(", ")}.
+                </p>
+              )}
+              {resetResult.missingPlanted.length > 0 && (
+                <p>
+                  Planted but not listed after the reset:{" "}
+                  {resetResult.missingPlanted.join(", ")}.
+                </p>
+              )}
+              {resetResult.pendingDeclared.length > 0 && (
+                <p>
+                  {resetResult.pendingDeclared.length} declared task(s) still to re-arm on the
+                  next Think reconcile: {resetResult.pendingDeclared.join(", ")}.
+                </p>
+              )}
+              {resetResult.remaining.length > 0 && (
+                <p>
+                  {resetResult.remaining.length} row(s) remain: {resetResult.remaining.join(", ")}
+                  {resetResult.unexpectedRemaining.length > 0
+                    ? ` Of those, ${resetResult.unexpectedRemaining.length} row(s) were not expected to be there: ${resetResult.unexpectedRemaining.join(", ")}.`
+                    : ""}
+                </p>
+              )}
+            </Notice>
+          );
+        })()}
 
       {actionError && (
         <Notice tone="danger" title="Schedule action failed" onDismiss={() => setActionError(null)}>
