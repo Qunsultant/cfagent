@@ -56,6 +56,11 @@ import type { CommercialStore } from "../../data/commercialPorts";
 import type { TenantDirectory } from "../../data/tenantDirectoryPorts";
 import type { StoreOperators } from "../../data/storeOperatorsPorts";
 import type { IMcpToolCommand, McpToolContext } from "../../patterns/interfaces";
+import { axisIds, resolveValue } from "../../config/vocabulary";
+
+/** The known values, rendered once for the schema descriptions. */
+const PROVIDER_IDS = axisIds("provider").join(", ");
+const BROKER_IDS = axisIds("broker").join(", ");
 
 export const BIZCOPILOT_TENANT_TOOL_ACTIONS = [
   "list",
@@ -93,8 +98,14 @@ const ManageTenantsInputSchema = z.object({
     .positive()
     .optional()
     .describe("Settings-update: auto-refresh interval in seconds."),
-  dataProviderId: z.string().optional().describe("Settings-update: data provider id."),
-  brokerId: z.string().optional().describe("Settings-update: broker id."),
+  dataProviderId: z
+    .string()
+    .optional()
+    .describe(`Settings-update: data provider id. Known: ${PROVIDER_IDS}. An unknown id refuses by name.`),
+  brokerId: z
+    .string()
+    .optional()
+    .describe(`Settings-update: broker id. Known: ${BROKER_IDS}. An unknown id refuses by name.`),
 });
 
 type ManageTenantsInput = z.infer<typeof ManageTenantsInputSchema>;
@@ -120,7 +131,22 @@ function requireTenantId(input: ManageTenantsInput): string {
   return tenantId;
 }
 
-function buildIntent(input: ManageTenantsInput): BizCopilotTenantIntent {
+/**
+ * Issue #5500 — a settings axis resolves through the whole-set vocabulary
+ * (#5515) before it reaches the route: an alias resolves to its canonical id,
+ * and an unknown value refuses by name with the vocabulary's own code. A chat
+ * turn therefore cannot write a provider (or broker) the engine would refuse,
+ * and the refusal text is the one the UX and the API show.
+ */
+function resolveAxisValue(axis: "provider" | "broker", raw: string): string {
+  const one = resolveValue(axis, raw);
+  if (one.ok) return one.value;
+  throw new Error(`${one.code}: ${one.message}`);
+}
+
+
+/** Exported for the #5500 pin — a pure function; no production caller changes. */
+export function buildIntent(input: ManageTenantsInput): BizCopilotTenantIntent {
   switch (input.action) {
     case "list":
       return { action: "list" };
@@ -136,8 +162,12 @@ function buildIntent(input: ManageTenantsInput): BizCopilotTenantIntent {
       if (input.adsEnabled !== undefined) patch.adsEnabled = input.adsEnabled;
       if (input.autoRefreshEnabled !== undefined) patch.autoRefreshEnabled = input.autoRefreshEnabled;
       if (input.autoRefreshIntervalS !== undefined) patch.autoRefreshIntervalS = input.autoRefreshIntervalS;
-      if (input.dataProviderId !== undefined) patch.dataProviderId = input.dataProviderId;
-      if (input.brokerId !== undefined) patch.brokerId = input.brokerId;
+      if (input.dataProviderId !== undefined) {
+        patch.dataProviderId = resolveAxisValue("provider", input.dataProviderId);
+      }
+      if (input.brokerId !== undefined) {
+        patch.brokerId = resolveAxisValue("broker", input.brokerId);
+      }
       if (Object.keys(patch).length === 0) {
         throw new Error("at least one settings field is required for action 'settings-update'");
       }
@@ -184,8 +214,14 @@ export class ManageTenantsCommand implements IMcpToolCommand<ManageTenantsInput,
         type: "number",
         description: "Settings-update: auto-refresh interval in seconds.",
       },
-      dataProviderId: { type: "string", description: "Settings-update: data provider id." },
-      brokerId: { type: "string", description: "Settings-update: broker id." },
+      dataProviderId: {
+        type: "string",
+        description: `Settings-update: data provider id. Known: ${PROVIDER_IDS}. An unknown id refuses by name (#5500).`,
+      },
+      brokerId: {
+        type: "string",
+        description: `Settings-update: broker id. Known: ${BROKER_IDS}. An unknown id refuses by name (#5500).`,
+      },
     },
     required: ["action"],
   };
