@@ -207,6 +207,55 @@ the flip can only land with the enrich flip in the 6b spec
 re-point.
 <!-- /5883: screener enrich hand-off -->
 
+<!-- 5954: explicit-symbols feed mode -->
+The feed family runs a symbols-fed mode (#5954, #4437 slice 6b0):
+`feed.pull` reads the unit's explicit symbols — the shard table's
+row for this unit's shard key, else the flat `params.symbols`
+list, the bespoke `shardSymbolsFor` idiom — and the quotes
+runner fetches exactly those symbols under the #4065 membership
+rule, extended from the options-chains runner: every named symbol
+a member of the stored list the run resolves ⇒ an index-kind
+subset universe; ANY named symbol outside it ⇒ a symbols-kind
+universe, the symbols used as-is (filtering would silently drop
+the caller's symbols). The membership check is a plain store
+read — a symbols-fed run never triggers an index refresh for a
+list it may not need — and a cold universe store is fine: the
+premium path (payer-chosen listings, `premium.ts`) screens its
+own symbols with no stored list at all. The runner's invariant
+— "the stored index list, never an invented one" — is HONORED,
+not changed: explicit symbols are the caller's own list,
+recorded on the artifact as their provenance (a symbols-kind
+universe's symbols ARE the provenance, per
+`FeedDatasetSymbolUniverse`); the feed family still invents no
+membership. The one normalizer (`normalizeSymbolsInput`,
+uppercase/trim/dedupe) is shared by the quotes and
+options-chains runners so the two runs can never disagree on
+what "the same symbols" means. Two named refusals guard the
+mode: a `"symbols"` universe with no explicit symbols throws
+`FEED_UNIVERSE_UNKNOWN` before any fetch (never a silent
+default-list pull), and explicit symbols on a non-quotes
+dataset throw `FEED_SYMBOLS_UNSUPPORTED` (quotes only — other
+runners would ignore the option and silently run the stored-list
+path). A sharded partition still rides `opts.symbols` — a filter
+on the stored list, never an explicit-symbol run — so the
+membership rule only answers `opts.explicitSymbols`. Parity is
+pinned by `tests/feed_symbols_5954.test.ts` (premium symbols
+shard fetches exactly the requested symbols with a cold store;
+all-members ⇒ index-kind subset; partially-outside ⇒
+symbols-kind, nothing dropped; ordinary index and sharded
+partition runs unchanged).
+
+One correction to the 6b survey rides with this slice: the quotes
+jobs are NOT parameterized — all four are built by
+`nasdaq100QuotesJob` with no `parameterizedUniverse` flag; only
+fundamentals, technicals, sentiment, and options-chains are. So
+the 6b3 flip cannot pass a `universe` param to the quotes feed
+node as-is (any universe input throws `universeUnknown` on a
+non-parameterized job); the flip must leave it absent (default
+nasdaq100) or make the quotes jobs parameterized — 6b1/6b2
+territory, not this slice's.
+<!-- /5954: explicit-symbols feed mode -->
+
 
 ### 1.3 The one-engine doctrine
 

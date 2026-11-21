@@ -768,6 +768,19 @@ export interface RunFeedJobOptions {
    */
   symbols?: string[];
   /**
+   * #5954 — the caller's own symbols (the premium fulfillment's
+   * payer-chosen listings, or an options screen's underlyings):
+   * the run fetches exactly these, under the #4065 membership
+   * rule — all members of the stored list the run resolves ⇒
+   * an index-kind subset; any non-member ⇒ a symbols-kind
+   * universe, the symbols used as-is. Distinct from `symbols`
+   * (a partition filter on the stored list): a run that names
+   * `explicitSymbols` never triggers an index refresh for a
+   * list it may not need, and never silently drops a symbol
+   * outside the list.
+   */
+  explicitSymbols?: string[];
+  /**
    * #4065 — the chains run's fetch window: the DTE band whose
    * expirations the job persists, and the cap on expirations
    * fetched per symbol. Defaults mirror the screener's own
@@ -811,6 +824,26 @@ function symbolsOfList(list: StoredIndexList): string[] {
         ),
       )
     : [];
+}
+
+/**
+ * #5954 — normalize a caller-supplied symbol list: uppercase,
+ * trimmed, empty entries dropped, duplicates removed (first
+ * occurrence wins the order). Shared by the quotes runner's
+ * explicit-symbols branch and the options-chains runner's
+ * membership rule (#4065) — one normalizer, so the two runs
+ * can never disagree on what "the same symbols" means.
+ */
+function normalizeSymbolsInput(
+  symbols: readonly unknown[] | undefined,
+): string[] {
+  return Array.from(
+    new Set(
+      (symbols ?? [])
+        .map((s) => String(s).toUpperCase().trim())
+        .filter((s) => s.length > 0),
+    ),
+  );
 }
 
 /**
@@ -1057,62 +1090,110 @@ export async function runFeedJob(
   // 1. Universe — the stored index list, never an invented one.
   // #3930: the run input names the list (parameterized jobs);
   // absent ⇒ the definition's universe.
+  // #5954 — explicit symbols (the #4065 membership rule): a run
+  // that names its symbols is a caller-supplied universe, not
+  // an invented index list. When every named symbol is a member
+  // of the stored list the run resolves, the run is a subset of
+  // that list — index-kind universe, size the subset's. When ANY
+  // named symbol is not a member, the run is an explicit-symbol
+  // run — symbols-kind universe, the symbols used as-is
+  // (filtering them against the list would silently drop the
+  // caller's symbols — the premium path's payer-chosen
+  // listings). The membership check is a plain store read — a
+  // run that names its symbols never triggers an index refresh
+  // for a list it may not need. The invariant holds: the feed
+  // family never invents membership; the symbols are the
+  // caller's, recorded on the artifact as their provenance
+  // (FeedDatasetSymbolUniverse: the symbols themselves ARE the
+  // provenance). A sharded partition still rides `opts.symbols`
+  // below — it is a filter on the stored list, never an
+  // explicit-symbol run, so the membership rule only answers
+  // `opts.explicitSymbols`.
   const universeIndex = resolveRunUniverse(def, opts.universe);
   const universeLabel = labelForRunUniverse(registry, universeIndex);
-  // #3976: a cold store hydrates through the wired index refresh
-  // before the universe is declared missing.
-  const { list, refreshError, refreshTimedOut } =
-    await resolveUniverseListWithHydration(deps, universeIndex);
-  let symbols = symbolsOfList(list);
-  // #3535: a sharded partition pulls only its subset of the
-  // universe (universe order preserved; unknown symbols ignored —
-  // a partition is a filter on the universe, never an addition).
-  if (opts.symbols && list) {
-    const wanted = new Set(
-      opts.symbols.map((s) => s.toUpperCase().trim()).filter((s) => s.length > 0),
-    );
-    symbols = symbols.filter((s) => wanted.has(s));
-  }
-  const universe: FeedDatasetArtifact["universe"] = {
-    kind: "index",
-    index: universeIndex,
-    label: universeLabel,
-    snapshotDate: list?.snapshotDate ?? null,
-    sourceLabel: list?.sourceLabel ?? null,
-    size: symbols.length,
-  };
-  if (!list || symbols.length === 0) {
-    if (refreshTimedOut) {
+  const explicitSymbols = normalizeSymbolsInput(opts.explicitSymbols);
+  let symbols: string[];
+  let universe: FeedDatasetArtifact["universe"];
+  if (explicitSymbols.length > 0) {
+    const list = await deps.universeStore.latest(universeIndex);
+    const listed = new Set(symbolsOfList(list));
+    if (list && explicitSymbols.every((s) => listed.has(s))) {
+      symbols = explicitSymbols;
+      universe = {
+        kind: "index",
+        index: universeIndex,
+        label: universeLabel,
+        snapshotDate: list.snapshotDate ?? null,
+        sourceLabel: list.sourceLabel ?? null,
+        size: symbols.length,
+      };
+    } else {
+      symbols = explicitSymbols;
+      universe = {
+        kind: "symbols",
+        symbols: [...explicitSymbols],
+        label: `Run symbols (${explicitSymbols.length})`,
+        snapshotDate: null,
+        sourceLabel: null,
+        size: symbols.length,
+      };
+    }
+  } else {
+    // #3976: a cold store hydrates through the wired index refresh
+    // before the universe is declared missing.
+    const { list, refreshError, refreshTimedOut } =
+      await resolveUniverseListWithHydration(deps, universeIndex);
+    symbols = symbolsOfList(list);
+    // #3535: a sharded partition pulls only its subset of the
+    // universe (universe order preserved; unknown symbols ignored —
+    // a partition is a filter on the universe, never an addition).
+    if (opts.symbols && list) {
+      const wanted = new Set(
+        opts.symbols.map((s) => s.toUpperCase().trim()).filter((s) => s.length > 0),
+      );
+      symbols = symbols.filter((s) => wanted.has(s));
+    }
+    universe = {
+      kind: "index",
+      index: universeIndex,
+      label: universeLabel,
+      snapshotDate: list?.snapshotDate ?? null,
+      sourceLabel: list?.sourceLabel ?? null,
+      size: symbols.length,
+    };
+    if (!list || symbols.length === 0) {
+      if (refreshTimedOut) {
+        return record({
+          status: "failed",
+          quotes: [],
+          requested: 0,
+          missingSymbols: [],
+          codedError: FEED_JOB_CODES.refreshTimeout,
+          errorMessage: `Index-list refresh for the ${universeLabel} universe did not settle within ${timeouts.refreshMs}ms (FEED_REFRESH_TIMEOUT). The feed job has no universe to pull.`,
+          universe,
+        });
+      }
+      if (refreshError !== undefined) {
+        return record({
+          status: "failed",
+          quotes: [],
+          requested: 0,
+          missingSymbols: [],
+          codedError: FEED_JOB_CODES.universeRefreshFailed,
+          errorMessage: `Index-list refresh for the ${universeLabel} universe failed: ${refreshError}. The feed job has no universe to pull.`,
+          universe,
+        });
+      }
       return record({
         status: "failed",
         quotes: [],
         requested: 0,
         missingSymbols: [],
-        codedError: FEED_JOB_CODES.refreshTimeout,
-        errorMessage: `Index-list refresh for the ${universeLabel} universe did not settle within ${timeouts.refreshMs}ms (FEED_REFRESH_TIMEOUT). The feed job has no universe to pull.`,
+        codedError: FEED_JOB_CODES.universeMissing,
+        errorMessage: `No stored ${universeLabel} index list exists; the feed job has no universe to pull. Refresh the index list first.`,
         universe,
       });
     }
-    if (refreshError !== undefined) {
-      return record({
-        status: "failed",
-        quotes: [],
-        requested: 0,
-        missingSymbols: [],
-        codedError: FEED_JOB_CODES.universeRefreshFailed,
-        errorMessage: `Index-list refresh for the ${universeLabel} universe failed: ${refreshError}. The feed job has no universe to pull.`,
-        universe,
-      });
-    }
-    return record({
-      status: "failed",
-      quotes: [],
-      requested: 0,
-      missingSymbols: [],
-      codedError: FEED_JOB_CODES.universeMissing,
-      errorMessage: `No stored ${universeLabel} index list exists; the feed job has no universe to pull. Refresh the index list first.`,
-      universe,
-    });
   }
 
   // 2. The batch contract: the job maintains its dataset in one
@@ -1153,7 +1234,7 @@ export async function runFeedJob(
         requested: symbols.length,
         missingSymbols: symbols,
         codedError: FEED_JOB_CODES.fetchTimeout,
-        errorMessage: `Provider batch quote fetch for the ${universeLabel} universe did not settle within ${timeouts.fetchMs}ms (${FEED_JOB_CODES.fetchTimeout}).`,
+        errorMessage: `Provider batch quote fetch for the ${universe.label} universe did not settle within ${timeouts.fetchMs}ms (${FEED_JOB_CODES.fetchTimeout}).`,
         universe,
       });
     }
@@ -1205,7 +1286,7 @@ export async function runFeedJob(
       requested: symbols.length,
       missingSymbols,
       codedError: FEED_JOB_CODES.noQuotesReturned,
-      errorMessage: `Provider "${def.sourceId}" returned no quotes for the ${universeLabel} universe; nothing was persisted as data.`,
+      errorMessage: `Provider "${def.sourceId}" returned no quotes for the ${universe.label} universe; nothing was persisted as data.`,
       universe,
     });
   }
@@ -2421,13 +2502,7 @@ export async function runFeedOptionsChainsJob(
   // 1. Universe — explicit symbols (membership rule) or the
   //    stored index list (with hydration, like the
   //    fundamentals run).
-  const explicitSymbols = Array.from(
-    new Set(
-      (opts.symbols ?? [])
-        .map((s) => s.toUpperCase().trim())
-        .filter((s) => s.length > 0),
-    ),
-  );
+  const explicitSymbols = normalizeSymbolsInput(opts.symbols);
   let symbols: string[];
   let universe: FeedDatasetArtifact["universe"];
   if (explicitSymbols.length > 0) {
