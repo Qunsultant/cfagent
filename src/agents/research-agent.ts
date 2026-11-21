@@ -235,6 +235,8 @@ export class ResearchAgent extends PortThink {
         inputSchema: z.object({
           trigger: z.enum(["manual", "scheduled"]),
           userLogin: z.string().optional(),
+          // Issue #5911 — the run id the engine minted (optional).
+          runId: z.string().optional(),
           // Issue #5912 — the venue/mode this run names (optional).
           brokerId: z.string().optional(),
           mode: z.string().optional(),

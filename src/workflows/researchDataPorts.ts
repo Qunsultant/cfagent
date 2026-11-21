@@ -11,6 +11,7 @@ import type { DataProviderId, IndexId } from "../trading";
 import type { FeedDatasetArtifact, FeedDatasetStore } from "../data/feedDatasetPorts";
 import type { ResearchEvaluation } from "../services/researchPipeline";
 import { buildTrackRecord, type TrackRecord } from "../services/researchTrackRecord";
+import { runIdBody } from "../services/executionTreeIds";
 export {
   reconcileResearchTaskWithRunRecord,
   type ResearchTaskReconciliation,
@@ -20,12 +21,15 @@ export const RESEARCH_JOB_ID_PREFIX = "research:";
 
 /** Canonical engine job id for a research run (`research:<runId>`). */
 export function researchEngineJobId(runId: string): string {
-  return `${RESEARCH_JOB_ID_PREFIX}${runId}`;
+  // Issue #5911 — the platform's run ids carry the `run:` type marker; a
+  // job-instance id is `<kind>:<runBody>`, so the marker is dropped here.
+  // A legacy `rsr_…` id has no marker and passes through unchanged.
+  return `${RESEARCH_JOB_ID_PREFIX}${runIdBody(runId)}`;
 }
 
 /** DO-storage checkpoint artifact key for a research stage. */
 export function researchArtifactKey(runId: string, stageId: string): string {
-  return `${RESEARCH_JOB_ID_PREFIX}${runId}:${stageId}`;
+  return `${RESEARCH_JOB_ID_PREFIX}${runIdBody(runId)}:${stageId}`;
 }
 
 export interface ResearchDatasetResolution {

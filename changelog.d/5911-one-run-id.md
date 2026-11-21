@@ -1,0 +1,3 @@
+### Fixed
+
+- **One job, one run id (#5911):** a research run no longer exists under two ids. The pipeline used to mint its own `rsr_…` id even when the engine had already minted one, so the same run appeared as a ledger row (`rsr_…`) and an engine record (`d1:research:<uuid>`) that could never be joined exactly. The pipeline now goes through the platform's id authority (#5175) when it must mint, and **adopts the id it is given** when the engine dispatched it — the report, the artifact keys and the run record all carry that one id. `research:<runId>` keeps its `<kind>:<runBody>` shape by dropping the `run:` marker, and a legacy `rsr_…` id still resolves unchanged. #ceo-aimp
