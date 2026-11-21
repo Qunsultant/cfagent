@@ -8,14 +8,16 @@
  *
  * Shape (design ~/workspace/.work/design-3550-onboarding.md §4,
  * Shape A): a per-run job definition (jobId = command.jobId), a
- * nested chain of six nodes, kinds feed -> enrich -> analyze ->
- * store -> serve -> deliver, each 1:1 with a catalog stage
- * (workflowCatalog.ts STOCK_SCREENER). processing.shards =
- * command shard ids; units = shards on every node; artifacts
- * hand off per (stage, shard). The goal leg rides its own
+ * nested chain of five generic nodes for a market run — kinds
+ * feed -> enrich -> analyze -> generate -> deliver, each 1:1
+ * with a v2 catalog stage (#5884 6b3: the generic steps run
+ * the chain; the deliver node stays the bespoke
+ * screener.deliver step until 6c). The goal leg rides its own
  * definition (#5873): the "goalScreen" spec, same six kinds,
  * the analyze node the goal dispatch (screener.goal) — a goal
  * run never executes as a market screen, #1996).
+ * processing.shards = command shard ids; units = shards on
+ * every node; artifacts hand off per (stage, shard).
  *
  * Step handlers resolve the live deps per invocation (agent
  * stub, quote/history deps, store/deliver doors) and delegate
@@ -73,6 +75,8 @@ import type { StockScreenDelivery } from "../workflows/stockScreenRunSpec";
 import type { WorkflowGoalScreenEnvelope } from "../agents/orchestrator/goalScreenDispatch";
 import { SCREENER_DEFAULT_EXECUTION_MODE } from "../config/screenerExecutionMode";
 import { jobDefinitionSpec } from "../config/jobDefinitionCatalog";
+import { FEED_PIPELINE_CATALOG } from "./feedPipelineJobs";
+import { DEFAULT_TENANT_PROVIDERS } from "../data/commercialPorts";
 
 /** The step names a screener job's configuration references. */
 export const SCREENER_FEED_STEP = "screener.feed";
@@ -84,16 +88,24 @@ export const SCREENER_STORE_STEP = "screener.store";
 export const SCREENER_SERVE_STEP = "screener.serve";
 export const SCREENER_DELIVER_STEP = "screener.deliver";
 
-/** The six node kinds, in catalog order. */
-export const SCREENER_NODE_KINDS = ["feed", "enrich", "analyze", "store", "serve", "deliver"] as const;
+/** The five generic node kinds, in catalog order (#5884 6b3 — the market spec's v2 stages). The "goalScreen" spec keeps its own six bespoke stages (feed/enrich/analyze/store/serve/deliver); these constants project the market spec only. */
+export const SCREENER_NODE_KINDS = ["feed", "enrich", "analyze", "generate", "deliver"] as const;
 
-/** The step each node kind runs. */
+/**
+ * The step each node kind runs. Spelled as literals: the
+ * canonical constants live in the family modules, and
+ * importing them here would cycle (enrichPipelineJobs imports
+ * registerScreenerSteps from this module). Drift fails loudly:
+ * the #4365-P04 pin holds these equal to the catalog, and the
+ * #5884 definition test holds the built nodes' steps equal to
+ * the family constants (FEED_PULL_STEP, ENRICH_SCREENER_STEP,
+ * ANALYZE_SCREENER_STEP, GENERATE_APPLY_STEP).
+ */
 export const SCREENER_NODE_STEPS: Record<(typeof SCREENER_NODE_KINDS)[number], string> = {
-  feed: SCREENER_FEED_STEP,
-  enrich: SCREENER_GATHER_STEP,
-  analyze: SCREENER_ANALYSIS_STEP,
-  store: SCREENER_STORE_STEP,
-  serve: SCREENER_SERVE_STEP,
+  feed: "feed.pull",
+  enrich: "enrich.screener",
+  analyze: "analyze.screener",
+  generate: "generate.apply",
   deliver: SCREENER_DELIVER_STEP,
 };
 
@@ -527,8 +539,66 @@ export function createScreenerStepRegistry(deps: ScreenerStepDeps): JobStepRegis
 }
 
 /**
- * The raw J1 definition for one screen run: the six catalog
- * stages as a NESTED chain — feed is the root, every later stage
+ * Issue #5884 (#4437 slice 6b3 — the flip): the family job ids
+ * for one market run, computed per command. The generic steps
+ * are job-driven and the job id depends on the run's provider —
+ * a static spec literal would pin one provider for every run
+ * (a broker substitution, forbidden by #5517). Provider =
+ * `command.provider ?? DEFAULT_TENANT_PROVIDERS.dataProviderId`
+ * (the #5517 default — since #5516 it reads through to the
+ * one externalized vocabulary block, not a second default
+ * table); the feed job is the provider's
+ * canonical quotes job, validated against FEED_PIPELINE_CATALOG
+ * (acyclic: feedPipelineJobs imports no screener module); the
+ * chain derives by the family lineage (`<feed>-enrich` →
+ * `<feed>-enrich-analyze` → `<feed>-enrich-analyze-generate`),
+ * the same derivation the enrich/analyze/generate catalogs
+ * use. An unknown provider refuses by name — a job id is never
+ * invented.
+ */
+export function screenerFamilyJobIds(command: WorkflowJobCommand): {
+  feedJobId: string;
+  enrichJobId: string;
+  analyzeJobId: string;
+  generateJobId: string;
+} {
+  const provider = command.provider ?? DEFAULT_TENANT_PROVIDERS.dataProviderId;
+  const feedJobId = `${provider}-nasdaq100-quotes`;
+  const entry = FEED_PIPELINE_CATALOG.find(
+    (e) => e.jobId === feedJobId && e.dataset === "quotes",
+  );
+  if (!entry) {
+    throw new Error(
+      `SCREENER_FEED_JOB_UNKNOWN: no quotes feed job "${feedJobId}" for provider "${provider}" — refusing to invent a feed job id.`,
+    );
+  }
+  return {
+    feedJobId,
+    enrichJobId: `${feedJobId}-enrich`,
+    analyzeJobId: `${feedJobId}-enrich-analyze`,
+    generateJobId: `${feedJobId}-enrich-analyze-generate`,
+  };
+}
+
+/**
+ * Issue #5884 — the feed node's universe param: the run's
+ * single universe when every shard that names one agrees on
+ * it; absent otherwise, so per-shard universes govern per unit
+ * (6b1) and no node-level universe can override them.
+ * Explicit-symbols shards name no universe.
+ */
+function screenerFeedNodeUniverse(command: WorkflowJobCommand): string | undefined {
+  const universes = new Set(
+    (command.shards ?? [])
+      .map((shard) => shard.universe)
+      .filter((u): u is string => typeof u === "string" && u.trim() !== ""),
+  );
+  return universes.size === 1 ? [...universes][0] : undefined;
+}
+
+/**
+ * The raw J1 definition for one screen run: the five generic
+ * nodes as a NESTED chain — feed is the root, every later stage
  * the single child of the stage before it (the chain idiom: a
  * stage's input is its parent stage's output). jobId =
  * command.jobId; processing.shards = the command's shard ids on
@@ -579,7 +649,25 @@ export function buildScreenerJobDefinition(command: WorkflowJobCommand): unknown
   // are its projection (a parity pin holds them equal). Issue #5873 —
   // a goal command builds the "goalScreen" spec (analyze node
   // screener.goal); a market command builds the "screener" spec.
+  // Issue #5884 — the generic steps are job-driven: the market
+  // definition's nodes carry their family job id (computed per
+  // command above); the feed node also carries the run's single
+  // universe when the shards agree on one. The goal definition's
+  // bespoke nodes carry neither (its steps read the shared params).
   const spec = jobDefinitionSpec(command.goalScreen ? "goalScreen" : "screener");
+  const familyIds = command.goalScreen ? null : screenerFamilyJobIds(command);
+  const feedUniverse = familyIds ? screenerFeedNodeUniverse(command) : undefined;
+  const jobIdParams: Record<string, Record<string, unknown>> = familyIds
+    ? {
+        feed: {
+          feedJobId: familyIds.feedJobId,
+          ...(feedUniverse ? { universe: feedUniverse } : {}),
+        },
+        enrich: { enrichJobId: familyIds.enrichJobId },
+        analyze: { analyzeJobId: familyIds.analyzeJobId },
+        generate: { generateJobId: familyIds.generateJobId },
+      }
+    : {};
   let node: JobNodeConfig | undefined;
   for (let i = spec.stages.length - 1; i >= 0; i--) {
     const stageSpec = spec.stages[i];
@@ -589,7 +677,7 @@ export function buildScreenerJobDefinition(command: WorkflowJobCommand): unknown
       steps: [
         {
           step: stageSpec.step,
-          params: { ...params, ...(stageSpec.params ?? {}) },
+          params: { ...params, ...(jobIdParams[kind] ?? {}), ...(stageSpec.params ?? {}) },
         },
       ],
       processing: { shards: [...shardIds] },

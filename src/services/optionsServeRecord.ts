@@ -23,6 +23,7 @@
  */
 
 import { recordOptionsRun } from "../agents/optionsRuns";
+import { vocabularyDefaults } from "../config/vocabulary";
 import { recordJobOutcome } from "./jobOutcomes";
 import {
   classifyChainFreshness,
@@ -649,7 +650,7 @@ export function recordStrategyScreenRun(
         asyncJobId: input.asyncJobId ?? null,
         jobType: "options-strategy-panel",
         strategyMode,
-        dataProviderId: input.dataProviderId ?? "etrade",
+        dataProviderId: input.dataProviderId ?? vocabularyDefaults().provider,
         brokerId: input.brokerId ?? DEFAULT_TENANT_PROVIDERS.brokerId,
       },
       ...(input.scheduleId ? { scheduleId: input.scheduleId } : {}),

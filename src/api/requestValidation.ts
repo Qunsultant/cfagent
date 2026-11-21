@@ -199,6 +199,8 @@ export const tenantCreateBodySchema = z.object({
  * Tenant settings PATCH (#2221): JSON types only. `intervalS` must
  * be a number and the provider ids strings when present; the
  * positive-integer bound and the non-empty checks stay in the route.
+ * `turnStepTimeoutMs` (#5423, #3515 S4) must be a number when
+ * present; its bounds (1000–600000 ms) stay in the route.
  */
 export const tenantSettingsBodySchema = z.object({
   adsEnabled: z.boolean().optional(),
@@ -208,6 +210,7 @@ export const tenantSettingsBodySchema = z.object({
   providers: z
     .object({ dataProviderId: z.string(), brokerId: z.string() })
     .optional(),
+  turnStepTimeoutMs: z.number().optional(),
 });
 
 /**

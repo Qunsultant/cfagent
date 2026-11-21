@@ -34,6 +34,18 @@ export interface ResearchConfig {
   minOpenInterest: number;
   /** Minimum days to expiry for any leg. */
   minDte: number;
+  /** Lower bound for the near-term option-chain selection band. */
+  nearExpiryMinDte: number;
+  /** Upper bound for the near-term option-chain selection band. */
+  nearExpiryMaxDte: number;
+  /** Lower bound for the long-dated option-chain selection band. */
+  leapsExpiryMinDte: number;
+  /** Maximum expirations to request in each chain-selection band. */
+  maxExpiriesPerBand: number;
+  /** Upper bound for calibrated demo chains in the near-term band. */
+  calibratedNearMaxDte: number;
+  /** Upper bound for calibrated demo chains in the LEAPS band. */
+  calibratedLeapsMaxDte: number;
   /** DTE at/below which short legs carry assignment risk. */
   assignmentRiskDte: number;
   /**
@@ -74,6 +86,12 @@ export const RESEARCH_CONFIG_DEFAULTS: ResearchConfig = {
   minOptionVolume: 10,
   minOpenInterest: 50,
   minDte: 7,
+  nearExpiryMinDte: 30,
+  nearExpiryMaxDte: 45,
+  leapsExpiryMinDte: 180,
+  maxExpiriesPerBand: 4,
+  calibratedNearMaxDte: 120,
+  calibratedLeapsMaxDte: 400,
   assignmentRiskDte: 7,
   ownershipStrategiesAllowed: false,
   pmccEnabled: true,
@@ -121,6 +139,12 @@ export const RESEARCH_CONFIG_SCHEMA: ConfigSchemaField[] = [
   { key: "minOptionVolume", label: "Min option volume", type: "number", default: RESEARCH_CONFIG_DEFAULTS.minOptionVolume, hint: "Activity threshold." },
   { key: "minOpenInterest", label: "Min open interest", type: "number", default: RESEARCH_CONFIG_DEFAULTS.minOpenInterest, hint: "Activity threshold." },
   { key: "minDte", label: "Min DTE", type: "number", default: RESEARCH_CONFIG_DEFAULTS.minDte, hint: "Minimum days to expiry per leg." },
+  { key: "nearExpiryMinDte", label: "Near-term chain min DTE", type: "number", default: RESEARCH_CONFIG_DEFAULTS.nearExpiryMinDte, hint: "Lower bound for short-dated option-chain selection." },
+  { key: "nearExpiryMaxDte", label: "Near-term chain max DTE", type: "number", default: RESEARCH_CONFIG_DEFAULTS.nearExpiryMaxDte, hint: "Upper bound for short-dated option-chain selection." },
+  { key: "leapsExpiryMinDte", label: "LEAPS chain min DTE", type: "number", default: RESEARCH_CONFIG_DEFAULTS.leapsExpiryMinDte, hint: "Lower bound for long-dated option-chain selection." },
+  { key: "maxExpiriesPerBand", label: "Max expiries per chain band", type: "number", default: RESEARCH_CONFIG_DEFAULTS.maxExpiriesPerBand, hint: "Caps expiration requests in each option-chain band." },
+  { key: "calibratedNearMaxDte", label: "Calibrated near-term max DTE", type: "number", default: RESEARCH_CONFIG_DEFAULTS.calibratedNearMaxDte, hint: "Upper bound for demo-only calibrated near-term chains." },
+  { key: "calibratedLeapsMaxDte", label: "Calibrated LEAPS max DTE", type: "number", default: RESEARCH_CONFIG_DEFAULTS.calibratedLeapsMaxDte, hint: "Upper bound for demo-only calibrated LEAPS chains." },
   { key: "ownershipStrategiesAllowed", label: "Allow cash-secured puts / covered calls", type: "boolean", default: RESEARCH_CONFIG_DEFAULTS.ownershipStrategiesAllowed, hint: "Spec default OFF — requires explicit permission." },
   { key: "pmccEnabled", label: "Enable PMCC analysis", type: "boolean", default: RESEARCH_CONFIG_DEFAULTS.pmccEnabled, hint: "Spec: optional PMCC analysis." },
   { key: "autoEmail", label: "Email report after run", type: "boolean", default: RESEARCH_CONFIG_DEFAULTS.autoEmail, hint: "Off by default." },
@@ -159,6 +183,12 @@ function validateConfig(config: ResearchConfig): string[] {
   if (!(config.minOptionVolume >= 0)) errors.push("minOptionVolume must be >= 0");
   if (!(config.minOpenInterest >= 0)) errors.push("minOpenInterest must be >= 0");
   if (!(config.minDte >= 0)) errors.push("minDte must be >= 0");
+  if (!(config.nearExpiryMinDte >= 0)) errors.push("nearExpiryMinDte must be >= 0");
+  if (!(config.nearExpiryMaxDte >= config.nearExpiryMinDte)) errors.push("nearExpiryMaxDte must be >= nearExpiryMinDte");
+  if (!(config.leapsExpiryMinDte > config.nearExpiryMaxDte)) errors.push("leapsExpiryMinDte must be > nearExpiryMaxDte");
+  if (!(Number.isInteger(config.maxExpiriesPerBand) && config.maxExpiriesPerBand >= 1 && config.maxExpiriesPerBand <= 20)) errors.push("maxExpiriesPerBand must be an integer from 1 to 20");
+  if (!(config.calibratedNearMaxDte >= config.nearExpiryMaxDte)) errors.push("calibratedNearMaxDte must be >= nearExpiryMaxDte");
+  if (!(config.calibratedLeapsMaxDte >= config.leapsExpiryMinDte)) errors.push("calibratedLeapsMaxDte must be >= leapsExpiryMinDte");
   if (!config.universe.trim()) errors.push("universe must be non-empty");
   if (!config.scheduleCron.trim()) errors.push("scheduleCron must be non-empty");
   if (config.emailTo && !/^[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+$/.test(config.emailTo)) {

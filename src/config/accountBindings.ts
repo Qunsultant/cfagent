@@ -28,6 +28,10 @@ export const ACCOUNT_BINDING_CONFIG = {
   registryKeyPrefix: "acctreg:v1:",
   defaultAccountType: "stock" as (typeof ACCOUNT_TYPES)[number],
   defaultScope: "tenant" as (typeof ACCOUNT_BINDING_SCOPES)[number],
+  reportMask: {
+    character: "•",
+    visibleSuffixCharacters: 4,
+  },
   failureCodes: {
     unknownAccount: "FAILURE_ACCOUNT_UNKNOWN",
     unownedAccount: "FAILURE_ACCOUNT_UNOWNED",
@@ -37,3 +41,11 @@ export const ACCOUNT_BINDING_CONFIG = {
     bindingMissing: "FAILURE_ACCOUNT_BINDING_MISSING",
   },
 } as const;
+
+/** Return a display-safe account identifier. Short IDs are fully masked. */
+export function maskAccountId(accountId: string): string {
+  const suffixLength = ACCOUNT_BINDING_CONFIG.reportMask.visibleSuffixCharacters;
+  const suffix = accountId.length > suffixLength ? accountId.slice(-suffixLength) : "";
+  const maskedLength = Math.max(4, accountId.length - suffix.length);
+  return ACCOUNT_BINDING_CONFIG.reportMask.character.repeat(maskedLength) + suffix;
+}

@@ -1467,6 +1467,14 @@ export const D1_CATALOGUE_ENTRIES: CatalogueEntry[] = [
     form: "literal",
   },
   {
+    code: "schema.d1.agent_tenant_settings.alter_table_add_column_turn_step_timeout_ms",
+    plane: "d1",
+    table: "agent_tenant_settings",
+    statement: `ALTER TABLE agent_tenant_settings ADD COLUMN turn_step_timeout_ms INTEGER`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
     code: "schema.d1.agent_payment_proof_redemptions.create_table",
     plane: "d1",
     table: "agent_payment_proof_redemptions",
@@ -3504,6 +3512,9 @@ export const D1_MIGRATION_CODES: Record<number, readonly string[]> = {
     "schema.d1.agent_usage_events.create_table",
     "schema.d1.agent_usage_events.create_index_agent_usage_events_tenant_idx",
     "schema.d1.agent_usage_events.create_index_agent_usage_events_user_idx",
+  ],
+  78: [
+    "schema.d1.agent_tenant_settings.alter_table_add_column_turn_step_timeout_ms",
   ],
   75: [
     "schema.d1.job_pipeline_instances.alter_table_add_column_run_definition_version",

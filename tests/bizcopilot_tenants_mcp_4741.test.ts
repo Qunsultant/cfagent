@@ -58,6 +58,8 @@ function settingsRow(tenantId: string, overrides: Partial<TenantSettingsRecord> 
     autoRefreshIntervalS: 15,
     dataProviderId: "etrade",
     brokerId: "etrade",
+    // Issue #5423: per-step timeout, null = unconfigured (same as the adapters' fresh row).
+    turnStepTimeoutMs: null,
     ...overrides,
   };
 }
@@ -112,6 +114,16 @@ function makeWorld() {
       const row = settings.get(tenantId) ?? settingsRow(tenantId);
       row.dataProviderId = providers.dataProviderId;
       row.brokerId = providers.brokerId;
+      settings.set(tenantId, row);
+      return row;
+    },
+    // Issue #5423: per-step timeout (null = unconfigured — the
+    // route's readSettings calls the getter on every read).
+    getTenantTurnStepTimeoutMs: async (tenantId: string) =>
+      settings.get(tenantId)?.turnStepTimeoutMs ?? null,
+    setTenantTurnStepTimeoutMs: async (tenantId: string, timeoutMs: number) => {
+      const row = settings.get(tenantId) ?? settingsRow(tenantId);
+      row.turnStepTimeoutMs = timeoutMs;
       settings.set(tenantId, row);
       return row;
     },

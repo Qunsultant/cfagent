@@ -448,6 +448,14 @@ export interface GenerateReportDocument {
   /** The input artifact's recorded rule gaps, verbatim. */
   gaps: AnalyzedDatasetArtifact["gaps"];
   rows: AnalyzedDatasetRow[];
+  /**
+   * Issue #2863 (S3, re-homed in #5884 6b3): the run's
+   * validated criteria (its filters), present only when the
+   * run screened on filters — the canonical copy's criteria,
+   * so report replay reads them from persisted data instead
+   * of marking the criteria gap partial. Never invented.
+   */
+  criteria?: Record<string, unknown>;
 }
 
 const fmtNum = (v: number | null): string => (v === null ? "n/a" : String(v));
@@ -458,6 +466,7 @@ export function buildReportDocument(args: {
   inputArtifact: AnalyzedDatasetArtifact;
   rows: AnalyzedDatasetRow[];
   partitioned: boolean;
+  criteria?: Record<string, unknown>;
 }): GenerateReportDocument {
   if (args.kind === "screener-report") {
     return buildScreenerReportDocument(args);
@@ -481,6 +490,7 @@ function buildScreenerReportDocument(args: {
   inputArtifact: AnalyzedDatasetArtifact;
   rows: AnalyzedDatasetRow[];
   partitioned: boolean;
+  criteria?: Record<string, unknown>;
 }): GenerateReportDocument {
   const { def, inputArtifact, rows, partitioned } = args;
   const s = inputArtifact.summary;
@@ -511,6 +521,10 @@ function buildScreenerReportDocument(args: {
     inputSummary: s,
     gaps: inputArtifact.gaps,
     rows,
+    // Issue #2863 (S3, re-homed in #5884 6b3): the run's
+    // validated criteria ride the canonical copy — present
+    // only when the run screened on filters, never invented.
+    ...(args.criteria ? { criteria: args.criteria } : {}),
   };
 }
 
@@ -520,6 +534,7 @@ function buildAnalysisReportDocument(args: {
   inputArtifact: AnalyzedDatasetArtifact;
   rows: AnalyzedDatasetRow[];
   partitioned: boolean;
+  criteria?: Record<string, unknown>;
 }): GenerateReportDocument {
   const { def, inputArtifact, rows, partitioned } = args;
   const s = inputArtifact.summary;
@@ -550,6 +565,10 @@ function buildAnalysisReportDocument(args: {
     inputSummary: s,
     gaps: inputArtifact.gaps,
     rows,
+    // Issue #2863 (S3, re-homed in #5884 6b3): the run's
+    // validated criteria ride the canonical copy — present
+    // only when the run screened on filters, never invented.
+    ...(args.criteria ? { criteria: args.criteria } : {}),
   };
 }
 
@@ -838,6 +857,15 @@ export interface RunGenerateJobOptions {
   /** Shard partition: generate from only these symbols of the
    *  input artifact (the plane's sharded shape). */
   symbols?: readonly string[];
+  /**
+   * Issue #2863 (S3, re-homed in #5884 6b3): the run's
+   * validated criteria (its filters), stamped onto the report
+   * document when the run screened on filters. Absent = the
+   * run screened on no filters — the document never invents
+   * criteria, and a replay from it marks the gap partial,
+   * exactly as the bespoke store stage did.
+   */
+  criteria?: Record<string, unknown>;
 }
 
 export interface GenerateRunResult {
@@ -1098,6 +1126,9 @@ export async function runGenerateJob(
       inputArtifact,
       rows: effectiveRows,
       partitioned,
+      // Issue #2863 (S3, re-homed in #5884 6b3): the run's
+      // validated criteria ride the report document.
+      ...(opts.criteria ? { criteria: opts.criteria } : {}),
     });
     const formatRecords: GeneratedFormatRecord[] = [];
     for (const format of formats) {

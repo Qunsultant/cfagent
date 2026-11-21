@@ -13,7 +13,7 @@ import { createSettingsPort } from "../../data/createSettingsPorts";
 import type { SettingsPort } from "../../data/settingsReadPorts";
 import type { DatabaseORM } from "../../orm";
 import type { Env } from "../../types";
-import { ETradeEmailTradingService } from "../../trading";
+import { defaultStockScreenProvider, ETradeEmailTradingService } from "../../trading";
 import { ETradeWebhookService } from "../../services/tradingWebhooks";
 import type { ParentScreenReportInput } from "../../workflows/workflowPorts";
 import { resolveStockReportFormatStatus } from "../../services/stockReportFormatStatus";
@@ -294,7 +294,7 @@ export async function persistScreenerReportCanonical(ctx: ReportDispatchContext,
   timestamp: string;
   universe?: unknown;
   sector?: unknown;
-  /** Issue #1007: data provider provenance (default "etrade"). */
+  /** Issue #1007: data provider provenance (#5516: absent → the externalized default). */
   provider?: unknown;
   success: boolean;
   totalScanned: number;
@@ -364,7 +364,7 @@ export async function persistScreenerReportCanonical(ctx: ReportDispatchContext,
         // Issue #1007: provider provenance — a Yahoo-provider run is
         // identifiable as such in Reports; E*TRADE runs record the
         // default they have always implied.
-        provider: result.provider ?? "etrade",
+        provider: result.provider ?? defaultStockScreenProvider(),
         trigger: result.trigger,
         success: result.success,
         totalScanned: result.totalScanned,

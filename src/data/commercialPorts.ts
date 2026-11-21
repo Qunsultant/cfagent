@@ -28,6 +28,7 @@ import type { CommercialAccount } from "../services/cfpayMonetization";
 // productPorts, never redeclared here.
 import { assertSegment, DEFAULT_SEGMENT } from "./productPorts";
 import { BusinessError } from "../outcomes/outcomeAspects";
+import { vocabularyDefaults } from "../config/vocabulary";
 
 export type StoreTier = "Free" | "PayPerUse" | "Subscribed";
 
@@ -151,6 +152,13 @@ export interface TenantSettingsRecord {
   dataProviderId: string;
   /** Per-tenant broker selection. Absent row = alpaca (DEFAULT_TENANT_PROVIDERS, #3812/#3937). */
   brokerId: string;
+  /**
+   * Issue #5423 (#3515 S4): per-step timeout for the MAS turn
+   * loop, in milliseconds. Null = UNCONFIGURED — the turn refuses
+   * (named refusal) instead of running unbounded. Adapters apply
+   * NO default: the absent value is meaningful, not a gap.
+   */
+  turnStepTimeoutMs: number | null;
 }
 
 /** Issue #2481: the auto-refresh half of a tenant settings row. */
@@ -183,10 +191,18 @@ export interface TenantProviders {
  * design (ADR 0019; the registry's fundamentals route is Yahoo).
  * Paper is not stored here: it is the mode default (TEST) applied by the
  * trade-environment resolver, so live remains an explicit act.
+ *
+ * Issue #5516: the two ids are read through to the one externalized block
+ * (`config/vocabulary.json` → `provider` / `broker`) on every access, so a
+ * config change moves them and this is not a second default table.
  */
 export const DEFAULT_TENANT_PROVIDERS: TenantProviders = {
-  dataProviderId: "alpaca",
-  brokerId: "alpaca",
+  get dataProviderId() {
+    return vocabularyDefaults().provider;
+  },
+  get brokerId() {
+    return vocabularyDefaults().broker;
+  },
 };
 
 export interface CreditClaimRecord {
@@ -356,6 +372,20 @@ export interface CommercialStore {
   setTenantProviders(
     tenantId: string,
     providers: TenantProviders,
+  ): Promise<TenantSettingsRecord>;
+  /**
+   * Issue #5423 (#3515 S4): the tenant's STORED per-step timeout
+   * for the MAS turn loop, in milliseconds — or null when no
+   * timeout is configured (no settings row, or a row whose
+   * turnStepTimeoutMs is null). Applies NO default: null is the
+   * unconfigured state, and the turn refuses (named refusal)
+   * rather than running unbounded.
+   */
+  getTenantTurnStepTimeoutMs(tenantId: string): Promise<number | null>;
+  /** Issue #5423 (#3515 S4): store the tenant's per-step timeout (ms). */
+  setTenantTurnStepTimeoutMs(
+    tenantId: string,
+    timeoutMs: number,
   ): Promise<TenantSettingsRecord>;
   /** Idempotent: re-recording the same claim is a no-op (the DO ledger row is the audit). Issue #3289: the optional productId/versionId/priceUSD record which charge the credit replaces (§3.9). */
   recordCreditClaim(claim: {

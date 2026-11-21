@@ -46,77 +46,7 @@ export function researchReportToStoreInput(
   const cleanArtifacts = Object.fromEntries(
     Object.entries(artifacts).filter(([, value]) => value !== undefined),
   );
-  const artifactKeys = [artifacts.pdfKey, artifacts.xlsxKey, artifacts.csvKey].filter(
-    (k): k is string => typeof k === "string" && k.length > 0,
-  );
   const jobRunId = researchEngineJobId(report.runId);
-  const stages = [
-    {
-      stage: "feed",
-      status: report.stats.quotesRetrieved > 0 || report.stats.universeSize > 0 ? "completed" : "completed",
-      durationMs: null,
-      inputIds: [`universe:${report.stats.universeSize}`],
-      outputIds: [`quotes:${report.stats.quotesRetrieved}`],
-      errorCode: null,
-      error: null,
-      evidence: { universeSize: report.stats.universeSize, quotesRetrieved: report.stats.quotesRetrieved },
-    },
-    {
-      stage: "gather",
-      status: "completed",
-      durationMs: null,
-      inputIds: [`quotes:${report.stats.quotesRetrieved}`],
-      outputIds: [`chains:${report.stats.chainsFetched}`],
-      errorCode: null,
-      error: null,
-      evidence: { chainsFetched: report.stats.chainsFetched, chainsCalibrated: report.stats.chainsCalibrated },
-    },
-    {
-      stage: "analysis",
-      status: "completed",
-      durationMs: report.stats.durationMs,
-      inputIds: [`candidates:${report.stats.candidatesEvaluated}`],
-      outputIds: [`qualified:${report.stats.qualified}`, `watchlist:${report.stats.watchlist}`],
-      errorCode: null,
-      error: null,
-      evidence: {
-        qualified: report.stats.qualified,
-        watchlist: report.stats.watchlist,
-        rejected: report.stats.rejected,
-        oodaIterations: report.stats.oodaIterations,
-      },
-    },
-    {
-      stage: "generation",
-      status: artifactKeys.length > 0 ? "completed" : "failed",
-      durationMs: null,
-      inputIds: [report.runId],
-      outputIds: artifactKeys,
-      errorCode: null,
-      error: null,
-      evidence: { artifactCount: artifactKeys.length },
-    },
-    {
-      stage: "recording",
-      status: "completed",
-      durationMs: null,
-      inputIds: artifactKeys,
-      outputIds: [jobRunId],
-      errorCode: null,
-      error: null,
-      evidence: { jobRunId, generationId: report.generationId },
-    },
-    {
-      stage: "delivery",
-      status: "completed",
-      durationMs: null,
-      inputIds: [jobRunId],
-      outputIds: [],
-      errorCode: null,
-      error: null,
-      evidence: { trigger: report.trigger },
-    },
-  ];
   return {
     runId: report.runId,
     generationId: report.generationId,
@@ -128,12 +58,14 @@ export function researchReportToStoreInput(
     body: {
       ...(report as unknown as Record<string, unknown>),
       ...cleanArtifacts,
-      success: true,
+      success: !report.dataRefusal,
       jobRunId,
       engineVersion: (report as { modelVersion?: string }).modelVersion ?? "rules-1.0.0",
       inputHash: report.generationId,
       captureIds: [report.runId],
-      stages,
+      // The report is created inside J-stack's generate/deliver path. The
+      // six engine stages are read from J-stack checkpoints by the run view;
+      // this report body must not synthesize a competing stage ledger.
     },
   };
 }

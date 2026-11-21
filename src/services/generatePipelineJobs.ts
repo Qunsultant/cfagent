@@ -332,6 +332,13 @@ export function registerGenerateStep(
         ...(stringParams(ctx.params.formats)
           ? { formats: stringParams(ctx.params.formats) }
           : {}),
+        // Issue #2863 (S3, re-homed in #5884 6b3): the run's
+        // validated criteria (its filters) ride the report
+        // document — present only when the run screened on
+        // filters, never invented.
+        ...(ctx.params.filters && typeof ctx.params.filters === "object"
+          ? { criteria: ctx.params.filters as Record<string, unknown> }
+          : {}),
         ...(symbols ? { symbols } : {}),
       },
     );

@@ -7,11 +7,19 @@
  *    (id + version + stages + mode + schedule defaults), listed by id.
  *  - 4365-P02 validation refuses by name at load time: no stages, a stage
  *    without a step, an invalid mode, a non-object — never a partial job.
- *  - 4365-P03 the screener's six nodes and its mode LOAD FROM the spec: the
+ *  - 4365-P03 the screener's five nodes and its mode LOAD FROM the spec: the
  *    built definition's kinds, steps and mode equal the catalog's.
+ *    (Six nodes until the 6b3 flip #5884, which re-pointed the
+ *    spec onto the generic five-stage chain.)
  *  - 4365-P04 the typed constants are the spec's projection (a parity pin,
- *    not a second definition).
+ *    not a second definition). (They moved with the builder in
+ *    the 6b3 flip #5884: the same five generic steps, as
+ *    string literals — the family constants would cycle.)
  *  - 4365-P05 stage parameters merge over the run's parameters, per stage.
+ *    (Since the 6b3 flip #5884 the analyze + generate stages
+ *    carry params — ruleSets/inputMode, reports — and the
+ *    builder injects the per-command family job ids; the
+ *    "stages carry no params" shape is gone with the flip.)
  */
 import { describe, expect, it } from "vitest";
 import {
@@ -60,8 +68,7 @@ describe("4365-P01 the definition is an externalized, addressable spec", () => {
       "feed",
       "enrich",
       "analyze",
-      "store",
-      "serve",
+      "generate",
       "deliver",
     ]);
     expect(screener.executionMode).toBeTruthy();
@@ -110,7 +117,7 @@ describe("4365-P02 validation refuses by name", () => {
 });
 
 describe("4365-P03 the screener loads from the spec", () => {
-  it("builds the six stages with the spec's steps and mode", () => {
+  it("builds the five stages with the spec's steps and mode", () => {
     const def = buildScreenerJobDefinition(command()) as any;
     const spec = jobDefinitionSpec("screener");
     expect(chainKindsAndSteps(def)).toEqual(spec.stages.map((s) => ({ kind: s.kind, step: s.step })));
@@ -150,7 +157,17 @@ describe("4365-P05 stage parameters merge over the run's", () => {
     });
     expect(spec.stages[0].params).toEqual({ top: 5 });
     expect(spec.stages[1].params).toEqual({ channel: "email" });
-    // The screener's own stages carry no params: the run's params ride as-is.
-    expect(jobDefinitionSpec("screener").stages.every((s) => s.params === undefined)).toBe(true);
+    // Since the 6b3 flip #5884 the screener's stages DO carry
+    // params: analyze carries ruleSets + inputMode, generate
+    // carries reports; feed/enrich/deliver carry none. The
+    // run's params still ride as-is underneath.
+    const byKind = new Map(
+      jobDefinitionSpec("screener").stages.map((s) => [s.kind, s.params]),
+    );
+    expect(byKind.get("analyze")).toEqual({ ruleSets: ["screen", "factors"], inputMode: "handOff" });
+    expect(byKind.get("generate")).toEqual({ reports: ["screener-report"] });
+    expect(byKind.get("feed")).toBeUndefined();
+    expect(byKind.get("enrich")).toBeUndefined();
+    expect(byKind.get("deliver")).toBeUndefined();
   });
 });

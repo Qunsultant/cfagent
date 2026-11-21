@@ -39,6 +39,14 @@ import type {
   UnifiedScheduleState,
 } from "../data/unifiedSchedulePorts";
 import { carryScheduleProvenance, provenanceFromPayload, stampScheduleProvenance, systemProvenance } from "./consolidatedScheduling";
+import type { ScheduleProvenance } from "../schedule";
+import { isBuiltinScheduledGoalId } from "../config/builtinScheduledGoals";
+import {
+  jobCatalogueEntryForCallback,
+  jobCatalogueEntryForId,
+  jobCatalogueEntryForOperation,
+} from "../config/jobCatalogue";
+import type { ScheduleSource } from "../config/scheduleSourceModes";
 import {
   WORKER_CRON_TRIGGERS_INVENTORY,
 } from "./scheduleSystems";
@@ -110,6 +118,65 @@ export interface ScheduleAlarmLike {
 export const DECLARED_TASK_CALLBACK = "_runDeclaredScheduledTask";
 
 /**
+ * Issue #5890 — the ONE job identity a schedule row keys on.
+ *
+ * - A code-declared task keys by its TASK id (`declaredTaskIdOf`,
+ *   #4351) — never by `scheduleHash`: Think computes the hash from
+ *   `{schedule, retry}` only, so two different tasks that resolved
+ *   to the same schedule share one hash (both declared tasks show
+ *   `1cc4bdea8e8b678cdc2258188071a26f`).
+ * - A derived-record duty keys by its catalogue id: the live alarm
+ *   (by callback) and the derived record (by id) are the same job —
+ *   but ONLY when the catalogue entry's source is `derived-record`.
+ *   A creatable callback (`autonomousMarketScreen`, …) is a job
+ *   family, not one job: two user screens under it are two jobs, so
+ *   they never collapse.
+ * - Anything else keys by its own row id, so distinct user
+ *   schedules keep distinct rows.
+ */
+export type ScheduleJobKeyInput =
+  | {
+      callback?: unknown;
+      payload?: unknown;
+      definition?: unknown;
+      id?: unknown;
+      operation?: unknown;
+    }
+  | null
+  | undefined;
+
+export function scheduleJobKeyOf(input: ScheduleJobKeyInput): string {
+  const declared = declaredTaskIdOf(
+    input as { callback?: unknown; payload?: unknown; definition?: unknown },
+  );
+  if (declared) return `declared:${declared}`;
+  const holder = (input ?? {}) as {
+    callback?: unknown;
+    definition?: unknown;
+    id?: unknown;
+  };
+  const definition =
+    holder.definition && typeof holder.definition === "object"
+      ? (holder.definition as { callback?: unknown })
+      : undefined;
+  const callback =
+    typeof holder.callback === "string"
+      ? holder.callback
+      : typeof definition?.callback === "string"
+        ? (definition.callback as string)
+        : undefined;
+  if (callback) {
+    const byCallback = jobCatalogueEntryForCallback(callback);
+    if (byCallback?.source === "derived-record") return `job:${byCallback.id}`;
+  }
+  const id = typeof holder.id === "string" ? holder.id : undefined;
+  if (id) {
+    const byId = jobCatalogueEntryForId(id);
+    if (byId?.source === "derived-record") return `job:${byId.id}`;
+  }
+  return `row:${id ?? "unknown"}`;
+}
+/**
  * Issue #4351 — the declared task id an alarm (or a stored record's
  * definition) carries, or null for a schedule the user created. One reader
  * for both shapes, so the declaration filter and the pause/delete/resume
@@ -133,6 +200,220 @@ export function declaredTaskIdOf(
   if (!payload || typeof payload !== "object") return null;
   const taskId = (payload as { taskId?: unknown }).taskId;
   return typeof taskId === "string" && taskId.trim() ? taskId : null;
+}
+
+/* =================================================================
+ * Issue #5889 — schedule provenance: one source per row.
+ *
+ * The Schedules home merges at least seven sources into one table
+ * with no source identity. The derivation below is the one reader
+ * that attributes a row: it runs over the list shape
+ * (`unifiedRecordToListItem`, the route-appended derived rows, and
+ * the no-record alarm branch), so the row, its Source column, its
+ * filter value and its detail dialog can never disagree. Pure and
+ * total: every input yields exactly one source — a row whose
+ * creation was never recorded reads "unknown" / "not recorded",
+ * never a fabricated source.
+ *
+ * Rule order is load-bearing (first match wins): a ticker-push row
+ * IS a derived-record catalogue entry, so the kind check precedes
+ * the catalogue check; a sweep interval alarm runs under the same
+ * callback as the derived sweep record, so the derived-record check
+ * (stable id, provenance reason) precedes the callback check. The
+ * #5880 job catalogue is the home of job identity: a derived
+ * record resolves by its catalogue id, a callback/operation row by
+ * its catalogue entry — no second id scheme is invented here.
+ * ================================================================= */
+
+/** The three sweep/watchdog `scheduleEvery` guard callbacks (`src/agents/orchestrator.ts`). */
+const SWEEP_ALARM_CALLBACKS: readonly string[] = [
+  "sweepStaleLedgerTasks",
+  "sweepStaleAsyncJobs",
+  "watchdogMissedSchedules",
+];
+
+/** The shapes a schedule, alarm, record or goal definition arrives in. */
+export interface ScheduleSourceInput {
+  id: string;
+  kind?: string;
+  callback?: string;
+  operation?: string;
+  payload?: unknown;
+  provenance?: unknown;
+  jobId?: string;
+  definition?: Record<string, unknown> | unknown;
+}
+
+/** The validated provenance a payload or a record carries, if any. */
+function scheduleSourceProvenance(input: ScheduleSourceInput): ScheduleProvenance | undefined {
+  const definition =
+    input.definition && typeof input.definition === "object"
+      ? (input.definition as Record<string, unknown>)
+      : undefined;
+  const payload = input.payload ?? definition?.payload;
+  return (
+    provenanceFromPayload(payload) ?? provenanceFromPayload({ provenance: input.provenance })
+  );
+}
+
+function scheduleSourceJobId(input: ScheduleSourceInput, payload: unknown): string | undefined {
+  if (typeof input.jobId === "string" && input.jobId) return input.jobId;
+  const definition =
+    input.definition && typeof input.definition === "object"
+      ? (input.definition as Record<string, unknown>)
+      : undefined;
+  if (typeof definition?.jobId === "string" && definition.jobId) {
+    return definition.jobId as string;
+  }
+  if (payload && typeof payload === "object") {
+    const jobId = (payload as Record<string, unknown>).jobId;
+    if (typeof jobId === "string" && jobId) return jobId;
+  }
+  return undefined;
+}
+
+/** The catalogue job an input names (callback, operation, then id), or null. */
+function catalogueJobOf(
+  callback: string,
+  operation: string | undefined,
+  id: string,
+): string | null {
+  if (callback) {
+    const byCallback = jobCatalogueEntryForCallback(callback);
+    if (byCallback) return byCallback.id;
+  }
+  if (operation) {
+    const byOperation = jobCatalogueEntryForOperation(operation);
+    if (byOperation) return byOperation.id;
+  }
+  const byId = jobCatalogueEntryForId(id);
+  if (byId) return byId.id;
+  return null;
+}
+
+/** The arming origin a provenance value states, in plain words. */
+function provenanceOrigin(provenance: ScheduleProvenance | undefined): string {
+  if (!provenance) return "not recorded";
+  if (provenance.origin === "user") {
+    return provenance.createdBy ? `user ${provenance.createdBy}` : "user";
+  }
+  if (provenance.origin === "agent") {
+    return `agent ${provenance.agentId ?? "unknown"}`;
+  }
+  return provenance.reason ? `system · ${provenance.reason}` : "system";
+}
+
+/**
+ * The one source for a schedule row: kind + job identity + arming
+ * origin (+ owning agent / workflow when the row names one).
+ * Deterministic; the rule order above is part of the contract.
+ */
+export function resolveScheduleSource(input: ScheduleSourceInput): ScheduleSource {
+  const definition =
+    input.definition && typeof input.definition === "object"
+      ? (input.definition as Record<string, unknown>)
+      : undefined;
+  const callback =
+    typeof input.callback === "string"
+      ? input.callback
+      : typeof definition?.callback === "string"
+        ? (definition.callback as string)
+        : "";
+  const operation =
+    typeof input.operation === "string"
+      ? input.operation
+      : typeof definition?.operation === "string"
+        ? (definition.operation as string)
+        : undefined;
+  const payload = input.payload ?? definition?.payload;
+  const provenance = scheduleSourceProvenance(input);
+  const jobId = scheduleSourceJobId(input, payload);
+  const catalogueJob = catalogueJobOf(callback, operation, input.id);
+
+  // The live feed's own row: the TickerAgent's push, not a due-check record.
+  if (input.kind === "ticker-push") {
+    return { kind: "ticker-push", job: input.id, origin: "TickerAgent feed", agent: "TickerAgent" };
+  }
+  // A derived record, by its stable catalogue id — or, for the IV
+  // collection (whose record id is its alarm id), by the provenance
+  // reason the builder stamps on the record and the payload.
+  const derivedById = jobCatalogueEntryForId(input.id);
+  if (derivedById?.source === "derived-record") {
+    return { kind: "derived", job: input.id, origin: "system due-check" };
+  }
+  if (typeof provenance?.reason === "string" && provenance.reason) {
+    const derivedByReason = jobCatalogueEntryForId(provenance.reason);
+    if (derivedByReason?.source === "derived-record") {
+      return { kind: "derived", job: provenance.reason, origin: "system due-check" };
+    }
+  }
+  // A seeded built-in goal: tick-polled by the ScheduledAgent.
+  if (input.kind === "goal" && isBuiltinScheduledGoalId(input.id)) {
+    return { kind: "seeded", job: input.id, origin: "ScheduledAgent tick", agent: "ScheduledAgent" };
+  }
+  // A Think declared task: the payload's task id is the job identity.
+  const declared = declaredTaskIdOf({ callback, payload });
+  if (declared) {
+    return {
+      kind: "declared-task",
+      job: declared,
+      origin: "OrchestratorAgent declaration",
+      agent: "OrchestratorAgent",
+    };
+  }
+  // A workflow-stage schedule: the job id is the workflow it belongs to.
+  if (input.kind === "workflow-stage" || callback === "runWorkflowStage") {
+    return {
+      kind: "workflow",
+      job: jobId ?? input.id,
+      origin: provenanceOrigin(provenance),
+      ...(jobId ? { workflow: jobId } : {}),
+    };
+  }
+  // A pipeline job schedule: the jobdef id is the job identity.
+  if (callback === "runPipelineJobSchedule" || (jobId !== undefined && jobId.startsWith("jobdef:"))) {
+    return { kind: "pipeline-job", job: jobId ?? input.id, origin: provenanceOrigin(provenance) };
+  }
+  // A sweep/watchdog interval alarm: the same job as the derived
+  // row, a different row — the callback names the duty, never the
+  // derived record's id.
+  if ((SWEEP_ALARM_CALLBACKS as readonly string[]).includes(callback)) {
+    return {
+      kind: "sweep-alarm",
+      job: callback,
+      origin: "OrchestratorAgent interval guard",
+      agent: "OrchestratorAgent",
+    };
+  }
+  // A worker duty: deployment config, state disabled while Worker crons are OFF (#4112).
+  if (input.kind === "worker-duty") {
+    return { kind: "worker-duty", job: input.id, origin: "Worker cron (disabled)" };
+  }
+  // Provenance, where the record carries it: user, agent, system.
+  if (provenance?.origin === "user") {
+    return {
+      kind: "user-created",
+      job: catalogueJob ?? callback ?? input.id,
+      origin: provenance.createdBy ? `user ${provenance.createdBy}` : "user",
+    };
+  }
+  if (provenance?.origin === "agent") {
+    return {
+      kind: "agent-created",
+      job: catalogueJob ?? callback ?? input.id,
+      origin: `agent ${provenance.agentId ?? "unknown"}`,
+      agent: provenance.agentId,
+    };
+  }
+  if (provenance?.origin === "system") {
+    return {
+      kind: "system",
+      job: catalogueJob ?? callback ?? input.id,
+      origin: provenance.reason ? `system · ${provenance.reason}` : "system",
+    };
+  }
+  // No provenance, no structural rule: not recorded, never invented.
+  return { kind: "unknown", job: catalogueJob ?? callback ?? input.id, origin: "not recorded" };
 }
 
 /**
@@ -1011,6 +1292,14 @@ export function unifiedRecordToListItem(record: UnifiedScheduleRecord, nextRun?:
   const def = record.definition as Partial<ScheduleDefinitionLike> & {
     type?: string;
   };
+  // Issue #5889 — the record's provenance rides the list item (the
+  // payload's stamp wins; a record-only stamp, like the derived
+  // builders', is the fallback), and the row's source is derived
+  // from it once, here, so the column, the filters and the detail
+  // dialog can never disagree.
+  const provenance =
+    provenanceFromPayload(def.payload) ??
+    provenanceFromPayload({ provenance: record.provenance });
   return {
     id: record.id,
     kind: record.kind,
@@ -1029,6 +1318,20 @@ export function unifiedRecordToListItem(record: UnifiedScheduleRecord, nextRun?:
     paused: record.state === "paused",
     ...(record.pausedAt ? { pausedAt: record.pausedAt } : {}),
     ...(nextRun !== undefined ? { nextRun } : {}),
+    ...(provenance !== undefined ? { provenance } : {}),
+    source: resolveScheduleSource({
+      id: record.id,
+      kind: record.kind,
+      callback: record.callback,
+      operation: record.operation,
+      payload: def.payload,
+      provenance: record.provenance,
+      jobId:
+        typeof (def as Record<string, unknown>).jobId === "string"
+          ? ((def as Record<string, unknown>).jobId as string)
+          : undefined,
+      definition: record.definition as Record<string, unknown>,
+    }),
     // Issue #3310 — a stage-schedule names its workflow + stage, so
     // the home renders the stage, not just the firing callback.
     ...(typeof (def as Record<string, unknown>).jobId === "string"
@@ -1138,6 +1441,184 @@ export function timingFromRecordDefinition(def: Record<string, unknown>): Resolv
 }
 
 /* =================================================================
+ * Issue #5890 — one row per job: the collapse and the arm-time
+ * hygiene. Pure functions over the list shape, so the service list
+ * and the route list (which appends the derived rows after this
+ * service) collapse through the same reader.
+ * ================================================================= */
+
+/** The canonical id a job key names, or the row id for a row key. */
+function canonicalIdOfJobKey(key: string): string {
+  const sep = key.indexOf(":");
+  return sep === -1 ? key : key.slice(sep + 1);
+}
+
+/** Winner rank inside one job: the canonical row, then a live row, then a paused row. */
+function collapseRank(
+  item: { id: string; paused: boolean },
+  canonicalId: string,
+): number {
+  if (item.id === canonicalId) return 0;
+  return item.paused ? 2 : 1;
+}
+
+/**
+ * Whether the candidate wins over the incumbent inside one job.
+ * Same rank: a live row wins on the soonest firing; a paused row
+ * wins on the most recent pause; a canonical row is unique, so its
+ * tie-break is the id. A live row beats a stale paused record
+ * because the job IS firing — a per-alarm paused record does not
+ * block re-declaration (the filter reads by task id), so the paused
+ * record is a stale per-occurrence artifact, not the job's state.
+ * A canonical paused record beats a live alarm because it DOES
+ * block re-declaration: the alarm beside it is an orphan that fires
+ * into an early return, not the job.
+ */
+function collapseWinsOver(
+  candidate: {
+    id: string;
+    paused: boolean;
+    nextRun?: number;
+    time?: number;
+    pausedAt?: string;
+  },
+  incumbent: {
+    id: string;
+    paused: boolean;
+    nextRun?: number;
+    time?: number;
+    pausedAt?: string;
+  },
+  canonicalId: string,
+): boolean {
+  const candidateRank = collapseRank(candidate, canonicalId);
+  const incumbentRank = collapseRank(incumbent, canonicalId);
+  if (candidateRank !== incumbentRank) return candidateRank < incumbentRank;
+  if (candidateRank === 0) return candidate.id < incumbent.id;
+  if (candidateRank === 1) {
+    const candidateNext = candidate.nextRun ?? Number.POSITIVE_INFINITY;
+    const incumbentNext = incumbent.nextRun ?? Number.POSITIVE_INFINITY;
+    if (candidateNext !== incumbentNext) return candidateNext < incumbentNext;
+    const candidateTime = candidate.time ?? Number.POSITIVE_INFINITY;
+    const incumbentTime = incumbent.time ?? Number.POSITIVE_INFINITY;
+    if (candidateTime !== incumbentTime) return candidateTime < incumbentTime;
+    return candidate.id < incumbent.id;
+  }
+  const candidatePaused = candidate.pausedAt ?? "";
+  const incumbentPaused = incumbent.pausedAt ?? "";
+  if (candidatePaused !== incumbentPaused) return candidatePaused > incumbentPaused;
+  const candidateTime = candidate.time ?? Number.NEGATIVE_INFINITY;
+  const incumbentTime = incumbent.time ?? Number.NEGATIVE_INFINITY;
+  if (candidateTime !== incumbentTime) return candidateTime > incumbentTime;
+  return candidate.id < incumbent.id;
+}
+
+/**
+ * Issue #5890 — collapse a schedule list to one row per job.
+ * Groups by `scheduleJobKeyOf` and keeps one winner per key; rows
+ * keep the position of their key's first appearance, so a list
+ * with no duplicates is byte-identical in order. Pure and total:
+ * a list of distinct jobs passes through unchanged.
+ */
+export function collapseScheduleListItems<
+  T extends ReturnType<typeof unifiedRecordToListItem>,
+>(items: readonly T[]): T[] {
+  const winners = new Map<string, { firstIndex: number; item: T }>();
+  items.forEach((item, index) => {
+    const key = scheduleJobKeyOf(item);
+    const existing = winners.get(key);
+    if (!existing) {
+      winners.set(key, { firstIndex: index, item });
+      return;
+    }
+    if (collapseWinsOver(item, existing.item, canonicalIdOfJobKey(key))) {
+      winners.set(key, { firstIndex: existing.firstIndex, item });
+    }
+  });
+  return [...winners.values()]
+    .sort((a, b) => a.firstIndex - b.firstIndex)
+    .map((entry) => entry.item);
+}
+
+/** The shapes the arm-time helpers read (an alarm row, SDK or port). */
+export interface DeclaredTaskAlarmInput {
+  id: string;
+  callback?: unknown;
+  payload?: unknown;
+  time?: unknown;
+}
+
+/**
+ * Issue #5890 — the superseded declared-task occurrence alarms to
+ * cancel: every alarm past the first for one (taskId, scheduledFor)
+ * group. Two reconciles that both find `schedule_id` missing arm
+ * the same occurrence twice (the Agents SDK mints a fresh id per
+ * arming; `idempotent: true` does not dedupe by payload), so the
+ * same occurrence can hold two SDK ids. Keeps the most recently
+ * armed (last in list order — the SDK lists in arming order, and
+ * Think's last reconcile tracked the last arm it wrote). Cancelling
+ * the tracked one is still safe: the next reconcile re-arms exactly
+ * one, so a wrong guess converges instead of accumulating.
+ */
+export function supersededDeclaredTaskAlarmIds(
+  alarms: readonly DeclaredTaskAlarmInput[],
+): string[] {
+  const groups = new Map<string, string[]>();
+  for (const alarm of alarms) {
+    const taskId = declaredTaskIdOf(alarm);
+    if (!taskId) continue;
+    const payload =
+      alarm.payload && typeof alarm.payload === "object"
+        ? (alarm.payload as { scheduledFor?: unknown })
+        : undefined;
+    const scheduledFor =
+      typeof payload?.scheduledFor === "number"
+        ? payload.scheduledFor
+        : typeof alarm.time === "number"
+          ? alarm.time
+          : null;
+    const key = `${taskId}:${scheduledFor === null ? "none" : scheduledFor}`;
+    const group = groups.get(key) ?? [];
+    group.push(alarm.id);
+    groups.set(key, group);
+  }
+  const superseded: string[] = [];
+  for (const ids of groups.values()) {
+    if (ids.length < 2) continue;
+    superseded.push(...ids.slice(0, -1));
+  }
+  return superseded.sort();
+}
+
+/** The shapes the ensure-guard plan reads (an alarm row, SDK or port). */
+export interface GuardAlarmInput {
+  id: string;
+  callback?: unknown;
+  payload?: unknown;
+}
+
+/**
+ * Issue #5890 — one ensure-guard's decision for a duty callback:
+ * arm only when no matching alarm exists; when matches exist, do
+ * not arm, and cancel every match past the first (a superseded arm
+ * from an earlier guard run, e.g. one that armed while the list
+ * failed). The caller owns the list failure: a failed list must
+ * never reach this function as an empty list, or the guard arms
+ * blind and mints a second alarm for the same callback.
+ */
+export function planGuardAlarm(
+  alarms: readonly GuardAlarmInput[],
+  callback: string,
+  payloadMatches: (payload: unknown) => boolean,
+): { arm: boolean; cancelIds: string[] } {
+  const matching = alarms.filter(
+    (alarm) => alarm.callback === callback && payloadMatches(alarm.payload),
+  );
+  if (matching.length === 0) return { arm: true, cancelIds: [] };
+  return { arm: false, cancelIds: matching.slice(1).map((alarm) => alarm.id) };
+}
+
+/* =================================================================
  * The merged list: live SDK alarms joined to their records, plus
  * paused records. A record's id is the list id; a legacy alarm
  * with no record keeps its SDK id until it is touched (adoption).
@@ -1181,6 +1662,10 @@ export async function listUnifiedScheduleItems(
         alarm.type === "delayed"
           ? alarm.type
           : undefined;
+      // Issue #5889 — a legacy alarm with no record carries its
+      // source too, derived from the alarm alone (its payload's
+      // stamp, if any); a row with no provenance reads Unknown.
+      const alarmProvenance = provenanceFromPayload(alarm.payload);
       items.push({
         id: alarm.id,
         kind: "screen",
@@ -1198,6 +1683,12 @@ export async function listUnifiedScheduleItems(
         ...(typeof def.time === "number" ? { time: def.time } : {}),
         paused: false,
         ...(alarm.nextRun !== undefined ? { nextRun: alarm.nextRun } : {}),
+        ...(alarmProvenance !== undefined ? { provenance: alarmProvenance } : {}),
+        source: resolveScheduleSource({
+          id: alarm.id,
+          callback: alarm.callback,
+          payload: alarm.payload,
+        }),
       });
     }
   }
@@ -1209,7 +1700,11 @@ export async function listUnifiedScheduleItems(
     const item = unifiedRecordToListItem(record);
     if (!typeParam || item.type === typeParam) items.push(item);
   }
-  return items;
+  // Issue #5890 — one row per job: the same taskId / derived duty
+  // rendered as several rows (duplicate arms, stale per-alarm paused
+  // records) collapses to its winner here, so every reader of this
+  // list sees the one row.
+  return collapseScheduleListItems(items);
 }
 
 /* =================================================================
@@ -1358,30 +1853,81 @@ export async function pauseUnifiedSchedule(
     if (!isManagedAlarmKind(existing.kind)) {
       return fail(`Schedule kind '${existing.kind}' cannot be paused.`, 400);
     }
-    if (existing.state === "paused") return { ok: true, record: existing };
   }
   const alarm = await deps.alarms.get(existing?.alarmId ?? id);
-  if (!alarm) {
+  if (!alarm && !existing) {
     return fail(`Schedule '${id}' not found`, 404);
   }
   // Issue #4351 — a code-declared task is identified by its TASK id (the id
   // `getScheduledTasks()` declares it under), not by the SDK's alarm id: the
   // declaration filter reads the record by task id, so pausing has to store it
   // there. A user-created schedule keeps the id the caller addressed.
-  const declaredTaskId = declaredTaskIdOf(alarm);
+  // Issue #5890 — the task id is read from the RECORD first: a stale row's
+  // alarm is already gone, so the alarm alone cannot name the task, and
+  // pausing that row stored a separate record under the SDK alarm id.
+  const declaredTaskId = declaredTaskIdOf(existing) ?? declaredTaskIdOf(alarm);
   const recordId = declaredTaskId ?? id;
-  const record: UnifiedScheduleRecord = existing
-    ? { ...existing, state: "paused", pausedAt: nowIso, alarmId: alarm.id, updatedAt: nowIso }
-    : {
-        ...(isStageAlarmPayload(alarm.payload)
-          ? workflowStageScheduleToRecord(alarm, nowIso)
-          : screenScheduleToRecord(alarm, nowIso)),
-        id: recordId,
-        state: "paused",
-        pausedAt: nowIso,
-      };
+  // Issue #5890 — a declared task's occurrences are one job: pausing
+  // cancels EVERY live alarm for the task, not just the addressed one,
+  // so no superseded occurrence is left listed (or firing into the
+  // handler's early return). Runs before the already-paused return
+  // too, so a re-pause still clears strays the duplicate-arming race
+  // left behind.
+  const cancelSupersededTaskAlarms = async (): Promise<void> => {
+    if (!declaredTaskId) return;
+    const live = await deps.alarms.list();
+    for (const other of live) {
+      if (other.id === alarm?.id) continue;
+      if (declaredTaskIdOf(other) === declaredTaskId) {
+        await deps.alarms.cancel(other.id);
+      }
+    }
+  };
+  if (existing && existing.state === "paused" && existing.id === recordId) {
+    await cancelSupersededTaskAlarms();
+    return { ok: true, record: existing };
+  }
+  let record: UnifiedScheduleRecord;
+  if (existing) {
+    // Issue #5890 — the merge: an existing record under a per-alarm id
+    // is re-keyed to the task id instead of kept as a second row. (The
+    // pre-#5890 spread kept `existing.id`, so pausing a row whose
+    // record already lived under the alarm id never collapsed it.)
+    record = {
+      ...existing,
+      id: recordId,
+      state: "paused",
+      pausedAt: nowIso,
+      alarmId: alarm?.id ?? existing.alarmId,
+      updatedAt: nowIso,
+    };
+  } else if (alarm) {
+    record = {
+      ...(isStageAlarmPayload(alarm.payload)
+        ? workflowStageScheduleToRecord(alarm, nowIso)
+        : screenScheduleToRecord(alarm, nowIso)),
+      id: recordId,
+      state: "paused",
+      pausedAt: nowIso,
+    };
+  } else {
+    // Unreachable: the 404 above fires when both are missing.
+    return fail(`Schedule '${id}' not found`, 404);
+  }
   await deps.store.save(record);
-  await deps.alarms.cancel(alarm.id);
+  // Issue #5890 — merge: every other stored record for this declared
+  // task (a legacy per-alarm record, from a pause before #4351 keyed
+  // it by task id) folds into the one record under the task id.
+  if (declaredTaskId) {
+    const stored = await deps.store.list();
+    for (const other of stored) {
+      if (other.id !== recordId && declaredTaskIdOf(other) === declaredTaskId) {
+        await deps.store.remove(other.id);
+      }
+    }
+  }
+  if (alarm) await deps.alarms.cancel(alarm.id);
+  await cancelSupersededTaskAlarms();
   return { ok: true, record };
 }
 
@@ -1416,13 +1962,26 @@ export async function resumeUnifiedSchedule(
   // declaration, which arms it again (Think's reconcile is the supported hook
   // for "app-owned data getScheduledTasks() reads").
   if (declaredTaskIdOf(record)) {
+    const taskId = declaredTaskIdOf(record) as string;
     const resumed: UnifiedScheduleRecord = {
       ...record,
+      id: taskId,
       state: "active",
       pausedAt: null,
       updatedAt: nowIso,
     };
     await deps.store.save(resumed);
+    // Issue #5890 — merge: a resume addressed by a stale per-alarm id
+    // moves the record under the task id, and every other stored
+    // record for the same task folds into it, so the one row the list
+    // shows is the one the declaration reads.
+    if (record.id !== taskId) await deps.store.remove(record.id);
+    const stored = await deps.store.list();
+    for (const other of stored) {
+      if (other.id !== taskId && declaredTaskIdOf(other) === taskId) {
+        await deps.store.remove(other.id);
+      }
+    }
     await deps.reconcileDeclared?.();
     return { ok: true, record: resumed, previousId: id };
   }
@@ -1447,23 +2006,44 @@ export async function resumeUnifiedSchedule(
   return { ok: true, record: resumed, alarm, previousId: id };
 }
 
+/**
+ * Issue #5891 — the result of a delete: either the row is gone
+ * (`cancelled: true`) or the delete is refused with the named
+ * error, like pause / resume / trigger / update refuse. There is
+ * no silent `{ok: true, cancelled: false}` any more: that shape
+ * told the UI the delete had succeeded while the row stayed.
+ */
+export type DeleteUnifiedScheduleResult =
+  | { ok: true; cancelled: boolean }
+  | { ok: false; error: string; status: number };
+
 export async function deleteUnifiedSchedule(
   deps: UnifiedManagementDeps,
   id: string,
-): Promise<{ ok: true; cancelled: boolean }> {
-  // Issue #4239 — a derived record is a no-op delete (#4237 precedent).
-  if (isDerivedTokenRenewalRecord(id)) return { ok: true, cancelled: false };
-  // Issue #4240 — a derived record is a no-op delete (#4237 precedent).
-  if (isDerivedRetentionRecord(id)) return { ok: true, cancelled: false };
-  // Issue #4241 — a derived record is a no-op delete (#4237 precedent).
-  if (isDerivedNightlyResearchRecord(id)) return { ok: true, cancelled: false };
-  // Issue #4242 — derived records are no-op deletes (#4237 precedent).
-  if (isDerivedStaleLedgerSweepRecord(id)) return { ok: true, cancelled: false };
-  if (isDerivedStaleAsyncJobSweepRecord(id)) return { ok: true, cancelled: false };
-  if (isDerivedScheduleWatchdogRecord(id)) return { ok: true, cancelled: false };
+): Promise<DeleteUnifiedScheduleResult> {
+  // Issue #5891 — a derived record refuses delete with a named
+  // error, like pause / resume / trigger / update refuse it
+  // (#4239–#4242). The #4237 no-op precedent is retired: it told
+  // the UI the delete had succeeded while the row re-derived on
+  // every list.
+  if (isDerivedTokenRenewalRecord(id)) return derivedTokenRenewalError("delete");
+  // Issue #5891 — a derived record refuses delete (see above).
+  if (isDerivedRetentionRecord(id)) return derivedRetentionError("delete");
+  // Issue #5891 — a derived record refuses delete (see above).
+  if (isDerivedNightlyResearchRecord(id)) return derivedNightlyResearchError("delete");
+  // Issue #5891 — derived records refuse delete (see above).
+  if (isDerivedStaleLedgerSweepRecord(id)) return derivedStaleLedgerSweepError("delete");
+  if (isDerivedStaleAsyncJobSweepRecord(id)) return derivedStaleAsyncJobSweepError("delete");
+  if (isDerivedScheduleWatchdogRecord(id)) return derivedScheduleWatchdogError("delete");
   const record = await deps.store.get(id);
-  if (record && !isManagedAlarmKind(record.kind)) {
-    return { ok: true, cancelled: false };
+  if (record) {
+    // Issue #5891 — a goal deletes through the goals surface, and
+    // any other non-managed kind names itself, like trigger refuses
+    // it — never a silent no-op.
+    if (record.kind === "goal") return goalSurfaceError("delete");
+    if (!isManagedAlarmKind(record.kind)) {
+      return fail(`Schedule kind '${record.kind}' cannot be deleted.`, 400);
+    }
   }
   const alarm = record ? undefined : await deps.alarms.get(id);
   const alarmId = record?.alarmId ?? id;
@@ -1488,7 +2068,13 @@ export async function deleteUnifiedSchedule(
   }
   let recordRemoved = false;
   if (record) recordRemoved = await deps.store.remove(id);
-  return { ok: true, cancelled: alarmCancelled || recordRemoved };
+  // Issue #5891 — nothing was there to delete: a 404 names the
+  // id instead of the silent `{ok: true, cancelled: false}` the
+  // route used to answer 200 with.
+  if (!alarmCancelled && !recordRemoved) {
+    return fail(`Schedule '${id}' not found`, 404);
+  }
+  return { ok: true, cancelled: true };
 }
 
 /**

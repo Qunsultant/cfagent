@@ -11,13 +11,15 @@ import { planScheduledScreen } from "../src/workflows/stockScreenPlanner";
 const TS = "2026-11-02T13:00:00.000Z";
 
 describe("planScheduledScreen", () => {
-  it("defaults trigger to scheduled, universe to TECH, sector to ALL", () => {
+  it("defaults trigger to scheduled, universe to the externalized default, sector to ALL", () => {
+    // Issue #5516: the absent-selection universe is the externalized default
+    // (config/vocabulary.json → universe), never the TECH sector.
     const plan = planScheduledScreen({ provider: "etrade" }, TS);
     expect(plan.sector).toBe("ALL");
-    expect(plan.universe).toBe("TECH");
+    expect(plan.universe).toBe("NASDAQ100");
     expect(plan.provider).toBe("etrade");
     expect(plan.yahooDataMode).toBeUndefined();
-    expect(plan.idempotencyKey).toBe("screener:scheduled:TECH:ALL:2026-11-02T13:00");
+    expect(plan.idempotencyKey).toBe("screener:scheduled:NASDAQ100:ALL:2026-11-02T13:00");
   });
 
   it("refuses a missing provider with FAILURE_NO_SCREENING_PROVIDER (#4431)", () => {

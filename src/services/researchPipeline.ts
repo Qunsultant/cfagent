@@ -43,6 +43,7 @@ import type {
 } from "./researchFalsification";
 import { buildFalsification, buildPremortem } from "./researchFalsification";
 import { newRunId as mintRunId, oodaStepShortId } from "./executionTreeIds";
+import { maskAccountId } from "../config/accountBindings";
 
 export type TriggerSource = "manual" | "scheduled";
 
@@ -84,6 +85,10 @@ export interface ChainSnapshot {
   underlyingPrice: number;
   asOf: number;
   provenance: ChainProvenance;
+  /** Selected broker or feed identity, when the provider can record it. */
+  source?: string;
+  /** Safe, actionable chain retrieval details when the provider could not supply a usable chain. */
+  failureReason?: string;
   expiries: ProviderChainExpiry[];
 }
 
@@ -178,6 +183,7 @@ export interface RunStats {
   quotesRetrieved: number;
   candidatesEvaluated: number;
   chainsFetched: number;
+  chainsAttempted?: number;
   chainsCalibrated: number;
   qualified: number;
   watchlist: number;
@@ -185,6 +191,43 @@ export interface RunStats {
   unverified: number;
   oodaIterations: number;
   durationMs: number;
+}
+
+export type ResearchSymbolOutcome =
+  | "not_screened"
+  | "not_evaluated"
+  | "quote_unavailable"
+  | "filtered"
+  | "thesis_rejected"
+  | "chain_failed"
+  | "evaluated";
+
+export interface ResearchStrategyEvaluation {
+  strategy: string;
+  outcome: "build_unavailable" | "rejected" | "unverified" | "watchlist" | "qualified";
+  gate?: string;
+  reason?: string;
+  legs?: ResearchLeg[];
+}
+
+/** One durable account of what happened to each symbol considered by OODA. */
+export interface ResearchSymbolEvaluation {
+  symbol: string;
+  outcome: ResearchSymbolOutcome;
+  reason?: string;
+  quote?: Pick<QuoteSnapshot, "price" | "timestamp" | "quoteStatus" | "source" | "marketCap" | "isEtf">;
+  chain?: {
+    outcome: "retrieved" | "failed";
+    source: string;
+    provenance?: ChainProvenance;
+    asOf?: number;
+    expiryCount?: number;
+    legCount?: number;
+    failureReason?: string;
+  };
+  outlook?: Outlook;
+  strategies: ResearchStrategyEvaluation[];
+  selectedStrategy?: string;
 }
 
 export interface OodaStep {
@@ -252,6 +295,11 @@ export interface ResearchReport {
    */
   brokerId?: string;
   mode?: string;
+  /** Read-only instrument selection resolved for this run, when recorded. */
+  assetType?: string;
+  accountType?: string;
+  /** Safe masked identifier only; credentials are never report fields. */
+  accountId?: string;
   /** Amendment 1: the effective filter/config snapshot this run used. */
   configSnapshot: ResearchConfig;
   regime: RegimeAssessment;
@@ -259,6 +307,8 @@ export interface ResearchReport {
   ideas: TradeCard[];
   watchlist: WatchlistEntry[];
   rejected: RejectedEntry[];
+  /** Complete universe ledger, including budget/filter/quote/chain outcomes. */
+  symbolEvaluations?: ResearchSymbolEvaluation[];
   stats: RunStats;
   oodaTrace: OodaStep[];
   /** Issue #774: pipeline stage trace — the 8 stages from the design doc. */
@@ -277,6 +327,9 @@ export interface ResearchRunOptions {
   /** Issue #5912 — the venue/mode this run quoted from (recorded, not inferred). */
   brokerId?: string;
   mode?: string;
+  assetType?: string;
+  accountType?: string;
+  accountId?: string;
   runId?: string;
   now?: number;
 }
@@ -744,6 +797,7 @@ export async function runResearchPipeline(
     stageTrace.push({ stage: s, detail, at: new Date().toISOString() });
 
   const rejected: RejectedEntry[] = [];
+  const symbolEvaluations: ResearchSymbolEvaluation[] = [];
   const watchlist: WatchlistEntry[] = [];
   const qualified: TradeCard[] = [];
   let unverified = 0;
@@ -752,6 +806,7 @@ export async function runResearchPipeline(
     quotesRetrieved: 0,
     candidatesEvaluated: 0,
     chainsFetched: 0,
+    chainsAttempted: 0,
     chainsCalibrated: 0,
     qualified: 0,
     watchlist: 0,
@@ -788,6 +843,7 @@ export async function runResearchPipeline(
     // Fail closed: no universe, no ideas — still publish the report honestly.
     return finishReport({
       runId, config, opts, now, started, trace, stageTrace, regime,
+      symbolEvaluations,
       ideas: [], watchlist, rejected: [{
         symbol: "*", outlook: "unknown", structure: "-",
         gate: "data_integrity",
@@ -797,20 +853,43 @@ export async function runResearchPipeline(
     });
   }
   stats.universeSize = symbols.length;
+  const screened = symbols.slice(0, config.maxCandidates * 3);
+  const screenedSet = new Set(screened);
+  for (const symbol of symbols) {
+    symbolEvaluations.push({
+      symbol,
+      outcome: screenedSet.has(symbol) ? "not_evaluated" : "not_screened",
+      reason: screenedSet.has(symbol)
+        ? "Awaiting evaluation within the configured screening budget."
+        : `Outside the configured screening budget of ${config.maxCandidates * 3} symbols.`,
+      strategies: [],
+    });
+  }
+  const evaluationBySymbol = new Map(symbolEvaluations.map((evaluation) => [evaluation.symbol, evaluation]));
   step("observe", `Universe ${config.universe}: ${symbols.length} symbols.`);
 
   let iterations = 0;
-  const screened = symbols.slice(0, config.maxCandidates * 3);
-
+  let chainAttempts = 0;
   for (const symbol of screened) {
     // OODA budget: stop when the next action has no clear purpose.
     if (iterations >= config.oodaMaxIterations) {
       step("decide", "OODA budget exhausted — stopping candidate evaluation.");
+      for (const remaining of screened.slice(iterations)) {
+        const evaluation = evaluationBySymbol.get(remaining);
+        if (evaluation?.outcome === "not_evaluated") evaluation.reason = "Not evaluated because the configured OODA iteration budget was exhausted.";
+      }
       break;
     }
-    if (qualified.length >= config.maxIdeas && watchlist.length >= config.maxIdeas) break;
+    if (qualified.length >= config.maxIdeas && watchlist.length >= config.maxIdeas) {
+      for (const remaining of screened.slice(iterations)) {
+        const evaluation = evaluationBySymbol.get(remaining);
+        if (evaluation?.outcome === "not_evaluated") evaluation.reason = "Not evaluated because the configured idea and watchlist limits were reached.";
+      }
+      break;
+    }
     iterations++;
     stats.oodaIterations = iterations;
+    const symbolEvaluation = evaluationBySymbol.get(symbol)!;
 
     // OBSERVE — quote.
     let quote: QuoteSnapshot | null = null;
@@ -820,17 +899,37 @@ export async function runResearchPipeline(
       quote = null;
     }
     if (!quote) {
+      symbolEvaluation.outcome = "quote_unavailable";
+      symbolEvaluation.reason = "No quote was returned by the configured quote source.";
       rejected.push({ symbol, outlook: "unknown", structure: "-", gate: "data_integrity", reason: "No quote retrieved." });
       continue;
     }
     stats.quotesRetrieved++;
+    symbolEvaluation.quote = {
+      price: quote.price,
+      timestamp: quote.timestamp,
+      quoteStatus: quote.quoteStatus,
+      source: quote.source,
+      marketCap: quote.marketCap,
+      isEtf: quote.isEtf,
+    };
 
     // ORIENT — initial filters (from config, never hardcoded).
-    if (quote.isEtf && !config.etfsIncluded) continue;
+    if (quote.isEtf && !config.etfsIncluded) {
+      symbolEvaluation.outcome = "filtered";
+      symbolEvaluation.reason = "ETF excluded by the effective run configuration.";
+      continue;
+    }
     if (!quote.isEtf && quote.marketCap != null && quote.marketCap < config.marketCapMin) {
+      symbolEvaluation.outcome = "filtered";
+      symbolEvaluation.reason = "Market capitalization is below the configured minimum.";
       continue; // Spec initial filter; not a "rejection" — just screened out.
     }
-    if (config.priceCap !== null && quote.price > config.priceCap) continue;
+    if (config.priceCap !== null && quote.price > config.priceCap) {
+      symbolEvaluation.outcome = "filtered";
+      symbolEvaluation.reason = "Quote price is above the configured price cap.";
+      continue;
+    }
 
     // OBSERVE — technicals + catalysts.
     const [technicals, catalysts] = await Promise.all([
@@ -842,25 +941,68 @@ export async function runResearchPipeline(
     const draft = draftThesis(symbol, technicals, catalysts, regime);
     step("orient", `${symbol}: outlook ${draft.outlook}.`);
     if (draft.outlook === "unknown") {
+      symbolEvaluation.outcome = "thesis_rejected";
+      symbolEvaluation.outlook = draft.outlook;
+      symbolEvaluation.reason = draft.thesis;
       rejected.push({ symbol, outlook: draft.outlook, structure: "-", gate: "thesis_coherence", reason: draft.thesis });
       continue;
     }
 
     // DECIDE — investigate (chain) or skip.
+    if (chainAttempts >= config.maxChainsPerRun) {
+      symbolEvaluation.reason = "Option chain was not requested because the configured chain budget was reached.";
+      step("decide", "Chain budget exhausted — stopping.");
+      for (const remaining of screened.slice(iterations)) {
+        const evaluation = evaluationBySymbol.get(remaining);
+        if (evaluation?.outcome === "not_evaluated") evaluation.reason = "Not evaluated because the configured option-chain budget was exhausted.";
+      }
+      break;
+    }
+    chainAttempts++;
+    stats.chainsAttempted = chainAttempts;
     let chain: ChainSnapshot;
     try {
       chain = await deps.provider.getChain(symbol);
-      stats.chainsFetched++;
-      if (stats.chainsFetched > config.maxChainsPerRun) {
-        step("decide", "Chain budget exhausted — stopping.");
-        break;
+      if (chain.provenance === "unavailable" || chain.expiries.length === 0) {
+        symbolEvaluation.outcome = "chain_failed";
+        symbolEvaluation.outlook = draft.outlook;
+        symbolEvaluation.reason = chain.failureReason ?? "Option chain source returned no expirations or contracts.";
+        symbolEvaluation.chain = {
+          outcome: "failed",
+          source: chain.source ?? "not recorded",
+          provenance: chain.provenance,
+          asOf: chain.asOf,
+          expiryCount: chain.expiries.length,
+          legCount: chain.expiries.reduce((count, expiry) => count + expiry.legs.length, 0),
+          ...(chain.failureReason ? { failureReason: chain.failureReason } : {}),
+        };
+        rejected.push({ symbol, outlook: draft.outlook, structure: "-", gate: "quote_quality", reason: symbolEvaluation.reason });
+        continue;
       }
+      stats.chainsFetched++;
       if (chain.provenance === "calibrated") stats.chainsCalibrated++;
-    } catch {
-      rejected.push({ symbol, outlook: draft.outlook, structure: "-", gate: "quote_quality", reason: "Chain retrieval failed." });
+    } catch (error) {
+      symbolEvaluation.outcome = "chain_failed";
+      symbolEvaluation.outlook = draft.outlook;
+      const reason = error instanceof Error ? error.message : String(error);
+      symbolEvaluation.reason = reason;
+      symbolEvaluation.chain = { outcome: "failed", source: quote.source, failureReason: reason };
+      rejected.push({ symbol, outlook: draft.outlook, structure: "-", gate: "quote_quality", reason });
       continue;
     }
     stats.candidatesEvaluated++;
+    symbolEvaluation.outcome = "evaluated";
+    symbolEvaluation.outlook = draft.outlook;
+    symbolEvaluation.reason = "Option chain retrieved; configured strategy structures evaluated.";
+    symbolEvaluation.chain = {
+      outcome: "retrieved",
+      source: chain.source ?? "not recorded",
+      provenance: chain.provenance,
+      asOf: chain.asOf,
+      expiryCount: chain.expiries.length,
+      legCount: chain.expiries.reduce((count, expiry) => count + expiry.legs.length, 0),
+      ...(chain.failureReason ? { failureReason: chain.failureReason } : {}),
+    };
 
     // BUILD-AND-PRICE — construct candidate structures per the §6 table; keep the best
     // gated one. Alternatives are evaluated, not just the richest premium.
@@ -899,8 +1041,14 @@ export async function runResearchPipeline(
         built = null;
       }
       if (!built) {
+        const missingIv = missingIvForStructure(name, chain, quote.price, config);
+        symbolEvaluation.strategies.push({
+          strategy: name,
+          outcome: "build_unavailable",
+          reason: missingIv ? "Required chain IV is missing; no assumed IV was used." : "The available chain could not build this structure.",
+        });
         // #926: a missing-IV build is a counted exclusion, not a silent skip.
-        if (missingIvForStructure(name, chain, quote.price, config)) {
+        if (missingIv) {
           rejected.push({
             symbol, outlook: draft.outlook, structure: name,
             gate: "missing-iv",
@@ -959,14 +1107,18 @@ export async function runResearchPipeline(
 
       const outcome = runStageGates(gateCandidate, { config, now });
       if (outcome.status === "rejected") {
+        const gate = outcome.gateResults.find((g) => !g.passed)?.gate ?? "unknown";
+        const reason = outcome.rejectionReason ?? "Rejected.";
+        symbolEvaluation.strategies.push({ strategy: name, outcome: "rejected", gate, reason, legs: built.legs });
         rejected.push({
           symbol, outlook: draft.outlook, structure: name,
-          gate: outcome.gateResults.find((g) => !g.passed)?.gate ?? "unknown",
-          reason: outcome.rejectionReason ?? "Rejected.",
+          gate,
+          reason,
         });
         continue;
       }
       if (outcome.status === "unverified") {
+        symbolEvaluation.strategies.push({ strategy: name, outcome: "unverified", reason: "Required evidence was unavailable for a verified gate result.", legs: built.legs });
         unverified++;
         continue;
       }
@@ -1043,6 +1195,7 @@ export async function runResearchPipeline(
       };
 
       if (outcome.status === "watchlist") {
+        symbolEvaluation.strategies.push({ strategy: name, outcome: "watchlist", reason: outcome.rejectionReason ?? "Watchlist.", legs: built.legs });
         watchlist.push({
           symbol,
           outlook: draft.outlook,
@@ -1053,12 +1206,15 @@ export async function runResearchPipeline(
         });
         continue;
       }
+      symbolEvaluation.strategies.push({ strategy: name, outcome: "qualified", legs: built.legs });
       if (!bestCard || card.score > bestCard.score) bestCard = card;
       step("act", `${symbol} ${name}: gated ${outcome.status}, score ${card.score}.`);
     }
     stage("challenge-and-gate", `${symbol}: ${bestCard ? `qualified ${bestCard.structure}` : "no qualifying structure"}.`);
 
     if (bestCard) {
+      symbolEvaluation.selectedStrategy = bestCard.structure;
+      symbolEvaluation.reason = `Selected ${bestCard.structure} as the highest scoring qualified structure for this symbol.`;
       qualified.push(bestCard);
       step("decide", `${symbol}: shortlisted ${bestCard.structure}.`);
     }
@@ -1092,6 +1248,7 @@ export async function runResearchPipeline(
 
   return finishReport({
     runId, config, opts, now, started, trace, stageTrace, regime,
+    symbolEvaluations,
     ideas, watchlist, rejected, stats, summary,
     ...(dataRefusal ? { dataRefusal } : {}),
   });
@@ -1105,6 +1262,7 @@ function finishReport(args: {
   started: number;
   trace: OodaStep[];
   stageTrace: PipelineStageStep[];
+  symbolEvaluations: ResearchSymbolEvaluation[];
   regime: RegimeAssessment;
   ideas: TradeCard[];
   watchlist: WatchlistEntry[];
@@ -1113,7 +1271,7 @@ function finishReport(args: {
   summary: string;
   dataRefusal?: { code: "research_data_unavailable"; message: string };
 }): ResearchReport {
-  const { runId, config, opts, now, started, trace, stageTrace, regime, ideas, watchlist, rejected, stats, summary } = args;
+  const { runId, config, opts, now, started, trace, stageTrace, regime, ideas, watchlist, rejected, stats, summary, symbolEvaluations } = args;
   stats.durationMs = Date.now() - started;
   return {
     runId,
@@ -1126,6 +1284,9 @@ function finishReport(args: {
     // Issue #5912 — the venue/mode this run used, recorded once here.
     ...(opts.brokerId ? { brokerId: opts.brokerId } : {}),
     ...(opts.mode ? { mode: opts.mode } : {}),
+    assetType: opts.assetType ?? "options",
+    ...(opts.accountType ? { accountType: opts.accountType } : {}),
+    ...(opts.accountId ? { accountId: maskAccountId(opts.accountId) } : {}),
     // Amendment 1: the effective filter/config snapshot this run used.
     configSnapshot: JSON.parse(JSON.stringify(config)) as ResearchConfig,
     regime,
@@ -1133,6 +1294,7 @@ function finishReport(args: {
     ideas,
     watchlist,
     rejected,
+    symbolEvaluations,
     stats,
     oodaTrace: trace,
     stageTrace,

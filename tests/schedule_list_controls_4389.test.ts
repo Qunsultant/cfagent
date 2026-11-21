@@ -110,10 +110,13 @@ describe("4389-P03 the one ordering rule", () => {
 
 describe("4389-P04 Status is its own column", () => {
   it("comes from the shared vocabulary and renders a badge", () => {
+    // Issue #5889 — the list gained its own Source column, right after
+    // the identity columns; Status keeps its own column after it.
     expect(resolveScheduleRowColumns("list")).toEqual([
       "schedule",
       "id",
       "cadence",
+      "source",
       "status",
       "scope",
       "actions",

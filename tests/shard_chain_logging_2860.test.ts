@@ -109,7 +109,9 @@ describe("sharded-chain logging / classification (#2860)", () => {
     const started = logEvents().filter((e) => e.event === "screen.started");
     expect(started).toHaveLength(1);
     expect(started[0].trigger).toBe("scheduled");
-    expect(started[0].universe).toBe("TECH");
+    // Issue #5516: an unselected sharded market screen plans the externalized
+    // universe default (config/vocabulary.json → nasdaq100).
+    expect(started[0].universe).toBe("NASDAQ100");
     expect(started[0].actorId).toBe("test_trader");
     expect(typeof started[0].traceId).toBe("string");
   });

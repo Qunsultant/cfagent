@@ -11,9 +11,10 @@
  * the run into `fan-out-batch-*` steps — it is carried on the
  * command and validated, and every shard runs exactly once
  * regardless of the cap. What this file pins now is the seam
- * itself: the six screener stages (feed/gather/analysis/store/
- * serve/deliver) run in order per unit, the stage ledger records
- * each stage (readable via the collation's stageTransitions and
+ * itself: the five screener nodes (feed/gather/analysis/
+ * analysis/deliver — generate maps to analysis) run in
+ * order per unit, the stage ledger records each node
+ * (readable via the collation's stageTransitions and
  * the shard rows), and a failure is attributed to its stage.
  */
 import { describe, expect, it } from "vitest";
@@ -29,8 +30,14 @@ import {
   type WorkflowJobCommand,
 } from "../src/workflows/workflowPorts";
 
-/** The six engine stages, in the order they run per unit. */
-const SIX_STAGES = ["feed", "gather", "analysis", "store", "serve", "deliver"];
+/**
+ * The five engine nodes, in the order they run per unit.
+ * #5884: the flip re-points the screener spec onto the five
+ * generic nodes — store/serve leave the chain and generate
+ * maps to the analysis vocabulary stage, so the collation
+ * carries two analysis entries per unit.
+ */
+const FIVE_STAGES = ["feed", "gather", "analysis", "analysis", "deliver"];
 
 function okResult(overrides: Partial<ShardScreenResult> = {}): ShardScreenResult {
   return {
@@ -119,7 +126,7 @@ describe("seam C — workflow fan-out on the stage-runner contract (#2601)", () 
     // fan-out-batch-* steps — the engine owns fan-out now,
     // so this pins the intent behind the old batch plan:
     // all five shards run exactly once, each completes,
-    // and each unit's six stages are recorded in order.
+    // and each unit's five nodes are recorded in order.
     const b = makeDeps();
     const adapter = new InMemoryWorkflowAdapter(b.deps);
     const h = await adapter.start(command(5, { maxParallelShards: 2 }));
@@ -130,10 +137,10 @@ describe("seam C — workflow fan-out on the stage-runner contract (#2601)", () 
     expect((collation.shards as { status: string }[]).every((s) => s.status === "completed")).toBe(true);
     expect((collation.shards as unknown[])).toHaveLength(5);
     const transitions = collation.stageTransitions as { stage: string; outcome: string }[];
-    expect(transitions).toHaveLength(5 * SIX_STAGES.length);
+    expect(transitions).toHaveLength(5 * FIVE_STAGES.length);
     for (let i = 0; i < 5; i++) {
-      expect(transitions.slice(i * 6, (i + 1) * 6).map((t) => t.stage)).toEqual(SIX_STAGES);
-      expect(transitions.slice(i * 6, (i + 1) * 6).every((t) => t.outcome === "completed")).toBe(true);
+      expect(transitions.slice(i * FIVE_STAGES.length, (i + 1) * FIVE_STAGES.length).map((t) => t.stage)).toEqual(FIVE_STAGES);
+      expect(transitions.slice(i * FIVE_STAGES.length, (i + 1) * FIVE_STAGES.length).every((t) => t.outcome === "completed")).toBe(true);
     }
     const rows = await b.store.listJobsForChain("tenant-1", "job-5");
     expect(rows.map((r) => r.jobKey).sort()).toEqual(
@@ -177,11 +184,11 @@ describe("seam C — workflow fan-out on the stage-runner contract (#2601)", () 
     );
   });
 
-  it("six stages run in order per unit, recorded in the collation's stage ledger", async () => {
+  it("five nodes run in order per unit, recorded in the collation's stage ledger", async () => {
     // The stage-runner seam itself, on the engine path:
-    // feed → gather → analysis → store → serve → deliver
-    // per unit, each completed, readable back from the
-    // parent canonical row the finalize stored.
+    // feed → gather → analysis → analysis (generate) →
+    // deliver per unit, each completed, readable back from
+    // the parent canonical row the finalize stored.
     const b = makeDeps();
     const adapter = new InMemoryWorkflowAdapter(b.deps);
     const h = await adapter.start(command(2));
@@ -190,8 +197,8 @@ describe("seam C — workflow fan-out on the stage-runner contract (#2601)", () 
     const collation = b.parentStored[0]?.collation;
     expect(collation.lifecycle).toBe("ReportGenerated");
     expect(collation.stageTransitions).toEqual([
-      ...SIX_STAGES.map((stage) => ({ stage, outcome: "completed", atMs: 1_000_000 })),
-      ...SIX_STAGES.map((stage) => ({ stage, outcome: "completed", atMs: 1_000_000 })),
+      ...FIVE_STAGES.map((stage) => ({ stage, outcome: "completed", atMs: 1_000_000 })),
+      ...FIVE_STAGES.map((stage) => ({ stage, outcome: "completed", atMs: 1_000_000 })),
     ]);
     // The same ledger is what the parent row carries.
     const readBack = await collationFor(b.store, "job-5");
@@ -200,12 +207,15 @@ describe("seam C — workflow fan-out on the stage-runner contract (#2601)", () 
 
   it("a failing screen is attributed to its stage (analysis) in the ledger and the failed legs", async () => {
     // #4192: a market failure throws at analysis — the unit
-    // fails fast, never stores or delivers, and the ledger
-    // names the stage: the failing shard records feed +
-    // gather completed and analysis failed, with no
-    // store/serve/deliver entries anywhere; the other shard
-    // never reaches analysis. The attempt record is the
-    // failed leg rows + the Failed collation.
+    // fails fast, never delivers, and the ledger names the
+    // stage: the failing shard records feed + gather
+    // completed and analysis failed twice (analyze and the
+    // generate node, which also maps to analysis, both
+    // record failed), with no deliver entry anywhere; the
+    // other shard never reaches analysis. The attempt record
+    // is the failed leg rows + the Failed collation.
+    // #5884: the failing step is the generic analyze.screener
+    // step, so the shard error names that step id.
     const b = makeDeps(async (req) => ({
       ...okResult({ success: false, error: "no quotes", universe: req.universe }),
       full: { marker: "full-failed" },
@@ -219,7 +229,7 @@ describe("seam C — workflow fan-out on the stage-runner contract (#2601)", () 
     const collation = b.parentStored[0]?.collation;
     expect(collation.lifecycle).toBe("Failed");
     expect(collation.shards[0]?.status).toBe("failed");
-    expect(collation.shards[0]?.error).toMatch(/screener\.analysis/);
+    expect(collation.shards[0]?.error).toMatch(/analyze\.screener/);
     expect(collation.shards[0]?.error).toMatch(/no quotes/);
     expect(collation.shards[1]?.status).toBe("failed");
     expect(collation.shards[1]?.error).toMatch(/never reached analysis/i);
@@ -227,6 +237,7 @@ describe("seam C — workflow fan-out on the stage-runner contract (#2601)", () 
     expect(transitions.map((t) => `${t.stage}:${t.outcome}`)).toEqual([
       "feed:completed",
       "gather:completed",
+      "analysis:failed",
       "analysis:failed",
       "feed:completed",
       "gather:completed",

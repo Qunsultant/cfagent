@@ -16,7 +16,8 @@
  * stored — there is no alarm to adopt and no steady-state alarm
  * exists (legacy alarms are removed by migrateLegacyScreenSchedules).
  * Management ops refuse with a coded error naming the derived
- * record (pause / resume / trigger / update); delete is a no-op.
+ * record (pause / resume / trigger / update / delete — #5891
+ * retired the delete no-op).
  * The manual trigger stays on its existing route
  * POST /api/schedules/trigger-renew.
  */
@@ -185,10 +186,16 @@ describe("4239 management refuses the derived record with coded errors", () => {
     }
   });
 
-  it("delete is a no-op for the derived record", async () => {
+  it("delete refuses the derived record with a named error (#5891)", async () => {
     const store = new InMemoryUnifiedScheduleStore();
     const deleted = await deleteUnifiedSchedule({ store, alarms }, "token-renewal");
-    expect(deleted).toEqual({ ok: true, cancelled: false });
+    expect(deleted.ok).toBe(false);
+    if (!deleted.ok) {
+      expect(deleted.status).toBe(400);
+      expect(deleted.error).toContain("token-renewal");
+      expect(deleted.error).toContain("derived record");
+      expect(deleted.error).not.toContain("Goal schedules");
+    }
   });
 });
 

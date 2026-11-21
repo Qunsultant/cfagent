@@ -6,7 +6,10 @@
  * and §10 AOP rule flags live here rather than as inline literals.
  */
 
+import { ACCOUNT_TYPES } from "./accountBindings";
+
 export type ResearchStorageMode = "durable" | "in-memory";
+export type ResearchAccountType = (typeof ACCOUNT_TYPES)[number];
 
 /** Issue #5916 — the six research stages, in execution order. */
 export const RESEARCH_STAGE_KINDS = [
@@ -92,6 +95,8 @@ export interface ResearchJobConfig {
   evaluationLookbackHours: number;
   /** Storage/processing adapter mode for `research:<runId>` (`durable` default, `in-memory` optional). */
   storageMode: ResearchStorageMode;
+  /** Account class whose tenant binding is recorded with OODA evidence. */
+  accountBindingType: ResearchAccountType;
 }
 
 export const DEFAULT_RESEARCH_JOB_CONFIG: Readonly<ResearchJobConfig> = {
@@ -102,6 +107,7 @@ export const DEFAULT_RESEARCH_JOB_CONFIG: Readonly<ResearchJobConfig> = {
   retryMaxAttempts: 2,
   evaluationLookbackHours: 24,
   storageMode: "durable",
+  accountBindingType: "options",
 };
 
 /** Programme §10 AOP invariants pinned for the research engine job. */
@@ -129,6 +135,10 @@ function parseBoundedInt(
 export function resolveResearchJobConfig(
   env?: Record<string, string | undefined>,
 ): ResearchJobConfig {
+  const accountBindingType = env?.RESEARCH_ACCOUNT_BINDING_TYPE ?? DEFAULT_RESEARCH_JOB_CONFIG.accountBindingType;
+  if (!(ACCOUNT_TYPES as readonly string[]).includes(accountBindingType)) {
+    throw new Error(`RESEARCH_ACCOUNT_BINDING_TYPE must be one of: ${ACCOUNT_TYPES.join(", ")}`);
+  }
   return {
     oodaBudgetMs: parseBoundedInt(
       env?.RESEARCH_OODA_BUDGET_MS,
@@ -170,6 +180,7 @@ export function resolveResearchJobConfig(
       env?.RESEARCH_STORAGE_MODE === "in-memory"
         ? "in-memory"
         : DEFAULT_RESEARCH_JOB_CONFIG.storageMode,
+    accountBindingType: accountBindingType as ResearchAccountType,
   };
 }
 

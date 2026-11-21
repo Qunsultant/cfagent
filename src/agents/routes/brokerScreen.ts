@@ -35,6 +35,7 @@ import {
   resolveUniverseSymbols,
   type StockScreenProvider,
 } from "../../trading";
+import { defaultUniverseId } from "../../config/defaultUniverse";
 import { resolveTenantBroker } from "../../services/tenantProviders";
 import { resolveBrokerEnvironmentFromSettings } from "./brokerEnvironment";
 import type { ScreenerAgent } from "../screener-agent";
@@ -120,7 +121,7 @@ export async function handleBrokerScreenRoutes(
   // screen — the run's membership, carried onto the shard.
   let universeListings: NasdaqStockListing[] | null = null;
   if (symbols.length === 0) {
-    const id = requestedUniverse ?? "NASDAQ100";
+    const id = requestedUniverse ?? defaultUniverseId();
     try {
       const resolved = await resolveUniverseSymbols(id, MAX_SCREEN_SYMBOLS);
       symbols.push(...resolved.symbols);

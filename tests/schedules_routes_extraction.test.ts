@@ -266,15 +266,20 @@ describe("schedules behavior (extraction #379)", () => {
     const cancelSchedule = vi.fn(async () => false);
     const ctx = baseCtx({ cancelSchedule: cancelSchedule as any });
     const res = await handleSchedulesRoutes(req("DELETE", "/schedules/sch-7"), urlOf("/schedules/sch-7"), "/schedules/sch-7", "s1", ctx);
-    expect((res as Response).status).toBe(200);
+    // Issue #5891 — nothing is there to delete (no record, alarm
+    // cancel false), so the route answers 404 naming the id, never
+    // the silent 200 + cancelled:false.
+    expect((res as Response).status).toBe(404);
     expect(cancelSchedule).toHaveBeenCalledWith("sch-7");
+    expect(await (res as Response).json()).toMatchObject({ error: expect.stringContaining("sch-7") });
     // With no body id and no path id, the original derivation falls back to
     // path.split("/schedules/")[1] - the literal "cancel" - so the 400
     // branch is not reachable through this route's own spellings (quirk
-    // of the original code, pinned as-is).
+    // of the original code, pinned as-is). The fallback id names
+    // nothing, so #5891 answers 404 for it too.
     cancelSchedule.mockClear();
     const noId = await handleSchedulesRoutes(req("POST", "/schedules/cancel", {}), urlOf("/schedules/cancel"), "/schedules/cancel", "s1", ctx);
-    expect((noId as Response).status).toBe(200);
+    expect((noId as Response).status).toBe(404);
     expect(cancelSchedule).toHaveBeenCalledWith("cancel");
   });
 

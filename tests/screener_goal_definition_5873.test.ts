@@ -19,8 +19,8 @@ import {
   jobRunRecorderFromStore,
 } from "../src/services/jobPipelineEngine";
 import { jobDefinitionSpec } from "../src/config/jobDefinitionCatalog";
+import { ANALYZE_SCREENER_STEP } from "../src/services/analyzePipelineJobs";
 import {
-  SCREENER_ANALYSIS_STEP,
   buildScreenerJobDefinition,
   createScreenerStepRegistry,
   type ScreenerStepDeps,
@@ -243,16 +243,22 @@ describe("goal definition builder (#5873)", () => {
     expect(raw.root.executionMode?.shape).toBe("monolith");
   });
 
-  it("a market command builds the market spec unchanged: analyze node is screener.analysis", () => {
+  it("a market command builds the flipped market spec: five generic nodes, analyze node is analyze.screener", () => {
     const raw = buildScreenerJobDefinition(marketCommand()) as any;
     expect(raw.name).toBe("Screener — screen-manual-5873");
+    const kinds: string[] = [];
     const stepsByKind = new Map<string, string>();
     let node = raw.root;
     while (node) {
+      kinds.push(node.kind);
       stepsByKind.set(node.kind, node.steps?.[0]?.step);
       node = node.children?.[0];
     }
-    expect(stepsByKind.get("analyze")).toBe(SCREENER_ANALYSIS_STEP);
+    // The 6b3 flip #5884: the market spec is v2, five generic
+    // nodes — the goal branch (3b) pinned the market spec
+    // unchanged, and the flip is the change that un-pins it.
+    expect(kinds).toEqual(["feed", "enrich", "analyze", "generate", "deliver"]);
+    expect(stepsByKind.get("analyze")).toBe(ANALYZE_SCREENER_STEP);
   });
 });
 
@@ -285,17 +291,13 @@ describe("goal dispatch on its own definition (#5873)", () => {
     expect(h.delivered).toHaveLength(1);
   });
 
-  it("a market run still dispatches through the market analyze step (parity)", async () => {
-    const h = await makeHarness();
-    const analysisSpy = vi.spyOn(h.agent, "screenAnalysisStage");
-    const command = marketCommand();
-    await h.control.defineJob(buildScreenerJobDefinition(command));
-    const dispatch = await h.control.runJob("screen-manual-5873");
-    const outcome = await dispatch.completion!;
-    expect(outcome.state).toBe("completed");
-    expect(analysisSpy).toHaveBeenCalled();
-    expect(h.yahooCalls.length).toBeGreaterThan(0);
-    expect(h.stored).toHaveLength(1);
-    expect(h.delivered).toHaveLength(1);
-  });
+  // Issue #5884 (6b3): "a market run still dispatches
+  // through the market analyze step (parity)" is REMOVED —
+  // the market run no longer dispatches through the bespoke
+  // screenAnalysisStage at all. The market-dispatch parity
+  // now lives in the flip's engine proof,
+  // tests/screener_substrate_4190.test.ts (full generic chain,
+  // monolith + sharded, artifacts + run record), and the
+  // goal-side parity stays here: the goal run executes the
+  // goal step, never the market analyze step.
 });

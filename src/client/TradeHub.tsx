@@ -25,7 +25,7 @@ import { buildOrderPreviewBody, orderPreviewRefusalMessage } from "./trading/ord
 import { PortfolioRiskPanel } from "./PortfolioRiskPanel";
 import { brokerSectionNav } from "./brokerSectionNav";
 import type { RiskBroker } from "./portfolioRiskApi";
-import { brokerSupports, isBrokerId } from "../trading";
+import { brokerSupports, defaultBrokerId, isBrokerId } from "../trading";
 // Issue #4649: the one live-mode rule set shared with the settings menu.
 import { needsLiveModeForBroker, liveOnlyNoticeCopy } from "./trading/liveMode";
 import { submitVoiceTurn } from "./voiceDeskClient";
@@ -1197,7 +1197,7 @@ export function TradeHub({
   const runDiagnostics = async (brokerIdOverride?: string, override?: string) => {
     // Issue #3937: the default is the platform default, not the legacy
     // fallback — diagnostics run against the selected broker.
-    const brokerToUse = brokerIdOverride || selectedBroker || "alpaca";
+    const brokerToUse = brokerIdOverride || selectedBroker || defaultBrokerId();
     const envToUse = override || activeEnv;
     setDiagnosticsLoading(true);
     try {

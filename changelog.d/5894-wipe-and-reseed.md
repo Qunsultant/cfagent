@@ -1,0 +1,6 @@
+### Schedules home: reset to defaults — wipe-and-reseed to the needed set (#5894)
+
+- The Schedules home gains one "Reset to defaults" action (platform-admin gated, same overview probe as the empty action): the #5893 one-click empty, then re-seed to the needed set — seedable built-in goals plus the Track 1 recreation plan — with a preview of what will exist after the reset, confirm, then verify by re-fetching the list.
+- The needed set is defined in one place: seedable goals come from the server (GET /api/schedule/builtin-goals, owner-removed goals subtracted, never re-added), Track 1 from the existing recreate plan, comeback classes from the empty action — and every planted job must resolve in the one job catalogue, or the preview refuses. No second defaults list, no new seeding mechanism, no new store.
+- The reseed reuses the Seed-all machinery (POST /api/schedule/goals per goal, already-existing skipped, never duplicated) and the Track 1 recreate (POST /api/schedules/create per screen); derived rows re-derive, declared tasks re-arm on the next Think reconcile, sweep/watchdog arms re-arm via the ensure-guards. Every other user row goes and stays gone, named by id in the preview.
+- A partial reset (failed clear, failed seed or create, a planted row that is not listed) is reported as incomplete with the gap named, never claimed as defaults.

@@ -36,7 +36,8 @@
  * Rules of the house (issue #959):
  *   - Strict objects: unknown keys are REJECTED with the field named.
  *     No silent coercion of mis-typed values (no string→number casts);
- *     the only defaults are the documented ones (universe NASDAQ100 at
+ *     the only defaults are the documented ones (the externalized universe
+ *     default, #5516, at
  *     the interactive stock route, the schedule assembly defaults in
  *     buildSchedulePayload).
  *   - Identity fields (userLogin / environment / trigger) are never
@@ -55,6 +56,7 @@ import { z } from "zod";
 import type { OptionScreenerFilter, StockScreenerFilter } from "../types";
 import { JOB_RUN_TRIGGERS, type JobRunTrigger } from "../data/jobRunRecordPorts";
 import { UNIVERSES } from "./universes";
+import { defaultUniverseId } from "../config/defaultUniverse";
 import type {
   EventCalendarInfo,
   NoViewStrategyRequest,
@@ -255,7 +257,7 @@ export function parseStockScreenRequest(input: unknown): ScreeningValidationResu
     ok: true,
     value: {
       filters: filters as StockScreenerFilter,
-      universe: (universe as string | undefined) ?? "NASDAQ100",
+      universe: (universe as string | undefined) ?? defaultUniverseId(),
       ...(minScore !== undefined ? { minScore: minScore as number } : {}),
       ...(emailTo !== undefined ? { emailTo: emailTo as string } : {}),
       ...(pushToSlack !== undefined ? { pushToSlack: pushToSlack as boolean } : {}),
@@ -1097,7 +1099,8 @@ function validateDiscoveryCriteria(
  * trigger routes, and the NLQ scheduling executor — the assembly
  * semantics are the create route's historical ones:
  *
- *   - effectiveUniverse = criteria.universe, defaulting to "NASDAQ100"
+ *   - effectiveUniverse = criteria.universe, defaulting to the externalized
+ *     universe default (#5516)
  *     for autonomousOptionsAnalysis without symbols;
  *   - maxItems defaults to the effective universe's defaultMaxSymbols,
  *     else the symbol count (0 when neither exists — the discovery
@@ -1106,8 +1109,8 @@ function validateDiscoveryCriteria(
  *   - identity (userLogin / environment / trigger) is stamped from the
  *     trusted caller context, never taken from the criteria;
  *   - autonomousMarketScreen WITHOUT a universe stamps no maxItems
- *     default (the market-screen service applies its own TECH-universe
- *     default at run time). The REST create route additionally requires
+ *     default (the market-screen service applies the externalized
+ *     universe default at run time, #5516). The REST create route additionally requires
  *     an explicit universe for stock schedules — that is creation
  *     policy enforced by the route on top of this builder, not a
  *     property of the payload shape.
@@ -1218,7 +1221,7 @@ export function buildSchedulePayload(
     ? undefined
     : universeValue ||
       (callback === "autonomousOptionsAnalysis" && (!symbols || symbols.length === 0)
-        ? "NASDAQ100"
+        ? defaultUniverseId()
         : undefined);
   const defaultMaxItems = !applyCreationDefaults
     ? undefined

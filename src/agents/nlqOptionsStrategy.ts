@@ -34,7 +34,7 @@ import type { Outlook } from "../services/researchGates";
 import type { GoalKind } from "../services/goalScenarioStore";
 import { newRunId } from "../services/executionTreeIds";
 import { validateStrategyRequest, type StrategyScreenFilter } from "../trading";
-import { parseScanRequestTemplate } from "../trading";
+import { defaultBrokerId, parseScanRequestTemplate } from "../trading";
 import {
   createScannerScreenPorts,
   createStrategyScreenAgents,
@@ -1548,8 +1548,8 @@ async function runOpportunityScan(
       // Issue #3327 (carried from main's runOpportunityScan persist
       // block by the #3186 splice): the broker whose chains this run
       // reads, stamped on the saved run by the pipeline's persist
-      // stage. Absent, the run records E*TRADE (the pre-provenance
-      // default) — never a guess.
+      // stage. Absent, the run records the externalized default broker
+      // (#5516) — never a guess.
       broker: deps?.broker,
     },
   };
@@ -1561,7 +1561,7 @@ async function runOpportunityScan(
   // resolution with the same env the chain source was constructed
   // with (both production hosts construct it with no override).
   const scanBroker = deps?.env
-    ? discoveryBrokerStageInput(deps?.broker ?? "etrade", deps.env)
+    ? discoveryBrokerStageInput(deps?.broker ?? defaultBrokerId(), deps.env)
     : null;
   const scanDecision = nlqScanDispatchRoute({ broker: scanBroker, env: deps?.env });
   let result: OpportunityScanResult & { scanRunId?: string; persisted?: boolean };

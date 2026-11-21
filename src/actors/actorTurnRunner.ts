@@ -42,6 +42,12 @@
  */
 import { generateText, stepCountIs } from "ai";
 import { getSharedOutboundLimiter } from "../security/outboundRateLimiter";
+import { TurnStepTimeoutUnconfiguredError } from "../config/turnStepTimeout";
+import { ConsoleObservabilitySink } from "../observability/observabilityPorts";
+import {
+  createStructuredLogger,
+  type StructuredLogger,
+} from "../observability/structuredLogger";
 import type {
   ActorSessionPort,
   ActorTurnHooks,
@@ -60,17 +66,56 @@ export interface ModelTurnOptions {
   messages: ModelChatMessage[];
   tools: import("ai").ToolSet;
   maxSteps?: number;
+  /**
+   * Per-step timeout in milliseconds (#5423, #3515 S4). REQUIRED at
+   * runtime: the production model turn refuses (named refusal) when
+   * it is absent — a turn never runs unbounded. The runner resolves
+   * it from the tenant's configured value before the model turn.
+   */
+  stepTimeoutMs?: number;
+  /** Tenant the timeout was resolved for (names the refusal). */
+  tenantId?: string;
 }
 
 export type ModelTurnFn = (opts: ModelTurnOptions) => Promise<{ text: string }>;
+
+/**
+ * True when an error is the AI SDK's per-step timeout abort: the SDK
+ * aborts the step's controller with a DOMException named
+ * `TimeoutError` ("Step timeout of <ms>ms exceeded", ai 7.0.123
+ * `setAbortTimeout`). The name alone is not enough — a total or
+ * chunk timeout would share it — so the "Step timeout" message
+ * prefix is part of the classification.
+ */
+export function isTurnStepTimeoutError(err: unknown): err is DOMException {
+  return (
+    !!err &&
+    typeof err === "object" &&
+    (err as { name?: unknown }).name === "TimeoutError" &&
+    typeof (err as { message?: unknown }).message === "string" &&
+    (err as { message: string }).message.startsWith("Step timeout")
+  );
+}
 
 /**
  * Production model turn: AI SDK generateText (the same tool loop
  * streamText runs). AI SDK 7 has no maxSteps option: the bound is
  * expressed as stopWhen: stepCountIs(maxSteps), which is exactly
  * the step bound Think enforced.
+ *
+ * Per-step timeout (#5423): the vendor primitive, `timeout:
+ * { stepMs }` (ai 7.0.123 `TimeoutConfiguration`). The SDK arms a
+ * fresh timer per step and aborts the step with a named
+ * TimeoutError; the step-count cap stays enforced alongside via
+ * stopWhen. No hand-rolled timer, no AbortSignal.timeout wrapper:
+ * the SDK owns the timer. The refusal check runs BEFORE the
+ * outbound-limiter acquire so an unconfigured turn fails fast
+ * without consuming a shared token.
  */
 export const generateTextModelTurn: ModelTurnFn = async (opts) => {
+  if (opts.stepTimeoutMs === undefined) {
+    throw new TurnStepTimeoutUnconfiguredError(opts.tenantId ?? "primary", "absent");
+  }
   // Issue #3515 S1: the direct actor-turn path had no outbound limiter
   // (the gateway port's opt-in limiter only covers turns routed through
   // the port). One shared LLM token per turn, bounded wait, else a typed
@@ -82,6 +127,7 @@ export const generateTextModelTurn: ModelTurnFn = async (opts) => {
     messages: opts.messages as never,
     tools: opts.tools,
     stopWhen: opts.maxSteps !== undefined ? stepCountIs(opts.maxSteps) : undefined,
+    timeout: { stepMs: opts.stepTimeoutMs },
   });
   return { text };
 };
@@ -118,10 +164,46 @@ export interface TurnRunnerDeps {
    * Absent means never abort.
    */
   isAborted?: () => boolean;
+  /**
+   * Per-step timeout resolver (#5423): returns the tenant's
+   * configured timeout in milliseconds for this turn (read
+   * through the tenant-settings port by the factory caller).
+   * Resolved once per turn, before the model turn, so a
+   * mid-turn settings change never moves the goalposts. Absent
+   * means the model turn refuses (named refusal) when it is
+   * the production `generateTextModelTurn`; stub model turns
+   * in tests ignore the value.
+   */
+  resolveStepTimeoutMs?: () => number | Promise<number>;
+  /**
+   * Tenant the timeout was resolved for (names the refusal and
+   * scopes the timeout events). Absent reads as the deployment
+   * default tenant in the refusal text.
+   */
+  tenantId?: string;
+  /**
+   * Structured logger for the turn's timeout outcomes (#5423).
+   * Absent means the explicit `ConsoleObservabilitySink`
+   * fallback (the batch-10 clientLogger precedent): timeout
+   * events land in the console as structured JSON. Never build
+   * the sink from an empty env here — the #5587 rule forbids
+   * new empty-env sinks. A caller with an env in scope injects
+   * an env-constructed sink's logger instead, and the events
+   * reach the AE dataset.
+   */
+  structuredLog?: StructuredLogger;
 }
 
 export class AgentChatTurnRunner implements ActorTurnPort {
-  constructor(private readonly deps: TurnRunnerDeps) {}
+  private readonly log: StructuredLogger;
+
+  constructor(private readonly deps: TurnRunnerDeps) {
+    this.log =
+      deps.structuredLog ??
+      createStructuredLogger(new ConsoleObservabilitySink(), {
+        component: "actor-turn-runner",
+      });
+  }
 
   async runTurn(input: TurnInput): Promise<ChatResponseResult> {
     const { hooks, session, modelTurn } = this.deps;
@@ -165,15 +247,39 @@ export class AgentChatTurnRunner implements ActorTurnPort {
     const tools = pickTools(hooks.getTools(), config?.activeTools);
 
     let text: string;
+    let stepTimeoutMs: number | undefined;
     try {
+      stepTimeoutMs = await this.deps.resolveStepTimeoutMs?.();
       ({ text } = await modelTurn({
         model: config?.model ?? hooks.getModel(),
         system: instructions,
         messages: config?.messages ?? modelMessages,
         tools: config?.tools ? pickTools(config.tools, config?.activeTools) : tools,
         maxSteps,
+        stepTimeoutMs,
+        tenantId: this.deps.tenantId,
       }));
     } catch (err) {
+      // #5423: a timeout / refusal is a NAMED, RECORDED outcome,
+      // not a silent stall. The event carries the 7 mandatory
+      // attributes via the structured logger (tenant/actor/agent
+      // read null here — the runner has no identity in scope, and
+      // the logger never fabricates scope).
+      if (isTurnStepTimeoutError(err)) {
+        this.log.error("turn.step_timeout", {
+          timeoutMs: stepTimeoutMs ?? null,
+          requestId,
+          error: err.message,
+          errorName: err.name,
+        });
+      } else if (err instanceof TurnStepTimeoutUnconfiguredError) {
+        this.log.error("turn.step_timeout_unconfigured", {
+          reason: err.reason,
+          requestId,
+          error: err.message,
+          errorName: err.name,
+        });
+      }
       if (hooks.onChatError) await hooks.onChatError(err);
       throw err;
     }

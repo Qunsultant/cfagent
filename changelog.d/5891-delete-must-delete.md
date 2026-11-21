@@ -1,0 +1,3 @@
+### Fixed
+
+- Delete on the Schedules home no longer silently pretends to delete the six derived rows (token-renewal, retention, nightly-research, sweep-stale-ledger-tasks, sweep-stale-async-jobs, schedule-watchdog), goal rows, or other non-managed rows: the delete path refuses with a named error (400, or 404 for an unknown id) instead of answering 200 with `cancelled: false`, the audit records the refusal truthfully (`success: false` + the error), the client throws when a delete answers `cancelled: false`, and Delete is disabled with the reason on rows it cannot remove. Ticker-push Delete still pauses the feed and answers `cancelled: true`.

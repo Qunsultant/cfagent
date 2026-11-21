@@ -36,7 +36,9 @@ describe("#5025 schemaComponent barrel & membership store naming", () => {
     // remainder 63 → 64 (usage_events tenant_id ALTER).
     // #3185 bridge adds migration 0077 (agent_usage_events mirror
     // table + 2 indexes): D1 234 → 237.
-    expect(D1_CATALOGUE_ENTRIES.length).toBe(237);
+    // #5423 adds migration 0078 (agent_tenant_settings
+    // turn_step_timeout_ms column): D1 237 → 238.
+    expect(D1_CATALOGUE_ENTRIES.length).toBe(238);
     expect(ORM_CATALOGUE_ENTRIES.length).toBe(26);
     expect(REMAINDER_CATALOGUE_ENTRIES.length).toBe(64);
     expect(DO_CATALOGUE_ENTRIES.length).toBe(109);

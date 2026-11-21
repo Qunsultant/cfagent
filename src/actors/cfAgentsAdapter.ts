@@ -13,6 +13,7 @@
  */
 import { AgentChatTurnRunner, generateTextModelTurn, type ModelTurnFn } from "./actorTurnRunner";
 import { ActorSessionStore, type SessionStorageBackend } from "./actorSessionStore";
+import type { StructuredLogger } from "../observability/structuredLogger";
 import type {
   ActorSchedulePort,
   ActorSessionPort,
@@ -80,9 +81,21 @@ export function createCfActorSchedule(agent: SchedulerLike): ActorSchedulePort {
 export function createCfActorTurn(
   hooks: ActorTurnHooks,
   session: ActorSessionPort,
-  modelTurn: ModelTurnFn = generateTextModelTurn
+  modelTurn: ModelTurnFn = generateTextModelTurn,
+  opts: {
+    resolveStepTimeoutMs?: () => number | Promise<number>;
+    tenantId?: string;
+    structuredLog?: StructuredLogger;
+  } = {},
 ): ActorTurnPort {
-  return new AgentChatTurnRunner({ hooks, session, modelTurn });
+  return new AgentChatTurnRunner({
+    hooks,
+    session,
+    modelTurn,
+    resolveStepTimeoutMs: opts.resolveStepTimeoutMs,
+    tenantId: opts.tenantId,
+    structuredLog: opts.structuredLog,
+  });
 }
 
 export interface WorkspaceHostEntryLike {

@@ -34,7 +34,7 @@ import { MarketDataResearchService } from "./marketDataResearch";
 import { CANCEL_ALL_PREVIEW_TTL_MS, type CancelPreviewStore } from "./cancelPreviewStore";
 import { recordTradingRunOutcome, alpacaModeFromEnv } from "./tradingRunOutcome";
 import type { SqlStorage } from "../orm";
-import type { ITradingPlatform } from "../trading";
+import { defaultBrokerId, type ITradingPlatform } from "../trading";
 import {
   type CancelableOrder,
   type CancelFilter,
@@ -908,7 +908,7 @@ export function recordCancelOutcome(
     action: "cancel",
     symbol: receipt.target?.symbol,
     orderClass: receipt.target?.orderClass,
-    broker: ledger?.broker ?? "alpaca",
+    broker: ledger?.broker ?? defaultBrokerId(),
     mode: ledger?.mode ?? (env ? alpacaModeFromEnv(env) : undefined),
     codedError: receipt.code,
     origin,
@@ -937,7 +937,7 @@ export function recordScopedCancelOutcome(
     status: receipt.success ? "completed" : "failed",
     action: receipt.action,
     symbol: receipt.filter.symbol ? String(receipt.filter.symbol).toUpperCase() : undefined,
-    broker: ledger?.broker ?? "alpaca",
+    broker: ledger?.broker ?? defaultBrokerId(),
     mode: ledger?.mode ?? (env ? alpacaModeFromEnv(env) : undefined),
     codedError: receipt.code,
     origin,

@@ -11,6 +11,7 @@
 import type { JobRunRecord } from "../services/jobRunRecords";
 import type { UnifiedScheduleRecord } from "../data/unifiedSchedulePorts";
 import type { ScheduleProvenance } from "../schedule";
+import type { ScheduleSource } from "../config/scheduleSourceModes";
 // The one transport for this module: apiFetch polls the 202
 // async-job contract (#3309) — a queued list/create/detail call
 // answers 202 with a statusUrl and the caller gets the completed
@@ -50,6 +51,14 @@ export interface ScheduleListItem {
   lastRunOutcome?: string;
   /** Issue #3121 #4240 — the retention row's last pass summary (dispatch detail, verbatim). */
   lastRunDetail?: string;
+  /**
+   * Issue #5889 — the row's source (kind + job identity + arming
+   * origin, derived once on the server) and the record's creation
+   * provenance where present. Absent on legacy rows, which read as
+   * Unknown / not recorded, never a fabricated source.
+   */
+  source?: ScheduleSource;
+  provenance?: ScheduleProvenance;
 }
 
 /** A schedule detail: the raw SDK schedule, or a paused list item. */
@@ -430,14 +439,27 @@ export async function bulkScheduleAction(
   });
 }
 
+/**
+ * Issue #5891 — the client checks `cancelled`: a 200 that answers
+ * cancelled:false is a failed delete, never a success. The server
+ * now refuses those rows with a named error, but a stale or foreign
+ * 200 + cancelled:false must still never read as deleted.
+ */
 export async function deleteSchedule(
   id: string,
   headers?: Record<string, string>,
-): Promise<void> {
-  await api(`/api/schedules/${encodeURIComponent(id)}`, {
-    method: "DELETE",
-    headers,
-  });
+): Promise<{ scheduleId: string; cancelled: boolean }> {
+  const res = await api<{ scheduleId: string; cancelled: boolean }>(
+    `/api/schedules/${encodeURIComponent(id)}`,
+    {
+      method: "DELETE",
+      headers,
+    },
+  );
+  if (!res.cancelled) {
+    throw new Error(`Schedule '${id}' was not deleted.`);
+  }
+  return res;
 }
 
 /**

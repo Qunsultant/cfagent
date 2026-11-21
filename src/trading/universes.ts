@@ -164,5 +164,14 @@ export function resolveUniverse(
     case "ALL":
       // ALL is sharded by the caller — never resolved directly.
       return [];
+    default:
+      // Issue #5516: the configured default is a string until it reaches the
+      // registry (defaultUniverseId is registry-free by design), so the one
+      // place that indexes UNIVERSES is also the one place that refuses an id
+      // it does not hold.
+      throw new Error(
+        `[universes] "${String(id)}" is not a screener universe (#5516). ` +
+          `Screener universes: ${(Object.keys(UNIVERSES) as UniverseId[]).join(", ")}.`,
+      );
   }
 }

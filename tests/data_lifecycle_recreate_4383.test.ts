@@ -386,7 +386,9 @@ describe("recreate, tenant scope (#4383)", () => {
     // stays 253 and skipped grows 8 → 9.
     // Issue #3185 bridge adds migration 0077 (agent_usage_events
     // mirror table + 2 indexes): 257 → 260.
-    expect(body.d1.selected).toHaveLength(260);
+    // Issue #5423 adds migration 0078 (agent_tenant_settings
+    // turn_step_timeout_ms column): 260 → 261.
+    expect(body.d1.selected).toHaveLength(261);
     expect(body.d1.skipped).toHaveLength(9);
     // Two member instances (alice, bob), each planning the fresh DO leg.
     expect(body.instances).toHaveLength(2);
@@ -455,7 +457,9 @@ describe("recreate, tenant scope (#4383)", () => {
     // #4767 adds migrations 0071/0072 (4 D1 ALTERs): 249 → 253.
     // #3185 bridge adds migration 0077 (agent_usage_events mirror
     // table + 2 indexes): 257 → 260.
-    expect(body.d1.report.executed).toHaveLength(260);
+    // Issue #5423 adds migration 0078 (agent_tenant_settings
+    // turn_step_timeout_ms column): 260 → 261.
+    expect(body.d1.report.executed).toHaveLength(261);
     expect(body.d1.verification.ok).toBe(true);
     expect(body.instances).toHaveLength(2);
     for (const inst of body.instances) {

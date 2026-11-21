@@ -183,6 +183,39 @@ function renderRejected(ctx: Ctx, rejected: RejectedEntry[]): void {
   }
 }
 
+function renderRunProvenance(ctx: Ctx, report: ResearchReport): void {
+  heading(ctx, "Run provenance");
+  text(ctx, `Broker: ${report.brokerId ?? "not recorded"} · Mode: ${report.mode ?? "not recorded"} · Asset: ${report.assetType ?? "options"}`, { size: 9, color: PRINT_MUTED });
+  text(ctx, `Account type: ${report.accountType ?? "not recorded"} · Account: ${report.accountId ?? "not recorded"}`, { size: 9, color: PRINT_MUTED });
+  const quoteSources = [...new Set((report.symbolEvaluations ?? []).map((row) => row.quote?.source).filter((source): source is string => Boolean(source)))];
+  const chainSources = [...new Set((report.symbolEvaluations ?? []).map((row) => row.chain?.source).filter((source): source is string => Boolean(source)))];
+  text(ctx, `Quote sources: ${quoteSources.join(", ") || "not recorded"}`, { size: 9, color: PRINT_MUTED });
+  text(ctx, `Option-chain sources: ${chainSources.join(", ") || "not recorded"}`, { size: 9, color: PRINT_MUTED });
+}
+
+function renderSymbolEvaluations(ctx: Ctx, report: ResearchReport): void {
+  heading(ctx, `Universe evaluation (${(report.symbolEvaluations ?? []).length})`);
+  if (!report.symbolEvaluations?.length) {
+    text(ctx, "Per-symbol evaluation evidence was not recorded for this run.", { size: 9, color: PRINT_MUTED });
+    return;
+  }
+  for (const evaluation of report.symbolEvaluations) {
+    ensureSpace(ctx, 30);
+    const quote = evaluation.quote
+      ? `quote ${evaluation.quote.price} (${evaluation.quote.quoteStatus}, ${evaluation.quote.source})`
+      : "quote unavailable";
+    const chain = evaluation.chain
+      ? `chain ${evaluation.chain.outcome} (${evaluation.chain.source}${evaluation.chain.provenance ? `, ${evaluation.chain.provenance}` : ""}; ${evaluation.chain.expiryCount ?? 0} expiries / ${evaluation.chain.legCount ?? 0} contracts)`
+      : "chain not attempted";
+    text(ctx, `${evaluation.symbol} — ${evaluation.outcome}`, { size: 9, bold: true });
+    text(ctx, `${quote} · ${chain}`, { size: 8, color: PRINT_MUTED, x: MARGIN + 12 });
+    if (evaluation.strategies.length) {
+      text(ctx, `Strategies: ${evaluation.strategies.map((strategy) => `${strategy.strategy}=${strategy.outcome}${strategy.gate ? `(${strategy.gate})` : ""}${strategy.legs?.length ? ` [${strategy.legs.map(researchLegLine).join("; ")}]` : ""}`).join(", ")}`, { size: 8, x: MARGIN + 12 });
+    }
+    if (evaluation.reason) text(ctx, evaluation.reason, { size: 8, color: PRINT_MUTED, x: MARGIN + 12 });
+  }
+}
+
 function renderTradeCard(ctx: Ctx, idea: TradeCard): void {
   newPage(ctx);
   text(ctx, `Trade card #${idea.rank}: ${idea.symbol}`, {
@@ -308,12 +341,13 @@ export async function generateResearchPdf(
   );
   rule(ctx);
   text(ctx, report.summary || "No summary.", { size: 10 });
+  renderRunProvenance(ctx, report);
   ctx.y -= 4;
   const s = report.stats;
   if (s) {
     text(
       ctx,
-      `Universe ${s.universeSize} · quotes ${s.quotesRetrieved} · evaluated ${s.candidatesEvaluated} · qualified ${s.qualified} · watchlist ${s.watchlist} · rejected ${s.rejected}`,
+      `Universe ${s.universeSize} · quotes ${s.quotesRetrieved} · chains attempted ${s.chainsAttempted ?? "not recorded"} / fetched ${s.chainsFetched} · evaluated ${s.candidatesEvaluated} · qualified ${s.qualified} · watchlist ${s.watchlist} · rejected ${s.rejected}`,
       { size: 9, color: PRINT_MUTED }
     );
   }
@@ -321,6 +355,7 @@ export async function generateResearchPdf(
   renderRankedTable(ctx, report.ideas ?? []);
   renderWatchlist(ctx, report.watchlist ?? []);
   renderRejected(ctx, report.rejected ?? []);
+  renderSymbolEvaluations(ctx, report);
 
   for (const idea of (report.ideas ?? []).slice(0, 5)) {
     renderTradeCard(ctx, idea);

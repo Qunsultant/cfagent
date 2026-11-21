@@ -1,8 +1,18 @@
 import type { TradeOrderContext } from "../trading/tradeOrderContext";
+import type { ScheduleProvenance } from "../../schedule";
+import type { ScheduleSource } from "../../config/scheduleSourceModes";
 
 export interface ScheduledTaskItem {
   id: string;
   type: "interval" | "cron" | "delayed" | "scheduled";
+  /**
+   * Issue #5889 — the row's source (kind + job identity + arming
+   * origin, derived once on the server) and the record's creation
+   * provenance where present. Absent on legacy rows, which read as
+   * Unknown / not recorded, never a fabricated source.
+   */
+  source?: ScheduleSource;
+  provenance?: ScheduleProvenance;
   /**
    * Issue #4389 — the unified kind the row carries (screen, workflow-stage,
    * ticker-push, …). The cadence dialog reads it: a live feed runs on an

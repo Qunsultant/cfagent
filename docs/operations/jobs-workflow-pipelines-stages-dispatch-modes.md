@@ -147,6 +147,15 @@ no chain and must not appear where a chain is named.
 | `sagarun` | Saga run (one cross-domain journey, payment leg then screen leg, compensable) | payment leg → screen leg | `src/workflows/workflowCatalog.ts` (saga-run) |
 | `resrch` | Research (OODA is one research type within the family) | configure → observe → orient → decide → build-and-price → challenge-and-gate → rank-and-report → evaluate-later | Ruled; no catalog family yet — #5118 owns the entry |
 
+OODA option-chain reads reuse the shared `options-chains` feed dataset when a
+same-provider artifact is within the configured `quoteFreshnessSeconds` window
+and includes the requested symbol. The ResearchDataProvider reads it through
+the shared `OptionChainSource`; a missing, stale, or uncovered row falls back
+to the run's selected broker platform. The report records whether chain data
+came from the persisted feed or the selected broker, and preserves bounded
+provider failure details. The feed catalog remains the producer: OODA does not
+create a second options fetcher or feed job.
+
 All catalog families now carry a ruled short id (2026-11-17). The
 research family is ruled `resrch` but has no catalog family yet —
 #5118 owns the research catalog entry.

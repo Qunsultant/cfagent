@@ -2596,6 +2596,12 @@ const BASELINE: Array<[string, string, number]> = [
   ["docs/architecture/reference/vocabulary.md", "yahoo", 1],
   ["docs/architecture/reference/vocabulary.md", "nasdaq", 3],
   ["docs/architecture/reference/vocabulary.md", "tastytrade", 1],
+  // #5516 INTEGRATION: the stock screen's data-mode labels name the provider
+  // that serves the delayed-quote mode — every surface prints these strings
+  // verbatim, so naming it is the label's subject, not incidental prose. The
+  // strings moved here from the workflow planner to break a module cycle; no
+  // new mention was written.
+  ["src/config/yahooDataMode.ts", "yahoo", 3],
 ];
 
 const BASELINE_MAP = new Map(BASELINE.map(([f, t, c]) => [`${f}\t${t}`, c]));
