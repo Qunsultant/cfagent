@@ -53,12 +53,10 @@ import { normalizeIvBroker } from "../src/data/ivHistoryPorts";
 /** A copy of the registry with one or more defaults changed (the seam). */
 function withDefaults(over: Partial<Vocabulary["defaults"]>): Vocabulary {
   const current = getVocabulary();
-  return {
-    version: current.version,
-    defaults: { ...current.defaults, ...over },
-    axes: current.axes,
-    conflations: current.conflations,
-  };
+  // Spread the whole registry: a field another slice adds (e.g. the provider ×
+  // dataset matrix) must survive, or the seam copy fails validation the moment
+  // main grows an axis.
+  return { ...current, defaults: { ...current.defaults, ...over } };
 }
 
 afterEach(() => setVocabulary(null));

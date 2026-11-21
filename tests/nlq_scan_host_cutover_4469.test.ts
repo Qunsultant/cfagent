@@ -733,7 +733,7 @@ describe("gated-out scan runs stay on sync (#4469)", () => {
 describe("scan-leg composition (#4469)", () => {
   it("runOpportunityScan derives the pair, gates, and dispatches through the host, keeping the sync call", () => {
     const source = readFileSync("src/agents/nlqOptionsStrategy.ts", "utf8");
-    expect(source).toContain('discoveryBrokerStageInput(deps?.broker ?? "etrade"');
+    expect(source).toContain("discoveryBrokerStageInput(deps?.broker ?? defaultBrokerId()");
     expect(source).toContain("nlqScanDispatchRoute({");
     expect(source).toContain("runNlqScanViaHost({");
     expect(source).toContain("runStrategyScreenViaEngine(");
