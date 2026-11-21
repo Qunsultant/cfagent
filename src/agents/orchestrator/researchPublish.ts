@@ -24,7 +24,7 @@ import type { ResearchReport } from "../../services/researchPipeline";
 import type { ResearchReportArtifactOutcome, ResearchWorkbookOutcome } from "../../trading";
 import { resolveCopilotTradingSelection } from "../copilotTradingMode";
 import { resolveTenantBroker } from "../../services/tenantProviders";
-import { resolveTradeEnvironmentFromSettings as resolveSharedTradingEnvironment } from "../routes/brokerEnvironment";
+import { resolveSharedTradingEnvironment } from "../routes/brokerEnvironment";
 import { tradingTypeFor } from "../../trading";
 import { createStructuredLogger } from "../../observability/structuredLogger";
 import { createObservabilitySink } from "../../observability/createObservabilityPorts";
