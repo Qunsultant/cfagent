@@ -249,8 +249,8 @@ export function PipelinePolicyPanel() {
 
       {saveError && <Notice tone="danger">{saveError}</Notice>}
       {saved && <Notice tone="success">Pipeline settings saved — they apply to the next run.</Notice>}
-      <Button type="button" variant="primary" disabled={dirtyCount === 0 || saving} onClick={() => void save()}>
-        {saving ? "Saving…" : dirtyCount === 0 ? "No changes" : `Save ${dirtyCount} change${dirtyCount === 1 ? "" : "s"}`}
+      <Button type="button" variant="primary" loading={saving} disabled={dirtyCount === 0} onClick={() => void save()}>
+        {dirtyCount === 0 ? "No changes" : `Save ${dirtyCount} change${dirtyCount === 1 ? "" : "s"}`}
       </Button>
     </Card>
   );
