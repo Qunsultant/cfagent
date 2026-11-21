@@ -292,10 +292,31 @@ export interface JobPipelineDeps {
   newRunId?: () => string;
   /**
    * The resolved pipeline policy (retry budgets, resolved once
-   * here — the stage contract's one resolution). Defaults to
-   * resolvePipelinePolicy() with no env/settings overrides.
+   * here — the stage contract's one resolution). When absent the
+   * constructor resolves from `env` + `settings` instead
+   * (#4782 S3); before that slice the fallback resolved with no
+   * env/settings overrides at all.
    */
   policy?: PipelinePolicy;
+  /**
+   * Issue #4782 S3 — the Worker env the policy resolves from
+   * when no explicit `policy` is injected (the platform-default
+   * layer: env vars an operator sets without a deploy). The
+   * engine never reads env itself; the host passes what it has.
+   * Absent → the defaults, exactly as before.
+   */
+  env?: Record<string, unknown>;
+  /**
+   * Issue #4782 S3 — the per-tenant settings map (`pipeline.*`
+   * values, read where the tenant is known) the policy resolves
+   * from when no explicit `policy` is injected. Settings beat
+   * env, as in the resolver. A host MUST pass only the settings
+   * of the tenant whose job this engine runs: the shared engine
+   * never reads a host-global settings map (multi-tenant rule —
+   * one tenant's settings must not apply to another's runs).
+   * Absent → env-only, as before.
+   */
+  settings?: Record<string, string | undefined>;
   /** Sleep for retry backoff and unit deadlines. Defaults to a real (unref'd) timer. */
   sleep?: (ms: number) => Promise<void>;
   /** The stage-runner invocation this host drives (the contract's driver kind). Defaults to "sync". */
@@ -811,7 +832,12 @@ export class JobPipelineControl {
 
   constructor(private readonly deps: JobPipelineDeps) {
     this.now = deps.now ?? (() => new Date());
-    this.policy = deps.policy ?? resolvePipelinePolicy();
+    // Issue #4782 S3 — an explicit policy wins; otherwise the
+    // policy resolves once here from the host's env (platform
+    // default) + the tenant's settings map (settings beat env).
+    // Before this slice the fallback resolved with no env and no
+    // settings at all, so operator tuning had no effect on runs.
+    this.policy = deps.policy ?? resolvePipelinePolicy(deps.env, deps.settings);
     this.sleep = deps.sleep ?? defaultSleep;
     this.newRunId =
       // Issue #5175 slice 3: the engine default mints through the one

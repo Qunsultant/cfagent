@@ -85,6 +85,7 @@ import {
   scopedDeliveryClaimRunId,
   type DeliverySuppressor,
 } from "../../workflows/screenDeliverySuppression";
+import { envStrings } from "../../workflows/envStrings";
 import {
   inferTenantFromDeliveryId,
   resolveAndVerifySlackRecipientAtDelivery,
@@ -115,7 +116,7 @@ import {
   type FollowupReportResult,
   type ScreenerRunOutcome,
 } from "../../services/screenerFollowups";
-import { resolvePipelinePolicy, shouldNotify } from "../../services/pipelinePolicy";
+import { readPipelineSettings, resolvePipelinePolicy, shouldNotify } from "../../services/pipelinePolicy";
 import { createStructuredLogger } from "../../observability/structuredLogger";
 import { createObservabilitySink } from "../../observability/createObservabilityPorts";
 
@@ -725,11 +726,8 @@ function resolveFeedDispatchJobId(
   capability: string,
   payload: Record<string, unknown>,
 ): string | null {
-  const knobs: Record<string, string | undefined> = {};
-  for (const [key, value] of Object.entries(env as unknown as Record<string, unknown>)) {
-    if (typeof value === "string") knobs[key] = value;
-  }
-  const registry = buildFeedJobRegistry(knobs);
+  // Issue #4782 S3 — one shared env→strings helper, ./envStrings.
+  const registry = buildFeedJobRegistry(envStrings(env));
   if (capability === "http.request") {
     const path = payload.pathAndQuery;
     if (typeof path !== "string") return null;
@@ -2400,7 +2398,13 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
       // completes the job as 'skipped' with the reason recorded,
       // instead of the pre-R3 behavior where coverage depended on
       // incidental config.
-      const pipelinePolicy = resolvePipelinePolicy(ctx.env as unknown as Record<string, unknown>);
+      // Issue #4782 S3 — the per-login settings map rides the
+      // gate: an operator's `pipeline.*` tuning takes effect on
+      // deliveries. Absent reader → env-only, as before.
+      const pipelinePolicy = resolvePipelinePolicy(
+        ctx.env as unknown as Record<string, unknown>,
+        ctx.readSettingRaw ? readPipelineSettings(ctx.readSettingRaw) : undefined,
+      );
       if (typeof payload.skipReason === "string" && payload.skipReason) {
         // Issue #1228 (#1209 F2): the 'completed' notify job was
         // suppressed on this channel because the delivery was to be
@@ -2592,7 +2596,12 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
       // Issue #1191 (#1173 R3): pipeline policy gate, mirroring the
       // deliver branch — a policy-off event/channel completes as
       // 'skipped' with the reason on the job, never a silent drop.
-      const notifyPolicy = resolvePipelinePolicy(ctx.env as unknown as Record<string, unknown>);
+      // Issue #4782 S3 — as the deliver branch above: the
+      // per-login settings map rides the notify gate.
+      const notifyPolicy = resolvePipelinePolicy(
+        ctx.env as unknown as Record<string, unknown>,
+        ctx.readSettingRaw ? readPipelineSettings(ctx.readSettingRaw) : undefined,
+      );
       if (!shouldNotify(notifyPolicy, event, channel)) {
         result = { status: "skipped", reason: `Pipeline policy disables ${event} notifications on ${channel}.`, channel, event };
       } else {

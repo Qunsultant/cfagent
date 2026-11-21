@@ -54,7 +54,7 @@
  * legitimately outlive its stages' deadline by much, and the
  * bound is the stage timeouts module's resolution, not a new
  * literal. Poll cadence is the shared chat await cadence
- * (CHAT_AWAIT_POLL_INTERVAL_MS).
+ * (resolveChatAwaitPollMs(env), #4782 S3).
  */
 import type { Env } from "../types";
 import type { ScreenerRunResult } from "../agents/screener-agent";
@@ -83,7 +83,7 @@ import {
 } from "./workflowPorts";
 import { ScreenAlreadyRunningError } from "../services/screenInFlight";
 import { resolveScreenProviderForRun } from "../services/tenantProviders";
-import { CHAT_AWAIT_POLL_INTERVAL_MS } from "../agents/orchestrator/chatAwaitBudget";
+import { resolveChatAwaitPollMs } from "../agents/orchestrator/chatAwaitBudget";
 import { createStructuredLogger } from "../observability/structuredLogger";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
 
@@ -537,7 +537,7 @@ export async function runStockScreenViaEngine(
     input.readWorkflowJobHistory ?? ((t: string, c: string) => readJobHistory(env, t, c));
   const sleep =
     input.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
-  const pollIntervalMs = input.pollIntervalMs ?? CHAT_AWAIT_POLL_INTERVAL_MS;
+  const pollIntervalMs = input.pollIntervalMs ?? resolveChatAwaitPollMs(env);
   const deadline = nowMs() + (input.awaitDeadlineMs ?? resolveStockScreenAwaitDeadlineMs(env as unknown as Record<string, unknown>));
   // A terminal instance whose collation has not projected yet
   // gets a few extra polls — projection lag is not a failure.

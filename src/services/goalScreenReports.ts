@@ -232,13 +232,17 @@ interface BlobStorage {
 export async function generateAndStoreGoalScreenArtifacts(
   env: { REPORTS_BUCKET?: unknown },
   storage: BlobStorage,
-  result: GoalDrivenScreenResult
+  result: GoalDrivenScreenResult,
+  // Issue #4782 S3 — the per-tenant settings map, when the
+  // caller has one (settings beat env in the resolver). Absent
+  // → env-only, as before.
+  settings?: Record<string, string | undefined>
 ): Promise<GoalScreenArtifactOutcome> {
   const { putReportPdf } = await import("./reportBlobStore");
   const { resolvePipelinePolicy } = await import("./pipelinePolicy");
   const { withRetry } = await import("./resilience");
   const { codedMessage, hasOutcomeCodePrefix } = await import("../outcomes/outcomeAspects");
-  const policy = resolvePipelinePolicy(env as Record<string, unknown>);
+  const policy = resolvePipelinePolicy(env as Record<string, unknown>, settings);
   const contentTypes: Record<GoalScreenArtifactFormat, string> = {
     pdf: "application/pdf",
     xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

@@ -71,6 +71,7 @@ import { createGeneratedDatasetPorts } from "../data/createGeneratedDatasetPorts
 import { createDeliverySuppressor } from "../workflows/screenDeliverySuppression";
 import { resolveChainSourceForRequest } from "../workflows/brokerChainSourceResidency";
 import { stageQueueSendFromEnv } from "../workflows/stageQueueTransport";
+import { envStrings } from "../workflows/envStrings";
 import { createSqlDeliverySuppressionStore } from "../data/deliveryClaimsStore";
 import { createD1IndexListDb, D1IndexListStore } from "../data/d1IndexListAdapter";
 import { createJobPipelineMessaging } from "../messaging/createJobPipelineMessaging";
@@ -205,14 +206,6 @@ export function pipelineSql(ctx: ScheduledTasksPipelineContext): SqlStorage {
     );
   }
   return sql;
-}
-
-function envStrings(env: Env): Record<string, string | undefined> {
-  const out: Record<string, string | undefined> = {};
-  for (const [key, value] of Object.entries(env as unknown as Record<string, unknown>)) {
-    if (typeof value === "string") out[key] = value;
-  }
-  return out;
 }
 
 /** The feed-step wiring for this host residency (DO storage + D1 dataset/index stores). */
@@ -638,6 +631,12 @@ export function createScheduledAgentPipelineControl(
       createDefaultResearchStepDeps(),
     ),
     invocation: "sync",
+    // Issue #4782 S3 — the policy resolves from the host env (the
+    // platform-default layer). No settings map is passed here:
+    // the scheduled host has no per-tenant settings reader, and
+    // the shared engine must never read a host-global map — a
+    // per-job policy carrier is the follow-up's work (#4782 PR 2).
+    env: envStrings(ctx.env),
   });
 }
 
@@ -928,6 +927,9 @@ export async function startPipelineJobWorkflow(
       createDefaultResearchStepDeps(),
     ),
     invocation: "workflow-shard",
+    // Issue #4782 S3 — as the host control above: env only, no
+    // host-global settings map (see the note there).
+    env: envStrings(ctx.env),
   });
   const existing = await d1Stores.definitions.getDefinition(jobId);
   if (

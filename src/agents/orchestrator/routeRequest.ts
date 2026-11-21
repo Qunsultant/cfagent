@@ -105,6 +105,9 @@ export interface RouteRequestDeps {
   getScreenerExecutionContext: ReportsRouteContext["getScreenerExecutionContext"];
   getReportDispatchHitl: ReportsRouteContext["getReportDispatchHitl"];
   setReportDispatchHitl: ReportsRouteContext["setReportDispatchHitl"];
+  getPipelinePolicySettings: ReportsRouteContext["getPipelinePolicySettings"];
+  setPipelinePolicySettings: ReportsRouteContext["setPipelinePolicySettings"];
+  getPipelinePolicyDefaults: ReportsRouteContext["getPipelinePolicyDefaults"];
   getReportConfirmation: ReportsRouteContext["getReportConfirmation"];
   decideReportConfirmation: ReportsRouteContext["decideReportConfirmation"];
   createReportConfirmation: ReportsRouteContext["createReportConfirmation"];
@@ -208,6 +211,9 @@ export async function routeRequest(deps: RouteRequestDeps, request: Request): Pr
     getScreenerExecutionContext: () => deps.getScreenerExecutionContext(),
     getReportDispatchHitl: () => deps.getReportDispatchHitl(),
     setReportDispatchHitl: (enabled) => deps.setReportDispatchHitl(enabled),
+    getPipelinePolicySettings: () => deps.getPipelinePolicySettings(),
+    setPipelinePolicySettings: (settings) => deps.setPipelinePolicySettings(settings),
+    getPipelinePolicyDefaults: () => deps.getPipelinePolicyDefaults(),
     getReportConfirmation: (id) => deps.getReportConfirmation(id),
     decideReportConfirmation: (id, status, decidedBy) =>
       deps.decideReportConfirmation(id, status, decidedBy),

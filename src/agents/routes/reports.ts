@@ -135,6 +135,12 @@ export interface ReportsRouteContext {
   >;
   getReportDispatchHitl(): boolean;
   setReportDispatchHitl(enabled: boolean): void;
+  /** Issue #4782 S3 — the stored `pipeline.*` values (only keys the operator set). */
+  getPipelinePolicySettings(): Record<string, string>;
+  /** Issue #4782 S3 — validate by name + write atomically; returns the first error or null. */
+  setPipelinePolicySettings(settings: Record<string, unknown>): string | null;
+  /** Issue #4782 S3 — the resolver's defaults as stored-setting strings. */
+  getPipelinePolicyDefaults(): Record<string, string>;
   getReportConfirmation(id: string): any | null;
   decideReportConfirmation(
     id: string,
@@ -475,6 +481,44 @@ export async function handleReportsRoutes(
     ctx.setReportDispatchHitl(body.enabled);
     ctx.audit("report_dispatch_hitl.changed", "orchestrator", { enabled: body.enabled });
     return Response.json({ enabled: body.enabled });
+  }
+
+  // Issue #4782 S3 — the pipeline-policy settings (`pipeline.*`
+  // globals): per-tenant values in mas_settings, edited here and
+  // read by the resolver on every pipeline run. GET returns the
+  // stored values plus the resolver's defaults (a field with no
+  // stored value renders its default); POST validates by name —
+  // an unknown key or an out-of-range value is refused with 400
+  // naming the key, never clamped, and a batch with one bad entry
+  // writes nothing.
+  if (path.endsWith("/trading/settings/pipeline-policy") && request.method === "GET") {
+    return Response.json({
+      settings: ctx.getPipelinePolicySettings(),
+      defaults: ctx.getPipelinePolicyDefaults(),
+    });
+  }
+
+  if (path.endsWith("/trading/settings/pipeline-policy") && request.method === "POST") {
+    const body = (await request.json().catch(() => null)) as { settings?: unknown } | null;
+    if (
+      !body ||
+      typeof body.settings !== "object" ||
+      body.settings === null ||
+      Array.isArray(body.settings)
+    ) {
+      return Response.json({ error: "settings (object) is required." }, { status: 400 });
+    }
+    const error = ctx.setPipelinePolicySettings(body.settings as Record<string, unknown>);
+    if (error) {
+      return Response.json({ error }, { status: 400 });
+    }
+    ctx.audit("pipeline_policy.changed", "orchestrator", {
+      settings: body.settings as Record<string, unknown>,
+    });
+    return Response.json({
+      settings: ctx.getPipelinePolicySettings(),
+      defaults: ctx.getPipelinePolicyDefaults(),
+    });
   }
 
   // Issue #2481: per-tenant auto-refresh setting (owner decision

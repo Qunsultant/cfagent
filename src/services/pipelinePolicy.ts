@@ -96,6 +96,41 @@ const ATTEMPTS_MIN = 1;
 const ATTEMPTS_MAX = 10;
 const DELAY_MIN_MS = 0;
 const DELAY_MAX_MS = 120_000;
+const JITTER_MIN = 0;
+const JITTER_MAX = 1;
+
+/**
+ * Issue #4782 S3 — the resolver's defaults as stored-setting
+ * strings, for the settings route + UI: a field with no stored
+ * value renders this. Derived from
+ * {@link DEFAULT_PIPELINE_POLICY} — never a second literal set,
+ * so a default change lands in the UI with no edit here. The
+ * shared `pipeline.retry.*` keys carry no default of their own
+ * (they only override per-bucket values when set), so they are
+ * absent from this record by construction.
+ */
+export const PIPELINE_POLICY_DEFAULTS: Record<string, string> = {
+  "pipeline.retry.acquisition.attempts": String(DEFAULT_PIPELINE_POLICY.retry.acquisition.maxAttempts),
+  "pipeline.retry.acquisition.baseDelayMs": String(DEFAULT_PIPELINE_POLICY.retry.acquisition.baseDelayMs),
+  "pipeline.retry.acquisition.maxDelayMs": String(DEFAULT_PIPELINE_POLICY.retry.acquisition.maxDelayMs),
+  "pipeline.retry.acquisition.jitterRatio": String(DEFAULT_PIPELINE_POLICY.retry.acquisition.jitterRatio),
+  "pipeline.retry.delivery.attempts": String(DEFAULT_PIPELINE_POLICY.retry.delivery.maxAttempts),
+  "pipeline.retry.delivery.baseDelayMs": String(DEFAULT_PIPELINE_POLICY.retry.delivery.baseDelayMs),
+  "pipeline.retry.delivery.maxDelayMs": String(DEFAULT_PIPELINE_POLICY.retry.delivery.maxDelayMs),
+  "pipeline.retry.delivery.jitterRatio": String(DEFAULT_PIPELINE_POLICY.retry.delivery.jitterRatio),
+  "pipeline.retry.report.attempts": String(DEFAULT_PIPELINE_POLICY.retry.report.maxAttempts),
+  "pipeline.retry.report.baseDelayMs": String(DEFAULT_PIPELINE_POLICY.retry.report.baseDelayMs),
+  "pipeline.retry.report.maxDelayMs": String(DEFAULT_PIPELINE_POLICY.retry.report.maxDelayMs),
+  "pipeline.retry.report.jitterRatio": String(DEFAULT_PIPELINE_POLICY.retry.report.jitterRatio),
+  "pipeline.notifications.enabled": DEFAULT_PIPELINE_POLICY.notifications.enabled ? "1" : "0",
+  "pipeline.notify.slack": DEFAULT_PIPELINE_POLICY.notifications.slack ? "1" : "0",
+  "pipeline.notify.email": DEFAULT_PIPELINE_POLICY.notifications.email ? "1" : "0",
+  "pipeline.notify.webhook": DEFAULT_PIPELINE_POLICY.notifications.webhook ? "1" : "0",
+  "pipeline.notify.events": (Object.keys(DEFAULT_PIPELINE_POLICY.notifications.events) as NotificationEvent[])
+    .filter((event) => DEFAULT_PIPELINE_POLICY.notifications.events[event])
+    .join(","),
+  "pipeline.fetchTimeoutMs": String(DEFAULT_PIPELINE_POLICY.fetchTimeoutMs),
+};
 
 /**
  * Issue #4781 S2 — the retry-bucket names: the single source for
@@ -133,6 +168,31 @@ function parseIntClamped(
     return undefined;
   }
   return Math.min(max, Math.max(min, Math.trunc(n)));
+}
+
+/**
+ * Issue #4782 S3 — the float parser the retry fields were missing:
+ * jitterRatio is a 0..1 ratio, not an int. Same contract as
+ * parseIntClamped: blank/missing → undefined, non-numeric → warn
+ * + undefined, out of range → clamped. Never throws.
+ */
+function parseFloatClamped(
+  raw: string | undefined,
+  min: number,
+  max: number,
+  label: string
+): number | undefined {
+  if (raw === undefined || raw === null || String(raw).trim() === "") return undefined;
+  const n = Number(String(raw).trim());
+  if (!Number.isFinite(n)) {
+    structuredLog.warn("pipeline_policy.ignoring_non_numeric", {
+      message: `[pipelinePolicy] ignoring non-numeric ${label}: ${String(raw).slice(0, 40)}`,
+      label,
+      raw: String(raw).slice(0, 40),
+    });
+    return undefined;
+  }
+  return Math.min(max, Math.max(min, n));
 }
 
 function parseBool(raw: string | undefined, label: string): boolean | undefined {
@@ -196,7 +256,8 @@ export function resolvePipelinePolicy(
     settingsPrefix: string,
     sharedAttempts: string | undefined,
     sharedBase: string | undefined,
-    sharedMax: string | undefined
+    sharedMax: string | undefined,
+    sharedJitter: string | undefined
   ): RetryPolicy => {
     const attempts =
       parseIntClamped(s(`${settingsPrefix}.attempts`) ?? e(`${envPrefix}_ATTEMPTS`) ?? sharedAttempts, ATTEMPTS_MIN, ATTEMPTS_MAX, `${envPrefix}_ATTEMPTS`) ??
@@ -207,11 +268,16 @@ export function resolvePipelinePolicy(
     const maxDelay =
       parseIntClamped(s(`${settingsPrefix}.maxDelayMs`) ?? e(`${envPrefix}_MAX_DELAY_MS`) ?? sharedMax, DELAY_MIN_MS, DELAY_MAX_MS, `${envPrefix}_MAX_DELAY_MS`) ??
       base.maxDelayMs;
+    // Issue #4782 S3 — jitterRatio is overridable like the other
+    // retry values (per-bucket, then shared), float clamped 0..1.
+    const jitterRatio =
+      parseFloatClamped(s(`${settingsPrefix}.jitterRatio`) ?? e(`${envPrefix}_JITTER_RATIO`) ?? sharedJitter, JITTER_MIN, JITTER_MAX, `${envPrefix}_JITTER_RATIO`) ??
+      base.jitterRatio;
     return {
       maxAttempts: attempts,
       baseDelayMs: baseDelay,
       maxDelayMs: Math.max(maxDelay, baseDelay),
-      jitterRatio: base.jitterRatio,
+      jitterRatio,
     };
   };
 
@@ -223,7 +289,8 @@ export function resolvePipelinePolicy(
       "pipeline.retry.acquisition",
       s("pipeline.retry.attempts") ?? e("PIPELINE_RETRY_ATTEMPTS"),
       s("pipeline.retry.baseDelayMs") ?? e("PIPELINE_RETRY_BASE_DELAY_MS"),
-      s("pipeline.retry.maxDelayMs") ?? e("PIPELINE_RETRY_MAX_DELAY_MS")
+      s("pipeline.retry.maxDelayMs") ?? e("PIPELINE_RETRY_MAX_DELAY_MS"),
+      s("pipeline.retry.jitterRatio") ?? e("PIPELINE_RETRY_JITTER_RATIO")
     ),
     delivery: retryFor(
       d.retry.delivery,
@@ -231,7 +298,8 @@ export function resolvePipelinePolicy(
       "pipeline.retry.delivery",
       s("pipeline.retry.attempts") ?? e("PIPELINE_RETRY_ATTEMPTS"),
       s("pipeline.retry.baseDelayMs") ?? e("PIPELINE_RETRY_BASE_DELAY_MS"),
-      s("pipeline.retry.maxDelayMs") ?? e("PIPELINE_RETRY_MAX_DELAY_MS")
+      s("pipeline.retry.maxDelayMs") ?? e("PIPELINE_RETRY_MAX_DELAY_MS"),
+      s("pipeline.retry.jitterRatio") ?? e("PIPELINE_RETRY_JITTER_RATIO")
     ),
     report: retryFor(
       d.retry.report,
@@ -239,7 +307,8 @@ export function resolvePipelinePolicy(
       "pipeline.retry.report",
       s("pipeline.retry.attempts") ?? e("PIPELINE_RETRY_ATTEMPTS"),
       s("pipeline.retry.baseDelayMs") ?? e("PIPELINE_RETRY_BASE_DELAY_MS"),
-      s("pipeline.retry.maxDelayMs") ?? e("PIPELINE_RETRY_MAX_DELAY_MS")
+      s("pipeline.retry.maxDelayMs") ?? e("PIPELINE_RETRY_MAX_DELAY_MS"),
+      s("pipeline.retry.jitterRatio") ?? e("PIPELINE_RETRY_JITTER_RATIO")
     ),
   };
 
@@ -266,6 +335,106 @@ export function resolvePipelinePolicy(
     d.fetchTimeoutMs;
 
   return { retry, notifications, fetchTimeoutMs };
+}
+
+/**
+ * Issue #4782 S3 — every `pipeline.*` key the resolver reads, in
+ * one list. The single source for which settings exist: the
+ * settings reader, the settings route's validation, and the UI
+ * all enumerate these keys — never a second list.
+ */
+export const PIPELINE_POLICY_SETTING_KEYS: ReadonlyArray<string> = [
+  "pipeline.retry.attempts",
+  "pipeline.retry.baseDelayMs",
+  "pipeline.retry.maxDelayMs",
+  "pipeline.retry.jitterRatio",
+  "pipeline.retry.acquisition.attempts",
+  "pipeline.retry.acquisition.baseDelayMs",
+  "pipeline.retry.acquisition.maxDelayMs",
+  "pipeline.retry.acquisition.jitterRatio",
+  "pipeline.retry.delivery.attempts",
+  "pipeline.retry.delivery.baseDelayMs",
+  "pipeline.retry.delivery.maxDelayMs",
+  "pipeline.retry.delivery.jitterRatio",
+  "pipeline.retry.report.attempts",
+  "pipeline.retry.report.baseDelayMs",
+  "pipeline.retry.report.maxDelayMs",
+  "pipeline.retry.report.jitterRatio",
+  "pipeline.notifications.enabled",
+  "pipeline.notify.slack",
+  "pipeline.notify.email",
+  "pipeline.notify.webhook",
+  "pipeline.notify.events",
+  "pipeline.fetchTimeoutMs",
+];
+
+/**
+ * Issue #4782 S3 — build the settings map the resolver takes from
+ * any per-tenant settings reader (the orchestrator's
+ * `readSettingRaw` over mas_settings). Only keys the resolver
+ * reads are ever asked for, and only non-null values are carried —
+ * an absent key stays env-only, never an empty string.
+ */
+export function readPipelineSettings(
+  read: (key: string) => string | null,
+): Record<string, string | undefined> {
+  const out: Record<string, string | undefined> = {};
+  for (const key of PIPELINE_POLICY_SETTING_KEYS) {
+    const value = read(key);
+    if (value !== null && value !== undefined) out[key] = value;
+  }
+  return out;
+}
+
+/**
+ * Issue #4782 S3 — validate one settings write by name, for the
+ * settings route (and any other writer). Returns an error message
+ * or null when the value is acceptable. Refused by name, never
+ * clamped: a write that reads back differently from what the
+ * operator asked for is a lie, so out-of-range values are errors
+ * here even though the resolver clamps them at read time.
+ */
+export function validatePipelinePolicySetting(key: string, value: string): string | null {
+  if (!PIPELINE_POLICY_SETTING_KEYS.includes(key)) return `unknown pipeline setting: ${key}`;
+  const v = String(value).trim();
+  if (v === "") return `${key} must not be empty`;
+  if (key.endsWith(".attempts")) {
+    const n = Number(v);
+    if (!Number.isFinite(n) || !Number.isInteger(n)) return `${key} must be a whole number`;
+    if (n < ATTEMPTS_MIN || n > ATTEMPTS_MAX) return `${key} must be ${ATTEMPTS_MIN}..${ATTEMPTS_MAX}`;
+    return null;
+  }
+  if (key.endsWith(".baseDelayMs") || key.endsWith(".maxDelayMs")) {
+    const n = Number(v);
+    if (!Number.isFinite(n) || !Number.isInteger(n)) return `${key} must be a whole number of milliseconds`;
+    if (n < DELAY_MIN_MS || n > DELAY_MAX_MS) return `${key} must be ${DELAY_MIN_MS}..${DELAY_MAX_MS}`;
+    return null;
+  }
+  if (key.endsWith(".jitterRatio")) {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return `${key} must be a number`;
+    if (n < JITTER_MIN || n > JITTER_MAX) return `${key} must be ${JITTER_MIN}..${JITTER_MAX}`;
+    return null;
+  }
+  if (key === "pipeline.fetchTimeoutMs") {
+    const n = Number(v);
+    if (!Number.isFinite(n) || !Number.isInteger(n)) return `${key} must be a whole number of milliseconds`;
+    if (n < 1_000 || n > 120_000) return `${key} must be 1000..120000`;
+    return null;
+  }
+  if (key === "pipeline.notify.events") {
+    const known: NotificationEvent[] = ["started", "completed", "partial", "failed", "blocked", "held", "delivered"];
+    for (const token of v.split(",").map((t) => t.trim().toLowerCase()).filter(Boolean)) {
+      const name = token.startsWith("-") ? token.slice(1) : token;
+      if (!known.includes(name as NotificationEvent)) return `${key} has unknown event: ${token}`;
+    }
+    return null;
+  }
+  // The boolean toggles: notifications.enabled, notify.slack/email/webhook.
+  if (!["1", "true", "on", "yes", "0", "false", "off", "no"].includes(v.toLowerCase())) {
+    return `${key} must be true or false`;
+  }
+  return null;
 }
 
 /** Should a notification for `event` go out on `channel` at all? */

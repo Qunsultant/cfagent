@@ -530,6 +530,12 @@
  * /trigger (in handleSchedulesRoutes, immediately before the
  * single-row pause/resume/trigger branches they must precede) —
  * bringing the pinned inventory to 498 entries.
+ *
+ * Issue #4782 added two — GET/POST /trading/settings/pipeline-policy
+ * (in handleReportsRoutes, after the report-dispatch-hitl handler,
+ * before /tenant/settings/auto-refresh) — bringing the pinned
+ * inventory to 500 entries (498 on current main); the
+ * delegation sequence is unchanged (same handler, same position).
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
@@ -659,6 +665,8 @@ const EXPECTED_INVENTORY = [
   "handleReportsRoutes :: endsWith(\"/trading/reports/confirmations\")",
   "handleReportsRoutes :: endsWith(\"/trading/settings/report-dispatch-hitl\")",
   "handleReportsRoutes :: endsWith(\"/trading/settings/report-dispatch-hitl\")",
+  "handleReportsRoutes :: endsWith(\"/trading/settings/pipeline-policy\")",
+  "handleReportsRoutes :: endsWith(\"/trading/settings/pipeline-policy\")",
   "handleReportsRoutes :: endsWith(\"/tenant/settings/auto-refresh\")",
   "handleReportsRoutes :: endsWith(\"/tenant/settings/providers\")",
   "handleReportsRoutes :: endsWith(\"/trading/reports/confirm\")",

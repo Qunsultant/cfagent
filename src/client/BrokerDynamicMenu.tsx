@@ -34,6 +34,7 @@ import {
 import { useAutoRefresh } from "./autoRefresh";
 import { useTenantProviders, DATA_PROVIDER_OPTIONS, labelForDataProvider } from "./tenantProviders";
 import { getPollingConfig } from "./pollingConfig";
+import { PipelinePolicyPanel } from "./PipelinePolicyPanel";
 import {
   FONT_SCALE_PRESETS,
   getStoredFontScale,
@@ -1153,6 +1154,9 @@ export function BrokerDynamicMenu({
                   </div>
                 </div>
               )}
+
+              {/* Issue #4782 S3 — pipeline-policy settings (retry budgets + notifications). Self-fetching panel: reads/writes the per-tenant pipeline.* globals through /api/trading/settings/pipeline-policy. */}
+              <PipelinePolicyPanel />
 
               {/* Ads & Partner Deals Configuration */}
               <div className="settings-pref-row">

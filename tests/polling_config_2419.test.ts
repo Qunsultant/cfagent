@@ -35,7 +35,26 @@ describe("polling config (#2419)", () => {
       autoRefreshDefaultS: 15,
       autoRefreshMinS: 10,
       autoRefreshMaxS: 300,
+      // Issue #4782 S3 — the live parent poll intervals (the 15s
+      // DEFAULT_POLL_INTERVAL_MS is dead code, left for #4776).
+      screenDoorParentPollMs: 5_000,
+      chatScreenParentPollMs: 5_000,
     });
+  });
+
+  it("resolves the live parent poll intervals from env (#4782 S3)", () => {
+    const resolved = resolvePollingConfigFromEnv({
+      SCREEN_DOOR_PARENT_POLL_MS: "3000",
+      CHAT_SCREEN_PARENT_POLL_MS: "7000",
+    });
+    expect(resolved.screenDoorParentPollMs).toBe(3_000);
+    expect(resolved.chatScreenParentPollMs).toBe(7_000);
+    const bad = resolvePollingConfigFromEnv({
+      SCREEN_DOOR_PARENT_POLL_MS: "not-a-number",
+      CHAT_SCREEN_PARENT_POLL_MS: "-5",
+    });
+    expect(bad.screenDoorParentPollMs).toBe(5_000);
+    expect(bad.chatScreenParentPollMs).toBe(5_000);
   });
 
   it("resolves injected values and ignores invalid ones", () => {

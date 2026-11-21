@@ -135,6 +135,7 @@ import {
   type OptionsDecodedRequestShape,
   type OptionsRequestShape,
 } from "./optionsStepPorts";
+import { envStrings } from "./envStrings";
 
 export type OptionsStageControlOperation =
   | "run"
@@ -558,6 +559,10 @@ export async function controlOptionsStage(
             }),
           ),
           invocation: "sync",
+          // Issue #4782 S3 — the stage re-run resolves its retry
+          // policy from the caller's env (platform default);
+          // the step deps above already carry the same env.
+          ...(input.env ? { env: envStrings(input.env) } : {}),
         })
       : reader;
     let state: string;
