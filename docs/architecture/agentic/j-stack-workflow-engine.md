@@ -251,10 +251,49 @@ jobs are NOT parameterized — all four are built by
 fundamentals, technicals, sentiment, and options-chains are. So
 the 6b3 flip cannot pass a `universe` param to the quotes feed
 node as-is (any universe input throws `universeUnknown` on a
-non-parameterized job); the flip must leave it absent (default
-nasdaq100) or make the quotes jobs parameterized — 6b1/6b2
-territory, not this slice's.
+non-parameterized job). RESOLVED by 6b1 (#5955, next section):
+the four nasdaq100 quotes jobs are parameterized now, so the flip
+can pass a universe param.
 <!-- /5954: explicit-symbols feed mode -->
+
+<!-- 5955: per-shard universe in feed.pull -->
+One job definition serves multi-universe commands (#5955, #4437
+slice 6b1): `feed.pull` reads the unit's shard universe — the
+shard table's row for this unit's shard key (`shardRowFor`, the
+one shard-table reader in the step, shared with 6b0's
+`explicitSymbolsFor`), the bespoke `screenRequestFromParams`
+idiom — and the run input the quotes runner resolves is the
+shard's stored list. Precedence: explicit symbols (6b0) win over
+the shard universe; the shard universe wins over the node's
+`universe` param; absent ⇒ the job's default, as before. The
+quotes jobs had to become parameterized for this to work: the
+four nasdaq100 jobs (all built by `nasdaq100QuotesJob`) now carry
+`parameterizedUniverse: true` on the #3930 idiom — the id names
+the DEFAULT universe, a run's `universe` input names the stored
+list it actually pulls. The per-universe-job route was not
+viable: only one source has per-universe quotes jobs, so the
+other three sources could not serve an ALL run that way.
+Parameterizing is backwards-compatible: no existing caller
+passed a universe input to a quotes job (it threw), an absent
+input still resolves to nasdaq100, and the per-universe jobs
+stay registered for their existing callers.
+
+A universe-shard unit pulls its WHOLE universe, never a
+partition of it: the shard IS the universe (the bespoke feed
+resolves the shard's universe to its full list). The step's
+`feedShardSymbols` partition splits ONE universe across N units
+and applies only when the shard row carries no universe (the
+feed family's own s0/s1 sharding); partitioning a universe shard
+across all shard keys would silently drop most of the universe
+(an ALL unit fetched one-sixth of nasdaq100 before this slice).
+A shard universe with no stored index list (ETF / LEV_ETF — no
+`IndexId`) refuses by name (`FEED_UNIVERSE_UNKNOWN`) before any
+fetch; that coverage is 6b2's slice. Parity is pinned by
+`tests/feed_per_shard_universe_5955.test.ts` (each ALL unit
+fetches its own whole universe; monolith single-universe runs
+unchanged; explicit symbols still win; partition sharding
+unchanged).
+<!-- /5955: per-shard universe in feed.pull -->
 
 
 ### 1.3 The one-engine doctrine
