@@ -409,8 +409,8 @@ export function runSummaryFromReport(hit: ScheduledReportHit): RunSummary {
     reportId: hit.id,
     scanRunId: kind === "options_scanner" ? canonicalScanRunId(hit.body) : null,
     discoveryRunId: kind === "discovery" ? canonicalDiscoveryRunId(hit.body) : null,
-    // Issue #4259 / #581: research canonical rows carry body.jobRunId
-    // (`research:<runId>`) so the ledger folds the D1 twin onto the report.
+    // Issue #4259 / #581: when a research canonical row carries an actual
+    // body.jobRunId (`research:<run-body>`), fold its D1 twin onto the report.
     scheduleId: null,
     asyncJobId: null,
     workflowId: strOrNull(body?.jobRunId) ?? null,
