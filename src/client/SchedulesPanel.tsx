@@ -91,6 +91,14 @@ export interface ScheduleItem {
   lastRunOutcome?: string;
   /** Issue #3121 #4240 — the retention row's last pass summary (dispatch detail, verbatim). */
   lastRunDetail?: string;
+  /**
+   * Issue #5889 — the row's source (kind + job identity + arming
+   * origin, derived once on the server) and the record's creation
+   * provenance where present. Absent on legacy rows, which read as
+   * Unknown / not recorded, never a fabricated source.
+   */
+  source?: ScheduleSource;
+  provenance?: ScheduleProvenance;
 }
 
 // Issue #4329 S2 (#4331): the owner's ten filters, configured in
@@ -113,6 +121,17 @@ import {
   type ScheduleListKind,
   type ScheduleListStatusFilter,
 } from "../config/scheduleListModes";
+import {
+  SCHEDULE_SOURCE_FILTER_LABELS,
+  resolveScheduleSourceFilters,
+  scheduleSourceAgents,
+  scheduleSourceDisplay,
+  scheduleSourceKindOf,
+  scheduleSourceWorkflows,
+  type ScheduleSource,
+  type ScheduleSourceFilter,
+} from "../config/scheduleSourceModes";
+import type { ScheduleProvenance } from "../schedule";
 import { SCHEDULE_ROW_COLUMN_LABELS } from "../config/scheduleRowModes";
 import {
   nextTableSort,
@@ -269,6 +288,13 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
   // Issue #4389 — the list's two extra dimensions: a status filter beside the
   // kinds, and a sort applied to the rows (never to the source array).
   const [statusFilter, setStatusFilter] = useState<ScheduleListStatusFilter>("all");
+  // Issue #5889 — the source dimension beside the kinds and the status: one
+  // source kind at a time (or the Cron timing slice), plus the per-agent and
+  // per-workflow views, which name only the agents and workflows the loaded
+  // rows actually carry. All three compose with kind and status.
+  const [sourceFilter, setSourceFilter] = useState<ScheduleSourceFilter>("all");
+  const [agentFilter, setAgentFilter] = useState<string>("all");
+  const [workflowFilter, setWorkflowFilter] = useState<string>("all");
   const [sort, setSort] = useState<TableSort | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [focusMissing, setFocusMissing] = useState(false);
@@ -484,6 +510,29 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
       statusFilter === "all" ||
       (statusFilter === "paused" ? Boolean(s.paused) : !s.paused),
   );
+  // Issue #5889 — the source filter composes with kind and status. "cron"
+  // is a timing slice, not a source: every cron-timed row, whatever its
+  // source (it overlaps Derived by design — each row still carries
+  // exactly one source). The per-agent and per-workflow views name only
+  // the values the loaded rows carry; a selected value that stops
+  // existing (a refresh dropped its last row) falls back to all.
+  const sourceFiltered = statusFiltered.filter((s) => {
+    if (sourceFilter === "all") return true;
+    if (sourceFilter === "cron") return s.type === "cron";
+    return scheduleSourceKindOf(s) === sourceFilter;
+  });
+  const agentValues = scheduleSourceAgents(allSchedules);
+  const effectiveAgentFilter = agentValues.includes(agentFilter) ? agentFilter : "all";
+  const agentFiltered = sourceFiltered.filter(
+    (s) => effectiveAgentFilter === "all" || s.source?.agent === effectiveAgentFilter,
+  );
+  const workflowValues = scheduleSourceWorkflows(allSchedules);
+  const effectiveWorkflowFilter = workflowValues.includes(workflowFilter)
+    ? workflowFilter
+    : "all";
+  const workflowFiltered = agentFiltered.filter(
+    (s) => effectiveWorkflowFilter === "all" || s.source?.workflow === effectiveWorkflowFilter,
+  );
   // The one ordering rule (`src/client/tableSort.ts`): numbers numeric, strings
   // locale-aware, blanks last, ties stable.
   const sortValue = (s: ScheduleItem, key: string): string | number | null => {
@@ -494,6 +543,10 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
         return s.id;
       case "cadence":
         return genericCadence(s);
+      case "source": {
+        const display = scheduleSourceDisplay(s);
+        return `${display.label} ${display.job}`;
+      }
       case "status":
         return s.paused ? 1 : 0;
       case "scope": {
@@ -504,8 +557,29 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
         return null;
     }
   };
-  const rows = sortTableRows(statusFiltered, sort, sortValue);
+  const rows = sortTableRows(workflowFiltered, sort, sortValue);
   const statusFilters = resolveScheduleListStatusFilters();
+
+  // Count by source (issue #5889): one count per configured source
+  // filter, from the whole list (never the kind-filtered list — the
+  // Source buttons are their own dimension, like the kind buttons).
+  // The Cron count is the timing slice's count: every cron-timed row.
+  const sourceCounts: Record<string, number> = { all: allSchedules.length };
+  for (const filter of resolveScheduleSourceFilters()) {
+    if (filter === "all") continue;
+    sourceCounts[filter] =
+      filter === "cron"
+        ? allSchedules.filter((s) => s.type === "cron").length
+        : allSchedules.filter((s) => scheduleSourceKindOf(s) === filter).length;
+  }
+  const agentCounts: Record<string, number> = {};
+  for (const agent of agentValues) {
+    agentCounts[agent] = allSchedules.filter((s) => s.source?.agent === agent).length;
+  }
+  const workflowCounts: Record<string, number> = {};
+  for (const workflow of workflowValues) {
+    workflowCounts[workflow] = allSchedules.filter((s) => s.source?.workflow === workflow).length;
+  }
 
   // Count by kind (issue #4329 S2): one classifier, every configured filter.
   const kindCounts = countSchedulesByKind(allSchedules);
@@ -645,6 +719,25 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
           </span>
         </Stack>
       ),
+    },
+    {
+      // Issue #5889 — the Source column: the row's source label, then
+      // its job identity and arming origin. A row with no source reads
+      // Unknown / not recorded, never a fabricated source.
+      key: "source",
+      header: sortableHeader("source", SCHEDULE_ROW_COLUMN_LABELS.source),
+      ariaSort: tableSortAria(sort, "source"),
+      render: (s) => {
+        const display = scheduleSourceDisplay(s);
+        return (
+          <Stack gap="0-5">
+            <strong className="ui-meta">{display.label}</strong>
+            <span className="ui-meta">
+              {display.job} · {display.origin}
+            </span>
+          </Stack>
+        );
+      },
     },
     {
       key: "scope",
@@ -799,11 +892,11 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
   // Issue #4333 — the columns this surface shows come from the shared row
   // vocabulary (`src/config/scheduleRowModes.ts`), the same one the goals and
   // queue tables resolve: the base identity columns and this list's own
-  // `scope` lead, the action column closes. A deployment can hide a column
+  // `source` lead, the action column closes. A deployment can hide a column
   // from config; the order is the vocabulary's.
   // The vocabulary also fixes the ORDER: a column the deployment hides is
-  // dropped, the rest keep the shared order (status before scope, actions
-  // last), never the order this file happens to declare its factories in.
+  // dropped, the rest keep the shared order (source, then status, then scope,
+  // actions last), never the order this file happens to declare its factories in.
   const listColumnOrder = resolveScheduleRowColumns("list");
   const columnByKey = new Map(genericColumns.map((column) => [column.key, column]));
   const visibleGenericColumns: TableColumn<ScheduleItem>[] = listColumnOrder
@@ -935,6 +1028,27 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
             ariaLabel="Filter schedules by status"
           />
         )}
+        {/* Issue #5889 — the source dimension beside the kinds and the
+            status; the three compose (Options + Derived + Active). The
+            vocabulary is configuration, like the kinds. Cron is a
+            timing slice, not a source: every cron-timed row, whatever
+            its source — it overlaps Derived by design. */}
+        <PillGroup
+          options={resolveScheduleSourceFilters().map((id) => ({
+            id,
+            label: `${SCHEDULE_SOURCE_FILTER_LABELS[id]} (${sourceCounts[id] ?? 0})`,
+            ...(id === "cron"
+              ? {
+                  tooltip:
+                    "Rows armed on a cron expression — a timing slice, overlapping Derived by design; each row still carries one source",
+                }
+              : {}),
+          }))}
+          value={sourceFilter}
+          onChange={(value) => setSourceFilter(value as ScheduleSourceFilter)}
+          size="sm"
+          ariaLabel="Filter schedules by source"
+        />
         <Button
           type="button"
           variant="secondary"
@@ -946,6 +1060,45 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
           ↻ Refresh
         </Button>
       </Flex>
+
+      {/* Issue #5889 — the per-agent and per-workflow views: only the
+          agents and workflows the loaded rows name get a button, so a
+          view with no rows is never invented. Both compose with kind,
+          status and source. */}
+      {(agentValues.length > 0 || workflowValues.length > 0) && (
+        <Flex justify="between" align="center" gap="3" wrap>
+          {agentValues.length > 0 && (
+            <PillGroup
+              options={[
+                { id: "all", label: "All agents" },
+                ...agentValues.map((agent) => ({
+                  id: agent,
+                  label: `${agent} (${agentCounts[agent] ?? 0})`,
+                })),
+              ]}
+              value={effectiveAgentFilter}
+              onChange={(value) => setAgentFilter(value)}
+              size="sm"
+              ariaLabel="Filter schedules by agent"
+            />
+          )}
+          {workflowValues.length > 0 && (
+            <PillGroup
+              options={[
+                { id: "all", label: "All workflows" },
+                ...workflowValues.map((workflow) => ({
+                  id: workflow,
+                  label: `${workflow} (${workflowCounts[workflow] ?? 0})`,
+                })),
+              ]}
+              value={effectiveWorkflowFilter}
+              onChange={(value) => setWorkflowFilter(value)}
+              size="sm"
+              ariaLabel="Filter schedules by workflow"
+            />
+          )}
+        </Flex>
+      )}
 
       {/* Issue #5878 — bulk pause / resume / run-now: the same verbs as
           the per-row buttons, over a scope — all schedules, or the kind
@@ -1051,7 +1204,7 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
               title={
                 <>
                   <span aria-hidden="true">🗂️</span> Schedules
-                  <Badge tone="accent" size="xs">{statusFiltered.length} Shown</Badge>
+                  <Badge tone="accent" size="xs">{rows.length} Shown</Badge>
                   <span className="ui-meta">Every durable schedule, one row each</span>
                 </>
               }
@@ -1066,10 +1219,29 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
             rowTitle={(s) => `${s.id} · ${s.callback}`}
             containerClassName="sched-table-scroll"
             empty={
+              // Issue #5889 — the empty state names the active filters, so
+              // an empty source / agent / workflow view reads as "nothing
+              // with this source", never as "nothing scheduled".
               <p className="ui-meta">
-                {statusFilter === "all"
-                  ? "No schedules in this group."
-                  : `No ${SCHEDULE_LIST_STATUS_LABELS[statusFilter].toLowerCase()} schedules in this group.`}
+                {(() => {
+                  const parts: string[] = [];
+                  if (activeTab !== "all") parts.push(SCHEDULE_LIST_FILTER_LABELS[activeTab]);
+                  if (sourceFilter !== "all") {
+                    parts.push(
+                      sourceFilter === "cron" ? "Cron" : SCHEDULE_SOURCE_FILTER_LABELS[sourceFilter],
+                    );
+                  }
+                  if (effectiveAgentFilter !== "all") parts.push(`agent ${effectiveAgentFilter}`);
+                  if (effectiveWorkflowFilter !== "all") {
+                    parts.push(`workflow ${effectiveWorkflowFilter}`);
+                  }
+                  if (statusFilter !== "all") {
+                    parts.push(SCHEDULE_LIST_STATUS_LABELS[statusFilter].toLowerCase());
+                  }
+                  return parts.length > 0
+                    ? `No ${parts.join(" · ")} schedules.`
+                    : "No schedules in this group.";
+                })()}
               </p>
             }
           />

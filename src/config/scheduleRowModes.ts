@@ -12,7 +12,7 @@
  * own" is a property of the configuration, not a claim two files repeat:
  *
  *   base          schedule · id · cadence — the row's identity, on every list
- *   list extras   status · scope         — the state, then the payload
+ *   list extras   source · status · scope — the source, then the state, then the payload
  *   goal extras   operation · budget · lastRun · provenance
  *   queue extras  scope · status
  *   actions       appended last where the surface owns per-row actions
@@ -30,6 +30,7 @@ export const SCHEDULE_ROW_COLUMN_IDS = [
   "schedule",
   "id",
   "cadence",
+  "source",
   "scope",
   "operation",
   "budget",
@@ -45,6 +46,7 @@ export const SCHEDULE_ROW_COLUMN_LABELS: Record<ScheduleRowColumn, string> = {
   schedule: "Schedule",
   id: "Schedule ID",
   cadence: "Cadence",
+  source: "Source",
   scope: "Scope",
   operation: "Operation",
   budget: "Budget",
@@ -73,7 +75,9 @@ export const SCHEDULE_ROW_SURFACE_EXTRAS: Record<
 > = {
   // Issue #4389 — status is its own column on the list (the owner: "status
   // must be its own column"), not a badge inside the name cell.
-  list: ["status", "scope"],
+  // Issue #5889 — source is its own column on the list, right after the
+  // identity columns: a row's source is identity, not payload.
+  list: ["source", "status", "scope"],
   goals: ["operation", "budget", "lastRun", "provenance"],
   queue: ["scope", "status"],
 };

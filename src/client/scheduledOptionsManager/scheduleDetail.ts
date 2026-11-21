@@ -1,5 +1,7 @@
 import type { StrategyProfile } from "../../trading";
 import type { ScheduledTaskItem } from "./types";
+import type { ScheduleProvenance } from "../../schedule";
+import { scheduleSourceDisplay } from "../../config/scheduleSourceModes";
 import { systemJobFor } from "./systemJobs";
 import { cadenceText, formatNextRun, payloadOf } from "./format";
 import { formatNoViewConstraints } from "./noView";
@@ -39,7 +41,7 @@ export interface ScheduleDetailField {
 }
 
 export interface ScheduleDetailSection {
-  id: "schedule" | "ownership" | "scope" | "delivery" | "views" | "constraints" | "run";
+  id: "schedule" | "source" | "ownership" | "scope" | "delivery" | "views" | "constraints" | "run";
   title: string;
   fields: ScheduleDetailField[];
 }
@@ -428,6 +430,35 @@ export function buildScheduleDetail(
     return value === undefined ? [] : [{ label, value }];
   });
 
+  // Issue #5889 — the Source section: the same source the list's
+  // Source column shows (kind + job identity + arming origin), plus
+  // the agent / workflow the row names and the creation record where
+  // the row carries one. A row with no source reads Unknown / not
+  // recorded — the dialog and the column can never disagree, because
+  // both read the one display helper over the row's server source.
+  const sourceDisplay = scheduleSourceDisplay(item);
+  const sourceProvenance: ScheduleProvenance | undefined =
+    item.provenance ??
+    (payload.provenance &&
+    typeof payload.provenance === "object" &&
+    ["user", "system", "agent"].includes(
+      (payload.provenance as Record<string, unknown>).origin as string,
+    )
+      ? (payload.provenance as ScheduleProvenance)
+      : undefined);
+  const sourceFields: ScheduleDetailField[] = [
+    { label: "Source", value: sourceDisplay.label },
+    { label: "Job", value: sourceDisplay.job, mono: true },
+    { label: "Arming origin", value: sourceDisplay.origin },
+    ...(sourceDisplay.agent ? [{ label: "Agent", value: sourceDisplay.agent, mono: true }] : []),
+    ...(sourceDisplay.workflow
+      ? [{ label: "Workflow", value: sourceDisplay.workflow, mono: true }]
+      : []),
+    ...(sourceProvenance?.createdBy
+      ? [{ label: "Created by", value: sourceProvenance.createdBy }]
+      : []),
+  ];
+
   const deliveryFields: ScheduleDetailField[] = [
     {
       label: "Slack",
@@ -453,6 +484,7 @@ export function buildScheduleDetail(
 
   const sections: ScheduleDetailSection[] = [
     { id: "schedule", title: "Schedule", fields: scheduleFields },
+    { id: "source", title: "Source", fields: sourceFields },
     { id: "ownership", title: "Ownership", fields: ownershipFields },
     { id: "scope", title: "Scope", fields: scopeFields },
     { id: "delivery", title: "Delivery", fields: deliveryFields },

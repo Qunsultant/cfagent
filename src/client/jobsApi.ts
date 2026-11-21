@@ -11,6 +11,7 @@
 import type { JobRunRecord } from "../services/jobRunRecords";
 import type { UnifiedScheduleRecord } from "../data/unifiedSchedulePorts";
 import type { ScheduleProvenance } from "../schedule";
+import type { ScheduleSource } from "../config/scheduleSourceModes";
 // The one transport for this module: apiFetch polls the 202
 // async-job contract (#3309) — a queued list/create/detail call
 // answers 202 with a statusUrl and the caller gets the completed
@@ -50,6 +51,14 @@ export interface ScheduleListItem {
   lastRunOutcome?: string;
   /** Issue #3121 #4240 — the retention row's last pass summary (dispatch detail, verbatim). */
   lastRunDetail?: string;
+  /**
+   * Issue #5889 — the row's source (kind + job identity + arming
+   * origin, derived once on the server) and the record's creation
+   * provenance where present. Absent on legacy rows, which read as
+   * Unknown / not recorded, never a fabricated source.
+   */
+  source?: ScheduleSource;
+  provenance?: ScheduleProvenance;
 }
 
 /** A schedule detail: the raw SDK schedule, or a paused list item. */
