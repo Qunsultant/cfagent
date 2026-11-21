@@ -31,7 +31,7 @@ import {
   type YahooHistoryDeps,
   type TradingPlatformId,
 } from "../trading";
-import { DEFAULT_RESEARCH_BROKER_ID } from "../config/researchJobConfig";
+import { DEFAULT_TENANT_PROVIDERS } from "../data/commercialPorts";
 import { isDemoCalibratedChainsEnabled } from "../config/demoMode";
 import type { Env, ETradeOptionChain } from "../types";
 import type { NasdaqStockListing } from "./nasdaqListings";
@@ -187,7 +187,7 @@ export class EtradeResearchDataProvider implements ResearchDataProvider {
     // ETradeService construction — the T0 ledger's researchProviders
     // entry). ORM-free, exactly as before.
     this.platform = TradingPlatformRegistry.getPlatform(
-      (selection?.brokerId ?? DEFAULT_RESEARCH_BROKER_ID) as TradingPlatformId,
+      (selection?.brokerId ?? DEFAULT_TENANT_PROVIDERS.brokerId) as TradingPlatformId,
       env,
       undefined,
       userLogin,
@@ -237,13 +237,13 @@ export class EtradeResearchDataProvider implements ResearchDataProvider {
       // throws here and becomes null, never a stale-cache snapshot.
       quote = await fetchQuoteLiveStrict(this.platform, symbol, {
         // Research follows the selected broker mode, never the worker's
-        // deployment environment (a PROD worker can still read Alpaca Paper).
+        // deployment environment (a PROD worker can still read paper data).
         isLive: this.selection?.mode === "live",
       });
     } catch (error) {
       structuredLog.warn("researchProviders.quote_unavailable", {
         symbol,
-        brokerId: this.selection?.brokerId ?? DEFAULT_RESEARCH_BROKER_ID,
+        brokerId: this.selection?.brokerId ?? DEFAULT_TENANT_PROVIDERS.brokerId,
         mode: this.selection?.mode ?? "paper",
         error: error instanceof Error ? error.message : String(error),
       });
@@ -263,7 +263,7 @@ export class EtradeResearchDataProvider implements ResearchDataProvider {
       marketCap: marketCapDollars,
       isEtf: etfs.get(symbol.toUpperCase()) ?? false,
       quoteStatus: quote.quoteStatus ?? "unknown",
-      source: quote.source ?? this.selection?.brokerId ?? DEFAULT_RESEARCH_BROKER_ID,
+      source: quote.source ?? this.selection?.brokerId ?? DEFAULT_TENANT_PROVIDERS.brokerId,
     };
   }
 

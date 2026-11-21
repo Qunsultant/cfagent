@@ -24,7 +24,7 @@ import type { ResearchReport } from "../../services/researchPipeline";
 import type { ResearchReportArtifactOutcome, ResearchWorkbookOutcome } from "../../trading";
 import { resolveCopilotTradingSelection } from "../copilotTradingMode";
 import { resolveTenantBroker } from "../../services/tenantProviders";
-import { resolveTradeEnvironmentFromSettings } from "../routes/brokerEnvironment";
+import { resolveTradeEnvironmentFromSettings as resolveSharedTradingEnvironment } from "../routes/brokerEnvironment";
 import { tradingTypeFor } from "../../trading";
 import { createStructuredLogger } from "../../observability/structuredLogger";
 import { createObservabilitySink } from "../../observability/createObservabilityPorts";
@@ -212,7 +212,7 @@ export async function runResearchAndPublish(ctx: ResearchPublishContext,
           // unbound, use the platform's documented broker default and the
           // shared TEST/paper trade-environment default; never deployment PROD.
           const brokerId = await resolveTenantBroker(ctx.env);
-          const environment = resolveTradeEnvironmentFromSettings(
+          const environment = resolveSharedTradingEnvironment(
             ctx.readSettingRaw,
             ctx.env,
           );

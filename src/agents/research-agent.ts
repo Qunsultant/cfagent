@@ -126,7 +126,7 @@ export interface ResearchRunRequest {
   userLogin?: string;
   /**
    * Issue #5912/#5974 — which venue to quote from and in which mode. Unset
-   * uses the shared tenant selection, defaulting to Alpaca Paper. An unknown
+   * uses the shared tenant selection, with the platform's paper default. An unknown
    * broker id refuses by name in the platform registry, before any quote.
    */
   brokerId?: string;
