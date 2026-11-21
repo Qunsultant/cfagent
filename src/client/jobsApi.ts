@@ -392,6 +392,44 @@ export async function resumeSchedule(
   });
 }
 
+/** One row's outcome in a bulk pause / resume / run-now summary. */
+export interface BulkScheduleRowResult {
+  id: string;
+  kind: string;
+  outcome: "paused" | "already-paused" | "resumed" | "already-active" | "triggered" | "refused";
+  reason?: string;
+}
+
+/** A bulk pause / resume / run-now summary: counts plus one result per in-scope row. */
+export interface BulkScheduleResult {
+  verb: "pause" | "resume" | "trigger";
+  scope: string;
+  total: number;
+  applied: number;
+  already: number;
+  refused: number;
+  results: BulkScheduleRowResult[];
+}
+
+/**
+ * Issue #5878 — one bulk verb over a scope (`all` or one schedule
+ * kind): POST /api/schedules/<verb> with `{ scope }`. The server
+ * answers 200 with the per-row summary — refusals are rows in the
+ * summary, never an HTTP error — so this resolves (never throws)
+ * whenever the server answers.
+ */
+export async function bulkScheduleAction(
+  verb: "pause" | "resume" | "trigger",
+  scope: string,
+  headers?: Record<string, string>,
+): Promise<BulkScheduleResult> {
+  return api<BulkScheduleResult>(`/api/schedules/${verb}`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ scope }),
+  });
+}
+
 export async function deleteSchedule(
   id: string,
   headers?: Record<string, string>,

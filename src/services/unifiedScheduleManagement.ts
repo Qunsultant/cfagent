@@ -44,6 +44,8 @@ import {
 } from "./scheduleSystems";
 import { resolveCronEntryPoint } from "./consolidatedCronEntries";
 import { canonicalJson } from "./scheduleDedupe";
+import { classifyScheduleKind } from "./scheduleKinds";
+import { SCHEDULE_LIST_KIND_IDS, type ScheduleListKind } from "../config/scheduleListModes";
 import { RENEWAL_DISPATCH_CRON, RETENTION_DISPATCH_CRON, RETENTION_RECORD_ID, TOKEN_RENEWAL_RECORD_ID } from "./heartbeatDueChecks";
 import { NIGHTLY_RESEARCH_DISPATCH_CRON, NIGHTLY_RESEARCH_RECORD_ID } from "./researchScheduleGuard";
 import {
@@ -1560,6 +1562,298 @@ export async function triggerUnifiedSchedule(
       : alarm.payload;
   await run(alarm.callback, payload);
   return { ok: true, scheduleId: record?.id ?? id, callback: alarm.callback };
+}
+
+/* =================================================================
+ * Bulk — pause / resume / trigger in bulk and per category (#5878).
+ * ================================================================= */
+
+/** The three bulk verbs: the same verbs the single-row path offers. */
+export type BulkScheduleVerb = "pause" | "resume" | "trigger";
+
+/**
+ * A bulk scope: `all` (every row the home lists) or one filter kind
+ * (the kinds `src/config/scheduleListModes.ts` already names).
+ */
+export type BulkScheduleScope = "all" | ScheduleListKind;
+
+/** A bulk scope is valid when it is `all` or one of the filter kinds. */
+export function isBulkScheduleScope(value: unknown): value is BulkScheduleScope {
+  return (
+    value === "all" ||
+    (typeof value === "string" &&
+      (SCHEDULE_LIST_KIND_IDS as readonly string[]).includes(value))
+  );
+}
+
+/**
+ * One row of the Schedules home list, as the bulk verb sees it: the
+ * fields the kind classifier reads, plus the paused flag the list
+ * already rendered. The row's record is re-read from the store at
+ * execution time (below), so a row paused after the list loaded is
+ * still reported correctly — the flag here is classification input
+ * only, never the execution state.
+ */
+export interface BulkScheduleRow {
+  id: string;
+  callback?: string;
+  type?: string;
+  payload?: unknown;
+  paused?: boolean;
+}
+
+/** One row's outcome in a bulk summary. */
+export type BulkScheduleOutcome =
+  | "paused"
+  | "already-paused"
+  | "resumed"
+  | "already-active"
+  | "triggered"
+  | "refused";
+
+/** One row's result: its id, its filter kind, its outcome, and — for a refusal — why. */
+export interface BulkScheduleRowResult {
+  id: string;
+  kind: ScheduleListKind;
+  outcome: BulkScheduleOutcome;
+  reason?: string;
+}
+
+/** A bulk verb's summary: counts plus one result per in-scope row, in list order. */
+export interface BulkScheduleSummary {
+  verb: BulkScheduleVerb;
+  scope: BulkScheduleScope;
+  total: number;
+  /** Rows the verb acted on (paused / resumed / triggered). */
+  applied: number;
+  /** Rows already in the desired state (already-paused / already-active). */
+  already: number;
+  /** Rows refused, each with its reason in `results`. */
+  refused: number;
+  results: BulkScheduleRowResult[];
+}
+
+/**
+ * A row-level override for rows the one management path does not own
+ * (the live-feed row, whose pause / resume / trigger go through its
+ * own host, not the unified store). Returning `undefined` falls
+ * through to the standard path; `already: true` on an ok result
+ * reports the row as already in the desired state (a feed that is
+ * already paused, on a bulk pause).
+ */
+export type BulkScheduleRowExecutor = (
+  row: BulkScheduleRow,
+  verb: BulkScheduleVerb,
+) => Promise<
+  | { ok: true; already?: boolean }
+  | { ok: false; error: string }
+  | undefined
+>;
+
+function bulkAppliedOutcome(verb: BulkScheduleVerb): BulkScheduleOutcome {
+  return verb === "pause" ? "paused" : verb === "resume" ? "resumed" : "triggered";
+}
+
+function bulkAlreadyOutcome(verb: BulkScheduleVerb): BulkScheduleOutcome {
+  return verb === "pause" ? "already-paused" : "already-active";
+}
+
+function bulkErrorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+/**
+ * Issue #5878 — one bulk verb over a scope: filter the home-list rows
+ * to the scope, then run the single-row verb per row and report
+ * per-row outcomes. A row's refusal (derived record, goal surface,
+ * unmanageable kind, missing alarm, a thrown store/alarm error)
+ * refuses only that row — the batch always runs to the end and the
+ * summary counts what happened.
+ *
+ * The per-row dispatch re-reads the row's stored record at execution
+ * time, so the already-in-state outcomes come from the store, not
+ * from the list snapshot:
+ * - pause: a stored paused record is `already-paused`; a stored goal
+ *   or unmanageable record is refused by the single-row verb (its
+ *   named error), never silently skipped as already-paused.
+ * - resume: a stored non-paused record is `already-active`; a stored
+ *   goal or unmanageable record is refused by the single-row verb.
+ * - trigger: no pre-skip — the single-row verb itself refuses a
+ *   paused row with its 409, and every other refusal, so the reason
+ *   is always the single-row reason.
+ * A row with no stored record (a derived row, a legacy alarm with no
+ * record, a row that vanished after the list loaded) goes straight
+ * to the single-row verb: derived ids refuse with their named
+ * errors, legacy alarms act, a missing row 404s — each as a per-row
+ * refusal. A resume over a record-less row first asks the alarms
+ * port: a live alarm means the row is active (`already-active`), so
+ * a live legacy alarm is never misreported as refused-not-paused.
+ */
+async function runBulkSchedules(
+  deps: UnifiedManagementDeps,
+  verb: BulkScheduleVerb,
+  scope: BulkScheduleScope,
+  rows: readonly BulkScheduleRow[],
+  nowIso: string,
+  run: ((callback: string, payload: unknown) => Promise<void>) | undefined,
+  executeRow: BulkScheduleRowExecutor | undefined,
+): Promise<BulkScheduleSummary> {
+  const inScope = rows.filter(
+    (row) => scope === "all" || classifyScheduleKind(row) === scope,
+  );
+  const results: BulkScheduleRowResult[] = [];
+  for (const row of inScope) {
+    const kind = classifyScheduleKind(row);
+    try {
+      const handled = executeRow ? await executeRow(row, verb) : undefined;
+      if (handled !== undefined) {
+        if (handled.ok) {
+          results.push({
+            id: row.id,
+            kind,
+            outcome:
+              handled.already === true
+                ? bulkAlreadyOutcome(verb)
+                : bulkAppliedOutcome(verb),
+          });
+        } else {
+          results.push({ id: row.id, kind, outcome: "refused", reason: handled.error });
+        }
+        continue;
+      }
+      const record = await deps.store.get(row.id);
+      if (record && (record.kind === "goal" || !isManagedAlarmKind(record.kind))) {
+        // A stored goal / unmanageable row is refused by the
+        // single-row verb with its named error — never reported as
+        // already-in-state on the strength of its stored state.
+        const outcome = await runSingleRowVerb(deps, verb, row.id, nowIso, run);
+        results.push(mapSingleRowOutcome(row.id, kind, verb, outcome));
+        continue;
+      }
+      if (verb === "pause") {
+        if (record?.state === "paused") {
+          results.push({ id: row.id, kind, outcome: "already-paused" });
+          continue;
+        }
+        const outcome = await pauseUnifiedSchedule(deps, row.id, nowIso);
+        results.push(mapSingleRowOutcome(row.id, kind, verb, outcome));
+        continue;
+      }
+      if (verb === "resume") {
+        if (record && record.state !== "paused") {
+          results.push({ id: row.id, kind, outcome: "already-active" });
+          continue;
+        }
+        if (!record) {
+          // No stored record: a live alarm means the row is active
+          // (a legacy alarm with no record); only a row with no
+          // alarm at all goes to the verb, which refuses it.
+          const alarm = await deps.alarms.get(row.id);
+          if (alarm) {
+            results.push({ id: row.id, kind, outcome: "already-active" });
+            continue;
+          }
+        }
+        const outcome = await resumeUnifiedSchedule(deps, row.id, nowIso);
+        results.push(mapSingleRowOutcome(row.id, kind, verb, outcome));
+        continue;
+      }
+      const outcome = await triggerUnifiedSchedule(
+        deps,
+        row.id,
+        run as (callback: string, payload: unknown) => Promise<void>,
+      );
+      results.push(mapSingleRowOutcome(row.id, kind, verb, outcome));
+    } catch (err) {
+      results.push({ id: row.id, kind, outcome: "refused", reason: bulkErrorMessage(err) });
+    }
+  }
+  const applied = results.filter((r) => r.outcome === bulkAppliedOutcome(verb)).length;
+  const already = results.filter(
+    (r) => r.outcome === "already-paused" || r.outcome === "already-active",
+  ).length;
+  return {
+    verb,
+    scope,
+    total: results.length,
+    applied,
+    already,
+    refused: results.length - applied - already,
+    results,
+  };
+}
+
+async function runSingleRowVerb(
+  deps: UnifiedManagementDeps,
+  verb: BulkScheduleVerb,
+  id: string,
+  nowIso: string,
+  run: ((callback: string, payload: unknown) => Promise<void>) | undefined,
+): Promise<UnifiedOpResult | { ok: true; scheduleId: string; callback: string } | { ok: false; error: string; status: number }> {
+  if (verb === "pause") return pauseUnifiedSchedule(deps, id, nowIso);
+  if (verb === "resume") return resumeUnifiedSchedule(deps, id, nowIso);
+  return triggerUnifiedSchedule(
+    deps,
+    id,
+    run as (callback: string, payload: unknown) => Promise<void>,
+  );
+}
+
+function mapSingleRowOutcome(
+  id: string,
+  kind: ScheduleListKind,
+  verb: BulkScheduleVerb,
+  outcome:
+    | UnifiedOpResult
+    | { ok: true; scheduleId: string; callback: string }
+    | { ok: false; error: string; status: number },
+): BulkScheduleRowResult {
+  if (outcome.ok) return { id, kind, outcome: bulkAppliedOutcome(verb) };
+  return { id, kind, outcome: "refused", reason: outcome.error };
+}
+
+/**
+ * Issue #5878 — bulk pause over a scope: every in-scope row paused
+ * through `pauseUnifiedSchedule`, per-row outcomes reported.
+ */
+export async function pauseSchedulesInScope(
+  deps: UnifiedManagementDeps,
+  scope: BulkScheduleScope,
+  rows: readonly BulkScheduleRow[],
+  nowIso: string,
+  executeRow?: BulkScheduleRowExecutor,
+): Promise<BulkScheduleSummary> {
+  return runBulkSchedules(deps, "pause", scope, rows, nowIso, undefined, executeRow);
+}
+
+/**
+ * Issue #5878 — bulk resume over a scope: every in-scope paused row
+ * resumed through `resumeUnifiedSchedule`, per-row outcomes reported.
+ */
+export async function resumeSchedulesInScope(
+  deps: UnifiedManagementDeps,
+  scope: BulkScheduleScope,
+  rows: readonly BulkScheduleRow[],
+  nowIso: string,
+  executeRow?: BulkScheduleRowExecutor,
+): Promise<BulkScheduleSummary> {
+  return runBulkSchedules(deps, "resume", scope, rows, nowIso, undefined, executeRow);
+}
+
+/**
+ * Issue #5878 — bulk run-now over a scope: every in-scope row
+ * triggered through `triggerUnifiedSchedule` with the caller's `run`
+ * (the same callback runner the single-row trigger route uses),
+ * per-row outcomes reported.
+ */
+export async function triggerSchedulesInScope(
+  deps: UnifiedManagementDeps,
+  scope: BulkScheduleScope,
+  rows: readonly BulkScheduleRow[],
+  run: (callback: string, payload: unknown) => Promise<void>,
+  executeRow?: BulkScheduleRowExecutor,
+): Promise<BulkScheduleSummary> {
+  return runBulkSchedules(deps, "trigger", scope, rows, new Date().toISOString(), run, executeRow);
 }
 
 /* =================================================================

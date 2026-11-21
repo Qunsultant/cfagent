@@ -46,6 +46,7 @@ import {
   type TableColumn,
 } from "./components/ui";
 import {
+  bulkScheduleAction,
   deleteSchedule,
   getSchedule,
   listSchedules,
@@ -53,6 +54,7 @@ import {
   resumeSchedule,
   triggerSchedule,
   updateSchedule,
+  type BulkScheduleResult,
 } from "./jobsApi";
 import { CadenceModal } from "./scheduledOptionsManager/CadenceModal";
 import { ConfirmModal } from "./scheduledOptionsManager/ConfirmModal";
@@ -279,6 +281,14 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
     null,
   );
   const [deleting, setDeleting] = useState(false);
+  // Issue #5878 — bulk pause / resume / run-now: the confirm target
+  // (verb + scope), the last summary, and the in-flight flag.
+  const [bulkTarget, setBulkTarget] = useState<{
+    verb: "pause" | "resume" | "trigger";
+    scope: ScheduleListFilter;
+  } | null>(null);
+  const [bulkResult, setBulkResult] = useState<BulkScheduleResult | null>(null);
+  const [bulkBusy, setBulkBusy] = useState(false);
   const [cadenceTarget, setCadenceTarget] = useState<ScheduleItem | null>(null);
   const [cadenceBusy, setCadenceBusy] = useState(false);
   const [cadenceError, setCadenceError] = useState<string | null>(null);
@@ -349,6 +359,60 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
         : pauseSchedule(s.id, envHeaders),
     );
     if (ok) setRefreshSignal((n) => n + 1);
+  };
+
+  /** Issue #5878 — the bulk toolbar's labels, per verb and scope. */
+  const bulkButtonLabel = (verb: "pause" | "resume" | "trigger", scope: ScheduleListFilter) => {
+    if (verb === "pause") return scope === "all" ? "Pause all" : `Pause ${SCHEDULE_LIST_FILTER_LABELS[scope]}`;
+    if (verb === "resume") return scope === "all" ? "Resume all" : `Resume ${SCHEDULE_LIST_FILTER_LABELS[scope]}`;
+    return scope === "all" ? "Run all now" : `Run ${SCHEDULE_LIST_FILTER_LABELS[scope]} now`;
+  };
+
+  /** "all schedules" or "Options schedules" — the confirm's scope noun. */
+  const bulkScopeNoun = (scope: ScheduleListFilter) =>
+    scope === "all" ? "all schedules" : `${SCHEDULE_LIST_FILTER_LABELS[scope]} schedules`;
+
+  /** How many rows the scope names ("2 schedules in scope"). */
+  const bulkScopeCount = (scope: ScheduleListFilter) => {
+    const n = scope === "all" ? allSchedules.length : (counts[scope] ?? 0);
+    return `${n} schedule${n === 1 ? "" : "s"} in scope`;
+  };
+
+  /** "1 paused · 1 already paused · 6 refused" — the summary's count sentence. */
+  const bulkSummaryLine = (summary: BulkScheduleResult) => {
+    const appliedNoun =
+      summary.verb === "pause" ? "paused" : summary.verb === "resume" ? "resumed" : "triggered";
+    const parts = [`${summary.applied} ${appliedNoun}`];
+    if (summary.already > 0) {
+      parts.push(
+        `${summary.already} ${summary.verb === "pause" ? "already paused" : "already active"}`,
+      );
+    }
+    if (summary.refused > 0) parts.push(`${summary.refused} refused`);
+    return parts.join(" · ");
+  };
+
+  const bulkSummaryTitle = (summary: BulkScheduleResult) => {
+    const noun =
+      summary.verb === "pause" ? "Paused" : summary.verb === "resume" ? "Resumed" : "Triggered";
+    return `${noun} ${summary.applied} schedule${summary.applied === 1 ? "" : "s"}`;
+  };
+
+  const runBulkAction = async () => {
+    const target = bulkTarget;
+    if (!target) return;
+    setBulkBusy(true);
+    try {
+      const summary = await bulkScheduleAction(target.verb, target.scope, envHeaders);
+      setBulkResult(summary);
+      await fetchSchedules();
+      setRefreshSignal((n) => n + 1);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBulkBusy(false);
+      setBulkTarget(null);
+    }
   };
 
   const applyFrequency = async (
@@ -812,6 +876,37 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
         )}
       </ConfirmModal>
 
+      {/* Issue #5878 — bulk pause / resume / run-now confirms the scope
+          and its count before anything runs. Pause and resume are
+          reversible, run-now fires callbacks, so the tone is primary,
+          not danger. */}
+      <ConfirmModal
+        open={bulkTarget !== null}
+        title={
+          bulkTarget
+            ? bulkTarget.verb === "trigger"
+              ? `Run ${bulkScopeNoun(bulkTarget.scope)} now?`
+              : `${bulkTarget.verb === "pause" ? "Pause" : "Resume"} ${bulkScopeNoun(bulkTarget.scope)}?`
+            : ""
+        }
+        confirmLabel={bulkTarget ? bulkButtonLabel(bulkTarget.verb, bulkTarget.scope) : ""}
+        cancelLabel="Cancel"
+        tone="primary"
+        busy={bulkBusy}
+        onClose={() => setBulkTarget(null)}
+        onConfirm={runBulkAction}
+      >
+        {bulkTarget && (
+          <p>
+            {bulkTarget.verb === "pause"
+              ? `Pause ${bulkScopeNoun(bulkTarget.scope)} (${bulkScopeCount(bulkTarget.scope)}). Paused schedules stay listed and can be resumed.`
+              : bulkTarget.verb === "resume"
+                ? `Resume ${bulkScopeNoun(bulkTarget.scope)} (${bulkScopeCount(bulkTarget.scope)}). Already-active schedules are left alone.`
+                : `Run ${bulkScopeNoun(bulkTarget.scope)} now (${bulkScopeCount(bulkTarget.scope)}). Each schedule runs its callback once; paused schedules refuse until resumed.`}
+          </p>
+        )}
+      </ConfirmModal>
+
       {userLogin && (
         <div className="ui-meta">
           Schedules for <strong>{userLogin}</strong>{activeEnv ? ` · E*TRADE ${activeEnv}` : ""}
@@ -851,6 +946,61 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
           ↻ Refresh
         </Button>
       </Flex>
+
+      {/* Issue #5878 — bulk pause / resume / run-now: the same verbs as
+          the per-row buttons, over a scope — all schedules, or the kind
+          the filter currently shows. A confirm dialog names the scope
+          and its count before anything runs. */}
+      <Flex gap="1" align="center" wrap>
+        {(["pause", "resume", "trigger"] as const).map((verb) => (
+          <Button
+            key={verb}
+            type="button"
+            variant="secondary"
+            size="sm"
+            disabled={bulkBusy}
+            onClick={() => setBulkTarget({ verb, scope: "all" })}
+            title={`${bulkButtonLabel(verb, "all")} — every schedule in the list`}
+          >
+            {bulkButtonLabel(verb, "all")}
+          </Button>
+        ))}
+        {activeTab !== "all" &&
+          (["pause", "resume", "trigger"] as const).map((verb) => (
+            <Button
+              key={verb}
+              type="button"
+              variant="secondary"
+              size="sm"
+              disabled={bulkBusy}
+              onClick={() => setBulkTarget({ verb, scope: activeTab })}
+              title={`${bulkButtonLabel(verb, activeTab)} — every ${SCHEDULE_LIST_FILTER_LABELS[activeTab]} schedule in the list`}
+            >
+              {bulkButtonLabel(verb, activeTab)}
+            </Button>
+          ))}
+      </Flex>
+
+      {bulkResult && (
+        <Notice
+          tone={bulkResult.refused > 0 ? "warning" : "success"}
+          title={bulkSummaryTitle(bulkResult)}
+          onDismiss={() => setBulkResult(null)}
+        >
+          {bulkSummaryLine(bulkResult)}
+          {bulkResult.results.some((r) => r.outcome === "refused") && (
+            <ul>
+              {bulkResult.results
+                .filter((r) => r.outcome === "refused")
+                .map((r) => (
+                  <li key={r.id}>
+                    <code>{r.id}</code> — {r.reason}
+                  </li>
+                ))}
+            </ul>
+          )}
+        </Notice>
+      )}
 
       {actionError && (
         <Notice tone="danger" title="Schedule action failed" onDismiss={() => setActionError(null)}>
