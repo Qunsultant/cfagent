@@ -2033,8 +2033,11 @@ export async function acquireUniverse(
         ...live,
         symbol: listing.symbol,
         companyName: live.companyName || listing.companyName,
-        // Issue #4439: the listing row is the authority for exchange.
-        listingExchange: listing.exchange.toUpperCase(),
+        // Issue #4439: the listing row is the authority for exchange — but a
+        // listing row may carry none (curated universes and test fixtures do
+        // not always have it). A missing exchange is "unknown", never a crash
+        // on a live quote path.
+        ...(listing.exchange ? { listingExchange: listing.exchange.toUpperCase() } : {}),
         // This provider's quote payloads do not reliably include sector. The
         // dynamically fetched Nasdaq listing row does, and resolveStockSector
         // provides curated/inferred enrichment.
