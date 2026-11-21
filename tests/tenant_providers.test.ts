@@ -153,7 +153,9 @@ describe("unified run record provenance stamping", () => {
       ranked: [],
     });
     const legacy = (bodies[0].body as Record<string, unknown>).provenance as Record<string, unknown>;
-    expect(legacy.dataProviderId).toBe("etrade");
+    // Issue #5516: a run with no provider records the externalized default
+    // (config/vocabulary.json → provider), not the pre-#3990 literal.
+    expect(legacy.dataProviderId).toBe("alpaca");
     expect(legacy.brokerId).toBe("alpaca");
   });
 });
