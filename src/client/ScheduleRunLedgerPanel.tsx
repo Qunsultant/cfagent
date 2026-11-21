@@ -38,6 +38,11 @@ import { attachWorkflowRuns, type WorkflowLedgerEntry } from "../services/runLed
 import type { WorkflowRun } from "../services/workflowRuns";
 import { RunDetail } from "./WorkflowRunsPanel";
 import { attachReportRuns, type ReportLedgerEntry } from "./runLedgerReportRuns";
+import {
+  attachAutopilotOutcomes,
+  type AutopilotLedgerEntry,
+} from "./runLedgerAutopilotOutcomes";
+import type { JobOutcomeRow } from "../data/jobOutcomePorts";
 import { ArtifactLink } from "./DocsAndReportsPanel";
 import { RunDetailsModal } from "./components/RunDetailsModal";
 import type { RunDetail as DocsRunDetail } from "./runDetails";
@@ -314,6 +319,9 @@ export function ScheduleRunLedgerPanel({
   const [workflowEntries, setWorkflowEntries] = useState<WorkflowLedgerEntry[]>([]);
   // Issue #4262 (S4, option A) — the reports read: what each run PRODUCED.
   const [reportEntries, setReportEntries] = useState<ReportLedgerEntry[]>([]);
+  // Issue #6003 — the Autopilot outcome read: the rows Autopilot surfaces
+  // today that no ledger row already carries (twin-less kinds included).
+  const [autopilotEntries, setAutopilotEntries] = useState<AutopilotLedgerEntry[]>([]);
   // Issue #4332 — the two fields the options-runs card carried (symbols,
   // actionable setups), joined onto the ledger's own rows by start instant.
   const [optionsDetails, setOptionsDetails] = useState<ReadonlyMap<string, OptionsRunDetail>>(
@@ -362,9 +370,33 @@ export function ScheduleRunLedgerPanel({
         // Additive: a failed options read leaves the two columns as "—".
         optionRuns = [];
       }
+      let autopilot: AutopilotLedgerEntry[] = [];
+      try {
+        // Issue #6003 — the Autopilot outcome read, folded the same way
+        // as the workflow and reports reads: an outcome row the ledger
+        // (or a folded row) already carries is the same run and is
+        // dropped; a row with no twin becomes one ledger row stamped
+        // "autopilot". Limit 50 is the window Autopilot itself surfaces.
+        const res = await apiFetch("/api/autopilot/jobs?limit=50");
+        if (res.ok) {
+          const body = (await res.json()) as { jobs?: JobOutcomeRow[] };
+          autopilot = attachAutopilotOutcomes(
+            [
+              ...runs,
+              ...attached.map((entry) => entry.row),
+              ...reports.map((entry) => entry.row),
+            ],
+            Array.isArray(body.jobs) ? body.jobs : [],
+          );
+        }
+      } catch {
+        // Additive: a failed Autopilot read must not empty the ledger.
+        autopilot = [];
+      }
       setRuns(runs);
       setWorkflowEntries(attached);
       setReportEntries(reports);
+      setAutopilotEntries(autopilot);
       setOptionsDetails(optionsRunDetailsByStart(optionRuns));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load run ledger");
@@ -389,13 +421,15 @@ export function ScheduleRunLedgerPanel({
   }, [reportEntries]);
   const mergedRuns = useMemo(() => {
     // One row per run: the ledger is authoritative, then a folded workflow
-    // run, then a report run — a jobId seen once is never listed twice.
+    // run, then a report run, then an Autopilot outcome row — a jobId seen
+    // once is never listed twice.
     const byId = new Map<string, JobRunRecord>();
     for (const row of runs) byId.set(row.jobId, row);
     for (const entry of workflowEntries) if (!byId.has(entry.row.jobId)) byId.set(entry.row.jobId, entry.row);
     for (const entry of reportEntries) if (!byId.has(entry.row.jobId)) byId.set(entry.row.jobId, entry.row);
+    for (const entry of autopilotEntries) if (!byId.has(entry.row.jobId)) byId.set(entry.row.jobId, entry.row);
     return [...byId.values()];
-  }, [runs, workflowEntries, reportEntries]);
+  }, [runs, workflowEntries, reportEntries, autopilotEntries]);
   const visible = filterLedgerRuns(mergedRuns, scheduleId, runId);
   // Issue #4262 (S1) — the one ledger's kind filters. The filter set and the
   // default come from config (src/config/runLedgerModes.ts), never literals.
