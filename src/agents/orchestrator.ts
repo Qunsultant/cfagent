@@ -109,6 +109,10 @@ import {
   staleLedgerSweepOutcome,
   staleAsyncJobSweepOutcome,
 } from "../services/sweepWatchdogSchedule";
+import {
+  planGuardAlarm,
+  supersededDeclaredTaskAlarmIds,
+} from "../services/unifiedScheduleManagement";
 import { nlqSchedulingPort, nlqSocialBriefPort, nlqStockScreenPort, type NlqPortsContext } from "./orchestrator/nlqPorts";
 import { formatTraceparent, newTraceContext } from "../observability/observabilityPorts";
 import { observeDoRouteDispatch } from "../observability/scheduledJobOutcomes";
@@ -1398,6 +1402,20 @@ export class OrchestratorAgent extends PortThink {
     // best-effort arm for that path. Best-effort: a failure never
     // blocks startup.
     await this.reconcileCopilotScheduledTasks();
+
+    try {
+      // Issue #5890 — cancel superseded declared-task occurrence
+      // alarms (the same occurrence armed twice by racing reconciles).
+      // Think's wake reconcile runs after onStart and re-arms anything
+      // the prune wrongly cancels, so this can only converge, never
+      // strand a task. Best-effort: a failure never blocks startup.
+      await this.pruneSupersededDeclaredTaskAlarms();
+    } catch (pruneErr) {
+      structuredLog.warn("orchestrator.on_start_declared_task_prune_failed", {
+        message: "[OrchestratorAgent][onStart] Superseded declared-task alarm prune failed:",
+        error: pruneErr instanceof Error ? pruneErr.message : String(pruneErr),
+      });
+    }
   }
 
   /**
@@ -1550,12 +1568,33 @@ export class OrchestratorAgent extends PortThink {
 
   /** Issue #618: arm the recurring stale-sweep interval once per user. */
   private async ensureStaleSweepSchedule(userLogin: string): Promise<void> {
-    const existing = await this.listSchedules().catch(() => [] as Schedule<unknown>[]);
-    const already = existing.some((s) => {
-      const item = s as any;
-      return item.callback === "sweepStaleLedgerTasks" && item.payload?.userLogin === userLogin;
-    });
-    if (already) return;
+    // Issue #5890 — a failed list must not arm: arming blind mints a
+    // second alarm for the same callback with a new SDK id. And a list
+    // that already holds the duty cancels the surplus arms instead of
+    // leaving them listed beside it.
+    let existing: Schedule<unknown>[];
+    try {
+      existing = await this.listSchedules();
+    } catch (listError) {
+      structuredLog.warn("orchestrator.ensure_stale_sweep_list_failed", {
+        message: "[OrchestratorAgent] Could not list schedules; not arming the stale-ledger sweep:",
+        error: listError instanceof Error ? listError.message : String(listError),
+      });
+      return;
+    }
+    const plan = planGuardAlarm(
+      existing as unknown as Array<{ id: string; callback?: unknown; payload?: unknown }>,
+      "sweepStaleLedgerTasks",
+      (payload) => (payload as { userLogin?: unknown } | null)?.userLogin === userLogin,
+    );
+    for (const id of plan.cancelIds) {
+      try {
+        await this.cancelSchedule(id);
+      } catch {
+        // Best-effort: the next onStart retries.
+      }
+    }
+    if (!plan.arm) return;
     await this.scheduleEvery(STALE_SWEEP_INTERVAL_SECONDS, "sweepStaleLedgerTasks", { userLogin });
   }
 
@@ -1607,6 +1646,42 @@ export class OrchestratorAgent extends PortThink {
         message: "[OrchestratorAgent] Could not reconcile the declared scheduled tasks:",
         error: reconcileError instanceof Error ? reconcileError.message : String(reconcileError),
       });
+    }
+    // Issue #5890 — the reconcile just ran, so the tracked alarm for
+    // each task exists again: now cancel any superseded twin the
+    // racing reconciles left behind.
+    await this.pruneSupersededDeclaredTaskAlarms();
+  }
+
+  /**
+   * Issue #5890 — cancel superseded declared-task occurrence alarms:
+   * the same (taskId, scheduledFor) armed twice by racing reconciles
+   * leaves two SDK ids for one occurrence. Best-effort by the same
+   * rule as every reconcile: a list or cancel failure never throws —
+   * the list collapse hides any transient duplicate, and the next
+   * reconcile retries the prune.
+   */
+  private async pruneSupersededDeclaredTaskAlarms(): Promise<void> {
+    let existing: Schedule<unknown>[];
+    try {
+      existing = await this.listSchedules();
+    } catch {
+      return;
+    }
+    const ids = supersededDeclaredTaskAlarmIds(
+      existing as unknown as Array<{
+        id: string;
+        callback?: unknown;
+        payload?: unknown;
+        time?: unknown;
+      }>,
+    );
+    for (const id of ids) {
+      try {
+        await this.cancelSchedule(id);
+      } catch {
+        // Best-effort: the next reconcile retries.
+      }
     }
   }
 
@@ -2114,12 +2189,30 @@ export class OrchestratorAgent extends PortThink {
    *  instance (the #618/#3784 ensure-schedule pattern: list
    *  schedules, skip when a watchdogMissedSchedules schedule exists). */
   private async ensureScheduleWatchdogSchedule(): Promise<void> {
-    const existing = await this.listSchedules().catch(() => [] as Schedule<unknown>[]);
-    const already = existing.some((s) => {
-      const item = s as any;
-      return item.callback === "watchdogMissedSchedules";
-    });
-    if (already) return;
+    // Issue #5890 — a failed list must not arm (see ensureStaleSweepSchedule).
+    let existing: Schedule<unknown>[];
+    try {
+      existing = await this.listSchedules();
+    } catch (listError) {
+      structuredLog.warn("orchestrator.ensure_schedule_watchdog_list_failed", {
+        message: "[OrchestratorAgent] Could not list schedules; not arming the schedule watchdog:",
+        error: listError instanceof Error ? listError.message : String(listError),
+      });
+      return;
+    }
+    const plan = planGuardAlarm(
+      existing as unknown as Array<{ id: string; callback?: unknown; payload?: unknown }>,
+      "watchdogMissedSchedules",
+      () => true,
+    );
+    for (const id of plan.cancelIds) {
+      try {
+        await this.cancelSchedule(id);
+      } catch {
+        // Best-effort: the next onStart retries.
+      }
+    }
+    if (!plan.arm) return;
     await this.scheduleEvery(SCHEDULE_WATCHDOG_INTERVAL_SECONDS, "watchdogMissedSchedules", {});
   }
 
@@ -2127,12 +2220,30 @@ export class OrchestratorAgent extends PortThink {
    *  instance (the #618 ensureStaleSweepSchedule pattern: list
    *  schedules, skip when a sweepStaleAsyncJobs schedule exists). */
   private async ensureStaleAsyncJobSweepSchedule(): Promise<void> {
-    const existing = await this.listSchedules().catch(() => [] as Schedule<unknown>[]);
-    const already = existing.some((s) => {
-      const item = s as any;
-      return item.callback === "sweepStaleAsyncJobs";
-    });
-    if (already) return;
+    // Issue #5890 — a failed list must not arm (see ensureStaleSweepSchedule).
+    let existing: Schedule<unknown>[];
+    try {
+      existing = await this.listSchedules();
+    } catch (listError) {
+      structuredLog.warn("orchestrator.ensure_stale_async_job_sweep_list_failed", {
+        message: "[OrchestratorAgent] Could not list schedules; not arming the stale-async-job sweep:",
+        error: listError instanceof Error ? listError.message : String(listError),
+      });
+      return;
+    }
+    const plan = planGuardAlarm(
+      existing as unknown as Array<{ id: string; callback?: unknown; payload?: unknown }>,
+      "sweepStaleAsyncJobs",
+      () => true,
+    );
+    for (const id of plan.cancelIds) {
+      try {
+        await this.cancelSchedule(id);
+      } catch {
+        // Best-effort: the next onStart retries.
+      }
+    }
+    if (!plan.arm) return;
     await this.scheduleEvery(STALE_ASYNC_JOB_SWEEP_INTERVAL_SECONDS, "sweepStaleAsyncJobs", {});
   }
 

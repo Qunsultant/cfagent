@@ -361,7 +361,7 @@ describe("ensureIvHistoryCollectionRecord adopts the armed IV alarm (#4238)", ()
 });
 
 describe("the one management path serves internal records (#4238)", () => {
-  it("lists an active internal record with its alarm, and a paused one without", async () => {
+  it("lists one row per IV duty: the active record with its alarm wins over a stale paused record (#5890)", async () => {
     const store = new InMemoryUnifiedScheduleStore();
     const { port } = alarmsPort({
       list: async () => [ivAlarm()],
@@ -370,8 +370,20 @@ describe("the one management path serves internal records (#4238)", () => {
     store.save(ivRecord());
     store.save(ivRecord({ id: "iv-paused", alarmId: "iv-paused", state: "paused", pausedAt: NOW_ISO }));
     const items = await listUnifiedScheduleItems({ store, alarms: port });
-    expect(items.map((i) => i.id).sort()).toEqual(["iv-1", "iv-paused"]);
+    // Issue #5890 — the two records are one job (same callback, same
+    // payload, same cadence): the stale per-alarm paused record must
+    // not render as a second row. The live row is the job's state.
+    expect(items.map((i) => i.id).sort()).toEqual(["iv-1"]);
     expect(items.find((i) => i.id === "iv-1")?.kind).toBe("internal");
+    expect(items.find((i) => i.id === "iv-1")?.paused).toBe(false);
+  });
+
+  it("lists a paused internal record with no live alarm as the one paused row (#5890)", async () => {
+    const store = new InMemoryUnifiedScheduleStore();
+    const { port } = alarmsPort({ list: async () => [] });
+    store.save(ivRecord({ id: "iv-paused", alarmId: "iv-paused", state: "paused", pausedAt: NOW_ISO }));
+    const items = await listUnifiedScheduleItems({ store, alarms: port });
+    expect(items.map((i) => i.id)).toEqual(["iv-paused"]);
     expect(items.find((i) => i.id === "iv-paused")?.paused).toBe(true);
   });
 
