@@ -2,9 +2,10 @@
  * PR #1 — True Orchestrator: operation catalog + plan validation.
  *
  * Ported from cfpay's src/orchestrate.ts (battle-tested).
- * The catalog is the single source of truth for plannable operations.
- * The planner prompt is generated FROM it, so the model can only
- * propose steps that exist.
+ * The catalog is a view over the one job catalogue
+ * (`config/job-catalogue.json`, issue #5880) — the single source of
+ * truth for plannable operations. The planner prompt is generated
+ * FROM it, so the model can only propose steps that exist.
  *
  * Issue #1441 ([AGENTIC] Phase 2, sub-issue of #1362) extends this
  * compiler with a goal→capability-chain path over the Phase 1 registry
@@ -18,6 +19,7 @@ import {
   WORKED_EXAMPLES,
   type RegistryStage,
 } from "./agentic/capabilityRegistry";
+import { getJobCatalogue, getJobCatalogueAgents } from "./config/jobCatalogue";
 
 export interface CatalogEntry {
   agent: string;
@@ -27,133 +29,43 @@ export interface CatalogEntry {
   blurb: string;
 }
 
-export const OPERATION_CATALOG: CatalogEntry[] = [
-  {
-    agent: "search",
-    binding: "ORCHESTRATOR_AGENT",
-    // #3652: `search.opportunity_hunt` is the seeded `opportunity-hunt`
-    // goal's operation (daily 07:00, enabled). It was absent from this
-    // catalog, so every firing threw `Unknown operation` at createJob.
-    // Unlike #1655's `qa.run_sweep` (descriptor-only), this operation has
-    // an executor: src/services/opportunityHunt.ts.
-    operations: ["search.query", "search.opportunity_hunt"],
-    blurb: "Web and data search; the daily hunt scans the tradable universe.",
-  },
-  {
-    agent: "payments",
-    binding: "PAYMENTS_AGENT",
-    operations: ["payments.draft"],
-    blurb: "Draft a payment request (requires approval before execution).",
-  },
-  {
-    agent: "tasks",
-    binding: "TASKS_AGENT",
-    operations: ["tasks.create"],
-    blurb: "Create a tracked task with owner and due date.",
-  },
-  {
-    agent: "memory",
-    binding: "MEMORY_AGENT",
-    operations: ["memory.remember"],
-    blurb: "Store an outcome in long-term vector memory.",
-  },
-  {
-    agent: "nlq",
-    binding: "NLQ_AGENT",
-    operations: ["nlq.execute"],
-    blurb: "Execute a natural-language query against the data layer.",
-  },
-  {
-    agent: "qa",
-    binding: "ORCHESTRATOR_AGENT",
-    // #1655: qa.run_sweep is the built-in goals config daily-qa-sweep
-    // operation (config/builtin-scheduled-goals.json). It was missing from this catalog,
-    // so every due tick threw "Unknown operation: qa.run_sweep" in
-    // createJob and the goal stayed due. createJob is descriptor-only,
-    // so registration is the complete op-registry fix — no executor
-    // is added here, and no sweep implementation is claimed.
-    operations: ["qa.supervised_fix", "qa.run_sweep"],
-    blurb:
-      "Investigate a QA failure and propose a supervised fix (issue #162); run the scheduled QA sweep (issue #1655).",
-  },
-  {
-    agent: "trading",
-    binding: "TRADING_AGENT",
-    operations: ["trading.screen_stocks", "trading.screen_options", "trading.trade_stock", "trading.trade_options"],
-    blurb:
-      "Provider-neutral trading competency (issue #291): stock/options screening and approval-gated trading across registered broker providers.",
-  },
-  {
-    // #1517 (Lane 1, follow-up of #1362): chain.execute is a
-    // materialized-chain marker, NOT an orchestrator job operation.
-    // ScheduledAgent handles it in its own onCron branch (governed
-    // firing decision, then a job descriptor like every other goal);
-    // the catalog entry exists so a materialized goals-list entry is
-    // a valid goal. It is listed in the planner prompt like the
-    // social marker operations; it is not a leg an orchestrator
-    // plan executes.
-    agent: "scheduled",
-    binding: "SCHEDULED_AGENT",
-    operations: ["chain.execute"],
-    blurb:
-      "A materialized approved chain goal (issue #1517): fired only through the governed predicate, executed by the chain lane.",
-  },
-  {
-    // #1077 Phase 5b slice 1: social.publish is NOT an orchestrator
-    // job. ScheduledAgent executes it directly through the social goal
-    // executor; the catalog entry exists so addGoal accepts the
-    // operation and the dashboard can list it.
-    // #1224: pipeline:social-daily is likewise NOT an orchestrator
-    // job. ScheduledAgent executes it through the pipeline executor
-    // (feed → generate → deliver in one firing); the entry exists so
-    // addGoal accepts the pipeline operation. The stage operations
-    // (social.feed, social.generate, social.deliver) are deliberately
-    // NOT catalog entries: stages are not schedulable goals.
-    agent: "social",
-    binding: "SCHEDULED_AGENT",
-    operations: ["social.publish", "pipeline:social-daily"],
-    blurb:
-      "Build the day's social drafts and publish them under the channel gating (issue #1077); pipeline:social-daily runs feed → generate → deliver as one scheduled firing (issue #1224).",
-  },
-  {
-    // #1819 rollup slice: resource.* operations are NOT orchestrator
-    // jobs. ScheduledAgent executes them directly through the resource
-    // goal handlers (the social.publish precedent); the catalog entry
-    // exists so addGoal accepts the operations and the dashboard can
-    // list them. Per-op emission stays in-path (buffered AE write);
-    // these goals only READ the D1 projection — they never route
-    // measurement through the job system.
-    agent: "resource",
-    binding: "SCHEDULED_AGENT",
-    operations: ["resource.rollup_daily", "resource.cap_alert", "resource.dashboard_comparison"],
-    blurb:
-      "SessionStore resource rollup, cap alert, and dashboard comparison (issue #1819): daily UTC rollup, hourly 70%-of-cap alert, and the instrumented-vs-dashboard comparison report, all as ScheduledAgent goals.",
-  },
-  {
-    // #1980 index-list refresh operations are NOT orchestrator
-    // jobs. ScheduledAgent executes them directly through the
-    // refresh job (the social.publish / resource.* precedent);
-    // the catalog entry exists so addGoal accepts the operations
-    // and the dashboard can list them.
-    agent: "index",
-    binding: "SCHEDULED_AGENT",
-    operations: ["index.refresh_wikipedia", "index.refresh_holdings"],
-    blurb:
-      "Stored index-list refresh (issue #1980, follow-up to #1852; extended by #2962): weekly Wikipedia refresh of Dow / S&P 500 / S&P 100 / Nasdaq-100 / S&P 400 / the 11 GICS sectors and daily ETF-holdings refresh of Russell 2000 / Russell 1000 / Russell 3000, both as ScheduledAgent goals on the existing tick.",
-  },
-  {
-    // #4411 monthly Autopilot evaluation is NOT an orchestrator
-    // job. ScheduledAgent executes it directly through the
-    // evaluate path (the social.publish / resource.* / index.*
-    // precedent); the catalog entry exists so addGoal accepts the
-    // operation and the dashboard can list it.
-    agent: "autopilot",
-    binding: "SCHEDULED_AGENT",
-    operations: ["autopilot.evaluate"],
-    blurb:
-      "Monthly Autopilot policy-envelope evaluation (issue #4411): a dry-run check of the live envelope against live limits and live account state, once a month, as a ScheduledAgent goal — never places orders.",
-  },
-];
+/**
+ * Issue #5880 — the operation catalog is a VIEW over the one
+ * externalized job catalogue (`config/job-catalogue.json`, read
+ * through `src/config/jobCatalogue.ts`), not a second list.
+ *
+ * The planner prompt is still generated FROM this list, so the model
+ * can only propose steps that exist — but the operations, agents,
+ * bindings and blurbs now live in the catalogue: one entry per
+ * operation, grouped by agent in catalogue order. Adding a plannable
+ * operation is one catalogue entry (with its agent's binding and
+ * blurb); the per-operation history that used to live in comments on
+ * this literal now lives on the catalogue entries themselves
+ * (`issue` + `note`). The shape is unchanged — `catalogAgent`,
+ * `plannerPrompt`, `validateSteps` and `createJob` read this export
+ * exactly as before — and `tests/job_catalogue_5880.test.ts`
+ * (5880-P02) pins the derived literal against the pre-#5880 list, so
+ * a catalogue edit that drops or reorders an operation fails loudly
+ * instead of silently narrowing the planner.
+ *
+ * Load-time view, the #4253 `DEFAULT_SCHEDULES` precedent: the
+ * catalogue is read once at module load. The `setJobCatalogue`
+ * override seam (tests only) does not re-derive this export.
+ */
+export const OPERATION_CATALOG: CatalogEntry[] = (() => {
+  const agents = getJobCatalogueAgents();
+  const jobs = getJobCatalogue();
+  return agents
+    .map((agent) => ({
+      agent: agent.agent,
+      binding: agent.binding,
+      operations: jobs
+        .filter((job) => job.agent === agent.agent && job.operation)
+        .map((job) => job.operation as string),
+      blurb: agent.blurb,
+    }))
+    .filter((entry) => entry.operations.length > 0);
+})();
 
 export function catalogAgent(agent: string): CatalogEntry | undefined {
   return OPERATION_CATALOG.find((e) => e.agent === agent);

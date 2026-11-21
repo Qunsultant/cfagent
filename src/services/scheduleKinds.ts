@@ -3,13 +3,17 @@
  *
  * Pure: a recorded schedule in, one of the owner's kinds out. The vocabulary
  * and the filter set live in `src/config/scheduleListModes.ts` (configuration);
- * this module only applies the ordered rule table.
+ * this module only applies the ordered rule table — plus, since #5880, the
+ * one job catalogue (`config/job-catalogue.json`): a schedule whose callback
+ * names a catalogue job takes that job's kind, and the rule table is the
+ * fallback for callbacks the catalogue does not name.
  *
  * Classification is by the recorded callback name and the schedule's type —
  * the only fields the store carries. A callback that matches no rule is
  * `other`: a schedule is never dropped and never guessed into a family.
  */
 import type { ScheduleListKind } from "../config/scheduleListModes";
+import { jobCatalogueEntryForCallback } from "../config/jobCatalogue";
 
 /** The fields classification reads — never the whole record. */
 export interface ScheduleKindCandidate {
@@ -91,11 +95,35 @@ function matches(rule: ScheduleKindRule, s: ScheduleKindCandidate): boolean {
   return false;
 }
 
-/** Classify one schedule; nothing matches → "other". */
+/**
+ * Classify one schedule; nothing matches → "other".
+ *
+ * Issue #5880 — the Schedules home list reads the one job catalogue:
+ * under the default rules, a schedule whose callback names a
+ * catalogue job takes that job's kind. The delayed-type rule still
+ * wins first (a delayed job is queued whatever its callback would
+ * say), and the rule table below stays as the fallback for callbacks
+ * the catalogue does not name (legacy alarms, goal/payment/trading
+ * callbacks that are not catalogue jobs). A caller passing explicit
+ * custom rules gets rules-only behavior — the catalogue consults only
+ * under the default rules. `tests/job_catalogue_5880.test.ts`
+ * (5880-P05) pins every catalogue callback's kind to the classifier's
+ * answer, so the catalogue and the rule table can never silently
+ * disagree about a job's family.
+ */
 export function classifyScheduleKind(
   s: ScheduleKindCandidate,
   rules: readonly ScheduleKindRule[] = SCHEDULE_KIND_RULES,
 ): ScheduleListKind {
+  const type = typeof s.type === "string" ? s.type.trim().toLowerCase() : "";
+  if (type === "delayed") return "queued";
+  if (rules === SCHEDULE_KIND_RULES) {
+    const callback = typeof s.callback === "string" ? s.callback.trim() : "";
+    if (callback) {
+      const entry = jobCatalogueEntryForCallback(callback);
+      if (entry) return entry.kind;
+    }
+  }
   for (const rule of rules) {
     if (matches(rule, s)) return rule.kind;
   }
