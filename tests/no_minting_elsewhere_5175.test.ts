@@ -500,7 +500,7 @@ describe("5175 slice 4 — no minting elsewhere", () => {
     ).toBe(1);
   });
 
-  it("P19 bare-UUID run / job / chain ids are exactly 28", () => {
+  it("P19 bare-UUID run / job / chain ids are exactly 27", () => {
     // Line-based (no backtick — template lines belong to P01-P18).
     // DECIDED EXEMPTION — the 2.5 job-chain correlation UUIDs (5):
     // - src/agents/orchestrator/asyncJobs.ts:472 (`httpChainId`),
@@ -527,13 +527,9 @@ describe("5175 slice 4 — no minting elsewhere", () => {
     // call, "so every discovery fetch is attributable to exactly one
     // discovery run":
     // - src/services/discoveryService.ts:681, 761
-    // Research exclusion family (1) — the research-engine run id, CFO
-    // lane, same family as the excluded rsr_ ids (judgment call, see
-    // the header):
-    // - src/workflows/researchScreenEngine.ts:180
     expect(
       countBareUuidRunIds(),
       "bare-UUID run/job/chain ids: a new one is a new bare-UUID mint outside the leaf",
-    ).toBe(28);
+    ).toBe(27);
   });
 });
