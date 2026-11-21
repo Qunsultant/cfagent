@@ -383,7 +383,7 @@ export class GetPaymentBudgetCommand implements IMcpToolCommand<{
 }> {
   readonly name = "get_payment_budget";
   readonly description =
-    "Retrieve current payment budget and remaining spend allowance for agentic tools (e.g. options screener $0.05 USDC, market research $0.10 USDC, search.query, nlq.execute). Evaluates against BudgetGuard and the user's commercial tier. Requires the chat turn's acting identity.";
+    "Retrieve current payment budget and remaining spend allowance for agentic tools (e.g. options screener, market research, search.query, nlq.execute). Evaluates against BudgetGuard and the user's commercial tier. Requires the chat turn's acting identity.";
   readonly jsonSchema = {
     type: "object" as const,
     properties: {

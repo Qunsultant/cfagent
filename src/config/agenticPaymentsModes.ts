@@ -86,7 +86,8 @@
  * - Premium payment verification: the x402 gate, the MPP boundary
  *   (MPP credentials are verified ONLY through the mppx gateway in
  *   handleGatedEndpoint; verifyPayment rejects MPP-from-headers in
- *   ALL modes), the per-tier prices ($0.05 / $0.10 / $0.02), the
+ *   ALL modes), the per-tier prices (approved catalogue prices,
+ *   #5609), the
  *   execution channel (MCP "mcp", REST "webhook"/"premium"), the
  *   caller identity (MCP sessionId, REST session login or verified
  *   payer scope), and canonical capture/run-linking on REST are all

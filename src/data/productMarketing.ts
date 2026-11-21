@@ -219,7 +219,7 @@ export interface CatalogDisplayEntry {
   canonicalName: string;
   servingAgent: string | null;
   priceUSD: number | null;
-  priceSource: "gate" | "catalogue-approved" | "plan-approved" | null;
+  priceSource: "catalogue-approved" | "plan-approved" | null;
   priceLabel: string | null;
   /** Issue #4696 — the effective version's period in days; null for family rows. */
   periodDays: number | null;
@@ -250,21 +250,21 @@ export function buildCatalogDisplay(
     const priceLabel =
       entry.priceUSD === null
         ? null
-        : entry.priceSource === "gate"
-          ? `$${entry.priceUSD.toFixed(2)} per call — real (testnet) x402 gate`
-          : entry.priceSource === "plan-approved"
-            ? entry.periodDays !== null
-              ? `$${entry.priceUSD.toFixed(2)} / ${entry.periodDays} days — approved plan price`
-              : `$${entry.priceUSD.toFixed(2)} — approved plan price`
+        : entry.priceSource === "plan-approved"
+          ? entry.periodDays !== null
+            ? `$${entry.priceUSD.toFixed(2)} / ${entry.periodDays} days — approved plan price`
+            : `$${entry.priceUSD.toFixed(2)} — approved plan price`
+          : entry.gateEndpoint !== null
+            ? `$${entry.priceUSD.toFixed(2)} per call — approved catalogue price, real (testnet) x402 gate`
             : `$${entry.priceUSD.toFixed(2)} — approved catalogue price`;
     const realVsSimulated =
-      entry.priceSource === "gate"
-        ? "real (testnet)"
-        : entry.priceSource === "catalogue-approved"
-          ? "operator catalogue price"
-          : entry.priceSource === "plan-approved"
-            ? "approved plan price"
-            : null;
+      entry.priceSource === "catalogue-approved"
+        ? entry.gateEndpoint !== null
+          ? "real (testnet)"
+          : "operator catalogue price"
+        : entry.priceSource === "plan-approved"
+          ? "approved plan price"
+          : null;
     let purchasePath: PurchasePath | null = null;
     let purchasePathReason: string | null = null;
     if (entry.listed && entry.availability === "purchasable") {
@@ -282,7 +282,7 @@ export function buildCatalogDisplay(
         purchasePath = {
           label: "Pay per call",
           route: entry.gateEndpoint,
-          note: "Pay at the gate endpoint; price shown is the approved gate price.",
+          note: "Pay at the gate endpoint; price shown is the approved catalogue price.",
         };
       } else {
         purchasePathReason =

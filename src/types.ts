@@ -2752,12 +2752,19 @@ export interface AgenticPaymentConfig {
   mppSecretKey?: string;
 }
 
-export interface PaidTradingServiceTier {
+/**
+ * #5609 (G-7): a premium paid-service DESCRIPTOR — identity and
+ * service metadata only (id, resource, name, description, rate
+ * limit). It carries NO price: the price is operator data in the
+ * price catalogue (`getApprovedPrice` on the premium family), and
+ * every charge path resolves it from there. A descriptor with a
+ * price field would be a second price source.
+ */
+export interface PaidTradingServiceDescriptor {
   id: string;
   resource: string;
   name: string;
   description: string;
-  priceUSD: number;
   rateLimitPerMin?: number;
 }
 

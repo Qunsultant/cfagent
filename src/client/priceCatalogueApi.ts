@@ -26,7 +26,7 @@ import { withCsrfInit } from "./apiFetch";
 import { COMMERCIAL_API_BASE } from "../data/commercialUrlCatalog";
 const BASE = COMMERCIAL_API_BASE;
 
-export type PriceFamily = "stock" | "goal" | "options" | "strategy";
+export type PriceFamily = "stock" | "goal" | "options" | "strategy" | "options-scan" | "market-research" | "stock-signals";
 export type PriceApprovalStatus = "proposed" | "approved";
 
 export interface PriceEntryView {
@@ -72,8 +72,23 @@ async function callJson(path: string, init?: RequestInit): Promise<unknown> {
 
 function isPriceFamily(value: unknown): value is PriceFamily {
   return (
-    value === "stock" || value === "goal" || value === "options" || value === "strategy"
+    value === "stock" ||
+    value === "goal" ||
+    value === "options" ||
+    value === "strategy" ||
+    value === "options-scan" ||
+    value === "market-research" ||
+    value === "stock-signals"
   );
+}
+
+/**
+ * #5609 (G-7): premium families are priced per call, not per run —
+ * the section labels them accordingly. The server is the authority
+ * on the families; this only guards the render.
+ */
+export function isPremiumPriceFamily(value: unknown): value is PriceFamily {
+  return value === "options-scan" || value === "market-research" || value === "stock-signals";
 }
 
 /** Validate one catalogue entry from a prices read (the server assert is authoritative; this only guards the render against a half-shaped body). */

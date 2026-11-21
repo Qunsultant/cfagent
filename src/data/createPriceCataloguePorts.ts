@@ -17,12 +17,30 @@ import {
   ensurePriceCatalogueSchema,
   type PriceCatalogueDb,
 } from "./d1PriceCatalogueAdapter";
-import type { PriceCatalogue } from "./priceCataloguePorts";
+import type { PremiumPriceFamily, PriceCatalogue } from "./priceCataloguePorts";
 
 /** Build the price catalogue adapter from Worker env, or null if unbound. */
 export function createPriceCatalogueAdapter(env: { AGENT_DB?: unknown }): D1PriceCatalogueAdapter | null {
   if (!env.AGENT_DB) return null;
   return new D1PriceCatalogueAdapter(createD1PriceCatalogueDb(env.AGENT_DB as D1Database));
+}
+
+/**
+ * #5609 (G-7): resolve the APPROVED price for one premium family
+ * from Worker env. Null when the store is unbound, the family has
+ * no effective version, or the effective version is PROPOSED-only —
+ * every null is the caller's fail-closed signal, never a reason to
+ * guess a price. The shared resolver so the premium HTTP routes,
+ * the MCP paid tools, and the NLQ refusal all read the same price
+ * from the same source.
+ */
+export async function getApprovedPremiumPrice(
+  env: { AGENT_DB?: unknown },
+  family: PremiumPriceFamily,
+): Promise<number | null> {
+  const catalogue = createPriceCatalogueAdapter(env);
+  if (!catalogue) return null;
+  return catalogue.getApprovedPrice(family);
 }
 
 export { ensurePriceCatalogueSchema };

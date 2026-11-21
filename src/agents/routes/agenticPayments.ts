@@ -109,7 +109,7 @@ import { createBillingCheckoutPorts, type BillingCheckoutEnv } from "../../servi
 import { createBillingPorts, type BillingEnv } from "../../services/createBillingPorts";
 import { StripePaymentStrategy } from "../../patterns/paymentStrategies";
 
-import { PRICE_FAMILIES, PROPOSED_SEED_PRICES, assertPriceFamily, type PriceEntry, type PriceFamily } from "../../data/priceCataloguePorts";
+import { PRICE_FAMILIES, PROPOSED_SEED_PRICES, assertCataloguePriceFamily, assertPriceFamily, type PriceEntry, type PriceFamily } from "../../data/priceCataloguePorts";
 import {
   createPriceCatalogueAdapter,
   ensurePriceCatalogueSchema,
@@ -7368,7 +7368,9 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
       let family;
       try {
-        family = assertPriceFamily(body.family);
+        // #5609 (G-7): catalogue versions exist for premium families
+        // too — the catalogue validator, not the per-run one.
+        family = assertCataloguePriceFamily(body.family);
       } catch (err: any) {
         return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: codedMessage("FAILURE_COMMERCIAL_REQUEST_INVALID") }, { status: 400 });
       }

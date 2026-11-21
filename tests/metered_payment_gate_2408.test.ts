@@ -50,6 +50,12 @@ import type { UsageEventPort, InsertUsageEventRow } from "../src/data/canonicalR
 import type { StoreTier } from "../src/data/commercialPorts";
 import { DatabaseORM } from "../src/orm";
 import { MockSqlStorage } from "./mock-sql";
+import { APPROVED_PREMIUM_PRICES } from "./premiumPriceCatalogueFixture";
+
+// #5609 (G-7): the gate takes its price as an argument — the caller
+// resolves the APPROVED catalogue price. These tests drive the gate
+// directly, so the price comes from the approved premium catalogue.
+const OPTIONS_SCAN_PRICE = APPROVED_PREMIUM_PRICES["options-scan"];
 import type { Env, X402PaymentProof, AgenticPaymentReceipt } from "../src/types";
 
 // ---------------------------------------------------------------------------
@@ -182,7 +188,7 @@ function sampleReceipt(): AgenticPaymentReceipt {
     receiptId: "rcpt_x402_test_1",
     protocol: "x402",
     resource: "/api/premium/options-scan",
-    amount: 0.05,
+    amount: OPTIONS_SCAN_PRICE,
     currency: "USDC",
     network: "base-sepolia",
     payer: PAYER,
@@ -218,7 +224,7 @@ describe("metered-gate pure helpers (#2408)", () => {
 
   it("builds the meter row from the receipt: runId = receipt id, category = service id", () => {
     const receipt = sampleReceipt();
-    const row = buildMeteredCallEvent({ receipt, userLogin: payerScopeId(PAYER), category: "options_screener", priceUSD: 0.05, tier: "Free", tenantId: null });
+    const row = buildMeteredCallEvent({ receipt, userLogin: payerScopeId(PAYER), category: "options_screener", priceUSD: OPTIONS_SCAN_PRICE, tier: "Free", tenantId: null });
     expect(row.id).toBe(`use_${receipt.receiptId}`);
     expect(row.runId).toBe(receipt.receiptId);
     expect(row.category).toBe("options_screener");
@@ -227,7 +233,7 @@ describe("metered-gate pure helpers (#2408)", () => {
     expect(row.tenantId).toBeNull();
     const detail = JSON.parse(row.detailJson ?? "{}") as Record<string, unknown>;
     expect(detail.receiptId).toBe(receipt.receiptId);
-    expect(detail.priceUSD).toBe(0.05);
+    expect(detail.priceUSD).toBe(OPTIONS_SCAN_PRICE);
     expect(detail.tier).toBe("Free");
     expect(detail.protocol).toBe("x402");
   });
@@ -243,7 +249,7 @@ describe("metered-gate pure helpers (#2408)", () => {
 });
 
 describe("x402 branch: served calls are metered, refused calls are not (#2408)", () => {
-  const def = TRADING_PAID_SERVICES.OPTIONS_SCREENER;
+  const def = { ...TRADING_PAID_SERVICES.OPTIONS_SCREENER, priceUSD: OPTIONS_SCAN_PRICE };
 
   it("verified payment serves AND records exactly one usage_event", async () => {
     const { service } = makeService();
@@ -265,7 +271,7 @@ describe("x402 branch: served calls are metered, refused calls are not (#2408)",
     expect(meter.rows[0].runId).toMatch(/^rcpt_x402_/);
     const detail = JSON.parse(meter.rows[0].detailJson ?? "{}") as any;
     expect(detail.tier).toBe("Free");
-    expect(detail.priceUSD).toBe(0.05);
+    expect(detail.priceUSD).toBe(OPTIONS_SCAN_PRICE);
   });
 
   it("records the resolved tier on the usage_event (session traffic)", async () => {
@@ -423,7 +429,7 @@ describe("x402 branch: served calls are metered, refused calls are not (#2408)",
 });
 
 describe("MPP branch: served calls are metered the same way (#2408)", () => {
-  const def = TRADING_PAID_SERVICES.OPTIONS_SCREENER;
+  const def = { ...TRADING_PAID_SERVICES.OPTIONS_SCREENER, priceUSD: OPTIONS_SCAN_PRICE };
 
   function mppService() {
     const sql = new MockSqlStorage();
@@ -520,7 +526,7 @@ describe("premium-route wiring (#2408)", () => {
       runId: "rcpt_x402_roundtrip",
       category: "options_screener",
       createdAt: new Date().toISOString(),
-      detailJson: JSON.stringify({ receiptId: "rcpt_x402_roundtrip", priceUSD: 0.05, tier: "Free", protocol: "x402" }),
+      detailJson: JSON.stringify({ receiptId: "rcpt_x402_roundtrip", priceUSD: OPTIONS_SCAN_PRICE, tier: "Free", protocol: "x402" }),
       tenantId: "tenant-roundtrip",
     });
     const rows = opts.meter!.listByUser("owner-login", 10);

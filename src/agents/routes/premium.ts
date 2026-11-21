@@ -3,9 +3,9 @@
  * (src/agents/orchestrator.ts). Pure move - no behavior change.
  *
  * Owns the Paid Trading Service blocks:
- * /premium/options-scan (Institutional Options & Greeks Screener, $0.05 USDC),
- * /premium/market-research (Autonomous Equity Research Report, $0.10 USDC),
- * /premium/stock-signals (Real-Time Quantitative Anomaly Signals, $0.02 USDC).
+ * /premium/options-scan (Institutional Options & Greeks Screener),
+ * /premium/market-research (Autonomous Equity Research Report),
+ * /premium/stock-signals (Real-Time Quantitative Anomaly Signals).
  * Each is a payment-gated endpoint (ETradeAgenticPaymentService.handleGatedEndpoint)
  * matching `path.includes("/premium/...")` for GET and POST.
  * The three blocks were contiguous in routeRequest (between the Cloudflare
@@ -28,8 +28,11 @@
  * wallet's simulated proofs are rejected by verifyPayment (#122) and
  * are labeled simulated wherever a price is shown (see
  * src/services/x402PaymentPath.ts). The 402 body carries the path
- * label in `paymentPath`; prices are pinned ($0.05 / $0.10 / $0.02)
- * and stand unless the owner changes them.
+ * label in `paymentPath`; prices are operator data in the price
+ * catalogue (#5609) — the approved catalogue price for the premium
+ * family, resolved per request, never a pinned code constant. With
+ * no approved price the route refuses (503) instead of minting a
+ * challenge for a guessed amount.
  *
  * Handlers that used OrchestratorAgent state receive it via the explicit
  * PremiumRouteContext parameter; there are no new globals and no
@@ -72,6 +75,9 @@ import type { StoreTier } from "../../data/commercialPorts";
 import { isUnlimitedFreeGrantActive } from "../../data/commercialPorts";
 import { resolveEffectiveTier } from "../../data/subscriptionPorts";
 import type { MeteredGateOptions } from "../../services/meteredPaymentGate";
+import { meteredGateRefusal } from "../../services/meteredPaymentGate";
+import { getApprovedPremiumPrice } from "../../data/createPriceCataloguePorts";
+import type { PremiumPriceFamily } from "../../data/priceCataloguePorts";
 import { screenAlreadyRunningDetails } from "../../services/screenInFlight";
 import { quotaExceededDetails } from "../../security/userRequestQuota";
 import { generationId, newRunId } from "../../services/executionTreeIds";
@@ -248,6 +254,29 @@ function premiumPaymentService(
 }
 
 /**
+ * #5609 (G-7): resolve the APPROVED catalogue price for one premium
+ * service, or the fail-closed refusal when there is none. A challenge
+ * cannot be minted without a price, so the refusal happens BEFORE
+ * handleGatedEndpoint is called — never a 402 for a guessed amount,
+ * never a serve. Null covers all three no-price states (store
+ * unbound, no effective version, PROPOSED-only) identically.
+ */
+async function approvedPremiumPriceOrRefusal(
+  ctx: PremiumRouteContext,
+  family: PremiumPriceFamily,
+): Promise<number | Response> {
+  const priceUSD = await getApprovedPremiumPrice(ctx.env, family);
+  if (priceUSD === null) {
+    return meteredGateRefusal(
+      503,
+      "PriceUnavailable",
+      "No approved price is set for this premium service; the paid result was not served.",
+    );
+  }
+  return priceUSD;
+}
+
+/**
  * Issue #2408 (Phase 1.2): build the metered-gate options for one
  * premium request. The meter is the usage port over the premium
  * host's already-bound agent DO sql (the same seam
@@ -361,10 +390,13 @@ export async function handlePremiumRoutes(
   sessionId: string,
   ctx: PremiumRouteContext
 ): Promise<Response | null> {
-  // Paid Trading Service: Institutional Options & Greeks Screener ($0.05 USDC)
+  // Paid Trading Service: Institutional Options & Greeks Screener
+  // (#5609: the price is the approved catalogue price for "options-scan")
   if (path.includes("/premium/options-scan") && (request.method === "GET" || request.method === "POST")) {
     const paymentService = premiumPaymentService(ctx, sessionId, request);
     const tier = TRADING_PAID_SERVICES.OPTIONS_SCREENER;
+    const priceOrRefusal = await approvedPremiumPriceOrRefusal(ctx, "options-scan");
+    if (priceOrRefusal instanceof Response) return priceOrRefusal;
     // #1728: the screener switch governs the RESPONSE ENVELOPE only
     // (mode "mcp" → the MCP flat envelope; mode "rest" (legacy) →
     // the REST envelope below). The gate, price, engine, channel,
@@ -376,7 +408,7 @@ export async function handlePremiumRoutes(
     return paymentService.handleGatedEndpoint(
       request,
       tier.resource,
-      tier.priceUSD,
+      priceOrRefusal,
       tier.description,
       async (receipt) => {
         let filter: any = {};
@@ -549,10 +581,13 @@ export async function handlePremiumRoutes(
     );
   }
 
-  // Paid Trading Service: Autonomous Equity Research Report ($0.10 USDC)
+  // Paid Trading Service: Autonomous Equity Research Report
+  // (#5609: the price is the approved catalogue price for "market-research")
   if (path.includes("/premium/market-research") && (request.method === "GET" || request.method === "POST")) {
     const paymentService = premiumPaymentService(ctx, sessionId, request);
     const tier = TRADING_PAID_SERVICES.MARKET_RESEARCH;
+    const priceOrRefusal = await approvedPremiumPriceOrRefusal(ctx, "market-research");
+    if (priceOrRefusal instanceof Response) return priceOrRefusal;
     // #1728: the research switch governs the RESPONSE ENVELOPE only
     // (same boundaries and `?mode=` run level as the screener
     // switch above).
@@ -561,7 +596,7 @@ export async function handlePremiumRoutes(
     return paymentService.handleGatedEndpoint(
       request,
       tier.resource,
-      tier.priceUSD,
+      priceOrRefusal,
       tier.description,
       async (receipt) => {
         // Multi-tenant owner for the canonical research row (#183 identity
@@ -634,7 +669,8 @@ export async function handlePremiumRoutes(
     );
   }
 
-  // Paid Trading Service: Real-Time Quantitative Anomaly Signals ($0.02 USDC)
+  // Paid Trading Service: Real-Time Quantitative Anomaly Signals
+  // (#5609: the price is the approved catalogue price for "stock-signals")
   // #2373 Slice B (verification): paid via the x402/MPP gate below in ALL
   // flag states — the gate reads no flag. Seam-unification onto
   // paidScreenSubmission is an open owner decision: the seam needs a verified
@@ -643,11 +679,13 @@ export async function handlePremiumRoutes(
   if (path.includes("/premium/stock-signals") && (request.method === "GET" || request.method === "POST")) {
     const paymentService = premiumPaymentService(ctx, sessionId, request);
     const tier = TRADING_PAID_SERVICES.STOCK_SIGNALS;
+    const priceOrRefusal = await approvedPremiumPriceOrRefusal(ctx, "stock-signals");
+    if (priceOrRefusal instanceof Response) return priceOrRefusal;
 
     return paymentService.handleGatedEndpoint(
       request,
       tier.resource,
-      tier.priceUSD,
+      priceOrRefusal,
       tier.description,
       async (receipt) => {
         let symbols = ["NVDA", "AAPL", "MSFT", "TSLA"];

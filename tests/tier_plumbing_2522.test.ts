@@ -50,6 +50,12 @@ import type {
 import type { X402ClaimVerifier } from "../src/services/x402Verifier";
 import { DatabaseORM } from "../src/orm";
 import { MockSqlStorage } from "./mock-sql";
+import { APPROVED_PREMIUM_PRICES } from "./premiumPriceCatalogueFixture";
+
+// #5609 (G-7): the gate takes its price as an argument — the caller
+// resolves the APPROVED catalogue price. These tests drive the gate
+// directly, so the price comes from the approved premium catalogue.
+const OPTIONS_SCAN_PRICE = APPROVED_PREMIUM_PRICES["options-scan"];
 import type { Env, X402PaymentProof } from "../src/types";
 import {
   handleAgenticPaymentsRoutes,
@@ -425,7 +431,7 @@ describe("resolveTierTransition (#2522)", () => {
 // 5. Gate tier-decision audit
 // ---------------------------------------------------------------------------
 describe("gate tier-decision audit, x402 branch (#2522)", () => {
-  const def = TRADING_PAID_SERVICES.OPTIONS_SCREENER;
+  const def = { ...TRADING_PAID_SERVICES.OPTIONS_SCREENER, priceUSD: OPTIONS_SCAN_PRICE };
 
   it("served call writes exactly one commercial.tier.decision row with the decision", async () => {
     const { orm, service } = makeService();
@@ -446,7 +452,7 @@ describe("gate tier-decision audit, x402 branch (#2522)", () => {
     expect(decisions[0].payload).toMatchObject({
       tier: "Free",
       category: "options_screener",
-      priceUSD: 0.05,
+      priceUSD: OPTIONS_SCAN_PRICE,
       protocol: "x402",
     });
     expect(decisions[0].payload.userLogin).toBe(payerScopeId(PAYER));
@@ -517,7 +523,7 @@ describe("gate tier-decision audit, x402 branch (#2522)", () => {
 });
 
 describe("gate tier-decision audit, MPP branch (#2522)", () => {
-  const def = TRADING_PAID_SERVICES.OPTIONS_SCREENER;
+  const def = { ...TRADING_PAID_SERVICES.OPTIONS_SCREENER, priceUSD: OPTIONS_SCAN_PRICE };
 
   function mppService() {
     const sql = new MockSqlStorage();

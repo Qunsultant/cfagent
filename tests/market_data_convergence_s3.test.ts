@@ -47,6 +47,20 @@ import {
 } from "../src/agents/routes/premium";
 import { DatabaseORM } from "../src/orm";
 import { MockSqlStorage } from "./mock-sql";
+// #5609 (G-7): the premium routes resolve their price from the
+// catalogue (getApprovedPremiumPrice). This suite binds no D1, so
+// the catalogue resolves from the approved in-memory fixture —
+// the real port semantics, with the binding stubbed, never the price.
+vi.mock("../src/data/createPriceCataloguePorts", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../src/data/createPriceCataloguePorts")>();
+  const { approvedPremiumCatalogue } = await import("./premiumPriceCatalogueFixture");
+  return {
+    ...actual,
+    getApprovedPremiumPrice: (_env: unknown, family: string) =>
+      approvedPremiumCatalogue.getApprovedPrice(family),
+  };
+});
 import type { Env, MarketDataResearchQuote, X402PaymentProof } from "../src/types";
 
 // On-chain verification is covered by the x402 verifier suites; here

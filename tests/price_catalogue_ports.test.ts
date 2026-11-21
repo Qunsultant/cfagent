@@ -141,11 +141,33 @@ describe("price catalogue port contract (#2185)", () => {
       expect(await catalogue.getPrice("goal")).toBe(0.1);
       expect(await catalogue.getPrice("options")).toBe(0.05);
       expect(await catalogue.getPrice("strategy")).toBe(0.1);
+      // #5609 (G-7): premium seeds — PROPOSED rows, never approved.
+      expect(await catalogue.getPrice("options-scan")).toBe(5);
+      expect(await catalogue.getPrice("market-research")).toBe(10);
+      expect(await catalogue.getPrice("stock-signals")).toBe(2);
       expect(await catalogue.getPrice("nope")).toBeNull();
       const all = await catalogue.getAllPrices();
-      expect(all.map((e) => e.family).sort()).toEqual(["goal", "options", "stock", "strategy"]);
+      expect(all.map((e) => e.family).sort()).toEqual([
+        "goal",
+        "market-research",
+        "options",
+        "options-scan",
+        "stock",
+        "stock-signals",
+        "strategy",
+      ]);
       expect(Object.fromEntries(all.map((e) => [e.family, e.priceUSD]))).toEqual({
         ...PROPOSED_SEED_PRICES,
+      });
+      // #5609 (G-7): premium rows are premium products, not per-run.
+      expect(Object.fromEntries(all.map((e) => [e.family, e.productId]))).toEqual({
+        goal: "prod-per-run-goal",
+        "market-research": "prod-premium-market-research",
+        options: "prod-per-run-options",
+        "options-scan": "prod-premium-options-scan",
+        stock: "prod-per-run-stock",
+        "stock-signals": "prod-premium-stock-signals",
+        strategy: "prod-per-run-strategy",
       });
     }
   });
