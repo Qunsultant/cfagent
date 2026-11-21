@@ -43,14 +43,21 @@
  * as `builtinScheduledGoals.ts`: importing it back would be a module
  * cycle for the modules that import this reader.
  *
- * Environment-free: this module imports only the JSON and a type, so
- * the client bundle may import it (the create-form picker and the
- * kind classifier do) exactly like `src/client/navConfig.ts` imports
- * its JSON. Nothing here touches the Worker, the DOM, or node APIs.
+ * Environment-free: this module imports the JSON, types, and the
+ * broker registry through `src/trading/index.ts` (the sole public
+ * surface of src/trading/, #290), so the client bundle may import it
+ * (the create-form picker and the kind classifier do) exactly like
+ * `src/client/navConfig.ts` imports its JSON. Nothing here touches
+ * the Worker, the DOM, or node APIs.
  */
 import raw from "../../config/job-catalogue.json";
 import type { ScheduleListKind } from "./scheduleListModes";
-import { isBrokerId, type BrokerId } from "../trading/brokerCatalog";
+// Trading boundary (#290): the ONLY public surface of src/trading/ is
+// its index — import the broker registry through it, never a
+// trading-internal path. The client already imports the index
+// (brokerEnvironment.ts, jobDefinitionParamRegistry.ts), so this stays
+// client-safe.
+import { isBrokerId, type BrokerId } from "../trading";
 
 /** The Schedules home kind family a job belongs to. */
 export type JobCatalogueKind = ScheduleListKind;
@@ -101,10 +108,11 @@ export interface JobCatalogueEntry {
   requiresBroker?: boolean;
   /**
    * Which broker the job needs, when it needs one: a `BrokerId` from
-   * the platform's broker registry (`src/trading/brokerCatalog.ts` —
-   * the authority, not a second list here), or `"any"` when any
-   * registered broker works. Reusing `BrokerId` also keeps this
-   * module free of provider-brand literals (neutrality census #3525).
+   * the platform's broker registry (`src/trading/brokerCatalog.ts`,
+   * reached through the index — the authority, not a second list
+   * here), or `"any"` when any registered broker works. Reusing
+   * `BrokerId` also keeps this module free of provider-brand
+   * literals (neutrality census #3525).
    */
   broker?: BrokerId | "any";
   mode?: "paper" | "live" | "either";
