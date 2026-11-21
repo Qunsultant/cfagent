@@ -914,6 +914,11 @@
           "name": "broker_id",
           "type": "TEXT",
           "pk": 0
+        },
+        {
+          "name": "turn_step_timeout_ms",
+          "type": "INTEGER",
+          "pk": 0
         }
       ],
       "constraints": {}

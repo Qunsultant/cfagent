@@ -356,6 +356,14 @@ export const agentTenantSettings = sqliteTable("agent_tenant_settings", {
   dataProviderId: text("data_provider_id").notNull().default("etrade"),
   /** Per-tenant broker selection. Absent row = alpaca (adapter default, DEFAULT_TENANT_PROVIDERS, #3812/#3937). The column DEFAULT below is a pre-#3937 leftover — see the data-provider note above. */
   brokerId: text("broker_id").notNull().default("etrade"),
+  /**
+   * Issue #5423 (#3515 S4): per-step timeout for the MAS turn
+   * loop, in milliseconds. Nullable: absent row / null =
+   * UNCONFIGURED — turns for the tenant refuse (named refusal)
+   * instead of running unbounded. No code default lives here
+   * (the adapter applies none); migration 0078.
+   */
+  turnStepTimeoutMs: integer("turn_step_timeout_ms"),
 });
 
 /**

@@ -140,6 +140,7 @@ export function TenantAdminPanel() {
     adsEnabled?: boolean;
     autoRefresh?: { enabled: boolean; intervalS: number };
     providers?: { dataProviderId: string; brokerId: string };
+    turnStepTimeoutMs?: number;
   }) => {
     if (!detail) return;
     setSaving(true);
@@ -195,6 +196,11 @@ export function TenantAdminPanel() {
             { key: "members", header: "Account members", render: (row) => String(row.memberCount) },
             { key: "ads", header: "Ads", render: (row) => (row.adsEnabled ? "On" : "Off") },
             { key: "providers", header: "Data provider / broker", render: (row) => `${row.dataProviderId} / ${row.brokerId}` },
+            {
+              key: "stepTimeout",
+              header: "Step timeout",
+              render: (row) => (row.turnStepTimeoutMs === null ? "Unconfigured" : `${row.turnStepTimeoutMs} ms`),
+            },
             {
               key: "open",
               header: "",
@@ -278,6 +284,24 @@ export function TenantAdminPanel() {
                 void handleSaveSettings({
                   providers: { dataProviderId: detail.dataProviderId, brokerId: e.currentTarget.value },
                 });
+              }
+            }}
+          />
+          <TextInput
+            label="Turn step timeout (milliseconds)"
+            type="number"
+            hint="Per-step timeout for the MAS turn loop (issue 5423). 1000–600000 ms. Blank means unconfigured — turns for this tenant refuse instead of running unbounded."
+            value={detail.turnStepTimeoutMs === null ? "" : String(detail.turnStepTimeoutMs)}
+            disabled={saving}
+            onBlur={(e) => {
+              const raw = e.currentTarget.value.trim();
+              if (raw === "") return;
+              const timeoutMs = Number.parseInt(raw, 10);
+              if (Number.isInteger(timeoutMs) && timeoutMs >= 1000 && timeoutMs <= 600000) {
+                setFormError("");
+                void handleSaveSettings({ turnStepTimeoutMs: timeoutMs });
+              } else {
+                setFormError("Turn step timeout must be between 1000 and 600000 milliseconds.");
               }
             }}
           />

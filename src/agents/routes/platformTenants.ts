@@ -10,7 +10,7 @@
  *   GET    /platform-tenants                  list tenants + settings + member counts
  *   POST   /platform-tenants                  create a tenant (settings row with store defaults)
  *   GET    /platform-tenants/:id              detail: settings + account-row members
- *   PATCH  /platform-tenants/:id/settings     update tenant settings (ads, auto-refresh, providers)
+ *   PATCH  /platform-tenants/:id/settings     update tenant settings (ads, auto-refresh, providers, turn step timeout)
  *
  * (Paths are the DO-internal spellings: src/server.ts strips the
  * /api prefix when forwarding, so externally these are
@@ -41,11 +41,14 @@
  *   read-only identity by construction.
  * - Settings reuse the existing commercial store setters
  *   (setTenantAdsEnabled / setTenantAutoRefresh /
- *   setTenantProviders): a create is a settings row written with
- *   store defaults (ads enabled, auto-refresh OFF / 15s,
- *   etrade / etrade — the adapters' absent-row defaults, never
- *   code constants in this module). No new migration: the
- *   directory port reads only tables 0007 / 0026 / 0028 create.
+ *   setTenantProviders / setTenantTurnStepTimeoutMs): a create is
+ *   a settings row written with store defaults (ads enabled,
+ *   auto-refresh OFF / 15s, etrade / etrade — the adapters'
+ *   absent-row defaults, never code constants in this module;
+ *   the turn step timeout is UNCONFIGURED on a new tenant —
+ *   null, never a default — migration 0078, #5423). No new
+ *   table: the directory port reads only tables 0007 / 0026 /
+ *   0028 create.
  * - Operator writes are audit-annotated best-effort after the
  *   write when the caller supplies an audit funnel (an audit
  *   failure never fails the write); the audit-before-write
@@ -90,6 +93,7 @@ import {
 
 import { createStructuredLogger } from "../../observability/structuredLogger";
 import { createObservabilitySink } from "../../observability/createObservabilityPorts";
+import { parseTurnStepTimeoutMs } from "../../config/turnStepTimeout";
 
 /** Issue #5606 (G-3) — module logger on the structured-logging seam. */
 const structuredLog = createStructuredLogger(createObservabilitySink({}), {
@@ -126,6 +130,8 @@ interface TenantSettingsView {
   autoRefreshIntervalS: number;
   dataProviderId: string;
   brokerId: string;
+  /** Issue #5423 (#3515 S4): per-step timeout (ms); null = unconfigured. Mirrors the client view in tenantAdminApi.ts. */
+  turnStepTimeoutMs: number | null;
 }
 
 /**
@@ -204,6 +210,7 @@ function settingsView(
   adsEnabled: boolean,
   autoRefresh: { enabled: boolean; intervalS: number },
   providers: { dataProviderId: string; brokerId: string },
+  turnStepTimeoutMs: number | null,
 ): TenantSettingsView {
   return {
     tenantId,
@@ -212,6 +219,7 @@ function settingsView(
     autoRefreshIntervalS: autoRefresh.intervalS,
     dataProviderId: providers.dataProviderId,
     brokerId: providers.brokerId,
+    turnStepTimeoutMs,
   };
 }
 
@@ -222,7 +230,8 @@ async function readSettings(
   const adsEnabled = await commercial.getTenantAdsEnabled(tenantId);
   const autoRefresh = await commercial.getTenantAutoRefresh(tenantId);
   const providers = await commercial.getTenantProviders(tenantId);
-  return settingsView(tenantId, adsEnabled, autoRefresh, providers);
+  const turnStepTimeoutMs = await commercial.getTenantTurnStepTimeoutMs(tenantId);
+  return settingsView(tenantId, adsEnabled, autoRefresh, providers, turnStepTimeoutMs);
 }
 
 function auditBestEffort(
@@ -396,6 +405,7 @@ export async function handlePlatformTenantRoutes(
             settings.adsEnabled,
             { enabled: settings.autoRefreshEnabled, intervalS: settings.autoRefreshIntervalS },
             { dataProviderId: settings.dataProviderId, brokerId: settings.brokerId },
+            settings.turnStepTimeoutMs,
           ),
           creationMode: TENANT_CREATION_MODE,
         },
@@ -477,9 +487,12 @@ export async function handlePlatformTenantRoutes(
         if (field === "providers") {
           return requestInvalidResponse("providers must be { dataProviderId: string, brokerId: string }.");
         }
+        if (field === "turnStepTimeoutMs") {
+          return requestInvalidResponse("turnStepTimeoutMs must be a number.");
+        }
         return requestInvalidResponse("No settings field supplied.");
       }
-      // Issue #5605 (G-2): the PATCH's up-to-three settings
+      // Issue #5605 (G-2): the PATCH's up-to-four settings
       // writes run as ONE D1 batch unit when AGENT_DB is bound —
       // the setters buffer their upserts into the ambient unit
       // the runner opens. Without a binding (a test-seam store)
@@ -515,6 +528,19 @@ export async function handlePlatformTenantRoutes(
             dataProviderId: providers["dataProviderId"],
             brokerId: providers["brokerId"],
           });
+          applied = true;
+        }
+        if (body["turnStepTimeoutMs"] !== undefined) {
+          // #5423 (#3515 S4): the bounds live in the config
+          // module (parseTurnStepTimeoutMs) — a value outside
+          // 1000–600000 ms is a 400 with the bound in the message.
+          let timeoutMs: number;
+          try {
+            timeoutMs = parseTurnStepTimeoutMs(body["turnStepTimeoutMs"]);
+          } catch (err) {
+            return requestInvalidResponse(err instanceof Error ? err.message : "turnStepTimeoutMs is invalid.");
+          }
+          await commercial.setTenantTurnStepTimeoutMs(tenantId, timeoutMs);
           applied = true;
         }
         if (!applied) return requestInvalidResponse("No settings field supplied.");

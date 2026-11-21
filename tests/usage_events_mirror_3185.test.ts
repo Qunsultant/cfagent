@@ -109,7 +109,11 @@ describe("3185-B01 migration 0077 creates the mirror", () => {
   it("registers 0077 after 0076 in a well-formed registry", () => {
     const versions = ALL_MIGRATIONS.map((m) => m.version);
     expect(versions).toContain(77);
-    expect(versions[versions.length - 1]).toBe(77);
+    // #3189: only migration_registry.test.ts owns "latest" — this
+    // test pins 0077's REGISTRATION (after 0076), not its
+    // latest-ness, so it stays green when a later migration
+    // (#5423 adds 0078) lands after it.
+    expect(versions.indexOf(77)).toBe(versions.indexOf(76) + 1);
     expect(versions).toEqual([...versions].sort((a, b) => a - b));
     const names = ALL_MIGRATIONS.map((m) => m.name);
     expect(new Set(names).size).toBe(names.length);
