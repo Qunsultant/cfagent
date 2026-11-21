@@ -114,7 +114,7 @@ import {
   CHAT_AWAIT_POLL_INTERVAL_MS,
   resolveChatAwaitDeadlineMs,
 } from "./chatAwaitBudget";
-import { CREDITS_TOP_UP_HINT } from "../../services/providerUxLinks";
+import { CREDITS_TOP_UP_HINT, workflowRunUrl } from "../../services/providerUxLinks";
 import { resolveScreenProviderForRun } from "../../services/tenantProviders";
 import { resolvePresetFilter } from "../../services/screenerPresetResolution";
 import { codedMessage } from "../../outcomes/outcomeAspects";
@@ -204,6 +204,16 @@ export interface MeshScreenRunResult {
    * never this read-back.
    */
   receiptEmailSource?: "in-turn" | "seam";
+  /**
+   * Issue #5921 — async dispatch receipt: present ONLY when
+   * the caller explicitly asked for delivery:"async" and the
+   * door returned early with the run id instead of awaiting.
+   * jobId is the run id; statusUrl is the Workflow Runs UX
+   * URL for it (`?tab=workflow-runs&run=<jobId>`). Absent on
+   * every awaited (sync/default) run.
+   */
+  jobId?: string;
+  statusUrl?: string;
   rejections?: Array<{ symbol: string; reason: string }>;
   allStocks: Array<{
     symbol: string;
@@ -595,13 +605,25 @@ export async function runStockScreenViaDoor(
   }
   const execFields = executionMode ? { executionMode } : {};
   const presetFields = presetRef ? { presetRef } : {};
+  // Issue #5921 — the async dispatch leg keys on the
+  // CALLER-EXPLICIT delivery only
+  // (input.executionMode?.delivery === "async"). The family
+  // default delivery is "async" (screener catalog spec /
+  // DEFAULT_JOB_EXECUTION_MODE), so keying on the RESOLVED
+  // mode would flip every default chat screen to an early
+  // return — a sync-leg change this slice explicitly
+  // excludes. Explicit async → early return with the run id;
+  // explicit sync or default → await, byte-identical. The
+  // resolved mode is still threaded to the command unchanged.
+  const asyncDispatch = input.executionMode?.delivery === "async";
+  const dispatchFields = asyncDispatch ? { asyncDispatch: true as const } : {};
   // Issue #4435 — the in-turn receipt email rides only the
   // paid path (the free path never reads it).
   const receiptFields = input.receiptEmail !== undefined ? { receiptEmail: input.receiptEmail } : {};
   if (await screenMonetizationOn(ctx)) {
-    return runPaidScreen(ctx, { filters, userLogin: login, universeId, ...modeFields, ...execFields, ...presetFields, ...receiptFields });
+    return runPaidScreen(ctx, { filters, userLogin: login, universeId, ...modeFields, ...execFields, ...presetFields, ...receiptFields, ...dispatchFields });
   }
-  return runFreeScreen(ctx, { filters, userLogin: login, universeId, ...modeFields, ...execFields, ...presetFields });
+  return runFreeScreen(ctx, { filters, userLogin: login, universeId, ...modeFields, ...execFields, ...presetFields, ...dispatchFields });
 }
 
 /** The pieces of one door screen run, shared by the free and paid paths. */
@@ -824,6 +846,38 @@ function settleScreenBridge(
 }
 
 /**
+ * Issue #5921 — the async dispatch receipt: the result a caller
+ * with delivery:"async" gets back promptly instead of an awaited
+ * run. The run is started (same command, same bridge row as the
+ * sync leg) and completes on the workflow; the caller watches it
+ * at statusUrl. success:true names the DISPATCH, not a completed
+ * screen — totalScanned/matchedCount are 0 and allStocks/
+ * opportunities are empty because nothing has been read back yet.
+ */
+function asyncDispatchReceipt(args: {
+  jobId: string;
+  universeId: UniverseId;
+  startedAtIso: string;
+  receiptEmailSource?: "in-turn" | "seam";
+}): MeshScreenRunResult {
+  const statusUrl = workflowRunUrl(args.jobId);
+  return {
+    timestamp: args.startedAtIso,
+    universe: args.universeId,
+    sector: "",
+    success: true,
+    totalScanned: 0,
+    matchedCount: 0,
+    discoveryMessage: `Screen dispatched as async run ${args.jobId} — watch it at ${statusUrl}.`,
+    jobId: args.jobId,
+    statusUrl,
+    ...(args.receiptEmailSource ? { receiptEmailSource: args.receiptEmailSource } : {}),
+    allStocks: [],
+    opportunities: [],
+  };
+}
+
+/**
  * The free path: start the run and await its outcome. Unlike
  * the NLQ port there is NO fallback: an unavailable port or a
  * failed start is a coded refusal (header difference 1). Once
@@ -842,6 +896,8 @@ async function runFreeScreen(
     executionMode?: import("../../data/jobPipelinePorts").JobExecutionMode;
     /** Issue #4434 (S6/N5): the resolved preset reference, stamped on the run record. */
     presetRef?: StockScreenPresetRef;
+    /** Issue #5921 — caller-explicit async dispatch (see runStockScreenViaDoor). */
+    asyncDispatch?: boolean;
   },
 ): Promise<MeshScreenRunResult> {
   const ports: WorkflowPort | null =
@@ -881,6 +937,18 @@ async function runFreeScreen(
     userLogin: req.userLogin,
     nowIso: parts.startedAtIso,
   });
+  // Issue #5921 — explicit async dispatch returns early with
+  // the run id instead of awaiting. The bridge row was started
+  // BEFORE this return, and is deliberately NEVER settled here
+  // — same rule as the await-deadline return: the still-running
+  // run keeps its `running` row for the #3784 sweep.
+  if (req.asyncDispatch) {
+    return asyncDispatchReceipt({
+      jobId: parts.jobId,
+      universeId: req.universeId,
+      startedAtIso: parts.startedAtIso,
+    });
+  }
   return awaitScreenOutcome(ctx, {
     shards: parts.shards,
     userLogin: req.userLogin,
@@ -1085,6 +1153,8 @@ async function runPaidScreen(
     presetRef?: StockScreenPresetRef;
     /** Issue #4435: the receipt email the user supplied in the chat turn for this paid run. */
     receiptEmail?: string;
+    /** Issue #5921 — caller-explicit async dispatch (see runStockScreenViaDoor). */
+    asyncDispatch?: boolean;
   },
 ): Promise<MeshScreenRunResult> {
   const parts = await buildScreenCommand(ctx, req);
@@ -1208,6 +1278,19 @@ async function runPaidScreen(
     userLogin: req.userLogin,
     nowIso: startedAtIso,
   });
+  // Issue #5921 — same early return as the free path: the
+  // payment run was submitted and the bridge row started; the
+  // receipt carries the receipt-email source like every paid
+  // outcome. The bridge is deliberately NEVER settled here —
+  // same rule as the await-deadline return.
+  if (req.asyncDispatch) {
+    return asyncDispatchReceipt({
+      jobId,
+      universeId: req.universeId,
+      startedAtIso,
+      receiptEmailSource,
+    });
+  }
   return awaitPaidScreenOutcome(ctx, {
     shards,
     userLogin: req.userLogin,
