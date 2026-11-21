@@ -41,9 +41,14 @@ describe("Agent research fallback observability (issue #543)", () => {
   const section = methodSection();
 
   it("the fallback branch still calls the deterministic pipeline directly", () => {
-    expect(section).toContain(
-      "const fallback = await agent.runResearch({ trigger, userLogin: login });"
-    );
+    // #5912 made the call carry the run's venue/mode selection, so the pin
+    // asserts the direct pipeline call and its correlation arguments rather
+    // than one exact one-line spelling (gitops §7: pins move with the code).
+    const fallbackAt = section.indexOf("const fallback = await agent.runResearch({");
+    expect(fallbackAt).toBeGreaterThan(-1);
+    const call = section.slice(fallbackAt, section.indexOf("});", fallbackAt));
+    expect(call).toContain("trigger");
+    expect(call).toContain("userLogin: login");
   });
 
   it("a structured warning marks the Agent bypass on the fallback branch", () => {
