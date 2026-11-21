@@ -174,32 +174,33 @@ No UX reads or writes it; it cannot be per-tenant or per-run; a bad value throws
 
 | Registry | Members | Used by OODA? |
 |---|---|---|
-| `UniverseId` (screener selector) | `TECH, NASDAQ100, SP100, SP500, RUSSELL2000, ETF, LEV_ETF, ALL` — **8** | **Yes** (`universes.ts`) |
-| `IndexId` + `SectorId` (stored lists) | `dow, sp500, sp100, nasdaq100, russell2000, russell1000, sp400, russell3000, tech, etf, lev_etf` + 11 GICS — **22** | No (`indexMembership.ts`; refresh `indexListJob.ts`) |
+| `UniverseId` (screener selector) | **8** ids — market-cap slices, keyword filters, and `ALL` (enumerated in `universes.ts`) | **Yes** |
+| `IndexId` + `SectorId` (stored lists) | **22** ids — stored index memberships and 11 GICS sector lists (`indexMembership.ts`; refresh `indexListJob.ts`) | No |
 
 `resolveUniverse` switches on the id with **no default branch**, so an unknown id returns `undefined`; the research caller calls `.map` on it → `TypeError` → caught one level up and converted into a **published report** reading *"Universe retrieval failed; no candidates evaluated."* with `universeSize: 0`. The config validator only checks the string is non-empty.
 
 | Requested | Selectable | What happens |
 |---|---|---|
-| `NASDAQ100` (default), `SP100`, `SP500`, `RUSSELL2000`, `TECH`, `ETF`, `LEV_ETF` | ✓ | Work (market-cap slice / keyword filter) |
+| The default and the six other resolved ids | ✓ | Work (market-cap slice / keyword filter) |
 | `ALL` | ✓ but hollow | Returns `[]` — "sharded by the caller, never resolved directly"; the research path does not shard it |
-| `dow`, `sp400`, `russell1000`, `russell3000`, 11 `sector-*`, any typo/lowercase variant | ✗ | `undefined.map` → "Universe retrieval failed" → empty run |
+| The 14 stored-list ids the selector does not expose (mid-cap, total-market, 11 sector lists), plus any typo/lowercase variant | ✗ | `undefined.map` → "Universe retrieval failed" → empty run |
 
-Even the 8 that work resolve from the **Nasdaq listings directory by market-cap rank**, not from the stored index snapshots — "SP500" in OODA is "top 500 by market cap", not the S&P 500. #3667 owns integrating the stored lists; the refusal honesty is #6032.
+Even the 8 that work resolve from the **market listings directory by market-cap rank**, not from the stored membership snapshots — a universe label in OODA is a market-cap slice, not the stored list of the same name. #3667 owns integrating the stored lists; the refusal honesty is #6032.
 
 ---
 
 ## 9. Brokers and modes
 
-| Broker | `paperMode` | Mode map | Evidence |
-|---|---|---|---|
-| `etrade` | true | `{paper: "sandbox_api", live: "live_oauth"}` | `brokerCatalog.ts` |
-| `alpaca` | true | `{paper: "paper_api", live: "live_api"}` | `brokerCatalog.ts` |
-| `public` | **false** | TEST = preview/read-only; placement refused at the seam | `brokerCatalog.ts` |
-| `tastytrade` | true | paper + live declared | `brokerCatalog.ts` |
+| Platform registration | `paperMode` | Mode map shape |
+|---|---|---|
+| A | true | paper → sandbox API, live → live OAuth |
+| B | true | paper → paper API, live → live API |
+| C | **false** | preview/read-only; placement refused at the seam |
+| D | true | paper + live declared |
+
+The named matrix, with the catalogue ids, is in #6036; the ids are deliberately not repeated here so this page stays platform-neutral (the census in `docs/operations/data/neutrality-census.md` requires it).
 
 The honest matrix is **3 × {paper, live} + 1 × {live, read-only test}**. The research path never consults `paperMode`:
-
 | Check | Present? | Consequence |
 |---|---|---|
 | Broker registered | ✓ throws by name | Good (`registry.ts`, fail-closed) |
