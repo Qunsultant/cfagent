@@ -7,6 +7,8 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_PIPELINE_POLICY,
+  PIPELINE_POLICY_SETTING_KEYS,
+  readPipelineSettings,
   resolvePipelinePolicy,
   shouldNotify,
 } from "../src/services/pipelinePolicy";
@@ -111,5 +113,92 @@ describe("shouldNotify", () => {
 
     const masterOff = resolvePipelinePolicy({ PIPELINE_NOTIFICATIONS: "off" });
     expect(shouldNotify(masterOff, "failed", "slack")).toBe(false);
+  });
+});
+
+describe("jitterRatio override (#4782 S3)", () => {
+  it("defaults to 0.25 in every bucket", () => {
+    const p = resolvePipelinePolicy();
+    expect(p.retry.acquisition.jitterRatio).toBe(0.25);
+    expect(p.retry.delivery.jitterRatio).toBe(0.25);
+    expect(p.retry.report.jitterRatio).toBe(0.25);
+  });
+
+  it("settings beat env beat shared beat default, per bucket and shared", () => {
+    const p = resolvePipelinePolicy(
+      {
+        PIPELINE_RETRY_JITTER_RATIO: "0.5",
+        PIPELINE_REPORT_RETRY_JITTER_RATIO: "0.4",
+      },
+      {
+        "pipeline.retry.jitterRatio": "0.1",
+        "pipeline.retry.delivery.jitterRatio": "0.2",
+      },
+    );
+    // Shared settings win over shared env where no per-bucket
+    // value exists (acquisition)…
+    expect(p.retry.acquisition.jitterRatio).toBe(0.1);
+    // …a per-bucket setting wins outright (delivery)…
+    expect(p.retry.delivery.jitterRatio).toBe(0.2);
+    // …and a per-bucket env beats a shared setting (report): the
+    // chain is per-bucket settings, per-bucket env, then shared.
+    expect(p.retry.report.jitterRatio).toBe(0.4);
+  });
+
+  it("per-bucket env beats shared env when no settings are present", () => {
+    const p = resolvePipelinePolicy({
+      PIPELINE_RETRY_JITTER_RATIO: "0.5",
+      PIPELINE_REPORT_RETRY_JITTER_RATIO: "0.4",
+    });
+    expect(p.retry.acquisition.jitterRatio).toBe(0.5);
+    expect(p.retry.delivery.jitterRatio).toBe(0.5);
+    expect(p.retry.report.jitterRatio).toBe(0.4);
+  });
+
+  it("clamps jitterRatio to 0..1", () => {
+    const p = resolvePipelinePolicy({
+      PIPELINE_RETRY_JITTER_RATIO: "1.5",
+      PIPELINE_DELIVERY_RETRY_JITTER_RATIO: "-0.2",
+    });
+    expect(p.retry.acquisition.jitterRatio).toBe(1);
+    expect(p.retry.delivery.jitterRatio).toBe(0);
+    expect(p.retry.report.jitterRatio).toBe(1);
+  });
+
+  it("ignores a non-numeric jitterRatio, never throws", () => {
+    const p = resolvePipelinePolicy(
+      { PIPELINE_RETRY_JITTER_RATIO: "abc" },
+      { "pipeline.retry.acquisition.jitterRatio": "not-a-number" },
+    );
+    expect(p.retry.acquisition.jitterRatio).toBe(0.25);
+    expect(p.retry.delivery.jitterRatio).toBe(0.25);
+  });
+});
+
+describe("readPipelineSettings (#4782 S3)", () => {
+  it("builds the settings map from a reader, skipping absent keys", () => {
+    const store: Record<string, string> = {
+      "pipeline.retry.report.attempts": "1",
+      "pipeline.retry.jitterRatio": "0",
+    };
+    const seen: string[] = [];
+    const map = readPipelineSettings((key) => {
+      seen.push(key);
+      return store[key] ?? null;
+    });
+    expect(map).toEqual({
+      "pipeline.retry.report.attempts": "1",
+      "pipeline.retry.jitterRatio": "0",
+    });
+    // Only the keys the resolver reads are ever asked for.
+    expect(seen).toEqual([...PIPELINE_POLICY_SETTING_KEYS]);
+    expect(seen).toContain("pipeline.retry.report.attempts");
+    expect(seen).toContain("pipeline.retry.acquisition.jitterRatio");
+    expect(seen).toContain("pipeline.notifications.enabled");
+    expect(seen).toContain("pipeline.fetchTimeoutMs");
+  });
+
+  it("returns an empty map when the reader has nothing", () => {
+    expect(readPipelineSettings(() => null)).toEqual({});
   });
 });

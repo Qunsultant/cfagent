@@ -152,6 +152,16 @@ export interface OptionsChainFormatOutput {
  */
 export interface OptionsChainStepDeps {
   env: Env;
+  /**
+   * Issue #4782 S3 — the per-tenant settings map (`pipeline.*`
+   * values), when the caller has one (settings beat env in the
+   * resolver). Neither residency builder sets it today — the
+   * scheduled host and the workflow residency have no
+   * per-tenant settings reader, and the shared engine must never
+   * read a host-global map — so the steps resolve env-only until
+   * the definition-carried policy lands (follow-up, #4782 PR 2).
+   */
+  settings?: Record<string, string | undefined>;
   /** The durable engine stores the inner per-symbol dispatches define their jobs on. */
   engineStores: OptionsEngineStores;
   /** The stage-message queue the inner dispatches publish through (null: publish nothing). */
@@ -396,7 +406,7 @@ async function runOptionsChainFeedUnit(
       descriptor: `options-chain feed ${symbol}: failed — no chain source`,
     };
   }
-  const policy = resolvePipelinePolicy(deps.env as unknown as Record<string, unknown>).retry[
+  const policy = resolvePipelinePolicy(deps.env as unknown as Record<string, unknown>, deps.settings).retry[
     SHARD_RETRY_BUCKET.feed
   ];
   type RecordedRun = Parameters<JobRunRecorder["recordRun"]>[0];
@@ -611,7 +621,7 @@ async function runOptionsChainGenerate(
       };
       return { output, descriptor: `options-chain generate pdf: ${out.pdfKey}` };
     }
-    const policy = resolvePipelinePolicy(deps.env as unknown as Record<string, unknown>).retry[
+    const policy = resolvePipelinePolicy(deps.env as unknown as Record<string, unknown>, deps.settings).retry[
       SHARD_RETRY_BUCKET.generate
     ];
     const prefix = format === "xlsx" ? "options:xlsx:" : "options:csv:";

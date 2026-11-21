@@ -145,7 +145,11 @@ export async function getReportFileName(
  */
 export async function generateReportStage(
   env: { REPORTS_BUCKET?: unknown; REPORT_ASSET_AGENT?: unknown },
-  input: UnifiedReportInput
+  input: UnifiedReportInput,
+  // Issue #4782 S3 — the per-tenant settings map, when the
+  // caller has one (settings beat env in the resolver). Absent
+  // → env-only, as before.
+  settings?: Record<string, string | undefined>
 ): Promise<UnifiedReportOutput> {
   const generationId = `${input.type}:${input.trigger}:${input.timestamp}`;
   const { codedMessage, hasOutcomeCodePrefix } = await import("../outcomes/outcomeAspects");
@@ -163,7 +167,7 @@ export async function generateReportStage(
     // null asset counts as a failed attempt and is retried like a throw.
     const { resolvePipelinePolicy } = await import("./pipelinePolicy");
     const { withRetry } = await import("./resilience");
-    const policy = resolvePipelinePolicy(env as Record<string, unknown>);
+    const policy = resolvePipelinePolicy(env as Record<string, unknown>, settings);
     const asset = await withRetry(
       async () => {
         const generated = await generatePdfAsset(env as any, input.userLogin, assetType as any, input.result, input.pdfOptions);
@@ -229,10 +233,12 @@ export async function runReportPipeline(
     put: (key: string, value: unknown) => Promise<void>;
     get: (key: string) => Promise<unknown>;
   },
-  input: UnifiedReportInput
+  input: UnifiedReportInput,
+  // Issue #4782 S3 — as generateReportStage above.
+  settings?: Record<string, string | undefined>
 ): Promise<UnifiedReportOutput> {
   void storage;
-  return generateReportStage(env, input);
+  return generateReportStage(env, input, settings);
 }
 
 /** One canonical-report row, as the ORM's storeCanonicalReport takes it. */

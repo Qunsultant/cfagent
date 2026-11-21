@@ -27,7 +27,7 @@
  * each bounded by the stage deadline, so one stage deadline
  * cannot bound the goal job.
  * Poll cadence is the shared chat await cadence
- * (CHAT_AWAIT_POLL_INTERVAL_MS). A deadline expiry, or a terminal
+ * (resolveChatAwaitPollMs(env), #4782 S3). A deadline expiry, or a terminal
  * workflow without a projected collation, returns an honest
  * still-running failure naming the run's status URL — the goal job
  * continues; the caller polls Workflow Runs. A job that produced no
@@ -60,7 +60,7 @@ import {
   type WorkflowHandle,
   type WorkflowPort,
 } from "./workflowPorts";
-import { CHAT_AWAIT_POLL_INTERVAL_MS } from "../agents/orchestrator/chatAwaitBudget";
+import { resolveChatAwaitPollMs } from "../agents/orchestrator/chatAwaitBudget";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
 
 /** A goal job composes two legs sequentially — twice one stage deadline (#4775 S1). */
@@ -143,7 +143,7 @@ export async function runGoalScreenViaEngine(
     input.readWorkflowJobHistory ?? ((t: string, c: string) => readJobHistory(env, t, c));
   const sleep =
     input.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
-  const pollIntervalMs = input.pollIntervalMs ?? CHAT_AWAIT_POLL_INTERVAL_MS;
+  const pollIntervalMs = input.pollIntervalMs ?? resolveChatAwaitPollMs(env);
   const deadline = nowMs() + (input.awaitDeadlineMs ?? resolveGoalScreenAwaitDeadlineMs(input.env as unknown as Record<string, unknown>));
   let terminalPolls = 0;
   for (;;) {

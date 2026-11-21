@@ -43,6 +43,10 @@ export async function generateAndStoreDiscoveryReport(args: {
   env: { REPORTS_BUCKET?: unknown } | Record<string, unknown>;
   storage: DiscoveryReportStorage | undefined;
   input: DiscoveryReportInput;
+  // Issue #4782 S3 — the per-tenant settings map, when the
+  // caller has one (settings beat env in the resolver). Absent
+  // → env-only, as before.
+  settings?: Record<string, string | undefined>;
 }): Promise<DiscoveryReportArtifactOutcome> {
   const outcome: DiscoveryReportArtifactOutcome = {
     pdfStatus: "failed",
@@ -61,7 +65,7 @@ export async function generateAndStoreDiscoveryReport(args: {
   const { withRetry } = await import("./resilience");
   const { resolvePipelinePolicy } = await import("./pipelinePolicy");
   const { putReportPdf } = await import("./reportBlobStore");
-  const policy = resolvePipelinePolicy(args.env as Record<string, unknown>).retry.report;
+  const policy = resolvePipelinePolicy(args.env as Record<string, unknown>, args.settings).retry.report;
   const id = reportId(args.input);
 
   try {

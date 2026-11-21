@@ -189,6 +189,9 @@ export class DefinePipelineChainCommand implements IMcpToolCommand<DefinePipelin
         createDefaultResearchStepDeps(),
       ),
       invocation: "sync",
+      // Issue #4782 S3 — the retry policy resolves from the
+      // caller's env (platform default), as the adapters above do.
+      ...(envRecord ? { env: envRecord } : {}),
     });
 
     const definition = await control.defineJob({

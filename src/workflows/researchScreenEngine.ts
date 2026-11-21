@@ -255,6 +255,10 @@ export async function dispatchResearchEngineRun(
     publisher: null,
     steps: registerResearchSteps(createBuiltinStepRegistry(), wiredDeps),
     invocation: "sync",
+    // Issue #4782 S3 — the retry policy resolves from the
+    // caller's env (platform default); input.env is already
+    // string-valued, so it passes through as-is.
+    ...(input.env ? { env: input.env } : {}),
   });
   const definition = buildResearchJobDefinition(runId, {
     userLogin: input.userLogin,
@@ -496,6 +500,9 @@ export async function executeResearchStageControl(
     publisher: null,
     steps: registerResearchSteps(createBuiltinStepRegistry(), deps),
     invocation: "sync",
+    // Issue #4782 S3 — as the dispatch control above: the stage
+    // re-run resolves its retry policy from the caller's env.
+    ...(input.env ? { env: input.env } : {}),
   });
 
   const existingDef = await stores.definitions.getDefinition(validated.engineJobId);

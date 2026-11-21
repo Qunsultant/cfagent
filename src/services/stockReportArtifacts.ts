@@ -79,6 +79,12 @@ export interface GenerateStockReportArtifactsInput {
   storage: any;
   result: ScreenerRunResult;
   userLogin: string;
+  /**
+   * Issue #4782 S3 — the per-tenant settings map (`pipeline.*`
+   * values), when the caller has one (settings beat env in the
+   * resolver). Absent → env-only, as before.
+   */
+  settings?: Record<string, string | undefined>;
   /** Formats to generate; default all three. Anything omitted is never-attempted. */
   formats?: StockReportFormat[];
   /** PDF section config; resolved from env (code defaults + overrides, #2088) when omitted. */
@@ -107,6 +113,8 @@ async function generatePdfLeg(
       timestamp: result.timestamp,
       pdfOptions: pdfOptions as never,
     },
+    // Issue #4782 S3 — the settings map rides the PDF leg too.
+    input.settings,
   );
   if (pipelineResult.pdfStatus === "generated") {
     result.pdfKey = pipelineResult.pdfKey;
@@ -134,7 +142,7 @@ async function generateXlsxLeg(
   const { env, storage, result } = input;
   // Issue #1278 (#1173 R5): generate+store retries under the R1 report
   // policy — a transient blob-store failure no longer fails the XLSX.
-  const reportRetry = resolvePipelinePolicy(env as unknown as Record<string, unknown>).retry.report;
+  const reportRetry = resolvePipelinePolicy(env as unknown as Record<string, unknown>, input.settings).retry.report;
   const xlsxKey = `${STOCK_XLSX_KEY_PREFIX}${crypto.randomUUID().slice(0, 8)}`;
   try {
     let fileName = "";
@@ -168,7 +176,7 @@ async function generateCsvLeg(
   // Issue #2062: every stock run records its full document set. Same
   // contract as the XLSX leg: retried under the R1 report policy, and
   // a real failure is recorded on the run instead of failing the screen.
-  const reportRetry = resolvePipelinePolicy(env as unknown as Record<string, unknown>).retry.report;
+  const reportRetry = resolvePipelinePolicy(env as unknown as Record<string, unknown>, input.settings).retry.report;
   const csvKey = `${SCREENER_CSV_KEY_PREFIX}${crypto.randomUUID().slice(0, 8)}`;
   try {
     let fileName = "";

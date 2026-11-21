@@ -32,6 +32,18 @@ export interface PollingConfig {
   chatAutoRefreshFloorS: number;
   /** Goal staged-run tracking poll cadence. */
   goalTrackPollMs: number;
+  /**
+   * Issue #4782 S3 — the screen-door parent's poll cadence: how
+   * often the screen door checks whether the parent workflow
+   * step finished (was `SCREEN_DOOR_PARENT_POLL_INTERVAL_MS`).
+   */
+  screenDoorParentPollMs: number;
+  /**
+   * Issue #4782 S3 — the NLQ chat-screen parent's poll cadence:
+   * how often the chat screen checks whether the parent
+   * workflow step finished (was `CHAT_SCREEN_PARENT_POLL_INTERVAL_MS`).
+   */
+  chatScreenParentPollMs: number;
   /** Goal staged-run tracking absolute deadline. */
   goalTrackDeadlineMs: number;
   /** Auto-refresh cadence pill options offered by the dynamic panel, in seconds. */
@@ -52,6 +64,8 @@ export const POLLING_CONFIG_DEFAULTS: PollingConfig = {
   optionsLatestPollMs: 60_000,
   chatAutoRefreshFloorS: 5,
   goalTrackPollMs: 2_000,
+  screenDoorParentPollMs: 5_000,
+  chatScreenParentPollMs: 5_000,
   goalTrackDeadlineMs: 600_000,
   autoRefreshIntervalOptionsS: [10, 15, 30, 60, 120, 300],
   autoRefreshDefaultS: 15,
@@ -70,6 +84,8 @@ const ENV_KEYS: Record<
   optionsLatestPollMs: "OPTIONS_LATEST_POLL_MS",
   chatAutoRefreshFloorS: "CHAT_AUTO_REFRESH_FLOOR_S",
   goalTrackPollMs: "GOAL_TRACK_POLL_MS",
+  screenDoorParentPollMs: "SCREEN_DOOR_PARENT_POLL_MS",
+  chatScreenParentPollMs: "CHAT_SCREEN_PARENT_POLL_MS",
   goalTrackDeadlineMs: "GOAL_TRACK_DEADLINE_MS",
   autoRefreshDefaultS: "AUTO_REFRESH_DEFAULT_S",
   autoRefreshMinS: "AUTO_REFRESH_MIN_S",
@@ -85,6 +101,8 @@ export interface PollingEnvVars {
   OPTIONS_LATEST_POLL_MS?: unknown;
   CHAT_AUTO_REFRESH_FLOOR_S?: unknown;
   GOAL_TRACK_POLL_MS?: unknown;
+  SCREEN_DOOR_PARENT_POLL_MS?: unknown;
+  CHAT_SCREEN_PARENT_POLL_MS?: unknown;
   GOAL_TRACK_DEADLINE_MS?: unknown;
   /** Comma-separated seconds, e.g. "10,15,30,60,120,300". */
   AUTO_REFRESH_INTERVAL_OPTIONS_S?: unknown;

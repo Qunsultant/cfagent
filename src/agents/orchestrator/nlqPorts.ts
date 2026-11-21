@@ -28,9 +28,10 @@ import {
 } from "../../workflows/workflowPorts";
 import { readJobHistory } from "../../data/createShardJobPorts";
 import {
-  CHAT_AWAIT_POLL_INTERVAL_MS,
   resolveChatAwaitDeadlineMs,
+  resolveChatAwaitPollMs,
 } from "./chatAwaitBudget";
+import { resolvePollingConfigFromEnv } from "../../client/pollingConfig";
 import type { ShardJobRow } from "../../data/shardJobPorts";
 import { meshTraceStoreForEnv } from "../../data/createMeshTracePorts";
 import { resolveScreenProviderForRun } from "../../services/tenantProviders";
@@ -308,8 +309,6 @@ export function nlqStockScreenPort(ctx: NlqPortsContext): NLQStockScreenPort {
   };
 }
 
-/** Cadence for the port's own status-surface polls (the workflow's internal child polling is the command's pollIntervalMs). */
-const CHAT_SCREEN_POLL_INTERVAL_MS = CHAT_AWAIT_POLL_INTERVAL_MS;
 /**
  * Bound on the port's await. Generous against the workflow's
  * own per-shard deadlines (10 min per batch); on expiry the
@@ -319,8 +318,11 @@ const CHAT_SCREEN_POLL_INTERVAL_MS = CHAT_AWAIT_POLL_INTERVAL_MS;
  */
 // Issue #4202 — the shared chat await budget (./chatAwaitBudget.ts). This port
 // carried the door's fifteen-minute literal a second time; one budget now.
-/** The parent workflow's child-poll cadence for chat runs (its durable sleeps; granularity only). */
-const CHAT_SCREEN_PARENT_POLL_INTERVAL_MS = 5_000;
+// Issue #4782 S3 — the cadences are externalized, not constants:
+// the port's own await poll resolves through
+// resolveChatAwaitPollMs(env), and the parent workflow's
+// child-poll cadence through
+// resolvePollingConfigFromEnv(env).chatScreenParentPollMs.
 
 /** The pieces of one chat screen run, shared by the free (S8) and paid (S10) chat paths. */
 interface ChatScreenCommandParts {
@@ -386,7 +388,7 @@ async function buildChatScreenCommand(
     shards,
     filters: req.filters as unknown as Record<string, unknown>,
     maxItems: 10,
-    pollIntervalMs: CHAT_SCREEN_PARENT_POLL_INTERVAL_MS,
+    pollIntervalMs: resolvePollingConfigFromEnv(ctx.env).chatScreenParentPollMs,
     ...(provider !== null ? { provider } : {}),
     ...(traceparent ? { traceparent } : {}),
   });
@@ -480,7 +482,7 @@ async function runChatScreenViaWorkflow(
     ctx.readWorkflowJobHistory ?? ((t: string, c: string) => readJobHistory(ctx.env, t, c));
   const sleep =
     ctx.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
-  const pollIntervalMs = ctx.workflowPollIntervalMs ?? CHAT_SCREEN_POLL_INTERVAL_MS;
+  const pollIntervalMs = ctx.workflowPollIntervalMs ?? resolveChatAwaitPollMs(ctx.env);
   const deadline = nowMs() + (ctx.workflowAwaitDeadlineMs ?? resolveChatAwaitDeadlineMs(ctx.env));
   // A terminal instance whose collation has not projected yet
   // gets a few extra polls — projection lag is not a failure.
@@ -815,7 +817,7 @@ async function awaitChatPaidScreenOutcome(
   const sleep =
     ctx.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const nowMs = ctx.nowMs ?? (() => Date.now());
-  const pollIntervalMs = ctx.workflowPollIntervalMs ?? CHAT_SCREEN_POLL_INTERVAL_MS;
+  const pollIntervalMs = ctx.workflowPollIntervalMs ?? resolveChatAwaitPollMs(ctx.env);
   const deadline = nowMs() + (ctx.workflowAwaitDeadlineMs ?? resolveChatAwaitDeadlineMs(ctx.env));
   const readPaymentStatus =
     ctx.paymentWorkflowStatus ??

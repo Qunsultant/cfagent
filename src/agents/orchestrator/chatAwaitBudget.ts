@@ -27,10 +27,19 @@ export interface ChatAwaitBudgetEnv {
    * the ceiling: this knob can only ever shorten the wait.
    */
   CHAT_AWAIT_BUDGET_MS?: unknown;
+  /**
+   * Issue #4782 S3 — the await loops' poll cadence, milliseconds.
+   * Absent → {@link DEFAULT_CHAT_AWAIT_POLL_MS}. Clamped to
+   * [{@link MIN_CHAT_AWAIT_POLL_MS}, {@link MAX_CHAT_AWAIT_POLL_MS}].
+   */
+  CHAT_AWAIT_POLL_MS?: unknown;
 }
 
 /** Wrangler var name for the operator lever (see {@link ChatAwaitBudgetEnv}). */
 export const CHAT_AWAIT_BUDGET_ENV_KEY = "CHAT_AWAIT_BUDGET_MS" as const;
+
+/** Wrangler var name for the poll-cadence lever (#4782 S3). */
+export const CHAT_AWAIT_POLL_ENV_KEY = "CHAT_AWAIT_POLL_MS" as const;
 
 /**
  * How long a chat turn may wait on a workflow before answering "still running".
@@ -46,9 +55,17 @@ export const MIN_CHAT_AWAIT_DEADLINE_MS = 5_000;
 
 /**
  * Poll cadence for the await loops. Unchanged from the window this replaces —
- * #4202 moves the budget, not the cadence.
+ * #4202 moves the budget, not the cadence. #4782 S3 externalizes it
+ * (was the `CHAT_AWAIT_POLL_INTERVAL_MS` constant): the default is
+ * still 2s, and the loops read it through {@link resolveChatAwaitPollMs}.
  */
-export const CHAT_AWAIT_POLL_INTERVAL_MS = 2_000;
+export const DEFAULT_CHAT_AWAIT_POLL_MS = 2_000;
+
+/** Poll-cadence floor (#4782 S3): below this the loop busy-polls. */
+export const MIN_CHAT_AWAIT_POLL_MS = 500;
+
+/** Poll-cadence ceiling (#4782 S3): above this the await feels dead. */
+export const MAX_CHAT_AWAIT_POLL_MS = 30_000;
 
 /**
  * Resolve the chat await budget (ms) from the operator override.
@@ -70,4 +87,22 @@ export function resolveChatAwaitDeadlineMs(
     typeof raw === "number" ? raw : raw == null ? Number.NaN : Number(raw);
   if (!Number.isFinite(value) || value <= 0) return DEFAULT_CHAT_AWAIT_DEADLINE_MS;
   return Math.min(MAX_CHAT_AWAIT_DEADLINE_MS, Math.max(MIN_CHAT_AWAIT_DEADLINE_MS, value));
+}
+
+/**
+ * Issue #4782 S3 — resolve the await loops' poll cadence (ms) from
+ * the operator override. Same total contract as the budget
+ * resolver: every input resolves to a value in
+ * [{@link MIN_CHAT_AWAIT_POLL_MS}, {@link MAX_CHAT_AWAIT_POLL_MS}],
+ * so the cadence never depends on a caller remembering to pass one.
+ */
+export function resolveChatAwaitPollMs(
+  env?: ChatAwaitBudgetEnv | null,
+): number {
+  const raw = env?.[CHAT_AWAIT_POLL_ENV_KEY];
+  if (typeof raw === "string" && raw.trim() === "") return DEFAULT_CHAT_AWAIT_POLL_MS;
+  const value =
+    typeof raw === "number" ? raw : raw == null ? Number.NaN : Number(raw);
+  if (!Number.isFinite(value) || value <= 0) return DEFAULT_CHAT_AWAIT_POLL_MS;
+  return Math.min(MAX_CHAT_AWAIT_POLL_MS, Math.max(MIN_CHAT_AWAIT_POLL_MS, value));
 }

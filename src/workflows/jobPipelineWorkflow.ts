@@ -45,6 +45,7 @@ import {
 import { resolveUniverseDepsFromStageInput } from "./universeDepsResidency";
 import { resolveChainSourceForRequest } from "./brokerChainSourceResidency";
 import { stageQueueSendFromEnv } from "./stageQueueTransport";
+import { envStrings as envStringsFromEnv } from "./envStrings";
 import { createPipelineStepRegistry } from "../services/enrichPipelineJobs";
 import { screenerStepDepsForWorkflow } from "../services/screenerPipelineJobs";
 import { buildFeedJobRegistry } from "../services/feedJobs";
@@ -92,14 +93,7 @@ import type { JobRunOutcome } from "../services/jobPipelineEngine";
 
 export type { JobPipelineWorkflowPayload } from "./jobPipelineWorkflowFlow";
 
-/** String-valued env entries (the registries' knob source). */
-function workflowEnvStrings(env: Env): Record<string, string | undefined> {
-  const out: Record<string, string | undefined> = {};
-  for (const [key, value] of Object.entries(env as unknown as Record<string, unknown>)) {
-    if (typeof value === "string") out[key] = value;
-  }
-  return out;
-}
+/** String-valued env entries (the registries' knob source) — one shared implementation, ./envStrings. */
 
 /**
  * The generate-step wiring for this workflow residency
@@ -119,7 +113,7 @@ export function generateStepDepsForWorkflow(
   stores: JobPipelineStores,
 ): GenerateStepDeps {
   return {
-    registry: buildGenerateJobRegistry(workflowEnvStrings(env)),
+    registry: buildGenerateJobRegistry(envStringsFromEnv(env)),
     analyzedStore: createAnalyzedDatasetPorts(env),
     generatedStore: createGeneratedDatasetPorts(env),
     canonicalReportStore: createTenantAwareCanonicalReportStore({
@@ -163,7 +157,7 @@ export function feedStepDepsForWorkflow(
   const capturePort = createProviderCaptureAdapter(env) ?? undefined;
   const blobStorage = createR2CaptureBlobStorage(env) ?? undefined;
   return {
-    registry: buildFeedJobRegistry(workflowEnvStrings(env)),
+    registry: buildFeedJobRegistry(envStringsFromEnv(env)),
     // Issue #5823: the per-request override rides through to the
     // #3941 factory — the run's own login for the per-login
     // providers (never the host's service login) and the Yahoo
@@ -298,7 +292,7 @@ export function createJobPipelineWorkflowDeps(env: Env): JobPipelineDeps {
   const feedDeps = feedStepDepsForWorkflow(env, stores);
   const runRecords = new D1JobRunRecordStore(createD1JobRunRecordDb(db));
   const messaging = createJobPipelineMessaging(env);
-  const envStrings = workflowEnvStrings(env);
+  const envStrings = envStringsFromEnv(env);
   return {
     stores,
     runRecorder: {
@@ -412,6 +406,9 @@ export function createJobPipelineWorkflowDeps(env: Env): JobPipelineDeps {
       createDefaultResearchStepDeps(),
     ),
     invocation: "workflow-shard",
+    // Issue #4782 S3 — the policy resolves from this env (the
+    // platform-default layer); the engine reads nothing itself.
+    env: envStrings,
   };
 }
 

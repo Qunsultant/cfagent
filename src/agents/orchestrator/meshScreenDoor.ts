@@ -111,9 +111,10 @@ import { meshTraceStoreForEnv } from "../../data/createMeshTracePorts";
 import type { MeshTraceStore } from "../../data/meshTracePorts";
 import { childContextOfTraceparent } from "../../observability/meshTrace";
 import {
-  CHAT_AWAIT_POLL_INTERVAL_MS,
   resolveChatAwaitDeadlineMs,
+  resolveChatAwaitPollMs,
 } from "./chatAwaitBudget";
+import { resolvePollingConfigFromEnv } from "../../client/pollingConfig";
 import { CREDITS_TOP_UP_HINT } from "../../services/providerUxLinks";
 import { resolveScreenProviderForRun } from "../../services/tenantProviders";
 import { resolvePresetFilter } from "../../services/screenerPresetResolution";
@@ -412,6 +413,11 @@ export function meshScreenDoorContextFromMcp(context: McpToolContext): MeshScree
       return sql;
     },
     traceparent: context.traceparent,
+    // Issue #4782 S3 — wire the await-cadence override
+    // channel: the door's await poll resolves from env here, so
+    // an operator's CHAT_AWAIT_POLL_MS takes effect; a seam
+    // override below still wins (test seams).
+    workflowPollIntervalMs: resolveChatAwaitPollMs(context.env),
     // Issue #3922: forward the tool context's settings reader
     // (populated by the execution-context owners on the
     // orchestrator instance) so the ND gate's stored layer
@@ -425,14 +431,14 @@ export function meshScreenDoorContextFromMcp(context: McpToolContext): MeshScree
 /* The door operation                                                  */
 /* ------------------------------------------------------------------ */
 
-/** Cadence for the door's own status-surface polls (the workflow's internal child polling is the command's pollIntervalMs). */
-const SCREEN_DOOR_POLL_INTERVAL_MS = CHAT_AWAIT_POLL_INTERVAL_MS;
-/** Bound on the door's await (parity with the port: on expiry an honest tracked failure — the run stays visible at its status URL). */
-// Issue #4202 — this was a fifteen-minute literal. A pending request is a
-// resident Durable Object, so that window was billed per run (see
-// ./chatAwaitBudget.ts). The budget is shared with the NLQ port now.
-/** The parent workflow's child-poll cadence for door runs. */
-const SCREEN_DOOR_PARENT_POLL_INTERVAL_MS = 5_000;
+// Issue #4202 — the door's await budget was a fifteen-minute
+// literal. A pending request is a resident Durable Object, so that
+// window was billed per run (see ./chatAwaitBudget.ts). The budget
+// is shared with the NLQ port now. Issue #4782 S3 — the cadences
+// are externalized, not constants: the door's own await poll
+// resolves through resolveChatAwaitPollMs(env), and the parent
+// workflow's child-poll cadence through
+// resolvePollingConfigFromEnv(env).screenDoorParentPollMs.
 
 /** The budget-guard operation a chat screen is charged against (see the header for why this name). */
 const SCREEN_DOOR_BUDGET_OPERATION = "nlq.execute";
@@ -680,7 +686,7 @@ async function buildScreenCommand(
     shards,
     filters: req.filters as unknown as Record<string, unknown>,
     maxItems: 10,
-    pollIntervalMs: SCREEN_DOOR_PARENT_POLL_INTERVAL_MS,
+    pollIntervalMs: resolvePollingConfigFromEnv(ctx.env).screenDoorParentPollMs,
     ...(req.screenMode
       ? { screenMode: req.screenMode, screenIntent: req.screenIntent }
       : {}),
@@ -919,7 +925,7 @@ async function awaitScreenOutcome(
   const sleep =
     ctx.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const nowMs = ctx.nowMs ?? (() => Date.now());
-  const pollIntervalMs = ctx.workflowPollIntervalMs ?? SCREEN_DOOR_POLL_INTERVAL_MS;
+  const pollIntervalMs = ctx.workflowPollIntervalMs ?? resolveChatAwaitPollMs(ctx.env);
   const deadline = nowMs() + (ctx.workflowAwaitDeadlineMs ?? resolveChatAwaitDeadlineMs(ctx.env));
   // A terminal instance whose collation has not projected yet
   // gets a few extra polls — projection lag is not a failure.
@@ -1286,7 +1292,7 @@ async function awaitPaidScreenOutcome(
   const sleep =
     ctx.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const nowMs = ctx.nowMs ?? (() => Date.now());
-  const pollIntervalMs = ctx.workflowPollIntervalMs ?? SCREEN_DOOR_POLL_INTERVAL_MS;
+  const pollIntervalMs = ctx.workflowPollIntervalMs ?? resolveChatAwaitPollMs(ctx.env);
   const deadline = nowMs() + (ctx.workflowAwaitDeadlineMs ?? resolveChatAwaitDeadlineMs(ctx.env));
   const readPaymentStatus =
     ctx.paymentWorkflowStatus ??

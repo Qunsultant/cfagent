@@ -20,11 +20,13 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
   CHAT_AWAIT_BUDGET_ENV_KEY,
-  CHAT_AWAIT_POLL_INTERVAL_MS,
+  CHAT_AWAIT_POLL_ENV_KEY,
+  DEFAULT_CHAT_AWAIT_POLL_MS,
   DEFAULT_CHAT_AWAIT_DEADLINE_MS,
   MAX_CHAT_AWAIT_DEADLINE_MS,
   MIN_CHAT_AWAIT_DEADLINE_MS,
   resolveChatAwaitDeadlineMs,
+  resolveChatAwaitPollMs,
 } from "../src/agents/orchestrator/chatAwaitBudget";
 
 const read = (rel: string) => readFileSync(resolve(__dirname, "..", rel), "utf8");
@@ -39,7 +41,23 @@ describe("chat await budget (#4202 — DO duration)", () => {
   });
 
   it("keeps the poll cadence unchanged (the budget moves, the cadence does not)", () => {
-    expect(CHAT_AWAIT_POLL_INTERVAL_MS).toBe(2_000);
+    expect(DEFAULT_CHAT_AWAIT_POLL_MS).toBe(2_000);
+    expect(resolveChatAwaitPollMs(undefined)).toBe(2_000);
+    expect(resolveChatAwaitPollMs({})).toBe(2_000);
+  });
+
+  it("lets an operator tune the poll cadence within its bounds (#4782 S3)", () => {
+    expect(resolveChatAwaitPollMs({ [CHAT_AWAIT_POLL_ENV_KEY]: "1000" })).toBe(1_000);
+    expect(resolveChatAwaitPollMs({ [CHAT_AWAIT_POLL_ENV_KEY]: 500 })).toBe(500);
+    // Below the floor resolves to the floor; above the ceiling to the ceiling.
+    expect(resolveChatAwaitPollMs({ [CHAT_AWAIT_POLL_ENV_KEY]: "1" })).toBe(500);
+    expect(resolveChatAwaitPollMs({ [CHAT_AWAIT_POLL_ENV_KEY]: "999999" })).toBe(30_000);
+  });
+
+  it("falls back to the default poll on anything unusable (#4782 S3)", () => {
+    for (const bad of ["", "  ", "abc", "0", "-1", "NaN", "Infinity", null, undefined, {}]) {
+      expect(resolveChatAwaitPollMs({ [CHAT_AWAIT_POLL_ENV_KEY]: bad })).toBe(2_000);
+    }
   });
 
   it("lets an operator shorten it", () => {
@@ -76,6 +94,29 @@ describe("chat await budget (#4202 — DO duration)", () => {
     expect(read("src/agents/orchestrator/nlqPorts.ts")).not.toContain(
       "CHAT_SCREEN_AWAIT_DEADLINE_MS =",
     );
+  });
+
+  it("is the only poll cadence the await loops carry (#4782 S3 — no copied poll literal)", () => {
+    for (const file of [
+      "src/agents/orchestrator/meshScreenDoor.ts",
+      "src/agents/orchestrator/nlqPorts.ts",
+    ]) {
+      const src = read(file);
+      // The await poll resolves from the shared budget module…
+      expect(src).toContain("resolveChatAwaitPollMs");
+      // …and the parent poll from the polling config.
+      expect(src).toContain("resolvePollingConfigFromEnv");
+      expect(src).not.toContain("CHAT_AWAIT_POLL_INTERVAL_MS");
+      expect(src).not.toMatch(/PARENT_POLL_INTERVAL_MS\s*=\s*5_000/);
+    }
+    // No other live consumer keeps the old constant alive.
+    for (const file of [
+      "src/workflows/runStockScreenViaEngine.ts",
+      "src/workflows/runGoalScreenViaEngine.ts",
+    ]) {
+      expect(read(file)).toContain("resolveChatAwaitPollMs");
+      expect(read(file)).not.toContain("CHAT_AWAIT_POLL_INTERVAL_MS");
+    }
   });
 });
 
