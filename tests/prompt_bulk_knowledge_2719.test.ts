@@ -50,8 +50,13 @@ const PRE_CHANGE_PROMPT_CHARS = 10_193;
  * chars (pre-change 6,188 — 24 chars of drift since #3812); the pin
  * moves to 6,600 to keep that filed steering while retaining the
  * anti-bloat ceiling.
+ * #4435 adds the paid-screen receipt-email steering (+155 chars: ask for
+ * the email in the chat turn, pass receiptEmail) and measures 6,702
+ * chars; the pin moves to 6,750 to keep that money-path steering while
+ * retaining the anti-bloat ceiling — a further move needs a documented
+ * reason, not a quiet bump.
  */
-const PROMPT_SIZE_PIN_CHARS = 6_600;
+const PROMPT_SIZE_PIN_CHARS = 6_750;
 
 describe("issue #2719 — moved documentation bulk is out of the prompt", () => {
   it("drops the Platform Workflows & UI Navigation Map section", () => {
