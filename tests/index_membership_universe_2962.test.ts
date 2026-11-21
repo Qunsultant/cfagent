@@ -28,6 +28,15 @@ import {
   resolveStoredIndexList,
 } from "../src/services/indexListConsumer";
 
+/** #5956 — the listings adapter is not exercised here; an unbound call throws by name. */
+const unboundListings = {
+  getMembers: async (): Promise<never> => {
+    throw new Error(
+      "listings adapter not bound — this test serves no listings-derived index",
+    );
+  },
+};
+
 /** S&P 400 layout, verified live 2026-11-03: Symbol | Security | GICS Sector | GICS Sub-Industry | HQ | SEC filings. */
 const SP400_HTML = `<table class="wikitable"><tbody>
 <tr><th>Symbol</th><th>Security</th><th>GICS Sector</th><th>GICS Sub-Industry</th><th>Headquarters Location</th><th>SEC filings</th></tr>
@@ -159,6 +168,7 @@ describe("sector universes (#2962)", () => {
   });
   it("an unknown key throws UnknownIndexError instead of inventing members", async () => {
     const svc = createIndexMembershipService({
+      listings: unboundListings,
       wikipedia: createWikipediaIndexMembershipAdapter(async () => SP500_HTML),
       holdings: createEtfHoldingsIndexMembershipAdapter(
         holdingsFetch({ IWB: IWB_CSV, IWM: IWM_CSV }),
@@ -203,6 +213,7 @@ describe("russell3000 union (#2962)", () => {
   });
   it("IWV cross-check reports set differences against the union", async () => {
     const svc = createIndexMembershipService({
+      listings: unboundListings,
       wikipedia: createWikipediaIndexMembershipAdapter(async () => SP500_HTML),
       holdings: unionPort(),
     });
@@ -232,6 +243,7 @@ describe("holdings single-ETF for new keys (#2962)", () => {
 describe("cross-adapter conformance for sp400 (#2962)", () => {
   it("wikipedia table vs MDY holdings agree on the shared member", async () => {
     const svc = createIndexMembershipService({
+      listings: unboundListings,
       wikipedia: createWikipediaIndexMembershipAdapter(async () => SP400_HTML),
       holdings: createEtfHoldingsIndexMembershipAdapter(
         holdingsFetch({ MDY: MDY_CSV }),
@@ -248,6 +260,7 @@ describe("cross-adapter conformance for sp400 (#2962)", () => {
 describe("service routing + staleness (#2962)", () => {
   const svc = () =>
     createIndexMembershipService({
+      listings: unboundListings,
       wikipedia: createWikipediaIndexMembershipAdapter(async (url) =>
         url.includes("S%26P_400") ? SP400_HTML : SP500_HTML,
       ),
@@ -271,6 +284,7 @@ describe("service routing + staleness (#2962)", () => {
     );
     const m = await stalePort.getMembers("russell3000");
     const service = createIndexMembershipService({
+      listings: unboundListings,
       wikipedia: createWikipediaIndexMembershipAdapter(async () => SP500_HTML),
       holdings: stalePort,
     });
@@ -281,6 +295,7 @@ describe("service routing + staleness (#2962)", () => {
 describe("stored layer for new keys (#2962)", () => {
   const makeService = (): IndexMembershipPort =>
     createIndexMembershipService({
+      listings: unboundListings,
       wikipedia: createWikipediaIndexMembershipAdapter(async (url) =>
         url.includes("S%26P_400") ? SP400_HTML : SP500_HTML,
       ),

@@ -364,7 +364,12 @@ describe("feed.pull — per-shard universe (#5955 6b1)", () => {
     });
   });
 
-  it("an ETF shard refuses by name before any fetch (no stored list until 6b2)", async () => {
+  it("an unknown shard universe still refuses by name before any fetch", async () => {
+    // #5956 (6b2) closed the ETF case this test used to pin:
+    // an ETF shard now resolves its stored list (see
+    // feed_non_index_universes_5956.test.ts). The refusal rule
+    // itself stands — an input naming no known list still
+    // refuses by name before any fetch.
     const { steps, calls } = await makeSteps({
       seedLists: { nasdaq100: NASDAQ100_SYMBOLS },
       shardKeys: ALL_SHARD_KEYS,
@@ -372,8 +377,11 @@ describe("feed.pull — per-shard universe (#5955 6b1)", () => {
     await expect(
       steps.resolve(FEED_PULL_STEP)(
         stepCtx({
-          shardKey: "ETF",
-          params: { feedJobId: QUOTES_JOB_ID, shards: ALL_SHARDS },
+          shardKey: "BOGUS",
+          params: {
+            feedJobId: QUOTES_JOB_ID,
+            shards: [...ALL_SHARDS, { shardId: "BOGUS", universe: "bogus" }],
+          },
         }),
       ),
     ).rejects.toMatchObject({ code: FEED_JOB_CODES.universeUnknown });

@@ -103,6 +103,16 @@ One artifact per (index, snapshotDate) in `mas_index_lists`:
   `indexRefreshExecutor`, or wire the production branch the
   way the Wikipedia branch is wired). Forced `triggerGoal`
   exercises it before then, through an injected executor.
+- `index-refresh-listings` (#5956): weekly Sundays 04:30 UTC,
+  enabled once its built-in goal entry lands (a follow-up
+  activation — the operation is catalogued and executable now:
+  forced `triggerGoal` exercises it, and an operator-added
+  goal runs it). Its production path is live: D1 store via
+  `AGENT_DB` + the listings-derived adapter bound to the live
+  listings feed — the fetcher IS bound in code, so the goal
+  refreshes tech, etf, lev_etf through the same branch as the
+  Wikipedia goal. The 10-day table freshness budget applies
+  (a non-holdings list).
 
 ## Operator activation (running deployment)
 

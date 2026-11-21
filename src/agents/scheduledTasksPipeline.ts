@@ -165,8 +165,10 @@ import { createCaptureWiredFeedProvider } from "../services/feedProviderWiring";
 import { fetchWikipediaIndexHtml } from "../services/indexListJob";
 import {
   createIndexMembershipService,
+  createListingsDerivedIndexMembershipAdapter,
   createWikipediaIndexMembershipAdapter,
 } from "../trading";
+import { fetchAllUsStockListings } from "../services/nasdaqListings";
 import type { JobInstanceRecord } from "../data/jobPipelinePorts";
 import { createStructuredLogger } from "../observability/structuredLogger";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
@@ -255,6 +257,12 @@ export function feedStepDepsForScheduledAgent(
                 );
               },
             },
+            // #5956 — the listings-derived adapter (tech / etf /
+            // lev_etf): bound for real, never a stub — a cold-store
+            // hydration for one of those universes calls it.
+            listings: createListingsDerivedIndexMembershipAdapter(
+              fetchAllUsStockListings,
+            ),
           }),
         }
       : null,
