@@ -38,6 +38,17 @@ export const PROVIDER_UX_LINKS = {
 export type ProviderUxLinkKey = keyof typeof PROVIDER_UX_LINKS;
 
 /**
+ * Issue #5921 — the Workflow Runs deep link for one run id.
+ * The async dispatch receipt points the caller at the run's
+ * Workflow Runs page (the copilot prompt's own convention:
+ * `?tab=workflow-runs&run=<runId>`). A relative in-product
+ * link — never an API URL (user rule: UX URLs only).
+ */
+export function workflowRunUrl(jobId: string): string {
+  return `?tab=workflow-runs&run=${encodeURIComponent(jobId)}`;
+}
+
+/**
  * One human-readable line naming the fix for each requested link. Stable
  * labels so a chat reply or a refusal can carry the exact same sentence.
  */

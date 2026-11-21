@@ -1238,7 +1238,7 @@ const SCREEN_UNIVERSE_IDS = Object.keys(UNIVERSES) as UniverseId[];
 export class RunStockScreenCommand implements IMcpToolCommand<MeshScreenDoorInput> {
   readonly name = "run_stock_screen";
   readonly description =
-    "Run a stock screen over a named universe (NASDAQ100, SP500, SP100, RUSSELL2000, TECH, ETF, LEV_ETF, or ALL universes) through the mesh screen door: a durable ScreenerScreenWorkflow run whose standout picks are read back from the canonical report store. This is the universe-screen path — for raw listings rows by price/cap/gainers filters use etrade_market_scan instead. When monetization is on, the door runs the paid path (budget check, then a PaymentWorkflow run — one charge per run-request). A paid screen needs a receipt email: if none is known, ask the user for it in the chat turn instead of calling without one — pass the address the user replies with as receiptEmail. Requires the chat turn's acting identity; the result is the completed run's stored result.";
+    "Run a stock screen over a named universe (NASDAQ100, SP500, SP100, RUSSELL2000, TECH, ETF, LEV_ETF, or ALL universes) through the mesh screen door: a durable ScreenerScreenWorkflow run whose standout picks are read back from the canonical report store. This is the universe-screen path — for raw listings rows by price/cap/gainers filters use etrade_market_scan instead. When monetization is on, the door runs the paid path (budget check, then a PaymentWorkflow run — one charge per run-request). A paid screen needs a receipt email: if none is known, ask the user for it in the chat turn instead of calling without one — pass the address the user replies with as receiptEmail. Requires the chat turn's acting identity; the result is the completed run's stored result. Issue #5921 — with delivery:\"async\" the result is a dispatch receipt with the run id and status link instead of the awaited run.";
   readonly jsonSchema = {
     type: "object" as const,
     properties: {
@@ -1263,7 +1263,7 @@ export class RunStockScreenCommand implements IMcpToolCommand<MeshScreenDoorInpu
       executionMode: {
         type: "object",
         description:
-          "Issue #4363 — the run's execution mode. Omit a field for the family default; online+sync is refused.",
+          "Issue #4363 — the run's execution mode. Omit a field for the family default; online+sync is refused. Issue #5921 — delivery async returns promptly with the run id and status link.",
         properties: {
           concurrency: { type: "string", enum: ["sequential", "parallel"] },
           pacing: { type: "string", enum: ["batch", "online"] },
@@ -1325,7 +1325,7 @@ export class RunStockScreenCommand implements IMcpToolCommand<MeshScreenDoorInpu
         shape: z.enum(["monolith", "sharded"]).optional(),
       })
       .optional()
-      .describe("Issue #4363 — the run's execution mode; online+sync is refused"),
+      .describe("Issue #4363 — the run's execution mode; online+sync is refused. Issue #5921 — delivery async returns promptly with the run id and status link"),
     presetId: z
       .string()
       .min(1)
