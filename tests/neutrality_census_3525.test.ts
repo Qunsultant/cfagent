@@ -2586,6 +2586,16 @@ const BASELINE: Array<[string, string, number]> = [
   // provider token. Renaming that shared helper would touch every broker
   // route for a census spelling, so the row is baselined instead.
   ["src/mcps/openaimp/brokerOrderCommands.ts", "etrade", 2],
+  // #5515 INTEGRATION: docs/architecture/reference/vocabulary.md is the
+  // registry's own reference — it names the axis values (provider ids and
+  // their labels) because that IS its subject; neutralizing them would make
+  // the page unusable. The values live in config/vocabulary.json, which the
+  // census does not scan; only the prose table is covered here.
+  ["docs/architecture/reference/vocabulary.md", "etrade", 2],
+  ["docs/architecture/reference/vocabulary.md", "alpaca", 3],
+  ["docs/architecture/reference/vocabulary.md", "yahoo", 1],
+  ["docs/architecture/reference/vocabulary.md", "nasdaq", 3],
+  ["docs/architecture/reference/vocabulary.md", "tastytrade", 1],
 ];
 
 const BASELINE_MAP = new Map(BASELINE.map(([f, t, c]) => [`${f}\t${t}`, c]));
