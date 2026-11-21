@@ -8,7 +8,7 @@
  * / deliver-shard), and the finalize's projection hops
  * (project-shard / project-final) all land under the one
  * traceparent the command carried, and the collation's
- * stageTransitions carry the six engine stages.
+ * stageTransitions carry the five engine nodes.
  *
  * Retired with the child-workflow flow (no replacement):
  * - the parent flow's fan-out steps (fan-out-batch-N hops):
@@ -262,7 +262,7 @@ describe("adapter step emission (engine path, slice 3)", () => {
     expect(hops.find((hop) => hop.operation === "execute-screen")?.traceId).toBe(TRACE_ID);
   });
 
-  it("existing emissions are untouched on the engine path: announce + project-final, six stages on the collation", async () => {
+  it("existing emissions are untouched on the engine path: announce + project-final, five nodes on the collation", async () => {
     const h = makeHarness();
     const { handle, hops } = await runAdapterWithTrace(h, parentCommand());
     expect(handle.status).toBe("complete");
@@ -277,13 +277,16 @@ describe("adapter step emission (engine path, slice 3)", () => {
     const collation = h.parentStored[0]?.collation;
     expect(collation?.lifecycle).toBe("ReportGenerated");
     // The engine publishes stage transitions instead of
-    // per-step mesh hops: all six stages completed.
+    // per-step mesh hops: all five nodes completed.
+    // #5884: the flip re-points the screener spec onto the
+    // five generic nodes — store/serve leave the chain and
+    // generate maps to the analysis vocabulary stage, so the
+    // collation carries two analysis entries.
     expect(collation?.stageTransitions).toEqual([
       { stage: "feed", outcome: "completed", atMs: NOW_MS },
       { stage: "gather", outcome: "completed", atMs: NOW_MS },
       { stage: "analysis", outcome: "completed", atMs: NOW_MS },
-      { stage: "store", outcome: "completed", atMs: NOW_MS },
-      { stage: "serve", outcome: "completed", atMs: NOW_MS },
+      { stage: "analysis", outcome: "completed", atMs: NOW_MS },
       { stage: "deliver", outcome: "completed", atMs: NOW_MS },
     ]);
     // The parent row carries the collation as resultJson.
@@ -372,9 +375,14 @@ describe("adapter step emission (engine path, slice 3)", () => {
     const collation = h.parentStored[0]?.collation;
     expect(collation?.lifecycle).toBe("Failed");
     expect(collation?.shards[0]?.error).toMatch(/no quotes/);
+    // #5884: the generate node records a failed ledger entry
+    // when analyze fails (its vocabulary stage is also
+    // analysis), so the failing shard carries two
+    // analysis/failed transitions.
     expect(collation?.stageTransitions).toEqual([
       { stage: "feed", outcome: "completed", atMs: NOW_MS },
       { stage: "gather", outcome: "completed", atMs: NOW_MS },
+      { stage: "analysis", outcome: "failed", atMs: NOW_MS },
       { stage: "analysis", outcome: "failed", atMs: NOW_MS },
     ]);
   });

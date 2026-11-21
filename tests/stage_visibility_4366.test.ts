@@ -50,11 +50,12 @@ describe("4366-P01 the spec builds the engine config", () => {
     });
     expect(config.jobId).toBe("job-1");
     expect(kindsOf(config.root)).toEqual([
+      // #5884: the flip re-points the screener spec onto the
+      // five generic nodes — store/serve collapse into generate.
       "feed",
       "enrich",
       "analyze",
-      "store",
-      "serve",
+      "generate",
       "deliver",
     ]);
     // Issue #4773 — the job's mode lives on the root node now: the
