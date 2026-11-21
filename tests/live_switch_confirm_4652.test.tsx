@@ -20,6 +20,7 @@ import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { BrokerDynamicMenu } from "../src/client/BrokerDynamicMenu";
+import { setBrokerEnvironmentForTest } from "../src/client/brokerEnvironment";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -60,6 +61,10 @@ describe("#4652 — arming live trading asks first", () => {
     container.remove();
     vi.unstubAllGlobals();
     window.localStorage.clear();
+    // Issue #5879: the menu reads the module environment value, so
+    // reset it — a confirmed switch in one test would otherwise leak
+    // into the next render.
+    setBrokerEnvironmentForTest("TEST");
   });
 
   function buttons(scope: ParentNode = container): HTMLButtonElement[] {
@@ -86,12 +91,14 @@ describe("#4652 — arming live trading asks first", () => {
     return calls.filter((c) => c.url.includes("/api/environment/switch") && c.method === "POST");
   }
 
-  async function renderMenu(activeEnv: "TEST" | "PROD") {
+  async function renderMenu(env: "TEST" | "PROD") {
+    // Issue #5879: the environment is set on the module value, not
+    // passed as a prop — the menu reads the one persisted selection.
+    setBrokerEnvironmentForTest(env);
     await act(async () => {
       root.render(
         <BrokerDynamicMenu
           initialOpen
-          activeEnv={activeEnv}
           onToggleAccountMode={() => undefined}
         />,
       );

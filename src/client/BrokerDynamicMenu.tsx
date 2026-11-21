@@ -19,7 +19,6 @@ import {
 import {
   switchBrokerEnvironment,
   useBrokerEnvironment,
-  BROKER_ENV_CHANGED_EVENT,
   type BrokerEnvironment,
 } from "./brokerEnvironment";
 // Issue #4649 (matrix gap 1): the one live-mode rule set — which brokers can
@@ -49,7 +48,10 @@ import {
 
 export interface SettingsMenuProps {
   /**
-   * Environment value passed from parent or defaulted to single broker environment.
+   * Environment value passed from parent. Issue #5879: retained for
+   * callers, no longer read as an environment source — the menu reads
+   * the server-mirrored useBrokerEnvironment() value instead, so a
+   * prop that disagrees with the server cannot flip the panel.
    */
   activeEnv?: "TEST" | "PROD";
   oauthStatus?: {
@@ -121,7 +123,6 @@ export interface SettingsMenuProps {
 export type BrokerDynamicMenuProps = SettingsMenuProps;
 
 export function BrokerDynamicMenu({
-  activeEnv,
   oauthStatus,
   account,
   brokerStatus,
@@ -147,7 +148,6 @@ export function BrokerDynamicMenu({
   onSelectTheme,
   currentLayout = "left",
   onToggleLayout,
-  accountMode,
   onToggleAccountMode,
   autoRefreshEnabled,
   autoRefreshInterval,
@@ -381,23 +381,21 @@ export function BrokerDynamicMenu({
     ? brokerCredentialGuidance(selectedBrokerId).kind
     : "oauth1_per_login";
 
-  // Single environment value with immediate local reactivity
-  const [localEnv, setLocalEnv] = useState<BrokerEnvironment | null>(null);
+  // Issue #5879: ONE environment value — the server-mirrored hook.
+  // The local override this replaces shadowed the persisted
+  // selection: it was set optimistically on every switch and never
+  // cleared, so a switch whose POST failed left the panel showing an
+  // environment the server does not hold (switchBrokerEnvironment
+  // reverts the hook value on failure; the local copy did not follow). The
+  // hook already gives immediate reactivity — switchBrokerEnvironment
+  // adopts the target in the module singleton before the POST — and
+  // converges every subscriber on BROKER_ENV_CHANGED_EVENT, so no
+  // local copy is needed. activeEnv (Chat's copy of the same hook
+  // value) stays in props for callers but is no longer read as a
+  // source: a prop that can disagree with the server is the same
+  // defect with a different name.
   const brokerEnv = useBrokerEnvironment();
-  const effectiveEnv = localEnv ?? activeEnv ?? (accountMode ? (accountMode === "live" ? "PROD" : "TEST") : "TEST");
-
-  useEffect(() => {
-    const handleEnvChanged = (e: Event) => {
-      const next = (e as CustomEvent).detail?.env;
-      if (next === "TEST" || next === "PROD") {
-        setLocalEnv(next);
-      }
-    };
-    window.addEventListener(BROKER_ENV_CHANGED_EVENT, handleEnvChanged);
-    return () => {
-      window.removeEventListener(BROKER_ENV_CHANGED_EVENT, handleEnvChanged);
-    };
-  }, []);
+  const effectiveEnv = brokerEnv;
 
   useEffect(() => {
     let cancelled = false;
@@ -537,7 +535,6 @@ export function BrokerDynamicMenu({
   // twice per click — the incident's duplicate /environment/switch
   // jobs. Same target, same echo adoption either way.
   const onSwitchEnv = (target: "TEST" | "PROD") => {
-    setLocalEnv(target);
     if (handleSwitchEnvironment) {
       handleSwitchEnvironment(target);
     } else {

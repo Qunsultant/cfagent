@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { CardHeader, Select, TextInput, Modal, Button } from "../components/ui";
 import { useTenantProviders } from "../tenantProviders";
+import { brokerPresentation } from "../../trading";
 import { universeOptions, withLegacyValue } from "../vocabularyOptions";
 import { useBrokerEnvironment } from "../brokerEnvironment";
 import { listPresets, type ScreenerPreset } from "../ScreenerPresetManager";
@@ -92,15 +93,21 @@ export function ScheduleFormModal(props: ScheduleFormModalProps) {
   const [stockPresets, setStockPresets] = useState<ScreenerPreset[]>([]);
   const [presetsError, setPresetsError] = useState("");
   // Issue #3655: the dialog shows the broker and the live/paper mode
-  // as visible fields at creation time. They are display-only here:
-  // the values come from the tenant's server-resolved selections
-  // (Settings), and the create route stamps them server-side — the
-  // form never submits a broker/mode value of its own. Mode derives
-  // from the broker environment (TEST → paper, PROD → live).
+  // at creation time. Issue #5879 dedupes them to the ONE persisted
+  // selection, shown once (the tenant-default line below): the
+  // display-only Broker/Mode pair this replaced duplicated the #5189
+  // override pair for options schedules in the same form. The values
+  // come from the tenant's server-resolved selections (Settings), and
+  // the create route stamps them server-side — the form never submits
+  // a broker/mode value of its own. Mode derives from the broker
+  // environment (TEST → paper, PROD → live). Names come from
+  // brokerPresentation (total over unknown ids), never a hardcoded
+  // broker name.
   const [tenantProviders] = useTenantProviders();
   const brokerEnvironment = useBrokerEnvironment();
   const dialogBrokerId = tenantProviders.brokerId;
   const dialogMode = brokerEnvironment === "TEST" ? "paper" : "live";
+  const dialogPresentation = brokerPresentation(dialogBrokerId);
   useEffect(() => {
     if (props.jobType !== "marketScreen") return;
     let cancelled = false;
@@ -158,34 +165,32 @@ export function ScheduleFormModal(props: ScheduleFormModalProps) {
                 </div>
               )}
 
-              {/* Broker & mode (Issue #3655) — visible at creation time,
-                  display-only: resolved from the tenant's broker
-                  selection in Settings and recorded on the schedule by
-                  the server. The data provider feeding the run is the
-                  tenant's data-provider selection. The recorded values
-                  are a snapshot, not a pin (D1): at fire time the run
-                  re-resolves both from the live selections, so a later
-                  change in Settings applies to future runs. */}
+              {/* Run target (Issue #5879) — ONE broker/mode/account
+                  selection, shown once: the tenant default from
+                  Settings, read from the one persisted selection.
+                  This single line replaces the #3655 display-only
+                  Broker + Mode pair, which duplicated the #5189
+                  override pair below for options schedules (same
+                  form, same values, no independent meaning). This is
+                  the live default, not a pin (D1): the broker and
+                  mode are re-resolved from Settings when the schedule
+                  fires, so a later change in Settings applies to
+                  future runs. At fire time the effective mode is
+                  resolved again — deployment pin, tenant selection,
+                  or base-URL inference (scheduledEffectiveMode.ts) —
+                  and the run record states the mode that actually
+                  governed the run. The per-schedule override lives
+                  in RunTargetFields (options only, closed #5187 /
+                  #5189). */}
               <div className="sched-form-group">
-                <Select label="Broker" hint={`Runs under your broker selection from Settings (${tenantProviders.dataProviderId} feeds the data). This is the live default, not a pin — the broker is re-resolved from Settings when the schedule fires, so a later change in Settings applies to future runs.`} id="sched-broker"
-                  value={dialogBrokerId}
-                  disabled
-                >
-                  <option value="etrade">E*TRADE</option>
-                  <option value="alpaca">Alpaca</option>
-                  {!["etrade", "alpaca"].includes(dialogBrokerId) && (
-                    <option value={dialogBrokerId}>{dialogBrokerId}</option>
-                  )}
-                </Select>
-              </div>
-              <div className="sched-form-group">
-                <Select label="Mode" hint={`Live/paper from the broker environment (${brokerEnvironment}). This is the live default, not a pin — the effective mode is re-resolved when the schedule fires, so a later change applies to future runs.`} id="sched-mode"
-                  value={dialogMode}
-                  disabled
-                >
-                  <option value="live">Live</option>
-                  <option value="paper">Paper</option>
-                </Select>
+                <p className="hint" id="sched-tenant-default">
+                  <strong>Run target (tenant default):</strong> {dialogPresentation.label} /{" "}
+                  {dialogPresentation.modeShort[dialogMode]} ({tenantProviders.dataProviderId} feeds the data).
+                  This is the live default, not a pin — the broker and mode are re-resolved from Settings
+                  when the schedule fires, so a later change in Settings applies to future runs. At fire
+                  time the effective mode is resolved again (deployment pin, tenant selection, or base-URL
+                  inference) and the run record states the mode that actually governed the run.
+                </p>
               </div>
 
               {/* Target Universe or Symbols */}
@@ -394,7 +399,7 @@ export function ScheduleFormModal(props: ScheduleFormModalProps) {
                 setMode={props.setMode}
                 accountId={props.accountId}
                 setAccountId={props.setAccountId}
-                tenantBrokerId={props.tenantBrokerId}
+                tenantBrokerId={dialogBrokerId}
               />
               <NotificationFields
                 jobType={props.jobType}

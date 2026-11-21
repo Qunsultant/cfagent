@@ -23,7 +23,7 @@ import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { BrokerDynamicMenu } from "../src/client/BrokerDynamicMenu";
-import { switchBrokerEnvironment } from "../src/client/brokerEnvironment";
+import { switchBrokerEnvironment, setBrokerEnvironmentForTest } from "../src/client/brokerEnvironment";
 import { setTenantProvidersStateForTest, resetTenantProvidersStateForTest } from "../src/client/tenantProviders";
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
@@ -38,6 +38,10 @@ describe("one switch action posts /environment/switch exactly once (#3784)", () 
     document.body.appendChild(container);
     localStorage.clear();
     switchPosts = [];
+    // Issue #5879: the menu reads the module environment value, so
+    // reset it — a confirmed switch in one test flips the module, and
+    // without a reset the next render would start live instead of paper.
+    setBrokerEnvironmentForTest("TEST");
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
