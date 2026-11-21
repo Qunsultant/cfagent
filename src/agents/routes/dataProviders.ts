@@ -830,6 +830,33 @@ async function pipelineChainsViewFor(
   }
 }
 
+/**
+ * Issue #6048 - a bounded preview of one persisted feed artifact. The page
+ * renders this; it never reads a provider and never ships the whole dataset.
+ */
+export function previewFeedArtifact(
+  artifact: FeedDatasetArtifact,
+  limit: number,
+): { dataset: string; rows: number; sample: unknown[] } {
+  const cap = Math.max(1, Math.min(Math.floor(limit), 100));
+  if (artifact.quotes.length > 0) {
+    return { dataset: "quotes", rows: artifact.quotes.length, sample: artifact.quotes.slice(0, cap) };
+  }
+  if (artifact.fundamentals?.length) {
+    return { dataset: "fundamentals", rows: artifact.fundamentals.length, sample: artifact.fundamentals.slice(0, cap) };
+  }
+  if (artifact.bars?.length) {
+    return { dataset: "technicals", rows: artifact.bars.length, sample: artifact.bars.slice(0, cap) };
+  }
+  if (artifact.sentiment?.length) {
+    return { dataset: "sentiment", rows: artifact.sentiment.length, sample: artifact.sentiment.slice(0, cap) };
+  }
+  if (artifact.chains?.length) {
+    return { dataset: "options-chains", rows: artifact.chains.length, sample: artifact.chains.slice(0, cap) };
+  }
+  return { dataset: artifact.dataset, rows: 0, sample: [] };
+}
+
 export async function handleDataProviderRoutes(
   request: Request,
   url: URL,
@@ -846,6 +873,8 @@ export async function handleDataProviderRoutes(
   const feedRunMatch = path.match(/^\/data-providers\/([^/]+)\/feed-run$/);
   // #3535: the pipeline feed-jobs surface (list + per-job actions).
   const feedJobsMatch = path.match(/^\/data-providers\/([^/]+)\/feed-jobs$/);
+  // #6048 - the bounded artifact preview (the page's Output action).
+  const feedArtifactMatch = path.match(/^\/data-providers\/([^/]+)\/feed-artifact$/);
   const feedJobActionMatch = path.match(
     /^\/data-providers\/([^/]+)\/feed-jobs\/([^/]+)\/([a-z]+)$/,
   );
@@ -881,7 +910,7 @@ export async function handleDataProviderRoutes(
   const pipelineChainActionMatch = path.match(
     /^\/data-providers\/([^/]+)\/pipeline-chains\/([^/]+)\/([a-z_]+)$/,
   );
-  if (!isList && !oneMatch && !actionMatch && !feedRunMatch && !feedJobsMatch && !feedJobActionMatch && !enrichJobsMatch && !enrichJobActionMatch && !analyzeJobsMatch && !analyzeJobActionMatch && !generateJobsMatch && !generateJobActionMatch && !deliverJobsMatch && !deliverJobActionMatch && !pipelineChainsMatch && !pipelineChainActionMatch) return null;
+  if (!isList && !oneMatch && !actionMatch && !feedRunMatch && !feedJobsMatch && !feedArtifactMatch && !feedJobActionMatch && !enrichJobsMatch && !enrichJobActionMatch && !analyzeJobsMatch && !analyzeJobActionMatch && !generateJobsMatch && !generateJobActionMatch && !deliverJobsMatch && !deliverJobActionMatch && !pipelineChainsMatch && !pipelineChainActionMatch) return null;
 
   try {
     // ---- reads ----
@@ -994,6 +1023,64 @@ export async function handleDataProviderRoutes(
         });
       }
       return Response.json({ feed, quotes });
+    }
+
+    // Issue #6048 - the Output action's bounded artifact read. Served from the
+    // persisted copy only; a missing copy is a coded 404, never a fetch.
+    if (request.method === "GET" && feedArtifactMatch) {
+      const id = decodeURIComponent(feedArtifactMatch[1]) as DataProviderId;
+      const def = feedRegistryFor(ctx).forSource(id);
+      if (!def) {
+        return Response.json(
+          {
+            error: `No feed job is registered for provider "${id}".`,
+            code: FEED_JOB_CODES.jobNotFound,
+          },
+          { status: 404 },
+        );
+      }
+      const store = feedDatasetStoreFor(ctx);
+      if (!store) {
+        return Response.json(
+          {
+            error: "No feed-dataset store is wired on this deployment.",
+            code: "FEED_JOB_NOT_CONFIGURED",
+          },
+          { status: 500 },
+        );
+      }
+      let artifact: FeedDatasetArtifact | undefined;
+      try {
+        artifact = await store.latest(def.sourceId, def.dataset);
+      } catch (error) {
+        return Response.json(
+          {
+            error: error instanceof Error ? error.message : String(error),
+            code: "FEED_ARTIFACT_READ_FAILED",
+          },
+          { status: 500 },
+        );
+      }
+      if (!artifact) {
+        return Response.json(
+          {
+            error: `No persisted "${def.dataset}" copy exists for "${def.id}" yet.`,
+            code: "FEED_ARTIFACT_MISSING",
+          },
+          { status: 404 },
+        );
+      }
+      const limitRaw = Number(url.searchParams.get("limit") ?? "20");
+      const limit = Number.isFinite(limitRaw) ? limitRaw : 20;
+      return Response.json({
+        jobId: def.id,
+        dataset: def.dataset,
+        artifactId: artifact.id,
+        asOf: artifact.asOf,
+        universe: artifact.universe,
+        run: artifact.run,
+        preview: previewFeedArtifact(artifact, limit),
+      });
     }
 
     // #3530 S1 — run the provider's feed job now. #3578: the run
