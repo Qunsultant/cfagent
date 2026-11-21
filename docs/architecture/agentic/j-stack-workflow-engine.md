@@ -168,6 +168,34 @@ analyze never invoked; market command → market definition,
 market run unchanged).
 <!-- /5873: goal branch out of the screener analyze node -->
 
+<!-- 5874: portfolio modifier as an analyze input -->
+The portfolio modifier rides the parent hand-off (#5874, #4437 slice
+3c): positions arrive as a stage input, not a live leg inside
+analyze — option (i) from the issue. The gather stage fetches the
+book (the one live broker leg, via `loadPortfolioBook` on the
+per-run state the feed stage already bound) and carries the JSON
+snapshot as `portfolioBook` on the gather output; the analyze stage
+applies `applyPortfolioContextToOpportunities` purely from that
+snapshot and never touches the broker. The leg is best-effort,
+exactly like the gather stage's persisted reads: no broker in scope
+records a `no-broker` snapshot, a failed fetch records
+`positions-unavailable`, and a goal run skips the fetch entirely
+(the goal leg never consumes positions, and the gather input already
+carries `goalScreen`). A hand-off without the field degrades to
+`positions-unavailable` in analyze, never a failure. Option (ii) —
+an optional portfolio leg inside analyze — was rejected: analyze's
+input model is persisted/hand-off data, and a live broker leg inside
+it is a contract change with its own failure modes. The snapshot
+flows forward with the hand-off (`ScreenerAnalysisStageOutput`
+spreads the gather output), so the slice-6 flip can consume it
+wherever the ranking lands without a new fetch; the legacy
+`runScreenInner` path keeps its own live fetch until slice 7
+retires it. Parity is pinned by
+`tests/screener_portfolio_handoff_5874.test.ts` (analyze reads the
+hand-off with no broker in state; gather records the snapshots and
+skips goal runs; the fetch lives in gather, never in analyze).
+<!-- /5874: portfolio modifier as an analyze input -->
+
 The screener's deliver stage likewise runs through the generic deliver
 machinery (#5826): `deliver.apply` gains a screener application
 (params `screener: true`) that delivers a screen outcome through the
