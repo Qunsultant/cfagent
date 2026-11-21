@@ -42,6 +42,7 @@ import {
   EmptyState,
   Notice,
   PageSection,
+  Select,
   Spinner,
   Stack,
   Table,
@@ -59,6 +60,7 @@ import {
   fetchMemberships,
   type AdminMembershipView,
 } from "./iaaaAdminApi";
+import { providerOptions } from "./vocabularyOptions";
 
 export function TenantAdminPanel() {
   const [tenants, setTenants] = useState<TenantListRow[]>([]);
@@ -247,18 +249,26 @@ export function TenantAdminPanel() {
               }
             }}
           />
-          <TextInput
-            label="Data provider id"
+          <Select
+            label="Data provider"
+            hint="The data source this tenant's runs read from. A stored value that is no longer offered stays visible as legacy until you pick a known provider."
             value={detail.dataProviderId}
             disabled={saving}
-            onBlur={(e) => {
-              if (e.currentTarget.value) {
+            onChange={(e) => {
+              const dataProviderId = e.currentTarget.value;
+              if (dataProviderId && dataProviderId !== detail.dataProviderId) {
                 void handleSaveSettings({
-                  providers: { dataProviderId: e.currentTarget.value, brokerId: detail.brokerId },
+                  providers: { dataProviderId, brokerId: detail.brokerId },
                 });
               }
             }}
-          />
+          >
+            {providerOptions(detail.dataProviderId).map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </Select>
           <TextInput
             label="Broker id"
             value={detail.brokerId}
