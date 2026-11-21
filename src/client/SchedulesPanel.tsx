@@ -56,6 +56,16 @@ import {
   updateSchedule,
   type BulkScheduleResult,
 } from "./jobsApi";
+import {
+  confirmCancelAll,
+  confirmClearTable,
+  previewCancelAll,
+  previewClearTable,
+  type CancelAllPreview,
+  type CancelAllResult,
+  type ClearTablePreview,
+} from "./adminQueueApi";
+import { fetchAdminOverview } from "./iaaaAdminApi";
 import { CadenceModal } from "./scheduledOptionsManager/CadenceModal";
 import { ConfirmModal } from "./scheduledOptionsManager/ConfirmModal";
 import { ScheduleDetailModal } from "./scheduledOptionsManager/ScheduleDetailModal";
@@ -296,6 +306,53 @@ export function deleteRefusalReason(s: ScheduleItem): string | null {
   return null;
 }
 
+/**
+ * Issue #5893 — the rows of a list that come back on their own after
+ * an empty, by class. Derived rows re-derive from code on the next
+ * list (the six ids above, or any row the server stamps source
+ * `derived`); declared tasks re-arm on the next Think reconcile
+ * (source `declared-task`); built-in goals re-seed when the store is
+ * empty, except goals the owner removed (kind `goal`, or source
+ * `seeded`). Each id lands in exactly one bucket. Everything else —
+ * user-created, agent-created, pipeline, workflow, ticker-push,
+ * system, unknown rows — goes and stays gone.
+ */
+export interface EmptyListComeback {
+  derived: string[];
+  declaredTasks: string[];
+  seededGoals: string[];
+}
+
+export function emptyListComeback(schedules: ScheduleItem[]): EmptyListComeback {
+  const derived: string[] = [];
+  const declaredTasks: string[] = [];
+  const seededGoals: string[] = [];
+  for (const s of schedules) {
+    if (DERIVED_SCHEDULE_IDS.has(s.id) || scheduleSourceKindOf(s) === "derived") {
+      derived.push(s.id);
+    } else if (scheduleSourceKindOf(s) === "declared-task") {
+      declaredTasks.push(s.id);
+    } else if (s.kind === "goal" || scheduleSourceKindOf(s) === "seeded") {
+      seededGoals.push(s.id);
+    }
+  }
+  return { derived, declaredTasks, seededGoals };
+}
+
+/** The verified outcome of one Empty-the-list run, for the result notice. */
+export interface EmptyListResult {
+  cancelled: number;
+  pausedDeleted: number;
+  /** Alarms the cancel step failed to cancel (they stay listed). */
+  failed: CancelAllResult["failed"];
+  /** The clear-table step's failure, when the wipe was partial. */
+  clearError?: string;
+  /** Row ids still listed after the verifying re-fetch. */
+  remaining: string[];
+  /** Remaining rows that were NOT expected to come back. */
+  unexpectedRemaining: string[];
+}
+
 /** Last-event rendering for a derived row (never a fabricated time). */
 function formatLastEvent(lastAt?: string): string {
   if (!lastAt) return "never";
@@ -353,6 +410,20 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
   } | null>(null);
   const [bulkResult, setBulkResult] = useState<BulkScheduleResult | null>(null);
   const [bulkBusy, setBulkBusy] = useState(false);
+  // Issue #5893 — one-click empty: the platform-admin gate probe
+  // (the same overview probe the queue view uses), the preview, and
+  // the verified result. The wipe itself reuses the two existing
+  // routes (cancel-all + clear-table); no new route, no new wipe
+  // primitive, no new audit event type.
+  const [emptyGate, setEmptyGate] = useState<"loading" | "allowed" | "denied" | "error">("loading");
+  const [emptyGateError, setEmptyGateError] = useState<string | null>(null);
+  const [emptyPreview, setEmptyPreview] = useState<{
+    cancel: CancelAllPreview;
+    clear: ClearTablePreview;
+  } | null>(null);
+  const [emptyModalOpen, setEmptyModalOpen] = useState(false);
+  const [emptyBusy, setEmptyBusy] = useState(false);
+  const [emptyResult, setEmptyResult] = useState<EmptyListResult | null>(null);
   const [cadenceTarget, setCadenceTarget] = useState<ScheduleItem | null>(null);
   const [cadenceBusy, setCadenceBusy] = useState(false);
   const [cadenceError, setCadenceError] = useState<string | null>(null);
@@ -383,6 +454,34 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
   useEffect(() => {
     fetchSchedules();
   }, [fetchSchedules]);
+
+  // Issue #5893 — the empty action is platform-admin gated, with the
+  // same probe the queue view uses (GET /api/iaaa/overview): a
+  // 403/Forbidden refusal means "not an admin" (the same gate test
+  // ScheduleQueueView.isOverviewGateRefusal makes — duplicated here
+  // rather than imported, because importing ScheduleQueueView would
+  // cycle through AdminQueueWipePanel back into this file). Any other
+  // probe failure leaves the action unavailable with the reason.
+  useEffect(() => {
+    let cancelled = false;
+    void fetchAdminOverview()
+      .then(() => {
+        if (!cancelled) setEmptyGate("allowed");
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        const message = err instanceof Error ? err.message : "Failed to load IAAA overview.";
+        if (/403|Forbidden/.test(message)) {
+          setEmptyGate("denied");
+        } else {
+          setEmptyGateError(message);
+          setEmptyGate("error");
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   /** Shared mutating-action helper: run, surface errors, refresh. */
   const runAction = async (fn: () => Promise<unknown>) => {
@@ -476,6 +575,67 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
     } finally {
       setBulkBusy(false);
       setBulkTarget(null);
+    }
+  };
+
+  /** Issue #5893 — the empty preview: both wipe previews, fail-closed. */
+  const onPreviewEmpty = async () => {
+    setActionError(null);
+    setEmptyResult(null);
+    setEmptyBusy(true);
+    try {
+      const [cancel, clear] = await Promise.all([
+        previewCancelAll(),
+        previewClearTable("unified_schedules"),
+      ]);
+      setEmptyPreview({ cancel, clear });
+      setEmptyModalOpen(true);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setEmptyBusy(false);
+    }
+  };
+
+  /**
+   * Issue #5893 — the empty confirm: cancel the alarms, then clear
+   * the paused records. The two steps have separate audits already
+   * (schedules.cancelled.all, maintenance.table.cleared); a clear
+   * failure after a successful cancel is a partial wipe and is
+   * reported as one — the result never claims "empty" it did not
+   * verify. Verification is the re-fetched list, classified against
+   * the comeback the preview promised.
+   */
+  const runEmptyConfirm = async () => {
+    setEmptyBusy(true);
+    try {
+      const cancelResult = await confirmCancelAll();
+      let pausedDeleted = 0;
+      let clearError: string | undefined;
+      try {
+        pausedDeleted = (await confirmClearTable("unified_schedules")).deleted;
+      } catch (err) {
+        clearError = err instanceof Error ? err.message : String(err);
+      }
+      const fresh = (await listSchedules(envHeaders)) as unknown as ScheduleItem[];
+      setSchedules(fresh);
+      setRefreshSignal((n) => n + 1);
+      const comeback = emptyListComeback(fresh);
+      const expected = new Set([...comeback.derived, ...comeback.declaredTasks, ...comeback.seededGoals]);
+      setEmptyResult({
+        cancelled: cancelResult.cancelled,
+        pausedDeleted,
+        failed: cancelResult.failed,
+        ...(clearError !== undefined ? { clearError } : {}),
+        remaining: fresh.map((s) => s.id),
+        unexpectedRemaining: fresh.filter((s) => !expected.has(s.id)).map((s) => s.id),
+      });
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setEmptyBusy(false);
+      setEmptyModalOpen(false);
+      setEmptyPreview(null);
     }
   };
 
@@ -1054,6 +1214,70 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
         )}
       </ConfirmModal>
 
+      {/* Issue #5893 — one-click empty: the preview names what will
+          go (alarms + paused records) and what will come back on its
+          own, so "empty" is never a surprise. The two wipe steps are
+          named as steps: cancel-all alone would preserve the paused
+          records, and the clear step is what deletes them. */}
+      <ConfirmModal
+        open={emptyModalOpen}
+        title="Empty the list?"
+        confirmLabel="Empty the list"
+        cancelLabel="Keep schedules"
+        busy={emptyBusy}
+        onClose={() => {
+          setEmptyModalOpen(false);
+          setEmptyPreview(null);
+        }}
+        onConfirm={() => void runEmptyConfirm()}
+      >
+        {emptyPreview && (
+          <div>
+            <p>
+              {emptyPreview.cancel.wouldCancelCount} alarm(s) will be cancelled;{" "}
+              {emptyPreview.clear.wouldDelete} paused record(s) will be deleted.
+            </p>
+            {emptyPreview.cancel.pausedPreserved > 0 && (
+              <p>
+                Cancel-all alone would preserve {emptyPreview.cancel.pausedPreserved} paused
+                record(s); this action also clears them, so they go too.
+              </p>
+            )}
+            {(() => {
+              const comeback = emptyListComeback(schedules);
+              const lines: string[] = [];
+              if (comeback.derived.length > 0) {
+                lines.push(
+                  `${comeback.derived.length} derived row(s) will come back on their own — they are derived from code and re-appear on the next list: ${comeback.derived.join(", ")}.`,
+                );
+              }
+              if (comeback.declaredTasks.length > 0) {
+                lines.push(
+                  `${comeback.declaredTasks.length} declared task(s) will re-arm on the next Think reconcile: ${comeback.declaredTasks.join(", ")}.`,
+                );
+              }
+              if (comeback.seededGoals.length > 0) {
+                lines.push(
+                  `${comeback.seededGoals.length} built-in goal(s) will re-seed when the store is empty (except goals the owner removed): ${comeback.seededGoals.join(", ")}.`,
+                );
+              }
+              if (lines.length === 0) return <p>Nothing in the list comes back on its own.</p>;
+              return (
+                <>
+                  {lines.map((line) => (
+                    <p key={line}>{line}</p>
+                  ))}
+                </>
+              );
+            })()}
+            <p>
+              Own instance only — KV is never touched; nothing platform-wide is wiped. This
+              cannot be undone.
+            </p>
+          </div>
+        )}
+      </ConfirmModal>
+
       {userLogin && (
         <div className="ui-meta">
           Schedules for <strong>{userLogin}</strong>{activeEnv ? ` · E*TRADE ${activeEnv}` : ""}
@@ -1186,7 +1410,37 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
               {bulkButtonLabel(verb, activeTab)}
             </Button>
           ))}
+        {/* Issue #5893 — one-click empty: the action the issue
+            requires, beside the bulk verbs. Platform-admin gated
+            (the probe above); a non-admin never sees the button,
+            only the note below it. */}
+        {emptyGate === "allowed" && (
+          <Button
+            type="button"
+            variant="danger"
+            size="sm"
+            disabled={emptyBusy || loading}
+            onClick={() => void onPreviewEmpty()}
+            title="Empty the list — preview what will go and what will come back, then confirm. Own instance only; KV is never touched."
+          >
+            Empty the list
+          </Button>
+        )}
       </Flex>
+
+      {/* Issue #5893 — the gate, said plainly: emptying the list is
+          a platform-admin action, and the admin queue holds the same
+          wipe. A probe failure names itself instead of hiding the
+          action silently. */}
+      {emptyGate === "denied" && (
+        <p className="ui-meta">
+          Emptying the list is a platform-admin action — this account is not a platform admin.
+          The admin queue (?tab=schedules&amp;view=queue) holds the same wipe.
+        </p>
+      )}
+      {emptyGate === "error" && emptyGateError && (
+        <p className="ui-meta">Empty the list is unavailable: {emptyGateError}</p>
+      )}
 
       {bulkResult && (
         <Notice
@@ -1205,6 +1459,56 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
                   </li>
                 ))}
             </ul>
+          )}
+        </Notice>
+      )}
+
+      {/* Issue #5893 — the verified empty result: what the two steps
+          did, and what the re-fetched list still holds. A partial
+          wipe (clear failure, failed cancels, unexpected remainders)
+          is a warning that names the gap, never a success that claims
+          "empty". */}
+      {emptyResult && (
+        <Notice
+          tone={
+            emptyResult.clearError !== undefined ||
+            emptyResult.unexpectedRemaining.length > 0 ||
+            emptyResult.failed.length > 0
+              ? "warning"
+              : "success"
+          }
+          title={
+            emptyResult.clearError !== undefined ||
+            emptyResult.unexpectedRemaining.length > 0 ||
+            emptyResult.failed.length > 0
+              ? "List not fully emptied"
+              : "Emptied the list"
+          }
+          onDismiss={() => setEmptyResult(null)}
+        >
+          <p>
+            Cancelled {emptyResult.cancelled} alarm(s), deleted {emptyResult.pausedDeleted} paused
+            record(s).
+          </p>
+          {emptyResult.failed.length > 0 && (
+            <p>
+              Failed to cancel:{" "}
+              {emptyResult.failed.map((f) => `${f.id} (${f.error})`).join(", ")}.
+            </p>
+          )}
+          {emptyResult.clearError !== undefined && (
+            <p>
+              The paused-records clear failed: {emptyResult.clearError} — the alarms were
+              cancelled but the paused records were not deleted.
+            </p>
+          )}
+          {emptyResult.remaining.length > 0 && (
+            <p>
+              {emptyResult.remaining.length} row(s) remain: {emptyResult.remaining.join(", ")}.
+              {emptyResult.unexpectedRemaining.length === 0
+                ? " They came back on their own — derived rows re-derive from code, declared tasks re-arm on the next Think reconcile, built-in goals re-seed when the store is empty."
+                : ` Of those, ${emptyResult.unexpectedRemaining.length} row(s) were not expected to come back: ${emptyResult.unexpectedRemaining.join(", ")}.`}
+            </p>
           )}
         </Notice>
       )}
