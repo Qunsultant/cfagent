@@ -31,7 +31,6 @@ import {
   type YahooHistoryDeps,
   type TradingPlatformId,
 } from "../trading";
-import { resolveEnvironmentConfig } from "../config/environment";
 import { DEFAULT_RESEARCH_BROKER_ID } from "../config/researchJobConfig";
 import { isDemoCalibratedChainsEnabled } from "../config/demoMode";
 import type { Env, ETradeOptionChain } from "../types";
@@ -192,7 +191,7 @@ export class EtradeResearchDataProvider implements ResearchDataProvider {
       env,
       undefined,
       userLogin,
-      selection?.mode,
+      selection?.mode ?? "paper",
     );
   }
 
@@ -237,9 +236,17 @@ export class EtradeResearchDataProvider implements ResearchDataProvider {
       // always had via ETradeService.getQuoteAsync — a failed live quote
       // throws here and becomes null, never a stale-cache snapshot.
       quote = await fetchQuoteLiveStrict(this.platform, symbol, {
-        isLive: resolveEnvironmentConfig(this.env).isLive,
+        // Research follows the selected broker mode, never the worker's
+        // deployment environment (a PROD worker can still read Alpaca Paper).
+        isLive: this.selection?.mode === "live",
       });
-    } catch {
+    } catch (error) {
+      structuredLog.warn("researchProviders.quote_unavailable", {
+        symbol,
+        brokerId: this.selection?.brokerId ?? DEFAULT_RESEARCH_BROKER_ID,
+        mode: this.selection?.mode ?? "paper",
+        error: error instanceof Error ? error.message : String(error),
+      });
       return null;
     }
     if (!quote || !(quote.lastPrice > 0)) return null;
@@ -256,7 +263,7 @@ export class EtradeResearchDataProvider implements ResearchDataProvider {
       marketCap: marketCapDollars,
       isEtf: etfs.get(symbol.toUpperCase()) ?? false,
       quoteStatus: quote.quoteStatus ?? "unknown",
-      source: quote.source ?? "etrade",
+      source: quote.source ?? this.selection?.brokerId ?? DEFAULT_RESEARCH_BROKER_ID,
     };
   }
 

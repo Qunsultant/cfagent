@@ -90,7 +90,8 @@ export interface ScreenerResearchRouteContext {
   /** Single-owner research run pipeline (owner: OrchestratorAgent.runResearchAndPublish - was `(t, u) => this.runResearchAndPublish(t, u)`); the #308 canonical store lives inside it. */
   runResearchAndPublish(
     trigger: "manual" | "scheduled",
-    userLogin?: string
+    userLogin?: string,
+    selection?: { brokerId?: string; mode?: string; runId?: string },
   ): Promise<{
     success: boolean;
     error?: string;

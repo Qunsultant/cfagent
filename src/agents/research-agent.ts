@@ -125,8 +125,8 @@ export interface ResearchRunRequest {
   trigger: TriggerSource;
   userLogin?: string;
   /**
-   * Issue #5912 — which venue to quote from and in which mode. Unset uses
-   * the configured default (the deployment environment). An unknown
+   * Issue #5912/#5974 — which venue to quote from and in which mode. Unset
+   * uses the shared tenant selection, defaulting to Alpaca Paper. An unknown
    * broker id refuses by name in the platform registry, before any quote.
    */
   brokerId?: string;

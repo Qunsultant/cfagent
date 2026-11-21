@@ -133,6 +133,7 @@ export interface RouteRequestDeps {
   runResearchAndPublish(
     trigger: "manual" | "scheduled",
     userLogin?: string,
+    selection?: { brokerId?: string; mode?: string; runId?: string },
   ): Promise<{
     success: boolean;
     error?: string;
@@ -815,7 +816,8 @@ export async function routeRequest(deps: RouteRequestDeps, request: Request): Pr
     getScreenerAgent: (userLogin?: string) => deps.getScreenerAgent(userLogin),
     getScreenerExecutionContext: () => deps.getScreenerExecutionContext(),
     getResearchAgent: (userLogin?: string) => deps.getResearchAgent(userLogin),
-    runResearchAndPublish: (trigger, userLogin) => deps.runResearchAndPublish(trigger, userLogin),
+    runResearchAndPublish: (trigger, userLogin, selection) =>
+      deps.runResearchAndPublish(trigger, userLogin, selection),
     getOrm: () => deps.getOrm(),
     traceId: parseTraceparent(request.headers.get("traceparent"))?.traceId ?? null,
     // Issue #1661: DO blob handle for full capture on the backtest leg.
