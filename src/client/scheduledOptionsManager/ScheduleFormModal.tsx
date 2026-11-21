@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { CardHeader, Select, TextInput, Modal, Button } from "../components/ui";
 import { useTenantProviders } from "../tenantProviders";
+import { universeOptions, withLegacyValue } from "../vocabularyOptions";
 import { useBrokerEnvironment } from "../brokerEnvironment";
 import { listPresets, type ScreenerPreset } from "../ScreenerPresetManager";
 import type { CreatableJob } from "./types";
@@ -195,13 +196,11 @@ export function ScheduleFormModal(props: ScheduleFormModalProps) {
                     onChange={(e) => setTargetUniverse(e.target.value)}
                   >
                     {jobType === "optionsAnalysis" && <option value="">Custom symbols (below)</option>}
-                    <option value="TECH">Technology (keyword discovery)</option>
-                    <option value="NASDAQ100">Nasdaq-100</option>
-                    <option value="SP100">S&P 100</option>
-                    <option value="SP500">S&P 500</option>
-                    <option value="RUSSELL2000">Russell 2000</option>
-                    <option value="ETF">ETFs</option>
-                    <option value="LEV_ETF">Leveraged ETFs</option>
+                    {withLegacyValue(universeOptions("screener"), targetUniverse).map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
                   </Select>
                   {!targetUniverse && jobType === "optionsAnalysis" && (
                     <>

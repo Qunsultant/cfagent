@@ -32,6 +32,7 @@ import { NotificationFields } from "../scheduledOptionsManager/NotificationField
 import { blankDiscoveryRequestDraft } from "../scheduledOptionsManager/discoveryRequests";
 import { blankNoViewConstraintsDraft } from "../scheduledOptionsManager/noView";
 import type { ScheduleFormState } from "../scheduledOptionsManager/types";
+import { universeOptions, withLegacyValue } from "../vocabularyOptions";
 
 export interface ScheduledOptionsRunFormProps {
   activeEnv: "TEST" | "PROD";
@@ -166,13 +167,11 @@ export function ScheduledOptionsRunForm({ activeEnv, userLogin }: ScheduledOptio
             onChange={(e) => setTargetUniverse(e.target.value)}
           >
             <option value="">Custom symbols (below)</option>
-            <option value="TECH">Technology (keyword discovery)</option>
-            <option value="NASDAQ100">Nasdaq-100</option>
-            <option value="SP100">S&amp;P 100</option>
-            <option value="SP500">S&amp;P 500</option>
-            <option value="RUSSELL2000">Russell 2000</option>
-            <option value="ETF">ETFs</option>
-            <option value="LEV_ETF">Leveraged ETFs</option>
+            {withLegacyValue(universeOptions("screener"), targetUniverse).map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
           </Select>
           {!targetUniverse && (
             <TextInput label="Target Equity Symbols" hint="Comma-separated tickers" id="scheduled-options-run-symbols"
