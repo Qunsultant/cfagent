@@ -286,9 +286,30 @@ jobs:
                 elif ($others | map(. == "SUCCESS" or . == "NEUTRAL" or . == "SKIPPED") | all) then "SUCCESS"
                 else "NOT_GREEN" end
             ' 2>/dev/null || echo MISSING)
-            echo "PR #$pr_number: queue=$IN_QUEUE checks=$verdict mergeState=$merge_state autoMerge=$merge_method"
+            # Issue #5930 - "not green yet" and "green but unqueued" must not
+            # both read as success. A check still running means the verdict is
+            # not a decision: fail the check with that reason, so the PR shows
+            # it, and let the next gate completion retry.
+            pending=$(echo "$state" | jq -r --arg p "$OWN_CHECK_PREFIX" '
+              [ .data.node.commits.nodes[0].commit.statusCheckRollup.contexts.nodes[]?
+                | select((((.name // .context) // "") | startswith($p)) | not)
+                | (.conclusion // .state // "UNKNOWN")
+              ]
+              | any(. == "IN_PROGRESS" or . == "QUEUED" or . == "PENDING" or . == "EXPECTED" or . == "WAITING")
+            ' 2>/dev/null || echo false)
+            echo "PR #$pr_number: queue=$IN_QUEUE checks=$verdict pending=$pending mergeState=$merge_state autoMerge=$merge_method"
             if [ "$IN_QUEUE" = "true" ]; then
               echo "PR #$pr_number is already in the merge queue."
+              return 0
+            fi
+            if [ "$verdict" != "SUCCESS" ] && [ "$pending" = "true" ]; then
+              # Issue #5930: the gate that woke this job finished, but the head
+              # as a whole has not. This is not a success — the PR is not in the
+              # queue — so the check says so and the next gate completion
+              # retries. Own checks are excluded from the verdict above, so a
+              # red enrollment check never blocks its own retry (#4317).
+              echo "::error::PR #$pr_number is not enrollable yet: checks are still running on the head (verdict $verdict). This is not an enrollment; the next gate completion retries."
+              FAILED=1
               return 0
             fi
             if [ "$verdict" != "SUCCESS" ]; then
@@ -321,6 +342,27 @@ jobs:
             IN_QUEUE=$(echo "$after" | jq -r '.data.node.isInMergeQueue // false' 2>/dev/null || echo false)
             if [ "$IN_QUEUE" != "true" ]; then
               echo "::error::PR #$pr_number is not in the merge queue after the enrollment attempt. Enqueue response: $enqueue State: $after"
+              FAILED=1
+              return 0
+            fi
+            # Issue #5930 - the queue can accept an entry (position 1, QUEUED)
+            # and drop it seconds later without starting a merge_group build.
+            # The immediate read-back cannot see that, so settle and re-read;
+            # an eviction is reported here and on the check, never silently
+            # counted as enrolled.
+            sleep 8
+            local settle settle_state
+            settle=$(gh api graphql -F id="$node_id" -f query='
+              query($id: ID!) {
+                node(id: $id) {
+                  ... on PullRequest { isInMergeQueue mergeStateStatus }
+                }
+              }
+            ' 2>&1 || true)
+            IN_QUEUE=$(echo "$settle" | jq -r '.data.node.isInMergeQueue // false' 2>/dev/null || echo false)
+            settle_state=$(echo "$settle" | jq -r '.data.node.mergeStateStatus // "UNKNOWN"' 2>/dev/null || echo UNKNOWN)
+            if [ "$IN_QUEUE" != "true" ]; then
+              echo "::error::PR #$pr_number was enqueued and is no longer in the merge queue (evicted without a merge-group build; mergeState=$settle_state). The queue is not processing entries — see issue #5930."
               FAILED=1
               return 0
             fi

@@ -39,6 +39,7 @@ import {
 } from "../services/researchPipelineJobs";
 import {
   resolveResearchJobConfig,
+  resolveResearchStageModes,
   type ResearchStorageMode,
 } from "../config/researchJobConfig";
 import { researchEngineJobId } from "./researchDataPorts";
@@ -82,6 +83,9 @@ export interface DispatchResearchEngineInput {
   stores?: JobPipelineDeps["stores"];
   runRecorder?: JobRunRecorder;
   flags?: Pick<FeatureFlagPort, "isEnabled">;
+  /** Issue #5912 — the venue/mode this run names; rides the job params. */
+  brokerId?: string;
+  mode?: string;
   researchDeps?: ResearchStepDeps;
   execute: (ctx?: { runId: string; engineJobId: string }) => Promise<Record<string, unknown>>;
 }
@@ -255,6 +259,11 @@ export async function dispatchResearchEngineRun(
   const definition = buildResearchJobDefinition(runId, {
     userLogin: input.userLogin,
     trigger: input.trigger,
+    // Issue #5916 — per-stage overrides come from one config value.
+    stageModes: resolveResearchStageModes(input.env),
+    // Issue #5912 — the venue/mode this run names (carried to analyze.ooda).
+    ...(input.brokerId ? { brokerId: input.brokerId } : {}),
+    ...(input.mode ? { mode: input.mode } : {}),
   });
   await control.defineJob(definition as never);
 

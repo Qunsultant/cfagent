@@ -83,6 +83,9 @@ export interface ResearchStepDeps {
     userLogin: string;
     trigger: "manual" | "scheduled";
     datasetAsOf?: string | null;
+    /** Issue #5912 — the venue/mode this run names, when it named one. */
+    brokerId?: string;
+    mode?: string;
   }) => Promise<ResearchReport | Record<string, unknown>>;
   /** Execute the §9 outcome evaluation pass for a run or due runs. */
   runEvaluateStage?: (input: {
@@ -123,6 +126,9 @@ export function registerResearchSteps(
       userLogin?: string;
       trigger?: "manual" | "scheduled";
       datasetAsOf?: string | null;
+      /** Issue #5912 — the venue/mode this run names. */
+      brokerId?: string;
+      mode?: string;
     };
     const runId = params.runId || ctx.jobId.replace(/^research:/, "");
     const userLogin = params.userLogin || "";
@@ -143,6 +149,8 @@ export function registerResearchSteps(
       userLogin,
       trigger,
       datasetAsOf: params.datasetAsOf ?? null,
+      ...(typeof params.brokerId === "string" && params.brokerId ? { brokerId: params.brokerId } : {}),
+      ...(typeof params.mode === "string" && params.mode ? { mode: params.mode } : {}),
     });
     const ideaCount = Array.isArray((report as { ideas?: unknown[] }).ideas)
       ? (report as { ideas: unknown[] }).ideas.length
@@ -157,6 +165,8 @@ export function registerResearchSteps(
     const params = (ctx.params ?? {}) as {
       runId?: string;
       userLogin?: string;
+      brokerId?: string;
+      mode?: string;
     };
     const runId = params.runId || ctx.jobId.replace(/^research:/, "");
     const userLogin = params.userLogin || "";
@@ -247,6 +257,11 @@ export function assertResearchAopCompliance(
 }
 
 export interface ResearchJobDefinitionConfig {
+  /** Issue #5912 — the venue/mode this run names (carried to analyze.ooda). */
+  brokerId?: string;
+  mode?: string;
+  /** Issue #5916 — per-stage execution-mode overrides (config-driven). */
+  stageModes?: import("../config/researchJobConfig").ResearchStageModes;
   userLogin: string;
   trigger: "manual" | "scheduled";
   sourceId?: string;
@@ -281,28 +296,51 @@ export function buildResearchJobDefinition(
   const rawRoot = built.root as Record<string, unknown> & {
     children?: Array<Record<string, unknown>>;
   };
+  // Issue #5916 — a stage's own mode wins over the job's, per axis.
+  const stageModes = config.stageModes ?? {};
+  const withStageMode = <T extends Record<string, unknown>>(node: T): T => {
+    const override = stageModes[node.kind as keyof typeof stageModes];
+    if (!override) return node;
+    const existing = (node.executionMode ?? {}) as Record<string, unknown>;
+    return { ...node, executionMode: { ...existing, ...override } };
+  };
   const children = (rawRoot.children ?? []).map((child) => {
     if (child.kind === "feed") {
-      return {
+      return withStageMode({
         ...child,
         inputs: { sources: [sourceId], datasets: [dataset] },
         steps: [{ step: RESEARCH_FEED_STEP, params: { runId } }],
-      };
+      });
     }
     if (child.kind === "enrich") {
-      return {
+      return withStageMode({
         ...child,
         inputs: { sources: [sourceId], datasets: [dataset] },
         steps: [{ step: RESEARCH_ENRICH_STEP, params: { runId } }],
-      };
+      });
     }
     if (child.kind === "generate") {
-      return { ...child, steps: [{ step: RESEARCH_GENERATE_STEP, params: { runId } }] };
+      return withStageMode({ ...child, steps: [{ step: RESEARCH_GENERATE_STEP, params: { runId } }] });
     }
     if (child.kind === "deliver") {
-      return { ...child, steps: [{ step: RESEARCH_DELIVER_STEP, params: { runId } }] };
+      return withStageMode({ ...child, steps: [{ step: RESEARCH_DELIVER_STEP, params: { runId } }] });
     }
-    return child;
+    if (child.kind === "analyze") {
+      // Issue #5912 — the venue/mode ride this stage's params: it is the
+      // stage that runs the research loop, so the run it names is its own.
+      const analyze = child as Record<string, unknown> & {
+        steps?: Array<Record<string, unknown>>;
+      };
+      const steps = Array.isArray(analyze.steps) ? analyze.steps : [];
+      const [first, ...rest] = steps;
+      const stepParams = {
+        ...((first?.params ?? {}) as Record<string, unknown>),
+        ...(config.brokerId ? { brokerId: config.brokerId } : {}),
+        ...(config.mode ? { mode: config.mode } : {}),
+      };
+      return withStageMode({ ...analyze, steps: [{ ...first, params: stepParams }, ...rest] });
+    }
+    return withStageMode(child);
   });
 
   return {

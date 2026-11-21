@@ -73,6 +73,19 @@ function scanChainFixture(symbol: string, spot: number, expiry: { year: number; 
   } as unknown as ETradeOptionChain;
 }
 
+/**
+ * Expiry 90 days out, computed at run time so the fixture never goes stale
+ * (#5947): the screener drops chains whose expiry falls outside the default
+ * 0–90 day DTE window, so a fixed future date only postpones the next
+ * date-bomb — a run-time-relative expiry is always DTE 90 (the user's ruling
+ * is current date + 90 days; the screener's window check is inclusive, so
+ * DTE 90 passes the default 0–90 window).
+ */
+function expiry90DaysOut() {
+  const d = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000);
+  return { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate() };
+}
+
 describe("ETAPI Externalized Configuration & Unified Options Service", () => {
   beforeEach(() => {
     setRuntimeEtapiConfigOverrides(null);
@@ -155,7 +168,7 @@ describe("ETAPI Externalized Configuration & Unified Options Service", () => {
       symbol: "NVDA",
       underlyingPrice: 130,
       quoteTime: Date.now(),
-      selectedExpiry: { year: 2026, month: 11, day: 20 },
+      selectedExpiry: expiry90DaysOut(),
       pairs: [
         {
           call: {
