@@ -57,6 +57,18 @@ import { tradingTypeFor } from "../../trading";
 import { isLoginShaped, getServiceUserLogin } from "../../security/serviceIdentity";
 import type { JobRunTrigger } from "../../data/jobRunRecordPorts";
 import { findDuplicateSchedule } from "../../services/scheduleDedupe";
+
+/**
+ * Issue #5516 — the creation-time broker when the tenant store cannot be read.
+ * This is NOT a run default: a run resolves `config/vocabulary.json` → broker
+ * through the one externalized block. It is the pre-#3655 bootstrap
+ * path kept deliberately (the gate below states the contract): an unreadable
+ * selection has always meant "run the E*TRADE token check", and that check
+ * names the broker it checks. Pinned by tests/run_defaults_5516.test.ts (D5)
+ * so a later cleanup cannot silently reroute schedule creation to a broker the
+ * deployment has no credentials for.
+ */
+const LEGACY_UNREADABLE_BROKER = "etrade";
 import {
   buildScheduleProvenance,
   isSubDailyCron,
@@ -1980,8 +1992,9 @@ export async function handleSchedulesRoutes(
         }
         // Issue #3655: the creation credential check follows the tenant
         // broker, not E*TRADE unconditionally. Broker etrade — or an
-        // unreadable/unconfigured selection, preserving pre-#3655
-        // behaviour — runs the existing E*TRADE token check below,
+        // unreadable/unconfigured selection (LEGACY_UNREADABLE_BROKER,
+        // #5516), preserving pre-#3655 behaviour — runs the existing
+        // E*TRADE token check below,
         // unchanged. Any other broker verifies that broker's
         // credentials via resolveScreenSelection; a missing credential
         // is a 409 NAMING THE BROKER, never E*TRADE. Broker + data
@@ -2001,11 +2014,15 @@ export async function handleSchedulesRoutes(
           // reader instead of a test's vi.mock of it.
           const { readTenantBrokerSelection } = await import("../../services/providerConnections");
           const brokerRead = await readTenantBrokerSelection(ctx.env);
-          const brokerId = brokerRead.status === "ok" ? brokerRead.brokerId : "etrade";
+          // Issue #5516: the unreadable-store leg keeps the pre-#3655
+          // E*TRADE bootstrap, named rather than inlined — see
+          // LEGACY_UNREADABLE_BROKER.
+          const brokerId =
+            brokerRead.status === "ok" ? brokerRead.brokerId : LEGACY_UNREADABLE_BROKER;
           createBrokerId = brokerId;
           const createEnvironment = trustedEnvironment === "TEST" ? "TEST" : "PROD";
           createMode = tradingTypeFor(
-            isBrokerId(brokerId) ? brokerId : "etrade",
+            isBrokerId(brokerId) ? brokerId : LEGACY_UNREADABLE_BROKER,
             createEnvironment
           );
           if (brokerId === "etrade") {
