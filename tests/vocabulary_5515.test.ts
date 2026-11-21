@@ -149,8 +149,11 @@ describe("#5515 whole-set vocabulary", () => {
     expect(unknown.message).toContain("nasdaq100");
   });
 
-  it("P09 defaults are externalized, not hardcoded: alpaca / paper / equity / nasdaq100", () => {
+  it("P09 defaults are externalized, not hardcoded: alpaca / alpaca / paper / equity / nasdaq100", () => {
+    // Issue #5516: the provider axis carries its own default (a provider
+    // inferred from the broker default would be the conflation #5515 refuses).
     expect(vocabularyDefaults()).toEqual({
+      provider: "alpaca",
       broker: "alpaca",
       mode: "paper",
       asset: "equity",

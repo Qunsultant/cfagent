@@ -45,7 +45,7 @@ export const AXES = [
 export type Axis = (typeof AXES)[number];
 
 /** Axes whose value may be omitted, resolving to `defaults` in the JSON. */
-export const DEFAULTED_AXES = ["broker", "mode", "asset", "universe"] as const;
+export const DEFAULTED_AXES = ["provider", "broker", "mode", "asset", "universe"] as const;
 export type DefaultedAxis = (typeof DEFAULTED_AXES)[number];
 
 export interface VocabularyEntry {
@@ -328,15 +328,33 @@ export function universeValues(): VocabularyEntry[] {
   return [...vocab.axes.universe.map((e) => ({ ...e })), ...sectors];
 }
 
-/** The declared defaults, as canonical ids. */
+/**
+ * The declared defaults, as canonical ids (#5516: the one block every surface
+ * resolves from — a surface that carries its own copy is a second source of
+ * truth, gitops §7).
+ */
 export function vocabularyDefaults(): Record<DefaultedAxis, string> {
-  const d = getVocabulary().defaults;
   return {
-    broker: d.broker as string,
-    mode: d.mode as string,
-    asset: d.asset as string,
-    universe: d.universe as string,
+    provider: defaultFor("provider"),
+    broker: defaultFor("broker"),
+    mode: defaultFor("mode"),
+    asset: defaultFor("asset"),
+    universe: defaultFor("universe"),
   };
+}
+
+/**
+ * Issue #5516 — the one resolver a surface calls for a default it does not
+ * hold: the value is read from `config/vocabulary.json`'s `defaults` block on
+ * every call, so a seam change (`setVocabulary`) moves it and no surface can
+ * snapshot it. `validateVocabulary` guarantees the value exists on its axis;
+ * the canonical id is returned (an alias spelling in the file still resolves
+ * to the registry's id).
+ */
+export function defaultFor(axis: DefaultedAxis): string {
+  const declared = getVocabulary().defaults[axis] as string;
+  const resolved = resolveValue(axis, declared);
+  return resolved.ok ? resolved.value : declared;
 }
 
 function findConflation(axis: Axis, value: string): Conflation | undefined {

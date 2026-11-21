@@ -8,6 +8,7 @@
  */
 
 import type { AgentContext, ScheduleOptions } from "agents";
+import { defaultUniverseId } from "../../config/defaultUniverse";
 import type { AgentScheduleItem, Env, StockScreenerFilter } from "../../types";
 import type { NLQSchedulingPort, NLQSocialBriefPort, NLQStockScreenPort, NLQStockScreenRunResult } from "../nlq";
 import type { ScreenerAgent, ScreenerRunRequest } from "../screener-agent";
@@ -344,7 +345,7 @@ async function buildChatScreenCommand(
   ctx: NlqPortsContext,
   req: { filters: StockScreenerFilter; userLogin: string; universe?: string },
 ): Promise<ChatScreenCommandParts> {
-  const universeId = req.universe ?? "TECH";
+  const universeId = req.universe ?? defaultUniverseId();
   // Issue #2867: shard derivation is the broker's one policy.
   const shards: WorkflowJobCommand["shards"] = shardsForUniverse(universeId);
   const nowMs = ctx.nowMs ?? (() => Date.now());

@@ -33,6 +33,7 @@ import { getServiceUserLogin } from "../security/serviceIdentity";
 import type { Env } from "../types";
 import type { OptionScreenerFilter, StockScreenerFilter } from "../types";
 import type { ScreeningProviderAssetClass } from "../trading";
+import { defaultUniverseId } from "../config/defaultUniverse";
 import type { ScreenerRunRequest, ScreenerRunResult } from "./screener-agent";
 import {
   aggregateShardResults,
@@ -322,7 +323,7 @@ async function executeOperation(
         trigger: req.trigger,
         deliver: false,
         filters: req.filters ?? {},
-        universe: req.universe ?? (req.symbols ? "symbols" : "TECH"),
+        universe: req.universe ?? (req.symbols ? "symbols" : defaultUniverseId()),
         asyncRequested: false,
         delivery: {},
         userLogin,

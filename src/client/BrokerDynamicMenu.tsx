@@ -4,7 +4,7 @@ import { PillGroup, Button, TextInput, Select, Notice } from "./components/ui";
 import { AlpacaSignInCard } from "./AlpacaSignInCard";
 import { apiFetch } from "./apiFetch";
 import { syncTarget, connectStatusEndpoint } from "./brokerEndpoints";
-import { brokerPresentation } from "../trading";
+import { brokerPresentation, defaultBrokerId } from "../trading";
 import { PublicTokenCard } from "./PublicTokenCard";
 import { AccountBindingSelector } from "./AccountBindingSelector";
 import { brokerCredentialGuidance, isBrokerId } from "../trading";
@@ -369,7 +369,7 @@ export function BrokerDynamicMenu({
 
   // Issue #3812: the platform default is Alpaca (paper), so the menu
   // never falls back to E*TRADE when no selection is stored.
-  const selectedBrokerId = tenantProviders.brokerId ?? "alpaca";
+  const selectedBrokerId = tenantProviders.brokerId ?? defaultBrokerId();
   const selectedBrokerLabel = brokerPresentation(selectedBrokerId).label;
   const brokerIcon = brokerPresentation(selectedBrokerId).icon;
   // Issue #3855: the connect surface switches on the broker's credential
