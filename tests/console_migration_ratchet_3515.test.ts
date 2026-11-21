@@ -156,6 +156,20 @@
  * census does not trip: none of the new event names or `component:`
  * lines contains a census term (`slack` is not a census term).
  *
+ * Paperwork batch (this slice) moves the two stale trading ceilings
+ * from REMAINING_PIN to MIGRATED_ZERO with NO production code change:
+ * `src/trading/channels/intake.ts` (ceiling 3) and
+ * `src/trading/options/unifiedOptionsService.ts` (ceiling 1) each hold
+ * 0 real `console.*` uses on current main (verified from code with a
+ * port of the ratchet's stripper — comments/strings excluded; intake
+ * reached zero via #5083 S4, unifiedOptionsService never held a use).
+ * After this batch REMAINING_PIN sums to 2: only
+ * `src/observability/observabilityPorts.ts`, the SANCTIONED_FALLBACK
+ * (the structured logger's own console fallback, exactly 2 uses),
+ * which stays by design. The console migration (S3) is complete at
+ * that point — every remaining `console.*` in `src/` is the sanctioned
+ * fallback itself.
+ *
  * Batch 8 (this slice) migrated `src/security` — all 14 files, 29 real
  * sites — to the same logger, and moved them from REMAINING_PIN to
  * MIGRATED_ZERO; after batch 8 the remaining total is 41. No pin
@@ -562,11 +576,13 @@ const MIGRATED_ZERO: readonly string[] = [
   "src/telemetry/resourceUsageObservabilityAdapter.ts",
   "src/telemetry/telemetryPorts.ts",
   "src/trading/alpaca/signIn.ts",
+  "src/trading/channels/intake.ts",
   "src/trading/dataProviders/fetchOutcome.ts",
   "src/trading/email/agent.ts",
   "src/trading/etrade/client.ts",
   "src/trading/etrade/platform.ts",
   "src/trading/etrade/quoteTrace.ts",
+  "src/trading/options/unifiedOptionsService.ts",
   "src/trading/platformHistory.ts",
   "src/trading/screenerPipeline.ts",
   "src/trading/slack/agent.ts",
@@ -599,8 +615,6 @@ const MIGRATED_ZERO: readonly string[] = [
  */
 const REMAINING_PIN: Readonly<Record<string, number>> = {
   "src/observability/observabilityPorts.ts": 2,
-  "src/trading/channels/intake.ts": 3,
-  "src/trading/options/unifiedOptionsService.ts": 1,
 };
 
 /** The structured logger's own console fallback — exactly 2 uses. */
