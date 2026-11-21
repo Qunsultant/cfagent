@@ -1,0 +1,3 @@
+### Fixed
+
+- **Enrollment can no longer report success without a queue entry (#5930):** `auto-merge: enroll` returned success when the head was not yet green ("leaving it for the next sweep"), so "checks still running" and "enrolled in the queue" were indistinguishable — three green PRs sat unmerged on 2026-11-20 with the check passing. The pending case now **fails the check with its reason** (own checks stay excluded from the verdict, so a red attempt never blocks its own retry), and the next gate completion re-runs it. Additionally, an entry the queue accepts and then drops — position 1, `QUEUED`, no merge-group build ever starts — is detected by a settle re-read and reported as an eviction instead of being counted as enrolled. #ceo-aimp
