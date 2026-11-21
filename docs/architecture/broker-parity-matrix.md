@@ -51,3 +51,21 @@ and account types directly through `/api/broker/account-binding` (`registryPatch
 the `broker_account_binding` MCP tool (`registry_get` / `registry_update`), and
 the `AccountBindingSelector` UX without code changes or redeploys.
 
+## Tuple Model, Validation Seam & Migration (#5094 F1 / #5098)
+
+Tenant state and per-surface scopes (`tenant`, `autopilot`, `copilot`, `schedule`, `ux`, `audit`) carry the unambiguous 4-element binding tuple `{ broker, mode, accountType, accountId }` (`AccountBindingTuple` in `src/trading/accountBindings.ts`).
+
+- **Validation Seam (`validateAccountAgainstBroker`)**:
+  Validates candidate tuples against the broker's actual registered/connected accounts:
+  - Unknown account -> coded error `FAILURE_ACCOUNT_UNKNOWN` (HTTP 404).
+  - Unowned or closed account -> coded error `FAILURE_ACCOUNT_UNOWNED` (HTTP 403).
+  - Wrong asset class or incompatible account type -> coded error `FAILURE_ACCOUNT_ASSET_TYPE_MISMATCH` (HTTP 400).
+  - Cross-broker substitution attempt -> coded error `FAILURE_ACCOUNT_BROKER_MISMATCH` (HTTP 409).
+  - Never silently falls back across brokers, modes, or accounts.
+
+- **Migration Seam (`migrateLegacyBrokerSelectionToTuple` / `migrateTenantAccountBinding`)**:
+  Migrates legacy broker/mode-only selections into full tuples:
+  - If 0 accounts exist: fails loud with `FAILURE_ACCOUNT_UNKNOWN`.
+  - If exactly 1 candidate account exists (or exactly 1 marked default): migrates cleanly to the tuple.
+  - If multiple candidate accounts exist with no single default: fails loud with `FAILURE_ACCOUNT_MIGRATION_AMBIGUOUS` (HTTP 409) returning `candidateAccountIds` so the tenant is asked instead of guessed.
+

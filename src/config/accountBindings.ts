@@ -18,6 +18,8 @@ export const ACCOUNT_BINDING_SCOPES = [
   "autopilot",
   "copilot",
   "schedule",
+  "ux",
+  "audit",
 ] as const;
 
 export const ACCOUNT_BINDING_CONFIG = {
@@ -26,4 +28,12 @@ export const ACCOUNT_BINDING_CONFIG = {
   registryKeyPrefix: "acctreg:v1:",
   defaultAccountType: "stock" as (typeof ACCOUNT_TYPES)[number],
   defaultScope: "tenant" as (typeof ACCOUNT_BINDING_SCOPES)[number],
+  failureCodes: {
+    unknownAccount: "FAILURE_ACCOUNT_UNKNOWN",
+    unownedAccount: "FAILURE_ACCOUNT_UNOWNED",
+    assetTypeMismatch: "FAILURE_ACCOUNT_ASSET_TYPE_MISMATCH",
+    brokerMismatch: "FAILURE_ACCOUNT_BROKER_MISMATCH",
+    migrationAmbiguous: "FAILURE_ACCOUNT_MIGRATION_AMBIGUOUS",
+    bindingMissing: "FAILURE_ACCOUNT_BINDING_MISSING",
+  },
 } as const;

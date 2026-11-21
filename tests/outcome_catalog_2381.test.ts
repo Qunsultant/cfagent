@@ -256,7 +256,7 @@ describe("outcome catalog: run detail messages (#2608)", () => {
     // FAILURE_IDENTITY_SCHEMA_UNAVAILABLE +
     // FAILURE_IDENTITY_READ_FAILED).
     // The count pins that no RUN_* code leaked into "outcomes".
-    expect(Object.keys(outcomes)).toHaveLength(263); // #5607 (G-5/G-6): +7 payment-assurance / commercial codes; +1 (#5867: FAILURE_COMMERCIAL_AUDIT_REQUIRED); +1 (#3571 residual: SUCCESS_TOP_UP_CLAIMED, audit-only claim code)
+    expect(Object.keys(outcomes)).toHaveLength(269); // #5607 (G-5/G-6): +7; +1 (#5867); +1 (#3571 residual); +6 (#5098/#5094 F1: FAILURE_ACCOUNT_*)
     // Count is the merged catalog (this branch + main).
     expect(Object.keys(outcomes).some((k) => k.startsWith("RUN_"))).toBe(false);
     for (const code of RUN_CODES) {
