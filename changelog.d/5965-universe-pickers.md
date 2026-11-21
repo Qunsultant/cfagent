@@ -1,0 +1,3 @@
+### Changed
+
+- **The scheduled-run universe pickers read the vocabulary (#5965 slice 1):** `ScheduleFormModal` and `ScheduledOptionsRunForm` no longer carry their own option lists. Both render `universeOptions("screener")` from `src/client/vocabularyOptions.ts`, which reads `src/config/vocabulary.ts`, so the two forms cannot drift from each other or from the registry. `TECH` is gone from both — it is a GICS sector (`sector-information-technology`), not a universe (#5515) — while a schedule that already stores it still shows it, labelled `(legacy)`, instead of silently blanking. Labels come from the registry (`Nasdaq-100`, `ETFs`, `Russell 2000`), and adding a universe to `config/vocabulary.json` puts it in both pickers with no component change. #CAIO-quns
