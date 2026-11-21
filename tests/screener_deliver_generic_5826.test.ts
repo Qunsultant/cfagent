@@ -297,35 +297,19 @@ async function makeParityHarness(): Promise<ParityHarness> {
 }
 
 describe("generic deliver carries screener delivery (#5826)", () => {
-  it("market parity, full chain: same sink calls through deliver.apply as through screener.deliver", async () => {
-    const h = await makeParityHarness();
-    const command = marketCommand();
-    await h.bespoke.control.defineJob(buildScreenerJobDefinition(command));
-    await h.generic.control.defineJob(genericDeliverDefinition(command));
-
-    // The generic registry does not contain the bespoke step at
-    // all — the delivery below can only have come through
-    // deliver.apply. The definitions name the two steps.
-    const bespokeStatus = await h.bespoke.control.getJob(command.jobId);
-    const genericStatus = await h.generic.control.getJob(command.jobId);
-    expect(deliverNodeStep(bespokeStatus.definition)).toBe(SCREENER_DELIVER_STEP);
-    expect(deliverNodeStep(genericStatus.definition)).toBe(DELIVER_APPLY_STEP);
-
-    const bespokeRun = await h.bespoke.control.runJob(command.jobId);
-    const genericRun = await h.generic.control.runJob(command.jobId);
-    expect((await bespokeRun.completion!).state).toBe("completed");
-    expect((await genericRun.completion!).state).toBe("completed");
-
-    expect(h.generic.sink).toHaveLength(1);
-    expect(h.bespoke.sink).toHaveLength(1);
-    // The two runs differ only in per-run generated ids (run/task/
-    // trace ids, artifact keys); the delivered outcome is the same.
-    expect(normalizeSinkCall(h.generic.sink[0]!)).toEqual(
-      normalizeSinkCall(h.bespoke.sink[0]!),
-    );
-    expect(h.generic.sink[0]?.userLogin).toBe("owner");
-    expect(h.generic.sink[0]?.opts?.deliveryId).toBe(`workflow:${command.jobId}`);
-  });
+  // Issue #5884 (6b3): "market parity, full chain: same
+  // sink calls through deliver.apply as through
+  // screener.deliver" MOVED to 6c (#5885) — its generic side
+  // loses its serve-shaped parent in the flip (the market
+  // definition's deliver node is now bespoke screener.deliver
+  // fed by generate.apply, not by the serve step), so the two
+  // runs no longer share a parent shape to compare. 6c owns
+  // the deliver flip and restores the parity test there: the
+  // bespoke side needs a hand-built six-node bespoke
+  // definition (the builder no longer builds one), the
+  // generic side dispatches the flipped five-node definition
+  // through deliver.apply, and the sink calls must match.
+  // 6c's survey already plans the sink-call parity test.
 
   it("step parity, market: same output and same sink args", async () => {
     // The bespoke side runs through the real agent stage; the
