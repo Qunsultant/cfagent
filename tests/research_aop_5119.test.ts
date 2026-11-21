@@ -6,6 +6,7 @@ import {
   resolveResearchJobConfig,
 } from "../src/config/researchJobConfig";
 import { codedMessage } from "../src/outcomes/outcomeAspects";
+import { maskAccountId } from "../src/config/accountBindings";
 import { JobStepRegistry } from "../src/services/jobPipelineSteps";
 import {
   ANALYZE_OODA_STEP,
@@ -35,6 +36,13 @@ describe("Issue #5119 (Sub-issue 3 of #5109) — Research AOP Compliance", () =>
     });
     expect(custom.oodaBudgetMs).toBe(45000);
     expect(custom.maxParallelCandidates).toBe(2);
+    expect(resolveResearchJobConfig().accountBindingType).toBe("options");
+    expect(resolveResearchJobConfig({ RESEARCH_ACCOUNT_BINDING_TYPE: "stock" }).accountBindingType).toBe("stock");
+    expect(() => resolveResearchJobConfig({ RESEARCH_ACCOUNT_BINDING_TYPE: "not-an-account" })).toThrow(
+      "RESEARCH_ACCOUNT_BINDING_TYPE",
+    );
+    expect(maskAccountId("acct-123456")).toBe("•••••••3456");
+    expect(maskAccountId("abc")).toBe("••••");
 
     expect(isWithinResearchGuardWindow(new Date("2026-11-17T21:15:00.000Z"), custom)).toBe(true);
     expect(isWithinResearchGuardWindow(new Date("2026-11-17T21:30:00.000Z"), custom)).toBe(false);

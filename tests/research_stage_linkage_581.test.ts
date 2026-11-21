@@ -54,8 +54,9 @@ describe("581 / 5175 research stage linkage & unified run id", () => {
   });
 
   it("stamps canonical run linkage without fabricating J-stack stage outcomes", () => {
+    const boundReport = { ...sampleReport, brokerId: "alpaca", mode: "paper", accountType: "options", accountId: "••••3456" };
     const storedInput = researchReportToStoreInput(
-      sampleReport,
+      boundReport,
       {
         pdfKey: "report:pdf:research:7c0c36a1",
         pdfStatus: "generated",
@@ -70,6 +71,10 @@ describe("581 / 5175 research stage linkage & unified run id", () => {
     expect(body.jobRunId).toBe("research:778ad3bf-7044-4ef9-9be9-38744ac8aa86");
     expect(body.engineVersion).toBe("rules-1.0.0");
     expect(body.captureIds).toEqual(["778ad3bf-7044-4ef9-9be9-38744ac8aa86"]);
+    expect(body.brokerId).toBe("alpaca");
+    expect(body.mode).toBe("paper");
+    expect(body.accountType).toBe("options");
+    expect(body.accountId).toBe("••••3456");
     expect(body.stages).toBeUndefined();
 
     const canonicalSummary = runSummaryFromReport({
@@ -103,5 +108,11 @@ describe("581 / 5175 research stage linkage & unified run id", () => {
     expect(detail.stages.filter((s) => s.stage !== "recording").every((s) => s.status === "unknown")).toBe(true);
     expect(detail.lineage.engineVersion).toBe("rules-1.0.0");
     expect(detail.lineage.captureIds).toEqual(["778ad3bf-7044-4ef9-9be9-38744ac8aa86"]);
+    expect(detail.provenance).toMatchObject({
+      brokerId: "alpaca",
+      tradingMode: "paper",
+      accountType: "options",
+      accountId: "••••3456",
+    });
   });
 });
