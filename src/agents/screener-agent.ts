@@ -1636,6 +1636,8 @@ export class ScreenerAgent extends PortThink {
             mode: "yahoo",
             symbols: selectedSymbols,
             maxSymbols: selectedSymbols.length,
+            // Issue #4439: the run's exchange scope rides the acquisition.
+            exchange: req.filters?.exchange,
             yahooDeps: quoteBundle.yahoo!,
           })
         : provider === "alpaca"
@@ -1643,6 +1645,8 @@ export class ScreenerAgent extends PortThink {
               mode: "alpaca",
               symbols: selectedSymbols,
               maxSymbols: selectedSymbols.length,
+              // Issue #4439: the run's exchange scope rides the acquisition.
+              exchange: req.filters?.exchange,
               quoteDeps: quoteBundle.alpaca!,
             })
           : provider === "public"
@@ -1650,12 +1654,16 @@ export class ScreenerAgent extends PortThink {
                 mode: "public",
                 symbols: selectedSymbols,
                 maxSymbols: selectedSymbols.length,
+                // Issue #4439: the run's exchange scope rides the acquisition.
+                exchange: req.filters?.exchange,
                 quoteDeps: quoteBundle.public!,
               })
           : await acquireUniverse({
               mode: "etrade-only",
               symbols: selectedSymbols,
               maxSymbols: selectedSymbols.length,
+              // Issue #4439: the run's exchange scope rides the acquisition.
+              exchange: req.filters?.exchange,
               quoteDeps: quoteBundle.etrade!,
             });
       await beat();
@@ -2444,6 +2452,8 @@ export class ScreenerAgent extends PortThink {
             mode: "yahoo",
             symbols: selectedSymbols,
             maxSymbols: selectedSymbols.length,
+            // Issue #4439: the run's exchange scope rides the acquisition.
+            exchange: req.filters?.exchange,
             yahooDeps: req.yahooDeps ?? bundle.yahoo!,
           })
         : provider === "alpaca"
@@ -2451,6 +2461,8 @@ export class ScreenerAgent extends PortThink {
               mode: "alpaca",
               symbols: selectedSymbols,
               maxSymbols: selectedSymbols.length,
+              // Issue #4439: the run's exchange scope rides the acquisition.
+              exchange: req.filters?.exchange,
               quoteDeps: bundle.alpaca ?? (() => { throw new Error("SCREENER_QUOTE_DEPS_MISSING: no Alpaca quote deps bound for this run — the agent's platform binding did not produce an Alpaca leg."); })(),
             })
           : provider === "public"
@@ -2458,12 +2470,16 @@ export class ScreenerAgent extends PortThink {
                 mode: "public",
                 symbols: selectedSymbols,
                 maxSymbols: selectedSymbols.length,
+                // Issue #4439: the run's exchange scope rides the acquisition.
+                exchange: req.filters?.exchange,
                 quoteDeps: bundle.public ?? (() => { throw new Error("SCREENER_QUOTE_DEPS_MISSING: no Public quote deps bound for this run — the agent's platform binding did not produce a Public leg."); })(),
               })
             : await acquireUniverse({
                 mode: "etrade-only",
                 symbols: selectedSymbols,
                 maxSymbols: selectedSymbols.length,
+                // Issue #4439: the run's exchange scope rides the acquisition.
+                exchange: req.filters?.exchange,
                 quoteDeps: bundle.etrade ?? (() => { throw new Error("SCREENER_QUOTE_DEPS_MISSING: no E*TRADE quote deps bound for this run — the agent's platform binding did not produce an E*TRADE leg."); })(),
               });
     state.acquired = acquired;

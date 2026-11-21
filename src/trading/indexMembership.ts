@@ -919,6 +919,8 @@ export async function screenIndexMembers(
     symbols: membersToListings(membership),
     maxSymbols,
     quoteDeps,
+    // Issue #4439: the caller's exchange scope rides the acquisition.
+    exchange: filter?.exchange,
   });
   return screenUniverse(new DynamicMarketScreener(), acquired, filter);
 }

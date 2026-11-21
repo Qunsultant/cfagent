@@ -151,7 +151,9 @@ export function createYahooStockScreener(
   const inner = new DynamicMarketScreener();
   return {
     async screenMarkets(filter?: StockScreenerFilter): Promise<StockScreenResult> {
-      const acquired = await acquireUniverse({ mode: "yahoo", yahooDeps });
+      // Issue #4439: the run's exchange scope rides the acquisition, so
+      // this leg quotes only the requested exchange's listings.
+      const acquired = await acquireUniverse({ mode: "yahoo", yahooDeps, exchange: filter?.exchange });
       if (acquired.error) {
         throw new Error(acquired.error);
       }
