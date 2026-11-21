@@ -2602,6 +2602,11 @@ const BASELINE: Array<[string, string, number]> = [
   // strings moved here from the workflow planner to break a module cycle; no
   // new mention was written.
   ["src/config/yahooDataMode.ts", "yahoo", 3],
+  // #6057 INTEGRATION (docs): the J-stack hosts doc names the feed job
+  // `yahoo-nasdaq100-quotes` in its #3976 tracker row — the job identifier
+  // is the row's subject (the incident is about that job); neutralizing it
+  // would remove the identifier the row exists to record.
+  ["docs/architecture/application/j-stack-hosts.md", "yahoo", 1],
 ];
 
 const BASELINE_MAP = new Map(BASELINE.map(([f, t, c]) => [`${f}\t${t}`, c]));
