@@ -11,7 +11,7 @@ import { describe, it, expect } from "vitest";
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { readFileSync } from "node:fs";
-import { BROKER_ENVIRONMENT_STORAGE_KEY } from "../src/client/brokerEnvironment";
+import { BROKER_ENVIRONMENT_STORAGE_KEY, setBrokerEnvironmentForTest } from "../src/client/brokerEnvironment";
 import { BrokerDynamicMenu } from "../src/client/BrokerDynamicMenu";
 import {
   setTenantProvidersStateForTest,
@@ -24,9 +24,12 @@ const menu = readFileSync("src/client/BrokerDynamicMenu.tsx", "utf8");
 
 /** Rendered menu text for one environment (Alpaca tenant, #3855: the
  * toggle label now comes from the presentation's modeShort, so the
- * assertion reads the rendered control, not a source literal). */
-async function renderMenuText(activeEnv: "TEST" | "PROD"): Promise<string> {
+ * assertion reads the rendered control, not a source literal).
+ * Issue #5879: the environment is set on the module value, not passed
+ * as a prop — the menu reads the one persisted selection. */
+async function renderMenuText(env: "TEST" | "PROD"): Promise<string> {
   setTenantProvidersStateForTest({ brokerId: "alpaca" });
+  setBrokerEnvironmentForTest(env);
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
@@ -36,7 +39,6 @@ async function renderMenuText(activeEnv: "TEST" | "PROD"): Promise<string> {
         initialOpen: true,
         userLogin: "OpenAIMP",
         userName: "OpenAIMP User",
-        activeEnv,
       }),
     );
   });
@@ -44,6 +46,7 @@ async function renderMenuText(activeEnv: "TEST" | "PROD"): Promise<string> {
   act(() => root.unmount());
   container.remove();
   resetTenantProvidersStateForTest();
+  setBrokerEnvironmentForTest("TEST");
   return text;
 }
 

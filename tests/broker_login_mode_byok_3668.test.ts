@@ -12,6 +12,7 @@ import { getTradingAgentConfig, TRADING_AGENT_CONFIG_BASELINE } from "../src/con
 import { ProposeStockTradeCommand } from "../src/mcps/openaimp/meshDoorCommands";
 import type { McpToolContext } from "../src/patterns/interfaces";
 import { setTenantProvidersStateForTest, resetTenantProvidersStateForTest } from "../src/client/tenantProviders";
+import { setBrokerEnvironmentForTest } from "../src/client/brokerEnvironment";
 
 function textOf(html: string): string {
   return html.split("<!-- -->").join("");
@@ -19,6 +20,7 @@ function textOf(html: string): string {
 
 afterEach(() => {
   resetTenantProvidersStateForTest();
+  setBrokerEnvironmentForTest("TEST");
   vi.unstubAllGlobals();
 });
 
@@ -26,6 +28,9 @@ describe("Issue #3668: Broker Login, Mode Switching, BYOK & Neutral Drafting", (
   describe("1. Mode Switching & effectiveEnv", () => {
     it("strictly respects effectiveEnv === 'PROD' for isLive without getting stuck on brokerStatus.environment = 'live'", () => {
       setTenantProvidersStateForTest({ brokerId: "alpaca" });
+      // Issue #5879: the environment is set on the module value, not
+      // passed as a prop — the menu reads the one persisted selection.
+      setBrokerEnvironmentForTest("TEST");
       const htmlTest = ReactDOMServer.renderToString(
         React.createElement(
           ToastProvider,
@@ -33,15 +38,15 @@ describe("Issue #3668: Broker Login, Mode Switching, BYOK & Neutral Drafting", (
           React.createElement(SettingsMenu, {
             userLogin: "tester",
             userName: "Tester",
-            activeEnv: "TEST",
             initialOpen: true,
           }),
         ),
       );
-      // Even if broker status was live, activeEnv='TEST' renders Paper as active
+      // Even if broker status was live, a TEST module value renders Paper as active
       expect(htmlTest).toMatch(/btn-env-mini\s+active[^>]*>[^<]*🧪\s*Paper/);
       expect(htmlTest).not.toMatch(/btn-env-mini\s+active[^>]*>[^<]*🔴\s*Live/);
 
+      setBrokerEnvironmentForTest("PROD");
       const htmlProd = ReactDOMServer.renderToString(
         React.createElement(
           ToastProvider,
@@ -49,7 +54,6 @@ describe("Issue #3668: Broker Login, Mode Switching, BYOK & Neutral Drafting", (
           React.createElement(SettingsMenu, {
             userLogin: "tester",
             userName: "Tester",
-            activeEnv: "PROD",
             initialOpen: true,
           }),
         ),

@@ -15,8 +15,12 @@ import ReactDOMServer from "react-dom/server";
 import { SettingsMenu } from "../src/client/BrokerDynamicMenu";
 import { ToastProvider } from "../src/client/components/ui";
 import { setTenantProvidersStateForTest, resetTenantProvidersStateForTest } from "../src/client/tenantProviders";
+import { setBrokerEnvironmentForTest } from "../src/client/brokerEnvironment";
 
-function renderMenu(props: Partial<React.ComponentProps<typeof SettingsMenu>> = {}): string {
+/** Issue #5879: the environment is set on the module value, not passed
+ * as a prop — the menu reads the one persisted selection. */
+function renderMenu(env: "TEST" | "PROD" = "TEST", props: Partial<React.ComponentProps<typeof SettingsMenu>> = {}): string {
+  setBrokerEnvironmentForTest(env);
   return ReactDOMServer.renderToString(
     React.createElement(
       ToastProvider,
@@ -37,6 +41,7 @@ function textOf(html: string): string {
 
 afterEach(() => {
   resetTenantProvidersStateForTest();
+  setBrokerEnvironmentForTest("TEST");
   vi.unstubAllGlobals();
 });
 
@@ -46,7 +51,7 @@ describe("Sub-Issue 3 (#3419): Single Active Mode & Dynamic Broker Menu", () => 
       setTenantProvidersStateForTest({ brokerId: "alpaca" });
 
       // TEST mode (Paper)
-      const testHtml = renderMenu({ activeEnv: "TEST" });
+      const testHtml = renderMenu("TEST");
       const testText = textOf(testHtml);
       expect(testText).toContain("🧪 Paper");
       expect(testText).not.toContain("🔴 Live");
@@ -56,7 +61,7 @@ describe("Sub-Issue 3 (#3419): Single Active Mode & Dynamic Broker Menu", () => 
       expect(testHtml).not.toMatch(/btn-env-mini\s+active[^>]*>[^<]*🔴\s*Live/);
 
       // PROD mode (Live)
-      const prodHtml = renderMenu({ activeEnv: "PROD" });
+      const prodHtml = renderMenu("PROD");
       const prodText = textOf(prodHtml);
       expect(prodText).not.toContain("🧪 Paper");
       expect(prodText).toContain("🔴 Live");
@@ -69,7 +74,7 @@ describe("Sub-Issue 3 (#3419): Single Active Mode & Dynamic Broker Menu", () => 
       setTenantProvidersStateForTest({ brokerId: "etrade" });
 
       // TEST mode (Sandbox)
-      const testHtml = renderMenu({ activeEnv: "TEST" });
+      const testHtml = renderMenu("TEST");
       const testText = textOf(testHtml);
       expect(testText).toContain("🧪 Sandbox");
       expect(testText).not.toContain("🔴 Live");
@@ -77,7 +82,7 @@ describe("Sub-Issue 3 (#3419): Single Active Mode & Dynamic Broker Menu", () => 
       expect(testHtml).not.toMatch(/btn-env-mini\s+active[^>]*>[^<]*🔴\s*Live/);
 
       // PROD mode (Live)
-      const prodHtml = renderMenu({ activeEnv: "PROD" });
+      const prodHtml = renderMenu("PROD");
       const prodText = textOf(prodHtml);
       expect(prodText).not.toContain("🧪 Sandbox");
       expect(prodText).toContain("🔴 Live");
@@ -89,7 +94,7 @@ describe("Sub-Issue 3 (#3419): Single Active Mode & Dynamic Broker Menu", () => 
   describe("Broker dynamic adaptation and E*TRADE isolation", () => {
     it("adapts dynamic menu headers and badges to Alpaca", () => {
       setTenantProvidersStateForTest({ brokerId: "alpaca" });
-      const html = renderMenu({ activeEnv: "TEST" });
+      const html = renderMenu("TEST");
       const text = textOf(html);
 
       expect(text).toContain("Alpaca Brokerage API");
@@ -101,7 +106,7 @@ describe("Sub-Issue 3 (#3419): Single Active Mode & Dynamic Broker Menu", () => 
 
     it("does not fabricate an E*TRADE test account number on Alpaca", () => {
       setTenantProvidersStateForTest({ brokerId: "alpaca" });
-      const html = renderMenu({ activeEnv: "TEST", account: null });
+      const html = renderMenu("TEST", { account: null });
       const text = textOf(html);
 
       expect(text).not.toContain("••••4748");
@@ -109,7 +114,7 @@ describe("Sub-Issue 3 (#3419): Single Active Mode & Dynamic Broker Menu", () => 
 
     it("presents E*TRADE controls when E*TRADE is the selected broker", () => {
       setTenantProvidersStateForTest({ brokerId: "etrade" });
-      const html = renderMenu({ activeEnv: "TEST" });
+      const html = renderMenu("TEST");
       const text = textOf(html);
 
       expect(text).toContain("E*TRADE Brokerage API");
@@ -119,20 +124,20 @@ describe("Sub-Issue 3 (#3419): Single Active Mode & Dynamic Broker Menu", () => 
     it("names the active broker and environment in the trigger tooltip", () => {
       // Alpaca Paper
       setTenantProvidersStateForTest({ brokerId: "alpaca" });
-      const alpacaPaperHtml = renderMenu({ activeEnv: "TEST", initialOpen: false });
+      const alpacaPaperHtml = renderMenu("TEST", { initialOpen: false });
       expect(alpacaPaperHtml).toContain("Settings (Alpaca · Paper)");
 
       // Alpaca Live
-      const alpacaLiveHtml = renderMenu({ activeEnv: "PROD", initialOpen: false });
+      const alpacaLiveHtml = renderMenu("PROD", { initialOpen: false });
       expect(alpacaLiveHtml).toContain("Settings (Alpaca · Live)");
 
       // E*TRADE Sandbox
       setTenantProvidersStateForTest({ brokerId: "etrade" });
-      const etradeSandboxHtml = renderMenu({ activeEnv: "TEST", initialOpen: false });
+      const etradeSandboxHtml = renderMenu("TEST", { initialOpen: false });
       expect(etradeSandboxHtml).toContain("Settings (E*TRADE · Sandbox)");
 
       // E*TRADE Live
-      const etradeLiveHtml = renderMenu({ activeEnv: "PROD", initialOpen: false });
+      const etradeLiveHtml = renderMenu("PROD", { initialOpen: false });
       expect(etradeLiveHtml).toContain("Settings (E*TRADE · Live)");
     });
   });
