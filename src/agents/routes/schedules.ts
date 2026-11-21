@@ -24,6 +24,9 @@
  *   POST        /schedules/:id/pause               (issue #273)
  *   POST        /schedules/:id/resume              (issue #273)
  *   POST        /schedules/:id/trigger             (issue #273)
+ *   POST        /schedules/pause                   (issue #5878 — bulk pause by scope)
+ *   POST        /schedules/resume                  (issue #5878 — bulk resume by scope)
+ *   POST        /schedules/trigger                 (issue #5878 — bulk run-now by scope)
  *   PUT         /schedules/:id                     (issue #273)
  *   GET         /schedules/approvals               (issue #3122 — list pending agent-schedule approvals)
  *   POST        /schedules/approvals/:id/approve   (issue #3122 — PDP-checked approve + arm)
@@ -104,8 +107,11 @@ import { pickFeedLoadParams } from "../../services/feedSnapshotStore";
 import {
   deleteUnifiedSchedule,
   getUnifiedScheduleDetail,
+  isBulkScheduleScope,
   listUnifiedScheduleItems,
+  pauseSchedulesInScope,
   pauseUnifiedSchedule,
+  resumeSchedulesInScope,
   resumeUnifiedSchedule,
   screenScheduleToRecord,
   TICKER_PUSH_RECORD_ID,
@@ -129,8 +135,13 @@ import {
   scheduleWatchdogRecordToListItem,
   scheduleWatchdogToRecord,
   triggerUnifiedSchedule,
+  triggerSchedulesInScope,
   unifiedRecordToListItem,
   updateUnifiedSchedule,
+  type BulkScheduleRowExecutor,
+  type BulkScheduleScope,
+  type BulkScheduleSummary,
+  type BulkScheduleVerb,
   type ScheduleAlarms,
   type ScheduleAlarmLike,
 } from "../../services/unifiedScheduleManagement";
@@ -705,6 +716,204 @@ export async function handleSchedulesRoutes(
       }
     };
 
+    // Issue #5878 — the one schedule list, shared by the GET list
+    // route and the bulk pause/resume/trigger routes: the unified
+    // items plus the ticker-push row and the six derived rows, under
+    // the same ?type= filter. A bulk scope filters THESE rows (by
+    // kind), so the bulk verb and the home the user sees can never
+    // disagree about which rows a scope names.
+    const readScheduleListItems = async (typeParam?: string | null) => {
+      const items = await listUnifiedScheduleItems(
+        { store: unifiedStore(), alarms },
+        typeParam ?? undefined,
+      );
+      // Issue #3121 #4237 — the ticker-push row is not in this
+      // store (it lives in the TickerAgent); append it when the
+      // feed answers, under the same ?type= filter as the rest.
+      const tickerItem = await readTickerPushListItem(ctx.env);
+      if (tickerItem && (!typeParam || tickerItem.type === typeParam)) {
+        items.push(tickerItem);
+      }
+      // Issue #3121 #4239 — the token-renewal row is derived,
+      // not stored; append it with its last renewal joined from
+      // the ledger, under the same ?type= filter as the rest.
+      const renewalItem = await readTokenRenewalListItem(ctx.agentCtx.storage.sql);
+      if (renewalItem && (!typeParam || renewalItem.type === typeParam)) {
+        items.push(renewalItem);
+      }
+      // Issue #3121 #4240 — the retention row is derived,
+      // not stored; append it with its last pass joined from
+      // the ledger, under the same ?type= filter as the rest.
+      const retentionItem = await readRetentionListItem(ctx.agentCtx.storage.sql);
+      if (retentionItem && (!typeParam || retentionItem.type === typeParam)) {
+        items.push(retentionItem);
+      }
+      // Issue #3121 #4241 — the nightly research row is derived,
+      // not stored; append it with its last run joined from
+      // the ledger, under the same ?type= filter as the rest.
+      const nightlyResearchItem = await readNightlyResearchListItem(ctx.agentCtx.storage.sql);
+      if (nightlyResearchItem && (!typeParam || nightlyResearchItem.type === typeParam)) {
+        items.push(nightlyResearchItem);
+      }
+      // Issue #3121 #4242 — the three sweep/watchdog rows are
+      // derived, not stored; append each with its last run joined
+      // from the ledger, under the same ?type= filter as the rest.
+      const staleLedgerSweepItem = await readStaleLedgerSweepListItem(ctx.agentCtx.storage.sql);
+      if (staleLedgerSweepItem && (!typeParam || staleLedgerSweepItem.type === typeParam)) {
+        items.push(staleLedgerSweepItem);
+      }
+      const staleAsyncJobSweepItem = await readStaleAsyncJobSweepListItem(ctx.agentCtx.storage.sql);
+      if (staleAsyncJobSweepItem && (!typeParam || staleAsyncJobSweepItem.type === typeParam)) {
+        items.push(staleAsyncJobSweepItem);
+      }
+      const scheduleWatchdogItem = await readScheduleWatchdogListItem(ctx.agentCtx.storage.sql);
+      if (scheduleWatchdogItem && (!typeParam || scheduleWatchdogItem.type === typeParam)) {
+        items.push(scheduleWatchdogItem);
+      }
+      return items;
+    };
+
+    // Issue #5878 — the manual-run runner, shared by the single-row
+    // trigger route and the bulk trigger route. Callbacks whose method
+    // wrapper records its own runs (the creatable four, plus the
+    // internal callbacks #3788/#3310/#4186 wrapped) record outcome-aware
+    // runs themselves, so the route must not double-record them;
+    // other callbacks have no wrapper, so the route records the
+    // invocation itself (invocation-level success, since the
+    // callback reports no outcome). Paused schedules refused
+    // inside the service with 409 record nothing — no run happened.
+    // The schedule id is the caller's explicit id when one is given
+    // (the single-row route), else the id the payload carries
+    // (triggerUnifiedSchedule stamps `scheduleId` on manual
+    // triggers), so the ledger linkage is the same either way.
+    const runScheduleCallbackNow = async (
+      callback: string,
+      payload: unknown,
+      explicitScheduleId?: string,
+    ) => {
+      const scheduleId =
+        explicitScheduleId ??
+        (payload && typeof payload === "object" &&
+        typeof (payload as Record<string, unknown>).scheduleId === "string"
+          ? ((payload as Record<string, unknown>).scheduleId as string)
+          : undefined);
+      if ((RECORDED_SCHEDULE_CALLBACKS as readonly string[]).includes(callback)) {
+        await ctx.runScheduleCallback(callback, payload);
+      } else {
+        await recordScheduleCallbackRun(
+          ctx.agentCtx.storage.sql,
+          callback,
+          payload,
+          { id: scheduleId },
+          () => ctx.runScheduleCallback(callback, payload),
+          {
+            // Issue #5085 (S6): a failed ledger write is named
+            // (audit + coded OBS-1020) through the shared
+            // namer instead of vanishing silently.
+            onRecordFailure: nameLedgerWriteFailure(
+              (type, agent, payload) => ctx.audit(type, agent, payload),
+              "schedule.ledger_write_failed",
+            ),
+          },
+        );
+      }
+    };
+
+    // Issue #5878 — the bulk executor for the one row the management
+    // service does not own: the live-feed row. Its pause / resume /
+    // trigger go through the TickerAgent's typed RPC, exactly as the
+    // single-row route does them. Any other row returns undefined
+    // and falls through to the standard per-row verb.
+    const executeBulkRow: BulkScheduleRowExecutor = async (row, verb) => {
+      if (row.id !== TICKER_PUSH_RECORD_ID) return undefined;
+      const stub = tickerPushStub();
+      if (verb === "pause") {
+        const feed = await stub.getTickerPushRecord();
+        if (feed?.state === "paused") return { ok: true, already: true };
+        await stub.pauseTickerPush();
+        return { ok: true };
+      }
+      if (verb === "resume") {
+        const feed = await stub.getTickerPushRecord();
+        if (feed?.state !== "paused") return { ok: true, already: true };
+        await stub.resumeTickerPush();
+        return { ok: true };
+      }
+      const feed = await stub.getTickerPushRecord();
+      if (feed?.state === "paused") {
+        return { ok: false, error: "The live feed is paused — resume it before triggering." };
+      }
+      await stub.triggerTickerPush();
+      return { ok: true };
+    };
+
+    // Issue #5878 — one bulk verb over a scope, shared by the three
+    // bulk routes below. Body: `{ scope: "all" | kind }`. The scope
+    // is validated (400 otherwise); the rows are the one schedule
+    // list; the verb runs through the bulk service; each acted row
+    // gets its single-row audit event, and the call gets one bulk
+    // audit event naming the scope and the counts.
+    const handleBulkScheduleVerb = async (verb: BulkScheduleVerb) => {
+      try {
+        const body = (await request.json().catch(() => ({}))) as any;
+        if (!isBulkScheduleScope(body?.scope)) {
+          return Response.json(
+            { error: "scope must be 'all' or one of the schedule kinds (stocks, options, strategy, goal, payment, trading, system, queued, other)" },
+            { status: 400 },
+          );
+        }
+        const scope = body.scope as BulkScheduleScope;
+        const rows = await readScheduleListItems();
+        const callbackById = new Map(rows.map((r) => [r.id, r.callback]));
+        const deps = { store: unifiedStore(), alarms, reconcileDeclared: ctx.reconcileScheduledTasks };
+        const nowIso = new Date().toISOString();
+        let summary: BulkScheduleSummary;
+        if (verb === "pause") {
+          summary = await pauseSchedulesInScope(deps, scope, rows, nowIso, executeBulkRow);
+        } else if (verb === "resume") {
+          summary = await resumeSchedulesInScope(deps, scope, rows, nowIso, executeBulkRow);
+        } else {
+          summary = await triggerSchedulesInScope(deps, scope, rows, runScheduleCallbackNow, executeBulkRow);
+        }
+        const auditEvent =
+          verb === "pause" ? "schedule.paused" : verb === "resume" ? "schedule.resumed" : "schedule.triggered";
+        const bulkAuditEvent =
+          verb === "pause"
+            ? "schedule.bulk-paused"
+            : verb === "resume"
+              ? "schedule.bulk-resumed"
+              : "schedule.bulk-triggered";
+        for (const result of summary.results) {
+          if (result.outcome !== "paused" && result.outcome !== "resumed" && result.outcome !== "triggered") {
+            continue;
+          }
+          ctx.audit(auditEvent, "orchestrator", {
+            scheduleId: result.id,
+            callback: callbackById.get(result.id),
+          });
+        }
+        ctx.audit(bulkAuditEvent, "orchestrator", {
+          scope,
+          total: summary.total,
+          applied: summary.applied,
+          already: summary.already,
+          refused: summary.refused,
+        });
+        return Response.json({
+          success: true,
+          verb: summary.verb,
+          scope: summary.scope,
+          total: summary.total,
+          applied: summary.applied,
+          already: summary.already,
+          refused: summary.refused,
+          results: summary.results,
+        });
+      } catch (err: any) {
+        return Response.json({ error: err.message || "Failed to run bulk schedule action" }, { status: 500 });
+      }
+    };
+
     // Issue #3311 — webhook-triggered scheduling: a workflow step
     // calls POST /schedules/webhook/followup (via the HMAC edge in
     // src/server/routes/scheduleWebhook.ts) and the scheduler mints a
@@ -926,53 +1135,9 @@ export async function handleSchedulesRoutes(
         // broken scheduling binding as "you have no schedules" (audit
         // finding F14). A failure now surfaces as the 500 below.
         const typeParam = url.searchParams.get("type");
-        const items = await listUnifiedScheduleItems(
-          { store: unifiedStore(), alarms },
-          typeParam ?? undefined,
-        );
-        // Issue #3121 #4237 — the ticker-push row is not in this
-        // store (it lives in the TickerAgent); append it when the
-        // feed answers, under the same ?type= filter as the rest.
-        const tickerItem = await readTickerPushListItem(ctx.env);
-        if (tickerItem && (!typeParam || tickerItem.type === typeParam)) {
-          items.push(tickerItem);
-        }
-        // Issue #3121 #4239 — the token-renewal row is derived,
-        // not stored; append it with its last renewal joined from
-        // the ledger, under the same ?type= filter as the rest.
-        const renewalItem = await readTokenRenewalListItem(ctx.agentCtx.storage.sql);
-        if (renewalItem && (!typeParam || renewalItem.type === typeParam)) {
-          items.push(renewalItem);
-        }
-        // Issue #3121 #4240 — the retention row is derived,
-        // not stored; append it with its last pass joined from
-        // the ledger, under the same ?type= filter as the rest.
-        const retentionItem = await readRetentionListItem(ctx.agentCtx.storage.sql);
-        if (retentionItem && (!typeParam || retentionItem.type === typeParam)) {
-          items.push(retentionItem);
-        }
-        // Issue #3121 #4241 — the nightly research row is derived,
-        // not stored; append it with its last run joined from
-        // the ledger, under the same ?type= filter as the rest.
-        const nightlyResearchItem = await readNightlyResearchListItem(ctx.agentCtx.storage.sql);
-        if (nightlyResearchItem && (!typeParam || nightlyResearchItem.type === typeParam)) {
-          items.push(nightlyResearchItem);
-        }
-        // Issue #3121 #4242 — the three sweep/watchdog rows are
-        // derived, not stored; append each with its last run joined
-        // from the ledger, under the same ?type= filter as the rest.
-        const staleLedgerSweepItem = await readStaleLedgerSweepListItem(ctx.agentCtx.storage.sql);
-        if (staleLedgerSweepItem && (!typeParam || staleLedgerSweepItem.type === typeParam)) {
-          items.push(staleLedgerSweepItem);
-        }
-        const staleAsyncJobSweepItem = await readStaleAsyncJobSweepListItem(ctx.agentCtx.storage.sql);
-        if (staleAsyncJobSweepItem && (!typeParam || staleAsyncJobSweepItem.type === typeParam)) {
-          items.push(staleAsyncJobSweepItem);
-        }
-        const scheduleWatchdogItem = await readScheduleWatchdogListItem(ctx.agentCtx.storage.sql);
-        if (scheduleWatchdogItem && (!typeParam || scheduleWatchdogItem.type === typeParam)) {
-          items.push(scheduleWatchdogItem);
-        }
+        // Issue #5878 — the one schedule list (unified items +
+        // ticker-push row + derived rows); see readScheduleListItems.
+        const items = await readScheduleListItems(typeParam ?? undefined);
         return Response.json({
           count: items.length,
           schedules: items,
@@ -1505,6 +1670,25 @@ export async function handleSchedulesRoutes(
       }
     }
 
+    // Bulk pause (POST /api/schedules/pause) — issue #5878. The bulk
+    // branch sits BEFORE the single-row pause branch below: the
+    // single-row match would otherwise read "pause" as the id.
+    if (path.endsWith("/schedules/pause") && request.method === "POST") {
+      return handleBulkScheduleVerb("pause");
+    }
+
+    // Bulk resume (POST /api/schedules/resume) — issue #5878. Same
+    // ordering reason as the bulk pause branch above.
+    if (path.endsWith("/schedules/resume") && request.method === "POST") {
+      return handleBulkScheduleVerb("resume");
+    }
+
+    // Bulk run-now (POST /api/schedules/trigger) — issue #5878. Same
+    // ordering reason as the bulk pause branch above.
+    if (path.endsWith("/schedules/trigger") && request.method === "POST") {
+      return handleBulkScheduleVerb("trigger");
+    }
+
     // Pause a schedule (POST /api/schedules/:id/pause) — issue #273.
     // The SDK schedule is cancelled, but its definition and state
     // live in the unified store as a paused record, so the job stays
@@ -1584,36 +1768,7 @@ export async function handleSchedulesRoutes(
         const result = await triggerUnifiedSchedule(
           { store: unifiedStore(), alarms },
           scheduleId,
-          async (callback, payload) => {
-            // Issue #2964: record the manual run. Callbacks whose method
-            // wrapper records its own runs (the creatable four, plus the
-            // internal callbacks #3788/#3310/#4186 wrapped) record outcome-aware
-            // runs themselves, so the route must not double-record them;
-            // other callbacks have no wrapper, so the route records the
-            // invocation itself (invocation-level success, since the
-            // callback reports no outcome). Paused schedules refused
-            // inside the service with 409 record nothing — no run happened.
-            if ((RECORDED_SCHEDULE_CALLBACKS as readonly string[]).includes(callback)) {
-              await ctx.runScheduleCallback(callback, payload);
-            } else {
-              await recordScheduleCallbackRun(
-                ctx.agentCtx.storage.sql,
-                callback,
-                payload,
-                { id: scheduleId },
-                () => ctx.runScheduleCallback(callback, payload),
-                {
-                  // Issue #5085 (S6): a failed ledger write is named
-                  // (audit + coded OBS-1020) through the shared
-                  // namer instead of vanishing silently.
-                  onRecordFailure: nameLedgerWriteFailure(
-                    (type, agent, payload) => ctx.audit(type, agent, payload),
-                    "schedule.ledger_write_failed",
-                  ),
-                },
-              );
-            }
-          },
+          (callback, payload) => runScheduleCallbackNow(callback, payload, scheduleId),
         );
         if (!result.ok) {
           return Response.json(
