@@ -803,7 +803,9 @@ describe("market sharded submit through the seam (#4280)", () => {
     expect(input.commandOverrides.jobId).toBe(chainId);
     expect(input.spec.deliver).toBe(true);
     expect(input.spec.trigger).toBe("scheduled");
-    expect(input.spec.universe).toBe("TECH");
+    // Issue #5516: an unselected sharded market screen plans the externalized
+    // universe default (config/vocabulary.json → nasdaq100), not the TECH sector.
+    expect(input.spec.universe).toBe("NASDAQ100");
     expect(input.spec.delivery).toEqual({
       emailTo: "ops@example.com",
       slackChannel: "#screener",

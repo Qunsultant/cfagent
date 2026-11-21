@@ -106,7 +106,9 @@ describe("fail-closed chain probes (#2860 Factor 8)", () => {
       activeChainRows: [
         {
           payload_json: JSON.stringify({
-            chain: { userLogin: "test_trader", universe: "TECH" },
+            // Issue #5516: the unselected run now screens the externalized
+            // default universe, so the recorded chain must name it too.
+            chain: { userLogin: "test_trader", universe: "NASDAQ100" },
           }),
         },
       ],
