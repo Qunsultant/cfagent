@@ -23,6 +23,9 @@ import type { ResearchAgent } from "../research-agent";
 import type { ResearchReport } from "../../services/researchPipeline";
 import type { ResearchReportArtifactOutcome, ResearchWorkbookOutcome } from "../../trading";
 import { resolveCopilotTradingSelection } from "../copilotTradingMode";
+import { resolveTenantBroker } from "../../services/tenantProviders";
+import { resolveTradeEnvironmentFromSettings } from "../routes/brokerEnvironment";
+import { tradingTypeFor } from "../../trading";
 import { createStructuredLogger } from "../../observability/structuredLogger";
 import { createObservabilitySink } from "../../observability/createObservabilityPorts";
 
@@ -188,6 +191,10 @@ export async function runResearchAndPublish(ctx: ResearchPublishContext,
     };
   }
   const login = userLogin as string;
+  const agent = ctx.getResearchAgent(login);
+  if (!agent) {
+    return { success: false, error: "ResearchAgent binding not configured." };
+  }
   // Research uses the same tenant broker + paper/live selection as Copilot.
   // Resolve missing fields once at the publish boundary so manual and
   // scheduled runs carry the identical selection through J-stack and the
@@ -198,20 +205,23 @@ export async function runResearchAndPublish(ctx: ResearchPublishContext,
       env: ctx.env,
       readSettingRaw: ctx.readSettingRaw,
     });
-    if (!resolved.resolved) {
-      return {
-        success: false,
-        error: "Research could not resolve the tenant broker and trading mode; configure the broker selection before running.",
-      };
-    }
-    effectiveSelection = {
-      ...resolved.selection,
-      ...selection,
-    };
-  }
-  const agent = ctx.getResearchAgent(login);
-  if (!agent) {
-    return { success: false, error: "ResearchAgent binding not configured." };
+    const fallbackSelection = resolved.resolved
+      ? resolved.selection
+      : await (async () => {
+          // OODA is read-only. If the optional commercial settings adapter is
+          // unbound, use the platform's documented broker default and the
+          // shared TEST/paper trade-environment default; never deployment PROD.
+          const brokerId = await resolveTenantBroker(ctx.env);
+          const environment = resolveTradeEnvironmentFromSettings(
+            ctx.readSettingRaw,
+            ctx.env,
+          );
+          return {
+            brokerId,
+            mode: tradingTypeFor(brokerId, environment),
+          };
+        })();
+    effectiveSelection = { ...fallbackSelection, ...selection };
   }
   // Dispatch discovery through the SDK agent-tool run. The child
   // invokes its deterministic, read-only pipeline tool and persists the
