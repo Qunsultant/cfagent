@@ -182,6 +182,8 @@ export interface FeedJobView {
   sourceId: string;
   dataset: string;
   label: string;
+  /** The catalog family (#6048); absent on responses predating it. */
+  family?: string;
   feed: FeedJobDatasetView | null;
   pipeline: {
     state: string;

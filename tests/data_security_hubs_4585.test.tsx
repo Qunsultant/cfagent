@@ -101,8 +101,8 @@ function read(rel: string): string {
   return readFileSync(join(here, rel), "utf8").replace(/\r\n/g, "\n");
 }
 
-const DATA_HUB_VIEWS_EXPECTED = ["data-providers", "data-lifecycle", "downloads"] as const;
-const DATA_HUB_LABELS = ["Data Providers", "Data Lifecycle", "Parameters & Export"];
+const DATA_HUB_VIEWS_EXPECTED = ["data-providers", "feeds", "data-lifecycle", "downloads"] as const;
+const DATA_HUB_LABELS = ["Data Providers", "Feeds", "Data Lifecycle", "Parameters & Export"];
 const SECURITY_HUB_VIEWS_EXPECTED = ["iaaa-admin", "users", "admin-access", "profile", "pdp", "pep", "pip", "pap"] as const;
 const SECURITY_HUB_LABELS = ["IAAA Admin", "Users", "Admin Access", "Profile", "PDP", "PEP", "PIP", "PAP"];
 const REMAINING_PLATFORM_ADMIN = [
@@ -116,7 +116,7 @@ const REMAINING_PLATFORM_ADMIN = [
 ] as const;
 
 describe("4585-P01 the hubs resolve exactly their views (#4585)", () => {
-  it("DATA_HUB_VIEWS lists the three data views, in order", () => {
+  it("DATA_HUB_VIEWS lists the four data views, in order", () => {
     expect([...DATA_HUB_VIEWS]).toEqual([...DATA_HUB_VIEWS_EXPECTED]);
     expect(DATA_HUB_VIEWS_EXPECTED.map((v) => DATA_HUB_VIEW_LABELS[v])).toEqual(DATA_HUB_LABELS);
   });
@@ -130,12 +130,12 @@ describe("4585-P01 the hubs resolve exactly their views (#4585)", () => {
 });
 
 describe("4585-P02 each hub carries one sub-menu entry per view (#4585)", () => {
-  it("the DataHub item has three sub-items with labels, descriptions, and icons", () => {
+  it("the DataHub item has four sub-items with labels, descriptions, and icons", () => {
     const platform = DEFAULT_LEFT_NAV_CONFIG.sections.find((s) => s.id === "section-platform");
     expect(platform).toBeDefined();
     const item = platform!.items.find((i) => i.id === "data-hub");
     expect(item).toBeDefined();
-    expect(item!.subItems).toHaveLength(3);
+    expect(item!.subItems).toHaveLength(4);
     for (const [index, view] of DATA_HUB_VIEWS_EXPECTED.entries()) {
       const sub = item!.subItems![index];
       expect(sub.id).toBe(view);
