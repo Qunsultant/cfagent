@@ -92,10 +92,10 @@ const T0 = Date.parse("2026-11-07T12:00:00.000Z");
 const iso = (ms: number) => new Date(ms).toISOString();
 const SYMBOLS = ["AAPL", "MSFT"];
 
-/** Expiries the stub serves (DTE from T0: 13, 41, 377). */
+/** Expiries the stub serves (DTE from T0: 41, 86, 377). */
 const STUB_EXPIRIES: ETradeOptionExpireDate[] = [
-  { year: 2026, month: 11, day: 20 },
   { year: 2026, month: 12, day: 18 },
+  { year: 2027, month: 2, day: 1 },
   { year: 2027, month: 11, day: 19 },
 ];
 
@@ -134,9 +134,9 @@ interface StubKnobs {
   throwExpiriesFor?: Set<string>;
   /** Symbols whose expiries fetch returns []. */
   emptyExpiriesFor?: Set<string>;
-  /** Symbols whose chain fetch throws for one expiry (the 2nd). */
+  /** Symbols whose chain fetch throws for one expiry (the Dec 18 expiry). */
   throwChainFor?: Set<string>;
-  /** Symbols whose first chain carries a WRONG selectedExpiry. */
+  /** Symbols whose second chain carries a WRONG selectedExpiry. */
   mismatchFor?: Set<string>;
 }
 
@@ -180,7 +180,10 @@ function stubChainsProvider(knobs: StubKnobs = {}): DataProvider {
         throw new Error(`stub chain failure for ${request.symbol}`);
       }
       let chain = stubChain(request.symbol, expiry);
-      if (knobs.mismatchFor?.has(request.symbol) && expiry.day === 20) {
+      // The second served expiry (STUB_EXPIRIES[1]); the first (Dec 18)
+      // is the replacement value, so the wrong-expiry chain must be a
+      // different one — applying this to the first would be a no-op.
+      if (knobs.mismatchFor?.has(request.symbol) && expiry === STUB_EXPIRIES[1]) {
         chain = {
           ...chain,
           selectedExpiry: { year: 2026, month: 12, day: 18 },
@@ -350,15 +353,15 @@ describe("the options-chains runner (#4065)", () => {
     const aapl = artifact.chains!.find((r) => r.symbol === "AAPL")!;
     // Default window 0–365 DTE from T0: the 377-DTE expiry is out.
     expect(aapl.expiries).toEqual([
-      { year: 2026, month: 11, day: 20 },
       { year: 2026, month: 12, day: 18 },
+      { year: 2027, month: 2, day: 1 },
     ]);
     expect(aapl.chains).toHaveLength(2);
     expect(aapl.fetchErrors).toEqual([]);
     expect(aapl.chains[0]?.selectedExpiry).toEqual({
       year: 2026,
-      month: 11,
-      day: 20,
+      month: 12,
+      day: 18,
     });
     expect(feedDatasetRowCount(artifact)).toBe(2);
   });
@@ -400,10 +403,14 @@ describe("the options-chains runner (#4065)", () => {
   it("the DTE window filters expiries (screener semantics)", async () => {
     const { artifact } = await runChains(
       {},
-      { symbols: ["AAPL"], minDte: 0, maxDte: 30 },
+      // Window follows the moved nearest expiry (DTE 86 from T0):
+      // it catches only the Feb 1 2027 expiry; Dec 18 (41) and
+      // Nov 19 2027 (377) stay out. Feb 1 — not Jan 15 — is the moved
+      // expiry because Jan 15 is the dataset test's miss-query date.
+      { symbols: ["AAPL"], minDte: 75, maxDte: 95 },
     );
     const aapl = artifact.chains!.find((r) => r.symbol === "AAPL")!;
-    expect(aapl.expiries).toEqual([{ year: 2026, month: 11, day: 20 }]);
+    expect(aapl.expiries).toEqual([{ year: 2027, month: 2, day: 1 }]);
     expect(aapl.chains).toHaveLength(1);
   });
 
@@ -433,8 +440,8 @@ describe("the options-chains runner (#4065)", () => {
     );
     const aapl = artifact.chains!.find((r) => r.symbol === "AAPL")!;
     expect(aapl.expiries).toEqual([
-      { year: 2026, month: 11, day: 20 },
       { year: 2026, month: 12, day: 18 },
+      { year: 2027, month: 2, day: 1 },
     ]);
     expect(aapl.chains).toHaveLength(2);
   });
@@ -607,8 +614,8 @@ describe("the dataset-backed source serves fetchChains identically (#4065)", () 
     const artifact = await datasetStore.latest("alpaca", "options-chains");
     const source = createDatasetOptionChainSource(artifact!);
     expect(await source.getOptionExpireDates("AAPL")).toEqual([
-      { year: 2026, month: 11, day: 20 },
       { year: 2026, month: 12, day: 18 },
+      { year: 2027, month: 2, day: 1 },
     ]);
     expect(await source.getOptionExpireDates("MSFT")).toEqual([]);
     const scoped = await source.getOptionChains({
@@ -627,7 +634,7 @@ describe("the dataset-backed source serves fetchChains identically (#4065)", () 
       }),
     ).toBeNull();
     const unscoped = await source.getOptionChains({ symbol: "AAPL" });
-    expect(unscoped?.selectedExpiry).toEqual({ year: 2026, month: 11, day: 20 });
+    expect(unscoped?.selectedExpiry).toEqual({ year: 2026, month: 12, day: 18 });
     expect(await source.getOptionChains({ symbol: "MSFT" })).toBeNull();
   });
 });
@@ -768,7 +775,7 @@ function makeDoStorage() {
 function alpacaContracts(symbol: string) {
   const strikes = symbol === "AAPL" ? [150, 155] : [300, 305];
   const rows: Array<Record<string, unknown>> = [];
-  for (const expiry of ["2026-11-20", "2026-12-18"]) {
+  for (const expiry of ["2026-12-18", "2027-02-01"]) {
     for (const strike of strikes) {
       for (const type of ["call", "put"]) {
         const tag = expiry.replaceAll("-", "").slice(2);
@@ -914,8 +921,8 @@ describe("the chains job across residencies (#4065)", () => {
     expect(dataset!.chains).toHaveLength(2);
     for (const row of dataset!.chains!) {
       expect(row.expiries).toEqual([
-        { year: 2026, month: 11, day: 20 },
         { year: 2026, month: 12, day: 18 },
+        { year: 2027, month: 2, day: 1 },
       ]);
       expect(row.chains).toHaveLength(2);
       expect(row.fetchErrors).toEqual([]);

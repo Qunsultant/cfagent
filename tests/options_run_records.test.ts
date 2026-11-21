@@ -64,6 +64,17 @@ const canonicalInput = {
   createdAt: "2026-10-28T12:00:00.000Z",
 };
 
+/**
+ * Expiry 30 days out, computed at run time so the fixture never goes stale
+ * (#5947): the screener drops chains whose expiry falls outside the default
+ * 0–90 day DTE window, so a fixed future date only postpones the next
+ * date-bomb — a run-time-relative expiry is always DTE 30.
+ */
+function expiry30DaysOut() {
+  const d = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+  return { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate() };
+}
+
 describe("storeOptionsCanonicalReport", () => {
   it("writes the run owner onto the canonical row", () => {
     const orm = { storeCanonicalReport: vi.fn(() => ({ reportId: "r1", created: true })) };
@@ -230,7 +241,7 @@ describe("scheduled options scanner canonical report", () => {
         symbol: "NVDA",
         underlyingPrice: 130,
         quoteTime: Date.now(),
-        selectedExpiry: { year: 2026, month: 11, day: 20 },
+        selectedExpiry: expiry30DaysOut(),
         pairs: [
           {
             call: {
