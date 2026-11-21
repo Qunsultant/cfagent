@@ -10,9 +10,9 @@
  * per-route extraction characterization tests.
  *
  * The agent surface the dispatch needs is declared as RouteRequestDeps:
- * the class passes itself (cast — the members are the class's private
- * methods, which only the class may name; at runtime they are the same
- * functions the inline body called). Nothing here reaches the class
+ * the class passes itself (cast — the members are the class's methods,
+ * mostly private, which only the class may name; at runtime they are the
+ * same functions the inline body called). Nothing here reaches the class
  * itself, so there is no import cycle back to orchestrator.ts.
  */
 import type { AgentContext } from "agents";
@@ -27,6 +27,12 @@ import type { PaymentsFlowScopedModes } from "../../config/paymentsFlowModes";
 import type { ScreenerRunOutcome } from "../../services/screenerFollowups";
 import type { ResearchExecutionPath } from "../../services/researchTaskLedger";
 import type { ReportsRouteContext } from "../routes/reports";
+import {
+  getPipelinePolicySettings,
+  pipelinePolicyDefaults,
+  setPipelinePolicySettings,
+} from "./pipelinePolicySettings";
+import type { ReportDispatchContext } from "./reportDispatch";
 import type { McpChatNlqRouteContext } from "../routes/mcpChatNlq";
 import type { AutopilotRouteContext } from "../routes/autopilot";
 import type { SchedulesRouteContext } from "../routes/schedules";
@@ -105,9 +111,11 @@ export interface RouteRequestDeps {
   getScreenerExecutionContext: ReportsRouteContext["getScreenerExecutionContext"];
   getReportDispatchHitl: ReportsRouteContext["getReportDispatchHitl"];
   setReportDispatchHitl: ReportsRouteContext["setReportDispatchHitl"];
-  getPipelinePolicySettings: ReportsRouteContext["getPipelinePolicySettings"];
-  setPipelinePolicySettings: ReportsRouteContext["setPipelinePolicySettings"];
-  getPipelinePolicyDefaults: ReportsRouteContext["getPipelinePolicyDefaults"];
+  // Issue #4782 S3 — the report-dispatch context the pipeline-policy routes
+  // read/write through (./pipelinePolicySettings.ts). The thin wrappers that
+  // used to expose these on the orchestrator moved here so orchestrator.ts
+  // stays within the #992 size budget.
+  reportDispatchContext(): ReportDispatchContext;
   getReportConfirmation: ReportsRouteContext["getReportConfirmation"];
   decideReportConfirmation: ReportsRouteContext["decideReportConfirmation"];
   createReportConfirmation: ReportsRouteContext["createReportConfirmation"];
@@ -210,9 +218,9 @@ export async function routeRequest(deps: RouteRequestDeps, request: Request): Pr
     getScreenerExecutionContext: () => deps.getScreenerExecutionContext(),
     getReportDispatchHitl: () => deps.getReportDispatchHitl(),
     setReportDispatchHitl: (enabled) => deps.setReportDispatchHitl(enabled),
-    getPipelinePolicySettings: () => deps.getPipelinePolicySettings(),
-    setPipelinePolicySettings: (settings) => deps.setPipelinePolicySettings(settings),
-    getPipelinePolicyDefaults: () => deps.getPipelinePolicyDefaults(),
+    getPipelinePolicySettings: () => getPipelinePolicySettings(deps.reportDispatchContext()),
+    setPipelinePolicySettings: (settings) => setPipelinePolicySettings(deps.reportDispatchContext(), settings),
+    getPipelinePolicyDefaults: () => pipelinePolicyDefaults(),
     getReportConfirmation: (id) => deps.getReportConfirmation(id),
     decideReportConfirmation: (id, status, decidedBy) =>
       deps.decideReportConfirmation(id, status, decidedBy),

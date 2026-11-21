@@ -110,12 +110,6 @@ import {
   staleAsyncJobSweepOutcome,
 } from "../services/sweepWatchdogSchedule";
 import { nlqSchedulingPort, nlqSocialBriefPort, nlqStockScreenPort, type NlqPortsContext } from "./orchestrator/nlqPorts";
-import { resolveChatAwaitPollMs } from "./orchestrator/chatAwaitBudget";
-import {
-  getPipelinePolicySettings,
-  pipelinePolicyDefaults,
-  setPipelinePolicySettings,
-} from "./orchestrator/pipelinePolicySettings";
 import { formatTraceparent, newTraceContext } from "../observability/observabilityPorts";
 import { observeDoRouteDispatch } from "../observability/scheduledJobOutcomes";
 import { createAlertingPort } from "../observability/otelAlerting";
@@ -699,10 +693,6 @@ export class OrchestratorAgent extends PortThink {
       // Issue #2369: env + this instance's SQL for the chat
       // screen's workflow start and mas_reports read-back.
       env: this.env,
-      // Issue #4782 S3 — wire the await-cadence override
-      // channel: the chat screen's await poll resolves from env
-      // here, so an operator's CHAT_AWAIT_POLL_MS takes effect.
-      workflowPollIntervalMs: resolveChatAwaitPollMs(this.env),
       ensureTables: () => this.ensureTables(),
       // Issue #2428 (Agent Mesh S17): the chat screen's workflow
       // command is stamped with the in-flight turn's traceparent
@@ -846,7 +836,7 @@ export class OrchestratorAgent extends PortThink {
     };
   }
 
-  private reportDispatchContext(): ReportDispatchContext {
+  reportDispatchContext(): ReportDispatchContext {
     return {
       env: this.env,
       ensureTables: () => this.ensureTables(),
@@ -2252,24 +2242,6 @@ export class OrchestratorAgent extends PortThink {
   // Issue #992: extracted to ./orchestrator/reportDispatch.ts (getReportDispatchHitl);
   private getReportDispatchHitl(): boolean {
     return getReportDispatchHitl(this.reportDispatchContext());
-  }
-
-  // Issue #4782 S3: extracted to ./orchestrator/pipelinePolicySettings.ts
-  // (getPipelinePolicySettings) — the stored `pipeline.*` values.
-  private getPipelinePolicySettings(): Record<string, string> {
-    return getPipelinePolicySettings(this.reportDispatchContext());
-  }
-
-  // Issue #4782 S3: extracted to ./orchestrator/pipelinePolicySettings.ts
-  // (setPipelinePolicySettings) — validates by name, writes atomically.
-  private setPipelinePolicySettings(settings: Record<string, unknown>): string | null {
-    return setPipelinePolicySettings(this.reportDispatchContext(), settings);
-  }
-
-  // Issue #4782 S3: the resolver's defaults as stored-setting
-  // strings (see ./orchestrator/pipelinePolicySettings.ts).
-  private getPipelinePolicyDefaults(): Record<string, string> {
-    return pipelinePolicyDefaults();
   }
 
   // Issue #992: extracted to ./orchestrator/reportDispatch.ts (setReportDispatchHitl);
