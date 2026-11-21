@@ -61,6 +61,9 @@ function copyOf(vocab: Vocabulary): Vocabulary {
       Object.entries(vocab.axes).map(([axis, entries]) => [axis, entries.map((e) => ({ ...e }))]),
     ) as Vocabulary["axes"],
     conflations: vocab.conflations.map((c) => ({ ...c })),
+    // #5494: the provider × dataset matrix travels with the copy, or the
+    // overridden registry would lose the served pairs.
+    providerDatasets: vocab.providerDatasets.map((p) => ({ ...p })),
   };
 }
 

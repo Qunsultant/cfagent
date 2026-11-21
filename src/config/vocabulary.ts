@@ -54,6 +54,12 @@ export interface VocabularyEntry {
   kind?: string;
   aliases?: string[];
   modes?: string[];
+  /**
+   * dataset entries only (#5494): the capability the dataset delivers. One
+   * dataset, one capability — the dataset axis is the single home for the
+   * mapping, so the provider × dataset matrix never restates it.
+   */
+  capability?: string;
 }
 
 export interface VocabularyPointer {
@@ -68,11 +74,50 @@ export interface Conflation {
   message: string;
 }
 
+/**
+ * One row of the provider × dataset matrix as DATA (#5494): the provider, the
+ * dataset it serves, and — where the feed pulls in one batch call — the batch
+ * flag. `capability` is optional here and, when present, is a consistency
+ * claim checked against the dataset axis (which owns the fact).
+ */
+export interface ProviderDatasetEntry {
+  provider: string;
+  dataset: string;
+  capability?: string;
+  batch?: boolean;
+}
+
+/** A validated matrix row: the pair the engine may serve, with its capability. */
+export interface ProviderDatasetPair {
+  provider: string;
+  dataset: string;
+  capability: string;
+  batch: boolean;
+}
+
+/**
+ * What one provider × dataset lookup answers (#5494): which capability the
+ * pair delivers and whether it is pulled in the provider's batch form.
+ *
+ * `declaredDataset` is the spelling the caller passed — the artifact/store key
+ * stays the DECLARED value (`technicals`, `options-chains`), never the
+ * canonical one, so canonicalising a lookup can never orphan a stored dataset.
+ */
+export interface ProviderDatasetResolution {
+  provider: string;
+  dataset: string;
+  declaredDataset: string;
+  capability: string;
+  batch: boolean;
+}
+
 export interface Vocabulary {
   version: number;
   defaults: Partial<Record<DefaultedAxis, string>>;
   axes: Record<Axis, VocabularyEntry[]>;
   conflations: Conflation[];
+  /** The served provider × dataset pairs (#5494) — one row per pair. */
+  providerDatasets: ProviderDatasetPair[];
 }
 
 /** Refusal codes. The message always names the axis and the value. */
@@ -137,6 +182,72 @@ export function validateVocabulary(candidate: Vocabulary): Vocabulary {
   // Cross-axis shares are legitimate (an exchange and a provider may share a
   // spelling); what is not allowed is a value claiming to be two values on
   // the SAME axis, which the per-axis check above rejects.
+  //
+  // The provider × dataset matrix (#5494) is data too: every row names a
+  // provider the provider axis holds and a dataset the dataset axis holds (id
+  // or alias), one row per pair. A row's capability comes from the dataset
+  // entry — the dataset axis owns that fact, so the matrix never restates it;
+  // a row that claims a different capability is refused rather than corrected.
+  const rawPairs = candidate.providerDatasets;
+  if (!Array.isArray(rawPairs) || rawPairs.length === 0) {
+    throw new Error(
+      "[vocabulary] providerDatasets is missing or empty — the provider × dataset matrix is a registry, never a gap",
+    );
+  }
+  const datasetCapability = new Map<string, string>();
+  for (const entry of axes.dataset) {
+    if (!entry.capability || typeof entry.capability !== "string") {
+      throw new Error(
+        `[vocabulary] dataset "${entry.id}" declares no capability — a dataset delivers exactly one`,
+      );
+    }
+    datasetCapability.set(canon(entry.id), entry.capability);
+  }
+  const pairs: ProviderDatasetPair[] = [];
+  const seenPairs = new Set<string>();
+  for (const pair of rawPairs) {
+    if (!pair || typeof pair.provider !== "string" || typeof pair.dataset !== "string") {
+      throw new Error(
+        "[vocabulary] a providerDatasets entry must name both a provider and a dataset",
+      );
+    }
+    const provider = findEntryIn(axes.provider, pair.provider);
+    if (!provider) {
+      throw new Error(
+        `[vocabulary] providerDatasets names provider "${pair.provider}" the provider axis does not hold`,
+      );
+    }
+    const dataset = findEntryIn(axes.dataset, pair.dataset);
+    if (!dataset) {
+      throw new Error(
+        `[vocabulary] providerDatasets names dataset "${pair.dataset}" the dataset axis does not hold`,
+      );
+    }
+    if (pair.batch !== undefined && typeof pair.batch !== "boolean") {
+      throw new Error(
+        `[vocabulary] providerDatasets ${provider.id}×${dataset.id} has a non-boolean batch flag`,
+      );
+    }
+    const capability = datasetCapability.get(canon(dataset.id)) as string;
+    if (pair.capability !== undefined && canon(pair.capability) !== canon(capability)) {
+      throw new Error(
+        `[vocabulary] providerDatasets ${provider.id}×${dataset.id} claims capability "${pair.capability}" but dataset "${dataset.id}" delivers "${capability}"`,
+      );
+    }
+    const key = `${canon(provider.id)}×${canon(dataset.id)}`;
+    if (seenPairs.has(key)) {
+      throw new Error(
+        `[vocabulary] providerDatasets declares ${provider.id}×${dataset.id} twice — one pair, one entry`,
+      );
+    }
+    seenPairs.add(key);
+    pairs.push({
+      provider: provider.id,
+      dataset: dataset.id,
+      capability,
+      batch: pair.batch === true,
+    });
+  }
   const defaults = candidate.defaults ?? {};
   for (const axis of DEFAULTED_AXES) {
     const value = defaults[axis];
@@ -152,7 +263,7 @@ export function validateVocabulary(candidate: Vocabulary): Vocabulary {
       `[vocabulary] conflation "${c.axis}=${c.value}" shadows a real value — a conflation names a value that is NOT on that axis`,
     );
   }
-  return { version: candidate.version ?? 1, defaults, axes, conflations: conflicts };
+  return { version: candidate.version ?? 1, defaults, axes, conflations: conflicts, providerDatasets: pairs };
 }
 
 let current: Vocabulary = validateVocabulary(SOURCE);
@@ -333,4 +444,71 @@ export function requireAxis(
     code: VOCABULARY_CODES.missingDefault,
     message: `No ${axis} declared and no externalized default exists (#5515). Declare ${axis}; nothing is invented.`,
   };
+}
+
+/**
+ * Issue #5494 — the ONE capability lookup: does `provider` serve `dataset`,
+ * and what does that pair deliver?
+ *
+ * The answer is the `providerDatasets` matrix in `config/vocabulary.json`,
+ * read here and nowhere else. Consumers (the feed path first, every later
+ * capability consumer after it) ask this function instead of switching on a
+ * provider id or duck-typing a method.
+ *
+ * The pair is resolved EXACTLY as declared: an unserved pair refuses with the
+ * coded refusal naming BOTH axes and listing what that provider does serve. It
+ * never resolves to another provider that happens to serve the dataset —
+ * "never broker-for-broker" is the rule (#5515), so a missing pair is a named
+ * gap, not a substitution.
+ */
+export function resolveProviderDataset(
+  provider: string,
+  dataset: string,
+): Resolved<ProviderDatasetResolution> {
+  // Defensive on purpose: a caller may hold an untyped job definition (a
+  // hand-built fixture, a migrated record), and an absent axis is a refused
+  // value — never a crash and never a guess.
+  const providerValue = typeof provider === "string" ? provider : "";
+  const datasetValue = typeof dataset === "string" ? dataset : "";
+  const resolvedProvider = resolveValue("provider", providerValue);
+  if (!resolvedProvider.ok) return resolvedProvider;
+  const resolvedDataset = resolveValue("dataset", datasetValue);
+  if (!resolvedDataset.ok) return resolvedDataset;
+  const pair = getVocabulary().providerDatasets.find(
+    (p) => p.provider === resolvedProvider.value && p.dataset === resolvedDataset.value,
+  );
+  if (!pair) {
+    const serves = datasetIdsForProvider(resolvedProvider.value);
+    return {
+      ok: false,
+      code: VOCABULARY_CODES.unsupportedPair,
+      message:
+        `Provider "${resolvedProvider.value}" does not serve dataset "${resolvedDataset.value}" (#5494). ` +
+        `${resolvedProvider.value} serves: ${serves.length > 0 ? serves.join(", ") : "(no dataset declared)"}. ` +
+        `No substitute provider is used — never broker-for-broker (#5515).`,
+    };
+  }
+  return {
+    ok: true,
+    value: {
+      provider: pair.provider,
+      dataset: pair.dataset,
+      declaredDataset: datasetValue.trim(),
+      capability: pair.capability,
+      batch: pair.batch,
+    },
+  };
+}
+
+/** Every served provider × dataset pair, in registry order (a copy — never mutate). */
+export function providerDatasetMatrix(): ProviderDatasetPair[] {
+  return getVocabulary().providerDatasets.map((p) => ({ ...p }));
+}
+
+/** The canonical datasets one provider serves (the refusal message's list). */
+export function datasetIdsForProvider(provider: string): string[] {
+  const wanted = canon(typeof provider === "string" ? provider : "");
+  return getVocabulary()
+    .providerDatasets.filter((p) => canon(p.provider) === wanted)
+    .map((p) => p.dataset);
 }

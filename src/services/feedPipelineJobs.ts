@@ -31,6 +31,7 @@ import type { Env } from "../types";
 import type { IndexListStore } from "../data/indexListPorts";
 import type { FeedDatasetStore } from "../data/feedDatasetPorts";
 import type { FeedProviderWiringDeps } from "./feedProviderWiring";
+import { resolveProviderDataset } from "../config/vocabulary";
 import {
   buildFeedJobRegistry,
   buildFeedStatus,
@@ -616,7 +617,18 @@ export function createFeedStepRegistry(deps: FeedStepDeps): JobStepRegistry {
     if (!deps.datasetStore) throw feedNotConfigured(def.id, "the feed-dataset store");
     if (!deps.universeStore) throw feedNotConfigured(def.id, "the index-list (universe) store");
     const provider = deps.providerFor(def);
-    if (!provider) throw feedNotConfigured(def.id, `a capture-wired provider for "${def.sourceId}"`);
+    if (!provider) {
+      // #5494 — an unserved provider × dataset pair refuses by name with the
+      // coded refusal and BOTH axes; only a host-side wiring gap (no acting
+      // login, no capture residency) is FEED_JOB_NOT_CONFIGURED. Neither branch
+      // substitutes another provider for the requested one.
+      const pair = resolveProviderDataset(def.sourceId, def.dataset);
+      if (!pair.ok) throw new Error(`${pair.code}: ${pair.message}`);
+      throw feedNotConfigured(
+        def.id,
+        `a capture-wired provider for "${def.sourceId}" serving dataset "${def.dataset}"`,
+      );
+    }
 
     // #5954 — explicit symbols (the premium path): the unit's
     // own symbols, read the bespoke way (explicitSymbolsFor
