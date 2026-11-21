@@ -259,8 +259,8 @@ export function screenerProvenanceLines(result: {
         ? {
             quotesLine: `Quotes: ${brokerLabel} live snapshots${modeLabel} — Yahoo gap-fill (delayed) for missing quotes`,
             methodologyQuotes:
-              `Quotes: ${brokerLabel} live snapshots${modeLabel} (primary) — Yahoo Finance (delayed) ` +
-              `filled gaps the primary missed; filled rows carry delayed quotes, not ${brokerLabel} live.`,
+              `Quotes: ${brokerLabel} live snapshots${modeLabel} (primary) — Yahoo Finance gap-fill ` +
+              `(delayed) filled gaps the primary missed; filled rows carry delayed quotes, not ${brokerLabel} live.`,
           }
         : yahoo
           ? {
