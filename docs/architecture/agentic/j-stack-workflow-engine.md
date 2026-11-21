@@ -108,12 +108,14 @@ matched notion, and the kind fabricates none.
 One registry does not mean one step signature. Converging the step
 contracts — so every family runs on the generic steps — is the #4437
 decomposition work, not something the registry gives for free. The
-stock screener still runs bespoke steps (`screener.feed`,
-`screener.gather`, `screener.analysis`, `screener.store`,
-`screener.serve`, `screener.deliver` in the catalog spec,
-`src/config/jobDefinitionCatalog.ts:110-115`); the options-chain family
-likewise uses bespoke steps. No family has yet been redefined onto the
-generic steps.
+stock screener is redefined onto the generic steps (#5884,
+#4437 slice 6b3, the flip): the `screener` spec (v2,
+`src/config/jobDefinitionCatalog.ts:147`) is five generic nodes
+— `feed.pull`, `enrich.screener`, `analyze.screener`,
+`generate.apply`, and `screener.deliver` (the deliver node stays
+bespoke until slice 6c, #5885, flips it onto `deliver.apply`).
+The options-chain family likewise uses bespoke steps; no other
+family has yet been redefined onto the generic steps.
 
 The screener's feed stage nevertheless reads through the generic feed
 machinery for its quotes (#5823): the step handler binds the quote /
@@ -142,16 +144,17 @@ fields the persisted enriched rows do not carry. Standout selection
 is summary output, and parity with the bespoke analyze is pinned by
 `tests/screener_analyze_parity_5824.test.ts` (same quotes → same
 screen signals, momentum scores, factor grades, standouts). The
-spec still points the screener's analyze node at `screener.analysis`
-until slice 6 (#5827) re-points it; the goal branch and the
-portfolio modifier are separate slices (#5873, #5874).
+spec pointed its analyze node at `screener.analysis` until slice
+6b3 (#5884) re-pointed the whole market spec onto the generic
+chain; the goal branch and the portfolio modifier are separate
+slices (#5873, #5874).
 
 <!-- 5873: goal branch out of the screener analyze node -->
 The goal leg rides its own definition (#5873, #4437 slice 3b): a
 goal command builds the `goalScreen` spec (same six kinds, the
 analyze node the goal dispatch step `screener.goal`), while a
-market command builds the unchanged `screener` spec (analyze node
-`screener.analysis`). The goal step is a thin handler delegating
+market command builds the re-pointed `screener` spec (v2, five
+generic nodes). The goal step is a thin handler delegating
 to a new agent stage method, `screenGoalStage`, which carries the
 goal-branch body moved verbatim — the goal runner (the engine
 method, with the test injection point) plus the goal-shaped
@@ -159,9 +162,9 @@ output — and `screenAnalysisStage` is market-only. The goal leg
 is a dispatch (quota charge, trade client, goal universe deps,
 options leg, production goal screen), not a computation
 expressible as a generic analyze rule set, so it cannot ride
-`analyze.screener`; the flip (slice 6b3) re-points only the
-market spec's analyze node, and the goal definition is
-untouched. Parity is pinned by
+`analyze.screener`; the flip (slice 6b3, #5884) re-pointed only
+the market spec, and the goal definition is untouched. Parity
+is pinned by
 `tests/screener_goal_definition_5873.test.ts` (goal command →
 goal definition, goal run through the goal step with the market
 analyze never invoked; market command → market definition,
@@ -195,6 +198,43 @@ retires it. Parity is pinned by
 hand-off with no broker in state; gather records the snapshots and
 skips goal runs; the fetch lives in gather, never in analyze).
 <!-- /5874: portfolio modifier as an analyze input -->
+
+<!-- 5884: the flip — screener spec onto the generic chain -->
+The flip re-points the market spec onto the generic five-stage
+chain (#5884, #4437 slice 6b3): the `screener` spec goes v1 → v2,
+five nodes — `feed.pull`, `enrich.screener`, `analyze.screener`
+(params `ruleSets: ["screen", "factors"]`, `inputMode: "handOff"`),
+`generate.apply` (params `reports: ["screener-report"]`), and
+`screener.deliver` (bespoke until 6c). The family job ids are
+computed per command, never pinned in the spec: provider =
+the command's provider, falling back to the tenant default
+data provider (a static spec literal would pin one provider
+for every run — a broker substitution, forbidden by #5517), feed job `<provider>-nasdaq100-quotes` validated against
+`FEED_PIPELINE_CATALOG` (unknown provider refused by name,
+`SCREENER_FEED_JOB_UNKNOWN`), then derived `<feed>-enrich` →
+`-analyze` → `-generate`, injected into the per-node params by
+`screenerFamilyJobIds` (`src/services/screenerPipelineJobs.ts`).
+The run's single universe rides the feed node only when every
+shard naming one agrees (`screenerFeedNodeUniverse`); per-shard
+universes govern per unit (6b1), explicit-symbols shards name
+none (6b0). Goal commands build the untouched `goalScreen` spec
+— a goal param on a market definition is refused, never
+dropped. The deliver leg degrades until 6c (the engine proof
+dispatches with `deliver: false`); the collation degrades until
+6e (#5922) teaches it the generic shape. The flip also fixed
+`analyze.screener`'s hand-off for sharded runs: the engine hands
+a sharded unit the per-shard map, and the step unwraps its own
+shard's entry (the bespoke `priorFor` idiom) before resolving
+the hand-off — without it a sharded run failed
+`ANALYZE_HANDOFF_MALFORMED`. The 2863 criteria stamp's home is
+the generated screener-report document: `generate.apply` passes
+`params.filters` as `criteria` when present, never invented.
+Pinned by `tests/screener_generic_definition_5884.test.ts`
+(five nodes, per-provider job ids, shards on every node, goal
+param refused) and the moved pins in
+`tests/screener_substrate_4190.test.ts` /
+`tests/stage_visibility_4365.test.ts`.
+<!-- /5884: the flip — screener spec onto the generic chain -->
 
 The screener's deliver stage likewise runs through the generic deliver
 machinery (#5826): `deliver.apply` gains a screener application
