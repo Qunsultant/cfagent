@@ -33,6 +33,11 @@ export const RUN_LEDGER_KIND_IDS = [
   "workflow",
   "pipeline",
   "ops",
+  // Issue #6003 — the agent families: Autopilot rows arrive stamped
+  // `ledgerKind: "autopilot"` by the outcome fold, Copilot cycle rows
+  // classify by their `stock-copilot-` operation (see the rule table).
+  "autopilot",
+  "copilot",
   "other",
 ] as const;
 
@@ -54,6 +59,8 @@ export const RUN_LEDGER_FILTER_LABELS: Record<RunLedgerFilter, string> = {
   workflow: "Workflow",
   pipeline: "Pipeline",
   ops: "Operations",
+  autopilot: "Autopilot",
+  copilot: "Copilot",
   other: "Other",
 };
 
@@ -63,7 +70,8 @@ export const RUN_LEDGER_DEFAULT_FILTER_ENV_VAR = "RUN_LEDGER_DEFAULT_FILTER";
 /**
  * The built-in filter set: every kind the rule table can produce, in the
  * order the owner named them (stock, strategy, options, goal, reports,
- * workflow) followed by the two operational kinds and the honest fallback.
+ * workflow) followed by the two operational kinds, the two agent families
+ * (Autopilot, Copilot — issue #6003), and the honest fallback last.
  */
 export const DEFAULT_RUN_LEDGER_FILTERS: readonly RunLedgerFilter[] = [
   RUN_LEDGER_ALL_FILTER,
@@ -75,6 +83,8 @@ export const DEFAULT_RUN_LEDGER_FILTERS: readonly RunLedgerFilter[] = [
   "workflow",
   "pipeline",
   "ops",
+  "autopilot",
+  "copilot",
   "other",
 ];
 
@@ -152,6 +162,18 @@ export interface RunLedgerKindRule {
  * carries no family namespace of its own.
  */
 export const RUN_LEDGER_KIND_RULES: readonly RunLedgerKindRule[] = [
+  // Issue #6003 — the Stock Copilot's own cycle rows: the loop's Think
+  // task records them in the ledger with operation (and jobId)
+  // `stock-copilot-paper-cycle` (#3788). First because it is the most
+  // specific namespace here; the prefix is disjoint from every other
+  // rule, so no existing classification changes. Rows the copilot
+  // *dispatched* (triggeredBy "copilot") stay under their family kind —
+  // kind answers what ran, the Triggered by column says who dispatched it.
+  // No `autopilot.` backstop rule: operation `autopilot.evaluate` is a
+  // goal operation (monthly evaluation) that today classifies as "other",
+  // and a prefix rule would move it. Autopilot rows arrive stamped
+  // `ledgerKind: "autopilot"` by the outcome fold instead.
+  { kind: "copilot", operationPrefixes: ["stock-copilot-"] },
   { kind: "options", operationPrefixes: ["trading.screen_options", "options."] },
   { kind: "stock", operationPrefixes: ["trading.screen_stocks", "screen.", "screener."] },
   { kind: "strategy", operationPrefixes: ["trading.strategy", "strategy."] },
