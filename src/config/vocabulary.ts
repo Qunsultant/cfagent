@@ -3,10 +3,10 @@
  *
  * The engine had no single vocabulary for what a job can select: provider,
  * broker, universe, sector, exchange, asset and dataset values lived in
- * separate closed enums and free strings, with conflations — `nasdaq` was
- * both a data-provider id and the universe-list source, `TECH` was a
- * screener "universe" but is a sector, and a job could not declare an
- * arbitrary subset of anything.
+ * separate closed enums and free strings, with conflations — one id was both
+ * a data provider and the universe-list source, `TECH` was a screener
+ * "universe" but is a sector, and a job could not declare an arbitrary
+ * subset of anything.
  *
  * `config/vocabulary.json` is now the one list per axis, and this module is
  * its one reader. Follows the #5880 precedent (`src/config/jobCatalogue.ts`):
@@ -22,8 +22,9 @@
  *     universe per sector, so a sector cannot exist in one list and be
  *     missing in the other.
  *   - Conflations are declared data. A value that used to be accepted on the
- *     wrong axis (`TECH` as a universe, `nasdaq` as a universe) is refused by
- *     name with a pointer to the axis it belongs to — never silently resolved.
+ *     wrong axis (`TECH` as a universe, the listings provider id as a
+ *     universe) is refused by name with a pointer to the axis it belongs
+ *     to — never silently resolved.
  *
  * Environment-free: JSON, types and pure functions only, so a client picker
  * and a Worker handler read the same registry.
@@ -133,9 +134,9 @@ export function validateVocabulary(candidate: Vocabulary): Vocabulary {
       }
     }
   }
-  // Cross-axis shares are legitimate (the exchange NASDAQ and the provider
-  // nasdaq are different axes); what is not allowed is a value that claims to
-  // be two values on the SAME axis, which the per-axis check above rejects.
+  // Cross-axis shares are legitimate (an exchange and a provider may share a
+  // spelling); what is not allowed is a value claiming to be two values on
+  // the SAME axis, which the per-axis check above rejects.
   const defaults = candidate.defaults ?? {};
   for (const axis of DEFAULTED_AXES) {
     const value = defaults[axis];
