@@ -12,10 +12,10 @@
  * store -> serve -> deliver, each 1:1 with a catalog stage
  * (workflowCatalog.ts STOCK_SCREENER). processing.shards =
  * command shard ids; units = shards on every node; artifacts
- * hand off per (stage, shard). The goal leg rides the same six
- * nodes (goalScreen job param; handlers branch like
- * runShardFlow does — a goal run never executes as a market
- * screen, #1996).
+ * hand off per (stage, shard). The goal leg rides its own
+ * definition (#5873): the "goalScreen" spec, same six kinds,
+ * the analyze node the goal dispatch (screener.goal) — a goal
+ * run never executes as a market screen, #1996).
  *
  * Step handlers resolve the live deps per invocation (agent
  * stub, quote/history deps, store/deliver doors) and delegate
@@ -78,6 +78,8 @@ import { jobDefinitionSpec } from "../config/jobDefinitionCatalog";
 export const SCREENER_FEED_STEP = "screener.feed";
 export const SCREENER_GATHER_STEP = "screener.gather";
 export const SCREENER_ANALYSIS_STEP = "screener.analysis";
+/** The goal dispatch step: the analyze node of the "goalScreen" definition (#5873). */
+export const SCREENER_GOAL_STEP = "screener.goal";
 export const SCREENER_STORE_STEP = "screener.store";
 export const SCREENER_SERVE_STEP = "screener.serve";
 export const SCREENER_DELIVER_STEP = "screener.deliver";
@@ -172,7 +174,8 @@ export interface ScreenerStepDeps {
     },
   ) => Promise<void>;
   /**
-   * The goal runner (defaults to the agent's runGoalScreen).
+   * The goal runner for the goal step (defaults to the agent's
+   * engine method, runGoalScreenOnEngine, inside screenGoalStage).
    * Tests inject a fake; production never overrides it.
    */
   goalRunner?: ScreenerGoalRunner;
@@ -428,11 +431,30 @@ export function registerScreenerSteps(registry: JobStepRegistry, deps: ScreenerS
     const userLogin = requireUserLogin(params);
     const agent = deps.agentFor(userLogin);
     const req = screenRequestFromParams(params, shardSymbolsFor(params, ctx.shardKey), ctx.shardKey);
-    const goalScreen = goalScreenParam(params);
     const output = await agent.screenAnalysisStage(ctx.runId, {
       request: req,
       gatherOutput: prior,
-      ...(goalScreen ? { goalScreen } : {}),
+    });
+    return { output };
+  });
+
+  registry.register(SCREENER_GOAL_STEP, async (ctx: JobStepContext) => {
+    const prior = priorFor<ScreenerGatherStageOutput>(ctx.input, ctx.shardKey);
+    if (isDupOutput(prior)) return { output: prior };
+    const params = ctx.params;
+    const userLogin = requireUserLogin(params);
+    const agent = deps.agentFor(userLogin);
+    const req = screenRequestFromParams(params, shardSymbolsFor(params, ctx.shardKey), ctx.shardKey);
+    const goalScreen = goalScreenParam(params);
+    if (!goalScreen) {
+      throw new Error(
+        "SCREENER_GOAL_STEP_NO_GOAL: the goal step ran without a goalScreen param — refusing to run a goal dispatch with no goal command.",
+      );
+    }
+    const output = await agent.screenGoalStage(ctx.runId, {
+      request: req,
+      gatherOutput: prior,
+      goalScreen,
       ...(deps.goalRunner ? { goalRunner: deps.goalRunner } : {}),
     });
     return { output };
@@ -510,8 +532,9 @@ export function createScreenerStepRegistry(deps: ScreenerStepDeps): JobStepRegis
  * the single child of the stage before it (the chain idiom: a
  * stage's input is its parent stage's output). jobId =
  * command.jobId; processing.shards = the command's shard ids on
- * every node (units = shards on every node); the goal leg rides
- * the same six nodes with the goalScreen param.
+ * every node (units = shards on every node); a goal command
+ * builds the "goalScreen" spec — the goal leg's own definition
+ * (#5873), same six kinds, the analyze node the goal dispatch.
  */
 export function buildScreenerJobDefinition(command: WorkflowJobCommand): unknown {
   if (!command.jobId || !command.jobId.trim()) {
@@ -553,8 +576,10 @@ export function buildScreenerJobDefinition(command: WorkflowJobCommand): unknown
   };
   // Issue #4365 — the stage list comes from the externalized definition
   // spec, not from a literal in this builder. The typed constants below
-  // are its projection (a parity pin holds them equal).
-  const spec = jobDefinitionSpec("screener");
+  // are its projection (a parity pin holds them equal). Issue #5873 —
+  // a goal command builds the "goalScreen" spec (analyze node
+  // screener.goal); a market command builds the "screener" spec.
+  const spec = jobDefinitionSpec(command.goalScreen ? "goalScreen" : "screener");
   let node: JobNodeConfig | undefined;
   for (let i = spec.stages.length - 1; i >= 0; i--) {
     const stageSpec = spec.stages[i];
@@ -586,7 +611,7 @@ export function buildScreenerJobDefinition(command: WorkflowJobCommand): unknown
   };
   return {
     jobId: command.jobId,
-    name: `Screener — ${command.jobId}`,
+    name: `${command.goalScreen ? "Goal screen" : "Screener"} — ${command.jobId}`,
     root,
   };
 }

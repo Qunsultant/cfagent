@@ -146,6 +146,28 @@ spec still points the screener's analyze node at `screener.analysis`
 until slice 6 (#5827) re-points it; the goal branch and the
 portfolio modifier are separate slices (#5873, #5874).
 
+<!-- 5873: goal branch out of the screener analyze node -->
+The goal leg rides its own definition (#5873, #4437 slice 3b): a
+goal command builds the `goalScreen` spec (same six kinds, the
+analyze node the goal dispatch step `screener.goal`), while a
+market command builds the unchanged `screener` spec (analyze node
+`screener.analysis`). The goal step is a thin handler delegating
+to a new agent stage method, `screenGoalStage`, which carries the
+goal-branch body moved verbatim — the goal runner (the engine
+method, with the test injection point) plus the goal-shaped
+output — and `screenAnalysisStage` is market-only. The goal leg
+is a dispatch (quota charge, trade client, goal universe deps,
+options leg, production goal screen), not a computation
+expressible as a generic analyze rule set, so it cannot ride
+`analyze.screener`; the flip (slice 6b3) re-points only the
+market spec's analyze node, and the goal definition is
+untouched. Parity is pinned by
+`tests/screener_goal_definition_5873.test.ts` (goal command →
+goal definition, goal run through the goal step with the market
+analyze never invoked; market command → market definition,
+market run unchanged).
+<!-- /5873: goal branch out of the screener analyze node -->
+
 The screener's deliver stage likewise runs through the generic deliver
 machinery (#5826): `deliver.apply` gains a screener application
 (params `screener: true`) that delivers a screen outcome through the

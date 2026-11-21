@@ -383,7 +383,13 @@ export interface ScreenerGoalRunner {
 export interface ScreenerAnalysisStageInput {
   request: ScreenerRunRequest;
   gatherOutput: ScreenerGatherStageOutput;
-  goalScreen?: GoalScreenCommand;
+}
+
+/** Input for the GOAL stage (catalog: analysis — the goal dispatch). The goal leg's own stage (#5873): the goal runner is the engine method (runGoalScreenOnEngine) unless a test injects a fake. */
+export interface ScreenerGoalStageInput {
+  request: ScreenerRunRequest;
+  gatherOutput: ScreenerGatherStageOutput;
+  goalScreen: GoalScreenCommand;
   goalRunner?: ScreenerGoalRunner;
 }
 
@@ -470,6 +476,7 @@ export interface ScreenerAgentPort {
   screenFeedStage(runId: string, input: ScreenerFeedStageInput): Promise<ScreenerFeedStageOutput>;
   screenGatherStage(runId: string, input: ScreenerGatherStageInput): Promise<ScreenerGatherStageOutput>;
   screenAnalysisStage(runId: string, input: ScreenerAnalysisStageInput): Promise<ScreenerAnalysisStageOutput>;
+  screenGoalStage(runId: string, input: ScreenerGoalStageInput): Promise<ScreenerAnalysisStageOutput>;
   screenStoreStage(runId: string, input: ScreenerStoreStageInput): Promise<ScreenerStoreStageOutput>;
   screenServeStage(runId: string, input: ScreenerServeStageInput): Promise<ScreenerServeStageOutput>;
   screenDeliverStage(runId: string, input: ScreenerDeliverStageInput): Promise<ScreenerDeliverStageOutput>;
@@ -2601,11 +2608,74 @@ export class ScreenerAgent extends PortThink {
   }
 
   /**
+   * GOAL stage (catalog: analysis — the goal dispatch, #5873): the
+   * goal leg's own stage on the "goalScreen" definition. Runs the
+   * goal runner instead of the market screen — never a market
+   * screen presented as a goal result (#1996).
+   */
+  async screenGoalStage(runId: string, input: ScreenerGoalStageInput): Promise<ScreenerAnalysisStageOutput> {
+    const req = input.request;
+    const gatherOutput = input.gatherOutput;
+    const state = await this.ensureScreenerEngineState(runId, req, gatherOutput.timestamp, {
+      platformRunId: gatherOutput.platformRunId,
+      taskId: gatherOutput.taskId,
+      appliedLearnings: gatherOutput.appliedLearnings,
+    });
+    state.acquired = gatherOutput.acquired;
+    state.technicalsBySymbol = new Map(Object.entries(gatherOutput.technicalsBySymbol));
+    state.persistedSentiment = gatherOutput.persistedSentiment
+      ? {
+          sentimentBySymbol: new Map(gatherOutput.persistedSentiment.entries),
+          label: gatherOutput.persistedSentiment.label,
+          asOf: gatherOutput.persistedSentiment.asOf,
+          universeIndex: gatherOutput.persistedSentiment.universeIndex,
+          universeLabel: gatherOutput.persistedSentiment.universeLabel,
+          ageSeconds: gatherOutput.persistedSentiment.ageSeconds,
+          stale: gatherOutput.persistedSentiment.stale,
+        }
+      : undefined;
+
+    // Issue #4279 ([One engine] #3550 S4): the goal runner is the
+    // engine method — both legs run on the engine (stock leg via
+    // the S3 seam, options leg via the one options pipeline). The
+    // direct runGoalScreen is no longer the default on any live
+    // path; the injection point stays so tests can substitute a
+    // fake runner.
+    const goalRunner = input.goalRunner ?? ((goalReq) => this.runGoalScreenOnEngine(goalReq));
+    const out = await goalRunner({
+      scenario: input.goalScreen.scenario,
+      trigger: req.trigger,
+      idempotencyKey: runId,
+      userLogin: state.userLogin,
+      ...(req.environment ? { environment: req.environment } : {}),
+      ...(input.goalScreen.assetClasses ? { assetClasses: input.goalScreen.assetClasses } : {}),
+      ...(gatherOutput.goalSymbols?.length ? { symbols: gatherOutput.goalSymbols } : {}),
+      ...(input.goalScreen.provider ? { provider: input.goalScreen.provider } : {}),
+      ...(input.goalScreen.yahooDataMode ? { yahooDataMode: input.goalScreen.yahooDataMode } : {}),
+      ...(input.goalScreen.baseStockFilter ? { baseStockFilter: input.goalScreen.baseStockFilter } : {}),
+      ...(input.goalScreen.baseOptionsFilter ? { baseOptionsFilter: input.goalScreen.baseOptionsFilter } : {}),
+    });
+    return {
+      ...gatherOutput,
+      screenResult: {
+        totalScanned: out.result?.counts?.stocksScanned ?? 0,
+        matchedCount: out.result?.counts?.stocksMatched ?? 0,
+        filterSummary: undefined,
+      },
+      allStocks: [],
+      opportunities: [],
+      sentimentCoverage: { symbols: 0, withSentiment: 0 },
+      goalTask: out.task,
+      goalExecuted: out.executed,
+      ...(out.result ? { goalResult: out.result } : {}),
+    };
+  }
+
+  /**
    * ANALYSIS stage (catalog: analysis — screen): screenUniverse
    * + factor grades + the enrichment joins + selectStandouts +
-   * the portfolio-context modifier. A goal command runs the goal
-   * runner here instead of the market screen — never a market
-   * screen presented as a goal result (#1996).
+   * the portfolio-context modifier. Market-only: a goal command
+   * runs the goal stage instead (#5873).
    */
   async screenAnalysisStage(runId: string, input: ScreenerAnalysisStageInput): Promise<ScreenerAnalysisStageOutput> {
     const req = input.request;
@@ -2628,43 +2698,6 @@ export class ScreenerAgent extends PortThink {
           stale: gatherOutput.persistedSentiment.stale,
         }
       : undefined;
-
-    if (input.goalScreen) {
-      // Issue #4279 ([One engine] #3550 S4): the goal runner is the
-      // engine method — both legs run on the engine (stock leg via
-      // the S3 seam, options leg via the one options pipeline). The
-      // direct runGoalScreen is no longer the default on any live
-      // path; the injection point stays so tests can substitute a
-      // fake runner.
-      const goalRunner = input.goalRunner ?? ((goalReq) => this.runGoalScreenOnEngine(goalReq));
-      const out = await goalRunner({
-        scenario: input.goalScreen.scenario,
-        trigger: req.trigger,
-        idempotencyKey: runId,
-        userLogin: state.userLogin,
-        ...(req.environment ? { environment: req.environment } : {}),
-        ...(input.goalScreen.assetClasses ? { assetClasses: input.goalScreen.assetClasses } : {}),
-        ...(gatherOutput.goalSymbols?.length ? { symbols: gatherOutput.goalSymbols } : {}),
-        ...(input.goalScreen.provider ? { provider: input.goalScreen.provider } : {}),
-        ...(input.goalScreen.yahooDataMode ? { yahooDataMode: input.goalScreen.yahooDataMode } : {}),
-        ...(input.goalScreen.baseStockFilter ? { baseStockFilter: input.goalScreen.baseStockFilter } : {}),
-        ...(input.goalScreen.baseOptionsFilter ? { baseOptionsFilter: input.goalScreen.baseOptionsFilter } : {}),
-      });
-      return {
-        ...gatherOutput,
-        screenResult: {
-          totalScanned: out.result?.counts?.stocksScanned ?? 0,
-          matchedCount: out.result?.counts?.stocksMatched ?? 0,
-          filterSummary: undefined,
-        },
-        allStocks: [],
-        opportunities: [],
-        sentimentCoverage: { symbols: 0, withSentiment: 0 },
-        goalTask: out.task,
-        goalExecuted: out.executed,
-        ...(out.result ? { goalResult: out.result } : {}),
-      };
-    }
 
     const screener = new DynamicMarketScreener();
     const acquired = gatherOutput.acquired;
