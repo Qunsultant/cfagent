@@ -1,5 +1,5 @@
 /**
- * Issue #6048 — the DataHub feeds view.
+ * Issue issue 6048 — the DataHub feeds view.
  *
  * The stored-index feed family on one page: every registered feed job that
  * declares `family: "index100"` (the four quotes jobs, fundamentals,
@@ -15,7 +15,7 @@
  *
  * Output is the dataset status the same read carries (artifact, asOf, rows,
  * freshness, history). A richer preview/download panel is a later slice of
- * #6048; this page never fetches from a provider.
+ * issue 6048; this page never fetches from a provider.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Badge, Button, Flex, Notice, Stack, Table, type TableColumn } from "./components/ui";
@@ -255,7 +255,7 @@ export function FeedsPanel() {
         <Notice tone="warning" density="compact" title="Feeds list unavailable">
           {loadError
             ? `The read failed: ${loadError}`
-            : "The provider read returned no stored-index feed jobs. The endpoint is GET /api/data-providers (feedJobs), which falls back to the feed catalog when the pipeline host is unbound (#6046)."}
+            : "The provider read returned no stored-index feed jobs. The endpoint is GET /api/data-providers (feedJobs), which falls back to the feed catalog when the pipeline host is unbound (issue 6046)."}
         </Notice>
         <Flex gap="2">
           <Button size="sm" variant="secondary" onClick={() => void load()}>
@@ -295,8 +295,8 @@ export function FeedsPanel() {
       />
       <Notice tone="neutral" density="compact" title="Output and replay">
         The output column reads the persisted feed-dataset status this page already has. A raw-row
-        preview, a download, replay and the consumer map are the remaining slices of #6048; the job
-        graph they read is #6049.
+        preview, a download, replay and the consumer map are the remaining slices of issue 6048; the job
+        graph they read is issue 6049.
       </Notice>
     </Stack>
   );
