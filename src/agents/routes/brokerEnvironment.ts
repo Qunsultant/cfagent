@@ -88,7 +88,7 @@ export function resolveBrokerEnvironmentFromSettings(
  * brokerConnect (which credential side is verified and stored). Read routes keep
  * resolveBrokerEnvironmentFromSettings so the data plane does not move.
  */
-export function resolveTradeEnvironmentFromSettings(
+export function resolveSharedTradingEnvironment(
   readSettingRaw: ((key: string) => string | null) | undefined,
   workerEnv: Partial<Env>,
 ): BrokerEnvironment {
@@ -100,6 +100,9 @@ export function resolveTradeEnvironmentFromSettings(
   void workerEnv;
   return "TEST";
 }
+
+/** Compatibility export for existing broker-order callers. */
+export const resolveTradeEnvironmentFromSettings = resolveSharedTradingEnvironment;
 
 /**
  * Settings access the switch handler needs. The writer is optional
