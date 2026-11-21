@@ -236,6 +236,10 @@ export async function generatePdfAssetOutcome(
 ): Promise<AssetGenerationOutcome> {
   const ns = (env as any).REPORT_ASSET_AGENT;
   if (!ns) {
+    structuredLog.error("reportAssetAgent.generate_pdf_asset_skipped_no_binding", {
+      message: `[ReportAssetAgent] generatePdfAsset(${type}) skipped: REPORT_ASSET_AGENT binding is not configured.`,
+      type,
+    });
     return {
       status: "failed",
       error: "REPORT_ASSET_BINDING_MISSING: REPORT_ASSET_AGENT is not configured.",
