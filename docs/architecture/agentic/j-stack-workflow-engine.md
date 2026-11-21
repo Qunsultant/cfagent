@@ -163,6 +163,50 @@ moves its deliver node onto this step and wires the sink in the
 residencies. Parity is pinned by
 `tests/screener_deliver_generic_5826.test.ts`.
 
+<!-- 5883: screener enrich hand-off -->
+The screener's enrich application likewise runs as a generic step
+(#5883, #4437 slice 6a): `enrich.screener`
+(`src/services/enrichPipelineJobs.ts`) sits beside `enrich.apply`
+(the `analyze.ooda` / `analyze.screener` precedent — a separate
+step for a different input/output contract) and runs the enrich job
+identically, but returns the gather-shaped hand-off the
+`analyze.screener` hand-off mode consumes
+(`resolveScreenerHandOff`: an object with `acquired.quotes` plus
+`platformRunId` / `taskId` / `timestamp` lineage) instead of the
+enrich summary alone. The hand-off carries the input feed
+artifact's quotes verbatim — the same quotes the bespoke gather's
+`acquired.quotes` carries, since the gather stage spreads its feed
+output — shard-filtered under sharding to exactly the partition
+the enrich job enriched, with the enrich summary riding along so
+the recorded output still carries the run's outcome exactly as
+`enrich.apply` records it. The alternative — persisting the quote
+fields as enrich features — was rejected: `rsi` is a history
+element the default enrich job does not request (it needs the
+history element plus the technicals join, not the quote), it
+produces no hand-off at all (6b would have to flip analyze to
+persisted mode, against the 3a design), and it changes persisted
+rows for every consumer of the enrich job. Parity is pinned by
+`tests/screener_enrich_handoff_5883.test.ts` (same quotes → same
+`acquired.quotes` hand-off as `screener.gather`, and the hand-off
+drives `analyze.screener` to the same standouts).
+
+Two decisions ride with this slice. The feed node's freshness
+decision: the re-pointed chain fetches once per run (`feed.pull`)
+and everything downstream reads the persisted copy, so the
+bespoke double-fetch is gone by construction — the remaining loss
+is only dedup across separate runs minutes apart, and a
+feed-node freshness check is a feed-family change (the `feed.pull`
+contract, a TTL, reused-run semantics), a separate logical change
+set filed as its own follow-up; the loss is accepted here, bounded
+by one batch fetch of ~100 symbols on an hourly cadence. The feed
+node itself flips to `feed.pull` in 6b, not here: flipping the
+feed node alone breaks the bespoke gather (`feed.pull` outputs a
+feed-job summary, not a `ScreenerFeedStageOutput`, and the gather
+step passes its feed output straight to `screenGatherStage`), so
+the flip can only land with the enrich flip in the 6b spec
+re-point.
+<!-- /5883: screener enrich hand-off -->
+
 
 ### 1.3 The one-engine doctrine
 

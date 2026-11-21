@@ -28,7 +28,10 @@
  * (createPipelineStepRegistry) — no second engine entry.
  */
 import type { DataProviderId, IndexId } from "../trading";
-import type { FeedDatasetStore } from "../data/feedDatasetPorts";
+import type {
+  FeedDatasetArtifact,
+  FeedDatasetStore,
+} from "../data/feedDatasetPorts";
 import type { EnrichedDatasetStore } from "../data/enrichedDatasetPorts";
 import {
   buildEnrichJobRegistry,
@@ -39,6 +42,7 @@ import {
   type EnrichJobDefinition,
   type EnrichJobRegistry,
   type EnrichJoinSource,
+  type EnrichRunResult,
   type EnrichStatusView,
 } from "./enrichJobs";
 import {
@@ -86,6 +90,16 @@ import { JobStepRegistry, type JobStepContext } from "./jobPipelineSteps";
 
 /** The step name an enrich job's configuration references. */
 export const ENRICH_APPLY_STEP = "enrich.apply";
+
+/**
+ * Issue #5883 (#4437 slice 6a) — the screener's enrich
+ * application beside `enrich.apply` (the `analyze.ooda` /
+ * `analyze.screener` precedent): the same enrich job, but the
+ * step returns the gather-shaped hand-off the
+ * `analyze.screener` hand-off mode consumes, instead of the
+ * enrich summary alone.
+ */
+export const ENRICH_SCREENER_STEP = "enrich.screener";
 
 /** One catalog entry: how the surfaces name and find an enrich job. */
 export interface EnrichPipelineCatalogEntry {
@@ -311,6 +325,143 @@ function joinSourceParams(value: unknown): EnrichJoinSource[] | undefined {
 }
 
 /**
+ * The shared enrich run both steps execute: resolve the job
+ * (refused by name), refuse unwired stores, compute the
+ * shard's partition from the persisted input, run the job,
+ * and fail the pipeline run with the job's coded error when
+ * the run fails (the run recorded its own failure in the
+ * enriched store, so the job's run record and the dataset
+ * record agree).
+ */
+async function runEnrichStepJob(
+  deps: EnrichStepDeps,
+  stepName: string,
+  ctx: JobStepContext,
+): Promise<{
+  def: EnrichJobDefinition;
+  result: EnrichRunResult;
+  symbols: string[] | undefined;
+}> {
+  const enrichJobId =
+    typeof ctx.params.enrichJobId === "string" ? ctx.params.enrichJobId : "";
+  const def = deps.registry.get(enrichJobId);
+  if (!def) {
+    throw new Error(
+      `${ENRICH_JOB_CODES.jobNotFound}: step "${stepName}" names enrich job "${enrichJobId}", which is not in the enrich registry.`,
+    );
+  }
+  if (!deps.datasetStore) throw enrichNotConfigured(def.id, "the feed-dataset store");
+  if (!deps.enrichedStore) throw enrichNotConfigured(def.id, "the enriched-dataset store");
+
+  // Sharded shape: this unit enriches its partition of the
+  // PERSISTED input's symbols (the partition is computed from
+  // the stored copy — the same copy the run resolves, so
+  // partitions and the whole-input run can never disagree on
+  // membership; the feed step's idiom).
+  let symbols: string[] | undefined;
+  if (ctx.shardKey) {
+    const shards =
+      (await deps.shardsFor?.(def.id)) ??
+      (Array.isArray(ctx.params.shards) ? (ctx.params.shards as string[]) : []);
+    const input = await resolveFeedInputArtifact(
+      deps.datasetStore,
+      def.feedJobId,
+      def.sourceId,
+      def.dataset,
+    );
+    const inputSymbols = input
+      ? input.quotes
+          .map((q) => (q as { symbol?: unknown }).symbol)
+          .filter((s): s is string => typeof s === "string")
+          .map((s) => s.toUpperCase())
+      : [];
+    symbols = feedShardSymbols(inputSymbols, shards, ctx.shardKey) ?? undefined;
+  }
+
+  const result = await runEnrichJob(
+    deps.registry,
+    { datasetStore: deps.datasetStore, enrichedStore: deps.enrichedStore },
+    def.id,
+    {
+      trigger: ctx.trigger,
+      kind: ctx.runKind,
+      runId: ctx.runId,
+      ...(stringParams(ctx.params.elements)
+        ? { elements: stringParams(ctx.params.elements) }
+        : {}),
+      ...(joinSourceParams(ctx.params.enrichFrom)
+        ? { enrichFrom: joinSourceParams(ctx.params.enrichFrom) }
+        : {}),
+      ...(typeof ctx.params.seriesPeriod === "number"
+        ? { seriesPeriod: ctx.params.seriesPeriod }
+        : {}),
+      ...(symbols ? { symbols } : {}),
+    },
+  );
+  if (result.status === "failed") {
+    throw new Error(
+      `${result.codedError ?? "ENRICH_RUN_FAILED"}: enrich job "${def.id}" run ${result.runId} failed (${result.errorMessage ?? "no detail"})`,
+    );
+  }
+  return { def, result, symbols };
+}
+
+/** The enrich summary `enrich.apply` records as its output. */
+function enrichSummaryOutput(
+  def: EnrichJobDefinition,
+  result: EnrichRunResult,
+): Record<string, unknown> {
+  return {
+    enrichJobId: def.id,
+    feedJobId: def.feedJobId,
+    sourceId: def.sourceId,
+    dataset: def.dataset,
+    enrichRunId: result.runId,
+    artifactId: result.artifactId,
+    status: result.status,
+    requested: result.requested,
+    received: result.received,
+    failed: result.failed,
+    inputArtifactId: result.inputArtifactId,
+    inputRunId: result.inputRunId,
+    elementCoverage: result.elementCoverage,
+  };
+}
+
+/**
+ * The feed artifact the enrich job consumed, for the screener
+ * hand-off: found by the run result's input artifact id (exact
+ * — the same artifact the job enriched, even if a newer feed
+ * run landed since), falling back to the newest usable copy.
+ * Missing ⇒ the input is gone after a successful run, refused
+ * by the job's input-missing code rather than handing the
+ * analyze node an empty hand-off.
+ */
+async function resolveEnrichHandOffInput(
+  datasetStore: NonNullable<EnrichStepDeps["datasetStore"]>,
+  def: EnrichJobDefinition,
+  result: EnrichRunResult,
+): Promise<FeedDatasetArtifact> {
+  if (result.inputArtifactId) {
+    const history = await datasetStore.listRuns(def.sourceId, def.dataset, 10);
+    const byId = history.find((a) => a.id === result.inputArtifactId);
+    if (byId) return byId;
+  }
+  const newest = await resolveFeedInputArtifact(
+    datasetStore,
+    def.feedJobId,
+    def.sourceId,
+    def.dataset,
+  );
+  if (!newest) {
+    throw new Error(
+      `${ENRICH_JOB_CODES.inputMissing}: enrich job "${def.id}" run ${result.runId} consumed a feed artifact that is no longer resolvable; the screener hand-off was refused rather than handing the analyze node an empty one.`,
+    );
+  }
+  return newest;
+}
+
+/**
  * Register the enrich step on a registry. Hosts compose the
  * FULL registry through createPipelineStepRegistry below; this
  * function exists so a registry built for tests can add the
@@ -321,87 +472,63 @@ export function registerEnrichStep(
   deps: EnrichStepDeps,
 ): void {
   registry.register(ENRICH_APPLY_STEP, async (ctx: JobStepContext) => {
-    const enrichJobId =
-      typeof ctx.params.enrichJobId === "string" ? ctx.params.enrichJobId : "";
-    const def = deps.registry.get(enrichJobId);
-    if (!def) {
-      throw new Error(
-        `${ENRICH_JOB_CODES.jobNotFound}: step "${ENRICH_APPLY_STEP}" names enrich job "${enrichJobId}", which is not in the enrich registry.`,
-      );
-    }
-    if (!deps.datasetStore) throw enrichNotConfigured(def.id, "the feed-dataset store");
-    if (!deps.enrichedStore) throw enrichNotConfigured(def.id, "the enriched-dataset store");
+    const { def, result } = await runEnrichStepJob(deps, ENRICH_APPLY_STEP, ctx);
+    return {
+      output: enrichSummaryOutput(def, result),
+      descriptor: `enrich ${def.sourceId}/${def.dataset}: ${result.received}/${result.requested} rows persisted (artifact ${result.artifactId}, input run ${result.inputRunId})`,
+    };
+  });
 
-    // Sharded shape: this unit enriches its partition of the
-    // PERSISTED input's symbols (the partition is computed from
-    // the stored copy — the same copy the run resolves, so
-    // partitions and the whole-input run can never disagree on
-    // membership; the feed step's idiom).
-    let symbols: string[] | undefined;
-    if (ctx.shardKey) {
-      const shards =
-        (await deps.shardsFor?.(def.id)) ??
-        (Array.isArray(ctx.params.shards) ? (ctx.params.shards as string[]) : []);
-      const input = await resolveFeedInputArtifact(
-        deps.datasetStore,
-        def.feedJobId,
-        def.sourceId,
-        def.dataset,
-      );
-      const inputSymbols = input
-        ? input.quotes
-            .map((q) => (q as { symbol?: unknown }).symbol)
-            .filter((s): s is string => typeof s === "string")
-            .map((s) => s.toUpperCase())
-        : [];
-      symbols = feedShardSymbols(inputSymbols, shards, ctx.shardKey) ?? undefined;
-    }
-
-    const result = await runEnrichJob(
-      deps.registry,
-      { datasetStore: deps.datasetStore, enrichedStore: deps.enrichedStore },
-      def.id,
-      {
-        trigger: ctx.trigger,
-      kind: ctx.runKind,
-        runId: ctx.runId,
-        ...(stringParams(ctx.params.elements)
-          ? { elements: stringParams(ctx.params.elements) }
-          : {}),
-        ...(joinSourceParams(ctx.params.enrichFrom)
-          ? { enrichFrom: joinSourceParams(ctx.params.enrichFrom) }
-          : {}),
-        ...(typeof ctx.params.seriesPeriod === "number"
-          ? { seriesPeriod: ctx.params.seriesPeriod }
-          : {}),
-        ...(symbols ? { symbols } : {}),
-      },
+  /**
+   * Issue #5883 (#4437 slice 6a) — the screener's enrich
+   * application beside `enrich.apply`: the same enrich job,
+   * but the step returns the gather-shaped hand-off the
+   * `analyze.screener` hand-off mode consumes
+   * (`resolveScreenerHandOff`, analyzeJobs.ts) instead of the
+   * enrich summary alone. The hand-off carries the input
+   * artifact's quotes verbatim — the same quotes the bespoke
+   * gather's `acquired.quotes` carries (the gather stage
+   * spreads its feed output, so its quotes ARE the feed
+   * stage's quotes) — shard-filtered under sharding, exactly
+   * the partition the enrich job enriched. The lineage names
+   * the run that produced this hand-off (platformRunId = the
+   * pipeline run id, taskId = the job id, timestamp = the
+   * step's run timestamp), matching the bespoke gather run's
+   * lineage shape. The enrich summary rides along, so the
+   * recorded output still carries the run's outcome exactly
+   * as `enrich.apply` records it.
+   */
+  registry.register(ENRICH_SCREENER_STEP, async (ctx: JobStepContext) => {
+    const { def, result, symbols } = await runEnrichStepJob(
+      deps,
+      ENRICH_SCREENER_STEP,
+      ctx,
     );
-    if (result.status === "failed") {
-      // The enrich run recorded its own failure in the enriched
-      // store; the pipeline run fails with the same coded error
-      // so the job's run record and the dataset record agree.
-      throw new Error(
-        `${result.codedError ?? "ENRICH_RUN_FAILED"}: enrich job "${def.id}" run ${result.runId} failed (${result.errorMessage ?? "no detail"})`,
-      );
-    }
+    const inputArtifact = await resolveEnrichHandOffInput(
+      deps.datasetStore!,
+      def,
+      result,
+    );
+    const quotes = symbols
+      ? inputArtifact.quotes.filter((q) => {
+          const symbol = (q as { symbol?: unknown }).symbol;
+          return (
+            typeof symbol === "string" &&
+            symbols.some((s) => s.toUpperCase() === symbol.toUpperCase())
+          );
+        })
+      : inputArtifact.quotes;
     return {
       output: {
-        enrichJobId: def.id,
-        feedJobId: def.feedJobId,
-        sourceId: def.sourceId,
-        dataset: def.dataset,
-        enrichRunId: result.runId,
-        artifactId: result.artifactId,
-        status: result.status,
-        requested: result.requested,
-        received: result.received,
-        failed: result.failed,
-        inputArtifactId: result.inputArtifactId,
-        inputRunId: result.inputRunId,
-        elementCoverage: result.elementCoverage,
+        // The gather shape the analyze node reads.
+        acquired: { quotes },
+        platformRunId: ctx.runId,
+        taskId: ctx.jobId,
+        timestamp: ctx.now,
+        // The enrich summary, preserved.
+        ...enrichSummaryOutput(def, result),
       },
-      descriptor: `enrich ${def.sourceId}/${def.dataset}: ${result.received}/${result.requested} rows persisted (artifact ${result.artifactId}, input run ${result.inputRunId})`,
+      descriptor: `enrich ${def.sourceId}/${def.dataset} (screener hand-off): ${result.received}/${result.requested} rows persisted (artifact ${result.artifactId}, input run ${result.inputRunId})`,
     };
   });
 }
