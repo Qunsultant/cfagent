@@ -1,10 +1,16 @@
 /** @vitest-environment jsdom */
 /**
  * Issue #2688 — RoleGrantsPanel (IAAA Admin → Overview, beside
- * Service tokens / Service user): grant form for platform-admin /
- * tenant-admin only, grant list showing who granted each role and
- * when, and revoke-with-confirm per grant. Server decides every
- * refusal; the panel surfaces it, never hides enforcement.
+ * Service tokens / Service user): grant list showing who granted
+ * each role and when. Server decides every refusal; the panel
+ * surfaces it, never hides enforcement.
+ *
+ * Issue #6165 — one admin-creation path: the panel no longer
+ * grants or revokes. Granting and revoking happen in exactly one
+ * place — Grant membership on the Members tab. This section keeps
+ * only the read-only admin-role list and points at the Members
+ * tab; the grant form and revoke action are retired (the
+ * role-grants routes stay as deprecated aliases).
  *
  * Harness mirrors tests/service_tokens_panel_2681.test.tsx: the
  * real api client module is mocked, the panel renders with
@@ -15,11 +21,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { RoleGrantsPanel } from "../src/client/RoleGrantsPanel";
-import {
-  fetchRoleGrants,
-  grantRoleGrant,
-  revokeRoleGrant,
-} from "../src/client/roleGrantsApi";
+import { fetchRoleGrants } from "../src/client/roleGrantsApi";
 
 vi.mock("../src/client/roleGrantsApi", () => ({
   fetchRoleGrants: vi.fn(),
@@ -30,8 +32,6 @@ vi.mock("../src/client/roleGrantsApi", () => ({
 }));
 
 const mockedFetch = vi.mocked(fetchRoleGrants);
-const mockedGrant = vi.mocked(grantRoleGrant);
-const mockedRevoke = vi.mocked(revokeRoleGrant);
 
 let container: HTMLDivElement;
 let root: Root;
@@ -66,40 +66,8 @@ async function renderPanel() {
   });
 }
 
-async function click(label: string) {
-  const buttons = Array.from(container.querySelectorAll("button"));
-  const target = buttons.find((b) => (b.textContent ?? "").trim() === label);
-  if (!target) throw new Error(`button not found: ${label}`);
-  await act(async () => {
-    target.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-  });
-}
-
-function setInput(id: string, value: string) {
-  const el = document.body.querySelector(`#${id}`) as
-    | HTMLInputElement
-    | HTMLSelectElement
-    | null;
-  if (!el) throw new Error(`No input #${id}`);
-  // React controlled inputs ignore plain .value assignment in jsdom;
-  // drive the native setter so React's onChange fires (same pattern
-  // as tests/service_tokens_panel_2681.test.tsx).
-  const proto =
-    el instanceof HTMLSelectElement
-      ? window.HTMLSelectElement.prototype
-      : window.HTMLInputElement.prototype;
-  const setter = Object.getOwnPropertyDescriptor(proto, "value")!.set!;
-  act(() => {
-    setter.call(el, value);
-    el.dispatchEvent(new Event("input", { bubbles: true }));
-    el.dispatchEvent(new Event("change", { bubbles: true }));
-  });
-}
-
 beforeEach(() => {
   mockedFetch.mockResolvedValue([...GRANTS] as never);
-  mockedGrant.mockResolvedValue({ grant: GRANTS[0] } as never);
-  mockedRevoke.mockResolvedValue({ ok: true } as never);
 });
 
 afterEach(async () => {
@@ -119,28 +87,17 @@ describe("issue #2688: RoleGrantsPanel", () => {
     expect(bodyText()).toContain("t1800000000000");
   });
 
-  it("grants through the API and reloads the list", async () => {
+  it("offers no grant form and no revoke — #6165 retired them to the Members tab", async () => {
     await renderPanel();
-    setInput("rgp-target", "v1:new0000000000000000000000000000000000000000000001");
-    await click("Grant role");
-    expect(mockedGrant).toHaveBeenCalledWith(
-      expect.objectContaining({ internalUserId: "v1:new0000000000000000000000000000000000000000000001", role: "tenant-admin" }),
+    expect(document.body.querySelector("#rgp-target")).toBeNull();
+    const buttons = Array.from(container.querySelectorAll("button")).map((b) =>
+      (b.textContent ?? "").trim(),
     );
-    expect(mockedFetch.mock.calls.length).toBeGreaterThan(1);
-  });
-
-  it("revokes only after confirm, and surfaces a server refusal", async () => {
-    await renderPanel();
-    await click("Revoke");
-    expect(mockedRevoke).not.toHaveBeenCalled();
-    await click("Confirm revoke");
-    expect(mockedRevoke).toHaveBeenCalledWith("m-1", 0);
-    mockedFetch.mockResolvedValueOnce([...GRANTS] as never);
-    mockedRevoke.mockRejectedValueOnce(new Error("Forbidden: revoke denied."));
-    await renderPanel();
-    await click("Revoke");
-    await click("Confirm revoke");
-    expect(bodyText()).toContain("Forbidden: revoke denied.");
+    expect(buttons).not.toContain("Grant role");
+    expect(buttons).not.toContain("Revoke");
+    expect(bodyText()).toContain(
+      "Grant or revoke admin roles from Grant membership on the Members tab.",
+    );
   });
 
   it("shows a denied state instead of a silently empty list", async () => {

@@ -1319,6 +1319,7 @@ export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL,
             })),
           });
         }
+        // Deprecated: issue #6165 — one admin-creation path. Superseded by POST /api/iaaa/membership/grant (Grant membership on the Members tab); this route is a deprecated alias that mints through the same grantMembership seam and stays functional.
         if (path === "/api/iaaa/role-grants/grant") {
           if (request.method !== "POST") {
             return Response.json({ error: "Method not allowed" }, { status: 405 });
@@ -1482,6 +1483,7 @@ export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL,
             { status: 201, ...(grantRotationCookie ? { headers: { "Set-Cookie": grantRotationCookie } } : {}) },
           );
         }
+        // Deprecated: issue #6165 — one admin-creation path. Superseded by the Members-tab revoke in src/client/IaaaAdminPanel.tsx (revokeMembershipApi; POST /api/iaaa/membership/grant is the one grant route); this route is a deprecated alias that stays functional.
         if (path === "/api/iaaa/role-grants/revoke") {
           if (request.method !== "POST") {
             return Response.json({ error: "Method not allowed" }, { status: 405 });

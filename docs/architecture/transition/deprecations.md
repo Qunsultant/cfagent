@@ -33,6 +33,15 @@ journal is the retry record; the blob seam refuses by name
 (`OPTIONS_CHAIN_REPORTS_BUCKET_UNBOUND`) when `REPORTS_BUCKET` is
 unbound, rather than silently dropping bytes to legacy DO storage.
 
+## 2026-11-22 — #6165 retires the second grant surface (one admin-creation path)
+
+- Routes: `POST /api/iaaa/role-grants/grant` and `POST /api/iaaa/role-grants/revoke` (`src/server/routes/auth.ts`)
+- Date: 2026-11-22
+- Reason: Issue #6165 (sub of #945). Creating an admin existed in two grant surfaces: the Members-tab grant (`POST /api/iaaa/membership/grant`) and the Role grants section (`POST /api/iaaa/role-grants/grant`). Both mint through the same `grantMembership` seam, so the second surface was pure duplication. The Members tab is the one grant surface; the Role grants section keeps only its read-only admin-role list and points at the Members tab.
+- Replacement: `POST /api/iaaa/membership/grant` (grant) and the Members-tab revoke/edit (revoke). Client `grantRoleGrant` / `revokeRoleGrant` (`src/client/roleGrantsApi.ts`) are `@deprecated` and frozen.
+- Consumers at deprecation: `RoleGrantsPanel` no longer calls either function; `tests/iaaa_role_grants_2688.test.ts` still exercises the routes as deprecated aliases (behavior unchanged).
+- Deletion condition: zero consumers plus an owner decision plus a gate amendment; deletion is never part of a program slice.
+
 ## 2026-11-20 — #5915 supersedes the research cutover flag
 
 - Name: `research_engine_cutover` (feature flag key)

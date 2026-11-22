@@ -117,3 +117,50 @@ border) that failed the token ratchet, so the ratchet is green.
    the read-only guarantee of this panel stays reviewable.
 4. Add client controls only after the server endpoints exist
    and are tested with the same gating matrix as v1.
+
+## One admin-creation path (#6165)
+
+Inventory (verified in code 2026-11-22) and the consolidation
+decision. One of everything: an operator creates a platform-admin
+or tenant-admin from exactly one UX surface, and the bootstrap
+list changes through exactly one proposal flow.
+
+**The one grant path — Members tab.** `POST
+/api/iaaa/membership/grant` (`grantMembershipApi`), minting
+through the single `grantMembership` seam
+(`src/security/authorization.ts`). It grants any role (member,
+approver, auditor, workspace-admin, tenant-admin,
+platform-admin), any scope, multi-binding — and sits beside
+revoke, edit, and the memberships table. Q9 two-admin rule and
+the SELF_GRANT 403 stay.
+
+**Retired grant surfaces (deprecated, never deleted).**
+`POST /api/iaaa/role-grants/grant` and `POST
+/api/iaaa/role-grants/revoke` are deprecated aliases of the
+membership-grant route: they mint through the same seam, so
+behavior is unchanged. The Role grants section (Overview) keeps
+only its read-only admin-role list and points at the Members
+tab. Client `grantRoleGrant` / `revokeRoleGrant`
+(`src/client/roleGrantsApi.ts`) are `@deprecated` and frozen.
+Ledger: `docs/architecture/transition/deprecations.md`
+(#6165 entry).
+
+**The one bootstrap path.** `IAAA_BOOTSTRAP_ADMINS` env list →
+login-path provisioning (`runWiredPostLogin` in
+`src/security/iaaaGithubEndToEnd.ts`: listed ids get
+tenant-admin at sign-in; `platform:` entries claim genesis →
+platform-admin via the atomic marker) + the data-lifecycle
+bootstrap routes as the operator surface (platform bootstrap
+check/init claims genesis for a `platform:` caller;
+tenant-bootstrap initializes a tenant, including its founding
+tenant-admin via the same `provisionBootstrapAdmins`). The list
+changes through exactly one proposal flow: Bootstrap proposals
+(#3077). Security split, unchanged: the env list never mints
+platform-admin; platform-admin comes only from an existing
+platform-admin or the one-time genesis claim.
+
+**Not a second grant path — access requests (#1274).** A user
+requests access; admins approve/deny. Approval mints through the
+same `grantMembership` seam under the same two-approver rule. A
+request is an entry point to the one grant mechanism, not a
+parallel creation path.
