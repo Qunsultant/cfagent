@@ -133,7 +133,8 @@ describe("schema equality — all planes (#4282 P4)", () => {
     expect(new Set(executedCodes).size).toBe(
       COMBINED_CATALOGUE_ENTRIES.length,
     );
-    expect(COMBINED_CATALOGUE_ENTRIES.length).toBe(452);
+    expect(COMBINED_CATALOGUE_ENTRIES.length).toBe(453);    // Issue #6167 adds 1 entry (the host_version remainder ALTER
+    // on mas_async_jobs): 452 → 453 entries.
     // Issue #5229 adds migration 0069 (agent_referral_rules
     // expiry_period_ms column): 410 entries resolve to 421 statements.
     // Issue #5086 adds migration 0070 (otel_config_overrides table):
@@ -166,7 +167,9 @@ describe("schema equality — all planes (#4282 P4)", () => {
     // + unique identity index): 450 → 454.
     // Issue #6141 adds 9 entries (migration 0082: 6 rule columns +
     // ledger table + 2 indexes): 454 → 463.
-    expect(executedStatements).toBe(463);
+    // Issue #6167 adds 1 entry (the host_version remainder ALTER
+    // on mas_async_jobs), one statement: 463 → 464.
+    expect(executedStatements).toBe(464);
     const actual = instance.introspect();
     const diff = diffSchema(actual, combinedExpectedModel());
     expect(isEmptyDiff(diff)).toBe(true);

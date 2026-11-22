@@ -138,7 +138,9 @@ describe("P5 runner — plan resolution (P4 finding 1: phased order)", () => {
     expect(p.skipped).toHaveLength(1);
     // Issue #6141 adds migration 0082 (referral trial-extension: 6
     // rule columns + ledger table + 2 indexes): 453 → 462.
-    expect(p.steps).toHaveLength(462);
+    // Issue #6167 adds the host_version remainder ALTER on
+    // mas_async_jobs (1 step): 462 → 463.
+    expect(p.steps).toHaveLength(463);
     expect(p.skipped).toHaveLength(1);
     expect(p.skipped[0].code).toBe(SEED_FORM_CODE);
     expect(p.skipped[0].reason).toMatch(/call site/i);
@@ -170,7 +172,9 @@ describe("P5 runner — plan resolution (P4 finding 1: phased order)", () => {
     // 449 → 453.
         // Issue #6141 adds migration 0082 (referral trial-extension: 6
     // rule columns + ledger table + 2 indexes): 453 → 462.
-    expect(harness).toHaveLength(462);    // Production move 1: the rebuild CREATE for agent_price_catalogue
+    // Issue #6167 adds the host_version remainder ALTER on
+    // mas_async_jobs (1 step): 462 → 463.
+    expect(harness).toHaveLength(463);    // Production move 1: the rebuild CREATE for agent_price_catalogue
     // must stay after the RENAME that clears its table (a second
     // table-creation for the same table cannot run before the rename
     // on real SQLite). Production move 2: the legacy seed is hoisted
@@ -342,7 +346,8 @@ describe("P5 runner — delta-to-steps selection (P4 finding 3, P4 finding 2)", 
     // #4767 adds migrations 0071/0072 (4 remainder ALTERs): 132 → 136.
     // #5865 adds migration 0074 (definition history): 136 → 137.
     // Issue #3185 adds the usage_events tenant index to the DO leg: 139 → 140.
-    expect(selected.schema).toHaveLength(140);
+    // Issue #6167 adds the host_version remainder ALTER on mas_async_jobs: 140 → 141.
+    expect(selected.schema).toHaveLength(141);
     expect(selected.seeds).toHaveLength(0);
     // Issue #3185 adds one probed DO statement (usage_events.tenant_id):
     // the fresh CREATE TABLE already carries the column, so the ALTER
