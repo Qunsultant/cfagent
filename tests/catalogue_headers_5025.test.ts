@@ -46,9 +46,11 @@ describe("#5025 schemaComponent barrel & membership store naming", () => {
     // identity index): D1 241 → 244.
     // #6141 adds migration 0082 (referral trial-extension: 6 rule
     // columns + ledger table + 2 indexes): D1 244 → 253.
+    // #6167 adds one probed DO ALTER (mas_async_jobs.host_version):
+    // remainder 64 → 65.
     expect(D1_CATALOGUE_ENTRIES.length).toBe(253);
     expect(ORM_CATALOGUE_ENTRIES.length).toBe(26);
-    expect(REMAINDER_CATALOGUE_ENTRIES.length).toBe(64);
+    expect(REMAINDER_CATALOGUE_ENTRIES.length).toBe(65);
     expect(DO_CATALOGUE_ENTRIES.length).toBe(109);
   });
 

@@ -121,6 +121,7 @@ const REMAINDER_STATEMENT_SHA256 = {
   "schema.do.mas_async_jobs.alter_table_add_column_attempts_json": "70d5184ee37c16118cc5e47be2cdf6b602c130b1ff0301545ac210765251c580",
 "schema.do.mas_async_jobs.alter_table_add_column_channel": "bf2fe63006e8b081f55e30581ade5dae1e9909a83d008965ffc8f513d3397342",
   "schema.do.mas_async_jobs.alter_table_add_column_error_code": "b48a4d1ba3bd1a349f5ae07b9ef4a140452c6296b5ec5729d047fea2245d0f99",
+  "schema.do.mas_async_jobs.alter_table_add_column_host_version": "95d7ffeadcabad81554084b56e762f9c11799c88fb76cf1926d214b381ca0c38",
   "schema.do.mas_async_jobs.alter_table_add_column_job_kind": "852fb985246f2a8d23d3b21e769ad690705386b7a34ac746e77dd713084da2ab",
   "schema.do.mas_async_jobs.alter_table_add_column_last_activity_at": "be4488d836c36cf653bbc5d8e5d6af3281562f0600ac2de0cd32158276407c7f",
   "schema.do.mas_async_jobs.alter_table_add_column_not_before": "51ecb07e37e2cf0854b14b8606e4f5880a912f4dde2487d9ec7dbe467d3a8571",
@@ -452,11 +453,11 @@ const P3_DELEGATED_FILES = [
 ];
 
 describe("remainder catalogue — P3 long tail + ALTER reconciliation (#4282 P3)", () => {
-  it("catalogues all 64 remainder statements: 8 table + 2 index + 52 alter + 1 drop + 1 seed-form", () => {
+  it("catalogues all 65 remainder statements: 8 table + 2 index + 53 alter + 1 drop + 1 seed-form", () => {
     const catalogue = buildRemainderCatalogue();
-    expect(REMAINDER_CATALOGUE_ENTRIES.length).toBe(64);
-    expect(catalogue.size()).toBe(64);
-    expect(catalogue.byKind("schema").length).toBe(63);
+    expect(REMAINDER_CATALOGUE_ENTRIES.length).toBe(65);
+    expect(catalogue.size()).toBe(65);
+    expect(catalogue.byKind("schema").length).toBe(64);
     expect(catalogue.byKind("seed").length).toBe(1);
     const verbs = new Map<string, number>();
     const classify = (statement: string): string => {
@@ -481,18 +482,19 @@ describe("remainder catalogue — P3 long tail + ALTER reconciliation (#4282 P3)
     }
     expect(verbs.get("CREATE TABLE")).toBe(8);
     expect(verbs.get("CREATE INDEX")).toBe(2);
-    expect(verbs.get("ALTER TABLE")).toBe(52);
+    expect(verbs.get("ALTER TABLE")).toBe(53);
     expect(verbs.get("DROP INDEX")).toBe(1);
     expect(verbs.get("INSERT OR REPLACE")).toBe(1);
     expect(verbs.get("OTHER")).toBeUndefined();
     // Every code is unique and every entry is reachable by its code.
     const codes = new Set(REMAINDER_CATALOGUE_ENTRIES.map((e) => e.code));
-    expect(codes.size).toBe(64);
+    expect(codes.size).toBe(65);
     for (const entry of REMAINDER_CATALOGUE_ENTRIES) {
       expect(catalogue.get(entry.code).statement).toBe(entry.statement);
     }
-    // Planes: do 54, d1 1, orm 5, index 3, route 1.
-    expect(REMAINDER_CATALOGUE_ENTRIES.filter((e) => e.plane === "do").length).toBe(54);
+    // Planes: do 55, d1 1, orm 5, index 3, route 1.
+    // Issue #6167 adds one probed DO ALTER (mas_async_jobs.host_version).
+    expect(REMAINDER_CATALOGUE_ENTRIES.filter((e) => e.plane === "do").length).toBe(55);
     expect(REMAINDER_CATALOGUE_ENTRIES.filter((e) => e.plane === "d1").length).toBe(1);
     expect(REMAINDER_CATALOGUE_ENTRIES.filter((e) => e.plane === "orm").length).toBe(5);
     expect(REMAINDER_CATALOGUE_ENTRIES.filter((e) => e.plane === "index").length).toBe(3);
@@ -599,7 +601,7 @@ describe("remainder catalogue — P3 long tail + ALTER reconciliation (#4282 P3)
   });
 
   it("each entry's statement is byte-identical to the base (sha256 pin)", () => {
-    expect(Object.keys(REMAINDER_STATEMENT_SHA256).length).toBe(64);
+    expect(Object.keys(REMAINDER_STATEMENT_SHA256).length).toBe(65);
     for (const entry of REMAINDER_CATALOGUE_ENTRIES) {
       const digest = createHash("sha256")
         .update(entry.statement, "utf8")
