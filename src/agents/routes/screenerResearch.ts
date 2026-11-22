@@ -91,7 +91,14 @@ export interface ScreenerResearchRouteContext {
   runResearchAndPublish(
     trigger: "manual" | "scheduled",
     userLogin?: string,
-    selection?: { brokerId?: string; mode?: string; runId?: string },
+    selection?: {
+      brokerId?: string;
+      mode?: string;
+      runId?: string;
+      stage?: "analyze" | "generate" | "deliver";
+      report?: import("../../services/researchPipeline").ResearchReport;
+      publication?: unknown;
+    },
   ): Promise<{
     success: boolean;
     error?: string;
@@ -646,6 +653,19 @@ export async function handleScreenerResearchRoutes(
                 ...(input.runId ? { runId: input.runId } : {}),
               });
             },
+            runGenerateStage: async (input) =>
+              ctx.runResearchAndPublish("manual", input.userLogin, {
+                runId: input.runId,
+                stage: "generate",
+                report: input.report,
+              }),
+            runDeliverStage: async (input) =>
+              ctx.runResearchAndPublish("manual", input.userLogin, {
+                runId: input.runId,
+                stage: "deliver",
+                report: input.report,
+                publication: input.publication,
+              }),
           },
           execute: (runCtx) =>
             runCtx
@@ -655,6 +675,7 @@ export async function handleScreenerResearchRoutes(
                     runId: runCtx.runId,
                     ...(runCtx.feed ? { feed: runCtx.feed } : {}),
                     ...(runCtx.enrich ? { enrich: runCtx.enrich } : {}),
+                    ...(runCtx.deferPublication ? { stage: "analyze" as const } : {}),
                   }),
                 )
               : triggerManualResearch(ctx.runResearchAndPublish, userLogin, selection),
@@ -832,9 +853,22 @@ export async function handleScreenerResearchRoutes(
                 ...(input.runId ? { runId: input.runId } : {}),
               });
             },
+            runGenerateStage: async (input) =>
+              ctx.runResearchAndPublish("manual", input.userLogin, {
+                runId: input.runId,
+                stage: "generate",
+                report: input.report,
+              }),
+            runDeliverStage: async (input) =>
+              ctx.runResearchAndPublish("manual", input.userLogin, {
+                runId: input.runId,
+                stage: "deliver",
+                report: input.report,
+                publication: input.publication,
+              }),
           },
           execute: (runCtx) =>
-            triggerScheduledResearch(ctx.runResearchAndPublish, userLogin, runCtx?.feed, runCtx?.enrich),
+            triggerScheduledResearch(ctx.runResearchAndPublish, userLogin, runCtx?.feed, runCtx?.enrich, runCtx?.deferPublication),
         });
         const out = {
           ...dispatched.outcome,
