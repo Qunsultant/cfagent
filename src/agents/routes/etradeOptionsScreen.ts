@@ -70,6 +70,7 @@ import {
 } from "../../workflows/screenDeliverySuppression";
 import { createStructuredLogger } from "../../observability/structuredLogger";
 import { createObservabilitySink } from "../../observability/createObservabilityPorts";
+import { getOtelJobPipelineObservers } from "../../observability/otelJobPipelineObservers";
 import { generationId, newRunId } from "../../services/executionTreeIds";
 
 /** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
@@ -264,6 +265,9 @@ async function executeOptionsScreenViaSync(args: ExecuteOptionsScreenArgs, gener
       // SQLite (the same handle the stage claims + delivery
       // suppressor already use).
       engineStores: optionsEngineStoresFromSql(ctx.agentCtx.storage.sql),
+      // Issue #6179: the OTel observers for this dispatch — the
+      // manual run emits job.run.settled like the scheduled runs.
+      otel: getOtelJobPipelineObservers(ctx.env),
     },
   );
   if (outcome.outcome === "failed") {
@@ -521,6 +525,9 @@ async function runUnifiedOpportunitiesViaPipeline(args: {
         typeof ctx.agentCtx.storage.sql?.exec === "function"
           ? optionsEngineStoresFromSql(ctx.agentCtx.storage.sql)
           : optionsEngineStoresInMemory(),
+      // Issue #6179: the OTel observers for this dispatch — the
+      // unified scan emits job.run.settled like the scheduled runs.
+      otel: getOtelJobPipelineObservers(ctx.env),
     },
   );
   if (outcome.outcome !== "completed") {
