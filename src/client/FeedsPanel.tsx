@@ -18,14 +18,17 @@
  * issue 6048; this page never fetches from a provider.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Badge, Button, Flex, Notice, Stack, Table, type TableColumn } from "./components/ui";
+import { Badge, Button, Card, CardHeader, Flex, Notice, Stack, Table, type TableColumn } from "./components/ui";
 import { navigateToTab } from "./router";
+import { downloadTextFile } from "./runExport";
 import type { BadgeTone } from "./components/ui/Badge";
 import {
   fetchDataProviders,
+  fetchFeedArtifact,
   fmtDataProviderTime,
   postFeedJobAction,
   postFeedJobSchedule,
+  type FeedArtifactPreviewView,
   type FeedJobActionName,
   type FeedJobView,
 } from "./dataProvidersApi";
@@ -71,6 +74,8 @@ export function FeedsPanel() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [output, setOutput] = useState<FeedArtifactPreviewView | null>(null);
+  const [outputBusy, setOutputBusy] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -126,6 +131,30 @@ export function FeedsPanel() {
     [load],
   );
 
+  const openOutput = useCallback(async (job: FeedJobView) => {
+    setOutputBusy(job.jobId);
+    setNotice(null);
+    try {
+      setOutput(await fetchFeedArtifact(job.sourceId));
+    } catch (error) {
+      setOutput(null);
+      setNotice(
+        `Output read refused for ${job.jobId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    } finally {
+      setOutputBusy(null);
+    }
+  }, []);
+
+  const downloadOutput = (view: FeedArtifactPreviewView) => {
+    // The one exporter (#1065): no second blob-URL implementation in the client.
+    downloadTextFile(
+      `${view.jobId}-${view.preview.dataset}-preview.json`,
+      JSON.stringify(view.preview.sample, null, 2),
+      "application/json",
+    );
+  };
+
   const columns = useMemo<TableColumn<FeedJobView>[]>(() => {
     const jobActions = (job: FeedJobView) => {
       const state = jobState(job);
@@ -155,6 +184,14 @@ export function FeedsPanel() {
               Retry
             </Button>
           )}
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={outputBusy === job.jobId}
+            onClick={() => void openOutput(job)}
+          >
+            Output
+          </Button>
           <Button size="sm" variant="secondary" disabled={disabled} onClick={() => void toggleSchedule(job)}>
             {job.schedule?.enabled ? "Disable schedule" : "Enable schedule"}
           </Button>
@@ -238,12 +275,17 @@ export function FeedsPanel() {
         ),
       },
       {
+        key: "consumers",
+        header: "Consumers",
+        render: (job) => (job.consumers?.length ? job.consumers.join(", ") : "â€”"),
+      },
+      {
         key: "actions",
         header: "Actions",
         render: jobActions,
       },
     ];
-  }, [act, busy, toggleSchedule]);
+  }, [act, busy, openOutput, outputBusy, toggleSchedule]);
 
   if (jobs === null) {
     return <Notice tone="neutral" density="compact">Loading the stored-index feed family…</Notice>;
@@ -293,10 +335,31 @@ export function FeedsPanel() {
         caption="stored-index feed jobs"
         stickyHeader
       />
-      <Notice tone="neutral" density="compact" title="Output and replay">
-        The output column reads the persisted feed-dataset status this page already has. A raw-row
-        preview, a download, replay and the consumer map are the remaining slices of issue 6048; the job
-        graph they read is issue 6049.
+      {output && (
+        <Card>
+          <CardHeader
+            title={`Output â€” ${output.jobId}`}
+            subtitle={`${output.preview.dataset} Â· ${output.preview.rows} rows Â· as of ${fmtDataProviderTime(output.asOf)}`}
+          />
+          <Stack gap="2">
+            <Flex gap="2" wrap>
+              <Button size="sm" variant="secondary" onClick={() => downloadOutput(output)}>
+                Download JSON
+              </Button>
+              <Button size="sm" variant="secondary" onClick={() => setOutput(null)}>
+                Close
+              </Button>
+            </Flex>
+            <pre className="ui-meta-sm">
+              {JSON.stringify(output.preview.sample, null, 2)}
+            </pre>
+          </Stack>
+        </Card>
+      )}
+      <Notice tone="neutral" density="compact" title="Replay and the consumer graph">
+        Output is the bounded preview of the persisted copy. Replay is blocked by the engineâ€™s
+        workflow-id lookup (issue 6058). Consumers are the catalog declaration; the validated graph is
+        issue 6049.
       </Notice>
     </Stack>
   );
