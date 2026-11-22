@@ -108,6 +108,13 @@ export interface AsyncJobStoredRow {
    *  (the single outcome catalog's code, never a message), or NULL
    *  for rows that never failed. Probed additive column. */
   error_code: string | null;
+  /** Issue #6167: the host version the executor claimed under
+   *  (CF_VERSION_METADATA.id), or NULL when the claim predates
+   *  this slice or the platform reported no version. Probed
+   *  additive column. The reap compares it with the version at
+   *  reap time to name the restart class (deploy vs
+   *  same-version). */
+  host_version: string | null;
 }
 
 /** The list projection: the legacy list SELECT never read
@@ -132,6 +139,11 @@ export interface AsyncJobRunningRow {
   stuck_alerted_at: string | null;
   last_activity_at: string | null;
   created_at: string;
+  /** Issue #6167: the host version the executor claimed under,
+   *  or NULL when the claim predates this slice. The recovery
+   *  compares it with the version at reap time to name the
+   *  restart class and to gate a stillborn re-arm. */
+  host_version: string | null;
 }
 
 /** One chain's rows as the shard planner reads them (raw). */
@@ -227,9 +239,13 @@ export interface AsyncJobQueuePort {
    * THE CLAIM (audit R-7): the guarded UPDATE queued -> running.
    * Returns true iff exactly one row was written — the caller
    * treats false as the honest not-claimed outcome and stops.
-   * NOT transaction-wrapped, by ruling.
+   * NOT transaction-wrapped, by ruling. Issue #6167: the optional
+   * hostVersion stamps the host version the executor claimed
+   * under (CF_VERSION_METADATA.id); NULL/absent leaves the
+   * column untouched (legacy callers, deployments that report
+   * no version).
    */
-  claim(jobId: string, sessionId: string, nowIso: string): boolean;
+  claim(jobId: string, sessionId: string, nowIso: string, hostVersion?: string | null): boolean;
   /** The completion transition: running -> completed, guarded
    *  on still-running. Returns rows written. Issue #3811: stamps
    *  last_activity_at at the completion instant. */
@@ -364,6 +380,9 @@ export const ACTIVE_JOB_PAYLOADS_SQL =
  *  instance's rows, oldest first so the stalest rows are swept
  *  first when the batch cap binds. The DO adapter executes
  *  exactly this statement for listRunning(). Issue #3811: the
- *  scan also selects last_activity_at (the stall evidence). */
+ *  scan also selects last_activity_at (the stall evidence).
+ *  Issue #6167: the scan also selects host_version (the
+ *  claim-time host version, for the restart-class naming and
+ *  the stillborn re-arm gate). */
 export const LIST_RUNNING_SQL =
-  "SELECT job_id, session_id, capability, display_name, payload_json, status, started_at, stuck_alerted_at, last_activity_at, created_at FROM mas_async_jobs WHERE session_id = ? AND status = 'running' ORDER BY created_at ASC LIMIT ?";
+  "SELECT job_id, session_id, capability, display_name, payload_json, status, started_at, stuck_alerted_at, last_activity_at, host_version, created_at FROM mas_async_jobs WHERE session_id = ? AND status = 'running' ORDER BY created_at ASC LIMIT ?";

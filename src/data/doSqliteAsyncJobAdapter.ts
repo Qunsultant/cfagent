@@ -131,6 +131,12 @@ export class DoSqliteAsyncJobStore
       // NULL on rows that never failed.
       this.sql.exec(remainderAlterSql("mas_async_jobs", "error_code"));
     }
+    if (!names.has("host_version")) {
+      // Issue #6167: the host version the executor claimed under
+      // (CF_VERSION_METADATA.id). NULL on legacy rows and when the
+      // platform reported no version at claim time.
+      this.sql.exec(remainderAlterSql("mas_async_jobs", "host_version"));
+    }
     this.sql.exec(doIndexSql("idx_mas_async_jobs_parent"));
     this.sql.exec(doIndexSql("idx_mas_async_jobs_chain"));
   }
@@ -228,13 +234,17 @@ export class DoSqliteAsyncJobStore
     );
   }
 
-  claim(jobId: string, sessionId: string, nowIso: string): boolean {
+  claim(jobId: string, sessionId: string, nowIso: string, hostVersion?: string | null): boolean {
     const cursor = this.sql.exec(
-      `UPDATE mas_async_jobs SET status = 'running', started_at = ?, last_activity_at = ?, updated_at = ?
+      `UPDATE mas_async_jobs SET status = 'running', started_at = ?, last_activity_at = ?, updated_at = ?, host_version = ?
      WHERE job_id = ? AND session_id = ? AND status = 'queued'`,
       nowIso,
       nowIso,
       nowIso,
+      // Issue #6167: the host version the executor claimed under;
+      // NULL when the caller reports none (legacy caller, or the
+      // platform reported no version).
+      hostVersion ?? null,
       jobId,
       sessionId,
     );
@@ -374,7 +384,7 @@ export class DoSqliteAsyncJobStore
     // lesson as insertQueued's single-line INSERT below. The SQL
     // is identical; only the layout changes.
     const rows = Array.from(this.sql.exec(
-      "SELECT job_id, session_id, capability, display_name, status, result_json, response_status, error, created_at, updated_at, started_at, completed_at, parent_job_id, job_kind, channel, not_before, stage, chain_id, stuck_alerted_at, trigger, triggered_by, schedule_id, tenant_id, last_activity_at, error_code FROM mas_async_jobs WHERE job_id = ? AND session_id = ?",
+      "SELECT job_id, session_id, capability, display_name, status, result_json, response_status, error, created_at, updated_at, started_at, completed_at, parent_job_id, job_kind, channel, not_before, stage, chain_id, stuck_alerted_at, trigger, triggered_by, schedule_id, tenant_id, last_activity_at, error_code, host_version FROM mas_async_jobs WHERE job_id = ? AND session_id = ?",
       jobId,
       sessionId,
     )) as unknown as AsyncJobStoredRow[];
@@ -383,7 +393,7 @@ export class DoSqliteAsyncJobStore
 
   listRows(sessionId: string, limit: number): AsyncJobListRow[] {
     return Array.from(this.sql.exec(
-      `SELECT job_id, session_id, capability, display_name, status, result_json, error, created_at, updated_at, started_at, completed_at, parent_job_id, job_kind, channel, not_before, stage, chain_id, stuck_alerted_at, trigger, triggered_by, schedule_id, tenant_id, last_activity_at, error_code
+      `SELECT job_id, session_id, capability, display_name, status, result_json, error, created_at, updated_at, started_at, completed_at, parent_job_id, job_kind, channel, not_before, stage, chain_id, stuck_alerted_at, trigger, triggered_by, schedule_id, tenant_id, last_activity_at, error_code, host_version
      FROM mas_async_jobs WHERE session_id = ?
      ORDER BY created_at DESC LIMIT ?`,
       sessionId,

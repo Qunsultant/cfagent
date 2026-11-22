@@ -93,6 +93,7 @@ export class InMemoryAsyncJobStore
       tenant_id: input.tenantId ?? null,
       last_activity_at: null,
       error_code: null,
+      host_version: null,
     });
   }
 
@@ -139,16 +140,20 @@ export class InMemoryAsyncJobStore
       tenant_id: null,
       last_activity_at: input.nowIso,
       error_code: null,
+      host_version: null,
     });
   }
 
-  claim(jobId: string, sessionId: string, nowIso: string): boolean {
+  claim(jobId: string, sessionId: string, nowIso: string, hostVersion?: string | null): boolean {
     const row = this.rows.get(jobId);
     if (!row || row.session_id !== sessionId || row.status !== "queued") return false;
     row.status = "running";
     row.started_at = nowIso;
     row.last_activity_at = nowIso;
     row.updated_at = nowIso;
+    // Issue #6167: the host version the executor claimed under;
+    // NULL when the caller reports none.
+    row.host_version = hostVersion ?? null;
     return true;
   }
 
@@ -351,6 +356,7 @@ export class InMemoryAsyncJobStore
         stuck_alerted_at: r.stuck_alerted_at,
         last_activity_at: r.last_activity_at,
         created_at: r.created_at,
+        host_version: r.host_version,
       }));
   }
 

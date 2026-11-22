@@ -286,6 +286,17 @@ export const REMAINDER_CATALOGUE_ENTRIES: CatalogueEntry[] = [
     form: "literal",
   },
   {
+    // Issue #6167 — the host version the executor claimed under
+    // (CF_VERSION_METADATA.id), so a later reap can name the
+    // restart class (deploy vs same-version). NULL on legacy rows.
+    code: "schema.do.mas_async_jobs.alter_table_add_column_host_version",
+    plane: "do",
+    table: "mas_async_jobs",
+    statement: `ALTER TABLE mas_async_jobs ADD COLUMN host_version TEXT`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
     code: "schema.do.mas_async_jobs.alter_table_add_column_job_kind",
     plane: "do",
     table: "mas_async_jobs",
