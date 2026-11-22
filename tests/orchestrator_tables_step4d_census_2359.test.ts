@@ -211,7 +211,10 @@ describe("4d family census: surface-1 execution sites", () => {
   it("the data layer carries exactly the moved statements; ports and in-memory adapters carry none", () => {
     const layer = new Map<string, number>([
       ["src/data/doSqliteAutopilotStateAdapter.ts", 1],
-      ["src/data/doSqlitePolicyVerdictAdapter.ts", 4],
+      // 6 since #5100 (F3 of #5094): the ensureColumn helper's PRAGMA
+      // probe + conditional ALTER for the five binding columns (the
+      // confirmations adapter at 9 already carries its helper this way).
+      ["src/data/doSqlitePolicyVerdictAdapter.ts", 6],
       ["src/data/doSqliteReportConfirmationAdapter.ts", 9],
       ["src/data/doSqliteScreenerPresetAdapter.ts", 6],
       // 21 at step 4d; 22 since #2528 slice 1: updateBody (see

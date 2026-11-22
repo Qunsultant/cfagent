@@ -45,6 +45,7 @@ import {
   COPILOT_BROKER_ID,
   resolveCopilotTradingSelection,
 } from "../copilotTradingMode";
+import { resolveStockCopilotActiveBinding } from "../orchestrator/meshStockCopilotDoor";
 import type { CommercialStore } from "../../data/commercialPorts";
 import { SqlIndexListStore } from "../../data/doSqliteIndexListAdapter";
 import {
@@ -302,6 +303,8 @@ export async function handleStockCopilotRoutes(
         readSettingRaw: ctx.readSettingRaw,
         commercial: ctx.commercial,
       });
+      // Issue #5100 (F3 of #5094): the bound account for the resolved selection.
+      const activeBinding = await resolveStockCopilotActiveBinding(ctx.env, userLogin, selection);
       const rawActivity = activity.listActivity(userLogin, ACTIVITY_LIMIT);
       // Issue #5085 (S6): the runs ledger is the source of truth for
       // "did the run happen" — lastCycle is a projection of the
@@ -379,6 +382,10 @@ export async function handleStockCopilotRoutes(
         selectionResolved: selection.resolved,
         activeBroker: selection.resolved ? selection.selection.brokerId : null,
         activeMode: selection.resolved ? selection.selection.mode : null,
+        // Issue #5100 (F3 of #5094): the bound account the copilot's
+        // order tools resolve against, masked. Null when unresolved
+        // or unbound.
+        activeBinding,
         // #3738: the registration's channel switches (the panel's
         // voice affordance renders from channels.voice.effective).
         channels: projectStockCopilotChannels(ctx),

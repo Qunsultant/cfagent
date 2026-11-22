@@ -23,6 +23,36 @@ describe("Issue #3838 — Stock Copilot Prompt Externalization & Alpaca HITL Inv
     expect(prompt).toBe(EXPECTED_PROMPTS.plain);
   });
 
+  it("bound prompt names the bound account, masked (#5100)", () => {
+    const prompt = buildOrchestratorSystemPrompt({
+      ...PROMPT_BASE,
+      activeBinding: { broker: "alpaca", mode: "paper", accountType: "stock", accountId: "PA-900" },
+    });
+    expect(prompt).toMatch(/Bound account: stock/);
+    expect(prompt).toContain("900");
+    // The full account id never reaches the prompt.
+    expect(prompt).not.toContain("PA-900");
+    expect(prompt).toMatch(/order tools execute against this account only/);
+  });
+
+  it("unbound prompt states no account is bound (#5100)", () => {
+    const prompt = buildOrchestratorSystemPrompt({ ...PROMPT_BASE, activeBinding: null });
+    expect(prompt).toMatch(/No account bound/);
+    expect(prompt).toMatch(/never issue an order tool call/);
+  });
+
+  it("stock copilot prompt names the bound account, masked (#5100)", async () => {
+    const { buildStockCopilotSystemPrompt } = await import(
+      "../src/agents/prompts/stockCopilotPrompt"
+    );
+    const prompt = buildStockCopilotSystemPrompt({
+      ...PROMPT_BASE,
+      activeBinding: { broker: "alpaca", mode: "paper", accountType: "stock", accountId: "PA-900" },
+    });
+    expect(prompt).toMatch(/Bound account: stock/);
+    expect(prompt).not.toContain("PA-900");
+  });
+
   it("activated Stock Copilot prompt uses externalized Alpaca trading capabilities and rules", async () => {
     const { buildStockCopilotSystemPrompt, STOCK_COPILOT_TRADING_RULE } = await import(
       "../src/agents/prompts/stockCopilotPrompt"

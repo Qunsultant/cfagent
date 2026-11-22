@@ -172,6 +172,12 @@ export const TRADE_COLUMN_MAP = {
   mode: "mode",
   stopPrice: "stop_price",
   timeInForce: "time_in_force",
+  // Issue #5100 (F3 of #5094): the resolved binding tuple, stamped on the
+  // draft at preview so execute can prove the draft's account.
+  accountId: "account_id",
+  accountType: "account_type",
+  bindingScope: "binding_scope",
+  bindingSource: "binding_source",
   createdAt: "created_at",
   updatedAt: "updated_at",
 } as const;

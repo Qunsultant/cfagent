@@ -205,6 +205,10 @@ export interface AutonomousOptionsAnalysisOptions {
   mode?: "paper" | "live";
   /** Issue #5189 — broker account scope, when the broker exposes several. */
   accountId?: string;
+  /** Issue #5100 (F3 of #5094): the asset class of the stamped
+   *  binding tuple (options for this callback); re-validated at fire
+   *  time with the accountId above. */
+  accountType?: string;
   symbols?: string[];
   /** Universe to scan (resolves to symbols via listings; overrides symbols). */
   universe?: string;
@@ -274,6 +278,14 @@ export interface AutonomousStrategyDiscoveryOptions {
   environment?: string;
   trigger?: JobRunTrigger;
   userLogin?: string;
+  /** Issue #5100 (F3 of #5094): the binding tuple stamped at
+   *  creation; the fire-time guard re-validates it. Absent on
+   *  payloads built before this field existed (refused at fire time
+   *  with FAILURE_ACCOUNT_BINDING_MISSING). */
+  brokerId?: string;
+  mode?: "live" | "paper";
+  accountType?: string;
+  accountId?: string;
   /** The arming schedule's id, when the caller knows it (recorded as
    *  run provenance; the SDK callback path supplies none). */
   scheduleId?: string;

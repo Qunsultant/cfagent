@@ -165,6 +165,42 @@ describe("job run record shape (#2964)", () => {
     expect(record.artifactRefs).toEqual(["pdf-key-1"]);
   });
 
+  it("carries the bound-account tuple on the record when present (#5100)", () => {
+    const record = buildJobRunRecord({
+      system: "orchestrator-schedule",
+      jobId: "s",
+      operation: "autonomousMarketScreen",
+      started: "2026-11-03T00:00:00.000Z",
+      finished: "2026-11-03T00:00:01.000Z",
+      outcome: "success",
+      triggeredBy: "scheduled",
+      accountType: "stock",
+      accountId: "PA-900",
+      bindingScope: "schedule",
+      bindingSource: "binding",
+    });
+    expect(record.accountType).toBe("stock");
+    expect(record.accountId).toBe("PA-900");
+    expect(record.bindingScope).toBe("schedule");
+    expect(record.bindingSource).toBe("binding");
+  });
+
+  it("omits the bound-account tuple when absent (#5100)", () => {
+    const record = buildJobRunRecord({
+      system: "orchestrator-schedule",
+      jobId: "s",
+      operation: "runPipelineJobSchedule",
+      started: "2026-11-03T00:00:00.000Z",
+      finished: "2026-11-03T00:00:01.000Z",
+      outcome: "success",
+      triggeredBy: "scheduled",
+    });
+    expect(record.accountType).toBeUndefined();
+    expect(record.accountId).toBeUndefined();
+    expect(record.bindingScope).toBeUndefined();
+    expect(record.bindingSource).toBeUndefined();
+  });
+
   it("rejects a failure without error text", () => {
     expect(() =>
       buildJobRunRecord({
@@ -305,6 +341,24 @@ describe("job run record stores (#2964)", () => {
     expect(runs[0].error).toBe("screen blew up");
     expect(runs[0].triggeredBy).toBe("manual");
     expect(store.latestByJob("s1")?.started).toBe("2026-11-03T00:00:03.000Z");
+  });
+
+  it("a skipped callback run persists its detail code and its firing tuple (#5100)", async () => {
+    const storage = new SqliteTestStorage();
+    const store = new SqlJobRunRecordStore(storage.sql as never);
+    await recordScheduleCallbackRun(
+      storage.sql as never,
+      "autonomousMarketScreen",
+      { userLogin: "alice", brokerId: "etrade", mode: "paper", accountType: "stock", accountId: "ET-GONE" },
+      { id: "sched-5100" },
+      async () => ({ outcome: "skipped", detail: "FAILURE_ACCOUNT_UNKNOWN" }),
+    );
+    const runs = store.listByJob("sched-5100");
+    expect(runs).toHaveLength(1);
+    expect(runs[0].outcome).toBe("skipped");
+    expect(runs[0].detail).toBe("FAILURE_ACCOUNT_UNKNOWN");
+    expect(runs[0].accountType).toBe("stock");
+    expect(runs[0].accountId).toBe("ET-GONE");
   });
 });
 

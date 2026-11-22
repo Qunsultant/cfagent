@@ -213,12 +213,20 @@ export function recordCronDispatchRun(
  * row, read from the firing schedule payload (recorded at creation).
  * A payload without them records no provenance — never a fresh ambient
  * read at fire time, never a guessed broker.
+ *
+ * Issue #5100 (F3 of #5094): the binding tuple rides the same way —
+ * read from the firing payload, so a refused run's skipped record
+ * still proves which account was (not) executed against.
  */
 function payloadProvenance(payload: unknown): {
   brokerId?: string;
   dataProviderId?: string;
   mode?: "live" | "paper";
   modeSource?: "pin" | "selection" | "inference";
+  accountType?: string;
+  accountId?: string;
+  bindingScope?: string;
+  bindingSource?: string;
 } {
   if (!payload || typeof payload !== "object") return {};
   const p = payload as Record<string, unknown>;
@@ -233,6 +241,10 @@ function payloadProvenance(payload: unknown): {
     ...(p.modeSource === "pin" || p.modeSource === "selection" || p.modeSource === "inference"
       ? { modeSource: p.modeSource }
       : {}),
+    ...(typeof p.accountType === "string" && p.accountType ? { accountType: p.accountType } : {}),
+    ...(typeof p.accountId === "string" && p.accountId ? { accountId: p.accountId } : {}),
+    ...(typeof p.bindingScope === "string" && p.bindingScope ? { bindingScope: p.bindingScope } : {}),
+    ...(typeof p.bindingSource === "string" && p.bindingSource ? { bindingSource: p.bindingSource } : {}),
   };
 }
 

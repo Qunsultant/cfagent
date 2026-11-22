@@ -320,6 +320,10 @@ export const ORM_CATALOGUE_ENTRIES: CatalogueEntry[] = [
         mode TEXT,
         stop_price REAL,
         time_in_force TEXT,
+        account_id TEXT,
+        account_type TEXT,
+        binding_scope TEXT,
+        binding_source TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       )

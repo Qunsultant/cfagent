@@ -87,7 +87,8 @@
  * were re-pointed to the new line in the same PR.
  */
 import type { Env } from "../types";
-import { BROKER_CATALOG, isBrokerId } from "../trading";
+import { BROKER_CATALOG, isBrokerId, type AccountBindingTuple } from "../trading";
+import { maskAccountId } from "../config/accountBindings";
 
 export interface OrchestratorPromptRoute {
   agent: string;
@@ -165,6 +166,15 @@ export interface OrchestratorPromptInput {
   activeBroker?: string;
   activeMode?: string;
   copilotExecutionMode?: "hitl" | "autonomous";
+  /**
+   * Issue #5100 (F3 of #5094): the resolved bound account for this
+   * turn. Three states: undefined = not resolved — the prompt stays
+   * byte-identical (the F4 seam contract + the #686/#879/#2719/#3838
+   * byte-identity pins); null = resolved unbound — the prompt states
+   * "No account bound"; a tuple = resolved bound — the prompt names
+   * the account (accountType + masked accountId).
+   */
+  activeBinding?: AccountBindingTuple | null;
 }
 
 export interface ResolvedPromptBrokerTools {
@@ -178,6 +188,21 @@ export interface ResolvedPromptBrokerTools {
   ordersTool: string;
   cancelBracketTool: string;
   executionPolicy: "hitl" | "autonomous";
+}
+
+/**
+ * Issue #5100 (F3 of #5094): the bound-account line for copilot
+ * prompts, shared by both builders. Undefined (not resolved) renders
+ * nothing, keeping the prompt byte-identical; null (resolved unbound)
+ * states "No account bound"; a tuple names the bound account
+ * (accountType + masked accountId — never a full id in a prompt).
+ */
+export function bindingPromptLine(activeBinding?: AccountBindingTuple | null): string {
+  if (activeBinding === undefined) return "";
+  if (activeBinding === null) {
+    return "\nNo account bound: order tools refuse until an account is bound — answer read-only questions, and never issue an order tool call.";
+  }
+  return `\nBound account: ${activeBinding.accountType} ${maskAccountId(activeBinding.accountId)} — order tools execute against this account only.`;
 }
 
 export function resolvePromptBrokerTools(
@@ -333,7 +358,7 @@ Agentic Best Practices & Workflow Rules:
 3. RAG & Knowledge Retrieval: If 'tool_openaimp_knowledge_search' or 'tool_openaimp_query_platform_knowledge' returns matching documents, cite them accurately.
 4. Human-in-the-Loop (HITL) Execution: For financial operations or task proposals, always require human confirmation. When a user approves (or mentions a draft ID like pay_xxx or task_xxx), call 'tool_openaimp_confirm_payment_draft' with decision: 'approved'.
 5. Multi-Turn Context & Session Memory: Respect the active session memory facts shown above. When the user asks to remember a preference, call 'tool_openaimp_manage_session_memory' with action: 'remember'.
-6. Broker-Neutral Trading & Market Screening (${brokerTools.brokerLabel} ${brokerTools.modeLabel}): When the user asks to run a stock screen over a universe (e.g. NASDAQ100, SP500, or ALL universes), invoke 'tool_openaimp_run_stock_screen' with that universe. When the user asks to screen options strategies over a universe (e.g. bull put credit spreads in NASDAQ100 with max loss <= $30 and max profit > $0), invoke 'tool_openaimp_run_options_strategy_screen' with the structured constraints (strategyType, maxLoss, minProfit) — never deflect that request to a UI workflow. When the user asks for a listings-style filter scan (by RSI, market cap, sector, price, gainers/losers across listings), invoke 'tool_openaimp_etrade_market_scan'. Active broker is ${brokerTools.brokerLabel} (${brokerTools.modeLabel}) — never ask which broker to use. For quotes invoke '${brokerTools.quoteTool}'. ${brokerTools.executionPolicy === "autonomous" ? `Autonomous mode is active: for trade orders (buy/sell/bracket), invoke '${brokerTools.executeTool}' directly.` : `For trade orders (buy/sell/bracket), ALWAYS invoke '${brokerTools.previewTool}' in one call. Only execute via '${brokerTools.executeTool}' when the user explicitly confirms approval.`} Never state an order price without its source + timestamp (user limit, or live quote + provider + time); missing \u2192 ask for the limit, never guess. A failed quote tool is a failure, never an estimated price.
+6. Broker-Neutral Trading & Market Screening (${brokerTools.brokerLabel} ${brokerTools.modeLabel}): When the user asks to run a stock screen over a universe (e.g. NASDAQ100, SP500, or ALL universes), invoke 'tool_openaimp_run_stock_screen' with that universe. When the user asks to screen options strategies over a universe (e.g. bull put credit spreads in NASDAQ100 with max loss <= $30 and max profit > $0), invoke 'tool_openaimp_run_options_strategy_screen' with the structured constraints (strategyType, maxLoss, minProfit) — never deflect that request to a UI workflow. When the user asks for a listings-style filter scan (by RSI, market cap, sector, price, gainers/losers across listings), invoke 'tool_openaimp_etrade_market_scan'. Active broker is ${brokerTools.brokerLabel} (${brokerTools.modeLabel}) — never ask which broker to use. For quotes invoke '${brokerTools.quoteTool}'. ${brokerTools.executionPolicy === "autonomous" ? `Autonomous mode is active: for trade orders (buy/sell/bracket), invoke '${brokerTools.executeTool}' directly.` : `For trade orders (buy/sell/bracket), ALWAYS invoke '${brokerTools.previewTool}' in one call. Only execute via '${brokerTools.executeTool}' when the user explicitly confirms approval.`} Never state an order price without its source + timestamp (user limit, or live quote + provider + time); missing \u2192 ask for the limit, never guess. A failed quote tool is a failure, never an estimated price.${bindingPromptLine(input.activeBinding)}
 7. Be structured, transparent, accurate, and professional. Avoid repeating internal tool call boilerplate.
 8. Background execution: MCP capabilities return queued job IDs instead of final results. Tell the user the job ID, and use 'tool_openaimp_get_async_job' or 'tool_openaimp_list_async_jobs' only when they ask for status or results. Never imply queued work is already complete.${input.stockCopilotMcpActive ? `\n\n${input.stockCopilotCapability ? buildStockCopilotMcpSteering(input.stockCopilotCapability) : STOCK_COPILOT_MCP_STEERING}` : ""}`;
   return withRetrievedContentRule(prompt, Boolean(memoryContext || vectorContext || optionsResearchContext || bizCopilotTenantContext || bizCopilotAccountContext || bizCopilotChannelContext));

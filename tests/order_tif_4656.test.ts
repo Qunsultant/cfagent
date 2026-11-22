@@ -20,6 +20,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { handleBrokerOrderRoutes, type BrokerOrderRouteContext } from "../src/agents/routes/brokerOrders";
 import { TradingPlatformRegistry } from "../src/trading/registry";
+import { upsertAccountBinding } from "../src/services/accountBindings";
 import { normalizeTimeInForce, TIME_IN_FORCE_VALUES } from "../src/trading";
 import { etradeOrderTerm } from "../src/trading/etrade/platform";
 import { PublicTradingPlatform } from "../src/trading/public/platform";
@@ -66,6 +67,49 @@ const baseCtx = (store: ReturnType<typeof makeStore>): BrokerOrderRouteContext =
     schedule: async () => ({ id: "sched-1" }) as never,
     cancelSchedule: async () => true,
   }) as BrokerOrderRouteContext;
+
+/** The #5112 in-memory DO-namespace stub, for seeding bindings. */
+function makeMemoryDoNamespace() {
+  const store = new Map<string, string>();
+  const stub = {
+    async fetch(request: Request): Promise<Response> {
+      const payload = (await request.json()) as { op: string; key: string; value?: string };
+      if (payload.op === "get") {
+        return Response.json({ ok: true, value: store.get(payload.key) ?? null });
+      }
+      if (payload.op === "put" && payload.value !== undefined) {
+        store.set(payload.key, payload.value);
+        return Response.json({ ok: true });
+      }
+      if (payload.op === "delete") {
+        store.delete(payload.key);
+        return Response.json({ ok: true });
+      }
+      return new Response("Bad request", { status: 400 });
+    },
+  };
+  return {
+    idFromName: () => "singleton" as unknown as DurableObjectId,
+    get: () => stub as unknown as DurableObjectStub,
+  };
+}
+
+/**
+ * Issue #5100 (F3 of #5094): the route refuses unbound previews and
+ * executions, so the chain test builds its context on a
+ * SESSION_STORE stub with alice's Alpaca paper stock account bound.
+ */
+async function boundCtx(store: ReturnType<typeof makeStore>): Promise<BrokerOrderRouteContext> {
+  const env = { SESSION_STORE: makeMemoryDoNamespace() } as never;
+  await upsertAccountBinding(env as never, "alice", {
+    broker: "alpaca",
+    mode: "paper",
+    accountType: "stock",
+    scope: "tenant",
+    accountId: "PA-900",
+  });
+  return { ...baseCtx(store), env } as BrokerOrderRouteContext;
+}
 
 const req = (path: string, body: unknown, login = "alice") =>
   new Request(`https://agent.internal${path}`, {
@@ -168,6 +212,7 @@ describe("#4656 — the approved time-in-force survives preview → draft → ex
 
   it("passes the normalized value to the platform and stores it on the draft", async () => {
     const store = makeStore();
+    const ctx = await boundCtx(store);
     const res = await handleBrokerOrderRoutes(
       req("/broker/order/preview", {
         broker: "alpaca",
@@ -181,7 +226,7 @@ describe("#4656 — the approved time-in-force survives preview → draft → ex
       urlOf("/broker/order/preview"),
       "/broker/order/preview",
       "alice",
-      baseCtx(store),
+      ctx,
     );
     expect(res!.status).toBe(200);
     expect(stub.previewed[0].timeInForce).toBe("gtc");
@@ -193,7 +238,7 @@ describe("#4656 — the approved time-in-force survives preview → draft → ex
       urlOf("/broker/order/execute"),
       "/broker/order/execute",
       "alice",
-      baseCtx(store),
+      ctx,
     );
     expect(exec!.status).toBe(200);
     expect(stub.placed[0].timeInForce).toBe("gtc");

@@ -18,6 +18,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { buildOrderPreviewBody, type OrderPreviewInput } from "../src/client/trading/orderPreviewBody";
 import { handleBrokerOrderRoutes, type BrokerOrderRouteContext } from "../src/agents/routes/brokerOrders";
 import { TradingPlatformRegistry } from "../src/trading/registry";
+import { upsertAccountBinding } from "../src/services/accountBindings";
 import { ORM_CATALOGUE_ENTRIES } from "../src/data/schemaComponent/ormCatalogue";
 import { REMAINDER_CATALOGUE_ENTRIES } from "../src/data/schemaComponent/remainderCatalogue";
 import { TRADE_COLUMN_MAP } from "../src/data/ormColumnMaps";
@@ -97,6 +98,49 @@ const baseCtx = (store: ReturnType<typeof makeStore>): BrokerOrderRouteContext =
     cancelSchedule: async () => true,
   }) as BrokerOrderRouteContext;
 
+/** The #5112 in-memory DO-namespace stub, for seeding bindings. */
+function makeMemoryDoNamespace() {
+  const store = new Map<string, string>();
+  const stub = {
+    async fetch(request: Request): Promise<Response> {
+      const payload = (await request.json()) as { op: string; key: string; value?: string };
+      if (payload.op === "get") {
+        return Response.json({ ok: true, value: store.get(payload.key) ?? null });
+      }
+      if (payload.op === "put" && payload.value !== undefined) {
+        store.set(payload.key, payload.value);
+        return Response.json({ ok: true });
+      }
+      if (payload.op === "delete") {
+        store.delete(payload.key);
+        return Response.json({ ok: true });
+      }
+      return new Response("Bad request", { status: 400 });
+    },
+  };
+  return {
+    idFromName: () => "singleton" as unknown as DurableObjectId,
+    get: () => stub as unknown as DurableObjectStub,
+  };
+}
+
+/**
+ * Issue #5100 (F3 of #5094): the route refuses unbound previews and
+ * executions, so the chain tests build their context on a
+ * SESSION_STORE stub with alice's Alpaca paper stock account bound.
+ */
+async function boundCtx(store: ReturnType<typeof makeStore>): Promise<BrokerOrderRouteContext> {
+  const env = { SESSION_STORE: makeMemoryDoNamespace() } as never;
+  await upsertAccountBinding(env as never, "alice", {
+    broker: "alpaca",
+    mode: "paper",
+    accountType: "stock",
+    scope: "tenant",
+    accountId: "PA-900",
+  });
+  return { ...baseCtx(store), env } as BrokerOrderRouteContext;
+}
+
 const req = (path: string, body: unknown, login = "alice") =>
   new Request(`https://agent.internal${path}`, {
     method: "POST",
@@ -169,6 +213,7 @@ describe("#4654 — the stop price survives preview → draft → execute", () =
 
   it("stores the previewed stop price on the draft and forwards it on execute (STOP)", async () => {
     const store = makeStore();
+    const ctx = await boundCtx(store);
     const previewRes = await handleBrokerOrderRoutes(
       req("/broker/order/preview", {
         broker: "alpaca",
@@ -181,7 +226,7 @@ describe("#4654 — the stop price survives preview → draft → execute", () =
       urlOf("/broker/order/preview"),
       "/broker/order/preview",
       "alice",
-      baseCtx(store),
+      ctx,
     );
     expect(previewRes!.status).toBe(200);
     expect(stub.previewed[0].stopPrice).toBe(95.5);
@@ -193,7 +238,7 @@ describe("#4654 — the stop price survives preview → draft → execute", () =
       urlOf("/broker/order/execute"),
       "/broker/order/execute",
       "alice",
-      baseCtx(store),
+      ctx,
     );
     expect(executeRes!.status).toBe(200);
     expect(stub.placed).toHaveLength(1);
@@ -213,6 +258,11 @@ describe("#4654 — the stop price survives preview → draft → execute", () =
         totalValue: 100,
         status: "previewed",
         broker: "alpaca",
+        mode: "paper",
+        accountType: "stock",
+        accountId: "PA-900",
+        bindingScope: "copilot",
+        bindingSource: "binding",
         stopPrice: 95.5,
         createdAt: "2026-11-16T00:00:00.000Z",
         updatedAt: "2026-11-16T00:00:00.000Z",
@@ -223,7 +273,7 @@ describe("#4654 — the stop price survives preview → draft → execute", () =
       urlOf("/broker/order/execute"),
       "/broker/order/execute",
       "alice",
-      baseCtx(store),
+      await boundCtx(store),
     );
     expect(res!.status).toBe(200);
     expect(stub.placed[0].limitPrice).toBe(100);
@@ -242,6 +292,11 @@ describe("#4654 — the stop price survives preview → draft → execute", () =
         totalValue: 90,
         status: "previewed",
         broker: "alpaca",
+        mode: "paper",
+        accountType: "stock",
+        accountId: "PA-900",
+        bindingScope: "copilot",
+        bindingSource: "binding",
         createdAt: "2026-11-16T00:00:00.000Z",
         updatedAt: "2026-11-16T00:00:00.000Z",
       },
@@ -251,7 +306,7 @@ describe("#4654 — the stop price survives preview → draft → execute", () =
       urlOf("/broker/order/execute"),
       "/broker/order/execute",
       "alice",
-      baseCtx(store),
+      await boundCtx(store),
     );
     expect(res!.status).toBe(200);
     expect(stub.placed[0].stopPrice).toBe(90);

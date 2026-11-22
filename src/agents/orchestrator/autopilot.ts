@@ -13,6 +13,8 @@ import type { DatabaseORM } from "../../orm";
 import type { AgentName, Env } from "../../types";
 import { getValidTokens, etradeIdentityFromLogin } from "../../security/etradeOAuth";
 import { ETradeRestClient } from "../../trading";
+import { maskAccountId } from "../../config/accountBindings";
+import type { ExecutionAccountContext } from "../../services/accountBindings";
 import { AGENT_DIDS } from "../did";
 import {
   attestVerdict,
@@ -108,7 +110,17 @@ export function incrementAutopilotOrdersToday(ctx: AutopilotContext): void {
 }
 
 /** Best-effort broker balance snapshot; null when unavailable. */
-export async function fetchBrokerBalanceSnapshot(ctx: AutopilotContext, userLogin: string, requestedEnv: unknown): Promise<unknown | null> {
+export async function fetchBrokerBalanceSnapshot(
+  ctx: AutopilotContext,
+  userLogin: string,
+  requestedEnv: unknown,
+  // Issue #5100 (F3 of #5094): the validated binding resolution the
+  // snapshot was requested for. The snapshot implementation itself is
+  // single-broker (#4571 owns any routing change); the resolution only
+  // names the binding in the unavailable warn, masked — never a full
+  // account id in logs.
+  binding?: ExecutionAccountContext,
+): Promise<unknown | null> {
   try {
     // Issue #2442 S3: the snapshot verdict resolves identity via the
     // alias record, so it agrees with the panel instead of missing
@@ -126,6 +138,13 @@ export async function fetchBrokerBalanceSnapshot(ctx: AutopilotContext, userLogi
     structuredLog.warn("autopilot.balance_snapshot_unavailable", {
       message: "[OrchestratorAgent] Autopilot: balance snapshot unavailable:",
       error: err instanceof Error ? err.message : String(err),
+      ...(binding
+        ? {
+            broker: binding.broker,
+            accountType: binding.accountType,
+            accountId: binding.accountId ? maskAccountId(binding.accountId) : null,
+          }
+        : {}),
     });
     return null;
   }
@@ -166,9 +185,13 @@ export async function evaluateAndRecordAutopilotVerdict(ctx: AutopilotContext, p
   intent: OrderIntent;
   draftId?: string | null;
   dryRun?: boolean;
+  /** Issue #5100 (F3 of #5094): the validated binding resolution,
+   *  recorded on the verdict. (The resolved context, not just the
+   *  tuple — the verdict also carries the binding scope + source.) */
+  binding?: ExecutionAccountContext;
 }): Promise<{ verdict: PolicyVerdict; attestation: PolicyVerdictAttestation }> {
   const state = getAutopilotState(ctx, );
-  const balance = await fetchBrokerBalanceSnapshot(ctx, params.userLogin, params.requestedEnv);
+  const balance = await fetchBrokerBalanceSnapshot(ctx, params.userLogin, params.requestedEnv, params.binding);
   const accountState: AutopilotAccountState = buildAccountStateFromBalance(balance, {
     ordersToday: state.ordersToday,
     peakEquity: state.peakEquity,
@@ -218,6 +241,19 @@ export async function evaluateAndRecordAutopilotVerdict(ctx: AutopilotContext, p
       proposerDid: attestation.proposerDid,
       authorizerDid: attestation.authorizerDid,
       createdAt: verdict.evaluatedAt,
+      // Issue #5100 (F3 of #5094): the validated binding resolution,
+      // recorded on the verdict so the record proves which account the
+      // evaluation ran against. Absent when the caller evaluated
+      // without a resolution (legacy callers).
+      ...(params.binding
+        ? {
+            broker: params.binding.broker,
+            accountType: params.binding.accountType,
+            accountId: params.binding.accountId ?? null,
+            bindingScope: params.binding.scope,
+            bindingSource: params.binding.source,
+          }
+        : {}),
     });
   } catch (err) {
     structuredLog.warn("autopilot.persist_verdict_failed", {

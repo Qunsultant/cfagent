@@ -1,6 +1,60 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { DatabaseORM } from "../src/orm";
 import { MockSqlStorage } from "./mock-sql";
+import { upsertAccountBinding } from "../src/services/accountBindings";
+
+/**
+ * Issue #5100 (F3 of #5094): NLQ arming resolves the tenant's broker
+ * selection server-side before stamping the binding tuple. The test
+ * tenant selects Alpaca paper; the binding is seeded per test below.
+ */
+vi.mock("../src/services/providerConnections", () => ({
+  resolveScreenSelection: async () => ({
+    resolved: true,
+    selection: {
+      connectionId: "alpaca:TEST:scheduler_test_trader",
+      brokerId: "alpaca",
+      environment: "TEST",
+      mode: "paper",
+      externalAccountId: "PA-900",
+    },
+  }),
+}));
+
+/** The #5112 in-memory DO-namespace stub, for seeding bindings. */
+function makeMemoryDoNamespace() {
+  const store = new Map<string, string>();
+  const stub = {
+    async fetch(request: Request): Promise<Response> {
+      const payload = (await request.json()) as { op: string; key: string; value?: string };
+      if (payload.op === "get") {
+        return Response.json({ ok: true, value: store.get(payload.key) ?? null });
+      }
+      if (payload.op === "put" && payload.value !== undefined) {
+        store.set(payload.key, payload.value);
+        return Response.json({ ok: true });
+      }
+      if (payload.op === "delete") {
+        store.delete(payload.key);
+        return Response.json({ ok: true });
+      }
+      return new Response("Bad request", { status: 400 });
+    },
+  };
+  return {
+    idFromName: () => "singleton" as unknown as DurableObjectId,
+    get: () => stub as unknown as DurableObjectStub,
+  };
+}
+
+async function seedTestBindings(env: Env, login: string): Promise<void> {
+  for (const binding of [
+    { broker: "alpaca", mode: "paper", accountType: "stock", scope: "tenant", accountId: "PA-900" },
+    { broker: "alpaca", mode: "paper", accountType: "options", scope: "tenant", accountId: "PA-900" },
+  ] as const) {
+    await upsertAccountBinding(env as never, login, binding);
+  }
+}
 import {
   planNLQ,
   executeNLQQueryAsync,
@@ -118,7 +172,7 @@ describe("NLQ scheduling executes against the real scheduling port (issue #109)"
   let env: Env;
   const sessionId = "scheduler_test_trader";
 
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.restoreAllMocks();
     const sql = new MockSqlStorage();
     orm = new DatabaseORM(sql);
@@ -135,7 +189,10 @@ describe("NLQ scheduling executes against the real scheduling port (issue #109)"
       ET_API_KEY: "sandbox_consumer_key_123",
       ET_API_SECRET: "sandbox_consumer_secret_456",
       ET_BASE_URL: "https://apisb.etrade.com/v1",
+      // Issue #5100 (F3 of #5094): the binding store for the test login.
+      SESSION_STORE: makeMemoryDoNamespace(),
     } as Env;
+    await seedTestBindings(env, sessionId);
   });
 
   it("creates a delayed reminder through schedule() and returns the port's real id", async () => {
@@ -415,7 +472,7 @@ describe("NLQ scheduling F1 allow-list (issue #3122)", () => {
   let env: Env;
   const sessionId = "scheduler_test_trader";
 
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.restoreAllMocks();
     const sql = new MockSqlStorage();
     orm = new DatabaseORM(sql);
@@ -430,7 +487,10 @@ describe("NLQ scheduling F1 allow-list (issue #3122)", () => {
       ET_API_KEY: "sandbox_consumer_key_123",
       ET_API_SECRET: "sandbox_consumer_secret_456",
       ET_BASE_URL: "https://apisb.etrade.com/v1",
+      // Issue #5100 (F3 of #5094): the binding store for the test login.
+      SESSION_STORE: makeMemoryDoNamespace(),
     } as Env;
+    await seedTestBindings(env, sessionId);
   });
 
   function createPlan(callback: string): NLQPlan {
@@ -522,5 +582,74 @@ describe("NLQ scheduling F1 allow-list (issue #3122)", () => {
       terms: "",
     });
     expect(allowed.success).toBe(true);
+  });
+});
+
+/** Issue #5100 (F3 of #5094): NLQ arming resolves + stamps the bound account. */
+describe("NLQ scheduling enforces the bound account (#5100)", () => {
+  let orm: DatabaseORM;
+  let env: Env;
+  const sessionId = "scheduler_test_trader";
+
+  beforeEach(async () => {
+    vi.restoreAllMocks();
+    const sql = new MockSqlStorage();
+    orm = new DatabaseORM(sql);
+    orm.initializeSchema(sessionId);
+    env = {
+      APP_ENV: "TEST",
+      APP_BASE_URL: "https://agent.openaimp.com",
+      AI_SEARCH_ENDPOINT: "https://ai-search.internal",
+      ETRADE_ENVIRONMENT: "sandbox",
+      FEATURE_SCHEDULE_NLQ: "1",
+      ET_API_KEY: "sandbox_consumer_key_123",
+      ET_API_SECRET: "sandbox_consumer_secret_456",
+      ET_BASE_URL: "https://apisb.etrade.com/v1",
+      SESSION_STORE: makeMemoryDoNamespace(),
+    } as Env;
+    await seedTestBindings(env, sessionId);
+  });
+
+  const marketScreenPlan = (): NLQPlan => ({
+    domain: "scheduling",
+    operation: "create",
+    scheduleData: {
+      action: "create",
+      scheduleType: "interval",
+      intervalSeconds: 3600,
+      callback: "autonomousMarketScreen",
+      description: "Hourly market screen",
+      universe: "NASDAQ100",
+    },
+    terms: "",
+    role: "any",
+    since: null,
+    limit: 1,
+  });
+
+  it("bound arming stamps the resolved tuple on the armed payload", async () => {
+    const port = new FakeSchedulingPort();
+    const result = await executeNLQQueryAsync(orm, sessionId, marketScreenPlan(), env, sessionId, undefined, {
+      schedulingPort: port,
+    });
+    expect(result.status).toBe("scheduled");
+    expect(port.calls).toHaveLength(1);
+    const payload = port.calls[0].args[2] as Record<string, unknown>;
+    expect(payload.brokerId).toBe("alpaca");
+    expect(payload.mode).toBe("paper");
+    expect(payload.accountType).toBe("stock");
+    expect(payload.accountId).toBe("PA-900");
+  });
+
+  it("arming without a binding is refused and arms nothing", async () => {
+    const port = new FakeSchedulingPort();
+    const result = await executeNLQQueryAsync(orm, sessionId, marketScreenPlan(), env, "nobody", undefined, {
+      schedulingPort: port,
+    });
+    expect(result.status).toBe("error");
+    expect(result.summary).toMatch(/FAILURE_ACCOUNT_BINDING_MISSING/);
+    expect(result.summary).toMatch(/NOT created/);
+    expect(port.calls).toHaveLength(0);
+    expect(port.items).toHaveLength(0);
   });
 });
