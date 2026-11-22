@@ -913,7 +913,43 @@ export const agentReferralRules = sqliteTable("agent_referral_rules", {
   redemptionScope: text("redemption_scope").notNull(),
   /** Issue #5229 (slice 2.31): ms from earn to expiry; 0 = never expires. Seeded 90 days by migration 0069. */
   expiryPeriodMs: integer("expiry_period_ms").notNull(),
+  /** Issue #6141: trial days earned per referred first verified paid run. Seeded 7 by migration 0082. */
+  extensionDays: integer("extension_days").notNull(),
+  /** Issue #6141: trial days granted to a referred user on signup via the link. Seeded 14 by migration 0082. */
+  referredTrialDays: integer("referred_trial_days").notNull(),
+  /** Issue #6141: max trial-extension grants per referrer per UTC day. Seeded 3 by migration 0082. */
+  maxExtensionsPerDay: integer("max_extensions_per_day").notNull(),
+  /** Issue #6141: max trial-extension grants per referrer per UTC calendar month. Seeded 10 by migration 0082. */
+  maxExtensionsPerMonth: integer("max_extensions_per_month").notNull(),
+  /** Issue #6141: plan whose trial the referred grant activates; null = disabled. Seeded null by migration 0082. */
+  referralTrialPlanId: text("referral_trial_plan_id"),
+  /** Issue #6141: share-message template; must contain {link}. Seeded by migration 0082. */
+  shareMessageTemplate: text("share_message_template").notNull(),
   updatedAtMs: integer("updated_at_ms").notNull(),
+});
+
+/**
+ * Issue #6141 — one trial-extension grant per referred user, ever.
+ * The ledger is the audit for every grant (caps count its rows,
+ * the profile panel reads its sums) and the banked-apply path
+ * consumes its rows oldest-expiring-first. TIME only (D-2.25):
+ * it extends a trial's periodEndMs or banks as free days — it
+ * never touches a commercial balance, never mints a subscription,
+ * never pays for a plan, never converts to credits. Column names
+ * match migration 0082 exactly; the test pins the two together.
+ */
+export const agentReferralTrialExtensions = sqliteTable("agent_referral_trial_extensions", {
+  id: text("id").primaryKey(),
+  referrerUserId: text("referrer_user_id").notNull(),
+  referredUserId: text("referred_user_id").notNull(),
+  tenantId: text("tenant_id").notNull(),
+  daysGranted: integer("days_granted").notNull(),
+  status: text("status").notNull(),
+  subscriptionId: text("subscription_id"),
+  grantedAtMs: integer("granted_at_ms").notNull(),
+  expiresAtMs: integer("expires_at_ms"),
+  appliedAtMs: integer("applied_at_ms"),
+  consumedAtMs: integer("consumed_at_ms"),
 });
 
 export const agentReferralEarnings = sqliteTable("agent_referral_earnings", {

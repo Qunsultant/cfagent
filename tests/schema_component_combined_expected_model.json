@@ -1534,6 +1534,36 @@
           "name": "expiry_period_ms",
           "type": "INTEGER",
           "pk": 0
+        },
+        {
+          "name": "extension_days",
+          "type": "INTEGER",
+          "pk": 0
+        },
+        {
+          "name": "referred_trial_days",
+          "type": "INTEGER",
+          "pk": 0
+        },
+        {
+          "name": "max_extensions_per_day",
+          "type": "INTEGER",
+          "pk": 0
+        },
+        {
+          "name": "max_extensions_per_month",
+          "type": "INTEGER",
+          "pk": 0
+        },
+        {
+          "name": "referral_trial_plan_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "share_message_template",
+          "type": "TEXT",
+          "pk": 0
         }
       ],
       "constraints": {}
@@ -5605,6 +5635,66 @@
         {
           "name": "value",
           "type": "TEXT",
+          "pk": 0
+        }
+      ],
+      "constraints": {}
+    },
+    "agent_referral_trial_extensions": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "pk": 1
+        },
+        {
+          "name": "referrer_user_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "referred_user_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "tenant_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "days_granted",
+          "type": "INTEGER",
+          "pk": 0
+        },
+        {
+          "name": "status",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "subscription_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "granted_at_ms",
+          "type": "INTEGER",
+          "pk": 0
+        },
+        {
+          "name": "expires_at_ms",
+          "type": "INTEGER",
+          "pk": 0
+        },
+        {
+          "name": "applied_at_ms",
+          "type": "INTEGER",
+          "pk": 0
+        },
+        {
+          "name": "consumed_at_ms",
+          "type": "INTEGER",
           "pk": 0
         }
       ],
@@ -9878,6 +9968,21 @@
         "finished"
       ],
       "unique": true
+    },
+    "agent_referral_trial_extensions_referrer_idx": {
+      "table": "agent_referral_trial_extensions",
+      "columns": [
+        "referrer_user_id",
+        "granted_at_ms"
+      ],
+      "unique": false
+    },
+    "agent_referral_trial_extensions_referred_idx": {
+      "table": "agent_referral_trial_extensions",
+      "columns": [
+        "referred_user_id"
+      ],
+      "unique": false
     },
     "idx_job_stage_events_run": {
       "table": "job_stage_events",

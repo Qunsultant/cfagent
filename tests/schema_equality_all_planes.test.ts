@@ -2,8 +2,9 @@
  * #4282 P4 — schema-equality pin: all planes, one clean instance.
  *
  * What this suite pins (measured, never assumed):
- *  - the combined catalogue (D1 + DO + ORM + remainder, 440 entries)
- *    builds the frozen combined model exactly: 184 tables / 107 indexes. *  - the frozen combined model is the deterministic union of the four
+ *  - the combined catalogue (D1 + DO + ORM + remainder, 452 entries)
+ *    builds the frozen combined model exactly: 185 tables / 109 indexes.
+ *  - the frozen combined model is the deterministic union of the four
  *    per-plane fixtures, with ZERO cross-plane disagreements (column
  *    type / pk / constraint / index). The union is recomputed from the
  *    four fixtures in this suite and compared deep-equal to the frozen
@@ -71,13 +72,15 @@ function fixtureSha256(name: string): string {
 }
 
 describe("schema equality — all planes (#4282 P4)", () => {
-  it("the frozen combined baseline is the clean-checkout seed (184 tables / 107 indexes)", () => {
+  it("the frozen combined baseline is the clean-checkout seed (185 tables / 109 indexes)", () => {
     const model = combinedExpectedModel();
     // #6072 adds migration 0080 (agent_screener_task_entries table):
     // 183 → 184 tables. #6099 adds migration 0081 (job_run_records
     // unique identity index): 106 → 107 indexes.
-    expect(Object.keys(model.tables).length).toBe(184);
-    expect(Object.keys(model.indexes).length).toBe(107);
+    // #6141 adds migration 0082 (referral trial-extension ledger
+    // table + 2 indexes): 184 → 185 tables, 107 → 109 indexes.
+    expect(Object.keys(model.tables).length).toBe(185);
+    expect(Object.keys(model.indexes).length).toBe(109);
     expect(fixtureSha256("schema_component_combined_expected_model.json")).toBe(
       COMBINED_FIXTURE_SHA256,
     );
@@ -92,8 +95,10 @@ describe("schema equality — all planes (#4282 P4)", () => {
     // #6072 adds migration 0080 (agent_screener_task_entries
     // table): d1 tables 103 → 104. #6099 adds migration 0081
     // (job_run_records unique identity index): d1 indexes 62 → 63.
+    // #6141 adds migration 0082 (referral trial-extension ledger
+    // table + 2 indexes): d1 tables 104 → 105, d1 indexes 63 → 65.
     const counts: Record<string, [number, number]> = {
-      d1: [104, 63],
+      d1: [105, 65],
       do: [70, 41],
       orm: [13, 10],
       remainder: [19, 15],
@@ -128,7 +133,8 @@ describe("schema equality — all planes (#4282 P4)", () => {
     expect(new Set(executedCodes).size).toBe(
       COMBINED_CATALOGUE_ENTRIES.length,
     );
-    expect(COMBINED_CATALOGUE_ENTRIES.length).toBe(443);    // Issue #5229 adds migration 0069 (agent_referral_rules
+    expect(COMBINED_CATALOGUE_ENTRIES.length).toBe(452);
+    // Issue #5229 adds migration 0069 (agent_referral_rules
     // expiry_period_ms column): 410 entries resolve to 421 statements.
     // Issue #5086 adds migration 0070 (otel_config_overrides table):
     // 412 entries resolve to 423 statements.
@@ -158,7 +164,10 @@ describe("schema equality — all planes (#4282 P4)", () => {
     // agent_screener_task_entries table) and #6099 adds 3 entries
     // (migration 0081: job_run_records tenant_id + projected_at_ms
     // + unique identity index): 450 → 454.
-    expect(executedStatements).toBe(454);    const actual = instance.introspect();
+    // Issue #6141 adds 9 entries (migration 0082: 6 rule columns +
+    // ledger table + 2 indexes): 454 → 463.
+    expect(executedStatements).toBe(463);
+    const actual = instance.introspect();
     const diff = diffSchema(actual, combinedExpectedModel());
     expect(isEmptyDiff(diff)).toBe(true);
     expect(diff.missingTables).toEqual([]);

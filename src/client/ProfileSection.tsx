@@ -34,6 +34,7 @@
  */
 import React, { useEffect, useRef, useState } from "react";
 import { Button, Card, Notice, Spinner, Stack, TextInput } from "./components/ui";
+import { ReferralTrialSection } from "./ReferralTrialSection";
 import { PROFILE_LIMITS } from "../config/profileLimits";
 import {
   displayNameFor,
@@ -154,48 +155,53 @@ export function ProfileSection({ userLogin }: ProfileSectionProps) {
   }
 
   return (
-    <Card>
-      <Stack gap="2">
-        <p>
-          Signed in as: <strong>{userLogin}</strong>
-          {profile.displayName ? ` — showing as ${displayNameFor(profile)}` : ""}
-        </p>
-        <TextInput
-          label="Display name"
-          hint="Shown instead of your login. Leave empty to show your login."
-          value={displayName}
-          maxLength={PROFILE_LIMITS.displayNameMaxLength}
-          error={fieldErrors.displayName}
-          onChange={(event) => setDisplayName(event.target.value)}
-        />
-        <TextInput
-          label="Phone"
-          hint="Optional. Used only to contact you about your account — never for sign-in, and not verified."
-          value={phone}
-          maxLength={PROFILE_LIMITS.phoneMaxLength}
-          inputMode="tel"
-          error={fieldErrors.phone}
-          onChange={(event) => setPhone(event.target.value)}
-        />
-        <TextInput
-          label="Email"
-          hint="Optional. Contact email — used only to contact you about your account. Changing it does not change your sign-in login, and it is not verified."
-          value={email}
-          maxLength={PROFILE_LIMITS.emailMaxLength}
-          inputMode="email"
-          error={fieldErrors.email}
-          onChange={(event) => setEmail(event.target.value)}
-        />
-        {saveError && <Notice tone="danger">{saveError}</Notice>}
-        {savedMessage && (
-          <Notice tone={savedDuplicate ? "info" : "success"}>{savedMessage}</Notice>
-        )}
-        <div>
-          <Button type="button" variant="primary" disabled={saving} onClick={() => void save()} loading={saving}>
-            Save profile
-          </Button>
-        </div>
-      </Stack>
-    </Card>
+    <>
+      <Card>
+        <Stack gap="2">
+          <p>
+            Signed in as: <strong>{userLogin}</strong>
+            {profile.displayName ? ` — showing as ${displayNameFor(profile)}` : ""}
+          </p>
+          <TextInput
+            label="Display name"
+            hint="Shown instead of your login. Leave empty to show your login."
+            value={displayName}
+            maxLength={PROFILE_LIMITS.displayNameMaxLength}
+            error={fieldErrors.displayName}
+            onChange={(event) => setDisplayName(event.target.value)}
+          />
+          <TextInput
+            label="Phone"
+            hint="Optional. Used only to contact you about your account — never for sign-in, and not verified."
+            value={phone}
+            maxLength={PROFILE_LIMITS.phoneMaxLength}
+            inputMode="tel"
+            error={fieldErrors.phone}
+            onChange={(event) => setPhone(event.target.value)}
+          />
+          <TextInput
+            label="Email"
+            hint="Optional. Contact email — used only to contact you about your account. Changing it does not change your sign-in login, and it is not verified."
+            value={email}
+            maxLength={PROFILE_LIMITS.emailMaxLength}
+            inputMode="email"
+            error={fieldErrors.email}
+            onChange={(event) => setEmail(event.target.value)}
+          />
+          {saveError && <Notice tone="danger">{saveError}</Notice>}
+          {savedMessage && (
+            <Notice tone={savedDuplicate ? "info" : "success"}>{savedMessage}</Notice>
+          )}
+          <div>
+            <Button type="button" variant="primary" disabled={saving} onClick={() => void save()} loading={saving}>
+              Save profile
+            </Button>
+          </div>
+        </Stack>
+      </Card>
+      {/* Issue #6141: the referral panel — link, earned extensions,
+          banked days, trial end date, referred-user count. */}
+      <ReferralTrialSection userLogin={userLogin} />
+    </>
   );
 }

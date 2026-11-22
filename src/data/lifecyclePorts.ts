@@ -57,6 +57,21 @@ export function round2(n: number): number {
  */
 export const DEFAULT_REFERRAL_EXPIRY_PERIOD_MS = 90 * 24 * 60 * 60 * 1000;
 
+/**
+ * Issue #6141 — PROPOSED defaults for the referral trial-extension
+ * model (Grafana-style, adapted). Operator data, never code
+ * constants: the rule row carries the live values; these constants
+ * are only the seeds/defaults when no value is supplied. The share
+ * message copy is a PROPOSED default pending owner approval.
+ */
+export const DEFAULT_REFERRAL_EXTENSION_DAYS = 7;
+export const DEFAULT_REFERRED_TRIAL_DAYS = 14;
+export const DEFAULT_MAX_EXTENSIONS_PER_DAY = 3;
+export const DEFAULT_MAX_EXTENSIONS_PER_MONTH = 10;
+export const DEFAULT_REFERRAL_TRIAL_PLAN_ID: string | null = null;
+export const DEFAULT_REFERRAL_SHARE_MESSAGE_TEMPLATE =
+  "Join me on OpenAIMP — sign up with my link and get a {trialDays}-day free trial of the paid tier, plus free runs every month: {link}";
+
 /** What a referral credit may be redeemed against. Only pay-per-run in this slice. */
 export type ReferralRedemptionScope = "pay-per-run";
 
@@ -69,6 +84,19 @@ export type ReferralRedemptionScope = "pay-per-run";
  * the credit can no longer convert or redeem. 0 means never
  * expires — an explicit operator choice, visible in the rules
  * UX; the seeded default is 90 days.
+ *
+ * Trial-extension fields (#6141): extensionDays is the trial time
+ * a referrer earns per referred user's first verified paid run;
+ * referredTrialDays is the trial a referred user is granted on
+ * signup via the link; maxExtensionsPerDay/PerMonth cap grants
+ * (UTC day / UTC calendar month); referralTrialPlanId is the plan
+ * whose trial the referred grant activates (null = the grant is
+ * disabled until an operator sets it); shareMessageTemplate is
+ * the referral share copy, with {link} (required) and {trialDays}
+ * placeholders. The extension is TIME only (D-2.25): it never
+ * mints a subscription, never pays for a plan, never converts to
+ * credits — the banked expiry below reuses expiryPeriodMs, so a
+ * banked extension dies on the same schedule as a credit.
  */
 export interface ReferralRules {
   id: string;
@@ -78,6 +106,18 @@ export interface ReferralRules {
   redemptionScope: ReferralRedemptionScope;
   /** Milliseconds from earn to expiry; 0 = never expires. */
   expiryPeriodMs: number;
+  /** #6141: trial days earned per referred first verified paid run. */
+  extensionDays: number;
+  /** #6141: trial days granted to a referred user on signup via the link. */
+  referredTrialDays: number;
+  /** #6141: max trial-extension grants per referrer per UTC day. */
+  maxExtensionsPerDay: number;
+  /** #6141: max trial-extension grants per referrer per UTC calendar month. */
+  maxExtensionsPerMonth: number;
+  /** #6141: plan whose trial the referred grant activates; null = disabled. */
+  referralTrialPlanId: string | null;
+  /** #6141: share-message template; must contain {link}. */
+  shareMessageTemplate: string;
   updatedAtMs: number;
 }
 
@@ -86,11 +126,23 @@ export function validateReferralRules(input: {
   vestingDelayMs: unknown;
   redemptionScope: unknown;
   expiryPeriodMs?: unknown;
+  extensionDays?: unknown;
+  referredTrialDays?: unknown;
+  maxExtensionsPerDay?: unknown;
+  maxExtensionsPerMonth?: unknown;
+  referralTrialPlanId?: unknown;
+  shareMessageTemplate?: unknown;
 }): {
   earnAmountUSD: number;
   vestingDelayMs: number;
   redemptionScope: ReferralRedemptionScope;
   expiryPeriodMs: number;
+  extensionDays: number;
+  referredTrialDays: number;
+  maxExtensionsPerDay: number;
+  maxExtensionsPerMonth: number;
+  referralTrialPlanId: string | null;
+  shareMessageTemplate: string;
 } {
   const earnAmountUSD = round2(Number(input.earnAmountUSD));
   if (!Number.isFinite(earnAmountUSD) || earnAmountUSD <= 0) {
@@ -111,7 +163,61 @@ export function validateReferralRules(input: {
   if (!Number.isFinite(expiryPeriodMs) || expiryPeriodMs < 0 || Math.floor(expiryPeriodMs) !== expiryPeriodMs) {
     throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
   }
-  return { earnAmountUSD, vestingDelayMs, redemptionScope: "pay-per-run", expiryPeriodMs };
+  // #6141: absent extension fields keep the seeded PROPOSED
+  // defaults, same as expiry above — a pre-extension caller must
+  // not reset them to an invented value. Days and caps are whole
+  // numbers >= 1; the plan id is null (disabled) or a non-empty
+  // string; the template must contain {link}.
+  const extensionDays =
+    input.extensionDays === undefined ? DEFAULT_REFERRAL_EXTENSION_DAYS : Number(input.extensionDays);
+  if (!Number.isFinite(extensionDays) || extensionDays < 1 || Math.floor(extensionDays) !== extensionDays) {
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
+  }
+  const referredTrialDays =
+    input.referredTrialDays === undefined ? DEFAULT_REFERRED_TRIAL_DAYS : Number(input.referredTrialDays);
+  if (!Number.isFinite(referredTrialDays) || referredTrialDays < 1 || Math.floor(referredTrialDays) !== referredTrialDays) {
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
+  }
+  const maxExtensionsPerDay =
+    input.maxExtensionsPerDay === undefined ? DEFAULT_MAX_EXTENSIONS_PER_DAY : Number(input.maxExtensionsPerDay);
+  if (!Number.isFinite(maxExtensionsPerDay) || maxExtensionsPerDay < 1 || Math.floor(maxExtensionsPerDay) !== maxExtensionsPerDay) {
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
+  }
+  const maxExtensionsPerMonth =
+    input.maxExtensionsPerMonth === undefined ? DEFAULT_MAX_EXTENSIONS_PER_MONTH : Number(input.maxExtensionsPerMonth);
+  if (!Number.isFinite(maxExtensionsPerMonth) || maxExtensionsPerMonth < 1 || Math.floor(maxExtensionsPerMonth) !== maxExtensionsPerMonth) {
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
+  }
+  let referralTrialPlanId: string | null = DEFAULT_REFERRAL_TRIAL_PLAN_ID;
+  if (input.referralTrialPlanId !== undefined && input.referralTrialPlanId !== null) {
+    if (typeof input.referralTrialPlanId !== "string" || !input.referralTrialPlanId.trim()) {
+      throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
+    }
+    referralTrialPlanId = input.referralTrialPlanId.trim();
+  }
+  const shareMessageTemplate =
+    input.shareMessageTemplate === undefined
+      ? DEFAULT_REFERRAL_SHARE_MESSAGE_TEMPLATE
+      : input.shareMessageTemplate;
+  if (
+    typeof shareMessageTemplate !== "string" ||
+    !shareMessageTemplate.trim() ||
+    !shareMessageTemplate.includes("{link}")
+  ) {
+    throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
+  }
+  return {
+    earnAmountUSD,
+    vestingDelayMs,
+    redemptionScope: "pay-per-run",
+    expiryPeriodMs,
+    extensionDays,
+    referredTrialDays,
+    maxExtensionsPerDay,
+    maxExtensionsPerMonth,
+    referralTrialPlanId,
+    shareMessageTemplate: shareMessageTemplate.trim(),
+  };
 }
 
 /**
@@ -247,6 +353,96 @@ export interface ReferralAttribution {
   createdAtMs: number;
 }
 
+/**
+ * Issue #6141 — one trial-extension grant. One per referred user,
+ * ever: the first verified paid run grants the referrer the rule's
+ * extensionDays, and a replay returns the existing row (the id is
+ * deterministic, the same pattern as referralEarningId). The grant
+ * is TIME only (D-2.25): it extends a trial's periodEndMs or banks
+ * as free days — it never touches a commercial balance, never
+ * mints a subscription, never pays for a plan, never converts to
+ * credits. Banked rows expire per the rule's expiryPeriodMs
+ * (D-2.31); applied/consumed rows are spent and never expire.
+ */
+export type ReferralTrialExtensionStatus = "applied" | "banked" | "consumed";
+
+export interface ReferralTrialExtension {
+  id: string;
+  referrerUserId: string;
+  referredUserId: string;
+  tenantId: string;
+  daysGranted: number;
+  status: ReferralTrialExtensionStatus;
+  /** The trial row extended (applied) or later consumed into (consumed); null while banked. */
+  subscriptionId: string | null;
+  grantedAtMs: number;
+  /** Null when the rule's expiryPeriodMs is 0 (never expires). */
+  expiresAtMs: number | null;
+  appliedAtMs: number | null;
+  consumedAtMs: number | null;
+}
+
+/** Deterministic extension id: one extension per referred user. */
+export function trialExtensionId(referredUserId: string): string {
+  return `trial-ext:${referredUserId}`;
+}
+
+/**
+ * Issue #6141: expiry is measured from GRANT time (grantedAtMs).
+ * The boundary is inclusive: at exactly grantedAtMs + expiry the
+ * banked days are expired. expiresAtMs null means never expires.
+ * Applied/consumed rows never expire — they are spent.
+ */
+export function isExtensionExpired(extension: ReferralTrialExtension, nowMs: number): boolean {
+  if (extension.status !== "banked") return false;
+  if (extension.expiresAtMs === null) return false;
+  return nowMs >= extension.expiresAtMs;
+}
+
+/** Unexpired banked days across a user's extensions. */
+export function bankedExtensionDaysFor(
+  extensions: ReferralTrialExtension[],
+  nowMs: number,
+): number {
+  let total = 0;
+  for (const e of extensions) {
+    if (e.status !== "banked") continue;
+    if (isExtensionExpired(e, nowMs)) continue;
+    total += e.daysGranted;
+  }
+  return total;
+}
+
+/**
+ * Issue #6141 — the trial-extension ledger port. The ledger is the
+ * audit for every grant: caps count its rows, the profile panel
+ * reads its sums, and the banked-apply path consumes its rows
+ * oldest-expiring-first. All reads are referrer-scoped.
+ */
+export interface ReferralTrialExtensionPort {
+  /**
+   * Record a grant. Insert-or-ignore by id: replaying the same
+   * referred user returns the existing row, never a second grant.
+   */
+  recordExtension(input: ReferralTrialExtension): Promise<ReferralTrialExtension>;
+  /** All extensions for one referrer, oldest first. No unscoped read. */
+  listExtensions(referrerUserId: string): Promise<ReferralTrialExtension[]>;
+  /** Grants for one referrer at or after sinceMs (cap counting). */
+  countExtensionsSince(referrerUserId: string, sinceMs: number): Promise<number>;
+  /** Mark a banked row applied to a trial (extends periodEndMs). */
+  markExtensionApplied(
+    id: string,
+    subscriptionId: string,
+    nowMs: number,
+  ): Promise<ReferralTrialExtension | null>;
+  /** Mark a banked row consumed into a later trial. */
+  markExtensionConsumed(
+    id: string,
+    subscriptionId: string,
+    nowMs: number,
+  ): Promise<ReferralTrialExtension | null>;
+}
+
 export interface ReferralCreditPort {
   /** The stored operator rule row (seeded by migration 0015). */
   getRules(): Promise<ReferralRules>;
@@ -257,6 +453,13 @@ export interface ReferralCreditPort {
     redemptionScope: unknown;
     /** #5229: optional — absent keeps the seeded 90-day default. */
     expiryPeriodMs?: unknown;
+    /** #6141: optional — absent keeps the seeded PROPOSED defaults. */
+    extensionDays?: unknown;
+    referredTrialDays?: unknown;
+    maxExtensionsPerDay?: unknown;
+    maxExtensionsPerMonth?: unknown;
+    referralTrialPlanId?: unknown;
+    shareMessageTemplate?: unknown;
   }): Promise<ReferralRules>;
   /**
    * Record a referrer→referred attribution (#2657). Set-once: replaying the
@@ -415,5 +618,9 @@ export interface DigestPassPort {
   markDigestPassRun(day: string): Promise<void>;
 }
 
-/** The full lifecycle store: referral + preferences + digest guard + digest pass. */
-export type LifecycleStore = ReferralCreditPort & NotificationPreferencePort & DigestGuardPort & DigestPassPort;
+/** The full lifecycle store: referral + preferences + digest guard + digest pass + trial extensions (#6141). */
+export type LifecycleStore = ReferralCreditPort &
+  NotificationPreferencePort &
+  DigestGuardPort &
+  DigestPassPort &
+  ReferralTrialExtensionPort;

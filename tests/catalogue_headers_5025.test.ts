@@ -44,7 +44,9 @@ describe("#5025 schemaComponent barrel & membership store naming", () => {
     // table): D1 240 → 241. #6099 adds migration 0081
     // (job_run_records tenant_id + projected_at_ms + unique
     // identity index): D1 241 → 244.
-    expect(D1_CATALOGUE_ENTRIES.length).toBe(244);
+    // #6141 adds migration 0082 (referral trial-extension: 6 rule
+    // columns + ledger table + 2 indexes): D1 244 → 253.
+    expect(D1_CATALOGUE_ENTRIES.length).toBe(253);
     expect(ORM_CATALOGUE_ENTRIES.length).toBe(26);
     expect(REMAINDER_CATALOGUE_ENTRIES.length).toBe(64);
     expect(DO_CATALOGUE_ENTRIES.length).toBe(109);

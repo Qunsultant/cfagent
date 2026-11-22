@@ -19,6 +19,14 @@ const SEED = {
   vestingDelayMs: 7 * DAY_MS,
   redemptionScope: "pay-per-run",
   expiryPeriodMs: 90 * DAY_MS,
+  // Issue #6141: the trial-extension rule values, seeded defaults.
+  extensionDays: 7,
+  referredTrialDays: 14,
+  maxExtensionsPerDay: 3,
+  maxExtensionsPerMonth: 10,
+  referralTrialPlanId: null,
+  shareMessageTemplate:
+    "Join me on OpenAIMP — sign up with my link and get a {trialDays}-day free trial of the paid tier, plus free runs every month: {link}",
 };
 
 function ok(body: unknown) {
@@ -83,7 +91,9 @@ describe("ReferralCreditRulesSection (#5229)", () => {
     expect(container!.textContent).toContain("Save referral rules");
     // Change the expiry from 90 to 30 days and save.
     const inputs = container!.querySelectorAll("input");
-    expect(inputs).toHaveLength(3);
+    // Issue #6141: 8 text inputs now (earn, vesting, expiry, extension
+    // days, referred trial days, both caps, share template) + 1 select.
+    expect(inputs).toHaveLength(8);
     const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")!.set!;
     await act(async () => {
       setter.call(inputs[2], "30");
@@ -104,6 +114,13 @@ describe("ReferralCreditRulesSection (#5229)", () => {
     expect(posted.earnAmountUSD).toBe(0.5);
     expect(posted.vestingDelayMs).toBe(7 * DAY_MS);
     expect(posted.redemptionScope).toBe("pay-per-run");
+    // Issue #6141: the save carries the extension values through.
+    expect(posted.extensionDays).toBe(7);
+    expect(posted.referredTrialDays).toBe(14);
+    expect(posted.maxExtensionsPerDay).toBe(3);
+    expect(posted.maxExtensionsPerMonth).toBe(10);
+    expect(posted.referralTrialPlanId).toBeNull();
+    expect(posted.shareMessageTemplate).toBe(SEED.shareMessageTemplate);
     expect(container!.textContent).toContain("30 days after they are earned");
     expect(container!.textContent).toContain("Referral rules saved.");
     restore();

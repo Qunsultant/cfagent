@@ -1406,6 +1406,25 @@ export const MIGRATION_0081_JOB_RUN_RECORDS_PROJECTION: DataMigration = {
   name: "0081_job_run_records_projection",
   sql: d1MigrationSql(81),
 };
+/**
+ * Migration 0082 — referral trial-extension model (#6141).
+ * Adds the trial-extension rule columns to `agent_referral_rules`
+ * (extension days, referred trial days, daily/monthly caps,
+ * referral trial plan id, share-message template — all seeded
+ * with the PROPOSED defaults, operator-editable via the existing
+ * referral-rules route) and creates the extension ledger
+ * `agent_referral_trial_extensions` (one row per referred user,
+ * ever; applied | banked | consumed). Marker-gated like the
+ * other ALTER migrations, so a re-apply is skipped.
+ * Renumbered 0079 → 0082 on rebase: main landed the #3515 S5 SLO
+ * thresholds as 0079, then the #6072 screener task ledger as 0080
+ * and the #6099 job-run-records projection as 0081.
+ */
+export const MIGRATION_0082_REFERRAL_TRIAL_EXTENSION: DataMigration = {
+  version: 82,
+  name: "0082_referral_trial_extension",
+  sql: d1MigrationSql(82),
+};
 export const MIGRATION_0058_PRODUCT_VERSIONS: DataMigration = {
   version: 58,
   name: "0058_product_versions",
@@ -1653,6 +1672,7 @@ export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANC
   MIGRATION_0079_TENANT_SLO_THRESHOLDS,
   MIGRATION_0080_SCREENER_TASK_ENTRIES,
   MIGRATION_0081_JOB_RUN_RECORDS_PROJECTION,
+  MIGRATION_0082_REFERRAL_TRIAL_EXTENSION,
 ];
 
 function splitStatements(sqlText: string): string[] {

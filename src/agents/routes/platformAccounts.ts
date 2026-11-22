@@ -87,7 +87,7 @@ import { createStoreOperatorsAdapter } from "../../data/createStoreOperatorsPort
 import { createSubscriptionAdapter } from "../../data/createSubscriptionPorts";
 import { PLATFORM_ROUTE_SUFFIXES } from "../../data/platformUrlCatalog";
 import type { CommercialStore } from "../../data/commercialPorts";
-import type { ReferralCreditPort } from "../../data/lifecyclePorts";
+import type { LifecycleStore } from "../../data/lifecyclePorts";
 import type { ReferralCodeRuleStore, ReferralCodeStore } from "../../data/referralCodePorts";
 import type { OnboardingStateStore } from "../../data/onboardingPorts";
 import type { UserProfileStore } from "../../data/profilePorts";
@@ -101,6 +101,7 @@ import {
   type PlatformIdentity,
 } from "../../services/platformIdentity";
 import { captureSignupAttribution } from "../../services/referralAttribution";
+import { activateTrialSubscription } from "../../services/trialSubscriptionActivation";
 import {
   extractIdempotencyKey,
   toUserProfileView,
@@ -179,10 +180,13 @@ export interface PlatformAccountPorts {
   /** User profile store (#3261); null when unbound — the profile routes fail closed with 503. */
   profile: UserProfileStore | null;
   /**
-   * Lifecycle store (#5226, 2.27); null/undefined when unbound — the setup
-   * route skips attribution, never blocks account creation.
+   * Lifecycle store (#5226, 2.27; #6141 widens it to the full
+   * store for the referred-trial grant's rule read). Null/undefined
+   * when unbound — the setup route skips attribution, never blocks
+   * account creation. The runtime object is the full D1 lifecycle
+   * adapter; the narrower type above was the pre-#6141 shape.
    */
-  lifecycle?: ReferralCreditPort | null;
+  lifecycle?: LifecycleStore | null;
   /**
    * Referral-code stores (#5226, 2.27); null/undefined when unbound —
    * the setup route skips code resolution. Only the rule + code reads
@@ -818,6 +822,47 @@ export async function handlePlatformAccountRoutes(
             referrerUserId: attribution.referrerUserId,
             source: attribution.source,
           });
+          // Issue #6141: the referred user's trial grant — the
+          // rule's referredTrialDays on the operator-chosen trial
+          // plan (null = disabled). Best-effort like the capture:
+          // a missing plan, an unapproved version, or any store
+          // error is a silent skip (audited), never a failed
+          // signup. The grant activates the trial at the rule's
+          // length (trialDaysOverride); the free tier follows
+          // when the trial lapses, per the existing trial path.
+          try {
+            const rules = await ports.lifecycle.getRules();
+            if (rules.referralTrialPlanId) {
+              const plan = await ports.subscriptions.getPlan(rules.referralTrialPlanId);
+              if (plan && plan.active && plan.trialDays !== null && plan.trialDays !== undefined) {
+                const trial = await activateTrialSubscription({
+                  subs: ports.subscriptions,
+                  store: ports.commercial,
+                  userId: verifiedLogin,
+                  tenantId,
+                  plan,
+                  trialDaysOverride: rules.referredTrialDays,
+                });
+                ctx.audit("platform.account.referral_trial_granted", "payments", {
+                  userLogin: verifiedLogin,
+                  referrerUserId: attribution.referrerUserId,
+                  planId: plan.id,
+                  subscriptionId: trial.subscription.id,
+                  trialEndsAtMs: trial.trialEndsAtMs,
+                });
+              }
+            }
+          } catch {
+            structuredLog.warn("platformAccounts.signup_referred_trial_failed", {
+              route,
+              login: verifiedLogin,
+              tenantId,
+            });
+            ctx.audit("platform.account.referral_trial_failed", "payments", {
+              userLogin: verifiedLogin,
+              tenantId,
+            });
+          }
         }
       } catch {
         // #5607 (G-5): the skip was silent; log it and audit it.

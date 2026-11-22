@@ -18,14 +18,19 @@
  * days in the UI and stored as milliseconds on the server (whole
  * days are exact; fractional days are allowed). Expiry 0 means the
  * credit never expires — an explicit operator choice.
+ * Issue #6141 extends the same row with the trial-extension values
+ * (extension days, referred trial days, caps, trial plan, share
+ * message) — same route, same save, same re-read discipline.
  * ui primitives only, token-only styling.
  */
 import React, { useCallback, useEffect, useState } from "react";
 import { Button } from "./components/ui/Button";
 import { Card } from "./components/ui/Card";
 import { Notice } from "./components/ui/Notice";
+import { Select } from "./components/ui/Select";
 import { TextInput } from "./components/ui/TextInput";
 import { listOperators } from "./refundPolicyApi";
+import { listPlans, type PlanView } from "./commercialApi";
 import {
   getReferralRules,
   setReferralRules,
@@ -69,6 +74,15 @@ export function ReferralCreditRulesSection() {
   const [earn, setEarn] = useState("");
   const [vestingDays, setVestingDays] = useState("");
   const [expiryDays, setExpiryDays] = useState("");
+  // Issue #6141: trial-extension rule values (whole days / counts;
+  // the plan select is "" for "None — disabled").
+  const [extensionDays, setExtensionDays] = useState("");
+  const [referredTrialDays, setReferredTrialDays] = useState("");
+  const [maxExtensionsPerDay, setMaxExtensionsPerDay] = useState("");
+  const [maxExtensionsPerMonth, setMaxExtensionsPerMonth] = useState("");
+  const [referralTrialPlanId, setReferralTrialPlanId] = useState("");
+  const [shareMessageTemplate, setShareMessageTemplate] = useState("");
+  const [plans, setPlans] = useState<PlanView[]>([]);
   const [saving, setSaving] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [savedNote, setSavedNote] = useState("");
@@ -77,9 +91,10 @@ export function ReferralCreditRulesSection() {
     setLoading(true);
     setLoadError(null);
     try {
-      const [rulesResult, operatorsResult] = await Promise.allSettled([
+      const [rulesResult, operatorsResult, plansResult] = await Promise.allSettled([
         getReferralRules(),
         listOperators(),
+        listPlans(),
       ]);
       if (rulesResult.status === "fulfilled") {
         const fresh = rulesResult.value;
@@ -87,10 +102,20 @@ export function ReferralCreditRulesSection() {
         setEarn(String(fresh.earnAmountUSD));
         setVestingDays(msToDays(fresh.vestingDelayMs));
         setExpiryDays(msToDays(fresh.expiryPeriodMs));
+        setExtensionDays(String(fresh.extensionDays));
+        setReferredTrialDays(String(fresh.referredTrialDays));
+        setMaxExtensionsPerDay(String(fresh.maxExtensionsPerDay));
+        setMaxExtensionsPerMonth(String(fresh.maxExtensionsPerMonth));
+        setReferralTrialPlanId(fresh.referralTrialPlanId ?? "");
+        setShareMessageTemplate(fresh.shareMessageTemplate);
       } else {
         setRules(null);
         setLoadError(loadMessage(statusOf(rulesResult.reason)));
       }
+      // #6141: the plan list feeds the referred-trial plan select.
+      // A failed plans read leaves the select with "None — disabled"
+      // only; the rules still load and save.
+      setPlans(plansResult.status === "fulfilled" ? plansResult.value.plans : []);
       // Operators success alone proves operator status — the route
       // refuses non-operators server-side. Any failure (including a
       // transient outage) falls back to the read-only view; the
@@ -129,6 +154,25 @@ export function ReferralCreditRulesSection() {
       setActionError("Vesting and expiry must be zero or more days.");
       return;
     }
+    // #6141: extension values are whole numbers, 1 or more; the
+    // share template must be non-empty and contain {link}.
+    const parsedExtensionDays = Number(extensionDays);
+    const parsedReferredTrialDays = Number(referredTrialDays);
+    const parsedMaxPerDay = Number(maxExtensionsPerDay);
+    const parsedMaxPerMonth = Number(maxExtensionsPerMonth);
+    if (
+      !Number.isInteger(parsedExtensionDays) || parsedExtensionDays < 1 ||
+      !Number.isInteger(parsedReferredTrialDays) || parsedReferredTrialDays < 1 ||
+      !Number.isInteger(parsedMaxPerDay) || parsedMaxPerDay < 1 ||
+      !Number.isInteger(parsedMaxPerMonth) || parsedMaxPerMonth < 1
+    ) {
+      setActionError("Extension days, referred trial days, and both caps must be whole numbers of 1 or more.");
+      return;
+    }
+    if (!shareMessageTemplate.trim() || !shareMessageTemplate.includes("{link}")) {
+      setActionError("The share message must not be empty and must contain {link}.");
+      return;
+    }
     if (!rules) return;
     setSaving(true);
     try {
@@ -137,19 +181,31 @@ export function ReferralCreditRulesSection() {
         vestingDelayMs,
         redemptionScope: rules.redemptionScope,
         expiryPeriodMs,
+        extensionDays: parsedExtensionDays,
+        referredTrialDays: parsedReferredTrialDays,
+        maxExtensionsPerDay: parsedMaxPerDay,
+        maxExtensionsPerMonth: parsedMaxPerMonth,
+        referralTrialPlanId: referralTrialPlanId === "" ? null : referralTrialPlanId,
+        shareMessageTemplate,
       });
       const fresh = await getReferralRules();
       setRules(fresh);
       setEarn(String(fresh.earnAmountUSD));
       setVestingDays(msToDays(fresh.vestingDelayMs));
       setExpiryDays(msToDays(fresh.expiryPeriodMs));
+      setExtensionDays(String(fresh.extensionDays));
+      setReferredTrialDays(String(fresh.referredTrialDays));
+      setMaxExtensionsPerDay(String(fresh.maxExtensionsPerDay));
+      setMaxExtensionsPerMonth(String(fresh.maxExtensionsPerMonth));
+      setReferralTrialPlanId(fresh.referralTrialPlanId ?? "");
+      setShareMessageTemplate(fresh.shareMessageTemplate);
       setSavedNote("Referral rules saved.");
     } catch (err) {
       setActionError(actionMessage(statusOf(err)));
     } finally {
       setSaving(false);
     }
-  }, [earn, vestingDays, expiryDays, rules]);
+  }, [earn, vestingDays, expiryDays, extensionDays, referredTrialDays, maxExtensionsPerDay, maxExtensionsPerMonth, referralTrialPlanId, shareMessageTemplate, rules]);
 
   if (loading) {
     return (
@@ -176,6 +232,11 @@ export function ReferralCreditRulesSection() {
       <p>
         Credits expire {rules.expiryPeriodMs === 0 ? "never" : `${msToDays(rules.expiryPeriodMs)} days after they are earned`}.
       </p>
+      <p>
+        Trial extension: {rules.extensionDays} days per referred first paid run; referred users get a {rules.referredTrialDays}-day trial
+        {rules.referralTrialPlanId ? ` (${rules.referralTrialPlanId})` : " (no trial plan selected — referred trials are disabled)"}.
+        Caps: {rules.maxExtensionsPerDay} per day, {rules.maxExtensionsPerMonth} per month.
+      </p>
       {!isOperator && <p>Only a store operator can change referral rules.</p>}
       {isOperator && (
         <>
@@ -199,6 +260,55 @@ export function ReferralCreditRulesSection() {
             value={expiryDays}
             onChange={(e) => setExpiryDays(e.target.value)}
             inputMode="decimal"
+          />
+          <TextInput
+            label="Trial extension (days per referral)"
+            hint="Trial days the referrer earns per referred user's first paid run."
+            value={extensionDays}
+            onChange={(e) => setExtensionDays(e.target.value)}
+            inputMode="numeric"
+          />
+          <TextInput
+            label="Referred trial (days)"
+            hint="Trial days a referred user gets on signup via the link."
+            value={referredTrialDays}
+            onChange={(e) => setReferredTrialDays(e.target.value)}
+            inputMode="numeric"
+          />
+          <TextInput
+            label="Max extensions per day"
+            hint="Most trial-extension grants per referrer per day."
+            value={maxExtensionsPerDay}
+            onChange={(e) => setMaxExtensionsPerDay(e.target.value)}
+            inputMode="numeric"
+          />
+          <TextInput
+            label="Max extensions per month"
+            hint="Most trial-extension grants per referrer per calendar month."
+            value={maxExtensionsPerMonth}
+            onChange={(e) => setMaxExtensionsPerMonth(e.target.value)}
+            inputMode="numeric"
+          />
+          <Select
+            label="Referred trial plan"
+            hint="Plan whose trial a referred user gets on signup. None disables referred trials."
+            value={referralTrialPlanId}
+            onChange={(e) => setReferralTrialPlanId(e.target.value)}
+          >
+            <option value="">None — disabled</option>
+            {plans
+              .filter((p) => p.trialDays !== null && p.trialDays !== undefined)
+              .map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name} ({p.trialDays} days)
+                </option>
+              ))}
+          </Select>
+          <TextInput
+            label="Share message"
+            hint="Message shown with the referral link. Must contain {link}; {trialDays} is replaced with the referred trial days."
+            value={shareMessageTemplate}
+            onChange={(e) => setShareMessageTemplate(e.target.value)}
           />
           <Button onClick={save} loading={saving}>
             Save referral rules

@@ -146,8 +146,9 @@ describe("billing servicing panel", () => {
       }
       // Issue #5229 (2.31): the referral-credit rules section mounts
       // in the overview next to the balance card.
+      // Issue #6141: the rules shape carries the trial-extension values.
       if (url === "/api/payments/agentic/commercial/referral/rules") {
-        return ok({ code: "SUCCESS_REFERRAL_RULES_READ", rules: { earnAmountUSD: 0.5, vestingDelayMs: 604800000, redemptionScope: "pay-per-run", expiryPeriodMs: 7776000000 } });
+        return ok({ code: "SUCCESS_REFERRAL_RULES_READ", rules: { earnAmountUSD: 0.5, vestingDelayMs: 604800000, redemptionScope: "pay-per-run", expiryPeriodMs: 7776000000, extensionDays: 7, referredTrialDays: 14, maxExtensionsPerDay: 3, maxExtensionsPerMonth: 10, referralTrialPlanId: null, shareMessageTemplate: "Join me on OpenAIMP — sign up with my link and get a {trialDays}-day free trial of the paid tier, plus free runs every month: {link}" } });
       }
       if (url === "/api/payments/agentic/commercial/operators") {
         return ok({ operators: [{ login: "owner", source: "env" }] });
