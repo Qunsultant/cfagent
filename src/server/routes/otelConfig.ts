@@ -40,6 +40,7 @@ import {
   OTEL_DESTINATIONS,
   OTEL_DOMAINS,
   OTEL_FILE_CONFIG,
+  normalizeOtelBackendProtocol,
   normalizeOtelBoolean,
   normalizeOtelExporter,
   normalizeOtelLevel,
@@ -47,6 +48,7 @@ import {
   normalizeOtelPositiveInt,
   normalizeOtelRatio,
   normalizeOtelSampling,
+  normalizeOtelString,
   resolveOtelAlertingSettings,
   resolveOtelArchiveSettings,
   resolveOtelBackendSettings,
@@ -152,6 +154,10 @@ function normalizeByKind(kind: OtelRuntimeOverrideKind, raw: unknown): unknown {
       return normalizeOtelNonNegativeInt(raw);
     case "ratio":
       return normalizeOtelRatio(raw);
+    case "string":
+      return normalizeOtelString(raw);
+    case "protocol":
+      return normalizeOtelBackendProtocol(raw);
     case "severity": {
       if (raw === undefined || raw === null) return null;
       if (typeof raw !== "string") return "invalid";
@@ -378,7 +384,7 @@ export function buildEffectiveOtelConfig(
     source: settingsFieldSource("positiveInt", alertingLevels.maxAlertsPerDay),
   };
 
-  // Backend settings (the Grafana Cloud switch + request timeout).
+  // Backend settings (the Grafana Cloud switch + request timeout + service name + protocol + endpoint + instance ID).
   const backendFile = OTEL_FILE_CONFIG.backend;
   const backendLevels = {
     enabled: levelsFor("OTEL_BACKEND_ENABLED", backendFile?.enabled),
@@ -386,6 +392,10 @@ export function buildEffectiveOtelConfig(
       "OTEL_BACKEND_REQUEST_TIMEOUT_MS",
       backendFile?.requestTimeoutMs,
     ),
+    serviceName: levelsFor("OTEL_SERVICE_NAME", backendFile?.serviceName),
+    protocol: levelsFor("OTEL_EXPORTER_OTLP_PROTOCOL", backendFile?.protocol),
+    endpoint: levelsFor("OTEL_BACKEND_ENDPOINT", backendFile?.endpoint),
+    instanceId: levelsFor("OTEL_BACKEND_INSTANCE_ID", backendFile?.instanceId),
   };
   const backendSettings = resolveOtelBackendSettings(backendLevels).settings;
   effective["backend.enabled"] = {
@@ -395,6 +405,22 @@ export function buildEffectiveOtelConfig(
   effective["backend.requestTimeoutMs"] = {
     value: backendSettings.requestTimeoutMs,
     source: settingsFieldSource("positiveInt", backendLevels.requestTimeoutMs),
+  };
+  effective["backend.serviceName"] = {
+    value: backendSettings.serviceName,
+    source: settingsFieldSource("string", backendLevels.serviceName),
+  };
+  effective["backend.protocol"] = {
+    value: backendSettings.protocol,
+    source: settingsFieldSource("protocol", backendLevels.protocol),
+  };
+  effective["backend.endpoint"] = {
+    value: backendSettings.endpoint,
+    source: settingsFieldSource("string", backendLevels.endpoint),
+  };
+  effective["backend.instanceId"] = {
+    value: backendSettings.instanceId,
+    source: settingsFieldSource("string", backendLevels.instanceId),
   };
 
   // Catalog severities: the override wins, else the catalog

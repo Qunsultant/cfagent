@@ -66,6 +66,7 @@ import {
   OBS_METRICS_FREE_TIER_GUARD,
   formatCatalogMessage,
 } from "./otelMessages";
+import { otelServiceResource } from "./otelResource";
 import {
   newTraceContext,
   timestampIsoFor,
@@ -441,16 +442,20 @@ export interface OtelMeterProviderOptions {
  * exporter, exporting on the configured interval (and on
  * forceFlush at run/settle boundaries). The caller owns the
  * provider lifecycle (forceFlush at run/settle boundaries,
- * shutdown at isolate teardown).
+ * shutdown at isolate teardown). Issue #5164 (S10): the
+ * provider carries the service resource (`service.name` from
+ * the resolved backend.serviceName), so every serialized
+ * metric payload names the service.
  */
 export function createOtelMeterProvider(options: OtelMeterProviderOptions): {
   provider: MeterProvider;
   meter: Meter;
 } {
   const { config, transport, sink, onError } = options;
+  const resource = otelServiceResource(config.backend.serviceName);
   const live = config.masterEnabled && config.metricsExporter !== "none";
   if (!live) {
-    const provider = new MeterProvider();
+    const provider = new MeterProvider({ resource });
     return { provider, meter: provider.getMeter(options.meterName ?? "cfagent") };
   }
   const exporter = createOtlpHttpMetricExporter({
@@ -464,6 +469,6 @@ export function createOtelMeterProvider(options: OtelMeterProviderOptions): {
     exporter,
     exportIntervalMillis: config.settings.exportIntervalMs,
   });
-  const provider = new MeterProvider({ readers: [reader] });
+  const provider = new MeterProvider({ readers: [reader], resource });
   return { provider, meter: provider.getMeter(options.meterName ?? "cfagent") };
 }

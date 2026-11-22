@@ -2,9 +2,10 @@
 
 The Worker’s OTLP export fans out to Grafana Cloud behind the
 `backend.enabled` config switch. This document is the decision
-record (why Grafana Cloud, what the three secrets are, where they
-come from) and the operator runbook (how to turn it on, what
-happens when it fails, how Step 5 is verified).
+record (why Grafana Cloud, what the one secret is and what the
+config values are, where they come from) and the operator
+runbook (how to turn it on, what happens when it fails, how
+Step 5 is verified).
 
 ## Status
 
@@ -14,9 +15,11 @@ happens when it fails, how Step 5 is verified).
 - **Step 4 (wire the export): BUILT in this slice** — code +
   config + tests + docs, default OFF.
 - **Step 5 (end-to-end verification): BLOCKED on an owner step**
-  — the three Grafana secrets below must be set in GitHub
-  Secrets first (then a deploy syncs them to the Worker). The
-  build does not wait for them; only the live check does.
+  — the one Grafana secret below must be set in GitHub
+  Secrets first (then a deploy syncs it to the Worker); the
+  endpoint + instance ID are config values, already in
+  `config/otel.json`. The build does not wait for it; only
+  the live check does.
 
 ## Decision: Grafana Cloud free tier (owner, 2026-11-18)
 
@@ -52,36 +55,41 @@ convert to paid (no card on file). The stack is empty of our
 data until this slice’s switch is flipped after the secrets
 are set.
 
-## The three secrets (owner step)
+## The one secret (owner step)
 
-All three live in **GitHub Secrets** and reach the Worker through
-the deploy workflow’s sync-secrets job
+Only ONE value is a secret. The endpoint + instance ID are
+**config values** in `config/otel.json` (owner direction
+2026-11-22), not secrets — they carry no credential, so they
+live in the repo like every other OTel switch:
+
+| Config key | Value | Where it comes from |
+| --- | --- | --- |
+| `backend.endpoint` | `https://otlp-gateway-prod-us-east-2.grafana.net/otlp` | Portal, Connections → OpenTelemetry (region us-east-2, verified 2026-11-22). The region is part of the URL — it is NOT guessed in code (the Grafana MCP returns no URLs, so the region cannot be derived from it). |
+| `backend.instanceId` | `1929738` | Portal, Connections → OpenTelemetry (the Basic-auth username). |
+
+The API key lives in **GitHub Secrets** and reaches the Worker
+through the deploy workflow’s sync-secrets job
 (`.github/workflows/deploy.yml`, the “Set core secrets” step,
-`optional_secret` each — absence is reported in the job summary
+`optional_secret` — absence is reported in the job summary
 and never fails a deploy; the backend stays off and fails closed
-with the coded OBS message naming the missing secret). Set them
+with the coded OBS message naming the missing secret). Set it
 in the repo (Settings → Secrets and variables → Actions), then
-deploy: the sync job pushes them to Worker secrets. `wrangler
-secret put` works as a manual fallback for any one of them, but
-the sync job is the path — a deploy is what enables the backend,
-and no secret value ever appears in `wrangler.jsonc`, in config,
-or in the repo. The values come from the Grafana Cloud portal,
-**Connections → OpenTelemetry** (the portal shows the endpoint,
-the instance ID, and a button to create the API token — the token
-is shown once). The owner never needs to show the values to anyone;
-they are set in GitHub Secrets and synced from there.
+deploy: the sync job pushes it to a Worker secret. `wrangler
+secret put` works as a manual fallback, but the sync job is the
+path — a deploy is what enables the backend, and no secret value
+ever appears in `wrangler.jsonc`, in config, nor in the repo.
+The key comes from the Grafana Cloud portal (**Access Policies**,
+or the OTel page’s “Create token” button — the token is shown
+once). The owner never needs to show the value to anyone; it is
+set in GitHub Secrets and synced from there.
 
 | Secret | Value | Where it comes from |
 | --- | --- | --- |
-| `GRAFANA_OTLP_ENDPOINT` | The gateway URL, e.g. `https://otlp-gateway-prod-us-central-0.grafana.net/otlp` | Portal, Connections → OpenTelemetry. The region is part of the URL — it is NOT guessed in code (the Grafana MCP returns no URLs, so the region cannot be derived from it). |
-| `GRAFANA_CLOUD_INSTANCE_ID` | The numeric stack/instance ID, e.g. `1234567` | Portal, Connections → OpenTelemetry (the Basic-auth username). |
 | `GRAFANA_CLOUD_API_KEY` | The API token (`glc_...`) | Portal — create an API key with scopes `metrics:write`, `logs:write`, `traces:write` (the Basic-auth password; shown once). |
 
 Commands (manual fallback — the sync job is the path):
 
 ```bash
-wrangler secret put GRAFANA_OTLP_ENDPOINT
-wrangler secret put GRAFANA_CLOUD_INSTANCE_ID
 wrangler secret put GRAFANA_CLOUD_API_KEY
 ```
 
@@ -90,6 +98,35 @@ Worker secret AND the same value as a GitHub secret — it gates
 the external HTTP surface of `/api/otel/v1/logs|metrics|traces`
 and `/api/otel/v1/alerts`. In-process logging/metrics/spans/
 alerting work without it.
+
+## Service name + protocol (externalized)
+
+Nothing in code: every value is externalized, and an invalid
+value fails closed to the default, never to a hardcoded literal.
+
+- **Service name** — `config/otel.json` `backend.serviceName`
+  (`"ai-search-agent"`, the Worker name in `wrangler.jsonc`),
+  env override `OTEL_SERVICE_NAME`, runtime override through
+  the S7 config port (`backend.serviceName`). Empty/invalid
+  fails closed to `ai-search-agent`. It does NOT need portal
+  configuration: it is our label, shown as the service in
+  Grafana. `src/observability/otelResource.ts`
+  (`otelServiceResource`) builds the resource — the SDK default
+  merged with `service.name` — and all three providers
+  (logs, metrics, traces) carry it, so every outbound OTLP
+  payload names the service: the archive AND Grafana both get
+  it. Without it the SDK default names the service
+  `unknown_service:node` in Grafana.
+- **Protocol** — `config/otel.json` `backend.protocol`
+  (`"http/json"`), env override `OTEL_EXPORTER_OTLP_PROTOCOL`,
+  runtime override through the S7 config port
+  (`backend.protocol`). Values `http/json` | `http/protobuf`;
+  invalid fails closed to `http/json` with a coded message.
+  The implemented serialization is OTLP/HTTP JSON (the S1/S2/S3
+  serializers produce JSON); the portal’s default
+  `http/protobuf` is NOT implemented in this slice — the value
+  documents the current choice, and protobuf support is a
+  follow-up (named here, no new issue filed).
 
 ## How the wiring works
 
@@ -133,12 +170,13 @@ alerting work without it.
 - **Backend disabled (the default)**: no backend attempt at
   all. No message, no audit event — that is the normal off
   state.
-- **Enabled but unconfigured** (a secret missing, or a
-  non-https endpoint — Basic auth never goes over plaintext):
+- **Enabled but unconfigured** (the API key secret missing,
+  or a config endpoint/instance ID missing, or a non-https
+  endpoint — Basic auth never goes over plaintext):
   no fetch attempt. The failure is NAMED once per UTC day per
   signal: one coded message (OBS-1002 logs / OBS-1006 metrics /
   OBS-1012 traces, detail naming “Grafana Cloud backend” and
-  the missing secret NAME) + one audit event
+  the missing config key or secret NAME) + one audit event
   (`otel.backend.export_failed`, actor `system:otel-backend`,
   `actorType: service`, `outcome: failed`). The naming never
   carries a credential value.
@@ -165,10 +203,10 @@ alerting work without it.
 
 ## Turning it on (operator checklist)
 
-1. Set the three secrets above in GitHub Secrets (repo
+1. Set the one secret above in GitHub Secrets (repo
    Settings → Secrets and variables → Actions).
-2. Deploy (the sync-secrets job pushes them to Worker secrets;
-   a deploy after setting them is what makes them live).
+2. Deploy (the sync-secrets job pushes it to a Worker secret;
+   a deploy after setting it is what makes it live).
 3. Flip the switch: `?tab=observability&view=config`, set
    `backend.enabled` to `true` (runtime flip, no redeploy),
    or set `OTEL_BACKEND_ENABLED=true` in env and redeploy.
@@ -208,7 +246,8 @@ Cloud, linked by trace id:
 
 ## Residuals
 
-- Step 5 is BLOCKED on the owner step (the three secrets).
+- Step 5 is BLOCKED on the owner step (the one secret,
+  `GRAFANA_CLOUD_API_KEY`).
   The build (code + config + tests + docs) does not wait for
   them; only the live check does.
 - There is no in-app place to see Grafana data as charts yet —

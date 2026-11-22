@@ -261,17 +261,16 @@ describe("deploy.yml — Slack credentials (#3952)", () => {
 // ---------------------------------------------------------------------------
 
 describe("deploy.yml — Grafana Cloud OTLP secrets (#5164)", () => {
-  // The three Grafana secrets (owner direction 2026-11-22): they live
-  // in GitHub Secrets and reach the Worker through the sync-secrets
-  // job, so enabling the backend later is configuration only. Presence
-  // in the sync list is what makes a GitHub secret reach the deployment
-  // at all. The endpoint is a secret too, not a var; the only thing in
-  // config is the backend switch (off by default).
-  const WIRED = [
-    "GRAFANA_OTLP_ENDPOINT",
-    "GRAFANA_CLOUD_INSTANCE_ID",
-    "GRAFANA_CLOUD_API_KEY",
-  ];
+  // The ONE Grafana secret (owner direction 2026-11-22): the API
+  // key lives in GitHub Secrets and reaches the Worker through
+  // the sync-secrets job, so enabling the backend later is
+  // configuration only. Presence in the sync list is what makes
+  // a GitHub secret reach the deployment at all. The endpoint +
+  // instance ID are CONFIG values in config/otel.json, not
+  // secrets — the workflow must not sync them (a stale secret
+  // would shadow the config value).
+  const WIRED = ["GRAFANA_CLOUD_API_KEY"];
+  const CONFIG_ONLY = ["GRAFANA_OTLP_ENDPOINT", "GRAFANA_CLOUD_INSTANCE_ID"];
 
   it("syncs each Grafana secret the backend reads, as an optional push", () => {
     for (const name of WIRED) {
@@ -280,6 +279,16 @@ describe("deploy.yml — Grafana Cloud OTLP secrets (#5164)", () => {
       // Optional, never required: absence is a reported fail-closed state,
       // not a reason to fail a code deploy — the code names the missing
       // secret with the coded OBS message and the backend stays off.
+      expect(workflow, `${name}: must not be required`).not.toContain(`require_secret ${name} `);
+    }
+  });
+
+  it("does not sync the endpoint or instance ID as secrets (they are config values)", () => {
+    for (const name of CONFIG_ONLY) {
+      expect(workflow, `${name}: must not be a GitHub-secret source`).not.toContain(
+        `secrets.${name}`,
+      );
+      expect(workflow, `${name}: must not be pushed`).not.toContain(`optional_secret ${name} `);
       expect(workflow, `${name}: must not be required`).not.toContain(`require_secret ${name} `);
     }
   });

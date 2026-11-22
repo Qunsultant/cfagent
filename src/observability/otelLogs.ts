@@ -55,6 +55,7 @@ import type { OtelBackendSettings, OtelDestination, OtelDomain, OtelExporterKind
 import { effectiveOtelDomainSwitches } from "../config/otelModes";
 import type { OtelRuntimeOverrideRecord } from "../config/otelConfigPort";
 import { OBS_EXPORT_FAILED, OBS_SINK_DEGRADED, formatCatalogMessage } from "./otelMessages";
+import { otelServiceResource } from "./otelResource";
 import type { ObservabilityEvent, ObservabilityLevel, ObservabilitySink } from "./observabilityPorts";
 
 /** One domain's resolved switch values (enabled + level + sampling). */
@@ -244,15 +245,21 @@ export interface OtelLoggerProviderOptions {
  * in production, simple in tests) over the thin OTLP/HTTP
  * exporter. The caller owns the provider lifecycle (forceFlush
  * at run/settle boundaries, shutdown at isolate teardown).
+ * Issue #5164 (S10): the provider carries the service resource
+ * (`service.name` from the resolved backend.serviceName), so
+ * every serialized log payload names the service — the archive
+ * AND Grafana both get it, because the resource is stamped in
+ * the builder, before the fan-out transport.
  */
 export function createOtelLoggerProvider(options: OtelLoggerProviderOptions): {
   provider: LoggerProvider;
   logger: Logger;
 } {
   const { config, transport, onError } = options;
+  const resource = otelServiceResource(config.backend.serviceName);
   const live = config.masterEnabled && config.logsExporter !== "none";
   if (!live) {
-    const provider = new LoggerProvider();
+    const provider = new LoggerProvider({ resource });
     return { provider, logger: provider.getLogger(options.loggerName ?? "cfagent") };
   }
   const exporter = createOtlpHttpLogExporter(transport, onError);
@@ -267,7 +274,7 @@ export function createOtelLoggerProvider(options: OtelLoggerProviderOptions): {
           scheduledDelayMillis: options.batch?.scheduledDelayMs ?? 1000,
           maxQueueSize: options.batch?.maxQueueSize ?? 1000,
         });
-  const provider = new LoggerProvider({ processors: [processor] });
+  const provider = new LoggerProvider({ processors: [processor], resource });
   return { provider, logger: provider.getLogger(options.loggerName ?? "cfagent") };
 }
 

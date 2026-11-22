@@ -52,6 +52,7 @@
  * to empty overrides (the deploy-time values govern).
  */
 import {
+  normalizeOtelBackendProtocol,
   normalizeOtelBoolean,
   normalizeOtelExporter,
   normalizeOtelLevel,
@@ -59,6 +60,7 @@ import {
   normalizeOtelPositiveInt,
   normalizeOtelRatio,
   normalizeOtelSampling,
+  normalizeOtelString,
   OTEL_DOMAINS,
 } from "./otelModes";
 import { OBS_CATALOG, OBS_CONFIG_INVALID, type ObsSeverity } from "../observability/otelMessages";
@@ -95,7 +97,9 @@ export type OtelRuntimeOverrideKind =
   | "positiveInt"
   | "nonNegativeInt"
   | "ratio"
-  | "severity";
+  | "severity"
+  | "string"
+  | "protocol";
 
 /** One overridable config key: its dotted config path, its value kind, and its env-var name (when one exists). */
 export interface OtelRuntimeOverrideKeyDef {
@@ -157,6 +161,10 @@ function buildOverrideKeys(): OtelRuntimeOverrideKeyDef[] {
     { key: "alerting.maxAlertsPerDay", kind: "positiveInt", envName: "OTEL_ALERTING_MAX_ALERTS_PER_DAY", description: "Alerting free-tier guard: max alerts per day" },
     { key: "backend.enabled", kind: "boolean", envName: "OTEL_BACKEND_ENABLED", description: "Grafana Cloud backend on/off (the external OTLP destination)" },
     { key: "backend.requestTimeoutMs", kind: "positiveInt", envName: "OTEL_BACKEND_REQUEST_TIMEOUT_MS", description: "Grafana Cloud backend request timeout (ms)" },
+    { key: "backend.serviceName", kind: "string", envName: "OTEL_SERVICE_NAME", description: "OTLP service name stamped as service.name (default ai-search-agent)" },
+    { key: "backend.protocol", kind: "protocol", envName: "OTEL_EXPORTER_OTLP_PROTOCOL", description: "OTLP backend wire protocol (http/json | http/protobuf; only http/json is implemented)" },
+    { key: "backend.endpoint", kind: "string", envName: "OTEL_BACKEND_ENDPOINT", description: "Grafana Cloud OTLP gateway URL (a config value, not a secret)" },
+    { key: "backend.instanceId", kind: "string", envName: "OTEL_BACKEND_INSTANCE_ID", description: "Grafana Cloud stack/instance ID (a config value, not a secret)" },
   ];
   for (const domain of OTEL_DOMAINS) {
     const upper = domain.toUpperCase().replace(/-/g, "_");
@@ -254,6 +262,10 @@ function normalizeOverrideValue(
       return normalizeOtelNonNegativeInt(raw);
     case "ratio":
       return normalizeOtelRatio(raw);
+    case "string":
+      return normalizeOtelString(raw);
+    case "protocol":
+      return normalizeOtelBackendProtocol(raw);
     case "severity": {
       if (raw === undefined || raw === null) return null;
       if (typeof raw !== "string") return "invalid";

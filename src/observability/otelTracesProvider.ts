@@ -149,10 +149,13 @@ export function resolveOtelTracesConfig(
     ),
   }).settings;
   // Issue #5164 (S10) — the Grafana Cloud backend settings
-  // (enabled + request timeout), resolved through the same
+  // (enabled + request timeout + service name + protocol +
+  // endpoint + instance ID), resolved through the same
   // mechanism. OFF by default: telemetry stays on the
-  // free-tier path until the owner sets the three Grafana
-  // Worker secrets and flips the switch.
+  // free-tier path until the owner sets the one Grafana
+  // Worker secret (GRAFANA_CLOUD_API_KEY) and flips the
+  // switch. The endpoint + instance ID are config values,
+  // not secrets (owner direction 2026-11-22).
   const backendFile = OTEL_FILE_CONFIG.backend;
   const backend = resolveOtelBackendSettings({
     enabled: levelsFor("OTEL_BACKEND_ENABLED", backendFile?.enabled),
@@ -160,6 +163,10 @@ export function resolveOtelTracesConfig(
       "OTEL_BACKEND_REQUEST_TIMEOUT_MS",
       backendFile?.requestTimeoutMs,
     ),
+    serviceName: levelsFor("OTEL_SERVICE_NAME", backendFile?.serviceName),
+    protocol: levelsFor("OTEL_EXPORTER_OTLP_PROTOCOL", backendFile?.protocol),
+    endpoint: levelsFor("OTEL_BACKEND_ENDPOINT", backendFile?.endpoint),
+    instanceId: levelsFor("OTEL_BACKEND_INSTANCE_ID", backendFile?.instanceId),
   }).settings;
   return { masterEnabled, tracesExporter, domains, destinations, settings, backend };
 }

@@ -77,6 +77,7 @@ import {
   OBS_TRACES_FREE_TIER_GUARD,
   formatCatalogMessage,
 } from "./otelMessages";
+import { otelServiceResource } from "./otelResource";
 import {
   newTraceContext,
   timestampIsoFor,
@@ -430,16 +431,20 @@ export function ensureOtelContextManager(): void {
  * in production, simple in tests) over the thin OTLP/HTTP
  * span exporter. The caller owns the provider lifecycle
  * (forceFlush at run/settle boundaries, shutdown at isolate
- * teardown).
+ * teardown). Issue #5164 (S10): the provider carries the
+ * service resource (`service.name` from the resolved
+ * backend.serviceName), so every serialized span payload
+ * names the service.
  */
 export function createOtelTracerProvider(options: OtelTracerProviderOptions): {
   provider: TracerProvider;
   tracer: Tracer;
 } {
   const { config, transport, sink, onError } = options;
+  const resource = otelServiceResource(config.backend.serviceName);
   const live = config.masterEnabled && config.tracesExporter !== "none";
   if (!live) {
-    const provider = new TracerProvider();
+    const provider = new TracerProvider({ resource });
     return { provider, tracer: provider.getTracer(options.tracerName ?? "cfagent") };
   }
   const exporter = createOtlpHttpSpanExporter({
@@ -460,7 +465,7 @@ export function createOtelTracerProvider(options: OtelTracerProviderOptions): {
           scheduledDelayMillis: options.batch?.scheduledDelayMillis ?? 1000,
           maxQueueSize: options.batch?.maxQueueSize ?? 1000,
         });
-  const provider = new TracerProvider({ spanProcessors: [processor] });
+  const provider = new TracerProvider({ spanProcessors: [processor], resource });
   return { provider, tracer: provider.getTracer(options.tracerName ?? "cfagent") };
 }
 

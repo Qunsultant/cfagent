@@ -115,6 +115,10 @@ describe("S7 config port (#5086)", () => {
       "alerting.maxAlertsPerDay",
       "backend.enabled",
       "backend.requestTimeoutMs",
+      "backend.serviceName",
+      "backend.protocol",
+      "backend.endpoint",
+      "backend.instanceId",
       "catalog.OBS-1016.severity",
     ]) {
       expect(keys, `${key} must be overridable`).toContain(key);

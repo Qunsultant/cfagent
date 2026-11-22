@@ -16,32 +16,36 @@
  *
  * Auth is Grafana Cloud OTLP Basic: the username is the
  * numeric stack/instance ID, the password is the API token
- * (glc_...), `Authorization: Basic base64(id:key)`. Three
- * values, all Worker secrets, never in the repo: they live in
- * GitHub Secrets and reach the Worker through the deploy
+ * (glc_...), `Authorization: Basic base64(id:key)`. ONE value
+ * is a Worker secret — GRAFANA_CLOUD_API_KEY (scopes
+ * metrics:write, logs:write, traces:write); it lives in
+ * GitHub Secrets and reaches the Worker through the deploy
  * workflow's sync-secrets job (`.github/workflows/deploy.yml`,
- * "Set core secrets" step, `optional_secret` each;
- * `wrangler secret put` is the manual fallback).
- * GRAFANA_OTLP_ENDPOINT (the gateway URL from the portal,
+ * "Set core secrets" step, `optional_secret`;
+ * `wrangler secret put` is the manual fallback). The
+ * endpoint + instance ID are CONFIG values, not secrets
+ * (owner direction 2026-11-22): config/otel.json
+ * `backend.endpoint` (the gateway URL from the portal,
  * Connections → OpenTelemetry,
- * `https://otlp-gateway-prod-<region>.grafana.net/otlp`),
- * GRAFANA_CLOUD_INSTANCE_ID, GRAFANA_CLOUD_API_KEY (scopes
- * metrics:write, logs:write, traces:write). The signal path
- * is appended per signal: /v1/logs, /v1/metrics, /v1/traces
- * (OTLP/HTTP JSON — the same payload the ingestion route
- * accepts; no serializer change).
+ * `https://otlp-gateway-prod-us-east-2.grafana.net/otlp`,
+ * region us-east-2) and `backend.instanceId` (`1929738`).
+ * The signal path is appended per signal: /v1/logs,
+ * /v1/metrics, /v1/traces (OTLP/HTTP JSON — the same payload
+ * the ingestion route accepts; no serializer change).
  *
  * Fail-closed: backend disabled (the default) means no backend
- * attempt at all. Enabled but unconfigured (a secret missing,
- * or a non-https endpoint) means no fetch attempt: the failure
+ * attempt at all. Enabled but unconfigured (the API key secret
+ * missing, or the config endpoint/instance ID missing, or a
+ * non-https endpoint) means no fetch attempt: the failure
  * is NAMED once per UTC day per signal — one coded message
  * (the per-signal export-failed code: OBS-1002 logs / OBS-1006
  * metrics / OBS-1012 traces) plus one audit event (type
  * otel.backend.export_failed, actor system:otel-backend) — and
  * the free-tier path carries on. A failed POST names the same
  * way, once per day. The naming never carries a credential
- * value, only secret NAMES (which variable is missing) and the
- * HTTP status. The once-per-day guard is the OBS-1007/1013
+ * value, only the config key (`backend.endpoint`,
+ * `backend.instanceId`) or the secret NAME
+ * (GRAFANA_CLOUD_API_KEY) and the HTTP status. The once-per-day guard is the OBS-1007/1013
  * free-tier-guard precedent: a down gateway would otherwise
  * emit a coded message and an audit event per batch (every
  * ~1s per signal) and flood the Analytics Engine sink and the
@@ -76,10 +80,6 @@ import {
 import { createWiredAuditStore } from "../security/iaaaAuditStore";
 import type { Env } from "../types";
 
-/** The Grafana Cloud OTLP gateway URL (a Worker secret, never in the repo). */
-export const GRAFANA_OTLP_ENDPOINT_ENV = "GRAFANA_OTLP_ENDPOINT";
-/** The Grafana Cloud stack/instance ID (a Worker secret, never in the repo). */
-export const GRAFANA_CLOUD_INSTANCE_ID_ENV = "GRAFANA_CLOUD_INSTANCE_ID";
 /** The Grafana Cloud API key (a Worker secret, never in the repo). */
 export const GRAFANA_CLOUD_API_KEY_ENV = "GRAFANA_CLOUD_API_KEY";
 
@@ -109,14 +109,19 @@ export type OtelBackendCredentialsResolution =
     };
 
 /**
- * Resolves the three Grafana Worker secrets. Blank counts as
- * missing; a non-https endpoint is unusable (Basic auth must
- * never go over plaintext) and is reported the same way. The
- * region is NOT guessed: the endpoint comes from the portal
- * (Connections → OpenTelemetry), so a stack in any region
- * works without a code change.
+ * Resolves the Grafana backend credentials: the endpoint +
+ * instance ID come from the resolved backend config
+ * (config/otel.json `backend`, owner direction 2026-11-22 —
+ * config values, not secrets); ONLY the API key comes from
+ * the Worker secret. Blank counts as missing; a non-https
+ * endpoint is unusable (Basic auth must never go over
+ * plaintext) and is reported the same way. The region is NOT
+ * guessed: the endpoint comes from the portal (Connections →
+ * OpenTelemetry), so a stack in any region works without a
+ * code change.
  */
 export function resolveOtelBackendCredentials(
+  settings: OtelBackendSettings,
   env: Record<string, unknown>,
 ): OtelBackendCredentialsResolution {
   const problems: string[] = [];
@@ -126,22 +131,22 @@ export function resolveOtelBackendCredentials(
     const trimmed = raw.trim();
     return trimmed ? trimmed : undefined;
   };
-  const endpoint = readSecret(GRAFANA_OTLP_ENDPOINT_ENV);
-  const instanceId = readSecret(GRAFANA_CLOUD_INSTANCE_ID_ENV);
+  const endpoint = settings.endpoint.trim();
+  const instanceId = settings.instanceId.trim();
   const apiKey = readSecret(GRAFANA_CLOUD_API_KEY_ENV);
   if (!endpoint) {
-    problems.push(`${GRAFANA_OTLP_ENDPOINT_ENV} is not set`);
+    problems.push("backend.endpoint is not set");
   } else {
     try {
       const url = new URL(endpoint);
       if (url.protocol !== "https:") {
-        problems.push(`${GRAFANA_OTLP_ENDPOINT_ENV} is not an https URL`);
+        problems.push("backend.endpoint is not an https URL");
       }
     } catch {
-      problems.push(`${GRAFANA_OTLP_ENDPOINT_ENV} is not a valid URL`);
+      problems.push("backend.endpoint is not a valid URL");
     }
   }
-  if (!instanceId) problems.push(`${GRAFANA_CLOUD_INSTANCE_ID_ENV} is not set`);
+  if (!instanceId) problems.push("backend.instanceId is not set");
   if (!apiKey) problems.push(`${GRAFANA_CLOUD_API_KEY_ENV} is not set`);
   if (problems.length > 0 || !endpoint || !instanceId || !apiKey) {
     return { configured: false, problems };
@@ -195,7 +200,7 @@ export function createOtelBackendAudit(env: Env): OtelBackendAuditFn {
 export interface OtelBackendFanOutDeps {
   signal: OtelSignal;
   env: Record<string, unknown>;
-  /** The init-time resolved backend settings (enabled + timeout). */
+  /** The init-time resolved backend settings (enabled + timeout + service name + protocol + endpoint + instance ID). */
   settings: OtelBackendSettings;
   /**
    * The archive transport (in-process ingestion → R2). Its
@@ -246,7 +251,7 @@ export function createOtelBackendFanOutTransport(
   const { signal, settings } = deps;
   const fetchFn = deps.fetchFn ?? fetch;
   const nowMs = deps.nowMs ?? Date.now;
-  const credentials = resolveOtelBackendCredentials(deps.env);
+  const credentials = resolveOtelBackendCredentials(deps.settings, deps.env);
   const failureCode = otelBackendFailureCode(signal);
 
   let guardedDay = "";
@@ -303,7 +308,7 @@ export function createOtelBackendFanOutTransport(
         // Disabled (the default): no backend attempt at all.
       } else if (!credentials.configured) {
         // Enabled but unconfigured: no fetch attempt — name the
-        // missing secret NAMES (never a value) once per day.
+        // missing config key or secret NAME (never a value) once per day.
         nameFailure(`not configured: ${credentials.problems.join("; ")}`);
       } else {
         const { endpoint, instanceId, apiKey } = credentials.credentials;
