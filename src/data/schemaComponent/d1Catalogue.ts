@@ -3128,6 +3128,24 @@ export const D1_CATALOGUE_ENTRIES: CatalogueEntry[] = [
     kind: "schema",
     form: "literal",
   },
+  {
+    // Issue #6072 (#4437 slice 6d-a) — the D1-resident screener task
+    // ledger's entries: the key/value store behind `ScreenerTaskStore`
+    // (the ledger's port). The key carries the `screener:` namespace
+    // the DO-storage implementation prefixes with; the value is the
+    // JSON task record (`screener:task:<id>`) or the task id
+    // (`screener:idem:<key>`). A `list(prefix)` read is a PK range
+    // scan on the key prefix — no secondary index.
+    code: "schema.d1.agent_screener_task_entries.create_table",
+    plane: "d1",
+    table: "agent_screener_task_entries",
+    statement: `CREATE TABLE IF NOT EXISTS agent_screener_task_entries (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+)`,
+    kind: "schema",
+    form: "literal",
+  },
 ];
 
 /** Per-migration-version code lists, in statement order. */
@@ -3516,6 +3534,7 @@ export const D1_MIGRATION_CODES: Record<number, readonly string[]> = {
   78: [
     "schema.d1.agent_tenant_settings.alter_table_add_column_turn_step_timeout_ms",
   ],
+  79: ["schema.d1.agent_screener_task_entries.create_table"],
   75: [
     "schema.d1.job_pipeline_instances.alter_table_add_column_run_definition_version",
   ],

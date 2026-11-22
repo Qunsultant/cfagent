@@ -2144,3 +2144,18 @@ export const otelConfigOverrides = sqliteTable(
     }),
   ],
 );
+
+/**
+ * Issue #6072 (#4437 slice 6d-a) — the D1-resident screener task ledger's
+ * entries: the key/value store behind `ScreenerTaskStore` (the ledger's
+ * port), the D1 half of the DO-storage implementation (screener-agent
+ * `taskStore()`, keys `screener:task:<id>` / `screener:idem:<key>`,
+ * values = JSON task records / task ids). One row per entry; `set`
+ * upserts (the ledger overwrites a record on every transition).
+ * DDL authority: migration 0079. This schema MAPS the table; it does
+ * not create it.
+ */
+export const agentScreenerTaskEntries = sqliteTable("agent_screener_task_entries", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull(),
+});

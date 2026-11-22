@@ -54,7 +54,7 @@ import type {
   ScreenerServeStageOutput,
   ScreenerStoreStageOutput,
 } from "../agents/screener-agent";
-import type { YahooHistoryDeps, DataProvider } from "../trading";
+import type { ScreeningResult, YahooHistoryDeps, DataProvider } from "../trading";
 import {
   bindAlpacaQuoteDeps,
   bindEtradeQuoteDeps,
@@ -77,6 +77,24 @@ import { SCREENER_DEFAULT_EXECUTION_MODE } from "../config/screenerExecutionMode
 import { jobDefinitionSpec } from "../config/jobDefinitionCatalog";
 import { FEED_PIPELINE_CATALOG } from "./feedPipelineJobs";
 import { DEFAULT_TENANT_PROVIDERS } from "../data/commercialPorts";
+import {
+  assembleGoalScreenResult,
+  buildGoalScreenPlan,
+  goalUniverseLabel,
+  TERMINAL_TASK_STATUSES,
+  type GoalDrivenScreenResult,
+  type GoalLegOutcome,
+  type GoalOptionsLegInput,
+  type GoalScreenPlan,
+  type GoalStockLegInput,
+} from "./goalDrivenScreen";
+import {
+  evaluateScreenerOutcome,
+  ScreenerTaskLedger,
+  type ScreenerTask,
+} from "./screenerTaskLedger";
+import { createD1ScreenerTaskStore } from "../data/d1ScreenerTaskStoreAdapter";
+import type { GoalScreenArtifactOutcome } from "./goalScreenReports";
 
 /** The step names a screener job's configuration references. */
 export const SCREENER_FEED_STEP = "screener.feed";
@@ -87,6 +105,43 @@ export const SCREENER_GOAL_STEP = "screener.goal";
 export const SCREENER_STORE_STEP = "screener.store";
 export const SCREENER_SERVE_STEP = "screener.serve";
 export const SCREENER_DELIVER_STEP = "screener.deliver";
+
+/**
+ * The goal composition's step names (#6072): the analyze node of the
+ * "goalScreen" definition runs these eight steps in order, replacing
+ * the single `screener.goal` dispatch (which stays registered for
+ * old stored definitions — see SCREENER_GOAL_STEP above).
+ */
+export const GOAL_QUOTA_STEP = "goal.quota";
+export const GOAL_PLAN_STEP = "goal.plan";
+export const GOAL_LEDGER_CLAIM_STEP = "goal.ledgerClaim";
+export const GOAL_STOCK_LEG_STEP = "goal.stockLeg";
+export const GOAL_OPTIONS_LEG_STEP = "goal.optionsLeg";
+export const GOAL_ASSEMBLE_STEP = "goal.assemble";
+export const GOAL_LEDGER_COMPLETE_STEP = "goal.ledgerComplete";
+export const GOAL_ARTIFACTS_STEP = "goal.artifacts";
+
+/**
+ * The goal-run composition, in run order (#6072): quota (the
+ * submission gate, before any work) → plan (the pure scenario→plan
+ * derivation) → ledger claim (the D1-resident ledger: terminal
+ * record = duplicate, active record = adopt, fresh = create +
+ * claim + start + heartbeat) → the two leg dispatches (each a
+ * failed class on error, never a failed run) → assembly (the
+ * #1963 / #462 contract) → ledger complete (complete, or
+ * fail + escalate when every leg failed) → artifacts (the report
+ * tail + the analysis output the store stage consumes).
+ */
+export const GOAL_COMPOSITION_STEPS = [
+  GOAL_QUOTA_STEP,
+  GOAL_PLAN_STEP,
+  GOAL_LEDGER_CLAIM_STEP,
+  GOAL_STOCK_LEG_STEP,
+  GOAL_OPTIONS_LEG_STEP,
+  GOAL_ASSEMBLE_STEP,
+  GOAL_LEDGER_COMPLETE_STEP,
+  GOAL_ARTIFACTS_STEP,
+] as const;
 
 /** The five generic node kinds, in catalog order (#5884 6b3 — the market spec's v2 stages). The "goalScreen" spec keeps its own six bespoke stages (feed/enrich/analyze/store/serve/deliver); these constants project the market spec only. */
 export const SCREENER_NODE_KINDS = ["feed", "enrich", "analyze", "generate", "deliver"] as const;
@@ -194,6 +249,19 @@ export interface ScreenerStepDeps {
    * Tests inject a fake; production never overrides it.
    */
   goalRunner?: ScreenerGoalRunner;
+  /**
+   * Issue #6072 — the goal composition's injected deps. Each is
+   * optional; when absent the step resolves its production default
+   * from the agent (quota / legs / artifacts) or refuses by name
+   * (the D1 ledger — a goal run without a D1-resident ledger cannot
+   * satisfy the eviction requirement, so there is no silent fallback
+   * to the DO-storage ledger runGoalScreenOnEngine used).
+   */
+  goalTaskLedgerFor?: () => ScreenerTaskLedger;
+  goalQuotaCharge?: (input: { userLogin: string; runId: string }) => Promise<void>;
+  goalStockLeg?: (input: GoalStockLegInput) => Promise<ScreeningResult>;
+  goalOptionsLeg?: (input: GoalOptionsLegInput) => Promise<ScreeningResult>;
+  goalArtifacts?: (result: GoalDrivenScreenResult) => Promise<GoalScreenArtifactOutcome>;
 }
 
 /**
@@ -394,6 +462,75 @@ function isDupOutput(value: unknown): value is { duplicate: true } {
 }
 
 /**
+ * Issue #6072 — the goal composition's accumulated state: each step's
+ * output is the next step's input, so the state threads the gather
+ * output (the analyze node's input), the plan, the ledger task, the
+ * leg outcomes, and the assembled result through to the artifacts
+ * step, which builds the analysis output the store stage consumes.
+ * Every field is JSON (the plan, the task record, the leg results),
+ * so the state survives as per-step persisted artifacts — a resume
+ * re-derives from them instead of re-executing.
+ */
+interface GoalCompositionState {
+  gather: ScreenerGatherStageOutput;
+  plan?: GoalScreenPlan;
+  requested?: ("stocks" | "options")[];
+  task?: ScreenerTask;
+  executed?: boolean;
+  stockLeg?: GoalLegStepOutput;
+  optionsLeg?: GoalLegStepOutput;
+  result?: GoalDrivenScreenResult;
+}
+
+/** One leg step's output: its ScreeningResult, its error, or skipped (class not requested). */
+type GoalLegStepOutput = GoalLegOutcome | { legSkipped: true };
+
+/**
+ * The composition state a step's input carries: the accumulated state
+ * (steps after the first), or the analyze node's raw gather output
+ * (the first step wraps it). A scheduled duplicate passes through
+ * unwrapped — the caller checks isDupOutput first.
+ */
+function goalCompositionState(
+  input: unknown,
+  shardKey: string | null,
+): GoalCompositionState {
+  const prior = priorFor<GoalCompositionState | ScreenerGatherStageOutput>(
+    input,
+    shardKey,
+  );
+  if (
+    prior &&
+    typeof prior === "object" &&
+    "gather" in (prior as unknown as Record<string, unknown>)
+  ) {
+    return prior as GoalCompositionState;
+  }
+  return { gather: prior as ScreenerGatherStageOutput };
+}
+
+/** The goal command a composition step's params carry (refuses by name without one). */
+function requireGoalScreen(params: Record<string, unknown>): GoalScreenCommand {
+  const goalScreen = goalScreenParam(params);
+  if (!goalScreen) {
+    throw new Error(
+      "GOAL_STEP_NO_GOAL: a goal composition step ran without a goalScreen param — refusing to run a goal dispatch with no goal command.",
+    );
+  }
+  return goalScreen;
+}
+
+/** The D1-resident task ledger a composition step writes to (refuses by name without one). */
+function requireGoalTaskLedger(deps: ScreenerStepDeps): ScreenerTaskLedger {
+  if (!deps.goalTaskLedgerFor) {
+    throw new Error(
+      "GOAL_TASK_LEDGER_MISSING: the goal composition steps need a D1-resident task ledger (goalTaskLedgerFor) — a goal run without one cannot survive a workflow eviction, so there is no fallback to the DO-storage ledger (#6072).",
+    );
+  }
+  return deps.goalTaskLedgerFor();
+}
+
+/**
  * Register the six screener steps on a registry. The handlers
  * are thin: resolve the live deps, delegate to the agent stage
  * methods, return the (JSON-only) stage output as the hand-off.
@@ -473,6 +610,319 @@ export function registerScreenerSteps(registry: JobStepRegistry, deps: ScreenerS
       ...(deps.goalRunner ? { goalRunner: deps.goalRunner } : {}),
     });
     return { output };
+  });
+
+  /**
+   * Issue #6072 — the goal composition: the eight steps that replace
+   * the `screener.goal` dispatch on the goal definition's analyze
+   * node. Each step threads the accumulated GoalCompositionState
+   * (the first wraps the node's gather output); a scheduled
+   * duplicate passes through every step untouched, exactly as
+   * through the bespoke steps above.
+   */
+  registry.register(GOAL_QUOTA_STEP, async (ctx: JobStepContext) => {
+    const prior = priorFor<unknown>(ctx.input, ctx.shardKey);
+    if (isDupOutput(prior)) return { output: prior };
+    const params = ctx.params;
+    const userLogin = requireUserLogin(params);
+    requireGoalScreen(params);
+    const agent = deps.agentFor(userLogin);
+    // The quota run id is the engine run id, exactly as
+    // runGoalScreenOnEngine charged it (`goalScreen:<runId>`) — a
+    // duplicate delivery re-charges the same id, and the port
+    // counts it once (#2842).
+    const charge =
+      deps.goalQuotaCharge ??
+      ((input: { userLogin: string; runId: string }) =>
+        agent.chargeGoalScreenQuota(input));
+    await charge({ userLogin, runId: `goalScreen:${ctx.runId}` });
+    return { output: goalCompositionState(ctx.input, ctx.shardKey) };
+  });
+
+  registry.register(GOAL_PLAN_STEP, async (ctx: JobStepContext) => {
+    const prior = priorFor<unknown>(ctx.input, ctx.shardKey);
+    if (isDupOutput(prior)) return { output: prior };
+    const goalScreen = requireGoalScreen(ctx.params);
+    const state = goalCompositionState(ctx.input, ctx.shardKey);
+    // The symbols are the gather stage's goal symbols (resolved
+    // from the goal command's explicit symbols, or the universe
+    // path); the command's own symbols are the fallback for a
+    // gather output that did not set them.
+    const symbols = state.gather.goalSymbols?.length
+      ? state.gather.goalSymbols
+      : goalScreen.symbols;
+    const plan = buildGoalScreenPlan(goalScreen.scenario, {
+      ...(symbols?.length ? { symbols } : {}),
+      ...(goalScreen.baseStockFilter
+        ? { baseStockFilter: goalScreen.baseStockFilter }
+        : {}),
+      ...(goalScreen.baseOptionsFilter
+        ? { baseOptionsFilter: goalScreen.baseOptionsFilter }
+        : {}),
+    });
+    const requested = goalScreen.assetClasses ?? ["stocks", "options"];
+    return { output: { ...state, plan, requested } };
+  });
+
+  registry.register(GOAL_LEDGER_CLAIM_STEP, async (ctx: JobStepContext) => {
+    const prior = priorFor<unknown>(ctx.input, ctx.shardKey);
+    if (isDupOutput(prior)) return { output: prior };
+    const params = ctx.params;
+    const userLogin = requireUserLogin(params);
+    const goalScreen = requireGoalScreen(params);
+    const state = goalCompositionState(ctx.input, ctx.shardKey);
+    const ledger = requireGoalTaskLedger(deps);
+    // The run id IS the idempotency key, exactly as
+    // runGoalDrivenScreenWithLedger keyed it — a re-entry of the
+    // same run (pause + resume, workflow eviction replay, step
+    // retry) finds its own record. The adoption is #5269 verbatim:
+    // a TERMINAL record is a duplicate delivery (executed:false,
+    // providers never re-invoked); an ACTIVE record is adopted
+    // through the legal transitions; a fresh run is created,
+    // claimed, started, and heartbeated.
+    const idempotencyKey = ctx.runId;
+    const existing = (await ledger.list(200)).find(
+      (t) => t.idempotencyKey === idempotencyKey,
+    );
+    if (existing && TERMINAL_TASK_STATUSES.has(existing.status)) {
+      return { output: { ...state, task: existing, executed: false } };
+    }
+    let task: ScreenerTask;
+    if (existing) {
+      task = existing;
+      if (task.status === "queued") task = await ledger.claim(task.id);
+      if (task.status === "claimed") task = await ledger.start(task.id);
+      await ledger.heartbeat(task.id);
+    } else {
+      const created = await ledger.create({
+        trigger: ctx.trigger,
+        universe: goalUniverseLabel(goalScreen.scenario),
+        sector: goalScreen.scenario.direction,
+        userLogin,
+        idempotencyKey,
+      });
+      if (!created.created) {
+        return { output: { ...state, task: created.task, executed: false } };
+      }
+      task = created.task;
+      await ledger.claim(task.id);
+      await ledger.start(task.id);
+      await ledger.heartbeat(task.id);
+    }
+    return { output: { ...state, task, executed: true } };
+  });
+
+  registry.register(GOAL_STOCK_LEG_STEP, async (ctx: JobStepContext) => {
+    const prior = priorFor<unknown>(ctx.input, ctx.shardKey);
+    if (isDupOutput(prior)) return { output: prior };
+    const params = ctx.params;
+    const userLogin = requireUserLogin(params);
+    const goalScreen = requireGoalScreen(params);
+    const agent = deps.agentFor(userLogin);
+    const state = goalCompositionState(ctx.input, ctx.shardKey);
+    if (state.executed === false) return { output: state };
+    if (!state.plan) {
+      throw new Error(
+        "GOAL_LEG_NO_PLAN: the stock leg ran without a plan — the goal.plan step must run first.",
+      );
+    }
+    if (!state.requested?.includes("stocks")) {
+      return { output: { ...state, stockLeg: { legSkipped: true } } };
+    }
+    const dispatch =
+      deps.goalStockLeg ??
+      ((input: GoalStockLegInput) => agent.runGoalStockLeg(input));
+    let stockLeg: GoalLegStepOutput;
+    try {
+      const result = await dispatch({
+        plan: state.plan,
+        userLogin,
+        trigger: ctx.trigger,
+        idempotencyKey: ctx.runId,
+        ...(params.environment
+          ? { environment: params.environment as "TEST" | "PROD" }
+          : {}),
+        ...(goalScreen.provider ? { provider: goalScreen.provider } : {}),
+      });
+      stockLeg = { result };
+    } catch (err) {
+      // Issue #462: a failed leg is a failed class, never a failed
+      // run — the throw is recorded as the leg's error outcome and
+      // the assembly turns it into a partial result.
+      stockLeg = { error: err instanceof Error ? err.message : String(err) };
+    }
+    return { output: { ...state, stockLeg } };
+  });
+
+  registry.register(GOAL_OPTIONS_LEG_STEP, async (ctx: JobStepContext) => {
+    const prior = priorFor<unknown>(ctx.input, ctx.shardKey);
+    if (isDupOutput(prior)) return { output: prior };
+    const params = ctx.params;
+    const userLogin = requireUserLogin(params);
+    requireGoalScreen(params);
+    const agent = deps.agentFor(userLogin);
+    const state = goalCompositionState(ctx.input, ctx.shardKey);
+    if (state.executed === false) return { output: state };
+    if (!state.plan) {
+      throw new Error(
+        "GOAL_LEG_NO_PLAN: the options leg ran without a plan — the goal.plan step must run first.",
+      );
+    }
+    if (!state.requested?.includes("options")) {
+      return { output: { ...state, optionsLeg: { legSkipped: true } } };
+    }
+    const dispatch =
+      deps.goalOptionsLeg ??
+      ((input: GoalOptionsLegInput) => agent.runGoalOptionsLeg(input));
+    let optionsLeg: GoalLegStepOutput;
+    try {
+      const result = await dispatch({
+        plan: state.plan,
+        userLogin,
+        trigger: ctx.trigger,
+        idempotencyKey: ctx.runId,
+        ...(params.environment
+          ? { environment: params.environment as "TEST" | "PROD" }
+          : {}),
+      });
+      optionsLeg = { result };
+    } catch (err) {
+      // Issue #462: a failed leg is a failed class, never a failed run.
+      optionsLeg = { error: err instanceof Error ? err.message : String(err) };
+    }
+    return { output: { ...state, optionsLeg } };
+  });
+
+  registry.register(GOAL_ASSEMBLE_STEP, async (ctx: JobStepContext) => {
+    const prior = priorFor<unknown>(ctx.input, ctx.shardKey);
+    if (isDupOutput(prior)) return { output: prior };
+    const state = goalCompositionState(ctx.input, ctx.shardKey);
+    if (state.executed === false) return { output: state };
+    if (!state.plan || !state.requested) {
+      throw new Error(
+        "GOAL_ASSEMBLE_NO_PLAN: the assembly ran without a plan — the goal.plan step must run first.",
+      );
+    }
+    const outcomes: Partial<Record<"stocks" | "options", GoalLegOutcome>> = {};
+    for (const klass of state.requested) {
+      const leg = klass === "stocks" ? state.stockLeg : state.optionsLeg;
+      if (!leg || "legSkipped" in leg) {
+        throw new Error(
+          `GOAL_ASSEMBLE_NO_LEG: the assembly ran without the ${klass} leg's outcome — the goal.${klass}Leg step must run first.`,
+        );
+      }
+      outcomes[klass] = leg;
+    }
+    const result = assembleGoalScreenResult({
+      plan: state.plan,
+      requested: state.requested,
+      outcomes,
+      now: new Date(ctx.now),
+    });
+    return { output: { ...state, result } };
+  });
+
+  registry.register(GOAL_LEDGER_COMPLETE_STEP, async (ctx: JobStepContext) => {
+    const prior = priorFor<unknown>(ctx.input, ctx.shardKey);
+    if (isDupOutput(prior)) return { output: prior };
+    const state = goalCompositionState(ctx.input, ctx.shardKey);
+    if (state.executed === false) return { output: state };
+    if (!state.task || !state.result) {
+      throw new Error(
+        "GOAL_LEDGER_COMPLETE_NO_TASK: the ledger completion ran without a claimed task and an assembled result — the goal.ledgerClaim and goal.assemble steps must run first.",
+      );
+    }
+    const ledger = requireGoalTaskLedger(deps);
+    const result = state.result;
+    let task: ScreenerTask;
+    if (result.status === "failed") {
+      // Issue #5269 verbatim: total failure is failed-then-escalated
+      // (the ledger's human-visible terminal state).
+      const reasons = result.partial
+        ? Object.entries(result.partial.reasons)
+            .map(([klass, reason]) => `${klass}: ${reason}`)
+            .join("; ")
+        : "all requested asset classes failed";
+      await ledger.fail(state.task.id, reasons);
+      task = await ledger.escalate(
+        state.task.id,
+        "goal-driven screen failed on every requested asset class; awaiting human review",
+      );
+    } else {
+      const partial = result.status === "partial";
+      const evaluation = evaluateScreenerOutcome(
+        {
+          success: true,
+          runTimestamp: result.completedAt,
+          totalScanned:
+            result.counts.stocksScanned + result.counts.optionsUnderlyingsScanned,
+          matchedCount: result.counts.hits,
+          opportunities: result.counts.hits,
+          partial,
+          qualificationPresent: partial ? result.partial !== undefined : false,
+          error: null,
+        },
+        result.completedAt,
+      );
+      task = await ledger.complete(state.task.id, {
+        runTimestamp: result.completedAt,
+        totalScanned:
+          result.counts.stocksScanned + result.counts.optionsUnderlyingsScanned,
+        matchedCount: result.counts.hits,
+        opportunitiesCount: result.counts.hits,
+        partial,
+        evaluation,
+      });
+    }
+    return { output: { ...state, task, executed: true } };
+  });
+
+  registry.register(GOAL_ARTIFACTS_STEP, async (ctx: JobStepContext) => {
+    const prior = priorFor<unknown>(ctx.input, ctx.shardKey);
+    if (isDupOutput(prior)) return { output: prior };
+    const params = ctx.params;
+    const userLogin = requireUserLogin(params);
+    const goalScreen = requireGoalScreen(params);
+    const agent = deps.agentFor(userLogin);
+    const state = goalCompositionState(ctx.input, ctx.shardKey);
+    const result = state.result ? { ...state.result } : undefined;
+    if (result) {
+      // The run's explicit data mode + provider ride the result
+      // before artifact generation, exactly as runGoalScreenOnEngine
+      // stamped them (the PDF provenance names the mode).
+      if (goalScreen.yahooDataMode && !result.yahooDataMode) {
+        result.yahooDataMode = goalScreen.yahooDataMode;
+      }
+      if (goalScreen.provider && !result.provider) {
+        result.provider = goalScreen.provider;
+      }
+      const generate =
+        deps.goalArtifacts ??
+        ((r: GoalDrivenScreenResult) => agent.generateGoalScreenArtifacts(r));
+      const artifacts = await generate(result);
+      Object.assign(result, artifacts);
+    }
+    const gatherOutput = state.gather;
+    // The analysis output the store stage consumes — the shape
+    // screenGoalStage returned, verbatim (a duplicate delivery
+    // carries no result, so the store stage records its refusal
+    // by name, as the direct path did).
+    return {
+      output: {
+        ...gatherOutput,
+        screenResult: {
+          totalScanned: result?.counts?.stocksScanned ?? 0,
+          matchedCount: result?.counts?.stocksMatched ?? 0,
+          filterSummary: undefined,
+        },
+        allStocks: [],
+        opportunities: [],
+        sentimentCoverage: { symbols: 0, withSentiment: 0 },
+        goalTask: state.task,
+        goalExecuted: state.executed ?? false,
+        ...(result ? { goalResult: result } : {}),
+      } as ScreenerAnalysisStageOutput,
+    };
   });
 
   registry.register(SCREENER_STORE_STEP, async (ctx: JobStepContext) => {
@@ -675,14 +1125,16 @@ export function buildScreenerJobDefinition(command: WorkflowJobCommand): unknown
   for (let i = spec.stages.length - 1; i >= 0; i--) {
     const stageSpec = spec.stages[i];
     const kind = stageSpec.kind;
+    // Issue #6072 — a stage may declare several steps (the
+    // goalScreen analyze stage's composition); a single-step stage
+    // keeps its `step`. Every step on the node carries the same params.
+    const stepNames = stageSpec.steps ?? [stageSpec.step];
     const next: JobNodeConfig = {
       kind,
-      steps: [
-        {
-          step: stageSpec.step,
-          params: { ...params, ...(jobIdParams[kind] ?? {}), ...(stageSpec.params ?? {}) },
-        },
-      ],
+      steps: stepNames.map((name) => ({
+        step: name,
+        params: { ...params, ...(jobIdParams[kind] ?? {}), ...(stageSpec.params ?? {}) },
+      })),
       processing: { shards: [...shardIds] },
       ...(node ? { children: [node] } : {}),
     };
@@ -922,6 +1374,19 @@ export function screenerStepDepsForScheduledAgent(
     ),
     storeReport: buildStoreDoor(env),
     deliverOutcome: buildDeliverDoor(env),
+    // Issue #6072 — the goal composition's ledger is D1-resident
+    // (env.AGENT_DB, the same binding the run ledger reads), so a
+    // goal run's ledger survives a workflow eviction. Unbound in
+    // this residency = a named refusal at claim time, never a
+    // silent fallback to the DO-storage ledger.
+    goalTaskLedgerFor: () => {
+      if (!env.AGENT_DB) {
+        throw new Error(
+          "GOAL_TASK_LEDGER_NO_D1: the goal composition steps need the AGENT_DB binding for the D1-resident task ledger — refusing a goal run with no D1 ledger (#6072).",
+        );
+      }
+      return new ScreenerTaskLedger(createD1ScreenerTaskStore(env.AGENT_DB));
+    },
   };
 }
 
@@ -940,5 +1405,16 @@ export function screenerStepDepsForWorkflow(env: Env, feedDeps: FeedStepDeps): S
     ),
     storeReport: buildStoreDoor(env),
     deliverOutcome: buildDeliverDoor(env),
+    // Issue #6072 — the goal composition's ledger is D1-resident
+    // (env.AGENT_DB, the same binding the run ledger reads); unbound
+    // = a named refusal at claim time, never a silent fallback.
+    goalTaskLedgerFor: () => {
+      if (!env.AGENT_DB) {
+        throw new Error(
+          "GOAL_TASK_LEDGER_NO_D1: the goal composition steps need the AGENT_DB binding for the D1-resident task ledger — refusing a goal run with no D1 ledger (#6072).",
+        );
+      }
+      return new ScreenerTaskLedger(createD1ScreenerTaskStore(env.AGENT_DB));
+    },
   };
 }
