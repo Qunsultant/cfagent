@@ -33,10 +33,11 @@
  */
 
 import {
-  RESEARCH_SCHEDULED_FIRE_HOUR_UTC,
   researchTickDateKey,
+  type ResearchFireHourConfig,
   type ResearchTickDecision,
 } from "./researchScheduleGuard";
+import { DEFAULT_RESEARCH_JOB_CONFIG } from "../config/researchJobConfig";
 import { DoSqliteReselectionStore } from "../data/doSqliteReselectionAdapter";
 import type {
   ReselectionActiveEntry,
@@ -72,18 +73,21 @@ export const STRATEGY_BANK_LAST_RUN_KEY = "strategy_bank_reselection_last_run";
 /**
  * Decide whether the nightly re-selection should fire at `now`,
  * given the durable last-fired date key. Fires exactly once per
- * weekday (Mon–Fri UTC), only at/after 21:00 UTC. The caller owns
+ * weekday (Mon–Fri UTC), only at/after the configured
+ * `scheduleUtcHour` (issue #6030: one declaration, shared with the
+ * research guard — never a second literal). The caller owns
  * persistence and writes the marker only after a successful run, so
  * a failed night retries on the next tick (#354 semantics).
  */
 export function shouldFireStrategyBankTick(
   now: Date,
-  lastFiredDateKey: string | null
+  lastFiredDateKey: string | null,
+  config: ResearchFireHourConfig = DEFAULT_RESEARCH_JOB_CONFIG
 ): ResearchTickDecision {
   const dateKey = researchTickDateKey(now);
   const dow = now.getUTCDay();
   if (dow === 0 || dow === 6) return { fire: false, dateKey, reason: "weekend" };
-  if (now.getUTCHours() < RESEARCH_SCHEDULED_FIRE_HOUR_UTC)
+  if (now.getUTCHours() < config.scheduleUtcHour)
     return { fire: false, dateKey, reason: "too-early" };
   if (lastFiredDateKey === dateKey)
     return { fire: false, dateKey, reason: "already-fired" };

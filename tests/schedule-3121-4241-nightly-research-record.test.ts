@@ -48,10 +48,8 @@ import {
 import { InMemoryUnifiedScheduleStore } from "../src/data/inMemoryUnifiedScheduleAdapter";
 import { SqlJobRunRecordStore } from "../src/data/doSqliteJobRunRecordAdapter";
 import { scheduleIdToLedgerJobId } from "../src/services/jobRunRecords";
-import {
-  NIGHTLY_RESEARCH_DISPATCH_CRON,
-  RESEARCH_SCHEDULED_FIRE_HOUR_UTC,
-} from "../src/services/researchScheduleGuard";
+import { nightlyResearchDispatchCron } from "../src/services/researchScheduleGuard";
+import { DEFAULT_RESEARCH_JOB_CONFIG } from "../src/config/researchJobConfig";
 import { classifyScheduleKind } from "../src/services/scheduleKinds";
 import { scheduleTitle } from "../src/client/scheduledOptionsManager/scheduleDetail";
 import { recordNightlyResearchLedgerRun } from "../src/agents/routes/screenerResearch";
@@ -92,7 +90,7 @@ describe("4241 derived nightly research record", () => {
     expect(record.kind).toBe("internal");
     expect(record.state).toBe("active");
     expect(record.callback).toBe("nightly-research");
-    expect(record.definition.cron).toBe(NIGHTLY_RESEARCH_DISPATCH_CRON);
+    expect(record.definition.cron).toBe(nightlyResearchDispatchCron());
     expect(record.definition.cron).toBe("0 21 * * 1-5");
     expect(record.definition.entryPoint).toBe("nightly-research");
     expect(record.provenance.origin).toBe("system");
@@ -102,9 +100,14 @@ describe("4241 derived nightly research record", () => {
     expect(record.updatedAt).toBe(NOW);
   });
 
-  it("reads the cadence from the guard's own rule, never re-literalized", () => {
-    expect(RESEARCH_SCHEDULED_FIRE_HOUR_UTC).toBe(21);
-    expect(NIGHTLY_RESEARCH_DISPATCH_CRON).toBe("0 21 * * 1-5");
+  it("reads the cadence from the one resolved config, never re-literalized (#6030)", () => {
+    expect(DEFAULT_RESEARCH_JOB_CONFIG.scheduleUtcHour).toBe(21);
+    expect(nightlyResearchDispatchCron()).toBe("0 21 * * 1-5");
+    // The env moves the record's cron with the guard's fire hour.
+    expect(nightlyResearchDispatchCron({ scheduleUtcHour: 22 })).toBe("0 22 * * 1-5");
+    expect(nightlyResearchToRecord(NOW, null, { scheduleUtcHour: 22 }).definition.cron).toBe(
+      "0 22 * * 1-5"
+    );
   });
 
   it("adds no new kind to the unified-store union", () => {
@@ -436,8 +439,12 @@ describe("4241 Schedules home renders the nightly research row (source pins)", (
     expect(riders).toContain('https://agent.internal/research/scheduled-tick');
     // The slice adds no Worker cron and no SDK alarm for the research run.
     const guard = source("src/services/researchScheduleGuard.ts");
-    expect(guard).toContain('NIGHTLY_RESEARCH_DISPATCH_CRON = "0 21 * * 1-5"');
-    expect(guard).toContain("RESEARCH_SCHEDULED_FIRE_HOUR_UTC = 21");
+    // #6030 — one declaration: the cron is derived from the config hour,
+    // and no second fire-hour literal exists in the guard.
+    expect(guard).toContain("export function nightlyResearchDispatchCron(");
+    expect(guard).toContain("config.scheduleUtcHour");
+    expect(guard).not.toContain("RESEARCH_SCHEDULED_FIRE_HOUR_UTC");
+    expect(guard).not.toContain("NIGHTLY_RESEARCH_DISPATCH_CRON =");
     // The fired run is recorded in the ledger from the scheduled-tick
     // handler, after the durable marker write.
     const route = source("src/agents/routes/screenerResearch.ts");

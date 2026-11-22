@@ -858,7 +858,8 @@ export class ResearchAgent extends PortThink {
     const store = this.settingsStore();
     const decision = shouldFireResearchTick(
       now,
-      store.get(RESEARCH_DISCOVERY_LAST_RUN_KEY)
+      store.get(RESEARCH_DISCOVERY_LAST_RUN_KEY),
+      resolveResearchJobConfig(this.env)
     );
     if (!decision.fire) return { fired: false, dateKey: decision.dateKey };
     const result = await this.runDiscovery({ ...req, trigger: "scheduled" });

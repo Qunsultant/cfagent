@@ -28,11 +28,11 @@ import {
 import { CREATABLE_SCHEDULE_CALLBACKS } from "../src/agents/orchestrator/scheduleCallbacks";
 import { DEFAULT_SCHEDULES, isDue } from "../src/schedule";
 import {
-  RESEARCH_SCHEDULED_FIRE_HOUR_UTC,
   RESEARCH_SCHEDULED_LAST_RUN_KEY,
   researchTickDateKey,
   shouldFireResearchTick,
 } from "../src/services/researchScheduleGuard";
+import { DEFAULT_RESEARCH_JOB_CONFIG } from "../src/config/researchJobConfig";
 import {
   buildJobRunRecord,
   resolveScheduleRunJobId,
@@ -503,7 +503,8 @@ describe("S0-P18 retention (B-T1-03/05): window, defaults, audit-chain guard", (
 
 describe("S0-P19 piggyback research guard (B-T1-04): exactly once per weekday at/after 21:00 UTC", () => {
   it("pins the guard constants", () => {
-    expect(RESEARCH_SCHEDULED_FIRE_HOUR_UTC).toBe(21);
+    // #6030 — the fire hour is one declaration: the research config.
+    expect(DEFAULT_RESEARCH_JOB_CONFIG.scheduleUtcHour).toBe(21);
     expect(RESEARCH_SCHEDULED_LAST_RUN_KEY).toBe("research_scheduled_last_run");
     expect(researchTickDateKey(new Date(Date.UTC(2026, 9, 19, 23, 59)))).toBe("2026-10-19");
   });

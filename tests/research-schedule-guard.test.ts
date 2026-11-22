@@ -10,8 +10,8 @@ import { describe, it, expect } from "vitest";
 import {
   shouldFireResearchTick,
   researchTickDateKey,
-  RESEARCH_SCHEDULED_FIRE_HOUR_UTC,
 } from "../src/services/researchScheduleGuard";
+import { DEFAULT_RESEARCH_JOB_CONFIG } from "../src/config/researchJobConfig";
 
 /** Monday 2026-10-19 21:05 UTC. */
 function mon2105(): Date {
@@ -94,7 +94,7 @@ describe("shouldFireResearchTick", () => {
     expect(d.fire).toBe(true);
   });
 
-  it("the fire-hour constant is 21:00 UTC (17:00 ET after close)", () => {
-    expect(RESEARCH_SCHEDULED_FIRE_HOUR_UTC).toBe(21);
+  it("the fire hour is one declaration: the research config (#6030)", () => {
+    expect(DEFAULT_RESEARCH_JOB_CONFIG.scheduleUtcHour).toBe(21);
   });
 });

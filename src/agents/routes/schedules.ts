@@ -158,6 +158,11 @@ import {
   type ScheduleAlarms,
   type ScheduleAlarmLike,
 } from "../../services/unifiedScheduleManagement";
+import {
+  DEFAULT_RESEARCH_JOB_CONFIG,
+  resolveResearchJobConfig,
+} from "../../config/researchJobConfig";
+import type { ResearchFireHourConfig } from "../../services/researchScheduleGuard";
 import { SCHEDULE_WATCHDOG_HEARTBEAT_JOB_ID } from "../../services/scheduleWatchdog";
 import {
   TICKER_INSTANCE_NAME,
@@ -532,11 +537,12 @@ export async function readRetentionListItem(
  */
 export async function readNightlyResearchListItem(
   sql: ConstructorParameters<typeof SqlJobRunRecordStore>[0],
+  config: ResearchFireHourConfig = DEFAULT_RESEARCH_JOB_CONFIG,
 ): Promise<ReturnType<typeof nightlyResearchRecordToListItem> | null> {
   try {
     const lastRun = new SqlJobRunRecordStore(sql).latestByJob(NIGHTLY_RESEARCH_RECORD_ID);
     return nightlyResearchRecordToListItem(
-      nightlyResearchToRecord(new Date().toISOString()),
+      nightlyResearchToRecord(new Date().toISOString(), null, config),
       lastRun ? { started: lastRun.started, finished: lastRun.finished, outcome: lastRun.outcome } : undefined,
     );
   } catch (err) {
@@ -765,7 +771,10 @@ export async function handleSchedulesRoutes(
       // Issue #3121 #4241 — the nightly research row is derived,
       // not stored; append it with its last run joined from
       // the ledger, under the same ?type= filter as the rest.
-      const nightlyResearchItem = await readNightlyResearchListItem(ctx.agentCtx.storage.sql);
+      const nightlyResearchItem = await readNightlyResearchListItem(
+        ctx.agentCtx.storage.sql,
+        resolveResearchJobConfig(ctx.env as unknown as Record<string, string | undefined>),
+      );
       if (nightlyResearchItem && (!typeParam || nightlyResearchItem.type === typeParam)) {
         items.push(nightlyResearchItem);
       }

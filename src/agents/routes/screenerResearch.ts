@@ -45,6 +45,7 @@ import {
   RESEARCH_SCHEDULED_LAST_RUN_KEY,
   NIGHTLY_RESEARCH_RECORD_ID,
 } from "../../services/researchScheduleGuard";
+import { resolveResearchJobConfig } from "../../config/researchJobConfig";
 import { recordLedgerRun } from "../../services/unifiedLedger";
 import { SqlJobRunRecordStore } from "../../data/doSqliteJobRunRecordAdapter";
 import { resolveScheduledJobAlertThreshold } from "../../config/scheduledJobAlert";
@@ -786,7 +787,8 @@ export async function handleScreenerResearchRoutes(
         // successful run so a failed 21:00 run retries at 21:30.
         const decision = shouldFireResearchTick(
           new Date(),
-          ctx.readSettingRaw(RESEARCH_SCHEDULED_LAST_RUN_KEY)
+          ctx.readSettingRaw(RESEARCH_SCHEDULED_LAST_RUN_KEY),
+          resolveResearchJobConfig(ctx.env as unknown as Record<string, string | undefined>)
         );
         if (!decision.fire) {
           // Issue Qunsultant/cfagent#2037 — a skip is an outcome, not
@@ -953,7 +955,8 @@ export async function handleScreenerResearchRoutes(
                 const { getStrategyWeightsV2ForRegime } = await import("../../services/strategyWeightsV2");
                 const sbDecision = shouldFireStrategyBankTick(
                   new Date(),
-                  ctx.readSettingRaw(STRATEGY_BANK_LAST_RUN_KEY)
+                  ctx.readSettingRaw(STRATEGY_BANK_LAST_RUN_KEY),
+                  resolveResearchJobConfig(ctx.env as unknown as Record<string, string | undefined>)
                 );
                 if (sbDecision.fire) {
                   const evidence = buildStrategyRegimeEvidence(track.ideas);
