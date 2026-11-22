@@ -80,22 +80,6 @@ describe("issue #6064 — the enrich stage", () => {
     expect(report.stats.quotesRetrieved).toBe(1);
   });
 
-  it("consumes the run-scoped enrich hand-off", async () => {
-    putResearchFeed(feed());
-    putResearchEnrich({
-      runId: "run-enrich-1",
-      asOf: "2026-11-22T00:00:01.000Z",
-      bySymbol: { AAA: { technicals, catalysts: [] } },
-    });
-    const p = provider({
-      getTechnicals: vi.fn(async () => {
-        throw new Error("technicals must not be fetched");
-      }),
-    });
-    await runResearchPipeline({ provider: p }, config, baseOpts);
-    expect(p.getTechnicals).not.toHaveBeenCalled();
-  });
-
   it("runs as the research.enrich engine step and hands the output to analyze", async () => {
     const { createBuiltinStepRegistry } = await import("../src/services/jobPipelineSteps");
     const { registerResearchSteps } = await import("../src/services/researchPipelineJobs");

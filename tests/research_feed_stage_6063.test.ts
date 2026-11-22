@@ -102,18 +102,6 @@ describe("issue #6063 — the feed stage", () => {
     expect(report.stats.quotesRetrieved).toBe(0);
   });
 
-  it("consumes the run-scoped hand-off when the caller did not pass feed", async () => {
-    putResearchFeed(feed());
-    const p = provider({
-      getQuote: vi.fn(async () => {
-        throw new Error("quote must not be fetched");
-      }),
-    });
-    const report = await runResearchPipeline(deps(p), config, baseOpts);
-    expect(p.getQuote).not.toHaveBeenCalled();
-    expect(report.stats.quotesRetrieved).toBe(1);
-  });
-
   it("preserves the universe-failure report from the feed error", async () => {
     const report = await runResearchPipeline(deps(provider()), config, {
       ...baseOpts,

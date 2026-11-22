@@ -84,7 +84,7 @@ import {
 import { fetchAllUsStockListings } from "../services/nasdaqListings";
 import type { OptionsWorkflowStepDeps } from "../services/optionsPipelineJobs";
 import { optionsChainStepDepsForWorkflow } from "../services/optionsChainPipelineJobs";
-import { createDefaultResearchStepDeps } from "../services/researchPipelineJobs";
+import { createWorkflowResearchStepDeps } from "./researchWorkflowStageDeps";
 import { fetchWikipediaIndexHtml } from "../services/indexListJob";
 import type { JobPipelineDeps } from "../services/jobPipelineEngine";
 import { JobPipelineError } from "../services/jobPipelineConfig";
@@ -411,7 +411,7 @@ export function createJobPipelineWorkflowDeps(env: Env): JobPipelineDeps {
       optionsChainStepDepsForWorkflow(env),
       // Issue #5237: research steps (`analyze.ooda` and `evaluate.apply`) compose
       // into the shared registry in the workflow residency.
-      createDefaultResearchStepDeps(),
+      createWorkflowResearchStepDeps(env),
     ),
     invocation: "workflow-shard",
     // Issue #4782 S3 — the policy resolves from this env (the

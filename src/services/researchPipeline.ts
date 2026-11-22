@@ -37,8 +37,8 @@ import type {
   ChainProvenance,
 } from "./researchGates";
 import { runStageGates } from "./researchGates";
-import { takeResearchFeed, type ResearchFeedStageOutput } from "./researchFeedHandoff";
-import { takeResearchEnrich, type ResearchEnrichStageOutput } from "./researchEnrichHandoff";
+import type { ResearchFeedStageOutput } from "./researchFeedHandoff";
+import type { ResearchEnrichStageOutput } from "./researchEnrichHandoff";
 import type {
   Falsification,
   Premortem,
@@ -806,7 +806,7 @@ export async function runEnrichStage(
     ]);
     bySymbol[entry.symbol] = { technicals, catalysts };
   }
-  return { runId, asOf: new Date().toISOString(), bySymbol };
+  return { runId, asOf: new Date().toISOString(), feed, bySymbol };
 }
 
 /**
@@ -910,8 +910,8 @@ export async function runResearchPipeline(
   step("observe", "Assessing market regime.");
   // Issue #6063 — the feed stage output, or this pipeline's own fetch when the
   // stage did not run (a direct caller, or a resumed run in another process).
-  const feed = opts.feed ?? takeResearchFeed(runId) ?? (await runFeedStage(deps, config, { ...opts, runId }));
-  const enrich = opts.enrich ?? takeResearchEnrich(runId);
+  const feed = opts.feed ?? (await runFeedStage(deps, config, { ...opts, runId }));
+  const enrich = opts.enrich;
   const regime = feed.regime as RegimeAssessment;
   stage("orient", `Regime: ${regime.regime}.`);
   step("orient", `Regime: ${regime.regime}.`);

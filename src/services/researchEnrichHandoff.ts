@@ -1,4 +1,8 @@
 /**
+ * Deprecated (#6093): the process-local maps are no longer used by the J-stack
+ * path. Stage outputs travel through the engine step output (durable) and the
+ * types below are the hand-off contracts; the maps remain only for legacy
+ * direct callers.
  * Issue #6064 — the enrich stage's run-scoped hand-off.
  *
  * The enrich step is the producer: it fetches technicals and catalysts for the
@@ -18,9 +22,13 @@ export interface ResearchEnrichEntry {
   catalysts: unknown[] | null;
 }
 
+import type { ResearchFeedStageOutput } from "./researchFeedHandoff";
+
 export interface ResearchEnrichStageOutput {
   runId: string;
   asOf: string;
+  /** Issue #6093 — the feed step output this enrichment was built from. */
+  feed: ResearchFeedStageOutput;
   bySymbol: Record<string, ResearchEnrichEntry>;
 }
 
