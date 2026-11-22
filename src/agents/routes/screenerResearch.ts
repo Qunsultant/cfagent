@@ -617,12 +617,30 @@ export async function handleScreenerResearchRoutes(
           d1: resolveResearchD1(),
           env: ctx.env as Record<string, string | undefined>,
           ...selection,
+          researchDeps: {
+            runFeedStage: async (input) => {
+              const agent = ctx.getResearchAgent(input.userLogin);
+              if (!agent) {
+                throw new Error(
+                  "research_stage_unavailable: the research agent is not configured.",
+                );
+              }
+              return agent.runFeedStage({
+                trigger: input.trigger,
+                userLogin: input.userLogin,
+                ...(input.runId ? { runId: input.runId } : {}),
+                ...(input.brokerId ? { brokerId: input.brokerId } : {}),
+                ...(input.mode ? { mode: input.mode } : {}),
+              });
+            },
+          },
           execute: (runCtx) =>
             runCtx
               ? runWithResearchRunId(runCtx.runId, () =>
                   triggerManualResearch(ctx.runResearchAndPublish, userLogin, {
                     ...selection,
                     runId: runCtx.runId,
+                    ...(runCtx.feed ? { feed: runCtx.feed } : {}),
                   }),
                 )
               : triggerManualResearch(ctx.runResearchAndPublish, userLogin, selection),
@@ -771,7 +789,25 @@ export async function handleScreenerResearchRoutes(
           sql: resolveResearchSql(),
           d1: resolveResearchD1(),
           env: ctx.env as Record<string, string | undefined>,
-          execute: () => triggerScheduledResearch(ctx.runResearchAndPublish, userLogin),
+          researchDeps: {
+            runFeedStage: async (input) => {
+              const agent = ctx.getResearchAgent(input.userLogin);
+              if (!agent) {
+                throw new Error(
+                  "research_stage_unavailable: the research agent is not configured.",
+                );
+              }
+              return agent.runFeedStage({
+                trigger: input.trigger,
+                userLogin: input.userLogin,
+                ...(input.runId ? { runId: input.runId } : {}),
+                ...(input.brokerId ? { brokerId: input.brokerId } : {}),
+                ...(input.mode ? { mode: input.mode } : {}),
+              });
+            },
+          },
+          execute: (runCtx) =>
+            triggerScheduledResearch(ctx.runResearchAndPublish, userLogin, runCtx?.feed),
         });
         const out = {
           ...dispatched.outcome,

@@ -7,6 +7,7 @@
  */
 
 import type { TriggerSource } from "./researchPipeline";
+import type { ResearchFeedStageOutput } from "./researchFeedHandoff";
 
 const runIdStack: string[] = [];
 
@@ -34,6 +35,8 @@ export interface ResearchRunSelection {
    * run id, no second mint.
    */
   runId?: string;
+  /** Issue #6063 — the feed stage output, threaded into the run. */
+  feed?: ResearchFeedStageOutput;
 }
 
 export type PublishEntry<R> = (
@@ -60,7 +63,8 @@ export function triggerManualResearch<R>(
  */
 export function triggerScheduledResearch<R>(
   publish: PublishEntry<R>,
-  userLogin?: string
+  userLogin?: string,
+  feed?: ResearchFeedStageOutput
 ): Promise<R> {
-  return publish("scheduled", userLogin);
+  return feed ? publish("scheduled", userLogin, { feed }) : publish("scheduled", userLogin);
 }

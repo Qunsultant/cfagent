@@ -33,6 +33,7 @@ import { isBrokerId, isTradingType } from "../trading";
 import { resolveResearchJobConfig } from "../config/researchJobConfig";
 import { createResearchStorePorts } from "../data/createResearchStorePorts";
 import { createFeedDatasetAdapter } from "../data/createFeedDatasetPorts";
+import type { ResearchFeedStageOutput } from "../services/researchFeedHandoff";
 import type { ResearchStorePorts } from "../data/researchStorePorts";
 import {
   ResearchConfigService,
@@ -42,6 +43,7 @@ import {
 } from "../services/researchConfig";
 import {
   runResearchPipeline,
+  runFeedStage as runFeedStagePipeline,
   runResearchEvaluation,
   type TriggerSource,
   type ResearchReport,
@@ -137,6 +139,8 @@ export interface ResearchRunRequest {
   mode?: string;
   /** Optional engine runId so canonical report & D1 JobRunRecord share one ID (#581 / #5175). */
   runId?: string;
+  /** Issue #6063 — the feed stage output, when the engine ran the feed step. */
+  feed?: ResearchFeedStageOutput;
   /** Optional one-off config overrides for this run (still validated). */
   configOverride?: Partial<ResearchConfig>;
 }
@@ -548,37 +552,12 @@ export class ResearchAgent extends PortThink {
     return researchA2AOutcome(data);
   }
 
-  /**
-   * THE pipeline entry for this agent. Runs the full OODA research loop
-   * and persists the run record. Publication (canonical store) is the
-   * orchestrator's job — see runResearchAndPublish.
-   */
-  async runResearch(req: ResearchRunRequest): Promise<ResearchRunResult> {
-    // Issue #2327: no identity, no run — a request that cannot name
-    // its actor is refused, never executed under a default login.
-    const userLogin = explicitResearchLogin(req.userLogin);
-    if (!userLogin) {
-      return { success: false, report: null, error: RESEARCH_IDENTITY_REQUIRED };
-    }
-    try {
-      this.ensureTables();
-      const service = this.configService();
-      let config = service.load();
-      if (req.configOverride) {
-        const merged = service.save(req.configOverride);
-        if (merged.errors.length > 0) {
-          return {
-            success: false,
-            report: null,
-            error: `Invalid config override: ${merged.errors.join("; ")}`,
-          };
-        }
-        config = merged.config;
-      }
-      // Issue #1331: history resolution degrades to undefined deps
-      // (honestly-null technicals) instead of failing the run — the
-      // old yahooHistory contract. See resolveYahooHistoryDeps.
-      const historyDeps = await resolveYahooHistoryDeps({
+  /** Issue #6063 — the provider/config runtime shared by run and feed stages. */
+  private async buildProvider(
+    userLogin: string,
+    req: ResearchRunRequest,
+    config: ResearchConfig,
+  ) {      const historyDeps = await resolveYahooHistoryDeps({
         sql: this.ctx.storage.sql,
         env: this.env,
         userLogin,
@@ -620,6 +599,7 @@ export class ResearchAgent extends PortThink {
         {
           ...(req.brokerId ? { brokerId: req.brokerId } : {}),
           ...(req.mode ? { mode: req.mode } : {}),
+          ...(req.feed ? { feed: req.feed } : {}),
           chainFeed: {
             datasetStore: createFeedDatasetAdapter(this.env),
             maxAgeSeconds: config.quoteFreshnessSeconds,
@@ -627,6 +607,57 @@ export class ResearchAgent extends PortThink {
           chainRules: config,
         }
       );
+    return provider;
+  }
+
+  /** Issue #6063 — the feed stage: regime, universe and quotes, no publication. */
+  async runFeedStage(req: ResearchRunRequest): Promise<ResearchFeedStageOutput> {
+    const userLogin = explicitResearchLogin(req.userLogin);
+    if (!userLogin) throw new Error(RESEARCH_IDENTITY_REQUIRED);
+    this.ensureTables();
+    const config = this.configService().load();
+    const provider = await this.buildProvider(userLogin, req, config);
+    return runFeedStagePipeline({ provider }, config, {
+      trigger: req.trigger,
+      userLogin,
+      ...(req.runId ? { runId: req.runId } : {}),
+      ...(req.brokerId ? { brokerId: req.brokerId } : {}),
+      ...(req.mode ? { mode: req.mode } : {}),
+    });
+  }
+
+  /**
+   * THE pipeline entry for this agent. Runs the full OODA research loop
+   * and persists the run record. Publication (canonical store) is the
+   * orchestrator's job — see runResearchAndPublish.
+   */
+  async runResearch(req: ResearchRunRequest): Promise<ResearchRunResult> {
+    // Issue #2327: no identity, no run — a request that cannot name
+    // its actor is refused, never executed under a default login.
+    const userLogin = explicitResearchLogin(req.userLogin);
+    if (!userLogin) {
+      return { success: false, report: null, error: RESEARCH_IDENTITY_REQUIRED };
+    }
+    try {
+      this.ensureTables();
+      const service = this.configService();
+      let config = service.load();
+      if (req.configOverride) {
+        const merged = service.save(req.configOverride);
+        if (merged.errors.length > 0) {
+          return {
+            success: false,
+            report: null,
+            error: `Invalid config override: ${merged.errors.join("; ")}`,
+          };
+        }
+        config = merged.config;
+      }
+      // Issue #1331: history resolution degrades to undefined deps
+      // (honestly-null technicals) instead of failing the run — the
+      // old yahooHistory contract. See resolveYahooHistoryDeps.
+      const provider = await this.buildProvider(userLogin, req, config);
+
       // Issue #773: feed historical evaluation outcomes into the pipeline's Decide stage.
       let trackRecord: import("../services/researchTrackRecord").TrackRecord | undefined;
       try {
@@ -663,6 +694,7 @@ export class ResearchAgent extends PortThink {
           // and the report can name them instead of guessing.
           ...(req.brokerId ? { brokerId: req.brokerId } : {}),
           ...(req.mode ? { mode: req.mode } : {}),
+          ...(req.feed ? { feed: req.feed } : {}),
           ...(accountBinding ? accountBinding : {}),
         }
       );

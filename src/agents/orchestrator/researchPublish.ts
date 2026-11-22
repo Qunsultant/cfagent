@@ -21,6 +21,7 @@ import {
 } from "../../services/researchTaskLedger";
 import type { ResearchAgent } from "../research-agent";
 import type { ResearchReport } from "../../services/researchPipeline";
+import type { ResearchFeedStageOutput } from "../../services/researchFeedHandoff";
 import type { ResearchReportArtifactOutcome, ResearchWorkbookOutcome } from "../../trading";
 import { resolveCopilotTradingSelection } from "../copilotTradingMode";
 import { resolveTenantBroker } from "../../services/tenantProviders";
@@ -161,7 +162,7 @@ export async function runResearchAndPublish(ctx: ResearchPublishContext,
   trigger: "manual" | "scheduled",
   userLogin?: string,
   /** Issue #5912 — the venue/mode this run names, if any. */
-  selection?: { brokerId?: string; mode?: string; runId?: string }
+  selection?: { brokerId?: string; mode?: string; runId?: string; feed?: ResearchFeedStageOutput }
 ): Promise<{
   success: boolean;
   error?: string;
@@ -274,21 +275,27 @@ export async function runResearchAndPublish(ctx: ResearchPublishContext,
     // below triggers on status, never on a throw, so without this the
     // throw fails the whole run instead of degrading it.
     let child: { status: string; error?: string };
-    try {
-      child = await ctx.runAgentTool(ResearchAgent, {
-        input: {
-          trigger,
-          userLogin: login,
-          ...(effectiveSelection?.runId ? { runId: effectiveSelection.runId } : {}),
-          ...(effectiveSelection?.brokerId ? { brokerId: effectiveSelection.brokerId } : {}),
-          ...(effectiveSelection?.mode ? { mode: effectiveSelection.mode } : {}),
-        },
-      });
-    } catch (err) {
-      child = {
-        status: "error",
-        error: err instanceof Error ? err.message : String(err),
-      };
+    if (effectiveSelection?.feed) {
+      // Issue #6063 — the feed stage already ran on J-stack; the direct
+      // pipeline consumes its persisted output instead of a second fetch.
+      child = { status: "feed_stage" };
+    } else {
+      try {
+        child = await ctx.runAgentTool(ResearchAgent, {
+          input: {
+            trigger,
+            userLogin: login,
+            ...(effectiveSelection?.runId ? { runId: effectiveSelection.runId } : {}),
+            ...(effectiveSelection?.brokerId ? { brokerId: effectiveSelection.brokerId } : {}),
+            ...(effectiveSelection?.mode ? { mode: effectiveSelection.mode } : {}),
+          },
+        });
+      } catch (err) {
+        child = {
+          status: "error",
+          error: err instanceof Error ? err.message : String(err),
+        };
+      }
     }
     let report = await agent.getLatest();
     if (child.status !== "completed" || !report || report.runId === previousRunId || report.trigger !== trigger || report.userLogin !== login) {
@@ -313,6 +320,7 @@ export async function runResearchAndPublish(ctx: ResearchPublishContext,
         ...(effectiveSelection?.runId ? { runId: effectiveSelection.runId } : {}),
         ...(effectiveSelection?.brokerId ? { brokerId: effectiveSelection.brokerId as never } : {}),
         ...(effectiveSelection?.mode ? { mode: effectiveSelection.mode } : {}),
+        ...(effectiveSelection?.feed ? { feed: effectiveSelection.feed } : {}),
       });
       if (!fallback.success || !fallback.report) {
         const failure = fallback.error || child.error || `Research agent finished with status ${child.status}.`;
