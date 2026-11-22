@@ -115,6 +115,10 @@ const REMAINDER_STATEMENT_SHA256 = {
   "schema.do.job_run_records.alter_table_add_column_kind": "34c0ed18d0e392479b78e764eee8ca3469016ce6f7a16eb97b88c9cef79ea93a",
   "schema.do.job_run_records.alter_table_add_column_origin_run_id": "a964ba093b55c66e2ae42db8ca854060dfde87d1f6885f83a15db01cce2b145d",
   "schema.do.job_run_records.alter_table_add_column_definition_version": "6a99fcb4f160d062d91fac0db4db22e87e2dde046df28ef12a2ba22d956ff87d",
+  "schema.do.job_run_records.alter_table_add_column_account_type": "6fa4a394f569df573a970f9f66537fa69b8e090c8dfbf32315e5d5fc99384b94",
+  "schema.do.job_run_records.alter_table_add_column_account_id": "313d96edcf71b4b5e35e9a58c2f99669e5040ae3a599b2bcd399cd24ccdfc357",
+  "schema.do.job_run_records.alter_table_add_column_binding_scope": "10ee9270fa4c4cc521f3e36ca20bf407c33bec9cbb589fd435e7e33bbe54ddfd",
+  "schema.do.job_run_records.alter_table_add_column_binding_source": "f47ce60f3889252b513df0ba7addbcfde22046b2fb988f40b38765e69883ec57",
   "schema.do.job_pipeline_instances.alter_table_add_column_run_definition_version": "79adb986bb037badc60f653bce7f99084930e6fd05fac0da3d8f6e2e83da6719",
   "schema.do.mas_async_jobs.alter_table_add_column_chain_id": "6ce7bfa86fd12746c47e09735e8ca618df98cef7542c8c9612c6bc490b1afdc1",
   "schema.do.mas_async_jobs.alter_table_add_column_tenant_id": "f4ce90ba9f7582002a6ca54d40a3dccbd340e77bb829294e09e770cb8175487d",
@@ -146,6 +150,11 @@ const REMAINDER_STATEMENT_SHA256 = {
   "schema.do.mas_opportunity_scans.alter_table_add_column_schedule_id": "3f2b9a5cb514b82016154c54bd6a76b2f6202cbcba25c568c3bfb973499dcc2b",
   "schema.do.mas_opportunity_scans.alter_table_add_column_user_login": "84d45cd85a2c49a84b4af6e17d418a7643b36b4c3693c0981e5512f1a4a43ec0",
   "schema.do.mas_opportunity_scans.alter_table_add_column_workflow_id": "2ba98732883ac752ac1bafe8583a3e8c1e030849a285cff245f4c9e92ca7ac7a",
+  "schema.do.mas_policy_verdicts.alter_table_add_column_broker": "0516a156768e579d4406479e6e6c72c5419d092d06e0538884c11e3b8266ec41",
+  "schema.do.mas_policy_verdicts.alter_table_add_column_account_type": "fb0c86f8b7c40c2df62ed7c0291c26bf3672b0255a9dab5444e6c7b87aba069a",
+  "schema.do.mas_policy_verdicts.alter_table_add_column_account_id": "b33b47ebc26bfbdbafb7edaa33c4c306884e08edf8deb2c3dd1dbf39d46ca72c",
+  "schema.do.mas_policy_verdicts.alter_table_add_column_binding_scope": "b78af879d1ff52f87cd5c4cdcecada89da689ca300c1f5410312fe33c3366c01",
+  "schema.do.mas_policy_verdicts.alter_table_add_column_binding_source": "d2d66b915568996f4debe487b97e301f12d947fea5b4af34eec9b75199859b18",
   "schema.do.mas_report_confirmations.alter_table_add_column": "9c0dabbe6fbbe9f8c55938c1b8e93cef4240520814b30d3cf986707b68ab1dfd",
   "schema.do.mas_reports.alter_table_add_column": "d86b2aec458a2a1854d471c10bc6a8ffe8f37b05adb5d06ad374facdae2f09ea",
   "schema.index.mas_reports.drop_index_idx_mas_reports_generation": "59f431304462a0f467c7c5e60996e752ae289c8943024afe70ddbdd2541e795d",
@@ -155,6 +164,10 @@ const REMAINDER_STATEMENT_SHA256 = {
   "schema.orm.mas_trades.alter_table_add_column_mode": "38442d5e5ceb505bfa7e876ce69f8b2be9cfe1f9b48b84a2528075306109b70b",
   "schema.orm.mas_trades.alter_table_add_column_stop_price": "cfcb1fec30f6e6e022bcaceb91d92bd79b22d7d966574fc3fafb85089a4ab31d",
   "schema.orm.mas_trades.alter_table_add_column_time_in_force": "5ffd5aafd0f0453e7e7db1b08e94aa60c2f211906c95f0369124c83595a66f96",
+  "schema.orm.mas_trades.alter_table_add_column_account_id": "7e0f28e1af0d4ac3bce0d9d64857c20df5b9744a74831b59fe7bfec1986c545a",
+  "schema.orm.mas_trades.alter_table_add_column_account_type": "f67a77d93bebe2d2000c65a1ad47e84c68cf8bb9a499781dc72bedefd29d9dae",
+  "schema.orm.mas_trades.alter_table_add_column_binding_scope": "e67762dacd63212fd2cc2fcf33f32af2da5c7485ce469274aea914f3d0ec5f8a",
+  "schema.orm.mas_trades.alter_table_add_column_binding_source": "068ff6444414fed608adb55dcc36180726038295b24866c31a8183773b3f3afb",
   "schema.do.stock_copilot_activity.alter_table_add_column_critic_verdict_json": "64dd279747ad9a77a808e5e63c8baf21307acfbcde00195e6ec01064095f1134",
   "schema.do.stock_copilot_activity.alter_table_add_column_mode": "5eb025894bfc9a3e47c888234122af4170214d0ed31da66e373f3d126a7a670b",
   "schema.do.stock_copilot_activity.alter_table_add_column_session": "a5f1dc8ac6e137f026e2611705c21a32be485279d86c5f774575e319a6aee161",
@@ -453,11 +466,16 @@ const P3_DELEGATED_FILES = [
 ];
 
 describe("remainder catalogue — P3 long tail + ALTER reconciliation (#4282 P3)", () => {
-  it("catalogues all 65 remainder statements: 8 table + 2 index + 53 alter + 1 drop + 1 seed-form", () => {
+  it("catalogues all 78 remainder statements: 8 table + 2 index + 66 alter + 1 drop + 1 seed-form", () => {
     const catalogue = buildRemainderCatalogue();
-    expect(REMAINDER_CATALOGUE_ENTRIES.length).toBe(65);
-    expect(catalogue.size()).toBe(65);
-    expect(catalogue.byKind("schema").length).toBe(64);
+    // Issue #6167 adds 1 probed DO ALTER (mas_async_jobs.host_version):
+    // 64 → 65. Issue #5100 (F3 of #5094) adds 13 literal ALTERs: the
+    // job_run_records binding columns (4), the mas_trades binding columns
+    // (4), and the mas_policy_verdicts binding columns (5): 65 → 78.
+    expect(REMAINDER_CATALOGUE_ENTRIES.length).toBe(78);
+    expect(catalogue.size()).toBe(78);
+    expect(catalogue.byKind("schema").length).toBe(77);
+
     expect(catalogue.byKind("seed").length).toBe(1);
     const verbs = new Map<string, number>();
     const classify = (statement: string): string => {
@@ -482,21 +500,21 @@ describe("remainder catalogue — P3 long tail + ALTER reconciliation (#4282 P3)
     }
     expect(verbs.get("CREATE TABLE")).toBe(8);
     expect(verbs.get("CREATE INDEX")).toBe(2);
-    expect(verbs.get("ALTER TABLE")).toBe(53);
+    expect(verbs.get("ALTER TABLE")).toBe(66);
     expect(verbs.get("DROP INDEX")).toBe(1);
     expect(verbs.get("INSERT OR REPLACE")).toBe(1);
     expect(verbs.get("OTHER")).toBeUndefined();
     // Every code is unique and every entry is reachable by its code.
     const codes = new Set(REMAINDER_CATALOGUE_ENTRIES.map((e) => e.code));
-    expect(codes.size).toBe(65);
+    expect(codes.size).toBe(78);
     for (const entry of REMAINDER_CATALOGUE_ENTRIES) {
       expect(catalogue.get(entry.code).statement).toBe(entry.statement);
     }
-    // Planes: do 55, d1 1, orm 5, index 3, route 1.
+    // Planes: do 64, d1 1, orm 9, index 3, route 1.
     // Issue #6167 adds one probed DO ALTER (mas_async_jobs.host_version).
-    expect(REMAINDER_CATALOGUE_ENTRIES.filter((e) => e.plane === "do").length).toBe(55);
+    expect(REMAINDER_CATALOGUE_ENTRIES.filter((e) => e.plane === "do").length).toBe(64);
     expect(REMAINDER_CATALOGUE_ENTRIES.filter((e) => e.plane === "d1").length).toBe(1);
-    expect(REMAINDER_CATALOGUE_ENTRIES.filter((e) => e.plane === "orm").length).toBe(5);
+    expect(REMAINDER_CATALOGUE_ENTRIES.filter((e) => e.plane === "orm").length).toBe(9);
     expect(REMAINDER_CATALOGUE_ENTRIES.filter((e) => e.plane === "index").length).toBe(3);
     expect(REMAINDER_CATALOGUE_ENTRIES.filter((e) => e.plane === "route").length).toBe(1);
     // Exactly the four parameterized entries, with their parameters.
@@ -601,7 +619,7 @@ describe("remainder catalogue — P3 long tail + ALTER reconciliation (#4282 P3)
   });
 
   it("each entry's statement is byte-identical to the base (sha256 pin)", () => {
-    expect(Object.keys(REMAINDER_STATEMENT_SHA256).length).toBe(65);
+    expect(Object.keys(REMAINDER_STATEMENT_SHA256).length).toBe(78);
     for (const entry of REMAINDER_CATALOGUE_ENTRIES) {
       const digest = createHash("sha256")
         .update(entry.statement, "utf8")

@@ -550,13 +550,51 @@ export const REMAINDER_CATALOGUE_ENTRIES: CatalogueEntry[] = [
   },
   {
     // Issue #5100 (F3 of #5094): the binding columns on the verdict ledger.
-    code: "schema.do.mas_policy_verdicts.alter_table_add_column",
+    // Literal ALTERs, one per column — the same guarded-ALTER precedent as
+    // the job_run_records / mas_trades entries below. A parameterized
+    // generic ALTER cannot live here: the recreate runner
+    // (GENERIC_ALTER_PAIRS), the remainder equality harness, and the
+    // combined phased executor all resolve generic ALTERs only for the
+    // two pinned pairs (mas_reports, mas_report_confirmations), and an
+    // unregistered generic fails closed in all three.
+    code: "schema.do.mas_policy_verdicts.alter_table_add_column_broker",
     plane: "do",
     table: "mas_policy_verdicts",
-    statement: `ALTER TABLE mas_policy_verdicts ADD COLUMN \${column} \${type}`,
+    statement: `ALTER TABLE mas_policy_verdicts ADD COLUMN broker TEXT`,
     kind: "schema",
-    form: "parameterized",
-    parameters: ["column", "type"],
+    form: "literal",
+  },
+  {
+    code: "schema.do.mas_policy_verdicts.alter_table_add_column_account_type",
+    plane: "do",
+    table: "mas_policy_verdicts",
+    statement: `ALTER TABLE mas_policy_verdicts ADD COLUMN account_type TEXT`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    code: "schema.do.mas_policy_verdicts.alter_table_add_column_account_id",
+    plane: "do",
+    table: "mas_policy_verdicts",
+    statement: `ALTER TABLE mas_policy_verdicts ADD COLUMN account_id TEXT`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    code: "schema.do.mas_policy_verdicts.alter_table_add_column_binding_scope",
+    plane: "do",
+    table: "mas_policy_verdicts",
+    statement: `ALTER TABLE mas_policy_verdicts ADD COLUMN binding_scope TEXT`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    code: "schema.do.mas_policy_verdicts.alter_table_add_column_binding_source",
+    plane: "do",
+    table: "mas_policy_verdicts",
+    statement: `ALTER TABLE mas_policy_verdicts ADD COLUMN binding_source TEXT`,
+    kind: "schema",
+    form: "literal",
   },
   {
     code: "schema.do.mas_reports.alter_table_add_column",

@@ -395,9 +395,18 @@ const ORCH = "agents/orchestrator.ts";
  *  PR #6013 head 60e4351e). Budget lines rise to 3740 and bytes
  *  rise to 171_700 — measured + ~5% headroom, the pin's
  *  convention — so the pin still fails on any further
+ *  unintentional regrowth.
+ *  #5100 (F3 of #5094) enforces the bound account at execution:
+ *  the fire-time enforceScheduleBinding guard (one private
+ *  method) + its four schedule-callback call sites, the
+ *  scheduleMaintenanceContext env carrier, and the copilot
+ *  turn-start binding resolution in portBeforeTurn — measured
+ *  3,843 lines / 176,028 B on the branch tree. Budget lines rise
+ *  to 4040 and bytes rise to 184_900 — measured + ~5% headroom,
+ *  the pin's convention — so the pin still fails on any further
  *  unintentional regrowth. */
-const BUDGET_LINES = 3740;
-const BUDGET_BYTES = 171_700;
+const BUDGET_LINES = 4040;
+const BUDGET_BYTES = 184_900;
 
 const count = (haystack: string, needle: string) =>
   haystack.split(needle).length - 1;
