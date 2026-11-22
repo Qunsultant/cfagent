@@ -66,6 +66,9 @@ import {
   // already imports it statically.
   resolveAlpacaPair,
   TradingPlatformRegistry,
+  defaultBrokerId,
+  defaultTradingMode,
+  environmentForTradingType,
   tradingTypeFor,
   type AlpacaSide,
   type TradingEnvironment,
@@ -277,8 +280,16 @@ export async function readTenantBrokerSelection(
 /**
  * Resolve the ONE screen selection for this run. Fail-closed by
  * construction: every failure mode returns a named refusal. There
- * is no default broker, no default account, and no fail-open — an
- * unconfigured tenant never screens on E*TRADE.
+ * is no default account and no fail-open — a store failure still
+ * refuses by name, and a defaulted broker without a credential
+ * still refuses CONNECTION_NOT_BOUND (the default never substitutes
+ * another broker's data). An unconfigured tenant resolves to the
+ * EXISTING vocabulary default (issue #5104, DEFAULT part of B1):
+ * the configured default broker (`defaultBrokerId()`) in its
+ * configured default mode (`defaultTradingMode()`), in the
+ * environment the catalog maps that mode to — never E*TRADE by
+ * accident, and never live on a stored environment it was never
+ * selected for.
  */
 export async function resolveScreenSelection(
   readers: ScreenSelectionReaders,
@@ -297,15 +308,34 @@ export async function resolveScreenSelection(
   if (brokerRead.status === "store_unavailable") {
     return { resolved: false, code: "STORE_UNAVAILABLE", error: brokerRead.error };
   }
+  // Issue #5104 (DEFAULT part of B1): no stored selection is not a
+  // refusal — it is the existing vocabulary default. The mode is
+  // the configured default mode, and the environment is the catalog
+  // inverse of that mode, so a defaulted broker never runs live on
+  // a stored environment it was never selected for. A store failure
+  // above still refuses by name.
+  let brokerId: BrokerId;
+  let environment: TradingEnvironment;
+  let mode: TradingType;
   if (brokerRead.status === "unconfigured") {
-    return { resolved: false, code: "UNCONFIGURED", error: brokerRead.error };
+    brokerId = defaultBrokerId();
+    mode = defaultTradingMode();
+    const defaultEnvironment = environmentForTradingType(brokerId, mode);
+    if (!defaultEnvironment) {
+      throw new Error(
+        `[providerConnections] the configured default broker "${brokerId}" cannot trade in the ` +
+          `configured default mode "${mode}" (#5104). No environment maps to that mode.`,
+      );
+    }
+    environment = defaultEnvironment;
+  } else {
+    brokerId = brokerRead.brokerId;
+    environment = resolveBrokerEnvironmentFromSettings(
+      readers.readSettingRaw,
+      readers.env,
+    );
+    mode = tradingTypeFor(brokerId, environment);
   }
-  const brokerId = brokerRead.brokerId;
-  const environment = resolveBrokerEnvironmentFromSettings(
-    readers.readSettingRaw,
-    readers.env,
-  );
-  const mode = tradingTypeFor(brokerId, environment);
   const connectionId = connectionIdFor(brokerId, environment, readers.userLogin);
 
   const hasCredentials =

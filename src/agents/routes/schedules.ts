@@ -59,6 +59,14 @@ import {
 } from "../../services/accountBindings";
 import { TradingPlatformRegistry, tradingTypeFor } from "../../trading";
 import type { BrokerAccount } from "../../types";
+// Issue #5104 (DEFAULT part of B1): the brokerCatalog helpers come
+// from the leaf module, never the trading barrel — the barrel sits
+// on a load cycle with providerConnections (see the lazy import
+// below); brokerCatalog imports only config/vocabulary.
+import {
+  defaultBrokerId,
+  defaultTradingMode,
+} from "../../trading/brokerCatalog";
 import { isLoginShaped, getServiceUserLogin } from "../../security/serviceIdentity";
 import type { JobRunTrigger } from "../../data/jobRunRecordPorts";
 import { findDuplicateSchedule } from "../../services/scheduleDedupe";
@@ -2055,15 +2063,28 @@ export async function handleSchedulesRoutes(
           const brokerRead = await readTenantBrokerSelection(ctx.env);
           // Issue #5516: the unreadable-store leg keeps the pre-#3655
           // E*TRADE bootstrap, named rather than inlined — see
-          // LEGACY_UNREADABLE_BROKER.
+          // LEGACY_UNREADABLE_BROKER. Issue #5104 (DEFAULT part of
+          // B1): the UNCONFIGURED leg is different — no stored
+          // selection resolves to the EXISTING vocabulary default,
+          // not the legacy bootstrap. The mode is the configured
+          // default mode, so the stamped (broker, mode) matches what
+          // resolveScreenSelection resolves for the same unconfigured
+          // tenant below.
           const brokerId =
-            brokerRead.status === "ok" ? brokerRead.brokerId : LEGACY_UNREADABLE_BROKER;
+            brokerRead.status === "ok"
+              ? brokerRead.brokerId
+              : brokerRead.status === "unconfigured"
+                ? defaultBrokerId()
+                : LEGACY_UNREADABLE_BROKER;
           createBrokerId = brokerId;
           const createEnvironment = trustedEnvironment === "TEST" ? "TEST" : "PROD";
-          createMode = tradingTypeFor(
-            isBrokerId(brokerId) ? brokerId : LEGACY_UNREADABLE_BROKER,
-            createEnvironment
-          );
+          createMode =
+            brokerRead.status === "unconfigured"
+              ? defaultTradingMode()
+              : tradingTypeFor(
+                  isBrokerId(brokerId) ? brokerId : LEGACY_UNREADABLE_BROKER,
+                  createEnvironment,
+                );
           if (brokerId === "etrade") {
             // Issue #2442 S3: the trusted login (Worker-forwarder
             // established, never caller-supplied) resolves to its session

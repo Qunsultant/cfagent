@@ -65,7 +65,11 @@ describe("UnifiedOptionsService.resolveEngineClient — no options plane", () =>
     );
   });
 
-  it("refuses with a named error when the tenant has not configured a broker (#3460 S3)", async () => {
+  it("falls back to the existing alpaca/paper default when the tenant has not configured a broker (#5104)", async () => {
+    // Issue #5104 (DEFAULT part of B1): the #3460 S3 refusal now
+    // applies only to a genuine store failure. An unconfigured
+    // tenant resolves to the EXISTING vocabulary default
+    // (alpaca/paper) instead of refusing.
     tenant.selection = () =>
       ({
         status: "unconfigured",
@@ -76,9 +80,9 @@ describe("UnifiedOptionsService.resolveEngineClient — no options plane", () =>
       "test-user@example.com",
       "PAPER",
     );
-    await expect(service.resolveEngineClient()).rejects.toThrow(
-      /no broker selection: the tenant has not configured a broker/,
-    );
+    const result = await service.resolveEngineClient();
+    expect(result.engineClient).toBeDefined();
+    expect(result.platformRunId).toBeUndefined();
   });
 });
 

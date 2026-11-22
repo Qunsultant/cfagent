@@ -130,16 +130,24 @@ describe("resolveScreenSelection — fail closed, no defaults", () => {
     });
   });
 
-  it("refuses UNCONFIGURED when no broker selection is stored — never E*TRADE", async () => {
+  it("resolves the existing alpaca/paper default when no broker selection is stored — never E*TRADE", async () => {
+    // Issue #5104 (DEFAULT part of B1): no stored selection is the
+    // EXISTING vocabulary default (alpaca/paper), not a refusal.
+    // A genuine store failure still refuses by name (next test).
     const result = await resolveScreenSelection(
       readers({
         commercial: { getTenantBrokerSelection: async () => null },
       }),
     );
     expect(result).toEqual({
-      resolved: false,
-      code: "UNCONFIGURED",
-      error: expect.stringContaining("no broker selection"),
+      resolved: true,
+      selection: {
+        connectionId: "alpaca:TEST:alice",
+        brokerId: "alpaca",
+        environment: "TEST",
+        mode: "paper",
+        externalAccountId: "acct-1",
+      },
     });
   });
 
@@ -160,7 +168,9 @@ describe("resolveScreenSelection — fail closed, no defaults", () => {
     });
   });
 
-  it("refuses UNCONFIGURED for a stored broker id that is not a known broker", async () => {
+  it("resolves the existing alpaca/paper default for a stored broker id that is not a known broker", async () => {
+    // Issue #5104 (DEFAULT part of B1): an unknown stored id is an
+    // unconfigured tenant — the vocabulary default, not a refusal.
     const result = await resolveScreenSelection(
       readers({
         commercial: {
@@ -169,9 +179,14 @@ describe("resolveScreenSelection — fail closed, no defaults", () => {
       }),
     );
     expect(result).toEqual({
-      resolved: false,
-      code: "UNCONFIGURED",
-      error: expect.stringContaining("not a registered broker"),
+      resolved: true,
+      selection: {
+        connectionId: "alpaca:TEST:alice",
+        brokerId: "alpaca",
+        environment: "TEST",
+        mode: "paper",
+        externalAccountId: "acct-1",
+      },
     });
   });
 
