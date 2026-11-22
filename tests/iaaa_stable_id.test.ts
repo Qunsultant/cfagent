@@ -26,8 +26,10 @@ import {
   type MigrationDeps,
 } from "../src/security/iaaaLogin";
 import {
+  lookupInternalUserIdByLogin,
   lookupMigratedUserId,
   recordIdMigration,
+  recordLoginAlias,
 } from "../src/security/iaaaMigration";
 import type { KvLike } from "../src/security/kvResilience";
 import type { Env } from "../src/types";
@@ -463,5 +465,109 @@ describe("id-migration alias records", () => {
     });
     expect(conflict.ok).toBe(false);
     expect(await lookupMigratedUserId(kv, MINTED_ID)).toBe(DERIVED_GITHUB_42);
+  });
+});
+
+describe("login-alias lookup follows the id-migration record (#6182)", () => {
+  it("the live scenario: after migration rewrites the binding, the alias still resolves the retired id until the lookup follows the record", async () => {
+    const kv = memoryKv();
+    const bindings = createMemoryIdentityBindingStore();
+    const memberships = createMemoryMembershipStore();
+    await seedMintedBinding(bindings, GITHUB_ISSUER, "42", MINTED_ID);
+    await seedMemberships(memberships, MINTED_ID);
+    const aliased = await recordLoginAlias(kv, {
+      githubLogin: "octocat",
+      internalUserId: MINTED_ID,
+      nowMs: 1_000,
+    });
+    expect(aliased.ok).toBe(true);
+    // The wired login migrates the binding to the derived id...
+    const resolved = await resolveProviderBinding(
+      bindings,
+      GITHUB_ISSUER,
+      "42",
+      20_000,
+      makeDeps(memberships, kv),
+    );
+    expect(resolved.ok).toBe(true);
+    if (!resolved.ok) return;
+    expect(resolved.binding.internalUserId).toBe(DERIVED_GITHUB_42);
+    // ...but post-login alias recording hits ALIAS_CONFLICT (the
+    // alias already points at the retired id), so the alias is
+    // unchanged — and every login-keyed reader must still reach
+    // the derived id by following the migration record.
+    const after = await recordLoginAlias(kv, {
+      githubLogin: "octocat",
+      internalUserId: DERIVED_GITHUB_42,
+      nowMs: 21_000,
+    });
+    expect(after.ok).toBe(false);
+    expect(await lookupInternalUserIdByLogin(kv, "octocat")).toBe(DERIVED_GITHUB_42);
+  });
+
+  it("without a migration record the alias resolves verbatim", async () => {
+    const kv = memoryKv();
+    await recordLoginAlias(kv, {
+      githubLogin: "octocat",
+      internalUserId: MINTED_ID,
+      nowMs: 1_000,
+    });
+    expect(await lookupInternalUserIdByLogin(kv, "octocat")).toBe(MINTED_ID);
+  });
+
+  it("no alias returns null, even when a migration record exists", async () => {
+    const kv = memoryKv();
+    await recordIdMigration(kv, {
+      oldInternalUserId: MINTED_ID,
+      newInternalUserId: DERIVED_GITHUB_42,
+      nowMs: 10_000,
+    });
+    expect(await lookupInternalUserIdByLogin(kv, "nobody")).toBe(null);
+  });
+
+  it("follows a chain of migrations to the current id", async () => {
+    const kv = memoryKv();
+    await recordLoginAlias(kv, {
+      githubLogin: "octocat",
+      internalUserId: MINTED_ID,
+      nowMs: 1_000,
+    });
+    await recordIdMigration(kv, {
+      oldInternalUserId: MINTED_ID,
+      newInternalUserId: DERIVED_GITHUB_42,
+      nowMs: 10_000,
+    });
+    await recordIdMigration(kv, {
+      oldInternalUserId: DERIVED_GITHUB_42,
+      newInternalUserId: DERIVED_GOOGLE_SUB_1,
+      nowMs: 11_000,
+    });
+    expect(await lookupInternalUserIdByLogin(kv, "octocat")).toBe(DERIVED_GOOGLE_SUB_1);
+  });
+
+  it("a self-referential migration record terminates on the alias value", async () => {
+    const kv = memoryKv();
+    await recordLoginAlias(kv, {
+      githubLogin: "octocat",
+      internalUserId: MINTED_ID,
+      nowMs: 1_000,
+    });
+    await recordIdMigration(kv, {
+      oldInternalUserId: MINTED_ID,
+      newInternalUserId: MINTED_ID,
+      nowMs: 10_000,
+    });
+    expect(await lookupInternalUserIdByLogin(kv, "octocat")).toBe(MINTED_ID);
+  });
+
+  it("a corrupt migration record falls back to the alias value, never throws", async () => {
+    const kv = memoryKv();
+    await recordLoginAlias(kv, {
+      githubLogin: "octocat",
+      internalUserId: MINTED_ID,
+      nowMs: 1_000,
+    });
+    await kv.put(`iaaa-alias:migrated:${MINTED_ID}`, "not-json{");
+    expect(await lookupInternalUserIdByLogin(kv, "octocat")).toBe(MINTED_ID);
   });
 });
