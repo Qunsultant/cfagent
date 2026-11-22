@@ -40,7 +40,7 @@ export class DoSqlitePolicyVerdictStore implements PolicyVerdictPort {
     this.sql.exec(doIndexSql("idx_mas_policy_verdicts_created"));
     // Issue #5100 (F3 of #5094): the binding columns, added when
     // missing so existing DO tables upgrade in place. Fresh installs
-    // get them from the CREATE TABLE DDL.
+    // get them from the table definition.
     for (const column of ["broker", "account_type", "account_id", "binding_scope", "binding_source"]) {
       ensureColumn(this.sql, column);
     }
