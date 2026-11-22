@@ -99,19 +99,51 @@ describe("recheckRunAuthority (pure mid-run consumer)", () => {
     expect(decision).toEqual({
       denied: true,
       reason: "OWNER_MEMBERSHIP_REVOKED",
-      detail: "owner has membership records but none live",
+      detail: "owner membership m1 revoked at 1970-01-01T00:16:39.999Z",
     });
   });
 
-  it("denies when the only membership is live-recorded but all bindings expired", () => {
+  it("denies as EXPIRED when the only membership is live-recorded but all bindings expired (#6160)", () => {
     const decision = recheckRunAuthority({
       memberships: [membership({ roleBindings: [{ role: "member", scope: "tenant", expiresAtMs: NOW - 1 }] })],
       nowMs: NOW,
     });
     expect(decision).toEqual({
       denied: true,
-      reason: "OWNER_MEMBERSHIP_REVOKED",
-      detail: "owner has membership records but none live",
+      reason: "OWNER_MEMBERSHIP_EXPIRED",
+      detail: "owner membership bindings all expired; latest expiry 1970-01-01T00:16:39.999Z",
+    });
+  });
+
+  it("denies as EXPIRED when one record is revoked but an unrevoked record's bindings all expired (#6160)", () => {
+    // Renewal of the unrevoked record restores dispatch, so the
+    // actionable reason is expiry — not the revoked record.
+    const decision = recheckRunAuthority({
+      memberships: [
+        membership({ revokedAtMs: NOW - 1 }),
+        membership({
+          membershipId: "m2",
+          roleBindings: [{ role: "member", scope: "tenant", expiresAtMs: NOW - 1 }],
+        }),
+      ],
+      nowMs: NOW,
+    });
+    expect(decision).toEqual({
+      denied: true,
+      reason: "OWNER_MEMBERSHIP_EXPIRED",
+      detail: "owner membership bindings all expired; latest expiry 1970-01-01T00:16:39.999Z",
+    });
+  });
+
+  it("denies as EXPIRED when the unrevoked membership carries no bindings at all (#6160)", () => {
+    const decision = recheckRunAuthority({
+      memberships: [membership({ roleBindings: [] })],
+      nowMs: NOW,
+    });
+    expect(decision).toEqual({
+      denied: true,
+      reason: "OWNER_MEMBERSHIP_EXPIRED",
+      detail: "owner membership has no live binding",
     });
   });
 
@@ -190,7 +222,23 @@ describe("enforceOwnerDispatch (async seam)", () => {
     expect(decision).toEqual({
       denied: true,
       reason: "OWNER_MEMBERSHIP_REVOKED",
-      detail: "owner has membership records but none live",
+      detail: "owner membership m1 revoked at 1970-01-01T00:16:39.999Z",
+    });
+  });
+
+  it("denies an expired owner through store + resolver, preserving the EXPIRED reason (#6160)", async () => {
+    const decision = await enforceOwnerDispatch({
+      store: storeFor([
+        membership({ roleBindings: [{ role: "member", scope: "tenant", expiresAtMs: NOW - 1 }] }),
+      ]) as never,
+      resolveInternalUserId: async () => "v1:abc",
+      login: "owner",
+      nowMs: NOW,
+    });
+    expect(decision).toEqual({
+      denied: true,
+      reason: "OWNER_MEMBERSHIP_EXPIRED",
+      detail: "owner membership bindings all expired; latest expiry 1970-01-01T00:16:39.999Z",
     });
   });
 

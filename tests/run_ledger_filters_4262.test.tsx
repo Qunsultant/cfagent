@@ -160,9 +160,35 @@ describe("4262-P01 kind classification", () => {
   });
 
   it("never guesses: an unmatched operation is 'other'", () => {
-    expect(classifyRunKind({ operation: "autonomousMarketScreen" })).toBe("other");
+    expect(classifyRunKind({ operation: "something.unknown" })).toBe("other");
     expect(classifyRunKind({ operation: null })).toBe("other");
     expect(classifyRunKind({})).toBe("other");
+  });
+
+  it("classifies the orchestrator schedule callbacks into their family kinds (#6160)", () => {
+    // The recording wrapper stamps the callback name as the operation,
+    // and the rule table never knew that namespace — every callback row
+    // landed in "other", so a denied Stock dispatch was invisible under
+    // kind=stock. Kind answers what ran; the Triggered by / Trigger
+    // columns already say it was a schedule.
+    expect(classifyRunKind({ operation: "autonomousMarketScreen" })).toBe("stock");
+    expect(classifyRunKind({ operation: "autonomousGoalScreen" })).toBe("goal");
+    expect(classifyRunKind({ operation: "autonomousOptionsAnalysis" })).toBe("options");
+    expect(classifyRunKind({ operation: "autonomousStrategyDiscovery" })).toBe("strategy");
+    expect(classifyRunKind({ operation: "collectIvHistory" })).toBe("options");
+    expect(classifyRunKind({ operation: "runWorkflowStage" })).toBe("workflow");
+    expect(classifyRunKind({ operation: "autoRenewETradeTokens" })).toBe("ops");
+    expect(classifyRunKind({ operation: "expireStaleOrderDraft" })).toBe("ops");
+    expect(classifyRunKind({ operation: "sendScheduledReminder" })).toBe("ops");
+    expect(classifyRunKind({ operation: "sweepStaleLedgerTasks" })).toBe("ops");
+    expect(classifyRunKind({ operation: "sweepStaleAsyncJobs" })).toBe("ops");
+    expect(classifyRunKind({ operation: "executeAsyncJob" })).toBe("ops");
+    // A denied dispatch records the same callback operation with
+    // outcome "skipped" — it classifies identically, so the denial
+    // shows under the family's filter.
+    expect(
+      classifyRunKind({ operation: "autonomousMarketScreen", system: "orchestrator-schedule" }),
+    ).toBe("stock");
   });
 
   it("classifies the copilot loop's own cycle rows as copilot (#6003)", () => {

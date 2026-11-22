@@ -47,7 +47,11 @@
  * revokedAtMs is undefined AND at least one role binding is live
  * (expiresAtMs undefined or in the future). A membership record
  * that is revoked, or live-recorded with every binding expired,
- * is not live.
+ * is not live. Issue #6160: the two not-live shapes deny under
+ * different reasons — REVOKED only when every record is revoked,
+ * EXPIRED when an unrevoked record's bindings all expired (the Q9
+ * 90-day default firing is an expiry, not a revocation, and the
+ * detail names the latest expiry or the revoked membership).
  *
  * Approval-consumer inventory (Q6 item 3 — every consumer shape
  * validates through lifecycle.ts validateApproval):
@@ -95,11 +99,27 @@ export type RunRevocationReason =
   | "SESSION_REVOKED"
   | "DELEGATION_REVOKED"
   | "DELEGATION_EXPIRED"
-  | "OWNER_MEMBERSHIP_REVOKED";
+  | "OWNER_MEMBERSHIP_REVOKED"
+  | "OWNER_MEMBERSHIP_EXPIRED";
 
 export type RunAuthorityDecision =
   | { allowed: true }
   | { denied: true; reason: RunRevocationReason; detail?: string };
+
+/**
+ * The owner-dispatch seam's verdict: the membership arm only. The
+ * seam never supplies a session or a delegation, so it can only
+ * deny for a membership reason — the narrow type lets the dispatch
+ * call sites (whose denial reasons are the `DispatchDenialReason`
+ * union) take `decision.reason` without a cast.
+ */
+export type OwnerDispatchDecision =
+  | { allowed: true }
+  | {
+      denied: true;
+      reason: "OWNER_MEMBERSHIP_REVOKED" | "OWNER_MEMBERSHIP_EXPIRED";
+      detail?: string;
+    };
 
 function bindingIsLive(binding: RoleBinding, nowMs: number): boolean {
   return binding.expiresAtMs === undefined || binding.expiresAtMs > nowMs;
@@ -110,6 +130,66 @@ function membershipIsLive(membership: Membership, nowMs: number): boolean {
     membership.revokedAtMs === undefined &&
     membership.roleBindings.some((binding) => bindingIsLive(binding, nowMs))
   );
+}
+
+/**
+ * The membership arm on its own: null (unresolvable) or an empty
+ * list allows; memberships that exist but none live deny, split by
+ * #6160 into REVOKED (every record revoked) vs EXPIRED (an
+ * unrevoked record's bindings all expired, or no bindings at all).
+ * Shared by `recheckRunAuthority` (third check, after session and
+ * delegation) and `enforceOwnerDispatch` (which never supplies a
+ * session or a delegation, so its verdict is this narrow type).
+ */
+export function recheckMemberships(
+  memberships: Membership[] | null,
+  nowMs: number,
+): OwnerDispatchDecision {
+  if (memberships === null || memberships.length === 0) return { allowed: true };
+  const anyLive = memberships.some((m) => membershipIsLive(m, nowMs));
+  if (anyLive) return { allowed: true };
+  // Issue #6160 — expired is not revoked. A membership record is
+  // "revoked" only when revokedAtMs is set; a live-recorded
+  // membership whose bindings all expired (the Q9 90-day default,
+  // #3155) denies as EXPIRED, and the detail names the evidence
+  // (latest expiry, or the revoked membership and its revocation
+  // time), so the operator can act without a live store read.
+  // Mixed (some revoked, some merely expired): renewal of the
+  // unrevoked record restores dispatch, so the actionable reason
+  // is EXPIRED. The deny itself does not weaken — expired still
+  // denies.
+  const allRevoked = memberships.every((m) => m.revokedAtMs !== undefined);
+  if (allRevoked) {
+    const latest = memberships.reduce((a, b) =>
+      (b.revokedAtMs ?? 0) > (a.revokedAtMs ?? 0) ? b : a,
+    );
+    return {
+      denied: true,
+      reason: "OWNER_MEMBERSHIP_REVOKED",
+      detail: `owner membership ${latest.membershipId} revoked at ${new Date(
+        latest.revokedAtMs as number,
+      ).toISOString()}`,
+    };
+  }
+  const expiries = memberships.flatMap((m) =>
+    m.roleBindings
+      .map((b) => b.expiresAtMs)
+      .filter((x): x is number => typeof x === "number"),
+  );
+  if (expiries.length > 0) {
+    return {
+      denied: true,
+      reason: "OWNER_MEMBERSHIP_EXPIRED",
+      detail: `owner membership bindings all expired; latest expiry ${new Date(
+        Math.max(...expiries),
+      ).toISOString()}`,
+    };
+  }
+  return {
+    denied: true,
+    reason: "OWNER_MEMBERSHIP_EXPIRED",
+    detail: "owner membership has no live binding",
+  };
 }
 
 /**
@@ -137,25 +217,16 @@ export function recheckRunAuthority(input: {
       return { denied: true, reason: "DELEGATION_EXPIRED", detail: `delegation ${delegation.id} expired` };
     }
   }
-  const memberships = input.memberships;
-  if (memberships !== null && memberships.length > 0) {
-    const anyLive = memberships.some((m) => membershipIsLive(m, input.nowMs));
-    if (!anyLive) {
-      return {
-        denied: true,
-        reason: "OWNER_MEMBERSHIP_REVOKED",
-        detail: "owner has membership records but none live",
-      };
-    }
-  }
-  return { allowed: true };
+  return recheckMemberships(input.memberships, input.nowMs);
 }
 
 /**
  * Async owner-dispatch seam: resolves the owner's internal id
  * through the injected resolver (production: the iaaa-alias login
  * lookup over the SessionStore KV), loads memberships, and applies
- * recheckRunAuthority. A missing store, an unresolvable login, or
+ * recheckMemberships (the membership arm only — no session or
+ * delegation is supplied here, so the verdict is the narrow
+ * OwnerDispatchDecision). A missing store, an unresolvable login, or
  * a throwing store/resolver ALLOWS with a loud log — see the
  * module header for why a lookup failure never fabricates a
  * denial. The resolver is injected (never imported here) so this
@@ -175,7 +246,7 @@ export async function enforceOwnerDispatch(input: {
    * follow-up) so the events reach the Analytics Engine dataset.
    */
   sink?: ObservabilitySink;
-}): Promise<RunAuthorityDecision> {
+}): Promise<OwnerDispatchDecision> {
   if (!input.store) return { allowed: true };
   // #3515 S3 batch 8 — logger over the injected sink, else the structured
   // console fallback (never an empty-env sink, #5587).
@@ -206,7 +277,7 @@ export async function enforceOwnerDispatch(input: {
     });
     return { allowed: true };
   }
-  return recheckRunAuthority({ memberships, nowMs: input.nowMs });
+  return recheckMemberships(memberships, input.nowMs);
 }
 
 /**

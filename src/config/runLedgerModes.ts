@@ -174,11 +174,20 @@ export const RUN_LEDGER_KIND_RULES: readonly RunLedgerKindRule[] = [
   // and a prefix rule would move it. Autopilot rows arrive stamped
   // `ledgerKind: "autopilot"` by the outcome fold instead.
   { kind: "copilot", operationPrefixes: ["stock-copilot-"] },
-  { kind: "options", operationPrefixes: ["trading.screen_options", "options."] },
-  { kind: "stock", operationPrefixes: ["trading.screen_stocks", "screen.", "screener."] },
-  { kind: "strategy", operationPrefixes: ["trading.strategy", "strategy."] },
+  // Issue #6160 — the orchestrator schedule callbacks record their
+  // callback name as the operation, and the rule table never knew
+  // that namespace: every callback row landed in "other", so a denied
+  // Stock dispatch was invisible under kind=stock. The callback
+  // operations classify by what ran (exact names, matched lowercase
+  // by the classifier); the Triggered by / Trigger columns already
+  // say it was a schedule. A denied dispatch records the same
+  // callback operation with outcome "skipped", so it classifies
+  // identically and shows under the family's filter.
+  { kind: "options", operationPrefixes: ["trading.screen_options", "options."], operationEquals: ["autonomousoptionsanalysis", "collectivhistory"] },
+  { kind: "stock", operationPrefixes: ["trading.screen_stocks", "screen.", "screener."], operationEquals: ["autonomousmarketscreen"] },
+  { kind: "strategy", operationPrefixes: ["trading.strategy", "strategy."], operationEquals: ["autonomousstrategydiscovery"] },
   { kind: "reports", operationPrefixes: ["report.", "reports."] },
-  { kind: "workflow", operationPrefixes: ["chain.", "workflow."], operationEquals: ["chain"] },
+  { kind: "workflow", operationPrefixes: ["chain.", "workflow."], operationEquals: ["chain", "runworkflowstage"] },
   { kind: "pipeline", operationEquals: ["feed", "enrich", "analyze", "generate", "deliver"] },
   {
     kind: "ops",
@@ -195,6 +204,14 @@ export const RUN_LEDGER_KIND_RULES: readonly RunLedgerKindRule[] = [
       "tasks.",
       "nlq.",
     ],
+    operationEquals: [
+      "autorenewetradetokens",
+      "expirestaleorderdraft",
+      "sendscheduledreminder",
+      "sweepstaleledgertasks",
+      "sweepstaleasyncjobs",
+      "executeasyncjob",
+    ],
   },
-  { kind: "goal", systems: ["scheduled-agent-goal"] },
+  { kind: "goal", systems: ["scheduled-agent-goal"], operationEquals: ["autonomousgoalscreen"] },
 ];

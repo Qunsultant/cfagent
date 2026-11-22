@@ -2658,6 +2658,15 @@ const BASELINE: Array<[string, string, number]> = [
   // strings moved here from the workflow planner to break a module cycle; no
   // new mention was written.
   ["src/config/yahooDataMode.ts", "yahoo", 3],
+  // #6160 INTEGRATION, and a substring hit rather than a brand use: the
+  // run-ledger kind rule classifies the orchestrator's own token-renewal
+  // callback by its existing operation name, whose identifier contains the
+  // provider token. Renaming the callback would touch the dispatch seam,
+  // the recording wrapper, and every schedule that names it, for a census
+  // spelling — so the row is baselined instead. No new brand mention was
+  // written: the token was already in the callback's name before this slice.
+  // Appended at the END so the platform slice (first 188 rows) is untouched.
+  ["src/config/runLedgerModes.ts", "etrade", 1],
 ];
 
 const BASELINE_MAP = new Map(BASELINE.map(([f, t, c]) => [`${f}\t${t}`, c]));

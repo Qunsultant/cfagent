@@ -2125,10 +2125,12 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
         ctx.audit("async_job.dispatch_denied", "orchestrator", {
           jobId,
           capability: job.capability,
-          reason: "OWNER_MEMBERSHIP_REVOKED",
+          // Issue #6160 — the reason comes from the gate: REVOKED only
+          // for a genuinely revoked record, EXPIRED for expired bindings.
+          reason: owner.reason,
           ...(owner.detail ? { detail: owner.detail } : {}),
         });
-        throw new Error("Async job dispatch denied: OWNER_MEMBERSHIP_REVOKED");
+        throw new Error(`Async job dispatch denied: ${owner.reason}`);
       }
     }
 

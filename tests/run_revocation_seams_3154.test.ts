@@ -128,6 +128,15 @@ function revokedMembership(): Membership {
   return { ...liveMembership(), revokedAtMs: 500 };
 }
 
+function expiredMembership(): Membership {
+  // Unrevoked, but its only binding expired long ago — the #6160
+  // case: the Q9 90-day default firing, not a revocation.
+  return {
+    ...liveMembership(),
+    roleBindings: [{ role: "member", scope: "tenant", expiresAtMs: 1 }],
+  };
+}
+
 function storeFor(list: Membership[]): MembershipStore {
   return { getMembershipsByUser: async () => list } as unknown as MembershipStore;
 }
@@ -156,6 +165,34 @@ describe("scheduled-callback dispatch seam (#3154)", () => {
     expect(denial).toBeDefined();
     expect(denial!.payload.reason).toBe("OWNER_MEMBERSHIP_REVOKED");
     expect(denial!.payload.callback).toBe("autoRenewETradeTokens");
+    expect(removed).toBe(0);
+  });
+
+  it("expired owner: denies as EXPIRED (not REVOKED) and names renewal as the action (#6160)", async () => {
+    const audits: Array<{ type: string; payload: Record<string, unknown> }> = [];
+    let removed = 0;
+    const ctx = {
+      env: { SLACK_WEBHOOK_URL: "https://hooks.slack.com/x", SCREENER_EMAIL_TO: "ops@example.com" },
+      waitUntilStable: async () => true,
+      getScreenerExecutionContext: async () => undefined,
+      audit: (type: string, _agent: string, payload: Record<string, unknown>) => {
+        audits.push({ type, payload });
+      },
+      serviceMembershipStore: storeFor([expiredMembership()]),
+      resolveOwnerInternalUserId: async () => "v1:abc",
+      removeUnownedBaselineSchedules: async () => { removed++; },
+      getOrm: () => { throw new Error("service must not run on a denied dispatch"); },
+      sessionKey: () => "owner",
+    } as unknown as ScheduledCallbacksContext;
+
+    await autoRenewETradeTokens(ctx, { userLogin: "owner" });
+
+    const denial = audits.find((a) => a.type === "schedule.dispatch_denied");
+    expect(denial).toBeDefined();
+    expect(denial!.payload.reason).toBe("OWNER_MEMBERSHIP_EXPIRED");
+    expect(denial!.payload.callback).toBe("autoRenewETradeTokens");
+    expect(String(denial!.payload.action)).toContain("Renew");
+    expect(String(denial!.payload.detail)).toContain("expired");
     expect(removed).toBe(0);
   });
 });
