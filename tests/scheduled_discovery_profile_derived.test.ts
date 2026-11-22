@@ -1171,6 +1171,18 @@ describe("POST /api/schedules/create with a profile-derived discovery payload (#
       `etrade:token:TEST:${authenticatedLogin}`,
       storedTestTokens
     );
+    // Issue #5100 (F3 of #5094): creation of an account-scoped
+    // schedule refuses when the tenant has no binding, so the
+    // success-path tests seed the bound E*TRADE paper account.
+    // Seeded raw (the read path JSON-parses the stored array).
+    seedSession(
+      "account_bindings",
+      `acctbind:v1:${authenticatedLogin}`,
+      JSON.stringify([
+        { broker: "etrade", mode: "paper", accountType: "stock", scope: "tenant", accountId: "ET-123" },
+        { broker: "etrade", mode: "paper", accountType: "options", scope: "tenant", accountId: "ET-123" },
+      ])
+    );
     agent.env = {
       APP_ENV: "TEST",
       SESSION_STORE: sessionStoreNs,

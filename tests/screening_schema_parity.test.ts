@@ -26,6 +26,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { readFileSync } from "node:fs";
 import { MockSqlStorage } from "./mock-sql";
 import { makeFakeSessionStore } from "./fake-session-store";
+import { upsertAccountBinding } from "../src/services/accountBindings";
 
 // The orchestrator extends AIChatAgent from @cloudflare/ai-chat, whose real
 // module graph pulls in `cloudflare:` protocol imports the node test loader
@@ -43,6 +44,64 @@ vi.mock("@cloudflare/ai-chat", () => {
     },
   };
 });
+
+// Issue #5100 (F3 of #5094): the NLQ arm resolves the tenant's broker
+// selection server-side before stamping the binding tuple. The test
+// tenant selects Alpaca paper; the binding is seeded per test below
+// (see seedNlqBindings). Only resolveScreenSelection is stubbed —
+// readTenantBrokerSelection stays real for the REST route's etrade
+// fixtures, which never call resolveScreenSelection.
+vi.mock("../src/services/providerConnections", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/services/providerConnections")>();
+  return {
+    ...actual,
+    resolveScreenSelection: async () => ({
+      resolved: true,
+      selection: {
+        connectionId: "alpaca:TEST:parity_user",
+        brokerId: "alpaca",
+        environment: "TEST",
+        mode: "paper",
+        externalAccountId: "PA-900",
+      },
+    }),
+  };
+});
+
+/** The #5112 in-memory DO-namespace stub, for seeding NLQ bindings. */
+function makeMemoryDoNamespace() {
+  const store = new Map<string, string>();
+  const stub = {
+    async fetch(request: Request): Promise<Response> {
+      const payload = (await request.json()) as { op: string; key: string; value?: string };
+      if (payload.op === "get") {
+        return Response.json({ ok: true, value: store.get(payload.key) ?? null });
+      }
+      if (payload.op === "put" && payload.value !== undefined) {
+        store.set(payload.key, payload.value);
+        return Response.json({ ok: true });
+      }
+      if (payload.op === "delete") {
+        store.delete(payload.key);
+        return Response.json({ ok: true });
+      }
+      return new Response("Bad request", { status: 400 });
+    },
+  };
+  return {
+    idFromName: () => "singleton" as unknown as DurableObjectId,
+    get: () => stub as unknown as DurableObjectStub,
+  };
+}
+
+async function seedNlqBindings(env: any, login: string): Promise<void> {
+  for (const binding of [
+    { broker: "alpaca", mode: "paper", accountType: "stock", scope: "tenant", accountId: "PA-900" },
+    { broker: "alpaca", mode: "paper", accountType: "options", scope: "tenant", accountId: "PA-900" },
+  ] as const) {
+    await upsertAccountBinding(env as never, login, binding);
+  }
+}
 
 // Capturing fakes for the options screen route: the REAL
 // DynamicOptionsScreener would try to reach E*TRADE; the parity question
@@ -611,17 +670,21 @@ describe("#959 cross-entry schedule parity (REST route / NLQ / builder)", () => 
   let scheduleCalls: any[];
   let orm: DatabaseORM;
   const sessionId = "parity_user";
+  const nlqSessionNs = makeMemoryDoNamespace();
   const env = {
     APP_ENV: "TEST",
     // Issue #4249: these tests drive the NLQ scheduling entry
     // point, so the NLQ channel is explicitly on here (its default
     // is OFF — unconfigured NLQ scheduling refuses FEATURE_DISABLED).
     FEATURE_SCHEDULE_NLQ: "1",
+    // Issue #5100 (F3 of #5094): the binding store for the NLQ arm.
+    SESSION_STORE: nlqSessionNs,
   } as any;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     scheduleCalls = [];
     orm = new DatabaseORM(new MockSqlStorage() as any);
+    await seedNlqBindings(env, sessionId);
   });
 
   function makeAgent() {
@@ -631,6 +694,18 @@ describe("#959 cross-entry schedule parity (REST route / NLQ / builder)", () => 
     agent.ctx = ctx;
     const { namespace: sessionStoreNs, seed: seedSession } = makeFakeSessionStore();
     seedSession("etrade", `etrade:token:TEST:${authenticatedLogin}`, storedTestTokens);
+    // Issue #5100 (F3 of #5094): creation of an account-scoped
+    // schedule refuses when the tenant has no binding, so the
+    // success-path tests seed the bound E*TRADE paper account.
+    // Seeded raw (the read path JSON-parses the stored array).
+    seedSession(
+      "account_bindings",
+      `acctbind:v1:${authenticatedLogin}`,
+      JSON.stringify([
+        { broker: "etrade", mode: "paper", accountType: "stock", scope: "tenant", accountId: "ET-123" },
+        { broker: "etrade", mode: "paper", accountType: "options", scope: "tenant", accountId: "ET-123" },
+      ])
+    );
     agent.env = { APP_ENV: "TEST", SESSION_STORE: sessionStoreNs } as any;
     agent.schedule = async (when: any, callback: string, payload: any, options: any) => {
       scheduleCalls.push([when, callback, payload, options]);
@@ -674,7 +749,10 @@ describe("#959 cross-entry schedule parity (REST route / NLQ / builder)", () => 
       // session; TEST → paper), so the builder's identity must carry
       // the same resolved values for parity — the builder stamps
       // identity values, never a default.
-      { userLogin: authenticatedLogin, environment: "TEST", trigger: "scheduled", brokerId: "etrade", dataProviderId: "alpaca", mode: "paper" }
+      // Issue #5100 (F3 of #5094) — the bound account tuple is
+      // stamped server-side; options analysis resolves the options
+      // account, never the stock one.
+      { userLogin: authenticatedLogin, environment: "TEST", trigger: "scheduled", brokerId: "etrade", dataProviderId: "alpaca", mode: "paper", accountType: "options", accountId: "ET-123" }
     );
     expect(built.ok).toBe(true);
     if (!built.ok) return;
@@ -710,7 +788,9 @@ describe("#959 cross-entry schedule parity (REST route / NLQ / builder)", () => 
       // Issue #3655: same resolved-identity stamping as the options
       // parity test above (etrade broker / alpaca data / paper for
       // this fixture, #3990).
-      { userLogin: authenticatedLogin, environment: "TEST", trigger: "scheduled", brokerId: "etrade", dataProviderId: "alpaca", mode: "paper" }
+      // Issue #5100 (F3 of #5094) — the bound account tuple is
+      // stamped server-side; discovery resolves the stock account.
+      { userLogin: authenticatedLogin, environment: "TEST", trigger: "scheduled", brokerId: "etrade", dataProviderId: "alpaca", mode: "paper", accountType: "stock", accountId: "ET-123" }
     );
     expect(built.ok).toBe(true);
     if (!built.ok) return;
@@ -760,8 +840,11 @@ describe("#959 cross-entry schedule parity (REST route / NLQ / builder)", () => 
     expect(port.calls[0].method).toBe("scheduleEvery");
     // #3122: the NLQ executor stamps agent provenance on the armed
     // payload; the rest is exactly the schema-built identity stamps.
+    // Issue #5100 (F3 of #5094): the NLQ arm stamps the resolved
+    // binding tuple (alpaca/paper, stock account) alongside the
+    // #3655 broker/data-provider/mode stamps.
     const { provenance, ...identity } = port.calls[0].args[2] as Record<string, unknown>;
-    expect(identity).toEqual({ userLogin: sessionId, trigger: "scheduled" });
+    expect(identity).toEqual({ userLogin: sessionId, trigger: "scheduled", brokerId: "alpaca", dataProviderId: "alpaca", mode: "paper", accountType: "stock", accountId: "PA-900" });
     expect(provenance).toMatchObject({ agentId: "nlq", createdBy: sessionId, origin: "agent" });
     expect(typeof (provenance as Record<string, unknown>).createdAt).toBe("string");
   });
@@ -788,7 +871,10 @@ describe("#959 cross-entry schedule parity (REST route / NLQ / builder)", () => 
     const built = buildSchedulePayload(
       "autonomousOptionsAnalysis",
       { symbols: ["NVDA"], thesis: "bullish" },
-      { userLogin: sessionId, trigger: "scheduled" }
+      // Issue #5100 (F3 of #5094): the NLQ arm stamps the resolved
+      // binding tuple (alpaca/paper, options account) — the builder's
+      // identity must carry the same values for parity.
+      { userLogin: sessionId, trigger: "scheduled", brokerId: "alpaca", dataProviderId: "alpaca", mode: "paper", accountType: "options", accountId: "PA-900" }
     );
     expect(built.ok).toBe(true);
     if (!built.ok) return;

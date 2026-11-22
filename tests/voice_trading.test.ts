@@ -12,6 +12,64 @@ import {
 import type { AgentScheduleItem, Env, VoiceTradingTurnRequest } from "../src/types";
 import type { NLQSchedulingPort } from "../src/agents/nlq";
 import { ETradeRestClient } from "../src/trading/etrade/client";
+import { upsertAccountBinding } from "../src/services/accountBindings";
+
+// Issue #5100 (F3 of #5094): the NLQ arm resolves the tenant's broker
+// selection server-side before stamping the binding tuple. This suite
+// pins the E*TRADE desk, so the selection is E*TRADE paper and the
+// binding is seeded per test below (see seedVoiceBindings). Only
+// resolveScreenSelection is stubbed.
+vi.mock("../src/services/providerConnections", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/services/providerConnections")>();
+  return {
+    ...actual,
+    resolveScreenSelection: async () => ({
+      resolved: true,
+      selection: {
+        connectionId: "etrade:TEST:voice_test_trader",
+        brokerId: "etrade",
+        environment: "TEST",
+        mode: "paper",
+        externalAccountId: "ET-123",
+      },
+    }),
+  };
+});
+
+/** The #5112 in-memory DO-namespace stub, for seeding voice bindings. */
+function makeMemoryDoNamespace() {
+  const store = new Map<string, string>();
+  const stub = {
+    async fetch(request: Request): Promise<Response> {
+      const payload = (await request.json()) as { op: string; key: string; value?: string };
+      if (payload.op === "get") {
+        return Response.json({ ok: true, value: store.get(payload.key) ?? null });
+      }
+      if (payload.op === "put" && payload.value !== undefined) {
+        store.set(payload.key, payload.value);
+        return Response.json({ ok: true });
+      }
+      if (payload.op === "delete") {
+        store.delete(payload.key);
+        return Response.json({ ok: true });
+      }
+      return new Response("Bad request", { status: 400 });
+    },
+  };
+  return {
+    idFromName: () => "singleton" as unknown as DurableObjectId,
+    get: () => stub as unknown as DurableObjectStub,
+  };
+}
+
+async function seedVoiceBindings(env: any, login: string): Promise<void> {
+  for (const binding of [
+    { broker: "etrade", mode: "paper", accountType: "stock", scope: "tenant", accountId: "ET-123" },
+    { broker: "etrade", mode: "paper", accountType: "options", scope: "tenant", accountId: "ET-123" },
+  ] as const) {
+    await upsertAccountBinding(env as never, login, binding);
+  }
+}
 
 /**
  * §7 adaptation (#2389): voice approvals now settle through the
@@ -135,6 +193,7 @@ describe("Cloudflare Voice Trading Agent (E*TRADE Desk)", () => {
   let orm: DatabaseORM;
   const sessionId = "voice_test_trader";
 
+  const voiceSessionNs = makeMemoryDoNamespace();
   const mockEnv: Env = {
     APP_BASE_URL: "https://agent.openaimp.com",
     AI_SEARCH_ENDPOINT: "https://ai-search.internal",
@@ -148,9 +207,12 @@ describe("Cloudflare Voice Trading Agent (E*TRADE Desk)", () => {
     // NLQ channel is opted in here; unconfigured NLQ scheduling refuses
     // by design (schedule_nlq defaults OFF).
     FEATURE_SCHEDULE_NLQ: "1",
+    // Issue #5100 (F3 of #5094): the binding store for the NLQ arm.
+    SESSION_STORE: voiceSessionNs,
   };
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    await seedVoiceBindings(mockEnv, sessionId);
     DynamicMarketScreener.setTestUniverseFixture(MOCK_TEST_UNIVERSE);
     DynamicMarketScreener.setTestListingsFixture(MOCK_TEST_UNIVERSE.map((stock) => ({
       symbol: stock.symbol,

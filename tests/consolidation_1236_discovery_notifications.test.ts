@@ -13,6 +13,63 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { MockSqlStorage } from "./mock-sql";
 import { DatabaseORM } from "../src/orm";
+import { upsertAccountBinding } from "../src/services/accountBindings";
+
+// Issue #5100 (F3 of #5094): the NLQ arm resolves the tenant's broker
+// selection server-side before stamping the binding tuple. The test
+// tenant selects Alpaca paper; the binding is seeded per test below
+// (see seedNlqBindings). Only resolveScreenSelection is stubbed.
+vi.mock("../src/services/providerConnections", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/services/providerConnections")>();
+  return {
+    ...actual,
+    resolveScreenSelection: async () => ({
+      resolved: true,
+      selection: {
+        connectionId: "alpaca:TEST:discnotif_nlq_user",
+        brokerId: "alpaca",
+        environment: "TEST",
+        mode: "paper",
+        externalAccountId: "PA-900",
+      },
+    }),
+  };
+});
+
+/** The #5112 in-memory DO-namespace stub, for seeding NLQ bindings. */
+function makeMemoryDoNamespace() {
+  const store = new Map<string, string>();
+  const stub = {
+    async fetch(request: Request): Promise<Response> {
+      const payload = (await request.json()) as { op: string; key: string; value?: string };
+      if (payload.op === "get") {
+        return Response.json({ ok: true, value: store.get(payload.key) ?? null });
+      }
+      if (payload.op === "put" && payload.value !== undefined) {
+        store.set(payload.key, payload.value);
+        return Response.json({ ok: true });
+      }
+      if (payload.op === "delete") {
+        store.delete(payload.key);
+        return Response.json({ ok: true });
+      }
+      return new Response("Bad request", { status: 400 });
+    },
+  };
+  return {
+    idFromName: () => "singleton" as unknown as DurableObjectId,
+    get: () => stub as unknown as DurableObjectStub,
+  };
+}
+
+async function seedNlqBindings(env: any, login: string): Promise<void> {
+  for (const binding of [
+    { broker: "alpaca", mode: "paper", accountType: "stock", scope: "tenant", accountId: "PA-900" },
+    { broker: "alpaca", mode: "paper", accountType: "options", scope: "tenant", accountId: "PA-900" },
+  ] as const) {
+    await upsertAccountBinding(env as never, login, binding);
+  }
+}
 
 // The NLQ executor's module graph reaches the orchestrator, which
 // extends AIChatAgent from @cloudflare/ai-chat — unresolvable under
@@ -486,16 +543,20 @@ describe("NLQ discovery schedule delivery fields (#1236)", () => {
   }
 
   const sessionId = "discnotif_nlq_user";
+  const nlqSessionNs = makeMemoryDoNamespace();
   const env = {
     APP_ENV: "TEST",
     // Issue #4249: these tests drive the NLQ scheduling entry
     // point, so the NLQ channel is explicitly on here (its default
     // is OFF — unconfigured NLQ scheduling refuses FEATURE_DISABLED).
     FEATURE_SCHEDULE_NLQ: "1",
+    // Issue #5100 (F3 of #5094): the binding store for the NLQ arm.
+    SESSION_STORE: nlqSessionNs,
   } as any;
   let orm: DatabaseORM;
-  beforeEach(() => {
+  beforeEach(async () => {
     orm = new DatabaseORM(new MockSqlStorage() as any);
+    await seedNlqBindings(env, sessionId);
   });
 
   it("NLQ discovery schedules carry the per-task recipients through to the armed payload", async () => {
