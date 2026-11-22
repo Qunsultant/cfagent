@@ -35,10 +35,12 @@ describe("4354-P01 the scope shows its whole value", () => {
 
 describe("4354-P02 the columns have a floor", () => {
   it("the cadence and scope columns hold their content", () => {
+    // #5881 px->rem exact conversion (sizes preserved: 220px = 13.75rem,
+    // 260px = 16.25rem); the floor is the same, only the literal moved.
     const cadence = sheet.slice(sheet.indexOf(".schedule-row-cadence"));
-    expect(cadence.slice(0, 120)).toContain("min-width: 220px");
+    expect(cadence.slice(0, 120)).toContain("min-width: 13.75rem");
     const scope = sheet.slice(sheet.indexOf(".schedule-row-scope"));
-    expect(scope.slice(0, 120)).toContain("min-width: 260px");
+    expect(scope.slice(0, 120)).toContain("min-width: 16.25rem");
   });
 });
 

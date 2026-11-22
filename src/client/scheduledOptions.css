@@ -1,6 +1,8 @@
 /* ==========================================================================
    SCHEDULED SCREENING — schedules as one row per schedule (issue #2329)
-   Token-only styles: every value is a semantic token from tokens.css.
+   Token-only styles: every value is a semantic token from tokens.css,
+   and every length is a token or a rem value (issue #5881: no px
+   literal survives except 1px borders).
    Primitives (Table, Badge, Button, Modal, Notice, EmptyState) carry the
    interactive surfaces; these rules carry layout and the dialog chrome.
    ========================================================================== */
@@ -108,7 +110,7 @@
 }
 
 .sched-table-scroll .ui-table {
-  min-width: 1180px;
+  min-width: 73.75rem;
 }
 
 .sched-table-status {
@@ -129,14 +131,14 @@
 }
 
 .schedule-item-card.is-paused td:first-child {
-  box-shadow: inset 3px 0 0 var(--color-warning);
+  box-shadow: inset 0.1875rem 0 0 var(--color-warning);
 }
 
 .schedule-row-job {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
-  min-width: 200px;
+  min-width: 12.5rem;
 }
 
 .schedule-row-name {
@@ -155,7 +157,7 @@
 
 .schedule-row-id {
   display: block;
-  max-width: 260px;
+  max-width: 16.25rem;
   color: var(--color-text-muted);
   font-family: var(--font-mono);
   font-size: var(--font-size-caption);
@@ -188,16 +190,16 @@
  * holds its value in full: both were squeezed, so a row ran to three-plus
  * lines and the scope clipped. The table keeps its horizontal scroll. */
 .schedule-row-cadence {
-  min-width: 220px;
+  min-width: 13.75rem;
 }
 
 .schedule-row-scope {
-  min-width: 260px;
+  min-width: 16.25rem;
 }
 
 .schedule-row-summary {
   display: block;
-  max-width: 320px;
+  max-width: 20rem;
   color: var(--color-text-muted);
   font-size: var(--font-size-body-sm);
 }
@@ -227,16 +229,16 @@
 
 /* ---------- Dialogs (Details, cadence, confirmation) ---------- */
 .sched-detail-modal {
-  width: min(860px, calc(100vw - 2rem));
-  max-height: min(88vh, 960px);
+  width: min(53.75rem, calc(100vw - var(--space-8)));
+  max-height: min(88vh, 60rem);
 }
 
 .sched-confirm-modal {
-  width: min(520px, calc(100vw - 2rem));
+  width: min(32.5rem, calc(100vw - var(--space-8)));
 }
 
 .sched-cadence-modal {
-  width: min(560px, calc(100vw - 2rem));
+  width: min(35rem, calc(100vw - var(--space-8)));
 }
 
 .sched-dialog-header {
@@ -253,13 +255,6 @@
   flex-direction: column;
   gap: var(--space-1);
   min-width: 0;
-}
-
-.sched-dialog-title {
-  margin: 0;
-  color: var(--color-text-primary);
-  font-size: var(--font-size-title-sm);
-  font-weight: 700;
 }
 
 .sched-dialog-subtitle {
@@ -298,15 +293,6 @@
   gap: var(--space-2);
 }
 
-.sched-detail-section-title {
-  margin: 0;
-  color: var(--color-text-dim);
-  font-size: var(--font-size-micro);
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
 .sched-detail-list {
   display: flex;
   flex-direction: column;
@@ -320,7 +306,7 @@
 
 .sched-detail-row {
   display: grid;
-  grid-template-columns: minmax(140px, 220px) 1fr;
+  grid-template-columns: minmax(8.75rem, 13.75rem) 1fr;
   gap: var(--space-3);
   align-items: baseline;
 }
@@ -350,7 +336,7 @@
 }
 
 .sched-detail-payload {
-  max-height: 280px;
+  max-height: 17.5rem;
   margin: var(--space-2) 0 0;
   padding: var(--space-3);
   overflow: auto;
@@ -385,7 +371,7 @@
 /* ---------- Create / edit form (ScheduleFormModal) ---------- */
 .sched-modal-card {
   width: 100%;
-  max-width: 680px;
+  max-width: 42.5rem;
 }
 
 .sched-modal-header {
@@ -430,6 +416,15 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
+}
+
+/* The create/edit form itself (#5881): the flex-column layout the
+ * form used to carry as an inline style, now the one sched-form
+ * rule — same gap, same column flow, no per-render style prop. */
+.sched-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
 }
 
 .sched-form-label {
@@ -481,7 +476,7 @@
 
 .channels-checkbox-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(16.25rem, 1fr));
   gap: var(--space-3);
   margin-top: var(--space-1);
 }
@@ -499,6 +494,24 @@
 
 .channel-check-card:hover {
   border-color: var(--color-accent-border);
+}
+
+/* A channel that is not configured, only announced (#5881): the
+ * broadcast card is dimmed to read as informational, never as a
+ * control — the 0.9 opacity the card used to carry as an inline
+ * style, now the one modifier rule. */
+.channel-check-card--dimmed {
+  opacity: 0.9;
+}
+
+/* The per-channel address input (#5881): the margin, padding, and
+ * caption size the three channel inputs used to repeat as inline
+ * styles, now the one shared rule — 0.3rem had no scale step, so
+ * the margin takes the nearest on-scale token (--space-1, 0.25rem). */
+.sched-channel-input {
+  margin-top: var(--space-1);
+  padding: var(--space-1-5) var(--space-2-5);
+  font-size: var(--font-size-caption);
 }
 
 .channel-check-top {
@@ -595,7 +608,7 @@
 
 .live-preview-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(17.5rem, 1fr));
   gap: var(--space-3);
 }
 

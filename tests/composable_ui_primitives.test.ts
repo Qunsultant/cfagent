@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import React from "react";
-import { SegmentedControl, PillGroup, Badge, Button, Spinner, EmptyState, Card, Notice, Tabs, TabPanel, TextInput, Select, FileInput, Modal, Table, Skeleton, Checkbox, PageShell, PageSection, PageTemplate, ContextStrip, KpiRibbon, SummaryCard, CardHeader, WorkCard, DetailCard, WorkspaceGrid, ActionBar, QueueFeed, ToastProvider, useToast, Menu, Popover, Drawer, SkipLink, Stack, Flex, Grid } from "../src/client/components/ui";
+import { SegmentedControl, PillGroup, Badge, Button, Spinner, EmptyState, Card, Notice, Tabs, TabPanel, TextInput, Select, FileInput, Modal, Table, Skeleton, Checkbox, PageShell, PageSection, PageTemplate, ContextStrip, KpiRibbon, SummaryCard, CardHeader, WorkCard, DetailCard, WorkspaceGrid, ActionBar, QueueFeed, ToastProvider, useToast, Menu, Popover, Drawer, SkipLink, Stack, Flex, Grid, Disclosure } from "../src/client/components/ui";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -630,5 +630,21 @@ describe("Layout primitives (#3048)", () => {
     const auto = React.createElement(Grid, { autoFit: true, minColumnWidth: "lg", gap: "5" }, "a");
     expect(auto.props.autoFit).toBe(true);
     expect(auto.props.minColumnWidth).toBe("lg");
+  });
+});
+
+describe("Disclosure (#5881)", () => {
+  it("is the shared collapsible section: summary + children, closed by default", () => {
+    const element = React.createElement(Disclosure, { summary: "Custom criteria" }, "body text");
+    expect(element.type).toBe(Disclosure);
+    expect(element.props.summary).toBe("Custom criteria");
+    expect(element.props.children).toBe("body text");
+    expect(element.props.defaultOpen).toBeUndefined();
+  });
+
+  it("defaultOpen starts open and className passes through", () => {
+    const element = React.createElement(Disclosure, { summary: "S", defaultOpen: true, className: "ui-mt-1" }, "body");
+    expect(element.props.defaultOpen).toBe(true);
+    expect(element.props.className).toBe("ui-mt-1");
   });
 });

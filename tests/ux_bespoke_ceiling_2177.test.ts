@@ -180,7 +180,12 @@ describe("bespoke-styling ceiling (issue #2177)", () => {
     // them; flow/compare treatments retarget to .ui-checkbox-label
     // scoped to their panel. Measured on this tree: braces 3838,
     // classes 2619, inline 807, rawLabels 0.
-    expect(inlineStyles).toBeLessThanOrEqual(807);
+    // Ratcheted to 549 by #5881 (Configure New Schedule tokens pass:
+    // the 13 inline styles across CadenceFields,
+    // DiscoveryFormSections, NotificationFields, ScheduleFormModal,
+    // and ThesisRiskFields move to the Grid/Disclosure primitives,
+    // sched-* classes, and ui-mt-* utilities).
+    expect(inlineStyles).toBeLessThanOrEqual(549);
     expect(rawLabels).toBeLessThanOrEqual(0);
   });
 });

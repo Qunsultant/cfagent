@@ -1397,6 +1397,10 @@
     "file": "src/client/scheduledOptions.css",
     "wave": "S-U8"
   },
+  "channel-check-card--dimmed": {
+    "file": "src/client/scheduledOptions.css",
+    "wave": "S-U8"
+  },
   "channel-check-desc": {
     "file": "src/client/scheduledOptions.css",
     "wave": "S-U8"
@@ -6965,6 +6969,10 @@
     "file": "src/client/scheduledOptions.css",
     "wave": "S-U8"
   },
+  "sched-channel-input": {
+    "file": "src/client/scheduledOptions.css",
+    "wave": "S-U8"
+  },
   "sched-confirm-modal": {
     "file": "src/client/scheduledOptions.css",
     "wave": "S-U8"
@@ -7001,10 +7009,6 @@
     "file": "src/client/scheduledOptions.css",
     "wave": "S-U8"
   },
-  "sched-detail-section-title": {
-    "file": "src/client/scheduledOptions.css",
-    "wave": "S-U8"
-  },
   "sched-detail-status": {
     "file": "src/client/scheduledOptions.css",
     "wave": "S-U8"
@@ -7029,7 +7033,7 @@
     "file": "src/client/scheduledOptions.css",
     "wave": "S-U8"
   },
-  "sched-dialog-title": {
+  "sched-form": {
     "file": "src/client/scheduledOptions.css",
     "wave": "S-U8"
   },

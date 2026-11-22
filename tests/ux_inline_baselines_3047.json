@@ -53,10 +53,10 @@
   "src/client/options/flows/FlowSummaryDualBars.tsx": 4,
   "src/client/options/flows/FlowTradeDetailModal.tsx": 2,
   "src/client/options/flows/OptionsFlowsHub.tsx": 39,
-  "src/client/scheduledOptionsManager/CadenceFields.tsx": 1,
-  "src/client/scheduledOptionsManager/DiscoveryFormSections.tsx": 1,
-  "src/client/scheduledOptionsManager/NotificationFields.tsx": 5,
-  "src/client/scheduledOptionsManager/ScheduleFormModal.tsx": 5,
-  "src/client/scheduledOptionsManager/ThesisRiskFields.tsx": 1,
+  "src/client/scheduledOptionsManager/CadenceFields.tsx": 0,
+  "src/client/scheduledOptionsManager/DiscoveryFormSections.tsx": 0,
+  "src/client/scheduledOptionsManager/NotificationFields.tsx": 0,
+  "src/client/scheduledOptionsManager/ScheduleFormModal.tsx": 0,
+  "src/client/scheduledOptionsManager/ThesisRiskFields.tsx": 0,
   "src/client/search/SearchHub.tsx": 4
 }

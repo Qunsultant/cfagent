@@ -53,7 +53,7 @@ export function NotificationFields(props: NotificationFieldsProps) {
                         <>
                           <TextInput
                             type="text"
-                            style={{ marginTop: "0.3rem", padding: "var(--space-1-5) var(--space-2-5)", fontSize: "var(--font-size-caption)" }}
+                            className="sched-channel-input"
                             value={slackChannel}
                             onChange={(e) => setSlackChannel(e.target.value)}
                             placeholder="Slack Channel (e.g. #trading-desk)"
@@ -64,7 +64,7 @@ export function NotificationFields(props: NotificationFieldsProps) {
                               "Configured (no channel recorded)" for
                               the same record). */}
                           {slackChannel.trim() === "" && (
-                            <span className="hint" style={{ fontSize: "var(--font-size-caption)", color: "var(--color-text-muted)" }}>
+                            <span className="hint">
                               Not set — no channel recorded for this schedule.
                             </span>
                           )}
@@ -87,7 +87,7 @@ export function NotificationFields(props: NotificationFieldsProps) {
                       {Boolean(emailTo) && (
                         <TextInput
                           type="email"
-                          style={{ marginTop: "0.3rem", padding: "var(--space-1-5) var(--space-2-5)", fontSize: "var(--font-size-caption)" }}
+                          className="sched-channel-input"
                           value={emailTo}
                           onChange={(e) => setEmailTo(e.target.value)}
                           placeholder="Recipient Email (e.g. trader@firm.com)"
@@ -110,7 +110,7 @@ export function NotificationFields(props: NotificationFieldsProps) {
                       {Boolean(webhookUrl) && (
                         <TextInput
                           type="url"
-                          style={{ marginTop: "0.3rem", padding: "var(--space-1-5) var(--space-2-5)", fontSize: "var(--font-size-caption)" }}
+                          className="sched-channel-input"
                           value={webhookUrl}
                           onChange={(e) => setWebhookUrl(e.target.value)}
                           placeholder="https://..."
@@ -119,7 +119,7 @@ export function NotificationFields(props: NotificationFieldsProps) {
                     </div>
 
                     {/* Broadcast */}
-                    <div className="channel-check-card" style={{ opacity: 0.9 }}>
+                    <div className="channel-check-card channel-check-card--dimmed">
                       <div className="channel-check-top">
                         <strong>WebSocket UI Broadcast</strong>
                       </div>

@@ -889,6 +889,10 @@ div.ui-modal-title { font-size: inherit; font-weight: inherit; }
   margin-top: var(--space-1);
 }
 
+.ui-mt-2 {
+  margin-top: var(--space-2);
+}
+
 .ui-danger {
   color: var(--color-danger);
 }
@@ -909,6 +913,26 @@ div.ui-modal-title { font-size: inherit; font-weight: inherit; }
 .ui-plain-link {
   text-decoration: none;
   color: inherit;
+}
+
+/* ---------- Disclosure (#5881) ---------- */
+/* The one collapsible section: a native <details>/<summary> pair, so
+ * the open state, keyboard behaviour, and AT announcements stay
+ * native. Token values only; no outer margin — the call site adds a
+ * ui-mt-* utility when the section needs separation from above. */
+.ui-disclosure {
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-surface-sunken);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+}
+
+.ui-disclosure-summary {
+  font-size: var(--font-size-body-sm);
+  cursor: pointer;
+  color: var(--color-accent);
+  font-weight: 600;
+  user-select: none;
 }
 
 /* ---------- Template organisms I (#3132) ---------- */

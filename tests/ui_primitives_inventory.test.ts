@@ -67,6 +67,8 @@ const INVENTORY: Record<string, string[]> = {
   "Stack.tsx": ["Stack"],
   "Flex.tsx": ["Flex"],
   "Grid.tsx": ["Grid"],
+  // #5881: the shared collapsible section (native details/summary).
+  "Disclosure.tsx": ["Disclosure"],
 };
 
 /** Non-primitive files allowed in components/ui (helpers + styles). */
