@@ -152,6 +152,29 @@ function memoryStageClaimStore(): StageClaimStore {
  * accepts a discovery-mode leg carrying the universe input and
  * refuses one carrying neither explicit symbols nor the input.
  */
+/**
+ * Issue #6074 — the goal options leg's run ids, one mint site for
+ * both forms: the leg run id the options job is defined under and
+ * the goal run id the goal shape's delivery builder is a pure
+ * function of (null when the caller passed no idempotency key —
+ * the host dispatch refuses a key-less leg by name instead). The
+ * sync leg (runGoalOptionsLegViaWorkflow, below) and the engine
+ * leg (runGoalOptionsLegOnEngineNodes, screenerPipelineJobs) both
+ * build them from the same idempotency key — never mint the
+ * templates a second time (P06 pins the goal-screen: family at
+ * 14 in tests/no_minting_elsewhere_5175.test.ts).
+ */
+export function goalOptionsLegRunIds(idempotencyKey?: string): {
+  legRunId: string;
+  goalRunId: string | null;
+} {
+  const key = idempotencyKey ?? crypto.randomUUID();
+  return {
+    legRunId: `goal-screen:${key}:options`,
+    goalRunId: idempotencyKey ? `goal-screen:${idempotencyKey}` : null,
+  };
+}
+
 export async function runGoalOptionsLegViaWorkflow(args: {
   workflow: OptionsWorkflowDeps;
   registry: ScreeningProviderRegistry;
@@ -170,7 +193,7 @@ export async function runGoalOptionsLegViaWorkflow(args: {
       "options workflow: no userLogin - refusing to run the options leg without an identity",
     );
   }
-  const legRunId = `goal-screen:${args.idempotencyKey ?? crypto.randomUUID()}:options`;
+  const { legRunId, goalRunId } = goalOptionsLegRunIds(args.idempotencyKey);
   // Issue #4858 — the goal envelope, extracted verbatim so the host
   // dispatch and the sync dispatch below serve the same request.
   const request = {
@@ -188,7 +211,6 @@ export async function runGoalOptionsLegViaWorkflow(args: {
   let screenedResult: unknown;
   let hostServed = false;
   if (args.host) {
-    const goalRunId = args.idempotencyKey ? `goal-screen:${args.idempotencyKey}` : null;
     const symbols = args.plan.optionsFilter.underlyingSymbols;
     const hasSymbols =
       Array.isArray(symbols) &&

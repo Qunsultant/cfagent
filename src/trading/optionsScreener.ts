@@ -825,7 +825,17 @@ export class DynamicOptionsScreener {
         warnings,
       );
     }
-    if ((!filter.underlyingSymbols || filter.underlyingSymbols.length === 0) && filter.maxUnderlyings === undefined) {
+    // Issue #6074 — discovery needs no explicit symbols when the
+    // screener was constructed with universe deps: resolveUnderlyings
+    // discovers from the threaded listings and caps at maxScanSymbols,
+    // so the scan is bounded without the field. Without deps (and
+    // without symbols or a cap) the refusal stands — a dep-less
+    // discovery has nowhere to discover from (#1378).
+    if (
+      (!filter.underlyingSymbols || filter.underlyingSymbols.length === 0) &&
+      filter.maxUnderlyings === undefined &&
+      !this.universeDeps
+    ) {
       throw new OptionsValidationError(
         "Specify underlying symbols or set the visible maximum-underlyings limit before scanning option chains.",
         filter,

@@ -46,7 +46,12 @@ import { ensureEnrichPipelineJobs } from "../src/services/enrichPipelineJobs";
 import { ensureAnalyzePipelineJobs } from "../src/services/analyzePipelineJobs";
 import { ensureGeneratePipelineJobs } from "../src/services/generatePipelineJobs";
 import { ensureDeliverPipelineJobs } from "../src/services/deliverPipelineJobs";
-import { createScreenerStepRegistry, type ScreenerStepDeps } from "../src/services/screenerPipelineJobs";
+import {
+  createScreenerStepRegistry,
+  readGoalOptionsLegScreen,
+  saveGoalOptionsLegDefinition,
+  type ScreenerStepDeps,
+} from "../src/services/screenerPipelineJobs";
 import { ScreenerTaskLedger } from "../src/services/screenerTaskLedger";
 import { InMemoryScreenerTaskStore } from "../src/data/inMemoryScreenerTaskStoreAdapter";
 import { buildScenario } from "../src/services/goalScenarioEngine";
@@ -63,6 +68,10 @@ import {
 import type { ParentScreenReportInput } from "../src/workflows/workflowPorts";
 import type { WorkflowJobCommand } from "../src/workflows/workflowPorts";
 import { DEFAULT_PIPELINE_POLICY } from "../src/services/pipelinePolicy";
+import type {
+  BrokerOptionChain,
+  OptionChainSource,
+} from "../src/trading/optionChainSource";
 import type {
   DataProvider,
   DataResult,
@@ -86,6 +95,62 @@ function directionalScenario() {
     portfolioRef: { kind: "hypothetical" },
     constraints: {},
   });
+}
+
+// Issue #6074 — the fake options chain for the re-pointed
+// default-bindings test: the #3186 goal-leg fixture shape (ATM,
+// bid 1.0 / ask 1.05, OI 500, volume 100, underlying 100), with
+// the expiry computed from this suite's FIXED T0 (2026-11-12).
+// T0+40d (2026-12-22): the DTE window {21, 60} is checked
+// against BOTH clocks — the run clock (T0, DTE 40) and the wall
+// clock the screener's expiry filter reads (real today, DTE 30)
+// — and both must land inside the window, since this suite's T0
+// sits 10 days behind wall clock.
+const EXPIRY = { year: 2026, month: 12, day: 22 };
+const EXPIRY_YYMMDD = "261222";
+
+function fakeChainSource(chainCalls: string[]): OptionChainSource {
+  const chainFor = (symbol: string): BrokerOptionChain =>
+    ({
+      symbol,
+      underlyingPrice: 100,
+      selectedExpiry: EXPIRY,
+      pairs: [
+        {
+          call: {
+            symbol: `${symbol}${EXPIRY_YYMMDD}C00100000`,
+            optionType: "CALL",
+            strikePrice: 100,
+            bid: 1.0,
+            ask: 1.05,
+            lastPrice: 1.02,
+            volume: 100,
+            openInterest: 500,
+          },
+          put: {
+            symbol: `${symbol}${EXPIRY_YYMMDD}P00100000`,
+            optionType: "PUT",
+            strikePrice: 100,
+            bid: 1.0,
+            ask: 1.05,
+            lastPrice: 1.02,
+            volume: 100,
+            openInterest: 500,
+          },
+        },
+      ],
+    }) as BrokerOptionChain;
+  return {
+    getOptionChains: async (params: { symbol?: string }) => {
+      const symbol = (params?.symbol ?? "").toUpperCase();
+      chainCalls.push(symbol);
+      return symbol === "AAPL" ? chainFor(symbol) : null;
+    },
+    getOptionExpireDates: async (symbol: string) => {
+      void symbol;
+      return [EXPIRY] as never;
+    },
+  };
 }
 
 const SYMBOLS = ["AAPL", "MSFT", "NVDA", "AMZN"];
@@ -267,6 +332,7 @@ interface CutoverHarness {
   quotaCharges: { userLogin: string; runId: string }[];
   stockLegCalls: unknown[];
   optionsLegCalls: unknown[];
+  chainCalls: string[];
 }
 
 async function makeCutoverHarness(opts: {
@@ -310,6 +376,7 @@ async function makeCutoverHarness(opts: {
   const quotaCharges: { userLogin: string; runId: string }[] = [];
   const stockLegCalls: unknown[] = [];
   const optionsLegCalls: unknown[] = [];
+  const chainCalls: string[] = [];
   const shardsFor = async (jobId: string) =>
     (await stores.definitions.getDefinition(jobId))?.config.processing.shards ?? [];
   const deps: ScreenerStepDeps = {
@@ -356,6 +423,16 @@ async function makeCutoverHarness(opts: {
     // reach it — the fake wins.
     goalStockLegAnalyzedFor: async (analyzeJobId: string) =>
       analyzedStore.latestUsable(analyzeJobId),
+    // Issue #6074 — the options-leg definition writer + screen
+    // reader are production-default bindings too (the harness
+    // stores, as the host factories bind createJobPipelineStores
+    // over their residency's storage): the real options leg
+    // defines its job and reads its screen from them. Tests that
+    // inject a goalOptionsLeg fake never reach them.
+    goalOptionsLegDefineFor: async (raw: Record<string, unknown>) =>
+      saveGoalOptionsLegDefinition(stores, raw),
+    goalOptionsLegScreenFor: async (legRunId: string) =>
+      readGoalOptionsLegScreen(stores, legRunId),
     ...(opts.omitCompositionDeps
       ? {}
       : {
@@ -448,6 +525,20 @@ async function makeCutoverHarness(opts: {
         screenerDeliverOutcome: deps.deliverOutcome,
       },
       deps,
+      // Issue #6074 — the options steps compose here too (the
+      // resolving registration, as in the workflow residency):
+      // the real options leg runs the eight options-pipeline
+      // stages on the harness registry. The fake chain serves
+      // AAPL only; universe deps carry the same listing.
+      {
+        definitions: stores.definitions,
+        artifacts: stores.artifacts,
+        chainSourceFor: () => fakeChainSource(chainCalls),
+        universeDepsFor: async () => ({
+          fetchListings: async () => [listing("AAPL")],
+        }),
+        queue: null,
+      },
     ),
     now: () => new Date(T0),
     policy: SINGLE_ATTEMPT_POLICY,
@@ -476,6 +567,7 @@ async function makeCutoverHarness(opts: {
     quotaCharges,
     stockLegCalls,
     optionsLegCalls,
+    chainCalls,
   };
 }
 
@@ -661,7 +753,7 @@ describe("goal-leg dispatch (#4192)", () => {
     expect(h.parentStored[0]?.goalScreen).toBe(true);
   });
 
-  it("the default composition bindings are the agent methods and the generic stock chain, never the direct runGoalScreen (#4279, #6073)", async () => {
+  it("the default composition bindings are the agent methods and the generic stock + options chains, never the direct runGoalScreen (#4279, #6073, #6074)", async () => {
     // Issue #6072 — the composition's production defaults live on
     // the agent (quota charge, options-leg dispatch, artifact
     // tail); the ledger dep is injected (it has no agent default —
@@ -672,7 +764,14 @@ describe("goal-leg dispatch (#4192)", () => {
     // so a regression to the nested dispatch cannot do live work
     // in this test, and is asserted never called), and the analyzed
     // reader is the harness store, so the real leg screens AAPL
-    // through feed → enrich → analyze → generate.
+    // through feed → enrich → analyze → generate. Issue #6074 —
+    // the options leg's default is the same: the leg runs the
+    // eight options-pipeline stages in-process on the harness
+    // registry (the spy below is mocked the same way and asserted
+    // never called), and the definition writer + screen reader are
+    // the harness stores, so the real leg screens AAPL through
+    // plan → chainFetch → enrich → screen → risk →
+    // persistCanonicalResults → shapeReport → deliver.
     const h = await makeCutoverHarness({ omitCompositionDeps: true });
     const quotaSpy = vi
       .spyOn(h.agent, "chargeGoalScreenQuota")
@@ -717,7 +816,26 @@ describe("goal-leg dispatch (#4192)", () => {
       jobId: "goal-4279",
       shards: [{ shardId: "s0", symbols: [listing("AAPL")] }],
       goalScreen: {
-        scenario: directionalScenario(),
+        // Issue #6074 — explicit scenario constraints (the
+        // incomeScenario shape): buildScenario fills a missing
+        // liquidity floor from RESEARCH_CONFIG_DEFAULTS, whose
+        // maxSpreadPct 0.15 reads as 0.15% in evaluateContract
+        // and rejects the fake chain's 4.88% spread — the units
+        // question is out of scope for this slice (reported to
+        // the parent), so this test pins the explicit-constraints
+        // path, as the 6074 suite does.
+        scenario: buildScenario({
+          goalKind: "directional",
+          portfolioRef: { kind: "hypothetical" },
+          constraints: {
+            dteWindow: { min: 21, max: 60 },
+            liquidityFloor: {
+              minOpenInterest: 500,
+              minVolume: 100,
+              maxSpreadPct: 8,
+            },
+          },
+        }),
         scenarioSource: "built",
         symbols: ["AAPL"],
       },
@@ -730,7 +848,11 @@ describe("goal-leg dispatch (#4192)", () => {
     // chain instead (the fake provider fetched AAPL once).
     expect(stockSpy).not.toHaveBeenCalled();
     expect(h.quoteCalls).toContain("AAPL");
-    expect(optionsSpy).toHaveBeenCalledTimes(1);
+    // Issue #6074 — the nested options dispatch never runs on the
+    // engine path anymore; the leg screened through the options
+    // nodes instead (the fake chain source fetched AAPL once).
+    expect(optionsSpy).not.toHaveBeenCalled();
+    expect(h.chainCalls).toContain("AAPL");
     expect(artifactsSpy).toHaveBeenCalledTimes(1);
     expect(engineSpy).not.toHaveBeenCalled();
     expect(directSpy).not.toHaveBeenCalled();
@@ -740,11 +862,22 @@ describe("goal-leg dispatch (#4192)", () => {
     const envelope = h.stored[0] as { result: Record<string, unknown> };
     const result = envelope.result as {
       status: string;
-      counts: { stocksScanned: number; stocksMatched: number };
+      counts: {
+        stocksScanned: number;
+        stocksMatched: number;
+        optionsUnderlyingsScanned: number;
+        optionsContractsMatched: number;
+        hits: number;
+      };
     };
     expect(result.status).toBe("complete");
     expect(result.counts.stocksScanned).toBe(1);
     expect(result.counts.stocksMatched).toBe(1);
+    // Issue #6074 — the options leg screened AAPL through the
+    // nodes: one underlying, both contracts (call + put), one hit.
+    expect(result.counts.optionsUnderlyingsScanned).toBe(1);
+    expect(result.counts.optionsContractsMatched).toBe(2);
+    expect(result.counts.hits).toBe(2);
   });
 });
 

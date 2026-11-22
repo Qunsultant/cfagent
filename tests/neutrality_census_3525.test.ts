@@ -963,6 +963,18 @@ function measure(): Map<string, number> {
  * new comment mentions were neutralized instead ("broker client",
  * "platform path"), so no screener row is added or raised.
  * Baseline totals move 1390/11287 -> 1390/11289.
+ * Baseline update (#6074, 2026-11-22): the goal options leg runs
+ * the options-pipeline nodes in-process (6d-c), and its universe
+ * resolution stamps the same universe descriptor literal
+ * (`{ provider: "nasdaq" }`) onto the leg's request — naming the
+ * provider is the leg's job, so the new row is dispositioned
+ * INTEGRATION, as the #4856/#6072 rows for the same literal. The
+ * row counts 2 lines: the stamp itself plus the resolver's doc
+ * comment naming the descriptor. The engine-doc prose was
+ * neutralized instead (it names the shared default's provider,
+ * not the brand), so no docs row moves.
+ * 1 new row (screenerPipelineJobs.ts nasdaq 2).
+ * Baseline totals move 1390/11289 -> 1391/11291.
  */
 const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (188 rows / 989 lines) ----
@@ -1777,6 +1789,7 @@ const BASELINE: Array<[string, string, number]> = [
   // names + the factory's doc comment).
   ["src/services/screenerPipelineJobs.ts", "alpaca", 3],
   ["src/services/screenerPipelineJobs.ts", "etrade", 4],
+  ["src/services/screenerPipelineJobs.ts", "nasdaq", 2],
   ["src/services/screenerPipelineJobs.ts", "yahoo", 12],
   ["src/services/screeningDelivery.ts", "etrade", 6],
   ["src/services/screeningRuntime.ts", "etrade", 3],

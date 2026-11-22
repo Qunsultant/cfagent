@@ -80,6 +80,7 @@ import { DEFAULT_TENANT_PROVIDERS } from "../data/commercialPorts";
 import {
   assembleGoalScreenResult,
   buildGoalScreenPlan,
+  goalOptionsLegRunIds,
   goalUniverseLabel,
   TERMINAL_TASK_STATUSES,
   type GoalDrivenScreenResult,
@@ -98,6 +99,22 @@ import type { AnalyzedDatasetArtifact } from "../data/analyzedDatasetPorts";
 import { createAnalyzedDatasetPorts } from "../data/createAnalyzedDatasetPorts";
 import { defaultUniverseId } from "../config/defaultUniverse";
 import type { GoalScreenArtifactOutcome } from "./goalScreenReports";
+import { resolveJobDefinition } from "./jobPipelineConfig";
+import {
+  createJobPipelineStoresFromD1,
+  createJobPipelineStoresFromSql,
+} from "../data/createJobPipelinePorts";
+import type { SqlStorage } from "../orm";
+import {
+  OPTIONS_SCREEN_ROOT_STEP,
+  OPTIONS_SCREEN_STEP,
+  optionsScreenJobDefinition,
+  optionsScreenJobId,
+  optionsStageStorageFromArtifacts,
+} from "../workflows/optionsScreenEngine";
+import { optionsArtifactKey } from "../workflows/optionsScreenPorts";
+import { OPTIONS_PIPELINE_STAGES } from "../workflows/stageRuntimeIds";
+import { stampUniverseDepsStageInput } from "../workflows/optionsStepPorts";
 
 /** The step names a screener job's configuration references. */
 export const SCREENER_FEED_STEP = "screener.feed";
@@ -275,6 +292,26 @@ export interface ScreenerStepDeps {
     analyzeJobId: string,
   ) => Promise<AnalyzedDatasetArtifact | undefined>;
   goalOptionsLeg?: (input: GoalOptionsLegInput) => Promise<ScreeningResult>;
+  /**
+   * Issue #6074 — the goal options leg's definition writer: persist
+   * the per-run options-screen definition (built by
+   * optionsScreenJobDefinition) onto the residency's definition
+   * store, so the resolving options steps can read the dispatch
+   * request back. Absent = the leg refuses by name
+   * (GOAL_OPTIONS_LEG_NO_DEFINITION_STORE), never a silent
+   * fallthrough to the nested dispatch. Bound in the host
+   * factories from the residency's pipeline stores.
+   */
+  goalOptionsLegDefineFor?: (raw: Record<string, unknown>) => Promise<void>;
+  /**
+   * Issue #6074 — the goal options leg's screen-reader: the screen
+   * artifact the options nodes wrote for the leg run, read back
+   * from the residency's artifact store scoped by the leg run id
+   * (the scope the resolving steps write under). Absent = the leg
+   * refuses by name (GOAL_OPTIONS_LEG_NO_ARTIFACT_STORE). Bound in
+   * the host factories from the residency's pipeline stores.
+   */
+  goalOptionsLegScreenFor?: (legRunId: string) => Promise<unknown>;
   goalArtifacts?: (result: GoalDrivenScreenResult) => Promise<GoalScreenArtifactOutcome>;
 }
 
@@ -690,6 +727,252 @@ async function runGoalStockLegOnGenericNodes(args: {
 }
 
 /**
+ * Issue #6074 — the goal OPTIONS leg on the engine's options
+ * nodes. The leg resolves its symbols (explicit → the ONE shared
+ * default as a universe stage input → named refusal), builds the
+ * #4858 dispatch envelope verbatim (the same request the sync
+ * leg built, plus the universe input when the leg runs in
+ * discovery mode), persists the per-run options-screen definition
+ * FIRST (so the resolving steps can read the request back — the
+ * writer MUST write the store the registry's optionsDeps reads),
+ * then invokes `options.runRoot` + `options.runStage` × 8
+ * in-process on the captured registry, threading each output as
+ * the next input, and reads the screen artifact back for the
+ * result the 6d-a assemble node consumes. The synthesized
+ * contexts carry the OPTIONS job's identity (jobId =
+ * options-screen:<legRunId>, runId = legRunId — the resolving
+ * steps derive their run id from the job id and scope their
+ * storage by the engine run id), the goal run's clock/trigger/
+ * runKind, and no shard key (the options job is monolith). A
+ * stage failure throws as `options leg failed at <stage>: ...`,
+ * the sync dispatch's failure shape, and the leg step records it
+ * as a failed class (#462), never a failed run.
+ */
+async function runGoalOptionsLegOnEngineNodes(args: {
+  registry: JobStepRegistry;
+  deps: ScreenerStepDeps;
+  ctx: JobStepContext;
+  params: Record<string, unknown>;
+  plan: GoalScreenPlan;
+}): Promise<ScreeningResult> {
+  const { registry, deps, ctx, plan } = args;
+  const userLogin = requireUserLogin(args.params);
+  const resolved = resolveGoalOptionsLegSymbols(plan);
+  // Issue #6074 — the leg's run ids come from the one mint site
+  // (goalOptionsLegRunIds, goalDrivenScreen): the engine run id
+  // is the idempotency key, so the leg run id and the goal run id
+  // are the same forms the sync leg mints — never mint the
+  // templates a second time (P06 pins the goal-screen: family
+  // at 14).
+  const { legRunId, goalRunId } = goalOptionsLegRunIds(ctx.runId);
+  // The #4858 goal envelope, verbatim — the host dispatch and the
+  // sync dispatch serve the same request, and so does this leg —
+  // PLUS the goalRunId stamp the goal seam applies (#4290): the
+  // resolving steps rebuild the leg's ports per invocation from
+  // the stored request, and the goal shape's delivery builder is
+  // a pure function of the stamped goal run id
+  // (goalRunIdFromGoalRequest) — a goal-shape request without it
+  // refuses by name at the plan stage, before any execution. The
+  // sync dispatch never needed the stamp (its direct ports carry
+  // the goal run id in the delivery builder, not the request);
+  // the resolving steps do. The goal run id is the
+  // `goal-screen:<engine run id>` form the host path stamps
+  // (`goal-screen:<idempotencyKey>`).
+  // Explicit symbols ride the plan (the screen stage discovers
+  // them from the filter); a universe resolution stamps the
+  // universe stage input, which carries no universe NAME — the
+  // factory resolves the shared default itself (#4473).
+  let request: unknown = {
+    assetClass: "options",
+    runIdentity: { runId: legRunId },
+    trigger: ctx.trigger,
+    provenanceTrigger: "goal",
+    classInput: {
+      goalPlan: {
+        optionsFilter: plan.optionsFilter,
+        structures: plan.structures,
+        goalRunId,
+      },
+    },
+  };
+  if ("universe" in resolved) {
+    request = stampUniverseDepsStageInput(request, { provider: "nasdaq" });
+  }
+  if (!deps.goalOptionsLegDefineFor) {
+    throw new Error(
+      "GOAL_OPTIONS_LEG_NO_DEFINITION_STORE: the goal options leg needs the definition writer (goalOptionsLegDefineFor) to persist the per-run options-screen definition the resolving steps read back — refusing a goal options leg with nowhere to define its job (#6074).",
+    );
+  }
+  const jobId = optionsScreenJobId(legRunId);
+  await deps.goalOptionsLegDefineFor(
+    optionsScreenJobDefinition(jobId, request, userLogin),
+  );
+  const base = {
+    jobId,
+    runId: legRunId,
+    stepIndex: 0,
+    item: null,
+    itemIndex: null,
+    items: [] as readonly unknown[],
+    shardKey: null,
+    now: ctx.now,
+    trigger: ctx.trigger,
+    runKind: ctx.runKind,
+  };
+  let input: unknown;
+  try {
+    const root = await registry.resolve(OPTIONS_SCREEN_ROOT_STEP)({
+      ...base,
+      nodePath: "root",
+      kind: "options-screen",
+      params: {},
+      input,
+    });
+    input = root.output;
+  } catch (err) {
+    throw new Error(
+      `options leg failed at ${OPTIONS_SCREEN_ROOT_STEP}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  for (const stageId of OPTIONS_PIPELINE_STAGES) {
+    try {
+      const out = await registry.resolve(OPTIONS_SCREEN_STEP)({
+        ...base,
+        nodePath: `root/${stageId}`,
+        kind: stageId,
+        params: { stageId },
+        input,
+      });
+      input = out.output;
+    } catch (err) {
+      throw new Error(
+        `options leg failed at ${stageId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+  if (!deps.goalOptionsLegScreenFor) {
+    throw new Error(
+      "GOAL_OPTIONS_LEG_NO_ARTIFACT_STORE: the goal options leg needs the screen reader (goalOptionsLegScreenFor) to map the options nodes' output — refusing a goal options leg with nowhere to read the screen artifact (#6074).",
+    );
+  }
+  const screened = (await deps.goalOptionsLegScreenFor(legRunId)) as
+    | { result?: unknown }
+    | undefined;
+  if (!screened || screened.result === undefined) {
+    throw new Error(
+      `GOAL_OPTIONS_LEG_NO_SCREEN_ARTIFACT: the options nodes ran but no screen artifact exists for leg run "${legRunId}" — refusing to map a leg result from nothing (#6074).`,
+    );
+  }
+  // The sync leg's provenance marker (runGoalOptionsLegViaWorkflow
+  // falls back to it when no options provider is registered): the
+  // goal result's hits keep the same provenance.
+  return {
+    assetClass: "options",
+    providerId: "options-screen-workflow",
+    result: screened.result as never,
+  };
+}
+
+/**
+ * Issue #6074 — the goal step's default runner: the 6d-a
+ * composition itself. An old stored definition carries the single
+ * `screener.goal` step on its analyze node (v1 shape); the runner
+ * synthesizes the analyze-node params the v2 builder writes — the
+ * family job ids + the market spec's analyze/generate stage params
+ * + the leg's working copy of the resolved universe — from the
+ * same inputs the builder reads (the goal command's provider, the
+ * gather output's symbols else the command's), then threads the
+ * eight `goal.*` steps with synthesized contexts (the goal run's
+ * own job/run ids, the node's path, the gather output as the
+ * first step's input), and returns the artifacts step's output —
+ * the analysis output the store stage consumes, the shape
+ * screenGoalStage returned, verbatim. runGoalScreenOnEngine /
+ * screenGoalStage are never called on this path.
+ */
+export async function runGoalScreenComposition(args: {
+  registry: JobStepRegistry;
+  deps: ScreenerStepDeps;
+  ctx: JobStepContext;
+  params: Record<string, unknown>;
+  prior: unknown;
+}): Promise<ScreenerAnalysisStageOutput> {
+  const { registry, deps, ctx, params, prior } = args;
+  const goalScreen = requireGoalScreen(params);
+  const gatherSymbols = (prior as { goalSymbols?: unknown } | null | undefined)
+    ?.goalSymbols;
+  // The plan step's rule, verbatim: the gather stage's goal symbols
+  // (bare strings), else the command's own symbols.
+  const symbols = (
+    Array.isArray(gatherSymbols) && gatherSymbols.length > 0
+      ? gatherSymbols
+      : (goalScreen.symbols ?? [])
+  )
+    .map((s) =>
+      typeof s === "string"
+        ? s
+        : ((s as { symbol?: unknown } | null | undefined)?.symbol ?? ""),
+    )
+    .filter((s): s is string => typeof s === "string" && s.length > 0);
+  const command = {
+    jobId: ctx.jobId,
+    goalScreen: { ...goalScreen, ...(symbols.length > 0 ? { symbols } : {}) },
+    ...(goalScreen.provider ? { provider: goalScreen.provider } : {}),
+  } as WorkflowJobCommand;
+  const familyIds = screenerFamilyJobIds(command);
+  const marketSpec = jobDefinitionSpec("screener");
+  const stockLegAnalyzeParams =
+    marketSpec?.stages.find((s) => s.kind === "analyze")?.params ?? {};
+  const stockLegGenerateParams =
+    marketSpec?.stages.find((s) => s.kind === "generate")?.params ?? {};
+  const goalSymbols = resolveGoalStockLegSymbols(command);
+  const analyzeParams = {
+    ...params,
+    ...familyIds,
+    stockLegAnalyzeParams,
+    stockLegGenerateParams,
+    ...(goalSymbols && "universe" in goalSymbols
+      ? { stockLegUniverse: goalSymbols.universe }
+      : {}),
+    // The builder's common params the generic chain reads: the
+    // flat symbol list + the shard table (the v2 analyze node
+    // carries both — feed.pull's explicitSymbolsFor reads
+    // params.symbols and the ctx.shardKey row's symbols). An old
+    // node's params carry neither, so the runner synthesizes them
+    // from the same resolved symbols; in universe mode both are
+    // empty and the leg reads the universe (stockLegUniverse above).
+    symbols,
+    shards: [{ shardId: ctx.shardKey ?? "goal", symbols }],
+  };
+  const base = {
+    jobId: ctx.jobId,
+    runId: ctx.runId,
+    nodePath: ctx.nodePath,
+    stepIndex: 0,
+    item: null,
+    itemIndex: null,
+    items: [] as readonly unknown[],
+    shardKey: ctx.shardKey,
+    now: ctx.now,
+    trigger: ctx.trigger,
+    runKind: ctx.runKind,
+  };
+  let input: unknown = prior;
+  let output: unknown;
+  for (const step of GOAL_COMPOSITION_STEPS) {
+    output = (
+      await registry.resolve(step)({
+        ...base,
+        kind: "analyze",
+        params: analyzeParams,
+        input,
+      })
+    ).output;
+    input = output;
+  }
+  return output as ScreenerAnalysisStageOutput;
+}
+
+/**
  * Issue #6073 — the goal stock leg's result, mapped from the
  * generic chain's analyzed artifact (pure: no stores, no
  * registry). Matched = the artifact's own standouts — the
@@ -863,12 +1146,21 @@ export function registerScreenerSteps(registry: JobStepRegistry, deps: ScreenerS
         "SCREENER_GOAL_STEP_NO_GOAL: the goal step ran without a goalScreen param — refusing to run a goal dispatch with no goal command.",
       );
     }
-    const output = await agent.screenGoalStage(ctx.runId, {
-      request: req,
-      gatherOutput: prior,
-      goalScreen,
-      ...(deps.goalRunner ? { goalRunner: deps.goalRunner } : {}),
-    });
+    // Issue #6074 — the default runner is the composition itself
+    // (runGoalScreenComposition, above): an old stored definition's
+    // analyze node runs the eight goal.* steps in-process instead of
+    // the legacy dispatch. A test-injected deps.goalRunner still
+    // wins (the 6072/4192 suites keep injecting fakes); production
+    // never overrides it, so runGoalScreenOnEngine /
+    // screenGoalStage are never called on the default path.
+    const output = deps.goalRunner
+      ? await agent.screenGoalStage(ctx.runId, {
+          request: req,
+          gatherOutput: prior,
+          goalScreen,
+          goalRunner: deps.goalRunner,
+        })
+      : await runGoalScreenComposition({ registry, deps, ctx, params, prior });
     return { output };
   });
 
@@ -1032,7 +1324,6 @@ export function registerScreenerSteps(registry: JobStepRegistry, deps: ScreenerS
     const params = ctx.params;
     const userLogin = requireUserLogin(params);
     requireGoalScreen(params);
-    const agent = deps.agentFor(userLogin);
     const state = goalCompositionState(ctx.input, ctx.shardKey);
     if (state.executed === false) return { output: state };
     if (!state.plan) {
@@ -1043,20 +1334,33 @@ export function registerScreenerSteps(registry: JobStepRegistry, deps: ScreenerS
     if (!state.requested?.includes("options")) {
       return { output: { ...state, optionsLeg: { legSkipped: true } } };
     }
-    const dispatch =
-      deps.goalOptionsLeg ??
-      ((input: GoalOptionsLegInput) => agent.runGoalOptionsLeg(input));
+    // Issue #6074 — the leg runs the options-pipeline nodes
+    // in-process (runGoalOptionsLegOnEngineNodes, above). A
+    // test-injected deps.goalOptionsLeg still wins (the 6072/5873
+    // suites keep injecting fakes, with the same input shape as
+    // before); production never overrides it, so the optionsWorkflow
+    // dep call (agent.runGoalOptionsLeg) never runs on the engine
+    // path. A node failure is a failed class (#462), never a failed
+    // run.
     let optionsLeg: GoalLegStepOutput;
     try {
-      const result = await dispatch({
-        plan: state.plan,
-        userLogin,
-        trigger: ctx.trigger,
-        idempotencyKey: ctx.runId,
-        ...(params.environment
-          ? { environment: params.environment as "TEST" | "PROD" }
-          : {}),
-      });
+      const result = deps.goalOptionsLeg
+        ? await deps.goalOptionsLeg({
+            plan: state.plan,
+            userLogin,
+            trigger: ctx.trigger,
+            idempotencyKey: ctx.runId,
+            ...(params.environment
+              ? { environment: params.environment as "TEST" | "PROD" }
+              : {}),
+          })
+        : await runGoalOptionsLegOnEngineNodes({
+            registry,
+            deps,
+            ctx,
+            params,
+            plan: state.plan,
+          });
       optionsLeg = { result };
     } catch (err) {
       // Issue #462: a failed leg is a failed class, never a failed run.
@@ -1294,6 +1598,92 @@ export function resolveGoalStockLegSymbols(
   if (fallback.length > 0) return { universe: fallback };
   throw new Error(
     "GOAL_STOCK_LEG_NO_SYMBOLS: the goal stock leg has no explicit symbols and the shared default universe did not resolve — refusing a symbol-less run (#6073; owner rule 2026-11-22: never a symbol-less run, for ANY run).",
+  );
+}
+
+/**
+ * Issue #6074 — the goal OPTIONS leg's symbol resolution, the
+ * stock leg's resolver in plan form: explicit symbols ride the
+ * plan's optionsFilter.underlyingSymbols (normalized upper/trim/
+ * dedupe); no explicit symbols resolves the ONE shared externalized
+ * default (the #5515 default universe, read through
+ * defaultUniverseId()) as a universe; neither resolving refuses by
+ * name (GOAL_OPTIONS_LEG_NO_SYMBOLS) — never a symbol-less run, for
+ * ANY run (owner rule 2026-11-22), never a per-leg literal. Unlike
+ * the stock resolver it takes the PLAN, not the command: it runs at
+ * leg time, inside goal.optionsLeg, where the plan is what's in
+ * hand — the leg then stamps the resolved universe as a universe
+ * stage input ({provider: "nasdaq"}) on the dispatch request, so
+ * the resolving steps rebuild live universe deps per invocation
+ * (#4473). The universe carries no NAME on the request: the
+ * factory resolves the shared default itself.
+ */
+export function resolveGoalOptionsLegSymbols(
+  plan: GoalScreenPlan,
+  fallbackUniverse?: string,
+): { symbols: string[] } | { universe: string } {
+  const explicit = (plan.optionsFilter?.underlyingSymbols ?? [])
+    .map((s) => (typeof s === "string" ? s.toUpperCase().trim() : ""))
+    .filter((s) => s.length > 0)
+    .filter((s, i, arr) => arr.indexOf(s) === i);
+  if (explicit.length > 0) return { symbols: explicit };
+  let fallback = "";
+  try {
+    fallback = (fallbackUniverse ?? defaultUniverseId()).trim().toLowerCase();
+  } catch {
+    fallback = "";
+  }
+  if (fallback.length > 0) return { universe: fallback };
+  throw new Error(
+    "GOAL_OPTIONS_LEG_NO_SYMBOLS: the goal options leg has no explicit symbols and the shared default universe did not resolve — refusing a symbol-less run (#6074; owner rule 2026-11-22: never a symbol-less run, for ANY run).",
+  );
+}
+
+/**
+ * Issue #6074 — persist the goal options leg's per-run
+ * options-screen definition (the raw record built by
+ * optionsScreenJobDefinition) onto a residency's definition
+ * store: resolve + version (existing + 1, else 1) + save — the
+ * same record JobPipelineControl.defineJob persists, minus the
+ * control (the leg never dispatches via a control; the nodes run
+ * in-process). No instance record is created: nothing runs the
+ * leg's job through a control, so no instance is read. The host
+ * factories + tests bind this over their own stores; the writer
+ * MUST write the store the registry's optionsDeps reads — that
+ * match is the load-bearing invariant.
+ */
+export async function saveGoalOptionsLegDefinition(
+  stores: JobPipelineStores,
+  raw: Record<string, unknown>,
+): Promise<void> {
+  const resolved = resolveJobDefinition(raw);
+  const existing = await stores.definitions.getDefinition(resolved.jobId);
+  await stores.definitions.saveDefinition({
+    jobId: resolved.jobId,
+    name: resolved.name,
+    root: resolved.root,
+    rawConfig: raw,
+    config: resolved.config,
+    version: (existing?.version ?? 0) + 1,
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+/**
+ * Issue #6074 — read the screen artifact the options nodes wrote
+ * for the leg run back out of a residency's artifact store. The
+ * resolving steps scope their storage by the engine run id — the
+ * leg run id, since the leg invokes them with runId = legRunId —
+ * so the scope IS the leg run id: one arg, never a second scope
+ * that could drift from it. Returns undefined when the artifact
+ * is absent (the leg refuses GOAL_OPTIONS_LEG_NO_SCREEN_ARTIFACT).
+ */
+export async function readGoalOptionsLegScreen(
+  stores: JobPipelineStores,
+  legRunId: string,
+): Promise<unknown> {
+  return optionsStageStorageFromArtifacts(stores.artifacts, legRunId).get(
+    optionsArtifactKey(legRunId, "screen"),
   );
 }
 
@@ -1759,10 +2149,26 @@ export function buildDeliverDoor(env: Env): ScreenerStepDeps["deliverOutcome"] {
  * store / deliver doors are real (the orchestrator stub, lazy).
  */
 export function screenerStepDepsForScheduledAgent(
-  ctx: { env: Env },
+  ctx: { env: Env; agentCtx?: { storage?: { sql?: SqlStorage } } },
   feedDeps: FeedStepDeps,
 ): ScreenerStepDeps {
   const env = ctx.env;
+  // Issue #6074 — the goal options leg's pipeline stores over
+  // this host's DO SQLite (the same construction
+  // optionsStepDepsForScheduledAgent uses, so the leg's writer
+  // writes the store the registry's optionsDeps reads). The guard
+  // is pipelineSql's (job_pipeline_host_unavailable) — the
+  // residency's own guard, not the leg's: the control plane
+  // cannot be built without this storage at all.
+  const optionsLegStores = (): JobPipelineStores => {
+    const sql = ctx.agentCtx?.storage?.sql;
+    if (!sql) {
+      throw new Error(
+        "job_pipeline_host_unavailable: the ScheduledAgent host has no DO SQLite storage to build the pipeline stores over.",
+      );
+    }
+    return createJobPipelineStoresFromSql(sql);
+  };
   return {
     agentFor: (userLogin) => screenerAgentStub(env, userLogin),
     ...createScreenerFeedDepsFactories(
@@ -1798,6 +2204,13 @@ export function screenerStepDepsForScheduledAgent(
       }
       return store.latestUsable(analyzeJobId);
     },
+    // Issue #6074 — the goal options leg's definition writer +
+    // screen reader, over this residency's pipeline stores (the
+    // same stores the resolving options steps read).
+    goalOptionsLegDefineFor: async (raw: Record<string, unknown>) =>
+      saveGoalOptionsLegDefinition(optionsLegStores(), raw),
+    goalOptionsLegScreenFor: async (legRunId: string) =>
+      readGoalOptionsLegScreen(optionsLegStores(), legRunId),
   };
 }
 
@@ -1840,6 +2253,33 @@ export function screenerStepDepsForWorkflow(env: Env, feedDeps: FeedStepDeps): S
         );
       }
       return store.latestUsable(analyzeJobId);
+    },
+    // Issue #6074 — the goal options leg's definition writer +
+    // screen reader, over this residency's pipeline stores (the
+    // same stores the resolving options steps read). No AGENT_DB
+    // binding = the leg's named refusal at leg time, never a
+    // silent fallback to the nested dispatch.
+    goalOptionsLegDefineFor: async (raw: Record<string, unknown>) => {
+      if (!env.AGENT_DB) {
+        throw new Error(
+          "GOAL_OPTIONS_LEG_NO_DEFINITION_STORE: the goal options leg needs the AGENT_DB binding for the residency's definition store — refusing a goal options leg with nowhere to define its job (#6074).",
+        );
+      }
+      await saveGoalOptionsLegDefinition(
+        createJobPipelineStoresFromD1(env.AGENT_DB),
+        raw,
+      );
+    },
+    goalOptionsLegScreenFor: async (legRunId: string) => {
+      if (!env.AGENT_DB) {
+        throw new Error(
+          "GOAL_OPTIONS_LEG_NO_ARTIFACT_STORE: the goal options leg needs the AGENT_DB binding for the residency's artifact store — refusing a goal options leg with nowhere to read the screen artifact (#6074).",
+        );
+      }
+      return readGoalOptionsLegScreen(
+        createJobPipelineStoresFromD1(env.AGENT_DB),
+        legRunId,
+      );
     },
   };
 }
