@@ -221,7 +221,8 @@ universes govern per unit (6b1), explicit-symbols shards name
 none (6b0). Goal commands build the untouched `goalScreen` spec
 — a goal param on a market definition is refused, never
 dropped. The deliver leg is flipped in 6c (#5885, below);
-the collation degrades until 6e (#5922) teaches it the generic shape. The flip also fixed
+the collation is taught the generic shape in 6e (#5922,
+below). The flip also fixed
 `analyze.screener`'s hand-off for sharded runs: the engine hands
 a sharded unit the per-shard map, and the step unwraps its own
 shard's entry (the bespoke `priorFor` idiom) before resolving
@@ -296,6 +297,59 @@ restored full-chain + step parity tests in
 proof + definition pin in `tests/screener_substrate_4190.test.ts` /
 `tests/screener_generic_definition_5884.test.ts`.
 <!-- /5885: the deliver flip — generate→deliver payload mapping + sink wiring -->
+
+<!-- 5922: collation on generic-chain outputs — begin -->
+Slice 6e (#5922) teaches the collation the generic shape
+(`shardOutcomeFromStageOutputs`, `src/workflows/screenerCollation.ts`):
+the generic deepest output (`deliver.apply` output = generate
+output + delivery flags) carries no `screenResult` /
+`expectedCount` / `matchedCount` / `servedReport`, so its screen
+evidence is the 6c delivery payload — `payload.totalScanned`
+(the validated count; a non-number fails the shard as
+malformed, never completes it with coerced zeros),
+`payload.timestamp` (the run's finishedAt, feeding the
+`childRunIds` `screener:<timestamp>` links), and
+`payload.canonicalReportId` (the report-id fallback) — and its
+store evidence is the canonical leg map:
+`canonical["screener-report"]` of `stored`/`deduped` means the
+canonical row exists, `failed` means unstored with a store
+error naming the leg, `not_wired` means unstored with no error.
+The leg's reason is not in the step output (the canonical map
+carries statuses only), so the error names the leg, never a
+fabricated detail. `expectedCount` rides the command when the
+artifact lacks it — `composeScreenerCollation` passes the
+shard's asked-to-consider count (`shard.symbols.length`) as a
+fourth parameter to `shardOutcomeFromStageOutputs`; the
+artifact's own value still wins, and the field is omitted when
+neither has it (universe shards). `matchedCount` is omitted for
+generic runs (the analyzed artifact carries no matched notion,
+#5825's document rule). No per-format key is fabricated: the
+generic formats are inline bodies in the generated artifact, and
+a canonical report id is a mas_reports row id, not a PDF blob
+key — `/api/screener/report.pdf` takes a blob key — so putting
+it in `pdfKey` would build a broken download link (and would
+divert the parent-report C4 canonical branch). The downloadable
+references for a generic run are the shard outcome's `reportId`
++ the generated artifact id; the per-format-download gap
+(generate renders formats inline with no asset keys) is filed
+separately. A generate output with no screener payload fails
+loudly as malformed ("no screener delivery payload"), never as
+"never reached analysis" — the market spec always generates
+the screener-report kind. The bespoke path is unchanged (its
+three counts are still all required as numbers; a bespoke
+`stored` boolean still wins). Pinned by
+`tests/screener_collation_generic_5922.test.ts` (8 unit tests:
+generic success, canonical stored/deduped/failed/not_wired,
+expected-count fallback + artifact-wins, malformed payload,
+bespoke unchanged) and the restored dispatch tests in
+`tests/screener_cutover_4192.test.ts` (2-shard market screen
+collates `ReportGenerated` with 4/4 coverage, canonical-leg
+refusal records `Completed` with per-shard store errors,
+`deliver=false` skips delivery), whose harness now composes
+the full pipeline registry (`createPipelineStepRegistry` +
+`ensure*PipelineJobs`, the 4190 pattern) with a storing fake
+canonical seam.
+<!-- 5922: collation on generic-chain outputs — end -->
 
 The screener's deliver stage likewise runs through the generic deliver
 machinery (#5826): `deliver.apply` gains a screener application
