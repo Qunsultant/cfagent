@@ -38,6 +38,7 @@ import type {
 } from "./researchGates";
 import { runStageGates } from "./researchGates";
 import { takeResearchFeed, type ResearchFeedStageOutput } from "./researchFeedHandoff";
+import { takeResearchEnrich, type ResearchEnrichStageOutput } from "./researchEnrichHandoff";
 import type {
   Falsification,
   Premortem,
@@ -334,6 +335,8 @@ export interface ResearchRunOptions {
   runId?: string;
   /** Issue #6063 — the feed stage output; the pipeline consumes it instead of re-fetching. */
   feed?: ResearchFeedStageOutput;
+  /** Issue #6064 — the enrich stage output; analyze consumes it instead of re-fetching. */
+  enrich?: ResearchEnrichStageOutput;
   now?: number;
 }
 
@@ -783,6 +786,30 @@ function newRunId(): string {
  * are thin triggers over this function (amendment 2).
  */
 /**
+ * Issue #6064 — the enrich stage: technicals and catalysts for the feed's quoted
+ * symbols. Run as the `research.enrich` engine step; analyze consumes its output
+ * (opts.enrich / hand-off) and does not re-fetch.
+ */
+export async function runEnrichStage(
+  deps: PipelineDeps,
+  _config: ResearchConfig,
+  feed: ResearchFeedStageOutput,
+  opts: ResearchRunOptions,
+): Promise<ResearchEnrichStageOutput> {
+  const runId = opts.runId ?? feed.runId;
+  const bySymbol: Record<string, { technicals: unknown | null; catalysts: unknown[] | null }> = {};
+  for (const entry of feed.quotes) {
+    if (!entry.quote) continue;
+    const [technicals, catalysts] = await Promise.all([
+      deps.provider.getTechnicals(entry.symbol).catch(() => null),
+      deps.provider.getCatalysts(entry.symbol).catch(() => null),
+    ]);
+    bySymbol[entry.symbol] = { technicals, catalysts };
+  }
+  return { runId, asOf: new Date().toISOString(), bySymbol };
+}
+
+/**
  * Issue #6063 — the feed stage: regime, universe and the quote snapshot for the
  * screened slice. It is the stage's real work, run as the `research.feed`
  * engine step; `runResearchPipeline` consumes its output (opts.feed / hand-off)
@@ -884,6 +911,7 @@ export async function runResearchPipeline(
   // Issue #6063 — the feed stage output, or this pipeline's own fetch when the
   // stage did not run (a direct caller, or a resumed run in another process).
   const feed = opts.feed ?? takeResearchFeed(runId) ?? (await runFeedStage(deps, config, { ...opts, runId }));
+  const enrich = opts.enrich ?? takeResearchEnrich(runId);
   const regime = feed.regime as RegimeAssessment;
   stage("orient", `Regime: ${regime.regime}.`);
   step("orient", `Regime: ${regime.regime}.`);
@@ -981,10 +1009,18 @@ export async function runResearchPipeline(
     }
 
     // OBSERVE — technicals + catalysts.
-    const [technicals, catalysts] = await Promise.all([
-      deps.provider.getTechnicals(symbol).catch(() => null),
-      deps.provider.getCatalysts(symbol).catch(() => null),
-    ]);
+    let technicals: Technicals | null;
+    let catalysts: CatalystInfo[] | null;
+    const enriched = enrich?.bySymbol[symbol];
+    if (enriched) {
+      technicals = enriched.technicals as Technicals | null;
+      catalysts = enriched.catalysts as CatalystInfo[] | null;
+    } else {
+      [technicals, catalysts] = await Promise.all([
+        deps.provider.getTechnicals(symbol).catch(() => null),
+        deps.provider.getCatalysts(symbol).catch(() => null),
+      ]);
+    }
 
     // ORIENT — thesis.
     const draft = draftThesis(symbol, technicals, catalysts, regime);

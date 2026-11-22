@@ -38,6 +38,7 @@ import {
   type ResearchStepDeps,
 } from "../services/researchPipelineJobs";
 import type { ResearchFeedStageOutput } from "../services/researchFeedHandoff";
+import type { ResearchEnrichStageOutput } from "../services/researchEnrichHandoff";
 import {
   resolveResearchJobConfig,
   resolveResearchStageModes,
@@ -89,7 +90,7 @@ export interface DispatchResearchEngineInput {
   brokerId?: string;
   mode?: string;
   researchDeps?: Partial<ResearchStepDeps>;
-  execute: (ctx?: { runId: string; engineJobId: string; feed?: ResearchFeedStageOutput }) => Promise<Record<string, unknown>>;
+  execute: (ctx?: { runId: string; engineJobId: string; feed?: ResearchFeedStageOutput; enrich?: ResearchEnrichStageOutput }) => Promise<Record<string, unknown>>;
 }
 
 export interface DispatchResearchEngineResult {
@@ -241,6 +242,7 @@ export async function dispatchResearchEngineRun(
         runId: ctx.runId,
         engineJobId,
         ...(ctx.feed ? { feed: ctx.feed } : {}),
+        ...(ctx.enrich ? { enrich: ctx.enrich } : {}),
       }),
     ...input.researchDeps,
   };

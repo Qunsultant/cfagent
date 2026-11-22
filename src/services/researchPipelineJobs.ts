@@ -32,6 +32,7 @@ import { jobDefinitionSpec } from "../config/jobDefinitionCatalog";
 import { bindJobDefinitionParams } from "./jobDefinitionParamBinders";
 import { buildJobConfigFromSpec } from "./jobDefinitionSpecBuilder";
 import { putResearchFeed, type ResearchFeedStageOutput } from "./researchFeedHandoff";
+import { putResearchEnrich, type ResearchEnrichStageOutput } from "./researchEnrichHandoff";
 
 const structuredLog = createStructuredLogger(createObservabilitySink({}), {
   component: "services/researchPipelineJobs",
@@ -86,6 +87,15 @@ export interface ResearchStepDeps {
     brokerId?: string;
     mode?: string;
   }) => Promise<ResearchFeedStageOutput>;
+  /** Issue #6064 — the enrich stage: technicals and catalysts for the feed symbols. */
+  runEnrichStage?: (input: {
+    runId: string;
+    userLogin: string;
+    trigger: "manual" | "scheduled";
+    feed: ResearchFeedStageOutput;
+    brokerId?: string;
+    mode?: string;
+  }) => Promise<ResearchEnrichStageOutput>;
   /** Execute the OODA analysis loop and return the structured ResearchReport. */
   runOodaAnalysis: (input: {
     runId: string;
@@ -97,6 +107,8 @@ export interface ResearchStepDeps {
     mode?: string;
     /** Issue #6063 — the persisted feed step output, when the feed stage ran. */
     feed?: ResearchFeedStageOutput;
+    /** Issue #6064 — the persisted enrich step output, when the enrich stage ran. */
+    enrich?: ResearchEnrichStageOutput;
   }) => Promise<ResearchReport | Record<string, unknown>>;
   /** Execute the §9 outcome evaluation pass for a run or due runs. */
   runEvaluateStage?: (input: {
@@ -148,8 +160,39 @@ export function registerResearchSteps(
     };
   });
 
+  registry.register(RESEARCH_ENRICH_STEP, async (ctx) => {
+    const params = (ctx.params ?? {}) as {
+      runId?: string;
+      userLogin?: string;
+      trigger?: "manual" | "scheduled";
+      brokerId?: string;
+      mode?: string;
+    };
+    const runId = params.runId || ctx.jobId.replace(/^research:/, "");
+    const userLogin = params.userLogin || "";
+    const input = ctx.input as ResearchFeedStageOutput | null;
+    if (!userLogin || !deps.runEnrichStage || !input || !Array.isArray(input.quotes)) {
+      return {
+        output: { stage: "enrich", runId, status: "not_configured" },
+        descriptor: researchArtifactKey(runId, "enrich"),
+      };
+    }
+    const output = await deps.runEnrichStage({
+      runId,
+      userLogin,
+      trigger: params.trigger === "scheduled" ? "scheduled" : "manual",
+      feed: input,
+      ...(params.brokerId ? { brokerId: params.brokerId } : {}),
+      ...(params.mode ? { mode: params.mode } : {}),
+    });
+    putResearchEnrich(output);
+    return {
+      output,
+      descriptor: `${researchArtifactKey(runId, "enrich")} (${Object.keys(output.bySymbol).length} symbols)`,
+    };
+  });
+
   for (const [stepName, stageId] of [
-    [RESEARCH_ENRICH_STEP, "enrich"],
     [RESEARCH_GENERATE_STEP, "generate"],
     [RESEARCH_DELIVER_STEP, "deliver"],
   ] as const) {
@@ -185,6 +228,10 @@ export function registerResearchSteps(
       ctx.input && typeof ctx.input === "object" && Array.isArray((ctx.input as { quotes?: unknown }).quotes)
         ? (ctx.input as ResearchFeedStageOutput)
         : undefined;
+    const enrich =
+      ctx.input && typeof ctx.input === "object" && (ctx.input as { bySymbol?: unknown }).bySymbol && typeof (ctx.input as { bySymbol?: unknown }).bySymbol === "object"
+        ? (ctx.input as ResearchEnrichStageOutput)
+        : undefined;
     structuredLog.info("researchPipelineJobs.analyze_ooda_started", {
       jobId: ctx.jobId,
       runId,
@@ -199,6 +246,7 @@ export function registerResearchSteps(
       ...(typeof params.brokerId === "string" && params.brokerId ? { brokerId: params.brokerId } : {}),
       ...(typeof params.mode === "string" && params.mode ? { mode: params.mode } : {}),
       ...(feed ? { feed } : {}),
+      ...(enrich ? { enrich } : {}),
     });
     const ideaCount = Array.isArray((report as { ideas?: unknown[] }).ideas)
       ? (report as { ideas: unknown[] }).ideas.length
