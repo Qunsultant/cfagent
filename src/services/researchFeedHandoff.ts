@@ -2,7 +2,8 @@
  * Deprecated (#6093): the process-local maps are no longer used by the J-stack
  * path. Stage outputs travel through the engine step output (durable) and the
  * types below are the hand-off contracts; the maps remain only for legacy
- * direct callers.
+ * direct callers. Superseded by the engine step outputs composed in
+ * src/workflows/researchWorkflowStageDeps.ts.
  * Issue #6063 — the feed stage's run-scoped hand-off.
  *
  * The feed step is the producer: it runs the regime/universe/quote phase and
