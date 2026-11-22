@@ -30,6 +30,14 @@ export interface JobStageSpec {
   kind: string;
   /** The registered step that executes it. */
   step: string;
+  /**
+   * Issue #6072 — the steps that execute this stage, in order. When
+   * present the builder runs them all on the stage's node (the
+   * goalScreen analyze stage's composition); absent, the stage runs
+   * its single `step` (every other stage). `step` stays as the legacy
+   * single step, so old stored definitions still read.
+   */
+  steps?: string[];
   /** Stage parameters, merged over the run's parameters. */
   params?: Record<string, unknown>;
   /**
@@ -270,13 +278,26 @@ export const JOB_DEFINITION_SPECS: Readonly<Record<string, JobDefinitionSpec>> =
     id: "goalScreen",
     shortId: "goalscr",
     name: "Goal screen",
-    version: 1,
+    version: 2,
     description:
-      "goalscr — the goal screen: feed → enrich → goal → store → serve → deliver. The goal leg's own definition (#5873): the analyze node is the goal dispatch (screener.goal), never the market analyze step — a goal command is a dispatch (quota charge, trade client, goal universe deps, options leg, production goal screen), not a computation expressible as a generic analyze rule set.",
+      "goalscr — the goal screen: feed → enrich → goal → store → serve → deliver. The goal leg's own definition (#5873): the analyze node is the goal composition (goal.quota → goal.plan → goal.ledgerClaim → goal.stockLeg → goal.optionsLeg → goal.assemble → goal.ledgerComplete → goal.artifacts, #6072), never the market analyze step — a goal command is a dispatch (quota charge, trade client, goal universe deps, options leg, production goal screen), not a computation expressible as a generic analyze rule set.",
     stages: [
       { kind: "feed", step: "screener.feed" },
       { kind: "enrich", step: "screener.gather" },
-      { kind: "analyze", step: "screener.goal" },
+      {
+        kind: "analyze",
+        step: "screener.goal",
+        steps: [
+          "goal.quota",
+          "goal.plan",
+          "goal.ledgerClaim",
+          "goal.stockLeg",
+          "goal.optionsLeg",
+          "goal.assemble",
+          "goal.ledgerComplete",
+          "goal.artifacts",
+        ],
+      },
       { kind: "store", step: "screener.store" },
       { kind: "serve", step: "screener.serve" },
       { kind: "deliver", step: "screener.deliver" },
@@ -392,6 +413,23 @@ function resolveStage(raw: unknown, specId: string, path: string): JobStageSpec 
   }
   const kind = text(raw.kind, `stage ${path} kind`, specId);
   const step = text(raw.step, `stage ${path} step`, specId);
+  // Issue #6072 — a stage may declare its steps (the goalScreen
+  // analyze stage's composition). A non-array, or an array with a
+  // non-string / empty entry, refuses at load time, never as a
+  // silently single-step stage; an empty array reads as absent (the
+  // builder falls back to the single `step`).
+  let steps: string[] | undefined;
+  if (raw.steps !== undefined) {
+    if (
+      !Array.isArray(raw.steps) ||
+      raw.steps.some((s) => typeof s !== "string" || !s.trim())
+    ) {
+      throw new Error(
+        `Job definition "${specId}" stage ${path} is invalid: steps must be an array of non-empty step names.`,
+      );
+    }
+    steps = raw.steps as string[];
+  }
   const children = Array.isArray(raw.children)
     ? raw.children.map((child, i) => resolveStage(child, specId, `${path}.${i}`))
     : undefined;
@@ -421,6 +459,7 @@ function resolveStage(raw: unknown, specId: string, path: string): JobStageSpec 
   return {
     kind,
     step,
+    ...(steps && steps.length > 0 ? { steps } : {}),
     ...(params ? { params } : {}),
     ...(parameters && parameters.length > 0 ? { parameters } : {}),
     ...(executionMode ? { executionMode } : {}),

@@ -367,7 +367,7 @@ describe("5175 slice 4 — no minting elsewhere", () => {
     ).toBe(2);
   });
 
-  it("P10 screen: / goalScreen: quota keys are exactly 4", () => {
+  it("P10 screen: / goalScreen: quota keys are exactly 5", () => {
     // EXCLUDED quota-charge idempotency keys (slice 3) — stability is
     // the correctness property:
     // - src/agents/screener-agent.ts:1300 —
@@ -375,10 +375,15 @@ describe("5175 slice 4 — no minting elsewhere", () => {
     // - src/services/screenInFlight.ts:57 — `screen:${userLogin}:${universe}:${startedAtMs}`
     // - src/agents/screener-agent.ts:3131, 3254 —
     //   `goalScreen:${req.idempotencyKey}`
+    // - src/services/screenerPipelineJobs.ts:638 (#6072, the goal
+    //   composition's quota step) — `goalScreen:${ctx.runId}`: the
+    //   composition is the goal run's new quota-charge site (it
+    //   replaces runGoalScreenOnEngine as the entry, which keeps its
+    //   own mint), so the count moves 4 -> 5 with this site.
     expect(
       countAll(/`(?:screen|goalScreen):\$\{/g),
       "screen:/goalScreen: templates: a new one is a new quota-key mint outside the leaf",
-    ).toBe(4);
+    ).toBe(5);
   });
 
   it("P11 research: namespaces and keys are exactly 6", () => {

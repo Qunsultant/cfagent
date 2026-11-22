@@ -1368,6 +1368,23 @@ export const MIGRATION_0079_TENANT_SLO_THRESHOLDS: DataMigration = {
   name: "0079_tenant_slo_thresholds",
   sql: d1MigrationSql(79),
 };
+
+/**
+ * Migration 0080 — the D1-resident screener task ledger's entries
+ * (#6072, #4437 slice 6d-a; renumbered from 0079 on the 2026-11-22
+ * rebase: another lane's #5425 SLO-thresholds migration landed as
+ * 0079 on main first). Creates `agent_screener_task_entries`,
+ * the key/value store behind `ScreenerTaskStore`: the ledger the
+ * goal composition's claim/complete steps write to, so a goal run's
+ * ledger survives a workflow eviction (the DO-storage ledger does
+ * not — its rows live in the evicted instance's storage). Keys carry
+ * the `screener:` namespace; values are JSON task records / task ids.
+ */
+export const MIGRATION_0080_SCREENER_TASK_ENTRIES: DataMigration = {
+  version: 80,
+  name: "0080_screener_task_entries",
+  sql: d1MigrationSql(80),
+};
 export const MIGRATION_0058_PRODUCT_VERSIONS: DataMigration = {
   version: 58,
   name: "0058_product_versions",
@@ -1613,6 +1630,7 @@ export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANC
   MIGRATION_0077_USAGE_EVENTS_MIRROR,
   MIGRATION_0078_TENANT_TURN_STEP_TIMEOUT,
   MIGRATION_0079_TENANT_SLO_THRESHOLDS,
+  MIGRATION_0080_SCREENER_TASK_ENTRIES,
 ];
 
 function splitStatements(sqlText: string): string[] {

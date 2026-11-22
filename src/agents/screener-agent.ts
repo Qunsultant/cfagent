@@ -88,6 +88,7 @@ import {
   type ScannedStock,
   type OpportunityStock,
   type PartialQuoteQualification,
+  type ScreeningResult,
   type YahooHistoryDeps,
   type YahooScreenerDeps,
   type YahooTechnicals,
@@ -168,8 +169,11 @@ import type { StockScreenDelivery } from "../workflows/stockScreenRunSpec";
 import type { StageChainConfig } from "../types";
 import type {
   GoalDrivenScreenResult,
+  GoalOptionsLegInput,
+  GoalStockLegInput,
   OptionsWorkflowDeps,
 } from "../services/goalDrivenScreen";
+import type { GoalScreenArtifactOutcome } from "../services/goalScreenReports";
 import { createStructuredLogger } from "../observability/structuredLogger";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
 
@@ -497,6 +501,20 @@ export interface ScreenerAgentPort {
   screenServeStage(runId: string, input: ScreenerServeStageInput): Promise<ScreenerServeStageOutput>;
   screenDeliverStage(runId: string, input: ScreenerDeliverStageInput): Promise<ScreenerDeliverStageOutput>;
   runGoalScreen(req: Parameters<ScreenerAgent["runGoalScreen"]>[0]): Promise<{ task: ScreenerTask; executed: boolean; result?: GoalDrivenScreenResult }>;
+  /**
+   * Issue #6072 (#4437 slice 6d-a) — the goal composition's production
+   * bindings: the quota charge (the DO-SQLite quota counters live
+   * here, not in D1), the two leg dispatches (their trade client /
+   * universe deps / screeners are built here, from the same private
+   * builders runGoalScreenOnEngine used), and the artifact tail (the
+   * DO-storage blob store lives here). The composition steps call
+   * these when no dep is injected; 6d-b (#6073) and 6d-c (#6074)
+   * re-point the legs onto engine nodes and remove the leg bindings.
+   */
+  chargeGoalScreenQuota(input: { userLogin: string; runId: string }): Promise<void>;
+  runGoalStockLeg(input: GoalStockLegInput): Promise<ScreeningResult>;
+  runGoalOptionsLeg(input: GoalOptionsLegInput): Promise<ScreeningResult>;
+  generateGoalScreenArtifacts(result: GoalDrivenScreenResult): Promise<GoalScreenArtifactOutcome>;
 }
 
 export interface ScreenerRunResult {
@@ -3294,6 +3312,106 @@ export class ScreenerAgent extends PortThink {
       Object.assign(out.result, artifacts);
     }
     return out;
+  }
+
+  /**
+   * Issue #6072 (#4437 slice 6d-a) — the goal composition's production
+   * bindings (see ScreenerAgentPort): the quota charge, the two leg
+   * dispatches, and the artifact tail. Each reuses the dep
+   * construction runGoalScreenOnEngine performed inline (the private
+   * builders below); the composition steps call these only when no
+   * dep is injected, so tests substitute fakes without touching
+   * production wiring. The leg bindings are transitional: 6d-b
+   * (#6073) and 6d-c (#6074) re-point the legs onto engine nodes.
+   */
+  async chargeGoalScreenQuota(input: { userLogin: string; runId: string }): Promise<void> {
+    checkAndChargeUserRequestQuota({
+      port: this.userRequestQuota(),
+      policy: this.userRequestQuotaPolicy(),
+      tenantId: input.userLogin,
+      userLogin: input.userLogin,
+      kind: "goalScreen",
+      runId: input.runId,
+      onCharge: this.quotaMetricsOnCharge(),
+    });
+  }
+
+  async runGoalStockLeg(input: GoalStockLegInput): Promise<ScreeningResult> {
+    const userLogin = input.userLogin;
+    const tradeClient = this.tradeService(userLogin, input.environment);
+    const { goalUniverseDeps } = await this.buildGoalUniverseDeps({
+      userLogin,
+      idempotencyKey: input.idempotencyKey,
+    });
+    const { optionsScreener } = await this.buildGoalOptionsLegDeps({
+      tradeClient,
+      goalUniverseDeps,
+      userLogin,
+      environment: input.environment,
+      idempotencyKey: input.idempotencyKey,
+    });
+    const { createProductionScreeningRegistry } = await import(
+      "../services/screeningRuntime"
+    );
+    const { runGoalStockLegViaWorkflow } = await import("../services/goalDrivenScreen");
+    return runGoalStockLegViaWorkflow({
+      stock: { env: this.env, agent: this },
+      registry: createProductionScreeningRegistry({ optionsScreener }),
+      plan: input.plan,
+      userLogin,
+      trigger: input.trigger,
+      idempotencyKey: input.idempotencyKey,
+      ...(input.environment ? { environment: input.environment } : {}),
+      ...(input.provider ? { provider: input.provider } : {}),
+    });
+  }
+
+  async runGoalOptionsLeg(input: GoalOptionsLegInput): Promise<ScreeningResult> {
+    const userLogin = input.userLogin;
+    const tradeClient = this.tradeService(userLogin, input.environment);
+    const { goalUniverseDeps } = await this.buildGoalUniverseDeps({
+      userLogin,
+      idempotencyKey: input.idempotencyKey,
+    });
+    const { optionsScreener, optionsWorkflow } = await this.buildGoalOptionsLegDeps({
+      tradeClient,
+      goalUniverseDeps,
+      userLogin,
+      environment: input.environment,
+      idempotencyKey: input.idempotencyKey,
+    });
+    const { createProductionScreeningRegistry } = await import(
+      "../services/screeningRuntime"
+    );
+    const { runGoalOptionsLegViaWorkflow } = await import("../services/goalDrivenScreen");
+    return runGoalOptionsLegViaWorkflow({
+      // Issue #3186: the workflow deps carry the full screener (the
+      // cast is runProductionGoalScreen's — the builder returns the
+      // screenOptions pick, production always builds the full one).
+      workflow: {
+        screener: optionsScreener as DynamicOptionsScreener,
+        ...optionsWorkflow,
+      },
+      registry: createProductionScreeningRegistry({ optionsScreener }),
+      plan: input.plan,
+      userLogin,
+      trigger: input.trigger,
+      idempotencyKey: input.idempotencyKey,
+      host: {
+        env: this.env,
+        ...(input.environment ? { requestedEnv: input.environment } : {}),
+        ...(goalUniverseDeps ? { universe: { provider: "nasdaq" } } : {}),
+      },
+    });
+  }
+
+  async generateGoalScreenArtifacts(
+    result: GoalDrivenScreenResult,
+  ): Promise<GoalScreenArtifactOutcome> {
+    const { generateAndStoreGoalScreenArtifacts } = await import(
+      "../services/goalScreenReports"
+    );
+    return generateAndStoreGoalScreenArtifacts(this.env, this.ctx.storage as any, result);
   }
 
   /**

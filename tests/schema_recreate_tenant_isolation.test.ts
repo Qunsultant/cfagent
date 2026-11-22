@@ -88,11 +88,13 @@ describe("recreate + tenant isolation (#4282 P4)", () => {
   // turn_step_timeout_ms column): 447 → 448.
   // Issue #5425 adds migration 0079 (agent_tenant_settings
   // SLO threshold columns): 448 → 450.
-    expect(first.summary.totalSteps).toBe(450);
-    expect(first.summary.executed).toBe(450);
+  // Issue #6072 adds migration 0080 (agent_screener_task_entries
+  // table): 450 → 451.
+    expect(first.summary.totalSteps).toBe(451);
+    expect(first.summary.executed).toBe(451);
     expect(first.summary.failed).toBe(0);
     expect(first.summary.skipped).toBe(0);
-    expect(first.executed).toHaveLength(450);
+    expect(first.executed).toHaveLength(451);
     expect(first.failed).toEqual([]);
     expect(first.skipped).toEqual([]);
     // Uncreatable layers are deployment facts, not changes: they are
@@ -222,7 +224,7 @@ describe("recreate + tenant isolation (#4282 P4)", () => {
     });
     // The report is truthful: everything before the failing step
     // executed, the failing step is named, everything after it is
-    // skipped — and the three counts sum to the 448 resolved steps.
+    // skipped — and the three counts sum to the 451 resolved steps.
     expect(partial.summary.failed).toBe(1);
     expect(partial.failed).toHaveLength(1);
     expect(partial.failed[0].code).toBe(UNIQUE_INDEX_CODE);
@@ -230,8 +232,8 @@ describe("recreate + tenant isolation (#4282 P4)", () => {
       partial.summary.executed +
         partial.summary.failed +
         partial.summary.skipped,
-    ).toBe(450);
-    expect(partial.summary.totalSteps).toBe(450);
+    ).toBe(451);
+    expect(partial.summary.totalSteps).toBe(451);
     // The degradation is VISIBLE, never silent: the post-run equality
     // check fails. The missing indexes are exactly the failed step's
     // index plus the indexes of the skipped steps (the run stopped in

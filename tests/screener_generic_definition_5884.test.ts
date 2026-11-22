@@ -38,7 +38,10 @@ import { ENRICH_SCREENER_STEP } from "../src/services/enrichPipelineJobs";
 import { ANALYZE_SCREENER_STEP } from "../src/services/analyzePipelineJobs";
 import { GENERATE_APPLY_STEP } from "../src/services/generatePipelineJobs";
 import { DELIVER_APPLY_STEP } from "../src/services/deliverPipelineJobs";
-import { buildScreenerJobDefinition } from "../src/services/screenerPipelineJobs";
+import {
+  buildScreenerJobDefinition,
+  GOAL_COMPOSITION_STEPS,
+} from "../src/services/screenerPipelineJobs";
 import type { WorkflowJobCommand } from "../src/workflows/workflowPorts";
 
 function listing(symbol: string) {
@@ -84,6 +87,7 @@ function goalCommand(over: Partial<WorkflowJobCommand> = {}): WorkflowJobCommand
 interface NodeView {
   kind: string;
   step: string;
+  steps: string[];
   params: Record<string, unknown>;
   shards: unknown;
 }
@@ -95,6 +99,7 @@ function nodesOf(raw: unknown): NodeView[] {
     out.push({
       kind: node.kind,
       step: node.steps?.[0]?.step,
+      steps: (node.steps ?? []).map((s: any) => s.step),
       params: node.steps?.[0]?.params ?? {},
       shards: node.processing?.shards,
     });
@@ -222,9 +227,13 @@ describe("generic definition builder (#5884)", () => {
     }
   });
 
-  it("a goal command still builds the untouched goalScreen spec", () => {
+  it("a goal command still builds the goalScreen spec (analyze node is the 6d-a composition)", () => {
     const spec = jobDefinitionSpec("goalScreen");
-    expect(spec.version).toBe(1);
+    // Issue #6072 — the goal spec is v2: the analyze node runs the
+    // goal composition (the flip's "untouched" pin ends here; the
+    // other five nodes are still the 3b bespoke steps, and no family
+    // job id rides any bespoke node).
+    expect(spec.version).toBe(2);
     const nodes = nodesOf(buildScreenerJobDefinition(goalCommand()));
     expect(nodes.map((n) => n.kind)).toEqual([
       "feed",
@@ -237,11 +246,14 @@ describe("generic definition builder (#5884)", () => {
     expect(nodes.map((n) => n.step)).toEqual([
       "screener.feed",
       "screener.gather",
-      "screener.goal",
+      "goal.quota",
       "screener.store",
       "screener.serve",
       "screener.deliver",
     ]);
+    expect(nodes.find((n) => n.kind === "analyze")?.steps).toEqual(
+      GOAL_COMPOSITION_STEPS,
+    );
     // The goal path is byte-identical to 3b: no family job ids
     // ride the bespoke nodes.
     for (const node of nodes) {
