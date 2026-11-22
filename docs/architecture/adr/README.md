@@ -52,6 +52,7 @@ PR.
 | [0032](0032-data-access-mechanism-standard.md) | Drizzle is the data-access standard; the mini-ORM is the DO standard (#3260) | Proposed |
 | [0033](0033-cross-store-consistency-contract.md) | Cross-store consistency contract: DO + D1 dual-write discipline and read-your-writes rules (#4935) | Accepted |
 | [0034](0034-cbo-api-layer.md) | CBO API layer: one security model, one catalog, one auth module (#5343) | Accepted |
+| [0035](0035-d1-first-write.md) | D1-first writes: one store, one transaction, linked by foreign key (#6101) | Accepted |
 
 **Note on ADR 0004:** the number 0004 was assigned twice — to the UX token
 architecture decision and to the screener decoupling decision. Both records

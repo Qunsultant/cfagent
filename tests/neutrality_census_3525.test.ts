@@ -927,6 +927,24 @@ function measure(): Map<string, number> {
  * added one row / one line, so this update starts at 1364/11095;
  * #5610 touched no census row.)
  * Baseline totals move 1364/11095 -> 1361/11067.
+ * Baseline update (#6076, 2026-11-22): nine CFO-lane survey
+ * snapshots land in docs/architecture/survey/ as verbatim dated
+ * records — the tables rationalization (#6056), run-logging
+ * research (#6005), J-stack fit/gap master + stock + options
+ * inventories (#3550), broker/provider-neutrality inventory
+ * (#3460), options-screening + report-scope inventories (#2528),
+ * and the stock-screen gap->issue map. The snapshots name the
+ * providers they surveyed; neutralizing those mentions would
+ * falsify the dated record, so all rows are dispositioned
+ * HISTORICAL: 23 new rows (report-scope etrade 1 / yahoo 1;
+ * screening etrade 7 / yahoo 1; neutrality etrade 67 / alpaca 10 /
+ * nasdaq 1; fit-gap etrade 21 / alpaca 10 / yahoo 7 / nasdaq 1;
+ * options etrade 11 / alpaca 4 / yahoo 1 / nasdaq 1; stock
+ * etrade 4 / alpaca 1 / yahoo 8 / nasdaq 1; gap-map etrade 24 /
+ * alpaca 4 / yahoo 18 / nasdaq 2). The HISTORICAL marker is
+ * restated 165/820 -> 188/1026.
+ * Baseline totals move 1367/11080 -> 1390/11286 (direct recount on
+ * 7d3c4259; the header's last recorded 1361/11067 was stale).
  * Baseline update (#6072, 2026-11-22): the goal-run composition's
  * options-leg binding builds the goal leg's host-dispatch input, and
  * the universe descriptor names the goal universe's provider id
@@ -934,7 +952,7 @@ function measure(): Map<string, number> {
  * already carries for the same input) — naming the provider is the
  * leg dispatch's job, so the one new line is dispositioned
  * INTEGRATION. 1 raise (screener-agent.ts nasdaq 11->12).
- * Baseline totals move 1361/11067 -> 1361/11068.
+ * Baseline totals move 1390/11286 -> 1390/11287.
  */
 const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (188 rows / 989 lines) ----
@@ -2026,7 +2044,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["docs/agents/copilot-broker-capability.md", "yahoo", 1],
   ["src/agents/orchestrator.ts", "alpaca", 1],
   ["src/config/asyncJobModes.ts", "alpaca", 1],
-  // ---- HISTORICAL (165 rows / 820 lines) ----
+  // ---- HISTORICAL (188 rows / 1026 lines) ----
   ["docs/Assessment.md", "etrade", 6],
   ["docs/Assessment.md", "yahoo", 2],
   ["docs/agents/options-report-inventory.md", "etrade", 4],
@@ -2196,6 +2214,36 @@ const BASELINE: Array<[string, string, number]> = [
   ["docs/plans/rsi-tech-plan-2026-10-20.md", "yahoo", 1],
   ["docs/plans/pr_3719_body.md", "alpaca", 3],
   ["docs/plans/pr_3719_body.md", "etrade", 6],
+  // #6076 HISTORICAL: dated CFO-lane survey snapshots naming the
+  // providers surveyed — tables rationalization (#6056), run-logging
+  // research (#6005), J-stack fit/gap master + stock + options
+  // inventories (#3550), broker/provider-neutrality inventory
+  // (#3460), options-screening + report-scope inventories (#2528),
+  // and the stock-screen gap->issue map. Verbatim copies;
+  // neutralizing the names would falsify the dated record.
+  ["docs/architecture/survey/2528-options-report-scope-inventory-survey.md", "etrade", 1],
+  ["docs/architecture/survey/2528-options-report-scope-inventory-survey.md", "yahoo", 1],
+  ["docs/architecture/survey/2528-options-screening-inventory-survey.md", "etrade", 7],
+  ["docs/architecture/survey/2528-options-screening-inventory-survey.md", "yahoo", 1],
+  ["docs/architecture/survey/3460-broker-provider-neutrality-inventory-survey.md", "etrade", 67],
+  ["docs/architecture/survey/3460-broker-provider-neutrality-inventory-survey.md", "alpaca", 10],
+  ["docs/architecture/survey/3460-broker-provider-neutrality-inventory-survey.md", "nasdaq", 1],
+  ["docs/architecture/survey/3550-jstack-fit-gap-inventory-survey.md", "etrade", 21],
+  ["docs/architecture/survey/3550-jstack-fit-gap-inventory-survey.md", "alpaca", 10],
+  ["docs/architecture/survey/3550-jstack-fit-gap-inventory-survey.md", "yahoo", 7],
+  ["docs/architecture/survey/3550-jstack-fit-gap-inventory-survey.md", "nasdaq", 1],
+  ["docs/architecture/survey/3550-options-screener-jstack-inventory-survey.md", "etrade", 11],
+  ["docs/architecture/survey/3550-options-screener-jstack-inventory-survey.md", "alpaca", 4],
+  ["docs/architecture/survey/3550-options-screener-jstack-inventory-survey.md", "yahoo", 1],
+  ["docs/architecture/survey/3550-options-screener-jstack-inventory-survey.md", "nasdaq", 1],
+  ["docs/architecture/survey/3550-stock-screener-jstack-inventory-survey.md", "etrade", 4],
+  ["docs/architecture/survey/3550-stock-screener-jstack-inventory-survey.md", "alpaca", 1],
+  ["docs/architecture/survey/3550-stock-screener-jstack-inventory-survey.md", "yahoo", 8],
+  ["docs/architecture/survey/3550-stock-screener-jstack-inventory-survey.md", "nasdaq", 1],
+  ["docs/architecture/survey/stock-screen-gap-issue-map-2026-11-13-survey.md", "etrade", 24],
+  ["docs/architecture/survey/stock-screen-gap-issue-map-2026-11-13-survey.md", "alpaca", 4],
+  ["docs/architecture/survey/stock-screen-gap-issue-map-2026-11-13-survey.md", "yahoo", 18],
+  ["docs/architecture/survey/stock-screen-gap-issue-map-2026-11-13-survey.md", "nasdaq", 2],
   // ---- NOT-PROVIDER (74 rows / 298 lines) ----
   ["docs/ANALYSIS_AND_EXECUTION_WORKFLOWS.md", "nasdaq", 4],
   ["docs/CLOUDFLARE_SCHEDULING_AND_ETAPI_TUNING.md", "nasdaq", 1],
