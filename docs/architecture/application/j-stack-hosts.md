@@ -195,7 +195,7 @@ The umbrella programme is **#5272** (open, CAIO-quns): "[Programme] J-stack supe
 **NOT under #5272 — stated explicitly, so no reader assumes the umbrella covers them:**
 
 - **#5586** (exactly-once edge — the claim-RPC-lands-but-its-response-is-lost edge). Parent #4438, not #5272.
-- **#3976** (cold-universe incident: `yahoo-nasdaq100-quotes` fails `FEED_UNIVERSE_MISSING` from a cold universe state) and the **#6048 family** — #6048 (feed page), #6049 (dependency graph), #6050 (schedule stage filters), #5261 (feed-chain default execution mode), #6028 (ledger stage rows). Parent #3533, not #5272.
+- **#3976** (cold-universe incident: a quotes feed job fails `FEED_UNIVERSE_MISSING` from a cold universe state — the job is named in the issue) and the **#6048 family** — #6048 (feed page), #6049 (dependency graph), #6050 (schedule stage filters), #5261 (feed-chain default execution mode), #6028 (ledger stage rows). Parent #3533, not #5272.
 - **#5989** (the settings-read door: the live global-settings loop for shared-host scheduled runs + definition-carried per-job policy). Parent #3533. Adjacent to #5490 (policy from env+settings) but a distinct build — #5490 is the resolver at every host; #5989 is the door that carries the settings to the shared host.
 - **#2614** (step retries + `waitForEvent` on the options paths) — parent #2528 (CFO-qunso). **#3955** (durable event-wait / approval-wait stage) — parent #3549. Note #5780/#5782 cover the same area generally; these two are the specific builds.
 - **#3220 / #4808** (the journal-as-spec routing, §5) — not under #5272.
