@@ -58,6 +58,28 @@ export interface JobStepResult {
 
 export type JobStepHandler = (ctx: JobStepContext) => Promise<JobStepResult>;
 
+/**
+ * Issue #5886 (#4437 slice 6d) — the coded refusal a market-only
+ * generic step fails with when its params carry a goalScreen
+ * command. A goal run executes on the goalScreen definition (its
+ * analyze node is the goal dispatch, screener.goal); the market
+ * definition's generic nodes are market-only and must never
+ * silently ignore a goal param — a goal run mis-routed onto the
+ * market chain would run the market screen, then reach the sink's
+ * goal path, which reads payload.result.goalKind from a goal
+ * envelope the generic chain never builds. The refusal fires at
+ * the step's entry, before any fetch or compute, so the run fails
+ * named instead of mis-routing.
+ */
+export const GOAL_SCREEN_ON_MARKET_CHAIN = "GOAL_SCREEN_ON_MARKET_CHAIN";
+export function refuseGoalScreenParam(params: Record<string, unknown>, step: string): void {
+  if (params.goalScreen !== undefined) {
+    throw new Error(
+      `${GOAL_SCREEN_ON_MARKET_CHAIN}: step "${step}" is a market step — it received a goalScreen param, so a goal run was mis-routed onto the market chain (#5886). Goal runs execute on the goalScreen definition; refusing rather than silently ignoring the goal.`,
+    );
+  }
+}
+
 /** The step registry: name → handler. Hosts extend it; the engine resolves through it. */
 export class JobStepRegistry {
   private readonly handlers = new Map<string, JobStepHandler>();

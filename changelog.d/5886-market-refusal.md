@@ -1,0 +1,6 @@
+### #5886: market definition refuses a goalScreen param by name
+
+- All four market-only generic steps (`feed.pull`, `enrich.screener`, `analyze.screener`, `generate.apply`) now refuse a `goalScreen` param at entry with `GOAL_SCREEN_ON_MARKET_CHAIN` (shared guard `refuseGoalScreenParam` in `src/services/jobPipelineSteps.ts`), before any fetch or compute — a goal run mis-routed onto the market chain fails named instead of silently running the market screen and reaching the sink's goal path with no goal envelope.
+- The spec-route binder's refusal of `goalScreen` on the `screener` spec (declared parameters universe + deliver only) is pinned; the definition-level property (no `goalScreen` on any market node) stays pinned in `tests/screener_generic_definition_5884.test.ts`.
+- Verified, not rebuilt: a goal run executes on the goal definition — `tests/screener_goal_definition_5873.test.ts` and the goal-leg dispatch tests in `tests/screener_cutover_4192.test.ts` pass unchanged.
+- Not built here: the engine-steps conversion of the goal runner (`runGoalScreenOnEngine` → engine nodes) — the composition's DO-owned state (task ledger, storage, ORM) is reachable from the workflow residency only through the agent stub, so the conversion decomposes into follow-up sub-issues under #5886.

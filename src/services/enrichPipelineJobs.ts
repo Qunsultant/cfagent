@@ -86,7 +86,7 @@ import type {
   JobStatusView,
 } from "./jobPipelineEngine";
 import { withSchedulePreserved } from "./jobPipelineEngine";
-import { JobStepRegistry, type JobStepContext } from "./jobPipelineSteps";
+import { JobStepRegistry, refuseGoalScreenParam, type JobStepContext } from "./jobPipelineSteps";
 
 /** The step name an enrich job's configuration references. */
 export const ENRICH_APPLY_STEP = "enrich.apply";
@@ -499,6 +499,10 @@ export function registerEnrichStep(
    * as `enrich.apply` records it.
    */
   registry.register(ENRICH_SCREENER_STEP, async (ctx: JobStepContext) => {
+    // Issue #5886 (6d): the market chain refuses a goalScreen
+    // param by name — a goal run belongs on the goalScreen
+    // definition, never on this step.
+    refuseGoalScreenParam(ctx.params, ENRICH_SCREENER_STEP);
     const { def, result, symbols } = await runEnrichStepJob(
       deps,
       ENRICH_SCREENER_STEP,
