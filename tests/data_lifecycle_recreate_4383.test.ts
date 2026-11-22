@@ -372,7 +372,7 @@ describe("recreate, tenant scope (#4383)", () => {
     expect(body.confirmRequired).toBe(true);
     expect(typeof body.previewToken).toBe("string");
     expect(body.previewToken).toHaveLength(64);
-    // D1 leg: the fresh selection (238 schema + 12 seeds). Issue #4654 adds one
+    // D1 leg: the fresh selection (239 schema + 12 seeds). Issue #4654 adds one
     // more ORM-plane entry to the catalogue, so the D1 leg skips one more.
     // Issue #5229 adds migration 0069 (agent_referral_rules expiry_period_ms
     // column): 247 → 248. Issue #5086 adds migration 0070
@@ -388,7 +388,9 @@ describe("recreate, tenant scope (#4383)", () => {
     // mirror table + 2 indexes): 257 → 260.
     // Issue #5423 adds migration 0078 (agent_tenant_settings
     // turn_step_timeout_ms column): 260 → 261.
-    expect(body.d1.selected).toHaveLength(261);
+    // Issue #6072 adds migration 0079 (agent_screener_task_entries
+    // table): 261 → 262.
+    expect(body.d1.selected).toHaveLength(262);
     expect(body.d1.skipped).toHaveLength(9);
     // Two member instances (alice, bob), each planning the fresh DO leg.
     expect(body.instances).toHaveLength(2);
@@ -459,7 +461,9 @@ describe("recreate, tenant scope (#4383)", () => {
     // table + 2 indexes): 257 → 260.
     // Issue #5423 adds migration 0078 (agent_tenant_settings
     // turn_step_timeout_ms column): 260 → 261.
-    expect(body.d1.report.executed).toHaveLength(261);
+    // Issue #6072 adds migration 0079 (agent_screener_task_entries
+    // table): 261 → 262.
+    expect(body.d1.report.executed).toHaveLength(262);
     expect(body.d1.verification.ok).toBe(true);
     expect(body.instances).toHaveLength(2);
     for (const inst of body.instances) {

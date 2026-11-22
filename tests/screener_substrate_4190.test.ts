@@ -30,6 +30,8 @@ import { InMemoryEnrichedDatasetStore } from "../src/data/inMemoryEnrichedDatase
 import { InMemoryAnalyzedDatasetStore } from "../src/data/inMemoryAnalyzedDatasetAdapter";
 import { InMemoryGeneratedDatasetStore } from "../src/data/inMemoryGeneratedDatasetAdapter";
 import { InMemoryDeliveryDatasetStore } from "../src/data/inMemoryDeliveryDatasetAdapter";
+import { InMemoryScreenerTaskStore } from "../src/data/inMemoryScreenerTaskStoreAdapter";
+import { ScreenerTaskLedger } from "../src/services/screenerTaskLedger";
 import { InMemoryIndexListStore } from "../src/data/inMemoryIndexListAdapter";
 import { InMemoryMessagingAdapter } from "../src/messaging/inMemoryMessagingAdapter";
 import type { MessagingPorts } from "../src/messaging/messagingPorts";
@@ -47,6 +49,7 @@ import { buildEnrichJobRegistry } from "../src/services/enrichJobs";
 import { buildAnalyzeJobRegistry } from "../src/services/analyzeJobs";
 import { buildGenerateJobRegistry } from "../src/services/generateJobs";
 import { buildDeliverJobRegistry } from "../src/services/deliverJobs";
+import { buildScenario } from "../src/services/goalScenarioEngine";
 import { ensureFeedPipelineJobs } from "../src/services/feedPipelineJobs";
 import { ensureEnrichPipelineJobs } from "../src/services/enrichPipelineJobs";
 import { ensureAnalyzePipelineJobs } from "../src/services/analyzePipelineJobs";
@@ -82,9 +85,45 @@ import type {
   NewsResult,
   QuoteResult,
 } from "../src/types";
+import type { ScreeningResult } from "../src/trading";
 
 const T0 = Date.parse("2026-11-12T00:00:00.000Z");
 const iso = (ms: number) => new Date(ms).toISOString();
+
+// Issue #6072 — the goal composition's leg results: the 4190 goal
+// leg runs the real composition (goal.stockLeg / goal.optionsLeg),
+// so the harness's leg fakes return the same shapes the 6072
+// suite's leg fakes do (a matched stock + a matched option
+// contract over the goal symbols).
+function stockLegResult(): ScreeningResult {
+  return {
+    assetClass: "stocks",
+    providerId: "stock-screen-workflow",
+    result: {
+      status: "matches_found",
+      totalScanned: 1,
+      totalScreened: 1,
+      matchedCount: 1,
+      filterApplied: {},
+      filterSummary: "",
+      stocks: [{ symbol: "AAPL" }],
+      scannedAt: iso(T0),
+    } as never,
+  };
+}
+
+function optionsLegResult(): ScreeningResult {
+  return {
+    assetClass: "options",
+    providerId: "options-screen-workflow",
+    result: {
+      status: "matches_found",
+      totalUnderlyingsScanned: 1,
+      matchedCount: 1,
+      contracts: [{ underlyingSymbol: "AAPL" }],
+    } as never,
+  };
+}
 
 const SYMBOLS = ["AAPL", "MSFT", "NVDA", "AMZN"];
 const PRICES: Record<string, number> = { AAPL: 150, MSFT: 300, NVDA: 180, AMZN: 200 };
@@ -242,6 +281,9 @@ async function makeHarness(opts: {
   storeReport?: ScreenerStepDeps["storeReport"];
   deliverOutcome?: ScreenerStepDeps["deliverOutcome"];
   goalRunner?: ScreenerStepDeps["goalRunner"];
+  goalStockLeg?: ScreenerStepDeps["goalStockLeg"];
+  goalOptionsLeg?: ScreenerStepDeps["goalOptionsLeg"];
+  goalQuotaCharge?: ScreenerStepDeps["goalQuotaCharge"];
 } = {}): Promise<Harness> {
   const stores = createInMemoryJobPipelineStores();
   const runStore = new InMemoryJobRunRecordStore();
@@ -269,6 +311,11 @@ async function makeHarness(opts: {
   const yahooCalls: string[] = [];
   const barsCalls: string[] = [];
   const quoteCalls: string[] = [];
+  // Issue #6072 — the goal composition's ledger: the claim step
+  // refuses by name without a D1-resident task ledger
+  // (GOAL_TASK_LEDGER_MISSING, no DO fallback), so the harness
+  // wires the in-memory store, exactly as the 6072 suite does.
+  const taskStore = new InMemoryScreenerTaskStore();
   const shardsFor = async (jobId: string) =>
     (await stores.definitions.getDefinition(jobId))?.config.processing.shards ?? [];
   const deps: ScreenerStepDeps = {
@@ -298,6 +345,15 @@ async function makeHarness(opts: {
         delivered.push({ payload, userLogin });
       }),
     ...(opts.goalRunner ? { goalRunner: opts.goalRunner } : {}),
+    goalTaskLedgerFor: () =>
+      new ScreenerTaskLedger(taskStore, { newId: () => "goal-task-4190" }),
+    ...(opts.goalQuotaCharge
+      ? { goalQuotaCharge: opts.goalQuotaCharge }
+      : {}),
+    ...(opts.goalStockLeg ? { goalStockLeg: opts.goalStockLeg } : {}),
+    ...(opts.goalOptionsLeg
+      ? { goalOptionsLeg: opts.goalOptionsLeg }
+      : {}),
   };
   const control = new JobPipelineControl({
     stores,
@@ -446,7 +502,11 @@ describe("job-definition builder (#4190)", () => {
         jobId: "goal-4190",
         shards: [{ shardId: "s0", symbols: [listing("AAPL")] }],
         goalScreen: {
-          scenario: { goalKind: "growth", direction: "long" } as any,
+          scenario: buildScenario({
+            goalKind: "directional",
+            portfolioRef: { kind: "hypothetical" },
+            constraints: {},
+          }),
           scenarioSource: "built",
           symbols: ["AAPL"],
         },
@@ -731,33 +791,38 @@ describe("engine proof — market screen (#4190)", () => {
 
 describe("engine proof — goal leg (#4190)", () => {
   it("runs the goal runner on the same six nodes, never the market runner", async () => {
-    const goalCalls: unknown[] = [];
+    const stockLegCalls: unknown[] = [];
+    const optionsLegCalls: unknown[] = [];
+    const quotaCharges: unknown[] = [];
     const h = await makeHarness({
-      goalRunner: async (req: any) => {
-        goalCalls.push(req);
-        return {
-          task: { id: "goal-task-4190" },
-          executed: true,
-          result: {
-            scenario: req.scenario,
-            success: true,
-            counts: {
-              stocksScanned: 1,
-              stocksMatched: 1,
-              optionsUnderlyingsScanned: 0,
-              optionsContractsMatched: 0,
-              hits: 0,
-            },
-            opportunities: [],
-            allStocks: [],
-          },
-        };
+      // Issue #6072 — the goal definition's analyze node is the
+      // eight-step composition now, never the single screener.goal
+      // dispatch: the goalRunner fake the old dispatch called is
+      // dead on this path. The legs the composition calls are the
+      // goalStockLeg / goalOptionsLeg deps (the agent-port methods
+      // by default); the harness records their calls, and the
+      // ledger + quota deps the claim/quota steps need ride the
+      // same harness.
+      goalQuotaCharge: async (input) => {
+        quotaCharges.push(input);
+      },
+      goalStockLeg: async (input) => {
+        stockLegCalls.push(input);
+        return stockLegResult();
+      },
+      goalOptionsLeg: async (input) => {
+        optionsLegCalls.push(input);
+        return optionsLegResult();
       },
     });
     const command = marketCommand({
       jobId: "goal-4190",
       goalScreen: {
-        scenario: { goalKind: "growth", direction: "long" } as any,
+        scenario: buildScenario({
+            goalKind: "directional",
+            portfolioRef: { kind: "hypothetical" },
+            constraints: {},
+          }),
         scenarioSource: "built",
         symbols: ["AAPL"],
       },
@@ -766,9 +831,17 @@ describe("engine proof — goal leg (#4190)", () => {
     const dispatch = await h.control.runJob("goal-4190");
     const outcome = await dispatch.completion!;
     expect(outcome.state).toBe("completed");
-    // The goal runner ran once, with the feed-derived symbols.
-    expect(goalCalls).toHaveLength(1);
-    expect((goalCalls[0] as any)?.symbols).toEqual(["AAPL"]);
+    // The composition charged quota once and ran each leg once,
+    // with the plan carrying the feed-derived symbols (the plan
+    // has no symbol list of its own — the symbols ride the
+    // options filter's underlyingSymbols).
+    expect(quotaCharges).toHaveLength(1);
+    expect(stockLegCalls).toHaveLength(1);
+    expect(optionsLegCalls).toHaveLength(1);
+    expect((stockLegCalls[0] as any)?.plan?.goalKind).toBe("directional");
+    expect(
+      (optionsLegCalls[0] as any)?.plan?.optionsFilter?.underlyingSymbols,
+    ).toEqual(["AAPL"]);
     // The market quote path never ran for a goal command.
     expect(h.yahooCalls).toEqual([]);
     // The goal store + deliver doors ran.
