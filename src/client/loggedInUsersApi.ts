@@ -36,6 +36,11 @@ export interface LoggedInUserView {
   displayLogin: string;
   identity: string | null;
   tenantIds: string[];
+  /**
+   * #6164 (F9) — active-membership ids, sorted; [] when the user holds
+   * none. Older payloads omit it; the parser defaults to [].
+   */
+  membershipIds: string[];
   /** Null for legacy sessions, which cannot be attributed to login events. */
   loginCount: number | null;
   firstLoginMs: number | null;
@@ -130,6 +135,9 @@ function parseUser(value: unknown): LoggedInUserView {
     displayLogin,
     identity: typeof value.identity === "string" ? value.identity : null,
     tenantIds: tenantIds as string[],
+    membershipIds: Array.isArray(value.membershipIds)
+      ? (value.membershipIds as unknown[]).filter((id): id is string => typeof id === "string")
+      : [],
     loginCount: typeof value.loginCount === "number" ? value.loginCount : null,
     firstLoginMs: typeof value.firstLoginMs === "number" ? value.firstLoginMs : null,
     mostRecentLoginMs: typeof value.mostRecentLoginMs === "number" ? value.mostRecentLoginMs : null,

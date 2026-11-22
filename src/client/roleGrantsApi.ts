@@ -20,6 +20,7 @@
  */
 
 import { apiFetch } from "./apiFetch";
+import { isInternalUserId } from "./identityDisplay";
 
 /** Presentation of the role-grants subset of ALL_ROLES. Server enforces. */
 export const ROLE_GRANT_ROLE_OPTIONS = ["platform-admin", "tenant-admin", "store-operator"] as const;
@@ -31,6 +32,8 @@ export interface RoleGrantInfo {
   membershipId: string;
   bindingIndex: number;
   internalUserId: string;
+  /** #6164 — grantee login resolved server-side, null when no alias exists. */
+  login?: string | null;
   /** issuer:subject from the identity binding, or null when unbound. */
   identity: string | null;
   /** Grantee email captured at grant time, or null. */
@@ -39,6 +42,8 @@ export interface RoleGrantInfo {
   role: string;
   scope: string;
   grantedBy: string;
+  /** #6164 — granter login resolved server-side, null when no alias exists. */
+  grantedByLogin?: string | null;
   grantedAtMs: number;
   revoked: boolean;
   expiresAtMs?: number;
@@ -77,12 +82,14 @@ function parseGrant(value: unknown): RoleGrantInfo {
     membershipId,
     bindingIndex,
     internalUserId,
+    login: typeof value.login === "string" ? value.login : null,
     identity: typeof value.identity === "string" ? value.identity : null,
     email: typeof value.email === "string" ? value.email : null,
     tenantId,
     role,
     scope,
     grantedBy,
+    grantedByLogin: typeof value.grantedByLogin === "string" ? value.grantedByLogin : null,
     grantedAtMs,
     revoked: value.revoked === true,
     ...(typeof value.expiresAtMs === "number" ? { expiresAtMs: value.expiresAtMs } : {}),
@@ -104,7 +111,8 @@ export async function fetchRoleGrants(): Promise<RoleGrantInfo[]> {
 }
 
 export interface GrantRoleGrantInput {
-  internalUserId: string;
+  /** #6164 (A2) — a login or an internal user id; the server resolves a login. */
+  target: string;
   role: string;
   tenantId?: string;
   email?: string;
@@ -118,10 +126,14 @@ export interface GrantRoleGrantInput {
  * is unchanged. Frozen — no new consumers.
  */
 export async function grantRoleGrant(input: GrantRoleGrantInput): Promise<{ grant?: RoleGrantInfo; alreadyGranted?: boolean; pending?: boolean; proposalId?: string }> {
+  const { target, ...rest } = input;
   const res = await apiFetch("/api/iaaa/role-grants/grant", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(input),
+    body: JSON.stringify({
+      ...(isInternalUserId(target) ? { internalUserId: target } : { login: target }),
+      ...rest,
+    }),
   });
   if (!res.ok) throw await readError(res, "Failed to grant role.");
   const body = (await res.json().catch(() => null)) as { grant?: unknown; alreadyGranted?: unknown; pending?: unknown; proposalId?: unknown } | null;

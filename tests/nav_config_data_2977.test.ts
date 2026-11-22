@@ -90,7 +90,7 @@ describe("nav-config.json shape (issue #2977)", () => {
     }
   });
 
-  it("deepLinkSurfaces: 30 surfaces, unique, pages resolve, values non-empty", () => {
+  it("deepLinkSurfaces: 31 surfaces, unique, pages resolve, values non-empty", () => {
     const ids = new Set((navData.routes as { id: string }[]).map((r) => r.id));
     const surfaces = navData.deepLinkSurfaces as {
       surface: string;
@@ -99,8 +99,9 @@ describe("nav-config.json shape (issue #2977)", () => {
     }[];
     // Issue 4682: the Marketing Hub adds the 29th surface.
     // Issue #5169: Observability adds the 30th surface (archive).
-    expect(surfaces).toHaveLength(30);
-    expect(new Set(surfaces.map((s) => s.surface)).size).toBe(30);
+    // Issue #6164: iaaa-admin-sections adds the 31st surface (iaaaSection).
+    expect(surfaces).toHaveLength(31);
+    expect(new Set(surfaces.map((s) => s.surface)).size).toBe(31);
     for (const s of surfaces) {
       if (s.page !== null) expect(ids.has(s.page)).toBe(true);
       expect(s.values.length).toBeGreaterThan(0);
@@ -128,7 +129,7 @@ describe("nav-config.json loaders (issue #2977)", () => {
     expect(Object.keys(DEEP_LINK_OVERRIDES)).toHaveLength(
       Object.keys(navData.deepLinks as Record<string, unknown>).length,
     );
-    expect(SURFACE_TAB_DEFS).toHaveLength(30); // Issue 4682: + marketing-hub. Issue #5169: + observability.
+    expect(SURFACE_TAB_DEFS).toHaveLength(31); // Issue 4682: + marketing-hub. Issue #5169: + observability. Issue #6164: + iaaa-admin-sections.
     // 5 metadata sections + sandbox menu-only section.
     const built = buildDefaultLeftNavConfig().sections;
     expect(built).toHaveLength(6);

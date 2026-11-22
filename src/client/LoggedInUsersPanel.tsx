@@ -26,7 +26,8 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { Button, EmptyState, Notice, Select, Spinner, TextInput } from "./components/ui";
+import { Button, Card, EmptyState, Flex, Notice, Select, Spinner, Stack, TextInput } from "./components/ui";
+import { Identity } from "./identityDisplay";
 import {
   fetchLoggedInUsers,
   fetchQuotaUsage,
@@ -36,7 +37,6 @@ import {
   type LoggedInUsersResponse,
   type QuotaUsageResponse,
 } from "./loggedInUsersApi";
-import "./loggedInUsersPanel.deprecated.css";
 
 export function LoggedInUsersPanel() {
   const [data, setData] = useState<LoggedInUsersResponse | null>(null);
@@ -145,10 +145,13 @@ export function LoggedInUsersPanel() {
   );
 
   return (
-    <div className="lup-panel">
+    // #6164 (A3) — retired loggedInUsersPanel.deprecated.css: layout and
+    // text come from the ui primitives only (Stack/Flex/Card + ui-meta),
+    // the ApiKeysPanel pattern. No bespoke class remains in this file.
+    <Stack gap="3">
       {/* Issue #4839 G11: the two intro paragraphs said the same thing twice —
       merged into one. */}
-      <p className="lup-desc">
+      <p className="ui-meta">
         Active sessions and per-user login history from the durable records. Each row is
         one active login session. Created = when this login happened. Last seen = its
         last activity. Expires = when it stops counting as active (last activity + 8-hour
@@ -157,15 +160,15 @@ export function LoggedInUsersPanel() {
       </p>
       {notice !== "" && <Notice tone="success">{notice}</Notice>}
       {error !== "" && <Notice tone="danger">{error}</Notice>}
-      <div className="lup-item">
-        <div className="lup-item-meta">
-          <span className="lup-item-user">Request quota</span>
-          <span className="lup-desc">
+      <Card padding="sm">
+        <Stack gap="1">
+          <strong>Request quota</strong>
+          <span className="ui-meta">
             Per-user report-run quota (issue 2842): daily 10, weekly 70, monthly 300 runs for all
             tiers, pending the CBO/owner decision. Look up a user by their screener login to
             see remaining quota and active overrides, or grant extra runs for the current window.
           </span>
-          <span className="lup-item-count">
+          <Flex gap="2" align="end" wrap>
             {/* Issue #4839 G8: visible labels, not aria-label only. */}
             <TextInput
               label="User login"
@@ -176,16 +179,16 @@ export function LoggedInUsersPanel() {
             <Button disabled={quotaLoading} onClick={() => void lookupQuota()}>
               Look up quota
             </Button>
-          </span>
+          </Flex>
           {quotaError !== "" && <Notice tone="danger">{quotaError}</Notice>}
           {quotaLoading && (
-            <div className="lup-loading">
-              <Spinner />
-            </div>
+            <Flex gap="2" align="center">
+              <Spinner size="sm" /> <span className="ui-meta">Loading quota…</span>
+            </Flex>
           )}
           {quotaData && (
             <>
-              <span className="lup-item-times">
+              <span className="ui-meta">
                 {quotaData.userLogin} · partition {quotaData.tenantPartition} · Daily:{" "}
                 {quotaData.usage.daily.usage}/{quotaData.usage.daily.limit} (remaining{" "}
                 {quotaData.usage.daily.remaining}, resets {fmtLoggedInTime(quotaData.usage.daily.resetAtMs)}) ·
@@ -194,7 +197,7 @@ export function LoggedInUsersPanel() {
                 Monthly: {quotaData.usage.monthly.usage}/{quotaData.usage.monthly.limit} (remaining{" "}
                 {quotaData.usage.monthly.remaining}, resets {fmtLoggedInTime(quotaData.usage.monthly.resetAtMs)})
               </span>
-              <span className="lup-item-count">
+              <Flex gap="2" align="end" wrap>
                 {/* Issue #4839 G8: visible labels, not aria-label only. */}
                 <Select
                   label="Override window"
@@ -220,95 +223,121 @@ export function LoggedInUsersPanel() {
                 <Button disabled={granting} onClick={() => void grant()}>
                   Grant override
                 </Button>
-              </span>
+              </Flex>
             </>
           )}
-        </div>
-      </div>
+        </Stack>
+      </Card>
       {loading && (
-        <div className="lup-loading">
-          <Spinner />
-        </div>
+        <Flex gap="2" align="center">
+          <Spinner size="sm" /> <span className="ui-meta">Loading logged-in users…</span>
+        </Flex>
       )}
       {!loading && data && data.users.length === 0 && (
         <EmptyState title="No active sessions" description="No sessions pass the active-session check right now." />
       )}
       {!loading && data && data.users.length > 0 && (
         <>
-          <ul className="lup-list">
+          <Stack gap="3">
             {data.users.map((user) => (
-              <li key={user.internalUserId ?? `legacy:${user.displayLogin}`} className="lup-item">
-                <div className="lup-item-meta">
-                  <span className="lup-item-user">{user.identity ?? user.displayLogin}</span>
-                  <span className="lup-item-tenants">
+              <Card key={user.internalUserId ?? `legacy:${user.displayLogin}`} padding="sm">
+                <Stack gap="3">
+                <Stack gap="1">
+                  {/* #6164 (F9) — the user is a login beside the internal
+                  id, and the active memberships are named. */}
+                  <strong>
+                    {user.internalUserId ? (
+                      <Identity login={user.displayLogin} id={user.internalUserId} />
+                    ) : (
+                      user.identity ?? user.displayLogin
+                    )}
+                  </strong>
+                  {/* The issuer:subject binding stays visible: it names
+                  which provider identity this login is, and the old row
+                  showed it as the user label. */}
+                  {user.internalUserId && user.identity && (
+                    <span className="ui-meta">{user.identity}</span>
+                  )}
+                  <span className="ui-meta">
                     {user.tenantIds.length > 0 ? user.tenantIds.join(", ") : "no tenant attribution"}
                   </span>
-                  <span className="lup-item-count">
+                  <span className="ui-meta">
+                    Memberships:{" "}
+                    {(user.membershipIds ?? []).length > 0 ? (
+                      <code className="ui-mono">{(user.membershipIds ?? []).join(", ")}</code>
+                    ) : (
+                      "none"
+                    )}
+                  </span>
+                  <span className="ui-meta">
                     Recorded logins: {user.loginCount === null ? "—" : String(user.loginCount)}
                   </span>
-                  <span className="lup-item-times">
+                  <span className="ui-meta">
                     First: {fmtLoggedInTime(user.firstLoginMs)} · Most recent:{" "}
                     {fmtLoggedInTime(user.mostRecentLoginMs)} · First seen:{" "}
                     {fmtLoggedInTime(user.firstSeenMs)}
                   </span>
                   {user.recentLoginMs.length > 0 && (
-                    <span className="lup-item-recent">
+                    <span className="ui-meta">
                       Recent: {user.recentLoginMs.map(fmtLoggedInTime).join(", ")}
                     </span>
                   )}
-                </div>
-                <ul className="lup-sessions">
+                </Stack>
+                <Stack gap="2">
                   {user.sessions.map((session) => (
-                    <li key={session.sessionId} className="lup-session">
-                      <span className="lup-session-id">{session.sessionId}</span>
-                      <span className="lup-session-provider">
-                        {session.provider ?? "unknown provider"}
-                      </span>
-                      <span className="lup-session-times">
-                        Created: {fmtLoggedInTime(session.createdMs)} · Last seen:{" "}
-                        {fmtLoggedInTime(session.lastSeenMs)} · Expires:{" "}
-                        {fmtLoggedInTime(session.expiresMs)}
-                      </span>
-                      {confirmingSessionId === session.sessionId ? (
-                        <div className="lup-session-actions">
-                          <span className="lup-confirm-text">
-                            Revoke this session immediately?
-                          </span>
-                          <Button
-                            disabled={revokingId === session.sessionId}
-                            onClick={() => void revoke(session.sessionId)}
-                          >
-                            Confirm revoke
-                          </Button>
-                          <Button
-                            disabled={revokingId === session.sessionId}
-                            onClick={() => setConfirmingSessionId(null)}
-                          >
-                            Cancel
-                          </Button>
-                        </div>
-                      ) : (
-                        <div className="lup-session-actions">
-                          <Button
-                            disabled={revokingId === session.sessionId}
-                            onClick={() => setConfirmingSessionId(session.sessionId)}
-                          >
-                            Revoke
-                          </Button>
-                        </div>
-                      )}
-                    </li>
+                    <Card key={session.sessionId} padding="sm">
+                      <Stack gap="1">
+                        <code className="ui-mono">{session.sessionId}</code>
+                        <span className="ui-meta">
+                          {session.provider ?? "unknown provider"}
+                        </span>
+                        <span className="ui-meta">
+                          Created: {fmtLoggedInTime(session.createdMs)} · Last seen:{" "}
+                          {fmtLoggedInTime(session.lastSeenMs)} · Expires:{" "}
+                          {fmtLoggedInTime(session.expiresMs)}
+                        </span>
+                        {confirmingSessionId === session.sessionId ? (
+                          <Flex gap="2" align="center" wrap>
+                            <strong className="ui-meta">
+                              Revoke this session immediately?
+                            </strong>
+                            <Button
+                              disabled={revokingId === session.sessionId}
+                              onClick={() => void revoke(session.sessionId)}
+                            >
+                              Confirm revoke
+                            </Button>
+                            <Button
+                              disabled={revokingId === session.sessionId}
+                              onClick={() => setConfirmingSessionId(null)}
+                            >
+                              Cancel
+                            </Button>
+                          </Flex>
+                        ) : (
+                          <Flex gap="2" align="center" wrap>
+                            <Button
+                              disabled={revokingId === session.sessionId}
+                              onClick={() => setConfirmingSessionId(session.sessionId)}
+                            >
+                              Revoke
+                            </Button>
+                          </Flex>
+                        )}
+                      </Stack>
+                    </Card>
                   ))}
-                </ul>
-              </li>
+                </Stack>
+                </Stack>
+              </Card>
             ))}
-          </ul>
-          <p className="lup-note">
+          </Stack>
+          <p className="ui-meta">
             {data.coverage.loginCountNote} {data.coverage.lastSeenNote}{" "}
             {data.coverage.firstSeenNote}
           </p>
         </>
       )}
-    </div>
+    </Stack>
   );
 }

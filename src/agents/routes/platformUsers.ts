@@ -104,7 +104,7 @@ export interface PlatformUsersRouteContext {
 export interface PlatformUserMembershipView {
   membershipId: string;
   tenantId: string;
-  roles: Array<{ role: string; scope: string }>;
+  roles: Array<{ role: string; scope: string; expiresAtMs?: number }>;
   createdAtMs: number;
   revokedAtMs?: number;
 }
@@ -119,6 +119,12 @@ export interface PlatformUserAccountView {
 
 export interface PlatformUserView {
   userLogin: string;
+  /**
+   * #6164 (A2) — the internal user id for this login, or null when no
+   * alias exists. The Users page and the grant form correlate on it;
+   * a login is never a substitute for the id.
+   */
+  internalUserId: string | null;
   tenantId: string | null;
   currentTenantId: string | null;
   currentTenantSource: CurrentTenantAuthoritySource;
@@ -140,7 +146,13 @@ function toMembershipView(membership: Membership): PlatformUserMembershipView {
   const view: PlatformUserMembershipView = {
     membershipId: membership.membershipId,
     tenantId: membership.tenantId,
-    roles: membership.roleBindings.map((b) => ({ role: b.role, scope: b.scope })),
+    // #6164 — binding expiries ride along so the Users page status
+    // uses the same active/revoked/expired rule as the Members table.
+    roles: membership.roleBindings.map((b) => ({
+      role: b.role,
+      scope: b.scope,
+      ...(b.expiresAtMs !== undefined ? { expiresAtMs: b.expiresAtMs } : {}),
+    })),
     createdAtMs: membership.createdAtMs,
   };
   if (membership.revokedAtMs !== undefined) {
@@ -188,6 +200,7 @@ async function buildUserView(
   );
   return {
     userLogin: identity.userLogin,
+    internalUserId,
     tenantId: identity.tenantId,
     currentTenantId: identity.currentTenantId,
     currentTenantSource: identity.currentTenantSource,

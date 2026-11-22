@@ -457,7 +457,7 @@ describe("4585-P06 the homes render their tabs and mount the panels (#4585)", ()
 });
 
 describe("4585-P07 nav counts move (#4585)", () => {
-  it("routes 47, navOrders 0..27, sub-menu groups 21, surfaces 30", () => {
+  it("routes 47, navOrders 0..27, sub-menu groups 21, surfaces 31", () => {
     const routes = navConfigData.routes as {
       id: string;
       navEntry?: { navOrder: number };
@@ -480,7 +480,8 @@ describe("4585-P07 nav counts move (#4585)", () => {
     expect(dataHub?.navEntry?.navOrder).toBe(25);
     expect(securityHub?.navEntry?.navOrder).toBe(26);
     expect(Object.keys(navConfigData.subMenus as Record<string, unknown>)).toHaveLength(21);
-    expect(SURFACE_TAB_DEFS).toHaveLength(30);
+    // Issue #6164: iaaa-admin-sections adds the 31st surface.
+    expect(SURFACE_TAB_DEFS).toHaveLength(31);
     const platformAdmin = SURFACE_TAB_DEFS.find((d) => d.surface === "platform-admin");
     expect([...platformAdmin!.values]).toEqual([...REMAINING_PLATFORM_ADMIN]);
   });

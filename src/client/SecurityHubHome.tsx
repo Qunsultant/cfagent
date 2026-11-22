@@ -18,7 +18,7 @@
  * Inactive views unmount (TabPanel default).
  */
 import { useCallback, useEffect, useState } from "react";
-import { Card, CardHeader, PageSection, PageShell, Tabs, TabPanel, type TabOption } from "./components/ui";
+import { Card, CardHeader, EmptyState, PageSection, PageTemplate, Tabs, TabPanel, type TabOption } from "./components/ui";
 import { IaaaAdminPanel } from "./IaaaAdminPanel";
 import { UserAdminPanel } from "./UserAdminPanel";
 import { ProfileSection } from "./ProfileSection";
@@ -99,7 +99,7 @@ export function SecurityHubHome({ userLogin, user }: SecurityHubHomeProps = {}) 
   }, []);
 
   return (
-    <PageShell
+    <PageTemplate
       title="SecurityHub"
       scopeNote="IAAA admin, users, admin access, your profile, the Policy Decision Point, the Policy Enforcement Point, the Policy Information Point, and the Policy Administration Point"
     >
@@ -114,7 +114,10 @@ export function SecurityHubHome({ userLogin, user }: SecurityHubHomeProps = {}) 
 
       <TabPanel idBase="security-hub" tabId="iaaa-admin" active={deepLink.view === "iaaa-admin"}>
         <Card>
-          <CardHeader title="IAAA Admin" subtitle="Read-only memberships, genesis & audit" />
+          {/* #6164 (F11): the page is not read-only — it grants, revokes,
+          and deactivates — so the subtitle says what it does, not what
+          it doesn't. */}
+          <CardHeader title="IAAA Admin" subtitle="Memberships, genesis & audit" />
           <IaaaAdminPanel />
         </Card>
       </TabPanel>
@@ -140,7 +143,17 @@ export function SecurityHubHome({ userLogin, user }: SecurityHubHomeProps = {}) 
       <TabPanel idBase="security-hub" tabId="profile" active={deepLink.view === "profile"}>
         <Card>
           <CardHeader title="Profile" subtitle="Your display name and phone" />
-          {userLogin ? <ProfileSection userLogin={userLogin} /> : null}
+          {/* #6164 (F12): with no signed-in login the Card used to render
+          empty — header and nothing. A signed-out visitor gets the
+          empty state instead, with the way forward. */}
+          {userLogin ? (
+            <ProfileSection userLogin={userLogin} />
+          ) : (
+            <EmptyState
+              title="Not signed in"
+              description="Sign in to view your profile."
+            />
+          )}
         </Card>
       </TabPanel>
 
@@ -172,6 +185,6 @@ export function SecurityHubHome({ userLogin, user }: SecurityHubHomeProps = {}) 
         </Card>
       </TabPanel>
       </PageSection>
-    </PageShell>
+    </PageTemplate>
   );
 }

@@ -76,6 +76,7 @@ import { requiresStepUpForAction } from "../../security/iaaaGates";
 import { evaluateRoutePep } from "../../security/pepGateway";
 import { isWiringEnabled } from "../../security/providers";
 import { lookupInternalUserIdByLogin } from "../../security/iaaaMigration";
+import { resolveLogins } from "../../security/identityDisplay";
 import {
   getServiceUserLogin,
   isLoginShaped,
@@ -567,7 +568,19 @@ async function mintTokenRoute(
 
 async function listTokensRoute(ctx: ServiceUserRouteContext): Promise<Response> {
   const tokens = await listServiceTokens(resolveTokenStore(ctx));
-  return Response.json({ ok: true, tokens });
+  // #6164 (F7) — each token carries its minter's login, resolved
+  // server-side via the alias record (null when no alias exists).
+  // The service identity itself (serviceLogin + serviceInternalUserId)
+  // already rides on the token record.
+  const kv = ctx.aliasKv ?? sessionStore(ctx.env);
+  const logins = await resolveLogins(kv, tokens.map((t) => t.createdBy));
+  return Response.json({
+    ok: true,
+    tokens: tokens.map((t) => ({
+      ...t,
+      createdByLogin: logins.get(t.createdBy) ?? null,
+    })),
+  });
 }
 
 async function rotateTokenRoute(

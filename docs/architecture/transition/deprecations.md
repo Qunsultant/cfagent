@@ -120,6 +120,15 @@ unbound, rather than silently dropping bytes to legacy DO storage.
 - Consumers at deprecation: `AgenticWalletPanel.tsx` (+ its test) use 26 selectors.
 - Deletion condition: zero consumers plus an owner decision plus a gate amendment; deletion is never part of a program slice.
 
+## 2026-11-22 — #6164 retires the four IAAA deprecated sheets (zero consumers)
+
+- Files: `src/client/iaaaAdminPanel.deprecated.css`, `src/client/loggedInUsersPanel.deprecated.css`, `src/client/roleGrantsPanel.deprecated.css`, `src/client/serviceTokensPanel.deprecated.css`
+- Date: 2026-11-22
+- Reason: Issue #6164 (sub of #945) migrated all 7 consumers to the ui primitives only (Stack/Flex/Card/Notice + `ui-meta`/`ui-mono`/`ui-danger`, the ApiKeysPanel pattern) and removed all 4 imports. No file imports any of the four sheets anymore; zero consumers. The sheets stay on disk — deletion still needs an owner decision plus a gate amendment (gitops §22); deletion is never part of a program slice.
+- Replacement: `src/client/components/ui/primitives.css` (ui-* utilities) and `src/client/tokens.css` (design tokens).
+- Consumers now: none.
+- Deletion condition: zero consumers (met) plus an owner decision plus a gate amendment; deletion is never part of a program slice.
+
 ## 2026-11-17 — S-U7 renames iaaaAdminPanel.css to iaaaAdminPanel.deprecated.css (#5178)
 
 - File: `src/client/iaaaAdminPanel.css` → `src/client/iaaaAdminPanel.deprecated.css`
