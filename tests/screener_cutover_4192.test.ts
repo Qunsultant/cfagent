@@ -22,6 +22,12 @@
 import { describe, expect, it, vi } from "vitest";
 import { createInMemoryJobPipelineStores } from "../src/data/inMemoryJobPipelineAdapter";
 import { InMemoryJobRunRecordStore } from "../src/data/inMemoryJobRunRecordAdapter";
+import { InMemoryFeedDatasetStore } from "../src/data/inMemoryFeedDatasetAdapter";
+import { InMemoryEnrichedDatasetStore } from "../src/data/inMemoryEnrichedDatasetAdapter";
+import { InMemoryAnalyzedDatasetStore } from "../src/data/inMemoryAnalyzedDatasetAdapter";
+import { InMemoryGeneratedDatasetStore } from "../src/data/inMemoryGeneratedDatasetAdapter";
+import { InMemoryDeliveryDatasetStore } from "../src/data/inMemoryDeliveryDatasetAdapter";
+import { InMemoryIndexListStore } from "../src/data/inMemoryIndexListAdapter";
 import { InMemoryMessagingAdapter } from "../src/messaging/inMemoryMessagingAdapter";
 import type { MessagingPorts } from "../src/messaging/messagingPorts";
 import { InMemoryShardJobAdapter } from "../src/data/inMemoryShardJobAdapter";
@@ -29,7 +35,23 @@ import {
   JobPipelineControl,
   jobRunRecorderFromStore,
 } from "../src/services/jobPipelineEngine";
+import { createPipelineStepRegistry } from "../src/services/enrichPipelineJobs";
+import { buildFeedJobRegistry, type FeedJobDefinition } from "../src/services/feedJobs";
+import { buildEnrichJobRegistry } from "../src/services/enrichJobs";
+import { buildAnalyzeJobRegistry } from "../src/services/analyzeJobs";
+import { buildGenerateJobRegistry } from "../src/services/generateJobs";
+import { buildDeliverJobRegistry } from "../src/services/deliverJobs";
+import { ensureFeedPipelineJobs } from "../src/services/feedPipelineJobs";
+import { ensureEnrichPipelineJobs } from "../src/services/enrichPipelineJobs";
+import { ensureAnalyzePipelineJobs } from "../src/services/analyzePipelineJobs";
+import { ensureGeneratePipelineJobs } from "../src/services/generatePipelineJobs";
+import { ensureDeliverPipelineJobs } from "../src/services/deliverPipelineJobs";
 import { createScreenerStepRegistry, type ScreenerStepDeps } from "../src/services/screenerPipelineJobs";
+import type { CanonicalReportStoreSeam } from "../src/services/canonicalReportLeg";
+import type {
+  CanonicalReportFanoutOutcome,
+  CanonicalStoreResult,
+} from "../src/services/scheduledReports";
 import { ScreenerAgent } from "../src/agents/screener-agent";
 import {
   runScreenerScreenOnEngine,
@@ -39,8 +61,13 @@ import type { ParentScreenReportInput } from "../src/workflows/workflowPorts";
 import type { WorkflowJobCommand } from "../src/workflows/workflowPorts";
 import { DEFAULT_PIPELINE_POLICY } from "../src/services/pipelinePolicy";
 import type {
+  DataProvider,
+  DataResult,
+  MarketDataResearchCompanyFundamentals,
   MarketDataResearchHistoricalBar,
   MarketDataResearchQuote,
+  NewsResult,
+  QuoteResult,
 } from "../src/types";
 
 const T0 = Date.parse("2026-11-12T00:00:00.000Z");
@@ -108,6 +135,76 @@ function listing(symbol: string) {
   };
 }
 
+// Issue #5922 (6e): the generic feed step fetches through a
+// DataProvider (the 4190 pattern) — quotes + bars recorded so
+// the restored dispatch tests can prove every symbol was
+// fetched exactly once on the generic chain.
+function fakeProvider(
+  id: DataProvider["id"],
+  quoteCalls: string[],
+  barsCalls: string[],
+): DataProvider {
+  return {
+    id,
+    name: id,
+    capabilities: ["quotes", "historicalBars", "fundamentals", "news"],
+    isConfigured: () => true,
+    getQuotesBatch: async (symbols: string[]) => {
+      quoteCalls.push(...symbols);
+      const wanted = new Set(symbols.map((s) => s.toUpperCase()));
+      const result = SYMBOLS.map((s) => quote(s)).filter((q) =>
+        wanted.has(q.symbol.toUpperCase()),
+      );
+      return { providerId: id, capability: "quotes", result } as DataResult<QuoteResult[]>;
+    },
+    getFundamentals: async (symbol: string) =>
+      ({
+        providerId: id,
+        capability: "fundamentals",
+        result: { symbol, marketCap: 1_000_000, peTrailing: 25 } as MarketDataResearchCompanyFundamentals,
+      }) as DataResult<MarketDataResearchCompanyFundamentals>,
+    getHistoricalBars: async (symbol: string) => {
+      barsCalls.push(symbol);
+      return {
+        providerId: id,
+        capability: "historicalBars",
+        result: bars(),
+      } as DataResult<MarketDataResearchHistoricalBar[]>;
+    },
+    getNews: async (symbol: string) =>
+      ({
+        providerId: id,
+        capability: "news",
+        result: [
+          {
+            headline: `${symbol} reports quarterly results`,
+            source: "Yahoo Finance",
+            publishedAt: iso(T0),
+            symbol,
+          },
+        ],
+      }) as DataResult<NewsResult>,
+  };
+}
+
+// Issue #5922 (6e): the default canonical seam stores one row
+// per generate run (the production mas_reports seam, faked) —
+// the collation's store evidence. A refusing seam (store
+// returns null) is the generic store-refusal shape.
+function storingCanonicalSeam(canonicalStored: unknown[]): CanonicalReportStoreSeam {
+  return {
+    ownerLogin: "owner",
+    store: async (input) => {
+      canonicalStored.push(input);
+      return {
+        reportId: "canonical-screener-report",
+        created: true,
+        fanout: { code: "ok" } as unknown as CanonicalReportFanoutOutcome,
+      } as CanonicalStoreResult;
+    },
+  };
+}
+
 function marketCommand(over: Partial<WorkflowJobCommand> = {}): WorkflowJobCommand {
   return {
     jobId: "screen-cutover-4192",
@@ -149,6 +246,8 @@ interface CutoverHarness {
   parentStored: ParentScreenReportInput[];
   yahooCalls: string[];
   barsCalls: string[];
+  quoteCalls: string[];
+  canonicalStored: unknown[];
 }
 
 async function makeCutoverHarness(opts: {
@@ -156,9 +255,16 @@ async function makeCutoverHarness(opts: {
   deliverOutcome?: ScreenerStepDeps["deliverOutcome"];
   goalRunner?: ScreenerStepDeps["goalRunner"];
   quoteDepsFor?: ScreenerStepDeps["quoteDepsFor"];
+  canonicalReportStore?: CanonicalReportStoreSeam | null;
 } = {}): Promise<CutoverHarness> {
   const stores = createInMemoryJobPipelineStores();
   const runStore = new InMemoryJobRunRecordStore();
+  const datasetStore = new InMemoryFeedDatasetStore();
+  const enrichedStore = new InMemoryEnrichedDatasetStore();
+  const analyzedStore = new InMemoryAnalyzedDatasetStore();
+  const generatedStore = new InMemoryGeneratedDatasetStore();
+  const deliveryStore = new InMemoryDeliveryDatasetStore();
+  const universes = new InMemoryIndexListStore();
   const messaging = new InMemoryMessagingAdapter();
   const ports: MessagingPorts = {
     producer: messaging,
@@ -174,6 +280,10 @@ async function makeCutoverHarness(opts: {
   const parentStored: ParentScreenReportInput[] = [];
   const yahooCalls: string[] = [];
   const barsCalls: string[] = [];
+  const quoteCalls: string[] = [];
+  const canonicalStored: unknown[] = [];
+  const shardsFor = async (jobId: string) =>
+    (await stores.definitions.getDefinition(jobId))?.config.processing.shards ?? [];
   const deps: ScreenerStepDeps = {
     agentFor: () => agent as never,
     quoteDepsFor:
@@ -204,14 +314,60 @@ async function makeCutoverHarness(opts: {
       }),
     ...(opts.goalRunner ? { goalRunner: opts.goalRunner } : {}),
   };
+  // Issue #5922 (6e): the market definition runs the five
+  // generic family steps, so the harness composes the shared
+  // pipeline registry (the 4190 pattern) — the bespoke
+  // registry alone cannot resolve feed.pull etc. The goal
+  // definition still rides the bespoke screener steps in the
+  // same registry.
   const control = new JobPipelineControl({
     stores,
     runRecorder: jobRunRecorderFromStore(runStore),
     publisher: ports.publisher,
-    steps: createScreenerStepRegistry(deps),
+    steps: createPipelineStepRegistry(
+      {
+        registry: buildFeedJobRegistry({}),
+        providerFor: (def: FeedJobDefinition) => fakeProvider(def.sourceId, quoteCalls, barsCalls),
+        universeStore: universes,
+        datasetStore,
+        shardsFor,
+        indexRefresh: null,
+      },
+      { registry: buildEnrichJobRegistry({}), datasetStore, enrichedStore, shardsFor },
+      { registry: buildAnalyzeJobRegistry({}), enrichedStore, analyzedStore, shardsFor },
+      {
+        registry: buildGenerateJobRegistry({}),
+        analyzedStore,
+        generatedStore,
+        canonicalReportStore:
+          opts.canonicalReportStore !== undefined
+            ? opts.canonicalReportStore
+            : storingCanonicalSeam(canonicalStored),
+        shardsFor,
+      },
+      {
+        registry: buildDeliverJobRegistry({}),
+        generatedStore,
+        deliveryStore,
+        senders: {},
+        shardsFor,
+        // Issue #5885 (6c): the flipped deliver node runs
+        // generic deliver.apply, so the harness must wire the
+        // sink — without it a deliver: true dispatch throws
+        // DELIVER_SCREENER_SINK_NOT_CONFIGURED and fails the
+        // run (the step never falls back to the bespoke path).
+        screenerDeliverOutcome: deps.deliverOutcome,
+      },
+      deps,
+    ),
     now: () => new Date(T0),
     policy: SINGLE_ATTEMPT_POLICY,
   });
+  await ensureFeedPipelineJobs(control, stores, {});
+  await ensureEnrichPipelineJobs(control, stores, {});
+  await ensureAnalyzePipelineJobs(control, stores, {});
+  await ensureGeneratePipelineJobs(control, stores, {});
+  await ensureDeliverPipelineJobs(control, stores, {});
   const shardStore = new InMemoryShardJobAdapter();
   return {
     control,
@@ -225,6 +381,8 @@ async function makeCutoverHarness(opts: {
     parentStored,
     yahooCalls,
     barsCalls,
+    quoteCalls,
+    canonicalStored,
   };
 }
 
@@ -250,24 +408,110 @@ const fakeStep = {
 };
 
 describe("dispatch switch (#4192)", () => {
-  // Issue #5884 (6b3): the dispatch tests that assert the
-  // collation MOVED to 6e (#5922) — the flip re-points the
-  // definition onto the generic chain, and the collation
-  // reads bespoke-shaped outputs, so a generic-chain run
-  // collates as "failed: Shard never reached analysis" even
-  // on success. 6e teaches the collation the generic shape
-  // and restores them there, against the generic outputs:
-  // - "dispatches a 2-shard market screen through the engine
-  //   and returns its collation" (lifecycle ReportGenerated,
-  //   coverage 4/4, stored/delivered shards, parent row +
-  //   artifact);
-  // - "a store refusal is recorded on the collation, never a
-  //   failed run" (lifecycle Completed, storeErrors per
-  //   shard; note the store leg itself is gone post-flip —
-  //   6e restores the refusal shape against the generic
-  //   canonical leg);
-  // - "deliver=false skips delivery on the collation"
-  //   (lifecycle ReportGenerated, deliveredShards empty).
+  // Issue #5922 (6e): restored against the generic chain —
+  // the collation now reads the generic output shape, so a
+  // generic-chain run collates as success with counts from
+  // the delivery payload, expected counts from the command,
+  // and store evidence from the canonical leg.
+  it("dispatches a 2-shard market screen through the engine and returns its collation", async () => {
+    const h = await makeCutoverHarness();
+    const command = marketCommand();
+    const c = await runScreenerScreenOnEngine(fakeStep, dispatchDeps(h), command);
+
+    expect(c.jobId).toBe("screen-cutover-4192");
+    expect(c.lifecycle).toBe("ReportGenerated");
+    expect(c.screenMode).toBe("deterministic");
+    expect(c.qualified).toBe(false);
+    expect(c.coverage).toEqual({ evaluated: 4, considered: 4, ratio: 1 });
+    expect(c.shards.map((s) => s.shardId)).toEqual(["s0", "s1"]);
+    for (const s of c.shards) {
+      expect(s.status).toBe("completed");
+      expect(s.stored).toBe(true);
+      expect(s.delivered).toBe(true);
+    }
+    expect(c.storedShards).toEqual(["s0", "s1"]);
+    expect(c.deliveredShards).toEqual(["s0", "s1"]);
+    // No report keys on the generic chain: the formats are
+    // inline bodies in the generated artifact, not asset keys
+    // — the collation's keys are exactly the shards' keys.
+    expect(c.reportKeys).toEqual(
+      c.shards.map((s) => s.pdfKey).filter((k): k is string => typeof k === "string"),
+    );
+    expect(c.reportKeys).toEqual([]);
+    expect(c.childRunIds).toHaveLength(2);
+    expect(c.childRunIds?.every((id) => id.startsWith("screener:"))).toBe(true);
+    expect(c.parentReport).toEqual({ stored: true, reportId: "parent-report-1" });
+
+    // The canonical leg stored one row per shard; the deliver
+    // leg delivered once per shard; every symbol was quoted
+    // exactly once through the fake provider. The bespoke
+    // feed stage never runs on the generic chain.
+    expect(h.canonicalStored).toHaveLength(2);
+    expect(h.delivered).toHaveLength(2);
+    expect([...new Set(h.quoteCalls)].sort()).toEqual(["AAPL", "AMZN", "MSFT", "NVDA"]);
+    // No bars assertion on the generic chain: the bespoke
+    // history stage fetched bars per symbol, but the generic
+    // feed job pulls quotes only — history is a separate feed
+    // job kind, not part of the screener chain.
+    expect(h.yahooCalls).toEqual([]);
+
+    // The parent canonical row was stored once, keyed by job id.
+    expect(h.parentStored).toHaveLength(1);
+    expect(h.parentStored[0]?.jobId).toBe("screen-cutover-4192");
+    expect(h.parentStored[0]?.collation.lifecycle).toBe("ReportGenerated");
+
+    // The parent row is projected into the shard-job store, so
+    // the mesh door / NLQ port read the collation from the rows.
+    const parentRow = await h.shardStore.latestJob("tenant-1", "screen-cutover-4192", "screen-cutover-4192");
+    expect(parentRow).not.toBeNull();
+    expect(JSON.parse(parentRow?.resultJson ?? "{}").lifecycle).toBe("ReportGenerated");
+    expect(JSON.parse(parentRow?.resultJson ?? "{}").shards).toHaveLength(2);
+
+    // The collation is written as an artifact on the run.
+    const view = await h.control.getJob("screen-cutover-4192");
+    const runId = view.instance?.currentRunId;
+    expect(runId).toBeTruthy();
+    const artifact = await h.stores.artifacts.getArtifact(runId!, "screener/collation");
+    expect(artifact).toEqual(c);
+
+    // The run is on the platform run-record machinery.
+    expect(h.runStore.listByJob("screen-cutover-4192")).toHaveLength(1);
+    expect(h.runStore.listByJob("screen-cutover-4192")[0]?.outcome).toBe("success");
+  });
+
+  it("a store refusal is recorded on the collation, never a failed run", async () => {
+    // Issue #5922: the store leg is the generic canonical leg
+    // now — a seam that refuses (returns no row) records a
+    // store error per shard; the screen still completes and
+    // still delivers.
+    const h = await makeCutoverHarness({
+      canonicalReportStore: {
+        ownerLogin: "owner",
+        store: async () => null,
+      },
+    });
+    const c = await runScreenerScreenOnEngine(fakeStep, dispatchDeps(h), marketCommand());
+    expect(c.lifecycle).toBe("Completed");
+    expect(c.storeErrors).toEqual({
+      s0: 'Canonical report leg failed for "screener-report" (no canonical copy stored).',
+      s1: 'Canonical report leg failed for "screener-report" (no canonical copy stored).',
+    });
+    expect(c.storedShards).toEqual([]);
+    expect(h.delivered).toHaveLength(2);
+  });
+
+  it("deliver=false skips delivery on the collation", async () => {
+    const h = await makeCutoverHarness();
+    const c = await runScreenerScreenOnEngine(
+      fakeStep,
+      dispatchDeps(h),
+      marketCommand({ deliver: false }),
+    );
+    expect(c.lifecycle).toBe("ReportGenerated");
+    expect(c.deliveredShards).toEqual([]);
+    expect(h.delivered).toHaveLength(0);
+    expect(c.storedShards).toEqual(["s0", "s1"]);
+  });
 
   it("a shard role refuses by name — no child workflows are created by the engine dispatch", async () => {
     const h = await makeCutoverHarness();

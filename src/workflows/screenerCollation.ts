@@ -382,6 +382,20 @@ function stringField(value: Record<string, unknown> | null, name: string): strin
   return typeof v === "string" && v.length > 0 ? v : undefined;
 }
 
+/**
+ * Issue #5922 (#4437 slice 6e) — the generic chain carries no
+ * per-format asset keys: the generate step renders formats as
+ * inline bodies inside the generated artifact (the canonical
+ * record holds the whole document, addressable by report id).
+ * A canonical report id is a mas_reports row id, not a blob
+ * key — /api/screener/report.pdf takes a blob key — so the
+ * collation must not fabricate a per-format key from it. The
+ * downloadable references for a generic run are the shard
+ * outcome's reportId + the generated artifact id, not pdfKey /
+ * xlsxKey / csvKey. (The per-format-download gap is filed
+ * separately; the generate step would need to persist format
+ * assets with keys.)
+ */
 function formatKey(
   output: Record<string, unknown> | null,
   format: "pdf" | "xlsx" | "csv",
@@ -403,13 +417,34 @@ function formatKey(
  * Map one shard's deepest stage-output artifact + ledger entries
  * onto its ShardOutcome. Never invents completed: a shard
  * whose screen never ran is failed, with the reason named.
+ *
+ * Issue #5922 (#4437 slice 6e) — the generic chain's deepest
+ * output (deliver.apply output = generate.apply output +
+ * delivered) carries no screenResult / expectedCount /
+ * matchedCount / servedReport. Its screen evidence is the
+ * delivery payload (6c): totalScanned + run timestamp +
+ * canonical report id. Its store evidence is the canonical
+ * leg map (per report kind). expectedCountFromCommand is the
+ * composer's count — symbols the shard was asked to consider —
+ * used only when the artifact lacks expectedCount (the bespoke
+ * artifact's own value still wins).
  */
 export function shardOutcomeFromStageOutputs(
   shardId: string,
   deepest: Record<string, unknown> | null,
   ledgerEntries: LedgerEntry[],
+  expectedCountFromCommand?: number,
 ): ShardOutcome {
-  const timestamp = stringField(deepest, "timestamp");
+  // Issue #5922: the generic delivery payload (6c) rides the
+  // generate output as `payload`; the canonical leg map rides
+  // as `canonical` (per report kind).
+  const payload = deepest?.payload as Record<string, unknown> | undefined;
+  const hasPayload = payload !== undefined && payload !== null && typeof payload === "object";
+  const generateRunId =
+    typeof deepest?.generateRunId === "string" && deepest.generateRunId.length > 0
+      ? deepest.generateRunId
+      : undefined;
+  const timestamp = stringField(deepest, "timestamp") ?? stringField(payload ?? null, "timestamp");
   const base: ShardOutcome = {
     shardId,
     status: "failed",
@@ -436,7 +471,8 @@ export function shardOutcomeFromStageOutputs(
     return { ...base, status: "failed", error: `Goal screen failed (${kind}/${outlook})${message}` };
   }
   const screenResult = deepest?.screenResult as Record<string, unknown> | undefined;
-  const hasAnalysis = screenResult !== undefined && screenResult !== null;
+  const hasAnalysis =
+    (screenResult !== undefined && screenResult !== null) || hasPayload;
   const started = deepest !== null || ledgerEntries.length > 0;
   if (!started) {
     return { ...base, status: "failed", error: "Shard never ran: no stage output and no ledger entry for this shard." };
@@ -448,15 +484,26 @@ export function shardOutcomeFromStageOutputs(
     if (worst && worst.status !== "completed") {
       return { ...base, status: shardStatusFromLedger(worst.status), error: worst.error ?? `Shard failed at ${worst.stage}.` };
     }
+    // Issue #5922: the generate node ran but produced no
+    // screener payload — the screen's output is malformed,
+    // never "never reached analysis" (the market spec always
+    // generates the screener-report kind).
+    if (generateRunId) {
+      return {
+        ...base,
+        status: "failed",
+        error: "Shard stage output malformed: generate output carries no screener delivery payload.",
+      };
+    }
     return {
       ...base,
       status: "failed",
       error: "Shard never reached analysis: the run failed before its screen executed.",
     };
   }
-  // hasAnalysis implies deepest !== null (screenResult reads
-  // deepest.screenResult), but TS cannot narrow through the
-  // aliased boolean — the guard below is the explicit proof.
+  // hasAnalysis implies deepest !== null (screenResult/payload
+  // read deepest), but TS cannot narrow through the aliased
+  // boolean — the guard below is the explicit proof.
   if (deepest === null) {
     return { ...base, status: "failed", error: "Shard never ran: no stage output and no ledger entry for this shard." };
   }
@@ -466,48 +513,92 @@ export function shardOutcomeFromStageOutputs(
   if (worst && worst.status !== "completed") {
     return { ...base, status: shardStatusFromLedger(worst.status), error: worst.error ?? `Shard failed at ${worst.stage}.` };
   }
-  const totalScanned = screenResult.totalScanned;
-  const matchedCount = screenResult.matchedCount;
-  // The stage output is persisted data, not a trusted value:
-  // counts that are not numbers mean the screen's output is
+  // Issue #5922: the counts rule is shape-aware. Bespoke
+  // outputs carry all three counts; generic outputs carry
+  // only the payload's totalScanned — matchedCount does not
+  // exist on this shape (the analyzed artifact carries no
+  // matched notion, #5825's document rule) and expectedCount
+  // rides the command when the artifact lacks it. The stage
+  // output is persisted data, not a trusted value: counts
+  // that are not numbers mean the screen's output is
   // malformed — fail the shard loudly, never complete it
   // with coerced zeros (the retired flow validated the child
   // output with asShardScreenResult the same way).
-  if (
-    typeof totalScanned !== "number" ||
-    typeof matchedCount !== "number" ||
-    typeof deepest.expectedCount !== "number"
-  ) {
+  const totalScanned = screenResult?.totalScanned ?? (hasPayload ? payload.totalScanned : undefined);
+  const matchedCount = screenResult?.matchedCount;
+  const expectedCount =
+    typeof deepest.expectedCount === "number" ? deepest.expectedCount : expectedCountFromCommand;
+  if (screenResult !== undefined && screenResult !== null) {
+    if (
+      typeof totalScanned !== "number" ||
+      typeof matchedCount !== "number" ||
+      typeof expectedCount !== "number"
+    ) {
+      return {
+        ...base,
+        status: "failed",
+        error: "Shard stage output malformed: analysis counts are not numbers.",
+      };
+    }
+  } else if (typeof totalScanned !== "number") {
     return {
       ...base,
       status: "failed",
       error: "Shard stage output malformed: analysis counts are not numbers.",
     };
   }
-  const expectedCount = deepest.expectedCount;
   const result = deepest.result as Record<string, unknown> | undefined;
+  // Issue #5922: the generic store evidence is the canonical
+  // leg for the screener-report kind — "stored"/"deduped"
+  // means the canonical row exists; "failed" means the leg
+  // refused and is recorded as the shard's store error (the
+  // run still completes: the screen ran, only the store leg
+  // refused); "not_wired" means no canonical copy, recorded
+  // as unstored with no error. The leg's reason is not in
+  // the step output (the canonical map carries statuses
+  // only), so the error names the leg, never a fabricated
+  // detail. A bespoke `stored` boolean still wins.
+  const canonical = deepest.canonical as Record<string, unknown> | undefined;
+  const canonicalStatus =
+    typeof canonical?.["screener-report"] === "string" ? (canonical["screener-report"] as string) : undefined;
+  const canonicalStored = canonicalStatus === "stored" || canonicalStatus === "deduped";
+  // A bespoke `stored` boolean still wins; otherwise the
+  // canonical leg is the evidence (a generic deepest with no
+  // canonical map carries no store evidence at all, and the
+  // field stays omitted as before).
+  const hasCanonical = canonical !== undefined && canonical !== null && typeof canonical === "object";
+  const stored =
+    typeof deepest.stored === "boolean" ? deepest.stored : hasCanonical ? canonicalStored : undefined;
+  const storeError =
+    typeof deepest.storeError === "string"
+      ? deepest.storeError
+      : canonicalStatus === "failed"
+        ? `Canonical report leg failed for "screener-report" (no canonical copy stored).`
+        : undefined;
   return {
     shardId,
     status: "completed",
     ...(timestamp ? { timestamp } : {}),
-    totalScanned,
-    expectedCount,
-    matchedCount,
+    totalScanned: totalScanned as number,
+    ...(typeof expectedCount === "number" ? { expectedCount } : {}),
+    ...(typeof matchedCount === "number" ? { matchedCount } : {}),
     ...(formatKey(deepest, "pdf") ? { pdfKey: formatKey(deepest, "pdf")! } : {}),
     ...(formatKey(deepest, "xlsx") ? { xlsxKey: formatKey(deepest, "xlsx")! } : {}),
     ...(formatKey(deepest, "csv") ? { csvKey: formatKey(deepest, "csv")! } : {}),
-    ...(typeof deepest.stored === "boolean" ? { stored: deepest.stored } : {}),
+    ...(typeof stored === "boolean" ? { stored } : {}),
     ...(typeof deepest.delivered === "boolean" ? { delivered: deepest.delivered } : {}),
-    ...(typeof deepest.storeError === "string" ? { storeError: deepest.storeError } : {}),
+    ...(storeError ? { storeError } : {}),
     ...(typeof deepest.deliverError === "string" ? { deliverError: deepest.deliverError } : {}),
     ...(stringField(deepest, "reportId") ??
       stringField(result ?? null, "reportId") ??
-      stringField(goal ?? null, "reportId")
+      stringField(goal ?? null, "reportId") ??
+      stringField(payload ?? null, "canonicalReportId")
       ? {
           reportId:
             stringField(deepest, "reportId") ??
             stringField(result ?? null, "reportId") ??
-            stringField(goal ?? null, "reportId"),
+            stringField(goal ?? null, "reportId") ??
+            stringField(payload ?? null, "canonicalReportId"),
         }
       : {}),
   };
@@ -944,7 +1035,16 @@ export async function composeScreenerCollation(
       const entry = maps.get(kind)?.[lookupKey];
       if (entry && typeof entry === "object") deepest = entry;
     }
-    const shardOutcome = shardOutcomeFromStageOutputs(shard.shardId, deepest, entries);
+    const shardOutcome = shardOutcomeFromStageOutputs(
+      shard.shardId,
+      deepest,
+      entries,
+      // Issue #5922: the generic chain's deepest output carries
+      // no expectedCount — the shard's asked-to-consider count
+      // rides the command (its explicit symbols; absent for
+      // universe shards, where the count stays unknown).
+      shard.symbols?.length,
+    );
     if (deepest === null && readErrors.size > 0 && !shardOutcome.error?.includes("never ran")) {
       // An artifact read failed and the shard has no other
       // signal: name the read failure, never a silent gap.
