@@ -1,8 +1,9 @@
 /**
  * Issue #4116 — the sweep carrier: a one-off backfill + repair
- * pass that projects this DO instance's mas_reports and
- * mas_async_jobs rows into D1 through the shared projector
- * (via postRunLedgerBestEffort, the ORM carrier's write helper).
+ * pass that projects this DO instance's mas_reports,
+ * mas_async_jobs, and — issue #6099 — job_run_records rows into
+ * D1 through the shared projector (via postRunLedgerBestEffort,
+ * the ORM carrier's write helper).
  *
  * This is the backstop for rows whose ORM + queue carriers both
  * missed them (an unconfigured tenant at write time, a failed
@@ -31,6 +32,8 @@ import { listScheduledReports } from "../../services/scheduledReports";
 import { readTenantProjectionCarriers } from "../../services/projectionCarriers";
 import { postRunLedgerBestEffort } from "../../services/runLedgerProjectionPosting";
 import { createAsyncJobPorts } from "../../data/createAsyncJobPorts";
+import { SqlJobRunRecordStore } from "../../data/doSqliteJobRunRecordAdapter";
+import { jobRunRecordNaturalKey } from "../../workflows/runLedgerQueueTransport";
 import type { SqlStorage } from "../../orm";
 import type { Env } from "../../types";
 
@@ -42,7 +45,7 @@ const structuredLog = createStructuredLogger(createObservabilitySink({}), {
 export const RUN_LEDGER_RECONCILE_LIMIT = 100;
 
 export interface RunLedgerReconcileError {
-  ledger: "reports" | "async_jobs";
+  ledger: "reports" | "async_jobs" | "job_run_records";
   naturalKey: string;
   error: string;
 }
@@ -187,6 +190,33 @@ export async function reconcileRunLedgerProjection(args: {
       result.errors.push({
         ledger: "async_jobs",
         naturalKey: row.job_id,
+        error: posted.skipped ?? "projection failed",
+      });
+    }
+  }
+
+  // Job run records (issue #6099): the DO ledger's own rows,
+  // newest-first, same per-ledger limit. The DO table carries no
+  // tenant, so the sweep attributes each row to this call's
+  // tenant — the same call-site tenant the ORM hook uses. The
+  // in-agent rows (sync module functions with no env) reach D1
+  // only through this pass: the hook cannot fire where there is
+  // no env to read the carrier config from.
+  const runRecords = new SqlJobRunRecordStore(args.sql).listRecent(limit);
+  for (const row of runRecords) {
+    result.checked += 1;
+    const posted = await postRunLedgerBestEffort(env, tenantId, {
+      ledger: "job_run_records",
+      row: { record: row, tenantId },
+    }, nowMs);
+    if (posted.projected) {
+      result.reconciled += 1;
+    } else if (posted.skipped === "already-current") {
+      result.alreadyCurrent += 1;
+    } else {
+      result.errors.push({
+        ledger: "job_run_records",
+        naturalKey: jobRunRecordNaturalKey(row),
         error: posted.skipped ?? "projection failed",
       });
     }

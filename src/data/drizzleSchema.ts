@@ -1918,6 +1918,10 @@ export const jobRunRecords = sqliteTable("job_run_records", {
   originRunId: text("origin_run_id"),
   /** Issue #5887 — the definition version the run executed (null = pre-retention row). */
   definitionVersion: integer("definition_version"),
+  /** Issue #6099 — the owning tenant of a projected row (null = engine-written, never projected). */
+  tenantId: text("tenant_id"),
+  /** Issue #6099 — when the row landed via the projector (null = engine-written). */
+  projectedAtMs: integer("projected_at_ms"),
   errorText: text("error_text"),
   detail: text("detail"),
   descriptor: text("descriptor"),

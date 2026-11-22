@@ -9,8 +9,14 @@
  *   record version+1). LWW = latest version wins.
  * - Async jobs use the adapter's conditional upsert (replay no-op,
  *   stale never overwrites newer, newer lands).
- * - Both stamp the twin link when it resolves exactly (§3 of the
- *   design doc); ambiguous or absent links stay null.
+ * - Job run records (issue #6099) use the D1 job-run-record
+ *   store's conditional upsert on the derived identity
+ *   (jobId, started, finished): insert-if-absent, plus the
+ *   null-tenant upgrade for an engine-written twin. The row IS the
+ *   twin, so no link is stamped (linkedJobRunId is always null).
+ * - Reports + async jobs stamp the twin link when it resolves
+ *   exactly (§3 of the design doc); ambiguous or absent links
+ *   stay null.
  *
  * The projector never throws for a missing store — a null adapter
  * resolves to {projected:false, skipped:"unbound"}. A store
@@ -24,12 +30,13 @@ import type { CanonicalReportRow } from "./auditReportPorts";
 import type {
   AsyncJobProjectionInput,
   JobRunRecordLister,
+  JobRunRecordProjectionInput,
   ProjectRunLedgerResult,
   ReportProjectionInput,
   RunLedgerProjector,
 } from "./runLedgerPorts";
 
-export type { AsyncJobProjectionInput, ReportProjectionInput };
+export type { AsyncJobProjectionInput, JobRunRecordProjectionInput, ReportProjectionInput };
 
 export interface RunLedgerProjectorDeps {
   /** The versioned report writer (D1AuditReportAdapter). */
@@ -43,6 +50,10 @@ export interface RunLedgerProjectorDeps {
   };
   /** The D1 job-record reader for twin-link resolution. */
   jobRecordStore: JobRunRecordLister;
+  /** Issue #6099 — the D1 job-run-record writer for the projection (D1JobRunRecordStore). */
+  projectedJobRecordStore: {
+    recordProjectedJobRunRecord(row: JobRunRecordProjectionInput, nowMs: number): Promise<boolean>;
+  };
 }
 
 const GENERATE_PREFIX = "pipeline-generate:";
@@ -151,6 +162,16 @@ export function createRunLedgerProjector(deps: RunLedgerProjectorDeps): RunLedge
       nowMs: number,
     ): Promise<ProjectRunLedgerResult> {
       const written = await deps.asyncJobStore.recordAsyncJob(input, nowMs);
+      return written
+        ? { projected: true, linkedJobRunId: null }
+        : { projected: false, skipped: "already-current", linkedJobRunId: null };
+    },
+
+    async projectJobRunRecord(
+      input: JobRunRecordProjectionInput,
+      nowMs: number,
+    ): Promise<ProjectRunLedgerResult> {
+      const written = await deps.projectedJobRecordStore.recordProjectedJobRunRecord(input, nowMs);
       return written
         ? { projected: true, linkedJobRunId: null }
         : { projected: false, skipped: "already-current", linkedJobRunId: null };

@@ -20,6 +20,7 @@ import {
   type MessageEnvelope,
 } from "../messaging/messagingPorts";
 import type { StageQueueSend } from "./stageQueueTransport";
+import type { JobRunRecord } from "../services/jobRunRecords";
 import { createStructuredLogger } from "../observability/structuredLogger";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
 
@@ -28,7 +29,38 @@ const structuredLog = createStructuredLogger(createObservabilitySink({}), {
   component: "workflows/runLedgerQueueTransport",
 });
 
-export type RunLedgerProjectLedger = "reports" | "async_jobs";
+export type RunLedgerProjectLedger = "reports" | "async_jobs" | "job_run_records";
+
+/**
+ * Issue #6099 — the job-run-record natural key: jobId | started |
+ * finished, the same `|` join `mergeLedgerRuns` uses. Split from
+ * the right (the trailing two segments are ISO timestamps, which
+ * never contain `|`); a jobId containing `|` is the one case that
+ * cannot round-trip — the parser throws on it instead of guessing.
+ */
+export function jobRunRecordNaturalKey(record: JobRunRecord): string {
+  return [record.jobId, record.started, record.finished].join("|");
+}
+
+export function parseJobRunRecordNaturalKey(
+  naturalKey: string,
+): { jobId: string; started: string; finished: string } {
+  const parts = naturalKey.split("|");
+  if (parts.length < 3) {
+    throw new Error(
+      `malformed job-run-record natural key "${naturalKey}" — expected jobId|started|finished`,
+    );
+  }
+  const finished = parts.pop() as string;
+  const started = parts.pop() as string;
+  const jobId = parts.join("|");
+  if (!jobId || !started || !finished) {
+    throw new Error(
+      `malformed job-run-record natural key "${naturalKey}" — expected jobId|started|finished`,
+    );
+  }
+  return { jobId, started, finished };
+}
 
 export interface RunLedgerProjectMessage {
   ledger: RunLedgerProjectLedger;
@@ -72,7 +104,9 @@ export function isRunLedgerProjectEnvelope(value: unknown): value is MessageEnve
   const data = m.data;
   if (!data || typeof data !== "object") return false;
   return (
-    (data["ledger"] === "reports" || data["ledger"] === "async_jobs") &&
+    (data["ledger"] === "reports" ||
+      data["ledger"] === "async_jobs" ||
+      data["ledger"] === "job_run_records") &&
     typeof data["naturalKey"] === "string" &&
     (data["naturalKey"] as string).trim() !== "" &&
     typeof data["tenantId"] === "string" &&
@@ -118,7 +152,7 @@ export async function publishRunLedgerProject(args: {
   const naturalKey = args.message?.naturalKey?.trim();
   const tenantId = args.message?.tenantId?.trim();
   const userLogin = args.message?.userLogin?.trim();
-  if (ledger !== "reports" && ledger !== "async_jobs") {
+  if (ledger !== "reports" && ledger !== "async_jobs" && ledger !== "job_run_records") {
     return { published: false, reason: "unknown run-ledger projection ledger; refusing to publish." };
   }
   if (!naturalKey) {

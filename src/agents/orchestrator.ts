@@ -185,7 +185,10 @@ import { createAsyncJobPorts } from "../data/createAsyncJobPorts";
 import {
   projectAsyncJobBestEffort,
   projectCanonicalReportBestEffort,
+  projectJobRunRecordBestEffort,
 } from "../services/runLedgerProjectionHooks";
+import { SqlJobRunRecordStore } from "../data/doSqliteJobRunRecordAdapter";
+import { parseJobRunRecordNaturalKey } from "../workflows/runLedgerQueueTransport";
 // Issue #359-01: reports + HITL routes live in src/agents/routes/reports.ts;
 // routeRequest delegates to handleReportsRoutes at the original position.
 import { handleReportsRoutes } from "./routes/reports";
@@ -1128,7 +1131,7 @@ export class OrchestratorAgent extends PortThink {
    * the row is already projected, so there is nothing to do.
    */
   async projectQueuedRunLedger(input: {
-    ledger: "reports" | "async_jobs";
+    ledger: "reports" | "async_jobs" | "job_run_records";
     naturalKey: string;
     tenantId: string;
     userLogin: string;
@@ -1151,6 +1154,31 @@ export class OrchestratorAgent extends PortThink {
       }
       if (!posted.posted) {
         throw new Error(`run-ledger projection failed for report ${input.naturalKey}: ${posted.skipped ?? "unknown"}`);
+      }
+      return { status: posted.projected ? "projected" : "already-current" };
+    }
+    if (input.ledger === "job_run_records") {
+      // Issue #6099 — the claim-check re-read: parse the natural
+      // key, find the row in this instance's DO ledger, project it
+      // with skipQueue (this IS the queue delivery). A malformed
+      // key throws — the queue core retries it into the DLQ, never
+      // a silent drop; a missing row returns "missing-row" so the
+      // caller tries the shared instance.
+      const { jobId, started, finished } = parseJobRunRecordNaturalKey(input.naturalKey);
+      const rows = new SqlJobRunRecordStore(sql).listByJob(jobId);
+      const row = rows.find((r) => r.started === started && r.finished === finished);
+      if (!row) return { status: "missing-row" };
+      const posted = await projectJobRunRecordBestEffort({
+        env: this.env,
+        row,
+        userLogin: input.userLogin,
+        skipQueue: true,
+      });
+      if (!posted) {
+        throw new Error(`run-ledger projection skipped for job run record ${input.naturalKey} (no carrier configured or store unavailable)`);
+      }
+      if (!posted.posted) {
+        throw new Error(`run-ledger projection failed for job run record ${input.naturalKey}: ${posted.skipped ?? "unknown"}`);
       }
       return { status: posted.projected ? "projected" : "already-current" };
     }

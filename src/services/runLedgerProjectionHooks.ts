@@ -19,11 +19,14 @@ import type { SqlStorage } from "../orm";
 import { readTenantProjectionCarriers } from "./projectionCarriers";
 import { postRunLedgerBestEffort, type PostRunLedgerResult } from "./runLedgerProjectionPosting";
 import { publishRunLedgerProject } from "../workflows/runLedgerQueueTransport";
+import { jobRunRecordNaturalKey } from "../workflows/runLedgerQueueTransport";
 import type {
   AsyncJobProjectionInput,
+  JobRunRecordProjectionInput,
   ReportProjectionInput,
 } from "../data/runLedgerProjection";
 import type { AsyncJobStoredRow } from "../data/asyncJobPorts";
+import type { JobRunRecord } from "./jobRunRecords";
 import type { Env } from "../types";
 
 /** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
@@ -34,10 +37,10 @@ const structuredLog = createStructuredLogger(createObservabilitySink({}), {
 async function fireCarriers(
   env: Partial<Env>,
   tenantId: string,
-  ledger: "reports" | "async_jobs",
+  ledger: "reports" | "async_jobs" | "job_run_records",
   naturalKey: string,
   userLogin: string | null,
-  input: ReportProjectionInput | AsyncJobProjectionInput,
+  input: ReportProjectionInput | AsyncJobProjectionInput | JobRunRecordProjectionInput,
   nowMs: number,
   skipQueue?: boolean,
 ): Promise<PostRunLedgerResult | null> {
@@ -66,7 +69,9 @@ async function fireCarriers(
       tenantId,
       ledger === "reports"
         ? { ledger: "reports", row: input as ReportProjectionInput }
-        : { ledger: "async_jobs", row: input as AsyncJobProjectionInput },
+        : ledger === "async_jobs"
+          ? { ledger: "async_jobs", row: input as AsyncJobProjectionInput }
+          : { ledger: "job_run_records", row: input as JobRunRecordProjectionInput },
       nowMs,
     );
   } else {
@@ -242,6 +247,50 @@ export async function projectAsyncJobBestEffort(args: {
   } catch (err) {
     structuredLog.error("runLedger.async_job_hook_failed", {
       message: "[run-ledger] async-job projection hook failed — DO write unaffected",
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  }
+}
+
+/**
+ * Issue #6099 — project a DO job_run_records row that just landed.
+ * The caller passes the stored row (the record route's just-stored
+ * row — the DO store inserts verbatim, no dedup, so the built row
+ * IS what landed). The tenant comes from the carrier call site
+ * (the DO table carries no tenant column); the queue carrier fires
+ * only when a real owning login is known — without one the row
+ * still ORM-projects and the sweep is the backstop (the async-job
+ * hook's no-login discipline, same log line).
+ *
+ * Returns the ORM post result, or null when nothing was attempted
+ * (no carrier configured). `skipQueue` is the queue consumer's
+ * re-projection flag (see the report hook).
+ */
+export async function projectJobRunRecordBestEffort(args: {
+  env: Partial<Env>;
+  row: JobRunRecord;
+  /** The owning login for the queue route, or null when unknown (queue skipped, ORM still fires). */
+  userLogin?: string | null;
+  nowMs?: number;
+  skipQueue?: boolean;
+}): Promise<PostRunLedgerResult | null> {
+  try {
+    const tenantId = resolveIaaaTenant(args.env as Env);
+    const input: JobRunRecordProjectionInput = { record: args.row, tenantId };
+    return await fireCarriers(
+      args.env,
+      tenantId,
+      "job_run_records",
+      jobRunRecordNaturalKey(args.row),
+      args.userLogin ?? null,
+      input,
+      args.nowMs ?? Date.now(),
+      args.skipQueue,
+    );
+  } catch (err) {
+    structuredLog.error("runLedger.job_run_record_hook_failed", {
+      message: "[run-ledger] job-run-record projection hook failed — DO write unaffected",
       error: err instanceof Error ? err.message : String(err),
     });
     return null;

@@ -89,13 +89,13 @@ describe("recreate + tenant isolation (#4282 P4)", () => {
   // Issue #5425 adds migration 0079 (agent_tenant_settings
   // SLO threshold columns): 448 → 450.
   // Issue #6072 adds migration 0080 (agent_screener_task_entries
-  // table): 450 → 451.
-    expect(first.summary.totalSteps).toBe(451);
-    expect(first.summary.executed).toBe(451);
+  // table) and #6099 adds migration 0081 (job_run_records
+  // tenant_id + projected_at_ms + unique identity index): 450 → 454.
+    expect(first.summary.totalSteps).toBe(454);
+    expect(first.summary.executed).toBe(454);
     expect(first.summary.failed).toBe(0);
     expect(first.summary.skipped).toBe(0);
-    expect(first.executed).toHaveLength(451);
-    expect(first.failed).toEqual([]);
+    expect(first.executed).toHaveLength(454);    expect(first.failed).toEqual([]);
     expect(first.skipped).toEqual([]);
     // Uncreatable layers are deployment facts, not changes: they are
     // listed on every run, including the no-op.
@@ -224,17 +224,15 @@ describe("recreate + tenant isolation (#4282 P4)", () => {
     });
     // The report is truthful: everything before the failing step
     // executed, the failing step is named, everything after it is
-    // skipped — and the three counts sum to the 451 resolved steps.
-    expect(partial.summary.failed).toBe(1);
+    // skipped — and the three counts sum to the 454 resolved steps.    expect(partial.summary.failed).toBe(1);
     expect(partial.failed).toHaveLength(1);
     expect(partial.failed[0].code).toBe(UNIQUE_INDEX_CODE);
     expect(
       partial.summary.executed +
         partial.summary.failed +
         partial.summary.skipped,
-    ).toBe(451);
-    expect(partial.summary.totalSteps).toBe(451);
-    // The degradation is VISIBLE, never silent: the post-run equality
+    ).toBe(454);
+    expect(partial.summary.totalSteps).toBe(454);    // The degradation is VISIBLE, never silent: the post-run equality
     // check fails. The missing indexes are exactly the failed step's
     // index plus the indexes of the skipped steps (the run stopped in
     // the index phase, so every index after the failing one was never

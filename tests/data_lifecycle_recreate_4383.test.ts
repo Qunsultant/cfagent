@@ -391,9 +391,10 @@ describe("recreate, tenant scope (#4383)", () => {
     // Issue #5425 adds migration 0079 (agent_tenant_settings
     // SLO threshold columns): 261 → 263.
     // Issue #6072 adds migration 0080 (agent_screener_task_entries
-    // table): 263 → 264.
-    expect(body.d1.selected).toHaveLength(264);
-    expect(body.d1.skipped).toHaveLength(9);
+    // table, 1 step) and #6099 adds migration 0081 (job_run_records
+    // tenant_id + projected_at_ms + unique identity index, 3 steps):
+    // 263 → 267.
+    expect(body.d1.selected).toHaveLength(267);    expect(body.d1.skipped).toHaveLength(9);
     // Two member instances (alice, bob), each planning the fresh DO leg.
     expect(body.instances).toHaveLength(2);
     for (const inst of body.instances) {
@@ -466,9 +467,10 @@ describe("recreate, tenant scope (#4383)", () => {
     // Issue #5425 adds migration 0079 (agent_tenant_settings
     // SLO threshold columns): 261 → 263.
     // Issue #6072 adds migration 0080 (agent_screener_task_entries
-    // table): 263 → 264.
-    expect(body.d1.report.executed).toHaveLength(264);
-    expect(body.d1.verification.ok).toBe(true);
+    // table, 1 step) and #6099 adds migration 0081 (job_run_records
+    // tenant_id + projected_at_ms + unique identity index, 3 steps):
+    // 263 → 267.
+    expect(body.d1.report.executed).toHaveLength(267);    expect(body.d1.verification.ok).toBe(true);
     expect(body.instances).toHaveLength(2);
     for (const inst of body.instances) {
       expect(inst.report.outcome).toBe("succeeded");

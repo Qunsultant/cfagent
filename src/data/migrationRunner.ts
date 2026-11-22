@@ -1370,6 +1370,7 @@ export const MIGRATION_0079_TENANT_SLO_THRESHOLDS: DataMigration = {
 };
 
 /**
+/**
  * Migration 0080 — the D1-resident screener task ledger's entries
  * (#6072, #4437 slice 6d-a; renumbered from 0079 on the 2026-11-22
  * rebase: another lane's #5425 SLO-thresholds migration landed as
@@ -1384,6 +1385,26 @@ export const MIGRATION_0080_SCREENER_TASK_ENTRIES: DataMigration = {
   version: 80,
   name: "0080_screener_task_entries",
   sql: d1MigrationSql(80),
+};
+/**
+ * Issue #6099 — the job_run_records projection columns + unique
+ * identity (sub-issue of #4116). Additive only; existing rows read
+ * back as NULL (the engine never had a tenant; engine rows never
+ * pass through the projector, so their projected_at_ms stays NULL
+ * — an honest absence, never a backfilled guess). The unique index
+ * on (job_id, started, finished) is the projector's conflict
+ * target: the derived D1 identity the read surfaces already use
+ * (d1: + jobId + started + finished), so a re-projection is an
+ * idempotent no-op. The table itself is NOT new (migration 0047);
+ * this migration is the projection's additive columns.
+ * Renumbered 0079 → 0080 → 0081 on rebase: main landed the #3515
+ * S5 SLO thresholds as 0079, then the #6072 screener task ledger
+ * as 0080.
+ */
+export const MIGRATION_0081_JOB_RUN_RECORDS_PROJECTION: DataMigration = {
+  version: 81,
+  name: "0081_job_run_records_projection",
+  sql: d1MigrationSql(81),
 };
 export const MIGRATION_0058_PRODUCT_VERSIONS: DataMigration = {
   version: 58,
@@ -1631,6 +1652,7 @@ export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANC
   MIGRATION_0078_TENANT_TURN_STEP_TIMEOUT,
   MIGRATION_0079_TENANT_SLO_THRESHOLDS,
   MIGRATION_0080_SCREENER_TASK_ENTRIES,
+  MIGRATION_0081_JOB_RUN_RECORDS_PROJECTION,
 ];
 
 function splitStatements(sqlText: string): string[] {

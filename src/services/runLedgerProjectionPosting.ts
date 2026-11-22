@@ -26,6 +26,7 @@ import {
 import {
   createRunLedgerProjector,
   type AsyncJobProjectionInput,
+  type JobRunRecordProjectionInput,
   type ReportProjectionInput,
 } from "../data/runLedgerProjection";
 import type { ProjectRunLedgerResult } from "../data/runLedgerPorts";
@@ -42,7 +43,8 @@ export interface PostRunLedgerResult extends ProjectRunLedgerResult {
 
 export type RunLedgerPostInput =
   | { ledger: "reports"; row: ReportProjectionInput }
-  | { ledger: "async_jobs"; row: AsyncJobProjectionInput };
+  | { ledger: "async_jobs"; row: AsyncJobProjectionInput }
+  | { ledger: "job_run_records"; row: JobRunRecordProjectionInput };
 
 export async function postRunLedgerBestEffort(
   env: Partial<Env>,
@@ -71,11 +73,18 @@ export async function postRunLedgerBestEffort(
       reportStore: audit,
       asyncJobStore: adapter,
       jobRecordStore,
+      // Issue #6099 — the same store serves both projector deps:
+      // the read side (twin-link resolution) and the projection
+      // write side (the upsert). One store, two roles, no second
+      // writer.
+      projectedJobRecordStore: jobRecordStore,
     });
     const result =
       input.ledger === "reports"
         ? await projector.projectReport(input.row, nowMs)
-        : await projector.projectAsyncJob(input.row, nowMs);
+        : input.ledger === "async_jobs"
+          ? await projector.projectAsyncJob(input.row, nowMs)
+          : await projector.projectJobRunRecord(input.row, nowMs);
     return {
       ...result,
       posted: result.projected || result.skipped === "already-current",

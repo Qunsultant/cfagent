@@ -16,14 +16,16 @@
  */
 import { type DrizzleD1Database } from "drizzle-orm/d1";
 import { createDrizzleD1Db } from "./d1QueryLogger";
-import { and, desc, eq, notInArray } from "drizzle-orm";
+import { and, desc, eq, isNull, notInArray } from "drizzle-orm";
 import { jobRunRecords } from "./drizzleSchema";
+import type { JobRunRecordProjectionInput } from "./runLedgerPorts";
 import {
   applyMigrations,
   MIGRATION_0047_JOB_RUN_RECORDS,
   MIGRATION_0072_JOB_RUN_RECORDS_RUN_KIND,
   MIGRATION_0073_JOB_RUN_RECORDS_RECENT_IDX,
   MIGRATION_0076_JOB_RUN_DEFINITION_VERSION,
+  MIGRATION_0081_JOB_RUN_RECORDS_PROJECTION,
   type MigrationDb,
 } from "./migrationRunner";
 import {
@@ -42,13 +44,14 @@ export function createD1JobRunRecordDb(d1: D1Database): JobRunRecordDb {
   return createDrizzleD1Db(d1, { schema: { jobRunRecords } });
 }
 
-/** Idempotent schema-ensure: applies migrations 0047 + 0072 + 0073 if unapplied. */
+/** Idempotent schema-ensure: applies migrations 0047 + 0072 + 0073 + 0076 + 0081 if unapplied. */
 export async function ensureJobRunRecordsSchema(db: JobRunRecordDb): Promise<number[]> {
   return applyMigrations(db as unknown as MigrationDb, [
     MIGRATION_0047_JOB_RUN_RECORDS,
     MIGRATION_0072_JOB_RUN_RECORDS_RUN_KIND,
     MIGRATION_0073_JOB_RUN_RECORDS_RECENT_IDX,
     MIGRATION_0076_JOB_RUN_DEFINITION_VERSION,
+    MIGRATION_0081_JOB_RUN_RECORDS_PROJECTION,
   ]);
 }
 
@@ -132,17 +135,84 @@ export class D1JobRunRecordStore {
     // Prune to the per-job cap: keep the newest rows by the
     // history ordering, delete the rest (the DO adapter's
     // NOT IN discipline, expressed through the query builder).
+    await this.pruneToCap(record.jobId);
+  }
+
+  /**
+   * Issue #6099 — the projector's conditional upsert for one DO job
+   * run record. The conflict target is the derived identity
+   * (job_id, started, finished) — migration 0081's unique index.
+   * Job run records are immutable once written, so there is no
+   * updated_at ordering to compare: the upsert is insert-if-absent,
+   * plus the null upgrade (a present row whose tenant_id is NULL —
+   * an engine-written row — gets its tenant + projected_at_ms
+   * filled, and nothing else; the engine row's own fields are
+   * authoritative and never overwritten by the DO twin). Returns
+   * true when the write landed (insert or null-upgrade) and false
+   * when it was a no-op (exact replay). Same meta.changes detection
+   * as the async-job adapter; same per-job cap prune as record().
+   *
+   * Broker provenance (brokerId / dataProviderId / mode /
+   * modeSource) is NOT carried: the D1 table has no columns for it,
+   * and the engine's D1 writes drop it too — the DO row keeps it.
+   */
+  async recordProjectedJobRunRecord(
+    row: JobRunRecordProjectionInput,
+    nowMs: number,
+  ): Promise<boolean> {
+    await this.ensure();
+    const record = row.record;
+    const values = {
+      system: record.system,
+      jobId: record.jobId,
+      operation: record.operation,
+      started: record.started,
+      finished: record.finished,
+      outcome: record.outcome,
+      triggeredBy: record.triggeredBy,
+      triggerText: record.trigger ?? null,
+      scheduleId: record.scheduleId ?? null,
+      asyncJobId: record.asyncJobId ?? null,
+      workflowId: record.workflowId ?? null,
+      kind: record.kind ?? null,
+      originRunId: record.originRunId ?? null,
+      definitionVersion: record.definitionVersion ?? null,
+      errorText: record.error ?? null,
+      detail: record.detail ?? null,
+      descriptor: record.descriptor ?? null,
+      artifactRefsJson: record.artifactRefs !== undefined ? JSON.stringify(record.artifactRefs) : null,
+      tenantId: row.tenantId,
+      projectedAtMs: nowMs,
+    };
+    const result = (await this.db
+      .insert(jobRunRecords)
+      .values(values)
+      .onConflictDoUpdate({
+        target: [jobRunRecords.jobId, jobRunRecords.started, jobRunRecords.finished],
+        set: { tenantId: row.tenantId, projectedAtMs: nowMs },
+        where: isNull(jobRunRecords.tenantId),
+      })) as unknown as { meta?: { changes?: number } };
+    const changes = result?.meta?.changes;
+    const written = typeof changes === "number" ? changes > 0 : true;
+    if (written) {
+      await this.pruneToCap(record.jobId);
+    }
+    return written;
+  }
+
+  /** Shared per-job cap prune (record + the projection upsert). */
+  private async pruneToCap(jobId: string): Promise<void> {
     const keep = await this.db
       .select({ id: jobRunRecords.id })
       .from(jobRunRecords)
-      .where(eq(jobRunRecords.jobId, record.jobId))
+      .where(eq(jobRunRecords.jobId, jobId))
       .orderBy(desc(jobRunRecords.started), desc(jobRunRecords.id))
       .limit(JOB_RUN_RECORDS_PER_JOB_CAP);
     const keepIds = keep.map((r) => r.id);
     if (keepIds.length > 0) {
       await this.db
         .delete(jobRunRecords)
-        .where(and(eq(jobRunRecords.jobId, record.jobId), notInArray(jobRunRecords.id, keepIds)));
+        .where(and(eq(jobRunRecords.jobId, jobId), notInArray(jobRunRecords.id, keepIds)));
     }
   }
 

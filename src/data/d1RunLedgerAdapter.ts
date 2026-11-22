@@ -19,8 +19,10 @@ import {
 } from "./drizzleSchema";
 import {
   MIGRATION_0004_AGENT_AUDIT_REPORTS,
+  MIGRATION_0047_JOB_RUN_RECORDS,
   MIGRATION_0059_RUN_LEDGER,
   MIGRATION_0060_RUN_LEDGER_OWNER,
+  MIGRATION_0081_JOB_RUN_RECORDS_PROJECTION,
   applyMigrations,
   type MigrationDb,
 } from "./migrationRunner";
@@ -46,13 +48,16 @@ export function createD1RunLedgerDb(d1: unknown) {
  * Idempotent schema-ensure: applies migration 0059 if unapplied.
  * Migration 0004 rides along because 0059 ALTERs agent_reports —
  * applyMigrations sorts by version, so ordering is by version,
- * not list order.
+ * not list order. Issue #6099 — migration 0047 rides along too:
+ * 0081 ALTERs job_run_records, so the table must exist first.
  */
 export async function ensureRunLedgerSchema(db: D1RunLedgerDb): Promise<number[]> {
   return applyMigrations(db as unknown as MigrationDb, [
     MIGRATION_0004_AGENT_AUDIT_REPORTS,
+    MIGRATION_0047_JOB_RUN_RECORDS,
     MIGRATION_0059_RUN_LEDGER,
     MIGRATION_0060_RUN_LEDGER_OWNER,
+    MIGRATION_0081_JOB_RUN_RECORDS_PROJECTION,
   ]);
 }
 

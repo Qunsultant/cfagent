@@ -167,6 +167,7 @@ import { actorGateway } from "../../services/cloudflareActorGateway";
 import type { TickerPushRecordStub } from "../../services/actorGatewayPorts";
 import { createUnifiedSchedulePorts } from "../../data/createUnifiedSchedulePorts";
 import { recordLedgerRun } from "../../services/unifiedLedger";
+import { projectJobRunRecordBestEffort } from "../../services/runLedgerProjectionHooks";
 import { buildJobRunRecord, scheduleIdToLedgerJobId, type JobRunRecordInput } from "../../services/jobRunRecords";
 import { RENEWAL_DISPATCH_CRON, RETENTION_DISPATCH_CRON } from "../../services/heartbeatDueChecks";
 import { resolveActorAttribution } from "../../security/backgroundAttribution";
@@ -1604,6 +1605,19 @@ export async function handleSchedulesRoutes(
       try {
         const store = new SqlJobRunRecordStore(ctx.agentCtx.storage.sql);
         const built = recordLedgerRun(store, body as JobRunRecordInput);
+        // Issue #6099 — project the just-stored row into D1. This
+        // route is the one hookable door: it has env, unlike the
+        // sync in-agent writers (those rows reach D1 through the
+        // sweep). The hook never throws — a projection failure
+        // never fails the record response. The queue carrier
+        // routes under the service-user login (the background
+        // attribution above); without it the queue is skipped
+        // with the named log and ORM + sweep still cover the row.
+        await projectJobRunRecordBestEffort({
+          env: ctx.env,
+          row: built,
+          userLogin: getServiceUserLogin(ctx.env),
+        });
         return Response.json({ success: true, jobId: built.jobId, scheduleId: built.scheduleId ?? null });
       } catch (err) {
         return Response.json(
