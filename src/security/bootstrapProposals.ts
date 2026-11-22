@@ -48,12 +48,15 @@
  *   caller-supplied (a traceparent) when the caller has one, else
  *   a fresh UUID minted at proposal time and recorded on every
  *   later event.
- * - Post-genesis effect note: after genesis, a platform: entry
- *   grants tenant-admin only (the genesis-closed path) — it does
- *   NOT mint a second platform admin. Platform-admin grants go
- *   through Role grants (#2688), never through this list. The UI
- *   says so; this module does not special-case it beyond
- *   preserving the entry verbatim.
+ * - Post-genesis effect note (#6191 — per-identity genesis): a
+ *   `platform:`-listed identity that has not claimed yet gains
+ *   platform-admin on its first wired login (each listed identity
+ *   claims once, per-identity, not global-once); a `platform:`
+ *   entry whose identity already holds platform-admin grants
+ *   nothing new. Platform-admin grants OUTSIDE genesis go through
+ *   Role grants (#2688), never through this list. The UI says so;
+ *   this module does not special-case it beyond preserving the
+ *   entry verbatim.
  *
  * Cloud-native but cloud-agnostic: this module is pure — no
  * Cloudflare imports, no I/O. The KV-backed store adapter takes an
@@ -62,7 +65,7 @@
  */
 
 import type { Membership } from "./authorization";
-import { parseBootstrapAdmins } from "./iaaaBootstrap";
+import { parseBootstrapListWithGenesis } from "./iaaaGithubEndToEnd";
 
 export type BootstrapProposalStatus = "proposed" | "approved" | "rejected" | "applied";
 export type BootstrapChangeAction = "add" | "remove";
@@ -72,7 +75,7 @@ export interface BootstrapProposal {
   proposalId: string;
   status: BootstrapProposalStatus;
   action: BootstrapChangeAction;
-  /** The list entry as it would appear in IAAA_BOOTSTRAP_ADMINS (may carry `platform:`). */
+  /** The list entry as it would appear in IAAA_BOOTSTRAP_ADMINS (may carry an explicit role list, e.g. `platform,tenant:`). */
   identifier: string;
   /** Required non-empty reason from the proposer. */
   reason: string;
@@ -91,29 +94,46 @@ export interface BootstrapProposal {
   applicationNote?: string;
 }
 
-const GENESIS_PREFIX = "platform:";
 const BOOTSTRAP_GRANTORS = ["system:bootstrap", "system:bootstrap-genesis"] as const;
 
 /**
- * Normalize one bootstrap list entry: trim, keep a single `platform:`
- * prefix verbatim, and require the remainder to parse as exactly one
- * valid bootstrap entry with zero rejections (parseBootstrapAdmins).
- * Returns null for anything malformed — a login, a blank, a
- * platform: prefix over a malformed inner entry.
+ * Normalize one bootstrap list entry: trim, parse the explicit role
+ * list (#6191 — `<role>[,<role>]*:<identity>`, roles `platform` /
+ * `tenant`; a plain entry keeps its current meaning, tenant-admin
+ * only), and return the canonical form. An entry WITH an explicit
+ * role list canonicalizes to roles in canonical order
+ * (platform-then-tenant) then the identity; a plain entry (no role
+ * prefix) normalizes to the identity alone — the parser defaults
+ * it to tenant, but the prefix is not written back, so a plain
+ * entry and a `tenant:` entry for the same identity stay distinct
+ * strings here (the login path's parser dedupes by identity and
+ * merges roles; this normalizer does not). Returns null for
+ * anything malformed — a login, a blank, an unknown role, a
+ * duplicate role, or a malformed identity. An unknown role is a
+ * named rejection in the parser; here it is simply un-normalizable.
  */
 export function normalizeBootstrapEntry(identifier: string): string | null {
   const trimmed = identifier.trim();
   if (trimmed === "") return null;
-  let inner = trimmed;
-  let prefix = "";
-  if (trimmed.startsWith(GENESIS_PREFIX)) {
-    prefix = GENESIS_PREFIX;
-    inner = trimmed.slice(GENESIS_PREFIX.length).trim();
-    if (inner === "") return null;
-  }
-  const parsed = parseBootstrapAdmins(inner);
+  const parsed = parseBootstrapListWithGenesis(trimmed);
   if (parsed.entries.length !== 1 || parsed.rejected.length !== 0) return null;
-  return `${prefix}${inner}`;
+  const { roles, entry } = parsed.entries[0];
+  const identity =
+    entry.kind === "internalUserId"
+      ? entry.internalUserId
+      : `${entry.providerIssuer}:${entry.providerSubject}`;
+  // Explicit role list iff the text before the first ":" is a
+  // comma-separated list of known roles (so `https://...` and
+  // `v1:...` are never read as role prefixes, as in the parser).
+  const firstColon = trimmed.indexOf(":");
+  const hasExplicitRoles =
+    firstColon !== -1 &&
+    trimmed
+      .slice(0, firstColon)
+      .split(",")
+      .map((t) => t.trim())
+      .every((t) => t === "platform" || t === "tenant");
+  return hasExplicitRoles ? `${roles.join(",")}:${identity}` : identity;
 }
 
 /** Parse an env-var list into normalized entries, deduped, order preserved. */
@@ -164,7 +184,7 @@ export function createBootstrapProposal(
     return {
       ok: false,
       code: "INVALID_IDENTIFIER",
-      error: "identifier must be a valid bootstrap list entry (UUID, derived v1: id, or issuer:subject, optionally platform: prefixed).",
+      error: "identifier must be a valid bootstrap list entry (UUID, derived v1: id, or issuer:subject, optionally with an explicit role list such as platform,tenant:).",
     };
   }
   return {

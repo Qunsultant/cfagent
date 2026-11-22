@@ -80,6 +80,22 @@ describe("normalizeBootstrapEntry", () => {
     expect(normalizeBootstrapEntry("platform:")).toBeNull();
     expect(normalizeBootstrapEntry("https://github.com:")).toBeNull();
   });
+  it("canonicalizes an explicit role list (#6191) and rejects unknown roles", () => {
+    expect(normalizeBootstrapEntry(`platform,tenant:${UUID_A}`)).toBe(
+      `platform,tenant:${UUID_A}`,
+    );
+    // Reversed order canonicalizes to platform-then-tenant.
+    expect(normalizeBootstrapEntry(`tenant,platform:${UUID_A}`)).toBe(
+      `platform,tenant:${UUID_A}`,
+    );
+    expect(normalizeBootstrapEntry(`tenant:${UUID_A}`)).toBe(`tenant:${UUID_A}`);
+    // A plain entry stays plain (the parser defaults it to tenant,
+    // but the prefix is not written back).
+    expect(normalizeBootstrapEntry(UUID_A)).toBe(UUID_A);
+    expect(normalizeBootstrapEntry(`admin:${UUID_A}`)).toBeNull();
+    expect(normalizeBootstrapEntry(`platform,admin:${UUID_A}`)).toBeNull();
+    expect(normalizeBootstrapEntry(`platform,platform:${UUID_A}`)).toBeNull();
+  });
 });
 
 describe("currentBootstrapEntries", () => {

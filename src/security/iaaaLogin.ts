@@ -561,8 +561,8 @@ export async function isPlatformBootstrapListed(
 ): Promise<boolean> {
   if (bootstrapRaw === undefined || bootstrapRaw.trim() === "") return false;
   const parsed = parseBootstrapListWithGenesis(bootstrapRaw);
-  for (const { genesis, entry } of parsed.entries) {
-    if (!genesis) continue;
+  for (const { roles, entry } of parsed.entries) {
+    if (!roles.includes("platform")) continue;
     if (entry.kind === "internalUserId") {
       if (entry.internalUserId === targetInternalUserId) return true;
     } else {

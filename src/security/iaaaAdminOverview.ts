@@ -39,17 +39,27 @@
  * - Membership/audit reads that throw (e.g. corrupt bytes, which
  *   the stores refuse to overwrite) propagate to the route,
  *   which answers 500 with a generic error and no partial data.
- * - The genesis marker is a single key per tenant
- *   (iaaa-bootstrap:platform-genesis:<tenant>); its presence
- *   means a platform-admin genesis has happened, not who holds
- *   the role — the membership list answers that.
+ * - The genesis marker is per-identity (#6191 — one key per
+ *   listed identity,
+ *   iaaa-bootstrap:platform-genesis:<tenant>:<internalUserId>,
+ *   plus the legacy single key per tenant,
+ *   iaaa-bootstrap:platform-genesis:<tenant>, in global-once
+ *   mode). Presence of the caller's own marker or of the legacy
+ *   global marker means genesis has happened — not who holds
+ *   the role: holding platform-admin via the grant path is not
+ *   a genesis signal, and KvLike has no list, so another
+ *   identity's per-identity marker is not visible here; the
+ *   membership list answers who holds the role.
  */
 
 import type { Membership } from "./authorization";
 import type { MembershipStore } from "./authorization";
 import type { AuditStore, IaaaAuditEvent } from "./iaaaAudit";
 import type { KvLike } from "./kvResilience";
-import { platformGenesisMarkerKey } from "./iaaaGithubEndToEnd";
+import {
+  platformGenesisMarkerKey,
+  platformGenesisMarkerKeyForUser,
+} from "./iaaaGithubEndToEnd";
 import { checkPlatformPermission } from "./iaaaPdpSeam";
 
 /** Max audit events returned, newest first. */
@@ -225,12 +235,26 @@ export async function buildAdminOverview(
     .slice(0, IAAA_ADMIN_OVERVIEW_LIMIT)
     .map(toEventView);
   const marker = await deps.kv.get(platformGenesisMarkerKey(deps.tenantId));
+  // #6191 — per-identity genesis: the legacy global marker alone
+  // no longer answers "has genesis happened". Genesis has happened
+  // when the legacy marker exists OR the caller's own per-identity
+  // marker exists. Holding platform-admin via the grant path is
+  // NOT a genesis signal (a grant-path admin with no marker still
+  // reads false — the membership list answers who holds the role).
+  // KvLike has no list, so another identity's per-identity marker
+  // is not visible here; that is a named gap, not a silent false
+  // negative in the other direction.
+  const ownMarker = await deps.kv.get(
+    platformGenesisMarkerKeyForUser(deps.tenantId, input.callerInternalUserId),
+  );
   return {
     allowed: true,
     tenantId: deps.tenantId,
     callerInternalUserId: input.callerInternalUserId,
     memberships,
-    genesis: { platformGenesisOccurred: marker !== null },
+    genesis: {
+      platformGenesisOccurred: marker !== null || ownMarker !== null,
+    },
     recentAuditEvents,
   };
 }

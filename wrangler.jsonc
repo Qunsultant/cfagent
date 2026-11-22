@@ -472,16 +472,20 @@
     "IAAA_GRANT_DEFAULT_EXPIRY_DAYS": "90",
     "IAAA_ENABLED_PROVIDERS": "github,google",
     // Issue #945, GitHub activation (owner-authorized, updated 2026-10-23
-    // after #1182 stable identity): bootstrap the owner by issuer:subject
-    // entries — platform: entry for the genesis platform-admin grant on the
-    // next wired login, plain entry for tenant-admin in primary (unblocks
-    // E*TRADE PDP). Replaces the retired minted-UUID entry: post-#1182
-    // logins carry derived ids, so the minted entry could never match again.
+    // after #1182 stable identity) + #6191 (2026-11-22): bootstrap the
+    // owner by issuer:subject entries — one entry per user, with the
+    // roles EXPLICIT in the entry (`platform,tenant:` grants both
+    // roles; `tenant:` or a plain entry grants tenant-admin only).
+    // Genesis is per-identity (config `genesis.oneTime` in
+    // config/sessionstore.json, default false): each listed identity
+    // claims platform-admin once on its first wired login, and a
+    // revoked-then-relisted identity claims again. The Google entry
+    // is the owner's Google login — the second live platform-admin.
     // Tenant stays at the documented
     // default "primary". Rollback is removing these two vars (or
     // setting IAAA_PDP_ENABLED to "0") and redeploying — no code
     // change; granted memberships are NOT deleted by rollback.
-    "IAAA_BOOTSTRAP_ADMINS": "platform:https://github.com:82253453,https://github.com:82253453",
+    "IAAA_BOOTSTRAP_ADMINS": "platform,tenant:https://github.com:82253453,platform,tenant:https://accounts.google.com:116080816274398642624",
     "IAAA_PDP_ENABLED": "1",
     // Issue #2800 (owner-directed, interim bootstrap): make the
     // commercial URLs work for the owner login OpenAIMP for now.

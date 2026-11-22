@@ -28,6 +28,10 @@ import {
   IAAA_AUDIT_TABLE_KEY_PREFIX,
 } from "../data/auditLogPorts";
 import { createStructuredLogger } from "../observability/structuredLogger";
+import {
+  SESSION_STORE_CONFIG,
+  SESSION_STORE_CONFIG_ERRORS,
+} from "../config/sessionStoreConfig";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
 import { ConsoleObservabilitySink } from "../observability/observabilityPorts";
 
@@ -73,15 +77,22 @@ interface StoreOp {
 }
 
 /**
- * #1760 — hard ceilings for the audit bound. A client may request
- * SMALLER caps (tests, tighter deployments) but never larger ones:
- * the bound is enforcement, not a caller preference, so a caller
+ * #1760 — ceilings for the audit bound, externalized in
+ * config/sessionstore.json (#6191). A client may request SMALLER
+ * caps (tests, tighter deployments) but never larger ones: the
+ * bound is enforcement, not a caller preference, so a caller
  * widening it would be disabling its own limit. Out-of-range or
- * missing values fall back to the ceiling.
+ * missing values fall back to the ceiling. An invalid config
+ * value fails closed to the documented default with a named
+ * error (see the config resolver); the named errors are logged
+ * once on first use, in store() below.
  */
-const AUDIT_LIVE_MAX_HARD = 2000;
-const AUDIT_SEGMENT_HARD = 2000;
-const AUDIT_SEGMENTS_HARD = 10;
+const AUDIT_LIVE_MAX = SESSION_STORE_CONFIG.audit.liveMax;
+const AUDIT_SEGMENT = SESSION_STORE_CONFIG.audit.segmentSize;
+const AUDIT_SEGMENTS = SESSION_STORE_CONFIG.audit.maxSegments;
+
+/** #6191 — the config errors are logged once, on first adapter use. */
+let sessionStoreConfigErrorsLogged = false;
 
 function clampAuditCap(requested: unknown, hard: number): number {
   return typeof requested === "number" &&
@@ -142,13 +153,16 @@ function auditEventFromInput(
 
 /**
  * The kv_store schema generation this code creates and serves
- * (ADR 0022 D-A.4). Generation 1 is the original shape — the
+ * (ADR 0022 D-A.4), externalized in config/sessionstore.json
+ * (#6191 — the value is the documented default 1; the discipline
+ * is unchanged). Generation 1 is the original shape — the
  * `kv_store` table below — recorded in the D-A.4 marker by the
  * constructor (#2432). Bump this only alongside a schema change
  * to kv_store itself, under runDoSchemaMigration discipline:
  * the marker row is the commit record for the change.
  */
-export const SESSION_STORE_SCHEMA_VERSION = 1;
+export const SESSION_STORE_SCHEMA_VERSION =
+  SESSION_STORE_CONFIG.schemaVersion;
 
 export class SessionStore extends DurableObject<Env> {
   /**
@@ -177,9 +191,32 @@ export class SessionStore extends DurableObject<Env> {
    * constructor never ran (Object.create over the prototype,
    * #1819). The resolver inside the adapter likewise reads
    * the CURRENT ctx per statement.
+   *
+   * #6191 — the first build also logs any sessionstore config
+   * errors once (the config is static, so once per process is
+   * enough): an invalid value failed closed to the documented
+   * default at import time, and the named error is surfaced
+   * here rather than silently. Test instances built via
+   * Object.create (no constructor, no env) fall back to the
+   * structured console sink, as the fetch error path does.
    */
   private store(): DoSessionStoreAdapter {
     if (!this.kv) {
+      if (!sessionStoreConfigErrorsLogged) {
+        sessionStoreConfigErrorsLogged = true;
+        for (const error of SESSION_STORE_CONFIG_ERRORS) {
+          const structuredLog = createStructuredLogger(
+            this.env
+              ? createObservabilitySink(this.env)
+              : new ConsoleObservabilitySink(),
+            { component: "security/sessionStore" },
+          );
+          structuredLog.warn("sessionStore.config_invalid", {
+            message: `[SessionStore] sessionstore config invalid: ${error}`,
+            code: "sessionstore.config.invalid",
+          });
+        }
+      }
       this.kv = new DoSessionStoreAdapter(
         () => this.ctx.storage.sql,
         SESSION_STORE_SCHEMA_VERSION,
@@ -401,9 +438,9 @@ export class SessionStore extends DurableObject<Env> {
         if (!isAuditAppendInput(input)) {
           return Response.json({ error: "invalid audit event" }, { status: 400 });
         }
-        const liveMax = clampAuditCap(body.liveMax, AUDIT_LIVE_MAX_HARD);
-        const segmentSize = clampAuditCap(body.segmentSize, AUDIT_SEGMENT_HARD);
-        const maxSegments = clampAuditCap(body.maxArchiveSegments, AUDIT_SEGMENTS_HARD);
+        const liveMax = clampAuditCap(body.liveMax, AUDIT_LIVE_MAX);
+        const segmentSize = clampAuditCap(body.segmentSize, AUDIT_SEGMENT);
+        const maxSegments = clampAuditCap(body.maxArchiveSegments, AUDIT_SEGMENTS);
         const totalCap = liveMax + maxSegments * segmentSize;
 
         // #3251 (O1) — the append-only table substrate, behind
