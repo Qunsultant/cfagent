@@ -55,7 +55,7 @@ import type {
   JobStatusView,
 } from "./jobPipelineEngine";
 import { withSchedulePreserved } from "./jobPipelineEngine";
-import { JobStepRegistry, type JobStepContext } from "./jobPipelineSteps";
+import { JobStepRegistry, refuseGoalScreenParam, type JobStepContext } from "./jobPipelineSteps";
 
 /** The step name a generate job's configuration references. */
 export const GENERATE_APPLY_STEP = "generate.apply";
@@ -286,6 +286,10 @@ export function registerGenerateStep(
   deps: GenerateStepDeps,
 ): void {
   registry.register(GENERATE_APPLY_STEP, async (ctx: JobStepContext) => {
+    // Issue #5886 (6d): the market chain refuses a goalScreen
+    // param by name — a goal run belongs on the goalScreen
+    // definition, never on this step.
+    refuseGoalScreenParam(ctx.params, GENERATE_APPLY_STEP);
     const generateJobId =
       typeof ctx.params.generateJobId === "string" ? ctx.params.generateJobId : "";
     const def = deps.registry.get(generateJobId);
