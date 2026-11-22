@@ -31,6 +31,7 @@ import {
 import { jobDefinitionSpec } from "../config/jobDefinitionCatalog";
 import { bindJobDefinitionParams } from "./jobDefinitionParamBinders";
 import { buildJobConfigFromSpec } from "./jobDefinitionSpecBuilder";
+import { putResearchFeed, type ResearchFeedStageOutput } from "./researchFeedHandoff";
 
 const structuredLog = createStructuredLogger(createObservabilitySink({}), {
   component: "services/researchPipelineJobs",
@@ -77,6 +78,14 @@ export const RESEARCH_PIPELINE_CATALOG_ENTRY: ResearchPipelineCatalogEntry = {
 };
 
 export interface ResearchStepDeps {
+  /** Issue #6063 — the feed stage: regime, universe and quotes. */
+  runFeedStage?: (input: {
+    runId: string;
+    userLogin: string;
+    trigger: "manual" | "scheduled";
+    brokerId?: string;
+    mode?: string;
+  }) => Promise<ResearchFeedStageOutput>;
   /** Execute the OODA analysis loop and return the structured ResearchReport. */
   runOodaAnalysis: (input: {
     runId: string;
@@ -86,6 +95,8 @@ export interface ResearchStepDeps {
     /** Issue #5912 — the venue/mode this run names, when it named one. */
     brokerId?: string;
     mode?: string;
+    /** Issue #6063 — the persisted feed step output, when the feed stage ran. */
+    feed?: ResearchFeedStageOutput;
   }) => Promise<ResearchReport | Record<string, unknown>>;
   /** Execute the §9 outcome evaluation pass for a run or due runs. */
   runEvaluateStage?: (input: {
@@ -104,8 +115,40 @@ export function registerResearchSteps(
   registry: JobStepRegistry,
   deps: ResearchStepDeps,
 ): JobStepRegistry {
+  registry.register(RESEARCH_FEED_STEP, async (ctx) => {
+    const params = (ctx.params ?? {}) as {
+      runId?: string;
+      userLogin?: string;
+      trigger?: "manual" | "scheduled";
+      brokerId?: string;
+      mode?: string;
+    };
+    const runId = params.runId || ctx.jobId.replace(/^research:/, "");
+    const userLogin = params.userLogin || "";
+    if (!userLogin || !deps.runFeedStage) {
+      // A host that has not wired the stage runtime keeps the pre-#6063
+      // behaviour: analyze fetches its own inputs. The engine output states
+      // that honestly instead of claiming the feed ran.
+      return {
+        output: { stage: "feed", runId, status: "not_configured" },
+        descriptor: researchArtifactKey(runId, "feed"),
+      };
+    }
+    const output = await deps.runFeedStage({
+      runId,
+      userLogin,
+      trigger: params.trigger === "scheduled" ? "scheduled" : "manual",
+      ...(params.brokerId ? { brokerId: params.brokerId } : {}),
+      ...(params.mode ? { mode: params.mode } : {}),
+    });
+    putResearchFeed(output);
+    return {
+      output,
+      descriptor: `${researchArtifactKey(runId, "feed")} (${output.quotesRetrieved}/${output.universeSize})`,
+    };
+  });
+
   for (const [stepName, stageId] of [
-    [RESEARCH_FEED_STEP, "feed"],
     [RESEARCH_ENRICH_STEP, "enrich"],
     [RESEARCH_GENERATE_STEP, "generate"],
     [RESEARCH_DELIVER_STEP, "deliver"],
@@ -138,6 +181,10 @@ export function registerResearchSteps(
     const config = resolveResearchJobConfig();
     assertResearchAopCompliance(config, { userLogin });
     const trigger = params.trigger === "scheduled" ? "scheduled" : "manual";
+    const feed =
+      ctx.input && typeof ctx.input === "object" && Array.isArray((ctx.input as { quotes?: unknown }).quotes)
+        ? (ctx.input as ResearchFeedStageOutput)
+        : undefined;
     structuredLog.info("researchPipelineJobs.analyze_ooda_started", {
       jobId: ctx.jobId,
       runId,
@@ -151,6 +198,7 @@ export function registerResearchSteps(
       datasetAsOf: params.datasetAsOf ?? null,
       ...(typeof params.brokerId === "string" && params.brokerId ? { brokerId: params.brokerId } : {}),
       ...(typeof params.mode === "string" && params.mode ? { mode: params.mode } : {}),
+      ...(feed ? { feed } : {}),
     });
     const ideaCount = Array.isArray((report as { ideas?: unknown[] }).ideas)
       ? (report as { ideas: unknown[] }).ideas.length
