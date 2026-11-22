@@ -194,8 +194,12 @@ describe("screener + research behavior (extraction #378)", () => {
     expect((res as Response).status).toBe(200);
     // Issue #5911 — the dispatched run id is handed to the pipeline, so the
     // report cannot mint a second one.
+    // Issue #6036 — the dispatch carries the resolved venue (never an
+    // unvalidated requested string), alongside the #5911 run id.
     expect(runResearchAndPublish).toHaveBeenCalledWith("manual", "sess-9", {
       runId: expect.stringMatching(/^run:[a-z0-9]+-[a-z0-9]+$/),
+      brokerId: "alpaca",
+      mode: "paper",
     });
     expect(await (res as Response).json()).toMatchObject({
       success: true,
@@ -218,6 +222,8 @@ describe("screener + research behavior (extraction #378)", () => {
     expect((res as Response).status).toBe(200);
     expect(runResearchAndPublish).toHaveBeenCalledWith("manual", "trader42", {
       runId: expect.stringMatching(/^run:[a-z0-9]+-[a-z0-9]+$/),
+      brokerId: "alpaca",
+      mode: "paper",
     });
   });
 

@@ -46,6 +46,7 @@ import {
   NIGHTLY_RESEARCH_RECORD_ID,
 } from "../../services/researchScheduleGuard";
 import { resolveResearchJobConfig } from "../../config/researchJobConfig";
+import { isResearchVenueRefusal, resolveResearchVenue } from "../../services/researchVenue";
 import { recordLedgerRun } from "../../services/unifiedLedger";
 import { SqlJobRunRecordStore } from "../../data/doSqliteJobRunRecordAdapter";
 import { resolveScheduledJobAlertThreshold } from "../../config/scheduledJobAlert";
@@ -605,18 +606,26 @@ export async function handleScreenerResearchRoutes(
         brokerId?: string;
         mode?: string;
       };
-      const selection =
-        (typeof selectionBody.brokerId === "string" && selectionBody.brokerId.trim()) ||
-        (typeof selectionBody.mode === "string" && selectionBody.mode.trim())
-          ? {
-              ...(typeof selectionBody.brokerId === "string" && selectionBody.brokerId.trim()
-                ? { brokerId: selectionBody.brokerId.trim() }
-                : {}),
-              ...(typeof selectionBody.mode === "string" && selectionBody.mode.trim()
-                ? { mode: selectionBody.mode.trim() }
-                : {}),
-            }
-          : undefined;
+      // Issue #6036 — the venue is resolved (and refused) here, before
+      // dispatch: a misspelt mode or an unsupported broker × mode pair
+      // comes back as a coded 400 instead of a paper run whose record
+      // claims the requested string.
+      let selection: { brokerId: string; mode: string } | undefined;
+      try {
+        const venue = resolveResearchVenue({
+          brokerId: typeof selectionBody.brokerId === "string" ? selectionBody.brokerId : undefined,
+          mode: typeof selectionBody.mode === "string" ? selectionBody.mode : undefined,
+        });
+        selection = { brokerId: venue.brokerId, mode: venue.mode };
+      } catch (error) {
+        if (isResearchVenueRefusal(error)) {
+          return Response.json(
+            { ok: false, code: error.code, error: error.message },
+            { status: 400 },
+          );
+        }
+        throw error;
+      }
       try {
         const dispatched = await dispatchResearchEngineRun({
           userLogin,
