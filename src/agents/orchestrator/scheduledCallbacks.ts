@@ -110,7 +110,9 @@ async function resolveCallbackDispatch(
       nowMs: Date.now(),
     });
     if ("denied" in owner) {
-      return { denied: true, reason: "OWNER_MEMBERSHIP_REVOKED", detail: owner.detail };
+      // Issue #6160 — the reason comes from the gate: REVOKED only
+      // for a genuinely revoked record, EXPIRED for expired bindings.
+      return { denied: true, reason: owner.reason, detail: owner.detail };
     }
     return { allowed: true, kind: "owner", login: identity.login };
   }
@@ -153,7 +155,9 @@ function auditCallbackDenial(
     BROKER_REQUIRED:
       "Attach the schedule to an owner identity: brokerage work never runs under the service identity.",
     OWNER_MEMBERSHIP_REVOKED:
-      "The owner's membership is revoked or expired. Restore the membership, then resume the schedule.",
+      "The owner's membership is revoked. Restore the membership, then resume the schedule.",
+    OWNER_MEMBERSHIP_EXPIRED:
+      "The owner's membership expired (no live binding). Renew the membership, then resume the schedule.",
     PDP_DENIED:
       "The owner lacks task:create in this tenant. Grant the permission, then resume the schedule.",
   };
