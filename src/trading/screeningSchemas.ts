@@ -826,6 +826,13 @@ const brokerModeFields = {
   mode: z.enum(["live", "paper"]).optional(),
   /** Issue #5189: broker account scope, when the broker exposes several. */
   accountId: z.string().min(1).optional(),
+  /**
+   * Issue #5099 (F2): the account's asset class, riding with the account
+   * id so the schedule display and the stored payload agree. The create
+   * route resolves the run target from {accountType, accountId}; absent
+   * means the server default ("stock"). Optional, like accountId.
+   */
+  accountType: z.string().min(1).optional(),
 };
 
 /**

@@ -6,6 +6,7 @@ import { PortfolioRiskPanel } from "./PortfolioRiskPanel";
 import { formatMoney, formatSignedMoney, portfolioSummary } from "./brokerPortfolio";
 import { safeNumberFormat, safePriceFormat } from "./formatters";
 import { brokerSectionNav } from "./brokerSectionNav";
+import { ActiveBindingBadge } from "./ActiveBindingBadge";
 import { brokerSupports, brokerModeBadge, type BrokerPresentation } from "../trading";
 import type { RiskBroker } from "./portfolioRiskApi";
 import type { TradeOrderContext } from "./trading/tradeOrderContext";
@@ -79,6 +80,14 @@ export function PortfolioPanel({
                   <Badge tone={isLive ? "success" : "neutral"} size="sm" dot>
                     {brokerModeBadge(selectedBroker, isLive ? "live" : "paper")}
                   </Badge>
+                  {/* Issue #5099 (F2): the active account binding beside
+                      the broker/mode badges. */}
+                  <ActiveBindingBadge
+                    broker={selectedBroker}
+                    mode={isLive ? "live" : "paper"}
+                    accountType="stock"
+                    scope="tenant"
+                  />
                   <Badge tone="success" size="sm">HITL ATTESTED</Badge>
                 </Flex>
                 <CardHeader title={<>{brokerLabel} Portfolio Holdings &amp; Open Positions</>} />

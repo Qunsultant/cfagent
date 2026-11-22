@@ -19,6 +19,7 @@ import {
   TextInput,
 } from "./components/ui";
 import { ACCOUNT_BINDING_SCOPES } from "../config/accountBindings";
+import { fetchBrokerAccounts } from "./accountBindingStore";
 import {
   buildDefaultBrokerAssetAccountRegistry,
   type AccountBinding,
@@ -136,7 +137,19 @@ export function AccountBindingSelector({
     setError(null);
     setStatusMessage(null);
     try {
-      const matched = availableAccounts.find((a) => a.accountId === accountId.trim());
+      // Issue #5099 (F2): validate the save against the broker's real
+      // accounts when the accounts read serves the broker being saved.
+      // GET /api/broker/accounts serves the SELECTED broker — when the
+      // selector is saving another broker (or the read fails / is gated
+      // off), fall back to the plain upsert (the pre-F2 behavior). The
+      // fresh read also supplies the matched account name when the
+      // menu passed no `availableAccounts` prop.
+      const read = await fetchBrokerAccounts();
+      const validatedAccounts =
+        read && read.broker === selectedBroker ? read.accounts : null;
+      const matched = (validatedAccounts ?? availableAccounts).find(
+        (a) => a.accountId === accountId.trim(),
+      );
       const res = await fetch("/api/broker/account-binding", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -147,6 +160,7 @@ export function AccountBindingSelector({
           scope,
           accountId: accountId.trim(),
           accountName: matched?.accountName,
+          ...(validatedAccounts ? { availableAccounts: validatedAccounts } : {}),
         }),
       });
       const data = (await res.json().catch(() => ({}))) as {

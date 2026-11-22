@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { CardHeader, Select, TextInput, Modal, Button } from "../components/ui";
 import { useTenantProviders } from "../tenantProviders";
 import { brokerPresentation } from "../../trading";
+import { ActiveBindingBadge } from "../ActiveBindingBadge";
 import { universeOptions, withLegacyValue } from "../vocabularyOptions";
 import { useBrokerEnvironment } from "../brokerEnvironment";
 import { listPresets, type ScreenerPreset } from "../ScreenerPresetManager";
@@ -191,6 +192,22 @@ export function ScheduleFormModal(props: ScheduleFormModalProps) {
                   time the effective mode is resolved again (deployment pin, tenant selection, or base-URL
                   inference) and the run record states the mode that actually governed the run.
                 </p>
+                {/* Issue #5099 (F2): the active account binding for this
+                    job's account type. A per-schedule account override
+                    (RunTargetFields, options only) replaces the stored
+                    binding in the display, so the display and the
+                    submitted payload agree. */}
+                <ActiveBindingBadge
+                  broker={dialogBrokerId}
+                  mode={dialogMode}
+                  accountType={props.jobType === "optionsAnalysis" ? "options" : "stock"}
+                  scope="schedule"
+                  override={
+                    props.accountId?.trim()
+                      ? { accountId: props.accountId.trim(), accountType: "options" }
+                      : null
+                  }
+                />
               </div>
 
               {/* Target Universe or Symbols */}
