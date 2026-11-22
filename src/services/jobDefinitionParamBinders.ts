@@ -16,7 +16,12 @@
  * axis's values, so a data-only vocabulary addition reaches this binder
  * with no code change.
  */
-import type { JobDefinitionParameter, JobDefinitionSpec, JobParameterSettingRef } from "../config/jobDefinitionCatalog";
+import {
+  addressableStages,
+  type JobDefinitionParameter,
+  type JobDefinitionSpec,
+  type JobParameterSettingRef,
+} from "../config/jobDefinitionCatalog";
 import { resolveEnumSource, resolveParamDerivation } from "../config/jobDefinitionParamRegistry";
 import { VOCABULARY_CODES, resolveValue } from "../config/vocabulary";
 import type { JobExecutionMode } from "../data/jobPipelinePorts";
@@ -265,7 +270,8 @@ export function bindStageOverrides(
     stageProcessing?: Record<string, { checkpointEverySteps?: number }>;
   },
 ): JobDefinitionPerStage {
-  const stages = new Map(spec.stages.map((stage) => [stage.kind, stage]));
+  // Issue #6031 — a nested spec's children are addressable stages too.
+  const stages = new Map(addressableStages(spec).map((stage) => [stage.kind, stage]));
   const params: Record<string, Record<string, unknown>> = {};
   for (const [kind, values] of Object.entries(input.stageParams ?? {})) {
     const stage = stages.get(kind);
