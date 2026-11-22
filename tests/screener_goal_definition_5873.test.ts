@@ -310,6 +310,58 @@ describe("goal definition builder (#5873)", () => {
     expect(kinds).toEqual(["feed", "enrich", "analyze", "store", "serve", "deliver"]);
     expect(stepsByKind.get("analyze")).toEqual(GOAL_COMPOSITION_STEPS);
     expect(raw.root.executionMode?.shape).toBe("monolith");
+
+    // Issue #6073 — the goal definition carries the family job
+    // ids + the leg kit on the analyze node (the stock leg runs
+    // the generic chain); symbols mode needs no universe.
+    const paramsByKind = new Map<string, Record<string, unknown>>();
+    let n = raw.root;
+    while (n) {
+      paramsByKind.set(n.kind, n.steps?.[0]?.params ?? {});
+      n = n.children?.[0];
+    }
+    expect(paramsByKind.get("feed")!.feedJobId).toBe("yahoo-nasdaq100-quotes");
+    expect(paramsByKind.get("feed")!.universe).toBeUndefined();
+    expect(paramsByKind.get("analyze")!.feedJobId).toBe("yahoo-nasdaq100-quotes");
+    expect(paramsByKind.get("analyze")!.enrichJobId).toBe(
+      "yahoo-nasdaq100-quotes-enrich",
+    );
+    expect(paramsByKind.get("analyze")!.analyzeJobId).toBe(
+      "yahoo-nasdaq100-quotes-enrich-analyze",
+    );
+    expect(paramsByKind.get("analyze")!.generateJobId).toBe(
+      "yahoo-nasdaq100-quotes-enrich-analyze-generate",
+    );
+    expect(paramsByKind.get("analyze")!.stockLegAnalyzeParams).toEqual({
+      ruleSets: ["screen", "factors"],
+      inputMode: "handOff",
+    });
+    expect(paramsByKind.get("analyze")!.stockLegGenerateParams).toEqual({
+      reports: ["screener-report"],
+    });
+    expect(paramsByKind.get("analyze")!.stockLegUniverse).toBeUndefined();
+  });
+
+  it("a symbol-less goal command carries the shared default universe on the feed node (#6073)", () => {
+    const base = goalCommand();
+    const raw = buildScreenerJobDefinition(
+      goalCommand({
+        shards: [{ shardId: "goal" }],
+        goalScreen: { ...(base.goalScreen as object), symbols: undefined } as never,
+      }),
+    ) as any;
+    const paramsByKind = new Map<string, Record<string, unknown>>();
+    let n = raw.root;
+    while (n) {
+      paramsByKind.set(n.kind, n.steps?.[0]?.params ?? {});
+      n = n.children?.[0];
+    }
+    expect(paramsByKind.get("feed")!.universe).toBe("nasdaq100");
+    expect(paramsByKind.get("feed")!.feedJobId).toBe("yahoo-nasdaq100-quotes");
+    expect(paramsByKind.get("analyze")!.stockLegUniverse).toBe("nasdaq100");
+    expect(paramsByKind.get("analyze")!.analyzeJobId).toBe(
+      "yahoo-nasdaq100-quotes-enrich-analyze",
+    );
   });
 
   it("a market command builds the flipped market spec: five generic nodes, analyze node is analyze.screener", () => {

@@ -231,8 +231,10 @@ describe("generic definition builder (#5884)", () => {
     const spec = jobDefinitionSpec("goalScreen");
     // Issue #6072 — the goal spec is v2: the analyze node runs the
     // goal composition (the flip's "untouched" pin ends here; the
-    // other five nodes are still the 3b bespoke steps, and no family
-    // job id rides any bespoke node).
+    // other five nodes are still the 3b bespoke steps). Issue
+    // #6073 — the bespoke nodes' params now carry the family job
+    // ids + the leg kit (the stock leg runs the generic chain);
+    // the spec shape is unchanged.
     expect(spec.version).toBe(2);
     const nodes = nodesOf(buildScreenerJobDefinition(goalCommand()));
     expect(nodes.map((n) => n.kind)).toEqual([
@@ -254,13 +256,46 @@ describe("generic definition builder (#5884)", () => {
     expect(nodes.find((n) => n.kind === "analyze")?.steps).toEqual(
       GOAL_COMPOSITION_STEPS,
     );
-    // The goal path is byte-identical to 3b: no family job ids
-    // ride the bespoke nodes.
-    for (const node of nodes) {
-      expect(node.params).not.toHaveProperty("feedJobId");
-      expect(node.params).not.toHaveProperty("enrichJobId");
-      expect(node.params).not.toHaveProperty("analyzeJobId");
-      expect(node.params).not.toHaveProperty("generateJobId");
+    // Issue #6073 — the goal path is no longer byte-identical to
+    // 3b: the family job ids ride the goal definition now (the
+    // stock leg runs the generic chain), with the leg kit on the
+    // analyze node. The spec shape is unchanged (v2, same six
+    // kinds/steps, composition on analyze); only the bespoke
+    // nodes' params gained the ids. Symbols mode needs no
+    // universe anywhere.
+    const paramsByKind = new Map(nodes.map((n) => [n.kind, n.params]));
+    expect(paramsByKind.get("feed")!.feedJobId).toBe("yahoo-nasdaq100-quotes");
+    expect(paramsByKind.get("feed")!.universe).toBeUndefined();
+    expect(paramsByKind.get("enrich")!.enrichJobId).toBe(
+      "yahoo-nasdaq100-quotes-enrich",
+    );
+    expect(paramsByKind.get("analyze")!.feedJobId).toBe("yahoo-nasdaq100-quotes");
+    expect(paramsByKind.get("analyze")!.enrichJobId).toBe(
+      "yahoo-nasdaq100-quotes-enrich",
+    );
+    expect(paramsByKind.get("analyze")!.analyzeJobId).toBe(
+      "yahoo-nasdaq100-quotes-enrich-analyze",
+    );
+    expect(paramsByKind.get("analyze")!.generateJobId).toBe(
+      "yahoo-nasdaq100-quotes-enrich-analyze-generate",
+    );
+    expect(paramsByKind.get("analyze")!.stockLegAnalyzeParams).toEqual({
+      ruleSets: ["screen", "factors"],
+      inputMode: "handOff",
+    });
+    expect(paramsByKind.get("analyze")!.stockLegGenerateParams).toEqual({
+      reports: ["screener-report"],
+    });
+    expect(paramsByKind.get("analyze")!.stockLegUniverse).toBeUndefined();
+    // The store/serve/deliver nodes carry no family job ids (the
+    // leg kit rides feed/enrich/analyze only — the goal spec has
+    // no generate node; the generate job id rides the analyze
+    // node's kit, asserted above).
+    for (const kind of ["store", "serve", "deliver"]) {
+      expect(paramsByKind.get(kind)!).not.toHaveProperty("feedJobId");
+      expect(paramsByKind.get(kind)!).not.toHaveProperty("enrichJobId");
+      expect(paramsByKind.get(kind)!).not.toHaveProperty("analyzeJobId");
+      expect(paramsByKind.get(kind)!).not.toHaveProperty("generateJobId");
     }
   });
 });
