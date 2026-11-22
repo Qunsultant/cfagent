@@ -59,8 +59,10 @@ const DATA_LAYER_FILES: Array<[string, number]> = [
   // migrations and the guarded heartbeat UPDATE); 45 after #4417
   // (+2: the attempt-history SELECT + UPDATE in appendAttempt); 46
   // after #4423 (+1: the tolerant per-chain attempt-history read the
-  // Docs retry marker needs, in the adapter so the service stays at 0).
-  ["src/data/doSqliteAsyncJobAdapter.ts", 47],
+  // Docs retry marker needs, in the adapter so the service stays at 0);
+  // 47 after #4623 (+1: the tenant_id probed column); 48 after #6167
+  // (+1: the host_version probed column — the claim-time host version).
+  ["src/data/doSqliteAsyncJobAdapter.ts", 48],
   ["src/data/doSqliteJobOutcomeAdapter.ts", 13],
   ["src/data/doSqlitePausedScheduleAdapter.deprecated.ts", 7],
   ["src/data/inMemoryAsyncJobAdapter.ts", 0],

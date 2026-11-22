@@ -625,7 +625,7 @@ function restartClassFor(claimVersion: string | null | undefined, reapVersion: s
  *  written only by the claim, the 2-minute heartbeat, and
  *  terminal transitions, so a last activity within this bound of
  *  the claim IS the claim itself: the dispatch died on arrival,
- *  before doing real work (the three 2026-11-22 Yahoo orphans
+ *  before doing real work (the three 2026-11-22 feed orphans
  *  died 0.3–3.4s after their claims). A bound, not 0: the
  *  claim-to-last-activity write is the same instant, but a
  *  clock read can land a millisecond either side.
@@ -655,7 +655,7 @@ function isStillbornOrphan(row: {
  *  A stillborn orphan on an UNCHANGED version is NOT re-armed:
  *  the dispatch died on arrival on this host, so an identical
  *  re-arm replays the identical dispatch and dies identically —
- *  the re-arm loop just burns runs (three Yahoo re-arms on
+ *  the re-arm loop just burns runs (three feed re-arms on
  *  2026-11-22, all dead in seconds). Re-armed as before when
  *  the version changed (a deploy killed it — the #3907/#4002
  *  case), when the job had progressed (it died mid-work, so a
