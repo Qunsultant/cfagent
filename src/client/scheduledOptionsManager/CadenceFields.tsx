@@ -1,6 +1,6 @@
 import React from "react";
 import { etToUtcCron } from "../options/cronTime";
-import { Checkbox, Select, TextInput, Button } from "../components/ui";
+import { Checkbox, Select, TextInput, Button, Grid } from "../components/ui";
 import type { ScheduleMode } from "./types";
 import { CRON_PRESETS, INTERVAL_PRESETS, cadenceNeedsOptIn } from "./format";
 
@@ -52,7 +52,7 @@ export function CadenceFields(props: CadenceFieldsProps) {
         : undefined,
   );
   return (
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-4)" }}>
+              <Grid columns={2} gap="4">
                 <div className="sched-form-group">
                   <Select label="Cadence Type" id="sched-cadence-type"
                     value={scheduleType}
@@ -175,6 +175,6 @@ export function CadenceFields(props: CadenceFieldsProps) {
                     </p>
                   </div>
                 )}
-              </div>
+              </Grid>
   );
 }

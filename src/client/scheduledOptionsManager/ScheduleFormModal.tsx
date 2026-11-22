@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { CardHeader, Select, TextInput, Modal, Button } from "../components/ui";
+import { CardHeader, Select, TextInput, Modal, Button, Disclosure, Grid } from "../components/ui";
 import { useTenantProviders } from "../tenantProviders";
 import { brokerPresentation } from "../../trading";
 import { universeOptions, withLegacyValue } from "../vocabularyOptions";
@@ -140,7 +140,7 @@ export function ScheduleFormModal(props: ScheduleFormModalProps) {
               </Button>
             </header>
 
-            <form onSubmit={handleCreateSchedule} style={{ display: "flex", flexDirection: "column", gap: "var(--space-4)" }}>
+            <form onSubmit={handleCreateSchedule} className="sched-form">
               {/* Job Picker — Issue #5880: the options come from the
                   one externalized job catalogue
                   (`config/job-catalogue.json`), not hardcoded
@@ -281,10 +281,10 @@ export function ScheduleFormModal(props: ScheduleFormModalProps) {
 
               {/* Optional Custom Criteria (Market Screen) */}
               {jobType === "marketScreen" && (
-                <details style={{ marginTop: "0.25rem", padding: "var(--space-2) var(--space-3)", background: "var(--color-surface-sunken)", borderRadius: "6px", border: "1px solid var(--color-border-subtle)" }}>
-                  <summary style={{ fontSize: "var(--font-size-body-sm)", cursor: "pointer", color: "var(--color-accent)", fontWeight: 600, userSelect: "none" }}>
-                    ⚙️ Custom Screening Criteria &amp; Filters (Optional)
-                  </summary>
+                <Disclosure
+                  summary="⚙️ Custom Screening Criteria & Filters (Optional)"
+                  className="ui-mt-1"
+                >
                   {/* Issue #3655 S4b (E-13): these custom fields cover
                       five of the seven panel fields. Min/Max RSI and
                       Min Volume are only available through a saved
@@ -292,7 +292,7 @@ export function ScheduleFormModal(props: ScheduleFormModalProps) {
                   <p className="hint" id="sched-custom-criteria-note">
                     Min/Max RSI and Min Volume are only available through a saved preset above — these custom fields cover price, market cap, P/E and momentum.
                   </p>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-3)", marginTop: "0.6rem" }}>
+                  <Grid columns={2} gap="3" className="ui-mt-2">
                     <div className="sched-form-group">
                       <TextInput label="Min Price ($)" id="sched-filter-min-price"
                         type="number"
@@ -333,8 +333,8 @@ export function ScheduleFormModal(props: ScheduleFormModalProps) {
                         placeholder="e.g. 50"
                       />
                     </div>
-                  </div>
-                  <div className="sched-form-group" style={{ marginTop: "0.5rem" }}>
+                  </Grid>
+                  <div className="sched-form-group ui-mt-2">
                     <Select label="Price Trend / Momentum" id="sched-filter-trend"
                       value={trendFilter}
                       onChange={(e) => setTrendFilter(e.target.value)}
@@ -345,7 +345,7 @@ export function ScheduleFormModal(props: ScheduleFormModalProps) {
                       <option value="high_relative_volume">High Relative Volume</option>
                     </Select>
                   </div>
-                </details>
+                </Disclosure>
               )}
 
               <DiscoveryFormSections

@@ -1,5 +1,5 @@
 import React from "react";
-import { Select } from "../components/ui";
+import { Select, Grid } from "../components/ui";
 import type { CreatableJob } from "./types";
 
 export interface ThesisRiskFieldsProps {
@@ -14,7 +14,7 @@ export function ThesisRiskFields(props: ThesisRiskFieldsProps) {
   const { jobType, thesis, setThesis, riskProfile, setRiskProfile } = props;
   if (jobType !== "optionsAnalysis") return null;
   return (
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-4)" }}>
+                <Grid columns={2} gap="4">
                   <div className="sched-form-group">
                     <Select label="Market Thesis / Outlook" id="sched-market-thesis"
                       value={thesis}
@@ -37,6 +37,6 @@ export function ThesisRiskFields(props: ThesisRiskFieldsProps) {
                       <option value="aggressive">Aggressive (Maximum Leverage &amp; Upside)</option>
                     </Select>
                   </div>
-                </div>
+                </Grid>
   );
 }

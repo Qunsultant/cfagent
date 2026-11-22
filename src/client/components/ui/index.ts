@@ -66,6 +66,8 @@
  *   scale only; Stack is a flex column, Flex a flex row with wrap +
  *   inline modes, Grid a fixed-count or auto-fit grid) — the
  *   componentized form of hand-rolled flex/grid inline styles.
+ * - Disclosure — the one collapsible section (native details/summary,
+ *   token chrome; #5881).
  *
  * Styles live in ./primitives.css (imported once by main.tsx). New
  * primitives are added here with their styles + tests in the same PR.
@@ -106,4 +108,5 @@ export { SkipLink } from "./SkipLink";
 export { Stack, type StackProps } from "./Stack";
 export { Flex, type FlexProps } from "./Flex";
 export { Grid, type GridProps } from "./Grid";
+export { Disclosure, type DisclosureProps } from "./Disclosure";
 export type { LayoutGap, LayoutAlign, LayoutJustify, GridMinWidth } from "./layout";

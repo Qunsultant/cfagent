@@ -229,7 +229,7 @@ export function DiscoveryFormSections(props: DiscoveryFormSectionsProps) {
                           />
                         </div>
                       </div>
-                      <div className="sched-form-group" style={{ marginTop: "0.7rem" }}>
+                      <div className="sched-form-group ui-mt-2">
                         <TextInput label="Allowed Strategies" hint={`Comma-separated registry ids, or "all" for the full registry (the panel default)`} id={`sched-discovery-${idx}-allowed-strategies`}
                           type="text"
                           value={draft.allowedStrategies}
