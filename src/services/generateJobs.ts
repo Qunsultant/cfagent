@@ -528,6 +528,63 @@ function buildScreenerReportDocument(args: {
   };
 }
 
+/**
+ * Issue #5885 (#4437 slice 6c) — the screener-report document
+ * → delivery-outcome converter: the generate run is the only
+ * place where the document, the format records and the
+ * canonical record coexist without a store read, so the
+ * delivery payload is built here and rides the generate
+ * result (and the generate step output) to the deliver node.
+ * The payload is a ScreenerRunResult-shaped record the door
+ * already understands (screenerOutcomeFromRunResult): the
+ * opportunities are the summary's top by composite joined
+ * with their rows (signal from the row's "screen" rule-set
+ * signal, momentum from the row's composite score, price
+ * from the row); a top symbol with no row still rides, scored
+ * from the summary alone. What the document does not carry,
+ * the payload does not invent: no matchedCount (the analyzed
+ * artifact carries no matched notion — the document's own
+ * rule, #5825), no pdfKey/xlsxKey/csvKey (the generic formats
+ * are inline bodies, not artifact keys). Rich per-symbol
+ * parity is #5875, not 6c. The canonical report id rides
+ * only when the leg stored (or deduped) a row — the door
+ * stamps it onto the outcome, which is what makes the
+ * generic delivery deliverable (the C4 path: the canonical
+ * row IS the artifact for a run with no PDF key).
+ */
+export function buildScreenerDeliveryPayload(args: {
+  document: GenerateReportDocument;
+  canonicalReportId: string | null;
+  trigger: string;
+  finishedAt: string;
+}): Record<string, unknown> {
+  const { document, canonicalReportId, trigger, finishedAt } = args;
+  const rowsBySymbol = new Map(
+    document.rows.map((row) => [row.symbol.toUpperCase(), row]),
+  );
+  const opportunities = document.inputSummary.topByComposite.map((top) => {
+    const row = rowsBySymbol.get(top.symbol.toUpperCase());
+    const opportunity: Record<string, unknown> = {
+      symbol: top.symbol,
+      ...(row?.signals["screen"] ? { signal: row.signals["screen"] } : {}),
+      momentumScore: row?.compositeScore ?? top.score,
+    };
+    if (row?.lastPrice != null) opportunity.lastPrice = row.lastPrice;
+    return opportunity;
+  });
+  return {
+    trigger,
+    success: true,
+    timestamp: finishedAt,
+    totalScanned: document.inputSummary.symbols,
+    universe: document.universeLabel,
+    summary: document.summary,
+    thesis: document.title,
+    opportunities,
+    ...(canonicalReportId ? { canonicalReportId } : {}),
+  };
+}
+
 function buildAnalysisReportDocument(args: {
   kind: string;
   def: GenerateJobDefinition;
@@ -887,6 +944,21 @@ export interface GenerateRunResult {
   reportsGenerated: string[];
   /** Canonical leg outcomes, per report kind. */
   canonical: Record<string, GeneratedCanonicalRecord["status"]>;
+  /**
+   * Issue #5885 (6c): the canonical mas_reports row id of the
+   * FIRST stored/deduped canonical record, in configuration
+   * order — null when no leg stored a row. The deliver node
+   * threads it to the sink as the canonical report id.
+   */
+  reportId: string | null;
+  /**
+   * Issue #5885 (6c): the delivery payload for a screener-report
+   * run (buildScreenerDeliveryPayload) — null when no
+   * screener-report was generated. The generate step passes it
+   * through as `payload` on its output, which the deliver
+   * step already reads.
+   */
+  deliveryPayload: Record<string, unknown> | null;
 }
 
 /** The canonical leg for one report: through the seam where a
@@ -1086,6 +1158,10 @@ export async function runGenerateJob(
       canonical: Object.fromEntries(
         partial.reports.map((r) => [r.kind, r.canonical.status]),
       ) as Record<string, GeneratedCanonicalRecord["status"]>,
+      // Issue #5885 (6c): the loop computes both (the document
+      // exists only there); finish only copies them through.
+      reportId: partial.reportId,
+      deliveryPayload: partial.deliveryPayload,
     };
   };
 
@@ -1104,6 +1180,8 @@ export async function runGenerateJob(
       ),
       reports: [],
       inputArtifact: undefined,
+      reportId: null,
+      deliveryPayload: null,
     });
   }
 
@@ -1119,6 +1197,14 @@ export async function runGenerateJob(
   const finishedAt = new Date(opts.nowMs ?? Date.now()).toISOString();
   const generatedReports: GeneratedReportRecord[] = [];
   let received = 0;
+  // Issue #5885 (6c): the report id + delivery payload are
+  // computed in this loop — the only place the document, the
+  // format records and the canonical record coexist without a
+  // store read. reportId is the FIRST stored/deduped canonical
+  // record's id, in configuration order; the payload is built
+  // only for a screener-report.
+  let reportId: string | null = null;
+  let deliveryPayload: Record<string, unknown> | null = null;
   for (const kind of reports) {
     const document = buildReportDocument({
       kind,
@@ -1143,6 +1229,15 @@ export async function runGenerateJob(
       runId,
       finishedAt,
     });
+    if (reportId === null) reportId = canonical.reportId;
+    if (kind === "screener-report") {
+      deliveryPayload = buildScreenerDeliveryPayload({
+        document,
+        canonicalReportId: canonical.reportId,
+        trigger,
+        finishedAt,
+      });
+    }
     generatedReports.push({ kind, title: document.title, formats: formatRecords, canonical });
   }
 
@@ -1157,6 +1252,8 @@ export async function runGenerateJob(
     errorMessage: null,
     reports: generatedReports,
     inputArtifact,
+    reportId,
+    deliveryPayload,
   });
 }
 

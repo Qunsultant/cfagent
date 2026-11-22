@@ -42,11 +42,16 @@ export function researchReportToStoreInput(
   report: ResearchReport,
   artifacts: Partial<ResearchReportArtifactOutcome>,
   userLogin: string,
+  execution?: { engineJobId?: string | null },
 ): ScheduledReportInput {
   const cleanArtifacts = Object.fromEntries(
     Object.entries(artifacts).filter(([, value]) => value !== undefined),
   );
-  const jobRunId = researchEngineJobId(report.runId);
+  // A job id is linkage evidence, not a label to derive from every report.
+  // The user-facing OODA agent still has a direct-pipeline fallback, so only
+  // attach a job when the caller can prove that J-stack actually ran it.
+  const expectedJobId = researchEngineJobId(report.runId);
+  const jobRunId = execution?.engineJobId === expectedJobId ? expectedJobId : undefined;
   return {
     runId: report.runId,
     generationId: report.generationId,
@@ -59,13 +64,13 @@ export function researchReportToStoreInput(
       ...(report as unknown as Record<string, unknown>),
       ...cleanArtifacts,
       success: !report.dataRefusal,
-      jobRunId,
+      ...(jobRunId ? { jobRunId } : {}),
       engineVersion: (report as { modelVersion?: string }).modelVersion ?? "rules-1.0.0",
       inputHash: report.generationId,
       captureIds: [report.runId],
-      // The report is created inside J-stack's generate/deliver path. The
-      // six engine stages are read from J-stack checkpoints by the run view;
-      // this report body must not synthesize a competing stage ledger.
+      // A canonical report is not proof that a J-stack job ran. The run view
+      // reads stages only when an actual engineJobId was supplied above; this
+      // body never synthesizes a competing stage ledger.
     },
   };
 }
@@ -81,6 +86,7 @@ export async function recordResearchRunThroughLeg(
     report: ResearchReport;
     artifacts?: Partial<ResearchReportArtifactOutcome>;
     userLogin?: string;
+    engineJobId?: string | null;
   },
 ): Promise<{ reportId: string | null; created: boolean; leg: ResearchCanonicalLegReport }> {
   const owner = input.userLogin?.trim() || seam.ownerLogin?.trim() || "";
@@ -94,7 +100,9 @@ export async function recordResearchRunThroughLeg(
 
   try {
     const stored = await seam.store(
-      researchReportToStoreInput(input.report, input.artifacts ?? {}, owner),
+      researchReportToStoreInput(input.report, input.artifacts ?? {}, owner, {
+        engineJobId: input.engineJobId,
+      }),
     );
     if (!stored || !stored.reportId) {
       return {

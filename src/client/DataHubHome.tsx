@@ -17,6 +17,7 @@
 import { useEffect, useState } from "react";
 import { Card, CardHeader, Grid, PageSection, PageShell, Tabs, TabPanel, type TabOption } from "./components/ui";
 import { DataProvidersPanel } from "./DataProvidersPanel";
+import { FeedsPanel } from "./FeedsPanel";
 import { AlpacaSignInCard } from "./AlpacaSignInCard";
 import { DataLifecyclePanel } from "./DataLifecyclePanel";
 import { DownloadsPanel } from "./DownloadsPanel";
@@ -82,6 +83,13 @@ export function DataHubHome({ userLogin }: DataHubHomeProps = {}) {
             <AlpacaSignInCard activeEnv="TEST" collapsedWhenConfigured={false} />
             <AlpacaSignInCard activeEnv="PROD" collapsedWhenConfigured={false} />
           </Grid>
+        </Card>
+      </TabPanel>
+
+      <TabPanel idBase="data-hub" tabId="feeds" active={deepLink.view === "feeds"}>
+        <Card>
+          <CardHeader title="Feeds" subtitle="The stored-index feed family on the one pipeline" />
+          <FeedsPanel />
         </Card>
       </TabPanel>
 

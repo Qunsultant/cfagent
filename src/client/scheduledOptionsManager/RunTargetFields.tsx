@@ -10,6 +10,14 @@
  *     options screen cannot run on one that does not);
  *   - "Paper" is disabled for a broker with no paper mode (Public), so the form
  *     cannot submit a combination the run would refuse.
+ *
+ * Issue #5879 — this is the form's ONE broker/mode/account selection, kept
+ * ONLY where #5187/#5189 require it (options schedules) and labelled as an
+ * override of the tenant default shown above it, not a second copy of the
+ * same choice. The display-only #3655 pair that used to sit above it is
+ * gone; the tenant default line is the selection, these fields are the
+ * override. tenantBrokerId is a plain string: the tenant broker id is a
+ * string at the boundary, and brokerPresentation is total over unknown ids.
  */
 import React from "react";
 import { Grid, Select, TextInput } from "../components/ui";
@@ -25,7 +33,7 @@ export interface RunTargetFieldsProps {
   accountId: ScheduleFormState["accountId"];
   setAccountId: React.Dispatch<React.SetStateAction<ScheduleFormState["accountId"]>>;
   /** The tenant's broker, shown as the meaning of the empty selection. */
-  tenantBrokerId?: BrokerId;
+  tenantBrokerId?: string;
 }
 
 const CHAIN_BROKERS = (Object.keys(BROKER_CATALOG) as BrokerId[]).filter(
@@ -44,7 +52,8 @@ export function RunTargetFields(props: RunTargetFieldsProps) {
     <Grid columns={3} gap="4">
       <div className="sched-form-group">
         <Select
-          label="Broker"
+          label="Broker override"
+          hint={`Override the tenant default above — leave as Tenant default (${tenantLabel}) to run against the tenant selection.`}
           id="sched-run-broker"
           value={brokerId}
           onChange={(e) => {
@@ -68,7 +77,8 @@ export function RunTargetFields(props: RunTargetFieldsProps) {
 
       <div className="sched-form-group">
         <Select
-          label="Mode"
+          label="Mode override"
+          hint={`Leave blank to resolve for the broker. The effective mode is re-resolved at fire time, so a later change applies to future runs.`}
           id="sched-run-mode"
           value={mode}
           onChange={(e) => setMode(e.target.value as ScheduleFormState["mode"])}

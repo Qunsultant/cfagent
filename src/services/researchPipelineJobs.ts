@@ -31,6 +31,8 @@ import {
 import { jobDefinitionSpec } from "../config/jobDefinitionCatalog";
 import { bindJobDefinitionParams } from "./jobDefinitionParamBinders";
 import { buildJobConfigFromSpec } from "./jobDefinitionSpecBuilder";
+import type { ResearchFeedStageOutput } from "./researchFeedHandoff";
+import type { ResearchEnrichStageOutput } from "./researchEnrichHandoff";
 
 const structuredLog = createStructuredLogger(createObservabilitySink({}), {
   component: "services/researchPipelineJobs",
@@ -77,6 +79,40 @@ export const RESEARCH_PIPELINE_CATALOG_ENTRY: ResearchPipelineCatalogEntry = {
 };
 
 export interface ResearchStepDeps {
+  /** Issue #6093 — workflow-resident runs must consume the persisted stage outputs. */
+  requireStageInputs?: boolean;
+  /** Issue #6063 — the feed stage: regime, universe and quotes. */
+  runFeedStage?: (input: {
+    runId: string;
+    userLogin: string;
+    trigger: "manual" | "scheduled";
+    brokerId?: string;
+    mode?: string;
+  }) => Promise<ResearchFeedStageOutput>;
+  /** Issue #6064 — the enrich stage: technicals and catalysts for the feed symbols. */
+  runEnrichStage?: (input: {
+    runId: string;
+    userLogin: string;
+    trigger: "manual" | "scheduled";
+    feed: ResearchFeedStageOutput;
+    brokerId?: string;
+    mode?: string;
+  }) => Promise<ResearchEnrichStageOutput>;
+  /** Issue #6066 — the generate stage: the document set + canonical row. */
+  runGenerateStage?: (input: {
+    runId: string;
+    userLogin: string;
+    trigger: "manual" | "scheduled";
+    report: ResearchReport;
+  }) => Promise<unknown>;
+  /** Issue #6066 — the deliver stage: Slack/email/webhook for the stored report. */
+  runDeliverStage?: (input: {
+    runId: string;
+    userLogin: string;
+    trigger: "manual" | "scheduled";
+    report: ResearchReport;
+    publication: unknown;
+  }) => Promise<unknown>;
   /** Execute the OODA analysis loop and return the structured ResearchReport. */
   runOodaAnalysis: (input: {
     runId: string;
@@ -86,6 +122,12 @@ export interface ResearchStepDeps {
     /** Issue #5912 — the venue/mode this run names, when it named one. */
     brokerId?: string;
     mode?: string;
+    /** Issue #6063 — the persisted feed step output, when the feed stage ran. */
+    feed?: ResearchFeedStageOutput;
+    /** Issue #6064 — the persisted enrich step output, when the enrich stage ran. */
+    enrich?: ResearchEnrichStageOutput;
+    /** Issue #6066 — analyze stops at the report; generate/deliver own publication. */
+    deferPublication?: boolean;
   }) => Promise<ResearchReport | Record<string, unknown>>;
   /** Execute the §9 outcome evaluation pass for a run or due runs. */
   runEvaluateStage?: (input: {
@@ -104,21 +146,121 @@ export function registerResearchSteps(
   registry: JobStepRegistry,
   deps: ResearchStepDeps,
 ): JobStepRegistry {
-  for (const [stepName, stageId] of [
-    [RESEARCH_FEED_STEP, "feed"],
-    [RESEARCH_ENRICH_STEP, "enrich"],
-    [RESEARCH_GENERATE_STEP, "generate"],
-    [RESEARCH_DELIVER_STEP, "deliver"],
-  ] as const) {
-    registry.register(stepName, async (ctx) => {
-      const params = (ctx.params ?? {}) as { runId?: string };
-      const runId = params.runId || ctx.jobId.replace(/^research:/, "");
+  registry.register(RESEARCH_FEED_STEP, async (ctx) => {
+    const params = (ctx.params ?? {}) as {
+      runId?: string;
+      userLogin?: string;
+      trigger?: "manual" | "scheduled";
+      brokerId?: string;
+      mode?: string;
+    };
+    const runId = params.runId || ctx.jobId.replace(/^research:/, "");
+    const userLogin = params.userLogin || "";
+    if (!userLogin || !deps.runFeedStage) {
+      // A host that has not wired the stage runtime keeps the pre-#6063
+      // behaviour: analyze fetches its own inputs. The engine output states
+      // that honestly instead of claiming the feed ran.
       return {
-        output: { stage: stageId, runId, status: "completed" },
-        descriptor: researchArtifactKey(runId, stageId),
+        output: { stage: "feed", runId, status: "not_configured" },
+        descriptor: researchArtifactKey(runId, "feed"),
       };
+    }
+    const output = await deps.runFeedStage({
+      runId,
+      userLogin,
+      trigger: params.trigger === "scheduled" ? "scheduled" : "manual",
+      ...(params.brokerId ? { brokerId: params.brokerId } : {}),
+      ...(params.mode ? { mode: params.mode } : {}),
     });
-  }
+    return {
+      output,
+      descriptor: `${researchArtifactKey(runId, "feed")} (${output.quotesRetrieved}/${output.universeSize})`,
+    };
+  });
+
+  registry.register(RESEARCH_ENRICH_STEP, async (ctx) => {
+    const params = (ctx.params ?? {}) as {
+      runId?: string;
+      userLogin?: string;
+      trigger?: "manual" | "scheduled";
+      brokerId?: string;
+      mode?: string;
+    };
+    const runId = params.runId || ctx.jobId.replace(/^research:/, "");
+    const userLogin = params.userLogin || "";
+    const input = ctx.input as ResearchFeedStageOutput | null;
+    if (!userLogin || !deps.runEnrichStage || !input || !Array.isArray(input.quotes)) {
+      return {
+        output: { stage: "enrich", runId, status: "not_configured" },
+        descriptor: researchArtifactKey(runId, "enrich"),
+      };
+    }
+    const output = await deps.runEnrichStage({
+      runId,
+      userLogin,
+      trigger: params.trigger === "scheduled" ? "scheduled" : "manual",
+      feed: input,
+      ...(params.brokerId ? { brokerId: params.brokerId } : {}),
+      ...(params.mode ? { mode: params.mode } : {}),
+    });
+    return {
+      output,
+      descriptor: `${researchArtifactKey(runId, "enrich")} (${Object.keys(output.bySymbol).length} symbols)`,
+    };
+  });
+
+  registry.register(RESEARCH_GENERATE_STEP, async (ctx) => {
+    const params = (ctx.params ?? {}) as {
+      runId?: string;
+      userLogin?: string;
+      trigger?: "manual" | "scheduled";
+    };
+    const runId = params.runId || ctx.jobId.replace(/^research:/, "");
+    const userLogin = params.userLogin || "";
+    const report = ctx.input as ResearchReport | null;
+    const usable = report && typeof report === "object" && Array.isArray((report as { ideas?: unknown }).ideas);
+    if (!userLogin || !deps.runGenerateStage || !usable) {
+      return {
+        output: { stage: "generate", runId, status: "not_configured" },
+        descriptor: researchArtifactKey(runId, "generate"),
+      };
+    }
+    const publication = await deps.runGenerateStage({
+      runId,
+      userLogin,
+      trigger: params.trigger === "scheduled" ? "scheduled" : "manual",
+      report: report as ResearchReport,
+    });
+    return {
+      output: { report, publication },
+      descriptor: `${researchArtifactKey(runId, "generate")} (${(publication as { reportId?: string | null })?.reportId ?? "no report"})`,
+    };
+  });
+
+  registry.register(RESEARCH_DELIVER_STEP, async (ctx) => {
+    const params = (ctx.params ?? {}) as {
+      runId?: string;
+      userLogin?: string;
+      trigger?: "manual" | "scheduled";
+    };
+    const runId = params.runId || ctx.jobId.replace(/^research:/, "");
+    const userLogin = params.userLogin || "";
+    const input = ctx.input as { report?: ResearchReport; publication?: unknown } | null;
+    if (!userLogin || !deps.runDeliverStage || !input?.report || input.publication === undefined) {
+      return {
+        output: { stage: "deliver", runId, status: "not_configured" },
+        descriptor: researchArtifactKey(runId, "deliver"),
+      };
+    }
+    const delivery = await deps.runDeliverStage({
+      runId,
+      userLogin,
+      trigger: params.trigger === "scheduled" ? "scheduled" : "manual",
+      report: input.report,
+      publication: input.publication,
+    });
+    return { output: delivery, descriptor: researchArtifactKey(runId, "deliver") };
+  });
 
   registry.register(ANALYZE_OODA_STEP, async (ctx) => {
     const params = (ctx.params ?? {}) as {
@@ -138,6 +280,22 @@ export function registerResearchSteps(
     const config = resolveResearchJobConfig();
     assertResearchAopCompliance(config, { userLogin });
     const trigger = params.trigger === "scheduled" ? "scheduled" : "manual";
+    const inputFeed = (ctx.input as { feed?: ResearchFeedStageOutput } | null)?.feed;
+    const feed =
+      inputFeed && Array.isArray(inputFeed.quotes)
+        ? inputFeed
+        : ctx.input && typeof ctx.input === "object" && Array.isArray((ctx.input as { quotes?: unknown }).quotes)
+          ? (ctx.input as ResearchFeedStageOutput)
+          : undefined;
+    const enrich =
+      ctx.input && typeof ctx.input === "object" && (ctx.input as { bySymbol?: unknown }).bySymbol && typeof (ctx.input as { bySymbol?: unknown }).bySymbol === "object"
+        ? (ctx.input as ResearchEnrichStageOutput)
+        : undefined;
+    if (deps.requireStageInputs && (!feed || !enrich)) {
+      throw new Error(
+        "research_stage_input_missing: the workflow-resident analyze stage requires the persisted feed and enrich outputs.",
+      );
+    }
     structuredLog.info("researchPipelineJobs.analyze_ooda_started", {
       jobId: ctx.jobId,
       runId,
@@ -151,6 +309,9 @@ export function registerResearchSteps(
       datasetAsOf: params.datasetAsOf ?? null,
       ...(typeof params.brokerId === "string" && params.brokerId ? { brokerId: params.brokerId } : {}),
       ...(typeof params.mode === "string" && params.mode ? { mode: params.mode } : {}),
+      ...(feed ? { feed } : {}),
+      ...(enrich ? { enrich } : {}),
+      ...(feed || enrich ? { deferPublication: true } : {}),
     });
     const ideaCount = Array.isArray((report as { ideas?: unknown[] }).ideas)
       ? (report as { ideas: unknown[] }).ideas.length

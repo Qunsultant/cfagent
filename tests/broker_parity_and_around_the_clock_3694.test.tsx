@@ -20,6 +20,7 @@ import {
   resetTenantProvidersStateForTest,
 } from "../src/client/tenantProviders";
 import { diagnosticsEndpoint, syncTarget } from "../src/client/brokerEndpoints";
+import { setBrokerEnvironmentForTest } from "../src/client/brokerEnvironment";
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -77,6 +78,9 @@ describe("Issue #3694 — Broker live/paper parity, Alpaca sync & mode buttons",
     document.body.appendChild(container);
     localStorage.clear();
     resetTenantProvidersStateForTest();
+    // Issue #5879: the menu reads the module environment value, so
+    // reset it — a switch in one test would otherwise leak into the next.
+    setBrokerEnvironmentForTest("TEST");
     vi.restoreAllMocks();
   });
 
@@ -88,7 +92,7 @@ describe("Issue #3694 — Broker live/paper parity, Alpaca sync & mode buttons",
     expect(target.diagnostics).toBe(false);
   });
 
-  it("SettingsMenu displays Alpaca · Paper when accountMode is paper", async () => {
+  it("SettingsMenu displays Alpaca · Paper when the persisted environment is paper", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => ({
@@ -98,9 +102,12 @@ describe("Issue #3694 — Broker live/paper parity, Alpaca sync & mode buttons",
       }))
     );
     setTenantProvidersStateForTest({ brokerId: "alpaca" });
+    // Issue #5879: the environment is set on the module value, not
+    // passed as an accountMode prop — the menu reads the one persisted selection.
+    setBrokerEnvironmentForTest("TEST");
     root = createRoot(container);
     await act(async () => {
-      root.render(<SettingsMenu accountMode="paper" />);
+      root.render(<SettingsMenu />);
     });
 
     const trigger = container.querySelector(".broker-dynamic-menu-trigger") as HTMLButtonElement;
@@ -126,7 +133,7 @@ describe("Issue #3694 — Broker live/paper parity, Alpaca sync & mode buttons",
     root = null;
   });
 
-  it("SettingsMenu displays Alpaca · Live when accountMode is live", async () => {
+  it("SettingsMenu displays Alpaca · Live when the persisted environment is live", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => ({
@@ -136,9 +143,11 @@ describe("Issue #3694 — Broker live/paper parity, Alpaca sync & mode buttons",
       }))
     );
     setTenantProvidersStateForTest({ brokerId: "alpaca" });
+    // Issue #5879: see the paper test above.
+    setBrokerEnvironmentForTest("PROD");
     root = createRoot(container);
     await act(async () => {
-      root.render(<SettingsMenu accountMode="live" />);
+      root.render(<SettingsMenu />);
     });
 
     const trigger = container.querySelector(".broker-dynamic-menu-trigger") as HTMLButtonElement;
@@ -159,7 +168,14 @@ describe("Issue #3694 — Broker live/paper parity, Alpaca sync & mode buttons",
   });
 
   it("clicking Paper/Live button triggers handleSwitchEnvironment and does not call OAuth", async () => {
-    const handleSwitchEnvironment = vi.fn();
+    // Issue #5879: the mock parent must do what the real parent does —
+    // a switch updates the module value the menu reads. Without the
+    // setBrokerEnvironmentForTest call the menu would still read TEST
+    // after the mocked confirm, and the second click would target PROD
+    // again instead of switching back to paper.
+    const handleSwitchEnvironment = vi.fn((target: "TEST" | "PROD") => {
+      setBrokerEnvironmentForTest(target);
+    });
     const handleStartOAuth = vi.fn();
 
     root = createRoot(container);

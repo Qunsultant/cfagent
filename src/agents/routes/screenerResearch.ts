@@ -91,7 +91,14 @@ export interface ScreenerResearchRouteContext {
   runResearchAndPublish(
     trigger: "manual" | "scheduled",
     userLogin?: string,
-    selection?: { brokerId?: string; mode?: string; runId?: string },
+    selection?: {
+      brokerId?: string;
+      mode?: string;
+      runId?: string;
+      stage?: "analyze" | "generate" | "deliver";
+      report?: import("../../services/researchPipeline").ResearchReport;
+      publication?: unknown;
+    },
   ): Promise<{
     success: boolean;
     error?: string;
@@ -617,12 +624,58 @@ export async function handleScreenerResearchRoutes(
           d1: resolveResearchD1(),
           env: ctx.env as Record<string, string | undefined>,
           ...selection,
+          researchDeps: {
+            runFeedStage: async (input) => {
+              const agent = ctx.getResearchAgent(input.userLogin);
+              if (!agent) {
+                throw new Error(
+                  "research_stage_unavailable: the research agent is not configured.",
+                );
+              }
+              return agent.runFeedStage({
+                trigger: input.trigger,
+                userLogin: input.userLogin,
+                ...(input.runId ? { runId: input.runId } : {}),
+                ...(input.brokerId ? { brokerId: input.brokerId } : {}),
+                ...(input.mode ? { mode: input.mode } : {}),
+              });
+            },
+            runEnrichStage: async (input) => {
+              const agent = ctx.getResearchAgent(input.userLogin);
+              if (!agent) {
+                throw new Error(
+                  "research_stage_unavailable: the research agent is not configured.",
+                );
+              }
+              return agent.runEnrichStage(input.feed, {
+                trigger: input.trigger,
+                userLogin: input.userLogin,
+                ...(input.runId ? { runId: input.runId } : {}),
+              });
+            },
+            runGenerateStage: async (input) =>
+              ctx.runResearchAndPublish("manual", input.userLogin, {
+                runId: input.runId,
+                stage: "generate",
+                report: input.report,
+              }),
+            runDeliverStage: async (input) =>
+              ctx.runResearchAndPublish("manual", input.userLogin, {
+                runId: input.runId,
+                stage: "deliver",
+                report: input.report,
+                publication: input.publication,
+              }),
+          },
           execute: (runCtx) =>
             runCtx
               ? runWithResearchRunId(runCtx.runId, () =>
                   triggerManualResearch(ctx.runResearchAndPublish, userLogin, {
                     ...selection,
                     runId: runCtx.runId,
+                    ...(runCtx.feed ? { feed: runCtx.feed } : {}),
+                    ...(runCtx.enrich ? { enrich: runCtx.enrich } : {}),
+                    ...(runCtx.deferPublication ? { stage: "analyze" as const } : {}),
                   }),
                 )
               : triggerManualResearch(ctx.runResearchAndPublish, userLogin, selection),
@@ -771,7 +824,51 @@ export async function handleScreenerResearchRoutes(
           sql: resolveResearchSql(),
           d1: resolveResearchD1(),
           env: ctx.env as Record<string, string | undefined>,
-          execute: () => triggerScheduledResearch(ctx.runResearchAndPublish, userLogin),
+          researchDeps: {
+            runFeedStage: async (input) => {
+              const agent = ctx.getResearchAgent(input.userLogin);
+              if (!agent) {
+                throw new Error(
+                  "research_stage_unavailable: the research agent is not configured.",
+                );
+              }
+              return agent.runFeedStage({
+                trigger: input.trigger,
+                userLogin: input.userLogin,
+                ...(input.runId ? { runId: input.runId } : {}),
+                ...(input.brokerId ? { brokerId: input.brokerId } : {}),
+                ...(input.mode ? { mode: input.mode } : {}),
+              });
+            },
+            runEnrichStage: async (input) => {
+              const agent = ctx.getResearchAgent(input.userLogin);
+              if (!agent) {
+                throw new Error(
+                  "research_stage_unavailable: the research agent is not configured.",
+                );
+              }
+              return agent.runEnrichStage(input.feed, {
+                trigger: input.trigger,
+                userLogin: input.userLogin,
+                ...(input.runId ? { runId: input.runId } : {}),
+              });
+            },
+            runGenerateStage: async (input) =>
+              ctx.runResearchAndPublish("manual", input.userLogin, {
+                runId: input.runId,
+                stage: "generate",
+                report: input.report,
+              }),
+            runDeliverStage: async (input) =>
+              ctx.runResearchAndPublish("manual", input.userLogin, {
+                runId: input.runId,
+                stage: "deliver",
+                report: input.report,
+                publication: input.publication,
+              }),
+          },
+          execute: (runCtx) =>
+            triggerScheduledResearch(ctx.runResearchAndPublish, userLogin, runCtx?.feed, runCtx?.enrich, runCtx?.deferPublication),
         });
         const out = {
           ...dispatched.outcome,

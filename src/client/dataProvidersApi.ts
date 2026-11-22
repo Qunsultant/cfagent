@@ -182,6 +182,10 @@ export interface FeedJobView {
   sourceId: string;
   dataset: string;
   label: string;
+  /** The catalog family (#6048); absent on responses predating it. */
+  family?: string;
+  /** The declared consumers (surface copy; the validated graph is the job-graph issue). */
+  consumers?: readonly string[];
   feed: FeedJobDatasetView | null;
   pipeline: {
     state: string;
@@ -829,6 +833,27 @@ async function send<T>(path: string, init?: RequestInit): Promise<T> {
     throw err;
   }
   return data;
+}
+
+/** The Output action's bounded artifact preview (#6048). */
+export interface FeedArtifactPreviewView {
+  jobId: string;
+  dataset: string;
+  artifactId: string;
+  asOf: string;
+  universe: unknown;
+  run: FeedJobRunRecordView;
+  preview: { dataset: string; rows: number; sample: unknown[] };
+}
+
+/** Read the latest persisted artifact's bounded preview; never fetches a provider. */
+export async function fetchFeedArtifact(
+  providerId: string,
+  limit = 20
+): Promise<FeedArtifactPreviewView> {
+  return send<FeedArtifactPreviewView>(
+    `/api/data-providers/${encodeURIComponent(providerId)}/feed-artifact?limit=${limit}`
+  );
 }
 
 export async function fetchDataProviders(): Promise<DataProvidersList> {

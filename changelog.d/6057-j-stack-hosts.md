@@ -1,0 +1,3 @@
+### Added
+
+- **J-stack hosts documentation (Qunsultant/cfagent#6057):** new `docs/architecture/application/j-stack-hosts.md` — the verified inventory of all eighteen `JobPipelineControl` construction sites (what each enables, its invocation substrate, its differing deps), the two senses of "host" reconciled, workflow-shard / sync / async-alarm defined, the `JobPipelineDeps` composables, substrate selection stated as host composition only (journal-as-spec routed to #3220 / #4808), the five-axes justification for the host count, Workflow-platform utilization with its trackers (#5780), the #5272 umbrella tracker map, and three open staleness flags in the reference doc (not fixed here).

@@ -317,11 +317,20 @@ describe("pipeline feed-jobs routes (#3535)", () => {
     expect(body.code).toBe("FEED_JOB_ACTION_REFUSED");
   });
 
-  it("door unbound: GET still answers (empty jobs), POST refuses by name", async () => {
+  it("door unbound: GET lists the catalog with honest nulls, POST refuses by name", async () => {
     const { ctx } = await makeCtx({ feedPipelineDoor: null });
     const get = await callRoute(ctx, "GET", "/data-providers/yahoo/feed-jobs");
     expect(get.status).toBe(200);
-    expect(((await get.json()) as any).jobs).toEqual([]);
+    // Issue #6046: an unbound door is not "no jobs" — the catalog lists them
+    // and every pipeline-only field stays null rather than fabricated.
+    const jobs = ((await get.json()) as any).jobs as any[];
+    expect(jobs.length).toBeGreaterThan(0);
+    expect(jobs.every((job) => job.sourceId === "yahoo")).toBe(true);
+    expect(
+      jobs.every(
+        (job) => job.feed === null && job.pipeline === null && job.schedule === null,
+      ),
+    ).toBe(true);
     const post = await callRoute(
       ctx,
       "POST",

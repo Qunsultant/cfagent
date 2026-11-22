@@ -31,16 +31,18 @@
 export const DATA_HUB_TAB = "data-hub";
 
 /** The consolidated home's views. */
-export type DataHubView = "data-providers" | "data-lifecycle" | "downloads";
+export type DataHubView = "data-providers" | "feeds" | "data-lifecycle" | "downloads";
 
 export const DATA_HUB_VIEWS: readonly DataHubView[] = [
   "data-providers",
+  "feeds",
   "data-lifecycle",
   "downloads",
 ];
 
 export const DATA_HUB_VIEW_LABELS: Record<DataHubView, string> = {
   "data-providers": "Data Providers",
+  feeds: "Feeds",
   "data-lifecycle": "Data Lifecycle",
   downloads: "Parameters & Export",
 };

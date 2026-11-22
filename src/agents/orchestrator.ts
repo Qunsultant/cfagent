@@ -142,6 +142,10 @@ import { extractMessageText, createTurnTools, deriveTurn, assembleGrounding, typ
 import { createOpenaimpMcpFetch, ensureOpenaimpMcpConnection, chatNlqTurnGate, resolveStockCopilotMcpActivation, STOCK_COPILOT_SOURCE_TAB, type ChatNlqTurnGateResult, type EnsureOpenaimpMcpResult } from "./orchestrator/meshMcpClient";
 import { logChatActivity, enqueueHttpRequest, type HttpEntryContext } from "./orchestrator/httpEntry";
 import { runResearchAndPublish, deliverResearchReport, sendResearchSummaryEmail, type ResearchPublishContext } from "./orchestrator/researchPublish";
+import type { ResearchFeedStageOutput } from "../services/researchFeedHandoff";
+import type { ResearchReportArtifactOutcome } from "../trading";
+import type { ResearchEnrichStageOutput } from "../services/researchEnrichHandoff";
+import type { ResearchReport } from "../services/researchPipeline";
 import { ETradeEmailTradingService } from "../trading";
 import { ETradeBrowserService } from "../services/browserAgent";
 import { runGovernanceSeed } from "./orchestrator/governanceSeed";
@@ -963,7 +967,14 @@ export class OrchestratorAgent extends PortThink {
   async runResearchAndPublish(
     trigger: "manual" | "scheduled",
     userLogin?: string,
-    selection?: { brokerId?: string; mode?: string; runId?: string }
+    selection?: {
+      brokerId?: string;
+      mode?: string;
+      runId?: string;
+      stage?: "analyze" | "generate" | "deliver";
+      report?: ResearchReport;
+      publication?: { reportId: string | null; created: boolean; artifacts: ResearchReportArtifactOutcome };
+    }
   ): Promise<{
     success: boolean;
     error?: string;
@@ -977,6 +988,49 @@ export class OrchestratorAgent extends PortThink {
     return runResearchAndPublish(this.researchPublishContext(), trigger, userLogin, selection);
   }
 
+  /**
+   * Issue #6092 - the workflow residency's stage door: feed/enrich run on the
+   * owning ResearchAgent (its history/universe/account deps are bound there),
+   * not rebuilt in the workflow host.
+   */
+  async runResearchStage(input: {
+    stage: "feed" | "enrich";
+    runId: string;
+    userLogin?: string;
+    trigger?: "manual" | "scheduled";
+    feed?: ResearchFeedStageOutput;
+    brokerId?: string;
+    mode?: string;
+  }): Promise<ResearchFeedStageOutput | ResearchEnrichStageOutput> {
+    const agent = this.getResearchAgent(input.userLogin);
+    if (!agent) {
+      throw new Error("research_stage_unavailable: ResearchAgent binding not configured.");
+    }
+    const req = {
+      trigger: input.trigger ?? "manual",
+      userLogin: input.userLogin,
+      runId: input.runId,
+      ...(input.brokerId ? { brokerId: input.brokerId } : {}),
+      ...(input.mode ? { mode: input.mode } : {}),
+    };
+    if (input.stage === "feed") return agent.runFeedStage(req);
+    if (!input.feed) {
+      throw new Error("research_stage_input_missing: enrich requires the feed output.");
+    }
+    return agent.runEnrichStage(input.feed, req);
+  }
+
+  /** Issue #6092 - the evaluate stage through the owning ResearchAgent. */
+  async runResearchEvaluate(input: {
+    runId: string;
+    userLogin?: string;
+  }): Promise<unknown> {
+    const agent = this.getResearchAgent(input.userLogin);
+    if (!agent) {
+      throw new Error("research_stage_unavailable: ResearchAgent binding not configured.");
+    }
+    return agent.evaluateRun(input.runId, input.userLogin ?? "");
+  }
   // Issue #992: extracted to ./orchestrator/researchPublish.ts (deliverResearchReport);
   private async deliverResearchReport(
     agent: { getResearchPdfByKey(k: string): Promise<{ bytes: Uint8Array; fileName: string } | null>; refreshIdeaQuotes(r: unknown, u?: string): Promise<Array<{ symbol: string; status: string; detail: string }>>; getResearchConfig(): Promise<{ autoEmail?: boolean; emailTo?: string }> },

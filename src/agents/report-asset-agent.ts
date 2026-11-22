@@ -20,7 +20,7 @@ import {
   reportAssetA2AOutcome,
   type ReportAssetA2AOutcome,
 } from "./reportAssetA2aDispatch";
-import type { ScreenerPdfOptions } from "../trading";
+import { scrubFailureMessage, type ScreenerPdfOptions } from "../trading";
 import type { Env } from "../types";
 import { getServiceUserLogin } from "../security/serviceIdentity";
 import { putReportPdf } from "../services/reportBlobStore";
@@ -52,6 +52,10 @@ export interface AssetResult {
   key: string;
   fileName: string;
 }
+
+export type AssetGenerationOutcome =
+  | { status: "generated"; asset: AssetResult }
+  | { status: "failed"; error: string };
 
 /**
  * One stored asset's metadata, as listed by listAssets (#2349):
@@ -89,7 +93,7 @@ export class ReportAssetAgent extends PortThink {
    * runReportPipeline" item. The agent remains the single owner of
    * the generate step; the pipeline owns the dispatch.
    */
-  async generateAsset(request: AssetRequest): Promise<AssetResult | null> {
+  async generateAssetOutcome(request: AssetRequest): Promise<AssetGenerationOutcome> {
     try {
       const { type, data } = request;
       const { generateReportPdf, getReportFileName } = await import("../services/unifiedReportPipeline");
@@ -105,15 +109,22 @@ export class ReportAssetAgent extends PortThink {
         get: async (k: string) => (await (this.ctx.storage as any).get(k)) ?? null,
       };
       await putReportPdf(this.env, storage as any, key, fileName, bytes);
-      return { key, fileName };
+      return { status: "generated", asset: { key, fileName } };
     } catch (err) {
+      const message = scrubFailureMessage(err instanceof Error ? err.message : String(err));
       structuredLog.warn("reportAssetAgent.generate_asset_failed", {
         message: `[ReportAssetAgent] generateAsset(${request.type}) failed:`,
         type: request.type,
-        error: err instanceof Error ? err.message : String(err),
+        error: message,
       });
-      return null;
+      return { status: "failed", error: `REPORT_ASSET_GENERATION_FAILED: ${message}` };
     }
+  }
+
+  /** Backward-compatible null-returning door for existing asset callers. */
+  async generateAsset(request: AssetRequest): Promise<AssetResult | null> {
+    const outcome = await this.generateAssetOutcome(request);
+    return outcome.status === "generated" ? outcome.asset : null;
   }
 
   /**
@@ -211,25 +222,47 @@ export async function generatePdfAsset(
   data: unknown,
   pdfOptions?: ScreenerPdfOptions
 ): Promise<AssetResult | null> {
+  const outcome = await generatePdfAssetOutcome(env, userLogin, type, data, pdfOptions);
+  return outcome.status === "generated" ? outcome.asset : null;
+}
+
+/** Detailed variant for report pipelines that persist per-format failures. */
+export async function generatePdfAssetOutcome(
+  env: { REPORT_ASSET_AGENT?: any },
+  userLogin: string,
+  type: AssetType,
+  data: unknown,
+  pdfOptions?: ScreenerPdfOptions,
+): Promise<AssetGenerationOutcome> {
+  const ns = (env as any).REPORT_ASSET_AGENT;
+  if (!ns) {
+    structuredLog.error("reportAssetAgent.generate_pdf_asset_skipped_no_binding", {
+      message: `[ReportAssetAgent] generatePdfAsset(${type}) skipped: REPORT_ASSET_AGENT binding is not configured.`,
+      type,
+    });
+    return {
+      status: "failed",
+      error: "REPORT_ASSET_BINDING_MISSING: REPORT_ASSET_AGENT is not configured.",
+    };
+  }
   try {
-    const ns = (env as any).REPORT_ASSET_AGENT;
-    if (!ns) {
-      // Issue #912: was silent — log why PDF generation is skipped.
-      structuredLog.error("reportAssetAgent.generate_pdf_asset_skipped_no_binding", {
-        message: `[ReportAssetAgent] generatePdfAsset(${type}) skipped: REPORT_ASSET_AGENT binding not configured in worker env. PDF will not be generated.`,
-        type,
-      });
-      return null;
-    }
     const agent = ns.get(ns.idFromName(reportAssetAgentName(userLogin, getServiceUserLogin(env as Env)))) as unknown as ReportAssetAgent;
-    return await agent.generateAsset({ type, data, userLogin, pdfOptions });
+    if (typeof (agent as any).generateAssetOutcome === "function") {
+      return await agent.generateAssetOutcome({ type, data, userLogin, pdfOptions });
+    }
+    // Compatibility for a stale test double or older local actor stub.
+    const asset = await agent.generateAsset({ type, data, userLogin, pdfOptions });
+    return asset
+      ? { status: "generated", asset }
+      : { status: "failed", error: "REPORT_ASSET_GENERATION_FAILED: ReportAssetAgent returned no asset." };
   } catch (err) {
+    const message = scrubFailureMessage(err instanceof Error ? err.message : String(err));
     structuredLog.warn("reportAssetAgent.generate_pdf_asset_failed", {
       message: `[ReportAssetAgent] generatePdfAsset(${type}) failed:`,
       type,
-      error: err instanceof Error ? err.message : String(err),
+      error: message,
     });
-    return null;
+    return { status: "failed", error: `REPORT_ASSET_DISPATCH_FAILED: ${message}` };
   }
 }
 

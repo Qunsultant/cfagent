@@ -357,6 +357,24 @@ describe("feed routes (#3530 S1)", () => {
     expect(yahoo.feedJobs[0].pipeline.lastRunStatus).toBe("success");
   });
 
+  it("GET feed-artifact 404s before a run and returns a bounded preview after it", async () => {
+    const { ctx } = await makeCtx();
+    const before = await callRoute(ctx, "GET", "/data-providers/yahoo/feed-artifact");
+    expect(before.status).toBe(404);
+    expect(((await before.json()) as any).code).toBe("FEED_ARTIFACT_MISSING");
+
+    const run = await callRoute(ctx, "POST", "/data-providers/yahoo/feed-run", {});
+    expect(run.status).toBe(200);
+
+    const res = await callRoute(ctx, "GET", "/data-providers/yahoo/feed-artifact?limit=1");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as any;
+    expect(body.jobId).toBe(YAHOO_JOB_ID);
+    expect(body.preview.dataset).toBe("quotes");
+    expect(body.preview.rows).toBe(2);
+    expect(body.preview.sample).toHaveLength(1);
+  });
+
   it("POST feed-run for a provider with no registered job is a typed 404", async () => {
     // S2 adaptation (#3530 S2, disclosed): the no-job exemplar was
     // etrade in S1; etrade has a job since S2, so the invariant

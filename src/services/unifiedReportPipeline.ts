@@ -29,7 +29,7 @@
  * callers of runReportPipeline are unchanged.
  */
 
-import type { ScreenerPdfOptions } from "../trading";
+import { scrubFailureMessage, type ScreenerPdfOptions } from "../trading";
 import type { JobRunTrigger } from "../data/jobRunRecordPorts";
 import { createStructuredLogger } from "../observability/structuredLogger";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
@@ -156,24 +156,34 @@ export async function generateReportStage(
 
   try {
     // Issue #680: delegate to ReportAssetAgent (single owner for PDF gen).
-    const { generatePdfAsset } = await import("../agents/report-asset-agent");
+    const reportAssetAgent = await import("../agents/report-asset-agent");
+    const { generatePdfAsset, generatePdfAssetOutcome } = reportAssetAgent;
     // Issue #1641: the asset type IS the input type — the old
     // screener-else-options mapping silently generated an OPTIONS pdf
     // for a research input. ReportAssetAgent supports all three.
     const assetType = input.type;
     // Issue #1278 (#1173 R5): retry under the R1 pipeline policy
     // (retry.report — PIPELINE_REPORT_RETRY_* / pipeline.retry.report).
-    // generatePdfAsset never throws: null IS its failure signal, so a
-    // null asset counts as a failed attempt and is retried like a throw.
+    // The detailed asset outcome preserves the ReportAssetAgent's cause;
+    // retain the legacy helper fallback for existing test/worker stubs.
     const { resolvePipelinePolicy } = await import("./pipelinePolicy");
     const { withRetry } = await import("./resilience");
     const policy = resolvePipelinePolicy(env as Record<string, unknown>, settings);
     const asset = await withRetry(
       async () => {
-        const generated = await generatePdfAsset(env as any, input.userLogin, assetType as any, input.result, input.pdfOptions);
-        if (!generated) {
-          throw new Error("generatePdfAsset returned null");
+        if (typeof generatePdfAssetOutcome === "function") {
+          const outcome = await generatePdfAssetOutcome(
+            env as any,
+            input.userLogin,
+            assetType as any,
+            input.result,
+            input.pdfOptions,
+          );
+          if (outcome.status === "failed") throw new Error(outcome.error);
+          return outcome.asset;
         }
+        const generated = await generatePdfAsset(env as any, input.userLogin, assetType as any, input.result, input.pdfOptions);
+        if (!generated) throw new Error("REPORT_ASSET_GENERATION_FAILED: ReportAssetAgent returned no asset.");
         return generated;
       },
       policy.retry.report,
@@ -198,7 +208,7 @@ export async function generateReportStage(
       pdfStatus: "generated",
     };
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = scrubFailureMessage(err instanceof Error ? err.message : String(err));
     structuredLog.error("unified_report.pdf_generation_failed", {
       message: `[UnifiedReport] PDF generation failed (${input.type}/${input.trigger}): ${message}`,
       type: input.type,

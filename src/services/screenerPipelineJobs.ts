@@ -11,8 +11,8 @@
  * nested chain of five generic nodes for a market run — kinds
  * feed -> enrich -> analyze -> generate -> deliver, each 1:1
  * with a v2 catalog stage (#5884 6b3: the generic steps run
- * the chain; the deliver node stays the bespoke
- * screener.deliver step until 6c). The goal leg rides its own
+ * the chain; #5885 6c: the deliver node runs generic
+ * deliver.apply with the screener marker). The goal leg rides its own
  * definition (#5873): the "goalScreen" spec, same six kinds,
  * the analyze node the goal dispatch (screener.goal) — a goal
  * run never executes as a market screen, #1996).
@@ -99,14 +99,17 @@ export const SCREENER_NODE_KINDS = ["feed", "enrich", "analyze", "generate", "de
  * the #4365-P04 pin holds these equal to the catalog, and the
  * #5884 definition test holds the built nodes' steps equal to
  * the family constants (FEED_PULL_STEP, ENRICH_SCREENER_STEP,
- * ANALYZE_SCREENER_STEP, GENERATE_APPLY_STEP).
+ * ANALYZE_SCREENER_STEP, GENERATE_APPLY_STEP, DELIVER_APPLY_STEP).
+ * Issue #5885 (6c): the deliver node runs generic deliver.apply,
+ * not the bespoke screener.deliver step (which the goalScreen
+ * spec still uses).
  */
 export const SCREENER_NODE_STEPS: Record<(typeof SCREENER_NODE_KINDS)[number], string> = {
   feed: "feed.pull",
   enrich: "enrich.screener",
   analyze: "analyze.screener",
   generate: "generate.apply",
-  deliver: SCREENER_DELIVER_STEP,
+  deliver: "deliver.apply",
 };
 
 /**
@@ -799,8 +802,35 @@ export function overlayEngineDelivery(
   };
 }
 
+/**
+ * Issue #5885 (#4437 slice 6c) — the market-outcome
+ * construction, extracted pure so it is unit-testable without
+ * the orchestrator door: the payload → outcome conversion
+ * (screenerOutcomeFromRunResult, unchanged) plus the canonical
+ * report id stamp. The stamp fires ONLY for payloads that
+ * carry the field — the generic generate output (the converter
+ * builds it in) — never for a bespoke ScreenerRunResult, which
+ * has no such field, so the bespoke path is unchanged and a
+ * bespoke market run with PDFs still takes the PDF-adoption
+ * branch downstream (the C4 canonical branch sits after the
+ * pdf-failed branch and before the no-keys branch in
+ * asyncJobs.ts; stamping from opts.canonicalReportId instead
+ * would have diverted those runs). Without the stamp a generic
+ * delivery is dead on arrival: no pdfKeys and no canonical id
+ * hits "no artifact" → FAILURE_REPORT_ARTIFACT_MISSING.
+ */
+export function buildScreenerMarketOutcome(
+  payload: Record<string, unknown>,
+  appBaseUrl: string | undefined,
+): ScreenerRunOutcome {
+  const outcome = screenerOutcomeFromRunResult("stock", payload, appBaseUrl);
+  return typeof payload.canonicalReportId === "string" && payload.canonicalReportId
+    ? { ...outcome, canonicalReportId: payload.canonicalReportId }
+    : outcome;
+}
+
 /** The deliver door, mirroring screenerWorkflow.ts buildDeps (goal seam + market outcome sink). */
-function buildDeliverDoor(env: Env): ScreenerStepDeps["deliverOutcome"] {
+export function buildDeliverDoor(env: Env): ScreenerStepDeps["deliverOutcome"] {
   return async (payload, userLogin, opts) => {
     const orchestrator = orchestratorDoor(env);
     if (opts?.goalScreen) {
@@ -857,7 +887,7 @@ function buildDeliverDoor(env: Env): ScreenerStepDeps["deliverOutcome"] {
       return;
     }
     const outcome = overlayEngineDelivery(
-      screenerOutcomeFromRunResult("stock", payload as Record<string, unknown>, env.APP_BASE_URL),
+      buildScreenerMarketOutcome(payload as Record<string, unknown>, env.APP_BASE_URL),
       opts?.delivery,
       opts?.stageChain,
     );

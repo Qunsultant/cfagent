@@ -7,6 +7,8 @@
  */
 
 import type { TriggerSource } from "./researchPipeline";
+import type { ResearchFeedStageOutput } from "./researchFeedHandoff";
+import type { ResearchEnrichStageOutput } from "./researchEnrichHandoff";
 
 const runIdStack: string[] = [];
 
@@ -34,6 +36,12 @@ export interface ResearchRunSelection {
    * run id, no second mint.
    */
   runId?: string;
+  /** Issue #6063 — the feed stage output, threaded into the run. */
+  feed?: ResearchFeedStageOutput;
+  /** Issue #6064 — the enrich stage output, threaded into the run. */
+  enrich?: ResearchEnrichStageOutput;
+  /** Issue #6065 — analyze stops at the report; generate/deliver own publication. */
+  stage?: "analyze" | "generate" | "deliver";
 }
 
 export type PublishEntry<R> = (
@@ -60,7 +68,12 @@ export function triggerManualResearch<R>(
  */
 export function triggerScheduledResearch<R>(
   publish: PublishEntry<R>,
-  userLogin?: string
+  userLogin?: string,
+  feed?: ResearchFeedStageOutput,
+  enrich?: ResearchEnrichStageOutput,
+  deferPublication?: boolean
 ): Promise<R> {
-  return publish("scheduled", userLogin);
+  return feed || enrich
+    ? publish("scheduled", userLogin, { ...(feed ? { feed } : {}), ...(enrich ? { enrich } : {}), ...(deferPublication ? { stage: "analyze" as const } : {}) })
+    : publish("scheduled", userLogin);
 }

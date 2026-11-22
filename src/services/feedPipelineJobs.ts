@@ -78,6 +78,10 @@ export interface FeedPipelineCatalogEntry {
   jobId: string;
   sourceId: DataProviderId;
   dataset: string;
+  /** The family a surface groups by (e.g. "nasdaq100"); absent = not in a named family. */
+  family?: string;
+  /** The declared consumers of this dataset (surface copy; the validated graph is #6049). */
+  consumers?: readonly string[];
   label: string;
   /** Lower-case name fragments the copilot/UX resolution accepts. */
   aliases: readonly string[];
@@ -93,6 +97,8 @@ export const FEED_PIPELINE_CATALOG: readonly FeedPipelineCatalogEntry[] = [
     jobId: "yahoo-nasdaq100-quotes",
     sourceId: "yahoo",
     dataset: "quotes",
+    family: "index100",
+    consumers: ["enrich", "analyze", "research"],
     label: "Yahoo quotes — Nasdaq-100",
     aliases: ["yahoo", "yahoo quotes", "yahoo nasdaq100", "nasdaq100 quotes"],
   },
@@ -100,6 +106,8 @@ export const FEED_PIPELINE_CATALOG: readonly FeedPipelineCatalogEntry[] = [
     jobId: "yahoo-nasdaq100-fundamentals",
     sourceId: "yahoo",
     dataset: "fundamentals",
+    family: "index100",
+    consumers: ["enrich", "analyze"],
     // #3930: ONE parameterized fundamentals job — the label
     // names the DEFAULT universe (nasdaq100); a run's universe
     // input serves any stored list.
@@ -110,6 +118,8 @@ export const FEED_PIPELINE_CATALOG: readonly FeedPipelineCatalogEntry[] = [
     jobId: "yahoo-nasdaq100-technicals",
     sourceId: "yahoo",
     dataset: "technicals",
+    family: "index100",
+    consumers: ["enrich", "screener"],
     // #3931: ONE parameterized technicals job — the label
     // names the DEFAULT universe (nasdaq100); a run's universe
     // input serves any stored list.
@@ -120,6 +130,8 @@ export const FEED_PIPELINE_CATALOG: readonly FeedPipelineCatalogEntry[] = [
     jobId: "yahoo-nasdaq100-sentiment",
     sourceId: "yahoo",
     dataset: "sentiment",
+    family: "index100",
+    consumers: ["enrich", "screener"],
     // #3932: ONE parameterized sentiment job — the label
     // names the DEFAULT universe (nasdaq100); a run's universe
     // input serves any stored list.
@@ -275,6 +287,8 @@ export const FEED_PIPELINE_CATALOG: readonly FeedPipelineCatalogEntry[] = [
     jobId: "alpaca-nasdaq100-quotes",
     sourceId: "alpaca",
     dataset: "quotes",
+    family: "index100",
+    consumers: ["enrich", "analyze", "research"],
     label: "Alpaca quotes — Nasdaq-100",
     aliases: ["alpaca"],
   },
@@ -282,6 +296,8 @@ export const FEED_PIPELINE_CATALOG: readonly FeedPipelineCatalogEntry[] = [
     jobId: "etrade-nasdaq100-quotes",
     sourceId: "etrade",
     dataset: "quotes",
+    family: "index100",
+    consumers: ["enrich", "analyze", "research"],
     label: "E*TRADE quotes — Nasdaq-100",
     aliases: ["etrade", "e*trade", "e-trade"],
   },
@@ -289,6 +305,8 @@ export const FEED_PIPELINE_CATALOG: readonly FeedPipelineCatalogEntry[] = [
     jobId: "public-nasdaq100-quotes",
     sourceId: "public",
     dataset: "quotes",
+    family: "index100",
+    consumers: ["enrich", "analyze", "research"],
     label: "Public.com quotes — Nasdaq-100",
     aliases: ["public", "public.com"],
   },
@@ -296,6 +314,7 @@ export const FEED_PIPELINE_CATALOG: readonly FeedPipelineCatalogEntry[] = [
     jobId: "etrade-options-chains",
     sourceId: "etrade",
     dataset: "options-chains",
+    consumers: ["options screens"],
     // #4065: ONE chains job per optionsChains-serving source —
     // the label names the source; a run's universe/symbols
     // input names what it actually pulls.
@@ -306,6 +325,7 @@ export const FEED_PIPELINE_CATALOG: readonly FeedPipelineCatalogEntry[] = [
     jobId: "alpaca-options-chains",
     sourceId: "alpaca",
     dataset: "options-chains",
+    consumers: ["options screens"],
     label: "Alpaca options chains — parameterized (default Nasdaq-100)",
     aliases: ["alpaca options chains"],
   },
@@ -313,6 +333,7 @@ export const FEED_PIPELINE_CATALOG: readonly FeedPipelineCatalogEntry[] = [
     jobId: "public-options-chains",
     sourceId: "public",
     dataset: "options-chains",
+    consumers: ["options screens"],
     label: "Public.com options chains — parameterized (default Nasdaq-100)",
     aliases: ["public options chains"],
   },
@@ -320,6 +341,8 @@ export const FEED_PIPELINE_CATALOG: readonly FeedPipelineCatalogEntry[] = [
     jobId: NASDAQ100_UNIVERSE_JOB_ID,
     sourceId: "nasdaq",
     dataset: "universe",
+    family: "index100",
+    consumers: ["feed jobs"],
     label: "Nasdaq-100 universe (stored index list)",
     aliases: ["nasdaq", "nasdaq100", "nasdaq-100", "nasdaq universe"],
   },
@@ -880,6 +903,10 @@ export interface FeedJobSurfaceView {
   sourceId: DataProviderId;
   dataset: string;
   label: string;
+  /** The catalog family, when the entry declares one (surface grouping only). */
+  family?: string;
+  /** The declared consumers (surface copy; the validated graph is #6049). */
+  consumers?: readonly string[];
   feed: FeedStatusView | null;
   pipeline: {
     state: string;
@@ -960,6 +987,8 @@ export async function buildFeedJobSurfaceView(args: {
     sourceId: args.entry.sourceId,
     dataset: args.entry.dataset,
     label: args.entry.label,
+    ...(args.entry.family !== undefined ? { family: args.entry.family } : {}),
+    ...(args.entry.consumers !== undefined ? { consumers: args.entry.consumers } : {}),
     feed,
     pipeline,
     nextScheduledRun,

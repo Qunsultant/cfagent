@@ -21,6 +21,7 @@ import {
 } from "../../services/researchTaskLedger";
 import type { ResearchAgent } from "../research-agent";
 import type { ResearchReport } from "../../services/researchPipeline";
+import type { ResearchFeedStageOutput } from "../../services/researchFeedHandoff";
 import type { ResearchReportArtifactOutcome, ResearchWorkbookOutcome } from "../../trading";
 import { resolveCopilotTradingSelection } from "../copilotTradingMode";
 import { resolveTenantBroker } from "../../services/tenantProviders";
@@ -161,7 +162,19 @@ export async function runResearchAndPublish(ctx: ResearchPublishContext,
   trigger: "manual" | "scheduled",
   userLogin?: string,
   /** Issue #5912 — the venue/mode this run names, if any. */
-  selection?: { brokerId?: string; mode?: string; runId?: string }
+  selection?: {
+    brokerId?: string;
+    mode?: string;
+    runId?: string;
+    feed?: ResearchFeedStageOutput;
+    enrich?: import("../../services/researchEnrichHandoff").ResearchEnrichStageOutput;
+    /** Issue #6066 - the publish leg this call performs; absent = the full run. */
+    stage?: "analyze" | "generate" | "deliver";
+    /** Generate/deliver input: the report analyze returned. */
+    report?: ResearchReport;
+    /** Deliver input: the generation result. */
+    publication?: { reportId: string | null; created: boolean; artifacts: ResearchReportArtifactOutcome };
+  }
 ): Promise<{
   success: boolean;
   error?: string;
@@ -194,6 +207,40 @@ export async function runResearchAndPublish(ctx: ResearchPublishContext,
   const agent = ctx.getResearchAgent(login);
   if (!agent) {
     return { success: false, error: "ResearchAgent binding not configured." };
+  }
+  // Issue #6066 - the generate and deliver legs are their own stages: they take
+  // the report (and the generation result) from the previous engine step and do
+  // only their leg. No pipeline run, no second document, no second delivery.
+  const stage = selection?.stage ?? "full";
+  if (stage === "generate" || stage === "deliver") {
+    const stageReport = selection?.report;
+    if (!stageReport) {
+      return { success: false, error: "research_stage_report_missing" };
+    }
+    if (stage === "generate") {
+      const publication = await generateAndStoreResearchReport(ctx, agent, stageReport, {
+        trigger,
+        userLogin: login,
+      });
+      return {
+        success: true,
+        reportId: publication.reportId,
+        created: publication.created,
+        artifacts: publication.artifacts,
+        report: stageReport,
+      };
+    }
+    const publication = selection?.publication;
+    if (!publication) {
+      return { success: false, error: "research_stage_publication_missing" };
+    }
+    const delivery = await deliverResearchReport(ctx, agent, stageReport, {
+      reportId: publication.reportId,
+      pdfKey: publication.artifacts.pdfKey ?? null,
+      trigger,
+      userLogin: login,
+    });
+    return { success: true, reportId: publication.reportId, emailed: delivery.emailed, report: stageReport };
   }
   // Research uses the same tenant broker + paper/live selection as Copilot.
   // Resolve missing fields once at the publish boundary so manual and
@@ -274,21 +321,27 @@ export async function runResearchAndPublish(ctx: ResearchPublishContext,
     // below triggers on status, never on a throw, so without this the
     // throw fails the whole run instead of degrading it.
     let child: { status: string; error?: string };
-    try {
-      child = await ctx.runAgentTool(ResearchAgent, {
-        input: {
-          trigger,
-          userLogin: login,
-          ...(effectiveSelection?.runId ? { runId: effectiveSelection.runId } : {}),
-          ...(effectiveSelection?.brokerId ? { brokerId: effectiveSelection.brokerId } : {}),
-          ...(effectiveSelection?.mode ? { mode: effectiveSelection.mode } : {}),
-        },
-      });
-    } catch (err) {
-      child = {
-        status: "error",
-        error: err instanceof Error ? err.message : String(err),
-      };
+    if (effectiveSelection?.feed) {
+      // Issue #6063 — the feed stage already ran on J-stack; the direct
+      // pipeline consumes its persisted output instead of a second fetch.
+      child = { status: "feed_stage" };
+    } else {
+      try {
+        child = await ctx.runAgentTool(ResearchAgent, {
+          input: {
+            trigger,
+            userLogin: login,
+            ...(effectiveSelection?.runId ? { runId: effectiveSelection.runId } : {}),
+            ...(effectiveSelection?.brokerId ? { brokerId: effectiveSelection.brokerId } : {}),
+            ...(effectiveSelection?.mode ? { mode: effectiveSelection.mode } : {}),
+          },
+        });
+      } catch (err) {
+        child = {
+          status: "error",
+          error: err instanceof Error ? err.message : String(err),
+        };
+      }
     }
     let report = await agent.getLatest();
     if (child.status !== "completed" || !report || report.runId === previousRunId || report.trigger !== trigger || report.userLogin !== login) {
@@ -313,6 +366,8 @@ export async function runResearchAndPublish(ctx: ResearchPublishContext,
         ...(effectiveSelection?.runId ? { runId: effectiveSelection.runId } : {}),
         ...(effectiveSelection?.brokerId ? { brokerId: effectiveSelection.brokerId as never } : {}),
         ...(effectiveSelection?.mode ? { mode: effectiveSelection.mode } : {}),
+        ...(effectiveSelection?.feed ? { feed: effectiveSelection.feed } : {}),
+        ...(effectiveSelection?.enrich ? { enrich: effectiveSelection.enrich } : {}),
       });
       if (!fallback.success || !fallback.report) {
         const failure = fallback.error || child.error || `Research agent finished with status ${child.status}.`;
@@ -331,36 +386,42 @@ export async function runResearchAndPublish(ctx: ResearchPublishContext,
       report = fallback.report;
     }
     // Issue #2167: generate the full document set BEFORE the canonical write,
-    // so the row carries the artifact keys. Previously the row was written
-    // first and never updated — the PDF was delivered but the record could
-    // not prove or serve it.
-    const publication = await generateAndStoreResearchReport(ctx, agent, report, {
-      trigger,
-      userLogin: login,
-    });
-    const pdfKey = publication.artifacts.pdfKey ?? null;
-    // #336: full delivery through the #308 seams (Slack, email, webhook),
-    // delivering the canonical stored copy. Best-effort; never fails the run.
+    // so the row carries the artifact keys. Issue #6066: this leg is the
+    // generate stage; an analyze-only stage returns before it.
     let emailed = false;
-    try {
-      const delivery = await deliverResearchReport(ctx, 
-        agent,
-        report,
-        {
-          reportId: publication.reportId,
-          pdfKey,
-          trigger,
-          userLogin: login,
-        }
-      );
-      emailed = delivery.emailed;
-    } catch (err) {
-      structuredLog.warn("researchPublish.research_delivery_failed", {
-        message: "[OrchestratorAgent] Research delivery failed:",
-        error: err instanceof Error ? err.message : String(err),
+    let reportId: string | null = null;
+    let created = false;
+    let artifacts: ResearchReportArtifactOutcome | undefined;
+    if (stage !== "analyze") {
+      const publication = await generateAndStoreResearchReport(ctx, agent, report, {
+        trigger,
+        userLogin: login,
       });
-    }
-    // Issue #577: complete the task with the path actually taken and a
+      reportId = publication.reportId;
+      created = publication.created;
+      artifacts = publication.artifacts;
+      const pdfKey = publication.artifacts.pdfKey ?? null;
+      // #336: full delivery through the #308 seams (Slack, email, webhook),
+      // delivering the canonical stored copy. Best-effort; never fails the run.
+      try {
+        const delivery = await deliverResearchReport(ctx,
+          agent,
+          report,
+          {
+            reportId: publication.reportId,
+            pdfKey,
+            trigger,
+            userLogin: login,
+          }
+        );
+        emailed = delivery.emailed;
+      } catch (err) {
+        structuredLog.warn("researchPublish.research_delivery_failed", {
+          message: "[OrchestratorAgent] Research delivery failed:",
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }    // Issue #577: complete the task with the path actually taken and a
     // deterministic evaluation of the outcome (never a model grading
     // itself). Best-effort — the published result stands either way.
     if (taskId) {
@@ -414,10 +475,10 @@ export async function runResearchAndPublish(ctx: ResearchPublishContext,
     }
     return {
       success: true,
-      reportId: publication.reportId,
-      created: publication.created,
+      reportId,
+      created,
       emailed,
-      artifacts: publication.artifacts,
+      artifacts,
       report,
       taskId,
       executionPath,

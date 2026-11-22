@@ -37,6 +37,8 @@ import {
   type ResearchPipelineStage,
   type ResearchStepDeps,
 } from "../services/researchPipelineJobs";
+import type { ResearchFeedStageOutput } from "../services/researchFeedHandoff";
+import type { ResearchEnrichStageOutput } from "../services/researchEnrichHandoff";
 import {
   resolveResearchJobConfig,
   resolveResearchStageModes,
@@ -87,8 +89,8 @@ export interface DispatchResearchEngineInput {
   /** Issue #5912 — the venue/mode this run names; rides the job params. */
   brokerId?: string;
   mode?: string;
-  researchDeps?: ResearchStepDeps;
-  execute: (ctx?: { runId: string; engineJobId: string }) => Promise<Record<string, unknown>>;
+  researchDeps?: Partial<ResearchStepDeps>;
+  execute: (ctx?: { runId: string; engineJobId: string; feed?: ResearchFeedStageOutput; enrich?: ResearchEnrichStageOutput; deferPublication?: boolean }) => Promise<Record<string, unknown>>;
 }
 
 export interface DispatchResearchEngineResult {
@@ -234,8 +236,16 @@ export async function dispatchResearchEngineRun(
   }
 
   let capturedOutcome: Record<string, unknown> | undefined;
-  const baseDeps: ResearchStepDeps = input.researchDeps ?? {
-    runOodaAnalysis: async (ctx) => input.execute({ runId: ctx.runId, engineJobId }),
+  const baseDeps: ResearchStepDeps = {
+    runOodaAnalysis: async (ctx) =>
+      input.execute({
+        runId: ctx.runId,
+        engineJobId,
+        ...(ctx.feed ? { feed: ctx.feed } : {}),
+        ...(ctx.enrich ? { enrich: ctx.enrich } : {}),
+        ...(ctx.deferPublication ? { deferPublication: true } : {}),
+      }),
+    ...input.researchDeps,
   };
   const wiredDeps: ResearchStepDeps = {
     ...baseDeps,
@@ -450,7 +460,7 @@ export interface ExecuteResearchStageControlInput extends ControlResearchStageIn
   storageMode?: ResearchStorageMode;
   stores?: JobPipelineDeps["stores"];
   runRecorder?: JobRunRecorder;
-  researchDeps?: ResearchStepDeps;
+  researchDeps?: Partial<ResearchStepDeps>;
   /** Test-only fence (#5287): never set in production callers. */
   allowTestStub?: boolean;
 }
@@ -489,7 +499,7 @@ export async function executeResearchStageControl(
       `FAILURE_RESEARCH_DEPS_MISSING: stage control "${validated.op}" on ${validated.engineJobId} requires explicit researchDeps.`,
     );
   }
-  const deps: ResearchStepDeps = input.researchDeps ?? {
+  const deps: ResearchStepDeps = {
     runOodaAnalysis: async (ctx) => {
       if (!input.allowTestStub && !isVitest) {
         throw new Error(
@@ -503,6 +513,7 @@ export async function executeResearchStageControl(
         userLogin: ctx.userLogin,
       };
     },
+    ...input.researchDeps,
   };
   const control = new JobPipelineControl({
     stores,

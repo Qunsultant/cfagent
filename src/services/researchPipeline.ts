@@ -37,6 +37,8 @@ import type {
   ChainProvenance,
 } from "./researchGates";
 import { runStageGates } from "./researchGates";
+import type { ResearchFeedStageOutput } from "./researchFeedHandoff";
+import type { ResearchEnrichStageOutput } from "./researchEnrichHandoff";
 import type {
   Falsification,
   Premortem,
@@ -331,6 +333,10 @@ export interface ResearchRunOptions {
   accountType?: string;
   accountId?: string;
   runId?: string;
+  /** Issue #6063 — the feed stage output; the pipeline consumes it instead of re-fetching. */
+  feed?: ResearchFeedStageOutput;
+  /** Issue #6064 — the enrich stage output; analyze consumes it instead of re-fetching. */
+  enrich?: ResearchEnrichStageOutput;
   now?: number;
 }
 
@@ -779,6 +785,82 @@ function newRunId(): string {
  * THE single pipeline entry. Both the manual route and the scheduled tick
  * are thin triggers over this function (amendment 2).
  */
+/**
+ * Issue #6064 — the enrich stage: technicals and catalysts for the feed's quoted
+ * symbols. Run as the `research.enrich` engine step; analyze consumes its output
+ * (opts.enrich / hand-off) and does not re-fetch.
+ */
+export async function runEnrichStage(
+  deps: PipelineDeps,
+  _config: ResearchConfig,
+  feed: ResearchFeedStageOutput,
+  opts: ResearchRunOptions,
+): Promise<ResearchEnrichStageOutput> {
+  const runId = opts.runId ?? feed.runId;
+  const bySymbol: Record<string, { technicals: unknown | null; catalysts: unknown[] | null }> = {};
+  for (const entry of feed.quotes) {
+    if (!entry.quote) continue;
+    const [technicals, catalysts] = await Promise.all([
+      deps.provider.getTechnicals(entry.symbol).catch(() => null),
+      deps.provider.getCatalysts(entry.symbol).catch(() => null),
+    ]);
+    bySymbol[entry.symbol] = { technicals, catalysts };
+  }
+  return { runId, asOf: new Date().toISOString(), feed, bySymbol };
+}
+
+/**
+ * Issue #6063 — the feed stage: regime, universe and the quote snapshot for the
+ * screened slice. It is the stage's real work, run as the `research.feed`
+ * engine step; `runResearchPipeline` consumes its output (opts.feed / hand-off)
+ * and never re-fetches a quote the feed already has.
+ */
+export async function runFeedStage(
+  deps: PipelineDeps,
+  config: ResearchConfig,
+  opts: ResearchRunOptions,
+): Promise<ResearchFeedStageOutput> {
+  const runId = opts.runId ?? newRunId();
+  const now = opts.now ?? Date.now();
+  let regime: RegimeAssessment;
+  try {
+    regime = await deps.provider.getRegime();
+  } catch {
+    regime = { regime: "unknown", notes: ["Regime feed failed — proceeding without regime context."], asOf: now };
+  }
+  let symbols: string[] = [];
+  let universeError: string | null = null;
+  try {
+    symbols = await deps.provider.getUniverseSymbols(config.universe);
+  } catch (err) {
+    universeError = err instanceof Error ? err.message : String(err);
+  }
+  const screened = symbols.slice(0, config.maxCandidates * 3);
+  const quotes: Array<{ symbol: string; quote: QuoteSnapshot | null }> = [];
+  let quotesRetrieved = 0;
+  for (const symbol of screened) {
+    let quote: QuoteSnapshot | null = null;
+    try {
+      quote = await deps.provider.getQuote(symbol);
+    } catch {
+      quote = null;
+    }
+    if (quote) quotesRetrieved++;
+    quotes.push({ symbol, quote });
+  }
+  return {
+    runId,
+    asOf: new Date(now).toISOString(),
+    regime,
+    universe: config.universe,
+    universeError,
+    symbols,
+    quotes,
+    universeSize: symbols.length,
+    quotesRetrieved,
+  };
+}
+
 export async function runResearchPipeline(
   deps: PipelineDeps,
   config: ResearchConfig,
@@ -826,20 +908,18 @@ export async function runResearchPipeline(
   // OBSERVE — market regime.
   stage("observe", "Assessing market regime.");
   step("observe", "Assessing market regime.");
-  let regime: RegimeAssessment;
-  try {
-    regime = await deps.provider.getRegime();
-  } catch {
-    regime = { regime: "unknown", notes: ["Regime feed failed — proceeding without regime context."], asOf: now };
-  }
+  // Issue #6063 — the feed stage output, or this pipeline's own fetch when the
+  // stage did not run (a direct caller, or a resumed run in another process).
+  const feed = opts.feed ?? (await runFeedStage(deps, config, { ...opts, runId }));
+  const enrich = opts.enrich;
+  const regime = feed.regime as RegimeAssessment;
   stage("orient", `Regime: ${regime.regime}.`);
   step("orient", `Regime: ${regime.regime}.`);
 
   // OBSERVE — universe.
-  let symbols: string[] = [];
-  try {
-    symbols = await deps.provider.getUniverseSymbols(config.universe);
-  } catch (err) {
+  if (feed.universeError !== null) {
+    stats.universeSize = feed.universeSize;
+    stats.quotesRetrieved = feed.quotesRetrieved;
     // Fail closed: no universe, no ideas — still publish the report honestly.
     return finishReport({
       runId, config, opts, now, started, trace, stageTrace, regime,
@@ -847,15 +927,16 @@ export async function runResearchPipeline(
       ideas: [], watchlist, rejected: [{
         symbol: "*", outlook: "unknown", structure: "-",
         gate: "data_integrity",
-        reason: `Universe retrieval failed: ${err instanceof Error ? err.message : String(err)}.`,
+        reason: `Universe retrieval failed: ${feed.universeError}.`,
       }],
       stats, summary: "Universe retrieval failed; no candidates evaluated.",
     });
   }
-  stats.universeSize = symbols.length;
-  const screened = symbols.slice(0, config.maxCandidates * 3);
+  stats.universeSize = feed.universeSize;
+  stats.quotesRetrieved = feed.quotesRetrieved;
+  const screened = feed.quotes.map((entry) => entry.symbol);
   const screenedSet = new Set(screened);
-  for (const symbol of symbols) {
+  for (const symbol of feed.symbols) {
     symbolEvaluations.push({
       symbol,
       outcome: screenedSet.has(symbol) ? "not_evaluated" : "not_screened",
@@ -866,11 +947,13 @@ export async function runResearchPipeline(
     });
   }
   const evaluationBySymbol = new Map(symbolEvaluations.map((evaluation) => [evaluation.symbol, evaluation]));
-  step("observe", `Universe ${config.universe}: ${symbols.length} symbols.`);
+  step("observe", `Universe ${config.universe}: ${feed.symbols.length} symbols.`);
 
   let iterations = 0;
   let chainAttempts = 0;
-  for (const symbol of screened) {
+  for (const entry of feed.quotes) {
+    const symbol = entry.symbol;
+    const quote = entry.quote as QuoteSnapshot | null;
     // OODA budget: stop when the next action has no clear purpose.
     if (iterations >= config.oodaMaxIterations) {
       step("decide", "OODA budget exhausted — stopping candidate evaluation.");
@@ -892,19 +975,13 @@ export async function runResearchPipeline(
     const symbolEvaluation = evaluationBySymbol.get(symbol)!;
 
     // OBSERVE — quote.
-    let quote: QuoteSnapshot | null = null;
-    try {
-      quote = await deps.provider.getQuote(symbol);
-    } catch {
-      quote = null;
-    }
+
     if (!quote) {
       symbolEvaluation.outcome = "quote_unavailable";
       symbolEvaluation.reason = "No quote was returned by the configured quote source.";
       rejected.push({ symbol, outlook: "unknown", structure: "-", gate: "data_integrity", reason: "No quote retrieved." });
       continue;
     }
-    stats.quotesRetrieved++;
     symbolEvaluation.quote = {
       price: quote.price,
       timestamp: quote.timestamp,
@@ -932,10 +1009,18 @@ export async function runResearchPipeline(
     }
 
     // OBSERVE — technicals + catalysts.
-    const [technicals, catalysts] = await Promise.all([
-      deps.provider.getTechnicals(symbol).catch(() => null),
-      deps.provider.getCatalysts(symbol).catch(() => null),
-    ]);
+    let technicals: Technicals | null;
+    let catalysts: CatalystInfo[] | null;
+    const enriched = enrich?.bySymbol[symbol];
+    if (enriched) {
+      technicals = enriched.technicals as Technicals | null;
+      catalysts = enriched.catalysts as CatalystInfo[] | null;
+    } else {
+      [technicals, catalysts] = await Promise.all([
+        deps.provider.getTechnicals(symbol).catch(() => null),
+        deps.provider.getCatalysts(symbol).catch(() => null),
+      ]);
+    }
 
     // ORIENT — thesis.
     const draft = draftThesis(symbol, technicals, catalysts, regime);
