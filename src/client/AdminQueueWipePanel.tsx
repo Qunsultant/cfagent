@@ -578,7 +578,7 @@ export function AdminQueueWipePanel() {
 
   return (
     <div>
-      <p className="iaaa-admin-note">
+      <p className="ui-meta">
         SQL rows below wipe this instance only. KV rows in the selective wipe are
         platform-wide: SessionStore is one shared store, so wiping memberships, tokens,
         bindings, sessions, or the genesis marker affects all users, not just this instance.
@@ -607,7 +607,7 @@ export function AdminQueueWipePanel() {
 
       <TabPanel idBase="schedules-queue" tabId="queue" active={section === "queue"} retain>
       <CardHeader title="Queue dump" />
-      <p className="iaaa-admin-note">
+      <p className="ui-meta">
         Read before any destructive action. Refresh after a wipe to verify the queue is empty.
       </p>
       <Button onClick={() => void loadDump()} disabled={dumpBusy}>
@@ -621,7 +621,7 @@ export function AdminQueueWipePanel() {
         </Notice>
       ) : dump ? (
         <>
-          <p className="iaaa-admin-note">
+          <p className="ui-meta">
             {dump.count} schedule(s) · {activeCount} active · {pausedCount} paused (paused records are preserved, never deleted, by a queue wipe)
           </p>
           <Table
@@ -637,7 +637,7 @@ export function AdminQueueWipePanel() {
 
       <TabPanel idBase="schedules-queue" tabId="cancel" active={section === "cancel"} retain>
       <CardHeader title="Cancel all schedules (queue wipe)" />
-      <p className="iaaa-admin-note">
+      <p className="ui-meta">
         Preview first: the preview lists exactly what would be cancelled and how many paused
         records would be preserved, and cancels nothing. Confirm in the dialog to wipe.
         Paused records are preserved, never deleted. Every wipe writes the
@@ -691,7 +691,7 @@ export function AdminQueueWipePanel() {
 
       <TabPanel idBase="schedules-queue" tabId="wipe" active={section === "wipe"} retain>
       <CardHeader title="Clear a table" />
-      <p className="iaaa-admin-note">
+      <p className="ui-meta">
         Only the allowlisted tables are offered. Running jobs are never deleted (counted as
         skipped). Audit history (mas_events) and the outcome watermark are clearable through
         the selective wipe below (audit history needs a second confirmation and an export);
@@ -737,7 +737,7 @@ export function AdminQueueWipePanel() {
       </Modal>
 
       <CardHeader title="Selective wipe (all tables, by default)" />
-      <p className="iaaa-admin-note">
+      <p className="ui-meta">
         Every row is checked by default. Uncheck a row to keep it: unchecked rows are skipped
         entirely — no preview call, no delete, no audit for that row. SQL rows wipe this
         instance; KV rows are platform-wide (all users). A failure on one row never hides the
@@ -833,7 +833,7 @@ export function AdminQueueWipePanel() {
 
       <TabPanel idBase="schedules-queue" tabId="recreate" active={section === "recreate"} retain>
       <CardHeader title="Recreate Track 1" />
-      <p className="iaaa-admin-note">
+      <p className="ui-meta">
         A separate explicit action, never automatic after a wipe. Review the four schedules
         below; creating them is the recreate half of the wipe decision, and leaving schedules
         off is the alternative — do not press this button unless recreating is intended.

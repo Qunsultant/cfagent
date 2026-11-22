@@ -44,6 +44,8 @@ export interface ServiceTokenInfo {
   expiresAtMs: number;
   revokedAtMs: number | null;
   createdBy: string;
+  /** #6164 (F7) — minter login resolved server-side, null when no alias exists. */
+  createdByLogin?: string | null;
   createdAtMs: number;
   lastUsedAtMs: number | null;
 }

@@ -13,6 +13,7 @@
  */
 
 import { apiFetch } from "./apiFetch";
+import { isInternalUserId } from "./identityDisplay";
 
 export interface AdminRoleBindingView {
   role: string;
@@ -24,6 +25,12 @@ export interface AdminRoleBindingView {
 export interface AdminMembershipView {
   membershipId: string;
   internalUserId: string;
+  /**
+   * #6164 — login resolved server-side via the alias record, or null
+   * when no alias exists. Optional for older payloads; the client
+   * renders "not recorded", never a fabricated login.
+   */
+  login?: string | null;
   tenantId: string;
   roleBindings: AdminRoleBindingView[];
   createdBy: string;
@@ -36,13 +43,72 @@ export interface AdminAuditEventView {
   timestamp: number;
   type: string;
   actorPrincipalId: string;
+  /** #6164 — actor login resolved server-side, null when no alias exists. */
+  actorLogin?: string | null;
   initiatingPrincipalId: string;
+  /** #6164 — initiating login resolved server-side, null when no alias exists. */
+  initiatingLogin?: string | null;
   action: string;
   decision: string;
   outcome: string;
   correlationId: string;
   resourceId?: string;
   errorCode?: string;
+}
+
+/**
+ * #6164 (F1) — a membership's liveness, from its own record only.
+ * A membership is revoked when revokedAtMs is set, expired when every
+ * binding carries an expiry at or before nowMs, and active otherwise.
+ * A membership with no bindings is active but grants no roles.
+ */
+export type MembershipStatus =
+  | { kind: "active" }
+  | { kind: "revoked"; atMs: number }
+  | { kind: "expired"; atMs: number };
+
+export function membershipStatus(
+  membership: AdminMembershipView,
+  nowMs: number,
+): MembershipStatus {
+  if (membership.revokedAtMs !== undefined) {
+    return { kind: "revoked", atMs: membership.revokedAtMs };
+  }
+  // Expired only when EVERY binding is expired; a binding with no
+  // expiry is live, so a membership mixing live and expired bindings
+  // is active. The expired date is the latest binding expiry.
+  const bindings = membership.roleBindings;
+  if (bindings.length > 0) {
+    const expiredAt = bindings.map((b) =>
+      b.expiresAtMs !== undefined && b.expiresAtMs <= nowMs ? b.expiresAtMs : null,
+    );
+    if (expiredAt.every((e) => e !== null)) {
+      return { kind: "expired", atMs: Math.max(...(expiredAt as number[])) };
+    }
+  }
+  return { kind: "active" };
+}
+
+/** #6164 (F1) — "role (scope)" for every live binding of every live membership, in order. */
+export function liveRoles(memberships: AdminMembershipView[], nowMs: number): string[] {
+  return memberships.flatMap((m) =>
+    membershipStatus(m, nowMs).kind !== "active"
+      ? []
+      : m.roleBindings
+          .filter((b) => b.expiresAtMs === undefined || b.expiresAtMs > nowMs)
+          .map((b) => `${b.role} (${b.scope})`),
+  );
+}
+
+/** #6164 (F1) — short status text for the Summary membership-status line. */
+export function formatMembershipStatus(status: MembershipStatus): string {
+  if (status.kind === "revoked") {
+    return `Revoked ${new Date(status.atMs).toLocaleDateString()}`;
+  }
+  if (status.kind === "expired") {
+    return `Expired ${new Date(status.atMs).toLocaleDateString()}`;
+  }
+  return "Active";
 }
 
 /** #2173 admin-counts slice — counts only, no member identities. */
@@ -74,6 +140,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isMembership(value: unknown): value is AdminMembershipView {
   if (!isRecord(value)) return false;
+  if (
+    value.login !== undefined &&
+    value.login !== null &&
+    typeof value.login !== "string"
+  ) {
+    return false;
+  }
   return (
     typeof value.membershipId === "string" &&
     typeof value.internalUserId === "string" &&
@@ -149,6 +222,8 @@ export async function fetchAdminOverview(): Promise<AdminOverview> {
 export interface AccessRequestView {
   requestId: string;
   requesterInternalUserId: string;
+  /** #6164 (F4) — requester login resolved server-side, null when no alias exists. */
+  requesterLogin?: string | null;
   requestedRole: string;
   scope: string;
   tenantId: string;
@@ -209,8 +284,14 @@ export async function fetchMemberships(): Promise<AdminMembershipView[]> {
   return data.memberships;
 }
 
+/**
+ * #6164 (A2) — grant to a login OR an internal user id. An id-shaped
+ * target goes out as internalUserId; anything else goes out as login
+ * and the server resolves it via the alias record (400 when the login
+ * has no alias). A membership is never minted keyed by a login string.
+ */
 export async function grantMembershipApi(
-  internalUserId: string,
+  target: string,
   roleBindings: MembershipMutationBinding[],
   email?: string,
 ): Promise<{
@@ -220,7 +301,7 @@ export async function grantMembershipApi(
   proposalId?: string;
 }> {
   const data = await postJson<{ membership?: unknown; welcome?: unknown; pending?: unknown; proposalId?: unknown }>("/api/iaaa/membership/grant", {
-    internalUserId,
+    ...(isInternalUserId(target) ? { internalUserId: target } : { login: target }),
     roleBindings,
     ...(email ? { email } : {}),
   });

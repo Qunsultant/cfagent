@@ -28,6 +28,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Button, Checkbox, EmptyState, Notice, SmallHeader, Spinner, TextInput } from "./components/ui";
+import { formatIdentityText } from "./identityDisplay";
 import {
   approvePolicyProposal,
   fetchActivePolicy,
@@ -154,7 +155,7 @@ export function PolicyProposalsPanel() {
     <div className="policy-proposals-panel">
       {error !== "" && <Notice tone="danger">{error}</Notice>}
       {notice !== "" && <Notice tone="success">{notice}</Notice>}
-      <p className="iaaa-admin-note">
+      <p className="ui-meta">
         Policy proposals are platform-admin only. A proposal has no effect until a
         different platform admin approves it and it is promoted; the compiled policy
         stays active until then. Active source: {activeSource}. The frozen obligation
@@ -163,7 +164,7 @@ export function PolicyProposalsPanel() {
       {draft && (
         <>
           <SmallHeader title="Propose a policy change" />
-          <p className="iaaa-admin-note">
+          <p className="ui-meta">
             Active version: <code>{draft.version}</code>. Toggle grants, preview the
             impact, then propose.
           </p>
@@ -229,8 +230,9 @@ export function PolicyProposalsPanel() {
         <ul>
           {proposals.map((p) => (
             <li key={p.proposalId}>
-              <code>{p.proposalId}</code> — {p.status} — proposed by {p.proposer}
-              {p.approver ? `, reviewed by ${p.approver}` : ""}
+              <code>{p.proposalId}</code> — {p.status} — proposed by{" "}
+              {formatIdentityText(p.proposerLogin, p.proposer)}
+              {p.approver ? `, reviewed by ${formatIdentityText(p.approverLogin, p.approver)}` : ""}
               {p.exceptionReason ? ` (exception: ${p.exceptionReason})` : ""}
               {" — "}
               {p.beforeRef} → {p.afterRef} — {fmtPolicyTime(p.createdAtMs)}

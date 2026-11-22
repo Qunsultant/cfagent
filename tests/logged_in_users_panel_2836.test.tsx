@@ -43,6 +43,8 @@ const RESPONSE = {
       displayLogin: "alice",
       identity: "https://github.com:12345",
       tenantIds: ["primary"],
+      // #6164 (F9) — the active memberships render beside the user.
+      membershipIds: ["mem-alice-1"],
       loginCount: 4,
       firstLoginMs: 1000,
       mostRecentLoginMs: 4000,
@@ -153,6 +155,8 @@ describe("LoggedInUsersPanel", () => {
     expect(text).toContain("t1799999999500");
     expect(text).toContain("t1800028799500");
     expect(text).toContain("legacy-user");
+    expect(text).toContain("mem-alice-1");
+    expect(text).toContain("Memberships:");
     expect(text).toContain("Counts cover retained events only.");
   });
 

@@ -33,6 +33,8 @@ export interface PipSourceInfo {
 export interface PipMembership {
   membershipId: string;
   internalUserId: string;
+  /** #6164 (F6) — login resolved server-side, null when no alias exists. */
+  login?: string | null;
   tenantId: string;
   workspaceId?: string;
   roleBindings: {
@@ -41,6 +43,8 @@ export interface PipMembership {
     workspaceId?: string;
     resourceId?: string;
     grantedBy: string;
+    /** #6164 (F6) — granter login resolved server-side, null when no alias exists. */
+    grantedByLogin?: string | null;
     expiresAtMs?: number;
   }[];
   createdBy: string;
@@ -55,6 +59,8 @@ export interface PipDenial {
   tenantId: string;
   permission: string;
   deniedBy: string;
+  /** #6164 (F6) — denier login resolved server-side, null when no alias exists. */
+  deniedByLogin?: string | null;
   deniedAtMs: number;
 }
 
@@ -154,6 +160,9 @@ function parsePipState(value: unknown): PipState {
           ? { resourceId: binding.resourceId }
           : {}),
         grantedBy: binding.grantedBy,
+        ...(typeof binding.grantedByLogin === "string"
+          ? { grantedByLogin: binding.grantedByLogin }
+          : {}),
         ...(typeof binding.expiresAtMs === "number"
           ? { expiresAtMs: binding.expiresAtMs }
           : {}),
@@ -168,6 +177,7 @@ function parsePipState(value: unknown): PipState {
     memberships.push({
       membershipId: entry.membershipId,
       internalUserId: entry.internalUserId,
+      ...(typeof entry.login === "string" ? { login: entry.login } : {}),
       tenantId: entry.tenantId,
       ...(typeof entry.workspaceId === "string" ? { workspaceId: entry.workspaceId } : {}),
       roleBindings,
@@ -207,6 +217,7 @@ function parsePipState(value: unknown): PipState {
       tenantId: entry.tenantId,
       permission: entry.permission,
       deniedBy: entry.deniedBy,
+      ...(typeof entry.deniedByLogin === "string" ? { deniedByLogin: entry.deniedByLogin } : {}),
       deniedAtMs: entry.deniedAtMs,
     });
   }

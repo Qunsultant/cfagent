@@ -65,7 +65,13 @@ export const TAB_PARAM_OWNERS: Readonly<Record<string, readonly RouteId[]>> = {
   assetClass: ["order"],
   riskTab: ["order"],
   reportsTab: ["reports"],
-  iaaaTab: ["platform-admin"],
+  // #6164 — the IAAA Admin panel lives under security-hub now
+  // (SecurityHubHome, view iaaa-admin), so its inner-tab params are
+  // owned by security-hub. They were owned by ["platform-admin"]:
+  // every navigateToTab("security-hub", …) dropped them, so a
+  // bookmarked ?iaaaTab=members landed on the default tab instead.
+  iaaaTab: ["security-hub"],
+  iaaaSection: ["security-hub"],
   // Issue #3978: the data-providers inner tabs (`providerTab`) live on
   // platform-admin, so the param survives navigation to it and drops
   // on the way out, like every other page-owned param (#3238).
@@ -258,7 +264,20 @@ export function legacyPlatformAdminHubRedirect(
     return { tab: "data-hub", view: section };
   }
   if (section === "iaaa-admin" || section === "users" || section === "admin-access") {
-    return { tab: "security-hub", view: section };
+    // #6164 — carry the IAAA inner-tab state through the redirect:
+    // a bookmarked ?tab=platform-admin&view=iaaa-admin&iaaaTab=members
+    // used to land on the hub's default tab (the redirect returned
+    // tab+view only). The params ride only on the iaaa-admin view —
+    // users/admin-access have no inner tabs.
+    if (section !== "iaaa-admin") return { tab: "security-hub", view: section };
+    const carried: Record<string, string> = {};
+    const iaaaTab = params.get("iaaaTab");
+    const iaaaSection = params.get("iaaaSection");
+    if (iaaaTab) carried.iaaaTab = iaaaTab;
+    if (iaaaSection) carried.iaaaSection = iaaaSection;
+    return Object.keys(carried).length > 0
+      ? { tab: "security-hub", view: section, params: carried }
+      : { tab: "security-hub", view: section };
   }
   return null;
 }

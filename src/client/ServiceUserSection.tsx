@@ -23,7 +23,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { Button, Notice, Spinner, TextInput } from "./components/ui";
+import { Button, Flex, Notice, Spinner, Stack, TextInput } from "./components/ui";
 import {
   completeServiceEtradeAuth,
   fetchServiceUserStatus,
@@ -235,29 +235,29 @@ export function ServiceUserSection() {
   return (
     <>
       {/* Issue #4839 G4: the section explains itself before the button. */}
-      <p className="iaaa-admin-note">
+      <p className="ui-meta">
         The service user is the platform&apos;s own identity for background work. The
         platform tier is the set of admin roles it holds; Provision creates that tier
         the first time — only a status read showing it provisioned counts as done.
       </p>
-      <div className="iaaa-admin-summary">
-        <div>
-          <span className="iaaa-admin-label">Service user</span>
+      <Flex gap="6" wrap>
+        <Stack gap="1">
+          <span className="ui-meta">Service user</span>
           <strong>{status.serviceUser}</strong>
-        </div>
-        <div>
-          <span className="iaaa-admin-label">Platform tier</span>
+        </Stack>
+        <Stack gap="1">
+          <span className="ui-meta">Platform tier</span>
           <strong>
             {status.platform
               ? `Provisioned (${status.platform.roles.join(", ")})`
               : "Not provisioned"}
           </strong>
-        </div>
-        <div>
-          <span className="iaaa-admin-label">Tenant tiers</span>
+        </Stack>
+        <Stack gap="1">
+          <span className="ui-meta">Tenant tiers</span>
           <strong>{status.tenants.length > 0 ? status.tenants.join(", ") : "None"}</strong>
-        </div>
-      </div>
+        </Stack>
+      </Flex>
       {notice && <Notice tone={notice.tone}>{notice.text}</Notice>}
       <Button type="button" disabled={provisioning} onClick={() => void provision()}>
         Provision platform tier
@@ -267,7 +267,7 @@ export function ServiceUserSection() {
       </Button>
       {status.provisioning && (
         <>
-          <p className="iaaa-admin-note">
+          <p className="ui-meta">
             Provisioning checklist — every item names the owner action that closes it.
           </p>
           <ul>
@@ -284,7 +284,7 @@ export function ServiceUserSection() {
             ))}
           </ul>
           {status.provisioning.ownerActions.length > 0 && (
-            <p className="iaaa-admin-note">
+            <p className="ui-meta">
               {status.provisioning.ownerActions.join(" ")}
             </p>
           )}
@@ -303,7 +303,7 @@ export function ServiceUserSection() {
           )}
           {authUrl && (
             <>
-              <p className="iaaa-admin-note">
+              <p className="ui-meta">
                 If the authorization page did not open, use this link:{" "}
                 <a href={authUrl} target="_blank" rel="noopener noreferrer">
                   Authorize {status.serviceUser} at E*TRADE

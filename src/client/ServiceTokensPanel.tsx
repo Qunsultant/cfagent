@@ -18,7 +18,8 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { Button, Checkbox, EmptyState, Notice, Select, Spinner, TextInput } from "./components/ui";
+import { Button, Card, Checkbox, EmptyState, Flex, Notice, Select, Spinner, Stack, TextInput } from "./components/ui";
+import { formatIdentityText, Identity } from "./identityDisplay";
 import {
   fetchServiceTokens,
   fmtServiceTokenTime,
@@ -29,7 +30,6 @@ import {
   type ServiceTokenInfo,
   type ServiceTokenTier,
 } from "./serviceTokensApi";
-import "./serviceTokensPanel.deprecated.css";
 
 const ROLE_OPTIONS = SERVICE_TOKEN_ROLE_OPTIONS;
 
@@ -159,10 +159,15 @@ export function ServiceTokensPanel() {
   };
 
   return (
-    <div className="stp-panel">
-      <p className="stp-desc">
+    // #6164 (A3) — retired serviceTokensPanel.deprecated.css: layout and
+    // text come from the ui primitives only (Stack/Flex/Card/Notice +
+    // ui-meta/ui-mono), the ApiKeysPanel pattern. The roles fieldset is
+    // now a Stack with a strong group label — no ui utility resets a
+    // fieldset, and no new utility is added in this slice.
+    <Stack gap="3">
+      <p className="ui-meta">
         Service tokens let non-interactive callers act as the service identity. Send a token as{" "}
-        <code>Authorization: Bearer svc_…</code>. A platform token works platform-wide; a tenant
+        <code className="ui-mono">Authorization: Bearer svc_…</code>. A platform token works platform-wide; a tenant
         token works only inside its tenant. Treat a token like a password — anyone holding it
         can use it until it expires or you revoke it.
       </p>
@@ -174,40 +179,42 @@ export function ServiceTokensPanel() {
       )}
 
       {freshSecret && (
-        <div className="stp-secret" role="status">
-          <span className="stp-secret-label">Your new service token — copy it now:</span>
-          <code className="stp-secret-value">{freshSecret}</code>
-          <div className="stp-secret-actions">
-            <Button size="sm" variant="primary" onClick={handleCopy}>
-              {copied ? "Copied ✓" : "Copy token"}
-            </Button>
-            <Button size="sm" variant="secondary" onClick={() => setFreshSecret(null)}>
-              Dismiss
-            </Button>
-          </div>
-          <span className="stp-secret-note">
-            You won&apos;t see this token again. The server stores only a hash of it, so a lost
-            token can only be revoked and replaced. Rotation invalidates the old token immediately.
-          </span>
-        </div>
+        <Notice tone="warning">
+          <Stack gap="2">
+            <strong>Your new service token — copy it now:</strong>
+            <code className="ui-mono">{freshSecret}</code>
+            <Flex gap="2" wrap>
+              <Button size="sm" variant="primary" onClick={handleCopy}>
+                {copied ? "Copied ✓" : "Copy token"}
+              </Button>
+              <Button size="sm" variant="secondary" onClick={() => setFreshSecret(null)}>
+                Dismiss
+              </Button>
+            </Flex>
+            <span className="ui-meta">
+              You won&apos;t see this token again. The server stores only a hash of it, so a lost
+              token can only be revoked and replaced. Rotation invalidates the old token immediately.
+            </span>
+          </Stack>
+        </Notice>
       )}
 
-      <div className="stp-mint-form">
-        <div className="stp-mint-row">
+      <Stack gap="2">
+        <Flex gap="2" align="end" wrap>
           <TextInput
             id="stp-label"
             label="New token label"
             placeholder="e.g. Nightly report automation"
             value={label}
             onChange={(event) => setLabel(event.target.value)}
-            wrapperClassName="stp-label-field"
+            wrapperClassName="ui-grow"
           />
           <Select
             id="stp-tier"
             label="Scope"
             value={tier}
             onChange={(event) => setTier(event.target.value as ServiceTokenTier)}
-            wrapperClassName="stp-tier-field"
+            wrapperClassName="ui-grow"
           >
             <option value="platform">Platform</option>
             <option value="tenant">Tenant</option>
@@ -219,7 +226,7 @@ export function ServiceTokensPanel() {
               placeholder="e.g. tenant-a"
               value={tenantId}
               onChange={(event) => setTenantId(event.target.value)}
-              wrapperClassName="stp-tenant-field"
+              wrapperClassName="ui-grow"
             />
           )}
           <TextInput
@@ -228,12 +235,12 @@ export function ServiceTokensPanel() {
             placeholder="90"
             value={expiryDays}
             onChange={(event) => setExpiryDays(event.target.value)}
-            wrapperClassName="stp-expiry-field"
+            wrapperClassName="ui-grow"
           />
-        </div>
-        <fieldset className="stp-roles">
-          <legend className="stp-roles-label">Roles (least privilege — only what the token needs)</legend>
-          <div className="stp-roles-list">
+        </Flex>
+        <Stack gap="1">
+          <strong className="ui-meta">Roles (least privilege — only what the token needs)</strong>
+          <Flex gap="3" wrap>
             {ROLE_OPTIONS.map((role) => (
               <Checkbox
                 key={role}
@@ -242,89 +249,97 @@ export function ServiceTokensPanel() {
                 onChange={() => toggleRole(role)}
               />
             ))}
-          </div>
-          <span className="stp-roles-note">
+          </Flex>
+          <span className="ui-footnote">
             Roles you cannot grant are refused by the server. Workspace-admin is not available
             on tokens (no workspace binding exists for them).
           </span>
-        </fieldset>
+        </Stack>
         <Button variant="primary" onClick={handleMint} loading={minting} disabled={minting}>
           Create token
         </Button>
-      </div>
+      </Stack>
 
       {loading ? (
-        <div className="stp-loading">
-          <Spinner size="sm" /> Loading service tokens…
-        </div>
+        <Flex gap="2" align="center">
+          <Spinner size="sm" /> <span className="ui-meta">Loading service tokens…</span>
+        </Flex>
       ) : tokens.length === 0 ? (
         <EmptyState
           title="No service tokens yet"
           description="Create a token to let automation act as the service identity. Tokens you create appear here with their scope, roles, and expiry."
         />
       ) : (
-        <ul className="stp-list">
+        <Stack gap="2">
           {tokens.map((token) => (
-            <li key={token.id} className="stp-item">
-              <div className="stp-item-meta">
-                <span className="stp-item-label">{token.label}</span>
-                <code className="stp-item-prefix">{token.prefix}…</code>
-                <span className="stp-item-scope">
-                  {token.tier === "tenant" ? `Tenant ${token.tenantId}` : "Platform"}
-                  {" · "}
-                  {token.roles.join(", ")}
-                  {token.revokedAtMs !== null && " · Revoked"}
-                </span>
-                <span className="stp-item-times">
-                  Expires {fmtServiceTokenTime(token.expiresAtMs)} · Last used{" "}
-                  {fmtServiceTokenTime(token.lastUsedAtMs)}
-                </span>
-              </div>
-              {token.revokedAtMs === null &&
-                (confirmingRevokeId === token.id ? (
-                  <div className="stp-item-actions">
-                    <span className="stp-confirm-text">
-                      Revoke this token? Callers using it stop working immediately.
-                    </span>
-                    <Button
-                      size="sm"
-                      variant="danger"
-                      onClick={() => handleRevoke(token.id)}
-                      loading={revokingId === token.id}
-                      disabled={revokingId === token.id}
-                    >
-                      Confirm revoke
-                    </Button>
-                    <Button size="sm" variant="secondary" onClick={() => setConfirmingRevokeId(null)}>
-                      Cancel
-                    </Button>
-                  </div>
-                ) : (
-                  <div className="stp-item-actions">
-                    <Button
-                      size="sm"
-                      variant="primary"
-                      tone="subtle"
-                      onClick={() => handleRotate(token.id)}
-                      loading={rotatingId === token.id}
-                      disabled={rotatingId === token.id}
-                    >
-                      Rotate
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="danger"
-                      tone="subtle"
-                      onClick={() => setConfirmingRevokeId(token.id)}
-                    >
-                      Revoke
-                    </Button>
-                  </div>
-                ))}
-            </li>
+            <Card key={token.id} padding="sm">
+              <Flex justify="between" align="center" gap="3" wrap>
+                <Stack gap="0-5">
+                  <strong>{token.label}</strong>
+                  <code className="ui-mono">{token.prefix}…</code>
+                  <span className="ui-meta-sm">
+                    {token.tier === "tenant" ? `Tenant ${token.tenantId}` : "Platform"}
+                    {" · "}
+                    {token.roles.join(", ")}
+                    {token.revokedAtMs !== null && " · Revoked"}
+                  </span>
+                  {/* #6164 (F7) — the token's service identity and its minter. */}
+                  <span className="ui-meta-sm">
+                    Service: <Identity login={token.serviceLogin} id={token.serviceInternalUserId} />
+                    {" · Minted by "}
+                    {formatIdentityText(token.createdByLogin, token.createdBy)}
+                  </span>
+                  <span className="ui-meta-sm">
+                    Expires {fmtServiceTokenTime(token.expiresAtMs)} · Last used{" "}
+                    {fmtServiceTokenTime(token.lastUsedAtMs)}
+                  </span>
+                </Stack>
+                {token.revokedAtMs === null &&
+                  (confirmingRevokeId === token.id ? (
+                    <Flex gap="2" align="center" wrap>
+                      <span className="ui-danger">
+                        Revoke this token? Callers using it stop working immediately.
+                      </span>
+                      <Button
+                        size="sm"
+                        variant="danger"
+                        onClick={() => handleRevoke(token.id)}
+                        loading={revokingId === token.id}
+                        disabled={revokingId === token.id}
+                      >
+                        Confirm revoke
+                      </Button>
+                      <Button size="sm" variant="secondary" onClick={() => setConfirmingRevokeId(null)}>
+                        Cancel
+                      </Button>
+                    </Flex>
+                  ) : (
+                    <Flex gap="2" align="center" wrap>
+                      <Button
+                        size="sm"
+                        variant="primary"
+                        tone="subtle"
+                        onClick={() => handleRotate(token.id)}
+                        loading={rotatingId === token.id}
+                        disabled={rotatingId === token.id}
+                      >
+                        Rotate
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="danger"
+                        tone="subtle"
+                        onClick={() => setConfirmingRevokeId(token.id)}
+                      >
+                        Revoke
+                      </Button>
+                    </Flex>
+                  ))}
+              </Flex>
+            </Card>
           ))}
-        </ul>
+        </Stack>
       )}
-    </div>
+    </Stack>
   );
 }

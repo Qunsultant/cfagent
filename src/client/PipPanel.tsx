@@ -25,6 +25,8 @@
  */
 import { useEffect, useState } from "react";
 import { CardHeader, EmptyState, Spinner, Stack } from "./components/ui";
+import { formatMembershipStatus, membershipStatus } from "./iaaaAdminApi";
+import { formatIdentityText, Identity } from "./identityDisplay";
 import { fetchPipState, type PipState } from "./pipApi";
 
 type LoadState =
@@ -140,14 +142,20 @@ export function PipPanel() {
             {attributes.memberships.map((membership) => (
               <li key={membership.membershipId}>
                 <p>Tenant: {membership.tenantId}</p>
-                <p>Membership: {membership.membershipId}</p>
+                {/* #6164 (F6) — the membership is a login beside its id,
+                with the same status wording as the Members table. */}
+                <p>
+                  Membership: <Identity login={membership.login} id={membership.membershipId} />
+                  {" — "}
+                  {formatMembershipStatus(membershipStatus(membership, Date.now()))}
+                </p>
                 <ul>
                   {membership.roleBindings.map((binding, index) => (
                     <li key={`${membership.membershipId}-${index}`}>
                       <p>
                         {binding.role} ({binding.scope})
                       </p>
-                      <p>Granted by {binding.grantedBy}</p>
+                      <p>Granted by {formatIdentityText(binding.grantedByLogin, binding.grantedBy)}</p>
                     </li>
                   ))}
                 </ul>
@@ -170,7 +178,7 @@ export function PipPanel() {
                 <p>Permission: {denial.permission}</p>
                 <p>Tenant: {denial.tenantId}</p>
                 <p>Denial: {denial.denialId}</p>
-                <p>Denied by {denial.deniedBy}</p>
+                <p>Denied by {formatIdentityText(denial.deniedByLogin, denial.deniedBy)}</p>
               </li>
             ))}
           </ul>

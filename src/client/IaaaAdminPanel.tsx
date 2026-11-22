@@ -28,9 +28,10 @@
  * lists identities.
  */
 
-import { useCallback, useEffect, useState } from "react";
-import { Badge, Button, CardHeader, EmptyState, Flex, Modal, Notice, PageSection, Select, Spinner, Stack, Table, Tabs, TabPanel, TextInput } from "./components/ui";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { Badge, Button, Card, CardHeader, EmptyState, Flex, Modal, Notice, PageSection, Select, Skeleton, Stack, Table, Tabs, TabPanel, TextInput } from "./components/ui";
 import { useUrlSyncedTabs } from "./useUrlSyncedTabs";
+import { formatIdentityText, Identity, isInternalUserId } from "./identityDisplay";
 import {
   deactivateSelf,
   decideAccessRequest,
@@ -39,7 +40,10 @@ import {
   fetchAdminOverview,
   fetchMemberships,
   formatEventTime,
+  formatMembershipStatus,
   grantMembershipApi,
+  liveRoles,
+  membershipStatus,
   revokeMembershipApi,
   type AccessRequestView,
   type AdminMembershipView,
@@ -69,15 +73,37 @@ import { LoggedInUsersPanel } from "./LoggedInUsersPanel";
 import { fetchRoleGrants } from "./roleGrantsApi";
 import { fetchLoggedInUsers } from "./loggedInUsersApi";
 
-// Issue #5077: the iaaaAdminPanel.css import stays — the sheet styles this
-// panel's child components (ServiceUserSection, AdminQueueWipePanel,
-// PolicyProposalsPanel), which are not migrated in this slice. This file
-// itself no longer uses any class from it; the import is the subtree's
-// only load of the sheet (main.tsx does not import it). Retiring the sheet
-// waits on migrating those children.
-import "./iaaaAdminPanel.deprecated.css";
+// #6164 (A3): iaaaAdminPanel.deprecated.css is retired — its last
+// consumers (ServiceUserSection, AdminQueueWipePanel,
+// PolicyProposalsPanel) now use the ui primitives only, as do the
+// other three sheets' consumers. The .deprecated.css files stay on
+// disk (gitops §22: deletion needs zero consumers + an owner decision
+// + a gate amendment); no file imports them anymore.
 
 type IaaaAdminTab = "overview" | "members" | "api" | "mcp" | "iaaa" | "correlations";
+
+/**
+ * #6164 (F2) — audit-table cell for a principal that may be an internal
+ * id or a system/issuer principal: ids render as {@link Identity},
+ * anything else renders verbatim. Lives here (not in identityDisplay)
+ * because the audit table is its only caller — and a shared helper
+ * rendering a component tag would trip the token-coverage ratchet,
+ * which requires every JSX-rendering client file to import a ui
+ * primitive (identityDisplay renders only a fragment + a ui-mono code).
+ */
+function Principal({
+  login,
+  principal,
+}: {
+  login: string | null | undefined;
+  principal: string;
+}): ReactNode {
+  return isInternalUserId(principal) ? (
+    <Identity login={login} id={principal} />
+  ) : (
+    <>{principal}</>
+  );
+}
 
 const IAAA_ADMIN_TABS = [
   { id: "overview", label: "Overview" },
@@ -254,7 +280,7 @@ export function IaaaAdminPanel() {
 
   const grant = useCallback(async () => {
     if (grantTarget.trim() === "") {
-      setMembersError("A target internal user id is required.");
+      setMembersError("A target login or internal user id is required.");
       return;
     }
     setActingId("grant");
@@ -374,7 +400,18 @@ export function IaaaAdminPanel() {
     void load();
   }, [load]);
 
-  if (loading) return <Spinner />;
+  // #6164 (F13) — the wait is the region's only content, so it says
+  // what is loading (visible text + skeleton), never a bare Spinner.
+  if (loading) {
+    return (
+      <PageSection>
+        <Card>
+          <p role="status">Loading IAAA admin…</p>
+          <Skeleton variant="text" lines={3} />
+        </Card>
+      </PageSection>
+    );
+  }
   if (notAdmin) {
     // #2688 limited view: tenant-admins get the Role grants
     // section only — never Overview data, Service tokens, or
@@ -414,8 +451,15 @@ export function IaaaAdminPanel() {
   if (error) return <Notice tone="danger">{error}</Notice>;
   if (!overview) return <EmptyState title="No IAAA data" description="The overview came back empty." />;
 
-  const roles = overview.memberships.flatMap((m) =>
-    m.roleBindings.map((b) => `${b.role} (${b.scope})`),
+  // #6164 (F1) — "Your roles" lists LIVE roles only: a revoked
+  // membership, or one whose bindings all expired, grants nothing.
+  // The non-live memberships are named below with their dates, so
+  // the Summary never again says "not revoked" on one page and
+  // "revoked" on another.
+  const nowMs = Date.now();
+  const roles = liveRoles(overview.memberships, nowMs);
+  const nonLiveMemberships = overview.memberships.filter(
+    (m) => membershipStatus(m, nowMs).kind !== "active",
   );
 
   return (
@@ -492,6 +536,16 @@ export function IaaaAdminPanel() {
           <Stack gap="1">
             <span className="ui-label">Your roles</span>
             <strong>{roles.length > 0 ? roles.join(", ") : "None"}</strong>
+          </Stack>
+          <Stack gap="1">
+            <span className="ui-label">Membership status</span>
+            <strong>
+              {nonLiveMemberships.length === 0
+                ? "All active"
+                : nonLiveMemberships
+                    .map((m) => formatMembershipStatus(membershipStatus(m, nowMs)))
+                    .join("; ")}
+            </strong>
           </Stack>
           <Stack gap="1">
             <span className="ui-label">Platform genesis</span>
@@ -649,7 +703,7 @@ export function IaaaAdminPanel() {
               {
                 key: "requester",
                 header: "Requester",
-                render: (r) => <code>{r.requesterInternalUserId}</code>,
+                render: (r) => <Identity login={r.requesterLogin} id={r.requesterInternalUserId} />,
               },
               { key: "role", header: "Role", render: (r) => r.requestedRole },
               { key: "status", header: "Status", render: (r) => r.status },
@@ -709,6 +763,22 @@ export function IaaaAdminPanel() {
             columns={[
               { key: "time", header: "Time", render: (event) => formatEventTime(event.timestamp) },
               { key: "action", header: "Action", render: (event) => <code>{event.action}</code> },
+              {
+                key: "actor",
+                header: "Actor",
+                render: (event) => (
+                  <>
+                    <Principal login={event.actorLogin} principal={event.actorPrincipalId} />
+                    {event.initiatingPrincipalId &&
+                      event.initiatingPrincipalId !== event.actorPrincipalId && (
+                        <>
+                          {" "}initiated by{" "}
+                          <Principal login={event.initiatingLogin} principal={event.initiatingPrincipalId} />
+                        </>
+                      )}
+                  </>
+                ),
+              },
               { key: "decision", header: "Decision", render: (event) => event.decision },
               { key: "outcome", header: "Outcome", render: (event) => event.outcome },
               {
@@ -742,8 +812,8 @@ export function IaaaAdminPanel() {
         {/* Issue #4839 G6: where the id comes from — the Memberships table
         below lists them; a wired sign-in's /api/me shows the caller's own. */}
         <TextInput
-          label="Target internal user id"
-          hint="Find it in the Memberships table below, or from /api/me after a wired sign-in."
+          label="Target login or internal user id"
+          hint="A login is resolved server-side via the alias record; an internal user id is used as-is. Find it in the Memberships table below, or from /api/me after a wired sign-in."
           value={grantTarget}
           onChange={(e) => setGrantTarget(e.target.value)}
         />
@@ -801,7 +871,16 @@ export function IaaaAdminPanel() {
         ) : (
           <Table
             columns={[
-              { key: "user", header: "User", render: (m) => <code>{m.internalUserId}</code> },
+              {
+                key: "user",
+                header: "User",
+                render: (m) => <Identity login={m.login} id={m.internalUserId} />,
+              },
+              {
+                key: "membership",
+                header: "Membership",
+                render: (m) => <code>{m.membershipId}</code>,
+              },
               { key: "tenant", header: "Tenant", render: (m) => m.tenantId },
               {
                 key: "roles",
@@ -810,9 +889,9 @@ export function IaaaAdminPanel() {
                   m.roleBindings.map((b) => `${b.role} (${b.scope})`).join(", "),
               },
               {
-                key: "revoked",
-                header: "Revoked",
-                render: (m) => (m.revokedAtMs !== undefined ? "Yes" : "No"),
+                key: "status",
+                header: "Status",
+                render: (m) => formatMembershipStatus(membershipStatus(m, Date.now())),
               },
               {
                 key: "actions",
@@ -828,7 +907,7 @@ export function IaaaAdminPanel() {
                         onClick={() =>
                           setRevokeTarget({
                             id: m.membershipId,
-                            label: `${m.internalUserId} (${m.tenantId})`,
+                            label: `${formatIdentityText(m.login, m.internalUserId)} (${m.tenantId})`,
                           })
                         }
                       >

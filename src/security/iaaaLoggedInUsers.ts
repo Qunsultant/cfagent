@@ -95,6 +95,13 @@ export interface LoggedInUserRow {
   /** Active-membership tenants, sorted; [] for the legacy group. */
   tenantIds: string[];
   /**
+   * Active-membership ids, sorted; [] for the legacy group.
+   * #6164 (F9): the row carries the ids the Members table shows,
+   * so the two surfaces can be correlated — a user with no active
+   * membership reads [] ("none recorded"), never an invented id.
+   */
+  membershipIds: string[];
+  /**
    * Retained auth.login succeeded events for this user. Null
    * for the legacy group, which cannot be attributed to events.
    */
@@ -125,6 +132,12 @@ export interface MembershipInput {
   internalUserId: string;
   tenantId: string;
   revoked: boolean;
+  /**
+   * Membership record id, when the caller carries it (#6164 F9).
+   * Optional: callers that predate the field keep working, and a
+   * membership without an id contributes no id to the row.
+   */
+  membershipId?: string;
   /**
    * Single-expiry form: a caller holding multi-binding records
    * folds binding expiry into `revoked` instead (no unexpired
@@ -274,11 +287,17 @@ export function buildLoggedInUserRows(
   }
 
   const activeByUser = new Map<string, string[]>();
+  const membershipIdsByUser = new Map<string, string[]>();
   for (const m of input.memberships) {
     if (!isActiveMembership(m, input.nowMs)) continue;
     const tenants = activeByUser.get(m.internalUserId) ?? [];
     if (!tenants.includes(m.tenantId)) tenants.push(m.tenantId);
     activeByUser.set(m.internalUserId, tenants);
+    if (m.membershipId !== undefined) {
+      const ids = membershipIdsByUser.get(m.internalUserId) ?? [];
+      if (!ids.includes(m.membershipId)) ids.push(m.membershipId);
+      membershipIdsByUser.set(m.internalUserId, ids);
+    }
   }
 
   const aliasByUser = new Map<string, number>();
@@ -339,6 +358,7 @@ export function buildLoggedInUserRows(
       identity,
       tenantIds:
         input.scope === "tenant" ? [input.tenantId ?? ""] : tenants,
+      membershipIds: (membershipIdsByUser.get(internalUserId) ?? []).sort(),
       loginCount: timestamps.length,
       firstLoginMs: timestamps.length > 0 ? timestamps[0] : null,
       mostRecentLoginMs:
@@ -358,6 +378,7 @@ export function buildLoggedInUserRows(
         displayLogin,
         identity: null,
         tenantIds: [],
+        membershipIds: [],
         loginCount: null,
         firstLoginMs: null,
         mostRecentLoginMs: null,

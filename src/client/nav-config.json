@@ -973,9 +973,9 @@
       {
         "id": "iaaa-admin",
         "label": "IAAA Admin",
-        "shortLabel": "Read-only memberships, genesis & audit",
+        "shortLabel": "Memberships, genesis & audit",
         "icon": "IaaaAdmin",
-        "description": "Read-only memberships, genesis & audit"
+        "description": "Memberships, genesis & audit"
       },
       {
         "id": "users",
@@ -2069,7 +2069,7 @@
     },
     {
       "surface": "iaaa-admin",
-      "page": "platform-admin",
+      "page": "security-hub",
       "pageView": "iaaa-admin",
       "param": "iaaaTab",
       "values": [
@@ -2079,6 +2079,23 @@
         "mcp",
         "iaaa",
         "correlations"
+      ]
+    },
+    {
+      "surface": "iaaa-admin-sections",
+      "page": "security-hub",
+      "pageView": "iaaa-admin",
+      "param": "iaaaSection",
+      "values": [
+        "summary",
+        "service-user",
+        "service-tokens",
+        "role-grants",
+        "bootstrap-proposals",
+        "logged-in-users",
+        "deactivate",
+        "access-requests",
+        "audit-events"
       ]
     },
     {

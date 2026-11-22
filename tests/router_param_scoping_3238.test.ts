@@ -62,9 +62,21 @@ describe("router param scoping (#3238)", () => {
     expect(buildSearchWithTab("?tab=workflow-runs&run=abc", "reports")).toBe(
       "?tab=reports",
     );
-    expect(buildSearchWithTab("?tab=platform-admin&iaaaTab=members", "platform-admin")).toBe(
-      "?tab=platform-admin&iaaaTab=members",
+    // Issue #6164: iaaaTab is owned by security-hub now (the IAAA Admin
+    // panel lives there), not platform-admin — it survives navigation
+    // to security-hub and drops on the way out, like providerTab.
+    expect(buildSearchWithTab("?tab=security-hub&iaaaTab=members", "security-hub")).toBe(
+      "?tab=security-hub&iaaaTab=members",
     );
+    expect(buildSearchWithTab("?tab=security-hub&iaaaTab=members", "platform-admin")).toBe(
+      "?tab=platform-admin",
+    );
+    expect(buildSearchWithTab("?tab=security-hub&iaaaTab=members", "portfolio")).toBe(
+      "?tab=portfolio",
+    );
+    expect(
+      buildSearchWithTab("?tab=security-hub&iaaaSection=audit-events", "security-hub"),
+    ).toBe("?tab=security-hub&iaaaSection=audit-events");
     // Issue #3978: the data-providers inner tab param is owned by
     // platform-admin — it survives navigation to the page and drops
     // on the way out, like iaaaTab.

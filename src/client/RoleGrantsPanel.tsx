@@ -25,13 +25,13 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { EmptyState, Notice, Spinner } from "./components/ui";
+import { Card, EmptyState, Flex, Notice, Spinner, Stack } from "./components/ui";
+import { formatIdentityText, Identity } from "./identityDisplay";
 import {
   fetchRoleGrants,
   fmtRoleGrantTime,
   type RoleGrantInfo,
 } from "./roleGrantsApi";
-import "./roleGrantsPanel.deprecated.css";
 
 export function RoleGrantsPanel() {
   const [grants, setGrants] = useState<RoleGrantInfo[]>([]);
@@ -56,8 +56,11 @@ export function RoleGrantsPanel() {
   }, [load]);
 
   return (
-    <div className="rgp-panel">
-      <p className="rgp-desc">
+    // #6164 (A3) — retired roleGrantsPanel.deprecated.css: layout and text
+    // come from the ui primitives only (Stack/Flex/Card + ui-meta), the
+    // ApiKeysPanel pattern. No bespoke class remains in this file.
+    <Stack gap="3">
+      <p className="ui-meta">
         Admin roles are granted explicitly — signing in through any provider grants no admin
         role by itself. A platform admin grants platform-admin; a tenant admin grants
         tenant-admin within their own tenant only. Granting yourself a role is refused by
@@ -72,35 +75,40 @@ export function RoleGrantsPanel() {
           {error}
         </Notice>
       )}
-
       {loading ? (
-        <div className="rgp-loading">
-          <Spinner size="sm" /> Loading role grants…
-        </div>
+        <Flex gap="2" align="center">
+          <Spinner size="sm" /> <span className="ui-meta">Loading role grants…</span>
+        </Flex>
       ) : grants.length === 0 ? (
         <EmptyState
           title="No admin grants yet"
           description="Admin roles are granted from Grant membership on the Members tab. Grants appear here with who granted them and when."
         />
       ) : (
-        <ul className="rgp-list">
+        <Stack gap="2">
           {grants.map((grant) => (
-            <li key={grant.grantId} className="rgp-item">
-              <div className="rgp-item-meta">
-                <span className="rgp-item-user">{grant.identity ?? grant.internalUserId}</span>
-                <span className="rgp-item-role">
-                  {grant.role} ({grant.scope}) · Tenant {grant.tenantId}
-                  {grant.revoked && " · Revoked"}
-                </span>
-                <span className="rgp-item-times">
-                  Granted by {grant.grantedBy} · {fmtRoleGrantTime(grant.grantedAtMs)}
-                  {grant.email ? ` · ${grant.email}` : ""}
-                </span>
-              </div>
-            </li>
+            <Card key={grant.grantId} padding="sm">
+              <Flex justify="between" align="center" gap="3" wrap>
+                <Stack gap="1">
+                  {/* #6164 (F8) — the grantee is a login beside the id, never
+                  a bare hash; the identity binding stays as the fallback. */}
+                  <span className="ui-mono">
+                    <Identity login={grant.login ?? grant.identity} id={grant.internalUserId} />
+                  </span>
+                  <span className="ui-meta">
+                    {grant.role} ({grant.scope}) · Tenant {grant.tenantId}
+                    {grant.revoked && " · Revoked"}
+                  </span>
+                  <span className="ui-meta">
+                    Granted by {formatIdentityText(grant.grantedByLogin, grant.grantedBy)} · {fmtRoleGrantTime(grant.grantedAtMs)}
+                    {grant.email ? ` · ${grant.email}` : ""}
+                  </span>
+                </Stack>
+              </Flex>
+            </Card>
           ))}
-        </ul>
+        </Stack>
       )}
-    </div>
+    </Stack>
   );
 }
