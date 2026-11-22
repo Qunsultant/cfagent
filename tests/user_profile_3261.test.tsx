@@ -21,7 +21,7 @@
  * field, and the section marks that field invalid (aria-invalid +
  * the coded message under it).
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { ProfileSection } from "../src/client/ProfileSection";
@@ -36,6 +36,43 @@ import { getOutcome } from "../src/outcomes/outcomeAspects";
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
 const catalogMessage = (code: string): string => getOutcome(code)!.businessMessage;
+
+// Issue #6141: the profile section now mounts the referral panel,
+// which fetches GET /referral/balance on mount. The stub answers
+// that read with an empty extension summary, so the panel renders
+// its content instead of a load warning (which would add a second
+// role="alert" to the container and break the duplicate-save test).
+const REFERRAL_BALANCE = {
+  code: "SUCCESS_REFERRAL_BALANCE_READ",
+  userId: "prof-ui-a",
+  redeemableUSD: 0,
+  expiredUSD: 0,
+  totalEarnedUSD: 0,
+  attribution: null,
+  extension: {
+    referredCount: 0,
+    totalExtensionDays: 0,
+    appliedDays: 0,
+    bankedDays: 0,
+    expiredDays: 0,
+    trialEndsAtMs: null,
+  },
+  rules: {
+    earnAmountUSD: 0.5,
+    vestingDelayMs: 604800000,
+    redemptionScope: "pay-per-run",
+    expiryPeriodMs: 7776000000,
+    extensionDays: 7,
+    referredTrialDays: 14,
+    maxExtensionsPerDay: 3,
+    maxExtensionsPerMonth: 10,
+    referralTrialPlanId: null,
+    shareMessageTemplate:
+      "Join me on OpenAIMP — sign up with my link and get a {trialDays}-day free trial of the paid tier, plus free runs every month: {link}",
+  },
+};
+
+const prevFetch = (globalThis as any).fetch;
 
 const apiState = vi.hoisted(() => ({
   profile: {
@@ -136,6 +173,16 @@ beforeEach(() => {
   apiState.saveDuplicate = false;
   apiState.saveMessage = null;
   document.body.innerHTML = "";
+  (globalThis as any).fetch = vi.fn(async (url: string) => {
+    if (String(url).includes("/referral/balance")) {
+      return { ok: true, status: 200, json: async () => REFERRAL_BALANCE };
+    }
+    throw new Error(`unexpected fetch: ${url}`);
+  });
+});
+
+afterEach(() => {
+  (globalThis as any).fetch = prevFetch;
 });
 
 describe("displayNameFor (#3261)", () => {
@@ -205,7 +252,9 @@ describe("ProfileSection (#3261)", () => {
     const { container } = await renderSection();
     const labels = Array.from(container.querySelectorAll("label")).map((l) => l.textContent ?? "");
     expect(labels.join(" ")).toMatch(/email/i);
-    expect(container.querySelectorAll("input").length).toBe(3);
+    // Issue #6141: the referral panel adds a fourth input (the
+    // read-only referral link) below the profile fields.
+    expect(container.querySelectorAll("input").length).toBe(4);
     expect(container.textContent).toContain("does not change your sign-in login");
     expect(container.textContent).not.toContain("Email cannot be changed here yet");
   });

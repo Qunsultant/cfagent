@@ -149,7 +149,9 @@ const D1_MIGRATION_SQL_SHA256: Record<number, string> = {
   80: "6761e28c163ce021d52e5cee3dd57eb3989504d10ad585443386956657bd917e",
   // #6099 adds migration 0081 (job_run_records tenant_id +
   // projected_at_ms + unique identity index).
-  81: "f5b6659bebc315b6f5ad499fa459c2f3b1f8b9196f28807fc2dcc614507ccd90",};
+  81: "f5b6659bebc315b6f5ad499fa459c2f3b1f8b9196f28807fc2dcc614507ccd90",
+  82: "6dbf344114cffc578c59fae8eb4b17abba4a459c6748fa603c0e6a9428ac37dd",
+};
 
 /** Per-version statement counts, measured from the base runner. */
 const D1_MIGRATION_STATEMENT_COUNTS: Record<number, number> = {
@@ -235,7 +237,9 @@ const D1_MIGRATION_STATEMENT_COUNTS: Record<number, number> = {
   // #6072 adds migration 0080 (agent_screener_task_entries table): 1 statement.
   80: 1,
   // #6099 adds migration 0081 (job_run_records projection): 3 statements.
-  81: 3,};
+  81: 3,
+  82: 9,
+};
 
 /** The 11 seed-DML statements, exact text, measured from the base runner. */
 const D1_SEED_STATEMENTS: string[] = [
@@ -275,7 +279,8 @@ function expectedD1Model(): SchemaModel {
 }
 
 describe("D1 catalogue — migrationRunner delegates (#4282 P1)", () => {
-  it("catalogues all 244 runner statements: 232 schema + 12 seed", () => {    const catalogue = buildD1Catalogue();
+  it("catalogues all 253 runner statements: 241 schema + 12 seed", () => {
+    const catalogue = buildD1Catalogue();
     // #5086 adds migration 0070 (otel_config_overrides table): 224 → 225.
     // #4767 adds migrations 0071/0072 (4 D1 ALTERs): 225 → 229.
     // #4204 adds migration 0073 (D1 job_run_records recent-read index): 229 → 230.
@@ -286,9 +291,11 @@ describe("D1 catalogue — migrationRunner delegates (#4282 P1)", () => {
     // #6072 adds migration 0080 (agent_screener_task_entries table): 240 → 241.
     // #6099 adds migration 0081 (job_run_records tenant_id + projected_at_ms +
     // unique identity index): 241 → 244.
-    expect(D1_CATALOGUE_ENTRIES.length).toBe(244);
-    expect(catalogue.size()).toBe(244);
-    expect(catalogue.byKind("schema").length).toBe(232);    expect(catalogue.byKind("seed").length).toBe(12);
+    // #6141 adds migration 0082 (referral trial-extension: 6 rule columns + ledger table + 2 indexes): 244 → 253.
+    expect(D1_CATALOGUE_ENTRIES.length).toBe(253);
+    expect(catalogue.size()).toBe(253);
+    expect(catalogue.byKind("schema").length).toBe(241);
+    expect(catalogue.byKind("seed").length).toBe(12);
     const verbs = new Map<string, number>();
     const classify = (statement: string): string => {
       const upper = statement.trim().toUpperCase();
@@ -312,10 +319,10 @@ describe("D1 catalogue — migrationRunner delegates (#4282 P1)", () => {
       const verb = classify(entry.statement);
       verbs.set(verb, (verbs.get(verb) ?? 0) + 1);
     }
-    expect(verbs.get("CREATE TABLE")).toBe(105);
-    expect(verbs.get("CREATE INDEX")).toBe(55);
+    expect(verbs.get("CREATE TABLE")).toBe(106);
+    expect(verbs.get("CREATE INDEX")).toBe(57);
     expect(verbs.get("CREATE UNIQUE INDEX")).toBe(8);
-    expect(verbs.get("ALTER TABLE")).toBe(63);
+    expect(verbs.get("ALTER TABLE")).toBe(69);
     expect(verbs.get("DROP TABLE")).toBe(1);
     expect(verbs.get("INSERT OR IGNORE")).toBe(8);
     expect(verbs.get("INSERT INTO")).toBe(1);
@@ -327,7 +334,7 @@ describe("D1 catalogue — migrationRunner delegates (#4282 P1)", () => {
       .map(Number)
       .sort((a, b) => a - b);
     expect(versions).toEqual(
-      Array.from({ length: 81 }, (_, i) => i + 1),
+      Array.from({ length: 82 }, (_, i) => i + 1),
     );
     const allCodes = new Set<string>();
     for (const version of versions) {

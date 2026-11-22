@@ -18,7 +18,7 @@
  */
 import { type DrizzleD1Database } from "drizzle-orm/d1";
 import { createDrizzleD1Db } from "./d1QueryLogger";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, gte } from "drizzle-orm";
 import {
   agentDigestPassDays,
   agentDigestSends,
@@ -27,6 +27,7 @@ import {
   agentReferralAttributions,
   agentReferralEarnings,
   agentReferralRules,
+  agentReferralTrialExtensions,
 } from "./drizzleSchema";
 import {
   applyMigrations,
@@ -34,6 +35,7 @@ import {
   MIGRATION_0031_REFERRAL_ATTRIBUTION,
   MIGRATION_0035_DIGEST_PASS,
   MIGRATION_0069_REFERRAL_EXPIRY,
+  MIGRATION_0082_REFERRAL_TRIAL_EXTENSION,
   type MigrationDb,
 } from "./migrationRunner";
 import {
@@ -56,6 +58,7 @@ import {
   type ReferralAttribution,
   type ReferralEarning,
   type ReferralRules,
+  type ReferralTrialExtension,
 } from "./lifecyclePorts";
 import { BusinessError } from "../outcomes/outcomeAspects";
 
@@ -64,6 +67,7 @@ export type LifecycleDb = DrizzleD1Database<{
   agentReferralRules: typeof agentReferralRules;
   agentReferralEarnings: typeof agentReferralEarnings;
   agentReferralAttributions: typeof agentReferralAttributions;
+  agentReferralTrialExtensions: typeof agentReferralTrialExtensions;
   agentNotificationPreferences: typeof agentNotificationPreferences;
   agentDigestSends: typeof agentDigestSends;
 }>;
@@ -75,6 +79,7 @@ export function createD1LifecycleDb(d1: D1Database): LifecycleDb {
       agentReferralRules,
       agentReferralEarnings,
       agentReferralAttributions,
+      agentReferralTrialExtensions,
       agentNotificationPreferences,
       agentDigestSends,
     },
@@ -94,6 +99,7 @@ export async function ensureLifecycleSchema(db: LifecycleDb): Promise<number[]> 
     MIGRATION_0031_REFERRAL_ATTRIBUTION,
     MIGRATION_0035_DIGEST_PASS,
     MIGRATION_0069_REFERRAL_EXPIRY,
+    MIGRATION_0082_REFERRAL_TRIAL_EXTENSION,
   ]);
 }
 
@@ -122,6 +128,22 @@ function toEarning(raw: typeof agentReferralEarnings.$inferSelect): ReferralEarn
   };
 }
 
+function toExtension(raw: typeof agentReferralTrialExtensions.$inferSelect): ReferralTrialExtension {
+  return {
+    id: raw.id,
+    referrerUserId: raw.referrerUserId,
+    referredUserId: raw.referredUserId,
+    tenantId: raw.tenantId,
+    daysGranted: raw.daysGranted,
+    status: raw.status as ReferralTrialExtension["status"],
+    subscriptionId: raw.subscriptionId,
+    grantedAtMs: raw.grantedAtMs,
+    expiresAtMs: raw.expiresAtMs,
+    appliedAtMs: raw.appliedAtMs,
+    consumedAtMs: raw.consumedAtMs,
+  };
+}
+
 /** Lifecycle store over D1 via Drizzle. */
 export class D1LifecycleAdapter implements LifecycleStore {
   constructor(readonly db: LifecycleDb) {}
@@ -142,6 +164,12 @@ export class D1LifecycleAdapter implements LifecycleStore {
       vestingDelayMs: rows[0].vestingDelayMs,
       redemptionScope: "pay-per-run",
       expiryPeriodMs: rows[0].expiryPeriodMs,
+      extensionDays: rows[0].extensionDays,
+      referredTrialDays: rows[0].referredTrialDays,
+      maxExtensionsPerDay: rows[0].maxExtensionsPerDay,
+      maxExtensionsPerMonth: rows[0].maxExtensionsPerMonth,
+      referralTrialPlanId: rows[0].referralTrialPlanId,
+      shareMessageTemplate: rows[0].shareMessageTemplate,
       updatedAtMs: rows[0].updatedAtMs,
     };
   }
@@ -151,6 +179,12 @@ export class D1LifecycleAdapter implements LifecycleStore {
     vestingDelayMs: unknown;
     redemptionScope: unknown;
     expiryPeriodMs?: unknown;
+    extensionDays?: unknown;
+    referredTrialDays?: unknown;
+    maxExtensionsPerDay?: unknown;
+    maxExtensionsPerMonth?: unknown;
+    referralTrialPlanId?: unknown;
+    shareMessageTemplate?: unknown;
   }): Promise<ReferralRules> {
     const validated = validateReferralRules(input);
     const record: ReferralRules = { id: "default", ...validated, updatedAtMs: Date.now() };
@@ -162,6 +196,12 @@ export class D1LifecycleAdapter implements LifecycleStore {
         vestingDelayMs: record.vestingDelayMs,
         redemptionScope: record.redemptionScope,
         expiryPeriodMs: record.expiryPeriodMs,
+        extensionDays: record.extensionDays,
+        referredTrialDays: record.referredTrialDays,
+        maxExtensionsPerDay: record.maxExtensionsPerDay,
+        maxExtensionsPerMonth: record.maxExtensionsPerMonth,
+        referralTrialPlanId: record.referralTrialPlanId,
+        shareMessageTemplate: record.shareMessageTemplate,
         updatedAtMs: record.updatedAtMs,
       })
       .onConflictDoUpdate({
@@ -171,6 +211,12 @@ export class D1LifecycleAdapter implements LifecycleStore {
           vestingDelayMs: record.vestingDelayMs,
           redemptionScope: record.redemptionScope,
           expiryPeriodMs: record.expiryPeriodMs,
+          extensionDays: record.extensionDays,
+          referredTrialDays: record.referredTrialDays,
+          maxExtensionsPerDay: record.maxExtensionsPerDay,
+          maxExtensionsPerMonth: record.maxExtensionsPerMonth,
+          referralTrialPlanId: record.referralTrialPlanId,
+          shareMessageTemplate: record.shareMessageTemplate,
           updatedAtMs: record.updatedAtMs,
         },
       });
@@ -302,6 +348,94 @@ export class D1LifecycleAdapter implements LifecycleStore {
     // Both adapters share redeemableBalanceFor, so the two
     // implementations cannot drift.
     return redeemableBalanceFor(earnings, Date.now(), rules.expiryPeriodMs);
+  }
+
+  async recordExtension(input: ReferralTrialExtension): Promise<ReferralTrialExtension> {
+    if (!input.id || !input.referrerUserId || !input.referredUserId || !input.tenantId) {
+      throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
+    }
+    if (input.referrerUserId === input.referredUserId) {
+      throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
+    }
+    // INSERT OR IGNORE: one extension per referred user, ever.
+    await this.db
+      .insert(agentReferralTrialExtensions)
+      .values({
+        id: input.id,
+        referrerUserId: input.referrerUserId,
+        referredUserId: input.referredUserId,
+        tenantId: input.tenantId,
+        daysGranted: input.daysGranted,
+        status: input.status,
+        subscriptionId: input.subscriptionId,
+        grantedAtMs: input.grantedAtMs,
+        expiresAtMs: input.expiresAtMs,
+        appliedAtMs: input.appliedAtMs,
+        consumedAtMs: input.consumedAtMs,
+      })
+      .onConflictDoNothing();
+    const rows = await this.db
+      .select()
+      .from(agentReferralTrialExtensions)
+      .where(eq(agentReferralTrialExtensions.id, input.id))
+      .limit(1);
+    return toExtension(rows[0]);
+  }
+
+  async listExtensions(referrerUserId: string): Promise<ReferralTrialExtension[]> {
+    const rows = await this.db
+      .select()
+      .from(agentReferralTrialExtensions)
+      .where(eq(agentReferralTrialExtensions.referrerUserId, referrerUserId))
+      .orderBy(asc(agentReferralTrialExtensions.grantedAtMs), asc(agentReferralTrialExtensions.id));
+    return rows.map(toExtension);
+  }
+
+  async countExtensionsSince(referrerUserId: string, sinceMs: number): Promise<number> {
+    const rows = await this.db
+      .select()
+      .from(agentReferralTrialExtensions)
+      .where(
+        and(
+          eq(agentReferralTrialExtensions.referrerUserId, referrerUserId),
+          gte(agentReferralTrialExtensions.grantedAtMs, sinceMs),
+        ),
+      );
+    return rows.length;
+  }
+
+  async markExtensionApplied(
+    id: string,
+    subscriptionId: string,
+    nowMs: number,
+  ): Promise<ReferralTrialExtension | null> {
+    await this.db
+      .update(agentReferralTrialExtensions)
+      .set({ status: "applied", subscriptionId, appliedAtMs: nowMs })
+      .where(eq(agentReferralTrialExtensions.id, id));
+    const rows = await this.db
+      .select()
+      .from(agentReferralTrialExtensions)
+      .where(eq(agentReferralTrialExtensions.id, id))
+      .limit(1);
+    return rows.length === 0 ? null : toExtension(rows[0]);
+  }
+
+  async markExtensionConsumed(
+    id: string,
+    subscriptionId: string,
+    nowMs: number,
+  ): Promise<ReferralTrialExtension | null> {
+    await this.db
+      .update(agentReferralTrialExtensions)
+      .set({ status: "consumed", subscriptionId, consumedAtMs: nowMs })
+      .where(eq(agentReferralTrialExtensions.id, id));
+    const rows = await this.db
+      .select()
+      .from(agentReferralTrialExtensions)
+      .where(eq(agentReferralTrialExtensions.id, id))
+      .limit(1);
+    return rows.length === 0 ? null : toExtension(rows[0]);
   }
 
   async redeem(input: {

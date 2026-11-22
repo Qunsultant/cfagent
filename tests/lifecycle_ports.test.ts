@@ -44,12 +44,14 @@ import {
   ensureLifecycleSchema,
 } from "../src/data/d1LifecycleAdapter";
 import { InMemoryLifecycleAdapter } from "../src/data/inMemoryLifecycleAdapter";
-import { MIGRATION_0015_LIFECYCLE_REFERRAL, MIGRATION_0069_REFERRAL_EXPIRY } from "../src/data/migrationRunner";
+import { createD1SubscriptionDb, ensureSubscriptionSchema } from "../src/data/d1SubscriptionAdapter";
+import { MIGRATION_0015_LIFECYCLE_REFERRAL, MIGRATION_0069_REFERRAL_EXPIRY, MIGRATION_0082_REFERRAL_TRIAL_EXTENSION } from "../src/data/migrationRunner";
 import {
   agentDigestSends,
   agentNotificationPreferences,
   agentReferralEarnings,
   agentReferralRules,
+  agentReferralTrialExtensions,
 } from "../src/data/drizzleSchema";
 import {
   allocateRedemption,
@@ -601,7 +603,7 @@ describe("lifecycle structural pins (#2208)", () => {
     }
   });
 
-  it("migration DDL and Drizzle schema agree on columns for all four tables", () => {
+  it("migration DDL and Drizzle schema agree on columns for all five tables", () => {
     for (const [table, mapping] of [
       ["agent_referral_rules", agentReferralRules],
       ["agent_referral_earnings", agentReferralEarnings],
@@ -625,12 +627,31 @@ describe("lifecycle structural pins (#2208)", () => {
       // Issue #5229 (slice 2.31): migration 0069 adds expiry_period_ms
       // to agent_referral_rules by ALTER TABLE — the DDL that defines
       // the table is 0015 + 0069, not 0015 alone.
+      // Issue #6141: migration 0082 adds the six trial-extension
+      // columns the same way — 0015 + 0069 + 0082.
       if (table === "agent_referral_rules") {
         const added = [...MIGRATION_0069_REFERRAL_EXPIRY.sql.matchAll(/ADD COLUMN (\w+)/g)].map((m) => m[1]);
         ddlColumns.push(...added);
+        const added82 = [...MIGRATION_0082_REFERRAL_TRIAL_EXTENSION.sql.matchAll(/ADD COLUMN (\w+)/g)].map((m) => m[1]);
+        ddlColumns.push(...added82);
       }
       expect(ddlColumns.sort()).toEqual(schemaColumns.sort());
     }
+    // Issue #6141: the extension ledger is created by migration 0082
+    // itself — its CREATE TABLE block is the DDL under test.
+    const ledgerBlock = MIGRATION_0082_REFERRAL_TRIAL_EXTENSION.sql.split(
+      `CREATE TABLE IF NOT EXISTS agent_referral_trial_extensions (`,
+    )[1].split(");")[0];
+    const ledgerDdl = [...ledgerBlock.matchAll(/^\s{2}(\w+) /gm)]
+      .map((m) => m[1])
+      .filter((c) => !["PRIMARY", "FOREIGN", "UNIQUE", "CONSTRAINT", "CHECK"].includes(c));
+    const ledgerRawColumns = getTableConfig(agentReferralTrialExtensions).columns as any;
+    const ledgerSchema = Array.isArray(ledgerRawColumns)
+      ? ledgerRawColumns.map((c: any) => c.name as string)
+      : Object.keys(ledgerRawColumns).map((s) =>
+          s.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`),
+        );
+    expect(ledgerDdl.sort()).toEqual(ledgerSchema.sort());
   });
 
   it("referral tables are separate from failure-credit claim tables", () => {
@@ -644,6 +665,11 @@ describe("lifecycle routes (#2208)", () => {
     const mock = new MockD1Database();
     const db = createD1LifecycleDb(mock as unknown as D1Database);
     await ensureLifecycleSchema(db);
+    // Issue #6141: the balance route now reads the trial-extension
+    // summary, which lists the caller's trial rows — the mock
+    // needs the subscription schema ensured too, as in production.
+    const subsDb = createD1SubscriptionDb(mock as unknown as D1Database);
+    await ensureSubscriptionSchema(subsDb);
     const emailSend = vi.fn(async () => undefined);
     const env = {
       AGENT_DB: mock,

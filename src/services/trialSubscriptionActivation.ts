@@ -68,6 +68,13 @@ export interface TrialActivationInput {
   tenantId: string;
   plan: SubscriptionPlanRecord;
   nowMs?: number;
+  /**
+   * Issue #6141: override the plan's trialDays with the operator's
+   * referred-trial-days rule (the referred grant). The plan still
+   * supplies included runs and must still offer a trial; the
+   * override changes ONLY the trial length, never the price.
+   */
+  trialDaysOverride?: number;
 }
 
 export interface TrialActivationResult {
@@ -127,7 +134,7 @@ export async function activateTrialSubscription(
     }
     throw err;
   }
-  const trialDays = plan.trialDays;
+  const trialDays = input.trialDaysOverride ?? plan.trialDays;
   if (trialDays === null || trialDays === undefined || !Number.isInteger(trialDays) || trialDays < 1) {
     throw new BusinessError("FAILURE_COMMERCIAL_CONFLICT"); // #5606 (G-3)
   }

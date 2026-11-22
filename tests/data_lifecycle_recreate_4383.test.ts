@@ -394,7 +394,11 @@ describe("recreate, tenant scope (#4383)", () => {
     // table, 1 step) and #6099 adds migration 0081 (job_run_records
     // tenant_id + projected_at_ms + unique identity index, 3 steps):
     // 263 → 267.
-    expect(body.d1.selected).toHaveLength(267);    expect(body.d1.skipped).toHaveLength(9);
+    expect(body.d1.skipped).toHaveLength(9);
+    // Issue #6141 adds migration 0082 (referral trial-extension: 6
+    // rule columns + ledger table + 2 indexes): 267 → 276.
+    expect(body.d1.selected).toHaveLength(276);
+    expect(body.d1.skipped).toHaveLength(9);
     // Two member instances (alice, bob), each planning the fresh DO leg.
     expect(body.instances).toHaveLength(2);
     for (const inst of body.instances) {
@@ -470,7 +474,11 @@ describe("recreate, tenant scope (#4383)", () => {
     // table, 1 step) and #6099 adds migration 0081 (job_run_records
     // tenant_id + projected_at_ms + unique identity index, 3 steps):
     // 263 → 267.
-    expect(body.d1.report.executed).toHaveLength(267);    expect(body.d1.verification.ok).toBe(true);
+    expect(body.d1.verification.ok).toBe(true);
+    // Issue #6141 adds migration 0082 (referral trial-extension: 6
+    // rule columns + ledger table + 2 indexes): 267 → 276.
+    expect(body.d1.report.executed).toHaveLength(276);
+    expect(body.d1.verification.ok).toBe(true);
     expect(body.instances).toHaveLength(2);
     for (const inst of body.instances) {
       expect(inst.report.outcome).toBe("succeeded");

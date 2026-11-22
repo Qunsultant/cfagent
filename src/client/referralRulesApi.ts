@@ -25,6 +25,18 @@ export interface ReferralRulesView {
   vestingDelayMs: number;
   redemptionScope: string;
   expiryPeriodMs: number;
+  /** Issue #6141: trial days earned per referred first verified paid run. */
+  extensionDays: number;
+  /** Issue #6141: trial days granted to a referred user on signup via the link. */
+  referredTrialDays: number;
+  /** Issue #6141: max trial-extension grants per referrer per UTC day. */
+  maxExtensionsPerDay: number;
+  /** Issue #6141: max trial-extension grants per referrer per UTC calendar month. */
+  maxExtensionsPerMonth: number;
+  /** Issue #6141: plan whose trial the referred grant activates; null = disabled. */
+  referralTrialPlanId: string | null;
+  /** Issue #6141: share-message template; must contain {link}. */
+  shareMessageTemplate: string;
 }
 
 export interface ReferralRulesResponse {
@@ -63,7 +75,13 @@ function assertRules(value: unknown): ReferralRulesView {
     typeof rules.earnAmountUSD !== "number" ||
     typeof rules.vestingDelayMs !== "number" ||
     typeof rules.redemptionScope !== "string" ||
-    typeof rules.expiryPeriodMs !== "number"
+    typeof rules.expiryPeriodMs !== "number" ||
+    typeof rules.extensionDays !== "number" ||
+    typeof rules.referredTrialDays !== "number" ||
+    typeof rules.maxExtensionsPerDay !== "number" ||
+    typeof rules.maxExtensionsPerMonth !== "number" ||
+    !(rules.referralTrialPlanId === null || typeof rules.referralTrialPlanId === "string") ||
+    typeof rules.shareMessageTemplate !== "string"
   ) {
     throw new ReferralRulesApiError(500);
   }
@@ -72,6 +90,12 @@ function assertRules(value: unknown): ReferralRulesView {
     vestingDelayMs: rules.vestingDelayMs,
     redemptionScope: rules.redemptionScope,
     expiryPeriodMs: rules.expiryPeriodMs,
+    extensionDays: rules.extensionDays,
+    referredTrialDays: rules.referredTrialDays,
+    maxExtensionsPerDay: rules.maxExtensionsPerDay,
+    maxExtensionsPerMonth: rules.maxExtensionsPerMonth,
+    referralTrialPlanId: rules.referralTrialPlanId,
+    shareMessageTemplate: rules.shareMessageTemplate,
   };
 }
 

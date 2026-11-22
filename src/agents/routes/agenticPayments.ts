@@ -335,6 +335,11 @@ import {
   convertReferralCreditsForRunPartial,
   recordFirstPaidRunEarning,
 } from "../../services/referralCredits";
+import {
+  applyBankedExtensions,
+  grantTrialExtension,
+  trialExtensionSummary,
+} from "../../services/referralTrialExtensions";
 import { createWorkflowPorts, type WorkflowEnv } from "../../workflows/createWorkflowPorts";
 import { tryStartScreenerWorkflow } from "../../workflows/screenerWorkflowRoutes";
 import type { WorkflowJobCommand } from "../../workflows/workflowPorts";
@@ -2113,6 +2118,55 @@ export async function handleAgenticPaymentsRoutes(
                         trigger: "auto",
                         runRequestId,
                       });
+                      // Issue #6141: the same first-verified-paid-run
+                      // event grants the referrer trial time. The grant
+                      // is best-effort inside the earn's own best-effort
+                      // block: a grant failure is a loud log + a
+                      // grant_failed audit row, never a failed run.
+                      // A cap refusal is a skip, audited as such.
+                      try {
+                        const grantSubs = requireSubs();
+                        if (!(grantSubs instanceof Response)) {
+                          const grant = await grantTrialExtension(
+                            { lifecycle: earnLifecycle, subs: grantSubs },
+                            {
+                              referrerUserId: attribution.referrerUserId,
+                              referredUserId: login,
+                              tenantId,
+                              nowMs: Date.now(),
+                            },
+                          );
+                          if (grant.outcome === "cap_refused") {
+                            ctx.audit("commercial.referral.trial_extension_grant_failed", "payments", {
+                              referrerUserId: attribution.referrerUserId,
+                              referredUserId: login,
+                              runRequestId,
+                              reason: "cap refused: daily or monthly extension cap reached",
+                            });
+                          } else if (grant.extension) {
+                            ctx.audit("commercial.referral.trial_extension_granted", "payments", {
+                              referrerUserId: attribution.referrerUserId,
+                              referredUserId: login,
+                              runRequestId,
+                              daysGranted: grant.extension.daysGranted,
+                              outcome: grant.outcome,
+                            });
+                          }
+                        }
+                      } catch (grantErr: any) {
+                        structuredLog.error("agenticPayments.referral_trial_extension_failed", {
+                          message: `[payments] referral trial-extension grant failed for ${login}: ${grantErr?.message ?? "unknown error"}`,
+                          referredUserId: login,
+                          runRequestId,
+                          error: grantErr?.message ?? "unknown error",
+                        });
+                        ctx.audit("commercial.referral.trial_extension_grant_failed", "payments", {
+                          referrerUserId: attribution.referrerUserId,
+                          referredUserId: login,
+                          runRequestId,
+                          reason: grantErr?.message ?? "unknown error",
+                        });
+                      }
                     }
                   }
                 }
@@ -4930,6 +4984,37 @@ export async function handleAgenticPaymentsRoutes(
         tenantId,
         plan,
       });
+      // Issue #6141: a fresh trial consumes the user's banked
+      // extension days (oldest-expiring-first). Best-effort: an
+      // apply failure is audited and the trial still returns —
+      // the days stay banked and apply on the next trial start.
+      let bankedDaysApplied = 0;
+      try {
+        const applyLifecycle = requireLifecycle();
+        if (!(applyLifecycle instanceof Response)) {
+          const applyEnsured = await ensureLifecycle(applyLifecycle);
+          if (!applyEnsured) {
+            const applied = await applyBankedExtensions(
+              { lifecycle: applyLifecycle, subs },
+              { userId: login, subscriptionId: subscription.id, nowMs: Date.now() },
+            );
+            bankedDaysApplied = applied.daysApplied;
+            if (applied.daysApplied > 0) {
+              ctx.audit("commercial.referral.trial_extension_applied", "payments", {
+                userId: login,
+                subscriptionId: subscription.id,
+                daysApplied: applied.daysApplied,
+              });
+            }
+          }
+        }
+      } catch (applyErr: any) {
+        ctx.audit("commercial.referral.trial_extension_apply_failed", "payments", {
+          userId: login,
+          subscriptionId: subscription.id,
+          reason: applyErr?.message ?? "unknown error",
+        });
+      }
       const activatedSubscriptions = await subs.listSubscriptions(login);
       const activationTransition = resolveTierTransition(
         identity.stored,
@@ -4950,13 +5035,26 @@ export async function handleAgenticPaymentsRoutes(
         newEffectiveTier: activationTransition.newEffectiveTier,
       });
       const effectiveTier = resolveEffectiveTier(account, [subscription], Date.now());
+      // #6141: the subscription row above predates the banked-days
+      // apply, so re-read it — the client shows the true trial end,
+      // and the message carries the extended date.
+      const refreshed = bankedDaysApplied > 0 ? await subs.getSubscription(subscription.id) : null;
+      const finalTrialEndsAtMs = refreshed ? refreshed.periodEndMs : trialEndsAtMs;
       const message = trialStartedMessage({
         planName: plan.name,
         trialDays: plan.trialDays,
         includedRuns: plan.includedRuns,
-        trialEndsAtMs,
+        trialEndsAtMs: finalTrialEndsAtMs,
       });
-      return Response.json({ code: "SUCCESS_SUBSCRIPTION_TRIAL_STARTED", subscription, account, effectiveTier, trialEndsAtMs, message });
+      return Response.json({
+        code: "SUCCESS_SUBSCRIPTION_TRIAL_STARTED",
+        subscription: refreshed ?? subscription,
+        account,
+        effectiveTier,
+        trialEndsAtMs: finalTrialEndsAtMs,
+        message,
+        bankedDaysApplied,
+      });
     } catch (err: any) {
       // #5606 (G-3): typed failures render from the catalog;
       // anything else logs server-side and answers the generic code.
@@ -8596,6 +8694,16 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
         lifecycle.listEarnings(userId),
         lifecycle.getAttribution(userId),
       ]);
+      // Issue #6141: the profile panel's trial-extension numbers ride
+      // the same read — one route, no second referral-status route.
+      // The summary reads only the extension ledger + the trial rows;
+      // a subs read failure surfaces the same 503 as a store failure.
+      const subs = requireSubs();
+      if (subs instanceof Response) return subs;
+      const extension = await trialExtensionSummary(
+        { lifecycle, subs },
+        { userId, nowMs: Date.now() },
+      );
       return Response.json({ code: "SUCCESS_REFERRAL_BALANCE_READ", 
         userId,
         redeemableUSD,
@@ -8606,11 +8714,19 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
         // attribution row is keyed by referred user, so a referrer's own
         // balance reads null here — their earnings are the list above.
         attribution,
+        // #6141: trial-extension summary for the profile panel.
+        extension,
         rules: {
           earnAmountUSD: rules.earnAmountUSD,
           vestingDelayMs: rules.vestingDelayMs,
           redemptionScope: rules.redemptionScope,
           expiryPeriodMs: rules.expiryPeriodMs,
+          extensionDays: rules.extensionDays,
+          referredTrialDays: rules.referredTrialDays,
+          maxExtensionsPerDay: rules.maxExtensionsPerDay,
+          maxExtensionsPerMonth: rules.maxExtensionsPerMonth,
+          referralTrialPlanId: rules.referralTrialPlanId,
+          shareMessageTemplate: rules.shareMessageTemplate,
         },
       });
     } catch (err: any) {
@@ -8637,6 +8753,12 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
           vestingDelayMs: rules.vestingDelayMs,
           redemptionScope: rules.redemptionScope,
           expiryPeriodMs: rules.expiryPeriodMs,
+          extensionDays: rules.extensionDays,
+          referredTrialDays: rules.referredTrialDays,
+          maxExtensionsPerDay: rules.maxExtensionsPerDay,
+          maxExtensionsPerMonth: rules.maxExtensionsPerMonth,
+          referralTrialPlanId: rules.referralTrialPlanId,
+          shareMessageTemplate: rules.shareMessageTemplate,
         },
       });
     } catch (err: any) {
@@ -8655,6 +8777,8 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       if (!isStoreOperator(login)) return Response.json({ code: "FAILURE_COMMERCIAL_FORBIDDEN", error: "Forbidden: operator only." }, { status: 403 });
       const body = (await request.json().catch(() => ({}))) as {
         earnAmountUSD: unknown; vestingDelayMs: unknown; redemptionScope: unknown; expiryPeriodMs?: unknown;
+        extensionDays?: unknown; referredTrialDays?: unknown; maxExtensionsPerDay?: unknown;
+        maxExtensionsPerMonth?: unknown; referralTrialPlanId?: unknown; shareMessageTemplate?: unknown;
       };
       const lifecycle = requireLifecycle();
       if (lifecycle instanceof Response) return lifecycle;
@@ -8674,6 +8798,12 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
         vestingDelayMs: rules.vestingDelayMs,
         redemptionScope: rules.redemptionScope,
         expiryPeriodMs: rules.expiryPeriodMs,
+        extensionDays: rules.extensionDays,
+        referredTrialDays: rules.referredTrialDays,
+        maxExtensionsPerDay: rules.maxExtensionsPerDay,
+        maxExtensionsPerMonth: rules.maxExtensionsPerMonth,
+        referralTrialPlanId: rules.referralTrialPlanId,
+        shareMessageTemplate: rules.shareMessageTemplate,
       });
       return Response.json({
         code: "SUCCESS_REFERRAL_RULES_UPDATED",
@@ -8682,6 +8812,12 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
           vestingDelayMs: rules.vestingDelayMs,
           redemptionScope: rules.redemptionScope,
           expiryPeriodMs: rules.expiryPeriodMs,
+          extensionDays: rules.extensionDays,
+          referredTrialDays: rules.referredTrialDays,
+          maxExtensionsPerDay: rules.maxExtensionsPerDay,
+          maxExtensionsPerMonth: rules.maxExtensionsPerMonth,
+          referralTrialPlanId: rules.referralTrialPlanId,
+          shareMessageTemplate: rules.shareMessageTemplate,
         },
       });
     } catch (err: any) {
@@ -8717,7 +8853,51 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
         referredUserId: earning.referredUserId,
         amountUSD: earning.amountUSD,
       });
-      return Response.json({ code: "SUCCESS_REFERRAL_EARNING_RECORDED", earning });
+      // Issue #6141: the operator-recorded earn is the same first-
+      // verified-paid-run event as the auto trigger, so it grants
+      // the same trial extension. Best-effort: a grant failure is
+      // audited and the recorded earning still returns — the
+      // operator can re-grant by re-posting (the grant is
+      // idempotent per referred user).
+      let extension: Awaited<ReturnType<typeof grantTrialExtension>>["extension"] = null;
+      let extensionOutcome: Awaited<ReturnType<typeof grantTrialExtension>>["outcome"] | null = null;
+      try {
+        const grantSubs = requireSubs();
+        if (!(grantSubs instanceof Response)) {
+          const grant = await grantTrialExtension(
+            { lifecycle, subs: grantSubs },
+            {
+              referrerUserId: body.referrerUserId,
+              referredUserId: body.referredUserId,
+              tenantId: body.tenantId,
+              nowMs: Date.now(),
+            },
+          );
+          extension = grant.extension;
+          extensionOutcome = grant.outcome;
+          if (grant.outcome === "cap_refused") {
+            ctx.audit("commercial.referral.trial_extension_grant_failed", "payments", {
+              referrerUserId: body.referrerUserId,
+              referredUserId: body.referredUserId,
+              reason: "cap refused: daily or monthly extension cap reached",
+            });
+          } else if (grant.extension) {
+            ctx.audit("commercial.referral.trial_extension_granted", "payments", {
+              referrerUserId: body.referrerUserId,
+              referredUserId: body.referredUserId,
+              daysGranted: grant.extension.daysGranted,
+              outcome: grant.outcome,
+            });
+          }
+        }
+      } catch (grantErr: any) {
+        ctx.audit("commercial.referral.trial_extension_grant_failed", "payments", {
+          referrerUserId: body.referrerUserId,
+          referredUserId: body.referredUserId,
+          reason: grantErr?.message ?? "unknown error",
+        });
+      }
+      return Response.json({ code: "SUCCESS_REFERRAL_EARNING_RECORDED", earning, extension, extensionOutcome });
     } catch (err: any) {
       return Response.json({ code: "FAILURE_UNEXPECTED_ERROR", error: codedMessage("FAILURE_UNEXPECTED_ERROR") }, { status: 500 });
     }

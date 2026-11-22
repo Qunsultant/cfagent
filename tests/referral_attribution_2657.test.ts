@@ -36,6 +36,7 @@ import {
   createD1CommercialDb,
   ensureCommercialSchema,
 } from "../src/data/d1CommercialAdapter";
+import { createD1SubscriptionDb, ensureSubscriptionSchema } from "../src/data/d1SubscriptionAdapter";
 import { InMemoryCommercialAdapter } from "../src/data/inMemoryCommercialAdapter";
 import { convertReferralCreditsForRun } from "../src/services/referralCredits";
 
@@ -210,6 +211,11 @@ describe("referral attribution routes + auto-earn trigger (#2657)", () => {
     const mock = new MockD1Database();
     const commercialDb = createD1CommercialDb(mock as unknown as D1Database);
     await ensureCommercialSchema(commercialDb);
+    // Issue #6141: the balance route now reads the trial-extension
+    // summary, which lists the caller's trial rows — the mock needs
+    // the subscription schema ensured too, as in production.
+    const subsDb = createD1SubscriptionDb(mock as unknown as D1Database);
+    await ensureSubscriptionSchema(subsDb);
     const binding = {
       create: vi.fn(async ({ id }: { id: string }) => ({ id })),
       get: vi.fn(async () => ({ status: async () => ({ status: "completed" }) })),

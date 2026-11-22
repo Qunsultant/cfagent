@@ -14,6 +14,11 @@ import {
 } from "./tenantScope";
 import { BusinessError } from "../outcomes/outcomeAspects";
 import {
+  DEFAULT_REFERRAL_EXTENSION_DAYS,
+  DEFAULT_REFERRAL_SHARE_MESSAGE_TEMPLATE,
+  DEFAULT_REFERRED_TRIAL_DAYS,
+  DEFAULT_MAX_EXTENSIONS_PER_DAY,
+  DEFAULT_MAX_EXTENSIONS_PER_MONTH,
   allocateRedemption,
   defaultPreferences,
   expiredBalanceFor,
@@ -28,6 +33,7 @@ import {
   type ReferralAttribution,
   type ReferralEarning,
   type ReferralRules,
+  type ReferralTrialExtension,
 } from "./lifecyclePorts";
 
 /** In-memory lifecycle store (tests + unbound-env fallback shape). */
@@ -39,9 +45,17 @@ export class InMemoryLifecycleAdapter implements LifecycleStore {
     redemptionScope: "pay-per-run",
     // #5229: seeded 90-day expiry, mirroring migration 0069.
     expiryPeriodMs: 7776000000,
+    // #6141: seeded PROPOSED extension defaults, mirroring migration 0082.
+    extensionDays: DEFAULT_REFERRAL_EXTENSION_DAYS,
+    referredTrialDays: DEFAULT_REFERRED_TRIAL_DAYS,
+    maxExtensionsPerDay: DEFAULT_MAX_EXTENSIONS_PER_DAY,
+    maxExtensionsPerMonth: DEFAULT_MAX_EXTENSIONS_PER_MONTH,
+    referralTrialPlanId: null,
+    shareMessageTemplate: DEFAULT_REFERRAL_SHARE_MESSAGE_TEMPLATE,
     updatedAtMs: 0,
   };
   private earnings = new Map<string, ReferralEarning>();
+  private extensions = new Map<string, ReferralTrialExtension>();
   private attributions = new Map<string, ReferralAttribution>();
   private preferences = new Map<string, NotificationPreferences>();
   private digestSends = new Set<string>();
@@ -57,6 +71,12 @@ export class InMemoryLifecycleAdapter implements LifecycleStore {
     vestingDelayMs: unknown;
     redemptionScope: unknown;
     expiryPeriodMs?: unknown;
+    extensionDays?: unknown;
+    referredTrialDays?: unknown;
+    maxExtensionsPerDay?: unknown;
+    maxExtensionsPerMonth?: unknown;
+    referralTrialPlanId?: unknown;
+    shareMessageTemplate?: unknown;
   }): Promise<ReferralRules> {
     const validated = validateReferralRules(input);
     this.rules = { id: "default", ...validated, updatedAtMs: Date.now() };
@@ -92,6 +112,69 @@ export class InMemoryLifecycleAdapter implements LifecycleStore {
     };
     this.earnings.set(id, record);
     return { ...record };
+  }
+
+  async recordExtension(input: ReferralTrialExtension): Promise<ReferralTrialExtension> {
+    if (!input.id || !input.referrerUserId || !input.referredUserId || !input.tenantId) {
+      throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
+    }
+    if (input.referrerUserId === input.referredUserId) {
+      throw new BusinessError("FAILURE_COMMERCIAL_REQUEST_INVALID"); // #5606 (G-3)
+    }
+    const existing = this.extensions.get(input.id);
+    if (existing) return { ...existing };
+    const record: ReferralTrialExtension = { ...input };
+    this.extensions.set(record.id, record);
+    return { ...record };
+  }
+
+  async listExtensions(referrerUserId: string): Promise<ReferralTrialExtension[]> {
+    return [...this.extensions.values()]
+      .filter((e) => e.referrerUserId === referrerUserId)
+      .sort((a, b) => a.grantedAtMs - b.grantedAtMs || (a.id < b.id ? -1 : 1))
+      .map((e) => ({ ...e }));
+  }
+
+  async countExtensionsSince(referrerUserId: string, sinceMs: number): Promise<number> {
+    let count = 0;
+    for (const e of this.extensions.values()) {
+      if (e.referrerUserId === referrerUserId && e.grantedAtMs >= sinceMs) count += 1;
+    }
+    return count;
+  }
+
+  async markExtensionApplied(
+    id: string,
+    subscriptionId: string,
+    nowMs: number,
+  ): Promise<ReferralTrialExtension | null> {
+    const existing = this.extensions.get(id);
+    if (!existing) return null;
+    const updated: ReferralTrialExtension = {
+      ...existing,
+      status: "applied",
+      subscriptionId,
+      appliedAtMs: nowMs,
+    };
+    this.extensions.set(id, updated);
+    return { ...updated };
+  }
+
+  async markExtensionConsumed(
+    id: string,
+    subscriptionId: string,
+    nowMs: number,
+  ): Promise<ReferralTrialExtension | null> {
+    const existing = this.extensions.get(id);
+    if (!existing) return null;
+    const updated: ReferralTrialExtension = {
+      ...existing,
+      status: "consumed",
+      subscriptionId,
+      consumedAtMs: nowMs,
+    };
+    this.extensions.set(id, updated);
+    return { ...updated };
   }
 
   async recordAttribution(input: {
