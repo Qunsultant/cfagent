@@ -25,6 +25,13 @@ import type { OptionChainSource } from "./optionChainSource";
 import { type NasdaqStockListing } from "../services/nasdaqListings";
 import type { NasdaqUniverseDeps } from "./screenerPipeline";
 import { getScreenerConfig, type EtapiScreenerConfig } from "../config/etapiConfig";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
+
+/** Issue #6171 — module logger on the structured-logging seam (same pattern as the broker client's module logger). */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "trading/optionsScreener",
+});
 
 const baseScreenerConfig = getScreenerConfig();
 /** Maximum underlyings (explicit or discovered) any single screen may query. */
@@ -610,18 +617,29 @@ export class DynamicOptionsScreener {
           deferred: true,
         };
       }
+      // Issue #6171: a rejected fallback fetch used to be swallowed (`.catch(() => null)`),
+      // so the run reported "Option chain fetch returned no data." with no cause. Capture
+      // the rejection so the fetch error names the provider and the reason.
+      let fallbackFetchError: string | undefined;
       const chain = await (client.supportsOptionRequestBudget
         ? client.getOptionChains({ symbol }, budget)
         : budget.tryConsume()
           ? client.getOptionChains({ symbol })
-          : Promise.resolve(null)).catch(() => null);
+          : Promise.resolve(null)).catch((error: unknown) => {
+        fallbackFetchError = error instanceof Error ? error.message : String(error);
+        structuredLog.error("optionsScreener.fallback_chain_fetch_error", {
+          symbol,
+          error: fallbackFetchError,
+        });
+        return null;
+      });
       if (budget.exhausted) {
         return { chains: [], fetchErrors: [{ symbol, reason: SUBREQUEST_BUDGET_DEFERRED_REASON }], expirationsTruncated: 0, deferred: true };
       }
       if (chain) return { chains: [chain], fetchErrors: [], expirationsTruncated: 0, deferred: false };
       return {
         chains: [],
-        fetchErrors: [{ symbol, reason: expirationError || client.lastError || "Option chain fetch returned no data." }],
+        fetchErrors: [{ symbol, reason: fallbackFetchError || expirationError || client.lastError || "Option chain fetch returned no data." }],
         expirationsTruncated: 0,
         deferred: false,
       };
@@ -655,6 +673,14 @@ export class DynamicOptionsScreener {
         deferred: true,
       };
     }
+    // Issue #6171: a rejected per-expiration fetch used to be swallowed
+    // (`.catch(() => null)`), so the run reported "All N expiration fetches
+    // returned no data." with no cause — and `client.lastError` is empty by
+    // construction for the platform path and for failures outside the broker
+    // client's own try block. Capture each rejection (keyed by expiry date,
+    // so the earliest expiry's error wins deterministically) and log it, so
+    // the fetch error names the provider and the reason.
+    const fetchErrorsByExpiry = new Map<string, string>();
     const chains = await mapLimit(toFetch, this.config.expiryFetchConcurrency, (expiry) => {
       const params = {
         symbol,
@@ -668,18 +694,30 @@ export class DynamicOptionsScreener {
         : budget.tryConsume()
           ? client.getOptionChains(params)
           : Promise.resolve(null);
-      return request.catch(() => null);
+      return request.catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error);
+        fetchErrorsByExpiry.set(`${expiry.year}-${expiry.month}-${expiry.day}`, message);
+        structuredLog.error("optionsScreener.expiration_chain_fetch_error", {
+          symbol,
+          expiry: `${expiry.year}-${expiry.month}-${expiry.day}`,
+          error: message,
+        });
+        return null;
+      });
     });
     const fetched = chains.filter((chain): chain is ETradeOptionChain => Boolean(chain));
     if (budget.exhausted && fetched.length === 0) {
       return { chains: [], fetchErrors: [{ symbol, reason: SUBREQUEST_BUDGET_DEFERRED_REASON }], expirationsTruncated, deferred: true };
     }
     if (fetched.length === 0) {
+      const capturedFetchError = toFetch
+        .map((expiry) => fetchErrorsByExpiry.get(`${expiry.year}-${expiry.month}-${expiry.day}`))
+        .find((message): message is string => message !== undefined);
       return {
         chains: [],
         fetchErrors: [{
           symbol,
-          reason: client.lastError || expirationError || `All ${toFetch.length} expiration fetches returned no data.`,
+          reason: capturedFetchError || client.lastError || expirationError || `All ${toFetch.length} expiration fetches returned no data.`,
         }],
         expirationsTruncated,
         deferred: deferredExpirations > 0,

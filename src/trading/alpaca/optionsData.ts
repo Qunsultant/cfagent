@@ -371,6 +371,16 @@ export async function fetchAlpacaOptionExpireDates(
 }
 
 /**
+ * Issue #6171: budget-exhaustion is a caller-side precondition failure, not
+ * a provider failure. The platform re-throws it (the #3233 contract: the
+ * caller must see the rejection so it can defer the fetch) instead of
+ * recording it as a chain error and returning null.
+ */
+export function isAlpacaBudgetExhaustion(error: unknown): boolean {
+  return error instanceof Error && error.message.includes("request budget exhausted");
+}
+
+/**
  * Issue #3990: one option chain, assembled from contracts +
  * snapshots. Extracted verbatim from
  * `AlpacaTradingPlatform.getOptionChains` — the platform delegates
@@ -387,6 +397,7 @@ export async function fetchAlpacaOptionExpireDates(
  * emitted with invented numbers; greeks and IV appear only when
  * Alpaca sends them.
  */
+
 export async function assembleAlpacaOptionChain(
   cfg: AlpacaOptionsConfig,
   params: OptionsChainRequest,
@@ -404,7 +415,20 @@ export async function assembleAlpacaOptionChain(
     strikePrice: params.strikePrice,
     chainType: params.chainType,
   });
-  if (contracts.length === 0) return null;
+  // Issue #6171: a silent null here destroyed the diagnostic evidence — the
+  // run reported "All N expiration fetches returned no data." with no cause,
+  // because nothing recorded WHY the chain was empty. Throw a named error
+  // (symbol + expiry + stage) instead; the platform records it in lastError
+  // and the screener surfaces it as the fetch reason.
+  const expiryLabel =
+    params.expiryYear && params.expiryMonth && params.expiryDay
+      ? isoDate(params.expiryYear, params.expiryMonth, params.expiryDay)
+      : "unspecified expiry";
+  if (contracts.length === 0) {
+    throw new Error(
+      `Alpaca option chain for ${params.symbol} ${expiryLabel}: no contracts listed for the expiry.`,
+    );
+  }
 
   if (requestBudget && !requestBudget.tryConsume()) {
     throw new Error("Alpaca option snapshot request budget exhausted for this run.");
@@ -446,7 +470,11 @@ export async function assembleAlpacaOptionChain(
     matched++;
   }
 
-  if (matched === 0) return null;
+  if (matched === 0) {
+    throw new Error(
+      `Alpaca option chain for ${params.symbol} ${expiryLabel}: no contract had a two-sided quote.`,
+    );
+  }
 
   let strikes = [...byStrike.keys()].sort((a, b) => a - b);
   if (params.noOfStrikes && strikes.length > params.noOfStrikes) {
