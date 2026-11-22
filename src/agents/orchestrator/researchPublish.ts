@@ -162,7 +162,7 @@ export async function runResearchAndPublish(ctx: ResearchPublishContext,
   trigger: "manual" | "scheduled",
   userLogin?: string,
   /** Issue #5912 — the venue/mode this run names, if any. */
-  selection?: { brokerId?: string; mode?: string; runId?: string; feed?: ResearchFeedStageOutput }
+  selection?: { brokerId?: string; mode?: string; runId?: string; feed?: ResearchFeedStageOutput; enrich?: import("../../services/researchEnrichHandoff").ResearchEnrichStageOutput }
 ): Promise<{
   success: boolean;
   error?: string;
@@ -321,6 +321,7 @@ export async function runResearchAndPublish(ctx: ResearchPublishContext,
         ...(effectiveSelection?.brokerId ? { brokerId: effectiveSelection.brokerId as never } : {}),
         ...(effectiveSelection?.mode ? { mode: effectiveSelection.mode } : {}),
         ...(effectiveSelection?.feed ? { feed: effectiveSelection.feed } : {}),
+        ...(effectiveSelection?.enrich ? { enrich: effectiveSelection.enrich } : {}),
       });
       if (!fallback.success || !fallback.report) {
         const failure = fallback.error || child.error || `Research agent finished with status ${child.status}.`;

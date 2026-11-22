@@ -633,6 +633,19 @@ export async function handleScreenerResearchRoutes(
                 ...(input.mode ? { mode: input.mode } : {}),
               });
             },
+            runEnrichStage: async (input) => {
+              const agent = ctx.getResearchAgent(input.userLogin);
+              if (!agent) {
+                throw new Error(
+                  "research_stage_unavailable: the research agent is not configured.",
+                );
+              }
+              return agent.runEnrichStage(input.feed, {
+                trigger: input.trigger,
+                userLogin: input.userLogin,
+                ...(input.runId ? { runId: input.runId } : {}),
+              });
+            },
           },
           execute: (runCtx) =>
             runCtx
@@ -641,6 +654,7 @@ export async function handleScreenerResearchRoutes(
                     ...selection,
                     runId: runCtx.runId,
                     ...(runCtx.feed ? { feed: runCtx.feed } : {}),
+                    ...(runCtx.enrich ? { enrich: runCtx.enrich } : {}),
                   }),
                 )
               : triggerManualResearch(ctx.runResearchAndPublish, userLogin, selection),
@@ -805,9 +819,22 @@ export async function handleScreenerResearchRoutes(
                 ...(input.mode ? { mode: input.mode } : {}),
               });
             },
+            runEnrichStage: async (input) => {
+              const agent = ctx.getResearchAgent(input.userLogin);
+              if (!agent) {
+                throw new Error(
+                  "research_stage_unavailable: the research agent is not configured.",
+                );
+              }
+              return agent.runEnrichStage(input.feed, {
+                trigger: input.trigger,
+                userLogin: input.userLogin,
+                ...(input.runId ? { runId: input.runId } : {}),
+              });
+            },
           },
           execute: (runCtx) =>
-            triggerScheduledResearch(ctx.runResearchAndPublish, userLogin, runCtx?.feed),
+            triggerScheduledResearch(ctx.runResearchAndPublish, userLogin, runCtx?.feed, runCtx?.enrich),
         });
         const out = {
           ...dispatched.outcome,

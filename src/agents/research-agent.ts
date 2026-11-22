@@ -34,6 +34,7 @@ import { resolveResearchJobConfig } from "../config/researchJobConfig";
 import { createResearchStorePorts } from "../data/createResearchStorePorts";
 import { createFeedDatasetAdapter } from "../data/createFeedDatasetPorts";
 import type { ResearchFeedStageOutput } from "../services/researchFeedHandoff";
+import type { ResearchEnrichStageOutput } from "../services/researchEnrichHandoff";
 import type { ResearchStorePorts } from "../data/researchStorePorts";
 import {
   ResearchConfigService,
@@ -44,6 +45,7 @@ import {
 import {
   runResearchPipeline,
   runFeedStage as runFeedStagePipeline,
+  runEnrichStage as runEnrichStagePipeline,
   runResearchEvaluation,
   type TriggerSource,
   type ResearchReport,
@@ -141,6 +143,8 @@ export interface ResearchRunRequest {
   runId?: string;
   /** Issue #6063 — the feed stage output, when the engine ran the feed step. */
   feed?: ResearchFeedStageOutput;
+  /** Issue #6064 — the enrich stage output, when the engine ran the enrich step. */
+  enrich?: ResearchEnrichStageOutput;
   /** Optional one-off config overrides for this run (still validated). */
   configOverride?: Partial<ResearchConfig>;
 }
@@ -600,6 +604,7 @@ export class ResearchAgent extends PortThink {
           ...(req.brokerId ? { brokerId: req.brokerId } : {}),
           ...(req.mode ? { mode: req.mode } : {}),
           ...(req.feed ? { feed: req.feed } : {}),
+          ...(req.enrich ? { enrich: req.enrich } : {}),
           chainFeed: {
             datasetStore: createFeedDatasetAdapter(this.env),
             maxAgeSeconds: config.quoteFreshnessSeconds,
@@ -623,6 +628,23 @@ export class ResearchAgent extends PortThink {
       ...(req.runId ? { runId: req.runId } : {}),
       ...(req.brokerId ? { brokerId: req.brokerId } : {}),
       ...(req.mode ? { mode: req.mode } : {}),
+    });
+  }
+
+  /** Issue #6064 — the enrich stage: technicals and catalysts for the feed symbols. */
+  async runEnrichStage(
+    feed: ResearchFeedStageOutput,
+    req: ResearchRunRequest,
+  ): Promise<ResearchEnrichStageOutput> {
+    const userLogin = explicitResearchLogin(req.userLogin);
+    if (!userLogin) throw new Error(RESEARCH_IDENTITY_REQUIRED);
+    this.ensureTables();
+    const config = this.configService().load();
+    const provider = await this.buildProvider(userLogin, req, config);
+    return runEnrichStagePipeline({ provider }, config, feed, {
+      trigger: req.trigger,
+      userLogin,
+      ...(req.runId ? { runId: req.runId } : {}),
     });
   }
 
@@ -695,6 +717,7 @@ export class ResearchAgent extends PortThink {
           ...(req.brokerId ? { brokerId: req.brokerId } : {}),
           ...(req.mode ? { mode: req.mode } : {}),
           ...(req.feed ? { feed: req.feed } : {}),
+          ...(req.enrich ? { enrich: req.enrich } : {}),
           ...(accountBinding ? accountBinding : {}),
         }
       );
