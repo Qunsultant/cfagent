@@ -284,6 +284,49 @@ describe("schedule payload broker + mode (#3655)", () => {
     }
   });
 
+  it("stamps accountType and accountId from the server-resolved identity (#5100)", () => {
+    const built = buildSchedulePayload(
+      "autonomousMarketScreen",
+      { universe: "NASDAQ100" },
+      {
+        userLogin: "alice",
+        environment: "TEST",
+        trigger: "scheduled",
+        brokerId: "alpaca",
+        dataProviderId: "alpaca",
+        mode: "paper",
+        accountType: "stock",
+        accountId: "PA-900",
+      }
+    );
+    expect(built.ok).toBe(true);
+    if (built.ok) {
+      expect(built.value.accountType).toBe("stock");
+      expect(built.value.accountId).toBe("PA-900");
+    }
+  });
+
+  it("identity account values win over caller-supplied criteria values (#5100)", () => {
+    const built = buildSchedulePayload(
+      "autonomousMarketScreen",
+      { universe: "NASDAQ100", accountType: "options", accountId: "PA-INTRUDER" },
+      {
+        userLogin: "alice",
+        environment: "TEST",
+        trigger: "scheduled",
+        brokerId: "alpaca",
+        mode: "paper",
+        accountType: "stock",
+        accountId: "PA-900",
+      }
+    );
+    expect(built.ok).toBe(true);
+    if (built.ok) {
+      expect(built.value.accountType).toBe("stock");
+      expect(built.value.accountId).toBe("PA-900");
+    }
+  });
+
   it("the stock criteria schema accepts provider alpaca and broker/mode fields", () => {
     const parsed = marketScreenScheduleCriteriaSchema.safeParse({
       universe: "NASDAQ100",

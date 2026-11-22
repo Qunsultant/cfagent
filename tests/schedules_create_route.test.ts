@@ -76,7 +76,7 @@ describe("POST /api/schedules/create (#111)", () => {
     userLogin: authenticatedLogin,
   });
 
-  function makeAgent() {
+  function makeAgent({ bound = true }: { bound?: boolean } = {}) {
     const sql = new MockSqlStorage();
     const ctx = {
       storage: { sql },
@@ -92,6 +92,20 @@ describe("POST /api/schedules/create (#111)", () => {
       `etrade:token:TEST:${authenticatedLogin}`,
       storedTestTokens
     );
+    if (bound) {
+      // Issue #5100 (F3 of #5094): creation of an account-scoped
+      // schedule refuses when the tenant has no binding, so the
+      // success-path tests seed the bound E*TRADE paper account.
+      // Seeded raw (the read path JSON-parses the stored array).
+      seedSession(
+        "account_bindings",
+        `acctbind:v1:${authenticatedLogin}`,
+        JSON.stringify([
+          { broker: "etrade", mode: "paper", accountType: "stock", scope: "tenant", accountId: "ET-123" },
+          { broker: "etrade", mode: "paper", accountType: "options", scope: "tenant", accountId: "ET-123" },
+        ])
+      );
+    }
     agent.env = {
       APP_ENV: "TEST",
       SESSION_STORE: sessionStoreNs,
@@ -239,6 +253,11 @@ describe("POST /api/schedules/create (#111)", () => {
       brokerId: "etrade",
       dataProviderId: "alpaca",
       mode: "paper",
+      // Issue #5100 (F3 of #5094) — the bound account tuple is
+      // stamped server-side; options analysis resolves the options
+      // account, never the stock one.
+      accountType: "options",
+      accountId: "ET-123",
       // Issue #4235 — the recorded opt-in rides the stored payload.
       subDailyOptIn: true,
       // Issue #3121 S1 — creation provenance travels in the armed
@@ -298,6 +317,11 @@ describe("POST /api/schedules/create (#111)", () => {
       brokerId: "etrade",
       dataProviderId: "alpaca",
       mode: "paper",
+      // Issue #5100 (F3 of #5094) — the bound account tuple is
+      // stamped server-side; the market screen resolves the stock
+      // account.
+      accountType: "stock",
+      accountId: "ET-123",
       // Issue #4235 — the recorded opt-in rides the stored payload.
       subDailyOptIn: true,
       // Issue #3121 S1 — creation provenance travels in the armed
@@ -486,5 +510,52 @@ describe("POST /api/schedules/create (#111)", () => {
       expect(body.success).toBe(false);
       expect(scheduleCalls).toHaveLength(0);
     });
+  });
+
+  describe("bound-account enforcement (#5100, F3 of #5094)", () => {
+    it("bound creation stamps the resolved tuple on the armed payload", async () => {
+      const agent = makeAgent();
+      const { status, body } = await postCreate(agent, {
+        scheduleType: "interval",
+        intervalSeconds: 3600,
+        subDailyOptIn: true,
+        callback: "autonomousMarketScreen",
+        payload: { universe: "NASDAQ100", maxItems: 5 },
+      });
+      expect(status).toBe(200);
+      expect(body.success).toBe(true);
+      expect(scheduleEveryCalls).toHaveLength(1);
+      expect(scheduleEveryCalls[0][2]).toMatchObject({
+        brokerId: "etrade",
+        mode: "paper",
+        accountType: "stock",
+        accountId: "ET-123",
+      });
+    });
+
+    it("unbound creation is refused with the coded failure and arms nothing", async () => {
+      const agent = makeAgent({ bound: false });
+      const { status, body } = await postCreate(agent, {
+        scheduleType: "interval",
+        intervalSeconds: 3600,
+        subDailyOptIn: true,
+        callback: "autonomousMarketScreen",
+        payload: { universe: "NASDAQ100", maxItems: 5 },
+      });
+      expect(status).toBe(404);
+      expect(body.success).toBe(false);
+      expect(body.code).toBe("FAILURE_ACCOUNT_BINDING_MISSING");
+      expect(scheduleEveryCalls).toHaveLength(0);
+      expect(scheduleCalls).toHaveLength(0);
+    });
+
+    // A caller-supplied accountId is an untrusted explicit hint,
+    // validated against the broker's enumerated accounts — it is
+    // never stamped verbatim. That path is pinned deterministically
+    // at the wrapper level (explicit without enumeration fails
+    // closed) and at the payload level (identity wins over
+    // caller-supplied values, #3655); a route-level explicit test
+    // would enumerate the live E*TRADE account list, so it is not
+    // asserted here.
   });
 });

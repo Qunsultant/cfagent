@@ -193,6 +193,11 @@ export function buildJobRunRecord(input: JobRunRecordInput): JobRunRecord {
     ...(input.dataProviderId !== undefined ? { dataProviderId: input.dataProviderId } : {}),
     ...(input.mode !== undefined ? { mode: input.mode } : {}),
     ...(input.modeSource !== undefined ? { modeSource: input.modeSource } : {}),
+    // Issue #5100 (F3 of #5094): the binding tuple the run executed against.
+    ...(input.accountType !== undefined ? { accountType: input.accountType } : {}),
+    ...(input.accountId !== undefined ? { accountId: input.accountId } : {}),
+    ...(input.bindingScope !== undefined ? { bindingScope: input.bindingScope } : {}),
+    ...(input.bindingSource !== undefined ? { bindingSource: input.bindingSource } : {}),
   };
 }
 

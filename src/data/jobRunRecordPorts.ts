@@ -226,6 +226,17 @@ export interface JobRunRecord {
   mode?: "live" | "paper" | null;
   /** Issue #3655 (effective mode): which resolver leg produced the mode — pin | selection | inference. */
   modeSource?: "pin" | "selection" | "inference" | null;
+  /**
+   * Issue #5100 (F3 of #5094): the binding tuple the run executed
+   * against, stamped from the firing schedule payload (recorded at
+   * creation). Absent on rows recorded before the tuple existed —
+   * never backfilled. D1-backed rows do not carry these fields yet;
+   * the DO-SQLite ledger is the surface that stores them.
+   */
+  accountType?: string | null;
+  accountId?: string | null;
+  bindingScope?: string | null;
+  bindingSource?: string | null;
 }
 
 /** The per-run record store surface (synchronous: DO SQLite is sync). */

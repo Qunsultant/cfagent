@@ -8,7 +8,8 @@
  */
 
 import type { AgentContext, Schedule, ScheduleOptions } from "agents";
-import type { AgentName } from "../../types";
+import type { AgentName, Env } from "../../types";
+import { resolveValidatedExecutionAccountContext } from "../../services/accountBindings";
 import { createUnifiedSchedulePorts } from "../../data/createUnifiedSchedulePorts";
 import { stampScheduleProvenance, systemProvenance } from "../../services/consolidatedScheduling";
 import {
@@ -39,6 +40,9 @@ export type ScreenerExecutionContext = { userLogin: string; environment?: "TEST"
  */
 export interface ScheduleMaintenanceContext {
   agentCtx: AgentContext;
+  /** Issue #5100 (F3 of #5094): the deployment env, so the baseline
+   *  arm can resolve the tenant's broker selection + binding. */
+  env?: Env;
   listSchedules: () => Promise<Schedule<unknown>[]>;
   cancelSchedule: (id: string) => Promise<boolean>;
   schedule: (when: Date | number | string, callback: string, payload?: unknown, options?: ScheduleOptions) => Promise<unknown>;
@@ -367,10 +371,67 @@ export async function ensureStrategyScanSchedule(ctx: ScheduleMaintenanceContext
   // (including the creation-default maxItems stamp, which is exactly
   // the UNIVERSES default the options service applies itself when
   // maxItems is absent, so the run's behavior is unchanged).
+  // Issue #5100 (F3 of #5094): the baseline arm stamps the resolved
+  // binding tuple like every other creation path — under F3's
+  // fire-time rule an unstamped baseline would be refused at every
+  // fire. The selection + binding resolve here; either failing is a
+  // structured warn and NO arm (best-effort function — the onStart
+  // caller already try/catches).
+  let baselineBrokerId: string | undefined;
+  let baselineDataProviderId: string | undefined;
+  let baselineMode: "live" | "paper" | undefined;
+  let baselineAccountType: string | undefined;
+  let baselineAccountId: string | undefined;
+  if (ctx.env) {
+    const { resolveScreenSelection } = await import("../../services/providerConnections");
+    const selection = await resolveScreenSelection({ env: ctx.env, userLogin });
+    if (!selection.resolved) {
+      structuredLog.warn("scheduleMaintenance.strategy_scan_baseline_binding_unresolved", {
+        message: "[OrchestratorAgent] Strategy-scan baseline NOT armed: the tenant's broker selection could not be resolved.",
+        error: selection.error,
+      });
+      return;
+    }
+    const { resolveTenantProviders } = await import("../../services/tenantProviders");
+    const tenantProviders = await resolveTenantProviders(ctx.env);
+    const bindingRes = await resolveValidatedExecutionAccountContext(ctx.env, userLogin, {
+      broker: selection.selection.brokerId,
+      mode: selection.selection.mode,
+      accountType: "options",
+      scope: "schedule",
+    });
+    if (!bindingRes.ok) {
+      structuredLog.warn("scheduleMaintenance.strategy_scan_baseline_binding_unresolved", {
+        message: "[OrchestratorAgent] Strategy-scan baseline NOT armed: the bound account could not be resolved.",
+        code: bindingRes.code,
+        error: bindingRes.error,
+      });
+      return;
+    }
+    baselineBrokerId = selection.selection.brokerId;
+    baselineDataProviderId = tenantProviders.dataProviderId;
+    baselineMode = selection.selection.mode;
+    baselineAccountType = bindingRes.context.accountType;
+    baselineAccountId = bindingRes.context.accountId ?? undefined;
+  } else {
+    structuredLog.warn("scheduleMaintenance.strategy_scan_baseline_binding_unresolved", {
+      message: "[OrchestratorAgent] Strategy-scan baseline NOT armed: no execution environment is available to resolve the bound account.",
+    });
+    return;
+  }
   const built = buildSchedulePayload(
     "autonomousOptionsAnalysis",
     { universe: "NASDAQ100" },
-    { userLogin, environment, trigger: "scheduled" }
+    {
+      userLogin,
+      environment,
+      trigger: "scheduled",
+      ...(baselineBrokerId ? { brokerId: baselineBrokerId } : {}),
+      ...(baselineDataProviderId ? { dataProviderId: baselineDataProviderId } : {}),
+      ...(baselineMode ? { mode: baselineMode } : {}),
+      ...(baselineAccountType ? { accountType: baselineAccountType } : {}),
+      ...(baselineAccountId ? { accountId: baselineAccountId } : {}),
+    }
   );
   if (!built.ok) {
     // The baseline criteria are constants; a builder rejection here

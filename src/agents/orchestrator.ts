@@ -67,7 +67,9 @@ import {
   type JobListScopedModes,
 } from "../config/asyncJobModes";
 import type { PaymentsFlowScopedModes } from "../config/paymentsFlowModes";
-import { BROKER_CATALOG, brokerCopilotCapability, diffScanRuns, isCopilotBroker } from "../trading";
+import { BROKER_CATALOG, brokerCopilotCapability, diffScanRuns, isBrokerId, isCopilotBroker, TradingPlatformRegistry, validateAccountAgainstBroker, type AccountBindingTuple } from "../trading";
+import { ACCOUNT_BINDING_CONFIG, maskAccountId } from "../config/accountBindings";
+import { accountBindingAuditFields, getBrokerAssetAccountRegistry, resolveValidatedExecutionAccountContext, type ExecutionAccountContext } from "../services/accountBindings";
 import { createOptionsDiscoveryPorts } from "../data/createOptionsDiscoveryPorts";
 import { createUnifiedSchedulePorts } from "../data/createUnifiedSchedulePorts";
 
@@ -122,7 +124,7 @@ import { recordTraceHopBestEffort } from "../data/createMeshTracePorts";
 import { createSocialBriefStoreFromNamespace } from "./social/briefStore";
 import { fetchSlackPost } from "./social/delivery";
 import { postSlackText } from "./resourceGoals";
-import { renderChannelText } from "../outcomes/outcomeAspects";
+import { codedMessage, renderChannelText } from "../outcomes/outcomeAspects";
 import type { DoNamespaceLike } from "../data/durableKv";
 import { createKvMembershipStore } from "../security/iaaaMembershipStore";
 import { isLoginShaped } from "../security/serviceIdentity";
@@ -246,6 +248,7 @@ import type {
   AsyncJobSubmission,
   TransactionSnapData,
   RouteDecision,
+  BrokerAccount,
 } from "../types";
 import { createStructuredLogger } from "../observability/structuredLogger";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
@@ -635,6 +638,7 @@ export class OrchestratorAgent extends PortThink {
   private scheduleMaintenanceContext(): ScheduleMaintenanceContext {
     return {
       agentCtx: this.ctx,
+      env: this.env,
       listSchedules: () => this.listSchedules(),
       cancelSchedule: (id) => this.cancelSchedule(id),
       schedule: (when, callback, payload, options) => this.schedule(when, callback as keyof this, payload, options),
@@ -1845,6 +1849,102 @@ export class OrchestratorAgent extends PortThink {
   }
 
   // Issue #992: extracted to ./orchestrator/scheduledCallbacks.ts (autonomousMarketScreen);
+  /**
+   * Issue #5100 (F3 of #5094): fire-time binding enforcement — the one
+   * enforcement point for the four account-scoped schedule callbacks.
+   * The stamped tuple on the firing payload is re-validated against
+   * the broker's current account list before the service runs:
+   *
+   * - no stamped tuple (a pre-F3 schedule) → refused, skipped with
+   *   FAILURE_ACCOUNT_BINDING_MISSING as the detail reason;
+   * - a stamped account that no longer resolves (closed, re-bound,
+   *   wrong asset class, another broker) → refused, skipped with the
+   *   mapped failure code as the detail reason;
+   * - the broker's account list cannot be enumerated → the guard
+   *   THROWS, so the run records a failure (not a skip) and the SDK
+   *   retry policy applies — an unverifiable run is not a refusal.
+   *
+   * Callers return `{ outcome: "skipped", detail: code }` on a
+   * refusal and never call the service. `runPipelineJobSchedule` is
+   * deliberately NOT guarded here: pipeline jobs carry no broker
+   * targeting (see the note at CREATABLE_SCHEDULE_CALLBACKS).
+   */
+  private async enforceScheduleBinding(payload: {
+    brokerId?: unknown;
+    mode?: unknown;
+    accountType?: unknown;
+    accountId?: unknown;
+    userLogin?: unknown;
+    environment?: unknown;
+  } | undefined): Promise<
+    | { ok: true; tuple: AccountBindingTuple }
+    | { ok: false; code: string; error: string }
+  > {
+    const p = (payload ?? {}) as Record<string, unknown>;
+    const brokerId = typeof p.brokerId === "string" ? p.brokerId : "";
+    const mode = p.mode === "live" || p.mode === "paper" ? p.mode : undefined;
+    const accountType = typeof p.accountType === "string" ? p.accountType : "";
+    const accountId = typeof p.accountId === "string" ? p.accountId : "";
+    if (!brokerId || !mode || !accountType || !accountId) {
+      const code = ACCOUNT_BINDING_CONFIG.failureCodes.bindingMissing;
+      return {
+        ok: false,
+        code,
+        error: codedMessage(
+          code,
+          "Schedule payload carries no stamped binding tuple; re-create the schedule to bind it to an account.",
+        ),
+      };
+    }
+    if (!isBrokerId(brokerId)) {
+      const code = ACCOUNT_BINDING_CONFIG.failureCodes.bindingMissing;
+      return {
+        ok: false,
+        code,
+        error: codedMessage(
+          code,
+          `Schedule payload names unknown broker "${brokerId}"; re-create the schedule to bind it to an account.`,
+        ),
+      };
+    }
+    const savedContext = await this.getScreenerExecutionContext();
+    const userLogin = resolveScheduledLogin(typeof p.userLogin === "string" ? p.userLogin : undefined, savedContext?.userLogin) || "";
+    if (!userLogin) {
+      const code = ACCOUNT_BINDING_CONFIG.failureCodes.bindingMissing;
+      return {
+        ok: false,
+        code,
+        error: codedMessage(code, "Schedule payload carries no owner login, so its bound account cannot be resolved."),
+      };
+    }
+    let accounts: readonly BrokerAccount[];
+    try {
+      accounts = await TradingPlatformRegistry.getPlatform(
+        brokerId,
+        this.env,
+        this.getOrm(),
+        userLogin,
+        mode === "live" ? "PROD" : "TEST",
+      ).getAccounts();
+    } catch (err) {
+      throw new Error(
+        `Could not enumerate ${brokerId} accounts to validate the schedule's bound account: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    const registry = await getBrokerAssetAccountRegistry(this.env, userLogin);
+    const valRes = validateAccountAgainstBroker({
+      broker: brokerId,
+      mode,
+      accountType,
+      accountId,
+      availableAccounts: accounts,
+      registry,
+      updatedBy: userLogin,
+    });
+    if (!valRes.ok) return { ok: false, code: valRes.code, error: valRes.error };
+    return { ok: true, tuple: valRes.tuple };
+  }
+
   // Issue #2964: the SDK fires this as method.call(this, payload, schedule),
   // so the schedule object arrives as the second argument and the wrapper
   // records the run against schedule.id (manual triggers resolve via the
@@ -1868,13 +1968,23 @@ export class OrchestratorAgent extends PortThink {
      *  authorization, forwarded to the scheduled callback. */
     scheduleKind?: "one_off" | "recurring";
     authorizedAtSubmission?: boolean;
+    /** Issue #5100 (F3 of #5094): the binding tuple stamped at
+     *  creation; the fire-time guard re-validates it. */
+    brokerId?: string;
+    mode?: "live" | "paper";
+    accountType?: string;
+    accountId?: string;
   }, schedule?: { id?: unknown }): Promise<void> {
     return recordScheduleCallbackRun(
       this.ctx.storage.sql,
       "autonomousMarketScreen",
       payload,
       schedule,
-      () => autonomousMarketScreen(this.scheduledCallbacksContext(), payload),
+      async () => {
+        const guard = await this.enforceScheduleBinding(payload);
+        if (!guard.ok) return { outcome: "skipped", detail: guard.code };
+        return autonomousMarketScreen(this.scheduledCallbacksContext(), payload);
+      },
       { audit: (type, agent, payload) => this.audit(type, agent, payload) },
     );
   }
@@ -1897,13 +2007,23 @@ export class OrchestratorAgent extends PortThink {
      *  authorization, forwarded to the scheduled callback. */
     scheduleKind?: "one_off" | "recurring";
     authorizedAtSubmission?: boolean;
+    /** Issue #5100 (F3 of #5094): the binding tuple stamped at
+     *  creation; the fire-time guard re-validates it. */
+    brokerId?: string;
+    mode?: "live" | "paper";
+    accountType?: string;
+    accountId?: string;
   }, schedule?: { id?: unknown }): Promise<void> {
     return recordScheduleCallbackRun(
       this.ctx.storage.sql,
       "autonomousGoalScreen",
       payload,
       schedule,
-      () => autonomousGoalScreen(this.scheduledCallbacksContext(), payload),
+      async () => {
+        const guard = await this.enforceScheduleBinding(payload);
+        if (!guard.ok) return { outcome: "skipped", detail: guard.code };
+        return autonomousGoalScreen(this.scheduledCallbacksContext(), payload);
+      },
       { audit: (type, agent, payload) => this.audit(type, agent, payload) },
     );
   }
@@ -1930,6 +2050,15 @@ export class OrchestratorAgent extends PortThink {
           message: "[OrchestratorAgent] Skipping unowned scheduled options screen.",
         });
         return (outcome = { outcome: "skipped", detail: "unowned scheduled options screen" });
+      }
+      // Issue #5100 (F3 of #5094): fire-time binding enforcement —
+      // the stamped tuple is re-validated before the service runs; a
+      // refusal records a skipped run with the code as the detail.
+      // (After the unowned check above, so its baseline-schedule
+      // cleanup still runs for ownerless schedules.)
+      {
+        const guard = await this.enforceScheduleBinding(payload);
+        if (!guard.ok) return (outcome = { outcome: "skipped", detail: guard.code });
       }
       if (payload?.trigger !== "manual") {
         const slot = new Date().toISOString().slice(0, 16);
@@ -2064,7 +2193,11 @@ export class OrchestratorAgent extends PortThink {
       "autonomousStrategyDiscovery",
       payload,
       schedule,
-      () => autonomousStrategyDiscovery(this.scheduledCallbacksContext(), payload),
+      async () => {
+        const guard = await this.enforceScheduleBinding(payload);
+        if (!guard.ok) return { outcome: "skipped", detail: guard.code };
+        return autonomousStrategyDiscovery(this.scheduledCallbacksContext(), payload);
+      },
       { audit: (type, agent, payload) => this.audit(type, agent, payload) },
     );
   }
@@ -2751,6 +2884,10 @@ export class OrchestratorAgent extends PortThink {
     intent: OrderIntent;
     draftId?: string | null;
     dryRun?: boolean;
+    /** Issue #5100 (F3 of #5094): the validated binding resolution,
+     *  recorded on the verdict. (The resolved context, not just the
+     *  tuple — the verdict also carries the binding scope + source.) */
+    binding?: ExecutionAccountContext;
   }): Promise<{ verdict: PolicyVerdict; attestation: PolicyVerdictAttestation }> {
     return evaluateAndRecordAutopilotVerdict(this.autopilotContext(), params);
   }
@@ -3126,13 +3263,33 @@ export class OrchestratorAgent extends PortThink {
     // from the tenant selection, not a hardcoded broker. An unresolved or
     // unsupported selection leaves the capability absent; the default
     // Alpaca steering and the cycle's own refusal handle it.
+    // Issue #5100 (F3 of #5094): the turn's bound account, resolved for
+    // the stock AND options copilot registrations — this hook is the
+    // single turn entry, whatever drove the turn. The selection resolves
+    // once here and feeds both the stock capability (stock turns only)
+    // and the prompt's activeBinding (both paths — the stock builder
+    // and the generic builder render the same binding line from the
+    // one input field). General and BizCopilot turns carry no binding:
+    // activeBinding stays undefined and the prompt is byte-identical.
+    // The resolution is audited once per turn (copilot.turn_binding_
+    // resolved); a coded refusal audits the minimal unset context +
+    // the code, so the turn still answers read-only but never issues
+    // an order tool call. A store failure leaves activeBinding null
+    // (the order guards in §5.2 refuse independently) and audits
+    // nothing — the turn itself must never break on a binding read.
+    const copilotRegistration = copilotRegistrationForSourceTab(sourceTab);
     let stockCopilotCapability: StockCopilotPromptCapability | undefined;
-    if (stockMcpActivation.active) {
+    let activeBinding: AccountBindingTuple | null | undefined;
+    if (copilotRegistration === "stock" || copilotRegistration === "options") {
       const copilotSelection = await resolveCopilotTradingSelection({
         env: this.env,
         readSettingRaw: (key) => this.readSettingRaw(key),
       });
-      if (copilotSelection.resolved && isCopilotBroker(copilotSelection.selection.brokerId)) {
+      if (
+        stockMcpActivation.active &&
+        copilotSelection.resolved &&
+        isCopilotBroker(copilotSelection.selection.brokerId)
+      ) {
         const capability = brokerCopilotCapability(copilotSelection.selection.brokerId);
         stockCopilotCapability = {
           brokerId: copilotSelection.selection.brokerId,
@@ -3144,6 +3301,47 @@ export class OrchestratorAgent extends PortThink {
           percentBrackets: capability.percentBrackets,
         };
       }
+      if (copilotSelection.resolved) {
+        const accountType = copilotRegistration === "options" ? "options" : "stock";
+        try {
+          const bindingRes = await resolveValidatedExecutionAccountContext(this.env, userLogin, {
+            broker: copilotSelection.selection.brokerId,
+            mode: copilotSelection.selection.mode,
+            accountType,
+            scope: "copilot",
+          });
+          if (bindingRes.ok) {
+            activeBinding = bindingRes.context.tuple;
+            this.audit("copilot.turn_binding_resolved", "orchestrator", {
+              ...accountBindingAuditFields(bindingRes.context),
+              accountId: bindingRes.context.accountId ? maskAccountId(bindingRes.context.accountId) : null,
+            });
+          } else {
+            activeBinding = null;
+            this.audit("copilot.turn_binding_resolved", "orchestrator", {
+              ...accountBindingAuditFields({
+                broker: copilotSelection.selection.brokerId,
+                mode: copilotSelection.selection.mode,
+                accountType,
+                scope: "copilot",
+                resolvedFromScope: null,
+                source: "unset",
+                tuple: {
+                  broker: copilotSelection.selection.brokerId,
+                  mode: copilotSelection.selection.mode,
+                  accountType,
+                  accountId: "",
+                },
+              }),
+              code: bindingRes.code,
+            });
+          }
+        } catch {
+          activeBinding = null;
+        }
+      } else {
+        activeBinding = null;
+      }
     }
     return {
       instructions: buildOrchestratorSystemPrompt({
@@ -3154,6 +3352,9 @@ export class OrchestratorAgent extends PortThink {
         isAutoOptionsResearchRequest,
         stockCopilotMcpActive: stockMcpActivation.active,
         stockCopilotCapability,
+        // Issue #5100 (F3 of #5094): the turn's bound account (stock
+        // and options registrations; undefined elsewhere).
+        activeBinding,
         // #3727: the steering follows the SAME value the gate
         // resolved for this turn (nlqGate.mode) — no second read
         // of CHAT_NLQ_MODE. The auto-research branch never runs

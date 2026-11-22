@@ -20,6 +20,7 @@ import {
 export { publishManualScreenerRun } from "./etradeBrokerPublish";
 import { ETradeThinkHarness } from "../../services/thinkHarness";
 import { TradingPlatformRegistry, fetchQuoteLiveStrict } from "../../trading";
+import type { ExecutionAccountContext } from "../../services/accountBindings";
 // #4654/#4656: draft→placement terms, shared with the neutral route.
 import { deriveOrderExecutionTerms } from "./orderExecutionTerms";
 import { markDraftCancelledIfPresent } from "./brokerOrders";
@@ -143,6 +144,10 @@ export interface EtradeBrokerRouteContext {
     intent: OrderIntent;
     draftId?: string | null;
     dryRun?: boolean;
+    /** Issue #5100 (F3 of #5094): the validated binding resolution,
+     *  recorded on the verdict. (The resolved context, not just the
+     *  tuple — the verdict also carries the binding scope + source.) */
+    binding?: ExecutionAccountContext;
   }): Promise<{ verdict: PolicyVerdict; attestation: PolicyVerdictAttestation }>;
   /** Autopilot state (owner: OrchestratorAgent - was `this.getAutopilotState()`). */
   getAutopilotState(): { running: boolean };

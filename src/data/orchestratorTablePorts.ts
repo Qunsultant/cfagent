@@ -83,6 +83,13 @@ export interface PolicyVerdictInsert {
   proposerDid: string;
   authorizerDid: string;
   createdAt: string;
+  /** Issue #5100 (F3 of #5094): the validated binding resolution the
+   *  evaluation ran against. Absent on rows recorded before F3. */
+  broker?: string | null;
+  accountType?: string | null;
+  accountId?: string | null;
+  bindingScope?: string | null;
+  bindingSource?: string | null;
 }
 
 /** The control-center projection (the route's exact column set). */
@@ -103,6 +110,12 @@ export interface PolicyVerdictRecentRow {
   proposer_did: string;
   authorizer_did: string;
   created_at: string;
+  /** Issue #5100 (F3 of #5094): the binding the verdict ran against. */
+  broker?: string | null;
+  account_type?: string | null;
+  account_id?: string | null;
+  binding_scope?: string | null;
+  binding_source?: string | null;
 }
 
 export interface PolicyVerdictPort {

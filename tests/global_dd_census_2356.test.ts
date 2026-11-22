@@ -246,7 +246,10 @@ const STEP4D_SERVICE_FILES = [
 /** The step-4d statements live in the data layer, exactly. */
 const STEP4D_DATA_LAYER_FILES: Array<[string, number]> = [
   ["src/data/doSqliteAutopilotStateAdapter.ts", 1],
-  ["src/data/doSqlitePolicyVerdictAdapter.ts", 4],
+  // 6 since #5100 (F3 of #5094): the ensureColumn helper's PRAGMA
+  // probe + conditional ALTER (the confirmations adapter at 9
+  // already carries its helper this way) for the five binding columns.
+  ["src/data/doSqlitePolicyVerdictAdapter.ts", 6],
   ["src/data/doSqliteReportConfirmationAdapter.ts", 9],
   ["src/data/doSqliteScreenerPresetAdapter.ts", 6],
   // 21 at step 4d; 22 since #2528 slice 1: the canonical

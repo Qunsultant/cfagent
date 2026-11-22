@@ -24,7 +24,13 @@
  * E*TRADE-only. The legacy /api/etrade/* routes are untouched.
  */
 import { orderCapabilitiesFor } from "../../config/orderCapabilities";
-import { accountBindingAuditFields, resolveExecutionAccountContext } from "../../services/accountBindings";
+import { ACCOUNT_BINDING_CONFIG, maskAccountId } from "../../config/accountBindings";
+import { codedMessage, getOutcome } from "../../outcomes/outcomeAspects";
+import {
+  accountBindingAuditFields,
+  resolveValidatedExecutionAccountContext,
+  type ExecutionAccountContext,
+} from "../../services/accountBindings";
 // Issue #4654/#4656: one derivation of the draft's approved terms for both
 // execute routes.
 import { deriveOrderExecutionTerms } from "./orderExecutionTerms";
@@ -40,6 +46,7 @@ import {
   type BrokerId,
   type NormalizedTimeInForce,
 } from "../../trading";
+import type { BrokerAccount } from "../../types";
 import { handleBrokerLimitRoutes } from "./brokerLimits";
 import {
   cancelAllOrders,
@@ -130,6 +137,11 @@ function isRoutedBroker(value: unknown): value is RoutedBroker {
  * re-previewed under another environment takes the new mode — the
  * stamp records the environment the draft was last previewed under,
  * which is the environment it would execute in.
+ *
+ * Issue #5100 (F3 of #5094): the resolved binding tuple is stamped
+ * alongside them, from the validated preview resolution. Execute
+ * re-resolves and compares against this stamp (409 on mismatch);
+ * legacy rows without a stamp are refused with a re-preview message.
  */
 function ensureDraftStored(
   ctx: BrokerOrderRouteContext,
@@ -138,9 +150,19 @@ function ensureDraftStored(
   broker: RoutedBroker,
   mode: "live" | "paper",
   timeInForce?: NormalizedTimeInForce,
+  binding?: ExecutionAccountContext | null,
 ): void {
   const orm = ctx.getOrm();
   if (!orm?.trades) return;
+  // Issue #5100: the binding tuple rides the row in both branches.
+  const bindingStamp = binding
+    ? {
+        accountId: binding.accountId ?? null,
+        accountType: binding.accountType ?? null,
+        bindingScope: binding.scope ?? null,
+        bindingSource: binding.source ?? null,
+      }
+    : {};
   const existing = orm.trades.findById(preview.orderId);
   if (existing) {
     // Issue #4654: the draft row is the only carrier of the stop price from
@@ -155,6 +177,7 @@ function ensureDraftStored(
       ...(stopPrice !== undefined ? { stopPrice } : {}),
       // Issue #4656: the approved time-in-force rides the same row.
       ...(timeInForce !== undefined ? { timeInForce } : {}),
+      ...bindingStamp,
       updatedAt: new Date().toISOString(),
     });
     return;
@@ -181,6 +204,7 @@ function ensureDraftStored(
         ? (preview as { stopPrice: number }).stopPrice
         : undefined,
     timeInForce,
+    ...bindingStamp,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   });
@@ -286,17 +310,40 @@ export async function handleBrokerOrderRoutes(
       const userLogin = request.headers.get("x-user-login");
       if (!userLogin) return unauthenticatedResponse();
 
-      const accountCtx = await resolveExecutionAccountContext(ctx.env, userLogin, {
+      // Issue #5100 (F3 of #5094): the preview resolves the account through
+      // the validated wrapper — an unbound preview is refused with the coded
+      // failure, and a body-supplied accountId is validated against the
+      // broker's enumerated accounts, never accepted verbatim. The
+      // platform is constructed first so the enumeration can run before
+      // any preview is produced.
+      const platform = TradingPlatformRegistry.getPlatform(broker, ctx.env, ctx.getOrm(), userLogin, requestedEnv);
+      const explicitAccountId = body.accountId ?? body.accountKey;
+      let availableAccounts: readonly BrokerAccount[] | undefined;
+      if (explicitAccountId !== undefined && explicitAccountId !== null && `${explicitAccountId}`.trim() !== "") {
+        try {
+          availableAccounts = await platform.getAccounts();
+        } catch (enumErr) {
+          // Issue #3669 keeps its own mapping: an unconfigured broker is
+          // the coded 409, not a generic enumeration failure.
+          if (enumErr instanceof Error && /not configured/i.test(enumErr.message)) throw enumErr;
+          return Response.json(
+            { ok: false, error: `Could not enumerate ${broker} accounts to validate the requested account; the preview was refused.` },
+            { status: 502 },
+          );
+        }
+      }
+      const accountCtx = await resolveValidatedExecutionAccountContext(ctx.env, userLogin, {
         broker,
         mode: modeFromEnvironment(requestedEnv),
         accountType: body.accountType ?? (assetClass === "options" ? "options" : "stock"),
         scope: body.bindingScope ?? "copilot",
-        explicitAccountId: body.accountId ?? body.accountKey,
+        explicitAccountId,
+        availableAccounts,
       });
-      if (accountCtx) {
-        ctx.audit("broker.account_binding_resolved", "trading", accountBindingAuditFields(accountCtx));
+      if (!accountCtx.ok) {
+        return Response.json({ ok: false, code: accountCtx.code, error: accountCtx.error }, { status: accountCtx.status });
       }
-      const platform = TradingPlatformRegistry.getPlatform(broker, ctx.env, ctx.getOrm(), userLogin, requestedEnv);
+      ctx.audit("broker.account_binding_resolved", "trading", accountBindingAuditFields(accountCtx.context));
       const preview = await platform.previewOrder({
         assetClass,
         sessionId,
@@ -310,7 +357,7 @@ export async function handleBrokerOrderRoutes(
         optionLegs,
         strategyNetDebit: body.strategyNetDebit !== undefined ? Number(body.strategyNetDebit) : undefined,
       });
-      ensureDraftStored(ctx, sessionId, preview, broker, modeFromEnvironment(requestedEnv), timeInForce);
+      ensureDraftStored(ctx, sessionId, preview, broker, modeFromEnvironment(requestedEnv), timeInForce, accountCtx.context);
       return await completeEtradeOrderPreview({
         ctx,
         sessionId,
@@ -407,6 +454,54 @@ export async function handleBrokerOrderRoutes(
       const parsedStrategy = parseStrategyOrder(existingRecord.previewNotes);
       const strategyOrder = parsedStrategy.optionLegs.length > 0 ? parsedStrategy : undefined;
 
+      // Issue #5100 (F3 of #5094): execute proves the draft's account.
+      // The binding is re-resolved now and compared with the tuple
+      // stamped at preview; a re-bound account is a 409, an unbound
+      // tenant or a legacy draft without a stamp is refused with the
+      // coded failure and a re-preview message. Nothing executes
+      // against any account other than the previewed one.
+      const draftAccountType =
+        (existingRecord.accountType as string | undefined) ??
+        (parsedStrategy.optionLegs.length > 0 ? "options" : "stock");
+      const draftMode =
+        (existingRecord.mode as "live" | "paper" | undefined) ?? modeFromEnvironment(requestedEnv);
+      const bindingRes = await resolveValidatedExecutionAccountContext(ctx.env, userLogin, {
+        broker: draftBroker,
+        mode: draftMode,
+        accountType: draftAccountType,
+        scope: "copilot",
+      });
+      if (!bindingRes.ok) {
+        return Response.json(
+          { ok: false, code: bindingRes.code, error: bindingRes.error },
+          { status: bindingRes.status },
+        );
+      }
+      const resolvedBinding = bindingRes.context;
+      const draftAccountId = (existingRecord.accountId as string | undefined) ?? null;
+      if (!draftAccountId) {
+        const code = ACCOUNT_BINDING_CONFIG.failureCodes.bindingMissing;
+        return Response.json(
+          {
+            ok: false,
+            code,
+            error: codedMessage(
+              code,
+              "Order draft was previewed before account binding enforcement and carries no bound account. A fresh preview is required.",
+            ),
+          },
+          { status: getOutcome(code)?.httpStatus ?? 404 },
+        );
+      }
+      if (resolvedBinding.accountId !== draftAccountId) {
+        return Response.json(
+          {
+            error: `Order draft was previewed on account ${maskAccountId(draftAccountId)} and the bound account is now ${maskAccountId(resolvedBinding.accountId ?? "")}. A fresh preview is required.`,
+          },
+          { status: 409 },
+        );
+      }
+
       // Autopilot policy envelope gate, re-evaluated at execution
       // time (same block as the E*TRADE route).
       let executionVerdict: any = null;
@@ -416,6 +511,7 @@ export async function handleBrokerOrderRoutes(
           requestedEnv,
           sessionId,
           draftId: orderId,
+          binding: resolvedBinding,
           intent: {
             symbol,
             action,

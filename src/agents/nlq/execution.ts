@@ -12,6 +12,8 @@ import { getApprovedPremiumPrice } from "../../data/createPriceCataloguePorts";
 import { describeX402PaymentPath } from "../../services/x402PaymentPath";
 import { ETradeBrowserService } from "../../services/browserAgent";
 import { ETradeService } from "../../services/etrade";
+import { resolveValidatedExecutionAccountContext, type ExecutionAccountContext } from "../../services/accountBindings";
+import { ACCOUNT_SCOPED_SCHEDULE_CALLBACKS } from "../orchestrator/scheduleCallbacks";
 import { createComparisonRunner } from "../../services/comparisonNlqRunner";
 import { getPlatformCapabilitiesDeskSummary } from "../../services/platformKnowledge";
 import { UnifiedOptionsService, ETradeSlackTradingService, describeFlowProvenance, getDynamicLiveFlowItems, isNonLivePricingQuoteStatus, nonLivePricingNotice } from "../../trading";
@@ -1275,6 +1277,11 @@ async function executeSchedulingAction(
   // it (orchestrator). When present, schedule actions route through it.
   capability?: AgentScheduleExecutorDeps,
   tenantId?: string,
+  // Issue #5100 (F3 of #5094): the deployment env, threaded from
+  // executeNLQQueryAsyncCore — account-scoped arming resolves the
+  // tenant's broker selection and binding from it. Absent env refuses
+  // account-scoped arming (fail closed); reminders are unaffected.
+  env?: Env,
 ): Promise<NLQQueryResult> {
   const action = plan.scheduleData?.action || "list";
   const base = { plan, domain: "scheduling", targetTable: "cf_agent_schedules", executedAt };
@@ -1495,7 +1502,60 @@ async function executeSchedulingAction(
         if (sd[key] !== undefined) criteria[key] = sd[key];
       }
     }
-    const built = buildSchedulePayload(callback, criteria, { userLogin, trigger: "scheduled" });
+    // Issue #5100 (F3 of #5094): account-scoped callbacks resolve the
+    // binding at arm time, exactly as REST creation does — broker and
+    // mode come from the tenant's server-resolved selection, the
+    // account from the stored binding, and the resolved tuple rides
+    // the identity stamp so the NLQ payload matches a REST payload.
+    // NLQ plans carry no accountId, so no explicit validation arises
+    // here. Without an env the selection cannot be read and arming is
+    // refused (fail closed); reminders are unaffected.
+    let nlqBinding: ExecutionAccountContext | null = null;
+    let nlqBrokerId: string | undefined;
+    let nlqDataProviderId: string | undefined;
+    let nlqMode: "live" | "paper" | undefined;
+    if (ACCOUNT_SCOPED_SCHEDULE_CALLBACKS.has(callback)) {
+      if (!env) {
+        return failure(
+          "Schedule creation failed: FAILURE_ACCOUNT_BINDING_MISSING: no execution environment is available to resolve the bound account. The schedule was NOT created.",
+        );
+      }
+      // Issue #3655: providerConnections is imported LAZILY, never
+      // statically — it sits on a load cycle with the trading barrel.
+      const { resolveScreenSelection } = await import("../../services/providerConnections");
+      const selection = await resolveScreenSelection({ env, userLogin });
+      if (!selection.resolved) {
+        return failure(
+          `Schedule creation failed: ${selection.code}: ${selection.error}. The schedule was NOT created.`,
+        );
+      }
+      const { resolveTenantProviders } = await import("../../services/tenantProviders");
+      const tenantProviders = await resolveTenantProviders(env);
+      nlqBrokerId = selection.selection.brokerId;
+      nlqDataProviderId = tenantProviders.dataProviderId;
+      nlqMode = selection.selection.mode;
+      const bindingRes = await resolveValidatedExecutionAccountContext(env, userLogin, {
+        broker: selection.selection.brokerId,
+        mode: selection.selection.mode,
+        accountType: callback === "autonomousOptionsAnalysis" ? "options" : "stock",
+        scope: "schedule",
+      });
+      if (!bindingRes.ok) {
+        return failure(
+          `Schedule creation failed: ${bindingRes.code}: ${bindingRes.error} The schedule was NOT created.`,
+        );
+      }
+      nlqBinding = bindingRes.context;
+    }
+    const built = buildSchedulePayload(callback, criteria, {
+      userLogin,
+      trigger: "scheduled",
+      ...(nlqBrokerId ? { brokerId: nlqBrokerId } : {}),
+      ...(nlqDataProviderId ? { dataProviderId: nlqDataProviderId } : {}),
+      ...(nlqMode ? { mode: nlqMode } : {}),
+      ...(nlqBinding?.accountType ? { accountType: nlqBinding.accountType } : {}),
+      ...(nlqBinding?.accountId ? { accountId: nlqBinding.accountId } : {}),
+    });
     if (!built.ok) {
       return failure(
         `Schedule creation failed: ${built.error} The schedule was NOT created.`
@@ -2579,6 +2639,7 @@ async function executeNLQQueryAsyncCore(
       // without it the executor still enforces the F1 allow-list.
       deps?.agentScheduleCapability,
       resolveIaaaTenant(env),
+      env,
     );
   }
 

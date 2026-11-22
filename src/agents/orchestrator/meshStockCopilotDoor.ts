@@ -12,8 +12,11 @@
 
 import {
   resolveCopilotTradingSelection,
+  type CopilotSelectionResolution,
 } from "../copilotTradingMode";
 import { isCopilotBroker } from "../../trading";
+import { maskAccountId } from "../../config/accountBindings";
+import { resolveValidatedExecutionAccountContext } from "../../services/accountBindings";
 import type { CommercialStore } from "../../data/commercialPorts";
 import { SqlIndexListStore } from "../../data/doSqliteIndexListAdapter";
 import {
@@ -182,6 +185,13 @@ export interface StockCopilotStatusResult {
   selectionResolved: boolean;
   activeBroker: string | null;
   activeMode: string | null;
+  /**
+   * Issue #5100 (F3 of #5094): the bound account the copilot's order
+   * tools resolve against (accountType + masked accountId). Null when
+   * the selection is unresolved or no account is bound. The server
+   * payload only — no client files change in F3; F4 wires consumers.
+   */
+  activeBinding: { accountType: string; accountId: string } | null;
   rsiMode: StockCopilotRsiMode;
   userLogin: string;
   controlUpdatedAt: string | null;
@@ -413,6 +423,34 @@ export function hasCopilotCycleLedgerRows(sql: StockCopilotStoreSqlExecutor): bo
 }
 
 /**
+ * Issue #5100 (F3 of #5094): the bound account for a resolved copilot
+ * selection, masked. Shared by the door status and the route status
+ * (the route duplicates the door's payload construction rather than
+ * delegating). Binding source only — no enumeration. A status read
+ * never fails because the binding could not be read: any failure
+ * resolves to null.
+ */
+export async function resolveStockCopilotActiveBinding(
+  env: Env | undefined,
+  userLogin: string,
+  selection: CopilotSelectionResolution,
+): Promise<{ accountType: string; accountId: string } | null> {
+  if (!env || !selection.resolved) return null;
+  try {
+    const res = await resolveValidatedExecutionAccountContext(env, userLogin, {
+      broker: selection.selection.brokerId,
+      mode: selection.selection.mode,
+      accountType: "stock",
+      scope: "copilot",
+    });
+    if (!res.ok || !res.context.accountId) return null;
+    return { accountType: res.context.accountType, accountId: maskAccountId(res.context.accountId) };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Reads Stock Copilot status and loop telemetry for the acting user via the data layer ports.
  */
 export async function getStockCopilotStatusViaDoor(
@@ -454,6 +492,9 @@ export async function getStockCopilotStatusViaDoor(
     readSettingRaw: ctx.readSettingRaw,
     commercial,
   });
+
+  // Issue #5100 (F3 of #5094): the bound account for the resolved selection.
+  const activeBinding = await resolveStockCopilotActiveBinding(ctx.env, login, selection);
 
   const rawActivity = activity.listActivity(login, 20);
   // Issue #5085 (S6): the runs ledger is the source of truth for
@@ -550,6 +591,7 @@ export async function getStockCopilotStatusViaDoor(
     selectionResolved: selection.resolved,
     activeBroker: selection.resolved ? selection.selection.brokerId : null,
     activeMode: selection.resolved ? selection.selection.mode : null,
+    activeBinding,
     userLogin: login,
     controlUpdatedAt: controlRecord?.updatedAt ?? null,
     openPositions: positions.listOpenPositions(login).map(projectOpenPosition),

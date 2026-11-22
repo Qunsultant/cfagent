@@ -341,6 +341,22 @@ describe("runAutopilotMonthlyEvaluation (#4411)", () => {
     expect(result.error).toMatch(/500/);
   });
 
+  it("names the coded failure when the endpoint refuses for a missing binding (#5100)", async () => {
+    const result = await runAutopilotMonthlyEvaluation({
+      serviceLogin: "service-user",
+      evaluateFetch: fakeFetch(
+        new Response(
+          JSON.stringify({ ok: false, code: "FAILURE_ACCOUNT_BINDING_MISSING", error: "No account is bound for this tenant." }),
+          { status: 404 },
+        ),
+        {},
+      ),
+    });
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/404/);
+    expect(result.error).toMatch(/FAILURE_ACCOUNT_BINDING_MISSING/);
+  });
+
   it("fails visibly when the evaluate response carries no verdict", async () => {
     const result = await runAutopilotMonthlyEvaluation({
       serviceLogin: "service-user",

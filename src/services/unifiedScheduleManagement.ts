@@ -2527,6 +2527,11 @@ export function resolveScheduleUpdate(
   // semantics). Timing-only updates (no payload in the body) are not
   // re-validated — a legacy payload stays updatable — and
   // non-screening callbacks' payloads are not screening criteria.
+  // Issue #5100 (F3 of #5094): the strip covers all five identity
+  // fields AND the binding tuple — the stamped tuple is authoritative
+  // for a schedule, and an update must not re-target the account.
+  // Changing a schedule's account is an explicit re-bind, not a side
+  // effect of an update.
   if (
     body.payload !== undefined &&
     (SCREENING_SCHEDULE_CALLBACKS as readonly string[]).includes(current.callback)
@@ -2535,7 +2540,7 @@ export function resolveScheduleUpdate(
       current.payload && typeof current.payload === "object"
         ? (current.payload as Record<string, unknown>)
         : {};
-    const { userLogin: _untrustedUserLogin, environment: _untrustedEnvironment, ...criteria } =
+    const { userLogin: _untrustedUserLogin, environment: _untrustedEnvironment, brokerId: _untrustedBrokerId, dataProviderId: _untrustedDataProviderId, mode: _untrustedMode, accountId: _untrustedAccountId, accountType: _untrustedAccountType, ...criteria } =
       body.payload && typeof body.payload === "object"
         ? (body.payload as Record<string, unknown>)
         : {};
@@ -2543,6 +2548,11 @@ export function resolveScheduleUpdate(
       userLogin: typeof currentPayload.userLogin === "string" ? currentPayload.userLogin : undefined,
       environment: typeof currentPayload.environment === "string" ? currentPayload.environment : undefined,
       trigger: "scheduled",
+      ...(typeof currentPayload.brokerId === "string" ? { brokerId: currentPayload.brokerId } : {}),
+      ...(typeof currentPayload.dataProviderId === "string" ? { dataProviderId: currentPayload.dataProviderId } : {}),
+      ...(currentPayload.mode === "live" || currentPayload.mode === "paper" ? { mode: currentPayload.mode } : {}),
+      ...(typeof currentPayload.accountType === "string" ? { accountType: currentPayload.accountType } : {}),
+      ...(typeof currentPayload.accountId === "string" ? { accountId: currentPayload.accountId } : {}),
     }, { applyCreationDefaults: false });
     if (!built.ok) {
       return { ok: false, error: built.error };
