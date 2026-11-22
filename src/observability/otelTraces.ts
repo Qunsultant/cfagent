@@ -68,7 +68,7 @@ import {
 import { JsonTraceSerializer } from "@opentelemetry/otlp-transformer";
 import type { OtelDestination, OtelDomain, OtelExporterKind } from "../config/otelModes";
 import { effectiveOtelDomainSwitches } from "../config/otelModes";
-import type { OtelTracesSettings } from "../config/otelModes";
+import type { OtelBackendSettings, OtelTracesSettings } from "../config/otelModes";
 import type { OtelRuntimeOverrideRecord } from "../config/otelConfigPort";
 import type { OtelDomainSwitches } from "./otelLogs";
 import { domainForComponent } from "./otelLogs";
@@ -93,6 +93,8 @@ export interface OtelTracesConfig {
   destinations: Record<OtelDestination, boolean>;
   /** Issue #2808 (S3) — the traces settings (free-tier daily write limit). */
   settings: OtelTracesSettings;
+  /** Issue #5164 (S10) — the Grafana Cloud backend settings (resolved, OFF by default). */
+  backend: OtelBackendSettings;
 }
 
 /**

@@ -113,6 +113,8 @@ describe("S7 config port (#5086)", () => {
       "alerting.slackEnabled",
       "alerting.emailEnabled",
       "alerting.maxAlertsPerDay",
+      "backend.enabled",
+      "backend.requestTimeoutMs",
       "catalog.OBS-1016.severity",
     ]) {
       expect(keys, `${key} must be overridable`).toContain(key);

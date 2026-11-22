@@ -85,6 +85,8 @@ function j1j7OnConfig(overrides: Partial<OtelMetricsConfig> = {}): OtelMetricsCo
       healthPipelineMaxFailureRate: 0.05,
       sloResourceRowsReadMaxPct: 0.7,
     },
+    // Issue #5164 (S10) — the backend OFF (the file default).
+    backend: { enabled: false, requestTimeoutMs: 10000 },
     ...overrides,
   };
 }

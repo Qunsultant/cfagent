@@ -412,6 +412,25 @@ redeploy (KV/D1 switches + admin UI) is S7/S8.
    logging never fails the caller). The OTel transport respects
    the R2 switch (R2 off = no R2 write; ingestion falls back to
    the structured log).
+6. **External backend** (issue #5164, S10) — one switch for the
+   Grafana Cloud destination (`OTEL_BACKEND_ENABLED` / the config
+   map `otel.backend.enabled`, default OFF) plus the request
+   timeout (`OTEL_BACKEND_REQUEST_TIMEOUT_MS` /
+   `otel.backend.requestTimeoutMs`, 10000ms). When ON, each
+   signal's export fans out: the archive transport (in-process
+   ingestion → R2) runs first and its status is what the
+   exporter sees; the Grafana Cloud OTLP POST runs second,
+   best-effort (Basic auth: the numeric stack/instance ID + the
+   API token, both Worker secrets, never in the repo). A backend
+   failure never fails the export — the batch is safe in the
+   archive — and is named once per UTC day per signal (coded
+   OBS-1002/1006/1012 + one audit event `otel.backend.export_failed`).
+   `backend.enabled` flips at runtime through the S7 config port
+   (consulted per export); the timeout resolves at provider init.
+   Analytics Engine + R2 keep receiving telemetry whatever the
+   backend does. The three secrets are `GRAFANA_OTLP_ENDPOINT`
+   (the gateway URL from the portal, Connections → OpenTelemetry),
+   `GRAFANA_CLOUD_INSTANCE_ID`, `GRAFANA_CLOUD_API_KEY`.
 
 **Workers Logs is NOT a switch in this file.** It is deploy-time
 only: `wrangler.jsonc` `observability.enabled` (set `false` to

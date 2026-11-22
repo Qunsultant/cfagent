@@ -40,6 +40,7 @@ import {
   OTEL_FILE_CONFIG,
   effectiveOtelDomainSwitches,
   otelSdkDisabled,
+  resolveOtelBackendSettings,
   resolveOtelDestinationEnabled,
   resolveOtelDomainEnabled,
   resolveOtelDomainLevel,
@@ -51,6 +52,7 @@ import {
   type OtelDomain,
   type OtelScopeLevels,
 } from "../config/otelModes";
+import { createOtelBackendAudit, createOtelBackendFanOutTransport } from "./otelBackend";
 import {
   cachedOtelRuntimeOverrides,
   otelConfigD1FromEnv,
@@ -146,7 +148,20 @@ export function resolveOtelTracesConfig(
       tracesFile?.freeTier?.dailyWriteLimit,
     ),
   }).settings;
-  return { masterEnabled, tracesExporter, domains, destinations, settings };
+  // Issue #5164 (S10) — the Grafana Cloud backend settings
+  // (enabled + request timeout), resolved through the same
+  // mechanism. OFF by default: telemetry stays on the
+  // free-tier path until the owner sets the three Grafana
+  // Worker secrets and flips the switch.
+  const backendFile = OTEL_FILE_CONFIG.backend;
+  const backend = resolveOtelBackendSettings({
+    enabled: levelsFor("OTEL_BACKEND_ENABLED", backendFile?.enabled),
+    requestTimeoutMs: levelsFor(
+      "OTEL_BACKEND_REQUEST_TIMEOUT_MS",
+      backendFile?.requestTimeoutMs,
+    ),
+  }).settings;
+  return { masterEnabled, tracesExporter, domains, destinations, settings, backend };
 }
 
 export interface OtelTracingHandle {
@@ -189,10 +204,25 @@ export function createOtelTracing(env: Env): OtelTracingHandle {
   const ingestionLog = createOtelIngestionLog(
     createStructuredLogger(createObservabilitySink(env), { component: "otel-ingestion" }),
   );
-  const transport: OtelTransport = async (body) => {
+  const archiveTransport: OtelTransport = async (body) => {
     const result = await handleOtelTracesIngestion({ body, blobStore, log: ingestionLog });
     return { status: result.status };
   };
+  // Issue #5164 (S10) — the Grafana Cloud backend leg: the
+  // archive transport above runs first (its status is what the
+  // exporter sees); the backend POST runs second, best-effort.
+  // A backend failure is named once per UTC day per signal
+  // (coded message through the ingestion log's error channel +
+  // one audit event) and never fails the export.
+  const transport = createOtelBackendFanOutTransport({
+    signal: "traces",
+    env: env as unknown as Record<string, unknown>,
+    settings: config.backend,
+    archive: archiveTransport,
+    onError: (message) => ingestionLog.error(message),
+    audit: createOtelBackendAudit(env),
+    getRuntimeOverrides: () => cachedOtelRuntimeOverrides(),
+  });
   // The Analytics Engine sink (the store): the traces export
   // writes one event per span through the EXISTING sink.
   // S7 (#5086): no explicit destinations (per-write runtime

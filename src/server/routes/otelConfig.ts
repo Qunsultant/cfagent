@@ -49,6 +49,7 @@ import {
   normalizeOtelSampling,
   resolveOtelAlertingSettings,
   resolveOtelArchiveSettings,
+  resolveOtelBackendSettings,
   resolveOtelDestinationEnabled,
   resolveOtelDomainEnabled,
   resolveOtelDomainLevel,
@@ -375,6 +376,25 @@ export function buildEffectiveOtelConfig(
   effective["alerting.maxAlertsPerDay"] = {
     value: alertingSettings.maxAlertsPerDay,
     source: settingsFieldSource("positiveInt", alertingLevels.maxAlertsPerDay),
+  };
+
+  // Backend settings (the Grafana Cloud switch + request timeout).
+  const backendFile = OTEL_FILE_CONFIG.backend;
+  const backendLevels = {
+    enabled: levelsFor("OTEL_BACKEND_ENABLED", backendFile?.enabled),
+    requestTimeoutMs: levelsFor(
+      "OTEL_BACKEND_REQUEST_TIMEOUT_MS",
+      backendFile?.requestTimeoutMs,
+    ),
+  };
+  const backendSettings = resolveOtelBackendSettings(backendLevels).settings;
+  effective["backend.enabled"] = {
+    value: backendSettings.enabled,
+    source: settingsFieldSource("boolean", backendLevels.enabled),
+  };
+  effective["backend.requestTimeoutMs"] = {
+    value: backendSettings.requestTimeoutMs,
+    source: settingsFieldSource("positiveInt", backendLevels.requestTimeoutMs),
   };
 
   // Catalog severities: the override wins, else the catalog

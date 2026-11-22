@@ -155,6 +155,8 @@ function buildOverrideKeys(): OtelRuntimeOverrideKeyDef[] {
     { key: "alerting.slackEnabled", kind: "boolean", envName: "OTEL_ALERTING_SLACK_ENABLED", description: "Slack alert channel on/off" },
     { key: "alerting.emailEnabled", kind: "boolean", envName: "OTEL_ALERTING_EMAIL_ENABLED", description: "Email alert channel on/off" },
     { key: "alerting.maxAlertsPerDay", kind: "positiveInt", envName: "OTEL_ALERTING_MAX_ALERTS_PER_DAY", description: "Alerting free-tier guard: max alerts per day" },
+    { key: "backend.enabled", kind: "boolean", envName: "OTEL_BACKEND_ENABLED", description: "Grafana Cloud backend on/off (the external OTLP destination)" },
+    { key: "backend.requestTimeoutMs", kind: "positiveInt", envName: "OTEL_BACKEND_REQUEST_TIMEOUT_MS", description: "Grafana Cloud backend request timeout (ms)" },
   ];
   for (const domain of OTEL_DOMAINS) {
     const upper = domain.toUpperCase().replace(/-/g, "_");

@@ -210,6 +210,8 @@ describe("handleOtelConfigRoutes — GET (catalog + keys + overrides + effective
     const keys = (body.keys as Array<{ key: string }>).map((k) => k.key);
     expect(keys).toContain("enabled");
     expect(keys).toContain("alerting.maxAlertsPerDay");
+    expect(keys).toContain("backend.enabled");
+    expect(keys).toContain("backend.requestTimeoutMs");
     expect(keys).toContain("archive.pageSize");
     expect(keys).toContain("catalog.OBS-1001.severity");
     expect(keys).toContain("domains.j1j7.enabled");

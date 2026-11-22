@@ -200,6 +200,9 @@ jobs:
           S_SLACK_VERIFICATION_TOKEN: ${{ secrets.SLACK_VERIFICATION_TOKEN }}
           S_SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           S_SLACK_CHANNEL: ${{ secrets.SLACK_CHANNEL }}
+          S_GRAFANA_OTLP_ENDPOINT: ${{ secrets.GRAFANA_OTLP_ENDPOINT }}
+          S_GRAFANA_CLOUD_INSTANCE_ID: ${{ secrets.GRAFANA_CLOUD_INSTANCE_ID }}
+          S_GRAFANA_CLOUD_API_KEY: ${{ secrets.GRAFANA_CLOUD_API_KEY }}
         run: |
           set -euo pipefail
           source scripts/ci/put-secret.sh
@@ -264,6 +267,19 @@ jobs:
           # set: without it a bot-token deployment with no per-call
           # channel refuses by name instead of posting.
           optional_secret SLACK_CHANNEL "$S_SLACK_CHANNEL"
+
+          # Grafana Cloud OTLP backend (#5164, owner direction
+          # 2026-11-22): the three secrets live in GitHub Secrets
+          # and reach the Worker through this job, so enabling the
+          # backend later is configuration only. The endpoint is a
+          # secret too, not a var; the only thing in config is the
+          # backend switch (off by default). Every name is optional
+          # — absence is reported in the job summary and the backend
+          # stays off, failing closed with the coded OBS message
+          # naming the missing secret, never a deploy failure.
+          optional_secret GRAFANA_OTLP_ENDPOINT "$S_GRAFANA_OTLP_ENDPOINT"
+          optional_secret GRAFANA_CLOUD_INSTANCE_ID "$S_GRAFANA_CLOUD_INSTANCE_ID"
+          optional_secret GRAFANA_CLOUD_API_KEY "$S_GRAFANA_CLOUD_API_KEY"
 
       - name: Set E*TRADE secrets on Cloudflare Worker [${{ needs.load-environment.outputs.target_env }}]
         env:
