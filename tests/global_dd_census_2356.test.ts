@@ -222,7 +222,10 @@ const STEP4A_DATA_LAYER_FILES: Array<[string, number]> = [
   // in shardJobs, which keeps zero storage-exec sites).
   // Issue #4623 adds one probed additive exec (mas_async_jobs.tenant_id) —
   // 46 → 47, all of it in the data layer (no site above it).
-  ["src/data/doSqliteAsyncJobAdapter.ts", 47],
+  // Issue #6167 adds one probed additive exec
+  // (mas_async_jobs.host_version, the claim-time host version) —
+  // 47 → 48, all of it in the data layer (no site above it).
+  ["src/data/doSqliteAsyncJobAdapter.ts", 48],
   ["src/data/inMemoryAsyncJobAdapter.ts", 0],
   ["src/data/asyncJobPorts.ts", 0],
   ["src/data/createAsyncJobPorts.ts", 0],
