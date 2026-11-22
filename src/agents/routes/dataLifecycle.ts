@@ -121,8 +121,12 @@ import { provisionBootstrapAdmins } from "../../security/iaaaBootstrap";
 import {
   parseBootstrapListWithGenesis,
   platformGenesisMarkerKey,
+  platformGenesisMarkerKeyForUser,
+  hasNonLivePlatformAdmin,
+  holdsPlatformAdmin,
   resolveIaaaTenant,
 } from "../../security/iaaaGithubEndToEnd";
+import { SESSION_STORE_CONFIG } from "../../config/sessionStoreConfig";
 import { createKvBindingStore } from "../../security/iaaaLogin";
 import { getInternalUserId } from "../../security/identityBinding";
 import {
@@ -595,21 +599,43 @@ async function prefixPlan(
   };
 }
 
-/** Single-key plan (one tenant's genesis marker). */
+/** Single-key plan (one tenant's genesis markers). #6191 — the
+ * wipe deletes the legacy global marker for the tenant AND every
+ * per-identity marker under it (prefix
+ * `platformGenesisMarkerKey(tenantId) + ":"`): a wipe that left a
+ * per-identity marker behind would leave a spent claim standing
+ * after the tenant's genesis was meant to be cleared. */
 async function markerPlan(
   stores: ResolvedStores,
   tenantId: string,
-): Promise<KvPlan> {
-  const key = platformGenesisMarkerKey(tenantId);
-  const value = await stores.stores.getSessionKey(key);
+): Promise<KvPlan | null> {
+  const globalKey = platformGenesisMarkerKey(tenantId);
+  const perIdentityPrefix = `${globalKey}:`;
+  const collect = async (): Promise<string[] | null> => {
+    const keys: string[] = [];
+    const global = await stores.stores.getSessionKey(globalKey);
+    if (global !== null) keys.push(globalKey);
+    const perIdentity = await stores.stores.listSessions(perIdentityPrefix);
+    if (perIdentity === null) return null;
+    for (const entry of perIdentity) keys.push(entry.key);
+    return keys;
+  };
+  const keys = await collect().catch(() => null);
+  if (keys === null) {
+    // Fail closed (the kvWipe idiom): a namespace that cannot be
+    // listed cannot be previewed or cleared honestly.
+    return null;
+  }
   return {
     targetId: "tenant-genesis-marker",
-    count: value === null ? 0 : 1,
+    count: keys.length,
     async execute() {
-      if (value === null) return 0;
-      await stores.stores.deleteSessionKey(key);
-      const after = await stores.stores.getSessionKey(key);
-      return after === null ? 1 : 0;
+      for (const key of keys) {
+        await stores.stores.deleteSessionKey(key);
+      }
+      const remaining = await collect().catch(() => null);
+      if (remaining === null) return keys.length;
+      return keys.length - remaining.length;
     },
   };
 }
@@ -1330,13 +1356,33 @@ async function handleExport(
  * supports putIfAbsent, then the platform-admin grant; a failed
  * grant releases the claim. Without putIfAbsent, the legacy
  * create-then-put order is preserved.
+ *
+ * #6191 — the marker key depends on the mode (config
+ * `genesis.oneTime`, default false = per-identity): per-identity
+ * keys let every listed identity claim, and a marker whose grant
+ * is gone is a restore (delete + re-claim) when it names this
+ * identity and a non-live membership proves a grant landed once.
+ * In global-once mode the legacy single marker per tenant is kept.
+ * Already holding live platform-admin is an idempotent no-op.
  */
 async function performGenesis(
   stores: ResolvedStores,
   tenantId: string,
   internalUserId: string,
+  genesisOneTime: boolean = SESSION_STORE_CONFIG.genesis.oneTime,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  const markerKey = platformGenesisMarkerKey(tenantId);
+  if (
+    await holdsPlatformAdmin(
+      stores.membershipStore,
+      internalUserId,
+      stores.nowMs(),
+    )
+  ) {
+    return { ok: true };
+  }
+  const markerKey = genesisOneTime
+    ? platformGenesisMarkerKey(tenantId)
+    : platformGenesisMarkerKeyForUser(tenantId, internalUserId);
   const markerValue = JSON.stringify({
     grantedTo: internalUserId,
     tenantId,
@@ -1362,6 +1408,31 @@ async function performGenesis(
       return false;
     }
   };
+  // Restore: a marker that exists but whose grant is gone is cleared
+  // so the claim below can re-win it — but only when it names this
+  // identity and a non-live membership proves a grant landed once.
+  // Any other present marker (another identity's claim, a concurrent
+  // grant in flight, a stuck marker) refuses, as before.
+  const existing = await stores.kv.get(markerKey).catch(() => null);
+  if (existing !== null) {
+    let restorable = false;
+    try {
+      const parsedMarker = JSON.parse(existing) as { grantedTo?: unknown };
+      restorable =
+        parsedMarker.grantedTo === internalUserId &&
+        (await hasNonLivePlatformAdmin(
+          stores.membershipStore,
+          internalUserId,
+          stores.nowMs(),
+        ));
+    } catch {
+      restorable = false;
+    }
+    if (!restorable) {
+      return { ok: false, error: "genesis marker was claimed concurrently" };
+    }
+    await stores.kv.delete(markerKey).catch(() => undefined);
+  }
   if (typeof stores.kv.putIfAbsent === "function") {
     let claimed = false;
     try {
@@ -1398,7 +1469,7 @@ async function callerIsGenesisEntry(
   );
   const bindingStore = createKvBindingStore(stores.kv);
   for (const item of parsed.entries) {
-    if (!item.genesis) continue;
+    if (!item.roles.includes("platform")) continue;
     const entry = item.entry;
     const resolved =
       entry.kind === "internalUserId"
@@ -1490,30 +1561,71 @@ async function checkPlatformBootstrap(
       "src/data/tenantChannelPorts.ts; src/data/commercialPorts.ts; src/data (provider registry)",
   });
 
-  // 4. Platform genesis for the IAAA tenant.
-  const markerKey = platformGenesisMarkerKey(stores.iaaaTenantId);
-  const marker = await stores.kv.get(markerKey);
-  if (marker !== null) {
-    let grantedTo = "unknown";
-    try {
-      const parsed = JSON.parse(marker) as { grantedTo?: unknown };
-      if (typeof parsed.grantedTo === "string") grantedTo = parsed.grantedTo;
-    } catch {
-      // A present-but-unparseable marker still closes the window.
+  // 4. Platform genesis for the IAAA tenant (#6191 — per-identity).
+  // There is no single global window anymore: each platform-listed
+  // identity claims its own marker on first login (config
+  // `genesis.oneTime` restores the legacy global-once window). The
+  // element is present only when every platform-listed identity
+  // holds live platform-admin; otherwise it names who still needs
+  // to log in. A legacy global marker, if one exists, is inert —
+  // it gates nothing — and is reported as such, not as a closure.
+  const genesisAdmins = parseBootstrapListWithGenesis(
+    (ctx.env as unknown as Record<string, unknown>)[
+      "IAAA_BOOTSTRAP_ADMINS"
+    ] as string | undefined,
+  );
+  const genesisBindingStore = createKvBindingStore(stores.kv);
+  const platformIds: string[] = [];
+  for (const item of genesisAdmins.entries) {
+    if (!item.roles.includes("platform")) continue;
+    const entry = item.entry;
+    const resolved =
+      entry.kind === "internalUserId"
+        ? entry.internalUserId
+        : await getInternalUserId(
+            genesisBindingStore,
+            entry.providerIssuer,
+            entry.providerSubject,
+          );
+    if (resolved !== null && !platformIds.includes(resolved)) {
+      platformIds.push(resolved);
     }
-    elements.push({
-      id: "platform-genesis",
-      state: "present",
-      detail: `Genesis marker present for tenant "${stores.iaaaTenantId}" (grantedTo: ${grantedTo}); the genesis window is closed.`,
-      source: "src/security/iaaaGithubEndToEnd.ts (platformGenesisMarkerKey)",
-    });
-  } else {
+  }
+  if (platformIds.length === 0) {
     elements.push({
       id: "platform-genesis",
       state: "missing",
-      detail: `No genesis marker for tenant "${stores.iaaaTenantId}"; the genesis window is open for a platform: bootstrap entry.`,
-      source: "src/security/iaaaGithubEndToEnd.ts (platformGenesisMarkerKey)",
+      detail: `No platform: bootstrap entry in IAAA_BOOTSTRAP_ADMINS for tenant "${stores.iaaaTenantId}"; a platform-listed identity gains platform-admin on its first wired login.`,
+      source: "src/security/iaaaGithubEndToEnd.ts (platformGenesisMarkerKeyForUser)",
     });
+  } else {
+    const pending: string[] = [];
+    for (const internalUserId of platformIds) {
+      if (
+        !(await holdsPlatformAdmin(
+          stores.membershipStore,
+          internalUserId,
+          stores.nowMs(),
+        ))
+      ) {
+        pending.push(internalUserId);
+      }
+    }
+    if (pending.length === 0) {
+      elements.push({
+        id: "platform-genesis",
+        state: "present",
+        detail: `Genesis complete for ${platformIds.length} platform-listed identit${platformIds.length === 1 ? "y" : "ies"} in tenant "${stores.iaaaTenantId}" (each holds live platform-admin).`,
+        source: "src/security/iaaaGithubEndToEnd.ts (platformGenesisMarkerKeyForUser)",
+      });
+    } else {
+      elements.push({
+        id: "platform-genesis",
+        state: "missing",
+        detail: `Genesis pending for ${pending.length} of ${platformIds.length} platform-listed identit${platformIds.length === 1 ? "y" : "ies"} in tenant "${stores.iaaaTenantId}"; each gains platform-admin on its first wired login.`,
+        source: "src/security/iaaaGithubEndToEnd.ts (platformGenesisMarkerKeyForUser)",
+      });
+    }
   }
 
   // 5. Bootstrap admins configuration. The env var's full
@@ -1884,27 +1996,31 @@ async function handleTenantBootstrap(
   }
 
   // -- genesis ------------------------------------------------------------------
-  const markerKey = platformGenesisMarkerKey(tenantId);
-  const marker = await stores.kv.get(markerKey);
-  if (marker !== null) {
-    let grantedTo = "unknown";
-    try {
-      const parsed = JSON.parse(marker) as { grantedTo?: unknown };
-      if (typeof parsed.grantedTo === "string") grantedTo = parsed.grantedTo;
-    } catch {
-      // Present-but-unparseable still closes the window.
-    }
+  // #6191 — per-identity: the question is whether the FOUNDING
+  // ADMIN holds live platform-admin, not whether a single global
+  // marker exists. A legacy global marker is inert and gates
+  // nothing. performGenesis (below) claims the founding admin's
+  // own per-identity marker (or the global marker in global-once
+  // mode, where a claim by another identity is still refused).
+  const founderHoldsPlatformAdmin =
+    founderId !== null &&
+    (await holdsPlatformAdmin(
+      stores.membershipStore,
+      founderId,
+      stores.nowMs(),
+    ));
+  if (founderHoldsPlatformAdmin) {
     steps.push({
       id: "genesis",
       status: "present",
-      detail: `Genesis marker present (grantedTo: ${grantedTo}); the window is closed.`,
+      detail: `Genesis already done for the founding admin (they hold live platform-admin).`,
     });
   } else if (!claimGenesis) {
     steps.push({
       id: "genesis",
       status: "not-requested",
       detail:
-        "Genesis claim not requested; the marker window stays open for the founding admin's first platform-scoped login, or re-run with claimGenesis: true.",
+        "Genesis claim not requested; the window stays open for the founding admin's first platform-scoped login, or re-run with claimGenesis: true.",
     });
   } else if (founderId === null) {
     steps.push({

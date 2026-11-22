@@ -508,9 +508,9 @@ export function IaaaAdminPanel() {
         {!overview.genesis.platformGenesisOccurred && (
           <Notice tone="info">
             Platform genesis has not yet occurred — no platform admin exists yet. The first
-            platform admin comes from the bootstrap list (IAAA_BOOTSTRAP_ADMINS): the first
-            platform: entry wins on that identity&apos;s next fresh sign-in. See Bootstrap
-            proposals.
+            platform admin comes from the bootstrap list (IAAA_BOOTSTRAP_ADMINS): each
+            platform: entry gains platform-admin on that identity&apos;s next fresh sign-in.
+            See Bootstrap proposals.
           </Notice>
         )}
         {roles.length === 0 && (

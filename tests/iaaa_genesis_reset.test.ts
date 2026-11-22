@@ -13,6 +13,14 @@
  * parses as JSON with grantedTo exactly the retired Oct 22 id.
  * Then the existing genesis path runs unchanged (grant + re-set).
  *
+ * #6191 — the repair runs in GLOBAL-ONCE mode only
+ * (genesis.oneTime: true): the stranded marker lives on the
+ * legacy global key, which the per-identity default never reads.
+ * These tests therefore run with genesisOneTime: true; the
+ * per-identity counterpart (a stranded global marker does not
+ * block a per-identity claim) is pinned in
+ * iaaa_genesis_atomic_claim.test.ts.
+ *
  * Fail-closed pins: unparsable or malformed markers are NOT
  * deleted (genesis-closed path); a delete failure yields status
  * "error" without failing the login; not-listed and plain-entry
@@ -73,6 +81,8 @@ function deps() {
     kv: memoryKv(),
     bindingStore: createMemoryIdentityBindingStore(),
     membershipStore: createMemoryMembershipStore(),
+    // #6191 — the #1208 repair is global-once-only.
+    genesisOneTime: true,
   };
 }
 
@@ -143,9 +153,12 @@ describe("one-time genesis marker reset (#1208)", () => {
       atMs: NOW - 1000,
     });
     await d.kv.put(MARKER_KEY, otherMarker);
+    // #6191 — platform,tenant: so the closed path still grants
+    // tenant-admin (a platform-only entry would get
+    // genesis-claim-lost and no tenant grant).
     const result = await runWiredPostLogin(
       d,
-      loginInput(UUID_A, `platform:${UUID_A}`),
+      loginInput(UUID_A, `platform,tenant:${UUID_A}`),
     );
     expect(result.bootstrap.status).toBe("genesis-closed-tenant-admin");
     expect(await d.kv.get(MARKER_KEY)).toBe(otherMarker);
@@ -188,9 +201,12 @@ describe("one-time genesis marker reset (#1208)", () => {
   it("does not delete an unparsable marker; genesis-closed path", async () => {
     const d = deps();
     await d.kv.put(MARKER_KEY, "not-json{{{");
+    // #6191 — platform,tenant: so the closed path still grants
+    // tenant-admin (a platform-only entry would get
+    // genesis-claim-lost and no tenant grant).
     const result = await runWiredPostLogin(
       d,
-      loginInput(UUID_A, `platform:${UUID_A}`),
+      loginInput(UUID_A, `platform,tenant:${UUID_A}`),
     );
     expect(result.bootstrap.status).toBe("genesis-closed-tenant-admin");
     expect(await d.kv.get(MARKER_KEY)).toBe("not-json{{{");
@@ -203,9 +219,12 @@ describe("one-time genesis marker reset (#1208)", () => {
     const d = deps();
     const malformed = JSON.stringify({ tenantId: "primary", atMs: NOW });
     await d.kv.put(MARKER_KEY, malformed);
+    // #6191 — platform,tenant: so the closed path still grants
+    // tenant-admin (a platform-only entry would get
+    // genesis-claim-lost and no tenant grant).
     const result = await runWiredPostLogin(
       d,
-      loginInput(UUID_A, `platform:${UUID_A}`),
+      loginInput(UUID_A, `platform,tenant:${UUID_A}`),
     );
     expect(result.bootstrap.status).toBe("genesis-closed-tenant-admin");
     expect(await d.kv.get(MARKER_KEY)).toBe(malformed);
@@ -253,6 +272,8 @@ describe("one-time genesis marker reset (#1208)", () => {
         kv: failingKv,
         bindingStore: createMemoryIdentityBindingStore(),
         membershipStore: createMemoryMembershipStore(),
+        // #6191 — the #1208 repair is global-once-only.
+        genesisOneTime: true,
       },
       loginInput(UUID_A, `platform:${UUID_A}`),
     );

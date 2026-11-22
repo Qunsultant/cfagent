@@ -65,7 +65,10 @@ import { createInMemoryAuditPorts } from "../src/data/createAuditPorts";
 import { InMemoryCommercialAdapter } from "../src/data/inMemoryCommercialAdapter";
 import type { TenantDirectory } from "../src/data/tenantDirectoryPorts";
 import { InMemoryTenantChannelAdapter } from "../src/data/inMemoryTenantChannelAdapter";
-import { platformGenesisMarkerKey } from "../src/security/iaaaGithubEndToEnd";
+import {
+  platformGenesisMarkerKey,
+  platformGenesisMarkerKeyForUser,
+} from "../src/security/iaaaGithubEndToEnd";
 import type { KvLike } from "../src/security/kvResilience";
 import type { SqlStorage } from "../src/orm";
 
@@ -698,20 +701,49 @@ describe("platform bootstrap (#3250)", () => {
     expect(byId["session-store-schema"].state).toBe("present");
     expect(byId["agent-db-schema"].state).toBe("present");
     expect(byId["reference-data"].state).toBe("present");
-    // No marker for the IAAA tenant "primary" in the fixture.
-    expect(byId["platform-genesis"].state).toBe("missing");
+    // #6191 — the platform-genesis element is membership-based, not
+    // marker-based: the listed identity (OP) already holds live
+    // platform-admin in the fixture, so genesis is complete for
+    // them even though no marker exists yet. A listed identity
+    // that does NOT hold it reports "missing" (pinned below).
+    expect(byId["platform-genesis"].state).toBe("present");
     expect(byId["bootstrap-admins"].state).toBe("present");
+  });
+
+  it("check reports platform-genesis missing for a listed identity without platform-admin", async () => {
+    // #6191 — per-identity: the element is missing while the
+    // listed identity has not yet claimed (no live platform-admin
+    // membership), regardless of any marker.
+    const w = await makeWorld({}, { IAAA_BOOTSTRAP_ADMINS: "platform:someone-else" });
+    const out = await call(w.ctx, "/api/data-lifecycle/bootstrap", "GET", OP);
+    expect(out.status).toBe(200);
+    const byId = Object.fromEntries(out.body.elements.map((e: any) => [e.id, e]));
+    expect(byId["platform-genesis"].state).toBe("missing");
   });
 
   it("initialize claims genesis for a platform: bootstrap caller, then is a no-op", async () => {
     const w = await makeWorld();
+    // The fixture OP holds platform-admin via the grant path; revoke
+    // it so genesis actually has something to mint (OP stays an
+    // operator via the store operator list, and stays the platform:
+    // entry). Without this the element is already "present" and
+    // init is a no-op — that case is pinned by the check test above.
+    const mine0 = await w.membershipStore.getMembershipsByUser(OP_ID);
+    const grant = mine0.find((m) =>
+      m.roleBindings.some((b) => b.role === "platform-admin"),
+    );
+    expect(grant).toBeTruthy();
+    await w.membershipStore.revokeMembership(grant!.membershipId, 1000);
     const first = await call(w.ctx, "/api/data-lifecycle/bootstrap", "POST", OP, { confirm: true });
     expect(first.status).toBe(200);
     const byId = Object.fromEntries(first.body.elements.map((e: any) => [e.id, e]));
     expect(byId["platform-genesis"].state).toBe("initialized");
-    const markerRaw = w.sessions.get(platformGenesisMarkerKey("primary"));
+    // #6191 — per-identity default: the claim is on the caller's
+    // own marker, not the legacy global key.
+    const markerRaw = w.sessions.get(platformGenesisMarkerKeyForUser("primary", OP_ID));
     expect(markerRaw).toBeTruthy();
     expect(JSON.parse(markerRaw!).grantedTo).toBe(OP_ID);
+    expect(w.sessions.has(platformGenesisMarkerKey("primary"))).toBe(false);
     const mine = await w.membershipStore.getMembershipsByUser(OP_ID);
     const platformGrants = mine.filter((m) =>
       m.roleBindings.some((b) => b.role === "platform-admin" && b.grantedBy === "system:bootstrap-genesis"),
@@ -721,7 +753,7 @@ describe("platform bootstrap (#3250)", () => {
     const second = await call(w.ctx, "/api/data-lifecycle/bootstrap", "POST", OP, { confirm: true });
     const byId2 = Object.fromEntries(second.body.elements.map((e: any) => [e.id, e]));
     expect(byId2["platform-genesis"].state).toBe("present");
-    expect(w.sessions.get(platformGenesisMarkerKey("primary"))).toBe(markerRaw);
+    expect(w.sessions.get(platformGenesisMarkerKeyForUser("primary", OP_ID))).toBe(markerRaw);
     expect(await w.membershipStore.getMembershipsByUser(OP_ID)).toHaveLength(mine.length);
   });
 
@@ -786,8 +818,13 @@ describe("tenant bootstrap (#3250)", () => {
     const inTenant = founderMemberships.filter((m) => m.tenantId === "tenant-c");
     expect(inTenant.some((m) => m.roleBindings.some((b) => b.role === "tenant-admin"))).toBe(true);
     expect(inTenant.some((m) => m.roleBindings.some((b) => b.role === "platform-admin"))).toBe(true);
-    const marker = w.sessions.get(platformGenesisMarkerKey("tenant-c"));
+    // #6191 — per-identity default: the claim is on the founding
+    // admin's own marker, not the legacy global key.
+    const marker = w.sessions.get(
+      platformGenesisMarkerKeyForUser("tenant-c", "user-founder"),
+    );
     expect(JSON.parse(marker!).grantedTo).toBe("user-founder");
+    expect(w.sessions.has(platformGenesisMarkerKey("tenant-c"))).toBe(false);
     const channels = await w.channels.getTenantChannels("tenant-c");
     expect(channels).toBeTruthy();
     // Re-run: no duplication, steps report present.
@@ -804,7 +841,9 @@ describe("tenant bootstrap (#3250)", () => {
     expect(againById["genesis"].status).toBe("present");
     const after = await w.membershipStore.getMembershipsByUser("user-founder");
     expect(after.filter((m) => m.tenantId === "tenant-c")).toHaveLength(inTenant.length);
-    expect(w.sessions.get(platformGenesisMarkerKey("tenant-c"))).toBe(marker);
+    expect(
+      w.sessions.get(platformGenesisMarkerKeyForUser("tenant-c", "user-founder")),
+    ).toBe(marker);
   });
 
   it("claimGenesis without platform-admin membership leaves genesis unclaimed and reports partial truthfully", async () => {

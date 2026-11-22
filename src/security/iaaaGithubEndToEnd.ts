@@ -71,6 +71,10 @@
 
 import type { Env, SessionData } from "../types";
 import {
+  SESSION_STORE_CONFIG,
+  SESSION_STORE_CONFIG_ERRORS,
+} from "../config/sessionStoreConfig";
+import {
   createMembership,
   type MembershipStore,
   type Permission,
@@ -111,6 +115,20 @@ export const IAAA_PLATFORM_GENESIS_KEY_PREFIX = "iaaa-bootstrap:platform-genesis
 /** Kv key recording that a platform-admin genesis happened in a tenant. */
 export function platformGenesisMarkerKey(tenantId: string): string {
   return `${IAAA_PLATFORM_GENESIS_KEY_PREFIX}${tenantId}`;
+}
+
+/**
+ * #6191 — per-identity genesis marker key. The one-time constraint is
+ * per-identity, not per-tenant: each platform-listed identity claims
+ * ITS OWN marker, so one identity's claim never blocks another's.
+ * The legacy global key above is kept for the global-once mode
+ * (config `genesis.oneTime`) and for the clean-state wipe prefix.
+ */
+export function platformGenesisMarkerKeyForUser(
+  tenantId: string,
+  internalUserId: string,
+): string {
+  return `${IAAA_PLATFORM_GENESIS_KEY_PREFIX}${tenantId}:${internalUserId}`;
 }
 
 /**
@@ -216,8 +234,39 @@ export function shouldEnforcePdp(
   return isLegacyPdpGraceExpired(env, session, nowMs);
 }
 
+/** A role a bootstrap list entry can grant. */
+export type BootstrapRole = "platform" | "tenant";
+
+const BOOTSTRAP_ROLES: readonly BootstrapRole[] = ["platform", "tenant"];
+
+function isBootstrapRole(value: string): value is BootstrapRole {
+  return (BOOTSTRAP_ROLES as readonly string[]).includes(value);
+}
+
+/** Canonical role order: platform first, then tenant. */
+function canonicalRoles(roles: BootstrapRole[]): BootstrapRole[] {
+  const out: BootstrapRole[] = [];
+  for (const role of BOOTSTRAP_ROLES) {
+    if (roles.includes(role)) out.push(role);
+  }
+  return out;
+}
+
+/**
+ * The identity a bootstrap entry names, as a dedupe key. A bare id is
+ * itself; a provider entry is `issuer:subject` — the same string the
+ * plain form of that identity carries, so `platform:<issuer>:<subject>`
+ * and `<issuer>:<subject>` dedupe to one user.
+ */
+function bootstrapIdentityKey(entry: BootstrapEntry): string {
+  return entry.kind === "internalUserId"
+    ? entry.internalUserId
+    : `${entry.providerIssuer}:${entry.providerSubject}`;
+}
+
 export interface GenesisBootstrapEntry {
-  genesis: boolean;
+  /** The roles this entry grants, explicitly named, canonical order. */
+  roles: BootstrapRole[];
   entry: BootstrapEntry;
 }
 
@@ -226,15 +275,23 @@ export interface ParsedBootstrapListWithGenesis {
   rejected: BootstrapRejection[];
 }
 
-const GENESIS_PREFIX = "platform:";
-
 /**
- * Parse a bootstrap list with genesis support. Each comma-separated
- * entry is either a plain entry (delegated to parseBootstrapAdmins:
- * bare UUID or issuer:subject) or a "platform:"-prefixed entry whose
- * remainder parses the same way. A platform: entry with an
- * unparseable remainder is rejected with the original text, never
- * silently downgraded to a plain entry.
+ * Parse a bootstrap list with explicit roles (#6191). Each
+ * comma-separated entry is `[<role>[,<role>]*:]<identity>`, where the
+ * roles are `platform` and/or `tenant` and the identity is a bare
+ * UUID / derived `v1:` id or an `issuer:subject` pair (delegated to
+ * parseBootstrapAdmins). A plain entry (no role prefix) grants
+ * tenant-admin only, for backward compatibility.
+ *
+ * The comma is both the entry separator and the role-list separator,
+ * so the parse is left-to-right over comma-split segments: a bare
+ * `platform`/`tenant` segment continues the pending role list, and a
+ * segment whose text before its first `:` is a known role closes the
+ * list onto its identity. An unknown role is a named rejection, never
+ * silently treated as an issuer. The same identity twice (any forms)
+ * is deduped by MERGING roles into one entry, with the dropped
+ * duplicate recorded in `rejected` as a named warning — no privilege
+ * is silently lost, and one user still appears once.
  */
 export function parseBootstrapListWithGenesis(
   raw: string | undefined,
@@ -242,36 +299,96 @@ export function parseBootstrapListWithGenesis(
   const entries: GenesisBootstrapEntry[] = [];
   const rejected: BootstrapRejection[] = [];
   if (raw === undefined) return { entries, rejected };
+  const byIdentity = new Map<string, GenesisBootstrapEntry>();
+  let pendingRoles: BootstrapRole[] = [];
   for (const part of raw.split(",")) {
-    const entry = part.trim();
-    if (entry === "") continue;
-    if (entry.startsWith(GENESIS_PREFIX)) {
-      const remainder = entry.slice(GENESIS_PREFIX.length).trim();
-      if (remainder === "") {
+    const segment = part.trim();
+    if (segment === "") continue;
+    // A bare role token continues the pending role list.
+    if (isBootstrapRole(segment)) {
+      if (pendingRoles.includes(segment)) {
         rejected.push({
-          entry,
-          reason: "platform: entry has no identity after the prefix",
+          entry: segment,
+          reason: `duplicate role '${segment}' in bootstrap entry`,
         });
+        pendingRoles = [];
         continue;
       }
-      const parsed = parseBootstrapAdmins(remainder);
-      if (parsed.entries.length === 0) {
-        for (const rejection of parsed.rejected) {
-          rejected.push({ entry, reason: rejection.reason });
-        }
-        if (parsed.rejected.length === 0) {
-          rejected.push({ entry, reason: "platform: entry could not be parsed" });
-        }
-        continue;
-      }
-      entries.push({ genesis: true, entry: parsed.entries[0] });
+      pendingRoles.push(segment);
       continue;
     }
-    const parsed = parseBootstrapAdmins(entry);
-    entries.push(
-      ...parsed.entries.map((e) => ({ genesis: false, entry: e })),
-    );
-    rejected.push(...parsed.rejected);
+    const firstColon = segment.indexOf(":");
+    let segmentRoles: BootstrapRole[] = [];
+    let identityText = segment;
+    if (firstColon !== -1) {
+      const prefixText = segment.slice(0, firstColon).trim();
+      if (isBootstrapRole(prefixText)) {
+        segmentRoles = [prefixText];
+        identityText = segment.slice(firstColon + 1).trim();
+      } else if (pendingRoles.length > 0) {
+        // A pending role list plus a non-role prefix token means the
+        // operator was writing a role list with an unknown role —
+        // reject it by name instead of misreading it as an issuer.
+        rejected.push({
+          entry: segment,
+          reason: `unknown bootstrap role '${prefixText}' in bootstrap entry`,
+        });
+        pendingRoles = [];
+        continue;
+      }
+      // Otherwise the whole segment is the identity (an issuer:subject
+      // pair or a derived v1: id — neither starts with a known role).
+    }
+    const duplicateRole = segmentRoles.find((r) => pendingRoles.includes(r));
+    if (duplicateRole) {
+      rejected.push({
+        entry: segment,
+        reason: `duplicate role '${duplicateRole}' in bootstrap entry`,
+      });
+      pendingRoles = [];
+      continue;
+    }
+    const roles = canonicalRoles([...pendingRoles, ...segmentRoles]);
+    pendingRoles = [];
+    if (identityText === "") {
+      rejected.push({
+        entry: segment,
+        reason: "bootstrap entry has no identity after the role prefix",
+      });
+      continue;
+    }
+    const parsed = parseBootstrapAdmins(identityText);
+    if (parsed.entries.length === 0) {
+      for (const rejection of parsed.rejected) {
+        rejected.push({ entry: segment, reason: rejection.reason });
+      }
+      if (parsed.rejected.length === 0) {
+        rejected.push({ entry: segment, reason: "bootstrap entry could not be parsed" });
+      }
+      continue;
+    }
+    const entry = parsed.entries[0];
+    const finalRoles = roles.length === 0 ? ["tenant" as BootstrapRole] : roles;
+    const key = bootstrapIdentityKey(entry);
+    const existing = byIdentity.get(key);
+    if (existing) {
+      existing.roles = canonicalRoles([...existing.roles, ...finalRoles]);
+      rejected.push({
+        entry: segment,
+        reason:
+          "duplicate bootstrap entry for the same identity; merged roles into a single entry — list each user once",
+      });
+      continue;
+    }
+    const merged: GenesisBootstrapEntry = { roles: finalRoles, entry };
+    byIdentity.set(key, merged);
+    entries.push(merged);
+  }
+  if (pendingRoles.length > 0) {
+    rejected.push({
+      entry: pendingRoles.join(","),
+      reason: `bootstrap role list '${pendingRoles.join(",")}' has no identity after the prefix`,
+    });
   }
   return { entries, rejected };
 }
@@ -296,6 +413,14 @@ export interface WiredPostLoginDeps {
    * follow-up) so the events reach the Analytics Engine dataset.
    */
   sink?: ObservabilitySink;
+  /**
+   * #6191 — explicit genesis-mode override. When set, it wins over
+   * the bundled SessionStore config (`genesis.oneTime`); when absent
+   * the config resolves the mode (default false = per-identity).
+   * Tests pass this to pin both modes; production callers leave it
+   * unset so the config is the single source.
+   */
+  genesisOneTime?: boolean;
 }
 
 export interface WiredPostLoginInput {
@@ -318,6 +443,7 @@ export type BootstrapRunStatus =
   | "provisioned"
   | "genesis"
   | "genesis-closed-tenant-admin"
+  | "genesis-claim-lost"
   | "already-admin"
   | "not-listed"
   | "blank"
@@ -382,7 +508,7 @@ async function releaseGenesisMarker(
   }
 }
 
-async function holdsPlatformAdmin(
+export async function holdsPlatformAdmin(
   store: MembershipStore,
   internalUserId: string,
   nowMs: number,
@@ -398,6 +524,249 @@ async function holdsPlatformAdmin(
           (b.expiresAtMs === undefined || b.expiresAtMs > nowMs),
       ),
   );
+}
+
+/**
+ * #6191 — true iff the user holds a platform-admin membership that is
+ * no longer live (revoked, or expired). A revoked record is history,
+ * never un-revoked — but its presence proves a genesis grant landed
+ * once and is gone, which is what authorizes a restore (a fresh grant)
+ * as opposed to a first grant. A user with NO platform-admin
+ * membership at all has nothing to restore from.
+ */
+export async function hasNonLivePlatformAdmin(
+  store: MembershipStore,
+  internalUserId: string,
+  nowMs: number,
+): Promise<boolean> {
+  const memberships = await store.getMembershipsByUser(internalUserId);
+  return memberships.some(
+    (m) =>
+      m.roleBindings.some(
+        (b) => b.role === "platform-admin" && b.scope === "platform",
+      ) &&
+      (m.revokedAtMs !== undefined ||
+        m.roleBindings.some(
+          (b) =>
+            b.role === "platform-admin" &&
+            b.scope === "platform" &&
+            b.expiresAtMs !== undefined &&
+            b.expiresAtMs <= nowMs,
+        )),
+  );
+}
+
+/** Mint one platform-admin membership via the genesis seam. */
+async function grantPlatformAdmin(
+  membershipStore: MembershipStore,
+  internalUserId: string,
+  tenantId: string,
+  nowMs: number,
+): Promise<boolean> {
+  try {
+    const created = await createMembership(membershipStore, {
+      internalUserId,
+      tenantId,
+      roleBindings: [
+        {
+          role: "platform-admin",
+          scope: "platform",
+          grantedBy: "system:bootstrap-genesis",
+        },
+      ],
+      createdBy: "system:bootstrap-genesis",
+      nowMs,
+    });
+    return created.ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Provision tenant-admin for one user (idempotent — skips when already
+ * held). Returns whether a grant landed, was already held, or errored.
+ */
+async function provisionTenantAdmin(
+  membershipStore: MembershipStore,
+  internalUserId: string,
+  tenantId: string,
+  nowMs: number,
+): Promise<"provisioned" | "already-admin" | "error"> {
+  const provisioned = await provisionBootstrapAdmins(membershipStore, {
+    tenantId,
+    internalUserIds: [internalUserId],
+    nowMs,
+  });
+  if (!provisioned.ok) return "error";
+  return provisioned.skippedAlreadyAdmin.includes(internalUserId)
+    ? "already-admin"
+    : "provisioned";
+}
+
+/**
+ * #6191 — platform genesis for one listed identity.
+ *
+ * The marker key depends on the mode (config `genesis.oneTime`,
+ * default false = per-identity):
+ * - Per-identity: the marker is per-identity
+ *   (`platformGenesisMarkerKeyForUser`), so one identity's claim
+ *   never blocks another's. A marker that exists but whose grant is
+ *   gone is a RESTORE, not a refusal — but only when the marker
+ *   names this identity AND a non-live platform-admin membership
+ *   proves a grant landed once. The spent claim is deleted and the
+ *   atomic claim retried, so concurrent restorers still produce
+ *   exactly one grant. A marker with no such membership is either a
+ *   concurrent grant in flight (do not disturb it) or a stuck marker
+ *   from a failed grant whose release failed (operator repair, as
+ *   before) — it is left alone and the caller takes the closed path.
+ * - Global-once: the legacy single marker per tenant, preserved
+ *   byte-for-byte in behaviour (including the #1208 stranded-marker
+ *   repair, which only applies here — the stranded marker lives on
+ *   the global key). A second identity is refused with the named
+ *   error path, as before.
+ *
+ * In both modes the claim is atomic (#1756): the marker is claimed
+ * BEFORE granting, and a failed grant releases the claim so a retry
+ * can win. When the entry also lists `tenant`, a platform grant is
+ * followed by a tenant-admin top-up (idempotent); when the entry is
+ * platform-only, no tenant-admin is ever silently granted.
+ */
+async function runPlatformGenesis(args: {
+  kv: KvLike;
+  membershipStore: MembershipStore;
+  internalUserId: string;
+  tenantId: string;
+  nowMs: number;
+  genesisOneTime: boolean;
+  includeTenant: boolean;
+  warn: (event: string, fields: Record<string, unknown>) => void;
+}): Promise<BootstrapRunStatus> {
+  const { kv, membershipStore, internalUserId, tenantId, nowMs } = args;
+  // Already holding live platform-admin: top up tenant-admin if
+  // listed (idempotent — skipped when already held).
+  if (await holdsPlatformAdmin(membershipStore, internalUserId, nowMs)) {
+    if (!args.includeTenant) return "already-admin";
+    const tenant = await provisionTenantAdmin(
+      membershipStore,
+      internalUserId,
+      tenantId,
+      nowMs,
+    );
+    if (tenant === "provisioned") return "provisioned";
+    return "already-admin";
+  }
+  const markerKey = args.genesisOneTime
+    ? platformGenesisMarkerKey(tenantId)
+    : platformGenesisMarkerKeyForUser(tenantId, internalUserId);
+  // The claim lost (or the window closed): tenant-admin only when
+  // the entry lists it — a platform-only entry gets nothing here,
+  // and the status says so instead of claiming a tenant grant.
+  const genesisClosed = async (): Promise<BootstrapRunStatus> => {
+    if (!args.includeTenant) return "genesis-claim-lost";
+    const tenant = await provisionTenantAdmin(
+      membershipStore,
+      internalUserId,
+      tenantId,
+      nowMs,
+    );
+    if (tenant === "provisioned") return "genesis-closed-tenant-admin";
+    if (tenant === "already-admin") return "already-admin";
+    return "error";
+  };
+  let marker = await kv.get(markerKey);
+  if (marker !== null) {
+    if (args.genesisOneTime && isStrandedOct22Marker(marker)) {
+      // #1208 one-time repair (global-once mode only): the stranded
+      // Oct 22 marker names a retired id no login carries — delete
+      // it so the claim below grants and re-sets the marker. A
+      // delete failure propagates to the outer catch (status
+      // "error"); the login itself is unaffected.
+      await kv.delete(markerKey);
+      marker = null;
+    } else {
+      // Restore: the marker names this identity AND a non-live
+      // platform-admin membership proves a grant landed once.
+      let restorable = false;
+      try {
+        const parsedMarker = JSON.parse(marker) as { grantedTo?: unknown };
+        restorable =
+          parsedMarker.grantedTo === internalUserId &&
+          (await hasNonLivePlatformAdmin(membershipStore, internalUserId, nowMs));
+      } catch {
+        restorable = false;
+      }
+      if (restorable) {
+        await kv.delete(markerKey);
+        marker = null;
+      } else {
+        return genesisClosed();
+      }
+    }
+  }
+  const markerValue = JSON.stringify({
+    grantedTo: internalUserId,
+    tenantId,
+    atMs: nowMs,
+  });
+  if (typeof kv.putIfAbsent === "function") {
+    // #1756 atomic path: claim the marker BEFORE granting, in one
+    // indivisible backend operation. The loser takes the
+    // genesis-closed path and never writes the marker, so exactly
+    // one first-login can win. The grant follows the claim (never
+    // precedes it): a grant before the claim would let the loser
+    // hold platform-admin too. If the grant fails, release the
+    // claim so a retry can win.
+    const claimed = await kv.putIfAbsent(markerKey, markerValue);
+    if (!claimed) return genesisClosed();
+    const granted = await grantPlatformAdmin(
+      membershipStore,
+      internalUserId,
+      tenantId,
+      nowMs,
+    );
+    if (!granted) {
+      await releaseGenesisMarker(kv, markerKey);
+      return "error";
+    }
+    if (args.includeTenant) {
+      const tenant = await provisionTenantAdmin(
+        membershipStore,
+        internalUserId,
+        tenantId,
+        nowMs,
+      );
+      if (tenant === "error") {
+        // Platform-admin landed (status "genesis"); the tenant
+        // top-up is best-effort and retries on the next login.
+        args.warn("iaaaGithubEndToEnd.genesis_tenant_topup_failed", {
+          message:
+            "[post-login] genesis granted platform-admin but the tenant-admin top-up failed; it retries on the next login",
+          code: "bootstrap.tenant_topup_failed",
+        });
+      }
+    }
+    return "genesis";
+  }
+  // Legacy path (backend without putIfAbsent): the pre-#1756
+  // create-then-put order, unchanged. Two concurrent first-logins
+  // can still both win here; deployments on such a backend must
+  // serialize their first logins. The order is deliberately NOT
+  // changed to claim-then-grant: without an atomic claim a "win"
+  // is not exclusive, so releasing the marker on a failed grant
+  // could reopen the window under a grant that already landed.
+  const granted = await grantPlatformAdmin(
+    membershipStore,
+    internalUserId,
+    tenantId,
+    nowMs,
+  );
+  if (!granted) return "error";
+  await kv.put(markerKey, markerValue);
+  if (args.includeTenant) {
+    await provisionTenantAdmin(membershipStore, internalUserId, tenantId, nowMs);
+  }
+  return "genesis";
 }
 
 /**
@@ -439,145 +808,65 @@ export async function runWiredPostLogin(
       bootstrapStatus = "blank";
     } else {
       const parsed = parseBootstrapListWithGenesis(input.bootstrapRaw);
-      let matchedGenesis = false;
+      let matchedRoles: BootstrapRole[] = [];
       let matched = false;
-      for (const { genesis, entry } of parsed.entries) {
+      for (const { roles, entry } of parsed.entries) {
         const resolved = await resolveEntryUserId(deps.bindingStore, entry);
         if (resolved === input.internalUserId) {
           matched = true;
-          if (genesis) matchedGenesis = true;
+          matchedRoles = roles;
         }
       }
       if (!matched) {
         bootstrapStatus = "not-listed";
-      } else if (matchedGenesis) {
-        if (await holdsPlatformAdmin(deps.membershipStore, input.internalUserId, input.nowMs)) {
-          bootstrapStatus = "already-admin";
-        } else {
-          const markerKey = platformGenesisMarkerKey(input.tenantId);
-          let marker = await deps.kv.get(markerKey);
-          // #1208 one-time repair: if the marker is the stranded
-          // Oct 22 marker, delete it so the existing genesis path
-          // below grants platform-admin and re-sets the marker to
-          // the logging-in user. A delete failure propagates to
-          // the outer catch (bootstrap status "error"); the login
-          // itself is unaffected. All other markers are untouched.
-          if (marker !== null && isStrandedOct22Marker(marker)) {
-            await deps.kv.delete(markerKey);
-            marker = null;
-          }
-          // Genesis window closed (marker present, or claim lost):
-          // a platform: entry now grants tenant-admin only, through
-          // the ordinary bootstrap path. Shared by the marker-present
-          // branch and the lost-claim branch below.
-          const genesisClosed = async (): Promise<BootstrapRunStatus> => {
-            const provisioned = await provisionBootstrapAdmins(
-              deps.membershipStore,
+      } else if (matchedRoles.includes("platform")) {
+        // #6191 — the genesis mode is config
+        // (config/sessionstore.json, genesis.oneTime; default false
+        // = per-identity). An explicit override in deps wins over
+        // config. An invalid config value fails closed to
+        // per-identity (see the config resolver); the named config
+        // errors are warned here, where the mode is actually used.
+        const genesisOneTime =
+          deps.genesisOneTime ?? SESSION_STORE_CONFIG.genesis.oneTime;
+        if (
+          deps.genesisOneTime === undefined &&
+          SESSION_STORE_CONFIG_ERRORS.length > 0
+        ) {
+          for (const error of SESSION_STORE_CONFIG_ERRORS) {
+            structuredLog.warn(
+              "iaaaGithubEndToEnd.sessionstore_config_invalid",
               {
-                tenantId: input.tenantId,
-                internalUserIds: [input.internalUserId],
-                nowMs: input.nowMs,
+                message: `[post-login] sessionstore config invalid: ${error}`,
+                code: "sessionstore.config.invalid",
               },
             );
-            return provisioned.ok
-              ? provisioned.skippedAlreadyAdmin.includes(input.internalUserId)
-                ? "already-admin"
-                : "genesis-closed-tenant-admin"
-              : "error";
-          };
-          if (marker === null) {
-            const markerValue = JSON.stringify({
-              grantedTo: input.internalUserId,
-              tenantId: input.tenantId,
-              atMs: input.nowMs,
-            });
-            if (typeof deps.kv.putIfAbsent === "function") {
-              // #1756 atomic path: claim the marker BEFORE granting,
-              // in one indivisible backend operation. The loser
-              // takes the genesis-closed path and never writes the
-              // marker, so exactly one first-login can win. The
-              // grant follows the claim (never precedes it): a
-              // grant before the claim would let the loser hold
-              // platform-admin too. If the grant fails, release
-              // the claim so a retry can win.
-              const claimed = await deps.kv.putIfAbsent(markerKey, markerValue);
-              if (!claimed) {
-                bootstrapStatus = await genesisClosed();
-              } else {
-                let granted = false;
-                try {
-                  const created = await createMembership(deps.membershipStore, {
-                    internalUserId: input.internalUserId,
-                    tenantId: input.tenantId,
-                    roleBindings: [
-                      {
-                        role: "platform-admin",
-                        scope: "platform",
-                        grantedBy: "system:bootstrap-genesis",
-                      },
-                    ],
-                    createdBy: "system:bootstrap-genesis",
-                    nowMs: input.nowMs,
-                  });
-                  granted = created.ok;
-                } catch {
-                  granted = false;
-                }
-                if (!granted) {
-                  await releaseGenesisMarker(deps.kv, markerKey);
-                  bootstrapStatus = "error";
-                } else {
-                  bootstrapStatus = "genesis";
-                }
-              }
-            } else {
-              // Legacy path (backend without putIfAbsent): the
-              // pre-#1756 create-then-put order, unchanged. Two
-              // concurrent first-logins can still both win here;
-              // deployments on such a backend must serialize
-              // their first logins. The order is deliberately NOT
-              // changed to claim-then-grant: without an atomic
-              // claim a "win" is not exclusive, so releasing the
-              // marker on a failed grant could reopen the window
-              // under a grant that already landed.
-              const created = await createMembership(deps.membershipStore, {
-                internalUserId: input.internalUserId,
-                tenantId: input.tenantId,
-                roleBindings: [
-                  {
-                    role: "platform-admin",
-                    scope: "platform",
-                    grantedBy: "system:bootstrap-genesis",
-                  },
-                ],
-                createdBy: "system:bootstrap-genesis",
-                nowMs: input.nowMs,
-              });
-              if (!created.ok) {
-                bootstrapStatus = "error";
-              } else {
-                await deps.kv.put(markerKey, markerValue);
-                bootstrapStatus = "genesis";
-              }
-            }
-          } else {
-            bootstrapStatus = await genesisClosed();
           }
         }
+        bootstrapStatus = await runPlatformGenesis({
+          kv: deps.kv,
+          membershipStore: deps.membershipStore,
+          internalUserId: input.internalUserId,
+          tenantId: input.tenantId,
+          nowMs: input.nowMs,
+          genesisOneTime,
+          includeTenant: matchedRoles.includes("tenant"),
+          warn: (event, fields) => structuredLog.warn(event, fields),
+        });
       } else {
-        const provisioned = await provisionBootstrapAdmins(
+        // Tenant-only (plain or tenant:): unchanged bootstrap
+        // provisioning — tenant-admin only, never platform-admin.
+        const tenant = await provisionTenantAdmin(
           deps.membershipStore,
-          {
-            tenantId: input.tenantId,
-            internalUserIds: [input.internalUserId],
-            nowMs: input.nowMs,
-          },
+          input.internalUserId,
+          input.tenantId,
+          input.nowMs,
         );
-        bootstrapStatus = provisioned.ok
-          ? provisioned.skippedAlreadyAdmin.includes(input.internalUserId)
-            ? "already-admin"
-            : "provisioned"
-          : "error";
+        bootstrapStatus =
+          tenant === "provisioned"
+            ? "provisioned"
+            : tenant === "already-admin"
+              ? "already-admin"
+              : "error";
       }
     }
   } catch {
@@ -590,10 +879,11 @@ export async function runWiredPostLogin(
   // ordinary bootstrap grant), "genesis" (platform-admin grant +
   // marker set), "genesis-closed-tenant-admin" (tenant-admin grant
   // via the genesis-closed path). "already-admin", "not-listed",
-  // "blank", "conflict-preserved", "invalid", and "error" wrote
-  // nothing, so they emit nothing — an event for a non-occurrence
-  // would be false evidence. Best-effort throughout: a failed
-  // write warns and never throws or changes the login outcome.
+  // "blank", "conflict-preserved", "invalid", "genesis-claim-lost",
+  // and "error" wrote nothing, so they emit nothing — an event for
+  // a non-occurrence would be false evidence. Best-effort
+  // throughout: a failed write warns and never throws or changes
+  // the login outcome.
   if (deps.audit) {
     try {
       if (aliasStatus === "recorded") {

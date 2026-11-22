@@ -52,6 +52,7 @@ import {
   isPdpEnabled,
   parseBootstrapListWithGenesis,
   platformGenesisMarkerKey,
+  platformGenesisMarkerKeyForUser,
   resolveIaaaTenant,
   runWiredPostLogin,
   shouldEnforcePdp,
@@ -123,16 +124,18 @@ describe("bootstrap list with genesis", () => {
     );
     expect(parsed.rejected).toEqual([]);
     expect(parsed.entries).toHaveLength(3);
+    // #6191 — explicit roles: a plain entry defaults to tenant
+    // only; platform: grants platform only (no silent tenant).
     expect(parsed.entries[0]).toEqual({
-      genesis: false,
+      roles: ["tenant"],
       entry: { kind: "internalUserId", internalUserId: UUID_A },
     });
     expect(parsed.entries[1]).toEqual({
-      genesis: true,
+      roles: ["platform"],
       entry: { kind: "internalUserId", internalUserId: UUID_B },
     });
     expect(parsed.entries[2]).toEqual({
-      genesis: true,
+      roles: ["platform"],
       entry: {
         kind: "providerSubject",
         providerIssuer: "https://github.com",
@@ -325,7 +328,12 @@ describe("wired post-login: alias + bootstrap", () => {
     expect(memberships[0].roleBindings[0].role).toBe("platform-admin");
     expect(memberships[0].roleBindings[0].scope).toBe("platform");
     expect(memberships[0].createdBy).toBe("system:bootstrap-genesis");
-    expect(await d.kv.get(platformGenesisMarkerKey("primary"))).not.toBeNull();
+    // #6191 — per-identity default: the claim is on the user's own
+    // marker, not the legacy global key.
+    expect(
+      await d.kv.get(platformGenesisMarkerKeyForUser("primary", UUID_A)),
+    ).not.toBeNull();
+    expect(await d.kv.get(platformGenesisMarkerKey("primary"))).toBeNull();
     const decision = await checkPermission(d.membershipStore, {
       internalUserId: UUID_A,
       tenantId: "primary",
@@ -337,13 +345,19 @@ describe("wired post-login: alias + bootstrap", () => {
   });
 
   it("genesis closed: a later platform: entry grants tenant-admin only", async () => {
-    const d = deps();
+    // #6191 — the closed path is GLOBAL-ONCE mode
+    // (genesisOneTime: true): under the per-identity default the
+    // second identity would win its own claim (pinned in
+    // iaaa_genesis_per_identity.test.ts). The entries are
+    // platform,tenant: so the closed path still grants tenant-admin
+    // (a platform-only entry would get genesis-claim-lost).
+    const d = { ...deps(), genesisOneTime: true };
     await runWiredPostLogin(d, {
       githubLogin: "first",
       internalUserId: UUID_A,
       providerIssuer: "https://github.com",
       providerSubject: "1",
-      bootstrapRaw: `platform:${UUID_A}`,
+      bootstrapRaw: `platform,tenant:${UUID_A}`,
       tenantId: "primary",
       nowMs: NOW,
     });
@@ -352,7 +366,7 @@ describe("wired post-login: alias + bootstrap", () => {
       internalUserId: UUID_B,
       providerIssuer: "https://github.com",
       providerSubject: "2",
-      bootstrapRaw: `platform:${UUID_B}`,
+      bootstrapRaw: `platform,tenant:${UUID_B}`,
       tenantId: "primary",
       nowMs: NOW,
     });

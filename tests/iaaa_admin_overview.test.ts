@@ -88,6 +88,7 @@ async function depsWith(opts: {
   memberships?: Membership[];
   events?: IaaaAuditEvent[];
   genesis?: boolean;
+  genesisPerIdentity?: boolean;
 }): Promise<{ deps: AdminOverviewDeps; audit: AuditStore }> {
   const membershipStore = createMemoryMembershipStore();
   for (const m of opts.memberships ?? []) await membershipStore.put(m);
@@ -96,6 +97,12 @@ async function depsWith(opts: {
   const { kv, store } = mapKv();
   if (opts.genesis) {
     store.set("iaaa-bootstrap:platform-genesis:primary", JSON.stringify({ grantedTo: ADMIN_ID }));
+  }
+  if (opts.genesisPerIdentity) {
+    store.set(
+      `iaaa-bootstrap:platform-genesis:primary:${ADMIN_ID}`,
+      JSON.stringify({ grantedTo: ADMIN_ID }),
+    );
   }
   return {
     deps: { membershipStore, auditStore: audit, kv, tenantId: "primary", nowMs: NOW },
@@ -204,6 +211,19 @@ describe("buildAdminOverview", () => {
     const result = await buildAdminOverview(deps, { callerInternalUserId: ADMIN_ID });
     expect(result.allowed).toBe(true);
     if (result.allowed) expect(result.genesis.platformGenesisOccurred).toBe(false);
+  });
+
+  it("caller's own per-identity marker → platformGenesisOccurred true (#6191)", async () => {
+    // No legacy global marker. The caller holds platform-admin (to
+    // be allowed — the "absent" test pins that membership alone
+    // reads false); the per-identity marker alone flips the field.
+    const { deps } = await depsWith({
+      memberships: [platformAdmin(ADMIN_ID)],
+      genesisPerIdentity: true,
+    });
+    const result = await buildAdminOverview(deps, { callerInternalUserId: ADMIN_ID });
+    expect(result.allowed).toBe(true);
+    if (result.allowed) expect(result.genesis.platformGenesisOccurred).toBe(true);
   });
 
   it("audit events are capped at the documented limit, newest first", async () => {

@@ -35,6 +35,7 @@ import {
 import type { KvLike } from "../src/security/kvResilience";
 import {
   platformGenesisMarkerKey,
+  platformGenesisMarkerKeyForUser,
   runWiredPostLogin,
 } from "../src/security/iaaaGithubEndToEnd";
 
@@ -43,6 +44,8 @@ const UUID_B = "22222222-2222-4222-8222-222222222222";
 const RETIRED_OCT22_ID = "00fbb0ba-9e4b-43ec-a7d6-df2a1dfc5d6c";
 const NOW = 1780000000000;
 const MARKER_KEY = platformGenesisMarkerKey("primary");
+const MARKER_KEY_A = platformGenesisMarkerKeyForUser("primary", UUID_A);
+const MARKER_KEY_B = platformGenesisMarkerKeyForUser("primary", UUID_B);
 
 /** Yield to the event loop so a concurrent caller can interleave. */
 function tick(): Promise<void> {
@@ -130,11 +133,16 @@ function loginInput(
   };
 }
 
-function deps(kv: KvLike, membershipStore?: MembershipStore) {
+function deps(
+  kv: KvLike,
+  membershipStore?: MembershipStore,
+  genesisOneTime?: boolean,
+) {
   return {
     kv,
     bindingStore: createMemoryIdentityBindingStore(),
     membershipStore: membershipStore ?? createMemoryMembershipStore(),
+    ...(genesisOneTime !== undefined ? { genesisOneTime } : {}),
   };
 }
 
@@ -168,11 +176,25 @@ function strandedMarker(): string {
 
 describe("atomic genesis claim (#1756)", () => {
   it("two concurrent first-logins yield exactly one genesis winner", async () => {
+    // #6191 — this pins the #1756 atomicity for GLOBAL-ONCE mode
+    // (genesisOneTime: true): two different identities race for the
+    // single global marker. Under the per-identity default both
+    // would win (each claims their own marker); that is pinned in
+    // iaaa_genesis_per_identity.test.ts. The entries are
+    // platform,tenant: so the loser still falls through to
+    // tenant-admin (a platform-only loser gets genesis-claim-lost
+    // and no tenant grant — pinned below).
     const kv = interleavingAtomicKv();
-    const d = deps(kv);
+    const d = deps(kv, undefined, true);
     const [first, second] = await Promise.all([
-      runWiredPostLogin(d, loginInput("alice", UUID_A, `platform:${UUID_A}`)),
-      runWiredPostLogin(d, loginInput("bob", UUID_B, `platform:${UUID_B}`)),
+      runWiredPostLogin(
+        d,
+        loginInput("alice", UUID_A, `platform,tenant:${UUID_A}`),
+      ),
+      runWiredPostLogin(
+        d,
+        loginInput("bob", UUID_B, `platform,tenant:${UUID_B}`),
+      ),
     ]);
     expect([first.bootstrap.status, second.bootstrap.status].sort()).toEqual([
       "genesis",
@@ -190,6 +212,27 @@ describe("atomic genesis claim (#1756)", () => {
     expect(loserMemberships[0].roleBindings[0].role).toBe("tenant-admin");
   });
 
+  it("a platform-only loser gets genesis-claim-lost and no tenant grant", async () => {
+    // #6191 — explicit roles: a platform: entry (no tenant) never
+    // silently grants tenant-admin. The loser of a global-once race
+    // gets the named status and no membership at all.
+    const kv = interleavingAtomicKv();
+    const d = deps(kv, undefined, true);
+    const [first, second] = await Promise.all([
+      runWiredPostLogin(d, loginInput("alice", UUID_A, `platform:${UUID_A}`)),
+      runWiredPostLogin(d, loginInput("bob", UUID_B, `platform:${UUID_B}`)),
+    ]);
+    expect([first.bootstrap.status, second.bootstrap.status].sort()).toEqual([
+      "genesis",
+      "genesis-claim-lost",
+    ]);
+    const holders = await platformAdminHolders(d.membershipStore, [UUID_A, UUID_B]);
+    expect(holders).toHaveLength(1);
+    const loser = holders[0] === UUID_A ? UUID_B : UUID_A;
+    const loserMemberships = await d.membershipStore.getMembershipsByUser(loser);
+    expect(loserMemberships).toHaveLength(0);
+  });
+
   it("a single first-login still wins via the atomic claim", async () => {
     const kv = interleavingAtomicKv();
     const d = deps(kv);
@@ -198,13 +241,20 @@ describe("atomic genesis claim (#1756)", () => {
       loginInput("alice", UUID_A, `platform:${UUID_A}`),
     );
     expect(result.bootstrap.status).toBe("genesis");
-    const marker = await kv.get(MARKER_KEY);
+    // #6191 — per-identity default: the claim is on Alice's own
+    // marker, not the legacy global key.
+    const marker = await kv.get(MARKER_KEY_A);
     expect(JSON.parse(marker!).grantedTo).toBe(UUID_A);
+    expect(await kv.get(MARKER_KEY)).toBeNull();
   });
 
   it("a live marker is never overwritten by the claim path", async () => {
+    // #6191 — global-once mode: a live global marker for another
+    // identity blocks the claim. Under the per-identity default
+    // Alice's own marker is a different key, so a global marker
+    // cannot block her (pinned in iaaa_genesis_per_identity).
     const kv = interleavingAtomicKv();
-    const d = deps(kv);
+    const d = deps(kv, undefined, true);
     const liveMarker = JSON.stringify({
       grantedTo: UUID_B,
       tenantId: "primary",
@@ -213,7 +263,7 @@ describe("atomic genesis claim (#1756)", () => {
     await kv.put(MARKER_KEY, liveMarker);
     const result = await runWiredPostLogin(
       d,
-      loginInput("alice", UUID_A, `platform:${UUID_A}`),
+      loginInput("alice", UUID_A, `platform,tenant:${UUID_A}`),
     );
     expect(result.bootstrap.status).toBe("genesis-closed-tenant-admin");
     expect(await kv.get(MARKER_KEY)).toBe(liveMarker);
@@ -221,8 +271,12 @@ describe("atomic genesis claim (#1756)", () => {
   });
 
   it("the #1208 repair still runs before the claim: stranded marker is re-set to the caller", async () => {
+    // #6191 — the #1208 repair runs in GLOBAL-ONCE mode only (the
+    // stranded marker lives on the global key). In per-identity
+    // mode the global key is never read, so a stranded global
+    // marker cannot block a claim (pinned below).
     const kv = interleavingAtomicKv();
-    const d = deps(kv);
+    const d = deps(kv, undefined, true);
     await kv.put(MARKER_KEY, strandedMarker());
     const result = await runWiredPostLogin(
       d,
@@ -234,15 +288,37 @@ describe("atomic genesis claim (#1756)", () => {
     expect(await platformAdminHolders(d.membershipStore, [UUID_A])).toEqual([UUID_A]);
   });
 
+  it("a stranded global marker does not block a per-identity claim", async () => {
+    // #6191 — per-identity default: the stranded Oct 22 marker
+    // sits on the legacy global key, which the per-identity path
+    // never reads. Alice claims her own marker and wins; the
+    // stranded marker is left untouched (it is inert, not a
+    // closure).
+    const kv = interleavingAtomicKv();
+    const d = deps(kv);
+    await kv.put(MARKER_KEY, strandedMarker());
+    const result = await runWiredPostLogin(
+      d,
+      loginInput("alice", UUID_A, `platform:${UUID_A}`),
+    );
+    expect(result.bootstrap.status).toBe("genesis");
+    expect(await kv.get(MARKER_KEY)).toBe(strandedMarker());
+    const marker = await kv.get(MARKER_KEY_A);
+    expect(JSON.parse(marker!).grantedTo).toBe(UUID_A);
+    expect(await platformAdminHolders(d.membershipStore, [UUID_A])).toEqual([UUID_A]);
+  });
+
   it("a lost claim falls through to tenant-admin and never writes the marker", async () => {
     const kv = alwaysLosesKv();
     const d = deps(kv);
     const result = await runWiredPostLogin(
       d,
-      loginInput("alice", UUID_A, `platform:${UUID_A}`),
+      loginInput("alice", UUID_A, `platform,tenant:${UUID_A}`),
     );
     expect(result.bootstrap.status).toBe("genesis-closed-tenant-admin");
-    expect(await kv.get(MARKER_KEY)).toBeNull();
+    // #6191 — per-identity default: the marker that must stay
+    // unwritten is Alice's own per-identity key.
+    expect(await kv.get(MARKER_KEY_A)).toBeNull();
     expect(await platformAdminHolders(d.membershipStore, [UUID_A])).toEqual([]);
     const memberships = await d.membershipStore.getMembershipsByUser(UUID_A);
     expect(memberships).toHaveLength(1);
@@ -266,6 +342,9 @@ describe("atomic genesis claim (#1756)", () => {
       loginInput("alice", UUID_A, `platform:${UUID_A}`),
     );
     expect(failed.bootstrap.status).toBe("error");
+    // #6191 — per-identity default: the released marker is Alice's
+    // own per-identity key (the legacy global key was never touched).
+    expect(await kv.get(MARKER_KEY_A)).toBeNull();
     expect(await kv.get(MARKER_KEY)).toBeNull();
     const retried = await runWiredPostLogin(
       deps(kv, healthy),
@@ -283,7 +362,9 @@ describe("atomic genesis claim (#1756)", () => {
       loginInput("alice", UUID_A, `platform:${UUID_A}`),
     );
     expect(result.bootstrap.status).toBe("genesis");
-    const marker = await kv.get(MARKER_KEY);
+    // #6191 — per-identity default: the marker is Alice's own key.
+    const marker = await kv.get(MARKER_KEY_A);
     expect(JSON.parse(marker!).grantedTo).toBe(UUID_A);
+    expect(await kv.get(MARKER_KEY)).toBeNull();
   });
 });

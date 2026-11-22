@@ -238,16 +238,33 @@ function buildPlans(
   });
   plans.set("marker", {
     row: "marker",
+    // #6191 — the marker is per-identity now: the row covers the
+    // legacy global marker for the tenant AND every per-identity
+    // marker under it. A memberships wipe without clearing the
+    // per-identity markers would strand them (the memberships are
+    // deleted, not revoked, so the restore rule cannot fire) and
+    // lock platform-admin out on the next owner login — the same
+    // coupling the memberships row already names below.
     list: async () => {
-      const value = await stores.getSessionKey(markerKey);
-      return value === null ? [] : [{ key: markerKey }];
+      const keys: Array<{ key: string }> = [];
+      const global = await stores.getSessionKey(markerKey);
+      if (global !== null) keys.push({ key: markerKey });
+      const perIdentity = await stores.listSessions(`${markerKey}:`);
+      if (perIdentity === null) return null;
+      for (const entry of perIdentity) keys.push({ key: entry.key });
+      return keys;
     },
     count: (entries) => entries.length,
     keys: (entries) => entries.map((e) => e.key),
     deleteKey: (key) => stores.deleteSessionKey(key),
     verify: async () => {
-      const value = await stores.getSessionKey(markerKey);
-      return value === null ? [] : [{ key: markerKey }];
+      const keys: Array<{ key: string }> = [];
+      const global = await stores.getSessionKey(markerKey);
+      if (global !== null) keys.push({ key: markerKey });
+      const perIdentity = await stores.listSessions(`${markerKey}:`);
+      if (perIdentity === null) return null;
+      for (const entry of perIdentity) keys.push({ key: entry.key });
+      return keys;
     },
   });
   plans.set("sessions", {
