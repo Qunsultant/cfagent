@@ -145,7 +145,11 @@ describe("POST /api/maintenance/recreate-schema (#4383)", () => {
     // Issue #3185 adds one probed DO statement (usage_events.tenant_id):
     // the fresh CREATE TABLE already carries the column, so the ALTER
     // is probed-and-skipped: 36 → 37.
-    expect(body.skipped).toHaveLength(37);
+    // Issue #5100 (F3 of #5094) adds 9 probed DO statements (4
+    // job_run_records + 5 mas_policy_verdicts literal ALTERs): the
+    // fresh CREATE TABLEs already carry the binding columns, so the
+    // ALTERs are probed-and-skipped: 37 → 46.
+    expect(body.skipped).toHaveLength(46);
     expect(body.skipped.map((s: any) => s.code)).toContain(
       "schema.index.mas_reports.drop_index_idx_mas_reports_generation",
     );

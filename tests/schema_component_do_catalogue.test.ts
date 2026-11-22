@@ -175,7 +175,7 @@ const DO_STATEMENT_SHA256: Record<string, string> = {
   "schema.do.job_pipeline_definition_versions.create_table":
     "e3f5565bed6c75f3abce7cac93815261d1c529eb8c9fd0b59192bba31c882ba9",
   "schema.do.job_pipeline_instances.create_table": "0f25e6a8c9861f24a934cd21c82e8974d6f7e6756fcc94973fad6ebec9c1b11a",
-  "schema.do.job_run_records.create_table": "13ece01aa0866f3c8ae8c317ab922c8a6491aa6cd6bd4963b0e259fbfa2c915b",
+  "schema.do.job_run_records.create_table": "18d2fec2838c265edccd711110058f9de9592d096036c574de4e99303100d493",
   "schema.do.job_stage_events.create_table": "35c76adfe72cfa7a970a51db32c0c53ea7e3d3a97a50f3d631882f9448840aca",
   "schema.do.kv_store.create_table": "516aa66d405986dc7230f7154a6b0365cb02a91f2ddd1972033286553634e661",
   "schema.do.mas_adaptation_audit.create_table": "de2de2116954a30edbdbb3a2da6500146c6303485e577368ebd0abff5d6eb7b8",
@@ -203,7 +203,7 @@ const DO_STATEMENT_SHA256: Record<string, string> = {
   "schema.do.mas_opportunity_scans.create_table": "e7738286ef07beb2670f3c1ace7e4d0168b7344414e6397089db2b42ca78f011",
   "schema.do.mas_outcome_tracking.create_table": "42f1d3ef5d275c57082d64bb80a98e6863cb12146e73cddd86f5f02d1ea2a530",
   "schema.do.mas_outcomes.create_table": "bb6f6cc6480f3ec9d50fa1e5933661c072caa38cca0402dac464bf0d437aed87",
-  "schema.do.mas_policy_verdicts.create_table": "d05f7fc4f9d4db430c9344d6a1e86422fb80770a3c7bb254128a321b640945ed",
+  "schema.do.mas_policy_verdicts.create_table": "3ed1fe58c03e91b0b7e64b9b605a5a02101bae5d9cfd7cbba4e667123db95ccc",
   "schema.do.mas_report_confirmations.create_table": "9089cbc440a8c6f0bbd0859903e3ecb04b41bc15795fafc6fdbe3b225c2f5fa9",
   "schema.do.mas_reports.create_table": "6497bc8d4ea00782bdff77ed66ee52748cb14391f1b84e1fc18ca7970337ac6d",
   "schema.do.mas_run_aliases.create_table": "d1613552463eac88e41d94194cfabfaca9aebcd5fc71d878c03b3df07d647fe6",

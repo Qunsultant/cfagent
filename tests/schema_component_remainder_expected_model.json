@@ -318,6 +318,26 @@
           "pk": 0
         },
         {
+          "name": "account_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "account_type",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "binding_scope",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "binding_source",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
           "name": "created_at",
           "type": "TEXT",
           "pk": 0
@@ -807,6 +827,26 @@
         },
         {
           "name": "mode_source",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "account_type",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "account_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "binding_scope",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "binding_source",
           "type": "TEXT",
           "pk": 0
         },

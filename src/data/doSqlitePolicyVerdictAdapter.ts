@@ -15,25 +15,20 @@ import type {
   PolicyVerdictRecentRow,
 } from "./orchestratorTablePorts";
 import { doIndexSql, doTableSql } from "./schemaComponent/doCatalogue";
-import { remainderStatementSql } from "./schemaComponent/remainderCatalogue";
+import { remainderAlterSql } from "./schemaComponent/remainderCatalogue";
 
 /** The DoSqliteReportConfirmationStore ensureColumn pattern, for this table. */
-function ensureColumn(
-  sql: OrchestratorTableSqlExecutor,
-  column: string,
-  type: string
-): void {
+function ensureColumn(sql: OrchestratorTableSqlExecutor, column: string): void {
   const cols = Array.from(
     sql.exec("PRAGMA table_info(mas_policy_verdicts)")
   ) as Array<{ name?: unknown }>;
   const names = cols.map((c) => String(c?.name ?? ""));
   if (!names.includes(column)) {
-    sql.exec(
-      remainderStatementSql("schema.do.mas_policy_verdicts.alter_table_add_column", {
-        column,
-        type,
-      }),
-    );
+    // Issue #5100 (F3 of #5094): the binding columns live as literal
+    // ALTERs in the remainder catalogue (one per column), resolved here
+    // through remainderAlterSql — the same guarded-ALTER precedent the
+    // job-run-records adapter and the ORM facade use.
+    sql.exec(remainderAlterSql("mas_policy_verdicts", column));
   }
 }
 
@@ -47,7 +42,7 @@ export class DoSqlitePolicyVerdictStore implements PolicyVerdictPort {
     // missing so existing DO tables upgrade in place. Fresh installs
     // get them from the CREATE TABLE DDL.
     for (const column of ["broker", "account_type", "account_id", "binding_scope", "binding_source"]) {
-      ensureColumn(this.sql, column, "TEXT");
+      ensureColumn(this.sql, column);
     }
   }
 

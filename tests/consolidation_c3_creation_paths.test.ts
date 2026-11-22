@@ -27,7 +27,7 @@
  * fails this test until it is enumerated here and, if it arms a
  * screening callback, routed through the builder.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, beforeEach, vi } from "vitest";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { buildSchedulePayload } from "../src/trading/screeningSchemas";
@@ -35,6 +35,51 @@ import {
   ensureStrategyScanSchedule,
   type ScheduleMaintenanceContext,
 } from "../src/agents/orchestrator/scheduleMaintenance";
+import { resolveScreenSelection } from "../src/services/providerConnections";
+import { resolveTenantProviders } from "../src/services/tenantProviders";
+import { resolveValidatedExecutionAccountContext } from "../src/services/accountBindings";
+
+// Issue #5100 (F3 of #5094): the baseline arm resolves the tenant's
+// broker selection + bound account and stamps the tuple — it never
+// arms unstamped. Same stub as tests/strategy_scan_schedule.test.ts.
+vi.mock("../src/services/providerConnections", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/services/providerConnections")>();
+  return { ...actual, resolveScreenSelection: vi.fn() };
+});
+vi.mock("../src/services/tenantProviders", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/services/tenantProviders")>();
+  return { ...actual, resolveTenantProviders: vi.fn() };
+});
+vi.mock("../src/services/accountBindings", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/services/accountBindings")>();
+  return { ...actual, resolveValidatedExecutionAccountContext: vi.fn() };
+});
+
+beforeEach(() => {
+  vi.mocked(resolveScreenSelection).mockResolvedValue({
+    resolved: true,
+    selection: {
+      connectionId: "conn-test",
+      brokerId: "alpaca",
+      environment: "TEST",
+      mode: "paper",
+      externalAccountId: "ext-test",
+    },
+  });
+  vi.mocked(resolveTenantProviders).mockResolvedValue({ brokerId: "alpaca", dataProviderId: "alpaca" });
+  vi.mocked(resolveValidatedExecutionAccountContext).mockResolvedValue({
+    ok: true,
+    context: {
+      broker: "alpaca",
+      mode: "paper",
+      accountType: "options",
+      accountId: "acct-alice-1",
+      scope: "schedule",
+      resolvedFromScope: "schedule",
+      source: "binding",
+    },
+  });
+});
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const entry of readdirSync(dir)) {
@@ -170,6 +215,7 @@ describe("ensureStrategyScanSchedule — baseline arm through the builder", () =
     };
     const ctx = {
       agentCtx: { storage: { sql: throwingSql } },
+      env: {},
       listSchedules: async () => [],
       cancelSchedule: async () => true,
       schedule: async (when: unknown, callback: string, payload?: unknown, options?: unknown) => {
@@ -190,7 +236,18 @@ describe("ensureStrategyScanSchedule — baseline arm through the builder", () =
     const expected = buildSchedulePayload(
       "autonomousOptionsAnalysis",
       { universe: "NASDAQ100" },
-      { userLogin: "alice", environment: "PROD", trigger: "scheduled" },
+      {
+        userLogin: "alice",
+        environment: "PROD",
+        trigger: "scheduled",
+        // Issue #5100 (F3 of #5094): the baseline arm stamps the
+        // resolved binding tuple on the armed payload.
+        brokerId: "alpaca",
+        dataProviderId: "alpaca",
+        mode: "paper",
+        accountType: "options",
+        accountId: "acct-alice-1",
+      },
     );
     expect(expected.ok).toBe(true);
     if (expected.ok) {
