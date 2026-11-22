@@ -84,6 +84,12 @@
  *  OBS-1022 otel.config.forbidden — a signed-in non-admin was
  *    denied the OTel config (authenticated, not platform-admin).
  *
+ * Codes added in #6112 (audit-chain race fix):
+ *  OBS-1023 otel.audit_chain.append_failed — an audit-chain
+ *    append failed after the bounded retry (or the append itself
+ *    threw) and was named (audited + logged) instead of vanishing
+ *    silently in appendAuditChainBestEffort.
+ *
  * The three exporter codes (OBS-1002 / OBS-1006 / OBS-1012)
  * carry a `{detail}` template: their message shape varies by
  * failure stage (extraction vs serialization vs transport), so
@@ -136,6 +142,8 @@ export const OBS_LEDGER_WRITE_FAILED = "OBS-1020" as const;
 export const OBS_ALERTING_RULE_UNKNOWN = "OBS-1021" as const;
 /** A signed-in non-admin was denied the OTel config. */
 export const OBS_CONFIG_FORBIDDEN = "OBS-1022" as const;
+/** An audit-chain append failed and was named (audited + logged) instead of vanishing silently. */
+export const OBS_AUDIT_CHAIN_APPEND_FAILED = "OBS-1023" as const;
 
 /**
  * The severity scale for coded messages. The S4 placeholder
@@ -296,6 +304,13 @@ export const OBS_CATALOG: Readonly<Record<string, ObsCatalogEntry>> = {
     name: "otel.config.forbidden",
     template: "OTel config is available to platform admins only",
     severity: "warning",
+  },
+  [OBS_AUDIT_CHAIN_APPEND_FAILED]: {
+    code: OBS_AUDIT_CHAIN_APPEND_FAILED,
+    name: "otel.audit_chain.append_failed",
+    template:
+      "Audit-chain append failed for tenant {tenantId} ({action}): {error}",
+    severity: "error",
   },
 } as const;
 

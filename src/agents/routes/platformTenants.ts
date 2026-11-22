@@ -262,6 +262,7 @@ function auditBestEffort(
       action: `platform.tenant_admin.${action}`,
       payload,
     },
+    ctx.audit,
   );
 }
 

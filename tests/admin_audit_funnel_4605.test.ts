@@ -96,8 +96,16 @@ describe("Issue #4605 — admin read audit & tenant-admin audit funnel", () => {
     );
     expect(patchRes?.status).toBe(200);
 
-    // Allow best-effort microtasks for Q7 chain append to settle.
-    await new Promise((r) => setTimeout(r, 10));
+    // The Q7 chain append is fire-and-forget (two async SHA-256
+    // hashes); poll until both entries land instead of a fixed
+    // 10ms wait that elapses under parallel load. (#5164: the
+    // fixed wait failed 4 of 5 full 40-file runs on this branch
+    // — both tests in this file, alternating — and 0 of 5 on
+    // pristine main; the assertions below are unchanged.)
+    for (let i = 0; i < 200; i++) {
+      if ((await auditPolicy.listChainEntries("acme")).length >= 2) break;
+      await new Promise((r) => setTimeout(r, 10));
+    }
 
     expect(audit).toHaveBeenCalledWith("platform-tenant-admin", "orchestrator", {
       actorLogin: "op1",
@@ -157,7 +165,15 @@ describe("Issue #4605 — admin read audit & tenant-admin audit funnel", () => {
     );
     expect(lookupRes?.status).toBe(200);
 
-    await new Promise((r) => setTimeout(r, 10));
+    // The Q7 chain append is fire-and-forget (two async SHA-256
+    // hashes); poll until the entry lands instead of a fixed 10ms
+    // wait that elapses under parallel load. (#5164: see the
+    // companion wait above — same race, same fix; the assertion
+    // below is unchanged.)
+    for (let i = 0; i < 200; i++) {
+      if ((await auditPolicy.listChainEntries("acme")).length >= 1) break;
+      await new Promise((r) => setTimeout(r, 10));
+    }
 
     expect(audit).toHaveBeenCalledWith("platform.user_admin.lookup", "orchestrator", {
       actorLogin: "admin-1",

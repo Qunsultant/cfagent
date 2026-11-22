@@ -37,6 +37,10 @@ import {
 } from "../data/auditPolicyPorts";
 import { createStructuredLogger } from "../observability/structuredLogger";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
+import {
+  formatCatalogMessage,
+  OBS_AUDIT_CHAIN_APPEND_FAILED,
+} from "../observability/otelMessages";
 
 /** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
 const structuredLog = createStructuredLogger(createObservabilitySink({}), {
@@ -135,14 +139,38 @@ export async function checkAuditGate(
 }
 
 /**
+ * The audit callback a chain-append failure is reported through
+ * (#6112): the caller's audit funnel — `ctx.audit` in the route
+ * layer, the same shape as `OrchestratorAgent.audit`. The failure
+ * is audited as `audit.chain.append_failed` so a lost chain link
+ * is attributable (tenant, action, error) instead of a log line
+ * nobody reads. Optional: callers without an audit funnel still
+ * get the coded log floor below.
+ */
+export type AuditChainFailureAudit = (
+  type: string,
+  agent: "orchestrator",
+  payload: Record<string, unknown>,
+) => void;
+
+/**
  * Best-effort chain append, mirroring the journal projection
  * direction: a chain-write failure is loudly logged and never
  * fails the underlying action. The DO mas_events row remains
  * the audit record; this link is its tamper evidence.
+ *
+ * A failure that still occurs after the adapter's serialization
+ * and bounded retry (#6112) is NAMED, never swallowed: the audit
+ * callback (when the caller passes one) records
+ * `audit.chain.append_failed`, and the coded OBS-1023 log line
+ * names it even with no callback. A throwing audit callback
+ * never breaks the caller — naming a failure must not become a
+ * second failure.
  */
 export async function appendAuditChainBestEffort(
   setup: () => Promise<AuditPolicyPort | null>,
   input: AuditChainEntryInput,
+  audit?: AuditChainFailureAudit,
 ): Promise<void> {
   try {
     const port = await setup();
@@ -154,9 +182,37 @@ export async function appendAuditChainBestEffort(
     }
     await port.appendChainEntry(input);
   } catch (err) {
-    structuredLog.error("auditGate.chain_append_failed", {
-      message: `[audit-gate] chain append failed — audit row unaffected: ${err instanceof Error ? err.message : String(err)}`,
-      error: err instanceof Error ? err.message : String(err),
-    });
+    nameChainAppendFailure(audit, input, err);
   }
+}
+
+/** Name one failed chain append: audit half + coded log floor. */
+function nameChainAppendFailure(
+  audit: AuditChainFailureAudit | undefined,
+  input: AuditChainEntryInput,
+  err: unknown,
+): void {
+  const error = err instanceof Error ? err.message : String(err);
+  if (audit) {
+    try {
+      audit("audit.chain.append_failed", "orchestrator", {
+        code: "audit_chain_append_failed",
+        tenantId: input.tenantId,
+        action: input.action,
+        error,
+      });
+    } catch {
+      // Reporting a failed append must never break the caller.
+    }
+  }
+  structuredLog.error(
+    "auditGate.chain_append_failed",
+    {
+      message: `[audit-gate] ${formatCatalogMessage(OBS_AUDIT_CHAIN_APPEND_FAILED, { tenantId: input.tenantId, action: input.action, error })} — audit row unaffected.`,
+      tenantId: input.tenantId,
+      action: input.action,
+      error,
+    },
+    { errorCode: OBS_AUDIT_CHAIN_APPEND_FAILED },
+  );
 }

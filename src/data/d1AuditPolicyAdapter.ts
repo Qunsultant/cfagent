@@ -136,8 +136,50 @@ function toChainEntry(raw: typeof agentAuditChain.$inferSelect): AuditChainEntry
   };
 }
 
+/**
+ * #6112 — the bounded retry budget for a chain append that loses
+ * the sequence race: one try + two retries, never unbounded. The
+ * budget mirrors the recorded D1 retry budget
+ * (`DEFAULT_D1_RETRY_POLICY.maxAttempts` in d1RetryPolicy.ts),
+ * but the retry itself is deliberately NOT `withD1Retry`: that
+ * policy never retries constraint violations, and this retry is
+ * not a replay of the same insert — it re-reads the head and
+ * computes a fresh sequence, so the conflict that failed attempt
+ * N cannot fail attempt N+1 the same way. A retry needs no
+ * backoff delay: the winner's row is already committed by the
+ * time the loser's insert fails, so an immediate re-read sees it.
+ */
+const AUDIT_CHAIN_APPEND_MAX_ATTEMPTS = 3;
+
+/**
+ * True when the failure is the chain id's primary-key conflict
+ * (`agent_audit_chain.id` = `tenant:sequence`): either the
+ * SQLite constraint error code (SQLITE_CONSTRAINT_PRIMARYKEY,
+ * 1555) or the constraint message. Any other failure (a missing
+ * table, a validation error, a transport fault) is not a
+ * sequence race and must never be retried here.
+ */
+function isAuditChainUniqueConflict(error: unknown): boolean {
+  if (error instanceof Error) {
+    const code = (error as { errcode?: unknown }).errcode;
+    if (code === 1555) return true;
+    if (/UNIQUE constraint|PRIMARY KEY/i.test(error.message)) return true;
+  }
+  return false;
+}
+
 export class D1AuditPolicyAdapter implements AuditPolicyPort {
   constructor(private readonly db: AuditPolicyDb) {}
+
+  /**
+   * Per-tenant append queue (#6112) — the same serialization as
+   * the in-memory adapter: within one isolate, a tenant's
+   * appends run one at a time so a head read always sees the
+   * previous append. The bounded retry below covers the races
+   * the queue cannot see: a second isolate, or a fresh adapter
+   * instance, writing the same tenant at the same moment.
+   */
+  private chainQueue = new Map<string, Promise<unknown>>();
 
   async listActionPolicies(): Promise<AuditPolicyActionRow[]> {
     const rows = await this.db
@@ -223,6 +265,40 @@ export class D1AuditPolicyAdapter implements AuditPolicyPort {
   }
 
   async appendChainEntry(input: AuditChainEntryInput): Promise<AuditChainEntry> {
+    const tail = this.chainQueue.get(input.tenantId) ?? Promise.resolve();
+    const next = tail.then(() => this.appendChainEntryWithRetry(input));
+    this.chainQueue.set(input.tenantId, next.catch(() => {}));
+    return next;
+  }
+
+  /**
+   * One append attempt, retried only on the id's primary-key
+   * conflict. Each attempt re-reads the head, so a retry computes
+   * the sequence the winner just took + 1 and re-hashes against
+   * the winner's entry hash — the chain stays consecutive and
+   * hash-linked. After the budget exhausts the original conflict
+   * surfaces (never wrapped), and the caller names it.
+   */
+  private async appendChainEntryWithRetry(
+    input: AuditChainEntryInput,
+  ): Promise<AuditChainEntry> {
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        return await this.appendChainEntryOnce(input);
+      } catch (error) {
+        if (
+          attempt >= AUDIT_CHAIN_APPEND_MAX_ATTEMPTS ||
+          !isAuditChainUniqueConflict(error)
+        ) {
+          throw error;
+        }
+      }
+    }
+  }
+
+  private async appendChainEntryOnce(
+    input: AuditChainEntryInput,
+  ): Promise<AuditChainEntry> {
     const head = await this.getChainHead(input.tenantId);
     const sequence = (head?.sequence ?? 0) + 1;
     const createdAtMs = input.createdAtMs ?? Date.now();
