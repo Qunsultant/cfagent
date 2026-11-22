@@ -594,6 +594,90 @@ export async function recoverQueuedAsyncJobs(ctx: AsyncJobsContext): Promise<voi
   }
 }
 
+/** Issue #6167: the host version the platform reports for THIS
+ *  execution (CF_VERSION_METADATA.id), or null when the
+ *  platform reports none. The platform reports a version id,
+ *  not a restart cause — the version is the only host identity
+ *  a reap can compare against the claim-time stamp. */
+function hostVersionFromEnv(env: unknown): string | null {
+  const id = (env as Record<string, unknown> | undefined)?.CF_VERSION_METADATA as
+    | { id?: unknown }
+    | undefined;
+  return typeof id?.id === "string" && id.id.length > 0 ? id.id : null;
+}
+
+/** Issue #6167: the restart class a reap names from the claim-time
+ *  host version against the version at reap time. "deploy" — the
+ *  version changed, so a deploy restarted the host (the #3907 /
+ *  #4002 recovery case). "same-version" — the version did NOT
+ *  change, so the restart was an eviction / hibernation / crash,
+ *  not a deploy. "unknown" — either side reported no version, so
+ *  the class stays unnamed (the #4418 fallback). */
+type OrphanRestartClass = "deploy" | "same-version" | "unknown";
+function restartClassFor(claimVersion: string | null | undefined, reapVersion: string | null): OrphanRestartClass {
+  if (!claimVersion || !reapVersion) return "unknown";
+  return claimVersion === reapVersion ? "same-version" : "deploy";
+}
+
+/** Issue #6167: a stillborn orphan — the executor died within
+ *  STILLBORN_ORPHAN_MS of its claim, before the first heartbeat
+ *  and before any stage completed. The last-activity stamp is
+ *  written only by the claim, the 2-minute heartbeat, and
+ *  terminal transitions, so a last activity within this bound of
+ *  the claim IS the claim itself: the dispatch died on arrival,
+ *  before doing real work (the three 2026-11-22 Yahoo orphans
+ *  died 0.3–3.4s after their claims). A bound, not 0: the
+ *  claim-to-last-activity write is the same instant, but a
+ *  clock read can land a millisecond either side.
+ *
+ *  The bound is a named constant, following the RECOVERY_REARM_CAP
+ *  precedent in this file: the recovery bounds are named in code,
+ *  not externalized config (see the #6167 PR body — the repo's
+ *  no-hard-coding rule is noted there, and externalizing this
+ *  bound is a follow-up, not this slice). */
+const STILLBORN_ORPHAN_MS = 10_000;
+function isStillbornOrphan(row: {
+  started_at: string | null;
+  last_activity_at: string | null;
+}): boolean {
+  const startedMs = row.started_at ? Date.parse(row.started_at) : Number.NaN;
+  if (Number.isNaN(startedMs)) return false;
+  // No activity stamp (legacy row) reads as the claim itself —
+  // the row never recorded activity past the claim.
+  const lastMs = row.last_activity_at ? Date.parse(row.last_activity_at) : startedMs;
+  if (Number.isNaN(lastMs)) return false;
+  return lastMs - startedMs <= STILLBORN_ORPHAN_MS;
+}
+
+/** Issue #6167: the re-arm gate for an orphaned row, shared by
+ *  the onStart recovery and the sweep so the two paths cannot
+ *  drift (the sweep's own comment says the rules are shared).
+ *  A stillborn orphan on an UNCHANGED version is NOT re-armed:
+ *  the dispatch died on arrival on this host, so an identical
+ *  re-arm replays the identical dispatch and dies identically —
+ *  the re-arm loop just burns runs (three Yahoo re-arms on
+ *  2026-11-22, all dead in seconds). Re-armed as before when
+ *  the version changed (a deploy killed it — the #3907/#4002
+ *  case), when the job had progressed (it died mid-work, so a
+ *  resume may land), or when the version is unknown on either
+ *  side (existing behavior preserved — never refuse a re-arm on
+ *  evidence we do not have). */
+function shouldRearmOrphanedRow(
+  row: { started_at: string | null; last_activity_at: string | null; host_version?: string | null },
+  reapVersion: string | null,
+): { rearm: boolean; restartClass: OrphanRestartClass; notRearmedReason?: string } {
+  const restartClass = restartClassFor(row.host_version, reapVersion);
+  if (restartClass === "same-version" && isStillbornOrphan(row)) {
+    return {
+      rearm: false,
+      restartClass,
+      notRearmedReason:
+        "the dispatch died within 10s of its claim on the same host version (a stillborn orphan — an identical re-arm would replay the identical dispatch and die identically)",
+    };
+  }
+  return { rearm: true, restartClass };
+}
+
 /** Issue #4002: the reap message for a row this recovery closes —
  *  names the cause (the executor died with its host at a restart)
  *  with the last-activity evidence, never the generic
@@ -607,14 +691,40 @@ function orphanedReapMessage(
     pipelineRunId?: string | null;
     /** Issue #4418: the host that died, when the platform reports one. */
     hostId?: string | null;
+    /** Issue #6167: the host version the executor claimed under,
+     *  when the row carries one. Compared with hostId at reap
+     *  time to name the restart class. */
+    claimHostVersion?: string | null;
+    /** Issue #6167: the restart class, computed by
+     *  shouldRearmOrphanedRow. Defaults to "unknown" (the #4418
+     *  fallback) when not supplied. */
+    restartClass?: OrphanRestartClass;
+    /** Issue #6167: why the row was NOT re-armed (the stillborn
+     *  gate). Named only when the gate refused the re-arm. */
+    notRearmedReason?: string;
   },
 ): string {
   // Issue #4418: attribution is stated only when known. The platform reports a
   // version id, not a restart cause, so the cause is named as unreported
   // rather than guessed (deploy / eviction / hibernation stay indistinguishable).
+  // Issue #6167: when the claim-time and reap-time versions are both known,
+  // the comparison DOES name the restart class — a changed version is a
+  // deploy restart; an unchanged version is a same-version restart
+  // (eviction / hibernation / crash, not a deploy).
   const host = recording?.hostId ? `host ${recording.hostId}` : "host unknown";
-  const base = `Orphaned by a host restart (${host}; restart cause not reported by the platform): the executor died with its host before a result was recorded (last activity ${lastActivityAt ?? "unknown"}). The run never recorded a result.`;
-  let message = rearmedAs ? `${base} Re-armed as job ${rearmedAs}; the work continues there.` : base;
+  const restartClass = recording?.restartClass ?? "unknown";
+  const restartClause =
+    restartClass === "deploy" && recording?.claimHostVersion && recording?.hostId
+      ? `deploy restart — version ${recording.claimHostVersion} → ${recording.hostId}`
+      : restartClass === "same-version"
+        ? "same-version restart — eviction / hibernation / crash, not a deploy"
+        : "restart cause not reported by the platform";
+  const base = `Orphaned by a host restart (${host}; ${restartClause}): the executor died with its host before a result was recorded (last activity ${lastActivityAt ?? "unknown"}). The run never recorded a result.`;
+  let message = rearmedAs
+    ? `${base} Re-armed as job ${rearmedAs}; the work continues there.`
+    : recording?.notRearmedReason
+      ? `${base} Not re-armed: ${recording.notRearmedReason}.`
+      : base;
   // Issue #4002 (recording slice): the ids the row must carry.
   // The Workflow Runs view renders the row's error, so the feed
   // job id (+ pipeline run id when known) is visible there even
@@ -867,6 +977,17 @@ export async function recoverStaleRunningAsyncJobs(
           : typeof row.started_at === "string"
             ? row.started_at
             : null;
+      // Issue #6167: the host version at reap time, read once for
+      // the re-arm gate and the reap message below. The row's
+      // claim-time version rides listRunning (host_version). The
+      // decision is computed once: the restart class names the
+      // reap for every orphan; the re-arm refusal applies only
+      // inside the resumable branch below.
+      const hostId = hostVersionFromEnv(ctx.env);
+      const rearmDecision = shouldRearmOrphanedRow(
+        row as { started_at: string | null; last_activity_at: string | null; host_version?: string | null },
+        hostId,
+      );
       // Issue #4002: re-arm a resumable feed dispatch before
       // reaping the original — the re-armed row replays the same
       // dispatch once the pipeline host has settled its orphan
@@ -875,6 +996,7 @@ export async function recoverStaleRunningAsyncJobs(
       // running on a submit failure.
       let rearmedJobId: string | undefined;
       let rearmCount = 0;
+      let notRearmedReason: string | undefined;
       const payload = parseRowPayload(row);
       const isFeedDispatch = payload
         ? isFeedDispatchShape(String(row.capability), payload)
@@ -886,7 +1008,14 @@ export async function recoverStaleRunningAsyncJobs(
       ) {
         const ownRearmCount =
           typeof payload.recoveryRearmCount === "number" ? payload.recoveryRearmCount : 0;
-        if (ownRearmCount + countRecoveryRearms(ctx, jobId) < RECOVERY_REARM_CAP) {
+        // Issue #6167: the stillborn gate — a dispatch that died
+        // on arrival on an UNCHANGED version is not re-armed.
+        // The cap below is a different refusal (already re-armed
+        // twice); the gate is the futility refusal, and its reason
+        // rides the reap message so the failure is named.
+        if (!rearmDecision.rearm) {
+          notRearmedReason = rearmDecision.notRearmedReason;
+        } else if (ownRearmCount + countRecoveryRearms(ctx, jobId) < RECOVERY_REARM_CAP) {
           try {
             const graph = jobGraphFields(row);
             const submission = {
@@ -941,14 +1070,17 @@ export async function recoverStaleRunningAsyncJobs(
         }
       }
       const completedAt = new Date(nowMs).toISOString();
-      const versionMetadata = (ctx.env as unknown as Record<string, unknown> | undefined)?.CF_VERSION_METADATA as
-        | { id?: unknown }
-        | undefined;
-      const hostId = versionMetadata && typeof versionMetadata.id === "string" ? versionMetadata.id : null;
       const message = orphanedReapMessage(lastActivityAt, rearmedJobId, {
         feedJobId,
         pipelineRunId,
         hostId,
+        // Issue #6167: the claim-time version and the restart
+        // class, so the message names the restart (deploy vs
+        // same-version) and, when the gate refused it, why the
+        // row was not re-armed.
+        claimHostVersion: typeof row.host_version === "string" ? row.host_version : null,
+        restartClass: rearmDecision.restartClass,
+        notRearmedReason,
       });
       const written = ports(ctx).queue.reapStaleRunning(
         jobId,
@@ -966,6 +1098,10 @@ export async function recoverStaleRunningAsyncJobs(
           errorCode: FAILURE_ASYNC_JOB_ORPHANED_CODE,
           lastActivityAt,
           ...(hostId ? { hostId } : {}),
+          // Issue #6167: the restart class and, when the gate
+          // refused it, why the row was not re-armed.
+          restartClass: rearmDecision.restartClass,
+          ...(notRearmedReason ? { notRearmedReason } : {}),
           ...(rearmedJobId ? { rearmedAs: rearmedJobId } : {}),
           ...(feedJobId ? { feedJobId } : {}),
           ...(pipelineRunId ? { pipelineRunId } : {}),
@@ -1383,10 +1519,22 @@ async function settleStaleFeedDispatch(
         : null;
   let rearmedJobId: string | undefined;
   let rearmCount = 0;
+  let notRearmedReason: string | undefined;
+  // Issue #6167: the host version at reap time + the shared
+  // re-arm decision (same gate as the onStart recovery — the
+  // two settle paths cannot drift). A stillborn orphan on an
+  // unchanged version is not re-armed.
+  const hostId = hostVersionFromEnv(ctx.env);
+  const rearmDecision = shouldRearmOrphanedRow(
+    row as { started_at: string | null; last_activity_at: string | null; host_version?: string | null },
+    hostId,
+  );
   if (isResumableFeedDispatch(String(row.capability), payload)) {
     const ownRearmCount =
       typeof payload.recoveryRearmCount === "number" ? payload.recoveryRearmCount : 0;
-    if (ownRearmCount + countRecoveryRearms(ctx, jobId) < RECOVERY_REARM_CAP) {
+    if (!rearmDecision.rearm) {
+      notRearmedReason = rearmDecision.notRearmedReason;
+    } else if (ownRearmCount + countRecoveryRearms(ctx, jobId) < RECOVERY_REARM_CAP) {
       try {
         const graph = jobGraphFields(row);
         const submitted = await submitAsyncJob(ctx, {
@@ -1422,13 +1570,16 @@ async function settleStaleFeedDispatch(
   const pipelineRunId = feedJobId
     ? await resolveFeedDispatchPipelineRunId(ctx.env, feedJobId, lastActivityAt)
     : null;
-  const versionMetadata = (ctx.env as unknown as Record<string, unknown> | undefined)
-    ?.CF_VERSION_METADATA as { id?: unknown } | undefined;
-  const hostId = versionMetadata && typeof versionMetadata.id === "string" ? versionMetadata.id : null;
   const message = orphanedReapMessage(lastActivityAt, rearmedJobId, {
     feedJobId,
     pipelineRunId,
     hostId,
+    // Issue #6167: the claim-time version and the restart class,
+    // so the message names the restart (deploy vs same-version)
+    // and, when the gate refused it, why the row was not re-armed.
+    claimHostVersion: typeof row.host_version === "string" ? row.host_version : null,
+    restartClass: rearmDecision.restartClass,
+    notRearmedReason,
   });
   const written = ports(ctx).queue.reapStaleRunning(
     jobId,
@@ -1446,6 +1597,10 @@ async function settleStaleFeedDispatch(
     errorCode: FAILURE_ASYNC_JOB_ORPHANED_CODE,
     lastActivityAt,
     ...(hostId ? { hostId } : {}),
+    // Issue #6167: the restart class and, when the gate refused
+    // it, why the row was not re-armed.
+    restartClass: rearmDecision.restartClass,
+    ...(notRearmedReason ? { notRearmedReason } : {}),
     ...(rearmedJobId ? { rearmedAs: rearmedJobId } : {}),
     ...(feedJobId ? { feedJobId } : {}),
     ...(pipelineRunId ? { pipelineRunId } : {}),
@@ -1993,7 +2148,12 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
   // claim iff still queued. NOT transaction-wrapped, by ruling:
   // serialization + the guard + this verification are the
   // mechanism. false here is the honest not-claimed outcome.
-  if (!family.queue.claim(jobId, ctx.sessionKey(), now)) return;
+  // Issue #6167: the claim stamps the host version the executor
+  // claimed under (CF_VERSION_METADATA.id), so a later reap can
+  // name the restart class (deploy vs same-version) and gate a
+  // stillborn re-arm.
+  const hostVersion = hostVersionFromEnv(ctx.env);
+  if (!family.queue.claim(jobId, ctx.sessionKey(), now, hostVersion)) return;
 
   const job = family.read.getClaimed(jobId, ctx.sessionKey());
   if (!job) throw new Error(`Async job ${jobId} disappeared after it was claimed.`);
@@ -2006,10 +2166,14 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
   // Issue #4623: the executor names the tenant it is executing for. A row
   // with no tenant (legacy, or a deployment without the account store) says
   // so here instead of implying one.
+  // Issue #6167: the started audit carries the host version the
+  // claim stamped, so the trail names the host the executor died
+  // on even when the row is later read from another host.
   ctx.audit("async_job.started", "orchestrator", {
     jobId,
     capability: job.capability,
     tenantId: job.tenant_id ?? null,
+    hostVersion,
   });
   // Issue #3811: heartbeat while the job runs — the #624
   // research-task precedent (2-minute interval, cleared at the
