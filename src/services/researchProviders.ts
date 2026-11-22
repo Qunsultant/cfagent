@@ -33,7 +33,7 @@ import {
   type DataProviderId,
   type OptionChainSource,
 } from "../trading";
-import { DEFAULT_TENANT_PROVIDERS } from "../data/commercialPorts";
+import { resolveResearchVenue, type ResearchVenue } from "./researchVenue";
 import { isDemoCalibratedChainsEnabled } from "../config/demoMode";
 import type { Env, ETradeOptionChain } from "../types";
 import type { NasdaqStockListing } from "./nasdaqListings";
@@ -151,6 +151,8 @@ function chainToSnapshot(
  */
 export class EtradeResearchDataProvider implements ResearchDataProvider {
   private readonly platform: ITradingPlatform;
+  /** Issue #6036 — the pair this provider actually executes (never a requested string). */
+  readonly venue: ResearchVenue;
   private listingsCache: NasdaqStockListing[] | null = null;
   private persistedChainsPromise?: Promise<PersistedOptionsChainsRead | undefined>;
 
@@ -190,15 +192,22 @@ export class EtradeResearchDataProvider implements ResearchDataProvider {
       chainRules?: ResearchChainRules;
     }
   ) {
-    // #291 Q2: resolved through the platform registry (was a direct
+    // #6036 — the venue is resolved once, by the one resolver the
+    // dispatch paths share: a normalised mode, a catalogued broker ×
+    // mode pair, and a named refusal instead of a silent paper run.
+    // #291 Q2: still resolved through the platform registry (was a direct
     // ETradeService construction — the T0 ledger's researchProviders
     // entry). ORM-free, exactly as before.
+    this.venue = resolveResearchVenue({
+      brokerId: selection?.brokerId,
+      mode: selection?.mode,
+    });
     this.platform = TradingPlatformRegistry.getPlatform(
-      (selection?.brokerId ?? DEFAULT_TENANT_PROVIDERS.brokerId) as TradingPlatformId,
+      this.venue.brokerId,
       env,
       undefined,
       userLogin,
-      selection?.mode ?? "paper",
+      this.venue.mode,
     );
   }
 
@@ -243,15 +252,15 @@ export class EtradeResearchDataProvider implements ResearchDataProvider {
       // always had via ETradeService.getQuoteAsync — a failed live quote
       // throws here and becomes null, never a stale-cache snapshot.
       quote = await fetchQuoteLiveStrict(this.platform, symbol, {
-        // Research follows the selected broker mode, never the worker's
+        // Research follows the resolved venue mode, never the worker's
         // deployment environment (a PROD worker can still read paper data).
-        isLive: this.selection?.mode === "live",
+        isLive: this.venue.mode === "live",
       });
     } catch (error) {
       structuredLog.warn("researchProviders.quote_unavailable", {
         symbol,
-        brokerId: this.selection?.brokerId ?? DEFAULT_TENANT_PROVIDERS.brokerId,
-        mode: this.selection?.mode ?? "paper",
+        brokerId: this.venue.brokerId,
+        mode: this.venue.mode,
         error: error instanceof Error ? error.message : String(error),
       });
       return null;
@@ -270,15 +279,15 @@ export class EtradeResearchDataProvider implements ResearchDataProvider {
       marketCap: marketCapDollars,
       isEtf: etfs.get(symbol.toUpperCase()) ?? false,
       quoteStatus: quote.quoteStatus ?? "unknown",
-      source: quote.source ?? this.selection?.brokerId ?? DEFAULT_TENANT_PROVIDERS.brokerId,
+      source: quote.source ?? this.venue.brokerId,
     };
   }
 
   async getChain(symbol: string): Promise<ChainSnapshot> {
     const now = Date.now();
     const rules = { ...RESEARCH_CONFIG_DEFAULTS, ...this.selection?.chainRules };
-    const brokerSource = this.selection?.brokerId ?? DEFAULT_TENANT_PROVIDERS.brokerId;
-    let source = brokerSource;
+    const brokerSource = this.venue.brokerId;
+    let source: string = brokerSource;
     let sourceAsOf = now;
     let chainSource: OptionChainSource | ITradingPlatform = this.platform;
     let persistedRow: FeedOptionsChainRow | undefined;
