@@ -207,7 +207,22 @@ export async function recordLoginAlias(
   return { ok: true, alias };
 }
 
-/** Login -> internalUserId, or null when no alias exists. */
+/**
+ * Login -> internalUserId, or null when no alias exists.
+ *
+ * Follows the id-migration record (#1182, #6182) from the aliased id
+ * to the current id. A login alias recorded before a binding
+ * migration still names the retired id, and recordLoginAlias refuses
+ * to re-point it (ALIAS_CONFLICT, by design — possible login
+ * recycling) — while the migration itself only records the
+ * old→new id-migration and never touches the login alias. The
+ * migration record is the forward pointer (see
+ * migrateBindingToDerivedId), so this lookup follows it: without
+ * this, every login-keyed reader (Users view, dispatch gate,
+ * tenant bootstrap) resolves a migrated login to the retired id
+ * and reads the revoked memberships. A corrupt record or a cycle
+ * falls back to the last good id, never throws.
+ */
 export async function lookupInternalUserIdByLogin(
   kv: KvLike,
   githubLogin: string,
@@ -215,10 +230,19 @@ export async function lookupInternalUserIdByLogin(
   if (!isValidField(githubLogin)) return null;
   const raw = await kv.get(loginKey(githubLogin));
   if (raw === null) return null;
+  let current: string | null;
   try {
-    return (JSON.parse(raw) as LoginAlias).internalUserId ?? null;
+    current = (JSON.parse(raw) as LoginAlias).internalUserId ?? null;
   } catch {
     return null;
+  }
+  if (current === null) return null;
+  const seen = new Set<string>([current]);
+  for (;;) {
+    const next = await lookupMigratedUserId(kv, current);
+    if (next === null || next === current || seen.has(next)) return current;
+    seen.add(next);
+    current = next;
   }
 }
 
