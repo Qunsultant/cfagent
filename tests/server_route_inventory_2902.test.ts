@@ -663,6 +663,9 @@ describe("server route inventory pin (#2902)", () => {
     // #5086 (S7, observability program #5080) adds the OTel config
     // delegation right after the OTel archive delegation (the
     // admin config routes over the runtime config port).
+    // #5425 (S5, #3515) adds the SLO read delegation right after
+    // the OTel config delegation (the SLO read route over the S2
+    // metrics recorder).
     expect(calls).toEqual([
       "handleCoreEarlyRoutes",
       "handlePrivacyRoutes",
@@ -676,6 +679,7 @@ describe("server route inventory pin (#2902)", () => {
       "handleOtelRoutes",
       "handleOtelArchiveRoutes",
       "handleOtelConfigRoutes",
+      "handleSloRoutes",
       "handlePrivacyReportsRoutes",
       "handlePlatformRetrievalRoutes",
       "handleAuthIaaaRoutes",
@@ -739,9 +743,17 @@ describe("server route inventory pin (#2902)", () => {
     // OTel config delegation (1 import line + a 5-line comment
     // + the 2-line dispatch branch) (335 → 343). The routing logic
     // itself lives in src/server/routes/otelConfig.ts, not here.
+    // #5425 records an eighth deliberate growth: +14 lines — +7 for
+    // the SLO read delegation (1 import line + a 4-line comment +
+    // the 2-line dispatch branch) and +7 for the request-recording
+    // wiring (1 import line + a 4-line comment + the fetch line
+    // rewritten as a 3-line call carrying the onRequestObserved
+    // callback) (343 → 357). The routing logic itself lives in
+    // src/server/routes/otelSlo.ts, not here; the recording lives
+    // in src/observability/serverMetrics.ts, not here.
     const src = readFileSync("src/server.ts", "utf8");
     const lines = src.split("\n").length - (src.endsWith("\n") ? 1 : 0);
-    expect(lines).toBeLessThanOrEqual(343);
+    expect(lines).toBeLessThanOrEqual(357);
   });
 });
 

@@ -29,6 +29,30 @@
  *     — the day's SessionStore rows-read vs the configured
  *     max pct of the free-tier budget, evaluated when the
  *     rollup is recorded.
+ *   slo.api.uptime (Gauge, 1=within SLO / 0=breached) — the
+ *     #3515 S5 uptime SLO: the share of recorded API requests
+ *     not failing (status < 500) vs the tenant's configured
+ *     uptime target, evaluated when the SLO read endpoint asks.
+ *   slo.api.p95_latency (Gauge, 1=within SLO / 0=breached) —
+ *     the #3515 S5 P95 API latency SLO: the 95th percentile of
+ *     recorded API request durations vs the tenant's configured
+ *     max, evaluated when the SLO read endpoint asks.
+ *
+ * The API SLOs (#5425) ride the same recorder and the same
+ * metric+threshold shape, but their measurement differs from
+ * the resource SLO: there is no prober and no background job —
+ * uptime is measured from the recorder's own API request counts
+ * (parallel to evaluatePipelineHealth's run counts), and P95 is
+ * computed from a bounded in-memory sample of raw durations
+ * (the exported histogram series keep only sum/count/min/max,
+ * so P95 cannot be reconstructed from AE). The evaluation
+ * trigger is the SLO read endpoint (GET /api/otel/v1/slo) —
+ * evaluateAndRecordSlo is called by a real read path, never
+ * left dangling like the health evaluation was before S5.
+ * A threshold that is null (unconfigured) is not evaluated and
+ * claims nothing: its gauge is skipped, and the read reports
+ * "unconfigured". No observations yet reports "no-data".
+ * Recording never fails the request; evaluation never throws.
  *
  * Health and SLO are pure evaluators (unit-pinned) plus a
  * gauge that records the evaluation. The dashboard (S8)
@@ -102,6 +126,109 @@ export function evaluateResourceSlo(input: {
   return { withinSlo: pct < max, pct };
 }
 
+/** The API uptime evaluation (a metric + a config threshold). */
+export interface UptimeSloEvaluation {
+  /** Share of requests not failing (status < 500); null with no requests yet. */
+  uptime: number | null;
+  /** Null with no requests yet (no signal is not compliance). */
+  withinSlo: boolean | null;
+}
+
+/**
+ * The uptime SLO as a metric + a config threshold: the share of
+ * recorded API requests not failing vs the configured target
+ * ratio. The target is a FLOOR, so within SLO is `>=` (unlike
+ * the resource SLO's ceiling `<`): meeting the target counts.
+ * No requests yet is neither within nor breached (null verdict).
+ * An invalid target fails closed to never-within (any measured
+ * uptime is reported, but no compliance is claimed).
+ */
+export function evaluateUptimeSlo(input: {
+  total: number;
+  failed: number;
+  targetRatio: number;
+}): UptimeSloEvaluation {
+  if (input.total <= 0) return { uptime: null, withinSlo: null };
+  const uptime = (input.total - input.failed) / input.total;
+  const target = input.targetRatio;
+  if (!Number.isFinite(target) || target <= 0 || target > 1) {
+    return { uptime, withinSlo: false };
+  }
+  return { uptime, withinSlo: uptime >= target };
+}
+
+/** The API P95 latency evaluation (a metric + a config threshold). */
+export interface P95LatencySloEvaluation {
+  /** 95th percentile of the recorded durations (ms); null with no samples yet. */
+  p95Ms: number | null;
+  /** Null with no samples yet (no signal is not compliance). */
+  withinSlo: boolean | null;
+}
+
+/**
+ * Nearest-rank 95th percentile over raw durations (ms).
+ * Sorts a copy, takes the ceil(0.95 * n)-th value (1-based).
+ * Empty sample is null. The sample is the recorder's bounded
+ * in-memory window — P95 is computed from raw observations,
+ * never reconstructed from exported histogram aggregates.
+ */
+export function percentile95(samples: readonly number[]): number | null {
+  if (!samples || samples.length === 0) return null;
+  const sorted = [...samples].sort((a, b) => a - b);
+  const rank = Math.ceil(0.95 * sorted.length);
+  return sorted[Math.max(0, rank - 1)] ?? null;
+}
+
+/**
+ * The P95 latency SLO as a metric + a config threshold: the
+ * 95th percentile of recorded API request durations vs the
+ * configured max. The max is a CEILING, so within SLO is `<=`.
+ * No samples yet is neither within nor breached (null verdict).
+ * An invalid max fails closed to never-within.
+ */
+export function evaluateP95LatencySlo(input: {
+  samples: readonly number[];
+  maxMs: number;
+}): P95LatencySloEvaluation {
+  const p95Ms = percentile95(input.samples);
+  if (p95Ms === null) return { p95Ms: null, withinSlo: null };
+  const max = input.maxMs;
+  if (!Number.isFinite(max) || max <= 0) {
+    return { p95Ms, withinSlo: false };
+  }
+  return { p95Ms, withinSlo: p95Ms <= max };
+}
+
+/** The tenant's configured API SLO thresholds (null = unconfigured). */
+export interface ApiSloThresholds {
+  uptimeTargetRatio: number | null;
+  p95LatencyMaxMs: number | null;
+}
+
+/** The two API SLO evaluations, as the read endpoint reports them. */
+export interface ApiSloEvaluation {
+  uptime: { value: number | null; withinSlo: boolean | null; target: number | null };
+  p95Latency: { valueMs: number | null; withinSlo: boolean | null; targetMs: number | null };
+  totalRequests: number;
+  failedRequests: number;
+  latencySamples: number;
+}
+
+/** The API request counts the uptime evaluation reads. */
+export interface ApiRequestCounts {
+  total: number;
+  failed: number;
+  latencySamples: number;
+}
+
+/**
+ * The bounded latency sample for the P95: the oldest durations
+ * drop once the window is full, so one isolate's memory stays
+ * bounded however many requests it serves. Counts stay exact —
+ * only the percentile window is bounded.
+ */
+export const API_REQUEST_LATENCY_SAMPLE_CAP = 10_000;
+
 export interface OtelMetricsRecorderDeps {
   /** The OTel Meter (from the MeterProvider). */
   meter: Meter;
@@ -119,6 +246,20 @@ export interface OtelMetricsRecorder {
   recordQuotaCharge(charge: { userLogin: string; kind: string; tenantId: string }): void;
   recordResourceRollup(rows: readonly DailyRollupRow[]): void;
   evaluateAndRecordPipelineHealth(): PipelineHealthEvaluation;
+  /** Issue #5425 (#3515 S5): record one API request (status + duration) for the API SLOs. */
+  recordApiRequest(observation: { status: number; durationMs: number }): void;
+  /**
+   * Issue #5425 (#3515 S5): evaluate both API SLOs against the
+   * tenant's thresholds and record the gauges (1=within /
+   * 0=breached). A null threshold is not evaluated and its gauge
+   * is skipped. Called by the SLO read endpoint — the real
+   * evaluation trigger. Returns the evaluation.
+   */
+  evaluateAndRecordSlo(thresholds: ApiSloThresholds): ApiSloEvaluation;
+  /** The API request counts the uptime evaluation reads (for tests / the read path). */
+  apiRequestCounts(): ApiRequestCounts;
+  /** The last API SLO evaluation, or null before any evaluation. */
+  lastApiSlo(): ApiSloEvaluation | null;
   /** The run counts the health evaluation reads (for tests / the flush path). */
   runCounts(): OtelRunCounts;
   /** The last SLO evaluation, or null before any rollup was recorded. */
@@ -144,9 +285,19 @@ export function createOtelMetricsRecorder(deps: OtelMetricsRecorderDeps): OtelMe
   let opsGauge: Gauge | null = null;
   let healthGauge: Gauge | null = null;
   let sloGauge: Gauge | null = null;
+  let uptimeSloGauge: Gauge | null = null;
+  let p95LatencySloGauge: Gauge | null = null;
   let totalRuns = 0;
   let failedRuns = 0;
   let lastSloEvaluation: ResourceSloEvaluation | null = null;
+  // Issue #5425 (#3515 S5): the API SLO state — exact counts
+  // plus the bounded latency sample the P95 reads. Per-isolate,
+  // like the run counts above: each isolate evaluates the
+  // requests it served.
+  let totalApiRequests = 0;
+  let failedApiRequests = 0;
+  const apiLatencySamples: number[] = [];
+  let lastApiSloEvaluation: ApiSloEvaluation | null = null;
 
   const getRunsCounter = (): Counter | null => {
     if (runsCounter) return runsCounter;
@@ -255,6 +406,30 @@ export function createOtelMetricsRecorder(deps: OtelMetricsRecorderDeps): OtelMe
       sloGauge = null;
     }
     return sloGauge;
+  };
+  const getUptimeSloGauge = (): Gauge | null => {
+    if (uptimeSloGauge) return uptimeSloGauge;
+    try {
+      uptimeSloGauge = meter.createGauge("slo.api.uptime", {
+        description: "API uptime SLO (1=within SLO, 0=breached)",
+        unit: "1",
+      });
+    } catch {
+      uptimeSloGauge = null;
+    }
+    return uptimeSloGauge;
+  };
+  const getP95LatencySloGauge = (): Gauge | null => {
+    if (p95LatencySloGauge) return p95LatencySloGauge;
+    try {
+      p95LatencySloGauge = meter.createGauge("slo.api.p95_latency", {
+        description: "API P95 latency SLO (1=within SLO, 0=breached)",
+        unit: "1",
+      });
+    } catch {
+      p95LatencySloGauge = null;
+    }
+    return p95LatencySloGauge;
   };
 
   /** True only when the recording domain is ON (a gate throw is a no-op). */
@@ -368,12 +543,85 @@ export function createOtelMetricsRecorder(deps: OtelMetricsRecorderDeps): OtelMe
     return evaluation;
   };
 
+  const recordApiRequest = (observation: { status: number; durationMs: number }): void => {
+    try {
+      if (!enabled()) return;
+      totalApiRequests += 1;
+      if (observation.status >= 500) failedApiRequests += 1;
+      if (Number.isFinite(observation.durationMs)) {
+        apiLatencySamples.push(observation.durationMs);
+        while (apiLatencySamples.length > API_REQUEST_LATENCY_SAMPLE_CAP) {
+          apiLatencySamples.shift();
+        }
+      }
+    } catch {
+      // Best-effort: recording never fails the request.
+    }
+  };
+
+  const evaluateAndRecordSlo = (thresholds: ApiSloThresholds): ApiSloEvaluation => {
+    const uptimeValue =
+      totalApiRequests > 0 ? (totalApiRequests - failedApiRequests) / totalApiRequests : null;
+    const p95Value = percentile95(apiLatencySamples);
+    const uptimeEvaluation =
+      thresholds.uptimeTargetRatio === null
+        ? { uptime: uptimeValue, withinSlo: null as boolean | null }
+        : evaluateUptimeSlo({
+            total: totalApiRequests,
+            failed: failedApiRequests,
+            targetRatio: thresholds.uptimeTargetRatio,
+          });
+    const p95Evaluation =
+      thresholds.p95LatencyMaxMs === null
+        ? { p95Ms: p95Value, withinSlo: null as boolean | null }
+        : evaluateP95LatencySlo({ samples: apiLatencySamples, maxMs: thresholds.p95LatencyMaxMs });
+    const evaluation: ApiSloEvaluation = {
+      uptime: {
+        value: uptimeEvaluation.uptime,
+        withinSlo: uptimeEvaluation.withinSlo,
+        target: thresholds.uptimeTargetRatio,
+      },
+      p95Latency: {
+        valueMs: p95Evaluation.p95Ms,
+        withinSlo: p95Evaluation.withinSlo,
+        targetMs: thresholds.p95LatencyMaxMs,
+      },
+      totalRequests: totalApiRequests,
+      failedRequests: failedApiRequests,
+      latencySamples: apiLatencySamples.length,
+    };
+    lastApiSloEvaluation = evaluation;
+    try {
+      if (!enabled()) return evaluation;
+      // A null verdict (unconfigured threshold, or no signal
+      // yet) records no gauge: absence is first-class, never a
+      // fabricated 1 or 0.
+      if (evaluation.uptime.withinSlo !== null) {
+        getUptimeSloGauge()?.record(evaluation.uptime.withinSlo ? 1 : 0, {});
+      }
+      if (evaluation.p95Latency.withinSlo !== null) {
+        getP95LatencySloGauge()?.record(evaluation.p95Latency.withinSlo ? 1 : 0, {});
+      }
+    } catch {
+      // Best-effort: recording never fails the evaluation.
+    }
+    return evaluation;
+  };
+
   return {
     recordJobRunSettled,
     recordJobStageStep,
     recordQuotaCharge,
     recordResourceRollup,
     evaluateAndRecordPipelineHealth,
+    recordApiRequest,
+    evaluateAndRecordSlo,
+    apiRequestCounts: () => ({
+      total: totalApiRequests,
+      failed: failedApiRequests,
+      latencySamples: apiLatencySamples.length,
+    }),
+    lastApiSlo: () => lastApiSloEvaluation,
     runCounts: () => ({ total: totalRuns, failed: failedRuns }),
     lastSlo: () => lastSloEvaluation,
     flush: async () => {

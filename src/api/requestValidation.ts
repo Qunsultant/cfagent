@@ -201,6 +201,9 @@ export const tenantCreateBodySchema = z.object({
  * positive-integer bound and the non-empty checks stay in the route.
  * `turnStepTimeoutMs` (#5423, #3515 S4) must be a number when
  * present; its bounds (1000–600000 ms) stay in the route.
+ * `sloUptimeTargetRatio` / `sloP95LatencyMaxMs` (#5425, #3515 S5)
+ * must be numbers when present; their bounds (ratio in (0, 1],
+ * 1–600000 ms) stay in the route.
  */
 export const tenantSettingsBodySchema = z.object({
   adsEnabled: z.boolean().optional(),
@@ -211,6 +214,8 @@ export const tenantSettingsBodySchema = z.object({
     .object({ dataProviderId: z.string(), brokerId: z.string() })
     .optional(),
   turnStepTimeoutMs: z.number().optional(),
+  sloUptimeTargetRatio: z.number().optional(),
+  sloP95LatencyMaxMs: z.number().optional(),
 });
 
 /**

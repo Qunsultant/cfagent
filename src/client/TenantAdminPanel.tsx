@@ -141,6 +141,8 @@ export function TenantAdminPanel() {
     autoRefresh?: { enabled: boolean; intervalS: number };
     providers?: { dataProviderId: string; brokerId: string };
     turnStepTimeoutMs?: number;
+    sloUptimeTargetRatio?: number;
+    sloP95LatencyMaxMs?: number;
   }) => {
     if (!detail) return;
     setSaving(true);
@@ -200,6 +202,19 @@ export function TenantAdminPanel() {
               key: "stepTimeout",
               header: "Step timeout",
               render: (row) => (row.turnStepTimeoutMs === null ? "Unconfigured" : `${row.turnStepTimeoutMs} ms`),
+            },
+            {
+              key: "sloUptime",
+              header: "Uptime target",
+              render: (row) =>
+                row.sloUptimeTargetRatio === null
+                  ? "Unconfigured"
+                  : `${(row.sloUptimeTargetRatio * 100).toFixed(1)}%`,
+            },
+            {
+              key: "sloP95",
+              header: "P95 latency max",
+              render: (row) => (row.sloP95LatencyMaxMs === null ? "Unconfigured" : `${row.sloP95LatencyMaxMs} ms`),
             },
             {
               key: "open",
@@ -302,6 +317,42 @@ export function TenantAdminPanel() {
                 void handleSaveSettings({ turnStepTimeoutMs: timeoutMs });
               } else {
                 setFormError("Turn step timeout must be between 1000 and 600000 milliseconds.");
+              }
+            }}
+          />
+          <TextInput
+            label="Uptime target (ratio)"
+            type="number"
+            hint="Uptime target for the API uptime SLO (issue 5425). Greater than 0 and at most 1 — e.g. 0.999 is 99.9% uptime. Blank means unconfigured — the SLO reports unconfigured and claims no compliance."
+            value={detail.sloUptimeTargetRatio === null ? "" : String(detail.sloUptimeTargetRatio)}
+            disabled={saving}
+            onBlur={(e) => {
+              const raw = e.currentTarget.value.trim();
+              if (raw === "") return;
+              const targetRatio = Number.parseFloat(raw);
+              if (Number.isFinite(targetRatio) && targetRatio > 0 && targetRatio <= 1) {
+                setFormError("");
+                void handleSaveSettings({ sloUptimeTargetRatio: targetRatio });
+              } else {
+                setFormError("Uptime target must be greater than 0 and at most 1.");
+              }
+            }}
+          />
+          <TextInput
+            label="P95 latency max (milliseconds)"
+            type="number"
+            hint="P95 API latency max for the P95 latency SLO (issue 5425). 1–600000 ms. Blank means unconfigured — the SLO reports unconfigured and claims no compliance."
+            value={detail.sloP95LatencyMaxMs === null ? "" : String(detail.sloP95LatencyMaxMs)}
+            disabled={saving}
+            onBlur={(e) => {
+              const raw = e.currentTarget.value.trim();
+              if (raw === "") return;
+              const maxMs = Number.parseInt(raw, 10);
+              if (Number.isInteger(maxMs) && maxMs >= 1 && maxMs <= 600000) {
+                setFormError("");
+                void handleSaveSettings({ sloP95LatencyMaxMs: maxMs });
+              } else {
+                setFormError("P95 latency max must be between 1 and 600000 milliseconds.");
               }
             }}
           />

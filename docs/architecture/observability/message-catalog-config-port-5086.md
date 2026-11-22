@@ -23,7 +23,7 @@ could only change with a redeploy; the runtime flip
 ## Decision
 
 **One message catalog** (`src/observability/otelMessages.ts`,
-`OBS_CATALOG`): 23 codes, OBS-1001..OBS-1023, each with a
+`OBS_CATALOG`): 25 codes, OBS-1001..OBS-1025, each with a
 human-readable template and a default severity
 (info | warning | error | critical). Codes are stable across
 releases and never reused for a different meaning. The catalog
@@ -35,7 +35,8 @@ passing. The pre-existing codes are absorbed unchanged
 OBS-1014..1019; S6 OBS-1020; archive OBS-1008..1011); S7 adds
 OBS-1021 (unknown alert rule, rejected) and OBS-1022 (config
 forbidden); #6112 adds OBS-1023 (audit-chain append failed,
-named instead of vanishing silently). Per-code severity overrides ride the config port
+named instead of vanishing silently); S5 (#5425) adds OBS-1024
+(SLO forbidden) and OBS-1025 (SLO unavailable). Per-code severity overrides ride the config port
 (`catalog.<OBS-code>.severity`), generated from the catalog
 itself — adding a code automatically makes its severity
 overridable.

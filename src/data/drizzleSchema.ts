@@ -364,6 +364,16 @@ export const agentTenantSettings = sqliteTable("agent_tenant_settings", {
    * (the adapter applies none); migration 0078.
    */
   turnStepTimeoutMs: integer("turn_step_timeout_ms"),
+  /**
+   * Issue #5425 (#3515 S5): the #3515 SLO thresholds for this
+   * tenant. Nullable: absent row / null = UNCONFIGURED — the
+   * SLO reports "unconfigured" and claims no compliance instead
+   * of evaluating against an invented number. No code default
+   * lives here (the adapter applies none); migration 0079.
+   */
+  sloUptimeTargetRatio: real("slo_uptime_target_ratio"),
+  /** Issue #5425 (#3515 S5): P95 API latency max, in milliseconds. Nullable, migration 0079. */
+  sloP95LatencyMaxMs: integer("slo_p95_latency_max_ms"),
 });
 
 /**

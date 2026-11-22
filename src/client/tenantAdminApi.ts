@@ -43,6 +43,19 @@ export interface TenantSettingsView {
    * The server always returns the field (null when unconfigured).
    */
   turnStepTimeoutMs: number | null;
+  /**
+   * Issue #5425 (#3515 S5): uptime target ratio for the API
+   * uptime SLO. Null = UNCONFIGURED — the SLO reports
+   * "unconfigured" and claims no compliance. The server always
+   * returns the field (null when unconfigured).
+   */
+  sloUptimeTargetRatio: number | null;
+  /**
+   * Issue #5425 (#3515 S5): P95 API latency max, in
+   * milliseconds. Null = UNCONFIGURED. The server always returns
+   * the field (null when unconfigured).
+   */
+  sloP95LatencyMaxMs: number | null;
 }
 
 export interface TenantListRow extends TenantSettingsView {
@@ -75,7 +88,9 @@ function isSettings(value: unknown): value is TenantSettingsView {
     typeof value.autoRefreshIntervalS === "number" &&
     typeof value.dataProviderId === "string" &&
     typeof value.brokerId === "string" &&
-    (value.turnStepTimeoutMs === null || typeof value.turnStepTimeoutMs === "number")
+    (value.turnStepTimeoutMs === null || typeof value.turnStepTimeoutMs === "number") &&
+    (value.sloUptimeTargetRatio === null || typeof value.sloUptimeTargetRatio === "number") &&
+    (value.sloP95LatencyMaxMs === null || typeof value.sloP95LatencyMaxMs === "number")
   );
 }
 
@@ -120,6 +135,10 @@ export interface TenantSettingsPatch {
   providers?: { dataProviderId: string; brokerId: string };
   /** Issue #5423 (#3515 S4): per-step timeout for the MAS turn loop, in milliseconds (1000–600000). */
   turnStepTimeoutMs?: number;
+  /** Issue #5425 (#3515 S5): uptime target ratio for the API uptime SLO (greater than 0, at most 1). */
+  sloUptimeTargetRatio?: number;
+  /** Issue #5425 (#3515 S5): P95 API latency max, in milliseconds (1–600000). */
+  sloP95LatencyMaxMs?: number;
 }
 
 export async function updateTenantSettings(

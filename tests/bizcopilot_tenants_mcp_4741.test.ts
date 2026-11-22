@@ -60,6 +60,9 @@ function settingsRow(tenantId: string, overrides: Partial<TenantSettingsRecord> 
     brokerId: "etrade",
     // Issue #5423: per-step timeout, null = unconfigured (same as the adapters' fresh row).
     turnStepTimeoutMs: null,
+    // Issue #5425: SLO thresholds, null = unconfigured (same as the adapters' fresh row).
+    sloUptimeTargetRatio: null,
+    sloP95LatencyMaxMs: null,
     ...overrides,
   };
 }
@@ -124,6 +127,24 @@ function makeWorld() {
     setTenantTurnStepTimeoutMs: async (tenantId: string, timeoutMs: number) => {
       const row = settings.get(tenantId) ?? settingsRow(tenantId);
       row.turnStepTimeoutMs = timeoutMs;
+      settings.set(tenantId, row);
+      return row;
+    },
+    // Issue #5425: SLO thresholds (null = unconfigured — the
+    // route's readSettings calls the getters on every read).
+    getTenantSloUptimeTargetRatio: async (tenantId: string) =>
+      settings.get(tenantId)?.sloUptimeTargetRatio ?? null,
+    setTenantSloUptimeTargetRatio: async (tenantId: string, ratio: number) => {
+      const row = settings.get(tenantId) ?? settingsRow(tenantId);
+      row.sloUptimeTargetRatio = ratio;
+      settings.set(tenantId, row);
+      return row;
+    },
+    getTenantSloP95LatencyMaxMs: async (tenantId: string) =>
+      settings.get(tenantId)?.sloP95LatencyMaxMs ?? null,
+    setTenantSloP95LatencyMaxMs: async (tenantId: string, maxMs: number) => {
+      const row = settings.get(tenantId) ?? settingsRow(tenantId);
+      row.sloP95LatencyMaxMs = maxMs;
       settings.set(tenantId, row);
       return row;
     },

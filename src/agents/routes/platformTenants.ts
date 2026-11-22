@@ -10,7 +10,7 @@
  *   GET    /platform-tenants                  list tenants + settings + member counts
  *   POST   /platform-tenants                  create a tenant (settings row with store defaults)
  *   GET    /platform-tenants/:id              detail: settings + account-row members
- *   PATCH  /platform-tenants/:id/settings     update tenant settings (ads, auto-refresh, providers, turn step timeout)
+ *   PATCH  /platform-tenants/:id/settings     update tenant settings (ads, auto-refresh, providers, turn step timeout, SLO thresholds)
  *
  * (Paths are the DO-internal spellings: src/server.ts strips the
  * /api prefix when forwarding, so externally these are
@@ -94,6 +94,10 @@ import {
 import { createStructuredLogger } from "../../observability/structuredLogger";
 import { createObservabilitySink } from "../../observability/createObservabilityPorts";
 import { parseTurnStepTimeoutMs } from "../../config/turnStepTimeout";
+import {
+  parseSloP95LatencyMaxMs,
+  parseSloUptimeTargetRatio,
+} from "../../config/sloThresholds";
 
 /** Issue #5606 (G-3) — module logger on the structured-logging seam. */
 const structuredLog = createStructuredLogger(createObservabilitySink({}), {
@@ -132,6 +136,10 @@ interface TenantSettingsView {
   brokerId: string;
   /** Issue #5423 (#3515 S4): per-step timeout (ms); null = unconfigured. Mirrors the client view in tenantAdminApi.ts. */
   turnStepTimeoutMs: number | null;
+  /** Issue #5425 (#3515 S5): uptime target ratio; null = unconfigured. Mirrors the client view in tenantAdminApi.ts. */
+  sloUptimeTargetRatio: number | null;
+  /** Issue #5425 (#3515 S5): P95 API latency max (ms); null = unconfigured. Mirrors the client view in tenantAdminApi.ts. */
+  sloP95LatencyMaxMs: number | null;
 }
 
 /**
@@ -211,6 +219,8 @@ function settingsView(
   autoRefresh: { enabled: boolean; intervalS: number },
   providers: { dataProviderId: string; brokerId: string },
   turnStepTimeoutMs: number | null,
+  sloUptimeTargetRatio: number | null,
+  sloP95LatencyMaxMs: number | null,
 ): TenantSettingsView {
   return {
     tenantId,
@@ -220,6 +230,8 @@ function settingsView(
     dataProviderId: providers.dataProviderId,
     brokerId: providers.brokerId,
     turnStepTimeoutMs,
+    sloUptimeTargetRatio,
+    sloP95LatencyMaxMs,
   };
 }
 
@@ -231,7 +243,17 @@ async function readSettings(
   const autoRefresh = await commercial.getTenantAutoRefresh(tenantId);
   const providers = await commercial.getTenantProviders(tenantId);
   const turnStepTimeoutMs = await commercial.getTenantTurnStepTimeoutMs(tenantId);
-  return settingsView(tenantId, adsEnabled, autoRefresh, providers, turnStepTimeoutMs);
+  const sloUptimeTargetRatio = await commercial.getTenantSloUptimeTargetRatio(tenantId);
+  const sloP95LatencyMaxMs = await commercial.getTenantSloP95LatencyMaxMs(tenantId);
+  return settingsView(
+    tenantId,
+    adsEnabled,
+    autoRefresh,
+    providers,
+    turnStepTimeoutMs,
+    sloUptimeTargetRatio,
+    sloP95LatencyMaxMs,
+  );
 }
 
 function auditBestEffort(
@@ -407,6 +429,8 @@ export async function handlePlatformTenantRoutes(
             { enabled: settings.autoRefreshEnabled, intervalS: settings.autoRefreshIntervalS },
             { dataProviderId: settings.dataProviderId, brokerId: settings.brokerId },
             settings.turnStepTimeoutMs,
+            settings.sloUptimeTargetRatio,
+            settings.sloP95LatencyMaxMs,
           ),
           creationMode: TENANT_CREATION_MODE,
         },
@@ -491,9 +515,15 @@ export async function handlePlatformTenantRoutes(
         if (field === "turnStepTimeoutMs") {
           return requestInvalidResponse("turnStepTimeoutMs must be a number.");
         }
+        if (field === "sloUptimeTargetRatio") {
+          return requestInvalidResponse("sloUptimeTargetRatio must be a number.");
+        }
+        if (field === "sloP95LatencyMaxMs") {
+          return requestInvalidResponse("sloP95LatencyMaxMs must be a number.");
+        }
         return requestInvalidResponse("No settings field supplied.");
       }
-      // Issue #5605 (G-2): the PATCH's up-to-four settings
+      // Issue #5605 (G-2): the PATCH's up-to-six settings
       // writes run as ONE D1 batch unit when AGENT_DB is bound —
       // the setters buffer their upserts into the ambient unit
       // the runner opens. Without a binding (a test-seam store)
@@ -542,6 +572,32 @@ export async function handlePlatformTenantRoutes(
             return requestInvalidResponse(err instanceof Error ? err.message : "turnStepTimeoutMs is invalid.");
           }
           await commercial.setTenantTurnStepTimeoutMs(tenantId, timeoutMs);
+          applied = true;
+        }
+        if (body["sloUptimeTargetRatio"] !== undefined) {
+          // #5425 (#3515 S5): the bounds live in the config
+          // module (parseSloUptimeTargetRatio) — a value outside
+          // (0, 1] is a 400 with the bound in the message.
+          let targetRatio: number;
+          try {
+            targetRatio = parseSloUptimeTargetRatio(body["sloUptimeTargetRatio"]);
+          } catch (err) {
+            return requestInvalidResponse(err instanceof Error ? err.message : "sloUptimeTargetRatio is invalid.");
+          }
+          await commercial.setTenantSloUptimeTargetRatio(tenantId, targetRatio);
+          applied = true;
+        }
+        if (body["sloP95LatencyMaxMs"] !== undefined) {
+          // #5425 (#3515 S5): the bounds live in the config
+          // module (parseSloP95LatencyMaxMs) — a value outside
+          // 1–600000 ms is a 400 with the bound in the message.
+          let maxMs: number;
+          try {
+            maxMs = parseSloP95LatencyMaxMs(body["sloP95LatencyMaxMs"]);
+          } catch (err) {
+            return requestInvalidResponse(err instanceof Error ? err.message : "sloP95LatencyMaxMs is invalid.");
+          }
+          await commercial.setTenantSloP95LatencyMaxMs(tenantId, maxMs);
           applied = true;
         }
         if (!applied) return requestInvalidResponse("No settings field supplied.");

@@ -45,6 +45,8 @@ const TENANTS = {
       dataProviderId: "etrade",
       brokerId: "etrade",
       turnStepTimeoutMs: null,
+      sloUptimeTargetRatio: null,
+      sloP95LatencyMaxMs: null,
       memberCount: 2,
     },
   ],

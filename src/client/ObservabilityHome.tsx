@@ -7,7 +7,9 @@
  * archive (OtelArchivePanel) — the R2 archive file browser,
  * the interim view until the S8 dashboard (#5087) lands — and
  * config (OtelConfigPanel, S7 #5086) — the message catalog +
- * runtime config port.
+ * runtime config port — and slo (SloPanel, S5 #5425) — the two
+ * #3515 SLOs (uptime, P95 API latency) as health states against
+ * the tenant's configured thresholds.
  *
  * View state follows the URL (`?view=`), the same pattern as
  * PlatformAdminPage, SchedulesHome, and SecurityHubHome: the
@@ -17,9 +19,10 @@
  * views unmount (TabPanel default).
  */
 import { useEffect, useState } from "react";
-import { Card, PageShell, Tabs, TabPanel, type TabOption } from "./components/ui";
+import { Card, CardHeader, PageShell, Tabs, TabPanel, type TabOption } from "./components/ui";
 import { OtelArchivePanel } from "./OtelArchivePanel";
 import { OtelConfigPanel } from "./OtelConfigPanel";
+import { SloPanel } from "./SloPanel";
 import { navigateToTab, subscribeToRouteChanges } from "./router";
 import {
   OBSERVABILITY_VIEW_LABELS,
@@ -38,7 +41,7 @@ export function ObservabilityHome() {
   const [deepLink, setDeepLink] = useState<ObservabilityDeepLink>(() =>
     typeof window !== "undefined"
       ? parseObservabilityDeepLink(window.location.search)
-      : { view: "archive" },
+      : { view: "archive", tenantId: "primary" },
   );
 
   useEffect(() => {
@@ -85,6 +88,16 @@ export function ObservabilityHome() {
             <small>Message catalog + runtime config — no redeploy</small>
           </div>
           <OtelConfigPanel />
+        </Card>
+      </TabPanel>
+
+      <TabPanel idBase="observability" tabId="slo" active={deepLink.view === "slo"}>
+        <Card>
+          <CardHeader
+            title="SLOs"
+            subtitle="Uptime + P95 API latency vs the tenant's thresholds"
+          />
+          <SloPanel tenantId={deepLink.tenantId} />
         </Card>
       </TabPanel>
     </PageShell>

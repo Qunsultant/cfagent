@@ -86,11 +86,13 @@ describe("recreate + tenant isolation (#4282 P4)", () => {
   // mirror table + 2 indexes): 444 → 447.
   // Issue #5423 adds migration 0078 (agent_tenant_settings
   // turn_step_timeout_ms column): 447 → 448.
-    expect(first.summary.totalSteps).toBe(448);
-    expect(first.summary.executed).toBe(448);
+  // Issue #5425 adds migration 0079 (agent_tenant_settings
+  // SLO threshold columns): 448 → 450.
+    expect(first.summary.totalSteps).toBe(450);
+    expect(first.summary.executed).toBe(450);
     expect(first.summary.failed).toBe(0);
     expect(first.summary.skipped).toBe(0);
-    expect(first.executed).toHaveLength(448);
+    expect(first.executed).toHaveLength(450);
     expect(first.failed).toEqual([]);
     expect(first.skipped).toEqual([]);
     // Uncreatable layers are deployment facts, not changes: they are
@@ -228,8 +230,8 @@ describe("recreate + tenant isolation (#4282 P4)", () => {
       partial.summary.executed +
         partial.summary.failed +
         partial.summary.skipped,
-    ).toBe(448);
-    expect(partial.summary.totalSteps).toBe(448);
+    ).toBe(450);
+    expect(partial.summary.totalSteps).toBe(450);
     // The degradation is VISIBLE, never silent: the post-run equality
     // check fails. The missing indexes are exactly the failed step's
     // index plus the indexes of the skipped steps (the run stopped in

@@ -136,6 +136,8 @@ export class InMemoryCommercialAdapter implements CommercialStore {
       dataProviderId: existing?.dataProviderId ?? DEFAULT_TENANT_PROVIDERS.dataProviderId,
       brokerId: existing?.brokerId ?? DEFAULT_TENANT_PROVIDERS.brokerId,
       turnStepTimeoutMs: existing?.turnStepTimeoutMs ?? null,
+      sloUptimeTargetRatio: existing?.sloUptimeTargetRatio ?? null,
+      sloP95LatencyMaxMs: existing?.sloP95LatencyMaxMs ?? null,
     };
     this.tenantSettings.set(tenantId, record);
     return record;
@@ -165,6 +167,8 @@ export class InMemoryCommercialAdapter implements CommercialStore {
       dataProviderId: existing?.dataProviderId ?? DEFAULT_TENANT_PROVIDERS.dataProviderId,
       brokerId: existing?.brokerId ?? DEFAULT_TENANT_PROVIDERS.brokerId,
       turnStepTimeoutMs: existing?.turnStepTimeoutMs ?? null,
+      sloUptimeTargetRatio: existing?.sloUptimeTargetRatio ?? null,
+      sloP95LatencyMaxMs: existing?.sloP95LatencyMaxMs ?? null,
     };
     this.tenantSettings.set(tenantId, record);
     return record;
@@ -203,6 +207,8 @@ export class InMemoryCommercialAdapter implements CommercialStore {
       dataProviderId: providers.dataProviderId,
       brokerId: providers.brokerId,
       turnStepTimeoutMs: existing?.turnStepTimeoutMs ?? null,
+      sloUptimeTargetRatio: existing?.sloUptimeTargetRatio ?? null,
+      sloP95LatencyMaxMs: existing?.sloP95LatencyMaxMs ?? null,
     };
     this.tenantSettings.set(tenantId, record);
     return record;
@@ -226,6 +232,64 @@ export class InMemoryCommercialAdapter implements CommercialStore {
       dataProviderId: existing?.dataProviderId ?? DEFAULT_TENANT_PROVIDERS.dataProviderId,
       brokerId: existing?.brokerId ?? DEFAULT_TENANT_PROVIDERS.brokerId,
       turnStepTimeoutMs: timeoutMs,
+      sloUptimeTargetRatio: existing?.sloUptimeTargetRatio ?? null,
+      sloP95LatencyMaxMs: existing?.sloP95LatencyMaxMs ?? null,
+    };
+    this.tenantSettings.set(tenantId, record);
+    return record;
+  }
+
+  /** Issue #5425 (#3515 S5) — the stored uptime target ratio, or null when unconfigured (NO default applied). */
+  async getTenantSloUptimeTargetRatio(tenantId: string): Promise<number | null> {
+    const existing = this.tenantSettings.get(tenantId);
+    return existing?.sloUptimeTargetRatio ?? null;
+  }
+
+  /** Issue #5425 (#3515 S5) — store the tenant's uptime target ratio; the other halves of the shared row are preserved. */
+  async setTenantSloUptimeTargetRatio(
+    tenantId: string,
+    targetRatio: number,
+  ): Promise<TenantSettingsRecord> {
+    const existing = this.tenantSettings.get(tenantId);
+    const record: TenantSettingsRecord = {
+      tenantId,
+      adsEnabled: existing?.adsEnabled ?? true,
+      updatedAtMs: Date.now(),
+      autoRefreshEnabled: existing?.autoRefreshEnabled ?? DEFAULT_TENANT_AUTO_REFRESH.enabled,
+      autoRefreshIntervalS: existing?.autoRefreshIntervalS ?? DEFAULT_TENANT_AUTO_REFRESH.intervalS,
+      dataProviderId: existing?.dataProviderId ?? DEFAULT_TENANT_PROVIDERS.dataProviderId,
+      brokerId: existing?.brokerId ?? DEFAULT_TENANT_PROVIDERS.brokerId,
+      turnStepTimeoutMs: existing?.turnStepTimeoutMs ?? null,
+      sloUptimeTargetRatio: targetRatio,
+      sloP95LatencyMaxMs: existing?.sloP95LatencyMaxMs ?? null,
+    };
+    this.tenantSettings.set(tenantId, record);
+    return record;
+  }
+
+  /** Issue #5425 (#3515 S5) — the stored P95 latency max (ms), or null when unconfigured (NO default applied). */
+  async getTenantSloP95LatencyMaxMs(tenantId: string): Promise<number | null> {
+    const existing = this.tenantSettings.get(tenantId);
+    return existing?.sloP95LatencyMaxMs ?? null;
+  }
+
+  /** Issue #5425 (#3515 S5) — store the tenant's P95 latency max (ms); the other halves of the shared row are preserved. */
+  async setTenantSloP95LatencyMaxMs(
+    tenantId: string,
+    maxMs: number,
+  ): Promise<TenantSettingsRecord> {
+    const existing = this.tenantSettings.get(tenantId);
+    const record: TenantSettingsRecord = {
+      tenantId,
+      adsEnabled: existing?.adsEnabled ?? true,
+      updatedAtMs: Date.now(),
+      autoRefreshEnabled: existing?.autoRefreshEnabled ?? DEFAULT_TENANT_AUTO_REFRESH.enabled,
+      autoRefreshIntervalS: existing?.autoRefreshIntervalS ?? DEFAULT_TENANT_AUTO_REFRESH.intervalS,
+      dataProviderId: existing?.dataProviderId ?? DEFAULT_TENANT_PROVIDERS.dataProviderId,
+      brokerId: existing?.brokerId ?? DEFAULT_TENANT_PROVIDERS.brokerId,
+      turnStepTimeoutMs: existing?.turnStepTimeoutMs ?? null,
+      sloUptimeTargetRatio: existing?.sloUptimeTargetRatio ?? null,
+      sloP95LatencyMaxMs: maxMs,
     };
     this.tenantSettings.set(tenantId, record);
     return record;

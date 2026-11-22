@@ -47,6 +47,8 @@ describe("tenantAdminApi request bound (#4513)", () => {
             dataProviderId: "etrade",
             brokerId: "etrade",
             turnStepTimeoutMs: null,
+            sloUptimeTargetRatio: null,
+            sloP95LatencyMaxMs: null,
           },
         },
         { status: 201 },

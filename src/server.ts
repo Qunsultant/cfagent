@@ -55,9 +55,11 @@ import { handlePlatformTelemetryRoutes, handlePlatformRetrievalRoutes, handlePla
 import { handleOtelRoutes } from "./server/routes/otel";
 import { handleOtelArchiveRoutes } from "./server/routes/otelArchive";
 import { handleOtelConfigRoutes } from "./server/routes/otelConfig";
+import { handleSloRoutes } from "./server/routes/otelSlo";
 import { handleScheduledEvent, handleQueueBatch } from "./server/routes/queue";
 import { createStructuredLogger } from "./observability/structuredLogger";
 import { createObservabilitySink } from "./observability/createObservabilityPorts";
+import { recordServerApiRequest } from "./observability/serverMetrics";
 
 /** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
 const structuredLog = createStructuredLogger(createObservabilitySink({}), {
@@ -199,6 +201,12 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
     // audited, fail-closed.
     const otelConfigResponse = await handleOtelConfigRoutes(request, env, url, path);
     if (otelConfigResponse) return otelConfigResponse;
+    // Issue #5425 (#3515 S5): the SLO read route (GET
+    // /api/otel/v1/slo) — the evaluation trigger for the API
+    // SLOs. Authenticated + platform-admin gated, audited,
+    // fail-closed (the OTel archive/config read precedent).
+    const sloResponse = await handleSloRoutes(request, env, url, path);
+    if (sloResponse) return sloResponse;
     // Slice 4 (#2902): audit/reports moved to src/server/routes/privacy.ts —
     // /api/audit/history, /api/reports/list, /api/reports/seed-canonical.
     const privacyReportsResponse = await handlePrivacyReportsRoutes(request, env, url, path);
@@ -315,7 +323,13 @@ export default {
   // request, stream one http.request event. Purely
   // observational — the response passes through unchanged,
   // and the error boundary still converts throws to 5xx.
-  fetch: withRequestObservability(withErrorBoundary(handleFetch)),
+  // Issue #5425 (#3515 S5): every observed request is also
+  // recorded into the server metrics handle (status +
+  // duration), so the API SLOs measure the requests this
+  // isolate served. Best-effort: recording never fails a request.
+  fetch: withRequestObservability(withErrorBoundary(handleFetch), {
+    onRequestObserved: (observation, env) => recordServerApiRequest(env as Env, observation),
+  }),
   async email(message: any, env: Env, ctx?: any): Promise<void> {
     // Issue #3490 (S2, epic #3488): agent-addressed mail
     // (`<agent-kebab>+<instance>@<domain>`, a bound agent

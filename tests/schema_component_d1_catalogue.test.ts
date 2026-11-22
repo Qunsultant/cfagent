@@ -144,6 +144,7 @@ const D1_MIGRATION_SQL_SHA256: Record<number, string> = {
   74: "7b53a58d4917e8118af27ed53ff5611a9b6846b69499959de5c61b5fa9c51c18",
   77: "9ab9c8a81b2937bdc4ed9caf68f70951803baed677a1c35f4a29fa7da5c50096",
   78: "b21108871d584314ec5b14ddfdcb0381e80085583ffefa24364590f39c7defd5",
+  79: "058ac5fa01d81432149e2c7a084b68cf4a42d2411baf141c624a899bb1ddc8d5",
 };
 
 /** Per-version statement counts, measured from the base runner. */
@@ -226,6 +227,7 @@ const D1_MIGRATION_STATEMENT_COUNTS: Record<number, number> = {
   74: 2,
   77: 3,
   78: 1,
+  79: 2,
 };
 
 /** The 11 seed-DML statements, exact text, measured from the base runner. */
@@ -266,7 +268,7 @@ function expectedD1Model(): SchemaModel {
 }
 
 describe("D1 catalogue — migrationRunner delegates (#4282 P1)", () => {
-  it("catalogues all 238 runner statements: 226 schema + 12 seed", () => {
+  it("catalogues all 240 runner statements: 228 schema + 12 seed", () => {
     const catalogue = buildD1Catalogue();
     // #5086 adds migration 0070 (otel_config_overrides table): 224 → 225.
     // #4767 adds migrations 0071/0072 (4 D1 ALTERs): 225 → 229.
@@ -274,9 +276,10 @@ describe("D1 catalogue — migrationRunner delegates (#4282 P1)", () => {
     // #5865 adds migration 0074 (definition history: table + backfill): 230 → 232.
     // #3185 bridge adds migration 0077 (agent_usage_events mirror: table + 2 indexes): 234 → 237.
     // #5423 adds migration 0078 (agent_tenant_settings turn_step_timeout_ms column): 237 → 238.
-    expect(D1_CATALOGUE_ENTRIES.length).toBe(238);
-    expect(catalogue.size()).toBe(238);
-    expect(catalogue.byKind("schema").length).toBe(226);
+    // #5425 adds migration 0079 (agent_tenant_settings SLO threshold columns): 238 → 240.
+    expect(D1_CATALOGUE_ENTRIES.length).toBe(240);
+    expect(catalogue.size()).toBe(240);
+    expect(catalogue.byKind("schema").length).toBe(228);
     expect(catalogue.byKind("seed").length).toBe(12);
     const verbs = new Map<string, number>();
     const classify = (statement: string): string => {
@@ -304,7 +307,7 @@ describe("D1 catalogue — migrationRunner delegates (#4282 P1)", () => {
     expect(verbs.get("CREATE TABLE")).toBe(104);
     expect(verbs.get("CREATE INDEX")).toBe(55);
     expect(verbs.get("CREATE UNIQUE INDEX")).toBe(7);
-    expect(verbs.get("ALTER TABLE")).toBe(59);
+    expect(verbs.get("ALTER TABLE")).toBe(61);
     expect(verbs.get("DROP TABLE")).toBe(1);
     expect(verbs.get("INSERT OR IGNORE")).toBe(8);
     expect(verbs.get("INSERT INTO")).toBe(1);
@@ -316,7 +319,7 @@ describe("D1 catalogue — migrationRunner delegates (#4282 P1)", () => {
       .map(Number)
       .sort((a, b) => a - b);
     expect(versions).toEqual(
-      Array.from({ length: 78 }, (_, i) => i + 1),
+      Array.from({ length: 79 }, (_, i) => i + 1),
     );
     const allCodes = new Set<string>();
     for (const version of versions) {

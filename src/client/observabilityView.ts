@@ -14,6 +14,12 @@
  *   config port (`OtelConfigPanel`) — every overridable key
  *   with its effective value and winning source, editable by a
  *   platform admin (each change versioned + audited).
+ * - `view=slo` (S5, #5425): SLO compliance (`SloPanel`) — the
+ *   two #3515 SLOs (uptime, P95 API latency) evaluated against
+ *   the tenant's configured thresholds, reported as health
+ *   states. `?tenantId=` names the tenant (default "primary");
+ *   thresholds are configured per tenant in the tenant admin
+ *   panel, never here.
  *
  * This module is pure: URLSearchParams in, values out. No
  * window, no fetch, no Cloudflare — the same hexagonal shape as
@@ -25,13 +31,14 @@
 export const OBSERVABILITY_TAB = "observability";
 
 /** The consolidated home's views. */
-export type ObservabilityView = "archive" | "config";
+export type ObservabilityView = "archive" | "config" | "slo";
 
-export const OBSERVABILITY_VIEWS: readonly ObservabilityView[] = ["archive", "config"];
+export const OBSERVABILITY_VIEWS: readonly ObservabilityView[] = ["archive", "config", "slo"];
 
 export const OBSERVABILITY_VIEW_LABELS: Record<ObservabilityView, string> = {
   archive: "Archive",
   config: "Config",
+  slo: "SLOs",
 };
 
 export function isObservabilityView(value: unknown): value is ObservabilityView {
@@ -49,12 +56,16 @@ export function normalizeObservabilityView(value: unknown): ObservabilityView {
 
 export interface ObservabilityDeepLink {
   view: ObservabilityView;
+  /** The tenant the SLO view reads (default "primary"). Archive/config ignore it. */
+  tenantId: string;
 }
 
 /** Parse the home's deep link out of a query string. */
 export function parseObservabilityDeepLink(search: string): ObservabilityDeepLink {
   const params = new URLSearchParams(search);
+  const tenantId = params.get("tenantId")?.trim();
   return {
     view: normalizeObservabilityView(params.get("view")),
+    tenantId: tenantId ? tenantId : "primary",
   };
 }
