@@ -32,7 +32,7 @@ import type { OrchestratorAgent } from "../agents/orchestrator";
 import { SHARED_ORCHESTRATOR_INSTANCE } from "../security/serviceIdentity";
 import { screenerOutcomeFromRunResult } from "../services/screenerFollowups";
 import type { ScreenerRunOutcome } from "../services/screenerFollowups";
-import type { AsyncJobChannel, Env, StageChainConfig } from "../types";
+import type { AsyncJobChannel, Env, ScreenedStockItem, StageChainConfig, StockScreenResult } from "../types";
 import type { JobPipelineStores, JobNodeConfig } from "../data/jobPipelinePorts";
 import { normalizeJobRunTrigger } from "../data/jobRunRecordPorts";
 import type { JobPipelineControl } from "./jobPipelineEngine";
@@ -94,6 +94,9 @@ import {
   type ScreenerTask,
 } from "./screenerTaskLedger";
 import { createD1ScreenerTaskStore } from "../data/d1ScreenerTaskStoreAdapter";
+import type { AnalyzedDatasetArtifact } from "../data/analyzedDatasetPorts";
+import { createAnalyzedDatasetPorts } from "../data/createAnalyzedDatasetPorts";
+import { defaultUniverseId } from "../config/defaultUniverse";
 import type { GoalScreenArtifactOutcome } from "./goalScreenReports";
 
 /** The step names a screener job's configuration references. */
@@ -260,6 +263,17 @@ export interface ScreenerStepDeps {
   goalTaskLedgerFor?: () => ScreenerTaskLedger;
   goalQuotaCharge?: (input: { userLogin: string; runId: string }) => Promise<void>;
   goalStockLeg?: (input: GoalStockLegInput) => Promise<ScreeningResult>;
+  /**
+   * Issue #6073 — the goal stock leg's analyzed-artifact reader:
+   * the analyzed dataset the generic chain persisted for the
+   * leg's analyze job. Absent = the leg refuses by name
+   * (GOAL_STOCK_LEG_NO_ANALYZED_STORE), never a silent
+   * fallthrough to the nested dispatch. Bound in the host
+   * factories from createAnalyzedDatasetPorts(env).
+   */
+  goalStockLegAnalyzedFor?: (
+    analyzeJobId: string,
+  ) => Promise<AnalyzedDatasetArtifact | undefined>;
   goalOptionsLeg?: (input: GoalOptionsLegInput) => Promise<ScreeningResult>;
   goalArtifacts?: (result: GoalDrivenScreenResult) => Promise<GoalScreenArtifactOutcome>;
 }
@@ -530,6 +544,252 @@ function requireGoalTaskLedger(deps: ScreenerStepDeps): ScreenerTaskLedger {
   return deps.goalTaskLedgerFor();
 }
 
+/** The hand-off quote fields the goal stock leg maps from (the enrich output's acquired.quotes). */
+interface GoalStockLegQuote {
+  symbol: string;
+  lastPrice?: number;
+  changePercent?: number;
+  peRatio?: number;
+  volume?: number;
+  averageVolume?: number;
+  open?: number;
+  high?: number;
+  low?: number;
+  week52High?: number;
+  week52Low?: number;
+}
+
+/**
+ * Issue #6073 — the goal stock leg on the generic chain: the four
+ * generic steps run in-process inside goal.stockLeg (function
+ * calls on the captured registry, not nodes of the goal
+ * definition — the composition state threads through the leg,
+ * not through them, and the builder gives every step on a node
+ * the same params, so per-step params cannot ride the analyze
+ * node). The synthesized contexts carry the leg's own run
+ * identity (same jobId/runId/trigger/runKind/now, the goal
+ * run's shardKey — null, monolith) with the leg's kit from the
+ * analyze node's params, WITHOUT `goalScreen` — the 6d refusal
+ * guards the market chain, and these calls are the leg's own,
+ * not a market run; the refusal is not triggered and not
+ * weakened. The step names are literals, as in the externalized
+ * catalog: their canonical constants are FEED_PULL_STEP
+ * (feedPipelineJobs), ENRICH_SCREENER_STEP (enrichPipelineJobs),
+ * ANALYZE_SCREENER_STEP (analyzePipelineJobs) and
+ * GENERATE_APPLY_STEP (generatePipelineJobs) — imported
+ * constants would cycle through enrichPipelineJobs, which
+ * imports this module for registerScreenerSteps. The chain is
+ * store-mediated (each step reads the previous step's persisted
+ * dataset via latestUsable), so no input threading is needed
+ * beyond the analyze hand-off, which consumes the enrich output
+ * explicitly (its handOff branch).
+ */
+async function runGoalStockLegOnGenericNodes(args: {
+  registry: JobStepRegistry;
+  deps: ScreenerStepDeps;
+  ctx: JobStepContext;
+  params: Record<string, unknown>;
+  plan: GoalScreenPlan;
+}): Promise<ScreeningResult> {
+  const { registry, deps, ctx, params, plan } = args;
+  const readId = (key: string): string => {
+    const value = params[key];
+    return typeof value === "string" && value.trim() !== "" ? value : "";
+  };
+  const feedJobId = readId("feedJobId");
+  const enrichJobId = readId("enrichJobId");
+  const analyzeJobId = readId("analyzeJobId");
+  const generateJobId = readId("generateJobId");
+  if (!feedJobId || !enrichJobId || !analyzeJobId || !generateJobId) {
+    throw new Error(
+      "GOAL_STOCK_LEG_NO_FAMILY_IDS: the goal stock leg needs the family job ids the #6073 builder writes onto the analyze node — this definition predates them; re-define the job.",
+    );
+  }
+  const stockLegAnalyzeParams = (params.stockLegAnalyzeParams ?? {}) as Record<
+    string,
+    unknown
+  >;
+  const stockLegGenerateParams = (params.stockLegGenerateParams ?? {}) as Record<
+    string,
+    unknown
+  >;
+  const stockLegUniverse =
+    typeof params.stockLegUniverse === "string" &&
+    params.stockLegUniverse.trim() !== ""
+      ? params.stockLegUniverse.trim().toLowerCase()
+      : undefined;
+  // The 6d refusal reads goalScreen off the params; the leg's own
+  // calls carry none (see above).
+  const legParams = { ...params };
+  delete legParams.goalScreen;
+  const base = {
+    jobId: ctx.jobId,
+    runId: ctx.runId,
+    nodePath: ctx.nodePath,
+    stepIndex: 0,
+    item: null,
+    itemIndex: null,
+    items: [] as readonly unknown[],
+    shardKey: ctx.shardKey,
+    now: ctx.now,
+    trigger: ctx.trigger,
+    runKind: ctx.runKind,
+  };
+  const feed = await registry.resolve("feed.pull")({
+    ...base,
+    kind: "feed",
+    params: {
+      ...legParams,
+      feedJobId,
+      ...(stockLegUniverse ? { universe: stockLegUniverse } : {}),
+    },
+    input: undefined,
+  });
+  const enrich = await registry.resolve("enrich.screener")({
+    ...base,
+    kind: "enrich",
+    params: { ...legParams, enrichJobId },
+    input: feed.output,
+  });
+  const analyze = await registry.resolve("analyze.screener")({
+    ...base,
+    kind: "analyze",
+    params: { ...legParams, analyzeJobId, ...stockLegAnalyzeParams },
+    input: enrich.output,
+  });
+  await registry.resolve("generate.apply")({
+    ...base,
+    kind: "generate",
+    params: {
+      ...legParams,
+      generateJobId,
+      ...stockLegGenerateParams,
+      filters: plan.stockFilter,
+    },
+    input: analyze.output,
+  });
+  if (!deps.goalStockLegAnalyzedFor) {
+    throw new Error(
+      "GOAL_STOCK_LEG_NO_ANALYZED_STORE: the goal stock leg needs the analyzed-dataset reader (goalStockLegAnalyzedFor) to map the generic chain's output — refusing a goal stock leg with nowhere to read the analyzed artifact (#6073).",
+    );
+  }
+  const artifact = await deps.goalStockLegAnalyzedFor(analyzeJobId);
+  if (!artifact) {
+    throw new Error(
+      `GOAL_STOCK_LEG_NO_ANALYZED_ARTIFACT: the generic chain ran but no usable analyzed artifact exists for analyze job "${analyzeJobId}" — refusing to map a leg result from nothing (#6073).`,
+    );
+  }
+  const quotes = (enrich.output as { acquired?: { quotes?: unknown } } | undefined)
+    ?.acquired?.quotes;
+  return goalStockLegResultFromAnalyzed({
+    artifact,
+    quotes: Array.isArray(quotes) ? (quotes as GoalStockLegQuote[]) : [],
+    plan,
+    timestamp: ctx.now,
+  });
+}
+
+/**
+ * Issue #6073 — the goal stock leg's result, mapped from the
+ * generic chain's analyzed artifact (pure: no stores, no
+ * registry). Matched = the artifact's own standouts — the
+ * family's list ("the generate stage reads this list rather
+ * than re-deriving it", ≤ standoutMaxItems, default 5). Each
+ * standout joins its analyzed row (lastPrice, `signals.screen`
+ * → signal, `compositeScore` → momentumScore — the same
+ * fallbacks `buildScreenerDeliveryPayload` uses) with its
+ * hand-off quote (changePercent, peRatio?, volume?) into a
+ * ScreenedStockItem with the same field semantics as
+ * `scannedStockToScreenedItem` (price/open/high/low/
+ * previousClose derived from lastPrice + changePercent;
+ * companyName falls back to the symbol — the bespoke path's own
+ * last resort; sector/rsi14 omitted — the chain computes
+ * neither). The plan's stockFilter is NOT applied as a row
+ * filter (verified: the nested leg doesn't apply it either —
+ * analyze runs static thresholds, nothing consumes
+ * `params.filters` in analyze; the filter rides as generate
+ * criteria, as today). The #1963 status checks still apply
+ * downstream in the assembly.
+ */
+export function goalStockLegResultFromAnalyzed(args: {
+  artifact: AnalyzedDatasetArtifact;
+  quotes: readonly GoalStockLegQuote[];
+  plan: GoalScreenPlan;
+  timestamp: string;
+  providerId?: string;
+}): ScreeningResult {
+  const { artifact, quotes, plan, timestamp } = args;
+  // The nested leg's provenance marker (runGoalStockLegViaWorkflow
+  // falls back to it when no stocks provider is registered): the
+  // goal result's hits carry it, so the engine leg keeps the same
+  // provenance rather than inventing a new one.
+  const providerId = args.providerId ?? "stock-screen-workflow";
+  const quotesBySymbol = new Map(quotes.map((q) => [q.symbol.toUpperCase(), q]));
+  const rowsBySymbol = new Map(
+    artifact.rows.map((r) => [r.symbol.toUpperCase(), r]),
+  );
+  const num = (value: unknown): number | undefined =>
+    typeof value === "number" && Number.isFinite(value) ? value : undefined;
+  const stocks: ScreenedStockItem[] = artifact.summary.standouts.map((standout) => {
+    const row = rowsBySymbol.get(standout.symbol.toUpperCase());
+    const quote = quotesBySymbol.get(standout.symbol.toUpperCase());
+    const price = row?.lastPrice ?? num(quote?.lastPrice) ?? 0;
+    const changePercent = num(quote?.changePercent) ?? 0;
+    const previousClose =
+      changePercent === -100 ? price : price / (1 + changePercent / 100);
+    const rawSignal = row?.signals["screen"] ?? standout.signal;
+    const signal =
+      rawSignal === "BULLISH_MOMENTUM" ||
+      rawSignal === "OVERSOLD_BOUNCE" ||
+      rawSignal === "RANGE_BOUND" ||
+      rawSignal === "OVERBOUGHT"
+        ? rawSignal
+        : "RANGE_BOUND";
+    return {
+      symbol: standout.symbol,
+      companyName: standout.symbol,
+      lastPrice: price,
+      price,
+      change: price - previousClose,
+      changePercent,
+      bid: price,
+      ask: price,
+      volume: num(quote?.volume) ?? 0,
+      open: num(quote?.open) ?? price,
+      high: num(quote?.high) ?? price,
+      low: num(quote?.low) ?? price,
+      previousClose,
+      timestamp,
+      ...(num(quote?.peRatio) != null ? { peRatio: num(quote?.peRatio) } : {}),
+      ...(num(quote?.averageVolume) != null
+        ? { averageVolume: num(quote?.averageVolume) }
+        : {}),
+      ...(num(quote?.week52High) != null
+        ? { week52High: num(quote?.week52High) }
+        : {}),
+      ...(num(quote?.week52Low) != null
+        ? { week52Low: num(quote?.week52Low) }
+        : {}),
+      macdSignal: "",
+      signal,
+      technicalSignal: "",
+      momentumScore: row?.compositeScore ?? standout.momentumScore,
+      highlightReason: "",
+    };
+  });
+  const result: StockScreenResult = {
+    totalScanned: artifact.summary.symbols,
+    totalScreened: artifact.summary.symbols,
+    matchedCount: stocks.length,
+    filterApplied: plan.stockFilter,
+    filterSummary: "",
+    stocks,
+    scannedAt: timestamp,
+    status: stocks.length > 0 ? "matches_found" : "no_matches",
+  };
+  return { assetClass: "stocks", providerId, result };
+}
+
 /**
  * Register the six screener steps on a registry. The handlers
  * are thin: resolve the live deps, delegate to the agent stage
@@ -718,7 +978,6 @@ export function registerScreenerSteps(registry: JobStepRegistry, deps: ScreenerS
     const params = ctx.params;
     const userLogin = requireUserLogin(params);
     const goalScreen = requireGoalScreen(params);
-    const agent = deps.agentFor(userLogin);
     const state = goalCompositionState(ctx.input, ctx.shardKey);
     if (state.executed === false) return { output: state };
     if (!state.plan) {
@@ -729,21 +988,34 @@ export function registerScreenerSteps(registry: JobStepRegistry, deps: ScreenerS
     if (!state.requested?.includes("stocks")) {
       return { output: { ...state, stockLeg: { legSkipped: true } } };
     }
-    const dispatch =
-      deps.goalStockLeg ??
-      ((input: GoalStockLegInput) => agent.runGoalStockLeg(input));
+    // Issue #6073 — the leg runs the generic chain in-process
+    // (runGoalStockLegOnGenericNodes, above) and maps the
+    // analyzed artifact's standouts. A test-injected
+    // deps.goalStockLeg still wins (the 6072/5873 suites keep
+    // injecting fakes, with the same input shape as before);
+    // production never overrides it, so the nested dispatch
+    // (runGoalStockLegViaWorkflow) never runs on the engine path.
+    // A chain failure is a failed class (#462), never a failed run.
     let stockLeg: GoalLegStepOutput;
     try {
-      const result = await dispatch({
-        plan: state.plan,
-        userLogin,
-        trigger: ctx.trigger,
-        idempotencyKey: ctx.runId,
-        ...(params.environment
-          ? { environment: params.environment as "TEST" | "PROD" }
-          : {}),
-        ...(goalScreen.provider ? { provider: goalScreen.provider } : {}),
-      });
+      const result = deps.goalStockLeg
+        ? await deps.goalStockLeg({
+            plan: state.plan,
+            userLogin,
+            trigger: ctx.trigger,
+            idempotencyKey: ctx.runId,
+            ...(params.environment
+              ? { environment: params.environment as "TEST" | "PROD" }
+              : {}),
+            ...(goalScreen.provider ? { provider: goalScreen.provider } : {}),
+          })
+        : await runGoalStockLegOnGenericNodes({
+            registry,
+            deps,
+            ctx,
+            params,
+            plan: state.plan,
+          });
       stockLeg = { result };
     } catch (err) {
       // Issue #462: a failed leg is a failed class, never a failed
@@ -992,6 +1264,40 @@ export function createScreenerStepRegistry(deps: ScreenerStepDeps): JobStepRegis
 }
 
 /**
+ * Issue #6073 — the goal stock leg's symbol resolution (owner
+ * rule 2026-11-22: there is NEVER a symbol-less run, for ANY
+ * run). Explicit `goalScreen.symbols` (normalized: uppercase /
+ * trim / dedupe, mirroring `explicitSymbolsFor`) win; else the
+ * ONE shared externalized default (the #5515 default universe,
+ * read through its one reader `defaultUniverseId` — never a
+ * leg-local literal) as a universe; else a named refusal
+ * (`GOAL_STOCK_LEG_NO_SYMBOLS`) at definition-build time, before
+ * any work — never silent nothing, never a silent fallthrough
+ * to ALL. The fallback is injectable so the refusal is testable
+ * without touching the shared config.
+ */
+export function resolveGoalStockLegSymbols(
+  command: WorkflowJobCommand,
+  fallbackUniverse?: string,
+): { symbols: string[] } | { universe: string } {
+  const explicit = (command.goalScreen?.symbols ?? [])
+    .map((s) => (typeof s === "string" ? s.toUpperCase().trim() : ""))
+    .filter((s) => s.length > 0)
+    .filter((s, i, arr) => arr.indexOf(s) === i);
+  if (explicit.length > 0) return { symbols: explicit };
+  let fallback = "";
+  try {
+    fallback = (fallbackUniverse ?? defaultUniverseId()).trim().toLowerCase();
+  } catch {
+    fallback = "";
+  }
+  if (fallback.length > 0) return { universe: fallback };
+  throw new Error(
+    "GOAL_STOCK_LEG_NO_SYMBOLS: the goal stock leg has no explicit symbols and the shared default universe did not resolve — refusing a symbol-less run (#6073; owner rule 2026-11-22: never a symbol-less run, for ANY run).",
+  );
+}
+
+/**
  * Issue #5884 (#4437 slice 6b3 — the flip): the family job ids
  * for one market run, computed per command. The generic steps
  * are job-driven and the job id depends on the run's provider —
@@ -1015,7 +1321,17 @@ export function screenerFamilyJobIds(command: WorkflowJobCommand): {
   analyzeJobId: string;
   generateJobId: string;
 } {
-  const provider = command.provider ?? DEFAULT_TENANT_PROVIDERS.dataProviderId;
+  // Issue #6073 — a goal command's provider lives at
+  // goalScreen.provider (what the nested leg passed through as
+  // the leg provider; typed to the single provider id the goal
+  // command allows, #4436); the top-level provider, when a caller
+  // set one, wins, as on the market path; else the tenant default.
+  // Market commands carry no goalScreen, so this changes nothing
+  // for them.
+  const provider =
+    command.provider ??
+    command.goalScreen?.provider ??
+    DEFAULT_TENANT_PROVIDERS.dataProviderId;
   const feedJobId = `${provider}-nasdaq100-quotes`;
   const entry = FEED_PIPELINE_CATALOG.find(
     (e) => e.jobId === feedJobId && e.dataset === "quotes",
@@ -1066,14 +1382,64 @@ export function buildScreenerJobDefinition(command: WorkflowJobCommand): unknown
     );
   }
   const shardIds = (command.shards ?? []).map((shard) => shard.shardId);
-  const symbols = (command.shards ?? []).flatMap(
-    (shard) => (shard.symbols ?? []) as NasdaqStockListing[],
+  // Issue #6073 — the goal stock leg resolves its symbols at build
+  // time (explicit → the ONE shared externalized default → named
+  // refusal); only when stocks are requested — an options-only goal
+  // run has no stock leg to resolve for. The resolved explicit
+  // symbols ride the goal shard's row and the flat list (the goal
+  // run is monolith, so feed.pull reads the flat list); the row is
+  // the honest record, the flat list the fetch set. Production
+  // goal commands carry no shard-row symbols
+  // (buildGoalScreenCommand puts them only on goalScreen.symbols),
+  // so the builder is the place that puts them on the row — as
+  // the resolved bare strings, never invented listing objects
+  // (no company name or exchange is known for them; the only
+  // reader that matters, explicitSymbolsFor, accepts both shapes,
+  // and the bespoke feed/gather stages ignore the flat list on
+  // goal runs — they read goalScreen.symbols). A row that already
+  // carries a symbol (as a listing, as tests build it) is not
+  // duplicated.
+  const goalStocksRequested =
+    !command.goalScreen ||
+    (command.goalScreen.assetClasses ?? ["stocks", "options"]).includes("stocks");
+  const goalSymbols =
+    command.goalScreen && goalStocksRequested
+      ? resolveGoalStockLegSymbols(command)
+      : null;
+  const shardTable = (command.shards ?? []).map((shard) => {
+    const row: {
+      shardId: string;
+      universe?: string;
+      symbols?: unknown[];
+    } = {
+      shardId: shard.shardId,
+      ...(shard.universe ? { universe: shard.universe } : {}),
+      ...(shard.symbols ? { symbols: [...shard.symbols] } : {}),
+    };
+    if (goalSymbols && "symbols" in goalSymbols && shard.shardId === "goal") {
+      const have = new Set(
+        ((shard.symbols ?? []) as unknown[])
+          .map((s) =>
+            typeof s === "string"
+              ? s.toUpperCase().trim()
+              : s !== null &&
+                  typeof s === "object" &&
+                  typeof (s as { symbol?: unknown }).symbol === "string"
+                ? String((s as { symbol: unknown }).symbol)
+                    .toUpperCase()
+                    .trim()
+                : "",
+          )
+          .filter((s) => s.length > 0),
+      );
+      const missing = goalSymbols.symbols.filter((s) => !have.has(s));
+      if (missing.length > 0) row.symbols = [...(row.symbols ?? []), ...missing];
+    }
+    return row;
+  });
+  const symbols = shardTable.flatMap(
+    (row) => (row.symbols ?? []) as NasdaqStockListing[],
   );
-  const shardTable = (command.shards ?? []).map((shard) => ({
-    shardId: shard.shardId,
-    ...(shard.universe ? { universe: shard.universe } : {}),
-    ...(shard.symbols ? { symbols: shard.symbols } : {}),
-  }));
   const params: Record<string, unknown> = {
     userLogin: command.userLogin,
     trigger: command.trigger,
@@ -1102,25 +1468,56 @@ export function buildScreenerJobDefinition(command: WorkflowJobCommand): unknown
   // are its projection (a parity pin holds them equal). Issue #5873 —
   // a goal command builds the "goalScreen" spec (analyze node
   // screener.goal); a market command builds the "screener" spec.
-  // Issue #5884 — the generic steps are job-driven: the market
-  // definition's nodes carry their family job id (computed per
-  // command above); the feed node also carries the run's single
-  // universe when the shards agree on one. The goal definition's
-  // bespoke nodes carry neither (its steps read the shared params).
+  // Issue #5884 — the generic steps are job-driven: the definition's
+  // nodes carry their family job id (computed per command above);
+  // the market feed node also carries the run's single universe
+  // when the shards agree on one. Issue #6073 — the goal
+  // definition's nodes carry the family ids too (the goal stock
+  // leg runs the generic chain): the feed node carries the
+  // resolved default universe when the leg runs universe-fed,
+  // and the analyze node carries the leg's whole kit (the four
+  // family ids + the market spec's analyze/generate stage params,
+  // read at build time — single home, no duplicated literal).
   const spec = jobDefinitionSpec(command.goalScreen ? "goalScreen" : "screener");
-  const familyIds = command.goalScreen ? null : screenerFamilyJobIds(command);
-  const feedUniverse = familyIds ? screenerFeedNodeUniverse(command) : undefined;
-  const jobIdParams: Record<string, Record<string, unknown>> = familyIds
-    ? {
-        feed: {
-          feedJobId: familyIds.feedJobId,
-          ...(feedUniverse ? { universe: feedUniverse } : {}),
-        },
-        enrich: { enrichJobId: familyIds.enrichJobId },
-        analyze: { analyzeJobId: familyIds.analyzeJobId },
-        generate: { generateJobId: familyIds.generateJobId },
-      }
-    : {};
+  const familyIds = screenerFamilyJobIds(command);
+  const feedUniverse = command.goalScreen
+    ? goalSymbols && "universe" in goalSymbols
+      ? goalSymbols.universe
+      : undefined
+    : screenerFeedNodeUniverse(command);
+  const marketSpec = command.goalScreen ? jobDefinitionSpec("screener") : undefined;
+  const stockLegAnalyzeParams =
+    marketSpec?.stages.find((s) => s.kind === "analyze")?.params ?? {};
+  const stockLegGenerateParams =
+    marketSpec?.stages.find((s) => s.kind === "generate")?.params ?? {};
+  const jobIdParams: Record<string, Record<string, unknown>> = {
+    feed: {
+      feedJobId: familyIds.feedJobId,
+      ...(feedUniverse ? { universe: feedUniverse } : {}),
+    },
+    enrich: { enrichJobId: familyIds.enrichJobId },
+    analyze: {
+      analyzeJobId: familyIds.analyzeJobId,
+      ...(command.goalScreen
+        ? {
+            feedJobId: familyIds.feedJobId,
+            enrichJobId: familyIds.enrichJobId,
+            generateJobId: familyIds.generateJobId,
+            stockLegAnalyzeParams,
+            stockLegGenerateParams,
+            // Issue #6073 — the leg's working copy of the resolved
+            // universe: the leg runs on the analyze node, so the
+            // feed node's universe param (above) is not in its
+            // params — the kit carries it, frozen at build time
+            // exactly as the market feed node's universe is.
+            ...(goalSymbols && "universe" in goalSymbols
+              ? { stockLegUniverse: goalSymbols.universe }
+              : {}),
+          }
+        : {}),
+    },
+    generate: { generateJobId: familyIds.generateJobId },
+  };
   let node: JobNodeConfig | undefined;
   for (let i = spec.stages.length - 1; i >= 0; i--) {
     const stageSpec = spec.stages[i];
@@ -1387,6 +1784,20 @@ export function screenerStepDepsForScheduledAgent(
       }
       return new ScreenerTaskLedger(createD1ScreenerTaskStore(env.AGENT_DB));
     },
+    // Issue #6073 — the goal stock leg's analyzed-artifact
+    // reader: the analyzed-dataset store for this residency (the
+    // same construction the analyze deps use). No AGENT_DB binding
+    // = the leg's named refusal (GOAL_STOCK_LEG_NO_ANALYZED_STORE)
+    // at leg time, never a silent fallback to the nested dispatch.
+    goalStockLegAnalyzedFor: async (analyzeJobId: string) => {
+      const store = createAnalyzedDatasetPorts(env);
+      if (!store) {
+        throw new Error(
+          "GOAL_STOCK_LEG_NO_ANALYZED_STORE: the goal stock leg needs the analyzed-dataset store (env.AGENT_DB) to map the generic chain's output — refusing a goal stock leg with nowhere to read the analyzed artifact (#6073).",
+        );
+      }
+      return store.latestUsable(analyzeJobId);
+    },
   };
 }
 
@@ -1415,6 +1826,20 @@ export function screenerStepDepsForWorkflow(env: Env, feedDeps: FeedStepDeps): S
         );
       }
       return new ScreenerTaskLedger(createD1ScreenerTaskStore(env.AGENT_DB));
+    },
+    // Issue #6073 — the goal stock leg's analyzed-artifact
+    // reader: the analyzed-dataset store for this residency (the
+    // same construction the analyze deps use). No AGENT_DB binding
+    // = the leg's named refusal (GOAL_STOCK_LEG_NO_ANALYZED_STORE)
+    // at leg time, never a silent fallback to the nested dispatch.
+    goalStockLegAnalyzedFor: async (analyzeJobId: string) => {
+      const store = createAnalyzedDatasetPorts(env);
+      if (!store) {
+        throw new Error(
+          "GOAL_STOCK_LEG_NO_ANALYZED_STORE: the goal stock leg needs the analyzed-dataset store (env.AGENT_DB) to map the generic chain's output — refusing a goal stock leg with nowhere to read the analyzed artifact (#6073).",
+        );
+      }
+      return store.latestUsable(analyzeJobId);
     },
   };
 }

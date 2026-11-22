@@ -349,6 +349,13 @@ async function makeCutoverHarness(opts: {
     // The ledger dep is always injected (it has no agent default —
     // it refuses by name without a D1 ledger).
     goalTaskLedgerFor: () => new ScreenerTaskLedger(taskStore, { newId: () => "goal-task-4192" }),
+    // Issue #6073 — the analyzed-artifact reader is a production-
+    // default binding (the harness store, as the host factories
+    // bind createAnalyzedDatasetPorts(env)): the real stock leg
+    // maps from it. Tests that inject a goalStockLeg fake never
+    // reach it — the fake wins.
+    goalStockLegAnalyzedFor: async (analyzeJobId: string) =>
+      analyzedStore.latestUsable(analyzeJobId),
     ...(opts.omitCompositionDeps
       ? {}
       : {
@@ -654,12 +661,18 @@ describe("goal-leg dispatch (#4192)", () => {
     expect(h.parentStored[0]?.goalScreen).toBe(true);
   });
 
-  it("the default composition bindings are the agent methods, never the direct runGoalScreen (#4279)", async () => {
+  it("the default composition bindings are the agent methods and the generic stock chain, never the direct runGoalScreen (#4279, #6073)", async () => {
     // Issue #6072 — the composition's production defaults live on
-    // the agent (quota charge, leg dispatches, artifact tail); the
-    // ledger dep is injected (it has no agent default — it refuses
-    // by name without a D1 ledger). runGoalScreenOnEngine is nowhere
-    // on the path anymore.
+    // the agent (quota charge, options-leg dispatch, artifact
+    // tail); the ledger dep is injected (it has no agent default —
+    // it refuses by name without a D1 ledger). runGoalScreenOnEngine
+    // is nowhere on the path anymore. Issue #6073 — the stock
+    // leg's default is no longer the agent method either: the leg
+    // runs the generic chain in-process (the spy below is mocked
+    // so a regression to the nested dispatch cannot do live work
+    // in this test, and is asserted never called), and the analyzed
+    // reader is the harness store, so the real leg screens AAPL
+    // through feed → enrich → analyze → generate.
     const h = await makeCutoverHarness({ omitCompositionDeps: true });
     const quotaSpy = vi
       .spyOn(h.agent, "chargeGoalScreenQuota")
@@ -712,12 +725,26 @@ describe("goal-leg dispatch (#4192)", () => {
     const c = await runScreenerScreenOnEngine(fakeStep, dispatchDeps(h), command);
     expect(c.lifecycle).toBe("ReportGenerated");
     expect(quotaSpy).toHaveBeenCalledTimes(1);
-    expect(stockSpy).toHaveBeenCalledTimes(1);
+    // Issue #6073 — the nested stock dispatch never runs on the
+    // engine path anymore; the leg screened through the generic
+    // chain instead (the fake provider fetched AAPL once).
+    expect(stockSpy).not.toHaveBeenCalled();
+    expect(h.quoteCalls).toContain("AAPL");
     expect(optionsSpy).toHaveBeenCalledTimes(1);
     expect(artifactsSpy).toHaveBeenCalledTimes(1);
     expect(engineSpy).not.toHaveBeenCalled();
     expect(directSpy).not.toHaveBeenCalled();
     expect(h.stored).toHaveLength(1);
+    // Both legs succeeded through their defaults: the goal result
+    // is complete with the chain's AAPL hit.
+    const envelope = h.stored[0] as { result: Record<string, unknown> };
+    const result = envelope.result as {
+      status: string;
+      counts: { stocksScanned: number; stocksMatched: number };
+    };
+    expect(result.status).toBe("complete");
+    expect(result.counts.stocksScanned).toBe(1);
+    expect(result.counts.stocksMatched).toBe(1);
   });
 });
 

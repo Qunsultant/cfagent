@@ -450,7 +450,7 @@ it); the ledger-complete step completes with the deterministic
 evaluation, or fails + escalates when every leg failed; the
 artifacts step stamps the run's data mode + provider onto the
 result and runs the report tail. The ledger is D1-resident
-(`agent_screener_task_entries`, migration 0079, `ScreenerTaskStore`
+(`agent_screener_task_entries`, migration 0080, `ScreenerTaskStore`
 over drizzle D1 — `D1ScreenerTaskStore`, keys `screener:`-namespaced
 exactly as the DO-storage implementation stores them — plus an
 in-memory adapter for tests), wired from `env.AGENT_DB` in the
@@ -478,6 +478,45 @@ refusal before any ledger record, terminal duplicate, failed leg
 as failed class, active-record adoption on eviction replay) and
 the re-pointed 4192 / 5873 goal tests.
 <!-- 6072: goal composition onto engine nodes — end -->
+<!-- 6073: goal stock leg on generic nodes — begin -->
+Slice 6d-b (#6073) re-points the goal stock leg onto the generic
+chain: `goal.stockLeg` runs `feed.pull` → `enrich.screener` →
+`analyze.screener` → `generate.apply` in-process on the captured
+registry (function calls, not nodes — the composition state
+threads through the leg, and the builder gives every step on a
+node the same params) and maps the analyzed artifact's standouts
+to the ScreeningResult the assemble node consumes
+(`goalStockLegResultFromAnalyzed`,
+`src/services/screenerPipelineJobs.ts`). The leg resolves its
+symbols explicit → the ONE shared externalized default (the #5515
+default universe, `defaultUniverseId()`) → named refusal
+(`GOAL_STOCK_LEG_NO_SYMBOLS`) — the owner rule (2026-11-22):
+never a symbol-less run, for ANY run; no leg-local literal. The
+builder (`buildScreenerJobDefinition`) computes the family job
+ids for goal commands too (provider: top-level, else
+`goalScreen.provider`, else the tenant default) and writes the
+leg's kit onto the analyze node's params (the four family ids +
+the market spec's analyze/generate stage params, read at build
+time, + `stockLegUniverse` when universe-fed); the resolved
+explicit symbols ride the goal shard's row and the flat list
+(the goal run is monolith, so `feed.pull` reads the flat list),
+the resolved default universe rides the feed node's params.
+The synthesized step contexts carry the leg's run identity
+without `goalScreen`, so the 6d refusal is not triggered and
+not weakened. A test-injected `deps.goalStockLeg` still wins
+(the 6072/5873 suites keep injecting fakes); the analyzed
+artifact is read through `goalStockLegAnalyzedFor` (bound in
+both host factories from `createAnalyzedDatasetPorts(env)`;
+absent → `GOAL_STOCK_LEG_NO_ANALYZED_STORE`, no usable artifact
+→ `GOAL_STOCK_LEG_NO_ANALYZED_ARTIFACT`). The nested dispatch
+(`runGoalStockLegViaWorkflow`, universe ALL) stays for the
+direct path until slice 7 retires it — the engine leg and the
+direct path now diverge by design. Pinned by
+`tests/goal_stock_leg_generic_6073.test.ts` (10 tests: resolver,
+builder, full run with no `runGoalStockLeg` call, symbol-less
+run on the default universe, leg failure as a failed class) and
+the re-pointed 5873 definition pins.
+<!-- 6073: goal stock leg on generic nodes — end -->
 
 The screener's deliver stage likewise runs through the generic deliver
 machinery (#5826): `deliver.apply` gains a screener application
