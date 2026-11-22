@@ -19,7 +19,8 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { Button, TextInput, Notice } from "./components/ui";
+import { Button, Flex, TextInput, Notice } from "./components/ui";
+import { ActiveBindingBadge } from "./ActiveBindingBadge";
 import { useTenantProviders, labelForBroker, brokerUnavailableNotice } from "./tenantProviders";
 import {
   cancelRemoteOrder,
@@ -166,6 +167,17 @@ export function AccountPanels({ activeEnv, onUnreadAlertsChange }: AccountPanels
   }
   return (
     <>
+      {/* Issue #5099 (F2): the active account binding for the account
+          surfaces — the panels below read this broker's accounts. */}
+      <Flex gap="1" align="center" wrap>
+        <ActiveBindingBadge
+          broker={tenantProviders.brokerId}
+          mode={activeEnv === "PROD" ? "live" : "paper"}
+          accountType="stock"
+          scope="tenant"
+        />
+      </Flex>
+
       {/* Broker alerts */}
       <section className="ap-panel" id="section-alerts" style={{ scrollMarginTop: 80 }}>
         {header("alerts", unreadCount > 0 ? `Broker Alerts (${unreadCount} unread)` : "Broker Alerts", () => void loadAlerts())}

@@ -31,6 +31,7 @@ import { TradingApprovalsQueue } from "./TradingApprovalsQueue";
 import { STRATEGY_LIBRARY } from "./options/strategyLibrary";
 import { buildTradeLegs, describeTradeLeg } from "./trading/strategyAutobuild";
 import { brokerModeBadge, brokerPresentation } from "../trading";
+import { ActiveBindingBadge } from "./ActiveBindingBadge";
 import { AlpacaSignInCard } from "./AlpacaSignInCard";
 import { safeNumberFormat, safePriceFormat } from "./formatters";
 import {
@@ -485,6 +486,8 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
                         <Flex gap="2" wrap>
                           <Badge tone="accent" title={`Broker: ${brokerId}`}>{brokerLabel}</Badge>
                           <Badge tone={tradingType === "live" ? "warning" : "success"}>{brokerModeBadge(brokerId, tradingType)}</Badge>
+                          {/* Issue #5099 (F2): the active account binding beside the broker/mode badges. */}
+                          <ActiveBindingBadge broker={brokerId} mode={tradingType} accountType={orderAssetClass === "options" ? "options" : "stock"} scope="tenant" />
                         </Flex>
                       }
                       meta={

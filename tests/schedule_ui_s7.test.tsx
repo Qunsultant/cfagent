@@ -235,7 +235,7 @@ describe("S7 payload goldens — the one builder reproduces the legacy bodies by
       mode: "live",
       accountId: "acct-1",
     });
-    expect(withTarget.payload).toMatchObject({ brokerId: "public", mode: "live", accountId: "acct-1" });
+    expect(withTarget.payload).toMatchObject({ brokerId: "public", mode: "live", accountId: "acct-1", accountType: "options" });
 
     const without = submission({
       ...baseForm,
@@ -248,6 +248,7 @@ describe("S7 payload goldens — the one builder reproduces the legacy bodies by
     expect("brokerId" in without.payload).toBe(false);
     expect("mode" in without.payload).toBe(false);
     expect("accountId" in without.payload).toBe(false);
+    expect("accountType" in without.payload).toBe(false);
 
     // A broker whose catalogue declares no option chains never leaves the form.
     const refused = buildScheduleSubmission({

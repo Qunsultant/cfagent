@@ -192,7 +192,14 @@ export function buildScheduleSubmission(
         // absent field keeps the golden-pinned legacy payload byte-identical.
         ...(form.brokerId ? { brokerId: form.brokerId } : {}),
         ...(form.mode ? { mode: form.mode } : {}),
-        ...((form.accountId ?? "").trim() ? { accountId: (form.accountId ?? "").trim() } : {}),
+        // Issue #5099 (F2): the account's asset class rides with the
+        // account id, so the display and the payload agree — the
+        // server resolves the run target from {accountType, accountId}
+        // at creation (schedules.ts). Only in the options branch: this
+        // is the options account. Absent when no account is chosen.
+        ...((form.accountId ?? "").trim()
+          ? { accountType: "options", accountId: (form.accountId ?? "").trim() }
+          : {}),
       };
     }
   }

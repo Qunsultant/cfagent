@@ -7,6 +7,8 @@ import { syncTarget, connectStatusEndpoint } from "./brokerEndpoints";
 import { brokerPresentation, defaultBrokerId } from "../trading";
 import { PublicTokenCard } from "./PublicTokenCard";
 import { AccountBindingSelector } from "./AccountBindingSelector";
+import { ActiveBindingBadge } from "./ActiveBindingBadge";
+import { adoptAccountBinding } from "./accountBindingStore";
 import { brokerCredentialGuidance, isBrokerId } from "../trading";
 import { brokerOptions } from "./brokerOptions";
 import { fetchWatchlists, type ETradeWatchlist } from "./accountApi";
@@ -755,6 +757,21 @@ export function BrokerDynamicMenu({
                   ? "OFFLINE"
                   : brokerPresentation(selectedBrokerId).modeShort[isLive ? "live" : "paper"].toUpperCase()}
               </span>
+              {/* Issue #5099 (F2): the active account binding beside the
+                  broker/mode badges. Change scrolls to the selector below
+                  (the badge sits inside this panel, so dispatching the
+                  `open-settings-menu` toggle here would close it). */}
+              <ActiveBindingBadge
+                broker={selectedBrokerId}
+                mode={isLive ? "live" : "paper"}
+                accountType="stock"
+                scope="tenant"
+                onChangeRequest={() =>
+                  document
+                    .getElementById("account-binding-selector")
+                    ?.scrollIntoView({ behavior: "smooth", block: "start" })
+                }
+              />
             </div>
           </div>
 
@@ -951,10 +968,13 @@ export function BrokerDynamicMenu({
             )}
 
             {/* Account & asset-class binding selector (issue #5113) */}
-            <AccountBindingSelector
-              broker={selectedBrokerId}
-              mode={isLive ? "live" : "paper"}
-            />
+            <div id="account-binding-selector">
+              <AccountBindingSelector
+                broker={selectedBrokerId}
+                mode={isLive ? "live" : "paper"}
+                onSaved={(binding) => adoptAccountBinding(binding)}
+              />
+            </div>
           </div>
 
           {/* Preferences & Appearance Settings */}

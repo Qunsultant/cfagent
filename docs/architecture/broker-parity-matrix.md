@@ -69,3 +69,33 @@ Tenant state and per-surface scopes (`tenant`, `autopilot`, `copilot`, `schedule
   - If exactly 1 candidate account exists (or exactly 1 marked default): migrates cleanly to the tuple.
   - If multiple candidate accounts exist with no single default: fails loud with `FAILURE_ACCOUNT_MIGRATION_AMBIGUOUS` (HTTP 409) returning `candidateAccountIds` so the tenant is asked instead of guessed.
 
+## Active-Binding Display & Validated Switching (#5094 F2 / #5099)
+
+Every surface that carries a binding shows it, from one shared client
+store (`src/client/accountBindingStore.ts` + `ActiveBindingBadge`):
+
+- **Store**: one in-memory cache of GET `/api/broker/account-binding`,
+  resolved per surface through the F1 `resolveEffectiveAccountBinding`
+  (exact scope, else the tenant default). A save or switch anywhere
+  re-renders every open surface — no surface keeps a stale binding.
+- **Badge** (`ActiveBindingBadge`, beside the existing broker/mode badges):
+  `<account-type label> ••••<last 4>` (masked), "No account bound" when
+  unbound (never a silent default), Change reuses the existing
+  `open-settings-menu` event. Mounted on the BrokerDynamicMenu header
+  (tenant/stock), the order ticket (tenant, stock or options by ticket),
+  the schedule dialog (schedule scope; a per-schedule account override
+  replaces the stored binding in the display), and the portfolio /
+  account views (tenant/stock).
+- **Validated saves**: the AccountBindingSelector includes the selected
+  broker's accounts as `availableAccounts` on its PUT when the accounts
+  read serves the broker being saved, so the server validates the tuple
+  (`validateAccountAgainstBroker`); on a broker mismatch, a failed read,
+  or a gated-off accounts route it falls back to the plain upsert.
+  `switchAccountBinding` adopts optimistically and reverts on a server
+  refusal, so no surface keeps a binding the server refused.
+- **Schedule payload**: an options schedule with a chosen account carries
+  `{accountType: "options", accountId}` in its payload (accepted by the
+  options criteria schema), so the display and the payload agree; the
+  server resolves the run target from `{accountType, accountId}` at
+  creation. The tenant default itself is never pinned into the payload.
+
