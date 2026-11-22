@@ -79,8 +79,8 @@ describe("resolveUniverse", () => {
     expect(resolveUniverse("LEV_ETF", [])).toEqual([]);
   });
 
-  it("ALL resolves to empty (sharded by caller)", () => {
-    expect(resolveUniverse("ALL", bigUniverse(100))).toEqual([]);
+  it('ALL refuses as "a shard plan is not resolvable for a single run" (#6032)', () => {
+    expect(() => resolveUniverse("ALL", bigUniverse(100))).toThrow(/shard plan/);
   });
 
   it("ETF filter catches ETF markers", () => {

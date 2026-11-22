@@ -11,6 +11,9 @@
  * (Durable Object SQLite) and tests (in-memory) share the service.
  */
 
+// Issue #6032 — the accepted universe set lives in the registry, not here.
+import { normalizeResearchUniverseId, researchUniverseIds } from "../trading";
+
 export interface ResearchConfig {
   /** Minimum market cap for company screening (spec default: $5B). */
   marketCapMin: number;
@@ -121,16 +124,25 @@ export type ResearchConfigKey = keyof ResearchConfig;
 export interface ConfigSchemaField {
   key: ResearchConfigKey;
   label: string;
-  type: "number" | "boolean" | "string" | "nullable-number";
+  type: "number" | "boolean" | "string" | "nullable-number" | "select";
   default: unknown;
   hint: string;
+  /** Issue #6032 — a `select` field's options, fed from the one universe set. */
+  options?: readonly string[];
 }
 
 /** UI-bound schema for the filter editor (amendment 2). */
 export const RESEARCH_CONFIG_SCHEMA: ConfigSchemaField[] = [
   { key: "marketCapMin", label: "Min market cap ($)", type: "number", default: RESEARCH_CONFIG_DEFAULTS.marketCapMin, hint: "Spec default: $5B for companies." },
   { key: "priceCap", label: "Max underlying price ($, empty = none)", type: "nullable-number", default: RESEARCH_CONFIG_DEFAULTS.priceCap, hint: "No restriction unless configured." },
-  { key: "universe", label: "Universe", type: "string", default: RESEARCH_CONFIG_DEFAULTS.universe, hint: "Screening universe id." },
+  {
+    key: "universe",
+    label: "Universe",
+    type: "select",
+    options: researchUniverseIds(),
+    default: RESEARCH_CONFIG_DEFAULTS.universe,
+    hint: "Screening universe — resolved from the listings directory by market-cap rank.",
+  },
   { key: "etfsIncluded", label: "Include ETFs", type: "boolean", default: RESEARCH_CONFIG_DEFAULTS.etfsIncluded, hint: "ETFs evaluated separately from companies." },
   { key: "maxIdeas", label: "Max qualified ideas", type: "number", default: RESEARCH_CONFIG_DEFAULTS.maxIdeas, hint: "Spec: up to five." },
   { key: "quoteFreshnessSeconds", label: "Quote freshness (s)", type: "number", default: RESEARCH_CONFIG_DEFAULTS.quoteFreshnessSeconds, hint: "Option quote max age." },
@@ -172,7 +184,11 @@ function parseStoredValue(key: ResearchConfigKey, raw: string): unknown {
   return raw;
 }
 
-function validateConfig(config: ResearchConfig): string[] {
+/**
+ * Issue #6032 — the config validator is exported so the settings API, the
+ * agent and the tests judge a universe by the same rule.
+ */
+export function validateResearchConfig(config: ResearchConfig): string[] {
   const errors: string[] = [];
   if (!(config.marketCapMin >= 0)) errors.push("marketCapMin must be >= 0");
   if (config.priceCap !== null && !(config.priceCap > 0)) errors.push("priceCap must be positive or null");
@@ -189,7 +205,15 @@ function validateConfig(config: ResearchConfig): string[] {
   if (!(Number.isInteger(config.maxExpiriesPerBand) && config.maxExpiriesPerBand >= 1 && config.maxExpiriesPerBand <= 20)) errors.push("maxExpiriesPerBand must be an integer from 1 to 20");
   if (!(config.calibratedNearMaxDte >= config.nearExpiryMaxDte)) errors.push("calibratedNearMaxDte must be >= nearExpiryMaxDte");
   if (!(config.calibratedLeapsMaxDte >= config.leapsExpiryMinDte)) errors.push("calibratedLeapsMaxDte must be >= leapsExpiryMinDte");
-  if (!config.universe.trim()) errors.push("universe must be non-empty");
+  // Issue #6032 — the universe is an enum, not free text: an unknown id
+  // published an empty run indistinguishable from a quiet night.
+  if (!config.universe.trim()) {
+    errors.push("universe must be non-empty");
+  } else if (normalizeResearchUniverseId(config.universe) === null) {
+    errors.push(
+      `universe: "${config.universe}" is not a research universe. Accepted: ${researchUniverseIds().join(", ")}.`,
+    );
+  }
   if (!config.scheduleCron.trim()) errors.push("scheduleCron must be non-empty");
   if (config.emailTo && !/^[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+$/.test(config.emailTo)) {
     errors.push("emailTo is not a valid email address");
@@ -219,7 +243,7 @@ export class ResearchConfigService {
         errors.push(err instanceof Error ? err.message : String(err));
       }
     }
-    const validation = validateConfig(config);
+    const validation = validateResearchConfig(config);
     if (validation.length > 0 || errors.length > 0) {
       // Fail closed to defaults on corrupt stored config — never run with
       // an unvalidated filter set.
@@ -234,7 +258,7 @@ export class ResearchConfigService {
    */
   save(patch: Partial<ResearchConfig>): { config: ResearchConfig; errors: string[] } {
     const next: ResearchConfig = { ...this.load(), ...patch };
-    const errors = validateConfig(next);
+    const errors = validateResearchConfig(next);
     if (errors.length > 0) return { config: this.load(), errors };
     for (const key of Object.keys(patch) as ResearchConfigKey[]) {
       const value = patch[key];

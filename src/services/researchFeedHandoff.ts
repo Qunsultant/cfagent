@@ -30,6 +30,12 @@ export interface ResearchFeedStageOutput {
   regime: unknown;
   universe: string;
   universeError: string | null;
+  /**
+   * Issue #6032 — set when the universe itself refused (unknown id or
+   * `ALL`), so the report carries a coded refusal instead of a generic
+   * "retrieval failed" summary.
+   */
+  universeRefusalCode?: "research_universe_unknown";
   symbols: string[];
   quotes: ResearchFeedQuoteEntry[];
   universeSize: number;

@@ -97,6 +97,73 @@ function buildUniverses(): Record<UniverseId, UniverseDef> {
 
 export const UNIVERSES: Record<UniverseId, UniverseDef> = buildUniverses();
 
+/**
+ * Issue #6032 — the accepted set for a single OODA run: the screener
+ * universes a run can actually resolve. `ALL` is NOT here: it is a
+ * shard plan ("auto-sharded into parallel per-universe runs"), not a
+ * universe a single run can resolve, so selecting it would yield zero
+ * symbols. One set, read by the config validator, the provider and the
+ * settings API — never re-listed per surface.
+ */
+export const RESEARCH_UNIVERSE_IDS: readonly UniverseId[] = (
+  Object.keys(UNIVERSES) as UniverseId[]
+).filter((id) => id !== "ALL");
+
+/** The accepted universe ids, in registry order (the refusal names these). */
+export function researchUniverseIds(): UniverseId[] {
+  return [...RESEARCH_UNIVERSE_IDS];
+}
+
+/** Narrowing guard over the accepted set (a string from stored config). */
+export function isResearchUniverseId(value: unknown): value is UniverseId {
+  return (
+    typeof value === "string" &&
+    (RESEARCH_UNIVERSE_IDS as readonly string[]).includes(value)
+  );
+}
+
+/**
+ * Issue #6032 — normalise a stored/requested id (trim + upper-case) and
+ * return it only when it is in the accepted set. `null` is the refusal
+ * signal: no caller resolves a universe it cannot name.
+ */
+export function normalizeResearchUniverseId(
+  raw: string | null | undefined,
+): UniverseId | null {
+  if (raw == null) return null;
+  const normalized = raw.trim().toUpperCase();
+  return isResearchUniverseId(normalized) ? normalized : null;
+}
+
+/** Code the run record and the report carry for an unresolvable universe. */
+export const RESEARCH_UNIVERSE_UNKNOWN_CODE = "research_universe_unknown";
+
+/**
+ * Issue #6032 — a named refusal for a universe that cannot be resolved for
+ * a single run. Carries the offending id and the accepted set so every
+ * surface (route, report, log) can say what was wrong and what is allowed.
+ */
+export class ResearchUniverseRefusal extends Error {
+  readonly code = RESEARCH_UNIVERSE_UNKNOWN_CODE;
+  constructor(
+    readonly universe: string,
+    readonly accepted: readonly string[],
+    reason?: string,
+  ) {
+    super(
+      `[${RESEARCH_UNIVERSE_UNKNOWN_CODE}] "${universe}" is not a research universe` +
+        (reason ? ` (${reason})` : "") +
+        `. Accepted: ${accepted.join(", ")}.`,
+    );
+    this.name = "ResearchUniverseRefusal";
+  }
+}
+
+/** True when `error` is a universe refusal (the pipeline narrows with this). */
+export function isResearchUniverseRefusal(error: unknown): error is ResearchUniverseRefusal {
+  return error instanceof ResearchUniverseRefusal;
+}
+
 export function shardableUniverses(): UniverseId[] {
   return (Object.keys(UNIVERSES) as UniverseId[]).filter(
     (id) => UNIVERSES[id].shardable
@@ -162,16 +229,19 @@ export function resolveUniverse(
       return allListings.filter(isLeveragedEtfListing);
     }
     case "ALL":
-      // ALL is sharded by the caller — never resolved directly.
-      return [];
+      // Issue #6032 — "ALL" is a shard plan (per-universe runs), not a
+      // universe a single run can resolve. Returning [] published an empty
+      // run that looked like a genuine zero-qualification night.
+      throw new ResearchUniverseRefusal(
+        "ALL",
+        RESEARCH_UNIVERSE_IDS,
+        "a shard plan is not resolvable for a single run",
+      );
     default:
       // Issue #5516: the configured default is a string until it reaches the
       // registry (defaultUniverseId is registry-free by design), so the one
       // place that indexes UNIVERSES is also the one place that refuses an id
       // it does not hold.
-      throw new Error(
-        `[universes] "${String(id)}" is not a screener universe (#5516). ` +
-          `Screener universes: ${(Object.keys(UNIVERSES) as UniverseId[]).join(", ")}.`,
-      );
+      throw new ResearchUniverseRefusal(String(id), RESEARCH_UNIVERSE_IDS);
   }
 }

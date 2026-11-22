@@ -46,6 +46,7 @@ import {
   NIGHTLY_RESEARCH_RECORD_ID,
 } from "../../services/researchScheduleGuard";
 import { resolveResearchJobConfig } from "../../config/researchJobConfig";
+import { researchUniverseIds } from "../../trading";
 import { isResearchVenueRefusal, resolveResearchVenue } from "../../services/researchVenue";
 import { recordLedgerRun } from "../../services/unifiedLedger";
 import { SqlJobRunRecordStore } from "../../data/doSqliteJobRunRecordAdapter";
@@ -1555,7 +1556,9 @@ export async function handleScreenerResearchRoutes(
         return Response.json({ error: "ResearchAgent binding not configured." }, { status: 503 });
       }
       const config = await agent.getResearchConfig();
-      return Response.json({ config });
+      // Issue #6032 — the accepted set is served with the settings so the
+      // editor renders a select fed from the registry (no client-side copy).
+      return Response.json({ config, universes: researchUniverseIds() });
     }
     if (path.endsWith("/research/settings") && request.method === "POST") {
       const userLogin = request.headers.get("x-user-login") || sessionId;
@@ -1565,6 +1568,11 @@ export async function handleScreenerResearchRoutes(
       }
       const patch = (await request.json().catch(() => null)) as Partial<import("../../services/researchConfig").ResearchConfig> | null;
       const out = await agent.saveConfig(patch ?? {});
+      // Issue #6032 — an unknown universe is refused here with the accepted
+      // set, not persisted to fail later as an empty run.
+      if (Array.isArray(out.errors) && out.errors.length > 0) {
+        return Response.json({ ...out, universes: researchUniverseIds() }, { status: 400 });
+      }
       return Response.json(out);
     }
 

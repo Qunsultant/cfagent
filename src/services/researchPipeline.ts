@@ -37,6 +37,7 @@ import type {
   ChainProvenance,
 } from "./researchGates";
 import { runStageGates } from "./researchGates";
+import { isResearchUniverseRefusal } from "../trading";
 import type { ResearchFeedStageOutput } from "./researchFeedHandoff";
 import type { ResearchEnrichStageOutput } from "./researchEnrichHandoff";
 import type {
@@ -320,7 +321,10 @@ export interface ResearchReport {
    * a non-empty universe. The report is still published (it is the evidence),
    * but the caller must record the run as failed, not as "nothing qualified".
    */
-  dataRefusal?: { code: "research_data_unavailable"; message: string };
+  dataRefusal?: {
+    code: "research_data_unavailable" | "research_universe_unknown";
+    message: string;
+  };
 }
 
 export interface ResearchRunOptions {
@@ -830,10 +834,14 @@ export async function runFeedStage(
   }
   let symbols: string[] = [];
   let universeError: string | null = null;
+  let universeRefusalCode: "research_universe_unknown" | undefined;
   try {
     symbols = await deps.provider.getUniverseSymbols(config.universe);
   } catch (err) {
     universeError = err instanceof Error ? err.message : String(err);
+    // Issue #6032 — a universe refusal is coded, so the report can say
+    // "this universe is not resolvable", not "retrieval failed".
+    if (isResearchUniverseRefusal(err)) universeRefusalCode = "research_universe_unknown";
   }
   const screened = symbols.slice(0, config.maxCandidates * 3);
   const quotes: Array<{ symbol: string; quote: QuoteSnapshot | null }> = [];
@@ -854,6 +862,7 @@ export async function runFeedStage(
     regime,
     universe: config.universe,
     universeError,
+    ...(universeRefusalCode ? { universeRefusalCode } : {}),
     symbols,
     quotes,
     universeSize: symbols.length,
@@ -921,6 +930,9 @@ export async function runResearchPipeline(
     stats.universeSize = feed.universeSize;
     stats.quotesRetrieved = feed.quotesRetrieved;
     // Fail closed: no universe, no ideas — still publish the report honestly.
+    // Issue #6032 — an unresolvable universe is a coded refusal naming the
+    // id, not a plausible "0 candidates" night.
+    const universeRefused = feed.universeRefusalCode === "research_universe_unknown";
     return finishReport({
       runId, config, opts, now, started, trace, stageTrace, regime,
       symbolEvaluations,
@@ -929,7 +941,18 @@ export async function runResearchPipeline(
         gate: "data_integrity",
         reason: `Universe retrieval failed: ${feed.universeError}.`,
       }],
-      stats, summary: "Universe retrieval failed; no candidates evaluated.",
+      stats,
+      summary: universeRefused
+        ? `Universe "${config.universe}" is not resolvable for a single run; no candidates evaluated.`
+        : "Universe retrieval failed; no candidates evaluated.",
+      ...(universeRefused
+        ? {
+            dataRefusal: {
+              code: "research_universe_unknown" as const,
+              message: `[${feed.universeRefusalCode}] universe "${config.universe}" — ${feed.universeError}`,
+            },
+          }
+        : {}),
     });
   }
   stats.universeSize = feed.universeSize;
@@ -1354,7 +1377,10 @@ function finishReport(args: {
   rejected: RejectedEntry[];
   stats: RunStats;
   summary: string;
-  dataRefusal?: { code: "research_data_unavailable"; message: string };
+  dataRefusal?: {
+    code: "research_data_unavailable" | "research_universe_unknown";
+    message: string;
+  };
 }): ResearchReport {
   const { runId, config, opts, now, started, trace, stageTrace, regime, ideas, watchlist, rejected, stats, summary, symbolEvaluations } = args;
   stats.durationMs = Date.now() - started;
