@@ -180,8 +180,10 @@ describe("#5516 run-level defaults are externalized", () => {
     // it does not hold, at the one place that indexes it.
     setVocabulary(withDefaults({ universe: "dow" }));
     expect(defaultUniverseId()).toBe("DOW");
-    expect(() => resolveUniverse(defaultUniverseId(), [])).toThrow(/"DOW" is not a screener universe/);
-    expect(() => resolveUniverse(defaultUniverseId(), [])).toThrow(/Screener universes/);
+    // Issue #6032 — the refusal is coded and names the accepted set.
+    expect(() => resolveUniverse(defaultUniverseId(), [])).toThrow(/"DOW" is not a research universe/);
+    expect(() => resolveUniverse(defaultUniverseId(), [])).toThrow(/research_universe_unknown/);
+    expect(() => resolveUniverse(defaultUniverseId(), [])).toThrow(/Accepted:/);
 
     setVocabulary(withDefaults({ provider: "nasdaq" }));
     expect(() => defaultStockScreenProvider()).toThrow(/configured default provider "nasdaq"/);

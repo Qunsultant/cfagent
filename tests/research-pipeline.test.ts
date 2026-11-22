@@ -31,6 +31,7 @@ import {
   storeReportAtGeneration,
 } from "../src/services/scheduledReports";
 import { MockSqlStorage } from "./mock-sql";
+import { researchUniverseIds, ResearchUniverseRefusal } from "../src/trading";
 
 const NOW = Date.now();
 
@@ -143,6 +144,33 @@ describe("runResearchPipeline", () => {
     expect(report.stats.chainsAttempted).toBe(1);
     expect(report.brokerId).toBe("alpaca");
     expect(report.mode).toBe("paper");
+  });
+
+  it("an unresolvable universe is a coded refusal naming the id, with no quote attempt (#6032)", async () => {
+    const base = fixtureProvider();
+    let quoteCalls = 0;
+    const provider: ResearchDataProvider = {
+      ...base,
+      getUniverseSymbols: async (universe: string) => {
+        throw new ResearchUniverseRefusal(universe, researchUniverseIds());
+      },
+      getQuote: async (symbol) => {
+        quoteCalls += 1;
+        return base.getQuote(symbol);
+      },
+    };
+    const report = await runResearchPipeline(
+      { provider },
+      testConfig({ universe: "dow" }),
+      { trigger: "manual", userLogin: "tester", brokerId: "alpaca", mode: "paper", runId: "universe-refusal-6032", now: NOW },
+    );
+    expect(quoteCalls).toBe(0);
+    expect(report.dataRefusal).toEqual({
+      code: "research_universe_unknown",
+      message: expect.stringContaining("dow"),
+    });
+    expect(report.summary).toContain('"dow" is not resolvable');
+    expect(report.stats.universeSize).toBe(0);
   });
 
   it("counts empty option-chain responses as attempted refusals within the chain budget", async () => {

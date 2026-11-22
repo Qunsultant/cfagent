@@ -25,6 +25,7 @@ import {
   Flex,
   Notice,
   PageSection,
+  Select,
   Stack,
   Table,
   TextInput,
@@ -210,10 +211,20 @@ interface RunSummaryView {
   summary: string;
 }
 
-const CONFIG_FIELDS: { key: string; label: string; type: "number" | "boolean" | "string"; hint: string }[] = [
+const CONFIG_FIELDS: {
+  key: string;
+  label: string;
+  type: "number" | "boolean" | "string" | "select";
+  hint: string;
+}[] = [
   { key: "marketCapMin", label: "Min market cap ($)", type: "number", hint: "Spec default $5B for companies." },
   { key: "maxIdeas", label: "Max qualified ideas", type: "number", hint: "Spec: up to five." },
-  { key: "universe", label: "Universe", type: "string", hint: "Screening universe id." },
+  {
+    key: "universe",
+    label: "Universe",
+    type: "select",
+    hint: "Screening universe — resolved from the listings directory by market-cap rank.",
+  },
   { key: "quoteFreshnessSeconds", label: "Quote freshness (s)", type: "number", hint: "Option quote max age (quote-quality gate)." },
   { key: "maxSpreadPct", label: "Max spread (fraction of mid)", type: "number", hint: "Quote-quality gate threshold." },
   { key: "minOptionVolume", label: "Min option volume", type: "number", hint: "Activity threshold." },
@@ -376,6 +387,8 @@ function TradeCardDetail({ card }: { card: TradeCardView }) {
 
 export function ResearchRunsPanel({ activeEnv, userLogin, onSendPrompt }: ResearchRunsPanelProps) {
   const [config, setConfig] = useState<Record<string, unknown> | null>(null);
+  /** Issue #6032 — the accepted universes, served with the settings. */
+  const [universes, setUniverses] = useState<string[]>([]);
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState("");
@@ -392,7 +405,10 @@ export function ResearchRunsPanel({ activeEnv, userLogin, onSendPrompt }: Resear
     try {
       const res = await apiFetch("/api/research/settings", { headers: hdrs(userLogin) });
       if (!res.ok) return;
-      const data = await readJson<{ config?: Record<string, unknown> }>(res);
+      const data = await readJson<{ config?: Record<string, unknown>; universes?: string[] }>(res);
+      if (Array.isArray(data.universes) && data.universes.length > 0) {
+        setUniverses(data.universes);
+      }
       if (data.config) {
         setConfig(data.config);
         const d: Record<string, string> = {};
@@ -586,6 +602,18 @@ export function ResearchRunsPanel({ activeEnv, userLogin, onSendPrompt }: Resear
                   checked={(draft[f.key] ?? "") === "1" || (draft[f.key] ?? "").toLowerCase() === "true"}
                   onChange={(e) => setDraft({ ...draft, [f.key]: e.target.checked ? "1" : "0" })}
                 />
+              ) : f.type === "select" && f.key === "universe" && universes.length > 0 ? (
+                <Select
+                  aria-labelledby={`rrf-${f.key}`}
+                  value={draft[f.key] ?? ""}
+                  onChange={(e) => setDraft({ ...draft, [f.key]: e.target.value })}
+                >
+                  {universes.map((id) => (
+                    <option key={id} value={id}>
+                      {id}
+                    </option>
+                  ))}
+                </Select>
               ) : (
                 <TextInput
                   aria-labelledby={`rrf-${f.key}`}

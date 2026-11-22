@@ -21,6 +21,9 @@
  */
 
 import {
+  normalizeResearchUniverseId,
+  researchUniverseIds,
+  ResearchUniverseRefusal,
   resolveUniverse,
   fetchPlatformTechnicalsBatch,
   buildCalibratedOptionChains,
@@ -227,11 +230,16 @@ export class EtradeResearchDataProvider implements ResearchDataProvider {
   }
 
   async getUniverseSymbols(universe: string): Promise<string[]> {
+    // Issue #6032 — the id is validated before the listings are read and
+    // long before a quote is attempted: an unknown (or `ALL`) universe is
+    // a named refusal carrying the accepted set, never a `[]` that maps to
+    // an empty "0 candidates" run.
+    const id = normalizeResearchUniverseId(universe);
+    if (id === null) {
+      throw new ResearchUniverseRefusal(universe, researchUniverseIds());
+    }
     const listings = await this.listings();
-    const resolved = resolveUniverse(
-      universe as "NASDAQ100",
-      listings
-    );
+    const resolved = resolveUniverse(id, listings);
     return resolved.map((l) => l.symbol);
   }
 
