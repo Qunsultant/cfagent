@@ -40,6 +40,7 @@
         "ALTER TABLE mas_async_jobs ADD COLUMN schedule_id TEXT",
         "ALTER TABLE mas_async_jobs ADD COLUMN last_activity_at TEXT",
         "ALTER TABLE mas_async_jobs ADD COLUMN error_code TEXT",
+        "ALTER TABLE mas_async_jobs ADD COLUMN host_version TEXT",
         "CREATE INDEX IF NOT EXISTS idx_mas_async_jobs_parent ON mas_async_jobs(parent_job_id)",
         "CREATE INDEX IF NOT EXISTS idx_mas_async_jobs_chain ON mas_async_jobs(chain_id)"
       ]

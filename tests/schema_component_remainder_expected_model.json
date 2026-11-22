@@ -526,6 +526,11 @@
           "name": "error_code",
           "type": "TEXT",
           "pk": 0
+        },
+        {
+          "name": "host_version",
+          "type": "TEXT",
+          "pk": 0
         }
       ],
       "constraints": {}

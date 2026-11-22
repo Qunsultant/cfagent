@@ -404,7 +404,9 @@ describe("recreate, tenant scope (#4383)", () => {
     for (const inst of body.instances) {
       // #4767 adds migrations 0071/0072 (4 remainder ALTERs): 132 → 136.
       // Issue #3185 adds the usage_events tenant index to the DO leg: 139 → 140.
-      expect(inst.selected).toHaveLength(140);
+      // Issue #6167 adds one probed DO ALTER (mas_async_jobs.host_version):
+      // 140 → 141.
+      expect(inst.selected).toHaveLength(141);
       // Issue #4623 adds one probed DO statement (mas_async_jobs.tenant_id).
       // Issue #3185 adds one probed DO statement (usage_events.tenant_id):
       // the fresh CREATE TABLE already carries the column, so the ALTER
@@ -484,7 +486,9 @@ describe("recreate, tenant scope (#4383)", () => {
       expect(inst.report.outcome).toBe("succeeded");
       // #4767 adds migrations 0071/0072 (4 remainder ALTERs): 132 → 136.
       // Issue #3185 adds the usage_events tenant index to the DO leg: 139 → 140.
-      expect(inst.report.executed).toHaveLength(140);
+      // Issue #6167 adds one probed DO ALTER (mas_async_jobs.host_version):
+      // 140 → 141.
+      expect(inst.report.executed).toHaveLength(141);
       expect(inst.verification.ok).toBe(true);
     }
     expect(body.uncreatableLayers).toHaveLength(5);
