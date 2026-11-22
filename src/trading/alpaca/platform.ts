@@ -21,6 +21,7 @@ import {
   buildAlpacaOptionsConfig,
   configuredAlpacaBase,
   fetchAlpacaOptionExpireDates,
+  isAlpacaBudgetExhaustion,
   resolveAlpacaTradingBase,
   type AlpacaOptionsConfig,
 } from "./optionsData";
@@ -329,6 +330,15 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
   private keyIdLast4: string | null = null;
   private readyPromise: Promise<void> | null = null;
 
+  /**
+   * Issue #6171: the last error from a chain assembly, mirroring the E*TRADE
+   * #155 contract. The platform had no `getLastError()` at all, so
+   * `platformChainSource(alpaca).lastError` was ALWAYS undefined and the
+   * screener's fallback reason was always the generic message. Cleared on
+   * entry to each chain fetch, set on every failure return.
+   */
+  private lastError: string | undefined;
+
   private ready(): Promise<void> {
     this.readyPromise ??= (async () => {
       const side = alpacaTradingSide(this.env, this.overrideEnv);
@@ -515,6 +525,16 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
    * displayable price is omitted rather than emitted with invented numbers;
    * greeks and IV appear only when Alpaca sends them.
    */
+  /**
+   * Issue #6171: the last chain-fetch error, mirroring the E*TRADE #155
+   * contract (`getLastError()`). `platformChainSource` reads this getter,
+   * so a failed Alpaca chain fetch now names its cause instead of leaving
+   * the screener with an empty error channel.
+   */
+  getLastError(): string | undefined {
+    return this.lastError;
+  }
+
   async getOptionChains(
     params: {
       symbol: string;
@@ -530,16 +550,30 @@ export class AlpacaTradingPlatform implements ITradingPlatform {
     requestBudget?: import("../interfaces").OptionRequestBudget,
   ): Promise<BrokerOptionChain | null> {
     await this.ready();
+    this.lastError = undefined;
     // Issue #3990: the assembly lives in optionsData.ts now — the
     // data adapter's options source reads the same function, so the
     // two surfaces cannot disagree about a chain. The platform
     // passes its own getQuote as the underlying fetcher.
-    return assembleAlpacaOptionChain(
-      this.optionsConfig(),
-      params,
-      (symbol) => this.getQuote(symbol),
-      requestBudget,
-    );
+    // Issue #6171: the assembly throws a named error when the chain cannot
+    // be built (no contracts, no two-sided quote, upstream failure). The
+    // platform stays non-throwing — record the reason and return null, so
+    // the caller (and `platformChainSource.lastError`) can name it.
+    try {
+      return await assembleAlpacaOptionChain(
+        this.optionsConfig(),
+        params,
+        (symbol) => this.getQuote(symbol),
+        requestBudget,
+      );
+    } catch (error) {
+      // Issue #6171: budget exhaustion is a caller-side precondition failure
+      // (#3233 contract) — re-throw it so the caller can defer, instead of
+      // recording it as a chain error and returning null.
+      if (isAlpacaBudgetExhaustion(error)) throw error;
+      this.lastError = error instanceof Error ? error.message : String(error);
+      return null;
+    }
   }
 
   /** Verbatim live read with the error carried alongside (#3233 parity with E*TRADE). */

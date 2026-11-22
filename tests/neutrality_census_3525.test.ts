@@ -953,6 +953,16 @@ function measure(): Map<string, number> {
  * leg dispatch's job, so the one new line is dispositioned
  * INTEGRATION. 1 raise (screener-agent.ts nasdaq 11->12).
  * Baseline totals move 1390/11286 -> 1390/11287.
+ * Baseline update (#6171, 2026-11-22): the options chain fetch fix names
+ * the provider in the Alpaca adapter's own error messages — the assembly
+ * throws "Alpaca option chain for <symbol> <expiry>: no contracts listed"
+ * and "no contract had a two-sided quote" instead of returning null
+ * silently, so a failed run's message names its cause. Naming the
+ * provider is the adapter's job, so the two new lines are dispositioned
+ * INTEGRATION. 1 raise (optionsData.ts alpaca 23->25). The screener's
+ * new comment mentions were neutralized instead ("broker client",
+ * "platform path"), so no screener row is added or raised.
+ * Baseline totals move 1390/11287 -> 1390/11289.
  */
 const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (188 rows / 989 lines) ----
@@ -1804,7 +1814,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/trading/alpaca/credentials.ts", "alpaca", 6],
   ["src/trading/alpaca/fillLots.ts", "alpaca", 4],
   ["src/trading/alpaca/occSymbol.ts", "alpaca", 8],
-  ["src/trading/alpaca/optionsData.ts", "alpaca", 23],
+  ["src/trading/alpaca/optionsData.ts", "alpaca", 25],
   ["src/trading/alpaca/optionsData.ts", "etrade", 5],
   ["src/trading/alpaca/platform.ts", "alpaca", 113],
   ["src/trading/alpaca/platform.ts", "etrade", 8],
