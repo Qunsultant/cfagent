@@ -108,8 +108,9 @@ export class SqlFeedSnapshotStore implements FeedSnapshotStore {
         },
       });
       // Prune one row at a time (single-id DELETEs): the shared mock
-      // does not evaluate NOT IN subqueries, and per-row deletes are
-      // exactly as cheap at this volume.
+      // used not to evaluate NOT IN subqueries (issue #6099 fixed
+      // that in tests/mock-sql.ts), and per-row deletes are exactly
+      // as cheap at this volume — the shape stays as-is.
       const ids = executeDoDml<Array<{ id: string }>>(
         DO_DML_CATALOGUE,
         this.sql,

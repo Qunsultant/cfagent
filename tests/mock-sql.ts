@@ -204,7 +204,7 @@ export class MockSqlStorage implements SqlStorage {
     }
 
     // SELECT COUNT(*) FROM table [WHERE ...]
-    const countMatch = q.match(/SELECT\s+COUNT\(\*\)\s+AS\s+count\s+FROM\s+(\w+)(?:\s+WHERE\s+(.+))?/i);
+    const countMatch = q.match(/SELECT\s+COUNT\(\*\)\s+AS\s+count\s+FROM\s+(\w+)(?:\s+WHERE\s+([\s\S]+))?/i);
     if (countMatch) {
       const tbl = countMatch[1];
       const rows = this.tables.get(tbl) || [];
@@ -221,7 +221,7 @@ export class MockSqlStorage implements SqlStorage {
     // SELECT <cols> FROM table (supports "*" or an explicit column list;
     // issue #255 extended this from *-only so retention-style queries like
     // SELECT id FROM ... WHERE created_at < ? behave like real SQLite)
-    const selectMatch = q.match(/SELECT\s+(\*|[\w\s,]+)\s+FROM\s+(\w+)(.*?)$/i);
+    const selectMatch = q.match(/SELECT\s+(\*|[\w\s,]+)\s+FROM\s+(\w+)(.*?)$/is);
     if (selectMatch) {
       const colSpec = selectMatch[1].trim();
       const tbl = selectMatch[2];
@@ -239,7 +239,7 @@ export class MockSqlStorage implements SqlStorage {
       }
 
       // WHERE clause
-      const whereMatch = rest.match(/WHERE\s+(.+?)(?:\s+ORDER\s+BY|\s+LIMIT|\s+OFFSET|$)/i);
+      const whereMatch = rest.match(/WHERE\s+([\s\S]+?)(?:\s+ORDER\s+BY|\s+LIMIT|\s+OFFSET|$)/i);
       let argIndex = 0;
       if (whereMatch) {
         const whereClause = whereMatch[1];
@@ -293,7 +293,7 @@ export class MockSqlStorage implements SqlStorage {
     // Issue #887: OR REPLACE is matched too — several services upsert
     // with INSERT OR REPLACE (strategy reviews, strategy weights);
     // real SQLite replaces the conflicting row, the mock must as well.
-    const insertMatch = q.match(/INSERT\s+(?:OR\s+(IGNORE|REPLACE)\s+)?INTO\s+(\w+)\s*\((.*?)\)\s*VALUES\s*\((.*?)\)/i);
+    const insertMatch = q.match(/INSERT\s+(?:OR\s+(IGNORE|REPLACE)\s+)?INTO\s+(\w+)\s*\(([\s\S]*?)\)\s*VALUES\s*\(([\s\S]*?)\)/i);
     if (insertMatch) {
       const tbl = insertMatch[2];
       const cols = insertMatch[3].split(",").map((c) => c.trim());
@@ -402,7 +402,7 @@ export class MockSqlStorage implements SqlStorage {
     }
 
     // DELETE FROM table [WHERE id = ?]
-    const deleteMatch = q.match(/DELETE\s+FROM\s+(\w+)(?:\s+WHERE\s+(.+))?/i);
+    const deleteMatch = q.match(/DELETE\s+FROM\s+(\w+)(?:\s+WHERE\s+([\s\S]+))?/i);
     if (deleteMatch) {
       const tbl = deleteMatch[1];
       const wherePart = deleteMatch[2];
@@ -462,6 +462,31 @@ export class MockSqlStorage implements SqlStorage {
     args: unknown[]
   ): { matched: boolean; consumed: number } {
     let consumed = 0;
+    // Issue #6099 — col NOT IN (SELECT ...): FIRST, before the
+    // other branches — the subquery text itself contains `= ?`
+    // (and possibly IS NULL / LIKE / comparisons), which the
+    // branches below would match as if they were this
+    // condition. Evaluate the subquery and check membership,
+    // like real SQLite. The DO job-run-record prune (and the
+    // copilot retention prunes) delete every row for the owner
+    // except the subquery's newest N; the old lenient fallback
+    // matched this condition as true, so the prune deleted
+    // everything — and a multi-line WHERE never even reached it
+    // (the DELETE regex truncated it at the first newline).
+    // Consumed args = the subquery's `?` count. Note: the
+    // mock's rows carry no auto-increment id, so a SELECT id
+    // subquery yields undefined for every row — and undefined is
+    // among the kept values, so nothing is pruned below the cap,
+    // exactly like real SQLite.
+    const notInMatch = cond.match(/(\w+)\s+NOT\s+IN\s*\(\s*(SELECT[\s\S]*)\s*\)\s*$/i);
+    if (notInMatch) {
+      const col = notInMatch[1];
+      const subquery = notInMatch[2];
+      const kept = Array.from(this.exec(subquery, ...args)) as Array<Record<string, unknown>>;
+      const keptValues = new Set(kept.map((k) => k[col]));
+      const consumed = (subquery.match(/\?/g) || []).length;
+      return { matched: !keptValues.has(row[col]), consumed };
+    }
     // IS NULL / IS NOT NULL (no args consumed).
     const nullMatch = cond.match(/(\w+)\s+IS\s+(NOT\s+)?NULL/i);
     if (nullMatch) {

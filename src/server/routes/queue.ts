@@ -241,7 +241,7 @@ export async function dispatchRunLedgerProjectQueueWork(opts: {
   }
   type ProjectQueuedRunLedger = {
     projectQueuedRunLedger: (input: {
-      ledger: "reports" | "async_jobs";
+      ledger: "reports" | "async_jobs" | "job_run_records";
       naturalKey: string;
       tenantId: string;
       userLogin: string;

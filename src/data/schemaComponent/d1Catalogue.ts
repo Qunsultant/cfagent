@@ -3136,6 +3136,42 @@ export const D1_CATALOGUE_ENTRIES: CatalogueEntry[] = [
     form: "literal",
   },
   {
+    // Issue #6099 — the projection tenant: a DO-written row's owning
+    // tenant, stamped by the projector. Engine-written rows read
+    // NULL (the engine never had a tenant) — null is honest, never
+    // a default.
+    code: "schema.d1.job_run_records.alter_table_add_column_tenant_id",
+    plane: "d1",
+    table: "job_run_records",
+    statement: `ALTER TABLE job_run_records ADD COLUMN tenant_id TEXT`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    // Issue #6099 — when the row landed via the projector (null for
+    // engine-written rows, which never pass through the projector).
+    code: "schema.d1.job_run_records.alter_table_add_column_projected_at_ms",
+    plane: "d1",
+    table: "job_run_records",
+    statement: `ALTER TABLE job_run_records ADD COLUMN projected_at_ms INTEGER`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    // Issue #6099 — the derived identity (job_id, started,
+    // finished) as the projector's conflict target: one D1 row per
+    // run, so a re-projection is an idempotent no-op instead of a
+    // duplicate. The engine's sequential per-job execution already
+    // guarantees the identity unique per run.
+    code: "schema.d1.job_run_records.create_unique_index_job_run_records_identity_idx",
+    plane: "d1",
+    table: "job_run_records",
+    index: "job_run_records_identity_idx",
+    statement: `CREATE UNIQUE INDEX IF NOT EXISTS job_run_records_identity_idx ON job_run_records (job_id, started, finished)`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
     // Issue #5887 — the run-stamp on the instance, captured at dispatch.
     code: "schema.d1.job_pipeline_instances.alter_table_add_column_run_definition_version",
     plane: "d1",
@@ -3564,6 +3600,11 @@ export const D1_MIGRATION_CODES: Record<number, readonly string[]> = {
   ],
   73: [
     "schema.d1.job_run_records.create_index_job_run_records_recent_idx",
+  ],
+  81: [
+    "schema.d1.job_run_records.alter_table_add_column_tenant_id",
+    "schema.d1.job_run_records.alter_table_add_column_projected_at_ms",
+    "schema.d1.job_run_records.create_unique_index_job_run_records_identity_idx",
   ],
 };
 

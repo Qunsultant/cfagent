@@ -1,18 +1,22 @@
 /**
  * Issue #4116 — one system-of-record D1: the port types for the DO
- * run-ledger projection (mas_reports, mas_async_jobs → D1).
+ * run-ledger projection (mas_reports, mas_async_jobs, and — issue
+ * #6099 — job_run_records → D1).
  *
  * This module imports port types only — never a store client, never
  * drizzle-orm (the journalPosting structural rule). The D1 side
- * lives in d1RunLedgerAdapter.ts; the shared projector logic in
- * runLedgerProjection.ts; the carrier-config read in
+ * lives in d1RunLedgerAdapter.ts (reports/async jobs) and
+ * d1JobRunRecordAdapter.ts (job run records); the shared projector
+ * logic in runLedgerProjection.ts; the carrier-config read in
  * services/projectionCarriers.ts.
  *
  * Grain: one D1 row per DO row, keyed on the DO row's natural key
- * (report id / async job id). The DO row stays authoritative; the
- * D1 row is its projection. A projected row carries the twin link
- * (linkedJobRunId) when the projection resolved it exactly — null
- * otherwise, never guessed.
+ * (report id / async job id / the job run record's derived
+ * identity (jobId, started, finished)). The DO row stays
+ * authoritative; the D1 row is its projection. A projected row
+ * carries the twin link (linkedJobRunId) when the projection
+ * resolved it exactly — null otherwise, never guessed. A projected
+ * job run record IS the twin, so its link is always null.
  */
 import type { JobRunRecord } from "../services/jobRunRecords";
 
@@ -92,6 +96,20 @@ export interface ProjectedAsyncJobRow extends AsyncJobProjectionInput {
   projectedAtMs: number;
 }
 
+/**
+ * Issue #6099 — a DO job_run_records row as the projector receives
+ * it: the DO row's own shape, verbatim, plus its owning tenant.
+ * The record is nested, not re-declared flat: JobRunRecord already
+ * exists as one type, and a second flat copy of its ~20 fields
+ * would drift. The projector stamps projectedAtMs itself (the
+ * adapter stamps it from nowMs — callers never stamp projection
+ * time themselves).
+ */
+export interface JobRunRecordProjectionInput {
+  record: JobRunRecord;
+  tenantId: string;
+}
+
 /** The stored carrier-config row (one per tenant). */
 export interface TenantProjectionCarriersRow {
   tenantId: string;
@@ -117,6 +135,11 @@ export interface ProjectRunLedgerResult {
 export interface RunLedgerProjector {
   projectReport(input: ReportProjectionInput, nowMs: number): Promise<ProjectRunLedgerResult>;
   projectAsyncJob(input: AsyncJobProjectionInput, nowMs: number): Promise<ProjectRunLedgerResult>;
+  /** Issue #6099 — project one DO job run record into D1 (its own twin; linkedJobRunId is always null). */
+  projectJobRunRecord(
+    input: JobRunRecordProjectionInput,
+    nowMs: number,
+  ): Promise<ProjectRunLedgerResult>;
 }
 
 /** The D1 read side the projector needs for twin-link resolution. */

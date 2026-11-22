@@ -57,12 +57,11 @@ import {
   readTenantProjectionCarriers,
   type TenantProjectionCarriersRead,
 } from "../src/services/projectionCarriers";
-import {
-  createRunLedgerProjector,
-  resolveLinkedJobRunId,
-  type ReportProjectionInput,
-  type AsyncJobProjectionInput,
-} from "../src/data/runLedgerProjection";
+import { createRunLedgerProjector, resolveLinkedJobRunId, type ReportProjectionInput, type AsyncJobProjectionInput, type JobRunRecordProjectionInput } from "../src/data/runLedgerProjection";
+import { d1MigrationSql } from "../src/data/schemaComponent/d1Catalogue";
+import { SqlJobRunRecordStore } from "../src/data/doSqliteJobRunRecordAdapter";
+import { recordLedgerRun } from "../src/services/unifiedLedger";
+import { d1JobRunRecordId } from "../src/services/jobRunRecordReads";
 import {
   createD1AuditReportDb,
   D1AuditReportAdapter,
@@ -86,6 +85,7 @@ import { storeReportAtGeneration } from "../src/services/scheduledReports";
 import {
   projectAsyncJobBestEffort,
   projectCanonicalReportBestEffort,
+  projectJobRunRecordBestEffort,
 } from "../src/services/runLedgerProjectionHooks";
 import type { AsyncJobStoredRow } from "../src/data/asyncJobPorts";
 import { createAuditReportAdapter } from "../src/data/createAuditReportPorts";
@@ -207,6 +207,23 @@ function asyncJobInput(overrides: Partial<AsyncJobProjectionInput> = {}): AsyncJ
     tenantId: "primary",
     ...overrides,
   };
+}
+
+function jobRunRecordInput(overrides: Partial<JobRunRecord> = {}): JobRunRecordProjectionInput {
+  return { record: jobRecord(overrides), tenantId: "primary" };
+}
+
+/** One copilot-cycle DO row (scheduled-agent-goal, copilot dispatch) — the #6099 acceptance case. */
+function copilotCycleInput(): JobRunRecordProjectionInput {
+  return jobRunRecordInput({
+    system: "scheduled-agent-goal",
+    jobId: "goal-weekly-brief",
+    operation: "run",
+    started: "2026-11-12T00:00:00.000Z",
+    finished: "2026-11-12T00:05:00.000Z",
+    outcome: "success",
+    triggeredBy: "copilot",
+  });
 }
 
 describe("migration 0059 (run ledger, #4116)", () => {
@@ -423,7 +440,7 @@ describe("shared projector (one writer, three carriers, #4116)", () => {
     const jobDb = createD1JobRunRecordDb(mock as never);
     await ensureJobRunRecordsSchema(jobDb);
     const jobRecordStore = new D1JobRunRecordStore(jobDb);
-    const p = createRunLedgerProjector({ reportStore, asyncJobStore, jobRecordStore });
+    const p = createRunLedgerProjector({ reportStore, asyncJobStore, jobRecordStore, projectedJobRecordStore: jobRecordStore });
     return { p, reportStore, asyncJobStore, jobRecordStore };
   }
 
@@ -498,6 +515,97 @@ describe("shared projector (one writer, three carriers, #4116)", () => {
   });
 });
 
+describe("job-run-records projection (DO→D1, #6099)", () => {
+  async function jobRunProjector() {
+    const mock = new MockD1Database();
+    const auditDb = createD1AuditReportDb(mock as never);
+    await ensureAuditReportSchema(auditDb);
+    const reportStore = new D1AuditReportAdapter(auditDb);
+    const runDb = createD1RunLedgerDb(mock as never);
+    await ensureRunLedgerSchema(runDb);
+    const asyncJobStore = new D1RunLedgerAdapter(runDb);
+    const jobDb = createD1JobRunRecordDb(mock as never);
+    await ensureJobRunRecordsSchema(jobDb);
+    const jobRecordStore = new D1JobRunRecordStore(jobDb);
+    const p = createRunLedgerProjector({ reportStore, asyncJobStore, jobRecordStore, projectedJobRecordStore: jobRecordStore });
+    return { p, mock, jobDb, reportStore, asyncJobStore, jobRecordStore };
+  }
+
+  function rawRow(mock: MockD1Database, jobId: string): { tenantId: string | null; projectedAtMs: number | null } {
+    return mock.sqlite
+      .prepare("SELECT tenant_id AS tenantId, projected_at_ms AS projectedAtMs FROM job_run_records WHERE job_id = ?")
+      .get(jobId) as { tenantId: string | null; projectedAtMs: number | null };
+  }
+
+  it("migration 0081 registers the projection columns + unique identity", () => {
+    const found = ALL_MIGRATIONS.find((m) => m.version === 81);
+    expect(found).toBeDefined();
+    expect(found?.name).toBe("0081_job_run_records_projection");
+    expect(d1MigrationSql(81)).toContain("ADD COLUMN tenant_id TEXT");
+    expect(d1MigrationSql(81)).toContain("ADD COLUMN projected_at_ms INTEGER");
+    expect(d1MigrationSql(81)).toContain(
+      "CREATE UNIQUE INDEX IF NOT EXISTS job_run_records_identity_idx",
+    );
+  });
+
+  it("ensureRunLedgerSchema applies 0081 (columns + unique index exist after)", async () => {
+    const mock = new MockD1Database();
+    const runDb = createD1RunLedgerDb(mock as never);
+    await ensureRunLedgerSchema(runDb);
+    const cols = mock.sqlite.prepare("PRAGMA table_info(job_run_records)").all() as Array<{
+      name: string;
+    }>;
+    expect(cols.map((c) => c.name)).toContain("tenant_id");
+    expect(cols.map((c) => c.name)).toContain("projected_at_ms");
+    const idx = mock.sqlite
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'job_run_records_identity_idx'",
+      )
+      .get();
+    expect(idx).not.toBeUndefined();
+  });
+
+  it("projects a DO job run record verbatim, stamps tenant + projectedAt, and replays as already-current", async () => {
+    const { p, mock, jobRecordStore } = await jobRunProjector();
+    const nowMs = Date.parse("2026-11-12T00:06:00.000Z");
+    const first = await p.projectJobRunRecord(jobRunRecordInput(), nowMs);
+    expect(first.projected).toBe(true);
+    expect(first.linkedJobRunId).toBeNull();
+    const listed = await jobRecordStore.listByJob(
+      "screener:chat:ALL:2026-11-12T00:00:00.000Z:abcd1234",
+    );
+    expect(listed).toHaveLength(1);
+    expect(listed[0].outcome).toBe("success");
+    expect(listed[0].operation).toBe("run");
+    expect(listed[0].system).toBe("job-pipeline");
+    const raw = rawRow(mock, "screener:chat:ALL:2026-11-12T00:00:00.000Z:abcd1234");
+    expect(raw.tenantId).toBe("primary");
+    expect(raw.projectedAtMs).toBe(nowMs);
+    const replay = await p.projectJobRunRecord(jobRunRecordInput(), Date.now());
+    expect(replay).toEqual({ projected: false, skipped: "already-current", linkedJobRunId: null });
+    expect(
+      await jobRecordStore.listByJob("screener:chat:ALL:2026-11-12T00:00:00.000Z:abcd1234"),
+    ).toHaveLength(1);
+  });
+
+  it("an engine-written D1 row keeps its fields when its DO twin projects (null tenant upgrades)", async () => {
+    const { p, mock, jobRecordStore } = await jobRunProjector();
+    await jobRecordStore.record(jobRecord());
+    expect(rawRow(mock, "screener:chat:ALL:2026-11-12T00:00:00.000Z:abcd1234").tenantId).toBeNull();
+    const first = await p.projectJobRunRecord(jobRunRecordInput(), Date.now());
+    expect(first.projected).toBe(true);
+    const listed = await jobRecordStore.listByJob(
+      "screener:chat:ALL:2026-11-12T00:00:00.000Z:abcd1234",
+    );
+    expect(listed).toHaveLength(1);
+    expect(listed[0].outcome).toBe("success");
+    expect(listed[0].operation).toBe("run");
+    expect(rawRow(mock, "screener:chat:ALL:2026-11-12T00:00:00.000Z:abcd1234").tenantId).toBe(
+      "primary",
+    );
+  });
+});
+
 describe("best-effort post (ORM carrier, #4116)", () => {
   it("posts a report and an async job; a replay counts as posted (already-current)", async () => {
     const mock = new MockD1Database();
@@ -528,6 +636,31 @@ describe("best-effort post (ORM carrier, #4116)", () => {
     );
     expect(replay.posted).toBe(true);
     expect(replay.skipped).toBe("already-current");
+  });
+
+  it("posts a job run record; a replay counts as posted (already-current)", async () => {
+    const mock = new MockD1Database();
+    const env = { AGENT_DB: mock as never };
+    const first = await postRunLedgerBestEffort(
+      env,
+      "primary",
+      { ledger: "job_run_records", row: jobRunRecordInput() } as never,
+      Date.now(),
+    );
+    expect(first.posted).toBe(true);
+    expect(first.projected).toBe(true);
+    const replay = await postRunLedgerBestEffort(
+      env,
+      "primary",
+      { ledger: "job_run_records", row: jobRunRecordInput() } as never,
+      Date.now(),
+    );
+    expect(replay.posted).toBe(true);
+    expect(replay.skipped).toBe("already-current");
+    const store = new D1JobRunRecordStore(createD1JobRunRecordDb(mock as never));
+    expect(
+      await store.listByJob("screener:chat:ALL:2026-11-12T00:00:00.000Z:abcd1234"),
+    ).toHaveLength(1);
   });
 
   it("unbound AGENT_DB is a named skip, never a throw", async () => {
@@ -578,6 +711,47 @@ describe("queue carrier (run-ledger.project, #4116)", () => {
       userLogin: "alice",
     });
     expect(JSON.stringify(envelope)).not.toContain("Scanned 100");
+  });
+
+  it("publishes a job-run-records claim-check envelope (refs only, never the row payload)", async () => {
+    const sent: unknown[] = [];
+    const queue = { send: async (msg: unknown) => void sent.push(msg) };
+    const key = "goal-weekly-brief|2026-11-12T00:00:00.000Z|2026-11-12T00:05:00.000Z";
+    const res = await publishRunLedgerProject({
+      queue: queue as never,
+      message: { ledger: "job_run_records", naturalKey: key, tenantId: "primary", userLogin: "alice" } as never,
+      at: "2026-11-12T00:01:00.000Z",
+    });
+    expect(res.published).toBe(true);
+    expect(sent).toHaveLength(1);
+    const envelope = sent[0] as { type: string; id: string; data: Record<string, unknown> };
+    expect(envelope.type).toBe("run-ledger.project");
+    expect(envelope.id.startsWith("run-ledger-project:job_run_records:")).toBe(true);
+    expect(envelope.data).toEqual({
+      ledger: "job_run_records",
+      naturalKey: key,
+      tenantId: "primary",
+      userLogin: "alice",
+    });
+    expect(JSON.stringify(envelope)).not.toContain("success");
+  });
+
+  it("the guard accepts a job-run-records envelope", () => {
+    const key = "goal-weekly-brief|2026-11-12T00:00:00.000Z|2026-11-12T00:05:00.000Z";
+    const good = runLedgerProjectEvent({
+      ledger: "job_run_records",
+      naturalKey: key,
+      tenantId: "primary",
+      userLogin: "alice",
+      at: "2026-11-12T00:01:00.000Z",
+    } as never);
+    expect(isRunLedgerProjectEnvelope(good)).toBe(true);
+    expect(extractRunLedgerProject(good)).toEqual({
+      ledger: "job_run_records",
+      naturalKey: key,
+      tenantId: "primary",
+      userLogin: "alice",
+    });
   });
 
   it("no queue binding, bad ledger, and default login are named refusals, never throws", async () => {
@@ -896,6 +1070,99 @@ describe("write-site hooks (ORM + queue carriers, #4116)", () => {
     expect(await audit.listReports("primary", { limit: 10 })).toHaveLength(1);
     expect(sent).toHaveLength(0);
   });
+
+  it("the job-run-record hook projects the row and publishes the claim-check", async () => {
+    const mock = new MockD1Database();
+    await configureCarriers(mock, { queues: true, orm: true, sweep: false });
+    const sent: unknown[] = [];
+    const env = hookEnv(mock, { send: async (msg: unknown) => void sent.push(msg) });
+    const sql = new MockSqlStorage();
+    const record = recordLedgerRun(new SqlJobRunRecordStore(sql as never), {
+      system: "scheduled-agent-goal",
+      jobId: "goal-weekly-brief",
+      operation: "run",
+      started: "2026-11-12T00:00:00.000Z",
+      finished: "2026-11-12T00:05:00.000Z",
+      outcome: "success",
+      triggeredBy: "copilot",
+    });
+    await projectJobRunRecordBestEffort({ env, row: record, userLogin: "alice" });
+    const store = new D1JobRunRecordStore(createD1JobRunRecordDb(mock as never));
+    const listed = await store.listByJob("goal-weekly-brief");
+    expect(listed).toHaveLength(1);
+    expect(listed[0].triggeredBy).toBe("copilot");
+    expect(listed[0].system).toBe("scheduled-agent-goal");
+    expect(sent).toHaveLength(1);
+    expect((sent[0] as { data: Record<string, unknown> }).data).toEqual({
+      ledger: "job_run_records",
+      naturalKey: "goal-weekly-brief|2026-11-12T00:00:00.000Z|2026-11-12T00:05:00.000Z",
+      tenantId: "primary",
+      userLogin: "alice",
+    });
+  });
+
+  it("the job-run-record hook with no owning login still ORM-projects but skips the queue (no identity to route to)", async () => {
+    const mock = new MockD1Database();
+    await configureCarriers(mock, { queues: true, orm: true, sweep: false });
+    const sent: unknown[] = [];
+    const env = hookEnv(mock, { send: async (msg: unknown) => void sent.push(msg) });
+    const sql = new MockSqlStorage();
+    const record = recordLedgerRun(new SqlJobRunRecordStore(sql as never), {
+      system: "orchestrator-schedule",
+      jobId: "job-hook-run",
+      operation: "run",
+      started: "2026-11-12T00:00:00.000Z",
+      finished: "2026-11-12T00:05:00.000Z",
+      outcome: "success",
+      triggeredBy: "manual",
+    });
+    await projectJobRunRecordBestEffort({ env, row: record, userLogin: null });
+    const store = new D1JobRunRecordStore(createD1JobRunRecordDb(mock as never));
+    expect(await store.listByJob("job-hook-run")).toHaveLength(1);
+    expect(sent).toHaveLength(0);
+  });
+
+  it("the job-run-record hook with skipQueue projects via ORM but publishes nothing (the queue consumer's re-projection, no loop)", async () => {
+    const mock = new MockD1Database();
+    await configureCarriers(mock, { queues: true, orm: true, sweep: false });
+    const sent: unknown[] = [];
+    const env = hookEnv(mock, { send: async (msg: unknown) => void sent.push(msg) });
+    const sql = new MockSqlStorage();
+    const record = recordLedgerRun(new SqlJobRunRecordStore(sql as never), {
+      system: "orchestrator-schedule",
+      jobId: "job-hook-run-2",
+      operation: "run",
+      started: "2026-11-12T00:00:00.000Z",
+      finished: "2026-11-12T00:05:00.000Z",
+      outcome: "success",
+      triggeredBy: "manual",
+    });
+    const res = await projectJobRunRecordBestEffort({ env, row: record, userLogin: "alice", skipQueue: true });
+    expect(res?.projected).toBe(true);
+    const store = new D1JobRunRecordStore(createD1JobRunRecordDb(mock as never));
+    expect(await store.listByJob("job-hook-run-2")).toHaveLength(1);
+    expect(sent).toHaveLength(0);
+  });
+
+  it("the job-run-record hook for an unconfigured tenant projects nothing and publishes nothing, by name", async () => {
+    const mock = new MockD1Database();
+    const sent: unknown[] = [];
+    const env = hookEnv(mock, { send: async (msg: unknown) => void sent.push(msg) });
+    const sql = new MockSqlStorage();
+    const record = recordLedgerRun(new SqlJobRunRecordStore(sql as never), {
+      system: "orchestrator-schedule",
+      jobId: "job-hook-run-3",
+      operation: "run",
+      started: "2026-11-12T00:00:00.000Z",
+      finished: "2026-11-12T00:05:00.000Z",
+      outcome: "success",
+      triggeredBy: "manual",
+    });
+    await projectJobRunRecordBestEffort({ env, row: record, userLogin: "alice" });
+    const store = new D1JobRunRecordStore(createD1JobRunRecordDb(mock as never));
+    expect(await store.listByJob("job-hook-run-3")).toHaveLength(0);
+    expect(sent).toHaveLength(0);
+  });
 });
 
 describe("sweep carrier (one-off backfill, #4116)", () => {
@@ -933,6 +1200,16 @@ describe("sweep carrier (one-off backfill, #4116)", () => {
       triggeredBy: "manual",
       scheduleId: null,
     });
+    // Issue #6099 — a DO-written job run record the sweep must also reconcile.
+    recordLedgerRun(new SqlJobRunRecordStore(sql as never), {
+      system: "orchestrator-schedule",
+      jobId: "job-sweep-run",
+      operation: "run",
+      started: "2026-11-12T00:00:00.000Z",
+      finished: "2026-11-12T00:05:00.000Z",
+      outcome: "success",
+      triggeredBy: "manual",
+    });
     return reportIds;
   }
 
@@ -954,13 +1231,15 @@ describe("sweep carrier (one-off backfill, #4116)", () => {
     await seedDoRows(sql);
     const env = { AGENT_DB: mock as never, IAAA_TENANT_ID: "primary" };
     const first = await reconcileRunLedgerProjection({ env, sql: sql as never, sessionId: "sess-1" });
-    expect(first).toEqual({ checked: 3, reconciled: 3, alreadyCurrent: 0, errors: [] });
+    expect(first).toEqual({ checked: 4, reconciled: 4, alreadyCurrent: 0, errors: [] });
     const audit = createAuditReportAdapter({ AGENT_DB: mock as never })!;
     expect(await audit.listReports("primary", { limit: 10 })).toHaveLength(2);
     const adapter = createRunLedgerAdapter({ AGENT_DB: mock as never })!;
     expect(await adapter.listAsyncJobs("primary", 10)).toHaveLength(1);
+    const jobStore = new D1JobRunRecordStore(createD1JobRunRecordDb(mock as never));
+    expect(await jobStore.listByJob("job-sweep-run")).toHaveLength(1);
     const second = await reconcileRunLedgerProjection({ env, sql: sql as never, sessionId: "sess-1" });
-    expect(second).toEqual({ checked: 3, reconciled: 0, alreadyCurrent: 3, errors: [] });
+    expect(second).toEqual({ checked: 4, reconciled: 0, alreadyCurrent: 4, errors: [] });
   });
 
   it("the limit bounds each ledger per call", async () => {
@@ -970,8 +1249,8 @@ describe("sweep carrier (one-off backfill, #4116)", () => {
     await seedDoRows(sql);
     const env = { AGENT_DB: mock as never, IAAA_TENANT_ID: "primary" };
     const limited = await reconcileRunLedgerProjection({ env, sql: sql as never, sessionId: "sess-1", limit: 1 });
-    expect(limited.checked).toBe(2);
-    expect(limited.reconciled).toBe(2);
+    expect(limited.checked).toBe(3);
+    expect(limited.reconciled).toBe(3);
   });
 
   it("a tenant without the sweep carrier gets a named refusal, never a silent zero-row pass", async () => {
@@ -1002,10 +1281,10 @@ describe("sweep carrier (one-off backfill, #4116)", () => {
     };
     const env = { AGENT_DB: throwing as never, IAAA_TENANT_ID: "primary" };
     const res = await reconcileRunLedgerProjection({ env, sql: sql as never, sessionId: "sess-1" });
-    expect(res.checked).toBe(3);
+    expect(res.checked).toBe(4);
     expect(res.reconciled).toBe(0);
-    expect(res.errors).toHaveLength(3);
-    expect(res.errors.map((e) => e.ledger).sort()).toEqual(["async_jobs", "reports", "reports"]);
+    expect(res.errors).toHaveLength(4);
+    expect(res.errors.map((e) => e.ledger).sort()).toEqual(["async_jobs", "job_run_records", "reports", "reports"]);
   });
 });
 
@@ -1063,6 +1342,60 @@ describe("queue consumer DO door (projectQueuedRunLedger, #4116)", () => {
     const audit = createAuditReportAdapter({ AGENT_DB: mock as never })!;
     expect(await audit.listReports("primary", { limit: 10 })).toHaveLength(1);
   });
+
+  it("projects a queued job run record, reports already-current on replay, and names a missing row", async () => {
+    const mock = new MockD1Database();
+    const adapter = createRunLedgerAdapter({ AGENT_DB: mock as never })!;
+    await ensureRunLedgerTables(adapter);
+    await adapter.setTenantProjectionCarriers(
+      "primary",
+      { queues: true, orm: true, sweep: true },
+      "merged",
+      Date.now(),
+    );
+    const sql = new MockSqlStorage();
+    recordLedgerRun(new SqlJobRunRecordStore(sql as never), {
+      system: "scheduled-agent-goal",
+      jobId: "goal-weekly-brief",
+      operation: "run",
+      started: "2026-11-12T00:00:00.000Z",
+      finished: "2026-11-12T00:05:00.000Z",
+      outcome: "success",
+      triggeredBy: "copilot",
+    });
+    const agent = new OrchestratorAgent(
+      {
+        id: { toString: () => "alice" },
+        storage: { sql },
+        waitUntil: () => {},
+      } as never,
+      { AGENT_DB: mock as never, IAAA_TENANT_ID: "primary" } as never,
+    );
+    const key = "goal-weekly-brief|2026-11-12T00:00:00.000Z|2026-11-12T00:05:00.000Z";
+    const first = await agent.projectQueuedRunLedger({
+      ledger: "job_run_records",
+      naturalKey: key,
+      tenantId: "primary",
+      userLogin: "alice",
+    } as never);
+    expect(first).toEqual({ status: "projected" });
+    const second = await agent.projectQueuedRunLedger({
+      ledger: "job_run_records",
+      naturalKey: key,
+      tenantId: "primary",
+      userLogin: "alice",
+    } as never);
+    expect(second).toEqual({ status: "already-current" });
+    const missing = await agent.projectQueuedRunLedger({
+      ledger: "job_run_records",
+      naturalKey: "no-such-job|2026-11-12T00:00:00.000Z|2026-11-12T00:05:00.000Z",
+      tenantId: "primary",
+      userLogin: "alice",
+    } as never);
+    expect(missing).toEqual({ status: "missing-row" });
+    const store = new D1JobRunRecordStore(createD1JobRunRecordDb(mock as never));
+    expect(await store.listByJob("goal-weekly-brief")).toHaveLength(1);
+  });
 });
 
 describe("owner scope + backfill (migration 0060, #4116)", () => {
@@ -1077,7 +1410,7 @@ describe("owner scope + backfill (migration 0060, #4116)", () => {
     const jobDb = createD1JobRunRecordDb(mock as never);
     await ensureJobRunRecordsSchema(jobDb);
     const jobRecordStore = new D1JobRunRecordStore(jobDb);
-    const p = createRunLedgerProjector({ reportStore, asyncJobStore, jobRecordStore });
+    const p = createRunLedgerProjector({ reportStore, asyncJobStore, jobRecordStore, projectedJobRecordStore: jobRecordStore });
     return { p, reportStore, asyncJobStore, jobRecordStore, mock };
   }
 
@@ -1201,10 +1534,33 @@ describe("D1-only reads + parity vs the merged view (#4116)", () => {
       "merged",
       Date.now(),
     );
+    // Issue #6099 — a DO-written copilot-cycle job run record: the
+    // sweep must reconcile it into D1, and both read modes must
+    // then show it exactly once (it has no report twin to absorb).
+    recordLedgerRun(new SqlJobRunRecordStore(sql as never), {
+      system: "scheduled-agent-goal",
+      jobId: "goal-weekly-brief",
+      operation: "run",
+      started: "2026-11-12T00:00:00.000Z",
+      finished: "2026-11-12T00:05:00.000Z",
+      outcome: "success",
+      triggeredBy: "copilot",
+    });
+    const copilotId = d1JobRunRecordId(
+      jobRecord({
+        system: "scheduled-agent-goal",
+        jobId: "goal-weekly-brief",
+        operation: "run",
+        started: "2026-11-12T00:00:00.000Z",
+        finished: "2026-11-12T00:05:00.000Z",
+        outcome: "success",
+        triggeredBy: "copilot",
+      }),
+    );
     const env = { AGENT_DB: mock as never, IAAA_TENANT_ID: "primary" };
     const swept = await reconcileRunLedgerProjection({ env, sql: sql as never, sessionId: "sess-1" });
     expect(swept.errors).toEqual([]);
-    expect(swept.reconciled).toBe(3);
+    expect(swept.reconciled).toBe(4);
     const audit = createAuditReportAdapter({ AGENT_DB: mock as never })!;
     const projected = await audit.listReports("primary", { limit: 10 });
     expect(projected).toHaveLength(2);
@@ -1212,7 +1568,7 @@ describe("D1-only reads + parity vs the merged view (#4116)", () => {
     expect(twinned?.linkedJobRunId).toBe(
       "d1:screener:chat:ALL:2026-11-12T00:00:00.000Z:abcd1234:2026-11-12T00:00:00.000Z:2026-11-12T00:05:00.000Z",
     );
-    return { mock, sql, env, adapter, stored1: stored1!, stored2: stored2!, twinId: twinned!.linkedJobRunId! };
+    return { mock, sql, env, adapter, stored1: stored1!, stored2: stored2!, twinId: twinned!.linkedJobRunId!, copilotId };
   }
 
   async function setReadMode(adapter: D1RunLedgerAdapter, mode: "merged" | "d1-only") {
@@ -1388,5 +1744,74 @@ describe("D1-only reads + parity vs the merged view (#4116)", () => {
     // The projected async job reads as the same job-backed run.
     const d1Job = d1.runs.find((r) => String(r.id).includes("job-async-1") || (r.jobs ?? []).some((j: any) => j.job_id === "job-async-1"));
     expect(d1Job).toBeDefined();
+  });
+
+  it("/api/runs: a swept DO job run record (copilot cycle) appears exactly once in both modes", async () => {
+    const fx = await parityFixture();
+    // No jobRunRecordReader injection: the route reads D1 for real,
+    // so the swept DO row must be visible through the D1 read.
+    const ctx = {
+      ensureTables: () => fx.sql as never,
+      env: fx.env as never,
+      getScreenerAgent: () => ({ getHistory: async () => [] }) as never,
+      getScreenerExecutionContext: async () => null as never,
+    } as never;
+    const mergedRes = await handleReportsRoutes(
+      runsRequest(),
+      new URL("http://x/api/runs?kind=all"),
+      "/api/runs",
+      SESSION,
+      ctx,
+    );
+    expect(mergedRes?.status).toBe(200);
+    const merged = (await mergedRes!.json()) as { runs: any[]; ledgerReadMode: string };
+    expect(merged.ledgerReadMode).toBe("merged");
+    expect(merged.runs.filter((r) => r.id === fx.copilotId)).toHaveLength(1);
+    await setReadMode(fx.adapter, "d1-only");
+    const d1Res = await handleReportsRoutes(
+      runsRequest(),
+      new URL("http://x/api/runs?kind=all"),
+      "/api/runs",
+      SESSION,
+      ctx,
+    );
+    expect(d1Res?.status).toBe(200);
+    const d1 = (await d1Res!.json()) as { runs: any[]; ledgerReadMode: string };
+    expect(d1.ledgerReadMode).toBe("d1-only");
+    expect(d1.runs.filter((r) => r.id === fx.copilotId)).toHaveLength(1);
+  });
+
+  it("Workflow Runs: a swept DO job run record (copilot cycle) appears exactly once in both modes", async () => {
+    const fx = await parityFixture();
+    // No jobRunRecordReader injection: the route reads D1 for real.
+    const ctx = {
+      ensureTables: () => fx.sql as never,
+      userLogin: "alice",
+      env: fx.env as never,
+      scheduleReader: async () => [],
+    } as never;
+    const mergedRes = await handleWorkflowRunsRoutes(
+      new Request("http://x/api/workflow-runs", { method: "GET" }),
+      new URL("http://x/api/workflow-runs"),
+      "/api/workflow-runs",
+      "sess-1",
+      ctx,
+    );
+    expect(mergedRes?.status).toBe(200);
+    const merged = (await mergedRes!.json()) as { runs: any[]; ledgerReadMode: string };
+    expect(merged.ledgerReadMode).toBe("merged");
+    expect(merged.runs.filter((r) => String(r.id) === fx.copilotId)).toHaveLength(1);
+    await setReadMode(fx.adapter, "d1-only");
+    const d1Res = await handleWorkflowRunsRoutes(
+      new Request("http://x/api/workflow-runs", { method: "GET" }),
+      new URL("http://x/api/workflow-runs"),
+      "/api/workflow-runs",
+      "sess-1",
+      ctx,
+    );
+    expect(d1Res?.status).toBe(200);
+    const d1 = (await d1Res!.json()) as { runs: any[]; ledgerReadMode: string };
+    expect(d1.ledgerReadMode).toBe("d1-only");
+    expect(d1.runs.filter((r) => String(r.id) === fx.copilotId)).toHaveLength(1);
   });
 });

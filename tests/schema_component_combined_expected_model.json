@@ -3902,6 +3902,16 @@
           "pk": 0
         },
         {
+          "name": "tenant_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "projected_at_ms",
+          "type": "INTEGER",
+          "pk": 0
+        },
+        {
           "name": "broker_id",
           "type": "TEXT",
           "pk": 0
@@ -9859,6 +9869,15 @@
         "created_at DESC"
       ],
       "unique": false
+    },
+    "job_run_records_identity_idx": {
+      "table": "job_run_records",
+      "columns": [
+        "job_id",
+        "started",
+        "finished"
+      ],
+      "unique": true
     },
     "idx_job_stage_events_run": {
       "table": "job_stage_events",

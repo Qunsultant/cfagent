@@ -132,9 +132,10 @@ describe("P5 runner — plan resolution (P4 finding 1: phased order)", () => {
     // Issue #5425 adds migration 0079 (agent_tenant_settings
     // SLO threshold columns): 447 → 449.
     // Issue #6072 adds migration 0080 (agent_screener_task_entries
-    // table): 449 → 450.
-    expect(p.steps).toHaveLength(450);
-    expect(p.skipped).toHaveLength(1);
+    // table, 1 step) and #6099 adds migration 0081 (job_run_records
+    // tenant_id + projected_at_ms + unique identity index, 3 steps):
+    // 449 → 453.
+    expect(p.steps).toHaveLength(453);    expect(p.skipped).toHaveLength(1);
     expect(p.skipped[0].code).toBe(SEED_FORM_CODE);
     expect(p.skipped[0].reason).toMatch(/call site/i);
   });
@@ -160,9 +161,10 @@ describe("P5 runner — plan resolution (P4 finding 1: phased order)", () => {
     // Issue #5425 adds migration 0079 (agent_tenant_settings
     // SLO threshold columns): 447 → 449.
     // Issue #6072 adds migration 0080 (agent_screener_task_entries
-    // table): 449 → 450.
-    expect(harness).toHaveLength(450);
-    // Production move 1: the rebuild CREATE for agent_price_catalogue
+    // table, 1 step) and #6099 adds migration 0081 (job_run_records
+    // tenant_id + projected_at_ms + unique identity index, 3 steps):
+    // 449 → 453.
+    expect(harness).toHaveLength(453);    // Production move 1: the rebuild CREATE for agent_price_catalogue
     // must stay after the RENAME that clears its table (a second
     // table-creation for the same table cannot run before the rename
     // on real SQLite). Production move 2: the legacy seed is hoisted
@@ -305,9 +307,10 @@ describe("P5 runner — delta-to-steps selection (P4 finding 3, P4 finding 2)", 
     // Issue #5425 adds migration 0079 (agent_tenant_settings
     // SLO threshold columns): 249 → 251.
     // Issue #6072 adds migration 0080 (agent_screener_task_entries
-    // table): 251 → 252.
-    expect(selected.schema).toHaveLength(252);
-    expect(selected.seeds).toHaveLength(12);
+    // table, 1 step) and #6099 adds migration 0081 (job_run_records
+    // tenant_id + projected_at_ms + unique identity index, 3 steps):
+    // 251 → 255 schema statements.
+    expect(selected.schema).toHaveLength(255);    expect(selected.seeds).toHaveLength(12);
     expect(selected.skipped).toHaveLength(9);
     expect(
       codesOf(selected.skipped),
