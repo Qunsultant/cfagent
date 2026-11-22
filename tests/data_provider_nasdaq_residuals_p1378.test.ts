@@ -328,6 +328,35 @@ describe("(c3) options discovery routing", () => {
       /requires universeDeps/
     );
   });
+
+  it("fetchChains discovers through bound universe deps with no symbols and no cap (#6074)", async () => {
+    // Issue #6074 — the validator's premise ("no symbols + no
+    // maxUnderlyings = cannot scan") is false when universe deps
+    // are bound: resolveUnderlyings discovers from the threaded
+    // listings and caps at maxScanSymbols, so the scan is bounded
+    // without the field. Without deps the refusal stands (pinned
+    // by goal_options_leg_workflow_3186 + phase3_screeners_v2).
+    // No chain source here, so every discovered symbol reports a
+    // fetch error — the point is the discovery ran, not the fetch.
+    const adapter = createNasdaqDataProvider(async () => techListings());
+    const screener = new DynamicOptionsScreener(
+      undefined,
+      undefined,
+      bindNasdaqUniverseDeps(adapter, RUN) as never
+    );
+    const fetched = await screener.fetchChains({} as never);
+    expect(fetched.symbols).toEqual([
+      "ACME",
+      "COMP1",
+      "DATA1",
+      "FORD",
+      "NET1",
+      "SEMI1",
+      "TECH1",
+    ]);
+    expect(fetched.chains).toEqual([]);
+    expect(fetched.fetchErrors).toHaveLength(7);
+  });
 });
 
 describe("(c1) research provider routing", () => {

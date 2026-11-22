@@ -3240,6 +3240,19 @@ export class ScreenerAgent extends PortThink {
    * the #1998 gather enrichment, and the live/neutral stock
    * screener — the registry stock leg they served is gone on this
    * path; the leg's provider rides the seam override instead.
+   *
+   * @deprecated Issue #6074 ([One engine] #4437 slice 6d-c):
+   * retired by deprecation, recorded in the deprecation ledger
+   * (docs/architecture/transition/deprecations.md). Superseded by
+   * `runGoalScreenComposition` in
+   * `src/services/screenerPipelineJobs.ts` — the goal step's
+   * default runner is the 6d-a composition itself, so
+   * `screenGoalStage` no longer defaults to this method and it
+   * has no live callers.
+   * The method stays, pinned by the 6072/4192/6074 suites, per
+   * the no-deletion rule (gitops §22); deletion needs zero
+   * consumers plus an owner decision plus a gate amendment, and
+   * is never part of a program slice.
    */
   async runGoalScreenOnEngine(
     req: Parameters<ScreenerGoalRunner>[0],

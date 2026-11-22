@@ -517,6 +517,73 @@ builder, full run with no `runGoalStockLeg` call, symbol-less
 run on the default universe, leg failure as a failed class) and
 the re-pointed 5873 definition pins.
 <!-- 6073: goal stock leg on generic nodes — end -->
+<!-- 6074: goal options leg on options-pipeline nodes + runner retirement — begin -->
+Slice 6d-c (#6074) re-points the goal options leg onto the
+options-pipeline nodes: `goal.optionsLeg` runs `options.runRoot`
++ the eight `options.runStage` steps (plan, chainFetch, enrich,
+screen, risk, persistCanonicalResults, shapeReport, deliver) in
+process on the captured registry, with synthesized contexts
+(jobId = the options job id, runId = the leg run id
+`goal-screen:<engine run id>:options`, nodePath `root` /
+`root/<stageId>`). The leg defines its job first
+(`saveGoalOptionsLegDefinition` — `resolveJobDefinition` +
+version + `saveDefinition`, the same record
+`JobPipelineControl.defineJob` persists, minus the control; no
+instance record is created, nothing runs the leg's job through a
+control) and reads the screen artifact back
+(`readGoalOptionsLegScreen`, scoped by the leg run id); both
+deps are bound in both host factories over the residency's
+job-pipeline stores — the writer MUST write the store the
+registry's `optionsDeps` reads, that match is the load-bearing
+invariant. The request is the #4858 goal envelope verbatim PLUS
+the `goalRunId` stamp (`goal-screen:<engine run id>`): the
+resolving steps rebuild the leg's ports per invocation from the
+stored request, and the goal shape's delivery builder is a pure
+function of the stamped goal run id — a goal-shape request
+without `classInput.goalPlan.goalRunId` refuses by name at the
+plan stage. The userLogin rides the request (the #4289 shape) so
+the resolving steps rebuild owner-scoped ports. Symbol
+resolution (`resolveGoalOptionsLegSymbols`) is explicit
+`plan.optionsFilter.underlyingSymbols` → the ONE shared
+externalized default as a universe stage input (the shared
+default's provider id, `stampUniverseDepsStageInput`) → named refusal
+(`GOAL_OPTIONS_LEG_NO_SYMBOLS`) — the owner rule (2026-11-22):
+never a symbol-less run, for ANY run; no leg-local literal. The
+universe input carries no universe NAME — the factory resolves
+the default itself. The scheduled-agent residency binds no
+`universeDepsFor`, so a universe-input leg there refuses
+`stage_port_unavailable`; goal runs execute in the workflow
+residency, which binds it. `DynamicOptionsScreener.fetchChains`
+no longer throws its symbols-or-maxUnderlyings validation for a
+discovery-mode leg constructed with universe deps (the throw now
+fires only when no symbols AND no `maxUnderlyings` AND no
+universeDeps) — the host seam validates symbols-or-universe but
+never stamps `maxUnderlyings`, so a host-dispatched discovery
+leg failed the same way. The `screener.goal` step's default
+runner is now the composition itself
+(`runGoalScreenComposition`): it synthesizes the analyze-node
+params the v2 builder writes (the family job ids + the market
+spec's analyze/generate stage params + the resolved symbols and
+shard table + `stockLegUniverse` when universe-fed) and threads
+the eight `goal.*` steps with synthesized contexts, returning
+the artifacts step's output — the analysis output the store
+stage consumes, the shape `screenGoalStage` returned. A
+test-injected `deps.goalRunner` still wins. `runGoalScreenOnEngine`
+is retired by deprecation (ledger entry 2026-11-22,
+`docs/architecture/transition/deprecations.md`, `@deprecated`
+marker on the method) — it stays, pinned, per gitops §22, like
+`runGoalScreen`; `screenGoalStage`'s default branch now points
+at the composition, so the method has no live callers. The
+nested dispatch (`runGoalOptionsLegViaWorkflow`) stays for the
+direct path until slice 7 retires it — the engine leg and the
+direct path now diverge by design. Pinned by
+`tests/goal_options_leg_generic_6074.test.ts` (9 tests: resolver,
+full run with no `runGoalOptionsLeg` call, symbol-less run on
+the default universe, leg failure as a failed class, old-style
+definition through the composition) and the re-pointed 4192
+default-bindings test (the real options leg screens AAPL through
+the nodes).
+<!-- 6074: goal options leg on options-pipeline nodes + runner retirement — end -->
 
 The screener's deliver stage likewise runs through the generic deliver
 machinery (#5826): `deliver.apply` gains a screener application

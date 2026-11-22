@@ -40,6 +40,14 @@ unbound, rather than silently dropping bytes to legacy DO storage.
 - Reason: Issue #6165 (sub of #945). Creating an admin existed in two grant surfaces: the Members-tab grant (`POST /api/iaaa/membership/grant`) and the Role grants section (`POST /api/iaaa/role-grants/grant`). Both mint through the same `grantMembership` seam, so the second surface was pure duplication. The Members tab is the one grant surface; the Role grants section keeps only its read-only admin-role list and points at the Members tab.
 - Replacement: `POST /api/iaaa/membership/grant` (grant) and the Members-tab revoke/edit (revoke). Client `grantRoleGrant` / `revokeRoleGrant` (`src/client/roleGrantsApi.ts`) are `@deprecated` and frozen.
 - Consumers at deprecation: `RoleGrantsPanel` no longer calls either function; `tests/iaaa_role_grants_2688.test.ts` still exercises the routes as deprecated aliases (behavior unchanged).
+
+## 2026-11-22 — #6074 retires runGoalScreenOnEngine by deprecation
+
+- Name: `runGoalScreenOnEngine` (`ScreenerAgent`, `src/agents/screener-agent.ts`)
+- Date: 2026-11-22
+- Reason: Issue #6074 ([One engine] #4437 slice 6d-c, sub-issue of #5886) re-points the goal step's default runner off the legacy dispatch: the `screener.goal` step now runs the 6d-a goal composition itself (`runGoalScreenComposition` in `src/services/screenerPipelineJobs.ts`), and the goal options leg runs the options-pipeline nodes in-process (`runGoalOptionsLegOnEngineNodes`) instead of the `optionsWorkflow` dep call. The method is retired, not deleted, per gitops §22 — like `runGoalScreen`, which stays as the registry-leg implementation.
+- Replacement: `runGoalScreenComposition` (`src/services/screenerPipelineJobs.ts`) — the eight `goal.*` steps threaded in-process on the captured registry; old stored definitions (single `screener.goal` step) run the composition through it.
+- Consumers at deprecation: none in live code — `screenGoalStage`'s default branch was the only caller and now defaults to the composition; the method stays public and pinned by the 6072/4192/6074 suites.
 - Deletion condition: zero consumers plus an owner decision plus a gate amendment; deletion is never part of a program slice.
 
 ## 2026-11-20 — #5915 supersedes the research cutover flag

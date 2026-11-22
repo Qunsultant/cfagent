@@ -286,10 +286,14 @@ describe("5175 slice 4 — no minting elsewhere", () => {
     // generation / delivery ids, derived from the task id:
     // - src/agents/orchestrator/goalScreenDispatch.ts:110, 111, 153
     // - src/agents/screener-agent.ts:3089
-    // - src/services/goalDrivenScreen.ts:173, 191, 368
+    // - src/services/goalDrivenScreen.ts:173, 174, 390
     // - src/services/screeningRuntime.ts:392, 393, 424
-    // (goalDrivenScreen.ts:173 and :368 carry the `?? crypto.randomUUID()`
-    // quota-key fallback — the excluded quota family, not a run mint.)
+    // (goalDrivenScreen.ts:173-174 is the #6074 helper
+    // goalOptionsLegRunIds — the leg run id + goal run id for the
+    // options leg, minted once there and shared by the sync leg
+    // and the engine leg; :390 is the stock leg's own form and
+    // carries the `?? crypto.randomUUID()` quota-key fallback —
+    // the excluded quota family, not a run mint.)
     // Literal-segment forms, same family, found by the slice-4 survey (4):
     // - src/agents/routes/paymentAssuranceLive.ts:263 —
     //   `goal-screen:live-test:${runRequestId}` (live-test job id)
