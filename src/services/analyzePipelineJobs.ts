@@ -55,7 +55,7 @@ import type {
   JobStatusView,
 } from "./jobPipelineEngine";
 import { withSchedulePreserved } from "./jobPipelineEngine";
-import { JobStepRegistry, type JobStepContext } from "./jobPipelineSteps";
+import { JobStepRegistry, refuseGoalScreenParam, type JobStepContext } from "./jobPipelineSteps";
 
 /** The step name an analyze job's configuration references. */
 export const ANALYZE_APPLY_STEP = "analyze.apply";
@@ -451,6 +451,10 @@ export function registerScreenerAnalyzeStep(
   deps: AnalyzeStepDeps,
 ): void {
   registry.register(ANALYZE_SCREENER_STEP, async (ctx: JobStepContext) => {
+    // Issue #5886 (6d): the market chain refuses a goalScreen
+    // param by name — a goal run belongs on the goalScreen
+    // definition, never on this step.
+    refuseGoalScreenParam(ctx.params, ANALYZE_SCREENER_STEP);
     const def = resolveAnalyzeStepJob(deps, ANALYZE_SCREENER_STEP, ctx);
     if (!deps.analyzedStore) throw analyzeNotConfigured(def.id, "the analyzed-dataset store");
 

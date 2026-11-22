@@ -63,6 +63,7 @@ import { withSchedulePreserved } from "./jobPipelineEngine";
 import {
   createBuiltinStepRegistry,
   JobStepRegistry,
+  refuseGoalScreenParam,
   type JobStepContext,
 } from "./jobPipelineSteps";
 
@@ -629,6 +630,10 @@ export function createFeedStepRegistry(deps: FeedStepDeps): JobStepRegistry {
   const registry = createBuiltinStepRegistry();
 
   registry.register(FEED_PULL_STEP, async (ctx: JobStepContext) => {
+    // Issue #5886 (6d): the market chain refuses a goalScreen
+    // param by name — a goal run belongs on the goalScreen
+    // definition, never on this step.
+    refuseGoalScreenParam(ctx.params, FEED_PULL_STEP);
     const feedJobId =
       typeof ctx.params.feedJobId === "string" ? ctx.params.feedJobId : "";
     const def = deps.registry.get(feedJobId);

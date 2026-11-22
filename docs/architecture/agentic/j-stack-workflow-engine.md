@@ -297,6 +297,50 @@ proof + definition pin in `tests/screener_substrate_4190.test.ts` /
 `tests/screener_generic_definition_5884.test.ts`.
 <!-- /5885: the deliver flip — generate→deliver payload mapping + sink wiring -->
 
+<!-- 5886: the market refusal — a goalScreen param fails named on the market chain -->
+Slice 6d (#5886) makes the market refusal runtime-real. Slice 6b3
+(#5884) pinned the definition level: a market definition carries
+no `goalScreen` param on any node, and a goal command builds the
+untouched `goalScreen` spec. What it left open was the runtime: a
+hand-built or stale market definition carrying a `goalScreen`
+param would ride the generic nodes, which silently ignored it, and
+reach the sink's goal path — which reads `payload.result.goalKind`
+from a goal envelope the generic chain never builds. Now every
+market-only generic step refuses the param at its entry, before
+any fetch or compute: `feed.pull`, `enrich.screener`,
+`analyze.screener`, and `generate.apply` each call
+`refuseGoalScreenParam` (`src/services/jobPipelineSteps.ts`) first
+and fail the run with `GOAL_SCREEN_ON_MARKET_CHAIN`. The shared
+`deliver.apply` step does not refuse — it serves the goal outcome
+through the door's goal path by design — and the bespoke goal
+steps (`screener.feed`, `screener.gather`, `screener.goal`) read
+the param as before. The spec-route binder already refused
+undeclared params (`bindJobDefinitionParams`); the refusal of
+`goalScreen` on the `screener` spec (declared parameters universe
++ deliver only) is pinned alongside. Acceptance (1) verified, not
+rebuilt: a goal run executes on the goal definition — the goal
+definition test (`tests/screener_goal_definition_5873.test.ts`)
+and the goal-leg dispatch tests
+(`tests/screener_cutover_4192.test.ts`, goal runner on the same
+six nodes, never the market runner) pass unchanged. What 6d does
+NOT do: the engine-steps conversion of the goal runner. The goal
+step still dispatches through `runGoalScreenOnEngine`
+(`src/agents/screener-agent.ts`) — quota, trade client, goal
+universe deps, options-leg deps, then `runProductionGoalScreen`.
+Both legs already run on engines (stock via the S3 seam,
+`runStockScreenViaEngine`; options via the one options pipeline,
+`runOptionsScreenViaEngine` / host dispatch), but the composition
+— plan, ledger claim/complete, leg dispatch, result assembly —
+is a function call, and its state is DO-owned (task ledger, DO
+storage, ORM) that the workflow residency can reach only through
+the agent stub. Converting the composition into engine nodes
+(plan + ledger + legs + assembly as steps, D1-resident ledger,
+child-job dispatch) is a programme of its own; it decomposes
+under #5886 as follow-up sub-issues, it is not built here.
+Pinned by `tests/screener_market_refusal_5886.test.ts` (four
+step refusals + controls, binder refusal).
+<!-- /5886: the market refusal — a goalScreen param fails named on the market chain -->
+
 The screener's deliver stage likewise runs through the generic deliver
 machinery (#5826): `deliver.apply` gains a screener application
 (params `screener: true`) that delivers a screen outcome through the
