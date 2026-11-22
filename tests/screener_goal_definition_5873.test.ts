@@ -23,9 +23,13 @@ import { ANALYZE_SCREENER_STEP } from "../src/services/analyzePipelineJobs";
 import {
   buildScreenerJobDefinition,
   createScreenerStepRegistry,
+  GOAL_COMPOSITION_STEPS,
   type ScreenerStepDeps,
 } from "../src/services/screenerPipelineJobs";
 import { ScreenerAgent } from "../src/agents/screener-agent";
+import { ScreenerTaskLedger } from "../src/services/screenerTaskLedger";
+import { InMemoryScreenerTaskStore } from "../src/data/inMemoryScreenerTaskStoreAdapter";
+import { buildScenario } from "../src/services/goalScenarioEngine";
 import type { WorkflowJobCommand } from "../src/workflows/workflowPorts";
 import type {
   MarketDataResearchHistoricalBar,
@@ -119,7 +123,15 @@ function goalCommand(over: Partial<WorkflowJobCommand> = {}): WorkflowJobCommand
     jobId: "goal-5873",
     shards: [{ shardId: "goal", symbols: [listing("AAPL")] }],
     goalScreen: {
-      scenario: { goalKind: "growth", direction: "long" } as any,
+      // A real scenario (buildScenario) — see
+      // tests/goal_composition_nodes_6072.test.ts: the old literal
+      // was never a valid ScenarioDefinition, and the composition
+      // runs the real plan builder.
+      scenario: buildScenario({
+        goalKind: "directional",
+        portfolioRef: { kind: "hypothetical" },
+        constraints: {},
+      }),
       scenarioSource: "built",
       symbols: ["AAPL"],
     },
@@ -133,14 +145,20 @@ interface Harness {
   runStore: InMemoryJobRunRecordStore;
   storage: FakeStorage;
   agent: ScreenerAgent;
+  taskStore: InMemoryScreenerTaskStore;
   stored: unknown[];
   delivered: { payload: unknown; userLogin: string }[];
   yahooCalls: string[];
   barsCalls: string[];
+  quotaCharges: { userLogin: string; runId: string }[];
+  stockLegCalls: unknown[];
+  optionsLegCalls: unknown[];
 }
 
 async function makeHarness(opts: {
-  goalRunner?: ScreenerStepDeps["goalRunner"];
+  quotaCharge?: ScreenerStepDeps["goalQuotaCharge"];
+  stockLeg?: ScreenerStepDeps["goalStockLeg"];
+  optionsLeg?: ScreenerStepDeps["goalOptionsLeg"];
 } = {}): Promise<Harness> {
   const stores = createInMemoryJobPipelineStores();
   const runStore = new InMemoryJobRunRecordStore();
@@ -154,10 +172,14 @@ async function makeHarness(opts: {
   const storage = new FakeStorage();
   storage.map.set("screener:owner-login", "owner");
   const agent = new ScreenerAgent({ storage } as any, {} as any);
+  const taskStore = new InMemoryScreenerTaskStore();
   const stored: unknown[] = [];
   const delivered: { payload: unknown; userLogin: string }[] = [];
   const yahooCalls: string[] = [];
   const barsCalls: string[] = [];
+  const quotaCharges: { userLogin: string; runId: string }[] = [];
+  const stockLegCalls: unknown[] = [];
+  const optionsLegCalls: unknown[] = [];
   const deps: ScreenerStepDeps = {
     agentFor: () => agent as never,
     quoteDepsFor: () => ({
@@ -180,7 +202,50 @@ async function makeHarness(opts: {
     deliverOutcome: async (payload, userLogin) => {
       delivered.push({ payload, userLogin });
     },
-    ...(opts.goalRunner ? { goalRunner: opts.goalRunner } : {}),
+    // Issue #6072 — the goal run executes the composition, so the
+    // harness injects the composition deps (the injected goalRunner
+    // the old test used is never called: the analyze node has no
+    // screener.goal step anymore).
+    goalTaskLedgerFor: () => new ScreenerTaskLedger(taskStore, { newId: () => "goal-task-5873" }),
+    goalQuotaCharge:
+      opts.quotaCharge ??
+      (async (input) => {
+        quotaCharges.push({ userLogin: input.userLogin, runId: input.runId });
+      }),
+    goalStockLeg:
+      opts.stockLeg ??
+      (async (input) => {
+        stockLegCalls.push(input);
+        return {
+          assetClass: "stocks",
+          providerId: "stock-screen-workflow",
+          result: {
+            status: "matches_found",
+            totalScanned: 1,
+            totalScreened: 1,
+            matchedCount: 1,
+            filterApplied: {},
+            filterSummary: "",
+            stocks: [{ symbol: "AAPL" }],
+            scannedAt: iso(T0),
+          },
+        } as never;
+      }),
+    goalOptionsLeg:
+      opts.optionsLeg ??
+      (async (input) => {
+        optionsLegCalls.push(input);
+        return {
+          assetClass: "options",
+          providerId: "options-screen-workflow",
+          result: {
+            status: "matches_found",
+            totalUnderlyingsScanned: 1,
+            matchedCount: 1,
+            contracts: [{ underlyingSymbol: "AAPL" }],
+          },
+        } as never;
+      }),
   };
   const control = new JobPipelineControl({
     stores,
@@ -188,32 +253,27 @@ async function makeHarness(opts: {
     publisher: ports.publisher,
     steps: createScreenerStepRegistry(deps),
     now: () => new Date(T0),
+    newRunId: () => "run-goal-5873",
   });
-  return { control, stores, runStore, storage, agent, stored, delivered, yahooCalls, barsCalls };
-}
-
-function goalRunnerResult(req: any) {
   return {
-    task: { id: "goal-task-5873" },
-    executed: true,
-    result: {
-      scenario: req.scenario,
-      success: true,
-      counts: {
-        stocksScanned: 1,
-        stocksMatched: 1,
-        optionsUnderlyingsScanned: 0,
-        optionsContractsMatched: 0,
-        hits: 0,
-      },
-      opportunities: [],
-      allStocks: [],
-    },
+    control,
+    stores,
+    runStore,
+    storage,
+    agent,
+    taskStore,
+    stored,
+    delivered,
+    yahooCalls,
+    barsCalls,
+    quotaCharges,
+    stockLegCalls,
+    optionsLegCalls,
   };
 }
 
 describe("goal definition builder (#5873)", () => {
-  it("a goal command builds the goal spec: same six kinds, analyze node is screener.goal", () => {
+  it("a goal command builds the goal spec: same six kinds, analyze node is the goal composition", () => {
     const spec = jobDefinitionSpec("goalScreen");
     expect(spec.stages.map((s) => s.kind)).toEqual([
       "feed",
@@ -223,23 +283,32 @@ describe("goal definition builder (#5873)", () => {
       "serve",
       "deliver",
     ]);
+    // Issue #6072 — the analyze stage runs the composition; its
+    // legacy single `step` stays screener.goal for old stored
+    // definitions.
     expect(spec.stages.find((s) => s.kind === "analyze")?.step).toBe("screener.goal");
+    expect(spec.stages.find((s) => s.kind === "analyze")?.steps).toEqual(
+      GOAL_COMPOSITION_STEPS,
+    );
 
     const raw = buildScreenerJobDefinition(goalCommand()) as any;
     expect(raw.name).toBe("Goal screen — goal-5873");
     const kinds: string[] = [];
-    const stepsByKind = new Map<string, string>();
+    const stepsByKind = new Map<string, string[]>();
     let node = raw.root;
     while (node) {
       kinds.push(node.kind);
-      stepsByKind.set(node.kind, node.steps?.[0]?.step);
+      stepsByKind.set(
+        node.kind,
+        (node.steps ?? []).map((s: any) => s.step),
+      );
       expect(node.steps?.[0]?.params).toEqual(
         expect.objectContaining({ goalScreen: expect.anything() }),
       );
       node = node.children?.[0];
     }
     expect(kinds).toEqual(["feed", "enrich", "analyze", "store", "serve", "deliver"]);
-    expect(stepsByKind.get("analyze")).toBe("screener.goal");
+    expect(stepsByKind.get("analyze")).toEqual(GOAL_COMPOSITION_STEPS);
     expect(raw.root.executionMode?.shape).toBe("monolith");
   });
 
@@ -263,25 +332,27 @@ describe("goal definition builder (#5873)", () => {
 });
 
 describe("goal dispatch on its own definition (#5873)", () => {
-  it("a goal run executes the goal step, never the market analyze step", async () => {
-    const goalCalls: unknown[] = [];
-    const h = await makeHarness({
-      goalRunner: async (req: any) => {
-        goalCalls.push(req);
-        return goalRunnerResult(req);
-      },
-    });
-    // The goal step exists on the agent port (the dispatch target).
+  it("a goal run executes the goal composition, never the market analyze step", async () => {
+    const h = await makeHarness();
+    // The goal step exists on the agent port (the dispatch target for
+    // old stored definitions) but the composition never calls it.
     expect((h.agent as any).screenGoalStage).toBeTypeOf("function");
+    const goalStageSpy = vi.spyOn(h.agent, "screenGoalStage");
     const analysisSpy = vi.spyOn(h.agent, "screenAnalysisStage");
     const command = goalCommand();
     await h.control.defineJob(buildScreenerJobDefinition(command));
     const dispatch = await h.control.runJob("goal-5873");
     const outcome = await dispatch.completion!;
     expect(outcome.state).toBe("completed");
-    // The goal runner ran once, with the feed-derived symbols.
-    expect(goalCalls).toHaveLength(1);
-    expect((goalCalls[0] as any)?.symbols).toEqual(["AAPL"]);
+    // The composition ran: quota once, both legs once, ledger completed.
+    expect(h.quotaCharges).toHaveLength(1);
+    expect(h.stockLegCalls).toHaveLength(1);
+    expect(h.optionsLegCalls).toHaveLength(1);
+    const tasks = await new ScreenerTaskLedger(h.taskStore).list(10);
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0]?.status).toBe("completed");
+    // The old goal dispatch never ran for a goal command.
+    expect(goalStageSpy).not.toHaveBeenCalled();
     // The market analyze step never ran for a goal command.
     expect(analysisSpy).not.toHaveBeenCalled();
     // The market quote path never ran for a goal command.

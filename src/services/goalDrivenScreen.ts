@@ -152,7 +152,7 @@ function memoryStageClaimStore(): StageClaimStore {
  * accepts a discovery-mode leg carrying the universe input and
  * refuses one carrying neither explicit symbols nor the input.
  */
-async function runGoalOptionsLegViaWorkflow(args: {
+export async function runGoalOptionsLegViaWorkflow(args: {
   workflow: OptionsWorkflowDeps;
   registry: ScreeningProviderRegistry;
   plan: GoalScreenPlan;
@@ -349,7 +349,7 @@ function scannedStockToScreenedItem(scanned: ScannedStock, timestamp: string): S
  * symbol, matching the direct leg; totalScanned sums across shards
  * (the unique scanned count is not derivable from the aggregates).
  */
-async function runGoalStockLegViaWorkflow(args: {
+export async function runGoalStockLegViaWorkflow(args: {
   stock: StockWorkflowDeps;
   registry: ScreeningProviderRegistry;
   plan: GoalScreenPlan;
@@ -572,6 +572,192 @@ export interface GoalDrivenScreenResult {
   csvError?: string;
 }
 
+/** One leg's outcome for the assembler: its ScreeningResult, or the error it threw. */
+export type GoalLegOutcome =
+  | { result: ScreeningResult }
+  | { error: string };
+
+/**
+ * Issue #6072 (#4437 slice 6d-a) — the goal stock leg's input, as the
+ * composition's `goal.stockLeg` step dispatches it: the plan (built by
+ * `goal.plan`, JSON — it rides the step artifacts), the run identity,
+ * and the goal command's environment / provider overrides. The leg's
+ * deps (trade client, universe deps, options screener, registry) are
+ * built by the agent method that runs it, never by the step.
+ */
+export interface GoalStockLegInput {
+  plan: GoalScreenPlan;
+  userLogin: string;
+  trigger: JobRunTrigger;
+  idempotencyKey: string;
+  environment?: "TEST" | "PROD";
+  provider?: GoalScreenProvider;
+}
+
+/**
+ * Issue #6072 (#4437 slice 6d-a) — the goal options leg's input, as
+ * the composition's `goal.optionsLeg` step dispatches it: same shape
+ * as the stock leg's, minus the provider (the options leg's broker
+ * comes from the tenant selection, never a per-run override).
+ */
+export interface GoalOptionsLegInput {
+  plan: GoalScreenPlan;
+  userLogin: string;
+  trigger: JobRunTrigger;
+  idempotencyKey: string;
+  environment?: "TEST" | "PROD";
+}
+
+/**
+ * Issue #6072 (#4437 slice 6d-a) — the goal-run assembly, extracted
+ * verbatim from runGoalDrivenScreen so the goal composition's
+ * `goal.assemble` step runs the same logic the direct runner ran:
+ * the #1963 error-status checks (an error-status leg is a failed
+ * class, never a successful empty leg), the #462 partial contract
+ * (some classes failed -> "partial", all failed -> "failed"), the
+ * #1998 stock-gather carry, and the #2882 canonical stock-spec
+ * record. Pure: the leg outcomes arrive as data (a leg step that
+ * caught its dispatcher's throw passes `{ error }`, never a throw),
+ * so a failed leg is a failed class, never a failed run.
+ */
+export function assembleGoalScreenResult(input: {
+  plan: GoalScreenPlan;
+  requested: ScreeningProviderAssetClass[];
+  outcomes: Partial<Record<ScreeningProviderAssetClass, GoalLegOutcome>>;
+  now?: Date;
+}): GoalDrivenScreenResult {
+  const { plan, requested, outcomes } = input;
+  const hits: GoalScreenHit[] = [];
+  const counts = {
+    stocksScanned: 0,
+    stocksMatched: 0,
+    optionsUnderlyingsScanned: 0,
+    optionsContractsMatched: 0,
+    hits: 0,
+  };
+  const failedClasses: ScreeningProviderAssetClass[] = [];
+  const reasons: Record<string, string> = {};
+  // Issue #1998: the stock leg's gather summary, when it gathered.
+  let stockGather: import("../types").StockScreenGatherSummary | undefined;
+
+  for (const assetClass of requested) {
+    const outcome = outcomes[assetClass];
+    if (!outcome) {
+      failedClasses.push(assetClass);
+      reasons[assetClass] = "leg produced no outcome";
+      continue;
+    }
+    if ("error" in outcome) {
+      failedClasses.push(assetClass);
+      reasons[assetClass] = outcome.error;
+      continue;
+    }
+    const screened = outcome.result;
+    // Issue #1963: a leg is failed by its RESULT STATUS, not only
+    // by throwing. The options screener returns error-status
+    // results without throwing (no-symbols validation error; all
+    // chain fetches failed, e.g. dead E*TRADE auth), and the stock
+    // screener returns "no_universe" without throwing — the old
+    // code read all three as successful empty legs and reported
+    // the run "complete". An error-status leg is a failed class
+    // with its reason surfaced, per the #462 partial contract;
+    // "no_matches" stays a legitimate empty.
+    // Issue #1963 (second case): the listings-feed stock leg
+    // refuses technical filters (momentum, RSI) with matchedCount 0
+    // plus a validationError message (screener.ts unsupported
+    // branch — the sole validationError assignment in the stock
+    // screener) and status "no_matches". A validationError on the
+    // stock leg is therefore also a failed class: the filter was
+    // not evaluated, so "Complete, 0 hits" would be a lie.
+    const legResult = screened.result as {
+      status?: string;
+      validationError?: string;
+      fetchErrors?: Array<{ symbol?: string; reason?: string }>;
+    };
+    if (assetClass === "options" && legResult.status === "error") {
+      failedClasses.push(assetClass);
+      reasons[assetClass] =
+        legResult.validationError ??
+        (legResult.fetchErrors && legResult.fetchErrors.length > 0
+          ? legResult.fetchErrors
+              .map((e) => `${e.symbol ?? "options"}: ${e.reason ?? "fetch failed"}`)
+              .join("; ")
+          : "options screen failed");
+      continue;
+    }
+    if (
+      assetClass === "stocks" &&
+      (legResult.status === "no_universe" || legResult.validationError)
+    ) {
+      failedClasses.push(assetClass);
+      reasons[assetClass] =
+        legResult.validationError ?? "stock universe unavailable (no_universe)";
+      continue;
+    }
+    if (screened.assetClass === "stocks") {
+      const result = screened.result as {
+        totalScanned?: number;
+        matchedCount?: number;
+        stocks?: Array<{ symbol: string }>;
+        gather?: import("../types").StockScreenGatherSummary;
+      };
+      if (result.gather) stockGather = result.gather;
+      counts.stocksScanned = result.totalScanned ?? 0;
+      counts.stocksMatched = result.matchedCount ?? result.stocks?.length ?? 0;
+      for (const stock of result.stocks ?? []) {
+        hits.push({ assetClass: "stocks", providerId: screened.providerId, symbol: stock.symbol });
+      }
+    } else {
+      const result = screened.result as {
+        totalUnderlyingsScanned?: number;
+        matchedCount?: number;
+        contracts?: Array<{ underlyingSymbol: string }>;
+      };
+      counts.optionsUnderlyingsScanned = result.totalUnderlyingsScanned ?? 0;
+      counts.optionsContractsMatched = result.matchedCount ?? result.contracts?.length ?? 0;
+      const seen = new Set<string>();
+      for (const contract of result.contracts ?? []) {
+        if (seen.has(contract.underlyingSymbol)) continue;
+        seen.add(contract.underlyingSymbol);
+        hits.push({
+          assetClass: "options",
+          providerId: screened.providerId,
+          symbol: contract.underlyingSymbol,
+          structures: [...plan.structures],
+        });
+      }
+    }
+  }
+
+  counts.hits = hits.length;
+  const status: GoalDrivenScreenResult["status"] =
+    failedClasses.length === 0
+      ? "complete"
+      : failedClasses.length >= requested.length
+        ? "failed"
+        : "partial";
+
+  return {
+    goalKind: plan.goalKind,
+    outlook: plan.outlook,
+    plan,
+    // Issue #2882: the goal stock leg's canonical spec rides
+    // the result when stocks were requested. Record only:
+    // nothing in the result path executes from it. (#2991:
+    // the broker guard that once guaranteed this is retired —
+    // the record status comes from this path, not the guard.)
+    ...(requested.includes("stocks") ? { stockSpec: goalStockSpecFromPlan(plan) } : {}),
+    status,
+    hits,
+    counts,
+    ...(stockGather ? { gather: stockGather } : {}),
+    ...(failedClasses.length > 0
+      ? { partial: { failedClasses, reasons } }
+      : {}),
+    completedAt: (input.now ?? new Date()).toISOString(),
+  };
+}
+
 export async function runGoalDrivenScreen(input: {
   registry: ScreeningProviderRegistry;
   /** Issue #3272: forwarded to the ledger run so the stock leg keeps its id. */
@@ -614,19 +800,7 @@ export async function runGoalDrivenScreen(input: {
   });
   const requested: ScreeningProviderAssetClass[] = input.assetClasses ?? ["stocks", "options"];
 
-  const hits: GoalScreenHit[] = [];
-  const counts = {
-    stocksScanned: 0,
-    stocksMatched: 0,
-    optionsUnderlyingsScanned: 0,
-    optionsContractsMatched: 0,
-    hits: 0,
-  };
-  const failedClasses: ScreeningProviderAssetClass[] = [];
-  const reasons: Record<string, string> = {};
-  // Issue #1998: the stock leg's gather summary, when it gathered.
-  let stockGather: import("../types").StockScreenGatherSummary | undefined;
-
+  const outcomes: Partial<Record<ScreeningProviderAssetClass, GoalLegOutcome>> = {};
   for (const assetClass of requested) {
     try {
       const screened: ScreeningResult =
@@ -658,120 +832,33 @@ export async function runGoalDrivenScreen(input: {
                 ...(input.goalLegHost ? { host: input.goalLegHost } : {}),
               })
             : await input.registry.screen({ assetClass: "options", filter: plan.optionsFilter });
-      // Issue #1963: a leg is failed by its RESULT STATUS, not only
-      // by throwing. The options screener returns error-status
-      // results without throwing (no-symbols validation error; all
-      // chain fetches failed, e.g. dead E*TRADE auth), and the stock
-      // screener returns "no_universe" without throwing — the old
-      // code read all three as successful empty legs and reported
-      // the run "complete". An error-status leg is a failed class
-      // with its reason surfaced, per the #462 partial contract;
-      // "no_matches" stays a legitimate empty.
-      // Issue #1963 (second case): the listings-feed stock leg
-      // refuses technical filters (momentum, RSI) with matchedCount 0
-      // plus a validationError message (screener.ts unsupported
-      // branch — the sole validationError assignment in the stock
-      // screener) and status "no_matches". A validationError on the
-      // stock leg is therefore also a failed class: the filter was
-      // not evaluated, so "Complete, 0 hits" would be a lie.
-      const legResult = screened.result as {
-        status?: string;
-        validationError?: string;
-        fetchErrors?: Array<{ symbol?: string; reason?: string }>;
-      };
-      if (assetClass === "options" && legResult.status === "error") {
-        failedClasses.push(assetClass);
-        reasons[assetClass] =
-          legResult.validationError ??
-          (legResult.fetchErrors && legResult.fetchErrors.length > 0
-            ? legResult.fetchErrors
-                .map((e) => `${e.symbol ?? "options"}: ${e.reason ?? "fetch failed"}`)
-                .join("; ")
-            : "options screen failed");
-        continue;
-      }
-      if (
-        assetClass === "stocks" &&
-        (legResult.status === "no_universe" || legResult.validationError)
-      ) {
-        failedClasses.push(assetClass);
-        reasons[assetClass] =
-          legResult.validationError ?? "stock universe unavailable (no_universe)";
-        continue;
-      }
-      if (screened.assetClass === "stocks") {
-        const result = screened.result as {
-          totalScanned?: number;
-          matchedCount?: number;
-          stocks?: Array<{ symbol: string }>;
-          gather?: import("../types").StockScreenGatherSummary;
-        };
-        if (result.gather) stockGather = result.gather;
-        counts.stocksScanned = result.totalScanned ?? 0;
-        counts.stocksMatched = result.matchedCount ?? result.stocks?.length ?? 0;
-        for (const stock of result.stocks ?? []) {
-          hits.push({ assetClass: "stocks", providerId: screened.providerId, symbol: stock.symbol });
-        }
-      } else {
-        const result = screened.result as {
-          totalUnderlyingsScanned?: number;
-          matchedCount?: number;
-          contracts?: Array<{ underlyingSymbol: string }>;
-        };
-        counts.optionsUnderlyingsScanned = result.totalUnderlyingsScanned ?? 0;
-        counts.optionsContractsMatched = result.matchedCount ?? result.contracts?.length ?? 0;
-        const seen = new Set<string>();
-        for (const contract of result.contracts ?? []) {
-          if (seen.has(contract.underlyingSymbol)) continue;
-          seen.add(contract.underlyingSymbol);
-          hits.push({
-            assetClass: "options",
-            providerId: screened.providerId,
-            symbol: contract.underlyingSymbol,
-            structures: [...plan.structures],
-          });
-        }
-      }
+      outcomes[assetClass] = { result: screened };
     } catch (err) {
-      failedClasses.push(assetClass);
-      reasons[assetClass] = err instanceof Error ? err.message : String(err);
+      outcomes[assetClass] = { error: err instanceof Error ? err.message : String(err) };
     }
   }
 
-  counts.hits = hits.length;
-  const status: GoalDrivenScreenResult["status"] =
-    failedClasses.length === 0
-      ? "complete"
-      : failedClasses.length >= requested.length
-        ? "failed"
-        : "partial";
+  // Issue #6072 — the accumulation (status, hits, counts, partial)
+  // lives in assembleGoalScreenResult, shared with the goal
+  // composition's `goal.assemble` step.
+  return assembleGoalScreenResult({ plan, requested, outcomes, now: input.now });
+}
 
-  return {
-    goalKind: plan.goalKind,
-    outlook: plan.outlook,
-    plan,
-    // Issue #2882: the goal stock leg's canonical spec rides
-    // the result when stocks were requested. Record only:
-    // nothing in the result path executes from it. (#2991:
-    // the broker guard that once guaranteed this is retired —
-    // the record status comes from this path, not the guard.)
-    ...(requested.includes("stocks") ? { stockSpec: goalStockSpecFromPlan(plan) } : {}),
-    status,
-    hits,
-    counts,
-    ...(stockGather ? { gather: stockGather } : {}),
-    ...(failedClasses.length > 0
-      ? { partial: { failedClasses, reasons } }
-      : {}),
-    completedAt: (input.now ?? new Date()).toISOString(),
-  };
+/**
+ * Issue #6072 — the goal-run universe label, the one deterministic
+ * goal label: shared by the ledger adoption (`runGoalDrivenScreenWithLedger`)
+ * and the composition's claim step, so the label is minted once
+ * (#5175 P03 pins exactly two goal templates in src/).
+ */
+export function goalUniverseLabel(scenario: ScenarioDefinition): string {
+  return `goal:${scenario.goalKind}`;
 }
 
 /* ------------------------------------------------------------------ */
 /* Ledger adoption (durable, idempotent autonomous runs)               */
 /* ------------------------------------------------------------------ */
 
-const TERMINAL_TASK_STATUSES = new Set(["completed", "failed", "escalated", "cancelled"]);
+export const TERMINAL_TASK_STATUSES = new Set(["completed", "failed", "escalated", "cancelled"]);
 
 /**
  * Run a goal-driven screen under the screener task ledger.
@@ -836,7 +923,7 @@ export async function runGoalDrivenScreenWithLedger(input: {
   } else {
     const created = await input.ledger.create({
       trigger: input.trigger,
-      universe: `goal:${input.scenario.goalKind}`,
+      universe: goalUniverseLabel(input.scenario),
       sector: input.scenario.direction,
       userLogin: input.userLogin,
       idempotencyKey: input.idempotencyKey,

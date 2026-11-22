@@ -66,6 +66,14 @@ import { ANALYZE_SCREENER_STEP } from "../services/analyzePipelineJobs";
 import { GENERATE_APPLY_STEP } from "../services/generatePipelineJobs";
 import { DELIVER_APPLY_STEP } from "../services/deliverPipelineJobs";
 import {
+  GOAL_ARTIFACTS_STEP,
+  GOAL_ASSEMBLE_STEP,
+  GOAL_LEDGER_CLAIM_STEP,
+  GOAL_LEDGER_COMPLETE_STEP,
+  GOAL_OPTIONS_LEG_STEP,
+  GOAL_PLAN_STEP,
+  GOAL_QUOTA_STEP,
+  GOAL_STOCK_LEG_STEP,
   SCREENER_ANALYSIS_STEP,
   SCREENER_DELIVER_STEP,
   SCREENER_FEED_STEP,
@@ -339,7 +347,7 @@ export class InMemoryWorkflowAdapter implements WorkflowPort {
     // it, exactly as the bespoke analysis never did).
     registry.register(ANALYZE_SCREENER_STEP, analysisHandler);
 
-    registry.register(SCREENER_GOAL_STEP, async (ctx: JobStepContext) => {
+    const goalHandler = async (ctx: JobStepContext) => {
       const prior = priorFor<Record<string, unknown>>(ctx.input, ctx.shardKey);
       if (isDupOutput(prior)) return { output: prior };
       const command = this.commandFor(ctx.jobId);
@@ -402,7 +410,34 @@ export class InMemoryWorkflowAdapter implements WorkflowPort {
           goalExecuted: true,
         },
       };
-    });
+    };
+
+    registry.register(SCREENER_GOAL_STEP, goalHandler);
+    // #6072 (6d-a): the goal definition v2's analyze node is the
+    // eight-step composition (goal.quota → goal.plan →
+    // goal.ledgerClaim → goal.stockLeg → goal.optionsLeg →
+    // goal.assemble → goal.ledgerComplete → goal.artifacts), never
+    // the single screener.goal dispatch — the adapter must can all
+    // eight, or the engine refuses the run job_step_unknown. The
+    // assemble step carries the canned goal handler (the fake
+    // runner call, its guards, and the goal envelope), exactly as
+    // screener.goal did; the other seven are pass-throughs — the
+    // canned world has no quota ledger, plan, or legs to compute,
+    // and the envelope the store/deliver steps read rides the
+    // assemble output forward unchanged.
+    const goalPassThrough = async (ctx: JobStepContext) => {
+      const prior = priorFor<Record<string, unknown>>(ctx.input, ctx.shardKey);
+      if (isDupOutput(prior)) return { output: prior };
+      return { output: prior };
+    };
+    registry.register(GOAL_QUOTA_STEP, goalPassThrough);
+    registry.register(GOAL_PLAN_STEP, goalPassThrough);
+    registry.register(GOAL_LEDGER_CLAIM_STEP, goalPassThrough);
+    registry.register(GOAL_STOCK_LEG_STEP, goalPassThrough);
+    registry.register(GOAL_OPTIONS_LEG_STEP, goalPassThrough);
+    registry.register(GOAL_ASSEMBLE_STEP, goalHandler);
+    registry.register(GOAL_LEDGER_COMPLETE_STEP, goalPassThrough);
+    registry.register(GOAL_ARTIFACTS_STEP, goalPassThrough);
 
     // The store leg as a value (not a registration), so the
     // canned generate step below can compose store + serve.

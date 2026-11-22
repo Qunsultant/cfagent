@@ -77,8 +77,9 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 /** Issue #3185 (bridge slice) re-seeds it: agent_usage_events mirror table + 2 indexes. */
 /** Issue #5423 (migration 0078) re-seeds it: turn_step_timeout_ms on agent_tenant_settings. */
 /** Issue #5425 (migration 0079) re-seeds it: SLO threshold columns on agent_tenant_settings. */
+/** Issue #6072 (migration 0080) re-seeds it: agent_screener_task_entries table added. */
 export const COMBINED_FIXTURE_SHA256 =
-  "871dea8ea4af75d2be809a8bcc67d02534cf80964983fc7f5c385a5138d5051b";
+  "f2bf6187c5c6dc0e15631c4c43bc0f57c943b3e5415f602e31a0900434677664";
 
 /** All four planes' entries in plane order: D1, DO, ORM, remainder. */
 export const COMBINED_CATALOGUE_ENTRIES: CatalogueEntry[] = [
