@@ -46,6 +46,13 @@ vi.mock("../src/agents/report-asset-agent", () => ({
     hoisted.assetCalls++;
     return hoisted.assetQueue.length > 0 ? hoisted.assetQueue.shift() : null;
   }),
+  generatePdfAssetOutcome: vi.fn(async () => {
+    hoisted.assetCalls++;
+    const asset = hoisted.assetQueue.length > 0 ? hoisted.assetQueue.shift() : null;
+    return asset
+      ? { status: "generated", asset }
+      : { status: "failed", error: "REPORT_ASSET_GENERATION_FAILED: mock returned no asset." };
+  }),
 }));
 
 import {
