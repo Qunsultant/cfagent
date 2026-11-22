@@ -3182,6 +3182,9 @@ export class ScreenerAgent extends PortThink {
     const { readTenantBrokerSelection } = await import("../services/providerConnections");
     const {
       TradingPlatformRegistry,
+      defaultBrokerId,
+      defaultTradingMode,
+      environmentForTradingType,
       platformChainSource,
       platformQuoteSource,
       NeutralMarketScreener,
@@ -3189,14 +3192,34 @@ export class ScreenerAgent extends PortThink {
       createRefusingOptionsScreener,
     } = await import("../trading");
     const brokerRead = await readTenantBrokerSelection(this.env);
-    if (brokerRead.status !== "ok") {
+    if (brokerRead.status === "store_unavailable") {
       throw new Error(brokerRead.error);
     }
-    const selectedBroker = brokerRead.brokerId;
+    // Issue #5104 (DEFAULT part of B1): an unconfigured tenant falls
+    // back to the EXISTING vocabulary default. A
+    // genuine store failure above still refuses by name.
+    const selectedBroker =
+      brokerRead.status === "unconfigured" ? defaultBrokerId() : brokerRead.brokerId;
+    // The platform runs in the vocabulary default mode on the
+    // fallback — never in the caller's environment, so a defaulted
+    // broker never runs live on a stored environment it was never
+    // selected for.
+    let platformEnv = args.environment;
+    if (brokerRead.status === "unconfigured") {
+      const fallbackMode = defaultTradingMode();
+      const defaultEnvironment = environmentForTradingType(selectedBroker, fallbackMode);
+      if (!defaultEnvironment) {
+        throw new Error(
+          `[screener-agent] the configured default broker "${selectedBroker}" cannot trade in the ` +
+            `configured default mode "${fallbackMode}" (#5104). No environment maps to that mode.`,
+        );
+      }
+      platformEnv = defaultEnvironment;
+    }
     const goalPlatform =
       selectedBroker === "etrade"
         ? null
-        : TradingPlatformRegistry.getPlatform(selectedBroker, this.env, this.getOrm?.(), userLogin, args.environment);
+        : TradingPlatformRegistry.getPlatform(selectedBroker, this.env, this.getOrm?.(), userLogin, platformEnv);
     const neutralChainSource = goalPlatform ? platformChainSource(goalPlatform) : null;
     const neutralQuoteSource = goalPlatform ? platformQuoteSource(goalPlatform) : null;
     const optionsScreener =

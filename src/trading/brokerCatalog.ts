@@ -549,9 +549,48 @@ export function isBrokerId(value: unknown): value is BrokerId {
   return typeof value === "string" && Object.prototype.hasOwnProperty.call(BROKER_CATALOG, value.toLowerCase());
 }
 
+/**
+ * Issue #5104 (DEFAULT part of B1) — the configured default trading
+ * mode, read on every call from the one externalized block
+ * (`config/vocabulary.json` → `mode`), the mode half of
+ * `defaultBrokerId()`. Fail closed: a configured default that is not
+ * a trading type refuses by name instead of running live on a broker
+ * the operator never selected for live trading.
+ */
+export function defaultTradingMode(): TradingType {
+  const configured = vocabularyDefaults().mode;
+  // The TradingType guard, kept local: isTradingType lives in
+  // accountBindings, which imports this module — importing it here
+  // would cycle. The check is a type guard on the closed union,
+  // not a default.
+  if (configured === "paper" || configured === "live") return configured;
+  throw new Error(
+    `[brokerCatalog] configured default mode "${configured}" is not a trading type (#5516). ` +
+      `Modes: paper, live.`,
+  );
+}
+
 /** Environment → trading type for one broker. Unknown broker is a caller bug. */
 export function tradingTypeFor(broker: BrokerId, environment: TradingEnvironment): TradingType {
   return BROKER_CATALOG[broker].tradingTypeForEnvironment[environment];
+}
+
+/**
+ * Issue #5104 (DEFAULT part of B1) — the inverse of
+ * `tradingTypeFor`: the environment in which a broker trades in the
+ * given mode, or undefined when the broker never trades in that
+ * mode. The vocabulary default (broker, mode) pair resolves its
+ * environment through this catalog lookup, never a literal.
+ */
+export function environmentForTradingType(
+  broker: BrokerId,
+  tradingType: TradingType,
+): TradingEnvironment | undefined {
+  const mapping = BROKER_CATALOG[broker].tradingTypeForEnvironment;
+  for (const environment of Object.keys(mapping) as TradingEnvironment[]) {
+    if (mapping[environment] === tradingType) return environment;
+  }
+  return undefined;
 }
 
 /**

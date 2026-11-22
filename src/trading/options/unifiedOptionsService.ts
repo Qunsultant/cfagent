@@ -22,6 +22,11 @@ import { DatabaseORM, type SqlStorage } from "../../orm";
 import type { DataProviderPorts } from "../../data/buildDataProviderPorts";
 import type { JobRunTrigger } from "../../data/jobRunRecordPorts";
 import { TradingPlatformRegistry } from "../registry";
+import {
+  defaultBrokerId,
+  defaultTradingMode,
+  environmentForTradingType,
+} from "../brokerCatalog";
 import { resolveTenantBroker } from "../../services/tenantProviders";
 import { readTenantBrokerSelection } from "../../services/providerConnections";
 import { platformChainSource } from "../optionChainSource";
@@ -655,22 +660,42 @@ export class UnifiedOptionsService {
    * there is NO silent fallback to the direct client.
    */
   async resolveEngineClient(): Promise<{ engineClient: ETradeRestClient | OptionChainSource; platformRunId?: string }> {
-    // Issue #3460 slice 3: the manual entry reads the broker through
-    // the presence-aware seam — no default. An unconfigured tenant or
-    // a store failure refuses with the named reason instead of
-    // screening E*TRADE data.
+    // Issue #5104 (DEFAULT part of B1): the manual entry reads the
+    // broker through the presence-aware seam — an unconfigured tenant
+    // falls back to the EXISTING vocabulary default:
+    // the configured default broker in its configured default mode,
+    // in the environment the catalog maps that mode to. A genuine
+    // store failure still refuses with the named reason — it is
+    // never masked by a fallback.
     const brokerRead = await readTenantBrokerSelection(this.env);
-    if (brokerRead.status !== "ok") {
+    if (brokerRead.status === "store_unavailable") {
       throw new Error(brokerRead.error);
     }
-    const broker = brokerRead.brokerId;
+    const broker =
+      brokerRead.status === "unconfigured" ? defaultBrokerId() : brokerRead.brokerId;
+    // The platform runs in the vocabulary default mode on the
+    // fallback — never in the caller's override environment, so a
+    // defaulted broker never runs live on a stored environment it
+    // was never selected for.
+    let platformEnv = this.overrideEnv;
+    if (brokerRead.status === "unconfigured") {
+      const fallbackMode = defaultTradingMode();
+      const defaultEnvironment = environmentForTradingType(broker, fallbackMode);
+      if (!defaultEnvironment) {
+        throw new Error(
+          `[unifiedOptionsService] the configured default broker "${broker}" cannot trade in the ` +
+            `configured default mode "${fallbackMode}" (#5104). No environment maps to that mode.`,
+        );
+      }
+      platformEnv = defaultEnvironment;
+    }
     if (broker !== "etrade") {
       const platform = TradingPlatformRegistry.getPlatform(
         broker,
         this.env,
         this.orm,
         this.userLogin,
-        this.overrideEnv,
+        platformEnv,
       );
       const chainSource = platformChainSource(platform);
       if (chainSource) {
@@ -692,8 +717,8 @@ export class UnifiedOptionsService {
     // no ORM is present, construct env-first: ETradeService's
     // orm-first overload would otherwise drop the env argument.
     const etrade = this.orm
-      ? new ETradeService(this.orm, this.env, this.userLogin, this.overrideEnv)
-      : new ETradeService(this.env, undefined, this.userLogin, this.overrideEnv);
+      ? new ETradeService(this.orm, this.env, this.userLogin, platformEnv)
+      : new ETradeService(this.env, undefined, this.userLogin, platformEnv);
     // Issue #1157 (E2): when platform deps are wired, the engines
     // run through the data-provider platform: bootstrap this
     // storage (seed + enable etrade), resolve the optionsChains

@@ -425,20 +425,29 @@ describe("goal-leg host derivation (#4858)", () => {
     expect(paper.broker).toEqual(PAPER_PAIR);
   });
 
+  it("an unconfigured selection derives the existing alpaca/paper default and routes to the host (#5104)", async () => {
+    // Issue #5104 (DEFAULT part of B1): no stored selection is the
+    // EXISTING vocabulary default (alpaca/paper), not a sync
+    // fallback. Only a genuine store failure yields no pair.
+    const { decision, broker } = await resolveGoalLegHostDispatch(
+      boundEnv(),
+      undefined,
+      gate,
+      async () => ({ status: "unconfigured", error: "no selection" }),
+    );
+    expect(broker).toEqual({ broker: "alpaca", mode: "paper" });
+    expect(decision.route).toBe("host");
+  });
+
   it("a failed selection read yields no pair and the sync decision", async () => {
-    for (const read of [
-      { status: "unconfigured", error: "no selection" },
-      { status: "store_unavailable", error: "store down" },
-    ] as TenantBrokerSelectionRead[]) {
-      const { decision, broker } = await resolveGoalLegHostDispatch(
-        boundEnv(),
-        undefined,
-        gate,
-        async () => read,
-      );
-      expect(broker).toBeNull();
-      expect(decision.route).toBe("sync");
-    }
+    const { decision, broker } = await resolveGoalLegHostDispatch(
+      boundEnv(),
+      undefined,
+      gate,
+      async () => ({ status: "store_unavailable", error: "store down" }),
+    );
+    expect(broker).toBeNull();
+    expect(decision.route).toBe("sync");
   });
 
   it("a selection the derivation does not know yields no pair and the sync decision", async () => {

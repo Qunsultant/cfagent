@@ -45,6 +45,10 @@ import {
   type TenantBrokerSelectionRead,
 } from "./providerConnections";
 import {
+  defaultBrokerId,
+  defaultTradingMode,
+} from "../trading/brokerCatalog";
+import {
   optionsScreenJobId,
   optionsStageStorageFromArtifacts,
 } from "../workflows/optionsScreenEngine";
@@ -143,10 +147,20 @@ export async function resolveGoalLegHostDispatch(
   readSelection: (env: Env) => Promise<TenantBrokerSelectionRead> = readTenantBrokerSelection,
 ): Promise<{ decision: GoalLegDispatchDecision; broker: BrokerStageInput | null }> {
   const read = await readSelection(env);
-  const broker =
-    read.status === "ok"
-      ? discoveryBrokerStageInput(read.brokerId, env, requestedEnv)
-      : null;
+  // Issue #5104 (DEFAULT part of B1): an unconfigured tenant falls
+  // back to the EXISTING vocabulary default. The pair
+  // is the configured default broker in its configured default mode
+  // — constructed directly, so no broker-specific env derivation
+  // can lift it to live: a defaulted broker never runs live on a
+  // stored environment it was never selected for. A genuine store
+  // failure still yields no pair and the sync decision; it is never
+  // masked by a fallback.
+  let broker: BrokerStageInput | null = null;
+  if (read.status === "ok") {
+    broker = discoveryBrokerStageInput(read.brokerId, env, requestedEnv);
+  } else if (read.status === "unconfigured") {
+    broker = { broker: defaultBrokerId(), mode: defaultTradingMode() };
+  }
   return { decision: goalLegDispatchRoute({ broker, env, ...gate }), broker };
 }
 
