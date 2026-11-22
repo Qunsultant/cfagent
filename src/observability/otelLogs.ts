@@ -51,7 +51,7 @@ import {
 } from "@opentelemetry/sdk-logs";
 import { JsonLogsSerializer } from "@opentelemetry/otlp-transformer";
 import { ExportResultCode } from "@opentelemetry/core";
-import type { OtelDestination, OtelDomain, OtelExporterKind, OtelLevel } from "../config/otelModes";
+import type { OtelBackendSettings, OtelDestination, OtelDomain, OtelExporterKind, OtelLevel } from "../config/otelModes";
 import { effectiveOtelDomainSwitches } from "../config/otelModes";
 import type { OtelRuntimeOverrideRecord } from "../config/otelConfigPort";
 import { OBS_EXPORT_FAILED, OBS_SINK_DEGRADED, formatCatalogMessage } from "./otelMessages";
@@ -71,6 +71,8 @@ export interface OtelLoggingConfig {
   domains: Record<OtelDomain, OtelDomainSwitches>;
   /** Issue #5138 — one switch per destination (resolved, all ON by default). */
   destinations: Record<OtelDestination, boolean>;
+  /** Issue #5164 (S10) — the Grafana Cloud backend settings (resolved, OFF by default). */
+  backend: OtelBackendSettings;
 }
 
 /**

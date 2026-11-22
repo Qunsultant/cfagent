@@ -66,6 +66,8 @@ function j1j7OnConfig(overrides: Partial<OtelLoggingConfig> = {}): OtelLoggingCo
     },
     // Issue #5138 — all destinations ON (the file defaults).
     destinations: { analyticsEngine: true, r2: true, console: true },
+    // Issue #5164 (S10) — the backend OFF (the file default).
+    backend: { enabled: false, requestTimeoutMs: 10000 },
     ...overrides,
   };
 }

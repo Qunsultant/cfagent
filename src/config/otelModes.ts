@@ -203,6 +203,8 @@ export interface OtelFileConfig {
   archive: OtelArchiveFileConfig;
   /** Issue #5083 (S4) — the alerting settings (all config values, externalized). */
   alerting: OtelAlertingFileConfig;
+  /** Issue #5164 (S10) — the Grafana Cloud backend settings (all config values, externalized). */
+  backend: OtelBackendFileConfig;
 }
 
 /** One alerting section in the config file (config/otel.json). */
@@ -326,6 +328,34 @@ export interface OtelTracesSettings {
  */
 export const OTEL_TRACES_SETTINGS_BUILTIN: OtelTracesSettings = {
   freeTierDailyWriteLimit: 100000,
+} as const;
+
+/** Issue #5164 (S10) — one backend section in the config file (config/otel.json). */
+export interface OtelBackendFileConfig {
+  enabled: boolean;
+  requestTimeoutMs: number;
+}
+
+/** Issue #5164 (S10) — the resolved backend settings (the operational values the backend fan-out consumes). */
+export interface OtelBackendSettings {
+  enabled: boolean;
+  requestTimeoutMs: number;
+}
+
+/**
+ * Issue #5164 (S10) — the BUILTIN safe defaults for the backend
+ * settings (used only when the file is missing or a value is
+ * invalid). The backend is OFF (safe default: telemetry stays
+ * on the free-tier path — Analytics Engine + R2 — until the
+ * owner flips the switch after setting the three Grafana Worker
+ * secrets); the request timeout is 10s (the same bounded wait
+ * the payment and KV fetch paths use). An invalid value fails
+ * closed to these, never to a value that would silently enable
+ * an external export or hang a flush.
+ */
+export const OTEL_BACKEND_SETTINGS_BUILTIN: OtelBackendSettings = {
+  enabled: false,
+  requestTimeoutMs: 10000,
 } as const;
 
 /** The parsed config file (the operational defaults). */
@@ -929,6 +959,89 @@ export function resolveOtelTracesSettings(
     },
     invalid,
   };
+}
+
+export interface OtelBackendSettingsInput {
+  enabled: OtelScopeLevels;
+  requestTimeoutMs: OtelScopeLevels;
+}
+
+export interface ResolvedOtelBackendSettings {
+  settings: OtelBackendSettings;
+  /** True when any setting's winning level held an unrecognized value. */
+  invalid: boolean;
+}
+
+/**
+ * Issue #5164 (S10) — resolves the backend settings over run >
+ * session > user > runtime > env > file > builtin (the safe
+ * defaults: OFF, 10s timeout). Each setting resolves
+ * independently through the same mechanism; an unrecognized
+ * winning value for a setting fails closed to that setting's
+ * builtin safe default with a coded OBS-1001 message and no
+ * fall-through. `invalid` is true when any setting failed
+ * closed.
+ */
+export function resolveOtelBackendSettings(
+  input: OtelBackendSettingsInput,
+): ResolvedOtelBackendSettings {
+  let invalid = false;
+  const resolveOne = <T>(
+    switchName: string,
+    levels: OtelScopeLevels,
+    normalize: (raw: unknown) => T | "invalid" | null,
+    builtin: T,
+  ): T => {
+    for (const [source, value] of orderedLevels(levels)) {
+      const normalized = normalize(value);
+      if (normalized === null) continue;
+      if (normalized === "invalid") {
+        logInvalid(switchName, source, value, String(builtin));
+        invalid = true;
+        return builtin;
+      }
+      return normalized;
+    }
+    return builtin;
+  };
+  return {
+    settings: {
+      enabled: resolveOne(
+        "OTEL_BACKEND_ENABLED",
+        input.enabled,
+        normalizeBoolean,
+        OTEL_BACKEND_SETTINGS_BUILTIN.enabled,
+      ),
+      requestTimeoutMs: resolveOne(
+        "OTEL_BACKEND_REQUEST_TIMEOUT_MS",
+        input.requestTimeoutMs,
+        normalizePositiveInt,
+        OTEL_BACKEND_SETTINGS_BUILTIN.requestTimeoutMs,
+      ),
+    },
+    invalid,
+  };
+}
+
+/**
+ * Issue #5164 (S10) — the per-export enabled check: the
+ * init-time resolved value governs, unless a runtime override
+ * for `backend.enabled` is set (the S7 config port), in which
+ * case the override governs for that export. An unrecognized
+ * override value is ignored (the init-time value governs) —
+ * the override was already validated at write time by the
+ * port, so an unrecognized value here can only come from a
+ * hand-edited D1 row. Mirrors effectiveOtelDomainSwitches.
+ */
+export function effectiveOtelBackendEnabled(
+  initEnabled: boolean,
+  overrides: Readonly<Record<string, { value: unknown }>>,
+): boolean {
+  const record = overrides["backend.enabled"];
+  if (!record || record.value === undefined || record.value === null) return initEnabled;
+  const normalized = normalizeBoolean(record.value);
+  if (normalized === null || normalized === "invalid") return initEnabled;
+  return normalized;
 }
 
 export interface ResolvedOtelArchiveSettings {

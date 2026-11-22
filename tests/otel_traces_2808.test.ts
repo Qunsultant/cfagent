@@ -85,6 +85,8 @@ function j1j7OnConfig(overrides: Partial<OtelTracesConfig> = {}): OtelTracesConf
     },
     destinations: { analyticsEngine: true, r2: true, console: true },
     settings: { freeTierDailyWriteLimit: 100000 },
+    // Issue #5164 (S10) — the backend OFF (the file default).
+    backend: { enabled: false, requestTimeoutMs: 10000 },
     ...overrides,
   };
 }

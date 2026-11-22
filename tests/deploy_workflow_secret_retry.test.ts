@@ -255,3 +255,45 @@ describe("deploy.yml — Slack credentials (#3952)", () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// Grafana Cloud OTLP secrets (#5164)
+// ---------------------------------------------------------------------------
+
+describe("deploy.yml — Grafana Cloud OTLP secrets (#5164)", () => {
+  // The three Grafana secrets (owner direction 2026-11-22): they live
+  // in GitHub Secrets and reach the Worker through the sync-secrets
+  // job, so enabling the backend later is configuration only. Presence
+  // in the sync list is what makes a GitHub secret reach the deployment
+  // at all. The endpoint is a secret too, not a var; the only thing in
+  // config is the backend switch (off by default).
+  const WIRED = [
+    "GRAFANA_OTLP_ENDPOINT",
+    "GRAFANA_CLOUD_INSTANCE_ID",
+    "GRAFANA_CLOUD_API_KEY",
+  ];
+
+  it("syncs each Grafana secret the backend reads, as an optional push", () => {
+    for (const name of WIRED) {
+      expect(workflow, `${name}: no GitHub-secret source`).toContain(`secrets.${name}`);
+      expect(workflow, `${name}: not pushed`).toContain(`optional_secret ${name} `);
+      // Optional, never required: absence is a reported fail-closed state,
+      // not a reason to fail a code deploy — the code names the missing
+      // secret with the coded OBS message and the backend stays off.
+      expect(workflow, `${name}: must not be required`).not.toContain(`require_secret ${name} `);
+    }
+  });
+
+  it("keeps the Grafana pushes in the existing core-secrets step", () => {
+    const core = section("\n  sync-secrets:", "\n      - name: Set E*TRADE secrets");
+    for (const name of WIRED) {
+      expect(core, `${name} belongs to the core step`).toContain(`optional_secret ${name} `);
+    }
+    for (const name of WIRED) {
+      expect(
+        workflow.match(new RegExp(`optional_secret ${name} "`, "g")) ?? [],
+        `${name} must be pushed once, from the core step only`,
+      ).toHaveLength(1);
+    }
+  });
+});

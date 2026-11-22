@@ -45,6 +45,23 @@ export interface Env {
   // apply (50 / 500).
   OTEL_ARCHIVE_PAGE_SIZE?: string;
   OTEL_ARCHIVE_MAX_OBJECTS?: string;
+  // Issue #5164 (S10) — the Grafana Cloud OTLP backend switch
+  // (OTEL_BACKEND_ENABLED) and request timeout
+  // (OTEL_BACKEND_REQUEST_TIMEOUT_MS), plus the three Grafana
+  // secrets: the gateway URL from the portal (Connections →
+  // OpenTelemetry), the numeric stack/instance ID, and the API
+  // token with metrics:write, logs:write, traces:write. All
+  // secrets live in GitHub Secrets and reach the Worker through
+  // the deploy workflow's sync-secrets job (`optional_secret`
+  // each in .github/workflows/deploy.yml; `wrangler secret put`
+  // works as a manual fallback), never in wrangler.jsonc and
+  // never in the repo; without them the backend stays disabled
+  // (the free-tier path carries on).
+  OTEL_BACKEND_ENABLED?: string;
+  OTEL_BACKEND_REQUEST_TIMEOUT_MS?: string;
+  GRAFANA_OTLP_ENDPOINT?: string;
+  GRAFANA_CLOUD_INSTANCE_ID?: string;
+  GRAFANA_CLOUD_API_KEY?: string;
   // Issue #5083 (S4) — the alerting switches (master, Slack,
   // email, free-tier guard). Optional so code is safe before
   // they are set; absence means the config-file / built-in

@@ -75,7 +75,7 @@ import {
 
 /** Re-exported so the metrics stack shares the one settings shape. */
 export type { OtelMetricsSettings } from "../config/otelModes";
-import type { OtelMetricsSettings } from "../config/otelModes";
+import type { OtelBackendSettings, OtelMetricsSettings } from "../config/otelModes";
 
 /** The resolved OTel metrics configuration the provider/gate consume. */
 export interface OtelMetricsConfig {
@@ -86,6 +86,8 @@ export interface OtelMetricsConfig {
   destinations: Record<OtelDestination, boolean>;
   /** Issue #5082 (S2) — the metrics settings (export interval, free-tier limits, thresholds). */
   settings: OtelMetricsSettings;
+  /** Issue #5164 (S10) — the Grafana Cloud backend settings (resolved, OFF by default). */
+  backend: OtelBackendSettings;
 }
 
 /**
