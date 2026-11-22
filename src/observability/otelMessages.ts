@@ -145,6 +145,12 @@ export const OBS_CONFIG_FORBIDDEN = "OBS-1022" as const;
 /** An audit-chain append failed and was named (audited + logged) instead of vanishing silently. */
 export const OBS_AUDIT_CHAIN_APPEND_FAILED = "OBS-1023" as const;
 
+/** Issue #5425 (#3515 S5) — the SLO read is available to platform admins only. */
+export const OBS_SLO_FORBIDDEN = "OBS-1024" as const;
+
+/** Issue #5425 (#3515 S5) — the SLO read could not be served (admin check / audit failed). */
+export const OBS_SLO_UNAVAILABLE = "OBS-1025" as const;
+
 /**
  * The severity scale for coded messages. The S4 placeholder
  * severities ("info" | "warning" | "error" | "critical") are
@@ -310,6 +316,18 @@ export const OBS_CATALOG: Readonly<Record<string, ObsCatalogEntry>> = {
     name: "otel.audit_chain.append_failed",
     template:
       "Audit-chain append failed for tenant {tenantId} ({action}): {error}",
+    severity: "error",
+  },
+  [OBS_SLO_FORBIDDEN]: {
+    code: OBS_SLO_FORBIDDEN,
+    name: "otel.slo.forbidden",
+    template: "SLO compliance is available to platform admins only",
+    severity: "warning",
+  },
+  [OBS_SLO_UNAVAILABLE]: {
+    code: OBS_SLO_UNAVAILABLE,
+    name: "otel.slo.unavailable",
+    template: "{reason}",
     severity: "error",
   },
 } as const;

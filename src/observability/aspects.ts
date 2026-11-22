@@ -128,10 +128,25 @@ export async function withObservability<T>(
   }
 }
 
+/** One observed HTTP request: the status + duration the API SLOs read. */
+export interface ApiRequestObservation {
+  status: number;
+  durationMs: number;
+}
+
 export interface RequestObservabilityOptions {
   /** Resolve the sink from env; null means observability off for this request. */
   sinkFor?: (env: unknown) => ObservabilitySink | null;
   nowMs?: () => number;
+  /**
+   * Issue #5425 (#3515 S5): per-request hook for the API SLO
+   * recording. Called (best-effort, never throwing into the
+   * response path) with the status + duration after the log
+   * event is written — success path with the real status, error
+   * path with 500. A throwing hook is swallowed: observability
+   * never changes behavior.
+   */
+  onRequestObserved?: (observation: ApiRequestObservation, env: unknown) => void;
 }
 
 /**
@@ -175,6 +190,13 @@ export function withRequestObservability(
           fields: { method: request.method, status: response.status },
         });
       }
+      if (opts.onRequestObserved) {
+        try {
+          opts.onRequestObserved({ status: response.status, durationMs: end - start }, env);
+        } catch {
+          // Best-effort: a failing hook never fails the request.
+        }
+      }
       return response;
     } catch (err) {
       const end = nowMs();
@@ -197,6 +219,13 @@ export function withRequestObservability(
           errorCode: errorCodeOf(err),
           fields: { method: request.method },
         });
+      }
+      if (opts.onRequestObserved) {
+        try {
+          opts.onRequestObserved({ status: 500, durationMs: end - start }, env);
+        } catch {
+          // Best-effort: a failing hook never fails the request.
+        }
       }
       throw err;
     }

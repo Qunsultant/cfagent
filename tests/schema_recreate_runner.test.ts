@@ -129,7 +129,9 @@ describe("P5 runner — plan resolution (P4 finding 1: phased order)", () => {
     // mirror table + 2 indexes): 443 → 446.
     // Issue #5423 adds migration 0078 (agent_tenant_settings
     // turn_step_timeout_ms column): 446 → 447.
-    expect(p.steps).toHaveLength(447);
+    // Issue #5425 adds migration 0079 (agent_tenant_settings
+    // SLO threshold columns): 447 → 449.
+    expect(p.steps).toHaveLength(449);
     expect(p.skipped).toHaveLength(1);
     expect(p.skipped[0].code).toBe(SEED_FORM_CODE);
     expect(p.skipped[0].reason).toMatch(/call site/i);
@@ -153,7 +155,9 @@ describe("P5 runner — plan resolution (P4 finding 1: phased order)", () => {
     // mirror table + 2 indexes): 443 → 446.
     // Issue #5423 adds migration 0078 (agent_tenant_settings
     // turn_step_timeout_ms column): 446 → 447.
-    expect(harness).toHaveLength(447);
+    // Issue #5425 adds migration 0079 (agent_tenant_settings
+    // SLO threshold columns): 447 → 449.
+    expect(harness).toHaveLength(449);
     // Production move 1: the rebuild CREATE for agent_price_catalogue
     // must stay after the RENAME that clears its table (a second
     // table-creation for the same table cannot run before the rename
@@ -294,7 +298,9 @@ describe("P5 runner — delta-to-steps selection (P4 finding 3, P4 finding 2)", 
     // table + 2 indexes): 245 → 248.
     // Issue #5423 adds migration 0078 (agent_tenant_settings
     // turn_step_timeout_ms column): 248 → 249.
-    expect(selected.schema).toHaveLength(249);
+    // Issue #5425 adds migration 0079 (agent_tenant_settings
+    // SLO threshold columns): 249 → 251.
+    expect(selected.schema).toHaveLength(251);
     expect(selected.seeds).toHaveLength(12);
     expect(selected.skipped).toHaveLength(9);
     expect(

@@ -159,6 +159,16 @@ export interface TenantSettingsRecord {
    * NO default: the absent value is meaningful, not a gap.
    */
   turnStepTimeoutMs: number | null;
+  /**
+   * Issue #5425 (#3515 S5): the #3515 SLO thresholds for this
+   * tenant. Null = UNCONFIGURED — the SLO reports
+   * "unconfigured" and claims no compliance instead of
+   * evaluating against an invented number. Adapters apply NO
+   * default: the absent value is meaningful, not a gap.
+   */
+  sloUptimeTargetRatio: number | null;
+  /** Issue #5425 (#3515 S5): P95 API latency max, in milliseconds. Null = UNCONFIGURED. */
+  sloP95LatencyMaxMs: number | null;
 }
 
 /** Issue #2481: the auto-refresh half of a tenant settings row. */
@@ -386,6 +396,31 @@ export interface CommercialStore {
   setTenantTurnStepTimeoutMs(
     tenantId: string,
     timeoutMs: number,
+  ): Promise<TenantSettingsRecord>;
+  /**
+   * Issue #5425 (#3515 S5): the tenant's STORED uptime target
+   * ratio for the API uptime SLO — or null when no target is
+   * configured (no settings row, or a row whose
+   * sloUptimeTargetRatio is null). Applies NO default: null is
+   * the unconfigured state, and the SLO reports "unconfigured"
+   * rather than evaluating against an invented number.
+   */
+  getTenantSloUptimeTargetRatio(tenantId: string): Promise<number | null>;
+  /** Issue #5425 (#3515 S5): store the tenant's uptime target ratio. */
+  setTenantSloUptimeTargetRatio(
+    tenantId: string,
+    targetRatio: number,
+  ): Promise<TenantSettingsRecord>;
+  /**
+   * Issue #5425 (#3515 S5): the tenant's STORED P95 API latency
+   * max (ms) — or null when no max is configured. Applies NO
+   * default: null is the unconfigured state.
+   */
+  getTenantSloP95LatencyMaxMs(tenantId: string): Promise<number | null>;
+  /** Issue #5425 (#3515 S5): store the tenant's P95 API latency max (ms). */
+  setTenantSloP95LatencyMaxMs(
+    tenantId: string,
+    maxMs: number,
   ): Promise<TenantSettingsRecord>;
   /** Idempotent: re-recording the same claim is a no-op (the DO ledger row is the audit). Issue #3289: the optional productId/versionId/priceUSD record which charge the credit replaces (§3.9). */
   recordCreditClaim(claim: {

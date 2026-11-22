@@ -77,22 +77,31 @@ const LIST_RESPONSE = {
   maxObjects: 500,
 };
 
-describe("5169 view: the Observability tab has one view, Archive", () => {
-  it("OBSERVABILITY_VIEWS lists archive, labelled Archive", () => {
+describe("5169 view: the Observability tab's views — Archive, Config, SLOs", () => {
+  it("OBSERVABILITY_VIEWS lists archive, config, slo, labelled", () => {
     // S7 (#5086) adds the Config view; archive stays the default.
-    expect([...OBSERVABILITY_VIEWS]).toEqual(["archive", "config"]);
+    // S5 (#5425) adds the SLO view; archive stays the default.
+    expect([...OBSERVABILITY_VIEWS]).toEqual(["archive", "config", "slo"]);
     expect(OBSERVABILITY_VIEW_LABELS["archive"]).toBe("Archive");
     expect(OBSERVABILITY_VIEW_LABELS["config"]).toBe("Config");
+    expect(OBSERVABILITY_VIEW_LABELS["slo"]).toBe("SLOs");
   });
 
-  it("normalize/parse accept archive and fall back to archive for unknown views", () => {
+  it("normalize/parse accept the three views and fall back to archive for unknown views", () => {
     expect(normalizeObservabilityView("archive")).toBe("archive");
+    expect(normalizeObservabilityView("slo")).toBe("slo");
     expect(normalizeObservabilityView("bogus")).toBe("archive");
     expect(parseObservabilityDeepLink("?tab=observability&view=archive")).toEqual({
       view: "archive",
+      tenantId: "primary",
+    });
+    expect(parseObservabilityDeepLink("?tab=observability&view=slo")).toEqual({
+      view: "slo",
+      tenantId: "primary",
     });
     expect(parseObservabilityDeepLink("?tab=observability&view=nope")).toEqual({
       view: "archive",
+      tenantId: "primary",
     });
   });
 });

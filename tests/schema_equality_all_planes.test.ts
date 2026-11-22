@@ -123,7 +123,7 @@ describe("schema equality — all planes (#4282 P4)", () => {
     expect(new Set(executedCodes).size).toBe(
       COMBINED_CATALOGUE_ENTRIES.length,
     );
-    expect(COMBINED_CATALOGUE_ENTRIES.length).toBe(437);
+    expect(COMBINED_CATALOGUE_ENTRIES.length).toBe(439);
     // Issue #5229 adds migration 0069 (agent_referral_rules
     // expiry_period_ms column): 410 entries resolve to 421 statements.
     // Issue #5086 adds migration 0070 (otel_config_overrides table):
@@ -148,7 +148,9 @@ describe("schema equality — all planes (#4282 P4)", () => {
     // agent_usage_events mirror table + 2 indexes): 444 → 447.
     // Issue #5423 adds 1 entry (migration 0078:
     // agent_tenant_settings turn_step_timeout_ms column): 447 → 448.
-    expect(executedStatements).toBe(448);
+    // Issue #5425 adds 2 entries (migration 0079:
+    // agent_tenant_settings SLO threshold columns): 448 → 450.
+    expect(executedStatements).toBe(450);
     const actual = instance.introspect();
     const diff = diffSchema(actual, combinedExpectedModel());
     expect(isEmptyDiff(diff)).toBe(true);

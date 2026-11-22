@@ -1352,6 +1352,22 @@ export const MIGRATION_0078_TENANT_TURN_STEP_TIMEOUT: DataMigration = {
   name: "0078_tenant_turn_step_timeout",
   sql: d1MigrationSql(78),
 };
+
+/**
+ * Migration 0079 — the #3515 S5 SLO thresholds (#5425).
+ * Adds the nullable `slo_uptime_target_ratio` (REAL) and
+ * `slo_p95_latency_max_ms` (INTEGER) columns to
+ * `agent_tenant_settings`: null / absent row = UNCONFIGURED,
+ * and the SLO reports "unconfigured" and claims no compliance
+ * instead of evaluating against an invented number.
+ * Marker-gated like the other ALTER migrations, so a re-apply
+ * is skipped.
+ */
+export const MIGRATION_0079_TENANT_SLO_THRESHOLDS: DataMigration = {
+  version: 79,
+  name: "0079_tenant_slo_thresholds",
+  sql: d1MigrationSql(79),
+};
 export const MIGRATION_0058_PRODUCT_VERSIONS: DataMigration = {
   version: 58,
   name: "0058_product_versions",
@@ -1596,6 +1612,7 @@ export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANC
   MIGRATION_0076_JOB_RUN_DEFINITION_VERSION,
   MIGRATION_0077_USAGE_EVENTS_MIRROR,
   MIGRATION_0078_TENANT_TURN_STEP_TIMEOUT,
+  MIGRATION_0079_TENANT_SLO_THRESHOLDS,
 ];
 
 function splitStatements(sqlText: string): string[] {

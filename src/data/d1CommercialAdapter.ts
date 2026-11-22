@@ -48,6 +48,7 @@ import {
   MIGRATION_0058_PRODUCT_VERSIONS,
   MIGRATION_0062_OFFER_SUPPRESSIONS_RANK,
   MIGRATION_0078_TENANT_TURN_STEP_TIMEOUT,
+  MIGRATION_0079_TENANT_SLO_THRESHOLDS,
   type MigrationDb,
 } from "./migrationRunner";
 import { assertSegment, DEFAULT_SEGMENT } from "./productPorts";
@@ -123,6 +124,7 @@ export async function ensureCommercialSchema(db: CommercialDb): Promise<number[]
     MIGRATION_0058_PRODUCT_VERSIONS,
     MIGRATION_0062_OFFER_SUPPRESSIONS_RANK,
     MIGRATION_0078_TENANT_TURN_STEP_TIMEOUT,
+    MIGRATION_0079_TENANT_SLO_THRESHOLDS,
   ]);
 }
 
@@ -326,6 +328,8 @@ export class D1CommercialAdapter implements CommercialStore {
       dataProviderId: providers.dataProviderId,
       brokerId: providers.brokerId,
       turnStepTimeoutMs: await this.getTenantTurnStepTimeoutMs(tenantId),
+      sloUptimeTargetRatio: await this.getTenantSloUptimeTargetRatio(tenantId),
+      sloP95LatencyMaxMs: await this.getTenantSloP95LatencyMaxMs(tenantId),
     };
     // Issue #5605 (G-2): in a tenant-settings PATCH the route
     // opens one batch unit for the three setters; this upsert
@@ -393,6 +397,8 @@ export class D1CommercialAdapter implements CommercialStore {
       dataProviderId: providers.dataProviderId,
       brokerId: providers.brokerId,
       turnStepTimeoutMs: await this.getTenantTurnStepTimeoutMs(tenantId),
+      sloUptimeTargetRatio: await this.getTenantSloUptimeTargetRatio(tenantId),
+      sloP95LatencyMaxMs: await this.getTenantSloP95LatencyMaxMs(tenantId),
     };
     // Issue #5605 (G-2): buffers into the PATCH unit when one
     // is open (SETs only the auto-refresh half); executes
@@ -485,6 +491,8 @@ export class D1CommercialAdapter implements CommercialStore {
       dataProviderId: providers.dataProviderId,
       brokerId: providers.brokerId,
       turnStepTimeoutMs: await this.getTenantTurnStepTimeoutMs(tenantId),
+      sloUptimeTargetRatio: await this.getTenantSloUptimeTargetRatio(tenantId),
+      sloP95LatencyMaxMs: await this.getTenantSloP95LatencyMaxMs(tenantId),
     };
     // Issue #5605 (G-2): buffers into the PATCH unit when one
     // is open (SETs only the providers half); executes
@@ -540,6 +548,8 @@ export class D1CommercialAdapter implements CommercialStore {
       dataProviderId: providers.dataProviderId,
       brokerId: providers.brokerId,
       turnStepTimeoutMs: timeoutMs,
+      sloUptimeTargetRatio: await this.getTenantSloUptimeTargetRatio(tenantId),
+      sloP95LatencyMaxMs: await this.getTenantSloP95LatencyMaxMs(tenantId),
     };
     const query = this.db
       .insert(agentTenantSettings)
@@ -556,6 +566,118 @@ export class D1CommercialAdapter implements CommercialStore {
       .onConflictDoUpdate({
         target: agentTenantSettings.tenantId,
         set: { turnStepTimeoutMs: timeoutMs, updatedAtMs: record.updatedAtMs },
+      });
+    const { sql, params } = query.toSQL();
+    if (bufferD1Statement(sql, ...params)) return record;
+    await query;
+    return record;
+  }
+
+  /** Issue #5425 (#3515 S5) — the stored uptime target ratio, or null when unconfigured (no row / null column — NO default applied). */
+  async getTenantSloUptimeTargetRatio(tenantId: string): Promise<number | null> {
+    const rows = await this.db
+      .select()
+      .from(agentTenantSettings)
+      .where(eq(agentTenantSettings.tenantId, tenantId))
+      .limit(1);
+    if (rows.length === 0) return null;
+    const row = rows[0] as typeof rows[0] & { sloUptimeTargetRatio?: number | null };
+    return typeof row.sloUptimeTargetRatio === "number" ? row.sloUptimeTargetRatio : null;
+  }
+
+  /** Issue #5425 (#3515 S5) — store the tenant's uptime target ratio. Mirrors setTenantTurnStepTimeoutMs: the record is built from the current row's other halves, and the upsert's SET clause touches only the ratio half. */
+  async setTenantSloUptimeTargetRatio(
+    tenantId: string,
+    targetRatio: number,
+  ): Promise<TenantSettingsRecord> {
+    const adsEnabled = await this.getTenantAdsEnabled(tenantId);
+    const autoRefresh = await this.getTenantAutoRefresh(tenantId);
+    const providers = await this.getTenantProviders(tenantId);
+    const record: TenantSettingsRecord = {
+      tenantId,
+      adsEnabled,
+      updatedAtMs: Date.now(),
+      autoRefreshEnabled: autoRefresh.enabled,
+      autoRefreshIntervalS: autoRefresh.intervalS,
+      dataProviderId: providers.dataProviderId,
+      brokerId: providers.brokerId,
+      turnStepTimeoutMs: await this.getTenantTurnStepTimeoutMs(tenantId),
+      sloUptimeTargetRatio: targetRatio,
+      sloP95LatencyMaxMs: await this.getTenantSloP95LatencyMaxMs(tenantId),
+    };
+    const query = this.db
+      .insert(agentTenantSettings)
+      .values({
+        tenantId,
+        adsEnabled: adsEnabled ? 1 : 0,
+        updatedAtMs: record.updatedAtMs,
+        autoRefreshEnabled: record.autoRefreshEnabled ? 1 : 0,
+        autoRefreshIntervalS: record.autoRefreshIntervalS,
+        dataProviderId: record.dataProviderId,
+        brokerId: record.brokerId,
+        turnStepTimeoutMs: record.turnStepTimeoutMs,
+        sloUptimeTargetRatio: targetRatio,
+        sloP95LatencyMaxMs: record.sloP95LatencyMaxMs,
+      })
+      .onConflictDoUpdate({
+        target: agentTenantSettings.tenantId,
+        set: { sloUptimeTargetRatio: targetRatio, updatedAtMs: record.updatedAtMs },
+      });
+    const { sql, params } = query.toSQL();
+    if (bufferD1Statement(sql, ...params)) return record;
+    await query;
+    return record;
+  }
+
+  /** Issue #5425 (#3515 S5) — the stored P95 latency max (ms), or null when unconfigured (no row / null column — NO default applied). */
+  async getTenantSloP95LatencyMaxMs(tenantId: string): Promise<number | null> {
+    const rows = await this.db
+      .select()
+      .from(agentTenantSettings)
+      .where(eq(agentTenantSettings.tenantId, tenantId))
+      .limit(1);
+    if (rows.length === 0) return null;
+    const row = rows[0] as typeof rows[0] & { sloP95LatencyMaxMs?: number | null };
+    return typeof row.sloP95LatencyMaxMs === "number" ? row.sloP95LatencyMaxMs : null;
+  }
+
+  /** Issue #5425 (#3515 S5) — store the tenant's P95 latency max (ms). Mirrors setTenantSloUptimeTargetRatio. */
+  async setTenantSloP95LatencyMaxMs(
+    tenantId: string,
+    maxMs: number,
+  ): Promise<TenantSettingsRecord> {
+    const adsEnabled = await this.getTenantAdsEnabled(tenantId);
+    const autoRefresh = await this.getTenantAutoRefresh(tenantId);
+    const providers = await this.getTenantProviders(tenantId);
+    const record: TenantSettingsRecord = {
+      tenantId,
+      adsEnabled,
+      updatedAtMs: Date.now(),
+      autoRefreshEnabled: autoRefresh.enabled,
+      autoRefreshIntervalS: autoRefresh.intervalS,
+      dataProviderId: providers.dataProviderId,
+      brokerId: providers.brokerId,
+      turnStepTimeoutMs: await this.getTenantTurnStepTimeoutMs(tenantId),
+      sloUptimeTargetRatio: await this.getTenantSloUptimeTargetRatio(tenantId),
+      sloP95LatencyMaxMs: maxMs,
+    };
+    const query = this.db
+      .insert(agentTenantSettings)
+      .values({
+        tenantId,
+        adsEnabled: adsEnabled ? 1 : 0,
+        updatedAtMs: record.updatedAtMs,
+        autoRefreshEnabled: record.autoRefreshEnabled ? 1 : 0,
+        autoRefreshIntervalS: record.autoRefreshIntervalS,
+        dataProviderId: record.dataProviderId,
+        brokerId: record.brokerId,
+        turnStepTimeoutMs: record.turnStepTimeoutMs,
+        sloUptimeTargetRatio: record.sloUptimeTargetRatio,
+        sloP95LatencyMaxMs: maxMs,
+      })
+      .onConflictDoUpdate({
+        target: agentTenantSettings.tenantId,
+        set: { sloP95LatencyMaxMs: maxMs, updatedAtMs: record.updatedAtMs },
       });
     const { sql, params } = query.toSQL();
     if (bufferD1Statement(sql, ...params)) return record;
