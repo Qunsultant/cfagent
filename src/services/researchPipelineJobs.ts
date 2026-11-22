@@ -96,6 +96,21 @@ export interface ResearchStepDeps {
     brokerId?: string;
     mode?: string;
   }) => Promise<ResearchEnrichStageOutput>;
+  /** Issue #6066 — the generate stage: the document set + canonical row. */
+  runGenerateStage?: (input: {
+    runId: string;
+    userLogin: string;
+    trigger: "manual" | "scheduled";
+    report: ResearchReport;
+  }) => Promise<unknown>;
+  /** Issue #6066 — the deliver stage: Slack/email/webhook for the stored report. */
+  runDeliverStage?: (input: {
+    runId: string;
+    userLogin: string;
+    trigger: "manual" | "scheduled";
+    report: ResearchReport;
+    publication: unknown;
+  }) => Promise<unknown>;
   /** Execute the OODA analysis loop and return the structured ResearchReport. */
   runOodaAnalysis: (input: {
     runId: string;
@@ -109,6 +124,8 @@ export interface ResearchStepDeps {
     feed?: ResearchFeedStageOutput;
     /** Issue #6064 — the persisted enrich step output, when the enrich stage ran. */
     enrich?: ResearchEnrichStageOutput;
+    /** Issue #6066 — analyze stops at the report; generate/deliver own publication. */
+    deferPublication?: boolean;
   }) => Promise<ResearchReport | Record<string, unknown>>;
   /** Execute the §9 outcome evaluation pass for a run or due runs. */
   runEvaluateStage?: (input: {
@@ -192,19 +209,58 @@ export function registerResearchSteps(
     };
   });
 
-  for (const [stepName, stageId] of [
-    [RESEARCH_GENERATE_STEP, "generate"],
-    [RESEARCH_DELIVER_STEP, "deliver"],
-  ] as const) {
-    registry.register(stepName, async (ctx) => {
-      const params = (ctx.params ?? {}) as { runId?: string };
-      const runId = params.runId || ctx.jobId.replace(/^research:/, "");
+  registry.register(RESEARCH_GENERATE_STEP, async (ctx) => {
+    const params = (ctx.params ?? {}) as {
+      runId?: string;
+      userLogin?: string;
+      trigger?: "manual" | "scheduled";
+    };
+    const runId = params.runId || ctx.jobId.replace(/^research:/, "");
+    const userLogin = params.userLogin || "";
+    const report = ctx.input as ResearchReport | null;
+    const usable = report && typeof report === "object" && Array.isArray((report as { ideas?: unknown }).ideas);
+    if (!userLogin || !deps.runGenerateStage || !usable) {
       return {
-        output: { stage: stageId, runId, status: "completed" },
-        descriptor: researchArtifactKey(runId, stageId),
+        output: { stage: "generate", runId, status: "not_configured" },
+        descriptor: researchArtifactKey(runId, "generate"),
       };
+    }
+    const publication = await deps.runGenerateStage({
+      runId,
+      userLogin,
+      trigger: params.trigger === "scheduled" ? "scheduled" : "manual",
+      report: report as ResearchReport,
     });
-  }
+    return {
+      output: { report, publication },
+      descriptor: `${researchArtifactKey(runId, "generate")} (${(publication as { reportId?: string | null })?.reportId ?? "no report"})`,
+    };
+  });
+
+  registry.register(RESEARCH_DELIVER_STEP, async (ctx) => {
+    const params = (ctx.params ?? {}) as {
+      runId?: string;
+      userLogin?: string;
+      trigger?: "manual" | "scheduled";
+    };
+    const runId = params.runId || ctx.jobId.replace(/^research:/, "");
+    const userLogin = params.userLogin || "";
+    const input = ctx.input as { report?: ResearchReport; publication?: unknown } | null;
+    if (!userLogin || !deps.runDeliverStage || !input?.report || input.publication === undefined) {
+      return {
+        output: { stage: "deliver", runId, status: "not_configured" },
+        descriptor: researchArtifactKey(runId, "deliver"),
+      };
+    }
+    const delivery = await deps.runDeliverStage({
+      runId,
+      userLogin,
+      trigger: params.trigger === "scheduled" ? "scheduled" : "manual",
+      report: input.report,
+      publication: input.publication,
+    });
+    return { output: delivery, descriptor: researchArtifactKey(runId, "deliver") };
+  });
 
   registry.register(ANALYZE_OODA_STEP, async (ctx) => {
     const params = (ctx.params ?? {}) as {
@@ -247,6 +303,7 @@ export function registerResearchSteps(
       ...(typeof params.mode === "string" && params.mode ? { mode: params.mode } : {}),
       ...(feed ? { feed } : {}),
       ...(enrich ? { enrich } : {}),
+      ...(feed || enrich ? { deferPublication: true } : {}),
     });
     const ideaCount = Array.isArray((report as { ideas?: unknown[] }).ideas)
       ? (report as { ideas: unknown[] }).ideas.length

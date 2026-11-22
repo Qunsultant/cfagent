@@ -90,7 +90,7 @@ export interface DispatchResearchEngineInput {
   brokerId?: string;
   mode?: string;
   researchDeps?: Partial<ResearchStepDeps>;
-  execute: (ctx?: { runId: string; engineJobId: string; feed?: ResearchFeedStageOutput; enrich?: ResearchEnrichStageOutput }) => Promise<Record<string, unknown>>;
+  execute: (ctx?: { runId: string; engineJobId: string; feed?: ResearchFeedStageOutput; enrich?: ResearchEnrichStageOutput; deferPublication?: boolean }) => Promise<Record<string, unknown>>;
 }
 
 export interface DispatchResearchEngineResult {
@@ -243,6 +243,7 @@ export async function dispatchResearchEngineRun(
         engineJobId,
         ...(ctx.feed ? { feed: ctx.feed } : {}),
         ...(ctx.enrich ? { enrich: ctx.enrich } : {}),
+        ...(ctx.deferPublication ? { deferPublication: true } : {}),
       }),
     ...input.researchDeps,
   };

@@ -40,6 +40,8 @@ export interface ResearchRunSelection {
   feed?: ResearchFeedStageOutput;
   /** Issue #6064 — the enrich stage output, threaded into the run. */
   enrich?: ResearchEnrichStageOutput;
+  /** Issue #6065 — analyze stops at the report; generate/deliver own publication. */
+  stage?: "analyze" | "generate" | "deliver";
 }
 
 export type PublishEntry<R> = (
@@ -68,9 +70,10 @@ export function triggerScheduledResearch<R>(
   publish: PublishEntry<R>,
   userLogin?: string,
   feed?: ResearchFeedStageOutput,
-  enrich?: ResearchEnrichStageOutput
+  enrich?: ResearchEnrichStageOutput,
+  deferPublication?: boolean
 ): Promise<R> {
   return feed || enrich
-    ? publish("scheduled", userLogin, { ...(feed ? { feed } : {}), ...(enrich ? { enrich } : {}) })
+    ? publish("scheduled", userLogin, { ...(feed ? { feed } : {}), ...(enrich ? { enrich } : {}), ...(deferPublication ? { stage: "analyze" as const } : {}) })
     : publish("scheduled", userLogin);
 }
