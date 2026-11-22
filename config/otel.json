@@ -92,7 +92,7 @@
     "maxAlertsPerDay": 100
   },
   "backend": {
-    "enabled": false,
+    "enabled": true,
     "requestTimeoutMs": 10000,
     "serviceName": "ai-search-agent",
     "protocol": "http/json",
