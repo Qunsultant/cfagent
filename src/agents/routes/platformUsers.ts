@@ -304,6 +304,7 @@ export async function handlePlatformUsersRoutes(
           action: "platform.user_admin.lookup",
           payload: auditPayload,
         },
+        ctx.audit,
       );
     }
     return Response.json(view);

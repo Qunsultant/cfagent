@@ -92,7 +92,31 @@ export class InMemoryAuditPolicyAdapter implements AuditPolicyPort {
       .sort((a, b) => a.sequence - b.sequence);
   }
 
+  /**
+   * Per-tenant append queue (#6112). `appendChainEntry` is a
+   * read-modify-write (read head, compute sequence, hash, write);
+   * two concurrent calls for one tenant used to compute the same
+   * sequence and the second entry was lost to the collision throw.
+   * Each tenant's appends now run through that tenant's promise
+   * chain, so the head read of append N+1 always sees append N.
+   * The chain is per tenant (different tenants still append in
+   * parallel) and a rejected append never poisons the queue — the
+   * stored tail swallows the rejection while the caller still
+   * receives it. The collision guard below stays as the invariant
+   * check: it must never fire through this path again.
+   */
+  private chainQueue = new Map<string, Promise<unknown>>();
+
   async appendChainEntry(input: AuditChainEntryInput): Promise<AuditChainEntry> {
+    const tail = this.chainQueue.get(input.tenantId) ?? Promise.resolve();
+    const next = tail.then(() => this.appendChainEntrySerialized(input));
+    this.chainQueue.set(input.tenantId, next.catch(() => {}));
+    return next;
+  }
+
+  private async appendChainEntrySerialized(
+    input: AuditChainEntryInput,
+  ): Promise<AuditChainEntry> {
     const head = await this.getChainHead(input.tenantId);
     const sequence = (head?.sequence ?? 0) + 1;
     const createdAtMs = input.createdAtMs ?? Date.now();

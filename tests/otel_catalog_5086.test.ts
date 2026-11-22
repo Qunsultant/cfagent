@@ -8,7 +8,7 @@
  * fails at import.
  *
  * Rules the catalog enforces:
- *  - Every OBS code OBS-1001..OBS-1022 resolves with its template
+ *  - Every OBS code OBS-1001..OBS-1023 resolves with its template
  *    + severity (the S1 seed + S2/S3/S4/S6 codes, absorbed without
  *    renumbering — codes are stable across releases, never reused
  *    for a different meaning — plus the two codes S7 adds).
@@ -35,6 +35,7 @@ import {
   OBS_ARCHIVE_KEY_REJECTED,
   OBS_ARCHIVE_NOT_FOUND,
   OBS_ARCHIVE_UNAVAILABLE,
+  OBS_AUDIT_CHAIN_APPEND_FAILED,
   OBS_CONFIG_FORBIDDEN,
   OBS_CONFIG_INVALID,
   OBS_EXPORT_FAILED,
@@ -77,6 +78,7 @@ const EXPECTED_CODES = [
   OBS_LEDGER_WRITE_FAILED,
   OBS_ALERTING_RULE_UNKNOWN,
   OBS_CONFIG_FORBIDDEN,
+  OBS_AUDIT_CHAIN_APPEND_FAILED,
 ] as const;
 
 describe("S7 message catalog (#5086)", () => {
@@ -204,6 +206,18 @@ describe("S7 message catalog (#5086)", () => {
     expect(OBS_CATALOG[OBS_ALERTING_SEND_FAILED]?.severity).toBe("error");
     expect(OBS_CATALOG[OBS_ALERTING_RULE_UNKNOWN]?.severity).toBe("error");
     expect(OBS_CATALOG[OBS_CONFIG_FORBIDDEN]?.severity).toBe("warning");
+    expect(OBS_CATALOG[OBS_AUDIT_CHAIN_APPEND_FAILED]?.severity).toBe(
+      "error",
+    );
+    expect(
+      formatCatalogMessage(OBS_AUDIT_CHAIN_APPEND_FAILED, {
+        tenantId: "acme",
+        action: "platform.tenant_admin.create",
+        error: "boom",
+      }),
+    ).toBe(
+      "[OBS-1023] Audit-chain append failed for tenant acme (platform.tenant_admin.create): boom",
+    );
     expect(
       formatCatalogMessage(OBS_ALERTING_RULE_UNKNOWN, { ruleId: "rule:nope" }),
     ).toBe('[OBS-1021] Alert report rejected: unknown rule id "rule:nope"');
