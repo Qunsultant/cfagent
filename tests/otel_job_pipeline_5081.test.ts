@@ -52,6 +52,7 @@ import {
   type OtelLoggingConfig,
   type OtelTransport,
 } from "../src/observability/otelLogs";
+import { OTEL_BACKEND_SETTINGS_BUILTIN } from "../src/config/otelModes";
 
 function recordingSink() {
   const events: ObservabilityEvent[] = [];
@@ -282,6 +283,10 @@ describe("J1–J7 observers end-to-end — observer → OTel sink → OTLP/HTTP 
       },
       // Issue #5138 — all destinations ON (the file defaults).
       destinations: { analyticsEngine: true, r2: true, console: true },
+      // Issue #5164 — the backend is a required field (resolved by the
+      // config port); the builtin default is OFF, so this end-to-end
+      // test keeps its fake transport and exercises the OTel sink path.
+      backend: OTEL_BACKEND_SETTINGS_BUILTIN,
     };
     const { provider, logger } = createOtelLoggerProvider({
       config,
