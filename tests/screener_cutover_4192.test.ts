@@ -47,6 +47,9 @@ import { ensureAnalyzePipelineJobs } from "../src/services/analyzePipelineJobs";
 import { ensureGeneratePipelineJobs } from "../src/services/generatePipelineJobs";
 import { ensureDeliverPipelineJobs } from "../src/services/deliverPipelineJobs";
 import { createScreenerStepRegistry, type ScreenerStepDeps } from "../src/services/screenerPipelineJobs";
+import { ScreenerTaskLedger } from "../src/services/screenerTaskLedger";
+import { InMemoryScreenerTaskStore } from "../src/data/inMemoryScreenerTaskStoreAdapter";
+import { buildScenario } from "../src/services/goalScenarioEngine";
 import type { CanonicalReportStoreSeam } from "../src/services/canonicalReportLeg";
 import type {
   CanonicalReportFanoutOutcome,
@@ -72,6 +75,18 @@ import type {
 
 const T0 = Date.parse("2026-11-12T00:00:00.000Z");
 const iso = (ms: number) => new Date(ms).toISOString();
+
+// A real directional-growth scenario (buildScenario) — see
+// tests/goal_composition_nodes_6072.test.ts: the old literal
+// ({goalKind: "growth", direction: "long"}) was never a valid
+// ScenarioDefinition, and the composition runs the real plan builder.
+function directionalScenario() {
+  return buildScenario({
+    goalKind: "directional",
+    portfolioRef: { kind: "hypothetical" },
+    constraints: {},
+  });
+}
 
 const SYMBOLS = ["AAPL", "MSFT", "NVDA", "AMZN"];
 const PRICES: Record<string, number> = { AAPL: 150, MSFT: 300, NVDA: 180, AMZN: 200 };
@@ -241,6 +256,7 @@ interface CutoverHarness {
   shardStore: InMemoryShardJobAdapter;
   storage: FakeStorage;
   agent: ScreenerAgent;
+  taskStore: InMemoryScreenerTaskStore;
   stored: unknown[];
   delivered: { payload: unknown; userLogin: string }[];
   parentStored: ParentScreenReportInput[];
@@ -248,12 +264,20 @@ interface CutoverHarness {
   barsCalls: string[];
   quoteCalls: string[];
   canonicalStored: unknown[];
+  quotaCharges: { userLogin: string; runId: string }[];
+  stockLegCalls: unknown[];
+  optionsLegCalls: unknown[];
 }
 
 async function makeCutoverHarness(opts: {
   storeReport?: ScreenerStepDeps["storeReport"];
   deliverOutcome?: ScreenerStepDeps["deliverOutcome"];
-  goalRunner?: ScreenerStepDeps["goalRunner"];
+  quotaCharge?: ScreenerStepDeps["goalQuotaCharge"];
+  stockLeg?: ScreenerStepDeps["goalStockLeg"];
+  optionsLeg?: ScreenerStepDeps["goalOptionsLeg"];
+  goalArtifacts?: ScreenerStepDeps["goalArtifacts"];
+  /** Omit the injected composition fakes so the agent's production defaults run (the #4279 test). */
+  omitCompositionDeps?: boolean;
   quoteDepsFor?: ScreenerStepDeps["quoteDepsFor"];
   canonicalReportStore?: CanonicalReportStoreSeam | null;
 } = {}): Promise<CutoverHarness> {
@@ -275,6 +299,7 @@ async function makeCutoverHarness(opts: {
   const storage = new FakeStorage();
   storage.map.set("screener:owner-login", "owner");
   const agent = new ScreenerAgent({ storage } as any, {} as any);
+  const taskStore = new InMemoryScreenerTaskStore();
   const stored: unknown[] = [];
   const delivered: { payload: unknown; userLogin: string }[] = [];
   const parentStored: ParentScreenReportInput[] = [];
@@ -282,6 +307,9 @@ async function makeCutoverHarness(opts: {
   const barsCalls: string[] = [];
   const quoteCalls: string[] = [];
   const canonicalStored: unknown[] = [];
+  const quotaCharges: { userLogin: string; runId: string }[] = [];
+  const stockLegCalls: unknown[] = [];
+  const optionsLegCalls: unknown[] = [];
   const shardsFor = async (jobId: string) =>
     (await stores.definitions.getDefinition(jobId))?.config.processing.shards ?? [];
   const deps: ScreenerStepDeps = {
@@ -312,7 +340,61 @@ async function makeCutoverHarness(opts: {
       (async (payload, userLogin) => {
         delivered.push({ payload, userLogin });
       }),
-    ...(opts.goalRunner ? { goalRunner: opts.goalRunner } : {}),
+    // Issue #6072 — the goal run executes the composition, so the
+    // harness injects the composition deps (the injected goalRunner
+    // the old test used is never called: the analyze node has no
+    // screener.goal step anymore). The artifacts dep is a failed-
+    // status fake: this suite pins dispatch + collation, and the
+    // real tail is covered by tests/goal_composition_nodes_6072.
+    // The ledger dep is always injected (it has no agent default —
+    // it refuses by name without a D1 ledger).
+    goalTaskLedgerFor: () => new ScreenerTaskLedger(taskStore, { newId: () => "goal-task-4192" }),
+    ...(opts.omitCompositionDeps
+      ? {}
+      : {
+          goalQuotaCharge:
+            opts.quotaCharge ??
+            (async (input) => {
+              quotaCharges.push({ userLogin: input.userLogin, runId: input.runId });
+            }),
+          goalStockLeg:
+            opts.stockLeg ??
+            (async (input) => {
+              stockLegCalls.push(input);
+              return {
+                assetClass: "stocks",
+                providerId: "stock-screen-workflow",
+                result: {
+                  status: "matches_found",
+                  totalScanned: 1,
+                  totalScreened: 1,
+                  matchedCount: 1,
+                  filterApplied: {},
+                  filterSummary: "",
+                  stocks: [{ symbol: "AAPL" }],
+                  scannedAt: iso(T0),
+                },
+              } as never;
+            }),
+          goalOptionsLeg:
+            opts.optionsLeg ??
+            (async (input) => {
+              optionsLegCalls.push(input);
+              return {
+                assetClass: "options",
+                providerId: "options-screen-workflow",
+                result: {
+                  status: "matches_found",
+                  totalUnderlyingsScanned: 1,
+                  matchedCount: 1,
+                  contracts: [{ underlyingSymbol: "AAPL" }],
+                },
+              } as never;
+            }),
+          goalArtifacts:
+            opts.goalArtifacts ??
+            (async () => ({ pdfStatus: "failed", xlsxStatus: "failed", csvStatus: "failed" })),
+        }),
   };
   // Issue #5922 (6e): the market definition runs the five
   // generic family steps, so the harness composes the shared
@@ -376,6 +458,7 @@ async function makeCutoverHarness(opts: {
     shardStore,
     storage,
     agent,
+    taskStore,
     stored,
     delivered,
     parentStored,
@@ -383,6 +466,9 @@ async function makeCutoverHarness(opts: {
     barsCalls,
     quoteCalls,
     canonicalStored,
+    quotaCharges,
+    stockLegCalls,
+    optionsLegCalls,
   };
 }
 
@@ -530,46 +616,35 @@ describe("dispatch switch (#4192)", () => {
 });
 
 describe("goal-leg dispatch (#4192)", () => {
-  it("runs the goal runner on the same six nodes, never the market runner", async () => {
-    const goalCalls: unknown[] = [];
-    const h = await makeCutoverHarness({
-      goalRunner: async (req: any) => {
-        goalCalls.push(req);
-        return {
-          task: { id: "goal-task-4192" },
-          executed: true,
-          result: {
-            scenario: req.scenario,
-            success: true,
-            counts: {
-              stocksScanned: 1,
-              stocksMatched: 1,
-              optionsUnderlyingsScanned: 0,
-              optionsContractsMatched: 0,
-              hits: 0,
-            },
-            opportunities: [],
-            allStocks: [],
-          },
-        };
-      },
-    });
+  it("runs the goal composition on the same six nodes, never the market runner", async () => {
+    const h = await makeCutoverHarness();
+    const engineSpy = vi.spyOn(h.agent, "runGoalScreenOnEngine");
+    const goalStageSpy = vi.spyOn(h.agent, "screenGoalStage");
     const command = marketCommand({
       jobId: "goal-4192",
       // Goal parents are monolith (S1 pin: "is monolith with
-      // no shards") — the goal runner runs once per unit, so a
+      // no shards") — the composition runs once per unit, so a
       // multi-shard goal command would run it per shard.
       shards: [{ shardId: "s0", symbols: [listing("AAPL")] }],
       goalScreen: {
-        scenario: { goalKind: "growth", direction: "long" } as any,
+        scenario: directionalScenario(),
         scenarioSource: "built",
         symbols: ["AAPL"],
       },
     });
     const c = await runScreenerScreenOnEngine(fakeStep, dispatchDeps(h), command);
     expect(c.lifecycle).toBe("ReportGenerated");
-    expect(goalCalls).toHaveLength(1);
-    expect((goalCalls[0] as any)?.symbols).toEqual(["AAPL"]);
+    // The composition ran: quota once, both legs once with the
+    // feed-derived symbols in the plan.
+    expect(h.quotaCharges).toHaveLength(1);
+    expect(h.stockLegCalls).toHaveLength(1);
+    expect(h.optionsLegCalls).toHaveLength(1);
+    expect(
+      (h.stockLegCalls[0] as any)?.plan?.optionsFilter?.underlyingSymbols,
+    ).toEqual(["AAPL"]);
+    // The old goal dispatch is nowhere on the path.
+    expect(engineSpy).not.toHaveBeenCalled();
+    expect(goalStageSpy).not.toHaveBeenCalled();
     expect(h.yahooCalls).toEqual([]);
     expect(h.stored).toHaveLength(1);
     expect(h.delivered).toHaveLength(1);
@@ -579,25 +654,48 @@ describe("goal-leg dispatch (#4192)", () => {
     expect(h.parentStored[0]?.goalScreen).toBe(true);
   });
 
-  it("the default goal runner is the engine method, never the direct runGoalScreen (#4279)", async () => {
-    const h = await makeCutoverHarness();
-    const engineSpy = vi.spyOn(h.agent, "runGoalScreenOnEngine").mockResolvedValue({
-      task: { id: "goal-task-4279" },
-      executed: true,
+  it("the default composition bindings are the agent methods, never the direct runGoalScreen (#4279)", async () => {
+    // Issue #6072 — the composition's production defaults live on
+    // the agent (quota charge, leg dispatches, artifact tail); the
+    // ledger dep is injected (it has no agent default — it refuses
+    // by name without a D1 ledger). runGoalScreenOnEngine is nowhere
+    // on the path anymore.
+    const h = await makeCutoverHarness({ omitCompositionDeps: true });
+    const quotaSpy = vi
+      .spyOn(h.agent, "chargeGoalScreenQuota")
+      .mockResolvedValue(undefined);
+    const stockSpy = vi.spyOn(h.agent, "runGoalStockLeg").mockResolvedValue({
+      assetClass: "stocks",
+      providerId: "stock-screen-workflow",
       result: {
-        scenario: { goalKind: "growth", direction: "long" },
-        success: true,
-        counts: {
-          stocksScanned: 1,
-          stocksMatched: 1,
-          optionsUnderlyingsScanned: 0,
-          optionsContractsMatched: 0,
-          hits: 0,
-        },
-        opportunities: [],
-        allStocks: [],
+        status: "matches_found",
+        totalScanned: 1,
+        totalScreened: 1,
+        matchedCount: 1,
+        filterApplied: {},
+        filterSummary: "",
+        stocks: [{ symbol: "AAPL" }],
+        scannedAt: iso(T0),
       },
     } as never);
+    const optionsSpy = vi.spyOn(h.agent, "runGoalOptionsLeg").mockResolvedValue({
+      assetClass: "options",
+      providerId: "options-screen-workflow",
+      result: {
+        status: "matches_found",
+        totalUnderlyingsScanned: 1,
+        matchedCount: 1,
+        contracts: [{ underlyingSymbol: "AAPL" }],
+      },
+    } as never);
+    const artifactsSpy = vi
+      .spyOn(h.agent, "generateGoalScreenArtifacts")
+      .mockResolvedValue({
+        pdfStatus: "failed",
+        xlsxStatus: "failed",
+        csvStatus: "failed",
+      });
+    const engineSpy = vi.spyOn(h.agent, "runGoalScreenOnEngine");
     const directSpy = vi.spyOn(h.agent, "runGoalScreen").mockResolvedValue({
       task: { id: "goal-task-direct" },
       executed: true,
@@ -606,14 +704,18 @@ describe("goal-leg dispatch (#4192)", () => {
       jobId: "goal-4279",
       shards: [{ shardId: "s0", symbols: [listing("AAPL")] }],
       goalScreen: {
-        scenario: { goalKind: "growth", direction: "long" } as any,
+        scenario: directionalScenario(),
         scenarioSource: "built",
         symbols: ["AAPL"],
       },
     });
     const c = await runScreenerScreenOnEngine(fakeStep, dispatchDeps(h), command);
     expect(c.lifecycle).toBe("ReportGenerated");
-    expect(engineSpy).toHaveBeenCalledTimes(1);
+    expect(quotaSpy).toHaveBeenCalledTimes(1);
+    expect(stockSpy).toHaveBeenCalledTimes(1);
+    expect(optionsSpy).toHaveBeenCalledTimes(1);
+    expect(artifactsSpy).toHaveBeenCalledTimes(1);
+    expect(engineSpy).not.toHaveBeenCalled();
     expect(directSpy).not.toHaveBeenCalled();
     expect(h.stored).toHaveLength(1);
   });
@@ -985,7 +1087,7 @@ describe("collation composer — failed-shard mapping (#4192)", () => {
       command: marketCommand({
         jobId: "goal-4192",
         goalScreen: {
-          scenario: { goalKind: "growth", direction: "long" } as any,
+          scenario: directionalScenario(),
           scenarioSource: "built",
           symbols: ["AAPL"],
         },
@@ -1011,7 +1113,7 @@ describe("collation composer — failed-shard mapping (#4192)", () => {
       command: marketCommand({
         jobId: "goal-4192",
         goalScreen: {
-          scenario: { goalKind: "growth", direction: "long" } as any,
+          scenario: directionalScenario(),
           scenarioSource: "built",
           symbols: ["AAPL"],
         },

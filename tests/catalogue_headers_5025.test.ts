@@ -40,7 +40,9 @@ describe("#5025 schemaComponent barrel & membership store naming", () => {
     // turn_step_timeout_ms column): D1 237 → 238.
     // #5425 adds migration 0079 (agent_tenant_settings
     // SLO threshold columns): D1 238 → 240.
-    expect(D1_CATALOGUE_ENTRIES.length).toBe(240);
+    // #6072 adds migration 0080 (agent_screener_task_entries
+    // table): D1 240 → 241.
+    expect(D1_CATALOGUE_ENTRIES.length).toBe(241);
     expect(ORM_CATALOGUE_ENTRIES.length).toBe(26);
     expect(REMAINDER_CATALOGUE_ENTRIES.length).toBe(64);
     expect(DO_CATALOGUE_ENTRIES.length).toBe(109);

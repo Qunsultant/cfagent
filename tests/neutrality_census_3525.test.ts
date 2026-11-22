@@ -945,6 +945,14 @@ function measure(): Map<string, number> {
  * restated 165/820 -> 188/1026.
  * Baseline totals move 1367/11080 -> 1390/11286 (direct recount on
  * 7d3c4259; the header's last recorded 1361/11067 was stale).
+ * Baseline update (#6072, 2026-11-22): the goal-run composition's
+ * options-leg binding builds the goal leg's host-dispatch input, and
+ * the universe descriptor names the goal universe's provider id
+ * (`{ provider: "nasdaq" }`, the same literal `runGoalScreenOnEngine`
+ * already carries for the same input) — naming the provider is the
+ * leg dispatch's job, so the one new line is dispositioned
+ * INTEGRATION. 1 raise (screener-agent.ts nasdaq 11->12).
+ * Baseline totals move 1390/11286 -> 1390/11287.
  */
 const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (188 rows / 989 lines) ----
@@ -2267,7 +2275,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/agents/routes/etradeBroker.ts", "nasdaq", 1],
   ["src/agents/routes/optionsProviderGate.ts", "nasdaq", 1],
   ["src/agents/routes/premium.ts", "nasdaq", 1],
-  ["src/agents/screener-agent.ts", "nasdaq", 11],
+  ["src/agents/screener-agent.ts", "nasdaq", 12],
   ["src/agents/trading-agent.ts", "nasdaq", 1],
   ["src/aspects/errorCodes.ts", "nasdaq", 1],
   ["src/breakers/breakerPorts.ts", "nasdaq", 1],

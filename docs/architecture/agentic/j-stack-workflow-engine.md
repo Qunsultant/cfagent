@@ -395,7 +395,7 @@ the full pipeline registry (`createPipelineStepRegistry` +
 canonical seam.
 <!-- 5922: collation on generic-chain outputs — end -->
 
-<!-- 5873: goal branch out of the screener analyze node -->
+<!-- 5873: goal branch out of the screener analyze node — superseded by #6072 (6d-a), which replaces the single dispatch with the eight-step composition below; kept as the 3b history -->
 The goal leg rides its own definition (#5873, #4437 slice 3b): a
 goal command builds the `goalScreen` spec (same six kinds, the
 analyze node the goal dispatch step `screener.goal`), while a
@@ -416,6 +416,68 @@ goal definition, goal run through the goal step with the market
 analyze never invoked; market command → market definition,
 market run unchanged).
 <!-- /5873: goal branch out of the screener analyze node -->
+<!-- 6072: goal composition onto engine nodes — begin -->
+Slice 6d-a (#6072) converts the goal-run composition from the
+direct-runtime function `runGoalScreenOnEngine` into engine nodes
+on the goal definition's analyze node: `goal.quota` →
+`goal.plan` → `goal.ledgerClaim` → `goal.stockLeg` →
+`goal.optionsLeg` → `goal.assemble` → `goal.ledgerComplete` →
+`goal.artifacts` (`GOAL_COMPOSITION_STEPS`,
+`src/services/screenerPipelineJobs.ts`). Each step's output is
+the next step's input, threading an accumulated
+`GoalCompositionState` (gather output, plan, ledger task, leg
+outcomes, assembled result) through to the artifacts step, which
+builds the `ScreenerAnalysisStageOutput` the store stage consumes
+(the shape `screenGoalStage` returned, verbatim — a duplicate
+delivery carries no result, so the store stage records its
+refusal by name, as the direct path did). The quota step charges
+`goalScreen:<runId>` before any work (a duplicate delivery
+re-charges the same id and the port counts it once, #2842); the
+plan step is the pure `buildGoalScreenPlan` derivation (symbols
+from the gather stage's goal symbols, else the command's); the
+claim step is the #5269 adoption verbatim on a D1-resident
+ledger (terminal record = duplicate, `executed:false`, providers
+never re-invoked; active record = adopt through claim/start/
+heartbeat; fresh = create + claim + start + heartbeat); each leg
+step catches its dispatcher's throw as a failed class (#462 —
+never a failed run) and skips a class the command did not
+request; the assembly is the extracted pure
+`assembleGoalScreenResult` (`src/services/goalDrivenScreen.ts`,
+the #1963 error-status checks + #462 partial contract + #1998
+gather carry + #2882 stock-spec record, verbatim from
+`runGoalDrivenScreen`, which now collects leg outcomes and calls
+it); the ledger-complete step completes with the deterministic
+evaluation, or fails + escalates when every leg failed; the
+artifacts step stamps the run's data mode + provider onto the
+result and runs the report tail. The ledger is D1-resident
+(`agent_screener_task_entries`, migration 0079, `ScreenerTaskStore`
+over drizzle D1 — `D1ScreenerTaskStore`, keys `screener:`-namespaced
+exactly as the DO-storage implementation stores them — plus an
+in-memory adapter for tests), wired from `env.AGENT_DB` in the
+step-deps factories; unbound = a named refusal
+(`GOAL_TASK_LEDGER_NO_D1`), never a silent fallback to the
+DO-storage ledger, so a goal run's ledger survives a workflow
+eviction replay. The steps' production defaults resolve from the
+agent port (new methods `chargeGoalScreenQuota`,
+`runGoalStockLeg`, `runGoalOptionsLeg`,
+`generateGoalScreenArtifacts`, reusing the private dep builders
+`runGoalScreenOnEngine` used — the quota counters live in DO
+SQLite, the trade client / universe deps / screeners are built
+there, the blob store lives there); `runGoalScreenOnEngine` and
+`screenGoalStage` are never called on the path. The leg functions
+`runGoalStockLegViaWorkflow` / `runGoalOptionsLegViaWorkflow`
+are exported for the 6d-b (#6073) / 6d-c (#6074) re-points, which
+remove the transitional leg bindings. A stage may now declare
+`steps?: string[]` on its spec (`JobStageSpec`, validated by
+`resolveStage`); the builder runs every declared step on the
+node. The goalScreen spec is v2; its legacy single `step` stays
+`screener.goal` for old stored definitions, which still resolve.
+Pinned by `tests/goal_composition_nodes_6072.test.ts` (6 tests:
+builder, full run with no `runGoalScreenOnEngine` call, quota
+refusal before any ledger record, terminal duplicate, failed leg
+as failed class, active-record adoption on eviction replay) and
+the re-pointed 4192 / 5873 goal tests.
+<!-- 6072: goal composition onto engine nodes — end -->
 
 The screener's deliver stage likewise runs through the generic deliver
 machinery (#5826): `deliver.apply` gains a screener application
