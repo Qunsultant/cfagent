@@ -157,6 +157,14 @@ function OtelConfigKeyEditor({
           </option>
         ))}
       </Select>
+    ) : def.kind === "string" || def.kind === "protocol" ? (
+      <TextInput
+        label={`New value for ${def.key}`}
+        type="text"
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
+        disabled={saving}
+      />
     ) : (
       <TextInput
         label={`New value for ${def.key}`}

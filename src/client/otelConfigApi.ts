@@ -32,7 +32,9 @@ export type OtelConfigKeyKind =
   | "positiveInt"
   | "nonNegativeInt"
   | "ratio"
-  | "severity";
+  | "severity"
+  | "string"
+  | "protocol";
 
 export interface OtelConfigKeyDef {
   key: string;
@@ -80,9 +82,11 @@ const KEY_KINDS: readonly string[] = [
   "nonNegativeInt",
   "ratio",
   "severity",
+  "string",
+  "protocol",
 ];
 
-function parseOtelConfig(value: unknown): OtelConfigResponse {
+export function parseOtelConfig(value: unknown): OtelConfigResponse {
   if (!isRecord(value)) throw new Error("OTel config response was not an object.");
   if (!Array.isArray(value.catalog) || !Array.isArray(value.keys) || !Array.isArray(value.overrides)) {
     throw new Error("OTel config response was malformed.");
