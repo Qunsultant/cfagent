@@ -4,6 +4,13 @@
  * POST /api/iaaa/role-grants/grant,
  * POST /api/iaaa/role-grants/revoke.
  *
+ * Issue #6165 — one admin-creation path: the grant/revoke
+ * endpoints below are deprecated aliases of the membership-grant
+ * route (POST /api/iaaa/membership/grant). The list endpoint
+ * stays canonical: the Role grants section is now a read-only
+ * admin-role list. See docs/architecture/transition/deprecations.md
+ * (#6165 entry).
+ *
  * The grantable roles here are the admin subset of the single
  * role catalog (ALL_ROLES in src/security/authorization.ts):
  * platform-admin and tenant-admin only. This list is a display
@@ -103,6 +110,13 @@ export interface GrantRoleGrantInput {
   email?: string;
 }
 
+/**
+ * @deprecated Issue #6165 — one admin-creation path. Superseded by
+ * POST /api/iaaa/membership/grant (Grant membership on the Members
+ * tab, src/server/routes/auth.ts). Kept functional as a deprecated
+ * alias: it mints through the same grantMembership seam, so behavior
+ * is unchanged. Frozen — no new consumers.
+ */
 export async function grantRoleGrant(input: GrantRoleGrantInput): Promise<{ grant?: RoleGrantInfo; alreadyGranted?: boolean; pending?: boolean; proposalId?: string }> {
   const res = await apiFetch("/api/iaaa/role-grants/grant", {
     method: "POST",
@@ -127,6 +141,12 @@ export async function grantRoleGrant(input: GrantRoleGrantInput): Promise<{ gran
   };
 }
 
+/**
+ * @deprecated Issue #6165 — one admin-creation path. Superseded by
+ * the Members-tab revoke in src/client/IaaaAdminPanel.tsx
+ * (revokeMembershipApi). Kept functional as a deprecated alias;
+ * behavior is unchanged. Frozen — no new consumers.
+ */
 export async function revokeRoleGrant(membershipId: string, bindingIndex: number): Promise<void> {
   const res = await apiFetch("/api/iaaa/role-grants/revoke", {
     method: "POST",

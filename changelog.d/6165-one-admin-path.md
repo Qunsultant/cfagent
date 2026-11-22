@@ -1,0 +1,3 @@
+### Changed
+
+- **One admin-creation path (Qunsultant/cfagent#6165):** the Members tab is the one place an admin role is granted — Grant membership on the Members tab (`POST /api/iaaa/membership/grant`) is the single grant surface. The Role grants section (Overview) keeps only its read-only admin-role list and points at the Members tab; its grant form and revoke action are retired. `POST /api/iaaa/role-grants/grant` and `POST /api/iaaa/role-grants/revoke` are deprecated aliases of the membership-grant route (same `grantMembership` minting seam, behavior unchanged). The bootstrap path is unchanged: `IAAA_BOOTSTRAP_ADMINS` env list → login-path provisioning + genesis claim, with Bootstrap proposals (#3077) as the one proposal flow.

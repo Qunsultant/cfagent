@@ -232,27 +232,26 @@ describe("IAAA Admin content pass (#4839)", () => {
     expect(text).toContain("Provision creates that tier");
   });
 
-  it("G5 — the two grant surfaces explain themselves and when to use which", async () => {
+  it("G5 — the one grant surface explains itself; Role grants points at it (#6165)", async () => {
     await renderPanel();
-    // Members tab: Grant membership assigns any role; Role grants is admin-only.
+    // Members tab: Grant membership is the one place admin roles are granted.
     await act(async () => {
       topTabButtons()[1].click();
     });
     await act(async () => {});
     const membersText = container.textContent ?? "";
-    expect(membersText).toContain("Grant membership here assigns any role");
-    expect(membersText).toContain("Role grants on the Overview tab grants admin roles only");
-    // Role grants section: points back to Members for non-admin roles.
+    expect(membersText).toContain("Grant membership here is the one place admin roles are granted");
+    // Role grants section: read-only list that points at the Members tab.
     await act(async () => {
       topTabButtons()[0].click();
     });
     await act(async () => {});
     await openSection(3);
     const grantsText = container.textContent ?? "";
-    expect(grantsText).toContain("For any other role, use Grant membership on the Members tab");
+    expect(grantsText).toContain("Grant or revoke admin roles from Grant membership on the Members tab.");
   });
 
-  it("G6 — both grant forms say where an internal user id comes from", async () => {
+  it("G6 — the one grant form says where an internal user id comes from (#6165)", async () => {
     await renderPanel();
     await act(async () => {
       topTabButtons()[1].click();
@@ -260,12 +259,13 @@ describe("IAAA Admin content pass (#4839)", () => {
     await act(async () => {});
     expect(container.textContent).toContain("Memberships table below");
     expect(container.textContent).toContain("/api/me");
+    // Role grants has no grant form anymore — no target input to explain.
     await act(async () => {
       topTabButtons()[0].click();
     });
     await act(async () => {});
     await openSection(3);
-    expect(container.textContent).toContain("Memberships table on the Members tab");
+    expect(container.querySelector("#rgp-target")).toBeNull();
   });
 
   it("G7 — the Members role and scope dropdowns say what each option can do", async () => {

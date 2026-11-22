@@ -729,10 +729,12 @@ export function IaaaAdminPanel() {
           Memberships in this tenant (platform admins see all tenants&apos; memberships).
           Granting yourself a role is refused server-side; a grant requires fresh
           authentication for the step-up obligation, so a stale session must sign in again.
-          {/* Issue #4839 G5: the two grant surfaces explain themselves. */}
-          Grant membership here assigns any role — member, approver, auditor, or an admin
-          role — at tenant, workspace, or platform scope. Role grants on the Overview tab
-          grants admin roles only.
+          {/* Issue #6165: one admin-creation path — this is the one
+          grant surface. Role grants on the Overview tab is a
+          read-only list that points here. */}
+          Grant membership here is the one place admin roles are granted —
+          member, approver, auditor, or an admin role — at tenant,
+          workspace, or platform scope.
         </p>
         {membersError && <Notice tone="danger">{membersError}</Notice>}
         {grantNotice && <Notice>{grantNotice}</Notice>}
