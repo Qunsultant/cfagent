@@ -31,8 +31,8 @@ import {
 import { jobDefinitionSpec } from "../config/jobDefinitionCatalog";
 import { bindJobDefinitionParams } from "./jobDefinitionParamBinders";
 import { buildJobConfigFromSpec } from "./jobDefinitionSpecBuilder";
-import { putResearchFeed, type ResearchFeedStageOutput } from "./researchFeedHandoff";
-import { putResearchEnrich, type ResearchEnrichStageOutput } from "./researchEnrichHandoff";
+import type { ResearchFeedStageOutput } from "./researchFeedHandoff";
+import type { ResearchEnrichStageOutput } from "./researchEnrichHandoff";
 
 const structuredLog = createStructuredLogger(createObservabilitySink({}), {
   component: "services/researchPipelineJobs",
@@ -79,6 +79,8 @@ export const RESEARCH_PIPELINE_CATALOG_ENTRY: ResearchPipelineCatalogEntry = {
 };
 
 export interface ResearchStepDeps {
+  /** Issue #6093 — workflow-resident runs must consume the persisted stage outputs. */
+  requireStageInputs?: boolean;
   /** Issue #6063 — the feed stage: regime, universe and quotes. */
   runFeedStage?: (input: {
     runId: string;
@@ -170,7 +172,6 @@ export function registerResearchSteps(
       ...(params.brokerId ? { brokerId: params.brokerId } : {}),
       ...(params.mode ? { mode: params.mode } : {}),
     });
-    putResearchFeed(output);
     return {
       output,
       descriptor: `${researchArtifactKey(runId, "feed")} (${output.quotesRetrieved}/${output.universeSize})`,
@@ -202,7 +203,6 @@ export function registerResearchSteps(
       ...(params.brokerId ? { brokerId: params.brokerId } : {}),
       ...(params.mode ? { mode: params.mode } : {}),
     });
-    putResearchEnrich(output);
     return {
       output,
       descriptor: `${researchArtifactKey(runId, "enrich")} (${Object.keys(output.bySymbol).length} symbols)`,
@@ -280,14 +280,22 @@ export function registerResearchSteps(
     const config = resolveResearchJobConfig();
     assertResearchAopCompliance(config, { userLogin });
     const trigger = params.trigger === "scheduled" ? "scheduled" : "manual";
+    const inputFeed = (ctx.input as { feed?: ResearchFeedStageOutput } | null)?.feed;
     const feed =
-      ctx.input && typeof ctx.input === "object" && Array.isArray((ctx.input as { quotes?: unknown }).quotes)
-        ? (ctx.input as ResearchFeedStageOutput)
-        : undefined;
+      inputFeed && Array.isArray(inputFeed.quotes)
+        ? inputFeed
+        : ctx.input && typeof ctx.input === "object" && Array.isArray((ctx.input as { quotes?: unknown }).quotes)
+          ? (ctx.input as ResearchFeedStageOutput)
+          : undefined;
     const enrich =
       ctx.input && typeof ctx.input === "object" && (ctx.input as { bySymbol?: unknown }).bySymbol && typeof (ctx.input as { bySymbol?: unknown }).bySymbol === "object"
         ? (ctx.input as ResearchEnrichStageOutput)
         : undefined;
+    if (deps.requireStageInputs && (!feed || !enrich)) {
+      throw new Error(
+        "research_stage_input_missing: the workflow-resident analyze stage requires the persisted feed and enrich outputs.",
+      );
+    }
     structuredLog.info("researchPipelineJobs.analyze_ooda_started", {
       jobId: ctx.jobId,
       runId,
