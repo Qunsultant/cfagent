@@ -13,8 +13,18 @@
 // imports) so the decision is unit-testable without the Worker harness.
 // All date/time math is in UTC, matching how cron triggers fire.
 
-/** Earliest UTC hour of day at which the scheduled research run may fire. */
-export const RESEARCH_SCHEDULED_FIRE_HOUR_UTC = 21;
+import {
+  DEFAULT_RESEARCH_JOB_CONFIG,
+  type ResearchJobConfig,
+} from "../config/researchJobConfig";
+
+/**
+ * Issue #6030 — the one declaration of the fire hour is the research
+ * job config (`scheduleUtcHour`, overridable by
+ * `RESEARCH_SCHEDULE_UTC_HOUR`). This module reads it; it must never
+ * carry a second literal of its own.
+ */
+export type ResearchFireHourConfig = Pick<ResearchJobConfig, "scheduleUtcHour">;
 
 /**
  * Durable marker key for the last day the scheduled research run fired,
@@ -36,13 +46,18 @@ export const NIGHTLY_RESEARCH_RECORD_ID = "nightly-research";
 
 /**
  * Issue #3121 #4241 — the nightly research run's cadence as a cron,
- * the cron form of this module's own rule (hour 21 + Mon-Fri UTC).
- * The unified-store record reads this constant, never re-literalized,
- * so the record and the firing guard can never disagree about the
- * cadence. No Worker cron exists for it (the 5-trigger ceiling, #354)
+ * DERIVED from the same config the fire decision reads (issue #6030:
+ * the hour is one fact, so the record and the firing guard cannot
+ * disagree about the cadence when `RESEARCH_SCHEDULE_UTC_HOUR` moves).
+ * The unified-store record reads this function, never a re-literalized
+ * hour. No Worker cron exists for it (the 5-trigger ceiling, #354)
  * and none is added here — the run rides the every-30-minute tick.
  */
-export const NIGHTLY_RESEARCH_DISPATCH_CRON = "0 21 * * 1-5";
+export function nightlyResearchDispatchCron(
+  config: ResearchFireHourConfig = DEFAULT_RESEARCH_JOB_CONFIG
+): string {
+  return `0 ${config.scheduleUtcHour} * * 1-5`;
+}
 
 /**
  * YYYY-MM-DD date key for a moment, in UTC. Used both for the durable
@@ -68,18 +83,24 @@ export type ResearchTickDecision =
  * durable last-fired date key (null when no scheduled run has fired yet).
  *
  * Fires exactly once per weekday (Mon-Fri UTC), only on ticks at/after
- * 21:00 UTC. The caller owns persistence: on fire it must write `dateKey`
- * to the durable marker (mas_settings) so later ticks the same day see
- * "already-fired".
+ * the configured `scheduleUtcHour` (default 21:00 UTC). The caller owns
+ * persistence: on fire it must write `dateKey` to the durable marker
+ * (mas_settings) so later ticks the same day see "already-fired".
+ *
+ * Issue #6030 — the hour comes from the one config
+ * (`resolveResearchJobConfig(env).scheduleUtcHour`), the same value
+ * `isWithinResearchGuardWindow` reads, so the fire decision and the
+ * guard window move together when the env is set.
  */
 export function shouldFireResearchTick(
   now: Date,
-  lastFiredDateKey: string | null
+  lastFiredDateKey: string | null,
+  config: ResearchFireHourConfig = DEFAULT_RESEARCH_JOB_CONFIG
 ): ResearchTickDecision {
   const dateKey = researchTickDateKey(now);
   const dow = now.getUTCDay(); // 0 = Sunday ... 6 = Saturday
   if (dow === 0 || dow === 6) return { fire: false, dateKey, reason: "weekend" };
-  if (now.getUTCHours() < RESEARCH_SCHEDULED_FIRE_HOUR_UTC)
+  if (now.getUTCHours() < config.scheduleUtcHour)
     return { fire: false, dateKey, reason: "too-early" };
   if (lastFiredDateKey === dateKey)
     return { fire: false, dateKey, reason: "already-fired" };

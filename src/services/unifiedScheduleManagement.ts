@@ -55,7 +55,12 @@ import { canonicalJson } from "./scheduleDedupe";
 import { classifyScheduleKind } from "./scheduleKinds";
 import { SCHEDULE_LIST_KIND_IDS, type ScheduleListKind } from "../config/scheduleListModes";
 import { RENEWAL_DISPATCH_CRON, RETENTION_DISPATCH_CRON, RETENTION_RECORD_ID, TOKEN_RENEWAL_RECORD_ID } from "./heartbeatDueChecks";
-import { NIGHTLY_RESEARCH_DISPATCH_CRON, NIGHTLY_RESEARCH_RECORD_ID } from "./researchScheduleGuard";
+import {
+  nightlyResearchDispatchCron,
+  NIGHTLY_RESEARCH_RECORD_ID,
+  type ResearchFireHourConfig,
+} from "./researchScheduleGuard";
+import { DEFAULT_RESEARCH_JOB_CONFIG } from "../config/researchJobConfig";
 import {
   STALE_LEDGER_SWEEP_DISPATCH_CRON,
   STALE_LEDGER_SWEEP_RECORD_ID,
@@ -786,7 +791,8 @@ export interface NightlyResearchLastRun {
  * fires through the every-30-minute tick rider (#354, dispatchTickRiders posts
  * /research/scheduled-tick on every tick; the route's guard decides
  * fire/no-fire), and the Worker cron is OFF per #4112. The cron is
- * read from NIGHTLY_RESEARCH_DISPATCH_CRON, never re-literalized, so
+ * read from nightlyResearchDispatchCron (derived from the resolved
+ * research config, issue #6030), never re-literalized, so
  * the record and the firing guard can never disagree about the
  * cadence; the entry point is the ledger job id the runs join on
  * (jobId = record id). Kind `internal` (the #4238 seventh kind),
@@ -802,6 +808,7 @@ export interface NightlyResearchLastRun {
 export function nightlyResearchToRecord(
   nowIso: string,
   existing?: UnifiedScheduleRecord | null,
+  config: ResearchFireHourConfig = DEFAULT_RESEARCH_JOB_CONFIG,
 ): UnifiedScheduleRecord {
   return {
     id: NIGHTLY_RESEARCH_RECORD_ID,
@@ -810,7 +817,7 @@ export function nightlyResearchToRecord(
     callback: "nightly-research",
     definition: {
       type: "cron",
-      cron: NIGHTLY_RESEARCH_DISPATCH_CRON,
+      cron: nightlyResearchDispatchCron(config),
       entryPoint: "nightly-research",
     },
     provenance: systemProvenance(NIGHTLY_RESEARCH_ORIGIN, new Date(nowIso)),
