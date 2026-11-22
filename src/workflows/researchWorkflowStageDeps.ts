@@ -52,15 +52,17 @@ interface OrchestratorResearchDoor {
 }
 
 export function createWorkflowResearchStepDeps(env: Env): ResearchStepDeps {
-  const door = actorGateway.stub<OrchestratorResearchDoor>(
-    env.ORCHESTRATOR_AGENT,
-    SHARED_ORCHESTRATOR_INSTANCE,
-  );
+  // Resolve lazily: building the deps must not require the binding, only using a stage does.
+  const door = () =>
+    actorGateway.stub<OrchestratorResearchDoor>(
+      env.ORCHESTRATOR_AGENT,
+      SHARED_ORCHESTRATOR_INSTANCE,
+    );
 
   return {
     requireStageInputs: true,
     runFeedStage: async (input) =>
-      (await door.runResearchStage({
+      (await door().runResearchStage({
         stage: "feed",
         runId: input.runId,
         userLogin: input.userLogin,
@@ -69,7 +71,7 @@ export function createWorkflowResearchStepDeps(env: Env): ResearchStepDeps {
         ...(input.mode ? { mode: input.mode } : {}),
       })) as ResearchFeedStageOutput,
     runEnrichStage: async (input) =>
-      (await door.runResearchStage({
+      (await door().runResearchStage({
         stage: "enrich",
         runId: input.runId,
         userLogin: input.userLogin,
@@ -79,7 +81,7 @@ export function createWorkflowResearchStepDeps(env: Env): ResearchStepDeps {
         ...(input.mode ? { mode: input.mode } : {}),
       })) as ResearchEnrichStageOutput,
     runOodaAnalysis: async (input) => {
-      const result = await door.runResearchAndPublish(input.trigger, input.userLogin, {
+      const result = await door().runResearchAndPublish(input.trigger, input.userLogin, {
         runId: input.runId,
         stage: "analyze",
         ...(input.feed ? { feed: input.feed } : {}),
@@ -93,7 +95,7 @@ export function createWorkflowResearchStepDeps(env: Env): ResearchStepDeps {
       return result.report as ResearchReport;
     },
     runGenerateStage: async (input) => {
-      const result = await door.runResearchAndPublish("manual", input.userLogin, {
+      const result = await door().runResearchAndPublish("manual", input.userLogin, {
         runId: input.runId,
         stage: "generate",
         report: input.report,
@@ -104,7 +106,7 @@ export function createWorkflowResearchStepDeps(env: Env): ResearchStepDeps {
       return result;
     },
     runDeliverStage: async (input) => {
-      const result = await door.runResearchAndPublish("manual", input.userLogin, {
+      const result = await door().runResearchAndPublish("manual", input.userLogin, {
         runId: input.runId,
         stage: "deliver",
         report: input.report,
@@ -116,6 +118,6 @@ export function createWorkflowResearchStepDeps(env: Env): ResearchStepDeps {
       return result;
     },
     runEvaluateStage: async (input) =>
-      door.runResearchEvaluate({ runId: input.runId, userLogin: input.userLogin }),
+      door().runResearchEvaluate({ runId: input.runId, userLogin: input.userLogin }),
   };
 }
