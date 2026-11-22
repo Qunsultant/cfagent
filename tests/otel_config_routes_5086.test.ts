@@ -212,6 +212,10 @@ describe("handleOtelConfigRoutes — GET (catalog + keys + overrides + effective
     expect(keys).toContain("alerting.maxAlertsPerDay");
     expect(keys).toContain("backend.enabled");
     expect(keys).toContain("backend.requestTimeoutMs");
+    expect(keys).toContain("backend.serviceName");
+    expect(keys).toContain("backend.protocol");
+    expect(keys).toContain("backend.endpoint");
+    expect(keys).toContain("backend.instanceId");
     expect(keys).toContain("archive.pageSize");
     expect(keys).toContain("catalog.OBS-1001.severity");
     expect(keys).toContain("domains.j1j7.enabled");

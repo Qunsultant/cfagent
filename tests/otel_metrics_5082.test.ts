@@ -86,7 +86,14 @@ function j1j7OnConfig(overrides: Partial<OtelMetricsConfig> = {}): OtelMetricsCo
       sloResourceRowsReadMaxPct: 0.7,
     },
     // Issue #5164 (S10) — the backend OFF (the file default).
-    backend: { enabled: false, requestTimeoutMs: 10000 },
+    backend: {
+      enabled: false,
+      requestTimeoutMs: 10000,
+      serviceName: "ai-search-agent",
+      protocol: "http/json",
+      endpoint: "",
+      instanceId: "",
+    },
     ...overrides,
   };
 }

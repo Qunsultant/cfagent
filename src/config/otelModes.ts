@@ -334,12 +334,24 @@ export const OTEL_TRACES_SETTINGS_BUILTIN: OtelTracesSettings = {
 export interface OtelBackendFileConfig {
   enabled: boolean;
   requestTimeoutMs: number;
+  /** The OTLP service name stamped as `service.name` (default "ai-search-agent", the Worker name). */
+  serviceName: string;
+  /** The OTLP wire protocol: "http/json" (implemented) or "http/protobuf" (documented, not implemented). */
+  protocol: OtelBackendProtocol;
+  /** The Grafana Cloud OTLP gateway URL (a config value, not a secret). */
+  endpoint: string;
+  /** The numeric Grafana Cloud stack/instance ID (a config value, not a secret). */
+  instanceId: string;
 }
 
 /** Issue #5164 (S10) — the resolved backend settings (the operational values the backend fan-out consumes). */
 export interface OtelBackendSettings {
   enabled: boolean;
   requestTimeoutMs: number;
+  serviceName: string;
+  protocol: OtelBackendProtocol;
+  endpoint: string;
+  instanceId: string;
 }
 
 /**
@@ -347,15 +359,24 @@ export interface OtelBackendSettings {
  * settings (used only when the file is missing or a value is
  * invalid). The backend is OFF (safe default: telemetry stays
  * on the free-tier path — Analytics Engine + R2 — until the
- * owner flips the switch after setting the three Grafana Worker
- * secrets); the request timeout is 10s (the same bounded wait
- * the payment and KV fetch paths use). An invalid value fails
- * closed to these, never to a value that would silently enable
- * an external export or hang a flush.
+ * owner flips the switch after setting the API key Worker
+ * secret); the request timeout is 10s (the same bounded wait
+ * the payment and KV fetch paths use). The service name
+ * defaults to "ai-search-agent" (the Worker name in
+ * wrangler.jsonc); the protocol defaults to "http/json" (the
+ * implemented serialization); the endpoint + instance ID
+ * default to empty (unconfigured — the fan-out names the
+ * missing config key and makes no fetch attempt). An invalid
+ * value fails closed to these, never to a value that would
+ * silently enable an external export or hang a flush.
  */
 export const OTEL_BACKEND_SETTINGS_BUILTIN: OtelBackendSettings = {
   enabled: false,
   requestTimeoutMs: 10000,
+  serviceName: "ai-search-agent",
+  protocol: "http/json",
+  endpoint: "",
+  instanceId: "",
 } as const;
 
 /** The parsed config file (the operational defaults). */
@@ -501,6 +522,47 @@ function normalizeRatio(raw: unknown): number | "invalid" | null {
 }
 
 /**
+ * Issue #5164 (S10) — normalizes a non-empty string (the
+ * backend service name, endpoint, and instance ID). A blank
+ * string is unset (falls through to the next level); a
+ * non-string value is invalid (a hand-edited D1 row or a
+ * mistyped config value must fail closed, never coerce).
+ */
+function normalizeString(raw: unknown): string | "invalid" | null {
+  if (raw === undefined || raw === null) return null;
+  if (typeof raw !== "string") return "invalid";
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  return trimmed;
+}
+
+/**
+ * Issue #5164 (S10) — normalizes the OTLP backend protocol:
+ * "http/json" (the implemented serialization — the S1/S2/S3
+ * serializers produce OTLP/JSON) or "http/protobuf" (the
+ * portal's default; NOT implemented in this slice — the value
+ * documents the current choice, and selecting protobuf fails
+ * closed only when the value is unrecognized, never silently).
+ * Aliases "json" / "protobuf" are accepted; anything else is
+ * invalid (fails closed to "http/json").
+ */
+export type OtelBackendProtocol = "http/json" | "http/protobuf";
+
+function normalizeBackendProtocol(raw: unknown): OtelBackendProtocol | "invalid" | null {
+  if (raw === undefined || raw === null) return null;
+  if (typeof raw !== "string") return "invalid";
+  const normalized = raw.trim().toLowerCase();
+  if (!normalized) return null;
+  if (normalized === "http/json" || normalized === "http-json" || normalized === "json") {
+    return "http/json";
+  }
+  if (normalized === "http/protobuf" || normalized === "http-protobuf" || normalized === "protobuf") {
+    return "http/protobuf";
+  }
+  return "invalid";
+}
+
+/**
  * Issue #5086 (S7) — the normalizers, exported for the config
  * port (src/config/otelConfigPort.ts): a runtime override value
  * is validated by the SAME normalizer the deploy-time resolver
@@ -516,6 +578,8 @@ export const normalizeOtelSampling = normalizeSampling;
 export const normalizeOtelPositiveInt = normalizePositiveInt;
 export const normalizeOtelNonNegativeInt = normalizeNonNegativeInt;
 export const normalizeOtelRatio = normalizeRatio;
+export const normalizeOtelString = normalizeString;
+export const normalizeOtelBackendProtocol = normalizeBackendProtocol;
 
 type LevelEntry = [OtelResolutionSource, unknown];
 function orderedLevels(levels: OtelScopeLevels): LevelEntry[] {
@@ -964,6 +1028,10 @@ export function resolveOtelTracesSettings(
 export interface OtelBackendSettingsInput {
   enabled: OtelScopeLevels;
   requestTimeoutMs: OtelScopeLevels;
+  serviceName: OtelScopeLevels;
+  protocol: OtelScopeLevels;
+  endpoint: OtelScopeLevels;
+  instanceId: OtelScopeLevels;
 }
 
 export interface ResolvedOtelBackendSettings {
@@ -975,12 +1043,13 @@ export interface ResolvedOtelBackendSettings {
 /**
  * Issue #5164 (S10) — resolves the backend settings over run >
  * session > user > runtime > env > file > builtin (the safe
- * defaults: OFF, 10s timeout). Each setting resolves
- * independently through the same mechanism; an unrecognized
- * winning value for a setting fails closed to that setting's
- * builtin safe default with a coded OBS-1001 message and no
- * fall-through. `invalid` is true when any setting failed
- * closed.
+ * defaults: OFF, 10s timeout, service name "ai-search-agent",
+ * protocol "http/json", empty endpoint + instance ID). Each
+ * setting resolves independently through the same mechanism;
+ * an unrecognized winning value for a setting fails closed to
+ * that setting's builtin safe default with a coded OBS-1001
+ * message and no fall-through. `invalid` is true when any
+ * setting failed closed.
  */
 export function resolveOtelBackendSettings(
   input: OtelBackendSettingsInput,
@@ -1017,6 +1086,30 @@ export function resolveOtelBackendSettings(
         input.requestTimeoutMs,
         normalizePositiveInt,
         OTEL_BACKEND_SETTINGS_BUILTIN.requestTimeoutMs,
+      ),
+      serviceName: resolveOne(
+        "OTEL_SERVICE_NAME",
+        input.serviceName,
+        normalizeString,
+        OTEL_BACKEND_SETTINGS_BUILTIN.serviceName,
+      ),
+      protocol: resolveOne(
+        "OTEL_EXPORTER_OTLP_PROTOCOL",
+        input.protocol,
+        normalizeBackendProtocol,
+        OTEL_BACKEND_SETTINGS_BUILTIN.protocol,
+      ),
+      endpoint: resolveOne(
+        "OTEL_BACKEND_ENDPOINT",
+        input.endpoint,
+        normalizeString,
+        OTEL_BACKEND_SETTINGS_BUILTIN.endpoint,
+      ),
+      instanceId: resolveOne(
+        "OTEL_BACKEND_INSTANCE_ID",
+        input.instanceId,
+        normalizeString,
+        OTEL_BACKEND_SETTINGS_BUILTIN.instanceId,
       ),
     },
     invalid,
