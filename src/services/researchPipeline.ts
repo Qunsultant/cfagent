@@ -37,6 +37,7 @@ import type {
   ChainProvenance,
 } from "./researchGates";
 import { runStageGates } from "./researchGates";
+import { resolveResearchRules } from "../config/researchRules";
 import { isResearchUniverseRefusal } from "../trading";
 import type { ResearchFeedStageOutput } from "./researchFeedHandoff";
 import type { ResearchEnrichStageOutput } from "./researchEnrichHandoff";
@@ -450,11 +451,13 @@ function draftThesis(
 /** Spec §6 strategy table: candidate structures per outlook. */
 
 /**
- * Issue #353 — minimum DTE for the PMCC long leg. Matches the catalog's
- * poor_mans_covered_call farMinDte (180), so the provider's LEAPS band
- * (>=180 DTE) can actually satisfy it.
+ * Issue #6037 (b) — the structure-selection rules are data now. They used to be
+ * literals here (`PMCC_LONG_LEG_MIN_DTE = 180`, the 30/45 target window, the
+ * 0.05 width, the 0.9 moneyness, the 0.02 butterfly body); every one is declared
+ * once in `src/config/researchRules.ts` and read here by key, so a stored
+ * override changes the next run and the report names the version it ran under.
+ * The defaults are unchanged, which is what keeps this slice behaviour-neutral.
  */
-const PMCC_LONG_LEG_MIN_DTE = 180;
 
 export function structuresForOutlook(
   outlook: Outlook,
@@ -549,20 +552,26 @@ export function missingIvForStructure(
   spot: number,
   config: ResearchConfig
 ): boolean {
+  const rules = resolveResearchRules(config.rules);
   const hasIv = (leg: ProviderChainLeg | null | undefined): boolean =>
     leg != null && leg.iv != null && leg.iv > 0;
   if (name === "long_straddle" || name === "long_strangle") {
-    const expiry = pickExpiry(chain.expiries, config.minDte, 30, 45);
+    const expiry = pickExpiry(
+      chain.expiries,
+      config.minDte,
+      rules.structureTargetDteMin,
+      rules.structureTargetDteMax
+    );
     if (!expiry) return false;
     const call = findLeg(expiry, "call", () => true, spot);
     return call != null && !hasIv(call);
   }
   if (name === "pmcc") {
     const leaps = chain.expiries
-      .filter((e) => e.dte >= PMCC_LONG_LEG_MIN_DTE)
+      .filter((e) => e.dte >= rules.pmccLongLegMinDte)
       .sort((a, b) => a.dte - b.dte)[0];
     if (!leaps) return false;
-    const long = findLeg(leaps, "call", (s) => s < spot * 0.9, spot);
+    const long = findLeg(leaps, "call", (s) => s < spot * rules.pmccMoneyness, spot);
     return long != null && !hasIv(long);
   }
   return false;
@@ -574,10 +583,16 @@ export function buildStructure(
   spot: number,
   config: ResearchConfig
 ): BuiltStructure | null {
-  const expiry = pickExpiry(chain.expiries, config.minDte, 30, 45);
+  const rules = resolveResearchRules(config.rules);
+  const expiry = pickExpiry(
+    chain.expiries,
+    config.minDte,
+    rules.structureTargetDteMin,
+    rules.structureTargetDteMax
+  );
   if (!expiry) return null;
   const qt = chain.asOf;
-  const widthPct = 0.05;
+  const widthPct = rules.verticalWidthPct;
 
   const legOrNull = (
     type: "call" | "put",
@@ -663,7 +678,12 @@ export function buildStructure(
       break;
     }
     case "butterfly": {
-      const body = findLeg(expiry, "call", (s) => Math.abs(s - spot) / spot < 0.02, spot);
+      const body = findLeg(
+        expiry,
+        "call",
+        (s) => Math.abs(s - spot) / spot < rules.butterflyBodyTolerancePct,
+        spot
+      );
       if (body) {
         const wingLow = legOrNull("call", (s) => s < body.strike, 1);
         const wingHigh = legOrNull("call", (s) => s > body.strike, 1);
@@ -726,11 +746,16 @@ export function buildStructure(
       // poor_mans_covered_call declares farMinDte: 180, so >= 180 here
       // (was >= 300, which no loaded expiry could satisfy).
       const leaps = chain.expiries
-        .filter((e) => e.dte >= PMCC_LONG_LEG_MIN_DTE)
+        .filter((e) => e.dte >= rules.pmccLongLegMinDte)
         .sort((a, b) => a.dte - b.dte)[0];
       if (leaps) {
-        const long = findLeg(leaps, "call", (s) => s < spot * 0.9, spot);
-        const shortExp = pickExpiry(chain.expiries, config.minDte, 30, 45);
+        const long = findLeg(leaps, "call", (s) => s < spot * rules.pmccMoneyness, spot);
+        const shortExp = pickExpiry(
+          chain.expiries,
+          config.minDte,
+          rules.structureTargetDteMin,
+          rules.structureTargetDteMax
+        );
         const short = shortExp ? findLeg(shortExp, "call", (s) => s > spot, spot) : null;
         // #926: the long leg's chain IV is required to price the PMCC.
         if (long && short && short.strike > long.strike && long.iv != null && long.iv > 0) {
