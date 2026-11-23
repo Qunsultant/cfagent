@@ -534,8 +534,12 @@ export function ScheduleRunLedgerPanel({
       }
       await refresh();
     } catch (err) {
+      // Issue #6293 — the trigger message is a sentence: the raw reason
+      // may arrive without its trailing period (a 404 "Goal not found"
+      // has none), so terminate it here.
+      const reason = err instanceof Error ? err.message : String(err);
       setTriggerMsg(
-        `Could not start the run: ${err instanceof Error ? err.message : String(err)}`,
+        `Could not start the run: ${reason}${reason.endsWith(".") ? "" : "."}`,
       );
     } finally {
       setTriggering(null);
