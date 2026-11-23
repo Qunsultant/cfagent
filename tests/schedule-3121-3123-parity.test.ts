@@ -446,14 +446,14 @@ describe("3123-P04 goals KV migrated", () => {
     const saveGoals = body.slice(body.indexOf("private async saveGoals"));
     // Two writes in getGoals (seed + #6293 reconciliation re-write),
   // one in saveGoals.
-  expect(getGoals.split('put("goals")').length - 1).toBe(2);
-  expect(saveGoals.split('put("goals")').length - 1).toBe(1);
+  expect(getGoals.split('put("goals"').length - 1).toBe(2);
+  expect(saveGoals.split('put("goals"').length - 1).toBe(1);
   for (const method of [getGoals, saveGoals]) {
       expect(method).toContain("if (!store)");
       // Every put sits after the guard, inside the fallback branch.
       let from = 0;
       for (;;) {
-          const at = method.indexOf('put("goals")', from);
+          const at = method.indexOf('put("goals"', from);
         if (at < 0) break;
         expect(at).toBeGreaterThan(method.indexOf("if (!store)"));
         from = at + 1;
