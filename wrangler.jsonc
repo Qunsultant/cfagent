@@ -492,6 +492,13 @@
     // redeploys; an invalid value fails closed to dry-run).
     // Rollback is setting this back to "dry-run" and redeploying.
     "IAAA_STALE_CLEANUP_MODE": "dry-run",
+    // Issue #6238 — membership-index repair mode (default dry-run:
+    // the repair endpoint reports but rewrites no index until the
+    // owner flips this to "execute" and redeploys; an invalid value
+    // fails closed to dry-run). Set to "execute" for the one-time
+    // index rebuild, then flipped back to "dry-run" (rollback is
+    // setting this back to "dry-run" and redeploying).
+    "IAAA_MEMBERSHIP_INDEX_REPAIR_MODE": "execute",
     "IAAA_PDP_ENABLED": "1",
     // Issue #2800 (owner-directed, interim bootstrap): make the
     // commercial URLs work for the owner login OpenAIMP for now.
