@@ -13,6 +13,7 @@
 
 // Issue #6032 — the accepted universe set lives in the registry, not here.
 import { normalizeResearchUniverseId, researchUniverseIds } from "../trading";
+import { validateResearchRules, type ResearchRules } from "../config/researchRules";
 // Issue #5975 - the per-stage mode map and its one validator live in the job
 // config, so the deployment default and the stored configuration are judged
 // by the same rule.
@@ -87,6 +88,14 @@ export interface ResearchConfig {
    * deployment default, per stage and per axis.
    */
   stageModes: ResearchStageModes;
+  /**
+   * Issue #6037 (a) - the OODA strategy rules as one declared block. Empty by
+   * default (every rule takes its declared default, which is today's literal);
+   * a stored key overrides that rule. The block is versioned by `rulesVersion`:
+   * a change without a version bump is refused, so a report's version always
+   * identifies the rules it ran under.
+   */
+  rules: Partial<ResearchRules>;
 }
 
 /**
@@ -135,6 +144,7 @@ export const RESEARCH_CONFIG_DEFAULTS: ResearchConfig = {
   oodaMaxIterations: 40,
   rulesVersion: "1.0.0",
   stageModes: {},
+  rules: {},
 };
 
 /** Storage idiom mirrors mas_settings (key/value/updated_at, DELETE+INSERT). */
@@ -259,6 +269,10 @@ export function validateResearchConfig(config: ResearchConfig): string[] {
   // mode. `stageModes` names the carrier in the message.
   const stageModes = validateResearchStageModes(config.stageModes, "stageModes");
   errors.push(...stageModes.errors);
+  // Issue #6037 (a) - the strategy-rule block is judged by its own validator, so
+  // an out-of-bound rule or a bad weight sum cannot persist and silently change
+  // a decision.
+  errors.push(...validateResearchRules(config.rules).errors);
   return errors;
 }
 
@@ -313,7 +327,29 @@ export class ResearchConfigService {
         ),
       };
     }
-    const next: ResearchConfig = { ...this.load(), ...patch };
+    // Issue #6037 (a) — a report's `rulesVersion` identifies the rules it ran
+    // under, so a stored-rules change must arrive with a new version. Refused
+    // before anything is written: the version is the audit key, not a label.
+    const current = this.load();
+    if (patch.rules !== undefined) {
+      const nextRules = validateResearchRules({
+        ...current.rules,
+        ...(patch.rules as Record<string, unknown>),
+      }).rules;
+      const currentRules = validateResearchRules(current.rules).rules;
+      const changed = JSON.stringify(nextRules) !== JSON.stringify(currentRules);
+      const versionBumped =
+        patch.rulesVersion !== undefined && patch.rulesVersion !== current.rulesVersion;
+      if (changed && !versionBumped) {
+        return {
+          config: current,
+          errors: [
+            "rules changed without rulesVersion: bump rulesVersion in the same save so a report names the rules it ran under.",
+          ],
+        };
+      }
+    }
+    const next: ResearchConfig = { ...current, ...patch };
     const errors = validateResearchConfig(next);
     if (errors.length > 0) return { config: this.load(), errors };
     for (const key of Object.keys(patch) as ResearchConfigKey[]) {
