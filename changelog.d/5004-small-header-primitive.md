@@ -1,0 +1,3 @@
+### Changed
+
+- **SmallHeader primitive migrates the 46 hand-rolled h5/h6 sites (#5004, sub of #3695):** a new `SmallHeader` in `src/client/components/ui/` (Ceos's decision 2026-11-23: keep it as a primitive, be consistent) mirrors CardHeader's contract one step down — title 16px semibold primary, subtitle 12px muted, existing tokens only. All 46 sites across 15 files now use it (hand-rolled h5/h6 pinned at 0 by the rule-of-three census); the one h6 site (OmnichannelPanel's email subject) keeps its semantics via `level="h6"`. Accepted visual deltas: the 3 label-style sites grow to the 16px header, the 2 `.res-title`/`.rest-title` sites grow 14px → 16px, all others grow from ~13px browser-default bold to 16px semibold. #cpo-dhmp

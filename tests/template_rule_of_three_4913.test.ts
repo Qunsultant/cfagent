@@ -27,12 +27,14 @@
  *   is CAPPED at 1 use, not folded: its sunken surface + emphasized
  *   total row have no primitive equivalent, and folding it into a Card
  *   would nest a card inside the order-ticket Card. DetailCard stays.
- * - Headers: CardHeader (h4) for interiors; PageSection title (h2) /
- *   PageShell title (h1) for page/section titles; Modal title prop for
- *   dialog titles. Zero hand-rolled h2/h3/h4 outside ui/ and landing.ts
- *   (landing.ts is the C10 #4739 surface, out of scope). h5/h6 are the
- *   known leftover, pinned at 46: CardHeader renders h4, so migrating
- *   h5s would GROW them — they need a small-header decision (follow-up).
+ * - Headers: CardHeader (h4) for interiors; SmallHeader (h5/h6) for
+ *   sub-section headers; PageSection title (h2) / PageShell title (h1)
+ *   for page/section titles; Modal title prop for dialog titles. Zero
+ *   hand-rolled h2/h3/h4/h5/h6 outside ui/ and landing.ts (landing.ts
+ *   is the C10 #4739 surface, out of scope). h5/h6 migrated by #5004
+ *   to the SmallHeader primitive (Ceos's decision 2026-11-23: keep it
+ *   as a primitive, be consistent). Survivors for interiors are now
+ *   CardHeader (h4) + SmallHeader (h5/h6).
  * - Fluent: REMOVED (#5843, owner decision 2026-11-20: tokens.css and
  *   primitives.css only). AgentChatTabContent and ChatComposerVoiceControl
  *   were the #3146 experiment; both now use ui/ primitives, so zero client
@@ -429,11 +431,29 @@ describe("rule of three: headers (#4913)", () => {
     expect(pageTsx()).not.toContain(LANDING_TS);
   });
 
-  it("h5/h6 are the known leftover, pinned at 46 (CardHeader renders h4)", () => {
+  it("h5/h6 migrated to the SmallHeader primitive (#5004: keep it as a primitive)", () => {
     const h5 = countTag(pageTsx(), "h5");
     const h6 = countTag(pageTsx(), "h6");
-    expect(h5 + h6).toBe(46);
-    expect(h6).toBe(1);
+    expect(h5 + h6, "hand-rolled <h5>/<h6> sites remain (migrate to SmallHeader)").toBe(0);
+    expect(countTag(pageTsx(), "SmallHeader")).toBe(46);
+    // Exactly one site keeps h6 semantics (OmnichannelPanel: the email subject).
+    let h6Level = 0;
+    for (const f of pageTsx()) {
+      for (const t of findTags4913(stripComments(read(f)), new Set(["SmallHeader"]))) {
+        if (t.text.includes('level="h6"')) h6Level += 1;
+      }
+    }
+    expect(h6Level).toBe(1);
+    // landing.ts is a .ts file, so it is structurally outside the .tsx walk;
+    // its 3 h5s stay out of scope (C10 #4739), not silently dropped.
+    expect(pageTsx()).not.toContain(LANDING_TS);
+  });
+
+  it("SmallHeader's type names exactly the two heading levels, h5 by default", () => {
+    const src = read("src/client/components/ui/SmallHeader.tsx");
+    expect(src).toContain('level?: "h5" | "h6";');
+    expect(src).toContain('level = "h5"');
+    expect(src).toContain("<h5");
   });
 });
 

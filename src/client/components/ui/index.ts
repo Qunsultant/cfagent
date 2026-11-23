@@ -44,6 +44,8 @@
  * - SummaryCard — label/value rows + emphasized total (#3132).
  * - CardHeader — the one distributed header row (title left, meta
  *   right; #3133).
+ * - SmallHeader — the one distributed small-header row (h5/h6, one
+ *   step below CardHeader; #5004).
  * - WorkCard — input flow in one card with CardHeader (#3133).
  * - DetailCard — any content block with CardHeader (#3133).
  * - WorkspaceGrid — the workspace grid (workspace/list-detail/feed
@@ -95,6 +97,7 @@ export { ContextStrip, type ContextStripProps, type ContextStripChangeTone } fro
 export { KpiRibbon, type KpiRibbonItem, type KpiRibbonProps, type KpiSubTone } from "./KpiRibbon";
 export { SummaryCard, type SummaryCardProps, type SummaryCardRow, type SummaryValueTone } from "./SummaryCard";
 export { CardHeader, type CardHeaderProps } from "./CardHeader";
+export { SmallHeader, type SmallHeaderProps } from "./SmallHeader";
 export { WorkCard, type WorkCardProps } from "./WorkCard";
 export { DetailCard, type DetailCardProps } from "./DetailCard";
 export { WorkspaceGrid, type WorkspaceGridProps, type WorkspaceGridVariant } from "./WorkspaceGrid";

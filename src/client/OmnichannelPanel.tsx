@@ -1,4 +1,4 @@
-import { Badge, Button, Card, CardHeader, Flex, Grid, Notice, PageSection, PageShell, Stack, TextInput } from "./components/ui";
+import { Badge, Button, Card, CardHeader, SmallHeader, Flex, Grid, Notice, PageSection, PageShell, Stack, TextInput } from "./components/ui";
 import type { BrokerPresentation } from "../trading";
 import type { BrokerOrderDraft } from "../types";
 
@@ -195,9 +195,7 @@ export function OmnichannelPanel({
                         {emailResult.actionType || "reply"}
                       </Badge>
                     </Flex>
-                    <h6>
-                      Subject: {emailResult.responseSubject}
-                    </h6>
+                    <SmallHeader level="h6" title={`Subject: ${emailResult.responseSubject}`} />
                     {emailResult.responseHtml ? (
                       <div
                         dangerouslySetInnerHTML={{ __html: emailResult.responseHtml }}
@@ -313,7 +311,7 @@ export function OmnichannelPanel({
                     <Stack gap="2">
                       {slackResult.response.blocks?.map((block: any, bIdx: number) => {
                         if (block.type === "header") {
-                          return <h5 key={bIdx}>{block.text?.text}</h5>;
+                          return <SmallHeader key={bIdx} title={block.text?.text} />;
                         }
                         if (block.type === "section" && block.fields) {
                           return (

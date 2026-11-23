@@ -12,6 +12,7 @@ import {
   PageSection,
   PageTemplate,
   Select,
+  SmallHeader,
   Stack,
   SummaryCard,
   TabPanel,
@@ -1033,7 +1034,7 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
           >
 <Card>
                   <Stack gap="2">
-                  <h5>🛡️ Agentic HITL Safety Guarantee</h5>
+                  <SmallHeader title="🛡️ Agentic HITL Safety Guarantee" />
                   <p>
                     Every trade initiated by the Multi-Agent System is saved to the institutional ledger in <code>previewed</code> status.
                     No funds are moved, and no order is routed to {brokerLabel} until you review the order details and click <strong>Approve &amp; Submit</strong>.
@@ -1064,7 +1065,7 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
                 {/* Sample Quick Action Box */}
                 <Card>
                   <Stack gap="2">
-                  <h5>💬 NLQ Voice &amp; Text Prompts</h5>
+                  <SmallHeader title="💬 NLQ Voice &amp; Text Prompts" />
                   <p>You can also place trades effortlessly through conversational natural language:</p>
                   <Stack gap="1">
                     <Button

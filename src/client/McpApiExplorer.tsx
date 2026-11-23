@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { apiFetch as fetch } from "./apiFetch";
 import { TabHoverItem } from "./TabHoverItem";
-import { Button, CardHeader, TextInput, Select } from "./components/ui";
+import { Button, CardHeader, SmallHeader, TextInput, Select } from "./components/ui";
 import {
   MCP_TOOLS_CATALOG,
   MCP_RESOURCES_CATALOG,
@@ -382,7 +382,7 @@ export function McpApiExplorer() {
 
             {/* Input Schema Parameters */}
             <div className="schema-section">
-              <h5>Input Schema Parameters:</h5>
+              <SmallHeader title="Input Schema Parameters:" />
               <div className="schema-props-list">
                 {Object.entries(activeTool.schema.properties || {}).map(([propName, propDef]: [string, any]) => {
                   const isRequired = (activeTool.schema.required || []).includes(propName);
@@ -402,7 +402,7 @@ export function McpApiExplorer() {
             {/* JSON Arguments Editor */}
             <div className="arguments-section">
               <div className="args-header">
-                <h5>Call Arguments (JSON):</h5>
+                <SmallHeader title="Call Arguments (JSON):" />
                 <Button
                 variant="secondary"
                 size="sm"
@@ -473,7 +473,7 @@ export function McpApiExplorer() {
                     <span className="tool-name"><code>{res.uri}</code></span>
                     <span className="tool-cat-tag">JSON</span>
                   </div>
-                  <h5 className="res-title">{res.name}</h5>
+                  <SmallHeader title={res.name} />
                   <p className="tool-desc">{res.description}</p>
                 </div>
               ))}
@@ -560,7 +560,7 @@ export function McpApiExplorer() {
             <p className="runner-desc">{activePrompt.description}</p>
 
             <div className="schema-section">
-              <h5>Prompt Arguments:</h5>
+              <SmallHeader title="Prompt Arguments:" />
               <div className="schema-props-list">
                 {activePrompt.args.map((a) => (
                   <div key={a.name} className="prop-row">
@@ -622,7 +622,7 @@ export function McpApiExplorer() {
                     <span className={`method-tag ${r.method.toLowerCase()}`}>{r.method}</span>
                     <span className="path-text"><code>{r.path}</code></span>
                   </div>
-                  <h5 className="rest-title">{r.title}</h5>
+                  <SmallHeader title={r.title} />
                   <p className="tool-desc">{r.description}</p>
                 </div>
               ))}
@@ -643,7 +643,7 @@ export function McpApiExplorer() {
             {activeRest.method === "POST" && (
               <div className="arguments-section">
                 <div className="args-header">
-                  <h5>Request Body (JSON):</h5>
+                  <SmallHeader title="Request Body (JSON):" />
                   {activeRest.sampleBody && (
                     <Button
                     variant="secondary"
@@ -679,7 +679,7 @@ export function McpApiExplorer() {
             {/* Copyable cURL */}
             <div className="curl-section">
               <div className="curl-header">
-                <h5>Sample cURL Command:</h5>
+                <SmallHeader title="Sample cURL Command:" />
                 <Button
                 variant="secondary"
                 size="sm"
@@ -696,7 +696,7 @@ export function McpApiExplorer() {
             {activeRest.sampleResponse && (
               <div className="curl-section">
                 <div className="curl-header">
-                  <h5>Sample Response (JSON):</h5>
+                  <SmallHeader title="Sample Response (JSON):" />
                 </div>
                 <pre className="curl-code"><code>{JSON.stringify(activeRest.sampleResponse, null, 2)}</code></pre>
               </div>

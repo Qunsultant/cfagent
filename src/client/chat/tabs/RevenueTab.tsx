@@ -18,7 +18,7 @@ import { TextInput } from "../../components/ui/TextInput";
 import { FieldShell } from "../../components/ui/Field";
 import { Tabs, TabPanel } from "../../components/ui/Tabs";
 import { useUrlSyncedTabs } from "../../useUrlSyncedTabs";
-import { CardHeader, Grid } from "../../components/ui";
+import { CardHeader, Grid, SmallHeader } from "../../components/ui";
 
 export interface RevenueTabProps {
   adBannerConfig: AdBannerConfig;
@@ -316,7 +316,7 @@ export function RevenueTab({adBannerConfig, ads, browseTable, catErrorMsg, catSu
 
               <Card padding="none">
                 <div className="ui-stack">
-                  <h5>➕ Register New External Ad Network Placement</h5>
+                  <SmallHeader title="➕ Register New External Ad Network Placement" />
                   {extAdSuccessMsg && <Notice tone="success">{extAdSuccessMsg}</Notice>}
                   {extAdErrorMsg && <Notice tone="danger">{extAdErrorMsg}</Notice>}
 
@@ -447,7 +447,7 @@ export function RevenueTab({adBannerConfig, ads, browseTable, catErrorMsg, catSu
 
               <Card padding="none">
                 <div className="ui-stack">
-                  <h5>➕ Add New Referral Category</h5>
+                  <SmallHeader title="➕ Add New Referral Category" />
                   {catSuccessMsg && <Notice tone="success">{catSuccessMsg}</Notice>}
                   {catErrorMsg && <Notice tone="danger">{catErrorMsg}</Notice>}
 
@@ -520,10 +520,10 @@ export function RevenueTab({adBannerConfig, ads, browseTable, catErrorMsg, catSu
                 {tables.map((tbl) => (
                   <Card padding="none" key={tbl.name}>
                     <div className="ui-stack">
-                      <div className="ui-row">
-                        <h5><code>{tbl.name}</code></h5>
-                        <Badge size="xs" tone="neutral">{tbl.rowCount} rows</Badge>
-                      </div>
+                      <SmallHeader
+                        title={<code>{tbl.name}</code>}
+                        meta={<Badge size="xs" tone="neutral">{tbl.rowCount} rows</Badge>}
+                      />
                       <p className="ui-meta-sm">{tbl.description}</p>
                       <div className="ui-stack">
                         <span className="ui-meta-sm">{tbl.columns.length} columns:</span>
@@ -571,7 +571,7 @@ export function RevenueTab({adBannerConfig, ads, browseTable, catErrorMsg, catSu
               <Grid columns={2} gap="2">
                 <Card padding="none">
                   <div className="ui-stack">
-                    <h5>⚙️ Google Ads Configuration</h5>
+                    <SmallHeader title="⚙️ Google Ads Configuration" />
                     <FieldShell id="google-status" label="Google Ads Display Status">
                       <Button
                         variant={googleAdsEnabled ? "primary" : "secondary"}
@@ -617,7 +617,7 @@ export function RevenueTab({adBannerConfig, ads, browseTable, catErrorMsg, catSu
                 {adBannerConfig.enabled && adBannerConfig.showGoogleAdUnits && Boolean(adBannerConfig.tabVisibility.ads) && googleAdsEnabled && (
                   <Card padding="none">
                     <div className="ui-stack">
-                      <h5>Live Google Ads Preview</h5>
+                      <SmallHeader title="Live Google Ads Preview" />
                       <GoogleAdUnit
                         format={googleAdFormat}
                         publisherId={googlePublisherId}

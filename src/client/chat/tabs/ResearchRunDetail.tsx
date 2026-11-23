@@ -1,5 +1,5 @@
 import React from "react";
-import { Badge, Button, Card, CardHeader, Notice, Spinner, Table } from "../../components/ui";
+import { Badge, Button, Card, CardHeader, SmallHeader, Notice, Spinner, Table } from "../../components/ui";
 import { apiFetch } from "../../apiFetch";
 
 /**
@@ -240,7 +240,7 @@ function TradeCardView({ idea }: { idea: RunIdeaView }) {
       {idea.economics.length > 0 && <DefinitionList entries={idea.economics} />}
       {idea.supporting.length > 0 && (
         <>
-          <h5>Supporting evidence</h5>
+          <SmallHeader title="Supporting evidence" />
           <ul className="research-detail-list">
             {idea.supporting.map((s, i) => (
               <li key={i}>{s}</li>
@@ -250,7 +250,7 @@ function TradeCardView({ idea }: { idea: RunIdeaView }) {
       )}
       {idea.contradicting.length > 0 && (
         <>
-          <h5>Contradicting evidence</h5>
+          <SmallHeader title="Contradicting evidence" />
           <ul className="research-detail-list">
             {idea.contradicting.map((s, i) => (
               <li key={i}>{s}</li>
@@ -260,7 +260,7 @@ function TradeCardView({ idea }: { idea: RunIdeaView }) {
       )}
       {idea.falsification.length > 0 && (
         <>
-          <h5>Falsification (§4)</h5>
+          <SmallHeader title="Falsification (§4)" />
           <dl className="research-detail-dl">
             {idea.falsification.map((row) => (
               <div key={row.label} className="research-detail-dl-row">
@@ -278,7 +278,7 @@ function TradeCardView({ idea }: { idea: RunIdeaView }) {
       )}
       {idea.premortem && (
         <>
-          <h5>Pre-mortem (§7)</h5>
+          <SmallHeader title="Pre-mortem (§7)" />
           <p>{idea.premortem.assumedFailure}</p>
           {idea.premortem.causes.length > 0 && (
             <ul className="research-detail-list">
