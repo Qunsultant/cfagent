@@ -975,6 +975,13 @@ function measure(): Map<string, number> {
  * not the brand), so no docs row moves.
  * 1 new row (screenerPipelineJobs.ts nasdaq 2).
  * Baseline totals move 1390/11289 -> 1391/11291.
+ * Baseline update (#6208, 2026-11-23): the snapshots fetch chunks
+ * into ≤100-symbol requests, and a failed chunk logs the upstream
+ * body server-side — both new lines name the provider in its own
+ * adapter, so they are dispositioned INTEGRATION. 1 raise
+ * (optionsData.ts alpaca 25->27): the chunk-limit comment naming
+ * the documented limit, plus the server-side error log line.
+ * Baseline totals move 1391/11291 -> 1391/11293.
  */
 const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (188 rows / 989 lines) ----
@@ -1827,7 +1834,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/trading/alpaca/credentials.ts", "alpaca", 6],
   ["src/trading/alpaca/fillLots.ts", "alpaca", 4],
   ["src/trading/alpaca/occSymbol.ts", "alpaca", 8],
-  ["src/trading/alpaca/optionsData.ts", "alpaca", 25],
+  ["src/trading/alpaca/optionsData.ts", "alpaca", 27],
   ["src/trading/alpaca/optionsData.ts", "etrade", 5],
   ["src/trading/alpaca/platform.ts", "alpaca", 113],
   ["src/trading/alpaca/platform.ts", "etrade", 8],
