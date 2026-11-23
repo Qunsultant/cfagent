@@ -59,14 +59,15 @@ import {
 } from "../../services/accountBindings";
 import { TradingPlatformRegistry, tradingTypeFor } from "../../trading";
 import type { BrokerAccount } from "../../types";
-// Issue #5104 (DEFAULT part of B1): the brokerCatalog helpers come
-// from the leaf module, never the trading barrel — the barrel sits
-// on a load cycle with providerConnections (see the lazy import
-// below); brokerCatalog imports only config/vocabulary.
-import {
-  defaultBrokerId,
-  defaultTradingMode,
-} from "../../trading/brokerCatalog";
+// Issue #5104 (DEFAULT part of B1): the brokerCatalog helpers are
+// re-exported by the trading barrel (src/trading/index.ts), which is
+// the sole public import surface of src/trading/ (#290 boundary).
+// Importing the leaf module directly (../../trading/brokerCatalog)
+// violates that boundary; the barrel is the only allowed path.
+// The barrel's load cycle with providerConnections is a load-time
+// concern only — defaultBrokerId()/defaultTradingMode() are called
+// at request time, after all modules have initialized.
+import { defaultBrokerId, defaultTradingMode } from "../../trading";
 import { isLoginShaped, getServiceUserLogin } from "../../security/serviceIdentity";
 import type { JobRunTrigger } from "../../data/jobRunRecordPorts";
 import { findDuplicateSchedule } from "../../services/scheduleDedupe";

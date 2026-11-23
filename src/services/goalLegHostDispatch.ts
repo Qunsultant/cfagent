@@ -47,7 +47,7 @@ import {
 import {
   defaultBrokerId,
   defaultTradingMode,
-} from "../trading/brokerCatalog";
+} from "../trading";
 import {
   optionsScreenJobId,
   optionsStageStorageFromArtifacts,
