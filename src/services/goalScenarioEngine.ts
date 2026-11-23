@@ -219,7 +219,7 @@ export interface ScenarioConstraints {
   liquidityFloor?: {
     minOpenInterest?: number;
     minVolume?: number;
-    /** Max (ask−bid)/mid per leg. */
+    /** Max (ask−bid)/mid per leg, in percent. */
     maxSpreadPct?: number;
   };
 }
@@ -486,8 +486,8 @@ export function evaluateScenarioGrid(input: {
       if (floor.maxSpreadPct !== undefined) {
         const mid = (leg.bid + leg.ask) / 2;
         if (!(mid > 0)) missing = true;
-        else if ((leg.ask - leg.bid) / mid > floor.maxSpreadPct)
-          breachDetail = `Leg ${leg.optionType} ${leg.strike} spread ${(((leg.ask - leg.bid) / mid) * 100).toFixed(1)}% of mid > floor ${(floor.maxSpreadPct * 100).toFixed(1)}%.`;
+        else if (((leg.ask - leg.bid) / mid) * 100 > floor.maxSpreadPct)
+          breachDetail = `Leg ${leg.optionType} ${leg.strike} spread ${(((leg.ask - leg.bid) / mid) * 100).toFixed(1)}% of mid > floor ${floor.maxSpreadPct.toFixed(1)}%.`;
       }
       if (breachDetail) break;
     }

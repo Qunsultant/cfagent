@@ -738,7 +738,7 @@ export async function discoverNamesForStrategy(
     if (legs.length > 0) {
       const perLeg = legs.map((leg) => {
         const mid = (leg.bid + leg.ask) / 2;
-        const spreadPct = mid > 0 ? (leg.ask - leg.bid) / mid : 1;
+        const spreadPct = mid > 0 ? ((leg.ask - leg.bid) / mid) * 100 : 100;
         return clamp01(
           0.5 * clamp01((leg.openInterest ?? 0) / (config.minOpenInterest * 4)) +
             0.3 * clamp01((leg.volume ?? 0) / (config.minOptionVolume * 4)) +

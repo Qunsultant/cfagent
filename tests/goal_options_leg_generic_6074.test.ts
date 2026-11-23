@@ -153,13 +153,11 @@ function listing(symbol: string) {
 
 function directionalScenario() {
   // Issue #6074 — the scenario carries explicit constraints, the
-  // incomeScenario pattern (#3186): the buildScenario defaults
-  // fill a liquidity floor of maxSpreadPct 0.15 (the research
-  // config's fraction-of-mid value, read by the screener as
-  // percent — a units question for the owner, NOT this slice),
-  // which no realistic quote passes; the explicit floor below
-  // (8%, percent units as the screener reads them) is what the
-  // goal-leg tests use. DTE 30 sits inside 21..60.
+  // incomeScenario pattern (#3186). Issue #6196 fixed the
+  // default: buildScenario now fills a liquidity floor of
+  // maxSpreadPct 15 (percent), which realistic quotes pass; the
+  // explicit floor below (8%) is what the goal-leg tests use.
+  // DTE 30 sits inside 21..60.
   return buildScenario({
     goalKind: "directional",
     portfolioRef: { kind: "hypothetical" },

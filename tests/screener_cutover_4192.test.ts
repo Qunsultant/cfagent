@@ -817,13 +817,11 @@ describe("goal-leg dispatch (#4192)", () => {
       shards: [{ shardId: "s0", symbols: [listing("AAPL")] }],
       goalScreen: {
         // Issue #6074 — explicit scenario constraints (the
-        // incomeScenario shape): buildScenario fills a missing
-        // liquidity floor from RESEARCH_CONFIG_DEFAULTS, whose
-        // maxSpreadPct 0.15 reads as 0.15% in evaluateContract
-        // and rejects the fake chain's 4.88% spread — the units
-        // question is out of scope for this slice (reported to
-        // the parent), so this test pins the explicit-constraints
-        // path, as the 6074 suite does.
+        // incomeScenario shape). Issue #6196 fixed the default:
+        // RESEARCH_CONFIG_DEFAULTS.maxSpreadPct is now 15
+        // (percent), so a missing floor no longer reads as 0.15%
+        // in evaluateContract. This test still pins the
+        // explicit-constraints path, as the 6074 suite does.
         scenario: buildScenario({
           goalKind: "directional",
           portfolioRef: { kind: "hypothetical" },
