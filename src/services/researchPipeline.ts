@@ -285,6 +285,29 @@ export interface PipelineStageStep {
   // OODA loop carries a shortId (`OodaStep.shortId`, `ooda:*`).
 }
 
+/** Issue #773 (a) — the evaluation history as a run saw it. */
+export interface EvaluationFeedback {
+  /** Where the numbers came from; there is no second source. */
+  source: "track-record";
+  published: number;
+  evaluated: number;
+  /** Minimum evaluated ideas a family needs before it may reorder anything. */
+  minEvaluated: number;
+  /** The per-family slices the run could see, verbatim from the track record. */
+  families: Array<{
+    key: string;
+    evaluated: number;
+    winRate: number | null;
+    avgRMultiple: number | null;
+    /** True when this family carried a per-family direction accuracy. */
+    directionAccuracyRecorded: boolean;
+  }>;
+  /** True when the history actually changed the structure order this run. */
+  orderingApplied: boolean;
+  /** One sentence an operator can read: closed, or open and why. */
+  statement: string;
+}
+
 export interface ResearchReport {
   runId: string;
   generationId: string;
@@ -305,6 +328,13 @@ export interface ResearchReport {
   accountId?: string;
   /** Amendment 1: the effective filter/config snapshot this run used. */
   configSnapshot: ResearchConfig;
+  /**
+   * Issue #773 (a) — what the run read from the evaluation history, and
+   * whether any of it changed a decision. Visible and auditable by design: the
+   * loop is either stated as closed, or stated as open with the reason — never
+   * a silence that reads like a decision.
+   */
+  evaluationFeedback: EvaluationFeedback;
   regime: RegimeAssessment;
   summary: string;
   ideas: TradeCard[];
@@ -887,6 +917,40 @@ export async function runResearchPipeline(
   const stage = (s: PipelineStage, detail: string) =>
     stageTrace.push({ stage: s, detail, at: new Date().toISOString() });
 
+  // Issue #773 (a) — read the evaluation history once, at run start, and
+  // state what it did. `orderingApplied` is only true when a family actually
+  // carried the per-family direction accuracy the reorder needs; the reorder
+  // below sets it when it sorts. Nothing in the decision path changes here.
+  const MIN_EVALUATED_FOR_ORDERING = 10;
+  const trackRecordSlices = deps.trackRecord?.byStrategy ?? [];
+  const evaluationFeedback: EvaluationFeedback = {
+    source: "track-record",
+    published: deps.trackRecord?.published ?? 0,
+    evaluated: deps.trackRecord?.evaluated ?? 0,
+    minEvaluated: MIN_EVALUATED_FOR_ORDERING,
+    families: trackRecordSlices.map((slice) => {
+      const recorded = typeof (slice as { directionAccuracy?: unknown }).directionAccuracy === "number";
+      return {
+        key: slice.key,
+        evaluated: slice.evaluated,
+        winRate: slice.winRate,
+        avgRMultiple: slice.avgRMultiple,
+        directionAccuracyRecorded: recorded,
+      };
+    }),
+    orderingApplied: false,
+    statement: "",
+  };
+  const reorderableFamilies = evaluationFeedback.families.filter(
+    (family) => family.directionAccuracyRecorded && family.evaluated >= MIN_EVALUATED_FOR_ORDERING,
+  );
+  evaluationFeedback.statement =
+    evaluationFeedback.evaluated === 0
+      ? "No evaluated ideas are recorded yet, so no structure was reordered on history: the loop has nothing to feed back."
+      : reorderableFamilies.length > 0
+        ? `Read ${evaluationFeedback.evaluated} evaluated ideas across ${evaluationFeedback.families.length} structure families; ${reorderableFamilies.length} met the ${MIN_EVALUATED_FOR_ORDERING}-evaluation bar for ordering.`
+        : `Read ${evaluationFeedback.evaluated} evaluated ideas across ${evaluationFeedback.families.length} structure families, but no family records a per-family direction accuracy, so the structure order was not changed by history (win rates are recorded and shown; they are not yet an ordering input).`;
+
   const rejected: RejectedEntry[] = [];
   const symbolEvaluations: ResearchSymbolEvaluation[] = [];
   const watchlist: WatchlistEntry[] = [];
@@ -942,6 +1006,7 @@ export async function runResearchPipeline(
         reason: `Universe retrieval failed: ${feed.universeError}.`,
       }],
       stats,
+      evaluationFeedback,
       summary: universeRefused
         ? `Universe "${config.universe}" is not resolvable for a single run; no candidates evaluated.`
         : "Universe retrieval failed; no candidates evaluated.",
@@ -1136,6 +1201,7 @@ export async function runResearchPipeline(
           return rate < 0.4 ? -1 : rate > 0.6 ? 1 : 0;
         };
         structureNames = [...structureNames].sort((a, b) => score(b) - score(a));
+        evaluationFeedback.orderingApplied = true;
         step("decide", `Structure order by historical accuracy: ${structureNames.join(", ")}.`);
       }
     }
@@ -1357,7 +1423,7 @@ export async function runResearchPipeline(
   return finishReport({
     runId, config, opts, now, started, trace, stageTrace, regime,
     symbolEvaluations,
-    ideas, watchlist, rejected, stats, summary,
+    ideas, watchlist, rejected, stats, summary, evaluationFeedback,
     ...(dataRefusal ? { dataRefusal } : {}),
   });
 }
@@ -1377,12 +1443,13 @@ function finishReport(args: {
   rejected: RejectedEntry[];
   stats: RunStats;
   summary: string;
+  evaluationFeedback: EvaluationFeedback;
   dataRefusal?: {
     code: "research_data_unavailable" | "research_universe_unknown";
     message: string;
   };
 }): ResearchReport {
-  const { runId, config, opts, now, started, trace, stageTrace, regime, ideas, watchlist, rejected, stats, summary, symbolEvaluations } = args;
+  const { runId, config, opts, now, started, trace, stageTrace, regime, ideas, watchlist, rejected, stats, summary, symbolEvaluations, evaluationFeedback } = args;
   stats.durationMs = Date.now() - started;
   return {
     runId,
@@ -1400,6 +1467,9 @@ function finishReport(args: {
     ...(opts.accountId ? { accountId: maskAccountId(opts.accountId) } : {}),
     // Amendment 1: the effective filter/config snapshot this run used.
     configSnapshot: JSON.parse(JSON.stringify(config)) as ResearchConfig,
+    // Issue #773 (a) — the evaluation history this run read, and whether it
+    // changed a decision. Stated on every report, closed or open.
+    evaluationFeedback,
     regime,
     summary,
     ideas,
