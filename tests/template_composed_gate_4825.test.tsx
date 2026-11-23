@@ -42,7 +42,12 @@ import { AuditVaultPage } from "../src/client/AuditVaultPage";
 import { WorkflowCatalogPage } from "../src/client/WorkflowCatalogPage";
 import { NavSettingsPage } from "../src/client/NavSettingsPage";
 import { OptionsScreenerPage } from "../src/client/OptionsScreenerPage";
+<<<<<<< HEAD
 import { leftNavConfigIds } from "../src/client/navPresets";
+=======
+import { SecurityHubHome } from "../src/client/SecurityHubHome";
+import { leftNavConfigIds } from "../src/client/components/NavigationMenu";
+>>>>>>> 4f7fe3e7f (fix(6164): wire a security-hub mount in the composed-page gate)
 import { ToastProvider } from "../src/client/components/ui/Toast";
 import {
   routeConformance,
@@ -80,6 +85,10 @@ const STANDALONE_ROUTES: Record<string, React.ComponentType> = {
     />
   ),
   "options-screener": () => <OptionsScreenerPage onSelectTab={() => {}} />,
+  // security-hub mounts standalone, as Chat mounts it: no signed-in
+  // login (defaults), empty-shape fetch stub — the panels render
+  // their loading/empty states, never a crash.
+  "security-hub": SecurityHubHome,
 };
 
 /** Canonical slot order (PageTemplate renders them in this order). */
