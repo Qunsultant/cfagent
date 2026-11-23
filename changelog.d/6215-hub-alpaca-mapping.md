@@ -1,0 +1,4 @@
+### #6215: map the alpaca tenant provider to the selected-broker hub variant
+
+- `TENANT_PROVIDER_TO_VARIANT_ID` now maps `alpaca` to `selected-broker`, so a manual stock screen for a tenant whose configured provider is alpaca starts instead of refusing with `NO_SCREENING_PROVIDER_FOR_TENANT`. The variant posts to `/api/broker/screen` with no provider claim, so the server runs the tenant-resolved provider — the tenant's own broker, never a foreign provider (#4430 invariant holds).
+- Pinned by `tests/neutrality_defaults_onboarding_3525.test.ts` (alpaca resolves to `selected-broker`; providers with no variant — public, nasdaq — still resolve to no selection). The neutrality census row stays at 1 (the map key reuses the existing allowance; the comment prose is brand-free per the #4430 precedent).

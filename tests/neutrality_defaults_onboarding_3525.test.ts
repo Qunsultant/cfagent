@@ -26,6 +26,7 @@ import {
   getScreeningProviders,
   noScreeningProviderMessage,
   resolveInitialScreeningProviderId,
+  variantIdToTenantProviderId,
 } from "../src/client/screeningAdapters";
 import { firstRunBrokerStep } from "../src/client/firstRunBrokerStep";
 import { DEFAULT_TENANT_PROVIDERS_STATE } from "../src/client/tenantProviders";
@@ -65,11 +66,27 @@ describe("neutrality S3 — StockHub default follows the tenant's configured pro
   it("tenant yahoo resolves to the yahoo-finance variant (registry id -> variant id)", () => {
     expect(resolveInitialScreeningProviderId("yahoo", variants)).toBe("yahoo-finance");
   });
+  it("tenant alpaca resolves to the selected-broker variant (#6215)", () => {
+    // Issue #6215: alpaca is screen-capable server-side (STOCK_SCREEN_PROVIDERS,
+    // brokerSupports(alpaca, "quote") and marketScreening both true), and the
+    // broker-neutral selected-broker variant posts to /api/broker/screen with
+    // no provider claim, so the server runs the tenant-resolved provider
+    // (alpaca). This is the tenant's own broker, not a foreign provider —
+    // the #4430 invariant holds.
+    expect(resolveInitialScreeningProviderId("alpaca", variants)).toBe("selected-broker");
+  });
+  it("the selected-broker variant maps back to no provider claim (#6215)", () => {
+    // The reverse map leaves "selected-broker" unmapped, so the run body
+    // carries no providerId claim and the server runs the tenant-resolved
+    // provider — the variant is broker-neutral, never a named brand.
+    expect(variantIdToTenantProviderId("selected-broker")).toBeUndefined();
+  });
   it("a tenant provider with no hub variant resolves to NO selection, never the first variant (#4430)", () => {
     // Broker-neutral: every no-variant provider id behaves the same —
     // the selection depends only on the tenant's configured data
-    // provider, never on a substituted default.
-    for (const providerId of ["alpaca", "public", "nasdaq", ""]) {
+    // provider, never on a substituted default. (alpaca has a variant
+    // since #6215 and is pinned above; it is not in this list.)
+    for (const providerId of ["public", "nasdaq", ""]) {
       expect(resolveInitialScreeningProviderId(providerId, variants)).toBe("");
     }
   });
@@ -85,7 +102,7 @@ describe("neutrality S3 — StockHub default follows the tenant's configured pro
   });
   it("a tenant provider with no hub variant resolves to NO selection even when the workflow-backed variant is absent (#4430)", () => {
     const withoutYahoo = variants.filter((v) => v.id !== "yahoo-finance");
-    expect(resolveInitialScreeningProviderId("alpaca", withoutYahoo)).toBe("");
+    expect(resolveInitialScreeningProviderId("public", withoutYahoo)).toBe("");
   });
   it("no variants resolves to the empty selection the correction effect already handles", () => {
     expect(resolveInitialScreeningProviderId("etrade", [])).toBe("");
