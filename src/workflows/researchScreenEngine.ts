@@ -388,6 +388,20 @@ export interface ReadResearchStagesInput {
   runRecorder?: JobRunRecorder;
 }
 
+/**
+ * Issue #6034 — what a stage produced, as the one read contract states it.
+ * `descriptor` is the step's own result reference (#6028); the optional
+ * fields are additive for a producer that can name its artifact or summary.
+ */
+export interface ResearchStageResult {
+  descriptor: string;
+  artifactRef?: string;
+  summary?: string;
+}
+
+/** Why a stage has no result — coded, never a prose guess. */
+export type ResearchStageResultReason = "not_run" | "no_artifact" | "not_applicable";
+
 export interface ResearchStageRow {
   stageId: ResearchPipelineStage;
   /** The engine's recorded status, or "pending" when the stage never ran. */
@@ -395,6 +409,16 @@ export interface ResearchStageRow {
   startedAt: string | null;
   endedAt: string | null;
   durationMs: number | null;
+  /** Issue #6034 — the units the stage planned, and how many ended failed. */
+  unitCount: number;
+  failedUnitCount: number;
+  /**
+   * Issue #6034 — the stage's result. Null is explicit and pairs with
+   * `resultReason`: never a fabricated summary.
+   */
+  result: ResearchStageResult | null;
+  /** Present only when `result` is null. */
+  resultReason?: ResearchStageResultReason;
 }
 
 /**
@@ -461,12 +485,31 @@ export async function readResearchStages(
             : units.length === 0
               ? (stored?.stageStatus ?? "pending")
               : "completed";
+    // Issue #6034 — the result and its coded reason. A live stage's own
+    // descriptor wins over the persisted row (the checkpoint is the truth
+    // while the run is in front of us); an absent result is `no_artifact`
+    // when the stage ran and `not_run` when it never did.
+    const descriptor = found?.resultRef ?? stored?.resultRef ?? null;
+    const ran = Boolean(found || stored);
+    const result: ResearchStageResult | null = descriptor ? { descriptor } : null;
+    const resultReason: ResearchStageResultReason | undefined = result
+      ? undefined
+      : ran
+        ? "no_artifact"
+        : "not_run";
     return {
       stageId,
       status,
       startedAt: found?.startedAt ?? stored?.startedAt ?? null,
       endedAt: found?.endedAt ?? stored?.endedAt ?? null,
       durationMs: found?.durationMs ?? stored?.durationMs ?? null,
+      unitCount: found ? found.units.length : (stored?.unitCount ?? 0),
+      failedUnitCount: found
+        ? found.units.filter((unit) => unit.status === "failed" || unit.status === "timed_out")
+            .length
+        : (stored?.failedUnitCount ?? 0),
+      result,
+      ...(resultReason ? { resultReason } : {}),
     };
   });
   return {

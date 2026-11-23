@@ -54,16 +54,35 @@ const STAGE_ACTIONS: Record<string, Array<{ op: string; label: string }>> = {
   failed: [{ op: "rerun", label: "Re-run" }],
 };
 
+/**
+ * Issue #6034 — one stage row, as the read contract states it. Every field
+ * comes from `GET /research/runs/:runId/stages`; the client invents none.
+ */
+interface ResearchStageRowView {
+  stageId: string;
+  status: string;
+  startedAt?: string | null;
+  endedAt?: string | null;
+  durationMs?: number | null;
+  unitCount?: number;
+  failedUnitCount?: number;
+  result?: { descriptor: string } | null;
+  resultReason?: string;
+}
+
 function ResearchStageControl({
   runId,
   userLogin,
   onAfterAction,
+  onStages,
 }: {
   runId: string | null;
   userLogin?: string;
   onAfterAction?: () => void;
+  /** Issue #6034 — the stage list as the read answered it, for the page's KPI. */
+  onStages?: (stageIds: string[]) => void;
 }) {
-  const [rows, setRows] = useState<Array<{ stageId: string; status: string }>>([]);
+  const [rows, setRows] = useState<ResearchStageRowView[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState("");
 
@@ -74,13 +93,15 @@ function ResearchStageControl({
         `/api/research/runs/${encodeURIComponent(runId)}/stages`,
         { headers: hdrs(userLogin) },
       );
-      const data = await readJson<{ stages?: Array<{ stageId: string; status: string }> }>(res);
-      setRows(Array.isArray(data.stages) ? data.stages : []);
+      const data = await readJson<{ stages?: ResearchStageRowView[] }>(res);
+      const next = Array.isArray(data.stages) ? data.stages : [];
+      setRows(next);
+      onStages?.(next.map((row) => row.stageId));
       setMsg("");
     } catch (err) {
       setMsg(`Stage status unavailable: ${err instanceof Error ? err.message : String(err)}`);
     }
-  }, [runId, userLogin]);
+  }, [runId, userLogin, onStages]);
 
   useEffect(() => {
     void load();
@@ -112,7 +133,7 @@ function ResearchStageControl({
 
   if (!runId) return null;
   return (
-    <DetailCard title="Stage control — feed → enrich → analyze → generate → deliver → evaluate">
+    <DetailCard title="Stage control">
       <Stack gap="2">
         {rows.length === 0 && <span className="ui-meta-sm">No stages recorded for this run yet.</span>}
         {rows.map((row) => (
@@ -121,6 +142,21 @@ function ResearchStageControl({
               {row.status}
             </Badge>
             <span className="ui-meta-sm">{row.stageId}</span>
+            {typeof row.durationMs === "number" && (
+              <span className="ui-meta-sm">{row.durationMs} ms</span>
+            )}
+            {typeof row.unitCount === "number" && row.unitCount > 0 && (
+              <span className="ui-meta-sm">
+                {row.failedUnitCount ?? 0}/{row.unitCount} units
+              </span>
+            )}
+            {row.result?.descriptor ? (
+              <span className="ui-meta-sm">
+                Result: <code>{row.result.descriptor}</code>
+              </span>
+            ) : row.resultReason ? (
+              <span className="ui-meta-sm">No result ({row.resultReason})</span>
+            ) : null}
             {(STAGE_ACTIONS[row.status] ?? []).map((action) => (
               <Button
                 key={action.op}
@@ -146,6 +182,12 @@ interface ResearchRunsPanelProps {
   activeEnv: "TEST" | "PROD";
   userLogin?: string;
   onSendPrompt?: (prompt: string) => void;
+  /**
+   * Issue #6034 — the stage vocabulary as the run read answered it, so the
+   * page's KPI and badge name the stages the engine actually reported
+   * instead of a literal list.
+   */
+  onStages?: (stageIds: string[]) => void;
 }
 
 type TriggerSource = "manual" | "scheduled";
@@ -385,7 +427,12 @@ function TradeCardDetail({ card }: { card: TradeCardView }) {
   );
 }
 
-export function ResearchRunsPanel({ activeEnv, userLogin, onSendPrompt }: ResearchRunsPanelProps) {
+export function ResearchRunsPanel({
+  activeEnv,
+  userLogin,
+  onSendPrompt,
+  onStages,
+}: ResearchRunsPanelProps) {
   const [config, setConfig] = useState<Record<string, unknown> | null>(null);
   /** Issue #6032 — the accepted universes, served with the settings. */
   const [universes, setUniverses] = useState<string[]>([]);
@@ -507,8 +554,11 @@ export function ResearchRunsPanel({ activeEnv, userLogin, onSendPrompt }: Resear
       }>(res);
       if (data.success && data.report) {
         setReport(data.report);
+        // Issue #6034 — the count is what the run reported, never a literal.
+        const stageCount = Array.isArray(data.stages) ? data.stages.length : null;
+        const stageSuffix = stageCount !== null ? ` · ${stageCount} stages` : "";
         const engineSuffix = data.engineJobId
-          ? ` (${data.engineJobId} · ${data.cutoverMode ?? "engine"}/${data.storageMode ?? "durable"} · ${Array.isArray(data.stages) ? data.stages.length : 6}/6 stages)`
+          ? ` (${data.engineJobId} · ${data.cutoverMode ?? "engine"}/${data.storageMode ?? "durable"} · ${stageSuffix})`
           : "";
         setRunMsg(`Done — canonical report ${data.reportId ?? ""} stored${engineSuffix}.`);
         void loadHistory();
@@ -588,6 +638,7 @@ export function ResearchRunsPanel({ activeEnv, userLogin, onSendPrompt }: Resear
         runId={report?.runId ?? history[0]?.runId ?? null}
         userLogin={userLogin}
         onAfterAction={() => void loadHistory()}
+        {...(onStages ? { onStages } : {})}
       />
 
       {showFilters && config && (
