@@ -168,3 +168,71 @@ describe("6157-P04 a refusal is reported as a refusal", () => {
     expect(bodyText()).not.toContain("OODA run started");
   });
 });
+
+describe("6293-P05 a skipped hunt trigger is reported as skipped, not started", () => {
+  it("reads the tick: no job created means no 'run started'", async () => {
+    (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(
+      async (input: unknown) => {
+        const url = String(input);
+        if (url.includes("/api/ledger/runs")) {
+          return new Response(JSON.stringify({ runs: [] }), { status: 200 });
+        }
+        if (url.includes("/api/schedule/goals/opportunity-hunt/trigger")) {
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              tick: {
+                timestamp: "2026-11-23T00:00:00.000Z",
+                goalsEvaluated: 1,
+                jobsCreated: 0,
+                jobsSkipped: 1,
+                errors: ["opportunity-hunt: already in flight (run abc, status running)"],
+              },
+            }),
+            { status: 200 },
+          );
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      },
+    );
+    await render(<ScheduleRunLedgerPanel />);
+    await settle();
+    await act(async () => {
+      button("Opportunity Hunt")!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await settle();
+    });
+    await settle();
+    expect(bodyText()).toContain("Opportunity Hunt run skipped");
+    expect(bodyText()).toContain("already in flight");
+    expect(bodyText()).not.toContain("Opportunity Hunt run started.");
+  });
+});
+
+describe("6293-P06 a 404 trigger is a refusal, not a started run", () => {
+  it("surfaces 'Goal not found' instead of claiming a run", async () => {
+    (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(
+      async (input: unknown) => {
+        const url = String(input);
+        if (url.includes("/api/ledger/runs")) {
+          return new Response(JSON.stringify({ runs: [] }), { status: 200 });
+        }
+        if (url.includes("/api/schedule/goals/opportunity-hunt/trigger")) {
+          return new Response(
+            JSON.stringify({ error: "Goal not found: opportunity-hunt" }),
+            { status: 404 },
+          );
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      },
+    );
+    await render(<ScheduleRunLedgerPanel />);
+    await settle();
+    await act(async () => {
+      button("Opportunity Hunt")!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await settle();
+    });
+    await settle();
+    expect(bodyText()).toContain("Could not start the run: Goal not found: opportunity-hunt.");
+    expect(bodyText()).not.toContain("Opportunity Hunt run started.");
+  });
+});

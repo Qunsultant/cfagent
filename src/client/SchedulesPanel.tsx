@@ -167,22 +167,39 @@ import { resolveScheduleRowColumns } from "../config/scheduleRowModes";
 
 /**
  * Translate a cron expression to human-readable English.
- * Supports the patterns used by our schedulers.
+ * Supports the patterns used by our schedulers. A field that is not a
+ * plain integer (or a step the branch understands) falls back to the
+ * raw cron — never a "NaN" rendering (issue #6293: the stored
+ * "0 * /6 * * *" cron rendered "Daily at NaN:00 AM UTC").
  */
 export function cronToEnglish(cron: string): string {
   const parts = cron.trim().split(/\s+/);
   if (parts.length < 5) return cron;
 
   const [min, hour, dom, month, dow] = parts;
+  const isPlainInt = (s: string): boolean => /^\d+$/.test(s);
 
   // Hourly: "5 * * * *" → "Every hour at :05"
   if (hour === "*" && dom === "*" && month === "*" && dow === "*") {
+    if (!isPlainInt(min)) return cron;
     const m = min.padStart(2, "0");
     return `Every hour at :${m}`;
   }
 
+  // Stepped hours: "0 * /6 * * *" → "Every 6 hours at :00"
+  // (issue #6293 — this is not daily at all, and the old Daily branch
+  // parsed the step as NaN).
+  const hourStep = /^\*\/(\d+)$/.exec(hour);
+  if (hourStep && dom === "*" && month === "*" && dow === "*") {
+    if (!isPlainInt(min)) return cron;
+    const step = parseInt(hourStep[1], 10);
+    const m = min.padStart(2, "0");
+    return `Every ${step} hour${step === 1 ? "" : "s"} at :${m}`;
+  }
+
   // Daily: "0 3 * * *" → "Daily at 3:00 AM UTC"
   if (dom === "*" && month === "*" && dow === "*") {
+    if (!isPlainInt(hour) || !isPlainInt(min)) return cron;
     const h = parseInt(hour, 10);
     const m = min.padStart(2, "0");
     const ampm = h >= 12 ? "PM" : "AM";
@@ -192,6 +209,7 @@ export function cronToEnglish(cron: string): string {
 
   // Weekly: "15 22 * * 1-5" → "Weekdays at 10:15 PM UTC"
   if (dom === "*" && month === "*") {
+    if (!isPlainInt(hour) || !isPlainInt(min)) return cron;
     const h = parseInt(hour, 10);
     const m = min.padStart(2, "0");
     const ampm = h >= 12 ? "PM" : "AM";

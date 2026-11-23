@@ -287,4 +287,63 @@ describe("OpportunityHuntPanel (issue 6273)", () => {
     });
     expect(container!.textContent).toContain("opportunity_hunt_no_bars");
   });
+
+  it("classifies a 408 poll outcome structurally and names the job (issue 6293)", async () => {
+    vi.mocked(listAllRuns).mockResolvedValue({ runs: [], partial: false });
+    const err = new Error(
+      "The request is still processing. The job will continue in the background.",
+    ) as Error & { status?: number; data?: unknown };
+    err.status = 408;
+    err.data = {
+      error: "The request is still processing. The job will continue in the background.",
+      jobId: "job-6293",
+      statusUrl: "/api/jobs/job-6293",
+    };
+    vi.mocked(runOpportunityHuntNow).mockRejectedValue(err);
+    await act(async () => {
+      root!.render(<OpportunityHuntPanel />);
+    });
+    const button = [...container!.querySelectorAll("button")].find((b) =>
+      b.textContent?.includes("Run hunt now"),
+    );
+    await act(async () => {
+      button!.click();
+    });
+    // The catalog message for the code, never the raw transport text.
+    expect(container!.textContent).toContain("FAILURE_ASYNC_JOB_STILL_PROCESSING");
+    expect(container!.textContent).not.toContain(
+      "The request is still processing. The job will continue in the background.",
+    );
+    // The job id rides along so the run can be found in the ledger.
+    expect(container!.textContent).toContain("job-6293");
+  });
+
+  it("shows a running status line while the run is pending (issue 6293)", async () => {
+    vi.mocked(listAllRuns).mockResolvedValue({ runs: [], partial: false });
+    let resolveRun!: (value: unknown) => void;
+    vi.mocked(runOpportunityHuntNow).mockImplementation(
+      () => new Promise((resolve) => { resolveRun = resolve; }) as never,
+    );
+    await act(async () => {
+      root!.render(<OpportunityHuntPanel />);
+    });
+    const button = [...container!.querySelectorAll("button")].find((b) =>
+      b.textContent?.includes("Run hunt now"),
+    );
+    await act(async () => {
+      button!.click();
+    });
+    expect(container!.textContent).toContain("Running");
+    await act(async () => {
+      resolveRun({
+        ok: true,
+        scanned: 1,
+        skipped: 0,
+        setups: [],
+        summary: "Opportunity hunt: 0 setup(s) across 1 symbol(s)",
+        asOf: "2026-11-23T12:00:00.000Z",
+      });
+    });
+    expect(container!.textContent).toContain("No setups");
+  });
 });
