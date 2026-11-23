@@ -1,8 +1,11 @@
 import { resolveEnvironmentConfig } from "../../config/environment";
 import {
   buildSchedulePayload,
+  maskAccountBinding,
+  maskBrokerAccount,
   parseOptionScreenerFilter,
   parseStockScreenerFilter,
+  resolveAccountByLabel,
   SCREENING_SCHEDULE_CALLBACKS,
   TradingPlatformRegistry,
   resolveChannelBroker,
@@ -12,7 +15,17 @@ import { getApprovedPremiumPrice } from "../../data/createPriceCataloguePorts";
 import { describeX402PaymentPath } from "../../services/x402PaymentPath";
 import { ETradeBrowserService } from "../../services/browserAgent";
 import { ETradeService } from "../../services/etrade";
-import { resolveValidatedExecutionAccountContext, type ExecutionAccountContext } from "../../services/accountBindings";
+import { maskAccountId } from "../../config/accountBindings";
+import { resolveCopilotTradingSelection } from "../copilotTradingMode";
+import {
+  listAccountBindings,
+  listBrokerAccountsForMode,
+  migrateTenantAccountBinding,
+  resolveUserAccountBinding,
+  resolveValidatedExecutionAccountContext,
+  validateAndUpsertAccountBinding,
+  type ExecutionAccountContext,
+} from "../../services/accountBindings";
 import { ACCOUNT_SCOPED_SCHEDULE_CALLBACKS } from "../orchestrator/scheduleCallbacks";
 import { createComparisonRunner } from "../../services/comparisonNlqRunner";
 import { getPlatformCapabilitiesDeskSummary } from "../../services/platformKnowledge";
@@ -1126,6 +1139,23 @@ function executeNLQQueryCore(
         executedAt,
       };
     }
+
+    if (action === "binding_show" || action === "binding_list" || action === "binding_switch") {
+      // Issue #5101 (F4 of #5094): binding intents need the broker
+      // enumeration and SessionStore writes, both async — the sync
+      // executor cannot serve them (#923 pattern). Use the async NLQ
+      // executor (executeNLQQueryAsync).
+      return {
+        plan,
+        domain: "trading",
+        targetTable: "account_bindings",
+        count: 0,
+        status: "error",
+        summary: "Account binding: this action requires the asynchronous NLQ executor (executeNLQQueryAsync).",
+        rows: [],
+        executedAt,
+      };
+    }
   }
 
   // Handle Market Data Research & Quoting Domain (Yahoo Finance & Alpaca)
@@ -1687,6 +1717,283 @@ async function executeSchedulingAction(
 
 /** Issue #257: the original asynchronous executor (renamed); the exported
  *  executeNLQQueryAsync below wraps it with the mas_events audit write. */
+/**
+ * Issue #5101 (F4 of #5094): the async-core handler for the binding
+ * intents. All three read the broker's enumerated accounts server-side
+ * and return MASKED ids only — a full account id never appears in an
+ * NLQ result. `binding_switch` binds the chat (copilot) scope: by label
+ * through `resolveAccountByLabel`, or — with no label — through the F1
+ * migration rule (exactly one candidate for the broker/mode/type, else
+ * ask, never guess).
+ */
+async function executeNlqBindingAction(input: {
+  orm: DatabaseORM;
+  sessionId: string;
+  plan: NLQPlan;
+  env?: Env;
+  login: string;
+  deps?: NLQExecutionDeps;
+  executedAt: string;
+  action: "binding_show" | "binding_list" | "binding_switch";
+}): Promise<NLQQueryResult> {
+  const { plan, login, executedAt, action } = input;
+  const data = plan.tradingData ?? {};
+  const broker = typeof data.broker === "string" ? data.broker.trim().toLowerCase() : undefined;
+  const mode = data.mode;
+  const accountType = typeof data.accountType === "string" ? data.accountType.trim().toLowerCase() : undefined;
+  const accountName = typeof data.accountName === "string" ? data.accountName.trim() : undefined;
+  const env = input.env ?? ({} as Env);
+  const errorResult = (summary: string): NLQQueryResult => ({
+    plan,
+    domain: "trading",
+    targetTable: "account_bindings",
+    count: 0,
+    status: "error",
+    summary,
+    rows: [],
+    executedAt,
+  });
+  // The migration refusal quotes full candidate ids — scrub them masked.
+  const scrubIds = (message: string, ids: readonly string[]): string => {
+    let out = message;
+    for (const id of ids) {
+      if (id && id.length >= 4) out = out.split(id).join(maskAccountId(id));
+    }
+    return out;
+  };
+  const describeMasked = (b: {
+    broker: string;
+    mode: string;
+    accountType: string;
+    maskedAccountId: string;
+    accountName?: string;
+  }): string =>
+    `${b.broker} ${b.mode} ${b.accountType} — ${b.accountName ? `${b.accountName} ` : ""}(${b.maskedAccountId})`;
+  const enumerator = input.deps?.accountEnumerator
+    ? { enumerate: input.deps.accountEnumerator }
+    : undefined;
+
+  if (action === "binding_show") {
+    let showBroker = broker;
+    let showMode = mode;
+    if (!showBroker || !showMode) {
+      // "Which account am I using" names neither: resolve the chat's own
+      // broker/mode selection, exactly as a copilot turn does (F3 seam).
+      const selection = await resolveCopilotTradingSelection({ env });
+      if (!selection.resolved) {
+        return errorResult(
+          "Account binding: I could not read your broker selection — say which broker and mode, e.g. 'which account is bound for Alpaca paper'.",
+        );
+      }
+      showBroker = showBroker ?? selection.selection.brokerId;
+      showMode = showMode ?? selection.selection.mode;
+    }
+    if (!showBroker || !showMode) {
+      return errorResult(
+        "Account binding: I could not read your broker selection — say which broker and mode, e.g. 'which account is bound for Alpaca paper'.",
+      );
+    }
+    const res = await resolveUserAccountBinding(env, login, {
+      broker: showBroker,
+      mode: showMode,
+      accountType: accountType ?? "stock",
+      scope: "copilot",
+    });
+    if (!res.found || !res.binding) {
+      return {
+        plan,
+        domain: "trading",
+        targetTable: "account_bindings",
+        count: 0,
+        status: "info",
+        summary: `No account bound for ${showBroker} ${showMode} ${accountType ?? "stock"} (chat scope). Ask to switch to an account to bind one.`,
+        rows: [],
+        executedAt,
+      };
+    }
+    const masked = maskAccountBinding(res.binding);
+    return {
+      plan,
+      domain: "trading",
+      targetTable: "account_bindings",
+      count: 1,
+      status: "matches_found",
+      summary: `Bound account for chat: ${describeMasked(masked)}.`,
+      // Rows carry the masked id only — never an `accountId` field, so a
+      // reader cannot mistake it for a full id.
+      rows: [
+        {
+          broker: masked.broker,
+          mode: masked.mode,
+          accountType: masked.accountType,
+          scope: masked.scope,
+          maskedAccountId: masked.maskedAccountId,
+          ...(masked.accountName ? { accountName: masked.accountName } : {}),
+          resolvedFromScope: res.resolvedFromScope,
+        },
+      ],
+      executedAt,
+    };
+  }
+
+  if (action === "binding_list") {
+    if (broker) {
+      const listMode = mode ?? "paper";
+      const enumRes = await listBrokerAccountsForMode(env, login, broker, listMode, input.orm, enumerator);
+      if (!enumRes.ok) return errorResult(`Account list: ${enumRes.error}`);
+      const rows = enumRes.accounts.map((a) => {
+        const masked = maskBrokerAccount(a);
+        return {
+          broker,
+          mode: listMode,
+          maskedAccountId: masked.maskedAccountId,
+          accountName:
+            masked.accountName ?? (masked as { accountDesc?: string }).accountDesc,
+          accountType: masked.accountType,
+          accountStatus:
+            (masked as { accountStatus?: string }).accountStatus ??
+            (masked as { status?: string }).status,
+        };
+      });
+      return {
+        plan,
+        domain: "trading",
+        targetTable: "broker_accounts",
+        count: rows.length,
+        status: rows.length > 0 ? "matches_found" : "no_matches",
+        summary:
+          rows.length > 0
+            ? `${broker} ${listMode} accounts (${rows.length}): ${rows
+                .map((r) => `${r.accountName ?? "account"} (${r.maskedAccountId})`)
+                .join(", ")}.`
+            : `No accounts found for ${broker} ${listMode}.`,
+        rows,
+        executedAt,
+      };
+    }
+    const all = await listAccountBindings(env, login);
+    // Rows carry the masked id only — never an `accountId` field, so a
+    // reader cannot mistake it for a full id.
+    const rows = all.map((b) => {
+      const masked = maskAccountBinding(b);
+      return {
+        broker: masked.broker,
+        mode: masked.mode,
+        accountType: masked.accountType,
+        scope: masked.scope,
+        maskedAccountId: masked.maskedAccountId,
+        ...(masked.accountName ? { accountName: masked.accountName } : {}),
+      };
+    });
+    return {
+      plan,
+      domain: "trading",
+      targetTable: "account_bindings",
+      count: rows.length,
+      status: rows.length > 0 ? "matches_found" : "no_matches",
+      summary:
+        rows.length > 0
+          ? `Your bound accounts (${rows.length}): ${rows.map((b) => describeMasked(b)).join("; ")}.`
+          : "No accounts bound yet. Ask to switch to an account to bind one.",
+      rows,
+      executedAt,
+    };
+  }
+
+  // binding_switch — the chat (copilot) scope is the surface being switched.
+  const scope = "copilot" as const;
+  if (!broker) {
+    return errorResult(
+      "Account switch: say which broker to switch to, e.g. 'switch to my Alpaca paper account'.",
+    );
+  }
+  const switchMode = mode ?? "paper";
+  const enumRes = await listBrokerAccountsForMode(env, login, broker, switchMode, input.orm, enumerator);
+  if (!enumRes.ok) return errorResult(`Account switch: ${enumRes.error}`);
+  if (accountName) {
+    const labelRes = resolveAccountByLabel({ accountName, availableAccounts: enumRes.accounts });
+    if (!labelRes.ok) {
+      return {
+        ...errorResult(labelRes.error),
+        ...(labelRes.candidateNames
+          ? { rows: labelRes.candidateNames.map((name) => ({ accountName: name })) }
+          : {}),
+      };
+    }
+    const resolvedName =
+      labelRes.account.accountName?.trim() ||
+      (labelRes.account as { accountDesc?: string }).accountDesc?.trim();
+    const upsertRes = await validateAndUpsertAccountBinding(env, login, {
+      broker,
+      mode: switchMode,
+      accountType: accountType ?? "stock",
+      scope,
+      accountId: labelRes.account.accountId,
+      accountName: resolvedName,
+      availableAccounts: enumRes.accounts,
+    });
+    if (!upsertRes.ok) return errorResult(`Account switch: ${upsertRes.error}`);
+    const masked = maskAccountBinding(upsertRes.binding);
+    return {
+      plan,
+      domain: "trading",
+      targetTable: "account_bindings",
+      count: 1,
+      status: "matches_found",
+      summary: `Switched the chat binding to ${describeMasked(masked)}.`,
+      rows: [
+        {
+          broker: masked.broker,
+          mode: masked.mode,
+          accountType: masked.accountType,
+          scope: masked.scope,
+          maskedAccountId: masked.maskedAccountId,
+          ...(masked.accountName ? { accountName: masked.accountName } : {}),
+        },
+      ],
+      executedAt,
+    };
+  }
+  // No label: the F1 migration rule — exactly one candidate switches,
+  // several ask, never guess.
+  const migRes = await migrateTenantAccountBinding(env, login, {
+    broker,
+    mode: switchMode,
+    targetAccountType: accountType,
+    scope,
+    availableAccounts: enumRes.accounts,
+  });
+  if (!migRes.ok) {
+    const candidateIds = migRes.candidateAccountIds ?? [];
+    return {
+      ...errorResult(scrubIds(migRes.error, candidateIds)),
+      ...(candidateIds.length > 0
+        ? { rows: candidateIds.map((id) => ({ maskedAccountId: maskAccountId(id) })) }
+        : {}),
+    };
+  }
+  const masked = maskAccountBinding(migRes.binding);
+  return {
+    plan,
+    domain: "trading",
+    targetTable: "account_bindings",
+    count: 1,
+    status: "matches_found",
+    summary: `Switched the chat binding to ${describeMasked(masked)}.`,
+    rows: [
+      {
+        broker: masked.broker,
+        mode: masked.mode,
+        accountType: masked.accountType,
+        scope: masked.scope,
+        maskedAccountId: masked.maskedAccountId,
+        ...(masked.accountName ? { accountName: masked.accountName } : {}),
+      },
+    ],
+    executedAt,
+  };
+}
+
 async function executeNLQQueryAsyncCore(
   orm: DatabaseORM,
   sessionId: string,
@@ -1732,6 +2039,21 @@ async function executeNLQQueryAsyncCore(
         rows: caps.workflows as any,
         executedAt,
       };
+    }
+
+    // Issue #5101 (F4 of #5094): chat-side binding intents — show the
+    // bound account, list accounts, or switch the chat (copilot) binding.
+    if (action === "binding_show" || action === "binding_list" || action === "binding_switch") {
+      return executeNlqBindingAction({
+        orm,
+        sessionId,
+        plan,
+        env,
+        login,
+        deps,
+        executedAt,
+        action,
+      });
     }
 
     if (action === "screen") {

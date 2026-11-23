@@ -379,6 +379,66 @@ export function ToolResultView({
     );
   }
 
+  // 3b. Account Binding Tool Card (#5101, F4 of #5094)
+  // Renders only the masked id / account name / code / error the tool
+  // returns — a full account id never reaches this card (the server
+  // masks every binding result before it leaves). Sits before the
+  // payment branch, whose `data?.action` match would otherwise claim
+  // every binding result (binding results carry `action: "set"` etc.).
+  if (normalizedType.includes("broker_account_binding")) {
+    const binding = data?.binding ?? null;
+    const bindings = Array.isArray(data?.bindings) ? data.bindings : null;
+    const maskedId = binding?.maskedAccountId ?? binding?.accountId ?? data?.maskedAccountId ?? null;
+    const isFailure = data?.ok === false;
+    const isUnboundGet = data?.action === "get" && data?.found === false;
+    const title =
+      data?.action === "set"
+        ? "Account Binding Switched"
+        : data?.action === "clear"
+          ? "Account Binding Cleared"
+          : data?.action === "list"
+            ? "Account Bindings"
+            : "Account Binding";
+    return (
+      <Card padding="none" className="tool-card binding-card">
+        <div className="tool-card-header" onClick={() => setOpen(!open)}>
+          <span className="tool-icon">🔗</span>
+          <div className="tool-summary">
+            <strong>{title}:</strong>{" "}
+            {isFailure ? (
+              <span>{data?.error || data?.code || "Binding action failed."}</span>
+            ) : bindings ? (
+              <span>
+                {bindings.length} binding{bindings.length === 1 ? "" : "s"}
+                {bindings.length > 0
+                  ? ` — ${bindings.map((b: any) => `${b.accountName ? `${b.accountName} ` : ""}(${b.maskedAccountId ?? b.accountId ?? "?"})`).join(", ")}`
+                  : ""}
+              </span>
+            ) : binding ? (
+              <span>
+                {binding.broker} {binding.mode} {binding.accountType}
+                {binding.accountName ? ` — ${binding.accountName}` : ""} ({maskedId})
+              </span>
+            ) : isUnboundGet ? (
+              <span>No account bound.</span>
+            ) : (
+              <span>{data?.action === "clear" ? (data?.removed ? "Binding removed." : "Nothing to remove.") : "Done."}</span>
+            )}
+          </div>
+          <Badge size="xs" uppercase tone={isFailure ? "danger" : isUnboundGet ? "info" : "success"}>
+            {isFailure ? "Failed" : isUnboundGet ? "Unbound" : "Bound"}
+          </Badge>
+          <span className="toggle-arrow">{open ? "▲" : "▼"}</span>
+        </div>
+        {open && (
+          <div className="tool-card-body">
+            <pre>{JSON.stringify(data, null, 2)}</pre>
+          </div>
+        )}
+      </Card>
+    );
+  }
+
   // 4. Payment Draft Tool
   if (normalizedType.includes("payment") || data?.status === "awaiting_confirmation" || data?.action) {
     const amount = data?.amount || data?.input?.amount;

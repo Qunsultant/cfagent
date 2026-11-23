@@ -89,9 +89,20 @@ export const nlqPlanSchema = z.object({
           "watchlist_save",
           "watchlist_list",
           "watchlist_details",
+          // Issue #5101 (F4 of #5094): chat-side binding intents.
+          "binding_show",
+          "binding_list",
+          "binding_switch",
         ])
         .optional(),
       symbol: z.string().optional(),
+      // Issue #5101: binding slots — broker, mode, asset class, and the
+      // human account label a switch names. Never a full account id:
+      // the executor resolves the label server-side.
+      broker: z.string().optional(),
+      mode: z.enum(["paper", "live"]).optional(),
+      accountType: z.string().optional(),
+      accountName: z.string().optional(),
       orderAction: z.enum(["BUY", "SELL", "BUY_TO_COVER", "SELL_SHORT"]).optional(),
       quantity: z.number().optional(),
       orderType: z.enum(["MARKET", "LIMIT", "STOP", "STOP_LIMIT"]).optional(),

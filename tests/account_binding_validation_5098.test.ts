@@ -23,6 +23,7 @@ import {
 } from "../src/services/accountBindings";
 import { handleAccountBindingRoutes } from "../src/agents/routes/accountBindings";
 import { BrokerAccountBindingCommand } from "../src/mcps/openaimp/accountBindingCommands";
+import { maskAccountId } from "../src/config/accountBindings";
 import type { Env } from "../src/types";
 
 function makeMemoryDoNamespace() {
@@ -477,7 +478,10 @@ describe("Issue #5098 (Slice F1 of #5094) — Tuple model, persistence & validat
       { env, sessionId: "trader-mcp" },
     ) as { ok: boolean; tuple: AccountBindingTuple };
     expect(valRes.ok).toBe(true);
-    expect(valRes.tuple.accountId).toBe("ALP-LIVE-001");
+    // Issue #5101 (F4 of #5094): the MCP tool masks every id it
+    // returns — the tuple carries the masked id, never the full id.
+    expect(valRes.tuple.accountId).toBe(maskAccountId("ALP-LIVE-001"));
+    expect(JSON.stringify(valRes)).not.toContain("ALP-LIVE-001");
 
     // Migrate unambiguous
     const migRes = await cmd.execute(
@@ -493,6 +497,8 @@ describe("Issue #5098 (Slice F1 of #5094) — Tuple model, persistence & validat
     ) as { ok: boolean; migrated: boolean; tuple: AccountBindingTuple };
     expect(migRes.ok).toBe(true);
     expect(migRes.migrated).toBe(true);
-    expect(migRes.tuple.accountId).toBe("SOLO-1");
+    // Issue #5101 (F4 of #5094): the MCP tool masks every id it returns.
+    expect(migRes.tuple.accountId).toBe(maskAccountId("SOLO-1"));
+    expect(JSON.stringify(migRes)).not.toContain("SOLO-1");
   });
 });

@@ -40,6 +40,8 @@ import {
 } from "../components/ui";
 import { CardHeader } from "../components/ui";
 import { createClientLogger } from "../clientLogger";
+import { fetchAccountBindings } from "../accountBindingStore";
+import { messageHasBindingSwitch } from "./bindingBridge";
 
 const log = createClientLogger("client/AgentChatTabContent");
 
@@ -220,6 +222,23 @@ export function AgentChatTabContentInner({
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView?.({ behavior: "smooth" });
   }, [messages, status]);
+
+  // Issue #5101 (F4 of #5094): a chat switch through the
+  // `broker_account_binding` tool re-binds the server binding — reload
+  // the F2 client store from the server so every surface shows the new
+  // binding. The tool result is masked, so the reload (not the result)
+  // is the authority; each message id reloads at most once.
+  const seenBindingToolMessagesRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    for (const msg of messages ?? []) {
+      if (!msg || typeof msg !== "object") continue;
+      const msgId = String((msg as any).id ?? "");
+      if (!msgId || seenBindingToolMessagesRef.current.has(msgId)) continue;
+      if (!messageHasBindingSwitch(msg)) continue;
+      seenBindingToolMessagesRef.current.add(msgId);
+      void fetchAccountBindings(true);
+    }
+  }, [messages]);
 
   const isBusy = status === "streaming" || status === "submitted";
 

@@ -1,0 +1,3 @@
+### Added
+
+- **Chat can inspect, list, and switch the bound account (#5101, F4 of #5094):** the `broker_account_binding` tool now returns masked ids only, validates every `set` against the broker's server-enumerated accounts (fail closed when the enumeration is unavailable), and switches by account label without the model ever holding a full id; the copilot prompt names the bound account (masked) and steers at the tool; NLQ answers "which account am I using" / "list my accounts" / "switch to …" through new `binding_show` / `binding_list` / `binding_switch` intents; a chat switch reloads the binding store on every surface. A broker without an account list refuses by name; an ambiguous label asks instead of guessing. #cpo-dhmp
