@@ -99,12 +99,12 @@ describe("ResearchTaskLedger lifecycle", () => {
     l.start(task.id);
     l.heartbeat(task.id);
     const done = l.complete(task.id, {
-      path: "fallback",
+      path: "agent",
       reportRunId: "run-1",
       evaluation: GOOD_EVAL,
     });
     expect(done.status).toBe("completed");
-    expect(done.path).toBe("fallback");
+    expect(done.path).toBe("agent");
     expect(done.reportRunId).toBe("run-1");
     expect(done.evaluation?.verdict).toBe("pass");
     expect(done.history.map((h) => h.status)).toEqual([
@@ -148,7 +148,7 @@ describe("evaluateResearchOutcome (deterministic, not model-graded)", () => {
     expect(GOOD_EVAL.checks.every((c) => c.ok)).toBe(true);
   });
 
-  it("fails a stale runId (the fallback-masking case from #543)", () => {
+  it("fails a stale runId (the stale-report case from #543)", () => {
     const ev = evaluateResearchOutcome(
       {
         reportRunId: "run-0",
@@ -231,7 +231,10 @@ describe("slice wiring (source evidence)", () => {
     expect(failAt).toBeGreaterThan(dispatchAt);
     // The evaluation fed to completion is the deterministic one.
     expect(section).toContain("evaluateResearchOutcome");
-    expect(section).toContain('executionPath = "fallback"');
+    // The execution path is the agent dispatch only (#6250 removed
+    // the direct-pipeline fallback, so "fallback" can never be recorded).
+    expect(section).toContain('executionPath: ResearchExecutionPath = "agent"');
+    expect(section).not.toContain('= "fallback"');
   });
 });
 
@@ -321,7 +324,7 @@ describe("stale detection and sweep (#615, R4)", () => {
     advance(31 * MIN);
     const freshId = runningTask(l, "k-new");
     const doneId = runningTask(l, "k-fin");
-    l.complete(doneId, { path: "fallback", reportRunId: "run-9", evaluation: GOOD_EVAL });
+    l.complete(doneId, { path: "agent", reportRunId: "run-9", evaluation: GOOD_EVAL });
     const swept = l.sweepStale(30 * MIN);
     expect(swept.map((t) => t.id)).toEqual([staleId]);
     expect(l.get(freshId)?.status).toBe("running");

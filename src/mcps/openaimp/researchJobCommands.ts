@@ -24,7 +24,7 @@ import {
   createDefaultResearchStepDeps,
   registerResearchSteps,
 } from "../../services/researchPipelineJobs";
-import { JobPipelineControl } from "../../services/jobPipelineEngine";
+import { createJobPipelineControl } from "../../services/jobPipelineControlFactory";
 import { createBuiltinStepRegistry } from "../../services/jobPipelineSteps";
 import { codedMessage } from "../../outcomes/outcomeAspects";
 import type { SqlStorage } from "../../orm";
@@ -201,7 +201,9 @@ export class DefinePipelineChainCommand implements IMcpToolCommand<DefinePipelin
       : input.jobId;
     const engineJobId = researchEngineJobId(runId);
 
-    const control = new JobPipelineControl({
+    // Issue #6250 — the MCP research dispatch builds through the ONE
+    // factory, with the caller's env: the run emits `job.run.settled`.
+    const control = createJobPipelineControl({
       stores,
       runRecorder,
       publisher: null,
@@ -213,7 +215,7 @@ export class DefinePipelineChainCommand implements IMcpToolCommand<DefinePipelin
       // Issue #4782 S3 — the retry policy resolves from the
       // caller's env (platform default), as the adapters above do.
       ...(envRecord ? { env: envRecord } : {}),
-    });
+    }, { ...(envRecord ? { env: envRecord } : {}) });
 
     const definition = await control.defineJob({
       jobId: engineJobId,

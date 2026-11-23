@@ -83,27 +83,7 @@ import {
   type JobScheduleHost,
   type JobStatusView,
 } from "../services/jobPipelineEngine";
-// Issue #5081 (S1, observability program #5080): the OTel J1–J7
-// observers — the run-settled observer and the stage-step
-// journal, chained with this host's existing observers. The
-// OTel logging stack is built once per control (the control is
-// cached on ctx), gated by the per-domain j1j7 switch.
-import { createOtelJobPipelineLogger, createOtelLogging } from "../observability/otelProvider";
-import {
-  chainRunSettledObservers,
-  createOtelJobPipelineRunSettledObserver,
-  createOtelJobStepJournal,
-} from "../observability/otelJobPipeline";
-import { createOtelMetrics } from "../observability/otelMetricsProvider";
-import {
-  createOtelJobPipelineMetricsRunSettledObserver,
-  createOtelJobPipelineMetricsStepJournal,
-} from "../observability/otelJobPipelineMetrics";
-import { createOtelTracing } from "../observability/otelTracesProvider";
-import {
-  createOtelJobPipelineTracesRunSettledObserver,
-  createOtelJobPipelineTracesStepJournal,
-} from "../observability/otelJobPipelineTraces";
+import { createJobPipelineControl } from "../services/jobPipelineControlFactory";
 import { buildFeedJobRegistry, buildFeedStatus } from "../services/feedJobs";
 import { resolveFeedJobTimeouts } from "../services/feedJobTimeouts";
 import { resolveStageTimeoutMs } from "../services/stageTimeouts";
@@ -546,69 +526,18 @@ export function createScheduledAgentPipelineControl(
   // steps run through them, and the screener steps bind their
   // quote/history deps over the same #3941 provider construction.
   const feedDeps = feedStepDepsForScheduledAgent(ctx, userLogin);
-  // Issue #5081 (S1): the OTel J1–J7 logging stack for this
-  // host's control plane. The OTel run-settled observer is
-  // CHAINED after the feed-run observer (the feed observer is
-  // kept, never replaced); the OTel stage-step journal wraps
-  // the identity journal (no journal was set here before).
-  // Both observers check the per-domain j1j7 switch first and
-  // no-op when it is OFF, so the OTel wiring costs nothing
-  // when the domain is off. The workflow / options / in-memory
-  // hosts are not yet wired — same helper, later slice.
-  const otel = createOtelLogging(ctx.env);
-  const otelLogger = createOtelJobPipelineLogger(ctx.env, otel);
-  const otelObserverDeps = {
-    logger: otelLogger,
-    isEnabled: () => otel.isDomainEnabled("j1j7"),
-    flush: () => otel.flush(),
-  };
-  // Issue #5082 (S2): the OTel J1–J7 metrics stack for this
-  // host's control plane, built once per control alongside the
-  // logging stack. The metrics run-settled observer is CHAINED
-  // after the logging observer (the logging observer is kept,
-  // never replaced); the metrics stage-step journal WRAPS the
-  // logging journal (metrics → logging → identity → step).
-  // Both metrics observers check the per-domain j1j7 switch
-  // first and no-op when it is OFF. The logging path is
-  // untouched by this wiring.
-  const otelMetrics = createOtelMetrics(ctx.env);
-  const otelMetricsObserverDeps = {
-    recorder: otelMetrics.recorder,
-    isEnabled: () => otelMetrics.isDomainEnabled("j1j7"),
-    flush: () => otelMetrics.flush(),
-  };
-  // Issue #2808 (S3): the OTel J1–J7 tracing stack for this
-  // host's control plane, built once per control alongside the
-  // logging and metrics stacks. The traces run-settled observer
-  // is CHAINED after the metrics observer (the metrics observer
-  // is kept, never replaced); the traces stage-step journal
-  // WRAPS the metrics journal (traces → metrics → logging →
-  // identity → step). Both traces observers check the
-  // per-domain j1j7 switch first and no-op when it is OFF. The
-  // logging and metrics paths are untouched by this wiring.
-  const otelTraces = createOtelTracing(ctx.env);
-  const otelTracesObserverDeps = {
-    tracer: otelTraces.tracer,
-    isEnabled: () => otelTraces.isDomainEnabled("j1j7"),
-    flush: () => otelTraces.flush(),
-  };
-  return new JobPipelineControl({
+  // Issue #6250 — the OTel J1–J7 logging + metrics + traces stacks
+  // are wired by the ONE factory (src/services/jobPipelineControlFactory),
+  // not inline here: the feed-run observer stays as the deps'
+  // runSettledObserver and the factory chains the OTel observer after
+  // it; the journal the factory builds wraps the identity journal
+  // (no journal was set here before). Both observers check the
+  // per-domain j1j7 switch first and no-op when it is OFF.
+  return createJobPipelineControl({
     stores,
-    runRecorder: jobRunRecorderFromStore(new SqlJobRunRecordStore(sql)),
-    runSettledObserver: chainRunSettledObservers(
-      feedRunSettledObserverFor(ctx),
-      createOtelJobPipelineRunSettledObserver(otelObserverDeps),
-      createOtelJobPipelineMetricsRunSettledObserver(otelMetricsObserverDeps),
-      createOtelJobPipelineTracesRunSettledObserver(otelTracesObserverDeps),
-    ),
-    journal: createOtelJobPipelineTracesStepJournal({
-      ...otelTracesObserverDeps,
-      inner: createOtelJobPipelineMetricsStepJournal({
-        ...otelMetricsObserverDeps,
-        inner: createOtelJobStepJournal(otelObserverDeps),
-      }),
-    }),
-    publisher: messaging.ports?.publisher ?? null,
+      runRecorder: jobRunRecorderFromStore(new SqlJobRunRecordStore(sql)),
+      runSettledObserver: feedRunSettledObserverFor(ctx),
+      publisher: messaging.ports?.publisher ?? null,
     // Issue #6028 — the stage-level terminal rows land in this host's
     // own DO SQLite (the same store the stage-event consumer writes).
     stageEvents: createScheduledAgentStageEventStore(ctx),
@@ -655,7 +584,7 @@ export function createScheduledAgentPipelineControl(
     // the shared engine must never read a host-global map — a
     // per-job policy carrier is the follow-up's work (#4782 PR 2).
     env: envStrings(ctx.env),
-  });
+  }, { env: ctx.env });
 }
 
 /** Ensure the feed job definitions exist on this host's control plane. */
@@ -912,7 +841,11 @@ export async function startPipelineJobWorkflow(
   // Issue #5823: the feed deps are built once and shared, as in the
   // host control — the screener steps bind over the same provider.
   const mirrorFeedDeps = feedStepDepsForScheduledAgent(ctx);
-  const workflowControl = new JobPipelineControl({
+  // Issue #6250 — the mirror control is built by the ONE factory,
+  // so a mirrored definition's later dispatch emits job.run.settled
+  // exactly like the host control's (the steps never execute here,
+  // but the wiring must not depend on that).
+  const workflowControl = createJobPipelineControl({
     stores: d1Stores,
     // The D1 run-record adapter is async; wrap it in the async
     // recorder seam directly (the workflow adapter's own shape).
@@ -948,7 +881,7 @@ export async function startPipelineJobWorkflow(
     // Issue #4782 S3 — as the host control above: env only, no
     // host-global settings map (see the note there).
     env: envStrings(ctx.env),
-  });
+  }, { env: ctx.env });
   const existing = await d1Stores.definitions.getDefinition(jobId);
   if (
     !existing ||

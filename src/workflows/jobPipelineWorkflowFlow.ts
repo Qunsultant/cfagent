@@ -19,10 +19,10 @@
  * at run start, on every surface).
  */
 import {
-  JobPipelineControl,
   type JobPipelineDeps,
   type JobRunOutcome,
 } from "../services/jobPipelineEngine";
+import { createJobPipelineControl } from "../services/jobPipelineControlFactory";
 import { JobPipelineError } from "../services/jobPipelineConfig";
 import type { JobRunTrigger } from "../data/jobRunRecordPorts";
 import { normalizeJobRunTrigger } from "../data/jobRunRecordPorts";
@@ -67,12 +67,17 @@ export async function runJobPipelineWorkflowFlow(
       "Job pipeline workflow payload requires a non-empty jobId (claim-check: ids only).",
     );
   }
-  const control = new JobPipelineControl({
+  // Issue #6250 — the workflow flow builds through the ONE factory,
+  // with the deps' env: the workflow step journal stays as the
+  // journal and the factory threads it as the inner journal, so a
+  // workflow-dispatched run emits `job.run.settled` and its steps
+  // stay replay-safe through step.do.
+  const control = createJobPipelineControl({
     ...deps,
     journal: {
       do: async <T>(name: string, fn: () => Promise<T>): Promise<T> => step.do(name, fn),
     },
-  });
+  }, { ...(deps.env ? { env: deps.env } : {}) });
   const workflowInstanceId = opts?.workflowInstanceId;
   let dispatch;
   try {

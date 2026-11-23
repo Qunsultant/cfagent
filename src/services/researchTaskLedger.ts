@@ -30,7 +30,16 @@ export type ResearchTaskStatus =
   | "escalated"
   | "cancelled";
 
-export type ResearchExecutionPath = "agent" | "fallback";
+/**
+ * Issue #6250 — the agent dispatch is the ONLY execution path.
+ * The direct-pipeline "fallback" is removed from
+ * runResearchAndPublish (OODA runs on j-stack and nowhere else),
+ * so the type can never record a fallback run again. The
+ * direct-rollback emergency flag in dispatchResearchEngineRun is a
+ * different mechanism (an explicit, default-off incident rollback,
+ * not a silent second path) and does not ride this type.
+ */
+export type ResearchExecutionPath = "agent";
 
 export interface ResearchTaskTransition {
   status: ResearchTaskStatus;

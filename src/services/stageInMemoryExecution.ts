@@ -7,7 +7,7 @@ import {
   EPHEMERAL_GUARANTEE_CONTRACT,
   type JobExecutionMode,
 } from "../data/jobPipelinePorts";
-import { JobPipelineControl } from "./jobPipelineEngine";
+import { createJobPipelineControl } from "./jobPipelineControlFactory";
 import { buildEphemeralGuaranteeNotice } from "./jobPipelineConfig";
 import type { JobStepRegistry } from "./jobPipelineSteps";
 
@@ -48,7 +48,10 @@ export async function runStageInMemory(
     durability: "in-memory",
   };
   const notice = buildEphemeralGuaranteeNotice(input.stageId, mode)!;
-  const control = new JobPipelineControl({
+  // Issue #6250 — the in-memory stage run builds through the ONE
+  // factory too (no env in scope and no durable sink: a bare control,
+  // exactly as before — the explicit opt-in ephemeral execution).
+  const control = createJobPipelineControl({
     stores,
     runRecorder: {
       recordRun: async () => {},

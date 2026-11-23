@@ -58,6 +58,7 @@ import {
   JobPipelineControl,
   jobRunRecorderFromStore,
 } from "../services/jobPipelineEngine";
+import { createJobPipelineControl } from "../services/jobPipelineControlFactory";
 import { createBuiltinStepRegistry } from "../services/jobPipelineSteps";
 import type { JobStepContext } from "../services/jobPipelineSteps";
 import { FEED_PULL_STEP } from "../services/feedPipelineJobs";
@@ -155,7 +156,10 @@ export class InMemoryWorkflowAdapter implements WorkflowPort {
     const ports: MessagingPorts = { producer: messaging, consumer: messaging, publisher: messaging, subscriber: messaging };
     const registry = createBuiltinStepRegistry();
     this.registerCannedSteps(registry);
-    this.control = new JobPipelineControl({
+    // Issue #6250 — the in-memory adapter builds through the ONE
+    // factory too (test-only adapter, no env in scope: a bare
+    // control, exactly as before).
+    this.control = createJobPipelineControl({
       stores: this.stores,
       runRecorder: jobRunRecorderFromStore(runStore),
       publisher: ports.publisher,

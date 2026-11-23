@@ -60,10 +60,10 @@ import { SqlJobRunRecordStore } from "../data/doSqliteJobRunRecordAdapter";
 import { InMemoryJobRunRecordStore } from "../data/inMemoryJobRunRecordAdapter";
 import type { OtelJobPipelineObservers } from "../observability/otelJobPipelineObservers";
 import {
-  JobPipelineControl,
   jobRunRecorderFromStore,
   type JobRunRecorder,
 } from "../services/jobPipelineEngine";
+import { createJobPipelineControl } from "../services/jobPipelineControlFactory";
 import { newRunId, shardScanRunId } from "../services/executionTreeIds";
 import {
   createBuiltinStepRegistry,
@@ -1046,19 +1046,17 @@ async function dispatchScreenViaEngine(
     ...(deps.stageStorageScope ? { stageStorageScope: deps.stageStorageScope } : {}),
   };
   const registry = registerOptionsScreenStep(createBuiltinStepRegistry(), stepDeps);
-  const control = new JobPipelineControl({
+  // Issue #6250 — the dispatch builds through the ONE factory; the
+  // caller's `otel` set (the #6179 seam) rides the factory's `otel`
+  // option instead of the control's seams, so the wiring stays in
+  // one place. Absent `otel`, the control runs exactly as before.
+  const control = createJobPipelineControl({
     stores: engineStores.stores,
     runRecorder: engineStores.runRecorder,
     publisher: null,
     steps: registry,
     invocation: "sync",
-    // Issue #6179: the OTel observers ride the control's existing
-    // seams when the caller supplied them; absent, the control
-    // runs exactly as before (no settle event, no step journal).
-    ...(deps.otel
-      ? { runSettledObserver: deps.otel.runSettledObserver, journal: deps.otel.journal }
-      : {}),
-  });
+  }, { ...(deps.otel ? { otel: deps.otel } : {}) });
   // Issue #4066: the dispatch request rides the job definition's
   // rawConfig (persisted by defineJob) so a later per-stage control
   // action can rebuild this run's step ports from it.
@@ -1233,7 +1231,9 @@ export async function runComparisonViaEngine(
     execute,
     holder,
   });
-  const control = new JobPipelineControl({
+  // Issue #6250 — the comparison dispatch builds through the ONE
+  // factory too (no env in scope: a bare control, exactly as before).
+  const control = createJobPipelineControl({
     stores: engineStores.stores,
     runRecorder: engineStores.runRecorder,
     publisher: null,

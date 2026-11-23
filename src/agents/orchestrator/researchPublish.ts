@@ -299,10 +299,10 @@ export async function runResearchAndPublish(ctx: ResearchPublishContext,
     taskId = null;
   }
   // Issue #624: heartbeat the task while dispatch is in flight —
-  // both the agent-tool run and the fallback run below are awaited here,
-  // so one timer bounds the heartbeat gap for either path. Cleared
-  // in the finally on every exit; the ledger rejects heartbeats
-  // from terminal states, so a stray tick would be harmless anyway.
+  // the agent-tool run below is awaited here, so one timer bounds
+  // the heartbeat gap. Cleared in the finally on every exit; the
+  // ledger rejects heartbeats from terminal states, so a stray tick
+  // would be harmless anyway.
   let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
   if (taskId) {
     const id = taskId;
@@ -311,15 +311,17 @@ export async function runResearchAndPublish(ctx: ResearchPublishContext,
     }, ctx.RESEARCH_TASK_HEARTBEAT_MS);
   }
   try {
-    // Issue #1738: the primary dispatch is the SDK's runAgentTool
-    // on an Agents SDK actor — the "think" label died with the
-    // Think base class. The fallback (direct pipeline) is unchanged.
-    let executionPath: ResearchExecutionPath = "agent";
+    // Issue #1738: the dispatch is the SDK's runAgentTool on an
+    // Agents SDK actor — the "think" label died with the Think base
+    // class. Issue #6250: it is the ONLY dispatch path — the
+    // direct-pipeline fallback is removed, so OODA runs on j-stack
+    // and nowhere else.
+    const executionPath: ResearchExecutionPath = "agent";
     // Issue #1387: a THROWN agent dispatch (e.g. the sub-agent bootstrap
-    // error when the root namespace is missing) must degrade to the
-    // direct pipeline like a non-completed status — the #543 fallback
-    // below triggers on status, never on a throw, so without this the
-    // throw fails the whole run instead of degrading it.
+    // error when the root namespace is missing) converts to an
+    // error-status child — the #6250 incomplete guard below fails
+    // the run with a named error instead of degrading it to the
+    // direct pipeline, which no longer exists.
     let child: { status: string; error?: string };
     if (effectiveSelection?.feed) {
       // Issue #6063 — the feed stage already ran on J-stack; the direct
@@ -345,14 +347,15 @@ export async function runResearchAndPublish(ctx: ResearchPublishContext,
     }
     let report = await agent.getLatest();
     if (child.status !== "completed" || !report || report.runId === previousRunId || report.trigger !== trigger || report.userLogin !== login) {
-      // Keep scheduled discovery dependable if a provider cannot complete
-      // the agent-tool run. The same read-only deterministic pipeline remains
-      // the recovery path and persists through the same ResearchAgent.
-      // Issue #543: the fallback must not silently mask which execution
-      // path ran — emit a structured warning carrying the identifiers an
-      // operator needs to correlate the bypass in Workers Logs.
-      structuredLog.warn("researchPublish.research_agent_turn_bypassed", {
-        message: `[OrchestratorAgent] Agent research turn bypassed — falling back to direct pipeline: trigger=${trigger} userLogin=${login} childStatus=${child.status} childError=${child.error ?? "none"} previousRunId=${previousRunId ?? "none"} latestRunId=${report?.runId ?? "none"}`,
+      // Issue #6250 — no direct-pipeline fallback: the agent turn is
+      // the ONE dispatch path (OODA runs on j-stack and nowhere
+      // else). An incomplete turn fails the run with a named error
+      // instead of silently degrading to a non-engine execution.
+      // Issue #543: the failure must not silently mask which
+      // execution path ran — emit a structured warning carrying the
+      // identifiers an operator needs to correlate it in Workers Logs.
+      structuredLog.warn("researchPublish.research_agent_turn_incomplete", {
+        message: `[OrchestratorAgent] Agent research turn incomplete — failing the run with a named error (no direct-pipeline fallback): trigger=${trigger} userLogin=${login} childStatus=${child.status} childError=${child.error ?? "none"} previousRunId=${previousRunId ?? "none"} latestRunId=${report?.runId ?? "none"}`,
         trigger,
         userLogin: login,
         childStatus: child.status,
@@ -360,30 +363,17 @@ export async function runResearchAndPublish(ctx: ResearchPublishContext,
         previousRunId: previousRunId ?? "none",
         latestRunId: report?.runId ?? "none",
       });
-      const fallback = await agent.runResearch({
-        trigger,
-        userLogin: login,
-        ...(effectiveSelection?.runId ? { runId: effectiveSelection.runId } : {}),
-        ...(effectiveSelection?.brokerId ? { brokerId: effectiveSelection.brokerId as never } : {}),
-        ...(effectiveSelection?.mode ? { mode: effectiveSelection.mode } : {}),
-        ...(effectiveSelection?.feed ? { feed: effectiveSelection.feed } : {}),
-        ...(effectiveSelection?.enrich ? { enrich: effectiveSelection.enrich } : {}),
-      });
-      if (!fallback.success || !fallback.report) {
-        const failure = fallback.error || child.error || `Research agent finished with status ${child.status}.`;
-        // Issue #577: a total failure escalates the task for a human
-        // instead of vanishing into this error return.
-        if (taskId) {
-          try {
-            await agent.failResearchTask(taskId, failure, true);
-          } catch {
-            // Ledger is best-effort; the error return stands either way.
-          }
+      const failure = `research_agent_turn_incomplete: ${child.error ?? `Research agent finished with status ${child.status}.`}`;
+      // Issue #577: a total failure escalates the task for a human
+      // instead of vanishing into this error return.
+      if (taskId) {
+        try {
+          await agent.failResearchTask(taskId, failure, true);
+        } catch {
+          // Ledger is best-effort; the error return stands either way.
         }
-        return { success: false, error: failure, taskId };
       }
-      executionPath = "fallback";
-      report = fallback.report;
+      return { success: false, error: failure, taskId };
     }
     // Issue #2167: generate the full document set BEFORE the canonical write,
     // so the row carries the artifact keys. Issue #6066: this leg is the
