@@ -86,6 +86,7 @@ const BASELINE: Array<[string, string, number, Disposition]> = [
   ["src/security/platformContext.ts", "resolveRunBrokerContext", 1, "RESOLVER"],
   ["src/security/platformContext.ts", "resolveScreenProviderForRun", 1, "RESOLVER"],
   ["src/security/platformContext.ts", "resolveTenantBroker", 1, "RESOLVER"],
+  ["src/services/accountBindings.ts", "resolveTenantBroker", 1, "INTEGRATION"], // #6301: fire-time guard (DO alarm context — no session, no PDP permission) — migration to resolvePlatformContext belongs to #6151 slices 2–3.
   ["src/services/brokerOrderCancel.ts", "resolveTenantBroker", 4, "INTEGRATION"],
   ["src/services/brokerOrderPreview.ts", "resolveTenantBroker", 1, "INTEGRATION"],
   ["src/services/brokerOrderReplace.ts", "resolveTenantBroker", 1, "INTEGRATION"],
