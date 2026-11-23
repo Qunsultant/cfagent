@@ -518,6 +518,12 @@ export interface Env {
   // login path), and granting tenant-admin only — never
   // platform-admin. See src/security/iaaaBootstrap.ts.
   IAAA_BOOTSTRAP_ADMINS?: string;
+  // Issue #6236 — stale-identity cleanup mode: "execute" deletes
+  // provably-stale alias rows / reverse-index entries; anything
+  // else (including unset or invalid) fails closed to "dry-run"
+  // (inventory only, deletes nothing). See
+  // src/security/iaaaStaleCleanup.ts.
+  IAAA_STALE_CLEANUP_MODE?: string;
   // #1185 / #1066 — explicit service identity for unattended work
   // (worker scheduled()/queue() and session-less entry points).
   // Optional, owner-set, and NON-secret: a login id the owner authorizes

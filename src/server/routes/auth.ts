@@ -19,7 +19,7 @@ import { unauthorizedJson } from "./apiRefusals";
 import { createWiredAuditStore } from "../../security/iaaaAuditStore";
 import { createKvMembershipStore, listMembershipsFromEntries, grantMembership, readMembershipById } from "../../security/iaaaMembershipStore";
 import { createKvPermissionDenialStore } from "../../security/iaaaPermissionDenialStore";
-import { resolveIaaaTenant, isLegacyPdpGraceExpired, isPdpEnabled, shouldEnforcePdp } from "../../security/iaaaGithubEndToEnd";
+import { resolveIaaaTenant, isLegacyPdpGraceExpired, isPdpEnabled, shouldEnforcePdp, parseBootstrapListWithGenesis } from "../../security/iaaaGithubEndToEnd";
 import { evaluateRoutePep, PEP_GATE_INVENTORY } from "../../security/pepGateway";
 import { handleLogout, renderLoginPage } from "../../oauth";
 import { AUTH_OUTCOME_PARAM, parseAuthOutcome } from "../../security/authOutcome";
@@ -55,6 +55,14 @@ import { MANAGEABLE_DENIED_PERMISSIONS, canManagePermissionDenial } from "../../
 import { ALL_ROLES, canGrantRole, membershipStoreToAttributeProvider, PERMISSIONS, type AuthorizationScope, type Role } from "../../security/authorization";
 import { approveBootstrapProposal, bootstrapProposalAuditInput, confirmBootstrapApplied, createBootstrapProposal, createKvBootstrapProposalStore, currentBootstrapEntries, findBootstrapDivergence, parseStoredBootstrapProposal, rejectBootstrapProposal, BOOTSTRAP_PROPOSAL_KEY_PREFIX, type BootstrapProposal, type BootstrapProposalAuditAction } from "../../security/bootstrapProposals";
 import { parseBootstrapAdmins, resolveBootstrapEntries } from "../../security/iaaaBootstrap";
+import { lookupMigratedUserId } from "../../security/iaaaMigration";
+import {
+  resolveStaleCleanupMode,
+  runStaleIdentityCleanup,
+  STALE_CLEANUP_AUDIT_TYPE,
+  type StaleCleanupItem,
+  type StaleCleanupReport,
+} from "../../security/iaaaStaleCleanup";
 import { createWiredBindingStore } from "../../security/iaaaLogin";
 import { approveProposal, createKvPolicyProposalStore, createProposal, diffPolicySnapshots, parseStoredProposal, policyProposalAuditInput, previewDecisions, promoteProposal, rejectProposal, POLICY_PROPOSAL_ACTIVE_KEY, POLICY_PROPOSAL_KEY_PREFIX, type PolicyProposal, type PolicyProposalAuditAction } from "../../security/policyProposals";
 import { canRevokeRoleGrant, flattenRoleGrants, removeRoleBinding, toRoleGrantView, validateRoleGrantRequest } from "../../security/roleGrants";
@@ -992,6 +1000,10 @@ export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL,
       path === "/api/iaaa/bootstrap-proposals/approve" ||
       path === "/api/iaaa/bootstrap-proposals/reject" ||
       path === "/api/iaaa/bootstrap-proposals/confirm-applied" ||
+      // #6236 — stale-identity inventory + cleanup (platform-admin
+      // gate inside, same as the bootstrap routes above).
+      path === "/api/iaaa/stale-identities" ||
+      path === "/api/iaaa/stale-identities/cleanup" ||
       path === "/api/iaaa/memberships" ||
       path === "/api/iaaa/deactivate" ||
       path === "/api/iaaa/offboard" ||
@@ -2586,7 +2598,11 @@ export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL,
           path === "/api/iaaa/bootstrap-proposals/propose" ||
           path === "/api/iaaa/bootstrap-proposals/approve" ||
           path === "/api/iaaa/bootstrap-proposals/reject" ||
-          path === "/api/iaaa/bootstrap-proposals/confirm-applied"
+          path === "/api/iaaa/bootstrap-proposals/confirm-applied" ||
+          // #6236 — stale-identity inventory + cleanup share this
+          // block's platform-admin gate (403 before touching state).
+          path === "/api/iaaa/stale-identities" ||
+          path === "/api/iaaa/stale-identities/cleanup"
         ) {
           const bootStore = createKvBootstrapProposalStore(kv);
           const bootAudit = async (
@@ -2635,37 +2651,66 @@ export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL,
           // ids pass through; provider entries resolve through the
           // Slice 1 binding store; unresolvable entries resolve to
           // nobody and are reported, never invented).
+          //
+          // #6236 — entries are parsed with
+          // parseBootstrapListWithGenesis, the one parser that
+          // understands role prefixes. The old `platform:`-strip
+          // + parseBootstrapAdmins misread
+          // `platform,tenant:<issuer>:<subject>` as issuer
+          // `tenant:<issuer>` (the `tenant:` role prefix was read
+          // as part of the issuer), so both owner identities
+          // reported "Unresolved (match nobody)". A bare id that
+          // names a RETIRED id is forward-resolved through its
+          // migration record to the live derived id, and reported
+          // in `forwardResolved` — the env entry itself is
+          // owner-managed, but the app now resolves it to the live
+          // identity either way.
           const resolveCurrentList = async (): Promise<{
             entries: string[];
             resolvedInternalUserIds: string[];
             unresolvedEntries: string[];
+            forwardResolved: Array<{ from: string; to: string }>;
           }> => {
             const entries = currentBootstrapEntries(env.IAAA_BOOTSTRAP_ADMINS);
             const parsed = entries.map((entry) => {
-              const inner = entry.startsWith("platform:")
-                ? entry.slice("platform:".length)
-                : entry;
-              return { entry, parsed: parseBootstrapAdmins(inner) };
+              const one = parseBootstrapListWithGenesis(entry);
+              return {
+                entry,
+                parsed: one.entries.length === 1 ? one.entries[0].entry : null,
+              };
             });
-            const toResolve = parsed
-              .filter((p) => p.parsed.entries.length === 1)
-              .map((p) => p.parsed.entries[0]);
+            const toResolve = parsed.flatMap((p) =>
+              p.parsed === null ? [] : [p.parsed],
+            );
             const resolved = await resolveBootstrapEntries(
               createWiredBindingStore(env),
               toResolve,
             );
             const unresolvedEntries = parsed
-              .filter((p) => p.parsed.entries.length !== 1)
+              .filter((p) => p.parsed === null)
               .map((p) => p.entry);
             for (const u of resolved.unresolved) {
               unresolvedEntries.push(
                 `${u.providerIssuer}:${u.providerSubject}`,
               );
             }
+            const resolvedInternalUserIds: string[] = [];
+            const forwardResolved: Array<{ from: string; to: string }> = [];
+            const aliasKv = sessionStore(env);
+            for (const id of resolved.internalUserIds) {
+              const migrated = await lookupMigratedUserId(aliasKv, id);
+              if (migrated !== null && migrated !== id) {
+                forwardResolved.push({ from: id, to: migrated });
+                resolvedInternalUserIds.push(migrated);
+              } else {
+                resolvedInternalUserIds.push(id);
+              }
+            }
             return {
               entries,
-              resolvedInternalUserIds: resolved.internalUserIds,
+              resolvedInternalUserIds,
               unresolvedEntries,
+              forwardResolved,
             };
           };
           if (path === "/api/iaaa/bootstrap-proposals" && request.method === "GET") {
@@ -2699,8 +2744,114 @@ export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL,
               entries: current.entries,
               resolvedInternalUserIds: current.resolvedInternalUserIds,
               unresolvedEntries: current.unresolvedEntries,
+              forwardResolved: current.forwardResolved,
               divergence,
             });
+          }
+          // #6236 — stale-identity inventory + cleanup, platform-admin
+          // only (same gate as the bootstrap routes above). The
+          // builder runs the application-level cleanup pass over the
+          // SessionStore alias / binding / membership families and
+          // composes it with the bootstrap forward-resolution and a
+          // live-grant verification for every resolved bootstrap id,
+          // so the response names what was deleted, what was
+          // retained as audit history, and what is still live. A
+          // listing failure answers 500 with no partial data
+          // (fail-visible, never a partial admin view — the
+          // logged-in-users precedent).
+          const runStaleIdentityCleanupForRequest = async (
+            mode: "dry-run" | "execute",
+          ): Promise<{
+            mode: "dry-run" | "execute";
+            dryRun: boolean;
+            report: StaleCleanupReport;
+            bootstrapForwardResolved: Array<{ from: string; to: string }>;
+            verifiedLive: Array<{
+              internalUserId: string;
+              platformAdmin: boolean;
+              tenantAdmin: boolean;
+            }>;
+          } | null> => {
+            const aliasEntries = await listSessionFamilyEntries(env, "iaaa-alias:");
+            const reverseEntries = await listSessionFamilyEntries(
+              env,
+              "iaaa-binding:user:",
+            );
+            const membershipEntries = await listSessionFamilyEntries(
+              env,
+              "iaaa-membership:",
+            );
+            if (!aliasEntries || !reverseEntries || !membershipEntries) {
+              return null;
+            }
+            const memberships = listMembershipsFromEntries(membershipEntries);
+            const actorId = session.internalUserId as string;
+            const auditOne = async (item: StaleCleanupItem): Promise<void> => {
+              const result = await recordAuditEvent(createWiredAuditStore(env), {
+                timestamp: nowMs,
+                type: STALE_CLEANUP_AUDIT_TYPE,
+                actorPrincipalId: actorId,
+                actorType: "human",
+                initiatingPrincipalId: actorId,
+                tenantId: "platform",
+                correlationId: item.key,
+                action: "stale_identity_cleanup.deleted",
+                decision: "allow",
+                policyVersion: IAAA_AUDIT_POLICY_VERSION,
+                outcome: "succeeded",
+              });
+              if (!result.ok) {
+                throw new Error("stale-identity cleanup audit write failed");
+              }
+            };
+            const report = await runStaleIdentityCleanup({
+              aliasKv: sessionStore(env),
+              bindingStore: createWiredBindingStore(env),
+              listAliasEntries: () => Promise.resolve(aliasEntries),
+              listReverseIndexEntries: () => Promise.resolve(reverseEntries),
+              listMemberships: () => Promise.resolve(memberships),
+              audit: auditOne,
+              nowMs,
+              actorInternalUserId: actorId,
+              mode,
+            });
+            const current = await resolveCurrentList();
+            const verifiedLive = current.resolvedInternalUserIds.map((id) => {
+              const mine = memberships.filter((m) => m.internalUserId === id);
+              const active = (role: string, scope: string) =>
+                mine.some(
+                  (m) =>
+                    m.revokedAtMs === undefined &&
+                    m.roleBindings.some(
+                      (b) =>
+                        b.role === role &&
+                        b.scope === scope &&
+                        (b.expiresAtMs === undefined || b.expiresAtMs > nowMs),
+                    ),
+                );
+              return {
+                internalUserId: id,
+                platformAdmin: active("platform-admin", "platform"),
+                tenantAdmin: active("tenant-admin", "tenant"),
+              };
+            });
+            return {
+              mode,
+              dryRun: report.dryRun,
+              report,
+              bootstrapForwardResolved: current.forwardResolved,
+              verifiedLive,
+            };
+          };
+          if (path === "/api/iaaa/stale-identities" && request.method === "GET") {
+            const result = await runStaleIdentityCleanupForRequest("dry-run");
+            if (result === null) {
+              return Response.json(
+                { error: "Stale-identity listing unavailable." },
+                { status: 500 },
+              );
+            }
+            return Response.json({ ok: true, ...result });
           }
           if (request.method !== "POST") {
             return Response.json({ error: "Method not allowed" }, { status: 405 });
@@ -2711,6 +2862,39 @@ export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL,
             if (id === "") return null;
             return bootStore.getProposal(id);
           };
+          // #6236 — run the stale-identity cleanup pass in the
+          // configured mode (IAAA_STALE_CLEANUP_MODE; unset or
+          // invalid fails closed to dry-run — the mode never comes
+          // from the request body, so a caller cannot escalate it).
+          // The run itself is audited best-effort: a failed run
+          // audit is named in the response, never a failed cleanup.
+          if (path === "/api/iaaa/stale-identities/cleanup" && request.method === "POST") {
+            const mode = resolveStaleCleanupMode(env.IAAA_STALE_CLEANUP_MODE);
+            const result = await runStaleIdentityCleanupForRequest(mode);
+            if (result === null) {
+              return Response.json(
+                { error: "Stale-identity listing unavailable." },
+                { status: 500 },
+              );
+            }
+            const runAudit = await recordAuditEvent(createWiredAuditStore(env), {
+              timestamp: nowMs,
+              type: STALE_CLEANUP_AUDIT_TYPE,
+              actorPrincipalId: session.internalUserId as string,
+              actorType: "human",
+              initiatingPrincipalId: session.internalUserId as string,
+              tenantId: "platform",
+              correlationId: crypto.randomUUID(),
+              action: "stale_identity_cleanup.run",
+              decision: "allow",
+              policyVersion: IAAA_AUDIT_POLICY_VERSION,
+              outcome: "succeeded",
+            }).catch(() => null);
+            if (!runAudit?.ok) {
+              result.report.auditFailures.push("stale_identity_cleanup.run");
+            }
+            return Response.json({ ok: true, ...result });
+          }
           if (path === "/api/iaaa/bootstrap-proposals/propose") {
             const action =
               bootBody?.action === "add" || bootBody?.action === "remove" ? bootBody.action : null;
@@ -2733,16 +2917,29 @@ export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL,
               return Response.json({ error: created.error, code: created.code }, { status: 400 });
             }
             const current = await resolveCurrentList();
-            const proposalInternalId = (
+            // #6236 — the proposal identifier is role-prefixed
+            // (`platform,tenant:<identity>`); resolve it with the
+            // role-aware parser, not the old `platform:`-strip +
+            // parseBootstrapAdmins, which misread the role prefix
+            // as part of the issuer. A retired bare id is
+            // forward-resolved to its live derived id, matching
+            // the current list above.
+            const proposalParsed = parseBootstrapListWithGenesis(
+              created.proposal.identifier,
+            );
+            let proposalInternalId = (
               await resolveBootstrapEntries(
                 createWiredBindingStore(env),
-                parseBootstrapAdmins(
-                  created.proposal.identifier.startsWith("platform:")
-                    ? created.proposal.identifier.slice("platform:".length)
-                    : created.proposal.identifier,
-                ).entries,
+                proposalParsed.entries.map((e) => e.entry),
               )
             ).internalUserIds[0];
+            if (proposalInternalId !== undefined) {
+              const migrated = await lookupMigratedUserId(
+                sessionStore(env),
+                proposalInternalId,
+              );
+              if (migrated !== null) proposalInternalId = migrated;
+            }
             const listedByIdentity =
               proposalInternalId !== undefined &&
               current.resolvedInternalUserIds.includes(proposalInternalId);
