@@ -11,7 +11,7 @@ import {
 import type { TradeOrderContext, TradeOrderLeg } from "../trading/tradeOrderContext";
 import "./strategyDiscovery.deprecated.css";
 
-import { Button, CardHeader, Modal, TextInput, FieldShell } from "../components/ui";
+import { Button, CardHeader, SmallHeader, Modal, TextInput, FieldShell } from "../components/ui";
 import { FeatureDisabledNotice, isOptionsProductEnabled } from "../featureFlags";
 export interface StrategyToEvaluate {
   symbol: string;
@@ -356,7 +356,7 @@ export function LlmStrategyEvalModal({
 
                   {(result.finalAnalysis.rankings || []).length > 0 && (
                     <div className="llm-eval-rankings-list">
-                      <h5>Cross-Group Ranked Trades:</h5>
+                      <SmallHeader title="Cross-Group Ranked Trades:" />
                       {result.finalAnalysis.rankings!.map((item) => {
                         const group = result.groups?.find((g) => g.id === item.groupId);
                         return (

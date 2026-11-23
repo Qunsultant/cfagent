@@ -48,7 +48,7 @@ import { OptionsDataDownloadDropdown } from "./OptionsDataDownloadDropdown";
 import type { TradeOrderContext } from "../trading/tradeOrderContext";
 import "./strategyDiscovery.deprecated.css";
 import { StrategyLibraryModal, type StrategyInfo } from "./StrategyLibraryModal";
-import { Button, CardHeader, FieldShell, PillGroup, SegmentedControl, Select, Table, TextInput, Modal, useToast } from "../components/ui";
+import { Button, CardHeader, SmallHeader, FieldShell, PillGroup, SegmentedControl, Select, Table, TextInput, Modal, useToast } from "../components/ui";
 import { createClientLogger } from "../clientLogger";
 
 const log = createClientLogger("client/StrategyDiscoveryPanel");
@@ -3741,7 +3741,7 @@ export function StrategyDiscoveryPanel({
 
           <div className="strat-drawer-content">
             <div className="strat-drawer-section">
-              <h5>Open Legs ({builderLegs.filter((l) => !l.isClosed).length})</h5>
+              <SmallHeader title={<>Open Legs ({builderLegs.filter((l) => !l.isClosed).length})</>} />
               {builderLegs.filter((l) => !l.isClosed).map((l) => (
                 <div key={l.id} className="strat-pos-item open">
                   <span>{l.side} {l.quantity}x {l.strike}{l.optionType[0]}</span>
@@ -3752,7 +3752,7 @@ export function StrategyDiscoveryPanel({
             </div>
 
             <div className="strat-drawer-section">
-              <h5>Closed / Rolled Legs ({builderLegs.filter((l) => l.isClosed).length})</h5>
+              <SmallHeader title={<>Closed / Rolled Legs ({builderLegs.filter((l) => l.isClosed).length})</>} />
               {builderLegs.filter((l) => l.isClosed).length === 0 ? (
                 <p className="empty-txt">No closed positions</p>
               ) : (

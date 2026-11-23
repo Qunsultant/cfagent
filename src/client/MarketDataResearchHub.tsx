@@ -3,7 +3,7 @@ import { useUrlSyncedTabs } from "./useUrlSyncedTabs";
 import { apiFetch as fetch } from "./apiFetch";
 import { mapScreenErrorFromBody } from "./paidScreenSubmit";
 import { UpgradeOffer } from "./UpgradeOffer";
-import { Badge, Card, CardHeader, EmptyState, Spinner, Button, Notice, Select, Table, TextInput, PageSection, FieldShell, Stack, Flex, Grid, type BadgeTone } from "./components/ui";
+import { Badge, Card, CardHeader, SmallHeader, EmptyState, Spinner, Button, Notice, Select, Table, TextInput, PageSection, FieldShell, Stack, Flex, Grid, type BadgeTone } from "./components/ui";
 import { ResearchReportActions } from "./ResearchReportActions";
 import { replayReport, replaySummary, type ReplayResponse } from "./replayReport";
 import { TabHoverItem } from "./TabHoverItem";
@@ -1293,7 +1293,7 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
               {/* Right Side: Analyst Rating & Action Card */}
               <Stack gap="3">
                 <Card>
-                  <h5>{report.fundamentals.provenance === "live" ? "Wall Street Consensus" : "Market Data Profile Rating — not live consensus"}</h5>
+                  <SmallHeader title={report.fundamentals.provenance === "live" ? "Wall Street Consensus" : "Market Data Profile Rating — not live consensus"} />
                   <Badge tone={recommendationToneFor(report.analystRating)}>
                     {report.analystRating}
                   </Badge>
@@ -1319,7 +1319,7 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
                 </Card>
 
                 <Card>
-                  <h5>Business Overview</h5>
+                  <SmallHeader title="Business Overview" />
                   <p>{report.fundamentals.description}</p>
                 </Card>
 
@@ -1501,7 +1501,7 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
               </div>
               {/* Valuation Multiples */}
               <Card>
-                <h5>📊 Valuation Multiples (yfinance)</h5>
+                <SmallHeader title="📊 Valuation Multiples (yfinance)" />
                 <Grid autoFit minColumnWidth="sm" gap="2">
                   <Stack gap="0">
                     <span className="ui-meta-sm">Market Capitalization</span>
@@ -1542,7 +1542,7 @@ export function MarketDataResearchHub({ user, onSendPrompt, onTradeSymbol }: Mar
 
               {/* Financial Performance & Margins */}
               <Card>
-                <h5>💰 Financial Performance &amp; Margins</h5>
+                <SmallHeader title="💰 Financial Performance &amp; Margins" />
                 <Grid autoFit minColumnWidth="sm" gap="2">
                   <Stack gap="0">
                     <span className="ui-meta-sm">Total Revenue (TTM)</span>

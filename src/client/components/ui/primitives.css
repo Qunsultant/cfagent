@@ -1007,6 +1007,29 @@ div.ui-modal-title { font-size: inherit; font-weight: inherit; }
   color: var(--color-text-muted);
 }
 
+/* ---------- SmallHeader (#5004) ---------- */
+/* The one distributed small-header treatment (h5/h6, one step below
+ * CardHeader's h4). Title 16px semibold primary, subtitle 12px muted —
+ * existing tokens only, no new token. No outer margin: spacing is the
+ * parent Stack's gap (§1.6b). */
+.ui-small-header h5,
+.ui-small-header h6 {
+  margin: 0;
+  font-size: var(--font-size-body-lg);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.ui-small-header h5:not(:last-child),
+.ui-small-header h6:not(:last-child) {
+  margin-bottom: var(--space-1);
+}
+
+.ui-small-header-subtitle {
+  font-size: var(--font-size-caption);
+  color: var(--color-text-muted);
+}
+
 /* ---------- Toast (#2283) ---------- */
 /* The one familiar place for transient feedback. Fixed viewport, above
    the modal backdrop (z-index 9999), pointer-transparent except on the

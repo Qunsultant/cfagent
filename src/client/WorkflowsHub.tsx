@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from "react";
 import "./workflowsHub.deprecated.css";
-import { Badge, Button, Card, CardHeader, KpiRibbon, Notice, PageSection, PillGroup, Table, TextInput, PageShell, Tabs, Stack, Flex, Grid, type BadgeTone } from "./components/ui";
+import { Badge, Button, Card, CardHeader, SmallHeader, KpiRibbon, Notice, PageSection, PillGroup, Table, TextInput, PageShell, Tabs, Stack, Flex, Grid, type BadgeTone } from "./components/ui";
 import { useUrlSyncedTabs } from "./useUrlSyncedTabs";
 import { STRATEGY_LIBRARY } from "./options/strategyLibrary";
 import {
@@ -1455,9 +1455,7 @@ export function WorkflowsHub({ onNavigateTab, onSendPrompt }: WorkflowsHubProps)
                       {/* Details Grid: Features & Data Sources */}
                       <Grid columns={2} gap="2">
                         <Card>
-                          <h5>
-                            <span>✨</span> Architectural Highlights
-                          </h5>
+                          <SmallHeader title={<><span>✨</span> Architectural Highlights</>} />
                           <ul>
                             {wf.keyFeatures.map((feat, idx) => (
                               <li key={idx}>
@@ -1469,9 +1467,7 @@ export function WorkflowsHub({ onNavigateTab, onSendPrompt }: WorkflowsHubProps)
                         </Card>
 
                         <Card>
-                          <h5>
-                            <span>🌐</span> Upstream Sites &amp; APIs Queried
-                          </h5>
+                          <SmallHeader title={<><span>🌐</span> Upstream Sites &amp; APIs Queried</>} />
                           <ul>
                             {wf.dataSources.map((ds, idx) => (
                               <li key={idx}>
@@ -1486,9 +1482,7 @@ export function WorkflowsHub({ onNavigateTab, onSendPrompt }: WorkflowsHubProps)
                       {/* Upstream APIs & Execution Metrics Breakdown */}
                       {wf.apiMetrics && wf.apiMetrics.length > 0 && (
                         <Card>
-                          <h5 style={{ margin: "0 0 0.75rem", color: "var(--color-accent)", fontSize: "var(--font-size-body)", textTransform: "uppercase", letterSpacing: "0.05em", display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
-                            <span>📊</span> Upstream Subrequests &amp; Edge Execution Metrics
-                          </h5>
+                          <SmallHeader title={<><span>📊</span> Upstream Subrequests &amp; Edge Execution Metrics</>} />
                           <div style={{ overflowX: "auto" }}>
                                                         <Table
                               columns={[

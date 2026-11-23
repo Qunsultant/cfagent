@@ -17,7 +17,7 @@ import { FieldShell } from "../../components/ui/Field";
 import { Tabs, TabPanel } from "../../components/ui/Tabs";
 import { useUrlSyncedTabs } from "../../useUrlSyncedTabs";
 import { BRAND } from "../../branding";
-import { CardHeader, Grid } from "../../components/ui";
+import { CardHeader, Grid, SmallHeader } from "../../components/ui";
 
 export interface ReferralsTabProps {
   activeShareRefId: string | null;
@@ -422,7 +422,7 @@ export function ReferralsTab({activeShareRefId, adBannerConfig, categories, copi
                             <Badge size="xs" tone="accent">{ref.category}</Badge>
                             <Badge size="xs" tone="neutral">🖱️ {ref.clicks} clicks</Badge>
                           </div>
-                          <h5>{ref.title}</h5>
+                          <SmallHeader title={ref.title} />
                           <p className="ui-meta">🎁 {ref.rewardText}</p>
                           <div className="ui-meta-sm">
                             <code>{ref.url}</code>

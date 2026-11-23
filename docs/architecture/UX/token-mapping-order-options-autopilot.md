@@ -88,7 +88,7 @@ controls row uses `ui-row`.
 | `workflow-runs-artifacts` | Token | `ui-row` | WorkflowRunsPanel.tsx |
 | `workflow-runs-stage-io` | Token | `ui-stack` | WorkflowRunsPanel.tsx |
 | `workflow-runs-subheading` | Token | Bare `<h4>` | WorkflowRunsPanel.tsx |
-| `workflow-runs-subheading-sm` | Token | `ui-label ui-mt-0` + `Stack` gap="1" below | WorkflowRunsPanel.tsx |
+| `workflow-runs-subheading-sm` | Token | `SmallHeader` primitive (#5004) | WorkflowRunsPanel.tsx |
 | `workflow-runs-stage-details` | Token | `Card` + bare `<details>` + `<strong>` summary | WorkflowRunsPanel.tsx |
 | `social-btn` | Token | `Button` primitive (ghost, sm) + `ui-brand-<network>` | ReferralsTab.tsx |
 | `mini-social-btn` | Token | `Button` primitive (ghost, sm) + `ui-brand-<network> ui-brand-mini` | ReferralsTab.tsx |

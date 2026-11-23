@@ -34,7 +34,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { Button, CardHeader } from "./components/ui";
+import { Button, CardHeader, SmallHeader } from "./components/ui";
 import {
   fetchAgenticLedger,
   fetchAgenticWalletStatus,
@@ -170,7 +170,7 @@ export function AgenticWalletPanel() {
           </p>
 
           <div className="awp-ledger">
-            <h5>Payment ledger{ledger ? ` (${ledger.length})` : ""}</h5>
+            <SmallHeader title={<>Payment ledger{ledger ? ` (${ledger.length})` : ""}</>} />
             <p className="awp-ledger-sub">
               Locally recorded agentic payments (x402 / MPP rows of the durable transaction ledger), newest first.
             </p>
@@ -209,7 +209,7 @@ export function AgenticWalletPanel() {
           </div>
 
           <div className="awp-ledger">
-            <h5>Paid-call receipts{receipts ? ` (${receipts.length})` : ""}</h5>
+            <SmallHeader title={<>Paid-call receipts{receipts ? ` (${receipts.length})` : ""}</>} />
             <p className="awp-ledger-sub">
               Your own paid calls, tier decisions, and joined gateway rows — newest first. Simulated rows are
               labeled, never shown as real.

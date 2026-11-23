@@ -33,7 +33,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { controlJobStage } from "./jobsApi";
 import { withCsrfInit } from "./apiFetch";
-import { Badge, Button, Card, CardHeader, EmptyState, Grid, Modal, Notice, PageSection, PageShell, PillGroup, Stack, Table, type TableColumn, TextInput } from "./components/ui";
+import { Badge, Button, Card, CardHeader, SmallHeader, EmptyState, Grid, Modal, Notice, PageSection, PageShell, PillGroup, Stack, Table, type TableColumn, TextInput } from "./components/ui";
 import type {
   ShardStrategyEvidence,
   WorkflowRun,
@@ -1855,13 +1855,13 @@ export function RunDetail({
                   <Grid autoFit minColumnWidth="sm" gap="2">
                     <section aria-label={`${stage.label} inputs`}>
                       <Stack gap="1">
-                        <h5 className="ui-label ui-mt-0">Inputs</h5>
+                        <SmallHeader title="Inputs" />
                         <pre className="ui-pre">{formatJson(stage.input)}</pre>
                       </Stack>
                     </section>
                     <section aria-label={`${stage.label} outputs`}>
                       <Stack gap="1">
-                        <h5 className="ui-label ui-mt-0">Outputs</h5>
+                        <SmallHeader title="Outputs" />
                         <pre className="ui-pre">{formatJson(stage.output)}</pre>
                       </Stack>
                     </section>

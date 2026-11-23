@@ -26,6 +26,7 @@ import {
   Notice,
   PageSection,
   Select,
+  SmallHeader,
   Stack,
   Table,
   TextInput,
@@ -368,13 +369,13 @@ function TradeCardDetail({ card }: { card: TradeCardView }) {
         <div className="ui-meta">{card.thesis}</div>
         {open && (
           <Stack gap="2">
-            <h5>Legs (exact contracts)</h5>
+            <SmallHeader title="Legs (exact contracts)" />
             <Table
               columns={legColumns}
               rows={card.legs.map((l, i) => ({ ...l, _idx: i }))}
               rowKey={(row) => String(row._idx)}
             />
-            <h5>Economics (independently recomputed)</h5>
+            <SmallHeader title="Economics (independently recomputed)" />
             <div>
               Max gain: {econ.maxGain === null ? "unbounded" : `$${econ.maxGain.toFixed(2)}`} · Breakevens:{" "}
               {econ.breakevens.length > 0 ? econ.breakevens.join(", ") : "—"}
@@ -385,14 +386,14 @@ function TradeCardDetail({ card }: { card: TradeCardView }) {
                 </span>
               )}
             </div>
-            <h5>Scenarios</h5>
+            <SmallHeader title="Scenarios" />
             <Table
               columns={scenarioColumns}
               rows={card.scenarios.map((s, i) => ({ ...s, _idx: i }))}
               rowKey={(row) => String(row._idx)}
             />
             <div className="ui-meta-sm">{card.feesNote}</div>
-            <h5>Falsification (§4)</h5>
+            <SmallHeader title="Falsification (§4)" />
             <ul>
               <li><b>Why the market may be wrong:</b> {card.falsification.whyMarketWrong}</li>
               <li><b>Resolution:</b> {card.falsification.resolutionTrigger} ({card.falsification.horizon})</li>
@@ -405,14 +406,14 @@ function TradeCardDetail({ card }: { card: TradeCardView }) {
             {card.falsificationWarnings.map((w, i) => (
               <Notice key={i} tone="warning">⚠ {w}</Notice>
             ))}
-            <h5>Pre-mortem (§7)</h5>
+            <SmallHeader title="Pre-mortem (§7)" />
             <div className="ui-meta-sm">{card.premortem.assumedFailure}</div>
             <ul>
               {card.premortem.causes.map((c, i) => (
                 <li key={i}><b>{c.category}:</b> {c.description}</li>
               ))}
             </ul>
-            <h5>Entry & limitations</h5>
+            <SmallHeader title="Entry & limitations" />
             <div>{card.entryCondition}</div>
             <ul>
               {card.limitations.map((l, i) => (

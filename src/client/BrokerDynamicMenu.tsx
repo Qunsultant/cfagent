@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { navigateToTab } from "./router";
-import { PillGroup, Button, TextInput, Select, Notice } from "./components/ui";
+import { PillGroup, Button, TextInput, Select, Notice, SmallHeader } from "./components/ui";
 import { AlpacaSignInCard } from "./AlpacaSignInCard";
 import { apiFetch } from "./apiFetch";
 import { syncTarget, connectStatusEndpoint } from "./brokerEndpoints";
@@ -734,7 +734,7 @@ export function BrokerDynamicMenu({
               <div className="broker-brand-text-row">
                 <div className="broker-brand-title">
                   <span className="brand-icon">{brokerIcon}</span>
-                  <h5>{`${selectedBrokerLabel} Brokerage API`}</h5>
+                  <SmallHeader title={`${selectedBrokerLabel} Brokerage API`} />
                 </div>
                 <span className={`brand-status-text ${isConnected ? "connected" : "disconnected"}`}>
                   {isConnected

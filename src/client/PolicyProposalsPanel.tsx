@@ -27,7 +27,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { Button, Checkbox, EmptyState, Notice, Spinner, TextInput } from "./components/ui";
+import { Button, Checkbox, EmptyState, Notice, SmallHeader, Spinner, TextInput } from "./components/ui";
 import {
   approvePolicyProposal,
   fetchActivePolicy,
@@ -162,7 +162,7 @@ export function PolicyProposalsPanel() {
       </p>
       {draft && (
         <>
-          <h5>Propose a policy change</h5>
+          <SmallHeader title="Propose a policy change" />
           <p className="iaaa-admin-note">
             Active version: <code>{draft.version}</code>. Toggle grants, preview the
             impact, then propose.
@@ -192,7 +192,7 @@ export function PolicyProposalsPanel() {
           </div>
           {preview && (
             <div>
-              <h5>Preview — no privilege change is silent</h5>
+              <SmallHeader title="Preview — no privilege change is silent" />
               {preview.diff.length === 0 ? (
                 <p>No grant changes.</p>
               ) : (
@@ -219,7 +219,7 @@ export function PolicyProposalsPanel() {
           )}
         </>
       )}
-      <h5>Proposals</h5>
+      <SmallHeader title="Proposals" />
       {proposals.length === 0 ? (
         <EmptyState
           title="No policy proposals"
