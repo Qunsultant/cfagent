@@ -1,0 +1,3 @@
+### Added
+
+- **Every executed stage of a settled run now has its own persisted row (#6028, sub-issue #6200):** the engine writes one `action: "terminal"` row per stage to the existing `job_stage_events` table when a run settles — status, `started_at`/`ended_at`, `duration_ms` (**null** when either stamp is missing, never 0, never estimated), `unit_count`, `failed_unit_count`, the failing unit's error text in `detail`, `result_ref` (the step's own descriptor), and `definition_version`. The six columns are added to an existing table when missing (the probed additive-column pattern), and the stage read falls back to these rows when a run's checkpoint is gone — so a past run's stages stay readable. No new store, no second stage vocabulary. #CAIO-quns

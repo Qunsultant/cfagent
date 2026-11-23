@@ -262,6 +262,13 @@ export interface StageUnitCheckpoint {
    */
   endedAt?: string;
   /**
+   * Issue #6028 — the step's own result reference for this unit (the
+   * descriptor the step returned), when it returned one. Recorded,
+   * never derived: absent when the step produced no descriptor, and
+   * never a summary invented by a surface.
+   */
+  resultRef?: string;
+  /**
    * Intra-unit resume position, for units whose execution is
    * itself stepped (#3549): the step/item indices a resume
    * continues from. Absent = the unit is atomic from the

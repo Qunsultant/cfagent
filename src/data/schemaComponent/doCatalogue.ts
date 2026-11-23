@@ -246,7 +246,13 @@ export const DO_CATALOGUE_ENTRIES: CatalogueEntry[] = [
       at TEXT NOT NULL,
       started_at TEXT,
       ended_at TEXT,
-      detail TEXT
+      detail TEXT,
+      stage_status TEXT,
+      duration_ms INTEGER,
+      unit_count INTEGER,
+      failed_unit_count INTEGER,
+      result_ref TEXT,
+      definition_version INTEGER
     )`,
     kind: "schema",
     form: "literal",
