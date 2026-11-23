@@ -2,17 +2,21 @@
  * @vitest-environment jsdom
  *
  * Issue #3855: the settings broker list is registry-driven.
- * The menu renders exactly the catalog-derived list — no broker is
- * hard-coded in the settings UI. Adding a broker is a catalog entry
+ * The menu renders exactly the registry-derived list — no broker is
+ * hard-coded in the settings UI. Adding a broker is a registry entry
  * (+ its presentation); the settings page picks it up with no
  * settings-UI edit. Removing one removes it the same way.
+ * Issue #6147 (S1, item 3): the list is the registry, not the catalog
+ * — the hosted broker renders as an extra, disabled pill (no execution
+ * adapter), never as a missing one.
  */
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { brokerOptions } from "../src/client/brokerOptions";
+import { brokerOptions, brokerOptionsFromRegistry } from "../src/client/brokerOptions";
+import { buildDefaultBrokerAssetAccountRegistry } from "../src/trading/accountBindings";
 import { BROKER_CATALOG, ROUTED_BROKER_IDS } from "../src/trading/brokerCatalog";
 import { brokerPresentation } from "../src/trading/brokerPresentation";
 import { BrokerDynamicMenu } from "../src/client/BrokerDynamicMenu";
@@ -106,7 +110,7 @@ describe("settings broker list is registry-driven (#3855)", () => {
       vi.unstubAllGlobals();
     });
 
-    it("renders one pill per catalog broker", async () => {
+    it("renders one pill per registry broker, with the read-only broker disabled", async () => {
       setTenantProvidersStateForTest({ brokerId: "alpaca" });
       root = createRoot(container);
       await act(async () => {
@@ -117,10 +121,22 @@ describe("settings broker list is registry-driven (#3855)", () => {
       const group = container.querySelector('[aria-label="Broker choice"]');
       expect(group).not.toBeNull();
       const pills = group!.querySelectorAll('button[role="radio"]');
-      expect(pills.length).toBe(ROUTED_BROKER_IDS.length);
+      // Issue #6147 (S1, item 3): the picker derives from the registry,
+      // not the catalog — the hosted broker renders as a fifth, disabled
+      // pill. The count is derived from the registry, never hard-coded.
+      const expected = brokerOptionsFromRegistry(buildDefaultBrokerAssetAccountRegistry());
+      expect(pills.length).toBe(expected.length);
       const labels = Array.from(pills).map((p) => p.textContent);
       expect(labels.some((t) => t?.includes("E*TRADE"))).toBe(true);
       expect(labels.some((t) => t?.includes("Alpaca"))).toBe(true);
+      const ibkrPill = Array.from(pills).find((p) =>
+        p.textContent?.includes("Interactive Brokers"),
+      ) as HTMLButtonElement | undefined;
+      expect(ibkrPill).toBeDefined();
+      expect(ibkrPill?.disabled).toBe(true);
+      expect(ibkrPill?.getAttribute("title")).toBe(
+        "Interactive Brokers has no execution adapter yet — read-only",
+      );
     });
   });
 });
