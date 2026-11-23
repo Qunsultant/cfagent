@@ -751,9 +751,16 @@ describe("server route inventory pin (#2902)", () => {
     // callback) (343 → 357). The routing logic itself lives in
     // src/server/routes/otelSlo.ts, not here; the recording lives
     // in src/observability/serverMetrics.ts, not here.
+    // #6172 records a ninth deliberate growth: +18 lines — +4 for
+    // the boundary import, +9 for the boundary resolution call
+    // (a 7-line comment + the 2-line establish + refusal return),
+    // +3 for the wrapper hook (a 2-line comment + the
+    // contextForRequest option), and +2 blank lines (357 → 375).
+    // The resolution lives in src/security/apiRequestContext.ts,
+    // not here; no new route or responsibility is added.
     const src = readFileSync("src/server.ts", "utf8");
     const lines = src.split("\n").length - (src.endsWith("\n") ? 1 : 0);
-    expect(lines).toBeLessThanOrEqual(357);
+    expect(lines).toBeLessThanOrEqual(375);
   });
 });
 

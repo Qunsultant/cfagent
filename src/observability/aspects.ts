@@ -31,10 +31,15 @@ import {
   sessionRefFor,
   timestampIsoFor,
   traceContextFromHeaders,
+  type ApiRequestDimensions,
   type ObservabilityEvent,
   type ObservabilitySink,
   type TraceContext,
 } from "./observabilityPorts";
+// Type-only: the wrapper CONSUMES the boundary's outcome shape
+// (never builds one). Erased at compile time — no runtime
+// dependency from the observability layer into security.
+import type { ApiRequestContextOutcome } from "../security/apiRequestContext";
 
 export interface ObservabilityAspectContext {
   sink: ObservabilitySink;
@@ -132,6 +137,14 @@ export async function withObservability<T>(
 export interface ApiRequestObservation {
   status: number;
   durationMs: number;
+  /**
+   * Issue #6172: the SLO cuts of the request's validated context
+   * (tenant, dispatch mode, exec mode, environment). Present only
+   * when the request carried a resolved context — an absent or
+   * denied context leaves the observation undimensioned, exactly
+   * as the pre-#6172 observations were.
+   */
+  dimensions?: ApiRequestDimensions;
 }
 
 export interface RequestObservabilityOptions {
@@ -147,6 +160,37 @@ export interface RequestObservabilityOptions {
    * never changes behavior.
    */
   onRequestObserved?: (observation: ApiRequestObservation, env: unknown) => void;
+  /**
+   * Issue #6172: read the request's carried execution-context
+   * outcome (set by the fetch boundary before the handler runs).
+   * The wrapper calls this AFTER the handler settles — the
+   * boundary runs inside the wrapped handler, so the carrier is
+   * populated only then. A throwing reader is swallowed:
+   * observability never changes behavior. Absent (no hook, or
+   * an undefined return) means the request carried no context
+   * and the event keeps today's nulls.
+   */
+  contextForRequest?: (
+    request: Request,
+  ) => ApiRequestContextOutcome | undefined;
+}
+
+/**
+ * The SLO cuts of a resolved outcome (undefined otherwise).
+ * The full id list rides the http.request event's scope +
+ * fields; the observation carries only these cuts.
+ */
+function dimensionsForOutcome(
+  outcome: ApiRequestContextOutcome | undefined,
+): ApiRequestDimensions | undefined {
+  if (!outcome || outcome.outcome !== "resolved") return undefined;
+  const c = outcome.context;
+  return {
+    tenantId: c.tenantId,
+    dispatchMode: c.dispatchMode,
+    execMode: c.execMode,
+    environment: c.environment,
+  };
 }
 
 /**
@@ -155,6 +199,16 @@ export interface RequestObservabilityOptions {
  * event (5xx → error level), return the response unchanged.
  * A throwing handler emits an error event and the throw
  * propagates (the error boundary outside converts it).
+ *
+ * Issue #6172: when the fetch boundary carried a validated
+ * execution context on the request, the event's scope names it
+ * (tenant, actor = principal, agent = agent run, run, session
+ * as a hash — never raw) and its fields carry the context's
+ * dimensions + contextStatus; the trace id prefers the
+ * context's (the boundary's trace is the request's canonical
+ * trace). Without a carried context the event keeps today's
+ * nulls and contextStatus "absent" — an unauthenticated
+ * request has no tenant, recorded as null, not fabricated.
  */
 export function withRequestObservability(
   handler: (request: Request, env: any) => Promise<Response>,
@@ -168,65 +222,76 @@ export function withRequestObservability(
     const sink = sinkFor(env);
     const trace = traceContextFromHeaders(request.headers);
     const start = nowMs();
+    const readOutcome = (): ApiRequestContextOutcome | undefined => {
+      try {
+        return opts.contextForRequest?.(request);
+      } catch {
+        return undefined;
+      }
+    };
+    const observe = async (
+      status: number,
+      errorCode?: string,
+    ): Promise<ApiRequestObservation> => {
+      const outcome = readOutcome();
+      const context =
+        outcome?.outcome === "resolved" ? outcome.context : undefined;
+      const end = nowMs();
+      const observation: ApiRequestObservation = {
+        status,
+        durationMs: end - start,
+        dimensions: dimensionsForOutcome(outcome),
+      };
+      if (sink) {
+        const event: ObservabilityEvent = {
+          type: "http.request",
+          level:
+            errorCode !== undefined || status >= 500 ? "error" : "info",
+          operation: "http.request",
+          tenantId: context?.tenantId ?? null,
+          actorId: context?.principalId ?? null,
+          agentId: context?.agentRunId ?? null,
+          component: "http",
+          runId: context?.runId ?? null,
+          sessionRef: context?.sessionId
+            ? sessionRefFor(context.sessionId)
+            : null,
+          traceId: context?.traceId ?? trace.traceId,
+          spanId: trace.spanId,
+          timestampMs: end,
+          timestampIso: timestampIsoFor(end),
+          durationMs: end - start,
+          fields: {
+            method: request.method,
+            status,
+            dispatchMode: context?.dispatchMode,
+            execMode: context?.execMode,
+            environment: context?.environment,
+            platformId: context?.platformId,
+            taskId: context?.taskId,
+            serviceId: context?.serviceId,
+            correlationId: context?.correlationId,
+            contextStatus: outcome?.outcome ?? "absent",
+          },
+        };
+        if (errorCode !== undefined) event.errorCode = errorCode;
+        await safeWrite(sink, event);
+      }
+      if (opts.onRequestObserved) {
+        try {
+          opts.onRequestObserved(observation, env);
+        } catch {
+          // Best-effort: a failing hook never fails the request.
+        }
+      }
+      return observation;
+    };
     try {
       const response = await handler(request, env);
-      const end = nowMs();
-      if (sink) {
-        await safeWrite(sink, {
-          type: "http.request",
-          level: response.status >= 500 ? "error" : "info",
-          operation: "http.request",
-          tenantId: null,
-          actorId: null,
-          agentId: null,
-          component: "http",
-          runId: null,
-          sessionRef: null,
-          traceId: trace.traceId,
-          spanId: trace.spanId,
-          timestampMs: end,
-          timestampIso: timestampIsoFor(end),
-          durationMs: end - start,
-          fields: { method: request.method, status: response.status },
-        });
-      }
-      if (opts.onRequestObserved) {
-        try {
-          opts.onRequestObserved({ status: response.status, durationMs: end - start }, env);
-        } catch {
-          // Best-effort: a failing hook never fails the request.
-        }
-      }
+      await observe(response.status);
       return response;
     } catch (err) {
-      const end = nowMs();
-      if (sink) {
-        await safeWrite(sink, {
-          type: "http.request",
-          level: "error",
-          operation: "http.request",
-          tenantId: null,
-          actorId: null,
-          agentId: null,
-          component: "http",
-          runId: null,
-          sessionRef: null,
-          traceId: trace.traceId,
-          spanId: trace.spanId,
-          timestampMs: end,
-          timestampIso: timestampIsoFor(end),
-          durationMs: end - start,
-          errorCode: errorCodeOf(err),
-          fields: { method: request.method },
-        });
-      }
-      if (opts.onRequestObserved) {
-        try {
-          opts.onRequestObserved({ status: 500, durationMs: end - start }, env);
-        } catch {
-          // Best-effort: a failing hook never fails the request.
-        }
-      }
+      await observe(500, errorCodeOf(err));
       throw err;
     }
   };

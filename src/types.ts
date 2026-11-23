@@ -704,6 +704,13 @@ export interface Env {
   // "legacy"). Resolution lives in src/config/apiIngressModes.ts.
   // Production value is an owner action; this slice never sets it.
   API_INGRESS_MODE?: string;
+  // Issue #6172 (slice 2 of the universal execution context):
+  // EXECUTION_CONTEXT_MODE: "observe" | "enforce" (built-in
+  // default "observe"; anything but "enforce" observes).
+  // Resolution lives in src/security/executionContext.ts
+  // (executionContextMode). The enforce flip is a separate,
+  // separately reviewed step; this slice never sets it.
+  EXECUTION_CONTEXT_MODE?: string;
   QUOTE_EXPIRY_MODE?: string;
   QUOTE_STREAM_PROVENANCE?: string;
   QUOTE_HTTP_PROVIDER_MODE?: string;

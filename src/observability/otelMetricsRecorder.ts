@@ -65,6 +65,7 @@
  */
 import type { Counter, Gauge, Histogram, Meter } from "@opentelemetry/api";
 import type { OtelMetricsSettings } from "./otelMetrics";
+import type { ApiRequestDimensions } from "./observabilityPorts";
 import type { JobRunSettledInfo } from "../services/jobPipelineEngine";
 import { FREE_TIER_BUDGETS, type DailyRollupRow } from "../telemetry/resourceRollup";
 
@@ -229,6 +230,18 @@ export interface ApiRequestCounts {
  */
 export const API_REQUEST_LATENCY_SAMPLE_CAP = 10_000;
 
+/**
+ * Issue #6172: one bounded API latency sample — the duration
+ * plus the SLO cuts of the request's validated context, when
+ * the request carried one. An undimensioned observation stores
+ * just the duration (the pre-#6172 shape). The per-dimension
+ * evaluation (#6174) reads these samples; the aggregate
+ * evaluation reads only the durations, unchanged.
+ */
+export type ApiRequestSample = {
+  durationMs: number;
+} & ApiRequestDimensions;
+
 export interface OtelMetricsRecorderDeps {
   /** The OTel Meter (from the MeterProvider). */
   meter: Meter;
@@ -247,7 +260,12 @@ export interface OtelMetricsRecorder {
   recordResourceRollup(rows: readonly DailyRollupRow[]): void;
   evaluateAndRecordPipelineHealth(): PipelineHealthEvaluation;
   /** Issue #5425 (#3515 S5): record one API request (status + duration) for the API SLOs. */
-  recordApiRequest(observation: { status: number; durationMs: number }): void;
+  recordApiRequest(observation: {
+    status: number;
+    durationMs: number;
+    /** Issue #6172: the SLO cuts of the request's validated context, when carried. */
+    dimensions?: ApiRequestDimensions;
+  }): void;
   /**
    * Issue #5425 (#3515 S5): evaluate both API SLOs against the
    * tenant's thresholds and record the gauges (1=within /
@@ -258,6 +276,13 @@ export interface OtelMetricsRecorder {
   evaluateAndRecordSlo(thresholds: ApiSloThresholds): ApiSloEvaluation;
   /** The API request counts the uptime evaluation reads (for tests / the read path). */
   apiRequestCounts(): ApiRequestCounts;
+  /**
+   * Issue #6172: the bounded dimensioned latency samples (the
+   * per-dimension evaluation's input, #6174). A readonly view
+   * of the same window the P95 reads — callers must not mutate
+   * it. Undimensioned samples carry only durationMs.
+   */
+  apiRequestSamples(): readonly ApiRequestSample[];
   /** The last API SLO evaluation, or null before any evaluation. */
   lastApiSlo(): ApiSloEvaluation | null;
   /** The run counts the health evaluation reads (for tests / the flush path). */
@@ -296,7 +321,7 @@ export function createOtelMetricsRecorder(deps: OtelMetricsRecorderDeps): OtelMe
   // requests it served.
   let totalApiRequests = 0;
   let failedApiRequests = 0;
-  const apiLatencySamples: number[] = [];
+  const apiLatencySamples: ApiRequestSample[] = [];
   let lastApiSloEvaluation: ApiSloEvaluation | null = null;
 
   const getRunsCounter = (): Counter | null => {
@@ -543,13 +568,24 @@ export function createOtelMetricsRecorder(deps: OtelMetricsRecorderDeps): OtelMe
     return evaluation;
   };
 
-  const recordApiRequest = (observation: { status: number; durationMs: number }): void => {
+  const recordApiRequest = (observation: {
+    status: number;
+    durationMs: number;
+    dimensions?: ApiRequestDimensions;
+  }): void => {
     try {
       if (!enabled()) return;
       totalApiRequests += 1;
       if (observation.status >= 500) failedApiRequests += 1;
       if (Number.isFinite(observation.durationMs)) {
-        apiLatencySamples.push(observation.durationMs);
+        // Issue #6172: store the duration with the observation's
+        // SLO cuts (when carried) — only the keys the observation
+        // actually carried, so an undimensioned sample stays a
+        // bare { durationMs }.
+        apiLatencySamples.push({
+          durationMs: observation.durationMs,
+          ...(observation.dimensions ?? {}),
+        });
         while (apiLatencySamples.length > API_REQUEST_LATENCY_SAMPLE_CAP) {
           apiLatencySamples.shift();
         }
@@ -562,7 +598,10 @@ export function createOtelMetricsRecorder(deps: OtelMetricsRecorderDeps): OtelMe
   const evaluateAndRecordSlo = (thresholds: ApiSloThresholds): ApiSloEvaluation => {
     const uptimeValue =
       totalApiRequests > 0 ? (totalApiRequests - failedApiRequests) / totalApiRequests : null;
-    const p95Value = percentile95(apiLatencySamples);
+    // The aggregate P95 reads only the durations — the
+    // dimensions ride alongside, never into the percentile.
+    const durations = apiLatencySamples.map((s) => s.durationMs);
+    const p95Value = percentile95(durations);
     const uptimeEvaluation =
       thresholds.uptimeTargetRatio === null
         ? { uptime: uptimeValue, withinSlo: null as boolean | null }
@@ -574,7 +613,7 @@ export function createOtelMetricsRecorder(deps: OtelMetricsRecorderDeps): OtelMe
     const p95Evaluation =
       thresholds.p95LatencyMaxMs === null
         ? { p95Ms: p95Value, withinSlo: null as boolean | null }
-        : evaluateP95LatencySlo({ samples: apiLatencySamples, maxMs: thresholds.p95LatencyMaxMs });
+        : evaluateP95LatencySlo({ samples: durations, maxMs: thresholds.p95LatencyMaxMs });
     const evaluation: ApiSloEvaluation = {
       uptime: {
         value: uptimeEvaluation.uptime,
@@ -621,6 +660,7 @@ export function createOtelMetricsRecorder(deps: OtelMetricsRecorderDeps): OtelMe
       failed: failedApiRequests,
       latencySamples: apiLatencySamples.length,
     }),
+    apiRequestSamples: () => apiLatencySamples,
     lastApiSlo: () => lastApiSloEvaluation,
     runCounts: () => ({ total: totalRuns, failed: failedRuns }),
     lastSlo: () => lastSloEvaluation,
