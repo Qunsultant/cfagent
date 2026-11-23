@@ -387,7 +387,7 @@ describe("autopilot sections as sub-tabs (#4409)", () => {
 
   it("every source line is a single line (nowrap + ellipsis, full text on hover)", async () => {
     const expected: Array<[string, string]> = [
-      ["job-outcomes", "Source: GET /api/runs — the unified run rows Docs reads (issue #2606); coded error and origin arrive only when #6006 folds the outcome facts into the one run source."],
+      ["job-outcomes", "Source: GET /api/runs — the unified run rows Docs reads (issue 2606); coded error and origin arrive only when issue 6006 folds the outcome facts into the one run source."],
       ["actions", "Source: GET /api/audit (mas_events) + /api/broker/orders (mas_trades). Simulated rows are labeled Sim, never live."],
       ["policy-decisions", "Source: GET /api/autopilot — mas_policy_verdicts, signed by RiskPolicyEngine. Dry-run verdicts are labeled simulated. Scheduled dry-run checks come from the monthly Autopilot evaluation schedule (Schedules home)."],
     ];
