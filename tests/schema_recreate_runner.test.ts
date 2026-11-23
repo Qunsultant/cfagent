@@ -141,7 +141,9 @@ describe("P5 runner — plan resolution (P4 finding 1: phased order)", () => {
     // mas_async_jobs (1 step): 462 → 463. Issue #5100 (F3 of #5094)
     // adds 13 literal ALTERs (4 job_run_records + 4 mas_trades + 5
     // mas_policy_verdicts): 463 → 476.
-    expect(p.steps).toHaveLength(485);
+    // Issue #5102 (F5 of #5094) adds migration 0084 (job_run_records
+    // binding columns: 4 ALTERs + 1 index): 485 → 490.
+    expect(p.steps).toHaveLength(490);
     expect(p.skipped).toHaveLength(1);
     expect(p.skipped[0].code).toBe(SEED_FORM_CODE);
     expect(p.skipped[0].reason).toMatch(/call site/i);
@@ -177,7 +179,9 @@ describe("P5 runner — plan resolution (P4 finding 1: phased order)", () => {
     // mas_async_jobs (1 step): 462 → 463. Issue #5100 (F3 of #5094)
     // adds 13 literal ALTERs (4 job_run_records + 4 mas_trades + 5
     // mas_policy_verdicts): 463 → 476.
-    expect(harness).toHaveLength(485);    // Production move 1: the rebuild CREATE for agent_price_catalogue
+    // Issue #5102 (F5 of #5094) adds migration 0084 (job_run_records
+    // binding columns: 4 ALTERs + 1 index): 485 → 490.
+    expect(harness).toHaveLength(490);    // Production move 1: the rebuild CREATE for agent_price_catalogue
     // must stay after the RENAME that clears its table (a second
     // table-creation for the same table cannot run before the rename
     // on real SQLite). Production move 2: the legacy seed is hoisted
@@ -328,7 +332,9 @@ describe("P5 runner — delta-to-steps selection (P4 finding 3, P4 finding 2)", 
     // Issue #5100 (F3 of #5094) adds 4 mas_trades ORM ALTERs (the
     // binding columns): the projected-model walk already has them
     // (the ORM CREATE carries them), so they are skipped: 9 → 13.
-    expect(selected.schema).toHaveLength(266);
+    // Issue #5102 (F5 of #5094) adds migration 0084 (job_run_records
+    // binding columns: 4 ALTERs + 1 index): 266 → 271.
+    expect(selected.schema).toHaveLength(271);
     expect(selected.seeds).toHaveLength(12);
     expect(selected.skipped).toHaveLength(13);
     expect(

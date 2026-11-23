@@ -618,6 +618,12 @@ describe("remainder catalogue — P3 long tail + ALTER reconciliation (#4282 P3)
       // catalogues (same ALTER text, D1 migration + DO probe).
       "schema.do.job_run_records.alter_table_add_column_definition_version",
       "schema.do.job_pipeline_instances.alter_table_add_column_run_definition_version",
+      // Issue #5102 (F5 of #5094) — the binding-tuple columns exist in
+      // both catalogues now (same ALTER text, D1 migration 0084 + DO probe).
+      "schema.do.job_run_records.alter_table_add_column_account_type",
+      "schema.do.job_run_records.alter_table_add_column_account_id",
+      "schema.do.job_run_records.alter_table_add_column_binding_scope",
+      "schema.do.job_run_records.alter_table_add_column_binding_source",
     ]);
     for (const entry of REMAINDER_CATALOGUE_ENTRIES) {
       if (crossPlane.has(entry.code)) continue;

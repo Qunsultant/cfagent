@@ -20,7 +20,7 @@
  * for broker Y. Absent filter fields match everything.
  */
 import { ACCOUNT_BINDING_SCOPES, ACCOUNT_TYPES } from "../config/accountBindings";
-import { isBrokerId } from "../trading/brokerCatalog";
+import { isBrokerId } from "../trading";
 import { isMissingIdLiteral } from "./consolidatedScheduling";
 
 export interface BindingFilter {
