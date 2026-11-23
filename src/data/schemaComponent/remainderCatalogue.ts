@@ -834,6 +834,17 @@ export const REMAINDER_CATALOGUE_ENTRIES: CatalogueEntry[] = [
     kind: "schema",
     form: "literal",
   },
+  {
+    // Issue #6202 — the D1 mirror declares the same table; `tenant_id` is
+    // added to the DO plane too, so both planes state one column set (an
+    // unused nullable column on DO, the projection stamp on D1).
+    code: "schema.do.job_stage_events.alter_table_add_column_tenant_id",
+    plane: "do",
+    table: "job_stage_events",
+    statement: `ALTER TABLE job_stage_events ADD COLUMN tenant_id TEXT`,
+    kind: "schema",
+    form: "literal",
+  },
 ];
 
 /** Build a fresh catalogue holding the remainder section. */

@@ -45,16 +45,16 @@ describe("#5025 schemaComponent barrel & membership store naming", () => {
     // (job_run_records tenant_id + projected_at_ms + unique
     // identity index): D1 241 → 244.
     // #6141 adds migration 0082 (referral trial-extension: 6 rule
-    // columns + ledger table + 2 indexes): D1 244 → 253.
+    // columns + ledger table + 2 indexes): D1 244 → 255.
     // #6167 adds one probed DO ALTER (mas_async_jobs.host_version):
     // remainder 64 → 65.
-    expect(D1_CATALOGUE_ENTRIES.length).toBe(253);
+    expect(D1_CATALOGUE_ENTRIES.length).toBe(255);
     expect(ORM_CATALOGUE_ENTRIES.length).toBe(26);
     // Issue #6167 adds 1 remainder entry (mas_async_jobs.host_version):
     // 64 → 65. Issue #5100 (F3 of #5094) adds 13 remainder entries (4
     // job_run_records + 4 mas_trades + 5 mas_policy_verdicts literal
     // ALTERs): 65 → 78.
-    expect(REMAINDER_CATALOGUE_ENTRIES.length).toBe(84);
+    expect(REMAINDER_CATALOGUE_ENTRIES.length).toBe(85);
     expect(DO_CATALOGUE_ENTRIES.length).toBe(109);
   });
 

@@ -620,7 +620,7 @@
       "file": "doSqliteJobStageEventAdapter.ts",
       "trigger": "listByRun()",
       "queries": [
-        "CREATE TABLE IF NOT EXISTS job_stage_events (\n      id INTEGER PRIMARY KEY AUTOINCREMENT,\n      event_key TEXT NOT NULL UNIQUE,\n      claim_key TEXT NOT NULL,\n      run_id TEXT NOT NULL,\n      job_id TEXT NOT NULL,\n      stage_id TEXT NOT NULL,\n      unit_id TEXT,\n      action TEXT NOT NULL,\n      at TEXT NOT NULL,\n      started_at TEXT,\n      ended_at TEXT,\n      detail TEXT,\n      stage_status TEXT,\n      duration_ms INTEGER,\n      unit_count INTEGER,\n      failed_unit_count INTEGER,\n      result_ref TEXT,\n      definition_version INTEGER\n    )",
+        "CREATE TABLE IF NOT EXISTS job_stage_events (\n      id INTEGER PRIMARY KEY AUTOINCREMENT,\n      event_key TEXT NOT NULL UNIQUE,\n      claim_key TEXT NOT NULL,\n      run_id TEXT NOT NULL,\n      job_id TEXT NOT NULL,\n      stage_id TEXT NOT NULL,\n      unit_id TEXT,\n      action TEXT NOT NULL,\n      at TEXT NOT NULL,\n      started_at TEXT,\n      ended_at TEXT,\n      detail TEXT,\n      stage_status TEXT,\n      duration_ms INTEGER,\n      unit_count INTEGER,\n      failed_unit_count INTEGER,\n      result_ref TEXT,\n      definition_version INTEGER,\n      tenant_id TEXT\n    )",
         "PRAGMA table_info(job_stage_events)",
         "ALTER TABLE job_stage_events ADD COLUMN stage_status TEXT",
         "ALTER TABLE job_stage_events ADD COLUMN duration_ms INTEGER",
@@ -628,6 +628,7 @@
         "ALTER TABLE job_stage_events ADD COLUMN failed_unit_count INTEGER",
         "ALTER TABLE job_stage_events ADD COLUMN result_ref TEXT",
         "ALTER TABLE job_stage_events ADD COLUMN definition_version INTEGER",
+        "ALTER TABLE job_stage_events ADD COLUMN tenant_id TEXT",
         "CREATE INDEX IF NOT EXISTS idx_job_stage_events_run ON job_stage_events (run_id)",
         "SELECT event_key, claim_key, run_id, job_id, stage_id, unit_id, action, at, started_at, ended_at, detail, stage_status, duration_ms, unit_count, failed_unit_count, result_ref, definition_version\n             FROM job_stage_events WHERE run_id = ? ORDER BY id ASC"
       ]

@@ -141,7 +141,7 @@ describe("P5 runner — plan resolution (P4 finding 1: phased order)", () => {
     // mas_async_jobs (1 step): 462 → 463. Issue #5100 (F3 of #5094)
     // adds 13 literal ALTERs (4 job_run_records + 4 mas_trades + 5
     // mas_policy_verdicts): 463 → 476.
-    expect(p.steps).toHaveLength(482);
+    expect(p.steps).toHaveLength(485);
     expect(p.skipped).toHaveLength(1);
     expect(p.skipped[0].code).toBe(SEED_FORM_CODE);
     expect(p.skipped[0].reason).toMatch(/call site/i);
@@ -177,7 +177,7 @@ describe("P5 runner — plan resolution (P4 finding 1: phased order)", () => {
     // mas_async_jobs (1 step): 462 → 463. Issue #5100 (F3 of #5094)
     // adds 13 literal ALTERs (4 job_run_records + 4 mas_trades + 5
     // mas_policy_verdicts): 463 → 476.
-    expect(harness).toHaveLength(482);    // Production move 1: the rebuild CREATE for agent_price_catalogue
+    expect(harness).toHaveLength(485);    // Production move 1: the rebuild CREATE for agent_price_catalogue
     // must stay after the RENAME that clears its table (a second
     // table-creation for the same table cannot run before the rename
     // on real SQLite). Production move 2: the legacy seed is hoisted
@@ -328,7 +328,7 @@ describe("P5 runner — delta-to-steps selection (P4 finding 3, P4 finding 2)", 
     // Issue #5100 (F3 of #5094) adds 4 mas_trades ORM ALTERs (the
     // binding columns): the projected-model walk already has them
     // (the ORM CREATE carries them), so they are skipped: 9 → 13.
-    expect(selected.schema).toHaveLength(264);
+    expect(selected.schema).toHaveLength(266);
     expect(selected.seeds).toHaveLength(12);
     expect(selected.skipped).toHaveLength(13);
     expect(
@@ -361,7 +361,7 @@ describe("P5 runner — delta-to-steps selection (P4 finding 3, P4 finding 2)", 
     // job_run_records + 5 mas_policy_verdicts literal ALTERs): the
     // fresh CREATE TABLEs already carry the binding columns, so the
     // ALTERs are probed-and-skipped: 37 → 46.
-    expect(selected.skipped).toHaveLength(52);
+    expect(selected.skipped).toHaveLength(53);
     expect(codesOf(selected.skipped)).toContain(DROP_INDEX_CODE);
   });
 

@@ -180,6 +180,7 @@ const REMAINDER_STATEMENT_SHA256 = {
   "schema.do.job_stage_events.alter_table_add_column_failed_unit_count": "89f2f0a34fbbe6f35ff9ac8339efe29dd8ef7f1031f822434775c3e236685d27",
   "schema.do.job_stage_events.alter_table_add_column_result_ref": "0c6dff851515512b1f081d5f1f256681e3639dbf8e1874b38fc4a64b942230e7",
   "schema.do.job_stage_events.alter_table_add_column_definition_version": "eb9826f93d5278655d90a7677adabff0190282354f7746e16804cd422fe58e8b",
+  "schema.do.job_stage_events.alter_table_add_column_tenant_id": "6ab3d1a2fb74a2e880d85751afd5718f7c0b831e57c54aacbb62c20bdfc34254",
   "seed.route.orchestrator_migration.insert_or_replace": "cf67ae430b5c1e25c7f7fbd393500411570765fef5261cbbec7badf1a243fc68",
 }
 
@@ -472,15 +473,15 @@ const P3_DELEGATED_FILES = [
 ];
 
 describe("remainder catalogue — P3 long tail + ALTER reconciliation (#4282 P3)", () => {
-  it("catalogues all 84 remainder statements: 8 table + 2 index + 72 alter + 1 drop + 1 seed-form", () => {
+  it("catalogues all 85 remainder statements: 8 table + 2 index + 73 alter + 1 drop + 1 seed-form", () => {
     const catalogue = buildRemainderCatalogue();
     // Issue #6167 adds 1 probed DO ALTER (mas_async_jobs.host_version):
     // 64 → 65. Issue #5100 (F3 of #5094) adds 13 literal ALTERs: the
     // job_run_records binding columns (4), the mas_trades binding columns
     // (4), and the mas_policy_verdicts binding columns (5): 65 → 78.
-    expect(REMAINDER_CATALOGUE_ENTRIES.length).toBe(84);
-    expect(catalogue.size()).toBe(84);
-    expect(catalogue.byKind("schema").length).toBe(83);
+    expect(REMAINDER_CATALOGUE_ENTRIES.length).toBe(85);
+    expect(catalogue.size()).toBe(85);
+    expect(catalogue.byKind("schema").length).toBe(84);
 
     expect(catalogue.byKind("seed").length).toBe(1);
     const verbs = new Map<string, number>();
@@ -506,19 +507,19 @@ describe("remainder catalogue — P3 long tail + ALTER reconciliation (#4282 P3)
     }
     expect(verbs.get("CREATE TABLE")).toBe(8);
     expect(verbs.get("CREATE INDEX")).toBe(2);
-    expect(verbs.get("ALTER TABLE")).toBe(72);
+    expect(verbs.get("ALTER TABLE")).toBe(73);
     expect(verbs.get("DROP INDEX")).toBe(1);
     expect(verbs.get("INSERT OR REPLACE")).toBe(1);
     expect(verbs.get("OTHER")).toBeUndefined();
     // Every code is unique and every entry is reachable by its code.
     const codes = new Set(REMAINDER_CATALOGUE_ENTRIES.map((e) => e.code));
-    expect(codes.size).toBe(84);
+    expect(codes.size).toBe(85);
     for (const entry of REMAINDER_CATALOGUE_ENTRIES) {
       expect(catalogue.get(entry.code).statement).toBe(entry.statement);
     }
     // Planes: do 64, d1 1, orm 9, index 3, route 1.
     // Issue #6167 adds one probed DO ALTER (mas_async_jobs.host_version).
-    expect(REMAINDER_CATALOGUE_ENTRIES.filter((e) => e.plane === "do").length).toBe(70);
+    expect(REMAINDER_CATALOGUE_ENTRIES.filter((e) => e.plane === "do").length).toBe(71);
     expect(REMAINDER_CATALOGUE_ENTRIES.filter((e) => e.plane === "d1").length).toBe(1);
     expect(REMAINDER_CATALOGUE_ENTRIES.filter((e) => e.plane === "orm").length).toBe(9);
     expect(REMAINDER_CATALOGUE_ENTRIES.filter((e) => e.plane === "index").length).toBe(3);
@@ -625,7 +626,7 @@ describe("remainder catalogue — P3 long tail + ALTER reconciliation (#4282 P3)
   });
 
   it("each entry's statement is byte-identical to the base (sha256 pin)", () => {
-    expect(Object.keys(REMAINDER_STATEMENT_SHA256).length).toBe(84);
+    expect(Object.keys(REMAINDER_STATEMENT_SHA256).length).toBe(85);
     for (const entry of REMAINDER_CATALOGUE_ENTRIES) {
       const digest = createHash("sha256")
         .update(entry.statement, "utf8")

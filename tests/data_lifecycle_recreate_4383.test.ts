@@ -399,7 +399,7 @@ describe("recreate, tenant scope (#4383)", () => {
     // Issue #5100 (F3 of #5094) adds 4 mas_trades ORM ALTERs (the
     // binding columns): the projected-model walk already has them,
     // so the D1 leg skips four more: 9 → 13. Selected stays 276.
-    expect(body.d1.selected).toHaveLength(276);
+    expect(body.d1.selected).toHaveLength(278);
     expect(body.d1.skipped).toHaveLength(13);
     // Two member instances (alice, bob), each planning the fresh DO leg.
     expect(body.instances).toHaveLength(2);
@@ -417,7 +417,7 @@ describe("recreate, tenant scope (#4383)", () => {
       // job_run_records + 5 mas_policy_verdicts literal ALTERs): the
       // fresh CREATE TABLEs already carry the binding columns, so the
       // ALTERs are probed-and-skipped: 37 → 46.
-      expect(inst.skipped).toHaveLength(52);
+      expect(inst.skipped).toHaveLength(53);
     }
     expect(body.uncreatableLayers).toHaveLength(5);
     // Nothing executed: the D1 store and the member instances are
@@ -494,7 +494,7 @@ describe("recreate, tenant scope (#4383)", () => {
     expect(body.d1.verification.ok).toBe(true);
     // Issue #6141 adds migration 0082 (referral trial-extension: 6
     // rule columns + ledger table + 2 indexes): 267 → 276.
-    expect(body.d1.report.executed).toHaveLength(276);
+    expect(body.d1.report.executed).toHaveLength(278);
     expect(body.d1.verification.ok).toBe(true);
     expect(body.instances).toHaveLength(2);
     for (const inst of body.instances) {

@@ -252,7 +252,8 @@ export const DO_CATALOGUE_ENTRIES: CatalogueEntry[] = [
       unit_count INTEGER,
       failed_unit_count INTEGER,
       result_ref TEXT,
-      definition_version INTEGER
+      definition_version INTEGER,
+      tenant_id TEXT
     )`,
     kind: "schema",
     form: "literal",

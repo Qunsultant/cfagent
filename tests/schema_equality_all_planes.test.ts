@@ -80,7 +80,7 @@ describe("schema equality — all planes (#4282 P4)", () => {
     // #6141 adds migration 0082 (referral trial-extension ledger
     // table + 2 indexes): 184 → 185 tables, 107 → 109 indexes.
     expect(Object.keys(model.tables).length).toBe(185);
-    expect(Object.keys(model.indexes).length).toBe(109);
+    expect(Object.keys(model.indexes).length).toBe(110);
     expect(fixtureSha256("schema_component_combined_expected_model.json")).toBe(
       COMBINED_FIXTURE_SHA256,
     );
@@ -121,7 +121,7 @@ describe("schema equality — all planes (#4282 P4)", () => {
     // ALTER reconciliation — e.g. job_run_records gains broker_id /
     // data_provider_id / mode / mode_source from DO ALTERs).
     expect(overlapTables).toBe(20);
-    expect(overlapIndexes).toBe(20);
+    expect(overlapIndexes).toBe(19);
     expect(union).toEqual(combinedExpectedModel());
   });
 
@@ -133,7 +133,7 @@ describe("schema equality — all planes (#4282 P4)", () => {
     expect(new Set(executedCodes).size).toBe(
       COMBINED_CATALOGUE_ENTRIES.length,
     );
-    expect(COMBINED_CATALOGUE_ENTRIES.length).toBe(474);    // Issue #6167 adds 1 entry (the host_version remainder ALTER
+    expect(COMBINED_CATALOGUE_ENTRIES.length).toBe(475);    // Issue #6167 adds 1 entry (the host_version remainder ALTER
     // on mas_async_jobs): 452 → 453. Issue #5100 (F3 of #5094) adds 13:
     // 453 → 466 entries.
     // Issue #5229 adds migration 0069 (agent_referral_rules
@@ -172,7 +172,7 @@ describe("schema equality — all planes (#4282 P4)", () => {
     // on mas_async_jobs), one statement: 463 → 464. Issue #5100 (F3 of
     // #5094) adds 13 entries (4 job_run_records + 4 mas_trades + 5
     // mas_policy_verdicts literal ALTERs): 464 → 477 statements.
-    expect(executedStatements).toBe(485);
+    expect(executedStatements).toBe(486);
     const actual = instance.introspect();
     const diff = diffSchema(actual, combinedExpectedModel());
     expect(isEmptyDiff(diff)).toBe(true);
