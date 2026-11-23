@@ -750,11 +750,11 @@ function scoreCandidate(
   eventRisk: string | null,
   config: ResearchConfig
 ): number {
-  const avgSpread = economics.legs.reduce(
-    (s, l) => s + (l.ask - l.bid) / l.mid,
+  const avgSpreadPct = economics.legs.reduce(
+    (s, l) => s + ((l.ask - l.bid) / l.mid) * 100,
     0
   ) / Math.max(economics.legs.length, 1);
-  const liquidity = Math.max(0, Math.min(1, 1 - avgSpread / config.maxSpreadPct));
+  const liquidity = Math.max(0, Math.min(1, 1 - avgSpreadPct / config.maxSpreadPct));
   const rewardRisk =
     economics.maxLoss > 0 && economics.maxGain !== null
       ? Math.min(economics.maxGain / economics.maxLoss, 3) / 3

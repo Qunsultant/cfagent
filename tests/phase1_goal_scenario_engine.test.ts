@@ -284,7 +284,7 @@ describe("scenario grid evaluator (issue #1107)", () => {
       constraints: {
         contracts: 1,
         dteWindow: { min: 7, max: 60 },
-        liquidityFloor: { minOpenInterest: 50, minVolume: 10, maxSpreadPct: 0.2 },
+        liquidityFloor: { minOpenInterest: 50, minVolume: 10, maxSpreadPct: 20 },
       },
     });
     const okByName = Object.fromEntries(ok.verdicts.map((v) => [v.constraint, v.status]));

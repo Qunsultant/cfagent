@@ -209,10 +209,10 @@ export function gateQuoteQuality(
       continue;
     }
     const mid = (leg.bid + leg.ask) / 2;
-    const spreadPct = (leg.ask - leg.bid) / mid;
+    const spreadPct = ((leg.ask - leg.bid) / mid) * 100;
     if (spreadPct > cfg.maxSpreadPct) {
       reasons.push(
-        `${label}: spread ${(spreadPct * 100).toFixed(1)}% exceeds ${(cfg.maxSpreadPct * 100).toFixed(0)}%.`
+        `${label}: spread ${spreadPct.toFixed(1)}% exceeds ${cfg.maxSpreadPct.toFixed(0)}%.`
       );
     }
     if (leg.quoteTimestamp) {

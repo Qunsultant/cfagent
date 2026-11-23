@@ -272,7 +272,7 @@ describe("runResearchPipeline", () => {
   });
 
   it("amendment 1: a tightened threshold changes gate behavior and the snapshot", async () => {
-    const tight: ResearchConfig = testConfig({ maxSpreadPct: 0.001 });
+    const tight: ResearchConfig = testConfig({ maxSpreadPct: 0.1 });
     const report = await runResearchPipeline(
       { provider: fixtureProvider() },
       tight,
@@ -284,7 +284,7 @@ describe("runResearchPipeline", () => {
     expect(
       report.watchlist.some((w) => w.reason.toLowerCase().includes("spread"))
     ).toBe(true);
-    expect(report.configSnapshot.maxSpreadPct).toBe(0.001);
+    expect(report.configSnapshot.maxSpreadPct).toBe(0.1);
   });
 
   it("publishes 'no qualifying opportunities' when everything is filtered", async () => {

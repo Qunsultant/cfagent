@@ -269,7 +269,7 @@ const CONFIG_FIELDS: {
     hint: "Screening universe — resolved from the listings directory by market-cap rank.",
   },
   { key: "quoteFreshnessSeconds", label: "Quote freshness (s)", type: "number", hint: "Option quote max age (quote-quality gate)." },
-  { key: "maxSpreadPct", label: "Max spread (fraction of mid)", type: "number", hint: "Quote-quality gate threshold." },
+  { key: "maxSpreadPct", label: "Max spread (% of mid)", type: "number", hint: "Quote-quality gate threshold." },
   { key: "minOptionVolume", label: "Min option volume", type: "number", hint: "Activity threshold." },
   { key: "minOpenInterest", label: "Min open interest", type: "number", hint: "Activity threshold." },
   { key: "minDte", label: "Min DTE", type: "number", hint: "Minimum days to expiry per leg." },

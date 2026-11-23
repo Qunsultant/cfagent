@@ -36,7 +36,7 @@ export interface ResearchConfig {
   quoteFreshnessSeconds: number;
   /** Underlying quote max age in seconds. */
   maxQuoteAgeSeconds: number;
-  /** Maximum bid/ask spread as a fraction of mid (configurable). */
+  /** Maximum bid/ask spread as a percent of mid (configurable). */
   maxSpreadPct: number;
   /** Minimum option volume (configurable activity threshold). */
   minOptionVolume: number;
@@ -99,7 +99,7 @@ export const RESEARCH_CONFIG_DEFAULTS: ResearchConfig = {
   maxIdeas: 5,
   quoteFreshnessSeconds: 300,
   maxQuoteAgeSeconds: 900,
-  maxSpreadPct: 0.15,
+  maxSpreadPct: 15,
   minOptionVolume: 10,
   minOpenInterest: 50,
   minDte: 7,
@@ -162,7 +162,7 @@ export const RESEARCH_CONFIG_SCHEMA: ConfigSchemaField[] = [
   { key: "maxIdeas", label: "Max qualified ideas", type: "number", default: RESEARCH_CONFIG_DEFAULTS.maxIdeas, hint: "Spec: up to five." },
   { key: "quoteFreshnessSeconds", label: "Quote freshness (s)", type: "number", default: RESEARCH_CONFIG_DEFAULTS.quoteFreshnessSeconds, hint: "Option quote max age." },
   { key: "maxQuoteAgeSeconds", label: "Underlying quote max age (s)", type: "number", default: RESEARCH_CONFIG_DEFAULTS.maxQuoteAgeSeconds, hint: "Underlying snapshot max age." },
-  { key: "maxSpreadPct", label: "Max spread (fraction of mid)", type: "number", default: RESEARCH_CONFIG_DEFAULTS.maxSpreadPct, hint: "Quote-quality gate threshold." },
+  { key: "maxSpreadPct", label: "Max spread (% of mid)", type: "number", default: RESEARCH_CONFIG_DEFAULTS.maxSpreadPct, hint: "Quote-quality gate threshold." },
   { key: "minOptionVolume", label: "Min option volume", type: "number", default: RESEARCH_CONFIG_DEFAULTS.minOptionVolume, hint: "Activity threshold." },
   { key: "minOpenInterest", label: "Min open interest", type: "number", default: RESEARCH_CONFIG_DEFAULTS.minOpenInterest, hint: "Activity threshold." },
   { key: "minDte", label: "Min DTE", type: "number", default: RESEARCH_CONFIG_DEFAULTS.minDte, hint: "Minimum days to expiry per leg." },
@@ -220,7 +220,7 @@ export function validateResearchConfig(config: ResearchConfig): string[] {
   if (!(config.maxIdeas >= 1 && config.maxIdeas <= 20)) errors.push("maxIdeas must be 1..20");
   if (!(config.quoteFreshnessSeconds > 0)) errors.push("quoteFreshnessSeconds must be positive");
   if (!(config.maxQuoteAgeSeconds > 0)) errors.push("maxQuoteAgeSeconds must be positive");
-  if (!(config.maxSpreadPct > 0 && config.maxSpreadPct < 2)) errors.push("maxSpreadPct must be in (0, 2)");
+  if (!(config.maxSpreadPct > 0 && config.maxSpreadPct < 200)) errors.push("maxSpreadPct must be in (0, 200)");
   if (!(config.minOptionVolume >= 0)) errors.push("minOptionVolume must be >= 0");
   if (!(config.minOpenInterest >= 0)) errors.push("minOpenInterest must be >= 0");
   if (!(config.minDte >= 0)) errors.push("minDte must be >= 0");
