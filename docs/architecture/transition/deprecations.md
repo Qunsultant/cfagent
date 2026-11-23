@@ -588,3 +588,11 @@ unbound, rather than silently dropping bytes to legacy DO storage.
 - Replacement: `src/client/BrokerDynamicMenu.tsx` (`BrokerDynamicMenu`, `SettingsMenu`).
 - Consumers at deprecation: zero production consumers (`SettingsMenu.tsx` and all tests import `BrokerDynamicMenu.tsx` directly).
 - Deletion condition: zero consumers plus an owner decision plus a gate amendment; deletion is never part of a program slice.
+
+## 2026-11-23 — #6029 (b) retires the dead `research.scheduleCron` setting
+
+- Setting: `research.scheduleCron` (the "Daily schedule (cron)" row of the research settings schema)
+- Date: 2026-11-23
+- Reason: Issue #6029 (b), sub-issue #6299. The setting was stored, validated and served, and **no code read it** — the filter editor advertised a schedule the nightly run never honoured (the run fires from the tick rider plus `shouldFireResearchTick`). Removing a dead setting removes nothing that runs, which is why this half of #6029 lands before the stored schedule (#6298).
+- Tolerance: a stored `research.scheduleCron` value is ignored — the loader iterates the declared settings, so the value is never read and never fails a load. A `POST /api/research/settings` that names the key is refused by name with this reason instead of being persisted again (`RESEARCH_CONFIG_RETIRED_KEYS`).
+- Follow-on: the cadence becomes editable when the stored schedule record lands (#6298); the rider branch is retired in the same sub-issue after that.
