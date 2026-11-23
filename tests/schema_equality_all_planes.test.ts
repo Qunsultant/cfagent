@@ -188,7 +188,9 @@ describe("schema equality — all planes (#4282 P4)", () => {
     // Issue #5102 (F5 of #5094) adds 5 entries (migration 0084:
     // 4 job_run_records ALTERs + 1 index), each one statement:
     // 486 → 491 statements.
-    expect(executedStatements).toBe(491);
+    // #6151 S3 adds migration 0085 (saved nav presets: 2 tables + 2 indexes), each one statement:
+    // 491 → 495 statements.
+    expect(executedStatements).toBe(495);
     const actual = instance.introspect();
     const diff = diffSchema(actual, combinedExpectedModel());
     expect(isEmptyDiff(diff)).toBe(true);
