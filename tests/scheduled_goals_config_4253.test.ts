@@ -379,4 +379,22 @@ describe("stale opportunity-hunt cron is reconciled once to the config value (#6
       "0 8 * * *",
     );
   });
+
+  it("6293-C05 a goal with a different operation is left untouched by the reconciliation", async () => {
+    // The id alone does not identify the shipped opportunity-hunt
+    // goal: a stored goal that reuses the id with another operation
+    // (a fixture running "search.query") keeps its step-hour cron.
+    const { agent: sqlAgent, store } = makeSqlAgent();
+    store.save(goalToRecord({ ...staleHunt(), operation: "search.query" } as never));
+    const sqlGoals = await sqlAgent.listGoals();
+    expect(sqlGoals.find((g: any) => g.id === "opportunity-hunt")?.cron).toBe("0 */6 * * *");
+    expect((store.get("opportunity-hunt")?.definition as any).cron).toBe("0 */6 * * *");
+    const { agent: kvAgent, kv } = makeKvAgent();
+    kv.set("goals", [{ ...staleHunt(), operation: "search.query" }]);
+    const kvGoals = await kvAgent.listGoals();
+    expect(kvGoals.find((g: any) => g.id === "opportunity-hunt")?.cron).toBe("0 */6 * * *");
+    expect((kv.get("goals") as any[]).find((g) => g.id === "opportunity-hunt")?.cron).toBe(
+      "0 */6 * * *",
+    );
+  });
 });
