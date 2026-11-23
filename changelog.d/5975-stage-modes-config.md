@@ -1,0 +1,3 @@
+### Added
+
+- **The OODA per-stage execution mode is a stored setting, not only an env var (#5975, sub-issue #6268):** `ResearchConfig.stageModes` persists the per-stage map as JSON in the existing settings store, `GET /research/settings` returns it and `POST /research/settings` accepts it — an unknown stage or axis is refused by name and nothing is written. A run now resolves **stored over `RESEARCH_STAGE_MODES`, per stage and per axis** (a stage present in only one carrier survives), and both dispatch paths — manual `POST /research/run` and the scheduled tick — pass the owner's stored map, so the two run the same modes. The env carrier keeps working exactly as before; it is the deployment default, not the only carrier. #CAIO-quns

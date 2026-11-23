@@ -44,6 +44,8 @@ import type { ResearchEnrichStageOutput } from "../services/researchEnrichHandof
 import {
   resolveResearchJobConfig,
   resolveResearchStageModes,
+  mergeResearchStageModes,
+  type ResearchStageModes,
   type ResearchStorageMode,
 } from "../config/researchJobConfig";
 import { newRunId } from "../services/executionTreeIds";
@@ -88,6 +90,12 @@ export interface DispatchResearchEngineInput {
   stores?: JobPipelineDeps["stores"];
   runRecorder?: JobRunRecorder;
   flags?: Pick<FeatureFlagPort, "isEnabled">;
+  /**
+   * Issue #5975 - the stored per-stage modes (ResearchConfig.stageModes).
+   * They win over the deployment default (`RESEARCH_STAGE_MODES`) per stage
+   * and per axis; absent means "the deployment default is the whole map".
+   */
+  stageModes?: ResearchStageModes;
   /** Issue #5912 — the venue/mode this run names; rides the job params. */
   brokerId?: string;
   mode?: string;
@@ -285,7 +293,13 @@ export async function dispatchResearchEngineRun(
     userLogin: input.userLogin,
     trigger: input.trigger,
     // Issue #5916 — per-stage overrides come from one config value.
-    stageModes: resolveResearchStageModes(input.env),
+    // Issue #5975 - the stored configuration wins over the deployment
+    // default, per stage and per axis, so a run started from the settings
+    // page and a run started by the tick resolve the same modes.
+    stageModes: mergeResearchStageModes(
+      resolveResearchStageModes(input.env),
+      input.stageModes,
+    ),
     // Issue #5912 — the venue/mode this run names (carried to analyze.ooda).
     ...(input.brokerId ? { brokerId: input.brokerId } : {}),
     ...(input.mode ? { mode: input.mode } : {}),

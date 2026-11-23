@@ -13,6 +13,13 @@
 
 // Issue #6032 — the accepted universe set lives in the registry, not here.
 import { normalizeResearchUniverseId, researchUniverseIds } from "../trading";
+// Issue #5975 - the per-stage mode map and its one validator live in the job
+// config, so the deployment default and the stored configuration are judged
+// by the same rule.
+import {
+  validateResearchStageModes,
+  type ResearchStageModes,
+} from "../config/researchJobConfig";
 
 export interface ResearchConfig {
   /** Minimum market cap for company screening (spec default: $5B). */
@@ -75,6 +82,13 @@ export interface ResearchConfig {
   oodaMaxIterations: number;
   /** Rules version pinned on every published idea (spec §9). */
   rulesVersion: string;
+  /**
+   * Issue #5975 - the per-stage execution-mode overrides the OODA job runs
+   * with, persisted here instead of only in `RESEARCH_STAGE_MODES`. Empty by
+   * default (every stage inherits the job mode); a stored value wins over the
+   * deployment default, per stage and per axis.
+   */
+  stageModes: ResearchStageModes;
 }
 
 export const RESEARCH_CONFIG_DEFAULTS: ResearchConfig = {
@@ -109,6 +123,7 @@ export const RESEARCH_CONFIG_DEFAULTS: ResearchConfig = {
   maxChainsPerRun: 12,
   oodaMaxIterations: 40,
   rulesVersion: "1.0.0",
+  stageModes: {},
 };
 
 /** Storage idiom mirrors mas_settings (key/value/updated_at, DELETE+INSERT). */
@@ -170,6 +185,16 @@ export const RESEARCH_CONFIG_SCHEMA: ConfigSchemaField[] = [
 
 function parseStoredValue(key: ResearchConfigKey, raw: string): unknown {
   const def = RESEARCH_CONFIG_DEFAULTS[key];
+  // Issue #5975 - a structured value (the stage-mode map) persists as JSON and
+  // is parsed back to its object form; a corrupt value throws, so the service
+  // falls closed to the defaults rather than running a half map.
+  if (def !== null && typeof def === "object") {
+    try {
+      return JSON.parse(raw);
+    } catch {
+      throw new Error(`Invalid JSON for ${key}: ${raw}`);
+    }
+  }
   if (typeof def === "boolean") {
     if (raw === "1" || raw.toLowerCase() === "true") return true;
     if (raw === "0" || raw.toLowerCase() === "false") return false;
@@ -220,6 +245,11 @@ export function validateResearchConfig(config: ResearchConfig): string[] {
   }
   if (!(config.riskFreeRate >= 0 && config.riskFreeRate < 1)) errors.push("riskFreeRate must be in [0, 1)");
   if (!(config.maxCandidates >= 1 && config.maxCandidates <= 100)) errors.push("maxCandidates must be 1..100");
+  // Issue #5975 - the stored per-stage modes are judged by the job config's
+  // validator, by name, so a typo cannot persist and silently keep the job
+  // mode. `stageModes` names the carrier in the message.
+  const stageModes = validateResearchStageModes(config.stageModes, "stageModes");
+  errors.push(...stageModes.errors);
   return errors;
 }
 
@@ -269,7 +299,9 @@ export class ResearchConfigService {
             ? value
             ? "1"
             : "0"
-          : String(value);
+          : typeof value === "object"
+            ? JSON.stringify(value)
+            : String(value);
       this.store.set(this.keyFor(key), raw);
     }
     return { config: next, errors: [] };
