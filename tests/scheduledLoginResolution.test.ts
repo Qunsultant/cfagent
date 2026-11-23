@@ -31,11 +31,14 @@ describe("scheduled wrapper wiring (#1965)", () => {
   );
   const orchestrator = readFileSync("src/agents/orchestrator.ts", "utf8");
 
-  it("all four scheduled wrappers resolve login through the helper, payload first", () => {
+  it("every scheduled wrapper resolves login through the helper, payload first", () => {
     const helperCall =
       "resolveScheduledLogin(payload?.userLogin, savedContext?.userLogin)";
+    // Four wrappers in the callbacks module, plus the research schedule
+    // callback added in #6298 (#6029 (a)), which lives in orchestrator.ts
+    // beside runPipelineJobSchedule and resolves the login the same way.
     expect(callbacks.split(helperCall).length - 1).toBe(4);
-    expect(orchestrator.split(helperCall).length - 1).toBe(1);
+    expect(orchestrator.split(helperCall).length - 1).toBe(2);
   });
 
   it("no wrapper keeps the old saved-context-first priority", () => {

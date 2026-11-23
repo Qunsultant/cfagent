@@ -150,8 +150,12 @@ describe("POST /api/schedules/create (#111)", () => {
     // (a job defined from the externalized spec is schedulable through the
     // same store; the callback runs the job by id). The pin's purpose —
     // no internal-only callback is creatable — is unchanged.
+    // Issue #6298 (#6029 (a)) deliberately grew it by one more:
+    // runResearchSchedule — the OODA run fires through runResearchAndPublish,
+    // the one path whose six stage deps are wired. The pin's purpose — no
+    // internal-only callback is creatable — is unchanged.
     expect([...CREATABLE_SCHEDULE_CALLBACKS].sort()).toEqual(
-      ["autonomousGoalScreen", "autonomousMarketScreen", "autonomousOptionsAnalysis", "autonomousStrategyDiscovery", "runPipelineJobSchedule"].sort()
+      ["autonomousGoalScreen", "autonomousMarketScreen", "autonomousOptionsAnalysis", "autonomousStrategyDiscovery", "runPipelineJobSchedule", "runResearchSchedule"].sort()
     );
     // Internal-only callbacks are armed by the agent itself, never via the route.
     expect(CREATABLE_SCHEDULE_CALLBACKS as readonly string[]).not.toContain("executeAsyncJob");

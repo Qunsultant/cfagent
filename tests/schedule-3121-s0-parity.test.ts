@@ -152,12 +152,18 @@ describe("S0-P03 creatable callbacks (B-T2-02): allow-list is the four screening
     // spec is schedulable through the same store, and its callback runs
     // that engine job by id. The pin's purpose — nothing internal-only is
     // creatable — is unchanged.
+    // Issue #6298 (#6029 (a)) grew the list by one: the OODA research run is
+    // schedulable through the same store, with its own callback because the
+    // research stage deps are wired only in the engine seam
+    // (`runResearchAndPublish`), not in the ScheduledAgent door. The pin's
+    // purpose — nothing internal-only is creatable — is unchanged.
     expect([...CREATABLE_SCHEDULE_CALLBACKS]).toEqual([
       "autonomousOptionsAnalysis",
       "autonomousMarketScreen",
       "autonomousStrategyDiscovery",
       "autonomousGoalScreen",
       "runPipelineJobSchedule",
+      "runResearchSchedule",
     ]);
     expect(CREATABLE_SCHEDULE_CALLBACKS_INVENTORY).toEqual([
       ...CREATABLE_SCHEDULE_CALLBACKS,
