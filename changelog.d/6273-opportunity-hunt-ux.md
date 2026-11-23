@@ -1,0 +1,3 @@
+### Added
+
+- **Opportunity Hunt sub-tab under Stock Hub (issue 6273):** the Stock Hub gains an "Opportunity Hunt" sub-menu entry and sub-tab (`?tab=stock-hub&view=opportunity-hunt`). From the tab the hunt runs on demand via the new synchronous seam `POST /api/opportunity-hunt/run`, which reuses the hunt as-is over the persisted technicals bars and returns the full result — setups per symbol/strategy, scanned/skipped counts, asOf — rendered as a setups table; the latest scheduled run from the run ledger sits alongside it. The hunt logic, evaluator, strategies, and schedule are unchanged. #cfo-qunso

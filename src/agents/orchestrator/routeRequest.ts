@@ -80,6 +80,7 @@ import { handleBrokerGateRoutes } from "../routes/brokerGate";
 import { handleAlpacaMarketDataRoutes, handleAlpacaTradingRoutes } from "../routes/alpaca";
 import { handleMarketDataQuoteResearchRoutes, handleMarketDataCompareScreenRoutes } from "../routes/marketDataResearch";
 import { handleScreenerResearchRoutes } from "../routes/screenerResearch";
+import { handleOpportunityHuntRoutes } from "../routes/opportunityHunt";
 import { handleSchedulesRoutes, makeRunScheduleCallback } from "../routes/schedules";
 import { handleStockCopilotRoutes } from "../routes/stockCopilot";
 import { handleCopilotChannelsRoutes } from "../routes/copilotChannels";
@@ -847,6 +848,15 @@ export async function routeRequest(deps: RouteRequestDeps, request: Request): Pr
     env: deps.env,
   });
   if (screenerResearchResponse) return screenerResearchResponse;
+  // Issue 6273: Opportunity Hunt on-demand run (POST /opportunity-hunt/run)
+  // lives in src/agents/routes/opportunityHunt.ts
+  // (handleOpportunityHuntRoutes), invoked at this exact position in the
+  // sequential path.endsWith sequence (right after the screener + research
+  // delegation, before the maintenance block); a non-null return matched.
+  const opportunityHuntResponse = await handleOpportunityHuntRoutes(request, url, path, sessionId, {
+    env: deps.env,
+  });
+  if (opportunityHuntResponse) return opportunityHuntResponse;
   // Issue #2280: maintenance routes run before the schedules routes.
   const maintenanceResponse = await handleMaintenanceRoutes(request, url, path, sessionId, {
     agentCtx: deps.ctx,

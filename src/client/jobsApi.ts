@@ -9,6 +9,7 @@
  * (withCsrfInit merges the CSRF header alongside).
  */
 import type { JobRunRecord } from "../services/jobRunRecords";
+import type { OpportunityHuntResult } from "../services/opportunityHunt";
 import type { UnifiedScheduleRecord } from "../data/unifiedSchedulePorts";
 import type { ScheduleProvenance } from "../schedule";
 import type { ScheduleSource } from "../config/scheduleSourceModes";
@@ -323,6 +324,20 @@ export async function triggerResearchRun(): Promise<{ runId: string | null }> {
     },
   );
   return { runId: data.engineJobId ?? data.reportId ?? null };
+}
+
+/**
+ * Issue 6273 — run the Opportunity Hunt on demand and return the full
+ * result (setups per symbol/strategy, scanned/skipped counts, asOf).
+ * The synchronous seam (POST /api/opportunity-hunt/run) reuses the hunt
+ * as-is; the scheduled goal and its trigger stay the single scheduled
+ * path, and this on-demand run writes no ledger row — its result is
+ * shown immediately by the caller.
+ */
+export function runOpportunityHuntNow() {
+  return api<{ ok: boolean } & OpportunityHuntResult>("/api/opportunity-hunt/run", {
+    method: "POST",
+  });
 }
 
 export function removeGoal(id: string) {

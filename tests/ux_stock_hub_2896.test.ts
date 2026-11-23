@@ -57,17 +57,18 @@ describe("Stock Hub split (#2896)", () => {
     expect(ROUTES.filter(hasNavEntry)).toHaveLength(28);
   });
 
-  it("defines the Hub tab set: stocks, new-screen (+run-screen alias), research (+ patterns, presets #2954)", () => {
-    expect([...STOCK_HUB_TABS]).toEqual(["stocks", "new-screen", "run-screen", "research", "patterns", "presets"]);
+  it("defines the Hub tab set: stocks, new-screen (+run-screen alias), research (+ patterns, presets #2954, opportunity-hunt #6273)", () => {
+    expect([...STOCK_HUB_TABS]).toEqual(["stocks", "new-screen", "run-screen", "research", "patterns", "opportunity-hunt", "presets"]);
     expect(isValidStockHubTab("stocks")).toBe(true);
     expect(isValidStockHubTab("research")).toBe(true);
+    expect(isValidStockHubTab("opportunity-hunt")).toBe(true);
     expect(isValidStockHubTab("options")).toBe(false);
   });
 
-  it("keeps the stock screener menu's sub-menus, repointed at Hub tabs (+ patterns, presets #2954)", () => {
+  it("keeps the stock screener menu's sub-menus, repointed at Hub tabs (+ patterns, presets #2954, opportunity-hunt #6273)", () => {
     const subs = SUB_MENU_CONFIGS["stock-hub"];
     expect(subs).toBeDefined();
-    expect(subs.map((s) => s.id)).toEqual(["screeners", "new-screen", "research", "patterns", "presets"]);
+    expect(subs.map((s) => s.id)).toEqual(["screeners", "new-screen", "research", "patterns", "opportunity-hunt", "presets"]);
     for (const sub of subs) {
       expect(sub.description.length).toBeGreaterThan(0);
       expect(NAV_ICON_MAP[sub.icon!]).toBeDefined();
@@ -87,6 +88,13 @@ describe("Stock Hub split (#2896)", () => {
       tab: "stock-hub",
       view: "research",
     });
+    expect(deepLinkForNavNode("stock-hub", "opportunity-hunt")).toEqual({
+      tab: "stock-hub",
+      view: "opportunity-hunt",
+    });
+    expect(deepLinkHrefForNavNode("stock-hub", "opportunity-hunt")).toBe(
+      "?tab=stock-hub&view=opportunity-hunt",
+    );
     expect(SUB_MENU_CONFIGS["screeners"]).toBeUndefined();
   });
 

@@ -48,6 +48,7 @@ import { RunDetailView, type RunDetailConfirmation } from "./RunDetailView";
 import { MorningDigest } from "./MorningDigest";
 import { MarketDataResearchHub, type User as ResearchUser } from "./MarketDataResearchHub";
 import { PatternsPanel } from "./PatternsPanel";
+import { OpportunityHuntPanel } from "./OpportunityHuntPanel";
 import { PresetsPanel } from "./PresetsPanel";
 import { buildAppliedPatternParams } from "./patternApplyHandoff";
 import { stockPatternById } from "../workflows/stockPatternCatalog";
@@ -135,7 +136,7 @@ export function providerFellBackNotice(state: TenantProvidersState): string | nu
   );
 }
 
-export type StockHubTab = "stocks" | "new-screen" | "run-screen" | "research" | "patterns" | "presets";
+export type StockHubTab = "stocks" | "new-screen" | "run-screen" | "research" | "patterns" | "opportunity-hunt" | "presets";
 
 export const STOCK_HUB_TABS: readonly StockHubTab[] = [
   "stocks",
@@ -143,6 +144,7 @@ export const STOCK_HUB_TABS: readonly StockHubTab[] = [
   "run-screen",
   "research",
   "patterns",
+  "opportunity-hunt",
   "presets",
 ] as const;
 
@@ -1015,6 +1017,18 @@ export function StockHub({
       },
     },
     {
+      // Issue 6273: Opportunity Hunt sub-tab — run the hunt on demand
+      // and show its output (setups per symbol/strategy).
+      id: "opportunity-hunt",
+      label: "Opportunity Hunt",
+      icon: "🎯",
+      tooltip: {
+        eyebrow: "OPPORTUNITY HUNT",
+        title: "Opportunity Hunt",
+        description: "Entry signals from the pattern strategies over the tradable universe's daily closes — run it on demand and see the setups.",
+      },
+    },
+    {
       id: "presets",
       label: "Presets",
       icon: "💾",
@@ -1662,6 +1676,19 @@ export function StockHub({
               }
             }}
           />
+        </div>
+      )}
+
+      {/* 5. Opportunity Hunt Panel (Issue 6273). */}
+      {visitedTabs.has("opportunity-hunt") && (
+        <div
+          role="tabpanel"
+          id="screener-tabpanel-opportunity-hunt"
+          aria-labelledby="cap-tab-opportunity-hunt"
+          hidden={hubTab !== "opportunity-hunt"}
+          style={hubTab !== "opportunity-hunt" ? { display: "none" } : undefined}
+        >
+          <OpportunityHuntPanel />
         </div>
       )}
 
