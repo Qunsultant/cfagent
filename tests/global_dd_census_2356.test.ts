@@ -1124,6 +1124,9 @@ const STEP5B_PORT_SITES: Array<[string, string, number]> = [
   // builder adds three list sites in auth.ts (alias rows,
   // reverse-index entries, memberships for the cleanup pass),
   // same factory — no new funnel, no bypass.
+  // Bumped 23 -> 24 for issue #6238: the membership-index repair
+  // route adds one list site in auth.ts (full membership set for
+  // the index rebuild), same factory — no new funnel, no bypass.
   // Slice 3 of Qunsultant/cfagent#2902 (2026-11-05): the 20 list
   // sites move verbatim from src/server.ts to
   // src/server/routes/auth.ts with the IAAA lifecycle; the count
@@ -1141,7 +1144,7 @@ const STEP5B_PORT_SITES: Array<[string, string, number]> = [
   // before "src/server/routes/otelArchive.ts" sorts before
   // "src/server/routes/platform.ts" sorts before
   // "src/server/routes/privacy.ts".)
-  ["src/server/routes/auth.ts", "listSessionFamilyEntries", 23],
+  ["src/server/routes/auth.ts", "listSessionFamilyEntries", 24],
   ["src/server/routes/auth.ts", "wiredAccessRequestStore", 1],
   ["src/server/routes/auth.ts", "wiredMembershipStore", 4],
   // #5169 (2026-11-17): the OTel archive routes compose

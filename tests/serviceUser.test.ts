@@ -10,6 +10,7 @@ import {
 } from "../src/security/authorization";
 import { IAAA_ALIAS_KEY_PREFIX } from "../src/security/iaaaMigration";
 import type { KvLike } from "../src/security/kvResilience";
+import type { SessionData } from "../src/types";
 
 const PROVISION = "/api/admin/service-user/provision";
 const REVOKE = "/api/admin/service-user/revoke";
@@ -77,6 +78,8 @@ async function makeCtx(opts: {
   serviceLogin?: string | null;
   defaultTenantId?: string;
   preexisting?: Membership[];
+  /** #6259 — verified-session seam: when present, resolveActingSession returns it. */
+  session?: SessionData | null;
 }): Promise<{ ctx: ServiceUserRouteContext; audit: ReturnType<typeof vi.fn>; store: MembershipStore }> {
   const store = createMemoryMembershipStore();
   for (const m of opts.callerMemberships ?? []) await store.put(m);
@@ -92,6 +95,7 @@ async function makeCtx(opts: {
     aliasKv: kv,
     serviceLogin: opts.serviceLogin === undefined ? SERVICE_LOGIN : opts.serviceLogin,
     defaultTenantId: opts.defaultTenantId ?? "primary",
+    ...(opts.session !== undefined ? { session: opts.session } : {}),
   } as unknown as ServiceUserRouteContext;
   return { ctx, audit, store };
 }
@@ -346,5 +350,67 @@ describe("GET /api/admin/service-user/status (#2331 slice 1)", () => {
     const denied = await makeCtx({ callerMemberships: [] });
     const deniedRes = await call(denied.ctx, STATUS, "GET", ADMIN_LOGIN);
     expect(deniedRes.status).toBe(403);
+  });
+});
+
+describe("caller identity resolution (#6259: one path, session-authoritative)", () => {
+  const STALE_ID = "old-owner-id";
+  const LIVE_ID = "v1:owner-derived-id";
+
+  function liveSession(): SessionData {
+    return {
+      githubLogin: ADMIN_LOGIN,
+      githubAvatar: "",
+      githubName: "",
+      createdAt: 1,
+      internalUserId: LIVE_ID,
+    };
+  }
+
+  function revokedPlatformAdmin(userId: string): Membership {
+    return {
+      membershipId: `m-revoked-${userId}`,
+      internalUserId: userId,
+      tenantId: "primary",
+      roleBindings: [
+        { role: "platform-admin", scope: "platform", grantedBy: "bootstrap" },
+      ],
+      createdBy: "bootstrap",
+      createdAtMs: 1,
+      revokedAtMs: 2,
+    };
+  }
+
+  it("status resolves the caller from the verified session when the alias points at a stale id", async () => {
+    // The alias still resolves the login to the retired id, whose
+    // only grant is revoked; the live session carries the derived
+    // id, which holds a live platform-admin grant. The Summary
+    // tab reads the session id and allows; the service-user panel
+    // must read the same id and allow too — not 403 with "not a
+    // platform admin" and status cards that never load.
+    const { ctx } = await makeCtx({
+      callerMemberships: [
+        revokedPlatformAdmin(STALE_ID),
+        platformAdminMembership(LIVE_ID),
+      ],
+      aliasId: STALE_ID,
+      session: liveSession(),
+    });
+    const { status, body } = await call(ctx, STATUS, "GET", ADMIN_LOGIN);
+    expect(status).toBe(200);
+    expect(body.serviceUser).toBe(SERVICE_LOGIN);
+  });
+
+  it("falls back to the alias when no session resolves (header-only callers keep today's behavior)", async () => {
+    const { ctx } = await makeCtx({
+      callerMemberships: [
+        revokedPlatformAdmin(STALE_ID),
+        platformAdminMembership(LIVE_ID),
+      ],
+      aliasId: STALE_ID,
+      session: null,
+    });
+    const { status } = await call(ctx, STATUS, "GET", ADMIN_LOGIN);
+    expect(status).toBe(403);
   });
 });

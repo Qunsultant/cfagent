@@ -35,6 +35,7 @@ import { IAAA_ALIAS_KEY_PREFIX } from "../src/security/iaaaMigration";
 import type { CommercialStore } from "../src/data/commercialPorts";
 import type { SubscriptionStore } from "../src/data/subscriptionPorts";
 import type { KvLike } from "../src/security/kvResilience";
+import type { SessionData } from "../src/types";
 
 const ME = "/api/admin/platform-users/me";
 const LOOKUP = "/api/admin/platform-users/lookup";
@@ -139,6 +140,8 @@ async function makeCtx(opts: {
   subscriptionRows?: Parameters<typeof memorySubscriptions>[0];
   commercial?: CommercialStore | null;
   subscriptions?: SubscriptionStore | null;
+  /** #6238/#6259 — verified-session seam: when present, the session id is authoritative. */
+  session?: SessionData | null;
 }): Promise<{ ctx: PlatformUsersRouteContext; audit: ReturnType<typeof vi.fn>; store: MembershipStore }> {
   const store = createMemoryMembershipStore();
   for (const m of opts.callerMemberships ?? []) await store.put(m);
@@ -165,6 +168,7 @@ async function makeCtx(opts: {
       opts.subscriptions !== undefined
         ? opts.subscriptions
         : memorySubscriptions(opts.subscriptionRows ?? {}),
+    ...(opts.session !== undefined ? { session: opts.session } : {}),
   } as unknown as PlatformUsersRouteContext;
   return { ctx, audit, store };
 }
@@ -363,5 +367,80 @@ describe("platform user admin routes (#2220)", () => {
     expect(body!.tenantId).toBe("acme");
     expect(body!.membershipSource).toBe("unmapped");
     expect(body!.memberships).toEqual([]);
+  });
+});
+
+describe("caller identity resolution (#6238/#6259: one path, session-authoritative)", () => {
+  const STALE_ID = "old-caller-id";
+
+  function liveSession(): SessionData {
+    return {
+      githubLogin: CALLER_LOGIN,
+      githubAvatar: "",
+      githubName: "",
+      createdAt: 1,
+      internalUserId: CALLER_ID,
+    };
+  }
+
+  it("self view: reads the session id's memberships when the alias points at a stale id", async () => {
+    // The alias still resolves the login to the retired id, whose
+    // only grant is revoked; the live session carries the derived
+    // id, which holds the live grants. The Users view for the
+    // signed-in login must show the session id's memberships —
+    // the same memberships the full-scan Role grants list shows —
+    // not only the revoked grant the stale alias id holds.
+    const { ctx } = await makeCtx({
+      callerMemberships: [
+        platformAdminMembership(CALLER_ID),
+        tenantMemberMembership(CALLER_ID, "primary"),
+        revokedMembership(STALE_ID, "primary"),
+      ],
+      aliasLogins: { [CALLER_LOGIN]: STALE_ID },
+      commercialRows: {
+        [CALLER_LOGIN]: { tenantId: "primary", tier: "PayPerUse", creditsUSD: 5, includedRuns: 2 },
+      },
+      session: liveSession(),
+    });
+    const { status, body } = await call(ctx, ME, CALLER_LOGIN);
+    expect(status).toBe(200);
+    expect(body!.membershipSource).toBe("wired");
+    const memberships = body!.memberships as Array<Record<string, unknown>>;
+    expect(memberships.map((m) => m.membershipId)).toEqual([
+      `m-platform-${CALLER_ID}`,
+      `m-tenant-${CALLER_ID}-primary`,
+    ]);
+  });
+
+  it("operator lookup: the gate reads the session id when the caller's alias points at a stale id", async () => {
+    const { ctx } = await makeCtx({
+      callerMemberships: [
+        platformAdminMembership(CALLER_ID),
+        revokedMembership(STALE_ID, "primary"),
+      ],
+      targetMemberships: [tenantMemberMembership(TARGET_ID, "acme")],
+      aliasLogins: { [CALLER_LOGIN]: STALE_ID, [TARGET_LOGIN]: TARGET_ID },
+      commercialRows: {
+        [TARGET_LOGIN]: { tenantId: "acme", tier: "Subscribed", creditsUSD: 0, includedRuns: 10 },
+      },
+      session: liveSession(),
+    });
+    const { status, body } = await call(ctx, `${LOOKUP}?login=${TARGET_LOGIN}`, CALLER_LOGIN);
+    expect(status).toBe(200);
+    expect(body!.userLogin).toBe(TARGET_LOGIN);
+  });
+
+  it("self view: without a session, the alias still resolves the caller (today's behavior)", async () => {
+    const { ctx } = await makeCtx({
+      callerMemberships: [platformAdminMembership(CALLER_ID)],
+      aliasLogins: { [CALLER_LOGIN]: CALLER_ID },
+      session: null,
+    });
+    const { status, body } = await call(ctx, ME, CALLER_LOGIN);
+    expect(status).toBe(200);
+    expect(body!.membershipSource).toBe("wired");
+    expect((body!.memberships as Array<Record<string, unknown>>).map((m) => m.membershipId)).toEqual([
+      `m-platform-${CALLER_ID}`,
+    ]);
   });
 });
