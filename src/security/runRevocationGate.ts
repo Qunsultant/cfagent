@@ -125,7 +125,15 @@ function bindingIsLive(binding: RoleBinding, nowMs: number): boolean {
   return binding.expiresAtMs === undefined || binding.expiresAtMs > nowMs;
 }
 
-function membershipIsLive(membership: Membership, nowMs: number): boolean {
+/**
+ * A membership is live when it is not revoked and at least one of
+ * its bindings is unexpired. Exported for the #6258 post-login
+ * alias-conflict repair, which fires only when the aliased id
+ * holds no live memberships — the same liveness the dispatch
+ * gate denies on, so the repair and the gate cannot disagree
+ * about whether an identity is dead.
+ */
+export function membershipIsLive(membership: Membership, nowMs: number): boolean {
   return (
     membership.revokedAtMs === undefined &&
     membership.roleBindings.some((binding) => bindingIsLive(binding, nowMs))

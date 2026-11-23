@@ -208,6 +208,32 @@ export async function recordLoginAlias(
 }
 
 /**
+ * Read the raw login-alias record for a login, or null when no
+ * alias exists or the stored record is corrupt. Unlike
+ * lookupInternalUserIdByLogin this does NOT follow the id-migration
+ * record: callers that need the aliased id itself (the #6258
+ * post-login repair, which records the migration the alias
+ * points at) read the record, never the resolved id.
+ */
+export async function readLoginAlias(
+  kv: KvLike,
+  githubLogin: string,
+): Promise<LoginAlias | null> {
+  if (!isValidField(githubLogin)) return null;
+  const raw = await kv.get(loginKey(githubLogin));
+  if (raw === null) return null;
+  try {
+    const parsed = JSON.parse(raw) as LoginAlias;
+    if (typeof parsed.internalUserId !== "string" || parsed.internalUserId.trim() === "") {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Login -> internalUserId, or null when no alias exists.
  *
  * Follows the id-migration record (#1182, #6182) from the aliased id

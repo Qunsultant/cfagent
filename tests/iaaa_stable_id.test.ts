@@ -9,7 +9,7 @@
  * id, moves their memberships, and records an old→new alias — all
  * before post-login bootstrap provisioning runs.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   createMembership,
   createMemoryMembershipStore,
@@ -31,6 +31,14 @@ import {
   recordIdMigration,
   recordLoginAlias,
 } from "../src/security/iaaaMigration";
+import { runWiredPostLogin } from "../src/security/iaaaGithubEndToEnd";
+import { createMemoryAuditStore } from "../src/security/iaaaAudit";
+import {
+  handlePlatformUsersRoutes,
+  type PlatformUsersRouteContext,
+} from "../src/agents/routes/platformUsers";
+import type { CommercialStore } from "../src/data/commercialPorts";
+import type { SubscriptionStore } from "../src/data/subscriptionPorts";
 import type { KvLike } from "../src/security/kvResilience";
 import type { Env } from "../src/types";
 import { makeFakeSessionStore } from "./fake-session-store";
@@ -569,5 +577,258 @@ describe("login-alias lookup follows the id-migration record (#6182)", () => {
     });
     await kv.put(`iaaa-alias:migrated:${MINTED_ID}`, "not-json{");
     expect(await lookupInternalUserIdByLogin(kv, "octocat")).toBe(MINTED_ID);
+  });
+});
+
+describe("post-login alias conflict records the id-migration (#6258)", () => {
+  // Production shape: the alias names the retired id, the derived id
+  // holds the live memberships, the retired id holds only a revoked
+  // membership, and no migration record exists — the #1182 migration
+  // can never create one (the provider key already holds a fresh
+  // derived-id binding). The repair must fire on the next sign-in.
+  async function seedRetiredAliasWithLiveDerived(
+    kv: KvLike,
+    memberships: MembershipStore,
+  ): Promise<void> {
+    const aliased = await recordLoginAlias(kv, {
+      githubLogin: "octocat",
+      internalUserId: MINTED_ID,
+      nowMs: 1_000,
+    });
+    expect(aliased.ok).toBe(true);
+    await seedMemberships(memberships, DERIVED_GITHUB_42);
+    const retired = await createMembership(memberships, {
+      internalUserId: MINTED_ID,
+      tenantId: "primary",
+      roleBindings: [
+        { role: "platform-admin", scope: "platform", grantedBy: "system:bootstrap" },
+      ],
+      createdBy: "system:bootstrap",
+      nowMs: 2_000,
+    });
+    expect(retired.ok).toBe(true);
+    if (!retired.ok) return;
+    await memberships.put({ ...retired.membership, revokedAtMs: 5_000 });
+  }
+
+  async function seedRevokedOnlyRetired(
+    kv: KvLike,
+    memberships: MembershipStore,
+  ): Promise<void> {
+    const aliased = await recordLoginAlias(kv, {
+      githubLogin: "octocat",
+      internalUserId: MINTED_ID,
+      nowMs: 1_000,
+    });
+    expect(aliased.ok).toBe(true);
+    const retired = await createMembership(memberships, {
+      internalUserId: MINTED_ID,
+      tenantId: "primary",
+      roleBindings: [
+        { role: "platform-admin", scope: "platform", grantedBy: "system:bootstrap" },
+      ],
+      createdBy: "system:bootstrap",
+      nowMs: 2_000,
+    });
+    expect(retired.ok).toBe(true);
+    if (!retired.ok) return;
+    await memberships.put({ ...retired.membership, revokedAtMs: 5_000 });
+  }
+
+  function postLogin(
+    kv: KvLike,
+    memberships: MembershipStore,
+    auditStore?: ReturnType<typeof createMemoryAuditStore>,
+  ) {
+    return runWiredPostLogin(
+      {
+        kv,
+        bindingStore: createMemoryIdentityBindingStore(),
+        membershipStore: memberships,
+        ...(auditStore
+          ? { audit: { store: auditStore, correlationId: "sess-1" } }
+          : {}),
+      },
+      {
+        githubLogin: "octocat",
+        internalUserId: DERIVED_GITHUB_42,
+        providerIssuer: GITHUB_ISSUER,
+        providerSubject: "42",
+        bootstrapRaw: undefined,
+        tenantId: "primary",
+        nowMs: 20_000,
+      },
+    );
+  }
+
+  function memoryCommercial(): CommercialStore {
+    return { getAccount: async () => null } as unknown as CommercialStore;
+  }
+
+  function memorySubscriptions(): SubscriptionStore {
+    return { listSubscriptions: async () => [] } as unknown as SubscriptionStore;
+  }
+
+  function makeUserCtx(
+    kv: KvLike,
+    memberships: MembershipStore,
+  ): PlatformUsersRouteContext {
+    return {
+      env: {},
+      audit: vi.fn(),
+      membershipStore: memberships,
+      aliasKv: kv,
+      commercial: memoryCommercial(),
+      subscriptions: memorySubscriptions(),
+    } as unknown as PlatformUsersRouteContext;
+  }
+
+  async function callUserMe(ctx: PlatformUsersRouteContext, login: string) {
+    const req = new Request("https://agent.test/admin/platform-users/me", {
+      headers: { "x-user-login": login },
+    });
+    const res = await handlePlatformUsersRoutes(
+      req,
+      new URL(req.url),
+      new URL(req.url).pathname,
+      "session-1",
+      ctx,
+    );
+    expect(res).not.toBeNull();
+    return (await res!.json()) as {
+      membershipSource: string;
+      memberships: Array<{
+        tenantId: string;
+        roles: Array<{ role: string; scope: string }>;
+        revokedAtMs?: number;
+      }>;
+    };
+  }
+
+  it("alias names the retired id + no record → sign-in records retired→derived, lookup returns derived, buildUserView shows the live memberships", async () => {
+    const kv = memoryKv();
+    const memberships = createMemoryMembershipStore();
+    await seedRetiredAliasWithLiveDerived(kv, memberships);
+    const auditStore = createMemoryAuditStore();
+
+    const result = await postLogin(kv, memberships, auditStore);
+    expect(result.alias.status).toBe("migration-recorded");
+    expect(result.bootstrap.status).toBe("blank");
+    expect(await lookupMigratedUserId(kv, MINTED_ID)).toBe(DERIVED_GITHUB_42);
+    expect(await lookupInternalUserIdByLogin(kv, "octocat")).toBe(DERIVED_GITHUB_42);
+
+    // The repair is observable via the #1760 audit seam.
+    const events = await auditStore.list();
+    expect(events).toHaveLength(1);
+    expect(events[0].type).toBe("iaaa.id_migration.record");
+    expect(events[0].actorPrincipalId).toBe(DERIVED_GITHUB_42);
+    expect(events[0].resourceId).toBe(MINTED_ID);
+
+    // buildUserView (self view) now resolves to the derived id and
+    // shows its live memberships — 3 rows under the derived id, not
+    // the retired id's single revoked row.
+    const view = await callUserMe(makeUserCtx(kv, memberships), "octocat");
+    expect(view.membershipSource).toBe("wired");
+    expect(view.memberships).toHaveLength(3);
+    expect(
+      view.memberships.some((m) =>
+        m.roles.some((r) => r.role === "tenant-admin" && r.scope === "tenant"),
+      ),
+    ).toBe(true);
+  });
+
+  it("alias already names the derived id → no record created", async () => {
+    const kv = memoryKv();
+    const memberships = createMemoryMembershipStore();
+    await recordLoginAlias(kv, {
+      githubLogin: "octocat",
+      internalUserId: DERIVED_GITHUB_42,
+      nowMs: 1_000,
+    });
+    const result = await postLogin(kv, memberships);
+    expect(result.alias.status).toBe("recorded");
+    expect(await lookupMigratedUserId(kv, DERIVED_GITHUB_42)).toBeNull();
+    expect(await lookupMigratedUserId(kv, MINTED_ID)).toBeNull();
+  });
+
+  it("aliased id has a live membership → repair refuses, lookup still returns the aliased id", async () => {
+    const kv = memoryKv();
+    const memberships = createMemoryMembershipStore();
+    await recordLoginAlias(kv, {
+      githubLogin: "octocat",
+      internalUserId: MINTED_ID,
+      nowMs: 1_000,
+    });
+    // The retired id still holds a LIVE membership: possible login
+    // recycling — the repair must refuse and the conflict stands
+    // for operator resolution.
+    const live = await createMembership(memberships, {
+      internalUserId: MINTED_ID,
+      tenantId: "primary",
+      roleBindings: [
+        { role: "tenant-admin", scope: "tenant", grantedBy: "system:bootstrap" },
+      ],
+      createdBy: "system:bootstrap",
+      nowMs: 2_000,
+    });
+    expect(live.ok).toBe(true);
+    const result = await postLogin(kv, memberships);
+    expect(result.alias.status).toBe("conflict-preserved");
+    expect(await lookupMigratedUserId(kv, MINTED_ID)).toBeNull();
+    expect(await lookupInternalUserIdByLogin(kv, "octocat")).toBe(MINTED_ID);
+  });
+
+  it("conflicting migration record already exists → ID_MIGRATION_CONFLICT, login still succeeds", async () => {
+    const kv = memoryKv();
+    const memberships = createMemoryMembershipStore();
+    await seedRevokedOnlyRetired(kv, memberships);
+    const existing = await recordIdMigration(kv, {
+      oldInternalUserId: MINTED_ID,
+      newInternalUserId: DERIVED_GOOGLE_SUB_1,
+      nowMs: 9_000,
+    });
+    expect(existing.ok).toBe(true);
+    const result = await postLogin(kv, memberships);
+    expect(result.bootstrap.status).toBe("blank");
+    expect(result.alias.status).toBe("conflict-preserved");
+    // The pre-existing record is preserved, never overwritten.
+    expect(await lookupMigratedUserId(kv, MINTED_ID)).toBe(DERIVED_GOOGLE_SUB_1);
+  });
+
+  it("repair store failure → login still succeeds, status reports the failure", async () => {
+    const kv = memoryKv();
+    const memberships = createMemoryMembershipStore();
+    await seedRevokedOnlyRetired(kv, memberships);
+    // kv.put throws, kv.get works: the repair cannot write the record.
+    const failingKv: KvLike = {
+      async get(key: string) {
+        return kv.get(key);
+      },
+      async put() {
+        throw new Error("kv unavailable");
+      },
+      async delete(key: string) {
+        return kv.delete(key);
+      },
+    };
+    const result = await runWiredPostLogin(
+      {
+        kv: failingKv,
+        bindingStore: createMemoryIdentityBindingStore(),
+        membershipStore: memberships,
+      },
+      {
+        githubLogin: "octocat",
+        internalUserId: DERIVED_GITHUB_42,
+        providerIssuer: GITHUB_ISSUER,
+        providerSubject: "42",
+        bootstrapRaw: undefined,
+        tenantId: "primary",
+        nowMs: 20_000,
+      },
+    );
+    expect(result.alias.status).toBe("migration-error");
+    expect(result.bootstrap.status).toBe("blank");
+    expect(await lookupMigratedUserId(kv, MINTED_ID)).toBeNull();
   });
 });

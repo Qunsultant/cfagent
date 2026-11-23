@@ -30,6 +30,7 @@ import {
 } from "../src/security/iaaaPdpSeam";
 import {
   authorize,
+  createMembership,
   createMemoryMembershipStore,
 } from "../src/security/authorization";
 import {
@@ -190,6 +191,21 @@ describe("wired post-login: alias + bootstrap", () => {
       tenantId: "primary",
       nowMs: NOW,
     });
+    // #6258 — the recycling case is the LIVE-membership case: the
+    // aliased id still holds a live membership, so the repair
+    // refuses and the conflict stands. (An aliased id with no live
+    // memberships is repaired, not preserved — see the #6258 block
+    // in tests/iaaa_stable_id.test.ts.)
+    const live = await createMembership(d.membershipStore, {
+      internalUserId: UUID_A,
+      tenantId: "primary",
+      roleBindings: [
+        { role: "tenant-admin", scope: "tenant", grantedBy: "system:bootstrap" },
+      ],
+      createdBy: "system:bootstrap",
+      nowMs: NOW,
+    });
+    expect(live.ok).toBe(true);
     const result = await runWiredPostLogin(d, {
       githubLogin: "octo",
       internalUserId: UUID_B,

@@ -89,18 +89,24 @@ import {
   type BootstrapEntry,
   type BootstrapRejection,
 } from "./iaaaBootstrap";
-import { recordLoginAlias } from "./iaaaMigration";
+import {
+  readLoginAlias,
+  recordIdMigration,
+  recordLoginAlias,
+} from "./iaaaMigration";
 import { checkPermission } from "./iaaaPdpSeam";
 import {
   buildAliasRecordedAuditEventInput,
   buildBootstrapGrantAuditEventInput,
+  buildIdMigrationRecordedAuditEventInput,
   recordWiredAuthAudit,
 } from "./iaaaAuthAudit";
 import type { AuditStore } from "./iaaaAudit";
+import { membershipIsLive } from "./runRevocationGate";
 import { SESSION_TTL } from "./session";
 import type { KvLike } from "./kvResilience";
 import { DEPLOYMENT_DEFAULT_TENANT_ID } from "../config/tenantDefaults";
-import { createStructuredLogger } from "../observability/structuredLogger";
+import { createStructuredLogger, type StructuredLogger } from "../observability/structuredLogger";
 import {
   ConsoleObservabilitySink,
   type ObservabilitySink,
@@ -437,6 +443,8 @@ export type AliasRunStatus =
   | "recorded"
   | "conflict-preserved"
   | "invalid"
+  | "migration-recorded"
+  | "migration-error"
   | "error";
 
 export type BootstrapRunStatus =
@@ -770,6 +778,69 @@ async function runPlatformGenesis(args: {
 }
 
 /**
+ * #6258 — repair the missing id-migration record after a post-login
+ * alias conflict. The #1182 migration can never create this record
+ * for a login whose provider key already holds a fresh derived-id
+ * binding (its migration no-ops forever), and the #1208 repair
+ * grants never write one — so the #6182 chain-follow has nothing
+ * to follow and the login keeps resolving to the retired id. This
+ * is the one place that can create the record: it runs on every
+ * wired GitHub sign-in, holds the binding-proved derived id, and
+ * already handles ALIAS_CONFLICT best-effort.
+ *
+ * The alias is never re-pointed: the ALIAS_CONFLICT guard stays
+ * intact and the #6182 chain-follow does the resolution. The
+ * repair fires only when the aliased id holds no live memberships
+ * (none unrevoked/unexpired, by the dispatch gate's liveness
+ * predicate) — a live identity can never be hijacked, and a true
+ * login-recycling conflict stands for operator resolution.
+ * Best-effort throughout: never throws, never fails the login.
+ * Returns the alias status to report, plus the retired id the
+ * record migrates from when one was written (for the audit seam).
+ */
+async function repairAliasConflictMigration(
+  deps: WiredPostLoginDeps,
+  input: WiredPostLoginInput,
+  structuredLog: StructuredLogger,
+): Promise<{ status: AliasRunStatus; migratedFrom: string | null }> {
+  try {
+    const alias = await readLoginAlias(deps.kv, input.githubLogin);
+    if (alias === null) return { status: "conflict-preserved", migratedFrom: null };
+    const aliasedId = alias.internalUserId;
+    if (aliasedId === input.internalUserId) {
+      return { status: "conflict-preserved", migratedFrom: null };
+    }
+    const aliasedMemberships =
+      await deps.membershipStore.getMembershipsByUser(aliasedId);
+    if (aliasedMemberships.some((m) => membershipIsLive(m, input.nowMs))) {
+      return { status: "conflict-preserved", migratedFrom: null };
+    }
+    const recorded = await recordIdMigration(deps.kv, {
+      oldInternalUserId: aliasedId,
+      newInternalUserId: input.internalUserId,
+      nowMs: input.nowMs,
+    });
+    if (!recorded.ok) {
+      // ID_MIGRATION_CONFLICT (or invalid): the existing record
+      // stands and the conflict is preserved for operator
+      // resolution — never overwritten.
+      structuredLog.warn("iaaaGithubEndToEnd.alias_migration_conflict", {
+        message: `[post-login] id-migration refused (${recorded.code}); alias conflict preserved`,
+        code: recorded.code,
+      });
+      return { status: "conflict-preserved", migratedFrom: null };
+    }
+    return { status: "migration-recorded", migratedFrom: aliasedId };
+  } catch (err) {
+    structuredLog.warn("iaaaGithubEndToEnd.alias_migration_failed", {
+      message: `[post-login] id-migration repair failed: ${err instanceof Error ? err.message : "unknown error"}`,
+      code: "alias.migration_failed",
+    });
+    return { status: "migration-error", migratedFrom: null };
+  }
+}
+
+/**
  * Wired post-login work: record the login alias, then bootstrap the
  * logging-in user if listed. Best-effort throughout: this function
  * never throws, and no failure here may change the login outcome.
@@ -787,6 +858,7 @@ export async function runWiredPostLogin(
     { component: "security/iaaaGithubEndToEnd" },
   );
   let aliasStatus: AliasRunStatus;
+  let migrationFrom: string | null = null;
   try {
     const recorded = await recordLoginAlias(deps.kv, {
       githubLogin: input.githubLogin,
@@ -800,6 +872,14 @@ export async function runWiredPostLogin(
         : "invalid";
   } catch {
     aliasStatus = "error";
+  }
+  // #6258 — after an alias conflict, record the id-migration the
+  // #6182 chain-follow needs. Best-effort: the helper never throws
+  // and never changes the login outcome.
+  if (aliasStatus === "conflict-preserved") {
+    const repair = await repairAliasConflictMigration(deps, input, structuredLog);
+    aliasStatus = repair.status;
+    migrationFrom = repair.migratedFrom;
   }
 
   let bootstrapStatus: BootstrapRunStatus;
@@ -875,15 +955,16 @@ export async function runWiredPostLogin(
 
   // #1760 — emit audit events for the post-login occurrences that
   // used to be silent. Only statuses that DID something emit:
-  // "recorded" (an alias row was written), "provisioned" (an
+  // "recorded" (an alias row was written), "migration-recorded"
+  // (#6258: an id-migration record was written), "provisioned" (an
   // ordinary bootstrap grant), "genesis" (platform-admin grant +
   // marker set), "genesis-closed-tenant-admin" (tenant-admin grant
   // via the genesis-closed path). "already-admin", "not-listed",
-  // "blank", "conflict-preserved", "invalid", "genesis-claim-lost",
-  // and "error" wrote nothing, so they emit nothing — an event for
-  // a non-occurrence would be false evidence. Best-effort
-  // throughout: a failed write warns and never throws or changes
-  // the login outcome.
+  // "blank", "conflict-preserved", "invalid", "migration-error",
+  // "genesis-claim-lost", and "error" wrote nothing, so they emit
+  // nothing — an event for a non-occurrence would be false
+  // evidence. Best-effort throughout: a failed write warns and
+  // never throws or changes the login outcome.
   if (deps.audit) {
     try {
       if (aliasStatus === "recorded") {
@@ -901,6 +982,27 @@ export async function runWiredPostLogin(
             message: `[post-login-audit] alias audit write failed (${recorded.code})`,
             code: recorded.code,
           });
+        }
+      }
+      if (aliasStatus === "migration-recorded" && migrationFrom !== null) {
+        const recorded = await recordWiredAuthAudit(
+          deps.audit.store,
+          buildIdMigrationRecordedAuditEventInput({
+            oldInternalUserId: migrationFrom,
+            newInternalUserId: input.internalUserId,
+            tenantId: input.tenantId,
+            timestamp: input.nowMs,
+            correlationId: deps.audit.correlationId,
+          }),
+        );
+        if (!recorded.ok) {
+          structuredLog.warn(
+            "iaaaGithubEndToEnd.alias_migration_audit_write_failed",
+            {
+              message: `[post-login-audit] id-migration audit write failed (${recorded.code})`,
+              code: recorded.code,
+            },
+          );
         }
       }
       if (
