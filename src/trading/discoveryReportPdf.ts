@@ -10,6 +10,7 @@
 
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import { discoverySymbolRows, type DiscoveryReportInput } from "./discoveryReportData";
+import { cleanForPdf } from "./pdfText";
 
 const MARGIN = 48;
 const PAGE_W = 612;
@@ -49,7 +50,8 @@ export async function generateDiscoveryReportPdf(input: DiscoveryReportInput): P
 
   const text = (value: string, size = 10, useBold = false, color = rgb(0, 0, 0), indent = 0) => {
     const maxWidth = PAGE_W - MARGIN * 2 - indent;
-    const words = String(value ?? "").split(/\s+/).filter(Boolean);
+    // #5109 — WinAnsi-sanitize before measuring (see ./pdfText).
+    const words = cleanForPdf(value).split(/\s+/).filter(Boolean);
     const lines: string[] = [];
     let line = "";
     for (const word of words) {

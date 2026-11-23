@@ -126,4 +126,42 @@ describe("#335 research report PDF", () => {
     expect(name).not.toContain(" ");
     expect(name.endsWith(".pdf")).toBe(true);
   });
+
+  it("generates a PDF when report text carries non-WinAnsi characters (#5109)", async () => {
+    const base = fixtureReport();
+    const bytes = await generateResearchPdf(
+      fixtureReport({
+        rejected: [
+          {
+            symbol: "AAPL",
+            outlook: "bullish",
+            structure: "s",
+            gate: "quote_quality",
+            reason:
+              "Alpaca returned 3 expiration(s) for AAPL, but none were in the configured near-term (30–45 DTE) or LEAPS (≥180 DTE) bands.",
+          },
+        ],
+        symbolEvaluations: [
+          {
+            symbol: "AAPL",
+            outcome: "rejected",
+            quote: null,
+            chain: null,
+            strategies: [],
+            reason:
+              "Alpaca returned 3 expiration(s) for AAPL, but none were in the configured near-term (30–45 DTE) or LEAPS (≥180 DTE) bands.",
+          } as any,
+        ],
+        ideas: [
+          {
+            ...base.ideas[0],
+            falsificationWarnings: ["⚠ IV is elevated vs history"],
+          } as any,
+        ],
+      })
+    );
+    const header = new TextDecoder().decode(bytes.slice(0, 5));
+    expect(header).toBe("%PDF-");
+    expect(bytes.length).toBeGreaterThan(1000);
+  });
 });

@@ -13,6 +13,7 @@ import { PDFDocument, PDFFont, PDFPage, rgb, StandardFonts } from "pdf-lib";
 import type { OptionScreenResult, ScreenedOptionContractItem } from "../types";
 import type { OptionsPartialQualification } from "./options/opportunityScanner";
 import { buildNamesByStrategyRows, buildStrategiesByNameRows } from "./optionsReportMatrix";
+import { cleanForPdf } from "./pdfText";
 
 
 /** Print palette (#473): named print mirrors of the semantic text roles —
@@ -44,19 +45,6 @@ function newPage(ctx: Ctx): void {
 
 function ensureSpace(ctx: Ctx, needed: number): void {
   if (ctx.y - needed < MARGIN) newPage(ctx);
-}
-
-function cleanForPdf(str: string): string {
-  return String(str ?? "")
-    .replace(/Δ/g, "Delta ")
-    .replace(/→/g, "->")
-    .replace(/←/g, "<-")
-    .replace(/•/g, "*")
-    .replace(/—/g, "-")
-    .replace(/–/g, "-")
-    .replace(/“|”/g, '"')
-    .replace(/‘|’/g, "'")
-    .replace(/[^\x20-\x7E\xA0-\xFF]/g, " ");
 }
 
 function text(
