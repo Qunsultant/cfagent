@@ -2695,6 +2695,18 @@ export async function updateUnifiedSchedule(
   };
   const resolution = resolveScheduleUpdate(current, body, nowMs);
   if (!resolution.ok) return fail(resolution.error, 400);
+  // Issue #6210 — the cancel + re-arm is one atomic edit. The
+  // timing validation above already runs before the cancel, but the
+  // re-arm itself can still throw after it (an SDK failure); if it
+  // does, the original alarm is re-armed with its original timing
+  // and the record is never saved with the new definition, so a
+  // failed edit leaves the schedule exactly as it was.
+  const rollbackTiming: ResolvedScheduleTiming =
+    current.type === "cron"
+      ? { type: "cron", cron: current.cron ?? "" }
+      : current.type === "interval"
+        ? { type: "interval", intervalSeconds: current.intervalSeconds ?? 0 }
+        : { type: current.type, time: current.time ?? 0 };
   await deps.alarms.cancel(alarm.id);
   // Issue #4235 — the re-armed alarm carries the recorded opt-in
   // in its payload, exactly as creation stamps it, so a later
@@ -2707,11 +2719,32 @@ export async function updateUnifiedSchedule(
     typeof baseRearmedPayload === "object"
       ? { ...(baseRearmedPayload as Record<string, unknown>), subDailyOptIn: true }
       : baseRearmedPayload;
-  const rearmed = await deps.alarms.arm(
-    resolution.timing,
-    alarm.callback,
-    rearmedPayload,
-  );
+  let rearmed: ScheduleAlarmLike;
+  try {
+    rearmed = await deps.alarms.arm(
+      resolution.timing,
+      alarm.callback,
+      rearmedPayload,
+    );
+  } catch (armErr) {
+    const armMessage = armErr instanceof Error ? armErr.message : String(armErr);
+    try {
+      const restored = await deps.alarms.arm(rollbackTiming, alarm.callback, alarm.payload);
+      if (record) {
+        await deps.store.save({ ...record, alarmId: restored.id, updatedAt: nowIso });
+      }
+      return fail(
+        `Failed to re-arm the schedule with the new timing (${armMessage}); the original schedule was restored.`,
+        500,
+      );
+    } catch (rollbackErr) {
+      const rollbackMessage = rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr);
+      return fail(
+        `Failed to re-arm the schedule with the new timing (${armMessage}) and the original schedule could not be restored (${rollbackMessage}).`,
+        500,
+      );
+    }
+  }
   // The record id is the id the user addressed (stable across the
   // cancel + re-arm); only the alarm id changes. A legacy alarm
   // with no record adopts one here.

@@ -43,6 +43,7 @@ import {
 } from "./scheduledOptionsManager/noView";
 import { cadenceNeedsOptIn, payloadOf } from "./scheduledOptionsManager/format";
 import { scheduleTitle } from "./scheduledOptionsManager/scheduleDetail";
+import { saveEditedSchedule } from "./scheduledOptionsManager/scheduleEdit";
 import {
   buildOptionsRunNowPayload,
   buildScheduleSubmission,
@@ -629,32 +630,31 @@ export function ScheduledOptionsManager({
     const requestBody: any = built.requestBody;
 
     try {
-      // If editing an existing schedule, cancel the prior schedule first
-      if (editingScheduleId) {
-        try {
-          await cancelSchedule(editingScheduleId, authHeaders());
-        } catch (priorErr) {
-          log.warn("scheduledOptionsManager.prior_schedule_cancel_failed", {
-            message: "[ScheduledOptionsManager] Note on prior schedule cancellation",
-            error: priorErr instanceof Error ? priorErr.message : String(priorErr),
-          });
-        }
-      }
+      // Issue #6210 — create FIRST, cancel the replaced schedule
+      // only after the create succeeds (saveEditedSchedule): a
+      // refused create leaves the original schedule untouched
+      // instead of deleting it.
+      const result = await saveEditedSchedule(
+        {
+          create: (body) => createSchedule(body as any, authHeaders()),
+          cancel: (id) => cancelSchedule(id, authHeaders()),
+        },
+        editingScheduleId,
+        requestBody,
+      );
 
-      const data = await createSchedule(requestBody, authHeaders());
-
-      if (data.success) {
+      if (result.ok) {
         setSuccessMsg(
           editingScheduleId
-            ? "✓ Schedule updated successfully!"
-            : `✓ Schedule created successfully! (ID: ${data.schedule?.id || "active"})`
+            ? `✓ Schedule updated successfully!${result.warning ? ` ${result.warning}` : ""}`
+            : `✓ Schedule created successfully! (ID: ${result.scheduleId || "active"})`
         );
         setEditingScheduleId(null);
         setModalOpen(false);
         fetchSchedules();
         fetchAudit();
       } else {
-        setError(data.error || "Failed to save schedule");
+        setError(result.error || "Failed to save schedule");
       }
     } catch (err: any) {
       setError(err.message || "Failed to save schedule");
