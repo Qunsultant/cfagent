@@ -531,7 +531,7 @@ export const AUTOPILOT_SOURCE_LINES = {
     "Source: GET /api/autopilot — OrchestratorAgent state (run state, kill switch, limits, verdicts).",
   limits:
     "Source: GET /api/autopilot — OrchestratorAgent state; localStorage defaults only when the server has none.",
-  jobs: "Source: GET /api/runs — the unified run rows Docs reads (issue #2606); coded error and origin arrive only when #6006 folds the outcome facts into the one run source.",
+  jobs: "Source: GET /api/runs — the unified run rows Docs reads (issue 2606); coded error and origin arrive only when issue 6006 folds the outcome facts into the one run source.",
   actions:
     "Source: GET /api/audit (mas_events) + /api/broker/orders (mas_trades). Simulated rows are labeled Sim, never live.",
   verdicts:
