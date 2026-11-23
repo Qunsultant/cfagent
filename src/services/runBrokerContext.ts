@@ -42,8 +42,15 @@ export interface RunBrokerSelection {
   readonly mode?: unknown;
   /** Broker account the run is scoped to, when the broker exposes several. */
   readonly accountId?: unknown;
-  /** Who supplied the broker: the caller, or the stored schedule. */
-  readonly source?: "caller" | "schedule";
+  /**
+   * Who supplied the broker: the caller, or the stored schedule.
+   * "tenant" is the third source, claimed by the one shared
+   * resolution (#6151): it passes the cached tenant broker as
+   * the selection so the broker store is read once per session.
+   * The derivation below already produced "tenant" for a
+   * store-resolved broker; this makes the claim type-legal.
+   */
+  readonly source?: "caller" | "schedule" | "tenant";
 }
 
 /** The resolved context â€” the only thing later stages should read. */
