@@ -85,8 +85,10 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
  *  from the DO-plane tail to the D1-plane position on
  *  job_run_records (migration 0084 owns the columns now) +
  *  the job_run_records_binding_idx index. */
+/** #6151 S3 (migration 0085) re-seeds it: agent_nav_presets +
+ *  agent_nav_preset_state + 2 indexes. */
 export const COMBINED_FIXTURE_SHA256 =
-  "efd10e4c60398e465d3eae2df7f8b533836c56261e3a3c567ffdb6df2f0f5e28";
+  "eef2f636d864f111363b4367fa54c8c3f71bbab61a64cad69acd9948ff314262";
 /** All four planes' entries in plane order: D1, DO, ORM, remainder. */
 export const COMBINED_CATALOGUE_ENTRIES: CatalogueEntry[] = [
   ...D1_CATALOGUE_ENTRIES,
