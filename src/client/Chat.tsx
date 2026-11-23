@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import type { ReactNode } from "react";
 import { startPolling } from "./polling";
 import { getPollingConfig } from "./pollingConfig";
@@ -25,7 +25,9 @@ import { BillingServicingPanel } from "./BillingServicingPanel";
 import { PageChromeContext } from "./components/ui/PageShell";
 import { AdBannerConfig, applyServerAdsConfig, getStoredAdBannerConfig, saveStoredAdBannerConfig, type ServerAdsConfig } from "./adBannerConfig";
 import { PartnerDealsModal } from "./components/PartnerDealsModal";
-import { NavigationMenu, NavTabId, NavLayoutMode, NavIcons, NAV_TAB_PRESETS, NAV_PRESET_STORAGE_KEY, completeVisibleTabs, derivePresetKey, type NavPresetKey } from "./components/NavigationMenu";
+import { NavigationMenu, NavTabId, NavLayoutMode, NavIcons, NAV_TAB_PRESETS, NAV_PRESET_STORAGE_KEY, buildPresetMap, completeVisibleTabs, derivePresetKey, isNavPresetKey, type NavPresetKey } from "./components/NavigationMenu";
+import { fetchPlatformContext, usePlatformContext } from "./platformContextStore";
+import { mergeVisibleTabs } from "./platformContextNav";
 import { NavSettingsPage } from "./NavSettingsPage";
 import { legacyAuditVaultRedirect, legacyDualHomeRedirect, legacyMarketingHubRedirect, legacyPlatformAdminHubRedirect, legacyProductRedirect, navigateToTab, readTabFromLocation, replaceToTab, subscribeToRouteChanges } from "./router";
 import { legacySchedulesRedirect } from "./schedulesHomeView";
@@ -253,6 +255,51 @@ export function Chat({ user }: { user: User }) {
     derivePresetKey(visibleTabs),
   );
 
+  // #6151 S1 — whether a localStorage map was adopted as the
+  // implicit selection on this load. The state initializer above
+  // already read the same key; this flag only records that it
+  // existed, so the persona-default effect below knows a fresh
+  // user from an adopting one.
+  const [hadAdoptedSelection] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      return localStorage.getItem("nextgentp_visible_nav_tabs") !== null;
+    } catch {
+      return false;
+    }
+  });
+
+  // #6151 S1 — the platform context is the source of truth for nav
+  // availability from here on. The store fetches once at bootstrap;
+  // the effective map passed down is selection ∩ availability.
+  const platformContext = usePlatformContext();
+  useEffect(() => {
+    void fetchPlatformContext();
+  }, []);
+
+  // Fresh users (no adopted selection) follow the persona default
+  // the server resolved. In S1 every default is alltabs, so this is
+  // a no-op for the shipped config — the seam is what S2/S4 use when
+  // a default narrows. Applied once: a later refetch must never
+  // overwrite the user's in-session toggles.
+  const appliedPersonaDefaultRef = useRef(false);
+  useEffect(() => {
+    if (!platformContext || hadAdoptedSelection || appliedPersonaDefaultRef.current) return;
+    if (!isNavPresetKey(platformContext.personaDefault)) return;
+    appliedPersonaDefaultRef.current = true;
+    const next = buildPresetMap(platformContext.personaDefault);
+    setVisibleTabs(next);
+    setNavPresetKey(platformContext.personaDefault);
+  }, [platformContext, hadAdoptedSelection]);
+
+  // Before the context lands the effective map is the selection
+  // (today's behavior — no flash of hidden tabs); after it lands,
+  // the server's availability caps the selection.
+  const effectiveVisibleTabs = useMemo(() => {
+    if (!platformContext) return visibleTabs;
+    return mergeVisibleTabs(visibleTabs, platformContext.visibleTabs);
+  }, [visibleTabs, platformContext]);
+
   const applyVisibleTabs = (
     next: Record<string, boolean>,
     presetKey?: NavPresetKey | null,
@@ -260,14 +307,10 @@ export function Chat({ user }: { user: User }) {
     const key = presetKey ?? derivePresetKey(next);
     setVisibleTabs(next);
     setNavPresetKey(key);
-    if (typeof window !== "undefined") {
-      localStorage.setItem("nextgentp_visible_nav_tabs", JSON.stringify(next));
-      if (key) {
-        localStorage.setItem(NAV_PRESET_STORAGE_KEY, key);
-      } else {
-        localStorage.removeItem(NAV_PRESET_STORAGE_KEY);
-      }
-    }
+    // #6151 S1: the selection is session-scoped until S3 — the
+    // localStorage map is adopted once on load (above) and never
+    // written again. The stale map stays on disk for S3 to offer
+    // as "save as preset".
   };
 
   const handleToggleTabVisibility = (tabId: string) => {
@@ -1133,7 +1176,7 @@ export function Chat({ user }: { user: User }) {
     // the fixed bottom-left trigger (outside side-nav and top-nav).
     "nav-settings": (
       <NavSettingsPage
-        visibleTabs={visibleTabs}
+        visibleTabs={effectiveVisibleTabs}
         activePreset={navPresetKey}
         onToggleTabVisibility={handleToggleTabVisibility}
         onApplyPreset={(key) => handleSetVisibleTabs(NAV_TAB_PRESETS[key], key)}
@@ -1409,7 +1452,7 @@ export function Chat({ user }: { user: User }) {
           theme={theme}
           onCycleTheme={handleCycleTheme}
           onAskAgent={handleAskAgent}
-          visibleTabs={visibleTabs}
+          visibleTabs={effectiveVisibleTabs}
           onSetVisibleTabs={handleSetVisibleTabs}
         />
       )}
@@ -1505,7 +1548,7 @@ export function Chat({ user }: { user: User }) {
               theme={theme}
               onCycleTheme={handleCycleTheme}
               onAskAgent={handleAskAgent}
-              visibleTabs={visibleTabs}
+              visibleTabs={effectiveVisibleTabs}
               onSetVisibleTabs={handleSetVisibleTabs}
             />
           </header>

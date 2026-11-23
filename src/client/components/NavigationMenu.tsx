@@ -8,6 +8,7 @@ import {
   SUB_MENU_CONFIGS,
   findNavItemConfig,
   isNavItemOrSubItemActive,
+  navSubItemAvailabilityKey,
   type NavMenuItemConfig,
   type NavSubMenuItemConfig,
 } from "../navConfig";
@@ -859,14 +860,25 @@ export const NAVIGATION_ITEMS: NavItemDef[] = ROUTES.filter(hasNavEntry)
 /**
  * Sub-menu items for a top-strip entry, mirroring the sidebar (#2996):
  * the entry's left-nav config item, gated by the sidebar's own sub
- * visibility rule (feature flag only — the sidebar does not apply
- * visibleTabs to subs). A strip id that is itself a sub (e.g. docs)
- * resolves to a synthetic item without subItems, so it yields [].
+ * visibility rule. #6151 S1: when the effective visibleTabs map is
+ * passed, a sub-item it marks unavailable
+ * (`<parentId>:<subId>` → false) is hidden too; without the map the
+ * feature flag alone decides, as before. A strip id that is itself
+ * a sub (e.g. docs) resolves to a synthetic item without subItems,
+ * so it yields [].
  */
-export function topStripSubItems(itemId: string): NavSubMenuItemConfig[] {
+export function topStripSubItems(
+  itemId: string,
+  visibleTabs?: Record<string, boolean>,
+): NavSubMenuItemConfig[] {
   const item = findNavItemConfig(DEFAULT_LEFT_NAV_CONFIG, itemId);
   if (!item?.subItems) return [];
-  return item.subItems.filter((sub) => isTabFeatureEnabled(sub.id as NavTabId));
+  return item.subItems.filter((sub) => {
+    if (visibleTabs && visibleTabs[navSubItemAvailabilityKey(itemId, sub.id)] === false) {
+      return false;
+    }
+    return isTabFeatureEnabled(sub.id as NavTabId);
+  });
 }
 
 /**
@@ -1100,7 +1112,7 @@ export function NavigationMenu({
             // itself is the first menu item, so every destination
             // stays one click away. Issue #3163: the dropdown also
             // opens on hover (hoverOpen on the Menu primitive).
-            const subs = topStripSubItems(item.id);
+            const subs = topStripSubItems(item.id, visibleTabs);
             if (subs.length > 0) {
               const configItem = findNavItemConfig(DEFAULT_LEFT_NAV_CONFIG, item.id);
               const menuActive = configItem
@@ -1181,7 +1193,7 @@ export function NavigationMenu({
               triggers toggle without navigating, as in the sidebar;
               visibility matches the sidebar's item rule. */}
           {topStripMenuOnlyParents()
-            .filter((parent) => isTabVisible(parent.id) && topStripSubItems(parent.id).length > 0)
+            .filter((parent) => isTabVisible(parent.id) && topStripSubItems(parent.id, visibleTabs).length > 0)
             .map((parent) => {
               const Icon = NAV_ICON_MAP[parent.icon] || NavIcons.Screeners;
               const menuActive = isNavItemOrSubItemActive(parent, activeTab);
@@ -1204,7 +1216,7 @@ export function NavigationMenu({
                       )}
                     </Button>
                   }
-                  items={topStripSubItems(parent.id).map((sub) => ({
+                  items={topStripSubItems(parent.id, visibleTabs).map((sub) => ({
                     id: sub.id,
                     label: sub.label,
                     onSelect: () =>

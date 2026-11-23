@@ -1075,6 +1075,11 @@ const STEP5B_PORT_SITES: Array<[string, string, number]> = [
   ["src/security/iaaaLogin.ts", "listSessionFamilyEntries", 2],
   ["src/security/iaaaLogin.ts", "sessionFamilyPorts", 1],
   ["src/security/iaaaLogin.ts", "wiredMembershipStore", 2],
+  // Added for #6151 S1: the platform-context invalidate helper
+  // lists the principal's sessions via the same
+  // listSessionFamilyEntries factory — no new funnel, no bypass
+  // (the login and principal variants share the one listing call).
+  ["src/security/platformContextInvalidate.ts", "listSessionFamilyEntries", 1],
   ["src/security/session.ts", "createSessionPorts", 1],
   ["src/security/session.ts", "listSessionFamilyEntries", 1],
   ["src/security/session.ts", "sessionFamilyPorts", 10],

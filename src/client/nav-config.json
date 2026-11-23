@@ -2316,5 +2316,12 @@
         }
       ]
     }
-  ]
+  ],
+  "personaDefaults": {
+    "platform-admin": "alltabs",
+    "tenant-admin": "alltabs",
+    "paid": "alltabs",
+    "non-paid": "alltabs"
+  },
+  "presetKeys": ["alltabs", "research", "trading", "payment", "marketing", "platform", "minimal", "none"]
 }
