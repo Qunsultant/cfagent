@@ -1030,6 +1030,18 @@ div.ui-modal-title { font-size: inherit; font-weight: inherit; }
   color: var(--color-text-muted);
 }
 
+/* ---------- Broker brand title (#6147 S1, item 1) ---------- */
+/* The settings-menu header wraps the broker icon + SmallHeader title in
+ * `.broker-brand-title`. The div had no layout rule, so the icon stacked
+ * ABOVE the title. Flex row, vertically centered, token gap — icon sits
+ * beside the name, as the broker card already does. Token-only; the
+ * header's other rules stay in the frozen sheet, untouched. */
+.broker-brand-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1-5);
+}
+
 /* ---------- Toast (#2283) ---------- */
 /* The one familiar place for transient feedback. Fixed viewport, above
    the modal backdrop (z-index 9999), pointer-transparent except on the

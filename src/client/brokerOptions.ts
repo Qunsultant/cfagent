@@ -21,6 +21,7 @@ import {
   brokerPresentation,
   type BrokerAssetAccountRegistry,
   type BrokerCredentialKind,
+  type BrokerOperation,
   type BrokerPresentation,
 } from "../trading";
 
@@ -31,6 +32,13 @@ export interface BrokerOptionSource {
   readonly credentialKind: BrokerCredentialKind;
   readonly icon?: string;
   readonly enabled?: boolean;
+  /**
+   * Issue #6147 (S1): the operations this broker supports. Selectability
+   * as the active trading broker reads `orderPlace` from here; absent
+   * means unknown, which selects the same as the catalog's own entries
+   * (all four carry `orderPlace: true`).
+   */
+  readonly supports?: Readonly<Partial<Record<BrokerOperation, boolean>>>;
 }
 
 /** One broker in the settings list. */
@@ -39,9 +47,35 @@ export interface BrokerOption {
   readonly label: string;
   readonly credentialKind: BrokerCredentialKind;
   readonly icon: string;
+  /**
+   * Issue #6147 (S1): false when the broker cannot be the active trading
+   * broker — it has no execution adapter (`orderPlace` capability). The
+   * picker renders it disabled with `unavailableReason`; selection of it
+   * is refused by name, never silently.
+   */
+  readonly selectable: boolean;
+  readonly unavailableReason?: string;
 }
 
 type PresentationFor = (id: string) => Pick<BrokerPresentation, "icon">;
+
+/**
+ * Issue #6147 (S1): a broker is selectable as the active trading broker
+ * only when its capabilities include order placement. A hosted, read-only
+ * broker (a hosted MCP broker with a read-only scope — no execution
+ * adapter) renders visible-but-unavailable with the reason: never
+ * silently absent, never silently selectable.
+ */
+function selectability(
+  label: string,
+  capabilities: Readonly<Partial<Record<BrokerOperation, boolean>>>,
+): Pick<BrokerOption, "selectable" | "unavailableReason"> {
+  if (capabilities.orderPlace === true) return { selectable: true };
+  return {
+    selectable: false,
+    unavailableReason: `${label} has no execution adapter yet — read-only`,
+  };
+}
 
 /**
  * The settings broker list, derived from the catalog in catalog order.
@@ -58,6 +92,7 @@ export function brokerOptions(
       label: entry.label,
       credentialKind: entry.credentialKind,
       icon: entry.icon ?? present(entry.id).icon,
+      ...selectability(entry.label, entry.supports ?? {}),
     }));
 }
 
@@ -76,5 +111,6 @@ export function brokerOptionsFromRegistry(
       label: entry.label,
       credentialKind: entry.credentialKind,
       icon: entry.icon || present(entry.id).icon,
+      ...selectability(entry.label, entry.capabilities),
     }));
 }

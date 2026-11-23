@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from "react";
+import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { navigateToTab } from "./router";
 import { PillGroup, Button, TextInput, Select, Notice, SmallHeader } from "./components/ui";
 import { AlpacaSignInCard } from "./AlpacaSignInCard";
@@ -10,7 +10,8 @@ import { AccountBindingSelector } from "./AccountBindingSelector";
 import { ActiveBindingBadge } from "./ActiveBindingBadge";
 import { adoptAccountBinding } from "./accountBindingStore";
 import { brokerCredentialGuidance, isBrokerId } from "../trading";
-import { brokerOptions } from "./brokerOptions";
+import { brokerOptionsFromRegistry } from "./brokerOptions";
+import { buildDefaultBrokerAssetAccountRegistry } from "../trading/accountBindings";
 import { fetchWatchlists, type ETradeWatchlist } from "./accountApi";
 import {
   loadTapeSelection,
@@ -189,6 +190,23 @@ export function BrokerDynamicMenu({
   const [autoRefreshState, setAutoRefreshState] = useAutoRefresh();
   const [tenantProviders, setTenantProviders] = useTenantProviders();
   const [providerSaveError, setProviderSaveError] = useState("");
+  // Issue #6147 (S1, item 3): the visible reason when a broker with no
+  // execution adapter is selected. Set by handleSelectBroker's by-name
+  // refusal; cleared on any successful selection.
+  const [brokerUnavailableNote, setBrokerUnavailableNote] = useState<string | null>(null);
+  /**
+   * Issue #6147 (S1, item 3): the picker derives from the registry, not
+   * the catalog — the registry carries the hosted broker as an enabled
+   * entry with no execution adapter, so it renders visible-but-unavailable.
+   * The default registry is the seed; runtime operator patches are not
+   * reflected here yet (a runtime-fetch picker is a follow-on, not this
+   * slice) — no worse than today's static-catalog picker, which
+   * reflects neither.
+   */
+  const brokerPickerOptions = useMemo(
+    () => brokerOptionsFromRegistry(buildDefaultBrokerAssetAccountRegistry()),
+    [],
+  );
   const handleSetTenantProviders = (next: { dataProviderId: string; brokerId: string }) => {
     setProviderSaveError("");
     void setTenantProviders(next).catch(() => {
@@ -552,6 +570,17 @@ export function BrokerDynamicMenu({
    * "public + paper" pair is never created by this surface.
    */
   const handleSelectBroker = (nextBrokerId: string) => {
+    // Issue #6147 (S1, item 3): refuse a broker with no execution adapter
+    // by name, with a visible reason — never silently. The PillGroup also
+    // disables the pill, so this guards programmatic callers.
+    const option = brokerPickerOptions.find((opt) => opt.id === nextBrokerId);
+    if (option && !option.selectable) {
+      setBrokerUnavailableNote(
+        option.unavailableReason ?? `${option.label} cannot be selected as the active broker.`,
+      );
+      return;
+    }
+    setBrokerUnavailableNote(null);
     if (needsLiveModeForBroker(nextBrokerId, effectiveEnv)) {
       setPendingLiveBroker(nextBrokerId);
       return;
@@ -791,43 +820,23 @@ export function BrokerDynamicMenu({
               ariaLabel="Broker choice"
               size="sm"
               variant="default"
-              options={brokerOptions().map((opt) => ({
+              options={brokerPickerOptions.map((opt) => ({
                 id: opt.id,
                 label: opt.label,
                 icon: opt.icon,
-                tooltip: `Select ${opt.label} as active broker`,
+                disabled: !opt.selectable,
+                tooltip: opt.selectable
+                  ? `Select ${opt.label} as active broker`
+                  : opt.unavailableReason,
               }))}
               value={selectedBrokerId}
               onChange={handleSelectBroker}
             />
-          </div>
-
-          {/* Data provider (Second Choice) — issue #3990: the data-source
-              list is separate from the broker list. A broker may also be
-              a data source (kind "broker"); Yahoo and Nasdaq are pure
-              data providers (kind "pure", no trading). The kind rides
-              the tooltip so the split is visible, not implied. */}
-          <div className="broker-panel-section data-provider-select-section">
-            <div className="section-label-row">
-              <span>Data provider</span>
-              <small>{labelForDataProvider(tenantProviders, tenantProviders.dataProviderId)} selected</small>
-            </div>
-            <PillGroup
-              className="settings-pref-btn-group data-provider-select-pills"
-              ariaLabel="Data provider choice"
-              size="sm"
-              variant="default"
-              options={DATA_PROVIDER_OPTIONS.map((opt) => ({
-                id: opt.id,
-                label: opt.label,
-                tooltip:
-                  opt.kind === "broker"
-                    ? `Select ${opt.label} as data provider (broker — also provides trading)`
-                    : `Select ${opt.label} as data provider (pure data provider — no trading)`,
-              }))}
-              value={tenantProviders.dataProviderId}
-              onChange={(v) => handleSetTenantProviders({ ...tenantProviders, dataProviderId: v })}
-            />
+            {brokerUnavailableNote && (
+              <Notice tone="warning" variant="box" density="compact" icon="⚠️" title="Broker unavailable">
+                <p>{brokerUnavailableNote}</p>
+              </Notice>
+            )}
           </div>
 
           {/* Environment & Connection (Harmonized Single Line with Toggle Button) */}
@@ -975,6 +984,34 @@ export function BrokerDynamicMenu({
                 onSaved={(binding) => adoptAccountBinding(binding)}
               />
             </div>
+          </div>
+
+          {/* Data provider (Third Choice) — issue #3990: the data-source
+              list is separate from the broker list. A broker may also be
+              a data source (kind "broker"); Yahoo and Nasdaq are pure
+              data providers (kind "pure", no trading). The kind rides
+              the tooltip so the split is visible, not implied. */}
+          <div className="broker-panel-section data-provider-select-section">
+            <div className="section-label-row">
+              <span>Data provider</span>
+              <small>{labelForDataProvider(tenantProviders, tenantProviders.dataProviderId)} selected</small>
+            </div>
+            <PillGroup
+              className="settings-pref-btn-group data-provider-select-pills"
+              ariaLabel="Data provider choice"
+              size="sm"
+              variant="default"
+              options={DATA_PROVIDER_OPTIONS.map((opt) => ({
+                id: opt.id,
+                label: opt.label,
+                tooltip:
+                  opt.kind === "broker"
+                    ? `Select ${opt.label} as data provider (broker — also provides trading)`
+                    : `Select ${opt.label} as data provider (pure data provider — no trading)`,
+              }))}
+              value={tenantProviders.dataProviderId}
+              onChange={(v) => handleSetTenantProviders({ ...tenantProviders, dataProviderId: v })}
+            />
           </div>
 
           {/* Preferences & Appearance Settings */}
