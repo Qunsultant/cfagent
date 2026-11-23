@@ -768,9 +768,15 @@ describe("server route inventory pin (#2902)", () => {
     // nav-availability delegation (1 import line + a 3-line comment
     // + the 2-line dispatch branch) (375 → 381). The routing logic
     // itself lives in src/server/routes/nav.ts, not here.
+    // #6250 records an eleventh deliberate growth: +13 lines for the
+    // env → OTel-observer resolver registration (2 import lines +
+    // a 9-line comment + the 1-line register call + 1 blank line)
+    // (381 → 394). The resolution lives in
+    // src/observability/otelJobPipelineObservers.ts, not here; no
+    // new route or responsibility is added.
     const src = readFileSync("src/server.ts", "utf8");
     const lines = src.split("\n").length - (src.endsWith("\n") ? 1 : 0);
-    expect(lines).toBeLessThanOrEqual(381);
+    expect(lines).toBeLessThanOrEqual(394);
   });
 });
 
