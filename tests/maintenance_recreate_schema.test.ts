@@ -149,7 +149,7 @@ describe("POST /api/maintenance/recreate-schema (#4383)", () => {
     // job_run_records + 5 mas_policy_verdicts literal ALTERs): the
     // fresh CREATE TABLEs already carry the binding columns, so the
     // ALTERs are probed-and-skipped: 37 → 46.
-    expect(body.skipped).toHaveLength(46);
+    expect(body.skipped).toHaveLength(52);
     expect(body.skipped.map((s: any) => s.code)).toContain(
       "schema.index.mas_reports.drop_index_idx_mas_reports_generation",
     );

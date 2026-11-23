@@ -576,6 +576,36 @@
           "name": "detail",
           "type": "TEXT",
           "pk": 0
+        },
+        {
+          "name": "stage_status",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "duration_ms",
+          "type": "INTEGER",
+          "pk": 0
+        },
+        {
+          "name": "unit_count",
+          "type": "INTEGER",
+          "pk": 0
+        },
+        {
+          "name": "failed_unit_count",
+          "type": "INTEGER",
+          "pk": 0
+        },
+        {
+          "name": "result_ref",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "definition_version",
+          "type": "INTEGER",
+          "pk": 0
         }
       ],
       "constraints": {

@@ -417,7 +417,7 @@ describe("recreate, tenant scope (#4383)", () => {
       // job_run_records + 5 mas_policy_verdicts literal ALTERs): the
       // fresh CREATE TABLEs already carry the binding columns, so the
       // ALTERs are probed-and-skipped: 37 → 46.
-      expect(inst.skipped).toHaveLength(46);
+      expect(inst.skipped).toHaveLength(52);
     }
     expect(body.uncreatableLayers).toHaveLength(5);
     // Nothing executed: the D1 store and the member instances are

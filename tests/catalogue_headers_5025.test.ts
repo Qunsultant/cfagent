@@ -54,7 +54,7 @@ describe("#5025 schemaComponent barrel & membership store naming", () => {
     // 64 → 65. Issue #5100 (F3 of #5094) adds 13 remainder entries (4
     // job_run_records + 4 mas_trades + 5 mas_policy_verdicts literal
     // ALTERs): 65 → 78.
-    expect(REMAINDER_CATALOGUE_ENTRIES.length).toBe(78);
+    expect(REMAINDER_CATALOGUE_ENTRIES.length).toBe(84);
     expect(DO_CATALOGUE_ENTRIES.length).toBe(109);
   });
 
