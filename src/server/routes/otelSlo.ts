@@ -32,6 +32,7 @@
 
 import type { Env, SessionData } from "../../types";
 import { requireAuth } from "../auth";
+import { requestExecutionContext } from "../../security/apiRequestContext";
 import { defaultAudit, defaultIsPlatformAdmin } from "./otelArchive";
 import {
   IAAA_AUDIT_POLICY_VERSION,
@@ -147,14 +148,27 @@ export async function handleSloRoutes(
     return jsonResponse(401, { error: "unauthorized" });
   }
 
+  // Issue #6172: the audit base reads the request's carried
+  // validated context when one resolved — the SLO read is
+  // attributed to the context's tenant + principal +
+  // correlation. Without a carried context the ad hoc values
+  // stand, so direct handler calls (and unattributed requests)
+  // behave exactly as before.
+  const carried = requestExecutionContext(request);
+  const carriedContext =
+    carried?.outcome === "resolved" ? carried.context : undefined;
   const auditBase = {
     timestamp: Date.now(),
     type: OTEL_SLO_AUDIT_TYPE,
-    actorPrincipalId: session.internalUserId ?? session.githubLogin ?? "unknown",
+    actorPrincipalId:
+      carriedContext?.principalId ??
+      session.internalUserId ?? session.githubLogin ?? "unknown",
     actorType: "human" as const,
-    initiatingPrincipalId: session.internalUserId ?? session.githubLogin ?? "unknown",
-    tenantId: resolveIaaaTenant(env),
-    correlationId: crypto.randomUUID(),
+    initiatingPrincipalId:
+      carriedContext?.initiatingPrincipalId ??
+      session.internalUserId ?? session.githubLogin ?? "unknown",
+    tenantId: carriedContext?.tenantId ?? resolveIaaaTenant(env),
+    correlationId: carriedContext?.correlationId ?? crypto.randomUUID(),
     action: "observability.slo.read",
     policyVersion: IAAA_AUDIT_POLICY_VERSION,
   };

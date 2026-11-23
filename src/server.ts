@@ -1,6 +1,10 @@
 import type { Env } from "./types";
 
 import { csrfGateResult } from "./security/csrf";
+import {
+  establishApiRequestContext,
+  requestExecutionContext,
+} from "./security/apiRequestContext";
 
 import { actorGateway } from "./services/cloudflareActorGateway";
 import { withRequestObservability } from "./observability/aspects";
@@ -140,6 +144,17 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
       const restLimited = checkPublicRestThrottle(request, { mode: apiIngressMode });
       if (restLimited) return restLimited;
     }
+
+    // Issue #6172 (slice 2 of the universal execution context):
+    // resolve the request's validated execution context ONCE, at
+    // the boundary, and carry it on the request for every handler.
+    // Runs after the static-asset, CSRF, and throttle gates and
+    // before any route dispatch; a refusal in enforce mode stops
+    // the request before any route work, while observe mode (the
+    // default) audits a denial and proceeds unattributed.
+    const { refusal } = await establishApiRequestContext(request, env);
+    if (refusal) return refusal;
+
     // Slice 2 (#2902): Core early branches moved to src/server/routes/core.ts
     // (/.well-known metadata, /a2a/*, /api/features).
     const coreEarlyResponse = await handleCoreEarlyRoutes(request, env, url, path);
@@ -327,8 +342,11 @@ export default {
   // recorded into the server metrics handle (status +
   // duration), so the API SLOs measure the requests this
   // isolate served. Best-effort: recording never fails a request.
+  // Issue #6172: the wrapper also reads the request's carried
+  // execution context for the event + the SLO sample.
   fetch: withRequestObservability(withErrorBoundary(handleFetch), {
     onRequestObserved: (observation, env) => recordServerApiRequest(env as Env, observation),
+    contextForRequest: requestExecutionContext,
   }),
   async email(message: any, env: Env, ctx?: any): Promise<void> {
     // Issue #3490 (S2, epic #3488): agent-addressed mail

@@ -50,6 +50,24 @@ export interface TraceContext {
   flags: string;
 }
 
+/**
+ * Issue #6172 (slice 2 of the universal execution context) — the
+ * SLO cuts of a validated ExecutionContext, carried on an API
+ * request observation. The full id list rides the http.request
+ * log event's scope + fields; the SLO sample carries only the
+ * dimensions the per-dimension evaluation (#6174) cuts on:
+ * tenant, dispatch mode, exec mode, environment. Values are
+ * plain strings here (the port layer names no security type);
+ * producers assign the context's typed values into them.
+ * Absent when the request carried no resolved context.
+ */
+export interface ApiRequestDimensions {
+  tenantId?: string;
+  dispatchMode?: string;
+  execMode?: string;
+  environment?: string;
+}
+
 const HEX32 = /^[0-9a-f]{32}$/;
 const HEX16 = /^[0-9a-f]{16}$/;
 const HEX2 = /^[0-9a-f]{2}$/;
