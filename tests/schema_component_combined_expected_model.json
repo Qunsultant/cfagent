@@ -8757,6 +8757,31 @@
           "name": "event_hash",
           "type": "TEXT",
           "pk": 0
+        },
+        {
+          "name": "platform_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "tenant_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "principal_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "correlation_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "trace_id",
+          "type": "TEXT",
+          "pk": 0
         }
       ],
       "constraints": {}
@@ -10458,6 +10483,37 @@
         "session_id",
         "type",
         "created_at DESC"
+      ],
+      "unique": false
+    },
+    "idx_mas_events_tenant_created": {
+      "table": "mas_events",
+      "columns": [
+        "tenant_id",
+        "created_at DESC"
+      ],
+      "unique": false
+    },
+    "idx_mas_events_principal_created": {
+      "table": "mas_events",
+      "columns": [
+        "principal_id",
+        "created_at DESC"
+      ],
+      "unique": false
+    },
+    "idx_mas_events_type_created": {
+      "table": "mas_events",
+      "columns": [
+        "type",
+        "created_at DESC"
+      ],
+      "unique": false
+    },
+    "idx_mas_events_correlation": {
+      "table": "mas_events",
+      "columns": [
+        "correlation_id"
       ],
       "unique": false
     },

@@ -402,8 +402,12 @@ describe("recreate, tenant scope (#4383)", () => {
     // Issue #5102 (F5 of #5094) adds migration 0084 (job_run_records
     // binding columns: 4 ALTERs + 1 index): 278 → 283.
     // #6151 S3 adds migration 0085 (saved nav presets: 2 tables + 2 indexes): 283 → 287.
-    expect(body.d1.selected).toHaveLength(287);
-    expect(body.d1.skipped).toHaveLength(13);
+    // Issue #6100 adds 4 mas_events envelope indexes on the D1 leg:
+    // 287 → 291. Its 5 envelope ALTERs are already carried by the
+    // projected-model walk (the ORM CREATE has them), so the D1 leg
+    // skips five more: 13 → 18.
+    expect(body.d1.selected).toHaveLength(291);
+    expect(body.d1.skipped).toHaveLength(18);
     // Two member instances (alice, bob), each planning the fresh DO leg.
     expect(body.instances).toHaveLength(2);
     for (const inst of body.instances) {
@@ -500,7 +504,8 @@ describe("recreate, tenant scope (#4383)", () => {
     // Issue #5102 (F5 of #5094) adds migration 0084 (job_run_records
     // binding columns: 4 ALTERs + 1 index): 278 → 283.
     // #6151 S3 adds migration 0085 (saved nav presets: 2 tables + 2 indexes): 283 → 287.
-    expect(body.d1.report.executed).toHaveLength(287);
+    // Issue #6100 adds 4 mas_events envelope indexes: 287 → 291.
+    expect(body.d1.report.executed).toHaveLength(291);
     expect(body.d1.verification.ok).toBe(true);
     expect(body.instances).toHaveLength(2);
     for (const inst of body.instances) {
