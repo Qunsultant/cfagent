@@ -7,6 +7,8 @@
  */
 
 import { ACCOUNT_TYPES } from "./accountBindings";
+import { isRetryBucketName, RETRY_BUCKET_NAMES } from "../services/pipelinePolicy";
+import type { StageRetryBucket } from "../workflows/stageRunnerPorts";
 
 export type ResearchStorageMode = "durable" | "in-memory";
 export type ResearchAccountType = (typeof ACCOUNT_TYPES)[number];
@@ -139,6 +141,200 @@ export function resolveResearchStageModes(
   const { modes, errors } = readResearchStageModes(env);
   if (errors.length > 0) throw new Error(errors[0]);
   return modes;
+}
+
+/**
+ * Issue #5109, Fix 2 — the resilient per-stage deadlines (ms) for the
+ * OODA job, in the survey's §2 combination: feed 240,000 (quotes for
+ * ≤36 symbols complete well inside it), analyze/enrich/generate/
+ * evaluate 600,000 (the engine's stage default), deliver 300,000.
+ * The research job has no run deadline (the run race applies to feed
+ * jobs only), so these are standalone per-stage budgets, consumed by
+ * the engine through the `perStage` carrier — never a second literal.
+ */
+export const DEFAULT_RESEARCH_STAGE_TIMEOUTS_MS: Readonly<Record<ResearchStageKind, number>> = {
+  feed: 240_000,
+  enrich: 600_000,
+  analyze: 600_000,
+  generate: 600_000,
+  deliver: 300_000,
+  evaluate: 600_000,
+};
+
+/**
+ * Issue #5109, Fix 2 — the per-stage retry bucket for the OODA job, in
+ * the survey's §2 combination. Analyze stays on `report`, never
+ * `acquisition`: a third attempt would re-run the whole OODA loop a
+ * third time. `timed_out` is never retried at the engine level (G4).
+ */
+export const DEFAULT_RESEARCH_STAGE_RETRY_BUCKETS: Readonly<
+  Record<ResearchStageKind, StageRetryBucket>
+> = {
+  feed: "acquisition",
+  enrich: "report",
+  analyze: "report",
+  generate: "report",
+  deliver: "delivery",
+  evaluate: "report",
+};
+
+/** Issue #5109, Fix 2 — per-stage timeout overrides, keyed by stage kind. */
+export type ResearchStageTimeouts = Partial<Record<ResearchStageKind, number>>;
+
+/** Issue #5109, Fix 2 — per-stage retry-bucket overrides, keyed by stage kind. */
+export type ResearchStageRetryBuckets = Partial<Record<ResearchStageKind, StageRetryBucket>>;
+
+/**
+ * Issue #5109, Fix 2 — validate one parsed stage-timeout map, returning
+ * the timeouts and the errors by name instead of throwing. One rule for
+ * the carrier: an unknown stage kind, a non-integer, or a non-positive
+ * value refuses by name — a typo must not silently keep the default.
+ */
+export function validateResearchStageTimeouts(
+  parsed: unknown,
+  source: string = "RESEARCH_STAGE_TIMEOUTS_MS",
+): { timeouts: ResearchStageTimeouts; errors: string[] } {
+  const errors: string[] = [];
+  const out: ResearchStageTimeouts = {};
+  if (parsed === null || parsed === undefined) return { timeouts: out, errors };
+  if (typeof parsed !== "object" || Array.isArray(parsed)) {
+    errors.push(`${source} must be an object keyed by research stage kind.`);
+    return { timeouts: out, errors };
+  }
+  for (const [stage, value] of Object.entries(parsed as Record<string, unknown>)) {
+    if (!(RESEARCH_STAGE_KINDS as readonly string[]).includes(stage)) {
+      errors.push(
+        `Unknown research stage "${stage}" in ${source}. Expected one of: ${RESEARCH_STAGE_KINDS.join(", ")}`,
+      );
+      continue;
+    }
+    if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
+      errors.push(`${source}.${stage} must be a positive integer number of milliseconds.`);
+      continue;
+    }
+    out[stage as ResearchStageKind] = value;
+  }
+  return { timeouts: out, errors };
+}
+
+/**
+ * Issue #5109, Fix 2 — validate one parsed stage-retry-bucket map, returning
+ * the buckets and the errors by name instead of throwing. Bucket names
+ * are the policy's own (`RETRY_BUCKET_NAMES`) — never a second list.
+ */
+export function validateResearchStageRetryBuckets(
+  parsed: unknown,
+  source: string = "RESEARCH_STAGE_RETRY_BUCKETS",
+): { retryBuckets: ResearchStageRetryBuckets; errors: string[] } {
+  const errors: string[] = [];
+  const out: ResearchStageRetryBuckets = {};
+  if (parsed === null || parsed === undefined) return { retryBuckets: out, errors };
+  if (typeof parsed !== "object" || Array.isArray(parsed)) {
+    errors.push(`${source} must be an object keyed by research stage kind.`);
+    return { retryBuckets: out, errors };
+  }
+  for (const [stage, value] of Object.entries(parsed as Record<string, unknown>)) {
+    if (!(RESEARCH_STAGE_KINDS as readonly string[]).includes(stage)) {
+      errors.push(
+        `Unknown research stage "${stage}" in ${source}. Expected one of: ${RESEARCH_STAGE_KINDS.join(", ")}`,
+      );
+      continue;
+    }
+    if (!isRetryBucketName(value)) {
+      errors.push(
+        `Unknown retry bucket ${JSON.stringify(value)} for research stage "${stage}" in ${source}. Expected one of: ${RETRY_BUCKET_NAMES.join(", ")}`,
+      );
+      continue;
+    }
+    out[stage as ResearchStageKind] = value;
+  }
+  return { retryBuckets: out, errors };
+}
+
+/**
+ * Issue #5109, Fix 2 — read the deployment timeout carrier without
+ * throwing, so a surface that only *describes* the configuration reports
+ * a broken default beside the read instead of failing.
+ */
+export function readResearchStageTimeouts(env?: Record<string, string | undefined>): {
+  timeouts: ResearchStageTimeouts;
+  errors: string[];
+} {
+  const raw = env?.RESEARCH_STAGE_TIMEOUTS_MS;
+  if (!raw || !raw.trim()) return { timeouts: {}, errors: [] };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return {
+      timeouts: {},
+      errors: [
+        "RESEARCH_STAGE_TIMEOUTS_MS is not valid JSON; expected { <stage>: <milliseconds> }.",
+      ],
+    };
+  }
+  return validateResearchStageTimeouts(parsed, "RESEARCH_STAGE_TIMEOUTS_MS");
+}
+
+/** Issue #5109, Fix 2 — read the deployment retry-bucket carrier without throwing. */
+export function readResearchStageRetryBuckets(env?: Record<string, string | undefined>): {
+  retryBuckets: ResearchStageRetryBuckets;
+  errors: string[];
+} {
+  const raw = env?.RESEARCH_STAGE_RETRY_BUCKETS;
+  if (!raw || !raw.trim()) return { retryBuckets: {}, errors: [] };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return {
+      retryBuckets: {},
+      errors: [
+        "RESEARCH_STAGE_RETRY_BUCKETS is not valid JSON; expected { <stage>: <bucket> }.",
+      ],
+    };
+  }
+  return validateResearchStageRetryBuckets(parsed, "RESEARCH_STAGE_RETRY_BUCKETS");
+}
+
+/**
+ * Issue #5109, Fix 2 — the effective per-stage timeouts: the deployment
+ * carrier overrides the recorded defaults, per stage; a stage present
+ * in only one of them survives. Nothing is dropped and nothing is
+ * invented. Throws on the first validation error, like
+ * `resolveResearchStageModes`.
+ */
+export function resolveResearchStageTimeouts(
+  env?: Record<string, string | undefined>,
+): Record<ResearchStageKind, number> {
+  const { timeouts, errors } = readResearchStageTimeouts(env);
+  if (errors.length > 0) throw new Error(errors[0]);
+  return mergeResearchStageTimeouts(DEFAULT_RESEARCH_STAGE_TIMEOUTS_MS, timeouts);
+}
+
+/** Issue #5109, Fix 2 — the effective per-stage retry buckets (same rule). */
+export function resolveResearchStageRetryBuckets(
+  env?: Record<string, string | undefined>,
+): Record<ResearchStageKind, StageRetryBucket> {
+  const { retryBuckets, errors } = readResearchStageRetryBuckets(env);
+  if (errors.length > 0) throw new Error(errors[0]);
+  return mergeResearchStageRetryBuckets(DEFAULT_RESEARCH_STAGE_RETRY_BUCKETS, retryBuckets);
+}
+
+/** Issue #5109, Fix 2 — merge one stage-timeout override over a base table. */
+export function mergeResearchStageTimeouts(
+  base: Readonly<Record<ResearchStageKind, number>>,
+  override?: ResearchStageTimeouts | null,
+): Record<ResearchStageKind, number> {
+  return { ...base, ...(override ?? {}) };
+}
+
+/** Issue #5109, Fix 2 — merge one stage-retry-bucket override over a base table. */
+export function mergeResearchStageRetryBuckets(
+  base: Readonly<Record<ResearchStageKind, StageRetryBucket>>,
+  override?: ResearchStageRetryBuckets | null,
+): Record<ResearchStageKind, StageRetryBucket> {
+  return { ...base, ...(override ?? {}) };
 }
 
 export interface ResearchJobConfig {
