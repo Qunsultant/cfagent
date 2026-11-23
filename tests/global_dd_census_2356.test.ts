@@ -1068,7 +1068,11 @@ const STEP5B_PORT_SITES: Array<[string, string, number]> = [
   // in the wired login tail lists the user's sessions via the
   // same listSessionFamilyEntries factory — no new funnel, no
   // bypass (the cap counts the existing family listing).
-  ["src/security/iaaaLogin.ts", "listSessionFamilyEntries", 1],
+  // Bumped 1 -> 2 for issue #6236: the targeted stranded-id
+  // cleanup in the same login tail lists the reverse-index
+  // entries for the stranded id via the same factory — no new
+  // funnel, no bypass.
+  ["src/security/iaaaLogin.ts", "listSessionFamilyEntries", 2],
   ["src/security/iaaaLogin.ts", "sessionFamilyPorts", 1],
   ["src/security/iaaaLogin.ts", "wiredMembershipStore", 2],
   ["src/security/session.ts", "createSessionPorts", 1],
@@ -1111,6 +1115,10 @@ const STEP5B_PORT_SITES: Array<[string, string, number]> = [
   // for the granter-revocation judgment) and the two revoke routes
   // add one each (granter-revocation pass), same factory — no new
   // funnel, no bypass.
+  // Bumped 20 -> 23 for issue #6236: the stale-identities admin
+  // builder adds three list sites in auth.ts (alias rows,
+  // reverse-index entries, memberships for the cleanup pass),
+  // same factory — no new funnel, no bypass.
   // Slice 3 of Qunsultant/cfagent#2902 (2026-11-05): the 20 list
   // sites move verbatim from src/server.ts to
   // src/server/routes/auth.ts with the IAAA lifecycle; the count
@@ -1128,7 +1136,7 @@ const STEP5B_PORT_SITES: Array<[string, string, number]> = [
   // before "src/server/routes/otelArchive.ts" sorts before
   // "src/server/routes/platform.ts" sorts before
   // "src/server/routes/privacy.ts".)
-  ["src/server/routes/auth.ts", "listSessionFamilyEntries", 20],
+  ["src/server/routes/auth.ts", "listSessionFamilyEntries", 23],
   ["src/server/routes/auth.ts", "wiredAccessRequestStore", 1],
   ["src/server/routes/auth.ts", "wiredMembershipStore", 4],
   // #5169 (2026-11-17): the OTel archive routes compose
