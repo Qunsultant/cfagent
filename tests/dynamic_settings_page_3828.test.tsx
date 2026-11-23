@@ -6,7 +6,7 @@ import path from "node:path";
 import React from "react";
 import ReactDOMServer from "react-dom/server";
 import { NavSettingsPage } from "../src/client/NavSettingsPage";
-import { leftNavConfigIds } from "../src/client/components/NavigationMenu";
+import { leftNavConfigIds } from "../src/client/navPresets";
 
 const CHAT_SRC = fs.readFileSync(
   path.resolve(process.cwd(), "src/client/Chat.tsx"),

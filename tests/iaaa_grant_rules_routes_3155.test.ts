@@ -89,7 +89,7 @@ async function makeEnv() {
   await seedMembership(PLAT_A_ID, "platform-admin", "platform");
   await seedMembership(PLAT_B_ID, "platform-admin", "platform");
   await seedMembership(MEMBER_ID, "member", "tenant");
-  return { env, membershipStore };
+  return { env, membershipStore, seed };
 }
 
 function req(method: string, path: string, body?: unknown, cookie?: string) {
@@ -201,6 +201,50 @@ describe("membership grant second-approver (#3155)", () => {
     expect(second.status).toBe(201);
     const secondBody = (await second.json()) as { membership: { roleBindings: Array<{ expiresAtMs?: number }> } };
     expect(secondBody.membership.roleBindings[0].expiresAtMs).toBeUndefined();
+  });
+});
+
+describe("#6164 (A2) — a login grant target resolves server-side", () => {
+  it("mints the membership keyed by the internal id, never by the login string", async () => {
+    const { env, seed } = await makeEnv();
+    seed("sessions", "iaaa-alias:login:octocat-target", {
+      githubLogin: "octocat-target",
+      internalUserId: TARGET_ID,
+      recordedAtMs: NOW,
+      source: "wired-login",
+    });
+    const res = await worker.fetch(
+      req(
+        "POST",
+        "/api/iaaa/membership/grant",
+        { login: "octocat-target", roleBindings: [{ role: "member", scope: "tenant" }] },
+        ADMIN_A_SESSION,
+      ),
+      env,
+    );
+    expect(res.status).toBe(201);
+    const memberships = await listMemberships(env, PLAT_A_SESSION);
+    expect(hasLiveBinding(memberships, TARGET_ID, "member")).toBe(true);
+    // Keying a membership by the raw login string would be a
+    // fabricated internal id — the route resolves the alias first.
+    expect(hasLiveBinding(memberships, "octocat-target", "member")).toBe(false);
+  });
+
+  it("an unresolvable login is refused 400 by an authorized caller, and mints nothing", async () => {
+    const { env } = await makeEnv();
+    const res = await worker.fetch(
+      req(
+        "POST",
+        "/api/iaaa/membership/grant",
+        { login: "no-such-login", roleBindings: [{ role: "member", scope: "tenant" }] },
+        ADMIN_A_SESSION,
+      ),
+      env,
+    );
+    expect(res.status).toBe(400);
+    expect(await res.text()).toMatch(/No internal user id found for login no-such-login/);
+    const memberships = await listMemberships(env, PLAT_A_SESSION);
+    expect(hasLiveBinding(memberships, "no-such-login", "member")).toBe(false);
   });
 });
 

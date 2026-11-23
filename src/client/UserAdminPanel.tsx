@@ -41,7 +41,7 @@ import { platformPath } from "../data/platformUrlCatalog";
 export interface PlatformUserMembershipView {
   membershipId: string;
   tenantId: string;
-  roles: Array<{ role: string; scope: string }>;
+  roles: Array<{ role: string; scope: string; expiresAtMs?: number }>;
   createdAtMs: number;
   revokedAtMs?: number;
 }
@@ -56,6 +56,8 @@ export interface PlatformUserAccountView {
 
 export interface PlatformUserView {
   userLogin: string;
+  /** #6164 (A2) — the internal user id for this login, null when no alias exists. */
+  internalUserId: string | null;
   tenantId: string | null;
   hasAccount: boolean;
   tier: string;
@@ -144,6 +146,10 @@ function UserViewSection({ view, heading }: { view: PlatformUserView; heading: s
           <strong>Verified login:</strong> {view.userLogin}
         </div>
         <div>
+          <strong>Internal user id:</strong>{" "}
+          {view.internalUserId ? <code>{view.internalUserId}</code> : "not recorded"}
+        </div>
+        <div>
           <strong>Tenant:</strong>{" "}
           {view.tenantId ?? "No tenant — no commercial account yet"}
         </div>
@@ -209,10 +215,21 @@ function UserViewSection({ view, heading }: { view: PlatformUserView; heading: s
             {
               key: "status",
               header: "Status",
-              render: (row) =>
-                row.revokedAtMs !== undefined
-                  ? `Revoked ${fmtTime(row.revokedAtMs)}`
-                  : "Active",
+              // #6164 — same active/revoked/expired rule as the Members
+              // table: expired only when every binding expired.
+              render: (row) => {
+                if (row.revokedAtMs !== undefined) {
+                  return `Revoked ${fmtTime(row.revokedAtMs)}`;
+                }
+                const expiries = row.roles
+                  .map((r) => r.expiresAtMs)
+                  .filter((e): e is number => e !== undefined);
+                if (row.roles.length > 0 && expiries.length === row.roles.length) {
+                  const latest = Math.max(...expiries);
+                  if (latest <= Date.now()) return `Expired ${fmtTime(latest)}`;
+                }
+                return "Active";
+              },
             },
           ]}
           rows={view.memberships}

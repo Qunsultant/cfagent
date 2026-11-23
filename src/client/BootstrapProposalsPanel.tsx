@@ -32,7 +32,8 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { Button, EmptyState, Notice, Select, Spinner, TextInput } from "./components/ui";
+import { Button, Card, EmptyState, Flex, Notice, Select, Spinner, Stack, TextInput } from "./components/ui";
+import { formatIdentityText } from "./identityDisplay";
 import {
   approveBootstrapProposal,
   confirmBootstrapApplied,
@@ -119,8 +120,11 @@ export function BootstrapProposalsPanel() {
   };
 
   return (
-    <div className="lup-panel">
-      <p className="lup-desc">
+    // #6164 (A3) — retired loggedInUsersPanel.deprecated.css (shared with
+    // LoggedInUsersPanel): layout and text come from the ui primitives
+    // only (Stack/Flex/Card + ui-meta), the ApiKeysPanel pattern.
+    <Stack gap="3">
+      <p className="ui-meta">
         Reviewed bootstrap changes (945 Q3). A proposal changes nothing until a different
         platform admin approves it, and approval changes nothing until the operator confirms
         application through the secrets channel — this panel never writes the bootstrap list
@@ -132,40 +136,50 @@ export function BootstrapProposalsPanel() {
       {notice !== "" && <Notice tone="success">{notice}</Notice>}
       {error !== "" && <Notice tone="danger">{error}</Notice>}
       {loading && (
-        <div className="lup-loading">
-          <Spinner />
-        </div>
+        <Flex gap="2" align="center">
+          <Spinner size="sm" /> <span className="ui-meta">Loading bootstrap proposals…</span>
+        </Flex>
       )}
       {!loading && current && (
-        <div className="lup-item">
-          <div className="lup-item-meta">
-            <span className="lup-item-user">Current bootstrap list</span>
-            <span className="lup-item-times">
+        <Card padding="sm">
+          <Stack gap="1">
+            <strong>Current bootstrap list</strong>
+            <span className="ui-meta">
               {current.entries.length === 0
                 ? "No entries."
                 : current.entries.join(", ")}
             </span>
+            {current.resolvedInternalUserIds.length > 0 && (
+              <span className="ui-meta">
+                Resolved to:{" "}
+                {current.resolvedInternalUserIds
+                  .map((id, i) =>
+                    formatIdentityText(current.resolvedLogins?.[i], id),
+                  )
+                  .join("; ")}
+              </span>
+            )}
             {current.unresolvedEntries.length > 0 && (
-              <span className="lup-item-times">
+              <span className="ui-meta">
                 Unresolved (match nobody): {current.unresolvedEntries.join(", ")}
               </span>
             )}
             {current.divergence.length > 0 && (
-              <span className="lup-item-times">
+              <span className="ui-meta">
                 Granted via bootstrap but no longer listed (membership stays until explicitly
                 revoked):{" "}
                 {current.divergence
-                  .map((d) => `${d.internalUserId} (${d.roles.join(", ")} via ${d.grantedVia})`)
+                  .map((d) => `${formatIdentityText(d.login, d.internalUserId)} (${d.roles.join(", ")} via ${d.grantedVia})`)
                   .join("; ")}
               </span>
             )}
-          </div>
-        </div>
+          </Stack>
+        </Card>
       )}
-      <div className="lup-item">
-        <div className="lup-item-meta">
-          <span className="lup-item-user">Propose a bootstrap change</span>
-          <span className="lup-item-count">
+      <Card padding="sm">
+        <Stack gap="1">
+          <strong>Propose a bootstrap change</strong>
+          <Flex gap="2" align="end" wrap>
             {/* Issue #4839 G8: visible labels, not aria-label only. */}
             <Select
               label="Change action"
@@ -190,38 +204,38 @@ export function BootstrapProposalsPanel() {
             <Button disabled={proposing} onClick={() => void doPropose()}>
               Propose
             </Button>
-          </span>
-        </div>
-      </div>
+          </Flex>
+        </Stack>
+      </Card>
       {!loading && proposals.length === 0 && (
         <EmptyState title="No bootstrap proposals" description="No bootstrap proposals exist yet." />
       )}
       {!loading && proposals.length > 0 && (
-        <ul className="lup-list">
+        <Stack gap="2">
           {proposals.map((p) => (
-            <li key={p.proposalId} className="lup-item">
-              <div className="lup-item-meta">
-                <span className="lup-item-user">
+            <Card key={p.proposalId} padding="sm">
+              <Stack gap="1">
+                <strong>
                   {p.action} {p.identifier}
+                </strong>
+                <span className="ui-meta">
+                  Status: {p.status} · Proposed by {formatIdentityText(p.proposerLogin, p.proposer)} · Reason: {p.reason}
                 </span>
-                <span className="lup-item-count">
-                  Status: {p.status} · Proposed by {p.proposer} · Reason: {p.reason}
-                </span>
-                <span className="lup-item-times">
+                <span className="ui-meta">
                   Created: {fmtBootstrapTime(p.createdAtMs)}
-                  {p.approver ? ` · Reviewed by ${p.approver}` : ""}
+                  {p.approver ? ` · Reviewed by ${formatIdentityText(p.approverLogin, p.approver)}` : ""}
                   {p.exceptionReason ? ` · Self-approval reason: ${p.exceptionReason}` : ""}
-                  {p.appliedBy ? ` · Applied by ${p.appliedBy}` : ""}
+                  {p.appliedBy ? ` · Applied by ${formatIdentityText(p.appliedByLogin, p.appliedBy)}` : ""}
                   {p.applicationNote ? ` · Note: ${p.applicationNote}` : ""}
                 </span>
                 {p.retained && (
-                  <span className="lup-item-times">
+                  <span className="ui-meta">
                     Removal retains membership {p.retained.membershipId} for{" "}
-                    {p.retained.internalUserId} until explicitly revoked.
+                    {formatIdentityText(p.retained.login, p.retained.internalUserId)} until explicitly revoked.
                   </span>
                 )}
                 {p.status === "proposed" && (
-                  <span className="lup-item-count">
+                  <Flex gap="2" align="end" wrap>
                     <TextInput
                       aria-label="Exception reason for self-approval"
                       value={exceptionReason}
@@ -247,10 +261,10 @@ export function BootstrapProposalsPanel() {
                     >
                       Reject
                     </Button>
-                  </span>
+                  </Flex>
                 )}
                 {p.status === "approved" && (
-                  <span className="lup-item-count">
+                  <Flex gap="2" align="end" wrap>
                     <TextInput
                       aria-label="Application note"
                       value={applicationNote}
@@ -270,17 +284,17 @@ export function BootstrapProposalsPanel() {
                     >
                       Confirm applied
                     </Button>
-                  </span>
+                  </Flex>
                 )}
-              </div>
-            </li>
+              </Stack>
+            </Card>
           ))}
-        </ul>
+        </Stack>
       )}
-      <p className="lup-note">
+      <p className="ui-meta">
         Every transition is audited through the chained audit store before it is stored. A
         failed audit append stores nothing.
       </p>
-    </div>
+    </Stack>
   );
 }

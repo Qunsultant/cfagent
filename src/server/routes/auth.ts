@@ -67,6 +67,8 @@ import {
 import { createWiredBindingStore } from "../../security/iaaaLogin";
 import { approveProposal, createKvPolicyProposalStore, createProposal, diffPolicySnapshots, parseStoredProposal, policyProposalAuditInput, previewDecisions, promoteProposal, rejectProposal, POLICY_PROPOSAL_ACTIVE_KEY, POLICY_PROPOSAL_KEY_PREFIX, type PolicyProposal, type PolicyProposalAuditAction } from "../../security/policyProposals";
 import { canRevokeRoleGrant, flattenRoleGrants, removeRoleBinding, toRoleGrantView, validateRoleGrantRequest } from "../../security/roleGrants";
+import { isInternalUserId, resolveLogins } from "../../security/identityDisplay";
+import { lookupInternalUserIdByLogin } from "../../security/iaaaMigration";
 import { evaluateWithObligations, OBLIGATION_POLICY, type ObligationAuditWriter } from "../../security/obligations";
 import { resolvePdpPolicySource } from "../../security/pdpPorts";
 import { IAAA_AUDIT_POLICY_VERSION, recordAuditEvent } from "../../security/iaaaAudit";
@@ -766,6 +768,19 @@ export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL,
       const tenantId = resolveIaaaTenant(env);
       const membershipStore = wiredMembershipStore(env);
       const requestStore = wiredAccessRequestStore(env);
+      const kv = sessionStore(env);
+      // #6164 (F4) — every request returned here carries its requester's
+      // login, resolved server-side via the alias record (null when no
+      // alias exists). The client renders it, never invents it.
+      const withRequesterLogin = async <T extends { requesterInternalUserId: string }>(
+        request: T,
+      ): Promise<T & { requesterLogin: string | null }> => ({
+        ...request,
+        requesterLogin:
+          (await resolveLogins(kv, [request.requesterInternalUserId])).get(
+            request.requesterInternalUserId,
+          ) ?? null,
+      });
       const nowMs = Date.now();
       const callerHasActiveMembership = async (): Promise<boolean> => {
         const memberships = await membershipStore.getMembershipsByUser(session.internalUserId as string);
@@ -801,7 +816,7 @@ export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL,
           if (!created.ok) {
             return Response.json({ error: "Access request could not be created." }, { status: 400 });
           }
-          return Response.json({ ok: true, request: created.request }, { status: 201 });
+          return Response.json({ ok: true, request: await withRequesterLogin(created.request) }, { status: 201 });
         }
         if (path === "/api/iaaa/access-requests") {
           if (request.method !== "GET") {
@@ -817,7 +832,18 @@ export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL,
           if (grantCheck.decision === "deny") {
             return Response.json({ error: "Forbidden: listing access requests requires tenant-admin." }, { status: 403 });
           }
-          return Response.json({ ok: true, requests: await requestStore.list() });
+          const listedRequests = await requestStore.list();
+          const listedLogins = await resolveLogins(
+            kv,
+            listedRequests.map((r) => r.requesterInternalUserId),
+          );
+          return Response.json({
+            ok: true,
+            requests: listedRequests.map((r) => ({
+              ...r,
+              requesterLogin: listedLogins.get(r.requesterInternalUserId) ?? null,
+            })),
+          });
         }
         // POST /api/iaaa/access-request/decision
         if (request.method !== "POST") {
@@ -886,7 +912,7 @@ export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL,
               return Response.json({
                 ok: true,
                 pendingSecondApproval: true,
-                request: approval.request,
+                request: await withRequesterLogin(approval.request),
               });
             }
             const granted = await grantMembership(membershipStore, {
@@ -923,7 +949,7 @@ export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL,
           approveRotationCookie = sessionRotationCookie(request, approveRotation);
         }
         return Response.json(
-          { ok: true, request: decided.request, sessionRotation: { rotatedCount: approveRotationCount, unavailable: approveRotationUnavailable } },
+          { ok: true, request: await withRequesterLogin(decided.request), sessionRotation: { rotatedCount: approveRotationCount, unavailable: approveRotationUnavailable } },
           approveRotationCookie ? { headers: { "Set-Cookie": approveRotationCookie } } : undefined,
         );
       } catch {
@@ -1230,7 +1256,19 @@ export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL,
           const memberships = callerIsPlatformAdmin
             ? all
             : all.filter((m) => m.tenantId === tenantId);
-          return Response.json({ ok: true, memberships });
+          // #6164 (F3) — each membership carries its login, resolved
+          // server-side via the alias record (null when no alias).
+          const membershipLogins = await resolveLogins(
+            kv,
+            memberships.map((m) => m.internalUserId),
+          );
+          return Response.json({
+            ok: true,
+            memberships: memberships.map((m) => ({
+              ...m,
+              login: membershipLogins.get(m.internalUserId) ?? null,
+            })),
+          });
         }
         // #2688 — dedicated admin-grant surface. Distinct from the
         // #1758 membership routes in three ways: (1) only
@@ -1271,11 +1309,22 @@ export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL,
               return Response.json({ error: "Role-grant listing unavailable." }, { status: 500 });
             }
             const reviewQueue = listGrantsForReview(listMembershipsFromEntries(reviewEntries), nowMs);
+            const visibleQueue = callerIsPlatformAdmin
+              ? reviewQueue
+              : reviewQueue.filter((q) => q.tenantId === tenantId);
+            // #6164 (F8) — the review queue carries the same identity
+            // join as the grant list: grantee login + granter login.
+            const reviewLogins = await resolveLogins(
+              kv,
+              visibleQueue.flatMap((q) => [q.internalUserId, q.createdBy]),
+            );
             return Response.json({
               ok: true,
-              reviewQueue: callerIsPlatformAdmin
-                ? reviewQueue
-                : reviewQueue.filter((q) => q.tenantId === tenantId),
+              reviewQueue: visibleQueue.map((q) => ({
+                ...q,
+                login: reviewLogins.get(q.internalUserId) ?? null,
+                createdByLogin: reviewLogins.get(q.createdBy) ?? null,
+              })),
             });
           }
           const entries = await listSessionFamilyEntries(env, "iaaa-membership:");
@@ -1323,14 +1372,22 @@ export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL,
               }
             }
           }
-          return Response.json({
-            ok: true,
-            grants: grants.map((g) => ({
-              ...g,
-              identity: identityByUser.get(g.internalUserId) ?? null,
-              email: emailByMembership.get(g.membershipId) ?? null,
-            })),
-          });
+          // #6164 (F8/F10) — each grant carries the grantee login and
+          // the granter login, resolved server-side via the alias
+          // record (null when no alias exists). The existing identity
+          // (issuer:subject) enrichment is unchanged.
+          const grantLogins = await resolveLogins(
+            kv,
+            grants.flatMap((g) => [g.internalUserId, g.grantedBy]),
+          );
+          const enrichedGrants = grants.map((g) => ({
+            ...g,
+            identity: identityByUser.get(g.internalUserId) ?? null,
+            email: emailByMembership.get(g.membershipId) ?? null,
+            login: grantLogins.get(g.internalUserId) ?? null,
+            grantedByLogin: grantLogins.get(g.grantedBy) ?? null,
+          }));
+          return Response.json({ ok: true, grants: enrichedGrants });
         }
         // Deprecated: issue #6165 — one admin-creation path. Superseded by POST /api/iaaa/membership/grant (Grant membership on the Members tab); this route is a deprecated alias that mints through the same grantMembership seam and stays functional.
         if (path === "/api/iaaa/role-grants/grant") {
@@ -1338,11 +1395,39 @@ export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL,
             return Response.json({ error: "Method not allowed" }, { status: 405 });
           }
           const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
-          const targetId = typeof body?.internalUserId === "string" ? body.internalUserId.trim() : "";
+          // #6164 (A2) — the grant form accepts a login OR an internal
+          // user id. An id-shaped value is used verbatim; anything else
+          // is resolved server-side via the alias record, and an
+          // unresolvable login fails closed — a membership is never
+          // minted keyed by a login string.
+          const rawTarget =
+            typeof body?.internalUserId === "string" && body.internalUserId.trim() !== ""
+              ? body.internalUserId.trim()
+              : typeof body?.login === "string"
+                ? body.login.trim()
+                : "";
           const role = typeof body?.role === "string" ? body.role.trim() : "";
           const requestedTenant = typeof body?.tenantId === "string" ? body.tenantId.trim() : undefined;
-          if (targetId === "" || role === "") {
-            return Response.json({ error: "internalUserId and role are required." }, { status: 400 });
+          if (rawTarget === "" || role === "") {
+            return Response.json({ error: "A target login or internalUserId, and role, are required." }, { status: 400 });
+          }
+          // A login that resolves to no alias is remembered, not
+          // refused here: the session gates below (step-up #3102,
+          // PDP deny #3113) answer to the session, not to the body,
+          // so a stale or denied caller must see 403 first and never
+          // learn whether a login exists. The raw string is a safe
+          // sentinel for the pre-gate reads: no membership is ever
+          // keyed by a login string, so the idempotent no-op check
+          // below is honest for it.
+          let targetId = rawTarget;
+          let unresolvedLogin: string | null = null;
+          if (!isInternalUserId(rawTarget)) {
+            const resolved = await lookupInternalUserIdByLogin(kv, rawTarget);
+            if (resolved === null) {
+              unresolvedLogin = rawTarget;
+            } else {
+              targetId = resolved;
+            }
           }
           const emailRaw = typeof body?.email === "string" ? body.email.trim() : "";
           const granteeEmail = emailRaw === "" ? undefined : emailRaw;
@@ -1427,6 +1512,9 @@ export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL,
               { error: "Forbidden: grant denied.", code: evaluated.reason, reason: evaluated.reason },
               { status: 403 },
             );
+          }
+          if (unresolvedLogin !== null) {
+            return Response.json({ error: `No internal user id found for login ${unresolvedLogin}.` }, { status: 400 });
           }
           // Issue #3155 (Q9): this surface grants admin roles
           // only, so every grant here needs two distinct
@@ -1684,6 +1772,9 @@ export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL,
             const memberships = listMembershipsFromEntries(membershipEntries).map((m) => ({
               internalUserId: m.internalUserId,
               tenantId: m.tenantId,
+              // #6164 (F9) — thread the membership id through so the
+              // row carries the ids the Members table shows.
+              membershipId: m.membershipId,
               revoked:
                 m.revokedAtMs !== undefined ||
                 !m.roleBindings.some(
@@ -2209,7 +2300,23 @@ export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL,
               else skippedCorrupt++;
             }
             proposals.sort((a, b) => a.createdAtMs - b.createdAtMs);
-            return Response.json({ ok: true, proposals, skippedCorrupt });
+            // #6164 (F10) — proposer/approver logins, resolved
+            // server-side via the alias record.
+            const papLogins = await resolveLogins(
+              kv,
+              proposals.flatMap((p) => [p.proposer, ...(p.approver ? [p.approver] : [])]),
+            );
+            return Response.json({
+              ok: true,
+              proposals: proposals.map((p) => ({
+                ...p,
+                proposerLogin: papLogins.get(p.proposer) ?? null,
+                ...(p.approver
+                  ? { approverLogin: papLogins.get(p.approver) ?? null }
+                  : {}),
+              })),
+              skippedCorrupt,
+            });
           }
           if (path === "/api/iaaa/policy-proposals/active" && request.method === "GET") {
             const rawActive = await kv.get(POLICY_PROPOSAL_ACTIVE_KEY);
@@ -2518,6 +2625,14 @@ export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL,
           // a cited description kept next to the interfaces, not
           // a tunable, so it is not a config value (same idiom
           // as the PDP coverage map above).
+          //
+          // enrichmentFields (#6164 F6) names the view-level joins
+          // this endpoint adds beside each provider record: the
+          // login resolved server-side through the alias record
+          // (null when no alias exists). They are declared here so
+          // the schema stays the whole contract — every key a
+          // record carries is either a provider field or a declared
+          // enrichment, never an undeclared leak.
           const pipSchema = {
             membership: {
               fields: [
@@ -2531,9 +2646,11 @@ export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL,
                 "revokedAtMs",
                 "email",
               ],
+              enrichmentFields: ["login"],
             },
             roleBinding: {
               fields: ["role", "scope", "workspaceId", "resourceId", "grantedBy", "expiresAtMs"],
+              enrichmentFields: ["grantedByLogin"],
             },
             permissionDenial: {
               fields: [
@@ -2544,6 +2661,7 @@ export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL,
                 "deniedBy",
                 "deniedAtMs",
               ],
+              enrichmentFields: ["deniedByLogin"],
             },
           };
           const provider = membershipStoreToAttributeProvider(
@@ -2560,6 +2678,32 @@ export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL,
           const denials = provider.getPermissionDenials
             ? await provider.getPermissionDenials(callerId)
             : null;
+          // #6164 (F6) — the memberships, bindings, and denials
+          // carry their logins, resolved server-side via the alias
+          // record (null when no alias exists). The pipSchema above
+          // is untouched: it describes the AttributeProvider
+          // interfaces, and these are view-level joins, not
+          // provider fields.
+          const pipLogins = await resolveLogins(
+            kv,
+            [
+              ...memberships.map((m) => m.internalUserId),
+              ...memberships.flatMap((m) => m.roleBindings.map((b) => b.grantedBy)),
+              ...(denials ?? []).map((d) => d.deniedBy),
+            ],
+          );
+          const enrichedMemberships = memberships.map((m) => ({
+            ...m,
+            login: pipLogins.get(m.internalUserId) ?? null,
+            roleBindings: m.roleBindings.map((b) => ({
+              ...b,
+              grantedByLogin: pipLogins.get(b.grantedBy) ?? null,
+            })),
+          }));
+          const enrichedDenials = (denials ?? []).map((d) => ({
+            ...d,
+            deniedByLogin: pipLogins.get(d.deniedBy) ?? null,
+          }));
           return Response.json({
             ok: true,
             schema: pipSchema,
@@ -2578,8 +2722,8 @@ export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL,
               },
             ],
             attributes: {
-              memberships,
-              denials: denials ?? [],
+              memberships: enrichedMemberships,
+              denials: enrichedDenials,
               denialsAvailable: denials !== null,
             },
           });
@@ -2733,7 +2877,39 @@ export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL,
               else skippedCorrupt++;
             }
             proposals.sort((a, b) => a.createdAtMs - b.createdAtMs);
-            return Response.json({ ok: true, proposals, skippedCorrupt });
+            // #6164 (F5) — proposer/approver/applier/retained logins,
+            // resolved server-side via the alias record.
+            const proposalLogins = await resolveLogins(
+              kv,
+              proposals.flatMap((p) => [
+                p.proposer,
+                ...(p.approver ? [p.approver] : []),
+                ...(p.appliedBy ? [p.appliedBy] : []),
+                ...(p.retained ? [p.retained.internalUserId] : []),
+              ]),
+            );
+            return Response.json({
+              ok: true,
+              proposals: proposals.map((p) => ({
+                ...p,
+                proposerLogin: proposalLogins.get(p.proposer) ?? null,
+                ...(p.approver
+                  ? { approverLogin: proposalLogins.get(p.approver) ?? null }
+                  : {}),
+                ...(p.appliedBy
+                  ? { appliedByLogin: proposalLogins.get(p.appliedBy) ?? null }
+                  : {}),
+                ...(p.retained
+                  ? {
+                      retained: {
+                        ...p.retained,
+                        login: proposalLogins.get(p.retained.internalUserId) ?? null,
+                      },
+                    }
+                  : {}),
+              })),
+              skippedCorrupt,
+            });
           }
           if (path === "/api/iaaa/bootstrap-proposals/current" && request.method === "GET") {
             const current = await resolveCurrentList();
@@ -2746,13 +2922,25 @@ export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL,
               listMembershipsFromEntries(memberEntries),
               nowMs,
             );
+            // #6164 (F5) — resolved ids + divergence rows carry their
+            // logins, resolved server-side via the alias record.
+            const currentLogins = await resolveLogins(kv, [
+              ...current.resolvedInternalUserIds,
+              ...divergence.map((d) => d.internalUserId),
+            ]);
             return Response.json({
               ok: true,
               entries: current.entries,
               resolvedInternalUserIds: current.resolvedInternalUserIds,
+              resolvedLogins: current.resolvedInternalUserIds.map(
+                (id) => currentLogins.get(id) ?? null,
+              ),
               unresolvedEntries: current.unresolvedEntries,
               forwardResolved: current.forwardResolved,
-              divergence,
+              divergence: divergence.map((d) => ({
+                ...d,
+                login: currentLogins.get(d.internalUserId) ?? null,
+              })),
             });
           }
           // #6236 — stale-identity inventory + cleanup, platform-admin
@@ -3058,10 +3246,38 @@ export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL,
             return Response.json({ error: "Method not allowed" }, { status: 405 });
           }
           const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
-          const targetId = typeof body?.internalUserId === "string" ? body.internalUserId.trim() : "";
+          // #6164 (A2) — the grant form accepts a login OR an internal
+          // user id. An id-shaped value is used verbatim; anything else
+          // is resolved server-side via the alias record, and an
+          // unresolvable login fails closed — a membership is never
+          // minted keyed by a login string.
+          const rawTarget =
+            typeof body?.internalUserId === "string" && body.internalUserId.trim() !== ""
+              ? body.internalUserId.trim()
+              : typeof body?.login === "string"
+                ? body.login.trim()
+                : "";
           const bindings = Array.isArray(body?.roleBindings) ? body.roleBindings : [];
-          if (targetId === "" || bindings.length === 0) {
-            return Response.json({ error: "internalUserId and a non-empty roleBindings array are required." }, { status: 400 });
+          if (rawTarget === "" || bindings.length === 0) {
+            return Response.json({ error: "A target login or internalUserId, and a non-empty roleBindings array, are required." }, { status: 400 });
+          }
+          // A login that resolves to no alias is remembered, not
+          // refused here: the session gates below (step-up #3102,
+          // PDP deny #3113) answer to the session, not to the body,
+          // so a stale or denied caller must see 403 first and never
+          // learn whether a login exists. The raw string is a safe
+          // sentinel for the pre-gate reads: no membership is ever
+          // keyed by a login string, so the idempotent no-op check
+          // below is honest for it.
+          let targetId = rawTarget;
+          let unresolvedLogin: string | null = null;
+          if (!isInternalUserId(rawTarget)) {
+            const resolved = await lookupInternalUserIdByLogin(kv, rawTarget);
+            if (resolved === null) {
+              unresolvedLogin = rawTarget;
+            } else {
+              targetId = resolved;
+            }
           }
           // #2661 — optional grantee email. A blank email is the
           // same as absent (the panel only sends a filled field);
@@ -3158,6 +3374,9 @@ export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL,
                 { status: 403 },
               );
             }
+          }
+          if (unresolvedLogin !== null) {
+            return Response.json({ error: `No internal user id found for login ${unresolvedLogin}.` }, { status: 400 });
           }
           // Issue #3155 (Q9): tenant-admin and platform-admin
           // grants need two distinct approvers. The first admin's

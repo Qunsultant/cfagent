@@ -22,19 +22,27 @@ export interface BootstrapProposalInfo {
   identifier: string;
   reason: string;
   proposer: string;
+  /** #6164 (F5) — proposer login resolved server-side, null when no alias exists. */
+  proposerLogin?: string | null;
   approver?: string;
+  /** #6164 (F5) — approver login resolved server-side, null when no alias exists. */
+  approverLogin?: string | null;
   exceptionReason?: string;
-  retained?: { internalUserId: string; membershipId: string };
+  retained?: { internalUserId: string; membershipId: string; login?: string | null };
   correlationId: string;
   createdAtMs: number;
   reviewedAtMs?: number;
   appliedAtMs?: number;
   appliedBy?: string;
+  /** #6164 (F5) — applier login resolved server-side, null when no alias exists. */
+  appliedByLogin?: string | null;
   applicationNote?: string;
 }
 
 export interface BootstrapDivergenceInfo {
   internalUserId: string;
+  /** #6164 (F5) — login resolved server-side, null when no alias exists. */
+  login?: string | null;
   membershipId: string;
   roles: string[];
   grantedVia: string;
@@ -43,6 +51,8 @@ export interface BootstrapDivergenceInfo {
 export interface BootstrapCurrentInfo {
   entries: string[];
   resolvedInternalUserIds: string[];
+  /** #6164 (F5) — logins parallel to resolvedInternalUserIds, null when no alias exists. */
+  resolvedLogins?: (string | null)[];
   unresolvedEntries: string[];
   divergence: BootstrapDivergenceInfo[];
 }
@@ -73,7 +83,9 @@ function parseProposal(value: unknown): BootstrapProposalInfo {
     identifier,
     reason,
     proposer,
+    ...(typeof value.proposerLogin === "string" ? { proposerLogin: value.proposerLogin } : {}),
     ...(typeof value.approver === "string" ? { approver: value.approver } : {}),
+    ...(typeof value.approverLogin === "string" ? { approverLogin: value.approverLogin } : {}),
     ...(typeof value.exceptionReason === "string" ? { exceptionReason: value.exceptionReason } : {}),
     ...(isRecord(value.retained) &&
     typeof value.retained.internalUserId === "string" &&
@@ -82,6 +94,7 @@ function parseProposal(value: unknown): BootstrapProposalInfo {
           retained: {
             internalUserId: value.retained.internalUserId,
             membershipId: value.retained.membershipId,
+            ...(typeof value.retained.login === "string" ? { login: value.retained.login } : {}),
           },
         }
       : {}),
@@ -90,6 +103,7 @@ function parseProposal(value: unknown): BootstrapProposalInfo {
     ...(typeof value.reviewedAtMs === "number" ? { reviewedAtMs: value.reviewedAtMs } : {}),
     ...(typeof value.appliedAtMs === "number" ? { appliedAtMs: value.appliedAtMs } : {}),
     ...(typeof value.appliedBy === "string" ? { appliedBy: value.appliedBy } : {}),
+    ...(typeof value.appliedByLogin === "string" ? { appliedByLogin: value.appliedByLogin } : {}),
     ...(typeof value.applicationNote === "string" ? { applicationNote: value.applicationNote } : {}),
   };
 }
@@ -138,8 +152,20 @@ export async function fetchBootstrapCurrent(): Promise<BootstrapCurrentInfo> {
   return {
     entries: body.entries as string[],
     resolvedInternalUserIds: body.resolvedInternalUserIds as string[],
+    ...(Array.isArray(body.resolvedLogins)
+      ? {
+          resolvedLogins: (body.resolvedLogins as unknown[]).map((l) =>
+            typeof l === "string" ? l : null,
+          ),
+        }
+      : {}),
     unresolvedEntries: body.unresolvedEntries as string[],
-    divergence: body.divergence as BootstrapDivergenceInfo[],
+    divergence: (body.divergence as BootstrapDivergenceInfo[]).map((d) => ({
+      ...d,
+      ...(typeof (d as { login?: unknown }).login === "string"
+        ? { login: (d as { login: string }).login }
+        : {}),
+    })),
   };
 }
 

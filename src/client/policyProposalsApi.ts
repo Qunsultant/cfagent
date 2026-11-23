@@ -24,7 +24,11 @@ export interface PolicyProposalInfo {
   proposalId: string;
   status: "proposed" | "approved" | "rejected" | "promoted";
   proposer: string;
+  /** #6164 (F10) — proposer login resolved server-side, null when no alias exists. */
+  proposerLogin?: string | null;
   approver?: string;
+  /** #6164 (F10) — approver login resolved server-side, null when no alias exists. */
+  approverLogin?: string | null;
   exceptionReason?: string;
   proposedSnapshot: PolicySnapshotInfo;
   beforeRef: string;
@@ -93,7 +97,9 @@ function parseProposal(value: unknown): PolicyProposalInfo {
     proposalId,
     status,
     proposer,
+    ...(typeof value.proposerLogin === "string" ? { proposerLogin: value.proposerLogin } : {}),
     ...(typeof value.approver === "string" ? { approver: value.approver } : {}),
+    ...(typeof value.approverLogin === "string" ? { approverLogin: value.approverLogin } : {}),
     ...(typeof value.exceptionReason === "string" ? { exceptionReason: value.exceptionReason } : {}),
     proposedSnapshot: parseSnapshot(value.proposedSnapshot),
     beforeRef,

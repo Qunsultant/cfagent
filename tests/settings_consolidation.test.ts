@@ -2,9 +2,9 @@ import { describe, it, expect } from "vitest";
 import {
   NAVIGATION_ITEMS,
   DEFAULT_VISIBLE_NAV_TABS,
-  NAV_TAB_PRESETS,
   isNavIdVisible,
 } from "../src/client/components/NavigationMenu";
+import { NAV_TAB_PRESETS } from "../src/client/navPresets";
 
 describe("Settings Consolidation & Unified Preferences", () => {
   it("maintains complete configuration presets for navigation visible tabs", () => {

@@ -61,6 +61,7 @@ import {
   platformGenesisMarkerKeyForUser,
 } from "./iaaaGithubEndToEnd";
 import { checkPlatformPermission } from "./iaaaPdpSeam";
+import { resolveLogins } from "./identityDisplay";
 
 /** Max audit events returned, newest first. */
 export const IAAA_ADMIN_OVERVIEW_LIMIT = 100;
@@ -84,7 +85,15 @@ export interface AdminAuditEventView {
   timestamp: number;
   type: string;
   actorPrincipalId: string;
+  /**
+   * #6164 — login resolved server-side via the alias record, or null
+   * when no alias exists. The client renders "not recorded", never a
+   * fabricated login. System principals ("system:…") resolve to null
+   * and render verbatim.
+   */
+  actorLogin: string | null;
   initiatingPrincipalId: string;
+  initiatingLogin: string | null;
   action: string;
   decision: string;
   outcome: string;
@@ -93,13 +102,16 @@ export interface AdminAuditEventView {
   errorCode?: string;
 }
 
+/** A membership with its login resolved server-side (#6164), null when no alias exists. */
+export type AdminMembershipWithLogin = Membership & { login: string | null };
+
 export type AdminOverviewResult =
   | { allowed: false }
   | {
       allowed: true;
       tenantId: string;
       callerInternalUserId: string;
-      memberships: Membership[];
+      memberships: AdminMembershipWithLogin[];
       genesis: { platformGenesisOccurred: boolean };
       recentAuditEvents: AdminAuditEventView[];
     };
@@ -186,13 +198,18 @@ export function computeAdminCounts(memberships: Membership[], nowMs: number): Ad
   };
 }
 
-function toEventView(event: IaaaAuditEvent): AdminAuditEventView {
+function toEventView(
+  event: IaaaAuditEvent,
+  logins: Map<string, string | null>,
+): AdminAuditEventView {
   const view: AdminAuditEventView = {
     id: event.id,
     timestamp: event.timestamp,
     type: event.type,
     actorPrincipalId: event.actorPrincipalId,
+    actorLogin: logins.get(event.actorPrincipalId) ?? null,
     initiatingPrincipalId: event.initiatingPrincipalId,
+    initiatingLogin: logins.get(event.initiatingPrincipalId) ?? null,
     action: event.action,
     decision: event.decision,
     outcome: event.outcome,
@@ -229,11 +246,18 @@ export async function buildAdminOverview(
   }
   const memberships = await deps.membershipStore.getMembershipsByUser(input.callerInternalUserId);
   const allEvents = await deps.auditStore.list();
-  const recentAuditEvents = allEvents
+  const recentEvents = allEvents
     .filter((event) => event.tenantId === deps.tenantId)
     .sort((a, b) => b.timestamp - a.timestamp)
-    .slice(0, IAAA_ADMIN_OVERVIEW_LIMIT)
-    .map(toEventView);
+    .slice(0, IAAA_ADMIN_OVERVIEW_LIMIT);
+  // #6164 — one alias join for the whole response: the caller's
+  // memberships plus every actor/initiator on the recent events.
+  // Unaliased ids resolve to null; system principals are skipped.
+  const logins = await resolveLogins(deps.kv, [
+    ...memberships.map((m) => m.internalUserId),
+    ...recentEvents.flatMap((event) => [event.actorPrincipalId, event.initiatingPrincipalId]),
+  ]);
+  const recentAuditEvents = recentEvents.map((event) => toEventView(event, logins));
   const marker = await deps.kv.get(platformGenesisMarkerKey(deps.tenantId));
   // #6191 — per-identity genesis: the legacy global marker alone
   // no longer answers "has genesis happened". Genesis has happened
@@ -251,7 +275,10 @@ export async function buildAdminOverview(
     allowed: true,
     tenantId: deps.tenantId,
     callerInternalUserId: input.callerInternalUserId,
-    memberships,
+    memberships: memberships.map((m) => ({
+      ...m,
+      login: logins.get(m.internalUserId) ?? null,
+    })),
     genesis: {
       platformGenesisOccurred: marker !== null || ownMarker !== null,
     },
