@@ -140,8 +140,30 @@ export function normalizeBootstrapEntry(identifier: string): string | null {
 export function currentBootstrapEntries(raw: string | undefined): string[] {
   if (raw === undefined) return [];
   const out: string[] = [];
+  // #6236 — the comma is both the entry separator and the
+  // role-list separator, so a bare `platform` / `tenant` segment
+  // is the role list of the NEXT entry, not an entry itself. The
+  // old per-segment normalize dropped those bare role segments,
+  // so `platform,tenant:<identity>` canonicalized to
+  // `tenant:<identity>` (the platform role silently lost) and the
+  // current-list resolver then misread the `tenant:` prefix as
+  // part of the issuer — both owner identities reported
+  // "Unresolved (match nobody)". Pending bare roles are carried
+  // onto the next identity segment before normalizing.
+  let pendingRoles: string[] = [];
   for (const part of raw.split(",")) {
-    const normalized = normalizeBootstrapEntry(part);
+    const segment = part.trim();
+    if (segment === "") continue;
+    if (segment === "platform" || segment === "tenant") {
+      if (!pendingRoles.includes(segment)) pendingRoles.push(segment);
+      continue;
+    }
+    const joined =
+      pendingRoles.length > 0
+        ? `${pendingRoles.join(",")},${segment}`
+        : segment;
+    pendingRoles = [];
+    const normalized = normalizeBootstrapEntry(joined);
     if (normalized !== null && !out.includes(normalized)) out.push(normalized);
   }
   return out;

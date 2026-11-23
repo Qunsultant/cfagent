@@ -111,9 +111,16 @@ import {
 } from "./authorization";
 import { ensureTenantMember } from "./iaaaAutoProvision";
 import {
+  lookupMigratedUserId,
   recordIdMigration,
   repairStrandedPlatformAdmin,
 } from "./iaaaMigration";
+import {
+  cleanupStrandedIdReferences,
+  resolveStaleCleanupMode,
+  STALE_CLEANUP_AUDIT_TYPE,
+  type StaleCleanupItem,
+} from "./iaaaStaleCleanup";
 import {
   createSession,
   deleteSession,
@@ -554,12 +561,18 @@ export interface NormalizedLoginProfile {
  * parsing. A bare id compares directly, an issuer:subject entry
  * resolves through the binding store (post-migration, so it yields the
  * derived id). Rejected or malformed entries never match.
+ *
+ * #6236 — when `opts.aliasKv` is supplied, a bare entry naming a
+ * RETIRED id also matches when its migration forward pointer resolves
+ * to the target's derived id: the entry names the same live identity,
+ * just under its old id. Without the kv the retired bare id matches
+ * nobody, as before.
  */
 export async function isBootstrapListed(
   bindingStore: IdentityBindingStore,
   bootstrapRaw: string | undefined,
   targetInternalUserId: string,
-  opts: { genesisOnly?: boolean } = {},
+  opts: { genesisOnly?: boolean; aliasKv?: KvLike } = {},
 ): Promise<boolean> {
   if (bootstrapRaw === undefined || bootstrapRaw.trim() === "") return false;
   const parsed = parseBootstrapListWithGenesis(bootstrapRaw);
@@ -571,6 +584,11 @@ export async function isBootstrapListed(
     if (opts.genesisOnly && !roles.includes("platform")) continue;
     if (entry.kind === "internalUserId") {
       if (entry.internalUserId === targetInternalUserId) return true;
+      if (opts.aliasKv) {
+        const migrated = await lookupMigratedUserId(opts.aliasKv, entry.internalUserId);
+        if (migrated !== null && migrated === targetInternalUserId) return true;
+      }
+      }
     } else {
       const resolved = await getInternalUserId(
         bindingStore,
@@ -590,14 +608,20 @@ export async function isBootstrapListed(
  * through the binding store (post-migration, so it yields the derived
  * id). Rejected or malformed entries never match, and a plain
  * (non-platform:) entry never counts.
+ *
+ * #6236 — `aliasKv`, when supplied, is passed through to
+ * isBootstrapListed so a bare entry naming a retired id matches
+ * through its migration forward pointer.
  */
 export async function isPlatformBootstrapListed(
   bindingStore: IdentityBindingStore,
   bootstrapRaw: string | undefined,
   targetInternalUserId: string,
+  aliasKv?: KvLike,
 ): Promise<boolean> {
   return isBootstrapListed(bindingStore, bootstrapRaw, targetInternalUserId, {
     genesisOnly: true,
+    ...(aliasKv ? { aliasKv } : {}),
   });
 }
 
@@ -720,6 +744,7 @@ export async function completeWiredLogin(
       store,
       env.IAAA_BOOTSTRAP_ADMINS,
       bindingResult.binding.internalUserId,
+      migrationDeps.aliasKv,
     );
     await repairStrandedPlatformAdmin({
       membershipStore: migrationDeps.membershipStore,
@@ -727,6 +752,49 @@ export async function completeWiredLogin(
       targetInternalUserId: bindingResult.binding.internalUserId,
       nowMs,
     });
+    // #6236 — targeted stranded-id cleanup (alias rows + reverse
+    // entries for STRANDED_PLATFORM_ADMIN_ID only; no store scan),
+    // platform-listed logins only, execute mode only. Best-effort
+    // like the repair: a cleanup failure never changes the login
+    // outcome. The audit callback is wired only when the caller
+    // supplied an audit store + tenant (as for the login events);
+    // otherwise the pass runs unaudited and the admin endpoint
+    // remains the audited surface.
+    if (
+      platformListed &&
+      resolveStaleCleanupMode(env.IAAA_STALE_CLEANUP_MODE) === "execute"
+    ) {
+      const cleanupAuditStore = options?.auditStore;
+      const cleanupAuditTenantId = options?.auditTenantId;
+      const cleanupAudit =
+        cleanupAuditStore && cleanupAuditTenantId
+          ? async (item: StaleCleanupItem): Promise<void> => {
+              await recordWiredAuthAudit(cleanupAuditStore, {
+                timestamp: nowMs,
+                type: STALE_CLEANUP_AUDIT_TYPE,
+                actorPrincipalId: bindingResult.binding.internalUserId,
+                actorType: "human",
+                initiatingPrincipalId: bindingResult.binding.internalUserId,
+                tenantId: cleanupAuditTenantId,
+                correlationId: item.key,
+                action: "stale_identity_cleanup.deleted",
+                decision: "allow",
+                policyVersion: IAAA_AUDIT_POLICY_VERSION,
+                outcome: "succeeded",
+              });
+            }
+          : undefined;
+      await cleanupStrandedIdReferences({
+        aliasKv: migrationDeps.aliasKv,
+        bindingStore: store,
+        listReverseIndexEntries: async () =>
+          (await listSessionFamilyEntries(env, "iaaa-binding:user:")) ?? [],
+        audit: cleanupAudit,
+        nowMs,
+        actorInternalUserId: bindingResult.binding.internalUserId,
+        mode: "execute",
+      });
+    }
   } catch {
     // Repair is best-effort; login proceeds regardless.
   }
