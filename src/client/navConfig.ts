@@ -236,8 +236,8 @@ export type NavPersona = "platform-admin" | "tenant-admin" | "paid" | "non-paid"
 /**
  * Persona defaults, externalized in the nav config data
  * (nav-config.json `personaDefaults`: persona → preset key, never
- * a map — the maps stay owned by NAV_TAB_PRESETS, so no preset data
- * is duplicated). A saved preset overrides the default (S3); a
+ * a map — the maps live in navPresets.ts, so no preset data is
+ * duplicated). A saved preset overrides the default (S3); a
  * per-user allow-list caps it (S4). S1's four defaults are all
  * alltabs-equivalent, so the change is behavior-preserving on day one.
  */
@@ -262,6 +262,76 @@ export function personaDefaultPresetKey(persona: NavPersona): string {
 export function builtinPresetKeys(): string[] {
   const keys = navConfigData.presetKeys as unknown;
   return Array.isArray(keys) ? keys.filter((k): k is string => typeof k === "string") : [];
+}
+
+/**
+ * #6151 S2 — the product→menu mapping (part 3), externalized in
+ * the nav config data (nav-config.json `productMenuMapping`).
+ *
+ * One entry per product: the product id (as the product catalog
+ * records it — subscription products are `prod-sub-<plan-name-slug>`
+ * via subscriptionProductIdForName; per-run products are
+ * `prod-per-run-<family>`) and the nav ids that product's
+ * subscription enables (top-level ids and/or `<parentId>:<subId>`
+ * sub-item keys from S1). A nav id in the mapping is product-gated:
+ * the endpoint shows it only while the caller holds an active
+ * subscription for a product that enables it; a nav id in NO entry
+ * is governed by the persona default alone. A product with no entry
+ * enables nothing. Admin allow-lists (S4) narrow on top; they never
+ * widen beyond the entitlement.
+ *
+ * The mapping ships EMPTY: products are operator data (plans are
+ * created through Admin Products; no subscription-product id is
+ * fixed in code), so no entry can be written without inventing a
+ * product. Operators add entries as products are created; the
+ * endpoint + pins prove the mechanism with the mapping injected.
+ * Per-run products (`prod-per-run-*`) have no subscription rows,
+ * so mapping one can never enable its menus — do not add them.
+ */
+export interface ProductMenuMappingEntry {
+  productId: string;
+  navIds: string[];
+}
+
+/**
+ * Normalize raw mapping data into validated entries. Unknown nav
+ * ids are dropped (they name no menu); an entry left with no nav
+ * ids is dropped; duplicate product ids merge (nav-id union).
+ * Pure — the endpoint test pins the filtering through this
+ * function, and productMenuMapping() below is this over the
+ * shipped config.
+ */
+export function normalizeProductMenuMapping(
+  raw: unknown,
+): ProductMenuMappingEntry[] {
+  if (!Array.isArray(raw)) return [];
+  const known = new Set(enumerateNavAvailabilityIds());
+  const byProduct = new Map<string, Set<string>>();
+  for (const entry of raw) {
+    if (typeof entry !== "object" || entry === null) continue;
+    const productId = (entry as { productId?: unknown }).productId;
+    const navIds = (entry as { navIds?: unknown }).navIds;
+    if (typeof productId !== "string" || productId.trim().length === 0) continue;
+    if (!Array.isArray(navIds)) continue;
+    const kept = navIds.filter(
+      (id): id is string => typeof id === "string" && known.has(id),
+    );
+    if (kept.length === 0) continue;
+    const set = byProduct.get(productId) ?? new Set<string>();
+    for (const id of kept) set.add(id);
+    byProduct.set(productId, set);
+  }
+  return [...byProduct.entries()].map(([productId, navIds]) => ({
+    productId,
+    navIds: [...navIds],
+  }));
+}
+
+/** The shipped product→menu mapping, normalized. */
+export function productMenuMapping(): ProductMenuMappingEntry[] {
+  return normalizeProductMenuMapping(
+    (navConfigData as { productMenuMapping?: unknown }).productMenuMapping,
+  );
 }
 
 /**

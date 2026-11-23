@@ -1,5 +1,5 @@
 /**
- * #6151 S1 — the nav-availability endpoint (GET /api/platform/nav-availability).
+ * #6151 S1+S2 — the nav-availability endpoint (GET /api/platform/nav-availability).
  *
  * The first production consumer of the one shared context resolution
  * (resolvePlatformContext, PR #6220): the endpoint resolves the
@@ -24,24 +24,32 @@
  * CISO-owned naming decision (#5350), not something this slice
  * invents.
  *
- * Computation order (S1): tenant allowance (absent until S4 — "no
- * allowance" means the tenant gets everything the platform
- * enables), subscription entitlements (the context's `tier` fact —
- * never re-derived; a direct per-concern call here fails the
- * existing census pin), per-user allow-list (absent until S4 — same
- * "no allow-list means no narrowing" rule), persona default (S1's
- * config in nav-config.json). S1's four persona defaults are all
- * alltabs-equivalent, so the endpoint returns the entire menu for
- * every persona and the change is behavior-preserving on day one;
- * the narrowing lands in S2 (subscription mapping) and S4
- * (allow-lists).
+ * Computation order: persona default (expanded from the shared
+ * preset maps — S2 expands ANY key, S1 expanded only `alltabs`),
+ * then subscription entitlements (S2): a nav id named in the
+ * product→menu mapping stays visible only while the caller holds
+ * an active subscription for a product that enables it. Tenant
+ * allowance (S4 storage — absent until S4, "no allowance" means
+ * the tenant gets everything the platform enables) and per-user
+ * allow-lists (absent until S4 — same "no allow-list means no
+ * narrowing" rule) narrow on top of this in S4. Admin personas
+ * bypass the subscription narrowing — they see the entire menu
+ * (issue part 2).
  *
- * Expansion note: S1 expands only the `alltabs` default (every
- * enumerated id → true). A non-alltabs configured default falls
- * back to the full map with a warn log — availability is a UX
- * narrowing, never an authorization gate (the PDP decision is the
- * boundary), so the permissive fallback keeps the surface working.
- * S2 moves the preset maps into shared data and expands any key.
+ * The tier fact is never re-derived here: it flows through from
+ * the resolved context unchanged. The per-PRODUCT fact (which
+ * products the caller holds) comes from reading the caller's
+ * subscription rows — a store read, not a resolver call (the
+ * census pin counts resolveEffectiveTier calls, and this file
+ * makes none). The active-row rule is the SAME rule
+ * resolveEffectiveTier uses (periodEndMs > nowMs): cancel keeps
+ * access to periodEnd (periodEndMs untouched by cancel), refund
+ * revokes by moving periodEndMs to nowMs (revokeSubscription),
+ * so the two can never disagree about whether a subscription is
+ * live. Availability is a UX narrowing, never an authorization
+ * gate (the PDP decision is the boundary) — so a transient
+ * subscription-store read failure serves the base map ungated
+ * instead of breaking the nav.
  */
 import { createCommercialAdapter } from "../../data/createCommercialPorts";
 import { createSubscriptionAdapter } from "../../data/createSubscriptionPorts";
@@ -58,10 +66,12 @@ import { holdsPlatformAdmin } from "../../security/iaaaGithubEndToEnd";
 import type { MembershipStore } from "../../security/authorization";
 import {
   builtinPresetKeys,
-  enumerateNavAvailabilityIds,
   personaDefaultPresetKey,
+  productMenuMapping,
+  type ProductMenuMappingEntry,
   type NavPersona,
 } from "../../client/navConfig";
+import { expandPresetKey } from "../../client/navPresets";
 import type { Env } from "../../types";
 
 export interface NavAvailabilityResponse {
@@ -77,25 +87,70 @@ export interface NavAvailabilityResponse {
 export interface NavRouteDeps {
   commercial?: CommercialStore | null;
   subscriptions?: SubscriptionStore | null;
+  /** Test seam: production reads the shipped config mapping. */
+  productMenuMapping?: ProductMenuMappingEntry[];
 }
 
 const NAV_AVAILABILITY_PATH = "/api/platform/nav-availability";
 
 /**
- * Expand a persona-default preset key into the full availability
- * map. S1: only `alltabs` is configured, so every enumerated id
- * maps to true. See the module header for the non-alltabs fallback.
+ * #6151 S2 — the active (unexpired) subscription product ids for
+ * a caller, by the SAME rule resolveEffectiveTier uses:
+ * periodEndMs > nowMs. Status is deliberately ignored — cancel
+ * keeps access to periodEnd (periodEndMs untouched by cancel);
+ * refund revokes by moving periodEndMs to nowMs
+ * (revokeSubscription), so a revoked row never counts. Rows whose
+ * plan is unknown contribute nothing (no product can be named for
+ * them). This reads rows; it never calls resolveEffectiveTier — the
+ * tier fact still comes from the resolved context.
  */
-export function expandPersonaDefault(personaDefault: string): Record<string, boolean> {
-  // S1: only `alltabs` is configured, so every enumerated id maps
-  // to true. A non-alltabs key falls back to the full map (the
-  // handler logs it) — availability is a UX narrowing, never an
-  // authorization gate, so the permissive fallback keeps the surface
-  // working. S2 moves the preset maps into shared data and expands
-  // any key.
-  return Object.fromEntries(
-    enumerateNavAvailabilityIds().map((id) => [id, true]),
-  );
+export function activeSubscriptionProductIds(
+  subscriptions: Array<{ planId: string; periodEndMs: number }>,
+  plansById: Map<string, { productId: string }>,
+  nowMs: number,
+): Set<string> {
+  const active = new Set<string>();
+  for (const row of subscriptions) {
+    if (row.periodEndMs <= nowMs) continue;
+    const productId = plansById.get(row.planId)?.productId;
+    if (typeof productId === "string" && productId.length > 0) {
+      active.add(productId);
+    }
+  }
+  return active;
+}
+
+/**
+ * #6151 S2 — apply the product→menu mapping to a base
+ * availability map. A mapped nav id stays visible only when the
+ * caller holds an active subscription for at least one product
+ * that enables it (OR across products); unmapped ids pass through
+ * unchanged, and a product with no mapping entry enables nothing.
+ * The result covers exactly the base keys — a mapping id outside
+ * the base map is ignored, never invented.
+ */
+export function applyProductMenuGating(
+  base: Record<string, boolean>,
+  mapping: ProductMenuMappingEntry[],
+  activeProductIds: Set<string>,
+): Record<string, boolean> {
+  const gateByNavId = new Map<string, Set<string>>();
+  for (const entry of mapping) {
+    for (const navId of entry.navIds) {
+      const gate = gateByNavId.get(navId) ?? new Set<string>();
+      gate.add(entry.productId);
+      gateByNavId.set(navId, gate);
+    }
+  }
+  const out: Record<string, boolean> = {};
+  for (const [id, visible] of Object.entries(base)) {
+    const gate = gateByNavId.get(id);
+    out[id] =
+      gate === undefined
+        ? visible
+        : visible === true && [...gate].some((p) => activeProductIds.has(p));
+  }
+  return out;
 }
 
 /**
@@ -219,19 +274,44 @@ export async function handleNavRoutes(
     nowMs,
   );
   const personaDefault = personaDefaultPresetKey(persona);
-  if (personaDefault !== "alltabs") {
-    const structuredLog = createStructuredLogger(createObservabilitySink(env), {
-      component: "server/routes/nav",
-    });
-    structuredLog.warn("nav.persona_default_unexpanded", {
-      message: `[nav-availability] persona default "${personaDefault}" has no server-side expansion yet (S2 generalizes it); serving the full map`,
-      personaDefault,
-      persona,
-    });
+  const base = expandPresetKey(personaDefault);
+
+  // S2: subscription gating applies to paid/non-paid only — admin
+  // personas see the entire menu. A mapped nav id stays visible
+  // only while the caller holds an active subscription for a
+  // product that enables it; unmapped ids pass through.
+  let visibleTabs = base;
+  if (persona !== "platform-admin" && persona !== "tenant-admin") {
+    const mapping =
+      deps?.productMenuMapping !== undefined
+        ? deps.productMenuMapping
+        : productMenuMapping();
+    if (mapping.length > 0) {
+      try {
+        const rows = await subscriptions.listSubscriptions(session.internalUserId);
+        const plans = await subscriptions.listPlans(false);
+        const plansById = new Map(plans.map((p) => [p.id, p]));
+        const active = activeSubscriptionProductIds(rows, plansById, nowMs);
+        visibleTabs = applyProductMenuGating(base, mapping, active);
+      } catch (err) {
+        // The stores are bound (the resolution just read them), so
+        // a read failure here is transient — serve the base map
+        // ungated. Availability is a UX narrowing, never an
+        // authorization gate, so the permissive fallback keeps the
+        // surface working.
+        const structuredLog = createStructuredLogger(createObservabilitySink(env), {
+          component: "server/routes/nav",
+        });
+        structuredLog.warn("nav.subscription_read_failed", {
+          message: `[nav-availability] subscription read failed; serving the persona-default map ungated: ${err instanceof Error ? err.message : String(err)}`,
+          persona,
+        });
+      }
+    }
   }
   const body: NavAvailabilityResponse = {
     ok: true,
-    visibleTabs: expandPersonaDefault(personaDefault),
+    visibleTabs,
     availablePresets: builtinPresetKeys(),
     personaDefault,
     persona,

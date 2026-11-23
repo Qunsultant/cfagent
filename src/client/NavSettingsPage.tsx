@@ -12,10 +12,10 @@ import { DEFAULT_LEFT_NAV_CONFIG } from "./navConfig";
 import { isTabFeatureEnabled } from "./featureFlags";
 import {
   NAV_PRESET_LABELS,
-  NavPresetButtons,
   leftNavConfigIds,
   type NavPresetKey,
-} from "./components/NavigationMenu";
+} from "./navPresets";
+import { NavPresetButtons } from "./components/NavigationMenu";
 import { BrokerDynamicMenu, type SettingsMenuProps } from "./BrokerDynamicMenu";
 
 export interface NavSettingsPageProps {

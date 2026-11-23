@@ -17,7 +17,7 @@ import {
   derivePresetKey,
   leftNavConfigIds,
   type NavPresetKey,
-} from "../src/client/components/NavigationMenu";
+} from "../src/client/navPresets";
 import { NavSettingsPage } from "../src/client/NavSettingsPage";
 import { isTabFeatureEnabled } from "../src/client/featureFlags";
 
