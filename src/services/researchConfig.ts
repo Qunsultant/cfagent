@@ -69,8 +69,6 @@ export interface ResearchConfig {
   autoEmail: boolean;
   /** Report email recipient (empty = no email). */
   emailTo: string;
-  /** Daily schedule (cron). Spec: once each trading day after market close. */
-  scheduleCron: string;
   /** Pricing assumptions. */
   riskFreeRate: number;
   dividendYield: number;
@@ -90,6 +88,20 @@ export interface ResearchConfig {
    */
   stageModes: ResearchStageModes;
 }
+
+/**
+ * Issue #6029 (b) (sub-issue #6299) — settings that were removed because
+ * nothing read them. The value is the reason stated to an API caller that
+ * still names the key: a stored value is ignored (the loader iterates the
+ * declared keys), and a `POST` carrying the key is refused by name rather
+ * than silently persisted. Removing a *dead* setting removes nothing that
+ * runs, which is why this half of #6029 does not wait for the stored
+ * schedule (#6298).
+ */
+export const RESEARCH_CONFIG_RETIRED_KEYS: Record<string, string> = {
+  scheduleCron:
+    "scheduleCron was retired in #6029: nothing ever read it, so editing it never changed when the OODA run fires. The cadence is not user-editable yet; the deployment schedule governs.",
+};
 
 export const RESEARCH_CONFIG_DEFAULTS: ResearchConfig = {
   marketCapMin: 5_000_000_000,
@@ -114,7 +126,6 @@ export const RESEARCH_CONFIG_DEFAULTS: ResearchConfig = {
   pmccEnabled: true,
   autoEmail: false,
   emailTo: "",
-  scheduleCron: "0 21 * * 1-5",
   riskFreeRate: 0.05,
   dividendYield: 0,
   feePerContract: 0.65,
@@ -176,7 +187,6 @@ export const RESEARCH_CONFIG_SCHEMA: ConfigSchemaField[] = [
   { key: "pmccEnabled", label: "Enable PMCC analysis", type: "boolean", default: RESEARCH_CONFIG_DEFAULTS.pmccEnabled, hint: "Spec: optional PMCC analysis." },
   { key: "autoEmail", label: "Email report after run", type: "boolean", default: RESEARCH_CONFIG_DEFAULTS.autoEmail, hint: "Off by default." },
   { key: "emailTo", label: "Report email recipient", type: "string", default: RESEARCH_CONFIG_DEFAULTS.emailTo, hint: "Empty = no email." },
-  { key: "scheduleCron", label: "Daily schedule (cron)", type: "string", default: RESEARCH_CONFIG_DEFAULTS.scheduleCron, hint: "After market close, weekdays." },
   { key: "riskFreeRate", label: "Risk-free rate", type: "number", default: RESEARCH_CONFIG_DEFAULTS.riskFreeRate, hint: "Pricing assumption." },
   { key: "feePerContract", label: "Fee per contract ($)", type: "number", default: RESEARCH_CONFIG_DEFAULTS.feePerContract, hint: "Scenario economics." },
   { key: "slippagePerContract", label: "Slippage per contract ($)", type: "number", default: RESEARCH_CONFIG_DEFAULTS.slippagePerContract, hint: "Scenario economics." },
@@ -239,7 +249,6 @@ export function validateResearchConfig(config: ResearchConfig): string[] {
       `universe: "${config.universe}" is not a research universe. Accepted: ${researchUniverseIds().join(", ")}.`,
     );
   }
-  if (!config.scheduleCron.trim()) errors.push("scheduleCron must be non-empty");
   if (config.emailTo && !/^[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+$/.test(config.emailTo)) {
     errors.push("emailTo is not a valid email address");
   }
@@ -287,6 +296,23 @@ export class ResearchConfigService {
    * Invalid patches are rejected atomically (nothing is written).
    */
   save(patch: Partial<ResearchConfig>): { config: ResearchConfig; errors: string[] } {
+    // Issue #6029 (b) — every key must name a declared research setting.
+    // Before this, any key in the request body was persisted, so a typo (or a
+    // retired key) wrote a setting nothing reads. Atomic like the value
+    // validation below: one bad key writes nothing.
+    const unknown = Object.keys(patch).filter(
+      (key) => !(key in RESEARCH_CONFIG_DEFAULTS),
+    );
+    if (unknown.length > 0) {
+      return {
+        config: this.load(),
+        errors: unknown.map(
+          (key) =>
+            RESEARCH_CONFIG_RETIRED_KEYS[key] ??
+            `${key} is not a research setting; the accepted settings are ${Object.keys(RESEARCH_CONFIG_DEFAULTS).join(", ")}.`,
+        ),
+      };
+    }
     const next: ResearchConfig = { ...this.load(), ...patch };
     const errors = validateResearchConfig(next);
     if (errors.length > 0) return { config: this.load(), errors };
