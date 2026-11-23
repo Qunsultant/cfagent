@@ -55,6 +55,7 @@ PR.
 | [0035](0035-d1-first-write.md) | D1-first writes: one store, one transaction, linked by foreign key (#6101) | Accepted |
 | [0037](0037-deploy-version-host-identity.md) | Deploy-time host version: the async-job host identity is the deployed git SHA (#6216) | Accepted |
 | [0038](0038-one-job-pipeline-control-factory.md) | One Job Pipeline Control factory, wired once — OODA runs on j-stack and nowhere else (#6250) | Accepted |
+| [0039](0039-one-identity-resolution-path.md) | One identity-resolution path: the verified session is the authoritative caller identity (#6238 + #6259) | Accepted |
 
 **Note on ADR 0004:** the number 0004 was assigned twice — to the UX token
 architecture decision and to the screener decoupling decision. Both records

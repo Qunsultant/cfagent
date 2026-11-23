@@ -17,7 +17,7 @@
 import { sessionStore, SESSION_TTL, listSessionFamilyEntries, wiredMembershipStore, deleteSession, wiredAccessRequestStore } from "../../security/session";
 import { unauthorizedJson } from "./apiRefusals";
 import { createWiredAuditStore } from "../../security/iaaaAuditStore";
-import { createKvMembershipStore, listMembershipsFromEntries, grantMembership, readMembershipById } from "../../security/iaaaMembershipStore";
+import { createKvMembershipStore, listMembershipsFromEntries, grantMembership, readMembershipById, repairMembershipIndexes, resolveMembershipIndexRepairMode, MEMBERSHIP_INDEX_REPAIR_AUDIT_TYPE } from "../../security/iaaaMembershipStore";
 import { createKvPermissionDenialStore } from "../../security/iaaaPermissionDenialStore";
 import { resolveIaaaTenant, isLegacyPdpGraceExpired, isPdpEnabled, shouldEnforcePdp, parseBootstrapListWithGenesis } from "../../security/iaaaGithubEndToEnd";
 import { evaluateRoutePep, PEP_GATE_INVENTORY } from "../../security/pepGateway";
@@ -1031,6 +1031,9 @@ export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL,
       // gate inside, same as the bootstrap routes above).
       path === "/api/iaaa/stale-identities" ||
       path === "/api/iaaa/stale-identities/cleanup" ||
+      // #6238 — membership-index repair (platform-admin gate
+      // inside, same block as stale-identities below).
+      path === "/api/iaaa/membership-index/repair" ||
       path === "/api/iaaa/memberships" ||
       path === "/api/iaaa/deactivate" ||
       path === "/api/iaaa/offboard" ||
@@ -2753,7 +2756,10 @@ export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL,
           // #6236 — stale-identity inventory + cleanup share this
           // block's platform-admin gate (403 before touching state).
           path === "/api/iaaa/stale-identities" ||
-          path === "/api/iaaa/stale-identities/cleanup"
+          path === "/api/iaaa/stale-identities/cleanup" ||
+          // #6238 — membership-index repair shares this block's
+          // platform-admin gate (403 before touching state).
+          path === "/api/iaaa/membership-index/repair"
         ) {
           const bootStore = createKvBootstrapProposalStore(kv);
           const bootAudit = async (
@@ -3047,6 +3053,54 @@ export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL,
               );
             }
             return Response.json({ ok: true, ...result });
+          }
+          // #6238 — membership-index repair: rebuild every per-user
+          // index from the full membership scan, through the
+          // application (no hand-editing the store). GET is always
+          // a dry-run report; POST runs in the configured mode
+          // (IAAA_MEMBERSHIP_INDEX_REPAIR_MODE; unset or invalid
+          // fails closed to dry-run — the mode never comes from
+          // the request body, so a caller cannot escalate it).
+          // The run itself is audited best-effort: a failed run
+          // audit is named in the response, never a failed repair.
+          if (path === "/api/iaaa/membership-index/repair") {
+            if (request.method !== "GET" && request.method !== "POST") {
+              return Response.json({ error: "Method not allowed" }, { status: 405 });
+            }
+            const memberEntries = await listSessionFamilyEntries(env, "iaaa-membership:");
+            if (!memberEntries) {
+              return Response.json(
+                { error: "Membership-index repair unavailable." },
+                { status: 500 },
+              );
+            }
+            const mode =
+              request.method === "POST"
+                ? resolveMembershipIndexRepairMode(env.IAAA_MEMBERSHIP_INDEX_REPAIR_MODE)
+                : "dry-run";
+            const report = await repairMembershipIndexes(kv, memberEntries, {
+              mode,
+              nowMs,
+            });
+            if (mode === "execute") {
+              const runAudit = await recordAuditEvent(createWiredAuditStore(env), {
+                timestamp: nowMs,
+                type: MEMBERSHIP_INDEX_REPAIR_AUDIT_TYPE,
+                actorPrincipalId: session.internalUserId as string,
+                actorType: "human",
+                initiatingPrincipalId: session.internalUserId as string,
+                tenantId: "platform",
+                correlationId: crypto.randomUUID(),
+                action: "membership_index_repair.run",
+                decision: "allow",
+                policyVersion: IAAA_AUDIT_POLICY_VERSION,
+                outcome: "succeeded",
+              }).catch(() => null);
+              if (!runAudit?.ok) {
+                report.errors.push("membership_index_repair.run audit failed");
+              }
+            }
+            return Response.json({ ok: true, ...report });
           }
           if (request.method !== "POST") {
             return Response.json({ error: "Method not allowed" }, { status: 405 });

@@ -7,13 +7,25 @@
  * scheme, no grant rule, and no audit channel:
  * - Gate: the caller's x-user-login header (set by the Worker from
  *   the verified session, same trust as the schedules routes) is
- *   resolved to an internalUserId through the wired-login alias
- *   record, and the caller must hold a live platform-admin
- *   membership (PDP platform-scope check, GAP-1 seam A).
- *   Anything else answers 403 with
- *   no data. A caller without an alias has no wired identity and
- *   is refused the same way legacy sessions are refused by the
- *   #1758 admin routes.
+ *   resolved to an internalUserId, and the caller must hold a live
+ *   platform-admin membership (PDP platform-scope check, GAP-1
+ *   seam A). Anything else answers 403 with no data.
+ *   #6238/#6259 — ONE identity-resolution path: the caller's
+ *   internalUserId comes from the VERIFIED SESSION first
+ *   (resolveActingSession — the session cookie, or the `session`
+ *   test seam — the same id the IAAA overview / auth routes gate
+ *   on), and only when no session resolves does the route fall
+ *   back to the login→alias lookup. The alias can resolve to a
+ *   retired id (the login path and the Users view resolved to
+ *   revoked ids while the session carried the derived id, #6236)
+ *   — an alias-first gate denied a live platform-admin and the
+ *   panel then showed "not a platform admin" with status cards
+ *   that never load (the one failing fetch is GET
+ *   /api/admin/service-user/status → 403). The alias fallback
+ *   preserves header-only callers; it is a fallback, not a
+ *   second path. A caller without an alias AND without a
+ *   session has no wired identity and is refused the same way
+ *   legacy sessions are refused by the #1758 admin routes.
  * - Grant: grantMembership, so canGrantRole re-enforces Slice 3
  *   policy at the store call. Two consequences the caller must
  *   understand. First, platform-admin is NOT a tenant superuser:
@@ -179,7 +191,15 @@ export async function resolveCaller(
     return jsonError("Unauthorized: a signed-in session is required.", 401);
   }
   const kv = ctx.aliasKv ?? sessionStore(ctx.env);
-  const internalUserId = await lookupInternalUserIdByLogin(kv, login);
+  // #6238/#6259 — session-authoritative caller identity: the
+  // verified session's internalUserId is the same id the IAAA
+  // overview / auth routes gate on. The alias lookup is the
+  // fallback for callers that arrive without a resolvable
+  // session; it can resolve to a retired id, so it never
+  // overrides a resolved session.
+  const session = await resolveActingSession(request, ctx);
+  const internalUserId =
+    session?.internalUserId ?? (await lookupInternalUserIdByLogin(kv, login));
   if (!internalUserId) {
     return jsonError(
       "Forbidden: service-user administration requires a wired session.",
@@ -684,14 +704,20 @@ function etradeReqEnv(request: Request, url: URL): string | undefined {
 }
 
 /**
- * The acting session for the step-up + PEP gates. The session seam
- * overrides the load in tests; in production the id comes from the
- * request's session cookie. Any failure loads as null — fail-closed,
- * never a fallback to the header login.
+ * The acting session for the step-up + PEP gates, and — #6238 /
+ * #6259 — the authoritative caller identity for `resolveCaller`.
+ * The session seam overrides the load in tests; in production
+ * the id comes from the request's session cookie. Any failure
+ * loads as null — fail-closed, never a fallback to the header
+ * login. Shared with platformUsers.ts (the same one-path rule
+ * for the Users view), so the helper is exported rather than
+ * duplicated. The ctx parameter is the minimal shape the load
+ * needs (env + optional session seam), so sibling route modules
+ * can reuse it without importing the whole service-user context.
  */
-async function resolveActingSession(
+export async function resolveActingSession(
   request: Request,
-  ctx: ServiceUserRouteContext,
+  ctx: { env: Env; session?: SessionData | null },
 ): Promise<SessionData | null> {
   if ("session" in ctx) return ctx.session ?? null;
   try {

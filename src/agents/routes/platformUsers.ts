@@ -14,7 +14,15 @@
  *   (the same read the IAAA panel renders), mapped to a view that
  *   carries no grant internals. Revoked rows stay visible with
  *   their revoked time — a revoked membership is history, not a
- *   missing row.
+ *   missing row. #6238/#6259 — the memberships for the SELF view
+ *   are read for the VERIFIED SESSION's internalUserId (the same
+ *   id the IAAA overview / auth routes gate on), not re-resolved
+ *   from the login through the alias: the alias can resolve to a
+ *   retired id while the session carries the derived id (#6236),
+ *   which is why the Users view showed only the revoked 10/22
+ *   grant. The alias lookup remains for the OPERATOR lookup's
+ *   target (a target has no session) and as the fallback when no
+ *   session resolves — a fallback, not a second caller path.
  *
  * Scoping (session-scoped ALWAYS, the #2231 correction):
  * - The self view takes its subject from the verified session
@@ -68,6 +76,7 @@ import {
 import { createKvMembershipStore } from "../../security/iaaaMembershipStore";
 import { checkPlatformPermission } from "../../security/iaaaPdpSeam";
 import { lookupInternalUserIdByLogin } from "../../security/iaaaMigration";
+import { resolveActingSession } from "./serviceUser";
 import { sessionStore } from "../../security/session";
 import { isLoginShaped } from "../../security/serviceIdentity";
 import type {
@@ -75,7 +84,7 @@ import type {
   MembershipStore,
 } from "../../security/authorization";
 import type { KvLike } from "../../security/kvResilience";
-import type { Env } from "../../types";
+import type { Env, SessionData } from "../../types";
 import { createEnsuredAuditPolicyAdapter } from "../../data/createAuditPolicyPorts";
 import type { AuditPolicyPort } from "../../data/auditPolicyPorts";
 import { appendAuditChainBestEffort } from "../../services/auditGate";
@@ -99,6 +108,15 @@ export interface PlatformUsersRouteContext {
   membershipStore?: MembershipStore;
   /** Test seam: use this KV instead of the SessionStore KV for aliases. */
   aliasKv?: KvLike;
+  /**
+   * Issue #4988 — test seam, same shape as serviceUser.ts: the
+   * acting session for the session-authoritative caller
+   * resolution (#6238/#6259). When absent, the session is loaded
+   * from the request's session cookie; a present null is a
+   * missing session, never a fallback to the header identity —
+   * the alias lookup below is the fallback, not the session.
+   */
+  session?: SessionData | null;
 }
 
 export interface PlatformUserMembershipView {
@@ -180,10 +198,19 @@ function resolvePorts(ctx: PlatformUsersRouteContext): {
 async function buildUserView(
   ctx: PlatformUsersRouteContext,
   login: string,
+  // #6238/#6259 — the self view's session id, when the caller
+  // resolved one. The memberships are read for THIS id (the
+  // verified session's id, the same id the overview gate uses),
+  // never re-resolved from the login through the alias. The
+  // operator lookup passes nothing here: the target has no
+  // session, so its id always comes from the alias.
+  sessionInternalUserId?: string | null,
 ): Promise<PlatformUserView> {
   const ports = resolvePorts(ctx);
   const kv = ctx.aliasKv ?? sessionStore(ctx.env);
-  const internalUserId = await lookupInternalUserIdByLogin(kv, login);
+  const internalUserId =
+    sessionInternalUserId ??
+    (await lookupInternalUserIdByLogin(kv, login));
   let rawMemberships: Membership[] = [];
   let memberships: PlatformUserMembershipView[] = [];
   let membershipSource: "wired" | "unmapped" = "unmapped";
@@ -232,7 +259,15 @@ async function resolveOperatorCaller(
     return jsonError("Unauthorized: a signed-in session is required.", 401);
   }
   const kv = ctx.aliasKv ?? sessionStore(ctx.env);
-  const internalUserId = await lookupInternalUserIdByLogin(kv, login);
+  // #6238/#6259 — session-authoritative caller identity, the same
+  // one-path rule as serviceUser.ts resolveCaller: the verified
+  // session's internalUserId is the id the overview / auth routes
+  // gate on. The alias lookup is the fallback for callers that
+  // arrive without a resolvable session; it can resolve to a
+  // retired id, so it never overrides a resolved session.
+  const session = await resolveActingSession(request, ctx);
+  const internalUserId =
+    session?.internalUserId ?? (await lookupInternalUserIdByLogin(kv, login));
   if (!internalUserId) {
     return jsonError(
       "Forbidden: user administration requires a wired session.",
@@ -285,7 +320,13 @@ export async function handlePlatformUsersRoutes(
       if (!isLoginShaped(login)) {
         return jsonError("Unauthorized: a signed-in session is required.", 401);
       }
-      return Response.json(await buildUserView(ctx, login));
+      // #6238/#6259 — the self view reads the session id's
+      // memberships (see buildUserView); the login still drives
+      // the identity/account half.
+      const session = await resolveActingSession(request, ctx);
+      return Response.json(
+        await buildUserView(ctx, login, session?.internalUserId ?? null),
+      );
     }
     const caller = await resolveOperatorCaller(request, ctx);
     if (caller instanceof Response) return caller;

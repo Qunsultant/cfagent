@@ -524,6 +524,12 @@ export interface Env {
   // (inventory only, deletes nothing). See
   // src/security/iaaaStaleCleanup.ts.
   IAAA_STALE_CLEANUP_MODE?: string;
+  // Issue #6238 — membership-index repair mode: "execute" rewrites
+  // per-user membership indexes from the full record scan;
+  // anything else (including unset or invalid) fails closed to
+  // "dry-run" (report only, writes nothing). See
+  // src/security/iaaaMembershipStore.ts.
+  IAAA_MEMBERSHIP_INDEX_REPAIR_MODE?: string;
   // #1185 / #1066 — explicit service identity for unattended work
   // (worker scheduled()/queue() and session-less entry points).
   // Optional, owner-set, and NON-secret: a login id the owner authorizes
