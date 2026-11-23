@@ -137,7 +137,7 @@ surface reads/writes them. Registration + a UX editor is the missing
 step; high leverage (one pattern, four job families).
 
 **10. #5208 — the proactive hedge.** Hedge drafts exist on demand only
-(`POST /etrade/hedge/analyze`, panel). No MCP tool, no schedule, no
+(via the existing hedge-analysis endpoint, in the panel). No MCP tool, no schedule, no
 autopilot loop; the introspection tail-risk hedge is prose naming an
 A2A event no code path publishes. Delivers protection the user does not
 have to remember to ask for.
