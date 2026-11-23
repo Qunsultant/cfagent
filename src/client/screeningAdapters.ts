@@ -97,6 +97,16 @@ export function getScreeningProviders(assetClass: ScreeningAssetClass): Screenin
 const TENANT_PROVIDER_TO_VARIANT_ID: Readonly<Record<string, string>> = {
   etrade: "etrade",
   yahoo: "yahoo-finance",
+  // Issue #6215: this provider is screen-capable server-side (it is in
+  // STOCK_SCREEN_PROVIDERS, and its quote + marketScreening support are
+  // both declared), and the broker-neutral selected-broker variant posts
+  // to /api/broker/screen with no provider claim, so the server runs the
+  // tenant-resolved provider. This is the tenant's own broker, not a
+  // foreign provider — the #4430 invariant holds: no silent substitution
+  // to a provider the tenant's broker does not implement. (Prose kept
+  // brand-free per the #4430 census precedent; the map key below is the
+  // data-bearing identifier.)
+  alpaca: "selected-broker",
 };
 
 /** Coded block when no hub variant exists for the tenant's configured provider (#4430). */
