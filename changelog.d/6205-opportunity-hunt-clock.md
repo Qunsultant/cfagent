@@ -1,0 +1,3 @@
+### Fixed
+
+- **`opportunity_hunt_3652` no longer depends on the hour CI runs (#6205):** the test forced the `opportunity-hunt` goal and asserted the whole tick had no errors, but `onCron` also runs every *other* goal that is due in that tick — and `resource-cap-alert` (daily 00:00 UTC) needs `AGENT_DB`, which the test's env does not bind. From 00:00 UTC the test therefore failed for the rest of the UTC day, reddening shard 4 on every PR. The test now pins `Date` to a fixed midday instant (restored in `afterEach`) and scopes the error assertion to the goal under test. No production behaviour changed. #CAIO-quns
