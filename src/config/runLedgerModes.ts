@@ -188,7 +188,17 @@ export const RUN_LEDGER_KIND_RULES: readonly RunLedgerKindRule[] = [
   { kind: "strategy", operationPrefixes: ["trading.strategy", "strategy."], operationEquals: ["autonomousstrategydiscovery"] },
   { kind: "reports", operationPrefixes: ["report.", "reports."] },
   { kind: "workflow", operationPrefixes: ["chain.", "workflow."], operationEquals: ["chain", "runworkflowstage"] },
-  { kind: "pipeline", operationEquals: ["feed", "enrich", "analyze", "generate", "deliver"] },
+  // Issue #6028 — the OODA research run records the definition's root kind
+  // as its operation (`research`, jobPipelineEngine terminal record), which
+  // matched no rule and landed in "other": the one job whose point is six
+  // stages was invisible under the Pipeline filter. Reuses the existing kind
+  // — no seventh kind, no second label — and the dotted prefix keeps a
+  // future `researching.*` family out.
+  {
+    kind: "pipeline",
+    operationPrefixes: ["research."],
+    operationEquals: ["feed", "enrich", "analyze", "generate", "deliver", "research"],
+  },
   {
     kind: "ops",
     operationPrefixes: [
