@@ -171,12 +171,18 @@ describe("GET /api/security/pip (#4655)", () => {
           "revokedAtMs",
           "email",
         ],
+        // #6164 (F6): the view-level login join, declared beside the
+        // provider fields it annotates — the interface itself is
+        // unchanged (src/security/authorization.ts).
+        enrichmentFields: ["login"],
       },
       roleBinding: {
         fields: ["role", "scope", "workspaceId", "resourceId", "grantedBy", "expiresAtMs"],
+        enrichmentFields: ["grantedByLogin"],
       },
       permissionDenial: {
         fields: ["denialId", "internalUserId", "tenantId", "permission", "deniedBy", "deniedAtMs"],
+        enrichmentFields: ["deniedByLogin"],
       },
     });
     // Sources: which store each attribute group came from, and the
@@ -202,20 +208,35 @@ describe("GET /api/security/pip (#4655)", () => {
     expect(body.attributes.memberships[0].internalUserId).toBe(PLATFORM_ID);
     expect(body.attributes.memberships[0].tenantId).toBe("primary");
     expect(body.attributes.memberships[0].roleBindings[0].role).toBe("platform-admin");
-    expect(body.attributes.denials).toEqual([platformDenial]);
+    // #6164 (F6): the denial carries the denying principal's login
+    // beside the id — null when the store has no alias, never invented.
+    expect(body.attributes.denials).toEqual([{ ...platformDenial, deniedByLogin: null }]);
     // No other user's attributes leak: the other user's membership
     // and denial are absent from the whole response.
     expect(JSON.stringify(body)).not.toContain(OTHER_ID);
     expect(JSON.stringify(body)).not.toContain(otherDenial.denialId);
-    // Returned records carry only schema fields — no extra keys.
-    const schemaFields = new Set([
+    // Returned records carry only declared keys — the provider fields
+    // plus the enrichment the schema names, never an undeclared extra.
+    const membershipKeys = new Set([
       ...body.schema.membership.fields,
-      ...body.schema.permissionDenial.fields,
+      ...body.schema.membership.enrichmentFields,
     ]);
-    for (const record of [...body.attributes.memberships, ...body.attributes.denials]) {
-      for (const key of Object.keys(record)) {
-        expect(schemaFields.has(key)).toBe(true);
+    const bindingKeys = new Set([
+      ...body.schema.roleBinding.fields,
+      ...body.schema.roleBinding.enrichmentFields,
+    ]);
+    const denialKeys = new Set([
+      ...body.schema.permissionDenial.fields,
+      ...body.schema.permissionDenial.enrichmentFields,
+    ]);
+    for (const record of body.attributes.memberships) {
+      for (const key of Object.keys(record)) expect(membershipKeys.has(key)).toBe(true);
+      for (const binding of record.roleBindings) {
+        for (const key of Object.keys(binding)) expect(bindingKeys.has(key)).toBe(true);
       }
+    }
+    for (const record of body.attributes.denials) {
+      for (const key of Object.keys(record)) expect(denialKeys.has(key)).toBe(true);
     }
   });
 

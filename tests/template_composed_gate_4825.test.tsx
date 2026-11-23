@@ -42,12 +42,8 @@ import { AuditVaultPage } from "../src/client/AuditVaultPage";
 import { WorkflowCatalogPage } from "../src/client/WorkflowCatalogPage";
 import { NavSettingsPage } from "../src/client/NavSettingsPage";
 import { OptionsScreenerPage } from "../src/client/OptionsScreenerPage";
-<<<<<<< HEAD
-import { leftNavConfigIds } from "../src/client/navPresets";
-=======
 import { SecurityHubHome } from "../src/client/SecurityHubHome";
-import { leftNavConfigIds } from "../src/client/components/NavigationMenu";
->>>>>>> 4f7fe3e7f (fix(6164): wire a security-hub mount in the composed-page gate)
+import { leftNavConfigIds } from "../src/client/navPresets";
 import { ToastProvider } from "../src/client/components/ui/Toast";
 import {
   routeConformance,

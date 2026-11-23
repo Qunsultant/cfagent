@@ -146,6 +146,44 @@ describe("step-up gates at routes (#3102, #945 Q4)", () => {
     expect(await res.text()).toMatch(STEP_UP);
   });
 
+  it("POST /api/iaaa/role-grants/grant with a LOGIN target and 60-minute-old auth → 403 step-up, never a 400 that names the login", async () => {
+    // #6164 (A2) resolves a login target to its internal id. An
+    // unresolvable login must answer AFTER this gate: the gate answers
+    // to the session, so a stale caller never learns whether a login
+    // exists (#3102's ordering rule, applied to the new resolution).
+    const { env, seed } = makeEnv();
+    seedWired(seed, "0d9a3102-1c2b-4e3f-8a5b-31020000000a", "octocat-login", "user-login", HOUR);
+    const res = await worker.fetch(
+      req("/api/iaaa/role-grants/grant", {
+        method: "POST",
+        cookie: "0d9a3102-1c2b-4e3f-8a5b-31020000000a",
+        body: { login: "no-such-login", role: "platform-admin" },
+      }),
+      env,
+    );
+    expect(res.status).toBe(403);
+    const text = await res.text();
+    expect(text).toMatch(STEP_UP);
+    expect(text).not.toMatch(/No internal user id found/);
+  });
+
+  it("POST /api/iaaa/membership/grant with a LOGIN target and 60-minute-old auth → 403 step-up, never a 400 that names the login", async () => {
+    const { env, seed } = makeEnv();
+    seedWired(seed, "0d9a3102-1c2b-4e3f-8a5b-31020000000b", "octocat-login2", "user-login2", HOUR);
+    const res = await worker.fetch(
+      req("/api/iaaa/membership/grant", {
+        method: "POST",
+        cookie: "0d9a3102-1c2b-4e3f-8a5b-31020000000b",
+        body: { login: "no-such-login", roleBindings: [{ role: "member", scope: "tenant" }] },
+      }),
+      env,
+    );
+    expect(res.status).toBe(403);
+    const text = await res.text();
+    expect(text).toMatch(STEP_UP);
+    expect(text).not.toMatch(/No internal user id found/);
+  });
+
   it("GET /api/privacy/export with 60-minute-old auth → 403 step-up, no payload built", async () => {
     const { env, seed } = makeEnv();
     seedWired(seed, "0d9a3102-1c2b-4e3f-8a5b-310200000004", "octocat-export", "user-export", HOUR);
