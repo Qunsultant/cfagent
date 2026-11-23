@@ -606,6 +606,11 @@
           "name": "definition_version",
           "type": "INTEGER",
           "pk": 0
+        },
+        {
+          "name": "tenant_id",
+          "type": "TEXT",
+          "pk": 0
         }
       ],
       "constraints": {

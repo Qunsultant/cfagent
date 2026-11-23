@@ -33,6 +33,9 @@ const STAGE_ROW_COLUMNS = [
   "failed_unit_count",
   "result_ref",
   "definition_version",
+  // Issue #6202 — the D1 mirror declares one column set; adding it here
+  // keeps the two planes' CREATEs identical (unused on the DO plane).
+  "tenant_id",
 ] as const;
 
 function ensureTable(sql: SqlStorage): void {

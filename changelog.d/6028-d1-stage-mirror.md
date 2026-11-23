@@ -1,0 +1,3 @@
+### Added
+
+- **The stage rows now have their D1 mirror (#6028, sub-issue #6202):** migration **0083** creates `job_stage_events` on D1 with the same column set as the DO table (plus the nullable `tenant_id` projection stamp) and a UNIQUE index on `(run_id, stage_id)`. The engine writes the mirror best-effort after the authoritative DO rows — a mirror failure is logged (`jobPipeline.stage_row_mirror_failed`) and never fails the run — and the stage read falls back to D1 when the DO has nothing for a run, returning the identical shape. Both planes now declare **one** column set: `tenant_id` is on the DO table too (nullable, unused there), so a table is the same table whichever plane created it. #CAIO-quns
