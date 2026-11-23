@@ -431,24 +431,33 @@ describe("3123-P04 goals KV migrated", () => {
 
   it("ScheduledAgent no longer writes the goals KV key when SQL storage exists", () => {
     const body = source("src/agents/scheduled-agent.ts");
-    // Exactly two `put("goals"` writes, one per method, each inside
-    // its no-SQL fallback branch: getGoals seeds the fallback key
-    // only when empty, saveGoals persists the fallback key. The
-    // store path never touches the KV key.
+    // Exactly three `put("goals"` writes, each inside its no-SQL
+    // fallback branch: getGoals seeds the fallback key only when
+    // empty and re-writes it when the #6293 reconciliation corrects
+    // the stale opportunity-hunt cron, and saveGoals persists the
+    // fallback key. The store path never touches the KV key.
+    
     const writes = body.split('put("goals"').length - 1;
-    expect(writes).toBe(2);
+    expect(writes).toBe(3);
     const getGoals = body.slice(
       body.indexOf("private async getGoals"),
       body.indexOf("private async saveGoals"),
     );
     const saveGoals = body.slice(body.indexOf("private async saveGoals"));
-    for (const method of [getGoals, saveGoals]) {
-      expect(method.split('put("goals"').length - 1).toBe(1);
+    // Two writes in getGoals (seed + #6293 reconciliation re-write),
+  // one in saveGoals.
+  expect(getGoals.split('put("goals")').length - 1).toBe(2);
+  expect(saveGoals.split('put("goals")').length - 1).toBe(1);
+  for (const method of [getGoals, saveGoals]) {
       expect(method).toContain("if (!store)");
-      // The put sits after the guard, inside the fallback branch.
-      expect(method.indexOf('put("goals"')).toBeGreaterThan(
-        method.indexOf("if (!store)"),
-      );
+      // Every put sits after the guard, inside the fallback branch.
+      let from = 0;
+      for (;;) {
+          const at = method.indexOf('put("goals")', from);
+        if (at < 0) break;
+        expect(at).toBeGreaterThan(method.indexOf("if (!store)"));
+        from = at + 1;
+      }
     }
     expect(body).toContain("unified");
   });
