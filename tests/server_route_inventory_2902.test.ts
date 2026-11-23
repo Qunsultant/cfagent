@@ -668,6 +668,9 @@ describe("server route inventory pin (#2902)", () => {
     // #5425 (S5, #3515) adds the SLO read delegation right after
     // the OTel config delegation (the SLO read route over the S2
     // metrics recorder).
+    // #6151 S1 adds the nav-availability delegation right after
+    // the AuthMe delegation (the platform-context endpoint it
+    // belongs to).
     expect(calls).toEqual([
       "handleCoreEarlyRoutes",
       "handlePrivacyRoutes",
@@ -676,6 +679,7 @@ describe("server route inventory pin (#2902)", () => {
       "handleTradingScheduleRoutes",
       "handleMessagingSocialRoutes",
       "handleAuthMeRoutes",
+      "handleNavRoutes",
       "handlePrivacyChainsRoutes",
       "handlePlatformTelemetryRoutes",
       "handleOtelRoutes",
@@ -760,9 +764,13 @@ describe("server route inventory pin (#2902)", () => {
     // contextForRequest option), and +2 blank lines (357 → 375).
     // The resolution lives in src/security/apiRequestContext.ts,
     // not here; no new route or responsibility is added.
+    // #6151 S1 records a tenth deliberate growth: +6 lines for the
+    // nav-availability delegation (1 import line + a 3-line comment
+    // + the 2-line dispatch branch) (375 → 381). The routing logic
+    // itself lives in src/server/routes/nav.ts, not here.
     const src = readFileSync("src/server.ts", "utf8");
     const lines = src.split("\n").length - (src.endsWith("\n") ? 1 : 0);
-    expect(lines).toBeLessThanOrEqual(375);
+    expect(lines).toBeLessThanOrEqual(381);
   });
 });
 
