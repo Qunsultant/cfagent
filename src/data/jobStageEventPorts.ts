@@ -34,6 +34,25 @@ export interface JobStageEventRecord {
   /** When the unit reached a terminal state (null while it is still running or resumable). */
   endedAt: string | null;
   detail: string | null;
+  /**
+   * Issue #6028 — the stage-level terminal row's fields. A row with
+   * `action: "terminal"` is the run-level summary of one stage and
+   * carries them; the per-unit transition rows (`started` /
+   * `completed` / `failed`) leave them absent, so the two vocabularies
+   * never impersonate each other.
+   */
+  /** `completed` | `failed` | `stopped` | `running` — the engine's recorded status, never inferred. */
+  stageStatus?: string;
+  /** `endedAt − startedAt`; null when either stamp is missing — never 0, never estimated. */
+  durationMs?: number | null;
+  /** The units the stage planned. */
+  unitCount?: number;
+  /** The units that ended failed (failed or timed out). */
+  failedUnitCount?: number;
+  /** The step descriptors the stage's units returned, in unit order; null when none did. */
+  resultRef?: string | null;
+  /** The spec version the run executed; null for a definition with no version. */
+  definitionVersion?: number | null;
 }
 
 export interface JobStageEventStore {

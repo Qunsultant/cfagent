@@ -102,6 +102,9 @@ import {
   resolveJobDefinition,
 } from "./jobPipelineConfig";
 import type { JobStepContext, JobStepRegistry } from "./jobPipelineSteps";
+import type { JobStageEventRecord, JobStageEventStore } from "../data/jobStageEventPorts";
+import { createStructuredLogger } from "../observability/structuredLogger";
+import { createObservabilitySink } from "../observability/createObservabilityPorts";
 import { publishJobStatus, publishStageAction } from "./jobPipelineEvents";
 import { newRunId, stepExecutionId } from "./executionTreeIds";
 import type { MessagePublisher, StageName } from "../messaging/messagingPorts";
@@ -264,6 +267,11 @@ export const identityJobStepJournal: JobStepJournal = {
   do: async (_name, fn) => fn(),
 };
 
+/** Issue #6028 — module logger, on the same structured-logging seam as the services. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "services/jobPipelineEngine",
+});
+
 /** Default sleep: a real timer that never holds the process open on its own. */
 const defaultSleep = (ms: number): Promise<void> =>
   new Promise((resolve) => {
@@ -287,6 +295,13 @@ export interface JobPipelineDeps {
   /** Null when the queue substrate is unconfigured: runs proceed, status publication is skipped, store state remains the truth. */
   publisher: MessagePublisher | null;
   steps: JobStepRegistry;
+  /**
+   * Issue #6028 — the stage-level terminal rows' store (the existing
+   * `job_stage_events`). Absent ⇒ no stage rows are written, exactly as
+   * before this slice; a present store is written best-effort (see
+   * `writeStageRows`).
+   */
+  stageEvents?: JobStageEventStore;
   journal?: JobStepJournal;
   now?: () => Date;
   newRunId?: () => string;
@@ -424,6 +439,12 @@ export interface JobStageView {
   startedAt: string | null;
   endedAt: string | null;
   durationMs: number | null;
+  /**
+   * Issue #6028 — the result references the stage's units returned (the
+   * descriptor each step produced), in unit order. Null when no unit
+   * produced one — never a fabricated summary.
+   */
+  resultRef: string | null;
   units: Array<{
     unitId: string;
     status: StageUnitCheckpoint["status"];
@@ -433,6 +454,8 @@ export interface JobStageView {
     startedAt?: string;
     /** Issue #4359 — the unit's recorded terminal instant, when it ended. */
     endedAt?: string;
+    /** Issue #6028 — the descriptor the step returned for this unit, when it returned one. */
+    resultRef?: string;
   }>;
 }
 
@@ -734,7 +757,12 @@ export function vocabularyStageNodePath(
  * did not dispatch itself (readStagesFromPipelineStores).
  */
 export function projectStageViews(
-  definition: JobDefinition,
+  /**
+   * Issue #6028 — null when the definition is gone (a run whose spec was
+   * replaced): the stages and their stamps still come from the checkpoint,
+   * only the kinds read null. Nothing is invented in their place.
+   */
+  definition: JobDefinition | null,
   instance: JobInstanceRecord | null,
 ): JobStageView[] {
   if (!instance?.stageCheckpoint) return [];
@@ -743,24 +771,26 @@ export function projectStageViews(
     kinds.set(path, node.kind);
     (node.children ?? []).forEach((child, i) => walk(child, childPath(path, i)));
   };
-  walk(definition.root, "");
+  if (definition) walk(definition.root, "");
   const byStage = new Map<string, JobStageView>();
   for (const unit of instance.stageCheckpoint.units) {
     if (!isJobStageId(unit.stage)) continue;
     const nodePath = unit.stage === "job:root" ? "" : unit.stage.slice("job:".length);
     let view = byStage.get(unit.stage);
     if (!view) {
-      view = {
+      const created: JobStageView = {
         stageId: unit.stage,
         nodePath,
         kind: kinds.get(nodePath) ?? null,
-        executionMode: definition.config.executionMode ?? null,
+        executionMode: definition?.config.executionMode ?? null,
         startedAt: null,
         endedAt: null,
         durationMs: null,
+        resultRef: null,
         units: [],
       };
-      byStage.set(unit.stage, view);
+      byStage.set(unit.stage, created);
+      view = created;
     }
     view.units.push({
       unitId: unit.unitId,
@@ -769,6 +799,7 @@ export function projectStageViews(
       ...(unit.error !== undefined ? { error: unit.error } : {}),
       ...(unit.startedAt !== undefined ? { startedAt: unit.startedAt } : {}),
       ...(unit.endedAt !== undefined ? { endedAt: unit.endedAt } : {}),
+      ...(unit.resultRef !== undefined ? { resultRef: unit.resultRef } : {}),
     });
   }
   // Issue #4359 — the stage's window is its units' recorded window:
@@ -794,8 +825,85 @@ export function projectStageViews(
       startedAt && endedAt
         ? Math.max(0, Date.parse(endedAt) - Date.parse(startedAt))
         : null;
+    // Issue #6028 — the stage's result references, in unit order. Null
+    // when no unit produced one; the join never invents a summary.
+    const refs = view.units
+      .map((unit) => unit.resultRef)
+      .filter((ref): ref is string => typeof ref === "string" && ref.length > 0);
+    view.resultRef = refs.length > 0 ? refs.join(", ") : null;
   }
   return [...byStage.values()];
+}
+
+/**
+ * Issue #6028 — one stage-level terminal row per executed stage, for the
+ * run ledger's stage store. Pure: the engine's own projection in, the
+ * rows out, so the write path and the tests see the same values.
+ *
+ * The identity is the engine's (runId + stageId), so a re-write of the
+ * same run is an update at the store's UNIQUE `event_key`, not a second
+ * row. `stage_id` carries the addressable kind when the definition is
+ * known (the id the stage-control surface addresses), the engine stage id
+ * otherwise.
+ */
+export function stageTerminalRows(input: {
+  runId: string;
+  jobId: string;
+  definition: JobDefinition | null;
+  instance: JobInstanceRecord;
+  at: string;
+  definitionVersion: number | null;
+}): JobStageEventRecord[] {
+  const rows: JobStageEventRecord[] = [];
+  const rootIsContainer = (input.definition?.root.children?.length ?? 0) > 0;
+  for (const stage of projectStageViews(input.definition, input.instance)) {
+    // The root of a job whose children ARE the stages is the job itself,
+    // not another stage: a row for it would show a stage the operator
+    // cannot address. A root with no children is the stage, and keeps its
+    // row (the feed/analyze families' shape).
+    if (rootIsContainer && stage.nodePath === "") continue;
+    const failed = stage.units.filter(
+      (unit) => unit.status === "failed" || unit.status === "timed_out",
+    );
+    const stopped = stage.units.some((unit) => unit.status === "stopped");
+    const allTerminal = stage.units.every((unit) =>
+      TERMINAL_STAGE_UNIT_STATUSES.has(unit.status),
+    );
+    const stageStatus =
+      failed.length > 0
+        ? "failed"
+        : stopped
+          ? "stopped"
+          : allTerminal
+            ? "completed"
+            : "running";
+    const errors = failed
+      .map((unit) => unit.error)
+      .filter((error): error is string => typeof error === "string" && error.length > 0);
+    rows.push({
+      eventKey: `${input.runId}:${stage.stageId}:terminal`,
+      claimKey: `${input.runId}::${stage.stageId}`,
+      runId: input.runId,
+      jobId: input.jobId,
+      // Issue #6028 — the addressable id: the stage kind the control
+      // surface and the flow address (the engine's node path is the
+      // identity, above, and stays in the claim key).
+      stageId: stage.kind ?? stage.stageId,
+      unitId: null,
+      action: "terminal",
+      at: input.at,
+      startedAt: stage.startedAt,
+      endedAt: stage.endedAt,
+      detail: errors.length > 0 ? errors.join("; ") : null,
+      stageStatus,
+      durationMs: stage.durationMs,
+      unitCount: stage.units.length,
+      failedUnitCount: failed.length,
+      resultRef: stage.resultRef,
+      definitionVersion: input.definitionVersion,
+    });
+  }
+  return rows;
 }
 
 /**
@@ -2275,6 +2383,41 @@ export class JobPipelineControl {
     await this.deps.stores.instances.saveInstance({ ...instance, updatedAt: this.iso() });
   }
 
+  /**
+   * Issue #6028 — write one terminal row per executed stage to the stage
+   * store. Best-effort by contract, the same rule the settle observer
+   * follows: a store failure never fails, retries or duplicates the run;
+   * it is logged, never swallowed.
+   */
+  private async writeStageRows(
+    instance: JobInstanceRecord,
+    definition: JobDefinition | null,
+  ): Promise<void> {
+    const store = this.deps.stageEvents;
+    const runId = instance.currentRunId;
+    if (!store || !runId) return;
+    const rows = stageTerminalRows({
+      runId,
+      jobId: instance.jobId,
+      definition,
+      instance,
+      at: this.iso(),
+      definitionVersion: instance.runDefinitionVersion ?? null,
+    });
+    for (const row of rows) {
+      try {
+        await store.record(row);
+      } catch (error) {
+        structuredLog.warn("jobPipeline.stage_row_write_failed", {
+          jobId: instance.jobId,
+          runId,
+          stageId: row.stageId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+  }
+
   private async recordTerminal(
     instance: JobInstanceRecord,
     outcome: "completed" | "failed" | "cancelled",
@@ -2315,6 +2458,10 @@ export class JobPipelineControl {
       ...(artifactRefs !== undefined ? { artifactRefs } : {}),
     });
     await this.deps.runRecorder.recordRun(record);
+    // Issue #6028 — the stage rows ride the engine's one terminal-
+    // recording point, so every trigger class (manual, scheduled,
+    // resume, retry, cancel) is covered by construction.
+    await this.writeStageRows(instance, definition ?? null);
     // #3530 slice B: the settle observer fires here — downstream
     // of the no-run guard above, so it observes exactly the runs
     // that settled, exactly once each. Guarded: an observer
@@ -3395,7 +3542,7 @@ export class JobPipelineControl {
           ...(running?.startedAt ? { startedAt: running.startedAt } : {}),
         });
         try {
-          const out = await this.withUnitDeadline(stage, () =>
+          const executed = await this.withUnitDeadline(stage, () =>
             this.execSteps(ctx, node, path, input, {
               mode: eff.mode,
               inMemory: eff.inMemory,
@@ -3406,6 +3553,7 @@ export class JobPipelineControl {
               resumeItem: resume.itemIndex,
             }),
           );
+          const out = executed.output;
           if (shardKey !== null) {
             await this.writeArtifact(
               ctx,
@@ -3415,6 +3563,9 @@ export class JobPipelineControl {
             );
           }
           const done = this.entryFor(ctx.ledger, stageId, unit.unitId);
+          // Issue #6028 — the step's own descriptor becomes the unit's
+          // result reference, recorded with the completion.
+          const resultRef = executed.resultRef;
           this.setEntry(ctx, {
             stage: stageId,
             unitId: unit.unitId,
@@ -3423,6 +3574,7 @@ export class JobPipelineControl {
             ...(done?.startedAt ? { startedAt: done.startedAt } : {}),
             endedAt: this.iso(),
             updatedAt: this.iso(),
+            ...(resultRef ? { resultRef } : {}),
           });
           await this.persistLedger(ctx);
           const settled = this.entryFor(ctx.ledger, stageId, unit.unitId);
@@ -3623,10 +3775,14 @@ export class JobPipelineControl {
       resumeStep: number;
       resumeItem: number;
     },
-  ): Promise<unknown> {
+  ): Promise<{ output: unknown; resultRef?: string }> {
     const journal = this.deps.journal ?? identityJobStepJournal;
     const steps = node.steps ?? [];
     const unitId = eff.shardKey ?? ctx.runId;
+    // Issue #6028 — the last non-empty descriptor a step returned for this
+    // unit. It is the step's own result reference, never derived from the
+    // output's shape.
+    let resultRef: string | undefined;
     const invoke = async (
       stepIndex: number,
       item: unknown,
@@ -3665,6 +3821,8 @@ export class JobPipelineControl {
         );
       }
       ctx.stepExecutions += 1;
+      const descriptor = (result as { descriptor?: unknown }).descriptor;
+      if (typeof descriptor === "string" && descriptor.length > 0) resultRef = descriptor;
       return result.output;
     };
 
@@ -3733,7 +3891,7 @@ export class JobPipelineControl {
           true,
         );
       }
-      return perItem;
+      return { output: perItem, ...(resultRef ? { resultRef } : {}) };
     }
 
     // Batch pacing.
@@ -3780,7 +3938,7 @@ export class JobPipelineControl {
         true,
       );
     }
-    return current;
+    return { output: current, ...(resultRef ? { resultRef } : {}) };
   }
 }
 

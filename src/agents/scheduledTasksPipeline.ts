@@ -608,6 +608,9 @@ export function createScheduledAgentPipelineControl(
       }),
     }),
     publisher: messaging.ports?.publisher ?? null,
+    // Issue #6028 — the stage-level terminal rows land in this host's
+    // own DO SQLite (the same store the stage-event consumer writes).
+    stageEvents: createScheduledAgentStageEventStore(ctx),
     // #4312 — the feed execution bound resolves from env here
     // (FEED_JOB_EXECUTION_MS, 240s when no knob is set), so the
     // host's whole-run deadline is operator-configurable.

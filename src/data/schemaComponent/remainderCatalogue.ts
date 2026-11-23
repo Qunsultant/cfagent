@@ -768,6 +768,72 @@ export const REMAINDER_CATALOGUE_ENTRIES: CatalogueEntry[] = [
     form: "parameterized",
     parameters: ["table", "cols", "placeholders"],
   },
+  {
+    // Issue #6028 — the stage-level terminal row: added when missing so
+    // existing DO tables upgrade in place (the probed additive-column
+    // pattern, as job_run_records did for its provenance columns).
+    code: "schema.do.job_stage_events.alter_table_add_column_stage_status",
+    plane: "do",
+    table: "job_stage_events",
+    statement: `ALTER TABLE job_stage_events ADD COLUMN stage_status TEXT`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    // Issue #6028 — the stage-level terminal row: added when missing so
+    // existing DO tables upgrade in place (the probed additive-column
+    // pattern, as job_run_records did for its provenance columns).
+    code: "schema.do.job_stage_events.alter_table_add_column_duration_ms",
+    plane: "do",
+    table: "job_stage_events",
+    statement: `ALTER TABLE job_stage_events ADD COLUMN duration_ms INTEGER`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    // Issue #6028 — the stage-level terminal row: added when missing so
+    // existing DO tables upgrade in place (the probed additive-column
+    // pattern, as job_run_records did for its provenance columns).
+    code: "schema.do.job_stage_events.alter_table_add_column_unit_count",
+    plane: "do",
+    table: "job_stage_events",
+    statement: `ALTER TABLE job_stage_events ADD COLUMN unit_count INTEGER`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    // Issue #6028 — the stage-level terminal row: added when missing so
+    // existing DO tables upgrade in place (the probed additive-column
+    // pattern, as job_run_records did for its provenance columns).
+    code: "schema.do.job_stage_events.alter_table_add_column_failed_unit_count",
+    plane: "do",
+    table: "job_stage_events",
+    statement: `ALTER TABLE job_stage_events ADD COLUMN failed_unit_count INTEGER`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    // Issue #6028 — the stage-level terminal row: added when missing so
+    // existing DO tables upgrade in place (the probed additive-column
+    // pattern, as job_run_records did for its provenance columns).
+    code: "schema.do.job_stage_events.alter_table_add_column_result_ref",
+    plane: "do",
+    table: "job_stage_events",
+    statement: `ALTER TABLE job_stage_events ADD COLUMN result_ref TEXT`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    // Issue #6028 — the stage-level terminal row: added when missing so
+    // existing DO tables upgrade in place (the probed additive-column
+    // pattern, as job_run_records did for its provenance columns).
+    code: "schema.do.job_stage_events.alter_table_add_column_definition_version",
+    plane: "do",
+    table: "job_stage_events",
+    statement: `ALTER TABLE job_stage_events ADD COLUMN definition_version INTEGER`,
+    kind: "schema",
+    form: "literal",
+  },
 ];
 
 /** Build a fresh catalogue holding the remainder section. */

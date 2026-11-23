@@ -29,6 +29,7 @@ import {
   type JobStageView,
 } from "../services/jobPipelineEngine";
 import { createBuiltinStepRegistry } from "../services/jobPipelineSteps";
+import { createDoSqliteJobStageEventStore } from "../data/doSqliteJobStageEventAdapter";
 import {
   buildResearchJobDefinition,
   assertResearchAopCompliance,
@@ -266,6 +267,12 @@ export async function dispatchResearchEngineRun(
     // minted above is also the engine's persisted workflow run ID.
     newRunId: () => runId,
     publisher: null,
+    // Issue #6028 — the stage-level terminal rows persist in the run's
+    // own DO SQLite when the caller supplied one (production does), so a
+    // past run's stages survive its checkpoint.
+    ...(input.sql && typeof input.sql.exec === "function"
+      ? { stageEvents: createDoSqliteJobStageEventStore(input.sql) }
+      : {}),
     steps: registerResearchSteps(createBuiltinStepRegistry(), wiredDeps),
     invocation: "sync",
     // Issue #4782 S3 — the retry policy resolves from the
@@ -415,18 +422,36 @@ export async function readResearchStages(
     publisher: null,
     steps: createBuiltinStepRegistry(),
     invocation: "sync",
+    ...(input.sql && typeof input.sql.exec === "function"
+      ? { stageEvents: createDoSqliteJobStageEventStore(input.sql) }
+      : {}),
   });
   // No definition yet = the run never started; the six stages are pending,
   // not missing (the page still shows what can be started).
   const view = await control.getJob(engineJobId).catch(() => null);
+  // Issue #6028 — a settled run's stages live on after its checkpoint: the
+  // engine wrote one terminal row per stage when the run ended. Read as a
+  // fallback only — a live stage always wins, so the checkpoint stays the
+  // truth for a running run and the ledger is never a second truth.
+  const persisted = input.sql
+    ? await createDoSqliteJobStageEventStore(input.sql)
+        .listByRun(input.runId)
+        .catch(() => [])
+    : [];
+  const persistedByStage = new Map(
+    persisted
+      .filter((row) => row.action === "terminal" && row.stageStatus)
+      .map((row) => [row.stageId, row]),
+  );
   const stages: ResearchStageRow[] = RESEARCH_PIPELINE_STAGES.map((stageId) => {
     const found = view?.stages.find((stage) => stage.kind === stageId) ?? null;
+    const stored = persistedByStage.get(stageId) ?? null;
     const units = found?.units ?? [];
     const failed = units.some((unit) => unit.status === "failed");
     const running = units.some((unit) => unit.status === "running");
     const stopped = units.some((unit) => unit.status === "stopped");
     const status = !found
-      ? "pending"
+      ? (stored?.stageStatus ?? "pending")
       : failed
         ? "failed"
         : running
@@ -434,14 +459,14 @@ export async function readResearchStages(
           : stopped
             ? "stopped"
             : units.length === 0
-              ? "pending"
+              ? (stored?.stageStatus ?? "pending")
               : "completed";
     return {
       stageId,
       status,
-      startedAt: found?.startedAt ?? null,
-      endedAt: found?.endedAt ?? null,
-      durationMs: found?.durationMs ?? null,
+      startedAt: found?.startedAt ?? stored?.startedAt ?? null,
+      endedAt: found?.endedAt ?? stored?.endedAt ?? null,
+      durationMs: found?.durationMs ?? stored?.durationMs ?? null,
     };
   });
   return {
@@ -521,6 +546,9 @@ export async function executeResearchStageControl(
     publisher: null,
     steps: registerResearchSteps(createBuiltinStepRegistry(), deps),
     invocation: "sync",
+    ...(input.sql && typeof input.sql.exec === "function"
+      ? { stageEvents: createDoSqliteJobStageEventStore(input.sql) }
+      : {}),
     // Issue #4782 S3 — as the dispatch control above: the stage
     // re-run resolves its retry policy from the caller's env.
     ...(input.env ? { env: input.env } : {}),
