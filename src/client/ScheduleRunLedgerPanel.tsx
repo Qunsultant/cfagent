@@ -32,7 +32,7 @@ import {
   Table,
   type TableColumn,
 } from "./components/ui";
-import { listAllRuns } from "./jobsApi";
+import { listAllRuns, triggerGoal, triggerResearchRun } from "./jobsApi";
 import { apiFetch } from "./apiFetch";
 import { attachWorkflowRuns, type WorkflowLedgerEntry } from "../services/runLedgerWorkflowRuns";
 import type { WorkflowRun } from "../services/workflowRuns";
@@ -484,6 +484,35 @@ export function ScheduleRunLedgerPanel({
     [workflowByJobId, docsByRunId, openDocsDetails, optionsDetails],
   );
 
+  // Issue #6157 — the two named jobs run on demand from the ledger, through
+  // the trigger seams that already exist: the research manual door for OODA
+  // and the goal trigger for Opportunity Hunt. No second trigger path.
+  const [triggering, setTriggering] = useState<"ooda" | "hunt" | null>(null);
+  const [triggerMsg, setTriggerMsg] = useState<string | null>(null);
+
+  const runNow = async (which: "ooda" | "hunt") => {
+    setTriggering(which);
+    setTriggerMsg(null);
+    try {
+      if (which === "ooda") {
+        const started = await triggerResearchRun();
+        setTriggerMsg(
+          started.runId ? `OODA run started: ${started.runId}` : "OODA run started.",
+        );
+      } else {
+        await triggerGoal("opportunity-hunt");
+        setTriggerMsg("Opportunity Hunt run started.");
+      }
+      await refresh();
+    } catch (err) {
+      setTriggerMsg(
+        `Could not start the run: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    } finally {
+      setTriggering(null);
+    }
+  };
+
   return (
     <PageSection>
       <Flex align="center" justify="between" gap="3" wrap>
@@ -521,6 +550,26 @@ export function ScheduleRunLedgerPanel({
         >
           ↻ Refresh
         </Button>
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          onClick={() => void runNow("ooda")}
+          loading={triggering === "ooda"}
+          title="Start an OODA research run now — it appears in this ledger"
+        >
+          OODA
+        </Button>
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          onClick={() => void runNow("hunt")}
+          loading={triggering === "hunt"}
+          title="Start an Opportunity Hunt run now — it appears in this ledger"
+        >
+          Opportunity Hunt
+        </Button>
         {filterLabel && (
           <>
             <span className="ui-meta">
@@ -540,6 +589,14 @@ export function ScheduleRunLedgerPanel({
         )}
       </Flex>
 
+      {triggerMsg && (
+        <Notice
+          tone={triggerMsg.startsWith("Could not") ? "danger" : "success"}
+          title="Run trigger"
+        >
+          {triggerMsg}
+        </Notice>
+      )}
       {error && (
         <Notice tone="danger" title="Run ledger could not be loaded">
           {error}{" "}
