@@ -41,6 +41,18 @@ describe("RunBrokerContext (#5188)", () => {
     expect(ctx.modeSource).toBeDefined();
   });
 
+  it("accepts the tenant source claimed by the one shared resolution (#6151)", async () => {
+    const ctx = await resolveRunBrokerContext({
+      env: env({ TENANT_BROKER_ID: "public" }),
+      environment: "TEST",
+      selection: { brokerId: "alpaca", mode: "paper", source: "tenant" },
+    });
+
+    expect(ctx.brokerId).toBe("alpaca");
+    expect(ctx.source).toBe("tenant");
+    expect(ctx.mode).toBe("paper");
+  });
+
   it("falls back to the tenant's broker, never to a literal", async () => {
     const ctx = await resolveRunBrokerContext({ env: env(), environment: "TEST" });
 
