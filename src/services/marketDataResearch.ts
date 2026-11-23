@@ -41,6 +41,7 @@ import { defaultBreakerRegistry } from "../breakers/createBreakerPorts";
 import type { BreakerRegistry } from "../breakers/breakerPorts";
 import { AGENT_DIDS, createDidAttestationSync } from "../agents/did";
 import { createOutboundRateLimiter, type OutboundRateLimiter } from "../security/outboundRateLimiter";
+import { resolveFetchTimeoutMs } from "./pipelinePolicy";
 import { getCachedQuoteWithAge, setCachedQuote } from "./quoteCache";
 import { ALPACA_CONNECT_HINT } from "./providerUxLinks";
 import { normalizeAlpacaBaseUrl, type NormalizedTimeInForce } from "../trading";
@@ -2198,6 +2199,16 @@ export class YahooFinanceProvider implements IMarketDataProvider {
 }
 
 /**
+ * Issue #6278 — the batch quotes fetch chunks into
+ * ≤50-symbol requests (BATCH_QUOTES_CHUNK_SIZE) and merges the
+ * snapshots. One unchunked request for a whole universe (~100
+ * symbols) is the shape that timed out the 2026-11-23 manual
+ * screens; the #6208 options-snapshots limit is 100 (documented),
+ * and 50 keeps each stock request well inside it.
+ */
+const BATCH_QUOTES_CHUNK_SIZE = 50;
+
+/**
  * 2. Alpaca Market Data Provider Strategy (GoF Strategy Pattern)
  * Specializes in real-time Level 1/2 quotes, latest trades, NBBO bid/ask spreads, and multi-asset crypto/equities.
  * Also integrates Alpaca v2 Trading API for live/paper order executions, accounts, and portfolio positions.
@@ -2229,7 +2240,20 @@ export class AlpacaMarketDataProvider implements IMarketDataProvider {
    */
   private async throttledFetch(url: string, init: RequestInit): Promise<Response> {
     await this.outboundLimiter.acquire();
-    return fetch(url, init);
+    // Issue #6278 — every request through this choke point
+    // carries the pipeline policy's per-fetch timeout (15s
+    // default, env knob PIPELINE_FETCH_TIMEOUT_MS) via
+    // AbortSignal.timeout, so a hung connection fails fast
+    // instead of waiting for the caller's (60s) fetch race. A
+    // caller-provided signal is never overwritten; when
+    // AbortSignal.timeout is unavailable the request goes out
+    // unsignalled, as before.
+    const signal =
+      init.signal ??
+      (typeof AbortSignal !== "undefined" && "timeout" in AbortSignal
+        ? AbortSignal.timeout(resolveFetchTimeoutMs(this.env?.PIPELINE_FETCH_TIMEOUT_MS))
+        : undefined);
+    return fetch(url, { ...init, ...(signal ? { signal } : {}) });
   }
 
   /**
@@ -2399,13 +2423,23 @@ export class AlpacaMarketDataProvider implements IMarketDataProvider {
     if (!this.isConfigured()) {
       throw marketDataResearchLiveUnavailableError(wanted.join(","), "quotes", "alpaca");
     }
-    const url = `${this.getDataUrl()}/v2/stocks/snapshots?symbols=${encodeURIComponent(wanted.join(","))}`;
-    const res = await this.throttledFetch(url, { headers: this.getHeaders() });
-    if (!res.ok) {
-      throw new Error(`Alpaca batch quotes HTTP ${res.status}`);
+    // Issue #6278 — the batch pull is chunked (BATCH_QUOTES_CHUNK_SIZE)
+    // and the snapshots merged, so one slow/large request cannot
+    // burn the whole 60s fetch bound. Each chunk takes its own
+    // rate-limiter token, as every fetch does (#6208 pattern). A
+    // failed chunk throws, as the single request did — the feed
+    // job retries the whole fetch.
+    const snaps: Record<string, any> = {};
+    for (let i = 0; i < wanted.length; i += BATCH_QUOTES_CHUNK_SIZE) {
+      const chunk = wanted.slice(i, i + BATCH_QUOTES_CHUNK_SIZE);
+      const url = `${this.getDataUrl()}/v2/stocks/snapshots?symbols=${encodeURIComponent(chunk.join(","))}`;
+      const res = await this.throttledFetch(url, { headers: this.getHeaders() });
+      if (!res.ok) {
+        throw new Error(`Alpaca batch quotes HTTP ${res.status}`);
+      }
+      const data = (await res.json().catch(() => ({}))) as any;
+      Object.assign(snaps, data?.snapshots ?? {});
     }
-    const data = (await res.json().catch(() => ({}))) as any;
-    const snaps: Record<string, any> = data?.snapshots ?? {};
     const out: MarketDataResearchQuote[] = [];
     for (const symbol of wanted) {
       const s = snaps[symbol];

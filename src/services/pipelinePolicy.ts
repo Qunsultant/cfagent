@@ -236,6 +236,30 @@ function parseEvents(
 }
 
 /**
+ * Issue #6278 — the one resolution of the per-fetch timeout
+ * budget: the operator setting wins, then the Worker env knob,
+ * then the recorded default. The market-data provider reads the
+ * same value (env-only — it carries no tenant settings) for the
+ * per-request AbortSignal.timeout in throttledFetch, so the
+ * provider and the policy can never disagree about the bound.
+ * Never a second literal set: the clamp and the default live
+ * here and in DEFAULT_PIPELINE_POLICY only.
+ */
+export function resolveFetchTimeoutMs(
+  envValue: string | undefined,
+  settingsValue?: string | undefined,
+): number {
+  return (
+    parseIntClamped(
+      settingsValue ?? envValue,
+      1_000,
+      120_000,
+      "PIPELINE_FETCH_TIMEOUT_MS",
+    ) ?? DEFAULT_PIPELINE_POLICY.fetchTimeoutMs
+  );
+}
+
+/**
  * Resolve the effective policy. `env` is any string-valued record
  * (Worker env bindings read as strings); `settings` is the
  * operator-settings map (mas_settings values under `pipeline.*`).
@@ -330,9 +354,10 @@ export function resolvePipelinePolicy(
     events: { ...d.notifications.events, ...eventsOverride },
   };
 
-  const fetchTimeoutMs =
-    parseIntClamped(s("pipeline.fetchTimeoutMs") ?? e("PIPELINE_FETCH_TIMEOUT_MS"), 1_000, 120_000, "PIPELINE_FETCH_TIMEOUT_MS") ??
-    d.fetchTimeoutMs;
+  const fetchTimeoutMs = resolveFetchTimeoutMs(
+    e("PIPELINE_FETCH_TIMEOUT_MS"),
+    s("pipeline.fetchTimeoutMs"),
+  );
 
   return { retry, notifications, fetchTimeoutMs };
 }
