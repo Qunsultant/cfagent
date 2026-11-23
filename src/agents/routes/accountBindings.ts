@@ -10,6 +10,7 @@ import { ACCOUNT_BINDING_SCOPES } from "../../config/accountBindings";
 import {
   getBrokerAssetAccountRegistry,
   listAccountBindings,
+  migrateAccountBindingsToLogin,
   migrateTenantAccountBinding,
   removeAccountBinding,
   updateBrokerAssetAccountRegistry,
@@ -27,26 +28,37 @@ export async function handleAccountBindingRoutes(
   request: Request,
   url: URL,
   path: string,
-  sessionId: string,
-  ctx: { env: Env },
+  userLogin: string,
+  ctx: { env: Env; legacySessionId?: string },
 ): Promise<Response | null> {
   if (!path.endsWith("/broker/account-binding")) {
     return null;
   }
 
-  if (!sessionId || !sessionId.trim()) {
+  if (!userLogin || !userLogin.trim()) {
     return Response.json(
       { code: "FAILURE_AUTH_NO_SESSION", message: "Authentication required." },
       { status: 401 },
     );
   }
 
+  // Issue #6257 — bindings saved before the login-keying fix live under the
+  // DO instance id; copy them to the login key on first access so already-saved
+  // bindings keep working with no manual re-save. Idempotent; a no-op when
+  // the caller passed no legacy identity or it already equals the login.
+  if (
+    ctx.legacySessionId &&
+    ctx.legacySessionId.trim().toLowerCase() !== userLogin.trim().toLowerCase()
+  ) {
+    await migrateAccountBindingsToLogin(ctx.env, ctx.legacySessionId, userLogin);
+  }
+
   const method = request.method.toUpperCase();
 
   if (method === "GET") {
     const [bindings, registry] = await Promise.all([
-      listAccountBindings(ctx.env, sessionId),
-      getBrokerAssetAccountRegistry(ctx.env, sessionId),
+      listAccountBindings(ctx.env, userLogin),
+      getBrokerAssetAccountRegistry(ctx.env, userLogin),
     ]);
     const brokerFilter = url.searchParams.get("broker")?.trim().toLowerCase();
     const modeFilter = url.searchParams.get("mode")?.trim().toLowerCase();
@@ -75,7 +87,7 @@ export async function handleAccountBindingRoutes(
     if (body.registryPatch && typeof body.registryPatch === "object") {
       const regRes = await updateBrokerAssetAccountRegistry(
         ctx.env,
-        sessionId,
+        userLogin,
         body.registryPatch as BrokerAssetAccountRegistryPatch,
       );
       if (!regRes.ok) {
@@ -84,7 +96,7 @@ export async function handleAccountBindingRoutes(
       return Response.json({ ok: true, registry: regRes.registry });
     }
     if (body.action === "validate") {
-      const registry = await getBrokerAssetAccountRegistry(ctx.env, sessionId);
+      const registry = await getBrokerAssetAccountRegistry(ctx.env, userLogin);
       const valRes = validateAccountAgainstBroker({
         broker: body.broker,
         mode: body.mode,
@@ -94,7 +106,7 @@ export async function handleAccountBindingRoutes(
         accountName: body.accountName,
         availableAccounts: (Array.isArray(body.availableAccounts) ? body.availableAccounts : []) as BrokerAccountRecordLike[],
         registry,
-        updatedBy: sessionId,
+        updatedBy: userLogin,
       });
       if (!valRes.ok) {
         const status =
@@ -116,7 +128,7 @@ export async function handleAccountBindingRoutes(
     }
 
     if (body.action === "migrate") {
-      const migRes = await migrateTenantAccountBinding(ctx.env, sessionId, {
+      const migRes = await migrateTenantAccountBinding(ctx.env, userLogin, {
         broker: body.broker,
         mode: body.mode,
         targetAccountType: body.accountType ?? body.targetAccountType,
@@ -150,7 +162,7 @@ export async function handleAccountBindingRoutes(
     }
 
     if (Array.isArray(body.availableAccounts)) {
-      const res = await validateAndUpsertAccountBinding(ctx.env, sessionId, {
+      const res = await validateAndUpsertAccountBinding(ctx.env, userLogin, {
         broker: body.broker,
         mode: body.mode,
         accountType: body.accountType,
@@ -173,7 +185,7 @@ export async function handleAccountBindingRoutes(
       return Response.json({ ok: true, binding: res.binding, tuple: res.tuple });
     }
 
-    const res = await upsertAccountBinding(ctx.env, sessionId, {
+    const res = await upsertAccountBinding(ctx.env, userLogin, {
       broker: body.broker,
       mode: body.mode,
       accountType: body.accountType,
@@ -193,7 +205,7 @@ export async function handleAccountBindingRoutes(
     const mode = String(body.mode ?? url.searchParams.get("mode") ?? "").trim().toLowerCase();
     const accountType = String(body.accountType ?? url.searchParams.get("accountType") ?? "stock").trim().toLowerCase();
     const scope = String(body.scope ?? url.searchParams.get("scope") ?? "tenant").trim().toLowerCase();
-    const registry = await getBrokerAssetAccountRegistry(ctx.env, sessionId);
+    const registry = await getBrokerAssetAccountRegistry(ctx.env, userLogin);
 
     if (!isAccountBindingBroker(broker, registry) || (mode !== "paper" && mode !== "live")) {
       return Response.json(
@@ -202,7 +214,7 @@ export async function handleAccountBindingRoutes(
       );
     }
 
-    const removed = await removeAccountBinding(ctx.env, sessionId, {
+    const removed = await removeAccountBinding(ctx.env, userLogin, {
       broker,
       mode,
       accountType,
