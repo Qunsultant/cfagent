@@ -81,6 +81,14 @@ export interface AlpacaOptionQuoteRow {
 
 const CONTRACT_PAGE_CAP = 5;
 const CONTRACT_LIMIT = 10000;
+/**
+ * Issue #6208: the multi-contract snapshots endpoint's `symbols`
+ * parameter takes at most 100 symbols (Alpaca docs). An expiry
+ * routinely has 100–400 contracts, so the fetch chunks to this size.
+ */
+const SNAPSHOT_SYMBOL_LIMIT = 100;
+/** Upstream error bodies are logged server-side, truncated so a large body cannot flood logs. */
+const UPSTREAM_ERROR_LOG_LIMIT = 500;
 
 /**
  * Issue #3158 — single paper/live resolver for the Alpaca adapter.
@@ -281,6 +289,13 @@ export async function fetchAlpacaOptionContracts(
  * includes it) greeks and implied volatility. Symbols Alpaca does not return
  * are simply absent from the map — callers must treat "missing" as "no live
  * quote for this contract", never as zero.
+ *
+ * Issue #6208: the request is chunked into ≤100-symbol calls
+ * (SNAPSHOT_SYMBOL_LIMIT) and the results merged — one unchunked call
+ * for a large expiry is rejected with HTTP 400. Each chunk takes its
+ * own rate-limiter token, as every fetch does. A failed chunk logs
+ * the upstream body server-side and still throws the short,
+ * broker-named message the caller sees (module header rule).
  */
 export async function fetchAlpacaOptionSnapshots(
   cfg: AlpacaOptionsConfig,
@@ -290,38 +305,45 @@ export async function fetchAlpacaOptionSnapshots(
   const out = new Map<string, AlpacaOptionQuoteRow>();
   if (symbols.length === 0) return out;
 
-  const query = new URLSearchParams();
-  query.set("symbols", symbols.join(","));
-  if (cfg.feed) query.set("feed", cfg.feed);
+  for (let i = 0; i < symbols.length; i += SNAPSHOT_SYMBOL_LIMIT) {
+    const chunk = symbols.slice(i, i + SNAPSHOT_SYMBOL_LIMIT);
+    const query = new URLSearchParams();
+    query.set("symbols", chunk.join(","));
+    if (cfg.feed) query.set("feed", cfg.feed);
 
-  const url = `${cfg.dataUrl.replace(/\/$/, "")}/v1beta1/options/snapshots/${encodeURIComponent(
-    underlying.toUpperCase(),
-  )}?${query.toString()}`;
-  // Issue #3515 S1: one Alpaca token per snapshot fetch, shared with the provider.
-  await cfg.rateLimiter?.acquire();
-  const res = await fetch(url, { headers: cfg.headers });
-  if (!res.ok) {
-    throw new Error(`Alpaca option snapshots unavailable [HTTP ${res.status}].`);
-  }
-  const payload = (await res.json().catch(() => ({}))) as { snapshots?: Record<string, any> };
-  for (const [symbol, snap] of Object.entries(payload.snapshots ?? {})) {
-    const quote = snap?.latestQuote ?? {};
-    const trade = snap?.latestTrade ?? {};
-    const greeks = snap?.greeks ?? {};
-    const row: AlpacaOptionQuoteRow = {
-      symbol,
-      bid: num(quote.bp),
-      ask: num(quote.ap),
-      last: num(trade.p),
-      volume: num(snap?.dailyBar?.v),
-      delta: num(greeks.delta),
-      gamma: num(greeks.gamma),
-      theta: num(greeks.theta),
-      vega: num(greeks.vega),
-      rho: num(greeks.rho),
-      impliedVolatility: num(snap?.impliedVolatility),
-    };
-    out.set(symbol, row);
+    const url = `${cfg.dataUrl.replace(/\/$/, "")}/v1beta1/options/snapshots/${encodeURIComponent(
+      underlying.toUpperCase(),
+    )}?${query.toString()}`;
+    // Issue #3515 S1: one Alpaca token per snapshot fetch, shared with the provider.
+    await cfg.rateLimiter?.acquire();
+    const res = await fetch(url, { headers: cfg.headers });
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      console.error(
+        `Alpaca option snapshots unavailable [HTTP ${res.status}] for ${underlying.toUpperCase()}: ${body.slice(0, UPSTREAM_ERROR_LOG_LIMIT)}`,
+      );
+      throw new Error(`Alpaca option snapshots unavailable [HTTP ${res.status}].`);
+    }
+    const payload = (await res.json().catch(() => ({}))) as { snapshots?: Record<string, any> };
+    for (const [symbol, snap] of Object.entries(payload.snapshots ?? {})) {
+      const quote = snap?.latestQuote ?? {};
+      const trade = snap?.latestTrade ?? {};
+      const greeks = snap?.greeks ?? {};
+      const row: AlpacaOptionQuoteRow = {
+        symbol,
+        bid: num(quote.bp),
+        ask: num(quote.ap),
+        last: num(trade.p),
+        volume: num(snap?.dailyBar?.v),
+        delta: num(greeks.delta),
+        gamma: num(greeks.gamma),
+        theta: num(greeks.theta),
+        vega: num(greeks.vega),
+        rho: num(greeks.rho),
+        impliedVolatility: num(snap?.impliedVolatility),
+      };
+      out.set(symbol, row);
+    }
   }
   return out;
 }
