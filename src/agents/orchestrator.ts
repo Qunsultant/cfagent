@@ -116,7 +116,7 @@ import {
   supersededDeclaredTaskAlarmIds,
 } from "../services/unifiedScheduleManagement";
 import { nlqSchedulingPort, nlqSocialBriefPort, nlqStockScreenPort, type NlqPortsContext } from "./orchestrator/nlqPorts";
-import { formatTraceparent, newTraceContext } from "../observability/observabilityPorts";
+import { formatTraceparent, newTraceContext, parseTraceparent } from "../observability/observabilityPorts";
 import { observeDoRouteDispatch } from "../observability/scheduledJobOutcomes";
 import { createAlertingPort } from "../observability/otelAlerting";
 import { OBS_ALERTING_STUCK_RUN } from "../observability/otelMessages";
@@ -129,6 +129,11 @@ import type { DoNamespaceLike } from "../data/durableKv";
 import { createKvMembershipStore } from "../security/iaaaMembershipStore";
 import { isLoginShaped } from "../security/serviceIdentity";
 import { sessionStore } from "../security/session";
+import {
+  resolveAttributionEnvelope,
+  resolvePlatformId,
+  type AttributionEnvelopeOverride,
+} from "../security/attributionEnvelope";
 import { submitAsyncJob, recoverQueuedAsyncJobs, recoverStaleRunningAsyncJobs, getAsyncJob, listAsyncJobs, executeAsyncJob, sweepStaleAsyncJobs, scheduleScreenerFollowups, retryAsyncJob, retryFailedChainJobs, type AsyncJobsContext } from "./orchestrator/asyncJobs";
 import { formatMissedScheduleAlertDetail, watchdogMissedSchedules, type ScheduleWatchdogContext, type ScheduleWatchdogSweepResult } from "./orchestrator/scheduleWatchdog";
 import { RECORDED_SCHEDULE_CALLBACKS } from "./orchestrator/scheduleCallbacks";
@@ -757,7 +762,9 @@ export class OrchestratorAgent extends PortThink {
       ensureTables: () => this.ensureTables(),
       sessionKey: () => this.sessionKey(),
       schedule: (when, callback, payload, options) => this.schedule(when, callback as keyof this, payload, options),
-      audit: (type, agent, payload) => this.audit(type, agent, payload),
+      // Issue #6100: forwards an explicit caller envelope (tenant /
+      // correlation the submission already resolved) to the boundary.
+      audit: (type, agent, payload, envelope) => this.audit(type, agent, payload, envelope),
       getOrm: () => this.getOrm(),
       routeRequest: (request) => this.routeRequest(request),
       nlqSchedulingPort: () => this.nlqSchedulingPort(),
@@ -2627,29 +2634,60 @@ export class OrchestratorAgent extends PortThink {
    * Single owner of audit-row inserts (issue #270): this.audit() and the
    * POST /audit/event route both funnel through here.
    * Issue #2178 (Q7 S1): via the chained events Repository, not raw SQL.
+   * Issue #6100: stamps the attribution envelope at this boundary.
+   * The trace id is the in-flight turn's traceparent trace id (null
+   * outside a turn — never fabricated); the principal is the turn's
+   * userLogin; tenant and correlation come only from an explicit
+   * caller override (submitAsyncJob) — never invented. The platform
+   * id is deployment config (PLATFORM_ID, default "cfagent").
    */
   private recordAudit(
     type: string,
     agent: string,
-    payload: Record<string, unknown>
+    payload: Record<string, unknown>,
+    envelope?: AttributionEnvelopeOverride,
   ): { id: string; type: string; agent: string; payload: Record<string, unknown>; created_at: string } {
     const orm = this.getOrm();
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
+    const traceparent = this.turnTraceparent();
+    const stamped = resolveAttributionEnvelope(
+      {
+        platformId: resolvePlatformId(this.env.PLATFORM_ID),
+        sessionId: this.sessionKey(),
+        action: type,
+        traceId: traceparent ? (parseTraceparent(traceparent)?.traceId ?? null) : null,
+        principalId: this.pendingTurn?.userLogin ?? null,
+      },
+      envelope,
+    );
     orm.events.create({
       id,
+      // Issue #6100: the session is the boundary's own key — always
+      // present, so it is stamped from sessionKey() directly rather
+      // than through the nullable envelope field.
       sessionId: this.sessionKey(),
       type,
       agent: agent as AuditEvent["agent"],
       payload,
       createdAt: now,
+      platformId: stamped.platformId,
+      tenantId: stamped.tenantId,
+      principalId: stamped.principalId,
+      correlationId: stamped.correlationId,
+      traceId: stamped.traceId,
     });
     return { id, type, agent, payload, created_at: now };
   }
 
-  private audit(type: string, agent: AgentName | "judge" | "nlq" | "orchestrator", payload: Record<string, unknown>) {
+  private audit(
+    type: string,
+    agent: AgentName | "judge" | "nlq" | "orchestrator",
+    payload: Record<string, unknown>,
+    envelope?: AttributionEnvelopeOverride,
+  ) {
     try {
-      this.recordAudit(type, agent, payload);
+      this.recordAudit(type, agent, payload, envelope);
     } catch {
       // Don't fail execution if audit insertion fails
     }

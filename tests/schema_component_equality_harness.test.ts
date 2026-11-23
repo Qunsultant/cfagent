@@ -100,6 +100,12 @@ describe("DDL parser — real shared-table DDL (#4282 P0)", () => {
       "created_at:TEXT:pk0",
       "previous_event_hash:TEXT:pk0",
       "event_hash:TEXT:pk0",
+      // Issue #6100: the five attribution-envelope columns.
+      "platform_id:TEXT:pk0",
+      "tenant_id:TEXT:pk0",
+      "principal_id:TEXT:pk0",
+      "correlation_id:TEXT:pk0",
+      "trace_id:TEXT:pk0",
     ]);
     expect(columns("mas_memory")).toEqual([
       "key:TEXT:pk1",

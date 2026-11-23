@@ -11,6 +11,12 @@ export interface Env {
   // absence means the tick keeps legacy behavior (no cross-DO
   // halt read). Never a session or credential store.
   AGENT_DB?: D1Database;
+  // Issue #6100: the deployment platform id stamped on every
+  // attribution envelope (PLATFORM_ID env, default "cfagent").
+  // Optional so code is safe before it is set; absence means
+  // the default applies. This is the platform's own identity —
+  // never a broker id, never login-resolved.
+  PLATFORM_ID?: string;
   // Issue #1743: Analytics Engine dataset for the
   // observability stream. Optional so code is safe before the
   // dataset is provisioned; absence means the sink degrades
@@ -1199,6 +1205,17 @@ export interface AuditEvent {
   agent: AgentName | "judge" | "nlq" | "orchestrator";
   payload: Record<string, unknown>;
   createdAt: string;
+  /**
+   * Issue #6100: attribution envelope, first-class columns.
+   * Null when the stamping boundary cannot resolve the dimension
+   * (never invented); action is the event `type`, session is
+   * `sessionId` above — neither gets a second column.
+   */
+  platformId?: string | null;
+  tenantId?: string | null;
+  principalId?: string | null;
+  correlationId?: string | null;
+  traceId?: string | null;
   /** Issue #2178 (Q7 S1): hash-chain link; absent/null on pre-chain rows. */
   previousEventHash?: string | null;
   /** Issue #2178 (Q7 S1): own hash; absent on pre-chain rows. */

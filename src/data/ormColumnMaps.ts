@@ -123,6 +123,12 @@ export const EVENT_COLUMN_MAP = {
   createdAt: "created_at",
   previousEventHash: "previous_event_hash",
   eventHash: "event_hash",
+  // Issue #6100: attribution envelope, first-class columns.
+  platformId: "platform_id",
+  tenantId: "tenant_id",
+  principalId: "principal_id",
+  correlationId: "correlation_id",
+  traceId: "trace_id",
 } as const;
 
 /**

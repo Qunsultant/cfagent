@@ -13,6 +13,7 @@
 export {
   SHARED_MAS_TABLES,
   SHARED_TABLE_DDL,
+  ensureAttributionEnvelopeColumns,
   ensureAuditChainColumns,
   ensurePromotionsIndex,
   ensureSharedTable,

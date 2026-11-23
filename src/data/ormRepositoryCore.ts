@@ -41,7 +41,7 @@ import type { AuditEvent } from "../types";
 import {
   linkAuditRow,
 } from "../security/auditChain";
-import { ensureAuditChainColumns } from "./ormSchema";
+import { ensureAttributionEnvelopeColumns, ensureAuditChainColumns } from "./ormSchema";
 import type {
   RepositoryPort,
   RepositoryQueryOptions,
@@ -460,12 +460,17 @@ export class Repository<T extends Record<string, any>>
 export class ChainedAuditRepository extends Repository<AuditEvent> {
   override create(record: AuditEvent): AuditEvent {
     ensureAuditChainColumns(this.sql);
+    // Issue #6100: envelope columns on pre-existing tables.
+    ensureAttributionEnvelopeColumns(this.sql);
     const tail = Array.from(
       this.sql.exec(`SELECT event_hash FROM mas_events ORDER BY rowid DESC LIMIT 1`),
     ) as Array<{ event_hash?: string | null }>;
     const previousEventHash = tail[0]?.event_hash ?? null;
     const payloadText =
       typeof record.payload === "string" ? record.payload : JSON.stringify(record.payload ?? {});
+    // G-5 frozen: the hash input is exactly these six fields —
+    // the envelope columns are NOT hashed, so adding them changes
+    // neither the hash nor verification.
     const chained = linkAuditRow(
       {
         id: record.id,
@@ -482,6 +487,13 @@ export class ChainedAuditRepository extends Repository<AuditEvent> {
       payload: payloadText as unknown as Record<string, unknown>,
       previousEventHash: chained.previousEventHash,
       eventHash: chained.eventHash,
+      // Issue #6100: envelope dimensions bind explicitly — null when
+      // unresolvable at the boundary, never undefined, never invented.
+      platformId: record.platformId ?? null,
+      tenantId: record.tenantId ?? null,
+      principalId: record.principalId ?? null,
+      correlationId: record.correlationId ?? null,
+      traceId: record.traceId ?? null,
     });
   }
 }

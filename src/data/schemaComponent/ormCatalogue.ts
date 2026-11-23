@@ -75,7 +75,12 @@ export const ORM_CATALOGUE_ENTRIES: CatalogueEntry[] = [
         payload TEXT NOT NULL,
         created_at TEXT NOT NULL,
         previous_event_hash TEXT,
-        event_hash TEXT
+        event_hash TEXT,
+        platform_id TEXT,
+        tenant_id TEXT,
+        principal_id TEXT,
+        correlation_id TEXT,
+        trace_id TEXT
       )
     `,
     kind: "schema",
@@ -229,6 +234,51 @@ export const ORM_CATALOGUE_ENTRIES: CatalogueEntry[] = [
     plane: "orm",
     table: "mas_events",
     statement: `ALTER TABLE mas_events ADD COLUMN event_hash TEXT`,
+    kind: "schema",
+    form: "literal",
+  },
+  // Issue #6100: attribution envelope columns. Nullable by design —
+  // legacy rows without a resolvable dimension stay explicitly NULL,
+  // never invented (#3182 precedent). Fresh tables get the columns
+  // from the CREATE TABLE above in the same (last) position, so
+  // fresh and migrated tables agree.
+  {
+    code: "schema.orm.mas_events.alter_table_add_column_platform_id",
+    plane: "orm",
+    table: "mas_events",
+    statement: `ALTER TABLE mas_events ADD COLUMN platform_id TEXT`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    code: "schema.orm.mas_events.alter_table_add_column_tenant_id",
+    plane: "orm",
+    table: "mas_events",
+    statement: `ALTER TABLE mas_events ADD COLUMN tenant_id TEXT`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    code: "schema.orm.mas_events.alter_table_add_column_principal_id",
+    plane: "orm",
+    table: "mas_events",
+    statement: `ALTER TABLE mas_events ADD COLUMN principal_id TEXT`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    code: "schema.orm.mas_events.alter_table_add_column_correlation_id",
+    plane: "orm",
+    table: "mas_events",
+    statement: `ALTER TABLE mas_events ADD COLUMN correlation_id TEXT`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    code: "schema.orm.mas_events.alter_table_add_column_trace_id",
+    plane: "orm",
+    table: "mas_events",
+    statement: `ALTER TABLE mas_events ADD COLUMN trace_id TEXT`,
     kind: "schema",
     form: "literal",
   },
@@ -400,6 +450,46 @@ export const ORM_CATALOGUE_ENTRIES: CatalogueEntry[] = [
     table: "mas_events",
     index: "idx_mas_events_session_type",
     statement: `CREATE INDEX IF NOT EXISTS idx_mas_events_session_type ON mas_events(session_id, type, created_at DESC)`,
+    kind: "schema",
+    form: "literal",
+  },
+  // Issue #6100: the four read questions as queries — one index per
+  // envelope dimension (per-tenant, per-user, per-action; per-session
+  // already has idx_mas_events_session_type above). Correlation gets
+  // an index so one operation's rows join across tenants and users.
+  {
+    code: "schema.index.mas_events.create_index_idx_mas_events_tenant_created",
+    plane: "index",
+    table: "mas_events",
+    index: "idx_mas_events_tenant_created",
+    statement: `CREATE INDEX IF NOT EXISTS idx_mas_events_tenant_created ON mas_events(tenant_id, created_at DESC)`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    code: "schema.index.mas_events.create_index_idx_mas_events_principal_created",
+    plane: "index",
+    table: "mas_events",
+    index: "idx_mas_events_principal_created",
+    statement: `CREATE INDEX IF NOT EXISTS idx_mas_events_principal_created ON mas_events(principal_id, created_at DESC)`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    code: "schema.index.mas_events.create_index_idx_mas_events_type_created",
+    plane: "index",
+    table: "mas_events",
+    index: "idx_mas_events_type_created",
+    statement: `CREATE INDEX IF NOT EXISTS idx_mas_events_type_created ON mas_events(type, created_at DESC)`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    code: "schema.index.mas_events.create_index_idx_mas_events_correlation",
+    plane: "index",
+    table: "mas_events",
+    index: "idx_mas_events_correlation",
+    statement: `CREATE INDEX IF NOT EXISTS idx_mas_events_correlation ON mas_events(correlation_id)`,
     kind: "schema",
     form: "literal",
   },

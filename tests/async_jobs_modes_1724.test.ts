@@ -471,7 +471,16 @@ describe("J01 system 1: mas_async_jobs contracts", () => {
     expect(out.jobId).toMatch(/^job:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
     expect(out.status).toBe("queued");
     expect(out.statusUrl).toBe(`/api/jobs/${out.jobId}`);
-    expect(audit).toHaveBeenCalledWith("async_job.queued", "orchestrator", expect.objectContaining({ jobId: out.jobId }));
+    // Issue #6100: submitAsyncJob stamps the resolved envelope on the
+    // queued audit (4th arg) — tenant null here (session-1 resolves no
+    // tenant, hence the tenant_unresolved event first), principal the
+    // submitting login, correlation the job id.
+    expect(audit).toHaveBeenCalledWith(
+      "async_job.queued",
+      "orchestrator",
+      expect.objectContaining({ jobId: out.jobId }),
+      expect.objectContaining({ tenantId: null, principalId: "session-1", correlationId: out.jobId }),
+    );
   });
   it("submit schedules executeAsyncJob idempotently (queue-consumption idempotency key)", async () => {
     const sql = new FakeAsyncSql();
