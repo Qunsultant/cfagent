@@ -120,6 +120,7 @@ import { formatTraceparent, newTraceContext } from "../observability/observabili
 import { observeDoRouteDispatch } from "../observability/scheduledJobOutcomes";
 import { createAlertingPort } from "../observability/otelAlerting";
 import { OBS_ALERTING_STUCK_RUN } from "../observability/otelMessages";
+import { getOtelJobPipelineObservers } from "../observability/otelJobPipelineObservers";
 import { recordTraceHopBestEffort } from "../data/createMeshTracePorts";
 import { createSocialBriefStoreFromNamespace } from "./social/briefStore";
 import { fetchSlackPost } from "./social/delivery";
@@ -779,6 +780,13 @@ export class OrchestratorAgent extends PortThink {
       }),
       deliverySuppressor: createDeliverySuppressor(createSqlDeliverySuppressionStore(() => this.ensureTables())), // Issue #2913 (G6): durable suppression — one claims table shared by every context built here (lazy store).
       serviceMembershipStore: createKvMembershipStore(sessionStore(this.env)),
+      // Issue #6217: the OTel run-settled observers for the
+      // orphan reap (the #6179 shared helper, cached per env
+      // object) — a reaped feed dispatch emits `job.run.settled`
+      // through this chain. The chain gates on the j1j7 domain
+      // switch, so when the domain is OFF the reap emits
+      // nothing and costs nothing.
+      otel: getOtelJobPipelineObservers(this.env),
       notifyStuckRun: async (info) => {
         // Issue #5083 (S4) — the stuck-running alert routes
         // through the one alerting port (Slack + email). Text

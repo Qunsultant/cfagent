@@ -80,6 +80,12 @@ import { postSlackText } from "../resourceGoals";
 import { fetchSlackPost, type SlackDeliveryEnv } from "../social/delivery";
 import { createAsyncJobPorts, type AsyncJobPorts } from "../../data/createAsyncJobPorts";
 import {
+  normalizeJobRunTrigger,
+  type JobRunKind,
+  type JobRunTrigger,
+} from "../../data/jobRunRecordPorts";
+import type { OtelJobPipelineObservers } from "../../observability/otelJobPipelineObservers";
+import {
   createDeliverySuppressor,
   deliveryDestinationFor,
   scopedDeliveryClaimRunId,
@@ -183,6 +189,23 @@ export interface AsyncJobsContext {
    *  never invisible. Invoked fire-and-forget off the read path;
    *  the implementation audits its own delivery outcome. */
   notifyStuckRun?: (info: StuckRunAlertInfo) => Promise<void>;
+  /**
+   * Issue #6217 — the OTel run-settled observers for this host
+   * (the shared helper's result, built from the host env via
+   * getOtelJobPipelineObservers — the #6179 port shape, as the
+   * options engine carries it). The orphan reap fires the
+   * observer for a reaped feed dispatch whose pipeline run id
+   * resolved, so the reaped run emits `job.run.settled`
+   * exactly like a pipeline-settled failure (the same
+   * JobRunSettledInfo shape, state "failed", the reap message
+   * as the error). Absent, the reap runs exactly as before: no
+   * settle event. The observer chain gates on the j1j7 domain
+   * switch, so the emission is configurable through
+   * config/otel.json (invalid fails closed to OFF) — no second
+   * switch for the one event. Best-effort: an observer failure
+   * never fails the reap.
+   */
+  otel?: OtelJobPipelineObservers;
   /** Issue #1123: artifact lookups for followup.report jobs — the
    *  ScreenerAgent's stored PDFs, by kind and run key. */
   followupReportPort: () => {
@@ -964,6 +987,99 @@ async function resolveFeedDispatchPipelineRunId(
   }
 }
 
+/** Issue #6217 — map the row's provenance trigger onto the
+ *  run trigger the settle observer carries. "manual" and
+ *  "scheduled" pass through; "autonomous" is the autonomous
+ *  loop, which the run-ledger vocabulary calls "autopilot"
+ *  (jobRunRecordPorts.ts: "autopilot = the autonomous loop
+ *  dispatched it"). Anything else (absent, "webhook", "agent")
+ *  falls through the normalizer's fail-closed default
+ *  ("manual") — never invented. */
+export function orphanRunSettledTrigger(
+  graphTrigger: AsyncJobTrigger | null | undefined,
+): JobRunTrigger {
+  if (graphTrigger === "autonomous") return "autopilot";
+  return normalizeJobRunTrigger(graphTrigger);
+}
+
+/** Issue #6217 — derive the settled run's kind from the
+ *  dispatch the row carried. A feed-jobs `resume` dispatch is
+ *  a resumed run, a `retry` dispatch (or any row that is
+ *  itself a re-arm — it carries retryOf / recoveryRearmOf) is
+ *  a re-run; anything else is an original. The origin run id
+ *  is never derived here: retryOf names an async job, not a
+ *  pipeline run, so the notify call stamps originRunId null
+ *  rather than laundering the job id into a run id. */
+export function orphanRunSettledKind(
+  capability: string,
+  payload: Record<string, unknown>,
+): JobRunKind {
+  if (capability === "http.request" && typeof payload.pathAndQuery === "string") {
+    const action = /^\/data-providers\/[^/]+\/feed-jobs\/[^/]+\/(run|retry|resume)$/.exec(
+      payload.pathAndQuery,
+    )?.[1];
+    if (action === "resume") return "resume";
+    if (action === "retry") return "re-run";
+  }
+  if (
+    (typeof payload.retryOf === "string" && payload.retryOf !== "") ||
+    (typeof payload.recoveryRearmOf === "string" && payload.recoveryRearmOf !== "")
+  ) {
+    return "re-run";
+  }
+  return "original";
+}
+
+/** Issue #6217 — fire the context's run-settled observer for
+ *  one reaped orphan feed dispatch, with the SAME
+ *  JobRunSettledInfo shape `recordTerminal` emits for a
+ *  pipeline-settled failure (jobPipelineEngine.ts): the feed
+ *  job id, the pipeline run id, the row's trigger, state
+ *  "failed", the reap message as the error, the derived kind,
+ *  originRunId null (the reap has no run-origin link). The
+ *  OTel chain (logging + metrics + traces) then emits the one
+ *  `job.run.settled` event, gated on the j1j7 domain switch —
+ *  a reaped orphan is observable in Grafana exactly like a
+ *  pipeline-settled failure.
+ *
+ *  No-op when the port is absent (the reap runs exactly as
+ *  before) or when either id is missing — a run id that never
+ *  resolved is never invented, and a row with no pipeline run
+ *  has no run to settle (the engine's own guard: no run, no
+ *  settle event). Best-effort: an observer failure is logged
+ *  and never fails the reap (the engine's recordTerminal
+ *  contract, mirrored here). */
+async function notifyOrphanRunSettled(
+  ctx: AsyncJobsContext,
+  input: {
+    feedJobId: string | null;
+    pipelineRunId: string | null;
+    trigger: JobRunTrigger;
+    kind: JobRunKind;
+    error: string;
+  },
+): Promise<void> {
+  const observer = ctx.otel?.runSettledObserver;
+  if (!observer || !input.feedJobId || !input.pipelineRunId) return;
+  try {
+    await observer({
+      jobId: input.feedJobId,
+      runId: input.pipelineRunId,
+      trigger: input.trigger,
+      state: "failed",
+      error: input.error,
+      kind: input.kind,
+      originRunId: null,
+    });
+  } catch (error) {
+    structuredLog.warn("asyncJobs.orphan_run_settled_notify_failed", {
+      jobId: input.feedJobId,
+      runId: input.pipelineRunId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
 /** Issue #4002: how many re-arms have already been spawned from
  *  this row — counted over the session's rows, mirroring
  *  retryAsyncJob's duplicate-retry scan (a sibling in queued /
@@ -1154,6 +1270,18 @@ export async function recoverStaleRunningAsyncJobs(
           ...(rearmedJobId ? { rearmedAs: rearmedJobId } : {}),
           ...(feedJobId ? { feedJobId } : {}),
           ...(pipelineRunId ? { pipelineRunId } : {}),
+        });
+        // Issue #6217: the reaped orphan's run settles here —
+        // fire the run-settled observer (same shape as a
+        // pipeline-settled failure) so the orphan emits
+        // `job.run.settled`. Best-effort; a failure here never
+        // fails the reap.
+        await notifyOrphanRunSettled(ctx, {
+          feedJobId,
+          pipelineRunId,
+          trigger: orphanRunSettledTrigger(jobGraphFields(row).trigger),
+          kind: orphanRunSettledKind(String(row.capability), payload ?? {}),
+          error: message,
         });
         failed++;
         if (rearmedJobId) {
@@ -1656,6 +1784,18 @@ async function settleStaleFeedDispatch(
     ...(pipelineRunId ? { pipelineRunId } : {}),
     settledBy: "stale_sweep",
   });
+  // Issue #6217: the reaped orphan's run settles here — fire
+  // the run-settled observer (same shape as a
+  // pipeline-settled failure) so the orphan emits
+  // `job.run.settled`. Best-effort; a failure here never
+  // fails the reap.
+  await notifyOrphanRunSettled(ctx, {
+    feedJobId,
+    pipelineRunId,
+    trigger: orphanRunSettledTrigger(jobGraphFields(row).trigger),
+    kind: orphanRunSettledKind(String(row.capability), payload),
+    error: message,
+  });
   if (rearmedJobId) {
     ctx.audit("async_job.retried", "orchestrator", {
       jobId,
@@ -1696,6 +1836,11 @@ export async function sweepStaleAsyncJobs(
           reaped++;
           continue;
         }
+        // Issue #6217: no settle event here — a non-feed row
+        // carries no pipeline run id, so there is no run to
+        // settle (the engine's own guard: no run, no settle
+        // event). Only the feed-dispatch settle above fires the
+        // observer.
         const completedAt = new Date(nowMs).toISOString();
         const written = ports(ctx).queue.reapStaleRunning(
           jobId,
