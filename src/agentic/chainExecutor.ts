@@ -376,7 +376,7 @@ export function createChainLegExecutor(
       // Completeness gate, enforced at execution too (not only at
       // planning): a partial feed refuses assembly, naming every
       // blocker — the same gate `executeShardJob` enforces.
-      const gate = assessFeedGate(chainRows());
+      const gate = assessFeedGate(chainRows(), shardChain);
       if (!gate.ready) {
         const names = gate.blockedBy
           .map((b) => `${b.shardKey} (${b.reason})`)
