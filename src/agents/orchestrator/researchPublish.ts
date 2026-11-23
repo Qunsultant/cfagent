@@ -313,20 +313,61 @@ export async function runResearchAndPublish(ctx: ResearchPublishContext,
   try {
     // Issue #1738: the dispatch is the SDK's runAgentTool on an
     // Agents SDK actor — the "think" label died with the Think base
-    // class. Issue #6250: it is the ONLY dispatch path — the
-    // direct-pipeline fallback is removed, so OODA runs on j-stack
-    // and nowhere else.
+    // class. Issue #6250: the agent turn is the ONLY dispatch path
+    // when no feed is present — the direct-pipeline fallback is
+    // removed, so a failed turn never degrades to a non-engine
+    // execution. Issue #5109 Fix 1: when the feed stage already ran
+    // on J-stack, the analyze leg executes the pipeline as engine
+    // step work on the tenant agent (the feed branch below) — the
+    // leg's primary execution, consuming the engine's persisted
+    // stage outputs, not a fallback.
     const executionPath: ResearchExecutionPath = "agent";
     // Issue #1387: a THROWN agent dispatch (e.g. the sub-agent bootstrap
     // error when the root namespace is missing) converts to an
     // error-status child — the #6250 incomplete guard below fails
     // the run with a named error instead of degrading it to the
-    // direct pipeline, which no longer exists.
+    // direct pipeline, which no longer exists as a fallback after a
+    // failed turn.
+    // Issue #5109 Fix 1 — the analyze leg executes the pipeline as engine
+    // step work. When the feed stage already ran on J-stack, the leg runs
+    // on the tenant agent with the persisted feed/enrich (no second fetch,
+    // no second agent turn) and the leg's report is read directly from the
+    // run result — never re-read from getLatest(), which this branch
+    // cannot satisfy. This is the analyze leg's PRIMARY execution, not a
+    // fallback: #6250's rule stands — a failed or thrown agent turn never
+    // degrades to the direct pipeline (see the else branch below, and the
+    // #1387 / fallback-observability pins, which scope the no-direct-call
+    // rule to the dispatch section).
     let child: { status: string; error?: string; summary?: string; output?: unknown };
+    let legReport: ResearchReport | null = null;
     if (effectiveSelection?.feed) {
-      // Issue #6063 — the feed stage already ran on J-stack; the direct
-      // pipeline consumes its persisted output instead of a second fetch.
-      child = { status: "feed_stage" };
+      try {
+        const leg = await agent.runResearch({
+          trigger,
+          userLogin: login,
+          ...(effectiveSelection?.runId ? { runId: effectiveSelection.runId } : {}),
+          ...(effectiveSelection?.brokerId ? { brokerId: effectiveSelection.brokerId } : {}),
+          ...(effectiveSelection?.mode ? { mode: effectiveSelection.mode } : {}),
+          feed: effectiveSelection.feed,
+          ...(effectiveSelection.enrich ? { enrich: effectiveSelection.enrich } : {}),
+        });
+        if (leg.report) {
+          // The leg produced a report: the parent judges it exactly as it
+          // judges a completed turn's report (fresh run id, matching
+          // trigger/login — the guard below). A dataRefusal report is a
+          // report too: it flows through here exactly as it would from a
+          // completed turn, and the engine records the coded failure.
+          legReport = leg.report;
+          child = { status: "completed" };
+        } else {
+          child = { status: "error", error: leg.error ?? "research_pipeline_failed" };
+        }
+      } catch (err) {
+        child = {
+          status: "error",
+          error: err instanceof Error ? err.message : String(err),
+        };
+      }
     } else {
       try {
         child = await ctx.runAgentTool(ResearchAgent, {
@@ -345,12 +386,16 @@ export async function runResearchAndPublish(ctx: ResearchPublishContext,
         };
       }
     }
-    let report = await agent.getLatest();
+    // Issue #5109 Fix 1 — the leg's report wins: the feed branch reads the
+    // report the leg produced, never re-reads getLatest().
+    let report = legReport ?? (await agent.getLatest());
     if (child.status !== "completed" || !report || report.runId === previousRunId || report.trigger !== trigger || report.userLogin !== login) {
-      // Issue #6250 — no direct-pipeline fallback: the agent turn is
-      // the ONE dispatch path (OODA runs on j-stack and nowhere
-      // else). An incomplete turn fails the run with a named error
-      // instead of silently degrading to a non-engine execution.
+      // Issue #6250 — no direct-pipeline fallback after a failed turn:
+      // the agent turn is the ONE dispatch path when no feed is present
+      // (OODA runs on j-stack and nowhere else). An incomplete turn
+      // fails the run with a named error instead of silently degrading
+      // to a non-engine execution. (The feed branch above is the
+      // analyze leg's primary execution, not a fallback — #5109 Fix 1.)
       // Issue #543: the failure must not silently mask which
       // execution path ran — emit a structured warning carrying the
       // identifiers an operator needs to correlate it in Workers Logs.
