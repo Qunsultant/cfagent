@@ -484,26 +484,42 @@ export function buildResearchJobDefinition(
     const existing = (node.executionMode ?? {}) as Record<string, unknown>;
     return { ...node, executionMode: { ...existing, ...override } };
   };
+  // Issue #6355 — the spec-built step params (userLogin, trigger, runId,
+  // sourceId, dataset) ride the step: buildJobConfigFromSpec merged them
+  // into every step via withParams, and replacing them with { runId }
+  // made each handler take its not_configured early return. Analyze
+  // already preserves ...first.params; the four stages below follow the
+  // same precedent.
+  const firstStepParams = (node: Record<string, unknown>): Record<string, unknown> => {
+    const steps = Array.isArray(node.steps) ? (node.steps as Array<Record<string, unknown>>) : [];
+    return (steps[0]?.params ?? {}) as Record<string, unknown>;
+  };
   const children = (rawRoot.children ?? []).map((child) => {
     if (child.kind === "feed") {
       return withStageMode({
         ...child,
         inputs: { sources: [sourceId], datasets: [dataset] },
-        steps: [{ step: RESEARCH_FEED_STEP, params: { runId } }],
+        steps: [{ step: RESEARCH_FEED_STEP, params: { ...firstStepParams(child), runId } }],
       });
     }
     if (child.kind === "enrich") {
       return withStageMode({
         ...child,
         inputs: { sources: [sourceId], datasets: [dataset] },
-        steps: [{ step: RESEARCH_ENRICH_STEP, params: { runId } }],
+        steps: [{ step: RESEARCH_ENRICH_STEP, params: { ...firstStepParams(child), runId } }],
       });
     }
     if (child.kind === "generate") {
-      return withStageMode({ ...child, steps: [{ step: RESEARCH_GENERATE_STEP, params: { runId } }] });
+      return withStageMode({
+        ...child,
+        steps: [{ step: RESEARCH_GENERATE_STEP, params: { ...firstStepParams(child), runId } }],
+      });
     }
     if (child.kind === "deliver") {
-      return withStageMode({ ...child, steps: [{ step: RESEARCH_DELIVER_STEP, params: { runId } }] });
+      return withStageMode({
+        ...child,
+        steps: [{ step: RESEARCH_DELIVER_STEP, params: { ...firstStepParams(child), runId } }],
+      });
     }
     if (child.kind === "analyze") {
       // Issue #5912 — the venue/mode ride this stage's params: it is the
