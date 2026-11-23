@@ -33,7 +33,7 @@ const HUB_FILE = "src/client/TradeHub.tsx";
 const CHAT_FILE = "src/client/Chat.tsx";
 
 /** Routes whose panel file renders <PageTemplate> today. Wave 1 extends. */
-const CONFORMING_TEMPLATE_ROUTES = ["risk-analysis", "order", "options", "autopilot", "product-hub", "audit-vault", "workflow-catalog", "nav-settings", "options-screener"];
+const CONFORMING_TEMPLATE_ROUTES = ["risk-analysis", "order", "options", "autopilot", "product-hub", "audit-vault", "workflow-catalog", "nav-settings", "options-screener", "security-hub"];
 
 type TemplateState =
   | "template"
