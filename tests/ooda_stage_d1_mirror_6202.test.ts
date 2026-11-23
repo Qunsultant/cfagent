@@ -4,20 +4,25 @@
  *
  * Pins:
  *  - 6202-P01 the D1 store implements the same port: `record` upserts on
- *    (run_id, stage_id), `listByRun` returns the identical record shape;
- *  - 6202-P02 both DDL statements come from the catalogue by code (no
- *    literals in the adapter);
+ *    (run_id, stage_id) through migration 0083's table, and `listByRun`
+ *    returns the identical record shape;
+ *  - 6202-P02 the migration is the table's single declaration: it creates
+ *    `job_stage_events` with the DO column set plus `tenant_id`, and the
+ *    unique `(run_id, stage_id)` index the upsert targets;
  *  - 6202-P03 the engine mirrors every DO row best-effort — a mirror failure
  *    is logged, never fatal to the run;
  *  - 6202-P04 a read served from D1 alone answers the same stage shape when
  *    the DO has nothing for the run.
  */
-import { describe, expect, it, vi } from "vitest";
-import { createD1JobStageEventStore } from "../src/data/d1JobStageEventAdapter";
+import { describe, expect, it } from "vitest";
+import {
+  createD1JobStageEventStore,
+  ensureJobStageEventsSchema,
+  createD1JobStageEventDb,
+} from "../src/data/d1JobStageEventAdapter";
 import { createInMemoryJobPipelineStores } from "../src/data/inMemoryJobPipelineAdapter";
 import { InMemoryJobRunRecordStore } from "../src/data/inMemoryJobRunRecordAdapter";
 import { createInMemoryJobStageEventStore } from "../src/data/inMemoryJobStageEventAdapter";
-import { d1StatementSql } from "../src/data/schemaComponent/d1Catalogue";
 import {
   JobPipelineControl,
   jobRunRecorderFromStore,
@@ -25,6 +30,7 @@ import {
 import { JobStepRegistry } from "../src/services/jobPipelineSteps";
 import { readResearchStages } from "../src/workflows/researchScreenEngine";
 import type { JobExecutionMode } from "../src/data/jobPipelinePorts";
+import { MockD1Database } from "./mock-d1";
 
 const MODE: JobExecutionMode = {
   concurrency: "sequential",
@@ -33,143 +39,106 @@ const MODE: JobExecutionMode = {
   shape: "monolith",
 };
 
-interface FakeD1 {
-  prepare(statement: string): {
-    bind(...args: unknown[]): { run(): Promise<unknown>; all<T>(): Promise<{ results: T[] }> };
-    run(): Promise<unknown>;
-    all<T>(): Promise<{ results: T[] }>;
+function row(overrides: Record<string, unknown> = {}) {
+  return {
+    eventKey: "r-1:job:0:terminal",
+    claimKey: "r-1::job:0",
+    runId: "r-1",
+    jobId: "research:r-1",
+    stageId: "feed",
+    unitId: null,
+    action: "terminal",
+    at: "2026-11-22T00:00:05.000Z",
+    startedAt: "2026-11-22T00:00:00.000Z",
+    endedAt: "2026-11-22T00:00:05.000Z",
+    detail: null,
+    stageStatus: "completed",
+    durationMs: 5000,
+    unitCount: 1,
+    failedUnitCount: 0,
+    resultRef: "research/r-1/feed",
+    definitionVersion: 1,
+    ...overrides,
   };
 }
 
-/** The smallest D1 double: records statements and optional rows. */
-function fakeD1(rows: Array<Record<string, unknown>> = []): { d1: FakeD1; statements: string[] } {
-  const statements: string[] = [];
-  const d1: FakeD1 = {
-    prepare(statement: string) {
-      statements.push(statement);
-      const answer = async () => ({ results: rows });
-      const bound = {
-        run: async () => ({ meta: { changes: 1 } }),
-        all: answer,
-      };
-      return {
-        ...bound,
-        bind: (...args: unknown[]) => {
-          // Keep the bound values visible for the assertion that the write
-          // carries the row's own fields, never a placeholder.
-          (d1 as unknown as { lastBind?: unknown[] }).lastBind = args;
-          return bound;
-        },
-      };
-    },
-  };
-  return { d1, statements };
-}
+describe("6202-P01 the D1 store implements the same port", () => {
+  it("round-trips a row and upserts rather than duplicating", async () => {
+    const d1 = new MockD1Database();
+    const store = createD1JobStageEventStore(d1 as never);
+    expect(await store.record(row())).toBe(true);
+    // The same (run_id, stage_id) again is an update, not a second row.
+    expect(await store.record(row({ stageStatus: "failed", failedUnitCount: 1 }))).toBe(true);
 
-describe("6202-P01/P02 the D1 store implements the same port", () => {
-  it("upserts on (run_id, stage_id) with the row's own fields", async () => {
-    const { d1, statements } = fakeD1();
-    const store = createD1JobStageEventStore(d1 as unknown as D1Database);
-    await store.record({
-      eventKey: "r-1:job:0:terminal",
-      claimKey: "r-1::job:0",
-      runId: "r-1",
-      jobId: "research:r-1",
-      stageId: "feed",
-      unitId: null,
-      action: "terminal",
-      at: "2026-11-22T00:00:05.000Z",
-      startedAt: "2026-11-22T00:00:00.000Z",
-      endedAt: "2026-11-22T00:00:05.000Z",
-      detail: null,
-      stageStatus: "completed",
-      durationMs: 5000,
-      unitCount: 1,
-      failedUnitCount: 0,
-      resultRef: "research/r-1/feed",
-      definitionVersion: 1,
-    });
-    expect(statements[0]).toBe(d1StatementSql("schema.d1.job_stage_events.create_table"));
-    expect(statements[1]).toBe(
-      d1StatementSql("schema.d1.job_stage_events.create_index_job_stage_events_run_stage_idx"),
-    );
-    const insert = statements[2];
-    expect(insert).toContain("ON CONFLICT(run_id, stage_id) DO UPDATE");
-    const bind = (d1 as unknown as { lastBind: unknown[] }).lastBind;
-    expect(bind).toEqual([
-      "r-1:job:0:terminal",
-      "r-1::job:0",
-      "r-1",
-      "research:r-1",
-      "feed",
-      null,
-      "terminal",
-      "2026-11-22T00:00:05.000Z",
-      "2026-11-22T00:00:00.000Z",
-      "2026-11-22T00:00:05.000Z",
-      null,
-      "completed",
-      5000,
-      1,
-      0,
-      "research/r-1/feed",
-      1,
-      null,
-    ]);
-  });
-
-  it("reads the same record shape back", async () => {
-    const { d1 } = fakeD1([
-      {
-        event_key: "r-1:job:0:terminal",
-        claim_key: "r-1::job:0",
-        run_id: "r-1",
-        job_id: "research:r-1",
-        stage_id: "feed",
-        unit_id: null,
-        action: "terminal",
-        at: "2026-11-22T00:00:05.000Z",
-        started_at: "2026-11-22T00:00:00.000Z",
-        ended_at: "2026-11-22T00:00:05.000Z",
-        detail: "boom",
-        stage_status: "failed",
-        duration_ms: 5000,
-        unit_count: 2,
-        failed_unit_count: 1,
-        result_ref: null,
-        definition_version: 3,
-      },
-    ]);
-    const rows = await createD1JobStageEventStore(d1 as unknown as D1Database).listByRun("r-1");
+    const rows = await store.listByRun("r-1");
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
       runId: "r-1",
+      jobId: "research:r-1",
       stageId: "feed",
       action: "terminal",
       stageStatus: "failed",
       durationMs: 5000,
-      unitCount: 2,
+      unitCount: 1,
       failedUnitCount: 1,
-      resultRef: null,
-      definitionVersion: 3,
-      detail: "boom",
+      resultRef: "research/r-1/feed",
+      definitionVersion: 1,
     });
+    // A different run is not returned.
+    expect(await store.listByRun("r-other")).toEqual([]);
+  });
+});
+
+describe("6202-P02 the migration is the table's single declaration", () => {
+  it("creates the DO column set plus tenant_id, and the unique stage index", async () => {
+    const d1 = new MockD1Database();
+    const db = createD1JobStageEventDb(d1 as never);
+    await ensureJobStageEventsSchema(db);
+    // A second ensure is a no-op (the migration marker decides).
+    await ensureJobStageEventsSchema(db);
+
+    const columns = d1.sqlite
+      .prepare("PRAGMA table_info(job_stage_events)")
+      .all() as Array<{ name: string }>;
+    const names = columns.map((c) => c.name);
+    for (const column of [
+      "event_key",
+      "claim_key",
+      "run_id",
+      "job_id",
+      "stage_id",
+      "unit_id",
+      "action",
+      "at",
+      "started_at",
+      "ended_at",
+      "detail",
+      "stage_status",
+      "duration_ms",
+      "unit_count",
+      "failed_unit_count",
+      "result_ref",
+      "definition_version",
+      "tenant_id",
+    ]) {
+      expect(names).toContain(column);
+    }
+
+    const indexes = d1.sqlite
+      .prepare("PRAGMA index_list(job_stage_events)")
+      .all() as Array<{ name: string; unique: number }>;
+    const stageIdx = indexes.find((i) => i.name === "job_stage_events_run_stage_idx");
+    expect(stageIdx).toBeDefined();
+    expect(stageIdx!.unique).toBe(1);
   });
 });
 
 describe("6202-P03 the engine mirrors every DO row", () => {
-  it("writes the same rows to the mirror, and a mirror failure never fails the run", async () => {
+  it("writes the same rows to the D1 mirror", async () => {
     const stores = createInMemoryJobPipelineStores();
     const runRecorder = jobRunRecorderFromStore(new InMemoryJobRunRecordStore());
     const stageEvents = createInMemoryJobStageEventStore();
-    const mirrored: string[] = [];
-    const mirror = {
-      record: async (row: { stageId: string }) => {
-        mirrored.push(row.stageId);
-        return true;
-      },
-      listByRun: async () => [],
-    };
+    const d1 = new MockD1Database();
     const steps = new JobStepRegistry();
     steps.register("ok", async () => ({ output: { v: 1 }, descriptor: "result/ok" }));
     const control = new JobPipelineControl({
@@ -180,7 +149,7 @@ describe("6202-P03 the engine mirrors every DO row", () => {
       invocation: "sync",
       newRunId: () => "r-6202",
       stageEvents,
-      stageEventsMirror: mirror,
+      stageEventsMirror: createD1JobStageEventStore(d1 as never),
     });
     await control.defineJob({
       jobId: "research:r-6202",
@@ -195,7 +164,10 @@ describe("6202-P03 the engine mirrors every DO row", () => {
       },
     });
     await control.runJob("research:r-6202", { trigger: "manual" });
-    expect(mirrored.sort()).toEqual(["enrich", "feed"]);
+
+    const mirrored = await createD1JobStageEventStore(d1 as never).listByRun("r-6202");
+    expect(mirrored.map((r) => r.stageId).sort()).toEqual(["enrich", "feed"]);
+    expect(mirrored.every((r) => r.action === "terminal")).toBe(true);
     expect((await stageEvents.listByRun("r-6202")).length).toBe(2);
   });
 
@@ -237,32 +209,15 @@ describe("6202-P03 the engine mirrors every DO row", () => {
 
 describe("6202-P04 a D1-only read answers the same shape", () => {
   it("falls back to the mirror when the DO has nothing for the run", async () => {
-    const { d1 } = fakeD1([
-      {
-        event_key: "r-d1:job:0:terminal",
-        claim_key: "r-d1::job:0",
-        run_id: "r-d1",
-        job_id: "research:r-d1",
-        stage_id: "feed",
-        unit_id: null,
-        action: "terminal",
-        at: "2026-11-22T00:00:05.000Z",
-        started_at: "2026-11-22T00:00:00.000Z",
-        ended_at: "2026-11-22T00:00:05.000Z",
-        detail: null,
-        stage_status: "completed",
-        duration_ms: 5000,
-        unit_count: 1,
-        failed_unit_count: 0,
-        result_ref: "research/r-d1/feed",
-        definition_version: 1,
-      },
-    ]);
+    const d1 = new MockD1Database();
+    await createD1JobStageEventStore(d1 as never).record(
+      row({ runId: "r-d1", eventKey: "r-d1:job:0:terminal", claimKey: "r-d1::job:0", resultRef: "research/r-d1/feed" }),
+    );
     const read = await readResearchStages({
       runId: "r-d1",
       stores: createInMemoryJobPipelineStores(),
       runRecorder: jobRunRecorderFromStore(new InMemoryJobRunRecordStore()),
-      d1: d1 as unknown as D1Database,
+      d1: d1 as never,
     });
     const feed = read.stages.find((stage) => stage.stageId === "feed")!;
     expect(feed.status).toBe("completed");

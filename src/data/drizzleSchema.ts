@@ -1937,6 +1937,34 @@ export const jobPipelineArtifacts = sqliteTable("job_pipeline_artifacts", {
  * via D1 migration 0072 and the DO probed additive columns in
  * ensureTable.
  */
+/**
+ * Issue #6028/#6202 — the D1 mirror of the DO stage rows. One terminal row
+ * per executed stage; unique on (run_id, stage_id) so the mirror's upsert has
+ * a conflict target. `tenant_id` is the projection stamp (null on an
+ * engine-written row, exactly as job_run_records carries it).
+ */
+export const jobStageEvents = sqliteTable("job_stage_events", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  eventKey: text("event_key").notNull().unique(),
+  claimKey: text("claim_key").notNull(),
+  runId: text("run_id").notNull(),
+  jobId: text("job_id").notNull(),
+  stageId: text("stage_id").notNull(),
+  unitId: text("unit_id"),
+  action: text("action").notNull(),
+  at: text("at").notNull(),
+  startedAt: text("started_at"),
+  endedAt: text("ended_at"),
+  detail: text("detail"),
+  stageStatus: text("stage_status"),
+  durationMs: integer("duration_ms"),
+  unitCount: integer("unit_count"),
+  failedUnitCount: integer("failed_unit_count"),
+  resultRef: text("result_ref"),
+  definitionVersion: integer("definition_version"),
+  tenantId: text("tenant_id"),
+});
+
 export const jobRunRecords = sqliteTable("job_run_records", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   system: text("system").notNull(),

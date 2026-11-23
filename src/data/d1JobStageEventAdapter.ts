@@ -4,119 +4,127 @@
  *
  * Same port (`JobStageEventStore`) as the DO adapter, so the engine writes
  * one store and mirrors to the other without a second shape. The table is
- * migration 0083's (`src/data/migrationRunner.ts`), catalogued in
- * `schemaComponent/d1Catalogue.ts`; this adapter owns no statement text —
- * both DDL statements come from the catalogue by code, and the DML is
- * parameterized.
+ * migration 0083's, declared in the foundation's `drizzleSchema.ts`; this
+ * adapter goes through drizzle (the D1 family's one query path — no raw DML
+ * and no `.prepare(` in a `d1*.ts` file, per the #4384 pin).
  *
  * The write is an upsert on `(run_id, stage_id)`: the mirror is idempotent,
  * so a re-delivered settle can never duplicate a stage row. Reads return the
  * same record shape the DO adapter returns, which is what lets the stage read
  * answer from D1 alone when the DO is unreachable.
  */
+import { asc, eq } from "drizzle-orm";
+import { type DrizzleD1Database } from "drizzle-orm/d1";
+import { createDrizzleD1Db } from "./d1QueryLogger";
+import { jobStageEvents } from "./drizzleSchema";
+import {
+  applyMigrations,
+  MIGRATION_0083_JOB_STAGE_EVENTS,
+  type MigrationDb,
+} from "./migrationRunner";
 import type { JobStageEventRecord, JobStageEventStore } from "./jobStageEventPorts";
-import { d1StatementSql } from "./schemaComponent/d1Catalogue";
 
-const TABLE = "job_stage_events";
-const CREATE_CODE = "schema.d1.job_stage_events.create_table";
-const INDEX_CODE = "schema.d1.job_stage_events.create_index_job_stage_events_run_stage_idx";
+/** Drizzle D1 database carrying the stage-event table. */
+export type JobStageEventDb = DrizzleD1Database<{
+  jobStageEvents: typeof jobStageEvents;
+}>;
 
-const COLUMNS =
-  "event_key, claim_key, run_id, job_id, stage_id, unit_id, action, at, started_at, ended_at, detail, stage_status, duration_ms, unit_count, failed_unit_count, result_ref, definition_version";
-
-function str(value: unknown): string | null {
-  return typeof value === "string" && value !== "" ? value : null;
+/** Build the Drizzle D1 database object from a bound D1 client. */
+export function createD1JobStageEventDb(d1: D1Database): JobStageEventDb {
+  return createDrizzleD1Db(d1, { schema: { jobStageEvents } });
 }
 
-function num(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
+/** Idempotent schema ensure: applies migration 0083 if unapplied. */
+export async function ensureJobStageEventsSchema(db: JobStageEventDb): Promise<number[]> {
+  return applyMigrations(db as unknown as MigrationDb, [MIGRATION_0083_JOB_STAGE_EVENTS]);
 }
 
-function rowToRecord(row: Record<string, unknown>): JobStageEventRecord {
+function rowToRecord(row: typeof jobStageEvents.$inferSelect): JobStageEventRecord {
   return {
-    eventKey: String(row.event_key ?? ""),
-    claimKey: String(row.claim_key ?? ""),
-    runId: String(row.run_id ?? ""),
-    jobId: String(row.job_id ?? ""),
-    stageId: String(row.stage_id ?? ""),
-    unitId: str(row.unit_id),
-    action: String(row.action ?? ""),
-    at: String(row.at ?? ""),
-    startedAt: str(row.started_at),
-    endedAt: str(row.ended_at),
-    detail: str(row.detail),
-    stageStatus: str(row.stage_status) ?? undefined,
-    durationMs: num(row.duration_ms),
-    unitCount: num(row.unit_count) ?? undefined,
-    failedUnitCount: num(row.failed_unit_count) ?? undefined,
-    resultRef: str(row.result_ref),
-    definitionVersion: num(row.definition_version),
+    eventKey: row.eventKey,
+    claimKey: row.claimKey,
+    runId: row.runId,
+    jobId: row.jobId,
+    stageId: row.stageId,
+    unitId: row.unitId,
+    action: row.action,
+    at: row.at,
+    startedAt: row.startedAt,
+    endedAt: row.endedAt,
+    detail: row.detail,
+    stageStatus: row.stageStatus ?? undefined,
+    durationMs: row.durationMs,
+    unitCount: row.unitCount ?? undefined,
+    failedUnitCount: row.failedUnitCount ?? undefined,
+    resultRef: row.resultRef,
+    definitionVersion: row.definitionVersion,
   };
 }
 
-/** Idempotent schema ensure: the catalogue's CREATE + unique index, then the read-back shape. */
-async function ensureTable(d1: D1Database): Promise<void> {
-  await d1.prepare(d1StatementSql(CREATE_CODE)).run();
-  await d1.prepare(d1StatementSql(INDEX_CODE)).run();
-}
-
 export function createD1JobStageEventStore(d1: D1Database): JobStageEventStore {
+  const db = createD1JobStageEventDb(d1);
+  // One ensure per store instance: the schema is settled before the first
+  // write or read, and never re-applied per row.
+  let ready: Promise<unknown> | null = null;
+  const ensureOnce = (): Promise<unknown> => (ready ??= ensureJobStageEventsSchema(db));
+
   return {
     record: async (event: JobStageEventRecord): Promise<boolean> => {
-      await ensureTable(d1);
-      await d1
-        .prepare(
-          `INSERT INTO ${TABLE} (${COLUMNS}, tenant_id)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-             ON CONFLICT(run_id, stage_id) DO UPDATE SET
-               event_key = excluded.event_key,
-               claim_key = excluded.claim_key,
-               unit_id = excluded.unit_id,
-               action = excluded.action,
-               at = excluded.at,
-               started_at = excluded.started_at,
-               ended_at = excluded.ended_at,
-               detail = excluded.detail,
-               stage_status = excluded.stage_status,
-               duration_ms = excluded.duration_ms,
-               unit_count = excluded.unit_count,
-               failed_unit_count = excluded.failed_unit_count,
-               result_ref = excluded.result_ref,
-               definition_version = excluded.definition_version`,
-        )
-        .bind(
-          event.eventKey,
-          event.claimKey,
-          event.runId,
-          event.jobId,
-          event.stageId,
-          event.unitId,
-          event.action,
-          event.at,
-          event.startedAt,
-          event.endedAt,
-          event.detail,
-          event.stageStatus ?? null,
-          event.durationMs ?? null,
-          event.unitCount ?? null,
-          event.failedUnitCount ?? null,
-          event.resultRef ?? null,
-          event.definitionVersion ?? null,
-          // The mirror's tenant stamp is the pipeline's own: the run id's
-          // owner is stamped by the caller that has it (null here, never
-          // invented — migration 0081 uses the same nullable convention).
-          null,
-        )
-        .run();
+      await ensureOnce();
+      const values = {
+        eventKey: event.eventKey,
+        claimKey: event.claimKey,
+        runId: event.runId,
+        jobId: event.jobId,
+        stageId: event.stageId,
+        unitId: event.unitId,
+        action: event.action,
+        at: event.at,
+        startedAt: event.startedAt,
+        endedAt: event.endedAt,
+        detail: event.detail,
+        stageStatus: event.stageStatus ?? null,
+        durationMs: event.durationMs ?? null,
+        unitCount: event.unitCount ?? null,
+        failedUnitCount: event.failedUnitCount ?? null,
+        resultRef: event.resultRef ?? null,
+        definitionVersion: event.definitionVersion ?? null,
+        // The mirror's tenant stamp is the caller's to fill; an
+        // engine-written row carries null, never an invented tenant.
+        tenantId: null,
+      };
+      await db
+        .insert(jobStageEvents)
+        .values(values)
+        .onConflictDoUpdate({
+          target: [jobStageEvents.runId, jobStageEvents.stageId],
+          set: {
+            eventKey: values.eventKey,
+            claimKey: values.claimKey,
+            jobId: values.jobId,
+            unitId: values.unitId,
+            action: values.action,
+            at: values.at,
+            startedAt: values.startedAt,
+            endedAt: values.endedAt,
+            detail: values.detail,
+            stageStatus: values.stageStatus,
+            durationMs: values.durationMs,
+            unitCount: values.unitCount,
+            failedUnitCount: values.failedUnitCount,
+            resultRef: values.resultRef,
+            definitionVersion: values.definitionVersion,
+          },
+        });
       return true;
     },
     listByRun: async (runId: string): Promise<JobStageEventRecord[]> => {
-      await ensureTable(d1);
-      const result = await d1
-        .prepare(`SELECT ${COLUMNS} FROM ${TABLE} WHERE run_id = ? ORDER BY id ASC`)
-        .bind(runId)
-        .all<Record<string, unknown>>();
-      const rows = Array.isArray(result?.results) ? result.results : [];
+      await ensureOnce();
+      const rows = await db
+        .select()
+        .from(jobStageEvents)
+        .where(eq(jobStageEvents.runId, runId))
+        .orderBy(asc(jobStageEvents.id));
       return rows.map(rowToRecord);
     },
   };
