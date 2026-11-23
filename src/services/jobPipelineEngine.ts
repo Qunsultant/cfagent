@@ -2393,9 +2393,9 @@ export class JobPipelineControl {
     instance: JobInstanceRecord,
     definition: JobDefinition | null,
   ): Promise<void> {
-    const store = this.deps.stageEvents;
+    const stageEventStore = this.deps.stageEvents;
     const runId = instance.currentRunId;
-    if (!store || !runId) return;
+    if (!stageEventStore || !runId) return;
     const rows = stageTerminalRows({
       runId,
       jobId: instance.jobId,
@@ -2406,7 +2406,7 @@ export class JobPipelineControl {
     });
     for (const row of rows) {
       try {
-        await store.record(row);
+        await stageEventStore.record(row);
       } catch (error) {
         structuredLog.warn("jobPipeline.stage_row_write_failed", {
           jobId: instance.jobId,

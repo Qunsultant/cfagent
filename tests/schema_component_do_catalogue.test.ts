@@ -176,7 +176,7 @@ const DO_STATEMENT_SHA256: Record<string, string> = {
     "e3f5565bed6c75f3abce7cac93815261d1c529eb8c9fd0b59192bba31c882ba9",
   "schema.do.job_pipeline_instances.create_table": "0f25e6a8c9861f24a934cd21c82e8974d6f7e6756fcc94973fad6ebec9c1b11a",
   "schema.do.job_run_records.create_table": "18d2fec2838c265edccd711110058f9de9592d096036c574de4e99303100d493",
-  "schema.do.job_stage_events.create_table": "35c76adfe72cfa7a970a51db32c0c53ea7e3d3a97a50f3d631882f9448840aca",
+  "schema.do.job_stage_events.create_table": "72c0608f8573b2a9979c3786b13dee17e0ad2b407288a707f8b5e54c688586b0",
   "schema.do.kv_store.create_table": "516aa66d405986dc7230f7154a6b0365cb02a91f2ddd1972033286553634e661",
   "schema.do.mas_adaptation_audit.create_table": "de2de2116954a30edbdbb3a2da6500146c6303485e577368ebd0abff5d6eb7b8",
   "schema.do.mas_agent_workspace_files.create_table": "84a9b347798fbeab8d30c2be4e390ade91cb6dc59663250f2dd42ec23fc79d97",

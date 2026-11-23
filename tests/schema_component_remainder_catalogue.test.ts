@@ -174,6 +174,12 @@ const REMAINDER_STATEMENT_SHA256 = {
   "schema.do.stock_copilot_positions.alter_table_add_column_entry_order_type": "7e5bb8dc793c944dde7f415fb6ceb9fabbc919d66a8cec4539232616b893a62c",
   "schema.do.stock_copilot_positions.alter_table_add_column_entry_session": "88c3d71a0541b5199e9a3d7f67fe02bfae3f4e7c4935b5b908f3c618daf8b03e",
   "schema.do.usage_events.alter_table_add_column_tenant_id": "7f102cffc7afd42b4b6d2f7f732ce955ebb2956852f1fe5089cd4bd78d1b4769",
+  "schema.do.job_stage_events.alter_table_add_column_stage_status": "15f6fe598d5e3e5f4683e144f1ceee83bf2d31a04e73089305423315fc5f3499",
+  "schema.do.job_stage_events.alter_table_add_column_duration_ms": "4c7896350a1ac852ef15ee91b17a5a776b2ce5b22ac5df662deb4da2d1e086e2",
+  "schema.do.job_stage_events.alter_table_add_column_unit_count": "190e2c760a0fd0ae8c979ff95c9b8d1ff1b7e4aabe56e1ec76698732f91dbea5",
+  "schema.do.job_stage_events.alter_table_add_column_failed_unit_count": "89f2f0a34fbbe6f35ff9ac8339efe29dd8ef7f1031f822434775c3e236685d27",
+  "schema.do.job_stage_events.alter_table_add_column_result_ref": "0c6dff851515512b1f081d5f1f256681e3639dbf8e1874b38fc4a64b942230e7",
+  "schema.do.job_stage_events.alter_table_add_column_definition_version": "eb9826f93d5278655d90a7677adabff0190282354f7746e16804cd422fe58e8b",
   "seed.route.orchestrator_migration.insert_or_replace": "cf67ae430b5c1e25c7f7fbd393500411570765fef5261cbbec7badf1a243fc68",
 }
 
@@ -466,15 +472,15 @@ const P3_DELEGATED_FILES = [
 ];
 
 describe("remainder catalogue — P3 long tail + ALTER reconciliation (#4282 P3)", () => {
-  it("catalogues all 78 remainder statements: 8 table + 2 index + 66 alter + 1 drop + 1 seed-form", () => {
+  it("catalogues all 84 remainder statements: 8 table + 2 index + 72 alter + 1 drop + 1 seed-form", () => {
     const catalogue = buildRemainderCatalogue();
     // Issue #6167 adds 1 probed DO ALTER (mas_async_jobs.host_version):
     // 64 → 65. Issue #5100 (F3 of #5094) adds 13 literal ALTERs: the
     // job_run_records binding columns (4), the mas_trades binding columns
     // (4), and the mas_policy_verdicts binding columns (5): 65 → 78.
-    expect(REMAINDER_CATALOGUE_ENTRIES.length).toBe(78);
-    expect(catalogue.size()).toBe(78);
-    expect(catalogue.byKind("schema").length).toBe(77);
+    expect(REMAINDER_CATALOGUE_ENTRIES.length).toBe(84);
+    expect(catalogue.size()).toBe(84);
+    expect(catalogue.byKind("schema").length).toBe(83);
 
     expect(catalogue.byKind("seed").length).toBe(1);
     const verbs = new Map<string, number>();
@@ -500,19 +506,19 @@ describe("remainder catalogue — P3 long tail + ALTER reconciliation (#4282 P3)
     }
     expect(verbs.get("CREATE TABLE")).toBe(8);
     expect(verbs.get("CREATE INDEX")).toBe(2);
-    expect(verbs.get("ALTER TABLE")).toBe(66);
+    expect(verbs.get("ALTER TABLE")).toBe(72);
     expect(verbs.get("DROP INDEX")).toBe(1);
     expect(verbs.get("INSERT OR REPLACE")).toBe(1);
     expect(verbs.get("OTHER")).toBeUndefined();
     // Every code is unique and every entry is reachable by its code.
     const codes = new Set(REMAINDER_CATALOGUE_ENTRIES.map((e) => e.code));
-    expect(codes.size).toBe(78);
+    expect(codes.size).toBe(84);
     for (const entry of REMAINDER_CATALOGUE_ENTRIES) {
       expect(catalogue.get(entry.code).statement).toBe(entry.statement);
     }
     // Planes: do 64, d1 1, orm 9, index 3, route 1.
     // Issue #6167 adds one probed DO ALTER (mas_async_jobs.host_version).
-    expect(REMAINDER_CATALOGUE_ENTRIES.filter((e) => e.plane === "do").length).toBe(64);
+    expect(REMAINDER_CATALOGUE_ENTRIES.filter((e) => e.plane === "do").length).toBe(70);
     expect(REMAINDER_CATALOGUE_ENTRIES.filter((e) => e.plane === "d1").length).toBe(1);
     expect(REMAINDER_CATALOGUE_ENTRIES.filter((e) => e.plane === "orm").length).toBe(9);
     expect(REMAINDER_CATALOGUE_ENTRIES.filter((e) => e.plane === "index").length).toBe(3);
@@ -619,7 +625,7 @@ describe("remainder catalogue — P3 long tail + ALTER reconciliation (#4282 P3)
   });
 
   it("each entry's statement is byte-identical to the base (sha256 pin)", () => {
-    expect(Object.keys(REMAINDER_STATEMENT_SHA256).length).toBe(78);
+    expect(Object.keys(REMAINDER_STATEMENT_SHA256).length).toBe(84);
     for (const entry of REMAINDER_CATALOGUE_ENTRIES) {
       const digest = createHash("sha256")
         .update(entry.statement, "utf8")
