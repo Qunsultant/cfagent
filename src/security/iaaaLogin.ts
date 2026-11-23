@@ -588,7 +588,6 @@ export async function isBootstrapListed(
         const migrated = await lookupMigratedUserId(opts.aliasKv, entry.internalUserId);
         if (migrated !== null && migrated === targetInternalUserId) return true;
       }
-      }
     } else {
       const resolved = await getInternalUserId(
         bindingStore,
