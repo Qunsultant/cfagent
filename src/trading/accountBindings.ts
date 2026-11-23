@@ -11,6 +11,7 @@ import {
   ACCOUNT_BINDING_CONFIG,
   ACCOUNT_BINDING_SCOPES,
   ACCOUNT_TYPES,
+  maskAccountId,
 } from "../config/accountBindings";
 import {
   applyBrokerRegistryPatch,
@@ -675,4 +676,131 @@ export function migrateLegacyBrokerSelectionToTuple(
     account: chosen as BrokerAccountRecordLike,
     migrated: true,
   };
+}
+
+export interface ResolveAccountByLabelInput {
+  readonly accountName: unknown;
+  readonly availableAccounts: readonly (BrokerAccount | BrokerAccountRecordLike)[];
+}
+
+export type ResolveAccountByLabelResult =
+  | { readonly ok: true; readonly account: BrokerAccountRecordLike }
+  | {
+      readonly ok: false;
+      readonly code: string;
+      readonly error: string;
+      readonly candidateNames?: readonly string[];
+    };
+
+/**
+ * Issue #5101 (F4 of #5094): switch-by-label — resolve a human account
+ * label ("My IRA", "Individual Brokerage") to the broker's enumerated
+ * account, server-side, so the model never holds a full account id.
+ * Matching is against the account's display name (`accountName`, else
+ * `accountDesc`): an exact (case-insensitive) match wins; with no exact
+ * match a single substring match wins. Zero matches fail loud with
+ * `FAILURE_ACCOUNT_UNKNOWN`; several matches fail loud with
+ * `FAILURE_ACCOUNT_MIGRATION_AMBIGUOUS` listing the candidate names —
+ * ask, never guess (the F1 migration rule). Ownership, closed status,
+ * and asset-class fit are NOT decided here; the resolved account still
+ * goes through `validateAccountAgainstBroker` before anything is bound.
+ * The error lists display names only, never account ids.
+ */
+export function resolveAccountByLabel(
+  input: ResolveAccountByLabelInput,
+): ResolveAccountByLabelResult {
+  const rawLabel = typeof input.accountName === "string" ? input.accountName.trim() : "";
+  if (!rawLabel) {
+    const code = ACCOUNT_BINDING_CONFIG.failureCodes.bindingMissing;
+    return {
+      ok: false,
+      code,
+      error: codedMessage(code, "An account label is required to switch by label."),
+    };
+  }
+  const label = rawLabel.toLowerCase();
+  const displayName = (a: BrokerAccount | BrokerAccountRecordLike): string => {
+    const name = typeof a.accountName === "string" ? a.accountName.trim() : "";
+    if (name) return name;
+    const desc = typeof (a as BrokerAccount).accountDesc === "string" ? (a as BrokerAccount).accountDesc.trim() : "";
+    if (desc) return desc;
+    return maskAccountId(a.accountId);
+  };
+  const matches = (a: BrokerAccount | BrokerAccountRecordLike): boolean => {
+    const name = typeof a.accountName === "string" ? a.accountName.trim().toLowerCase() : "";
+    const desc = typeof (a as BrokerAccount).accountDesc === "string" ? (a as BrokerAccount).accountDesc.trim().toLowerCase() : "";
+    return name === label || desc === label;
+  };
+  const contains = (a: BrokerAccount | BrokerAccountRecordLike): boolean => {
+    const name = typeof a.accountName === "string" ? a.accountName.trim().toLowerCase() : "";
+    const desc = typeof (a as BrokerAccount).accountDesc === "string" ? (a as BrokerAccount).accountDesc.trim().toLowerCase() : "";
+    return (name.length > 0 && name.includes(label)) || (desc.length > 0 && desc.includes(label));
+  };
+  const ambiguous = (candidates: readonly (BrokerAccount | BrokerAccountRecordLike)[]) => {
+    const candidateNames = Array.from(new Set(candidates.map(displayName)));
+    const code = ACCOUNT_BINDING_CONFIG.failureCodes.migrationAmbiguous;
+    return {
+      ok: false as const,
+      code,
+      candidateNames,
+      error: codedMessage(
+        code,
+        `Several accounts match "${rawLabel}" (${candidateNames.join(", ")}); say which one to switch to instead of guessing.`,
+      ),
+    };
+  };
+
+  const exact = input.availableAccounts.filter(matches);
+  if (exact.length === 1) return { ok: true, account: exact[0] as BrokerAccountRecordLike };
+  if (exact.length > 1) return ambiguous(exact);
+
+  const partial = input.availableAccounts.filter(contains);
+  if (partial.length === 1) return { ok: true, account: partial[0] as BrokerAccountRecordLike };
+  if (partial.length > 1) return ambiguous(partial);
+
+  const code = ACCOUNT_BINDING_CONFIG.failureCodes.unknownAccount;
+  return {
+    ok: false,
+    code,
+    error: codedMessage(
+      code,
+      `No account named "${rawLabel}" was found among the broker's accounts.`,
+    ),
+  };
+}
+
+/**
+ * Issue #5101 (F4 of #5094): the masked form of a binding for anything
+ * that leaves the server — tool results, NLQ answers, prompts, client
+ * payloads. The stored binding keeps the full id; the masked copy carries
+ * the masked id in `accountId` AND as `maskedAccountId`, so a reader
+ * never has to guess which field is safe. Never surface an unmasked
+ * binding (or tuple) outside the server.
+ */
+export function maskAccountBinding<T extends AccountBindingTuple>(
+  binding: T,
+): T & { readonly maskedAccountId: string } {
+  const masked = maskAccountId(binding.accountId);
+  return { ...binding, accountId: masked, maskedAccountId: masked };
+}
+
+/**
+ * Issue #5101 (F4 of #5094): the masked form of a broker-enumerated
+ * account. `accountId`, `accountKey`, and `accountIdKey` are all
+ * identifiers the model and the client must never see in full.
+ */
+export function maskBrokerAccount<T extends BrokerAccountRecordLike>(
+  account: T,
+): T & { readonly maskedAccountId: string } {
+  const masked = maskAccountId(account.accountId);
+  const next = {
+    ...account,
+    accountId: masked,
+    maskedAccountId: masked,
+  } as T & { maskedAccountId: string; accountKey?: string; accountIdKey?: string };
+  const rawKey = (account as unknown as BrokerAccount).accountKey;
+  if (typeof rawKey === "string") next.accountKey = maskAccountId(rawKey);
+  const rawIdKey = (account as unknown as BrokerAccount).accountIdKey;
+  if (typeof rawIdKey === "string") next.accountIdKey = maskAccountId(rawIdKey);
+  return next;
 }

@@ -3,22 +3,47 @@
  * and clear `{ broker, mode, accountType, accountId }` bindings.
  */
 import { z } from "zod";
-import { ACCOUNT_BINDING_SCOPES, ACCOUNT_TYPES } from "../../config/accountBindings";
+import { ACCOUNT_BINDING_SCOPES, ACCOUNT_TYPES, maskAccountId } from "../../config/accountBindings";
 import {
   getBrokerAssetAccountRegistry,
   listAccountBindings,
+  listBrokerAccountsForMode,
   migrateTenantAccountBinding,
   removeAccountBinding,
   resolveUserAccountBinding,
   updateBrokerAssetAccountRegistry,
-  upsertAccountBinding,
+  validateAndUpsertAccountBinding,
+  type ListBrokerAccountsDeps,
 } from "../../services/accountBindings";
 import {
   isAccountBindingBroker,
+  maskAccountBinding,
+  maskBrokerAccount,
+  resolveAccountByLabel,
   validateAccountAgainstBroker,
   type BrokerAccountRecordLike,
 } from "../../trading";
 import type { IMcpToolCommand, McpToolContext } from "../../patterns/interfaces";
+
+/**
+ * Issue #5101 (F4 of #5094): injectable enumeration for the tool's
+ * validated `set` — production reads the broker's platform; tests pass
+ * a stub so no live broker credentials are needed. Absent in production.
+ */
+export interface BrokerAccountBindingCommandDeps {
+  listAccounts?: ListBrokerAccountsDeps["enumerate"];
+}
+
+/**
+ * Issue #5101: validation errors quote the requested account id back.
+ * The model supplied that id, but the result contract is "never a full
+ * id in a tool result" — scrub it to its masked form (only for ids long
+ * enough that a substring replace cannot corrupt the message).
+ */
+function scrubAccountId(error: string, accountId?: string): string {
+  if (!accountId || accountId.length < 4) return error;
+  return error.split(accountId).join(maskAccountId(accountId));
+}
 
 const BrokerAccountBindingInputSchema = z.object({
   action: z
@@ -53,19 +78,20 @@ const BrokerAccountBindingInputSchema = z.object({
 });
 
 export class BrokerAccountBindingCommand implements IMcpToolCommand {
+  constructor(private readonly deps?: BrokerAccountBindingCommandDeps) {}
   readonly name = "broker_account_binding";
   readonly description =
-    "Inspect, bind, or clear the active { broker, mode, accountType, accountId } account binding for the signed-in user across tenant, autopilot, copilot, or schedule scopes.";
+    "Inspect, bind, or clear the active { broker, mode, accountType, accountId } account binding for the signed-in user across tenant, autopilot, copilot, or schedule scopes. Results never carry a full account id — bindings and accounts are masked. Set validates against the broker's real accounts (server-fetched); switch by account label (accountName) without holding an id.";
   readonly jsonSchema = {
     type: "object" as const,
     properties: {
-      action: { type: "string", enum: ["list", "get", "set", "clear"], description: "Operation to perform (default: list)." },
+      action: { type: "string", enum: ["list", "get", "set", "clear", "validate", "migrate", "registry_get", "registry_update"], description: "Operation to perform (default: list)." },
       broker: { type: "string", description: "Configured broker identifier." },
       mode: { type: "string", enum: ["paper", "live"], description: "Trading mode." },
       accountType: { type: "string", enum: [...ACCOUNT_TYPES], description: "Account asset class/type." },
       scope: { type: "string", enum: [...ACCOUNT_BINDING_SCOPES], description: "Binding scope." },
-      accountId: { type: "string", description: "Specific account ID at the broker (required for action='set')." },
-      accountName: { type: "string", description: "Optional human-readable account label." },
+      accountId: { type: "string", description: "Specific account ID at the broker (required for action='set' unless accountName names the account)." },
+      accountName: { type: "string", description: "Human-readable account label — switch by label without holding the account id (action='set')." },
     },
   };
   readonly zodSchema = BrokerAccountBindingInputSchema;
@@ -109,7 +135,8 @@ export class BrokerAccountBindingCommand implements IMcpToolCommand {
       return {
         ok: true,
         action: "list",
-        bindings: filtered,
+        // Issue #5101: bindings leave the server masked — never a full id.
+        bindings: filtered.map((b) => maskAccountBinding(b)),
         registry,
         supportedAccountTypes: registry.accountTypes,
         supportedAssetTypes: registry.assetTypes,
@@ -137,7 +164,8 @@ export class BrokerAccountBindingCommand implements IMcpToolCommand {
         ok: true,
         action: "get",
         found: res.found,
-        binding: res.binding,
+        // Issue #5101: the binding leaves the server masked — never a full id.
+        binding: res.binding ? maskAccountBinding(res.binding) : res.binding,
         resolvedFromScope: res.resolvedFromScope,
       };
     }
@@ -156,14 +184,16 @@ export class BrokerAccountBindingCommand implements IMcpToolCommand {
         updatedBy: userLogin,
       });
       if (!valRes.ok) {
-        return { ok: false, action: "validate", code: valRes.code, error: valRes.error };
+        // Issue #5101: the error quotes the requested id — scrub it masked.
+        return { ok: false, action: "validate", code: valRes.code, error: scrubAccountId(valRes.error, parsed.accountId) };
       }
       return {
         ok: true,
         action: "validate",
-        tuple: valRes.tuple,
-        binding: valRes.binding,
-        account: valRes.account,
+        // Issue #5101: tuple, binding, and account leave masked.
+        tuple: maskAccountBinding(valRes.tuple),
+        binding: maskAccountBinding(valRes.binding),
+        account: maskBrokerAccount(valRes.account),
       };
     }
 
@@ -180,33 +210,106 @@ export class BrokerAccountBindingCommand implements IMcpToolCommand {
           ok: false,
           action: "migrate",
           code: migRes.code,
-          error: migRes.error,
-          ...(migRes.candidateAccountIds ? { candidateAccountIds: migRes.candidateAccountIds } : {}),
+          error: scrubAccountId(migRes.error, parsed.accountId),
+          // Issue #5101: candidate ids leave masked — never in full.
+          ...(migRes.candidateAccountIds ? { candidateAccountIds: migRes.candidateAccountIds.map((id) => maskAccountId(id)) } : {}),
         };
       }
       return {
         ok: true,
         action: "migrate",
         migrated: true,
-        tuple: migRes.tuple,
-        binding: migRes.binding,
-        account: migRes.account,
+        // Issue #5101: tuple, binding, and account leave masked.
+        tuple: maskAccountBinding(migRes.tuple),
+        binding: maskAccountBinding(migRes.binding),
+        account: maskBrokerAccount(migRes.account),
       };
     }
 
     if (parsed.action === "set") {
-      const result = await upsertAccountBinding(context.env, userLogin, {
+      // Issue #5101 (F4 of #5094): `set` no longer upserts unvalidated.
+      // The broker's accounts are enumerated server-side for the target
+      // mode and the binding is validated against them (fail closed when
+      // the enumeration is unavailable). The model switches by label
+      // (`accountName`) or by id; the stored account name is the
+      // enumerated account's own name, never a model-supplied string.
+      if (!parsed.broker || !parsed.mode) {
+        throw new Error("broker and mode are required for action='set'.");
+      }
+      const enumRes = await listBrokerAccountsForMode(
+        context.env,
+        userLogin,
+        parsed.broker,
+        parsed.mode,
+        context.orm,
+        this.deps?.listAccounts ? { enumerate: this.deps.listAccounts } : undefined,
+      );
+      if (!enumRes.ok) {
+        return { ok: false, action: "set", code: enumRes.code, error: enumRes.error };
+      }
+      const byId = (id: string) =>
+        enumRes.accounts.find((a) => {
+          const wanted = id.trim().toLowerCase();
+          const accId = typeof a.accountId === "string" ? a.accountId.trim().toLowerCase() : "";
+          const accKey =
+            typeof (a as { accountKey?: unknown }).accountKey === "string"
+              ? String((a as { accountKey: string }).accountKey).trim().toLowerCase()
+              : "";
+          return accId === wanted || accKey === wanted;
+        });
+      let accountId = parsed.accountId?.trim() ? parsed.accountId.trim() : undefined;
+      let accountName = parsed.accountName?.trim() ? parsed.accountName.trim() : undefined;
+      if (!accountId && accountName) {
+        const labelRes = resolveAccountByLabel({
+          accountName,
+          availableAccounts: enumRes.accounts,
+        });
+        if (!labelRes.ok) {
+          return {
+            ok: false,
+            action: "set",
+            code: labelRes.code,
+            error: labelRes.error,
+            ...(labelRes.candidateNames ? { candidateNames: labelRes.candidateNames } : {}),
+          };
+        }
+        accountId = labelRes.account.accountId;
+        accountName =
+          labelRes.account.accountName?.trim() ||
+          (labelRes.account as { accountDesc?: string }).accountDesc?.trim() ||
+          accountName;
+      }
+      if (!accountId) {
+        throw new Error("accountId or accountName is required for action='set'.");
+      }
+      // The stored name is the enumerated account's own name when the
+      // account is known; a model-supplied name never overwrites it.
+      const enumerated = byId(accountId);
+      if (enumerated) {
+        accountName =
+          enumerated.accountName?.trim() ||
+          (enumerated as { accountDesc?: string }).accountDesc?.trim() ||
+          accountName;
+      }
+      const result = await validateAndUpsertAccountBinding(context.env, userLogin, {
         broker: parsed.broker,
         mode: parsed.mode,
         accountType: parsed.accountType,
         scope: parsed.scope,
-        accountId: parsed.accountId,
-        accountName: parsed.accountName,
+        accountId,
+        accountName,
+        availableAccounts: enumRes.accounts,
       });
       if (!result.ok) {
-        return { ok: false, action: "set", error: result.error };
+        return { ok: false, action: "set", code: result.code, error: scrubAccountId(result.error, accountId) };
       }
-      return { ok: true, action: "set", binding: result.binding };
+      // Issue #5101: the binding leaves the server masked — never a full id.
+      return {
+        ok: true,
+        action: "set",
+        binding: maskAccountBinding(result.binding),
+        maskedAccountId: maskAccountId(result.binding.accountId),
+      };
     }
 
     // action === "clear"

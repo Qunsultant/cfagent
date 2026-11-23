@@ -559,6 +559,56 @@ export function planWithRules(question: string): NLQPlan {
     };
   }
 
+  // 4b. Fast-path for account binding (show / list / switch) — Issue #5101
+  // (F4 of #5094). Sits before the research fast-path: a broker-named
+  // binding question ("list my Alpaca accounts", "switch to my E*TRADE
+  // options account") must plan as a binding intent, never as a research
+  // report. Positions, balance, orders, and holdings questions are NOT
+  // binding questions — the positions rule below keeps them.
+  const isBindingAccountWord = /\b(binding|bound\s+account)\b/i.test(question);
+  const isPositionsLike = /\b(positions?|portfolio|holdings?|balance|orders?|trades?|fills?)\b/i.test(question);
+  const bindingSwitchVerb = /\b(switch|change|bind|use|select|set)\b/i.test(question);
+  const bindingListVerb = /\b(list|show|what|which|display)\b/i.test(question);
+  if (!isPositionsLike && /\baccounts?\b/i.test(question) && (isBindingAccountWord || bindingSwitchVerb || bindingListVerb)) {
+    const brokerMatch = question.match(/\b(e\*trade|etrade|alpaca|public|tastytrade|ibkr)\b/i);
+    const broker = brokerMatch ? brokerMatch[1].replace(/^\s*e\*trade$/i, "etrade").toLowerCase() : undefined;
+    const modeMatch = question.match(/\b(paper|live)\b/i);
+    const typeMatch = question.match(/\b(stock|options|forex|futures|crypto|margin)\b/i);
+    const quotedLabel = question.match(/["']([^"']{1,60})["']/);
+    const namedLabel = question.match(/\baccount\s+(?:called|named)\s+([A-Za-z][A-Za-z0-9 .'\-]{1,40})/i);
+    const trailingLabel = question.match(/\b(?:switch|change|use|bind|select|set)\s+(?:to\s+)?(?:the\s+|my\s+|a\s+)?([A-Za-z][A-Za-z0-9 .'\-]{1,40}?)\s+account\s*$/i);
+    const rawLabel = (quotedLabel?.[1] ?? namedLabel?.[1] ?? trailingLabel?.[1] ?? "").trim();
+    // The label is a human name, never a broker/mode/type word: strip
+    // those before keeping it ("switch to my E*TRADE paper account"
+    // names no label — the executor resolves the single candidate).
+    const accountName = rawLabel
+      ? rawLabel
+          .replace(/\b(e\*trade|etrade|alpaca|public|tastytrade|ibkr|paper|live|stock|options|forex|futures|crypto|margin)\b/gi, "")
+          .replace(/\s{2,}/g, " ")
+          .trim() || undefined
+      : undefined;
+    const bindingAction: "binding_show" | "binding_list" | "binding_switch" = bindingSwitchVerb
+      ? "binding_switch"
+      : /\baccounts\b/i.test(question) || /\blist\b/i.test(question)
+        ? "binding_list"
+        : "binding_show";
+    return {
+      domain: "trading",
+      operation: bindingAction === "binding_switch" ? "update" : "list",
+      tradingData: {
+        action: bindingAction,
+        ...(broker ? { broker } : {}),
+        ...(modeMatch ? { mode: modeMatch[1].toLowerCase() as "paper" | "live" } : {}),
+        ...(typeMatch ? { accountType: typeMatch[1].toLowerCase() } : {}),
+        ...(accountName ? { accountName } : {}),
+      },
+      terms: question.replace(STOP_WORDS_REGEX, " ").trim(),
+      role: "any",
+      since: null,
+      limit: 25,
+    };
+  }
+
   // 5. Fast-path for Market Data Research & Quoting (Yahoo Finance / Alpaca)
   if (/\b(yfinance|yahoo\s*finance|alpaca|market\s*data|fundamentals?|valuation|research|compare|snapshot|pe\s*ratio|p\/e|peg)\b/i.test(question)) {
     const excludeWords = new Set(["MARKET", "DATA", "USD", "FOR", "ON", "AND", "THE", "GET", "LIVE", "PE", "PEG", "API", "APIS", "NBBO", "DEEP", "RUN", "STOCK", "SHARE", "PRICE", "QUOTE", "WITH", "USING"]);

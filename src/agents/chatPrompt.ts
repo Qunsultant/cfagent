@@ -191,18 +191,21 @@ export interface ResolvedPromptBrokerTools {
 }
 
 /**
- * Issue #5100 (F3 of #5094): the bound-account line for copilot
- * prompts, shared by both builders. Undefined (not resolved) renders
- * nothing, keeping the prompt byte-identical; null (resolved unbound)
- * states "No account bound"; a tuple names the bound account
- * (accountType + masked accountId — never a full id in a prompt).
+ * Issue #5100 (F3 of #5094) / #5101 (F4): the bound-account line for
+ * copilot prompts, shared by both builders. Undefined (not resolved)
+ * renders nothing, keeping the prompt byte-identical; null (resolved
+ * unbound) states "No account bound"; a tuple names the bound account
+ * (accountType + masked accountId + accountName when present — never a
+ * full id in a prompt). F4 steers the model at the `broker_account_binding`
+ * tool for show/list/switch, by label, never by full id.
  */
 export function bindingPromptLine(activeBinding?: AccountBindingTuple | null): string {
   if (activeBinding === undefined) return "";
   if (activeBinding === null) {
-    return "\nNo account bound: order tools refuse until an account is bound — answer read-only questions, and never issue an order tool call.";
+    return "\nNo account bound: order tools refuse until an account is bound — answer read-only questions, and never issue an order tool call. To bind one, ask which account to use (broker, mode, account label) and invoke 'broker_account_binding' with action='set'; never ask for or state a full account id.";
   }
-  return `\nBound account: ${activeBinding.accountType} ${maskAccountId(activeBinding.accountId)} — order tools execute against this account only.`;
+  const name = activeBinding.accountName?.trim();
+  return `\nBound account: ${activeBinding.accountType} ${maskAccountId(activeBinding.accountId)}${name ? ` (${name})` : ""} — order tools execute against this account only. To show, list, or switch the bound account, invoke 'broker_account_binding' (action='get' / 'list' / 'set'); switch by account label (accountName), never by full account id, and never state a full account id.`;
 }
 
 export function resolvePromptBrokerTools(

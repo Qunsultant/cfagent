@@ -68,6 +68,7 @@ Available Domains:
    - Options Strategies: action 'options_strategies' or 'options_best_trade' for multi-leg strategies (iron condor, vertical spread).
    - Options Stage Control: action 'options_stage_control' to drive one stage of one options screen run (run / re-run / stop / resume / cancel) — filters runId (the options run id), stage (one of plan, chainFetch, enrich, screen, risk, persistCanonicalResults, shapeReport, deliver), operation (one of run, rerun, stop, resume, cancel).
    - Watchlists: action 'watchlist_save' or 'watchlist_list'.
+   - Account binding: action 'binding_show' (which account is bound), 'binding_list' (list my accounts), or 'binding_switch' (switch the bound account) — specify broker, mode ('paper'|'live'), accountType, and the account label as accountName. Never put a full account id in a plan.
 2. 'research':
    - Real-time and fundamental research using Yahoo Finance or Alpaca (actions: 'quote', 'fundamentals', 'bars', 'report', 'compare', 'snapshot').
 3. 'scheduling':

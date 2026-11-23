@@ -7,20 +7,25 @@
  * source of truth.
  */
 import type { Env } from "../types";
+import type { DatabaseORM } from "../orm";
 import { ACCOUNT_BINDING_CONFIG } from "../config/accountBindings";
 import { createStoreKv, type DoNamespaceLike } from "../data/durableKv";
 import { codedMessage, getOutcome } from "../outcomes/outcomeAspects";
 import {
   accountBindingSlotId,
   applyBrokerRegistryPatch,
+  brokerSupports,
   buildDefaultBrokerAssetAccountRegistry,
   isAccountBindingBroker,
   isAccountBindingTuple,
+  isBrokerId,
+  isTradingType,
   migrateLegacyBrokerSelectionToTuple,
   normalizeAccountBindingScope,
   normalizeAccountType,
   resolveEffectiveAccountBinding,
   toAccountBindingTuple,
+  TradingPlatformRegistry,
   validateAccountAgainstBroker,
   validateAccountBindingInput,
   type AccountBinding,
@@ -226,6 +231,83 @@ export async function validateAndUpsertAccountBinding(
     binding: upsertRes.binding,
     tuple: toAccountBindingTuple(upsertRes.binding),
   };
+}
+
+export interface ListBrokerAccountsDeps {
+  /**
+   * Issue #5101: injectable enumeration — production reads the broker's
+   * platform; tests pass a stub so no live broker credentials are needed.
+   * The default (absent) path is the only one production uses.
+   */
+  enumerate?: (input: {
+    env: Env;
+    userLogin: string;
+    broker: string;
+    mode: "paper" | "live";
+    orm?: DatabaseORM;
+  }) => Promise<readonly BrokerAccountRecordLike[]>;
+}
+
+export type ListBrokerAccountsForModeResult =
+  | { readonly ok: true; readonly accounts: readonly BrokerAccountRecordLike[] }
+  | { readonly ok: false; readonly code: string; readonly error: string };
+
+/**
+ * Issue #5101 (F4 of #5094; shared with B1 — do not duplicate): enumerate
+ * the broker's accounts for the TARGET mode (paper → TEST, live → PROD),
+ * through the broker's own platform (`TradingPlatformRegistry`), so a
+ * `set` can be validated against real accounts instead of trusting a
+ * model-supplied id. A broker the catalog does not know, a broker without
+ * the `accounts` capability, an invalid mode, or any platform/read failure
+ * refuses loud with `FAILURE_ACCOUNT_BINDING_MISSING` (the F3 fail-closed
+ * code) — never an empty list, never a silent fallback. The returned
+ * accounts carry FULL ids: callers that surface them (tool results,
+ * prompts, NLQ answers) must mask them first.
+ */
+export async function listBrokerAccountsForMode(
+  env: Env,
+  userLogin: string,
+  broker: unknown,
+  mode: unknown,
+  orm?: DatabaseORM,
+  deps?: ListBrokerAccountsDeps,
+): Promise<ListBrokerAccountsForModeResult> {
+  const fail = (message: string): ListBrokerAccountsForModeResult => {
+    const code = ACCOUNT_BINDING_CONFIG.failureCodes.bindingMissing;
+    return { ok: false, code, error: codedMessage(code, message) };
+  };
+  const rawBroker = typeof broker === "string" ? broker.trim().toLowerCase() : "";
+  if (!rawBroker || !isBrokerId(rawBroker)) {
+    return fail(`Unsupported broker "${String(broker ?? "")}": no account list can be enumerated for it.`);
+  }
+  if (!brokerSupports(rawBroker, "accounts")) {
+    return fail(
+      `Broker "${rawBroker}" does not expose an account list; a binding for it cannot be validated.`,
+    );
+  }
+  const rawMode = typeof mode === "string" ? mode.trim().toLowerCase() : "";
+  if (!isTradingType(rawMode)) {
+    return fail(`Invalid trading mode "${String(mode ?? "")}"; expected "paper" or "live".`);
+  }
+  const environment = rawMode === "live" ? "PROD" : "TEST";
+  try {
+    const accounts = deps?.enumerate
+      ? await deps.enumerate({ env, userLogin, broker: rawBroker, mode: rawMode, orm })
+      : await TradingPlatformRegistry.getPlatform(
+          rawBroker,
+          env,
+          orm,
+          userLogin,
+          environment,
+        ).getAccounts();
+    return { ok: true, accounts };
+  } catch (err) {
+    return fail(
+      `The broker's accounts for ${rawBroker} (${rawMode}) could not be read: ${
+        err instanceof Error ? err.message : "unknown error"
+      }.`,
+    );
+  }
 }
 
 /**

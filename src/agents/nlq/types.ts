@@ -171,6 +171,14 @@ export interface NLQExecutionDeps extends OptionsStrategyDeps {
   stockScreenPort?: NLQStockScreenPort;
   socialBriefPort?: NLQSocialBriefPort;
   /**
+   * Issue #5101 (F4 of #5094) — the account enumerator the binding
+   * intents (`binding_show` / `binding_list` / `binding_switch`) read
+   * through `listBrokerAccountsForMode`. Absent → the composition root
+   * path reads the broker's platform. Injectable so tests drive the
+   * intents deterministically without live broker credentials.
+   */
+  accountEnumerator?: import("../../services/accountBindings").ListBrokerAccountsDeps["enumerate"];
+  /**
    * #1686: optional DO blob handle for full capture on the port-less
    * listings-screener fallback legs. Unset → today's outcome-only contract.
    */
