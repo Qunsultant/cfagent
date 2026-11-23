@@ -9,9 +9,8 @@ import { PublicTokenCard } from "./PublicTokenCard";
 import { AccountBindingSelector } from "./AccountBindingSelector";
 import { ActiveBindingBadge } from "./ActiveBindingBadge";
 import { adoptAccountBinding } from "./accountBindingStore";
-import { brokerCredentialGuidance, isBrokerId } from "../trading";
+import { brokerCredentialGuidance, isBrokerId, buildDefaultBrokerAssetAccountRegistry } from "../trading";
 import { brokerOptionsFromRegistry } from "./brokerOptions";
-import { buildDefaultBrokerAssetAccountRegistry } from "../trading/accountBindings";
 import { fetchWatchlists, type ETradeWatchlist } from "./accountApi";
 import {
   loadTapeSelection,
