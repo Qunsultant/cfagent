@@ -103,9 +103,17 @@ export function createOtelJobPipelineObserverDeps(env: Env): OtelJobPipelineObse
  * observer + the wrapped step journal — the same order the
  * ScheduledAgent host uses (logging, then metrics, then traces;
  * the journal wraps traces → metrics → logging → identity).
+ *
+ * Issue #6250 — the optional inner journal is a host's pre-existing
+ * journal (e.g. the workflow step journal): it runs inside the
+ * logging journal instead of the identity journal, so the host's
+ * journal is kept, never replaced, exactly as the run-settled
+ * observer is chained rather than replaced. Absent, the composition
+ * is byte-for-byte the #6179 one.
  */
 export function createOtelJobPipelineObservers(
   deps: OtelJobPipelineObserverSet,
+  innerJournal?: JobStepJournal,
 ): OtelJobPipelineObservers {
   return {
     runSettledObserver: chainRunSettledObservers(
@@ -117,7 +125,10 @@ export function createOtelJobPipelineObservers(
       ...deps.tracing,
       inner: createOtelJobPipelineMetricsStepJournal({
         ...deps.metrics,
-        inner: createOtelJobStepJournal(deps.logging),
+        inner: createOtelJobStepJournal({
+          ...deps.logging,
+          ...(innerJournal ? { inner: innerJournal } : {}),
+        }),
       }),
     }),
   };
@@ -125,6 +136,28 @@ export function createOtelJobPipelineObservers(
 
 /** One observer set per env object (one per isolate). */
 const cachedByEnv = new WeakMap<object, OtelJobPipelineObservers>();
+
+/**
+ * One per-signal dep set per env object (one per isolate). The
+ * providers are the expensive part (transports, batch processors);
+ * the composition into observer + journal is cheap closures, so a
+ * caller that needs a different inner journal (the factory, for a
+ * host's pre-existing journal) composes from these cached deps
+ * instead of rebuilding the providers per control.
+ *
+ * Issue #6250 — the factory's env path uses this so a per-dispatch
+ * control build never re-creates the OTel providers.
+ */
+const cachedDepsByEnv = new WeakMap<object, OtelJobPipelineObserverSet>();
+
+/** The cached per-signal deps for an env object (built once). */
+export function getOtelJobPipelineObserverDeps(env: Env): OtelJobPipelineObserverSet {
+  const cached = cachedDepsByEnv.get(env);
+  if (cached) return cached;
+  const deps = createOtelJobPipelineObserverDeps(env);
+  cachedDepsByEnv.set(env, deps);
+  return deps;
+}
 
 /**
  * The cached accessor call sites use: build the observer set
@@ -135,7 +168,7 @@ const cachedByEnv = new WeakMap<object, OtelJobPipelineObservers>();
 export function getOtelJobPipelineObservers(env: Env): OtelJobPipelineObservers {
   const cached = cachedByEnv.get(env);
   if (cached) return cached;
-  const observers = createOtelJobPipelineObservers(createOtelJobPipelineObserverDeps(env));
+  const observers = createOtelJobPipelineObservers(getOtelJobPipelineObserverDeps(env));
   cachedByEnv.set(env, observers);
   return observers;
 }

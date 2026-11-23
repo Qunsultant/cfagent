@@ -99,6 +99,7 @@ import {
   type JobRunRecorder,
   type JobStageView,
 } from "../services/jobPipelineEngine";
+import { createJobPipelineControl } from "../services/jobPipelineControlFactory";
 import { JobPipelineError } from "../services/jobPipelineConfig";
 import { createBuiltinStepRegistry } from "../services/jobPipelineSteps";
 import {
@@ -321,13 +322,16 @@ export async function startOptionsScreenWorkflow(
       "the AGENT_DB binding the workflow residency reads is not configured in this deployment; the run was not dispatched.",
     );
   }
-  const defineControl = new JobPipelineControl({
+  // Issue #6250 — the define control builds through the ONE factory,
+  // with the host env (define-only: no run executes here, but the
+  // wiring must not depend on that).
+  const defineControl = createJobPipelineControl({
     stores,
     runRecorder,
     publisher: null,
     steps: createBuiltinStepRegistry(),
     invocation: "workflow-shard",
-  });
+  }, { env });
   // Issue #5270 — attach before defining: a re-dispatch of an
   // in-flight run returns the existing instance with no define
   // (no version bump under a running run) and no create.
@@ -480,13 +484,15 @@ export async function startOptionsChainWorkflow(
       "the AGENT_DB binding the workflow residency reads is not configured in this deployment; the chain was not dispatched.",
     );
   }
-  const defineControl = new JobPipelineControl({
+  // Issue #6250 — the chain define control builds through the ONE
+  // factory, with the host env (define-only, as the screen one).
+  const defineControl = createJobPipelineControl({
     stores,
     runRecorder,
     publisher: null,
     steps: createBuiltinStepRegistry(),
     invocation: "workflow-shard",
-  });
+  }, { env });
   // Issue #5270 — attach before defining, as in
   // startOptionsScreenWorkflow: a re-dispatch of an in-flight
   // chain returns the existing instance with no define and no
@@ -688,7 +694,9 @@ export async function readOptionsWorkflowRun(
   deps: { stores: JobPipelineStores; runRecorder: JobRunRecorder },
   jobId: string,
 ): Promise<OptionsWorkflowRunView> {
-  const control = new JobPipelineControl({
+  // Issue #6250 — the read control builds through the ONE factory too
+  // (read-only: no run executes here, so no env is passed).
+  const control = createJobPipelineControl({
     stores: deps.stores,
     runRecorder: deps.runRecorder,
     publisher: null,

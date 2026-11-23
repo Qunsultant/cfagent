@@ -47,6 +47,7 @@ import {
   type ScreenInterpretationAuditRecord,
 } from "./screenCriteriaArtifact";
 import { JobPipelineControl } from "../services/jobPipelineEngine";
+import { createJobPipelineControl } from "../services/jobPipelineControlFactory";
 import type { JobPipelineStores } from "../data/jobPipelinePorts";
 import type { ShardJobStore } from "../data/shardJobPorts";
 import { createJobPipelineWorkflowDeps } from "./jobPipelineWorkflow";
@@ -445,12 +446,16 @@ export class ScreenerScreenWorkflow extends PortThinkWorkflow<
     // composed step registry incl. the screener steps), with
     // the workflow step as the journal — the journal makes
     // step invocations replay-safe.
+    // Issue #6250 — the screener dispatch builds through the ONE
+    // factory, with the host env: the workflow step stays as the
+    // journal (threaded as the inner journal by the factory) and
+    // the run emits `job.run.settled`.
     const engineDeps = createJobPipelineWorkflowDeps(this.env);
     const adapted = adaptStep(step);
-    const control = new JobPipelineControl({
+    const control = createJobPipelineControl({
       ...engineDeps,
       journal: adapted,
-    });
+    }, { env: this.env });
     return runScreenerScreenOnEngine(
       adapted,
       {

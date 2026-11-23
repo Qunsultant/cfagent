@@ -22,12 +22,12 @@ import {
 import { createStructuredLogger } from "../observability/structuredLogger";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
 import {
-  JobPipelineControl,
   jobRunRecorderFromStore,
   type JobPipelineDeps,
   type JobRunRecorder,
   type JobStageView,
 } from "../services/jobPipelineEngine";
+import { createJobPipelineControl } from "../services/jobPipelineControlFactory";
 import { createBuiltinStepRegistry } from "../services/jobPipelineSteps";
 import { createDoSqliteJobStageEventStore } from "../data/doSqliteJobStageEventAdapter";
 import { createD1JobStageEventStore } from "../data/d1JobStageEventAdapter";
@@ -268,7 +268,10 @@ export async function dispatchResearchEngineRun(
 
   const { storageMode, ephemeralFallback, ephemeralReason, stores, runRecorder } =
     resolveResearchEngineAdapters(input);
-  const control = new JobPipelineControl({
+  // Issue #6250 — the OODA dispatch builds its control through the
+  // ONE factory, with the caller's env: the OTel run-settled
+  // observers ride the control, so this run emits `job.run.settled`.
+  const control = createJobPipelineControl({
     stores,
     runRecorder,
     // The OODA job and its durable J-stack execution are one run. Reuse
@@ -288,7 +291,7 @@ export async function dispatchResearchEngineRun(
     // caller's env (platform default); input.env is already
     // string-valued, so it passes through as-is.
     ...(input.env ? { env: input.env } : {}),
-  });
+  }, { ...(input.env ? { env: input.env } : {}) });
   const definition = buildResearchJobDefinition(runId, {
     userLogin: input.userLogin,
     trigger: input.trigger,
@@ -455,7 +458,10 @@ export async function readResearchStages(
 }> {
   const engineJobId = researchEngineJobId(input.runId);
   const { storageMode, stores, runRecorder } = resolveResearchEngineAdapters(input);
-  const control = new JobPipelineControl({
+  // Issue #6250 — the read-only stages view builds through the ONE
+  // factory too (no run executes here, so no env is passed: a bare
+  // control, exactly as before — the construction stays single).
+  const control = createJobPipelineControl({
     stores,
     runRecorder,
     publisher: null,
@@ -607,7 +613,10 @@ export async function executeResearchStageControl(
     },
     ...input.researchDeps,
   };
-  const control = new JobPipelineControl({
+  // Issue #6250 — the stage re-run builds through the ONE factory,
+  // with the caller's env: a re-run that executes emits
+  // `job.run.settled` like the dispatch.
+  const control = createJobPipelineControl({
     stores,
     runRecorder,
     publisher: null,
@@ -620,7 +629,7 @@ export async function executeResearchStageControl(
     // Issue #4782 S3 — as the dispatch control above: the stage
     // re-run resolves its retry policy from the caller's env.
     ...(input.env ? { env: input.env } : {}),
-  });
+  }, { ...(input.env ? { env: input.env } : {}) });
 
   const existingDef = await stores.definitions.getDefinition(validated.engineJobId);
   if (!existingDef) {

@@ -98,6 +98,8 @@ import { createUnifiedSchedulePorts } from "../../data/createUnifiedSchedulePort
 import { createDiscoveryService } from "../../services/discoveryService";
 import { buildDataProviderPorts } from "../../data/buildDataProviderPorts";
 import { createFitDiscoveryRunner } from "../../services/fitDiscoveryRunner";
+import { getOtelJobPipelineObservers } from "../../observability/otelJobPipelineObservers";
+import { normalizeJobRunTrigger } from "../../data/jobRunRecordPorts";
 import {
   followupChannelLabel,
   formatLifecycleNotification,
@@ -785,6 +787,54 @@ function orphanedReapMessage(
   return message;
 }
 
+/**
+ * Issue #6250 item 4 — emit `job.run.settled` for a reaped orphan.
+ *
+ * The reap path settles jobs via `ports(ctx).queue.reapStaleRunning`
+ * and never calls the engine's `recordTerminal`, so reaped orphans
+ * were invisible to Grafana by design. The emission reuses the
+ * engine's own path: the shared OTel observer set (the same
+ * composed log + metrics + traces observer the factory wires onto
+ * every control), invoked with the same `JobRunSettledInfo` shape
+ * the engine's `recordTerminal` reports — state "failed" with the
+ * orphan error. It is NOT a second emitter: no event text, metric,
+ * or span is constructed here; the observer owns all three signals.
+ *
+ * Identity follows the recording rule: the feed job id when the row
+ * was dispatching one (the id the run's own records carry), else the
+ * async row id; the pipeline run id when the door resolved one, else
+ * the row id (a run id is never invented). The trigger is the row's
+ * recorded trigger, fail-closed to "manual" through
+ * `normalizeJobRunTrigger` (an async trigger outside the engine's
+ * five modes reads as "manual", never invented).
+ *
+ * Best-effort by contract: an observer failure can never fail the
+ * reap — the row is already failed and audited; the emission is
+ * telemetry, not the settlement.
+ */
+export async function emitOrphanRunSettled(
+  ctx: AsyncJobsContext,
+  info: {
+    jobId: string;
+    runId: string;
+    trigger: unknown;
+    error: string;
+  },
+): Promise<void> {
+  try {
+    await getOtelJobPipelineObservers(ctx.env).runSettledObserver({
+      jobId: info.jobId,
+      runId: info.runId,
+      trigger: normalizeJobRunTrigger(info.trigger),
+      state: "failed",
+      error: info.error,
+    });
+  } catch {
+    // Best-effort: the reap stands either way; the observer logs its
+    // own failure through its own guarded channels.
+  }
+}
+
 /** Issue #4002: parse a row's stored payload, or null when it is
  *  not valid JSON — an unparseable row can never be re-armed. */
 function parseRowPayload(row: Record<string, unknown>): Record<string, unknown> | null {
@@ -1156,6 +1206,16 @@ export async function recoverStaleRunningAsyncJobs(
           ...(pipelineRunId ? { pipelineRunId } : {}),
         });
         failed++;
+        // Issue #6250 item 4 — the reaped orphan emits job.run.settled
+        // (same event, same shape as the engine's recordTerminal):
+        // the feed job id when this row was dispatching one, else the
+        // row id; the pipeline run id when the door resolved one.
+        await emitOrphanRunSettled(ctx, {
+          jobId: feedJobId ?? jobId,
+          runId: pipelineRunId ?? jobId,
+          trigger: jobGraphFields(row).trigger,
+          error: message,
+        });
         if (rearmedJobId) {
           ctx.audit("async_job.retried", "orchestrator", {
             jobId,
@@ -1656,6 +1716,14 @@ async function settleStaleFeedDispatch(
     ...(pipelineRunId ? { pipelineRunId } : {}),
     settledBy: "stale_sweep",
   });
+  // Issue #6250 item 4 — as in the onStart recovery: the reaped feed
+  // orphan emits job.run.settled.
+  await emitOrphanRunSettled(ctx, {
+    jobId: feedJobId ?? jobId,
+    runId: pipelineRunId ?? jobId,
+    trigger: jobGraphFields(row).trigger,
+    error: message,
+  });
   if (rearmedJobId) {
     ctx.audit("async_job.retried", "orchestrator", {
       jobId,
@@ -1727,6 +1795,15 @@ export async function sweepStaleAsyncJobs(
                   : null,
           });
           reaped++;
+          // Issue #6250 item 4 — the generic reap emits job.run.settled
+          // too: the row id is both the job and the run id (no feed
+          // job or pipeline run was resolved for this row).
+          await emitOrphanRunSettled(ctx, {
+            jobId,
+            runId: jobId,
+            trigger: jobGraphFields(row).trigger,
+            error: STALE_RUNNING_REAP_MESSAGE,
+          });
         }
         continue;
       }

@@ -1,18 +1,29 @@
 /**
  * Issue #543 — ResearchAgent agent-run fallback observability
- * (cloudflare.md §8C/F, §9E), re-pointed by #1738 at the SDK actor.
+ * (cloudflare.md §8C/F, §9E), re-pointed by #1738 at the SDK actor
+ * and by #6250 at the fallback's removal.
  *
  * `OrchestratorAgent.runResearchAndPublish` dispatches options research
  * through the Agent actor (`runAgentTool(ResearchAgent, …)`). When that
- * run does not produce a fresh report, it deliberately falls back to
+ * run did not produce a fresh report, it deliberately fell back to
  * the deterministic pipeline (`agent.runResearch(...)`) so scheduled
- * discovery stays dependable. Before #543 the fallback was silent: a
+ * discovery stayed dependable. Before #543 the fallback was silent: a
  * permanently broken agent path would have been masked by successful
  * research output, and logs could not distinguish the two paths.
  *
- * This suite pins the structured warning on the fallback branch: it
- * must exist, it must sit *inside* the fallback branch before the
- * direct pipeline call, and it must carry the correlation identifiers
+ * #6250 REMOVED the fallback (owner directive 2026-11-23: one code
+ * base, wired only once — OODA runs on j-stack and nowhere else).
+ * An incomplete agent turn is now a NAMED failure
+ * (`research_agent_turn_incomplete`), escalated to a human through
+ * the task ledger instead of degrading to a non-engine execution.
+ * The observability intent survives the removal: the failure is
+ * still marked by a structured warning carrying the correlation
+ * identifiers, so a permanently broken agent path is visible in
+ * Workers Logs instead of masked by research output.
+ *
+ * This suite pins the structured warning on the incomplete-turn
+ * branch: it must exist, it must sit *inside* the branch before the
+ * failure return, and it must carry the correlation identifiers
  * (trigger, userLogin, child status/error, previous/latest run ids).
  * Removing or gutting the signal fails the suite. Style follows the
  * repo's source-evidence tests (e.g. tests/agent-conformance.test.ts):
@@ -37,43 +48,35 @@ function methodSection(): string {
   return nextMethod === -1 ? rest : rest.slice(0, nextMethod);
 }
 
-describe("Agent research fallback observability (issue #543)", () => {
+describe("Agent research incomplete-turn observability (issue #543, #6250)", () => {
   const section = methodSection();
 
-  it("the fallback branch still calls the deterministic pipeline directly", () => {
-    // #5912 made the call carry the run's venue/mode selection, so the pin
-    // asserts the direct pipeline call and its correlation arguments rather
-    // than one exact one-line spelling (gitops §7: pins move with the code).
-    const fallbackAt = section.indexOf("const fallback = await agent.runResearch({");
-    expect(fallbackAt).toBeGreaterThan(-1);
-    const call = section.slice(fallbackAt, section.indexOf("});", fallbackAt));
-    expect(call).toContain("trigger");
-    expect(call).toContain("userLogin: login");
+  it("no direct-pipeline fallback remains in the publish entry", () => {
+    expect(section).not.toContain("agent.runResearch(");
+    expect(section).not.toContain('executionPath = "fallback"');
   });
 
-  it("a structured warning marks the Agent bypass on the fallback branch", () => {
-    expect(section).toContain(
-      "Agent research turn bypassed — falling back to direct pipeline"
-    );
+  it("a structured warning marks the incomplete Agent turn", () => {
+    expect(section).toContain("Agent research turn incomplete");
     // #3515 S3: the warning travels as a structuredLog.warn event
-    // (operation researchPublish.research_agent_turn_bypassed), not a
+    // (operation researchPublish.research_agent_turn_incomplete), not a
     // console.warn line — the pin keeps the same strength.
     expect(section).toContain(
-      'structuredLog.warn("researchPublish.research_agent_turn_bypassed"'
+      'structuredLog.warn("researchPublish.research_agent_turn_incomplete"'
     );
   });
 
-  it("the warning is emitted before the fallback call, inside the branch", () => {
-    const fallbackGuard = section.indexOf('child.status !== "completed"');
-    const warnAt = section.indexOf("Agent research turn bypassed");
-    const fallbackCall = section.indexOf("const fallback = await agent.runResearch");
-    expect(fallbackGuard).toBeGreaterThan(-1);
-    expect(warnAt).toBeGreaterThan(fallbackGuard);
-    expect(fallbackCall).toBeGreaterThan(warnAt);
+  it("the warning is emitted before the failure return, inside the incomplete branch", () => {
+    const guard = section.indexOf('child.status !== "completed"');
+    const warnAt = section.indexOf("Agent research turn incomplete");
+    const failAt = section.indexOf("failResearchTask", guard);
+    expect(guard).toBeGreaterThan(-1);
+    expect(warnAt).toBeGreaterThan(guard);
+    expect(failAt).toBeGreaterThan(warnAt);
   });
 
   it("the warning carries the correlation identifiers", () => {
-    const warnAt = section.indexOf("Agent research turn bypassed");
+    const warnAt = section.indexOf("Agent research turn incomplete");
     const statement = section.slice(warnAt, warnAt + 500);
     for (const token of [
       "trigger=${trigger}",
@@ -87,10 +90,8 @@ describe("Agent research fallback observability (issue #543)", () => {
     }
   });
 
-  it("the Agent dispatch remains the primary path (fallback did not replace it)", () => {
+  it("the Agent dispatch is the only path (no fallback replaced it)", () => {
     expect(section).toContain("runAgentTool(ResearchAgent");
-    expect(section.indexOf("runAgentTool(ResearchAgent")).toBeLessThan(
-      section.indexOf("const fallback = await agent.runResearch")
-    );
+    expect(section).not.toContain("agent.runResearch(");
   });
 });

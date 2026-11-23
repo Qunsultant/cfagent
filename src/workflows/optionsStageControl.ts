@@ -99,6 +99,7 @@
  */
 
 import { JobPipelineControl } from "../services/jobPipelineEngine";
+import { createJobPipelineControl } from "../services/jobPipelineControlFactory";
 import { createBuiltinStepRegistry } from "../services/jobPipelineSteps";
 import { JobPipelineError } from "../services/jobPipelineConfig";
 import type { SqlStorage } from "../orm";
@@ -375,7 +376,9 @@ export async function controlOptionsStage(
     } | null = null;
     let lastNotFound: OptionsStageControlError | null = null;
     for (const candidate of candidates) {
-      const reader = new JobPipelineControl({
+      // Issue #6250 — the reader builds through the ONE factory too
+      // (read-only: no run executes here, so no env is passed).
+      const reader = createJobPipelineControl({
         stores: candidate.stores.stores,
         runRecorder: candidate.stores.runRecorder,
         publisher: null,
@@ -534,8 +537,11 @@ export async function controlOptionsStage(
         );
       }
     }
+    // Issue #6250 — the execution control builds through the ONE
+    // factory, with the caller's env: a stage re-run that executes
+    // emits `job.run.settled`.
     const control = needsExecution
-      ? new JobPipelineControl({
+      ? createJobPipelineControl({
           stores: engineStores.stores,
           runRecorder: engineStores.runRecorder,
           publisher: null,
@@ -563,7 +569,7 @@ export async function controlOptionsStage(
           // policy from the caller's env (platform default);
           // the step deps above already carry the same env.
           ...(input.env ? { env: envStrings(input.env) } : {}),
-        })
+        }, { ...(input.env ? { env: input.env } : {}) })
       : reader;
     let state: string;
     if (operation === "run") {

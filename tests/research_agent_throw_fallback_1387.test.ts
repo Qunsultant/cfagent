@@ -1,18 +1,22 @@
 /**
- * Issue #1387 — a THROWN Agent dispatch must degrade to the direct
- * pipeline, not fail the run (re-pointed by #1738 at the SDK actor).
+ * Issue #1387 — a THROWN Agent dispatch fails the run with a named
+ * error (re-pointed by #6250).
  *
  * `runAgentTool`'s fresh path awaits `subAgent` with no try/catch, and
  * `runResearchAndPublish`'s outer try has only a `finally`. So the SDK
  * bootstrap throw (missing OrchestratorAgent root namespace) skipped
- * the #543 fallback — which triggers only on a returned non-completed
+ * the #543 fallback — which triggered only on a returned non-completed
  * status — and failed the whole research run.
  *
- * The fix converts a thrown dispatch into an error-status child before
- * the existing fallback guard, so the established fallback branch (with
- * its #543 structured warning) runs unchanged. The orchestrator cannot
- * be instantiated under Node, so — following the #543 suite's idiom —
- * the pinned contract is the branch structure itself.
+ * #543's fix converted a thrown dispatch into an error-status child
+ * before the fallback guard, so the fallback branch ran. #6250
+ * REMOVED that fallback (one code base, wired only once: OODA runs
+ * on j-stack and nowhere else) — so the thrown dispatch now converts
+ * to an error-status child before the incomplete guard, which fails
+ * the run with the named `research_agent_turn_incomplete` error
+ * instead of degrading to a non-engine execution. The orchestrator
+ * cannot be instantiated under Node, so — following the #543 suite's
+ * idiom — the pinned contract is the branch structure itself.
  */
 import { describe, it, expect } from "vitest";
 import * as fs from "node:fs";
@@ -25,7 +29,7 @@ const publish = fs.readFileSync(
 
 function dispatchSection(): string {
   const start = publish.indexOf(
-    'let executionPath: ResearchExecutionPath = "agent";'
+    'executionPath: ResearchExecutionPath = "agent"'
   );
   expect(start).toBeGreaterThan(-1);
   const guard = publish.indexOf('child.status !== "completed"', start);
@@ -33,7 +37,7 @@ function dispatchSection(): string {
   return publish.slice(start, guard);
 }
 
-describe("Agent dispatch throw falls back to the direct pipeline (#1387)", () => {
+describe("Agent dispatch throw fails the run with a named error (#1387, #6250)", () => {
   const section = dispatchSection();
 
   it("the runAgentTool dispatch is wrapped in try/catch", () => {
@@ -52,12 +56,14 @@ describe("Agent dispatch throw falls back to the direct pipeline (#1387)", () =>
     expect(section).toMatch(/err(?:or)?\s*instanceof\s*Error\s*\?\s*err\.message/);
   });
 
-  it("the existing fallback guard still follows the dispatch", () => {
+  it("no direct-pipeline fallback follows the dispatch — the incomplete guard fails the run", () => {
+    expect(publish).not.toContain("agent.runResearch(");
     const guard = publish.indexOf('child.status !== "completed"');
-    const warn = publish.indexOf("Agent research turn bypassed");
-    const fallback = publish.indexOf("const fallback = await agent.runResearch");
     expect(guard).toBeGreaterThan(-1);
-    expect(warn).toBeGreaterThan(guard);
-    expect(fallback).toBeGreaterThan(warn);
+    const failAt = publish.indexOf("failResearchTask", guard);
+    expect(failAt).toBeGreaterThan(guard);
+    const named = publish.indexOf("research_agent_turn_incomplete", guard);
+    expect(named).toBeGreaterThan(guard);
+    expect(named).toBeLessThan(publish.indexOf("return { success: false, error: failure", guard));
   });
 });
