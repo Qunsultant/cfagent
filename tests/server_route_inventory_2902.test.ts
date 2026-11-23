@@ -565,6 +565,8 @@ const EXPECTED_ROUTES: string[] = [
   "ANY /api/iaaa/bootstrap-proposals/approve",
   "ANY /api/iaaa/bootstrap-proposals/reject",
   "ANY /api/iaaa/bootstrap-proposals/confirm-applied",
+  "ANY /api/iaaa/stale-identities",
+  "ANY /api/iaaa/stale-identities/cleanup",
   "ANY /api/iaaa/memberships",
   "ANY /api/iaaa/deactivate",
   "ANY /api/iaaa/offboard",
