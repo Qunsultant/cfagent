@@ -464,7 +464,7 @@ async function generateAssemble(
   // planning): a manually retried assemble must still refuse a
   // partial feed, naming every blocker.
   const rows = chainRows(deps, chain.chainId);
-  const gate = assessFeedGate(rows);
+  const gate = assessFeedGate(rows, chain);
   if (!gate.ready) {
     const names = gate.blockedBy.map((b) => `${b.shardKey} (${b.reason})`).join(", ");
     throw new Error(`Assembly blocked by feed shard(s): ${names} — no partial report.`);

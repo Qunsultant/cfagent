@@ -51,8 +51,24 @@
 import { createAsyncJobPorts } from "../data/createAsyncJobPorts";
 import { assembleOptionsResultForServe } from "./unifiedReportPipeline";
 import {
+  checkpointFromStageRows,
+  type StageRowLike,
+} from "../workflows/stageRunnerCheckpoint";
+import {
+  planNext,
+  planRun,
+  resumeUnits,
+  type StageRunnerNext,
+} from "../workflows/stageRunnerPlan";
+import {
+  DEFAULT_STAGE_TIMEOUT_MS,
   RUNNER_STAGE_ORDER,
   STAGE_RETRY_BUCKET,
+  runnerStageForPipelineStage,
+} from "../workflows/stageRunnerPorts";
+import type {
+  StageRunnerCheckpoint,
+  StageRunnerPlan,
 } from "../workflows/stageRunnerPorts";
 import type { StageName } from "../messaging/messagingPorts";
 import type {
@@ -376,24 +392,31 @@ export function planServeJob(
  * ALL feed shards are completed. Anything else blocks assembly
  * and is NAMED — a failed shard names its error, a missing or
  * unfinished shard names its status — never a silent partial
- * report.
+ * report. Read off the runner checkpoint (issue 2610): the gate is
+ * the feed stage's entries over the three provider keys.
+ *
+ * The chain is optional for backwards compatibility (the gate's
+ * contract is the three provider keys; a chain-less call projects
+ * the same checkpoint with a predicate-only run id). Production
+ * callers pass the chain so the gate reads the chain's own plan.
  */
 export function assessFeedGate(
-  rows: ShardRow[]
+  rows: ShardRow[],
+  chain?: ShardChainContext,
 ): { ready: true } | { ready: false; blockedBy: Array<{ shardKey: string; reason: string }> } {
+  const checkpoint = chain
+    ? chainStageCheckpoint(chain, rows, "feed")
+    : stageCheckpointForUnits("feed-gate", rows, "feed", FEED_SHARD_KEYS);
   const blockedBy: Array<{ shardKey: string; reason: string }> = [];
   for (const key of FEED_SHARD_KEYS) {
-    const completed = rows.find(
-      (r) => r.stage === "feed" && r.shardKey === key && r.status === "completed"
-    );
-    if (completed) continue;
-    const any = rows.find((r) => r.stage === "feed" && r.shardKey === key);
-    if (!any) {
+    const entry = checkpoint.units.find((u) => u.unitId === key);
+    if (entry?.status === "completed") continue;
+    if (!entry || entry.status === "never-attempted") {
       blockedBy.push({ shardKey: key, reason: "feed shard not submitted" });
-    } else if (any.status === "failed") {
-      blockedBy.push({ shardKey: key, reason: any.error || "feed shard failed" });
+    } else if (entry.status === "failed") {
+      blockedBy.push({ shardKey: key, reason: entry.error || "feed shard failed" });
     } else {
-      blockedBy.push({ shardKey: key, reason: `feed shard status: ${any.status}` });
+      blockedBy.push({ shardKey: key, reason: `feed shard status: ${entry.status}` });
     }
   }
   return blockedBy.length === 0 ? { ready: true } : { ready: false, blockedBy };
@@ -415,31 +438,228 @@ export function shardProvenanceIds(rows: ShardRow[]): string[] {
     .map((r) => r.jobId);
 }
 
+/**
+ * Issue 2610 — the chain → stage-runner bridge.
+ *
+ * The sharded chain is the async-alarm invocation of the one stage runner:
+ * its advance decisions run on the stage-runner contract (one plan per
+ * stage, one checkpoint, planNext for the next stage, resumeUnits for the
+ * resume set), and only the submission construction (shard specs, stagger,
+ * parent linkage) and the chain's domain rules (feed dependency order,
+ * assemble gate, per-format options rules) stay in this module.
+ *
+ * Why one plan per stage: the runner's plan carries ONE unit list shared
+ * across its stages, but the chain's stages have different shard sets
+ * (feed = providers/symbols, generate = assemble+formats, store = formats,
+ * serve/deliver = the run itself). One single-stage plan per stage is the
+ * same shape the engine uses (one stage per job-tree node).
+ */
+export function chainStageUnits(chain: ShardChainContext, stage: PipelineStage): string[] {
+  if (stage === "feed") {
+    if (chain.screenType === "options") {
+      return [...new Set((chain.options?.symbols ?? []).map((s) => s.trim().toUpperCase()).filter(Boolean))];
+    }
+    return [...FEED_SHARD_KEYS];
+  }
+  if (stage === "generate") return ["assemble", ...REPORT_FORMATS];
+  if (stage === "store") return [...REPORT_FORMATS];
+  return [];
+}
+
+function stagePlanForUnits(runId: string, stage: PipelineStage, unitIds: readonly string[]): StageRunnerPlan {
+  const runnerStage = runnerStageForPipelineStage(stage);
+  return planRun({
+    runId,
+    invocation: "async-alarm",
+    stages: [
+      {
+        stage: runnerStage,
+        execution: stage === "generate" || stage === "store" ? "parallel" : "sequential",
+        timeoutMs: DEFAULT_STAGE_TIMEOUT_MS,
+        retryBucket: STAGE_RETRY_BUCKET[runnerStage],
+      },
+    ],
+    units: unitIds.map((unitId) => ({ unitId })),
+  });
+}
+
+/** One stage of one chain, as a runner plan (invocation: async-alarm). */
+export function chainStagePlan(chain: ShardChainContext, stage: PipelineStage): StageRunnerPlan {
+  return stagePlanForUnits(chain.chainId, stage, chainStageUnits(chain, stage));
+}
+
+/** A chain stage's rows for one unit, oldest first (createdAt order — the
+ *  store returns insertion order, but the bridge never assumes it). */
+function chainStageUnitRows(rows: ShardRow[], stage: PipelineStage, runId: string, unitId: string): ShardRow[] {
+  return rows
+    .filter((r) => r.stage === stage && (r.shardKey ?? runId) === unitId)
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+}
+
+/**
+ * One (stage, shard key) unit's current status, from its recorded rows.
+ * This is the chain's C3 retry rule, stated once: a unit counts as healed
+ * when ANY row for it completed — retryAsyncJob keeps the failed row (the
+ * failure record) and adds a new row, so "every row completed" would stall
+ * a healed chain forever. An unhealed failure blocks even while its retry
+ * is queued or running: the retry has not healed anything yet, and the
+ * chain waits for it (feed) or names it (generate/store) instead of
+ * advancing past a unit that is still being re-run.
+ *
+ * The shared projection's statusFor reads "any failed row → failed", which
+ * is correct for its one-unit (per-stage) use — a failed LEG blocks its
+ * stage — but wrong for per-shard units, where a failed row is retry
+ * history once a later row completed. So the heal rule lives here, in the
+ * bridge, as one synthetic row per unit; the shared projection is untouched.
+ * Rows for statuses the chain never records (e.g. a cancelled shard) read
+ * as queued — in flight, waited on — which is the same stall the old
+ * row-level predicates produced, never an advance.
+ */
+function chainUnitRow(pair: ShardRow[], stage: PipelineStage, unitId: string): StageRowLike {
+  const newest = pair[pair.length - 1]!;
+  const base = { unitId, stage, updatedAt: newest.createdAt };
+  if (pair.some((r) => r.status === "completed")) return { ...base, status: "completed" };
+  const failed = pair.find((r) => r.status === "failed");
+  if (failed) {
+    return { ...base, status: "failed", ...(failed.error ? { error: failed.error } : {}) };
+  }
+  if (pair.some((r) => r.status === "running")) return { ...base, status: "running" };
+  return { ...base, status: "queued" };
+}
+
+function stageCheckpointForUnits(
+  runId: string,
+  rows: ShardRow[],
+  stage: PipelineStage,
+  unitIds: readonly string[],
+): StageRunnerCheckpoint {
+  const plan = stagePlanForUnits(runId, stage, unitIds);
+  const effectiveUnits = unitIds.length > 0 ? unitIds : [runId];
+  const synthetic: StageRowLike[] = [];
+  for (const unitId of effectiveUnits) {
+    const pair = chainStageUnitRows(rows, stage, runId, unitId);
+    if (pair.length === 0) continue;
+    // One synthetic row per recorded attempt, so the projected attempt
+    // count stays the recorded row count (the checkpoint is the planner's
+    // view — statuses only; attempt counts live on ShardRow.attempts).
+    const derived = chainUnitRow(pair, stage, unitId);
+    for (let i = 0; i < pair.length; i++) synthetic.push(derived);
+  }
+  return checkpointFromStageRows(runId, synthetic, plan);
+}
+
+/**
+ * One stage of one chain, projected onto the runner checkpoint. The
+ * checkpoint is the planner's view of the stage (statuses only); the rows
+ * remain the audit record.
+ */
+export function chainStageCheckpoint(
+  chain: ShardChainContext,
+  rows: ShardRow[],
+  stage: PipelineStage,
+): StageRunnerCheckpoint {
+  return stageCheckpointForUnits(chain.chainId, rows, stage, chainStageUnits(chain, stage));
+}
+
+/** The next stage to run for one chain stage, or null when every unit of
+ *  the stage is terminal (completed/skipped/cancelled). Failed units are
+ *  non-terminal here — the chain's per-format rule (advance past failed
+ *  legs once every leg is terminal) is a chain-domain rule stated over the
+ *  checkpoint in planShardAdvance, never a planNext substitution. */
+export function chainStageNext(
+  chain: ShardChainContext,
+  rows: ShardRow[],
+  stage: PipelineStage,
+): StageRunnerNext | null {
+  return planNext(chainStagePlan(chain, stage), chainStageCheckpoint(chain, rows, stage));
+}
+
+/**
+ * The units a resume must re-run for one chain stage — only the ones that
+ * did not complete. A completed unit never appears here. This is the one
+ * resume operation for the chain: the failure hook's re-drive
+ * (asyncJobs.ts) reaches it through planShardAdvance's checkpoint-based
+ * terminal decision.
+ */
+export function chainStageResumeUnits(
+  chain: ShardChainContext,
+  rows: ShardRow[],
+  stage: PipelineStage,
+): string[] {
+  return resumeUnits(chainStagePlan(chain, stage), chainStageCheckpoint(chain, rows, stage)).map(
+    (r) => r.unit.unitId,
+  );
+}
+
+/**
+ * Units of one chain stage whose latest row is queued or running AFTER a
+ * failed row — a retry is in flight for them. The feed branch waits on
+ * these (assembly needs every symbol's data); the generate/store branches
+ * do not (stageTerminal counts a failed leg terminal — the serve outcome
+ * carries the leg error). The two terminal rules genuinely differ, and
+ * the difference is named here instead of unified away.
+ */
+export function chainStageInflightRetries(
+  chain: ShardChainContext,
+  rows: ShardRow[],
+  stage: PipelineStage,
+): string[] {
+  const units = chainStageUnits(chain, stage);
+  const effectiveUnits = units.length > 0 ? units : [chain.chainId];
+  const out: string[] = [];
+  for (const unitId of effectiveUnits) {
+    const pair = chainStageUnitRows(rows, stage, chain.chainId, unitId);
+    if (pair.length === 0) continue;
+    const latest = pair[pair.length - 1]!;
+    if (
+      (latest.status === "queued" || latest.status === "running") &&
+      pair.some((r) => r.status === "failed")
+    ) {
+      out.push(unitId);
+    }
+  }
+  return out;
+}
+
 function stageRows(rows: ShardRow[], stage: PipelineStage): ShardRow[] {
   return rows.filter((r) => r.stage === stage);
+}
+
+/** One (stage, unit) checkpoint entry, or undefined when the stage's plan
+ *  carries no such unit. */
+function checkpointEntry(
+  chain: ShardChainContext,
+  rows: ShardRow[],
+  stage: PipelineStage,
+  key: string,
+): { status: string; error?: string } | undefined {
+  return chainStageCheckpoint(chain, rows, stage).units.find((u) => u.unitId === key);
 }
 
 /** A shard key counts as healed when ANY row for it completed —
  *  retryAsyncJob keeps the failed row (the failure record) and
  *  adds a new row, so "every row completed" would stall a healed
- *  chain forever. */
-function keyHasCompleted(rows: ShardRow[], stage: PipelineStage, key: string): boolean {
-  return rows.some((r) => r.stage === stage && r.shardKey === key && r.status === "completed");
+ *  chain forever. Read off the runner checkpoint (issue 2610). */
+function keyHasCompleted(chain: ShardChainContext, rows: ShardRow[], stage: PipelineStage, key: string): boolean {
+  return checkpointEntry(chain, rows, stage, key)?.status === "completed";
 }
 
 /** True when every required key of the stage has a completed row. */
-function stageComplete(rows: ShardRow[], stage: PipelineStage, keys: readonly string[]): boolean {
-  return keys.every((k) => keyHasCompleted(rows, stage, k));
+function stageComplete(chain: ShardChainContext, rows: ShardRow[], stage: PipelineStage, keys: readonly string[]): boolean {
+  const checkpoint = chainStageCheckpoint(chain, rows, stage);
+  return keys.every(
+    (k) => checkpoint.units.find((u) => u.unitId === k)?.status === "completed",
+  );
 }
 
 /** True when some required key has a failed row and NO completed
  *  row — an unhealed failure, the chain's stop point. A failed row
- *  WITH a completed retry row is healed, not blocking. */
-function stageHasFailure(rows: ShardRow[], stage: PipelineStage, keys: readonly string[]): boolean {
+ *  WITH a completed retry row is healed, not blocking. Read off the
+ *  runner checkpoint (issue 2610). */
+function stageHasFailure(chain: ShardChainContext, rows: ShardRow[], stage: PipelineStage, keys: readonly string[]): boolean {
+  const checkpoint = chainStageCheckpoint(chain, rows, stage);
   return keys.some(
-    (k) =>
-      rows.some((r) => r.stage === stage && r.shardKey === k && r.status === "failed") &&
-      !keyHasCompleted(rows, stage, k)
+    (k) => checkpoint.units.find((u) => u.unitId === k)?.status === "failed",
   );
 }
 
@@ -447,17 +667,18 @@ function stageHasFailure(rows: ShardRow[], stage: PipelineStage, keys: readonly 
  *  — completed, or failed with no completed row (unhealed). A
  *  still-running key is not terminal: advancing early would
  *  strand its late completion behind the next stage's
- *  already-submitted guard, so the planner waits for it. */
-function stageTerminal(rows: ShardRow[], stage: PipelineStage, keys: readonly string[]): boolean {
-  return keys.every(
-    (k) =>
-      keyHasCompleted(rows, stage, k) ||
-      rows.some((r) => r.stage === stage && r.shardKey === k && r.status === "failed"),
-  );
+ *  already-submitted guard, so the planner waits for it. Read off
+ *  the runner checkpoint (issue 2610). */
+function stageTerminal(chain: ShardChainContext, rows: ShardRow[], stage: PipelineStage, keys: readonly string[]): boolean {
+  const checkpoint = chainStageCheckpoint(chain, rows, stage);
+  return keys.every((k) => {
+    const status = checkpoint.units.find((u) => u.unitId === k)?.status;
+    return status === "completed" || status === "failed";
+  });
 }
 
-function nextStageSubmitted(rows: ShardRow[], stage: PipelineStage): boolean {
-  return stageRows(rows, stage).length > 0;
+function nextStageSubmitted(chain: ShardChainContext, rows: ShardRow[], stage: PipelineStage): boolean {
+  return chainStageCheckpoint(chain, rows, stage).units.some((u) => u.status !== "never-attempted");
 }
 
 /**
@@ -484,18 +705,33 @@ export function planShardAdvance(input: {
   const { chain, rows, completedStage, completedKey, rootJobId, nowIso } = input;
   if (completedStage === "feed") {
     if (chain.screenType === "options") {
-      const symbols = [...new Set((chain.options?.symbols ?? []).map((s) => s.trim().toUpperCase()).filter(Boolean))];
-      const allTerminal = symbols.length > 0 && symbols.every((symbol) => {
-        const attempts = rows
-          .filter((r) => r.stage === "feed" && r.shardKey === symbol)
-          .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-        const latest = attempts[attempts.length - 1];
-        return latest?.status === "completed" || latest?.status === "failed";
+      // Issue 2610: the terminal decision runs on the runner checkpoint.
+      // The resume set (the runner's resume operation) names the failed
+      // symbols — the units an operator retry must re-run. A symbol is
+      // terminal when it completed or when it failed (and is therefore in
+      // the resume set); a symbol whose retry is queued is NOT terminal
+      // yet — assembly waits for its data, or its late completion would
+      // arrive after assembly and be dropped.
+      const symbols = chainStageUnits(chain, "feed");
+      const plan = chainStagePlan(chain, "feed");
+      const checkpoint = chainStageCheckpoint(chain, rows, "feed");
+      const failed = new Set(
+        resumeUnits(plan, checkpoint)
+          .filter((r) => r.checkpoint.status === "failed")
+          .map((r) => r.unit.unitId),
+      );
+      const terminal = symbols.every((symbol) => {
+        const status = checkpoint.units.find((u) => u.unitId === symbol)?.status;
+        return status === "completed" || failed.has(symbol);
       });
-      if (!allTerminal || nextStageSubmitted(rows, "generate")) return [];
+      const allTerminal =
+        symbols.length > 0 &&
+        terminal &&
+        chainStageInflightRetries(chain, rows, "feed").length === 0;
+      if (!allTerminal || nextStageSubmitted(chain, rows, "generate")) return [];
       return [planAssembleShard(chain, rootJobId)];
     }
-    if (stageHasFailure(rows, "feed", FEED_SHARD_KEYS)) return [];
+    if (stageHasFailure(chain, rows, "feed", FEED_SHARD_KEYS)) return [];
     const next = planNextFeedShard(chain, completedKey, rootJobId);
     if (next) {
       // Retry safety: the successor already exists (a retried shard
@@ -505,9 +741,9 @@ export function planShardAdvance(input: {
       return [next];
     }
     // Feed fully submitted: advance only through the gate.
-    const gate = assessFeedGate(rows);
+    const gate = assessFeedGate(rows, chain);
     if (!gate.ready) return [];
-    if (nextStageSubmitted(rows, "generate")) return [];
+    if (nextStageSubmitted(chain, rows, "generate")) return [];
     return [planAssembleShard(chain, rootJobId)];
   }
   if (completedStage === "generate" && completedKey === "assemble") {
@@ -527,19 +763,19 @@ export function planShardAdvance(input: {
       // outcome carries every leg's error) instead of a chain
       // stalled forever with no record. A still-running format
       // waits — see stageTerminal.
-      if (!keyHasCompleted(rows, "generate", "assemble")) return [];
-      if (!stageTerminal(rows, "generate", REPORT_FORMATS)) return [];
-      if (nextStageSubmitted(rows, "store")) return [];
+      if (!keyHasCompleted(chain, rows, "generate", "assemble")) return [];
+      if (!stageTerminal(chain, rows, "generate", REPORT_FORMATS)) return [];
+      if (nextStageSubmitted(chain, rows, "store")) return [];
       const generated = generateResultsFromRows(rows);
       if (generated.length === 0) {
-        if (nextStageSubmitted(rows, "serve")) return [];
+        if (nextStageSubmitted(chain, rows, "serve")) return [];
         return [planServeJob(chain, input.assembleJobId ?? rootJobId, rows, nowIso)];
       }
       return planStoreShards(chain, input.assembleJobId ?? rootJobId, rows, nowIso);
     }
-    if (stageHasFailure(rows, "generate", ["assemble", ...REPORT_FORMATS])) return [];
-    if (!stageComplete(rows, "generate", ["assemble", ...REPORT_FORMATS])) return [];
-    if (nextStageSubmitted(rows, "store")) return [];
+    if (stageHasFailure(chain, rows, "generate", ["assemble", ...REPORT_FORMATS])) return [];
+    if (!stageComplete(chain, rows, "generate", ["assemble", ...REPORT_FORMATS])) return [];
+    if (nextStageSubmitted(chain, rows, "store")) return [];
     return planStoreShards(chain, input.assembleJobId ?? rootJobId, rows, nowIso);
   }
   if (completedStage === "store") {
@@ -554,13 +790,13 @@ export function planShardAdvance(input: {
       const storedFormats = REPORT_FORMATS.filter((k) =>
         rows.some((r) => r.stage === "store" && r.shardKey === k),
       );
-      if (!stageTerminal(rows, "store", storedFormats)) return [];
-      if (nextStageSubmitted(rows, "serve")) return [];
+      if (!stageTerminal(chain, rows, "store", storedFormats)) return [];
+      if (nextStageSubmitted(chain, rows, "serve")) return [];
       return [planServeJob(chain, input.assembleJobId ?? rootJobId, rows, nowIso)];
     }
-    if (stageHasFailure(rows, "store", REPORT_FORMATS)) return [];
-    if (!stageComplete(rows, "store", REPORT_FORMATS)) return [];
-    if (nextStageSubmitted(rows, "serve")) return [];
+    if (stageHasFailure(chain, rows, "store", REPORT_FORMATS)) return [];
+    if (!stageComplete(chain, rows, "store", REPORT_FORMATS)) return [];
+    if (nextStageSubmitted(chain, rows, "serve")) return [];
     return [planServeJob(chain, input.assembleJobId ?? rootJobId, rows, nowIso)];
   }
   return [];
