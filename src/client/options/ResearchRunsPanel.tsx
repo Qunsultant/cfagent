@@ -34,6 +34,8 @@ import {
 } from "../components/ui";
 import { navigateToTab } from "../router";
 import { apiFetch, csrfHeaders } from "../apiFetch";
+import { defaultTradingMode } from "../../trading";
+import { readTenantProvidersState } from "../tenantProviders";
 import { ScheduledOptionsRunForm } from "./ScheduledOptionsRunForm";
 import { AutonomousOptionsRuns } from "./AutonomousOptionsRuns";
 import { ScreeningActivityPanel } from "./ScreeningActivityPanel";
@@ -689,14 +691,17 @@ export function ResearchRunsPanel({
         {/* Issue #5975 — the venue is a validated enum, not free text: the
             options come from the served catalogue (the same constants the
             route's resolver refuses by), and an empty value is the tenant
-            default, stated in the option itself. */}
+            default, stated in the option itself. Issue #6301: while the
+            served execution description loads, the tenant default reads
+            from the client one home (stored selection, else the
+            vocabulary default) — never "unresolved". */}
         <Select
           aria-label="Broker / venue"
           value={brokerId}
           onChange={(e) => setBrokerId(e.target.value)}
         >
           <option value="">
-            Tenant default ({execution?.venues.defaultBrokerId ?? "unresolved"})
+            Tenant default ({execution?.venues.defaultBrokerId ?? readTenantProvidersState().brokerId})
           </option>
           {(execution?.venues.brokers ?? []).map((broker) => (
             <option key={broker} value={broker}>
@@ -705,7 +710,7 @@ export function ResearchRunsPanel({
           ))}
         </Select>
         <Select aria-label="Mode" value={mode} onChange={(e) => setMode(e.target.value)}>
-          <option value="">Tenant default ({execution?.venues.defaultMode ?? "unresolved"})</option>
+          <option value="">Tenant default ({execution?.venues.defaultMode ?? defaultTradingMode()})</option>
           {(execution?.venues.modes ?? []).map((venueMode) => (
             <option key={venueMode} value={venueMode}>
               {venueMode}
@@ -713,8 +718,8 @@ export function ResearchRunsPanel({
           ))}
         </Select>
         <span className="ui-meta">
-          {`Effective venue: ${brokerId.trim() || execution?.venues.defaultBrokerId || "unresolved"} · ${
-            mode.trim() || execution?.venues.defaultMode || "unresolved"
+          {`Effective venue: ${brokerId.trim() || execution?.venues.defaultBrokerId || readTenantProvidersState().brokerId} · ${
+            mode.trim() || execution?.venues.defaultMode || defaultTradingMode()
           } ${brokerId.trim() || mode.trim() ? "(explicit override)" : "(tenant default)"}`}
         </span>
         <Button onClick={() => setShowFilters(!showFilters)}>{showFilters ? "Hide filters" : "Edit filters"}</Button>

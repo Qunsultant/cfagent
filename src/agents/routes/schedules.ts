@@ -45,6 +45,7 @@
  */
 
 import type { AgentContext, Schedule, ScheduleCriteria } from "agents";
+import { defaultAccountTypeForCallback } from "../../config/accountBindings";
 import { resolveEnvironmentConfig } from "../../config/environment";
 import { getStoredTokens, isTokenExpiredEt, etradeIdentityFromLogin } from "../../security/etradeOAuth";
 import {
@@ -2231,8 +2232,11 @@ export async function handleSchedulesRoutes(
               // Issue #5100 (F3 of #5094): the asset class defaults to
               // the callback's class (options analysis runs against
               // the options account); a body-supplied accountType is
-              // an untrusted hint, validated by the wrapper.
-              accountType: _untrustedAccountType ?? (callback === "autonomousOptionsAnalysis" ? "options" : "stock"),
+              // an untrusted hint, validated by the wrapper. Issue
+              // #6301: the default lives in the one home
+              // (defaultAccountTypeForCallback), shared with the
+              // fire-time guard and the blank-broker repair.
+              accountType: _untrustedAccountType ?? defaultAccountTypeForCallback(callback),
               scope: "schedule",
               explicitAccountId,
               availableAccounts,

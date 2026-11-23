@@ -8,7 +8,7 @@
  */
 import type { Env } from "../types";
 import type { DatabaseORM } from "../orm";
-import { ACCOUNT_BINDING_CONFIG } from "../config/accountBindings";
+import { ACCOUNT_BINDING_CONFIG, defaultAccountTypeForCallback } from "../config/accountBindings";
 import { createStoreKv, type DoNamespaceLike } from "../data/durableKv";
 import { codedMessage, getOutcome } from "../outcomes/outcomeAspects";
 import {
@@ -16,6 +16,7 @@ import {
   applyBrokerRegistryPatch,
   brokerSupports,
   buildDefaultBrokerAssetAccountRegistry,
+  defaultTradingMode,
   isAccountBindingBroker,
   isAccountBindingTuple,
   isBrokerId,
@@ -688,6 +689,99 @@ export async function resolveValidatedExecutionAccountContext(
     };
   }
   return { ok: true, context: ctx };
+}
+
+/**
+ * Issue #6301 — resolve a schedule payload's missing binding pieces
+ * from the ONE defaults home. The fire-time guard and the
+ * blank-broker repair share this function so a blank payload resolves
+ * the same way in both places instead of each carrying its own
+ * fallback.
+ *
+ * - broker: a stamped, registered broker wins (an explicit selection
+ *   is never overridden); a blank broker resolves through the one
+ *   home (`resolveTenantBroker`: stored selection → vocabulary
+ *   default). A present-but-unknown broker is returned as-is,
+ *   never defaulted — it is a corrupt record, and the caller refuses
+ *   it by name via `isBrokerId`.
+ * - mode: a stamped mode wins; a blank mode resolves via
+ *   `resolveScheduledEffectiveMode` (its `modeSource` rides along);
+ *   when that cannot resolve (a broker without the inference leg
+ *   and no TEST/PROD environment — mode is never guessed from a
+ *   missing environment), the vocabulary default mode
+ *   (`defaultTradingMode()`, paper) is the last leg and `modeSource`
+ *   is left unset.
+ * - accountType: a stamped value wins; a blank one resolves to the
+ *   callback's class default (`defaultAccountTypeForCallback`).
+ *
+ * The resolvers are imported LAZILY, never statically: tenantProviders
+ * and scheduledEffectiveMode sit on the trading-barrel load cycle, and
+ * a static import here would bind them before a test's vi.mock of the
+ * barrel (see scheduledBrokerGuard.ts). Dynamic import resolves
+ * through the installed module registry — the mock in tests, the real
+ * reader in production. The accountId is deliberately NOT resolved
+ * here: it needs the validated-account resolution
+ * (`resolveValidatedExecutionAccountContext`, which fails closed when
+ * no binding exists), and the callers invoke that themselves.
+ */
+export interface ScheduleBindingDefaults {
+  /** The effective broker: stamped-valid, or the one-home default. A present-but-unknown broker is returned as-is (never defaulted); the caller refuses it by name via `isBrokerId`. */
+  brokerId: string;
+  /** The effective mode: stamped, resolver-produced, or the vocabulary default. */
+  mode: "live" | "paper";
+  /** Which resolver leg produced the mode; unset when the vocabulary default did. */
+  modeSource?: "pin" | "selection" | "inference";
+  /** The effective account type: stamped, or the callback's class default. */
+  accountType: string;
+}
+
+export async function resolveScheduleBindingDefaults(args: {
+  env: Env;
+  brokerId?: unknown;
+  mode?: unknown;
+  accountType?: unknown;
+  environment?: unknown;
+  /** The firing callback — selects the callback's asset-class default. */
+  callback?: string;
+}): Promise<ScheduleBindingDefaults> {
+  const rawBroker = typeof args.brokerId === "string" ? args.brokerId : "";
+  const rawMode = args.mode === "live" || args.mode === "paper" ? args.mode : undefined;
+  const rawAccountType = typeof args.accountType === "string" ? args.accountType : "";
+  const environment = typeof args.environment === "string" ? args.environment : undefined;
+  let brokerId: string;
+  if (rawBroker) {
+    // A stamped broker is returned as-is — valid or not. The caller
+    // refuses an unknown one by name (isBrokerId); defaulting it
+    // would launder a corrupt record into a run on another broker.
+    brokerId = rawBroker;
+  } else {
+    const { resolveTenantBroker } = await import("./tenantProviders");
+    brokerId = await resolveTenantBroker(args.env);
+  }
+  let mode: "live" | "paper";
+  let modeSource: "pin" | "selection" | "inference" | undefined;
+  if (rawMode) {
+    mode = rawMode;
+  } else {
+    const { resolveScheduledEffectiveMode } = await import("./scheduledEffectiveMode");
+    const effective = await resolveScheduledEffectiveMode({
+      env: args.env,
+      brokerId,
+      environment,
+    });
+    if (effective) {
+      mode = effective.mode;
+      modeSource = effective.modeSource;
+    } else {
+      mode = defaultTradingMode();
+    }
+  }
+  return {
+    brokerId,
+    mode,
+    ...(modeSource ? { modeSource } : {}),
+    accountType: rawAccountType || defaultAccountTypeForCallback(args.callback ?? ""),
+  };
 }
 
 export function accountBindingAuditFields(ctx: ExecutionAccountContext | null): Record<string, unknown> {

@@ -73,6 +73,7 @@ import {
   type RecreateResultItem,
   type Track1PlanItem,
 } from "./adminQueueApi";
+import { labelForBroker, useTenantProviders } from "./tenantProviders";
 import {
   jobCatalogueEntryForCallback,
   jobCatalogueEntryForOperation,
@@ -479,6 +480,11 @@ function genericCadence(s: ScheduleItem): string {
 
 export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusScheduleId = null }: SchedulesPanelProps) {
   const toast = useToast();
+  // Issue #6301 — the tenant's resolved broker (stored selection, else
+  // the vocabulary default alpaca) from the one client home, so the
+  // header and the per-payload broker label never hard-code a broker.
+  const [tenantProviders] = useTenantProviders();
+  const tenantBrokerLabel = labelForBroker(tenantProviders, tenantProviders.brokerId);
   const [schedules, setSchedules] = useState<ScheduleItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -1185,18 +1191,20 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
         const owner = payload.userLogin;
         const environment = payload.environment || payload.env;
         // Issue #3655: the account label names the schedule's broker
-        // (recorded at creation), never a hard-coded E*TRADE. Legacy
-        // payloads without a broker read as E*TRADE — the only broker
-        // wired when they were armed — rather than borrowing the
-        // currently selected broker's name.
+        // (recorded at creation), never a hard-coded E*TRADE. Issue
+        // #6301: a legacy payload without a broker reads as the
+        // tenant's resolved broker — under the fire-time fallback a
+        // blank payload's effective broker IS the resolved default, so
+        // this is the truthful label, not a guess. The one exception
+        // is the E*TRADE token-renewal callback, whose broker is
+        // etrade by definition (callback identity, not a default).
+        const isTokenRenewal = s.callback.toLowerCase().includes("autorenewetradetokens");
         const brokerLabel =
           typeof payload.brokerId === "string" && payload.brokerId
-            ? payload.brokerId === "etrade"
+            ? labelForBroker(tenantProviders, payload.brokerId)
+            : isTokenRenewal
               ? "E*TRADE"
-              : payload.brokerId === "alpaca"
-                ? "Alpaca"
-                : payload.brokerId
-            : "E*TRADE";
+              : tenantBrokerLabel;
         const modeLabel =
           typeof payload.mode === "string" && payload.mode
             ? payload.mode === "live"
@@ -1577,7 +1585,7 @@ export function SchedulesPanel({ activeEnv, userLogin, onPreviewTrade, focusSche
 
       {userLogin && (
         <div className="ui-meta">
-          Schedules for <strong>{userLogin}</strong>{activeEnv ? ` · E*TRADE ${activeEnv}` : ""}
+          Schedules for <strong>{userLogin}</strong>{activeEnv ? ` · ${tenantBrokerLabel} ${activeEnv}` : ""}
         </div>
       )}
 
