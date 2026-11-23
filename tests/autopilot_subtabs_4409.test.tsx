@@ -48,39 +48,55 @@ const DEFAULT_LIMITS = {
   riskProfile: "moderate",
 };
 
-/** Two jobs out of chronological order, so a time sort is observable. */
-const JOBS = [
+/**
+ * Issue #2606: two runs out of chronological order, so a time sort
+ * is observable. The stub returns them as GET /api/runs rows — the
+ * shape Docs reads — and the component maps them onto the table.
+ */
+const RUNS = [
   {
-    id: "job-1",
-    kind: "stock",
+    kind: "screener",
+    id: "report-1",
+    runId: "run-1",
+    title: "Stock screen",
+    summary: "2 matched",
     trigger: "scheduled",
-    status: "completed",
-    scanned: 10,
-    matched: 2,
-    codedError: null,
-    reportUrl: null,
-    pdfKey: null,
-    xlsxKey: null,
-    csvKey: null,
-    deliveryStates: {},
-    origin: "daily-watch",
     createdAt: "2026-11-14T10:00:00.000Z",
+    status: "completed",
+    resultCount: 2,
+    pdfKey: null,
+    reportUrl: "https://example.invalid/reports/report-1",
+    xlsxKey: null,
+    xlsxUrl: null,
+    csvKey: null,
+    csvUrl: null,
+    pdfStatus: "generated",
+    pdfError: null,
+    reportId: "report-1",
+    scanRunId: null,
+    source: "screener",
   },
   {
-    id: "job-2",
-    kind: "options",
+    kind: "options_scanner",
+    id: "scan-2",
+    runId: "run-2",
+    title: "Options scan",
+    summary: "Failed",
     trigger: "manual",
-    status: "failed",
-    scanned: null,
-    matched: null,
-    codedError: "FAILURE_AUTH_NO_SESSION",
-    reportUrl: null,
-    pdfKey: null,
-    xlsxKey: null,
-    csvKey: null,
-    deliveryStates: {},
-    origin: "intraday",
     createdAt: "2026-11-13T09:00:00.000Z",
+    status: "failed",
+    resultCount: null,
+    pdfKey: null,
+    reportUrl: null,
+    xlsxKey: null,
+    xlsxUrl: null,
+    csvKey: null,
+    csvUrl: null,
+    pdfStatus: null,
+    pdfError: null,
+    reportId: null,
+    scanRunId: "scan-2",
+    source: "options_scanner",
   },
 ];
 
@@ -152,7 +168,7 @@ function stubFetch() {
   return vi.fn(async (input: unknown, init?: any) => {
     const url = String(input);
     const method = (init?.method || "GET").toUpperCase();
-    if (url.startsWith("/api/autopilot/jobs")) return jsonResponse({ jobs: JOBS });
+    if (url.startsWith("/api/runs")) return jsonResponse({ runs: RUNS });
     if (url === "/api/autopilot") {
       return jsonResponse({
         running: false,
@@ -371,7 +387,7 @@ describe("autopilot sections as sub-tabs (#4409)", () => {
 
   it("every source line is a single line (nowrap + ellipsis, full text on hover)", async () => {
     const expected: Array<[string, string]> = [
-      ["job-outcomes", "Source: GET /api/autopilot/jobs — mas_job_outcomes (one outcome sink); rows labeled by origin."],
+      ["job-outcomes", "Source: GET /api/runs — the unified run rows Docs reads (issue #2606); coded error and origin arrive only when #6006 folds the outcome facts into the one run source."],
       ["actions", "Source: GET /api/audit (mas_events) + /api/broker/orders (mas_trades). Simulated rows are labeled Sim, never live."],
       ["policy-decisions", "Source: GET /api/autopilot — mas_policy_verdicts, signed by RiskPolicyEngine. Dry-run verdicts are labeled simulated. Scheduled dry-run checks come from the monthly Autopilot evaluation schedule (Schedules home)."],
     ];
@@ -418,10 +434,13 @@ describe("autopilot sections as sub-tabs (#4409)", () => {
     expect(timeCell).not.toBeNull();
 
     await mountAutopilot("?tab=autopilot&view=job-outcomes");
-    const jobDetail = [...(activePanel()?.querySelectorAll(".ui-single-line") ?? [])].find((el) =>
-      el.textContent?.includes("FAILURE_AUTH_NO_SESSION"),
+    // Issue #2606: list rows carry no coded error until #6006, so
+    // the DETAIL cell shows the Report link for the run that has
+    // one instead of a coded-error span.
+    const jobReport = [...(activePanel()?.querySelectorAll("a") ?? [])].find((el) =>
+      el.textContent?.trim() === "Report",
     );
-    expect(jobDetail).toBeDefined();
+    expect(jobReport).toBeDefined();
 
     await mountAutopilot("?tab=autopilot&view=policy-decisions");
     const verdictPanel = activePanel();
@@ -469,20 +488,20 @@ describe("autopilot sections as sub-tabs (#4409)", () => {
 
   it("sorting reorders the job rows by time", async () => {
     await mountAutopilot("?tab=autopilot&view=job-outcomes");
-    // Stub order: job-1 (11/14, daily-watch) first.
-    expect(firstRowText()).toContain("daily-watch");
+    // Stub order: run-1 (11/14, Stock) first.
+    expect(firstRowText()).toContain("Stock");
     await act(async () => {
       sortButtons().find((b) => b.getAttribute("aria-label") === "Sort by DATE & TIME")!.click();
     });
     await flush();
-    // Ascending: job-2 (11/13, intraday) first.
-    expect(firstRowText()).toContain("intraday");
+    // Ascending: run-2 (11/13, Options) first.
+    expect(firstRowText()).toContain("Options");
     await act(async () => {
       sortButtons().find((b) => b.getAttribute("aria-label") === "Sort by DATE & TIME")!.click();
     });
     await flush();
-    // Descending again: job-1 first.
-    expect(firstRowText()).toContain("daily-watch");
+    // Descending again: run-1 first.
+    expect(firstRowText()).toContain("Stock");
   });
 
   it("sorting reorders the action rows by summary", async () => {

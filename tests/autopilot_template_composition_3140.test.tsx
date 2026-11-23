@@ -45,7 +45,7 @@ function stubFetch() {
   return vi.fn(async (input: unknown, init?: any) => {
     const url = String(input);
     const method = (init?.method || "GET").toUpperCase();
-    if (url.startsWith("/api/autopilot/jobs")) return jsonResponse({ jobs: [] });
+    if (url.startsWith("/api/runs")) return jsonResponse({ runs: [] });
     if (url === "/api/autopilot") {
       return jsonResponse({
         running: false,
@@ -254,7 +254,7 @@ describe("autopilot page template composition (#3140)", () => {
     window.history.pushState(null, "", "/?tab=autopilot&view=job-outcomes");
     await mountHub("autopilot");
     for (const [tabLabel, title, source] of [
-      ["Job outcomes", "Job outcomes", "Source: GET /api/autopilot/jobs — mas_job_outcomes"],
+      ["Job outcomes", "Job outcomes", "Source: GET /api/runs"],
       ["Recent autonomous actions", "Recent autonomous actions", "Source: GET /api/audit (mas_events)"],
       ["Policy decisions", "Policy decisions", "Source: GET /api/autopilot — mas_policy_verdicts"],
     ] as const) {

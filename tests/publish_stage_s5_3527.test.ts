@@ -581,8 +581,18 @@ describe("D. job-outcome kind extension (#3527 S5)", () => {
   });
 
   it("the Autopilot job feed labels the new kinds", () => {
+    // Issue #2606: the list re-pointed at GET /api/runs, so the
+    // sink-only kinds (corpus, reports) no longer have labels
+    // here — those rows stay in the sink (pinned above) and in
+    // the run ledger via the #6003 lossless fold. The feed now
+    // labels the four screen families plus engine runs.
     const src = readFileSync("src/client/components/AutopilotControlCenter.tsx", "utf8");
-    expect(src).toContain('corpus: "Corpus Sync"');
-    expect(src).toContain('reports: "Reports Index"');
+    expect(src).toContain('stock: "Stock"');
+    expect(src).toContain('options: "Options"');
+    expect(src).toContain('goal: "Goal Screen"');
+    expect(src).toContain('discovery: "Discovery"');
+    expect(src).toContain('engine: "Engine Run"');
+    expect(src).not.toContain('corpus: "Corpus Sync"');
+    expect(src).not.toContain('reports: "Reports Index"');
   });
 });

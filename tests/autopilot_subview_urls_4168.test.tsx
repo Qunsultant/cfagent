@@ -46,7 +46,7 @@ function stubFetch() {
   return vi.fn(async (input: unknown, init?: any) => {
     const url = String(input);
     const method = (init?.method || "GET").toUpperCase();
-    if (url.startsWith("/api/autopilot/jobs")) return jsonResponse({ jobs: [] });
+    if (url.startsWith("/api/runs")) return jsonResponse({ runs: [] });
     if (url === "/api/autopilot") {
       return jsonResponse({
         running: false,
