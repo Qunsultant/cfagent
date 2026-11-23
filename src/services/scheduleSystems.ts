@@ -77,6 +77,10 @@ export const CREATABLE_SCHEDULE_CALLBACKS_INVENTORY = [
   // Issue #4366 — a job defined from the externalized spec is schedulable
   // through the same store; the callback runs that engine job by id.
   "runPipelineJobSchedule",
+  // Issue #6298 (#6029 (a)) — the OODA research run as a stored schedule;
+  // it fires through `runResearchAndPublish`, the one path whose stage deps
+  // are wired (the door's research deps are the fail-closed defaults).
+  "runResearchSchedule",
 ] as const;
 
 /**

@@ -539,7 +539,10 @@ describe("5880-P09 census: every known job resolves to one entry", () => {
     for (const callback of RECORDED_SCHEDULE_CALLBACKS) {
       expect(jobCatalogueEntryForCallback(callback)?.id).toBeTruthy();
     }
-    expect(RECORDED_SCHEDULE_CALLBACKS).toHaveLength(11);
+    // Issue #6298 (#6029 (a)) grew the recorded set by one: runResearchSchedule
+    // fires the OODA run through the one research path, and the catalogue now
+    // carries its callback on the nightly-research entry.
+    expect(RECORDED_SCHEDULE_CALLBACKS).toHaveLength(12);
   });
 
   it("resolves every creatable inventory callback", () => {

@@ -1244,6 +1244,49 @@ export class OrchestratorAgent extends PortThink {
     await door.runPipelineJob(jobId, { userLogin });
   }
 
+  /**
+   * Issue #6298 (#6029 (a)) — the OODA research run as a stored schedule.
+   *
+   * It fires through `runResearchAndPublish`, the SAME path a manual run uses,
+   * because that path is the one place the six stage dependencies are wired.
+   * Routing it through `runPipelineJobSchedule` instead would land on the
+   * ScheduledAgent door, whose research deps are the fail-closed defaults and
+   * would stop at `FAILURE_RESEARCH_DEPS_MISSING` — a hollow run, which is the
+   * outcome #6029 forbids.
+   *
+   * The payload carries the owner (`userLogin`, falling back to the configured
+   * service identity, exactly like the other scheduled callbacks) and the
+   * ledger job id — `nightly-research` — so a scheduled run keeps the run
+   * ledger join an operator already reads. An unowned firing is skipped, never
+   * run as "default": `dispatchResearchEngineRun` refuses that login anyway.
+   */
+  async runResearchSchedule(
+    payload?: { userLogin?: string; jobId?: string; trigger?: string },
+    schedule?: { id?: unknown },
+  ): Promise<void> {
+    let outcome: ScheduledCallbackOutcome = { outcome: "skipped", detail: "callback did not run" };
+    const run = async (): Promise<ScheduledCallbackOutcome> => {
+      const savedContext = await this.getScreenerExecutionContext();
+      const userLogin = resolveScheduledLogin(payload?.userLogin, savedContext?.userLogin) || "";
+      if (!userLogin) {
+        structuredLog.warn("orchestrator.unowned_scheduled_research_skipped", {
+          message: "[OrchestratorAgent] Skipping unowned scheduled research run.",
+        });
+        return (outcome = { outcome: "skipped", detail: "unowned scheduled research run" });
+      }
+      const res = await this.runResearchAndPublish("scheduled", userLogin);
+      return (outcome = res.success
+        ? {
+            outcome: "success",
+            descriptor: res.reportId ?? "research run published",
+          }
+        : { outcome: "failure", error: res.error ?? "research run failed" });
+    };
+    await recordScheduleCallbackRun(this.ctx.storage.sql, "runResearchSchedule", payload, schedule, run, {
+      audit: (type, agent, body) => this.audit(type, agent, body),
+    });
+  }
+
   async handleA2A(body: unknown, origin: string): Promise<OrchestratorA2AOutcome> {
     void origin; // reserved for per-origin policy (cfpay parity); unused in v1
     this.ensureTables();

@@ -34,6 +34,17 @@ export const CREATABLE_SCHEDULE_CALLBACKS = [
   // broker reads, no order placement, and no broker/account params, so
   // there is no tuple to stamp and no fire-time enforcement to apply.
   "runPipelineJobSchedule",
+  // Issue #6298 (#6029 (a)) — the OODA research run as a stored schedule.
+  // Its own callback rather than `runPipelineJobSchedule`: the research job's
+  // stage dependencies are wired only in the engine seam
+  // (`runResearchAndPublish` / `dispatchResearchEngineRun`), while the
+  // ScheduledAgent door registers the fail-closed defaults, so a pipeline-job
+  // dispatch would stop at `FAILURE_RESEARCH_DEPS_MISSING` instead of running
+  // the six stages. Not account-scoped for the same reason
+  // `runPipelineJobSchedule` is not: the run resolves its venue from the tenant
+  // binding at run time (`resolveResearchVenue`, #6036) and refuses an
+  // unsupported pair by name — no per-schedule tuple is stamped.
+  "runResearchSchedule",
 ] as const;
 
 export const ACCOUNT_SCOPED_SCHEDULE_CALLBACKS = new Set<string>([
