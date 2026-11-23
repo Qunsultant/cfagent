@@ -48,7 +48,9 @@ describe("#5025 schemaComponent barrel & membership store naming", () => {
     // columns + ledger table + 2 indexes): D1 244 → 255.
     // #6167 adds one probed DO ALTER (mas_async_jobs.host_version):
     // remainder 64 → 65.
-    expect(D1_CATALOGUE_ENTRIES.length).toBe(255);
+    // Issue #5102 (F5 of #5094) adds migration 0084 (job_run_records
+    // binding columns: 4 ALTERs + 1 index): D1 255 → 260.
+    expect(D1_CATALOGUE_ENTRIES.length).toBe(260);
     expect(ORM_CATALOGUE_ENTRIES.length).toBe(26);
     // Issue #6167 adds 1 remainder entry (mas_async_jobs.host_version):
     // 64 → 65. Issue #5100 (F3 of #5094) adds 13 remainder entries (4
