@@ -44,6 +44,8 @@ import type { ResearchEnrichStageOutput } from "../services/researchEnrichHandof
 import {
   resolveResearchJobConfig,
   resolveResearchStageModes,
+  resolveResearchStageRetryBuckets,
+  resolveResearchStageTimeouts,
   mergeResearchStageModes,
   type ResearchStageModes,
   type ResearchStorageMode,
@@ -303,6 +305,11 @@ export async function dispatchResearchEngineRun(
       resolveResearchStageModes(input.env),
       input.stageModes,
     ),
+    // Issue #5109, Fix 2 — the per-stage deadlines and retry buckets
+    // resolve from the deployment carriers (defaults when absent),
+    // mirroring the stageModes resolution above.
+    stageTimeouts: resolveResearchStageTimeouts(input.env),
+    stageRetryBuckets: resolveResearchStageRetryBuckets(input.env),
     // Issue #5912 — the venue/mode this run names (carried to analyze.ooda).
     ...(input.brokerId ? { brokerId: input.brokerId } : {}),
     ...(input.mode ? { mode: input.mode } : {}),

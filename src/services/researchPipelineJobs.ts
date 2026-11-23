@@ -15,9 +15,13 @@ import { createStructuredLogger } from "../observability/structuredLogger";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
 import {
   DEFAULT_RESEARCH_JOB_CONFIG,
+  DEFAULT_RESEARCH_STAGE_RETRY_BUCKETS,
+  DEFAULT_RESEARCH_STAGE_TIMEOUTS_MS,
   RESEARCH_AOP_RULES,
   resolveResearchJobConfig,
   type ResearchJobConfig,
+  type ResearchStageRetryBuckets,
+  type ResearchStageTimeouts,
 } from "../config/researchJobConfig";
 import {
   RESEARCH_PIPELINE_STAGES,
@@ -30,7 +34,7 @@ import {
 } from "../workflows/researchDataPorts";
 import { jobDefinitionSpec } from "../config/jobDefinitionCatalog";
 import { bindJobDefinitionParams } from "./jobDefinitionParamBinders";
-import { buildJobConfigFromSpec } from "./jobDefinitionSpecBuilder";
+import { buildJobConfigFromSpec, type JobDefinitionPerStage } from "./jobDefinitionSpecBuilder";
 import type { ResearchFeedStageOutput } from "./researchFeedHandoff";
 import type { ResearchEnrichStageOutput } from "./researchEnrichHandoff";
 
@@ -423,6 +427,10 @@ export interface ResearchJobDefinitionConfig {
   mode?: string;
   /** Issue #5916 — per-stage execution-mode overrides (config-driven). */
   stageModes?: import("../config/researchJobConfig").ResearchStageModes;
+  /** Issue #5109, Fix 2 — per-stage timeout overrides (config-driven). */
+  stageTimeouts?: ResearchStageTimeouts;
+  /** Issue #5109, Fix 2 — per-stage retry-bucket overrides (config-driven). */
+  stageRetryBuckets?: ResearchStageRetryBuckets;
   userLogin: string;
   trigger: "manual" | "scheduled";
   sourceId?: string;
@@ -453,7 +461,18 @@ export function buildResearchJobDefinition(
   const jobId = researchEngineJobId(runId);
   const sourceId = String(bound.sourceId ?? "primary-feed");
   const dataset = String(bound.dataset ?? "quotes");
-  const built = buildJobConfigFromSpec(spec, jobId, bound);
+  // Issue #5109, Fix 2 — the resilient per-stage deadlines and retry
+  // buckets ride the builder's existing `perStage` carrier. Absent
+  // overrides run the recorded defaults, so the stage re-run path
+  // (which names no overrides) gets the same modes as the dispatch.
+  const perStage: JobDefinitionPerStage = {
+    timeouts: { ...DEFAULT_RESEARCH_STAGE_TIMEOUTS_MS, ...(config.stageTimeouts ?? {}) },
+    retryBuckets: {
+      ...DEFAULT_RESEARCH_STAGE_RETRY_BUCKETS,
+      ...(config.stageRetryBuckets ?? {}),
+    },
+  };
+  const built = buildJobConfigFromSpec(spec, jobId, bound, perStage);
   const rawRoot = built.root as Record<string, unknown> & {
     children?: Array<Record<string, unknown>>;
   };

@@ -418,6 +418,10 @@ export const JOB_DEFINITION_SPECS: Readonly<Record<string, JobDefinitionSpec>> =
       pacing: "batch",
       delivery: "async",
       shape: "monolith",
+      // Issue #5109, Fix 2 — durability made explicit: durable is the
+      // default, but the choice is now recorded on the spec so it can
+      // never slip to `in-memory` via a default change.
+      durability: "durable",
     },
     schedule: { enabled: false },
   },
