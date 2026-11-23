@@ -11,7 +11,20 @@
  *   tenantId, workspaceId, principalId, initiatingPrincipalId,
  *   taskId, agentRunId, delegationId, serviceId, connectionId,
  *   externalAccountId, environment, policyVersion,
- *   entitlementReference, approvalReference, correlationId
+ *   entitlementReference, approvalReference, correlationId,
+ *   sessionId, runId, platformId, traceId, dispatchMode, execMode
+ *
+ * The last six are the universal fields (Venus direction
+ * 2026-11-22, #1078 Consistency rule): the context carries ALL ids
+ * and BOTH modes, so the one shared resolution (#6151) produces
+ * this contract verbatim with no second shape. They are optional
+ * inputs validated when present, following the module's existing
+ * optional-field pattern — absence resolves, malformed values deny
+ * fail-closed. Dispatch mode reuses the one trigger vocabulary
+ * (JOB_RUN_TRIGGERS, #5028/#3214 ruling); exec mode is the #4136
+ * axis (sync/async), separate from the dispatch mode, never
+ * conflated. Narrowing inherits every universal field verbatim
+ * and can never set or change one.
  *
  * Rules (fail-closed throughout):
  * - resolveExecutionContext() is the only constructor. It builds a
@@ -57,6 +70,10 @@ import {
   type Permission,
 } from "./authorization";
 import {
+  JOB_RUN_TRIGGERS,
+  type JobRunTrigger,
+} from "../data/jobRunRecordPorts";
+import {
   recordAuditEvent,
   type ActorType,
   type AuditResult,
@@ -70,6 +87,21 @@ export const EXECUTION_CONTEXT_POLICY_VERSION = "execution-context-1";
 // ---------------------------------------------------------------------------
 
 export type ExecutionEnvironment = "sandbox" | "live";
+
+/**
+ * Dispatch mode: the five modes of the #5028/#3214 ruling (Venus
+ * 2026-11-17). JOB_RUN_TRIGGERS is the one source of truth; this
+ * type is an alias, never a second vocabulary.
+ */
+export type ExecutionDispatchMode = JobRunTrigger;
+
+/**
+ * Exec mode: the #4136 axis, separate from the dispatch mode — the
+ * trigger says what dispatched this execution; the exec mode says
+ * whether the caller awaits it. Never conflated, never defaulted:
+ * an unknown value denies at resolution (INVALID_FIELD).
+ */
+export type ExecutionMode = "sync" | "async";
 
 export interface ExecutionContext {
   tenantId: string;
@@ -91,6 +123,18 @@ export interface ExecutionContext {
   entitlementReference?: string;
   approvalReference?: string;
   correlationId: string;
+  /** Session this execution belongs to (universal field). */
+  sessionId?: string;
+  /** Uniform job/workflow run id (universal field). */
+  runId?: string;
+  /** Owning platform/domain (universal field). */
+  platformId?: string;
+  /** Trace id, carried by the attribution envelope (universal field). */
+  traceId?: string;
+  /** What dispatched this execution (universal field). */
+  dispatchMode?: ExecutionDispatchMode;
+  /** Whether the caller awaits this execution (universal field). */
+  execMode?: ExecutionMode;
 }
 
 // ---------------------------------------------------------------------------
@@ -142,6 +186,12 @@ export interface ResolveExecutionContextInput {
   entitlementReference?: string;
   approvalReference?: string;
   correlationId?: string;
+  sessionId?: string;
+  runId?: string;
+  platformId?: string;
+  traceId?: string;
+  dispatchMode?: ExecutionDispatchMode;
+  execMode?: ExecutionMode;
   nowMs: number;
 }
 
@@ -168,6 +218,12 @@ export interface ExecutionContextRequestEcho {
   serviceId: string;
   correlationId: string;
   approvalReference?: string;
+  sessionId?: string;
+  runId?: string;
+  platformId?: string;
+  traceId?: string;
+  dispatchMode?: ExecutionDispatchMode;
+  execMode?: ExecutionMode;
 }
 
 export type ResolveExecutionContextResult =
@@ -223,6 +279,22 @@ function echoOf(input: ResolveExecutionContextInput): ExecutionContextRequestEch
       typeof input.approvalReference === "string"
         ? normalize(input.approvalReference)
         : undefined,
+    sessionId:
+      typeof input.sessionId === "string"
+        ? normalize(input.sessionId)
+        : undefined,
+    runId:
+      typeof input.runId === "string" ? normalize(input.runId) : undefined,
+    platformId:
+      typeof input.platformId === "string"
+        ? normalize(input.platformId)
+        : undefined,
+    traceId:
+      typeof input.traceId === "string"
+        ? normalize(input.traceId)
+        : undefined,
+    dispatchMode: input.dispatchMode,
+    execMode: input.execMode,
   };
 }
 
@@ -268,6 +340,10 @@ export async function resolveExecutionContext(
     ["approvalReference", input.approvalReference],
     ["correlationId", input.correlationId],
     ["initiatingPrincipalId", input.initiatingPrincipalId],
+    ["sessionId", input.sessionId],
+    ["runId", input.runId],
+    ["platformId", input.platformId],
+    ["traceId", input.traceId],
   ];
   for (const [name, value] of optional) {
     if (value !== undefined && !isValidField(value)) {
@@ -276,6 +352,28 @@ export async function resolveExecutionContext(
   }
   if (input.environment !== "sandbox" && input.environment !== "live") {
     return deny(input, "INVALID_FIELD", "environment must be sandbox or live");
+  }
+  // Modes validate by membership, never by default: an unknown
+  // dispatch mode must deny, never silently read as "manual"
+  // (normalizeJobRunTrigger's manual default is the dispatch-site
+  // pass-through, not this contract). An unknown exec mode denies
+  // the same way; there is no default exec mode.
+  if (
+    input.dispatchMode !== undefined &&
+    !(JOB_RUN_TRIGGERS as readonly string[]).includes(input.dispatchMode)
+  ) {
+    return deny(
+      input,
+      "INVALID_FIELD",
+      "dispatchMode must be one of scheduled, manual, triggered, copilot, autopilot",
+    );
+  }
+  if (
+    input.execMode !== undefined &&
+    input.execMode !== "sync" &&
+    input.execMode !== "async"
+  ) {
+    return deny(input, "INVALID_FIELD", "execMode must be sync or async");
   }
   if (input.externalAccountId !== undefined && input.connectionId === undefined) {
     return deny(
@@ -393,6 +491,17 @@ export async function resolveExecutionContext(
     correlationId: isValidField(input.correlationId)
       ? normalize(input.correlationId)
       : crypto.randomUUID(),
+    sessionId:
+      input.sessionId !== undefined ? normalize(input.sessionId) : undefined,
+    runId: input.runId !== undefined ? normalize(input.runId) : undefined,
+    platformId:
+      input.platformId !== undefined
+        ? normalize(input.platformId)
+        : undefined,
+    traceId:
+      input.traceId !== undefined ? normalize(input.traceId) : undefined,
+    dispatchMode: input.dispatchMode,
+    execMode: input.execMode,
   };
   return { ok: true, context: Object.freeze(context) };
 }
@@ -422,7 +531,10 @@ export type NarrowExecutionContextResult =
  * the environment can narrow live → sandbox but never escalate;
  * the connection cannot change (a different connection requires
  * a fresh resolution); references a parent already carries cannot
- * be replaced, only added when the parent lacks them.
+ * be replaced, only added when the parent lacks them. The universal
+ * fields (sessionId, runId, platformId, traceId, dispatchMode,
+ * execMode) are inherited verbatim and can never be set or changed
+ * by narrowing — they are stamped at resolution, not at delegation.
  */
 export function narrowExecutionContext(
   parent: ExecutionContext,
@@ -567,6 +679,12 @@ const CONTEXT_FIELDS: ReadonlySet<string> = new Set([
   "entitlementReference",
   "approvalReference",
   "correlationId",
+  "sessionId",
+  "runId",
+  "platformId",
+  "traceId",
+  "dispatchMode",
+  "execMode",
 ]);
 
 /**
@@ -607,11 +725,30 @@ export function parseExecutionContext(raw: string): ExecutionContext | null {
     "externalAccountId",
     "entitlementReference",
     "approvalReference",
+    "sessionId",
+    "runId",
+    "platformId",
+    "traceId",
   ] as const;
   for (const field of optionalStrings) {
     if (record[field] !== undefined && !isValidField(record[field])) {
       return null;
     }
+  }
+  if (
+    record.dispatchMode !== undefined &&
+    !(JOB_RUN_TRIGGERS as readonly string[]).includes(
+      record.dispatchMode as string,
+    )
+  ) {
+    return null;
+  }
+  if (
+    record.execMode !== undefined &&
+    record.execMode !== "sync" &&
+    record.execMode !== "async"
+  ) {
+    return null;
   }
   if (
     record.principalType !== "human" &&
