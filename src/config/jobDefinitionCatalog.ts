@@ -391,8 +391,8 @@ export const JOB_DEFINITION_SPECS: Readonly<Record<string, JobDefinitionSpec>> =
         type: "select",
         required: false,
         enumSource: "universes",
-        default: "NASDAQ100",
-        description: "The universe the research run screens.",
+        description:
+          "The universe the research run screens. Absent ⇒ the run's configured universe; an unsupported id is refused by name before the run starts (#6032).",
       },
       {
         name: "brokerId",
@@ -406,8 +406,10 @@ export const JOB_DEFINITION_SPECS: Readonly<Record<string, JobDefinitionSpec>> =
         label: "Mode",
         type: "select",
         required: false,
-        options: ["paper", "live"],
-        default: "paper",
+        // Issue #6031/#6036 — the mode vocabulary is the venue resolver's,
+        // never a second literal. No default is invented here: an absent mode
+        // is inherited from the tenant binding by resolveResearchVenue.
+        enumSource: "tradeModes",
         description: "The trade mode the run resolves against the selected broker.",
       },
     ],
