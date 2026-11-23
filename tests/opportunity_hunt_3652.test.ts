@@ -14,7 +14,7 @@
  * - a forced `opportunity-hunt` tick records a success run whose
  *   descriptor is the hunt summary and stamps the goal.
  */
-import { describe, it, expect, vi } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 
 vi.mock("agents", () => ({
   routeAgentRequest: async () => null,
@@ -154,7 +154,21 @@ describe("executeOpportunityHunt (#3652)", () => {
 });
 
 describe("the opportunity-hunt tick (#3652)", () => {
+  // Issue #6205 — every test in this block restores the real clock, so a
+  // pinned `Date` can never leak into the next file.
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("records a success run carrying the hunt summary and stamps the goal", async () => {
+    // Issue #6205 — pin the tick's clock. `onCron` runs every goal that is due
+    // in the same tick as the forced one, and `resource-cap-alert` (daily
+    // 00:00 UTC) needs AGENT_DB, which this test's env does not bind. With the
+    // real clock the assertion below therefore passed or failed depending on
+    // the hour CI ran. Only `Date` is faked: no timer in the path changes.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-19T12:00:00.000Z"));
+
     const { ctx } = makeCtx();
     const agent: any = new (ScheduledAgent as any)(ctx, makeEnv());
     const summary = "Opportunity hunt: 0 setup(s) across 2 symbol(s) — none";
@@ -169,7 +183,11 @@ describe("the opportunity-hunt tick (#3652)", () => {
     const tick = await agent.onCron({ forceGoalId: "opportunity-hunt" });
 
     expect(spy).toHaveBeenCalledTimes(1);
-    expect(tick.errors).toEqual([]);
+    // Issue #6205 — scoped to the goal under test. `onCron` runs every goal
+    // that is due in the same tick as the forced one (by design), and another
+    // goal's missing binding is that goal's prerequisite, not this one's
+    // failure. The assertion still fails if this goal records an error.
+    expect(tick.errors.filter((e: string) => e.startsWith("opportunity-hunt:"))).toEqual([]);
     expect(tick.jobsCreated).toBeGreaterThanOrEqual(1);
     const goal = (await agent.listGoals()).find((g: any) => g.id === "opportunity-hunt")!;
     expect(goal.lastRun).toBeTruthy();
