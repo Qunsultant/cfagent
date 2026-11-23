@@ -16,6 +16,12 @@ describe("5568 research spec adoption", () => {
       "dataset",
       "trigger",
       "cron",
+      // Issue #6031 — the run-level parameters the Define page collects
+      // (declared without defaults: an absent venue/mode is inherited
+      // from the tenant binding, #6036).
+      "universe",
+      "brokerId",
+      "mode",
     ]);
   });
 
