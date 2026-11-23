@@ -444,6 +444,43 @@ export interface ResearchStageRow {
   result: ResearchStageResult | null;
   /** Present only when `result` is null. */
   resultReason?: ResearchStageResultReason;
+  /**
+   * Issue #6355 — the persisted step output's `status` when the output
+   * carries one (e.g. "not_configured"). Null when the output has no
+   * status field or no artifact was persisted — never a fabricated
+   * status. A present "not_configured" is the no-op signature: the
+   * stage completed without doing its work.
+   */
+  stepStatus: string | null;
+  /**
+   * Issue #6355 — the unit attempt count from the live checkpoint.
+   * Null when only persisted terminal rows survive (they carry no
+   * attempt) or the stage never ran.
+   */
+  attempt: number | null;
+}
+
+/**
+ * Issue #6355 — the persisted step output's `status` for one stage, or
+ * null when the stage wrote no artifact or its output carries no status
+ * field. The key is the engine's stage-output key
+ * (<nodePath>/stage-output, `keyPart` in jobPipelineEngine.ts) — the
+ * same key the engine writes and stageInput reads. A missing artifact
+ * is null, never an error: the stages read must not fail because one
+ * stage's output is absent.
+ */
+async function readStageOutputStatus(
+  stores: JobPipelineDeps["stores"],
+  runId: string,
+  nodePath: string,
+): Promise<string | null> {
+  const key = `${nodePath === "" ? "root" : nodePath}/stage-output`;
+  const output = await stores.artifacts.getArtifact(runId, key).catch(() => null);
+  if (output && typeof output === "object" && !Array.isArray(output)) {
+    const status = (output as Record<string, unknown>).status;
+    return typeof status === "string" ? status : null;
+  }
+  return null;
 }
 
 /**
@@ -504,51 +541,72 @@ export async function readResearchStages(
       .filter((row) => row.action === "terminal" && row.stageStatus)
       .map((row) => [row.stageId, row]),
   );
-  const stages: ResearchStageRow[] = RESEARCH_PIPELINE_STAGES.map((stageId) => {
-    const found = view?.stages.find((stage) => stage.kind === stageId) ?? null;
-    const stored = persistedByStage.get(stageId) ?? null;
-    const units = found?.units ?? [];
-    const failed = units.some((unit) => unit.status === "failed");
-    const running = units.some((unit) => unit.status === "running");
-    const stopped = units.some((unit) => unit.status === "stopped");
-    const status = !found
-      ? (stored?.stageStatus ?? "pending")
-      : failed
-        ? "failed"
-        : running
-          ? "running"
-          : stopped
-            ? "stopped"
-            : units.length === 0
-              ? (stored?.stageStatus ?? "pending")
-              : "completed";
-    // Issue #6034 — the result and its coded reason. A live stage's own
-    // descriptor wins over the persisted row (the checkpoint is the truth
-    // while the run is in front of us); an absent result is `no_artifact`
-    // when the stage ran and `not_run` when it never did.
-    const descriptor = found?.resultRef ?? stored?.resultRef ?? null;
-    const ran = Boolean(found || stored);
-    const result: ResearchStageResult | null = descriptor ? { descriptor } : null;
-    const resultReason: ResearchStageResultReason | undefined = result
-      ? undefined
-      : ran
-        ? "no_artifact"
-        : "not_run";
-    return {
-      stageId,
-      status,
-      startedAt: found?.startedAt ?? stored?.startedAt ?? null,
-      endedAt: found?.endedAt ?? stored?.endedAt ?? null,
-      durationMs: found?.durationMs ?? stored?.durationMs ?? null,
-      unitCount: found ? found.units.length : (stored?.unitCount ?? 0),
-      failedUnitCount: found
-        ? found.units.filter((unit) => unit.status === "failed" || unit.status === "timed_out")
-            .length
-        : (stored?.failedUnitCount ?? 0),
-      result,
-      ...(resultReason ? { resultReason } : {}),
-    };
-  });
+  // Issue #6355 — the engine run id the stage-output artifacts are
+  // keyed under: the dispatch pins it to the research run id, so the
+  // input run id is the fallback when the checkpoint (and its
+  // currentRunId) is gone.
+  const artifactRunId = view?.instance?.currentRunId ?? input.runId;
+  const stages: ResearchStageRow[] = await Promise.all(
+    RESEARCH_PIPELINE_STAGES.map(async (stageId) => {
+      const found = view?.stages.find((stage) => stage.kind === stageId) ?? null;
+      const stored = persistedByStage.get(stageId) ?? null;
+      const units = found?.units ?? [];
+      const failed = units.some((unit) => unit.status === "failed");
+      const running = units.some((unit) => unit.status === "running");
+      const stopped = units.some((unit) => unit.status === "stopped");
+      const status = !found
+        ? (stored?.stageStatus ?? "pending")
+        : failed
+          ? "failed"
+          : running
+            ? "running"
+            : stopped
+              ? "stopped"
+              : units.length === 0
+                ? (stored?.stageStatus ?? "pending")
+                : "completed";
+      // Issue #6034 — the result and its coded reason. A live stage's own
+      // descriptor wins over the persisted row (the checkpoint is the truth
+      // while the run is in front of us); an absent result is `no_artifact`
+      // when the stage ran and `not_run` when it never did.
+      const descriptor = found?.resultRef ?? stored?.resultRef ?? null;
+      const ran = Boolean(found || stored);
+      const result: ResearchStageResult | null = descriptor ? { descriptor } : null;
+      const resultReason: ResearchStageResultReason | undefined = result
+        ? undefined
+        : ran
+          ? "no_artifact"
+          : "not_run";
+      // Issue #6355 — the unit attempt count and the step output's status.
+      // attempt comes from the live checkpoint (the terminal rows carry
+      // none); stepStatus comes from the stage's persisted step-output
+      // artifact. Both stay null when the record is absent — a future
+      // no-op reads as stepStatus "not_configured", never as a healthy
+      // 0 ms completion.
+      const attempt =
+        found && found.units.length > 0
+          ? Math.max(...found.units.map((unit) => unit.attempt))
+          : null;
+      const nodePath = found?.nodePath ?? String(RESEARCH_PIPELINE_STAGES.indexOf(stageId));
+      const stepStatus = await readStageOutputStatus(stores, artifactRunId, nodePath);
+      return {
+        stageId,
+        status,
+        startedAt: found?.startedAt ?? stored?.startedAt ?? null,
+        endedAt: found?.endedAt ?? stored?.endedAt ?? null,
+        durationMs: found?.durationMs ?? stored?.durationMs ?? null,
+        unitCount: found ? found.units.length : (stored?.unitCount ?? 0),
+        failedUnitCount: found
+          ? found.units.filter((unit) => unit.status === "failed" || unit.status === "timed_out")
+              .length
+          : (stored?.failedUnitCount ?? 0),
+        result,
+        ...(resultReason ? { resultReason } : {}),
+        stepStatus,
+        attempt,
+      };
+    }),
+  );
   return {
     engineJobId,
     jobState: view?.instance?.state ?? "idle",
