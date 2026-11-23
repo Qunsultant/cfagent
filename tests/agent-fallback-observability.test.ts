@@ -21,6 +21,16 @@
  * identifiers, so a permanently broken agent path is visible in
  * Workers Logs instead of masked by research output.
  *
+ * Issue #5109 Fix 1 narrows (does not remove) the no-direct-call rule:
+ * the analyze leg's feed branch executes the pipeline via
+ * agent.runResearch on the tenant agent — the leg's PRIMARY execution
+ * when the feed stage already ran on J-stack, consuming the engine's
+ * persisted stage outputs. It is not a fallback: no turn is dispatched
+ * in that branch, so there is no failed turn to degrade from. The
+ * no-direct-call assertions below are therefore scoped to the dispatch
+ * section (from the runAgentTool call to the guard), where the
+ * fallback rule stands.
+ *
  * This suite pins the structured warning on the incomplete-turn
  * branch: it must exist, it must sit *inside* the branch before the
  * failure return, and it must carry the correlation identifiers
@@ -52,7 +62,15 @@ describe("Agent research incomplete-turn observability (issue #543, #6250)", () 
   const section = methodSection();
 
   it("no direct-pipeline fallback remains in the publish entry", () => {
-    expect(section).not.toContain("agent.runResearch(");
+    // #5109 Fix 1: the feed branch (analyze leg) executes the pipeline via
+    // agent.runResearch as its primary execution — not a fallback. The
+    // fallback rule stands: the dispatch section (runAgentTool call to the
+    // guard) contains no direct call.
+    const dispatchStart = section.indexOf("runAgentTool(ResearchAgent");
+    expect(dispatchStart).toBeGreaterThan(-1);
+    const guard = section.indexOf('child.status !== "completed"', dispatchStart);
+    expect(guard).toBeGreaterThan(-1);
+    expect(section.slice(dispatchStart, guard)).not.toContain("agent.runResearch(");
     expect(section).not.toContain('executionPath = "fallback"');
   });
 
@@ -92,6 +110,11 @@ describe("Agent research incomplete-turn observability (issue #543, #6250)", () 
 
   it("the Agent dispatch is the only path (no fallback replaced it)", () => {
     expect(section).toContain("runAgentTool(ResearchAgent");
-    expect(section).not.toContain("agent.runResearch(");
+    // #5109 Fix 1: scoped to the dispatch section — the feed branch's
+    // primary leg execution lives before the dispatch, not after it.
+    const dispatchStart = section.indexOf("runAgentTool(ResearchAgent");
+    const guard = section.indexOf('child.status !== "completed"', dispatchStart);
+    expect(guard).toBeGreaterThan(-1);
+    expect(section.slice(dispatchStart, guard)).not.toContain("agent.runResearch(");
   });
 });
