@@ -99,11 +99,12 @@ describe("recreate + tenant isolation (#4282 P4)", () => {
   // mas_policy_verdicts): 464 → 477.
   // Issue #5102 (F5 of #5094) adds migration 0084 (job_run_records
   // binding columns: 4 ALTERs + 1 index): 486 → 491.
-    expect(first.summary.totalSteps).toBe(491);
-    expect(first.summary.executed).toBe(491);
+  // #6151 S3 adds migration 0085 (saved nav presets: 2 tables + 2 indexes): 491 → 495.
+    expect(first.summary.totalSteps).toBe(495);
+    expect(first.summary.executed).toBe(495);
     expect(first.summary.failed).toBe(0);
     expect(first.summary.skipped).toBe(0);
-    expect(first.executed).toHaveLength(491);
+    expect(first.executed).toHaveLength(495);
     expect(first.failed).toEqual([]);
     expect(first.skipped).toEqual([]);
     // Uncreatable layers are deployment facts, not changes: they are
@@ -241,8 +242,8 @@ describe("recreate + tenant isolation (#4282 P4)", () => {
       partial.summary.executed +
         partial.summary.failed +
         partial.summary.skipped,
-    ).toBe(491);
-    expect(partial.summary.totalSteps).toBe(491);
+    ).toBe(495);
+    expect(partial.summary.totalSteps).toBe(495);
     // The degradation is VISIBLE, never silent: the post-run equality
     // check fails. The missing indexes are exactly the failed step's
     // index plus the indexes of the skipped steps (the run stopped in
