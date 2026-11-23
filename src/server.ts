@@ -51,6 +51,7 @@ registerTransactionRunner(aspectTransactionRunner);
 import { requireAuth } from "./server/auth";
 import { handleCoreEarlyRoutes, handleCoreLateRoutes, ensureBreakerDurability } from "./server/routes/core";
 import { handleAuthMeRoutes, handleAuthIaaaRoutes } from "./server/routes/auth";
+import { handleNavRoutes } from "./server/routes/nav";
 import { handlePrivacyRoutes, handlePrivacyChainsRoutes, handlePrivacyReportsRoutes } from "./server/routes/privacy";
 import { handleTradingScheduleRoutes, handleTradingOmniRoutes, handleTradingQuotesRoutes, handleTradingApproveRoutes } from "./server/routes/trading";
 import { handleMessagingSagaRoutes, handleMessagingSocialRoutes, handleMessagingSlackRoutes } from "./server/routes/messaging";
@@ -186,6 +187,11 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
     // /api/iaaa/overview, /api/governance/seed-halt moved to src/server/routes/auth.ts.
     const authMeResponse = await handleAuthMeRoutes(request, env, url, path);
     if (authMeResponse) return authMeResponse;
+    // #6151 S1: the nav-availability endpoint — GET
+    // /api/platform/nav-availability, the first consumer of the one
+    // shared platform-context resolution.
+    const navResponse = await handleNavRoutes(request, env, url, path);
+    if (navResponse) return navResponse;
     // Slice 4 (#2902): chains/jobs/traces/registry/catalog/reconcile/retention
     // moved to src/server/routes/privacy.ts — /api/chains/*, /api/jobs/*,
     // /api/traces, /api/agents/registry, /api/products/catalog, /api/retention/purge.

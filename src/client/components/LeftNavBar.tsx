@@ -3,6 +3,7 @@ import { Badge, Button } from "../components/ui";
 import {
   DEFAULT_LEFT_NAV_CONFIG,
   isNavItemOrSubItemActive,
+  navSubItemAvailabilityKey,
   platformAdminSectionFromNavId,
   type LeftNavConfig,
   type NavMenuItemConfig,
@@ -176,10 +177,15 @@ export function LeftNavBar({
     handleNavLinkClick(event, link);
   };
 
-  const isSubVisible = (sub: NavSubMenuItemConfig) => {
+  const isSubVisible = (sub: NavSubMenuItemConfig, parentId: string) => {
     // A disabled sub-product is hidden, never rendered greyed-out
     // with a dead link; unknown ids (e.g. hub-internal iv-history)
-    // have no tab map entry and stay visible, as before.
+    // have no tab map entry and stay visible, as before. #6151 S1:
+    // a sub-item the server marks unavailable in the effective map
+    // is hidden too — the map key is `<parentId>:<subId>`.
+    if (visibleTabs && visibleTabs[navSubItemAvailabilityKey(parentId, sub.id)] === false) {
+      return false;
+    }
     return isTabFeatureEnabled(sub.id as NavTabId);
   };
 
@@ -282,7 +288,9 @@ export function LeftNavBar({
                   const isExpanded = Boolean(
                     !collapsed && (expandedMenus[item.id] || hoveredItem === item.id),
                   );
-                  const visibleSubItems = (item.subItems ?? []).filter(isSubVisible);
+                  const visibleSubItems = (item.subItems ?? []).filter((sub) =>
+                    isSubVisible(sub, item.id),
+                  );
                   const flyoutOpen = Boolean(collapsed && flyout?.id === item.id && visibleSubItems.length > 0);
                   const active =
                     getNavGroup(activeTab) === item.id ||

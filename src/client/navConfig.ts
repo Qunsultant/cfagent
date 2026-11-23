@@ -226,6 +226,79 @@ export function platformAdminSectionFromNavId(id: string): string | undefined {
   return id.startsWith(prefix) ? id.slice(prefix.length) : undefined;
 }
 
+/**
+ * The four personas the nav-availability endpoint classifies
+ * (#6151 S1, part 6). Admins see the entire menu; paid/non-paid
+ * differ by the resolved tier fact.
+ */
+export type NavPersona = "platform-admin" | "tenant-admin" | "paid" | "non-paid";
+
+/**
+ * Persona defaults, externalized in the nav config data
+ * (nav-config.json `personaDefaults`: persona → preset key, never
+ * a map — the maps stay owned by NAV_TAB_PRESETS, so no preset data
+ * is duplicated). A saved preset overrides the default (S3); a
+ * per-user allow-list caps it (S4). S1's four defaults are all
+ * alltabs-equivalent, so the change is behavior-preserving on day one.
+ */
+const PERSONA_DEFAULTS = navConfigData.personaDefaults as unknown as Record<
+  NavPersona,
+  string
+>;
+
+export function personaDefaultPresetKey(persona: NavPersona): string {
+  const key = PERSONA_DEFAULTS?.[persona];
+  return typeof key === "string" && key.length > 0 ? key : "alltabs";
+}
+
+/**
+ * The built-in preset keys (#6151 S1: the endpoint's
+ * `availablePresets`). The keys live here, in the nav config data —
+ * never a second literal in server code. The client owns the preset
+ * MAPS (NAV_TAB_PRESETS); this list is the keys only, and the
+ * endpoint test pins it equal to Object.keys(NAV_TAB_PRESETS), so
+ * the two can never drift. Saved-preset ids join the list in S3.
+ */
+export function builtinPresetKeys(): string[] {
+  const keys = navConfigData.presetKeys as unknown;
+  return Array.isArray(keys) ? keys.filter((k): k is string => typeof k === "string") : [];
+}
+
+/**
+ * The availability key for a sub-item of a nav parent. Most sub
+ * items carry a bare id (`data-providers` under `data-hub`), so the
+ * key is `<parentId>:<subId>`; a sub item whose id is already
+ * qualified (`platform-admin:ads` — PLATFORM_ADMIN_NAV_ITEMS
+ * prefixes its ids) keeps its id as-is, so the key never
+ * double-prefixes. One derivation, shared by the server enumeration
+ * and the client's sub-item consults.
+ */
+export function navSubItemAvailabilityKey(parentId: string, subId: string): string {
+  return subId.startsWith(`${parentId}:`) ? subId : `${parentId}:${subId}`;
+}
+
+/**
+ * Every nav id the availability map covers, in config order: each
+ * top-level id, then each of its sub-items as `<parentId>:<subId>`
+ * (the #6151 S1 sub-item key format — the one format #6147 item 10's
+ * settings UI edits). The server endpoint and the client both
+ * enumerate from this one function, so the two can never drift: the
+ * endpoint's visibleTabs covers exactly these ids, and the client's
+ * merge consults exactly these sub-item keys.
+ */
+export function enumerateNavAvailabilityIds(): string[] {
+  const ids: string[] = [];
+  for (const section of DEFAULT_LEFT_NAV_CONFIG.sections) {
+    for (const item of section.items) {
+      ids.push(item.id);
+      for (const sub of item.subItems ?? []) {
+        ids.push(navSubItemAvailabilityKey(item.id, sub.id));
+      }
+    }
+  }
+  return ids;
+}
+
 export const DEFAULT_LEFT_NAV_CONFIG: LeftNavConfig = buildDefaultLeftNavConfig();
 
 /**

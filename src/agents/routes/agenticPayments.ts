@@ -318,6 +318,10 @@ import { getServiceUserLogin } from "../../security/serviceIdentity";
 import { lookupInternalUserIdByLogin } from "../../security/iaaaMigration";
 import { createKvMembershipStore, grantMembership } from "../../security/iaaaMembershipStore";
 import { listSessionFamilyEntries, sessionStore } from "../../security/session";
+import {
+  invalidatePlatformContextForLogin,
+  invalidatePlatformContextForPrincipal,
+} from "../../security/platformContextInvalidate";
 import { resolveIaaaTenant } from "../../security/iaaaGithubEndToEnd";
 import {
   canGrantRole,
@@ -1525,6 +1529,11 @@ export async function handleAgenticPaymentsRoutes(
           },
         );
       }
+      // #6151 S1: the account upsert may change the tier fact (an
+      // unlimited-free grant/revoke writes tier/tierSource) — drop
+      // the target's cached facts so the next load sees the fresh
+      // values. Best-effort; never fails the upsert.
+      await invalidatePlatformContextForLogin(ctx.env, upsertUserId, "subscription-change");
       return Response.json({ code: "SUCCESS_ACCOUNT_UPDATED", record });
     } catch (err: any) {
       // #5606 (G-3): typed failures render from the catalog;
@@ -3433,6 +3442,10 @@ export async function handleAgenticPaymentsRoutes(
         versionId: plan.id,
       }));
       const effectiveTier = resolveEffectiveTier(account, [subscription], Date.now());
+      // #6151 S1: activation writes the subscription row the tier
+      // fact reads — drop the purchaser's cached facts so the next
+      // load sees the fresh tier. Best-effort; never fails the purchase.
+      await invalidatePlatformContextForLogin(ctx.env, subscription.userId, "subscription-change");
       return Response.json({ code: "SUCCESS_SUBSCRIPTION_PURCHASED", subscription, account, effectiveTier });
     } catch (err: any) {
       // #5606 (G-3): typed failures render from the catalog;
@@ -5621,6 +5634,17 @@ export async function handleAgenticPaymentsRoutes(
         reason: result.reason,
         subscriptionId: result.subscription?.id ?? null,
       });
+      // #6151 S1: the subscription write changes what the next
+      // context resolution returns — drop the owner's cached facts
+      // so the next load sees the fresh tier. Best-effort; never
+      // fails the webhook.
+      if (result.applied && result.subscription) {
+        await invalidatePlatformContextForLogin(
+          ctx.env,
+          result.subscription.userId,
+          "subscription-change",
+        );
+      }
       return Response.json({ code: "SUCCESS_BILLING_WEBHOOK_APPLIED", 
         applied: result.applied,
         reason: result.reason,
@@ -7903,6 +7927,12 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       }
       const minted = granted.membership.roleBindings.find((b) => b.role === "store-operator");
       ctx.audit("commercial.operator.added", "payments", { operatorLogin: target, operatorInternalUserId: targetId, addedBy: login, via: "membership" });
+      // #6151 S1: the grant changes the target's PDP decisions —
+      // drop their cached context facts so the next load
+      // re-resolves. Best-effort; never fails the grant. (This
+      // route does not rotate sessions, unlike the role-grants
+      // route, so the invalidate is the only cache clear here.)
+      await invalidatePlatformContextForPrincipal(ctx.env, targetId, "role-change");
       return Response.json({
         code: "SUCCESS_OPERATOR_ADDED",
         operator: {

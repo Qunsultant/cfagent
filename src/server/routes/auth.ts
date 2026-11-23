@@ -43,6 +43,7 @@ import { clearSessionCookie } from "../../session";
 import { invalidateSessionCache } from "../../security/sessionCache";
 import { resolveIdleTimeoutMs } from "../../security/sessionPolicy";
 import { rotateUserSessionsForEnv, sessionRotationCookie } from "../../security/sessionRotation";
+import { invalidatePlatformContextForPrincipal } from "../../security/platformContextInvalidate";
 import { resolveScreenerAgentName } from "../../agents/screenerAgentName";
 import { quotaWindowKey, type QuotaUsageView } from "../../security/userRequestQuota";
 import type { UserRequestQuotaOverride } from "../../data/userRequestQuotaPorts";
@@ -1486,6 +1487,12 @@ export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL,
             structuredLog.warn("auth.session_rotation_skipped", { message: "[iaaa] session rotation skipped: session listing unavailable" });
           }
           const grantRotationCookie = sessionRotationCookie(request, grantRotation);
+          // #6151 S1: the grant changes the target's PDP decisions —
+          // drop their cached context facts so the next load
+          // re-resolves. Defense-in-depth beside the rotation above
+          // (rotation mints fresh session ids, whose cache is cold
+          // by construction); best-effort, never fails the grant.
+          await invalidatePlatformContextForPrincipal(env, targetId, "role-change");
           return Response.json(
             {
               ok: true,

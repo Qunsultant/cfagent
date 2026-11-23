@@ -136,6 +136,7 @@ import {
   wiredMembershipStore,
 } from "./session";
 import { setCsrfCookie } from "./csrf";
+import { invalidatePlatformContextSession } from "./platformContext";
 import {
   authOutcomeLoginUrl,
   type AuthOutcomeCode,
@@ -876,6 +877,13 @@ export async function completeWiredLogin(
   }
 
   const sessionId = await createSession(env, sessionData);
+  // #6151 S1: invalidate the new session's cached platform-context
+  // facts for the sign-in event. The cache is cold by construction
+  // (fresh session id), so this drops nothing today — it is the
+  // event's wiring point and a guard against any future
+  // session-id reuse. Synchronous and best-effort; never changes
+  // the login outcome.
+  invalidatePlatformContextSession(sessionId, "sign-in");
   // End-to-end post-login work (best-effort; never changes the login
   // outcome): alias recording + bootstrap-on-login. A failure here
   // is swallowed by runWiredPostLogin itself; the outer catch is
