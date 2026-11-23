@@ -456,6 +456,54 @@ export async function removeAccountBinding(
   return true;
 }
 
+/**
+ * Issue #6257 — one-time migration of bindings saved under a DO instance id
+ * to the verified login key.
+ *
+ * Settings used to write bindings under `acctbind:v1:<do-id>` (the
+ * Orchestrator `sessionKey()`), while every login-keyed reader (schedules,
+ * orders, autopilot, copilot, NLQ, research) reads `acctbind:v1:<login>`.
+ * Copies each legacy slot missing under the login key; login-keyed entries
+ * win on conflict. Also copies a stored registry patch when the login key
+ * has none. Legacy entries are left in place (copy, not move) and the
+ * function is idempotent: a second run migrates nothing.
+ */
+export async function migrateAccountBindingsToLogin(
+  env: Env,
+  legacyUserLogin: string,
+  userLogin: string,
+): Promise<{ readonly migratedBindings: number; readonly migratedRegistry: boolean }> {
+  const legacy = legacyUserLogin.trim().toLowerCase();
+  const login = userLogin.trim().toLowerCase();
+  if (!legacy || !login || legacy === login) {
+    return { migratedBindings: 0, migratedRegistry: false };
+  }
+  const kv = getBindingKv(env);
+  if (!kv) return { migratedBindings: 0, migratedRegistry: false };
+
+  const legacyBindings = await listAccountBindings(env, legacyUserLogin);
+  const currentBindings = await listAccountBindings(env, userLogin);
+  const missing = legacyBindings.filter(
+    (b) => !currentBindings.some((c) => accountBindingSlotId(c) === accountBindingSlotId(b)),
+  );
+  let migratedBindings = 0;
+  if (missing.length > 0) {
+    await kv.put(userBindingsKey(userLogin), JSON.stringify([...currentBindings, ...missing]));
+    migratedBindings = missing.length;
+  }
+
+  let migratedRegistry = false;
+  const legacyRegistryRaw = await kv.get(userRegistryKey(legacyUserLogin));
+  if (legacyRegistryRaw) {
+    const loginRegistryRaw = await kv.get(userRegistryKey(userLogin));
+    if (!loginRegistryRaw) {
+      await kv.put(userRegistryKey(userLogin), legacyRegistryRaw);
+      migratedRegistry = true;
+    }
+  }
+  return { migratedBindings, migratedRegistry };
+}
+
 export interface ExecutionAccountContext {
   readonly broker: AccountBindingBroker;
   readonly mode: TradingType;

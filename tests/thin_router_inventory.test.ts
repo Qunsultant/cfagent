@@ -1552,8 +1552,13 @@ function handlerConditions(handler: string): string[] {
 describe("thin router inventory (#359-17)", () => {
   it("routeRequest delegates to the route modules in the pinned order, each one guarded", () => {
     const body = routeRequestBody(src("agents/orchestrator/routeRequest.ts"));
-    const delegations = [...body.matchAll(/const (\w+) = await (handle\w+Routes)\(request, url, path, sessionId,/g)];
+    const delegations = [...body.matchAll(/const (\w+) = await (handle\w+Routes)\(request, url, path, (\w+),/g)];
     expect(delegations.map((m) => m[2])).toEqual(EXPECTED_DELEGATIONS);
+    // Issue #6257 — the binding route keys by the verified login, not the DO
+    // id; every other delegation passes the session id.
+    expect(delegations.map((m) => [m[2], m[3]]).filter(([, identity]) => identity !== "sessionId")).toEqual([
+      ["handleAccountBindingRoutes", "bindingUserLogin"],
+    ]);
     // Every delegation is guarded by `if (<var>) return <var>;` in the
     // same order — a non-null return matched, exactly as the inline
     // blocks returned directly.
@@ -1591,7 +1596,7 @@ describe("thin router inventory (#359-17)", () => {
     const body = routeRequestBody(src("agents/orchestrator/routeRequest.ts"));
     const inventory: string[] = [];
     const tokenRe =
-      /handle\w+Routes\(request, url, path, sessionId,|path\.(endsWith|includes|startsWith)\("([^"]+)"\)|path === "([^"]+)"/g;
+      /handle\w+Routes\(request, url, path, (?:sessionId|bindingUserLogin),|path\.(endsWith|includes|startsWith)\("([^"]+)"\)|path === "([^"]+)"/g;
     for (const m of body.matchAll(tokenRe)) {
       if (m[0].startsWith("handle")) {
         const name = m[0].slice(0, m[0].indexOf("("));

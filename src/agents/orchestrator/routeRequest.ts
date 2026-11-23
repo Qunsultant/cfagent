@@ -605,8 +605,14 @@ export async function routeRequest(deps: RouteRequestDeps, request: Request): Pr
   });
   if (brokerConnectResponse) return brokerConnectResponse;
 
-  const accountBindingResponse = await handleAccountBindingRoutes(request, url, path, sessionId, {
+  // Issue #6257 — the binding route must key by the verified login, not the
+  // DO instance id: every login-keyed reader (schedules, orders, autopilot,
+  // copilot, NLQ, research) looks bindings up by login. Fall back to the DO
+  // id only when the Worker attached no verified login (no session).
+  const bindingUserLogin = request.headers.get("x-user-login")?.trim() || sessionId;
+  const accountBindingResponse = await handleAccountBindingRoutes(request, url, path, bindingUserLogin, {
     env: deps.env,
+    legacySessionId: sessionId,
   });
   if (accountBindingResponse) return accountBindingResponse;
 
