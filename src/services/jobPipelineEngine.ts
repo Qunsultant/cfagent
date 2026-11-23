@@ -3964,6 +3964,38 @@ export class JobPipelineControl {
   }
 }
 
+/**
+ * Chains run-settled observers so an existing observer (e.g. the
+ * feed-run observer on the ScheduledAgent host) is kept and the
+ * OTel observer runs alongside it. Each observer is guarded: one
+ * observer's failure never blocks the others.
+ *
+ * Lives here (not in the observability modules) so the ONE factory
+ * (`jobPipelineControlFactory.ts`) can chain observers without
+ * importing the OTel provider chain: the providers import Node-only
+ * modules (`@opentelemetry/context-async-hooks`) the vite browser
+ * bundle cannot include, and the factory is imported by
+ * browser-bundled dispatch sites (issue #6250, CI Fast-gates build
+ * failure on PR #6261). `otelJobPipeline.ts` re-exports this so its
+ * existing importers keep working.
+ */
+export function chainRunSettledObservers(
+  ...observers: Array<
+    ((info: JobRunSettledInfo) => Promise<void> | void) | undefined | null
+  >
+): (info: JobRunSettledInfo) => Promise<void> {
+  return async (info: JobRunSettledInfo): Promise<void> => {
+    for (const observer of observers) {
+      if (!observer) continue;
+      try {
+        await observer(info);
+      } catch {
+        // One observer's failure never blocks the others.
+      }
+    }
+  };
+}
+
 /** Build the control plane from explicit parts (hosts compose this). */
 export function createJobPipelineControl(deps: JobPipelineDeps): JobPipelineControl {
   return new JobPipelineControl(deps);

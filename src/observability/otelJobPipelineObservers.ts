@@ -172,3 +172,27 @@ export function getOtelJobPipelineObservers(env: Env): OtelJobPipelineObservers 
   cachedByEnv.set(env, observers);
   return observers;
 }
+
+/**
+ * Issue #6250 — the ONE env → observer-set composition the Job
+ * Pipeline Control factory's `env` path resolves through. The
+ * factory cannot import this module as a value (the provider chain
+ * reaches the Node-only `@opentelemetry/context-async-hooks`, which
+ * the vite browser bundle cannot include — CI Fast gates + Test &
+ * Build red on PR #6261), so the Worker entry registers this
+ * function as the factory's resolver
+ * (`setJobPipelineControlOtelResolver` in
+ * `../services/jobPipelineControlFactory`, `src/server.ts`). The
+ * per-signal deps come from the cache above, so a per-dispatch
+ * control build never re-creates the OTel providers; a host's
+ * pre-existing journal threads in as the inner journal.
+ */
+export function resolveJobPipelineControlObservers(
+  env: Env | Record<string, unknown>,
+  innerJournal?: JobStepJournal,
+): OtelJobPipelineObservers {
+  return createOtelJobPipelineObservers(
+    getOtelJobPipelineObserverDeps(env as Env),
+    ...(innerJournal ? [innerJournal] : []),
+  );
+}

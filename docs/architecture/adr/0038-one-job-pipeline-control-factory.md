@@ -58,15 +58,39 @@ observers from an already-composed `otel` set when the caller has
 one, else from `env` (cached per env object at the dep level, so a
 per-dispatch control build never re-creates the OTel providers);
 with neither it builds a bare control, exactly as before, for the
-in-memory and read-only hosts that have no OTel sink.
+in-memory and read-only hosts that have no OTel sink. The `env`
+path resolves through an injected resolver, not a static import:
+the env → observer-set composition (`resolveJobPipelineControlObservers`
+in `otelJobPipelineObservers.ts`) imports the OTel provider chain,
+whose tracing provider imports the Node-only
+`@opentelemetry/context-async-hooks` (Node `async_hooks`), which
+the vite browser bundle cannot include — the build fails with
+`"AsyncLocalStorage" is not exported by "__vite-browser-external"`
+(CI Fast gates + Test & Build red on PR #6261 after the rebase onto
+main `e7d9ac96`; pristine main builds clean). The factory is
+imported by browser-bundled dispatch sites (`optionsStageControl`
+and `optionsWorkflowHost` reach the client bundle through the
+NLQ/trading surface), so it must stay browser-safe: it imports the
+engine and the (type-only) observer set, never the providers. The
+Worker entry (`src/server.ts`) registers the resolver once at
+startup (`setJobPipelineControlOtelResolver`, the same
+register-a-builder pattern as `registerDataProviderPortsBuilder` /
+`registerTransactionRunner` in that file); where no resolver is
+registered — the browser bundle, and tests that do not register
+one — an `env` control is bare, exactly as a no-observer control
+was before. The resolver is the one composition; there is no
+second env-resolution path.
 
 The factory is a separate module rather than an extension of the
 engine's bare `createJobPipelineControl` because the observer helpers
 import the engine's `identityJobStepJournal` as a VALUE — the engine
 importing them would be a runtime import cycle. The factory is the
-leaf composer (engine + observers, nothing imports it back); the bare
-factory stays as the constructor for tests and for hosts that
-explicitly pass no observers.
+leaf composer (engine + the observer set as a type only — it never
+imports the OTel providers as values, see the `env` paragraph
+above; `chainRunSettledObservers` lives in the engine for the same
+reason, re-exported by `otelJobPipeline.ts` for its existing
+importers); the bare factory stays as the constructor for tests and
+for hosts that explicitly pass no observers.
 
 ### One dispatch path for OODA/research
 

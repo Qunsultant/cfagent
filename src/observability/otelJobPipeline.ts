@@ -105,21 +105,14 @@ export function createOtelJobPipelineRunSettledObserver(
  * feed-run observer on the ScheduledAgent host) is kept and the
  * OTel observer runs alongside it. Each observer is guarded: one
  * observer's failure never blocks the others.
+ *
+ * Defined in the engine (`../services/jobPipelineEngine`) and
+ * re-exported here so existing importers keep working: the ONE
+ * factory imports it from the engine, so the factory never imports
+ * the OTel provider chain (issue #6250, CI Fast-gates build failure
+ * on PR #6261).
  */
-export function chainRunSettledObservers(
-  ...observers: Array<JobRunSettledObserver | undefined | null>
-): JobRunSettledObserver {
-  return async (info: JobRunSettledInfo): Promise<void> => {
-    for (const observer of observers) {
-      if (!observer) continue;
-      try {
-        await observer(info);
-      } catch {
-        // One observer's failure never blocks the others.
-      }
-    }
-  };
-}
+export { chainRunSettledObservers } from "../services/jobPipelineEngine";
 
 export interface OtelJobStepJournalDeps extends OtelJobPipelineObserverDeps {
   /** The inner journal to delegate to (defaults to the identity journal). */

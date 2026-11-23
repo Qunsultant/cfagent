@@ -48,6 +48,33 @@
  *    executes); they run through the factory so the construction
  *    stays single, and the absence is explicit at the call site.
  *
+ * Why the `env` path resolves through an injected resolver instead
+ * of importing the OTel providers: the env → observer-set
+ * resolution imports the provider chain
+ * (`otelJobPipelineObservers` → `otelProvider` /
+ * `otelMetricsProvider` → `otelTraces`), and the tracing provider
+ * imports the Node-only `@opentelemetry/context-async-hooks`
+ * (`AsyncLocalStorageContextManager`, Node `async_hooks`). The
+ * vite browser bundle cannot include it — the build fails with
+ * `"AsyncLocalStorage" is not exported by "__vite-browser-external"`
+ * (CI Fast gates + Test & Build red on PR #6261 after the rebase
+ * onto main `e7d9ac96`; pristine main builds clean). The factory
+ * is imported by browser-bundled dispatch sites (the workflow /
+ * screen engines — `optionsStageControl` and `optionsWorkflowHost`
+ * reach the client bundle through the NLQ/trading surface), so it
+ * must stay browser-safe: it imports the engine and the
+ * (type-only) observer set, never the providers. The Worker entry
+ * (`src/server.ts`) registers the resolver once at startup
+ * (`setJobPipelineControlOtelResolver`, the same register-a-builder
+ * pattern as `registerDataProviderPortsBuilder` /
+ * `registerTransactionRunner` in that file); the resolver is the
+ * one composition in `otelJobPipelineObservers`
+ * (`resolveJobPipelineControlObservers`). Where no resolver is
+ * registered — the browser bundle, and tests that do not register
+ * one — an `env` control is bare, exactly as a no-observer
+ * control was before: the absence is silent but safe, and the
+ * run still completes.
+ *
  * The observers are best-effort and guarded (each checks the
  * per-domain j1j7 switch first and no-ops when it is OFF; a signal
  * failure can never fail, retry, or duplicate the run), so wiring
@@ -56,23 +83,51 @@
  */
 import type { Env } from "../types";
 import {
+  chainRunSettledObservers,
   createJobPipelineControl as createBareJobPipelineControl,
   type JobPipelineControl,
   type JobPipelineDeps,
   type JobStepJournal,
 } from "./jobPipelineEngine";
-import { chainRunSettledObservers } from "../observability/otelJobPipeline";
-import {
-  createOtelJobPipelineObservers,
-  getOtelJobPipelineObserverDeps,
-  type OtelJobPipelineObservers,
-} from "../observability/otelJobPipelineObservers";
+// Type-only: the observer set is a value at runtime, but this module
+// must never import the OTel provider chain as a value — see the
+// header. The `env` path resolves through the injected resolver
+// below, registered by the Worker entry.
+import type { OtelJobPipelineObservers } from "../observability/otelJobPipelineObservers";
+
+/**
+ * Resolves a Worker env (+ an optional host journal to thread as
+ * the inner journal) into a composed observer set. Implemented by
+ * `resolveJobPipelineControlObservers`
+ * (`../observability/otelJobPipelineObservers`) and registered once
+ * by the Worker entry (`src/server.ts`).
+ */
+export type JobPipelineControlOtelResolver = (
+  env: Env | Record<string, unknown>,
+  innerJournal?: JobStepJournal,
+) => OtelJobPipelineObservers;
+
+/** The resolver registered by the Worker entry, if any. */
+let otelEnvResolver: JobPipelineControlOtelResolver | undefined;
+
+/**
+ * Register the env → observer-set resolver (Worker entry only, once
+ * at startup). Tests that exercise the `env` path register it
+ * themselves; where it is not registered an `env` control is bare.
+ */
+export function setJobPipelineControlOtelResolver(
+  resolver: JobPipelineControlOtelResolver,
+): void {
+  otelEnvResolver = resolver;
+}
 
 /** What the factory needs beyond the engine deps: where the OTel observers come from. */
 export interface CreateJobPipelineControlOptions {
   /**
    * The Worker env (or a string-valued env record). The observer set
-   * is built from it and cached once per env object.
+   * is built from it and cached once per env object, through the
+   * resolver registered by the Worker entry; where no resolver is
+   * registered the control is bare.
    */
   env?: Env | Record<string, unknown>;
   /**
@@ -106,10 +161,11 @@ export function createJobPipelineControl(
 /**
  * Resolve the wired observer set for a control. A supplied `otel`
  * set is used as-is (its journal wrapped around a pre-existing
- * journal when one is present); an `env` builds the set from the
- * cached per-env deps, threading a pre-existing journal as the
- * inner journal so the host's journal is kept. Absent both, there
- * is nothing to wire — the caller gets a bare control.
+ * journal when one is present); an `env` builds the set through the
+ * registered resolver, threading a pre-existing journal as the
+ * inner journal so the host's journal is kept. Absent both — or
+ * with an `env` but no resolver registered — there is nothing to
+ * wire and the caller gets a bare control.
  */
 function resolveWiredObservers(
   deps: JobPipelineDeps,
@@ -122,10 +178,9 @@ function resolveWiredObservers(
       journal: wrapJournal(opts.otel.journal, deps.journal),
     };
   }
-  if (!opts.env) return undefined;
-  const observerDeps = getOtelJobPipelineObserverDeps(opts.env as Env);
-  return createOtelJobPipelineObservers(
-    observerDeps,
+  if (!opts.env || !otelEnvResolver) return undefined;
+  return otelEnvResolver(
+    opts.env,
     ...(deps.journal ? [deps.journal] : []),
   );
 }
