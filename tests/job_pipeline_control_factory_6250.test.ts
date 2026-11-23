@@ -36,11 +36,18 @@ import {
   type JobRunSettledInfo,
   type JobStepJournal,
 } from "../src/services/jobPipelineEngine";
-import { createJobPipelineControl } from "../src/services/jobPipelineControlFactory";
+import { createJobPipelineControl, setJobPipelineControlOtelResolver } from "../src/services/jobPipelineControlFactory";
 import {
   createOtelJobPipelineObservers,
+  resolveJobPipelineControlObservers,
   type OtelJobPipelineObservers,
 } from "../src/observability/otelJobPipelineObservers";
+
+// Issue #6250 — the factory's `env` path resolves through the
+// injected resolver (the Worker entry registers it in production);
+// this suite registers it so the `env` test exercises the real
+// resolution instead of the bare fallback.
+setJobPipelineControlOtelResolver(resolveJobPipelineControlObservers);
 import { createStructuredLogger, type StructuredLogger } from "../src/observability/structuredLogger";
 import type {
   ObservabilityEvent,
@@ -292,5 +299,27 @@ describe("no second control construction survives (#6250)", () => {
     // second `new`, so the engine's bare factory stays the one construction.
     expect(text).not.toContain("new JobPipelineControl(");
     expect(text).toContain("createBareJobPipelineControl");
+  });
+
+  it("the Worker entry registers the env → observer resolver (the factory's `env` path is wired in production)", () => {
+    const text = fs.readFileSync(path.join(srcRoot, "server.ts"), "utf8");
+    expect(text).toContain(
+      "setJobPipelineControlOtelResolver(resolveJobPipelineControlObservers)",
+    );
+  });
+
+  it("the factory never imports the OTel provider chain as a value (the vite browser bundle cannot include it)", () => {
+    const text = fs.readFileSync(
+      path.join(srcRoot, "services/jobPipelineControlFactory.ts"),
+      "utf8",
+    );
+    // A value import from ../observability/* would drag the Node-only
+    // provider chain into the browser bundle; `import type` is erased
+    // at build time and is the only observability import allowed.
+    const valueImports = text
+      .split("\n")
+      .filter((line) => /^import (?!type\b)/.test(line) && line.includes("../observability/"));
+    expect(valueImports).toEqual([]);
+    expect(text).toContain("import type { OtelJobPipelineObservers }");
   });
 });

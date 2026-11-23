@@ -34,6 +34,8 @@ import { buildDataProviderPorts } from "./data/buildDataProviderPorts";
 import { registerDataProviderPortsBuilder } from "./data/dataProviderPortsProvider";
 import { aspectTransactionRunner } from "./data/transactionRunner";
 import { registerTransactionRunner } from "./data/transactionRunnerProvider";
+import { resolveJobPipelineControlObservers } from "./observability/otelJobPipelineObservers";
+import { setJobPipelineControlOtelResolver } from "./services/jobPipelineControlFactory";
 
 // #2303 (#1976 step 1): register the data-provider ports
 // builder for the client-bundle-reachable consumers
@@ -47,6 +49,17 @@ registerDataProviderPortsBuilder(buildDataProviderPorts);
 // because their module graph is client-bundle-reachable and
 // the aspect (node:async_hooks) is server-only.
 registerTransactionRunner(aspectTransactionRunner);
+
+// Issue #6250: register the env → OTel-observer resolver for the
+// ONE Job Pipeline Control factory — the factory resolves it
+// through this registration because its module graph is
+// client-bundle-reachable and the OTel providers are server-only
+// (the tracing provider imports the Node-only
+// @opentelemetry/context-async-hooks, node:async_hooks — the vite
+// browser bundle cannot include it; CI Fast gates + Test & Build
+// red on PR #6261). Where no resolver is registered (the browser
+// bundle) an `env` control is bare.
+setJobPipelineControlOtelResolver(resolveJobPipelineControlObservers);
 
 import { requireAuth } from "./server/auth";
 import { handleCoreEarlyRoutes, handleCoreLateRoutes, ensureBreakerDurability } from "./server/routes/core";
