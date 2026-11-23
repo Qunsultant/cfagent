@@ -289,6 +289,14 @@ export async function recordScheduleCallbackRun(
       outcome: outcome.outcome,
       triggeredBy: resolveScheduleRunTrigger(payload),
       ...payloadProvenance(payload),
+      // Issue #6301 — the outcome's resolved binding wins over the
+      // payload stamp: a blank payload stamps nothing, and the run's
+      // broker/mode is what the guard resolved from the one defaults
+      // home. A stamped payload's modeSource survives when the outcome
+      // carries none (the guard only sets it when it resolved the mode).
+      ...(outcome.brokerId ? { brokerId: outcome.brokerId } : {}),
+      ...(outcome.mode ? { mode: outcome.mode } : {}),
+      ...(outcome.modeSource ? { modeSource: outcome.modeSource } : {}),
       ...linkage,
       ...(outcome.error ? { error: outcome.error } : {}),
       ...(outcome.detail ? { detail: outcome.detail } : {}),

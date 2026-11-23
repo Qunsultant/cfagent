@@ -49,3 +49,24 @@ export function maskAccountId(accountId: string): string {
   const maskedLength = Math.max(4, accountId.length - suffix.length);
   return ACCOUNT_BINDING_CONFIG.reportMask.character.repeat(maskedLength) + suffix;
 }
+
+/**
+ * Issue #6301 — the ONE home for the schedule-callback → asset-class
+ * default. A schedule callback runs against its callback's class:
+ * options analysis runs against the options account; every other
+ * callback runs against the configured default account type
+ * (`defaultAccountType`, "stock"). This centralizes the rule the
+ * creation route previously inlined (`callback ===
+ * "autonomousOptionsAnalysis" ? "options" : "stock"`) so the fire-time
+ * guard, the blank-broker repair, and the creation route all resolve
+ * the same default from the same place instead of each carrying its
+ * own copy. The value is an asset-class constant, not a tunable
+ * setting — the mapping itself is the rule, and it lives here.
+ */
+export function defaultAccountTypeForCallback(
+  callback: string,
+): (typeof ACCOUNT_TYPES)[number] {
+  return callback === "autonomousOptionsAnalysis"
+    ? "options"
+    : ACCOUNT_BINDING_CONFIG.defaultAccountType;
+}

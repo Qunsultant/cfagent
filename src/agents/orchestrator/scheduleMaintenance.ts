@@ -9,6 +9,7 @@
 
 import type { AgentContext, Schedule, ScheduleOptions } from "agents";
 import type { AgentName, Env } from "../../types";
+import { defaultAccountTypeForCallback } from "../../config/accountBindings";
 import { resolveValidatedExecutionAccountContext } from "../../services/accountBindings";
 import { createUnifiedSchedulePorts } from "../../data/createUnifiedSchedulePorts";
 import { stampScheduleProvenance, systemProvenance } from "../../services/consolidatedScheduling";
@@ -332,6 +333,294 @@ export async function ensureIvHistoryCollectionRecord(
 }
 
 /**
+ * Issue #6301 — the blank-broker repair sweep. Runs on the onStart
+ * maintenance path (via ensureStrategyScanSchedule) so every agent
+ * start re-checks the schedule store; it is idempotent by
+ * construction (it only acts on payloads missing a binding-tuple
+ * piece, and a re-stamped alarm is no longer blank on the next run).
+ *
+ * - The four broker-targeted callbacks are swept: a blank payload on
+ *   any of them resolves through the one home at fire time (the
+ *   guard), so the sweep's job is to FIND them and to re-stamp the
+ *   one the system owns. Every blank schedule found is logged +
+ *   audited with its callback and id, whether or not it is re-stamped.
+ * - Only the system-owned strategy-scan baseline
+ *   (`autonomousOptionsAnalysis`) is re-stamped: the system armed it,
+ *   the adopt path re-creates its unified record on the next tick,
+ *   and its id is the system's own. A blank baseline is re-stamped
+ *   by creating the stamped alarm FIRST and cancelling the blank one
+ *   after (a create failure leaves the old alarm untouched); a blank
+ *   baseline is cancelled outright when a stamped baseline already
+ *   exists (it is redundant). A blank baseline with no cron, a
+ *   paused/disabled/deleted record, or an unresolvable binding is
+ *   left alone and logged — the guard covers its firing.
+ * - A blank schedule on any other broker-targeted callback is logged
+ *   + audited but NOT re-stamped: its id is user-facing (a cancel +
+ *   re-create would silently replace it), and the fire-time fallback
+ *   covers its firing. Re-stamping user schedules is a follow-up,
+ *   not a silent rewrite.
+ * - The tuple resolves exactly as the arm path resolves it
+ *   (resolveScreenSelection + resolveValidatedExecutionAccountContext):
+ *   a re-stamp IS a re-arm, so it holds the same bar — an
+ *   unresolvable selection/binding is a warn + skip, never a
+ *   half-stamped alarm.
+ *
+ * Returns the schedule list the caller should use afterwards (the
+ * input list when nothing changed, a re-list when it did, so the
+ * caller's alreadyAlarm lookup cannot adopt a cancelled alarm).
+ */
+export async function repairBlankBrokerSchedules(
+  ctx: ScheduleMaintenanceContext,
+  context: ScreenerExecutionContext,
+  existing: Schedule<unknown>[],
+): Promise<Schedule<unknown>[]> {
+  const userLogin = context.userLogin;
+  const isBrokerTargeted = (callback: unknown): boolean =>
+    callback === "autonomousOptionsAnalysis" ||
+    callback === "autonomousMarketScreen" ||
+    callback === "autonomousGoalScreen" ||
+    callback === "autonomousStrategyDiscovery";
+  const isBlankPayload = (payload: unknown): boolean => {
+    if (!payload || typeof payload !== "object") return true;
+    const p = payload as Record<string, unknown>;
+    return (
+      typeof p.brokerId !== "string" ||
+      !p.brokerId ||
+      (p.mode !== "live" && p.mode !== "paper") ||
+      typeof p.accountType !== "string" ||
+      !p.accountType ||
+      typeof p.accountId !== "string" ||
+      !p.accountId
+    );
+  };
+  const ownBlank = existing.filter((s) => {
+    const item = s as any;
+    return (
+      isBrokerTargeted(item.callback) &&
+      item.payload?.userLogin === userLogin &&
+      isBlankPayload(item.payload)
+    );
+  });
+  if (ownBlank.length === 0) return existing;
+  let changed = false;
+  // Non-baseline blank schedules: found, logged, audited — not re-stamped.
+  for (const blank of ownBlank) {
+    const item = blank as any;
+    if (item.callback === "autonomousOptionsAnalysis") continue;
+    structuredLog.warn("scheduleMaintenance.blank_broker_schedule_found", {
+      message: `[OrchestratorAgent] Blank-broker schedule found (not re-stamped): ${String(item.callback)} ${String(item.id ?? "?")} — it resolves to the tenant default at fire time.`,
+      scheduleId: typeof item.id === "string" ? item.id : undefined,
+      callback: typeof item.callback === "string" ? item.callback : undefined,
+    });
+    ctx.audit("schedule.blank_broker_found", "orchestrator", {
+      scheduleId: typeof item.id === "string" ? item.id : undefined,
+      callback: typeof item.callback === "string" ? item.callback : undefined,
+      note: "blank broker/mode; resolves to the tenant default at fire time; not re-stamped (user-facing id)",
+    });
+  }
+  const baselines = ownBlank.filter((s) => (s as any).callback === "autonomousOptionsAnalysis");
+  if (baselines.length === 0) return existing;
+  let stampedExists = existing.some((s) => {
+    const item = s as any;
+    return (
+      item.callback === "autonomousOptionsAnalysis" &&
+      item.payload?.userLogin === userLogin &&
+      !isBlankPayload(item.payload)
+    );
+  });
+  for (const blank of baselines) {
+    const item = blank as any;
+    const alarmId = typeof item.id === "string" && item.id ? item.id : null;
+    const cron = typeof item.cron === "string" && item.cron ? item.cron : null;
+    if (!alarmId) continue;
+    const store = unifiedScheduleStore(ctx);
+    const recordState = store?.get(alarmId)?.state;
+    if (recordState && recordState !== "active") {
+      // Paused/disabled/deleted: never silently re-arm; the guard
+      // covers the firing if the schedule ever resumes.
+      structuredLog.warn("scheduleMaintenance.blank_broker_schedule_paused", {
+        message: `[OrchestratorAgent] Blank-broker baseline ${alarmId} is ${recordState}; left alone (never silently re-armed).`,
+        scheduleId: alarmId,
+      });
+      ctx.audit("schedule.blank_broker_found", "orchestrator", {
+        scheduleId: alarmId,
+        callback: "autonomousOptionsAnalysis",
+        note: `blank broker/mode; record is ${recordState}; not re-stamped`,
+      });
+      continue;
+    }
+    if (stampedExists) {
+      // A stamped baseline already exists: the blank one is redundant.
+      try {
+        await ctx.cancelSchedule(alarmId);
+        store?.remove(alarmId);
+        ctx.audit("schedule.blank_broker_removed", "orchestrator", {
+          scheduleId: alarmId,
+          callback: "autonomousOptionsAnalysis",
+          reason: "redundant blank baseline; a stamped baseline exists",
+        });
+        changed = true;
+      } catch (error) {
+        structuredLog.warn("scheduleMaintenance.blank_broker_baseline_cancel_failed", {
+          message: `[OrchestratorAgent] Could not cancel redundant blank baseline ${alarmId}:`,
+          scheduleId: alarmId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+      continue;
+    }
+    if (!cron) {
+      structuredLog.warn("scheduleMaintenance.blank_broker_schedule_no_cron", {
+        message: `[OrchestratorAgent] Blank-broker baseline ${alarmId} has no cron expression; left alone (cannot re-arm without its cadence).`,
+        scheduleId: alarmId,
+      });
+      ctx.audit("schedule.blank_broker_found", "orchestrator", {
+        scheduleId: alarmId,
+        callback: "autonomousOptionsAnalysis",
+        note: "blank broker/mode; no cron expression; not re-stamped",
+      });
+      continue;
+    }
+    if (!ctx.env || !store) {
+      structuredLog.warn("scheduleMaintenance.blank_broker_repair_skipped", {
+        message: `[OrchestratorAgent] Blank-broker baseline ${alarmId} not re-stamped: ${!ctx.env ? "no execution environment" : "no unified schedule store"} (the guard covers its firing).`,
+        scheduleId: alarmId,
+      });
+      continue;
+    }
+    // Resolve the tuple exactly as the arm path does; either failing
+    // is a warn + skip, never a half-stamped alarm.
+    const { resolveScreenSelection } = await import("../../services/providerConnections");
+    const selection = await resolveScreenSelection({ env: ctx.env, userLogin });
+    if (!selection.resolved) {
+      structuredLog.warn("scheduleMaintenance.blank_broker_binding_unresolved", {
+        message: `[OrchestratorAgent] Blank-broker baseline ${alarmId} not re-stamped: the tenant's broker selection could not be resolved.`,
+        scheduleId: alarmId,
+        error: selection.error,
+      });
+      ctx.audit("schedule.blank_broker_found", "orchestrator", {
+        scheduleId: alarmId,
+        callback: "autonomousOptionsAnalysis",
+        note: "blank broker/mode; selection unresolvable; not re-stamped",
+      });
+      continue;
+    }
+    const { resolveTenantProviders } = await import("../../services/tenantProviders");
+    const tenantProviders = await resolveTenantProviders(ctx.env);
+    const bindingRes = await resolveValidatedExecutionAccountContext(ctx.env, userLogin, {
+      broker: selection.selection.brokerId,
+      mode: selection.selection.mode,
+      accountType: defaultAccountTypeForCallback("autonomousOptionsAnalysis"),
+      scope: "schedule",
+    });
+    if (!bindingRes.ok || !bindingRes.context.accountId) {
+      structuredLog.warn("scheduleMaintenance.blank_broker_binding_unresolved", {
+        message: `[OrchestratorAgent] Blank-broker baseline ${alarmId} not re-stamped: the bound account could not be resolved.`,
+        scheduleId: alarmId,
+        code: bindingRes.ok ? undefined : bindingRes.code,
+        error: bindingRes.ok ? "no account id resolved" : bindingRes.error,
+      });
+      ctx.audit("schedule.blank_broker_found", "orchestrator", {
+        scheduleId: alarmId,
+        callback: "autonomousOptionsAnalysis",
+        note: "blank broker/mode; bound account unresolvable; not re-stamped",
+      });
+      continue;
+    }
+    const repairedPayload = {
+      ...(item.payload as Record<string, unknown>),
+      brokerId: selection.selection.brokerId,
+      dataProviderId: tenantProviders.dataProviderId,
+      mode: selection.selection.mode,
+      accountType: bindingRes.context.accountType,
+      accountId: bindingRes.context.accountId,
+    };
+    // Create FIRST, cancel after: a create failure leaves the old
+    // alarm untouched. No `idempotent` flag — the new payload differs,
+    // and a dedupe by callback would silently return the blank alarm.
+    let armed: unknown;
+    try {
+      armed = await ctx.schedule(cron, "autonomousOptionsAnalysis", repairedPayload);
+    } catch (error) {
+      structuredLog.warn("scheduleMaintenance.blank_broker_restamp_failed", {
+        message: `[OrchestratorAgent] Blank-broker baseline ${alarmId} not re-stamped: the stamped alarm could not be created (old alarm untouched).`,
+        scheduleId: alarmId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      continue;
+    }
+    let newId =
+      armed && typeof armed === "object" && typeof (armed as { id?: unknown }).id === "string"
+        ? ((armed as { id: string }).id as string)
+        : null;
+    if (!newId) {
+      const relisted = await ctx.listSchedules().catch(() => [] as Schedule<unknown>[]);
+      const match = relisted.find((s) => {
+        const candidate = s as any;
+        return (
+          candidate.callback === "autonomousOptionsAnalysis" &&
+          candidate.payload?.userLogin === userLogin &&
+          candidate.payload?.brokerId === repairedPayload.brokerId &&
+          candidate.payload?.accountId === repairedPayload.accountId &&
+          candidate.id !== alarmId
+        );
+      });
+      newId =
+        match && typeof (match as any).id === "string" && (match as any).id
+          ? ((match as any).id as string)
+          : null;
+    }
+    try {
+      await ctx.cancelSchedule(alarmId);
+    } catch (error) {
+      // The stamped alarm exists and the blank one survives: the next
+      // tick finds the stamped baseline and cancels the blank one as
+      // redundant, so this heals without a duplicate firing.
+      structuredLog.warn("scheduleMaintenance.blank_broker_cancel_failed", {
+        message: `[OrchestratorAgent] Blank-broker baseline ${alarmId} re-stamped as ${newId ?? "?"} but the old alarm could not be cancelled; the next tick removes it as redundant.`,
+        scheduleId: alarmId,
+        newScheduleId: newId ?? undefined,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      changed = true;
+      stampedExists = true;
+      continue;
+    }
+    // Swap the unified record (best-effort; the next tick's adopt
+    // heals a missing new record).
+    try {
+      store.remove(alarmId);
+      if (newId) {
+        store.save(
+          strategyScanBaselineToRecord(
+            { id: newId, callback: "autonomousOptionsAnalysis", payload: repairedPayload },
+            { userLogin, cron },
+            new Date().toISOString(),
+          ),
+        );
+      }
+    } catch (error) {
+      structuredLog.warn("scheduleMaintenance.blank_broker_record_swap_failed", {
+        message: `[OrchestratorAgent] Blank-broker baseline ${alarmId} re-stamped as ${newId ?? "?"} but the unified-store record could not be swapped.`,
+        scheduleId: alarmId,
+        newScheduleId: newId ?? undefined,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    ctx.audit("schedule.blank_broker_repaired", "orchestrator", {
+      scheduleId: alarmId,
+      newScheduleId: newId ?? undefined,
+      callback: "autonomousOptionsAnalysis",
+      brokerId: repairedPayload.brokerId,
+      mode: repairedPayload.mode,
+    });
+    changed = true;
+    stampedExists = true;
+  }
+  return changed ? await ctx.listSchedules().catch(() => existing) : existing;
+}
+
+/**
  * Issue #275: arm the hourly Strategy/Symbol Scanner run once per
  * authenticated user — the full strategy catalog (no
  * allowedStrategies restriction) over the NASDAQ100 universe,
@@ -344,7 +633,14 @@ export async function ensureStrategyScanSchedule(ctx: ScheduleMaintenanceContext
   const userLogin = context.userLogin;
   const environment = context.environment || "PROD";
   const existing = await ctx.listSchedules().catch(() => [] as Schedule<unknown>[]);
-  const alreadyAlarm = existing.find((s) => {
+  // Issue #6301 — the blank-broker repair sweep runs first, on every
+  // maintenance pass, so a pre-F3 blank baseline is re-stamped (and
+  // any other blank-broker schedule is found + audited) instead of
+  // being adopted as-is forever. The returned list is the
+  // post-repair list, so the alreadyAlarm lookup below cannot adopt
+  // a cancelled alarm.
+  const current = await repairBlankBrokerSchedules(ctx, context, existing);
+  const alreadyAlarm = current.find((s) => {
     const item = s as any;
     return item.callback === "autonomousOptionsAnalysis" && item.payload?.userLogin === userLogin;
   });
@@ -372,11 +668,13 @@ export async function ensureStrategyScanSchedule(ctx: ScheduleMaintenanceContext
   // the UNIVERSES default the options service applies itself when
   // maxItems is absent, so the run's behavior is unchanged).
   // Issue #5100 (F3 of #5094): the baseline arm stamps the resolved
-  // binding tuple like every other creation path — under F3's
-  // fire-time rule an unstamped baseline would be refused at every
-  // fire. The selection + binding resolve here; either failing is a
-  // structured warn and NO arm (best-effort function — the onStart
-  // caller already try/catches).
+  // binding tuple like every other creation path — a stamped payload
+  // is the record of truth (the ledger reads it) even though the
+  // fire-time guard now resolves an unstamped baseline from the one
+  // defaults home instead of refusing it (issue #6301). The selection
+  // + binding resolve here; either failing is a structured warn and
+  // NO arm (best-effort function — the onStart caller already
+  // try/catches).
   let baselineBrokerId: string | undefined;
   let baselineDataProviderId: string | undefined;
   let baselineMode: "live" | "paper" | undefined;
@@ -397,7 +695,10 @@ export async function ensureStrategyScanSchedule(ctx: ScheduleMaintenanceContext
     const bindingRes = await resolveValidatedExecutionAccountContext(ctx.env, userLogin, {
       broker: selection.selection.brokerId,
       mode: selection.selection.mode,
-      accountType: "options",
+      // Issue #6301: the callback's class default lives in the one
+      // home (defaultAccountTypeForCallback), shared with the creation
+      // route, the fire-time guard, and the blank-broker repair.
+      accountType: defaultAccountTypeForCallback("autonomousOptionsAnalysis"),
       scope: "schedule",
     });
     if (!bindingRes.ok) {

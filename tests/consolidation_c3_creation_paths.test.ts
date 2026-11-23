@@ -131,8 +131,8 @@ const ARMING_SITES: Record<string, { count: number; role: string }> = {
     role: "async-job substrate arming executeAsyncJob (submit, recovery, not-before re-arm) — job execution, not schedule creation",
   },
   "src/agents/orchestrator/scheduleMaintenance.ts": {
-    count: 1,
-    role: "strategy-scan baseline arm; payload built by buildSchedulePayload (#1277)",
+    count: 2,
+    role: "strategy-scan baseline arm; payload built by buildSchedulePayload (#1277) + the #6301 blank-broker repair re-stamp (a re-arm, not a new creation: it overlays the resolved binding tuple onto the existing payload and preserves its cron)",
   },
   "src/agents/routes/etradeBrokerOrders.ts": {
     count: 1,

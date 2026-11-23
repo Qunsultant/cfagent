@@ -38,6 +38,7 @@ import { sessionStore } from "../../security/session";
 import { lookupInternalUserIdByLogin } from "../../security/iaaaMigration";
 import type { JobRunOutcome, JobRunTrigger } from "../../data/jobRunRecordPorts";
 import { normalizeJobRunTrigger } from "../../data/jobRunRecordPorts";
+import type { EffectiveModeSource } from "../../services/scheduledEffectiveMode";
 import { createStructuredLogger } from "../../observability/structuredLogger";
 import { createObservabilitySink } from "../../observability/createObservabilityPorts";
 
@@ -65,6 +66,26 @@ export interface ScheduledCallbackOutcome {
   descriptor?: string;
   error?: string;
   artifactRefs?: string[];
+  // Issue #6301 — the resolved binding the run executed under, so the
+  // runs ledger records the broker/mode instead of reading "—". The
+  // fire-time guard stamps these on the outcome (resolved from the
+  // one defaults home when the payload is blank); the recording
+  // wrapper copies them onto the record, winning over the payload
+  // stamp when present.
+  brokerId?: string;
+  mode?: "live" | "paper";
+  modeSource?: EffectiveModeSource;
+}
+
+/**
+ * Issue #6301 — the resolved binding a callback outcome carries for
+ * the ledger: the broker + mode the run executed under, with the
+ * resolver leg that produced the mode when known.
+ */
+export interface ScheduledCallbackBroker {
+  brokerId: string;
+  mode: "live" | "paper";
+  modeSource?: EffectiveModeSource;
 }
 
 /**

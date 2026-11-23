@@ -69,7 +69,7 @@ import {
 import type { PaymentsFlowScopedModes } from "../config/paymentsFlowModes";
 import { BROKER_CATALOG, brokerCopilotCapability, diffScanRuns, isBrokerId, isCopilotBroker, TradingPlatformRegistry, validateAccountAgainstBroker, type AccountBindingTuple } from "../trading";
 import { ACCOUNT_BINDING_CONFIG, maskAccountId } from "../config/accountBindings";
-import { accountBindingAuditFields, getBrokerAssetAccountRegistry, resolveValidatedExecutionAccountContext, type ExecutionAccountContext } from "../services/accountBindings";
+import { accountBindingAuditFields, getBrokerAssetAccountRegistry, resolveScheduleBindingDefaults, resolveValidatedExecutionAccountContext, type ExecutionAccountContext } from "../services/accountBindings";
 import { createOptionsDiscoveryPorts } from "../data/createOptionsDiscoveryPorts";
 import { createUnifiedSchedulePorts } from "../data/createUnifiedSchedulePorts";
 
@@ -103,7 +103,7 @@ import { createStockCopilotActivityPort } from "../data/createStockCopilotStoreP
 import { declareStrategyScanObserveTasks, type ScheduledTasksObserveContext } from "./orchestrator/scheduledTasksObserve";
 import { declareStockCopilotTasks, type ScheduledTasksCopilotContext } from "./orchestrator/scheduledTasksCopilot";
 import { buildOrchestratorSkillSources } from "./orchestrator/skillPacks";
-import { autoRenewETradeTokens, autonomousGoalScreen, autonomousMarketScreen, autonomousStrategyDiscovery, collectIvHistory, expireStaleOrderDraft, runWorkflowStage, sendScheduledReminder, type ScheduledCallbackOutcome, type ScheduledCallbacksContext } from "./orchestrator/scheduledCallbacks";
+import { autoRenewETradeTokens, autonomousGoalScreen, autonomousMarketScreen, autonomousStrategyDiscovery, collectIvHistory, expireStaleOrderDraft, runWorkflowStage, sendScheduledReminder, type ScheduledCallbackBroker, type ScheduledCallbackOutcome, type ScheduledCallbacksContext } from "./orchestrator/scheduledCallbacks";
 import { recordScheduleCallbackRun } from "./orchestrator/scheduleCallbackRunRecords";
 import {
   STALE_LEDGER_SWEEP_RECORD_ID,
@@ -1869,42 +1869,76 @@ export class OrchestratorAgent extends PortThink {
    * deliberately NOT guarded here: pipeline jobs carry no broker
    * targeting (see the note at CREATABLE_SCHEDULE_CALLBACKS).
    */
-  private async enforceScheduleBinding(payload: {
-    brokerId?: unknown;
-    mode?: unknown;
-    accountType?: unknown;
-    accountId?: unknown;
-    userLogin?: unknown;
-    environment?: unknown;
-  } | undefined): Promise<
-    | { ok: true; tuple: AccountBindingTuple }
-    | { ok: false; code: string; error: string }
+  /** Issue #6301 — stamp the guard's resolved binding onto a callback
+   *  outcome so the runs ledger records the run's broker/mode. */
+  private outcomeWithBinding(
+    outcome: ScheduledCallbackOutcome,
+    binding: ScheduledCallbackBroker,
+  ): ScheduledCallbackOutcome {
+    return {
+      ...outcome,
+      brokerId: binding.brokerId,
+      mode: binding.mode,
+      ...(binding.modeSource ? { modeSource: binding.modeSource } : {}),
+    };
+  }
+
+  private async enforceScheduleBinding(
+    payload: {
+      brokerId?: unknown;
+      mode?: unknown;
+      accountType?: unknown;
+      accountId?: unknown;
+      userLogin?: unknown;
+      environment?: unknown;
+    } | undefined,
+    /** The firing callback — selects the callback's asset-class default for a blank accountType. */
+    callback?: string,
+  ): Promise<
+    | { ok: true; tuple: AccountBindingTuple; modeSource?: ScheduledCallbackBroker["modeSource"] }
+    | {
+        ok: false;
+        code: string;
+        error: string;
+        /** The broker/mode resolved before the failure, when known — so a refused run still records which broker it tried. */
+        resolved?: ScheduledCallbackBroker;
+      }
   > {
     const p = (payload ?? {}) as Record<string, unknown>;
-    const brokerId = typeof p.brokerId === "string" ? p.brokerId : "";
-    const mode = p.mode === "live" || p.mode === "paper" ? p.mode : undefined;
-    const accountType = typeof p.accountType === "string" ? p.accountType : "";
     const accountId = typeof p.accountId === "string" ? p.accountId : "";
-    if (!brokerId || !mode || !accountType || !accountId) {
+    // Issue #6301 — a pre-F3 unstamped payload is RESOLVED from the
+    // one defaults home instead of refused: the broker, mode, and
+    // account type each fall back to the existing default
+    // (resolveScheduleBindingDefaults), and a missing accountId
+    // resolves through the validated-account resolution. A stamped,
+    // registered broker is never overridden, and a present-but-unknown
+    // broker is still refused by name. The account validation below
+    // is unchanged: an unresolvable account is a named refusal, and
+    // an unverifiable enumeration still throws (a failure row, never
+    // a silent refusal).
+    const resolved = await resolveScheduleBindingDefaults({
+      env: this.env,
+      brokerId: p.brokerId,
+      mode: p.mode,
+      accountType: p.accountType,
+      environment: p.environment,
+      callback,
+    });
+    const resolvedForLedger: ScheduledCallbackBroker = {
+      brokerId: resolved.brokerId,
+      mode: resolved.mode,
+      ...(resolved.modeSource ? { modeSource: resolved.modeSource } : {}),
+    };
+    if (!isBrokerId(resolved.brokerId)) {
       const code = ACCOUNT_BINDING_CONFIG.failureCodes.bindingMissing;
       return {
         ok: false,
         code,
         error: codedMessage(
           code,
-          "Schedule payload carries no stamped binding tuple; re-create the schedule to bind it to an account.",
+          `Schedule payload names unknown broker "${resolved.brokerId}"; re-create the schedule to bind it to an account.`,
         ),
-      };
-    }
-    if (!isBrokerId(brokerId)) {
-      const code = ACCOUNT_BINDING_CONFIG.failureCodes.bindingMissing;
-      return {
-        ok: false,
-        code,
-        error: codedMessage(
-          code,
-          `Schedule payload names unknown broker "${brokerId}"; re-create the schedule to bind it to an account.`,
-        ),
+        resolved: resolvedForLedger,
       };
     }
     const savedContext = await this.getScreenerExecutionContext();
@@ -1915,7 +1949,36 @@ export class OrchestratorAgent extends PortThink {
         ok: false,
         code,
         error: codedMessage(code, "Schedule payload carries no owner login, so its bound account cannot be resolved."),
+        resolved: resolvedForLedger,
       };
+    }
+    const brokerId = resolved.brokerId;
+    const mode = resolved.mode;
+    const accountType = resolved.accountType;
+    let effectiveAccountId = accountId;
+    if (!effectiveAccountId) {
+      const accountRes = await resolveValidatedExecutionAccountContext(this.env, userLogin, {
+        broker: brokerId,
+        mode,
+        accountType,
+        scope: "schedule",
+      });
+      if (!accountRes.ok) {
+        return { ok: false, code: accountRes.code, error: accountRes.error, resolved: resolvedForLedger };
+      }
+      effectiveAccountId = accountRes.context.accountId ?? "";
+      if (!effectiveAccountId) {
+        const code = ACCOUNT_BINDING_CONFIG.failureCodes.bindingMissing;
+        return {
+          ok: false,
+          code,
+          error: codedMessage(
+            code,
+            `No bound account resolves for ${brokerId}:${mode}:${accountType}; bind the account before scheduling runs.`,
+          ),
+          resolved: resolvedForLedger,
+        };
+      }
     }
     let accounts: readonly BrokerAccount[];
     try {
@@ -1936,13 +1999,13 @@ export class OrchestratorAgent extends PortThink {
       broker: brokerId,
       mode,
       accountType,
-      accountId,
+      accountId: effectiveAccountId,
       availableAccounts: accounts,
       registry,
       updatedBy: userLogin,
     });
-    if (!valRes.ok) return { ok: false, code: valRes.code, error: valRes.error };
-    return { ok: true, tuple: valRes.tuple };
+    if (!valRes.ok) return { ok: false, code: valRes.code, error: valRes.error, resolved: resolvedForLedger };
+    return { ok: true, tuple: valRes.tuple, ...(resolved.modeSource ? { modeSource: resolved.modeSource } : {}) };
   }
 
   // Issue #2964: the SDK fires this as method.call(this, payload, schedule),
@@ -1981,9 +2044,16 @@ export class OrchestratorAgent extends PortThink {
       payload,
       schedule,
       async () => {
-        const guard = await this.enforceScheduleBinding(payload);
-        if (!guard.ok) return { outcome: "skipped", detail: guard.code };
-        return autonomousMarketScreen(this.scheduledCallbacksContext(), payload);
+        const guard = await this.enforceScheduleBinding(payload, "autonomousMarketScreen");
+        if (!guard.ok) {
+          if (guard.resolved) return this.outcomeWithBinding({ outcome: "skipped", detail: guard.code }, guard.resolved);
+          return { outcome: "skipped", detail: guard.code };
+        }
+        return this.outcomeWithBinding(await autonomousMarketScreen(this.scheduledCallbacksContext(), payload), {
+          brokerId: guard.tuple.broker,
+          mode: guard.tuple.mode,
+          ...(guard.modeSource ? { modeSource: guard.modeSource } : {}),
+        });
       },
       { audit: (type, agent, payload) => this.audit(type, agent, payload) },
     );
@@ -2020,9 +2090,16 @@ export class OrchestratorAgent extends PortThink {
       payload,
       schedule,
       async () => {
-        const guard = await this.enforceScheduleBinding(payload);
-        if (!guard.ok) return { outcome: "skipped", detail: guard.code };
-        return autonomousGoalScreen(this.scheduledCallbacksContext(), payload);
+        const guard = await this.enforceScheduleBinding(payload, "autonomousGoalScreen");
+        if (!guard.ok) {
+          if (guard.resolved) return this.outcomeWithBinding({ outcome: "skipped", detail: guard.code }, guard.resolved);
+          return { outcome: "skipped", detail: guard.code };
+        }
+        return this.outcomeWithBinding(await autonomousGoalScreen(this.scheduledCallbacksContext(), payload), {
+          brokerId: guard.tuple.broker,
+          mode: guard.tuple.mode,
+          ...(guard.modeSource ? { modeSource: guard.modeSource } : {}),
+        });
       },
       { audit: (type, agent, payload) => this.audit(type, agent, payload) },
     );
@@ -2040,6 +2117,9 @@ export class OrchestratorAgent extends PortThink {
     }
     // Issue #2964: outcome stash, same pattern as the extracted callbacks.
     let outcome: ScheduledCallbackOutcome = { outcome: "skipped", detail: "callback did not run" };
+    // Issue #6301: the guard's resolved binding, attached to the final
+    // outcome so the ledger records the run's broker/mode.
+    let runBroker: ScheduledCallbackBroker | undefined;
     const runAnalysis = async (): Promise<ScheduledCallbackOutcome> => {
       const savedContext = await this.getScreenerExecutionContext();
       const userLogin = resolveScheduledLogin(payload?.userLogin, savedContext?.userLogin) || "";
@@ -2051,14 +2131,18 @@ export class OrchestratorAgent extends PortThink {
         });
         return (outcome = { outcome: "skipped", detail: "unowned scheduled options screen" });
       }
-      // Issue #5100 (F3 of #5094): fire-time binding enforcement —
-      // the stamped tuple is re-validated before the service runs; a
-      // refusal records a skipped run with the code as the detail.
-      // (After the unowned check above, so its baseline-schedule
-      // cleanup still runs for ownerless schedules.)
+      // Issue #5100 (F3 of #5094): fire-time binding enforcement —\n      // the stamped tuple is re-validated before the service runs; a\n      // refusal records a skipped run with the code as the detail.\n      // Issue #6301: a pre-F3 unstamped payload resolves from the\n      // one defaults home instead of being refused; the resolved\n      // binding rides the outcome to the ledger. (After the unowned\n      // check above, so its baseline-schedule cleanup still runs for\n      // ownerless schedules.)
       {
-        const guard = await this.enforceScheduleBinding(payload);
-        if (!guard.ok) return (outcome = { outcome: "skipped", detail: guard.code });
+        const guard = await this.enforceScheduleBinding(payload, "autonomousOptionsAnalysis");
+        if (!guard.ok) {
+          if (guard.resolved) runBroker = guard.resolved;
+          return (outcome = { outcome: "skipped", detail: guard.code });
+        }
+        runBroker = {
+          brokerId: guard.tuple.broker,
+          mode: guard.tuple.mode,
+          ...(guard.modeSource ? { modeSource: guard.modeSource } : {}),
+        };
       }
       if (payload?.trigger !== "manual") {
         const slot = new Date().toISOString().slice(0, 16);
@@ -2179,7 +2263,7 @@ export class OrchestratorAgent extends PortThink {
         } else {
           await runAnalysis();
         }
-        return outcome;
+        return runBroker ? this.outcomeWithBinding(outcome, runBroker) : outcome;
       },
       { audit: (type, agent, payload) => this.audit(type, agent, payload) },
     );
@@ -2194,9 +2278,16 @@ export class OrchestratorAgent extends PortThink {
       payload,
       schedule,
       async () => {
-        const guard = await this.enforceScheduleBinding(payload);
-        if (!guard.ok) return { outcome: "skipped", detail: guard.code };
-        return autonomousStrategyDiscovery(this.scheduledCallbacksContext(), payload);
+        const guard = await this.enforceScheduleBinding(payload, "autonomousStrategyDiscovery");
+        if (!guard.ok) {
+          if (guard.resolved) return this.outcomeWithBinding({ outcome: "skipped", detail: guard.code }, guard.resolved);
+          return { outcome: "skipped", detail: guard.code };
+        }
+        return this.outcomeWithBinding(await autonomousStrategyDiscovery(this.scheduledCallbacksContext(), payload), {
+          brokerId: guard.tuple.broker,
+          mode: guard.tuple.mode,
+          ...(guard.modeSource ? { modeSource: guard.modeSource } : {}),
+        });
       },
       { audit: (type, agent, payload) => this.audit(type, agent, payload) },
     );
