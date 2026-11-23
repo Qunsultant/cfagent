@@ -84,8 +84,9 @@ describe("schema equality — all planes (#4282 P4)", () => {
     // (job_run_records binding tuple: no new table, +1 index):
     // indexes 110 → 111.
     // #6151 S3 adds migration 0085 (saved nav presets: agent_nav_presets + agent_nav_preset_state + 2 indexes): 185 → 187 tables, 111 → 113 indexes.
+    // Issue #6100 adds 4 mas_events envelope indexes: 113 → 117.
     expect(Object.keys(model.tables).length).toBe(187);
-    expect(Object.keys(model.indexes).length).toBe(113);
+    expect(Object.keys(model.indexes).length).toBe(117);
     expect(fixtureSha256("schema_component_combined_expected_model.json")).toBe(
       COMBINED_FIXTURE_SHA256,
     );
@@ -107,10 +108,12 @@ describe("schema equality — all planes (#4282 P4)", () => {
     // (job_run_records binding tuple: 4 columns + 1 index):
     // d1 indexes 66 → 67.
     // #6151 S3 adds migration 0085 (saved nav presets: 2 tables + 2 indexes): d1 tables 106 → 108, d1 indexes 67 → 69.
+    // Issue #6100's envelope columns and indexes land on the ORM
+    // plane (see the orm row), so the d1 counts are unchanged by it.
     const counts: Record<string, [number, number]> = {
       d1: [108, 69],
       do: [70, 41],
-      orm: [13, 10],
+      orm: [13, 14],
       remainder: [19, 15],
     };
     for (const [plane, [tables, indexes]] of Object.entries(counts)) {
@@ -143,7 +146,7 @@ describe("schema equality — all planes (#4282 P4)", () => {
     expect(new Set(executedCodes).size).toBe(
       COMBINED_CATALOGUE_ENTRIES.length,
     );
-    expect(COMBINED_CATALOGUE_ENTRIES.length).toBe(484);    // Issue #6167 adds 1 entry (the host_version remainder ALTER
+    expect(COMBINED_CATALOGUE_ENTRIES.length).toBe(493);    // Issue #6167 adds 1 entry (the host_version remainder ALTER
     // on mas_async_jobs): 452 → 453. Issue #5100 (F3 of #5094) adds 13:
     // 453 → 466 entries. Issue #5102 (F5 of #5094) adds 5 entries
     // (migration 0084: 4 job_run_records ALTERs + 1 index):
@@ -190,7 +193,9 @@ describe("schema equality — all planes (#4282 P4)", () => {
     // 486 → 491 statements.
     // #6151 S3 adds migration 0085 (saved nav presets: 2 tables + 2 indexes), each one statement:
     // 491 → 495 statements.
-    expect(executedStatements).toBe(495);
+    // Issue #6100 adds 9 entries (5 mas_events envelope ALTERs + 4
+    // indexes), each one statement: 495 → 504 statements.
+    expect(executedStatements).toBe(504);
     const actual = instance.introspect();
     const diff = diffSchema(actual, combinedExpectedModel());
     expect(isEmptyDiff(diff)).toBe(true);

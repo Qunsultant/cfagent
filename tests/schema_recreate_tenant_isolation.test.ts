@@ -100,11 +100,13 @@ describe("recreate + tenant isolation (#4282 P4)", () => {
   // Issue #5102 (F5 of #5094) adds migration 0084 (job_run_records
   // binding columns: 4 ALTERs + 1 index): 486 → 491.
   // #6151 S3 adds migration 0085 (saved nav presets: 2 tables + 2 indexes): 491 → 495.
-    expect(first.summary.totalSteps).toBe(495);
-    expect(first.summary.executed).toBe(495);
+  // Issue #6100 adds 5 mas_events envelope ALTERs + 4 indexes:
+  // 495 → 504.
+    expect(first.summary.totalSteps).toBe(504);
+    expect(first.summary.executed).toBe(504);
     expect(first.summary.failed).toBe(0);
     expect(first.summary.skipped).toBe(0);
-    expect(first.executed).toHaveLength(495);
+    expect(first.executed).toHaveLength(504);
     expect(first.failed).toEqual([]);
     expect(first.skipped).toEqual([]);
     // Uncreatable layers are deployment facts, not changes: they are
@@ -234,7 +236,7 @@ describe("recreate + tenant isolation (#4282 P4)", () => {
     });
     // The report is truthful: everything before the failing step
     // executed, the failing step is named, everything after it is
-    // skipped — and the three counts sum to the 477 resolved steps.
+    // skipped — and the three counts sum to the 495 resolved steps.
     expect(partial.summary.failed).toBe(1);
     expect(partial.failed).toHaveLength(1);
     expect(partial.failed[0].code).toBe(UNIQUE_INDEX_CODE);

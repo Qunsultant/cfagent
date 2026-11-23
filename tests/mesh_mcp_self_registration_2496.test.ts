@@ -15,14 +15,21 @@
  * loaded and the registration happens BEFORE the server module
  * (src/mcps/openaimp/index.ts, whose MCP_TOOLS catalog snapshot is
  * taken at load) is imported — exactly how a deploy-time
- * registration lands in the catalog. Hence the dynamic imports:
- * static imports would evaluate the whole graph before the
- * registration could happen. This file intentionally shares no
+ * registration lands in the catalog. The factory itself is a static
+ * import (commands.ts does not import the server catalog, so the
+ * snapshot still happens after registration); only the server
+ * modules stay dynamic, because a static import would evaluate
+ * them — and take the snapshot — before the registration could
+ * happen. The factory import is static rather than dynamic for a
+ * measured reason: evaluating it inside the test body costs ~15s
+ * against the 25s test budget (RCA #6100 — the import, not the
+ * assertions, is what times out). This file intentionally shares no
  * harness with the main #2496 suite.
  */
 import { describe, expect, it } from "vitest";
 import { MCPClientManager } from "agents/mcp/client";
 import { z } from "zod";
+import { McpToolFactory } from "../src/mcps/openaimp/commands";
 import { MockSqlStorage } from "./mock-sql";
 import type { AsyncJobSubmission, Env } from "../src/types";
 
@@ -31,8 +38,11 @@ const PROBE_KEY = `tool_openaimp_${PROBE_TOOL}`;
 
 describe("issue #2496 — self-registration: a new factory command reaches the turn unaided", () => {
   it("registering a command in McpToolFactory is sufficient — no turn-code change", async () => {
-    // 1. Load the factory FIRST and register a brand-new command.
-    const { McpToolFactory } = await import("../src/mcps/openaimp/commands");
+    // 1. Register a brand-new command on the factory (statically
+    // imported above). The registration itself must happen here,
+    // before the server modules load below — the factory import is
+    // static only because evaluating it inside the test body costs
+    // ~15s against the 25s budget (RCA #6100).
     McpToolFactory.registerTool(
       {
         name: PROBE_TOOL,

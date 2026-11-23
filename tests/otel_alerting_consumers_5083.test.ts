@@ -23,6 +23,13 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { runResourceCapAlert } from "../src/agents/resourceGoals";
 import { createD1ResourceDb } from "../src/data/d1ResourceUsageAdapter";
+// The orchestrator graph is a static import, not a dynamic import
+// inside the sweep test: evaluating it there costs ~19s against the
+// 25s test budget (RCA #6100 — the import, not the assertions, is
+// what times out). The graph evaluates at file collection instead;
+// the test bodies themselves run in milliseconds.
+import { OrchestratorAgent } from "../src/agents/orchestrator";
+import { MockSqlStorage } from "./mock-sql";
 import type {
   AlertReport,
   AlertResult,
@@ -207,8 +214,6 @@ describe("S4 consumers route through the one alerting port", () => {
     // OrchestratorAgent and call the hook directly. The port
     // uses the env's Slack webhook (stubbed fetch) — the hook
     // must deliver through it, not bypass it.
-    const { OrchestratorAgent } = await import("../src/agents/orchestrator");
-    const { MockSqlStorage } = await import("./mock-sql");
     const fetchCalls: Array<{ url: string; body: string }> = [];
     vi.stubGlobal(
       "fetch",
