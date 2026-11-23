@@ -46,6 +46,7 @@ import {
   NIGHTLY_RESEARCH_RECORD_ID,
 } from "../../services/researchScheduleGuard";
 import { resolveResearchJobConfig } from "../../config/researchJobConfig";
+import { describeResearchExecution } from "../../services/researchExecutionView";
 import { researchUniverseIds } from "../../trading";
 import type { ResearchStageModes } from "../../config/researchJobConfig";
 import { isResearchVenueRefusal, resolveResearchVenue } from "../../services/researchVenue";
@@ -1589,7 +1590,18 @@ export async function handleScreenerResearchRoutes(
       const config = await agent.getResearchConfig();
       // Issue #6032 — the accepted set is served with the settings so the
       // editor renders a select fed from the registry (no client-side copy).
-      return Response.json({ config, universes: researchUniverseIds() });
+      //
+      // Issue #5975 (UX slice) — the execution group is served the same way:
+      // the stage/axis lists, the deployment default, the stored merge and the
+      // venue catalogue come from their declaring modules, so the page shows
+      // what a run will execute instead of holding a second copy. A broken
+      // deployment default is reported (`deploymentErrors`) rather than
+      // failing the read: the stored map still governs the run.
+      const execution = describeResearchExecution(
+        ctx.env as Record<string, string | undefined>,
+        config,
+      );
+      return Response.json({ config, universes: researchUniverseIds(), execution });
     }
     if (path.endsWith("/research/settings") && request.method === "POST") {
       const userLogin = request.headers.get("x-user-login") || sessionId;

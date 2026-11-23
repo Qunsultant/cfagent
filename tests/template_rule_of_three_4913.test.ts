@@ -435,7 +435,9 @@ describe("rule of three: headers (#4913)", () => {
     const h5 = countTag(pageTsx(), "h5");
     const h6 = countTag(pageTsx(), "h6");
     expect(h5 + h6, "hand-rolled <h5>/<h6> sites remain (migrate to SmallHeader)").toBe(0);
-    expect(countTag(pageTsx(), "SmallHeader")).toBe(46);
+    // #5975 UX slice (#6289): the OODA settings card's stage-mode section
+    // heading is a SmallHeader, so the primitive count tracks the one new site.
+    expect(countTag(pageTsx(), "SmallHeader")).toBe(47);
     // Exactly one site keeps h6 semantics (OmnichannelPanel: the email subject).
     let h6Level = 0;
     for (const f of pageTsx()) {

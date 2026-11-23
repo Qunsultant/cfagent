@@ -107,18 +107,36 @@ export function mergeResearchStageModes(
   return out;
 }
 
-export function resolveResearchStageModes(
-  env?: Record<string, string | undefined>,
-): ResearchStageModes {
+/**
+ * Issue #5975 (UX slice) — read the deployment carrier without throwing, so a
+ * surface that only *describes* the configuration reports a broken default
+ * beside the read instead of failing. `resolveResearchStageModes` is the
+ * throwing form the dispatch uses, over this same parse.
+ */
+export function readResearchStageModes(env?: Record<string, string | undefined>): {
+  modes: ResearchStageModes;
+  errors: string[];
+} {
   const raw = env?.RESEARCH_STAGE_MODES;
-  if (!raw || !raw.trim()) return {};
+  if (!raw || !raw.trim()) return { modes: {}, errors: [] };
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch {
-    throw new Error("RESEARCH_STAGE_MODES is not valid JSON; expected { <stage>: { <axis>: <value> } }.");
+    return {
+      modes: {},
+      errors: [
+        "RESEARCH_STAGE_MODES is not valid JSON; expected { <stage>: { <axis>: <value> } }.",
+      ],
+    };
   }
-  const { modes, errors } = validateResearchStageModes(parsed, "RESEARCH_STAGE_MODES");
+  return validateResearchStageModes(parsed, "RESEARCH_STAGE_MODES");
+}
+
+export function resolveResearchStageModes(
+  env?: Record<string, string | undefined>,
+): ResearchStageModes {
+  const { modes, errors } = readResearchStageModes(env);
   if (errors.length > 0) throw new Error(errors[0]);
   return modes;
 }

@@ -56,6 +56,34 @@ const STAGE_ACTIONS: Record<string, Array<{ op: string; label: string }>> = {
 };
 
 /**
+ * Issue #5975 (UX slice, #6289) — what the next run will execute, as the
+ * server describes it (`GET /api/research/settings` → `execution`).
+ *
+ * Every list here comes from the response: the six stages, the four axes, the
+ * venue catalogue, the deployment default and the effective merge. The panel
+ * holds no stage list, no axis list and no broker literal of its own.
+ */
+interface StageModesView {
+  [stage: string]: { [axis: string]: string };
+}
+
+interface ResearchExecutionView {
+  stages: string[];
+  axes: string[];
+  deploymentModes: StageModesView;
+  deploymentErrors: string[];
+  effectiveModes: StageModesView;
+  modeSources: { [stage: string]: { [axis: string]: "stored" | "deployment" } };
+  venues: {
+    brokers: string[];
+    modes: string[];
+    defaultBrokerId: string | null;
+    defaultMode: string | null;
+    defaultsError: string | null;
+  };
+}
+
+/**
  * Issue #6034 — one stage row, as the read contract states it. Every field
  * comes from `GET /research/runs/:runId/stages`; the client invents none.
  */
@@ -437,6 +465,10 @@ export function ResearchRunsPanel({
   const [config, setConfig] = useState<Record<string, unknown> | null>(null);
   /** Issue #6032 — the accepted universes, served with the settings. */
   const [universes, setUniverses] = useState<string[]>([]);
+  /** Issue #5975 — the execution description served with the settings. */
+  const [execution, setExecution] = useState<ResearchExecutionView | null>(null);
+  /** Issue #5975 — per-stage mode overrides being edited; empty = inherit. */
+  const [modeDraft, setModeDraft] = useState<StageModesView>({});
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState("");
@@ -453,17 +485,31 @@ export function ResearchRunsPanel({
     try {
       const res = await apiFetch("/api/research/settings", { headers: hdrs(userLogin) });
       if (!res.ok) return;
-      const data = await readJson<{ config?: Record<string, unknown>; universes?: string[] }>(res);
+      const data = await readJson<{
+        config?: Record<string, unknown>;
+        universes?: string[];
+        execution?: ResearchExecutionView;
+      }>(res);
       if (Array.isArray(data.universes) && data.universes.length > 0) {
         setUniverses(data.universes);
       }
+      if (data.execution) setExecution(data.execution);
       if (data.config) {
         setConfig(data.config);
         const d: Record<string, string> = {};
         for (const [k, v] of Object.entries(data.config)) {
+          // Issue #5975 — stageModes is an object edited by the execution
+          // editor below, never a stringified filter field.
+          if (k === "stageModes") continue;
           d[k] = v === null || v === undefined ? "" : String(v);
         }
         setDraft(d);
+        const stored = (data.config.stageModes ?? {}) as StageModesView;
+        const seeded: StageModesView = {};
+        for (const [stage, axes] of Object.entries(stored)) {
+          seeded[stage] = { ...axes };
+        }
+        setModeDraft(seeded);
       }
     } catch {
       /* panel falls back to server defaults */
@@ -509,18 +555,45 @@ export function ResearchRunsPanel({
         else if (f.type === "number") patch[f.key] = raw === "" ? null : Number(raw);
         else patch[f.key] = raw;
       }
+      // Issue #5975 — the per-stage modes ride the same payload: an empty
+      // axis is omitted so the deployment default (or the job mode) governs,
+      // never an empty string. The server validates the names it is given.
+      const stageModes: StageModesView = {};
+      for (const [stage, axes] of Object.entries(modeDraft)) {
+        const kept: Record<string, string> = {};
+        for (const [axis, value] of Object.entries(axes ?? {})) {
+          const trimmed = String(value ?? "").trim();
+          if (trimmed !== "") kept[axis] = trimmed;
+        }
+        if (Object.keys(kept).length > 0) stageModes[stage] = kept;
+      }
+      patch.stageModes = stageModes;
       const res = await apiFetch("/api/research/settings", {
         method: "POST",
         headers: { ...hdrs(userLogin), ...csrfHeaders() },
         body: JSON.stringify(patch),
       });
-      const data = await readJson<{ config?: Record<string, unknown>; errors?: string[] }>(res);
-      if (data.errors && data.errors.length > 0) {
+      // Issue #5975 (UX slice) — a validation refusal is a 400 carrying
+      // `errors`, not a transport failure: read the body first so the
+      // validator's own words (stage/axis named) are what the operator sees,
+      // and nothing is ever claimed saved. Any other non-ok status still
+      // states the HTTP failure, exactly as readJson did.
+      const data = (await res.json().catch(() => null)) as {
+        config?: Record<string, unknown>;
+        errors?: string[];
+        error?: string;
+      } | null;
+      if (data && Array.isArray(data.errors) && data.errors.length > 0) {
         setSaveMsg(`Rejected: ${data.errors.join("; ")}`);
-      } else {
-        setSaveMsg("Saved — the next run embeds this filter snapshot.");
-        if (data.config) setConfig(data.config);
+        return;
       }
+      if (!res.ok) {
+        throw new Error(data?.error ?? `HTTP ${res.status}`);
+      }
+      setSaveMsg("Saved — the next run embeds this filter snapshot.");
+      // One read path: the refreshed response carries the stored config and
+      // the effective merge, so the editor's inherit hints cannot go stale.
+      void loadConfig();
     } catch (err) {
       setSaveMsg(`Save failed: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
@@ -613,18 +686,37 @@ export function ResearchRunsPanel({
         >
           ↻ Refresh
         </Button>
-        <TextInput
+        {/* Issue #5975 — the venue is a validated enum, not free text: the
+            options come from the served catalogue (the same constants the
+            route's resolver refuses by), and an empty value is the tenant
+            default, stated in the option itself. */}
+        <Select
           aria-label="Broker / venue"
-          placeholder="Broker (default configured)"
           value={brokerId}
           onChange={(e) => setBrokerId(e.target.value)}
-        />
-        <TextInput
-          aria-label="Mode"
-          placeholder="Mode (paper / live)"
-          value={mode}
-          onChange={(e) => setMode(e.target.value)}
-        />
+        >
+          <option value="">
+            Tenant default ({execution?.venues.defaultBrokerId ?? "unresolved"})
+          </option>
+          {(execution?.venues.brokers ?? []).map((broker) => (
+            <option key={broker} value={broker}>
+              {broker}
+            </option>
+          ))}
+        </Select>
+        <Select aria-label="Mode" value={mode} onChange={(e) => setMode(e.target.value)}>
+          <option value="">Tenant default ({execution?.venues.defaultMode ?? "unresolved"})</option>
+          {(execution?.venues.modes ?? []).map((venueMode) => (
+            <option key={venueMode} value={venueMode}>
+              {venueMode}
+            </option>
+          ))}
+        </Select>
+        <span className="ui-meta">
+          {`Effective venue: ${brokerId.trim() || execution?.venues.defaultBrokerId || "unresolved"} · ${
+            mode.trim() || execution?.venues.defaultMode || "unresolved"
+          } ${brokerId.trim() || mode.trim() ? "(explicit override)" : "(tenant default)"}`}
+        </span>
         <Button onClick={() => setShowFilters(!showFilters)}>{showFilters ? "Hide filters" : "Edit filters"}</Button>
         {report && <Button onClick={() => void evaluate(report.runId)}>Evaluate this run (§9)</Button>}
         {onSendPrompt && (
@@ -676,8 +768,61 @@ export function ResearchRunsPanel({
               <span className="ui-meta-sm">{f.hint}</span>
             </Flex>
           ))}
+          <Stack gap="2">
+            <SmallHeader title="Stage execution modes — empty inherits the deployment default" />
+            <p className="ui-meta">
+              Each stage runs the deployment default or the job mode unless an axis is set here.
+              The effective value a run resolves is shown under each box; a stored override wins
+              per stage and per axis.
+            </p>
+            {execution && execution.deploymentErrors.length > 0 && (
+              <Notice tone="danger">
+                {`Deployment default ignored: ${execution.deploymentErrors.join("; ")}`}
+              </Notice>
+            )}
+            {execution &&
+              execution.stages.map((stage) => (
+                <Card key={stage} padding="sm">
+                  <Stack gap="2">
+                    <span>{stage}</span>
+                    <Flex gap="2" wrap={true}>
+                      {execution.axes.map((axis) => {
+                        const value = modeDraft[stage]?.[axis] ?? "";
+                        const effective = execution.effectiveModes[stage]?.[axis];
+                        const source = execution.modeSources[stage]?.[axis];
+                        const inherits = value.trim() === "";
+                        return (
+                          <Stack key={axis} gap="1">
+                            <TextInput
+                              aria-label={`${stage}: ${axis} mode`}
+                              placeholder={effective ?? "job mode"}
+                              value={value}
+                              onChange={(e) =>
+                                setModeDraft({
+                                  ...modeDraft,
+                                  [stage]: { ...(modeDraft[stage] ?? {}), [axis]: e.target.value },
+                                })
+                              }
+                            />
+                            <span className="ui-meta-sm">
+                              {`${axis}: ${
+                                inherits
+                                  ? `inherits ${effective ?? "the job mode"}${
+                                      source ? ` (${source} default)` : ""
+                                    }`
+                                  : "override"
+                              }`}
+                            </span>
+                          </Stack>
+                        );
+                      })}
+                    </Flex>
+                  </Stack>
+                </Card>
+              ))}
+          </Stack>
           <Flex gap="2" align="center">
-            <Button onClick={() => void save()} disabled={saving} loading={saving}>{"Save filters"}</Button>
+            <Button onClick={() => void save()} disabled={saving} loading={saving}>{"Save settings"}</Button>
             {saveMsg && <Notice tone="info">{saveMsg}</Notice>}
           </Flex>
           </Stack>
