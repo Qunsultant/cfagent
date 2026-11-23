@@ -156,7 +156,9 @@ const D1_MIGRATION_SQL_SHA256: Record<number, string> = {
   // #5102 adds migration 0084 (job_run_records binding tuple: 4
   // ALTERs + the binding-read index): 5 statements.
   84: "74b9fd18e06cb9b7abea9eceb2f53d69fb2fdc2d7f35ec42300fda893376b3a8",
-};
+  // #6151 S3 adds migration 0085 (saved nav presets: agent_nav_presets
+  // + agent_nav_preset_state): 4 statements.
+  85: "acbca0e1d709401ae86c4ca1b2388960761e8d311ea472987942959b9ad5f860",};
 
 /** Per-version statement counts, measured from the base runner. */
 const D1_MIGRATION_STATEMENT_COUNTS: Record<number, number> = {
@@ -248,7 +250,8 @@ const D1_MIGRATION_STATEMENT_COUNTS: Record<number, number> = {
   // #5102 adds migration 0084 (job_run_records binding tuple: 4
   // ALTERs + the binding-read index): 5 statements.
   84: 5,
-};
+  // #6151 S3 adds migration 0085 (saved nav presets: 2 tables + 2 indexes): 4 statements.
+  85: 4,};
 
 /** The 11 seed-DML statements, exact text, measured from the base runner. */
 const D1_SEED_STATEMENTS: string[] = [
@@ -288,7 +291,7 @@ function expectedD1Model(): SchemaModel {
 }
 
 describe("D1 catalogue — migrationRunner delegates (#4282 P1)", () => {
-  it("catalogues all 255 runner statements: 243 schema + 12 seed", () => {
+  it("catalogues all 259 runner statements: 247 schema + 12 seed", () => {
     const catalogue = buildD1Catalogue();
     // #5086 adds migration 0070 (otel_config_overrides table): 224 → 225.
     // #4767 adds migrations 0071/0072 (4 D1 ALTERs): 225 → 229.
@@ -303,10 +306,10 @@ describe("D1 catalogue — migrationRunner delegates (#4282 P1)", () => {
     // #6141 adds migration 0082 (referral trial-extension: 6 rule columns + ledger table + 2 indexes): 244 → 253.
     // #6028/#6202 adds migration 0083 (job_stage_events table + 1 index): 253 → 255.
     // #5102 adds migration 0084 (job_run_records binding tuple: 4 ALTERs + 1 index): 255 → 260.
-    expect(D1_CATALOGUE_ENTRIES.length).toBe(260);
-    expect(catalogue.size()).toBe(260);
-    expect(catalogue.byKind("schema").length).toBe(248);
-    expect(catalogue.byKind("seed").length).toBe(12);
+    // #6151 S3 adds migration 0085 (saved nav presets: 2 tables + 2 indexes): 260 → 264.
+    expect(D1_CATALOGUE_ENTRIES.length).toBe(264);
+    expect(catalogue.size()).toBe(264);
+    expect(catalogue.byKind("schema").length).toBe(252);    expect(catalogue.byKind("seed").length).toBe(12);
     const verbs = new Map<string, number>();
     const classify = (statement: string): string => {
       const upper = statement.trim().toUpperCase();
@@ -330,11 +333,10 @@ describe("D1 catalogue — migrationRunner delegates (#4282 P1)", () => {
       const verb = classify(entry.statement);
       verbs.set(verb, (verbs.get(verb) ?? 0) + 1);
     }
-    expect(verbs.get("CREATE TABLE")).toBe(107);
-    expect(verbs.get("CREATE INDEX")).toBe(58);
-    expect(verbs.get("CREATE UNIQUE INDEX")).toBe(9);
-    expect(verbs.get("ALTER TABLE")).toBe(73);
-    expect(verbs.get("DROP TABLE")).toBe(1);
+    expect(verbs.get("CREATE TABLE")).toBe(109);
+    expect(verbs.get("CREATE INDEX")).toBe(59);
+    expect(verbs.get("CREATE UNIQUE INDEX")).toBe(10);
+    expect(verbs.get("ALTER TABLE")).toBe(73);    expect(verbs.get("DROP TABLE")).toBe(1);
     expect(verbs.get("INSERT OR IGNORE")).toBe(8);
     expect(verbs.get("INSERT INTO")).toBe(1);
     expect(verbs.get("UPDATE")).toBe(3);
@@ -344,10 +346,12 @@ describe("D1 catalogue — migrationRunner delegates (#4282 P1)", () => {
     const versions = Object.keys(D1_MIGRATION_CODES)
       .map(Number)
       .sort((a, b) => a - b);
+    // 0084 is F5's migration (job_run_records binding columns,
+    // #5102), merged 2026-11-23 as f7b55d2 — the gap is filled and
+    // versions run 1–85 contiguously.
     expect(versions).toEqual(
-      Array.from({ length: 84 }, (_, i) => i + 1),
-    );
-    const allCodes = new Set<string>();
+      Array.from({ length: 85 }, (_, i) => i + 1),
+    );    const allCodes = new Set<string>();
     for (const version of versions) {
       const codes = D1_MIGRATION_CODES[version];
       expect(codes.length).toBe(D1_MIGRATION_STATEMENT_COUNTS[version]);
