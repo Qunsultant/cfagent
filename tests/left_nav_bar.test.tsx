@@ -183,11 +183,11 @@ describe("LeftNavBar UX & Reorganization (issue #2685)", () => {
     expect(platformAdminWrapper!.classList.contains("expanded")).toBe(false);
   });
 
-  it("configures Stock Hub with stocks, new-screen, research, patterns and presets sub-menus", () => {
+  it("configures Stock Hub with stocks, new-screen, research, patterns, opportunity-hunt and presets sub-menus", () => {
     const stockSubItems = SUB_MENU_CONFIGS["stock-hub"];
     expect(stockSubItems).toBeDefined();
     const subIds = stockSubItems.map((s) => s.id);
-    expect(subIds).toEqual(["screeners", "new-screen", "research", "patterns", "presets"]);
+    expect(subIds).toEqual(["screeners", "new-screen", "research", "patterns", "opportunity-hunt", "presets"]);
     expect(subIds).not.toContain("options");
     expect(subIds).not.toContain("scanner");
     expect(subIds).not.toContain("options-flows");
