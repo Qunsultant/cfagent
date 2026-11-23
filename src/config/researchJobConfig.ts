@@ -39,6 +39,74 @@ export type ResearchStageModes = Partial<
  * (`RESEARCH_STAGE_MODES`, JSON). An unknown stage kind or axis refuses by
  * name instead of being dropped: a typo must not silently keep the job mode.
  */
+/**
+ * Issue #5975 — validate one parsed stage-mode map, returning the modes and
+ * the errors by name instead of throwing. One rule for both carriers: the
+ * deployment default (`RESEARCH_STAGE_MODES`, JSON) and the stored
+ * `ResearchConfig.stageModes` (persisted through the settings API) are judged
+ * by this function, and `source` names the carrier in the message.
+ */
+export function validateResearchStageModes(
+  parsed: unknown,
+  source: string = "RESEARCH_STAGE_MODES",
+): { modes: ResearchStageModes; errors: string[] } {
+  const errors: string[] = [];
+  const out: ResearchStageModes = {};
+  if (parsed === null || parsed === undefined) return { modes: out, errors };
+  if (typeof parsed !== "object" || Array.isArray(parsed)) {
+    errors.push(`${source} must be an object keyed by research stage kind.`);
+    return { modes: out, errors };
+  }
+  for (const [stage, value] of Object.entries(parsed as Record<string, unknown>)) {
+    if (!(RESEARCH_STAGE_KINDS as readonly string[]).includes(stage)) {
+      errors.push(
+        `Unknown research stage "${stage}" in ${source}. Expected one of: ${RESEARCH_STAGE_KINDS.join(", ")}`,
+      );
+      continue;
+    }
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      errors.push(`${source}.${stage} must be an object keyed by execution-mode axis.`);
+      continue;
+    }
+    const axes: Partial<Record<ExecutionModeAxis, string>> = {};
+    for (const [axis, mode] of Object.entries(value as Record<string, unknown>)) {
+      if (!(EXECUTION_MODE_AXES as readonly string[]).includes(axis)) {
+        errors.push(
+          `Unknown execution-mode axis "${axis}" for research stage "${stage}". Expected one of: ${EXECUTION_MODE_AXES.join(", ")}`,
+        );
+        continue;
+      }
+      if (typeof mode !== "string" || !mode.trim()) {
+        errors.push(`${source}.${stage}.${axis} must be a non-empty string.`);
+        continue;
+      }
+      axes[axis as ExecutionModeAxis] = mode.trim();
+    }
+    out[stage as ResearchStageKind] = axes;
+  }
+  return { modes: out, errors };
+}
+
+/**
+ * Issue #5975 — the effective per-stage modes: the stored configuration wins
+ * over the deployment default, per stage and per axis, and a stage present in
+ * only one of them survives. Nothing is dropped and nothing is invented.
+ */
+export function mergeResearchStageModes(
+  base: ResearchStageModes,
+  override?: ResearchStageModes | null,
+): ResearchStageModes {
+  const out: ResearchStageModes = {};
+  for (const [stage, axes] of Object.entries(base)) {
+    out[stage as ResearchStageKind] = { ...axes };
+  }
+  for (const [stage, axes] of Object.entries(override ?? {})) {
+    const key = stage as ResearchStageKind;
+    out[key] = { ...(out[key] ?? {}), ...axes };
+  }
+  return out;
+}
+
 export function resolveResearchStageModes(
   env?: Record<string, string | undefined>,
 ): ResearchStageModes {
@@ -50,34 +118,9 @@ export function resolveResearchStageModes(
   } catch {
     throw new Error("RESEARCH_STAGE_MODES is not valid JSON; expected { <stage>: { <axis>: <value> } }.");
   }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new Error("RESEARCH_STAGE_MODES must be an object keyed by research stage kind.");
-  }
-  const out: ResearchStageModes = {};
-  for (const [stage, value] of Object.entries(parsed as Record<string, unknown>)) {
-    if (!(RESEARCH_STAGE_KINDS as readonly string[]).includes(stage)) {
-      throw new Error(
-        `Unknown research stage "${stage}" in RESEARCH_STAGE_MODES. Expected one of: ${RESEARCH_STAGE_KINDS.join(", ")}`,
-      );
-    }
-    if (!value || typeof value !== "object" || Array.isArray(value)) {
-      throw new Error(`RESEARCH_STAGE_MODES.${stage} must be an object keyed by execution-mode axis.`);
-    }
-    const axes: Partial<Record<ExecutionModeAxis, string>> = {};
-    for (const [axis, mode] of Object.entries(value as Record<string, unknown>)) {
-      if (!(EXECUTION_MODE_AXES as readonly string[]).includes(axis)) {
-        throw new Error(
-          `Unknown execution-mode axis "${axis}" for research stage "${stage}". Expected one of: ${EXECUTION_MODE_AXES.join(", ")}`,
-        );
-      }
-      if (typeof mode !== "string" || !mode.trim()) {
-        throw new Error(`RESEARCH_STAGE_MODES.${stage}.${axis} must be a non-empty string.`);
-      }
-      axes[axis as ExecutionModeAxis] = mode;
-    }
-    out[stage as ResearchStageKind] = axes;
-  }
-  return out;
+  const { modes, errors } = validateResearchStageModes(parsed, "RESEARCH_STAGE_MODES");
+  if (errors.length > 0) throw new Error(errors[0]);
+  return modes;
 }
 
 export interface ResearchJobConfig {

@@ -47,6 +47,7 @@ import {
 } from "../../services/researchScheduleGuard";
 import { resolveResearchJobConfig } from "../../config/researchJobConfig";
 import { researchUniverseIds } from "../../trading";
+import type { ResearchStageModes } from "../../config/researchJobConfig";
 import { isResearchVenueRefusal, resolveResearchVenue } from "../../services/researchVenue";
 import { recordLedgerRun } from "../../services/unifiedLedger";
 import { SqlJobRunRecordStore } from "../../data/doSqliteJobRunRecordAdapter";
@@ -83,6 +84,29 @@ const structuredLog = createStructuredLogger(createObservabilitySink({}), {
 type ScreenerExecutionContext = { userLogin: string; environment?: "TEST" | "PROD" };
 
 /** The subset of OrchestratorAgent surface the screener/research handlers need. */
+/**
+ * Issue #5975 - the owner's stored per-stage modes, resolved once per
+ * dispatch. A missing agent or a config read failure answers undefined, which
+ * leaves the deployment default (`RESEARCH_STAGE_MODES`) in force: the run
+ * never fails because a preference could not be read, and no mode is
+ * invented in its place.
+ */
+async function storedStageModesFor(
+  ctx: ScreenerResearchRouteContext,
+  userLogin: string,
+): Promise<ResearchStageModes | undefined> {
+  try {
+    const agent = ctx.getResearchAgent(userLogin);
+    if (!agent) return undefined;
+    const config = await agent.getResearchConfig();
+    return config.stageModes && Object.keys(config.stageModes).length > 0
+      ? config.stageModes
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export interface ScreenerResearchRouteContext {
   /** ScreenerAgent accessor (owner: OrchestratorAgent.getScreenerAgent - was `this.getScreenerAgent`). */
   getScreenerAgent(userLogin?: string): ScreenerAgent;
@@ -628,9 +652,13 @@ export async function handleScreenerResearchRoutes(
         throw error;
       }
       try {
+        // Issue #5975 - the owner's stored stage modes win over the
+        // deployment default for this dispatch.
+        const storedStageModes = await storedStageModesFor(ctx, userLogin);
         const dispatched = await dispatchResearchEngineRun({
           userLogin,
           trigger: "manual",
+          ...(storedStageModes ? { stageModes: storedStageModes } : {}),
           sql: resolveResearchSql(),
           d1: resolveResearchD1(),
           env: ctx.env as Record<string, string | undefined>,
@@ -830,9 +858,12 @@ export async function handleScreenerResearchRoutes(
         const screeningFlags = await import("../../services/screeningFlags");
         const readScreeningSetting = (key: string) => ctx.readSettingRaw(key);
         const screeningPaused = screeningFlags.isScreeningScheduledPaused(readScreeningSetting);
+        // Issue #5975 - manual and scheduled resolve the same stored modes.
+        const storedStageModes = await storedStageModesFor(ctx, userLogin);
         const dispatched = await dispatchResearchEngineRun({
           userLogin,
           trigger: "scheduled",
+          ...(storedStageModes ? { stageModes: storedStageModes } : {}),
           sql: resolveResearchSql(),
           d1: resolveResearchD1(),
           env: ctx.env as Record<string, string | undefined>,
