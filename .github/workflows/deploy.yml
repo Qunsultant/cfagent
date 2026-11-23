@@ -129,6 +129,32 @@ jobs:
       - name: Update wrangler.jsonc with KV ID
         run: sed -i "s/<YOUR_KV_NAMESPACE_ID>/$KV_ID/g" wrangler.jsonc
 
+      - name: Stamp deploy version into wrangler.jsonc
+        run: |
+          # Issue #6216: the async-job host version. CF_VERSION_METADATA.id
+          # is not available inside a Durable Object, so the claim stamped
+          # null and the stillborn gate could never fire. This step injects
+          # the deployed commit's SHA as the CF_DEPLOY_VERSION var (a plain
+          # var, visible in the DO env), the same sed pattern as the KV ID
+          # step above. The SHA is the deployed head: the CI workflow_run's
+          # head_sha, or github.sha for a manual dispatch. The resolver
+          # (src/agents/orchestrator/asyncJobs.ts `hostVersionFromEnv`)
+          # accepts only a full 40-hex SHA, so a failed stamp reads as
+          # unknown, never as a fake version — hence the hard failure
+          # below when the SHA cannot be resolved or the stamp does not
+          # land: a deploy without a version is a broken deploy.
+          DEPLOY_SHA="${{ github.event.workflow_run.head_sha || github.sha }}"
+          if [ -z "$DEPLOY_SHA" ]; then
+            echo "Failed to resolve the deployed commit SHA"
+            exit 1
+          fi
+          sed -i "s/<DEPLOY_VERSION>/$DEPLOY_SHA/g" wrangler.jsonc
+          grep -q "$DEPLOY_SHA" wrangler.jsonc || {
+            echo "CF_DEPLOY_VERSION was not stamped into wrangler.jsonc"
+            exit 1
+          }
+          echo "Stamped CF_DEPLOY_VERSION=$DEPLOY_SHA"
+
       - name: Ensure Vectorize index for VectorMemory (PR #6)
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}

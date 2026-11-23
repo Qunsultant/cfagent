@@ -133,8 +133,8 @@ export class DoSqliteAsyncJobStore
     }
     if (!names.has("host_version")) {
       // Issue #6167: the host version the executor claimed under
-      // (CF_VERSION_METADATA.id). NULL on legacy rows and when the
-      // platform reported no version at claim time.
+      // (the deploy-time git SHA, #6216). NULL on legacy rows and
+      // when the platform reported no version at claim time.
       this.sql.exec(remainderAlterSql("mas_async_jobs", "host_version"));
     }
     this.sql.exec(doIndexSql("idx_mas_async_jobs_parent"));
@@ -243,7 +243,10 @@ export class DoSqliteAsyncJobStore
       nowIso,
       // Issue #6167: the host version the executor claimed under;
       // NULL when the caller reports none (legacy caller, or the
-      // platform reported no version).
+      // platform reported no version). Issue #6216: the value is
+      // the deploy-time git SHA where the deploy workflow injected
+      // it (CF_DEPLOY_VERSION), falling back to
+      // CF_VERSION_METADATA.id.
       hostVersion ?? null,
       jobId,
       sessionId,

@@ -109,11 +109,13 @@ export interface AsyncJobStoredRow {
    *  for rows that never failed. Probed additive column. */
   error_code: string | null;
   /** Issue #6167: the host version the executor claimed under
-   *  (CF_VERSION_METADATA.id), or NULL when the claim predates
-   *  this slice or the platform reported no version. Probed
-   *  additive column. The reap compares it with the version at
-   *  reap time to name the restart class (deploy vs
-   *  same-version). */
+   *  (the deploy-time git SHA, #6216 — a plain var, so it IS
+   *  visible in the DO env — falling back to
+   *  CF_VERSION_METADATA.id where the deploy var was never
+   *  injected), or NULL when the claim predates this slice or
+   *  the platform reported no version. Probed additive column.
+   *  The reap compares it with the version at reap time to name
+   *  the restart class (deploy vs same-version). */
   host_version: string | null;
 }
 
@@ -241,9 +243,9 @@ export interface AsyncJobQueuePort {
    * treats false as the honest not-claimed outcome and stops.
    * NOT transaction-wrapped, by ruling. Issue #6167: the optional
    * hostVersion stamps the host version the executor claimed
-   * under (CF_VERSION_METADATA.id); NULL/absent leaves the
-   * column untouched (legacy callers, deployments that report
-   * no version).
+   * under (the deploy-time git SHA, #6216); NULL/absent leaves
+   * the column untouched (legacy callers, deployments that
+   * report no version).
    */
   claim(jobId: string, sessionId: string, nowIso: string, hostVersion?: string | null): boolean;
   /** The completion transition: running -> completed, guarded

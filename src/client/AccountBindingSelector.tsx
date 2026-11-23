@@ -20,6 +20,7 @@ import {
 } from "./components/ui";
 import { ACCOUNT_BINDING_SCOPES } from "../config/accountBindings";
 import { fetchBrokerAccounts } from "./accountBindingStore";
+import { withCsrfInit } from "./apiFetch";
 import {
   buildDefaultBrokerAssetAccountRegistry,
   type AccountBinding,
@@ -28,6 +29,34 @@ import {
   type BrokerAssetAccountRegistry,
   type BrokerAssetAccountRegistryPatch,
 } from "../trading";
+
+type BindingFailureBody = {
+  ok?: boolean;
+  message?: unknown;
+  error?: unknown;
+  code?: unknown;
+};
+
+/**
+ * Issue #6225 — surface the coded reason on a failed save/patch.
+ * The three failure bodies disagree on field names: the CSRF-gate
+ * 403 carries {error, code}, the validated path {ok:false, code,
+ * error}, the plain upsert {code, message}. Prefer the human text
+ * (message, else error) and append the code when the text does not
+ * already carry it, so the code (e.g. csrf_invalid) is visible
+ * instead of only the generic fallback.
+ */
+function describeBindingFailure(data: BindingFailureBody, fallback: string): string {
+  const message =
+    typeof data.message === "string" && data.message.length > 0 ? data.message : null;
+  const error = typeof data.error === "string" && data.error.length > 0 ? data.error : null;
+  const code = typeof data.code === "string" && data.code.length > 0 ? data.code : null;
+  const detail = message ?? error;
+  if (detail && code && !detail.includes(code)) return `${detail} [${code}]`;
+  if (detail) return detail;
+  if (code) return `[${code}] ${fallback}`;
+  return fallback;
+}
 
 export interface AccountBindingSelectorProps {
   broker: string;
@@ -104,18 +133,25 @@ export function AccountBindingSelector({
     setError(null);
     setStatusMessage(null);
     try {
-      const res = await fetch("/api/broker/account-binding", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ registryPatch: patch }),
-      });
+      const res = await fetch(
+        "/api/broker/account-binding",
+        // Issue #6225 — the CSRF gate (#3113) 403s every cookie-authenticated
+        // mutation missing the X-CSRF-Token header before any route work.
+        withCsrfInit({
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ registryPatch: patch }),
+        }),
+      );
       const data = (await res.json().catch(() => ({}))) as {
         ok?: boolean;
         registry?: BrokerAssetAccountRegistry;
         message?: string;
+        error?: string;
+        code?: string;
       };
       if (!res.ok || !data.registry) {
-        setError(data.message || "Failed to update registry.");
+        setError(describeBindingFailure(data, "Failed to update registry."));
         return;
       }
       setRegistry(data.registry);
@@ -150,26 +186,33 @@ export function AccountBindingSelector({
       const matched = (validatedAccounts ?? availableAccounts).find(
         (a) => a.accountId === accountId.trim(),
       );
-      const res = await fetch("/api/broker/account-binding", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          broker: selectedBroker,
-          mode,
-          accountType,
-          scope,
-          accountId: accountId.trim(),
-          accountName: matched?.accountName,
-          ...(validatedAccounts ? { availableAccounts: validatedAccounts } : {}),
+      const res = await fetch(
+        "/api/broker/account-binding",
+        // Issue #6225 — see applyRegistryPatch: the PUT must carry the
+        // CSRF token or the #3113 gate 403s it as csrf_invalid.
+        withCsrfInit({
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            broker: selectedBroker,
+            mode,
+            accountType,
+            scope,
+            accountId: accountId.trim(),
+            accountName: matched?.accountName,
+            ...(validatedAccounts ? { availableAccounts: validatedAccounts } : {}),
+          }),
         }),
-      });
+      );
       const data = (await res.json().catch(() => ({}))) as {
         ok?: boolean;
         binding?: AccountBinding;
         message?: string;
+        error?: string;
+        code?: string;
       };
       if (!res.ok || !data.binding) {
-        setError(data.message || "Failed to save account binding.");
+        setError(describeBindingFailure(data, "Failed to save account binding."));
         return;
       }
       setBindings((prev) => [
