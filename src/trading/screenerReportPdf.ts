@@ -29,6 +29,7 @@ import {
   type ScreenerPdfSectionConfig,
 } from "./screenerReportTemplate";
 import { SCREENER_FORMULA_DOCUMENTATION } from "./screenerReportXlsx";
+import { cleanForPdf } from "./pdfText";
 
 /** Print palette (#473): PDFs render on white paper, so the report uses
  *  this named print scale — the print mirrors of the semantic text/status
@@ -65,21 +66,6 @@ function newPage(ctx: Ctx): void {
 
 function ensureSpace(ctx: Ctx, needed: number): void {
   if (ctx.y - needed < MARGIN) newPage(ctx);
-}
-
-function cleanForPdf(str: string): string {
-  return String(str ?? "")
-    .replace(/Δ/g, "Delta ")
-    .replace(/▲/g, "+")
-    .replace(/▼/g, "-")
-    .replace(/→/g, "->")
-    .replace(/←/g, "<-")
-    .replace(/•/g, "*")
-    .replace(/—/g, "-")
-    .replace(/–/g, "-")
-    .replace(/“|”/g, '"')
-    .replace(/‘|’/g, "'")
-    .replace(/[^\x20-\x7E\xA0-\xFF]/g, " ");
 }
 
 function text(

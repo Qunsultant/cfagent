@@ -20,6 +20,7 @@ import type {
   RejectedEntry,
 } from "../services/researchPipeline";
 import { researchLegLine, researchReportFileName } from "./researchReportData";
+import { cleanForPdf } from "./pdfText";
 
 /** Print palette — same scale as the screener PDFs (#473). */
 const PRINT_INK: [number, number, number] = [0.15, 0.15, 0.15];
@@ -53,15 +54,18 @@ function ensureSpace(ctx: Ctx, needed: number): void {
 
 function text(
   ctx: Ctx,
-  str: string,
+  rawStr: string,
   opts: { size?: number; bold?: boolean; color?: [number, number, number]; x?: number } = {}
 ): void {
+  // #5109 — WinAnsi-sanitize before measuring: a raw "≥" (or "⚠") in a
+  // reason, thesis, or warning aborts the whole PDF at widthOfTextAtSize.
+  const str = cleanForPdf(rawStr);
   const size = opts.size ?? 10;
   const font = opts.bold ? ctx.bold : ctx.font;
   const c = opts.color ?? PRINT_INK;
   const x = opts.x ?? MARGIN;
   const maxWidth = PAGE_W - MARGIN - x;
-  const words = String(str ?? "").split(/\s+/).filter(Boolean);
+  const words = str.split(/\s+/).filter(Boolean);
   const lines: string[] = [];
   let line = "";
   for (const word of words) {
