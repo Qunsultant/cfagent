@@ -1443,6 +1443,26 @@ export const MIGRATION_0084_JOB_RUN_RECORDS_BINDING: DataMigration = {
   name: "0084_job_run_records_binding",
   sql: d1MigrationSql(84),
 };
+/**
+ * Migration 0085 — saved nav presets (#6151 S3).
+ * `agent_nav_presets` (one row per saved preset: id, user, name,
+ * map JSON over the availability ids, timestamps; UNIQUE
+ * (user_id, name)) + `agent_nav_preset_state` (one row per user:
+ * the active saved preset id + the current map). The nav
+ * endpoint reads the state row as its base — a saved preset
+ * overrides the persona default — and gates it by subscription
+ * on every call, so filtering is always at read time.
+ *
+ * Numbering: 0084 is F5's migration (job_run_records binding
+ * columns, #5102), merged 2026-11-23 as f7b55d2 — 0085 follows
+ * it in ALL_MIGRATIONS below (the registry test requires
+ * strictly increasing versions in list order).
+ */
+export const MIGRATION_0085_NAV_PRESETS: DataMigration = {
+  version: 85,
+  name: "0085_nav_presets",
+  sql: d1MigrationSql(85),
+};
 export const MIGRATION_0082_REFERRAL_TRIAL_EXTENSION: DataMigration = {
   version: 82,
   name: "0082_referral_trial_extension",
@@ -1698,6 +1718,7 @@ export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANC
   MIGRATION_0082_REFERRAL_TRIAL_EXTENSION,
   MIGRATION_0083_JOB_STAGE_EVENTS,
   MIGRATION_0084_JOB_RUN_RECORDS_BINDING,
+  MIGRATION_0085_NAV_PRESETS,
 ];
 
 function splitStatements(sqlText: string): string[] {

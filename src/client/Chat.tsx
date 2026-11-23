@@ -29,6 +29,15 @@ import { NavigationMenu, NavTabId, NavLayoutMode, NavIcons } from "./components/
 import { NAV_TAB_PRESETS, NAV_PRESET_STORAGE_KEY, buildPresetMap, completeVisibleTabs, derivePresetKey, isNavPresetKey, type NavPresetKey } from "./navPresets";
 import { fetchPlatformContext, usePlatformContext } from "./platformContextStore";
 import { mergeVisibleTabs } from "./platformContextNav";
+import {
+  applyNavPreset,
+  deleteNavPreset,
+  listNavPresets,
+  renameNavPreset,
+  saveNavPreset,
+  setNavSelection,
+  type NavPresetRecord,
+} from "./navPresetsApi";
 import { NavSettingsPage } from "./NavSettingsPage";
 import { legacyAuditVaultRedirect, legacyDualHomeRedirect, legacyMarketingHubRedirect, legacyPlatformAdminHubRedirect, legacyProductRedirect, navigateToTab, readTabFromLocation, replaceToTab, subscribeToRouteChanges } from "./router";
 import { legacySchedulesRedirect } from "./schedulesHomeView";
@@ -256,6 +265,32 @@ export function Chat({ user }: { user: User }) {
     derivePresetKey(visibleTabs),
   );
 
+  // #6151 S3 — the caller's saved presets (server-side) + the
+  // active saved preset. The legacy localStorage map is kept in
+  // state so the settings page can offer it once as "save as
+  // preset" instead of silently dropping it.
+  const [savedPresets, setSavedPresets] = useState<NavPresetRecord[]>([]);
+  const [activeSavedPresetId, setActiveSavedPresetId] = useState<string | null>(null);
+  const [legacySelection, setLegacySelection] = useState<Record<string, boolean> | null>(() => {
+    if (typeof window === "undefined") return null;
+    try {
+      const saved = localStorage.getItem("nextgentp_visible_nav_tabs");
+      return saved ? (JSON.parse(saved) as Record<string, boolean>) : null;
+    } catch {
+      return null;
+    }
+  });
+  // The server selection (active preset or custom map) is adopted
+  // once, on load, so a previous session's choice wins over the
+  // stale localStorage map. selectionDirtyRef marks that the user
+  // already toggled in-session — a late list response must never
+  // clobber their toggles. presetListLoaded gates the
+  // persona-default effect below: the server selection wins over
+  // the default, so the default waits until the list has settled.
+  const [presetListLoaded, setPresetListLoaded] = useState(false);
+  const serverSelectionAdoptedRef = useRef(false);
+  const selectionDirtyRef = useRef(false);
+
   // #6151 S1 — whether a localStorage map was adopted as the
   // implicit selection on this load. The state initializer above
   // already read the same key; this flag only records that it
@@ -282,16 +317,54 @@ export function Chat({ user }: { user: User }) {
   // the server resolved. In S1 every default is alltabs, so this is
   // a no-op for the shipped config — the seam is what S2/S4 use when
   // a default narrows. Applied once: a later refetch must never
-  // overwrite the user's in-session toggles.
+  // overwrite the user's in-session toggles. It waits for the
+  // preset list (S3): a stored server selection wins over the
+  // default, and the list effect below adopts it.
   const appliedPersonaDefaultRef = useRef(false);
   useEffect(() => {
     if (!platformContext || hadAdoptedSelection || appliedPersonaDefaultRef.current) return;
+    if (!presetListLoaded || serverSelectionAdoptedRef.current) return;
     if (!isNavPresetKey(platformContext.personaDefault)) return;
     appliedPersonaDefaultRef.current = true;
     const next = buildPresetMap(platformContext.personaDefault);
     setVisibleTabs(next);
     setNavPresetKey(platformContext.personaDefault);
-  }, [platformContext, hadAdoptedSelection]);
+  }, [platformContext, hadAdoptedSelection, presetListLoaded]);
+
+  // #6151 S3 — load the saved presets + adopt the server-side
+  // selection once. A missing/unreachable store leaves the local
+  // selection standing (the settings section hides itself).
+  useEffect(() => {
+    let cancelled = false;
+    void listNavPresets()
+      .then(({ presets, activePresetId, stateMap }) => {
+        if (cancelled) return;
+        setSavedPresets(presets);
+        setActiveSavedPresetId(activePresetId);
+        setPresetListLoaded(true);
+        if (serverSelectionAdoptedRef.current || selectionDirtyRef.current) return;
+        if (activePresetId) {
+          const preset = presets.find((p) => p.id === activePresetId);
+          if (preset) {
+            serverSelectionAdoptedRef.current = true;
+            setVisibleTabs({ ...preset.map });
+            setNavPresetKey(null);
+          }
+        } else if (stateMap) {
+          serverSelectionAdoptedRef.current = true;
+          setVisibleTabs({ ...stateMap });
+          setNavPresetKey(derivePresetKey(stateMap));
+        }
+      })
+      .catch(() => {
+        // Presets unavailable — the local selection stands, and the
+        // persona default may still apply above.
+        if (!cancelled) setPresetListLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Before the context lands the effective map is the selection
   // (today's behavior — no flash of hidden tabs); after it lands,
@@ -306,12 +379,26 @@ export function Chat({ user }: { user: User }) {
     presetKey?: NavPresetKey | null,
   ) => {
     const key = presetKey ?? derivePresetKey(next);
+    const previous = visibleTabs;
+    const previousKey = navPresetKey;
+    const previousSavedId = activeSavedPresetId;
+    selectionDirtyRef.current = true;
     setVisibleTabs(next);
     setNavPresetKey(key);
-    // #6151 S1: the selection is session-scoped until S3 — the
-    // localStorage map is adopted once on load (above) and never
-    // written again. The stale map stays on disk for S3 to offer
-    // as "save as preset".
+    // #6151 S3: a manual toggle breaks the saved-preset link — the
+    // selection becomes custom on the server too. The write is
+    // fire-and-forget: the server filters the map by the
+    // subscription gating, so the context is re-read after the
+    // write. On failure the previous selection is restored — a
+    // toggle that could not persist must not pretend it did.
+    setActiveSavedPresetId(null);
+    void setNavSelection(next)
+      .then(() => fetchPlatformContext(true))
+      .catch(() => {
+        setVisibleTabs(previous);
+        setNavPresetKey(previousKey);
+        setActiveSavedPresetId(previousSavedId);
+      });
   };
 
   const handleToggleTabVisibility = (tabId: string) => {
@@ -326,6 +413,68 @@ export function Chat({ user }: { user: User }) {
     presetKey?: NavPresetKey | null,
   ) => {
     applyVisibleTabs(newTabs, presetKey);
+  };
+
+  // #6151 S3 — saved-preset handlers for the settings page. Save
+  // applies the new preset right away (the active link is the
+  // selection, not just a row), so a reload adopts it. Delete
+  // keeps the current tabs: the server turns the selection custom.
+  const handleSaveCurrentPreset = async (name: string) => {
+    const record = await saveNavPreset(name, visibleTabs);
+    setSavedPresets((prev) => [...prev, record]);
+    await applyNavPreset(record.id);
+    setActiveSavedPresetId(record.id);
+    setNavPresetKey(null);
+    await fetchPlatformContext(true);
+  };
+
+  const handleSaveLegacyPreset = async (name: string) => {
+    if (!legacySelection) throw new Error("FAILURE_NAV_PRESET_REQUEST_INVALID");
+    const record = await saveNavPreset(name, legacySelection);
+    setSavedPresets((prev) => [...prev, record]);
+    await applyNavPreset(record.id);
+    setActiveSavedPresetId(record.id);
+    setNavPresetKey(null);
+    try {
+      localStorage.removeItem("nextgentp_visible_nav_tabs");
+    } catch {}
+    setLegacySelection(null);
+    await fetchPlatformContext(true);
+  };
+
+  const handleDismissLegacySelection = () => {
+    try {
+      localStorage.removeItem("nextgentp_visible_nav_tabs");
+    } catch {}
+    setLegacySelection(null);
+  };
+
+  const handleApplySavedPreset = async (id: string) => {
+    const { preset } = await applyNavPreset(id);
+    setVisibleTabs({ ...preset.map });
+    setNavPresetKey(null);
+    setActiveSavedPresetId(preset.id);
+    await fetchPlatformContext(true);
+  };
+
+  const handleRenameSavedPreset = async (id: string, name: string) => {
+    const record = await renameNavPreset(id, name);
+    setSavedPresets((prev) => prev.map((p) => (p.id === id ? record : p)));
+  };
+
+  const handleDeleteSavedPreset = async (id: string) => {
+    const previous = savedPresets;
+    const previousActive = activeSavedPresetId;
+    setSavedPresets((prev) => prev.filter((p) => p.id !== id));
+    if (activeSavedPresetId === id) setActiveSavedPresetId(null);
+    try {
+      await deleteNavPreset(id);
+      await fetchPlatformContext(true);
+    } catch (err) {
+      setSavedPresets(previous);
+      setActiveSavedPresetId(previousActive);
+      throw err;
+    }
   };
 
   // Universal Workspace Refresh state (accessible everywhere from top bar)
@@ -1181,6 +1330,15 @@ export function Chat({ user }: { user: User }) {
         activePreset={navPresetKey}
         onToggleTabVisibility={handleToggleTabVisibility}
         onApplyPreset={(key) => handleSetVisibleTabs(NAV_TAB_PRESETS[key], key)}
+        savedPresets={savedPresets}
+        activeSavedPresetId={activeSavedPresetId}
+        legacySelection={legacySelection}
+        onSaveCurrentPreset={handleSaveCurrentPreset}
+        onSaveLegacyPreset={handleSaveLegacyPreset}
+        onDismissLegacySelection={handleDismissLegacySelection}
+        onApplySavedPreset={handleApplySavedPreset}
+        onRenameSavedPreset={handleRenameSavedPreset}
+        onDeleteSavedPreset={handleDeleteSavedPreset}
         settingsMenuProps={{
           userLogin: user.login,
           userName: user.name,

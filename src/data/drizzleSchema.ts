@@ -1115,6 +1115,41 @@ export const agentSubscriptionPlans = sqliteTable("agent_subscription_plans", {
 });
 
 /**
+ * Saved nav presets (#6151 S3, migration 0085): one row per saved
+ * preset. The map is a JSON object over the availability ids
+ * (top-level + `<parentId>:<subId>` sub-item keys, normalized by
+ * normalizePresetMap in navPresetPorts). Names are unique per user
+ * (UNIQUE index in the DDL) — a duplicate name is a 409, never a
+ * second row. This schema MAPS the tables; it does not create
+ * them — DDL authority lives in migration 0085
+ * (src/data/migrationRunner.ts).
+ */
+export const agentNavPresets = sqliteTable("agent_nav_presets", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull(),
+  name: text("name").notNull(),
+  mapJson: text("map_json").notNull(),
+  createdAtMs: integer("created_at_ms").notNull(),
+  updatedAtMs: integer("updated_at_ms").notNull(),
+});
+
+/**
+ * Current nav selection (#6151 S3, migration 0085): one row per
+ * user. activePresetId names the active saved preset (null for a
+ * custom selection); mapJson is the current map (the active
+ * preset's map, or the custom map from manual toggles). The
+ * nav-availability endpoint reads this row as its base — a saved
+ * preset overrides the persona default — and gates it by
+ * subscription on every call, so filtering is always at read time.
+ */
+export const agentNavPresetState = sqliteTable("agent_nav_preset_state", {
+  userId: text("user_id").primaryKey(),
+  activePresetId: text("active_preset_id"),
+  mapJson: text("map_json"),
+  updatedAtMs: integer("updated_at_ms").notNull(),
+});
+
+/**
  * Products (#3289, migration 0058): product identity. A product
  * is the thing customers buy; its versions (plan rows for
  * subscriptions, catalogue rows for per-run) are the immutable

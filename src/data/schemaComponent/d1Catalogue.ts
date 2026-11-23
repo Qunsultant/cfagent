@@ -1946,6 +1946,63 @@ export const D1_CATALOGUE_ENTRIES: CatalogueEntry[] = [
     form: "literal",
   },
   {
+    // #6151 S3 — saved nav presets (migration 0085). One row per
+    // saved preset: the map is a JSON object over the availability
+    // ids (top-level + `<parentId>:<subId>` sub-item keys). Names
+    // are unique per user (UNIQUE index below) — a duplicate name
+    // is a 409, never a second row.
+    code: "schema.d1.agent_nav_presets.create_table",
+    plane: "d1",
+    table: "agent_nav_presets",
+    statement: `CREATE TABLE IF NOT EXISTS agent_nav_presets (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      map_json TEXT NOT NULL,
+      created_at_ms INTEGER NOT NULL,
+      updated_at_ms INTEGER NOT NULL
+    )`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    code: "schema.d1.agent_nav_presets.create_index_agent_nav_presets_user_name_idx",
+    plane: "d1",
+    table: "agent_nav_presets",
+    index: "agent_nav_presets_user_name_idx",
+    statement: `CREATE UNIQUE INDEX IF NOT EXISTS agent_nav_presets_user_name_idx
+      ON agent_nav_presets (user_id, name)`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    code: "schema.d1.agent_nav_presets.create_index_agent_nav_presets_user_idx",
+    plane: "d1",
+    table: "agent_nav_presets",
+    index: "agent_nav_presets_user_idx",
+    statement: `CREATE INDEX IF NOT EXISTS agent_nav_presets_user_idx
+      ON agent_nav_presets (user_id, updated_at_ms DESC)`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    // #6151 S3 — current nav selection (migration 0085). One row
+    // per user: the active saved preset id (null for a custom
+    // selection) and the current map. The nav-availability
+    // endpoint reads this row as its base.
+    code: "schema.d1.agent_nav_preset_state.create_table",
+    plane: "d1",
+    table: "agent_nav_preset_state",
+    statement: `CREATE TABLE IF NOT EXISTS agent_nav_preset_state (
+      user_id TEXT PRIMARY KEY,
+      active_preset_id TEXT,
+      map_json TEXT,
+      updated_at_ms INTEGER NOT NULL
+    )`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
     code: "schema.d1.job_run_records.create_table",
     plane: "d1",
     table: "job_run_records",
@@ -3774,6 +3831,12 @@ export const D1_MIGRATION_CODES: Record<number, readonly string[]> = {
   83: [
     "schema.d1.job_stage_events.create_table",
     "schema.d1.job_stage_events.create_index_job_stage_events_run_stage_idx",
+  ],
+  85: [
+    "schema.d1.agent_nav_presets.create_table",
+    "schema.d1.agent_nav_presets.create_index_agent_nav_presets_user_name_idx",
+    "schema.d1.agent_nav_presets.create_index_agent_nav_presets_user_idx",
+    "schema.d1.agent_nav_preset_state.create_table",
   ],
   82: [
     "schema.d1.agent_referral_rules.alter_table_add_column_extension_days",
