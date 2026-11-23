@@ -49,6 +49,7 @@ export function exportPolicySnapshot(): PolicySnapshot {
 const ROLES: readonly Role[] = [
   "platform-admin",
   "tenant-admin",
+  "store-operator",
   "workspace-admin",
   "member",
   "approver",

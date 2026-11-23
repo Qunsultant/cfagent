@@ -151,6 +151,7 @@ import {
 import {
   assertOperatorLogin,
   type EffectiveOperatorEntry,
+  type StoreOperatorEntry,
 } from "../../data/storeOperatorsPorts";
 import { buildScenario, GOAL_TAXONOMY } from "../../services/goalScenarioEngine";
 import { buildGoalScreenCommand } from "../../services/goalScreenWorkflowSubmission";
@@ -315,11 +316,21 @@ import { readReports } from "../../data/createAuditReportPorts";
 import { digestDayKey, expiredBalanceFor } from "../../data/lifecyclePorts";
 import { getServiceUserLogin } from "../../security/serviceIdentity";
 import { lookupInternalUserIdByLogin } from "../../security/iaaaMigration";
-import { createKvMembershipStore } from "../../security/iaaaMembershipStore";
-import { sessionStore } from "../../security/session";
+import { createKvMembershipStore, grantMembership } from "../../security/iaaaMembershipStore";
+import { listSessionFamilyEntries, sessionStore } from "../../security/session";
+import { resolveIaaaTenant } from "../../security/iaaaGithubEndToEnd";
+import {
+  canGrantRole,
+  type MembershipStore,
+} from "../../security/authorization";
+import { removeRoleBinding } from "../../security/roleGrants";
+import {
+  findLiveStoreOperatorBinding,
+  listLiveStoreOperatorMemberships,
+  resolveStoreOperatorAccess,
+} from "../../security/storeOperatorGate";
 import { observeLedgerWriteContext } from "../../security/commercialExecutionContext";
 import { authorizeLedgerWrite } from "../../security/serviceDispatch";
-import type { MembershipStore } from "../../security/authorization";
 import type { KvLike } from "../../security/kvResilience";
 import {
   issueReferralCode,
@@ -391,6 +402,24 @@ export interface AgenticPaymentsRouteContext {
    * observation error, never a request failure.
    */
   executionContextMembershipStore?: MembershipStore;
+  /**
+   * Issue #6180: test seams for the store-operator membership check
+   * (the referral-code precedent above). Production reads the
+   * SessionStore KV; tests inject an in-memory KV + store. Absent →
+   * sessionStore(ctx.env). Any failure building or reading them
+   * degrades to the legacy operator lists, never a request failure.
+   */
+  storeOperatorAliasKv?: KvLike;
+  /** Test seam: use this store instead of the SessionStore KV membership store (#6180). */
+  storeOperatorMembershipStore?: MembershipStore;
+  /**
+   * Issue #6180: test seam for membership enumeration (GET /operators
+   * list + the remove guard's holder count). Production lists the
+   * sessions-bucket membership keys; tests inject an in-memory
+   * listing. Absent → listSessionFamilyEntries(env, "iaaa-membership:").
+   * A null listing degrades (legacy rows only / legacy-only guard).
+   */
+  listMembershipEntries?: () => Promise<Array<{ key: string; value: string }> | null>;
   /** ORM accessor (owner: OrchestratorAgent.getOrm - was `this.getOrm()`). */
   getOrm(): DatabaseORM;
   /** Audit funnel (owner: OrchestratorAgent.audit - was `this.audit`). */
@@ -839,12 +868,14 @@ export async function handleAgenticPaymentsRoutes(
   //   from env.AGENT_DB. An unbound AGENT_DB fails closed on money
   //   paths (503) — the store cannot be verified, so no run starts
   //   and no balance is read as Free.
-  // - Operator writes require effective operator status: env
-  //   COMMERCIAL_STORE_OPERATORS UNION the store list (#2680;
-  //   empty = deny all). The consume/redeem/unredeemed-credit HTTP endpoints
-  //   from the earlier DO-store draft are gone: with D1, the
-  //   payment adapter and the submit route call the port directly,
-  //   so no hop-only endpoint needs to exist.
+  // - Operator writes require effective operator status: a live
+  //   tenant-scoped store-operator membership (#6180), or the
+  //   deprecated env COMMERCIAL_STORE_OPERATORS UNION store list
+  //   fallback (lossless migration bridge). The consume/redeem/
+  //   unredeemed-credit HTTP endpoints from the earlier DO-store
+  //   draft are gone: with D1, the payment adapter and the submit
+  //   route call the port directly, so no hop-only endpoint needs
+  //   to exist.
   // ================================================================
   const commercialLogin = (): string | null => {
     const login = request.headers.get("x-user-login");
@@ -859,6 +890,12 @@ export async function handleAgenticPaymentsRoutes(
   // the check degrades to env-only — exactly today's behavior,
   // never a 500, never a lockout. Env operators are the
   // bootstrap fallback; store operators are the managed list.
+  // #6180: the caller's store-operator membership is resolved
+  // once per request at setup (read-only, alongside the store
+  // preload) and OR-ed into the same synchronous check. The
+  // membership check is membership-only here (no env): the
+  // preloaded legacy sets below already cover the deprecated
+  // fallback, so no second store read is needed.
   const envOperatorLogins = (): Set<string> => {
     const raw = (ctx.env as unknown as Record<string, unknown>)["COMMERCIAL_STORE_OPERATORS"];
     if (typeof raw !== "string" || !raw.trim()) return new Set();
@@ -892,6 +929,32 @@ export async function handleAgenticPaymentsRoutes(
     storeOperatorLogins = new Set();
     storeOperatorReadError = err;
   }
+  // #6180 — the caller's store-operator membership, resolved once
+  // per request at setup (read-only, alongside the store preload).
+  // A read failure degrades to the legacy lists below, never a
+  // request failure; the degrade is visible through the legacy
+  // fallback log on first use.
+  const callerLogin = commercialLogin();
+  let callerHasStoreOperatorMembership = false;
+  if (callerLogin !== null) {
+    try {
+      const aliasKv = ctx.storeOperatorAliasKv ?? sessionStore(ctx.env);
+      const membershipStore =
+        ctx.storeOperatorMembershipStore ?? createKvMembershipStore(aliasKv);
+      const callerAccess = await resolveStoreOperatorAccess({
+        login: callerLogin,
+        tenantId: resolveIaaaTenant(ctx.env),
+        nowMs: Date.now(),
+        kv: aliasKv,
+        membershipStore,
+      });
+      callerHasStoreOperatorMembership =
+        callerAccess.allowed && callerAccess.via === "membership";
+    } catch {
+      callerHasStoreOperatorMembership = false;
+    }
+  }
+  let legacyFallbackReported = false;
   let operatorDegradeReported = false;
   const reportOperatorDegradeOnce = (): void => {
     if (storeOperatorReadError === null || operatorDegradeReported) return;
@@ -918,7 +981,17 @@ export async function handleAgenticPaymentsRoutes(
   const isStoreOperator = (login: string | null): boolean => {
     reportOperatorDegradeOnce();
     if (!login) return false;
-    return envOperators.has(login) || storeOperatorLogins.has(login);
+    if (callerHasStoreOperatorMembership && login === callerLogin) return true;
+    const legacy = envOperators.has(login) || storeOperatorLogins.has(login);
+    if (legacy && !legacyFallbackReported) {
+      // #6180 — the deprecated read: an operator check succeeded
+      // via the login-keyed lists, not via a membership. Logged
+      // lazily, on first use, mirroring reportOperatorDegradeOnce,
+      // so routes that never consult the operator list stay silent.
+      legacyFallbackReported = true;
+      structuredLog.warn("agenticPayments.store_operator_legacy_fallback", { login });
+    }
+    return legacy;
   };
   // Merged effective-operator list for the management routes:
   // env rows first-class (source "env", no added-by record),
@@ -948,6 +1021,40 @@ export async function handleAgenticPaymentsRoutes(
           });
         }
       }
+    }
+    // #6180 — membership rows: live store-operator memberships in
+    // the platform tenant. A login in both the legacy lists and the
+    // memberships shows once, as the membership (the membership is
+    // the authority; the legacy row is deprecated). Best-effort: an
+    // unavailable enumeration degrades to the legacy rows alone.
+    // A holder whose login does not resolve is skipped here — the
+    // list is the login-addressable surface; the membership stays
+    // visible in the Members tab, keyed by its internal id.
+    try {
+      const aliasKv = ctx.storeOperatorAliasKv ?? sessionStore(ctx.env);
+      const entries =
+        (await (ctx.listMembershipEntries
+          ? ctx.listMembershipEntries()
+          : listSessionFamilyEntries(ctx.env, "iaaa-membership:"))) ?? [];
+      const membershipRows = await listLiveStoreOperatorMemberships(
+        aliasKv,
+        entries,
+        resolveIaaaTenant(ctx.env),
+        Date.now(),
+      );
+      for (const row of membershipRows) {
+        if (row.login === null) continue;
+        byLogin.set(row.login, {
+          login: row.login,
+          source: "membership",
+          addedBy: row.grantedBy,
+          addedAtMs: row.createdAtMs,
+          internalUserId: row.internalUserId,
+          expiresAtMs: row.expiresAtMs ?? null,
+        });
+      }
+    } catch {
+      // Best-effort: the legacy rows above still answer.
     }
     return [...byLogin.values()].sort((a, b) => (a.login < b.login ? -1 : a.login > b.login ? 1 : 0));
   };
@@ -7674,13 +7781,19 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
   // actions following the prices-route pattern (not DELETE with
   // a body: the commercial handler's money writes are POST
   // actions, and DELETE bodies are dropped by some proxies).
-  // Add is idempotent for an existing store row; a login that
-  // is already env-managed is 409 (env rows are managed via
+  // #6180 — add/remove mint and revoke store-operator MEMBERSHIPS
+  // through the grant route's machinery (grantMembership +
+  // canGrantRole + removeRoleBinding), not store rows. The caller
+  // must hold grant power for the role (a tenant-admin); a bare
+  // store-operator cannot mint or revoke operators. Add is
+  // idempotent for a login that already holds the role; a login
+  // that is already env-managed is 409 (env rows are managed via
   // dashboard, never via the UI). Remove refuses (409) when it
-  // would leave zero effective operators, and 404s when there
-  // is no store row to remove. Unbound store is 503 for
-  // add/remove (there is nowhere to write) but list still
-  // returns the env rows.
+  // would leave zero effective operators, and 404s when there is
+  // no membership and no store row to remove. The membership store
+  // (SESSION_STORE) is the write target: unbound, add/remove are
+  // 503. List still returns the env rows when the membership
+  // enumeration is unavailable.
   if (path.endsWith(COMMERCIAL_ROUTE_SUFFIXES.operators) && request.method === "GET") {
     try {
       const login = commercialLogin();
@@ -7714,27 +7827,93 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       }
       if (envOperators.has(target)) {
         return Response.json(
-          { code: "FAILURE_COMMERCIAL_CONFLICT", error: `Login ${target} is already an env-managed operator: env operators are managed via dashboard, not via the UI.` },
+          { code: "FAILURE_COMMERCIAL_CONFLICT", error: `Login ${target} is already an env-managed operator: env operators are managed via dashboard, not via the UI. Run platform bootstrap initialize to migrate env operators to memberships.` },
           { status: 409 },
         );
       }
+      // #6180 — add mints a store-operator membership through the
+      // grant route's machinery, not a store row. The caller must
+      // hold grant power for the role (tenant-admin); a bare
+      // store-operator cannot mint operators.
+      const tenantId = resolveIaaaTenant(ctx.env);
+      const nowMs = Date.now();
+      if (
+        ctx.storeOperatorAliasKv === undefined &&
+        (ctx.env as unknown as Record<string, unknown>).SESSION_STORE === undefined
+      ) {
+        return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: "Operator membership store unavailable: SESSION_STORE is not bound." }, { status: 503 });
+      }
+      const aliasKv = ctx.storeOperatorAliasKv ?? sessionStore(ctx.env);
+      const membershipStore =
+        ctx.storeOperatorMembershipStore ?? createKvMembershipStore(aliasKv);
+      const callerId = login === null ? null : await lookupInternalUserIdByLogin(aliasKv, login);
+      if (login === null || callerId === null) {
+        return Response.json({ code: "FAILURE_COMMERCIAL_FORBIDDEN", error: "Forbidden: granting store-operator requires a wired session identity." }, { status: 403 });
+      }
+      const targetId = await lookupInternalUserIdByLogin(aliasKv, target);
+      if (targetId === null) {
+        return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: `Login ${target} has no wired identity: the user must sign in once before they can be granted store-operator.` }, { status: 400 });
+      }
+      if (targetId === callerId) {
+        return Response.json({ code: "FAILURE_COMMERCIAL_FORBIDDEN", error: "Forbidden: you cannot grant store-operator to yourself." }, { status: 403 });
+      }
+      const targetMemberships = await membershipStore.getMembershipsByUser(targetId);
+      const liveBinding = findLiveStoreOperatorBinding(targetMemberships, tenantId, nowMs);
+      if (liveBinding) {
+        return Response.json({
+          code: "SUCCESS_OPERATOR_ADDED",
+          operator: {
+            login: target,
+            source: "membership",
+            addedBy: liveBinding.binding.grantedBy,
+            addedAtMs: liveBinding.membership.createdAtMs,
+            internalUserId: targetId,
+            expiresAtMs: liveBinding.binding.expiresAtMs ?? null,
+          },
+        });
+      }
+      // A store row already makes the target effective; add is
+      // idempotent for it (today's behavior). The migration step
+      // owns row-to-membership conversion.
       const adapter = createStoreOperatorsAdapter(ctx.env as { AGENT_DB?: unknown });
-      if (!adapter) {
-        return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: "Operator store unavailable: AGENT_DB is not bound." }, { status: 503 });
+      if (adapter) {
+        try {
+          await ensureStoreOperatorsSchema(adapter.db);
+        } catch (err: any) {
+          return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_STORE_UNAVAILABLE") }, { status: 503 });
+        }
+        const existing = await adapter.listOperators();
+        const already = existing.find((entry) => entry.login === target);
+        if (already) {
+          return Response.json({ code: "SUCCESS_OPERATOR_ADDED", operator: already });
+        }
       }
-      try {
-        await ensureStoreOperatorsSchema(adapter.db);
-      } catch (err: any) {
-        return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_STORE_UNAVAILABLE") }, { status: 503 });
+      const granted = await grantMembership(membershipStore, {
+        granterInternalUserId: callerId,
+        internalUserId: targetId,
+        tenantId,
+        roleBindings: [{ role: "store-operator", scope: "tenant", grantedBy: callerId }],
+        nowMs,
+      });
+      if (!granted.ok) {
+        if (granted.code === "GRANT_DENIED") {
+          return Response.json({ code: "FAILURE_COMMERCIAL_FORBIDDEN", error: "Forbidden: granting store-operator requires a tenant-admin." }, { status: 403 });
+        }
+        return Response.json({ code: "FAILURE_UNEXPECTED_ERROR", error: codedMessage("FAILURE_UNEXPECTED_ERROR") }, { status: 500 });
       }
-      const existing = await adapter.listOperators();
-      const already = existing.find((entry) => entry.login === target);
-      if (already) {
-        return Response.json({ code: "SUCCESS_OPERATOR_ADDED", operator: already });
-      }
-      const operator = await adapter.addOperator({ login: target, addedBy: login });
-      ctx.audit("commercial.operator.added", "payments", { operatorLogin: operator.login, addedBy: login });
-      return Response.json({ code: "SUCCESS_OPERATOR_ADDED", operator });
+      const minted = granted.membership.roleBindings.find((b) => b.role === "store-operator");
+      ctx.audit("commercial.operator.added", "payments", { operatorLogin: target, operatorInternalUserId: targetId, addedBy: login, via: "membership" });
+      return Response.json({
+        code: "SUCCESS_OPERATOR_ADDED",
+        operator: {
+          login: target,
+          source: "membership",
+          addedBy: callerId,
+          addedAtMs: granted.membership.createdAtMs,
+          internalUserId: targetId,
+          expiresAtMs: minted?.expiresAtMs ?? null,
+        },
+      });
     } catch (err: any) {
       // #5606 (G-3): typed failures render from the catalog;
       // anything else logs server-side and answers the generic code.
@@ -7761,43 +7940,114 @@ const requireChannelMonetization = async (): Promise<Response | null> => {
       } catch (err: any) {
         return Response.json({ code: "FAILURE_COMMERCIAL_REQUEST_INVALID", error: codedMessage("FAILURE_COMMERCIAL_REQUEST_INVALID") }, { status: 400 });
       }
+      // #6180 — remove revokes a store-operator membership through
+      // the role-grants machinery, and deletes a store row when one
+      // exists. The caller must hold grant power for the role
+      // (tenant-admin); a bare store-operator cannot revoke
+      // operators.
+      const tenantId = resolveIaaaTenant(ctx.env);
+      const nowMs = Date.now();
+      if (
+        ctx.storeOperatorAliasKv === undefined &&
+        (ctx.env as unknown as Record<string, unknown>).SESSION_STORE === undefined
+      ) {
+        return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: "Operator membership store unavailable: SESSION_STORE is not bound." }, { status: 503 });
+      }
+      const aliasKv = ctx.storeOperatorAliasKv ?? sessionStore(ctx.env);
+      const membershipStore =
+        ctx.storeOperatorMembershipStore ?? createKvMembershipStore(aliasKv);
+      const callerId = login === null ? null : await lookupInternalUserIdByLogin(aliasKv, login);
+      if (login === null || callerId === null) {
+        return Response.json({ code: "FAILURE_COMMERCIAL_FORBIDDEN", error: "Forbidden: revoking store-operator requires a wired session identity." }, { status: 403 });
+      }
+      const grantDecision = await canGrantRole(membershipStore, {
+        granterInternalUserId: callerId,
+        targetTenantId: tenantId,
+        targetScope: "tenant",
+        targetRole: "store-operator",
+        nowMs,
+      });
+      if (grantDecision.decision === "deny") {
+        return Response.json({ code: "FAILURE_COMMERCIAL_FORBIDDEN", error: "Forbidden: revoking store-operator requires a tenant-admin." }, { status: 403 });
+      }
+      const targetId = await lookupInternalUserIdByLogin(aliasKv, target);
+      const targetMemberships =
+        targetId === null ? [] : await membershipStore.getMembershipsByUser(targetId);
+      const foundBinding = findLiveStoreOperatorBinding(targetMemberships, tenantId, nowMs);
+      const bindingToRemove =
+        foundBinding === null
+          ? null
+          : {
+              membership: foundBinding.membership,
+              bindingIndex: foundBinding.membership.roleBindings.indexOf(foundBinding.binding),
+            };
       const adapter = createStoreOperatorsAdapter(ctx.env as { AGENT_DB?: unknown });
-      if (!adapter) {
-        return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: "Operator store unavailable: AGENT_DB is not bound." }, { status: 503 });
+      let storeEntries: StoreOperatorEntry[] = [];
+      if (adapter) {
+        try {
+          await ensureStoreOperatorsSchema(adapter.db);
+          storeEntries = await adapter.listOperators();
+        } catch (err: any) {
+          return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_STORE_UNAVAILABLE") }, { status: 503 });
+        }
       }
-      try {
-        await ensureStoreOperatorsSchema(adapter.db);
-      } catch (err: any) {
-        return Response.json({ code: "FAILURE_COMMERCIAL_STORE_UNAVAILABLE", error: codedMessage("FAILURE_COMMERCIAL_STORE_UNAVAILABLE") }, { status: 503 });
-      }
-      const storeEntries = await adapter.listOperators();
       const hasStoreRow = storeEntries.some((entry) => entry.login === target);
-      if (!hasStoreRow) {
+      if (!bindingToRemove && !hasStoreRow) {
         return Response.json(
-          { code: "FAILURE_COMMERCIAL_NOT_FOUND", error: `No store operator row for login ${target}: env-managed operators are removed via dashboard, not via the UI.` },
+          { code: "FAILURE_COMMERCIAL_NOT_FOUND", error: `No store-operator membership and no store operator row for login ${target}.` },
           { status: 404 },
         );
       }
       // Last-operator guard on FRESH data (not the preloaded
       // set): removal must never leave zero effective operators
-      // through the UI. A login that is also env-managed stays
-      // effective via env, so removing its store row is safe;
-      // the guard only fires when the effective set would empty.
-      const effectiveAfter = new Set(envOperators);
-      for (const entry of storeEntries) {
-        if (entry.login !== target) effectiveAfter.add(entry.login);
+      // through the UI. Counts live membership holders (other than
+      // the target) plus legacy logins (other than the target).
+      // Membership enumeration is best-effort: an unavailable
+      // listing counts zero holders, so the guard refuses more,
+      // never less — the fail-closed direction.
+      let otherHolders = 0;
+      for (const l of envOperators) {
+        if (l !== target) otherHolders++;
       }
-      if (effectiveAfter.size === 0) {
+      for (const entry of storeEntries) {
+        if (entry.login !== target && !envOperators.has(entry.login)) otherHolders++;
+      }
+      try {
+        const entries =
+          (await (ctx.listMembershipEntries
+            ? ctx.listMembershipEntries()
+            : listSessionFamilyEntries(ctx.env, "iaaa-membership:"))) ?? [];
+        const rows = await listLiveStoreOperatorMemberships(aliasKv, entries, tenantId, nowMs);
+        for (const row of rows) {
+          if (row.internalUserId !== targetId) otherHolders++;
+        }
+      } catch {
+        // Best-effort: the guard counts the visible holders only.
+      }
+      if (otherHolders === 0) {
         return Response.json(
           { code: "FAILURE_COMMERCIAL_CONFLICT", error: "Refusing to remove the last effective operator: the system must never reach zero operators through the UI." },
           { status: 409 },
         );
       }
-      const removed = await adapter.removeOperator({ login: target });
-      if (!removed) {
-        return Response.json({ code: "FAILURE_COMMERCIAL_NOT_FOUND", error: `No store operator row for login ${target}.` }, { status: 404 });
+      if (hasStoreRow && adapter) {
+        const removed = await adapter.removeOperator({ login: target });
+        if (!removed) {
+          return Response.json({ code: "FAILURE_COMMERCIAL_NOT_FOUND", error: `No store operator row for login ${target}.` }, { status: 404 });
+        }
       }
-      ctx.audit("commercial.operator.removed", "payments", { operatorLogin: target, addedBy: login });
+      if (bindingToRemove) {
+        const result = removeRoleBinding(bindingToRemove.membership, bindingToRemove.bindingIndex);
+        if (!result.ok) {
+          return Response.json({ code: "FAILURE_UNEXPECTED_ERROR", error: codedMessage("FAILURE_UNEXPECTED_ERROR") }, { status: 500 });
+        }
+        if (result.emptied) {
+          await membershipStore.revokeMembership(bindingToRemove.membership.membershipId, nowMs);
+        } else {
+          await membershipStore.put(result.membership);
+        }
+      }
+      ctx.audit("commercial.operator.removed", "payments", { operatorLogin: target, operatorInternalUserId: targetId, addedBy: login, via: bindingToRemove ? "membership" : "store" });
       return Response.json({ code: "SUCCESS_OPERATOR_REMOVED", removed: target });
     } catch (err: any) {
       // #5606 (G-3): typed failures render from the catalog;

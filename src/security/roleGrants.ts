@@ -52,12 +52,19 @@ import {
 
 /**
  * The grantable set for this surface: ALL_ROLES filtered to the
- * two admin roles. Computed, not declared — a catalog change in
+ * admin roles. Computed, not declared — a catalog change in
  * authorization.ts flows through here automatically.
+ * #6180 — store-operator joins the set: the role-grants panel is the
+ * by-id surface for granting/removing admin bindings, and a
+ * store-operator binding must be visible and removable there (the
+ * /operators/remove route reuses removeRoleBinding below). It is NOT
+ * in ADMIN_GRANT_ROLES (grantRules.ts), so its grants mint
+ * immediately — the two-admin proposal flow protects only roles that
+ * confer grant power, and store-operator confers none.
  */
 export const ROLE_GRANT_ROLES: readonly Role[] = ALL_ROLES.filter(
-  (role): role is "platform-admin" | "tenant-admin" =>
-    role === "platform-admin" || role === "tenant-admin",
+  (role): role is "platform-admin" | "tenant-admin" | "store-operator" =>
+    role === "platform-admin" || role === "tenant-admin" || role === "store-operator",
 );
 
 export type RoleGrantRole = (typeof ROLE_GRANT_ROLES)[number];

@@ -76,8 +76,13 @@ import {
 } from "../../data/tenantChannelPorts";
 import { createTenantDirectoryAdapter } from "../../data/createTenantDirectoryPorts";
 import type { TenantDirectory } from "../../data/tenantDirectoryPorts";
-import { createStoreOperatorsAdapter } from "../../data/createStoreOperatorsPorts";
 import type { StoreOperators } from "../../data/storeOperatorsPorts";
+import { resolveStoreOperatorAccess } from "../../security/storeOperatorGate";
+import { createKvMembershipStore } from "../../security/iaaaMembershipStore";
+import { resolveIaaaTenant } from "../../security/iaaaGithubEndToEnd";
+import { sessionStore } from "../../security/session";
+import type { MembershipStore } from "../../security/authorization";
+import type { KvLike } from "../../security/kvResilience";
 import {
   channelPatchBodySchema,
   isTenantIdShaped,
@@ -142,18 +147,10 @@ function jsonError(
   return Response.json({ code, error: codedMessage(code) }, { status });
 }
 
-function parseEnvOperators(env: { AGENT_DB?: unknown }): Set<string> {
-  const raw = (env as unknown as Record<string, unknown>)["COMMERCIAL_STORE_OPERATORS"];
-  if (typeof raw !== "string" || !raw.trim()) return new Set();
-  return new Set(
-    raw
-      .split(",")
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0),
-  );
-}
-
-/** Resolve the verified operator login, or an error Response. */
+/** #6180 — the store-operator gate, through the one helper. The
+ * membership is the gate; the deprecated env/store login list is the
+ * lossless fallback (logged). No founding bypass: channel
+ * administration is steady-state. */
 async function resolveOperator(
   request: Request,
   ctx: PlatformChannelRouteContext,
@@ -162,23 +159,38 @@ async function resolveOperator(
   if (!login) {
     return jsonError("FAILURE_COMMERCIAL_UNAUTHORIZED", 401, { login: null });
   }
-  const effective = parseEnvOperators(ctx.env);
-  const adapter = ctx.operators ?? createStoreOperatorsAdapter(ctx.env);
-  if (adapter) {
-    try {
-      for (const entry of await adapter.listOperators()) effective.add(entry.login);
-    } catch {
-      // #5607 (G-5): the degrade was silent; log it.
-      structuredLog.warn("platformChannels.operator_list_degraded", {
-        login: login || null,
-      });
-      // Store-list failure degrades to env-only, exactly as the
-      // commercial price routes behave — never a lockout, never
-      // a silent widening (the operator check below still applies).
-    }
+  let kv: KvLike | undefined;
+  let membershipStore: MembershipStore | undefined;
+  try {
+    kv = sessionStore(ctx.env);
+    membershipStore = createKvMembershipStore(kv);
+  } catch {
+    kv = undefined;
+    membershipStore = undefined;
   }
-  if (!effective.has(login)) {
+  const access = await resolveStoreOperatorAccess({
+    login,
+    tenantId: resolveIaaaTenant(ctx.env),
+    nowMs: Date.now(),
+    kv,
+    membershipStore,
+    env: ctx.env as unknown as Record<string, unknown>,
+    operators: ctx.operators,
+  });
+  if (!access.allowed) {
     return jsonError("FAILURE_COMMERCIAL_OPERATOR_REQUIRED", 403, { login });
+  }
+  if (access.via === "legacy-list") {
+    structuredLog.warn("platformChannels.store_operator_legacy_fallback", { login });
+  }
+  if (access.storeDegraded) {
+    // #5607 (G-5): the degrade was silent; log it. A membership or
+    // store-list failure degrades to the env-only list — never a
+    // lockout, never a silent widening (the operator check above
+    // still applies).
+    structuredLog.warn("platformChannels.operator_list_degraded", {
+      login: login || null,
+    });
   }
   return login;
 }

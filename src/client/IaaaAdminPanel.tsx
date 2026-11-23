@@ -93,7 +93,7 @@ const IAAA_ADMIN_TABS = [
   // redirects there (schedulesHome.ts `legacySchedulesRedirect`).
 ] as const;
 
-const MEMBER_ROLES = ["member", "approver", "auditor", "workspace-admin", "tenant-admin", "platform-admin"] as const;
+const MEMBER_ROLES = ["member", "approver", "auditor", "workspace-admin", "store-operator", "tenant-admin", "platform-admin"] as const;
 const MEMBER_SCOPES = ["tenant", "workspace", "platform"] as const;
 
 export function IaaaAdminPanel() {

@@ -202,6 +202,7 @@ describe("issue #2681: service token mint", () => {
     expect([...ALL_ROLES]).toEqual([
       "platform-admin",
       "tenant-admin",
+      "store-operator",
       "workspace-admin",
       "member",
       "approver",

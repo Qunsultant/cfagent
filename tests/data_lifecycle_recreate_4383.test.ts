@@ -361,7 +361,7 @@ describe("recreate gates (#4383)", () => {
 // ---------------------------------------------------------------------------
 
 describe("recreate, tenant scope (#4383)", () => {
-  it("preview plans the D1 leg and the per-instance DO legs without executing or auditing", async () => {
+  it("preview plans the D1 leg and the per-instance DO legs without executing; the legacy-list gate emits one best-effort audit event", async () => {
     const world = await makeWorld();
     const { status, body } = await call(world.ctx, PATH, "POST", OP, {
       scope: "tenant",
@@ -426,7 +426,16 @@ describe("recreate, tenant scope (#4383)", () => {
     for (const login of [ALICE, BOB]) {
       expect(tableExists(world.instances.get(login)!.db, "mas_reports")).toBe(false);
     }
-    expect(world.funnel).not.toHaveBeenCalled();
+    // #6180 — the preview itself still writes nothing (D1/instances
+    // empty above), but the caller passes the gate via the deprecated
+    // legacy list, so resolveOperator emits one best-effort
+    // legacy-fallback audit event through the funnel.
+    expect(world.funnel).toHaveBeenCalledTimes(1);
+    expect(world.funnel).toHaveBeenCalledWith(
+      "data-lifecycle.store-operator-legacy-fallback",
+      "orchestrator",
+      expect.objectContaining({ login: OP, tenantId: "primary" }),
+    );
   });
 
   it("confirm without a token, and with a stale token, is refused and executes nothing", async () => {
@@ -508,7 +517,29 @@ describe("recreate, tenant scope (#4383)", () => {
     }
     expect(tableExists(world.instances.get(OP)!.db, "mas_reports")).toBe(false);
     // Audit AFTER the writes, through the funnel.
-    expect(world.funnel).toHaveBeenCalledTimes(1);
+    // #6180 — three funnel calls, in order: the preview's
+    // legacy-fallback audit, the confirm gate's legacy-fallback
+    // audit (OP is a legacy-list operator in this world, with no
+    // store-operator membership), then the recreate audit itself.
+    expect(world.funnel).toHaveBeenCalledTimes(3);
+    expect(world.funnel).toHaveBeenNthCalledWith(
+      1,
+      "data-lifecycle.store-operator-legacy-fallback",
+      "orchestrator",
+      expect.objectContaining({ login: OP, tenantId: "primary" }),
+    );
+    expect(world.funnel).toHaveBeenNthCalledWith(
+      2,
+      "data-lifecycle.store-operator-legacy-fallback",
+      "orchestrator",
+      expect.objectContaining({ login: OP, tenantId: "primary" }),
+    );
+    expect(world.funnel).toHaveBeenNthCalledWith(
+      3,
+      "data-lifecycle.recreate",
+      "orchestrator",
+      expect.objectContaining({ scope: "tenant", tenantId: "tenant-a" }),
+    );
     expect(world.funnel).toHaveBeenCalledWith(
       "data-lifecycle.recreate",
       "orchestrator",

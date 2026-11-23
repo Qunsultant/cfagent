@@ -25,6 +25,7 @@ export type ServiceTokenTier = "platform" | "tenant";
 export const SERVICE_TOKEN_ROLE_OPTIONS = [
   "platform-admin",
   "tenant-admin",
+  "store-operator",
   "member",
   "approver",
   "auditor",

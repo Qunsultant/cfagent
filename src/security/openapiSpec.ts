@@ -1137,7 +1137,7 @@ export function buildOpenApiSpec(): Record<string, unknown> {
           properties: {
             role: {
               type: "string",
-              enum: ["platform-admin", "tenant-admin", "workspace-admin", "member", "approver", "auditor"],
+              enum: ["platform-admin", "tenant-admin", "store-operator", "workspace-admin", "member", "approver", "auditor"],
             },
             scope: { type: "string", enum: ["platform", "tenant", "workspace", "resource"] },
             workspaceId: { type: "string" },

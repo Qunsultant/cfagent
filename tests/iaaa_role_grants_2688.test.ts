@@ -90,8 +90,8 @@ function membership(
 }
 
 describe("roleGrants pure module (#2688)", () => {
-  it("derives the grantable set from ALL_ROLES: exactly the two admin roles", () => {
-    expect([...ROLE_GRANT_ROLES].sort()).toEqual(["platform-admin", "tenant-admin"]);
+  it("derives the grantable set from ALL_ROLES: exactly the three admin roles", () => {
+    expect([...ROLE_GRANT_ROLES].sort()).toEqual(["platform-admin", "store-operator", "tenant-admin"]);
   });
 
   it("flattens only admin bindings, carrying grantor and grant time", () => {

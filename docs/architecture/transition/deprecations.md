@@ -50,6 +50,15 @@ unbound, rather than silently dropping bytes to legacy DO storage.
 - Consumers at deprecation: none in live code — `screenGoalStage`'s default branch was the only caller and now defaults to the composition; the method stays public and pinned by the 6072/4192/6074 suites.
 - Deletion condition: zero consumers plus an owner decision plus a gate amendment; deletion is never part of a program slice.
 
+## 2026-11-22 — #6180 deprecates the store-operator legacy-list reads
+
+- Name: the store-operator legacy-list fallback reads — the `COMMERCIAL_STORE_OPERATORS` env list plus the AGENT_DB store operators list, read via `listEffectiveOperatorLogins` / `parseEnvOperators` (`src/data/createStoreOperatorsPorts.ts`)
+- Date: 2026-11-22
+- Reason: Issue #6180 brings store-operator under IAAA as a tenant-scoped `store-operator` role binding. The env list + store list were a second, login-keyed, unrevocable, unaudited admin gate (capability map §7.2, "Two admin gates"); they are now a deprecated fallback only, kept so no operator loses access during the migration. An unresolvable login keeps access through the fallback until it signs in and the migration mints its membership.
+- Replacement: tenant-scoped store-operator memberships — one gate helper `src/security/storeOperatorGate.ts`, migration `src/security/storeOperatorMigration.ts`, `/operators/add` + `/operators/remove` minting/revoking memberships through the grant route's machinery.
+- Consumers at deprecation: the six gate sites (`src/agents/routes/dataLifecycle.ts`, `dlq.ts`, `platformChannels.ts`, `platformTenants.ts`, `agenticPayments.ts`), the `/operators` list (env/store rows), and `src/client/StoreOperatorsPanel.tsx` (env/store rows + Expires column).
+- Deletion condition: follow-up #6185 (OPEN) — zero consumers of the fallback reads plus live verification that every effective operator holds a store-operator membership, plus an owner decision plus a gate amendment; deletion is never part of a program slice.
+
 ## 2026-11-20 — #5915 supersedes the research cutover flag
 
 - Name: `research_engine_cutover` (feature flag key)
