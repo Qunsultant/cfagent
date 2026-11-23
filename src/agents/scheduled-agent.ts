@@ -735,6 +735,11 @@ export class ScheduledAgent extends PortThink {
       (goal) => goal.id === "opportunity-hunt",
     );
     if (!config || stored.cron === config.cron) return false;
+    // Issue #6293 — the id alone does not identify the shipped
+    // opportunity-hunt goal: a stored goal that reuses the id with a
+    // different operation keeps its cron (a fixture running
+    // "search.query" must not be rewritten to daily 07:00).
+    if (stored.operation !== config.operation) return false;
     stored.cron = config.cron;
     return true;
   }
