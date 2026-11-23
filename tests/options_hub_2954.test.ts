@@ -71,6 +71,7 @@ describe("stock hub tabs (#2954)", () => {
       "run-screen",
       "research",
       "patterns",
+      "opportunity-hunt",
       "presets",
     ]);
   });
@@ -124,6 +125,7 @@ describe("sub-menu mapping (#2954)", () => {
       "new-screen",
       "research",
       "patterns",
+      "opportunity-hunt",
       "presets",
     ]);
     expect(SUB_MENU_CONFIGS["assets-hub"].map((s) => s.id)).toEqual([

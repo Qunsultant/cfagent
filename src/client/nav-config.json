@@ -687,6 +687,15 @@
         "description": "Stock market setup signatures from the setup catalog — read-only, apply one to a new screen"
       },
       {
+        "id": "opportunity-hunt",
+        "label": "Opportunity Hunt",
+        "shortLabel": "Hunt",
+        "icon": "Goal",
+        "badge": "Hunt",
+        "badgeType": "ai",
+        "description": "Entry signals from the pattern strategies over the tradable universe's daily closes — run it on demand and see the setups"
+      },
+      {
         "id": "presets",
         "label": "Presets",
         "shortLabel": "Presets",
@@ -1588,6 +1597,10 @@
     "stock-hub:patterns": {
       "tab": "stock-hub",
       "view": "patterns"
+    },
+    "stock-hub:opportunity-hunt": {
+      "tab": "stock-hub",
+      "view": "opportunity-hunt"
     },
     "stock-hub:presets": {
       "tab": "stock-hub",
