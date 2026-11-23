@@ -1430,6 +1430,19 @@ export const MIGRATION_0083_JOB_STAGE_EVENTS: DataMigration = {
   name: "0083_job_stage_events",
   sql: d1MigrationSql(83),
 };
+/**
+ * Migration 0084 — the binding tuple on job run records (#5102,
+ * F5 of #5094). Four nullable columns on `job_run_records`
+ * (account_type, account_id, binding_scope, binding_source) plus
+ * the binding-read index (account_id, started DESC, id DESC) for
+ * the binding-filtered list reads. Nullable: rows written before
+ * F5 carry NULL and read as unbound — never backfilled.
+ */
+export const MIGRATION_0084_JOB_RUN_RECORDS_BINDING: DataMigration = {
+  version: 84,
+  name: "0084_job_run_records_binding",
+  sql: d1MigrationSql(84),
+};
 export const MIGRATION_0082_REFERRAL_TRIAL_EXTENSION: DataMigration = {
   version: 82,
   name: "0082_referral_trial_extension",
@@ -1684,6 +1697,7 @@ export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANC
   MIGRATION_0081_JOB_RUN_RECORDS_PROJECTION,
   MIGRATION_0082_REFERRAL_TRIAL_EXTENSION,
   MIGRATION_0083_JOB_STAGE_EVENTS,
+  MIGRATION_0084_JOB_RUN_RECORDS_BINDING,
 ];
 
 function splitStatements(sqlText: string): string[] {

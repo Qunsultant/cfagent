@@ -132,6 +132,27 @@ export interface RunSummary {
   scheduleId?: string | null;
   asyncJobId?: string | null;
   workflowId?: string | null;
+  /**
+   * Issue #5102 (F5 of #5094): the binding tuple the run executed
+   * against. A ledger row carries its record's tuple; a canonical
+   * report row carries its generating run's tuple (from its body
+   * provenance when present, else inherited from its D1 ledger
+   * twin in the merge below). Null/absent = the run predates the
+   * tuple or is not a brokered execution — never a guessed binding.
+   */
+  accountType?: string | null;
+  accountId?: string | null;
+  bindingScope?: string | null;
+  bindingSource?: string | null;
+  /**
+   * Issue #5102 (F5 of #5094): broker + mode provenance for the
+   * binding filter (§8). A ledger row carries its record's
+   * brokerId/mode; a canonical report row reads them from its
+   * body provenance; a scan row carries its broker (#3327). Null/
+   * absent = the home store records none — never backfilled.
+   */
+  brokerId?: string | null;
+  mode?: "live" | "paper" | null;
   /** Consolidation C4 (#1329): the mas_discovery_runs run id this row
    *  corresponds to, when known — the discovery twin of scanRunId. A
    *  canonical discovery row carries the id its body links to
@@ -409,6 +430,20 @@ export function runSummaryFromReport(hit: ScheduledReportHit): RunSummary {
     reportId: hit.id,
     scanRunId: kind === "options_scanner" ? canonicalScanRunId(hit.body) : null,
     discoveryRunId: kind === "discovery" ? canonicalDiscoveryRunId(hit.body) : null,
+    // Issue #5102 (F5 of #5094): the generating run's binding,
+    // when the canonical body carries it in its provenance
+    // (options reports stamp it; research bodies do not — those
+    // rows inherit it from their D1 ledger twin in the merge).
+    accountType: strOrNull(body?.provenance?.accountType) ?? null,
+    accountId: strOrNull(body?.provenance?.accountId) ?? null,
+    bindingScope: strOrNull(body?.provenance?.bindingScope) ?? null,
+    bindingSource: strOrNull(body?.provenance?.bindingSource) ?? null,
+    // Issue #5102 (F5 of #5094): broker + mode for the binding
+    // filter — the body's provenance broker and the body's mode
+    // when it names the trading mode (live/paper).
+    brokerId: strOrNull(body?.provenance?.brokerId) ?? null,
+    mode:
+      body?.mode === "live" || body?.mode === "paper" ? body.mode : null,
     // Issue #4259 / #581: when a research canonical row carries an actual
     // body.jobRunId (`research:<run-body>`), fold its D1 twin onto the report.
     scheduleId: null,
@@ -477,6 +512,11 @@ export function runSummaryFromScanRun(scan: ScanRunSummary): RunSummary {
     scheduleId: scan.scheduleId ?? null,
     asyncJobId: scan.asyncJobId ?? null,
     workflowId: scan.workflowId ?? null,
+    // Issue #5102 (F5 of #5094): the scan's broker (#3327) rides
+    // the summary for the binding filter. A scan row carries no
+    // account tuple (it reads chains, never an account), so the
+    // account fields stay absent — the row reads as unbound.
+    brokerId: scan.broker ?? null,
     source: "options_scanner",
     runSource: "options",
   };
@@ -618,6 +658,18 @@ export function runSummaryFromJobRunRecord(record: JobRunRecord): RunSummary {
     scheduleId: record.scheduleId ?? null,
     asyncJobId: record.asyncJobId ?? null,
     workflowId: record.workflowId ?? null,
+    // Issue #5102 (F5 of #5094): the ledger row's binding tuple
+    // rides the summary with the linkage, so the merge below can
+    // hand it to the canonical row that absorbs this row.
+    accountType: record.accountType ?? null,
+    accountId: record.accountId ?? null,
+    bindingScope: record.bindingScope ?? null,
+    bindingSource: record.bindingSource ?? null,
+    // Issue #5102 (F5 of #5094): the ledger row's #3655 broker +
+    // mode ride the summary with the tuple, so the binding filter
+    // can match on broker/mode as well as the account fields.
+    brokerId: record.brokerId ?? null,
+    mode: record.mode ?? null,
     source: "job-pipeline",
   };
 }
@@ -730,6 +782,31 @@ export function mergeRunSummaries(lists: RunSummary[][], limit: number): RunSumm
     for (const row of list) {
       if (row.reportId !== null && row.workflowId) {
         canonicalWorkflowIds.add(row.workflowId);
+      }
+    }
+  }
+  // Issue #5102 (F5 of #5094): the binding a canonical report row
+  // inherits from its D1 ledger twin. A job-pipeline row dropped
+  // below (its canonical twin carries the artifacts) still lends
+  // its tuple to that twin, keyed by the same workflowId join the
+  // drop reads on. First match wins — the join is exact, so a
+  // second match would be a duplicate record, not a second tuple.
+  // A canonical row whose own body provenance already carries a
+  // tuple keeps it; the twin only fills an absent one.
+  const ledgerBindingByWorkflowId = new Map<
+    string,
+    { accountType: string | null; accountId: string | null; bindingScope: string | null; bindingSource: string | null }
+  >();
+  for (const list of lists) {
+    for (const row of list) {
+      if (row.reportId === null && row.source === "job-pipeline" && row.workflowId) {
+        if (ledgerBindingByWorkflowId.has(row.workflowId)) continue;
+        ledgerBindingByWorkflowId.set(row.workflowId, {
+          accountType: row.accountType ?? null,
+          accountId: row.accountId ?? null,
+          bindingScope: row.bindingScope ?? null,
+          bindingSource: row.bindingSource ?? null,
+        });
       }
     }
   }
@@ -851,6 +928,22 @@ export function mergeRunSummaries(lists: RunSummary[][], limit: number): RunSumm
       }
       merged.push(row);
     }
+  }
+  // Issue #5102 (F5 of #5094): the canonical row inherits its
+  // ledger twin's tuple when its own body carries none — "reports
+  // ride the run row". A twin whose own tuple is entirely null
+  // lends nothing (the row stays explicitly unbound, never a
+  // guessed binding).
+  for (const row of merged) {
+    if (row.reportId === null || !row.workflowId) continue;
+    if (row.accountType ?? row.accountId ?? row.bindingScope ?? row.bindingSource) continue;
+    const twin = ledgerBindingByWorkflowId.get(row.workflowId);
+    if (!twin) continue;
+    if (!(twin.accountType ?? twin.accountId ?? twin.bindingScope ?? twin.bindingSource)) continue;
+    row.accountType = twin.accountType;
+    row.accountId = twin.accountId;
+    row.bindingScope = twin.bindingScope;
+    row.bindingSource = twin.bindingSource;
   }
   merged.sort((a, b) =>
     a.createdAt === b.createdAt ? (a.id < b.id ? 1 : -1) : a.createdAt < b.createdAt ? 1 : -1,

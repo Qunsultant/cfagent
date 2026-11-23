@@ -282,6 +282,14 @@ export function unifiedRecordsFromCanonicalReports(
       // canonical body's provenance object.
       brokerId: typeof body.provenance?.brokerId === "string" ? body.provenance.brokerId : null,
       dataProviderId: typeof body.provenance?.dataProviderId === "string" ? body.provenance.dataProviderId : null,
+      // Issue #5102 (F5 of #5094): the binding tuple the run
+      // executed against, from the same provenance object.
+      // Absent on rows recorded before the tuple existed —
+      // never backfilled, never a guessed binding.
+      accountType: typeof body.provenance?.accountType === "string" ? body.provenance.accountType : null,
+      accountId: typeof body.provenance?.accountId === "string" ? body.provenance.accountId : null,
+      bindingScope: typeof body.provenance?.bindingScope === "string" ? body.provenance.bindingScope : null,
+      bindingSource: typeof body.provenance?.bindingSource === "string" ? body.provenance.bindingSource : null,
       // Issue #3655 (effective mode): the resolver source, from the
       // canonical provenance when present, else the top-level body
       // (the scheduled stock callback writes it there). Absent on
@@ -651,6 +659,17 @@ export async function handleWorkflowRunsRoutes(
   // window still show (no intermediate widening needed — the
   // canonical read is independent of the job windows).
   const reportsOnly = url.searchParams.get("reports") === "only";
+  // Issue #5102 (F5 of #5094): the optional binding filter —
+  // broker / mode / account-type / accountId / binding-scope —
+  // validated against the registry; an invalid value is a 400,
+  // never a silent empty page. The page builder applies it
+  // BEFORE slicing, like every other filter.
+  const { parseBindingFilter } = await import("../../services/bindingFilter");
+  const bindingResult = parseBindingFilter(url.searchParams);
+  if (!bindingResult.ok) {
+    return Response.json({ error: bindingResult.error }, { status: 400 });
+  }
+  const bindingFilter = bindingResult.filter;
   // Jobs are grouped into runs, so read more rows than runs requested —
   // a 5-stage chain must not displace five single-job runs.
   const jobLimit = Math.min(MAX_LIMIT * 10, Math.max(120, (limit + offset) * 8));
@@ -1056,6 +1075,7 @@ export async function handleWorkflowRunsRoutes(
     search: searchParam ?? undefined,
     lifecycle: lifecycleParam ?? undefined,
     schedule: scheduleParam ?? undefined,
+    binding: bindingFilter,
     nowMs: Date.now(),
     reportsOnly,
     reportDocs,

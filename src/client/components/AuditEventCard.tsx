@@ -12,10 +12,32 @@
  */
 import React from "react";
 import { Badge, Card, Flex, Stack } from "../components/ui";
+import { formatRecordBindingLabel } from "../ActiveBindingBadge";
 import type { AuditLogEvent } from "../chat/types";
 
 export function AuditEventCard({ event: e }: { event: AuditLogEvent }) {
   const resolved = e.resolvedAspects ?? null;
+  // Issue #5102 (F5 of #5094): a brokered event carries its binding in
+  // the payload — show it as a compact masked cell (broker · mode ·
+  // account-type · masked id), never the full id. An event whose
+  // payload carries binding fields but no account id reads Unbound.
+  // Events with no binding fields at all show no cell: most audit
+  // events are not brokered, and an Unbound marker on every one
+  // would be noise. The raw payload below is the pre-existing
+  // full-payload detail view (§5 of the plan keeps it); the cell is
+  // the masked surface.
+  const payload = e.payload as Record<string, unknown>;
+  const carriesBinding =
+    typeof payload.bindingScope === "string" ||
+    typeof payload.bindingSource === "string" ||
+    typeof payload.accountType === "string" ||
+    typeof payload.accountId === "string";
+  const bindingLabel = carriesBinding
+    ? formatRecordBindingLabel({
+        accountType: typeof payload.accountType === "string" ? payload.accountType : null,
+        accountId: typeof payload.accountId === "string" ? payload.accountId : null,
+      })
+    : null;
   return (
     <Card padding="sm">
       <Stack gap="2">
@@ -24,6 +46,14 @@ export function AuditEventCard({ event: e }: { event: AuditLogEvent }) {
           <span className="ui-meta-sm">{e.type}</span>
           <span className="ui-meta-sm">{new Date(e.created_at).toLocaleTimeString()}</span>
         </Flex>
+        {bindingLabel !== null ? (
+          <Flex gap="1" align="center" wrap>
+            <span className="ui-meta-sm">Account:</span>
+            <Badge size="xs" tone="info" title={`Binding scope: ${typeof payload.bindingScope === "string" ? payload.bindingScope : "—"}`}>
+              {bindingLabel}
+            </Badge>
+          </Flex>
+        ) : null}
       {resolved ? (
         <div>
           <div>

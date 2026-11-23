@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from "react";
 import { Badge, Button, Card, CardHeader, EmptyState, Flex, PageSection, PageShell, Spinner, TabPanel, Table, Tabs, type TableColumn, type TabOption } from "./components/ui";
 import { safePriceFormat } from "./formatters";
+import { formatRecordBindingLabel } from "./ActiveBindingBadge";
 import {
   LEDGER_SORT_DEFAULT,
   ledgerBrokerId,
@@ -106,6 +107,10 @@ export function LedgerPanel({ orders, ordersLoading, fetchOrders, setRiskSubject
       { key: "status", header: header("Status", "status"), ariaSort: ariaSort("status"), render: (ord) => <Badge tone={String(ord.status) === "completed" ? "success" : String(ord.status) === "authorized" ? "accent" : "neutral"}>{ord.status.toUpperCase()}</Badge> },
       { key: "broker", header: header("Broker", "broker"), ariaSort: ariaSort("broker"), render: (ord) => <>{ledgerBrokerLabel(ord)}</> },
       { key: "mode", header: header("Mode", "mode"), ariaSort: ariaSort("mode"), render: (ord) => { const mode = ledgerMode(ord); return mode === null ? <>—</> : <Badge tone={mode === "live" ? "warning" : "success"}>{ledgerModeLabel(ord)}</Badge>; } },
+      // Issue #5102 (F5 of #5094): the account the draft was previewed
+      // on, stamped by F3 — masked, never the full id; a legacy row
+      // with no stamp reads Unbound, never a guessed account.
+      { key: "account", header: header("Account", "accountId"), ariaSort: ariaSort("accountId"), render: (ord) => <>{formatRecordBindingLabel(ord)}</> },
       { key: "ref", header: header("Broker Ref", "orderRef"), ariaSort: ariaSort("orderRef"), render: (ord) => <code>{ord.orderRef || "—"}</code> },
       { key: "did", header: header("Proposer DID", "proposerDid"), ariaSort: ariaSort("proposerDid"), render: (ord) => <code title={ord.proposerDid}>{ord.proposerDid.replace("did:agent:openaimp:", "")}</code> },
       { key: "date", header: header("Date & Time", "createdAt"), ariaSort: ariaSort("createdAt"), render: (ord) => <span>{new Date(ord.createdAt).toLocaleString()}</span> },

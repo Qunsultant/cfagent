@@ -67,6 +67,20 @@ export interface DeliveryDatasetRunRecord {
   trigger: DeliveryDatasetRunTrigger;
   /** Issue #4767 — the run kind of this leg run (original / re-run / resume / replay), the pipeline run's kind. Optional so artifacts stored before #4767 still parse. */
   kind?: DeliveryDatasetRunKind;
+  /**
+   * Issue #5102 (F5 of #5094): the binding tuple of the run that
+   * generated the report this run delivers — the generating run's
+   * tuple, stamped at the store call from the pipeline run
+   * context when the caller carries one. Optional so artifacts
+   * stored before F5 still parse; absent reads as unbound
+   * (explicit nulls), never a guessed binding. Channel records
+   * inherit this tuple for display from their parent run — they
+   * carry no copy of it.
+   */
+  accountType?: string | null;
+  accountId?: string | null;
+  bindingScope?: string | null;
+  bindingSource?: string | null;
   startedAt: string;
   finishedAt: string;
   status: DeliveryDatasetRunStatus;

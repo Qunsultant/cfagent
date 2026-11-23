@@ -26,6 +26,7 @@ import {
   MIGRATION_0073_JOB_RUN_RECORDS_RECENT_IDX,
   MIGRATION_0076_JOB_RUN_DEFINITION_VERSION,
   MIGRATION_0081_JOB_RUN_RECORDS_PROJECTION,
+  MIGRATION_0084_JOB_RUN_RECORDS_BINDING,
   type MigrationDb,
 } from "./migrationRunner";
 import {
@@ -44,7 +45,7 @@ export function createD1JobRunRecordDb(d1: D1Database): JobRunRecordDb {
   return createDrizzleD1Db(d1, { schema: { jobRunRecords } });
 }
 
-/** Idempotent schema-ensure: applies migrations 0047 + 0072 + 0073 + 0076 + 0081 if unapplied. */
+/** Idempotent schema-ensure: applies migrations 0047 + 0072 + 0073 + 0076 + 0081 + 0084 if unapplied. */
 export async function ensureJobRunRecordsSchema(db: JobRunRecordDb): Promise<number[]> {
   return applyMigrations(db as unknown as MigrationDb, [
     MIGRATION_0047_JOB_RUN_RECORDS,
@@ -52,6 +53,7 @@ export async function ensureJobRunRecordsSchema(db: JobRunRecordDb): Promise<num
     MIGRATION_0073_JOB_RUN_RECORDS_RECENT_IDX,
     MIGRATION_0076_JOB_RUN_DEFINITION_VERSION,
     MIGRATION_0081_JOB_RUN_RECORDS_PROJECTION,
+    MIGRATION_0084_JOB_RUN_RECORDS_BINDING,
   ]);
 }
 
@@ -90,6 +92,14 @@ function rowToRecord(row: JobRunRecordRow): JobRunRecord {
     ...(row.definitionVersion != null
       ? { definitionVersion: row.definitionVersion }
       : {}),
+    // Issue #5102 (F5 of #5094) — a row stored before migration
+    // 0084 carries none of the four binding columns; the spread
+    // passes the stored values through when present and the
+    // normalizer fills explicit nulls otherwise.
+    ...(row.accountType != null ? { accountType: row.accountType } : {}),
+    ...(row.accountId != null ? { accountId: row.accountId } : {}),
+    ...(row.bindingScope != null ? { bindingScope: row.bindingScope } : {}),
+    ...(row.bindingSource != null ? { bindingSource: row.bindingSource } : {}),
     ...(row.errorText != null ? { error: row.errorText } : {}),
     ...(row.detail != null ? { detail: row.detail } : {}),
     ...(row.descriptor != null ? { descriptor: row.descriptor } : {}),
@@ -127,6 +137,12 @@ export class D1JobRunRecordStore {
       kind: record.kind ?? null,
       originRunId: record.originRunId ?? null,
       definitionVersion: record.definitionVersion ?? null,
+      // Issue #5102 (F5 of #5094) — the binding tuple, stamped
+      // on new rows; null on rows whose call site carried none.
+      accountType: record.accountType ?? null,
+      accountId: record.accountId ?? null,
+      bindingScope: record.bindingScope ?? null,
+      bindingSource: record.bindingSource ?? null,
       errorText: record.error ?? null,
       detail: record.detail ?? null,
       descriptor: record.descriptor ?? null,
@@ -155,6 +171,14 @@ export class D1JobRunRecordStore {
    * Broker provenance (brokerId / dataProviderId / mode /
    * modeSource) is NOT carried: the D1 table has no columns for it,
    * and the engine's D1 writes drop it too — the DO row keeps it.
+   *
+   * Issue #5102 (F5 of #5094) — the binding tuple IS carried: the
+   * D1 table gained the four columns in migration 0084, so a
+   * projected row keeps its DO twin's tuple. The null upgrade does
+   * NOT fill a binding onto an existing engine row: the engine
+   * row's own fields are authoritative, and a null binding on it
+   * reads as unbound (the legacy rule), never as a cross-ledger
+   * backfill.
    */
   async recordProjectedJobRunRecord(
     row: JobRunRecordProjectionInput,
@@ -177,6 +201,12 @@ export class D1JobRunRecordStore {
       kind: record.kind ?? null,
       originRunId: record.originRunId ?? null,
       definitionVersion: record.definitionVersion ?? null,
+      // Issue #5102 (F5 of #5094) — the DO twin's binding tuple
+      // rides the projection, so the D1 row is not unbound forever.
+      accountType: record.accountType ?? null,
+      accountId: record.accountId ?? null,
+      bindingScope: record.bindingScope ?? null,
+      bindingSource: record.bindingSource ?? null,
       errorText: record.error ?? null,
       detail: record.detail ?? null,
       descriptor: record.descriptor ?? null,

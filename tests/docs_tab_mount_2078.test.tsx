@@ -77,7 +77,9 @@ describe("Chat docs tab (#2078)", () => {
     expect(container.querySelector(".ui-page-frame")).not.toBeNull();
     expect(
       [...container.querySelectorAll("th button > span:first-child")].map((el) => el.textContent),
-    ).toEqual(["Date-Time", "Run Type", "Run Source", "PDF", "XLSX", "CSV", "Run ID"]);
+      // Issue #5102 (F5 of #5094): the Account column sits after Run
+      // Source, before the artifact columns.
+    ).toEqual(["Date-Time", "Run Type", "Run Source", "Account", "PDF", "XLSX", "CSV", "Run ID"]);
     expect(text).toContain("screener:2026-10-27T13:05:00.000Z");
     expect(text).toContain("Scheduled");
     expect(text).toContain("Stock");

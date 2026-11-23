@@ -81,8 +81,12 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 /** Issue #6099 (migration 0081) re-seeds it: tenant_id + projected_at_ms on job_run_records + the unique identity index. */
 /** Issue #6141 (migration 0082) re-seeds it: referral trial-extension rule columns + agent_referral_trial_extensions table + 2 indexes. */
 /** Issue #6167 re-seeds it: host_version on mas_async_jobs (remainder ALTER). */
+/** Issue #5102 (F5 of #5094) re-seeds it: the binding tuple moves
+ *  from the DO-plane tail to the D1-plane position on
+ *  job_run_records (migration 0084 owns the columns now) +
+ *  the job_run_records_binding_idx index. */
 export const COMBINED_FIXTURE_SHA256 =
-  "b398c0047ae89a6bebd0084d558a813404853454baa69b8a95b64c2e2786cc22";
+  "efd10e4c60398e465d3eae2df7f8b533836c56261e3a3c567ffdb6df2f0f5e28";
 /** All four planes' entries in plane order: D1, DO, ORM, remainder. */
 export const COMBINED_CATALOGUE_ENTRIES: CatalogueEntry[] = [
   ...D1_CATALOGUE_ENTRIES,

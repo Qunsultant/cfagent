@@ -3299,6 +3299,59 @@ export const D1_CATALOGUE_ENTRIES: CatalogueEntry[] = [
     form: "literal",
   },
   {
+    // Issue #5102 (F5 of #5094) — the binding tuple the run
+    // executed against (migration 0084). Nullable: rows written
+    // before F5 carry NULL (unbound), never a guessed binding.
+    code: "schema.d1.job_run_records.alter_table_add_column_account_type",
+    plane: "d1",
+    table: "job_run_records",
+    statement: `ALTER TABLE job_run_records ADD COLUMN account_type TEXT`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    // Issue #5102 (F5 of #5094) — the full account id, stored
+    // (display is masked everywhere; see maskAccountId).
+    code: "schema.d1.job_run_records.alter_table_add_column_account_id",
+    plane: "d1",
+    table: "job_run_records",
+    statement: `ALTER TABLE job_run_records ADD COLUMN account_id TEXT`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    // Issue #5102 (F5 of #5094) — the scope the tuple was
+    // resolved for (tenant / autopilot / copilot / schedule).
+    code: "schema.d1.job_run_records.alter_table_add_column_binding_scope",
+    plane: "d1",
+    table: "job_run_records",
+    statement: `ALTER TABLE job_run_records ADD COLUMN binding_scope TEXT`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    // Issue #5102 (F5 of #5094) — how the tuple was resolved
+    // (explicit / binding / unset).
+    code: "schema.d1.job_run_records.alter_table_add_column_binding_source",
+    plane: "d1",
+    table: "job_run_records",
+    statement: `ALTER TABLE job_run_records ADD COLUMN binding_source TEXT`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    // Issue #5102 (F5 of #5094) — binding-filtered recent
+    // reads (the §6 retention/export queries filter by
+    // account, then read newest-first).
+    code: "schema.d1.job_run_records.create_index_job_run_records_binding_idx",
+    plane: "d1",
+    table: "job_run_records",
+    index: "job_run_records_binding_idx",
+    statement: `CREATE INDEX IF NOT EXISTS job_run_records_binding_idx ON job_run_records (account_id, started DESC, id DESC)`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
     // Issue #5887 — the run-stamp on the instance, captured at dispatch.
     code: "schema.d1.job_pipeline_instances.alter_table_add_column_run_definition_version",
     plane: "d1",
@@ -3747,6 +3800,15 @@ export const D1_MIGRATION_CODES: Record<number, readonly string[]> = {
     "schema.d1.job_run_records.alter_table_add_column_tenant_id",
     "schema.d1.job_run_records.alter_table_add_column_projected_at_ms",
     "schema.d1.job_run_records.create_unique_index_job_run_records_identity_idx",
+  ],
+  // Issue #5102 (F5 of #5094) — the binding tuple on every run
+  // record: four nullable columns + the binding-read index.
+  84: [
+    "schema.d1.job_run_records.alter_table_add_column_account_type",
+    "schema.d1.job_run_records.alter_table_add_column_account_id",
+    "schema.d1.job_run_records.alter_table_add_column_binding_scope",
+    "schema.d1.job_run_records.alter_table_add_column_binding_source",
+    "schema.d1.job_run_records.create_index_job_run_records_binding_idx",
   ],
 };
 

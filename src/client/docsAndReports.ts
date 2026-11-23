@@ -56,6 +56,16 @@ export interface DocumentRow {
   xlsxError: string | null;
   csvStatus: string | null;
   csvError: string | null;
+  /**
+   * Issue #5102 (F5 of #5094): the binding the run recorded, carried
+   * from the RunSummary (which rides its run row). Nulls when the run
+   * recorded none — a legacy or non-broker run reads Unbound, never a
+   * guessed account. The panel renders these masked only.
+   */
+  accountType: string | null;
+  accountId: string | null;
+  bindingScope: string | null;
+  bindingSource: string | null;
 }
 
 const SOURCE_BY_KIND: Record<string, DocumentRunSource> = {
@@ -136,7 +146,7 @@ export function documentRunType(
 export function toDocumentRows(
   runs: Pick<
     RunSummary,
-    "id" | "runId" | "createdAt" | "trigger" | "kind" | "source" | "runSource" | "title" | "status" | "reportUrl" | "xlsxUrl" | "csvUrl" | "xlsxStatus" | "xlsxError" | "csvStatus" | "csvError" | "pdfStatus" | "pdfError" | "retry"
+    "id" | "runId" | "createdAt" | "trigger" | "kind" | "source" | "runSource" | "title" | "status" | "reportUrl" | "xlsxUrl" | "csvUrl" | "xlsxStatus" | "xlsxError" | "csvStatus" | "csvError" | "pdfStatus" | "pdfError" | "retry" | "accountType" | "accountId" | "bindingScope" | "bindingSource"
   >[],
 ): DocumentRow[] {
   const rows: DocumentRow[] = [];
@@ -163,6 +173,12 @@ export function toDocumentRows(
       xlsxError: run.xlsxError ?? null,
       csvStatus: run.csvStatus ?? null,
       csvError: run.csvError ?? null,
+      // Issue #5102 (F5 of #5094): the run's recorded binding, or
+      // explicit nulls when the run recorded none.
+      accountType: run.accountType ?? null,
+      accountId: run.accountId ?? null,
+      bindingScope: run.bindingScope ?? null,
+      bindingSource: run.bindingSource ?? null,
     });
   }
   rows.sort((a, b) =>
@@ -198,6 +214,7 @@ export type DocumentSortKey =
   | "createdAt"
   | "runType"
   | "runSource"
+  | "account"
   | "pdf"
   | "xlsx"
   | "csv"
@@ -222,6 +239,9 @@ const SORT_DEFAULT_DIRECTION: Record<DocumentSortKey, DocumentSortDirection> = {
   createdAt: "desc",
   runType: "asc",
   runSource: "asc",
+  // Issue #5102 (F5 of #5094): the stamped account sorts A→Z; an
+  // unstamped row has no value and sorts last in both directions.
+  account: "asc",
   pdf: "desc",
   xlsx: "desc",
   csv: "desc",
@@ -249,6 +269,10 @@ function documentSortValue(row: DocumentRow, key: DocumentSortKey): SortValue {
       return row.runType === "manual" ? 0 : row.runType === "scheduled" ? 1 : null;
     case "runSource":
       return DOCUMENT_SOURCE_LABELS[row.runSource] ?? null;
+    case "account":
+      // Issue #5102 (F5 of #5094): the stamped account id; null when
+      // the run recorded none, so unbound rows sort last.
+      return row.accountId || null;
     case "pdf":
       return row.pdfUrl ? 1 : 0;
     case "xlsx":

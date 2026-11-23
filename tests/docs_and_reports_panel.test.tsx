@@ -203,7 +203,9 @@ describe("DocsAndReportsPanel", () => {
     await renderPanel();
 
     const headers = [...container.querySelectorAll("th button > span:first-child")].map((el) => el.textContent);
-    expect(headers).toEqual(["Date-Time", "Run Type", "Run Source", "PDF", "XLSX", "CSV", "Run ID"]);
+    // Issue #5102 (F5 of #5094): the Account column sits after Run
+    // Source, before the artifact columns.
+    expect(headers).toEqual(["Date-Time", "Run Type", "Run Source", "Account", "PDF", "XLSX", "CSV", "Run ID"]);
 
     const rows = container.querySelectorAll("tbody tr");
     expect(rows).toHaveLength(2);

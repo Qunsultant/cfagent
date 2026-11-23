@@ -61,6 +61,8 @@ import { buildFeedJobRegistry } from "./feedJobs";
 import { FEED_PIPELINE_CATALOG } from "./feedPipelineJobs";
 import type { DataProviderId } from "../trading";
 import type { ScanRunSummary } from "../trading";
+import type { BindingFilter } from "./bindingFilter";
+import { matchesBindingFilter } from "./bindingFilter";
 // Issue #3946 (Option B): the engine's D1 run records merge onto the
 // Workflow Runs page through runFromJobRunRecord, beside the DO
 // ledgers — never re-homed, never projected here (that is #4116).
@@ -270,6 +272,15 @@ export interface WorkflowRun {
   mode?: "live" | "paper" | null;
   /** Issue #3655 (effective mode): which resolver leg produced the mode — pin | selection | inference. */
   modeSource?: "pin" | "selection" | "inference" | null;
+  /**
+   * Issue #5102 (F5 of #5094): the binding tuple the run executed
+   * against. Absent on runs recorded before the tuple existed —
+   * never backfilled.
+   */
+  accountType?: string | null;
+  accountId?: string | null;
+  bindingScope?: string | null;
+  bindingSource?: string | null;
   stageCount: number;
   completedStages: number;
   failedStages: number;
@@ -420,6 +431,15 @@ export interface UnifiedWorkflowRunRecord {
    */
   brokerId?: string | null;
   dataProviderId?: string | null;
+  /**
+   * Issue #5102 (F5 of #5094): the binding tuple the run executed
+   * against, from the canonical body's provenance object. Absent
+   * when the canonical row predates the tuple — never backfilled.
+   */
+  accountType?: string | null;
+  accountId?: string | null;
+  bindingScope?: string | null;
+  bindingSource?: string | null;
   /** Issue #3655 (effective mode): which resolver leg produced the mode — pin | selection | inference. */
   modeSource?: "pin" | "selection" | "inference" | null;
   stages: Array<{
@@ -1881,6 +1901,13 @@ export function runFromOutcome(
     // canonical record when it carries them.
     ...(unified?.brokerId ? { brokerId: unified.brokerId } : {}),
     ...(unified?.dataProviderId ? { dataProviderId: unified.dataProviderId } : {}),
+    // Issue #5102 (F5 of #5094): the binding tuple rides the
+    // Workflow Run with the provenance when the unified record
+    // carries it.
+    ...(unified?.accountType ? { accountType: unified.accountType } : {}),
+    ...(unified?.accountId ? { accountId: unified.accountId } : {}),
+    ...(unified?.bindingScope ? { bindingScope: unified.bindingScope } : {}),
+    ...(unified?.bindingSource ? { bindingSource: unified.bindingSource } : {}),
     // Issue #3655 (effective mode): the resolver source rides the
     // Workflow Run with the mode when the unified record carries it.
     ...(unified?.modeSource ? { modeSource: unified.modeSource } : {}),
@@ -2067,6 +2094,12 @@ export function runFromJobRunRecord(
     ...(record.brokerId ? { brokerId: record.brokerId } : {}),
     ...(record.mode ? { mode: record.mode } : {}),
     ...(record.modeSource ? { modeSource: record.modeSource } : {}),
+    // Issue #5102 (F5 of #5094): the binding tuple rides the
+    // Workflow Run with the provenance when the record carries it.
+    ...(record.accountType ? { accountType: record.accountType } : {}),
+    ...(record.accountId ? { accountId: record.accountId } : {}),
+    ...(record.bindingScope ? { bindingScope: record.bindingScope } : {}),
+    ...(record.bindingSource ? { bindingSource: record.bindingSource } : {}),
     startedAt: record.started,
     finishedAt: record.finished,
     durationMs:
@@ -2528,13 +2561,15 @@ export function summarizeWorkflowRuns(runs: WorkflowRun[]): {
  */
 export function filterWorkflowRuns(
   runs: WorkflowRun[],
-  filters: { trigger?: string; status?: string; search?: string; reportsOnly?: boolean; lifecycle?: string; schedule?: string },
+  filters: { trigger?: string; status?: string; search?: string; reportsOnly?: boolean; lifecycle?: string; schedule?: string; binding?: BindingFilter },
 ): WorkflowRun[] {
   const trigger = filters.trigger && filters.trigger !== "all" ? filters.trigger : null;
   const status = filters.status && filters.status !== "all" ? filters.status : null;
   const lifecycle = filters.lifecycle && filters.lifecycle !== "all" ? filters.lifecycle : null;
   const schedule = filters.schedule && filters.schedule !== "all" ? filters.schedule : null;
   const needle = filters.search?.trim().toLowerCase() || "";
+  const binding = filters.binding;
+  const bindingActive = binding !== undefined && Object.keys(binding).length > 0;
   return runs.filter((run) => {
     if (filters.reportsOnly && !hasReportDocuments(run)) return false;
     if (trigger && run.trigger !== trigger) return false;
@@ -2547,6 +2582,11 @@ export function filterWorkflowRuns(
     }
     if (lifecycle && (run.lifecycle ?? lifecycleStateForRun(run)) !== lifecycle) return false;
     if (schedule && (run.schedule?.mechanism ?? "unknown") !== schedule) return false;
+    // Issue #5102 (F5 of #5094): the binding filter narrows the
+    // list like any other filter — before paging, so a match past
+    // the page limit stays reachable. An unbound run never matches
+    // a present binding field.
+    if (bindingActive && binding !== undefined && !matchesBindingFilter(run, binding)) return false;
     if (needle) {
       const hay = [
         run.title,
@@ -2574,6 +2614,8 @@ export interface WorkflowRunsPageOptions {
   lifecycle?: string;
   /** Issue #3021: schedule-mechanism filter (cron-trigger / queue / agent-scheduler / workflow-binding / manual / unknown). */
   schedule?: string;
+  /** Issue #5102 (F5 of #5094): binding filter (broker / mode / account-type / accountId / binding-scope). */
+  binding?: BindingFilter;
   /** Clock for delayed-run evaluation (not_before vs now); defaults to Date.now(). */
   nowMs?: number;
   /** Page start over the filtered, newest-first list. Clamped 0..10000. */
@@ -2663,7 +2705,7 @@ export function buildWorkflowRunsPage(
   }
   all.sort(compareWorkflowRunsNewestFirst);
   const hiddenTraceCount = includeTraces ? 0 : input.jobs.filter(isStandaloneRequestTrace).length;
-  const filtered = filterWorkflowRuns(all, { trigger: input.trigger, status: input.status, search: input.search, reportsOnly: input.reportsOnly, lifecycle: input.lifecycle, schedule: input.schedule });
+  const filtered = filterWorkflowRuns(all, { trigger: input.trigger, status: input.status, search: input.search, reportsOnly: input.reportsOnly, lifecycle: input.lifecycle, schedule: input.schedule, binding: input.binding });
   const totalMatched = filtered.length;
   const offset = Math.max(0, Math.min(Math.floor(input.offset ?? 0) || 0, 10000));
   const limit = Math.max(1, Math.min(Math.floor(input.limit ?? 40) || 40, 100));

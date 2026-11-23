@@ -543,6 +543,10 @@ export async function handleBrokerOrderRoutes(
           stage: "execute",
           orderId,
           error: policyErr instanceof Error ? policyErr.message : String(policyErr),
+          // Issue #5102 (F5 of #5094): the brokered execution's
+          // binding rides the audit event, so the vault can show
+          // which account the refused execution belonged to.
+          ...accountBindingAuditFields(resolvedBinding),
         });
         if (ctx.getAutopilotState().running) {
           return Response.json(

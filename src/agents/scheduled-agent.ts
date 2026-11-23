@@ -807,7 +807,22 @@ export class ScheduledAgent extends PortThink {
     onRecordFailure?: (failure: ScheduleCallbackRecordFailure) => void,
   ): Promise<boolean> {
     try {
-      const built = buildJobRunRecord({ system: "scheduled-agent-goal", ...record });
+      // Issue #5102 (F5 of #5094): the scheduled agent's rows are
+      // scheduling records — the tick loop carries no firing binding
+      // in scope (goals carry creation provenance, not a binding),
+      // and F3's rule forbids a fresh ambient read at fire time, so
+      // these rows stamp explicit nulls and still record. The
+      // brokered execution a goal dispatches records its own tuple
+      // through its own write site (schedule callback payload,
+      // broker preview/execute, policy verdict).
+      const built = buildJobRunRecord({
+        system: "scheduled-agent-goal",
+        accountType: record.accountType ?? null,
+        accountId: record.accountId ?? null,
+        bindingScope: record.bindingScope ?? null,
+        bindingSource: record.bindingSource ?? null,
+        ...record,
+      });
       const post = this.ledgerPost();
       if (post) {
         // The one physical ledger, best-effort: a 401 (no service

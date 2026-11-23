@@ -91,6 +91,75 @@ F3 made the tuple enforced; F4 makes it inspectable, switchable, and named in ch
 - **NLQ intents (`binding_show` / `binding_list` / `binding_switch`, `src/agents/nlq/`)**: the rule planner and the LLM planner both map binding questions; the async executor serves them (show resolves the chat's own broker/mode selection when none is named; switch binds the copilot scope, by label or by the F1 single-candidate rule) and returns masked ids only. The sync executor refuses them explicitly (#923 pattern — enumeration and writes are async-only).
 - **Client bridge (`src/client/chat/AgentChatTabContent.tsx` + `bindingBridge.ts`)**: a `broker_account_binding` set-success in a chat turn reloads the F2 store from the server (`fetchAccountBindings(true)`); the masked result is never adopted into the cache. `ToolResultView` renders the binding card from the masked id / account name / code / error only.
 
+## Audit-Record Provenance (F5 / #5102)
+
+Every record carries the binding tuple it executed against
+(`accountType` / `accountId` / `bindingScope` / `bindingSource`),
+stored full and displayed masked. New rows are stamped; legacy
+rows read as explicit nulls (unbound) — no backfill, ever. "No
+record without a binding" applies only to brokered executions;
+non-broker runs record with explicit nulls.
+
+- **Run records (`JobRunRecord`, migration 0084)**: the D1 table
+  gains the four columns + `job_run_records_binding_idx`; the
+  DO-SQLite and in-memory adapters round-trip the tuple (F3 had
+  already stamped the DO half). The builder validates the four
+  fields like the linkage ids (string-or-null, non-empty, never a
+  poisoned `"undefined"`/`"null"` literal, #3650); the normalizer
+  fills explicit nulls on legacy rows. The scheduled agent's
+  shared funnel stamps explicit nulls — the tick loop carries no
+  firing binding and F3's rule forbids a fresh ambient read at
+  fire time. The engine's own terminal records (`job-pipeline`)
+  stay unbound: threading the dispatch binding through the
+  instance schema is a follow-on (see below); the schedule
+  callback's twin of a bound pipeline run does carry the tuple,
+  so the binding is provable for the firing.
+- **Trades (`mas_trades`)**: F3 stamped the tuple at preview and
+  proves it at execute; F5 verified the NLQ arm writes no trade
+  rows (its only `mas_trades` write is the `cancel_order` status
+  update on an existing draft). The trade ledger renders a masked
+  Account column per row (`LedgerPanel`).
+- **Reports ride the run row**: `RunSummary` carries the tuple
+  (from the run record, or from the report body's provenance);
+  the merge hands a canonical report row its D1 ledger twin's
+  tuple when its own body carries none. The screener CSV bytes
+  are unchanged by design — its columns mirror the XLSX tab
+  column-for-column and the module forbids comment lines
+  ("Provenance rides in report metadata, never in the CSV
+  bytes"); the binding rides the run row the CSV hangs from.
+  `GET /api/runs` and `GET /api/workflow-runs` take a binding
+  filter (`broker` / `mode` / `accountType` / `accountId` /
+  `bindingScope`, `src/services/bindingFilter.ts`); an invalid
+  value is a 400, never a silent empty page, and an unbound row
+  never matches a present field.
+- **Deliveries**: a delivery run carries its generating run's
+  tuple from its options (stamped in `finish()`); the
+  pipeline-step caller passes none, so pipeline-dispatched
+  delivery runs stamp explicit nulls until the engine follow-on
+  lands. Channel records do not duplicate the tuple — they
+  inherit it for display from their parent run. No table
+  migration: the adapters round-trip the artifact as
+  `artifactJson`.
+- **Audit events**: every brokered-execution audit event carries
+  the binding fields (`broker.account_binding_resolved` at
+  preview, `autopilot.policy_check_failed` at execute, the
+  copilot turn binding, `schedule.account_binding_resolved` at
+  creation). The vault card shows a compact masked binding cell
+  per brokered event; the raw-payload detail view is unchanged
+  (the one pre-existing explicit full-payload surface).
+- **Surfaces**: a masked Account column per row on the run
+  ledger, Docs & Reports (sortable), and the trade ledger; the
+  run-details modal masks the provenance `accountId` entry.
+  History rows render the RECORDED tuple via
+  `formatRecordBindingLabel` — not the F2 badge, which is
+  store-driven for the live binding and carries a Change
+  affordance that would be wrong on a historical row.
+- **Follow-on (not built here)**: thread the dispatch binding
+  through the pipeline engine instance (`JobInstanceRecord` +
+  `job_pipeline_instances` migration) so the engine's own
+  `job-pipeline` terminal records carry the tuple instead of
+  reading unbound.
+
 ## Active-Binding Display & Validated Switching (#5094 F2 / #5099)
 
 Every surface that carries a binding shows it, from one shared client

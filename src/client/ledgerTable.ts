@@ -75,6 +75,7 @@ export type LedgerSortKey =
   | "status"
   | "broker"
   | "mode"
+  | "accountId"
   | "orderRef"
   | "proposerDid"
   | "createdAt";
@@ -104,6 +105,10 @@ const SORT_DEFAULT_DIRECTION: Record<LedgerSortKey, LedgerSortDirection> = {
   status: "asc",
   broker: "asc",
   mode: "asc",
+  // Issue #5102 (F5 of #5094): the stamped account sorts A→Z; an
+  // unstamped (legacy) row has no value and sorts last, via the
+  // default `order[key] || null` case in ledgerSortValue.
+  accountId: "asc",
   orderRef: "asc",
   proposerDid: "asc",
   createdAt: "desc",
