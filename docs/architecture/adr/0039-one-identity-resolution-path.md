@@ -78,7 +78,7 @@ helper is exported from `serviceUser.ts` and reused by
 
 - `resolveCaller` (`serviceUser.ts`) — the service-user panel
   gate and every route behind it (provision / revoke / status /
-  tokens / E*TRADE).
+  tokens / broker-token).
 - `resolveOperatorCaller` (`platformUsers.ts`) — the operator
   lookup gate.
 - The Users view self-read (`buildUserView` "me") — the
