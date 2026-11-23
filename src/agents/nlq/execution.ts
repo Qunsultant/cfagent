@@ -1726,6 +1726,11 @@ async function executeSchedulingAction(
  * migration rule (exactly one candidate for the broker/mode/type, else
  * ask, never guess).
  */
+// Issue #5101: the ask-for-broker/mode wording, shared by the two
+// unresolved-selection guards below — one literal, so the neutrality
+// census (#3525) counts it once and no brand name appears in it.
+const ASK_BINDING_BROKER_MODE =
+  "Account binding: I could not read your broker selection — say which broker and mode, e.g. 'which account is bound for paper trading'.";
 async function executeNlqBindingAction(input: {
   orm: DatabaseORM;
   sessionId: string;
@@ -1781,17 +1786,13 @@ async function executeNlqBindingAction(input: {
       // broker/mode selection, exactly as a copilot turn does (F3 seam).
       const selection = await resolveCopilotTradingSelection({ env });
       if (!selection.resolved) {
-        return errorResult(
-          "Account binding: I could not read your broker selection — say which broker and mode, e.g. 'which account is bound for Alpaca paper'.",
-        );
+        return errorResult(ASK_BINDING_BROKER_MODE);
       }
       showBroker = showBroker ?? selection.selection.brokerId;
       showMode = showMode ?? selection.selection.mode;
     }
     if (!showBroker || !showMode) {
-      return errorResult(
-        "Account binding: I could not read your broker selection — say which broker and mode, e.g. 'which account is bound for Alpaca paper'.",
-      );
+      return errorResult(ASK_BINDING_BROKER_MODE);
     }
     const res = await resolveUserAccountBinding(env, login, {
       broker: showBroker,
@@ -1904,7 +1905,7 @@ async function executeNlqBindingAction(input: {
   const scope = "copilot" as const;
   if (!broker) {
     return errorResult(
-      "Account switch: say which broker to switch to, e.g. 'switch to my Alpaca paper account'.",
+      "Account switch: say which broker to switch to, e.g. 'switch to my paper account'.",
     );
   }
   const switchMode = mode ?? "paper";

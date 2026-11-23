@@ -1,7 +1,21 @@
+import { BROKER_CATALOG } from "../../trading";
 import { parseOptionsStrategyIntent } from "../nlqOptionsStrategy";
 import { z } from "zod";
 import { STOP_WORDS_REGEX, extractOrderParameters } from "./orderParams";
 import { NLQPlan, nlqPlanSchema } from "./schema";
+
+// Issue #5101 (F4 of #5094): the broker names the binding fast-path
+// recognizes, derived from the broker catalog — never written as
+// literals here, so the neutrality census stays shrink-only (#3525).
+// Only catalog brokers carry the `accounts` capability the switch
+// enumerates; a non-catalog broker is not extracted here — the LLM
+// planner can still fill the slot and the executor refuses it by name.
+const BINDING_BROKER_IDS = Object.keys(BROKER_CATALOG);
+const BINDING_BROKER_PATTERN = new RegExp(`\\b(${BINDING_BROKER_IDS.join("|")})\\b`, "i");
+const BINDING_LABEL_STRIP_PATTERN = new RegExp(
+  `\\b(${BINDING_BROKER_IDS.join("|")}|paper|live|stock|options|forex|futures|crypto|margin)\\b`,
+  "gi",
+);
 export function planWithRules(question: string): NLQPlan {
   const qLower = question.toLowerCase();
 
@@ -561,7 +575,7 @@ export function planWithRules(question: string): NLQPlan {
 
   // 4b. Fast-path for account binding (show / list / switch) — Issue #5101
   // (F4 of #5094). Sits before the research fast-path: a broker-named
-  // binding question ("list my Alpaca accounts", "switch to my E*TRADE
+  // binding question ("list my brokerage accounts", "switch to my paper
   // options account") must plan as a binding intent, never as a research
   // report. Positions, balance, orders, and holdings questions are NOT
   // binding questions — the positions rule below keeps them.
@@ -570,8 +584,12 @@ export function planWithRules(question: string): NLQPlan {
   const bindingSwitchVerb = /\b(switch|change|bind|use|select|set)\b/i.test(question);
   const bindingListVerb = /\b(list|show|what|which|display)\b/i.test(question);
   if (!isPositionsLike && /\baccounts?\b/i.test(question) && (isBindingAccountWord || bindingSwitchVerb || bindingListVerb)) {
-    const brokerMatch = question.match(/\b(e\*trade|etrade|alpaca|public|tastytrade|ibkr)\b/i);
-    const broker = brokerMatch ? brokerMatch[1].replace(/^\s*e\*trade$/i, "etrade").toLowerCase() : undefined;
+    // Display spellings carry a separator after the first letter:
+    // probe a copy with that separator removed, so the
+    // catalog-derived pattern matches it.
+    const brokerProbe = question.replace(/([A-Za-z])[*\-](?=[A-Za-z])/g, "$1");
+    const brokerMatch = brokerProbe.match(BINDING_BROKER_PATTERN);
+    const broker = brokerMatch ? brokerMatch[1].toLowerCase() : undefined;
     const modeMatch = question.match(/\b(paper|live)\b/i);
     const typeMatch = question.match(/\b(stock|options|forex|futures|crypto|margin)\b/i);
     const quotedLabel = question.match(/["']([^"']{1,60})["']/);
@@ -579,11 +597,11 @@ export function planWithRules(question: string): NLQPlan {
     const trailingLabel = question.match(/\b(?:switch|change|use|bind|select|set)\s+(?:to\s+)?(?:the\s+|my\s+|a\s+)?([A-Za-z][A-Za-z0-9 .'\-]{1,40}?)\s+account\s*$/i);
     const rawLabel = (quotedLabel?.[1] ?? namedLabel?.[1] ?? trailingLabel?.[1] ?? "").trim();
     // The label is a human name, never a broker/mode/type word: strip
-    // those before keeping it ("switch to my E*TRADE paper account"
-    // names no label — the executor resolves the single candidate).
+    // those before keeping it ("switch to my paper account" names no
+    // label — the executor resolves the single candidate).
     const accountName = rawLabel
       ? rawLabel
-          .replace(/\b(e\*trade|etrade|alpaca|public|tastytrade|ibkr|paper|live|stock|options|forex|futures|crypto|margin)\b/gi, "")
+          .replace(BINDING_LABEL_STRIP_PATTERN, "")
           .replace(/\s{2,}/g, " ")
           .trim() || undefined
       : undefined;
