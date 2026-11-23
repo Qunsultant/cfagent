@@ -90,6 +90,7 @@ import {
 } from "./orchestrator/usageEventsReconcile";
 import { createStructuredLogger } from "../observability/structuredLogger";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
+import { actorGateway } from "../services/cloudflareActorGateway";
 
 /** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
 const structuredLog = createStructuredLogger(createObservabilitySink({}), {
@@ -262,7 +263,17 @@ export class ResearchAgent extends PortThink {
           mode: z.string().optional(),
         }),
         execute: async (input) => {
-          const result = await this.runResearch(input);
+          // Issue #5109 (follow-up to the #6297 model-id fix): this turn
+          // runs on a run-scoped facet (the SDK's runAgentTool addresses
+          // the child by runId), not on the tenant research:<login>
+          // instance — so running the pipeline here would persist the
+          // report into the facet's throwaway storage, where the
+          // orchestrator's getLatest() on the tenant instance can never
+          // see it, and the run fails with research_agent_turn_incomplete
+          // even though the turn completed. The pipeline runs on the
+          // tenant instance instead (the one owner of config, history,
+          // track record and account bindings).
+          const result = await this.runResearchOnTenant(input);
           return JSON.stringify({ success: result.success, error: result.error, runId: result.report?.runId, ideas: result.report?.ideas.length, summary: result.report?.summary });
         },
       }),
@@ -275,7 +286,10 @@ export class ResearchAgent extends PortThink {
           ivRank: z.number().nullable().optional(),
         }),
         execute: async (input) => {
-          const result = await this.runDiscovery({
+          // Same tenant-instance discipline as run_options_research
+          // above: discovery persists proposals into the tenant
+          // instance's storage, never the run-scoped facet's.
+          const result = await this.runDiscoveryOnTenant({
             trigger: input.trigger,
             userLogin: input.userLogin,
             symbols: input.symbols,
@@ -646,6 +660,66 @@ export class ResearchAgent extends PortThink {
       userLogin,
       ...(req.runId ? { runId: req.runId } : {}),
     });
+  }
+
+  /**
+   * Issue #5109 (follow-up to the #6297 model-id fix) — the agent-tool
+   * turn runs on a run-scoped facet (the SDK's runAgentTool addresses
+   * the child by runId), not on the tenant research:<login> instance,
+   * so a pipeline run on `this` would persist the report into the
+   * facet's throwaway storage, where the orchestrator's getLatest() on
+   * the tenant instance can never see it. Resolve the tenant instance
+   * through the actor gateway (the same stub the orchestrator uses) and
+   * run there: the tenant is the one owner of config, history, track
+   * record and account bindings. Direct callers (runResearch itself,
+   * the A2A executor) already run on the tenant instance and are
+   * unchanged.
+   */
+  private async runResearchOnTenant(
+    req: ResearchRunRequest
+  ): Promise<ResearchRunResult> {
+    const userLogin = explicitResearchLogin(req.userLogin);
+    if (!userLogin) {
+      return { success: false, report: null, error: RESEARCH_IDENTITY_REQUIRED };
+    }
+    const ns = this.env.RESEARCH_AGENT;
+    if (!ns) {
+      return {
+        success: false,
+        report: null,
+        error: "ResearchAgent binding not configured.",
+      };
+    }
+    const tenant = actorGateway.stub<ResearchAgent>(ns, `research:${userLogin}`);
+    return tenant.runResearch(req);
+  }
+
+  /** Same tenant-instance discipline as runResearchOnTenant, for discovery. */
+  private async runDiscoveryOnTenant(
+    req: ResearchDiscoveryRunRequest
+  ): Promise<ResearchDiscoveryRunResult> {
+    const userLogin = explicitResearchLogin(req.userLogin);
+    if (!userLogin) {
+      return {
+        success: false,
+        proposals: [],
+        persisted: 0,
+        limitations: [RESEARCH_IDENTITY_REQUIRED],
+        error: RESEARCH_IDENTITY_REQUIRED,
+      };
+    }
+    const ns = this.env.RESEARCH_AGENT;
+    if (!ns) {
+      return {
+        success: false,
+        proposals: [],
+        persisted: 0,
+        limitations: ["ResearchAgent binding not configured."],
+        error: "ResearchAgent binding not configured.",
+      };
+    }
+    const tenant = actorGateway.stub<ResearchAgent>(ns, `research:${userLogin}`);
+    return tenant.runDiscovery(req);
   }
 
   /**
