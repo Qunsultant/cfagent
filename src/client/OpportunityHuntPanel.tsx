@@ -23,6 +23,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   Button,
   Card,
+  CardHeader,
   EmptyState,
   Notice,
   PageSection,
@@ -135,7 +136,7 @@ export function OpportunityHuntPanel() {
         ) : null}
       </Card>
       <Card>
-        <h3>Latest scheduled run</h3>
+        <CardHeader title="Latest scheduled run" />
         {lastRunError ? (
           <Notice tone="warning" title="The run ledger could not be read">
             {lastRunError}
