@@ -1363,6 +1363,19 @@ export async function handleReportsRoutes(
       }
       const kind = kindResult.value;
       const limit = Math.max(1, Math.min(parseInt(url.searchParams.get("limit") || "50", 10) || 50, 100));
+      // Issue #5102 (F5 of #5094): the optional binding filter —
+      // broker / mode / account-type / accountId / binding-scope —
+      // validated against the registry; an invalid value is a 400,
+      // never a silent empty page. Applied after the merge (so the
+      // ledger-twin inheritance has run) and before the response.
+      const { parseBindingFilter, isEmptyBindingFilter, matchesBindingFilter } = await import(
+        "../../services/bindingFilter"
+      );
+      const bindingResult = parseBindingFilter(url.searchParams);
+      if (!bindingResult.ok) {
+        return Response.json({ error: bindingResult.error, runs: [] }, { status: 400 });
+      }
+      const bindingFilter = bindingResult.filter;
       const headerLogin = request.headers.get("x-user-login");
       const reportLogin = headerLogin && headerLogin.trim() ? headerLogin : undefined;
       // Issue #1185: identity-scoped stores read under the header login
@@ -1505,10 +1518,15 @@ export async function handleReportsRoutes(
       }
       const { mergeRunSummaries } = await import("../../services/runSummaries");
       const merged = mergeRunSummaries(lists, limit);
+      // Issue #5102 (F5 of #5094): the binding filter narrows the
+      // merged list; an unbound row never matches a present field.
+      const runs = isEmptyBindingFilter(bindingFilter)
+        ? merged
+        : merged.filter((row) => matchesBindingFilter(row, bindingFilter));
       return Response.json({
-        count: merged.length,
+        count: runs.length,
         kind,
-        runs: merged,
+        runs,
         ledgerReadMode,
         ...(Object.keys(storeErrors).length ? { storeErrors } : {}),
         timestamp: new Date().toISOString(),

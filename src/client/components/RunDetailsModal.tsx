@@ -8,6 +8,7 @@
 import { useState } from "react";
 import { Badge, Button, CardHeader, Modal, SegmentedControl, Table } from "../components/ui";
 import { formatRunDetailTimestamp, runDetailVisibleSections, type RunDetail, type RunDetailLevelFilter } from "../runDetails";
+import { maskAccountId } from "../../config/accountBindings";
 
 function Unknown({ store }: { store: string }) {
   return (
@@ -82,7 +83,19 @@ export function RunDetailSections({
                 ]}
                 rows={Object.entries(detail.provenance).map(([field, value]) => ({
                   field,
-                  value: value === null || value === undefined ? null : String(value),
+                  // Issue #5102 (F5 of #5094): the provenance tuple
+                  // carries the run's recorded binding — the account id
+                  // renders masked, never full. The stored record keeps
+                  // the full id; only this display masks it. (The audit
+                  // vault's raw-payload view is the one pre-existing
+                  // explicit full-payload surface, kept per §5; this
+                  // curated provenance table is not it.)
+                  value:
+                    value === null || value === undefined
+                      ? null
+                      : field === "accountId"
+                        ? maskAccountId(String(value))
+                        : String(value),
                 }))}
                 rowKey={(r) => r.field}
               />

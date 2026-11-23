@@ -243,10 +243,13 @@ describe("DocsAndReportsPanel scroll + sort", () => {
     const headers = [...container.querySelectorAll("th")];
     // Issue #2534: the Run Details column adds an eighth header; it
     // is an action column, not a sort column, so only the original
-    // seven headers carry sort buttons.
-    expect(headers).toHaveLength(8);
-    expect(headers.filter((th) => th.querySelector("button"))).toHaveLength(7);
+    // seven headers carry sort buttons. Issue #5102 (F5 of #5094):
+    // the Account column is the ninth header (and the eighth sort
+    // button).
+    expect(headers).toHaveLength(9);
+    expect(headers.filter((th) => th.querySelector("button"))).toHaveLength(8);
     expect(headers.some((th) => th.textContent?.includes("Run Details"))).toBe(true);
+    expect(headers.some((th) => th.textContent?.includes("Account"))).toBe(true);
     for (const th of headers.filter((h) => !h.textContent?.includes("Run Details"))) {
       expect(th.querySelector("button")).not.toBeNull();
     }
@@ -318,9 +321,11 @@ describe("DocsAndReportsPanel scroll + sort", () => {
     const header = headerByText("PDF");
     await click(header.querySelector("button")!);
     expect(header.getAttribute("aria-sort")).toBe("descending");
-    expect(columnTexts("td:nth-child(7) code")[0]).toBe("run-pdf");
+    // Issue #5102 (F5 of #5094): the Account column is the fourth
+    // column, so the Run ID column moved from 7th to 8th.
+    expect(columnTexts("td:nth-child(8) code")[0]).toBe("run-pdf");
     // Both unrecorded rows follow; ordering between them stays newest first.
-    expect(columnTexts("td:nth-child(7) code").slice(1)).toEqual(["run-none", "run-failed"]);
+    expect(columnTexts("td:nth-child(8) code").slice(1)).toEqual(["run-none", "run-failed"]);
   });
 
   it("announces the active sort in the count line", async () => {

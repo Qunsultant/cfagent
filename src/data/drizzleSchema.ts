@@ -1986,6 +1986,11 @@ export const jobRunRecords = sqliteTable("job_run_records", {
   tenantId: text("tenant_id"),
   /** Issue #6099 — when the row landed via the projector (null = engine-written). */
   projectedAtMs: integer("projected_at_ms"),
+  /** Issue #5102 (F5 of #5094) — the binding tuple the run executed against (null = pre-F5 row, never backfilled). */
+  accountType: text("account_type"),
+  accountId: text("account_id"),
+  bindingScope: text("binding_scope"),
+  bindingSource: text("binding_source"),
   errorText: text("error_text"),
   detail: text("detail"),
   descriptor: text("descriptor"),

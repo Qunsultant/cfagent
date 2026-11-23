@@ -44,6 +44,7 @@ import {
   type DocumentSortKey,
 } from "./docsAndReports";
 import { RunDetailsModal } from "./components/RunDetailsModal";
+import { formatRecordBindingLabel } from "./ActiveBindingBadge";
 import type { RunDetail } from "./runDetails";
 
 const RUN_TYPE_LABELS: Record<DocumentRunType, string> = {
@@ -57,6 +58,8 @@ const SORT_LABELS: Record<DocumentSortKey, string> = {
   createdAt: "Date-Time",
   runType: "Run Type",
   runSource: "Run Source",
+  // Issue #5102 (F5 of #5094): the account the run recorded.
+  account: "Account",
   pdf: "PDF",
   xlsx: "XLSX",
   csv: "CSV",
@@ -259,6 +262,14 @@ export function DocsAndReportsPanel() {
             {DOCUMENT_SOURCE_LABELS[row.runSource]}
           </span>
         ),
+      },
+      {
+        // Issue #5102 (F5 of #5094): the account the run recorded,
+        // masked — never the full id; an unbound run reads Unbound.
+        key: "account",
+        header: <SortHeader label={SORT_LABELS.account} sortKey="account" sort={sort} onSort={handleSort} />,
+        ariaSort: ariaSort("account"),
+        render: (row) => <span>{formatRecordBindingLabel(row)}</span>,
       },
       {
         key: "pdf",

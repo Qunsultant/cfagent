@@ -53,6 +53,26 @@ function accountTypeLabel(accountType: string): string {
   return ACCOUNT_TYPE_LABELS[accountType] ?? accountType;
 }
 
+/**
+ * Issue #5102 (F5 of #5094) — the RECORDED binding label for a
+ * history row (run ledger, docs row, trade row, audit event).
+ *
+ * The badge above is store-driven: it shows the binding that is
+ * LIVE right now, with a Change affordance for it. A history row
+ * must show the tuple the record STAMPED, not today's binding, and
+ * must not offer to change today's binding from a historical row —
+ * so rows render this label (same type label + `maskAccountId`
+ * rendering as the badge) inside a plain Badge, never the badge
+ * itself. Unbound rows read "Unbound", never a blank cell.
+ */
+export function formatRecordBindingLabel(binding: {
+  accountType?: string | null;
+  accountId?: string | null;
+} | null | undefined): string {
+  if (!binding?.accountId) return "Unbound";
+  return `${accountTypeLabel(binding.accountType ?? "")} ${maskAccountId(binding.accountId)}`;
+}
+
 export function ActiveBindingBadge({
   broker,
   mode,

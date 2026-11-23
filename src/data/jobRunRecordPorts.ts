@@ -230,8 +230,9 @@ export interface JobRunRecord {
    * Issue #5100 (F3 of #5094): the binding tuple the run executed
    * against, stamped from the firing schedule payload (recorded at
    * creation). Absent on rows recorded before the tuple existed —
-   * never backfilled. D1-backed rows do not carry these fields yet;
-   * the DO-SQLite ledger is the surface that stores them.
+   * never backfilled. Issue #5102 (F5 of #5094): D1-backed rows
+   * carry these fields too, via migration 0084 (the DO-SQLite
+   * ledger was the first surface to store them, in F3).
    */
   accountType?: string | null;
   accountId?: string | null;

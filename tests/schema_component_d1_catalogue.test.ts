@@ -153,6 +153,9 @@ const D1_MIGRATION_SQL_SHA256: Record<number, string> = {
   82: "6dbf344114cffc578c59fae8eb4b17abba4a459c6748fa603c0e6a9428ac37dd",
   // #6028/#6202 adds migration 0083 (the D1 stage-row mirror).
   83: "22376bf449c011f4a8a085ff2e0ab83da52e3c59fc03d8096fba047bc434e598",
+  // #5102 adds migration 0084 (job_run_records binding tuple: 4
+  // ALTERs + the binding-read index): 5 statements.
+  84: "74b9fd18e06cb9b7abea9eceb2f53d69fb2fdc2d7f35ec42300fda893376b3a8",
 };
 
 /** Per-version statement counts, measured from the base runner. */
@@ -242,6 +245,9 @@ const D1_MIGRATION_STATEMENT_COUNTS: Record<number, number> = {
   81: 3,
   82: 9,
   83: 2,
+  // #5102 adds migration 0084 (job_run_records binding tuple: 4
+  // ALTERs + the binding-read index): 5 statements.
+  84: 5,
 };
 
 /** The 11 seed-DML statements, exact text, measured from the base runner. */
@@ -295,9 +301,11 @@ describe("D1 catalogue — migrationRunner delegates (#4282 P1)", () => {
     // #6099 adds migration 0081 (job_run_records tenant_id + projected_at_ms +
     // unique identity index): 241 → 244.
     // #6141 adds migration 0082 (referral trial-extension: 6 rule columns + ledger table + 2 indexes): 244 → 253.
-    expect(D1_CATALOGUE_ENTRIES.length).toBe(255);
-    expect(catalogue.size()).toBe(255);
-    expect(catalogue.byKind("schema").length).toBe(243);
+    // #6028/#6202 adds migration 0083 (job_stage_events table + 1 index): 253 → 255.
+    // #5102 adds migration 0084 (job_run_records binding tuple: 4 ALTERs + 1 index): 255 → 260.
+    expect(D1_CATALOGUE_ENTRIES.length).toBe(260);
+    expect(catalogue.size()).toBe(260);
+    expect(catalogue.byKind("schema").length).toBe(248);
     expect(catalogue.byKind("seed").length).toBe(12);
     const verbs = new Map<string, number>();
     const classify = (statement: string): string => {
@@ -323,9 +331,9 @@ describe("D1 catalogue — migrationRunner delegates (#4282 P1)", () => {
       verbs.set(verb, (verbs.get(verb) ?? 0) + 1);
     }
     expect(verbs.get("CREATE TABLE")).toBe(107);
-    expect(verbs.get("CREATE INDEX")).toBe(57);
+    expect(verbs.get("CREATE INDEX")).toBe(58);
     expect(verbs.get("CREATE UNIQUE INDEX")).toBe(9);
-    expect(verbs.get("ALTER TABLE")).toBe(69);
+    expect(verbs.get("ALTER TABLE")).toBe(73);
     expect(verbs.get("DROP TABLE")).toBe(1);
     expect(verbs.get("INSERT OR IGNORE")).toBe(8);
     expect(verbs.get("INSERT INTO")).toBe(1);
@@ -337,7 +345,7 @@ describe("D1 catalogue — migrationRunner delegates (#4282 P1)", () => {
       .map(Number)
       .sort((a, b) => a - b);
     expect(versions).toEqual(
-      Array.from({ length: 83 }, (_, i) => i + 1),
+      Array.from({ length: 84 }, (_, i) => i + 1),
     );
     const allCodes = new Set<string>();
     for (const version of versions) {

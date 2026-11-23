@@ -3940,6 +3940,26 @@
           "name": "projected_at_ms",
           "type": "INTEGER",
           "pk": 0
+        },
+        {
+          "name": "account_type",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "account_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "binding_scope",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "binding_source",
+          "type": "TEXT",
+          "pk": 0
         }
       ],
       "constraints": {}
@@ -6322,6 +6342,15 @@
         "stage_id"
       ],
       "unique": true
+    },
+    "job_run_records_binding_idx": {
+      "table": "job_run_records",
+      "columns": [
+        "account_id",
+        "started DESC",
+        "id DESC"
+      ],
+      "unique": false
     }
   }
 }

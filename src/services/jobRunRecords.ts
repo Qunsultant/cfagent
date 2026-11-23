@@ -139,6 +139,25 @@ export function buildJobRunRecord(input: JobRunRecordInput): JobRunRecord {
       );
     }
   }
+  // Issue #5102 (F5 of #5094): the binding tuple fields validate
+  // exactly like the linkage ids — a string-or-null, non-empty, real
+  // id, never a poisoned literal (#3650). The tuple is optional on
+  // the input (legacy call sites omit it); when present it must be
+  // a real value, never a stringified missing id.
+  for (const key of ["accountType", "accountId", "bindingScope", "bindingSource"] as const) {
+    const value = input[key];
+    if (value !== undefined && value !== null && typeof value !== "string") {
+      throw new Error(`Job run ${key} must be a string or null.`);
+    }
+    if (typeof value === "string" && !value.trim()) {
+      throw new Error(`Job run ${key} must be a non-empty string or null.`);
+    }
+    if (typeof value === "string" && isMissingIdLiteral(value)) {
+      throw new Error(
+        `Job run ${key} must be a real id or null: a literal "undefined"/"null" id is a missing id (#3650).`,
+      );
+    }
+  }
   // Issue #5887 — the definition version a run executed with is a
   // non-negative integer or an explicit null (a row written before the
   // stamp). Anything else is a bug at the call site, not a value to store.
@@ -252,7 +271,31 @@ export function normalizeJobRunRecord(record: JobRunRecord): JobRunRecord {
     !isMissingIdLiteral(record.originRunId)
       ? record.originRunId
       : null;
-  return { ...record, jobId, kind, originRunId, definitionVersion, ...linkage };
+  // Issue #5102 (F5 of #5094) — the binding tuple reads the same
+  // way: a row stored before F5 carries none of the four fields,
+  // so it reads as explicit nulls (unbound), never a guessed
+  // binding; a stored value that is not a real non-empty id reads
+  // as null, never as a link.
+  const binding = (value: unknown): string | null =>
+    typeof value === "string" && value.trim() && !isMissingIdLiteral(value)
+      ? value
+      : null;
+  const accountType = binding(record.accountType);
+  const accountId = binding(record.accountId);
+  const bindingScope = binding(record.bindingScope);
+  const bindingSource = binding(record.bindingSource);
+  return {
+    ...record,
+    jobId,
+    kind,
+    originRunId,
+    definitionVersion,
+    accountType,
+    accountId,
+    bindingScope,
+    bindingSource,
+    ...linkage,
+  };
 }
 
 /** Keep the newest `cap` records of a newest-first list. */

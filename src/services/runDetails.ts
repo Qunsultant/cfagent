@@ -130,6 +130,9 @@ export interface RunDetailProvenance {
   tradingMode: string | null;
   accountType: string | null;
   accountId: string | null;
+  /** Issue #5102 (F5 of #5094): the scope the tuple was resolved for + how it was resolved. */
+  bindingScope: string | null;
+  bindingSource: string | null;
   workflowId: string | null;
   workflowName: string | null;
   workflowVersion: string | null;
@@ -298,6 +301,12 @@ export function buildRunDetail(
     | "discoveryRunId"
     | "partial"
     | "bodyR2Key"
+    | "accountType"
+    | "accountId"
+    | "bindingScope"
+    | "bindingSource"
+    | "brokerId"
+    | "mode"
   > & { body?: unknown },
   options: BuildRunDetailOptions = {},
 ): RunDetail {
@@ -590,10 +599,16 @@ export function buildRunDetail(
       asyncJobId: strOrNull(body?.asyncJobId ?? provenanceBody.asyncJobId) ?? null,
       jobType: strOrNull(body?.jobType ?? provenanceBody.jobType) ?? null,
       strategyMode: strOrNull(body?.strategyMode ?? (body?.evaluateAllStrategies === true ? "all" : null)) ?? null,
-      brokerId: strOrNull(mergedBody?.brokerId) ?? null,
-      tradingMode: strOrNull(mergedBody?.mode) ?? null,
-      accountType: strOrNull(mergedBody?.accountType) ?? null,
-      accountId: strOrNull(mergedBody?.accountId) ?? null,
+      // Issue #5102 (F5 of #5094): the run's binding tuple — the
+      // body first (a canonical body that stamps it), else the
+      // merged summary's tuple (the ledger-twin inheritance has
+      // already run there). Absent reads as null, never guessed.
+      brokerId: strOrNull(mergedBody?.brokerId) ?? strOrNull(summary.brokerId) ?? null,
+      tradingMode: strOrNull(mergedBody?.mode) ?? strOrNull(summary.mode) ?? null,
+      accountType: strOrNull(mergedBody?.accountType) ?? strOrNull(summary.accountType) ?? null,
+      accountId: strOrNull(mergedBody?.accountId) ?? strOrNull(summary.accountId) ?? null,
+      bindingScope: strOrNull(provenanceBody.bindingScope) ?? strOrNull(summary.bindingScope) ?? null,
+      bindingSource: strOrNull(provenanceBody.bindingSource) ?? strOrNull(summary.bindingSource) ?? null,
       workflowId: strOrNull(workflowBody.id ?? body?.workflowId) ?? null,
       workflowName: strOrNull(workflowBody.name ?? body?.workflowName) ?? null,
       workflowVersion: strOrNull(workflowBody.version ?? body?.workflowVersion) ?? null,

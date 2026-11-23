@@ -44,6 +44,7 @@ import {
 } from "./runLedgerAutopilotOutcomes";
 import type { JobOutcomeRow } from "../data/jobOutcomePorts";
 import { ArtifactLink } from "./DocsAndReportsPanel";
+import { formatRecordBindingLabel } from "./ActiveBindingBadge";
 import { RunDetailsModal } from "./components/RunDetailsModal";
 import type { RunDetail as DocsRunDetail } from "./runDetails";
 import type { DocumentRow } from "./docsAndReports";
@@ -255,6 +256,16 @@ function ledgerColumns(
           : "—"}
       </span>
     ),
+  },
+  {
+    // Issue #5102 (F5 of #5094): the account the firing ran under,
+    // stamped on the run record by F3 — masked, never the full id;
+    // a legacy or non-broker row reads Unbound, never a guessed
+    // account. (The Broker column above keeps the venue; this one
+    // is the account inside it.)
+    key: "account",
+    header: "Account",
+    render: (r) => <span>{formatRecordBindingLabel(r)}</span>,
   },
   { key: "summary", header: "Summary", render: (r) => <>{runSummary(r)}</> },
   {

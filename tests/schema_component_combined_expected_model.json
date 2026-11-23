@@ -3942,26 +3942,6 @@
           "pk": 0
         },
         {
-          "name": "broker_id",
-          "type": "TEXT",
-          "pk": 0
-        },
-        {
-          "name": "data_provider_id",
-          "type": "TEXT",
-          "pk": 0
-        },
-        {
-          "name": "mode",
-          "type": "TEXT",
-          "pk": 0
-        },
-        {
-          "name": "mode_source",
-          "type": "TEXT",
-          "pk": 0
-        },
-        {
           "name": "account_type",
           "type": "TEXT",
           "pk": 0
@@ -3978,6 +3958,26 @@
         },
         {
           "name": "binding_source",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "broker_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "data_provider_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "mode",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "mode_source",
           "type": "TEXT",
           "pk": 0
         }
@@ -10437,6 +10437,15 @@
         "stage_id"
       ],
       "unique": true
+    },
+    "job_run_records_binding_idx": {
+      "table": "job_run_records",
+      "columns": [
+        "account_id",
+        "started DESC",
+        "id DESC"
+      ],
+      "unique": false
     }
   }
 }

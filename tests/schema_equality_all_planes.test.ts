@@ -72,15 +72,19 @@ function fixtureSha256(name: string): string {
 }
 
 describe("schema equality — all planes (#4282 P4)", () => {
-  it("the frozen combined baseline is the clean-checkout seed (185 tables / 109 indexes)", () => {
+  it("the frozen combined baseline is the clean-checkout seed (185 tables / 111 indexes)", () => {
     const model = combinedExpectedModel();
     // #6072 adds migration 0080 (agent_screener_task_entries table):
     // 183 → 184 tables. #6099 adds migration 0081 (job_run_records
     // unique identity index): 106 → 107 indexes.
     // #6141 adds migration 0082 (referral trial-extension ledger
-    // table + 2 indexes): 184 → 185 tables, 107 → 109 indexes.
+    // table + 2 indexes): 184 → 185 tables, 107 → 109 indexes;
+    // migration 0083 (job_stage_events + 1 index) then took
+    // indexes 109 → 110. #5102 adds migration 0084
+    // (job_run_records binding tuple: no new table, +1 index):
+    // indexes 110 → 111.
     expect(Object.keys(model.tables).length).toBe(185);
-    expect(Object.keys(model.indexes).length).toBe(110);
+    expect(Object.keys(model.indexes).length).toBe(111);
     expect(fixtureSha256("schema_component_combined_expected_model.json")).toBe(
       COMBINED_FIXTURE_SHA256,
     );
@@ -96,9 +100,13 @@ describe("schema equality — all planes (#4282 P4)", () => {
     // table): d1 tables 103 → 104. #6099 adds migration 0081
     // (job_run_records unique identity index): d1 indexes 62 → 63.
     // #6141 adds migration 0082 (referral trial-extension ledger
-    // table + 2 indexes): d1 tables 104 → 105, d1 indexes 63 → 65.
+    // table + 2 indexes): d1 tables 104 → 105, d1 indexes 63 → 65;
+    // migration 0083 (job_stage_events + 1 index) then took d1
+    // indexes 65 → 66. #5102 adds migration 0084
+    // (job_run_records binding tuple: 4 columns + 1 index):
+    // d1 indexes 66 → 67.
     const counts: Record<string, [number, number]> = {
-      d1: [106, 66],
+      d1: [106, 67],
       do: [70, 41],
       orm: [13, 10],
       remainder: [19, 15],
@@ -133,9 +141,11 @@ describe("schema equality — all planes (#4282 P4)", () => {
     expect(new Set(executedCodes).size).toBe(
       COMBINED_CATALOGUE_ENTRIES.length,
     );
-    expect(COMBINED_CATALOGUE_ENTRIES.length).toBe(475);    // Issue #6167 adds 1 entry (the host_version remainder ALTER
+    expect(COMBINED_CATALOGUE_ENTRIES.length).toBe(480);    // Issue #6167 adds 1 entry (the host_version remainder ALTER
     // on mas_async_jobs): 452 → 453. Issue #5100 (F3 of #5094) adds 13:
-    // 453 → 466 entries.
+    // 453 → 466 entries. Issue #5102 (F5 of #5094) adds 5 entries
+    // (migration 0084: 4 job_run_records ALTERs + 1 index):
+    // 475 → 480 entries.
     // Issue #5229 adds migration 0069 (agent_referral_rules
     // expiry_period_ms column): 410 entries resolve to 421 statements.
     // Issue #5086 adds migration 0070 (otel_config_overrides table):
@@ -172,7 +182,10 @@ describe("schema equality — all planes (#4282 P4)", () => {
     // on mas_async_jobs), one statement: 463 → 464. Issue #5100 (F3 of
     // #5094) adds 13 entries (4 job_run_records + 4 mas_trades + 5
     // mas_policy_verdicts literal ALTERs): 464 → 477 statements.
-    expect(executedStatements).toBe(486);
+    // Issue #5102 (F5 of #5094) adds 5 entries (migration 0084:
+    // 4 job_run_records ALTERs + 1 index), each one statement:
+    // 486 → 491 statements.
+    expect(executedStatements).toBe(491);
     const actual = instance.introspect();
     const diff = diffSchema(actual, combinedExpectedModel());
     expect(isEmptyDiff(diff)).toBe(true);

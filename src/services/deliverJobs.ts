@@ -568,6 +568,19 @@ export interface RunDeliverJobOptions {
   trigger?: JobRunTrigger;
   /** Issue #4767 — the run kind (original / re-run / resume / replay). */
   kind?: JobRunKind;
+  /**
+   * Issue #5102 (F5 of #5094): the binding tuple of the run that
+   * generated the report this run delivers, when the caller
+   * carries it. The pipeline step caller has no binding in its
+   * context (the engine instance carries none — see the F5
+   * follow-on), so a pipeline-dispatched run stamps explicit
+   * nulls and still records; a caller that knows the generating
+   * run's tuple passes it here and the delivery run carries it.
+   */
+  accountType?: string | null;
+  accountId?: string | null;
+  bindingScope?: string | null;
+  bindingSource?: string | null;
   /** The run id to record under (the pipeline engine's run id,
    *  when dispatched through the plane — one run, one id). */
   runId?: string;
@@ -775,6 +788,13 @@ export async function runDeliverJob(
         runId,
         trigger,
         kind,
+        // Issue #5102 (F5 of #5094): the generating run's tuple
+        // when the caller carries it; explicit nulls otherwise —
+        // the run still records, it is not a failure.
+        accountType: opts.accountType ?? null,
+        accountId: opts.accountId ?? null,
+        bindingScope: opts.bindingScope ?? null,
+        bindingSource: opts.bindingSource ?? null,
         startedAt,
         finishedAt,
         status: partial.status,
