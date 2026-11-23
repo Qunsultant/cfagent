@@ -135,12 +135,13 @@ describe("P5 runner — plan resolution (P4 finding 1: phased order)", () => {
     // table, 1 step) and #6099 adds migration 0081 (job_run_records
     // tenant_id + projected_at_ms + unique identity index, 3 steps):
     // 449 → 453.
-    expect(p.skipped).toHaveLength(1);
     // Issue #6141 adds migration 0082 (referral trial-extension: 6
     // rule columns + ledger table + 2 indexes): 453 → 462.
     // Issue #6167 adds the host_version remainder ALTER on
-    // mas_async_jobs (1 step): 462 → 463.
-    expect(p.steps).toHaveLength(463);
+    // mas_async_jobs (1 step): 462 → 463. Issue #5100 (F3 of #5094)
+    // adds 13 literal ALTERs (4 job_run_records + 4 mas_trades + 5
+    // mas_policy_verdicts): 463 → 476.
+    expect(p.steps).toHaveLength(476);
     expect(p.skipped).toHaveLength(1);
     expect(p.skipped[0].code).toBe(SEED_FORM_CODE);
     expect(p.skipped[0].reason).toMatch(/call site/i);
@@ -170,11 +171,13 @@ describe("P5 runner — plan resolution (P4 finding 1: phased order)", () => {
     // table, 1 step) and #6099 adds migration 0081 (job_run_records
     // tenant_id + projected_at_ms + unique identity index, 3 steps):
     // 449 → 453.
-        // Issue #6141 adds migration 0082 (referral trial-extension: 6
+    // Issue #6141 adds migration 0082 (referral trial-extension: 6
     // rule columns + ledger table + 2 indexes): 453 → 462.
     // Issue #6167 adds the host_version remainder ALTER on
-    // mas_async_jobs (1 step): 462 → 463.
-    expect(harness).toHaveLength(463);    // Production move 1: the rebuild CREATE for agent_price_catalogue
+    // mas_async_jobs (1 step): 462 → 463. Issue #5100 (F3 of #5094)
+    // adds 13 literal ALTERs (4 job_run_records + 4 mas_trades + 5
+    // mas_policy_verdicts): 463 → 476.
+    expect(harness).toHaveLength(476);    // Production move 1: the rebuild CREATE for agent_price_catalogue
     // must stay after the RENAME that clears its table (a second
     // table-creation for the same table cannot run before the rename
     // on real SQLite). Production move 2: the legacy seed is hoisted
@@ -320,12 +323,14 @@ describe("P5 runner — delta-to-steps selection (P4 finding 3, P4 finding 2)", 
     // table, 1 step) and #6099 adds migration 0081 (job_run_records
     // tenant_id + projected_at_ms + unique identity index, 3 steps):
     // 251 → 255 schema statements.
-    expect(selected.seeds).toHaveLength(12);
     // Issue #6141 adds migration 0082 (referral trial-extension: 6
     // rule columns + ledger table + 2 indexes): 255 → 264.
+    // Issue #5100 (F3 of #5094) adds 4 mas_trades ORM ALTERs (the
+    // binding columns): the projected-model walk already has them
+    // (the ORM CREATE carries them), so they are skipped: 9 → 13.
     expect(selected.schema).toHaveLength(264);
     expect(selected.seeds).toHaveLength(12);
-    expect(selected.skipped).toHaveLength(9);
+    expect(selected.skipped).toHaveLength(13);
     expect(
       codesOf(selected.skipped),
     ).toContain("schema.orm.mas_transactions.alter_table_add_column_tenant_id");
@@ -352,7 +357,11 @@ describe("P5 runner — delta-to-steps selection (P4 finding 3, P4 finding 2)", 
     // Issue #3185 adds one probed DO statement (usage_events.tenant_id):
     // the fresh CREATE TABLE already carries the column, so the ALTER
     // is probed-and-skipped: 36 → 37.
-    expect(selected.skipped).toHaveLength(37);
+    // Issue #5100 (F3 of #5094) adds 9 probed DO statements (4
+    // job_run_records + 5 mas_policy_verdicts literal ALTERs): the
+    // fresh CREATE TABLEs already carry the binding columns, so the
+    // ALTERs are probed-and-skipped: 37 → 46.
+    expect(selected.skipped).toHaveLength(46);
     expect(codesOf(selected.skipped)).toContain(DROP_INDEX_CODE);
   });
 

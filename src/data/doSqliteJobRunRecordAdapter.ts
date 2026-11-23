@@ -59,6 +59,13 @@ function ensureTable(sql: SqlStorage): void {
   if (!names.has("mode_source")) {
     sql.exec(remainderAlterSql("job_run_records", "mode_source"));
   }
+  // Issue #5100 (F3 of #5094): the binding tuple the run executed
+  // against, added when missing so existing DO tables upgrade in place.
+  for (const column of ["account_type", "account_id", "binding_scope", "binding_source"]) {
+    if (!names.has(column)) {
+      sql.exec(remainderAlterSql("job_run_records", column));
+    }
+  }
   // Issue #4767 — the run kind + origin run id, added when
   // missing so existing DO tables upgrade in place.
   if (!names.has("kind")) {
@@ -121,6 +128,12 @@ function rowToRecord(row: Record<string, unknown>): JobRunRecord {
     ...(row.data_provider_id != null ? { dataProviderId: String(row.data_provider_id) } : {}),
     ...(row.mode != null ? { mode: String(row.mode) as JobRunRecord["mode"] } : {}),
     ...(row.mode_source != null ? { modeSource: String(row.mode_source) as JobRunRecord["modeSource"] } : {}),
+    // Issue #5100 (F3 of #5094): a row stored before the tuple columns
+    // existed reads back without them (no backfill).
+    ...(row.account_type != null ? { accountType: String(row.account_type) } : {}),
+    ...(row.account_id != null ? { accountId: String(row.account_id) } : {}),
+    ...(row.binding_scope != null ? { bindingScope: String(row.binding_scope) } : {}),
+    ...(row.binding_source != null ? { bindingSource: String(row.binding_source) } : {}),
   });
 }
 
@@ -128,8 +141,8 @@ function recordSync(sql: SqlStorage, record: JobRunRecord): void {
   ensureTable(sql);
   sql.exec(
     `INSERT INTO ${JOB_RUN_RECORDS_TABLE}
-         (system, job_id, operation, started, finished, outcome, triggered_by, trigger_text, schedule_id, async_job_id, workflow_id, kind, origin_run_id, definition_version, error_text, detail, descriptor, artifact_refs_json, broker_id, data_provider_id, mode, mode_source)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (system, job_id, operation, started, finished, outcome, triggered_by, trigger_text, schedule_id, async_job_id, workflow_id, kind, origin_run_id, definition_version, error_text, detail, descriptor, artifact_refs_json, broker_id, data_provider_id, mode, mode_source, account_type, account_id, binding_scope, binding_source)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     record.system,
     record.jobId,
     record.operation,
@@ -152,6 +165,10 @@ function recordSync(sql: SqlStorage, record: JobRunRecord): void {
     record.dataProviderId ?? null,
     record.mode ?? null,
     record.modeSource ?? null,
+    record.accountType ?? null,
+    record.accountId ?? null,
+    record.bindingScope ?? null,
+    record.bindingSource ?? null,
   );
   // Prune this job to the cap: delete every row outside the newest
   // cap rows (started desc, id desc breaks same-millisecond ties).

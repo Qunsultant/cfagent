@@ -182,7 +182,7 @@ import { buildJobStatusReport, resolveSubJob } from "../services/jobStageStatus"
 import type { JobStageEventRecord } from "../data/jobStageEventPorts";
 import { resolveWorkflowRunsStageReadLimit } from "../config/workflowRunsStageRead";
 import { assertExecutionModeSupported, resolveExecutionMode } from "../services/jobPipelineConfig";
-import { jobDefinitionSpec } from "../config/jobDefinitionCatalog";
+import { addressableStages, jobDefinitionSpec } from "../config/jobDefinitionCatalog";
 import { buildJobConfigFromSpec } from "../services/jobDefinitionSpecBuilder";
 import { bindJobDefinitionParams, bindStageOverrides } from "../services/jobDefinitionParamBinders";
 import { buildFeedJobRegistry } from "../services/feedJobs";
@@ -1490,7 +1490,7 @@ export class ScheduledAgent extends PortThink {
       jobId: definition.jobId,
       name: definition.name,
       version: definition.version,
-      stages: spec.stages.length,
+      stages: addressableStages(spec).length,
     };
   }
 

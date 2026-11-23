@@ -27,6 +27,12 @@ export const CREATABLE_SCHEDULE_CALLBACKS = [
   // schedulable through the same store; the callback runs that engine job
   // by id (the definition carries the owner params, so the payload needs
   // only the id).
+  // Issue #5100 (F3 of #5094) — deliberately NOT in
+  // ACCOUNT_SCOPED_SCHEDULE_CALLBACKS: a pipeline job is broker-free by
+  // construction. Its stages run feed → enrich → analyze → generate →
+  // deliver over market data and reports; the stage files carry no
+  // broker reads, no order placement, and no broker/account params, so
+  // there is no tuple to stamp and no fire-time enforcement to apply.
   "runPipelineJobSchedule",
 ] as const;
 

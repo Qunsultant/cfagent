@@ -53,10 +53,19 @@ vi.mock("../src/security/etradeOAuth", () => ({
   isTokenExpiredEt: vi.fn(() => false),
   etradeIdentityFromLogin: vi.fn(async () => ({})),
 }));
+// Issue #5100 (F3 of #5094): the create route resolves the bound
+// account through the validated wrapper and refuses an unbound
+// creation — stub it resolved so the route exercises the SDK arm;
+// the refusal itself is pinned by the "refuses" test below.
+vi.mock("../src/services/accountBindings", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/services/accountBindings")>();
+  return { ...actual, resolveValidatedExecutionAccountContext: vi.fn() };
+});
 
 import { ScheduledTasksService } from "../src/services/scheduledTasks";
 import { runStorageRetention } from "../src/security/storageRetention";
 import { getStoredTokens } from "../src/security/etradeOAuth";
+import { resolveValidatedExecutionAccountContext } from "../src/services/accountBindings";
 import {
   handleSchedulesRoutes,
   type SchedulesRouteContext,
@@ -118,6 +127,18 @@ const urlOf = (path: string) => new URL(`https://agent.internal${path}`);
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(resolveValidatedExecutionAccountContext).mockResolvedValue({
+    ok: true,
+    context: {
+      broker: "alpaca",
+      mode: "paper",
+      accountType: "stock",
+      accountId: "acct-trader1-1",
+      scope: "schedule",
+      resolvedFromScope: "schedule",
+      source: "binding",
+    },
+  });
 });
 
 describe("schedules route inventory (extraction #379)", () => {
@@ -367,6 +388,32 @@ describe("schedules behavior (extraction #379)", () => {
     expect(scheduleEvery).toHaveBeenCalledWith(60, "autonomousMarketScreen", expect.objectContaining({ universe: "NASDAQ100", trigger: "scheduled", userLogin: "trader1" }));
     expect(audit).toHaveBeenCalledWith("schedule.created", "orchestrator", expect.objectContaining({ scheduleId: "real-sdk-id", callback: "autonomousMarketScreen" }));
     expect(await (res as Response).json()).toEqual({ success: true, schedule: { id: "real-sdk-id" } });
+  });
+
+  it("POST /schedules/create refuses an unbound account-scoped creation (#5100)", async () => {
+    (getStoredTokens as any).mockResolvedValue({ storedAt: new Date().toISOString(), userLogin: "trader1" });
+    vi.mocked(resolveValidatedExecutionAccountContext).mockResolvedValueOnce({
+      ok: false,
+      code: "FAILURE_ACCOUNT_BINDING_MISSING",
+      error: "No account bound",
+      status: 404,
+    });
+    const scheduleEvery = vi.fn(async () => ({ id: "real-sdk-id" }));
+    const ctx = baseCtx({
+      scheduleEvery: scheduleEvery as any,
+      getScreenerExecutionContext: vi.fn(async () => ({ userLogin: "trader1", environment: "PROD" as const })),
+    });
+    const res = await handleSchedulesRoutes(
+      req("POST", "/schedules/create", { callback: "autonomousMarketScreen", scheduleType: "interval", intervalSeconds: 60, subDailyOptIn: true, payload: { universe: "NASDAQ100" } }),
+      urlOf("/schedules/create"),
+      "/schedules/create",
+      "s1",
+      ctx
+    );
+    expect((res as Response).status).toBe(404);
+    const body = await (res as Response).json();
+    expect(body.code).toBe("FAILURE_ACCOUNT_BINDING_MISSING");
+    expect(scheduleEvery).not.toHaveBeenCalled();
   });
 
   it("POST /schedules/trigger-screen runs the manual screen with the triggered trigger stamp", async () => {

@@ -381,6 +381,37 @@ export const JOB_DEFINITION_SPECS: Readonly<Record<string, JobDefinitionSpec>> =
         required: false,
         description: "Optional cron expression for scheduled runs.",
       },
+      // Issue #6031 — the run-level parameters the Define page could not
+      // collect: the universe (from the one accepted set, #6032), the venue
+      // and its mode. Declared here so the existing binder validates them
+      // instead of refusing them as undeclared.
+      {
+        name: "universe",
+        label: "Universe",
+        type: "select",
+        required: false,
+        enumSource: "universes",
+        description:
+          "The universe the research run screens. Absent ⇒ the run's configured universe; an unsupported id is refused by name before the run starts (#6032).",
+      },
+      {
+        name: "brokerId",
+        label: "Broker",
+        type: "text",
+        required: false,
+        description: "The broker whose venue the run quotes from (resolved and validated at run time, #6036).",
+      },
+      {
+        name: "mode",
+        label: "Mode",
+        type: "select",
+        required: false,
+        // Issue #6031/#6036 — the mode vocabulary is the venue resolver's,
+        // never a second literal. No default is invented here: an absent mode
+        // is inherited from the tenant binding by resolveResearchVenue.
+        enumSource: "tradeModes",
+        description: "The trade mode the run resolves against the selected broker.",
+      },
     ],
     executionMode: {
       concurrency: "sequential",
@@ -751,6 +782,29 @@ export function listJobDefinitionSpecs(): JobDefinitionSpec[] {
 }
 
 /** One spec by id; an unknown id refuses with the ids that exist. */
+/**
+ * Issue #6031 — every stage a definition can address: the declared stages
+ * plus each stage's children, depth-first. A nested spec (the OODA
+ * `research` spec nests its six stages under one `research` kind) is
+ * addressable at its real stage kinds, so the binder and the flow judge
+ * `stageModes` against the stages the engine actually executes — not
+ * against the one wrapper node.
+ */
+export function addressableStages(spec: JobDefinitionSpec): JobStageSpec[] {
+  const out: JobStageSpec[] = [];
+  const walk = (stages: JobStageSpec[] | undefined): void => {
+    for (const stage of stages ?? []) {
+      // A stage that carries children is a CONTAINER (the OODA spec's
+      // `research` wrapper, step `noop`): its children are the stages the
+      // engine executes, so the wrapper itself is not addressable.
+      if (stage.children && stage.children.length > 0) walk(stage.children);
+      else out.push(stage);
+    }
+  };
+  walk(spec.stages);
+  return out;
+}
+
 export function jobDefinitionSpec(id: string): JobDefinitionSpec {
   const spec = JOB_DEFINITION_SPECS[id];
   if (!spec) {

@@ -34,6 +34,11 @@ import {
   type PolicyVerdict,
   type PolicyVerdictAttestation,
 } from "../../services/riskPolicyEngine";
+import type { ExecutionAccountContext } from "../../services/accountBindings";
+import { resolveValidatedExecutionAccountContext } from "../../services/accountBindings";
+import { ACCOUNT_BINDING_CONFIG } from "../../config/accountBindings";
+import { codedMessage, getOutcome } from "../../outcomes/outcomeAspects";
+import { tradingTypeFor } from "../../trading";
 import { listJobOutcomes } from "../../services/jobOutcomes";
 import {
   resolveAutopilotVerdictTrendPolicy,
@@ -72,6 +77,10 @@ export interface AutopilotRouteContext {
     intent: OrderIntent;
     draftId?: string | null;
     dryRun?: boolean;
+    /** Issue #5100 (F3 of #5094): the validated binding resolution,
+     *  recorded on the verdict. (The resolved context, not just the
+     *  tuple — the verdict also carries the binding scope + source.) */
+    binding?: ExecutionAccountContext;
   }): Promise<{ verdict: PolicyVerdict; attestation: PolicyVerdictAttestation }>;
 }
 
@@ -199,11 +208,48 @@ export async function handleAutopilotRoutes(
       // environment header, so it resolves the same value locally.
       const envHeader = (request.headers.get("x-environment") || url.searchParams.get("env") || "").toUpperCase().trim();
       const snapshotEnv: "TEST" | "PROD" | undefined = envHeader === "TEST" || envHeader === "PROD" ? envHeader : undefined;
+      // Issue #5100 (F3 of #5094): the evaluation resolves the bound
+      // account first — an unbound tenant is refused with the coded
+      // failure, and the resolved tuple rides the verdict record.
+      // Broker comes from the tenant's stored selection (lazy import
+      // — providerConnections sits on a load cycle with the trading
+      // barrel); mode from tradingTypeFor; autopilot intents are
+      // stock-only (OrderIntent carries no option legs).
+      const bindingMissing = ACCOUNT_BINDING_CONFIG.failureCodes.bindingMissing;
+      if (!ctx.env) {
+        return Response.json(
+          { ok: false, code: bindingMissing, error: codedMessage(bindingMissing, "No execution environment is available to resolve the bound account.") },
+          { status: getOutcome(bindingMissing)?.httpStatus ?? 404 },
+        );
+      }
+      const { readTenantBrokerSelection } = await import("../../services/providerConnections");
+      const brokerRead = await readTenantBrokerSelection(ctx.env);
+      if (brokerRead.status !== "ok") {
+        return Response.json(
+          { ok: false, code: bindingMissing, error: codedMessage(bindingMissing, `No broker selection is configured for this tenant: ${brokerRead.error}`) },
+          { status: getOutcome(bindingMissing)?.httpStatus ?? 404 },
+        );
+      }
+      const evaluateBroker = brokerRead.brokerId;
+      const evaluateMode = tradingTypeFor(evaluateBroker, snapshotEnv ?? "TEST");
+      const bindingRes = await resolveValidatedExecutionAccountContext(ctx.env, userLogin, {
+        broker: evaluateBroker,
+        mode: evaluateMode,
+        accountType: "stock",
+        scope: "autopilot",
+      });
+      if (!bindingRes.ok) {
+        return Response.json(
+          { ok: false, code: bindingRes.code, error: bindingRes.error },
+          { status: bindingRes.status },
+        );
+      }
       const { verdict, attestation } = await ctx.evaluateAndRecordAutopilotVerdict({
         userLogin,
         requestedEnv: snapshotEnv,
         sessionId,
         dryRun: body.dryRun !== false,
+        binding: bindingRes.context,
         intent: {
           symbol,
           action: String(body.action || "BUY").toUpperCase(),

@@ -47,6 +47,32 @@ vi.mock("agents", () => {
 import { OrchestratorAgent, STRATEGY_SCAN_CRON } from "../src/agents/orchestrator";
 import { SqlUnifiedScheduleStore } from "../src/data/doSqliteUnifiedScheduleAdapter";
 import { MockSqlStorage } from "./mock-sql";
+import { resolveScreenSelection } from "../src/services/providerConnections";
+import { resolveTenantProviders } from "../src/services/tenantProviders";
+import { resolveValidatedExecutionAccountContext } from "../src/services/accountBindings";
+
+// Issue #5100 (F3 of #5094): the baseline arm resolves the tenant's
+// broker selection + bound account and stamps the tuple on the armed
+// payload — it never arms unstamped. Stub the three resolution
+// functions (the real ones need a live commercial store + broker
+// enumeration) so the arm path is exercisable here; the unbound case
+// is pinned by the "does not arm" test below.
+vi.mock("../src/services/providerConnections", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/services/providerConnections")>();
+  return { ...actual, resolveScreenSelection: vi.fn() };
+});
+vi.mock("../src/services/tenantProviders", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/services/tenantProviders")>();
+  return { ...actual, resolveTenantProviders: vi.fn() };
+});
+vi.mock("../src/services/accountBindings", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/services/accountBindings")>();
+  return { ...actual, resolveValidatedExecutionAccountContext: vi.fn() };
+});
+
+const mockedResolveScreenSelection = vi.mocked(resolveScreenSelection);
+const mockedResolveTenantProviders = vi.mocked(resolveTenantProviders);
+const mockedResolveValidatedExecutionAccountContext = vi.mocked(resolveValidatedExecutionAccountContext);
 
 let scheduleCalls: any[];
 let existing: any[];
@@ -70,6 +96,32 @@ beforeEach(() => {
   agent.audit = (type: string, agentName: string, payload: any) => {
     audits.push([type, agentName, payload]);
   };
+  // Issue #5100 (F3 of #5094): the baseline arm's default — a resolved
+  // Alpaca/paper selection with a bound options account, so the arm
+  // stamps the tuple. Individual tests override per case.
+  mockedResolveScreenSelection.mockResolvedValue({
+    resolved: true,
+    selection: {
+      connectionId: "conn-test",
+      brokerId: "alpaca",
+      environment: "TEST",
+      mode: "paper",
+      externalAccountId: "ext-test",
+    },
+  });
+  mockedResolveTenantProviders.mockResolvedValue({ brokerId: "alpaca", dataProviderId: "alpaca" });
+  mockedResolveValidatedExecutionAccountContext.mockResolvedValue({
+    ok: true,
+    context: {
+      broker: "alpaca",
+      mode: "paper",
+      accountType: "options",
+      accountId: "acct-venus-1",
+      scope: "schedule",
+      resolvedFromScope: "schedule",
+      source: "binding",
+    },
+  });
 });
 
 describe("ensureStrategyScanSchedule (#275)", () => {
@@ -95,6 +147,13 @@ describe("ensureStrategyScanSchedule (#275)", () => {
       universe: "NASDAQ100",
       maxItems: 100,
       trigger: "scheduled",
+      // Issue #5100 (F3 of #5094): the baseline arm stamps the
+      // resolved binding tuple on the armed payload.
+      brokerId: "alpaca",
+      dataProviderId: "alpaca",
+      mode: "paper",
+      accountType: "options",
+      accountId: "acct-venus-1",
       // Issue #3121 #4236 — the armed payload carries the system
       // provenance the Schedules home badges on (createdAt is stamped
       // at arm time, so only the stable fields are asserted here).
@@ -166,5 +225,19 @@ describe("ensureStrategyScanSchedule (#275)", () => {
     });
     await agent.ensureStrategyScanSchedule({ userLogin: "venus", environment: "PROD" });
     expect(scheduleCalls).toHaveLength(1);
+  });
+
+  it("does not arm when the bound account cannot be resolved (#5100)", async () => {
+    // Issue #5100 (F3 of #5094): an unstamped baseline would be
+    // refused at every fire, so the arm is skipped with a structured
+    // warn instead of arming a schedule that can never run.
+    mockedResolveValidatedExecutionAccountContext.mockResolvedValueOnce({
+      ok: false,
+      code: "FAILURE_ACCOUNT_BINDING_MISSING",
+      error: "No account bound",
+      status: 404,
+    });
+    await agent.ensureStrategyScanSchedule({ userLogin: "venus", environment: "PROD" });
+    expect(scheduleCalls).toHaveLength(0);
   });
 });

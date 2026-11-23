@@ -141,6 +141,11 @@ export interface CronDispatchRecordInput {
   finished: string;
   error?: string;
   detail?: string;
+  /** Issue #5100 (F3 of #5094): the binding tuple the dispatch executed against. */
+  accountType?: string;
+  accountId?: string;
+  bindingScope?: string;
+  bindingSource?: string;
 }
 
 /**
@@ -185,6 +190,11 @@ export function buildCronDispatchRecord(
     ...linkage,
     ...(input.error !== undefined ? { error: input.error } : {}),
     ...(input.detail !== undefined ? { detail: input.detail } : {}),
+    // Issue #5100 (F3 of #5094): the binding tuple the dispatch executed against.
+    ...(input.accountType !== undefined ? { accountType: input.accountType } : {}),
+    ...(input.accountId !== undefined ? { accountId: input.accountId } : {}),
+    ...(input.bindingScope !== undefined ? { bindingScope: input.bindingScope } : {}),
+    ...(input.bindingSource !== undefined ? { bindingSource: input.bindingSource } : {}),
   });
   return { ...validated, system: "worker-cron" };
 }

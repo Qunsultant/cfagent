@@ -1410,6 +1410,13 @@ export interface TradeRecord {
    * in the canonical lowercase vocabulary. Execute sends this value instead
    * of the broker's hardcoded default. Absent on legacy rows → default. */
   timeInForce?: NormalizedTimeInForce;
+  /** Issue #5100 (F3 of #5094): the resolved binding tuple, stamped on
+   * the draft at preview time so execute can prove the draft's account.
+   * Absent on legacy rows (pre-F3 drafts carry no binding). */
+  accountId?: string | null;
+  accountType?: string | null;
+  bindingScope?: string | null;
+  bindingSource?: string | null;
   createdAt: string;
   updatedAt: string;
 }

@@ -58,6 +58,7 @@ import { normalizeJobRunTrigger } from "../data/jobRunRecordPorts";
 import { createInMemoryJobPipelineStores } from "../data/inMemoryJobPipelineAdapter";
 import { SqlJobRunRecordStore } from "../data/doSqliteJobRunRecordAdapter";
 import { InMemoryJobRunRecordStore } from "../data/inMemoryJobRunRecordAdapter";
+import type { OtelJobPipelineObservers } from "../observability/otelJobPipelineObservers";
 import {
   JobPipelineControl,
   jobRunRecorderFromStore,
@@ -990,6 +991,16 @@ export interface OptionsScreenEngineDeps {
    * it absent and its steps execute exactly as before.
    */
   stageStorageScope?: DeferredStageStorageScope;
+  /**
+   * Issue #6179 — the OTel observers for this dispatch (the
+   * shared helper's result, built from the caller's env via
+   * getOtelJobPipelineObservers). Absent, the control runs
+   * exactly as before: no settle event, no step journal — a leg
+   * that has no env in scope keeps today's behavior. The
+   * observers are best-effort and can never fail, retry, or
+   * duplicate the run's own records.
+   */
+  otel?: OtelJobPipelineObservers;
 }
 
 /**
@@ -1041,6 +1052,12 @@ async function dispatchScreenViaEngine(
     publisher: null,
     steps: registry,
     invocation: "sync",
+    // Issue #6179: the OTel observers ride the control's existing
+    // seams when the caller supplied them; absent, the control
+    // runs exactly as before (no settle event, no step journal).
+    ...(deps.otel
+      ? { runSettledObserver: deps.otel.runSettledObserver, journal: deps.otel.journal }
+      : {}),
   });
   // Issue #4066: the dispatch request rides the job definition's
   // rawConfig (persisted by defineJob) so a later per-stage control

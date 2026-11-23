@@ -106,6 +106,22 @@ function aliasSeeds() {
   ];
 }
 
+// Issue #5100 (F3 of #5094): creation of an account-scoped schedule
+// refuses when the tenant has no binding — the success-path tests seed
+// the bound E*TRADE paper account under the trusted login.
+function bindingSeeds() {
+  return [
+    {
+      ns: "account_bindings",
+      key: `acctbind:v1:${LOGIN}`,
+      value: JSON.stringify([
+        { broker: "etrade", mode: "paper", accountType: "stock", scope: "tenant", accountId: "ET-123" },
+        { broker: "etrade", mode: "paper", accountType: "options", scope: "tenant", accountId: "ET-123" },
+      ]),
+    },
+  ];
+}
+
 beforeEach(() => {
   vi.restoreAllMocks();
 });
@@ -114,6 +130,7 @@ describe("S3 schedule-create preflight identity pass-through", () => {
   it("internal-id token + alias records → create succeeds (no 409)", async () => {
     const agent = makeAgent([
       ...aliasSeeds(),
+      ...bindingSeeds(),
       { ns: "etrade", key: `etrade:token:TEST:${INTERNAL_ID}`, value: freshToken(LOGIN) },
     ]);
     const { status, body } = await postCreate(agent);
@@ -133,6 +150,7 @@ describe("S3 schedule-create preflight identity pass-through", () => {
   it("alias-login token + alias records → create succeeds", async () => {
     const agent = makeAgent([
       ...aliasSeeds(),
+      ...bindingSeeds(),
       { ns: "etrade", key: `etrade:token:TEST:${ALIAS_LOGIN}`, value: freshToken(LOGIN) },
     ]);
     const { status, body } = await postCreate(agent);
@@ -142,6 +160,7 @@ describe("S3 schedule-create preflight identity pass-through", () => {
 
   it("login-key token, no alias → today's behavior preserved (create succeeds)", async () => {
     const agent = makeAgent([
+      ...bindingSeeds(),
       { ns: "etrade", key: `etrade:token:TEST:${LOGIN}`, value: freshToken(LOGIN) },
     ]);
     const { status, body } = await postCreate(agent);

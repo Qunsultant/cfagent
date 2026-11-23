@@ -37,6 +37,51 @@ import { COPILOT_SESSIONS } from "../src/services/stockCopilotSessions";
 import { SqlJobRunRecordStore } from "../src/data/doSqliteJobRunRecordAdapter";
 import { buildJobRunRecord } from "../src/services/jobRunRecords";
 import { STOCK_COPILOT_TASK_ID } from "../src/agents/orchestrator/scheduledTasksCopilot";
+import { upsertAccountBinding } from "../src/services/accountBindings";
+
+/** The #5112 in-memory DO-namespace stub, for seeding bindings. */
+function makeMemoryDoNamespace() {
+  const store = new Map<string, string>();
+  const stub = {
+    async fetch(request: Request): Promise<Response> {
+      const payload = (await request.json()) as { op: string; key: string; value?: string };
+      if (payload.op === "get") {
+        return Response.json({ ok: true, value: store.get(payload.key) ?? null });
+      }
+      if (payload.op === "put" && payload.value !== undefined) {
+        store.set(payload.key, payload.value);
+        return Response.json({ ok: true });
+      }
+      if (payload.op === "delete") {
+        store.delete(payload.key);
+        return Response.json({ ok: true });
+      }
+      return new Response("Bad request", { status: 400 });
+    },
+  };
+  return {
+    idFromName: () => "singleton" as unknown as DurableObjectId,
+    get: () => stub as unknown as DurableObjectStub,
+  };
+}
+
+/** A ctx whose env carries a binding store seeded for the owner. */
+async function boundCtx() {
+  const { ctx, sql } = await makeCtx({
+    env: {
+      STOCK_COPILOT_PAPER_ENABLED: "1",
+      SESSION_STORE: makeMemoryDoNamespace(),
+    } as StockCopilotRouteContext["env"],
+  });
+  await upsertAccountBinding(ctx.env as never, "owner", {
+    broker: "alpaca",
+    mode: "paper",
+    accountType: "stock",
+    scope: "tenant",
+    accountId: "PA-900",
+  });
+  return { ctx, sql };
+}
 
 /** Minimal SqlStorage shim over node:sqlite (same shape as #2528's harness). */
 class SqliteTestStorage {
@@ -222,6 +267,28 @@ describe("stock copilot routes (#3422)", () => {
     });
     expect(body.activity).toHaveLength(1);
     expect(body.activity[0]).toMatchObject({ outcome: "traded", entries: ["TEST"] });
+  });
+
+  it("status carries the masked active binding when bound (#5100)", async () => {
+    const { ctx, sql } = await boundCtx();
+    await seed(sql);
+    const res = await call(ctx, req("GET", STATUS_PATH));
+    expect(res?.status).toBe(200);
+    const body = (await res!.json()) as any;
+    expect(body.activeBinding).toBeTruthy();
+    expect(body.activeBinding.accountType).toBe("stock");
+    // Masked: the suffix survives, the full id never leaves the server.
+    expect(body.activeBinding.accountId).toContain("900");
+    expect(body.activeBinding.accountId).not.toBe("PA-900");
+  });
+
+  it("status carries a null active binding when unbound (#5100)", async () => {
+    const { ctx, sql } = await makeCtx();
+    await seed(sql);
+    const res = await call(ctx, req("GET", STATUS_PATH));
+    expect(res?.status).toBe(200);
+    const body = (await res!.json()) as any;
+    expect(body.activeBinding).toBeNull();
   });
 
   it("status reports off when the global flag is unset", async () => {

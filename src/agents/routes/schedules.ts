@@ -52,8 +52,13 @@ import {
   isBrokerId,
   resolveTenantProviders,
 } from "../../services/tenantProviders";
-import { accountBindingAuditFields, resolveExecutionAccountContext } from "../../services/accountBindings";
-import { tradingTypeFor } from "../../trading";
+import {
+  accountBindingAuditFields,
+  resolveValidatedExecutionAccountContext,
+  type ExecutionAccountContext,
+} from "../../services/accountBindings";
+import { TradingPlatformRegistry, tradingTypeFor } from "../../trading";
+import type { BrokerAccount } from "../../types";
 import { isLoginShaped, getServiceUserLogin } from "../../security/serviceIdentity";
 import type { JobRunTrigger } from "../../data/jobRunRecordPorts";
 import { findDuplicateSchedule } from "../../services/scheduleDedupe";
@@ -2091,7 +2096,7 @@ export async function handleSchedulesRoutes(
             }
           }
         }
-        const { userLogin: _untrustedUserLogin, environment: _untrustedEnvironment, brokerId: _untrustedBrokerId, dataProviderId: _untrustedDataProviderId, mode: _untrustedMode, ...safePayload } =
+        const { userLogin: _untrustedUserLogin, environment: _untrustedEnvironment, brokerId: _untrustedBrokerId, dataProviderId: _untrustedDataProviderId, mode: _untrustedMode, accountId: _untrustedAccountId, accountType: _untrustedAccountType, ...safePayload } =
           payload && typeof payload === "object" ? payload : {};
         // Issue #2373 (slice C): schedule-creation guard for
         // STOCK schedules, under monetization ON only. Stock
@@ -2160,18 +2165,64 @@ export async function handleSchedulesRoutes(
         // stamps identity from the trusted context only.
         let screeningPayload: unknown;
         if (ctx.accountScopedScheduleCallbacks.has(callback)) {
-          const scheduleAccountCtx =
-            trustedUserLogin && createBrokerId && createMode
-              ? await resolveExecutionAccountContext(ctx.env, trustedUserLogin, {
-                  broker: createBrokerId,
-                  mode: createMode,
-                  accountType: safePayload.accountType ?? "stock",
-                  scope: "schedule",
-                  explicitAccountId: safePayload.accountId,
-                })
-              : null;
-          if (scheduleAccountCtx) {
-            ctx.audit?.("schedule.account_binding_resolved", "orchestrator", accountBindingAuditFields(scheduleAccountCtx));
+          // Issue #5100 (F3 of #5094): the schedule's account resolves
+          // through the validated wrapper — an unbound creation is
+          // refused with the coded failure, and a caller-supplied
+          // accountId (captured above, before the identity strip) is
+          // validated against the broker's enumerated accounts, never
+          // accepted verbatim. The resolved tuple rides the identity
+          // stamp below, so the schedule executes against exactly the
+          // account stamped at creation.
+          let resolvedScheduleBinding: ExecutionAccountContext | null = null;
+          if (trustedUserLogin && createBrokerId && createMode) {
+            const explicitAccountId = _untrustedAccountId;
+            let availableAccounts: readonly BrokerAccount[] | undefined;
+            if (explicitAccountId !== undefined && explicitAccountId !== null && `${explicitAccountId}`.trim() !== "") {
+              // createBrokerId is server-resolved (tenant selection or
+              // the legacy broker fallback), so this narrowing is
+              // provably always true — a non-catalog id refuses
+              // fail-closed rather than enumerating a guessed broker.
+              if (!isBrokerId(createBrokerId)) {
+                return Response.json(
+                  { success: false, error: `Unknown broker "${createBrokerId}": the schedule was not created.` },
+                  { status: 502 },
+                );
+              }
+              try {
+                availableAccounts = await TradingPlatformRegistry.getPlatform(
+                  createBrokerId,
+                  ctx.env,
+                  ctx.getOrm(),
+                  trustedUserLogin,
+                  trustedEnvironment === "TEST" ? "TEST" : "PROD",
+                ).getAccounts();
+              } catch (enumErr) {
+                return Response.json(
+                  { success: false, error: `Could not enumerate ${createBrokerId} accounts to validate the requested account; the schedule was not created.` },
+                  { status: 502 },
+                );
+              }
+            }
+            const bindingRes = await resolveValidatedExecutionAccountContext(ctx.env, trustedUserLogin, {
+              broker: createBrokerId,
+              mode: createMode,
+              // Issue #5100 (F3 of #5094): the asset class defaults to
+              // the callback's class (options analysis runs against
+              // the options account); a body-supplied accountType is
+              // an untrusted hint, validated by the wrapper.
+              accountType: _untrustedAccountType ?? (callback === "autonomousOptionsAnalysis" ? "options" : "stock"),
+              scope: "schedule",
+              explicitAccountId,
+              availableAccounts,
+            });
+            if (!bindingRes.ok) {
+              return Response.json(
+                { success: false, code: bindingRes.code, error: bindingRes.error },
+                { status: bindingRes.status },
+              );
+            }
+            resolvedScheduleBinding = bindingRes.context;
+            ctx.audit?.("schedule.account_binding_resolved", "orchestrator", accountBindingAuditFields(resolvedScheduleBinding));
           }
           const built = buildSchedulePayload(callback, safePayload, {
             userLogin: trustedUserLogin || undefined,
@@ -2182,6 +2233,13 @@ export async function handleSchedulesRoutes(
             ...(createBrokerId ? { brokerId: createBrokerId } : {}),
             ...(createDataProviderId ? { dataProviderId: createDataProviderId } : {}),
             ...(createMode ? { mode: createMode } : {}),
+            // Issue #5100: the resolved binding tuple rides the same stamp.
+            ...(resolvedScheduleBinding?.accountType
+              ? { accountType: resolvedScheduleBinding.accountType }
+              : {}),
+            ...(resolvedScheduleBinding?.accountId
+              ? { accountId: resolvedScheduleBinding.accountId }
+              : {}),
           });
           if (!built.ok) {
             return Response.json({ success: false, error: built.error }, { status: 400 });

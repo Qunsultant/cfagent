@@ -69,6 +69,12 @@ export class InMemoryPolicyVerdictStore implements PolicyVerdictPort {
         proposer_did: r.proposerDid,
         authorizer_did: r.authorizerDid,
         created_at: r.createdAt,
+        // Issue #5100 (F3 of #5094): the binding the verdict ran against.
+        broker: r.broker ?? null,
+        account_type: r.accountType ?? null,
+        account_id: r.accountId ?? null,
+        binding_scope: r.bindingScope ?? null,
+        binding_source: r.bindingSource ?? null,
       }));
   }
 }

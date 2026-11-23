@@ -259,7 +259,7 @@
       "file": "doSqliteJobRunRecordAdapter.ts",
       "trigger": "listRecent(10)",
       "queries": [
-        "CREATE TABLE IF NOT EXISTS job_run_records (\n      id INTEGER PRIMARY KEY AUTOINCREMENT,\n      system TEXT NOT NULL,\n      job_id TEXT NOT NULL,\n      operation TEXT NOT NULL,\n      started TEXT NOT NULL,\n      finished TEXT NOT NULL,\n      outcome TEXT NOT NULL,\n      triggered_by TEXT NOT NULL,\n      trigger_text TEXT,\n      schedule_id TEXT,\n      async_job_id TEXT,\n      workflow_id TEXT,\n      error_text TEXT,\n      detail TEXT,\n      descriptor TEXT,\n      artifact_refs_json TEXT,\n      broker_id TEXT,\n      data_provider_id TEXT,\n      mode TEXT,\n      mode_source TEXT\n    )",
+        "CREATE TABLE IF NOT EXISTS job_run_records (\n      id INTEGER PRIMARY KEY AUTOINCREMENT,\n      system TEXT NOT NULL,\n      job_id TEXT NOT NULL,\n      operation TEXT NOT NULL,\n      started TEXT NOT NULL,\n      finished TEXT NOT NULL,\n      outcome TEXT NOT NULL,\n      triggered_by TEXT NOT NULL,\n      trigger_text TEXT,\n      schedule_id TEXT,\n      async_job_id TEXT,\n      workflow_id TEXT,\n      error_text TEXT,\n      detail TEXT,\n      descriptor TEXT,\n      artifact_refs_json TEXT,\n      broker_id TEXT,\n      data_provider_id TEXT,\n      mode TEXT,\n      mode_source TEXT,\n      account_type TEXT,\n      account_id TEXT,\n      binding_scope TEXT,\n      binding_source TEXT\n    )",
         "PRAGMA table_info(job_run_records)",
         "ALTER TABLE job_run_records ADD COLUMN trigger_text TEXT",
         "ALTER TABLE job_run_records ADD COLUMN schedule_id TEXT",
@@ -269,6 +269,10 @@
         "ALTER TABLE job_run_records ADD COLUMN data_provider_id TEXT",
         "ALTER TABLE job_run_records ADD COLUMN mode TEXT",
         "ALTER TABLE job_run_records ADD COLUMN mode_source TEXT",
+        "ALTER TABLE job_run_records ADD COLUMN account_type TEXT",
+        "ALTER TABLE job_run_records ADD COLUMN account_id TEXT",
+        "ALTER TABLE job_run_records ADD COLUMN binding_scope TEXT",
+        "ALTER TABLE job_run_records ADD COLUMN binding_source TEXT",
         "ALTER TABLE job_run_records ADD COLUMN kind TEXT",
         "ALTER TABLE job_run_records ADD COLUMN origin_run_id TEXT",
         "ALTER TABLE job_run_records ADD COLUMN definition_version INTEGER",
@@ -316,8 +320,18 @@
       "file": "doSqlitePolicyVerdictAdapter.ts",
       "trigger": "ensureSchema()",
       "queries": [
-        "\n      CREATE TABLE IF NOT EXISTS mas_policy_verdicts (\n        id TEXT PRIMARY KEY,\n        session_id TEXT NOT NULL,\n        symbol TEXT NOT NULL,\n        action TEXT NOT NULL,\n        quantity REAL NOT NULL,\n        notional REAL,\n        mode TEXT NOT NULL,\n        dry_run INTEGER NOT NULL DEFAULT 0,\n        passed INTEGER NOT NULL,\n        execution_allowed INTEGER NOT NULL,\n        requires_approval INTEGER NOT NULL,\n        binding_rule TEXT,\n        detail TEXT NOT NULL,\n        limits_json TEXT NOT NULL,\n        projections_json TEXT NOT NULL,\n        findings_json TEXT NOT NULL,\n        signature TEXT NOT NULL,\n        signing_key_id TEXT NOT NULL,\n        proposer_did TEXT NOT NULL,\n        authorizer_did TEXT NOT NULL,\n        created_at TEXT NOT NULL\n      )\n    ",
-        "CREATE INDEX IF NOT EXISTS idx_mas_policy_verdicts_created ON mas_policy_verdicts(created_at DESC)"
+        "\n      CREATE TABLE IF NOT EXISTS mas_policy_verdicts (\n        id TEXT PRIMARY KEY,\n        session_id TEXT NOT NULL,\n        symbol TEXT NOT NULL,\n        action TEXT NOT NULL,\n        quantity REAL NOT NULL,\n        notional REAL,\n        mode TEXT NOT NULL,\n        dry_run INTEGER NOT NULL DEFAULT 0,\n        passed INTEGER NOT NULL,\n        execution_allowed INTEGER NOT NULL,\n        requires_approval INTEGER NOT NULL,\n        binding_rule TEXT,\n        detail TEXT NOT NULL,\n        limits_json TEXT NOT NULL,\n        projections_json TEXT NOT NULL,\n        findings_json TEXT NOT NULL,\n        signature TEXT NOT NULL,\n        signing_key_id TEXT NOT NULL,\n        proposer_did TEXT NOT NULL,\n        authorizer_did TEXT NOT NULL,\n        created_at TEXT NOT NULL,\n        broker TEXT,\n        account_type TEXT,\n        account_id TEXT,\n        binding_scope TEXT,\n        binding_source TEXT\n      )\n    ",
+        "CREATE INDEX IF NOT EXISTS idx_mas_policy_verdicts_created ON mas_policy_verdicts(created_at DESC)",
+        "PRAGMA table_info(mas_policy_verdicts)",
+        "ALTER TABLE mas_policy_verdicts ADD COLUMN broker TEXT",
+        "PRAGMA table_info(mas_policy_verdicts)",
+        "ALTER TABLE mas_policy_verdicts ADD COLUMN account_type TEXT",
+        "PRAGMA table_info(mas_policy_verdicts)",
+        "ALTER TABLE mas_policy_verdicts ADD COLUMN account_id TEXT",
+        "PRAGMA table_info(mas_policy_verdicts)",
+        "ALTER TABLE mas_policy_verdicts ADD COLUMN binding_scope TEXT",
+        "PRAGMA table_info(mas_policy_verdicts)",
+        "ALTER TABLE mas_policy_verdicts ADD COLUMN binding_source TEXT"
       ]
     },
     {

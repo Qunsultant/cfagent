@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 // Issue #3460 slice 3: the unified service reads the broker through the
 // presence-aware seam (no default). These tests drive the E*TRADE path,
 // so the selection is explicit here instead of relying on the default.
@@ -82,6 +82,7 @@ const mockRunScreen = vi.fn();
 
 import { DatabaseORM } from "../src/orm";
 import { MockSqlStorage } from "./mock-sql";
+import { TradingPlatformRegistry } from "../src/trading/registry";
 import { DynamicMarketScreener } from "../src/trading/screener";
 import { MOCK_TEST_UNIVERSE } from "./fixtures/mockUniverse";
 import { ScheduledTasksService } from "../src/services/scheduledTasks";
@@ -333,6 +334,19 @@ describe("Scheduled job failure semantics (#112)", () => {
       const { namespace } = makeFakeSessionStore();
       (env as any).SESSION_STORE = namespace;
       await storeAccessTokens(env, "live_account_owner", "mock_token_prod", "mock_secret_prod", "PROD");
+      // Issue #5100 (F3 of #5094): the fire-time guard re-validates
+      // the stamped tuple against the broker's enumerated accounts.
+      // The E*TRADE account list is stubbed — the live list endpoint
+      // is never called from these tests.
+      vi.spyOn(TradingPlatformRegistry, "getPlatform").mockReturnValue({
+        getAccounts: async () => [
+          { accountId: "ET-123", accountType: "stock", broker: "etrade" },
+        ],
+      } as never);
+    });
+
+    afterEach(() => {
+      vi.restoreAllMocks();
     });
 
     function makeAgent(sql: MockSqlStorage) {
@@ -369,7 +383,15 @@ describe("Scheduled job failure semantics (#112)", () => {
       // to the raw client, so these prototype stubs are still reached.
       stubChainsThrow("quote stream down");
 
-      await agent.autonomousOptionsAnalysis({ symbols: ["AAPL"] });
+      await agent.autonomousOptionsAnalysis({
+        symbols: ["AAPL"],
+        // Issue #5100 (F3 of #5094): the fire-time guard requires the
+        // tuple stamped at creation.
+        brokerId: "etrade",
+        mode: "live",
+        accountType: "options",
+        accountId: "ET-123",
+      });
 
       const sent = broadcasts(agent);
       expect(sent.length).toBe(1);
@@ -396,7 +418,15 @@ describe("Scheduled job failure semantics (#112)", () => {
       // never real output).
       stubChains({ AAPL: 150, NVDA: 250 });
 
-      await agent.autonomousOptionsAnalysis({ symbols: ["AAPL", "NVDA"] });
+      await agent.autonomousOptionsAnalysis({
+        symbols: ["AAPL", "NVDA"],
+        // Issue #5100 (F3 of #5094): the fire-time guard requires the
+        // tuple stamped at creation.
+        brokerId: "etrade",
+        mode: "live",
+        accountType: "options",
+        accountId: "ET-123",
+      });
 
       const sent = broadcasts(agent);
       expect(sent.length).toBe(1);
@@ -414,7 +444,16 @@ describe("Scheduled job failure semantics (#112)", () => {
       const agent = makeAgent(sql);
       mockRunScreen.mockRejectedValue(new Error("screener universe unavailable"));
 
-      await agent.autonomousMarketScreen({ sector: "Technology", maxItems: 5 });
+      await agent.autonomousMarketScreen({
+        sector: "Technology",
+        maxItems: 5,
+        // Issue #5100 (F3 of #5094): the fire-time guard requires the
+        // tuple stamped at creation.
+        brokerId: "etrade",
+        mode: "live",
+        accountType: "stock",
+        accountId: "ET-123",
+      });
 
       const sent = broadcasts(agent);
       expect(sent.length).toBe(1);
@@ -509,7 +548,16 @@ describe("Scheduled job failure semantics (#112)", () => {
         discoveryMessage: "E*TRADE-only (mock)",
       });
 
-      await agent.autonomousMarketScreen({ sector: "Technology", maxItems: 5 });
+      await agent.autonomousMarketScreen({
+        sector: "Technology",
+        maxItems: 5,
+        // Issue #5100 (F3 of #5094): the fire-time guard requires the
+        // tuple stamped at creation.
+        brokerId: "etrade",
+        mode: "live",
+        accountType: "stock",
+        accountId: "ET-123",
+      });
 
       const sent = broadcasts(agent);
       expect(sent.length).toBe(1);
@@ -520,6 +568,61 @@ describe("Scheduled job failure semantics (#112)", () => {
 
       const orm = makeOrm(sql);
       expect(orm.events.findMany({ where: { type: "screener.screen_failed" } }).length).toBe(0);
+    });
+
+    describe("fire-time bound-account enforcement (#5100, F3 of #5094)", () => {
+      // The refusal half is pinned here (the service is never called,
+      // nothing broadcasts). The recording half — a skipped run
+      // persists its detail code — is pinned on real SQLite in
+      // tests/job-run-records-2964.test.ts: MockSqlStorage's prune
+      // DELETE eats the just-recorded row, so no run record survives
+      // to be read back on this harness (pre-existing mock gap, not
+      // an F3 defect).
+      it("a stamped schedule whose account no longer resolves is refused before the service call", async () => {
+        const sql = new MockSqlStorage();
+        const agent = makeAgent(sql);
+        mockRunScreen.mockClear();
+
+        await agent.autonomousMarketScreen({
+          sector: "Technology",
+          maxItems: 5,
+          brokerId: "etrade",
+          mode: "live",
+          accountType: "stock",
+          accountId: "ET-GONE",
+        });
+
+        expect(mockRunScreen).not.toHaveBeenCalled();
+        expect(broadcasts(agent)).toHaveLength(0);
+      });
+
+      it("a pre-F3 unstamped schedule is refused with BINDING_MISSING", async () => {
+        const sql = new MockSqlStorage();
+        const agent = makeAgent(sql);
+        mockRunScreen.mockClear();
+
+        await agent.autonomousMarketScreen({ sector: "Technology", maxItems: 5 });
+
+        expect(mockRunScreen).not.toHaveBeenCalled();
+        expect(broadcasts(agent)).toHaveLength(0);
+      });
+
+      it("a stamped options schedule whose account no longer resolves is refused before the chains", async () => {
+        const sql = new MockSqlStorage();
+        const agent = makeAgent(sql);
+        const chainsSpy = vi.spyOn(ETradeRestClient.prototype, "getOptionChains");
+
+        await agent.autonomousOptionsAnalysis({
+          symbols: ["AAPL"],
+          brokerId: "etrade",
+          mode: "live",
+          accountType: "options",
+          accountId: "ET-GONE",
+        });
+
+        expect(chainsSpy).not.toHaveBeenCalled();
+        expect(broadcasts(agent)).toHaveLength(0);
+      });
     });
   });
 });

@@ -6,7 +6,8 @@
  * Unknown enumSource or derivation names refuse BY NAME at spec
  * load/validation time, never at run time.
  */
-import { UNIVERSES } from "../trading";
+import { researchUniverseIds } from "../trading";
+import { RESEARCH_VENUE_MODES } from "../services/researchVenue";
 import { shardsForUniverse } from "../workflows/screenExecutionBroker";
 
 export interface ParamDerivationContext {
@@ -22,7 +23,11 @@ export type ParamDerivationFn = (
 ) => Record<string, unknown>;
 
 export const ENUM_SOURCES: Readonly<Record<string, () => string[]>> = {
-  universes: () => Object.keys(UNIVERSES),
+  // Issue #6032/#6031 — `ALL` is a shard plan, not a selectable universe.
+  universes: () => researchUniverseIds(),
+  // Issue #6031 — the trade-mode vocabulary has one home (the venue
+  // resolver, #6036); a spec that declares a mode reads it here.
+  tradeModes: () => [...RESEARCH_VENUE_MODES],
 };
 
 export const PARAM_DERIVATIONS: Readonly<Record<string, ParamDerivationFn>> = {

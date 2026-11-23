@@ -221,7 +221,11 @@ export const DO_CATALOGUE_ENTRIES: CatalogueEntry[] = [
       broker_id TEXT,
       data_provider_id TEXT,
       mode TEXT,
-      mode_source TEXT
+      mode_source TEXT,
+      account_type TEXT,
+      account_id TEXT,
+      binding_scope TEXT,
+      binding_source TEXT
     )`,
     kind: "schema",
     form: "literal",
@@ -645,7 +649,12 @@ export const DO_CATALOGUE_ENTRIES: CatalogueEntry[] = [
         signing_key_id TEXT NOT NULL,
         proposer_did TEXT NOT NULL,
         authorizer_did TEXT NOT NULL,
-        created_at TEXT NOT NULL
+        created_at TEXT NOT NULL,
+        broker TEXT,
+        account_type TEXT,
+        account_id TEXT,
+        binding_scope TEXT,
+        binding_source TEXT
       )
     `,
     kind: "schema",

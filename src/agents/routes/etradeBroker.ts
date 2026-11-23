@@ -20,6 +20,7 @@ import {
 export { publishManualScreenerRun } from "./etradeBrokerPublish";
 import { ETradeThinkHarness } from "../../services/thinkHarness";
 import { TradingPlatformRegistry, fetchQuoteLiveStrict } from "../../trading";
+import type { AutopilotRouteContext } from "./autopilot";
 // #4654/#4656: draft→placement terms, shared with the neutral route.
 import { deriveOrderExecutionTerms } from "./orderExecutionTerms";
 import { markDraftCancelledIfPresent } from "./brokerOrders";
@@ -135,15 +136,9 @@ export interface EtradeBrokerRouteContext {
     presetRef?: unknown;
     pareto?: unknown;
   }): Promise<void>;
-  /** Autopilot policy evaluation (owner: OrchestratorAgent - was `this.evaluateAndRecordAutopilotVerdict`). */
-  evaluateAndRecordAutopilotVerdict(params: {
-    userLogin: string;
-    requestedEnv: unknown;
-    sessionId: string;
-    intent: OrderIntent;
-    draftId?: string | null;
-    dryRun?: boolean;
-  }): Promise<{ verdict: PolicyVerdict; attestation: PolicyVerdictAttestation }>;
+  /** Autopilot policy evaluation (owner: OrchestratorAgent - was `this.evaluateAndRecordAutopilotVerdict`).
+   *  Reuses AutopilotRouteContext's member (incl. the #5100 `binding` param) — #2943 cap. */
+  evaluateAndRecordAutopilotVerdict: AutopilotRouteContext["evaluateAndRecordAutopilotVerdict"];
   /** Autopilot state (owner: OrchestratorAgent - was `this.getAutopilotState()`). */
   getAutopilotState(): { running: boolean };
   /** Autopilot order counter (owner: OrchestratorAgent - was `this.incrementAutopilotOrdersToday()`). */

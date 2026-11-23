@@ -385,6 +385,18 @@ export class DatabaseORM {
       }
     }
 
+    // Issue #5100 (F3 of #5094): the resolved binding tuple, stamped on
+    // the draft at preview so execute can prove the draft's account.
+    // Same guarded-ALTER precedent; legacy rows keep NULL.
+    {
+      const cols = Array.from(this.sql.exec("PRAGMA table_info(mas_trades)")) as Array<{ name?: unknown }>;
+      for (const column of ["account_id", "account_type", "binding_scope", "binding_source"]) {
+        if (!cols.some((c) => c.name === column)) {
+          this.sql.exec(remainderAlterSql("mas_trades", column));
+        }
+      }
+    }
+
     // 10. Watchlists Table (E*TRADE & Local Agent Watchlists)
     ensureSharedTable(this.sql, "mas_watchlists");
 

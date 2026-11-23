@@ -799,6 +799,14 @@ export interface ScheduleIdentity {
   dataProviderId?: string;
   /** Issue #3655: live/paper mode derived from (broker, environment). */
   mode?: "live" | "paper";
+  /**
+   * Issue #5100 (F3 of #5094): the resolved binding tuple, stamped
+   * server-side at creation alongside brokerId/mode — never a form
+   * value. Absent on payloads built before this field existed (those
+   * are refused at fire time with FAILURE_ACCOUNT_BINDING_MISSING).
+   */
+  accountType?: string;
+  accountId?: string;
 }
 
 const deliveryFields = {
@@ -1265,6 +1273,16 @@ export function buildSchedulePayload(
       : {}),
     ...((identity.mode ?? (validated.mode as string | undefined))
       ? { mode: identity.mode ?? (validated.mode as string) }
+      : {}),
+    // Issue #5100: the binding tuple rides the same identity-wins
+    // rule — the resolved tuple at creation wins; a stored payload's
+    // stamped values survive when the builder is called without
+    // identity values (trigger routes replay the stored payload).
+    ...((identity.accountType ?? (validated.accountType as string | undefined))
+      ? { accountType: identity.accountType ?? (validated.accountType as string) }
+      : {}),
+    ...((identity.accountId ?? (validated.accountId as string | undefined))
+      ? { accountId: identity.accountId ?? (validated.accountId as string) }
       : {}),
     trigger: identity.trigger,
   };

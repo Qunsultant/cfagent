@@ -78,7 +78,10 @@ const DATA_LAYER_FILES: Array<[string, number]> = [
   // 20 since #4751 moved the browse SELECT onto the shared
   // where-language (findMany-style $or/$like) — the facade's
   // last inline SELECT is gone, not kept alongside.
-  ["src/data/ormFacade.ts", 20],
+  // 22 since #5100 (F3 of #5094) added the mas_trades binding
+  // columns' PRAGMA-guarded ALTER (PRAGMA table_info check +
+  // ALTER, same precedent as broker/price_source/mode/stop_price).
+  ["src/data/ormFacade.ts", 22],
   // 4 at 3a; 5 since #4412 added the mas_promotions index exec
   // (sql.exec(MAS_PROMOTIONS_INDEX_DDL) in ensurePromotionsIndex());
   // 8 since #3182 added the mas_transactions tenant column's

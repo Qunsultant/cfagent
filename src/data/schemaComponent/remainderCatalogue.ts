@@ -194,6 +194,39 @@ export const REMAINDER_CATALOGUE_ENTRIES: CatalogueEntry[] = [
     form: "literal",
   },
   {
+    // Issue #5100 (F3 of #5094): the binding tuple the run executed against.
+    code: "schema.do.job_run_records.alter_table_add_column_account_type",
+    plane: "do",
+    table: "job_run_records",
+    statement: `ALTER TABLE job_run_records ADD COLUMN account_type TEXT`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    code: "schema.do.job_run_records.alter_table_add_column_account_id",
+    plane: "do",
+    table: "job_run_records",
+    statement: `ALTER TABLE job_run_records ADD COLUMN account_id TEXT`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    code: "schema.do.job_run_records.alter_table_add_column_binding_scope",
+    plane: "do",
+    table: "job_run_records",
+    statement: `ALTER TABLE job_run_records ADD COLUMN binding_scope TEXT`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    code: "schema.do.job_run_records.alter_table_add_column_binding_source",
+    plane: "do",
+    table: "job_run_records",
+    statement: `ALTER TABLE job_run_records ADD COLUMN binding_source TEXT`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
     code: "schema.do.job_run_records.alter_table_add_column_schedule_id",
     plane: "do",
     table: "job_run_records",
@@ -516,6 +549,54 @@ export const REMAINDER_CATALOGUE_ENTRIES: CatalogueEntry[] = [
     parameters: ["column", "type"],
   },
   {
+    // Issue #5100 (F3 of #5094): the binding columns on the verdict ledger.
+    // Literal ALTERs, one per column — the same guarded-ALTER precedent as
+    // the job_run_records / mas_trades entries below. A parameterized
+    // generic ALTER cannot live here: the recreate runner
+    // (GENERIC_ALTER_PAIRS), the remainder equality harness, and the
+    // combined phased executor all resolve generic ALTERs only for the
+    // two pinned pairs (mas_reports, mas_report_confirmations), and an
+    // unregistered generic fails closed in all three.
+    code: "schema.do.mas_policy_verdicts.alter_table_add_column_broker",
+    plane: "do",
+    table: "mas_policy_verdicts",
+    statement: `ALTER TABLE mas_policy_verdicts ADD COLUMN broker TEXT`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    code: "schema.do.mas_policy_verdicts.alter_table_add_column_account_type",
+    plane: "do",
+    table: "mas_policy_verdicts",
+    statement: `ALTER TABLE mas_policy_verdicts ADD COLUMN account_type TEXT`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    code: "schema.do.mas_policy_verdicts.alter_table_add_column_account_id",
+    plane: "do",
+    table: "mas_policy_verdicts",
+    statement: `ALTER TABLE mas_policy_verdicts ADD COLUMN account_id TEXT`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    code: "schema.do.mas_policy_verdicts.alter_table_add_column_binding_scope",
+    plane: "do",
+    table: "mas_policy_verdicts",
+    statement: `ALTER TABLE mas_policy_verdicts ADD COLUMN binding_scope TEXT`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    code: "schema.do.mas_policy_verdicts.alter_table_add_column_binding_source",
+    plane: "do",
+    table: "mas_policy_verdicts",
+    statement: `ALTER TABLE mas_policy_verdicts ADD COLUMN binding_source TEXT`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
     code: "schema.do.mas_reports.alter_table_add_column",
     plane: "do",
     table: "mas_reports",
@@ -587,6 +668,42 @@ export const REMAINDER_CATALOGUE_ENTRIES: CatalogueEntry[] = [
     plane: "orm",
     table: "mas_trades",
     statement: `ALTER TABLE mas_trades ADD COLUMN time_in_force TEXT`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    // Issue #5100 (F3 of #5094): the resolved binding tuple, stamped on
+    // the draft at preview time so execute can prove the draft's account
+    // (re-resolve + compare, 409 on mismatch). Same guarded-ALTER
+    // precedent; legacy rows keep NULL.
+    code: "schema.orm.mas_trades.alter_table_add_column_account_id",
+    plane: "orm",
+    table: "mas_trades",
+    statement: `ALTER TABLE mas_trades ADD COLUMN account_id TEXT`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    code: "schema.orm.mas_trades.alter_table_add_column_account_type",
+    plane: "orm",
+    table: "mas_trades",
+    statement: `ALTER TABLE mas_trades ADD COLUMN account_type TEXT`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    code: "schema.orm.mas_trades.alter_table_add_column_binding_scope",
+    plane: "orm",
+    table: "mas_trades",
+    statement: `ALTER TABLE mas_trades ADD COLUMN binding_scope TEXT`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    code: "schema.orm.mas_trades.alter_table_add_column_binding_source",
+    plane: "orm",
+    table: "mas_trades",
+    statement: `ALTER TABLE mas_trades ADD COLUMN binding_source TEXT`,
     kind: "schema",
     form: "literal",
   },

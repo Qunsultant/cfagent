@@ -97,9 +97,14 @@ export async function runAutopilotMonthlyEvaluation(input: {
     };
   }
   if (!response.ok) {
+    // Issue #5100 (F3 of #5094): the endpoint refuses unbound tenants
+    // with a coded body — carry the code in the message so the skipped
+    // run's reason names the refusal, not just the HTTP status.
+    const refusedBody = (await response.json().catch(() => ({}))) as { code?: unknown };
+    const refusedCode = typeof refusedBody.code === "string" && refusedBody.code ? ` (${refusedBody.code})` : "";
     return {
       ok: false,
-      error: `evaluate endpoint refused: HTTP ${response.status}`,
+      error: `evaluate endpoint refused: HTTP ${response.status}${refusedCode}`,
     };
   }
   const body = (await response.json().catch(() => ({}))) as {

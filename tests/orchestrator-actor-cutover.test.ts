@@ -658,6 +658,10 @@ describe("#686 R2/R3/R4 — the production turn, through runAgenticChatTurn", ()
         vectorContext: "",
         optionsResearchContext: `${marker}${jobLine}`,
         isAutoOptionsResearchRequest: true,
+        // Issue #5100 (F3 of #5094): this harness is unbound, so the
+        // turn's prompt carries the "No account bound" line
+        // (activeBinding null); absent would be byte-identical.
+        activeBinding: null,
       })
     );
   });

@@ -76,6 +76,7 @@ import {
   type OptionsStageStorage,
 } from "../workflows/optionsScreenPorts";
 import { runOptionsScreenViaEngine } from "../workflows/optionsScreenEngine";
+import { getOtelJobPipelineObservers } from "../observability/otelJobPipelineObservers";
 import {
   resolveGoalLegHostDispatch,
   runGoalLegViaHost,
@@ -259,6 +260,11 @@ export async function runGoalOptionsLegViaWorkflow(args: {
         stages: ports,
         claims: workflow.claims ?? memoryStageClaimStore(),
         queue: workflow.queue ?? null,
+        // Issue #6179: the OTel observers for this dispatch when
+        // the caller supplied a host env — the goal leg emits
+        // job.run.settled like the scheduled runs. Absent (no host),
+        // the leg runs exactly as before.
+        ...(args.host?.env ? { otel: getOtelJobPipelineObservers(args.host.env) } : {}),
       },
     );
     if (outcome.outcome === "failed") {

@@ -35,6 +35,28 @@ interface StageSpec {
   step: string;
   parameters?: DefinitionParameter[];
   executionMode?: Record<string, string>;
+  /** Issue #6031 — a nested spec's children are addressable stages. */
+  children?: StageSpec[];
+}
+
+/**
+ * Issue #6031 — every stage this spec can address, depth-first: the
+ * declared stages plus each stage's children. The flow renders this list,
+ * so a nested spec (the OODA `research` spec) shows its six real stages
+ * instead of the one wrapper node.
+ */
+function addressableStages(stages: StageSpec[] | undefined): StageSpec[] {
+  const out: StageSpec[] = [];
+  const walk = (list: StageSpec[] | undefined): void => {
+    for (const stage of list ?? []) {
+      // A container (children) is not itself executable; its children are
+      // the stages the engine runs, so only leaves are addressable.
+      if (stage.children && stage.children.length > 0) walk(stage.children);
+      else out.push(stage);
+    }
+  };
+  walk(stages);
+  return out;
 }
 
 interface DefinitionSpec {
@@ -309,7 +331,7 @@ export function WorkflowDefinitionFlow() {
                 {param.description && <span>{param.description}</span>}
               </div>
             ))}
-            {(target.stages ?? []).map((stage) => (
+            {addressableStages(target.stages).map((stage) => (
               <div key={`${target.id}-${stage.kind}-mode`}>
                 <span>{`${stage.kind} — execution mode`}</span>
                 {MODE_AXES.map((axis) => (

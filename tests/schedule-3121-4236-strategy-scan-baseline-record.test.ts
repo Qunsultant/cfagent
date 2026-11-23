@@ -53,6 +53,25 @@ import {
   strategyScanBaselineToRecord,
 } from "../src/services/unifiedScheduleManagement";
 import { MockSqlStorage } from "./mock-sql";
+import { resolveScreenSelection } from "../src/services/providerConnections";
+import { resolveTenantProviders } from "../src/services/tenantProviders";
+import { resolveValidatedExecutionAccountContext } from "../src/services/accountBindings";
+
+// Issue #5100 (F3 of #5094): the baseline arm resolves the tenant's
+// broker selection + bound account and stamps the tuple — it never
+// arms unstamped. Same stub as tests/strategy_scan_schedule.test.ts.
+vi.mock("../src/services/providerConnections", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/services/providerConnections")>();
+  return { ...actual, resolveScreenSelection: vi.fn() };
+});
+vi.mock("../src/services/tenantProviders", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/services/tenantProviders")>();
+  return { ...actual, resolveTenantProviders: vi.fn() };
+});
+vi.mock("../src/services/accountBindings", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/services/accountBindings")>();
+  return { ...actual, resolveValidatedExecutionAccountContext: vi.fn() };
+});
 
 const NOW_ISO = "2026-11-18T10:30:00.000Z";
 const BASELINE_PAYLOAD = {
@@ -144,6 +163,32 @@ describe("ensureStrategyScanSchedule saves the baseline record (#4236)", () => {
       return { id: "scan-1", callback, payload };
     };
     agent.audit = () => {};
+    // Issue #5100 (F3 of #5094): the baseline arm's default — a resolved
+    // Alpaca/paper selection with a bound options account, so the arm
+    // stamps the tuple.
+    vi.mocked(resolveScreenSelection).mockResolvedValue({
+      resolved: true,
+      selection: {
+        connectionId: "conn-test",
+        brokerId: "alpaca",
+        environment: "TEST",
+        mode: "paper",
+        externalAccountId: "ext-test",
+      },
+    });
+    vi.mocked(resolveTenantProviders).mockResolvedValue({ brokerId: "alpaca", dataProviderId: "alpaca" });
+    vi.mocked(resolveValidatedExecutionAccountContext).mockResolvedValue({
+      ok: true,
+      context: {
+        broker: "alpaca",
+        mode: "paper",
+        accountType: "options",
+        accountId: "acct-venus-1",
+        scope: "schedule",
+        resolvedFromScope: "schedule",
+        source: "binding",
+      },
+    });
   });
 
   it("saves a screen record for the armed alarm, origin named", async () => {

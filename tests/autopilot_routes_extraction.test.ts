@@ -21,6 +21,54 @@ import {
   type AutopilotState,
 } from "../src/agents/routes/autopilot";
 import { DEFAULT_AUTOPILOT_LIMITS } from "../src/services/riskPolicyEngine";
+import { upsertAccountBinding } from "../src/services/accountBindings";
+
+/**
+ * Issue #5100 (F3 of #5094): the evaluate endpoint resolves the bound
+ * account first. The test tenant selects Alpaca paper; the binding is
+ * seeded per test below.
+ */
+vi.mock("../src/services/providerConnections", () => ({
+  readTenantBrokerSelection: async () => ({ status: "ok", brokerId: "alpaca" }),
+}));
+
+/** The #5112 in-memory DO-namespace stub, for seeding bindings. */
+function makeMemoryDoNamespace() {
+  const store = new Map<string, string>();
+  const stub = {
+    async fetch(request: Request): Promise<Response> {
+      const payload = (await request.json()) as { op: string; key: string; value?: string };
+      if (payload.op === "get") {
+        return Response.json({ ok: true, value: store.get(payload.key) ?? null });
+      }
+      if (payload.op === "put" && payload.value !== undefined) {
+        store.set(payload.key, payload.value);
+        return Response.json({ ok: true });
+      }
+      if (payload.op === "delete") {
+        store.delete(payload.key);
+        return Response.json({ ok: true });
+      }
+      return new Response("Bad request", { status: 400 });
+    },
+  };
+  return {
+    idFromName: () => "singleton" as unknown as DurableObjectId,
+    get: () => stub as unknown as DurableObjectStub,
+  };
+}
+
+async function boundEnv(): Promise<Record<string, unknown>> {
+  const env = { SESSION_STORE: makeMemoryDoNamespace() } as Record<string, unknown>;
+  await upsertAccountBinding(env as never, "alice", {
+    broker: "alpaca",
+    mode: "paper",
+    accountType: "stock",
+    scope: "tenant",
+    accountId: "PA-900",
+  });
+  return env;
+}
 
 const src = (rel: string) => readFileSync(`src/${rel}`, "utf8");
 
@@ -170,7 +218,7 @@ describe("handleAutopilotRoutes behavior", () => {
   });
 
   it("POST /autopilot/evaluate delegates to the pipeline and echoes verdict + requestedBy", async () => {
-    const ctx = baseCtx();
+    const ctx = baseCtx({ env: (await boundEnv()) as never });
     const res = await handleAutopilotRoutes(
       req("POST", "/api/autopilot/evaluate", { symbol: "aapl", quantity: 10, action: "buy", requestedBy: "qa" }, { "x-user-login": "alice" }),
       new URL("https://x"),
@@ -185,5 +233,20 @@ describe("handleAutopilotRoutes behavior", () => {
     expect(ctx.evaluateAndRecordAutopilotVerdict).toHaveBeenCalledWith(
       expect.objectContaining({ sessionId: "sess-9", userLogin: "alice", dryRun: true, intent: expect.objectContaining({ symbol: "AAPL", quantity: 10 }) })
     );
+  });
+
+  it("POST /autopilot/evaluate unbound is refused with the coded failure (#5100)", async () => {
+    const ctx = baseCtx();
+    const res = await handleAutopilotRoutes(
+      req("POST", "/api/autopilot/evaluate", { symbol: "aapl", quantity: 10, action: "buy" }, { "x-user-login": "alice" }),
+      new URL("https://x"),
+      "/api/autopilot/evaluate",
+      "sess-9",
+      ctx
+    );
+    expect(res!.status).toBe(404);
+    const body = await res!.json();
+    expect(body.code).toBe("FAILURE_ACCOUNT_BINDING_MISSING");
+    expect(ctx.evaluateAndRecordAutopilotVerdict).not.toHaveBeenCalled();
   });
 });

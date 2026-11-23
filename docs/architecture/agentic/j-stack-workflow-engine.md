@@ -844,9 +844,10 @@ Parameters travel from spec to run in two steps:
    enum source, default (literal or `{ setting }` reference),
    required-ness, and named derivations. The enum sources and
    derivations live in a small registry,
-   `src/config/jobDefinitionParamRegistry.ts` (`ENUM_SOURCES` at `:24`,
-   `PARAM_DERIVATIONS` at `:28` — today one of each: `universes`,
-   `shardsForUniverse`). There is no per-family binder code any more:
+   `src/config/jobDefinitionParamRegistry.ts` (`ENUM_SOURCES` at `:25`,
+   `PARAM_DERIVATIONS` at `:33` — today two enum sources (`universes`,
+   `tradeModes`, the latter read from the one venue vocabulary, #6036) and
+   one derivation (`shardsForUniverse`)). There is no per-family binder code any more:
    the `BINDERS` record is deprecated and empty
    (`src/services/jobDefinitionParamBinders.ts:28-31`, #5496), and a new
    family is added as data — a spec declaration — not as code. The

@@ -9,7 +9,7 @@
 import type { Env } from "../types";
 import { ACCOUNT_BINDING_CONFIG } from "../config/accountBindings";
 import { createStoreKv, type DoNamespaceLike } from "../data/durableKv";
-import { codedMessage } from "../outcomes/outcomeAspects";
+import { codedMessage, getOutcome } from "../outcomes/outcomeAspects";
 import {
   accountBindingSlotId,
   applyBrokerRegistryPatch,
@@ -455,6 +455,109 @@ export async function resolveExecutionAccountContext(
     resolvedFromScope: null,
     source: "unset",
   };
+}
+
+export type ValidatedExecutionAccountContext =
+  | { readonly ok: true; readonly context: ExecutionAccountContext }
+  | {
+      readonly ok: false;
+      readonly code: string;
+      readonly error: string;
+      /** The outcome-catalog httpStatus for the code — never invented. */
+      readonly status: number;
+    };
+
+/**
+ * Issue #5100 (F3 of #5094) — the validated-resolution wrapper over
+ * `resolveExecutionAccountContext`. Closes the two holes the B1 plan
+ * flagged in the F1 primitive:
+ *
+ * - `source: "explicit"` — a body-supplied accountId is validated
+ *   against the broker's enumerated accounts via
+ *   `validateAccountAgainstBroker` (never accepted verbatim). Without
+ *   an enumeration the resolution fails closed: an explicit id that
+ *   cannot be validated is a refusal, not a pass-through.
+ * - `source: "unset"` — an unbound resolution is a coded
+ *   `FAILURE_ACCOUNT_BINDING_MISSING` refusal. No caller may receive
+ *   an unset context and proceed.
+ *
+ * `resolveExecutionAccountContext` itself is unchanged (the F1 pin
+ * `tests/account_binding_execution_5112.test.ts` asserts its shape);
+ * every F3 call site uses this wrapper.
+ */
+export async function resolveValidatedExecutionAccountContext(
+  env: Env,
+  userLogin: string,
+  input: {
+    broker: string;
+    mode: TradingType;
+    accountType?: unknown;
+    scope?: unknown;
+    explicitAccountId?: unknown;
+    /** The broker's enumerated accounts — required to validate an explicit accountId. */
+    availableAccounts?: readonly BrokerAccountRecordLike[];
+  },
+): Promise<ValidatedExecutionAccountContext> {
+  const fail = (code: string, error: string): ValidatedExecutionAccountContext => ({
+    ok: false,
+    code,
+    error,
+    status: getOutcome(code)?.httpStatus ?? 500,
+  });
+  const ctx = await resolveExecutionAccountContext(env, userLogin, input);
+  if (!ctx) {
+    const code = ACCOUNT_BINDING_CONFIG.failureCodes.bindingMissing;
+    return fail(
+      code,
+      codedMessage(
+        code,
+        `Unsupported broker "${input.broker}": no account binding can resolve for it.`,
+      ),
+    );
+  }
+  if (ctx.source === "unset") {
+    const code = ACCOUNT_BINDING_CONFIG.failureCodes.bindingMissing;
+    return fail(
+      code,
+      codedMessage(
+        code,
+        `No binding found for ${ctx.broker}:${ctx.mode}:${ctx.accountType}:${ctx.scope}. Silent fallback is disallowed.`,
+      ),
+    );
+  }
+  if (ctx.source === "explicit") {
+    if (!Array.isArray(input.availableAccounts)) {
+      const code = ACCOUNT_BINDING_CONFIG.failureCodes.bindingMissing;
+      return fail(
+        code,
+        codedMessage(
+          code,
+          `Cannot validate explicit account "${ctx.accountId}" for ${ctx.broker}: the broker's enumerated accounts were not supplied.`,
+        ),
+      );
+    }
+    const registry = await getBrokerAssetAccountRegistry(env, userLogin);
+    const valRes = validateAccountAgainstBroker({
+      broker: ctx.broker,
+      mode: ctx.mode,
+      accountType: ctx.accountType,
+      scope: ctx.scope,
+      accountId: ctx.accountId,
+      availableAccounts: input.availableAccounts,
+      registry,
+      updatedBy: userLogin,
+    });
+    if (!valRes.ok) return fail(valRes.code, valRes.error);
+    return {
+      ok: true,
+      context: {
+        ...ctx,
+        accountName: valRes.account.accountName ?? ctx.accountName,
+        tuple: valRes.tuple,
+      },
+    };
+  }
+  return { ok: true, context: ctx };
 }
 
 export function accountBindingAuditFields(ctx: ExecutionAccountContext | null): Record<string, unknown> {

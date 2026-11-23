@@ -20,6 +20,7 @@
  */
 
 import {
+  bindingPromptLine,
   delimitRetrievedContent,
   resolvePromptBrokerTools,
   withRetrievedContentRule,
@@ -255,7 +256,7 @@ Agentic Best Practices & Workflow Rules:
 3. RAG & Knowledge Retrieval: If 'tool_openaimp_knowledge_search' or 'tool_openaimp_query_platform_knowledge' returns matching documents, cite them accurately.
 4. Human-in-the-Loop (HITL) Execution: For financial operations or task proposals, always require human confirmation. When a user approves (or mentions a draft ID like pay_xxx or task_xxx), call 'tool_openaimp_confirm_payment_draft' with decision: 'approved'.
 5. Multi-Turn Context & Session Memory: Respect the active session memory facts shown above. When the user asks to remember a preference, call 'tool_openaimp_manage_session_memory' with action: 'remember'.
-${tradingRule}
+${tradingRule}${bindingPromptLine(input.activeBinding)}
 7. Be structured, transparent, accurate, and professional. Avoid repeating internal tool call boilerplate.
 8. Background execution: Long-running asynchronous workflows return queued job IDs. Tell the user the job ID, and use 'tool_openaimp_get_async_job' or 'tool_openaimp_list_async_jobs' only when they ask for status or results of asynchronous background jobs. Trading tools ('${brokerTools.previewTool}', '${brokerTools.executeTool}') are synchronous — do NOT call 'tool_openaimp_get_async_job' or 'tool_openaimp_list_async_jobs' for trading tools. Never imply queued work is already complete.
 
