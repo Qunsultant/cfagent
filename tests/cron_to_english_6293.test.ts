@@ -1,4 +1,4 @@
- * Issue #6293 — cronToEnglish must never render NaN, and stepped hours
+ //* Issue #6293 — cronToEnglish must never render NaN, and stepped hours
  * are their own cadence (not daily).
  *
  * The deployed opportunity-hunt goal stores "0 * /6 * * *" while the
