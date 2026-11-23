@@ -116,6 +116,7 @@ import {
 } from "./pipelinePolicy";
 import { computeBackoffDelayMs } from "./resilience";
 import {
+  FeedJobTimeoutError,
   resolveFeedJobTimeouts,
   withFeedDeadline,
 } from "./feedJobTimeouts";
@@ -547,6 +548,18 @@ interface RunContext {
   >;
   /** Run-record notes (fan-out caps, stage cancellations) appended to the terminal descriptor. */
   notes: string[];
+  /**
+   * Issue #6278 — the last leg failure recorded while a unit
+   * retries (message + attempt). The terminal error carries it
+   * when the run later dies at the whole-run deadline mid-retry,
+   * so the production error names the slow leg instead of only
+   * FEED_DEADLINE_EXCEEDED. In-memory only: the terminal record
+   * persists it via the error message. Deliberately NOT the
+   * ledger unit entry — the stage views treat a unit carrying
+   * `error` as failed, so a running unit must never carry one.
+   * Null until a retryable attempt fails.
+   */
+  lastLegError: { message: string; attempt: number } | null;
   /** The one node path a stage action forces re-execution of (re-run), or null on a normal run. */
   forceStage: string | null;
 }
@@ -2563,6 +2576,7 @@ export class JobPipelineControl {
       stepExecutions: 0,
       activeUnits: new Map(),
       notes: [],
+      lastLegError: null,
       forceStage: opts.forceStage,
     };
   }
@@ -2772,22 +2786,34 @@ export class JobPipelineControl {
       // Its message carries the FEED_DEADLINE_EXCEEDED code, so
       // the run record, the instance's lastError, and the panel
       // name the deadline rather than a generic failure.
+      // Issue #6278: the deadline message alone names no leg, so
+      // when a leg error was recorded while the unit retried it
+      // is appended (codedError + attempt) — the terminal record
+      // stays diagnosable from the production error. A
+      // non-deadline failure is untouched: its own message
+      // already is the leg error.
       const message = error instanceof Error ? error.message : String(error);
-      instance = { ...instance, state: "failed", desiredState: "none", lastError: message };
+      const terminalMessage =
+        error instanceof FeedJobTimeoutError &&
+        error.code === FEED_JOB_CODES.deadlineExceeded &&
+        ctx.lastLegError !== null
+          ? `${message} Last leg error (attempt ${ctx.lastLegError.attempt}): ${ctx.lastLegError.message}`
+          : message;
+      instance = { ...instance, state: "failed", desiredState: "none", lastError: terminalMessage };
       await this.setInstance(instance);
       await publishJobStatus(publisher, {
         jobId,
         runId: opts.runId,
         state: "failed",
         at: this.iso(),
-        detail: message,
+        detail: terminalMessage,
       });
-      await this.recordTerminal(instance, "failed", message);
+      await this.recordTerminal(instance, "failed", terminalMessage);
       return {
         jobId,
         runId: opts.runId,
         state: "failed",
-        error: message,
+        error: terminalMessage,
         artifactKeys: [...ctx.artifactKeys],
       };
     }
@@ -3657,6 +3683,14 @@ export class JobPipelineControl {
           const retryable =
             error instanceof JobPipelineError ? error.code === "job_step_failed" : true;
           if (retryable && tries < budget.maxAttempts) {
+            // Issue #6278 — record the attempt's error before
+            // the backoff, so the deadline catch in executeRun
+            // can name the last leg error when the run dies at
+            // the whole-run deadline mid-retry. Without this the
+            // terminal error carries only FEED_DEADLINE_EXCEEDED
+            // and the leg that was slow is undiagnosable from
+            // the production error.
+            ctx.lastLegError = { message, attempt: attemptNow };
             await this.sleep(computeBackoffDelayMs(budget, tries));
             // Issue #4544 — a forced re-run restarts at step 0
             // on retry, exactly as it starts: deriving here

@@ -556,6 +556,13 @@ export interface Env {
   ALPACA_OUTBOUND_RPM?: string;
   LLM_OUTBOUND_RPM?: string;
   OUTBOUND_RATE_LIMIT_MAX_WAIT_MS?: string;
+  // Issue #6278 — the pipeline policy's per-fetch timeout budget
+  // in ms (optional; default 15000 — see
+  // src/services/pipelinePolicy.ts resolveFetchTimeoutMs). The
+  // provider reads this same knob for the per-request
+  // AbortSignal.timeout in throttledFetch; the settings key
+  // pipeline.fetchTimeoutMs overrides it where the resolver runs.
+  PIPELINE_FETCH_TIMEOUT_MS?: string;
   // #1711 — payments flow switch (ONE switch, non-secret, owner-set).
   // PAYMENTS_FLOW_MODE: "hitl" | "immediate" (case-insensitive, padded
   // values accepted). Default when unset or blank: "hitl" — the #1690
