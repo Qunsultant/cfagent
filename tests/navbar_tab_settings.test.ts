@@ -2,15 +2,17 @@ import { describe, it, expect } from "vitest";
 import {
   NAVIGATION_ITEMS,
   DEFAULT_VISIBLE_NAV_TABS,
+  isNavIdVisible,
+  routeOnlyNavParent,
+} from "../src/client/components/NavigationMenu";
+import {
   NAV_TAB_PRESETS,
   NAV_PRESET_KEYS,
   buildPresetMap,
   completeVisibleTabs,
   derivePresetKey,
-  isNavIdVisible,
   leftNavConfigIds,
-  routeOnlyNavParent,
-} from "../src/client/components/NavigationMenu";
+} from "../src/client/navPresets";
 import { TAB_TO_FEATURE_MAP } from "../src/client/featureFlags";
 
 /** Every feature flag on: pins the map/parent behaviour, not the flags. */

@@ -42,7 +42,7 @@ import { AuditVaultPage } from "../src/client/AuditVaultPage";
 import { WorkflowCatalogPage } from "../src/client/WorkflowCatalogPage";
 import { NavSettingsPage } from "../src/client/NavSettingsPage";
 import { OptionsScreenerPage } from "../src/client/OptionsScreenerPage";
-import { leftNavConfigIds } from "../src/client/components/NavigationMenu";
+import { leftNavConfigIds } from "../src/client/navPresets";
 import { ToastProvider } from "../src/client/components/ui/Toast";
 import {
   routeConformance,
