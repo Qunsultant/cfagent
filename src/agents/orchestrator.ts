@@ -3776,6 +3776,19 @@ export class OrchestratorAgent extends PortThink {
       return this.routeRequest(request);
     }
 
+    // Issue #6224: same trap for the manual goal-screen submission:
+    // "screening" is not an immediate prefix, so without this branch
+    // a manual goal screen queues as an http.request async job and
+    // the workflow start dies stillborn in the replay (the executor
+    // dies before the first heartbeat) instead of returning the 202
+    // workflow acceptance. The route handler already completes
+    // binding.create synchronously; only the entry decision changes.
+    // POST only — reads on these paths never queue anyway (#2456).
+    // Same pattern as #2457/#2489/#2501/#2681 above.
+    if (path.endsWith("/screening/goal-screen") && request.method === "POST") {
+      return this.routeRequest(request);
+    }
+
     // The Worker strips the /api prefix when forwarding and marks queue-eligible requests.
     const isMcpEndpoint = /\/mcp(?:\/|$)/i.test(path);
     const isScheduleEndpoint = /(?:^|\/)(?:api\/)?schedules(?:\/|$)/i.test(path);
