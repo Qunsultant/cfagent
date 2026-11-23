@@ -5842,6 +5842,66 @@
         }
       }
     },
+    "agent_nav_presets": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "pk": 1
+        },
+        {
+          "name": "user_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "name",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "map_json",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "created_at_ms",
+          "type": "INTEGER",
+          "pk": 0
+        },
+        {
+          "name": "updated_at_ms",
+          "type": "INTEGER",
+          "pk": 0
+        }
+      ],
+      "constraints": {}
+    },
+    "agent_nav_preset_state": {
+      "columns": [
+        {
+          "name": "user_id",
+          "type": "TEXT",
+          "pk": 1
+        },
+        {
+          "name": "active_preset_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "map_json",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "updated_at_ms",
+          "type": "INTEGER",
+          "pk": 0
+        }
+      ],
+      "constraints": {}
+    },
     "kv_store": {
       "columns": [
         {
@@ -10437,6 +10497,22 @@
         "stage_id"
       ],
       "unique": true
+    },
+    "agent_nav_presets_user_name_idx": {
+      "table": "agent_nav_presets",
+      "columns": [
+        "user_id",
+        "name"
+      ],
+      "unique": true
+    },
+    "agent_nav_presets_user_idx": {
+      "table": "agent_nav_presets",
+      "columns": [
+        "user_id",
+        "updated_at_ms DESC"
+      ],
+      "unique": false
     },
     "job_run_records_binding_idx": {
       "table": "job_run_records",
