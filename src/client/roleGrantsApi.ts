@@ -22,7 +22,7 @@
 import { apiFetch } from "./apiFetch";
 
 /** Presentation of the role-grants subset of ALL_ROLES. Server enforces. */
-export const ROLE_GRANT_ROLE_OPTIONS = ["platform-admin", "tenant-admin"] as const;
+export const ROLE_GRANT_ROLE_OPTIONS = ["platform-admin", "tenant-admin", "store-operator"] as const;
 
 export type RoleGrantRoleOption = (typeof ROLE_GRANT_ROLE_OPTIONS)[number];
 

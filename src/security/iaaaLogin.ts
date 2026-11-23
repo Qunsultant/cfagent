@@ -545,24 +545,30 @@ export interface NormalizedLoginProfile {
 }
 
 /**
- * #1210 — does the logging-in user match a `platform:` bootstrap entry?
- * Reuses the existing bootstrap parser (parseBootstrapListWithGenesis);
- * it does not reimplement entry parsing. A platform: entry matches
- * when it resolves to the logging-in user's id: a bare id compares
- * directly, an issuer:subject entry resolves through the binding
- * store (post-migration, so it yields the derived id). Rejected or
- * malformed entries never match, and a plain (non-platform:) entry
- * never counts.
+ * #6180 — does the user match ANY bootstrap-list entry (platform: or
+ * plain)? The founding-bypass matcher for the data-lifecycle bootstrap
+ * handlers: the bootstrap list is the deployment-owned trust root, and
+ * a listed caller may run the handlers that create the first
+ * memberships. Reuses the existing bootstrap parser
+ * (parseBootstrapListWithGenesis); it does not reimplement entry
+ * parsing. A bare id compares directly, an issuer:subject entry
+ * resolves through the binding store (post-migration, so it yields the
+ * derived id). Rejected or malformed entries never match.
  */
-export async function isPlatformBootstrapListed(
+export async function isBootstrapListed(
   bindingStore: IdentityBindingStore,
   bootstrapRaw: string | undefined,
   targetInternalUserId: string,
+  opts: { genesisOnly?: boolean } = {},
 ): Promise<boolean> {
   if (bootstrapRaw === undefined || bootstrapRaw.trim() === "") return false;
   const parsed = parseBootstrapListWithGenesis(bootstrapRaw);
+  // #6191 — entries now carry explicit roles; a `platform:` entry is
+  // one whose roles include "platform" (the genesis role), while a
+  // plain entry defaults to ["tenant"]. genesisOnly therefore filters
+  // to platform-role entries; without it, any entry matches.
   for (const { roles, entry } of parsed.entries) {
-    if (!roles.includes("platform")) continue;
+    if (opts.genesisOnly && !roles.includes("platform")) continue;
     if (entry.kind === "internalUserId") {
       if (entry.internalUserId === targetInternalUserId) return true;
     } else {
@@ -575,6 +581,24 @@ export async function isPlatformBootstrapListed(
     }
   }
   return false;
+}
+
+/**
+ * #1210 — does the logging-in user match a `platform:` bootstrap entry?
+ * A platform: entry matches when it resolves to the logging-in user's
+ * id: a bare id compares directly, an issuer:subject entry resolves
+ * through the binding store (post-migration, so it yields the derived
+ * id). Rejected or malformed entries never match, and a plain
+ * (non-platform:) entry never counts.
+ */
+export async function isPlatformBootstrapListed(
+  bindingStore: IdentityBindingStore,
+  bootstrapRaw: string | undefined,
+  targetInternalUserId: string,
+): Promise<boolean> {
+  return isBootstrapListed(bindingStore, bootstrapRaw, targetInternalUserId, {
+    genesisOnly: true,
+  });
 }
 
 /** Options for the generic wired login tail (same shape as the GitHub delegate's). */

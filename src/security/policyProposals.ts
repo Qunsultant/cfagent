@@ -96,6 +96,7 @@ export function canonicalSnapshotJson(snapshot: PolicySnapshot): string {
   const roles: Role[] = [
     "platform-admin",
     "tenant-admin",
+    "store-operator",
     "workspace-admin",
     "member",
     "approver",
@@ -344,6 +345,7 @@ export function diffPolicySnapshots(
   const roles: Role[] = [
     "platform-admin",
     "tenant-admin",
+    "store-operator",
     "workspace-admin",
     "member",
     "approver",

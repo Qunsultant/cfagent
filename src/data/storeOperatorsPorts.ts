@@ -33,7 +33,7 @@ export function assertOperatorLogin(login: unknown): string {
 }
 
 /** Where an effective operator entry comes from. */
-export type OperatorSource = "env" | "store";
+export type OperatorSource = "env" | "store" | "membership";
 
 /** One row of the store-managed operator list. */
 export interface StoreOperatorEntry {
@@ -50,6 +50,10 @@ export interface EffectiveOperatorEntry {
   addedBy: string | null;
   /** Store rows only; null for env-managed rows. */
   addedAtMs: number | null;
+  /** Membership rows only: the holder's internal user id. */
+  internalUserId?: string | null;
+  /** Membership rows only: the binding's expiry (Q9 default), null when unbounded. */
+  expiresAtMs?: number | null;
 }
 
 /**

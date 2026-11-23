@@ -91,6 +91,7 @@ export type Permission = (typeof PERMISSIONS)[number];
 export type Role =
   | "platform-admin"
   | "tenant-admin"
+  | "store-operator"
   | "workspace-admin"
   | "member"
   | "approver"
@@ -99,6 +100,7 @@ export type Role =
 const ROLES: readonly Role[] = [
   "platform-admin",
   "tenant-admin",
+  "store-operator",
   "workspace-admin",
   "member",
   "approver",
@@ -121,6 +123,15 @@ const ROLE_GRANTS: Record<Role, readonly Permission[]> = {
   // Platform scope only; see authorize() — this set never grants tenant permissions.
   "platform-admin": ["role:assign", "audit:read", "audit:export"],
   "tenant-admin": [...PERMISSIONS],
+  // #6180 — store-operator holds NO PDP permissions. Its authority is
+  // the binding itself, checked by the store-operator gate
+  // (src/security/storeOperatorGate.ts), the same shape as the
+  // holdsPlatformAdmin / membershipIsLive binding checks: the
+  // commercial operations it gates (money writes, DLQ, data-lifecycle)
+  // are not PDP-checked today, and inventing a permission for them
+  // would name a CISO-owned permission without review. An empty set
+  // is explicit, never an omission.
+  "store-operator": [],
   "workspace-admin": [...PERMISSIONS],
   member: [
     "task:create",

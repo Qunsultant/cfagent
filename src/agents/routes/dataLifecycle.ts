@@ -16,12 +16,15 @@
  *
  * GATES — layered from the existing idioms, widest blast radius
  * first:
- * - Every route: the platformTenants operator gate (effective
- *   operators = env COMMERCIAL_STORE_OPERATORS ∪ the store
- *   operators list; no login 401, non-operator 403, unbound
- *   tenant stores 503 where the operation needs them). This is
- *   the gate of the panel neighbourhood the section lives in,
- *   and it works pre-genesis (env-held), which the bootstrap
+ * - Every route: the one store-operator gate (#6180,
+ *   src/security/storeOperatorGate.ts) — a live tenant-scoped
+ *   store-operator membership allows; the deprecated env
+ *   COMMERCIAL_STORE_OPERATORS ∪ store operators list is the
+ *   lossless fallback (audited); the bootstrap handlers
+ *   additionally admit a bootstrap-listed caller (founding
+ *   bypass). No login 401, non-operator 403, unbound tenant
+ *   stores 503 where the operation needs them. The gate works
+ *   pre-genesis (bootstrap-listed), which the bootstrap
  *   operations require.
  * - Platform clean state ADDITIONALLY requires a live
  *   platform-admin membership (the kvWipe #2489 resolveCaller
@@ -105,7 +108,10 @@ import type {
   TenantChannelStore,
   TenantChannelConfig,
 } from "../../data/tenantChannelPorts";
-import { createStoreOperatorsAdapter } from "../../data/createStoreOperatorsPorts";
+import {
+  createStoreOperatorsAdapter,
+  listEffectiveOperatorLogins,
+} from "../../data/createStoreOperatorsPorts";
 import type { StoreOperators } from "../../data/storeOperatorsPorts";
 import {
   IAAA_MEMBERSHIP_KEY_PREFIX,
@@ -128,6 +134,15 @@ import {
 } from "../../security/iaaaGithubEndToEnd";
 import { SESSION_STORE_CONFIG } from "../../config/sessionStoreConfig";
 import { createKvBindingStore } from "../../security/iaaaLogin";
+import {
+  applyDefaultGrantExpiry,
+  resolveGrantDefaultExpiryDays,
+} from "../../security/grantRules";
+import {
+  hasLiveStoreOperatorBinding,
+  resolveStoreOperatorAccess,
+} from "../../security/storeOperatorGate";
+import { migrateStoreOperatorsToMemberships } from "../../security/storeOperatorMigration";
 import { getInternalUserId } from "../../security/identityBinding";
 import {
   lookupInternalUserIdByLogin,
@@ -294,47 +309,54 @@ function jsonError(error: string, status: number): Response {
   return Response.json({ error }, { status });
 }
 
-function parseEnvOperators(env: Env): Set<string> {
-  const raw = (env as unknown as Record<string, unknown>)[
-    "COMMERCIAL_STORE_OPERATORS"
-  ];
-  if (typeof raw !== "string" || !raw.trim()) return new Set();
-  return new Set(
-    raw
-      .split(",")
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0),
-  );
-}
-
-/** The platformTenants operator gate, verbatim in behaviour. */
+/**
+ * #6180 — the store-operator gate, through the one helper
+ * (src/security/storeOperatorGate.ts). The membership is the gate;
+ * the deprecated env/store login list is the lossless fallback
+ * (audited, best-effort, below); the founding bypass admits a
+ * bootstrap-listed caller to the bootstrap handlers only
+ * (allowBootstrapFounding). Clean-state, export, and recreate stay
+ * strict: no bypass.
+ */
 async function resolveOperator(
   request: Request,
   ctx: DataLifecycleRouteContext,
+  stores: ResolvedStores,
+  opts: { allowBootstrapFounding?: boolean } = {},
 ): Promise<string | Response> {
   const login = request.headers.get("x-user-login")?.trim() ?? "";
   if (!login) {
     return jsonError("Unauthorized: a signed-in session is required.", 401);
   }
-  const effective = parseEnvOperators(ctx.env);
-  const adapter =
-    ctx.operators !== undefined
-      ? ctx.operators
-      : createStoreOperatorsAdapter(ctx.env);
-  if (adapter) {
-    try {
-      for (const entry of await adapter.listOperators()) {
-        effective.add(entry.login);
-      }
-    } catch {
-      // Degrades to env-only, exactly as the tenant-admin routes.
-    }
-  }
-  if (!effective.has(login)) {
+  const access = await resolveStoreOperatorAccess({
+    login,
+    tenantId: stores.iaaaTenantId,
+    nowMs: stores.nowMs(),
+    kv: stores.kv,
+    membershipStore: stores.membershipStore,
+    env: ctx.env as unknown as Record<string, unknown>,
+    operators: ctx.operators,
+    allowBootstrapFounding: opts.allowBootstrapFounding,
+  });
+  if (!access.allowed) {
     return jsonError(
       "Forbidden: data lifecycle operations require a store operator.",
       403,
     );
+  }
+  if (access.via === "legacy-list") {
+    // #6180 — the deprecated read: a login-list operator, not yet
+    // migrated to a store-operator membership. Audited best-effort
+    // (a failed audit write never converts the allow into a deny).
+    try {
+      ctx.audit("data-lifecycle.store-operator-legacy-fallback", "orchestrator", {
+        login,
+        tenantId: stores.iaaaTenantId,
+        storeDegraded: access.storeDegraded,
+      });
+    } catch {
+      // Best-effort annotation only.
+    }
   }
   return login;
 }
@@ -1102,9 +1124,9 @@ async function handleCleanState(
   request: Request,
   ctx: DataLifecycleRouteContext,
 ): Promise<Response> {
-  const operator = await resolveOperator(request, ctx);
-  if (operator instanceof Response) return operator;
   const stores = resolveStores(ctx);
+  const operator = await resolveOperator(request, ctx, stores);
+  if (operator instanceof Response) return operator;
   const body = (await request.json().catch(() => null)) as CleanBody | null;
   if (!body || typeof body !== "object") {
     return jsonError("A JSON body is required.", 400);
@@ -1266,9 +1288,9 @@ async function handleExport(
   url: URL,
   ctx: DataLifecycleRouteContext,
 ): Promise<Response> {
-  const operator = await resolveOperator(request, ctx);
-  if (operator instanceof Response) return operator;
   const stores = resolveStores(ctx);
+  const operator = await resolveOperator(request, ctx, stores);
+  if (operator instanceof Response) return operator;
   const scopeParam = url.searchParams.get("scope");
   if (scopeParam !== "tenant" && scopeParam !== "platform") {
     return jsonError("A scope of \"tenant\" or \"platform\" is required.", 400);
@@ -1661,6 +1683,51 @@ async function checkPlatformBootstrap(
     });
   }
 
+  // 6. Store-operator migration (#6180) — the deprecated login-keyed
+  // lists (env COMMERCIAL_STORE_OPERATORS UNION the store list) are
+  // migrated to store-operator memberships. The check is a dry run:
+  // nothing is minted here; the init handler performs it on confirm.
+  const { logins: legacyLogins, storeDegraded } = await listEffectiveOperatorLogins(
+    ctx.env as unknown as Record<string, unknown>,
+    ctx.operators,
+  );
+  const preview = await migrateStoreOperatorsToMemberships({
+    membershipStore: stores.membershipStore,
+    kv: stores.kv,
+    legacyLogins: [...legacyLogins],
+    tenantId: stores.iaaaTenantId,
+    nowMs: stores.nowMs(),
+    defaultExpiryDays: resolveGrantDefaultExpiryDays(
+      (ctx.env as unknown as Record<string, unknown>)[
+        "IAAA_GRANT_DEFAULT_EXPIRY_DAYS"
+      ] as string | undefined,
+    ),
+    dryRun: true,
+  });
+  if (legacyLogins.size === 0) {
+    elements.push({
+      id: "store-operators",
+      state: "present",
+      detail:
+        "No legacy operator logins configured (env COMMERCIAL_STORE_OPERATORS and the store list are both empty); nothing to migrate.",
+      source: "src/security/storeOperatorMigration.ts (migrateStoreOperatorsToMemberships)",
+    });
+  } else if (preview.migrated.length === 0 && preview.unresolved.length === 0) {
+    elements.push({
+      id: "store-operators",
+      state: "present",
+      detail: `${preview.alreadyHeld.length} legacy operator login(s) already hold store-operator memberships for this tenant.`,
+      source: "src/security/storeOperatorMigration.ts (migrateStoreOperatorsToMemberships)",
+    });
+  } else {
+    elements.push({
+      id: "store-operators",
+      state: "missing",
+      detail: `${preview.migrated.length} legacy operator login(s) without a store-operator membership${preview.unresolved.length > 0 ? ` (${preview.unresolved.length} unresolvable — no alias record; they keep access via the deprecated legacy list until they sign in)` : ""}${storeDegraded ? " (store list degraded to env-only)" : ""}; confirming migrates them.`,
+      source: "src/security/storeOperatorMigration.ts (migrateStoreOperatorsToMemberships)",
+    });
+  }
+
   return elements;
 }
 
@@ -1668,9 +1735,9 @@ async function handlePlatformBootstrapCheck(
   request: Request,
   ctx: DataLifecycleRouteContext,
 ): Promise<Response> {
-  const operator = await resolveOperator(request, ctx);
-  if (operator instanceof Response) return operator;
   const stores = resolveStores(ctx);
+  const operator = await resolveOperator(request, ctx, stores, { allowBootstrapFounding: true });
+  if (operator instanceof Response) return operator;
   const elements = await checkPlatformBootstrap(ctx, stores);
   return Response.json({
     tenantId: stores.iaaaTenantId,
@@ -1683,9 +1750,9 @@ async function handlePlatformBootstrapInit(
   request: Request,
   ctx: DataLifecycleRouteContext,
 ): Promise<Response> {
-  const operator = await resolveOperator(request, ctx);
-  if (operator instanceof Response) return operator;
   const stores = resolveStores(ctx);
+  const operator = await resolveOperator(request, ctx, stores, { allowBootstrapFounding: true });
+  if (operator instanceof Response) return operator;
   const body = (await request.json().catch(() => null)) as {
     confirm?: unknown;
   } | null;
@@ -1702,6 +1769,32 @@ async function handlePlatformBootstrapInit(
 
   const caller = await resolveWiredCaller(request, stores);
   for (const element of elements) {
+    if (element.id === "store-operators" && element.state === "missing") {
+      const { logins: legacyLogins } = await listEffectiveOperatorLogins(
+        ctx.env as unknown as Record<string, unknown>,
+        ctx.operators,
+      );
+      const result = await migrateStoreOperatorsToMemberships({
+        membershipStore: stores.membershipStore,
+        kv: stores.kv,
+        legacyLogins: [...legacyLogins],
+        tenantId: stores.iaaaTenantId,
+        nowMs: stores.nowMs(),
+        defaultExpiryDays: resolveGrantDefaultExpiryDays(
+          (ctx.env as unknown as Record<string, unknown>)[
+            "IAAA_GRANT_DEFAULT_EXPIRY_DAYS"
+          ] as string | undefined,
+        ),
+      });
+      if (result.failed.length > 0) {
+        element.state = "failed";
+        element.detail = `Store-operator migration failed for ${result.failed.map((f) => f.login).join(", ")}: ${result.failed[0].error}. Migrated ${result.migrated.length}, already held ${result.alreadyHeld.length}, unresolved ${result.unresolved.length}.`;
+      } else {
+        element.state = "initialized";
+        element.detail = `Migrated ${result.migrated.length} legacy operator login(s) to store-operator memberships (already held ${result.alreadyHeld.length}${result.unresolved.length > 0 ? `, ${result.unresolved.length} unresolvable — they keep access via the deprecated legacy list until they sign in` : ""}).`;
+      }
+      continue;
+    }
     if (element.id !== "platform-genesis" || element.state !== "missing") {
       continue;
     }
@@ -1807,9 +1900,9 @@ async function handleTenantBootstrap(
   request: Request,
   ctx: DataLifecycleRouteContext,
 ): Promise<Response> {
-  const operator = await resolveOperator(request, ctx);
-  if (operator instanceof Response) return operator;
   const stores = resolveStores(ctx);
+  const operator = await resolveOperator(request, ctx, stores, { allowBootstrapFounding: true });
+  if (operator instanceof Response) return operator;
   const body = (await request.json().catch(() => null)) as
     | TenantBootstrapBody
     | null;
@@ -1954,41 +2047,85 @@ async function handleTenantBootstrap(
               (b.expiresAtMs === undefined || b.expiresAtMs > nowMs),
           ),
       );
-      if (alreadyAdmin) {
+      // #6180 — the founding admin operates the tenant, so the step
+      // grants store-operator alongside tenant-admin. Without this a
+      // founder who is not in the env operator list could not run
+      // data-lifecycle operations once the bootstrap window closes.
+      const alreadyOperator = hasLiveStoreOperatorBinding(existing, tenantId, nowMs);
+      if (alreadyAdmin && alreadyOperator) {
         steps.push({
           id: "founding-admin",
           status: "present",
-          detail: `"${foundingAdminLogin}" already holds tenant-admin for this tenant.`,
+          detail: `"${foundingAdminLogin}" already holds tenant-admin and store-operator for this tenant.`,
         });
       } else if (!confirm) {
+        const grants: string[] = [];
+        if (!alreadyAdmin) grants.push("tenant-admin (system:bootstrap)");
+        if (!alreadyOperator) grants.push("store-operator (system:bootstrap)");
         steps.push({
           id: "founding-admin",
           status: "would-initialize",
-          detail: `"${foundingAdminLogin}" resolves to a wired identity; confirming grants tenant-admin (system:bootstrap).`,
+          detail: `"${foundingAdminLogin}" resolves to a wired identity; confirming grants ${grants.join(" and ")}.`,
         });
       } else {
-        const result = await provisionBootstrapAdmins(stores.membershipStore, {
-          tenantId,
-          internalUserIds: [founderId],
-          nowMs,
-        });
-        if (!result.ok) {
+        let adminDetail: string | null = null;
+        let adminFailed: string | null = null;
+        if (!alreadyAdmin) {
+          const result = await provisionBootstrapAdmins(stores.membershipStore, {
+            tenantId,
+            internalUserIds: [founderId],
+            nowMs,
+          });
+          if (!result.ok) {
+            adminFailed = `Provisioning failed: ${result.error}.`;
+          } else if (result.provisioned.includes(founderId)) {
+            adminDetail = "granted tenant-admin (system:bootstrap)";
+          } else {
+            adminDetail = "already holds tenant-admin";
+          }
+        } else {
+          adminDetail = "already holds tenant-admin";
+        }
+        let operatorDetail: string | null = null;
+        let operatorFailed: string | null = null;
+        if (!alreadyOperator) {
+          const expiryDays = resolveGrantDefaultExpiryDays(
+            (ctx.env as unknown as Record<string, unknown>)[
+              "IAAA_GRANT_DEFAULT_EXPIRY_DAYS"
+            ] as string | undefined,
+          );
+          const bindings = applyDefaultGrantExpiry(
+            [{ role: "store-operator", scope: "tenant", grantedBy: "system:bootstrap" }],
+            nowMs,
+            expiryDays,
+          );
+          const created = await createMembership(stores.membershipStore, {
+            internalUserId: founderId,
+            tenantId,
+            roleBindings: bindings,
+            createdBy: "system:bootstrap",
+            nowMs,
+          });
+          if (created.ok) {
+            operatorDetail = "granted store-operator (system:bootstrap)";
+          } else {
+            operatorFailed = `Store-operator grant failed: ${created.error}.`;
+          }
+        } else {
+          operatorDetail = "already holds store-operator";
+        }
+        if (adminFailed !== null || operatorFailed !== null) {
           steps.push({
             id: "founding-admin",
             status: "failed",
-            detail: `Provisioning failed: ${result.error}.`,
-          });
-        } else if (result.provisioned.includes(founderId)) {
-          steps.push({
-            id: "founding-admin",
-            status: "initialized",
-            detail: `"${foundingAdminLogin}" granted tenant-admin (system:bootstrap).`,
+            detail: `"${foundingAdminLogin}": ${[adminFailed, operatorFailed].filter(Boolean).join(" ")}`,
           });
         } else {
+          const granted = !alreadyAdmin || !alreadyOperator;
           steps.push({
             id: "founding-admin",
-            status: "present",
-            detail: `"${foundingAdminLogin}" already holds tenant-admin for this tenant.`,
+            status: granted ? "initialized" : "present",
+            detail: `"${foundingAdminLogin}" ${adminDetail}; ${operatorDetail}.`,
           });
         }
       }
@@ -2095,6 +2232,67 @@ async function handleTenantBootstrap(
         id: "channels",
         status: "failed",
         detail: `Channel provisioning failed: ${err instanceof Error ? err.message : "error"}.`,
+      });
+    }
+  }
+
+  // -- store-operators (#6180) ---------------------------------------------------
+  // The deprecated login-keyed operator lists migrate to
+  // store-operator memberships here, so a tenant founded after this
+  // slice carries its operators as memberships from day one. A
+  // preview (confirm=false) dry-runs the migration; confirm mints.
+  {
+    const { logins: legacyLogins, storeDegraded } = await listEffectiveOperatorLogins(
+      ctx.env as unknown as Record<string, unknown>,
+      ctx.operators,
+    );
+    const result = await migrateStoreOperatorsToMemberships({
+      membershipStore: stores.membershipStore,
+      kv: stores.kv,
+      legacyLogins: [...legacyLogins],
+      tenantId,
+      nowMs,
+      defaultExpiryDays: resolveGrantDefaultExpiryDays(
+        (ctx.env as unknown as Record<string, unknown>)[
+          "IAAA_GRANT_DEFAULT_EXPIRY_DAYS"
+        ] as string | undefined,
+      ),
+      dryRun: !confirm,
+    });
+    const unresolvedNote =
+      result.unresolved.length > 0
+        ? ` (${result.unresolved.length} unresolvable — no alias record; they keep access via the deprecated legacy list until they sign in)`
+        : "";
+    const degradedNote = storeDegraded ? " (store list degraded to env-only)" : "";
+    if (legacyLogins.size === 0) {
+      steps.push({
+        id: "store-operators",
+        status: "present",
+        detail: "No legacy operator logins configured; nothing to migrate.",
+      });
+    } else if (result.failed.length > 0) {
+      steps.push({
+        id: "store-operators",
+        status: "failed",
+        detail: `Store-operator migration failed for ${result.failed.map((f) => f.login).join(", ")}: ${result.failed[0].error}. Migrated ${result.migrated.length}, already held ${result.alreadyHeld.length}, unresolved ${result.unresolved.length}${degradedNote}.`,
+      });
+    } else if (!confirm) {
+      steps.push({
+        id: "store-operators",
+        status: "would-initialize",
+        detail: `Confirming migrates ${result.migrated.length} legacy operator login(s) to store-operator memberships${unresolvedNote}${degradedNote}.`,
+      });
+    } else if (result.migrated.length === 0 && result.unresolved.length === 0) {
+      steps.push({
+        id: "store-operators",
+        status: "present",
+        detail: `All ${result.alreadyHeld.length} legacy operator login(s) already hold store-operator memberships.`,
+      });
+    } else {
+      steps.push({
+        id: "store-operators",
+        status: "initialized",
+        detail: `Migrated ${result.migrated.length} legacy operator login(s) to store-operator memberships${unresolvedNote}${degradedNote}.`,
       });
     }
   }
@@ -2329,9 +2527,9 @@ async function handleRecreate(
   request: Request,
   ctx: DataLifecycleRouteContext,
 ): Promise<Response> {
-  const operator = await resolveOperator(request, ctx);
-  if (operator instanceof Response) return operator;
   const stores = resolveStores(ctx);
+  const operator = await resolveOperator(request, ctx, stores);
+  if (operator instanceof Response) return operator;
   const body = (await request.json().catch(() => null)) as RecreateBody | null;
   if (!body || typeof body !== "object") {
     return jsonError("A JSON body is required.", 400);

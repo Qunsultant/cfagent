@@ -1,12 +1,19 @@
 /**
  * Issue #2680 — Store operator management panel (standalone).
  *
- * Lists the effective commercial operators (env UNION store),
- * adds store operators by login, and removes store operators.
- * Env-managed rows are shown with an env badge and no remove
- * button: env operators are removed via dashboard, never via
- * the UI. Guard refusals from the server (last-operator 409,
- * env-login 409, blank-login 400) surface as plain messages.
+ * Lists the effective commercial operators (memberships first,
+ * then the deprecated env/store lists), adds store operators by
+ * login, and removes store operators. Env-managed rows are shown
+ * with an env badge and no remove button: env operators are
+ * removed via dashboard, never via the UI. Membership rows show
+ * the binding's expiry and are removed by revoking the binding.
+ * Guard refusals from the server (last-operator 409, env-login
+ * 409, blank-login 400) surface as plain messages.
+ *
+ * #6180 — the membership is the authority: a login that holds a
+ * store-operator membership and a legacy listing shows once, as
+ * the membership. Adding grants a membership (tenant-admins
+ * only); removing revokes it.
  *
  * STANDALONE by design: this file is NOT wired into
  * PaymentWorkflowAssurance here — #2677 Slice A is editing that
@@ -62,9 +69,13 @@ const opSubtitleStyle: React.CSSProperties = {
 };
 export interface EffectiveOperatorRow {
   login: string;
-  source: "env" | "store";
+  source: "env" | "store" | "membership";
   addedBy: string | null;
   addedAtMs: number | null;
+  /** Membership rows only: the holder's internal user id. */
+  internalUserId?: string | null;
+  /** Membership rows only: the binding's expiry (Q9 default), null when unbounded. */
+  expiresAtMs?: number | null;
 }
 
 async function callJson(path: string, init?: RequestInit): Promise<unknown> {
@@ -185,14 +196,15 @@ export function StoreOperatorsPanel() {
           <div>
             <CardHeader title="Store operators" />
             <p style={opSubtitleStyle}>
-              Effective operators are the deployment list plus the store list. Env-managed operators are removed via the
-              deployment dashboard, not here; store operators are managed below. Removing the last effective operator is
-              refused.
+              Effective operators are the store-operator memberships plus the deprecated deployment and store lists.
+              A login that holds a membership and a legacy listing shows once, as the membership. Env-managed
+              operators are removed via the deployment dashboard, not here; memberships and store operators are
+              managed below. Removing the last effective operator is refused.
             </p>
           </div>
           <Notice tone="warning" title="Not a store operator">
             You are not a store operator, so operator management is not available to this session. Operators are
-            assigned by an existing operator, or listed in the deployment&apos;s operator list by the owner.
+            granted by a tenant-admin, or listed in the deployment&apos;s operator list by the owner.
           </Notice>
         </div>
       </Card>
@@ -205,9 +217,9 @@ export function StoreOperatorsPanel() {
         <div>
           <CardHeader title="Store operators" />
           <p style={opSubtitleStyle}>
-            Effective operators are the deployment list plus the store list. Env-managed operators are removed via the
-            deployment dashboard, not here; store operators are managed below. Removing the last effective operator is
-            refused.
+            Effective operators are the store-operator memberships plus the deprecated deployment and store lists.
+            Env-managed operators are removed via the deployment dashboard, not here; memberships and store
+            operators are managed below. Removing the last effective operator is refused.
           </p>
         </div>
         {error && (
@@ -230,7 +242,16 @@ export function StoreOperatorsPanel() {
                 key: "source",
                 header: "Source",
                 render: (op) => (
-                  <Badge tone={op.source === "env" ? "neutral" : "accent"} title={op.source === "env" ? "Env-managed: remove via dashboard" : "Store-managed"}>
+                  <Badge
+                    tone={op.source === "env" ? "neutral" : op.source === "membership" ? "success" : "accent"}
+                    title={
+                      op.source === "env"
+                        ? "Env-managed: remove via dashboard"
+                        : op.source === "membership"
+                          ? "IAAA membership: remove revokes the binding"
+                          : "Store-managed"
+                    }
+                  >
                     {op.source}
                   </Badge>
                 ),
@@ -238,10 +259,16 @@ export function StoreOperatorsPanel() {
               { key: "addedBy", header: "Added by", render: (op) => op.addedBy ?? "—" },
               { key: "addedAt", header: "Added at", render: (op) => formatTimestamp(op.addedAtMs) },
               {
+                key: "expiresAt",
+                header: "Expires",
+                render: (op) =>
+                  op.source === "membership" ? (op.expiresAtMs ? formatTimestamp(op.expiresAtMs) : "Never") : "—",
+              },
+              {
                 key: "actions",
                 header: "Actions",
                 render: (op) =>
-                  op.source === "store" ? (
+                  op.source === "store" || op.source === "membership" ? (
                     <Button variant="secondary" size="sm" disabled={busy} onClick={() => void removeOperator(op.login)}>
                       Remove
                     </Button>

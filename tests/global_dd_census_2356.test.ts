@@ -1058,6 +1058,11 @@ function step5bPortSites(): Array<[string, string, number]> {
 }
 
 const STEP5B_PORT_SITES: Array<[string, string, number]> = [
+  // Added for issue #6180: the /operators list route and the
+  // /operators/remove guard each list the sessions-bucket membership
+  // keys via the same listSessionFamilyEntries factory — no new
+  // funnel, no bypass (both reuse the existing family listing).
+  ["src/agents/routes/agenticPayments.ts", "listSessionFamilyEntries", 2],
   ["src/data/createSessionPorts.ts", "createSessionPorts", 1],
   // Added for issue #2840: the per-user session-cap enforcement
   // in the wired login tail lists the user's sessions via the

@@ -6,13 +6,13 @@
  * - GET records: un-replayed dead-letter rows, newest first.
  * - POST replay: re-drive one record to its source queue.
  *
- * The gate mirrors the commercial operator routes: the
- * x-user-login header (session-verified by server.ts, #1156)
- * against env COMMERCIAL_STORE_OPERATORS UNION the store
- * operator list (#2680; unbound store degrades to env-only,
- * never a 500, never a lockout). Non-operators get 403, never
- * a separate 401. An unbound DLQ store yields 503: the
- * operator cannot list or replay what cannot be verified.
+ * The gate is the one store-operator gate (#6180,
+ * src/security/storeOperatorGate.ts): a live tenant-scoped
+ * store-operator membership allows; the deprecated env
+ * COMMERCIAL_STORE_OPERATORS UNION store operator list is the
+ * lossless fallback (logged). Non-operators get 403, never a
+ * separate 401. An unbound DLQ store yields 503: the operator
+ * cannot list or replay what cannot be verified.
  *
  * Route handlers take parsed inputs, never match paths:
  * helpers live above the handler so the thin-router inventory
@@ -21,7 +21,6 @@
  */
 import { resolveDlqDepthAlertThreshold } from "../../config/dlqDepthAlert";
 import { createDeadLetterStoreAdapter, ensureDeadLetterStoreSchema, type DeadLetterStoreDb } from "../../data/createDeadLetterStorePorts";
-import { createStoreOperatorsAdapter } from "../../data/createStoreOperatorsPorts";
 import { maybeAlertDlqDepth } from "../../messaging/dlqDepthAlert";
 import { replayDeadLetter, type ReplaySender } from "../../messaging/deadLetterReplay";
 import type { DeadLetterStore } from "../../messaging/deadLetterStorePorts";
@@ -30,6 +29,13 @@ import type { SlackDeliveryEnv } from "../social/delivery";
 
 import { createStructuredLogger } from "../../observability/structuredLogger";
 import { createObservabilitySink } from "../../observability/createObservabilityPorts";
+import { resolveStoreOperatorAccess } from "../../security/storeOperatorGate";
+import { createKvMembershipStore } from "../../security/iaaaMembershipStore";
+import { resolveIaaaTenant } from "../../security/iaaaGithubEndToEnd";
+import { sessionStore } from "../../security/session";
+import type { MembershipStore } from "../../security/authorization";
+import type { KvLike } from "../../security/kvResilience";
+import type { Env } from "../../types";
 
 /** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
 const structuredLog = createStructuredLogger(createObservabilitySink({}), {
@@ -50,29 +56,37 @@ function json(body: unknown, status: number): Response {
   return Response.json(body, { status });
 }
 
-function envOperatorLogins(env: unknown): Set<string> {
-  const raw = (env as Record<string, unknown>)["COMMERCIAL_STORE_OPERATORS"];
-  if (typeof raw !== "string" || !raw.trim()) return new Set();
-  return new Set(
-    raw
-      .split(",")
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0),
-  );
-}
-
-/** Effective operators: env list UNION store list, env-only on any store failure. */
+/**
+ * #6180 — the store-operator gate, through the one helper. The
+ * membership is the gate; the deprecated login list is the lossless
+ * fallback (logged). No founding bypass: the DLQ is steady-state.
+ * A store failure degrades to the legacy list — never a 500, never
+ * a lockout — exactly as before.
+ */
 async function isDlqOperator(env: unknown, login: string | null): Promise<boolean> {
   if (!login) return false;
-  if (envOperatorLogins(env).has(login)) return true;
+  const tenantId = resolveIaaaTenant(env as Partial<Env> | null | undefined);
+  let kv: KvLike | undefined;
+  let membershipStore: MembershipStore | undefined;
   try {
-    const adapter = createStoreOperatorsAdapter(env as { AGENT_DB?: unknown });
-    if (!adapter) return false;
-    const entries = await adapter.listOperators();
-    return entries.some((entry) => entry.login === login);
+    kv = sessionStore(env as Env);
+    membershipStore = createKvMembershipStore(kv);
   } catch {
-    return false;
+    kv = undefined;
+    membershipStore = undefined;
   }
+  const access = await resolveStoreOperatorAccess({
+    login,
+    tenantId,
+    nowMs: Date.now(),
+    kv,
+    membershipStore,
+    env: env as Record<string, unknown>,
+  });
+  if (access.via === "legacy-list") {
+    structuredLog.warn("dlq.store_operator_legacy_fallback", { login });
+  }
+  return access.allowed;
 }
 
 function sendersFromEnv(env: unknown): Record<string, ReplaySender> {

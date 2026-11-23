@@ -486,7 +486,15 @@ describe("clean state, tenant scope (#3250)", () => {
     expect(byId["instance-tables"].count).toBe(10); // per instance: 1 job + 1 outcome + 1 meta + 2 events = 5
     expect(w.sessions.size).toBe(sessionsBefore);
     expect(countRows(w.instances.get(ALICE)!.db, "mas_events")).toBe(2);
-    expect(w.funnel).not.toHaveBeenCalled();
+    // #6180 — the preview itself writes no audit event, but the gate
+    // records one best-effort event: OP passes through the deprecated
+    // legacy operator list (store list, not a membership).
+    expect(w.funnel).toHaveBeenCalledTimes(1);
+    expect(w.funnel).toHaveBeenCalledWith(
+      "data-lifecycle.store-operator-legacy-fallback",
+      "orchestrator",
+      expect.objectContaining({ login: OP, tenantId: "primary", storeDegraded: false }),
+    );
   });
 
   it("confirm without a preview token is refused and deletes nothing (sabotage pin)", async () => {
@@ -623,7 +631,15 @@ describe("clean state, platform scope (#3250)", () => {
     expect(byId["platform-tokens"].count).toBe(1);
     expect(byId["platform-sessions"].count).toBe(3);
     expect(byId["platform-audit-log"].count).toBe(1);
-    expect(w.funnel).not.toHaveBeenCalled();
+    // #6180 — the preview itself writes no audit event, but the gate
+    // records one best-effort event: OP passes through the deprecated
+    // legacy operator list (store list, not a membership).
+    expect(w.funnel).toHaveBeenCalledTimes(1);
+    expect(w.funnel).toHaveBeenCalledWith(
+      "data-lifecycle.store-operator-legacy-fallback",
+      "orchestrator",
+      expect.objectContaining({ login: OP, tenantId: "primary", storeDegraded: false }),
+    );
   });
 
   it("confirm requires the typed scope confirmation and auditConfirm", async () => {
@@ -757,6 +773,33 @@ describe("platform bootstrap (#3250)", () => {
     expect(await w.membershipStore.getMembershipsByUser(OP_ID)).toHaveLength(mine.length);
   });
 
+  it("check reports the store-operators migration element; initialize migrates the legacy operator (#6180)", async () => {
+    const w = await makeWorld();
+    const check = await call(w.ctx, "/api/data-lifecycle/bootstrap", "GET", OP);
+    expect(check.status).toBe(200);
+    const byId = Object.fromEntries(check.body.elements.map((e: any) => [e.id, e]));
+    expect(byId["store-operators"].state).toBe("missing");
+    expect(byId["store-operators"].detail).toMatch(
+      /1 legacy operator login\(s\) without a store-operator membership/,
+    );
+    const before = await w.membershipStore.getMembershipsByUser(OP_ID);
+    expect(before.some((m) => m.roleBindings.some((b) => b.role === "store-operator"))).toBe(false);
+    const init = await call(w.ctx, "/api/data-lifecycle/bootstrap", "POST", OP, { confirm: true });
+    expect(init.status).toBe(200);
+    const initById = Object.fromEntries(init.body.elements.map((e: any) => [e.id, e]));
+    expect(initById["store-operators"].state).toBe("initialized");
+    expect(initById["store-operators"].detail).toMatch(/Migrated 1 legacy operator login/);
+    const after = await w.membershipStore.getMembershipsByUser(OP_ID);
+    const minted = after.filter(
+      (m) =>
+        m.tenantId === "primary" &&
+        m.roleBindings.some((b) => b.role === "store-operator" && b.scope === "tenant"),
+    );
+    expect(minted).toHaveLength(1);
+    expect(minted[0].roleBindings[0].grantedBy).toBe("system:store-operator-migration");
+    expect(minted[0].roleBindings[0].expiresAtMs).toBeGreaterThan(Date.now());
+  });
+
   it("initialize without confirm performs nothing", async () => {
     const w = await makeWorld();
     const out = await call(w.ctx, "/api/data-lifecycle/bootstrap", "POST", OP, {});
@@ -844,6 +887,46 @@ describe("tenant bootstrap (#3250)", () => {
     expect(
       w.sessions.get(platformGenesisMarkerKeyForUser("tenant-c", "user-founder")),
     ).toBe(marker);
+  });
+
+  it("preview dry-runs the store-operators migration; confirm mints it and grants the founder store-operator (#6180)", async () => {
+    const w = await makeWorld();
+    const preview = await call(w.ctx, "/api/data-lifecycle/tenant-bootstrap", "POST", OP, {
+      tenantId: "tenant-c",
+      foundingAdminLogin: FOUNDER,
+    });
+    expect(preview.status).toBe(200);
+    const previewById = Object.fromEntries(preview.body.steps.map((s: any) => [s.id, s]));
+    expect(previewById["store-operators"].status).toBe("would-initialize");
+    expect(previewById["store-operators"].detail).toMatch(/Confirming migrates 1 legacy operator login/);
+    const before = await w.membershipStore.getMembershipsByUser(OP_ID);
+    expect(
+      before.some(
+        (m) => m.tenantId === "tenant-c" && m.roleBindings.some((b) => b.role === "store-operator"),
+      ),
+    ).toBe(false);
+    const out = await call(w.ctx, "/api/data-lifecycle/tenant-bootstrap", "POST", OP, {
+      tenantId: "tenant-c",
+      foundingAdminLogin: FOUNDER,
+      claimGenesis: true,
+      confirm: true,
+    });
+    expect(out.status).toBe(200);
+    const byId = Object.fromEntries(out.body.steps.map((s: any) => [s.id, s]));
+    expect(byId["store-operators"].status).toBe("initialized");
+    expect(byId["store-operators"].detail).toMatch(/Migrated 1 legacy operator login/);
+    const opAfter = await w.membershipStore.getMembershipsByUser(OP_ID);
+    expect(
+      opAfter.some(
+        (m) =>
+          m.tenantId === "tenant-c" &&
+          m.roleBindings.some((b) => b.role === "store-operator" && b.scope === "tenant"),
+      ),
+    ).toBe(true);
+    // The founding admin holds store-operator alongside tenant-admin.
+    const founderMemberships = await w.membershipStore.getMembershipsByUser("user-founder");
+    const inTenant = founderMemberships.filter((m) => m.tenantId === "tenant-c");
+    expect(inTenant.some((m) => m.roleBindings.some((b) => b.role === "store-operator"))).toBe(true);
   });
 
   it("claimGenesis without platform-admin membership leaves genesis unclaimed and reports partial truthfully", async () => {
