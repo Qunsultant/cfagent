@@ -142,6 +142,29 @@ export function ensureAuditChainColumns(sql: SqlStorage): void {
 }
 
 /**
+ * Issue #6100: attribution envelope columns for mas_events on tables
+ * created before the columns existed. Idempotent creation never
+ * migrates, so each missing column is added explicitly (the #2178
+ * audit-chain pattern above). Idempotent: a table that already has
+ * the columns is untouched. The columns are nullable by design —
+ * legacy rows without a resolvable dimension stay explicitly NULL,
+ * never invented — and fresh tables get the columns from the
+ * catalogue DDL (src/data/schemaComponent/ormCatalogue.ts), in the
+ * same (last) position, so fresh and migrated tables agree. The
+ * ALTER statements live in the catalogue too (#4282 single home
+ * for statement text) — this helper only executes them.
+ */
+export function ensureAttributionEnvelopeColumns(sql: SqlStorage): void {
+  const info = Array.from(sql.exec(`PRAGMA table_info(mas_events)`)) as Array<{ name: string }>;
+  const names = new Set(info.map((c) => c.name));
+  for (const column of ["platform_id", "tenant_id", "principal_id", "correlation_id", "trace_id"]) {
+    if (!names.has(column)) {
+      sql.exec(ormAuditChainAlterSql(column));
+    }
+  }
+}
+
+/**
  * Issue #3182: tenant column for mas_transactions on tables created
  * before the column existed. An IF NOT EXISTS create never
  * migrates, so the missing column is added explicitly (the

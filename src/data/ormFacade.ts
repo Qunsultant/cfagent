@@ -45,7 +45,7 @@ import {
   type CanonicalStoreResult,
 } from "../services/scheduledReports";
 import type { IndexEnv } from "../services/reportSemanticIndex";
-import { ensureSharedTable, ensureAuditChainColumns, ensurePromotionsIndex, ensureTransactionTenantColumn } from "./ormSchema";
+import { ensureSharedTable, ensureAttributionEnvelopeColumns, ensureAuditChainColumns, ensurePromotionsIndex, ensureTransactionTenantColumn } from "./ormSchema";
 import { ormTableSql } from "./schemaComponent/ormCatalogue";
 import { DO_DML_CATALOGUE } from "./schemaComponent/doDmlCatalogue";
 import { executeDoDml } from "./schemaComponent/doDmlExecutor";
@@ -314,6 +314,8 @@ export class DatabaseORM {
     ensureSharedTable(this.sql, "mas_events");
     // Issue #2178 (Q7 S1): chain columns on pre-existing tables.
     ensureAuditChainColumns(this.sql);
+    // Issue #6100: attribution envelope columns on pre-existing tables.
+    ensureAttributionEnvelopeColumns(this.sql);
 
     // 8b. Inbound webhook replay-protection nonces (issue #143 P0)
     this.sql.exec(ormTableSql("webhook_replay_nonces"));

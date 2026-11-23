@@ -53,6 +53,7 @@ import {
 import type { NLQSchedulingPort, NLQStockScreenPort } from "../nlq";
 import { BusinessError, codedMessage, resolveOutcome } from "../../outcomes/outcomeAspects";
 import { recordBlockingAudit } from "../../security/auditChain";
+import type { AttributionEnvelopeOverride } from "../../security/attributionEnvelope";
 import {
   enforceServiceDispatch,
   resolveAsyncJobIdentity,
@@ -147,7 +148,15 @@ export interface AsyncJobsContext {
   ensureTables: () => AgentContext["storage"]["sql"];
   sessionKey: () => string;
   schedule: (when: Date | number | string, callback: string, payload?: unknown, options?: ScheduleOptions) => Promise<unknown>;
-  audit: (type: string, agent: AgentName | "judge" | "nlq" | "orchestrator", payload: Record<string, unknown>) => void;
+  audit: (
+    type: string,
+    agent: AgentName | "judge" | "nlq" | "orchestrator",
+    payload: Record<string, unknown>,
+    // Issue #6100: optional explicit envelope dimensions the caller
+    // already resolved (tenant / correlation); the boundary fills
+    // the rest and the override wins per field.
+    envelope?: AttributionEnvelopeOverride,
+  ) => void;
   getOrm: () => DatabaseORM;
   routeRequest: (request: Request) => Promise<Response>;
   nlqSchedulingPort: () => NLQSchedulingPort;
@@ -508,11 +517,20 @@ export async function submitAsyncJob(ctx: AsyncJobsContext,
     if (ctx.env && (ctx.env as { AGENT_DB?: unknown }).AGENT_DB) {
       throw new AsyncJobTenantUnresolvedError(ctx.sessionKey());
     }
-    ctx.audit("async_job.tenant_unresolved", "orchestrator", {
-      jobId,
-      capability: job.capability,
-      userLogin: ctx.sessionKey(),
-    });
+    // Issue #6100: the envelope carries what this path knows — the
+    // submitting login as principal (this module's sessionKey-as-login
+    // convention) and the job id as correlation. The tenant is null
+    // by definition here: that IS the event.
+    ctx.audit(
+      "async_job.tenant_unresolved",
+      "orchestrator",
+      {
+        jobId,
+        capability: job.capability,
+        userLogin: ctx.sessionKey(),
+      },
+      { principalId: ctx.sessionKey(), correlationId: jobId },
+    );
   }
   queue.insertQueued({
     jobId,
@@ -563,7 +581,16 @@ export async function submitAsyncJob(ctx: AsyncJobsContext,
     throw error;
   }
 
-  ctx.audit("async_job.queued", "orchestrator", { jobId, capability: job.capability });
+  // Issue #6100: stamp the envelope the submission already resolved —
+  // the tenant (explicit or resolved above), the submitting login as
+  // principal (this module's sessionKey-as-login convention), the job
+  // id as correlation.
+  ctx.audit(
+    "async_job.queued",
+    "orchestrator",
+    { jobId, capability: job.capability },
+    { tenantId, principalId: ctx.sessionKey(), correlationId: jobId },
+  );
   return { jobId, status: "queued", statusUrl: `/api/jobs/${jobId}` };
 }
 

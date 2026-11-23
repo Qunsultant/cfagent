@@ -87,7 +87,10 @@ const DATA_LAYER_FILES: Array<[string, number]> = [
   // 8 since #3182 added the mas_transactions tenant column's
   // PRAGMA-guarded ALTER (PRAGMA table_info check + ALTER + tenant
   // index, same #2178 precedent as the audit chain columns above).
-  ["src/data/ormSchema.ts", 8],
+  // 10 since #6100 added the mas_events attribution-envelope
+  // columns' PRAGMA-guarded ALTER (PRAGMA table_info check + ALTER,
+  // same #2178 precedent; the indexes ride the catalogue CREATEs).
+  ["src/data/ormSchema.ts", 10],
   ["src/data/d1MarketplaceAdapter.ts", 0],
   ["src/data/inMemoryOrmAdapters.ts", 0],
   ["src/data/inMemoryMarketplaceAdapter.ts", 0],
