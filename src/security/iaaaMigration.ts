@@ -207,18 +207,50 @@ export async function recordLoginAlias(
   return { ok: true, alias };
 }
 
-/** Login -> internalUserId, or null when no alias exists. */
+/**
+ * Login -> internalUserId, or null when no alias exists.
+ *
+ * #6182 — follows the id-migration chain: the alias may still name
+ * a retired minted id (recordLoginAlias refuses to re-point it on
+ * ALIAS_CONFLICT, by design — possible login recycling), while the
+ * #1182 login-time migration records the old→new forward pointer
+ * under iaaa-alias:migrated:<oldId>. The lookup follows that chain
+ * to the current derived id, reusing lookupMigratedUserId. Cycle
+ * termination via a visited set plus a self-referential check; a
+ * corrupt or unreadable migration record falls back to the last
+ * good id; never throws. Read-path only: no record is written, and
+ * the alias conflict guard, the gate, the migration, and all stored
+ * state are untouched.
+ */
 export async function lookupInternalUserIdByLogin(
   kv: KvLike,
   githubLogin: string,
 ): Promise<string | null> {
   if (!isValidField(githubLogin)) return null;
-  const raw = await kv.get(loginKey(githubLogin));
-  if (raw === null) return null;
+  let current: string | null = null;
   try {
-    return (JSON.parse(raw) as LoginAlias).internalUserId ?? null;
+    const raw = await kv.get(loginKey(githubLogin));
+    if (raw === null) return null;
+    try {
+      current = (JSON.parse(raw) as LoginAlias).internalUserId ?? null;
+    } catch {
+      return null;
+    }
+    if (current === null) return null;
+    const visited = new Set<string>([current]);
+    while (true) {
+      const next = await lookupMigratedUserId(kv, current);
+      if (next === null || next === current || visited.has(next)) {
+        return current;
+      }
+      visited.add(next);
+      current = next;
+    }
   } catch {
-    return null;
+    // A store failure mid-chain must never deny the request: fall
+    // back to the last good id (null when the alias itself was
+    // unreadable).
+    return current;
   }
 }
 

@@ -1,0 +1,3 @@
+### Fixed
+
+- **Login-alias lookup follows the id-migration record (#6198, #6182 follow-up):** `lookupInternalUserIdByLogin` returned the `iaaa-alias:login:<login>` value verbatim, so after the #1182 login-time migration rewrote a binding to its derived id, the alias still named the retired id and the Users view and the dispatch gate resolved to the revoked membership. The lookup now follows the `iaaa-alias:migrated:<oldId>` chain to the current derived id (cycle termination via a visited set plus a self-referential check; a corrupt record falls back to the last good id; never throws). Read-path only: the `ALIAS_CONFLICT` guard, the gate, the migration, and all stored state are untouched. #CAIO-quns

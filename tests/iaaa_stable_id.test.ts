@@ -26,8 +26,11 @@ import {
   type MigrationDeps,
 } from "../src/security/iaaaLogin";
 import {
+  IAAA_ALIAS_KEY_PREFIX,
+  lookupInternalUserIdByLogin,
   lookupMigratedUserId,
   recordIdMigration,
+  recordLoginAlias,
 } from "../src/security/iaaaMigration";
 import type { KvLike } from "../src/security/kvResilience";
 import type { Env } from "../src/types";
@@ -463,5 +466,97 @@ describe("id-migration alias records", () => {
     });
     expect(conflict.ok).toBe(false);
     expect(await lookupMigratedUserId(kv, MINTED_ID)).toBe(DERIVED_GITHUB_42);
+  });
+});
+
+describe("lookupInternalUserIdByLogin follows the id-migration record (#6182)", () => {
+  it("live scenario: alias names the retired id, migration points at the derived id", async () => {
+    const kv = memoryKv();
+    const recorded = await recordLoginAlias(kv, {
+      githubLogin: "OpenAIMP",
+      internalUserId: MINTED_ID,
+      nowMs: 1_000,
+    });
+    expect(recorded.ok).toBe(true);
+    const migrated = await recordIdMigration(kv, {
+      oldInternalUserId: MINTED_ID,
+      newInternalUserId: DERIVED_GITHUB_42,
+      nowMs: 2_000,
+    });
+    expect(migrated.ok).toBe(true);
+    expect(await lookupInternalUserIdByLogin(kv, "OpenAIMP")).toBe(DERIVED_GITHUB_42);
+  });
+
+  it("follows a chain of migrations to the current id", async () => {
+    const kv = memoryKv();
+    const intermediate = "22222222-2222-4222-8222-222222222222";
+    const recorded = await recordLoginAlias(kv, {
+      githubLogin: "chain-user",
+      internalUserId: MINTED_ID,
+      nowMs: 1_000,
+    });
+    expect(recorded.ok).toBe(true);
+    expect(
+      (
+        await recordIdMigration(kv, {
+          oldInternalUserId: MINTED_ID,
+          newInternalUserId: intermediate,
+          nowMs: 2_000,
+        })
+      ).ok,
+    ).toBe(true);
+    expect(
+      (
+        await recordIdMigration(kv, {
+          oldInternalUserId: intermediate,
+          newInternalUserId: DERIVED_GITHUB_42,
+          nowMs: 3_000,
+        })
+      ).ok,
+    ).toBe(true);
+    expect(await lookupInternalUserIdByLogin(kv, "chain-user")).toBe(DERIVED_GITHUB_42);
+  });
+
+  it("terminates on a migration cycle and on a self-referential record", async () => {
+    const kv = memoryKv();
+    const a = "33333333-3333-4333-8333-333333333333";
+    const b = "44444444-4444-4444-8444-444444444444";
+    await recordLoginAlias(kv, { githubLogin: "cycle-user", internalUserId: a, nowMs: 1_000 });
+    await recordIdMigration(kv, { oldInternalUserId: a, newInternalUserId: b, nowMs: 2_000 });
+    await recordIdMigration(kv, { oldInternalUserId: b, newInternalUserId: a, nowMs: 3_000 });
+    // Last good id before the cycle repeats: b.
+    expect(await lookupInternalUserIdByLogin(kv, "cycle-user")).toBe(b);
+
+    const kv2 = memoryKv();
+    await recordLoginAlias(kv2, { githubLogin: "self-user", internalUserId: a, nowMs: 1_000 });
+    await recordIdMigration(kv2, { oldInternalUserId: a, newInternalUserId: a, nowMs: 2_000 });
+    expect(await lookupInternalUserIdByLogin(kv2, "self-user")).toBe(a);
+  });
+
+  it("falls back to the last good id when a migration record is corrupt", async () => {
+    const kv = memoryKv();
+    await recordLoginAlias(kv, {
+      githubLogin: "corrupt-user",
+      internalUserId: MINTED_ID,
+      nowMs: 1_000,
+    });
+    await recordIdMigration(kv, {
+      oldInternalUserId: MINTED_ID,
+      newInternalUserId: DERIVED_GITHUB_42,
+      nowMs: 2_000,
+    });
+    await kv.put(`${IAAA_ALIAS_KEY_PREFIX}migrated:${MINTED_ID}`, "{not json");
+    expect(await lookupInternalUserIdByLogin(kv, "corrupt-user")).toBe(MINTED_ID);
+  });
+
+  it("still returns null when no alias exists", async () => {
+    const kv = memoryKv();
+    expect(await lookupInternalUserIdByLogin(kv, "nobody")).toBeNull();
+  });
+
+  it("never throws on a corrupt alias record", async () => {
+    const kv = memoryKv();
+    await kv.put(`${IAAA_ALIAS_KEY_PREFIX}login:bad-user`, "{not json");
+    await expect(lookupInternalUserIdByLogin(kv, "bad-user")).resolves.toBeNull();
   });
 });
