@@ -91,11 +91,13 @@ prompt-behavior change to file separately, not a silent gap here.
 ## Named gaps (not silent)
 
 - **Ad-hoc resolve keys:** `resolveAiModelName()` keys that are not
-  config task models (`researchAgent`, `tradingAgent`) resolve to the
-  key itself when unset, so they cannot be pinned to a catalog model id
-  here. Reconciling them into config task models (or pinning them
+  config task models (`tradingAgent`) resolve to the key itself when
+  unset, so they cannot be pinned to a catalog model id here.
+  Reconciling them into config task models (or pinning them
   explicitly) is follow-up work; until then they are outside this
-  registry's drift check by design, and this doc says so.
+  registry's drift check by design, and this doc says so. (`researchAgent`
+  was reconciled into a config task model with a pin by #5109; it is no
+  longer an ad-hoc key.)
 - **Router chains:** `src/models/router.ts` `MODEL_CHAINS` (plan /
   execute / judge / summarize, cheap → primary → fallback) are fallback
   routing, not the pinned production task models. They are inventoried

@@ -24,9 +24,11 @@
  *   docs/architecture/security/model-prompt-registry.md.
  *
  * Named gaps (not silent): ad-hoc resolveAiModelName() keys that are
- * not config task models ("researchAgent", "tradingAgent") resolve to
- * the key itself when unset, so they cannot be pinned to a catalog
- * model id here; they are recorded in the registry doc, not hidden.
+ * not config task models ("tradingAgent") resolve to the key itself
+ * when unset, so they cannot be pinned to a catalog model id here;
+ * they are recorded in the registry doc, not hidden. (Issue #5109
+ * reconciled "researchAgent" into a config task model with a pin
+ * below; "tradingAgent" is the remaining ad-hoc key.)
  * Live-model behavior grading is out of scope for this gate (see
  * ./evalGate.ts); it is a separate, non-CI evaluation.
  */
@@ -92,6 +94,18 @@ export const MODEL_PINS: readonly ModelPin[] = [
     model: "@cf/zai-org/glm-4.7-flash",
     tier: "flagship",
     source: "environment.config.json defaults.etapi.ai.taskModels.marketResearch",
+  },
+  {
+    // Issue #5109: the research agent's turn model. ResearchAgent
+    // getModel() resolves resolveAiModelName(env, "researchAgent");
+    // until this role existed in the config task models the resolver
+    // returned the bare key "researchAgent", which the model resolver
+    // rejects — the OODA button failed deterministically and the
+    // nightly schedule never produced a run.
+    role: "researchAgent",
+    model: "@cf/zai-org/glm-4.7-flash",
+    tier: "flagship",
+    source: "environment.config.json defaults.etapi.ai.taskModels.researchAgent",
   },
   {
     role: "searchAgent",

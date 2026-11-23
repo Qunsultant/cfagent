@@ -249,6 +249,9 @@ export interface AiConfig {
     newsSentiment?: string;
     orchestrator?: string;
     marketResearch?: string;
+    // Issue #5109: the research agent's turn model (ResearchAgent
+    // getModel resolves resolveAiModelName(env, "researchAgent")).
+    researchAgent?: string;
     searchAgent?: string;
     // Issue #3773: the chat voice channel's model backend — the
     // speech-to-text and text-to-speech models, resolved through
@@ -495,6 +498,14 @@ const BASELINE_FALLBACK_CONFIG: EtapiConfig = {
       newsSentiment: "@cf/zai-org/glm-4.7-flash",
       orchestrator: "@cf/zai-org/glm-4.7-flash",
       marketResearch: "@cf/zai-org/glm-4.7-flash",
+      // Issue #5109: the research agent's turn model. Until this entry
+      // existed, resolveAiModelName(env, "researchAgent") fell through
+      // to the bare key "researchAgent", which the model resolver
+      // rejects — the OODA button failed deterministically with
+      // `research_agent_turn_incomplete: Invalid model id
+      // "researchAgent"` and the nightly schedule never produced a
+      // run. Flagship, like the sibling marketResearch role.
+      researchAgent: "@cf/zai-org/glm-4.7-flash",
       searchAgent: "@cf/zai-org/glm-4.7-flash",
       // Issue #3773: Workers AI speech models for the chat voice
       // channel's model backend (Whisper STT, MeloTTS TTS).

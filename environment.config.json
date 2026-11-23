@@ -149,6 +149,7 @@
           "optionsComparison": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
           "orchestrator": "@cf/zai-org/glm-4.7-flash",
           "marketResearch": "@cf/zai-org/glm-4.7-flash",
+          "researchAgent": "@cf/zai-org/glm-4.7-flash",
           "searchAgent": "@cf/zai-org/glm-4.7-flash",
           "newsSentiment": "@cf/zai-org/glm-4.7-flash"
         },
