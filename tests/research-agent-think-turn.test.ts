@@ -116,7 +116,14 @@ describe("ResearchAgent PortThink migration (#1953)", () => {
 
   it("keeps the port identity facet: model, system prompt, tools", () => {
     const agent = makeAgent();
-    expect(agent.getModel()).toBe("researchAgent");
+    // Issue #5109: getModel() must resolve to a valid Workers AI id,
+    // not the bare task key. The old assertion pinned "researchAgent"
+    // itself — the literal key resolveAiModelName returns when the
+    // task model is unregistered — which the model resolver rejects,
+    // so the OODA button failed deterministically with
+    // `research_agent_turn_incomplete: Invalid model id
+    // "researchAgent"` and the nightly schedule never produced a run.
+    expect(agent.getModel()).toBe("@cf/zai-org/glm-4.7-flash");
     expect(agent.getSystemPrompt()).toContain("read-only options research agent");
     expect(agent.getSystemPrompt()).toContain("must never place, preview, or submit trades");
     const tools = agent.getTools();
