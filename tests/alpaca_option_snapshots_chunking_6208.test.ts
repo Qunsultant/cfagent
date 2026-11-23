@@ -127,7 +127,7 @@ describe("Alpaca option snapshots chunking (#6208)", () => {
   });
 
   it("logs the upstream 400 body server-side and keeps the short caller message", async () => {
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) => {
@@ -145,7 +145,13 @@ describe("Alpaca option snapshots chunking (#6208)", () => {
     await expect(fetchAlpacaOptionSnapshots(ALPACA_CFG, "AAPL", ["AAPL260101C00100000"])).rejects.toThrow(
       "Alpaca option snapshots unavailable [HTTP 400].",
     );
-    expect(errorSpy).toHaveBeenCalled();
-    expect(errorSpy.mock.calls.flat().join(" ")).toContain("symbols exceeds maximum of 100");
+    expect(
+      infoSpy.mock.calls.some(
+        ([line]) =>
+          typeof line === "string" &&
+          line.includes("alpacaOptionsSnapshots.unavailable") &&
+          line.includes("symbols exceeds maximum of 100"),
+      ),
+    ).toBe(true);
   });
 });

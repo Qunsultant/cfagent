@@ -35,6 +35,13 @@ import type {
 } from "../dataProviders/contract";
 import type { OptionRequestBudget } from "../interfaces";
 import { normalizeAlpacaBaseUrl } from "./credentials";
+import { createStructuredLogger } from "../../observability/structuredLogger";
+import { createObservabilitySink } from "../../observability/createObservabilityPorts";
+
+/** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
+const structuredLog = createStructuredLogger(createObservabilitySink({}), {
+  component: "trading/alpaca/optionsData",
+});
 
 export interface AlpacaOptionsConfig {
   /** Trading host — paper or live, already resolved by the caller. */
@@ -319,9 +326,11 @@ export async function fetchAlpacaOptionSnapshots(
     const res = await fetch(url, { headers: cfg.headers });
     if (!res.ok) {
       const body = await res.text().catch(() => "");
-      console.error(
-        `Alpaca option snapshots unavailable [HTTP ${res.status}] for ${underlying.toUpperCase()}: ${body.slice(0, UPSTREAM_ERROR_LOG_LIMIT)}`,
-      );
+      structuredLog.error("alpacaOptionsSnapshots.unavailable", {
+        underlying: underlying.toUpperCase(),
+        httpStatus: res.status,
+        body: body.slice(0, UPSTREAM_ERROR_LOG_LIMIT),
+      });
       throw new Error(`Alpaca option snapshots unavailable [HTTP ${res.status}].`);
     }
     const payload = (await res.json().catch(() => ({}))) as { snapshots?: Record<string, any> };
