@@ -85,6 +85,7 @@ describe("schema equality — all planes (#4282 P4)", () => {
     // indexes 110 → 111.
     // #6151 S3 adds migration 0085 (saved nav presets: agent_nav_presets + agent_nav_preset_state + 2 indexes): 185 → 187 tables, 111 → 113 indexes.
     // Issue #6100 adds 4 mas_events envelope indexes: 113 → 117.
+    // Issue #6006 adds columns only (no new table or index): unchanged.
     expect(Object.keys(model.tables).length).toBe(187);
     expect(Object.keys(model.indexes).length).toBe(117);
     expect(fixtureSha256("schema_component_combined_expected_model.json")).toBe(
@@ -146,7 +147,7 @@ describe("schema equality — all planes (#4282 P4)", () => {
     expect(new Set(executedCodes).size).toBe(
       COMBINED_CATALOGUE_ENTRIES.length,
     );
-    expect(COMBINED_CATALOGUE_ENTRIES.length).toBe(493);    // Issue #6167 adds 1 entry (the host_version remainder ALTER
+    expect(COMBINED_CATALOGUE_ENTRIES.length).toBe(502);    // Issue #6167 adds 1 entry (the host_version remainder ALTER
     // on mas_async_jobs): 452 → 453. Issue #5100 (F3 of #5094) adds 13:
     // 453 → 466 entries. Issue #5102 (F5 of #5094) adds 5 entries
     // (migration 0084: 4 job_run_records ALTERs + 1 index):
@@ -195,7 +196,9 @@ describe("schema equality — all planes (#4282 P4)", () => {
     // 491 → 495 statements.
     // Issue #6100 adds 9 entries (5 mas_events envelope ALTERs + 4
     // indexes), each one statement: 495 → 504 statements.
-    expect(executedStatements).toBe(504);
+    // Issue #6006 adds 9 entries (migration 0086: job_run_records outcome
+    // facts, 9 ALTERs), each one statement: 504 → 513 statements.
+    expect(executedStatements).toBe(513);
     const actual = instance.introspect();
     const diff = diffSchema(actual, combinedExpectedModel());
     expect(isEmptyDiff(diff)).toBe(true);
@@ -243,9 +246,21 @@ describe("schema equality — all planes (#4282 P4)", () => {
     expect(diff.missingIndexes).toEqual(["idx_mas_reports_generation"]);
     expect(diff.missingTables).toEqual([]);
     expect(diff.extraTables).toEqual([]);
+    // Issue #6006 adds nine more D1-only ALTERs (the outcome-facts
+    // migration 0086) that the DO CREATE also wipes: eleven columns in
+    // catalogue order (the harness sorts them by column name).
     expect(diff.missingColumns).toEqual([
-      { column: "projected_at_ms", table: "job_run_records" },
-      { column: "tenant_id", table: "job_run_records" },
+      { table: "job_run_records", column: "coded_error" },
+      { table: "job_run_records", column: "csv_key" },
+      { table: "job_run_records", column: "delivery_states_json" },
+      { table: "job_run_records", column: "matched" },
+      { table: "job_run_records", column: "origin" },
+      { table: "job_run_records", column: "pdf_key" },
+      { table: "job_run_records", column: "projected_at_ms" },
+      { table: "job_run_records", column: "report_url" },
+      { table: "job_run_records", column: "scanned" },
+      { table: "job_run_records", column: "tenant_id" },
+      { table: "job_run_records", column: "xlsx_key" },
     ]);
     expect(diff.extraColumns).toEqual([]);
     expect(diff.changedColumns).toEqual([]);

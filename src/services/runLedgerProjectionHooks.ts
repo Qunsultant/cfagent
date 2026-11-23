@@ -15,6 +15,7 @@ import { createStructuredLogger } from "../observability/structuredLogger";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
 import { resolveIaaaTenant } from "../security/iaaaGithubEndToEnd";
 import { getScheduledReportById } from "./scheduledReports";
+import { JOB_OUTCOMES_KEEP_ROWS, listJobOutcomes } from "./jobOutcomes";
 import type { SqlStorage } from "../orm";
 import { readTenantProjectionCarriers } from "./projectionCarriers";
 import { postRunLedgerBestEffort, type PostRunLedgerResult } from "./runLedgerProjectionPosting";
@@ -22,6 +23,7 @@ import { publishRunLedgerProject } from "../workflows/runLedgerQueueTransport";
 import { jobRunRecordNaturalKey } from "../workflows/runLedgerQueueTransport";
 import type {
   AsyncJobProjectionInput,
+  JobOutcomeProjectionInput,
   JobRunRecordProjectionInput,
   ReportProjectionInput,
 } from "../data/runLedgerProjection";
@@ -37,10 +39,10 @@ const structuredLog = createStructuredLogger(createObservabilitySink({}), {
 async function fireCarriers(
   env: Partial<Env>,
   tenantId: string,
-  ledger: "reports" | "async_jobs" | "job_run_records",
+  ledger: "reports" | "async_jobs" | "job_run_records" | "job_outcomes",
   naturalKey: string,
   userLogin: string | null,
-  input: ReportProjectionInput | AsyncJobProjectionInput | JobRunRecordProjectionInput,
+  input: ReportProjectionInput | AsyncJobProjectionInput | JobRunRecordProjectionInput | JobOutcomeProjectionInput,
   nowMs: number,
   skipQueue?: boolean,
 ): Promise<PostRunLedgerResult | null> {
@@ -71,7 +73,9 @@ async function fireCarriers(
         ? { ledger: "reports", row: input as ReportProjectionInput }
         : ledger === "async_jobs"
           ? { ledger: "async_jobs", row: input as AsyncJobProjectionInput }
-          : { ledger: "job_run_records", row: input as JobRunRecordProjectionInput },
+          : ledger === "job_outcomes"
+            ? { ledger: "job_outcomes", row: input as JobOutcomeProjectionInput }
+            : { ledger: "job_run_records", row: input as JobRunRecordProjectionInput },
       nowMs,
     );
   } else {
@@ -291,6 +295,60 @@ export async function projectJobRunRecordBestEffort(args: {
   } catch (err) {
     structuredLog.error("runLedger.job_run_record_hook_failed", {
       message: "[run-ledger] job-run-record projection hook failed — DO write unaffected",
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  }
+}
+
+/**
+ * Issue #6006 — project a mas_job_outcomes row that just landed.
+ * Re-reads the stored row by id (the sink caps at 500 rows, so a
+ * full list covers it; a deduped store returns the pre-existing
+ * row — the projection carries what landed, never the caller's
+ * in-memory guess). The tenant comes from the carrier call site
+ * (the DO table carries no tenant column); the queue carrier fires
+ * only when a real owning login is known — without one the row
+ * still ORM-projects and the sweep is the backstop (the async-job
+ * hook's no-login discipline, same log line).
+ *
+ * Returns the ORM post result, or null when nothing was attempted
+ * (row missing, or no carrier configured). `skipQueue` is the queue
+ * consumer's re-projection flag: the consumer IS the queue
+ * carrier's delivery, so it must not publish again.
+ */
+export async function projectJobOutcomeBestEffort(args: {
+  env: Partial<Env>;
+  sql: SqlStorage;
+  outcomeId: string;
+  /** The owning login for the queue route, or null when unknown (queue skipped, ORM still fires). */
+  userLogin?: string | null;
+  nowMs?: number;
+  skipQueue?: boolean;
+}): Promise<PostRunLedgerResult | null> {
+  try {
+    const row = listJobOutcomes(args.sql, JOB_OUTCOMES_KEEP_ROWS).find((r) => r.id === args.outcomeId);
+    if (!row) {
+      structuredLog.warn("runLedger.job_outcome_row_missing", {
+        message: `[run-ledger] stored outcome ${args.outcomeId} not readable after store; projection skipped (sweep repairs).`,
+      });
+      return null;
+    }
+    const tenantId = resolveIaaaTenant(args.env as Env);
+    const input: JobOutcomeProjectionInput = { outcome: row, tenantId };
+    return await fireCarriers(
+      args.env,
+      tenantId,
+      "job_outcomes",
+      row.id,
+      args.userLogin ?? null,
+      input,
+      args.nowMs ?? Date.now(),
+      args.skipQueue,
+    );
+  } catch (err) {
+    structuredLog.error("runLedger.job_outcome_hook_failed", {
+      message: "[run-ledger] job-outcome projection hook failed — DO write unaffected",
       error: err instanceof Error ? err.message : String(err),
     });
     return null;

@@ -1468,6 +1468,22 @@ export const MIGRATION_0082_REFERRAL_TRIAL_EXTENSION: DataMigration = {
   name: "0082_referral_trial_extension",
   sql: d1MigrationSql(82),
 };
+/**
+ * Migration 0086 — outcome facts onto the one run source (#6006).
+ * Renumbered 0083 → 0086 on rebase: main took 0083 for the job_stage_events
+ * D1 mirror (#6028), 0084 for the binding tuple (#5102) and 0085 for the
+ * saved nav presets (#6151) in the same window.
+ * Adds the mas_job_outcomes fact columns to `job_run_records`
+ * (coded error, origin label, scan counts, delivery states JSON,
+ * typed artifact keys) so the fold can land the facts in D1 and
+ * GET /api/runs can surface them. Marker-gated like the other
+ * ALTER migrations, so a re-apply is skipped.
+ */
+export const MIGRATION_0086_JOB_RUN_RECORDS_OUTCOME_FACTS: DataMigration = {
+  version: 86,
+  name: "0086_job_run_records_outcome_facts",
+  sql: d1MigrationSql(86),
+};
 export const MIGRATION_0058_PRODUCT_VERSIONS: DataMigration = {
   version: 58,
   name: "0058_product_versions",
@@ -1719,6 +1735,7 @@ export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANC
   MIGRATION_0083_JOB_STAGE_EVENTS,
   MIGRATION_0084_JOB_RUN_RECORDS_BINDING,
   MIGRATION_0085_NAV_PRESETS,
+  MIGRATION_0086_JOB_RUN_RECORDS_OUTCOME_FACTS,
 ];
 
 function splitStatements(sqlText: string): string[] {

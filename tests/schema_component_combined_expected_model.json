@@ -3962,6 +3962,51 @@
           "pk": 0
         },
         {
+          "name": "coded_error",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "origin",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "scanned",
+          "type": "INTEGER",
+          "pk": 0
+        },
+        {
+          "name": "matched",
+          "type": "INTEGER",
+          "pk": 0
+        },
+        {
+          "name": "delivery_states_json",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "pdf_key",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "xlsx_key",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "csv_key",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "report_url",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
           "name": "broker_id",
           "type": "TEXT",
           "pk": 0

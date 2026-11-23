@@ -18,6 +18,8 @@ import { vocabularyDefaults } from "../config/vocabulary";
 import { DoSqliteJobOutcomeStore } from "../data/doSqliteJobOutcomeAdapter";
 import { createStructuredLogger } from "../observability/structuredLogger";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
+import { projectJobOutcomeBestEffort } from "./runLedgerProjectionHooks";
+import type { Env } from "../types";
 import type { SqlStorage } from "../orm";
 
 /** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
@@ -89,10 +91,14 @@ export function tradingRunOutcomeId(orderId: string): string {
   return `order:${orderId}`;
 }
 
-export function recordTradingRunOutcome(
+export async function recordTradingRunOutcome(
   sql: SqlStorage | null | undefined,
   input: TradingRunOutcomeInput,
-): void {
+  // Issue #6006 — when the caller passes `project` (its env + owning
+  // login), the outcome facts also fold into the one run source (D1)
+  // through the shared projector; best-effort, never fails the run.
+  project?: { env: Partial<Env>; userLogin?: string | null },
+): Promise<void> {
   if (!sql) return;
   try {
     // The production adapter, not the deprecated re-export shim: new code
@@ -138,6 +144,14 @@ export function recordTradingRunOutcome(
       },
       origin: input.origin,
     });
+    if (project?.env) {
+      await projectJobOutcomeBestEffort({
+        env: project.env,
+        sql,
+        outcomeId: tradingRunOutcomeId(input.orderId),
+        userLogin: project.userLogin ?? null,
+      });
+    }
   } catch (error) {
     structuredLog.warn("tradingRunOutcome.record_failed", {
       orderId: input.orderId,

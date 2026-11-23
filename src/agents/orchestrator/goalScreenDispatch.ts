@@ -21,6 +21,7 @@
 import type { DatabaseORM } from "../../orm";
 import type { GoalDrivenScreenResult } from "../../services/goalDrivenScreen";
 import { recordGoalRunOutcome } from "../../services/goalScreenReports";
+import type { Env } from "../../types";
 import { recordScreeningActivity } from "../../services/screeningActivity";
 import { yahooDataModeLabel } from "../../workflows/stockScreenPlanner";
 import {
@@ -148,7 +149,7 @@ export async function persistWorkflowGoalScreenReport(
       `Goal screen report could not be stored for run goal-screen:${envelope.taskId} (canonical store returned null).`,
     );
   }
-  recordGoalRunOutcome(
+  await recordGoalRunOutcome(
     typeof (orm as { getSql?: () => unknown }).getSql === "function"
       ? ((orm as { getSql: () => unknown }).getSql() as any)
       : undefined,
@@ -167,6 +168,9 @@ export async function persistWorkflowGoalScreenReport(
       origin: "goal-screen-workflow",
       createdAt: result.completedAt,
     },
+    // Issue #6006 — fold the outcome facts into the one run source
+    // (ctx.env is unknown-typed here; the mount passes the full env).
+    { env: ctx.env as unknown as Partial<Env>, userLogin },
   );
   recordScreeningActivity(orm as any, {
     userLogin,

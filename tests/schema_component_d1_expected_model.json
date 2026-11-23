@@ -3960,6 +3960,51 @@
           "name": "binding_source",
           "type": "TEXT",
           "pk": 0
+        },
+        {
+          "name": "coded_error",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "origin",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "scanned",
+          "type": "INTEGER",
+          "pk": 0
+        },
+        {
+          "name": "matched",
+          "type": "INTEGER",
+          "pk": 0
+        },
+        {
+          "name": "delivery_states_json",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "pdf_key",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "xlsx_key",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "csv_key",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "report_url",
+          "type": "TEXT",
+          "pk": 0
         }
       ],
       "constraints": {}
@@ -6403,6 +6448,15 @@
       ],
       "unique": true
     },
+    "job_run_records_binding_idx": {
+      "table": "job_run_records",
+      "columns": [
+        "account_id",
+        "started DESC",
+        "id DESC"
+      ],
+      "unique": false
+    },
     "agent_nav_presets_user_name_idx": {
       "table": "agent_nav_presets",
       "columns": [
@@ -6416,15 +6470,6 @@
       "columns": [
         "user_id",
         "updated_at_ms DESC"
-      ],
-      "unique": false
-    },
-    "job_run_records_binding_idx": {
-      "table": "job_run_records",
-      "columns": [
-        "account_id",
-        "started DESC",
-        "id DESC"
       ],
       "unique": false
     }

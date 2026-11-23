@@ -25,6 +25,8 @@
 import { recordOptionsRun } from "../agents/optionsRuns";
 import { vocabularyDefaults } from "../config/vocabulary";
 import { recordJobOutcome } from "./jobOutcomes";
+import { projectJobOutcomeBestEffort } from "./runLedgerProjectionHooks";
+import type { Env } from "../types";
 import {
   classifyChainFreshness,
   type ChainFreshness,
@@ -258,11 +260,16 @@ export interface OptionsRunOutcomeRecord {
  * outcome. Paths that already have a job tree (the follow-up bridge)
  * record their own outcome; this is for the paths that do not.
  * Never throws — a sink failure must not fail the run.
+ *
+ * Issue #6006 — when the caller passes `project` (its env + owning
+ * login), the outcome facts also fold into the one run source (D1)
+ * through the shared projector; best-effort, never fails the run.
  */
-export function recordOptionsRunOutcome(
+export async function recordOptionsRunOutcome(
   sql: SqlStorage | null | undefined,
   run: OptionsRunOutcomeRecord,
-): void {
+  project?: { env: Partial<Env>; userLogin?: string | null },
+): Promise<void> {
   if (!sql) return;
   try {
     recordJobOutcome(sql, {
@@ -281,6 +288,14 @@ export function recordOptionsRunOutcome(
       origin: run.origin,
       createdAt: run.createdAt,
     });
+    if (project?.env) {
+      await projectJobOutcomeBestEffort({
+        env: project.env,
+        sql,
+        outcomeId: run.id,
+        userLogin: project.userLogin ?? null,
+      });
+    }
   } catch (err) {
     structuredLog.warn("optionsServeRecord.outcome_write_failed", {
       message: `[optionsServeRecord] outcome write failed for run ${run.id}: ${err instanceof Error ? err.message : String(err)}`,

@@ -29,7 +29,7 @@ const structuredLog = createStructuredLogger(createObservabilitySink({}), {
   component: "workflows/runLedgerQueueTransport",
 });
 
-export type RunLedgerProjectLedger = "reports" | "async_jobs" | "job_run_records";
+export type RunLedgerProjectLedger = "reports" | "async_jobs" | "job_run_records" | "job_outcomes";
 
 /**
  * Issue #6099 — the job-run-record natural key: jobId | started |
@@ -106,7 +106,8 @@ export function isRunLedgerProjectEnvelope(value: unknown): value is MessageEnve
   return (
     (data["ledger"] === "reports" ||
       data["ledger"] === "async_jobs" ||
-      data["ledger"] === "job_run_records") &&
+      data["ledger"] === "job_run_records" ||
+      data["ledger"] === "job_outcomes") &&
     typeof data["naturalKey"] === "string" &&
     (data["naturalKey"] as string).trim() !== "" &&
     typeof data["tenantId"] === "string" &&
@@ -152,7 +153,7 @@ export async function publishRunLedgerProject(args: {
   const naturalKey = args.message?.naturalKey?.trim();
   const tenantId = args.message?.tenantId?.trim();
   const userLogin = args.message?.userLogin?.trim();
-  if (ledger !== "reports" && ledger !== "async_jobs" && ledger !== "job_run_records") {
+  if (ledger !== "reports" && ledger !== "async_jobs" && ledger !== "job_run_records" && ledger !== "job_outcomes") {
     return { published: false, reason: "unknown run-ledger projection ledger; refusing to publish." };
   }
   if (!naturalKey) {

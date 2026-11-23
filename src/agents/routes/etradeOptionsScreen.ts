@@ -806,7 +806,7 @@ export async function executeUnifiedOptions(args: {
     // Options run-record fix: this path has no follow-up bridge, so it owns its run
     // record. Without it the run never appears in Workflow Runs and its
     // artifacts (PDF/XLSX/CSV) have nothing to attach to.
-    recordOptionsRunOutcome(
+    await recordOptionsRunOutcome(
       typeof (orm as { getSql?: () => unknown }).getSql === "function"
         ? ((orm as { getSql: () => unknown }).getSql() as any)
         : undefined,
@@ -825,6 +825,8 @@ export async function executeUnifiedOptions(args: {
         origin: "manual-options-unified",
         createdAt: generatedAt,
       },
+      // Issue #6006 — fold the outcome facts into the one run source.
+      { env: ctx.env, userLogin },
     );
   } else if (result.success) {
     // Strategy screener / AI actions (strategies, best-trade, compare,
@@ -895,7 +897,7 @@ export async function executeUnifiedOptions(args: {
       createdAt: generatedAt,
       userLogin,
     });
-    recordOptionsRunOutcome(
+    await recordOptionsRunOutcome(
       typeof (orm as { getSql?: () => unknown }).getSql === "function"
         ? ((orm as { getSql: () => unknown }).getSql() as any)
         : undefined,
@@ -910,6 +912,8 @@ export async function executeUnifiedOptions(args: {
         origin: "options-strategy-ai",
         createdAt: generatedAt,
       },
+      // Issue #6006 — fold the outcome facts into the one run source.
+      { env: ctx.env, userLogin },
     );
   } else if (!result.success && reqData.pushToSlack !== false && reqData.pushToSlack !== "false") {
     const slackPayload = result.toSlack();

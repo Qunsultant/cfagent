@@ -14,6 +14,11 @@
  *   (jobId, started, finished): insert-if-absent, plus the
  *   null-tenant upgrade for an engine-written twin. The row IS the
  *   twin, so no link is stamped (linkedJobRunId is always null).
+ * - Job outcomes (issue #6006) use the store's attach-or-create
+ *   fold: the facts attach to the run's D1 row by exact linkage,
+ *   or the outcome becomes its own `job-outcome` row. The link
+ *   stamped is the folded row's derived id, so the caller can name
+ *   the row the facts landed on.
  * - Reports + async jobs stamp the twin link when it resolves
  *   exactly (§3 of the design doc); ambiguous or absent links
  *   stay null.
@@ -29,14 +34,16 @@ import { capText } from "./auditReportProjection";
 import type { CanonicalReportRow } from "./auditReportPorts";
 import type {
   AsyncJobProjectionInput,
+  JobOutcomeProjectionInput,
   JobRunRecordLister,
   JobRunRecordProjectionInput,
   ProjectRunLedgerResult,
   ReportProjectionInput,
   RunLedgerProjector,
 } from "./runLedgerPorts";
+import type { JobOutcomeRow } from "./jobOutcomePorts";
 
-export type { AsyncJobProjectionInput, JobRunRecordProjectionInput, ReportProjectionInput };
+export type { AsyncJobProjectionInput, JobOutcomeProjectionInput, JobRunRecordProjectionInput, ReportProjectionInput };
 
 export interface RunLedgerProjectorDeps {
   /** The versioned report writer (D1AuditReportAdapter). */
@@ -53,6 +60,11 @@ export interface RunLedgerProjectorDeps {
   /** Issue #6099 — the D1 job-run-record writer for the projection (D1JobRunRecordStore). */
   projectedJobRecordStore: {
     recordProjectedJobRunRecord(row: JobRunRecordProjectionInput, nowMs: number): Promise<boolean>;
+    /** Issue #6006 — the outcome fold (attach-or-create) on the same store. */
+    attachOutcomeFacts(
+      input: { outcome: JobOutcomeRow; tenantId: string },
+      nowMs: number,
+    ): Promise<{ landed: boolean; created: boolean; record: JobRunRecord }>;
   };
 }
 
@@ -175,6 +187,20 @@ export function createRunLedgerProjector(deps: RunLedgerProjectorDeps): RunLedge
       return written
         ? { projected: true, linkedJobRunId: null }
         : { projected: false, skipped: "already-current", linkedJobRunId: null };
+    },
+
+    async projectJobOutcome(
+      input: JobOutcomeProjectionInput,
+      nowMs: number,
+    ): Promise<ProjectRunLedgerResult> {
+      const result = await deps.projectedJobRecordStore.attachOutcomeFacts(input, nowMs);
+      return result.landed
+        ? { projected: true, linkedJobRunId: d1JobRunRecordId(result.record) }
+        : {
+            projected: false,
+            skipped: "already-current",
+            linkedJobRunId: d1JobRunRecordId(result.record),
+          };
     },
   };
 }

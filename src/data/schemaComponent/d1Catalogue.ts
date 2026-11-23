@@ -3409,6 +3409,84 @@ export const D1_CATALOGUE_ENTRIES: CatalogueEntry[] = [
     form: "literal",
   },
   {
+    // Issue #6006 — the outcome facts a mas_job_outcomes row carries
+    // that the one run source must hold so GET /api/runs can surface
+    // them: the coded error (distinct from the free-text error_text),
+    // the origin label (distinct from origin_run_id, the #4767 retry
+    // lineage), the scan counts, the per-channel delivery states
+    // (JSON), and the typed artifact keys.
+    code: "schema.d1.job_run_records.alter_table_add_column_coded_error",
+    plane: "d1",
+    table: "job_run_records",
+    statement: `ALTER TABLE job_run_records ADD COLUMN coded_error TEXT`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    code: "schema.d1.job_run_records.alter_table_add_column_origin",
+    plane: "d1",
+    table: "job_run_records",
+    statement: `ALTER TABLE job_run_records ADD COLUMN origin TEXT`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    code: "schema.d1.job_run_records.alter_table_add_column_scanned",
+    plane: "d1",
+    table: "job_run_records",
+    statement: `ALTER TABLE job_run_records ADD COLUMN scanned INTEGER`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    code: "schema.d1.job_run_records.alter_table_add_column_matched",
+    plane: "d1",
+    table: "job_run_records",
+    statement: `ALTER TABLE job_run_records ADD COLUMN matched INTEGER`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    code: "schema.d1.job_run_records.alter_table_add_column_delivery_states_json",
+    plane: "d1",
+    table: "job_run_records",
+    statement: `ALTER TABLE job_run_records ADD COLUMN delivery_states_json TEXT`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    code: "schema.d1.job_run_records.alter_table_add_column_pdf_key",
+    plane: "d1",
+    table: "job_run_records",
+    statement: `ALTER TABLE job_run_records ADD COLUMN pdf_key TEXT`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    code: "schema.d1.job_run_records.alter_table_add_column_xlsx_key",
+    plane: "d1",
+    table: "job_run_records",
+    statement: `ALTER TABLE job_run_records ADD COLUMN xlsx_key TEXT`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    code: "schema.d1.job_run_records.alter_table_add_column_csv_key",
+    plane: "d1",
+    table: "job_run_records",
+    statement: `ALTER TABLE job_run_records ADD COLUMN csv_key TEXT`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    code: "schema.d1.job_run_records.alter_table_add_column_report_url",
+    plane: "d1",
+    table: "job_run_records",
+    statement: `ALTER TABLE job_run_records ADD COLUMN report_url TEXT`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
     // Issue #5887 — the run-stamp on the instance, captured at dispatch.
     code: "schema.d1.job_pipeline_instances.alter_table_add_column_run_definition_version",
     plane: "d1",
@@ -3872,6 +3950,17 @@ export const D1_MIGRATION_CODES: Record<number, readonly string[]> = {
     "schema.d1.job_run_records.alter_table_add_column_binding_scope",
     "schema.d1.job_run_records.alter_table_add_column_binding_source",
     "schema.d1.job_run_records.create_index_job_run_records_binding_idx",
+  ],
+  86: [
+    "schema.d1.job_run_records.alter_table_add_column_coded_error",
+    "schema.d1.job_run_records.alter_table_add_column_origin",
+    "schema.d1.job_run_records.alter_table_add_column_scanned",
+    "schema.d1.job_run_records.alter_table_add_column_matched",
+    "schema.d1.job_run_records.alter_table_add_column_delivery_states_json",
+    "schema.d1.job_run_records.alter_table_add_column_pdf_key",
+    "schema.d1.job_run_records.alter_table_add_column_xlsx_key",
+    "schema.d1.job_run_records.alter_table_add_column_csv_key",
+    "schema.d1.job_run_records.alter_table_add_column_report_url",
   ],
 };
 
