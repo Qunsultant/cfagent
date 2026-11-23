@@ -390,7 +390,7 @@ describe("5175 slice 4 — no minting elsewhere", () => {
     ).toBe(5);
   });
 
-  it("P11 research: namespaces and keys are exactly 6", () => {
+  it("P11 research: namespaces and keys are exactly 9", () => {
     // - src/a2a/resolution.ts:86 — `research:${login}` (DO namespace)
     // - src/agents/orchestrator.ts:948 — `research:${login}` (DO stub)
     // - src/server/routes/platform.ts:205 — `research:${userLogin}`
@@ -399,6 +399,12 @@ describe("5175 slice 4 — no minting elsewhere", () => {
     // - src/agents/orchestrator.ts:1102 — `research:${login}` (#3185
     //   bridge: mirror provenance label for the reconcile's research
     //   leg, not a mint — the stub at :948 is the addressing site)
+    // - src/agents/research-agent.ts:698,726 — `research:${userLogin}`
+    //   (#5109: the agent tools delegate to the tenant instance — the
+    //   SAME address the orchestrator stubs at :948, not a new mint;
+    //   the facet hosting the turn has throwaway storage, so the
+    //   pipeline must run where getLatest() reads it. Count moves
+    //   7 -> 9 with these two sites.)
     // One prose mention — a backtick inside a `"..."` MCP tool
     // description string, not a template and not a mint:
     // - src/mcps/openaimp/researchJobCommands.ts:41
@@ -406,7 +412,7 @@ describe("5175 slice 4 — no minting elsewhere", () => {
     expect(
       countAll(/`research:/g),
       "research: templates: a new one is a new research-id mint outside the leaf",
-    ).toBe(7);
+    ).toBe(9);
   });
 
   it("P12 saga- family is exactly 7", () => {

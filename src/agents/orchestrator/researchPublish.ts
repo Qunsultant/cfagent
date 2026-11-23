@@ -64,7 +64,7 @@ export interface ResearchPublishContext {
         mode?: string;
       };
     }
-  ) => Promise<{ status: string; error?: string }>;
+  ) => Promise<{ status: string; error?: string; summary?: string; output?: unknown }>;
   getReportDispatchHitl: () => boolean;
   createReportConfirmation: (kind: "email" | "webhook", payloadJson: string, reportId?: string | null, createdBy?: string | null) => string;
   RESEARCH_TASK_HEARTBEAT_MS: number;
@@ -322,7 +322,7 @@ export async function runResearchAndPublish(ctx: ResearchPublishContext,
     // error-status child — the #6250 incomplete guard below fails
     // the run with a named error instead of degrading it to the
     // direct pipeline, which no longer exists.
-    let child: { status: string; error?: string };
+    let child: { status: string; error?: string; summary?: string; output?: unknown };
     if (effectiveSelection?.feed) {
       // Issue #6063 — the feed stage already ran on J-stack; the direct
       // pipeline consumes its persisted output instead of a second fetch.
@@ -354,12 +354,18 @@ export async function runResearchAndPublish(ctx: ResearchPublishContext,
       // Issue #543: the failure must not silently mask which
       // execution path ran — emit a structured warning carrying the
       // identifiers an operator needs to correlate it in Workers Logs.
+      // Issue #5109: carry the child's summary too (the model's final
+      // text — what it did in its turn, e.g. whether it called the
+      // research tool at all). The turn can end "completed" without
+      // ever calling the tool, and without the summary the parent
+      // cannot tell that from a tool run whose report went elsewhere.
       structuredLog.warn("researchPublish.research_agent_turn_incomplete", {
-        message: `[OrchestratorAgent] Agent research turn incomplete — failing the run with a named error (no direct-pipeline fallback): trigger=${trigger} userLogin=${login} childStatus=${child.status} childError=${child.error ?? "none"} previousRunId=${previousRunId ?? "none"} latestRunId=${report?.runId ?? "none"}`,
+        message: `[OrchestratorAgent] Agent research turn incomplete — failing the run with a named error (no direct-pipeline fallback): trigger=${trigger} userLogin=${login} childStatus=${child.status} childError=${child.error ?? "none"} childSummary=${(child.summary ?? "").slice(0, 500)} previousRunId=${previousRunId ?? "none"} latestRunId=${report?.runId ?? "none"}`,
         trigger,
         userLogin: login,
         childStatus: child.status,
         childError: child.error ?? "none",
+        childSummary: (child.summary ?? "").slice(0, 500),
         previousRunId: previousRunId ?? "none",
         latestRunId: report?.runId ?? "none",
       });

@@ -1,0 +1,4 @@
+### Fixed
+
+- OODA/research run trigger no longer fails with `research_agent_turn_incomplete: Research agent finished with status completed` (#5109): the research agent's tools (`run_options_research`, `run_goal_discovery`) now run the pipeline on the tenant `research:<login>` instance through the actor gateway instead of on the run-scoped facet that hosts the turn — the facet's storage is throwaway, so the report it persisted was invisible to the orchestrator's `getLatest()` on the tenant instance and the guard failed the run even though the turn completed. The incomplete-turn warning now also carries the child's summary, so a turn that ends "completed" without calling the tool is diagnosable from the log.
+- The `research:` template census pin moves 7 -> 9 with the two new tenant-instance addressings (same address the orchestrator already stubs, not new id mints).
