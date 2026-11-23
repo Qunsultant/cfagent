@@ -1420,6 +1420,16 @@ export const MIGRATION_0081_JOB_RUN_RECORDS_PROJECTION: DataMigration = {
  * thresholds as 0079, then the #6072 screener task ledger as 0080
  * and the #6099 job-run-records projection as 0081.
  */
+/**
+ * Migration 0083 — the D1 mirror of the DO stage rows (#6028/#6202).
+ * `job_stage_events`: one terminal row per executed stage, tenant-stamped,
+ * unique on (run_id, stage_id) so the mirror's upsert has a conflict target.
+ */
+export const MIGRATION_0083_JOB_STAGE_EVENTS: DataMigration = {
+  version: 83,
+  name: "0083_job_stage_events",
+  sql: d1MigrationSql(83),
+};
 export const MIGRATION_0082_REFERRAL_TRIAL_EXTENSION: DataMigration = {
   version: 82,
   name: "0082_referral_trial_extension",
@@ -1673,6 +1683,7 @@ export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANC
   MIGRATION_0080_SCREENER_TASK_ENTRIES,
   MIGRATION_0081_JOB_RUN_RECORDS_PROJECTION,
   MIGRATION_0082_REFERRAL_TRIAL_EXTENSION,
+  MIGRATION_0083_JOB_STAGE_EVENTS,
 ];
 
 function splitStatements(sqlText: string): string[] {

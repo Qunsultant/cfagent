@@ -82,7 +82,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 /** Issue #6141 (migration 0082) re-seeds it: referral trial-extension rule columns + agent_referral_trial_extensions table + 2 indexes. */
 /** Issue #6167 re-seeds it: host_version on mas_async_jobs (remainder ALTER). */
 export const COMBINED_FIXTURE_SHA256 =
-  "e7b02da73fc7abc35ff2e7484a3289edf96eecf758b4c36292f34b7b09e6d146";
+  "b398c0047ae89a6bebd0084d558a813404853454baa69b8a95b64c2e2786cc22";
 /** All four planes' entries in plane order: D1, DO, ORM, remainder. */
 export const COMBINED_CATALOGUE_ENTRIES: CatalogueEntry[] = [
   ...D1_CATALOGUE_ENTRIES,

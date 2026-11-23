@@ -30,6 +30,7 @@ import {
 } from "../services/jobPipelineEngine";
 import { createBuiltinStepRegistry } from "../services/jobPipelineSteps";
 import { createDoSqliteJobStageEventStore } from "../data/doSqliteJobStageEventAdapter";
+import { createD1JobStageEventStore } from "../data/d1JobStageEventAdapter";
 import {
   buildResearchJobDefinition,
   assertResearchAopCompliance,
@@ -449,6 +450,7 @@ export async function readResearchStages(
     ...(input.sql && typeof input.sql.exec === "function"
       ? { stageEvents: createDoSqliteJobStageEventStore(input.sql) }
       : {}),
+    ...(input.d1 ? { stageEventsMirror: createD1JobStageEventStore(input.d1) } : {}),
   });
   // No definition yet = the run never started; the six stages are pending,
   // not missing (the page still shows what can be started).
@@ -462,8 +464,16 @@ export async function readResearchStages(
         .listByRun(input.runId)
         .catch(() => [])
     : [];
+  // Issue #6202 — the D1 mirror answers when the DO has nothing this run:
+  // the read shape is identical, so a D1-only read is not a second contract.
+  const persistedRows =
+    persisted.length > 0
+      ? persisted
+      : input.d1
+        ? await createD1JobStageEventStore(input.d1).listByRun(input.runId).catch(() => [])
+        : [];
   const persistedByStage = new Map(
-    persisted
+    persistedRows
       .filter((row) => row.action === "terminal" && row.stageStatus)
       .map((row) => [row.stageId, row]),
   );
@@ -592,6 +602,7 @@ export async function executeResearchStageControl(
     ...(input.sql && typeof input.sql.exec === "function"
       ? { stageEvents: createDoSqliteJobStageEventStore(input.sql) }
       : {}),
+    ...(input.d1 ? { stageEventsMirror: createD1JobStageEventStore(input.d1) } : {}),
     // Issue #4782 S3 — as the dispatch control above: the stage
     // re-run resolves its retry policy from the caller's env.
     ...(input.env ? { env: input.env } : {}),

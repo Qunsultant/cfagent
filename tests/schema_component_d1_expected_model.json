@@ -5679,6 +5679,113 @@
         }
       ],
       "constraints": {}
+    },
+    "job_stage_events": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "pk": 1
+        },
+        {
+          "name": "event_key",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "claim_key",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "run_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "job_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "stage_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "unit_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "action",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "at",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "started_at",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "ended_at",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "detail",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "stage_status",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "duration_ms",
+          "type": "INTEGER",
+          "pk": 0
+        },
+        {
+          "name": "unit_count",
+          "type": "INTEGER",
+          "pk": 0
+        },
+        {
+          "name": "failed_unit_count",
+          "type": "INTEGER",
+          "pk": 0
+        },
+        {
+          "name": "result_ref",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "definition_version",
+          "type": "INTEGER",
+          "pk": 0
+        },
+        {
+          "name": "tenant_id",
+          "type": "TEXT",
+          "pk": 0
+        }
+      ],
+      "constraints": {
+        "unique:event_key": {
+          "kind": "unique",
+          "columns": [
+            "event_key"
+          ]
+        }
+      }
     }
   },
   "indexes": {
@@ -6207,6 +6314,14 @@
         "referred_user_id"
       ],
       "unique": false
+    },
+    "job_stage_events_run_stage_idx": {
+      "table": "job_stage_events",
+      "columns": [
+        "run_id",
+        "stage_id"
+      ],
+      "unique": true
     }
   }
 }

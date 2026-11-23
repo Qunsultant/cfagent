@@ -1905,6 +1905,47 @@ export const D1_CATALOGUE_ENTRIES: CatalogueEntry[] = [
     form: "literal",
   },
   {
+    // Issue #6028/#6202 — the D1 mirror of the DO stage rows (one terminal
+    // row per executed stage). `tenant_id` is the projection stamp, as
+    // job_run_records carries it.
+    code: "schema.d1.job_stage_events.create_table",
+    plane: "d1",
+    table: "job_stage_events",
+    statement: `CREATE TABLE IF NOT EXISTS job_stage_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      event_key TEXT NOT NULL UNIQUE,
+      claim_key TEXT NOT NULL,
+      run_id TEXT NOT NULL,
+      job_id TEXT NOT NULL,
+      stage_id TEXT NOT NULL,
+      unit_id TEXT,
+      action TEXT NOT NULL,
+      at TEXT NOT NULL,
+      started_at TEXT,
+      ended_at TEXT,
+      detail TEXT,
+      stage_status TEXT,
+      duration_ms INTEGER,
+      unit_count INTEGER,
+      failed_unit_count INTEGER,
+      result_ref TEXT,
+      definition_version INTEGER,
+      tenant_id TEXT
+    )`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    code: "schema.d1.job_stage_events.create_index_job_stage_events_run_stage_idx",
+    plane: "d1",
+    table: "job_stage_events",
+    index: "job_stage_events_run_stage_idx",
+    statement: `CREATE UNIQUE INDEX IF NOT EXISTS job_stage_events_run_stage_idx
+      ON job_stage_events (run_id, stage_id)`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
     code: "schema.d1.job_run_records.create_table",
     plane: "d1",
     table: "job_run_records",
@@ -3677,6 +3718,10 @@ export const D1_MIGRATION_CODES: Record<number, readonly string[]> = {
     "schema.d1.agent_tenant_settings.alter_table_add_column_slo_p95_latency_max_ms",
   ],
   80: ["schema.d1.agent_screener_task_entries.create_table"],
+  83: [
+    "schema.d1.job_stage_events.create_table",
+    "schema.d1.job_stage_events.create_index_job_stage_events_run_stage_idx",
+  ],
   82: [
     "schema.d1.agent_referral_rules.alter_table_add_column_extension_days",
     "schema.d1.agent_referral_rules.alter_table_add_column_referred_trial_days",
@@ -3847,6 +3892,15 @@ export const D1_CATALOGUE: SchemaCatalogue = buildD1Catalogue();
  * d1ResourceRollupAdapter) — the entries themselves are P1's, this
  * accessor only reads them.
  */
+/**
+ * One catalogue statement by its code (issue #6202 — an adapter that owns a
+ * table names both its CREATE and its index through the catalogue, never a
+ * literal of its own).
+ */
+export function d1StatementSql(code: string): string {
+  return D1_CATALOGUE.get(code).statement;
+}
+
 export function d1TableSql(table: string): string {
   return D1_CATALOGUE.get(`schema.d1.${table}.create_table`).statement;
 }
