@@ -248,6 +248,38 @@ export function buildBootstrapGrantAuditEventInput(input: {
 }
 
 /**
+ * #6258 — post-login alias-conflict repair, previously a silent
+ * Kv write (the migration record) with only a status string to
+ * show for it. Actor = the derived id the login now resolves to;
+ * resourceId = the retired id the record migrates from, so the
+ * event proves which forward pointer was written, when, and for
+ * whom. The mapping itself stays in the alias store. Best-effort,
+ * never changes the login outcome.
+ */
+export function buildIdMigrationRecordedAuditEventInput(input: {
+  oldInternalUserId: string;
+  newInternalUserId: string;
+  tenantId: string;
+  timestamp: number;
+  correlationId: string;
+}): CreateIaaaAuditEventInput {
+  return {
+    timestamp: input.timestamp,
+    type: "iaaa.id_migration.record",
+    actorPrincipalId: input.newInternalUserId,
+    actorType: "human",
+    initiatingPrincipalId: input.newInternalUserId,
+    tenantId: input.tenantId,
+    correlationId: input.correlationId,
+    action: "iaaa.id_migration.record",
+    resourceId: input.oldInternalUserId,
+    decision: "allow",
+    policyVersion: IAAA_AUDIT_POLICY_VERSION,
+    outcome: "succeeded",
+  };
+}
+
+/**
  * Best-effort record: returns the Slice 5 result, and converts a
  * throwing store into an ok:false AUDIT_WRITE_FAILED result
  * instead of propagating. Never throws. Never changes a login
