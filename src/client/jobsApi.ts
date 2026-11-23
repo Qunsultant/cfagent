@@ -307,6 +307,24 @@ export function triggerGoal(id: string) {
   );
 }
 
+/**
+ * Issue #6157 — start the OODA research run from the ledger. Reuses the
+ * existing manual door (`POST /api/research/run`): one trigger path, and
+ * the run lands in this ledger like any other. The response is the run's
+ * identity, never a fabricated one.
+ */
+export async function triggerResearchRun(): Promise<{ runId: string | null }> {
+  const data = await api<{ success?: boolean; engineJobId?: string; reportId?: string }>(
+    "/api/research/run",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    },
+  );
+  return { runId: data.engineJobId ?? data.reportId ?? null };
+}
+
 export function removeGoal(id: string) {
   return api<{ ok: boolean }>(`/api/schedule/goals/${encodeURIComponent(id)}`, {
     method: "DELETE",
