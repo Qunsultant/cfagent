@@ -1411,13 +1411,23 @@ export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL,
           if (rawTarget === "" || role === "") {
             return Response.json({ error: "A target login or internalUserId, and role, are required." }, { status: 400 });
           }
+          // A login that resolves to no alias is remembered, not
+          // refused here: the session gates below (step-up #3102,
+          // PDP deny #3113) answer to the session, not to the body,
+          // so a stale or denied caller must see 403 first and never
+          // learn whether a login exists. The raw string is a safe
+          // sentinel for the pre-gate reads: no membership is ever
+          // keyed by a login string, so the idempotent no-op check
+          // below is honest for it.
           let targetId = rawTarget;
+          let unresolvedLogin: string | null = null;
           if (!isInternalUserId(rawTarget)) {
             const resolved = await lookupInternalUserIdByLogin(kv, rawTarget);
             if (resolved === null) {
-              return Response.json({ error: `No internal user id found for login ${rawTarget}.` }, { status: 400 });
+              unresolvedLogin = rawTarget;
+            } else {
+              targetId = resolved;
             }
-            targetId = resolved;
           }
           const emailRaw = typeof body?.email === "string" ? body.email.trim() : "";
           const granteeEmail = emailRaw === "" ? undefined : emailRaw;
@@ -1502,6 +1512,9 @@ export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL,
               { error: "Forbidden: grant denied.", code: evaluated.reason, reason: evaluated.reason },
               { status: 403 },
             );
+          }
+          if (unresolvedLogin !== null) {
+            return Response.json({ error: `No internal user id found for login ${unresolvedLogin}.` }, { status: 400 });
           }
           // Issue #3155 (Q9): this surface grants admin roles
           // only, so every grant here needs two distinct
@@ -2612,6 +2625,14 @@ export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL,
           // a cited description kept next to the interfaces, not
           // a tunable, so it is not a config value (same idiom
           // as the PDP coverage map above).
+          //
+          // enrichmentFields (#6164 F6) names the view-level joins
+          // this endpoint adds beside each provider record: the
+          // login resolved server-side through the alias record
+          // (null when no alias exists). They are declared here so
+          // the schema stays the whole contract — every key a
+          // record carries is either a provider field or a declared
+          // enrichment, never an undeclared leak.
           const pipSchema = {
             membership: {
               fields: [
@@ -2625,9 +2646,11 @@ export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL,
                 "revokedAtMs",
                 "email",
               ],
+              enrichmentFields: ["login"],
             },
             roleBinding: {
               fields: ["role", "scope", "workspaceId", "resourceId", "grantedBy", "expiresAtMs"],
+              enrichmentFields: ["grantedByLogin"],
             },
             permissionDenial: {
               fields: [
@@ -2638,6 +2661,7 @@ export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL,
                 "deniedBy",
                 "deniedAtMs",
               ],
+              enrichmentFields: ["deniedByLogin"],
             },
           };
           const provider = membershipStoreToAttributeProvider(
@@ -3237,13 +3261,23 @@ export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL,
           if (rawTarget === "" || bindings.length === 0) {
             return Response.json({ error: "A target login or internalUserId, and a non-empty roleBindings array, are required." }, { status: 400 });
           }
+          // A login that resolves to no alias is remembered, not
+          // refused here: the session gates below (step-up #3102,
+          // PDP deny #3113) answer to the session, not to the body,
+          // so a stale or denied caller must see 403 first and never
+          // learn whether a login exists. The raw string is a safe
+          // sentinel for the pre-gate reads: no membership is ever
+          // keyed by a login string, so the idempotent no-op check
+          // below is honest for it.
           let targetId = rawTarget;
+          let unresolvedLogin: string | null = null;
           if (!isInternalUserId(rawTarget)) {
             const resolved = await lookupInternalUserIdByLogin(kv, rawTarget);
             if (resolved === null) {
-              return Response.json({ error: `No internal user id found for login ${rawTarget}.` }, { status: 400 });
+              unresolvedLogin = rawTarget;
+            } else {
+              targetId = resolved;
             }
-            targetId = resolved;
           }
           // #2661 — optional grantee email. A blank email is the
           // same as absent (the panel only sends a filled field);
@@ -3340,6 +3374,9 @@ export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL,
                 { status: 403 },
               );
             }
+          }
+          if (unresolvedLogin !== null) {
+            return Response.json({ error: `No internal user id found for login ${unresolvedLogin}.` }, { status: 400 });
           }
           // Issue #3155 (Q9): tenant-admin and platform-admin
           // grants need two distinct approvers. The first admin's
