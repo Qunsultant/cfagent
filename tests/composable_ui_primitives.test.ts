@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import React from "react";
-import { SegmentedControl, PillGroup, Badge, Button, Spinner, EmptyState, Card, Notice, Tabs, TabPanel, TextInput, Select, FileInput, Modal, Table, Skeleton, Checkbox, PageShell, PageSection, PageTemplate, ContextStrip, KpiRibbon, SummaryCard, CardHeader, WorkCard, DetailCard, WorkspaceGrid, ActionBar, QueueFeed, ToastProvider, useToast, Menu, Popover, Drawer, SkipLink, Stack, Flex, Grid, Disclosure } from "../src/client/components/ui";
+import { SegmentedControl, PillGroup, Badge, Button, Spinner, EmptyState, Card, Notice, Tabs, TabPanel, TextInput, Select, FileInput, Modal, Table, Skeleton, Checkbox, PageShell, PageSection, PageTemplate, ContextStrip, KpiRibbon, SummaryCard, CardHeader, WorkCard, DetailCard, WorkspaceGrid, ActionBar, QueueFeed, ToastProvider, useToast, Menu, Popover, Drawer, SkipLink, Stack, Flex, Grid, Disclosure, SmallHeader } from "../src/client/components/ui";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -646,5 +646,30 @@ describe("Disclosure (#5881)", () => {
     const element = React.createElement(Disclosure, { summary: "S", defaultOpen: true, className: "ui-mt-1" }, "body");
     expect(element.props.defaultOpen).toBe(true);
     expect(element.props.className).toBe("ui-mt-1");
+  });
+});
+
+describe("SmallHeader (#5004)", () => {
+  it("carries the title/subtitle/meta contract one step below CardHeader", () => {
+    const element = React.createElement(SmallHeader, {
+      title: "Positions",
+      subtitle: "Open legs, grouped by underlying",
+      meta: "Sort",
+    });
+    expect(element.type).toBe(SmallHeader);
+    expect(element.props.title).toBe("Positions");
+    expect(element.props.subtitle).toBe("Open legs, grouped by underlying");
+    expect(element.props.meta).toBe("Sort");
+  });
+
+  it("defaults to h5 and takes h6 for the single lower site", () => {
+    const element = React.createElement(SmallHeader, { title: "Positions" });
+    expect(element.props.level).toBeUndefined(); // default applied at render: "h5"
+    const h6 = React.createElement(SmallHeader, { title: "Subject", level: "h6" });
+    expect(h6.props.level).toBe("h6");
+  });
+
+  it("renders nothing with no content (CardHeader §1.6b parity)", () => {
+    expect(SmallHeader({})).toBeNull();
   });
 });

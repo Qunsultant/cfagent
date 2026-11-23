@@ -69,6 +69,8 @@ const INVENTORY: Record<string, string[]> = {
   "Grid.tsx": ["Grid"],
   // #5881: the shared collapsible section (native details/summary).
   "Disclosure.tsx": ["Disclosure"],
+  // #5004: the one distributed small-header primitive (h5/h6).
+  "SmallHeader.tsx": ["SmallHeader"],
 };
 
 /** Non-primitive files allowed in components/ui (helpers + styles). */
