@@ -302,6 +302,12 @@ export interface JobPipelineDeps {
    * `writeStageRows`).
    */
   stageEvents?: JobStageEventStore;
+  /**
+   * Issue #6202 — the optional D1 mirror of the same stage rows. Written
+   * best-effort after the DO write; the DO row stays authoritative, so a
+   * mirror failure never fails or blocks the run.
+   */
+  stageEventsMirror?: JobStageEventStore;
   journal?: JobStepJournal;
   now?: () => Date;
   newRunId?: () => string;
@@ -2409,6 +2415,22 @@ export class JobPipelineControl {
         await stageEventStore.record(row);
       } catch (error) {
         structuredLog.warn("jobPipeline.stage_row_write_failed", {
+          jobId: instance.jobId,
+          runId,
+          stageId: row.stageId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    // Issue #6202 — the D1 mirror, after the authoritative DO write. A
+    // mirror failure is logged and never fails the run.
+    const mirror = this.deps.stageEventsMirror;
+    if (!mirror) return;
+    for (const row of rows) {
+      try {
+        await mirror.record(row);
+      } catch (error) {
+        structuredLog.warn("jobPipeline.stage_row_mirror_failed", {
           jobId: instance.jobId,
           runId,
           stageId: row.stageId,

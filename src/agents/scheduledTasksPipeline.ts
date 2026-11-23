@@ -49,6 +49,7 @@ import {
 } from "../security/serviceIdentity";
 import { createJobPipelineStoresFromSql } from "../data/createJobPipelinePorts";
 import { createDoSqliteJobStageEventStore } from "../data/doSqliteJobStageEventAdapter";
+import { createD1JobStageEventStore } from "../data/d1JobStageEventAdapter";
 import type { JobStageEventStore } from "../data/jobStageEventPorts";
 import type { JobRunTrigger } from "../data/jobRunRecordPorts";
 import { normalizeJobRunTrigger } from "../data/jobRunRecordPorts";
@@ -611,6 +612,11 @@ export function createScheduledAgentPipelineControl(
     // Issue #6028 — the stage-level terminal rows land in this host's
     // own DO SQLite (the same store the stage-event consumer writes).
     stageEvents: createScheduledAgentStageEventStore(ctx),
+    // Issue #6202 — the D1 mirror of the stage rows, when this deployment
+    // has a D1 binding. Best-effort; the DO row is authoritative.
+    ...(ctx.env.AGENT_DB
+      ? { stageEventsMirror: createD1JobStageEventStore(ctx.env.AGENT_DB) }
+      : {}),
     // #4312 — the feed execution bound resolves from env here
     // (FEED_JOB_EXECUTION_MS, 240s when no knob is set), so the
     // host's whole-run deadline is operator-configurable.

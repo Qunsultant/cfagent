@@ -5826,6 +5826,11 @@
           "name": "definition_version",
           "type": "INTEGER",
           "pk": 0
+        },
+        {
+          "name": "tenant_id",
+          "type": "TEXT",
+          "pk": 0
         }
       ],
       "constraints": {
@@ -10424,6 +10429,14 @@
         "superseded_by"
       ],
       "unique": false
+    },
+    "job_stage_events_run_stage_idx": {
+      "table": "job_stage_events",
+      "columns": [
+        "run_id",
+        "stage_id"
+      ],
+      "unique": true
     }
   }
 }
