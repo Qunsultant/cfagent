@@ -595,14 +595,37 @@ export async function recoverQueuedAsyncJobs(ctx: AsyncJobsContext): Promise<voi
 }
 
 /** Issue #6167: the host version the platform reports for THIS
- *  execution (CF_VERSION_METADATA.id), or null when the
- *  platform reports none. The platform reports a version id,
- *  not a restart cause — the version is the only host identity
- *  a reap can compare against the claim-time stamp. */
-function hostVersionFromEnv(env: unknown): string | null {
-  const id = (env as Record<string, unknown> | undefined)?.CF_VERSION_METADATA as
-    | { id?: unknown }
-    | undefined;
+ *  execution, or null when the platform reports none. The platform
+ *  reports a version id, not a restart cause — the version is the
+ *  only host identity a reap can compare against the claim-time
+ *  stamp.
+ *
+ *  Issue #6216: the PRIMARY source is the deploy-time git SHA
+ *  (`CF_DEPLOY_VERSION`, injected by the deploy workflow into
+ *  wrangler.jsonc vars). A plain var IS visible in the Durable
+ *  Object env, where `CF_VERSION_METADATA` is not — the #6167 claim
+ *  stamped null in the DO because it read only
+ *  `CF_VERSION_METADATA`. The deploy var is preferred BECAUSE it is
+ *  the only source available in both contexts (Worker entrypoint
+ *  and DO), so a claim and a reap always agree when it is set.
+ *  `CF_VERSION_METADATA.id` stays as the fallback for contexts
+ *  where the deploy var was never injected (a local/dev deploy).
+ *
+ *  The deploy var must be a full 40-hex git SHA: a non-SHA value
+ *  means the injection never ran (the wrangler.jsonc placeholder
+ *  `<DEPLOY_VERSION>`), and a constant placeholder must never read
+ *  as a version — every claim would then carry the same fake
+ *  version and every reap would misread "same-version", including
+ *  after a real deploy. A failed injection reads as unknown, not
+ *  as a fake version. Exported for the #6216 pins. */
+const DEPLOY_VERSION_SHA = /^[0-9a-f]{40}$/;
+export function hostVersionFromEnv(env: unknown): string | null {
+  const record = env as Record<string, unknown> | undefined;
+  const deployVersion = record?.CF_DEPLOY_VERSION;
+  if (typeof deployVersion === "string" && DEPLOY_VERSION_SHA.test(deployVersion)) {
+    return deployVersion;
+  }
+  const id = record?.CF_VERSION_METADATA as { id?: unknown } | undefined;
   return typeof id?.id === "string" && id.id.length > 0 ? id.id : null;
 }
 
@@ -646,33 +669,57 @@ function isStillbornOrphan(row: {
   // the row never recorded activity past the claim.
   const lastMs = row.last_activity_at ? Date.parse(row.last_activity_at) : startedMs;
   if (Number.isNaN(lastMs)) return false;
-  return lastMs - startedMs <= STILLBORN_ORPHAN_MS;
+  // Issue #6216: the stillborn window is symmetric — the last
+  // activity must be within STILLBORN_ORPHAN_MS of the claim on
+  // EITHER side. A last activity well BEFORE the claim is not a
+  // stillborn (the executor cannot have died before it started);
+  // it is a temporally inconsistent row, and the old one-sided
+  // check (`diff <= bound`) misread it as stillborn — the #4002
+  // recovery seeds carry last-activity stamps minutes before
+  // their start stamps, and the #6216 gate (which refuses on
+  // unknown + stillborn) would have refused their re-arms. A
+  // millisecond either side is the #6167 clock-skew tolerance;
+  // minutes before the claim is not.
+  return Math.abs(lastMs - startedMs) <= STILLBORN_ORPHAN_MS;
 }
 
 /** Issue #6167: the re-arm gate for an orphaned row, shared by
  *  the onStart recovery and the sweep so the two paths cannot
  *  drift (the sweep's own comment says the rules are shared).
- *  A stillborn orphan on an UNCHANGED version is NOT re-armed:
- *  the dispatch died on arrival on this host, so an identical
- *  re-arm replays the identical dispatch and dies identically —
+ *  A stillborn orphan is re-armed ONLY on positive evidence of
+ *  a deploy (the version CHANGED — the #3907/#4002 case): the
+ *  dispatch died on arrival, so an identical re-arm on the same
+ *  host replays the identical dispatch and dies identically —
  *  the re-arm loop just burns runs (three feed re-arms on
- *  2026-11-22, all dead in seconds). Re-armed as before when
- *  the version changed (a deploy killed it — the #3907/#4002
- *  case), when the job had progressed (it died mid-work, so a
- *  resume may land), or when the version is unknown on either
- *  side (existing behavior preserved — never refuse a re-arm on
- *  evidence we do not have). */
+ *  2026-11-22, all dead in seconds).
+ *
+ *  Issue #6216: the refusal also applies when the version is
+ *  UNKNOWN on either side. #6167 preserved the old behaviour
+ *  there ("never refuse a re-arm on evidence we do not have"),
+ *  but the live evidence (the 2026-11-23 04:03 EST feed orphan:
+ *  no host_version, class "unknown", stillborn, re-armed
+ *  — plus the three 2026-11-22 re-arms) showed that default let
+ *  the loop through: the version was unknown because the source
+ *  (`CF_VERSION_METADATA.id`) is unavailable in the DO, not
+ *  because a deploy happened. When the orphan is stillborn and
+ *  no deploy is evidenced — same version OR unknown — the
+ *  dispatch is the likely cause, so it is failed visibly with
+ *  the reason named instead of re-armed. A PROGRESSED orphan is
+ *  still re-armed on any class (it died mid-work, so a resume
+ *  may land). */
 function shouldRearmOrphanedRow(
   row: { started_at: string | null; last_activity_at: string | null; host_version?: string | null },
   reapVersion: string | null,
 ): { rearm: boolean; restartClass: OrphanRestartClass; notRearmedReason?: string } {
   const restartClass = restartClassFor(row.host_version, reapVersion);
-  if (restartClass === "same-version" && isStillbornOrphan(row)) {
+  if (restartClass !== "deploy" && isStillbornOrphan(row)) {
     return {
       rearm: false,
       restartClass,
       notRearmedReason:
-        "the dispatch died within 10s of its claim on the same host version (a stillborn orphan — an identical re-arm would replay the identical dispatch and die identically)",
+        restartClass === "same-version"
+          ? "the dispatch died within 10s of its claim on the same host version (a stillborn orphan — an identical re-arm would replay the identical dispatch and die identically)"
+          : "the dispatch died within 10s of its claim and the host version is unknown on at least one side, so no deploy is evidenced (a stillborn orphan — an identical re-arm would replay the identical dispatch and die identically)",
     };
   }
   return { rearm: true, restartClass };
@@ -1009,10 +1056,12 @@ export async function recoverStaleRunningAsyncJobs(
         const ownRearmCount =
           typeof payload.recoveryRearmCount === "number" ? payload.recoveryRearmCount : 0;
         // Issue #6167: the stillborn gate — a dispatch that died
-        // on arrival on an UNCHANGED version is not re-armed.
-        // The cap below is a different refusal (already re-armed
-        // twice); the gate is the futility refusal, and its reason
-        // rides the reap message so the failure is named.
+        // on arrival is not re-armed unless a deploy is evidenced
+        // (#6216: same-version OR unknown — a stillborn orphan is
+        // re-armed only on a changed version). The cap below is a
+        // different refusal (already re-armed twice); the gate is
+        // the futility refusal, and its reason rides the reap
+        // message so the failure is named.
         if (!rearmDecision.rearm) {
           notRearmedReason = rearmDecision.notRearmedReason;
         } else if (ownRearmCount + countRecoveryRearms(ctx, jobId) < RECOVERY_REARM_CAP) {
@@ -1522,8 +1571,9 @@ async function settleStaleFeedDispatch(
   let notRearmedReason: string | undefined;
   // Issue #6167: the host version at reap time + the shared
   // re-arm decision (same gate as the onStart recovery — the
-  // two settle paths cannot drift). A stillborn orphan on an
-  // unchanged version is not re-armed.
+  // two settle paths cannot drift). A stillborn orphan is not
+  // re-armed unless a deploy is evidenced (#6216: same-version
+  // OR unknown).
   const hostId = hostVersionFromEnv(ctx.env);
   const rearmDecision = shouldRearmOrphanedRow(
     row as { started_at: string | null; last_activity_at: string | null; host_version?: string | null },
@@ -2149,9 +2199,11 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
   // serialization + the guard + this verification are the
   // mechanism. false here is the honest not-claimed outcome.
   // Issue #6167: the claim stamps the host version the executor
-  // claimed under (CF_VERSION_METADATA.id), so a later reap can
-  // name the restart class (deploy vs same-version) and gate a
-  // stillborn re-arm.
+  // claimed under (the deploy-time git SHA, #6216 — a plain var,
+  // so it IS visible in the DO env — falling back to
+  // CF_VERSION_METADATA.id where the deploy var was never
+  // injected), so a later reap can name the restart class
+  // (deploy vs same-version) and gate a stillborn re-arm.
   const hostVersion = hostVersionFromEnv(ctx.env);
   if (!family.queue.claim(jobId, ctx.sessionKey(), now, hostVersion)) return;
 

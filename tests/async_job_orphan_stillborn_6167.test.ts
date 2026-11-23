@@ -27,7 +27,13 @@
  *   the reason named. A stillborn orphan on a CHANGED version
  *   (a deploy killed it) and a PROGRESSED orphan are still
  *   re-armed as before, cap 2 preserved; an unknown version
- *   falls back to re-arming (existing behavior preserved).
+ *   fell back to re-arming (existing behavior preserved) UNTIL
+ *   #6216: the live evidence (three feed re-arms on 2026-11-22
+ *   plus the 2026-11-23 one, all dead in seconds) showed the
+ *   unknown fallback let the re-arm loop through, so #6216
+ *   refuses a stillborn orphan on an unknown version too — a
+ *   stillborn orphan is re-armed ONLY on positive evidence of
+ *   a deploy. See tests/async_job_orphan_stillborn_6216.test.ts.
  *
  * Harness mirrors tests/async_job_recovery_rearm_4002.test.ts:
  * real node:sqlite behind the family's ports, rows seeded at
@@ -225,7 +231,7 @@ describe("stillborn orphan on an unchanged version is not re-armed (#6167)", () 
     expect(allRows(h.db).filter((r) => r.job_id !== "job-progressed-same")).toHaveLength(1);
   });
 
-  it("a stillborn feed row with an UNKNOWN claim version is still re-armed (fallback preserves existing behavior)", async () => {
+  it("a stillborn feed row with an UNKNOWN claim version is NOT re-armed (#6216: no deploy evidenced)", async () => {
     const h = makeHarness();
     const startedAt = isoAgo(20 * MIN);
     const lastActivityAt = new Date(Date.parse(startedAt) + 2000).toISOString();
@@ -239,9 +245,11 @@ describe("stillborn orphan on an unchanged version is not re-armed (#6167)", () 
     });
 
     const result = await recoverStaleRunningAsyncJobs(h.ctx);
-    expect(result).toEqual({ examined: 1, failed: 1, rearmed: 1 });
+    expect(result).toEqual({ examined: 1, failed: 1, rearmed: 0 });
     const row = rowStatus(h.db, "job-stillborn-unknown");
+    expect(row.status).toBe("failed");
     expect(row.error).toContain("restart cause not reported");
+    expect(row.error).toContain("Not re-armed");
     expect(row.error).not.toContain("same-version restart");
     expect(row.error).not.toContain("deploy restart");
   });

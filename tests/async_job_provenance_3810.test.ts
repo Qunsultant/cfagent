@@ -260,10 +260,17 @@ describe("shard-chain re-arm after host death (#4424)", () => {
       }) as unknown as AsyncJobSubmission;
     const stale = await submitAsyncJob(ctx, shard("AAPL"));
     const done = await submitAsyncJob(ctx, shard("MSFT"));
+    // Issue #6216: the stale shard PROGRESSED before it died — its
+    // last activity is 5 minutes after its start, so the stillborn
+    // gate (which refuses a re-arm for a dispatch that died on
+    // arrival) does not apply. Both stamps equal would read as
+    // stillborn (last activity IS the claim) and the gate would
+    // refuse the re-arm this test pins.
     const stamp = "2020-01-01T00:00:00.000Z";
+    const progressed = "2020-01-01T00:05:00.000Z";
     db.prepare(
       "UPDATE mas_async_jobs SET status = 'running', started_at = ?, last_activity_at = ? WHERE job_id = ?",
-    ).run(stamp, stamp, stale.jobId);
+    ).run(stamp, progressed, stale.jobId);
     db.prepare("UPDATE mas_async_jobs SET status = 'completed' WHERE job_id = ?").run(done.jobId);
 
     const result = await recoverStaleRunningAsyncJobs(ctx);

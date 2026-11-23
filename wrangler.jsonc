@@ -550,6 +550,21 @@
     // so the flag is off — the variants put it at "0" for the same reason.
     "FEATURE_SANDBOX": "0",
     "FEATURE_WORKSPACE": "1",
-    "WORKSPACE_ROOT": "/workspace"
+    "WORKSPACE_ROOT": "/workspace",
+    // Issue #6216 — the deploy-time host version: the git SHA of the
+    // deployed commit. CF_VERSION_METADATA.id is NOT available inside
+    // a Durable Object, so the async-job claim stamped null and the
+    // stillborn gate could never fire. This var carries the deployed
+    // SHA, injected by the deploy workflow (sed, same pattern as the
+    // KV ID step) before `wrangler deploy`. It is a plain var, so it
+    // IS visible in the DO env. The placeholder below is never
+    // deployed as-is: the deploy step replaces it, and the resolver
+    // (src/agents/orchestrator/asyncJobs.ts `hostVersionFromEnv`)
+    // accepts only a full 40-hex git SHA, so a local `wrangler
+    // deploy` without the replacement reads as unknown, never as a
+    // fake version. Rollback is removing this var and redeploying
+    // (the claim then stamps null and the gate refuses stillborn
+    // re-arms on unknown, the pre-#6216 safe behaviour).
+    "CF_DEPLOY_VERSION": "<DEPLOY_VERSION>"
   }
 }
