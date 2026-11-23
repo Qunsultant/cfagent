@@ -1,0 +1,3 @@
+### Added
+
+- Worker startup measurement harness (#6281, code-splitting program #6280 Slice 0): `scripts/measure-startup.mjs` rebuilds the #3185 diagnosis measurement as a committed script — worker bundle bytes (wrangler dry-run = authoritative), esbuild metafile module ranking, parse-only time (`node --check`) and full import CPU, plus a CI budget check in Fast gates that fails the build when the bundle exceeds the recorded baseline + 5% (PROPOSED, owner decision; `scripts/measure-startup.config.json`, baseline 14,197,253 bytes on main `1841712537`). Startup time is reported as a CI artifact, never a failing gate. `npm run measure:startup`.

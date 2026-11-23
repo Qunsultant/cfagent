@@ -24,7 +24,8 @@
     "parity": "node scripts/parity.mjs",
     "lint:changed": "node scripts/lint-changed.mjs",
     "lint:audit": "node scripts/lint-changed.mjs --all",
-    "test:coverage": "vitest run --coverage --coverage.provider=v8 --coverage.reporter=json-summary --coverage.reporter=text-summary --coverage.reportsDirectory=coverage"
+    "test:coverage": "vitest run --coverage --coverage.provider=v8 --coverage.reporter=json-summary --coverage.reporter=text-summary --coverage.reportsDirectory=coverage",
+    "measure:startup": "node scripts/measure-startup.mjs"
   },
   "dependencies": {
     "@ai-sdk/react": "4.0.126",
