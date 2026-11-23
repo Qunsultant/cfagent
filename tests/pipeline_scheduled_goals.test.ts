@@ -315,4 +315,31 @@ describe("pipeline goals through ScheduledAgent", () => {
     const stores = createSocialStoresFromNamespace(ss.namespace as any)!;
     expect((await stores.ledger.getDraft("2026-10-26", "x"))?.status).toBe("dry-run-posted");
   });
+
+  it("a run whose record does not land is a tick error, not a silent success (issue 6293)", async () => {
+    // The firing itself succeeds; only the legacy "jobRunRecords" KV
+    // write fails (the ledger post is absent in this env, so the KV
+    // key is the only home). Before the fix the tick said jobsCreated
+    // 1 with no error and no row anywhere — the trigger looked like
+    // a success while the ledger showed nothing.
+    const store = new Map<string, unknown>();
+    store.set("goals", [pipelineGoal()]);
+    const ctx = {
+      storage: {
+        get: async (k: string) => (store.has(k) ? store.get(k) : undefined),
+        put: async (k: string, v: unknown) => {
+          if (k === "jobRunRecords") throw new Error("record store down");
+          void store.set(k, v);
+        },
+      },
+      _goals: store,
+    };
+    const ss = makeSessionStore();
+    await seedBrief(ss.namespace, "2026-10-26", "Morning brief.");
+    const budgetSpy = { calls: 0 };
+    const agent = new ScheduledAgent(ctx as any, makeEnv(ss.namespace, budgetSpy));
+    const tick = await agent.onCron(makeEnv(ss.namespace, budgetSpy));
+    expect(tick.jobsCreated).toBe(1);
+    expect(tick.errors.join(" ")).toMatch(/run record did not land/);
+  });
 });

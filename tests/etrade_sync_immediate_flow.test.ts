@@ -139,8 +139,8 @@ describe("E*TRADE & Broker Immediate Sync Routing (#1149)", () => {
     expect(forwarded[0].asyncEligible).toBe("1");
   });
 
-  it("orchestrator immediate regex matches interactive broker/trading/options routes", () => {
-    const isImmediateEndpoint = /(?:^|\/)(?:api\/)?(?:clear|reset|memory|audit|chat|chat-activity|screener|etrade|broker|trading|options)(?:\/|$)/i;
+  it("orchestrator immediate regex matches interactive broker/trading/options routes and the opportunity-hunt seam (issue 6293)", () => {
+    const isImmediateEndpoint = /(?:^|\/)(?:api\/)?(?:clear|reset|memory|audit|chat|chat-activity|screener|etrade\/options\/strategy|etrade|broker|trading|options|opportunity-hunt|research|workflow-runs|external-ads|categories|referrals|revenue|ads|platform|environment)(?:\/|$)/i;
 
     expect(isImmediateEndpoint.test("/etrade/status")).toBe(true);
     expect(isImmediateEndpoint.test("/etrade/positions")).toBe(true);
@@ -151,6 +151,11 @@ describe("E*TRADE & Broker Immediate Sync Routing (#1149)", () => {
     expect(isImmediateEndpoint.test("/screener/stocks")).toBe(true);
     expect(isImmediateEndpoint.test("/api/etrade/status")).toBe(true);
     expect(isImmediateEndpoint.test("/api/etrade/positions")).toBe(true);
+    // Issue #6293 — the hunt seam is a seconds-long pure computation
+    // the route runs synchronously; without this prefix every panel
+    // Run was queued as an async job behind a 10-minute poll.
+    expect(isImmediateEndpoint.test("/api/opportunity-hunt/run")).toBe(true);
+    expect(isImmediateEndpoint.test("/opportunity-hunt/run")).toBe(true);
 
     // Should NOT match arbitrary un-exempted endpoints
     expect(isImmediateEndpoint.test("/custom/long-computation")).toBe(false);

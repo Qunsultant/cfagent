@@ -624,6 +624,13 @@ export class ScheduledAgent extends PortThink {
         await this.ctx.storage.put("goals", seedable);
         return { goals: [...seedable], records: [] };
       }
+      // Issue #6293 — one-time reconciliation of the stale
+      // opportunity-hunt cron (see reconcileStaleOpportunityHuntCron):
+      // the stored value is corrected to the config value and the KV
+      // key re-written, so the correction is durable.
+      if (this.reconcileStaleOpportunityHuntCron(stored)) {
+        await this.ctx.storage.put("goals", stored);
+      }
       return { goals: stored, records: [] };
     }
     // One-way KV → store import: goals that only exist under the
@@ -677,7 +684,59 @@ export class ScheduledAgent extends PortThink {
       }
       return { goals: [...seedable], records: seeded };
     }
+    // Issue #6293 — one-time reconciliation of the stale
+    // opportunity-hunt cron (see reconcileStaleOpportunityHuntCron):
+    // the corrected record is written back to the store with its
+    // createdAt preserved, and the returned snapshot updated so a
+    // later saveGoals never re-introduces the stale value.
+    if (this.reconcileStaleOpportunityHuntCron(goals)) {
+      const fixed = goals.find((goal) => goal.id === "opportunity-hunt");
+      if (fixed) {
+        const prev = records.find((record) => record.id === fixed.id);
+        const record = goalToRecord(fixed);
+        if (prev) {
+          record.createdAt = prev.createdAt;
+          records[records.indexOf(prev)] = record;
+        } else {
+          records.push(record);
+        }
+        record.updatedAt = new Date().toISOString();
+        store.save(record);
+      }
+    }
     return { goals, records };
+  }
+
+  /**
+   * Issue #6293 — one-time reconciliation of the stale
+   * opportunity-hunt cron (user decision 2026-11-23: run it daily).
+   * The deployed stored goal still carries the cron it shipped with,
+   * "0 *\/6 * * *" (every 6 hours; see src/config/builtinScheduledGoals.ts),
+   * while the config says "0 7 * * *" (daily 07:00). The seed only
+   * runs on an empty store and never backfills, so the stale value
+   * persists indefinitely — and the no-timeZone isDue branch can
+   * never fire a step-hour cron, so the goal effectively never runs
+   * on schedule.
+   *
+   * Resets ONLY the known stale value to the config value (the
+   * config is the source of truth for the target cron). Any other
+   * stored cron — including an owner edit via the goals UI — is
+   * left untouched, so this never clobbers an owner edit. Once
+   * corrected the stored value equals the config value and this
+   * never fires again: a one-time reconciliation, not a blanket
+   * overwrite-on-load. Returns true when a goal was corrected; the
+   * caller persists the correction through the store the goals were
+   * read from.
+   */
+  private reconcileStaleOpportunityHuntCron(goals: ScheduledGoal[]): boolean {
+    const stored = goals.find((goal) => goal.id === "opportunity-hunt");
+    if (!stored || stored.cron !== "0 */6 * * *") return false;
+    const config = getBuiltinScheduledGoals().find(
+      (goal) => goal.id === "opportunity-hunt",
+    );
+    if (!config || stored.cron === config.cron) return false;
+    stored.cron = config.cron;
+    return true;
   }
 
   /**
@@ -2073,7 +2132,20 @@ export class ScheduledAgent extends PortThink {
           ...(extra.artifactRefs !== undefined
             ? { artifactRefs: extra.artifactRefs }
             : {}),
-        }).then(() => undefined);
+        }).then((landed) => {
+          // Issue #6293 — a run whose record did not land is silent
+          // no-row: `recordJobRun` swallows a storage failure and the
+          // firing branches ignored the boolean, so the tick said
+          // jobsCreated 1 with no error and no row anywhere. A failed
+          // write is a tick error now, so the trigger route and the
+          // ledger panel report it instead of a phantom success.
+          if (!landed) {
+            tick.errors.push(
+              `${goal.id}: run record did not land (ledger + legacy store both failed)`,
+            );
+          }
+          return undefined;
+        });
       };
 
       // #2840: in-flight firing guard (the screen-lock pattern,

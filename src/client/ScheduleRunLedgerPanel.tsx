@@ -511,8 +511,26 @@ export function ScheduleRunLedgerPanel({
           started.runId ? `OODA run started: ${started.runId}` : "OODA run started.",
         );
       } else {
-        await triggerGoal("opportunity-hunt");
-        setTriggerMsg("Opportunity Hunt run started.");
+        // Issue #6293 — report what the tick actually says, never a
+        // canned "run started": a trigger that created no job (goal
+        // not found, already in flight, budget rejected, or a failed
+        // firing) must not look like a started run. A failed firing
+        // still records its row in the ledger, so the message names
+        // the failure and the refresh below surfaces the row.
+        const { tick } = await triggerGoal("opportunity-hunt");
+        if (tick.jobsCreated > 0) {
+          setTriggerMsg("Opportunity Hunt run started.");
+        } else if (tick.errors.length > 0) {
+          setTriggerMsg(
+            tick.jobsSkipped > 0
+              ? `Opportunity Hunt run skipped: ${tick.errors[0]}`
+              : `Opportunity Hunt run failed: ${tick.errors[0]}`,
+          );
+        } else if (tick.goalsEvaluated === 0) {
+          setTriggerMsg("Goal not found: opportunity-hunt.");
+        } else {
+          setTriggerMsg("Opportunity Hunt run started.");
+        }
       }
       await refresh();
     } catch (err) {

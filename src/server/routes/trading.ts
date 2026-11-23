@@ -302,7 +302,19 @@ export async function handleTradingScheduleRoutes(request: Request, env: Env, ur
           if (!updated) return Response.json({ error: "Goal not found." }, { status: 404 });
           return Response.json({ ok: true });
         }
-        const tick = (await sched.triggerGoal(id, undefined, session.githubLogin)) as { goalsEvaluated?: unknown };
+        // Issue #6293 — a trigger that evaluated no goal is a
+        // not-found, not a success: the route used to answer
+        // `{ok: true, tick}` with 200 even when the goal was absent
+        // (goalsEvaluated 0, "Goal not found" in the tick), and the
+        // ledger panel showed "run started" for a run that never
+        // happened. 404 here, matching the sibling `enabled` and
+        // DELETE branches.
+        const tick = (await sched.triggerGoal(id, undefined, session.githubLogin)) as {
+          goalsEvaluated?: unknown;
+        };
+        if (tick.goalsEvaluated === 0) {
+          return Response.json({ error: `Goal not found: ${id}` }, { status: 404 });
+        }
         return Response.json({ ok: true, tick });
       }
       const deleteMatch = path.match(/^\/api\/schedule\/goals\/([^/]+)$/);

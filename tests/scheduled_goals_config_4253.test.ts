@@ -66,6 +66,7 @@ vi.mock("../src/security/etradeOAuth", () => ({
 
 import type { SqlStorage } from "../src/orm";
 import { SqlUnifiedScheduleStore } from "../src/data/doSqliteUnifiedScheduleAdapter";
+import { goalToRecord } from "../src/services/unifiedScheduleManagement";
 import { ScheduledAgent } from "../src/agents/scheduled-agent";
 import {
   getBuiltinScheduledGoals,
@@ -320,5 +321,62 @@ describe("built-in goals from config (#4253)", () => {
       expect(minute, `${goal.id} minute`).toMatch(/^\d+$/);
       expect(hour, `${goal.id} hour`).toMatch(/^\d+$/);
     }
+  });
+});
+
+describe("stale opportunity-hunt cron is reconciled once to the config value (#6293)", () => {
+  const staleHunt = () => ({
+    id: "opportunity-hunt",
+    name: "Opportunity hunt",
+    cron: "0 */6 * * *",
+    operation: "search.opportunity_hunt",
+    budgetCents: 1000,
+    enabled: true,
+  });
+
+  it("6293-C01 SQL store: a stored stale cron is reset to daily 07:00 and the row is corrected in place", async () => {
+    const { agent, store } = makeSqlAgent();
+    const seeded = goalToRecord(staleHunt() as never);
+    seeded.createdAt = "2026-11-01T00:00:00.000Z";
+    seeded.updatedAt = seeded.createdAt;
+    store.save(seeded);
+    const goals = await agent.listGoals();
+    expect(goals.find((g: any) => g.id === "opportunity-hunt")?.cron).toBe("0 7 * * *");
+    // The correction is durable: the stored row carries the config
+    // cron, with its createdAt preserved.
+    const row = store.get("opportunity-hunt");
+    expect((row?.definition as any).cron).toBe("0 7 * * *");
+    expect(row?.createdAt).toBe("2026-11-01T00:00:00.000Z");
+    // A second read is a no-op: the value already equals config.
+    expect(
+      (await agent.listGoals()).find((g: any) => g.id === "opportunity-hunt")?.cron,
+    ).toBe("0 7 * * *");
+  });
+
+  it("6293-C02 KV fallback: a stored stale cron is reset and the key re-written", async () => {
+    const { agent, kv } = makeKvAgent();
+    kv.set("goals", [staleHunt()]);
+    const goals = await agent.listGoals();
+    expect(goals.find((g: any) => g.id === "opportunity-hunt")?.cron).toBe("0 7 * * *");
+    const persisted = kv.get("goals") as any[];
+    expect(persisted.find((g) => g.id === "opportunity-hunt")?.cron).toBe("0 7 * * *");
+  });
+
+  it("6293-C03 an owner-edited cron is left untouched (SQL store)", async () => {
+    const { agent, store } = makeSqlAgent();
+    store.save(goalToRecord({ ...staleHunt(), cron: "0 8 * * *" } as never));
+    const goals = await agent.listGoals();
+    expect(goals.find((g: any) => g.id === "opportunity-hunt")?.cron).toBe("0 8 * * *");
+    expect((store.get("opportunity-hunt")?.definition as any).cron).toBe("0 8 * * *");
+  });
+
+  it("6293-C04 an owner-edited cron is left untouched (KV fallback)", async () => {
+    const { agent, kv } = makeKvAgent();
+    kv.set("goals", [{ ...staleHunt(), cron: "0 8 * * *" }]);
+    const goals = await agent.listGoals();
+    expect(goals.find((g: any) => g.id === "opportunity-hunt")?.cron).toBe("0 8 * * *");
+    expect((kv.get("goals") as any[]).find((g) => g.id === "opportunity-hunt")?.cron).toBe(
+      "0 8 * * *",
+    );
   });
 });

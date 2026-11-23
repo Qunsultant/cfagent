@@ -29,6 +29,8 @@ import {
   PageSection,
   Table,
 } from "./components/ui";
+import { asyncJobErrorCode } from "./apiFetch";
+import { codedMessage } from "../outcomes/outcomeAspects";
 import {
   listAllRuns,
   runOpportunityHuntNow,
@@ -51,9 +53,26 @@ function formatTime(iso: string): string {
 export function OpportunityHuntPanel() {
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [errorJobId, setErrorJobId] = useState<string | null>(null);
   const [result, setResult] = useState<OpportunityHuntResult | null>(null);
   const [lastRun, setLastRun] = useState<JobRunRecord | null>(null);
   const [lastRunError, setLastRunError] = useState<string | null>(null);
+  // Issue #6293 — a visible status line while a run is pending: when
+  // the run started and how long it has been going. The hunt normally
+  // answers in seconds (the seam is synchronous); a run that lingers
+  // past the poll deadline is reported as still running, with its job
+  // id, instead of a bare disabled button.
+  const [runStartedAt, setRunStartedAt] = useState<number | null>(null);
+  const [elapsedSec, setElapsedSec] = useState(0);
+
+  useEffect(() => {
+    if (runStartedAt === null) return;
+    const id = setInterval(
+      () => setElapsedSec(Math.floor((Date.now() - runStartedAt) / 1000)),
+      1000,
+    );
+    return () => clearInterval(id);
+  }, [runStartedAt]);
 
   const refreshLastRun = useCallback(async () => {
     try {
@@ -75,15 +94,38 @@ export function OpportunityHuntPanel() {
   const runNow = async () => {
     setRunning(true);
     setError(null);
+    setErrorJobId(null);
+    setElapsedSec(0);
+    setRunStartedAt(Date.now());
     try {
       const res = await runOpportunityHuntNow();
       setResult(res);
     } catch (cause) {
-      setError(
-        cause instanceof Error ? cause.message : "The hunt could not run.",
-      );
+      // Issue #6293 — classify structurally, never render the raw
+      // transport text. A 408/500 from the 202 poll carries a job id:
+      // the caller renders the catalog message for the code
+      // (`asyncJobErrorCode`), with the job id so the run can be found
+      // in the ledger. A genuine hunt failure (a named reason such as
+      // an unreadable bar source) has no async-job code and its named
+      // reason is shown as-is, as before.
+      const failure = cause as { status?: number; data?: unknown };
+      const code =
+        typeof failure.status === "number"
+          ? asyncJobErrorCode(failure.status, failure.data)
+          : undefined;
+      if (code) {
+        const jobId =
+          (failure.data as { jobId?: string } | null)?.jobId ?? null;
+        setError(codedMessage(code));
+        setErrorJobId(jobId);
+      } else {
+        setError(
+          cause instanceof Error ? cause.message : "The hunt could not run.",
+        );
+      }
     } finally {
       setRunning(false);
+      setRunStartedAt(null);
     }
   };
 
@@ -96,9 +138,22 @@ export function OpportunityHuntPanel() {
         <Button variant="primary" onClick={runNow} loading={running}>
           Run hunt now
         </Button>
+        {running ? (
+          <p>
+            Running… {elapsedSec}s elapsed. The hunt reads the persisted
+            bars and returns its setups here.
+          </p>
+        ) : null}
         {error ? (
           <Notice tone="danger" title="The hunt could not run">
             {error}
+            {errorJobId ? (
+              <p>
+                <a href="/?tab=schedules&view=runs">
+                  Check the run ledger for job {errorJobId}
+                </a>
+              </p>
+            ) : null}
           </Notice>
         ) : null}
         {result ? (
