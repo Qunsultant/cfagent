@@ -16,6 +16,8 @@ import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import * as XLSX from "@e965/xlsx";
 import type { GoalDrivenScreenResult } from "./goalDrivenScreen";
 import { recordJobOutcome } from "./jobOutcomes";
+import { projectJobOutcomeBestEffort } from "./runLedgerProjectionHooks";
+import type { Env } from "../types";
 import type { JobRunTrigger } from "../data/jobRunRecordPorts";
 import type { SqlStorage } from "../orm";
 import { yahooDataModeLabel } from "../workflows/stockScreenPlanner";
@@ -176,10 +178,11 @@ export interface GoalRunOutcomeRecord {
   createdAt?: string;
 }
 
-export function recordGoalRunOutcome(
+export async function recordGoalRunOutcome(
   sql: SqlStorage | null | undefined,
   run: GoalRunOutcomeRecord,
-): void {
+  project?: { env: Partial<Env>; userLogin?: string | null },
+): Promise<void> {
   if (!sql) return;
   try {
     recordJobOutcome(sql, {
@@ -197,6 +200,18 @@ export function recordGoalRunOutcome(
       origin: run.origin ?? "goal-screen",
       createdAt: run.createdAt,
     });
+    // Issue #6006 — when the caller passes `project` (its env +
+    // owning login), the outcome facts also fold into the one run
+    // source (D1) through the shared projector; best-effort, never
+    // fails the run.
+    if (project?.env) {
+      await projectJobOutcomeBestEffort({
+        env: project.env,
+        sql,
+        outcomeId: run.id,
+        userLogin: project.userLogin ?? null,
+      });
+    }
   } catch (err) {
     structuredLog.warn("goal_screen.outcome_write_failed", {
       message: `[GoalScreenReports] outcome write failed for run ${run.id}: ${err instanceof Error ? err.message : String(err)}`,

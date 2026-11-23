@@ -752,7 +752,7 @@ export async function handleBrokerOrderRoutes(
           orderId: cancelOrderId,
           reason: typeof body.reason === "string" ? body.reason : undefined,
         });
-        recordCancelOutcome(ctx.getOrm()?.getSql?.(), receipt, "broker_order_cancel", ctx.env);
+        await recordCancelOutcome(ctx.getOrm()?.getSql?.(), receipt, "broker_order_cancel", ctx.env);
         if (receipt.success) {
           markDraftCancelledIfPresent(ctx, receipt.target?.orderId ?? cancelOrderId);
         }
@@ -834,9 +834,9 @@ export async function handleBrokerOrderRoutes(
       });
       if (!receipt.dryRun) {
         if (broker === "alpaca") {
-          recordScopedCancelOutcome(ctx.getOrm()?.getSql?.(), receipt, "broker_orders_cancel_ticker", ctx.env);
+          await recordScopedCancelOutcome(ctx.getOrm()?.getSql?.(), receipt, "broker_orders_cancel_ticker", ctx.env);
         } else {
-          recordScopedCancelOutcome(
+          await recordScopedCancelOutcome(
             ctx.getOrm()?.getSql?.(),
             receipt,
             "broker_orders_cancel_ticker",
@@ -913,7 +913,7 @@ export async function handleBrokerOrderRoutes(
       );
       if (receipt.success || receipt.cancelled.length > 0 || receipt.refused.length > 0) {
         if (broker === "alpaca") {
-          recordScopedCancelOutcome(
+          await recordScopedCancelOutcome(
             sql,
             receipt,
             "broker_orders_cancel_all",
@@ -921,7 +921,7 @@ export async function handleBrokerOrderRoutes(
             `cancel_all:${receipt.preview?.expiresAt ?? new Date().toISOString()}`,
           );
         } else {
-          recordScopedCancelOutcome(
+          await recordScopedCancelOutcome(
             sql,
             receipt,
             "broker_orders_cancel_all",

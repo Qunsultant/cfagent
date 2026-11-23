@@ -29,6 +29,7 @@ import { createStructuredLogger } from "../../observability/structuredLogger";
 import { createObservabilitySink } from "../../observability/createObservabilityPorts";
 import { resolveIaaaTenant } from "../../security/iaaaGithubEndToEnd";
 import { listScheduledReports } from "../../services/scheduledReports";
+import { listJobOutcomes } from "../../services/jobOutcomes";
 import { readTenantProjectionCarriers } from "../../services/projectionCarriers";
 import { postRunLedgerBestEffort } from "../../services/runLedgerProjectionPosting";
 import { createAsyncJobPorts } from "../../data/createAsyncJobPorts";
@@ -45,7 +46,7 @@ const structuredLog = createStructuredLogger(createObservabilitySink({}), {
 export const RUN_LEDGER_RECONCILE_LIMIT = 100;
 
 export interface RunLedgerReconcileError {
-  ledger: "reports" | "async_jobs" | "job_run_records";
+  ledger: "reports" | "async_jobs" | "job_run_records" | "job_outcomes";
   naturalKey: string;
   error: string;
 }
@@ -217,6 +218,32 @@ export async function reconcileRunLedgerProjection(args: {
       result.errors.push({
         ledger: "job_run_records",
         naturalKey: jobRunRecordNaturalKey(row),
+        error: posted.skipped ?? "projection failed",
+      });
+    }
+  }
+
+  // Job outcomes (issue #6006): the sink's own rows, newest-first,
+  // same per-ledger limit. The sink carries no tenant column, so the
+  // sweep attributes each row to this call's tenant — the same
+  // call-site tenant the ORM hook uses. Without this leg a row whose
+  // carriers both missed (unconfigured at write time, configured
+  // later) would never fold; the sweep is the backstop.
+  const outcomes = listJobOutcomes(args.sql, limit);
+  for (const row of outcomes) {
+    result.checked += 1;
+    const posted = await postRunLedgerBestEffort(env, tenantId, {
+      ledger: "job_outcomes",
+      row: { outcome: row, tenantId },
+    }, nowMs);
+    if (posted.projected) {
+      result.reconciled += 1;
+    } else if (posted.skipped === "already-current") {
+      result.alreadyCurrent += 1;
+    } else {
+      result.errors.push({
+        ledger: "job_outcomes",
+        naturalKey: row.id,
         error: posted.skipped ?? "projection failed",
       });
     }

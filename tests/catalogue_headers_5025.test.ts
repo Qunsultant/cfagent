@@ -53,7 +53,9 @@ describe("#5025 schemaComponent barrel & membership store naming", () => {
     // #6151 S3 adds migration 0085 (saved nav presets: 2 tables + 2 indexes): D1 260 → 264.
     // #6100 adds 9 ORM entries (5 mas_events attribution-envelope
     // columns + 4 indexes): ORM 26 → 35.
-    expect(D1_CATALOGUE_ENTRIES.length).toBe(264);
+    // #6006 adds 9 D1 entries (migration 0086: job_run_records outcome
+    // facts): D1 264 → 273.
+    expect(D1_CATALOGUE_ENTRIES.length).toBe(273);
     expect(ORM_CATALOGUE_ENTRIES.length).toBe(35);
     // Issue #6167 adds 1 remainder entry (mas_async_jobs.host_version):
     // 64 → 65. Issue #5100 (F3 of #5094) adds 13 remainder entries (4

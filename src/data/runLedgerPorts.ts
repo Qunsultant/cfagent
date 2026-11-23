@@ -1,7 +1,8 @@
 /**
  * Issue #4116 — one system-of-record D1: the port types for the DO
  * run-ledger projection (mas_reports, mas_async_jobs, and — issue
- * #6099 — job_run_records → D1).
+ * #6099 — job_run_records → D1; and — issue #6006 — mas_job_outcomes
+ * folds into the D1 job run records).
  *
  * This module imports port types only — never a store client, never
  * drizzle-orm (the journalPosting structural rule). The D1 side
@@ -19,6 +20,7 @@
  * job run record IS the twin, so its link is always null.
  */
 import type { JobRunRecord } from "../services/jobRunRecords";
+import type { JobOutcomeRow } from "./jobOutcomePorts";
 
 /** The three projection carriers (Venus ruling, #4116 comment 6798859485). */
 export interface ProjectionCarriers {
@@ -110,6 +112,19 @@ export interface JobRunRecordProjectionInput {
   tenantId: string;
 }
 
+/**
+ * Issue #6006 — a mas_job_outcomes row as the projector receives
+ * it: the DO sink row's own shape, verbatim, plus its owning
+ * tenant. Nested like JobRunRecordProjectionInput, for the same
+ * reason: JobOutcomeRow already exists as one type. The fold
+ * (attach-or-create on the D1 job_run_records row) lives in the
+ * D1 adapter; the projector only routes it.
+ */
+export interface JobOutcomeProjectionInput {
+  outcome: JobOutcomeRow;
+  tenantId: string;
+}
+
 /** The stored carrier-config row (one per tenant). */
 export interface TenantProjectionCarriersRow {
   tenantId: string;
@@ -138,6 +153,16 @@ export interface RunLedgerProjector {
   /** Issue #6099 — project one DO job run record into D1 (its own twin; linkedJobRunId is always null). */
   projectJobRunRecord(
     input: JobRunRecordProjectionInput,
+    nowMs: number,
+  ): Promise<ProjectRunLedgerResult>;
+  /**
+   * Issue #6006 — fold one mas_job_outcomes row into D1 (attach the
+   * facts to the run's D1 row, or create the row when the run has
+   * none). linkedJobRunId is the folded D1 row's derived id, so the
+   * caller can name the row the facts landed on.
+   */
+  projectJobOutcome(
+    input: JobOutcomeProjectionInput,
     nowMs: number,
   ): Promise<ProjectRunLedgerResult>;
 }

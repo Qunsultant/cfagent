@@ -26,6 +26,7 @@ import {
 import {
   createRunLedgerProjector,
   type AsyncJobProjectionInput,
+  type JobOutcomeProjectionInput,
   type JobRunRecordProjectionInput,
   type ReportProjectionInput,
 } from "../data/runLedgerProjection";
@@ -44,7 +45,8 @@ export interface PostRunLedgerResult extends ProjectRunLedgerResult {
 export type RunLedgerPostInput =
   | { ledger: "reports"; row: ReportProjectionInput }
   | { ledger: "async_jobs"; row: AsyncJobProjectionInput }
-  | { ledger: "job_run_records"; row: JobRunRecordProjectionInput };
+  | { ledger: "job_run_records"; row: JobRunRecordProjectionInput }
+  | { ledger: "job_outcomes"; row: JobOutcomeProjectionInput };
 
 export async function postRunLedgerBestEffort(
   env: Partial<Env>,
@@ -84,7 +86,9 @@ export async function postRunLedgerBestEffort(
         ? await projector.projectReport(input.row, nowMs)
         : input.ledger === "async_jobs"
           ? await projector.projectAsyncJob(input.row, nowMs)
-          : await projector.projectJobRunRecord(input.row, nowMs);
+          : input.ledger === "job_run_records"
+            ? await projector.projectJobRunRecord(input.row, nowMs)
+            : await projector.projectJobOutcome(input.row, nowMs);
     return {
       ...result,
       posted: result.projected || result.skipped === "already-current",

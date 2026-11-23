@@ -300,7 +300,7 @@ export class PublicPreviewOrderCommand implements IMcpToolCommand {
       // failure before rethrowing so Workflow Runs explains the block.
       const coded =
         (error as { code?: string })?.code || "order_preview_failed";
-      recordTradingRunOutcome(context.orm?.getSql?.(), {
+      await recordTradingRunOutcome(context.orm?.getSql?.(), {
         orderId: `preview-refused-${input.symbol}-${Date.now()}`,
         status: "failed",
         action,
@@ -313,7 +313,8 @@ export class PublicPreviewOrderCommand implements IMcpToolCommand {
         origin: "public_preview_order",
         takeProfitPercent: input.takeProfitPercent,
         stopLossPercent: input.stopLossPercent,
-      });
+      },
+        { env: context.env, userLogin: context.actingLogin?.() ?? context.sessionId });
       throw error;
     }
     context.audit?.("public.order_previewed", "trading", {
@@ -326,7 +327,7 @@ export class PublicPreviewOrderCommand implements IMcpToolCommand {
       takeProfitPercent: input.takeProfitPercent,
       stopLossPercent: input.stopLossPercent,
     });
-    recordTradingRunOutcome(context.orm?.getSql?.(), {
+    await recordTradingRunOutcome(context.orm?.getSql?.(), {
       orderId: draft.orderId,
       status: "completed",
       action: draft.action,
@@ -342,7 +343,8 @@ export class PublicPreviewOrderCommand implements IMcpToolCommand {
       takeProfitPrice: (draft as { takeProfit?: { limitPrice?: number } }).takeProfit?.limitPrice,
       stopLossPrice: (draft as { stopLoss?: { stopPrice?: number } }).stopLoss?.stopPrice,
       priceSource: draft.priceSource?.kind,
-    });
+    },
+      { env: context.env, userLogin: context.actingLogin?.() ?? context.sessionId });
     return {
       success: true,
       orderId: draft.orderId,
@@ -458,7 +460,7 @@ export class PublicPlaceOrderCommand implements IMcpToolCommand {
           userLogin: context.actingLogin?.() ?? context.sessionId,
         })
       : undefined;
-    recordTradingRunOutcome(context.orm?.getSql?.(), {
+    await recordTradingRunOutcome(context.orm?.getSql?.(), {
       orderId: input.orderId,
       status: result.success ? "completed" : "failed",
       action: result.action,
@@ -475,7 +477,8 @@ export class PublicPlaceOrderCommand implements IMcpToolCommand {
             emailNotification: notifications.email.status,
           }
         : {}),
-    });
+    },
+      { env: context.env, userLogin: context.actingLogin?.() ?? context.sessionId });
     return notifications ? { ...result, notifications } : result;
   }
 }

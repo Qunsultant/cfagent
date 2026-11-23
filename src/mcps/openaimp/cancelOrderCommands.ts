@@ -113,7 +113,7 @@ export class AlpacaCancelOrderCommand implements IMcpToolCommand {
       reason: receipt.reason,
       message: receipt.message,
     });
-    recordCancelOutcome(context.orm?.getSql?.(), receipt, "alpaca_cancel_order", context.env);
+    await recordCancelOutcome(context.orm?.getSql?.(), receipt, "alpaca_cancel_order", context.env);
     if (receipt.success) {
       markDraftRowCancelledIfPresent(context.orm, receipt.target?.orderId ?? input.orderId);
     }
@@ -348,7 +348,7 @@ export class AlpacaCancelTickerCommand implements IMcpToolCommand {
       reason: receipt.reason,
     });
     if (!receipt.dryRun) {
-      recordScopedCancelOutcome(context.orm?.getSql?.(), receipt, "alpaca_cancel_ticker", context.env);
+      await recordScopedCancelOutcome(context.orm?.getSql?.(), receipt, "alpaca_cancel_ticker", context.env);
       markScopedDraftsCancelledIfPresent(context.orm, receipt);
     }
     return receipt;
@@ -413,7 +413,7 @@ export class AlpacaCancelAllCommand implements IMcpToolCommand {
       },
     );
     if (receipt.success || receipt.cancelled.length > 0 || receipt.refused.length > 0) {
-      recordScopedCancelOutcome(
+      await recordScopedCancelOutcome(
         context.orm?.getSql?.(),
         receipt,
         "alpaca_cancel_all",

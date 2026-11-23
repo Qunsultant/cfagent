@@ -2026,6 +2026,20 @@ export const jobRunRecords = sqliteTable("job_run_records", {
   accountId: text("account_id"),
   bindingScope: text("binding_scope"),
   bindingSource: text("binding_source"),
+  /** Issue #6006 — the outcome facts a folded mas_job_outcomes row
+   *  carries (null = the row predates the fold or is not an outcome
+   *  fold). coded_error is the coded error, distinct from the
+   *  free-text error_text; origin is the outcome's origin label,
+   *  distinct from origin_run_id (the #4767 retry lineage). */
+  codedError: text("coded_error"),
+  origin: text("origin"),
+  scanned: integer("scanned"),
+  matched: integer("matched"),
+  deliveryStatesJson: text("delivery_states_json"),
+  pdfKey: text("pdf_key"),
+  xlsxKey: text("xlsx_key"),
+  csvKey: text("csv_key"),
+  reportUrl: text("report_url"),
   errorText: text("error_text"),
   detail: text("detail"),
   descriptor: text("descriptor"),

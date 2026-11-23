@@ -64,6 +64,8 @@ import {
   recordJobOutcome,
   type JobOutcomeTrigger,
 } from "../../services/jobOutcomes";
+import { projectJobOutcomeBestEffort } from "../../services/runLedgerProjectionHooks";
+import type { Env } from "../../types";
 import { resolveActorAttribution } from "../../security/backgroundAttribution";
 import { getServiceUserLogin } from "../../security/serviceIdentity";
 import {
@@ -299,7 +301,7 @@ const REPORTS_BACKFILL_FAILED_CODE = "reports_index_backfill_failed";
  * the dispatch record above is its whole trace, exactly as the
  * job idiom draws it.
  */
-function recordReportsBackfillRun(
+async function recordReportsBackfillRun(
   ctx: ReportsRouteContext,
   request: Request,
   sql: SqlStorage,
@@ -309,7 +311,7 @@ function recordReportsBackfillRun(
     codedError?: string;
     outcome?: CanonicalIndexBackfillOutcome;
   }
-): void {
+): Promise<void> {
   try {
     recordJobOutcome(sql, {
       id: `reports-index-backfill:${args.ranAt}`,
@@ -328,6 +330,16 @@ function recordReportsBackfillRun(
         : undefined,
       origin: "reports-index-backfill",
       createdAt: args.ranAt,
+    });
+    // Issue #6006 — fold the outcome facts into the one run source
+    // (D1); best-effort, never fails the backfill. The mount passes
+    // the full env (narrow type here); the service login owns the
+    // queue route when the narrow env carries one.
+    await projectJobOutcomeBestEffort({
+      env: (ctx.env ?? {}) as unknown as Partial<Env>,
+      sql,
+      outcomeId: `reports-index-backfill:${args.ranAt}`,
+      userLogin: ctx.env?.SERVICE_USER_LOGIN ?? null,
     });
   } catch (err) {
     structuredLog.warn("scheduled_job_outcome.run_record_failed", {
@@ -1077,7 +1089,7 @@ export async function handleReportsRoutes(
         outcome: "ran",
         traceId,
       });
-      recordReportsBackfillRun(ctx, request, sql, {
+      await recordReportsBackfillRun(ctx, request, sql, {
         ranAt,
         status: "completed",
         outcome,
@@ -1094,7 +1106,7 @@ export async function handleReportsRoutes(
         traceId,
         errorCode,
       });
-      recordReportsBackfillRun(ctx, request, sql, {
+      await recordReportsBackfillRun(ctx, request, sql, {
         ranAt,
         status: "failed",
         codedError: errorCode,

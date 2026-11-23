@@ -27,6 +27,7 @@ import {
   MIGRATION_0076_JOB_RUN_DEFINITION_VERSION,
   MIGRATION_0081_JOB_RUN_RECORDS_PROJECTION,
   MIGRATION_0084_JOB_RUN_RECORDS_BINDING,
+  MIGRATION_0086_JOB_RUN_RECORDS_OUTCOME_FACTS,
   type MigrationDb,
 } from "./migrationRunner";
 import {
@@ -34,6 +35,7 @@ import {
   type JobRunRecord,
 } from "./jobRunRecordPorts";
 import { normalizeJobRunRecord } from "../services/jobRunRecords";
+import type { JobOutcomeRow } from "./jobOutcomePorts";
 
 /** Drizzle D1 database object carrying the run-record schema. */
 export type JobRunRecordDb = DrizzleD1Database<{
@@ -46,6 +48,7 @@ export function createD1JobRunRecordDb(d1: D1Database): JobRunRecordDb {
 }
 
 /** Idempotent schema-ensure: applies migrations 0047 + 0072 + 0073 + 0076 + 0081 + 0084 if unapplied. */
+/** Idempotent schema-ensure: applies migrations 0047 + 0072 + 0073 + 0076 + 0081 + 0086 if unapplied. */
 export async function ensureJobRunRecordsSchema(db: JobRunRecordDb): Promise<number[]> {
   return applyMigrations(db as unknown as MigrationDb, [
     MIGRATION_0047_JOB_RUN_RECORDS,
@@ -54,6 +57,7 @@ export async function ensureJobRunRecordsSchema(db: JobRunRecordDb): Promise<num
     MIGRATION_0076_JOB_RUN_DEFINITION_VERSION,
     MIGRATION_0081_JOB_RUN_RECORDS_PROJECTION,
     MIGRATION_0084_JOB_RUN_RECORDS_BINDING,
+    MIGRATION_0086_JOB_RUN_RECORDS_OUTCOME_FACTS,
   ]);
 }
 
@@ -67,6 +71,21 @@ function rowToRecord(row: JobRunRecordRow): JobRunRecord {
       artifactRefs = Array.isArray(parsed) ? parsed.map(String) : undefined;
     } catch {
       artifactRefs = undefined;
+    }
+  }
+  // Issue #6006 — the folded outcome facts read back through the
+  // same shape: a malformed delivery-states JSON reads as absent,
+  // never as a guessed map.
+  let deliveryStates: Record<string, string> | undefined;
+  if (row.deliveryStatesJson != null) {
+    try {
+      const parsed: unknown = JSON.parse(row.deliveryStatesJson);
+      deliveryStates =
+        parsed && typeof parsed === "object" && !Array.isArray(parsed)
+          ? (parsed as Record<string, string>)
+          : undefined;
+    } catch {
+      deliveryStates = undefined;
     }
   }
   return normalizeJobRunRecord({
@@ -104,7 +123,111 @@ function rowToRecord(row: JobRunRecordRow): JobRunRecord {
     ...(row.detail != null ? { detail: row.detail } : {}),
     ...(row.descriptor != null ? { descriptor: row.descriptor } : {}),
     ...(artifactRefs !== undefined ? { artifactRefs } : {}),
+    // Issue #6006 — the outcome facts (migration 0086). Absent is
+    // omitted, like every other nullable column above — a read-back
+    // record carries undefined for a fact the row never folded;
+    // consumers treat absent via `?? null`, never an invented fact.
+    // Pre-fold rows carry none.
+    ...(row.codedError != null ? { codedError: row.codedError } : {}),
+    ...(row.origin != null ? { origin: row.origin } : {}),
+    ...(row.scanned != null ? { scanned: row.scanned } : {}),
+    ...(row.matched != null ? { matched: row.matched } : {}),
+    ...(deliveryStates !== undefined ? { deliveryStates } : {}),
+    ...(row.pdfKey != null ? { pdfKey: row.pdfKey } : {}),
+    ...(row.xlsxKey != null ? { xlsxKey: row.xlsxKey } : {}),
+    ...(row.csvKey != null ? { csvKey: row.csvKey } : {}),
+    ...(row.reportUrl != null ? { reportUrl: row.reportUrl } : {}),
   });
+}
+
+/**
+ * Issue #6006 — the outcome-fact columns of one JobRunRecord, as
+ * D1 insert values. One definition for record() and the projected
+ * upsert, so the fold can never drift between the two writers.
+ * Absent facts write NULL, never an invented value.
+ */
+function outcomeFactColumns(record: JobRunRecord) {
+  return {
+    codedError: record.codedError ?? null,
+    origin: record.origin ?? null,
+    scanned: record.scanned ?? null,
+    matched: record.matched ?? null,
+    deliveryStatesJson:
+      record.deliveryStates !== undefined && record.deliveryStates !== null
+        ? JSON.stringify(record.deliveryStates)
+        : null,
+    pdfKey: record.pdfKey ?? null,
+    xlsxKey: record.xlsxKey ?? null,
+    csvKey: record.csvKey ?? null,
+    reportUrl: record.reportUrl ?? null,
+  };
+}
+
+/**
+ * Issue #6006 — the D1 job run record one mas_job_outcomes row
+ * folds into when its run has no D1 row (the create leg). The
+ * outcome id IS the jobId (the row stays addressable by the run
+ * it records); started == finished == the outcome's createdAt
+ * (one timestamp, never an invented interval). Status maps onto
+ * the D1 three-valued outcome: completed → success, failed →
+ * failure, partial → success with the partial coverage noted in
+ * the descriptor — a partial run is a completed run with partial
+ * coverage, never a failure. The outcome's trigger is both the
+ * dispatch mode (triggeredBy) and the ledger trigger.
+ */
+export function jobOutcomeFoldRecord(outcome: JobOutcomeRow): JobRunRecord {
+  const partial = outcome.status === "partial";
+  const descriptor = partial
+    ? outcome.scanned != null || outcome.matched != null
+      ? `Partial coverage — scanned ${outcome.scanned ?? "?"}, matched ${outcome.matched ?? "?"}`
+      : "Partial coverage"
+    : undefined;
+  return {
+    system: "job-outcome",
+    jobId: outcome.id,
+    operation: outcome.kind,
+    started: outcome.createdAt,
+    finished: outcome.createdAt,
+    outcome: outcome.status === "failed" ? "failure" : "success",
+    triggeredBy: outcome.trigger,
+    trigger: outcome.trigger,
+    ...(outcome.status === "failed" && outcome.codedError != null
+      ? { error: outcome.codedError }
+      : {}),
+    ...(descriptor !== undefined ? { descriptor } : {}),
+    codedError: outcome.codedError ?? null,
+    origin: outcome.origin,
+    scanned: outcome.scanned ?? null,
+    matched: outcome.matched ?? null,
+    deliveryStates: outcome.deliveryStates ?? null,
+    pdfKey: outcome.pdfKey ?? null,
+    xlsxKey: outcome.xlsxKey ?? null,
+    csvKey: outcome.csvKey ?? null,
+    reportUrl: outcome.reportUrl ?? null,
+  };
+}
+
+/** Issue #6006 — do a stored record's outcome facts already equal one outcome row's? Key-order-insensitive for delivery states. */
+export function sameOutcomeFacts(record: JobRunRecord, outcome: JobOutcomeRow): boolean {
+  const statesEqual = (a: Record<string, string> | null | undefined, b: Record<string, string> | null | undefined): boolean => {
+    const an = a ?? null;
+    const bn = b ?? null;
+    if (an === null || bn === null) return an === bn;
+    const ak = Object.keys(an).sort();
+    const bk = Object.keys(bn).sort();
+    return ak.length === bk.length && ak.every((k, i) => k === bk[i] && an[k] === bn[k]);
+  };
+  return (
+    (record.codedError ?? null) === (outcome.codedError ?? null) &&
+    (record.origin ?? null) === (outcome.origin ?? null) &&
+    (record.scanned ?? null) === (outcome.scanned ?? null) &&
+    (record.matched ?? null) === (outcome.matched ?? null) &&
+    statesEqual(record.deliveryStates, outcome.deliveryStates) &&
+    (record.pdfKey ?? null) === (outcome.pdfKey ?? null) &&
+    (record.xlsxKey ?? null) === (outcome.xlsxKey ?? null) &&
+    (record.csvKey ?? null) === (outcome.csvKey ?? null) &&
+    (record.reportUrl ?? null) === (outcome.reportUrl ?? null)
+  );
 }
 
 /** The D1 job-run-record store (async surface over the sync-shaped port via promises). */
@@ -147,6 +270,8 @@ export class D1JobRunRecordStore {
       detail: record.detail ?? null,
       descriptor: record.descriptor ?? null,
       artifactRefsJson: record.artifactRefs !== undefined ? JSON.stringify(record.artifactRefs) : null,
+      // Issue #6006 — the outcome facts ride the record verbatim.
+      ...outcomeFactColumns(record),
     });
     // Prune to the per-job cap: keep the newest rows by the
     // history ordering, delete the rest (the DO adapter's
@@ -211,6 +336,8 @@ export class D1JobRunRecordStore {
       detail: record.detail ?? null,
       descriptor: record.descriptor ?? null,
       artifactRefsJson: record.artifactRefs !== undefined ? JSON.stringify(record.artifactRefs) : null,
+      // Issue #6006 — the outcome facts ride the projection verbatim.
+      ...outcomeFactColumns(record),
       tenantId: row.tenantId,
       projectedAtMs: nowMs,
     };
@@ -269,6 +396,158 @@ export class D1JobRunRecordStore {
       .orderBy(desc(jobRunRecords.started), desc(jobRunRecords.id))
       .limit(Math.max(1, limit));
     return rows.map(rowToRecord);
+  }
+
+  /**
+   * Issue #6006 — find the D1 row for one outcome by EXACT linkage
+   * (the #4259 rule): workflowId == outcome id first (the persist
+   * stage stamps workflowId = the producing run's id), else
+   * asyncJobId == outcome id. scheduleId NEVER matches on its own
+   * (it names a schedule, not a run); no timestamp guess, no
+   * heuristic. Returns the raw row (for the update) + the record.
+   */
+  private async findByLinkage(
+    outcomeId: string,
+  ): Promise<{ row: JobRunRecordRow; record: JobRunRecord } | undefined> {
+    const byWorkflow = await this.db
+      .select()
+      .from(jobRunRecords)
+      .where(eq(jobRunRecords.workflowId, outcomeId))
+      .orderBy(desc(jobRunRecords.started), desc(jobRunRecords.id))
+      .limit(1);
+    if (byWorkflow.length > 0) {
+      return { row: byWorkflow[0], record: rowToRecord(byWorkflow[0]) };
+    }
+    const byAsyncJob = await this.db
+      .select()
+      .from(jobRunRecords)
+      .where(eq(jobRunRecords.asyncJobId, outcomeId))
+      .orderBy(desc(jobRunRecords.started), desc(jobRunRecords.id))
+      .limit(1);
+    if (byAsyncJob.length > 0) {
+      return { row: byAsyncJob[0], record: rowToRecord(byAsyncJob[0]) };
+    }
+    return undefined;
+  }
+
+  /** Issue #6006 — the fold row already created for one outcome id. */
+  private async findFoldRow(
+    outcomeId: string,
+  ): Promise<{ row: JobRunRecordRow; record: JobRunRecord } | undefined> {
+    const rows = await this.db
+      .select()
+      .from(jobRunRecords)
+      .where(
+        and(
+          eq(jobRunRecords.jobId, outcomeId),
+          eq(jobRunRecords.system, "job-outcome"),
+        ),
+      )
+      .orderBy(desc(jobRunRecords.started), desc(jobRunRecords.id))
+      .limit(1);
+    if (rows.length === 0) return undefined;
+    return { row: rows[0], record: rowToRecord(rows[0]) };
+  }
+
+  /**
+   * Issue #6006 — fold one mas_job_outcomes row into the one run
+   * source (attach-or-create). Attach: the run already has a D1
+   * row (exact linkage) — fill its outcome-fact columns; the
+   * engine row's own fields stay authoritative (the #6099
+   * discipline: errorText is filled only when null and the outcome
+   * failed with a coded error, never overwritten). Create: no D1
+   * row exists for the run (the twin-less kinds) — insert the
+   * outcome as its own `job-outcome` row (jobId IS the outcome id).
+   * A re-fold of identical facts is a no-op (landed false), so a
+   * replay or a queue redelivery never duplicates. A create that
+   * loses a race to an identical insert falls back to attach.
+   * Returns whether the write landed, whether it created a row,
+   * and the record as it now reads.
+   */
+  async attachOutcomeFacts(
+    input: { outcome: JobOutcomeRow; tenantId: string },
+    nowMs: number,
+  ): Promise<{ landed: boolean; created: boolean; record: JobRunRecord }> {
+    await this.ensure();
+    const { outcome, tenantId } = input;
+    const facts = outcomeFactColumns(jobOutcomeFoldRecord(outcome));
+    const errorFill: { errorText?: string } =
+      outcome.status === "failed" && outcome.codedError != null
+        ? { errorText: outcome.codedError }
+        : {};
+    const attach = async (found: {
+      row: JobRunRecordRow;
+      record: JobRunRecord;
+    }): Promise<{ landed: boolean; created: boolean; record: JobRunRecord }> => {
+      const needsErrorFill = found.record.error == null && errorFill.errorText !== undefined;
+      if (sameOutcomeFacts(found.record, outcome) && !needsErrorFill) {
+        return { landed: false, created: false, record: found.record };
+      }
+      // Issue #6099 discipline — the engine row's own fields stay
+      // authoritative: the codedError fills errorText only when the
+      // row has none. Spreading errorFill unconditionally would
+      // overwrite an engine error with the outcome's code.
+      await this.db
+        .update(jobRunRecords)
+        .set({ ...facts, ...(needsErrorFill ? errorFill : {}) })
+        .where(eq(jobRunRecords.id, found.row.id));
+      const reread = await this.db
+        .select()
+        .from(jobRunRecords)
+        .where(eq(jobRunRecords.id, found.row.id))
+        .limit(1);
+      return {
+        landed: true,
+        created: false,
+        record: reread.length > 0 ? rowToRecord(reread[0]) : found.record,
+      };
+    };
+    const linked = await this.findByLinkage(outcome.id);
+    if (linked) return attach(linked);
+    const foldRow = await this.findFoldRow(outcome.id);
+    if (foldRow) return attach(foldRow);
+    const record = jobOutcomeFoldRecord(outcome);
+    try {
+      await this.db.insert(jobRunRecords).values({
+        system: record.system,
+        jobId: record.jobId,
+        operation: record.operation,
+        started: record.started,
+        finished: record.finished,
+        outcome: record.outcome,
+        triggeredBy: record.triggeredBy,
+        triggerText: record.trigger ?? null,
+        scheduleId: record.scheduleId ?? null,
+        asyncJobId: record.asyncJobId ?? null,
+        workflowId: record.workflowId ?? null,
+        kind: record.kind ?? null,
+        originRunId: record.originRunId ?? null,
+        definitionVersion: record.definitionVersion ?? null,
+        errorText: record.error ?? null,
+        detail: record.detail ?? null,
+        descriptor: record.descriptor ?? null,
+        artifactRefsJson:
+          record.artifactRefs !== undefined ? JSON.stringify(record.artifactRefs) : null,
+        ...facts,
+        tenantId,
+        projectedAtMs: nowMs,
+      });
+    } catch {
+      // Lost a race to an identical insert (or a replay): fall back
+      // to attach — the row exists now, and the attach is idempotent.
+      const raced = await this.findFoldRow(outcome.id);
+      if (raced) return attach(raced);
+      throw new Error(
+        `[d1JobRunRecord] outcome fold insert failed for ${outcome.id} and no fold row exists`,
+      );
+    }
+    await this.pruneToCap(record.jobId);
+    const created = await this.findFoldRow(outcome.id);
+    return {
+      landed: true,
+      created: true,
+      record: created ? created.record : record,
+    };
   }
 }
 

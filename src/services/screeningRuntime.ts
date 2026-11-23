@@ -41,6 +41,7 @@
  */
 
 import type {
+  Env,
   OptionScreenerFilter,
   StockScreenResult,
   StockScreenerFilter,
@@ -418,7 +419,7 @@ export async function executeGoalScreenRun(input: {
     createdAt: result.completedAt,
     userLogin: input.userLogin,
   });
-  recordGoalRunOutcome(input.orm.getSql(), {
+  await recordGoalRunOutcome(input.orm.getSql(), {
     id: `goal-screen:${run.task.id}`,
     trigger: input.trigger,
     status: result.status === "failed" ? "failed" : result.status === "partial" ? "partial" : "completed",
@@ -432,7 +433,9 @@ export async function executeGoalScreenRun(input: {
       : undefined,
     origin: "goal-screen-direct",
     createdAt: result.completedAt,
-  });
+  },
+  // Issue #6006 — fold the outcome facts into the one run source.
+  { env: input.env as unknown as Partial<Env>, userLogin: input.userLogin });
   recordScreeningActivity(input.orm as any, {
     userLogin: input.userLogin,
     kind: "screen_run",
