@@ -67,6 +67,18 @@ export interface Env {
   OTEL_BACKEND_ENDPOINT?: string;
   OTEL_BACKEND_INSTANCE_ID?: string;
   GRAFANA_CLOUD_API_KEY?: string;
+  // Issue #6216 — the deploy-time host version: the git SHA of the
+  // deployed commit, injected by the deploy workflow into
+  // wrangler.jsonc vars (`CF_DEPLOY_VERSION`, the placeholder there
+  // is replaced at deploy time). A plain var IS visible in the
+  // Durable Object env, where CF_VERSION_METADATA is not — the
+  // async-job claim reads it (src/agents/orchestrator/asyncJobs.ts
+  // `hostVersionFromEnv`, preferred over CF_VERSION_METADATA.id) so
+  // a claimed job carries a non-null host_version and the stillborn
+  // gate can fire. Optional so code is safe before the injection
+  // lands; absence means the version is unknown (the pre-#6216
+  // behaviour) and the gate refuses a stillborn re-arm on unknown.
+  CF_DEPLOY_VERSION?: string;
   // Issue #5083 (S4) — the alerting switches (master, Slack,
   // email, free-tier guard). Optional so code is safe before
   // they are set; absence means the config-file / built-in
