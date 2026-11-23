@@ -6,9 +6,10 @@ import { EmptyState, Table, Tabs, TabPanel, Badge, Button, Card, DetailCard, Fle
 import { BRAND } from "../branding";
 import { normalizeAutopilotLimits, type AutopilotPolicyLimits } from "../../services/riskPolicyEngine";
 import type { TradeRecord } from "../../types";
-import type { JobRunTrigger } from "../../data/jobRunRecordPorts";
+import { normalizeJobRunTrigger, type JobRunTrigger } from "../../data/jobRunRecordPorts";
 import { csrfHeaders } from "../apiFetch";
 import type { RunDetail } from "../../services/runDetails";
+import type { RunSummary } from "../../services/runSummaries";
 import { RunDetailsModal } from "./RunDetailsModal";
 import { createClientLogger } from "../clientLogger";
 
@@ -46,12 +47,37 @@ export interface AutonomousActionItem {
   source?: "live" | "simulated";
 }
 
-/** Issue #1333: one job-outcome row from GET /autopilot/jobs. */
+/**
+ * Issue #2606: one job-outcome row in the jobs table, mapped from a
+ * unified run row (GET /api/runs) by runSummaryToJobOutcome below.
+ * The row is the one record Docs reads — not the mas_job_outcomes
+ * sink the list read before (#1333). Fields the one record does
+ * not carry read as null, never invented: `codedError` and `origin`
+ * land only when #6006 folds the outcome facts into the one run
+ * source, and `scanned` is unknown (only the headline `matched`
+ * count rides a RunSummary).
+ */
 export interface JobOutcomeFeedItem {
   id: string;
-  kind: "stock" | "options" | "goal" | "discovery" | "corpus" | "reports" | "feed";
+  /**
+   * The four screen families map from RunSummary.kind; "engine" is
+   * the engine's D1 job records (kind "report"). The sink-only
+   * kinds (corpus, reports, feed) have no /api/runs twin and no
+   * longer arrive here — those runs stay visible in the run ledger
+   * (the #6003 lossless fold); engine-recorded feed runs surface
+   * as "engine" rows (the ScheduledAgent pipeline wires the job
+   * run recorder, scheduledTasksPipeline.ts:596).
+   */
+  kind: "stock" | "options" | "goal" | "discovery" | "engine";
   trigger: JobRunTrigger;
-  status: "completed" | "failed" | "partial";
+  /**
+   * "skipped" is a D1 engine verdict (never mapped to success or
+   * failure); "unknown" is a row whose home store records no
+   * status (scan-store rows) — rendered as UNKNOWN, never
+   * invented. Scan twins are absorbed into their canonical row
+   * by the /api/runs merge, so "unknown" is rare.
+   */
+  status: "completed" | "failed" | "partial" | "skipped" | "unknown";
   scanned: number | null;
   matched: number | null;
   codedError: string | null;
@@ -60,7 +86,7 @@ export interface JobOutcomeFeedItem {
   xlsxKey: string | null;
   csvKey: string | null;
   deliveryStates: Record<string, string>;
-  origin: string;
+  origin: string | null;
   createdAt: string;
 }
 
@@ -69,19 +95,65 @@ export const JOB_OUTCOME_KIND_LABELS: Record<JobOutcomeFeedItem["kind"], string>
   options: "Options",
   goal: "Goal Screen",
   discovery: "Discovery",
-  // Issue #3527 S5 — the two registered tick jobs' run rows.
-  corpus: "Corpus Sync",
-  reports: "Reports Index",
-  // Issue #3530 slice B — feed runs recorded at settle on the
-  // pipeline host: a row exists only for a run that actually ran.
-  feed: "Feed Jobs",
+  engine: "Engine Run",
 };
 
 export const JOB_OUTCOME_STATUS_TONES: Record<JobOutcomeFeedItem["status"], BadgeTone> = {
   completed: "success",
   failed: "danger",
   partial: "warning",
+  skipped: "neutral",
+  unknown: "neutral",
 };
+
+/**
+ * Issue #2606: map one unified run row (GET /api/runs,
+ * src/services/runSummaries.ts) onto the jobs table's feed item.
+ * The mapping is lossy only where the one record carries less
+ * than the sink did — codedError, origin, scanned, delivery
+ * states — and those read as null/empty, never invented:
+ *   - kind: the four screen families map 1:1 (screener → stock,
+ *     the stock screener's canonical rows); D1 engine job
+ *     records (kind "report") read as "engine".
+ *   - id: the run's own id in its home store — the key
+ *     /api/runs/details resolves (runId || id || scanRunId).
+ *   - trigger: normalizeJobRunTrigger (#5052) — an unknown or
+ *     missing trigger reads as "manual", never invented.
+ *   - status: the store's verb verbatim where the table knows
+ *     it; "skipped" stays skipped; a row with no recorded
+ *     status reads "unknown".
+ *   - matched: the store's headline count; scanned is unknown.
+ */
+const RUN_SUMMARY_KIND_TO_FEED_KIND: Record<RunSummary["kind"], JobOutcomeFeedItem["kind"]> = {
+  screener: "stock",
+  options_scanner: "options",
+  goal: "goal",
+  discovery: "discovery",
+  report: "engine",
+};
+
+export function runSummaryToJobOutcome(run: RunSummary): JobOutcomeFeedItem {
+  const status: JobOutcomeFeedItem["status"] =
+    run.status === "completed" || run.status === "failed" || run.status === "partial" || run.status === "skipped"
+      ? run.status
+      : "unknown";
+  return {
+    id: run.runId,
+    kind: RUN_SUMMARY_KIND_TO_FEED_KIND[run.kind],
+    trigger: normalizeJobRunTrigger(run.trigger),
+    status,
+    scanned: null,
+    matched: run.resultCount,
+    codedError: null,
+    reportUrl: run.reportUrl,
+    pdfKey: run.pdfKey,
+    xlsxKey: run.xlsxKey,
+    csvKey: run.csvKey,
+    deliveryStates: {},
+    origin: null,
+    createdAt: run.createdAt,
+  };
+}
 
 export interface AuditLogRawEvent {
   id: string;
@@ -459,7 +531,7 @@ export const AUTOPILOT_SOURCE_LINES = {
     "Source: GET /api/autopilot — OrchestratorAgent state (run state, kill switch, limits, verdicts).",
   limits:
     "Source: GET /api/autopilot — OrchestratorAgent state; localStorage defaults only when the server has none.",
-  jobs: "Source: GET /api/autopilot/jobs — mas_job_outcomes (one outcome sink); rows labeled by origin.",
+  jobs: "Source: GET /api/runs — the unified run rows Docs reads (issue #2606); coded error and origin arrive only when #6006 folds the outcome facts into the one run source.",
   actions:
     "Source: GET /api/audit (mas_events) + /api/broker/orders (mas_trades). Simulated rows are labeled Sim, never live.",
   verdicts:
@@ -632,8 +704,10 @@ export function AutopilotControlCenter({
   const [isLoadingLive, setIsLoadingLive] = useState(false);
   const [isLiveFeed, setIsLiveFeed] = useState(false);
 
-  // Issue #1333: the job-outcome sink as the job feed — every job
-  // producer's success/failure, labeled by origin.
+  // Issue #2606: the unified run rows (GET /api/runs) as the job
+  // feed — every run's success/failure from the one record Docs
+  // reads. The mas_job_outcomes sink stays the write sink; this
+  // list no longer reads it.
   const [jobOutcomes, setJobOutcomes] = useState<JobOutcomeFeedItem[]>([]);
   const [isLoadingJobs, setIsLoadingJobs] = useState(false);
 
@@ -754,19 +828,21 @@ export function AutopilotControlCenter({
     }
   }, []);
 
-  // Issue #1333: the job-outcome sink (GET /autopilot/jobs). Never
-  // throws into the feed: an empty list reads as "no outcomes yet",
-  // never as a broken panel.
+  // Issue #2606: the jobs list reads the one run surface
+  // (GET /api/runs?kind=all&limit=100) — the same call Docs
+  // makes — mapped onto the table by runSummaryToJobOutcome.
+  // Never throws into the feed: an empty list reads as "no
+  // outcomes yet", never as a broken panel.
   const fetchJobOutcomes = useCallback(async () => {
     setIsLoadingJobs(true);
     try {
-      const res = await fetch("/api/autopilot/jobs?limit=50");
+      const res = await fetch("/api/runs?kind=all&limit=100");
       if (res.ok) {
         const data = (await res.json().catch(() => null)) as any;
-        if (Array.isArray(data?.jobs)) setJobOutcomes(data.jobs);
+        if (Array.isArray(data?.runs)) setJobOutcomes(data.runs.map(runSummaryToJobOutcome));
       }
     } catch {
-      // Sink unavailable — the feed stays at its last good state.
+      // Runs surface unavailable — the feed stays at its last good state.
     } finally {
       setIsLoadingJobs(false);
     }
@@ -1198,8 +1274,8 @@ export function AutopilotControlCenter({
       </PageSection>
       </TabPanel>
 
-      {/* Job Outcomes (issue #1333): every job's success/failure from
-          the one outcome sink, labeled by origin — not the trading
+      {/* Job Outcomes (issue #2606): every run's success/failure from
+          the one run surface (GET /api/runs) — not the trading
           actions feed above, but the job-truth feed. */}
       <TabPanel idBase="autopilot-sections" tabId="job-outcomes" active={activeView === "job-outcomes"}>
       <PageSection title="Job outcomes">
@@ -1209,7 +1285,7 @@ export function AutopilotControlCenter({
         <Flex gap="2" align="center" justify="between" wrap>
           <Flex gap="1" align="center">
             <Badge tone="neutral">{jobOutcomes.length}</Badge>
-            <Badge tone="neutral" title="One outcome sink (mas_job_outcomes): stock, options, goal-screen, discovery, corpus-sync, reports-index, and feed runs, manual and scheduled">
+            <Badge tone="neutral" title="One run surface (GET /api/runs): stock, options, goal-screen, discovery, and engine runs, manual and scheduled">
               {isLoadingJobs ? "🔄 Syncing…" : "Job-truth feed"}
             </Badge>
           </Flex>
@@ -1281,9 +1357,11 @@ export function AutopilotControlCenter({
                   ) : (
                     <span className="ui-meta-sm">—</span>
                   )}
-                  <Badge size="xs" tone="neutral" title={`Outcome origin: ${job.origin}`}>
-                    {job.origin}
-                  </Badge>
+                  {job.origin ? (
+                    <Badge size="xs" tone="neutral" title={`Outcome origin: ${job.origin}`}>
+                      {job.origin}
+                    </Badge>
+                  ) : null}
                   <Button
                     variant="secondary"
                     size="sm"
@@ -1306,7 +1384,7 @@ export function AutopilotControlCenter({
               framed
               icon="📋"
               title="No job outcomes recorded"
-              description="As screens, goal screens, discovery runs, corpus syncs, and reports-index sweeps complete or fail, their coded outcomes will appear here — one row per job, labeled by origin."
+              description="As screens, goal screens, discovery runs, and engine runs complete or fail, they will appear here — one row per run, from the unified run rows Docs reads."
             />
           )}
         />

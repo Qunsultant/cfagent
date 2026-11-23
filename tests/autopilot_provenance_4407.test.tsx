@@ -119,23 +119,31 @@ const ordersPayload = {
   ],
 };
 
+// Issue #2606: the jobs list reads GET /api/runs, so the stub
+// returns RunSummary rows — the same shape Docs reads.
 const jobsPayload = {
-  jobs: [
+  runs: [
     {
-      id: "job-1",
-      kind: "stock",
+      kind: "screener",
+      id: "report-1",
+      runId: "job-1",
+      title: "Stock screen",
+      summary: "5 matched",
       trigger: "scheduled",
-      status: "completed",
-      scanned: 100,
-      matched: 5,
-      codedError: null,
-      reportUrl: null,
-      pdfKey: null,
-      xlsxKey: null,
-      csvKey: null,
-      deliveryStates: {},
-      origin: "research-tick",
       createdAt: JOB_ISO,
+      status: "completed",
+      resultCount: 5,
+      pdfKey: null,
+      reportUrl: null,
+      xlsxKey: null,
+      xlsxUrl: null,
+      csvKey: null,
+      csvUrl: null,
+      pdfStatus: null,
+      pdfError: null,
+      reportId: "report-1",
+      scanRunId: null,
+      source: "screener",
     },
   ],
 };
@@ -171,7 +179,7 @@ function stubFetch(verdicts: unknown) {
           headers: { "Content-Type": "application/json" },
         });
       }
-      if (url.pathname === "/api/autopilot/jobs") {
+      if (url.pathname === "/api/runs") {
         return new Response(JSON.stringify(jobsPayload), {
           status: 200,
           headers: { "Content-Type": "application/json" },
@@ -271,8 +279,10 @@ describe("Autopilot provenance — no fake/generated data (#4407)", () => {
 
   it("names every section's source on the page", async () => {
     // #4409: each section names its source on its own sub-tab.
+    // Issue #2606: the jobs section's source is the one run
+    // surface now, not the mas_job_outcomes sink.
     await renderCenter(verdictsPayload.recentVerdicts, "job-outcomes");
-    expect(container!.textContent ?? "").toContain("mas_job_outcomes");
+    expect(container!.textContent ?? "").toContain("GET /api/runs");
     await renderCenter(verdictsPayload.recentVerdicts, "actions");
     const actionsText = container!.textContent ?? "";
     expect(actionsText).toContain("mas_events");

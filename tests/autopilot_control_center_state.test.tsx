@@ -86,8 +86,8 @@ function mockFetch(postMode: PostMode) {
         json: async () => ({ running: false, killSwitch: false, limits: DEFAULT_LIMITS, recentVerdicts: [] }),
       } as any;
     }
-    if (url.startsWith("/api/autopilot/jobs") && method === "GET") {
-      return { ok: true, status: 200, json: async () => ({ jobs: [] }) } as any;
+    if (url.startsWith("/api/runs") && method === "GET") {
+      return { ok: true, status: 200, json: async () => ({ runs: [] }) } as any;
     }
     if (method === "POST" || method === "PUT") {
       if (postMode === "fail") {
