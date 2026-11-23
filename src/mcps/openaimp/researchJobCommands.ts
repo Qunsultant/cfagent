@@ -12,6 +12,7 @@ import type { IMcpToolCommand, McpToolContext } from "../../patterns/interfaces"
 import {
   dispatchResearchEngineRun,
   executeResearchStageControl,
+  readResearchStages,
   resolveResearchEngineAdapters,
   type ResearchStageOp,
 } from "../../workflows/researchScreenEngine";
@@ -93,6 +94,26 @@ export class RunResearchJobCommand implements IMcpToolCommand<RunResearchJobInpu
         ephemeralFallback: stageResult.ephemeralFallback,
       });
       return stageResult;
+    }
+
+    // Issue #6034 — a run-level status read answers the one stage contract
+    // (the same shape `GET /research/runs/:runId/stages` returns), never a
+    // dispatch receipt.
+    if (input.runId && !input.stageId && (input.op ?? "status") === "status") {
+      const stages = await readResearchStages({
+        runId: input.runId,
+        userLogin: actingLogin,
+        ...(sql ? { sql } : {}),
+        ...(d1 ? { d1 } : {}),
+        ...(envRecord ? { env: envRecord } : {}),
+      });
+      context.audit("mcp.tool_called", "orchestrator", {
+        tool: this.name,
+        engineJobId: stages.engineJobId,
+        op: "status",
+        storageMode: stages.storageMode,
+      });
+      return stages;
     }
 
     const trigger = input.trigger ?? "manual";

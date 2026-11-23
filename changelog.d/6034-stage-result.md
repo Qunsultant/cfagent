@@ -1,0 +1,3 @@
+### Added
+
+- **A stage now says what it produced (#6034):** the one stage read (`GET /api/research/runs/:runId/stages`) returns each stage's `unitCount`, `failedUnitCount` and `result: { descriptor } | null`, plus a coded `resultReason` — `not_run` when the stage never ran, `no_artifact` when it ran and produced nothing. Null is explicit and never a fabricated summary. The same shape is served by the MCP `run_research_job` status op (a run-level status now answers the stage contract instead of a dispatch receipt) and by the persisted rows when a run's checkpoint is gone. The OODA panel shows each stage's duration, unit counts, result and reason; the page's pipeline KPI and stage badge name the stages the read reported instead of a "6 stages" literal. #CAIO-quns
