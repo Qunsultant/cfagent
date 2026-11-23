@@ -5,6 +5,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { handleAccountBindingRoutes } from "../src/agents/routes/accountBindings";
 import { AccountBindingSelector } from "../src/client/AccountBindingSelector";
 import { ActiveBindingBadge } from "../src/client/ActiveBindingBadge";
+import { InlineAccountBindingSelector } from "../src/client/InlineAccountBindingSelector";
 import {
   adoptAccountBinding,
   invalidateAccountBindings,
@@ -485,6 +486,274 @@ describe("Issue #5099 (F2 of #5094) — active-binding store, badge, validated s
     await flush();
     expect(container.textContent).toContain("PA-100");
     expect(container.textContent).not.toContain("PA-999");
+
+    await act(async () => {
+      root.unmount();
+    });
+
+  });
+
+  // Issue #6153 — inline account selector on the order ticket.
+  const inlineAccountsFixture = [
+    { accountId: "PA-100", accountType: "stock", accountName: "Alpaca Paper" },
+    { accountId: "PA-200", accountType: "stock", accountName: "Alpaca Paper 2" },
+  ];
+
+  function stubInlineFetch(opts: {
+    bindings: unknown[];
+    accounts?: unknown[] | null;
+    accountsBroker?: string;
+    putStatus?: number;
+    putBody?: unknown;
+  }) {
+    const putBodies: Record<string, unknown>[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (String(url).includes("/api/broker/accounts")) {
+          if (opts.accounts === null || opts.accounts === undefined) {
+            return new Response("unavailable", { status: 503 });
+          }
+          return Response.json({
+            broker: opts.accountsBroker ?? "alpaca",
+            environment: "TEST",
+            result: opts.accounts,
+          });
+        }
+        if (String(url).includes("/api/broker/account-binding") && init?.method === "PUT") {
+          putBodies.push(JSON.parse(String(init.body)));
+          if (opts.putStatus && opts.putStatus >= 400) {
+            return Response.json(
+              opts.putBody ?? { ok: false, error: "Account switch failed." },
+              { status: opts.putStatus },
+            );
+          }
+          const body = putBodies[putBodies.length - 1];
+          return Response.json({
+            ok: true,
+            binding: {
+              broker: body.broker,
+              mode: body.mode,
+              accountType: body.accountType,
+              scope: "tenant",
+              accountId: body.accountId,
+              updatedAt: new Date().toISOString(),
+              updatedBy: "user",
+            },
+          });
+        }
+        if (String(url).includes("/api/broker/account-binding")) {
+          return Response.json({ ok: true, bindings: opts.bindings });
+        }
+        return Response.json({ ok: true, bindings: [] });
+      }),
+    );
+    return putBodies;
+  }
+
+  function setSelectValue(select: HTMLSelectElement, value: string) {
+    const setter = Object.getOwnPropertyDescriptor(
+      window.HTMLSelectElement.prototype,
+      "value",
+    )!.set!;
+    setter.call(select, value);
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  it("6153-P01 renders the enumerated accounts masked with the bound one selected", async () => {
+    invalidateAccountBindings();
+    stubInlineFetch({ bindings: bindingsFixture, accounts: inlineAccountsFixture });
+
+    const { root, container } = mount(
+      <InlineAccountBindingSelector broker="alpaca" mode="paper" accountType="stock" scope="tenant" />,
+    );
+    await act(async () => {
+      root.render(
+        <InlineAccountBindingSelector broker="alpaca" mode="paper" accountType="stock" scope="tenant" />,
+      );
+    });
+    await flush();
+    await flush();
+    const select = container.querySelector("select");
+    expect(select).not.toBeNull();
+    expect(select!.value).toBe("PA-100");
+    expect(container.textContent).toContain("Alpaca Paper (••••-100)");
+    expect(container.textContent).toContain("Alpaca Paper 2 (••••-200)");
+    expect(container.textContent).not.toContain("No account bound");
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("6153-P02 selecting another account PUTs with availableAccounts and adopts it", async () => {
+    invalidateAccountBindings();
+    const putBodies = stubInlineFetch({ bindings: bindingsFixture, accounts: inlineAccountsFixture });
+
+    const { root, container } = mount(
+      <>
+        <InlineAccountBindingSelector broker="alpaca" mode="paper" accountType="stock" scope="tenant" />
+        <Probe broker="alpaca" mode="paper" accountType="stock" scope="tenant" />
+      </>,
+    );
+    await act(async () => {
+      root.render(
+        <>
+          <InlineAccountBindingSelector broker="alpaca" mode="paper" accountType="stock" scope="tenant" />
+          <Probe broker="alpaca" mode="paper" accountType="stock" scope="tenant" />
+        </>,
+      );
+    });
+    await flush();
+    await flush();
+    const select = container.querySelector("select") as HTMLSelectElement;
+    expect(select.value).toBe("PA-100");
+    await act(async () => {
+      setSelectValue(select, "PA-200");
+    });
+    await flush();
+    await flush();
+    expect(putBodies).toHaveLength(1);
+    expect(putBodies[0]).toMatchObject({
+      broker: "alpaca",
+      mode: "paper",
+      accountType: "stock",
+      accountId: "PA-200",
+      scope: "tenant",
+    });
+    expect(putBodies[0]?.availableAccounts).toEqual([
+      { accountId: "PA-100", accountType: "stock", accountName: "Alpaca Paper", broker: "alpaca" },
+      { accountId: "PA-200", accountType: "stock", accountName: "Alpaca Paper 2", broker: "alpaca" },
+    ]);
+    expect(select.value).toBe("PA-200");
+    // The Probe proves the store adopted the switch (the masked option
+    // labels never carry the raw id).
+    expect(container.textContent).toContain("PA-200");
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("6153-P03 unbound shows the placeholder and selecting an account binds it", async () => {
+    invalidateAccountBindings();
+    const putBodies = stubInlineFetch({ bindings: [], accounts: inlineAccountsFixture });
+
+    const { root, container } = mount(
+      <>
+        <InlineAccountBindingSelector broker="alpaca" mode="paper" accountType="stock" scope="tenant" />
+        <Probe broker="alpaca" mode="paper" accountType="stock" scope="tenant" />
+      </>,
+    );
+    await act(async () => {
+      root.render(
+        <>
+          <InlineAccountBindingSelector broker="alpaca" mode="paper" accountType="stock" scope="tenant" />
+          <Probe broker="alpaca" mode="paper" accountType="stock" scope="tenant" />
+        </>,
+      );
+    });
+    await flush();
+    await flush();
+    const select = container.querySelector("select") as HTMLSelectElement;
+    expect(select.value).toBe("");
+    expect(container.textContent).toContain("No account bound — select an account");
+    await act(async () => {
+      setSelectValue(select, "PA-100");
+    });
+    await flush();
+    await flush();
+    expect(putBodies).toHaveLength(1);
+    expect(putBodies[0]).toMatchObject({ accountId: "PA-100" });
+    expect(select.value).toBe("PA-100");
+    expect(container.textContent).toContain("PA-100");
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("6153-P04 renders nothing when the accounts read is unavailable or empty", async () => {
+    invalidateAccountBindings();
+    stubInlineFetch({ bindings: bindingsFixture, accounts: null });
+
+    const { root, container } = mount(
+      <InlineAccountBindingSelector broker="alpaca" mode="paper" accountType="stock" scope="tenant" />,
+    );
+    await act(async () => {
+      root.render(
+        <InlineAccountBindingSelector broker="alpaca" mode="paper" accountType="stock" scope="tenant" />,
+      );
+    });
+    await flush();
+    await flush();
+    expect(container.querySelector("select")).toBeNull();
+    expect(container.textContent).toBe("");
+
+    await act(async () => {
+      root.unmount();
+    });
+
+    // Empty enumeration: the same absence.
+    invalidateAccountBindings();
+    stubInlineFetch({ bindings: bindingsFixture, accounts: [] });
+    const second = mount(
+      <InlineAccountBindingSelector broker="alpaca" mode="paper" accountType="stock" scope="tenant" />,
+    );
+    await act(async () => {
+      second.root.render(
+        <InlineAccountBindingSelector broker="alpaca" mode="paper" accountType="stock" scope="tenant" />,
+      );
+    });
+    await flush();
+    await flush();
+    expect(second.container.querySelector("select")).toBeNull();
+
+    await act(async () => {
+      second.root.unmount();
+    });
+  });
+
+  it("6153-P05 a server refusal shows the error and keeps the previous binding", async () => {
+    invalidateAccountBindings();
+    stubInlineFetch({
+      bindings: bindingsFixture,
+      accounts: inlineAccountsFixture,
+      putStatus: 400,
+      putBody: {
+        ok: false,
+        code: "FAILURE_ACCOUNT_UNKNOWN",
+        error: "[FAILURE_ACCOUNT_UNKNOWN] Unknown account.",
+      },
+    });
+
+    const { root, container } = mount(
+      <>
+        <InlineAccountBindingSelector broker="alpaca" mode="paper" accountType="stock" scope="tenant" />
+        <Probe broker="alpaca" mode="paper" accountType="stock" scope="tenant" />
+      </>,
+    );
+    await act(async () => {
+      root.render(
+        <>
+          <InlineAccountBindingSelector broker="alpaca" mode="paper" accountType="stock" scope="tenant" />
+          <Probe broker="alpaca" mode="paper" accountType="stock" scope="tenant" />
+        </>,
+      );
+    });
+    await flush();
+    await flush();
+    const select = container.querySelector("select") as HTMLSelectElement;
+    expect(select.value).toBe("PA-100");
+    await act(async () => {
+      setSelectValue(select, "PA-200");
+    });
+    await flush();
+    await flush();
+    expect(container.textContent).toContain("FAILURE_ACCOUNT_UNKNOWN");
+    // The store reverted: the Select and the Probe agree on the old account.
+    expect(select.value).toBe("PA-100");
+    expect(container.textContent).toContain("PA-100");
 
     await act(async () => {
       root.unmount();

@@ -97,6 +97,14 @@ store (`src/client/accountBindingStore.ts` + `ActiveBindingBadge`):
   the schedule dialog (schedule scope; a per-schedule account override
   replaces the stored binding in the display), and the portfolio /
   account views (tenant/stock).
+- **Inline selector (#6153)**: the order ticket also carries the selector
+  inline, under the header (same slot as the badge): a compact `Select`
+  of the broker's enumerated accounts, switching through
+  `switchAccountBinding` — the same store and validation as the menu
+  selector's save. It renders only when the accounts read serves the
+  ticket's broker; otherwise the badge + Change remain the only path.
+  The badge stays the display and Change stays the shortcut to the full
+  selector (registry, free-text account ID, other brokers/scopes).
 - **Validated saves**: the AccountBindingSelector includes the selected
   broker's accounts as `availableAccounts` on its PUT when the accounts
   read serves the broker being saved, so the server validates the tuple

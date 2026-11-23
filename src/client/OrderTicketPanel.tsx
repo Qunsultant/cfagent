@@ -32,6 +32,7 @@ import { STRATEGY_LIBRARY } from "./options/strategyLibrary";
 import { buildTradeLegs, describeTradeLeg } from "./trading/strategyAutobuild";
 import { brokerModeBadge, brokerPresentation } from "../trading";
 import { ActiveBindingBadge } from "./ActiveBindingBadge";
+import { InlineAccountBindingSelector } from "./InlineAccountBindingSelector";
 import { AlpacaSignInCard } from "./AlpacaSignInCard";
 import { safeNumberFormat, safePriceFormat } from "./formatters";
 import {
@@ -505,6 +506,18 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
                         ) : undefined
                       }
                     />
+
+                {/* Issue #6153: the account selector inline on the ticket —
+                    the same slot as the badge above (broker/mode/asset
+                    class), the same store + validation as the
+                    settings-menu selector. The badge stays the display
+                    and Change stays the shortcut to the full selector. */}
+                <InlineAccountBindingSelector
+                  broker={brokerId}
+                  mode={tradingType}
+                  accountType={orderAssetClass === "options" ? "options" : "stock"}
+                  scope="tenant"
+                />
 
                 {orderError && (orderAssetClass === "options" ? (
                   <Notice tone="danger" title="Options preview failed. No order was created or submitted.">

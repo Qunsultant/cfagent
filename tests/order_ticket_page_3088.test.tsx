@@ -19,6 +19,7 @@ import { describe, expect, it, vi, afterEach, beforeEach } from "vitest";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { TradeHub } from "../src/client/TradeHub";
+import { invalidateAccountBindings } from "../src/client/accountBindingStore";
 import { ToastProvider } from "../src/client/components/ui/Toast";
 import { DEFAULT_LEFT_NAV_CONFIG } from "../src/client/navConfig";
 import {
@@ -182,5 +183,56 @@ describe("Order ticket page (issue #3088)", () => {
     expect(document.body.textContent).toContain("Options Order Ticket");
     expect(document.body.textContent).toContain("Build your order");
     expect(symbolInput()!.value).toBe("NVDA");
+  });
+
+  it("order ticket carries the account selector inline (issue #6153)", async () => {
+    const fetchMock = vi.fn(async (input: any, init?: any) => {
+      const url = String(input);
+      const okJson = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
+      if (url.startsWith("/api/broker/accounts")) {
+        return okJson({
+          broker: "alpaca",
+          environment: "TEST",
+          result: [{ accountId: "PA-100", accountType: "stock", accountName: "Alpaca Paper" }],
+        });
+      }
+      if (url.startsWith("/api/broker/account-binding")) {
+        return okJson({
+          ok: true,
+          bindings: [
+            {
+              broker: "alpaca",
+              mode: "paper",
+              accountType: "stock",
+              scope: "tenant",
+              accountId: "PA-100",
+              updatedAt: "2026-11-17T00:00:00.000Z",
+              updatedBy: "user",
+            },
+          ],
+        });
+      }
+      if (url.startsWith("/api/etrade/oauth/status")) {
+        return okJson({ authenticated: true, environment: "TEST", renewable: true });
+      }
+      if (url.startsWith("/api/etrade/status")) {
+        return okJson({ oauthAuthenticated: true, activeEnvironment: "TEST", environment: "TEST", configured: true, hasApiKey: true });
+      }
+      if (url.startsWith("/api/etrade/positions")) return okJson({ account: null, positions: [] });
+      if (url.startsWith("/api/broker/orders")) return okJson({ orders: [] });
+      return okJson({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    // The store cache is module-level: an earlier test in this file
+    // may have cached an empty bindings list, which would hide
+    // this test's stubbed binding.
+    invalidateAccountBindings();
+    await renderOrderPage();
+    const select = document.querySelector('select[aria-label="Account"]') as HTMLSelectElement | null;
+    expect(select).not.toBeNull();
+    expect(select!.value).toBe("PA-100");
+    expect(select!.textContent).toContain("Alpaca Paper (••••-100)");
+    // The badge stays the display beside it.
+    expect(document.body.textContent).toContain("Stock ••••-100");
   });
 });
