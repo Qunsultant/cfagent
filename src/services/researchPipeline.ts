@@ -38,6 +38,7 @@ import type {
 } from "./researchGates";
 import { runStageGates } from "./researchGates";
 import { resolveResearchRules } from "../config/researchRules";
+import type { ResearchRules } from "../config/researchRules";
 import { isResearchUniverseRefusal } from "../trading";
 import type { ResearchFeedStageOutput } from "./researchFeedHandoff";
 import type { ResearchEnrichStageOutput } from "./researchEnrichHandoff";
@@ -391,12 +392,13 @@ function draftThesis(
   symbol: string,
   technicals: Technicals | null,
   catalysts: CatalystInfo[] | null,
-  regime: RegimeAssessment
+  regime: RegimeAssessment,
+  rules: ResearchRules
 ): ThesisDraft {
   const supporting: string[] = [];
   const contradicting: string[] = [];
   let outlook: Outlook = "unknown";
-  let strength = 0.4;
+  let strength = rules.thesisStrengthBase;
 
   if (!technicals) {
     return {
@@ -417,13 +419,13 @@ function draftThesis(
   const alignedCatalysts = (catalysts ?? []).filter((c) => c.direction !== "neutral");
   if (technicals.trend === "up" && (technicals.momentum ?? 0) >= 0) {
     outlook = "bullish";
-    strength = 0.6;
+    strength = rules.thesisStrengthVeryStrong;
   } else if (technicals.trend === "down" && (technicals.momentum ?? 0) <= 0) {
     outlook = "bearish";
-    strength = 0.6;
+    strength = rules.thesisStrengthVeryStrong;
   } else if (technicals.trend === "flat") {
     outlook = "range_bound";
-    strength = 0.55;
+    strength = rules.thesisStrengthStrong;
   }
   if (regime.regime === "high_vol" && outlook !== "unknown") {
     outlook = "volatile";
@@ -431,7 +433,10 @@ function draftThesis(
   }
   for (const c of alignedCatalysts) {
     supporting.push(`Catalyst (${c.direction}): ${c.description}.`);
-    strength = Math.min(1, strength + 0.1);
+    strength = Math.min(
+      rules.thesisStrengthCap,
+      strength + rules.thesisStrengthPerConfirmation
+    );
   }
   if (catalysts === null) {
     contradicting.push("No catalyst feed available — event-driven drivers unassessed.");
@@ -803,7 +808,8 @@ function scoreCandidate(
   economics: StructureEconomics,
   chainProvenance: ChainProvenance,
   eventRisk: string | null,
-  config: ResearchConfig
+  config: ResearchConfig,
+  rules: ResearchRules
 ): number {
   const avgSpreadPct = economics.legs.reduce(
     (s, l) => s + ((l.ask - l.bid) / l.mid) * 100,
@@ -814,9 +820,12 @@ function scoreCandidate(
     economics.maxLoss > 0 && economics.maxGain !== null
       ? Math.min(economics.maxGain / economics.maxLoss, 3) / 3
       : 0.5;
-  let score = 0.4 * thesisStrength + 0.35 * liquidity + 0.25 * rewardRisk;
-  if (chainProvenance !== "live") score -= 1;
-  if (eventRisk) score -= 0.15;
+  let score =
+    rules.scoreWeightThesis * thesisStrength +
+    rules.scoreWeightLiquidity * liquidity +
+    rules.scoreWeightRewardRisk * rewardRisk;
+  if (chainProvenance !== "live") score += rules.nonLiveProvenancePenalty;
+  if (eventRisk) score -= rules.eventRiskPenalty;
   return Number(score.toFixed(4));
 }
 
@@ -881,6 +890,8 @@ export async function runFeedStage(
 ): Promise<ResearchFeedStageOutput> {
   const runId = opts.runId ?? newRunId();
   const now = opts.now ?? Date.now();
+  // Issue #6037 (c): the feed entry point resolves the block once too.
+  const rules = resolveResearchRules(config.rules);
   let regime: RegimeAssessment;
   try {
     regime = await deps.provider.getRegime();
@@ -898,7 +909,7 @@ export async function runFeedStage(
     // "this universe is not resolvable", not "retrieval failed".
     if (isResearchUniverseRefusal(err)) universeRefusalCode = "research_universe_unknown";
   }
-  const screened = symbols.slice(0, config.maxCandidates * 3);
+  const screened = symbols.slice(0, config.maxCandidates * rules.candidatePreScreenMultiplier);
   const quotes: Array<{ symbol: string; quote: QuoteSnapshot | null }> = [];
   let quotesRetrieved = 0;
   for (const symbol of screened) {
@@ -933,6 +944,9 @@ export async function runResearchPipeline(
   const started = Date.now();
   const now = opts.now ?? Date.now();
   const runId = opts.runId ?? newRunId();
+  // Issue #6037 (c): one resolution per run; every scoring / thesis / ordering
+  // / pre-screen decision below reads this block by key.
+  const rules = resolveResearchRules(config.rules);
   const trace: OodaStep[] = [];
   const step = (stage: OodaStep["stage"], detail: string) =>
     trace.push({ stage, detail, at: new Date().toISOString(), shortId: oodaStepShortId(stage) });
@@ -1055,7 +1069,7 @@ export async function runResearchPipeline(
       outcome: screenedSet.has(symbol) ? "not_evaluated" : "not_screened",
       reason: screenedSet.has(symbol)
         ? "Awaiting evaluation within the configured screening budget."
-        : `Outside the configured screening budget of ${config.maxCandidates * 3} symbols.`,
+        : `Outside the configured screening budget of ${config.maxCandidates * rules.candidatePreScreenMultiplier} symbols.`,
       strategies: [],
     });
   }
@@ -1136,7 +1150,7 @@ export async function runResearchPipeline(
     }
 
     // ORIENT — thesis.
-    const draft = draftThesis(symbol, technicals, catalysts, regime);
+    const draft = draftThesis(symbol, technicals, catalysts, regime, rules);
     step("orient", `${symbol}: outlook ${draft.outlook}.`);
     if (draft.outlook === "unknown") {
       symbolEvaluation.outcome = "thesis_rejected";
@@ -1207,14 +1221,15 @@ export async function runResearchPipeline(
     stage("build-and-price", `${symbol}: building ${draft.outlook} structures.`);
     let structureNames = structuresForOutlook(draft.outlook, config.ownershipStrategiesAllowed, config.pmccEnabled);
     // Issue #773: reorder structures by historical direction accuracy.
-    // Families with poor accuracy (<40%, n>=10) go last; strong ones (>60%) go first.
+    // Families with poor accuracy (below the block's weak threshold, n>=10) go
+    // last; strong ones (above its strong threshold) go first.
     if (deps.trackRecord?.byStrategy?.length) {
       const acc = new Map<string, { correct: number; total: number }>();
       for (const s of deps.trackRecord.byStrategy) {
         // byStrategy slices have directionAccuracy and evaluated counts
         const evaluated = (s as any).evaluated ?? 0;
         const dirAcc = (s as any).directionAccuracy;
-        if (typeof dirAcc === "number" && evaluated >= 10) {
+        if (typeof dirAcc === "number" && evaluated >= MIN_EVALUATED_FOR_ORDERING) {
           acc.set(s.key, { correct: Math.round(dirAcc * evaluated), total: evaluated });
         }
       }
@@ -1223,7 +1238,11 @@ export async function runResearchPipeline(
           const a = acc.get(name);
           if (!a) return 0.5; // no data → neutral
           const rate = a.correct / a.total;
-          return rate < 0.4 ? -1 : rate > 0.6 ? 1 : 0;
+          return rate < rules.trackRecordWeakBelow
+            ? -1
+            : rate > rules.trackRecordStrongAbove
+              ? 1
+              : 0;
         };
         structureNames = [...structureNames].sort((a, b) => score(b) - score(a));
         evaluationFeedback.orderingApplied = true;
@@ -1363,7 +1382,14 @@ export async function runResearchPipeline(
         (built.economics.maxLoss * 100 * costs.contracts +
           (costs.feePerContract + costs.slippagePerContract) * costs.contracts).toFixed(2)
       );
-      const score = scoreCandidate(draft.strength, built.economics, chain.provenance, eventRisk, config);
+      const score = scoreCandidate(
+        draft.strength,
+        built.economics,
+        chain.provenance,
+        eventRisk,
+        config,
+        rules
+      );
 
       const card: TradeCard = {
         rank: 0,
@@ -1577,6 +1603,8 @@ export async function runResearchEvaluation(
   now?: number
 ): Promise<ResearchEvaluation> {
   const at = now ?? Date.now();
+  // Issue #6037 (c): the invalidation band is a rule, not a literal.
+  const rules = resolveResearchRules(config.rules);
   const results: IdeaEvaluation[] = [];
   let dataQualityFailures = 0;
 
@@ -1609,7 +1637,10 @@ export async function runResearchEvaluation(
     if (bes.length > 0) {
       const lo = Math.min(...bes);
       const hi = Math.max(...bes);
-      if (quote.price < lo * 0.98 || quote.price > hi * 1.02) {
+      if (
+        quote.price < lo * rules.breakevenToleranceLower ||
+        quote.price > hi * rules.breakevenToleranceUpper
+      ) {
         invalidated = true;
         notes.push(`Spot ${quote.price} outside breakeven band [${lo}, ${hi}].`);
       }
