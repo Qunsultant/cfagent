@@ -114,6 +114,21 @@ export const RESEARCH_RULE_BOUNDS: Record<keyof ResearchRules, { min: number; ma
 
 const RULE_KEYS = Object.keys(RESEARCH_RULES_DEFAULTS) as Array<keyof ResearchRules>;
 
+/**
+ * Issue #6037 (d) — the canonical text a report's rules row carries: every
+ * rule, sorted by key, so two reports with the same values compare equal and
+ * a reader can see exactly what the run decided under.
+ */
+export function canonicalResearchRulesJson(
+  rules: ResearchRules | null | undefined,
+): string {
+  if (!rules) return "";
+  const sorted = [...RULE_KEYS].sort();
+  return JSON.stringify(
+    Object.fromEntries(sorted.map((key) => [key, rules[key]])),
+  );
+}
+
 /** The weights are one fact: they must sum to 1 (a 0.001 tolerance). */
 const WEIGHT_SUM_TOLERANCE = 0.001;
 
