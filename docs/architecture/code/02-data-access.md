@@ -4,7 +4,7 @@
 SQL lives behind ports; transactions are an aspect at the port boundary;
 migrations are owned by exactly one "latest" test.
 
-**Canonical sources.** ADR 0022 (`docs/architecture/adr/0022-data-foundation.md`
+**Canonical sources.** ADR 0022 (`docs/architecture/adr/data/0022-data-foundation.md`
 — linked directly; the ADR index is stale and omits it, see the README's
 known-conflicts table), ADR 0002, gitops §7 pin rule 5.
 
