@@ -11,7 +11,9 @@
  *
  *  D1  by report id, a row outside the newest-100 window still resolves
  *      (the same store the list is built from, same owner scope);
- *  D2  an unknown id is still an honest 404 — the fallback invents nothing;
+ *  D2  an unknown id is still an honest 404 — the fallback invents nothing,
+ *      and the 404 names the read mode it judged by (the live
+ *      discriminator the issue asks for);
  *  D3  another owner's report id does not resolve for this caller (the
  *      fallback keeps the list's owner scoping).
  */
@@ -83,11 +85,17 @@ describe("#6372 — Docs run details resolve by the canonical report id", () => 
     expect(payload.detail?.runId).toBe("run-alice-0");
   });
 
-  it("D2: an unknown id stays an honest 404", async () => {
+  it("D2: an unknown id stays an honest 404, naming the read mode it judged by", async () => {
     const sql = new SqliteTestStorage();
     seed(sql, 3, "alice");
     const res = await details(sql, "00000000-0000-4000-8000-000000000000", "alice");
     expect(res.status).toBe(404);
+    // The 404 carries the same `ledgerReadMode` the 200 does, so a live
+    // miss is discriminated on sight: projection vs. read window vs.
+    // owner scope. Without it the panel can only say "404".
+    const payload = (await res.json()) as { error?: string; ledgerReadMode?: string };
+    expect(payload.error).toBe("run not found");
+    expect(payload.ledgerReadMode).toBe("merged");
   });
 
   it("D3: another owner's report id does not resolve", async () => {
