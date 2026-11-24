@@ -439,7 +439,8 @@ describe("rule of three: headers (#4913)", () => {
     // heading is a SmallHeader, so the primitive count tracks the one new site.
     // Issue 6406: the hunt panel's entry/exit recommendation headings are
     // SmallHeaders too, so the count tracks those two new sites.
-    expect(countTag(pageTsx(), "SmallHeader")).toBe(49);
+    // #6151 S4 adds the Nav & Menu Access section heading too, so the primitive count now tracks one more site.
+    expect(countTag(pageTsx(), "SmallHeader")).toBe(50);
     // Exactly one site keeps h6 semantics (OmnichannelPanel: the email subject).
     let h6Level = 0;
     for (const f of pageTsx()) {
