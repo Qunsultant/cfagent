@@ -94,6 +94,9 @@ import {
 import { runStorageRetention } from "../../security/storageRetention";
 import { createAuditPolicyAdapter } from "../../data/createAuditPolicyPorts";
 import { pruneAuditChainForTenant } from "../../data/auditPolicyPorts";
+import { createProfileAdapter } from "../../data/createProfilePorts";
+import { createOrmPorts } from "../../data/createOrmPorts";
+import { loadIdpProfileConfig } from "../../security/idpProfileConfig";
 import { verifyStoredAuditChainAndAlert, type TamperAlertResult } from "../../services/auditTamperAlert";
 import {
   verifyStoredAuditChainAndAlertCheckpointed,
@@ -2656,6 +2659,63 @@ export async function handleSchedulesRoutes(
             // fields below are the operator-visible record.
           }
         };
+        // #5160 — IDP profile retention: purge profile rows whose
+        // identity has no live membership and whose last IDP refresh
+        // predates the configured retention window. Best-effort,
+        // same as the job-outcomes leg: a missing store, an
+        // unbound AGENT_DB, or a prune failure never fails the
+        // retention pass itself. retentionDays 0 (the shipped
+        // default) = retain while the identity exists — the cutoff
+        // is the epoch, so nothing is expired. The config reads
+        // from this instance's own mas_settings (the retention job
+        // runs IN the orchestrator, so the SettingsPort is local
+        // here — the worker-side sign-in path has no such port).
+        const idpProfilePrune = {
+          deleted: 0,
+          skipped: null as string | null,
+          error: null as string | null,
+        };
+        try {
+          const profileStore = createProfileAdapter(ctx.env);
+          if (!profileStore) {
+            idpProfilePrune.skipped = "AGENT_DB is not bound";
+          } else {
+            const settings = createOrmPorts(ctx.agentCtx.storage.sql).settings;
+            const config = loadIdpProfileConfig(settings);
+            if (config.retentionDays <= 0) {
+              idpProfilePrune.skipped = "retentionDays is 0 (retain while the identity exists)";
+            } else {
+              const membershipStore = createKvMembershipStore(sessionStore(ctx.env));
+              const nowMs = Date.now();
+              const pruned = await profileStore.purgeExpiredProfiles({
+                cutoffMs: nowMs - config.retentionDays * 86_400_000,
+                hasLiveMembership: async (internalUserId, tenantId) => {
+                  const memberships = await membershipStore.getMembershipsByUser(internalUserId);
+                  return memberships.some(
+                    (m) =>
+                      m.tenantId === tenantId &&
+                      m.revokedAtMs === undefined &&
+                      m.roleBindings.some(
+                        (b) => b.expiresAtMs === undefined || b.expiresAtMs > nowMs,
+                      ),
+                  );
+                },
+              });
+              idpProfilePrune.deleted = pruned.deleted;
+              auditEvent("RETENTION_IDP_PROFILE_PRUNE", {
+                deleted: pruned.deleted,
+                retentionDays: config.retentionDays,
+                note: "Nightly IDP profile retention (#5160): expired profile rows for identities with no live membership.",
+              });
+            }
+          }
+        } catch (err) {
+          idpProfilePrune.error = err instanceof Error ? err.message : String(err);
+          structuredLog.warn("schedules.retention_idp_profile_prune_failed", {
+            message: "[retention] IDP profile prune failed:",
+            error: idpProfilePrune.error,
+          });
+        }
         // #1766 leg 1 — orphan sweep (reports/*.json vs mas_reports.body_r2_key).
         const orphanSweep = {
           scanned: 0,
@@ -2814,6 +2874,7 @@ export async function handleSchedulesRoutes(
           jobOutcomesByAge: jobOutcomes.deletedByAge,
           jobOutcomesByCap: jobOutcomes.deletedByCap,
           jobOutcomesError: jobOutcomes.error,
+          idpProfilePrune,
           orphanSweep,
           snapshot,
         });

@@ -120,6 +120,9 @@ import type { AgentName, Env } from "../../types";
 
 import { createStructuredLogger } from "../../observability/structuredLogger";
 import { createObservabilitySink } from "../../observability/createObservabilityPorts";
+import { lookupInternalUserIdByLogin } from "../../security/iaaaMigration";
+import { resolveIaaaTenant } from "../../security/iaaaGithubEndToEnd";
+import { sessionStore } from "../../security/session";
 
 /** Issue #5606 (G-3) — module logger on the structured-logging seam. */
 const structuredLog = createStructuredLogger(createObservabilitySink({}), {
@@ -561,6 +564,18 @@ export async function handlePlatformAccountRoutes(
     // only, never the profile values themselves (email and phone
     // are PII). A store throw fails closed as a coded 503, never
     // a raw error.
+    // #5160 — the profile is per-tenant: this route reads and
+    // writes the OPERATING-tenant row (IAAA_TENANT_ID else
+    // "primary"), and the view carries the effective values
+    // (user-edited values where set, otherwise the provider
+    // value) plus the per-field provenance and the tenant. A user
+    // edit marks its field provenance 'user', so later sign-ins
+    // leave it alone. POST {syncFromProvider: true} (no profile
+    // fields, no idempotency key — the sync is naturally
+    // idempotent) resets user-owned fields to their provider
+    // values. The internal user id resolves via the login alias
+    // (best-effort; an unresolvable login saves a legacy row the
+    // next sign-in re-keys).
     if (isProfileGet || isProfileSave) {
       if (!ports.profile) {
         logAspectEvent({
@@ -574,11 +589,21 @@ export async function handlePlatformAccountRoutes(
         return Response.json(profileCodedBody("FAILURE_PROFILE_STORE_UNAVAILABLE"), { status: 503 });
       }
       const store = ports.profile;
+      const tenantId = resolveIaaaTenant(ctx.env);
+      let internalUserId: string | null = null;
+      try {
+        internalUserId = await lookupInternalUserIdByLogin(
+          sessionStore(ctx.env),
+          verifiedLogin,
+        );
+      } catch {
+        internalUserId = null;
+      }
       const readProfile = async (): Promise<
-        { ok: true; profile: Awaited<ReturnType<typeof store.getProfile>> } | { ok: false }
+        { ok: true; profile: Awaited<ReturnType<typeof store.getProfileByLogin>> } | { ok: false }
       > => {
         try {
-          return { ok: true, profile: await store.getProfile(verifiedLogin) };
+          return { ok: true, profile: await store.getProfileByLogin(verifiedLogin, tenantId) };
         } catch {
           logAspectEvent({
             aspect: "Profile",
@@ -602,7 +627,7 @@ export async function handlePlatformAccountRoutes(
         });
         return Response.json({
           ...profileCodedBody("SUCCESS_PROFILE_READ"),
-          ...toUserProfileView(verifiedLogin, read.profile),
+          ...toUserProfileView(verifiedLogin, read.profile, tenantId),
         });
       }
       const body = (await request.json().catch(() => ({}))) as {
@@ -610,6 +635,7 @@ export async function handlePlatformAccountRoutes(
         phone?: unknown;
         email?: unknown;
         idempotencyKey?: unknown;
+        syncFromProvider?: unknown;
       };
       // #5604: the save-body shape goes through the shared helper
       // first (`profileSaveBodySchema` — key first in schema order,
@@ -640,6 +666,70 @@ export async function handlePlatformAccountRoutes(
         );
       }
       const key = extractIdempotencyKey(body);
+      // #5160 — sync-from-provider: POST {syncFromProvider: true}
+      // with no profile fields resets user-owned fields to their
+      // provider values. The sync is naturally idempotent (a
+      // re-run converges), so no idempotency key is required; a
+      // body that mixes a sync with profile fields fails as a
+      // validation error, field `syncFromProvider`.
+      if (body.syncFromProvider === true) {
+        if (
+          "displayName" in body ||
+          "phone" in body ||
+          "email" in body
+        ) {
+          logAspectEvent({
+            aspect: "Profile",
+            operationName: "profile.sync",
+            code: "FAILURE_PROFILE_VALIDATION",
+            level: "warn",
+            message: "sync request carried profile fields",
+            metadata: { userLogin: verifiedLogin, field: "syncFromProvider", kind: "conflict" },
+          });
+          return Response.json(
+            profileCodedBody("FAILURE_PROFILE_VALIDATION", { field: "syncFromProvider" }),
+            { status: 400 },
+          );
+        }
+        const previous = await readProfile();
+        if (!previous.ok) {
+          return Response.json(profileCodedBody("FAILURE_PROFILE_STORE_UNAVAILABLE"), { status: 503 });
+        }
+        const syncId = previous.profile?.internalUserId ?? internalUserId;
+        if (!syncId) {
+          logAspectEvent({
+            aspect: "Profile",
+            operationName: "profile.sync",
+            code: "FAILURE_IDP_PROFILE_REFRESH_FAILED",
+            level: "warn",
+            message: "sync requested with no resolvable internal user id",
+            metadata: { userLogin: verifiedLogin },
+          });
+          return Response.json(profileCodedBody("FAILURE_IDP_PROFILE_REFRESH_FAILED"), { status: 503 });
+        }
+        let synced: Awaited<ReturnType<typeof store.syncFromProvider>>;
+        try {
+          synced = await store.syncFromProvider(syncId, tenantId, Date.now());
+        } catch {
+          logAspectEvent({
+            aspect: "Profile",
+            operationName: "profile.sync",
+            code: "FAILURE_IDP_PROFILE_REFRESH_FAILED",
+            level: "error",
+            message: "profile sync failed",
+            metadata: { userLogin: verifiedLogin },
+          });
+          return Response.json(profileCodedBody("FAILURE_IDP_PROFILE_REFRESH_FAILED"), { status: 503 });
+        }
+        structuredLog.info("platformAccounts.profile_synced", {
+          route,
+          login: verifiedLogin,
+        });
+        return Response.json({
+          ...profileCodedBody("SUCCESS_IDP_PROFILE_REFRESHED"),
+          ...toUserProfileView(verifiedLogin, synced, tenantId),
+        });
+      }
       if (!key.ok) {
         logAspectEvent({
           aspect: "Profile",
@@ -686,10 +776,27 @@ export async function handlePlatformAccountRoutes(
         });
         return Response.json({
           ...profileCodedBody("SUCCESS_PROFILE_READ"),
-          ...toUserProfileView(verifiedLogin, previous.profile),
+          ...toUserProfileView(verifiedLogin, previous.profile, tenantId),
         });
       }
       const nowMs = Date.now();
+      // #5160 — the save carries the FULL merged row (the row the
+      // caller read first, plus the user edits): dropping the IDP
+      // columns would silently un-record the provenance the
+      // sign-in refresh relies on. Each edited field is stamped
+      // provenance 'user' at nowMs, so later sign-ins leave it
+      // alone; a user-clear (null) is a 'user' value too and wins
+      // over a live provider value.
+      const provenance = { ...(previous.profile?.provenance ?? {}) };
+      if ("displayName" in input) {
+        provenance.displayName = { source: "user", updatedAtMs: nowMs };
+      }
+      if ("phone" in input) {
+        provenance.phone = { source: "user", updatedAtMs: nowMs };
+      }
+      if ("email" in input) {
+        provenance.email = { source: "user", updatedAtMs: nowMs };
+      }
       let saved: Awaited<ReturnType<typeof store.saveProfileOnce>>;
       try {
         saved = await store.saveProfileOnce(
@@ -700,6 +807,12 @@ export async function handlePlatformAccountRoutes(
             phone: "phone" in input ? (input.phone ?? null) : (previous.profile?.phone ?? null),
             email: "email" in input ? (input.email ?? null) : (previous.profile?.email ?? null),
             updatedAtMs: nowMs,
+            internalUserId: previous.profile?.internalUserId ?? internalUserId,
+            tenantId: previous.profile?.tenantId ?? tenantId,
+            idpIssuer: previous.profile?.idpIssuer ?? null,
+            idpAttributes: previous.profile?.idpAttributes ?? {},
+            provenance,
+            idpUpdatedAtMs: previous.profile?.idpUpdatedAtMs ?? null,
           },
           key.key,
           nowMs,
@@ -746,7 +859,7 @@ export async function handlePlatformAccountRoutes(
       });
       return Response.json({
         ...profileCodedBody("SUCCESS_PROFILE_UPDATED"),
-        ...toUserProfileView(verifiedLogin, next),
+        ...toUserProfileView(verifiedLogin, next, tenantId),
       });
     }
 

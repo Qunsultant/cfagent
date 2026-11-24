@@ -72,7 +72,7 @@ function fixtureSha256(name: string): string {
 }
 
 describe("schema equality — all planes (#4282 P4)", () => {
-  it("the frozen combined baseline is the clean-checkout seed (187 tables / 113 indexes)", () => {
+  it("the frozen combined baseline is the clean-checkout seed (188 tables / 114 indexes)", () => {
     const model = combinedExpectedModel();
     // #6072 adds migration 0080 (agent_screener_task_entries table):
     // 183 → 184 tables. #6099 adds migration 0081 (job_run_records
@@ -86,8 +86,9 @@ describe("schema equality — all planes (#4282 P4)", () => {
     // #6151 S3 adds migration 0085 (saved nav presets: agent_nav_presets + agent_nav_preset_state + 2 indexes): 185 → 187 tables, 111 → 113 indexes.
     // Issue #6100 adds 4 mas_events envelope indexes: 113 → 117.
     // Issue #6006 adds columns only (no new table or index): unchanged.
-    expect(Object.keys(model.tables).length).toBe(187);
-    expect(Object.keys(model.indexes).length).toBe(117);
+    // #5160 adds migration 0087 (IDP attributes profile: rebuild + lookup-index table + 1 unique index): 187 → 188 tables, 117 → 118 indexes.
+    expect(Object.keys(model.tables).length).toBe(188);
+    expect(Object.keys(model.indexes).length).toBe(118);
     expect(fixtureSha256("schema_component_combined_expected_model.json")).toBe(
       COMBINED_FIXTURE_SHA256,
     );
@@ -111,8 +112,9 @@ describe("schema equality — all planes (#4282 P4)", () => {
     // #6151 S3 adds migration 0085 (saved nav presets: 2 tables + 2 indexes): d1 tables 106 → 108, d1 indexes 67 → 69.
     // Issue #6100's envelope columns and indexes land on the ORM
     // plane (see the orm row), so the d1 counts are unchanged by it.
+    // #5160 adds migration 0087 (IDP attributes profile: lookup-index table + 1 unique index): d1 tables 108 → 109, d1 indexes 69 → 70.
     const counts: Record<string, [number, number]> = {
-      d1: [108, 69],
+      d1: [109, 70],
       do: [70, 41],
       orm: [13, 14],
       remainder: [19, 15],
@@ -147,12 +149,13 @@ describe("schema equality — all planes (#4282 P4)", () => {
     expect(new Set(executedCodes).size).toBe(
       COMBINED_CATALOGUE_ENTRIES.length,
     );
-    expect(COMBINED_CATALOGUE_ENTRIES.length).toBe(502);    // Issue #6167 adds 1 entry (the host_version remainder ALTER
+    expect(COMBINED_CATALOGUE_ENTRIES.length).toBe(508);    // Issue #6167 adds 1 entry (the host_version remainder ALTER
     // on mas_async_jobs): 452 → 453. Issue #5100 (F3 of #5094) adds 13:
     // 453 → 466 entries. Issue #5102 (F5 of #5094) adds 5 entries
     // (migration 0084: 4 job_run_records ALTERs + 1 index):
     // 475 → 480 entries.
     // #6151 S3 adds migration 0085 (saved nav presets: 2 tables + 2 indexes): 480 → 484 entries.
+    // #5160 adds migration 0087 (IDP attributes profile: rebuild + index table): 502 → 508 entries.
     // Issue #5229 adds migration 0069 (agent_referral_rules
     // expiry_period_ms column): 410 entries resolve to 421 statements.
     // Issue #5086 adds migration 0070 (otel_config_overrides table):
@@ -198,7 +201,9 @@ describe("schema equality — all planes (#4282 P4)", () => {
     // indexes), each one statement: 495 → 504 statements.
     // Issue #6006 adds 9 entries (migration 0086: job_run_records outcome
     // facts, 9 ALTERs), each one statement: 504 → 513 statements.
-    expect(executedStatements).toBe(513);
+    // #5160 adds migration 0087 (IDP attributes profile: rebuild + index table), each one statement:
+    // 513 → 519 statements.
+    expect(executedStatements).toBe(519);
     const actual = instance.introspect();
     const diff = diffSchema(actual, combinedExpectedModel());
     expect(isEmptyDiff(diff)).toBe(true);

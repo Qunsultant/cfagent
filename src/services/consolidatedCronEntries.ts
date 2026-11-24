@@ -492,6 +492,17 @@ export function retentionPassSummary(body: unknown): string | undefined {
   }
   const jobOutcomes = num(b.jobOutcomesPruned);
   if (jobOutcomes !== undefined) parts.push(`jobOutcomes=${jobOutcomes}`);
+  // #5160 — the IDP profile prune leg reports its deleted count
+  // (or its skip reason) the same way the other legs do.
+  const idpPrune = b.idpProfilePrune;
+  if (idpPrune && typeof idpPrune === "object") {
+    const p = idpPrune as Record<string, unknown>;
+    if (typeof p.skipped === "string" && p.skipped) {
+      parts.push(`idpProfiles=skipped: ${p.skipped}`);
+    } else if (num(p.deleted) !== undefined) {
+      parts.push(`idpProfiles=${num(p.deleted) ?? 0}`);
+    }
+  }
   const sweep = b.orphanSweep;
   if (sweep && typeof sweep === "object") {
     const s = sweep as Record<string, unknown>;

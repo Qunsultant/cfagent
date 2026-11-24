@@ -69,6 +69,7 @@ import { ServiceUserSection } from "./ServiceUserSection";
 import { ServiceTokensPanel } from "./ServiceTokensPanel";
 import { RoleGrantsPanel } from "./RoleGrantsPanel";
 import { BootstrapProposalsPanel } from "./BootstrapProposalsPanel";
+import { IdpProfileConfigPanel } from "./IdpProfileConfigPanel";
 import { LoggedInUsersPanel } from "./LoggedInUsersPanel";
 import { fetchRoleGrants } from "./roleGrantsApi";
 import { fetchLoggedInUsers } from "./loggedInUsersApi";
@@ -791,6 +792,12 @@ export function IaaaAdminPanel() {
             rowKey={(event) => event.id}
           />
         )}
+        </TabPanel>
+        {/* Issue #5160 — the Identity profile section: the IDP profile
+            config (attribute set + retention) and the admin identity
+            lookup. Platform-admin only (the panel gate + the routes). */}
+        <TabPanel idBase="iaaa-admin-overview" tabId="identity-profile" active={section === "identity-profile"}>
+          <IdpProfileConfigPanel />
         </TabPanel>
       </TabPanel>
 

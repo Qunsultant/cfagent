@@ -23,7 +23,8 @@ export type IaaaAdminSection =
   | "logged-in-users"
   | "deactivate"
   | "access-requests"
-  | "audit-events";
+  | "audit-events"
+  | "identity-profile";
 
 export const IAAA_ADMIN_SECTIONS: readonly IaaaAdminSection[] = [
   "summary",
@@ -35,6 +36,7 @@ export const IAAA_ADMIN_SECTIONS: readonly IaaaAdminSection[] = [
   "deactivate",
   "access-requests",
   "audit-events",
+  "identity-profile",
 ];
 
 export const IAAA_ADMIN_SECTION_LABELS: Record<IaaaAdminSection, string> = {
@@ -47,6 +49,7 @@ export const IAAA_ADMIN_SECTION_LABELS: Record<IaaaAdminSection, string> = {
   deactivate: "Deactivate",
   "access-requests": "Access requests",
   "audit-events": "Audit events",
+  "identity-profile": "Identity profile",
 };
 
 export function isIaaaAdminSection(value: unknown): value is IaaaAdminSection {
