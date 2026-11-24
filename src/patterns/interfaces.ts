@@ -177,6 +177,13 @@ export interface McpToolContext {
    */
   agentAccess?: import("../mcps/openaimp/mcpPermissionPorts").McpAgentAccessOptions;
   permissionDecisionSink?: import("../observability/observabilityPorts").ObservabilitySink;
+  /**
+   * #6173: the call's validated ExecutionContext, resolved once
+   * at the MCP entry (mcpChatNlq) and carried unchanged through
+   * the gate. Unset → the gate's denial is unattributed, exactly
+   * as before (in-process callers, queued-job re-checks).
+   */
+  executionContext?: import("../security/executionContext").ExecutionContext;
   /** #1744: execution id of the gated execution running this command (correlation only). */
   executionId?: string;
   /**

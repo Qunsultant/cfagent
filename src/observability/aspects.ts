@@ -275,6 +275,20 @@ export function withRequestObservability(
           },
         };
         if (errorCode !== undefined) event.errorCode = errorCode;
+        // #6173: the MCP surface label — only /mcp (+ /api/mcp,
+        // the Worker boundary's spelling) requests carry it, so
+        // MCP calls are separable from the aggregate; every other
+        // request's event is byte-identical to before.
+        const pathname = (() => {
+          try {
+            return new URL(request.url).pathname;
+          } catch {
+            return "";
+          }
+        })();
+        if (pathname === "/mcp" || pathname === "/api/mcp") {
+          event.fields.surface = "mcp";
+        }
         await safeWrite(sink, event);
       }
       if (opts.onRequestObserved) {

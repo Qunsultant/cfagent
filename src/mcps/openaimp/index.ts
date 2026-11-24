@@ -25,6 +25,7 @@ import { McpToolFactory } from "./commands";
 import { createObservabilitySink } from "../../observability/createObservabilityPorts";
 import type { ObservabilitySink } from "../../observability/observabilityPorts";
 import type { McpPrincipal, ToolPermissionPort } from "./mcpPermissionPorts";
+import type { ExecutionContext } from "../../security/executionContext";
 import { McpSystemFacade } from "../../patterns/facade";
 import {
   MEMORY_READ_MODE_SWITCH,
@@ -258,6 +259,8 @@ export async function executeMCPTool(
     traceparent?: () => string | undefined;
     permissionPort?: ToolPermissionPort;
     permissionDecisionSink?: ObservabilitySink;
+    /** #6173: the call's validated ExecutionContext, resolved once at the MCP entry. */
+    executionContext?: ExecutionContext;
     /** #1722: NLQ_MODE session/user carriers, spread through to the tool context. */
     scopedNlqModes?: import("../../config/nlqModes").NlqScopedModes;
     /** #1723: KNOWLEDGE_MODE / MEMORY_READ_MODE carriers, spread likewise. */
