@@ -160,7 +160,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-const ASSET_TYPES: readonly string[] = ["research", "screener", "options"];
+const ASSET_TYPES: readonly string[] = ["research", "screener", "options", "opportunity-hunt"];
 
 /** Chunked base64 for byte payloads (btoa exists in Workers + Node). */
 function bytesToBase64(bytes: Uint8Array): string {

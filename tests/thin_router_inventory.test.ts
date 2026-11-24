@@ -1129,6 +1129,8 @@ const EXPECTED_INVENTORY = [
   "handleScreenerResearchRoutes :: endsWith(\"/screening/goal-screen\")",
   "handleScreenerResearchRoutes :: endsWith(\"/screening/backtest\")",
   "handleOpportunityHuntRoutes :: endsWith(\"/opportunity-hunt/run\")",
+  "handleOpportunityHuntRoutes :: endsWith(\"/opportunity-hunt/report\")",
+  "handleOpportunityHuntRoutes :: endsWith(\"/opportunity-hunt/report.pdf\")",
   "handleMaintenanceRoutes :: endsWith(\"/maintenance/events-export\")",
   "handleMaintenanceRoutes :: endsWith(\"/maintenance/recreate-schema\")",
   "handleMaintenanceRoutes :: endsWith(\"/maintenance/clear-table\")",
