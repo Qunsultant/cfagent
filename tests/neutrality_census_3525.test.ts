@@ -982,6 +982,18 @@ function measure(): Map<string, number> {
  * (optionsData.ts alpaca 25->27): the chunk-limit comment naming
  * the documented limit, plus the server-side error log line.
  * Baseline totals move 1391/11291 -> 1391/11293.
+ * Baseline update (#6423, 2026-11-24): the data-layer docs move
+ * (docs(6113)) adds eight documents under docs/architecture/data/;
+ * six of them name providers — the surveys and research name the
+ * providers they survey (E*TRADE, Yahoo, Alpaca, Nasdaq) by
+ * definition, so the new rows are dispositioned INTEGRATION, as the
+ * data-model.md rows (#4802/#4813): neutralizing the names would
+ * make the surveys unusable. 18 new rows (6 files), 58 lines;
+ * table-domains.md and data-studio-scope.md carry no
+ * provider-brand row. (Counted totals before this update are
+ * 1392/11294 — the #6208 note's 1391/11293 is stale by the un-noted
+ * #6160 row.)
+ * Baseline totals move 1392/11294 -> 1410/11352.
  */
 const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (188 rows / 989 lines) ----
@@ -2697,6 +2709,33 @@ const BASELINE: Array<[string, string, number]> = [
   // written: the token was already in the callback's name before this slice.
   // Appended at the END so the platform slice (first 188 rows) is untouched.
   ["src/config/runLedgerModes.ts", "etrade", 1],
+  // #6423 INTEGRATION: the data-layer docs move adds six documents
+  // under docs/architecture/data/ that name the providers they survey
+  // (E*TRADE, Yahoo, Alpaca, Nasdaq) by definition — the surveys and
+  // research are about those providers, so naming them is the
+  // documents' job, as the data-model.md rows (#4802/#4813).
+  // Neutralizing the names would make the surveys unusable.
+  // Appended at the END so the platform slice (first 188 rows) is
+  // untouched. table-domains.md and data-studio-scope.md carry no
+  // provider-brand row. Counts measured with the census patterns.
+  ["docs/architecture/data/adr-0035-verification.md", "etrade", 2],
+  ["docs/architecture/data/adr-0035-verification.md", "alpaca", 2],
+  ["docs/architecture/data/adr-0035-verification.md", "tastytrade", 1],
+  ["docs/architecture/data/ciso-review.md", "etrade", 5],
+  ["docs/architecture/data/ciso-review.md", "alpaca", 2],
+  ["docs/architecture/data/ciso-review.md", "yahoo", 2],
+  ["docs/architecture/data/ciso-review.md", "nasdaq", 3],
+  ["docs/architecture/data/data-provider-platform-survey.md", "etrade", 5],
+  ["docs/architecture/data/data-provider-platform-survey.md", "alpaca", 2],
+  ["docs/architecture/data/data-provider-platform-survey.md", "yahoo", 4],
+  ["docs/architecture/data/identity-json-research.md", "etrade", 1],
+  ["docs/architecture/data/identity-json-research.md", "alpaca", 1],
+  ["docs/architecture/data/identity-json-research.md", "yahoo", 1],
+  ["docs/architecture/data/normalization-survey.md", "etrade", 1],
+  ["docs/architecture/data/normalization-survey.md", "alpaca", 1],
+  ["docs/architecture/data/screening-consolidation-survey.md", "etrade", 21],
+  ["docs/architecture/data/screening-consolidation-survey.md", "yahoo", 3],
+  ["docs/architecture/data/screening-consolidation-survey.md", "nasdaq", 1],
 ];
 
 const BASELINE_MAP = new Map(BASELINE.map(([f, t, c]) => [`${f}\t${t}`, c]));
