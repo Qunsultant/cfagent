@@ -2210,6 +2210,22 @@ function reportTrigger(trigger: string | null): WorkflowRunTrigger {
   return "unknown";
 }
 
+/**
+ * Issue #6371 — the engine family a report-only run belongs to. A research
+ * canonical row is filed under the Docs family "options" (its artifact
+ * family), which made the ledger render it as kind "options" and hid it from
+ * the `kind=workflow` view it belongs in. Name the engine family it actually
+ * is; the Docs family (and the Docs tab) stays untouched.
+ */
+export function engineFamilyForReportOnlyRun(
+  summary: { source: string },
+  docsFamily: string,
+): WorkflowRunFamily {
+  if (summary.source === "options_research") return "research";
+  if (docsFamily === "strategy") return "discovery";
+  return docsFamily as WorkflowRunFamily;
+}
+
 /** Normalize a canonical row's recorded status onto WorkflowRunStatus. */
 function reportStatus(status: string | null): WorkflowRunStatus {
   if (status === "completed" || status === "partial" || status === "failed") return status;
@@ -2892,6 +2908,9 @@ export interface WorkflowRunsPageOptions {
     summary: {
       runId: string;
       title: string;
+      /** Issue #6371 — the canonical row's producer, so a research row is
+       *  re-kinded to its engine family instead of its Docs family. */
+      source: string;
       trigger: string | null;
       status: string | null;
       /** Issue #6370 — the canonical row's owner, when it recorded one. */
@@ -2943,7 +2962,7 @@ export function buildWorkflowRunsPage(
     }
     for (const entry of input.reportDocs) {
       if (entry.matchKeys.some((key) => runIds.has(key))) continue;
-      const engineFamily = entry.documents.family === "strategy" ? "discovery" : entry.documents.family;
+      const engineFamily = engineFamilyForReportOnlyRun(entry.summary, entry.documents.family);
       const reportRun = runFromReportDocument({
         reportId: entry.documents.reportId,
         runId: entry.summary.runId,
