@@ -346,8 +346,8 @@ describe("P5 runner — delta-to-steps selection (P4 finding 3, P4 finding 2)", 
     // #6151 S3 adds migration 0085 (saved nav presets: 2 tables + 2 indexes): 271 → 275.
     // Issue #6100 adds 5 mas_events envelope ALTERs: the
     // projected-model walk already has them (the ORM CREATE carries
-    // them), so they are skipped: 13 → 18. Selected stays 275.
-    expect(selected.schema).toHaveLength(275);
+    // them), so the leg skips five more (13 → 18); its 4 indexes are selected: 275 → 279.
+    expect(selected.schema).toHaveLength(279);
     expect(selected.seeds).toHaveLength(12);
     expect(selected.skipped).toHaveLength(18);
     expect(
