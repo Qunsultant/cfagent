@@ -956,6 +956,9 @@ export const MESH_TOOL_FAMILIES: MeshToolFamilyEntry[] = [
       "get_pipeline_chain_status",
       "list_pipeline_chains",
       "manage_pipeline_chain",
+      // Issue #5976 — the chat/MCP door onto the one OODA configuration:
+      // `get` reads the effective config, `update` applies validated changes.
+      "research_config",
       "run_research_job",
       "define_pipeline_chain",
     ],
