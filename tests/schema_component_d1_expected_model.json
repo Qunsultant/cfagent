@@ -4079,7 +4079,7 @@
         {
           "name": "user_login",
           "type": "TEXT",
-          "pk": 1
+          "pk": 0
         },
         {
           "name": "display_name",
@@ -4092,17 +4092,55 @@
           "pk": 0
         },
         {
+          "name": "email",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
           "name": "updated_at_ms",
           "type": "INTEGER",
           "pk": 0
         },
         {
-          "name": "email",
+          "name": "internal_user_id",
           "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "tenant_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "idp_issuer",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "idp_attributes_json",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "provenance_json",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "idp_updated_at_ms",
+          "type": "INTEGER",
           "pk": 0
         }
       ],
-      "constraints": {}
+      "constraints": {
+        "primary_key": {
+          "kind": "primaryKey",
+          "columns": [
+            "internal_user_id",
+            "tenant_id"
+          ]
+        }
+      }
     },
     "agent_profile_idempotency_keys": {
       "columns": [
@@ -5996,6 +6034,51 @@
         }
       ],
       "constraints": {}
+    },
+    "agent_identity_attribute_index": {
+      "columns": [
+        {
+          "name": "tenant_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "attribute_name",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "attribute_value_normalized",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "internal_user_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "source",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "updated_at_ms",
+          "type": "INTEGER",
+          "pk": 0
+        }
+      ],
+      "constraints": {
+        "primary_key": {
+          "kind": "primaryKey",
+          "columns": [
+            "tenant_id",
+            "attribute_name",
+            "attribute_value_normalized",
+            "internal_user_id"
+          ]
+        }
+      }
     }
   },
   "indexes": {
@@ -6564,6 +6647,14 @@
         "tenant_id"
       ],
       "unique": false
+    },
+    "agent_user_profiles_login_tenant_idx": {
+      "table": "agent_user_profiles",
+      "columns": [
+        "user_login",
+        "tenant_id"
+      ],
+      "unique": true
     }
   }
 }

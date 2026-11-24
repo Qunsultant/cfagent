@@ -54,6 +54,12 @@ Evaluation — §7 separates those three states per slice.
   never email or login alone. Identity binding, login-key cutover,
   and migration code live in `src/security/iaaaLogin.ts`,
   `src/security/iaaaLoginKey.ts`, `src/security/iaaaMigration.ts`.
+  (Issue #5160, owner directive 2026-11-17: the IDP email IS stored
+  — as an identifying ATTRIBUTE in the D1 user profile
+  (`agent_user_profiles.idp_attributes_json`, migration 0087), with
+  exact-match lookup by email/phone/any stored identifier. The
+  identity KEY stays `(issuer, subject)`; an email change re-indexes
+  the attribute and never re-keys the identity.)
   Tests: `tests/iaaa_identity_binding.test.ts`,
   `tests/iaaa_login_key_cutover_1759.test.ts`,
   `tests/iaaa_repair_migration.test.ts`.

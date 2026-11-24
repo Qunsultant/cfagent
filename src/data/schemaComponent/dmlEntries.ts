@@ -41,6 +41,7 @@ import {
   eq,
   gt,
   gte,
+  isNull,
   lt,
   max,
   ne,
@@ -63,6 +64,7 @@ import {
   agentCodeRedemptionCounts,
   agentCodeRunBalances,
   agentFreeRunCounts,
+  agentIdentityAttributeIndex,
   agentProfileIdempotencyKeys,
   agentProposalTransitions,
   agentProposals,
@@ -107,6 +109,30 @@ function reqRecord(params: DmlParams, name: string): Record<string, unknown> {
 
 function reqValues(params: DmlParams): Record<string, unknown> {
   return reqRecord(params, "values");
+}
+
+/** The lookup-index rows for a profile save: an array (possibly empty) of index-row records. */
+function reqIndexRows(params: DmlParams): (typeof agentIdentityAttributeIndex.$inferInsert)[] {
+  const value = params["indexRows"];
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) {
+    throw new Error(`DML param "indexRows" must be an array`);
+  }
+  for (const row of value) {
+    if (!row || typeof row !== "object" || Array.isArray(row)) {
+      throw new Error(`DML param "indexRows" must contain only objects`);
+    }
+    const r = row as Record<string, unknown>;
+    for (const key of ["tenantId", "attributeName", "attributeValueNormalized", "internalUserId", "source"]) {
+      if (typeof r[key] !== "string") {
+        throw new Error(`DML param "indexRows" row field "${key}" must be a string`);
+      }
+    }
+    if (typeof r["updatedAtMs"] !== "number" || !Number.isFinite(r["updatedAtMs"])) {
+      throw new Error(`DML param "indexRows" row field "updatedAtMs" must be a finite number`);
+    }
+  }
+  return value as (typeof agentIdentityAttributeIndex.$inferInsert)[];
 }
 
 /* ------------------------------------------------------------------ */
@@ -587,20 +613,51 @@ const BATCH_ENTRIES: DmlCatalogueEntry[] = [
       // The profile upsert + the idempotency-key insert land in
       // ONE batch (the #3261 Idempotent Receiver rule); the entry
       // is keyed on the profile table, the batch's primary row.
+      // #5160 — the lookup-index rewrite rides the same batch:
+      // a user save that changes a contact value must re-index
+      // it, or the lookup would keep resolving the old value.
       const profile = reqValues(params) as typeof agentUserProfiles.$inferInsert;
       const idempotencyKey = reqString(params, "idempotencyKey");
       const createdAtMs = reqNumber(params, "createdAtMs");
-      return db.batch([
+      const indexRows = reqIndexRows(params);
+      type BatchStatement = Parameters<typeof db.batch>[0][number];
+      const statements: BatchStatement[] = [
+        // #5160 — a keyed save supersedes the legacy login row
+        // for the same login (a save after the refresh re-keyed
+        // the identity must not leave two rows behind). The
+        // delete runs first in the same batch; it deletes 0 rows
+        // when no legacy row exists.
+        db
+          .delete(agentUserProfiles)
+          .where(
+            and(
+              eq(agentUserProfiles.userLogin, profile.userLogin),
+              isNull(agentUserProfiles.internalUserId),
+            ),
+          ),
         db
           .insert(agentUserProfiles)
           .values(profile)
           .onConflictDoUpdate({
-            target: agentUserProfiles.userLogin,
+            // #5160 — the upsert target is the (internalUserId,
+            // tenantId) key. The save carries the FULL merged
+            // row (the route reads the stored row first), so the
+            // set writes the IDP columns too: a user save that
+            // dropped them would silently un-record the
+            // provenance a later refresh relies on. The route —
+            // not the upsert — owns which columns a user edit
+            // may change.
+            target: [agentUserProfiles.internalUserId, agentUserProfiles.tenantId],
             set: {
+              userLogin: profile.userLogin,
               displayName: profile.displayName,
               phone: profile.phone,
               email: profile.email,
               updatedAtMs: profile.updatedAtMs,
+              idpIssuer: profile.idpIssuer,
+              idpAttributes: profile.idpAttributes,
+              provenance: profile.provenance,
+              idpUpdatedAtMs: profile.idpUpdatedAtMs,
             },
           }),
         db.insert(agentProfileIdempotencyKeys).values({
@@ -608,7 +665,23 @@ const BATCH_ENTRIES: DmlCatalogueEntry[] = [
           userLogin: profile.userLogin,
           createdAtMs,
         }),
-      ]);
+      ];
+      if (profile.internalUserId && profile.tenantId) {
+        statements.push(
+          db
+            .delete(agentIdentityAttributeIndex)
+            .where(
+              and(
+                eq(agentIdentityAttributeIndex.tenantId, profile.tenantId),
+                eq(agentIdentityAttributeIndex.internalUserId, profile.internalUserId),
+              ),
+            ),
+        );
+        if (indexRows.length > 0) {
+          statements.push(db.insert(agentIdentityAttributeIndex).values(indexRows));
+        }
+      }
+      return db.batch(statements as unknown as Parameters<typeof db.batch>[0]);
     },
   },
   {

@@ -143,7 +143,7 @@ describe("module logging #5607: catalog codes", () => {
       expect(entry!.retryable).toBe(false);
       expect(codedMessage(code)).toBe(`[${code}] ${entry!.businessMessage}`);
     }
-    expect(Object.keys(outcomeCatalog.outcomes)).toHaveLength(269); // #5867: +1 FAILURE_COMMERCIAL_AUDIT_REQUIRED; +1 (#3571 residual: SUCCESS_TOP_UP_CLAIMED); +6 (#5098 tuple model: the six FAILURE_TUPLE_* validation codes)
+    expect(Object.keys(outcomeCatalog.outcomes)).toHaveLength(276); // #5867: +1 FAILURE_COMMERCIAL_AUDIT_REQUIRED; +1 (#3571 residual: SUCCESS_TOP_UP_CLAIMED); +6 (#5098 tuple model: the six FAILURE_TUPLE_* validation codes); +7 (#5160 IDP profile codes)
   });
 
   it("the reused codes resolve with the correct httpStatus", () => {

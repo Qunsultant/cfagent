@@ -788,7 +788,12 @@ const CENSUS_FAILURE_MESSAGE =
   "AND to the ADR 0033 Appendix A ledger, or the path does not land.";
 
 describe("Cross-store consistency pins (#4935, ADR 0033)", () => {
-  it("P-A: every projection call is in the audited census", () => {
+  // P-A scans all of src/ synchronously (~10s unloaded, >25s under
+  // shard load on shared runners) — the 25s default trips on load,
+  // not on a census violation. The 120s bound follows the
+  // trading-boundary.test.ts precedent; the census assertions below
+  // still run in full and still fail on any real violation.
+  it("P-A: every projection call is in the audited census", { timeout: 120_000 }, () => {
     const { violations, ignoredIaaaAuditCalls, allowed } =
       scanSrcForProjectionCalls();
     console.log(

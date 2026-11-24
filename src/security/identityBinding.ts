@@ -19,6 +19,14 @@
  * - Email and display login are NOT inputs to any function in this
  *   module. There is therefore no code path by which an email change
  *   can create a new identity or transfer another user's account.
+ *   (Issue #5160, owner directive 2026-11-17, SUPERSEDES the
+ *   storage reading of this rule: the IDP email IS stored — as an
+ *   identifying ATTRIBUTE in the D1 user profile
+ *   (`agent_user_profiles.idp_attributes_json`), with exact-match
+ *   lookup by email/phone/any stored identifier — but it never
+ *   becomes an input to binding here, and the identity KEY stays
+ *   (issuer, subject). An email change re-indexes the attribute;
+ *   it never re-keys the identity.)
  * - Linking requires proven control (`proofVerified: true`, i.e. the
  *   caller has already validated the provider assertion). Unproven
  *   linking is rejected and writes nothing.
