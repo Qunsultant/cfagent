@@ -489,3 +489,58 @@ describe("Settings footer (issue #6147 S4a)", () => {
     expect(container.querySelector('button[aria-label="Settings"]')).toBeNull();
   });
 });
+
+describe("Assets Hub registry + binding sub-menus (#6147 S2; #4681)", () => {
+  it("configures Assets Hub with forex, futures, commodities, bonds, registry, binding", () => {
+    const assetsSubItems = SUB_MENU_CONFIGS["assets-hub"];
+    expect(assetsSubItems).toBeDefined();
+    expect(assetsSubItems.map((s) => s.id)).toEqual([
+      "forex",
+      "futures",
+      "commodities",
+      "bonds",
+      "registry",
+      "binding",
+    ]);
+  });
+
+  it("on ?tab=assets-hub&view=registry, Assets Hub is active and the Registry sub-item is active", async () => {
+    window.history.pushState(null, "", "/?tab=assets-hub&view=registry");
+    await renderNavBar({ activeTab: "assets-hub" });
+    const registryBtn = Array.from(container.querySelectorAll(".sidebar-submenu-item")).find((b) =>
+      b.textContent?.includes("Registry"),
+    );
+    expect(registryBtn).toBeDefined();
+    expect(registryBtn!.classList.contains("active")).toBe(true);
+    const bindingBtn = Array.from(container.querySelectorAll(".sidebar-submenu-item")).find((b) =>
+      b.textContent?.includes("Binding"),
+    );
+    expect(bindingBtn).toBeDefined();
+    expect(bindingBtn!.classList.contains("active")).toBe(false);
+  });
+
+  it("on ?tab=assets-hub&view=binding, the Binding sub-item is active", async () => {
+    window.history.pushState(null, "", "/?tab=assets-hub&view=binding");
+    await renderNavBar({ activeTab: "assets-hub" });
+    const bindingBtn = Array.from(container.querySelectorAll(".sidebar-submenu-item")).find((b) =>
+      b.textContent?.includes("Binding"),
+    );
+    expect(bindingBtn).toBeDefined();
+    expect(bindingBtn!.classList.contains("active")).toBe(true);
+    const registryBtn = Array.from(container.querySelectorAll(".sidebar-submenu-item")).find((b) =>
+      b.textContent?.includes("Registry"),
+    );
+    expect(registryBtn).toBeDefined();
+    expect(registryBtn!.classList.contains("active")).toBe(false);
+  });
+
+  it("on bare ?tab=assets-hub, the Forex sub-item is active by default", async () => {
+    window.history.pushState(null, "", "/?tab=assets-hub");
+    await renderNavBar({ activeTab: "assets-hub" });
+    const forexBtn = Array.from(container.querySelectorAll(".sidebar-submenu-item")).find((b) =>
+      b.textContent?.includes("Forex"),
+    );
+    expect(forexBtn).toBeDefined();
+    expect(forexBtn!.classList.contains("active")).toBe(true);
+  });
+});

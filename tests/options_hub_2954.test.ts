@@ -55,7 +55,15 @@ describe("options copy hub tabs (#2954)", () => {
 
 describe("assets hub tabs (#2954)", () => {
   it("keeps only the tabs on neither the copy nor StockHub (#2971: the 5 own pages leave the hub)", () => {
-    expect(SCREENER_HUB_TABS).toEqual(["forex", "futures", "commodities", "bonds"]);
+    // #6147 S2: registry + binding join the four asset tabs (6 total).
+    expect(SCREENER_HUB_TABS).toEqual([
+      "forex",
+      "futures",
+      "commodities",
+      "bonds",
+      "registry",
+      "binding",
+    ]);
     for (const tab of SCREENER_HUB_TABS) {
       expect(OPTIONS_HUB_TABS).not.toContain(tab);
       expect(STOCK_HUB_TABS).not.toContain(tab);
@@ -119,7 +127,7 @@ describe("sub-menu mapping (#2954)", () => {
     expect(workflowIds).not.toContain("workflow-runs");
   });
 
-  it("adds patterns + presets to the stock-hub menu and all 4 to assets-hub", () => {
+  it("adds patterns + presets to the stock-hub menu and all 6 to assets-hub (#6147 S2)", () => {
     expect(SUB_MENU_CONFIGS["stock-hub"].map((s) => s.id)).toEqual([
       "screeners",
       "new-screen",
@@ -128,11 +136,14 @@ describe("sub-menu mapping (#2954)", () => {
       "opportunity-hunt",
       "presets",
     ]);
+    // #6147 S2: registry + binding join the four asset subs (6 total).
     expect(SUB_MENU_CONFIGS["assets-hub"].map((s) => s.id)).toEqual([
       "forex",
       "futures",
       "commodities",
       "bonds",
+      "registry",
+      "binding",
     ]);
   });
 });

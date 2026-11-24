@@ -94,19 +94,10 @@ export async function dispatchTickRiders(
       deps.userLogin,
       formatTraceparent(childSpan(tickTrace)),
     );
-  // Issue #354 — the daily options-research run (after market close)
-  // rides this tick. Fire/no-fire is decided inside the tick route.
-  await deps.dispatchAndAwait(
-    observeTickDispatch(
-      "research",
-      deps.orchestratorFetch(
-        new Request("https://agent.internal/research/scheduled-tick", {
-          method: "POST",
-          headers: dispatchHeaders(),
-        }),
-      ),
-    ),
-  );
+  // Issue #6299 — the research rider is RETIRED: the OODA cadence is one
+  // stored schedule record (#6029 a), fired by the tick's own schedule
+  // evaluation through `runPipelineJobSchedule`, so this tick no longer
+  // names `/research/scheduled-tick` and there is no second scheduler.
   // Issue #705 — the weekly reflection job rides this tick.
   await deps.dispatchAndAwait(
     observeTickDispatch(

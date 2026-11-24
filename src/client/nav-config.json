@@ -833,6 +833,20 @@
         "badge": "Planned",
         "badgeType": "neutral",
         "description": "Screen bonds — planned, no provider adapter yet"
+      },
+      {
+        "id": "registry",
+        "label": "Registry",
+        "shortLabel": "Registry",
+        "icon": "Screeners",
+        "description": "Broker, asset-type, and account-type registry"
+      },
+      {
+        "id": "binding",
+        "label": "Binding",
+        "shortLabel": "Binding",
+        "icon": "Screeners",
+        "description": "Bind a specific brokerage account"
       }
     ],
     "workflow-runs": [
@@ -1621,6 +1635,14 @@
     "assets-hub:bonds": {
       "tab": "assets-hub",
       "view": "bonds"
+    },
+    "assets-hub:registry": {
+      "tab": "assets-hub",
+      "view": "registry"
+    },
+    "assets-hub:binding": {
+      "tab": "assets-hub",
+      "view": "binding"
     },
     "options-screener:strategy-scanner": {
       "tab": "options",

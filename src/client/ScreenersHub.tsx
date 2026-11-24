@@ -6,6 +6,8 @@ import {
 } from "./screeningAdapters";
 import type { ScreenedStockItem } from "../types";
 import { CapabilityNavBar, CopilotTriggerButton, type CapabilityTabItem } from "./components/CapabilityNavBar";
+import { AccountBindingSelector } from "./AccountBindingSelector";
+import { defaultBrokerId } from "../trading";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { Notice, PageSection } from "./components/ui";
 
@@ -58,13 +60,15 @@ export function buildStockRunRequestBody(
   };
 }
 
-export type ScreenersHubTab = "forex" | "futures" | "commodities" | "bonds";
+export type ScreenersHubTab = "forex" | "futures" | "commodities" | "bonds" | "registry" | "binding";
 
 export const SCREENER_HUB_TABS: readonly ScreenersHubTab[] = [
   "forex",
   "futures",
   "commodities",
   "bonds",
+  "registry",
+  "binding",
 ] as const;
 
 export function isValidScreenerTab(tab: unknown): tab is ScreenersHubTab {
@@ -81,6 +85,12 @@ interface ScreenersHubProps {
    *  deep-link into the hub with the folded surface's tab. */
   initialTab?: ScreenersHubTab;
   onTabChange?: (tab: ScreenersHubTab) => void;
+  /**
+   * #6147 S2: the tenant's broker, for the registry/binding panels'
+   * AccountBindingSelector mounts. Threaded from TradeHub's
+   * useTenantProviders; defaults to the platform default broker.
+   */
+  broker?: string;
 }
 
 
@@ -174,6 +184,7 @@ export function ScreenersHub({
   userLogin,
   initialTab,
   onTabChange,
+  broker,
 }: ScreenersHubProps) {
   // Tabbed browsing via the shared hook (S2, #2027): canonical param is
   // `view`; `screenerTab` (and `tab`) stay as read-only legacy aliases so
@@ -190,8 +201,10 @@ export function ScreenersHub({
 
   // The provider-adapter machinery below serves the asset classes.
   // Issue #2971: the folded tabs are gone, so the hub tab IS the
-  // asset class — no borrowing.
-  const assetClass: ScreeningAssetClass = hubTab;
+  // asset class — no borrowing. The registry/binding tabs are not
+  // asset classes (#6147 S2), so they carry no asset class.
+  const assetClass: ScreeningAssetClass | undefined =
+    hubTab === "registry" || hubTab === "binding" ? undefined : hubTab;
   const screenerTabs: CapabilityTabItem[] = useMemo(() => {
     const descriptions: Record<string, { eyebrow: string; title: string; desc: string; icon: string }> = {
       forex: {
@@ -245,7 +258,36 @@ export function ScreenersHub({
     // Issue #2783: the #2438 exclusion is removed — the Planned tabs
     // return to the primary bar with their PLANNED badges (nothing
     // hidden); the left-nav Planned menu links to the same views.
-    return assetTabs;
+    //
+    // #6147 S2: the registry + binding views are hub tabs, not asset
+    // classes, so they are appended after the asset tabs. They are
+    // live (no PLANNED badge) — the Registry Manager and the bindings
+    // form it mounts already ship in the settings menu.
+    const bindingTabs: CapabilityTabItem[] = [
+      {
+        id: "registry",
+        label: "Registry",
+        icon: "🗂️",
+        tooltip: {
+          eyebrow: "BROKER REGISTRY",
+          title: "Broker Registry",
+          description:
+            "Manage the broker, asset-type, and account-type registry — which brokers and account types bindings can name.",
+        },
+      },
+      {
+        id: "binding",
+        label: "Binding",
+        icon: "🔗",
+        tooltip: {
+          eyebrow: "ACCOUNT BINDING",
+          title: "Account Binding",
+          description:
+            "Bind a specific brokerage account to this tenant, per broker, mode, and account type.",
+        },
+      },
+    ];
+    return [...assetTabs, ...bindingTabs];
   }, []);
 
   return (
@@ -284,6 +326,28 @@ export function ScreenersHub({
             <Notice tone="info" title={`${SCREENING_ASSET_CLASSES.find((a) => a.id === asset)?.label || "Asset"} Screener · Planned`}>
               This instrument class is a planned extension point. Multi-asset provider adapters are currently in development.
             </Notice>
+          </div>
+        ) : null
+      )}
+
+      {/* #6147 S2: Registry + Binding panels — one AccountBindingSelector
+          mount per view (same component, section prop selects which half
+          opens first); the settings-menu mount stays as the third home. */}
+      {(["registry", "binding"] as const).map((section) =>
+        visitedTabs.has(section) ? (
+          <div
+            key={section}
+            role="tabpanel"
+            id={`screener-tabpanel-${section}`}
+            aria-labelledby={`cap-tab-${section}`}
+            hidden={hubTab !== section}
+            style={hubTab !== section ? { display: "none" } : undefined}
+          >
+            <AccountBindingSelector
+              broker={broker ?? defaultBrokerId()}
+              mode={activeEnv === "PROD" ? "live" : "paper"}
+              section={section}
+            />
           </div>
         ) : null
       )}
