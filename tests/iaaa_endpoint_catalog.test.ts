@@ -96,7 +96,7 @@ describe("MCP catalogue (served)", () => {
     // also exist under foss:// aliases), 5 prompts. If the served
     // counts grow, update this pin — do not silently let the tab
     // go stale.
-    expect(servedCatalog.tools.length).toBe(156);
+    expect(servedCatalog.tools.length).toBe(157);
     expect(servedCatalog.resources.length).toBe(14);
     expect(servedCatalog.prompts.length).toBe(5);
   });

@@ -353,6 +353,10 @@ export const MCP_TOOL_SCOPES: Record<string, McpScope> = {
   run_pipeline_chain: "mcp:write",
   manage_pipeline_chain: "mcp:write",
   // #5117: nightly research job & runtime chain definition.
+  // #5976: the one OODA configuration — `get` reads, `update` writes, so the
+  // tool carries the write scope (the narrower read-only door would let an
+  // update through under a read grant).
+  research_config: "mcp:write",
   run_research_job: "mcp:write",
   define_pipeline_chain: "mcp:write",
   // #2351 (mesh S7): the BrowserAgent/SlackAgent doors' deliveries —

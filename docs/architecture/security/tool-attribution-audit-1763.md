@@ -186,6 +186,7 @@ other doors. Scope column is #1843's declaration, consumed here.
 | `manage_pipeline_chain` | mcp:write | L via door 2 only — acting identity required (#3540); refused on doors 1/3 (no acting-identity carrier there) |
 | `run_research_job` | mcp:write | L via door 2 only — acting identity required (#5117); dispatches `research:<runId>` or controls `(runId, stageId)` |
 | `define_pipeline_chain` | mcp:write | L via door 2 only — acting identity required (#5117); defines declarative pipeline chains on `JobPipelineControl` |
+| `research_config` | mcp:write | L via door 2 only — acting identity required (#5976); `get` reads the effective OODA configuration, `update` applies validated changes through the same door the settings page uses |
 
 ### mcp:execute (7)
 
