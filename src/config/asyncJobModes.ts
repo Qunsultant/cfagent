@@ -305,6 +305,10 @@ export const SYNCHRONOUS_MCP_TOOLS = new Set<string>([
   "list_async_jobs",
   "get_job_status",
   "get_job_stage_status",
+  // Issue #5976 — the OODA config door answers inline (a store read or a
+  // validated write), so it is synchronous like the job-status reads, not
+  // queued: queueing a settings read would add latency with no job to wait on.
+  "research_config",
   "stock_copilot_stage_control",
   // #5739: whole-job control is immediate state/control, never a queued job.
   "stock_copilot_job_control",

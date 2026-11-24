@@ -92,9 +92,9 @@ execution. Scope totals: 70 `mcp:read`, 34 `mcp:write`, 7 `mcp:execute`,
 | `mcp:payments` | 10 | `agentic_wallet_status`, `check_payment_budget`, `confirm_payment_draft`, `draft_payment`, `get_payment_budget`, `get_payment_gateways`, `get_payments_overview`, `get_transactions`, `paid_market_research`, `paid_options_screener` |
 | `mcp:admin` | 5 | `get_audit_events`, `get_revenue_summary`, `list_database_tables`, `query_table_data`, `manage_tenants` (#4741) |
 
-### 2.3 Synchronous vs queued — 103 synchronous, 53 queued
+### 2.3 Synchronous vs queued — 104 synchronous, 53 queued
 
-**103 tools are synchronous** (`SYNCHRONOUS_MCP_TOOLS`, plus the
+**104 tools are synchronous** (`SYNCHRONOUS_MCP_TOOLS`, plus the
 `LEGACY_BROKER_TOOL_PREFIX` arm of `isSynchronousMcpTool`,
 `src/config/asyncJobModes.ts`): the status reads, job retrieval, the broker
 read and trade paths, browser and web tools, and (from #4048) the Public
