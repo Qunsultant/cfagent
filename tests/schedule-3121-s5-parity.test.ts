@@ -19,7 +19,7 @@
  *   ZERO dispatches; renewal with the same denied gate still runs.
  * - S5-P03 tick provisioned calls onCron + all six POST dispatches
  *   exactly once, in order, under ONE trace (same trace id on every
- *   dispatch); a failing research dispatch does not fail the tick;
+ *   dispatch); a failing rider dispatch does not fail the tick;
  *   the success row carries scheduleId = the cron expression.
  * - S5-P04 renewal runs without identity; a renewal failure records
  *   a failure row AND propagates in the await path, and records the
@@ -191,8 +191,10 @@ function traceIdOf(traceparent: string | undefined): string | null {
   return parts.length === 4 ? parts[1] : null;
 }
 
+// Issue #6299 — the research rider is retired from this tick: the OODA
+// cadence is one stored schedule record fired by the tick's own schedule
+// evaluation, so the tick posts five riders, not six.
 const TICK_POST_URLS = [
-  "https://agent.internal/research/scheduled-tick",
   "https://agent.internal/reflection/run",
   "https://agent.internal/adaptation/weights/run",
   "https://agent.internal/knowledge/corpus-sync",
@@ -274,7 +276,7 @@ describe("S5-P02 tick gate denial / renewal gate independence", () => {
 });
 
 describe("S5-P03 provisioned tick dispatch order, trace, and observer", () => {
-  it("calls onCron + all six POST dispatches exactly once, in order, under one trace", async () => {
+  it("calls onCron + all five POST dispatches exactly once, in order, under one trace", async () => {
     const { deps, orchestrator, records, onCronCalls } = makeDeps();
     await runTickEntryPoint(deps);
     expect(onCronCalls.count).toBe(1);
@@ -305,9 +307,9 @@ describe("S5-P03 provisioned tick dispatch order, trace, and observer", () => {
     ).toBe(TICK_CRON);
   });
 
-  it("a failing research dispatch does not fail the tick (observer swallows)", async () => {
+  it("a failing rider dispatch does not fail the tick (observer swallows)", async () => {
     const orchestrator = makeOrchestrator({
-      failUrls: new Set(["https://agent.internal/research/scheduled-tick"]),
+      failUrls: new Set(["https://agent.internal/reflection/run"]),
     });
     const { deps, records, slackTexts } = makeDeps({ orchestrator });
     await expect(runTickEntryPoint(deps)).resolves.toBeUndefined();
@@ -333,7 +335,7 @@ describe("S5-P03 provisioned tick dispatch order, trace, and observer", () => {
     const { deps, orchestrator, onCronCalls } = makeDeps();
     await runCronEntryPoint("tick", deps);
     expect(onCronCalls.count).toBe(1);
-    expect(orchestrator.calls).toHaveLength(6);
+    expect(orchestrator.calls).toHaveLength(5);
   });
 });
 
