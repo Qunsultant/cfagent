@@ -102,7 +102,7 @@ function NavIdCheckboxes(props: {
                 {(item.subItems ?? []).map((sub) => {
                   const key = navSubItemAvailabilityKey(item.id, sub.id);
                   return (
-                    <div key={key} style={{ paddingLeft: "var(--space-md)" }}>
+                    <div key={key} style={{ paddingLeft: "var(--space-4)" }}>
                       <Checkbox
                         label={sub.label}
                         checked={value.has(key)}
