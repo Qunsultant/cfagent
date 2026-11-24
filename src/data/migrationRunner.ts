@@ -1463,6 +1463,24 @@ export const MIGRATION_0085_NAV_PRESETS: DataMigration = {
   name: "0085_nav_presets",
   sql: d1MigrationSql(85),
 };
+/**
+ * Migration 0086 — IDP attributes as a durable multi-tenant
+ * profile (#5160). Rebuilds agent_user_profiles to the
+ * (internal_user_id, tenant_id) key (the 0058 rebuild
+ * precedent): the old login key cannot hold one row per tenant
+ * for the same user. New columns: internal_user_id, tenant_id,
+ * idp_issuer, idp_attributes_json (the full sanitized IDP
+ * userinfo doc), provenance_json (per-field source), and
+ * idp_updated_at_ms. Plus agent_identity_attribute_index, the
+ * exact-match lookup index (tenant, attribute, normalized
+ * value, identity). Legacy rows carry NULL keys and are re-keyed
+ * in place by the sign-in refresh.
+ */
+export const MIGRATION_0086_IDP_ATTRIBUTES_PROFILE: DataMigration = {
+  version: 86,
+  name: "0086_idp_attributes_profile",
+  sql: d1MigrationSql(86),
+};
 export const MIGRATION_0082_REFERRAL_TRIAL_EXTENSION: DataMigration = {
   version: 82,
   name: "0082_referral_trial_extension",
@@ -1719,6 +1737,7 @@ export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANC
   MIGRATION_0083_JOB_STAGE_EVENTS,
   MIGRATION_0084_JOB_RUN_RECORDS_BINDING,
   MIGRATION_0085_NAV_PRESETS,
+  MIGRATION_0086_IDP_ATTRIBUTES_PROFILE,
 ];
 
 function splitStatements(sqlText: string): string[] {

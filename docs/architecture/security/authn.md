@@ -32,7 +32,10 @@ Slice 1 identity binding (`src/security/identityBinding.ts`) maps
 `(issuer, subject)` to a stable internal user id. The rules are absolute:
 
 - Email is never identity. For Google it is only the legacy login key, and
-  login fails closed if it is missing or unverified.
+  login fails closed if it is missing or unverified. (Issue #5160, owner
+  directive 2026-11-17: the IDP email IS stored as an identifying ATTRIBUTE
+  in the D1 user profile, with exact-match lookup — but no flow keys on it,
+  and the identity key stays (issuer, subject).)
 - A GitHub login is never identity either: it can be renamed, and a
   released login can be recycled. GitHub sessions bind the **numeric user
   id**; a missing or non-finite id fails login. The bootstrap parser

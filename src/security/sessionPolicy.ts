@@ -245,7 +245,11 @@ export const DEFAULT_SESSION_POLICY: SessionPolicy = {
 /**
  * Minimal session state this policy needs. It intentionally carries
  * no email, display login, or token: identity is the internal user
- * id bound in Slice 1 to (issuer, subject).
+ * id bound in Slice 1 to (issuer, subject). (Issue #5160, owner
+ * directive 2026-11-17: the IDP email IS stored elsewhere — as an
+ * identifying attribute in the D1 user profile — but the SESSION
+ * still carries no email; this statement is about the session, not
+ * about storage.)
  */
 export interface SessionState {
   sessionId: string;

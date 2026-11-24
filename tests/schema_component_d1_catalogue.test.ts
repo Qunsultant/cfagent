@@ -158,7 +158,11 @@ const D1_MIGRATION_SQL_SHA256: Record<number, string> = {
   84: "74b9fd18e06cb9b7abea9eceb2f53d69fb2fdc2d7f35ec42300fda893376b3a8",
   // #6151 S3 adds migration 0085 (saved nav presets: agent_nav_presets
   // + agent_nav_preset_state): 4 statements.
-  85: "acbca0e1d709401ae86c4ca1b2388960761e8d311ea472987942959b9ad5f860",};
+  85: "acbca0e1d709401ae86c4ca1b2388960761e8d311ea472987942959b9ad5f860",
+  // #5160 adds migration 0086 (IDP attributes profile: rebuild
+  // agent_user_profiles with the (internal_user_id, tenant_id) key
+  // + the agent_identity_attribute_index table): 6 statements.
+  86: "f037e33cafe2251ce50921754dedd1ee34ffff7d1404586bd135dfbf93351ff1",};
 
 /** Per-version statement counts, measured from the base runner. */
 const D1_MIGRATION_STATEMENT_COUNTS: Record<number, number> = {
@@ -251,9 +255,14 @@ const D1_MIGRATION_STATEMENT_COUNTS: Record<number, number> = {
   // ALTERs + the binding-read index): 5 statements.
   84: 5,
   // #6151 S3 adds migration 0085 (saved nav presets: 2 tables + 2 indexes): 4 statements.
-  85: 4,};
+  85: 4,
+  // #5160 adds migration 0086 (IDP attributes profile: rebuild
+  // agent_user_profiles + the lookup-index table): 6 statements
+  // (rename, create table, insert-from-legacy, drop legacy, unique
+  // index, index table).
+  86: 6,};
 
-/** The 11 seed-DML statements, exact text, measured from the base runner. */
+/** The 13 seed-DML statements, exact text, measured from the base runner. */
 const D1_SEED_STATEMENTS: string[] = [
   "INSERT OR IGNORE INTO agent_referral_rules (id, earn_amount_usd, vesting_delay_ms, redemption_scope, updated_at_ms) VALUES ('default', 0.5, 604800000, 'pay-per-run', 0)",
   "INSERT OR IGNORE INTO agent_free_run_allowances (family, runs, updated_at_ms) VALUES\n  ('stock', 10, 0),\n  ('goal', 10, 0),\n  ('options', 10, 0),\n  ('strategy', 10, 0)",
@@ -266,7 +275,10 @@ const D1_SEED_STATEMENTS: string[] = [
   "INSERT INTO agent_price_catalogue (id, family, price_usd, updated_at_ms, approval_status, approved_by, approved_at_ms, product_id, segment, version, effective_from_ms, effective_to_ms)\n  SELECT 'cat-' || family || '-default-v1', family, price_usd, updated_at_ms, approval_status, approved_by, approved_at_ms, 'prod-per-run-' || family, 'default', 1, updated_at_ms, NULL\n  FROM agent_price_catalogue_legacy",
   "UPDATE agent_products SET rank = 1 WHERE id = 'prod-free'",
   "INSERT OR IGNORE INTO agent_referral_code_rules (id, product_id, issuer, runs_per_code, reusable, expiry_days, attribution_mode, max_redemptions_per_code, max_redemptions_per_login, global_cap, redemption_count, active, created_at_ms, updated_at_ms)\n  VALUES\n    ('coderule-seed-prod-per-run-stock', 'prod-per-run-stock', 'platform_admin', 5, 0, 30, 'ledger', 1, 1, NULL, 0, 0, 0, 0),\n    ('coderule-seed-prod-per-run-goal', 'prod-per-run-goal', 'platform_admin', 5, 0, 30, 'ledger', 1, 1, NULL, 0, 0, 0, 0),\n    ('coderule-seed-prod-per-run-options', 'prod-per-run-options', 'platform_admin', 5, 0, 30, 'ledger', 1, 1, NULL, 0, 0, 0, 0),\n    ('coderule-seed-prod-per-run-strategy', 'prod-per-run-strategy', 'platform_admin', 5, 0, 30, 'ledger', 1, 1, NULL, 0, 0, 0, 0)",
-  "INSERT OR IGNORE INTO job_pipeline_definition_versions (id, job_id, version, definition_json, updated_at) SELECT job_id || ':' || version, job_id, version, definition_json, updated_at FROM job_pipeline_definitions"
+  "INSERT OR IGNORE INTO job_pipeline_definition_versions (id, job_id, version, definition_json, updated_at) SELECT job_id || ':' || version, job_id, version, definition_json, updated_at FROM job_pipeline_definitions",
+  // #5160 adds migration 0086 (IDP attributes profile: the legacy
+  // backfill INSERT — the rebuild's INSERT ... SELECT).
+  "INSERT INTO agent_user_profiles (user_login, display_name, phone, email, updated_at_ms, internal_user_id, tenant_id, idp_issuer, idp_attributes_json, provenance_json, idp_updated_at_ms)\n  SELECT user_login, display_name, phone, email, updated_at_ms, NULL, NULL, NULL, NULL, NULL, NULL\n  FROM agent_user_profiles_legacy"
 ];
 
 const FIXTURE_PATH = path.join(
@@ -291,7 +303,7 @@ function expectedD1Model(): SchemaModel {
 }
 
 describe("D1 catalogue — migrationRunner delegates (#4282 P1)", () => {
-  it("catalogues all 259 runner statements: 247 schema + 12 seed", () => {
+  it("catalogues all 270 runner statements: 257 schema + 13 seed", () => {
     const catalogue = buildD1Catalogue();
     // #5086 adds migration 0070 (otel_config_overrides table): 224 → 225.
     // #4767 adds migrations 0071/0072 (4 D1 ALTERs): 225 → 229.
@@ -307,9 +319,10 @@ describe("D1 catalogue — migrationRunner delegates (#4282 P1)", () => {
     // #6028/#6202 adds migration 0083 (job_stage_events table + 1 index): 253 → 255.
     // #5102 adds migration 0084 (job_run_records binding tuple: 4 ALTERs + 1 index): 255 → 260.
     // #6151 S3 adds migration 0085 (saved nav presets: 2 tables + 2 indexes): 260 → 264.
-    expect(D1_CATALOGUE_ENTRIES.length).toBe(264);
-    expect(catalogue.size()).toBe(264);
-    expect(catalogue.byKind("schema").length).toBe(252);    expect(catalogue.byKind("seed").length).toBe(12);
+    // #5160 adds migration 0086 (IDP attributes profile: rebuild + index table): 264 → 270.
+    expect(D1_CATALOGUE_ENTRIES.length).toBe(270);
+    expect(catalogue.size()).toBe(270);
+    expect(catalogue.byKind("schema").length).toBe(257);    expect(catalogue.byKind("seed").length).toBe(13);
     const verbs = new Map<string, number>();
     const classify = (statement: string): string => {
       const upper = statement.trim().toUpperCase();
@@ -333,12 +346,12 @@ describe("D1 catalogue — migrationRunner delegates (#4282 P1)", () => {
       const verb = classify(entry.statement);
       verbs.set(verb, (verbs.get(verb) ?? 0) + 1);
     }
-    expect(verbs.get("CREATE TABLE")).toBe(109);
+    expect(verbs.get("CREATE TABLE")).toBe(111);
     expect(verbs.get("CREATE INDEX")).toBe(59);
-    expect(verbs.get("CREATE UNIQUE INDEX")).toBe(10);
-    expect(verbs.get("ALTER TABLE")).toBe(73);    expect(verbs.get("DROP TABLE")).toBe(1);
+    expect(verbs.get("CREATE UNIQUE INDEX")).toBe(11);
+    expect(verbs.get("ALTER TABLE")).toBe(74);    expect(verbs.get("DROP TABLE")).toBe(2);
     expect(verbs.get("INSERT OR IGNORE")).toBe(8);
-    expect(verbs.get("INSERT INTO")).toBe(1);
+    expect(verbs.get("INSERT INTO")).toBe(2);
     expect(verbs.get("UPDATE")).toBe(3);
   });
 
@@ -348,9 +361,9 @@ describe("D1 catalogue — migrationRunner delegates (#4282 P1)", () => {
       .sort((a, b) => a - b);
     // 0084 is F5's migration (job_run_records binding columns,
     // #5102), merged 2026-11-23 as f7b55d2 — the gap is filled and
-    // versions run 1–85 contiguously.
+    // versions run 1–86 contiguously.
     expect(versions).toEqual(
-      Array.from({ length: 85 }, (_, i) => i + 1),
+      Array.from({ length: 86 }, (_, i) => i + 1),
     );    const allCodes = new Set<string>();
     for (const version of versions) {
       const codes = D1_MIGRATION_CODES[version];
@@ -364,7 +377,7 @@ describe("D1 catalogue — migrationRunner delegates (#4282 P1)", () => {
     expect(allCodes).toEqual(entryCodes);
   });
 
-  it("the 11 seed entries carry the exact base seed statements", () => {
+  it("the 13 seed entries carry the exact base seed statements", () => {
     const catalogue = buildD1Catalogue();
     const seedStatements = catalogue
       .byKind("seed")

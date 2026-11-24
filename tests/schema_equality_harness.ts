@@ -87,8 +87,11 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
  *  the job_run_records_binding_idx index. */
 /** #6151 S3 (migration 0085) re-seeds it: agent_nav_presets +
  *  agent_nav_preset_state + 2 indexes. */
+/** #5160 (migration 0086) re-seeds it: agent_user_profiles rebuilt
+ *  with the (internal_user_id, tenant_id) key + the
+ *  agent_identity_attribute_index table + 1 unique index. */
 export const COMBINED_FIXTURE_SHA256 =
-  "eef2f636d864f111363b4367fa54c8c3f71bbab61a64cad69acd9948ff314262";
+  "2621a09b61be396dc27c39d1fa1c2d61cb5d1d2d999be77c02282f722ae52658";
 /** All four planes' entries in plane order: D1, DO, ORM, remainder. */
 export const COMBINED_CATALOGUE_ENTRIES: CatalogueEntry[] = [
   ...D1_CATALOGUE_ENTRIES,

@@ -144,13 +144,14 @@ describe("P5 runner — plan resolution (P4 finding 1: phased order)", () => {
     // Issue #5102 (F5 of #5094) adds migration 0084 (job_run_records
     // binding columns: 4 ALTERs + 1 index): 485 → 490.
     // #6151 S3 adds migration 0085 (saved nav presets: 2 tables + 2 indexes): 490 → 494.
-    expect(p.steps).toHaveLength(494);
+    // #5160 adds migration 0086 (IDP attributes profile: rebuild + index table): 494 → 500.
+    expect(p.steps).toHaveLength(500);
     expect(p.skipped).toHaveLength(1);
     expect(p.skipped[0].code).toBe(SEED_FORM_CODE);
     expect(p.skipped[0].reason).toMatch(/call site/i);
   });
 
-  it("matches the P4 harness's phased steps, with exactly two production moves applied", () => {
+  it("matches the P4 harness's phased steps, with the two production moves applied per rebuild", () => {
     const p = plan();
     const harness = resolveCombinedSteps().filter(
       (s) => s.code !== SEED_FORM_CODE,
@@ -183,7 +184,8 @@ describe("P5 runner — plan resolution (P4 finding 1: phased order)", () => {
     // Issue #5102 (F5 of #5094) adds migration 0084 (job_run_records
     // binding columns: 4 ALTERs + 1 index): 485 → 490.
     // #6151 S3 adds migration 0085 (saved nav presets: 2 tables + 2 indexes): 490 → 494.
-    expect(harness).toHaveLength(494);    // Production move 1: the rebuild CREATE for agent_price_catalogue
+    // #5160 adds migration 0086 (IDP attributes profile: rebuild + index table): 494 → 500.
+    expect(harness).toHaveLength(500);    // Production move 1: the rebuild CREATE for agent_price_catalogue
     // must stay after the RENAME that clears its table (a second
     // table-creation for the same table cannot run before the rename
     // on real SQLite). Production move 2: the legacy seed is hoisted
@@ -204,6 +206,22 @@ describe("P5 runner — plan resolution (P4 finding 1: phased order)", () => {
     expected.splice(renameIdx + 1, 0, rebuild);
     // Move 2: the legacy seed goes just before the DROP.
     move(LEGACY_SEED_CODE, LEGACY_DROP_CODE);
+    // #5160: the same two moves for the m0086 rebuild
+    // (agent_user_profiles) — the moves are generic, not specific
+    // to the v58 precedent.
+    const rebuild86Code = "schema.d1.agent_user_profiles.create_table_m0086";
+    const rebuild86Idx = expected.findIndex((s) => s.code === rebuild86Code);
+    const [rebuild86] = expected.splice(rebuild86Idx, 1);
+    const rename86Idx = expected.findIndex(
+      (s) =>
+        s.code ===
+        "schema.d1.agent_user_profiles.alter_table_rename_to_agent_user_profiles_legacy",
+    );
+    expected.splice(rename86Idx + 1, 0, rebuild86);
+    move(
+      "seed.d1.agent_user_profiles.insert_from_legacy",
+      "schema.d1.agent_user_profiles_legacy.drop_table",
+    );
     expect(
       p.steps.map((s) => `${s.code}|${canonParams(s.params)}`),
     ).toEqual(
@@ -337,8 +355,9 @@ describe("P5 runner — delta-to-steps selection (P4 finding 3, P4 finding 2)", 
     // Issue #5102 (F5 of #5094) adds migration 0084 (job_run_records
     // binding columns: 4 ALTERs + 1 index): 266 → 271.
     // #6151 S3 adds migration 0085 (saved nav presets: 2 tables + 2 indexes): 271 → 275.
-    expect(selected.schema).toHaveLength(275);
-    expect(selected.seeds).toHaveLength(12);
+    // #5160 adds migration 0086 (IDP attributes profile: rebuild + index table): schema 275 → 280, seeds 12 → 13.
+    expect(selected.schema).toHaveLength(280);
+    expect(selected.seeds).toHaveLength(13);
     expect(selected.skipped).toHaveLength(13);
     expect(
       codesOf(selected.skipped),
