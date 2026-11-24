@@ -1988,10 +1988,13 @@ export function runFromReportDocument(input: {
   documents: WorkflowRunDocuments;
   trigger: string | null;
   status: string | null;
+  /** Issue #6370 — the canonical row's owner, rendered as "Triggered by". */
+  triggeredBy?: string | null;
   createdAt: string;
   stages?: WorkflowRunStage[];
 }): WorkflowRun {
   const trigger = reportTrigger(input.trigger);
+  const status = reportStatus(input.status);
   const stages = input.stages ?? [];
   return {
     id: input.runId,
@@ -2007,8 +2010,10 @@ export function runFromReportDocument(input: {
         : trigger === "scheduled"
           ? "Scheduled — recorded on the canonical row"
           : "Not recorded by the source",
-    triggeredBy: null,
-    status: reportStatus(input.status),
+    // Issue #6370 — the row's own owner, never invented: absent when the
+    // canonical row recorded none (legacy rows).
+    triggeredBy: input.triggeredBy ?? null,
+    status,
     // Issue #3021: lifecycle from the recorded verb; schedule from
     // the trigger alone (a canonical row carries no schedule id).
     lifecycle: lifecycleStateForRun({ status: reportStatus(input.status), stages }),
@@ -2021,7 +2026,9 @@ export function runFromReportDocument(input: {
     failedStages: stages.filter((s) => s.status === "failed").length,
     stages,
     inputs: {},
-    outputs: { status: input.status ?? null },
+    // Issue #6370 — a completed row shows its status verb, not `null`.
+    // A verb outside the normalised three is kept raw (honest absence).
+    outputs: { status: status === "unknown" ? (input.status ?? null) : status },
     artifacts: [],
     deliveryStates: {},
     error: null,
@@ -2640,6 +2647,8 @@ export interface WorkflowRunsPageOptions {
       title: string;
       trigger: string | null;
       status: string | null;
+      /** Issue #6370 — the canonical row's owner, when it recorded one. */
+      userLogin?: string | null;
       createdAt: string;
     };
   }>;
@@ -2696,6 +2705,7 @@ export function buildWorkflowRunsPage(
         documents: entry.documents,
         trigger: entry.summary.trigger,
         status: entry.summary.status,
+        triggeredBy: entry.summary.userLogin ?? null,
         createdAt: entry.summary.createdAt,
         stages: stagesFromUnifiedStages(entry.stages, entry.summary.createdAt),
       });

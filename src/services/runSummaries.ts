@@ -73,6 +73,8 @@ export interface RunSummary {
   /** The recorded trigger ("manual" / "scheduled" / "manual-trigger" /
    *  a canonical body's trigger), or null when the store records none. */
   trigger: string | null;
+  /** Issue #6370 — the canonical row's owner (the report-only run's "Triggered by"). */
+  userLogin?: string | null;
   createdAt: string;
   /** "completed" / "failed" / the discovery store's status verbatim,
    *  or null when the store records no status. */
@@ -372,7 +374,10 @@ export function runSummaryFromReport(hit: ScheduledReportHit): RunSummary {
     ...(r2Pointer ? { bodyR2Key: r2Pointer } : {}),
     title: hit.title,
     summary: hit.summary,
-    trigger: strOrNull(body?.trigger),
+    trigger: strOrNull(body?.trigger) ?? strOrNull(body?.report?.trigger),
+    // Issue #6370 — the report-only run's owner: the join renders it as
+    // "Triggered by" instead of leaving the row ownerless.
+    userLogin: hit.userLogin,
     createdAt: hit.createdAt,
     status:
       success === true
