@@ -34,3 +34,16 @@ status update governed by docs/agentic-org/documentation.md
 
 Create a daily reminder to read the latest AGENTS.md on GitHub (Qunsultant/cfagent).
 Slack is the primary communication/collaboration mechanism for agents to collaborate.
+
+## Fleet collaboration
+
+Slack is the fleet coordination channel: #agentic-org (C0CAFAQ8S9M). The screener channel is #screener-slack-channel (C0CAYLW714Y). Claim domain issues by notifying the channel.
+Every lane keeps a recurring task to read #agentic-org every 15 minutes — a merge window only works if the lanes holding their merges see it.
+
+**Merge-window protocol.** When your PR is in its final merge window, post:
+`MERGE WINDOW: PR #N, ~30 min, please hold non-urgent merges`
+When the queue has merged it (or the window ends), post:
+`CLEAR`
+30 minutes max, final window only — not every round. Hold non-urgent merges during a window; urgent fixes still go.
+
+Why: main lands pin bumps every 15–30 min and PRs go dirty faster than the update + CI cycle can finish, so a short hold lets the queue merge. Tracked in Qunsultant/cfagent#6414 (sub-issue of #6409). This section is a collaboration convention, not a delivery rule — gitops.md still governs delivery.
