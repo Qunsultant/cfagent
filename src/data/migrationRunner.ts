@@ -1463,10 +1463,67 @@ export const MIGRATION_0085_NAV_PRESETS: DataMigration = {
   name: "0085_nav_presets",
   sql: d1MigrationSql(85),
 };
+/**
+ * Migration 0087 — nav admin config (#6151 S4).
+ * `agent_nav_tenant_allowances` (one row per tenant: the nav ids
+ * the tenant gets) + `agent_nav_user_allowlists` (one row per
+ * user: the nav ids that user may see + saved-preset availability;
+ * tenant_id index for the per-tenant list) +
+ * `agent_nav_persona_defaults` (one row per persona: the built-in
+ * preset key override). The nav endpoint reads all three as
+ * narrowing on top of the subscription gating; an absent row
+ * means "no narrowing" for that layer.
+ *
+ * Numbering: 0085 is S3's migration (saved nav presets),
+ * merged 2026-11-23 as bf2058a — 0087 follows it in
+ * ALL_MIGRATIONS below (the registry test requires strictly
+ * increasing versions in list order).
+ */
+export const MIGRATION_0087_NAV_ADMIN_CONFIG: DataMigration = {
+  version: 87,
+  name: "0087_nav_admin_config",
+  sql: d1MigrationSql(87),
+};
+/**
+ * Migration 0088 — IDP attributes as a durable multi-tenant
+ * profile (#5160). Renumbered 0086 -> 0087 on rebase (main took
+ * 0086 for #6006's outcome facts), then 0087 -> 0088 on rebase
+ * (main took 0087 for #6151's nav admin config). Rebuilds agent_user_profiles to the
+ * (internal_user_id, tenant_id) key (the 0058 rebuild
+ * precedent): the old login key cannot hold one row per tenant
+ * for the same user. New columns: internal_user_id, tenant_id,
+ * idp_issuer, idp_attributes_json (the full sanitized IDP
+ * userinfo doc), provenance_json (per-field source), and
+ * idp_updated_at_ms. Plus agent_identity_attribute_index, the
+ * exact-match lookup index (tenant, attribute, normalized
+ * value, identity). Legacy rows carry NULL keys and are re-keyed
+ * in place by the sign-in refresh.
+ */
+export const MIGRATION_0088_IDP_ATTRIBUTES_PROFILE: DataMigration = {
+  version: 88,
+  name: "0088_idp_attributes_profile",
+  sql: d1MigrationSql(88),
+};
 export const MIGRATION_0082_REFERRAL_TRIAL_EXTENSION: DataMigration = {
   version: 82,
   name: "0082_referral_trial_extension",
   sql: d1MigrationSql(82),
+};
+/**
+ * Migration 0086 — outcome facts onto the one run source (#6006).
+ * Renumbered 0083 → 0086 on rebase: main took 0083 for the job_stage_events
+ * D1 mirror (#6028), 0084 for the binding tuple (#5102) and 0085 for the
+ * saved nav presets (#6151) in the same window.
+ * Adds the mas_job_outcomes fact columns to `job_run_records`
+ * (coded error, origin label, scan counts, delivery states JSON,
+ * typed artifact keys) so the fold can land the facts in D1 and
+ * GET /api/runs can surface them. Marker-gated like the other
+ * ALTER migrations, so a re-apply is skipped.
+ */
+export const MIGRATION_0086_JOB_RUN_RECORDS_OUTCOME_FACTS: DataMigration = {
+  version: 86,
+  name: "0086_job_run_records_outcome_facts",
+  sql: d1MigrationSql(86),
 };
 export const MIGRATION_0058_PRODUCT_VERSIONS: DataMigration = {
   version: 58,
@@ -1719,6 +1776,9 @@ export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANC
   MIGRATION_0083_JOB_STAGE_EVENTS,
   MIGRATION_0084_JOB_RUN_RECORDS_BINDING,
   MIGRATION_0085_NAV_PRESETS,
+  MIGRATION_0086_JOB_RUN_RECORDS_OUTCOME_FACTS,
+  MIGRATION_0087_NAV_ADMIN_CONFIG,
+  MIGRATION_0088_IDP_ATTRIBUTES_PROFILE,
 ];
 
 function splitStatements(sqlText: string): string[] {

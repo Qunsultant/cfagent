@@ -89,10 +89,12 @@ const structuredLog = createStructuredLogger(createObservabilitySink({}), {
 import { resolveScheduledJobAlertThreshold } from "../../config/scheduledJobAlert";
 import { postSlackText, resourceSlackPost } from "../resourceGoals";
 import type { SlackDeliveryEnv } from "../social/delivery";
+import type { Env } from "../../types";
 import {
   recordJobOutcome,
   type JobOutcomeTrigger,
 } from "../../services/jobOutcomes";
+import { projectJobOutcomeBestEffort } from "../../services/runLedgerProjectionHooks";
 import { resolveActorAttribution } from "../../security/backgroundAttribution";
 import { getServiceUserLogin } from "../../security/serviceIdentity";
 import {
@@ -253,11 +255,11 @@ const CORPUS_SYNC_INCOMPLETE_CODE = "corpus_sync_incomplete";
  * A guard-skipped tick records NO run row — the dispatch record
  * above is its whole trace, exactly as the job idiom draws it.
  */
-function recordCorpusSyncRun(
+async function recordCorpusSyncRun(
   ctx: KnowledgeCorpusRouteContext,
   request: Request,
   result: CorpusSyncResult
-): void {
+): Promise<void> {
   const sql = ctx.sql;
   if (!sql) return;
   try {
@@ -289,6 +291,16 @@ function recordCorpusSyncRun(
       deliveryStates,
       origin: "corpus-sync",
       createdAt: result.ranAt,
+    });
+    // Issue #6006 — fold the outcome facts into the one run source
+    // (D1); best-effort, never fails the corpus sync. The mount
+    // passes the full env (narrow type here); the service login
+    // owns the queue route.
+    await projectJobOutcomeBestEffort({
+      env: ctx.env as unknown as Partial<Env>,
+      sql,
+      outcomeId: `corpus-sync:${result.ranAt}`,
+      userLogin: getServiceUserLogin(ctx.env as unknown as Parameters<typeof getServiceUserLogin>[0]),
     });
   } catch (err) {
     structuredLog.warn("scheduled_job_outcome.run_record_failed", {
@@ -609,7 +621,7 @@ export async function handleKnowledgeCorpusRoutes(
             errorCode: CORPUS_SYNC_INCOMPLETE_CODE,
           }
     );
-    recordCorpusSyncRun(ctx, request, result);
+    await recordCorpusSyncRun(ctx, request, result);
     return Response.json({ success: true, ...result });
   }
   return null;

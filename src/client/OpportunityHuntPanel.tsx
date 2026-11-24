@@ -1,13 +1,22 @@
 /**
- * Issue 6273 — Opportunity Hunt sub-tab panel (Stock Hub).
+ * Issue 6273 — Opportunity Hunt sub-tab panel (Stock Hub), reworked into a
+ * report-style view by issue 6406 (UX first; the report in issue 6403 is
+ * deferred and must generate the same output this panel shows).
  *
- * Runs the hunt on demand and shows its output: the setups per
- * symbol/strategy, the scanned/skipped counts, and the run time. The
- * hunt itself is unchanged — the panel calls the synchronous run seam
- * (POST /api/opportunity-hunt/run), which reuses the hunt as-is over
- * the persisted technicals bars. A run that finds nothing is a
- * completed hunt (an empty table), not an error; only an unreadable
- * bar source fails, with its named reason shown.
+ * Runs the hunt on demand and shows its output as a report: a sortable
+ * one-row-per-symbol table with a pattern count, entry and exit signals
+ * with their price ranges, and a detail section for the selected symbol —
+ * its entry and exit recommendations grouped, with a price chart carrying
+ * the recommendation levels. The hunt itself is unchanged — the panel
+ * calls the synchronous run seam (POST /api/opportunity-hunt/run), which
+ * reuses the hunt as-is over the persisted technicals bars. A run that
+ * finds nothing is a completed hunt (an empty table), not an error; only
+ * an unreadable bar source fails, with its named reason shown.
+ *
+ * Exit signals come from the tenant's holdings, which the run seam loads
+ * from the selected broker and feeds to the evaluator. When the holdings
+ * read is unavailable the run still completes on entries only, and the
+ * panel states the reason — exits are never silently dropped.
  *
  * The panel also shows the latest scheduled run from the run ledger
  * (the daily scheduled goal firing, or a run triggered from the
@@ -19,14 +28,16 @@
  * styling. No broker or provider is named here: the hunt reads the
  * persisted technicals bars, and the run carries no venue selection.
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  Badge,
   Button,
   Card,
   CardHeader,
   EmptyState,
   Notice,
   PageSection,
+  SmallHeader,
   Table,
 } from "./components/ui";
 import { asyncJobErrorCode } from "./apiFetch";
@@ -36,10 +47,20 @@ import {
   runOpportunityHuntNow,
   type JobRunRecord,
 } from "./jobsApi";
-import type {
-  OpportunityHuntResult,
-  OpportunityHuntSetup,
-} from "../services/opportunityHunt";
+import type { OpportunityHuntResult } from "../services/opportunityHunt";
+import { OpportunityHuntChart } from "./OpportunityHuntChart";
+import {
+  HUNT_SORT_DEFAULT,
+  formatHuntPct,
+  formatHuntPrice,
+  groupHuntSetupsBySymbol,
+  huntTradingDayLabels,
+  nextHuntSort,
+  sortHuntRows,
+  type HuntSort,
+  type HuntSortKey,
+  type OpportunityHuntSymbolRow,
+} from "./opportunityHuntView";
 
 /** The goal id the scheduled hunt records under. */
 const HUNT_JOB_ID = "opportunity-hunt";
@@ -48,6 +69,41 @@ function formatTime(iso: string): string {
   const ms = Date.parse(iso);
   if (Number.isNaN(ms)) return iso;
   return new Date(ms).toLocaleString();
+}
+
+/**
+ * A sortable column header. The `th` carries `aria-sort` (from the column
+ * config); this button is the control. The indicator is decorative — the
+ * button's accessible name states the current direction.
+ */
+function SortHeader({
+  label,
+  sortKey,
+  sort,
+  onSort,
+}: {
+  label: string;
+  sortKey: HuntSortKey;
+  sort: HuntSort;
+  onSort: (key: HuntSortKey) => void;
+}) {
+  const active = sort.key === sortKey;
+  const direction = sort.dir === "asc" ? "ascending" : "descending";
+  return (
+    <Button
+      variant="secondary"
+      size="sm"
+      className="ui-table-sort"
+      onClick={() => onSort(sortKey)}
+      title={active ? `Sorted ${direction} — click to reverse` : `Sort by ${label}`}
+      aria-label={active ? `${label}, sorted ${direction}. Reverse order` : `Sort by ${label}`}
+    >
+      {label}
+      <span className="ui-table-sort-indicator" aria-hidden="true">
+        {active ? (sort.dir === "asc" ? "▲" : "▼") : "↕"}
+      </span>
+    </Button>
+  );
 }
 
 export function OpportunityHuntPanel() {
@@ -64,6 +120,10 @@ export function OpportunityHuntPanel() {
   // id, instead of a bare disabled button.
   const [runStartedAt, setRunStartedAt] = useState<number | null>(null);
   const [elapsedSec, setElapsedSec] = useState(0);
+  // Issue 6406 — the report-style view: sort state for the one-row-per
+  // symbol table, and the symbol whose recommendations + chart are shown.
+  const [sort, setSort] = useState<HuntSort>(HUNT_SORT_DEFAULT);
+  const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
 
   useEffect(() => {
     if (runStartedAt === null) return;
@@ -90,6 +150,36 @@ export function OpportunityHuntPanel() {
   useEffect(() => {
     void refreshLastRun();
   }, [refreshLastRun]);
+
+  const rows = useMemo(
+    () => (result ? sortHuntRows(groupHuntSetupsBySymbol(result), sort) : []),
+    [result, sort],
+  );
+
+  // A fresh result selects its first symbol; a stale selection is dropped.
+  useEffect(() => {
+    setSelectedSymbol((current) =>
+      rows.some((row) => row.symbol === current) ? current : (rows[0]?.symbol ?? null),
+    );
+  }, [rows]);
+
+  const selectedRow: OpportunityHuntSymbolRow | null =
+    rows.find((row) => row.symbol === selectedSymbol) ?? rows[0] ?? null;
+
+  const selectedCloses: readonly number[] = selectedRow
+    ? (result?.seriesBySymbol?.[selectedRow.symbol] ?? [])
+    : [];
+  const selectedLabels: readonly string[] = useMemo(
+    () =>
+      result && selectedCloses.length > 0
+        ? huntTradingDayLabels(result.asOf, selectedCloses.length)
+        : [],
+    [result, selectedCloses.length],
+  );
+
+  const handleSort = useCallback((key: HuntSortKey) => {
+    setSort((current) => nextHuntSort(current, key));
+  }, []);
 
   const runNow = async () => {
     setRunning(true);
@@ -132,7 +222,7 @@ export function OpportunityHuntPanel() {
   return (
     <PageSection
       title="Opportunity Hunt"
-      description="Entry signals from the pattern strategies over the tradable universe's daily closes. Run it on demand here; the scheduled goal also fires daily, and its runs land in the run ledger."
+      description="Entry and exit signals from the pattern strategies over the tradable universe's daily closes. Run it on demand here; the scheduled goal also fires daily, and its runs land in the run ledger."
     >
       <Card>
         <Button variant="primary" onClick={runNow} loading={running}>
@@ -161,18 +251,124 @@ export function OpportunityHuntPanel() {
             <p>
               {result.summary} (as of {formatTime(result.asOf)})
             </p>
-            <Table<OpportunityHuntSetup>
+            {result.holdingsStatus && !result.holdingsStatus.available ? (
+              <Notice tone="warning" title="Exit signals unavailable">
+                The hunt ran on entries only: the holdings read did not
+                report
+                {result.holdingsStatus.broker
+                  ? ` for ${result.holdingsStatus.broker}`
+                  : ""}
+                {result.holdingsStatus.reason
+                  ? ` — ${result.holdingsStatus.reason}`
+                  : ""}
+                . No exit was silently dropped; there was nothing held to
+                evaluate.
+              </Notice>
+            ) : null}
+            <Table<OpportunityHuntSymbolRow>
               columns={[
-                { key: "symbol", header: "Symbol", render: (row) => row.symbol },
                 {
-                  key: "strategy",
-                  header: "Strategy",
-                  render: (row) => row.strategy,
+                  key: "symbol",
+                  header: (
+                    <SortHeader label="Symbol" sortKey="symbol" sort={sort} onSort={handleSort} />
+                  ),
+                  ariaSort:
+                    sort.key === "symbol"
+                      ? sort.dir === "asc"
+                        ? "ascending"
+                        : "descending"
+                      : undefined,
+                  render: (row) => <Badge tone="neutral">{row.symbol}</Badge>,
+                },
+                {
+                  key: "patterns",
+                  header: (
+                    <SortHeader label="Patterns" sortKey="patterns" sort={sort} onSort={handleSort} />
+                  ),
+                  ariaSort:
+                    sort.key === "patterns"
+                      ? sort.dir === "asc"
+                        ? "ascending"
+                        : "descending"
+                      : undefined,
+                  align: "right",
+                  render: (row) => <>{row.patternCount}</>,
+                },
+                {
+                  key: "entries",
+                  header: "Entries",
+                  render: (row) =>
+                    row.entries.length > 0 ? (
+                      <>
+                        {row.entries.map((setup) => (
+                          <Badge key={setup.strategy} tone="success" title={setup.detail}>
+                            {setup.strategy}
+                          </Badge>
+                        ))}
+                      </>
+                    ) : (
+                      <>—</>
+                    ),
+                },
+                {
+                  key: "exits",
+                  header: "Exits",
+                  render: (row) =>
+                    row.exits.length > 0 ? (
+                      <>
+                        {row.exits.map((setup) => (
+                          <Badge key={setup.strategy} tone="danger" title={setup.detail}>
+                            {setup.strategy}
+                          </Badge>
+                        ))}
+                      </>
+                    ) : (
+                      <>—</>
+                    ),
+                },
+                {
+                  key: "entryRange",
+                  header: "Entry range",
+                  align: "right",
+                  render: (row) =>
+                    row.entryLow !== null && row.entryHigh !== null
+                      ? `${formatHuntPrice(row.entryLow)} – ${formatHuntPrice(row.entryHigh)}`
+                      : "—",
+                },
+                {
+                  key: "stopLoss",
+                  header: "Stop-loss",
+                  align: "right",
+                  render: (row) => formatHuntPrice(row.stopLoss),
+                },
+                {
+                  key: "takeProfit",
+                  header: "Take-profit",
+                  align: "right",
+                  render: (row) => formatHuntPrice(row.takeProfit),
+                },
+                {
+                  key: "lastClose",
+                  header: (
+                    <SortHeader label="Last close" sortKey="lastClose" sort={sort} onSort={handleSort} />
+                  ),
+                  ariaSort:
+                    sort.key === "lastClose"
+                      ? sort.dir === "asc"
+                        ? "ascending"
+                        : "descending"
+                      : undefined,
+                  align: "right",
+                  render: (row) => formatHuntPrice(row.lastClose),
                 },
               ]}
-              rows={result.setups}
-              rowKey={(row) => `${row.symbol}:${row.strategy}`}
-              caption="Symbols whose latest bar produced an entry signal"
+              rows={rows}
+              rowKey={(row) => row.symbol}
+              onRowClick={(row) => setSelectedSymbol(row.symbol)}
+              rowClassName={(row) =>
+                row.symbol === selectedRow?.symbol ? "is-selected" : ""
+              }
+              caption="One row per symbol — pattern count, entry and exit signals, and the entry recommendation's price range. Select a row for its recommendations and chart."
               empty={
                 <EmptyState
                   title="No setups"
@@ -187,6 +383,75 @@ export function OpportunityHuntPanel() {
                 : ""}
               .
             </p>
+            {selectedRow ? (
+              <Card>
+                <CardHeader
+                  title={`${selectedRow.symbol} — recommendations`}
+                />
+                <p>
+                  Last close {formatHuntPrice(selectedRow.lastClose)}
+                  {selectedRow.exitGainPct !== null
+                    ? ` · exits ${formatHuntPct(selectedRow.exitGainPct)} vs cost basis`
+                    : ""}
+                  .
+                </p>
+                {selectedRow.entries.length > 0 ? (
+                  <>
+                    <SmallHeader title="Entry recommendations" />
+                    <ul>
+                      {selectedRow.entries.map((setup) => (
+                        <li key={setup.strategy}>
+                          <Badge tone="success">{setup.strategy}</Badge>{" "}
+                          {setup.detail} — enter{" "}
+                          {setup.levels
+                            ? `${formatHuntPrice(setup.levels.entryLow)} – ${formatHuntPrice(setup.levels.entryHigh)}`
+                            : "—"}
+                          , stop-loss{" "}
+                          {formatHuntPrice(setup.levels?.stopLoss)}, take-profit{" "}
+                          {formatHuntPrice(setup.levels?.takeProfit)}.
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                ) : null}
+                {selectedRow.exits.length > 0 ? (
+                  <>
+                    <SmallHeader title="Exit recommendations" />
+                    <ul>
+                      {selectedRow.exits.map((setup) => (
+                        <li key={setup.strategy}>
+                          <Badge tone="danger">{setup.strategy}</Badge>{" "}
+                          {setup.detail} — exit at{" "}
+                          {formatHuntPrice(setup.lastClose)}, entered at{" "}
+                          {formatHuntPrice(setup.entryPrice)}
+                          {setup.entryPrice
+                            ? ` (${formatHuntPct((setup.lastClose - setup.entryPrice) / setup.entryPrice)})`
+                            : ""}
+                          .
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                ) : null}
+                {selectedRow.entries.length === 0 &&
+                selectedRow.exits.length === 0 ? (
+                  <p>No recommendations for this symbol.</p>
+                ) : null}
+                <OpportunityHuntChart
+                  symbol={selectedRow.symbol}
+                  closes={selectedCloses}
+                  labels={selectedLabels}
+                  entryLow={selectedRow.entryLow}
+                  entryHigh={selectedRow.entryHigh}
+                  stopLoss={selectedRow.stopLoss}
+                  takeProfit={selectedRow.takeProfit}
+                  entryPrice={
+                    selectedRow.exits[0]?.entryPrice ?? null
+                  }
+                  lastClose={selectedRow.lastClose}
+                />
+              </Card>
+            ) : null}
           </>
         ) : null}
       </Card>

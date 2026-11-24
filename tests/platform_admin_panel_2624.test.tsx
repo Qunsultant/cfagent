@@ -71,10 +71,11 @@ function panel(over: Partial<React.ComponentProps<typeof PlatformAdminPanel>> = 
 }
 
 describe("platform admin config (#2624)", () => {
-  it("lists the seven remaining items in dropdown order", () => {
+  it("lists the eight remaining items in dropdown order", () => {
     // Issue #4585 moved data-providers, data-lifecycle, downloads,
     // iaaa-admin, users, and admin-access into the DataHub and
-    // SecurityHub hubs; Platform Admin keeps the other seven.
+    // SecurityHub hubs; Platform Admin keeps the other seven, and
+    // #6151 S4 adds Nav & Menu Access last.
     const items = platformAdminItems();
     expect(items.map((item) => item.id)).toEqual([
       "ads",
@@ -84,9 +85,10 @@ describe("platform admin config (#2624)", () => {
       "channels",
       "accounts",
       "engine-tuning",
+      "nav-config",
     ]);
     expect(items[0].label).toBe("Ads & Partner Banners");
-    expect(items[items.length - 1].label).toBe("Engine Tuning");
+    expect(items[items.length - 1].label).toBe("Nav & Menu Access");
   });
 
   it("takes the panel title from the config", () => {
@@ -103,26 +105,28 @@ describe("platform admin config (#2624)", () => {
     }
     const icons = items.map((i) => i.icon);
     // Issue #4585 moved Users (the duplicate Agents) to SecurityHub;
-    // all seven remaining icons are distinct.
-    expect(new Set(icons).size).toBe(7);
+    // #6151 S4 adds Nav & Menu Access (Approvals) — all eight
+    // remaining icons are distinct.
+    expect(new Set(icons).size).toBe(8);
   });
 });
 
 describe("platform admin in the left navigation (#2624)", () => {
   const adminSection = DEFAULT_LEFT_NAV_CONFIG.sections.find((section) => section.id === "section-platform");
 
-  it("is a left-nav item with its own seven-item sub-menu", () => {
+  it("is a left-nav item with its own eight-item sub-menu", () => {
     expect(adminSection).toBeTruthy();
     expect(adminSection!.title).toBe("PLATFORM");
     const item = adminSection!.items.find((i) => i.id === "platform-admin")!;
     expect(item).toBeTruthy();
     expect(item.id).toBe("platform-admin");
     expect(item.label).toBe("Platform Admin");
-    expect(item.subItems).toHaveLength(7);
+    expect(item.subItems).toHaveLength(8);
     expect(item.subItems![0].id).toBe("platform-admin:ads");
     expect(item.subItems![4].id).toBe("platform-admin:channels");
     expect(item.subItems![5].id).toBe("platform-admin:accounts");
     expect(item.subItems![6].id).toBe("platform-admin:engine-tuning");
+    expect(item.subItems![7].id).toBe("platform-admin:nav-config");
   });
 
   it("maps sub-item ids to drawer sections, and nothing else", () => {
@@ -154,10 +158,11 @@ describe("platform admin panel (#2624)", () => {
     expect(dialog!.getAttribute("aria-labelledby")).toBe(document.querySelector(".ui-drawer-title")?.id);
 
     const menuItems = document.querySelectorAll('[role="tab"]');
-    expect(menuItems).toHaveLength(7);
+    expect(menuItems).toHaveLength(8);
     expect(menuItems[0].textContent).toContain("Ads & Partner Banners");
     expect(menuItems[4].textContent).toContain("Channels");
     expect(menuItems[5].textContent).toContain("Accounts");
+    expect(menuItems[7].textContent).toContain("Nav & Menu Access");
     expect(menuItems[6].textContent).toContain("Engine Tuning");
   });
 

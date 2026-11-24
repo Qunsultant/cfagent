@@ -280,6 +280,63 @@ export function buildIdMigrationRecordedAuditEventInput(input: {
 }
 
 /**
+ * #5160 — the sign-in IDP profile refresh. Actor = the signing-in
+ * user (human); the event proves a refresh happened, when, and
+ * for whom. It carries no attribute names and no values — the
+ * stored profile row is the evidence of what was captured.
+ */
+export function buildIdpProfileRefreshedAuditEventInput(input: {
+  internalUserId: string;
+  tenantId: string;
+  timestamp: number;
+  correlationId: string;
+}): CreateIaaaAuditEventInput {
+  return {
+    timestamp: input.timestamp,
+    type: "iaaa.idp_profile.refreshed",
+    actorPrincipalId: input.internalUserId,
+    actorType: "human",
+    initiatingPrincipalId: input.internalUserId,
+    tenantId: input.tenantId,
+    correlationId: input.correlationId,
+    action: "iaaa.idp_profile.refreshed",
+    decision: "allow",
+    policyVersion: IAAA_AUDIT_POLICY_VERSION,
+    outcome: "succeeded",
+  };
+}
+
+/**
+ * #5160 — a sign-in observed a divergence: a user-owned profile
+ * value hiding a different provider value. The diverged FIELD
+ * NAMES ride in resourceId (comma-joined, sorted) — field names
+ * only, never values. Best-effort, never changes the login
+ * outcome.
+ */
+export function buildIdpProfileDivergedAuditEventInput(input: {
+  internalUserId: string;
+  tenantId: string;
+  timestamp: number;
+  correlationId: string;
+  divergedFields: string[];
+}): CreateIaaaAuditEventInput {
+  return {
+    timestamp: input.timestamp,
+    type: "iaaa.idp_profile.diverged",
+    actorPrincipalId: input.internalUserId,
+    actorType: "human",
+    initiatingPrincipalId: input.internalUserId,
+    tenantId: input.tenantId,
+    correlationId: input.correlationId,
+    action: "iaaa.idp_profile.diverged",
+    resourceId: [...input.divergedFields].sort().join(","),
+    decision: "allow",
+    policyVersion: IAAA_AUDIT_POLICY_VERSION,
+    outcome: "succeeded",
+  };
+}
+
+/**
  * Best-effort record: returns the Slice 5 result, and converts a
  * throwing store into an ok:false AUDIT_WRITE_FAILED result
  * instead of propagating. Never throws. Never changes a login

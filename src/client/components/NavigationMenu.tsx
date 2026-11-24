@@ -817,6 +817,10 @@ export function NavigationMenu({
           onToggleCollapse={onToggleCollapse}
           visibleTabs={visibleTabs}
           alertBadgeCount={alertBadgeCount}
+          // Issue #6147 S4a: the footer settings trigger calls the
+          // shell's tab selection directly (nav-settings), not the
+          // deep-link catalog — same call the old fixed button made.
+          onOpenSettings={() => onSelectTab("nav-settings")}
         />
         <PlatformAdminPanel
           open={platformAdminOpen}
@@ -909,6 +913,21 @@ export function NavigationMenu({
             title="Open Autopilot & Trading execution center"
           >
             Trade
+          </Button>
+
+          {/* Issue #6147 S4a: top-mode settings trigger. The fixed
+              bottom-left button is gone and the left-nav footer does
+              not exist in top layout, so the top bar carries the
+              trigger — without it, top-mode users would have no entry
+              point to the settings page at all. */}
+          <Button
+            variant="secondary"
+            className="top-nav-control"
+            onClick={() => onSelectTab("nav-settings")}
+            title="Settings"
+            aria-label="Settings"
+          >
+            <NavIcons.Settings /> Settings
           </Button>
 
           {headerChildren}

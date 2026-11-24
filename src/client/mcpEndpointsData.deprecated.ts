@@ -1,4 +1,13 @@
 /**
+ * @deprecated Issue #6438 (sub-issue of #6266) — retired by deprecation
+ * rename only (gitops §22: never deleted). Superseded by the served
+ * MCP catalogue: GET /api/mcp/catalog (src/mcps/openaimp/catalog.ts)
+ * read through src/client/mcpCatalog.ts. The REST entries moved
+ * verbatim to src/client/restEndpointsData.ts.
+ * This file is FROZEN: no new features, no new consumers; delete
+ * only when it has zero consumers and the owner decides (see
+ * `docs/architecture/transition/deprecations.md`).
+ *
  * API & Model Context Protocol (MCP) Endpoints Metadata & Sample Payloads
  */
 

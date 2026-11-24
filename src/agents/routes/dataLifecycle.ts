@@ -104,6 +104,8 @@ import type { CommercialStore } from "../../data/commercialPorts";
 import { createTenantDirectoryAdapter } from "../../data/createTenantDirectoryPorts";
 import type { TenantDirectory } from "../../data/tenantDirectoryPorts";
 import { createTenantChannelAdapter } from "../../data/createTenantChannelPorts";
+import { createProfileAdapter } from "../../data/createProfilePorts";
+import type { UserProfileStore } from "../../data/profilePorts";
 import type {
   TenantChannelStore,
   TenantChannelConfig,
@@ -251,6 +253,8 @@ export interface DataLifecycleRouteContext {
   kv?: KvLike;
   /** Test seam: membership store (default: KV store over kv). */
   membershipStore?: MembershipStore;
+  /** Test seam: user profile store (default: D1 profile adapter). */
+  profile?: UserProfileStore | null;
   /** Test seam: namespace list/delete stores (default: SessionStore builder). */
   stores?: DataLifecycleKvStores;
   /** Test seam: AuditLog store (default: createWiredAuditStore(env)). */
@@ -271,6 +275,7 @@ interface ResolvedStores {
   channels: TenantChannelStore | null;
   kv: KvLike;
   membershipStore: MembershipStore;
+  profile: UserProfileStore | null;
   stores: DataLifecycleKvStores;
   auditStore: AuditStore;
   iaaaTenantId: string;
@@ -294,6 +299,7 @@ function resolveStores(ctx: DataLifecycleRouteContext): ResolvedStores {
         : createTenantChannelAdapter(ctx.env),
     kv,
     membershipStore: ctx.membershipStore ?? createKvMembershipStore(kv),
+    profile: ctx.profile !== undefined ? ctx.profile : createProfileAdapter(ctx.env),
     stores: ctx.stores ?? createDataLifecycleKvStores(ctx.env),
     auditStore: ctx.auditStore ?? createWiredAuditStore(ctx.env),
     iaaaTenantId: ctx.iaaaTenantId ?? resolveIaaaTenant(ctx.env),
@@ -2122,10 +2128,34 @@ async function handleTenantBootstrap(
           });
         } else {
           const granted = !alreadyAdmin || !alreadyOperator;
+          // #5160 — joining a second tenant seeds the founder's
+          // profile row for this tenant from the IDP attributes of
+          // their home row (IDP-sourced fields only — user edits
+          // never copy across tenants). Best-effort: a profile
+          // failure never fails the bootstrap; the next sign-in
+          // heals the row.
+          let profileDetail = "";
+          if (stores.profile) {
+            try {
+              const seeded = await stores.profile.seedTenantProfile(
+                founderId,
+                tenantId,
+                foundingAdminLogin,
+                nowMs,
+              );
+              const seededFields = Object.keys(seeded.idpAttributes).length;
+              profileDetail =
+                seededFields > 0
+                  ? ` Profile seeded for this tenant (${seededFields} IDP attribute(s) from the home row).`
+                  : " Profile row created for this tenant (no IDP attributes on the home row yet).";
+            } catch {
+              profileDetail = " Profile seeding failed (best-effort; the next sign-in heals the row).";
+            }
+          }
           steps.push({
             id: "founding-admin",
             status: granted ? "initialized" : "present",
-            detail: `"${foundingAdminLogin}" ${adminDetail}; ${operatorDetail}.`,
+            detail: `"${foundingAdminLogin}" ${adminDetail}; ${operatorDetail}.${profileDetail}`,
           });
         }
       }

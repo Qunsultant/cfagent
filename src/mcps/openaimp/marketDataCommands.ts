@@ -620,7 +620,7 @@ export class AlpacaPlaceOrderCommand implements IMcpToolCommand {
             userLogin: context.actingLogin?.() ?? context.sessionId,
           })
         : undefined;
-      recordTradingRunOutcome(context.orm?.getSql?.(), {
+      await recordTradingRunOutcome(context.orm?.getSql?.(), {
         orderId: input.orderId,
         status: result.success ? "completed" : "failed",
         action: result.action,
@@ -637,7 +637,8 @@ export class AlpacaPlaceOrderCommand implements IMcpToolCommand {
               emailNotification: notifications.email.status,
             }
           : {}),
-      });
+      },
+        { env: context.env, userLogin: context.actingLogin?.() ?? context.sessionId });
       return notifications ? { ...result, notifications } : result;
     }
     const resolved = resolveAlpacaOrderMode(marketDataModeLevels(context, "order", (input as any)?.mode, ALPACA_ORDER_MODE_SWITCH), "mcp");
@@ -801,7 +802,7 @@ export class AlpacaPlaceOrderCommand implements IMcpToolCommand {
       : undefined;
     // Issue #3812: the placement is the run's terminal fact. A broker
     // refusal (success:false) is a failed run with its coded refusal.
-    recordTradingRunOutcome(context.orm?.getSql?.(), {
+    await recordTradingRunOutcome(context.orm?.getSql?.(), {
       orderId: resolvedOrderId,
       status: result.success ? "completed" : "failed",
       action: normalized.side.toUpperCase(),
@@ -822,7 +823,8 @@ export class AlpacaPlaceOrderCommand implements IMcpToolCommand {
             emailNotification: notifications.email.status,
           }
         : {}),
-    });
+    },
+      { env: context.env, userLogin: context.actingLogin?.() ?? context.sessionId });
     return notifications ? { ...result, notifications } : result;
   }
 }
@@ -884,7 +886,7 @@ export class AlpacaExecuteOrderCommand implements IMcpToolCommand {
             userLogin: context.actingLogin?.() ?? context.sessionId,
           })
         : undefined;
-      recordTradingRunOutcome(context.orm?.getSql?.(), {
+      await recordTradingRunOutcome(context.orm?.getSql?.(), {
         orderId: input.orderId,
         status: result.success ? "completed" : "failed",
         action: result.action,
@@ -901,10 +903,11 @@ export class AlpacaExecuteOrderCommand implements IMcpToolCommand {
               emailNotification: notifications.email.status,
             }
           : {}),
-      });
+      },
+        { env: context.env, userLogin: context.actingLogin?.() ?? context.sessionId });
       return notifications ? { ...result, notifications } : result;
     } catch (error) {
-      recordTradingRunOutcome(context.orm?.getSql?.(), {
+      await recordTradingRunOutcome(context.orm?.getSql?.(), {
         orderId: input.orderId,
         status: "failed",
         action: "UNKNOWN",
@@ -912,7 +915,8 @@ export class AlpacaExecuteOrderCommand implements IMcpToolCommand {
         mode: alpacaModeFromEnv(context.env),
         codedError: (error as { code?: string })?.code || "order_execution_failed",
         origin: "alpaca_execute_order",
-      });
+      },
+        { env: context.env, userLogin: context.actingLogin?.() ?? context.sessionId });
       throw error;
     }
   }
@@ -1652,7 +1656,7 @@ export class AlpacaPreviewOrderCommand implements IMcpToolCommand {
       // failure before rethrowing so Workflow Runs explains the block.
       const coded =
         (error as { code?: string })?.code || "order_preview_failed";
-      recordTradingRunOutcome(context.orm?.getSql?.(), {
+      await recordTradingRunOutcome(context.orm?.getSql?.(), {
         orderId: `preview-refused-${input.symbol}-${Date.now()}`,
         status: "failed",
         action: input.action || input.orderAction || "BUY",
@@ -1665,7 +1669,8 @@ export class AlpacaPreviewOrderCommand implements IMcpToolCommand {
         origin: "alpaca_preview_order",
         takeProfitPercent: input.takeProfitPercent,
         stopLossPercent: input.stopLossPercent,
-      });
+      },
+        { env: context.env, userLogin: context.actingLogin?.() ?? context.sessionId });
       throw error;
     }
     context.audit?.("alpaca.order_previewed", "trading", {
@@ -1678,7 +1683,7 @@ export class AlpacaPreviewOrderCommand implements IMcpToolCommand {
       takeProfitPercent: input.takeProfitPercent,
       stopLossPercent: input.stopLossPercent,
     });
-    recordTradingRunOutcome(context.orm?.getSql?.(), {
+    await recordTradingRunOutcome(context.orm?.getSql?.(), {
       orderId: draft.orderId,
       status: "completed",
       action: draft.action,
@@ -1694,7 +1699,8 @@ export class AlpacaPreviewOrderCommand implements IMcpToolCommand {
       takeProfitPrice: (draft as { takeProfit?: { limitPrice?: number } }).takeProfit?.limitPrice,
       stopLossPrice: (draft as { stopLoss?: { stopPrice?: number } }).stopLoss?.stopPrice,
       priceSource: draft.priceSource?.kind,
-    });
+    },
+      { env: context.env, userLogin: context.actingLogin?.() ?? context.sessionId });
     return {
       orderId: draft.orderId,
       status: "previewed",

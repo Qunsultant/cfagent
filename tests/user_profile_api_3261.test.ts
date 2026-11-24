@@ -34,6 +34,14 @@ const VIEW = {
   phone: "+1 555-0100",
   email: null,
   updatedAtMs: 1234,
+  // #5160 — the extended view carries the provider-sourced fields;
+  // the mocked payloads omit them, so parseUserProfile fills defaults.
+  tenantId: null,
+  idpDisplayName: null,
+  idpPhone: null,
+  idpEmail: null,
+  diverged: [],
+  provenance: {},
 };
 
 let fetchCalls: { url: string; init?: RequestInit }[] = [];

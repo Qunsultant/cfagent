@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { REST_APIS_CATALOG } from "../src/client/mcpEndpointsData";
+import { REST_APIS_CATALOG } from "../src/client/restEndpointsData";
 
 /**
  * Issue #325 — POST /api/chat contract alignment.

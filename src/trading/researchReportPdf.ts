@@ -311,6 +311,11 @@ function renderConfigSnapshot(ctx: Ctx, report: ResearchReport): void {
     size: 9,
     color: PRINT_LABEL,
   });
+  // Issue #6037 (d) — the resolved rules the run decided under.
+  for (const [key, value] of Object.entries(report.rules ?? {})) {
+    ensureSpace(ctx, 12);
+    text(ctx, `rule ${key}: ${String(value)}`, { size: 7, color: PRINT_MUTED });
+  }
 }
 
 /**

@@ -42,7 +42,7 @@ import {
 import { buildFeedJobRegistry } from "../../services/feedJobs";
 import { FEED_PIPELINE_CATALOG, resolveFeedJob } from "../../services/feedPipelineJobs";
 import { recordJobOutcome } from "../../services/jobOutcomes";
-import { projectAsyncJobBestEffort } from "../../services/runLedgerProjectionHooks";
+import { projectAsyncJobBestEffort, projectJobOutcomeBestEffort } from "../../services/runLedgerProjectionHooks";
 import {
   buildLedgerLinkage,
   recoveryProvenance,
@@ -2014,7 +2014,8 @@ export async function recordScreenerRunMainJob(
   // run recorded twice converges to one row), else this main job's
   // id. Never throws: a sink failure must not fail the run.
   try {
-    recordJobOutcome(ctx.ensureTables(), {
+    const outcomeSql = ctx.ensureTables();
+    recordJobOutcome(outcomeSql, {
       id: outcome.deliveryId ?? jobId,
       kind: outcome.kind,
       trigger: outcome.trigger,
@@ -2028,6 +2029,15 @@ export async function recordScreenerRunMainJob(
       csvKey: outcome.csvKey,
       origin: "job-tree",
       createdAt: now,
+    });
+    // Issue #6006 — fold the outcome facts into the one run source
+    // (D1) through the shared projector; best-effort, never fails
+    // the run (the hook itself never throws).
+    await projectJobOutcomeBestEffort({
+      env: ctx.env,
+      sql: outcomeSql,
+      outcomeId: outcome.deliveryId ?? jobId,
+      userLogin,
     });
   } catch (err) {
     structuredLog.warn("asyncJobs.job_outcome_record_failed", {

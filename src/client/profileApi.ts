@@ -35,6 +35,16 @@ export interface UserProfileView {
   phone: string | null;
   email: string | null;
   updatedAtMs: number | null;
+  /** #5160 — the operating tenant this row belongs to. */
+  tenantId: string | null;
+  /** #5160 — the provider-sourced value for each field (null when the provider sent none). */
+  idpDisplayName: string | null;
+  idpPhone: string | null;
+  idpEmail: string | null;
+  /** #5160 — fields the user edited away from the provider value. */
+  diverged: string[];
+  /** #5160 — per-field provenance ({source: 'idp'|'user', updatedAtMs}). */
+  provenance: Record<string, { source: string; updatedAtMs: number }>;
 }
 
 /** Caller-supplied save fields: null clears, absent leaves unchanged. */
@@ -162,12 +172,21 @@ function parseUserProfile(value: unknown): UserProfileView {
   ) {
     throw new ProfileApiError(LOAD_FALLBACK, "", 0);
   }
+  const diverged = Array.isArray(value.diverged)
+    ? value.diverged.filter((d): d is string => typeof d === "string")
+    : [];
   return {
     userLogin: value.userLogin,
     displayName: (value.displayName ?? null) as string | null,
     phone: (value.phone ?? null) as string | null,
     email: (value.email ?? null) as string | null,
     updatedAtMs: (value.updatedAtMs ?? null) as number | null,
+    tenantId: (value.tenantId ?? null) as string | null,
+    idpDisplayName: (value.idpDisplayName ?? null) as string | null,
+    idpPhone: (value.idpPhone ?? null) as string | null,
+    idpEmail: (value.idpEmail ?? null) as string | null,
+    diverged,
+    provenance: isRecord(value.provenance) ? (value.provenance as UserProfileView["provenance"]) : {},
   };
 }
 
@@ -209,6 +228,27 @@ export async function saveProfile(
     }
     throw toProfileApiError(data, status, SAVE_FALLBACK);
   }
+  if (status !== 200) throw toProfileApiError(data, status, SAVE_FALLBACK);
+  const message =
+    isRecord(data) && typeof data.message === "string" && data.message.length > 0
+      ? data.message
+      : SAVE_FALLBACK;
+  return { profile: parseUserProfile(data), message, duplicate: false };
+}
+
+/**
+ * #5160 — reset user-edited fields to their provider values
+ * ("Sync from provider"). The POST carries no profile fields and
+ * no idempotency key: the sync is naturally idempotent (a re-run
+ * converges). Returns the synced profile plus the server's coded
+ * outcome message.
+ */
+export async function syncProfileFromProvider(): Promise<SaveProfileResult> {
+  const { status, data } = await callRaw(
+    platformPath("accountProfile"),
+    { method: "POST", body: JSON.stringify({ syncFromProvider: true }) },
+    SAVE_FALLBACK,
+  );
   if (status !== 200) throw toProfileApiError(data, status, SAVE_FALLBACK);
   const message =
     isRecord(data) && typeof data.message === "string" && data.message.length > 0

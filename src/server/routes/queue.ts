@@ -41,7 +41,7 @@ import { createMessagingPorts } from "../../messaging/createMessagingPorts";
 import { createJobPipelineEventsHandler } from "../../messaging/jobPipelineEventsConsumer";
 import type { JobStageEventRecord } from "../../data/jobStageEventPorts";
 import { createScreenerEventsWorkHandler } from "../../messaging/screenerEventsConsumer";
-import type { RunLedgerProjectMessage } from "../../workflows/runLedgerQueueTransport";
+import type { RunLedgerProjectLedger, RunLedgerProjectMessage } from "../../workflows/runLedgerQueueTransport";
 import { createDeadLetterStoreAdapter, ensureDeadLetterStoreSchema } from "../../data/createDeadLetterStorePorts";
 import { resolveDlqDepthAlertThreshold } from "../../config/dlqDepthAlert";
 import { resolveHeartbeatWatchdogConfig } from "../../config/heartbeatWatchdog";
@@ -241,7 +241,9 @@ export async function dispatchRunLedgerProjectQueueWork(opts: {
   }
   type ProjectQueuedRunLedger = {
     projectQueuedRunLedger: (input: {
-      ledger: "reports" | "async_jobs" | "job_run_records";
+      // Issue #6006 — the shared ledger union: a local copy would
+      // silently drop the next ledger (this one dropped job_outcomes).
+      ledger: RunLedgerProjectLedger;
       naturalKey: string;
       tenantId: string;
       userLogin: string;

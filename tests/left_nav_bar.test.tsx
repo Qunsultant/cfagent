@@ -33,6 +33,7 @@ import {
 } from "../src/client/navConfig";
 import { ROUTES, getRoute, hasNavEntry, getNavGroup } from "../src/client/routes";
 import { NAVIGATION_ITEMS } from "../src/client/components/NavigationMenu";
+import { NAV_TAB_PRESETS } from "../src/client/navPresets";
 import { deepLinkHrefForNavNode } from "../src/client/deepLinks";
 
 let container: HTMLDivElement;
@@ -344,10 +345,10 @@ describe("LeftNavBar UX & Reorganization (issue #2685)", () => {
     await renderNavBar();
     expect(container.textContent).toContain("Goal Screen");
   });
-  it("renders distinct icons for all seven Platform Admin sub-menu items", async () => {
+  it("renders distinct icons for all eight Platform Admin sub-menu items", async () => {
     const adminItem = findNavItemConfig(DEFAULT_LEFT_NAV_CONFIG, "platform-admin");
     expect(adminItem).toBeDefined();
-    expect(adminItem?.subItems).toHaveLength(7);
+    expect(adminItem?.subItems).toHaveLength(8);
     for (const sub of adminItem!.subItems!) {
       expect(sub.icon, `Sub-item ${sub.id} missing icon`).toBeDefined();
       expect(sub.icon!.length).toBeGreaterThan(0);
@@ -355,8 +356,9 @@ describe("LeftNavBar UX & Reorganization (issue #2685)", () => {
     const icons = adminItem!.subItems!.map((s) => s.icon);
     // Issue #4561 removed Tasks, ScheduledGoals, and Jobs (all unique);
     // issue #4585 moved Users out (the Agents duplicate with Tenants
-    // leaves with it), so all seven remaining icons are distinct.
-    expect(new Set(icons).size).toBe(7);
+    // leaves with it); #6151 S4 adds Nav & Menu Access (Approvals),
+    // so all eight remaining icons are distinct.
+    expect(new Set(icons).size).toBe(8);
 
     await renderNavBar();
     const chevronBtn = container.querySelector('[aria-controls="submenu-platform-admin"]') as HTMLButtonElement;
@@ -368,7 +370,7 @@ describe("LeftNavBar UX & Reorganization (issue #2685)", () => {
     const submenu = container.querySelector('#submenu-platform-admin');
     expect(submenu).toBeTruthy();
     const svgs = submenu!.querySelectorAll('.submenu-item-bullet svg');
-    expect(svgs.length).toBe(7);
+    expect(svgs.length).toBe(8);
   });
   it("renders Schedules under Platform with distinct Schedules icon and handles navigation", async () => {
     const platform = DEFAULT_LEFT_NAV_CONFIG.sections.find((s) => s.id === "section-platform");
@@ -401,5 +403,89 @@ describe("LeftNavBar UX & Reorganization (issue #2685)", () => {
     const sandboxItem = sandboxSection!.items.find((i) => i.id === "sandbox");
     expect(sandboxItem).toBeDefined();
     expect(sandboxItem?.icon).toBe("Sandbox");
+  });
+});
+
+describe("Settings footer (issue #6147 S4a)", () => {
+  it("the last menu is Sandbox — verified at build time (Ceos 2026-11-23 19:40)", () => {
+    const lastSection = DEFAULT_LEFT_NAV_CONFIG.sections.at(-1)!;
+    expect(lastSection.id).toBe("section-sandbox");
+    expect(lastSection.items.at(-1)!.id).toBe("sandbox");
+  });
+
+  it("footer settings trigger is present with preset `none` (every tab hidden)", async () => {
+    await renderNavBar({ visibleTabs: NAV_TAB_PRESETS.none, onOpenSettings: vi.fn() });
+    // No nav item renders under `none` …
+    expect(container.querySelectorAll(".sidebar-nav-item")).toHaveLength(0);
+    // … but the footer trigger is outside the visibility filter.
+    const settingsBtn = container.querySelector(
+      'button[aria-label="Settings"]',
+    ) as HTMLButtonElement | null;
+    expect(settingsBtn).not.toBeNull();
+    expect(settingsBtn!.textContent).toContain("Settings");
+  });
+
+  it("expanded Sandbox sub-menu stays above the footer (in-flow, inside the scroll container)", async () => {
+    await renderNavBar({ onOpenSettings: vi.fn() });
+    const chevronBtn = container.querySelector(
+      '[aria-controls="submenu-sandbox"]',
+    ) as HTMLButtonElement;
+    expect(chevronBtn).toBeTruthy();
+    await act(async () => {
+      chevronBtn.click();
+    });
+    const submenu = container.querySelector("#submenu-sandbox");
+    expect(submenu).not.toBeNull();
+    const footer = container.querySelector(".sidebar-settings-footer") as HTMLElement | null;
+    expect(footer).not.toBeNull();
+    const scroll = container.querySelector(".sidebar-nav-scroll") as HTMLElement;
+    // The sub-menu renders inside the scroll container; the footer
+    // does not — so an expanded sub-menu scrolls within its own
+    // container and can never extend behind the footer.
+    expect(scroll.contains(submenu)).toBe(true);
+    expect(scroll.contains(footer)).toBe(false);
+    // DOM order: the sub-menu precedes the footer …
+    expect(submenu!.compareDocumentPosition(footer!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // … and the footer is the aside's last child.
+    expect(container.querySelector("aside")!.lastElementChild).toBe(footer);
+  });
+
+  it("collapsed nav shows the gear only", async () => {
+    await renderNavBar({ collapsed: true, onOpenSettings: vi.fn() });
+    const settingsBtn = container.querySelector(
+      'button[aria-label="Settings"]',
+    ) as HTMLButtonElement;
+    expect(settingsBtn).not.toBeNull();
+    expect(settingsBtn.textContent).not.toContain("Settings");
+    expect(settingsBtn.querySelector("svg")).not.toBeNull();
+  });
+
+  it("expanded nav shows gear + label", async () => {
+    await renderNavBar({ collapsed: false, onOpenSettings: vi.fn() });
+    const settingsBtn = container.querySelector(
+      'button[aria-label="Settings"]',
+    ) as HTMLButtonElement;
+    expect(settingsBtn).not.toBeNull();
+    expect(settingsBtn.textContent).toContain("Settings");
+  });
+
+  it("clicking the footer trigger calls onOpenSettings, not onSelectTab", async () => {
+    const onOpenSettings = vi.fn();
+    const onSelectTab = vi.fn();
+    await renderNavBar({ onOpenSettings, onSelectTab });
+    const settingsBtn = container.querySelector(
+      'button[aria-label="Settings"]',
+    ) as HTMLButtonElement;
+    await act(async () => {
+      settingsBtn.click();
+    });
+    expect(onOpenSettings).toHaveBeenCalledTimes(1);
+    expect(onSelectTab).not.toHaveBeenCalled();
+  });
+
+  it("no footer renders without an onOpenSettings handler", async () => {
+    await renderNavBar({});
+    expect(container.querySelector(".sidebar-settings-footer")).toBeNull();
+    expect(container.querySelector('button[aria-label="Settings"]')).toBeNull();
   });
 });

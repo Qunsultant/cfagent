@@ -1,0 +1,3 @@
+### Added
+
+- IDP attributes are now captured at sign-in as a durable, multi-tenant, user-updatable profile (#5160): the full sanitized provider userinfo document is stored in the D1 `agent_user_profiles` table (migration 0087), one row per (internal user id, tenant), with per-field provenance so a user edit wins over later sign-ins and a "Sync from provider" reset restores provider values. New admin surfaces: identity lookup by a stored attribute (`GET /api/iaaa/identity/lookup`), admin profile read, and the "Identity profile" section in the IAAA Admin panel for the attribute set + retention config.

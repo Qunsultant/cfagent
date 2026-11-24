@@ -1844,26 +1844,6 @@ export function Chat({ user }: { user: User }) {
         activeTab={tab}
       />
 
-      {/* Settings trigger (issues 3696/3697/3828): fixed
-          bottom-left, rendered by the shell OUTSIDE both nav modes (not
-          in side-nav), so it stays reachable under any preset including
-          `none`. */}
-      <Button
-        variant="secondary"
-        size="sm"
-        title="Settings"
-        aria-label="Settings"
-        onClick={() => handleSelectTab("nav-settings")}
-        style={{
-          position: "fixed",
-          left: "var(--space-3, 0.75rem)",
-          bottom: "var(--space-3, 0.75rem)",
-          zIndex: 1000,
-        }}
-      >
-        <NavIcons.Settings /> Settings
-      </Button>
-
       {/* Externalized Partner Deals & Showcase Modal */}
       <PartnerDealsModal
         isOpen={showPartnerDealsModal}

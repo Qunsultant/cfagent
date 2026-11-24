@@ -1,0 +1,3 @@
+### Changed
+
+- **Settings trigger moved into the nav shell (Qunsultant/cfagent#6147, S4a):** the fixed bottom-left Settings button is gone. In left-nav layout the trigger lives in a footer slot at the bottom of `LeftNavBar` (in-flow below the scrollable menu list, full-width when expanded, gear-only when collapsed); in top-nav layout the top bar carries the trigger. The last menu (Sandbox) stays above the footer button even with its sub-menu expanded. The trigger stays reachable under every preset including `none`. New pins: footer presence under `none`, expanded Sandbox sub-menu above the footer, collapsed gear-only, footer click routing, top-bar trigger.

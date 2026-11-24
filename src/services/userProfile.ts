@@ -44,6 +44,12 @@
 import type { UserProfile } from "../data/profilePorts";
 import { PROFILE_LIMITS } from "../config/profileLimits";
 import { profileInputSchema, validateRequestShape } from "../api/requestValidation";
+import {
+  effectiveProfileValue,
+  idpFieldValue,
+  type FieldProvenance,
+  type ProfileFieldName,
+} from "../security/idpAttributes";
 
 /** A validated partial update: only keys the client sent. */
 export type ValidatedProfileInput = {
@@ -217,25 +223,86 @@ export function extractIdempotencyKey(body: unknown): IdempotencyKeyResult {
   return { ok: true, key: key.trim() };
 }
 
-/** The profile shape the self-only read endpoint returns. */
+/**
+ * The profile shape the self-only read endpoint returns.
+ *
+ * #5160 — the view carries the EFFECTIVE values (user-edited
+ * values where set, otherwise the provider value), so the client
+ * pre-fills from the provider and only ever writes user
+ * overrides. idpDisplayName/idpPhone/idpEmail are the raw
+ * provider values (for the "From your provider" hints); diverged
+ * names the fields whose user value hides a different provider
+ * value. tenantId is the operating tenant this row belongs to.
+ */
 export interface UserProfileView {
   userLogin: string;
   displayName: string | null;
   phone: string | null;
   email: string | null;
   updatedAtMs: number | null;
+  tenantId: string | null;
+  idpDisplayName: string | null;
+  idpPhone: string | null;
+  idpEmail: string | null;
+  diverged: ProfileFieldName[];
+  /** Per-field provenance as stored (the client renders the "From your provider" hints from this). */
+  provenance: Record<string, FieldProvenance>;
 }
 
 /** Shape a stored row (or its absence) as the read view. */
-export function toUserProfileView(userLogin: string, profile: UserProfile | null): UserProfileView {
+export function toUserProfileView(
+  userLogin: string,
+  profile: UserProfile | null,
+  tenantId?: string | null,
+): UserProfileView {
   if (!profile) {
-    return { userLogin, displayName: null, phone: null, email: null, updatedAtMs: null };
+    return {
+      userLogin,
+      displayName: null,
+      phone: null,
+      email: null,
+      updatedAtMs: null,
+      tenantId: tenantId ?? null,
+      idpDisplayName: null,
+      idpPhone: null,
+      idpEmail: null,
+      diverged: [],
+      provenance: {},
+    };
+  }
+  const diverged: ProfileFieldName[] = [];
+  for (const field of ["displayName", "phone", "email"] as const) {
+    const prov = profile.provenance[field];
+    if (prov?.source !== "user") continue;
+    const idpValue = idpFieldValue(field, profile.idpAttributes);
+    if (idpValue !== null && idpValue !== profile[field]) diverged.push(field);
   }
   return {
     userLogin: profile.userLogin,
-    displayName: profile.displayName,
-    phone: profile.phone,
-    email: profile.email,
+    displayName: effectiveProfileValue(
+      "displayName",
+      profile.displayName,
+      profile.provenance.displayName,
+      profile.idpAttributes,
+    ),
+    phone: effectiveProfileValue(
+      "phone",
+      profile.phone,
+      profile.provenance.phone,
+      profile.idpAttributes,
+    ),
+    email: effectiveProfileValue(
+      "email",
+      profile.email,
+      profile.provenance.email,
+      profile.idpAttributes,
+    ),
     updatedAtMs: profile.updatedAtMs,
+    tenantId: profile.tenantId ?? tenantId ?? null,
+    idpDisplayName: idpFieldValue("displayName", profile.idpAttributes),
+    idpPhone: idpFieldValue("phone", profile.idpAttributes),
+    idpEmail: idpFieldValue("email", profile.idpAttributes),
+    diverged,
+    provenance: { ...profile.provenance },
   };
 }

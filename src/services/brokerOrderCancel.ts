@@ -126,7 +126,7 @@ export async function cancelOrderViaSelectedBroker(
       orderId,
       ...(input.reason ? { reason: input.reason } : {}),
     });
-    recordCancelOutcome(sql, receipt, "broker_order_cancel", input.env);
+    await recordCancelOutcome(sql, receipt, "broker_order_cancel", input.env);
     if (receipt.success) {
       markDraftRowCancelledIfPresent(input.orm as never, receipt.target?.orderId ?? orderId);
     }
@@ -392,9 +392,9 @@ export async function cancelTickerViaSelectedBroker(
   if (!receipt.dryRun) {
     const sql = input.orm?.getSql?.();
     if (usesServiceCancelPort(broker)) {
-      recordScopedCancelOutcome(sql, receipt, "broker_orders_cancel_ticker", input.env);
+      await recordScopedCancelOutcome(sql, receipt, "broker_orders_cancel_ticker", input.env);
     } else {
-      recordScopedCancelOutcome(
+      await recordScopedCancelOutcome(
         sql,
         receipt,
         "broker_orders_cancel_ticker",
@@ -488,9 +488,9 @@ export async function cancelAllViaSelectedBroker(
   if (receipt.success || receipt.cancelled.length > 0 || receipt.refused.length > 0) {
     const suffix = `cancel_all:${receipt.preview?.expiresAt ?? new Date().toISOString()}`;
     if (usesServiceCancelPort(broker)) {
-      recordScopedCancelOutcome(sql, receipt, "broker_orders_cancel_all", input.env, suffix);
+      await recordScopedCancelOutcome(sql, receipt, "broker_orders_cancel_all", input.env, suffix);
     } else {
-      recordScopedCancelOutcome(
+      await recordScopedCancelOutcome(
         sql,
         receipt,
         "broker_orders_cancel_all",

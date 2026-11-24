@@ -22,7 +22,8 @@ export type PlatformAdminSectionId =
   | "tenants"
   | "channels"
   | "accounts"
-  | "engine-tuning";
+  | "engine-tuning"
+  | "nav-config";
 
 export interface PlatformAdminMenuItemConfig {
   id: PlatformAdminSectionId;

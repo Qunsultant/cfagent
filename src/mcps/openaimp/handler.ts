@@ -56,6 +56,7 @@ import { recordTraceHopBestEffort } from "../../data/createMeshTracePorts";
 import { childContextOfTraceparent } from "../../observability/meshTrace";
 import { createObservabilitySink } from "../../observability/createObservabilityPorts";
 import type { ObservabilitySink } from "../../observability/observabilityPorts";
+import type { ExecutionContext } from "../../security/executionContext";
 import {
   MCP_PERMISSION_DENIED_CODE,
   authorizeMcpToolCall,
@@ -125,6 +126,8 @@ export interface OpenaimpMcpHandlerContext {
    */
   storage?: import("../../trading").NasdaqUniverseRouteBundleInput["storage"];
   permissionPort?: ToolPermissionPort;
+  /** #6173: the call's validated ExecutionContext, resolved once at the MCP entry. Absent for in-process callers. */
+  executionContext?: ExecutionContext;
   permissionDecisionSink?: ObservabilitySink;
   /** #1722: NLQ_MODE session/user carriers, forwarded to tool execution. */
   scopedNlqModes?: import("../../config/nlqModes").NlqScopedModes;
@@ -236,6 +239,7 @@ export function createOpenaimpMcpServer(context: OpenaimpMcpHandlerContext): Ser
           audit: context.audit,
           decisionSink:
             context.permissionDecisionSink ?? createObservabilitySink(context.env),
+          executionContext: context.executionContext,
         });
         // #2496: stamp the acting identity + traceparent into the
         // job payload HERE, server-side, from the route-threaded

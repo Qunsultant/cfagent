@@ -178,6 +178,7 @@ import {
 import { createFollowupDeliveryPort } from "./screenerFollowupDelivery";
 import { deliverDiscoveryDirect } from "./screeningDelivery";
 import { recordJobOutcome } from "./jobOutcomes";
+import { projectJobOutcomeBestEffort } from "./runLedgerProjectionHooks";
 import { storeReportStage } from "./unifiedReportPipeline";
 import { storeOptionsCanonicalReport } from "./optionsServeRecord";
 import { registerScreenerPublishers } from "../events/screenerPublishers";
@@ -911,7 +912,7 @@ export class ScheduledTasksService {
    * Guarded on platformDeps.sql and never throwing â€” a sink failure
    * must not fail the discovery run.
    */
-  private recordDiscoveryOutcome(input: {
+  private async recordDiscoveryOutcome(input: {
     id: string;
     trigger: JobRunTrigger;
     status: "completed" | "failed" | "partial";
@@ -919,7 +920,7 @@ export class ScheduledTasksService {
     matched?: number;
     codedError?: string;
     createdAt?: string;
-  }): void {
+  }): Promise<void> {
     try {
       const sql = this.platformDeps?.sql;
       if (!sql) return;
@@ -927,6 +928,14 @@ export class ScheduledTasksService {
         kind: "discovery",
         origin: "discovery",
         ...input,
+      });
+      // Issue #6006 — fold the outcome facts into the one run
+      // source (D1); best-effort, never fails the discovery run.
+      await projectJobOutcomeBestEffort({
+        env: this.env,
+        sql,
+        outcomeId: input.id,
+        userLogin: this.userLogin,
       });
     } catch (err) {
       structuredLog.warn("scheduledTasks.discovery_outcome_record_failed", {
@@ -4276,7 +4285,7 @@ export class ScheduledTasksService {
         error,
       });
       // Issue #1333: discovery outcomes into the job-outcome sink.
-      this.recordDiscoveryOutcome({
+      await this.recordDiscoveryOutcome({
         // Issue #5175 slice 3: the outcome-sink row id mints through
         // the one leaf minter. The fallback was fresh per invocation
         // (the timestamp is minted per call) and the sink upserts
@@ -4434,7 +4443,7 @@ export class ScheduledTasksService {
         ...(options.scheduleId ? { scheduleId: options.scheduleId } : {}),
       });
       // Issue #1333: discovery outcomes into the job-outcome sink.
-      this.recordDiscoveryOutcome({
+      await this.recordDiscoveryOutcome({
         id: run.id,
         trigger: options.trigger || "scheduled",
         status: status === "completed" ? "completed" : "partial",
@@ -4900,7 +4909,7 @@ export class ScheduledTasksService {
         error,
       });
       // Issue #1333: profile-derived discovery outcomes into the sink.
-      this.recordDiscoveryOutcome({
+      await this.recordDiscoveryOutcome({
         // Issue #5175 slice 3: same leaf mint as the saved-request
         // fallback above — fresh per invocation, sink upserts.
         id: runId ?? newRunId(),
@@ -5174,7 +5183,7 @@ export class ScheduledTasksService {
         ...(options.scheduleId ? { scheduleId: options.scheduleId } : {}),
       });
       // Issue #1333: profile-derived discovery outcomes into the sink.
-      this.recordDiscoveryOutcome({
+      await this.recordDiscoveryOutcome({
         id: run.id,
         trigger: options.trigger || "scheduled",
         status,
@@ -5279,7 +5288,7 @@ export class ScheduledTasksService {
         error,
       });
       // Issue #1333: no-view discovery outcomes into the sink.
-      this.recordDiscoveryOutcome({
+      await this.recordDiscoveryOutcome({
         // Issue #5175 slice 3: same leaf mint as the saved-request
         // fallback above — fresh per invocation, sink upserts.
         id: runId ?? newRunId(),
@@ -5480,7 +5489,7 @@ export class ScheduledTasksService {
         ...(options.scheduleId ? { scheduleId: options.scheduleId } : {}),
       });
       // Issue #1333: no-view discovery outcomes into the sink.
-      this.recordDiscoveryOutcome({
+      await this.recordDiscoveryOutcome({
         id: run.id,
         trigger: options.trigger || "scheduled",
         status,

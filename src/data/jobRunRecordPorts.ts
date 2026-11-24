@@ -40,12 +40,20 @@ export const JOB_RUN_RECORDS_PER_JOB_CAP = 100;
  *  A dispatch row's `jobId`/`scheduleId` is its cron expression.
  *  "job-pipeline" is the Pipeline J1 job system (issue #3534):
  *  pipeline jobs record their terminal runs through this same
- *  machinery — no second run store. */
+ *  machinery — no second run store. "job-outcome" is the #6006
+ *  outcome-fold system: a D1 row created from a mas_job_outcomes
+ *  row that has no engine/DO job_run_records twin (the twin-less
+ *  kinds — corpus, reports, trading — and any outcome whose run
+ *  left no job record). Its jobId IS the outcome id, so the row
+ *  stays addressable by the run it records; started == finished ==
+ *  the outcome's createdAt (a recorded outcome carries one
+ *  timestamp, never an invented interval). */
 export type JobRunSystem =
   | "scheduled-agent-goal"
   | "orchestrator-schedule"
   | "job-pipeline"
-  | "worker-cron";
+  | "worker-cron"
+  | "job-outcome";
 
 /** success | failure | skipped — see the header note on skipped. */
 export type JobRunOutcome = "success" | "failure" | "skipped";
@@ -238,6 +246,26 @@ export interface JobRunRecord {
   accountId?: string | null;
   bindingScope?: string | null;
   bindingSource?: string | null;
+  /**
+   * Issue #6006 — the outcome facts a folded mas_job_outcomes row
+   * carries on the one run source (D1 migration 0086). Optional so
+   * rows recorded before the fold still parse; absent reads as null,
+   * never invented. `codedError` is the coded error, distinct from
+   * the free-text `error`; `origin` is the outcome's origin label
+   * (e.g. "job-tree", "corpus-sync"), distinct from `originRunId`
+   * (the #4767 retry lineage). `scanned`/`matched` are the run's
+   * scan counts; `deliveryStates` the per-channel delivery states;
+   * the four key fields the run's typed artifact links.
+   */
+  codedError?: string | null;
+  origin?: string | null;
+  scanned?: number | null;
+  matched?: number | null;
+  deliveryStates?: Record<string, string> | null;
+  pdfKey?: string | null;
+  xlsxKey?: string | null;
+  csvKey?: string | null;
+  reportUrl?: string | null;
 }
 
 /** The per-run record store surface (synchronous: DO SQLite is sync). */

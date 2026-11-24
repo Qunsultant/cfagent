@@ -19,6 +19,12 @@
  *    500 and never a dropped row.
  *  - 4359-P07 a checkpoint that belongs to another run is never projected
  *    under this run's id.
+ *  - 4359-P09 (#6416) a research row's stages join from the
+ *    orchestrator-side stage read, and the ScheduledAgent door is never
+ *    asked for a research id.
+ *  - 4359-P10 (#6416) a research row's stage detail says what the stage
+ *    did (artifact synthesis, descriptor summary, named no-op cause),
+ *    while other families keep the node path.
  */
 import { describe, expect, it } from "vitest";
 import { createInMemoryJobPipelineStores } from "../src/data/inMemoryJobPipelineAdapter";
@@ -361,5 +367,469 @@ describe("4359-P07 another run's checkpoint is never projected", () => {
     expect(res!.status).toBe(200);
     const data = (await res!.json()) as any;
     expect(data.runs.every((r: any) => r.stageCount === 0)).toBe(true);
+  });
+});
+
+/** Issue #6416 — a research JobStageView, as readResearchRunStages builds it. */
+function researchView(
+  kind: string,
+  nodePath: string,
+  over: Partial<JobStageView> = {},
+): JobStageView {
+  return {
+    stageId: `job:${nodePath}`,
+    nodePath,
+    kind,
+    executionMode: null,
+    startedAt: "2026-11-23T21:14:59.000Z",
+    endedAt: "2026-11-23T21:15:03.000Z",
+    durationMs: 3720,
+    resultRef: null,
+    units: [{ unitId: kind, status: "completed", attempt: 0 }],
+    ...over,
+  };
+}
+
+function researchReport6416() {
+  return {
+    runId: "r-6416",
+    generationId: "gen-r-6416",
+    trigger: "manual",
+    userLogin: "analyst",
+    createdAt: "2026-11-23T21:14:59.000Z",
+    rulesVersion: "1",
+    rules: {},
+    configSnapshot: {},
+    evaluationFeedback: { applied: false },
+    regime: { label: "bullish" },
+    summary: "test report",
+    ideas: [],
+    watchlist: [],
+    rejected: Array.from({ length: 14 }, (_, i) => ({
+      symbol: `SYM${String(i + 1).padStart(2, "0")}`,
+      outlook: "neutral",
+      structure: "call",
+      gate: i < 13 ? "quote_quality" : "thesis_coherence",
+      reason: "rejected",
+    })),
+    stats: {
+      universeSize: 100,
+      quotesRetrieved: 36,
+      candidatesEvaluated: 36,
+      chainsFetched: 12,
+      chainsCalibrated: 0,
+      qualified: 0,
+      watchlist: 0,
+      rejected: 14,
+      unverified: 0,
+      oodaIterations: 1,
+      durationMs: 1010,
+    },
+  };
+}
+
+function researchFeedArtifact6416() {
+  const symbols = Array.from({ length: 36 }, (_, i) => `SYM${String(i + 1).padStart(2, "0")}`);
+  return {
+    runId: "r-6416",
+    asOf: "2026-11-23T21:14:59.000Z",
+    regime: { label: "bullish" },
+    universe: "nasdaq100",
+    universeError: null,
+    symbols,
+    quotes: symbols.map((symbol, i) => ({ symbol, quote: i < 34 ? { price: 100 } : null })),
+    universeSize: 100,
+    quotesRetrieved: 36,
+  };
+}
+
+describe("4359-P09 a research row joins from the orchestrator-side stage read", () => {
+  function sqlDouble() {
+    return {
+      exec: () => [],
+    } as never;
+  }
+
+  const record = buildJobRunRecord({
+    system: "job-pipeline",
+    jobId: "research:r-6416",
+    operation: "feed",
+    started: new Date(T0).toISOString(),
+    finished: new Date(T0 + 60_000).toISOString(),
+    outcome: "success",
+    triggeredBy: "manual",
+    workflowId: "r-6416",
+    asyncJobId: "research:r-6416",
+  });
+
+  const researchStages = (): JobStageView[] => [
+    researchView("feed", "0", {
+      resultRef: "research:r-6416:feed (36/100)",
+      stageOutput: researchFeedArtifact6416(),
+    }),
+    researchView("enrich", "1", { resultRef: "research:r-6416:enrich (36 symbols)" }),
+    researchView("analyze", "2", {
+      resultRef: "research:r-6416:analyze (0 ideas)",
+      stageOutput: researchReport6416(),
+    }),
+    researchView("generate", "3", {
+      resultRef: "research:r-6416:generate (rep-6416)",
+      stageOutput: {
+        report: researchReport6416(),
+        publication: {
+          success: true,
+          reportId: "rep-6416",
+          created: true,
+          artifacts: {
+            pdfStatus: "generated",
+            pdfKey: "pdf-6416",
+            xlsxStatus: "generated",
+            csvStatus: "generated",
+          },
+          report: researchReport6416(),
+        },
+      },
+    }),
+    researchView("deliver", "4", {
+      resultRef: "research:r-6416:deliver",
+      stageOutput: {
+        success: true,
+        reportId: "rep-6416",
+        emailed: false,
+        slack: true,
+        webhook: false,
+        held: false,
+        pdfAttached: true,
+        reasons: { webhook: "not configured" },
+        report: researchReport6416(),
+      },
+    }),
+    researchView("evaluate", "5", { resultRef: "research:r-6416:evaluate (0 evaluated)" }),
+  ];
+
+  it("projects the six stages onto the run and never asks the door for the research id", async () => {
+    const askedResearch: string[][] = [];
+    const askedDoor: string[][] = [];
+    const res = await handleWorkflowRunsRoutes(
+      new Request("https://agent.internal/workflow-runs", { method: "GET" }),
+      new URL("https://agent.internal/workflow-runs"),
+      "/workflow-runs",
+      "session-1",
+      {
+        ensureTables: () => sqlDouble(),
+        userLogin: "analyst",
+        env: {},
+        jobRunRecordReader: async () => [record],
+        researchStageReader: async (jobIds: string[]) => {
+          askedResearch.push(jobIds);
+          return new Map([
+            ["research:r-6416", { stages: researchStages(), checkpointRunId: "r-6416", checkpointKind: null }],
+          ]);
+        },
+        jobStageReader: async (jobIds: string[]) => {
+          askedDoor.push(jobIds);
+          return new Map();
+        },
+      } as never,
+    );
+    expect(res!.status).toBe(200);
+    expect(askedResearch.flat()).toContain("research:r-6416");
+    expect(askedDoor.flat()).not.toContain("research:r-6416");
+    const data = (await res!.json()) as any;
+    const run = data.runs.find((r: any) => r.stageCount === 6);
+    expect(run).toBeTruthy();
+    expect(run.stages.map((s: any) => s.stage)).toEqual([
+      "feed",
+      "enrich",
+      "analyze",
+      "generate",
+      "deliver",
+      "evaluate",
+    ]);
+    expect(run.stages[0].detail).toContain("36/100 quotes retrieved");
+    expect(run.stages[2].detail).toContain("14 rejected");
+    expect(run.stages[3].detail).toContain("stored rep-6416");
+    expect(run.stages[4].detail).toContain("Slack posted");
+  });
+
+  it("names a failing research read in storeErrors and still renders", async () => {
+    const res = await handleWorkflowRunsRoutes(
+      new Request("https://agent.internal/workflow-runs", { method: "GET" }),
+      new URL("https://agent.internal/workflow-runs"),
+      "/workflow-runs",
+      "session-1",
+      {
+        ensureTables: () => sqlDouble(),
+        userLogin: "analyst",
+        env: {},
+        jobRunRecordReader: async () => [record],
+        researchStageReader: async () => {
+          throw new Error("research read unavailable");
+        },
+        jobStageReader: async () => new Map(),
+      } as never,
+    );
+    expect(res!.status).toBe(200);
+    const data = (await res!.json()) as any;
+    expect(data.storeErrors.jobStages).toContain("research stages: research read unavailable");
+  });
+});
+
+describe("4359-P10 a research row's stage detail says what the stage did", () => {
+  it("synthesizes feed counts from the artifact, not the descriptor", () => {
+    const stages = stagesFromEngineViews(
+      [researchView("feed", "0", { stageOutput: researchFeedArtifact6416() })],
+      "research:r-6416",
+    );
+    expect(stages[0].detail).toBe(
+      "feed: 36/100 quotes retrieved; 64 never attempted; 2 quote failures",
+    );
+  });
+
+  it("falls back to the descriptor's counts when the artifact is absent", () => {
+    const stages = stagesFromEngineViews(
+      [researchView("feed", "0", { resultRef: "research:r-6416:feed (36/100)" })],
+      "research:r-6416",
+    );
+    expect(stages[0].detail).toBe("feed: 36/100 quotes");
+  });
+
+  it("falls back to the run report when the engine holds no feed record", () => {
+    const stages = stagesFromEngineViews(
+      [
+        researchView("feed", "0", {
+          reportEvidence: { stats: { universeSize: 100, quotesRetrieved: 36 } },
+        }),
+      ],
+      "research:r-6416",
+    );
+    expect(stages[0].detail).toContain("36/100 quotes retrieved (from the run report");
+  });
+
+  it("names the cause of a feed no-op, never a bare not_configured", () => {
+    const stages = stagesFromEngineViews(
+      [
+        researchView("feed", "0", {
+          stepStatus: "not_configured",
+          stageOutput: { stage: "feed", runId: "r-6416", status: "not_configured" },
+        }),
+      ],
+      "research:r-6416",
+    );
+    expect(stages[0].detail).toBe(
+      "feed did not run (not_configured — no feed runtime was wired for this dispatch)",
+    );
+  });
+
+  it("reads analyze counts from the bare report, not the vacuous descriptor", () => {
+    const stages = stagesFromEngineViews(
+      [
+        researchView("analyze", "2", {
+          resultRef: "research:r-6416:analyze (0 ideas)",
+          stageOutput: researchReport6416(),
+        }),
+      ],
+      "research:r-6416",
+    );
+    expect(stages[0].detail).toBe(
+      "analyze: 0 qualified, 0 watchlist, 14 rejected (quote_quality 13, thesis_coherence 1); 36 candidates evaluated, 12 chains fetched",
+    );
+  });
+
+  it("reads analyze counts from the envelope-embedded report too", () => {
+    const stages = stagesFromEngineViews(
+      [
+        researchView("analyze", "2", {
+          resultRef: "research:r-6416:analyze (0 ideas)",
+          stageOutput: { success: true, reportId: null, report: researchReport6416() },
+        }),
+      ],
+      "research:r-6416",
+    );
+    expect(stages[0].detail).toContain("14 rejected (quote_quality 13, thesis_coherence 1)");
+  });
+
+  it("names the canonical store outcome and the per-format statuses for generate", () => {
+    const stages = stagesFromEngineViews(
+      [
+        researchView("generate", "3", {
+          stageOutput: {
+            report: researchReport6416(),
+            publication: {
+              success: true,
+              reportId: "rep-6416",
+              created: true,
+              artifacts: {
+                pdfStatus: "generated",
+                pdfKey: "pdf-6416",
+                xlsxStatus: "generated",
+                csvStatus: "generated",
+              },
+              report: researchReport6416(),
+            },
+          },
+        }),
+      ],
+      "research:r-6416",
+    );
+    expect(stages[0].detail).toBe(
+      "generate: report stored rep-6416; PDF generated (pdf-6416); XLSX generated; CSV generated",
+    );
+  });
+
+  it("names a store refusal and a PDF failure code for generate", () => {
+    const stages = stagesFromEngineViews(
+      [
+        researchView("generate", "3", {
+          stageOutput: {
+            report: researchReport6416(),
+            publication: {
+              success: true,
+              reportId: null,
+              created: false,
+              artifacts: {
+                pdfStatus: "failed",
+                pdfError: "FAILURE_REPORT_PDF_GENERATION",
+                xlsxStatus: "failed",
+                csvStatus: "failed",
+              },
+              report: researchReport6416(),
+            },
+          },
+        }),
+      ],
+      "research:r-6416",
+    );
+    expect(stages[0].detail).toContain("canonical_store_refused");
+    expect(stages[0].detail).toContain("PDF failed (FAILURE_REPORT_PDF_GENERATION)");
+  });
+
+  it("names a deduped generate row", () => {
+    const stages = stagesFromEngineViews(
+      [
+        researchView("generate", "3", {
+          stageOutput: {
+            report: researchReport6416(),
+            publication: {
+              success: true,
+              reportId: "rep-6416",
+              created: false,
+              artifacts: {
+                pdfStatus: "generated",
+                pdfKey: "pdf-6416",
+                xlsxStatus: "generated",
+                csvStatus: "generated",
+              },
+              report: researchReport6416(),
+            },
+          },
+        }),
+      ],
+      "research:r-6416",
+    );
+    expect(stages[0].detail).toContain("deduped (existing rep-6416)");
+  });
+
+  it("derives a generate no-op's cause from the analyze envelope", () => {
+    const stages = stagesFromEngineViews(
+      [
+        researchView("analyze", "2", {
+          stageOutput: { success: true, reportId: null, report: researchReport6416() },
+        }),
+        researchView("generate", "3", {
+          stepStatus: "not_configured",
+          stageOutput: { stage: "generate", runId: "r-6416", status: "not_configured" },
+        }),
+      ],
+      "research:r-6416",
+    );
+    expect(stages[1].detail).toContain("predates the unwrap fix");
+  });
+
+  it("names deliver channel by channel, plus held and confirmation id", () => {
+    const stages = stagesFromEngineViews(
+      [
+        researchView("deliver", "4", {
+          stageOutput: {
+            success: true,
+            reportId: "rep-6416",
+            emailed: true,
+            slack: true,
+            webhook: false,
+            held: false,
+            emailTo: "ops@example.com",
+            pdfAttached: true,
+            reasons: { webhook: "not configured" },
+            report: researchReport6416(),
+          },
+        }),
+      ],
+      "research:r-6416",
+    );
+    expect(stages[0].detail).toBe(
+      "deliver: Slack posted; email sent to ops@example.com; webhook not sent (not configured); PDF attached",
+    );
+  });
+
+  it("names a held deliver run first, not three silent not-sents", () => {
+    const stages = stagesFromEngineViews(
+      [
+        researchView("deliver", "4", {
+          stageOutput: {
+            success: true,
+            reportId: "rep-6416",
+            emailed: false,
+            slack: false,
+            webhook: false,
+            held: true,
+            confirmationId: "rc_hold1",
+            pdfAttached: false,
+            report: researchReport6416(),
+          },
+        }),
+      ],
+      "research:r-6416",
+    );
+    expect(stages[0].detail).toBe(
+      "deliver held for approval (confirmation rc_hold1); nothing sent",
+    );
+  });
+
+  it("derives a deliver no-op's cause from the generate no-op", () => {
+    const stages = stagesFromEngineViews(
+      [
+        researchView("generate", "3", {
+          stepStatus: "not_configured",
+          stageOutput: { stage: "generate", runId: "r-6416", status: "not_configured" },
+        }),
+        researchView("deliver", "4", {
+          stepStatus: "not_configured",
+          stageOutput: { stage: "deliver", runId: "r-6416", status: "not_configured" },
+        }),
+      ],
+      "research:r-6416",
+    );
+    expect(stages[1].detail).toContain("generate produced no publication");
+  });
+
+  it("reads enrich from the descriptor summary through the default branch", () => {
+    const stages = stagesFromEngineViews(
+      [researchView("enrich", "1", { resultRef: "research:r-6416:enrich (36 symbols)" })],
+      "research:r-6416",
+    );
+    expect(stages[0].detail).toBe("36 symbols");
+  });
+
+  it("keeps the node path for other families", () => {
+    const stages = stagesFromEngineViews(
+      [
+        researchView("feed", "0", {
+          resultRef: "screen-4359:feed (36/100)",
+          stageOutput: researchFeedArtifact6416(),
+        }),
+      ],
+      "screen-4359",
+    );
+    expect(stages[0].detail).toBe("0");
   });
 });

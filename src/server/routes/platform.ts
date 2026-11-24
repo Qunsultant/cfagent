@@ -34,6 +34,7 @@ import { requireAuth } from "../auth";
 import { unauthorizedJson } from "./apiRefusals";
 import type { Env, TransactionSnapData } from "../../types";
 import { bearerKeyFromRequest, verifyApiKey } from "../../security/apiKeys";
+import { buildMcpCatalog } from "../../mcps/openaimp/catalog";
 import { ETradeBrowserService } from "../../services/browserAgent";
 import { resolveSnapIdentity } from "../../config/restTwinsModes";
 
@@ -315,12 +316,50 @@ export async function handlePlatformRetrievalRoutes(request: Request, env: Env, 
 /**
  * Slice 7 of Qunsultant/cfagent#2902 (Platform & commerce) — moves only.
  * The MCP family of handleFetch, verbatim and in original order: /mcp
- * and /api/mcp (JSON-RPC 2.0 & discovery), /mcp/scanner and
+ * and /api/mcp (JSON-RPC 2.0 & discovery), GET /api/mcp/catalog (the
+ * served catalogue, #6438), /mcp/scanner and
  * /mcp/scanner/* (x402 pay-per-use options scanner). Returns null when
  * no branch matches, so handleFetch falls through to the next
  * delegation exactly as the inline chain did.
  */
 export async function handlePlatformMcpRoutes(request: Request, env: Env, url: URL, path: string): Promise<Response | null> {
+    // --- Served MCP catalogue (#6438, sub-issue of #6266) ---
+    // GET /api/mcp/catalog serves the one server catalogue (tools,
+    // resources, prompts, server info) the Tools tab, the chat
+    // Endpoints tab, and the IAAA admin MCP tab read instead of the
+    // retired hand-maintained client file. Same auth as /api/mcp:
+    // an app session or a valid API key, else 401 before any data.
+    // The catalogue is built from the live registries on every call,
+    // so a newly registered tool appears after deploy with no
+    // client-file edit. GET only; anything else is 405.
+    if (path === "/api/mcp/catalog") {
+      if (request.method === "OPTIONS") {
+        return new Response(null, {
+          headers: {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization",
+          },
+        });
+      }
+      const session = await requireAuth(request, env);
+      let userLogin = session?.githubLogin;
+      if (!userLogin) {
+        const verified = await verifyApiKey(env, bearerKeyFromRequest(request));
+        userLogin = verified?.login;
+      }
+      if (!userLogin) {
+        return Response.json(
+          { error: "Unauthorized: an app session or a valid API key is required." },
+          { status: 401 },
+        );
+      }
+      if (request.method !== "GET") {
+        return Response.json({ error: "Method not allowed" }, { status: 405 });
+      }
+      return Response.json(buildMcpCatalog());
+    }
+
     // --- Model Context Protocol (MCP) JSON-RPC 2.0 & Discovery Endpoint ---
     // Issue #180: transport identity is the app session OR a per-user API
     // key (Authorization: Bearer cfk_…, see src/security/apiKeys.ts) bound

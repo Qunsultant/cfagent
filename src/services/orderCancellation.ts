@@ -887,7 +887,7 @@ export async function cancelAllOrders(
  * broker did. Best-effort, like every other trading outcome: a ledger write
  * never turns a confirmed cancel into a failure.
  */
-export function recordCancelOutcome(
+export async function recordCancelOutcome(
   sql: SqlStorage | null | undefined,
   receipt: CancelReceipt,
   origin: string,
@@ -899,10 +899,10 @@ export function recordCancelOutcome(
    * a cancel is never recorded under another broker's name.
    */
   ledger?: { broker?: string; mode?: "live" | "paper" },
-): void {
+): Promise<void> {
   const orderId = receipt.target?.orderId;
   if (!orderId) return;
-  recordTradingRunOutcome(sql, {
+  await recordTradingRunOutcome(sql, {
     orderId,
     status: receipt.success ? "completed" : "failed",
     action: "cancel",
@@ -914,7 +914,11 @@ export function recordCancelOutcome(
     origin,
     cancelOutcome: receipt.success ? "cancelled" : "cancel_failed",
     brokerStatus: receipt.target?.statusAfter ?? receipt.target?.statusBefore,
-  });
+  },
+  // Issue #6006 — fold the outcome facts into the one run source.
+  // The cancel path threads no owning login, so the queue carrier is
+  // skipped; the ORM carrier still folds the row (tenant from env).
+  { env: env ?? {}, userLogin: null });
 }
 
 /**
@@ -922,7 +926,7 @@ export function recordCancelOutcome(
  * carrying the counts and the refusal when it failed. `order:<id>` rows stay
  * for single-order cancels; a batch is its own run.
  */
-export function recordScopedCancelOutcome(
+export async function recordScopedCancelOutcome(
   sql: SqlStorage | null | undefined,
   receipt: ScopedCancelReceipt,
   origin: string,
@@ -930,9 +934,9 @@ export function recordScopedCancelOutcome(
   runId?: string,
   /** Issue #3937: the ledger identity — see recordCancelOutcome. */
   ledger?: { broker?: string; mode?: "live" | "paper" },
-): void {
+): Promise<void> {
   const id = runId ?? `${receipt.action}:${new Date().toISOString()}`;
-  recordTradingRunOutcome(sql, {
+  await recordTradingRunOutcome(sql, {
     orderId: id,
     status: receipt.success ? "completed" : "failed",
     action: receipt.action,
@@ -944,7 +948,10 @@ export function recordScopedCancelOutcome(
     cancelOutcome: receipt.success ? "cancelled" : "cancel_failed",
     scanned: receipt.targeted,
     matched: receipt.cancelled.length,
-  });
+  },
+  // Issue #6006 — fold the outcome facts into the one run source
+  // (no owning login threaded here; the ORM carrier folds the row).
+  { env: env ?? {}, userLogin: null });
 }
 
 export type TradesCancelPort = {

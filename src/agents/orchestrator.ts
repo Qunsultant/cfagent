@@ -16,7 +16,7 @@ import { copilotRegistrationForSourceTab } from "../services/copilotChannels";
 import { runBizCopilotTenantBranch } from "../services/bizCopilotTenants";
 import { runBizCopilotAccountBranch } from "../services/bizCopilotAccounts";
 import { runBizCopilotChannelBranch } from "../services/bizCopilotChannels";
-import { recordJobOutcome } from "../services/jobOutcomes";
+import { JOB_OUTCOMES_KEEP_ROWS, listJobOutcomes, recordJobOutcome } from "../services/jobOutcomes";
 import type { JobOutcomeInput } from "../data/jobOutcomePorts";
 import type { JobRunTrigger } from "../data/jobRunRecordPorts";
 import {
@@ -156,6 +156,11 @@ import type { ResearchReport } from "../services/researchPipeline";
 import { ETradeEmailTradingService } from "../trading";
 import { ETradeBrowserService } from "../services/browserAgent";
 import { runGovernanceSeed } from "./orchestrator/governanceSeed";
+import {
+  runGetIdpProfileConfig,
+  runSetIdpProfileConfig,
+} from "./orchestrator/idpProfileConfig";
+import type { IdpProfileConfigShape } from "../config/idpProfile";
 import { runShardJobReconcile, type ReconcileShardJobsReport } from "./orchestrator/shardJobReconcile";
 import { runCanonicalReportSeed, type SeedCanonicalReportsResult } from "./orchestrator/canonicalReportSeed";
 import { reconcileRunLedgerProjection, type ReconcileRunLedgerResult } from "./orchestrator/runLedgerReconcile";
@@ -192,6 +197,7 @@ import { createAsyncJobPorts } from "../data/createAsyncJobPorts";
 import {
   projectAsyncJobBestEffort,
   projectCanonicalReportBestEffort,
+  projectJobOutcomeBestEffort,
   projectJobRunRecordBestEffort,
 } from "../services/runLedgerProjectionHooks";
 import { SqlJobRunRecordStore } from "../data/doSqliteJobRunRecordAdapter";
@@ -1078,6 +1084,15 @@ export class OrchestratorAgent extends PortThink {
     return runGovernanceSeed({ doSql: this.ctx.storage.sql, env: this.env }, setBy, tenantId);
   }
 
+  /** Issue #5160 — thin wrappers for the IAAA Admin "Identity profile" config surface (execution in ./orchestrator/idpProfileConfig.ts). The runtime values live in this instance's mas_settings; the worker-side routes reach them through these RPC methods. */
+  async getIdpProfileConfig(): Promise<IdpProfileConfigShape> {
+    return runGetIdpProfileConfig({ sql: this.ctx.storage.sql });
+  }
+
+  async setIdpProfileConfig(value: IdpProfileConfigShape): Promise<IdpProfileConfigShape> {
+    return runSetIdpProfileConfig({ sql: this.ctx.storage.sql }, value);
+  }
+
   /** Issue #1676 — thin wrapper; execution in ./orchestrator/shardJobReconcile.ts. */
   async reconcileShardJobProjection(tenantId: string): Promise<ReconcileShardJobsReport> {
     return runShardJobReconcile({ env: this.env, listRailsJobs: () => this.listAsyncJobs(100), tenantId, nowMs: Date.now() });
@@ -1141,13 +1156,39 @@ export class OrchestratorAgent extends PortThink {
    * the row is already projected, so there is nothing to do.
    */
   async projectQueuedRunLedger(input: {
-    ledger: "reports" | "async_jobs" | "job_run_records";
+    ledger: "reports" | "async_jobs" | "job_run_records" | "job_outcomes";
     naturalKey: string;
     tenantId: string;
     userLogin: string;
   }): Promise<{ status: "projected" | "already-current" | "missing-row" }> {
     this.ensureTables();
     const sql = this.ctx.storage.sql as never;
+    if (input.ledger === "job_outcomes") {
+      // Issue #6006 — the claim-check re-read: the natural key IS
+      // the outcome id; the sink has no get-by-id, so list the
+      // capped sink (500 rows max) and find it. A missing row
+      // returns "missing-row" so the caller tries the shared
+      // instance; a present row projects with skipQueue (this IS
+      // the queue delivery). Same throw discipline as the other
+      // ledgers: a failed projection retries into the DLQ, never a
+      // silent drop.
+      const row = listJobOutcomes(sql, JOB_OUTCOMES_KEEP_ROWS).find((r) => r.id === input.naturalKey);
+      if (!row) return { status: "missing-row" };
+      const posted = await projectJobOutcomeBestEffort({
+        env: this.env,
+        sql,
+        outcomeId: row.id,
+        userLogin: input.userLogin,
+        skipQueue: true,
+      });
+      if (!posted) {
+        throw new Error(`run-ledger projection skipped for job outcome ${input.naturalKey} (no carrier configured or store unavailable)`);
+      }
+      if (!posted.posted) {
+        throw new Error(`run-ledger projection failed for job outcome ${input.naturalKey}: ${posted.skipped ?? "unknown"}`);
+      }
+      return { status: posted.projected ? "projected" : "already-current" };
+    }
     if (input.ledger === "reports") {
       const hit = getScheduledReportById(sql, input.naturalKey, { userLogin: input.userLogin });
       if (!hit) return { status: "missing-row" };
@@ -2442,7 +2483,16 @@ export class OrchestratorAgent extends PortThink {
    */
   async recordFeedJobOutcome(input: JobOutcomeInput): Promise<void> {
     try {
-      recordJobOutcome(this.ensureTables(), input);
+      const sql = this.ensureTables();
+      recordJobOutcome(sql, input);
+      // Issue #6006 — fold the outcome facts into the one run source
+      // (D1); best-effort, never fails the feed run.
+      await projectJobOutcomeBestEffort({
+        env: this.env,
+        sql,
+        outcomeId: input.id,
+        userLogin: this.sessionKey(),
+      });
     } catch (err) {
       structuredLog.warn("orchestrator.feed_job_outcome_record_failed", {
         message:

@@ -15,6 +15,7 @@
 
 import type { ResearchLeg } from "../services/researchEconomics";
 import type { ResearchReport, TradeCard } from "../services/researchPipeline";
+import { canonicalResearchRulesJson } from "../config/researchRules";
 
 export type ResearchReportFormat = "pdf" | "xlsx" | "csv";
 
@@ -314,6 +315,8 @@ export function researchSummaryRows(report: ResearchReport): Array<[string, stri
     ["trigger", String(report?.trigger ?? "")],
     ["created_at", String(report?.createdAt ?? "")],
     ["rules_version", String(report?.rulesVersion ?? "")],
+    // Issue #6037 (d) — the resolved values, canonical (sorted keys).
+    ["rules", canonicalResearchRulesJson(report?.rules)],
     ["broker", String(report?.brokerId ?? "not recorded")],
     ["mode", String(report?.mode ?? "not recorded")],
     ["asset_type", String(report?.assetType ?? "not recorded")],

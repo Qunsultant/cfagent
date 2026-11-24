@@ -61,6 +61,7 @@ import {
 } from "../../observability/scheduledJobOutcomes";
 import { postSlackText, resourceSlackPost } from "../resourceGoals";
 import type { SlackDeliveryEnv } from "../social/delivery";
+import type { Env } from "../../types";
 import type { ScreenerAgent } from "../screener-agent";
 import type { ResearchAgent } from "../research-agent";
 import type { DatabaseORM, SqlStorage } from "../../orm";
@@ -238,6 +239,28 @@ export function recordNightlyResearchLedgerRun(
  * block); returns a Response when one of the owned paths matches, or null
  * to continue sequential matching.
  */
+/**
+ * Issue #6378 — one stage's output, on demand. The page asks for the stage an
+ * operator opened, so six stages' artifacts never ride one page load; the
+ * requested stage keeps its `output`, every other stage's is dropped (not set
+ * to undefined: the key is absent, so a reader cannot mistake it for an empty
+ * artifact). `""` and `"1"` keep every stage's output — the whole-read form.
+ */
+export function withRequestedStageOutput<
+  T extends { stages: Array<{ stageId: string; output?: unknown }> },
+>(read: T, wanted: string): T {
+  if (!wanted || wanted === "1") return read;
+  return {
+    ...read,
+    stages: read.stages.map((row) => {
+      if (row.stageId === wanted) return row;
+      const copy: { stageId: string; output?: unknown } = { ...row };
+      delete copy.output;
+      return copy as T["stages"][number];
+    }),
+  };
+}
+
 export async function handleScreenerResearchRoutes(
   request: Request,
   url: URL,
@@ -663,6 +686,9 @@ export async function handleScreenerResearchRoutes(
           sql: resolveResearchSql(),
           d1: resolveResearchD1(),
           env: ctx.env as Record<string, string | undefined>,
+          // Issue #6035 (b) — the full env, so a deployment hosting the
+          // job-pipeline workflow executes the run durably, one step per stage.
+          durableEnv: ctx.env as unknown as Env,
           ...selection,
           researchDeps: {
             runFeedStage: async (input) => {
@@ -742,15 +768,22 @@ export async function handleScreenerResearchRoutes(
     const stagesListMatch = path.match(/\/research\/runs\/([^/]+)\/stages$/);
     if (stagesListMatch && request.method === "GET") {
       const userLogin = request.headers.get("x-user-login") || sessionId;
+      // Issue #6378 — `?includeOutput=<stageId>` is the inline viewer's read:
+      // the SAME stage read, under the same owner scoping, with the one
+      // stage's persisted output attached. No second route, no second store.
+      const includeOutput = (new URL(request.url).searchParams.get("includeOutput") || "").trim();
       try {
-        const stages = await readResearchStages({
-          runId: decodeURIComponent(stagesListMatch[1]),
-          userLogin,
-          sql: resolveResearchSql(),
-          d1: resolveResearchD1(),
-          env: ctx.env as Record<string, string | undefined>,
-        });
-        return Response.json(stages);
+        const stages = await readResearchStages(
+          {
+            runId: decodeURIComponent(stagesListMatch[1]),
+            userLogin,
+            sql: resolveResearchSql(),
+            d1: resolveResearchD1(),
+            env: ctx.env as Record<string, string | undefined>,
+          },
+          includeOutput ? { includeStageOutputs: true } : undefined,
+        );
+        return Response.json(withRequestedStageOutput(stages, includeOutput));
       } catch (err: any) {
         return Response.json({ error: err?.message || "Failed to read research stages." }, { status: 503 });
       }
@@ -868,6 +901,9 @@ export async function handleScreenerResearchRoutes(
           sql: resolveResearchSql(),
           d1: resolveResearchD1(),
           env: ctx.env as Record<string, string | undefined>,
+          // Issue #6035 (b) — the full env, so a deployment hosting the
+          // job-pipeline workflow executes the run durably, one step per stage.
+          durableEnv: ctx.env as unknown as Env,
           researchDeps: {
             runFeedStage: async (input) => {
               const agent = ctx.getResearchAgent(input.userLogin);

@@ -411,9 +411,20 @@ const ORCH = "agents/orchestrator.ts";
  *  src/security/attributionEnvelope.ts) — measured 4,029 lines /
  *  185,038 B on the rebased tree after the two added comments were
  *  tightened, so budget bytes rise to 185_400, keeping ~360 B
- *  headroom. Lines keep 4040 (measured 4,029). */
-const BUDGET_LINES = 4040;
-const BUDGET_BYTES = 185_400;
+ *  headroom. Lines keep 4040 (measured 4,029).
+ *  #6006 (outcome fold) wires the job_outcomes claim-check into
+ *  projectQueuedRunLedger and the fold into recordFeedJobOutcome
+ *  (the projection itself lives in
+ *  src/services/runLedgerProjectionHooks.ts) — measured 4,064
+ *  lines / 186,709 B on the rebased tree, so budget lines rise to
+ *  4070 and bytes rise to 187_300 (~590 B headroom).
+ *  #5160 (IDP profile) adds the two thin get/setIdpProfileConfig
+ *  delegating wrappers + their imports (execution in
+ *  orchestrator/idpProfileConfig.ts; the class gains no logic) —
+ *  measured 4,078 lines / 187,445 B on the rebased tree, so
+ *  budget lines rise to 4080 and bytes rise to 187_900. */
+const BUDGET_LINES = 4080;
+const BUDGET_BYTES = 187_900;
 
 const count = (haystack: string, needle: string) =>
   haystack.split(needle).length - 1;

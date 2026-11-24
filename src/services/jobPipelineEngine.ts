@@ -452,6 +452,38 @@ export interface JobStageView {
    * produced one — never a fabricated summary.
    */
   resultRef: string | null;
+  /**
+   * Issue #6416 — the persisted step output's `status` (e.g.
+   * "not_configured") when the stage's artifact carries one. Set only
+   * by the research stage adapter, from the orchestrator-side stage
+   * read; the engine projection leaves it unset — the engine's own
+   * views carry no step status.
+   */
+  stepStatus?: string | null;
+  /**
+   * Issue #6416 — the persisted step-output artifact itself. Set only
+   * by the research stage adapter, which reads it from the same store
+   * as the stages; the Workflow Runs projection synthesizes stage
+   * detail from it. The engine projection leaves it unset.
+   */
+  stageOutput?: unknown;
+  /**
+   * Issue #6416 — the run's report body, attached by the research stage
+   * adapter only when a stage's descriptor and artifact are both absent:
+   * fallback evidence for detail synthesis (feed counts from the
+   * report's stats / symbolEvaluations). Never set by the engine
+   * projection, and never read when the descriptor or artifact exists.
+   */
+  reportEvidence?: unknown;
+  /**
+   * Issue #6377 — the checkpoint entry these units came from: the run id
+   * it belongs to and the kind of execution it recorded, stamped by the
+   * engine projection from the same read that produced the units (never
+   * a second store read). A view projected without a checkpoint carries
+   * neither, and the viewer then claims none.
+   */
+  checkpointRunId?: string | null;
+  checkpointKind?: JobRunKind | null;
   units: Array<{
     unitId: string;
     status: StageUnitCheckpoint["status"];
@@ -463,6 +495,14 @@ export interface JobStageView {
     endedAt?: string;
     /** Issue #6028 — the descriptor the step returned for this unit, when it returned one. */
     resultRef?: string;
+    /**
+     * Issue #6377 — the unit's recorded resume position (#3549): the
+     * step/item indices a resume continues from. Present only on a unit
+     * the runner stopped mid-execution (cleared on completion), so an
+     * absent value means the unit is atomic from the runner's view —
+     * never an estimated position.
+     */
+    progress?: StageUnitCheckpoint["progress"];
   }>;
 }
 
@@ -806,6 +846,11 @@ export function projectStageViews(
         endedAt: null,
         durationMs: null,
         resultRef: null,
+        // Issue #6377 — the checkpoint this view IS, stamped from the
+        // same instance read (never a second store read), so the viewer
+        // can name the run its units belong to.
+        checkpointRunId: instance.stageCheckpoint.runId,
+        checkpointKind: instance.stageCheckpoint.kind ?? null,
         units: [],
       };
       byStage.set(unit.stage, created);
@@ -819,6 +864,7 @@ export function projectStageViews(
       ...(unit.startedAt !== undefined ? { startedAt: unit.startedAt } : {}),
       ...(unit.endedAt !== undefined ? { endedAt: unit.endedAt } : {}),
       ...(unit.resultRef !== undefined ? { resultRef: unit.resultRef } : {}),
+      ...(unit.progress !== undefined ? { progress: unit.progress } : {}),
     });
   }
   // Issue #4359 — the stage's window is its units' recorded window:

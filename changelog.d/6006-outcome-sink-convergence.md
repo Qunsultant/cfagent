@@ -1,0 +1,3 @@
+### Added
+
+- Run ledger: fold `mas_job_outcomes` rows into the one run source (D1 `job_run_records`, migration 0083) so GET /api/runs surfaces the outcome facts — codedError, origin, scanned/matched counts, delivery states, and PDF/XLSX/CSV keys plus report URL (issue #6006). A row attaches to its engine twin by exact linkage (workflowId, else asyncJobId) or becomes one `job-outcome` row when twin-less; a re-fold of identical facts is a no-op. All eight outcome write sites (stock bridge, discovery, corpus, reports, options, goal, trading, feed) now dual-write: the DO-SQLite sink still records first, the D1 fold follows best-effort and never fails the run. The sink itself is unchanged in this slice and retires only once production parity holds.

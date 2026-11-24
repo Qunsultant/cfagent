@@ -99,9 +99,15 @@ import {
   buildAliasRecordedAuditEventInput,
   buildBootstrapGrantAuditEventInput,
   buildIdMigrationRecordedAuditEventInput,
+  buildIdpProfileDivergedAuditEventInput,
+  buildIdpProfileRefreshedAuditEventInput,
   recordWiredAuthAudit,
 } from "./iaaaAuthAudit";
 import type { AuditStore } from "./iaaaAudit";
+import { sanitizeIdpAttributes } from "./idpAttributes";
+import { loadIdpProfileConfig } from "./idpProfileConfig";
+import type { UserProfileStore } from "../data/profilePorts";
+import type { SettingsPort } from "../data/settingsReadPorts";
 import { membershipIsLive } from "./runRevocationGate";
 import { SESSION_TTL } from "./session";
 import type { KvLike } from "./kvResilience";
@@ -427,6 +433,17 @@ export interface WiredPostLoginDeps {
    * unset so the config is the single source.
    */
   genesisOneTime?: boolean;
+  /**
+   * #5160 — the durable profile store for the sign-in IDP
+   * attribute refresh. Absent (or unbound), the refresh is
+   * skipped and the login proceeds exactly as before.
+   */
+  profile?: UserProfileStore | null;
+  /**
+   * #5160 — the operator-config store the profile config loads
+   * from (mas_settings). Absent, the shipped defaults apply.
+   */
+  settings?: SettingsPort | null;
 }
 
 export interface WiredPostLoginInput {
@@ -437,6 +454,14 @@ export interface WiredPostLoginInput {
   bootstrapRaw: string | undefined;
   tenantId: string;
   nowMs: number;
+  /**
+   * #5160 — the raw IDP userinfo doc for this sign-in (before
+   * sanitization). Absent, no refresh runs. Tokens are never in
+   * this doc: the callback strips them before it reaches here.
+   */
+  idpAttributes?: Record<string, unknown> | null;
+  /** #5160 — the issuer the attributes came from; defaults to providerIssuer. */
+  idpIssuer?: string;
 }
 
 export type AliasRunStatus =
@@ -457,9 +482,19 @@ export type BootstrapRunStatus =
   | "blank"
   | "error";
 
+export type ProfileRunStatus = "refreshed" | "skipped" | "refresh-failed";
+
 export interface WiredPostLoginResult {
   alias: { status: AliasRunStatus };
   bootstrap: { status: BootstrapRunStatus };
+  /**
+   * #5160 — the IDP profile refresh: "refreshed" (the row was
+   * written), "skipped" (no store or no attributes), or
+   * "refresh-failed" (the store threw — the login still
+   * succeeded). diverged names the profile fields whose
+   * user-owned value hid a different provider value.
+   */
+  profile: { status: ProfileRunStatus; diverged: string[] };
 }
 
 async function resolveEntryUserId(
@@ -882,6 +917,39 @@ export async function runWiredPostLogin(
     migrationFrom = repair.migratedFrom;
   }
 
+  // #5160 — the sign-in IDP profile refresh: persist the
+  // sanitized userinfo doc into the durable per-tenant profile
+  // row (after the alias step, so a re-keyed identity refreshes
+  // under its derived id). Best-effort: a failed refresh warns
+  // and never throws or changes the login outcome — a login must
+  // never fail because the profile store is down.
+  let profileStatus: ProfileRunStatus = "skipped";
+  let profileDiverged: string[] = [];
+  if (deps.profile && input.idpAttributes && Object.keys(input.idpAttributes).length > 0) {
+    try {
+      const config = loadIdpProfileConfig(deps.settings ?? null);
+      const sanitized = sanitizeIdpAttributes(input.idpAttributes, config);
+      if (sanitized.ok && Object.keys(sanitized.attributes).length > 0) {
+        const refreshed = await deps.profile.refreshFromIdp({
+          internalUserId: input.internalUserId,
+          tenantId: input.tenantId,
+          userLogin: input.githubLogin,
+          idpIssuer: input.idpIssuer ?? input.providerIssuer,
+          attributes: sanitized.attributes,
+          nowMs: input.nowMs,
+        });
+        profileStatus = "refreshed";
+        profileDiverged = refreshed.diverged;
+      }
+    } catch {
+      profileStatus = "refresh-failed";
+      structuredLog.warn("iaaaGithubEndToEnd.idp_profile_refresh_failed", {
+        message: "[post-login] IDP profile refresh failed (login proceeds)",
+        code: "idp_profile.refresh_failed",
+      });
+    }
+  }
+
   let bootstrapStatus: BootstrapRunStatus;
   try {
     if (input.bootstrapRaw === undefined || input.bootstrapRaw.trim() === "") {
@@ -1005,6 +1073,41 @@ export async function runWiredPostLogin(
           );
         }
       }
+      if (profileStatus === "refreshed") {
+        const recorded = await recordWiredAuthAudit(
+          deps.audit.store,
+          buildIdpProfileRefreshedAuditEventInput({
+            internalUserId: input.internalUserId,
+            tenantId: input.tenantId,
+            timestamp: input.nowMs,
+            correlationId: deps.audit.correlationId,
+          }),
+        );
+        if (!recorded.ok) {
+          structuredLog.warn("iaaaGithubEndToEnd.idp_profile_audit_write_failed", {
+            message: `[post-login-audit] IDP profile refresh audit write failed (${recorded.code})`,
+            code: recorded.code,
+          });
+        }
+      }
+      if (profileDiverged.length > 0) {
+        const recorded = await recordWiredAuthAudit(
+          deps.audit.store,
+          buildIdpProfileDivergedAuditEventInput({
+            internalUserId: input.internalUserId,
+            tenantId: input.tenantId,
+            timestamp: input.nowMs,
+            correlationId: deps.audit.correlationId,
+            divergedFields: profileDiverged,
+          }),
+        );
+        if (!recorded.ok) {
+          structuredLog.warn("iaaaGithubEndToEnd.idp_profile_diverged_audit_write_failed", {
+            message: `[post-login-audit] IDP profile divergence audit write failed (${recorded.code})`,
+            code: recorded.code,
+          });
+        }
+      }
       if (
         bootstrapStatus === "provisioned" ||
         bootstrapStatus === "genesis" ||
@@ -1035,7 +1138,11 @@ export async function runWiredPostLogin(
     }
   }
 
-  return { alias: { status: aliasStatus }, bootstrap: { status: bootstrapStatus } };
+  return {
+    alias: { status: aliasStatus },
+    bootstrap: { status: bootstrapStatus },
+    profile: { status: profileStatus, diverged: profileDiverged },
+  };
 }
 
 /**

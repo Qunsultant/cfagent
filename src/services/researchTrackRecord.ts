@@ -54,6 +54,13 @@ export interface TrackRecordSlice {
   /** Share of evaluated ideas with pnl > 0 (null when none evaluated). */
   winRate: number | null;
   avgRMultiple: number | null;
+  /**
+   * Issue #773 (b) — share of this family's DIRECTION-SCORED evaluations that
+   * called the direction correctly (null when none scored). This is the input
+   * the structure reorder was written for; before it, the reorder read a field
+   * the slice never carried and silently never ran.
+   */
+  directionAccuracy: number | null;
 }
 
 export interface TrackRecord {
@@ -141,6 +148,8 @@ function sliceStats(rows: TrackRecordIdea[]): Omit<TrackRecordSlice, "key" | "pu
   const wins = evaluated.filter(
     (r) => (r.evaluation!.pnlEstimatePerUnit ?? 0) > 0
   ).length;
+  const scored = evaluated.filter((r) => r.evaluation!.directionCorrect != null);
+  const correct = scored.filter((r) => r.evaluation!.directionCorrect === true).length;
   return {
     evaluated: evaluated.length,
     winRate: evaluated.length > 0 ? wins / evaluated.length : null,
@@ -149,6 +158,9 @@ function sliceStats(rows: TrackRecordIdea[]): Omit<TrackRecordSlice, "key" | "pu
         .map((r) => r.evaluation!.rMultiple)
         .filter((v): v is number => v != null)
     ),
+    // Issue #773 (b): the per-family direction accuracy, from the recorded
+    // scores only — an unscored family stays null, never a guessed 0.
+    directionAccuracy: scored.length > 0 ? correct / scored.length : null,
   };
 }
 

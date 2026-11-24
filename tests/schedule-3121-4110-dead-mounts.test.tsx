@@ -141,7 +141,7 @@ describe("4110-P03 an open drawer at a retired section mounts neither panel (#41
     const menuLabels = Array.from(
       document.querySelectorAll('[role="tab"]'),
     ).map((item) => item.textContent ?? "");
-    expect(menuLabels).toHaveLength(7);
+    expect(menuLabels).toHaveLength(8);
     expect(menuLabels.some((label) => label.includes("Scheduled goals"))).toBe(false);
     expect(
       menuLabels.some(

@@ -16,8 +16,12 @@
  *    stock screens as the agent itself recorded them.
  *  - the engine's D1 job run records (JobRunRecord, #3946 Option B)
  *    — deployment-level engine runs. They map to kind "report" with
- *    source "job-pipeline"; they carry no pdf/xlsx/csv, no reportId,
- *    and no resultCount, so those fields stay null (honest absence).
+ *    source "job-pipeline"; they carry no reportId, and pre-fold
+ *    rows carry no pdf/xlsx/csv and no resultCount, so those fields
+ *    stay null (honest absence). A row folded from mas_job_outcomes
+ *    (#6006, migration 0086) carries the outcome facts instead —
+ *    matched as resultCount, the typed artifact keys, codedError
+ *    and origin verbatim.
  *    They are deployment-level runs, never attributed to the
  *    signed-in user — the D1 table carries no login column.
  *
@@ -69,6 +73,8 @@ export interface RunSummary {
   /** The recorded trigger ("manual" / "scheduled" / "manual-trigger" /
    *  a canonical body's trigger), or null when the store records none. */
   trigger: string | null;
+  /** Issue #6370 — the canonical row's owner (the report-only run's "Triggered by"). */
+  userLogin?: string | null;
   createdAt: string;
   /** "completed" / "failed" / the discovery store's status verbatim,
    *  or null when the store records no status. */
@@ -167,6 +173,16 @@ export interface RunSummary {
    *  ("stock" / "options" / "goal" / "strategy"), when the store
    *  records one. Optional so pre-#2062 rows still typecheck. */
   runSource?: string | null;
+  /**
+   * Issue #6006 — the run's coded error and origin label, when the
+   * home store records them (the D1 job run record's folded
+   * outcome facts, migration 0086). Optional so pre-#6006 rows
+   * still typecheck; absent reads as unknown, never invented. The
+   * Autopilot list (#2606) renders these from the one run source
+   * instead of the outcome sink.
+   */
+  codedError?: string | null;
+  origin?: string | null;
   /**
    * Issue #2910 (G3): the child canonical run ids a parent
    * row absorbs (`screener:<timestamp>` per market shard),
@@ -358,7 +374,10 @@ export function runSummaryFromReport(hit: ScheduledReportHit): RunSummary {
     ...(r2Pointer ? { bodyR2Key: r2Pointer } : {}),
     title: hit.title,
     summary: hit.summary,
-    trigger: strOrNull(body?.trigger),
+    trigger: strOrNull(body?.trigger) ?? strOrNull(body?.report?.trigger),
+    // Issue #6370 — the report-only run's owner: the join renders it as
+    // "Triggered by" instead of leaving the row ownerless.
+    userLogin: hit.userLogin,
     createdAt: hit.createdAt,
     status:
       success === true
@@ -604,14 +623,20 @@ export function runSummaryFromScreenerRun(run: ScreenerRunResult): RunSummary {
 
 /**
  * Issue #3946 (Option B): a D1 job run record → the one Runs shape.
- * The record carries no pdf/xlsx/csv, no reportId, and no
- * resultCount — those stay null, never invented. The summary is the
- * engine's recorded descriptor when present; otherwise the outcome
- * in words (failure carries the recorded error, skipped carries the
- * recorded reason). Kind "report": D1 rows surface under kind=all
- * only — "report" is not a valid kind filter value, so no other kind
- * ever claims them. The row is a deployment-level engine run, never
- * attributed to the signed-in user.
+ * The record carries no reportId — that stays null, never invented.
+ * The summary is the engine's recorded descriptor when present;
+ * otherwise the outcome in words (failure carries the recorded
+ * error, skipped carries the recorded reason). Kind "report": D1
+ * rows surface under kind=all only — "report" is not a valid kind
+ * filter value, so no other kind ever claims them. The row is a
+ * deployment-level engine run, never attributed to the signed-in
+ * user.
+ *
+ * Issue #6006: a row folded from mas_job_outcomes (migration 0086)
+ * carries the outcome facts — resultCount is its matched count,
+ * the typed artifact keys ride through, and codedError/origin
+ * surface verbatim. Rows that predate the fold keep all of those
+ * null (honest absence).
  */
 export function runSummaryFromJobRunRecord(record: JobRunRecord): RunSummary {
   const id = d1JobRunRecordId(record);
@@ -637,12 +662,12 @@ export function runSummaryFromJobRunRecord(record: JobRunRecord): RunSummary {
     trigger: record.trigger ?? null,
     createdAt: record.started,
     status,
-    resultCount: null,
-    pdfKey: null,
-    reportUrl: null,
-    xlsxKey: null,
+    resultCount: record.matched ?? null,
+    pdfKey: record.pdfKey ?? null,
+    reportUrl: record.reportUrl ?? null,
+    xlsxKey: record.xlsxKey ?? null,
     xlsxUrl: null,
-    csvKey: null,
+    csvKey: record.csvKey ?? null,
     csvUrl: null,
     pdfStatus: null,
     pdfError: null,
@@ -652,6 +677,9 @@ export function runSummaryFromJobRunRecord(record: JobRunRecord): RunSummary {
     csvError: null,
     reportId: null,
     scanRunId: null,
+    // Issue #6006 — the folded outcome facts, verbatim when present.
+    codedError: record.codedError ?? null,
+    origin: record.origin ?? null,
     // Issue #4259: the ledger row's §4 linkage rides the summary, so
     // the merge below can join it to its scan row. Absent reads as
     // null, never an invented id.
