@@ -123,7 +123,9 @@ describe("worker scheduled() (#1185)", () => {
     await (worker as any).scheduled({ cron: "*/30 * * * *" }, env, undefined);
     expect(search.addressedTo).toEqual([SHARED_ORCHESTRATOR_INSTANCE]);
     expect(search.requests.map((r) => new URL(r.url).pathname)).toEqual([
-      "/research/scheduled-tick",
+      // Issue #6299 — the research tick rider is RETIRED: the OODA cadence is
+      // one stored schedule fired by the tick's own schedule evaluation, so this
+      // tick no longer names /research/scheduled-tick. Its absence IS the change.
       "/reflection/run",
       "/adaptation/weights/run",
       // Issue #1169 (S4-4): the weekly corpus sync rides this tick.
