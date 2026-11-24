@@ -199,7 +199,7 @@ jobs:
       - name: 🛡️ Verify Cloudflare Worker Configuration
         # #3924: a version print validates nothing. A dry-run builds the Worker
         # (config, bindings, migrations, routes) without deploying it.
-                run: npx wrangler deploy --dry-run --outdir /tmp/wrangler-dry-run
+        run: npx wrangler deploy --dry-run --outdir /tmp/wrangler-dry-run
 
       - name: 📏 Worker startup budget check (#6281)
         # Code-splitting program #6280, Slice 0: fail when the worker bundle
