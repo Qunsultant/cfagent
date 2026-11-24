@@ -89,9 +89,12 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
  *  agent_nav_preset_state + 2 indexes. */
 /** Issue #6100 re-seeds it: 5 mas_events envelope columns + 4 indexes. */
 /** #6151 S4 (migration 0087) re-seeds it: agent_nav_tenant_allowances +
- *  agent_nav_user_allowlists + agent_nav_persona_defaults + 1 index. */
+ *  agent_nav_user_allowlists + agent_nav_persona_defaults + 1 index.
+ *  #5160 (migration 0088) re-seeds it: agent_user_profiles rebuilt
+ *  with the (internal_user_id, tenant_id) key + the
+ *  agent_identity_attribute_index table + 1 unique index. */
 export const COMBINED_FIXTURE_SHA256 =
-  "23d0d0ad1e3099019141598320a696fbc3dbfda28dabee9ff725946d7a8c4689";
+  "8a8750a1c38b816b05d01d7970f5b745cef92c2e85f6fd83379a2fa8a769e497";
 /** All four planes' entries in plane order: D1, DO, ORM, remainder. */
 export const COMBINED_CATALOGUE_ENTRIES: CatalogueEntry[] = [
   ...D1_CATALOGUE_ENTRIES,

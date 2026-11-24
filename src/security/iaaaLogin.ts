@@ -152,6 +152,7 @@ import {
   type StructuredLogger,
 } from "../observability/structuredLogger";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
+import { createProfileAdapter } from "../data/createProfilePorts";
 
 export const GITHUB_ISSUER = "https://github.com";
 export const IAAA_BINDING_KEY_PREFIX = "iaaa-binding:";
@@ -645,6 +646,14 @@ export interface WiredLoginOptions {
    * logins always migrate. Tests pass explicit memory stores.
    */
   migration?: MigrationDeps;
+  /**
+   * #5160 — the raw IDP userinfo doc for this sign-in (before
+   * sanitization), threaded from the provider callback. Absent,
+   * no profile refresh runs. Tokens are never in this doc.
+   */
+  idpAttributes?: Record<string, unknown> | null;
+  /** #5160 — the issuer the attributes came from; defaults to the binding issuer. */
+  idpIssuer?: string;
 }
 
 /**
@@ -906,6 +915,17 @@ export async function completeWiredLogin(
           // ride the same env-constructed sink as this login's own
           // structured events (never an empty-env sink, #5587).
           sink: createObservabilitySink(env),
+          // #5160 — the IDP profile refresh: the durable profile
+          // store over AGENT_DB (null when unbound — the refresh
+          // is then skipped). settings is null here: the worker
+          // login path cannot read the DO-owned mas_settings, so
+          // the shipped defaults apply at sign-in (store-all,
+          // token-ish keys always dropped); the operator-managed
+          // values govern the admin config surface and the
+          // retention job. Wiring the runtime values into the
+          // sign-in path is a follow-up on #5160.
+          profile: createProfileAdapter(env),
+          settings: null,
         },
         {
           githubLogin: profile.loginKey,
@@ -915,6 +935,8 @@ export async function completeWiredLogin(
           bootstrapRaw: env.IAAA_BOOTSTRAP_ADMINS,
           tenantId: options.auditTenantId ?? resolveIaaaTenant(env),
           nowMs,
+          idpAttributes: options?.idpAttributes ?? null,
+          idpIssuer: options?.idpIssuer ?? issuer,
         },
       );
     } catch {

@@ -329,10 +329,7 @@ function extractPartialProfile(
   raw: unknown,
   options: OidcProviderOptions
 ): NormalizedLoginProfile {
-  const doc =
-    raw && typeof raw === "object" && !Array.isArray(raw)
-      ? (raw as Record<string, unknown>)
-      : {};
+  const doc = asIdpAttributesDoc(raw) ?? {};
   const subjectRaw = doc[options.subjectField ?? "sub"];
   const subject =
     typeof subjectRaw === "string"
@@ -349,6 +346,19 @@ function extractPartialProfile(
     displayName: loginKey,
     avatarUrl: typeof avatarRaw === "string" ? avatarRaw : "",
   };
+}
+
+/**
+ * #5160 — the raw IDP doc as the profile-refresh input, or null
+ * when the provider returned a non-object document. The sanitizer
+ * (src/security/idpAttributes.ts) drops token-ish keys and
+ * non-JSON values before anything is stored; this helper only
+ * shapes the doc, it never filters it.
+ */
+function asIdpAttributesDoc(raw: unknown): Record<string, unknown> | null {
+  return raw && typeof raw === "object" && !Array.isArray(raw)
+    ? (raw as Record<string, unknown>)
+    : null;
 }
 
 /** Build a LoginProvider from OIDC/OAuth2 authorization-code options. */
@@ -507,10 +517,18 @@ export function createOidcProvider(options: OidcProviderOptions): LoginProvider 
             env,
             options.issuer,
             extractPartialProfile(rawProfile, options),
-            tailOptions
+            {
+              ...tailOptions,
+              idpAttributes: asIdpAttributesDoc(rawProfile),
+              idpIssuer: options.issuer,
+            }
           );
         }
-        return await completeWiredLogin(env, options.issuer, normalized.profile, tailOptions);
+        return await completeWiredLogin(env, options.issuer, normalized.profile, {
+          ...tailOptions,
+          idpAttributes: asIdpAttributesDoc(rawProfile),
+          idpIssuer: options.issuer,
+        });
       }
       if (!options.userinfoEndpoint) {
         throw new OidcAuthError(
@@ -556,13 +574,21 @@ export function createOidcProvider(options: OidcProviderOptions): LoginProvider 
           env,
           options.issuer,
           extractPartialProfile(rawProfile, options),
-          tailOptions
+          {
+            ...tailOptions,
+            idpAttributes: asIdpAttributesDoc(rawProfile),
+            idpIssuer: options.issuer,
+          }
         );
       }
       // The userinfo fetch with the fresh access token IS the proof
       // of control; the generic tail binds (issuer, subject) and
       // creates the session. Nothing is persisted before this call.
-      return await completeWiredLogin(env, options.issuer, normalized.profile, tailOptions);
+      return await completeWiredLogin(env, options.issuer, normalized.profile, {
+        ...tailOptions,
+        idpAttributes: asIdpAttributesDoc(rawProfile),
+        idpIssuer: options.issuer,
+      });
     } catch (err) {
       if (err instanceof OidcAuthError) return errorPage(err.message, err.status, structuredLog);
       const message = err instanceof Error ? err.message : "Unexpected OAuth authentication error";

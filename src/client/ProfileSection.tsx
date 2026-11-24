@@ -31,6 +31,14 @@
  * save attempt, kept across retries of that attempt (a retry after
  * a lost response converges with 409 instead of writing twice)
  * and cleared once the save lands.
+ *
+ * Issue #5160 — the profile is per-tenant and provider-backed:
+ * the section shows the operating tenant, pre-fills fields the
+ * user never edited from the provider values, marks fields the
+ * user edited away from the provider value ("From your provider"
+ * hints), and offers a "Sync from provider" reset that returns
+ * user-edited fields to their provider values. A user edit marks
+ * its field provenance 'user', so later sign-ins leave it alone.
  */
 import React, { useEffect, useRef, useState } from "react";
 import { Button, Card, Notice, Spinner, Stack, TextInput } from "./components/ui";
@@ -42,6 +50,7 @@ import {
   newIdempotencyKey,
   ProfileApiError,
   saveProfile,
+  syncProfileFromProvider,
   type UserProfileView,
 } from "./profileApi";
 
@@ -60,6 +69,7 @@ export function ProfileSection({ userLogin }: ProfileSectionProps) {
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [saving, setSaving] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [savedMessage, setSavedMessage] = useState<string | null>(null);
@@ -135,6 +145,34 @@ export function ProfileSection({ userLogin }: ProfileSectionProps) {
     }
   };
 
+  // #5160 — "Sync from provider": reset user-edited fields to
+  // their provider values. The sync is naturally idempotent, so
+  // no idempotency key is needed; the coded outcome message
+  // renders the same way a save confirmation does.
+  const sync = async () => {
+    setSyncing(true);
+    setSaveError(null);
+    setFieldErrors({});
+    setSavedMessage(null);
+    setSavedDuplicate(false);
+    try {
+      const result = await syncProfileFromProvider();
+      setProfile(result.profile);
+      setDisplayName(result.profile.displayName ?? "");
+      setPhone(result.profile.phone ?? "");
+      setEmail(result.profile.email ?? "");
+      setSavedMessage(result.message);
+    } catch (err) {
+      setSaveError(
+        err instanceof ProfileApiError
+          ? err.message
+          : "Your profile could not be synced. Try again later.",
+      );
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   if (loading) {
     return (
       <Card>
@@ -154,6 +192,10 @@ export function ProfileSection({ userLogin }: ProfileSectionProps) {
     );
   }
 
+  // #5160 — a view built before the IDP-profile fields existed
+  // (or a hand-built one in tests) carries no `diverged` list; the
+  // hints degrade to the plain text instead of throwing.
+  const diverged = profile.diverged ?? [];
   return (
     <>
       <Card>
@@ -162,9 +204,15 @@ export function ProfileSection({ userLogin }: ProfileSectionProps) {
             Signed in as: <strong>{userLogin}</strong>
             {profile.displayName ? ` — showing as ${displayNameFor(profile)}` : ""}
           </p>
+          {/* #5160 — the operating tenant this row belongs to (read-only). */}
+          <p>Tenant: {profile.tenantId ?? "—"}</p>
           <TextInput
             label="Display name"
-            hint="Shown instead of your login. Leave empty to show your login."
+            hint={
+              diverged.includes("displayName") && profile.idpDisplayName
+                ? `Shown instead of your login. Leave empty to show your login. From your provider: ${profile.idpDisplayName} — your edit wins over the provider value.`
+                : "Shown instead of your login. Leave empty to show your login."
+            }
             value={displayName}
             maxLength={PROFILE_LIMITS.displayNameMaxLength}
             error={fieldErrors.displayName}
@@ -172,7 +220,11 @@ export function ProfileSection({ userLogin }: ProfileSectionProps) {
           />
           <TextInput
             label="Phone"
-            hint="Optional. Used only to contact you about your account — never for sign-in, and not verified."
+            hint={
+              diverged.includes("phone") && profile.idpPhone
+                ? `Optional. Used only to contact you about your account — never for sign-in, and not verified. From your provider: ${profile.idpPhone} — your edit wins over the provider value.`
+                : "Optional. Used only to contact you about your account — never for sign-in, and not verified."
+            }
             value={phone}
             maxLength={PROFILE_LIMITS.phoneMaxLength}
             inputMode="tel"
@@ -181,7 +233,11 @@ export function ProfileSection({ userLogin }: ProfileSectionProps) {
           />
           <TextInput
             label="Email"
-            hint="Optional. Contact email — used only to contact you about your account. Changing it does not change your sign-in login, and it is not verified."
+            hint={
+              diverged.includes("email") && profile.idpEmail
+                ? `Optional. Contact email — used only to contact you about your account. Changing it does not change your sign-in login, and it is not verified. From your provider: ${profile.idpEmail} — your edit wins over the provider value.`
+                : "Optional. Contact email — used only to contact you about your account. Changing it does not change your sign-in login, and it is not verified."
+            }
             value={email}
             maxLength={PROFILE_LIMITS.emailMaxLength}
             inputMode="email"
@@ -193,8 +249,12 @@ export function ProfileSection({ userLogin }: ProfileSectionProps) {
             <Notice tone={savedDuplicate ? "info" : "success"}>{savedMessage}</Notice>
           )}
           <div>
-            <Button type="button" variant="primary" disabled={saving} onClick={() => void save()} loading={saving}>
+            <Button type="button" variant="primary" disabled={saving || syncing} onClick={() => void save()} loading={saving}>
               Save profile
+            </Button>
+            {/* #5160 — reset user-edited fields to their provider values. */}
+            <Button type="button" variant="secondary" disabled={saving || syncing} onClick={() => void sync()} loading={syncing}>
+              Sync from provider
             </Button>
           </div>
         </Stack>
