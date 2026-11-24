@@ -88,8 +88,10 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 /** #6151 S3 (migration 0085) re-seeds it: agent_nav_presets +
  *  agent_nav_preset_state + 2 indexes. */
 /** Issue #6100 re-seeds it: 5 mas_events envelope columns + 4 indexes. */
+/** #6151 S4 (migration 0087) re-seeds it: agent_nav_tenant_allowances +
+ *  agent_nav_user_allowlists + agent_nav_persona_defaults + 1 index. */
 export const COMBINED_FIXTURE_SHA256 =
-  "bff48918df017ef5ff6a6bf2e3cc9b7f6e1497f2e18f58e10cd874d02da2cbf0";
+  "23d0d0ad1e3099019141598320a696fbc3dbfda28dabee9ff725946d7a8c4689";
 /** All four planes' entries in plane order: D1, DO, ORM, remainder. */
 export const COMBINED_CATALOGUE_ENTRIES: CatalogueEntry[] = [
   ...D1_CATALOGUE_ENTRIES,

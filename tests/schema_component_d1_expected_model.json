@@ -5911,6 +5911,91 @@
         }
       ],
       "constraints": {}
+    },
+    "agent_nav_tenant_allowances": {
+      "columns": [
+        {
+          "name": "tenant_id",
+          "type": "TEXT",
+          "pk": 1
+        },
+        {
+          "name": "allowed_ids_json",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "updated_at_ms",
+          "type": "INTEGER",
+          "pk": 0
+        },
+        {
+          "name": "updated_by",
+          "type": "TEXT",
+          "pk": 0
+        }
+      ],
+      "constraints": {}
+    },
+    "agent_nav_user_allowlists": {
+      "columns": [
+        {
+          "name": "user_id",
+          "type": "TEXT",
+          "pk": 1
+        },
+        {
+          "name": "tenant_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "allowed_ids_json",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "saved_presets_allowed",
+          "type": "INTEGER",
+          "pk": 0
+        },
+        {
+          "name": "updated_at_ms",
+          "type": "INTEGER",
+          "pk": 0
+        },
+        {
+          "name": "updated_by",
+          "type": "TEXT",
+          "pk": 0
+        }
+      ],
+      "constraints": {}
+    },
+    "agent_nav_persona_defaults": {
+      "columns": [
+        {
+          "name": "persona",
+          "type": "TEXT",
+          "pk": 1
+        },
+        {
+          "name": "preset_key",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "updated_at_ms",
+          "type": "INTEGER",
+          "pk": 0
+        },
+        {
+          "name": "updated_by",
+          "type": "TEXT",
+          "pk": 0
+        }
+      ],
+      "constraints": {}
     }
   },
   "indexes": {
@@ -6470,6 +6555,13 @@
       "columns": [
         "user_id",
         "updated_at_ms DESC"
+      ],
+      "unique": false
+    },
+    "agent_nav_user_allowlists_tenant_idx": {
+      "table": "agent_nav_user_allowlists",
+      "columns": [
+        "tenant_id"
       ],
       "unique": false
     }

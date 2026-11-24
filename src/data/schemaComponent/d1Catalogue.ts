@@ -2003,6 +2003,70 @@ export const D1_CATALOGUE_ENTRIES: CatalogueEntry[] = [
     form: "literal",
   },
   {
+    // #6151 S4 — tenant nav allowance (migration 0087). One row
+    // per tenant: the nav ids the tenant gets at all (JSON array
+    // over the availability ids). Absent means the tenant gets
+    // everything the platform enables.
+    code: "schema.d1.agent_nav_tenant_allowances.create_table",
+    plane: "d1",
+    table: "agent_nav_tenant_allowances",
+    statement: `CREATE TABLE IF NOT EXISTS agent_nav_tenant_allowances (
+      tenant_id TEXT PRIMARY KEY,
+      allowed_ids_json TEXT NOT NULL,
+      updated_at_ms INTEGER NOT NULL,
+      updated_by TEXT NOT NULL
+    )`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    // #6151 S4 — per-user nav allow-list (migration 0087). One
+    // row per user: the nav ids that user may see (JSON array)
+    // plus whether saved presets are available to them. The row
+    // never widens beyond the tenant allowance (the store refuses
+    // an exceeding write).
+    code: "schema.d1.agent_nav_user_allowlists.create_table",
+    plane: "d1",
+    table: "agent_nav_user_allowlists",
+    statement: `CREATE TABLE IF NOT EXISTS agent_nav_user_allowlists (
+      user_id TEXT PRIMARY KEY,
+      tenant_id TEXT,
+      allowed_ids_json TEXT NOT NULL,
+      saved_presets_allowed INTEGER NOT NULL,
+      updated_at_ms INTEGER NOT NULL,
+      updated_by TEXT NOT NULL
+    )`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    code: "schema.d1.agent_nav_user_allowlists.create_index_agent_nav_user_allowlists_tenant_idx",
+    plane: "d1",
+    table: "agent_nav_user_allowlists",
+    index: "agent_nav_user_allowlists_tenant_idx",
+    statement: `CREATE INDEX IF NOT EXISTS agent_nav_user_allowlists_tenant_idx
+      ON agent_nav_user_allowlists (tenant_id)`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    // #6151 S4 — persona-default override (migration 0087). One
+    // row per persona: the built-in preset key that persona's
+    // fresh users start from. Absent means the shipped config
+    // (nav-config.json `personaDefaults`).
+    code: "schema.d1.agent_nav_persona_defaults.create_table",
+    plane: "d1",
+    table: "agent_nav_persona_defaults",
+    statement: `CREATE TABLE IF NOT EXISTS agent_nav_persona_defaults (
+      persona TEXT PRIMARY KEY,
+      preset_key TEXT NOT NULL,
+      updated_at_ms INTEGER NOT NULL,
+      updated_by TEXT NOT NULL
+    )`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
     code: "schema.d1.job_run_records.create_table",
     plane: "d1",
     table: "job_run_records",
@@ -3915,6 +3979,12 @@ export const D1_MIGRATION_CODES: Record<number, readonly string[]> = {
     "schema.d1.agent_nav_presets.create_index_agent_nav_presets_user_name_idx",
     "schema.d1.agent_nav_presets.create_index_agent_nav_presets_user_idx",
     "schema.d1.agent_nav_preset_state.create_table",
+  ],
+  87: [
+    "schema.d1.agent_nav_tenant_allowances.create_table",
+    "schema.d1.agent_nav_user_allowlists.create_table",
+    "schema.d1.agent_nav_user_allowlists.create_index_agent_nav_user_allowlists_tenant_idx",
+    "schema.d1.agent_nav_persona_defaults.create_table",
   ],
   82: [
     "schema.d1.agent_referral_rules.alter_table_add_column_extension_days",

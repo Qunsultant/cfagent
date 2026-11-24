@@ -148,7 +148,8 @@ describe("4561-P05 the three ids are gone from Platform Admin (#4561)", () => {
     // 13 → 7 in #4585: data-providers, data-lifecycle, downloads,
     // iaaa-admin, users, and admin-access moved to the DataHub and
     // SecurityHub hubs.
-    expect(ids).toHaveLength(7);
+    // 7 → 8 in #6151 S4: nav-config (Nav & Menu Access) joins.
+    expect(ids).toHaveLength(8);
     const navIds = PLATFORM_ADMIN_NAV_ITEMS.map((item) => item.id);
     expect(navIds).not.toContain("platform-admin:background-tasks");
     expect(navIds).not.toContain("platform-admin:scheduled-goals");

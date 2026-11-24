@@ -67,6 +67,7 @@ import { TenantAdminPanel } from "./TenantAdminPanel";
 import { ChannelsAdminPanel } from "./ChannelsAdminPanel";
 import { AccountAdminPanel } from "./AccountAdminPanel";
 import { EngineTuningPanel } from "./options/EtapiConfigModal";
+import NavAdminConfigPanel from "./NavAdminConfigPanel";
 import {
   AdsSection,
   ProvenanceSection,
@@ -97,6 +98,11 @@ export const PLATFORM_ADMIN_TABS: TabOption<PlatformAdminSectionId>[] = [
   { id: "channels", label: "Channels", icon: <NavIcons.Omnichannel /> },
   { id: "accounts", label: "Accounts", icon: <NavIcons.Contracts /> },
   { id: "engine-tuning", label: "Engine Tuning", icon: <NavIcons.Settings /> },
+  {
+    id: "nav-config",
+    label: "Nav & Menu Access",
+    icon: <NavIcons.Approvals />,
+  },
 ];
 
 export function PlatformAdminPage({
@@ -242,6 +248,12 @@ export function PlatformAdminPage({
       <TabPanel idBase="platform-admin" tabId="engine-tuning" active={active === "engine-tuning"}>
         <Card>
           <EngineTuningPanel userLogin={user?.login} />
+        </Card>
+      </TabPanel>
+
+      <TabPanel idBase="platform-admin" tabId="nav-config" active={active === "nav-config"}>
+        <Card>
+          <NavAdminConfigPanel />
         </Card>
       </TabPanel>
 

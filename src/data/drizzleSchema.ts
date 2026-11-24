@@ -1150,6 +1150,57 @@ export const agentNavPresetState = sqliteTable("agent_nav_preset_state", {
 });
 
 /**
+ * Tenant nav allowance (#6151 S4, migration 0087): one row per
+ * tenant — the nav ids the tenant gets at all (top-level ids +
+ * `<parentId>:<subId>` sub-item keys, stored as a JSON array).
+ * Absent means the tenant gets everything the platform enables
+ * (the S1 endpoint rule). This schema MAPS the table; it does
+ * not create it — DDL authority lives in migration 0087
+ * (src/data/migrationRunner.ts).
+ */
+export const agentNavTenantAllowances = sqliteTable("agent_nav_tenant_allowances", {
+  tenantId: text("tenant_id").primaryKey(),
+  allowedIdsJson: text("allowed_ids_json").notNull(),
+  updatedAtMs: integer("updated_at_ms").notNull(),
+  updatedBy: text("updated_by").notNull(),
+});
+
+/**
+ * Per-user nav allow-list (#6151 S4, migration 0087): one row per
+ * user — the nav ids that user may see (JSON array over the
+ * availability ids) plus whether saved presets are available to
+ * them at all. The row never widens beyond the tenant allowance:
+ * the store refuses an exceeding write. tenantId is the tenant
+ * the row belongs to (null when the user holds no tenant
+ * membership). This schema MAPS the table; DDL authority lives
+ * in migration 0087.
+ */
+export const agentNavUserAllowlists = sqliteTable("agent_nav_user_allowlists", {
+  userId: text("user_id").primaryKey(),
+  tenantId: text("tenant_id"),
+  allowedIdsJson: text("allowed_ids_json").notNull(),
+  savedPresetsAllowed: integer("saved_presets_allowed").notNull(),
+  updatedAtMs: integer("updated_at_ms").notNull(),
+  updatedBy: text("updated_by").notNull(),
+});
+
+/**
+ * Persona-default override (#6151 S4, migration 0087): one row
+ * per persona — the built-in preset key that persona's fresh
+ * users start from. Absent means the shipped config
+ * (nav-config.json `personaDefaults`); the endpoint reads the
+ * override first, so an edit takes effect on the user's next
+ * load with no redeploy. This schema MAPS the table; DDL
+ * authority lives in migration 0087.
+ */
+export const agentNavPersonaDefaults = sqliteTable("agent_nav_persona_defaults", {
+  persona: text("persona").primaryKey(),
+  presetKey: text("preset_key").notNull(),
+  updatedAtMs: integer("updated_at_ms").notNull(),
+  updatedBy: text("updated_by").notNull(),
+});
+
+/**
  * Products (#3289, migration 0058): product identity. A product
  * is the thing customers buy; its versions (plan rows for
  * subscriptions, catalogue rows for per-run) are the immutable

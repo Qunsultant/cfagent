@@ -30,12 +30,20 @@
  * expanded from the shared preset maps), then subscription
  * entitlements (S2): a nav id named in the product→menu mapping
  * stays visible only while the caller holds an active subscription
- * for a product that enables it. Tenant allowance (S4 storage —
- * absent until S4, "no allowance" means the tenant gets everything
- * the platform enables) and per-user allow-lists (absent until S4
- * — same "no allow-list means no narrowing" rule) narrow on top of
- * this in S4. Admin personas bypass the subscription narrowing —
- * they see the entire menu (issue part 2).
+ * for a product that enables it. Tenant allowance (S4) and
+ * per-user allow-lists (S4) narrow on top of this, for non-admin
+ * personas only: the allowance intersects the map when a row
+ * exists for the caller's tenant ("no allowance" means the tenant
+ * gets everything the platform enables), and the allow-list
+ * intersects it when a row exists for the caller ("no allow-list
+ * means no narrowing"). A per-user allow-list with
+ * savedPresetsAllowed false also hides the caller's saved presets
+ * (built-ins only) and ignores the active preset. The persona
+ * default itself is the S4 override when one exists for the
+ * persona, else the shipped config — so an edit takes effect on
+ * the user's next load. Admin personas bypass the subscription
+ * narrowing AND the S4 narrowing — they see the entire menu
+ * (issue part 2).
  *
  * The tier fact is never re-derived here: it flows through from
  * the resolved context unchanged. The per-PRODUCT fact (which
@@ -64,9 +72,19 @@
 import { createCommercialAdapter } from "../../data/createCommercialPorts";
 import { createSubscriptionAdapter } from "../../data/createSubscriptionPorts";
 import { createNavPresetAdapter } from "../../data/createNavPresetPorts";
+import { createNavAdminConfigAdapter } from "../../data/createNavAdminConfigPorts";
+import { listSessionFamilyEntries } from "../../security/session";
+import { listMembershipsFromEntries } from "../../security/iaaaMembershipStore";
 import type { CommercialStore } from "../../data/commercialPorts";
 import type { SubscriptionStore } from "../../data/subscriptionPorts";
 import type { NavPresetStore } from "../../data/navPresetPorts";
+import type { NavAdminConfigStore } from "../../data/navAdminConfigPorts";
+import {
+  assertNavAdminId,
+  assertPersonaPresetKey,
+  isNavPersona,
+  NAV_PERSONAS,
+} from "../../data/navAdminConfigPorts";
 import {
   isPresetMapInput,
   normalizePresetMap,
@@ -108,6 +126,8 @@ export interface NavRouteDeps {
   subscriptions?: SubscriptionStore | null;
   /** Test seam: production reads the preset store from env (null when unbound). */
   presets?: NavPresetStore | null;
+  /** Test seam: production reads the admin-config store from env (null when unbound). */
+  adminConfig?: NavAdminConfigStore | null;
   /** Test seam: production reads the shipped config mapping. */
   productMenuMapping?: ProductMenuMappingEntry[];
 }
@@ -115,6 +135,10 @@ export interface NavRouteDeps {
 const NAV_AVAILABILITY_PATH = "/api/platform/nav-availability";
 const NAV_PRESETS_PATH = "/api/platform/nav-presets";
 const NAV_PRESETS_SELECTION_PATH = "/api/platform/nav-presets/selection";
+const NAV_ADMIN_CONFIG_PATH = "/api/platform/nav-admin/config";
+const NAV_ADMIN_TENANT_ALLOWANCE_PATH = "/api/platform/nav-admin/tenant-allowance";
+const NAV_ADMIN_USER_ALLOWLIST_PATH = "/api/platform/nav-admin/user-allowlist";
+const NAV_ADMIN_PERSONA_DEFAULT_PATH = "/api/platform/nav-admin/persona-default";
 
 /**
  * #6151 S2 — the active (unexpired) subscription product ids for
@@ -218,6 +242,16 @@ function presetStoreFromDeps(deps: NavRouteDeps | undefined, env: Env): NavPrese
   return deps?.presets !== undefined ? deps.presets : createNavPresetAdapter(env);
 }
 
+/** The admin-config store for this call: injected, built from env, or null when unbound. */
+function adminConfigStoreFromDeps(
+  deps: NavRouteDeps | undefined,
+  env: Env,
+): NavAdminConfigStore | null {
+  return deps?.adminConfig !== undefined
+    ? deps.adminConfig
+    : createNavAdminConfigAdapter(env);
+}
+
 function jsonError(code: string, error: string, status: number): Response {
   return Response.json({ ok: false, code, error }, { status });
 }
@@ -248,6 +282,7 @@ async function authenticateNavCaller(request: Request, env: Env) {
 
 interface NavCaller {
   userId: string;
+  tenantId: string;
   tier: StoreTier;
   persona: NavPersona;
   commercial: CommercialStore;
@@ -327,6 +362,7 @@ async function resolveNavCaller(
   );
   return {
     userId,
+    tenantId: result.context.tenantId,
     tier,
     persona,
     commercial,
@@ -343,11 +379,17 @@ async function resolveNavCaller(
  * out-of-band) falls back to the stored map / default — the read
  * path heals it, so no partial state is ever visible. A missing
  * or unreadable preset store degrades to the persona default.
+ *
+ * #6151 S4 — when saved presets are disallowed for the caller
+ * (their allow-list says so), the active preset is ignored: the
+ * base falls back to the stored custom map / persona default, so
+ * a disallowed preset never resurrects a tab.
  */
 async function loadNavBase(
   presets: NavPresetStore | null,
   userId: string,
   personaDefault: string,
+  savedPresetsAllowed = true,
 ): Promise<{ base: Record<string, boolean>; activePresetId: string | null }> {
   const fallback = {
     base: expandPresetKey(personaDefault),
@@ -361,7 +403,7 @@ async function loadNavBase(
     return fallback;
   }
   if (!state) return fallback;
-  if (state.activePresetId) {
+  if (state.activePresetId && savedPresetsAllowed) {
     let preset: Awaited<ReturnType<NavPresetStore["getPreset"]>> = null;
     try {
       preset = await presets.getPreset(userId, state.activePresetId);
@@ -377,6 +419,92 @@ async function loadNavBase(
     return { base: normalizePresetMap(state.map), activePresetId: null };
   }
   return fallback;
+}
+
+// ---------------------------------------------------------------------------
+// #6151 S4 — tenant allowance + per-user allow-list narrowing.
+// ---------------------------------------------------------------------------
+
+/**
+ * The caller's S4 narrowing rows, read once per call. Admin
+ * personas bypass the narrowing (they see the entire menu), so
+ * both rows read null for them; an unbound or unreadable store
+ * also reads null — "no row means no narrowing", the same degrade
+ * direction as the subscription read below.
+ */
+async function readCallerAdminNarrowing(args: {
+  adminConfig: NavAdminConfigStore | null;
+  tenantId: string;
+  userId: string;
+  persona: NavPersona;
+  env: Env;
+}): Promise<{
+  allowance: Awaited<ReturnType<NavAdminConfigStore["getTenantAllowance"]>>;
+  allowlist: Awaited<ReturnType<NavAdminConfigStore["getUserAllowlist"]>>;
+}> {
+  const none = { allowance: null, allowlist: null };
+  const { adminConfig, tenantId, userId, persona, env } = args;
+  if (!adminConfig) return none;
+  if (persona === "platform-admin" || persona === "tenant-admin") return none;
+  try {
+    const [allowance, allowlist] = await Promise.all([
+      adminConfig.getTenantAllowance(tenantId),
+      adminConfig.getUserAllowlist(userId),
+    ]);
+    return { allowance, allowlist };
+  } catch (err) {
+    const structuredLog = createStructuredLogger(createObservabilitySink(env), {
+      component: "server/routes/nav",
+    });
+    structuredLog.warn("nav.admin_config_read_failed", {
+      message: `[nav-availability] admin-config read failed; serving the map ungated by allowance/allow-list: ${err instanceof Error ? err.message : String(err)}`,
+      persona,
+    });
+    return none;
+  }
+}
+
+/**
+ * Intersect a base map with the caller's allowance and allow-list.
+ * Pure — the S4 test pins the intersection through the endpoint.
+ * An absent row means no narrowing for that layer.
+ */
+function applyAdminNarrowing(
+  base: Record<string, boolean>,
+  allowance: Awaited<ReturnType<NavAdminConfigStore["getTenantAllowance"]>>,
+  allowlist: Awaited<ReturnType<NavAdminConfigStore["getUserAllowlist"]>>,
+): Record<string, boolean> {
+  const out: Record<string, boolean> = { ...base };
+  if (allowance) {
+    const allowed = new Set(allowance.allowedIds);
+    for (const id of Object.keys(out)) out[id] = out[id] && allowed.has(id);
+  }
+  if (allowlist) {
+    const allowed = new Set(allowlist.allowedIds);
+    for (const id of Object.keys(out)) out[id] = out[id] && allowed.has(id);
+  }
+  return out;
+}
+
+/**
+ * The caller's effective persona-default preset key: the S4
+ * stored override when one exists for the persona, else the
+ * shipped config. A missing/unreadable store degrades to the
+ * shipped config, so an edit takes effect on the next load with
+ * no redeploy — and a store outage never changes the default.
+ */
+async function effectivePersonaDefaultPresetKey(
+  adminConfig: NavAdminConfigStore | null,
+  persona: NavPersona,
+): Promise<string> {
+  if (!adminConfig) return personaDefaultPresetKey(persona);
+  try {
+    const override = await adminConfig.getPersonaDefault(persona);
+    if (override) return override.presetKey;
+  } catch {
+    // Degrade to shipped.
+  }
+  return personaDefaultPresetKey(persona);
 }
 
 /**
@@ -474,15 +602,26 @@ async function handleNavAvailability(
   if (request.method !== "GET") return methodNotAllowed();
   const caller = await resolveNavCaller(request, env, "nav-availability", deps);
   if (caller instanceof Response) return caller;
-  const { userId, tier, persona, subscriptions, nowMs } = caller;
-  const personaDefault = personaDefaultPresetKey(persona);
+  const { userId, tenantId, tier, persona, subscriptions, nowMs } = caller;
+  const adminConfig = adminConfigStoreFromDeps(deps, env);
+  const personaDefault = await effectivePersonaDefaultPresetKey(adminConfig, persona);
   const presets = presetStoreFromDeps(deps, env);
-  const { base } = await loadNavBase(presets, userId, personaDefault);
+  // The allow-list is read before the base: a disallowed saved
+  // preset must not become the base in the first place.
+  const narrowing = await readCallerAdminNarrowing({
+    adminConfig,
+    tenantId,
+    userId,
+    persona,
+    env,
+  });
+  const savedPresetsAllowed = narrowing.allowlist?.savedPresetsAllowed ?? true;
+  const { base } = await loadNavBase(presets, userId, personaDefault, savedPresetsAllowed);
   const mapping =
     deps?.productMenuMapping !== undefined
       ? deps.productMenuMapping
       : productMenuMapping();
-  const visibleTabs = await gateNavBase({
+  const gated = await gateNavBase({
     base,
     persona,
     subscriptions,
@@ -491,7 +630,10 @@ async function handleNavAvailability(
     nowMs,
     env,
   });
-  const savedIds = await listSavedPresetIds(presets, userId);
+  const visibleTabs = applyAdminNarrowing(gated, narrowing.allowance, narrowing.allowlist);
+  const savedIds = savedPresetsAllowed
+    ? await listSavedPresetIds(presets, userId)
+    : [];
   const body: NavAvailabilityResponse = {
     ok: true,
     visibleTabs,
@@ -607,7 +749,7 @@ async function handleNavPresetSelection(
     deps?.productMenuMapping !== undefined
       ? deps.productMenuMapping
       : productMenuMapping();
-  const visibleTabs = await gateNavBase({
+  const gated = await gateNavBase({
     base: normalized,
     persona: caller.persona,
     subscriptions: caller.subscriptions,
@@ -616,6 +758,18 @@ async function handleNavPresetSelection(
     nowMs: caller.nowMs,
     env,
   });
+  // #6151 S4 — the returned map is capped by the allowance /
+  // allow-list exactly like the availability read; the stored
+  // selection keeps the full map (filtering is at read time).
+  const adminConfig = adminConfigStoreFromDeps(deps, env);
+  const narrowing = await readCallerAdminNarrowing({
+    adminConfig,
+    tenantId: caller.tenantId,
+    userId: caller.userId,
+    persona: caller.persona,
+    env,
+  });
+  const visibleTabs = applyAdminNarrowing(gated, narrowing.allowance, narrowing.allowlist);
   await presets.ensureSchema();
   await presets.setState(caller.userId, { activePresetId: null, map: normalized });
   return Response.json({ ok: true, visibleTabs });
@@ -675,6 +829,24 @@ async function handleNavPresetAction(
       503,
     );
   }
+  // #6151 S4 — a per-user allow-list with saved presets
+  // disallowed refuses the apply outright: the preset never
+  // becomes the active selection.
+  const adminConfig = adminConfigStoreFromDeps(deps, env);
+  const narrowing = await readCallerAdminNarrowing({
+    adminConfig,
+    tenantId: caller.tenantId,
+    userId: caller.userId,
+    persona: caller.persona,
+    env,
+  });
+  if (narrowing.allowlist && narrowing.allowlist.savedPresetsAllowed === false) {
+    return jsonError(
+      "FAILURE_NAV_PRESET_NOT_ALLOWED",
+      "Saved presets are not available for this user.",
+      403,
+    );
+  }
   try {
     await presets.ensureSchema();
     const preset = await presets.getPreset(caller.userId, id);
@@ -689,7 +861,7 @@ async function handleNavPresetAction(
       deps?.productMenuMapping !== undefined
         ? deps.productMenuMapping
         : productMenuMapping();
-    const visibleTabs = await gateNavBase({
+    const gated = await gateNavBase({
       base: normalizePresetMap(preset.map),
       persona: caller.persona,
       subscriptions: caller.subscriptions,
@@ -698,6 +870,10 @@ async function handleNavPresetAction(
       nowMs: caller.nowMs,
       env,
     });
+    // #6151 S4 — the returned map is capped by the allowance /
+    // allow-list exactly like the availability read (the narrowing
+    // was read above, before the apply refusal).
+    const visibleTabs = applyAdminNarrowing(gated, narrowing.allowance, narrowing.allowlist);
     await presets.setState(caller.userId, {
       activePresetId: preset.id,
       map: normalizePresetMap(preset.map),
@@ -744,6 +920,413 @@ async function handleNavPresetDelete(
   });
 }
 
+// ---------------------------------------------------------------------------
+// #6151 S4 — admin-config routes (parts 4, 5, 6-UX).
+//
+// Who may write what (enforced here, server-side — the screens
+// only reflect it):
+// - Tenant allowances: platform admin only.
+// - Per-user allow-lists: platform admin (any user) or tenant
+//   admin (only users holding a live membership in the caller's
+//   own tenant). The row's tenant is derived server-side, never
+//   trusted from the client for a tenant-admin write.
+// - Persona defaults: platform admin only (they are platform-wide).
+// The tenant-allowance cap is enforced again in the store
+// (setUserAllowlist refuses an exceeding write), so the route and
+// the store agree about what a write may do.
+// ---------------------------------------------------------------------------
+
+/** Map an admin-config BusinessError code to its HTTP status. */
+function adminConfigErrorStatus(code: string): number {
+  if (
+    code === "FAILURE_NAV_ALLOWLIST_EXCEEDS_ALLOWANCE" ||
+    code === "FAILURE_NAV_ADMIN_FORBIDDEN"
+  ) {
+    return 403;
+  }
+  if (code === "FAILURE_NAV_ADMIN_REQUEST_INVALID") return 400;
+  return 500;
+}
+
+/** The live (non-revoked) tenant ids a user holds memberships in. */
+async function liveTenantIdsForUser(
+  membershipStore: MembershipStore,
+  userId: string,
+): Promise<Set<string>> {
+  const memberships = await membershipStore.getMembershipsByUser(userId);
+  return new Set(
+    memberships
+      .filter((m) => m.revokedAtMs === undefined)
+      .map((m) => m.tenantId),
+  );
+}
+
+/**
+ * The live member user ids per tenant, from the membership
+ * listing (the #1758 list-all source). The admin screen picks
+ * allow-list targets from this list — a tenant admin cannot use
+ * the IAAA memberships endpoint (platform-admin gated), so the
+ * list rides the admin-config read instead. A listing failure
+ * degrades to null (the screen falls back to a typed user id).
+ */
+async function listTenantMemberUserIds(
+  env: Env,
+): Promise<Map<string, string[]> | null> {
+  const entries = await listSessionFamilyEntries(env, "iaaa-membership:");
+  if (!entries) return null;
+  const byTenant = new Map<string, Set<string>>();
+  for (const membership of listMembershipsFromEntries(entries)) {
+    if (membership.revokedAtMs !== undefined) continue;
+    const set = byTenant.get(membership.tenantId) ?? new Set<string>();
+    set.add(membership.internalUserId);
+    byTenant.set(membership.tenantId, set);
+  }
+  const out = new Map<string, string[]>();
+  for (const [tenantId, ids] of [...byTenant.entries()].sort()) {
+    out.set(tenantId, [...ids].sort());
+  }
+  return out;
+}
+
+async function handleNavAdminConfig(
+  request: Request,
+  env: Env,
+  deps?: NavRouteDeps,
+): Promise<Response> {
+  if (request.method !== "GET") return methodNotAllowed();
+  const caller = await resolveNavCaller(request, env, "nav-admin-config", deps);
+  if (caller instanceof Response) return caller;
+  if (caller.persona !== "platform-admin" && caller.persona !== "tenant-admin") {
+    return jsonError(
+      "FAILURE_NAV_ADMIN_FORBIDDEN",
+      "Admin access required.",
+      403,
+    );
+  }
+  const adminConfig = adminConfigStoreFromDeps(deps, env);
+  const scope = caller.persona === "platform-admin" ? "platform" : "tenant";
+  // The effective default per persona: the stored override when
+  // one exists, else the shipped config — the same read the
+  // availability endpoint performs, so the screen never shows a
+  // default the endpoint would not use.
+  const personaDefaults = [];
+  for (const persona of NAV_PERSONAS) {
+    let presetKey = personaDefaultPresetKey(persona);
+    let overridden = false;
+    if (adminConfig) {
+      try {
+        const row = await adminConfig.getPersonaDefault(persona);
+        if (row) {
+          presetKey = row.presetKey;
+          overridden = true;
+        }
+      } catch {
+        // Degrade to shipped.
+      }
+    }
+    personaDefaults.push({ persona, presetKey, overridden });
+  }
+  if (!adminConfig) {
+    return Response.json({
+      ok: true,
+      scope,
+      tenantId: caller.tenantId,
+      allowances: [],
+      allowlists: [],
+      personaDefaults,
+      tenantMembers: [],
+    });
+  }
+  try {
+    await adminConfig.ensureSchema();
+    let allowances: Awaited<
+      ReturnType<NavAdminConfigStore["listTenantAllowances"]>
+    > = [];
+    let allowlists: Awaited<
+      ReturnType<NavAdminConfigStore["listUserAllowlists"]>
+    > = [];
+    if (scope === "platform") {
+      allowances = await adminConfig.listTenantAllowances();
+      allowlists = await adminConfig.listUserAllowlists();
+    } else {
+      const allowance = await adminConfig.getTenantAllowance(caller.tenantId);
+      allowances = allowance ? [allowance] : [];
+      allowlists = await adminConfig.listUserAllowlists(caller.tenantId);
+    }
+    // Member user ids in scope, for the allow-list target picker.
+    // A listing failure degrades to an empty list (the screen
+    // falls back to a typed user id).
+    let tenantMembers: { tenantId: string; userIds: string[] }[] = [];
+    try {
+      const members = await listTenantMemberUserIds(env);
+      if (members) {
+        const entries = [...members.entries()].map(([tenantId, userIds]) => ({
+          tenantId,
+          userIds,
+        }));
+        tenantMembers =
+          scope === "platform"
+            ? entries
+            : entries.filter((entry) => entry.tenantId === caller.tenantId);
+      }
+    } catch {
+      tenantMembers = [];
+    }
+    return Response.json({
+      ok: true,
+      scope,
+      tenantId: caller.tenantId,
+      allowances,
+      allowlists,
+      personaDefaults,
+      tenantMembers,
+    });
+  } catch (err) {
+    const structuredLog = createStructuredLogger(createObservabilitySink(env), {
+      component: "server/routes/nav",
+    });
+    structuredLog.warn("nav.admin_config_list_failed", {
+      message: `[nav-admin-config] admin config list failed; serving empty: ${err instanceof Error ? err.message : String(err)}`,
+    });
+    return Response.json({
+      ok: true,
+      scope,
+      tenantId: caller.tenantId,
+      allowances: [],
+      allowlists: [],
+      personaDefaults,
+      tenantMembers: [],
+    });
+  }
+}
+
+async function handleNavAdminTenantAllowance(
+  request: Request,
+  env: Env,
+  deps?: NavRouteDeps,
+): Promise<Response> {
+  if (request.method !== "PUT") return methodNotAllowed();
+  const caller = await resolveNavCaller(request, env, "nav-admin-tenant-allowance", deps);
+  if (caller instanceof Response) return caller;
+  if (caller.persona !== "platform-admin") {
+    return jsonError(
+      "FAILURE_NAV_ADMIN_FORBIDDEN",
+      "Only a platform admin writes tenant allowances.",
+      403,
+    );
+  }
+  const adminConfig = adminConfigStoreFromDeps(deps, env);
+  if (!adminConfig) {
+    return jsonError(
+      "FAILURE_NAV_ADMIN_STORE_UNAVAILABLE",
+      "Admin config is unavailable.",
+      503,
+    );
+  }
+  const body = await readJsonBody(request);
+  if (!body || typeof body.tenantId !== "string" || !Array.isArray(body.allowedIds)) {
+    return jsonError(
+      "FAILURE_NAV_ADMIN_REQUEST_INVALID",
+      "A tenant allowance needs a tenant id and an id list.",
+      400,
+    );
+  }
+  try {
+    const tenantId = assertNavAdminId(body.tenantId);
+    await adminConfig.ensureSchema();
+    const allowance = await adminConfig.setTenantAllowance(
+      tenantId,
+      body.allowedIds as string[],
+      caller.userId,
+    );
+    return Response.json({ ok: true, allowance });
+  } catch (err) {
+    const code =
+      err instanceof BusinessError ? err.code : "FAILURE_NAV_ADMIN_REQUEST_INVALID";
+    return jsonError(code, code, adminConfigErrorStatus(code));
+  }
+}
+
+async function handleNavAdminUserAllowlist(
+  request: Request,
+  env: Env,
+  deps?: NavRouteDeps,
+): Promise<Response> {
+  if (request.method !== "PUT") return methodNotAllowed();
+  const caller = await resolveNavCaller(request, env, "nav-admin-user-allowlist", deps);
+  if (caller instanceof Response) return caller;
+  if (caller.persona !== "platform-admin" && caller.persona !== "tenant-admin") {
+    return jsonError(
+      "FAILURE_NAV_ADMIN_FORBIDDEN",
+      "Only an admin writes per-user allow-lists.",
+      403,
+    );
+  }
+  const adminConfig = adminConfigStoreFromDeps(deps, env);
+  if (!adminConfig) {
+    return jsonError(
+      "FAILURE_NAV_ADMIN_STORE_UNAVAILABLE",
+      "Admin config is unavailable.",
+      503,
+    );
+  }
+  const body = await readJsonBody(request);
+  if (
+    !body ||
+    typeof body.userId !== "string" ||
+    !Array.isArray(body.allowedIds) ||
+    (body.savedPresetsAllowed !== undefined &&
+      typeof body.savedPresetsAllowed !== "boolean")
+  ) {
+    return jsonError(
+      "FAILURE_NAV_ADMIN_REQUEST_INVALID",
+      "An allow-list needs a user id, an id list, and an optional saved-presets flag.",
+      400,
+    );
+  }
+  try {
+    const targetUserId = assertNavAdminId(body.userId);
+    // The row's tenant is derived server-side. A tenant admin
+    // writes only users holding a live membership in their own
+    // tenant; a platform admin may name a tenant, else the
+    // target's first live membership tenant (null when the user
+    // holds no tenant membership).
+    let tenantId: string | null;
+    if (caller.persona === "tenant-admin") {
+      const live = await liveTenantIdsForUser(caller.membershipStore, targetUserId);
+      if (!live.has(caller.tenantId)) {
+        return jsonError(
+          "FAILURE_NAV_ADMIN_FORBIDDEN",
+          "The user is not a member of your tenant.",
+          403,
+        );
+      }
+      tenantId = caller.tenantId;
+    } else if (typeof body.tenantId === "string" && body.tenantId.trim().length > 0) {
+      tenantId = body.tenantId.trim();
+    } else {
+      const live = await liveTenantIdsForUser(caller.membershipStore, targetUserId);
+      tenantId = [...live].sort()[0] ?? null;
+    }
+    await adminConfig.ensureSchema();
+    const allowlist = await adminConfig.setUserAllowlist(
+      targetUserId,
+      {
+        tenantId,
+        allowedIds: body.allowedIds as string[],
+        savedPresetsAllowed:
+          typeof body.savedPresetsAllowed === "boolean"
+            ? body.savedPresetsAllowed
+            : undefined,
+      },
+      caller.userId,
+    );
+    return Response.json({ ok: true, allowlist });
+  } catch (err) {
+    const code =
+      err instanceof BusinessError ? err.code : "FAILURE_NAV_ADMIN_REQUEST_INVALID";
+    return jsonError(code, code, adminConfigErrorStatus(code));
+  }
+}
+
+async function handleNavAdminPersonaDefault(
+  request: Request,
+  env: Env,
+  deps?: NavRouteDeps,
+): Promise<Response> {
+  if (request.method !== "PUT") return methodNotAllowed();
+  const caller = await resolveNavCaller(request, env, "nav-admin-persona-default", deps);
+  if (caller instanceof Response) return caller;
+  if (caller.persona !== "platform-admin") {
+    return jsonError(
+      "FAILURE_NAV_ADMIN_FORBIDDEN",
+      "Only a platform admin edits persona defaults.",
+      403,
+    );
+  }
+  const adminConfig = adminConfigStoreFromDeps(deps, env);
+  if (!adminConfig) {
+    return jsonError(
+      "FAILURE_NAV_ADMIN_STORE_UNAVAILABLE",
+      "Admin config is unavailable.",
+      503,
+    );
+  }
+  const body = await readJsonBody(request);
+  if (!body || !isNavPersona(body.persona) || typeof body.presetKey !== "string") {
+    return jsonError(
+      "FAILURE_NAV_ADMIN_REQUEST_INVALID",
+      "A persona default needs a persona and a built-in preset key.",
+      400,
+    );
+  }
+  try {
+    const presetKey = assertPersonaPresetKey(body.presetKey);
+    await adminConfig.ensureSchema();
+    const personaDefault = await adminConfig.setPersonaDefault(
+      body.persona,
+      presetKey,
+      caller.userId,
+    );
+    return Response.json({ ok: true, personaDefault });
+  } catch (err) {
+    const code =
+      err instanceof BusinessError ? err.code : "FAILURE_NAV_ADMIN_REQUEST_INVALID";
+    return jsonError(code, code, adminConfigErrorStatus(code));
+  }
+}
+
+async function handleNavAdminPersonaDefaultDelete(
+  request: Request,
+  env: Env,
+  deps: NavRouteDeps | undefined,
+  persona: string,
+): Promise<Response> {
+  if (request.method !== "DELETE") return methodNotAllowed();
+  const caller = await resolveNavCaller(request, env, "nav-admin-persona-default", deps);
+  if (caller instanceof Response) return caller;
+  if (caller.persona !== "platform-admin") {
+    return jsonError(
+      "FAILURE_NAV_ADMIN_FORBIDDEN",
+      "Only a platform admin edits persona defaults.",
+      403,
+    );
+  }
+  if (!isNavPersona(persona)) {
+    return jsonError(
+      "FAILURE_NAV_ADMIN_REQUEST_INVALID",
+      "No such persona.",
+      400,
+    );
+  }
+  const adminConfig = adminConfigStoreFromDeps(deps, env);
+  if (!adminConfig) {
+    return jsonError(
+      "FAILURE_NAV_ADMIN_STORE_UNAVAILABLE",
+      "Admin config is unavailable.",
+      503,
+    );
+  }
+  await adminConfig.ensureSchema();
+  const deleted = await adminConfig.deletePersonaDefault(persona);
+  return Response.json({ ok: true, deleted });
+}
+
+/** Parse /api/platform/nav-admin/persona-default/:persona; null otherwise. */
+function matchNavAdminPersonaDefault(path: string): { persona: string } | null {
+  const parts = path.split("/").filter((p) => p.length > 0);
+  if (
+    parts.length === 5 &&
+    parts[0] === "api" &&
+    parts[1] === "platform" &&
+    parts[2] === "nav-admin" &&
+    parts[3] === "persona-default"
+  ) {
+    return { persona: parts[4] };
+  }
+  return null;
+}
+
 /** Parse /api/platform/nav-presets/:id[/apply|/rename]; null when the path is not a preset-action path. */
 function matchNavPresetAction(
   path: string,
@@ -785,6 +1368,27 @@ export async function handleNavRoutes(
   }
   if (path === NAV_PRESETS_SELECTION_PATH) {
     return handleNavPresetSelection(request, env, deps);
+  }
+  if (path === NAV_ADMIN_CONFIG_PATH) {
+    return handleNavAdminConfig(request, env, deps);
+  }
+  if (path === NAV_ADMIN_TENANT_ALLOWANCE_PATH) {
+    return handleNavAdminTenantAllowance(request, env, deps);
+  }
+  if (path === NAV_ADMIN_USER_ALLOWLIST_PATH) {
+    return handleNavAdminUserAllowlist(request, env, deps);
+  }
+  if (path === NAV_ADMIN_PERSONA_DEFAULT_PATH) {
+    return handleNavAdminPersonaDefault(request, env, deps);
+  }
+  const personaDefaultMatch = matchNavAdminPersonaDefault(path);
+  if (personaDefaultMatch) {
+    return handleNavAdminPersonaDefaultDelete(
+      request,
+      env,
+      deps,
+      personaDefaultMatch.persona,
+    );
   }
   const match = matchNavPresetAction(path);
   if (match) {
