@@ -236,7 +236,7 @@ describe("recreate + tenant isolation (#4282 P4)", () => {
     });
     // The report is truthful: everything before the failing step
     // executed, the failing step is named, everything after it is
-    // skipped — and the three counts sum to the 495 resolved steps.
+    // skipped — and the three counts sum to the 504 resolved steps.
     expect(partial.summary.failed).toBe(1);
     expect(partial.failed).toHaveLength(1);
     expect(partial.failed[0].code).toBe(UNIQUE_INDEX_CODE);
@@ -244,8 +244,8 @@ describe("recreate + tenant isolation (#4282 P4)", () => {
       partial.summary.executed +
         partial.summary.failed +
         partial.summary.skipped,
-    ).toBe(495);
-    expect(partial.summary.totalSteps).toBe(495);
+    ).toBe(504);
+    expect(partial.summary.totalSteps).toBe(504);
     // The degradation is VISIBLE, never silent: the post-run equality
     // check fails. The missing indexes are exactly the failed step's
     // index plus the indexes of the skipped steps (the run stopped in
