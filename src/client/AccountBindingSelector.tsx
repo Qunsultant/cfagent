@@ -61,6 +61,17 @@ function describeBindingFailure(data: BindingFailureBody, fallback: string): str
 export interface AccountBindingSelectorProps {
   broker: string;
   mode: "paper" | "live";
+  /**
+   * #6147 S2 — which half this mount shows first. The component holds
+   * both halves in one Card (bindings form + collapsible Registry
+   * Manager); the registry half is the same state and save path as
+   * the bindings half, so the slice mounts ONE component per view
+   * with this prop instead of splitting it. "registry" opens with
+   * the Registry Manager expanded; "binding" (default) opens with
+   * the bindings form and the registry collapsed. The user can still
+   * toggle between halves with the Manage Registry button.
+   */
+  section?: "registry" | "binding";
   initialBindings?: AccountBinding[];
   initialRegistry?: BrokerAssetAccountRegistry;
   availableAccounts?: Array<{ accountId: string; accountName?: string }>;
@@ -71,6 +82,7 @@ export interface AccountBindingSelectorProps {
 export function AccountBindingSelector({
   broker,
   mode,
+  section = "binding",
   initialBindings,
   initialRegistry,
   availableAccounts = [],
@@ -89,7 +101,8 @@ export function AccountBindingSelector({
   const [error, setError] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
-  const [showRegistryManager, setShowRegistryManager] = useState(false);
+  // #6147 S2: the registry view lands with the Registry Manager open.
+  const [showRegistryManager, setShowRegistryManager] = useState(section === "registry");
   const [newBrokerId, setNewBrokerId] = useState("");
   const [newBrokerLabel, setNewBrokerLabel] = useState("");
   const [newAssetType, setNewAssetType] = useState("");

@@ -440,6 +440,9 @@ export function isNavItemOrSubItemActive(
         // section tabs of `?tab=billing&view=<id>`. Issue 4682 adds
         // the Marketing Hub the same way: its three entries are the
         // referrals, ads, and social views of `?tab=marketing-hub`.
+        // #6147 S2 (#4681) adds Assets Hub the same way: its six
+        // entries are the forex, futures, commodities, bonds,
+        // registry, and binding views of `?tab=assets-hub`.
         if (
           (currentTab === "screeners" ||
             currentTab === "stock-hub" ||
@@ -447,6 +450,7 @@ export function isNavItemOrSubItemActive(
             currentTab === "audit-vault" ||
             currentTab === "marketing-hub" ||
             currentTab === "observability" ||
+            currentTab === "assets-hub" ||
             currentTab === "billing") &&
           view === sub.id
         )
