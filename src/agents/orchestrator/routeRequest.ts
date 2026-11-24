@@ -855,6 +855,9 @@ export async function routeRequest(deps: RouteRequestDeps, request: Request): Pr
   // delegation, before the maintenance block); a non-null return matched.
   const opportunityHuntResponse = await handleOpportunityHuntRoutes(request, url, path, sessionId, {
     env: deps.env,
+    // Issue 6406 — the hunt's holdings read reuses the broker-reads blocks.
+    getOrm: () => deps.getOrm(),
+    readSettingRaw: (key) => deps.readSettingRaw(key),
   });
   if (opportunityHuntResponse) return opportunityHuntResponse;
   // Issue #2280: maintenance routes run before the schedules routes.
