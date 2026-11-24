@@ -1242,6 +1242,27 @@ export async function handleReportsRoutes(
       // to the ledger-backed detail (lineage.captureIds carries the
       // scan id, formats carry the scan's documents).
       let summary = merged.find((r) => r.runId === wanted || r.id === wanted || r.scanRunId === wanted);
+      if (!summary && ledgerReadMode !== "d1-only") {
+        // Issue #6372 — the Docs panel fetches this endpoint by the canonical
+        // row's REPORT id, and the merged lists are a newest-100 window: a row
+        // that exists but sits outside that window 404'd by construction (the
+        // lookup also never matched a bare report id). Read the row by its own
+        // id from the same store the list is built from, under the same owner
+        // scope, and treat it exactly as a listed row. In d1-only mode the DO
+        // read is forbidden by the mode, so the projection half stays with
+        // #4116 rather than being bypassed here.
+        const { getScheduledReportById, resolveCanonicalReportBodyWithBackfill } = await import("../../services/scheduledReports");
+        const { runSummaryFromReport } = await import("../../services/runSummaries");
+        const direct = getScheduledReportById(sql, wanted, reportLogin ? { userLogin: reportLogin } : {});
+        if (direct) {
+          const withBody = {
+            ...direct,
+            body: (await resolveCanonicalReportBodyWithBackfill(sql, (ctx as any).env || {}, direct)) ?? "",
+          };
+          bodies.set(withBody.id, withBody.body);
+          summary = runSummaryFromReport(withBody);
+        }
+      }
       if (!summary && ledgerReadMode === "d1-only") {
         // A twin job-run-record id resolves to the canonical
         // report's detail — the twin is absorbed into it in
