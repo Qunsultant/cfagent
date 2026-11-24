@@ -127,6 +127,7 @@ import { postSlackText } from "./resourceGoals";
 import { codedMessage, renderChannelText } from "../outcomes/outcomeAspects";
 import type { DoNamespaceLike } from "../data/durableKv";
 import { createKvMembershipStore } from "../security/iaaaMembershipStore";
+import { readResearchConfig, writeResearchConfig } from "./orchestrator/researchConfigDoor";
 import { isLoginShaped } from "../security/serviceIdentity";
 import { sessionStore } from "../security/session";
 import {
@@ -963,6 +964,11 @@ export class OrchestratorAgent extends PortThink {
    * ResearchAgent stub (issue #319) — one agent owns options research.
    * Per-tenant instance id: research:<userLogin>.
    */
+  /** Issue #5976 — the chat/MCP config door (execution in researchConfigDoor.ts). */
+  async researchConfigForMcp(userLogin: string | undefined, patch?: Record<string, unknown>) {
+    return patch === undefined ? readResearchConfig(this.getResearchAgent(userLogin)) : writeResearchConfig(this.getResearchAgent(userLogin), patch);
+  }
+
   private getResearchAgent(userLogin?: string): ResearchAgent | null {
     const ns = this.env.RESEARCH_AGENT;
     if (!ns) return null;

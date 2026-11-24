@@ -191,6 +191,7 @@ import {
 import {
   RunResearchJobCommand,
   DefinePipelineChainCommand,
+  ResearchConfigCommand,
 } from "./researchJobCommands";
 import {
   RunGenerateJobCommand,
@@ -1968,6 +1969,7 @@ export class McpToolFactory {
 
     // Nightly OODA research & runtime pipeline-chain definition (#5117)
     this.registerTool(new RunResearchJobCommand());
+    this.registerTool(new ResearchConfigCommand());
     this.registerTool(new DefinePipelineChainCommand());
 
     // Cloudflare Agents Advanced Capabilities (Browser, Webhooks, Sandbox, Think, AI Search, Fibers)
