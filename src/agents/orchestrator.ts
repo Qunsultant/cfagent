@@ -762,8 +762,7 @@ export class OrchestratorAgent extends PortThink {
       ensureTables: () => this.ensureTables(),
       sessionKey: () => this.sessionKey(),
       schedule: (when, callback, payload, options) => this.schedule(when, callback as keyof this, payload, options),
-      // Issue #6100: forwards an explicit caller envelope (tenant /
-      // correlation the submission already resolved) to the boundary.
+      // Issue #6100: forward the caller's resolved envelope.
       audit: (type, agent, payload, envelope) => this.audit(type, agent, payload, envelope),
       getOrm: () => this.getOrm(),
       routeRequest: (request) => this.routeRequest(request),
@@ -2634,12 +2633,9 @@ export class OrchestratorAgent extends PortThink {
    * Single owner of audit-row inserts (issue #270): this.audit() and the
    * POST /audit/event route both funnel through here.
    * Issue #2178 (Q7 S1): via the chained events Repository, not raw SQL.
-   * Issue #6100: stamps the attribution envelope at this boundary.
-   * The trace id is the in-flight turn's traceparent trace id (null
-   * outside a turn — never fabricated); the principal is the turn's
-   * userLogin; tenant and correlation come only from an explicit
-   * caller override (submitAsyncJob) — never invented. The platform
-   * id is deployment config (PLATFORM_ID, default "cfagent").
+   * Issue #6100: stamps the attribution envelope here — trace id from the
+   * turn's traceparent (null, never fabricated), principal from its login,
+   * tenant/correlation from an explicit caller override only.
    */
   private recordAudit(
     type: string,
@@ -2663,9 +2659,7 @@ export class OrchestratorAgent extends PortThink {
     );
     orm.events.create({
       id,
-      // Issue #6100: the session is the boundary's own key — always
-      // present, so it is stamped from sessionKey() directly rather
-      // than through the nullable envelope field.
+      // Issue #6100: the session is this boundary's own key.
       sessionId: this.sessionKey(),
       type,
       agent: agent as AuditEvent["agent"],
