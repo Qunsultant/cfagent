@@ -3926,7 +3926,13 @@ export class OrchestratorAgent extends PortThink {
     // The Worker strips the /api prefix when forwarding and marks queue-eligible requests.
     const isMcpEndpoint = /\/mcp(?:\/|$)/i.test(path);
     const isScheduleEndpoint = /(?:^|\/)(?:api\/)?schedules(?:\/|$)/i.test(path);
-    const isImmediateEndpoint = /(?:^|\/)(?:api\/)?(?:clear|reset|memory|audit|chat|chat-activity|screener|etrade\/options\/strategy|etrade|broker|trading|options|research|workflow-runs|external-ads|categories|referrals|revenue|ads|platform|environment)(?:\/|$)/i.test(path);
+    // Issue #6293 — the Opportunity Hunt run seam is a seconds-long pure
+    // computation over persisted bars (the route runs it synchronously
+    // and returns the full result), so it is immediate like the other
+    // fast seams. Without this prefix the DO entry queued every panel
+    // Run as an `http.request` async job behind a 10-minute poll, and
+    // an orphaned or slow job left the hunt with no result at all.
+    const isImmediateEndpoint = /(?:^|\/)(?:api\/)?(?:clear|reset|memory|audit|chat|chat-activity|screener|etrade\/options\/strategy|etrade|broker|trading|options|opportunity-hunt|research|workflow-runs|external-ads|categories|referrals|revenue|ads|platform|environment)(?:\/|$)/i.test(path);
     const isJobsEndpoint = /(?:^|\/api)\/jobs(?:\/|$)/.test(path);
     const isApiRequest = path.startsWith("/api/") || request.headers.get("x-async-eligible") === "1";
     // #1724: HTTP_DELIVERY_MODE over the queue decision (run =

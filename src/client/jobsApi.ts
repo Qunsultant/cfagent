@@ -120,11 +120,17 @@ export type PresetGoalResult =
   | { id: string; status: "skipped"; reason: string }
   | { id: string; status: "failed"; error: string };
 
+/** The error `api` throws: the message plus the HTTP status and the parsed body, so a caller can classify the outcome structurally (issue #6293 — the hunt panel renders the catalog message for a 408/500 via `asyncJobErrorCode`, never the raw transport text). Same shape as the dataProvidersApi pattern. */
+export type ApiFailure = Error & { status?: number; data?: unknown };
+
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, withCsrfInit(init));
   const data = (await res.json().catch(() => ({}))) as any;
   if (!res.ok || data.ok === false || data.success === false) {
-    throw new Error(data.error || `HTTP ${res.status}`);
+    const err = new Error(data.error || `HTTP ${res.status}`) as ApiFailure;
+    err.status = res.status;
+    err.data = data;
+    throw err;
   }
   return data as T;
 }
