@@ -59,6 +59,9 @@ const SECTION_LABELS = [
   "Deactivate",
   "Access requests",
   "Audit events",
+  // #5160 adds the "Identity profile" section (attribute set +
+  // retention config, platform-admin only).
+  "Identity profile",
 ];
 
 let root: Root | null = null;
@@ -120,7 +123,7 @@ afterEach(async () => {
 });
 
 describe("IAAA admin overview sub-tabs (#4821)", () => {
-  it("Overview renders the nine section sub-tabs and starts on Summary", async () => {
+  it("Overview renders the ten section sub-tabs and starts on Summary", async () => {
     await renderPanel();
     expect(sectionTabLabels()).toEqual(SECTION_LABELS);
     // Summary: tenant summary + genesis, no other section mounted.

@@ -404,9 +404,27 @@ const ORCH = "agents/orchestrator.ts";
  *  3,843 lines / 176,028 B on the branch tree. Budget lines rise
  *  to 4040 and bytes rise to 184_900 — measured + ~5% headroom,
  *  the pin's convention — so the pin still fails on any further
- *  unintentional regrowth. */
-const BUDGET_LINES = 4040;
-const BUDGET_BYTES = 184_900;
+ *  unintentional regrowth.
+ *  #6100 (attribution envelope) stamps the boundary in recordAudit
+ *  (the envelope resolve + authorisation override parameter + the
+ *  three call-site passthroughs; the stamping itself lives in
+ *  src/security/attributionEnvelope.ts) — measured 4,029 lines /
+ *  185,038 B on the rebased tree after the two added comments were
+ *  tightened, so budget bytes rise to 185_400, keeping ~360 B
+ *  headroom. Lines keep 4040 (measured 4,029).
+ *  #6006 (outcome fold) wires the job_outcomes claim-check into
+ *  projectQueuedRunLedger and the fold into recordFeedJobOutcome
+ *  (the projection itself lives in
+ *  src/services/runLedgerProjectionHooks.ts) — measured 4,064
+ *  lines / 186,709 B on the rebased tree, so budget lines rise to
+ *  4070 and bytes rise to 187_300 (~590 B headroom).
+ *  #5160 (IDP profile) adds the two thin get/setIdpProfileConfig
+ *  delegating wrappers + their imports (execution in
+ *  orchestrator/idpProfileConfig.ts; the class gains no logic) —
+ *  measured 4,078 lines / 187,445 B on the rebased tree, so
+ *  budget lines rise to 4080 and bytes rise to 187_900. */
+const BUDGET_LINES = 4080;
+const BUDGET_BYTES = 187_900;
 
 const count = (haystack: string, needle: string) =>
   haystack.split(needle).length - 1;

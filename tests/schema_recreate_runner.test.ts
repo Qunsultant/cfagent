@@ -144,8 +144,11 @@ describe("P5 runner — plan resolution (P4 finding 1: phased order)", () => {
     // Issue #5102 (F5 of #5094) adds migration 0084 (job_run_records
     // binding columns: 4 ALTERs + 1 index): 485 → 490.
     // #6151 S3 adds migration 0085 (saved nav presets: 2 tables + 2 indexes): 490 → 494.
-    // #5160 adds migration 0086 (IDP attributes profile: rebuild + index table): 494 → 500.
-    expect(p.steps).toHaveLength(500);
+    // Issue #6100 adds 5 mas_events envelope ALTERs + 4 indexes:
+    // 494 → 503. Issue #6006 adds migration 0086 (job_run_records
+    // outcome facts, 9 ALTERs): 503 → 512.
+    // #5160 adds migration 0087 (IDP attributes profile: rebuild + index table): 512 → 518.
+    expect(p.steps).toHaveLength(518);
     expect(p.skipped).toHaveLength(1);
     expect(p.skipped[0].code).toBe(SEED_FORM_CODE);
     expect(p.skipped[0].reason).toMatch(/call site/i);
@@ -184,8 +187,11 @@ describe("P5 runner — plan resolution (P4 finding 1: phased order)", () => {
     // Issue #5102 (F5 of #5094) adds migration 0084 (job_run_records
     // binding columns: 4 ALTERs + 1 index): 485 → 490.
     // #6151 S3 adds migration 0085 (saved nav presets: 2 tables + 2 indexes): 490 → 494.
-    // #5160 adds migration 0086 (IDP attributes profile: rebuild + index table): 494 → 500.
-    expect(harness).toHaveLength(500);    // Production move 1: the rebuild CREATE for agent_price_catalogue
+    // Issue #6100 adds 5 mas_events envelope ALTERs + 4 indexes:
+    // 494 → 503. Issue #6006 adds migration 0086 (job_run_records
+    // outcome facts, 9 ALTERs): 503 → 512.
+    // #5160 adds migration 0087 (IDP attributes profile: rebuild + index table): 512 → 518.
+    expect(harness).toHaveLength(518);    // Production move 1: the rebuild CREATE for agent_price_catalogue
     // must stay after the RENAME that clears its table (a second
     // table-creation for the same table cannot run before the rename
     // on real SQLite). Production move 2: the legacy seed is hoisted
@@ -206,18 +212,18 @@ describe("P5 runner — plan resolution (P4 finding 1: phased order)", () => {
     expected.splice(renameIdx + 1, 0, rebuild);
     // Move 2: the legacy seed goes just before the DROP.
     move(LEGACY_SEED_CODE, LEGACY_DROP_CODE);
-    // #5160: the same two moves for the m0086 rebuild
+    // #5160: the same two moves for the m0087 rebuild
     // (agent_user_profiles) — the moves are generic, not specific
     // to the v58 precedent.
-    const rebuild86Code = "schema.d1.agent_user_profiles.create_table_m0086";
-    const rebuild86Idx = expected.findIndex((s) => s.code === rebuild86Code);
-    const [rebuild86] = expected.splice(rebuild86Idx, 1);
-    const rename86Idx = expected.findIndex(
+    const rebuild87Code = "schema.d1.agent_user_profiles.create_table_m0087";
+    const rebuild87Idx = expected.findIndex((s) => s.code === rebuild87Code);
+    const [rebuild87] = expected.splice(rebuild87Idx, 1);
+    const rename87Idx = expected.findIndex(
       (s) =>
         s.code ===
         "schema.d1.agent_user_profiles.alter_table_rename_to_agent_user_profiles_legacy",
     );
-    expected.splice(rename86Idx + 1, 0, rebuild86);
+    expected.splice(rename87Idx + 1, 0, rebuild87);
     move(
       "seed.d1.agent_user_profiles.insert_from_legacy",
       "schema.d1.agent_user_profiles_legacy.drop_table",
@@ -349,16 +355,23 @@ describe("P5 runner — delta-to-steps selection (P4 finding 3, P4 finding 2)", 
     // 251 → 255 schema statements.
     // Issue #6141 adds migration 0082 (referral trial-extension: 6
     // rule columns + ledger table + 2 indexes): 255 → 264.
+    // Issue #6028 adds 2 stage-row steps on the D1 leg: 264 → 266.
+    // Issue #6100 adds 4 mas_events envelope indexes on the D1 leg:
+    // 266 → 270.
     // Issue #5100 (F3 of #5094) adds 4 mas_trades ORM ALTERs (the
     // binding columns): the projected-model walk already has them
     // (the ORM CREATE carries them), so they are skipped: 9 → 13.
     // Issue #5102 (F5 of #5094) adds migration 0084 (job_run_records
     // binding columns: 4 ALTERs + 1 index): 266 → 271.
     // #6151 S3 adds migration 0085 (saved nav presets: 2 tables + 2 indexes): 271 → 275.
-    // #5160 adds migration 0086 (IDP attributes profile: rebuild + index table): schema 275 → 280, seeds 12 → 13.
-    expect(selected.schema).toHaveLength(280);
+    // Issue #6100 adds 5 mas_events envelope ALTERs: the
+    // projected-model walk already has them (the ORM CREATE carries
+    // them), so the leg skips five more (13 → 18); its 4 indexes are
+    // selected: 275 → 279, plus #6006's 9 ALTERs: 279 → 288.
+    // #5160 adds migration 0087 (IDP attributes profile: rebuild + index table): schema 288 → 293, seeds 12 → 13.
+    expect(selected.schema).toHaveLength(293);
     expect(selected.seeds).toHaveLength(13);
-    expect(selected.skipped).toHaveLength(13);
+    expect(selected.skipped).toHaveLength(18);
     expect(
       codesOf(selected.skipped),
     ).toContain("schema.orm.mas_transactions.alter_table_add_column_tenant_id");
