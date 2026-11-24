@@ -93,7 +93,11 @@ describe("worker scheduled() social dispatch (Phase 5b slice 1)", () => {
       // Issue #2659 (Phase 2.4): the scheduled digest pass rides this tick.
       "/payments/agentic/commercial/lifecycle/digest/run-due",
       "/reflection/run",
-      "/research/scheduled-tick",
+      // Issue #6299 — the research tick rider is RETIRED: the OODA cadence is
+      // one stored schedule fired by the tick's own schedule evaluation
+      // (runPipelineJobSchedule), so this tick no longer names
+      // /research/scheduled-tick and there is no second scheduler. This entry
+      // leaving the pinned set is the change, not a missing fetch.
       "/schedules/record-cron-dispatch",
       // Issue #3527 (S4): the reports index-backfill sweep's own rider.
       "/trading/reports/index-backfill-sweep",
