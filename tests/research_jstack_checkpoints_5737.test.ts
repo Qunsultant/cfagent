@@ -42,7 +42,31 @@ describe("Issue #5737 / #5597 — OODA research runs on J-stack with durable SQL
       {
         getScreenerAgent: () => ({} as any),
         getScreenerExecutionContext: async () => undefined,
-        getResearchAgent: () => null,
+        // Issue #6355 — the feed/enrich stages now run for real (their
+        // steps carry userLogin), so the fixture provides the agent the
+        // production route always has. A null agent fails loudly at feed
+        // with research_stage_unavailable instead of silently completing
+        // the stages as not_configured.
+        getResearchAgent: () =>
+          ({
+            runFeedStage: async (input: { runId?: string }) => ({
+              runId: input.runId ?? "r1",
+              asOf: new Date().toISOString(),
+              regime: null,
+              universe: "nasdaq100",
+              universeError: null,
+              symbols: [],
+              quotes: [],
+              universeSize: 0,
+              quotesRetrieved: 0,
+            }),
+            runEnrichStage: async (feed: unknown, input: { runId?: string }) => ({
+              runId: input.runId ?? "r1",
+              asOf: new Date().toISOString(),
+              feed,
+              bySymbol: {},
+            }),
+          }) as any,
         runResearchAndPublish: async () => ({
           success: true,
           reportId: "rep_jstack_1",

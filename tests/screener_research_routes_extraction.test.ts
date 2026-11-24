@@ -52,7 +52,28 @@ const baseCtx = (
   ({
     getScreenerAgent: vi.fn(),
     getScreenerExecutionContext: vi.fn(async () => ({ userLogin: "test_user" })),
-    getResearchAgent: vi.fn(),
+    // Issue #6355 - the feed/enrich stages now run for real (their steps
+    // carry userLogin), so the fixture provides the agent the production
+    // route always has, with an empty feed/enrich.
+    getResearchAgent: vi.fn(() => ({
+      runFeedStage: async (input: { runId?: string }) => ({
+        runId: input.runId ?? "r1",
+        asOf: new Date().toISOString(),
+        regime: null,
+        universe: "nasdaq100",
+        universeError: null,
+        symbols: [],
+        quotes: [],
+        universeSize: 0,
+        quotesRetrieved: 0,
+      }),
+      runEnrichStage: async (feed: unknown, input: { runId?: string }) => ({
+        runId: input.runId ?? "r1",
+        asOf: new Date().toISOString(),
+        feed,
+        bySymbol: {},
+      }),
+    }) as any),
     runResearchAndPublish: vi.fn(async () => ({ success: true })),
     readSettingRaw: vi.fn(() => null),
     writeSetting: vi.fn(),
@@ -200,6 +221,10 @@ describe("screener + research behavior (extraction #378)", () => {
       runId: expect.stringMatching(/^run:[a-z0-9]+-[a-z0-9]+$/),
       brokerId: "alpaca",
       mode: "paper",
+      // Issue #6355 - feed/enrich now run, so the call carries them and stage.
+      feed: expect.objectContaining({ universe: "nasdaq100", quotes: [] }),
+      enrich: expect.objectContaining({ bySymbol: {} }),
+      stage: "analyze",
     });
     expect(await (res as Response).json()).toMatchObject({
       success: true,
@@ -224,6 +249,10 @@ describe("screener + research behavior (extraction #378)", () => {
       runId: expect.stringMatching(/^run:[a-z0-9]+-[a-z0-9]+$/),
       brokerId: "alpaca",
       mode: "paper",
+      // Issue #6355 - feed/enrich now run, so the call carries them and stage.
+      feed: expect.objectContaining({ universe: "nasdaq100", quotes: [] }),
+      enrich: expect.objectContaining({ bySymbol: {} }),
+      stage: "analyze",
     });
   });
 
@@ -255,7 +284,16 @@ describe("screener + research behavior (extraction #378)", () => {
       ctx
     );
     expect((res as Response).status).toBe(200);
-    expect(runResearchAndPublish).toHaveBeenCalledWith("scheduled", "cronbot");
+    expect(runResearchAndPublish).toHaveBeenCalledWith(
+      "scheduled",
+      "cronbot",
+      expect.objectContaining({
+        // Issue #6355 - feed/enrich now run, so the call carries them and stage.
+        feed: expect.objectContaining({ universe: "nasdaq100", quotes: [] }),
+        enrich: expect.objectContaining({ bySymbol: {} }),
+        stage: "analyze",
+      }),
+  );
     expect(writeSetting).toHaveBeenCalledWith("research:scheduled-last-run", "2026-10-19");
   });
 

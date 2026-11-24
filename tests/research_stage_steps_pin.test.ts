@@ -46,3 +46,26 @@ describe("research job — every stage runs its own step", () => {
     expect(definition.root.steps?.[0]?.step).toBe("noop");
   });
 });
+
+describe("research job — every stage's step carries the bound owner and trigger", () => {
+  it("passes userLogin, trigger and runId to feed / enrich / generate / deliver (issue #6355)", () => {
+    const children = definition.root.children ?? [];
+    for (const kind of ["feed", "enrich", "generate", "deliver"] as const) {
+      const child = children.find((c) => c.kind === kind)!;
+      const params = (child.steps?.[0]?.params ?? {}) as Record<string, unknown>;
+      expect(params.userLogin).toBe("trader@example.com");
+      expect(params.trigger).toBe("manual");
+      expect(params.runId).toBe("r-stage-pin");
+    }
+  });
+
+  it("keeps userLogin and trigger on analyze and evaluate too", () => {
+    const children = definition.root.children ?? [];
+    for (const kind of ["analyze", "evaluate"] as const) {
+      const child = children.find((c) => c.kind === kind)!;
+      const params = (child.steps?.[0]?.params ?? {}) as Record<string, unknown>;
+      expect(params.userLogin).toBe("trader@example.com");
+      expect(params.trigger).toBe("manual");
+    }
+  });
+});
