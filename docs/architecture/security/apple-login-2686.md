@@ -89,7 +89,10 @@ fields, alias record). A relay→real email change for one subject
 resolves to the same internal user (pinned by test: two logins,
 one relay, one real, same subject → same `actorPrincipalId` on
 both login-success audits). No flow keys on email, and a relay
-address is never treated as a real, stable address.
+address is never treated as a real, stable address. (Issue #5160,
+owner directive 2026-11-17: the relay address IS stored as an
+identifying attribute in the D1 user profile — the binding key
+stays (`https://appleid.apple.com`, `sub`).)
 
 ## Revocation: nothing to revoke (by construction)
 
