@@ -648,6 +648,10 @@ describe("census chat column vs the mesh-door command registry (#2421)", () => {
       // joins the mesh-door family as a standalone (no census door
       // class of its own; it routes on the OrchestratorAgent).
       "options_copilot_stage_control",
+      // #5976: the OODA config door — one command on the OrchestratorAgent
+      // (researchConfigForMcp), no census door class of its own, so it joins
+      // this family as a standalone exactly like #4066's stage-control door.
+      "research_config",
       "stock_copilot_status",
       "stock_copilot_control",
       "stock_copilot_introspect",
