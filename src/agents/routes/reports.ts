@@ -1270,7 +1270,11 @@ export async function handleReportsRoutes(
         const link = links.find((l) => l.jobRunId === wanted);
         if (link) summary = merged.find((r) => r.reportId === link.reportId || r.id === link.reportId);
       }
-      if (!summary) return Response.json({ error: "run not found" }, { status: 404 });
+      // The 404 names the read mode it judged by — the same field the
+      // 200 carries — so a live 404 for a row the panel just listed is
+      // discriminated on sight (projection vs. read window vs. owner
+      // scope, #6372) instead of needing a redeploy to tell them apart.
+      if (!summary) return Response.json({ error: "run not found", ledgerReadMode }, { status: 404 });
       const body = summary.reportId ? bodies.get(summary.reportId) : undefined;
       return Response.json({ detail: buildRunDetail({ ...summary, body }), ledgerReadMode });
     } catch (err: any) {
