@@ -136,7 +136,7 @@ describe("4204 migration 0073 — D1 job_run_records recent-read index", () => {
     );
   });
 
-  it("4204-D1 ensure applies 0047 + 0072 + 0073 (and #5887's 0076, and #6099's 0081, and #5102's 0084) and lands the index, idempotently", async () => {
+  it("4204-D1 ensure applies 0047 + 0072 + 0073 (and #5887's 0076, #6099's 0081, #5102's 0084, #6006's 0086) and lands the index, idempotently", async () => {
     const mock = new MockD1Database();
     const db = createD1JobRunRecordDb(mock as any);
     const applied = await ensureJobRunRecordsSchema(db);
@@ -144,7 +144,8 @@ describe("4204 migration 0073 — D1 job_run_records recent-read index", () => {
     // Issue #6099 adds 0081 (tenant_id + projected_at_ms + the unique
     // identity index) to the same store.
     // Issue #5102 adds 0084 (the binding tuple + binding index) to the same store.
-    expect(applied).toEqual([47, 72, 73, 76, 81, 84]);
+    // Issue #6006 adds 0086 (the outcome facts, 9 ALTERs) to the same store.
+    expect(applied).toEqual([47, 72, 73, 76, 81, 84, 86]);
     const indexes = mock.sqlite
       .prepare(
         "SELECT name, tbl_name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'job_run_records'",
