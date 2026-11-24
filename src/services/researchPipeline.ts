@@ -38,6 +38,7 @@ import type {
 } from "./researchGates";
 import { runStageGates } from "./researchGates";
 import { resolveResearchRules } from "../config/researchRules";
+import { orderStructuresByTrackRecord } from "./researchStructureOrdering";
 import type { ResearchRules } from "../config/researchRules";
 import { isResearchUniverseRefusal } from "../trading";
 import type { ResearchFeedStageOutput } from "./researchFeedHandoff";
@@ -303,6 +304,8 @@ export interface EvaluationFeedback {
     avgRMultiple: number | null;
     /** True when this family carried a per-family direction accuracy. */
     directionAccuracyRecorded: boolean;
+    /** Issue #773 (b) — the recorded share of correct direction calls. */
+    directionAccuracy: number | null;
   }>;
   /** True when the history actually changed the structure order this run. */
   orderingApplied: boolean;
@@ -968,20 +971,21 @@ export async function runResearchPipeline(
     evaluated: deps.trackRecord?.evaluated ?? 0,
     minEvaluated: MIN_EVALUATED_FOR_ORDERING,
     families: trackRecordSlices.map((slice) => {
-      const recorded = typeof (slice as { directionAccuracy?: unknown }).directionAccuracy === "number";
+      const accuracy = slice.directionAccuracy ?? null;
       return {
         key: slice.key,
         evaluated: slice.evaluated,
         winRate: slice.winRate,
         avgRMultiple: slice.avgRMultiple,
-        directionAccuracyRecorded: recorded,
+        directionAccuracyRecorded: accuracy !== null,
+        directionAccuracy: accuracy,
       };
     }),
     orderingApplied: false,
     statement: "",
   };
   const reorderableFamilies = evaluationFeedback.families.filter(
-    (family) => family.directionAccuracyRecorded && family.evaluated >= MIN_EVALUATED_FOR_ORDERING,
+    (family) => family.directionAccuracy !== null && family.evaluated >= MIN_EVALUATED_FOR_ORDERING,
   );
   evaluationFeedback.statement =
     evaluationFeedback.evaluated === 0
@@ -1224,29 +1228,22 @@ export async function runResearchPipeline(
     // Families with poor accuracy (below the block's weak threshold, n>=10) go
     // last; strong ones (above its strong threshold) go first.
     if (deps.trackRecord?.byStrategy?.length) {
-      const acc = new Map<string, { correct: number; total: number }>();
-      for (const s of deps.trackRecord.byStrategy) {
-        // byStrategy slices have directionAccuracy and evaluated counts
-        const evaluated = (s as any).evaluated ?? 0;
-        const dirAcc = (s as any).directionAccuracy;
-        if (typeof dirAcc === "number" && evaluated >= MIN_EVALUATED_FOR_ORDERING) {
-          acc.set(s.key, { correct: Math.round(dirAcc * evaluated), total: evaluated });
-        }
-      }
-      if (acc.size > 0) {
-        const score = (name: string) => {
-          const a = acc.get(name);
-          if (!a) return 0.5; // no data → neutral
-          const rate = a.correct / a.total;
-          return rate < rules.trackRecordWeakBelow
-            ? -1
-            : rate > rules.trackRecordStrongAbove
-              ? 1
-              : 0;
-        };
-        structureNames = [...structureNames].sort((a, b) => score(b) - score(a));
-        evaluationFeedback.orderingApplied = true;
-        step("decide", `Structure order by historical accuracy: ${structureNames.join(", ")}.`);
+      const ordering = orderStructuresByTrackRecord(
+        structureNames,
+        deps.trackRecord.byStrategy,
+        rules,
+        MIN_EVALUATED_FOR_ORDERING,
+      );
+      if (ordering.considered.length > 0) {
+        structureNames = ordering.names;
+        evaluationFeedback.orderingApplied = ordering.applied;
+        evaluationFeedback.statement = ordering.applied
+          ? `${evaluationFeedback.statement} History reordered the structures: ${structureNames.join(", ")}.`
+          : `${evaluationFeedback.statement} History was read but changed no order: the families it covers already sort where their accuracy puts them.`;
+        step(
+          "decide",
+          `Structure order by historical accuracy (${ordering.considered.map((c) => `${c.key} ${Math.round(c.directionAccuracy * 100)}%`).join(", ")}): ${structureNames.join(", ")}.`,
+        );
       }
     }
     let bestCard: TradeCard | null = null;

@@ -84,6 +84,7 @@ describe("#773 (a) — the report states the evaluation history", () => {
         evaluated: 12,
         winRate: 0.25,
         avgRMultiple: -0.4,
+        directionAccuracy: null,
         directionAccuracyRecorded: false,
       },
       {
@@ -91,6 +92,7 @@ describe("#773 (a) — the report states the evaluation history", () => {
         evaluated: 8,
         winRate: 0.75,
         avgRMultiple: 0.6,
+        directionAccuracy: null,
         directionAccuracyRecorded: false,
       },
     ]);

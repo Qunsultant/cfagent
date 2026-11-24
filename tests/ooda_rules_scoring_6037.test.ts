@@ -186,7 +186,9 @@ describe("#6037 (c) — scoring, thesis and evaluation rules are data", () => {
   });
 
   it("C3: the pipeline reads every moved rule by key", () => {
-    const text = source();
+    // #773 (b) moved the two track-record thresholds into the pure ordering
+    // helper the pipeline delegates to; each rule is still read by key.
+    const text = [source(), readFileSync("src/services/researchStructureOrdering.ts", "utf8")].join("\n");
     for (const key of [
       "scoreWeightThesis",
       "scoreWeightLiquidity",
@@ -206,8 +208,9 @@ describe("#6037 (c) — scoring, thesis and evaluation rules are data", () => {
     ]) {
       expect(text, key).toContain(`rules.${key}`);
     }
-    // One declaration of the ordering bar: the block's literal 10 is gone.
-    expect(text).toContain("evaluated >= MIN_EVALUATED_FOR_ORDERING");
+    // One declaration of the ordering bar: the block's literal 10 is gone;
+    // the pipeline passes its named constant into the helper.
+    expect(source()).toContain("MIN_EVALUATED_FOR_ORDERING");
     expect(text).not.toMatch(/evaluated >= 10\b/);
   });
 });
