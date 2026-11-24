@@ -36,7 +36,7 @@
   "src/client/components/AskAgentWidget.tsx": 11,
   "src/client/components/AutopilotControlCenter.tsx": 3,
   "src/client/components/CapabilityNavBar.tsx": 1,
-  "src/client/components/LeftNavBar.tsx": 1,
+  "src/client/components/LeftNavBar.tsx": 3,
   "src/client/components/PartnerDealsModal.tsx": 3,
   "src/client/components/UniversalChart.tsx": 3,
   "src/client/featureFlags.tsx": 6,

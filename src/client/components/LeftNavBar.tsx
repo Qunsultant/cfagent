@@ -37,6 +37,10 @@ export interface LeftNavBarProps {
   className?: string;
   brandTitle?: string;
   brandTagline?: string;
+  /** Issue #6147 S4a: opens the settings page. The footer trigger is the
+      shell's settings entry point — it must stay reachable under every
+      preset, including `none`, so it is NOT filtered by visibleTabs. */
+  onOpenSettings?: () => void;
 }
 
 export function LeftNavBar({
@@ -50,6 +54,7 @@ export function LeftNavBar({
   className = "",
   brandTitle = BRAND.name,
   brandTagline = BRAND.tagline,
+  onOpenSettings,
 }: LeftNavBarProps) {
   // Issue #3163: hovered row in the expanded sidebar. The visible
   // sub-menu is pinned (expandedMenus, chevron click) OR hovered:
@@ -529,6 +534,36 @@ export function LeftNavBar({
           );
         })}
       </div>
+
+      {/* Issue #6147 S4a: settings trigger in the nav footer. The footer
+          is IN-FLOW below the scrollable menu list (the aside is a flex
+          column, .sidebar-nav-scroll is flex:1 with its own overflow),
+          so the last menu — Sandbox — always stays ABOVE the button even
+          with its sub-menu expanded: the expanded sub-menu renders
+          inside the scroll container and can never extend behind the
+          footer. Full-width when expanded, gear-only when collapsed. */}
+      {onOpenSettings && (
+        <div
+          className="sidebar-settings-footer"
+          style={{
+            borderTop: "1px solid var(--color-border-subtle)",
+            padding: "var(--space-2, 0.5rem) var(--space-3, 0.75rem)",
+            flexShrink: 0,
+          }}
+        >
+          <Button
+            variant="secondary"
+            size="sm"
+            title="Settings"
+            aria-label="Settings"
+            onClick={onOpenSettings}
+            style={{ width: "100%", justifyContent: "center" }}
+          >
+            <NavIcons.Settings />
+            {!collapsed && " Settings"}
+          </Button>
+        </div>
+      )}
     </aside>
   );
 }
