@@ -40,7 +40,7 @@
  *
  * Layering note (spike provisional): this server-side module imports
  * a client-side catalog. The catalog module itself imports only pure
- * data (src/client/mcpEndpointsData.ts has no component or CSS
+ * data (src/client/iaaaEndpointCatalog.ts has no component or CSS
  * imports), so the worker bundle is unaffected — but the #1024 design
  * should give the catalog a shared home instead of a client import.
  *

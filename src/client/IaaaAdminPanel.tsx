@@ -6,11 +6,13 @@
  * tenant's platform-genesis status, and recent tenant audit events
  * from GET /api/iaaa/overview. v2 adds a tabbed endpoint/event
  * explorer on top of the same gate: the API route table from
- * server.ts, the MCP catalogs, the IAAA audit-event taxonomy, and
- * the mapping tables between them. The explorer tabs are static
- * code knowledge (no user data) and render only after the overview
- * fetch succeeds — the panel stays gated behind the overview route
- * as a whole. The server is the gate; on 403 this panel shows a
+ * server.ts, the served MCP catalogue (GET /api/mcp/catalog, #6438),
+ * the IAAA audit-event taxonomy, and the mapping tables between them.
+ * The explorer tabs are static code knowledge (no user data) — except
+ * the MCP tab, which reads the served catalogue — and render only
+ * after the overview fetch succeeds — the panel stays gated behind
+ * the overview route as a whole. The server is the gate; on 403 this
+ * panel shows a
  * plain "not an admin" state and fetches nothing else.
  *
  * #1758 mutations: the Members tab grants, revokes, and edits
@@ -56,15 +58,12 @@ import {
 } from "./iaaaAdminSections";
 import {
   API_ENDPOINT_CATALOG,
+  buildMcpCorrelationRows,
   IAAA_AUDIT_EVENT_CATALOG,
   IAAA_CATALOG_GAPS,
   IAAA_CORRELATION_ROWS,
 } from "./iaaaEndpointCatalog";
-import {
-  MCP_PROMPTS_CATALOG,
-  MCP_RESOURCES_CATALOG,
-  MCP_TOOLS_CATALOG,
-} from "./mcpEndpointsData";
+import { fetchMcpCatalog, type ClientMcpCatalog } from "./mcpCatalog";
 import { ServiceUserSection } from "./ServiceUserSection";
 import { ServiceTokensPanel } from "./ServiceTokensPanel";
 import { RoleGrantsPanel } from "./RoleGrantsPanel";
@@ -188,6 +187,30 @@ export function IaaaAdminPanel() {
       IAAA_ADMIN_SECTIONS.some((s) => s === v),
     defaultTab: "summary",
   });
+  // Served MCP catalogue (#6438): the MCP and Correlations tabs read
+  // GET /api/mcp/catalog instead of a hand-maintained client file.
+  // Fetched once the overview gate has passed, so a non-admin never
+  // fires it. A failed fetch renders an error in the MCP tab, never a
+  // stale list; the Correlations tab falls back to the static rows.
+  const [catalog, setCatalog] = useState<ClientMcpCatalog | null>(null);
+  const [catalogError, setCatalogError] = useState("");
+  useEffect(() => {
+    if (!overview) return;
+    let cancelled = false;
+    fetchMcpCatalog()
+      .then((loaded) => {
+        if (!cancelled) setCatalog(loaded);
+      })
+      .catch((err: any) => {
+        if (!cancelled) setCatalogError(err?.message || "Failed to load the tool catalog");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [overview]);
+  const correlationRows = catalog
+    ? [...buildMcpCorrelationRows(catalog.tools.map((t) => t.name)), ...IAAA_CORRELATION_ROWS]
+    : IAAA_CORRELATION_ROWS;
   // #1274: pending access requests for this tenant. A tenant-admin
   // without platform-admin never reaches this panel (the overview
   // gate is platform-admin), so the decide buttons serve admins who
@@ -1006,20 +1029,23 @@ export function IaaaAdminPanel() {
 
       <TabPanel idBase="iaaa-admin" tabId="mcp" active={tab === "mcp"}>
         <p>
-          The MCP tools, resources, and prompts from the existing client catalog — reused,
-          not duplicated. Server capabilities the catalog lacks are listed below as gaps.
+          The MCP tools, resources, and prompts from the served catalogue (GET
+          /api/mcp/catalog) — one source of truth, not a hand-maintained copy.
+          Server capabilities the served catalogue lacks are listed below as gaps.
         </p>
-        <CardHeader title={<>Tools ({MCP_TOOLS_CATALOG.length})</>} />
+        {catalogError && <p>{catalogError}</p>}
+        {!catalog && !catalogError && <p>Loading the server catalogue…</p>}
+        <CardHeader title={<>Tools ({catalog ? catalog.tools.length : "…"})</>} />
         <Table
           columns={[
             { key: "name", header: "Name", render: (tool) => <code>{tool.name}</code> },
             { key: "category", header: "Category", render: (tool) => tool.category },
             { key: "description", header: "Description", render: (tool) => tool.description },
           ]}
-          rows={MCP_TOOLS_CATALOG}
+          rows={catalog?.tools ?? []}
           rowKey={(tool) => tool.name}
         />
-        <CardHeader title={<>Resources ({MCP_RESOURCES_CATALOG.length})</>} />
+        <CardHeader title={<>Resources ({catalog ? catalog.resources.length : "…"})</>} />
         <Table
           columns={[
             {
@@ -1030,16 +1056,16 @@ export function IaaaAdminPanel() {
             { key: "name", header: "Name", render: (resource) => resource.name },
             { key: "description", header: "Description", render: (resource) => resource.description },
           ]}
-          rows={MCP_RESOURCES_CATALOG}
+          rows={catalog?.resources ?? []}
           rowKey={(resource) => resource.uri}
         />
-        <CardHeader title={<>Prompts ({MCP_PROMPTS_CATALOG.length})</>} />
+        <CardHeader title={<>Prompts ({catalog ? catalog.prompts.length : "…"})</>} />
         <Table
           columns={[
             { key: "name", header: "Name", render: (prompt) => <code>{prompt.name}</code> },
             { key: "description", header: "Description", render: (prompt) => prompt.description },
           ]}
-          rows={MCP_PROMPTS_CATALOG}
+          rows={catalog?.prompts ?? []}
           rowKey={(prompt) => prompt.name}
         />
         <CardHeader title="Not in this catalog (server capabilities reported as gaps)" />
@@ -1117,7 +1143,7 @@ export function IaaaAdminPanel() {
             },
             { key: "note", header: "Note", render: (row) => row.note },
           ]}
-          rows={IAAA_CORRELATION_ROWS.filter((row) => row.kind === "endpoint-mcp")}
+          rows={correlationRows.filter((row) => row.kind === "endpoint-mcp")}
           rowKey={(_row, index) => `endpoint-mcp-${index}`}
         />
         <CardHeader title="IAAA event ↔ endpoint" />
@@ -1140,7 +1166,7 @@ export function IaaaAdminPanel() {
             },
             { key: "note", header: "Note", render: (row) => row.note },
           ]}
-          rows={IAAA_CORRELATION_ROWS.filter((row) => row.kind === "event-endpoint")}
+          rows={correlationRows.filter((row) => row.kind === "event-endpoint")}
           rowKey={(_row, index) => `event-endpoint-${index}`}
         />
       </TabPanel>

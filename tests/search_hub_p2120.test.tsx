@@ -473,16 +473,28 @@ describe("#2120 slice 1 tab backends (native shapes)", () => {
     expect(text()).toContain("keyword-matched");
   });
 
-  it("tools tab filters the client catalog with no network", async () => {
-    const calls = stubFetch(() => okJson({}));
+  it("tools tab fetches the served catalog once and filters it", async () => {
+    const calls = stubFetch(() =>
+      okJson({
+        tools: [
+          { name: "knowledge_search", description: "Search the knowledge base", scope: "mcp:read", inputSchema: { type: "object", properties: {}, required: [] } },
+          { name: "ai_search_financial_docs", description: "Search financial documents", scope: "mcp:read", inputSchema: { type: "object", properties: {}, required: [] } },
+        ],
+        resources: [],
+        prompts: [],
+        server: { name: "openaimp", title: "Multi-Agent Studio Enterprise MCP Server", version: "1.0.0", protocolVersion: "2024-11-05" },
+      })
+    );
     await render(<ToolSearchTab />);
-    // knowledge_search is in the client catalog (mcpEndpointsData.ts);
-    // ai_search_financial_docs is NOT (it lives in cloudflareAgentCommands
-    // only) — the tab covers the catalog, and the pin asserts a member.
-    setInputValue(container.querySelector("input")!, "knowledge_search");
+    // #6438: the tab reads the served catalogue (one fetch on mount).
+    // Both tools come from it — ai_search_financial_docs was missing
+    // from the old hand-maintained client catalog.
+    expect(calls.length).toBe(1);
+    expect(calls[0].url).toContain("/api/mcp/catalog");
+    setInputValue(container.querySelector("input")!, "ai_search_financial_docs");
     await submitForm();
-    expect(calls.length).toBe(0);
-    expect(text()).toContain("knowledge_search");
+    expect(calls.length).toBe(1);
+    expect(text()).toContain("ai_search_financial_docs");
   });
 });
 
@@ -500,8 +512,21 @@ describe("#2120 slice 1 existing surfaces still render", () => {
   });
 
   it("McpApiExplorer renders", async () => {
-    stubFetch(() => okJson({}));
+    // #6438: the explorer fetches the served catalogue on mount — a
+    // valid payload exercises the success path (the hero plus the
+    // first tool), not the load-error path.
+    stubFetch(() =>
+      okJson({
+        tools: [
+          { name: "knowledge_search", description: "Search the knowledge base", scope: "mcp:read", inputSchema: { type: "object", properties: {}, required: [] } },
+        ],
+        resources: [],
+        prompts: [],
+        server: { name: "openaimp", title: "Multi-Agent Studio Enterprise MCP Server", version: "1.0.0", protocolVersion: "2024-11-05" },
+      })
+    );
     await render(<McpApiExplorer />);
     expect(text()).toContain("MCP");
+    expect(text()).toContain("knowledge_search");
   });
 });

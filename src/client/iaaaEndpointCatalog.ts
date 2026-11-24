@@ -12,10 +12,10 @@
  *   row, not an endpoint. Auth notes describe the edge check in the
  *   handler itself (requireAuth, PDP, step-up, webhook signature);
  *   downstream DO enforcement is noted where it differs.
- * - MCP tab: REUSED from src/client/mcpEndpointsData.ts — this module
+ * - MCP tab: served from GET /api/mcp/catalog (#6438) — this module
  *   does not duplicate tool/resource/prompt entries. Server
- *   capabilities the catalog lacks are reported as gaps, never
- *   invented into the catalog.
+ *   capabilities the served catalogue lacks are reported as gaps,
+ *   never invented into the catalog.
  * - IAAA tab: event builders in src/security/iaaaAudit.ts and
  *   src/security/iaaaAuthAudit.ts plus every live audit call site.
  *   Occurrences that emit NO audit event are gaps, not events.
@@ -24,8 +24,6 @@
  * name similarity — a mapping row exists only when the code shows a
  * shared handler, a shared store, or an emitter site.
  */
-
-import { MCP_TOOLS_CATALOG } from "./mcpEndpointsData";
 
 import { COMMERCIAL_BARE_PREFIX, PAYMENTS_API_PREFIX } from "../data/commercialUrlCatalog";
 export type ApiEndpointAuth =
@@ -1703,7 +1701,7 @@ export interface CorrelationRow {
 }
 
 const MCP_TRANSPORT_SOURCE =
-  "src/server.ts /mcp branch forwards to the ORCHESTRATOR_AGENT DO; src/client/mcpEndpointsData.ts MCP_TOOLS_CATALOG";
+  "src/server.ts /mcp branch forwards to the ORCHESTRATOR_AGENT DO; GET /api/mcp/catalog (served catalogue, #6438)";
 
 const MCP_UNMAPPED_NOTE =
   "No worker HTTP route in the API catalog is this tool's handler; the tool executes inside the agent behind the MCP transport.";
@@ -1715,38 +1713,51 @@ const MCP_UNMAPPED_NOTES: Record<string, string> = {
     "Not /api/memory/search: knowledge_search uses AI Search RAG, while memory search uses Vectorize vector search — related systems, not one handler.",
 };
 
+/**
+ * Build the per-tool correlation rows from the served catalogue's tool
+ * names (#6438). The panel fetches GET /api/mcp/catalog and calls this
+ * with the served names, so a newly registered tool gets its transport
+ * and unmapped rows with no edit here. The one shares-source row
+ * (get_audit_events) is static — it is the only mapping — and stays in
+ * IAAA_CORRELATION_ROWS below.
+ */
+export function buildMcpCorrelationRows(toolNames: string[]): CorrelationRow[] {
+  return [
+    // Every served tool is reachable through the MCP transport (one row
+    // per tool, generated from the served names — not duplicated data).
+    ...toolNames.map((name): CorrelationRow => ({
+      kind: "endpoint-mcp",
+      left: "mcp",
+      right: name,
+      relation: "transport",
+      source: MCP_TRANSPORT_SOURCE,
+      note: "Transport only: the tool is served through the MCP endpoint; it does not share a worker HTTP handler.",
+    })),
+    // Every served tool except get_audit_events has no worker HTTP
+    // handler counterpart beyond the transport itself.
+    ...toolNames.filter((name) => name !== "get_audit_events").map(
+      (name): CorrelationRow => ({
+        kind: "endpoint-mcp",
+        left: "mcp",
+        right: name,
+        relation: "unmapped",
+        source: MCP_TRANSPORT_SOURCE,
+        note: MCP_UNMAPPED_NOTES[name] ?? MCP_UNMAPPED_NOTE,
+      }),
+    ),
+  ];
+}
+
 export const IAAA_CORRELATION_ROWS: CorrelationRow[] = [
-  // Every catalog tool is reachable through the MCP transport (one row
-  // per tool, generated from the reused catalog — not duplicated data).
-  ...MCP_TOOLS_CATALOG.map((tool): CorrelationRow => ({
-    kind: "endpoint-mcp",
-    left: "mcp",
-    right: tool.name,
-    relation: "transport",
-    source: MCP_TRANSPORT_SOURCE,
-    note: "Transport only: the tool is served through the MCP endpoint; it does not share a worker HTTP handler.",
-  })),
   // The one shares-source mapping: both read the same Kv audit store.
   {
     kind: "endpoint-mcp",
     left: "iaaa-overview",
     right: "get_audit_events",
     relation: "shares-source",
-    source: "src/security/iaaaAuditStore.ts single key iaaa-audit:events; src/client/mcpEndpointsData.ts",
+    source: "src/security/iaaaAuditStore.ts single key iaaa-audit:events; GET /api/mcp/catalog (served catalogue, #6438)",
     note: "Both read the same audit store, but they are not one handler — and the MCP tool is gated by the transport's session-or-key check, not by the overview route's platform-admin rule.",
   },
-  // Every catalog tool except get_audit_events has no worker HTTP
-  // handler counterpart beyond the transport itself.
-  ...MCP_TOOLS_CATALOG.filter((tool) => tool.name !== "get_audit_events").map(
-    (tool): CorrelationRow => ({
-      kind: "endpoint-mcp",
-      left: "mcp",
-      right: tool.name,
-      relation: "unmapped",
-      source: MCP_TRANSPORT_SOURCE,
-      note: MCP_UNMAPPED_NOTES[tool.name] ?? MCP_UNMAPPED_NOTE,
-    }),
-  ),
   // Event to endpoint: emitted events cite their emitting endpoints.
   {
     kind: "event-endpoint",
@@ -1855,9 +1866,6 @@ export interface CatalogGap {
   source: string;
 }
 
-const MCP_COMMAND_GAP_DETAIL =
-  "Server command class exists but is absent from the client MCP catalog; whether it is wired into the live MCP transport was not verified from the catalog alone, so it is reported here, not added to the tab.";
-
 export const IAAA_CATALOG_GAPS: CatalogGap[] = [
   {
     area: "iaaa",
@@ -1886,110 +1894,26 @@ export const IAAA_CATALOG_GAPS: CatalogGap[] = [
   {
     area: "mcp",
     item: "screen_options",
-    detail: "Paid scanner tool served by /mcp/scanner but absent from the client MCP catalog.",
+    detail: "Paid scanner tool served by /mcp/scanner but absent from the served MCP catalogue — the scanner is a separate MCP server, not part of the openaimp catalogue (#6438; folding it in is #3748's scope).",
     source: "src/mcps/scanner/cloudflareWalletsScanner.ts",
   },
   {
     area: "mcp",
     item: "scanner_status",
-    detail: "Free scanner tool served by /mcp/scanner but absent from the client MCP catalog.",
+    detail: "Free scanner tool served by /mcp/scanner but absent from the served MCP catalogue — the scanner is a separate MCP server, not part of the openaimp catalogue (#6438; folding it in is #3748's scope).",
     source: "src/mcps/scanner/cloudflareWalletsScanner.ts",
   },
   {
     area: "mcp",
     item: "get_scan_job",
-    detail: "Scanner tool served by /mcp/scanner but absent from the client MCP catalog.",
+    detail: "Scanner tool served by /mcp/scanner but absent from the served MCP catalogue — the scanner is a separate MCP server, not part of the openaimp catalogue (#6438; folding it in is #3748's scope).",
     source: "src/mcps/scanner/cloudflareWalletsScanner.ts",
   },
   {
     area: "mcp",
     item: "list_scan_jobs",
-    detail: "Scanner tool served by /mcp/scanner but absent from the client MCP catalog.",
+    detail: "Scanner tool served by /mcp/scanner but absent from the served MCP catalogue — the scanner is a separate MCP server, not part of the openaimp catalogue (#6438; folding it in is #3748's scope).",
     source: "src/mcps/scanner/cloudflareWalletsScanner.ts",
-  },
-  {
-    area: "mcp",
-    item: "query_platform_knowledge",
-    detail: MCP_COMMAND_GAP_DETAIL,
-    source: "src/mcps/openaimp/commands.ts QueryPlatformKnowledgeCommand",
-  },
-  {
-    area: "mcp",
-    item: "etrade_auth_status",
-    detail: MCP_COMMAND_GAP_DETAIL,
-    source: "src/mcps/openaimp/etradeCommands.ts",
-  },
-  {
-    area: "mcp",
-    item: "etrade_account_discovery",
-    detail: MCP_COMMAND_GAP_DETAIL,
-    source: "src/mcps/openaimp/etradeCommands.ts",
-  },
-  {
-    area: "mcp",
-    item: "browser_inspect_page",
-    detail: MCP_COMMAND_GAP_DETAIL,
-    source: "src/mcps/openaimp/cloudflareAgentCommands.ts BrowserInspectCommand",
-  },
-  {
-    area: "mcp",
-    item: "browser_screenshot",
-    detail: MCP_COMMAND_GAP_DETAIL,
-    source: "src/mcps/openaimp/cloudflareAgentCommands.ts BrowserScreenshotCommand",
-  },
-  {
-    area: "mcp",
-    item: "dispatch_trading_webhook",
-    detail: MCP_COMMAND_GAP_DETAIL,
-    source: "src/mcps/openaimp/cloudflareAgentCommands.ts DispatchTradingWebhookCommand",
-  },
-  {
-    area: "mcp",
-    item: "run_sandbox_command",
-    detail: MCP_COMMAND_GAP_DETAIL,
-    source: "src/mcps/openaimp/cloudflareAgentCommands.ts SandboxRunCommand",
-  },
-  {
-    area: "mcp",
-    item: "run_quant_backtest",
-    detail: MCP_COMMAND_GAP_DETAIL,
-    source: "src/mcps/openaimp/cloudflareAgentCommands.ts QuantBacktestCommand",
-  },
-  {
-    area: "mcp",
-    item: "think_trade_validation",
-    detail: MCP_COMMAND_GAP_DETAIL,
-    source: "src/mcps/openaimp/cloudflareAgentCommands.ts ThinkTradeValidationCommand",
-  },
-  {
-    area: "mcp",
-    item: "ai_search_financial_docs",
-    detail: MCP_COMMAND_GAP_DETAIL,
-    source: "src/mcps/openaimp/cloudflareAgentCommands.ts AISearchFinancialDocsCommand",
-  },
-  {
-    area: "mcp",
-    item: "execute_durable_twap",
-    detail: MCP_COMMAND_GAP_DETAIL,
-    source: "src/mcps/openaimp/cloudflareAgentCommands.ts DurableTWAPOrderCommand",
-  },
-  {
-    area: "mcp",
-    item: "paid_options_screener",
-    detail: MCP_COMMAND_GAP_DETAIL,
-    source: "src/mcps/openaimp/agenticPaymentCommands.ts PaidOptionsScreenerCommand",
-  },
-  {
-    area: "mcp",
-    item: "paid_market_research",
-    detail: MCP_COMMAND_GAP_DETAIL,
-    source: "src/mcps/openaimp/agenticPaymentCommands.ts PaidMarketResearchCommand",
-  },
-  {
-    area: "mcp",
-    item: "agentic_wallet_status",
-    detail: MCP_COMMAND_GAP_DETAIL,
-    source: "src/mcps/openaimp/agenticPaymentCommands.ts AgenticWalletStatusCommand",
   },
   {
     area: "api",
@@ -2007,6 +1931,6 @@ export const IAAA_CATALOG_GAPS: CatalogGap[] = [
     area: "api",
     item: "REST_APIS_CATALOG drift",
     detail: "A separate client REST catalog exists for McpApiExplorer and was NOT used for the API tab, which is derived from server.ts. The two may drift; reconciling them is out of scope for this change.",
-    source: "src/client/mcpEndpointsData.ts REST_APIS_CATALOG",
+    source: "src/client/restEndpointsData.ts REST_APIS_CATALOG",
   },
 ];
