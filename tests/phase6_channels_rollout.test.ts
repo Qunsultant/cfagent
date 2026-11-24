@@ -867,6 +867,26 @@ describe("scheduled tick Phase 6 steps (Phase 6)", () => {
       runDiscoveryIfDue: vi.fn(async () => ({ fired: false, dateKey: "2026-10-23" })),
       getTrackRecord: vi.fn(async () => trackRecordWithEvidence()),
       getResearchConfig: vi.fn(async () => ({ feePerContract: 0.65, slippagePerContract: 0.05 })),
+      // Issue #6355 - the feed/enrich stages now run for real (their
+      // steps carry userLogin), so the tick fixture provides the agent the
+      // production route always has, with an empty feed/enrich.
+      runFeedStage: async (input: { runId?: string }) => ({
+        runId: input.runId ?? "r1",
+        asOf: new Date().toISOString(),
+        regime: null,
+        universe: "nasdaq100",
+        universeError: null,
+        symbols: [],
+        quotes: [],
+        universeSize: 0,
+        quotesRetrieved: 0,
+      }),
+      runEnrichStage: async (feed: unknown, input: { runId?: string }) => ({
+        runId: input.runId ?? "r1",
+        asOf: new Date().toISOString(),
+        feed,
+        bySymbol: {},
+      }),
     };
     const settings = new Map<string, string>();
     if (paused) settings.set(SCREENING_FLAG_KEYS.scheduledPaused, "on");
