@@ -37,6 +37,7 @@ import {
   EmptyState,
   Notice,
   PageSection,
+  SmallHeader,
   Table,
 } from "./components/ui";
 import { asyncJobErrorCode } from "./apiFetch";
@@ -396,7 +397,7 @@ export function OpportunityHuntPanel() {
                 </p>
                 {selectedRow.entries.length > 0 ? (
                   <>
-                    <h3>Entry recommendations</h3>
+                    <SmallHeader title="Entry recommendations" />
                     <ul>
                       {selectedRow.entries.map((setup) => (
                         <li key={setup.strategy}>
@@ -415,7 +416,7 @@ export function OpportunityHuntPanel() {
                 ) : null}
                 {selectedRow.exits.length > 0 ? (
                   <>
-                    <h3>Exit recommendations</h3>
+                    <SmallHeader title="Exit recommendations" />
                     <ul>
                       {selectedRow.exits.map((setup) => (
                         <li key={setup.strategy}>
