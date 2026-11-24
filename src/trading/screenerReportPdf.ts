@@ -14,7 +14,7 @@
  * limit. Cells wrap; they are never silently sliced.
  */
 
-import { PDFDocument, PDFFont, PDFPage, rgb, StandardFonts } from "pdf-lib";
+import { PDFDocument, StandardFonts } from "pdf-lib";
 import type { ScreenerRunResult } from "../agents/screener-agent";
 import { yahooDataModeLabel } from "../config/yahooDataMode";
 import { defaultUniverseId } from "../config/defaultUniverse";
@@ -22,154 +22,39 @@ import {
   SCREENER_PDF_COLUMNS,
   buildScreenerPdfSections,
   projectFormulaAppendixRows,
-  wrapCellText,
   type ScreenerPdfColumn,
   DEFAULT_SCREENER_PDF_SECTION_CONFIG,
   type ScreenerPdfSection,
   type ScreenerPdfSectionConfig,
 } from "./screenerReportTemplate";
 import { SCREENER_FORMULA_DOCUMENTATION } from "./screenerReportXlsx";
-import { cleanForPdf } from "./pdfText";
+import {
+  PDF_PRINT_DANGER,
+  PDF_PRINT_INK,
+  PDF_PRINT_MUTED,
+  PDF_PRINT_NOTE,
+  addPageNumbers,
+  createPdfCtx,
+  ensureSpace,
+  renderTable,
+  rule,
+  text,
+} from "./pdfDrawing";
 
-/** Print palette (#473): PDFs render on white paper, so the report uses
- *  this named print scale — the print mirrors of the semantic text/status
- *  roles — instead of scattered rgb literals. pdf-lib 0..1 RGB triples. */
-const PRINT_INK: [number, number, number] = [0.15, 0.15, 0.15];
-const PRINT_LABEL: [number, number, number] = [0.35, 0.35, 0.35];
-const PRINT_MUTED: [number, number, number] = [0.4, 0.4, 0.4];
-const PRINT_NOTE: [number, number, number] = [0.45, 0.45, 0.45];
-const PRINT_FAINT: [number, number, number] = [0.5, 0.5, 0.5];
-const PRINT_HAIRLINE: [number, number, number] = [0.7, 0.7, 0.7];
-const PRINT_DANGER: [number, number, number] = [0.8, 0.2, 0.2];
+/** Screener-specific print colour: the partial-screen warning.
+ *  The shared base print scale lives in the drawing layer
+ *  (src/trading/pdfDrawing.ts). */
 const PRINT_WARNING: [number, number, number] = [0.75, 0.45, 0];
-
-const MARGIN = 36;
-const PAGE_W = 792; // Letter landscape (#2088: entire document, no mixing)
-const PAGE_H = 612;
 
 export interface ScreenerPdfOptions {
   sections?: ScreenerPdfSectionConfig;
 }
 
-interface Ctx {
-  doc: PDFDocument;
-  font: PDFFont;
-  bold: PDFFont;
-  page: PDFPage;
-  y: number;
-}
-
-function newPage(ctx: Ctx): void {
-  ctx.page = ctx.doc.addPage([PAGE_W, PAGE_H]);
-  ctx.y = PAGE_H - MARGIN;
-}
-
-function ensureSpace(ctx: Ctx, needed: number): void {
-  if (ctx.y - needed < MARGIN) newPage(ctx);
-}
-
-function text(
-  ctx: Ctx,
-  rawStr: string,
-  opts: { size?: number; bold?: boolean; color?: [number, number, number]; x?: number } = {}
-): void {
-  const str = cleanForPdf(rawStr);
-  const size = opts.size ?? 10;
-  const font = opts.bold ? ctx.bold : ctx.font;
-  const c = opts.color ?? PRINT_INK;
-  const x = opts.x ?? MARGIN;
-  const maxWidth = PAGE_W - MARGIN - x;
-  const words = str.split(/\s+/).filter(Boolean);
-  const lines: string[] = [];
-  let line = "";
-  for (const word of words) {
-    const candidate = line ? `${line} ${word}` : word;
-    if (line && font.widthOfTextAtSize(candidate, size) > maxWidth) {
-      lines.push(line);
-      line = word;
-    } else {
-      line = candidate;
-    }
-  }
-  if (line) lines.push(line);
-  for (const renderedLine of lines) {
-    ensureSpace(ctx, size + 4);
-    ctx.page.drawText(renderedLine, {
-      x,
-      y: ctx.y,
-      size,
-      font,
-      color: rgb(c[0], c[1], c[2]),
-    });
-    ctx.y -= size + 4;
-  }
-}
-
-function rule(ctx: Ctx): void {
-  ensureSpace(ctx, 10);
-  ctx.page.drawLine({
-    start: { x: MARGIN, y: ctx.y },
-    end: { x: PAGE_W - MARGIN, y: ctx.y },
-    thickness: 0.75,
-    color: rgb(...PRINT_HAIRLINE),
-  });
-  ctx.y -= 10;
-}
-
-function renderTableHeader(ctx: Ctx, cols: ScreenerPdfColumn[]): void {
-  ensureSpace(ctx, 16);
-  let x = MARGIN;
-  for (const col of cols) {
-    ctx.page.drawText(col.header, { x, y: ctx.y, size: 8, font: ctx.bold, color: rgb(...PRINT_LABEL) });
-    x += col.w;
-  }
-  ctx.y -= 10;
-  ctx.page.drawLine({
-    start: { x: MARGIN, y: ctx.y },
-    end: { x: PAGE_W - MARGIN, y: ctx.y },
-    thickness: 0.5,
-    color: rgb(...PRINT_HAIRLINE),
-  });
-  ctx.y -= 6;
-}
-
-/**
- * One section table: header repeats on every page break, cells wrap
- * to their column width (never sliced). Section titles carry
- * "showing X of Y" so a limit is visible, not silent (#2088).
- */
-function renderSectionTable(
-  ctx: Ctx,
-  section: Pick<ScreenerPdfSection, "title" | "rows" | "shown" | "total">,
-  cols: ScreenerPdfColumn[]
-): void {
-  if (section.rows.length === 0) return;
-  text(ctx, `${section.title} (showing ${section.shown} of ${section.total})`, { size: 12, bold: true });
-  renderTableHeader(ctx, cols);
-  const measure = (t: string): number => ctx.font.widthOfTextAtSize(t, 8);
-  for (const row of section.rows) {
-    const wrapped = row.map((cell, i) => wrapCellText(cell, cols[i].w - 4, measure));
-    const lineCount = Math.max(...wrapped.map((w) => w.length));
-    const rowHeight = lineCount * 10 + 2;
-    const pageBefore = ctx.page;
-    ensureSpace(ctx, rowHeight);
-    if (ctx.page !== pageBefore) renderTableHeader(ctx, cols);
-    let x = MARGIN;
-    for (let i = 0; i < row.length; i++) {
-      for (let li = 0; li < wrapped[i].length; li++) {
-        ctx.page.drawText(cleanForPdf(wrapped[i][li]), {
-          x,
-          y: ctx.y - li * 10,
-          size: 8,
-          font: ctx.font,
-          color: rgb(...PRINT_INK),
-        });
-      }
-      x += cols[i].w;
-    }
-    ctx.y -= rowHeight;
-  }
-  rule(ctx);
+/** Section titles carry "showing X of Y" so a limit is visible, not
+ *  silent (#2088). The table itself is the shared drawing layer's
+ *  renderTable. */
+function sectionTitle(section: Pick<ScreenerPdfSection, "title" | "shown" | "total">): string {
+  return `${section.title} (showing ${section.shown} of ${section.total})`;
 }
 
 /** Human timestamp (#2088): "Oct 28, 2026, 03:50 EDT (07:50 UTC)". Falls back to the raw ISO. */
@@ -279,7 +164,7 @@ export async function generateScreenerPdf(
   const doc = await PDFDocument.create();
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const bold = await doc.embedFont(StandardFonts.HelveticaBold);
-  const ctx: Ctx = { doc, font, bold, page: doc.addPage([PAGE_W, PAGE_H]), y: PAGE_H - MARGIN };
+  const ctx = createPdfCtx(doc, font, bold);
 
   const prov = screenerProvenanceLines(result);
   const triggerLabel = result.trigger === "manual" ? "Manual Screen" : "Autonomous Screen";
@@ -288,17 +173,17 @@ export async function generateScreenerPdf(
   const universeLabel = (result.universe || defaultUniverseId()).replace(/_/g, " ");
   text(ctx, `Stock Screener Report — ${universeLabel}`, { size: 16, bold: true });
   const sectorSegment = result.sector && result.sector !== "ALL" ? `  •  ${result.sector} sector` : "  •  All Sectors";
-  text(ctx, `${triggerLabel}${sectorSegment}`, { size: 10, color: PRINT_MUTED });
-  text(ctx, `Generated: ${formatReportTimestamp(result.timestamp)}`, { size: 9, color: PRINT_MUTED });
+  text(ctx, `${triggerLabel}${sectorSegment}`, { size: 10, color: PDF_PRINT_MUTED });
+  text(ctx, `Generated: ${formatReportTimestamp(result.timestamp)}`, { size: 9, color: PDF_PRINT_MUTED });
 
   // Active Screening Criteria
   ensureSpace(ctx, 16);
   const activeCriteria = result.filterSummary || "Default criteria (Positive Day Change, Momentum Score >= 60, Quant Buy/Strong Buy)";
-  text(ctx, `Active Criteria: ${activeCriteria}`, { size: 9, bold: true, color: PRINT_INK });
+  text(ctx, `Active Criteria: ${activeCriteria}`, { size: 9, bold: true, color: PDF_PRINT_INK });
   rule(ctx);
 
   if (!result.success) {
-    text(ctx, "Screen failed", { size: 13, bold: true, color: PRINT_DANGER });
+    text(ctx, "Screen failed", { size: 13, bold: true, color: PDF_PRINT_DANGER });
     text(ctx, result.error || "E*TRADE unavailable — no market data.", { size: 10 });
     return doc.save();
   }
@@ -319,7 +204,7 @@ export async function generateScreenerPdf(
   // Summary
   text(ctx, "Summary", { size: 12, bold: true });
   text(ctx, `Scanned: ${result.totalScanned}   Matched: ${result.matchedCount}   Standout Opportunities: ${result.opportunities.length}`);
-  if (result.discoveryMessage) text(ctx, result.discoveryMessage, { size: 8, color: PRINT_MUTED });
+  if (result.discoveryMessage) text(ctx, result.discoveryMessage, { size: 8, color: PDF_PRINT_MUTED });
   if (result.rejections && result.rejections.length > 0) {
     const counts: Record<string, number> = {};
     for (const r of result.rejections) {
@@ -330,7 +215,7 @@ export async function generateScreenerPdf(
       .sort((a, b) => b[1] - a[1])
       .map(([g, n]) => `${n} ${g}`)
       .join(", ");
-    text(ctx, `Rejections Breakdown: ${breakdown}`, { size: 8, color: PRINT_NOTE });
+    text(ctx, `Rejections Breakdown: ${breakdown}`, { size: 8, color: PDF_PRINT_NOTE });
   }
   rule(ctx);
 
@@ -344,19 +229,19 @@ export async function generateScreenerPdf(
   const standouts = sections.find((s) => s.key === "standouts")!;
   const allSymbols = sections.find((s) => s.key === "allSymbols")!;
 
-  text(ctx, `${prov.quotesLine}  |  Technicals (RSI, MACD, Gap%): Yahoo Finance daily history`, { size: 8, color: PRINT_MUTED });
+  text(ctx, `${prov.quotesLine}  |  Technicals (RSI, MACD, Gap%): Yahoo Finance daily history`, { size: 8, color: PDF_PRINT_MUTED });
   ctx.y -= 4;
 
-  renderSectionTable(ctx, gapUp, SCREENER_PDF_COLUMNS);
-  renderSectionTable(ctx, gapDown, SCREENER_PDF_COLUMNS);
+  renderTable(ctx, sectionTitle(gapUp), SCREENER_PDF_COLUMNS, gapUp.rows);
+  renderTable(ctx, sectionTitle(gapDown), SCREENER_PDF_COLUMNS, gapDown.rows);
   if (standouts.rows.length === 0) {
     text(ctx, "Standout Opportunities", { size: 12, bold: true });
-    text(ctx, "No standout opportunities met all criteria in this run.", { size: 9, color: PRINT_MUTED });
+    text(ctx, "No standout opportunities met all criteria in this run.", { size: 9, color: PDF_PRINT_MUTED });
     rule(ctx);
   } else {
-    renderSectionTable(ctx, standouts, SCREENER_PDF_COLUMNS);
+    renderTable(ctx, sectionTitle(standouts), SCREENER_PDF_COLUMNS, standouts.rows);
   }
-  renderSectionTable(ctx, allSymbols, SCREENER_PDF_COLUMNS);
+  renderTable(ctx, sectionTitle(allSymbols), SCREENER_PDF_COLUMNS, allSymbols.rows);
 
   // Formulas & Methodology appendix (#2088): the XLSX tab-2 content,
   // as-is (including the #1942 provenance defect until #1942 lands).
@@ -367,15 +252,15 @@ export async function generateScreenerPdf(
     { header: "Calculation Formula", w: 180 },
     { header: "Description & Interpretation", w: 140 },
   ];
-  renderSectionTable(
+  renderTable(
     ctx,
-    {
+    sectionTitle({
       title: "Formulas & Methodology",
-      rows: projectFormulaAppendixRows(SCREENER_FORMULA_DOCUMENTATION as any),
       shown: SCREENER_FORMULA_DOCUMENTATION.length,
       total: SCREENER_FORMULA_DOCUMENTATION.length,
-    },
-    appendixCols
+    }),
+    appendixCols,
+    projectFormulaAppendixRows(SCREENER_FORMULA_DOCUMENTATION as any)
   );
 
   // Methodology footer
@@ -389,19 +274,10 @@ export async function generateScreenerPdf(
     "Sentiment: day-action based (very bearish -> very bullish). Range zones are 52-week based, not RSI.",
     "Score: composite 0-100 of day momentum, intraday position, 52-week position, and value zone (screenScore); it does not include RSI, MACD, gap, or factor grades.",
   ];
-  for (const n of notes) text(ctx, `* ${n}`, { size: 7.5, color: PRINT_NOTE });
+  for (const n of notes) text(ctx, `* ${n}`, { size: 7.5, color: PDF_PRINT_NOTE });
 
   // Page numbers across all pages
-  const pages = doc.getPages();
-  pages.forEach((p, i) => {
-    p.drawText(`Page ${i + 1} of ${pages.length}`, {
-      x: PAGE_W - MARGIN - 60,
-      y: 20,
-      size: 8,
-      font,
-      color: rgb(...PRINT_FAINT),
-    });
-  });
+  addPageNumbers(doc, font);
 
   return doc.save();
 }

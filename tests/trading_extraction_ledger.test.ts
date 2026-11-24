@@ -127,6 +127,8 @@ const PINNED_STAR_REEXPORTS = [
   "./discoveryReportPdf",
   "./discoveryReportXlsx",
   "./discoveryReportCsv",
+  // Issue #6403: the opportunity hunt report renderer joins the trading surface.
+  "./opportunityHuntReportPdf",
   "./options",
   "./options/flows",
   "./options/flows/types",

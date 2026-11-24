@@ -43,6 +43,7 @@ import {
 import { asyncJobErrorCode } from "./apiFetch";
 import { codedMessage } from "../outcomes/outcomeAspects";
 import {
+  generateOpportunityHuntReport,
   listAllRuns,
   runOpportunityHuntNow,
   type JobRunRecord,
@@ -124,6 +125,9 @@ export function OpportunityHuntPanel() {
   // symbol table, and the symbol whose recommendations + chart are shown.
   const [sort, setSort] = useState<HuntSort>(HUNT_SORT_DEFAULT);
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
+  // Issue 6403 — the downloadable report (PDF) for the current result.
+  const [reportBusy, setReportBusy] = useState(false);
+  const [reportError, setReportError] = useState<string | null>(null);
 
   useEffect(() => {
     if (runStartedAt === null) return;
@@ -219,6 +223,29 @@ export function OpportunityHuntPanel() {
     }
   };
 
+  // Issue 6403 — download the report (PDF) for the current result.
+  // The result rides to the report endpoint, so the PDF renders the
+  // exact output this panel shows. A generation failure shows its
+  // error, never a fabricated link.
+  const downloadReport = async () => {
+    if (!result || reportBusy) return;
+    setReportBusy(true);
+    setReportError(null);
+    try {
+      const { reportUrl } = await generateOpportunityHuntReport(result);
+      const anchor = document.createElement("a");
+      anchor.href = reportUrl;
+      anchor.download = "";
+      anchor.click();
+    } catch (cause) {
+      setReportError(
+        cause instanceof Error ? cause.message : "The report could not be generated.",
+      );
+    } finally {
+      setReportBusy(false);
+    }
+  };
+
   return (
     <PageSection
       title="Opportunity Hunt"
@@ -227,7 +254,21 @@ export function OpportunityHuntPanel() {
       <Card>
         <Button variant="primary" onClick={runNow} loading={running}>
           Run hunt now
+        </Button>{" "}
+        <Button
+          variant="secondary"
+          onClick={downloadReport}
+          loading={reportBusy}
+          disabled={!result}
+          title={result ? "Download this run as a coloured PDF report" : "Run the hunt first"}
+        >
+          Download report (PDF)
         </Button>
+        {reportError ? (
+          <Notice tone="danger" title="The report could not be generated">
+            {reportError}
+          </Notice>
+        ) : null}
         {running ? (
           <p>
             Running… {elapsedSec}s elapsed. The hunt reads the persisted
