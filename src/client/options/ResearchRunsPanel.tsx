@@ -39,6 +39,7 @@ import { readTenantProvidersState } from "../tenantProviders";
 import { ScheduledOptionsRunForm } from "./ScheduledOptionsRunForm";
 import { AutonomousOptionsRuns } from "./AutonomousOptionsRuns";
 import { ScreeningActivityPanel } from "./ScreeningActivityPanel";
+import { elapsedMsForStage } from "./researchStageElapsed";
 
 /**
  * Issue #5917 — per-stage control for the run on screen.
@@ -76,6 +77,23 @@ interface ResearchExecutionView {
   deploymentErrors: string[];
   effectiveModes: StageModesView;
   modeSources: { [stage: string]: { [axis: string]: "stored" | "deployment" } };
+  /** Issue #6466 parts 3–4 — the dispatch settlement wait and the per-stage limits, as the server describes them. */
+  settlementWaitMs?: {
+    deploymentMs: number;
+    errors: string[];
+    effectiveMs: number;
+    source: "stored" | "deployment";
+  };
+  stageTimeouts?: {
+    effective: { [stage: string]: number };
+    sources: { [stage: string]: "stored" | "deployment" };
+    errors: string[];
+  };
+  stageRetryBuckets?: {
+    effective: { [stage: string]: string };
+    sources: { [stage: string]: "stored" | "deployment" };
+    errors: string[];
+  };
   venues: {
     brokers: string[];
     modes: string[];
@@ -120,6 +138,23 @@ function ResearchStageControl({
   const [rows, setRows] = useState<ResearchStageRowView[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState("");
+  // Issue #6466 part 2 — the workflow instance carrying the run (stamped at
+  // dispatch) and when it started; null when the run never dispatched through
+  // the workflow residency. Shown above the stage rows so an idle run is
+  // identifiable, not a blank.
+  const [workflowInstanceId, setWorkflowInstanceId] = useState<string | null>(null);
+  const [runStartedAt, setRunStartedAt] = useState<string | null>(null);
+  // Issue #6466 part 1 — the clock a running stage's elapsed time ticks
+  // against. It advances once a second while any row is running; the elapsed
+  // itself is computed from the already-read `startedAt`, so no new polling
+  // loop is needed.
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  const anyRunning = rows.some((row) => row.status === "running");
+  useEffect(() => {
+    if (!anyRunning) return;
+    const timer = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [anyRunning]);
   // Issue #6378 — the stage whose output is open, and the outputs read so
   // far. An absent entry means "not read yet"; null means "read, none
   // recorded" — the two are never conflated, so the panel never claims a
@@ -135,9 +170,15 @@ function ResearchStageControl({
         `/api/research/runs/${encodeURIComponent(runId)}/stages`,
         { headers: hdrs(userLogin) },
       );
-      const data = await readJson<{ stages?: ResearchStageRowView[] }>(res);
+      const data = await readJson<{
+        stages?: ResearchStageRowView[];
+        workflowInstanceId?: string | null;
+        runStartedAt?: string | null;
+      }>(res);
       const next = Array.isArray(data.stages) ? data.stages : [];
       setRows(next);
+      setWorkflowInstanceId(data.workflowInstanceId ?? null);
+      setRunStartedAt(data.runStartedAt ?? null);
       onStages?.(next.map((row) => row.stageId));
       setMsg("");
     } catch (err) {
@@ -210,6 +251,11 @@ function ResearchStageControl({
     <DetailCard title="Stage control">
       <Stack gap="2">
         {rows.length === 0 && <span className="ui-meta-sm">No stages recorded for this run yet.</span>}
+        {workflowInstanceId && (
+          <span className="ui-meta-sm">
+            {`Workflow instance ${workflowInstanceId}${runStartedAt ? ` · started ${new Date(runStartedAt).toLocaleString()}` : ""}`}
+          </span>
+        )}
         {rows.map((row) => (
           <React.Fragment key={row.stageId}>
           <Flex gap="2" align="center" wrap={true}>
@@ -217,9 +263,16 @@ function ResearchStageControl({
               {row.status}
             </Badge>
             <span className="ui-meta-sm">{row.stageId}</span>
-            {typeof row.durationMs === "number" && (
-              <span className="ui-meta-sm">{row.durationMs} ms</span>
-            )}
+            {(() => {
+              // Issue #6466 part 1 — every stage shows its elapsed time:
+              // finished shows the recorded duration, running ticks live
+              // from startedAt, timed-out/failed shows start-to-end. A
+              // stage that never started shows nothing — never an invented 0.
+              const elapsed = elapsedMsForStage(row, nowMs);
+              return elapsed === null ? null : (
+                <span className="ui-meta-sm">{elapsed} ms</span>
+              );
+            })()}
             {typeof row.unitCount === "number" && row.unitCount > 0 && (
               <span className="ui-meta-sm">
                 {row.failedUnitCount ?? 0}/{row.unitCount} units
@@ -952,11 +1005,36 @@ export function ResearchRunsPanel({
                 {`Deployment default ignored: ${execution.deploymentErrors.join("; ")}`}
               </Notice>
             )}
+            {execution?.settlementWaitMs && (
+              <span className="ui-meta">
+                {`Settlement wait: ${execution.settlementWaitMs.effectiveMs} ms (${execution.settlementWaitMs.source}; deployment ${execution.settlementWaitMs.deploymentMs} ms). A dispatch waits this long for the engine run to settle before reporting a timeout.`}
+              </span>
+            )}
+            {execution?.settlementWaitMs && execution.settlementWaitMs.errors.length > 0 && (
+              <Notice tone="danger">
+                {`Settlement wait carrier ignored: ${execution.settlementWaitMs.errors.join("; ")}`}
+              </Notice>
+            )}
+            {execution?.stageTimeouts && execution.stageTimeouts.errors.length > 0 && (
+              <Notice tone="danger">
+                {`Stage timeouts carrier ignored: ${execution.stageTimeouts.errors.join("; ")}`}
+              </Notice>
+            )}
+            {execution?.stageRetryBuckets && execution.stageRetryBuckets.errors.length > 0 && (
+              <Notice tone="danger">
+                {`Stage retry buckets carrier ignored: ${execution.stageRetryBuckets.errors.join("; ")}`}
+              </Notice>
+            )}
             {execution &&
               execution.stages.map((stage) => (
                 <Card key={stage} padding="sm">
                   <Stack gap="2">
                     <span>{stage}</span>
+                    {execution.stageTimeouts && (
+                      <span className="ui-meta-sm">
+                        {`Timeout: ${execution.stageTimeouts.effective[stage] ?? "—"} ms (${execution.stageTimeouts.sources[stage] ?? "deployment"}) · retry bucket: ${execution.stageRetryBuckets?.effective[stage] ?? "—"} (${execution.stageRetryBuckets?.sources[stage] ?? "deployment"})`}
+                      </span>
+                    )}
                     <Flex gap="2" wrap={true}>
                       {execution.axes.map((axis) => {
                         const value = modeDraft[stage]?.[axis] ?? "";

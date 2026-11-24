@@ -54,10 +54,20 @@ import {
   resolveResearchStageModes,
   resolveResearchStageRetryBuckets,
   resolveResearchStageTimeouts,
+  resolveResearchSettlementWaitMs,
   mergeResearchStageModes,
+  mergeResearchStageRetryBuckets,
+  mergeResearchStageTimeouts,
   type ResearchStageModes,
+  type ResearchStageRetryBuckets,
+  type ResearchStageTimeouts,
   type ResearchStorageMode,
 } from "../config/researchJobConfig";
+// Issue #6466 part 5 — the dispatch event rides the OTel J1–J7 logger (the
+// same logger that emits `job.run.settled`, proven to reach Grafana). This
+// module is server-only, so importing the observer deps as a value is safe
+// here — the browser-bundle ban binds the factory, not this module.
+import { getOtelJobPipelineObserverDeps } from "../observability/otelJobPipelineObservers";
 import { newRunId } from "../services/executionTreeIds";
 import { researchEngineJobId } from "./researchDataPorts";
 import { codedMessage } from "../outcomes/outcomeAspects";
@@ -106,6 +116,19 @@ export interface DispatchResearchEngineInput {
    * and per axis; absent means "the deployment default is the whole map".
    */
   stageModes?: ResearchStageModes;
+  /**
+   * Issue #6466 part 4 — the stored per-stage timeouts / retry buckets
+   * (ResearchConfig.stageTimeouts / stageRetryBuckets). They win over the
+   * deployment carriers per stage, mirroring stageModes.
+   */
+  stageTimeouts?: ResearchStageTimeouts;
+  stageRetryBuckets?: ResearchStageRetryBuckets;
+  /**
+   * Issue #6466 part 3 — the stored settlement-wait override
+   * (ResearchConfig.settlementWaitMs, ms). It wins over the deployment
+   * carrier; absent means the deployment carrier governs, then the default.
+   */
+  settlementWaitMs?: number | null;
   /** Issue #5912 — the venue/mode this run names; rides the job params. */
   brokerId?: string;
   mode?: string;
@@ -402,9 +425,16 @@ export async function dispatchResearchEngineRun(
     ),
     // Issue #5109, Fix 2 — the per-stage deadlines and retry buckets
     // resolve from the deployment carriers (defaults when absent),
-    // mirroring the stageModes resolution above.
-    stageTimeouts: resolveResearchStageTimeouts(input.env),
-    stageRetryBuckets: resolveResearchStageRetryBuckets(input.env),
+    // mirroring the stageModes resolution above. Issue #6466 part 4 — a
+    // stored override wins per stage, same rule.
+    stageTimeouts: mergeResearchStageTimeouts(
+      resolveResearchStageTimeouts(input.env),
+      input.stageTimeouts,
+    ),
+    stageRetryBuckets: mergeResearchStageRetryBuckets(
+      resolveResearchStageRetryBuckets(input.env),
+      input.stageRetryBuckets,
+    ),
     // Issue #5912 — the venue/mode this run names (carried to analyze.ooda).
     ...(input.brokerId ? { brokerId: input.brokerId } : {}),
     ...(input.mode ? { mode: input.mode } : {}),
@@ -415,17 +445,45 @@ export async function dispatchResearchEngineRun(
   // The in-process sync invocation stays as the explicit local/test path.
   if (!input.forceSync && researchWorkflowResidencyAvailable(input.durableEnv)) {
     const env = input.durableEnv as Env;
+    // Issue #6466 part 5 — the dispatch event rides the OTel J1–J7 logger
+    // (the same logger that emits `job.run.settled`), gated by the j1j7
+    // domain switch. Best-effort: a logger failure never fails the dispatch
+    // — the stamp still happens, only the event is missing.
+    const dispatchLogger = (() => {
+      try {
+        const otelDeps = getOtelJobPipelineObserverDeps(env);
+        return {
+          info: (type: string, fields: Record<string, unknown>) => {
+            try {
+              if (otelDeps.logging.isEnabled()) otelDeps.logging.logger.info(type, fields);
+            } catch {
+              // Best-effort logging.
+            }
+          },
+        };
+      } catch {
+        return undefined;
+      }
+    })();
     const started = await startResearchJobWorkflow({
       env,
       definition: definition as unknown as Record<string, unknown>,
       engineJobId,
+      runId,
       trigger: input.trigger,
+      ...(dispatchLogger ? { dispatchLogger } : {}),
       ...(input.startResearchWorkflow ? { startWorkflow: input.startResearchWorkflow } : {}),
     });
+    // Issue #6466 part 3 — the settlement wait is the effective value
+    // (stored config over the deployment carrier over the 120 s default),
+    // unless the caller already fixed one (a test seam).
     const settlement = await awaitResearchJobSettlement({
       env,
       engineJobId,
       ...(input.settlementOpts ?? {}),
+      timeoutMs:
+        input.settlementOpts?.timeoutMs ??
+        resolveResearchSettlementWaitMs(input.env, input.settlementWaitMs),
     });
     const view = settlement.view as unknown as {
       instance: { state: string; lastError?: string | null; currentRunId?: string | null } | null;
@@ -666,6 +724,14 @@ export async function readResearchStages(
   jobState: string;
   engineRunId: string | null;
   storageMode: ResearchStorageMode;
+  /**
+   * Issue #6466 part 2 — the workflow instance carrying the run (stamped at
+   * dispatch) and when it started; null when the run was never dispatched
+   * through the workflow residency. The page renders this line so an idle
+   * run is identifiable, not a blank.
+   */
+  workflowInstanceId: string | null;
+  runStartedAt: string | null;
   stages: ResearchStageRow[];
 }> {
   const engineJobId = researchEngineJobId(input.runId);
@@ -785,6 +851,8 @@ export async function readResearchStages(
     jobState: view?.instance?.state ?? "idle",
     engineRunId: view?.instance?.currentRunId ?? null,
     storageMode,
+    workflowInstanceId: view?.instance?.runWorkflowInstanceId ?? null,
+    runStartedAt: view?.instance?.runStartedAt ?? null,
     stages,
   };
 }

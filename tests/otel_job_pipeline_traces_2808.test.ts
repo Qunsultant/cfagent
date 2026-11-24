@@ -254,3 +254,30 @@ describe("createOtelJobPipelineTracesRunSettledObserver — one span per settled
     expect(spans).toHaveLength(1);
   });
 });
+
+describe("#6466 — step spans carry the run id as a first-class field", () => {
+  it("records runId + jobId attributes when the journal is given run context", async () => {
+    const { deps: d, mem, provider } = deps();
+    const journal = createOtelJobPipelineTracesStepJournal(d);
+    await journal.do("step:run-6466:feed:0:-:-", async () => "done", {
+      runId: "run-6466",
+      jobId: "research:run-6466",
+    });
+    const spans = mem.getFinishedSpans();
+    await provider.shutdown();
+    expect(spans).toHaveLength(1);
+    expect(spans[0].attributes.runId).toBe("run-6466");
+    expect(spans[0].attributes.jobId).toBe("research:run-6466");
+    expect(spans[0].attributes.step).toBe("step:run-6466:feed:0:-:-");
+  });
+
+  it("records no runId attribute when no run context is given", async () => {
+    const { deps: d, mem, provider } = deps();
+    const journal = createOtelJobPipelineTracesStepJournal(d);
+    await journal.do("step:run-6466:feed:0:-:-", async () => "done");
+    const spans = mem.getFinishedSpans();
+    await provider.shutdown();
+    expect(spans).toHaveLength(1);
+    expect(spans[0].attributes.runId).toBeUndefined();
+  });
+});

@@ -10,6 +10,11 @@ import { ACCOUNT_TYPES } from "./accountBindings";
 import { isRetryBucketName, RETRY_BUCKET_NAMES } from "../services/pipelinePolicy";
 import type { StageRetryBucket } from "../workflows/stageRunnerPorts";
 
+// Issue #6466 part 4 — re-exported so the execution view (and any other
+// reader of the effective retry-bucket table) names the bucket type from the
+// one job-config module instead of reaching into the stage-runner ports.
+export type { StageRetryBucket } from "../workflows/stageRunnerPorts";
+
 export type ResearchStorageMode = "durable" | "in-memory";
 export type ResearchAccountType = (typeof ACCOUNT_TYPES)[number];
 
@@ -335,6 +340,72 @@ export function mergeResearchStageRetryBuckets(
   override?: ResearchStageRetryBuckets | null,
 ): Record<ResearchStageKind, StageRetryBucket> {
   return { ...base, ...(override ?? {}) };
+}
+
+/**
+ * Issue #6466 part 3 — the dispatch settlement wait. The manual/scheduled
+ * research dispatch waits for the engine run to settle; the wait is
+ * deadline-bounded so the caller never hangs forever. It was a hardcoded
+ * default (`timeoutMs ?? 120_000` in the workflow host): a run that takes
+ * longer to *start* than the wait — the 2026-11-24 run research:mwuysxu3-1
+ * sat idle past it — fails with `research_workflow_run_timeout` even though
+ * the run's own per-stage budgets are 4–10 minutes. The carrier is
+ * externalized (deployment env + stored research config), default 120 s,
+ * raisable to 10–15x (1,200,000–1,800,000 ms) with no code change.
+ */
+export const DEFAULT_RESEARCH_SETTLEMENT_WAIT_MS = 120_000;
+export const MIN_RESEARCH_SETTLEMENT_WAIT_MS = 10_000;
+export const MAX_RESEARCH_SETTLEMENT_WAIT_MS = 1_800_000;
+
+/**
+ * Issue #6466 part 3 — validate one settlement-wait value. A missing value
+ * is not an error (the default governs); anything else must be an integer
+ * inside the bounds. Errors name the carrier, like the stage-timeout
+ * validators.
+ */
+export function validateResearchSettlementWaitMs(
+  value: unknown,
+  source = "RESEARCH_SETTLEMENT_WAIT_MS",
+): { waitMs: number | null; errors: string[] } {
+  if (value === null || value === undefined) return { waitMs: null, errors: [] };
+  if (typeof value !== "number" || !Number.isInteger(value) || value < MIN_RESEARCH_SETTLEMENT_WAIT_MS || value > MAX_RESEARCH_SETTLEMENT_WAIT_MS) {
+    return {
+      waitMs: null,
+      errors: [
+        `${source}: the settlement wait must be an integer between ${MIN_RESEARCH_SETTLEMENT_WAIT_MS} and ${MAX_RESEARCH_SETTLEMENT_WAIT_MS} ms`,
+      ],
+    };
+  }
+  return { waitMs: value, errors: [] };
+}
+
+/** Issue #6466 part 3 — read the deployment carrier (plain integer ms). */
+export function readResearchSettlementWaitMs(
+  env?: Record<string, string | undefined>,
+): { waitMs: number | null; errors: string[] } {
+  const raw = env?.RESEARCH_SETTLEMENT_WAIT_MS;
+  if (raw === undefined || raw === "") return { waitMs: null, errors: [] };
+  const parsed = Number(raw);
+  return validateResearchSettlementWaitMs(Number.isFinite(parsed) ? parsed : raw);
+}
+
+/**
+ * Issue #6466 part 3 — the effective settlement wait: the stored value
+ * wins; then the deployment carrier; then the default. Throws on the first
+ * validation error, like `resolveResearchStageTimeouts`.
+ */
+export function resolveResearchSettlementWaitMs(
+  env?: Record<string, string | undefined>,
+  storedMs?: number | null,
+): number {
+  if (storedMs !== null && storedMs !== undefined) {
+    const { waitMs, errors } = validateResearchSettlementWaitMs(storedMs, "settlementWaitMs");
+    if (errors.length > 0) throw new Error(errors[0]);
+    return waitMs ?? DEFAULT_RESEARCH_SETTLEMENT_WAIT_MS;
+  }
+  const { waitMs, errors } = readResearchSettlementWaitMs(env);
+  if (errors.length > 0) throw new Error(errors[0]);
+  return waitMs ?? DEFAULT_RESEARCH_SETTLEMENT_WAIT_MS;
 }
 
 export interface ResearchJobConfig {
