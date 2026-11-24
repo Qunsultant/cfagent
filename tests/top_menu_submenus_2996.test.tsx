@@ -225,3 +225,33 @@ describe("top-strip rendering (issue #2996)", () => {
     expect(trigger.className).toContain("active");
   });
 });
+
+describe("top-bar settings trigger (issue #6147 S4a)", () => {
+  it("renders a Settings button in the top bar that opens nav-settings", async () => {
+    const onSelectTab = vi.fn();
+    await act(async () => {
+      root.render(
+        <NavigationMenu
+          layout="top"
+          onToggleLayout={vi.fn()}
+          activeTab={"autopilot" as any}
+          onSelectTab={onSelectTab}
+          onAskAgent={vi.fn()}
+          user={{ login: "tester", name: "Tester", avatar: "" }}
+        />,
+      );
+    });
+    // The left-nav footer does not exist in top layout, so the top
+    // bar carries the trigger — without it, top-mode users would have
+    // no entry point to the settings page.
+    const settingsBtn = container.querySelector(
+      'button[aria-label="Settings"]',
+    ) as HTMLButtonElement | null;
+    expect(settingsBtn).not.toBeNull();
+    expect(settingsBtn!.textContent).toContain("Settings");
+    await act(async () => {
+      settingsBtn!.click();
+    });
+    expect(onSelectTab).toHaveBeenCalledWith("nav-settings");
+  });
+});

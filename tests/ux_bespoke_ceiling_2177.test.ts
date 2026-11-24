@@ -185,7 +185,15 @@ describe("bespoke-styling ceiling (issue #2177)", () => {
     // DiscoveryFormSections, NotificationFields, ScheduleFormModal,
     // and ThesisRiskFields move to the Grid/Disclosure primitives,
     // sched-* classes, and ui-mt-* utilities).
-    expect(inlineStyles).toBeLessThanOrEqual(549);
+    // Raised to 550 by #6147 S4a (settings button into the left-nav
+    // footer): net +1 — 2 token-only inline styles added in
+    // LeftNavBar (footer container + button width, same idiom as the
+    // file's existing collapsed flyout, covered by the per-file
+    // baseline in ux_inline_baselines_3047.json) and 1 removed with
+    // the fixed Chat.tsx settings button. #6450 (merged after this
+    // branch's base) adds no inline styles, so the merge-group count
+    // is 550 as well.
+    expect(inlineStyles).toBeLessThanOrEqual(550);
     expect(rawLabels).toBeLessThanOrEqual(0);
   });
 });
