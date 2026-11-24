@@ -26,7 +26,7 @@
  * tests/agent-fallback-observability.test.ts), so its stub helper is
  * pinned by source evidence; everything else here is behavioural.
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
@@ -325,13 +325,29 @@ describe("orchestrator research publish entry (#2327)", () => {
 });
 
 describe("research scheduled-tick route (#2327)", () => {
+  // Issue #6471 — the fire decision reads the live clock
+  // (shouldFireResearchTick fires on weekday ticks at/after 21:00 UTC
+  // when nothing fired today), so this pin failed in the evening
+  // window: the fire path throws (getResearchAgent → null) instead of
+  // taking the skip path. Pin the clock to a weekday noon UTC so the
+  // identity gate + skip path are exercised deterministically.
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-11-24T12:00:00Z"));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   function makeRouteCtx() {
     // The tick route now evaluates ctx.getOrm() eagerly in the fire
     // path (the #2037 outcome write + the engine dispatch take it as
     // an argument), so a throwing stub made this pin time-dependent:
     // it failed on weekdays from 21:00 UTC (the fire hour) while the
-    // skip path never reached it. A real in-memory ORM keeps the pin
-    // window-independent; the dispatch itself stays mocked.
+    // skip path never reached it. A real in-memory ORM keeps the
+    // outcome write window-independent; the dispatch itself stays
+    // mocked. (The fire decision itself still reads the live clock —
+    // see the fake-timer pin above, #6471.)
     const sql = new MockSqlStorage();
     const orm = new DatabaseORM(sql);
     orm.initializeSchema("default_trader");
