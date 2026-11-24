@@ -45,7 +45,7 @@ import {
   auditToMcpResult,
   reportsToMcpResult,
 } from "../src/mcps/openaimp/agentDbReadCommands";
-import { MCP_TOOLS_CATALOG } from "../src/client/mcpEndpointsData";
+import { buildMcpCatalog } from "../src/mcps/openaimp/catalog";
 import {
   API_ENDPOINT_CATALOG,
 } from "../src/client/iaaaEndpointCatalog";
@@ -326,8 +326,10 @@ describe("registration (#1697)", () => {
     expect(chainRun).toBeInstanceOf(ChainRunCommand);
   });
 
-  it("adds the four tools to the MCP explorer catalog", () => {
-    const catalogNames = MCP_TOOLS_CATALOG.map((t) => t.name);
+  it("adds the four tools to the served MCP catalogue", () => {
+    // #6438: the explorer reads GET /api/mcp/catalog, so the served
+    // catalogue is the assertion.
+    const catalogNames = buildMcpCatalog().tools.map((t) => t.name);
     for (const name of NEW_TOOLS) expect(catalogNames).toContain(name);
   });
 });

@@ -378,6 +378,7 @@ describe("S6-P07 retired-module determination: the #3123 renames", () => {
       "src/client/docsAndReports.deprecated.css",
       "src/client/iaaaAdminPanel.deprecated.css",
       "src/client/loggedInUsersPanel.deprecated.css",
+      "src/client/mcpEndpointsData.deprecated.ts",
       "src/client/options/optionsResearch.deprecated.css",
       "src/client/options/strategyDiscovery.deprecated.css",
       "src/client/optionsResearch.deprecated.css",

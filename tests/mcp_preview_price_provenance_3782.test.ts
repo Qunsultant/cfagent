@@ -28,7 +28,7 @@ import { AlpacaTradingPlatform } from "../src/trading/alpaca/platform";
 import { DynamicMarketScreener } from "../src/trading/screener";
 import { McpToolFactory } from "../src/mcps/openaimp/commands";
 import { MCP_TOOL_SCOPES } from "../src/mcps/openaimp/mcpPermissionPorts";
-import { MCP_TOOLS_CATALOG } from "../src/client/mcpEndpointsData";
+import { buildMcpCatalog } from "../src/mcps/openaimp/catalog";
 import { MESH_TOOL_FAMILIES } from "../src/agents/registry";
 import { buildOrchestratorSystemPrompt } from "../src/agents/chatPrompt";
 import { MOCK_TEST_UNIVERSE } from "./fixtures/mockUniverse";
@@ -458,7 +458,7 @@ describe("Alpaca parity (2): quote + preview as agent tools (#3782)", () => {
     expect(McpToolFactory.getTool("alpaca_preview_order")).toBeDefined();
     expect(MCP_TOOL_SCOPES["alpaca_get_quote"]).toBe("mcp:read");
     expect(MCP_TOOL_SCOPES["alpaca_preview_order"]).toBe("mcp:trade");
-    const catalogNames = MCP_TOOLS_CATALOG.map((t) => t.name);
+    const catalogNames = buildMcpCatalog().tools.map((t) => t.name);
     expect(catalogNames).toContain("alpaca_get_quote");
     expect(catalogNames).toContain("alpaca_preview_order");
     const marketDataFamily = MESH_TOOL_FAMILIES.find((f) => f.id === "market-data-mcp-commands");

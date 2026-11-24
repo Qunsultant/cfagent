@@ -35,7 +35,7 @@ import { MockSqlStorage } from "./mock-sql";
 import { createMAS } from "../src/agents/mas";
 import { McpToolFactory } from "../src/mcps/openaimp/commands";
 import { getWorkersAIModel, resolveAiModelName } from "../src/agents/model";
-import { REST_APIS_CATALOG } from "../src/client/mcpEndpointsData";
+import { REST_APIS_CATALOG } from "../src/client/restEndpointsData";
 
 /**
  * Issue #1738 — actor parity harness (successor to the #658 Think

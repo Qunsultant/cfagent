@@ -994,6 +994,19 @@ function measure(): Map<string, number> {
  * 1392/11294 — the #6208 note's 1391/11293 is stale by the un-noted
  * #6160 row.)
  * Baseline totals move 1392/11294 -> 1410/11352.
+ * Baseline update (#6438, 2026-11-24): the UX client reads the served
+ * MCP catalogue (GET /api/mcp/catalog) and the hand-maintained
+ * src/client/mcpEndpointsData.ts is retired to
+ * mcpEndpointsData.deprecated.ts (rename only, gitops §22). The
+ * deprecated file's content is unchanged, so its 3 rows move with
+ * it at the same counts; the REST entries move verbatim to
+ * src/client/restEndpointsData.ts, whose provider mentions are the
+ * entries' own paths and descriptions — dispositioned INTEGRATION,
+ * as the old file's rows. The 14 retired MCP gap rows shrink
+ * iaaaEndpointCatalog.ts/etrade 44->40 (their item/source lines
+ * named the provider); the new client modules carry no
+ * provider-brand row. 3 rows removed, 6 rows added.
+ * Baseline totals move 1410/11352 -> 1413/11394.
  */
 const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (188 rows / 989 lines) ----
@@ -1480,9 +1493,6 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/client/firstRunApi.ts", "etrade", 11],
   ["src/client/iaaaAdminApi.ts", "etrade", 1],
   ["src/client/iaaaEndpointCatalog.ts", "etrade", 44],
-  ["src/client/mcpEndpointsData.ts", "alpaca", 14],
-  ["src/client/mcpEndpointsData.ts", "etrade", 53],
-  ["src/client/mcpEndpointsData.ts", "yahoo", 5],
   ["src/client/orderPreviewCard.ts", "etrade", 1],
   ["src/client/pollingConfig.ts", "etrade", 1],
   ["src/client/portfolioRiskApi.ts", "alpaca", 1],
@@ -2736,6 +2746,12 @@ const BASELINE: Array<[string, string, number]> = [
   ["docs/architecture/data/screening-consolidation-survey.md", "etrade", 21],
   ["docs/architecture/data/screening-consolidation-survey.md", "yahoo", 3],
   ["docs/architecture/data/screening-consolidation-survey.md", "nasdaq", 1],
+  ["src/client/mcpEndpointsData.deprecated.ts", "alpaca", 14],
+  ["src/client/mcpEndpointsData.deprecated.ts", "etrade", 53],
+  ["src/client/mcpEndpointsData.deprecated.ts", "yahoo", 5],
+  ["src/client/restEndpointsData.ts", "alpaca", 4],
+  ["src/client/restEndpointsData.ts", "etrade", 35],
+  ["src/client/restEndpointsData.ts", "yahoo", 3],
 ];
 
 const BASELINE_MAP = new Map(BASELINE.map(([f, t, c]) => [`${f}\t${t}`, c]));
