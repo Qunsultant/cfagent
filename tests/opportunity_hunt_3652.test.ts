@@ -110,7 +110,10 @@ describe("runOpportunityHunt (#3652)", () => {
       },
     ]);
     expect(result.summary).toContain("1 setup(s) across 1 symbol(s)");
-    expect(result.summary).toContain("AAA:sma_crossover");
+    // Issue #6473 — the summary is the counts headline only: the symbol
+    // enumeration moved to the report body (table, charts, counts section),
+    // so the header no longer repeats it.
+    expect(result.summary).not.toContain("AAA:sma_crossover");
     expect(result.asOf).toBe("2026-11-19T12:00:00.000Z");
   });
 
@@ -137,7 +140,9 @@ describe("runOpportunityHunt (#3652)", () => {
   it("an empty universe is a completed hunt, not an error", () => {
     const result = runOpportunityHunt({ closesBySymbol: new Map() });
     expect(result.setups).toEqual([]);
-    expect(result.summary).toBe("Opportunity hunt: 0 setup(s) across 0 symbol(s) — none");
+    // Issue #6473 — no trailing "— none": the counts speak for themselves and
+    // the body carries the (empty) symbol detail.
+    expect(result.summary).toBe("Opportunity hunt: 0 setup(s) across 0 symbol(s)");
   });
 });
 
