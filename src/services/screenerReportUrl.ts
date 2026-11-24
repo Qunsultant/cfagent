@@ -38,3 +38,14 @@ export function optionsReportUrl(
     `/api/options/report.pdf?key=${encodeURIComponent(pdfKey)}`,
   );
 }
+
+/** Issue 6403: the Opportunity Hunt report PDF download URL. */
+export function opportunityHuntReportUrl(
+  appBaseUrl: string | undefined,
+  pdfKey: string,
+): string {
+  return absoluteReportUrl(
+    appBaseUrl,
+    `/api/opportunity-hunt/report.pdf?key=${encodeURIComponent(pdfKey)}`,
+  );
+}

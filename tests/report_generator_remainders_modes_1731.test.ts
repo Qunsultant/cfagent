@@ -150,6 +150,35 @@ function researchFixture(): ResearchReport {
   } as unknown as ResearchReport;
 }
 
+function opportunityHuntFixture(): import("../src/services/opportunityHunt").OpportunityHuntResult {
+  return {
+    scanned: 2,
+    skipped: 0,
+    setups: [
+      {
+        symbol: "AAA",
+        strategy: "sma_crossover",
+        direction: "entry",
+        lastClose: 100,
+        detail: "(Fast SMA 101.00 > Slow 99.00)",
+        levels: { entryLow: 99.5, entryHigh: 100.5, stopLoss: 95, takeProfit: 110 },
+      },
+      {
+        symbol: "AAA",
+        strategy: "mean_reversion",
+        direction: "exit",
+        lastClose: 100,
+        detail: "(close 3.0% above entry)",
+        entryPrice: 97,
+      },
+    ],
+    summary: "Opportunity hunt: 2 setup(s) across 2 symbol(s), 1 entry, 1 exit — AAA:sma_crossover, AAA:mean_reversion",
+    asOf: "2026-11-24T14:14:00.000Z",
+    holdingsStatus: { available: true, broker: "alpaca" },
+    seriesBySymbol: { AAA: [95, 96, 97, 98, 99, 100] },
+  };
+}
+
 function goalScreenFixture(): GoalDrivenScreenResult {
   return {
     goalKind: "income",
@@ -245,11 +274,12 @@ describe("report generator remainders registry (#1731, appendix (k))", () => {
 });
 
 describe("the ONE dispatch (#1731 R-1/R-2 boundary)", () => {
-  it("routes each of the three pipeline types to a valid PDF", async () => {
+  it("routes each pipeline type to a valid PDF", async () => {
     for (const [type, result] of [
       ["screener", screenerFixture()],
       ["options", optionsFixture()],
       ["research", researchFixture()],
+      ["opportunity-hunt", opportunityHuntFixture()],
     ] as const) {
       const bytes = await generateReportPdf(type, result);
       expect(bytes).toBeInstanceOf(Uint8Array);

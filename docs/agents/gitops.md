@@ -1234,6 +1234,30 @@ When the same change lands on `main` through another PR first (parallel lanes, �
    - Carve out the unique changes into a distinct follow-up issue and branch before closing.
 3. Only close your PR as superseded once `verify_pr_closure.py` confirms zero unmerged functional diff, carrying that verification evidence and linking the landed PR in the closure comment.
 4. Reconcile the issue from the landed PR (completion report, checklist state).
+5. **Make the retirement automatic — closing keyword *and* label, both.** GitHub
+   closes a *referenced pull request* only through a closing keyword: the
+   superseding PR's description carries `Closes #<old PR>` (the keywords are
+   `close` / `closes` / `closed`, `fix` / `fixes` / `fixed`,
+   `resolve` / `resolves` / `resolved`; `Supersedes #<old PR>` is prose and
+   closes nothing). The old PR also carries the `superseded` label, because
+   `.github/workflows/pr-closure-watchdog.yml` reopens **any** closed-unmerged
+   PR to prevent work loss, and skips that reopen only for a PR carrying the
+   label. The keyword does the closing; the label stops the watchdog undoing
+   it. Omit either and the retirement does not hold: a keyword-less merge
+   leaves the old PR open (its files landed, its record did not), and a
+   label-less close is reopened within the minute. When the keyword was missed
+   at merge time, apply the label and close the old PR by hand, carrying the
+   guardrail output.
+6. **Branches take care of themselves.** `delete_branch_on_merge` is ON for this
+   repository, so GitHub deletes a merged PR's head branch — never delete it by
+   hand. A closed-unmerged PR keeps its branch until the watchdog's `superseded`
+   path removes it, which is the only intended path for that branch. Fork PRs
+   are the exception: the base repository cannot delete a fork's branch.
+7. **Run the guardrail against a freshly fetched base.** `verify_pr_closure.py`
+   compares the branch against `origin/main`. A stale local `origin/main`
+   reports the superseding PR's own files as "unmerged" and refuses the close
+   with a message that reads like real work loss. `git fetch origin main` before
+   judging; a refusal after a fresh fetch is real and blocks the close.
 
 Never force-merge a colliding duplicate, and never leave a PR open and unexplained once its change is on `main`. Conversely, never blindly close a PR with unmerged code. A dangling PR misstates the state of the work, but a lost delta discards engineering value.
 
