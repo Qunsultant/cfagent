@@ -39,6 +39,10 @@ const FAMILY_KINDS: Record<string, RunLedgerKind> = {
   goal: "goal",
   reports: "reports",
   report: "reports",
+  // Issue #6371 — a research engine job is a workflow run, not an options
+  // Docs row: the manifest names it so the kind never falls through by
+  // accident (the fallback is "workflow" too, stated here on purpose).
+  research: "workflow",
 };
 
 function outcomeOf(run: WorkflowRun): JobRunOutcome {
