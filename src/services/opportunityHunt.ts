@@ -99,7 +99,7 @@ export interface OpportunityHuntInput {
 }
 
 /** Summarise a hunt for the ledger: counts first, then the first few symbols. */
-function huntSummary(result: Omit<OpportunityHuntResult, "summary">): string {
+export function huntSummary(result: Omit<OpportunityHuntResult, "summary">): string {
   const entries = result.setups.filter((s) => s.direction === "entry").length;
   const exits = result.setups.length - entries;
   const head = `Opportunity hunt: ${result.setups.length} setup(s) across ${result.scanned} symbol(s)`;
@@ -110,14 +110,39 @@ function huntSummary(result: Omit<OpportunityHuntResult, "summary">): string {
       ? `, ${entries} ${entries === 1 ? "entry" : "entries"}, ${exits} ${exits === 1 ? "exit" : "exits"}`
       : "";
   const tail = result.skipped > 0 ? `, ${result.skipped} skipped (short history)` : "";
-  const names =
-    result.setups.length > 0
-      ? ` — ${result.setups
-          .slice(0, 5)
-          .map((s) => `${s.symbol}:${s.strategy}`)
-          .join(", ")}${result.setups.length > 5 ? ", …" : ""}`
-      : " — none";
-  return `${head}${split}${tail}${names}`;
+  // Issue #6473 — the summary is the COUNTS headline only. It is rendered as
+  // the report's title block, and a symbol enumeration there pushed the
+  // document's first content line to the edge (and repeated the table below).
+  // The symbols live in the body: the per-symbol table, the charts, and the
+  // "How the counts add up" section that explains why setups outnumber them.
+  return `${head}${split}${tail}`;
+}
+
+/**
+ * Issue #6473 — the sentence that explains why setups outnumber symbols,
+ * computed from the result's own counts: a symbol carries one entry setup per
+ * strategy that fired, and exits are counted apart from entries. Pure, so the
+ * report and any other surface render one wording rather than two.
+ */
+export function huntCountsExplanation(result: OpportunityHuntResult): string {
+  const entries = result.setups.filter((s) => s.direction === "entry");
+  const exits = result.setups.filter((s) => s.direction === "exit");
+  const symbolsWithSetups = new Set(result.setups.map((s) => s.symbol)).size;
+  const perStrategy = new Map<string, number>();
+  for (const setup of entries) {
+    perStrategy.set(setup.strategy, (perStrategy.get(setup.strategy) ?? 0) + 1);
+  }
+  const strategyText = [...perStrategy.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([strategy, count]) => `${count} ${strategy}`)
+    .join(", ");
+  const head = `${result.scanned} symbol(s) scanned → ${symbolsWithSetups} produced at least one setup → ${result.setups.length} setups = ${entries.length} entry setup(s) + ${exits.length} exit setup(s).`;
+  const why = `A symbol can carry one entry setup per strategy, so setups outnumber symbols: ${strategyText || "no strategy fired"}.`;
+  const exitsNote =
+    exits.length > 0
+      ? ` The ${exits.length} exit setup(s) are evaluated separately against the run's holdings, not counted as entries.`
+      : "";
+  return `${head} ${why}${exitsNote}`;
 }
 
 /** Pure hunt over supplied closes. The caller owns the bar source. */

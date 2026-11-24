@@ -32,6 +32,7 @@
  */
 
 import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
+import { huntCountsExplanation } from "../services/opportunityHunt";
 import type {
   OpportunityHuntResult,
   OpportunityHuntSetup,
@@ -289,7 +290,15 @@ export async function generateOpportunityHuntPdf(
       { size: 9, color: PDF_PRINT_NOTE },
     );
   }
-  rule(ctx);
+  // Issue #6473 — "how did N symbols become M setups?" is answerable from the
+  // run's own counts, so the report answers it instead of leaving the reader to
+  // wonder: a symbol carries one setup per strategy that fired, and exits are
+  // counted apart from entries. Computed here, never asserted.
+  if (result.setups.length > 0) {
+    text(ctx, "How the counts add up", { size: 12, bold: true });
+    text(ctx, huntCountsExplanation(result), { size: 10 });
+    rule(ctx);
+  }
 
   if (result.setups.length === 0) {
     text(ctx, "No setups", { size: 12, bold: true });
