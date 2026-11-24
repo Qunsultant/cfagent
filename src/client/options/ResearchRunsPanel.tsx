@@ -99,6 +99,10 @@ interface ResearchStageRowView {
   failedUnitCount?: number;
   result?: { descriptor: string } | null;
   resultReason?: string;
+  /** Issue #6378 — the persisted step output, present only when the read was asked for it. */
+  output?: unknown;
+  /** Issue #6355 — the persisted step output's own status verb (e.g. "not_configured"). */
+  stepStatus?: string | null;
 }
 
 function ResearchStageControl({
@@ -116,6 +120,13 @@ function ResearchStageControl({
   const [rows, setRows] = useState<ResearchStageRowView[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState("");
+  // Issue #6378 — the stage whose output is open, and the outputs read so
+  // far. An absent entry means "not read yet"; null means "read, none
+  // recorded" — the two are never conflated, so the panel never claims a
+  // stage has no output before it asked.
+  const [openOutput, setOpenOutput] = useState<string | null>(null);
+  const [outputs, setOutputs] = useState<Record<string, unknown>>({});
+  const [outputBusy, setOutputBusy] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!runId) return;
@@ -162,13 +173,46 @@ function ResearchStageControl({
     }
   };
 
+  /**
+   * Issue #6378 — read one stage's output through the same stage route
+   * (`?includeOutput=<stageId>`), once per stage. The toggle closes without a
+   * fetch; a re-open reuses the read (a stage's output is immutable once
+   * written — a re-run produces a new run id, not a new artifact value).
+   */
+  const toggleOutput = async (stageId: string) => {
+    if (!runId) return;
+    if (openOutput === stageId) {
+      setOpenOutput(null);
+      return;
+    }
+    setOpenOutput(stageId);
+    if (Object.prototype.hasOwnProperty.call(outputs, stageId)) return;
+    setOutputBusy(stageId);
+    setMsg("");
+    try {
+      const res = await apiFetch(
+        `/api/research/runs/${encodeURIComponent(runId)}/stages?includeOutput=${encodeURIComponent(stageId)}`,
+        { headers: hdrs(userLogin) },
+      );
+      const data = await readJson<{ stages?: ResearchStageRowView[]; error?: string }>(res);
+      const row = (data.stages ?? []).find((stage) => stage.stageId === stageId);
+      setOutputs((prev) => ({ ...prev, [stageId]: row?.output ?? null }));
+    } catch (err) {
+      setMsg(`Stage output unavailable: ${err instanceof Error ? err.message : String(err)}`);
+      setOpenOutput(null);
+    } finally {
+      setOutputBusy(null);
+    }
+  };
+
   if (!runId) return null;
   return (
     <DetailCard title="Stage control">
       <Stack gap="2">
         {rows.length === 0 && <span className="ui-meta-sm">No stages recorded for this run yet.</span>}
         {rows.map((row) => (
-          <Flex key={row.stageId} gap="2" align="center" wrap={true}>
+          <React.Fragment key={row.stageId}>
+          <Flex gap="2" align="center" wrap={true}>
             <Badge tone={row.status === "failed" ? "danger" : row.status === "running" ? "info" : "neutral"} size="sm">
               {row.status}
             </Badge>
@@ -200,7 +244,30 @@ function ResearchStageControl({
                 {action.label}
               </Button>
             ))}
+            {/* Issue #6378 — the stage's output, inline: the operator who
+                wants to SEE what a stage produced no longer has to download
+                a file and open it elsewhere. */}
+            <Button
+              variant="secondary"
+              size="sm"
+              loading={outputBusy === row.stageId}
+              onClick={() => void toggleOutput(row.stageId)}
+              title="Show what this stage produced, inline"
+            >
+              {openOutput === row.stageId ? "Hide output" : "View output"}
+            </Button>
           </Flex>
+          {openOutput === row.stageId && (
+            outputBusy === row.stageId ? (
+              <span className="ui-meta-sm">Reading the stage output…</span>
+            ) : (
+              <StageOutputView
+                output={Object.prototype.hasOwnProperty.call(outputs, row.stageId) ? outputs[row.stageId] : null}
+                stepStatus={row.stepStatus ?? null}
+              />
+            )
+          )}
+          </React.Fragment>
         ))}
         {msg && <Notice tone="info" density="compact" variant="strip" title="Stage control">{msg}</Notice>}
       </Stack>
@@ -208,6 +275,106 @@ function ResearchStageControl({
   );
 }
 
+
+/**
+ * Issue #6378 — one value of a stage's output. Records render as tables
+ * (headers from the record's own keys, so a zero-row artifact still shows its
+ * columns), scalars as text, nested objects as key/value rows. Bounded on
+ * purpose: the first 50 rows and 12 columns are shown, and anything beyond is
+ * named as truncated rather than silently dropped.
+ */
+function outputCellText(value: unknown): string {
+  if (value === null || value === undefined) return "—";
+  if (typeof value === "string") return value.length > 400 ? `${value.slice(0, 400)}…` : value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  const json = JSON.stringify(value);
+  return json.length > 400 ? `${json.slice(0, 400)}…` : json;
+}
+
+const OUTPUT_ROW_CAP = 50;
+const OUTPUT_COLUMN_CAP = 12;
+
+function StageOutputValue({ value, depth = 0 }: { value: unknown; depth?: number }) {
+  if (value === null || value === undefined) return <span className="ui-meta-sm">—</span>;
+  if (typeof value !== "object") return <span className="ui-meta-sm">{outputCellText(value)}</span>;
+  if (Array.isArray(value)) {
+    const records = value.filter(
+      (row) => row && typeof row === "object" && !Array.isArray(row),
+    ) as Array<Record<string, unknown>>;
+    if (value.length === 0) {
+      return <span className="ui-meta-sm">0 rows recorded</span>;
+    }
+    if (records.length === value.length) {
+      const columns = Array.from(new Set(records.flatMap((row) => Object.keys(row)))).slice(0, OUTPUT_COLUMN_CAP);
+      const shown = records.slice(0, OUTPUT_ROW_CAP);
+      return (
+        <Stack gap="1">
+          <Table
+            columns={columns.map((key) => ({
+              key,
+              header: key,
+              render: (row: Record<string, unknown>) => (
+                <span className="ui-meta-sm">{outputCellText(row[key])}</span>
+              ),
+            }))}
+            rows={shown}
+            rowKey={(row) => String(shown.indexOf(row))}
+            caption={`${records.length} row${records.length === 1 ? "" : "s"}${records.length > shown.length ? ` — first ${shown.length} shown` : ""}`}
+          />
+          {records.length > shown.length && (
+            <span className="ui-meta-sm">
+              {records.length - shown.length} more rows not shown — download the artifact for the full set.
+            </span>
+          )}
+        </Stack>
+      );
+    }
+    return <span className="ui-meta-sm">{value.map(outputCellText).join(" · ")}</span>;
+  }
+  const entries = Object.entries(value as Record<string, unknown>);
+  if (depth >= 2) return <span className="ui-meta-sm">{outputCellText(value)}</span>;
+  return (
+    <Stack gap="1">
+      {entries.map(([key, nested]) => (
+        <Stack key={key} gap="1">
+          <span className="ui-meta-sm"><code>{key}</code></span>
+          <StageOutputValue value={nested} depth={depth + 1} />
+        </Stack>
+      ))}
+    </Stack>
+  );
+}
+
+/**
+ * Issue #6378 — a stage's output, rendered inline. What the engine persisted
+ * is what renders; nothing is summarized on the stage's behalf. A stage whose
+ * step recorded a status verb (e.g. `not_configured`, #6355) names it above
+ * the artifact, and a stage with no artifact says exactly that.
+ */
+export function StageOutputView({ output, stepStatus }: { output: unknown; stepStatus?: string | null }) {
+  if (output === null || output === undefined) {
+    return (
+      <Notice tone="neutral" density="compact">
+        No output artifact was recorded for this stage.
+      </Notice>
+    );
+  }
+  const status =
+    stepStatus ??
+    (output && typeof output === "object" && !Array.isArray(output)
+      ? (output as Record<string, unknown>).status
+      : null);
+  return (
+    <Stack gap="1">
+      {typeof status === "string" && status.length > 0 && (
+        <span className="ui-meta-sm">
+          Stage output status: <code>{status}</code>
+        </span>
+      )}
+      <StageOutputValue value={output} />
+    </Stack>
+  );
+}
 
 interface ResearchRunsPanelProps {
   activeEnv: "TEST" | "PROD";
