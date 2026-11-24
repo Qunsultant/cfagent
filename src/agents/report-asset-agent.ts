@@ -32,7 +32,7 @@ const structuredLog = createStructuredLogger(createObservabilitySink({}), {
   component: "agents/report-asset-agent",
 });
 
-export type AssetType = "research" | "screener" | "options";
+export type AssetType = "research" | "screener" | "options" | "opportunity-hunt";
 
 export interface AssetRequest {
   type: AssetType;

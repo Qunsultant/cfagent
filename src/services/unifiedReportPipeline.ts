@@ -40,8 +40,8 @@ const structuredLog = createStructuredLogger(createObservabilitySink({}), {
 });
 
 export interface UnifiedReportInput {
-  /** "screener" for stock, "options" for options screener, "research" for research runs (#1641) */
-  type: "screener" | "options" | "research";
+  /** "screener" for stock, "options" for options screener, "research" for research runs (#1641), "opportunity-hunt" for the Opportunity Hunt report (issue 6403) */
+  type: "screener" | "options" | "research" | "opportunity-hunt";
   /** The five dispatch modes (#5052) — how the run was started. */
   trigger: JobRunTrigger;
   /** The run result data (type-specific) */
@@ -68,7 +68,7 @@ export interface UnifiedReportOutput {
   pdfError?: string;
 }
 
-export type ReportAssetKind = "screener" | "options" | "research";
+export type ReportAssetKind = "screener" | "options" | "research" | "opportunity-hunt";
 
 /**
  * Generate the PDF bytes for a report.
@@ -102,9 +102,13 @@ export async function generateReportPdf(
   } else if (type === "options") {
     const { generateOptionsPdf } = await import("../trading");
     return generateOptionsPdf(result as any);
+  } else if (type === "opportunity-hunt") {
+    // Issue 6403: the hunt's report shape — the same output the panel shows.
+    const { generateOpportunityHuntPdf } = await import("../trading");
+    return generateOpportunityHuntPdf(result as any);
   }
   throw new Error(
-    `Unknown report type: ${String(type)} — the pipeline dispatches only screener, options, and research; goal-screen artifacts use their direct path.`
+    `Unknown report type: ${String(type)} — the pipeline dispatches only screener, options, research, and opportunity-hunt; goal-screen artifacts use their direct path.`
   );
 }
 
@@ -127,9 +131,12 @@ export async function getReportFileName(
   } else if (type === "options") {
     const { optionsPdfFileName } = await import("../trading");
     return optionsPdfFileName(result as any);
+  } else if (type === "opportunity-hunt") {
+    const { opportunityHuntPdfFileName } = await import("../trading");
+    return opportunityHuntPdfFileName(result as any);
   }
   throw new Error(
-    `Unknown report type: ${String(type)} — the pipeline dispatches only screener, options, and research; goal-screen artifacts use their direct path.`
+    `Unknown report type: ${String(type)} — the pipeline dispatches only screener, options, research, and opportunity-hunt; goal-screen artifacts use their direct path.`
   );
 }
 

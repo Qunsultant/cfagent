@@ -346,6 +346,24 @@ export function runOpportunityHuntNow() {
   });
 }
 
+/**
+ * Issue 6403 — generate the hunt's downloadable report (PDF) from the
+ * panel's current result. The result rides in the body so the PDF
+ * renders the exact output the panel shows. Returns the storage key
+ * and the download URL; a generation failure throws (the panel shows
+ * the error, never a fabricated link).
+ */
+export function generateOpportunityHuntReport(result: OpportunityHuntResult) {
+  return api<{ ok: boolean; pdfKey: string; generationId: string; reportUrl: string }>(
+    "/api/opportunity-hunt/report",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ result }),
+    },
+  );
+}
+
 export function removeGoal(id: string) {
   return api<{ ok: boolean }>(`/api/schedule/goals/${encodeURIComponent(id)}`, {
     method: "DELETE",

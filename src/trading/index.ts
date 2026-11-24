@@ -151,6 +151,8 @@ export * from "./discoveryReportData";
 export * from "./discoveryReportPdf";
 export * from "./discoveryReportXlsx";
 export * from "./discoveryReportCsv";
+// Issue 6403: the Opportunity Hunt report PDF (same output as the panel).
+export * from "./opportunityHuntReportPdf";
 export * from "./options";
 export * from "./options/flows";
 export * from "./options/flows/types";
