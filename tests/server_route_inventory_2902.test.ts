@@ -576,6 +576,7 @@ const EXPECTED_ROUTES: string[] = [
   "ANY /api/security/pip",
   "ANY /api/api-keys",
   "ANY PREFIX /api/api-keys/",
+  "ANY /api/mcp/catalog",
   "ANY /mcp",
   "ANY /api/mcp",
   "ANY /mcp/scanner",

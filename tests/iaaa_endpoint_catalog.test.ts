@@ -3,24 +3,22 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   API_ENDPOINT_CATALOG,
+  buildMcpCorrelationRows,
   IAAA_AUDIT_EVENT_CATALOG,
   IAAA_CATALOG_GAPS,
   IAAA_CORRELATION_ROWS,
 } from "../src/client/iaaaEndpointCatalog";
-import {
-  MCP_PROMPTS_CATALOG,
-  MCP_RESOURCES_CATALOG,
-  MCP_TOOLS_CATALOG,
-} from "../src/client/mcpEndpointsData";
+import { buildMcpCatalog } from "../src/mcps/openaimp/catalog";
 
 /**
  * #945 IAAA-UI v2 — endpoint/event explorer catalog integrity.
  *
  * The API catalog is static code knowledge derived by reading
- * src/server.ts's route table; the MCP tab reuses the existing
- * client catalogs; the IAAA tab enumerates the audit builders and
- * their live call sites. Nothing here may be invented: an unknown
- * is a gap row, and every correlation row must cite a real source.
+ * src/server.ts's route table; the MCP tab reads the served catalogue
+ * (GET /api/mcp/catalog, #6438); the IAAA tab enumerates the audit
+ * builders and their live call sites. Nothing here may be invented:
+ * an unknown is a gap row, and every correlation row must cite a real
+ * source.
  */
 
 const endpointIds = new Set(API_ENDPOINT_CATALOG.map((e) => e.id));
@@ -29,9 +27,10 @@ for (const e of API_ENDPOINT_CATALOG) {
   endpointPaths.add(e.path);
   for (const a of e.aliases) endpointPaths.add(a);
 }
-const mcpToolNames = new Set(MCP_TOOLS_CATALOG.map((t) => t.name));
-const mcpResourceUris = new Set(MCP_RESOURCES_CATALOG.map((r) => r.uri));
-const mcpPromptNames = new Set(MCP_PROMPTS_CATALOG.map((p) => p.name));
+const servedCatalog = buildMcpCatalog();
+const mcpToolNames = new Set(servedCatalog.tools.map((t) => t.name));
+const mcpResourceUris = new Set(servedCatalog.resources.map((r) => r.uri));
+const mcpPromptNames = new Set(servedCatalog.prompts.map((p) => p.name));
 const eventActions = new Set(IAAA_AUDIT_EVENT_CATALOG.map((e) => e.action));
 
 describe("API endpoint catalog", () => {
@@ -89,21 +88,25 @@ describe("API endpoint catalog", () => {
   });
 });
 
-describe("MCP catalog reuse", () => {
-  it("pins the reused catalog sizes so drift forces a review", () => {
-    // Counts verified against src/client/mcpEndpointsData.ts at v2
-    // authoring time. If the catalog grows, update this pin AND the
-    // MCP tab copy — do not silently let the tab go stale.
-    // 36 since #3782 (+2 Alpaca quote/preview tools); the MCP tab
-    // reads MCP_TOOLS_CATALOG directly, so no separate copy to update.
-    // 38 since #4741 (+1 manage_tenants tool).
-    expect(MCP_TOOLS_CATALOG.length).toBe(38);
-    expect(MCP_RESOURCES_CATALOG.length).toBe(8);
-    expect(MCP_PROMPTS_CATALOG.length).toBe(4);
+describe("MCP catalogue (served)", () => {
+  it("pins the served catalog sizes so drift forces a review", () => {
+    // Counts from the served catalogue (GET /api/mcp/catalog, #6438),
+    // built from the live registries at the merge head: 156 tools,
+    // 14 resources (11 unique names — the 3 market-data resources
+    // also exist under foss:// aliases), 5 prompts. If the served
+    // counts grow, update this pin — do not silently let the tab
+    // go stale.
+    expect(servedCatalog.tools.length).toBe(156);
+    expect(servedCatalog.resources.length).toBe(14);
+    expect(servedCatalog.prompts.length).toBe(5);
   });
 
   it("every endpoint-mcp row references a real endpoint and a real catalog entry", () => {
-    for (const row of IAAA_CORRELATION_ROWS.filter((r) => r.kind === "endpoint-mcp")) {
+    // The per-tool rows are built from the served names
+    // (buildMcpCorrelationRows, #6438); the static array holds only
+    // the one shares-source row. Both sets must reference real entries.
+    const builtRows = buildMcpCorrelationRows(servedCatalog.tools.map((t) => t.name));
+    for (const row of [...IAAA_CORRELATION_ROWS, ...builtRows].filter((r) => r.kind === "endpoint-mcp")) {
       expect(endpointIds.has(row.left), `unknown endpoint ${row.left}`).toBe(true);
       expect(row.source).toBeTruthy();
       if (row.right !== null) {

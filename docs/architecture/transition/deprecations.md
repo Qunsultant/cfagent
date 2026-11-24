@@ -605,3 +605,12 @@ unbound, rather than silently dropping bytes to legacy DO storage.
 - Reason: Issue #6029 (b), sub-issue #6299. The setting was stored, validated and served, and **no code read it** — the filter editor advertised a schedule the nightly run never honoured (the run fires from the tick rider plus `shouldFireResearchTick`). Removing a dead setting removes nothing that runs, which is why this half of #6029 lands before the stored schedule (#6298).
 - Tolerance: a stored `research.scheduleCron` value is ignored — the loader iterates the declared settings, so the value is never read and never fails a load. A `POST /api/research/settings` that names the key is refused by name with this reason instead of being persisted again (`RESEARCH_CONFIG_RETIRED_KEYS`).
 - Follow-on: the cadence becomes editable when the stored schedule record lands (#6298); the rider branch is retired in the same sub-issue after that.
+
+## 2026-11-24 — #6438 retires the hand-maintained client MCP catalogue
+
+- File: `src/client/mcpEndpointsData.ts` → `src/client/mcpEndpointsData.deprecated.ts` (rename only, gitops §22: never deleted)
+- Date: 2026-11-24
+- Reason: Issue #6438 (sub-issue of #6266). The Tools tab, the chat Endpoints tab, and the IAAA admin MCP tab read the served catalogue from GET /api/mcp/catalog (`src/mcps/openaimp/catalog.ts`, built from `McpToolFactory.getToolDefinitions()` plus the resource/prompt registries), so a newly registered tool appears on every surface after deploy with no client-file edit. The hand-maintained file held 38 tools against 147 on the server, and its descriptions contradicted each other (10 vs 8 enterprise tables). The served catalogue is the single source; tool categories are now the tools' permission scopes, as served.
+- Replacement: `GET /api/mcp/catalog` + `src/client/mcpCatalog.ts` (`fetchMcpCatalog`, `toClientCatalog`); REST entries moved verbatim to `src/client/restEndpointsData.ts` (REST cannot be derived from the OpenAPI spec in this slice — the spec covers only a subset and carries no runner samples; deriving it is #6439 follow-up).
+- Consumers at deprecation: zero production consumers — `ToolSearchTab.tsx`, `McpApiExplorer.tsx`, `IaaaAdminPanel.tsx`, and `iaaaEndpointCatalog.ts` (now `buildMcpCorrelationRows`) all read the served catalogue in the same slice. One test reads the file as text (`tests/payment_seed_transactions_removed.test.ts`); it now reads the `.deprecated.ts` path.
+- Deletion condition: zero consumers plus an owner decision plus a gate amendment; deletion is never part of a program slice.

@@ -67,6 +67,12 @@ function sectionTabButtons(): HTMLButtonElement[] {
   return Array.from(bar.querySelectorAll('[role="tab"]')) as HTMLButtonElement[];
 }
 
+async function flush(ms = 30) {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, ms));
+  });
+}
+
 async function renderPanel() {
   container = document.createElement("div");
   document.body.appendChild(container);
@@ -74,6 +80,7 @@ async function renderPanel() {
   await act(async () => {
     root!.render(<IaaaAdminPanel />);
   });
+  await flush();
 }
 
 beforeEach(() => {
@@ -83,7 +90,25 @@ beforeEach(() => {
   window.history.replaceState(null, "", "/");
   vi.stubGlobal(
     "fetch",
-    vi.fn(async () => new Response(JSON.stringify(OVERVIEW), { status: 200 })),
+    vi.fn(async (url: string) => {
+      // #6438: the panel fetches the served catalogue once the
+      // overview gate passes — the stub serves a valid payload for
+      // it, so the MCP tab lists served tools.
+      if (String(url).includes("/api/mcp/catalog")) {
+        return new Response(
+          JSON.stringify({
+            tools: [
+              { name: "knowledge_search", description: "Search the knowledge base", scope: "mcp:read", inputSchema: { type: "object", properties: {}, required: [] } },
+            ],
+            resources: [],
+            prompts: [],
+            server: { name: "openaimp", title: "Multi-Agent Studio Enterprise MCP Server", version: "1.0.0", protocolVersion: "2024-11-05" },
+          }),
+          { status: 200 },
+        );
+      }
+      return new Response(JSON.stringify(OVERVIEW), { status: 200 });
+    }),
   );
 });
 
@@ -139,8 +164,12 @@ describe("IAAA admin tabs", () => {
     expect(container.textContent).toContain("Recent audit events");
   });
 
-  it("MCP tab lists catalog tools, IAAA tab lists events and gaps, Correlations shows UNMAPPED rows", async () => {
+  it("MCP tab lists served catalog tools, IAAA tab lists events and gaps, Correlations shows UNMAPPED rows", async () => {
     await renderPanel();
+    // #6438: the MCP tab reads the served catalogue, which arrives on
+    // a second fetch after the overview gate passes — wait for both
+    // round-trips before opening the tab.
+    await flush();
     // #1758 pin update (§7): tab indices shift by one after Members.
     await act(async () => {
       tabButtons()[3].click();

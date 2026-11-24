@@ -34,7 +34,7 @@ import {
   scopesForIaaaRoles,
 } from "../src/mcps/openaimp/mcpPermissionPorts";
 import { MCP_TOOLS } from "../src/mcps/openaimp";
-import { MCP_TOOLS_CATALOG } from "../src/client/mcpEndpointsData";
+import { buildMcpCatalog } from "../src/mcps/openaimp/catalog";
 import { isSynchronousMcpTool } from "../src/config/asyncJobModes";
 import { buildOrchestratorSystemPrompt } from "../src/agents/chatPrompt";
 import { BIZCOPILOT_TENANTS_PAGE_URL } from "../src/services/bizCopilotTenants";
@@ -223,10 +223,13 @@ describe("registration (#4741)", () => {
     expect(isSynchronousMcpTool("manage_tenants")).toBe(true);
   });
 
-  it("adds the tool to the MCP explorer catalog", () => {
-    const entry = MCP_TOOLS_CATALOG.find((t) => t.name === "manage_tenants");
+  it("adds the tool to the served MCP catalogue", () => {
+    // #6438: the explorer reads GET /api/mcp/catalog, so the served
+    // catalogue is the assertion — and the category is now the tool's
+    // permission scope, as served (no hand-written "System & Audit").
+    const entry = buildMcpCatalog().tools.find((t) => t.name === "manage_tenants");
     expect(entry).toBeDefined();
-    expect(entry!.category).toBe("System & Audit");
+    expect(entry!.scope).toBe("mcp:admin");
   });
 
   it("carries the six-action enum in the schema", () => {
