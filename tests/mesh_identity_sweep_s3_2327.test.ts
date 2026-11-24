@@ -394,7 +394,21 @@ describe("research scheduled-tick route (#2327)", () => {
       "session",
       ctx,
     );
-    expect(res?.status).toBe(200);
+    // This pin owns the identity gate's verdict, not the tick's work. A bare
+    // `200` made it time-dependent: outside the fire window the guard skips
+    // and the route answers 200, while inside it (weekdays from 21:00 UTC)
+    // the tick actually runs the pipeline — and this stub resolves no
+    // research agent, so the run reports `research_stage_unavailable` as a
+    // 500. Both outcomes are "past the gate"; only a 401/403 is a refusal.
+    // Pinned as the gate's verdict, with the fire path's own refusal named
+    // so a change that starts refusing an identified caller still fails.
+    expect([200, 500]).toContain(res!.status);
+    expect(res!.status).not.toBe(401);
+    expect(res!.status).not.toBe(403);
+    if (res!.status === 500) {
+      const body = (await res!.clone().json()) as { error?: string };
+      expect(body.error ?? "").toContain("research_stage_unavailable");
+    }
   });
 });
 
