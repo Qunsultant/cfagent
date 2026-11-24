@@ -31,7 +31,7 @@
  * table per section, cells wrap and are never silently sliced.
  */
 
-import { PDFDocument, PDFFont, PDFPage, rgb, StandardFonts } from "pdf-lib";
+import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
 import type {
   OpportunityHuntResult,
   OpportunityHuntSetup,
@@ -43,21 +43,30 @@ import {
   type OpportunityHuntSymbolRow,
 } from "../client/opportunityHuntView";
 import { cleanForPdf } from "./pdfText";
-import { wrapCellText } from "./screenerReportTemplate";
 import { formatReportTimestamp } from "./screenerReportPdf";
+import {
+  PDF_CONTENT_W,
+  PDF_MARGIN,
+  PDF_PRINT_DANGER,
+  PDF_PRINT_HAIRLINE,
+  PDF_PRINT_INK,
+  PDF_PRINT_MUTED,
+  PDF_PRINT_NOTE,
+  addPageNumbers,
+  createPdfCtx,
+  ensureSpace,
+  renderTable,
+  rule,
+  text,
+  type PdfCtx,
+  type PdfTableColumn,
+} from "./pdfDrawing";
 
-/** Print palette: PDFs render on white paper, so the report uses
- *  this named print scale — the print mirrors of the semantic
- *  text/status roles — instead of scattered rgb literals. pdf-lib
- *  0..1 RGB triples. Entry green / exit red mirror the panel's
- *  success / danger Badge tones. */
-const PRINT_INK: [number, number, number] = [0.15, 0.15, 0.15];
-const PRINT_LABEL: [number, number, number] = [0.35, 0.35, 0.35];
-const PRINT_MUTED: [number, number, number] = [0.4, 0.4, 0.4];
-const PRINT_NOTE: [number, number, number] = [0.45, 0.45, 0.45];
-const PRINT_FAINT: [number, number, number] = [0.5, 0.5, 0.5];
-const PRINT_HAIRLINE: [number, number, number] = [0.7, 0.7, 0.7];
-const PRINT_DANGER: [number, number, number] = [0.8, 0.2, 0.2];
+/** Hunt-specific print colours: entry green / exit red mirror the
+ *  panel's success / danger Badge tones, and the bar / level colours
+ *  match the panel's chart. The shared base print scale lives in
+ *  the drawing layer (src/trading/pdfDrawing.ts). pdf-lib 0..1 RGB
+ *  triples. */
 const PRINT_SUCCESS: [number, number, number] = [0.15, 0.55, 0.25];
 const PRINT_ENTRY_BAR: [number, number, number] = [0.2, 0.6, 0.3];
 const PRINT_EXIT_BAR: [number, number, number] = [0.85, 0.25, 0.25];
@@ -68,139 +77,11 @@ const PRINT_LEVEL_STOP: [number, number, number] = [0.85, 0.25, 0.25];
 const PRINT_LEVEL_TAKE: [number, number, number] = [0.15, 0.55, 0.25];
 const PRINT_LEVEL_BASIS: [number, number, number] = [0.45, 0.35, 0.65];
 
-const MARGIN = 36;
-const PAGE_W = 792; // Letter landscape (2088: entire document, no mixing)
-const PAGE_H = 612;
-const CONTENT_W = PAGE_W - MARGIN * 2;
 
 /** How many symbols the pattern-count chart shows. The table below
  *  lists every symbol; the chart is a visualization, so it shows
  *  the top N by pattern count and says so — never a silent cut. */
 const PATTERN_CHART_TOP_N = 20;
-
-interface Ctx {
-  doc: PDFDocument;
-  font: PDFFont;
-  bold: PDFFont;
-  page: PDFPage;
-  y: number;
-}
-
-function newPage(ctx: Ctx): void {
-  ctx.page = ctx.doc.addPage([PAGE_W, PAGE_H]);
-  ctx.y = PAGE_H - MARGIN;
-}
-
-function ensureSpace(ctx: Ctx, needed: number): void {
-  if (ctx.y - needed < MARGIN) newPage(ctx);
-}
-
-function text(
-  ctx: Ctx,
-  rawStr: string,
-  opts: { size?: number; bold?: boolean; color?: [number, number, number]; x?: number } = {}
-): void {
-  const str = cleanForPdf(rawStr);
-  const size = opts.size ?? 10;
-  const font = opts.bold ? ctx.bold : ctx.font;
-  const c = opts.color ?? PRINT_INK;
-  const x = opts.x ?? MARGIN;
-  const maxWidth = PAGE_W - MARGIN - x;
-  const words = str.split(/\s+/).filter(Boolean);
-  const lines: string[] = [];
-  let line = "";
-  for (const word of words) {
-    const candidate = line ? `${line} ${word}` : word;
-    if (line && font.widthOfTextAtSize(candidate, size) > maxWidth) {
-      lines.push(line);
-      line = word;
-    } else {
-      line = candidate;
-    }
-  }
-  if (line) lines.push(line);
-  for (const renderedLine of lines) {
-    ensureSpace(ctx, size + 4);
-    ctx.page.drawText(renderedLine, {
-      x,
-      y: ctx.y,
-      size,
-      font,
-      color: rgb(c[0], c[1], c[2]),
-    });
-    ctx.y -= size + 4;
-  }
-}
-
-function rule(ctx: Ctx): void {
-  ensureSpace(ctx, 10);
-  ctx.page.drawLine({
-    start: { x: MARGIN, y: ctx.y },
-    end: { x: PAGE_W - MARGIN, y: ctx.y },
-    thickness: 0.75,
-    color: rgb(...PRINT_HAIRLINE),
-  });
-  ctx.y -= 10;
-}
-
-interface PdfColumn {
-  header: string;
-  w: number;
-}
-
-function renderTableHeader(ctx: Ctx, cols: PdfColumn[]): void {
-  ensureSpace(ctx, 16);
-  let x = MARGIN;
-  for (const col of cols) {
-    ctx.page.drawText(col.header, { x, y: ctx.y, size: 8, font: ctx.bold, color: rgb(...PRINT_LABEL) });
-    x += col.w;
-  }
-  ctx.y -= 10;
-  ctx.page.drawLine({
-    start: { x: MARGIN, y: ctx.y },
-    end: { x: PAGE_W - MARGIN, y: ctx.y },
-    thickness: 0.5,
-    color: rgb(...PRINT_HAIRLINE),
-  });
-  ctx.y -= 6;
-}
-
-/** One table: header repeats on every page break, cells wrap to
- *  their column width (never sliced). */
-function renderTable(
-  ctx: Ctx,
-  title: string,
-  cols: PdfColumn[],
-  rows: string[][],
-): void {
-  if (rows.length === 0) return;
-  text(ctx, title, { size: 12, bold: true });
-  renderTableHeader(ctx, cols);
-  const measure = (t: string): number => ctx.font.widthOfTextAtSize(t, 8);
-  for (const row of rows) {
-    const wrapped = row.map((cell, i) => wrapCellText(cell, cols[i].w - 4, measure));
-    const lineCount = Math.max(...wrapped.map((w) => w.length));
-    const rowHeight = lineCount * 10 + 2;
-    const pageBefore = ctx.page;
-    ensureSpace(ctx, rowHeight);
-    if (ctx.page !== pageBefore) renderTableHeader(ctx, cols);
-    let x = MARGIN;
-    for (let i = 0; i < row.length; i++) {
-      for (let li = 0; li < wrapped[i].length; li++) {
-        ctx.page.drawText(cleanForPdf(wrapped[i][li]), {
-          x,
-          y: ctx.y - li * 10,
-          size: 8,
-          font: ctx.font,
-          color: rgb(...PRINT_INK),
-        });
-      }
-      x += cols[i].w;
-    }
-    ctx.y -= rowHeight;
-  }
-  rule(ctx);
-}
 
 interface BarEntry {
   label: string;
@@ -215,7 +96,7 @@ interface BarEntry {
  * printed at the bar's end.
  */
 function renderBarChart(
-  ctx: Ctx,
+  ctx: PdfCtx,
   title: string,
   bars: BarEntry[],
   opts: { labelWidth?: number; maxValue?: number } = {},
@@ -224,7 +105,7 @@ function renderBarChart(
   text(ctx, title, { size: 12, bold: true });
   const labelW = opts.labelWidth ?? 140;
   const valueW = 48;
-  const barAreaW = CONTENT_W - labelW - valueW - 8;
+  const barAreaW = PDF_CONTENT_W - labelW - valueW - 8;
   const maxValue = opts.maxValue ?? Math.max(...bars.map((b) => b.value), 0);
   const barH = 11;
   const gap = 4;
@@ -237,16 +118,16 @@ function renderBarChart(
     }
     const yTop = ctx.y;
     ctx.page.drawText(cleanForPdf(bar.label), {
-      x: MARGIN,
+      x: PDF_MARGIN,
       y: yTop - 2,
       size: 8,
       font: ctx.font,
-      color: rgb(...PRINT_INK),
+      color: rgb(...PDF_PRINT_INK),
     });
     const barW = maxValue > 0 ? Math.max(1, (bar.value / maxValue) * barAreaW) : 0;
     if (barW > 0) {
       ctx.page.drawRectangle({
-        x: MARGIN + labelW,
+        x: PDF_MARGIN + labelW,
         y: yTop - barH + 2,
         width: barW,
         height: barH - 2,
@@ -254,11 +135,11 @@ function renderBarChart(
       });
     }
     ctx.page.drawText(String(bar.value), {
-      x: MARGIN + labelW + barAreaW + 8,
+      x: PDF_MARGIN + labelW + barAreaW + 8,
       y: yTop - 2,
       size: 8,
       font: ctx.bold,
-      color: rgb(...PRINT_INK),
+      color: rgb(...PDF_PRINT_INK),
     });
     ctx.y -= barH + gap;
   }
@@ -280,7 +161,7 @@ interface PriceLevel {
  * fewer than two closes draws nothing (no chart to draw).
  */
 function renderPriceChart(
-  ctx: Ctx,
+  ctx: PdfCtx,
   closes: readonly number[],
   levels: PriceLevel[],
   width: number,
@@ -288,7 +169,7 @@ function renderPriceChart(
 ): void {
   if (closes.length < 2) return;
   ensureSpace(ctx, height + 18);
-  const x0 = MARGIN;
+  const x0 = PDF_MARGIN;
   const yTop = ctx.y;
   const yBottom = yTop - height;
   const values = [...closes, ...levels.map((l) => l.value)];
@@ -311,7 +192,7 @@ function renderPriceChart(
     y: yBottom,
     width,
     height,
-    borderColor: rgb(...PRINT_HAIRLINE),
+    borderColor: rgb(...PDF_PRINT_HAIRLINE),
     borderWidth: 0.5,
   });
   // Level lines (behind the price line).
@@ -356,7 +237,7 @@ function strategyList(setups: OpportunityHuntSetup[]): string {
 }
 
 /** The per-symbol table's columns, in the panel's order. */
-const HUNT_TABLE_COLUMNS: PdfColumn[] = [
+const HUNT_TABLE_COLUMNS: PdfTableColumn[] = [
   { header: "Symbol", w: 84 },
   { header: "Patterns", w: 64 },
   { header: "Entries", w: 130 },
@@ -373,7 +254,7 @@ export async function generateOpportunityHuntPdf(
   const doc = await PDFDocument.create();
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const bold = await doc.embedFont(StandardFonts.HelveticaBold);
-  const ctx: Ctx = { doc, font, bold, page: doc.addPage([PAGE_W, PAGE_H]), y: PAGE_H - MARGIN };
+  const ctx = createPdfCtx(doc, font, bold);
 
   // The panel's own grouping — one row per symbol — so the PDF's
   // table is the panel's table, sorted by the panel's default
@@ -384,8 +265,8 @@ export async function generateOpportunityHuntPdf(
 
   // Header
   text(ctx, "Opportunity Hunt Report", { size: 16, bold: true });
-  text(ctx, `As of ${formatReportTimestamp(result.asOf)}`, { size: 10, color: PRINT_MUTED });
-  text(ctx, result.summary, { size: 10, color: PRINT_MUTED });
+  text(ctx, `As of ${formatReportTimestamp(result.asOf)}`, { size: 10, color: PDF_PRINT_MUTED });
+  text(ctx, result.summary, { size: 10, color: PDF_PRINT_MUTED });
   rule(ctx);
 
   // Summary
@@ -399,20 +280,20 @@ export async function generateOpportunityHuntPdf(
     text(
       ctx,
       `Exit signals unavailable — the hunt ran on entries only: the holdings read did not report${result.holdingsStatus.broker ? ` for ${result.holdingsStatus.broker}` : ""}${result.holdingsStatus.reason ? ` — ${result.holdingsStatus.reason}` : ""}. No exit was silently dropped; there was nothing held to evaluate.`,
-      { size: 9, color: PRINT_NOTE },
+      { size: 9, color: PDF_PRINT_NOTE },
     );
   } else if (result.holdingsStatus?.available) {
     text(
       ctx,
       `Exits evaluated against holdings from the selected broker${result.holdingsStatus.broker ? ` (${result.holdingsStatus.broker})` : ""}.`,
-      { size: 9, color: PRINT_NOTE },
+      { size: 9, color: PDF_PRINT_NOTE },
     );
   }
   rule(ctx);
 
   if (result.setups.length === 0) {
     text(ctx, "No setups", { size: 12, bold: true });
-    text(ctx, "The latest bar produced no entry signal for any symbol.", { size: 10, color: PRINT_MUTED });
+    text(ctx, "The latest bar produced no entry signal for any symbol.", { size: 10, color: PDF_PRINT_MUTED });
     rule(ctx);
   } else {
     // Per-strategy breakdown: entries and exits per strategy.
@@ -464,7 +345,7 @@ export async function generateOpportunityHuntPdf(
         row.exitGainPct !== null
           ? ` · exits ${formatHuntPct(row.exitGainPct)} vs cost basis`
           : "";
-      text(ctx, `Last close ${formatHuntPrice(row.lastClose)}${gainText}.`, { size: 9, color: PRINT_MUTED });
+      text(ctx, `Last close ${formatHuntPrice(row.lastClose)}${gainText}.`, { size: 9, color: PDF_PRINT_MUTED });
       if (row.entries.length > 0) {
         text(ctx, "Entry recommendations", { size: 10, bold: true, color: PRINT_SUCCESS });
         for (const setup of row.entries) {
@@ -475,7 +356,7 @@ export async function generateOpportunityHuntPdf(
         }
       }
       if (row.exits.length > 0) {
-        text(ctx, "Exit recommendations", { size: 10, bold: true, color: PRINT_DANGER });
+        text(ctx, "Exit recommendations", { size: 10, bold: true, color: PDF_PRINT_DANGER });
         for (const setup of row.exits) {
           const gain =
             setup.entryPrice
@@ -514,19 +395,10 @@ export async function generateOpportunityHuntPdf(
     "Levels: entry range, stop-loss, and take-profit are recommendation levels derived from the latest close with the per-strategy percentages in the externalized levels config — they are not the evaluator's exit triggers.",
     "This report renders the same output the Opportunity Hunt panel shows: one row per symbol, pattern count, entry and exit signals grouped per entry and per exit, with their price ranges.",
   ];
-  for (const n of notes) text(ctx, `* ${n}`, { size: 7.5, color: PRINT_NOTE });
+  for (const n of notes) text(ctx, `* ${n}`, { size: 7.5, color: PDF_PRINT_NOTE });
 
   // Page numbers across all pages
-  const pages = doc.getPages();
-  pages.forEach((p, i) => {
-    p.drawText(`Page ${i + 1} of ${pages.length}`, {
-      x: PAGE_W - MARGIN - 60,
-      y: 20,
-      size: 8,
-      font,
-      color: rgb(...PRINT_FAINT),
-    });
-  });
+  addPageNumbers(doc, font);
 
   return doc.save();
 }
