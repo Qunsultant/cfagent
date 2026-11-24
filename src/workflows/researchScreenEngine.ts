@@ -471,6 +471,12 @@ export async function dispatchResearchEngineRun(
     ...(input.sql && typeof input.sql.exec === "function"
       ? { stageEvents: createDoSqliteJobStageEventStore(input.sql) }
       : {}),
+    // Issue #6388 — the D1 mirror of the stage-event journal. The stage
+    // control (below) and the read path already wire it; the dispatch did
+    // not, so a dispatch-path run was unreadable from D1 once its DO was
+    // gone, and a D1-only reader saw nothing. Same adapter, same
+    // best-effort mirror write; no d1 = no mirror, never a throw.
+    ...(input.d1 ? { stageEventsMirror: createD1JobStageEventStore(input.d1) } : {}),
     steps: registerResearchSteps(createBuiltinStepRegistry(), wiredDeps),
     invocation: "sync",
     // Issue #4782 S3 — the retry policy resolves from the
