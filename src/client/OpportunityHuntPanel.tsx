@@ -48,6 +48,7 @@ import {
   runOpportunityHuntNow,
   type JobRunRecord,
 } from "./jobsApi";
+import { ReportLinkRow } from "./components/ReportLinkRow";
 import type { OpportunityHuntResult } from "../services/opportunityHunt";
 import { OpportunityHuntChart } from "./OpportunityHuntChart";
 import {
@@ -227,12 +228,17 @@ export function OpportunityHuntPanel() {
   // The result rides to the report endpoint, so the PDF renders the
   // exact output this panel shows. A generation failure shows its
   // error, never a fabricated link.
+  // Issue #6473 — the generated report is addressable: keep its URL so the
+  // panel can offer the link and a Share button, not only a download.
+  const [reportLink, setReportLink] = useState<string | null>(null);
+
   const downloadReport = async () => {
     if (!result || reportBusy) return;
     setReportBusy(true);
     setReportError(null);
     try {
       const { reportUrl } = await generateOpportunityHuntReport(result);
+      setReportLink(reportUrl);
       const anchor = document.createElement("a");
       anchor.href = reportUrl;
       anchor.download = "";
@@ -264,6 +270,16 @@ export function OpportunityHuntPanel() {
         >
           Download report (PDF)
         </Button>
+        <Button
+          variant="secondary"
+          onClick={() => void downloadReport()}
+          loading={reportBusy}
+          disabled={!result}
+          title={result ? "Get a shareable link to this run's report" : "Run the hunt first"}
+        >
+          Report link
+        </Button>
+        {reportLink ? <ReportLinkRow url={reportLink} /> : null}
         {reportError ? (
           <Notice tone="danger" title="The report could not be generated">
             {reportError}
