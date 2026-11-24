@@ -721,7 +721,7 @@ redirect mechanics (§15.2–§15.3).
 Follow CDO's ORM and adapter approach. Do NOT invent data-side
 solutions.
 
-- ADR 0002 (`docs/architecture/adr/0002-data-foundation-layer.md`):
+- ADR 0002 (`docs/architecture/adr/data/0002-data-foundation-layer.md`):
   port-first (R1 — domain code depends only on interfaces in
   `src/data/*`; no store client, no `env.AGENT_DB`, no SQL in domain
   code), dialect isolation (R2), portable versioned migrations (R3),

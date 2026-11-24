@@ -18,7 +18,7 @@ PR.
 | ADR | Title | Status |
 |-----|-------|--------|
 | [0001](0001-derived-stable-identity.md) | Derived stable identity from (issuer, subject) | Accepted |
-| [0002](0002-data-foundation-layer.md) | Data foundation layer: port-first, Drizzle ORM, D1 as one adapter | Accepted |
+| [0002](data/0002-data-foundation-layer.md) | Data foundation layer: port-first, Drizzle ORM, D1 as one adapter | Accepted |
 | [0003](0003-messaging-port.md) | Queue-backed messaging: port-first, provider adapter + in-memory adapter | Accepted |
 | [0004](0004-ux-token-architecture-no-exemptions.md) | UX token architecture compliance is mandatory — no exemptions | Accepted |
 | [0004](0004-screener-workflows.md) | Screener decoupling onto Workflows: port-first, parent/child fan-out, child-owned store/deliver | Accepted |
@@ -32,30 +32,30 @@ PR.
 | [0012](0012-mcp-tool-permissions.md) | MCP tool permissions: per-tool scopes + cryptographic execution isolation, port-first gate at every choke point (factory, JSON-RPC queued path, agent-turn adapter) | Accepted |
 | [0013](0013-test-parity-harness.md) | Test-parity harness: baseline snapshots, behavior comparison, per-PR checklist (capture/compare/checklist/check/report) | Accepted |
 | [0014](0014-chain-native-promotion-authority.md) | Chain-native promotion authority (#1747 branch 2): Phase 3 approval + registry verification + staged rollout replaces #759 verdicts for chains; supersedes #1468 reconciliation for chains only | Accepted |
-| [0015](0015-instrument-first-sessionstore-1819.md) | Instrument first for SessionStore resource usage (#1819): measure and instrument before any fix, switch change, or paid-plan decision; fix scoped to the burner the dashboard comparison names | Accepted |
+| [0015](data/0015-instrument-first-sessionstore-1819.md) | Instrument first for SessionStore resource usage (#1819): measure and instrument before any fix, switch change, or paid-plan decision; fix scoped to the burner the dashboard comparison names | Accepted |
 | [0016](0016-scheduledagent-resource-rollup-alert-1819.md) | Resource rollup + 70% cap alert live on ScheduledAgent (#1819): per-op emission in-path, aggregation on the existing `*/30` tick; no new cron, no second scheduler, no WorkflowPort generalization | Accepted |
 | [0017](0017-workflowport-is-not-a-dag.md) | WorkflowPort is NOT a DAG: fixed linear stage pipeline + parent → ≤4 parallel shards → collation + state machine with ≤3 retries/step; what a DAG slice would require | Accepted |
 | [0018](0018-caio-alignment-resource-instrumentation-1819.md) | CAIO alignment for #1819 resource instrumentation: reuse #1742's port pattern, consume #1743's landed schema/transport (PR #1842) and #1741's gateway stats (PR #1838) as a resource class; one schema/stream/home; IAAA audit untouched | Accepted |
 | [0019](0019-enrichment-yahoo-alpaca.md) | Daily enrichment + minute bars (#1888): Yahoo live via existing flag port, Alpaca flag-gated with Yahoo fallback, manual killswitch, telemetry-fed quality | Accepted |
-| [0020](0020-do-d1-r2-topology.md) | DO vs D1 vs R2 — actor runtime, queryable projection, blob storage | Accepted |
+| [0020](data/0020-do-d1-r2-topology.md) | DO vs D1 vs R2 — actor runtime, queryable projection, blob storage | Accepted |
 | [0021](0021-chat-deferred-from-page-shell.md) | Chat page deferred from the PageShell standard | Accepted |
-| [0022](0022-data-foundation.md) | Data foundation repo-wide — one data-access layer behind ports, AOP transactions, dialect portability, intelligence substrate | Accepted |
+| [0022](data/0022-data-foundation.md) | Data foundation repo-wide — one data-access layer behind ports, AOP transactions, dialect portability, intelligence substrate | Accepted |
 | [0023](0023-cross-domain-saga.md) | Cross-domain saga — paid screener run → trade, coordinated as a linear leg sequence | Proposed |
 | [0024](0024-durable-turn-submissions.md) | Durable chat-turn submission via Think's submission queue (ADR 0005 follow-up D2) | Accepted |
 | [0025](0025-web-search-provider-seam.md) | Web search behind a named-provider seam (Brave first), fail-loud with web_search_provider_not_configured until the owner sets the provider secret (#2731) | Accepted |
 | [0026](0026-cfpay-acceptance-decision.md) | cfpay acceptance decision — contract, options, and recommendation | Proposed |
 | [0027](0027-one-stage-runner-contract.md) | One stage-runner contract for every screen invocation mode: plan + checkpoint + three drivers, `mas_async_jobs` as the single unit store, retry budgets from `pipelinePolicy`, fan-out cap named not truncated (#2601, #2621) | Proposed |
-| [0028](0028-data-provider-broker-taxonomy.md) | Data-provider/broker taxonomy split, alpaca/alpaca defaults, Public.com as a live broker: declared == servable, kind map, no-paper-mode refusal, preview-first copilot tools (#3990) | Accepted |
-| [0029](0029-unified-schedule-store.md) | One unified schedule store, one run ledger, one management path: ScheduleStore port, pause as record state, KV ledger half → DO SQLite, jobsApi convergence, five modules retired by deprecation rename (#3123) | Accepted |
+| [0028](data/0028-data-provider-broker-taxonomy.md) | Data-provider/broker taxonomy split, alpaca/alpaca defaults, Public.com as a live broker: declared == servable, kind map, no-paper-mode refusal, preview-first copilot tools (#3990) | Accepted |
+| [0029](data/0029-unified-schedule-store.md) | One unified schedule store, one run ledger, one management path: ScheduleStore port, pause as record state, KV ledger half → DO SQLite, jobsApi convergence, five modules retired by deprecation rename (#3123) | Accepted |
 | [0030](0030-one-clock-sdk-alarms-watchdog.md) | One clock for scheduled work: SDK alarms on the agent, one Worker-cron watchdog (#4234) | Accepted |
 | [0031](0031-legacy-chain-per-stage-scheduling.md) | Legacy shard chain per-stage scheduling is mooted by the workflow-host migration: one scheduling model, chain-stage scheduling lands with #4471 (#4426) | Accepted |
-| [0032](0032-data-access-mechanism-standard.md) | Drizzle is the data-access standard; the mini-ORM is the DO standard (#3260) | Proposed |
-| [0033](0033-cross-store-consistency-contract.md) | Cross-store consistency contract: DO + D1 dual-write discipline and read-your-writes rules (#4935) | Accepted |
+| [0032](data/0032-data-access-mechanism-standard.md) | Drizzle is the data-access standard; the mini-ORM is the DO standard (#3260) | Proposed |
+| [0033](data/0033-cross-store-consistency-contract.md) | Cross-store consistency contract: DO + D1 dual-write discipline and read-your-writes rules (#4935) | Accepted |
 | [0034](0034-cbo-api-layer.md) | CBO API layer: one security model, one catalog, one auth module (#5343) | Accepted |
-| [0035](0035-d1-first-write.md) | D1-first writes: one store, one transaction, linked by foreign key (#6101) | Accepted |
+| [0035](data/0035-d1-first-write.md) | D1-first writes: one store, one transaction, linked by foreign key (#6101) | Accepted |
 | [0037](0037-deploy-version-host-identity.md) | Deploy-time host version: the async-job host identity is the deployed git SHA (#6216) | Accepted |
 | [0038](0038-one-job-pipeline-control-factory.md) | One Job Pipeline Control factory, wired once — OODA runs on j-stack and nowhere else (#6250) | Accepted |
-| [0039](0039-one-identity-resolution-path.md) | One identity-resolution path: the verified session is the authoritative caller identity (#6238 + #6259) | Accepted |
+| [0039](data/0039-one-identity-resolution-path.md) | One identity-resolution path: the verified session is the authoritative caller identity (#6238 + #6259) | Accepted |
 
 **Note on ADR 0004:** the number 0004 was assigned twice — to the UX token
 architecture decision and to the screener decoupling decision. Both records

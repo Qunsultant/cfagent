@@ -33,11 +33,11 @@ correctness.
 
 These docs operate under, and never restate, the accepted ADRs:
 
-- [ADR 0002](../../architecture/adr/0002-data-foundation-layer.md) —
+- [ADR 0002](../../architecture/adr/data/0002-data-foundation-layer.md) —
   data foundation layer: port-first, Drizzle ORM, D1 as one adapter.
-- [ADR 0020](../../architecture/adr/0020-do-d1-r2-topology.md) —
+- [ADR 0020](../../architecture/adr/data/0020-do-d1-r2-topology.md) —
   DO vs D1 vs R2: actor runtime, queryable projection, blob storage.
-- [ADR 0022](../../architecture/adr/0022-data-foundation.md) — data
+- [ADR 0022](../../architecture/adr/data/0022-data-foundation.md) — data
   foundation repo-wide: one data-access layer behind ports, AOP
   transactions, dialect portability, intelligence substrate.
 

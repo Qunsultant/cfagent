@@ -7,7 +7,7 @@ Survey-only. No build, no GitHub writes, no commits.
   (clean, donor node_modules symlinked).
 - **Phase body:** `~/workspace/w4282/phases/P6c-orm-core-dml.md` (base
   `ec614e69`). Survey: `~/workspace/w4282/SURVEY.md` §2/§2.1/§2.2/§7.
-  ADR: `docs/architecture/adr/0032-data-access-mechanism-standard.md`
+  ADR: `docs/architecture/adr/data/0032-data-access-mechanism-standard.md`
   (merged 2026-11-14 via PR #4562 — the phase body's ADR block is
   RESOLVED, see §2).
 - **Rulings honored:** Q1 (b) Repository calls are the entry shape
