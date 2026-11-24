@@ -99,6 +99,7 @@ import {
   type PolicySnapshot,
   type Role,
 } from "../../security/authorization";
+import type { ExecutionContext } from "../../security/executionContext";
 import type { ObligationAuditWriter } from "../../security/obligations";
 import { createExecutionStore, type ExecutionRecord, type ExecutionSeal } from "./executionStore";
 
@@ -768,35 +769,58 @@ export interface PermissionGateOptions {
   decisionSink?: ObservabilitySink;
   /** Optional #2171 agent-grant enforcement (see McpAgentAccessOptions). */
   agentAccess?: McpAgentAccessOptions;
+  /**
+   * #6173: the call's validated ExecutionContext (resolved once
+   * at the MCP entry). When present, the denial event + audit
+   * carry its dimensions (tenant, run, session, trace) and the
+   * surface label "mcp"; absent → today's unattributed denial
+   * exactly (nulls), so in-process callers are unaffected.
+   */
+  executionContext?: ExecutionContext;
 }
 
 function denialStreamEvent(
   toolName: string,
   scope: McpScope | null,
   principal: McpPrincipal,
-  sessionId: string | undefined
+  sessionId: string | undefined,
+  executionContext?: ExecutionContext,
 ): ObservabilityEvent {
   const now = Date.now();
   return {
     type: MCP_PERMISSION_DENIED_STREAM,
     level: "warn",
     operation: toolName,
-    tenantId: null,
+    // #6173: attributed when the entry resolved a context;
+    // nulls exactly as today when it did not.
+    tenantId: executionContext?.tenantId ?? null,
     // The principal identity stays in the audit trail, not the
     // stream: actor/agent are null on the denial event.
     actorId: null,
     agentId: null,
     component: "mcp-permissions",
-    runId: null,
-    sessionRef: sessionId ? sessionRefFor(sessionId) : null,
-    traceId: newTraceContext().traceId,
+    runId: executionContext?.runId ?? null,
+    sessionRef: executionContext?.sessionId
+      ? sessionRefFor(executionContext.sessionId)
+      : sessionId
+        ? sessionRefFor(sessionId)
+        : null,
+    traceId: executionContext?.traceId ?? newTraceContext().traceId,
     timestampMs: now,
     timestampIso: timestampIsoFor(now),
     count: 1,
     errorCode: MCP_PERMISSION_DENIED_CODE,
     // Counts/outcomes only: tool, scope, kind. Never arguments,
     // never login material beyond the session correlator.
-    fields: { tool: toolName, requiredScope: scope, principalKind: principal.kind },
+    // #6173: the surface label — this event is always an MCP
+    // denial, so the call is separable from the aggregate.
+    fields: {
+      tool: toolName,
+      requiredScope: scope,
+      principalKind: principal.kind,
+      surface: "mcp",
+      serviceId: executionContext?.serviceId,
+    },
   };
 }
 
@@ -879,11 +903,17 @@ export async function authorizeMcpToolCall(
     requiredScope: decision.scope,
     principalKind: principal.kind,
     login: principal.login,
+    // #6173: the call's dimensions when the entry resolved a
+    // context; absent → these keys are undefined, exactly as
+    // the pre-#6173 payload (no fabricated attribution).
+    tenantId: opts.executionContext?.tenantId,
+    traceId: opts.executionContext?.traceId,
+    serviceId: opts.executionContext?.serviceId,
   });
   if (opts.decisionSink) {
     try {
       await opts.decisionSink.write(
-        denialStreamEvent(toolName, decision.scope, principal, opts.sessionId)
+        denialStreamEvent(toolName, decision.scope, principal, opts.sessionId, opts.executionContext)
       );
     } catch {
       // Sink failure never fails the producer (#1743 discipline).

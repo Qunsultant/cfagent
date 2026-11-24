@@ -2205,6 +2205,7 @@ export class McpToolFactory {
       sessionId: context.sessionId,
       audit: context.audit,
       decisionSink: context.permissionDecisionSink,
+      executionContext: context.executionContext,
       run: (executionId) => command.execute(input, { ...context, executionId }),
     });
   }

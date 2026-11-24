@@ -1,0 +1,3 @@
+### Observability
+
+- **MCP tool calls now carry the validated execution context (#6173):** every MCP tool call resolves the one shared `resolvePlatformContext` resolution once at the DO route shell (`POST /mcp`) and carries it unchanged through the tool call — the permission gate derives scopes from the caller's live IAAA roles via the #5350 seam B adapter (never re-derived in MCP code), denials are audited and streamed with the call's tenant, run, session, and trace, and `http.request` events label `/mcp` requests with surface `mcp`. Unresolvable contexts are denied with a named, audited code (observe mode proceeds unattributed; enforce mode refuses with 403 before any tool runs).

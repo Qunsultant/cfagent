@@ -50,7 +50,9 @@ import {
 import { handleOpenaimpMcpHttpRequest } from "../../mcps/openaimp/handler";
 import { createObservabilitySink } from "../../observability/createObservabilityPorts";
 import { createStructuredLogger } from "../../observability/structuredLogger";
-import { resolveMcpPrincipalFromHeaders } from "../../mcps/openaimp/mcpPermissionPorts";
+import { createProductionMcpPermissionPort, resolveMcpPrincipalFromHeaders } from "../../mcps/openaimp/mcpPermissionPorts";
+import { traceIdOfTraceparent } from "../../observability/meshTrace";
+import { establishMcpToolContext } from "../../security/mcpToolContext";
 import { executeNaturalLanguageQuery, type NLQSchedulingPort, type NLQSocialBriefPort } from "../nlq";
 import {
   NLQ_MODE_SWITCH,
@@ -208,6 +210,28 @@ export async function handleMcpChatNlqRoutes(
         // still fail closed.
         const headerLogin = request.headers.get("x-user-login")?.trim() || undefined;
         const headerTraceparent = request.headers.get("traceparent") ?? undefined;
+        const principal = resolveMcpPrincipalFromHeaders(request.headers);
+        // #6173: resolve the tool call's validated ExecutionContext
+        // once, at this entry, from the Worker-forwarded identity
+        // headers + the DO route's session key. The context is
+        // carried unchanged through the tool call (handler context
+        // .executionContext) and read by the gate (role-derived
+        // scopes + attributed denials); the route never builds a
+        // second context. An enforce-mode denial refuses here,
+        // before any tool runs; observe mode proceeds
+        // unattributed, exactly as today. No login → absent, and
+        // the gate keeps its system default for in-process
+        // callers. The trace id is the incoming traceparent's, so
+        // the Worker boundary's context and this one link.
+        const { outcome, refusal, resolveRoles } = await establishMcpToolContext(
+          {
+            principal,
+            sessionId,
+            traceId: traceIdOfTraceparent(headerTraceparent) ?? undefined,
+          },
+          ctx.env,
+        );
+        if (refusal) return refusal;
         return await handleOpenaimpMcpHttpRequest(request, {
           env: ctx.env,
           orm,
@@ -226,7 +250,17 @@ export async function handleMcpChatNlqRoutes(
           // x-principal-kind session|api-key). No login resolves to
           // `unknown` (fail closed) — the gate never defaults an
           // external call to system.
-          principal: resolveMcpPrincipalFromHeaders(request.headers),
+          principal,
+          // #6173: the validated context (when resolved) and the
+          // role-derived gate port bound to it. Absent → both
+          // unset, and the handler falls back to the default port
+          // with unattributed denials, exactly as before.
+          ...(outcome.outcome === "resolved"
+            ? { executionContext: outcome.context }
+            : {}),
+          ...(resolveRoles
+            ? { permissionPort: createProductionMcpPermissionPort({ resolveRoles }) }
+            : {}),
           actingLogin: () => headerLogin,
           traceparent: () => headerTraceparent,
           permissionDecisionSink: createObservabilitySink(ctx.env),
