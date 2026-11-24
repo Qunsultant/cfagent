@@ -231,6 +231,12 @@ export function LeftNavBar({
     if (activeTab === "assets-hub") {
       return (currentView ?? "forex") === subId;
     }
+    // #6147 S3: the Data Hub's sub-menu items are its views —
+    // data-providers (the hub default), feeds, data-lifecycle,
+    // downloads, pipeline-policy — same shape as the branches above.
+    if (activeTab === "data-hub") {
+      return (currentView ?? "data-providers") === subId;
+    }
     return false;
   };
 

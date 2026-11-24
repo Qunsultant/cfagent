@@ -990,6 +990,13 @@
         "shortLabel": "Export options datasets, greek chains, and parameters",
         "icon": "Docs",
         "description": "Export options datasets, greek chains, and parameters"
+      },
+      {
+        "id": "pipeline-policy",
+        "label": "Pipeline Policy",
+        "shortLabel": "Retry budgets and notifications for the pipeline",
+        "icon": "Workflows",
+        "description": "Retry budgets and notifications — per-tenant settings, effective on the next run"
       }
     ],
     "security-hub": [
@@ -1807,6 +1814,10 @@
       "tab": "data-hub",
       "view": "downloads"
     },
+    "data-hub:pipeline-policy": {
+      "tab": "data-hub",
+      "view": "pipeline-policy"
+    },
     "security-hub:iaaa-admin": {
       "tab": "security-hub",
       "view": "iaaa-admin"
@@ -1986,7 +1997,8 @@
         "data-providers",
         "feeds",
         "data-lifecycle",
-        "downloads"
+        "downloads",
+        "pipeline-policy"
       ]
     },
     {

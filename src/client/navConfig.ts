@@ -443,6 +443,9 @@ export function isNavItemOrSubItemActive(
         // #6147 S2 (#4681) adds Assets Hub the same way: its six
         // entries are the forex, futures, commodities, bonds,
         // registry, and binding views of `?tab=assets-hub`.
+        // #6147 S3 adds Data Hub the same way: its five entries are
+        // the data-providers, feeds, data-lifecycle, downloads, and
+        // pipeline-policy views of `?tab=data-hub`.
         if (
           (currentTab === "screeners" ||
             currentTab === "stock-hub" ||
@@ -451,6 +454,7 @@ export function isNavItemOrSubItemActive(
             currentTab === "marketing-hub" ||
             currentTab === "observability" ||
             currentTab === "assets-hub" ||
+            currentTab === "data-hub" ||
             currentTab === "billing") &&
           view === sub.id
         )

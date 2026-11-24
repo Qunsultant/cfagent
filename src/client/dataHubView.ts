@@ -5,15 +5,18 @@
  * Home: `?tab=data-hub`. Sub-route scheme, following the app's existing
  * `?tab=` + `?view=` deep-link pattern (`src/client/router.ts`
  * `parseViewFromSearch`):
- * `?tab=data-hub&view=data-providers|data-lifecycle|downloads`.
+ * `?tab=data-hub&view=data-providers|feeds|data-lifecycle|downloads|pipeline-policy`.
  *
  * - `view=data-providers` (default): the market-data provider provisioning
  *   lifecycle (`DataProvidersPanel`) plus the BYOK provider-credential cards
  *   (`AlpacaSignInCard` TEST + PROD) — moved here from Platform Admin.
+ * - `view=feeds`: the stored-index feed family (`FeedsPanel`).
  * - `view=data-lifecycle`: clean state, platform bootstrap & tenant
  *   bootstrap (`DataLifecyclePanel`) — moved here from Platform Admin.
  * - `view=downloads`: parameters & export (`DownloadsPanel`) — moved here
  *   from Platform Admin.
+ * - `view=pipeline-policy`: retry budgets and notifications
+ *   (`PipelinePolicyPanel`) — moved here from the settings menu (#6147 S3).
  *
  * Retired addresses (each maps to the home):
  * - `?tab=platform-admin&view=data-providers` → `?tab=data-hub&view=data-providers`.
@@ -31,13 +34,14 @@
 export const DATA_HUB_TAB = "data-hub";
 
 /** The consolidated home's views. */
-export type DataHubView = "data-providers" | "feeds" | "data-lifecycle" | "downloads";
+export type DataHubView = "data-providers" | "feeds" | "data-lifecycle" | "downloads" | "pipeline-policy";
 
 export const DATA_HUB_VIEWS: readonly DataHubView[] = [
   "data-providers",
   "feeds",
   "data-lifecycle",
   "downloads",
+  "pipeline-policy",
 ];
 
 export const DATA_HUB_VIEW_LABELS: Record<DataHubView, string> = {
@@ -45,6 +49,7 @@ export const DATA_HUB_VIEW_LABELS: Record<DataHubView, string> = {
   feeds: "Feeds",
   "data-lifecycle": "Data Lifecycle",
   downloads: "Parameters & Export",
+  "pipeline-policy": "Pipeline Policy",
 };
 
 export function isDataHubView(value: unknown): value is DataHubView {
