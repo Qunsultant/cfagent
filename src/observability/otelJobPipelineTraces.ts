@@ -43,6 +43,7 @@ import {
   identityJobStepJournal,
   type JobRunSettledInfo,
   type JobStepJournal,
+  type JobStepJournalMeta,
 } from "../services/jobPipelineEngine";
 import { OTEL_J1J7_COMPONENT } from "./otelLogs";
 
@@ -147,7 +148,7 @@ export function createOtelJobPipelineTracesStepJournal(
   const inner = deps.inner ?? identityJobStepJournal;
   const nowMs = deps.nowMs ?? (() => Date.now());
   return {
-    do: async <T>(name: string, fn: () => Promise<T>): Promise<T> => {
+    do: async <T>(name: string, fn: () => Promise<T>, meta?: JobStepJournalMeta): Promise<T> => {
       const enabled = (() => {
         try {
           return deps.isEnabled();
@@ -155,12 +156,17 @@ export function createOtelJobPipelineTracesStepJournal(
           return false;
         }
       })();
-      if (!enabled) return inner.do(name, fn);
+      if (!enabled) return inner.do(name, fn, meta);
       const startMs = nowMs();
       const span = deps.tracer.startSpan("job.stage.step", {
         attributes: {
           component: OTEL_J1J7_COMPONENT,
           step: name,
+          // Issue #6466 part 5 — the run id as a first-class span attribute:
+          // TraceQL can select the run's spans by runId instead of regexing
+          // the step name.
+          ...(meta?.runId ? { runId: meta.runId } : {}),
+          ...(meta?.jobId ? { jobId: meta.jobId } : {}),
         },
         startTime: [Math.floor(startMs / 1000), (startMs % 1000) * 1_000_000],
       });
@@ -168,7 +174,7 @@ export function createOtelJobPipelineTracesStepJournal(
       // journal calls record child spans of this step.
       const ctx = trace.setSpan(context.active(), span);
       try {
-        const result = await context.with(ctx, () => inner.do(name, fn));
+        const result = await context.with(ctx, () => inner.do(name, fn, meta));
         const endMs = nowMs();
         span.setStatus({ code: SpanStatusCode.OK });
         span.end([Math.floor(endMs / 1000), (endMs % 1000) * 1_000_000]);

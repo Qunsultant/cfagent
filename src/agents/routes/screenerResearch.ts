@@ -48,7 +48,11 @@ import {
 import { resolveResearchJobConfig } from "../../config/researchJobConfig";
 import { describeResearchExecution } from "../../services/researchExecutionView";
 import { researchUniverseIds } from "../../trading";
-import type { ResearchStageModes } from "../../config/researchJobConfig";
+import type {
+  ResearchStageModes,
+  ResearchStageRetryBuckets,
+  ResearchStageTimeouts,
+} from "../../config/researchJobConfig";
 import { isResearchVenueRefusal, resolveResearchVenue } from "../../services/researchVenue";
 import { recordLedgerRun } from "../../services/unifiedLedger";
 import { SqlJobRunRecordStore } from "../../data/doSqliteJobRunRecordAdapter";
@@ -104,6 +108,49 @@ async function storedStageModesFor(
     return config.stageModes && Object.keys(config.stageModes).length > 0
       ? config.stageModes
       : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Issue #6466 parts 3–4 — the owner's stored execution limits for a
+ * dispatch: per-stage timeouts, per-stage retry buckets, and the settlement
+ * wait. Same fail-open shape as `storedStageModesFor`: a missing agent or a
+ * config read failure answers undefined, which leaves the deployment
+ * carriers in force — the run never fails because a preference could not
+ * be read, and no limit is invented in its place.
+ */
+async function storedResearchLimitsFor(
+  ctx: ScreenerResearchRouteContext,
+  userLogin: string,
+): Promise<
+  | {
+      stageTimeouts?: ResearchStageTimeouts;
+      stageRetryBuckets?: ResearchStageRetryBuckets;
+      settlementWaitMs?: number | null;
+    }
+  | undefined
+> {
+  try {
+    const agent = ctx.getResearchAgent(userLogin);
+    if (!agent) return undefined;
+    const config = await agent.getResearchConfig();
+    const limits: {
+      stageTimeouts?: ResearchStageTimeouts;
+      stageRetryBuckets?: ResearchStageRetryBuckets;
+      settlementWaitMs?: number | null;
+    } = {};
+    if (config.stageTimeouts && Object.keys(config.stageTimeouts).length > 0) {
+      limits.stageTimeouts = config.stageTimeouts;
+    }
+    if (config.stageRetryBuckets && Object.keys(config.stageRetryBuckets).length > 0) {
+      limits.stageRetryBuckets = config.stageRetryBuckets;
+    }
+    if (config.settlementWaitMs !== null && config.settlementWaitMs !== undefined) {
+      limits.settlementWaitMs = config.settlementWaitMs;
+    }
+    return Object.keys(limits).length > 0 ? limits : undefined;
   } catch {
     return undefined;
   }
@@ -679,10 +726,14 @@ export async function handleScreenerResearchRoutes(
         // Issue #5975 - the owner's stored stage modes win over the
         // deployment default for this dispatch.
         const storedStageModes = await storedStageModesFor(ctx, userLogin);
+        // Issue #6466 parts 3–4 — the owner's stored execution limits win
+        // over the deployment carriers for this dispatch, same rule.
+        const storedLimits = await storedResearchLimitsFor(ctx, userLogin);
         const dispatched = await dispatchResearchEngineRun({
           userLogin,
           trigger: "manual",
           ...(storedStageModes ? { stageModes: storedStageModes } : {}),
+          ...(storedLimits ?? {}),
           sql: resolveResearchSql(),
           d1: resolveResearchD1(),
           env: ctx.env as Record<string, string | undefined>,
@@ -894,10 +945,14 @@ export async function handleScreenerResearchRoutes(
         const screeningPaused = screeningFlags.isScreeningScheduledPaused(readScreeningSetting);
         // Issue #5975 - manual and scheduled resolve the same stored modes.
         const storedStageModes = await storedStageModesFor(ctx, userLogin);
+        // Issue #6466 parts 3–4 — manual and scheduled resolve the same
+        // stored limits.
+        const storedLimits = await storedResearchLimitsFor(ctx, userLogin);
         const dispatched = await dispatchResearchEngineRun({
           userLogin,
           trigger: "scheduled",
           ...(storedStageModes ? { stageModes: storedStageModes } : {}),
+          ...(storedLimits ?? {}),
           sql: resolveResearchSql(),
           d1: resolveResearchD1(),
           env: ctx.env as Record<string, string | undefined>,

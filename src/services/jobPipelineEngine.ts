@@ -260,8 +260,20 @@ export function normalizeOriginRunId(value: unknown): string | null {
  * the instance store happens regardless — the journal makes
  * workflow replay cheap, the checkpoint makes any resume exact.
  */
+/**
+ * Issue #6466 part 5 — the run context a step executes under. The OTel
+ * journals carry the run id as a FIRST-CLASS field (an attribute / log
+ * field), so a run is findable in Grafana by run id alone. Today the run id
+ * is only embedded in the step name (`step:<runBody>:…`), which TraceQL can
+ * only match with a regex over the step name.
+ */
+export interface JobStepJournalMeta {
+  runId?: string;
+  jobId?: string;
+}
+
 export interface JobStepJournal {
-  do<T>(name: string, fn: () => Promise<T>): Promise<T>;
+  do<T>(name: string, fn: () => Promise<T>, meta?: JobStepJournalMeta): Promise<T>;
 }
 
 export const identityJobStepJournal: JobStepJournal = {
@@ -1074,6 +1086,43 @@ export class JobPipelineControl {
   }
 
   // ---- management operations (job granularity) ---------------------------
+
+  /**
+   * Issue #6466 part 2 — stamp a workflow dispatch on the instance row.
+   * After the host starts a workflow instance, the row records the instance
+   * id in the EXISTING `runWorkflowInstanceId` field, the start time, and
+   * state "idle" — before the settlement poller runs, so the OODA page and
+   * the ledger can show the run from dispatch. The stamp is an UPDATE to the
+   * row `defineJob` already created (state "idle"); it never invents a
+   * second field. It refuses `job_already_running` on a live instance
+   * (queued/running/paused) — the same guard `dispatchResolved` enforces —
+   * because stamping "running" would break the workflow's own `runJob`.
+   */
+  async stampWorkflowDispatch(
+    jobId: string,
+    stamp: { workflowInstanceId: string; startedAt?: string | null },
+  ): Promise<JobInstanceRecord> {
+    const instance = await this.requireInstance(jobId);
+    if (
+      instance.state === "queued" ||
+      instance.state === "running" ||
+      instance.state === "paused"
+    ) {
+      throw new JobPipelineError(
+        "job_already_running",
+        `Job "${jobId}" is ${instance.state} (run ${instance.currentRunId ?? "unknown"}); resume or cancel it before dispatching a new run.`,
+      );
+    }
+    const updated: JobInstanceRecord = {
+      ...instance,
+      runWorkflowInstanceId: stamp.workflowInstanceId,
+      runStartedAt: stamp.startedAt ?? this.iso(),
+      state: "idle",
+      updatedAt: this.iso(),
+    };
+    await this.setInstance(updated);
+    return updated;
+  }
 
   /**
    * Dispatch a run. The delivery mode comes from the job's
@@ -3914,6 +3963,9 @@ export class JobPipelineControl {
         result = await journal.do(
           stepExecutionId(ctx.runId, path, stepIndex, eff.shardKey, itemIndex),
           () => handler(stepCtx),
+          // Issue #6466 part 5 — the run id rides as a first-class field, so
+          // the OTel journals can attribute the step span/log to the run.
+          { runId: ctx.runId, jobId: ctx.jobId },
         );
       } catch (error) {
         if (error instanceof JobPipelineError) throw error;

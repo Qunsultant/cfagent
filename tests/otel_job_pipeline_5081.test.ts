@@ -326,3 +326,34 @@ describe("J1–J7 observers end-to-end — observer → OTel sink → OTLP/HTTP 
     expect(attrs.runId).toBe("run-9");
   });
 });
+
+describe("#6466 — step log events carry the run id as a first-class field", () => {
+  it("logs runId on step started + completed when the journal is given run context", async () => {
+    const { sink, events } = recordingSink();
+    const journal = createOtelJobStepJournal({
+      ...observerDeps(testLogger(sink)),
+      nowMs: (() => { let t = 1000; return () => (t += 50); })(),
+    });
+    await journal.do("step:run-6466:feed:0:-:-", async () => "done", {
+      runId: "run-6466",
+      jobId: "research:run-6466",
+    });
+    expect(events).toHaveLength(2);
+    expect(events[0].type).toBe("job.stage.step.started");
+    expect(events[0].fields?.runId).toBe("run-6466");
+    expect(events[0].fields?.jobId).toBe("research:run-6466");
+    expect(events[1].type).toBe("job.stage.step.completed");
+    expect(events[1].fields?.runId).toBe("run-6466");
+  });
+
+  it("logs no runId when no run context is given", async () => {
+    const { sink, events } = recordingSink();
+    const journal = createOtelJobStepJournal({
+      ...observerDeps(testLogger(sink)),
+      nowMs: (() => { let t = 1000; return () => (t += 50); })(),
+    });
+    await journal.do("step:run-6466:feed:0:-:-", async () => "done");
+    expect(events).toHaveLength(2);
+    expect(events[0].fields?.runId).toBeUndefined();
+  });
+});

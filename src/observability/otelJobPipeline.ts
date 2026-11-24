@@ -41,6 +41,7 @@ import {
   identityJobStepJournal,
   type JobRunSettledInfo,
   type JobStepJournal,
+  type JobStepJournalMeta,
 } from "../services/jobPipelineEngine";
 import { OTEL_J1J7_COMPONENT } from "./otelLogs";
 
@@ -133,7 +134,7 @@ export function createOtelJobStepJournal(deps: OtelJobStepJournalDeps): JobStepJ
   const inner = deps.inner ?? identityJobStepJournal;
   const nowMs = deps.nowMs ?? (() => Date.now());
   return {
-    do: async <T>(name: string, fn: () => Promise<T>): Promise<T> => {
+    do: async <T>(name: string, fn: () => Promise<T>, meta?: JobStepJournalMeta): Promise<T> => {
       const enabled = (() => {
         try {
           return deps.isEnabled();
@@ -141,18 +142,25 @@ export function createOtelJobStepJournal(deps: OtelJobStepJournalDeps): JobStepJ
           return false;
         }
       })();
-      if (!enabled) return inner.do(name, fn);
+      if (!enabled) return inner.do(name, fn, meta);
       const startMs = nowMs();
+      // Issue #6466 part 5 — the run id as a first-class log field, so the
+      // run's step events are findable in Loki by runId instead of by the
+      // step name.
+      const runFields = {
+        ...(meta?.runId ? { runId: meta.runId } : {}),
+        ...(meta?.jobId ? { jobId: meta.jobId } : {}),
+      };
       try {
-        deps.logger.info("job.stage.step.started", { step: name });
+        deps.logger.info("job.stage.step.started", { step: name, ...runFields });
       } catch {
         // Best-effort logging.
       }
       try {
-        const result = await inner.do(name, fn);
+        const result = await inner.do(name, fn, meta);
         const durationMs = nowMs() - startMs;
         try {
-          deps.logger.info("job.stage.step.completed", { step: name, durationMs });
+          deps.logger.info("job.stage.step.completed", { step: name, durationMs, ...runFields });
         } catch {
           // Best-effort logging.
         }
@@ -161,7 +169,7 @@ export function createOtelJobStepJournal(deps: OtelJobStepJournalDeps): JobStepJ
         const durationMs = nowMs() - startMs;
         const message = error instanceof Error ? error.message : String(error);
         try {
-          deps.logger.error("job.stage.step.failed", { step: name, durationMs, error: message });
+          deps.logger.error("job.stage.step.failed", { step: name, durationMs, error: message, ...runFields });
         } catch {
           // Best-effort logging.
         }
