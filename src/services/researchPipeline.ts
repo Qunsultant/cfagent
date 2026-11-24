@@ -318,6 +318,12 @@ export interface ResearchReport {
   createdAt: string;
   rulesVersion: string;
   /**
+   * Issue #6037 (d) — the resolved rules this run decided under. Recorded
+   * from the block the pipeline read (one resolution), so a report is
+   * reproducible from its own evidence, not from "current settings".
+   */
+  rules: ResearchRules;
+  /**
    * Issue #5912 — the venue and mode this run actually quoted from, recorded
    * on the report so the row can name them. Absent = the configured default.
    */
@@ -1037,7 +1043,7 @@ export async function runResearchPipeline(
     // id, not a plausible "0 candidates" night.
     const universeRefused = feed.universeRefusalCode === "research_universe_unknown";
     return finishReport({
-      runId, config, opts, now, started, trace, stageTrace, regime,
+      runId, config, rules, opts, now, started, trace, stageTrace, regime,
       symbolEvaluations,
       ideas: [], watchlist, rejected: [{
         symbol: "*", outlook: "unknown", structure: "-",
@@ -1472,7 +1478,7 @@ export async function runResearchPipeline(
       : "No qualifying opportunities — no candidate passed the evidence and risk gates.");
 
   return finishReport({
-    runId, config, opts, now, started, trace, stageTrace, regime,
+    runId, config, rules, opts, now, started, trace, stageTrace, regime,
     symbolEvaluations,
     ideas, watchlist, rejected, stats, summary, evaluationFeedback,
     ...(dataRefusal ? { dataRefusal } : {}),
@@ -1482,6 +1488,7 @@ export async function runResearchPipeline(
 function finishReport(args: {
   runId: string;
   config: ResearchConfig;
+  rules: ResearchRules;
   opts: ResearchRunOptions;
   now: number;
   started: number;
@@ -1500,7 +1507,7 @@ function finishReport(args: {
     message: string;
   };
 }): ResearchReport {
-  const { runId, config, opts, now, started, trace, stageTrace, regime, ideas, watchlist, rejected, stats, summary, symbolEvaluations, evaluationFeedback } = args;
+  const { runId, config, rules, opts, now, started, trace, stageTrace, regime, ideas, watchlist, rejected, stats, summary, symbolEvaluations, evaluationFeedback } = args;
   stats.durationMs = Date.now() - started;
   return {
     runId,
@@ -1510,6 +1517,8 @@ function finishReport(args: {
     userLogin: opts.userLogin,
     createdAt: new Date(now).toISOString(),
     rulesVersion: config.rulesVersion,
+    // Issue #6037 (d) — the values, not just the version.
+    rules: { ...rules },
     // Issue #5912 — the venue/mode this run used, recorded once here.
     ...(opts.brokerId ? { brokerId: opts.brokerId } : {}),
     ...(opts.mode ? { mode: opts.mode } : {}),
