@@ -181,6 +181,17 @@ export async function runResearchAndPublish(ctx: ResearchPublishContext,
   reportId?: string | null;
   created?: boolean;
   emailed?: boolean;
+  /** Issue #6416 — the full delivery outcome (deliver leg + full-publish
+   * leg): which channels fired, whether the run was HITL-held and under
+   * which confirmation, and why a channel did not fire. Absent on the
+   * analyze-only leg, which delivers nothing. */
+  slack?: boolean;
+  webhook?: boolean;
+  held?: boolean;
+  confirmationId?: string;
+  emailTo?: string | null;
+  pdfAttached?: boolean;
+  reasons?: { slack?: string; email?: string; webhook?: string };
   /** Issue #2167: the run's recorded document set (keys + per-format status). */
   artifacts?: ResearchReportArtifactOutcome;
   report?: unknown;
@@ -240,7 +251,13 @@ export async function runResearchAndPublish(ctx: ResearchPublishContext,
       trigger,
       userLogin: login,
     });
-    return { success: true, reportId: publication.reportId, emailed: delivery.emailed, report: stageReport };
+    // Issue #6416 — the deliver leg returns the FULL delivery outcome,
+    // not `emailed` alone: the leg previously dropped slack, webhook,
+    // held and the confirmation id, so the stage artifact could never
+    // say what delivery did. The spread forwards every field
+    // deliverResearchReport records, including fields added later —
+    // nothing is silently dropped by this leg.
+    return { success: true, reportId: publication.reportId, ...delivery, report: stageReport };
   }
   // Research uses the same tenant broker + paper/live selection as Copilot.
   // Resolve missing fields once at the publish boundary so manual and
@@ -429,7 +446,7 @@ export async function runResearchAndPublish(ctx: ResearchPublishContext,
     // Issue #2167: generate the full document set BEFORE the canonical write,
     // so the row carries the artifact keys. Issue #6066: this leg is the
     // generate stage; an analyze-only stage returns before it.
-    let emailed = false;
+    let delivery: ResearchDeliveryOutcome | null = null;
     let reportId: string | null = null;
     let created = false;
     let artifacts: ResearchReportArtifactOutcome | undefined;
@@ -445,7 +462,7 @@ export async function runResearchAndPublish(ctx: ResearchPublishContext,
       // #336: full delivery through the #308 seams (Slack, email, webhook),
       // delivering the canonical stored copy. Best-effort; never fails the run.
       try {
-        const delivery = await deliverResearchReport(ctx,
+        delivery = await deliverResearchReport(ctx,
           agent,
           report,
           {
@@ -455,7 +472,6 @@ export async function runResearchAndPublish(ctx: ResearchPublishContext,
             userLogin: login,
           }
         );
-        emailed = delivery.emailed;
       } catch (err) {
         structuredLog.warn("researchPublish.research_delivery_failed", {
           message: "[OrchestratorAgent] Research delivery failed:",
@@ -518,7 +534,12 @@ export async function runResearchAndPublish(ctx: ResearchPublishContext,
       success: true,
       reportId,
       created,
-      emailed,
+      // Issue #6416 — the full-publish leg returns the same full delivery
+      // outcome as the deliver leg (spread, so nothing is dropped): the
+      // analyze-only leg leaves every delivery field absent, and a run
+      // that delivered carries slack / webhook / held / confirmation id
+      // alongside `emailed`.
+      ...(delivery ? { ...delivery } : { emailed: false }),
       artifacts,
       report,
       taskId,
@@ -527,6 +548,29 @@ export async function runResearchAndPublish(ctx: ResearchPublishContext,
   } finally {
     if (heartbeatTimer) clearInterval(heartbeatTimer);
   }
+}
+
+/**
+ * Issue #6416 — the full delivery outcome: which channels fired, which
+ * did not and why, whether the run was HITL-held (with its confirmation
+ * id), and whether the PDF was attached. The deliver leg returns this
+ * whole object instead of `emailed` alone: the leg previously dropped
+ * every channel except email, and the stage artifact could never say
+ * whether Slack posted, the webhook dispatched, or delivery was held.
+ */
+export interface ResearchDeliveryOutcome {
+  emailed: boolean;
+  slack: boolean;
+  webhook: boolean;
+  held: boolean;
+  /** The HITL confirmation id, present only when held. */
+  confirmationId?: string;
+  /** The configured email recipient, when the email leg read one. */
+  emailTo?: string | null;
+  /** Whether the run PDF was fetched and attached to a channel. */
+  pdfAttached: boolean;
+  /** Per-channel failure reasons, present only for channels that did not fire. */
+  reasons?: { slack?: string; email?: string; webhook?: string };
 }
 
 /**
@@ -549,8 +593,8 @@ export async function deliverResearchReport(ctx: ResearchPublishContext,
     userLogin?: string;
   },
   opts: { reportId: string | null; pdfKey: string | null; trigger: string; userLogin: string }
-): Promise<{ emailed: boolean; slack: boolean; webhook: boolean; held: boolean }> {
-  const result = { emailed: false, slack: false, webhook: false, held: false };
+): Promise<ResearchDeliveryOutcome> {
+  const result: ResearchDeliveryOutcome = { emailed: false, slack: false, webhook: false, held: false, pdfAttached: false };
 
   // Pre-entry refresh: flag ideas that moved or went stale.
   const refreshFlags = await agent.refreshIdeaQuotes(report as never, opts.userLogin);
@@ -577,7 +621,10 @@ export async function deliverResearchReport(ctx: ResearchPublishContext,
   // #277 HITL: hold for approval instead of delivering.
   if (ctx.getReportDispatchHitl()) {
     try {
-      ctx.createReportConfirmation(
+      // Issue #6416 — keep the confirmation id: the deliver leg returns
+      // it so the stage artifact can name the hold instead of recording
+      // three silent not-sents.
+      result.confirmationId = ctx.createReportConfirmation(
         "email",
         JSON.stringify({
           kind: "research",
@@ -603,6 +650,8 @@ export async function deliverResearchReport(ctx: ResearchPublishContext,
   const pdf = opts.pdfKey
     ? await agent.getResearchPdfByKey(opts.pdfKey).catch(() => null)
     : null;
+  // Issue #6416 — whether a channel could attach the PDF at all.
+  result.pdfAttached = pdf !== null;
   const reportUrl = `${ctx.env.APP_BASE_URL || "https://agent.openaimp.com"}/api/research/report.pdf${opts.pdfKey ? `?key=${encodeURIComponent(opts.pdfKey)}` : ""}`;
 
   // 1. Slack via the gated dispatch (#3177): the tenant gate refuses a
@@ -624,11 +673,19 @@ export async function deliverResearchReport(ctx: ResearchPublishContext,
         : {}),
     });
     result.slack = delivery.ok;
-    if (!delivery.ok) structuredLog.warn("researchPublish.research_slack_delivery_failed", {
-      message: "[OrchestratorAgent] Research Slack delivery failed:",
-      error: delivery.error,
-    });
+    if (!delivery.ok) {
+      // Issue #6416 — name why Slack did not fire; the ledger reads this.
+      result.reasons = { ...result.reasons, slack: delivery.error ?? "slack delivery refused" };
+      structuredLog.warn("researchPublish.research_slack_delivery_failed", {
+        message: "[OrchestratorAgent] Research Slack delivery failed:",
+        error: delivery.error,
+      });
+    }
   } catch (err) {
+    result.reasons = {
+      ...result.reasons,
+      slack: err instanceof Error ? err.message : String(err),
+    };
     structuredLog.warn("researchPublish.research_slack_delivery_failed", {
       message: "[OrchestratorAgent] Research Slack delivery failed:",
       error: err instanceof Error ? err.message : String(err),
@@ -638,10 +695,18 @@ export async function deliverResearchReport(ctx: ResearchPublishContext,
   // 2. Email (opt-in via research config), with PDF attachment.
   try {
     const cfg = await agent.getResearchConfig();
-    if (cfg.autoEmail && cfg.emailTo) {
+    // Issue #6416 — the recipient the email leg read, when it read one.
+    result.emailTo = cfg.emailTo ?? null;
+    if (!cfg.autoEmail) {
+      result.reasons = { ...result.reasons, email: "email opt-in off" };
+    } else if (!cfg.emailTo) {
+      result.reasons = { ...result.reasons, email: "no recipient configured" };
+    } else {
       const { validateEmailRecipient } = await import("../../security/webhookReplay");
       const check = validateEmailRecipient(cfg.emailTo, ctx.env.EMAIL_TO_ALLOWED_DOMAINS);
-      if (check.ok) {
+      if (!check.ok) {
+        result.reasons = { ...result.reasons, email: check.reason ?? "recipient rejected" };
+      } else {
         const { getCfpayConfig, cfpaySendEmail, cfpaySendEmailWithAttachments } = await import("../../services/cfpayA2A");
         const cfpay = getCfpayConfig(ctx.env);
         const subject = `🔬 Options research — ${report.ideas.length} qualified idea(s)${flagLines.length > 0 ? " (⚠ refresh flags)" : ""}`;
@@ -681,9 +746,15 @@ export async function deliverResearchReport(ctx: ResearchPublishContext,
           );
         }
         result.emailed = sent;
+        // Issue #6416 — name why email did not fire; the ledger reads this.
+        if (!sent) result.reasons = { ...result.reasons, email: "email send failed" };
       }
     }
   } catch (err) {
+    result.reasons = {
+      ...result.reasons,
+      email: err instanceof Error ? err.message : String(err),
+    };
     structuredLog.warn("researchPublish.research_email_delivery_failed", {
       message: "[OrchestratorAgent] Research email delivery failed:",
       error: err instanceof Error ? err.message : String(err),
@@ -707,8 +778,15 @@ export async function deliverResearchReport(ctx: ResearchPublishContext,
         reportId: opts.reportId,
       });
       result.webhook = true;
+    } else {
+      // Issue #6416 — "not configured" is a named outcome, not a silence.
+      result.reasons = { ...result.reasons, webhook: "not configured" };
     }
   } catch (err) {
+    result.reasons = {
+      ...result.reasons,
+      webhook: err instanceof Error ? err.message : String(err),
+    };
     structuredLog.warn("researchPublish.research_webhook_delivery_failed", {
       message: "[OrchestratorAgent] Research webhook delivery failed:",
       error: err instanceof Error ? err.message : String(err),

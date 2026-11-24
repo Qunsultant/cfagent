@@ -63,6 +63,7 @@ import type { DataProviderId } from "../trading";
 import type { ScanRunSummary } from "../trading";
 import type { BindingFilter } from "./bindingFilter";
 import { matchesBindingFilter } from "./bindingFilter";
+import { RESEARCH_JOB_ID_PREFIX } from "../workflows/researchDataPorts";
 // Issue #3946 (Option B): the engine's D1 run records merge onto the
 // Workflow Runs page through runFromJobRunRecord, beside the DO
 // ledgers — never re-homed, never projected here (that is #4116).
@@ -1421,6 +1422,243 @@ function stageRowsForGroup(
  * — this projection never invents a clock. Nothing here is a second
  * stage-read mechanism: the views come from the job-status surface.
  */
+/** Issue #6416 — a plain-object guard for stage-artifact reads. */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Issue #6416 — the report a stage artifact carries, wherever it sits.
+ * Post-unwrap the analyze artifact IS the report; pre-unwrap (and the
+ * generate / deliver artifacts) it is embedded under `.report`. A stage
+ * that never produced a report answers null — never a fabricated one.
+ */
+function researchReportFromArtifact(output: unknown): Record<string, unknown> | null {
+  if (!isRecord(output)) return null;
+  const embedded = output.report;
+  if (isRecord(embedded) && (Array.isArray(embedded.ideas) || isRecord(embedded.stats))) {
+    return embedded;
+  }
+  if (Array.isArray(output.ideas) || isRecord(output.stats)) return output;
+  return null;
+}
+
+/**
+ * Issue #6416 — the human summary inside a descriptor
+ * (`research:<runId>:feed (36/100)` → `36/100`): the trailing
+ * parenthesized part the step handlers append. A bare key with no
+ * summary answers null, so the projection falls back to the node path
+ * instead of showing an internal key.
+ */
+function descriptorSummary(resultRef: string | null): string | null {
+  if (!resultRef) return null;
+  const match = /\(([^)]+)\)\s*$/.exec(resultRef);
+  return match ? match[1] : null;
+}
+
+/**
+ * Issue #6416 — the feed stage's detail, from the artifact first (the
+ * feed output's own counts: quotes retrieved, never attempted, quote
+ * failures), then the descriptor's counts, then the run report's stats
+ * / symbolEvaluations when the engine holds neither. The 64 of a
+ * 36/100 run are "never attempted", never failures: the artifact's
+ * quote list is the attempt record, and only a null quote is a failure.
+ */
+function researchFeedDetail(view: JobStageView): string | null {
+  const output = view.stageOutput;
+  if (isRecord(output) && Array.isArray(output.quotes) && typeof output.universeSize === "number") {
+    const quotes = output.quotes as Array<Record<string, unknown>>;
+    const retrieved =
+      typeof output.quotesRetrieved === "number" ? output.quotesRetrieved : quotes.length;
+    const failures = quotes.filter((quote) => !isRecord(quote) || quote.quote == null).length;
+    const notScreened = Math.max(0, output.universeSize - retrieved);
+    const refusal =
+      typeof output.universeError === "string" && output.universeError.length > 0
+        ? `; universe refused: ${output.universeError}`
+        : "";
+    return `feed: ${retrieved}/${output.universeSize} quotes retrieved; ${notScreened} never attempted; ${failures} quote failure${failures === 1 ? "" : "s"}${refusal}`;
+  }
+  const summary = descriptorSummary(view.resultRef);
+  if (summary) return `feed: ${summary} quotes`;
+  const report = isRecord(view.reportEvidence) ? view.reportEvidence : null;
+  const stats = report && isRecord(report.stats) ? report.stats : null;
+  if (
+    stats &&
+    typeof stats.universeSize === "number" &&
+    typeof stats.quotesRetrieved === "number"
+  ) {
+    return `feed: ${stats.quotesRetrieved}/${stats.universeSize} quotes retrieved (from the run report; no engine feed record)`;
+  }
+  return null;
+}
+
+/**
+ * Issue #6416 — the analyze stage's detail, from the artifact's report
+ * (its stats and rejected list) — never the descriptor, which is
+ * vacuous (`(0 ideas)` says nothing about 14 rejections). The report
+ * is read wherever the artifact carries it: the artifact itself
+ * post-unwrap, embedded under `.report` pre-unwrap.
+ */
+function researchAnalyzeDetail(view: JobStageView): string | null {
+  const report = researchReportFromArtifact(view.stageOutput);
+  if (!report) return null;
+  const stats = isRecord(report.stats) ? report.stats : null;
+  const ideas = Array.isArray(report.ideas) ? report.ideas : [];
+  const watchlist = Array.isArray(report.watchlist) ? report.watchlist : [];
+  const rejected = Array.isArray(report.rejected) ? report.rejected : [];
+  const qualified = typeof stats?.qualified === "number" ? stats.qualified : ideas.length;
+  const watchlisted = typeof stats?.watchlist === "number" ? stats.watchlist : watchlist.length;
+  const rejectedCount = typeof stats?.rejected === "number" ? stats.rejected : rejected.length;
+  const byGate = new Map<string, number>();
+  for (const entry of rejected) {
+    if (isRecord(entry) && typeof entry.gate === "string") {
+      byGate.set(entry.gate, (byGate.get(entry.gate) ?? 0) + 1);
+    }
+  }
+  const gates = [...byGate.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([gate, count]) => `${gate} ${count}`)
+    .join(", ");
+  const candidates =
+    typeof stats?.candidatesEvaluated === "number"
+      ? `; ${stats.candidatesEvaluated} candidates evaluated`
+      : "";
+  const chains =
+    typeof stats?.chainsFetched === "number" ? `, ${stats.chainsFetched} chains fetched` : "";
+  return `analyze: ${qualified} qualified, ${watchlisted} watchlist, ${rejectedCount} rejected${gates ? ` (${gates})` : ""}${candidates}${chains}`;
+}
+
+/**
+ * Issue #6416 — the generate stage's detail, from the artifact's
+ * publication: the canonical row (created / deduped / refused — a null
+ * report id IS the store refusal, named `canonical_store_refused`) and
+ * the per-format statuses, with a PDF failure carrying its error code.
+ */
+function researchGenerateDetail(view: JobStageView): string | null {
+  const output = view.stageOutput;
+  if (!isRecord(output) || !isRecord(output.publication)) return null;
+  const publication = output.publication;
+  const reportId = typeof publication.reportId === "string" ? publication.reportId : null;
+  const store =
+    reportId === null
+      ? "canonical_store_refused"
+      : publication.created === true
+        ? `stored ${reportId}`
+        : `deduped (existing ${reportId})`;
+  const artifacts = isRecord(publication.artifacts) ? publication.artifacts : null;
+  const pdf = artifacts
+    ? artifacts.pdfStatus === "generated"
+      ? `PDF generated${typeof artifacts.pdfKey === "string" ? ` (${artifacts.pdfKey})` : ""}`
+      : `PDF failed${typeof artifacts.pdfError === "string" ? ` (${artifacts.pdfError})` : ""}`
+    : "PDF status unknown";
+  const xlsx = artifacts
+    ? `XLSX ${typeof artifacts.xlsxStatus === "string" ? artifacts.xlsxStatus : "unknown"}`
+    : "XLSX status unknown";
+  const csv = artifacts
+    ? `CSV ${typeof artifacts.csvStatus === "string" ? artifacts.csvStatus : "unknown"}`
+    : "CSV status unknown";
+  return `generate: report ${store}; ${pdf}; ${xlsx}; ${csv}`;
+}
+
+/**
+ * Issue #6416 — why generate took `not_configured`, derived from the
+ * sibling artifacts: the analyze artifact says whether a usable report
+ * existed at all (an envelope there means the run predates the unwrap
+ * fix — the one cause the no-op artifact itself cannot name).
+ */
+function researchGenerateNoopDetail(views: JobStageView[]): string {
+  const analyze = views.find((view) => view.kind === "analyze");
+  const analyzeOutput = analyze?.stageOutput;
+  if (isRecord(analyzeOutput) && typeof analyzeOutput.success === "boolean") {
+    return "generate did not run (not_configured — analyze returned the publish envelope, not a report; this run predates the unwrap fix)";
+  }
+  const analyzeReport = researchReportFromArtifact(analyzeOutput);
+  if (analyzeReport && Array.isArray(analyzeReport.ideas)) {
+    return "generate did not run (not_configured — the analyze report was usable, so the generate runtime was not wired or the owner was missing)";
+  }
+  return "generate did not run (not_configured — no usable report reached the stage)";
+}
+
+/**
+ * Issue #6416 — the deliver stage's detail, from the artifact's full
+ * delivery outcome: channel by channel, plus held + confirmation id.
+ * A held run says so first — its three not-sents are the hold, not
+ * three failures.
+ */
+function researchDeliverDetail(view: JobStageView): string | null {
+  const output = view.stageOutput;
+  if (
+    !isRecord(output) ||
+    (typeof output.emailed !== "boolean" && typeof output.held !== "boolean")
+  ) {
+    return null;
+  }
+  if (output.held === true) {
+    return `deliver held for approval${typeof output.confirmationId === "string" ? ` (confirmation ${output.confirmationId})` : ""}; nothing sent`;
+  }
+  const channelReason = (channel: string): string => {
+    const reasons = isRecord(output.reasons) ? output.reasons : null;
+    const reason = reasons && typeof reasons[channel] === "string" ? (reasons[channel] as string) : null;
+    return reason ? ` (${reason})` : "";
+  };
+  const slack = output.slack === true ? "Slack posted" : `Slack not sent${channelReason("slack")}`;
+  const email =
+    output.emailed === true
+      ? `email sent${typeof output.emailTo === "string" ? ` to ${output.emailTo}` : ""}`
+      : `email not sent${channelReason("email")}`;
+  const webhook =
+    output.webhook === true ? "webhook dispatched" : `webhook not sent${channelReason("webhook")}`;
+  const pdf = output.pdfAttached === true ? "PDF attached" : "PDF unavailable";
+  return `deliver: ${slack}; ${email}; ${webhook}; ${pdf}`;
+}
+
+/**
+ * Issue #6416 — why deliver took `not_configured`, derived from the
+ * sibling artifacts: a generate no-op means there was no publication
+ * to send; a generate publication means the deliver runtime itself
+ * was not wired (or the owner was missing).
+ */
+function researchDeliverNoopDetail(views: JobStageView[]): string {
+  const generate = views.find((view) => view.kind === "generate");
+  const generateOutput = generate?.stageOutput;
+  if (isRecord(generateOutput) && generateOutput.status === "not_configured") {
+    return "deliver did not run (not_configured — generate produced no publication for deliver to send)";
+  }
+  if (isRecord(generateOutput) && isRecord(generateOutput.publication)) {
+    return "deliver did not run (not_configured — a publication exists, so the deliver runtime was not wired or the owner was missing)";
+  }
+  return "deliver did not run (not_configured — no publication reached the stage)";
+}
+
+/**
+ * Issue #6416 — one research stage's detail. A no-op stage names its
+ * cause, never a bare `not_configured`; every other stage synthesizes
+ * from its artifact, falling back to the descriptor's human summary.
+ * Enrich has no synthesis of its own in this issue (its surfacing
+ * ownership is undecided) and evaluate rides with #6417 — both read
+ * the descriptor summary through the default branch.
+ */
+function researchStageDetail(view: JobStageView, views: JobStageView[]): string | null {
+  if (view.stepStatus === "not_configured") {
+    if (view.kind === "generate") return researchGenerateNoopDetail(views);
+    if (view.kind === "deliver") return researchDeliverNoopDetail(views);
+    return `${view.kind ?? "stage"} did not run (not_configured — no ${view.kind ?? "stage"} runtime was wired for this dispatch)`;
+  }
+  switch (view.kind) {
+    case "feed":
+      return researchFeedDetail(view);
+    case "analyze":
+      return researchAnalyzeDetail(view);
+    case "generate":
+      return researchGenerateDetail(view);
+    case "deliver":
+      return researchDeliverDetail(view);
+    default:
+      return descriptorSummary(view.resultRef);
+  }
+}
+
 export function stagesFromEngineViews(
   views: JobStageView[],
   engineJobId: string | null = null,
@@ -1438,6 +1676,13 @@ export function stagesFromEngineViews(
     const aggregate = aggregateStageStatus([view]);
     const status = statusFor[aggregate.status] ?? "pending";
     const stage = view.kind ?? view.nodePath ?? view.stageId;
+    // Issue #6416 — a research row's detail says what the stage did:
+    // the synthesized detail from the stage's artifact (counts, store
+    // outcome, channel outcomes), else the descriptor's human summary,
+    // else the node path as today. Other families keep the node path:
+    // their descriptors are not ledger copy.
+    const isResearch =
+      typeof engineJobId === "string" && engineJobId.startsWith(RESEARCH_JOB_ID_PREFIX);
     return {
       key: view.stageId,
       order: index + 1,
@@ -1454,7 +1699,9 @@ export function stagesFromEngineViews(
       startedAt: view.startedAt,
       finishedAt: view.endedAt,
       durationMs: view.durationMs,
-      detail: view.nodePath || null,
+      detail: isResearch
+        ? (researchStageDetail(view, views) ?? (view.nodePath || null))
+        : (view.nodePath || null),
       reason: aggregate.error,
       error: status === "failed" ? aggregate.error : null,
       capability: null,
