@@ -95,7 +95,20 @@ describe("runOpportunityHunt (#3652)", () => {
     });
     expect(result.scanned).toBe(1);
     expect(result.skipped).toBe(0);
-    expect(result.setups).toEqual([{ symbol: "AAA", strategy: "sma_crossover" }]);
+    // Issue 6406 — a setup now carries its direction, latest close, the
+    // evaluator's reason, and the entry recommendation's price range
+    // (sma_crossover on a 120 close: entry 119.40–120.60, stop 114,
+    // take-profit 132 — the externalized 0.5%/5%/10% levels).
+    expect(result.setups).toEqual([
+      {
+        symbol: "AAA",
+        strategy: "sma_crossover",
+        direction: "entry",
+        lastClose: 120,
+        detail: "(Fast SMA 116.00 > Slow 104.00)",
+        levels: { entryLow: 119.4, entryHigh: 120.6, stopLoss: 114, takeProfit: 132 },
+      },
+    ]);
     expect(result.summary).toContain("1 setup(s) across 1 symbol(s)");
     expect(result.summary).toContain("AAA:sma_crossover");
     expect(result.asOf).toBe("2026-11-19T12:00:00.000Z");
@@ -178,6 +191,8 @@ describe("the opportunity-hunt tick (#3652)", () => {
       setups: [],
       summary,
       asOf: "2026-11-19T12:00:00.000Z",
+      holdingsStatus: { available: false, reason: "holdings_not_loaded" },
+      seriesBySymbol: {},
     });
 
     const tick = await agent.onCron({ forceGoalId: "opportunity-hunt" });

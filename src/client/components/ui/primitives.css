@@ -603,6 +603,11 @@ div.ui-modal-title { font-size: inherit; font-weight: inherit; }
 
 .ui-table tbody tr:hover { background: var(--color-surface-hover); }
 
+/* Issue 6406 — the selected row in a clickable report table keeps its
+ * highlight after the hover ends, so the detail below stays anchored. */
+.ui-table tbody tr.is-selected { background: var(--color-accent-subtle); }
+.ui-table tbody tr.is-selected:hover { background: var(--color-accent-subtle); }
+
 .ui-table .align-center { text-align: center; }
 .ui-table .align-right { text-align: right; }
 

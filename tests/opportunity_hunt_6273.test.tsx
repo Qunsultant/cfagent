@@ -28,6 +28,31 @@ vi.mock("../src/client/jobsApi", () => ({
   runOpportunityHuntNow: vi.fn(),
 }));
 
+// Issue 6406 — the panel renders a lightweight-charts detail chart, and
+// jsdom has neither canvas nor matchMedia. The chart is mocked at the
+// library boundary (the 6406 suite pins the chart wiring itself), and
+// ResizeObserver is stubbed so the component's mount effect runs.
+vi.mock("lightweight-charts", () => {
+  const series = {
+    setData: vi.fn(),
+    createPriceLine: vi.fn(() => ({})),
+    removePriceLine: vi.fn(),
+  };
+  const chart = {
+    addSeries: vi.fn(() => series),
+    remove: vi.fn(),
+    applyOptions: vi.fn(),
+    timeScale: vi.fn(() => ({ fitContent: vi.fn() })),
+  };
+  return { createChart: vi.fn(() => chart), LineSeries: {}, ColorType: { Solid: "solid" } };
+});
+
+(globalThis as any).ResizeObserver = class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+};
+
 import { createFeedDatasetAdapter } from "../src/data/createFeedDatasetPorts";
 import {
   buildFeedJobRegistry,
@@ -52,7 +77,11 @@ import type { YahooDailyBar } from "../src/trading/technicals";
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
-const ctx: OpportunityHuntRouteContext = { env: { AGENT_DB: {} } };
+const ctx: OpportunityHuntRouteContext = {
+  env: { AGENT_DB: {} },
+  getOrm: () => undefined,
+  readSettingRaw: () => null,
+};
 
 const req = (method: string, path: string) =>
   new Request(`https://agent.internal${path}`, { method });
@@ -115,13 +144,54 @@ describe("POST /opportunity-hunt/run (issue 6273)", () => {
     expect(body.ok).toBe(true);
     expect(body.scanned).toBe(2);
     expect(body.skipped).toBe(1);
+    // Issue 6406 — a setup carries its direction, latest close, the
+    // evaluator's reason, and the entry recommendation's price range
+    // (the family on a 98 close: entry 97.51–98.49, stop 95.06,
+    // take-profit 100.94 — the externalized 0.5%/3%/3% levels).
+    const familyLevels = {
+      entryLow: 97.51,
+      entryHigh: 98.49,
+      stopLoss: 95.06,
+      takeProfit: 100.94,
+    };
     expect(body.setups).toEqual([
-      { symbol: "AAAA", strategy: "breakout" },
-      { symbol: "AAAA", strategy: "mean_reversion" },
-      { symbol: "AAAA", strategy: "rsi_reversal" },
+      {
+        symbol: "AAAA",
+        strategy: "breakout",
+        direction: "entry",
+        lastClose: 98,
+        detail: "(dip >1.5% below prior bar)",
+        levels: familyLevels,
+      },
+      {
+        symbol: "AAAA",
+        strategy: "mean_reversion",
+        direction: "entry",
+        lastClose: 98,
+        detail: "(dip >1.5% below prior bar)",
+        levels: familyLevels,
+      },
+      {
+        symbol: "AAAA",
+        strategy: "rsi_reversal",
+        direction: "entry",
+        lastClose: 98,
+        detail: "(dip >1.5% below prior bar)",
+        levels: familyLevels,
+      },
     ]);
     expect(body.summary).toContain("3 setup(s) across 2 symbol(s)");
     expect(typeof body.asOf).toBe("string");
+    // Issue 6406 — the trailing closes ride along for the panel's chart,
+    // and the holdings read is reported, not silently absent: this test's
+    // env has no broker plumbing, so holdings are unavailable and the
+    // hunt runs flat (entries only), with the reason attached.
+    expect(body.seriesBySymbol.AAAA).toEqual([
+      ...Array(14).fill(100),
+      98,
+    ]);
+    expect(body.holdingsStatus.available).toBe(false);
+    expect(typeof body.holdingsStatus.reason).toBe("string");
   });
 
   it("fails named when the store is unbound", async () => {
@@ -248,10 +318,21 @@ describe("OpportunityHuntPanel (issue 6273)", () => {
       ok: true,
       scanned: 2,
       skipped: 1,
-      setups: [{ symbol: "AAAA", strategy: "rsi_reversal" }],
+      setups: [
+        {
+          symbol: "AAAA",
+          strategy: "rsi_reversal",
+          direction: "entry",
+          lastClose: 98,
+          detail: "(dip >1.5% below prior bar)",
+          levels: { entryLow: 97.51, entryHigh: 98.49, stopLoss: 95.06, takeProfit: 100.94 },
+        },
+      ],
       summary:
-        "Opportunity hunt: 1 setup(s) across 2 symbol(s) — AAAA:rsi_reversal",
+        "Opportunity hunt: 1 setup(s) across 2 symbol(s), 1 entry, 0 exits — AAAA:rsi_reversal",
       asOf: "2026-11-23T12:00:00.000Z",
+      holdingsStatus: { available: false, reason: "holdings_not_loaded" },
+      seriesBySymbol: { AAAA: [...Array(14).fill(100), 98] },
     } as never);
     await act(async () => {
       root!.render(<OpportunityHuntPanel />);
@@ -342,6 +423,8 @@ describe("OpportunityHuntPanel (issue 6273)", () => {
         setups: [],
         summary: "Opportunity hunt: 0 setup(s) across 1 symbol(s)",
         asOf: "2026-11-23T12:00:00.000Z",
+        holdingsStatus: { available: false, reason: "holdings_not_loaded" },
+        seriesBySymbol: {},
       });
     });
     expect(container!.textContent).toContain("No setups");
