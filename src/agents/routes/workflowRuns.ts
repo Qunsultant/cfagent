@@ -59,10 +59,16 @@ import { getScheduledAgentDoor } from "../orchestrator/meshDoors";
 import { resolveWorkflowRunsStageReadLimit } from "../../config/workflowRunsStageRead";
 import {
   readStagesFromPipelineStores,
+  type JobPipelineDeps,
+  type JobRunRecorder,
   type JobStageView,
   type JobStagesRead,
 } from "../../services/jobPipelineEngine";
 import { createJobPipelineStoresFromD1, createJobPipelineStoresFromSql } from "../../data/createJobPipelinePorts";
+import { createResearchStorePorts } from "../../data/createResearchStorePorts";
+import { readResearchStages } from "../../workflows/researchScreenEngine";
+import { RESEARCH_JOB_ID_PREFIX } from "../../workflows/researchDataPorts";
+import { jobStageId } from "../../workflows/stageRunnerPorts";
 import { isInnerShardScanJobId } from "../../workflows/optionsScreenEngine";
 
 export interface WorkflowRunsSql {
@@ -108,6 +114,15 @@ export interface WorkflowRunsRouteContext {
    * A failing read is named in storeErrors and never hides the runs.
    */
   jobStageReader?: (jobIds: string[]) => Promise<Map<string, JobStagesRead>>;
+  /**
+   * Issue #6416 — the orchestrator-side stage read for research engine
+   * jobs. One batch call keyed by `research:<runId>`; each entry carries
+   * the six stages with their descriptors, step statuses and artifacts,
+   * read from the orchestrator SQLite the research checkpoints live in.
+   * Production builds this from readResearchStages; tests inject a map.
+   * A failing read is named in storeErrors and never hides the runs.
+   */
+  researchStageReader?: (jobIds: string[]) => Promise<Map<string, JobStagesRead>>;
   /**
    * Issue #4420 — the inner per-symbol engine stages of this page's options
    * feed shards, keyed by the SHARD job id. Production reads the shard
@@ -593,6 +608,112 @@ export async function readPipelineRunStagesFromScheduledAgent(
 }
 
 /**
+ * Issue #6416 — the orchestrator-side stage read for research engine
+ * jobs (`research:<runId>`), reusing the OODA page's read contract
+ * (readResearchStages) over the orchestrator sql. The ScheduledAgent
+ * door holds no research definition — its SQLite never sees a research
+ * run — so asking it for a research id answers nothing by design; the
+ * ledger's stage join has to come here. No new store, no new read
+ * contract: the rows are the same six ResearchStageRows the control
+ * page reads, adapted to the JobStageView shape the projection takes
+ * (stageId `job:<nodePath>`, kind the stage id, resultRef the
+ * descriptor, stepStatus and artifact carried for detail synthesis).
+ * A research id with no run at all answers the six stages "pending"
+ * (readResearchStages' own contract), never an invented stage list.
+ * Non-research ids are skipped, never answered here.
+ */
+export async function readResearchRunStages(
+  input: {
+    userLogin: string;
+    sql?: SqlStorage;
+    d1?: D1Database | null;
+    stores?: JobPipelineDeps["stores"];
+    runRecorder?: JobRunRecorder;
+  },
+  jobIds: string[],
+): Promise<Map<string, JobStagesRead>> {
+  const out = new Map<string, JobStagesRead>();
+  for (const jobId of jobIds) {
+    if (!jobId.startsWith(RESEARCH_JOB_ID_PREFIX)) continue;
+    const runId = jobId.slice(RESEARCH_JOB_ID_PREFIX.length);
+    if (!runId) continue;
+    const read = await readResearchStages(
+      {
+        runId,
+        userLogin: input.userLogin,
+        ...(input.sql ? { sql: input.sql } : {}),
+        ...(input.d1 ? { d1: input.d1 } : {}),
+        ...(input.stores ? { stores: input.stores } : {}),
+        ...(input.runRecorder ? { runRecorder: input.runRecorder } : {}),
+      },
+      { includeStageOutputs: true },
+    );
+    const views: JobStageView[] = read.stages.map((row) => {
+      const descriptor = row.result?.descriptor ?? null;
+      const status =
+        row.status === "completed" ||
+        row.status === "failed" ||
+        row.status === "running" ||
+        row.status === "stopped" ||
+        row.status === "cancelled"
+          ? row.status
+          : "never-attempted";
+      return {
+        // The stage id is the engine's own address for the node:
+        // jobStageId(nodePath) is the same construction projectStageViews
+        // reverses (jobStageNodePath), so the adapter rebuilds the id the
+        // checkpoint recorded — it mints nothing new, and the #5175 pin
+        // on `job:${` templates is untouched.
+        stageId: jobStageId(row.nodePath),
+        nodePath: row.nodePath,
+        kind: row.stageId,
+        executionMode: null,
+        startedAt: row.startedAt,
+        endedAt: row.endedAt,
+        durationMs: row.durationMs,
+        resultRef: descriptor,
+        stepStatus: row.stepStatus,
+        ...(row.output !== undefined ? { stageOutput: row.output } : {}),
+        units: [
+          {
+            unitId: row.stageId,
+            status,
+            attempt: row.attempt ?? 0,
+            ...(row.startedAt ? { startedAt: row.startedAt } : {}),
+            ...(row.endedAt ? { endedAt: row.endedAt } : {}),
+            ...(descriptor ? { resultRef: descriptor } : {}),
+          },
+        ],
+      };
+    });
+    // Issue #6416 — the report body's stats / symbolEvaluations are the
+    // feed detail's evidence of last resort, read only when the feed
+    // stage has neither a descriptor nor an artifact: the common path
+    // (a feed stage that ran) costs no extra read. The report lives in
+    // the same orchestrator SQLite, on the research_runs port.
+    const feedView = views.find((view) => view.kind === "feed");
+    if (feedView && !feedView.resultRef && feedView.stageOutput == null && input.sql) {
+      try {
+        const json = createResearchStorePorts(input.sql).runs.getReportJsonValue(runId);
+        const report = typeof json === "string" ? (JSON.parse(json) as unknown) : json;
+        if (report && typeof report === "object") feedView.reportEvidence = report;
+      } catch {
+        // Absent or unparseable: the feed detail falls back to the node path.
+      }
+    }
+    out.set(jobId, {
+      stages: views,
+      // The checkpoint's run id when the control knows one, else the run
+      // id itself — the same identity rule the engine door's read follows,
+      // so stagesForRecord's checkpointRunId === workflowId check holds.
+      checkpointRunId: read.engineRunId ?? runId,
+      checkpointKind: null,
+    });
+  }
+  return out;
+}
+
+/**
  * Issue #4420 — the inner engine stages of options feed shards, read from
  * the pipeline store the shard executor wrote them to (this host's own
  * SQLite: a shard runs on the Orchestrator, and so does this read). One
@@ -927,13 +1048,45 @@ export async function handleWorkflowRunsRoutes(
       ...new Set([...jobs.map((job) => job.job_id), ...keptJobRunRecords.map((r) => r.jobId)]),
     ].slice(0, stageLimit);
     if (stageIds.length > 0) {
-      try {
-        const reader =
-          ctx.jobStageReader ??
-          ((ids: string[]) => readPipelineRunStagesFromScheduledAgent(ctx.env, ids));
-        for (const [jobId, read] of await reader(stageIds)) stageReads.set(jobId, read);
-      } catch (err) {
-        storeErrors.jobStages = err instanceof Error ? err.message : String(err);
+      // Issue #6416 — research engine-job ids read from the
+      // orchestrator-side stage read, not the ScheduledAgent door: the
+      // door's SQLite holds no research definition, so it answers
+      // nothing for a research id by design. The two reads fail soft
+      // independently and name their failure the same way, and neither
+      // hides the runs.
+      const researchIds = stageIds.filter((id) => id.startsWith(RESEARCH_JOB_ID_PREFIX));
+      const otherIds = stageIds.filter((id) => !id.startsWith(RESEARCH_JOB_ID_PREFIX));
+      if (researchIds.length > 0) {
+        try {
+          const researchReader =
+            ctx.researchStageReader ??
+            ((ids: string[]) =>
+              readResearchRunStages(
+                {
+                  userLogin: ctx.userLogin,
+                  sql: ctx.ensureTables(),
+                  d1: (ctx.env as { AGENT_DB?: D1Database } | undefined)?.AGENT_DB ?? null,
+                },
+                ids,
+              ));
+          for (const [jobId, read] of await researchReader(researchIds)) stageReads.set(jobId, read);
+        } catch (err) {
+          storeErrors.jobStages = [storeErrors.jobStages, `research stages: ${err instanceof Error ? err.message : String(err)}`]
+            .filter(Boolean)
+            .join("; ");
+        }
+      }
+      if (otherIds.length > 0) {
+        try {
+          const reader =
+            ctx.jobStageReader ??
+            ((ids: string[]) => readPipelineRunStagesFromScheduledAgent(ctx.env, ids));
+          for (const [jobId, read] of await reader(otherIds)) stageReads.set(jobId, read);
+        } catch (err) {
+          storeErrors.jobStages = [storeErrors.jobStages, err instanceof Error ? err.message : String(err)]
+            .filter(Boolean)
+            .join("; ");
+        }
       }
     }
   }

@@ -46,6 +46,7 @@ import {
   type ResearchPipelineStage,
   type ResearchStepDeps,
 } from "../services/researchPipelineJobs";
+import type { ResearchReport } from "../services/researchPipeline";
 import type { ResearchFeedStageOutput } from "../services/researchFeedHandoff";
 import type { ResearchEnrichStageOutput } from "../services/researchEnrichHandoff";
 import {
@@ -328,11 +329,62 @@ export async function dispatchResearchEngineRun(
   };
   const wiredDeps: ResearchStepDeps = {
     ...baseDeps,
+    // Issue #6416 — the inline dispatch's runOodaAnalysis unwraps the
+    // publish envelope to the report the analyze step consumes, matching
+    // the residency contract (researchWorkflowStageDeps.ts): a publish-leg
+    // result without success/report fails closed instead of flowing
+    // downstream as a vacuous 0-idea report (which is what made generate
+    // and deliver take `not_configured` on research:mwu2akp6-1). The raw
+    // result is captured FIRST: the route spreads ...dispatched.outcome
+    // into the POST /research/run response and the OODA page reads
+    // data.success / data.report / data.reportId from it, so the captured
+    // outcome stays the envelope — the step handler alone sees the report.
+    // A publish-leg result is recognized by its shape, not its source:
+    // every success path of runResearchAndPublish carries `report`, and
+    // every failure path carries `success: false` — so a result with a
+    // boolean `success` AND (a `report` key, or `success: false`) is a
+    // publish leg, and anything else is not. The mesh/MCP stub dispatch
+    // receipts (no `success` field) and caller-supplied analysis doubles
+    // (`{success: true, ...}` with no report, pinned by #5237/#5120/
+    // #5122) pass through unchanged, exactly as today — the execute seam
+    // is typed Promise<Record<string, unknown>> and the dep itself
+    // Promise<ResearchReport | Record<string, unknown>>, so a non-envelope
+    // result is a legitimate value of the seam, not a publish failure.
+    // A blanket fail-closed unwrap would newly fail those dispatches and
+    // change the MCP tool's receipt contract, which #6353 owns — so the
+    // residency contract applies where it can apply: to publish legs.
+    // (The residency branch above needs no unwrap here: it builds its
+    // deps through createJobPipelineWorkflowDeps, whose analyze dep
+    // already unwraps — this seam is the in-process sync path only.)
     runOodaAnalysis: async (ctx) => {
       const result = await baseDeps.runOodaAnalysis(ctx);
       capturedOutcome = result as Record<string, unknown>;
+      const envelope = result as { success?: unknown; report?: unknown; error?: string };
+      if (
+        typeof envelope.success === "boolean" &&
+        (envelope.success === false || "report" in envelope)
+      ) {
+        if (!envelope.success || !envelope.report) {
+          throw new Error(
+            envelope.error ?? "research_stage_failed: analyze.ooda did not return a report.",
+          );
+        }
+        return envelope.report as ResearchReport;
+      }
       return result;
     },
+    // Issue #6416 — the same residency drift as the unwrap: the resident
+    // analyze requires the persisted feed/enrich outputs and fails closed
+    // without them, instead of running from scratch. The flag is set only
+    // when this dispatch carries real feed+enrich stage deps (the manual
+    // route and the scheduled tick); a dispatch with no stage deps has no
+    // persisted inputs to require, and its analyze cannot fetch from
+    // scratch (its execute is a stub), so the flag is vacuous there —
+    // setting it unconditionally would newly fail the mesh/MCP stub
+    // dispatches the pins assert succeed (#5123, #5286).
+    ...(input.researchDeps?.runFeedStage && input.researchDeps?.runEnrichStage
+      ? { requireStageInputs: true }
+      : {}),
   };
 
   const { storageMode, ephemeralFallback, ephemeralReason, stores, runRecorder } =
@@ -517,6 +569,8 @@ export type ResearchStageResultReason = "not_run" | "no_artifact" | "not_applica
 
 export interface ResearchStageRow {
   stageId: ResearchPipelineStage;
+  /** The engine's node path for this stage ("0".."5" in pipeline order). */
+  nodePath: string;
   /** The engine's recorded status, or "pending" when the stage never ran. */
   status: string;
   startedAt: string | null;
@@ -541,6 +595,15 @@ export interface ResearchStageRow {
    */
   stepStatus: string | null;
   /**
+   * Issue #6416 — the persisted step-output artifact itself, present
+   * only when the caller opts in ({ includeStageOutputs: true }): the
+   * Workflow Runs ledger read needs the artifact to synthesize stage
+   * detail, and it already fetches the artifact for `stepStatus` — so
+   * opting in keeps the artifact instead of discarding it. The OODA
+   * page's control read does not opt in, so it ships nothing extra.
+   */
+  output?: unknown;
+  /**
    * Issue #6355 — the unit attempt count from the live checkpoint.
    * Null when only persisted terminal rows survive (they carry no
    * attempt) or the stage never ran.
@@ -549,21 +612,31 @@ export interface ResearchStageRow {
 }
 
 /**
- * Issue #6355 — the persisted step output's `status` for one stage, or
- * null when the stage wrote no artifact or its output carries no status
- * field. The key is the engine's stage-output key
+ * Issue #6355 — the persisted step output for one stage, or null when
+ * the stage wrote no artifact. The key is the engine's stage-output key
  * (<nodePath>/stage-output, `keyPart` in jobPipelineEngine.ts) — the
  * same key the engine writes and stageInput reads. A missing artifact
  * is null, never an error: the stages read must not fail because one
  * stage's output is absent.
  */
-async function readStageOutputStatus(
+async function readStageOutput(
   stores: JobPipelineDeps["stores"],
   runId: string,
   nodePath: string,
-): Promise<string | null> {
+): Promise<unknown | null> {
   const key = `${nodePath === "" ? "root" : nodePath}/stage-output`;
   const output = await stores.artifacts.getArtifact(runId, key).catch(() => null);
+  return output ?? null;
+}
+
+/**
+ * Issue #6355 — the persisted step output's `status` when the output
+ * carries one (e.g. "not_configured"). Null when the output has no
+ * status field or no artifact was persisted — never a fabricated
+ * status. A present "not_configured" is the no-op signature: the
+ * stage completed without doing its work.
+ */
+function stageOutputStatus(output: unknown): string | null {
   if (output && typeof output === "object" && !Array.isArray(output)) {
     const status = (output as Record<string, unknown>).status;
     return typeof status === "string" ? status : null;
@@ -581,6 +654,7 @@ async function readStageOutputStatus(
  */
 export async function readResearchStages(
   input: ReadResearchStagesInput,
+  opts?: { includeStageOutputs?: boolean },
 ): Promise<{
   engineJobId: string;
   jobState: string;
@@ -670,15 +744,19 @@ export async function readResearchStages(
       // none); stepStatus comes from the stage's persisted step-output
       // artifact. Both stay null when the record is absent — a future
       // no-op reads as stepStatus "not_configured", never as a healthy
-      // 0 ms completion.
+      // 0 ms completion. Issue #6416 — the artifact itself is read once
+      // here and kept only when the caller opted in; stepStatus is
+      // derived from that same read, never a second fetch.
       const attempt =
         found && found.units.length > 0
           ? Math.max(...found.units.map((unit) => unit.attempt))
           : null;
       const nodePath = found?.nodePath ?? String(RESEARCH_PIPELINE_STAGES.indexOf(stageId));
-      const stepStatus = await readStageOutputStatus(stores, artifactRunId, nodePath);
+      const stageOutput = await readStageOutput(stores, artifactRunId, nodePath);
+      const stepStatus = stageOutputStatus(stageOutput);
       return {
         stageId,
+        nodePath,
         status,
         startedAt: found?.startedAt ?? stored?.startedAt ?? null,
         endedAt: found?.endedAt ?? stored?.endedAt ?? null,
@@ -692,6 +770,7 @@ export async function readResearchStages(
         ...(resultReason ? { resultReason } : {}),
         stepStatus,
         attempt,
+        ...(opts?.includeStageOutputs ? { output: stageOutput } : {}),
       };
     }),
   );

@@ -452,6 +452,29 @@ export interface JobStageView {
    * produced one — never a fabricated summary.
    */
   resultRef: string | null;
+  /**
+   * Issue #6416 — the persisted step output's `status` (e.g.
+   * "not_configured") when the stage's artifact carries one. Set only
+   * by the research stage adapter, from the orchestrator-side stage
+   * read; the engine projection leaves it unset — the engine's own
+   * views carry no step status.
+   */
+  stepStatus?: string | null;
+  /**
+   * Issue #6416 — the persisted step-output artifact itself. Set only
+   * by the research stage adapter, which reads it from the same store
+   * as the stages; the Workflow Runs projection synthesizes stage
+   * detail from it. The engine projection leaves it unset.
+   */
+  stageOutput?: unknown;
+  /**
+   * Issue #6416 — the run's report body, attached by the research stage
+   * adapter only when a stage's descriptor and artifact are both absent:
+   * fallback evidence for detail synthesis (feed counts from the
+   * report's stats / symbolEvaluations). Never set by the engine
+   * projection, and never read when the descriptor or artifact exists.
+   */
+  reportEvidence?: unknown;
   units: Array<{
     unitId: string;
     status: StageUnitCheckpoint["status"];
