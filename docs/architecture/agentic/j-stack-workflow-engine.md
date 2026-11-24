@@ -1482,7 +1482,7 @@ engine, in the order to read them:
 
 **Engine** (the four core docs above, plus)
 
-- [ADR 0033: Cross-store consistency contract](../adr/0033-cross-store-consistency-contract.md)
+- [ADR 0033: Cross-store consistency contract](../adr/data/0033-cross-store-consistency-contract.md)
   — the consistency contract the engine's stores and run records
   rely on.
 

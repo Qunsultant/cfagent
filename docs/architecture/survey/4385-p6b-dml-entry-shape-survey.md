@@ -7,7 +7,7 @@ Survey-only. No build, no GitHub writes.
 - **Base:** `f4b8eff794ce9b40222c017621d6b196f74396df` (tag v0.1.1800 — the P6a
   merge tip). Worktree: `~/workspace/w4282/wt-p6b-survey` (clean).
 - **Phase body:** `~/workspace/w4282/phases/P6b-do-raw-dml.md` (base
-  `ec614e69`). ADR: `docs/architecture/adr/0032-data-access-mechanism-standard.md`
+  `ec614e69`). ADR: `docs/architecture/adr/data/0032-data-access-mechanism-standard.md`
   (merged 2026-11-14 via PR #4562). P6a record: `~/workspace/w4282/S15-4384.md`,
   `~/workspace/w4282/evidence-p6a/GATE-REPORT.md` + `DESIGN.md`.
 - **Scan:** `evidence-p6b/scan-do-dml-f4b8eff7.txt` (P6a scan method,

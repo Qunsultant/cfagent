@@ -1236,7 +1236,7 @@ const BASELINE: Array<[string, string, number]> = [
   // #4935: ADR 0033's audit ledger names the broker publication module
   // it inventories (INTEGRATION — naming the provider is the
   // inventory's job).
-  ["docs/architecture/adr/0033-cross-store-consistency-contract.md", "etrade", 1],
+  ["docs/architecture/adr/data/0033-cross-store-consistency-contract.md", "etrade", 1],
   ["docs/architecture/agentic/agent-capabilities.md", "alpaca", 1],
   ["docs/architecture/agentic/job-system.md", "alpaca", 6],
   ["docs/architecture/agentic/job-system.md", "nasdaq", 2],
@@ -2362,9 +2362,9 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/trading/universes.ts", "nasdaq", 3],
   ["src/types.ts", "nasdaq", 1],
   // ---- FALSE-POSITIVE (28 rows / 32 lines) ----
-  ["docs/architecture/adr/0002-data-foundation-layer.md", "fidelity", 1],
+  ["docs/architecture/adr/data/0002-data-foundation-layer.md", "fidelity", 1],
   ["docs/architecture/adr/0005-actor-port.md", "fidelity", 1],
-  ["docs/architecture/adr/0022-data-foundation.md", "fidelity", 1],
+  ["docs/architecture/adr/data/0022-data-foundation.md", "fidelity", 1],
   ["docs/architecture/agentic/think-or-DO.md", "fidelity", 3],
   ["docs/architecture/code/component-taxonomy-01.md", "fidelity", 1],
   ["docs/architecture/technical/cloudflare-01.md", "fidelity", 1],
@@ -2461,11 +2461,11 @@ const BASELINE: Array<[string, string, number]> = [
   // providers the decision is about (HISTORICAL — dated decision
   // records, 0028 etrade 10 / public.com 7 / alpaca 24 / yahoo 11 /
   // nasdaq 4, index public.com 1 / alpaca 1->2).
-  ["docs/architecture/adr/0028-data-provider-broker-taxonomy.md", "etrade", 10],
-  ["docs/architecture/adr/0028-data-provider-broker-taxonomy.md", "public.com", 7],
-  ["docs/architecture/adr/0028-data-provider-broker-taxonomy.md", "alpaca", 24],
-  ["docs/architecture/adr/0028-data-provider-broker-taxonomy.md", "yahoo", 11],
-  ["docs/architecture/adr/0028-data-provider-broker-taxonomy.md", "nasdaq", 4],
+  ["docs/architecture/adr/data/0028-data-provider-broker-taxonomy.md", "etrade", 10],
+  ["docs/architecture/adr/data/0028-data-provider-broker-taxonomy.md", "public.com", 7],
+  ["docs/architecture/adr/data/0028-data-provider-broker-taxonomy.md", "alpaca", 24],
+  ["docs/architecture/adr/data/0028-data-provider-broker-taxonomy.md", "yahoo", 11],
+  ["docs/architecture/adr/data/0028-data-provider-broker-taxonomy.md", "nasdaq", 4],
   ["docs/architecture/adr/README.md", "public.com", 1],
   ["src/agents/registry.ts", "alpaca", 1],
   ["src/services/oasfRecords.ts", "public.com", 1],

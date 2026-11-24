@@ -1,7 +1,7 @@
 # #1976 Design Survey — Drizzle repo-wide data foundation
 
 **Base:** main `972a1ddfe09b2c8075958e4f32e5e912bdfb12a8` (2026-10-29). Read-only survey; every claim cites code at this SHA.
-**Inputs:** issue #1976 body (filed by #CAIO-quns) + its 5 comments (handover 6489956147; CDO design direction 6494857135, 6494975721, 6495004422, 6495037697). ADR 0002 (`docs/architecture/adr/0002-data-foundation-layer.md`, accepted) is the standing contract this programme extends.
+**Inputs:** issue #1976 body (filed by #CAIO-quns) + its 5 comments (handover 6489956147; CDO design direction 6494857135, 6494975721, 6495004422, 6495037697). ADR 0002 (`docs/architecture/adr/data/0002-data-foundation-layer.md`, accepted) is the standing contract this programme extends.
 
 ## Headline findings
 
