@@ -21,6 +21,11 @@ import {
   type ISeriesApi,
   type Time,
 } from "lightweight-charts";
+import { Notice } from "./components/ui";
+import {
+  chartColorFallbacks,
+  type ChartColorToken,
+} from "./designTokens";
 
 export interface OpportunityHuntChartProps {
   symbol: string;
@@ -37,12 +42,12 @@ export interface OpportunityHuntChartProps {
   lastClose: number;
 }
 
-function tokenColor(name: string, fallback: string): string {
-  if (typeof document === "undefined") return fallback;
+function tokenColor(name: ChartColorToken): string {
+  if (typeof document === "undefined") return chartColorFallbacks[name];
   const value = getComputedStyle(document.documentElement)
     .getPropertyValue(name)
     .trim();
-  return value || fallback;
+  return value || chartColorFallbacks[name];
 }
 
 export function OpportunityHuntChart(props: OpportunityHuntChartProps) {
@@ -54,13 +59,13 @@ export function OpportunityHuntChart(props: OpportunityHuntChartProps) {
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
-    const border = tokenColor("--color-border-subtle", "#e5e5e5");
+    const border = tokenColor("--color-border-subtle");
     const chart = createChart(container, {
       width: container.clientWidth || 800,
       height: 260,
       layout: {
         background: { type: ColorType.Solid, color: "transparent" },
-        textColor: tokenColor("--color-text-muted", "#888888"),
+        textColor: tokenColor("--color-text-muted"),
       },
       grid: {
         vertLines: { color: border },
@@ -70,7 +75,7 @@ export function OpportunityHuntChart(props: OpportunityHuntChartProps) {
       timeScale: { borderColor: border, timeVisible: false },
     });
     const series = chart.addSeries(LineSeries, {
-      color: tokenColor("--color-accent", "#2962ff"),
+      color: tokenColor("--color-accent"),
       lineWidth: 2,
     });
     chartRef.current = chart;
@@ -105,35 +110,35 @@ export function OpportunityHuntChart(props: OpportunityHuntChartProps) {
     if (props.entryLow !== null) {
       lines.push({
         price: props.entryLow,
-        color: tokenColor("--color-success", "#26a69a"),
+        color: tokenColor("--color-success"),
         title: "Entry low",
       });
     }
     if (props.entryHigh !== null) {
       lines.push({
         price: props.entryHigh,
-        color: tokenColor("--color-success", "#26a69a"),
+        color: tokenColor("--color-success"),
         title: "Entry high",
       });
     }
     if (props.stopLoss !== null) {
       lines.push({
         price: props.stopLoss,
-        color: tokenColor("--color-danger", "#ef5350"),
+        color: tokenColor("--color-danger"),
         title: "Stop-loss",
       });
     }
     if (props.takeProfit !== null) {
       lines.push({
         price: props.takeProfit,
-        color: tokenColor("--color-accent", "#2962ff"),
+        color: tokenColor("--color-accent"),
         title: "Take-profit",
       });
     }
     if (props.entryPrice !== null) {
       lines.push({
         price: props.entryPrice,
-        color: tokenColor("--color-warning", "#ff9800"),
+        color: tokenColor("--color-warning"),
         title: "Cost basis",
       });
     }
@@ -160,10 +165,10 @@ export function OpportunityHuntChart(props: OpportunityHuntChartProps) {
 
   if (props.closes.length < 2) {
     return (
-      <p>
+      <Notice tone="info">
         Not enough closes to chart {props.symbol} — the recommendation levels
         below are still the hunt&apos;s numbers.
-      </p>
+      </Notice>
     );
   }
   return (
@@ -171,7 +176,6 @@ export function OpportunityHuntChart(props: OpportunityHuntChartProps) {
       ref={containerRef}
       role="img"
       aria-label={`Trailing closes for ${props.symbol}, latest close ${props.lastClose.toFixed(2)}, with the entry, stop-loss, take-profit, and exit levels marked`}
-      style={{ width: "100%", minWidth: 0 }}
     />
   );
 }
