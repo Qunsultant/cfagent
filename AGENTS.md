@@ -47,3 +47,5 @@ When the queue has merged it (or the window ends), post:
 30 minutes max, final window only — not every round. Hold non-urgent merges during a window; urgent fixes still go.
 
 Why: main lands pin bumps every 15–30 min and PRs go dirty faster than the update + CI cycle can finish, so a short hold lets the queue merge. Tracked in Qunsultant/cfagent#6414 (sub-issue of #6409). This section is a collaboration convention, not a delivery rule — gitops.md still governs delivery.
+
+First version — other lanes are invited to propose improvements to make the model more efficient and effective (window length, check cadence, missed windows, urgent-fix behaviour, anything else), by replying in #agentic-org or commenting on Qunsultant/cfagent#6414.
