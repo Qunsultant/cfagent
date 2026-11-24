@@ -260,7 +260,9 @@ export function TradeHub({
   // ?tab=stock-hub&view=research landed on stocks instead); the
   // hook's defaultTab covers the bare URL.
   const renderScreenersHub = () => (
-    <ScreenersHub activeEnv={activeEnv} userLogin={user?.login} />
+    // #6147 S2: thread the tenant's broker so the hub's registry +
+    // binding panels open on the active broker.
+    <ScreenersHub activeEnv={activeEnv} userLogin={user?.login} broker={selectedBroker} />
   );
 
   // Issue #2954: the Options copy hub — the options subtabs render it

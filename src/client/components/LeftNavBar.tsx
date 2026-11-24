@@ -225,6 +225,12 @@ export function LeftNavBar({
     if (activeTab === "marketing-hub") {
       return (currentView ?? "referrals") === subId;
     }
+    // #6147 S2 (#4681): the Assets Hub's sub-menu items are its views —
+    // forex (the hub default), futures, commodities, bonds, registry,
+    // binding — same shape as the marketing-hub branch above.
+    if (activeTab === "assets-hub") {
+      return (currentView ?? "forex") === subId;
+    }
     return false;
   };
 
