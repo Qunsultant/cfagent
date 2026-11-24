@@ -113,6 +113,35 @@ export interface WorkflowRunArtifact {
   url: string;
 }
 
+/**
+ * Issue #6377 — one unit's entry in a stage's checkpoint: the state the
+ * engine recorded, the attempts it took, the descriptor the step returned,
+ * and the resume position a stopped unit continues from. Read from the
+ * checkpoint, never derived by a surface.
+ */
+export interface WorkflowRunCheckpointUnit {
+  unitId: string;
+  status: string;
+  attempt: number;
+  error?: string;
+  startedAt?: string;
+  endedAt?: string;
+  resultRef?: string;
+  progress?: { stepIndex: number; itemIndex: number };
+}
+
+/**
+ * Issue #6377 — the checkpoint entry a stage was projected from: the run it
+ * belongs to, the kind of execution it recorded, and its unit entries.
+ * Absent on a stage the engine did not project from a checkpoint — the
+ * viewer then claims none, rather than showing an empty one.
+ */
+export interface WorkflowRunStageCheckpoint {
+  runId: string | null;
+  kind: string | null;
+  units: WorkflowRunCheckpointUnit[];
+}
+
 export interface WorkflowRunStage {
   /** Stable row key: the job id, or `<transition-id>` for a stage recorded only as a transition. */
   key: string;
@@ -130,6 +159,12 @@ export interface WorkflowRunStage {
    * carries no buttons rather than a guess.
    */
   engineJobId?: string | null;
+  /**
+   * Issue #6377 — the checkpoint entry this stage came from, from the same
+   * read that produced the stage (no second store read). Absent when the
+   * stage was not projected from a checkpoint.
+   */
+  checkpoint?: WorkflowRunStageCheckpoint;
   /** Issue #4363 — the run's execution mode, as the definition recorded it. */
   executionMode?: string | null;
   startedAt: string | null;
@@ -1683,6 +1718,29 @@ export function stagesFromEngineViews(
     // their descriptors are not ledger copy.
     const isResearch =
       typeof engineJobId === "string" && engineJobId.startsWith(RESEARCH_JOB_ID_PREFIX);
+    // Issue #6377 — the stage's checkpoint entry, projected from the same
+    // view (never a second read). Gated on the checkpoint's own run id, not
+    // on unit presence: a read that is NOT the checkpoint (the research
+    // ledger read builds units from stage rows, with the checkpoint only as
+    // a fallback) claims no checkpoint rather than dressing ledger rows as
+    // one. A family whose stage read IS the checkpoint gets the entry free.
+    const checkpoint =
+      view.checkpointRunId !== null && view.checkpointRunId !== undefined
+        ? {
+            runId: view.checkpointRunId ?? null,
+            kind: view.checkpointKind ?? null,
+            units: view.units.map((unit) => ({
+              unitId: unit.unitId,
+              status: unit.status,
+              attempt: unit.attempt,
+              ...(unit.error !== undefined ? { error: unit.error } : {}),
+              ...(unit.startedAt !== undefined ? { startedAt: unit.startedAt } : {}),
+              ...(unit.endedAt !== undefined ? { endedAt: unit.endedAt } : {}),
+              ...(unit.resultRef !== undefined ? { resultRef: unit.resultRef } : {}),
+              ...(unit.progress !== undefined ? { progress: unit.progress } : {}),
+            })),
+          }
+        : undefined;
     return {
       key: view.stageId,
       order: index + 1,
@@ -1709,6 +1767,7 @@ export function stagesFromEngineViews(
       channel: null,
       input: null,
       output: null,
+      ...(checkpoint ? { checkpoint } : {}),
     };
   });
 }
