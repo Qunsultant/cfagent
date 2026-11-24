@@ -162,6 +162,10 @@ const D1_MIGRATION_SQL_SHA256: Record<number, string> = {
   // #6006 adds migration 0086 (job_run_records outcome facts: 9
   // ALTERs). Renumbered 0083 -> 0086 on rebase (main took 0083-0085).
   86: "5ccea3ee0f4183d634f94f507f4914031e73c5e38a1cca6b60e2ef4e6f64ceb7",
+  // #6151 S4 adds migration 0087 (nav admin config: allowances +
+  // allow-lists + persona defaults): 4 statements. Renumbered
+  // 0086 -> 0087 on rebase (main took 0086 for #6006).
+  87: "881fa0f8c589e31f2a608b405481dba350778a6649596a6e7b5c1eb074b4e2d4",
 };
 
 /** Per-version statement counts, measured from the base runner. */
@@ -258,6 +262,8 @@ const D1_MIGRATION_STATEMENT_COUNTS: Record<number, number> = {
   85: 4,
   // #6006 adds migration 0086 (job_run_records outcome facts: 9 ALTERs).
   86: 9,
+  // #6151 S4 adds migration 0087 (nav admin config: 3 tables + 1 index): 4 statements.
+  87: 4,
 };
 
 /** The 11 seed-DML statements, exact text, measured from the base runner. */
@@ -315,9 +321,10 @@ describe("D1 catalogue — migrationRunner delegates (#4282 P1)", () => {
     // #5102 adds migration 0084 (job_run_records binding tuple: 4 ALTERs + 1 index): 255 → 260.
     // #6151 S3 adds migration 0085 (saved nav presets: 2 tables + 2 indexes): 260 → 264.
     // #6006 adds migration 0086 (job_run_records outcome facts: 9 ALTERs): 264 → 273.
-    expect(D1_CATALOGUE_ENTRIES.length).toBe(273);
-    expect(catalogue.size()).toBe(273);
-    expect(catalogue.byKind("schema").length).toBe(261);    expect(catalogue.byKind("seed").length).toBe(12);
+    // #6151 S4 adds migration 0087 (nav admin config: 3 tables + 1 index): 273 → 277.
+    expect(D1_CATALOGUE_ENTRIES.length).toBe(277);
+    expect(catalogue.size()).toBe(277);
+    expect(catalogue.byKind("schema").length).toBe(265);    expect(catalogue.byKind("seed").length).toBe(12);
     const verbs = new Map<string, number>();
     const classify = (statement: string): string => {
       const upper = statement.trim().toUpperCase();
@@ -341,8 +348,8 @@ describe("D1 catalogue — migrationRunner delegates (#4282 P1)", () => {
       const verb = classify(entry.statement);
       verbs.set(verb, (verbs.get(verb) ?? 0) + 1);
     }
-    expect(verbs.get("CREATE TABLE")).toBe(109);
-    expect(verbs.get("CREATE INDEX")).toBe(59);
+    expect(verbs.get("CREATE TABLE")).toBe(112);
+    expect(verbs.get("CREATE INDEX")).toBe(60);
     expect(verbs.get("CREATE UNIQUE INDEX")).toBe(10);
     expect(verbs.get("ALTER TABLE")).toBe(82);    expect(verbs.get("DROP TABLE")).toBe(1);
     expect(verbs.get("INSERT OR IGNORE")).toBe(8);
@@ -356,10 +363,11 @@ describe("D1 catalogue — migrationRunner delegates (#4282 P1)", () => {
       .sort((a, b) => a - b);
     // 0084 is F5's migration (job_run_records binding columns,
     // #5102), merged 2026-11-23 as f7b55d2 — the gap is filled and
-    // versions run 1–86 contiguously (#6006's outcome facts were
-    // renumbered 0083 -> 0086 on rebase: main took 0083-0085).
+    // versions run 1–87 contiguously (#6006's outcome facts were
+    // renumbered 0083 -> 0086 on rebase: main took 0083-0085; #6151 S4
+    // renumbered 0086 -> 0087: main took 0086 for #6006).
     expect(versions).toEqual(
-      Array.from({ length: 86 }, (_, i) => i + 1),
+      Array.from({ length: 87 }, (_, i) => i + 1),
     );    const allCodes = new Set<string>();
     for (const version of versions) {
       const codes = D1_MIGRATION_CODES[version];

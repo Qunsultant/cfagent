@@ -108,14 +108,14 @@ describe("nav-config.json shape (issue #2977)", () => {
     }
   });
 
-  it("platformAdminSections: one section, 7 items, unique ids", () => {
+  it("platformAdminSections: one section, 8 items, unique ids", () => {
     const sections = navData.platformAdminSections as {
       id: string;
       items: { id: string; label: string; description: string }[];
     }[];
     expect(sections).toHaveLength(1);
-    expect(sections[0].items).toHaveLength(7);
-    expect(new Set(sections[0].items.map((i) => i.id)).size).toBe(7);
+    expect(sections[0].items).toHaveLength(8);
+    expect(new Set(sections[0].items.map((i) => i.id)).size).toBe(8);
     for (const item of sections[0].items) {
       expect(item.label).toBeTruthy();
       expect(item.description).toBeTruthy();

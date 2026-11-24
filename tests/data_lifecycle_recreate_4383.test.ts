@@ -407,7 +407,8 @@ describe("recreate, tenant scope (#4383)", () => {
     // #6100's 5 envelope ALTERs are already carried by the
     // projected-model walk (the ORM CREATE has them), so the D1 leg
     // skips five more: 13 → 18.
-    expect(body.d1.selected).toHaveLength(300);
+    // #6151 S4 adds migration 0087 (nav admin config: 3 tables + 1 index): 300 → 304.
+    expect(body.d1.selected).toHaveLength(304);
     expect(body.d1.skipped).toHaveLength(18);
     // Two member instances (alice, bob), each planning the fresh DO leg.
     expect(body.instances).toHaveLength(2);
@@ -507,7 +508,8 @@ describe("recreate, tenant scope (#4383)", () => {
     // #6151 S3 adds migration 0085 (saved nav presets: 2 tables + 2 indexes): 283 → 287.
     // Issue #6100 adds 4 mas_events envelope indexes: 287 → 291; #6006
     // adds 9 ALTERs (migration 0086): 291 → 300.
-    expect(body.d1.report.executed).toHaveLength(300);
+    // #6151 S4 adds migration 0087 (nav admin config: 3 tables + 1 index): 300 → 304.
+    expect(body.d1.report.executed).toHaveLength(304);
     expect(body.d1.verification.ok).toBe(true);
     expect(body.instances).toHaveLength(2);
     for (const inst of body.instances) {

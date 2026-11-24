@@ -147,7 +147,8 @@ describe("P5 runner — plan resolution (P4 finding 1: phased order)", () => {
     // Issue #6100 adds 5 mas_events envelope ALTERs + 4 indexes:
     // 494 → 503. Issue #6006 adds migration 0086 (job_run_records
     // outcome facts, 9 ALTERs): 503 → 512.
-    expect(p.steps).toHaveLength(512);
+    // #6151 S4 adds migration 0087 (nav admin config: 3 tables + 1 index): 512 → 516.
+    expect(p.steps).toHaveLength(516);
     expect(p.skipped).toHaveLength(1);
     expect(p.skipped[0].code).toBe(SEED_FORM_CODE);
     expect(p.skipped[0].reason).toMatch(/call site/i);
@@ -189,7 +190,8 @@ describe("P5 runner — plan resolution (P4 finding 1: phased order)", () => {
     // Issue #6100 adds 5 mas_events envelope ALTERs + 4 indexes:
     // 494 → 503. Issue #6006 adds migration 0086 (job_run_records
     // outcome facts, 9 ALTERs): 503 → 512.
-    expect(harness).toHaveLength(512);    // Production move 1: the rebuild CREATE for agent_price_catalogue
+    // #6151 S4 adds migration 0087 (nav admin config: 3 tables + 1 index): 512 → 516.
+    expect(harness).toHaveLength(516);    // Production move 1: the rebuild CREATE for agent_price_catalogue
     // must stay after the RENAME that clears its table (a second
     // table-creation for the same table cannot run before the rename
     // on real SQLite). Production move 2: the legacy seed is hoisted
@@ -350,7 +352,8 @@ describe("P5 runner — delta-to-steps selection (P4 finding 3, P4 finding 2)", 
     // projected-model walk already has them (the ORM CREATE carries
     // them), so the leg skips five more (13 → 18); its 4 indexes are
     // selected: 275 → 279, plus #6006's 9 ALTERs: 279 → 288.
-    expect(selected.schema).toHaveLength(288);
+    // #6151 S4 adds migration 0087 (nav admin config: 3 tables + 1 index): 288 → 292.
+    expect(selected.schema).toHaveLength(292);
     expect(selected.seeds).toHaveLength(12);
     expect(selected.skipped).toHaveLength(18);
     expect(

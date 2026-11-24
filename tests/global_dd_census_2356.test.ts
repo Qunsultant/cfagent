@@ -1141,12 +1141,18 @@ const STEP5B_PORT_SITES: Array<[string, string, number]> = [
   // populate-market-graph); the count is unchanged, only the file,
   // so the family total is unchanged.
   // (Order is the scanner's sort: "src/server/routes/auth.ts" sorts
-  // before "src/server/routes/otelArchive.ts" sorts before
+  // before "src/server/routes/nav.ts" sorts before
+  // "src/server/routes/otelArchive.ts" sorts before
   // "src/server/routes/platform.ts" sorts before
   // "src/server/routes/privacy.ts".)
   ["src/server/routes/auth.ts", "listSessionFamilyEntries", 24],
   ["src/server/routes/auth.ts", "wiredAccessRequestStore", 1],
   ["src/server/routes/auth.ts", "wiredMembershipStore", 4],
+  // #6151 S4 (2026-11-23): the nav-admin config read composes
+  // listSessionFamilyEntries once (membership listing for the
+  // allow-list target picker, same factory as auth.ts's
+  // membership-listing site — no new funnel, no bypass).
+  ["src/server/routes/nav.ts", "listSessionFamilyEntries", 1],
   // #5169 (2026-11-17): the OTel archive routes compose
   // wiredMembershipStore once, following the IAAA admin pattern.
   ["src/server/routes/otelArchive.ts", "wiredMembershipStore", 1],

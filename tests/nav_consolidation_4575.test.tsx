@@ -182,9 +182,9 @@ describe("Audit & Vault menu (#4575)", () => {
 // 4. Platform Admin dedup
 // --------------------------------------------------------------------------
 describe("Platform Admin dedup (#4575)", () => {
-  it("holds 7 sections: no free-runs, no products, no moved hub sections (#4585)", () => {
+  it("holds 8 sections: no free-runs, no products, no moved hub sections (#4585), plus nav-config (#6151 S4)", () => {
     const configIds = DEFAULT_PLATFORM_ADMIN_CONFIG.sections[0].items.map((i) => i.id);
-    expect(configIds).toHaveLength(7);
+    expect(configIds).toHaveLength(8);
     expect(configIds).not.toContain("free-runs");
     expect(configIds).not.toContain("products");
     // Issue #4585 moved six sections into the DataHub and SecurityHub hubs.
@@ -192,7 +192,7 @@ describe("Platform Admin dedup (#4575)", () => {
       expect(configIds).not.toContain(id);
     }
     const tabIds = PLATFORM_ADMIN_TABS.map((t) => t.id);
-    expect(tabIds).toHaveLength(7);
+    expect(tabIds).toHaveLength(8);
     expect(tabIds).not.toContain("free-runs");
     expect(tabIds).not.toContain("products");
   });

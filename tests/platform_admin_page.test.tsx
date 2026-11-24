@@ -79,8 +79,8 @@ describe("PlatformAdminPage component", () => {
     expect(tablist).toBeTruthy();
 
     const tabs = container.querySelectorAll('[role="tab"]');
-    expect(tabs).toHaveLength(7);
-    expect(PLATFORM_ADMIN_TABS).toHaveLength(7);
+    expect(tabs).toHaveLength(8);
+    expect(PLATFORM_ADMIN_TABS).toHaveLength(8);
 
     // Initial default tab is ads
     expect(tabs[0].getAttribute("aria-selected")).toBe("true");

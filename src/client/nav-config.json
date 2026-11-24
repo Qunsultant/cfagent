@@ -1952,7 +1952,8 @@
         "tenants",
         "channels",
         "accounts",
-        "engine-tuning"
+        "engine-tuning",
+        "nav-config"
       ]
     },
     {
@@ -2343,6 +2344,12 @@
           "label": "Engine Tuning",
           "description": "Configure trade engine, parameters, and safety controls",
           "icon": "Settings"
+        },
+        {
+          "id": "nav-config",
+          "label": "Nav & Menu Access",
+          "description": "Menu allowances, per-user allow-lists, and persona defaults",
+          "icon": "Approvals"
         }
       ]
     }

@@ -102,11 +102,12 @@ describe("recreate + tenant isolation (#4282 P4)", () => {
   // #6151 S3 adds migration 0085 (saved nav presets: 2 tables + 2 indexes): 491 → 495.
   // Issue #6100 adds 5 mas_events envelope ALTERs + 4 indexes:
   // 495 → 504. Issue #6006 adds 9 ALTERs (migration 0086): 504 → 513.
-    expect(first.summary.totalSteps).toBe(513);
-    expect(first.summary.executed).toBe(513);
+  // #6151 S4 adds migration 0087 (nav admin config: 3 tables + 1 index): 513 → 517.
+    expect(first.summary.totalSteps).toBe(517);
+    expect(first.summary.executed).toBe(517);
     expect(first.summary.failed).toBe(0);
     expect(first.summary.skipped).toBe(0);
-    expect(first.executed).toHaveLength(513);
+    expect(first.executed).toHaveLength(517);
     expect(first.failed).toEqual([]);
     expect(first.skipped).toEqual([]);
     // Uncreatable layers are deployment facts, not changes: they are
@@ -236,7 +237,7 @@ describe("recreate + tenant isolation (#4282 P4)", () => {
     });
     // The report is truthful: everything before the failing step
     // executed, the failing step is named, everything after it is
-    // skipped — and the three counts sum to the 513 resolved steps.
+    // skipped — and the three counts sum to the 517 resolved steps.
     expect(partial.summary.failed).toBe(1);
     expect(partial.failed).toHaveLength(1);
     expect(partial.failed[0].code).toBe(UNIQUE_INDEX_CODE);
@@ -244,8 +245,8 @@ describe("recreate + tenant isolation (#4282 P4)", () => {
       partial.summary.executed +
         partial.summary.failed +
         partial.summary.skipped,
-    ).toBe(513);
-    expect(partial.summary.totalSteps).toBe(513);
+    ).toBe(517);
+    expect(partial.summary.totalSteps).toBe(517);
     // The degradation is VISIBLE, never silent: the post-run equality
     // check fails. The missing indexes are exactly the failed step's
     // index plus the indexes of the skipped steps (the run stopped in

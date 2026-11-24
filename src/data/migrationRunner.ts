@@ -1463,6 +1463,27 @@ export const MIGRATION_0085_NAV_PRESETS: DataMigration = {
   name: "0085_nav_presets",
   sql: d1MigrationSql(85),
 };
+/**
+ * Migration 0087 — nav admin config (#6151 S4).
+ * `agent_nav_tenant_allowances` (one row per tenant: the nav ids
+ * the tenant gets) + `agent_nav_user_allowlists` (one row per
+ * user: the nav ids that user may see + saved-preset availability;
+ * tenant_id index for the per-tenant list) +
+ * `agent_nav_persona_defaults` (one row per persona: the built-in
+ * preset key override). The nav endpoint reads all three as
+ * narrowing on top of the subscription gating; an absent row
+ * means "no narrowing" for that layer.
+ *
+ * Numbering: 0085 is S3's migration (saved nav presets),
+ * merged 2026-11-23 as bf2058a — 0087 follows it in
+ * ALL_MIGRATIONS below (the registry test requires strictly
+ * increasing versions in list order).
+ */
+export const MIGRATION_0087_NAV_ADMIN_CONFIG: DataMigration = {
+  version: 87,
+  name: "0087_nav_admin_config",
+  sql: d1MigrationSql(87),
+};
 export const MIGRATION_0082_REFERRAL_TRIAL_EXTENSION: DataMigration = {
   version: 82,
   name: "0082_referral_trial_extension",
@@ -1736,6 +1757,7 @@ export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANC
   MIGRATION_0084_JOB_RUN_RECORDS_BINDING,
   MIGRATION_0085_NAV_PRESETS,
   MIGRATION_0086_JOB_RUN_RECORDS_OUTCOME_FACTS,
+  MIGRATION_0087_NAV_ADMIN_CONFIG,
 ];
 
 function splitStatements(sqlText: string): string[] {

@@ -344,10 +344,10 @@ describe("LeftNavBar UX & Reorganization (issue #2685)", () => {
     await renderNavBar();
     expect(container.textContent).toContain("Goal Screen");
   });
-  it("renders distinct icons for all seven Platform Admin sub-menu items", async () => {
+  it("renders distinct icons for all eight Platform Admin sub-menu items", async () => {
     const adminItem = findNavItemConfig(DEFAULT_LEFT_NAV_CONFIG, "platform-admin");
     expect(adminItem).toBeDefined();
-    expect(adminItem?.subItems).toHaveLength(7);
+    expect(adminItem?.subItems).toHaveLength(8);
     for (const sub of adminItem!.subItems!) {
       expect(sub.icon, `Sub-item ${sub.id} missing icon`).toBeDefined();
       expect(sub.icon!.length).toBeGreaterThan(0);
@@ -355,8 +355,9 @@ describe("LeftNavBar UX & Reorganization (issue #2685)", () => {
     const icons = adminItem!.subItems!.map((s) => s.icon);
     // Issue #4561 removed Tasks, ScheduledGoals, and Jobs (all unique);
     // issue #4585 moved Users out (the Agents duplicate with Tenants
-    // leaves with it), so all seven remaining icons are distinct.
-    expect(new Set(icons).size).toBe(7);
+    // leaves with it); #6151 S4 adds Nav & Menu Access (Approvals),
+    // so all eight remaining icons are distinct.
+    expect(new Set(icons).size).toBe(8);
 
     await renderNavBar();
     const chevronBtn = container.querySelector('[aria-controls="submenu-platform-admin"]') as HTMLButtonElement;
@@ -368,7 +369,7 @@ describe("LeftNavBar UX & Reorganization (issue #2685)", () => {
     const submenu = container.querySelector('#submenu-platform-admin');
     expect(submenu).toBeTruthy();
     const svgs = submenu!.querySelectorAll('.submenu-item-bullet svg');
-    expect(svgs.length).toBe(7);
+    expect(svgs.length).toBe(8);
   });
   it("renders Schedules under Platform with distinct Schedules icon and handles navigation", async () => {
     const platform = DEFAULT_LEFT_NAV_CONFIG.sections.find((s) => s.id === "section-platform");
