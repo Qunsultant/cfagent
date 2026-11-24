@@ -434,9 +434,14 @@ describe("4241 Schedules home renders the nightly research row (source pins)", (
     expect(panel).toContain('s.id === "nightly-research"');
   });
 
-  it("no new firing: the research run still rides the tick with its own daily guard", () => {
+  it("no new firing: the research run rides the stored schedule, not a tick rider (#6299)", () => {
     const riders = source("src/services/tickRiders.ts");
-    expect(riders).toContain('https://agent.internal/research/scheduled-tick');
+    // Issue #6299 — the rider is RETIRED. Before it, this pin asserted the
+    // tick DID dispatch the research route; now the absence is the guarantee:
+    // one scheduler (the stored schedule record), no second firing mechanism.
+    // The URL still appears in the retirement comment, so the guarantee is
+    // pinned on the CALL: no dispatch to the research route from this tick.
+    expect(riders).not.toContain('new Request("https://agent.internal/research/scheduled-tick"');
     // The slice adds no Worker cron and no SDK alarm for the research run.
     const guard = source("src/services/researchScheduleGuard.ts");
     // #6030 — one declaration: the cron is derived from the config hour,
