@@ -61,6 +61,7 @@ import {
 } from "../../observability/scheduledJobOutcomes";
 import { postSlackText, resourceSlackPost } from "../resourceGoals";
 import type { SlackDeliveryEnv } from "../social/delivery";
+import type { Env } from "../../types";
 import type { ScreenerAgent } from "../screener-agent";
 import type { ResearchAgent } from "../research-agent";
 import type { DatabaseORM, SqlStorage } from "../../orm";
@@ -663,6 +664,9 @@ export async function handleScreenerResearchRoutes(
           sql: resolveResearchSql(),
           d1: resolveResearchD1(),
           env: ctx.env as Record<string, string | undefined>,
+          // Issue #6035 (b) — the full env, so a deployment hosting the
+          // job-pipeline workflow executes the run durably, one step per stage.
+          durableEnv: ctx.env as unknown as Env,
           ...selection,
           researchDeps: {
             runFeedStage: async (input) => {
@@ -868,6 +872,9 @@ export async function handleScreenerResearchRoutes(
           sql: resolveResearchSql(),
           d1: resolveResearchD1(),
           env: ctx.env as Record<string, string | undefined>,
+          // Issue #6035 (b) — the full env, so a deployment hosting the
+          // job-pipeline workflow executes the run durably, one step per stage.
+          durableEnv: ctx.env as unknown as Env,
           researchDeps: {
             runFeedStage: async (input) => {
               const agent = ctx.getResearchAgent(input.userLogin);
