@@ -80,6 +80,7 @@ const BASELINE: Array<[string, string, number, Disposition]> = [
   ["src/agents/routes/etradeOptionsRuns.ts", "resolveTenantBroker", 4, "INTEGRATION"],
   ["src/agents/routes/mcpChatNlq.ts", "resolveTenantBroker", 1, "INTEGRATION"],
   ["src/agents/routes/meter.ts", "resolveEffectiveTier", 1, "INTEGRATION"],
+  ["src/agents/routes/opportunityHunt.ts", "resolveTenantBroker", 1, "INTEGRATION"], // #6406: the holdings read reuses the broker-reads composition verbatim (brokerReads.ts has the same call, INTEGRATION) — migration to resolvePlatformContext belongs to #6151 slices 2–3.
   ["src/agents/routes/premium.ts", "resolveEffectiveTier", 2, "INTEGRATION"],
   ["src/agents/routes/tradingIntegrations.ts", "resolveTenantBroker", 2, "INTEGRATION"],
   ["src/data/subscriptionPorts.ts", "resolveEffectiveTier", 2, "INTERNAL"],

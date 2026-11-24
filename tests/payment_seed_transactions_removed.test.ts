@@ -233,7 +233,7 @@ describe("seed transactions removed (#175)", () => {
       // the ids exist only as purge targets, never as seeds.
       expect(orchestrator).toContain(`transactions.delete("${id}")`);
     }
-    const samples = readFileSync("src/client/mcpEndpointsData.ts", "utf8");
+    const samples = readFileSync("src/client/mcpEndpointsData.deprecated.ts", "utf8");
     expect(samples).not.toContain(SEED_ID_STRIPE);
     expect(samples).not.toContain(SEED_ID_PAYPAL);
   });

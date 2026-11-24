@@ -569,6 +569,10 @@ const EXPECTED_ROUTES: string[] = [
   "ANY /api/iaaa/stale-identities/cleanup",
   "ANY /api/iaaa/membership-index/repair",
   "ANY /api/iaaa/memberships",
+  // #5160: IDP-profile lookup + profile + config routes.
+  "ANY /api/iaaa/identity/lookup",
+  "ANY /api/iaaa/identity/profile",
+  "ANY /api/iaaa/identity-profile/config",
   "ANY /api/iaaa/deactivate",
   "ANY /api/iaaa/offboard",
   "ANY /api/security/pdp",
@@ -576,6 +580,7 @@ const EXPECTED_ROUTES: string[] = [
   "ANY /api/security/pip",
   "ANY /api/api-keys",
   "ANY PREFIX /api/api-keys/",
+  "ANY /api/mcp/catalog",
   "ANY /mcp",
   "ANY /api/mcp",
   "ANY /mcp/scanner",

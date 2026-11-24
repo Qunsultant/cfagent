@@ -77,6 +77,11 @@ import { isMailSuppressed, resolveOffboardSessions, runOffboard, setMailSuppress
 import { createSubscriptionAdapter } from "../../data/createSubscriptionPorts";
 import { hasUnexpiredSubscription } from "../../data/subscriptionPorts";
 import { createLifecycleAdapter } from "../../data/createLifecyclePorts";
+import { createProfileAdapter } from "../../data/createProfilePorts";
+import { scopeLookupRequest } from "../../security/idpProfileAccess";
+import { validateIdpProfileConfig } from "../../security/idpProfileConfig";
+import type { IdpProfileConfigShape } from "../../config/idpProfile";
+import { toUserProfileView } from "../../services/userProfile";
 import { listApiKeys, mintApiKey, revokeApiKey } from "../../security/apiKeys";
 import { sendProvisioningWelcome } from "../../services/provisioningWelcome";
 
@@ -1035,6 +1040,11 @@ export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL,
       // inside, same block as stale-identities below).
       path === "/api/iaaa/membership-index/repair" ||
       path === "/api/iaaa/memberships" ||
+      // #5160 — IDP attribute identity lookup, admin profile read,
+      // and the Identity profile config surface (gates inside).
+      path === "/api/iaaa/identity/lookup" ||
+      path === "/api/iaaa/identity/profile" ||
+      path === "/api/iaaa/identity-profile/config" ||
       path === "/api/iaaa/deactivate" ||
       path === "/api/iaaa/offboard" ||
       path === "/api/security/pdp" ||
@@ -1272,6 +1282,170 @@ export async function handleAuthIaaaRoutes(request: Request, env: Env, url: URL,
               login: membershipLogins.get(m.internalUserId) ?? null,
             })),
           });
+        }
+        // #5160 — IDP attribute identity lookup: exact-match lookup
+        // by a stored IDP attribute (email, phone, any identifier)
+        // within the caller's admin scope. Platform-admin may search
+        // cross-tenant (tenantId param) or one tenant; tenant-admin
+        // is pinned to their own tenant (the param is ignored —
+        // the platformUsers.ts #2231 precedent). Returns ALL matches
+        // in scope, never a silent winner: more than one match sets
+        // ambiguous=true and the caller fails closed. Values are
+        // never logged; the response carries ids + tenant + source
+        // only (the lookup never returns the stored attribute
+        // values themselves).
+        if (path === "/api/iaaa/identity/lookup") {
+          if (request.method !== "GET") {
+            return Response.json({ error: "Method not allowed" }, { status: 405 });
+          }
+          const params = new URL(request.url).searchParams;
+          const attribute = params.get("attribute")?.trim() ?? "";
+          const value = params.get("value") ?? "";
+          if (!attribute || !value.trim()) {
+            return Response.json(
+              { error: "attribute and value query parameters are required." },
+              { status: 400 },
+            );
+          }
+          const callerRole = callerIsPlatformAdmin
+            ? "platform-admin"
+            : (await callerCanGrantTenantAdmin())
+              ? "tenant-admin"
+              : null;
+          const scope = scopeLookupRequest(
+            callerRole ? { role: callerRole, tenantId } : null,
+            params.get("tenantId")?.trim() || null,
+          );
+          if (!scope.ok) {
+            return Response.json(
+              { error: "Forbidden: identity lookup requires admin access." },
+              { status: 403 },
+            );
+          }
+          const profileStore = createProfileAdapter(env);
+          if (!profileStore) {
+            return Response.json({ error: "Profile store unavailable." }, { status: 503 });
+          }
+          const matches = await profileStore.lookupByAttribute(
+            scope.tenantId,
+            attribute,
+            value,
+          );
+          const ambiguous = matches.length > 1;
+          return Response.json({
+            ok: true,
+            code: ambiguous
+              ? "FAILURE_IDP_PROFILE_LOOKUP_AMBIGUOUS"
+              : "SUCCESS_IDP_PROFILE_LOOKUP",
+            matches,
+            ambiguous,
+          });
+        }
+        // #5160 — admin profile read: one identity's profile row
+        // for one tenant (platform-admin any tenant; tenant-admin
+        // own tenant only — the tenantId param is ignored for them,
+        // same scoping as the lookup above). The login resolves
+        // server-side via the alias record (null when no alias).
+        if (path === "/api/iaaa/identity/profile") {
+          if (request.method !== "GET") {
+            return Response.json({ error: "Method not allowed" }, { status: 405 });
+          }
+          const params = new URL(request.url).searchParams;
+          const internalUserId = params.get("internalUserId")?.trim() ?? "";
+          if (!internalUserId) {
+            return Response.json(
+              { error: "internalUserId query parameter is required." },
+              { status: 400 },
+            );
+          }
+          const callerRole = callerIsPlatformAdmin
+            ? "platform-admin"
+            : (await callerCanGrantTenantAdmin())
+              ? "tenant-admin"
+              : null;
+          const scope = scopeLookupRequest(
+            callerRole ? { role: callerRole, tenantId } : null,
+            params.get("tenantId")?.trim() || null,
+          );
+          if (!scope.ok) {
+            return Response.json(
+              { error: "Forbidden: reading a profile requires admin access." },
+              { status: 403 },
+            );
+          }
+          const profileStore = createProfileAdapter(env);
+          if (!profileStore) {
+            return Response.json({ error: "Profile store unavailable." }, { status: 503 });
+          }
+          const readTenantId = scope.tenantId ?? tenantId;
+          const profile = await profileStore.getProfile(internalUserId, readTenantId);
+          const logins = await resolveLogins(kv, [internalUserId]);
+          return Response.json({
+            ok: true,
+            profile: profile
+              ? {
+                  ...toUserProfileView(logins.get(internalUserId) ?? internalUserId, profile, readTenantId),
+                  internalUserId,
+                }
+              : null,
+          });
+        }
+        // #5160 — Identity profile config (platform-admin only):
+        // the attribute set + retention, managed through the IAAA
+        // Admin panel. Values live in the shared orchestrator
+        // instance's mas_settings; the worker reaches them through
+        // the orchestrator RPC (same precedent as
+        // seedGovernanceHalt). GET returns the effective config;
+        // POST validates structurally first (a bad value is a coded
+        // 400, never stored), then writes and audits the change
+        // (field names only — the exclusion list names attribute
+        // keys, never values).
+        if (path === "/api/iaaa/identity-profile/config") {
+          if (!callerIsPlatformAdmin) {
+            return Response.json(
+              { error: "Forbidden: identity profile config requires platform-admin access." },
+              { status: 403 },
+            );
+          }
+          const stub = actorGateway.stub<{
+            getIdpProfileConfig(): Promise<IdpProfileConfigShape>;
+            setIdpProfileConfig(value: IdpProfileConfigShape): Promise<IdpProfileConfigShape>;
+          }>(env.ORCHESTRATOR_AGENT, SHARED_ORCHESTRATOR_INSTANCE);
+          if (request.method === "GET") {
+            const config = await stub.getIdpProfileConfig();
+            return Response.json({ ok: true, config });
+          }
+          if (request.method !== "POST") {
+            return Response.json({ error: "Method not allowed" }, { status: 405 });
+          }
+          const body = (await request.json().catch(() => null)) as unknown;
+          const checked = validateIdpProfileConfig(body);
+          if (!checked.ok) {
+            return Response.json(
+              { error: `Invalid identity profile config: ${checked.reason}.`, code: "FAILURE_IDP_PROFILE_CONFIG_INVALID" },
+              { status: 400 },
+            );
+          }
+          const config = await stub.setIdpProfileConfig(checked.value);
+          try {
+            await recordAuditEvent(createWiredAuditStore(env), {
+              timestamp: nowMs,
+              type: "iaaa.idp_profile.config_updated",
+              actorPrincipalId: session.internalUserId as string,
+              actorType: "human",
+              initiatingPrincipalId: session.internalUserId as string,
+              tenantId,
+              correlationId: crypto.randomUUID(),
+              action: "iaaa.idp_profile.config_updated",
+              decision: "allow",
+              policyVersion: IAAA_AUDIT_POLICY_VERSION,
+              outcome: "succeeded",
+            });
+          } catch {
+            // The config write stands; a failed audit write is
+            // logged by the audit store, never a 500 here.
+          }
+          return Response.json({ ok: true, code: "SUCCESS_IDP_PROFILE_CONFIG_UPDATED", config });
         }
         // #2688 — dedicated admin-grant surface. Distinct from the
         // #1758 membership routes in three ways: (1) only

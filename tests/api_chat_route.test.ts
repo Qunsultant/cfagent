@@ -47,7 +47,7 @@ import { MockSqlStorage } from "./mock-sql";
 
 /**
  * Issue #312 — POST /api/chat was advertised in WorkflowsHub.tsx and
- * mcpEndpointsData.ts ("Multi-Agent Conversation Stream", sample body
+ * restEndpointsData.ts ("Multi-Agent Conversation Stream", sample body
  * { messages: [{ role: "user", content: "..." }] }) but no route existed.
  *
  * The route is a thin adapter over the single-owner agentic chat turn
@@ -114,7 +114,7 @@ describe("POST /api/chat (#312) — orchestrator route", () => {
     );
   }
 
-  it("accepts the advertised sample payload from mcpEndpointsData.ts", async () => {
+  it("accepts the advertised sample payload from restEndpointsData.ts", async () => {
     const { agent, turnCalls } = makeAgent();
     const res = await postChat(agent, {
       messages: [{ role: "user", content: "Hello AI Assistant" }],

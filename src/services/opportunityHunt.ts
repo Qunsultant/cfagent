@@ -22,6 +22,11 @@ import {
   SANDBOX_STRATEGY_IDS,
   type SandboxStrategyId,
 } from "./patternSignals";
+import {
+  deriveOpportunityHuntLevels,
+  OPPORTUNITY_HUNT_CHART_BARS,
+  type OpportunityHuntPriceLevels,
+} from "../config/opportunityHuntLevels";
 
 /** The catalog operation this module implements (issue #3652). */
 export const OPPORTUNITY_HUNT_OPERATION = "search.opportunity_hunt";
@@ -29,9 +34,35 @@ export const OPPORTUNITY_HUNT_OPERATION = "search.opportunity_hunt";
 /** Minimum closes before a pattern can be evaluated (same floor as the copilot plan step). */
 export const OPPORTUNITY_HUNT_MIN_BARS = 5;
 
+/** Which side of the trade the signal is on (issue 6406). */
+export type OpportunityHuntDirection = "entry" | "exit";
+
 export interface OpportunityHuntSetup {
   symbol: string;
   strategy: SandboxStrategyId;
+  /** Entry for a fresh signal; exit for a held position the evaluator says to close. */
+  direction: OpportunityHuntDirection;
+  /** Latest close — the execution/reference price for the recommendation. */
+  lastClose: number;
+  /** The evaluator's own reason string (e.g. "(Fast SMA 143.46 > Slow 136.24)"). */
+  detail: string;
+  /** Held position's cost basis — exits only. */
+  entryPrice?: number;
+  /** Entry recommendation's price range — entries only. */
+  levels?: OpportunityHuntPriceLevels;
+}
+
+/**
+ * Whether the hunt knew the tenant's holdings (issue 6406). Exits can only
+ * fire when holdings are known; when they are not, the reason rides along
+ * so the panel states it instead of silently showing entries only.
+ */
+export interface OpportunityHuntHoldingsStatus {
+  available: boolean;
+  /** The broker that answered the holdings read, when one did. */
+  broker?: string;
+  /** Coded reason the holdings were unavailable, when they were. */
+  reason?: string;
 }
 
 export interface OpportunityHuntResult {
@@ -43,6 +74,12 @@ export interface OpportunityHuntResult {
   /** One line for the run ledger's descriptor cell. */
   summary: string;
   asOf: string;
+  holdingsStatus: OpportunityHuntHoldingsStatus;
+  /**
+   * Trailing closes per symbol with setups, oldest → newest, capped at
+   * OPPORTUNITY_HUNT_CHART_BARS — the panel's price chart, not a new store.
+   */
+  seriesBySymbol: Record<string, readonly number[]>;
 }
 
 export interface OpportunityHuntInput {
@@ -51,11 +88,27 @@ export interface OpportunityHuntInput {
   strategies?: readonly SandboxStrategyId[];
   minBars?: number;
   now?: () => Date;
+  /**
+   * Held positions, symbol → entry (cost-basis) price. Absent = flat:
+   * the hunt evaluates entries only, exactly as before. Supplied by the
+   * caller from the tenant's broker-neutral positions read.
+   */
+  holdings?: ReadonlyMap<string, number>;
+  /** Why holdings were unavailable, when the caller knows (else a default). */
+  holdingsStatus?: OpportunityHuntHoldingsStatus;
 }
 
 /** Summarise a hunt for the ledger: counts first, then the first few symbols. */
 function huntSummary(result: Omit<OpportunityHuntResult, "summary">): string {
+  const entries = result.setups.filter((s) => s.direction === "entry").length;
+  const exits = result.setups.length - entries;
   const head = `Opportunity hunt: ${result.setups.length} setup(s) across ${result.scanned} symbol(s)`;
+  // Issue 6406 — the entry/exit split rides after the established prefix,
+  // so the pinned "N setup(s) across M symbol(s)" shape is unchanged.
+  const split =
+    result.setups.length > 0
+      ? `, ${entries} ${entries === 1 ? "entry" : "entries"}, ${exits} ${exits === 1 ? "exit" : "exits"}`
+      : "";
   const tail = result.skipped > 0 ? `, ${result.skipped} skipped (short history)` : "";
   const names =
     result.setups.length > 0
@@ -64,7 +117,7 @@ function huntSummary(result: Omit<OpportunityHuntResult, "summary">): string {
           .map((s) => `${s.symbol}:${s.strategy}`)
           .join(", ")}${result.setups.length > 5 ? ", …" : ""}`
       : " — none";
-  return `${head}${tail}${names}`;
+  return `${head}${split}${tail}${names}`;
 }
 
 /** Pure hunt over supplied closes. The caller owns the bar source. */
@@ -72,6 +125,7 @@ export function runOpportunityHunt(input: OpportunityHuntInput): OpportunityHunt
   const strategies = input.strategies ?? SANDBOX_STRATEGY_IDS;
   const minBars = input.minBars ?? OPPORTUNITY_HUNT_MIN_BARS;
   const setups: OpportunityHuntSetup[] = [];
+  const seriesBySymbol: Record<string, readonly number[]> = {};
   let scanned = 0;
   let skipped = 0;
 
@@ -81,14 +135,42 @@ export function runOpportunityHunt(input: OpportunityHuntInput): OpportunityHunt
       continue;
     }
     scanned += 1;
+    // Issue 6406 — a held symbol evaluates with its cost basis, so the
+    // evaluator's exit rules can fire; a symbol with no holding evaluates
+    // flat, exactly as before.
+    const entryPrice = input.holdings?.get(symbol);
+    const holding = entryPrice !== undefined;
+    const lastClose = closes[closes.length - 1];
+    let hasSetup = false;
     for (const strategy of strategies) {
       const signal = evaluateLatestPatternSignal(strategy, closes as readonly number[], {
-        holding: false,
-        entryPrice: 0,
+        holding,
+        entryPrice: entryPrice ?? 0,
       });
       if (signal.action === "enter_long") {
-        setups.push({ symbol, strategy });
+        hasSetup = true;
+        setups.push({
+          symbol,
+          strategy,
+          direction: "entry",
+          lastClose,
+          detail: signal.detail,
+          levels: deriveOpportunityHuntLevels(strategy, lastClose),
+        });
+      } else if (signal.action === "exit_long") {
+        hasSetup = true;
+        setups.push({
+          symbol,
+          strategy,
+          direction: "exit",
+          lastClose,
+          detail: signal.detail,
+          entryPrice,
+        });
       }
+    }
+    if (hasSetup) {
+      seriesBySymbol[symbol] = closes.slice(-OPPORTUNITY_HUNT_CHART_BARS);
     }
   }
 
@@ -102,6 +184,11 @@ export function runOpportunityHunt(input: OpportunityHuntInput): OpportunityHunt
     skipped,
     setups,
     asOf: (input.now ?? (() => new Date()))().toISOString(),
+    holdingsStatus: input.holdingsStatus ?? {
+      available: false,
+      reason: "holdings_not_loaded",
+    },
+    seriesBySymbol,
   };
   return { ...partial, summary: huntSummary(partial) };
 }
@@ -114,6 +201,9 @@ export async function executeOpportunityHunt(input: {
   loadCloses: () => Promise<ReadonlyMap<string, readonly number[]>>;
   strategies?: readonly SandboxStrategyId[];
   now?: () => Date;
+  /** Held positions, symbol → entry price (issue 6406). */
+  holdings?: ReadonlyMap<string, number>;
+  holdingsStatus?: OpportunityHuntHoldingsStatus;
 }): Promise<OpportunityHuntResult> {
   let closes: ReadonlyMap<string, readonly number[]>;
   try {
@@ -134,5 +224,7 @@ export async function executeOpportunityHunt(input: {
     closesBySymbol: closes,
     ...(input.strategies ? { strategies: input.strategies } : {}),
     ...(input.now ? { now: input.now } : {}),
+    ...(input.holdings ? { holdings: input.holdings } : {}),
+    ...(input.holdingsStatus ? { holdingsStatus: input.holdingsStatus } : {}),
   });
 }

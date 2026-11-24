@@ -1463,6 +1463,47 @@ export const MIGRATION_0085_NAV_PRESETS: DataMigration = {
   name: "0085_nav_presets",
   sql: d1MigrationSql(85),
 };
+/**
+ * Migration 0087 — nav admin config (#6151 S4).
+ * `agent_nav_tenant_allowances` (one row per tenant: the nav ids
+ * the tenant gets) + `agent_nav_user_allowlists` (one row per
+ * user: the nav ids that user may see + saved-preset availability;
+ * tenant_id index for the per-tenant list) +
+ * `agent_nav_persona_defaults` (one row per persona: the built-in
+ * preset key override). The nav endpoint reads all three as
+ * narrowing on top of the subscription gating; an absent row
+ * means "no narrowing" for that layer.
+ *
+ * Numbering: 0085 is S3's migration (saved nav presets),
+ * merged 2026-11-23 as bf2058a — 0087 follows it in
+ * ALL_MIGRATIONS below (the registry test requires strictly
+ * increasing versions in list order).
+ */
+export const MIGRATION_0087_NAV_ADMIN_CONFIG: DataMigration = {
+  version: 87,
+  name: "0087_nav_admin_config",
+  sql: d1MigrationSql(87),
+};
+/**
+ * Migration 0088 — IDP attributes as a durable multi-tenant
+ * profile (#5160). Renumbered 0086 -> 0087 on rebase (main took
+ * 0086 for #6006's outcome facts), then 0087 -> 0088 on rebase
+ * (main took 0087 for #6151's nav admin config). Rebuilds agent_user_profiles to the
+ * (internal_user_id, tenant_id) key (the 0058 rebuild
+ * precedent): the old login key cannot hold one row per tenant
+ * for the same user. New columns: internal_user_id, tenant_id,
+ * idp_issuer, idp_attributes_json (the full sanitized IDP
+ * userinfo doc), provenance_json (per-field source), and
+ * idp_updated_at_ms. Plus agent_identity_attribute_index, the
+ * exact-match lookup index (tenant, attribute, normalized
+ * value, identity). Legacy rows carry NULL keys and are re-keyed
+ * in place by the sign-in refresh.
+ */
+export const MIGRATION_0088_IDP_ATTRIBUTES_PROFILE: DataMigration = {
+  version: 88,
+  name: "0088_idp_attributes_profile",
+  sql: d1MigrationSql(88),
+};
 export const MIGRATION_0082_REFERRAL_TRIAL_EXTENSION: DataMigration = {
   version: 82,
   name: "0082_referral_trial_extension",
@@ -1736,6 +1777,8 @@ export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANC
   MIGRATION_0084_JOB_RUN_RECORDS_BINDING,
   MIGRATION_0085_NAV_PRESETS,
   MIGRATION_0086_JOB_RUN_RECORDS_OUTCOME_FACTS,
+  MIGRATION_0087_NAV_ADMIN_CONFIG,
+  MIGRATION_0088_IDP_ATTRIBUTES_PROFILE,
 ];
 
 function splitStatements(sqlText: string): string[] {

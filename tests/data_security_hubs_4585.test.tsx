@@ -8,7 +8,7 @@
  * iaaa-admin, users, admin-access, profile, pdp — the pdp view added
  * by #4651 — pep, added by #4653 — pip, added by #4655 — and pap,
  * added by #4658). Platform
- * Admin keeps the remaining seven sections. Old
+ * Admin keeps the remaining eight sections (#6151 S4 adds nav-config). Old
  * addresses redirect; nothing is deleted
  * (Policy Gate (i)); the panels keep their single live mount, now in the
  * hub. BYOK cards ride with data-providers; ProfileSection (mounted only
@@ -22,7 +22,7 @@
  *   address, the surface lists the values, and the home mounts a TabPanel
  *   for it carrying the panel.
  * - 4585-P04 `?tab=platform-admin&view=<moved>` redirects to the new hub;
- *   Platform Admin renders only the seven remaining sections.
+ *   Platform Admin renders only the eight remaining sections.
  * - 4585-P05 each moved panel has one LIVE mount — the hub is the one home
  *   (PlatformAdminPage no longer mounts any of the six).
  * - 4585-P06 the homes render their tabs and mount the panels (DataHub:
@@ -113,6 +113,8 @@ const REMAINING_PLATFORM_ADMIN = [
   "channels",
   "accounts",
   "engine-tuning",
+  // #6151 S4 adds Nav & Menu Access last.
+  "nav-config",
 ] as const;
 
 describe("4585-P01 the hubs resolve exactly their views (#4585)", () => {
@@ -251,7 +253,7 @@ describe("4585-P04 old Platform Admin addresses redirect (#4585)", () => {
     expect(legacyPlatformAdminHubRedirect("?tab=data-hub&view=data-providers")).toBeNull();
   });
 
-  it("Platform Admin keeps exactly the seven remaining sections", () => {
+  it("Platform Admin keeps exactly the eight remaining sections", () => {
     expect(PLATFORM_ADMIN_TABS.map((t) => t.id)).toEqual([...REMAINING_PLATFORM_ADMIN]);
     const sections = (
       navConfigData.platformAdminSections as {

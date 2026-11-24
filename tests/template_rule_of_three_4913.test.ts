@@ -437,7 +437,10 @@ describe("rule of three: headers (#4913)", () => {
     expect(h5 + h6, "hand-rolled <h5>/<h6> sites remain (migrate to SmallHeader)").toBe(0);
     // #5975 UX slice (#6289): the OODA settings card's stage-mode section
     // heading is a SmallHeader, so the primitive count tracks the one new site.
-    expect(countTag(pageTsx(), "SmallHeader")).toBe(47);
+    // Issue 6406: the hunt panel's entry/exit recommendation headings are
+    // SmallHeaders too, so the count tracks those two new sites.
+    // #6151 S4 adds the Nav & Menu Access section heading too, so the primitive count now tracks one more site.
+    expect(countTag(pageTsx(), "SmallHeader")).toBe(50);
     // Exactly one site keeps h6 semantics (OmnichannelPanel: the email subject).
     let h6Level = 0;
     for (const f of pageTsx()) {

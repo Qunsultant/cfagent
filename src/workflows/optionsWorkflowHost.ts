@@ -200,7 +200,8 @@ const ATTACHABLE_WORKFLOW_RUN_STATES = new Set(["queued", "running"]);
  * other read failure propagates fail-closed, never silently
  * dispatching over an unreadable record.
  */
-async function attachToInFlightRun(
+/** Issue #6035 (b) — exported so the research start seam reuses the one attach rule. */
+export async function attachToInFlightRun(
   control: JobPipelineControl,
   jobId: string,
 ): Promise<{ instanceId: string; jobId: string } | null> {
@@ -228,7 +229,8 @@ async function attachToInFlightRun(
 }
 
 /** The D1-backed run recorder for the workflow residency — the same adapter the start seam builds. */
-function jobRunRecorderFromD1(db: D1Database): JobRunRecorder {
+/** Issue #6035 (b) — exported so the research start seam reuses the one recorder adapter. */
+export function jobRunRecorderFromD1(db: D1Database): JobRunRecorder {
   const runs = new D1JobRunRecordStore(createD1JobRunRecordDb(db));
   return {
     recordRun: (record: Parameters<JobRunRecorder["recordRun"]>[0]) =>

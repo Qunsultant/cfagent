@@ -2003,6 +2003,70 @@ export const D1_CATALOGUE_ENTRIES: CatalogueEntry[] = [
     form: "literal",
   },
   {
+    // #6151 S4 — tenant nav allowance (migration 0087). One row
+    // per tenant: the nav ids the tenant gets at all (JSON array
+    // over the availability ids). Absent means the tenant gets
+    // everything the platform enables.
+    code: "schema.d1.agent_nav_tenant_allowances.create_table",
+    plane: "d1",
+    table: "agent_nav_tenant_allowances",
+    statement: `CREATE TABLE IF NOT EXISTS agent_nav_tenant_allowances (
+      tenant_id TEXT PRIMARY KEY,
+      allowed_ids_json TEXT NOT NULL,
+      updated_at_ms INTEGER NOT NULL,
+      updated_by TEXT NOT NULL
+    )`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    // #6151 S4 — per-user nav allow-list (migration 0087). One
+    // row per user: the nav ids that user may see (JSON array)
+    // plus whether saved presets are available to them. The row
+    // never widens beyond the tenant allowance (the store refuses
+    // an exceeding write).
+    code: "schema.d1.agent_nav_user_allowlists.create_table",
+    plane: "d1",
+    table: "agent_nav_user_allowlists",
+    statement: `CREATE TABLE IF NOT EXISTS agent_nav_user_allowlists (
+      user_id TEXT PRIMARY KEY,
+      tenant_id TEXT,
+      allowed_ids_json TEXT NOT NULL,
+      saved_presets_allowed INTEGER NOT NULL,
+      updated_at_ms INTEGER NOT NULL,
+      updated_by TEXT NOT NULL
+    )`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    code: "schema.d1.agent_nav_user_allowlists.create_index_agent_nav_user_allowlists_tenant_idx",
+    plane: "d1",
+    table: "agent_nav_user_allowlists",
+    index: "agent_nav_user_allowlists_tenant_idx",
+    statement: `CREATE INDEX IF NOT EXISTS agent_nav_user_allowlists_tenant_idx
+      ON agent_nav_user_allowlists (tenant_id)`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    // #6151 S4 — persona-default override (migration 0087). One
+    // row per persona: the built-in preset key that persona's
+    // fresh users start from. Absent means the shipped config
+    // (nav-config.json `personaDefaults`).
+    code: "schema.d1.agent_nav_persona_defaults.create_table",
+    plane: "d1",
+    table: "agent_nav_persona_defaults",
+    statement: `CREATE TABLE IF NOT EXISTS agent_nav_persona_defaults (
+      persona TEXT PRIMARY KEY,
+      preset_key TEXT NOT NULL,
+      updated_at_ms INTEGER NOT NULL,
+      updated_by TEXT NOT NULL
+    )`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
     code: "schema.d1.job_run_records.create_table",
     plane: "d1",
     table: "job_run_records",
@@ -2137,6 +2201,94 @@ export const D1_CATALOGUE_ENTRIES: CatalogueEntry[] = [
   idempotency_key TEXT PRIMARY KEY,
   user_login TEXT NOT NULL,
   created_at_ms INTEGER NOT NULL
+)`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    // #5160 — migration 0088 rebuilds agent_user_profiles (the
+    // 0058 price-catalogue rebuild precedent): the old key was
+    // the login alone, which cannot hold one row per tenant for
+    // the same user. The new key is (internal_user_id,
+    // tenant_id); user_login stays as a column (backfill + compat
+    // reads). Legacy rows carry NULL keys and are re-keyed by
+    // the sign-in refresh (provenance 'user' is stamped in code,
+    // not SQL — the columns hold user-saved values by definition).
+    code: "schema.d1.agent_user_profiles.alter_table_rename_to_agent_user_profiles_legacy",
+    plane: "d1",
+    table: "agent_user_profiles",
+    statement: `ALTER TABLE agent_user_profiles RENAME TO agent_user_profiles_legacy`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    code: "schema.d1.agent_user_profiles.create_table_m0088",
+    plane: "d1",
+    table: "agent_user_profiles",
+    statement: `CREATE TABLE agent_user_profiles (
+  user_login TEXT NOT NULL,
+  display_name TEXT,
+  phone TEXT,
+  email TEXT,
+  updated_at_ms INTEGER NOT NULL,
+  internal_user_id TEXT,
+  tenant_id TEXT,
+  idp_issuer TEXT,
+  idp_attributes_json TEXT,
+  provenance_json TEXT,
+  idp_updated_at_ms INTEGER,
+  PRIMARY KEY (internal_user_id, tenant_id)
+)`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    code: "seed.d1.agent_user_profiles.insert_from_legacy",
+    plane: "d1",
+    table: "agent_user_profiles",
+    statement: `INSERT INTO agent_user_profiles (user_login, display_name, phone, email, updated_at_ms, internal_user_id, tenant_id, idp_issuer, idp_attributes_json, provenance_json, idp_updated_at_ms)
+  SELECT user_login, display_name, phone, email, updated_at_ms, NULL, NULL, NULL, NULL, NULL, NULL
+  FROM agent_user_profiles_legacy`,
+    kind: "seed",
+    form: "literal",
+  },
+  {
+    code: "schema.d1.agent_user_profiles_legacy.drop_table",
+    plane: "d1",
+    table: "agent_user_profiles_legacy",
+    statement: `DROP TABLE agent_user_profiles_legacy`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    code: "schema.d1.agent_user_profiles.create_unique_index_agent_user_profiles_login_tenant_idx",
+    plane: "d1",
+    table: "agent_user_profiles",
+    index: "agent_user_profiles_login_tenant_idx",
+    statement: `CREATE UNIQUE INDEX IF NOT EXISTS agent_user_profiles_login_tenant_idx
+      ON agent_user_profiles (user_login, tenant_id)`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    // #5160 — the lookup index: one row per (tenant, attribute,
+    // normalized value, identity) → the match source (idp =
+    // provider-verified attribute, user = user-typed contact
+    // field). The identity is part of the key so two identities
+    // in one tenant can claim the same value — the lookup then
+    // returns BOTH and the caller fails closed ambiguous.
+    // Exact-match lookup only.
+    code: "schema.d1.agent_identity_attribute_index.create_table",
+    plane: "d1",
+    table: "agent_identity_attribute_index",
+    statement: `CREATE TABLE IF NOT EXISTS agent_identity_attribute_index (
+  tenant_id TEXT NOT NULL,
+  attribute_name TEXT NOT NULL,
+  attribute_value_normalized TEXT NOT NULL,
+  internal_user_id TEXT NOT NULL,
+  source TEXT NOT NULL,
+  updated_at_ms INTEGER NOT NULL,
+  PRIMARY KEY (tenant_id, attribute_name, attribute_value_normalized, internal_user_id)
 )`,
     kind: "schema",
     form: "literal",
@@ -3915,6 +4067,22 @@ export const D1_MIGRATION_CODES: Record<number, readonly string[]> = {
     "schema.d1.agent_nav_presets.create_index_agent_nav_presets_user_name_idx",
     "schema.d1.agent_nav_presets.create_index_agent_nav_presets_user_idx",
     "schema.d1.agent_nav_preset_state.create_table",
+  ],
+  87: [
+    "schema.d1.agent_nav_tenant_allowances.create_table",
+    "schema.d1.agent_nav_user_allowlists.create_table",
+    "schema.d1.agent_nav_user_allowlists.create_index_agent_nav_user_allowlists_tenant_idx",
+    "schema.d1.agent_nav_persona_defaults.create_table",
+  ],
+  // #5160 — rebuild agent_user_profiles to the (internal_user_id,
+  // tenant_id) key + the lookup-index table.
+  88: [
+    "schema.d1.agent_user_profiles.alter_table_rename_to_agent_user_profiles_legacy",
+    "schema.d1.agent_user_profiles.create_table_m0088",
+    "seed.d1.agent_user_profiles.insert_from_legacy",
+    "schema.d1.agent_user_profiles_legacy.drop_table",
+    "schema.d1.agent_user_profiles.create_unique_index_agent_user_profiles_login_tenant_idx",
+    "schema.d1.agent_identity_attribute_index.create_table",
   ],
   82: [
     "schema.d1.agent_referral_rules.alter_table_add_column_extension_days",

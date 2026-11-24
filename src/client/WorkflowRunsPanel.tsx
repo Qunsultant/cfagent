@@ -33,7 +33,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { controlJobStage } from "./jobsApi";
 import { withCsrfInit } from "./apiFetch";
-import { Badge, Button, Card, CardHeader, SmallHeader, EmptyState, Grid, Modal, Notice, PageSection, PageShell, PillGroup, Stack, Table, type TableColumn, TextInput } from "./components/ui";
+import { Badge, Button, Card, CardHeader, Disclosure, SmallHeader, EmptyState, Grid, Modal, Notice, PageSection, PageShell, PillGroup, Stack, Table, type TableColumn, TextInput } from "./components/ui";
 import type {
   ShardStrategyEvidence,
   WorkflowRun,
@@ -1385,6 +1385,49 @@ export function RunDetail({
         ),
       },
       {
+        // Issue #6377 — the checkpoint entry the stage was projected from:
+        // collapsed per stage, expandable to the units the engine recorded
+        // (status, attempts, result reference, resume position). A stage
+        // with no entry renders none — a checkpoint is never invented.
+        key: "checkpoint",
+        header: "Checkpoint",
+        render: (stage: WorkflowRunStage) =>
+          stage.checkpoint ? (
+            <Disclosure
+              summary={
+                <span className="ui-meta-sm">
+                  {`${stage.checkpoint.units.length} unit${stage.checkpoint.units.length === 1 ? "" : "s"}`}
+                  {stage.checkpoint.runId ? ` · ${stage.checkpoint.runId}` : " · run id not recorded"}
+                  {stage.checkpoint.kind ? ` · ${stage.checkpoint.kind}` : ""}
+                </span>
+              }
+            >
+              <div className="ui-stack ui-mt-1">
+                {stage.checkpoint.units.map((unit) => (
+                  <span key={unit.unitId} className="ui-meta-sm">
+                    {[
+                      unit.unitId,
+                      unit.status,
+                      `attempt ${unit.attempt}`,
+                      unit.startedAt ? `started ${unit.startedAt}` : null,
+                      unit.endedAt ? `ended ${unit.endedAt}` : null,
+                      unit.resultRef ? `result ${unit.resultRef}` : null,
+                      unit.progress
+                        ? `resume at step ${unit.progress.stepIndex + 1}, item ${unit.progress.itemIndex + 1}`
+                        : null,
+                      unit.error ? unit.error : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </span>
+                ))}
+              </div>
+            </Disclosure>
+          ) : (
+            <span className="ui-meta-sm">—</span>
+          ),
+      },
+      {
         key: "actions",
         header: "Actions",
         render: (stage: WorkflowRunStage) =>
@@ -1624,6 +1667,16 @@ export function RunDetail({
             rowProps={(stage) => ({ id: `stage-${stage.key}` })}
           />
         </div>
+      )}
+
+      {/* Issue #6377 — a missing checkpoint is a fact, not an empty panel:
+          the stages above came from the run's job rows, and the panel says so
+          instead of implying the engine checkpointed nothing. */}
+      {run.stages.length > 0 && !run.stages.some((stage) => stage.checkpoint) && (
+        <p className="ui-meta-sm">
+          No engine checkpoint was recorded for this run — the stages above come from its job rows, so there is no
+          checkpoint entry to expand.
+        </p>
       )}
 
       {/* Issue #4420 — the shard stage detail's inner per-symbol engine run:

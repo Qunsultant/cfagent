@@ -64,6 +64,11 @@ export function researchReportToStoreInput(
       ...(report as unknown as Record<string, unknown>),
       ...cleanArtifacts,
       success: !report.dataRefusal,
+      // Issue #6370 — the outcome→run join reads the body, so the trigger and
+      // the owner must be ON it: a completed run must never read "skipped" or
+      // "Not recorded by the source" because the join looked at the wrong row.
+      trigger: report.trigger,
+      userLogin,
       ...(jobRunId ? { jobRunId } : {}),
       engineVersion: (report as { modelVersion?: string }).modelVersion ?? "rules-1.0.0",
       inputHash: report.generationId,

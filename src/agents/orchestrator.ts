@@ -157,6 +157,11 @@ import type { ResearchReport } from "../services/researchPipeline";
 import { ETradeEmailTradingService } from "../trading";
 import { ETradeBrowserService } from "../services/browserAgent";
 import { runGovernanceSeed } from "./orchestrator/governanceSeed";
+import {
+  runGetIdpProfileConfig,
+  runSetIdpProfileConfig,
+} from "./orchestrator/idpProfileConfig";
+import type { IdpProfileConfigShape } from "../config/idpProfile";
 import { runShardJobReconcile, type ReconcileShardJobsReport } from "./orchestrator/shardJobReconcile";
 import { runCanonicalReportSeed, type SeedCanonicalReportsResult } from "./orchestrator/canonicalReportSeed";
 import { reconcileRunLedgerProjection, type ReconcileRunLedgerResult } from "./orchestrator/runLedgerReconcile";
@@ -1083,6 +1088,15 @@ export class OrchestratorAgent extends PortThink {
   /** Issue #1559 — thin wrapper for the operator route's one-time halt seed (execution in ./orchestrator/governanceSeed.ts). */
   async seedGovernanceHalt(setBy: string, tenantId: string): Promise<{ seeded: boolean; state: GovernedHaltState }> {
     return runGovernanceSeed({ doSql: this.ctx.storage.sql, env: this.env }, setBy, tenantId);
+  }
+
+  /** Issue #5160 — thin wrappers for the IAAA Admin "Identity profile" config surface (execution in ./orchestrator/idpProfileConfig.ts). The runtime values live in this instance's mas_settings; the worker-side routes reach them through these RPC methods. */
+  async getIdpProfileConfig(): Promise<IdpProfileConfigShape> {
+    return runGetIdpProfileConfig({ sql: this.ctx.storage.sql });
+  }
+
+  async setIdpProfileConfig(value: IdpProfileConfigShape): Promise<IdpProfileConfigShape> {
+    return runSetIdpProfileConfig({ sql: this.ctx.storage.sql }, value);
   }
 
   /** Issue #1676 — thin wrapper; execution in ./orchestrator/shardJobReconcile.ts. */

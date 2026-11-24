@@ -1,37 +1,41 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { apiFetch as fetch } from "./apiFetch";
 import { TabHoverItem } from "./TabHoverItem";
 import { Button, CardHeader, SmallHeader, TextInput, Select } from "./components/ui";
 import {
-  MCP_TOOLS_CATALOG,
-  MCP_RESOURCES_CATALOG,
-  MCP_PROMPTS_CATALOG,
-  REST_APIS_CATALOG,
-  McpToolMeta,
-  McpResourceMeta,
-  McpPromptMeta,
-  RestEndpointMeta,
-} from "./mcpEndpointsData";
+  fetchMcpCatalog,
+  type ClientCatalogPrompt,
+  type ClientCatalogResource,
+  type ClientCatalogTool,
+  type ClientMcpCatalog,
+} from "./mcpCatalog";
+import { REST_APIS_CATALOG, type RestEndpointMeta } from "./restEndpointsData";
 
 export function McpApiExplorer() {
   const [subTab, setSubTab] = useState<"tools" | "resources" | "prompts" | "rest" | "config">("tools");
   const [toolSearch, setToolSearch] = useState("");
   const [restCategoryFilter, setRestCategoryFilter] = useState<string>("all");
 
+  // Served catalogue state (#6438): the tools, resources, and prompts
+  // come from GET /api/mcp/catalog. The load fails closed — a failed
+  // fetch renders an error, never a stale list.
+  const [catalog, setCatalog] = useState<ClientMcpCatalog | null>(null);
+  const [loadError, setLoadError] = useState("");
+
   // Interactive MCP Tool Call Runner State
-  const [activeTool, setActiveTool] = useState<McpToolMeta>(MCP_TOOLS_CATALOG[0]);
-  const [toolArgsJson, setToolArgsJson] = useState(JSON.stringify(MCP_TOOLS_CATALOG[0].sampleArgs, null, 2));
+  const [activeTool, setActiveTool] = useState<ClientCatalogTool | null>(null);
+  const [toolArgsJson, setToolArgsJson] = useState("");
   const [mcpResult, setMcpResult] = useState<any>(null);
   const [mcpLoading, setMcpLoading] = useState(false);
   const [mcpError, setMcpError] = useState("");
 
   // Interactive MCP Resource Reader State
-  const [activeResource, setActiveResource] = useState<McpResourceMeta>(MCP_RESOURCES_CATALOG[0]);
+  const [activeResource, setActiveResource] = useState<ClientCatalogResource | null>(null);
   const [resourceResult, setResourceResult] = useState<any>(null);
   const [resourceLoading, setResourceLoading] = useState(false);
 
   // Interactive MCP Prompt State
-  const [activePrompt, setActivePrompt] = useState<McpPromptMeta>(MCP_PROMPTS_CATALOG[0]);
+  const [activePrompt, setActivePrompt] = useState<ClientCatalogPrompt | null>(null);
   const [promptResult, setPromptResult] = useState<any>(null);
   const [promptLoading, setPromptLoading] = useState(false);
 
@@ -40,6 +44,26 @@ export function McpApiExplorer() {
   const [restBodyJson, setRestBodyJson] = useState(
     REST_APIS_CATALOG[0].sampleBody ? JSON.stringify(REST_APIS_CATALOG[0].sampleBody, null, 2) : ""
   );
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchMcpCatalog()
+      .then((loaded) => {
+        if (cancelled) return;
+        setCatalog(loaded);
+        const firstTool = loaded.tools[0] ?? null;
+        setActiveTool(firstTool);
+        setToolArgsJson(firstTool ? JSON.stringify(firstTool.sampleArgs, null, 2) : "");
+        setActiveResource(loaded.resources[0] ?? null);
+        setActivePrompt(loaded.prompts[0] ?? null);
+      })
+      .catch((err: any) => {
+        if (!cancelled) setLoadError(err?.message || "Failed to load the tool catalog");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const [restResponse, setRestResponse] = useState<any>(null);
   const [restStatusCode, setRestStatusCode] = useState<number | null>(null);
   const [restLatencyMs, setRestLatencyMs] = useState<number | null>(null);
@@ -57,6 +81,7 @@ export function McpApiExplorer() {
 
   // Execute MCP Tool Call over live /api/mcp endpoint
   const handleExecuteMcpTool = async () => {
+    if (!activeTool) return;
     setMcpLoading(true);
     setMcpResult(null);
     setMcpError("");
@@ -92,7 +117,7 @@ export function McpApiExplorer() {
   };
 
   // Read MCP Resource over live /api/mcp endpoint
-  const handleReadResource = async (resMeta: McpResourceMeta) => {
+  const handleReadResource = async (resMeta: ClientCatalogResource) => {
     setActiveResource(resMeta);
     setResourceLoading(true);
     setResourceResult(null);
@@ -120,7 +145,7 @@ export function McpApiExplorer() {
   };
 
   // Get MCP Prompt over live /api/mcp endpoint
-  const handleGetPrompt = async (pMeta: McpPromptMeta) => {
+  const handleGetPrompt = async (pMeta: ClientCatalogPrompt) => {
     setActivePrompt(pMeta);
     setPromptLoading(true);
     setPromptResult(null);
@@ -187,7 +212,7 @@ export function McpApiExplorer() {
     }
   };
 
-  const filteredTools = MCP_TOOLS_CATALOG.filter(
+  const filteredTools = (catalog?.tools ?? []).filter(
     (t) =>
       t.name.toLowerCase().includes(toolSearch.toLowerCase()) ||
       t.description.toLowerCase().includes(toolSearch.toLowerCase()) ||
@@ -228,32 +253,32 @@ export function McpApiExplorer() {
       {/* Top Protocol Status Banner */}
       <div className="endpoints-hero-card">
         <div className="hero-badge-row">
-          <span className="protocol-badge">⚡ Model Context Protocol (MCP) 2024-11-05</span>
+          <span className="protocol-badge">⚡ Model Context Protocol (MCP) {catalog?.server.protocolVersion ?? "…"}</span>
           <span className="live-status-pill">● Server Active: JSON-RPC 2.0</span>
           <span className="transport-badge">HTTP POST & SSE Ready</span>
         </div>
         <CardHeader title="Model Context Protocol & REST API Developer Gateway" />
         <p>
           Seamlessly connect autonomous agents, Claude Desktop, Cursor, and enterprise workflows to Multi-Agent Studio.
-          Expose, test, and introspect all 14 tools, 6 resources, 3 prompts, and 16 REST APIs with live execution.
+          Expose, test, and introspect all {catalog ? catalog.tools.length : "…"} tools, {catalog ? catalog.resources.length : "…"} resources, {catalog ? catalog.prompts.length : "…"} prompts, and {REST_APIS_CATALOG.length} REST APIs with live execution.
         </p>
 
         {/* Global Endpoints Stats Ribbon */}
         <div className="endpoints-stats-ribbon">
           <div className="ep-stat">
-            <span className="ep-num">14</span>
+            <span className="ep-num">{catalog?.tools.length ?? "…"}</span>
             <span className="ep-lbl">MCP Tools</span>
           </div>
           <div className="ep-stat">
-            <span className="ep-num">6</span>
+            <span className="ep-num">{catalog?.resources.length ?? "…"}</span>
             <span className="ep-lbl">MCP Resources</span>
           </div>
           <div className="ep-stat">
-            <span className="ep-num">3</span>
+            <span className="ep-num">{catalog?.prompts.length ?? "…"}</span>
             <span className="ep-lbl">MCP Prompts</span>
           </div>
           <div className="ep-stat">
-            <span className="ep-num">16</span>
+            <span className="ep-num">{REST_APIS_CATALOG.length}</span>
             <span className="ep-lbl">REST Endpoints</span>
           </div>
           <div className="ep-stat">
@@ -274,7 +299,7 @@ export function McpApiExplorer() {
           variant={subTab === "tools" ? "primary" : "secondary"}
             onClick={() => setSubTab("tools")}
           >
-            🛠️ MCP Tools (14)
+            🛠️ MCP Tools{catalog ? ` (${catalog.tools.length})` : ""}
           </Button>
         </TabHoverItem>
 
@@ -287,7 +312,7 @@ export function McpApiExplorer() {
           variant={subTab === "resources" ? "primary" : "secondary"}
             onClick={() => setSubTab("resources")}
           >
-            📦 MCP Resources (6)
+            📦 MCP Resources{catalog ? ` (${catalog.resources.length})` : ""}
           </Button>
         </TabHoverItem>
 
@@ -300,7 +325,7 @@ export function McpApiExplorer() {
           variant={subTab === "prompts" ? "primary" : "secondary"}
             onClick={() => setSubTab("prompts")}
           >
-            💡 MCP Prompts (3)
+            💡 MCP Prompts{catalog ? ` (${catalog.prompts.length})` : ""}
           </Button>
         </TabHoverItem>
 
@@ -313,7 +338,7 @@ export function McpApiExplorer() {
           variant={subTab === "rest" ? "primary" : "secondary"}
             onClick={() => setSubTab("rest")}
           >
-            🚀 REST APIs (16)
+            🚀 REST APIs ({REST_APIS_CATALOG.length})
           </Button>
         </TabHoverItem>
 
@@ -334,6 +359,8 @@ export function McpApiExplorer() {
       {/* 1. MCP Tools View */}
       {subTab === "tools" && (
         <div className="endpoints-split-view">
+          {catalog && activeTool ? (
+            <>
           {/* Left: Tools List */}
           <div className="endpoints-list-pane">
             <div className="pane-header">
@@ -451,19 +478,25 @@ export function McpApiExplorer() {
               </div>
             )}
           </div>
+            </>
+          ) : (
+            <p>{loadError || "Loading the server catalogue…"}</p>
+          )}
         </div>
       )}
 
       {/* 2. MCP Resources View */}
       {subTab === "resources" && (
         <div className="endpoints-split-view">
+          {catalog && activeResource ? (
+            <>
           <div className="endpoints-list-pane">
             <div className="pane-header">
-              <CardHeader title={<>Exposed MCP Resources ({MCP_RESOURCES_CATALOG.length})</>} />
+              <CardHeader title={<>Exposed MCP Resources ({catalog.resources.length})</>} />
               <p className="pane-sub">Direct access to stateful data records, revenue metrics, and memory vaults.</p>
             </div>
             <div className="tools-cards-scroll">
-              {MCP_RESOURCES_CATALOG.map((res) => (
+              {catalog.resources.map((res) => (
                 <div
                   key={res.uri}
                   className={`tool-item-card ${activeResource.uri === res.uri ? "selected" : ""}`}
@@ -514,19 +547,25 @@ export function McpApiExplorer() {
               </div>
             )}
           </div>
+            </>
+          ) : (
+            <p>{loadError || "Loading the server catalogue…"}</p>
+          )}
         </div>
       )}
 
       {/* 3. MCP Prompts View */}
       {subTab === "prompts" && (
         <div className="endpoints-split-view">
+          {catalog && activePrompt ? (
+            <>
           <div className="endpoints-list-pane">
             <div className="pane-header">
-              <CardHeader title={<>Pre-Engineered Agent Prompts ({MCP_PROMPTS_CATALOG.length})</>} />
+              <CardHeader title={<>Pre-Engineered Agent Prompts ({catalog.prompts.length})</>} />
               <p className="pane-sub">Structured reasoning prompts for security audits and revenue analysis.</p>
             </div>
             <div className="tools-cards-scroll">
-              {MCP_PROMPTS_CATALOG.map((p) => (
+              {catalog.prompts.map((p) => (
                 <div
                   key={p.name}
                   className={`tool-item-card ${activePrompt.name === p.name ? "selected" : ""}`}
@@ -580,6 +619,10 @@ export function McpApiExplorer() {
               </div>
             )}
           </div>
+            </>
+          ) : (
+            <p>{loadError || "Loading the server catalogue…"}</p>
+          )}
         </div>
       )}
 

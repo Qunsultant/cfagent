@@ -445,17 +445,57 @@ export const agentOnboardingState = sqliteTable("agent_onboarding_state", {
  * the verified identity — src/services/platformIdentity.ts
  * carries no email). Email was added by migration 0068
  * (owner-directed 2026-11-16, CISO-review deferral lifted by
- * explicit owner direction; no CISO review happened). This schema
- * MAPS the table; DDL authority lives in migrations 0050 + 0068
+ * explicit owner direction; no CISO review happened). Migration
+ * 0088 (#5160) rebuilt the table to the (internal_user_id,
+ * tenant_id) key and added the IDP attribute columns: the old
+ * login key could not hold one row per tenant for the same user.
+ * This schema MAPS the table; DDL authority lives in migrations
+ * 0050 + 0068 + 0088 (src/data/migrationRunner.ts).
+ */
+export const agentUserProfiles = sqliteTable(
+  "agent_user_profiles",
+  {
+    userLogin: text("user_login").notNull(),
+    displayName: text("display_name"),
+    phone: text("phone"),
+    email: text("email"),
+    updatedAtMs: integer("updated_at_ms").notNull(),
+    internalUserId: text("internal_user_id"),
+    tenantId: text("tenant_id"),
+    idpIssuer: text("idp_issuer"),
+    idpAttributes: text("idp_attributes_json"),
+    provenance: text("provenance_json"),
+    idpUpdatedAtMs: integer("idp_updated_at_ms"),
+  },
+  (t) => [primaryKey({ columns: [t.internalUserId, t.tenantId] })],
+);
+
+/**
+ * Identity attribute lookup index (#5160, migration 0088). One
+ * row per (tenant, attribute, normalized value, identity): the
+ * exact-match lookup reads this table, never a scan. The
+ * identity is part of the key so two identities in one tenant
+ * can claim the same value — the lookup then returns BOTH and
+ * the caller fails closed ambiguous. This schema MAPS the table;
+ * DDL authority lives in migration 0088
  * (src/data/migrationRunner.ts).
  */
-export const agentUserProfiles = sqliteTable("agent_user_profiles", {
-  userLogin: text("user_login").primaryKey(),
-  displayName: text("display_name"),
-  phone: text("phone"),
-  email: text("email"),
-  updatedAtMs: integer("updated_at_ms").notNull(),
-});
+export const agentIdentityAttributeIndex = sqliteTable(
+  "agent_identity_attribute_index",
+  {
+    tenantId: text("tenant_id").notNull(),
+    attributeName: text("attribute_name").notNull(),
+    attributeValueNormalized: text("attribute_value_normalized").notNull(),
+    internalUserId: text("internal_user_id").notNull(),
+    source: text("source").notNull(),
+    updatedAtMs: integer("updated_at_ms").notNull(),
+  },
+  (t) => [
+    primaryKey({
+      columns: [t.tenantId, t.attributeName, t.attributeValueNormalized, t.internalUserId],
+    }),
+  ],
+);
 
 /**
  * Profile idempotency keys (#3261, standards §7.2 Idempotent
@@ -1147,6 +1187,57 @@ export const agentNavPresetState = sqliteTable("agent_nav_preset_state", {
   activePresetId: text("active_preset_id"),
   mapJson: text("map_json"),
   updatedAtMs: integer("updated_at_ms").notNull(),
+});
+
+/**
+ * Tenant nav allowance (#6151 S4, migration 0087): one row per
+ * tenant — the nav ids the tenant gets at all (top-level ids +
+ * `<parentId>:<subId>` sub-item keys, stored as a JSON array).
+ * Absent means the tenant gets everything the platform enables
+ * (the S1 endpoint rule). This schema MAPS the table; it does
+ * not create it — DDL authority lives in migration 0087
+ * (src/data/migrationRunner.ts).
+ */
+export const agentNavTenantAllowances = sqliteTable("agent_nav_tenant_allowances", {
+  tenantId: text("tenant_id").primaryKey(),
+  allowedIdsJson: text("allowed_ids_json").notNull(),
+  updatedAtMs: integer("updated_at_ms").notNull(),
+  updatedBy: text("updated_by").notNull(),
+});
+
+/**
+ * Per-user nav allow-list (#6151 S4, migration 0087): one row per
+ * user — the nav ids that user may see (JSON array over the
+ * availability ids) plus whether saved presets are available to
+ * them at all. The row never widens beyond the tenant allowance:
+ * the store refuses an exceeding write. tenantId is the tenant
+ * the row belongs to (null when the user holds no tenant
+ * membership). This schema MAPS the table; DDL authority lives
+ * in migration 0087.
+ */
+export const agentNavUserAllowlists = sqliteTable("agent_nav_user_allowlists", {
+  userId: text("user_id").primaryKey(),
+  tenantId: text("tenant_id"),
+  allowedIdsJson: text("allowed_ids_json").notNull(),
+  savedPresetsAllowed: integer("saved_presets_allowed").notNull(),
+  updatedAtMs: integer("updated_at_ms").notNull(),
+  updatedBy: text("updated_by").notNull(),
+});
+
+/**
+ * Persona-default override (#6151 S4, migration 0087): one row
+ * per persona — the built-in preset key that persona's fresh
+ * users start from. Absent means the shipped config
+ * (nav-config.json `personaDefaults`); the endpoint reads the
+ * override first, so an edit takes effect on the user's next
+ * load with no redeploy. This schema MAPS the table; DDL
+ * authority lives in migration 0087.
+ */
+export const agentNavPersonaDefaults = sqliteTable("agent_nav_persona_defaults", {
+  persona: text("persona").primaryKey(),
+  presetKey: text("preset_key").notNull(),
+  updatedAtMs: integer("updated_at_ms").notNull(),
+  updatedBy: text("updated_by").notNull(),
 });
 
 /**

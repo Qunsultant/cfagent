@@ -179,3 +179,26 @@ Q8-driven extras	Feature store / experiment tracking	[U] — Feast/MLflow common
 Q8-driven extras	Eval harness (LLM agents)	[U] — none verified	GAP/VERIFY — FinLake-Bench/FINSABER are benchmarks, not a shipped harness.
 Q8-driven extras	FIX engine	[U] — QuickFIX/J etc. commonly cited, not verified	GAP/VERIFY.
 Explicit NO-FOSS gaps: (1) consolidated real-time market data (SIP/OPRA feeds + exchange entitlements); (2) exchange/venue connectivity and matching; (3) broker custody, accounts, and execution itself; (4) index membership + GICS licensing (S&P DJI / MSCI / FTSE Russell / Nasdaq); (5) Cloudflare Workflows engine, Temporal Cloud, AWS Step Functions hosted control planes; (6) Flagship hosted flag service; (7) official E*TRADE FOSS client; (8) licensed fundamentals/sentiment datasets as such (the clients may be FOSS; the data is not).
+
+## Data-platform enablement — FOSS libraries the 2026-11-24 survey names (#6458)
+Condensed from docs/research/foss-data-platform-libraries.md (full tables, fit verdicts, and sources there). License key: [L] license text/header/announcement directly read; [R] reported by a secondary comparison citing the repo (LICENSE file not directly opened — verify before legal reliance); [U] unverified/disputed. No license statement here is legal advice; verify the LICENSE file at the pinned version before distribution or commercial reliance. Research basis: public sources read 2026-11-24; two sources read live (Marquez README, Data Contract CLI site), the rest search listings plus Nov 2026 round-ups citing project docs/repos; no tool run live against D1.
+Headline: no full FOSS catalog fits this stack as-is — the established catalogs need their own Java server plus a Postgres/MySQL store plus a search cluster, and none talks to D1. The tools that fit are small and composable. Metadata of record stays in D1 tables (Drizzle + Zod); heavy tools run outside, on exported snapshots — D1 has no wire protocol, so no SQL-engine tool attaches to live D1. Adoption is per-issue, sequenced per the report §7; nothing here is in use. DuckDB is already named in the IROS section above as ADOPT for analytics/backtest compute — the survey confirms the same tool for the catalog/discovery role; one tool, one adoption, not two.
+Capability	Technology	License	Verdict
+Analytical query over R2 Parquet	DuckDB	MIT [R]	Fits as-is (library) / dockerized sidecar — replaces DataStudio's analytical half.
+Data contracts	Data Contract CLI (ODCS v3)	MIT [L]	Fits as-is (CLI in CI) — replaces hand-written validators and the in-code product registry.
+Lineage	OpenLineage, client-only (JSON events → D1)	Apache-2.0 [R]	Fits as-is — zero new infrastructure; Marquez optional later as viewer.
+Lineage viewer (later)	Marquez	Apache-2.0 [L]	Fits dockerized as sidecar (Java + Postgres); no auth by default — put behind auth. Release cadence watch (no release since Oct 2024 per a secondary source).
+Data quality	GX Core	Apache-2.0 [R]	Fits dockerized / CI sidecar — Expectation suites on exported snapshots. GX Cloud discontinued 1 Jun 2026.
+Read-only viewer	Datasette	Apache-2.0 [R]	Fits dockerized as sidecar on exported snapshots — most direct DataStudio-viewer replacement.
+Full catalog (deferred)	ODD Platform	Apache-2.0 [R]	Fits dockerized as sidecar (Java + Postgres only) — the only full catalog that fits; adopt last, when the D1-table catalog is outgrown.
+Schema drift/lint (CI complement)	Ariga Atlas Community	Apache-2.0 [R]	Fits as-is (CI tool) — declarative diff + drift/lint alongside Drizzle Kit. Default binary is proprietary (MSA); use the community build.
+Lakehouse format (via DuckDB)	Apache Iceberg / Delta Lake	Apache-2.0 [R]	Fits as format via DuckDB — adopt only when multi-engine sharing or time travel is needed.
+Lakehouse format	DuckLake	MIT [R]	Watch maturity — metadata in SQL tables + Parquet in R2; 1.0 Apr 2026.
+Data catalog	DataHub	Apache-2.0 [R]	Does not fit — Kafka + Elasticsearch/OpenSearch + MySQL/Postgres + 7+ containers; no SQLite/D1.
+Data catalog	OpenMetadata	Apache-2.0 at root; ingestion/UI under Collate Community License 1.0 [R]	Does not fit — Java server + MySQL/Postgres + Elasticsearch/OpenSearch cluster + Airflow; no SQLite/D1.
+Data catalog	Apache Atlas	Apache-2.0 [R]	Does not fit — HBase/JanusGraph + Solr + Kafka + ZooKeeper; Hadoop-centric.
+Data catalog	Amundsen	Apache-2.0 [R]	DO NOT ADOPT — archived Sept 2026.
+Data quality	Soda Core	Elastic License 2.0 since Jan 2026 [R]	Excluded on license grounds — source-available, not OSI FOSS.
+Schema migrations	Liquibase Community	FSL-1.1-ALv2 since 5.0 [R]	Excluded on license grounds — not OSI FOSS.
+Distributed query	Trino / Presto	Apache-2.0 [R]	Does not fit — JVM coordinator+worker cluster by design.
+Recommended sequencing (report §7): formalise the catalogue as Drizzle tables in D1; ODCS contracts + Data Contract CLI in CI; OpenLineage events from Workers into D1; DuckDB sidecar over R2 Parquet exports (Datasette alongside); GX Core suites on the same snapshots; ODD Platform only if the D1 catalog proves insufficient. Skip DataHub/OpenMetadata/Atlas/Amundsen entirely at this scale.

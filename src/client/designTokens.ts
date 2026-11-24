@@ -416,3 +416,21 @@ export const adAccentPalette = [
   { value: "#a855f7", label: "Purple" },
   { value: "#f43f5e", label: "Rose" },
 ] as const;
+
+/**
+ * Issue 6406 — fallback colors for the hunt chart's canvas (lightweight-charts
+ * needs concrete colors; canvas does not resolve var()). Used only when the
+ * theme token cannot be resolved (non-browser / test environments); in the
+ * app the live token value wins. They live in the token module so raw color
+ * values stay confined to token sources.
+ */
+export const chartColorFallbacks = {
+  "--color-border-subtle": "#e5e5e5",
+  "--color-text-muted": "#888888",
+  "--color-accent": "#2962ff",
+  "--color-success": "#26a69a",
+  "--color-danger": "#ef5350",
+  "--color-warning": "#ff9800",
+} as const;
+
+export type ChartColorToken = keyof typeof chartColorFallbacks;

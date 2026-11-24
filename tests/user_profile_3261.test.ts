@@ -84,7 +84,23 @@ describe("migration 0050 — user profiles (#3261)", () => {
 
   it("DDL and the Drizzle schema agree on both tables and columns", () => {
     const columns = Object.keys(getTableColumns(agentUserProfiles));
-    expect(columns).toEqual(["userLogin", "displayName", "phone", "email", "updatedAtMs"]);
+    // #5160 (migration 0087) rebuilt agent_user_profiles with the
+    // composite (internal_user_id, tenant_id) PK plus the IDP
+    // attribute columns; the 0050 DDL below still holds for the
+    // original columns it created.
+    expect(columns).toEqual([
+      "userLogin",
+      "displayName",
+      "phone",
+      "email",
+      "updatedAtMs",
+      "internalUserId",
+      "tenantId",
+      "idpIssuer",
+      "idpAttributes",
+      "provenance",
+      "idpUpdatedAtMs",
+    ]);
     expect(MIGRATION_0050_USER_PROFILES.sql).toContain("display_name TEXT");
     expect(MIGRATION_0050_USER_PROFILES.sql).toContain("phone TEXT");
     const keyColumns = Object.keys(getTableColumns(agentProfileIdempotencyKeys));
@@ -129,22 +145,27 @@ describe.each([
   it("reads absent as null, round-trips per login, and isolates a second login", async () => {
     const { store, setup } = make();
     if (setup) await setup();
-    expect(await store.getProfile("prof-user-a")).toBeNull();
+    expect(await store.getProfileByLogin("prof-user-a", "primary")).toBeNull();
     const saved = await store.saveProfile({
       userLogin: "prof-user-a",
       displayName: "Ada",
       phone: "+1 555-0100",
       email: "ada@example.com",
       updatedAtMs: 1234,
-    });
+      internalUserId: "prof-id-a",
+      tenantId: "primary",
+      idpIssuer: null,
+      idpAttributes: {},
+      provenance: {},
+      idpUpdatedAtMs: null,    });
     expect(saved.displayName).toBe("Ada");
     expect(saved.phone).toBe("+1 555-0100");
     expect(saved.email).toBe("ada@example.com");
-    const reread = await store.getProfile("prof-user-a");
+    const reread = await store.getProfileByLogin("prof-user-a", "primary");
     expect(reread?.displayName).toBe("Ada");
     expect(reread?.email).toBe("ada@example.com");
     // A second login starts fresh: no shared display name, no shared phone.
-    expect(await store.getProfile("prof-user-b")).toBeNull();
+    expect(await store.getProfileByLogin("prof-user-b", "primary")).toBeNull();
   });
 
   it("upsert overwrites the previous row, and a null clear persists", async () => {
@@ -156,69 +177,84 @@ describe.each([
       phone: "+1 555-0100",
       email: "ada@example.com",
       updatedAtMs: 1234,
-    });
+      internalUserId: "prof-id-a",
+      tenantId: "primary",
+      idpIssuer: null,
+      idpAttributes: {},
+      provenance: {},
+      idpUpdatedAtMs: null,    });
     const updated = await store.saveProfile({
       userLogin: "prof-user-a",
       displayName: "Grace",
       phone: null,
       email: null,
       updatedAtMs: 1235,
-    });
+      internalUserId: "prof-id-a",
+      tenantId: "primary",
+      idpIssuer: null,
+      idpAttributes: {},
+      provenance: {},
+      idpUpdatedAtMs: null,    });
     expect(updated.displayName).toBe("Grace");
     expect(updated.phone).toBeNull();
     expect(updated.email).toBeNull();
-    expect((await store.getProfile("prof-user-a"))?.phone).toBeNull();
-    expect((await store.getProfile("prof-user-a"))?.email).toBeNull();
+    expect((await store.getProfileByLogin("prof-user-a", "primary"))?.phone).toBeNull();
+    expect((await store.getProfileByLogin("prof-user-a", "primary"))?.email).toBeNull();
   });
 
   it("saveProfileOnce writes once and replays the key as a duplicate without overwriting", async () => {
     const { store, setup } = make();
     if (setup) await setup();
     const first = await store.saveProfileOnce(
-      { userLogin: "prof-user-a", displayName: "Ada", phone: "+1 555-0100", email: "ada@example.com", updatedAtMs: 1234 },
+      { userLogin: "prof-user-a", displayName: "Ada", phone: "+1 555-0100", email: "ada@example.com", updatedAtMs: 1234, internalUserId: "prof-id-a", tenantId: "primary", idpIssuer: null, idpAttributes: {}, provenance: {}, idpUpdatedAtMs: null },
       "key-once-1",
       1234,
     );
     expect(first.duplicate).toBe(false);
     expect(first.profile?.displayName).toBe("Ada");
     const replay = await store.saveProfileOnce(
-      { userLogin: "prof-user-a", displayName: "Mallory", phone: null, email: null, updatedAtMs: 1235 },
+      { userLogin: "prof-user-a", displayName: "Mallory", phone: null, email: null, updatedAtMs: 1235, internalUserId: "prof-id-a", tenantId: "primary", idpIssuer: null, idpAttributes: {}, provenance: {}, idpUpdatedAtMs: null },
       "key-once-1",
       1235,
     );
     expect(replay).toEqual({ duplicate: true, profile: null });
     // The replay wrote nothing: the first values stand.
-    expect(await store.getProfile("prof-user-a")).toEqual({
+    expect(await store.getProfileByLogin("prof-user-a", "primary")).toEqual({
       userLogin: "prof-user-a",
       displayName: "Ada",
       phone: "+1 555-0100",
       email: "ada@example.com",
       updatedAtMs: 1234,
-    });
+      internalUserId: "prof-id-a",
+      tenantId: "primary",
+      idpIssuer: null,
+      idpAttributes: {},
+      provenance: {},
+      idpUpdatedAtMs: null,    });
     const secondKey = await store.saveProfileOnce(
-      { userLogin: "prof-user-a", displayName: "Grace", phone: null, email: "grace@example.com", updatedAtMs: 1236 },
+      { userLogin: "prof-user-a", displayName: "Grace", phone: null, email: "grace@example.com", updatedAtMs: 1236, internalUserId: "prof-id-a", tenantId: "primary", idpIssuer: null, idpAttributes: {}, provenance: {}, idpUpdatedAtMs: null },
       "key-once-2",
       1236,
     );
     expect(secondKey.duplicate).toBe(false);
-    expect((await store.getProfile("prof-user-a"))?.displayName).toBe("Grace");
+    expect((await store.getProfileByLogin("prof-user-a", "primary"))?.displayName).toBe("Grace");
   });
 
   it("saveProfileOnce keys are global: a key seen for login A is a duplicate for login B", async () => {
     const { store, setup } = make();
     if (setup) await setup();
     await store.saveProfileOnce(
-      { userLogin: "prof-user-a", displayName: "Ada", phone: null, email: null, updatedAtMs: 1234 },
+      { userLogin: "prof-user-a", displayName: "Ada", phone: null, email: null, updatedAtMs: 1234, internalUserId: "prof-id-a", tenantId: "primary", idpIssuer: null, idpAttributes: {}, provenance: {}, idpUpdatedAtMs: null },
       "key-shared-1",
       1234,
     );
     const cross = await store.saveProfileOnce(
-      { userLogin: "prof-user-b", displayName: "Bob", phone: null, email: null, updatedAtMs: 1235 },
+      { userLogin: "prof-user-b", displayName: "Bob", phone: null, email: null, updatedAtMs: 1235, internalUserId: "prof-id-b", tenantId: "primary", idpIssuer: null, idpAttributes: {}, provenance: {}, idpUpdatedAtMs: null },
       "key-shared-1",
       1235,
     );
     expect(cross).toEqual({ duplicate: true, profile: null });
-    expect(await store.getProfile("prof-user-b")).toBeNull();
+    expect(await store.getProfileByLogin("prof-user-b", "primary")).toBeNull();
   });
 });
 
@@ -414,6 +450,12 @@ describe("toUserProfileView (#3261)", () => {
       phone: null,
       email: null,
       updatedAtMs: null,
+      tenantId: null,
+      idpDisplayName: null,
+      idpPhone: null,
+      idpEmail: null,
+      diverged: [],
+      provenance: {},
     });
   });
 });
@@ -472,10 +514,31 @@ class ThrowingProfileStore implements UserProfileStore {
   async getProfile(): Promise<null> {
     throw new Error("boom: store exploded");
   }
+  async getProfileByLogin(): Promise<null> {
+    throw new Error("boom: store exploded");
+  }
+  async getProfilesByInternalUserId(): Promise<never> {
+    throw new Error("boom: store exploded");
+  }
   async saveProfile(): Promise<never> {
     throw new Error("boom: store exploded");
   }
   async saveProfileOnce(): Promise<never> {
+    throw new Error("boom: store exploded");
+  }
+  async refreshFromIdp(): Promise<never> {
+    throw new Error("boom: store exploded");
+  }
+  async syncFromProvider(): Promise<never> {
+    throw new Error("boom: store exploded");
+  }
+  async seedTenantProfile(): Promise<never> {
+    throw new Error("boom: store exploded");
+  }
+  async lookupByAttribute(): Promise<never> {
+    throw new Error("boom: store exploded");
+  }
+  async purgeExpiredProfiles(): Promise<never> {
     throw new Error("boom: store exploded");
   }
 }
@@ -584,7 +647,9 @@ describe("profile routes (#3261)", () => {
     expect(saved?.status).toBe(200);
     expect(saved?.body.userLogin).toBe("prof-route-c");
     expect(saved?.body.email).toBe("ada@example.com");
-    expect(saved?.body).not.toHaveProperty("tenantId");
+    // #5160: the view carries the OPERATING tenant, server-stamped —
+    // the client-supplied "evil-tenant" is ignored, not honored.
+    expect(saved?.body.tenantId).toBe("primary");
   });
 
   it("keeps a second login's profile separate from the first", async () => {
