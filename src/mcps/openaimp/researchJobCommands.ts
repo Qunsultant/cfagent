@@ -7,6 +7,7 @@
  *   - `define_pipeline_chain`: defines/updates a declarative pipeline chain on
  *     `JobPipelineControl` at runtime using the `jobs` family stage vocabulary.
  */
+import type { Env } from "../../types";
 import { z } from "zod";
 import type { IMcpToolCommand, McpToolContext } from "../../patterns/interfaces";
 import {
@@ -124,6 +125,9 @@ export class RunResearchJobCommand implements IMcpToolCommand<RunResearchJobInpu
       ...(sql ? { sql } : {}),
       ...(d1 ? { d1 } : {}),
       ...(envRecord ? { env: envRecord } : {}),
+      // Issue #6035 (b) — the full env: a hosted deployment runs the job on
+      // the workflow residency instead of the in-process sync invocation.
+      ...(context.env ? { durableEnv: context.env as unknown as Env } : {}),
       execute: async () => ({
         dispatched: true,
         trigger,

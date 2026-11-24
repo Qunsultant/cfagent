@@ -8,6 +8,8 @@
  * and exposes `(runId, stageId)` stage addressing via `controlResearchStage`.
  */
 import type { SqlStorage } from "../orm";
+import type { Env } from "../types";
+import type { JobRunTrigger } from "../data/jobRunRecordPorts";
 import {
   createJobPipelineStoresFromD1,
   createJobPipelineStoresFromSql,
@@ -30,6 +32,11 @@ import {
 import { createJobPipelineControl } from "../services/jobPipelineControlFactory";
 import { createBuiltinStepRegistry } from "../services/jobPipelineSteps";
 import { createDoSqliteJobStageEventStore } from "../data/doSqliteJobStageEventAdapter";
+import {
+  awaitResearchJobSettlement,
+  researchWorkflowResidencyAvailable,
+  startResearchJobWorkflow,
+} from "./researchWorkflowHost";
 import { createD1JobStageEventStore } from "../data/d1JobStageEventAdapter";
 import {
   buildResearchJobDefinition,
@@ -102,6 +109,30 @@ export interface DispatchResearchEngineInput {
   brokerId?: string;
   mode?: string;
   researchDeps?: Partial<ResearchStepDeps>;
+  /**
+   * Issue #6035 (b) — the full deployment env, when the caller has it. With the
+   * JOB_PIPELINE_WORKFLOW and AGENT_DB bindings present the run dispatches
+   * through the durable workflow residency (one step per stage); absent, the run
+   * keeps the in-process sync invocation.
+   */
+  durableEnv?: Env;
+  /** Explicit local/test path: keep the in-process sync invocation. */
+  forceSync?: boolean;
+  /** Test seam for the workflow starter. */
+  startResearchWorkflow?: (
+    jobId: string,
+    opts: { trigger: JobRunTrigger },
+  ) => Promise<{ instanceId: string }>;
+  /** Test seams for settlement polling. */
+  settlementOpts?: {
+    intervalMs?: number;
+    timeoutMs?: number;
+    sleep?: (ms: number) => Promise<void>;
+    now?: () => number;
+    readJob?: (engineJobId: string) => Promise<
+      { instance: { state: string } | null } & Record<string, unknown>
+    >;
+  };
   execute: (ctx?: { runId: string; engineJobId: string; feed?: ResearchFeedStageOutput; enrich?: ResearchEnrichStageOutput; deferPublication?: boolean }) => Promise<Record<string, unknown>>;
 }
 
@@ -113,6 +144,10 @@ export interface DispatchResearchEngineResult {
   stages: readonly ResearchPipelineStage[];
   stageVisibility: ResearchStageVisibility[];
   cutoverMode: "engine" | "direct_rollback";
+  /** Issue #6035 (b) — true when the run executed on the durable residency. */
+  durableResidency?: boolean;
+  /** The workflow instance carrying the run, when hosted. */
+  workflowInstanceId?: string;
   storageMode: ResearchStorageMode;
   ephemeralFallback: boolean;
   ephemeralReason?: "no_durable_store_reachable";
@@ -205,6 +240,38 @@ export function resolveResearchEngineAdapters(input: {
 }
 
 /**
+ * The one stage-visibility mapping: the in-process control and the hosted run
+ * return the same stage view shape, so a caller cannot tell the paths apart.
+ */
+function stageVisibilityFrom(stages: JobStageView[]): ResearchStageVisibility[] {
+  return RESEARCH_PIPELINE_STAGES.map((stageId) => {
+    const sv = stages.find((s) => s.kind === stageId);
+    const statuses = sv?.units.map((unit) => unit.status) ?? [];
+    const failed = statuses.some((status) => ["failed", "timed_out", "cancelled"].includes(status));
+    const completed = statuses.length > 0 && statuses.every((status) => status === "completed");
+    const running = statuses.some((status) => status === "running");
+    const pending = statuses.some((status) => ["queued", "never-attempted"].includes(status));
+    return {
+      stageId,
+      startedAt: sv?.startedAt ?? null,
+      finishedAt: sv?.endedAt ?? null,
+      durationMs: sv?.durationMs ?? null,
+      status: !sv || statuses.length === 0
+        ? "unknown"
+        : failed
+          ? "failed"
+          : completed
+            ? "completed"
+            : running
+              ? "running"
+              : pending
+                ? "pending"
+                : "unknown",
+    };
+  });
+}
+
+/**
  * Dispatch a nightly research run (manual or scheduled) as a `research:<runId>`
  * engine job on `JobPipelineControl` with explicit owner identity as stage input.
  */
@@ -270,6 +337,71 @@ export async function dispatchResearchEngineRun(
 
   const { storageMode, ephemeralFallback, ephemeralReason, stores, runRecorder } =
     resolveResearchEngineAdapters(input);
+  const definition = buildResearchJobDefinition(runId, {
+    userLogin: input.userLogin,
+    trigger: input.trigger,
+    // Issue #5916 — per-stage overrides come from one config value.
+    // Issue #5975 - the stored configuration wins over the deployment
+    // default, per stage and per axis, so a run started from the settings
+    // page and a run started by the tick resolve the same modes.
+    stageModes: mergeResearchStageModes(
+      resolveResearchStageModes(input.env),
+      input.stageModes,
+    ),
+    // Issue #5109, Fix 2 — the per-stage deadlines and retry buckets
+    // resolve from the deployment carriers (defaults when absent),
+    // mirroring the stageModes resolution above.
+    stageTimeouts: resolveResearchStageTimeouts(input.env),
+    stageRetryBuckets: resolveResearchStageRetryBuckets(input.env),
+    // Issue #5912 — the venue/mode this run names (carried to analyze.ooda).
+    ...(input.brokerId ? { brokerId: input.brokerId } : {}),
+    ...(input.mode ? { mode: input.mode } : {}),
+  });
+
+  // Issue #6035 (b) — when the deployment hosts the job-pipeline workflow,
+  // dispatch through it: one durable step per stage, checkpointed, resumable.
+  // The in-process sync invocation stays as the explicit local/test path.
+  if (!input.forceSync && researchWorkflowResidencyAvailable(input.durableEnv)) {
+    const env = input.durableEnv as Env;
+    const started = await startResearchJobWorkflow({
+      env,
+      definition: definition as unknown as Record<string, unknown>,
+      engineJobId,
+      trigger: input.trigger,
+      ...(input.startResearchWorkflow ? { startWorkflow: input.startResearchWorkflow } : {}),
+    });
+    const settlement = await awaitResearchJobSettlement({
+      env,
+      engineJobId,
+      ...(input.settlementOpts ?? {}),
+    });
+    const view = settlement.view as unknown as {
+      instance: { state: string; lastError?: string | null; currentRunId?: string | null } | null;
+      stages: JobStageView[];
+    };
+    if (settlement.state === "failed") {
+      throw new Error(view.instance?.lastError || `Research engine job ${engineJobId} failed.`);
+    }
+    return {
+      engineJobId,
+      runId,
+      trigger: input.trigger,
+      userLogin: input.userLogin,
+      stages: RESEARCH_PIPELINE_STAGES,
+      stageVisibility: stageVisibilityFrom(view.stages),
+      cutoverMode: "engine",
+      durableResidency: true,
+      workflowInstanceId: started.instanceId,
+      storageMode,
+      ephemeralFallback,
+      ...(ephemeralReason ? { ephemeralReason } : {}),
+      outcome: {
+        engineRunId: view.instance?.currentRunId ?? null,
+        state: settlement.state,
+        workflowInstanceId: started.instanceId,
+      },
+    };
+  }
   // Issue #6250 — the OODA dispatch builds its control through the
   // ONE factory, with the caller's env: the OTel run-settled
   // observers ride the control, so this run emits `job.run.settled`.
@@ -294,26 +426,6 @@ export async function dispatchResearchEngineRun(
     // string-valued, so it passes through as-is.
     ...(input.env ? { env: input.env } : {}),
   }, { ...(input.env ? { env: input.env } : {}) });
-  const definition = buildResearchJobDefinition(runId, {
-    userLogin: input.userLogin,
-    trigger: input.trigger,
-    // Issue #5916 — per-stage overrides come from one config value.
-    // Issue #5975 - the stored configuration wins over the deployment
-    // default, per stage and per axis, so a run started from the settings
-    // page and a run started by the tick resolve the same modes.
-    stageModes: mergeResearchStageModes(
-      resolveResearchStageModes(input.env),
-      input.stageModes,
-    ),
-    // Issue #5109, Fix 2 — the per-stage deadlines and retry buckets
-    // resolve from the deployment carriers (defaults when absent),
-    // mirroring the stageModes resolution above.
-    stageTimeouts: resolveResearchStageTimeouts(input.env),
-    stageRetryBuckets: resolveResearchStageRetryBuckets(input.env),
-    // Issue #5912 — the venue/mode this run names (carried to analyze.ooda).
-    ...(input.brokerId ? { brokerId: input.brokerId } : {}),
-    ...(input.mode ? { mode: input.mode } : {}),
-  });
   await control.defineJob(definition as never);
 
   const dispatch = await control.runJob(engineJobId, { trigger: input.trigger });
@@ -324,31 +436,7 @@ export async function dispatchResearchEngineRun(
     throw new Error(jobView.instance?.lastError || `Research engine job ${engineJobId} failed.`);
   }
 
-  const stageVisibility: ResearchStageVisibility[] = RESEARCH_PIPELINE_STAGES.map((stageId) => {
-    const sv = jobView.stages.find((s) => s.kind === stageId);
-    const statuses = sv?.units.map((unit) => unit.status) ?? [];
-    const failed = statuses.some((status) => ["failed", "timed_out", "cancelled"].includes(status));
-    const completed = statuses.length > 0 && statuses.every((status) => status === "completed");
-    const running = statuses.some((status) => status === "running");
-    const pending = statuses.some((status) => ["queued", "never-attempted"].includes(status));
-    return {
-      stageId,
-      startedAt: sv?.startedAt ?? null,
-      finishedAt: sv?.endedAt ?? null,
-      durationMs: sv?.durationMs ?? null,
-      status: !sv || statuses.length === 0
-        ? "unknown"
-        : failed
-          ? "failed"
-          : completed
-            ? "completed"
-            : running
-              ? "running"
-              : pending
-                ? "pending"
-                : "unknown",
-    };
-  });
+  const stageVisibility = stageVisibilityFrom(jobView.stages);
 
   return {
     engineJobId,
