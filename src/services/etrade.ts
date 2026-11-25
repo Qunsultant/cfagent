@@ -66,6 +66,7 @@ import {
 } from "../config/quoteModes";
 import { createStructuredLogger } from "../observability/structuredLogger";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
+import { auditEventPort } from "../data/createAuditEventPorts";
 
 /** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
 const structuredLog = createStructuredLogger(createObservabilitySink({}), {
@@ -1057,22 +1058,29 @@ export class ETradeService {
         })
       : { id: savedId };
 
-    // Record audit event
-    if (this.orm?.events) {
-      this.orm.events.create({
-        id: `evt_wl_${crypto.randomUUID().slice(0, 10)}`,
-        sessionId: this.userLogin,
-        type: "WATCHLIST_SAVED",
-        agent: "orchestrator",
-        payload: {
-          watchlistId: savedRecord.id,
-          name: cleanName,
-          symbolCount: mergedSymbols.length,
-          symbols: mergedSymbols,
-          source,
-        },
-        createdAt: new Date().toISOString(),
-      });
+    // Record audit event. #6102: the row writes to D1 now; a null
+    // port (AGENT_DB unbound) skips. saveScanAsWatchlist is async,
+    // so the write is awaited.
+    {
+      const port = await auditEventPort(
+        this.env as unknown as { AGENT_DB?: unknown },
+      );
+      if (port) {
+        await port.create({
+          id: `evt_wl_${crypto.randomUUID().slice(0, 10)}`,
+          sessionId: this.userLogin,
+          type: "WATCHLIST_SAVED",
+          agent: "orchestrator",
+          payload: {
+            watchlistId: savedRecord.id,
+            name: cleanName,
+            symbolCount: mergedSymbols.length,
+            symbols: mergedSymbols,
+            source,
+          },
+          createdAt: new Date().toISOString(),
+        });
+      }
     }
 
     return {

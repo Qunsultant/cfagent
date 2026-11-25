@@ -11,7 +11,7 @@
  *   outcome is built by the deliver stage, so the goal tests pin
  *   the submission shape instead of the retired direct call.
  * - D8: audit vs telemetry on the goal path — stage audit records
- *   land in mas_events (orm.events), telemetry lands in the #1743
+ *   land in D1 mas_events, telemetry lands in the #1743
  *   Analytics Engine stream (env.OBSERVABILITY data points), and
  *   neither sink ever carries the other's records.
  * - D2: the third fixed site (screener failure-notify audit insert)
@@ -27,6 +27,11 @@ import * as path from "node:path";
 import { ScheduledTasksService } from "../src/services/scheduledTasks";
 import { DatabaseORM } from "../src/orm";
 import { MockSqlStorage } from "./mock-sql";
+import { MockD1Database } from "./mock-d1";
+import {
+  createD1AuditEventDb,
+  D1AuditEventStore,
+} from "../src/data/d1AuditEventAdapter";
 import { publishScreenerFailed } from "../src/events/screenerPublishers";
 import type { ScreenerFailedEvent } from "../src/events/screenerEvents";
 import type { Env } from "../src/types";
@@ -285,11 +290,16 @@ function workflowGoalService(opts: { withBinding: boolean }) {
       status: async () => ({ status: "queued" }),
     })),
   };
+  // #6102: the service's audit rows land in D1 now — one fresh
+  // mock per call (called once per test, so fresh per test; a
+  // shared env would share the memoized port).
+  const d1Mock = new MockD1Database();
+  const d1Store = new D1AuditEventStore(createD1AuditEventDb(d1Mock as never));
   const mockEnv = {
     ETRADE_ENVIRONMENT: "sandbox",
     FEATURE_FLAGS: JSON.stringify({ goal_workflow: true }),
     ...(opts.withBinding ? { SCREENER_WORKFLOW: binding } : {}),
-    AGENT_DB: {},
+    AGENT_DB: d1Mock,
     OBSERVABILITY: {
       writeDataPoint: (point: CapturedPoint) => {
         dataPoints.push(point);
@@ -297,37 +307,43 @@ function workflowGoalService(opts: { withBinding: boolean }) {
     },
   } as unknown as Env;
   const mockOrm = new DatabaseORM(new MockSqlStorage() as never);
-  const auditRows: Array<{ type?: string; payload?: Record<string, unknown> }> = [];
-  const realCreate = mockOrm.events.create.bind(mockOrm.events);
-  (mockOrm.events as unknown as Record<string, unknown>).create = (
-    row: { type?: string; payload?: Record<string, unknown> },
-  ) => {
-    auditRows.push(row);
-    return realCreate(row as never);
-  };
   const service = new ScheduledTasksService(mockEnv, mockOrm, "test_trader");
   (service as unknown as Record<string, unknown>).guardScheduledAuth = vi.fn(
     async () => ({ blocked: false as const }),
   );
-  return { service, dataPoints, auditRows };
+  return { service, dataPoints, d1Store };
 }
 
 describe("D8 audit vs telemetry on the goal path (#1999)", () => {
+  // The service's audit() helper is sync fire-and-forget, so poll
+  // briefly until the row lands instead of asserting a race.
+  async function pollAuditEvents(store: D1AuditEventStore, type: string) {
+    let rows = await store.findMany({ where: { type } });
+    for (let i = 0; i < 50 && rows.length === 0; i++) {
+      await new Promise((r) => setTimeout(r, 20));
+      rows = await store.findMany({ where: { type } });
+    }
+    return rows;
+  }
+
   it("a submitted run writes its audit row to mas_events and its start event to telemetry — never crossed", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
-    const { service, dataPoints, auditRows } = workflowGoalService({ withBinding: true });
+    const { service, dataPoints, d1Store } = workflowGoalService({ withBinding: true });
     const result = await service.autonomousGoalScreen({ goalKind: "income" });
     expect(result.success).toBe(true);
     expect((result as { data?: { status?: string } }).data?.status).toBe("queued");
 
-    // Audit side: the submission is a mas_events row (system
+    // Audit side: the submission is a D1 mas_events row (system
     // principal, D7), and the telemetry operation name never
     // appears as an audit row type.
+    const auditRows = await pollAuditEvents(d1Store, "goal_screen.workflow_submitted");
     const auditTypes = auditRows.map((r) => r.type);
     expect(auditTypes).toContain("goal_screen.workflow_submitted");
     expect(auditTypes).not.toContain("goal.workflow.start");
     const submitted = auditRows.find((r) => r.type === "goal_screen.workflow_submitted");
-    expect(submitted?.payload).toMatchObject({ principalKind: "system" });
+    // #6102: payload reads back as the stored JSON TEXT string —
+    // parse the stored form before asserting fields.
+    expect(JSON.parse(submitted?.payload as unknown as string)).toMatchObject({ principalKind: "system" });
 
     // Telemetry side: exactly one data point — the start event,
     // counts/ids shape (type, level, operation, run id) — and it
@@ -343,7 +359,7 @@ describe("D8 audit vs telemetry on the goal path (#1999)", () => {
 
   it("a failed start emits ONE telemetry error event (code, never an audit row for the telemetry op) and audits the run failure", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
-    const { service, dataPoints, auditRows } = workflowGoalService({ withBinding: false });
+    const { service, dataPoints, d1Store } = workflowGoalService({ withBinding: false });
     const result = await service.autonomousGoalScreen({ goalKind: "income" });
     expect(result.success).toBe(false);
 
@@ -358,6 +374,7 @@ describe("D8 audit vs telemetry on the goal path (#1999)", () => {
 
     // Audit: the run failure IS an audit-path event and is
     // recorded as one; the telemetry op is not.
+    const auditRows = await pollAuditEvents(d1Store, "goal_screen.run_failed");
     const auditTypes = auditRows.map((r) => r.type);
     expect(auditTypes).toContain("goal_screen.run_failed");
     expect(auditTypes).not.toContain("goal.workflow.start");

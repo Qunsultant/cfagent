@@ -1,6 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { DatabaseORM } from "../src/orm";
 import { MockSqlStorage } from "./mock-sql";
+import { MockD1Database } from "./mock-d1";
+import {
+  createD1AuditEventDb,
+  D1AuditEventStore,
+} from "../src/data/d1AuditEventAdapter";
 import { upsertAccountBinding } from "../src/services/accountBindings";
 
 /**
@@ -170,6 +175,9 @@ function seedBaselineSchedules(port: FakeSchedulingPort): void {
 describe("NLQ scheduling executes against the real scheduling port (issue #109)", () => {
   let orm: DatabaseORM;
   let env: Env;
+  // #6102: the scheduling audit rows land in D1 now — one fresh
+  // mock per test (a shared env would share the memoized port).
+  let d1Store: D1AuditEventStore;
   const sessionId = "scheduler_test_trader";
 
   beforeEach(async () => {
@@ -177,6 +185,8 @@ describe("NLQ scheduling executes against the real scheduling port (issue #109)"
     const sql = new MockSqlStorage();
     orm = new DatabaseORM(sql);
     orm.initializeSchema(sessionId);
+    const d1Mock = new MockD1Database();
+    d1Store = new D1AuditEventStore(createD1AuditEventDb(d1Mock as never));
     env = {
       APP_ENV: "TEST",
       APP_BASE_URL: "https://agent.openaimp.com",
@@ -191,6 +201,7 @@ describe("NLQ scheduling executes against the real scheduling port (issue #109)"
       ET_BASE_URL: "https://apisb.etrade.com/v1",
       // Issue #5100 (F3 of #5094): the binding store for the test login.
       SESSION_STORE: makeMemoryDoNamespace(),
+      AGENT_DB: d1Mock,
     } as Env;
     await seedTestBindings(env, sessionId);
   });
@@ -228,7 +239,8 @@ describe("NLQ scheduling executes against the real scheduling port (issue #109)"
     expect(result.summary).not.toMatch(/sched_(delayed|scheduled|cron|interval)_/);
 
     // The audit event is stamped with the REAL schedule id.
-    const created = orm.events.findMany({ where: { type: "schedule.created" } });
+    // #6102: the scheduling audit is awaited — direct D1 read.
+    const created = await d1Store.findMany({ where: { type: "schedule.created" } });
     expect(created).toHaveLength(1);
     // #2178 S1: stored payload is JSON text — parse the stored form.
     expect((JSON.parse(created[0].payload as unknown as string) as any)?.scheduleId).toBe("fake-port-id-1");
@@ -356,7 +368,7 @@ describe("NLQ scheduling executes against the real scheduling port (issue #109)"
     expect(result.status).toBe("error");
     expect(result.summary).toContain("NOT created");
     expect(result.summary).not.toContain("successfully");
-    expect(orm.events.findMany({ where: { type: "schedule.created" } })).toHaveLength(0);
+    expect((await d1Store.findMany({ where: { type: "schedule.created" } })).length).toBe(0);
   });
 
   it("fails honestly when the port throws — no success claim, no audit event", async () => {
@@ -372,7 +384,7 @@ describe("NLQ scheduling executes against the real scheduling port (issue #109)"
     expect(result.count).toBe(0);
     expect(result.summary).toContain("NOT created");
     expect(result.summary).not.toContain("Task scheduled successfully");
-    expect(orm.events.findMany({ where: { type: "schedule.created" } })).toHaveLength(0);
+    expect((await d1Store.findMany({ where: { type: "schedule.created" } })).length).toBe(0);
   });
 
   it("fails honestly when no scheduling port is wired", async () => {
@@ -384,7 +396,7 @@ describe("NLQ scheduling executes against the real scheduling port (issue #109)"
     expect(result.count).toBe(0);
     expect(result.summary).toContain("NOT executed");
     expect(result.summary).not.toContain("successfully");
-    expect(orm.events.findMany({ where: { type: "schedule.created" } })).toHaveLength(0);
+    expect((await d1Store.findMany({ where: { type: "schedule.created" } })).length).toBe(0);
   });
 
   it("lists the port's real schedules — baselines included, phantoms gone", async () => {
@@ -433,7 +445,8 @@ describe("NLQ scheduling executes against the real scheduling port (issue #109)"
     expect(cancelResult.status).toBe("cancelled");
     expect(cancelResult.summary).toContain(realId);
     expect(port.items).toHaveLength(0);
-    const cancelEvents = orm.events.findMany({ where: { type: "schedule.cancelled" } });
+    // #6102: the cancel audit is awaited — direct D1 read.
+    const cancelEvents = await d1Store.findMany({ where: { type: "schedule.cancelled" } });
     expect(cancelEvents).toHaveLength(1);
     expect((JSON.parse(cancelEvents[0].payload as unknown as string) as any)?.scheduleId).toBe(realId);
 
@@ -470,6 +483,9 @@ describe("NLQ scheduling executes against the real scheduling port (issue #109)"
 describe("NLQ scheduling F1 allow-list (issue #3122)", () => {
   let orm: DatabaseORM;
   let env: Env;
+  // #6102: the scheduling audit rows land in D1 now — one fresh
+  // mock per test (a shared env would share the memoized port).
+  let d1Store: D1AuditEventStore;
   const sessionId = "scheduler_test_trader";
 
   beforeEach(async () => {
@@ -477,6 +493,8 @@ describe("NLQ scheduling F1 allow-list (issue #3122)", () => {
     const sql = new MockSqlStorage();
     orm = new DatabaseORM(sql);
     orm.initializeSchema(sessionId);
+    const d1Mock = new MockD1Database();
+    d1Store = new D1AuditEventStore(createD1AuditEventDb(d1Mock as never));
     env = {
       APP_ENV: "TEST",
       APP_BASE_URL: "https://agent.openaimp.com",
@@ -489,6 +507,7 @@ describe("NLQ scheduling F1 allow-list (issue #3122)", () => {
       ET_BASE_URL: "https://apisb.etrade.com/v1",
       // Issue #5100 (F3 of #5094): the binding store for the test login.
       SESSION_STORE: makeMemoryDoNamespace(),
+      AGENT_DB: d1Mock,
     } as Env;
     await seedTestBindings(env, sessionId);
   });
@@ -546,7 +565,7 @@ describe("NLQ scheduling F1 allow-list (issue #3122)", () => {
     }
     expect(port.calls).toHaveLength(0);
     expect(port.items).toHaveLength(0);
-    expect(orm.events.findMany({ where: { type: "schedule.created" } })).toHaveLength(0);
+    expect((await d1Store.findMany({ where: { type: "schedule.created" } })).length).toBe(0);
   });
 
   it("3122-F1b still arms the reminder and each creatable callback", async () => {
@@ -596,6 +615,10 @@ describe("NLQ scheduling enforces the bound account (#5100)", () => {
     const sql = new MockSqlStorage();
     orm = new DatabaseORM(sql);
     orm.initializeSchema(sessionId);
+    // #6102: the scheduling audit rows land in D1 now — a fresh
+    // mock per test (a shared env would share the memoized port).
+    // No audit assertions live in this block, so no store is kept.
+    const d1Mock = new MockD1Database();
     env = {
       APP_ENV: "TEST",
       APP_BASE_URL: "https://agent.openaimp.com",
@@ -606,6 +629,7 @@ describe("NLQ scheduling enforces the bound account (#5100)", () => {
       ET_API_SECRET: "sandbox_consumer_secret_456",
       ET_BASE_URL: "https://apisb.etrade.com/v1",
       SESSION_STORE: makeMemoryDoNamespace(),
+      AGENT_DB: d1Mock,
     } as Env;
     await seedTestBindings(env, sessionId);
   });

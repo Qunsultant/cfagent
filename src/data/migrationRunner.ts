@@ -1504,6 +1504,18 @@ export const MIGRATION_0088_IDP_ATTRIBUTES_PROFILE: DataMigration = {
   name: "0088_idp_attributes_profile",
   sql: d1MigrationSql(88),
 };
+/**
+ * Migration 0089 — mas_events moves from the DO to D1 (#6102).
+ * Replacement, not projection: new writes go to D1, old DO rows
+ * stay where they are, history restarts at cutover. The D1 row IS
+ * the record (no projected_at_ms); the table + six indexes mirror
+ * the DO table exactly.
+ */
+export const MIGRATION_0089_MAS_EVENTS: DataMigration = {
+  version: 89,
+  name: "0089_mas_events",
+  sql: d1MigrationSql(89),
+};
 export const MIGRATION_0082_REFERRAL_TRIAL_EXTENSION: DataMigration = {
   version: 82,
   name: "0082_referral_trial_extension",
@@ -1779,6 +1791,7 @@ export const ALL_MIGRATIONS: DataMigration[] = [  MIGRATION_0001_AGENT_GOVERNANC
   MIGRATION_0086_JOB_RUN_RECORDS_OUTCOME_FACTS,
   MIGRATION_0087_NAV_ADMIN_CONFIG,
   MIGRATION_0088_IDP_ATTRIBUTES_PROFILE,
+  MIGRATION_0089_MAS_EVENTS,
 ];
 
 function splitStatements(sqlText: string): string[] {

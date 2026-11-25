@@ -46,7 +46,8 @@ import type {
   ApprovalWorkflow,
   ApprovalWorkflowHost,
 } from "../services/approvalWorkflowPorts";
-import { recordBlockingAudit } from "../security/auditChain";
+import { recordBlockingAuditAsync } from "../security/auditChain";
+import { auditEventPort } from "../data/createAuditEventPorts";
 import { z } from "zod";
 import { resolveAiModelName } from "./model";
 import type { Env } from "../types";
@@ -1218,9 +1219,10 @@ export class TradingAgent extends PortThink {
     if (!userLogin) {
       throw new TradingServiceError("invalid_input", "settleTradingOrder requires an explicit userLogin.");
     }
-    const events = this.getOrm().events;
     // Decision audit BEFORE settle: a throwing store blocks execution.
-    recordBlockingAudit(events, {
+    // #6102: the claim writes to D1 now; a null port (AGENT_DB
+    // unbound) throws, so an unaudited decision never executes.
+    await recordBlockingAuditAsync(await auditEventPort(this.env as unknown as { AGENT_DB?: unknown }), {
       id: crypto.randomUUID(),
       sessionId: userLogin,
       type: "trade.approval_decision",
@@ -1246,7 +1248,9 @@ export class TradingAgent extends PortThink {
     // cannot be undone — but a failed audit write surfaces as a
     // throw naming the unrecorded execution, never as success.
     try {
-      recordBlockingAudit(events, {
+      // #6102: the result claim writes to D1 now (see the decision
+      // audit above for the null-port contract).
+      await recordBlockingAuditAsync(await auditEventPort(this.env as unknown as { AGENT_DB?: unknown }), {
         id: crypto.randomUUID(),
         sessionId: userLogin,
         type: "trade.order_executed",
@@ -1314,7 +1318,9 @@ export class TradingAgent extends PortThink {
     // the run (contrast decideTradeApproval's blocking audit,
     // where an unaudited decision must never take effect).
     try {
-      recordBlockingAudit(this.getOrm().events, {
+      // #6102: the start claim writes to D1 now; a failed write
+      // still only warns (best-effort, per the comment above).
+      await recordBlockingAuditAsync(await auditEventPort(this.env as unknown as { AGENT_DB?: unknown }), {
         id: crypto.randomUUID(),
         sessionId: this.instanceUserLogin() ?? "unknown",
         type: "trade.approval_started",
@@ -1369,7 +1375,10 @@ export class TradingAgent extends PortThink {
     // login, so the session is the instance owner's when known and an
     // explicit "unknown" marker otherwise — never a defaulted
     // "system" identity (G-AUD-3).
-    recordBlockingAudit(this.getOrm().events, {
+    // #6102: the decision claim writes to D1 now; a null port
+    // (AGENT_DB unbound) throws, so an unaudited decision never
+    // reaches the workflow and cannot take effect.
+    await recordBlockingAuditAsync(await auditEventPort(this.env as unknown as { AGENT_DB?: unknown }), {
       id: crypto.randomUUID(),
       sessionId: this.instanceUserLogin() ?? "unknown",
       type: "trade.approval_decision",

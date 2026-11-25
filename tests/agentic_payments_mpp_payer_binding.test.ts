@@ -183,6 +183,11 @@ import {
 import { createInMemoryCanonicalReportStorePorts } from "../src/data/createCanonicalReportStorePorts";
 import { DatabaseORM } from "../src/orm";
 import { MockSqlStorage } from "./mock-sql";
+import { MockD1Database } from "./mock-d1";
+import {
+  createD1AuditEventDb,
+  D1AuditEventStore,
+} from "../src/data/d1AuditEventAdapter";
 import type { Env } from "../src/types";
 import {
   handlePremiumRoutes,
@@ -221,6 +226,15 @@ function makeOrm() {
 }
 
 const RESOURCE = TRADING_PAID_SERVICES.OPTIONS_SCREENER.resource;
+
+// #6102: the service's audit rows land in D1 now — a fresh mock per
+// test (a shared env would share the memoized port across tests).
+function makeD1Env() {
+  const mock = new MockD1Database();
+  const store = new D1AuditEventStore(createD1AuditEventDb(mock as never));
+  const env = { ...mockEnv, AGENT_DB: mock } as unknown as Env;
+  return { mock, store, env };
+}
 
 /** A request carrying an MPP Payment credential (content is opaque to the fakes). */
 function mppRequest(extraHeaders: Record<string, string> = {}): Request {
@@ -270,7 +284,8 @@ describe("MPP receipts bind to the verified payer (#700 point 3)", () => {
   it("stamps the receipt, ledger rows and audit events under x402:<address>", async () => {
     mppFake.source = SOURCE_DID;
     const orm = makeOrm();
-    const { res, fulfill, seen } = await payWithMpp(orm);
+    const d1 = makeD1Env();
+    const { res, fulfill, seen } = await payWithMpp(orm, d1.env);
 
     expect(res.status).toBe(200);
     expect(fulfill).toHaveBeenCalledTimes(1);
@@ -293,7 +308,8 @@ describe("MPP receipts bind to the verified payer (#700 point 3)", () => {
     expect(txs[0].status).toBe("completed");
 
     // Audit event: same scope, payer in the payload.
-    const events = orm.events.findMany({ where: { type: "AGENTIC_PAYMENT_COLLECTED" } });
+    // #6102: the audit row lands in D1 now.
+    const events = await d1.store.findMany({ where: { type: "AGENTIC_PAYMENT_COLLECTED" } });
     expect(events).toHaveLength(1);
     expect((events[0] as any).sessionId).toBe(`x402:${MPP_PAYER}`);
     // #2178 S1: stored payload is JSON text — parse the stored form.
@@ -424,12 +440,16 @@ describe("MPP fail-closed paths unchanged (#700 point 3)", () => {
     mppFake.mode = "challenge";
     mppFake.source = SOURCE_DID; // even a source-shaped header changes nothing pre-verification
     const orm = makeOrm();
-    const { res, fulfill } = await payWithMpp(orm);
+    const d1 = makeD1Env();
+    const { res, fulfill } = await payWithMpp(orm, d1.env);
 
     expect(res.status).toBe(402);
     expect(fulfill).not.toHaveBeenCalled();
     expect(orm.transactions.findMany()).toHaveLength(0);
-    expect(orm.events.findMany({ where: { type: "AGENTIC_PAYMENT_COLLECTED" } })).toHaveLength(0);
+    // #6102: the (absent) audit row is asserted in D1 now.
+    expect(
+      await d1.store.findMany({ where: { type: "AGENTIC_PAYMENT_COLLECTED" } }),
+    ).toHaveLength(0);
   });
 
   it("MPP unconfigured (no MPP_SECRET_KEY) stays 402 and fulfills nothing", async () => {

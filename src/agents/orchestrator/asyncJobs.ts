@@ -52,7 +52,8 @@ import {
 } from "../../services/consolidatedScheduling";
 import type { NLQSchedulingPort, NLQStockScreenPort } from "../nlq";
 import { BusinessError, codedMessage, resolveOutcome } from "../../outcomes/outcomeAspects";
-import { recordBlockingAudit } from "../../security/auditChain";
+import { recordBlockingAuditAsync } from "../../security/auditChain";
+import { auditEventPort } from "../../data/createAuditEventPorts";
 import type { AttributionEnvelopeOverride } from "../../security/attributionEnvelope";
 import {
   enforceServiceDispatch,
@@ -2906,7 +2907,10 @@ export async function executeAsyncJob(ctx: AsyncJobsContext, { jobId }: AsyncJob
           // executor's catch, which marks the job failed: the recipient
           // may already hold the artifact, but the system never reports
           // an unrecorded delivery as success.
-          recordBlockingAudit(ctx.getOrm().events, {
+          // #6102: the blocking claim writes to D1 now; a null port
+          // (AGENT_DB unbound) throws — the job fails, never reports
+          // an unrecorded delivery as success.
+          await recordBlockingAuditAsync(await auditEventPort(ctx.env as unknown as { AGENT_DB?: unknown }), {
             id: crypto.randomUUID(),
             sessionId: userLogin,
             type: "followup.delivered",

@@ -25,11 +25,19 @@
  *   asynchronously by verifyAndAlertD1Chain; no production writer
  *   feeds it today, so it is exercised by tests and available to
  *   the gate's future chain writes.
+ * #6102: the live mas_events chain is D1 now — verifyStoredAuditChain-
+ * AndAlertD1 is the async twin of the #3156 pass, and the d1-chain
+ * verifier's alert lands in D1 through recordTamperAlertAsync. The
+ * sync DO verifier stays for tests only; production no longer calls it.
  */
 import {
   diagnoseStoredAuditChain,
   type DatabaseORM,
 } from "../data/ormFacade";
+import {
+  diagnoseAuditChain,
+  type AuditChainRow,
+} from "../security/auditChain";
 import {
   verifyAuditChain as verifyPolicyChain,
   type AuditPolicyPort,
@@ -37,8 +45,11 @@ import {
 import type { AuditEvent } from "../types";
 import {
   recordBlockingAudit,
+  recordBlockingAuditAsync,
+  type AsyncBlockingAuditEvents,
   type BlockingAuditEvents,
 } from "../security/auditChain";
+import type { AsyncEventLogPort } from "../data/asyncEventLogPorts";
 import { createStructuredLogger } from "../observability/structuredLogger";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
 
@@ -106,6 +117,29 @@ export function recordTamperAlert(
 }
 
 /**
+ * #6102: async twin of recordTamperAlert — the alert lands in the
+ * live D1 mas_events table through the async blocking seam. Same
+ * fail-closed contract: a failed alert write propagates.
+ */
+export async function recordTamperAlertAsync(
+  events: AsyncBlockingAuditEvents,
+  finding: TamperFinding,
+): Promise<AuditEvent> {
+  const record = buildAlertRecord(finding);
+  structuredLog.error("audit.tamper_detected", {
+    message:
+      `[audit-tamper] chain verification FAILED chain=${finding.chain}` +
+      (finding.tenantId ? ` tenant=${finding.tenantId}` : "") +
+      ` brokenIndex=${finding.brokenIndex} reason=${finding.reason}`,
+    chain: finding.chain,
+    ...(finding.tenantId ? { tenantId: finding.tenantId } : {}),
+    brokenIndex: finding.brokenIndex,
+    reason: finding.reason,
+  });
+  return recordBlockingAuditAsync(events, record);
+}
+
+/**
  * Verify the stored mas_events chain and, on failure, record the
  * alert against the same store. A verification READ failure is
  * treated as a break (fail-closed: an unverifiable chain is not an
@@ -135,13 +169,47 @@ export function verifyStoredAuditChainAndAlert(orm: DatabaseORM): TamperAlertRes
 }
 
 /**
+ * #6102: async twin of verifyStoredAuditChainAndAlert — the full
+ * genesis-anchored verification of the live D1 mas_events chain,
+ * with the failure alert landing in D1. This is the schedules
+ * route's fallback when no checkpoint context (raw SQL) exists.
+ * A verification READ failure is a break (fail-closed); if the
+ * alert write then also fails, that failure propagates.
+ */
+export async function verifyStoredAuditChainAndAlertD1(
+  events: AsyncEventLogPort,
+): Promise<TamperAlertResult> {
+  let diagnosis: { valid: boolean; brokenIndex: number | null; reason: string | null };
+  try {
+    const rows = await events.readChainWindow(0);
+    diagnosis = diagnoseAuditChain(rows as AuditChainRow[]);
+  } catch (err) {
+    diagnosis = {
+      valid: false,
+      brokenIndex: null,
+      reason: `verification error: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+  if (diagnosis.valid) {
+    return { valid: true, brokenIndex: null, reason: null, alertRecorded: false };
+  }
+  const alert = await recordTamperAlertAsync(events, {
+    chain: "mas_events",
+    brokenIndex: diagnosis.brokenIndex,
+    reason: diagnosis.reason ?? "chain verification failed",
+  });
+  return { ...diagnosis, alertRecorded: true, alertId: alert.id };
+}
+
+/**
  * Verify one tenant's d1-chain entries and, on failure, record the
  * alert against the given audit-events store. Same fail-closed
  * treatment of verification read failures as the mas_events pass.
+ * #6102: the alert store is the async D1 port now.
  */
 export async function verifyAndAlertD1Chain(
   port: AuditPolicyPort,
-  events: BlockingAuditEvents,
+  events: AsyncBlockingAuditEvents,
   tenantId: string,
 ): Promise<TamperAlertResult> {
   let verification: { valid: boolean; brokenIndex: number | null; reason: string | null };
@@ -157,7 +225,7 @@ export async function verifyAndAlertD1Chain(
   if (verification.valid) {
     return { valid: true, brokenIndex: null, reason: null, alertRecorded: false };
   }
-  const alert = recordTamperAlert(events, {
+  const alert = await recordTamperAlertAsync(events, {
     chain: "d1-chain",
     tenantId,
     brokenIndex: verification.brokenIndex,

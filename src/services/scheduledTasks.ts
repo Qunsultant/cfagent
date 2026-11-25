@@ -60,6 +60,7 @@ import { ETradeService } from "./etrade";
 import { generationId, newRunId } from "./executionTreeIds";
 import { hasActiveChain } from "./asyncJobGate";
 import { createAsyncJobPorts } from "../data/createAsyncJobPorts";
+import { auditEventPort } from "../data/createAuditEventPorts";
 import {
   isPortfolioContextEnabled,
   settingReadFromSql,
@@ -946,35 +947,43 @@ export class ScheduledTasksService {
   }
 
   /**
-   * Helper to append an audit event into mas_events if ORM is available
+   * Helper to append an audit event into mas_events if ORM is available.
+   * #6102: the row writes to D1 now. The helper stays sync (50 call
+   * sites, best-effort by contract) — the D1 write fire-and-forgets
+   * and a failed write warns exactly as before, never failing the run.
    */
   private audit(type: string, payload: Record<string, unknown>): void {
-    if (!this.orm?.events) return;
-    try {
-      // Issue #1999 (D7): this service runs system-path executions
-      // only (cron/bridge/scheduled), so every row it writes is a
-      // system-principal row for the run owner â€” never a session
-      // row, never a defaulted identity. G-AUD-3, applied.
-      this.orm.events.create({
-        id: crypto.randomUUID(),
-        sessionId: this.userLogin,
-        type,
-        agent: "orchestrator",
-        payload: { ...payload, principalKind: "system" },
-        createdAt: new Date().toISOString(),
-      });
-    } catch (err) {
-      // Issue #1999: an audit insertion failure is fail-visible,
-      // never silent â€” the warn carries type + login on the
-      // worker-log channel. The run's outcome is unchanged: the
-      // audit store is the record, not the run.
-      structuredLog.warn("scheduledTasks.audit_insertion_failed", {
-        message: `[ScheduledTasksService] Audit insertion failed (type=${type}, login=${this.userLogin}): ${err instanceof Error ? err.message : String(err)}`,
-        type,
-        userLogin: this.userLogin,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
+    void (async () => {
+      try {
+        const port = await auditEventPort(
+          this.env as unknown as { AGENT_DB?: unknown },
+        );
+        if (!port) return;
+        // Issue #1999 (D7): this service runs system-path executions
+        // only (cron/bridge/scheduled), so every row it writes is a
+        // system-principal row for the run owner — never a session
+        // row, never a defaulted identity. G-AUD-3, applied.
+        await port.create({
+          id: crypto.randomUUID(),
+          sessionId: this.userLogin,
+          type,
+          agent: "orchestrator",
+          payload: { ...payload, principalKind: "system" },
+          createdAt: new Date().toISOString(),
+        });
+      } catch (err) {
+        // Issue #1999: an audit insertion failure is fail-visible,
+        // never silent — the warn carries type + login on the
+        // worker-log channel. The run's outcome is unchanged: the
+        // audit store is the record, not the run.
+        structuredLog.warn("scheduledTasks.audit_insertion_failed", {
+          message: `[ScheduledTasksService] Audit insertion failed (type=${type}, login=${this.userLogin}): ${err instanceof Error ? err.message : String(err)}`,
+          type,
+          userLogin: this.userLogin,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    })();
   }
 
   /**

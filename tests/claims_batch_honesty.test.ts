@@ -29,6 +29,11 @@ import { createRoot, type Root } from "react-dom/client";
 import { readFileSync } from "node:fs";
 import { DatabaseORM } from "../src/orm";
 import { MockSqlStorage } from "./mock-sql";
+import { MockD1Database } from "./mock-d1";
+import {
+  createD1AuditEventDb,
+  D1AuditEventStore,
+} from "../src/data/d1AuditEventAdapter";
 import { ScheduledTasksService } from "../src/services/scheduledTasks";
 import { ETradeWebhookService } from "../src/services/tradingWebhooks";
 import { verifyHmacSha256Signature } from "../src/security/webhookSecurity";
@@ -118,13 +123,31 @@ describe("F19 — dispatchReminder failure propagation", () => {
   let sql: MockSqlStorage;
   let orm: DatabaseORM;
   const sessionId = "reminder_test_trader";
-  const env = { APP_ENV: "TEST" } as Env;
+  // #6102: audit rows land in D1 now — one fresh mock + env per
+  // test (a shared env would share the memoized port and pollute
+  // counts across tests).
+  let env: Env;
+  let d1Store: D1AuditEventStore;
 
   beforeEach(() => {
     sql = new MockSqlStorage();
     orm = new DatabaseORM(sql);
     orm.initializeSchema(sessionId);
+    const d1Mock = new MockD1Database();
+    d1Store = new D1AuditEventStore(createD1AuditEventDb(d1Mock as never));
+    env = { APP_ENV: "TEST", AGENT_DB: d1Mock } as unknown as Env;
   });
+
+  // The service's audit() helper is sync fire-and-forget, so poll
+  // briefly until the row lands instead of asserting a race.
+  async function pollAuditEvents(type: string) {
+    let rows = await d1Store.findMany({ where: { type } });
+    for (let i = 0; i < 50 && rows.length === 0; i++) {
+      await new Promise((r) => setTimeout(r, 20));
+      rows = await d1Store.findMany({ where: { type } });
+    }
+    return rows;
+  }
 
   it("happy path: success with per-channel truth and a dispatched audit", async () => {
     const service = new ScheduledTasksService(env, orm, sessionId);
@@ -132,8 +155,8 @@ describe("F19 — dispatchReminder failure propagation", () => {
 
     expect(res.success).toBe(true);
     expect(res.data?.channels).toEqual({ audit: true, chatMessage: true });
-    expect(orm.events.findMany({ where: { type: "reminder.dispatched" } }).length).toBe(1);
-    expect(orm.events.findMany({ where: { type: "reminder.dispatch_failed" } }).length).toBe(0);
+    expect((await pollAuditEvents("reminder.dispatched")).length).toBe(1);
+    expect((await d1Store.findMany({ where: { type: "reminder.dispatch_failed" } })).length).toBe(0);
     expect(
       orm.messages.findMany({ where: { sessionId } }).some((m) => m.content.includes("Stretch and hydrate"))
     ).toBe(true);
@@ -150,8 +173,8 @@ describe("F19 — dispatchReminder failure propagation", () => {
     expect(res.error).toContain("could not be delivered");
     expect(res.data?.channels.chatMessage).toBe(false);
     expect(res.data?.messageError).toContain("sqlite locked");
-    expect(orm.events.findMany({ where: { type: "reminder.dispatched" } }).length).toBe(0);
-    const failed = orm.events.findMany({ where: { type: "reminder.dispatch_failed" } });
+    expect((await d1Store.findMany({ where: { type: "reminder.dispatched" } })).length).toBe(0);
+    const failed = await pollAuditEvents("reminder.dispatch_failed");
     expect(failed.length).toBe(1);
     // #2178 S1: stored payload is JSON text — parse the stored form.
     expect((JSON.parse(failed[0].payload as unknown as string) as any)?.error).toContain("sqlite locked");

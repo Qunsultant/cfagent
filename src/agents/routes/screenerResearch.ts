@@ -46,6 +46,7 @@ import {
   NIGHTLY_RESEARCH_RECORD_ID,
 } from "../../services/researchScheduleGuard";
 import { resolveResearchJobConfig } from "../../config/researchJobConfig";
+import { auditEventPort } from "../../data/createAuditEventPorts";
 import { describeResearchExecution } from "../../services/researchExecutionView";
 import { researchUniverseIds } from "../../trading";
 import type {
@@ -59,7 +60,7 @@ import { SqlJobRunRecordStore } from "../../data/doSqliteJobRunRecordAdapter";
 import { resolveScheduledJobAlertThreshold } from "../../config/scheduledJobAlert";
 import {
   recordScheduledJobOutcome,
-  scheduledJobOutcomeStoreFromOrmEvents,
+  scheduledJobOutcomeStoreFromAuditEvents,
   type ScheduledJobId,
   type ScheduledJobOutcomeInput,
 } from "../../observability/scheduledJobOutcomes";
@@ -221,12 +222,10 @@ async function recordTickJobOutcome(
   try {
     await recordScheduledJobOutcome(
       {
-        store: scheduledJobOutcomeStoreFromOrmEvents(() => {
-          const orm = ctx.getOrm() as unknown as {
-            events?: { create?: unknown; findMany?: unknown };
-          };
-          return orm?.events ?? null;
-        }, sessionId),
+        store: scheduledJobOutcomeStoreFromAuditEvents(
+          () => auditEventPort(ctx.env as unknown as { AGENT_DB?: unknown }),
+          sessionId,
+        ),
         alert: async (text: string) => {
           await postSlackText({
             post: resourceSlackPost,
@@ -2100,14 +2099,20 @@ export async function handleScreenerResearchRoutes(
               params,
             );
             try {
-              orm.events.create({
-                id: crypto.randomUUID(),
-                sessionId: userLogin,
-                type: "goal_screen.payment_started",
-                agent: "orchestrator",
-                payload: { principalKind: "session", jobId: idempotencyKey, trigger: "manual", workflowId: started.workflowId },
-                createdAt: new Date().toISOString(),
-              });
+              // #6102: the audit row writes to D1 now; a null port
+              // (AGENT_DB unbound) skips, and a failed write warns
+              // exactly as before.
+              const port = await auditEventPort(ctx.env as unknown as { AGENT_DB?: unknown });
+              if (port) {
+                await port.create({
+                  id: crypto.randomUUID(),
+                  sessionId: userLogin,
+                  type: "goal_screen.payment_started",
+                  agent: "orchestrator",
+                  payload: { principalKind: "session", jobId: idempotencyKey, trigger: "manual", workflowId: started.workflowId },
+                  createdAt: new Date().toISOString(),
+                });
+              }
             } catch (auditErr) {
               structuredLog.warn("screenerResearch.goal_screen_audit_insertion_failed", {
                 message: `[goal-screen-workflow] Audit insertion failed (type=goal_screen.payment_started, login=${userLogin}): ${auditErr instanceof Error ? auditErr.message : String(auditErr)}`,
@@ -2168,17 +2173,22 @@ export async function handleScreenerResearchRoutes(
           // warns and never fails the 202: the audit store is the
           // record, not the run.
           try {
-            orm.events.create({
-              id: crypto.randomUUID(),
-              sessionId: userLogin,
-              type: "goal_screen.workflow_submitted",
-              agent: "orchestrator",
-              // Issue #2989: the started workflow id, mirroring
-              // the scheduled path (which already records it) —
-              // the manual submit's job record at start time.
-              payload: { principalKind: "session", jobId: idempotencyKey, trigger: "manual", workflowId: handle.workflowId },
-              createdAt: new Date().toISOString(),
-            });
+            // #6102: D1 audit row (see goal_screen.payment_started
+            // above for the null-port contract).
+            const port = await auditEventPort(ctx.env as unknown as { AGENT_DB?: unknown });
+            if (port) {
+              await port.create({
+                id: crypto.randomUUID(),
+                sessionId: userLogin,
+                type: "goal_screen.workflow_submitted",
+                agent: "orchestrator",
+                // Issue #2989: the started workflow id, mirroring
+                // the scheduled path (which already records it) —
+                // the manual submit's job record at start time.
+                payload: { principalKind: "session", jobId: idempotencyKey, trigger: "manual", workflowId: handle.workflowId },
+                createdAt: new Date().toISOString(),
+              });
+            }
           } catch (auditErr) {
             structuredLog.warn("screenerResearch.goal_screen_audit_insertion_failed", {
               message: `[goal-screen-workflow] Audit insertion failed (type=goal_screen.workflow_submitted, login=${userLogin}): ${auditErr instanceof Error ? auditErr.message : String(auditErr)}`,
@@ -2210,20 +2220,25 @@ export async function handleScreenerResearchRoutes(
           // run_failed rows. A lost row warns and never changes
           // the coded 500 below.
           try {
-            orm.events.create({
-              id: crypto.randomUUID(),
-              sessionId: userLogin,
-              type: "goal_screen.run_failed",
-              agent: "orchestrator",
-              payload: {
-                principalKind: "session",
-                jobId: idempotencyKey,
-                code,
-                reason,
-                error: err instanceof Error ? err.message : String(err),
-              },
-              createdAt: new Date().toISOString(),
-            });
+            // #6102: D1 audit row (see goal_screen.payment_started
+            // above for the null-port contract).
+            const port = await auditEventPort(ctx.env as unknown as { AGENT_DB?: unknown });
+            if (port) {
+              await port.create({
+                id: crypto.randomUUID(),
+                sessionId: userLogin,
+                type: "goal_screen.run_failed",
+                agent: "orchestrator",
+                payload: {
+                  principalKind: "session",
+                  jobId: idempotencyKey,
+                  code,
+                  reason,
+                  error: err instanceof Error ? err.message : String(err),
+                },
+                createdAt: new Date().toISOString(),
+              });
+            }
           } catch (auditErr) {
             structuredLog.warn("screenerResearch.goal_screen_audit_insertion_failed", {
               message: `[goal-screen-workflow] Audit insertion failed (type=goal_screen.run_failed, login=${userLogin}): ${auditErr instanceof Error ? auditErr.message : String(auditErr)}`,

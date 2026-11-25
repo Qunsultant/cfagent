@@ -2294,6 +2294,87 @@ export const D1_CATALOGUE_ENTRIES: CatalogueEntry[] = [
     form: "literal",
   },
   {
+    // #6102 — migration 0089 replaces the DO mas_events data layer
+    // with D1: the D1 row IS the record (no projection, no
+    // projected_at_ms, no backfill of existing DO rows). Columns
+    // mirror the DO row exactly; the six indexes mirror the DO
+    // table's six (see schema.orm.mas_events in ormCatalogue.ts).
+    code: "schema.d1.mas_events.create_table",
+    plane: "d1",
+    table: "mas_events",
+    statement: `CREATE TABLE IF NOT EXISTS mas_events (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  type TEXT NOT NULL,
+  agent TEXT NOT NULL,
+  payload TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  previous_event_hash TEXT,
+  event_hash TEXT,
+  platform_id TEXT,
+  tenant_id TEXT,
+  principal_id TEXT,
+  correlation_id TEXT,
+  trace_id TEXT
+)`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    code: "schema.d1.mas_events.create_index_idx_mas_events_created",
+    plane: "d1",
+    table: "mas_events",
+    index: "idx_mas_events_created",
+    statement: `CREATE INDEX IF NOT EXISTS idx_mas_events_created ON mas_events(created_at, id)`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    code: "schema.d1.mas_events.create_index_idx_mas_events_session_type",
+    plane: "d1",
+    table: "mas_events",
+    index: "idx_mas_events_session_type",
+    statement: `CREATE INDEX IF NOT EXISTS idx_mas_events_session_type ON mas_events(session_id, type, created_at DESC)`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    code: "schema.d1.mas_events.create_index_idx_mas_events_tenant_created",
+    plane: "d1",
+    table: "mas_events",
+    index: "idx_mas_events_tenant_created",
+    statement: `CREATE INDEX IF NOT EXISTS idx_mas_events_tenant_created ON mas_events(tenant_id, created_at DESC)`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    code: "schema.d1.mas_events.create_index_idx_mas_events_principal_created",
+    plane: "d1",
+    table: "mas_events",
+    index: "idx_mas_events_principal_created",
+    statement: `CREATE INDEX IF NOT EXISTS idx_mas_events_principal_created ON mas_events(principal_id, created_at DESC)`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    code: "schema.d1.mas_events.create_index_idx_mas_events_type_created",
+    plane: "d1",
+    table: "mas_events",
+    index: "idx_mas_events_type_created",
+    statement: `CREATE INDEX IF NOT EXISTS idx_mas_events_type_created ON mas_events(type, created_at DESC)`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
+    code: "schema.d1.mas_events.create_index_idx_mas_events_correlation",
+    plane: "d1",
+    table: "mas_events",
+    index: "idx_mas_events_correlation",
+    statement: `CREATE INDEX IF NOT EXISTS idx_mas_events_correlation ON mas_events(correlation_id)`,
+    kind: "schema",
+    form: "literal",
+  },
+  {
     code: "schema.d1.job_enriched_datasets.create_table",
     plane: "d1",
     table: "job_enriched_datasets",
@@ -4083,6 +4164,17 @@ export const D1_MIGRATION_CODES: Record<number, readonly string[]> = {
     "schema.d1.agent_user_profiles_legacy.drop_table",
     "schema.d1.agent_user_profiles.create_unique_index_agent_user_profiles_login_tenant_idx",
     "schema.d1.agent_identity_attribute_index.create_table",
+  ],
+  // #6102 — mas_events moves from the DO to D1 by replacement
+  // (no backfill, no projection): the D1 table + the six DO indexes.
+  89: [
+    "schema.d1.mas_events.create_table",
+    "schema.d1.mas_events.create_index_idx_mas_events_created",
+    "schema.d1.mas_events.create_index_idx_mas_events_session_type",
+    "schema.d1.mas_events.create_index_idx_mas_events_tenant_created",
+    "schema.d1.mas_events.create_index_idx_mas_events_principal_created",
+    "schema.d1.mas_events.create_index_idx_mas_events_type_created",
+    "schema.d1.mas_events.create_index_idx_mas_events_correlation",
   ],
   82: [
     "schema.d1.agent_referral_rules.alter_table_add_column_extension_days",

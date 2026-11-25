@@ -18,6 +18,35 @@ import {
   handleAuditRoutes,
   type AuditRouteContext,
 } from "../src/agents/routes/audit";
+import { MockD1Database } from "./mock-d1";
+import {
+  createD1AuditEventDb,
+  D1AuditEventStore,
+} from "../src/data/d1AuditEventAdapter";
+import type { AuditEvent } from "../src/types";
+
+/**
+ * #6102: seed a D1 event log and return the env carrier for it.
+ * Rows are written through the real chained store, so the route
+ * reads exactly what production reads.
+ */
+async function seedD1Events(
+  rows: Array<Partial<AuditEvent> & { id: string }>,
+): Promise<{ AGENT_DB: MockD1Database }> {
+  const mock = new MockD1Database();
+  const store = new D1AuditEventStore(createD1AuditEventDb(mock as never));
+  for (const row of rows) {
+    await store.create({
+      sessionId: "s1",
+      type: "t",
+      agent: "orchestrator",
+      payload: {},
+      createdAt: "2026-10-19T05:00:00Z",
+      ...row,
+    } as AuditEvent);
+  }
+  return { AGENT_DB: mock };
+}
 
 const src = (rel: string) => readFileSync(`src/${rel}`, "utf8");
 
@@ -103,17 +132,19 @@ describe("handleAuditRoutes behavior", () => {
     // #1644: rows carry session_id (production rows always do — recordAudit
     // writes the instance session key), because the route now filters the
     // command output by session before projecting.
-    const rows = [
-      { id: "e1", session_id: "s1", type: "t.a", agent: "trading", payload: JSON.stringify({ k: 1 }), created_at: "2026-10-19T05:00:00Z" },
-      { id: "e2", session_id: "s1", type: "t.b", agent: "orchestrator", payload: "not-json{", created_at: "2026-10-19T06:00:00Z" },
-    ];
-    const ctx = baseCtx({ ensureTables: () => makeSql({ mas_events: rows }) });
+    // #6102: the rows live in D1 now — seeded through the real store.
+    const env = await seedD1Events([
+      { id: "e1", sessionId: "s1", type: "t.a", agent: "trading", payload: { k: 1 }, createdAt: "2026-10-19T05:00:00Z" },
+      { id: "e2", sessionId: "s1", type: "t.b", agent: "orchestrator", payload: "not-json{", createdAt: "2026-10-19T06:00:00Z" },
+    ]);
+    const ctx = baseCtx({ env });
     const res = await handleAuditRoutes(req("GET", "/api/audit"), new URL("https://x/api/audit"), "/api/audit", "s1", ctx);
     expect(res).not.toBeNull();
     const body = await res!.json();
     expect(body.count).toBe(2);
-    expect(body.events[0].payload).toEqual({ k: 1 });
-    expect(body.events[1].payload).toEqual({ raw: "not-json{" });
+    // created_at DESC: the later row (e2, unparseable) comes first.
+    expect(body.events[0].payload).toEqual({ raw: "not-json{" });
+    expect(body.events[1].payload).toEqual({ k: 1 });
   });
 
   it("GET /audit clamps the limit param to 1..100", async () => {
@@ -122,15 +153,18 @@ describe("handleAuditRoutes behavior", () => {
     // pinned by returned count, not by a SQL parameter. A non-numeric
     // limit clamps through Math.max/min to NaN, and slice(0, NaN) yields
     // zero rows — deterministic empty, replacing the old NaN-param quirk.
-    const rows = Array.from({ length: 150 }, (_, i) => ({
-      id: `e${i}`,
-      session_id: "s",
-      type: "t",
-      agent: "trading",
-      payload: JSON.stringify({ k: i }),
-      created_at: `2026-10-19T${String(i % 24).padStart(2, "0")}:00:00Z`,
-    }));
-    const ctx = baseCtx({ ensureTables: () => makeSql({ mas_events: rows }) });
+    // #6102: the rows live in D1 now — seeded through the real store.
+    const env = await seedD1Events(
+      Array.from({ length: 150 }, (_, i) => ({
+        id: `e${i}`,
+        sessionId: "s",
+        type: "t",
+        agent: "trading",
+        payload: { k: i },
+        createdAt: `2026-10-19T${String(i % 24).padStart(2, "0")}:00:00Z`,
+      })),
+    );
+    const ctx = baseCtx({ env });
     const capped = await handleAuditRoutes(req("GET", "/api/audit?limit=5000"), new URL("https://x/api/audit?limit=5000"), "/api/audit", "s", ctx);
     expect((await capped!.json()).count).toBe(100);
     const nan = await handleAuditRoutes(req("GET", "/api/audit?limit=abc"), new URL("https://x/api/audit?limit=abc"), "/api/audit", "s", ctx);

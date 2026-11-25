@@ -25,6 +25,7 @@ import {
 } from "../../observability/scheduledJobOutcomes";
 import { postSlackText, resourceSlackPost } from "../resourceGoals";
 import type { SlackDeliveryEnv } from "../social/delivery";
+import { auditEventPort } from "../../data/createAuditEventPorts";
 
 /**
  * Issue Qunsultant/cfagent#2037 — the reflection job's outcome
@@ -51,26 +52,17 @@ function reflectionOutcomeDeps(ctx: EtradeBrokerRouteContext): {
       );
     },
     recentOutcomes: async (maxRows) => {
-      const events = (ctx.getOrm() as unknown as {
-        events?: {
-          findMany: (options: {
-            where: { type: string };
-            orderBy?: string;
-            limit?: number;
-          }) => Array<{
-            payload?: unknown;
-            createdAt?: string;
-            created_at?: string;
-          }>;
-        };
-      }).events;
-      if (!events || typeof events.findMany !== "function") return [];
-      return events
-        .findMany({
-          where: { type: SCHEDULED_JOB_OUTCOME_TYPE },
-          orderBy: "created_at DESC",
-          limit: maxRows,
-        })
+      // #6102: the outcome rows live in D1 now; a null port
+      // (AGENT_DB unbound) reads empty, exactly as the missing
+      // port did before.
+      const port = await auditEventPort(ctx.env as unknown as { AGENT_DB?: unknown });
+      if (!port) return [];
+      const rows = await port.findMany({
+        where: { type: SCHEDULED_JOB_OUTCOME_TYPE },
+        orderBy: "created_at DESC",
+        limit: maxRows,
+      });
+      return rows
         .map(parseScheduledJobOutcomeRow)
         .filter(
           (row): row is ScheduledJobOutcomeRow => row !== null,

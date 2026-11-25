@@ -48,7 +48,7 @@ export type EnrichmentAuditFn = (
   type: string,
   agent: string,
   payload: Record<string, unknown>,
-) => unknown;
+) => Promise<unknown>;
 
 const CREATE_RUNS_SQL = doTableSql("mas_enrichment_runs");
 const CREATE_RUNS_INDEX_SQL = doIndexSql("idx_mas_enrichment_runs_job");
@@ -141,14 +141,11 @@ export class SqlEnrichmentStore implements EnrichmentRunStore {
       ENRICHMENT_KILLSWITCH_KEY,
       state === "halted" ? "on" : "off",
     );
-    // Best-effort audit: never blocks an operator stop.
-    try {
-      this.audit?.("enrichment.killswitch", "enrichment", {
-        state,
-        setBy,
-        reason,
-      });
-    } catch (err) {
+    // Best-effort audit: never blocks an operator stop. The audit fn
+    // is async (#6102: D1) — a rejection must not surface either, so
+    // both the sync throw and the async rejection land in the same
+    // ignored-error log.
+    const auditFailed = (err: unknown) => {
       this.log.error("doSqliteEnrichmentAdapter.killswitch_audit_failed", {
         message: "[Enrichment] Killswitch audit failed (ignored):",
         error: err instanceof Error ? err.message : String(err),
@@ -156,6 +153,17 @@ export class SqlEnrichmentStore implements EnrichmentRunStore {
         setBy,
         reason,
       });
+    };
+    try {
+      void Promise.resolve(
+        this.audit?.("enrichment.killswitch", "enrichment", {
+          state,
+          setBy,
+          reason,
+        }),
+      ).catch(auditFailed);
+    } catch (err) {
+      auditFailed(err);
     }
     return state;
   }

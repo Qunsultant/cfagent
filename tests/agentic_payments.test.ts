@@ -20,6 +20,11 @@ import {
 } from "../src/services/agenticPayments";
 import { DatabaseORM } from "../src/orm";
 import { MockSqlStorage } from "./mock-sql";
+import { MockD1Database } from "./mock-d1";
+import {
+  createD1AuditEventDb,
+  D1AuditEventStore,
+} from "../src/data/d1AuditEventAdapter";
 import { createInMemoryCanonicalReportStorePorts } from "../src/data/createCanonicalReportStorePorts";
 import type { Env, X402PaymentProof } from "../src/types";
 import { AGENT_DIDS } from "../src/agents/did";
@@ -67,13 +72,18 @@ describe("Cloudflare Agentic Payments (x402 & MPP Standards)", () => {
   let orm: DatabaseORM;
   let mockEnv: Env;
   let paymentService: ETradeAgenticPaymentService;
+  // #6102: the service's audit rows land in D1 now.
+  let d1Store: D1AuditEventStore;
 
   beforeEach(() => {
     sql = new MockSqlStorage();
     orm = new DatabaseORM(sql);
     orm.initializeSchema("trader_session_1");
+    const d1Mock = new MockD1Database();
+    d1Store = new D1AuditEventStore(createD1AuditEventDb(d1Mock as never));
 
     mockEnv = {
+      AGENT_DB: d1Mock as never,
       AI: {} as any,
       AI_SEARCH_ENDPOINT: "https://mock.search",
       ORCHESTRATOR_AGENT: {} as any,
@@ -450,7 +460,8 @@ describe("Cloudflare Agentic Payments (x402 & MPP Standards)", () => {
       expect(lastTx.currency).toBe("USDC");
       expect(lastTx.status).toBe("completed");
 
-      const events = orm.events.findMany({ where: { type: "AGENTIC_PAYMENT_COLLECTED" } });
+      // #6102: the audit row lands in D1 now.
+      const events = await d1Store.findMany({ where: { type: "AGENTIC_PAYMENT_COLLECTED" } });
       expect(events.length).toBe(1);
     });
 

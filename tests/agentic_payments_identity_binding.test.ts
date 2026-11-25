@@ -137,6 +137,16 @@ import { PREMIUM_GATEWAY_INSTANCE } from "../src/server";
 import type { Env, X402PaymentProof } from "../src/types";
 import { DatabaseORM } from "../src/orm";
 import { MockSqlStorage } from "./mock-sql";
+import { MockD1Database } from "./mock-d1";
+import {
+  createD1AuditEventDb,
+  D1AuditEventStore,
+} from "../src/data/d1AuditEventAdapter";
+import {
+  applyMigrations,
+  ALL_MIGRATIONS,
+  type MigrationDb,
+} from "../src/data/migrationRunner";
 // #5609 (G-7): the premium routes resolve their price from the
 // catalogue (getApprovedPremiumPrice). This suite binds no D1, so
 // the catalogue resolves from the approved in-memory fixture —
@@ -472,14 +482,29 @@ describe("auto-approve limit persists per identity (#183)", () => {
 describe("premium routes bind persisted state to the verified payer (#183)", () => {
   let orm: DatabaseORM;
   let ctx: PremiumRouteContext;
+  // #6102: the service's audit rows land in D1 now — one fresh mock
+  // per test (a shared env would share the memoized port across tests).
+  let d1Store: D1AuditEventStore;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     orm = makeOrm();
     etradeCapture.logins.length = 0;
+    const d1Mock = new MockD1Database();
+    const d1Db = createD1AuditEventDb(d1Mock as never);
+    d1Store = new D1AuditEventStore(d1Db);
+    // The session-login paid-scan path resolves the metered tier and
+    // other state from D1 tables — a bare mock 503s the gate, so the
+    // full migration set is applied (as in production D1). The audit
+    // rows still come from the 0089 ensure on first port use.
+    await applyMigrations(d1Db as unknown as MigrationDb, ALL_MIGRATIONS);
     // Issue #2408: the route meters served calls through ctx.sql —
     // the production host always supplies it (makePremiumRouteContext),
     // so this route-level served expectation supplies it too.
-    ctx = { env: mockEnv, sql: new MockSqlStorage(), getOrm: () => orm } as unknown as PremiumRouteContext;
+    ctx = {
+      env: { ...mockEnv, AGENT_DB: d1Mock } as unknown as Env,
+      sql: new MockSqlStorage(),
+      getOrm: () => orm,
+    } as unknown as PremiumRouteContext;
   });
 
   const premiumUrl = new URL("https://agent.internal/premium/options-scan");
@@ -547,14 +572,25 @@ describe("premium routes bind persisted state to the verified payer (#183)", () 
       expect(tx.status).toBe("completed");
     }
 
-    const collected = orm.events.findMany({ where: { type: "AGENTIC_PAYMENT_COLLECTED" } });
+    // #6102: the audit rows land in D1 now. The challenge writes are
+    // fire-and-forget (sync 402 builder), so poll briefly until they
+    // land instead of asserting a race.
+    const readEvents = async (type: string) =>
+      d1Store.findMany({ where: { type } });
+    let collected: Awaited<ReturnType<typeof readEvents>> = [];
+    let challenges: Awaited<ReturnType<typeof readEvents>> = [];
+    for (let i = 0; i < 50; i++) {
+      collected = await readEvents("AGENTIC_PAYMENT_COLLECTED");
+      challenges = await readEvents("AGENTIC_PAYMENT_CHALLENGE");
+      if (collected.length === 2 && challenges.length >= 2) break;
+      await new Promise((r) => setTimeout(r, 20));
+    }
     expect(collected).toHaveLength(2);
     for (const evt of collected) expect((evt as any).sessionId).toBe("x402:0xPayer183");
 
     // Challenge events are keyed by their challenge nonce in gateway
     // mode — never by an asserted login, the gateway instance id, or a
     // shared consumer identity.
-    const challenges = orm.events.findMany({ where: { type: "AGENTIC_PAYMENT_CHALLENGE" } });
     expect(challenges.length).toBeGreaterThanOrEqual(2);
     for (const evt of challenges) {
       expect((evt as any).sessionId).toMatch(/^x402:challenge:/);

@@ -57,6 +57,11 @@ vi.mock("../src/workflows/runStockScreenViaEngine", async (importOriginal) => {
 import { makeFakeSessionStore } from "./fake-session-store";
 import { DatabaseORM } from "../src/orm";
 import { MockSqlStorage } from "./mock-sql";
+import { MockD1Database } from "./mock-d1";
+import {
+  createD1AuditEventDb,
+  D1AuditEventStore,
+} from "../src/data/d1AuditEventAdapter";
 import { DynamicMarketScreener } from "../src/trading/screener";
 import { MOCK_TEST_UNIVERSE } from "./fixtures/mockUniverse";
 import { ScheduledTasksService } from "../src/services/scheduledTasks";
@@ -90,7 +95,26 @@ describe("Cloudflare Agents: Task Scheduling & Durable Timers", () => {
   let mockKv: MockKVNamespace;
   let lastScreenerRequest: any;
   let env: Env;
+  // #6102: audit rows land in D1 now — one fresh mock + store per
+  // test (a shared env would share the memoized port across tests).
+  let auditStore: D1AuditEventStore;
   const sessionId = "scheduler_test_trader";
+
+  // The service's audit() helper stays sync and fire-and-forgets
+  // the D1 write, so poll briefly until the row lands instead of
+  // asserting a race. Payload reads back as the stored JSON TEXT.
+  async function waitForAuditEvents(type: string, expected = 1) {
+    let rows: any[] = [];
+    for (let i = 0; i < 50; i++) {
+      rows = await auditStore.findMany({ where: { type } });
+      if (rows.length >= expected) break;
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    return rows;
+  }
+  function auditPayload(row: any) {
+    return typeof row.payload === "string" ? JSON.parse(row.payload) : row.payload;
+  }
 
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -101,6 +125,8 @@ describe("Cloudflare Agents: Task Scheduling & Durable Timers", () => {
     orm.initializeSchema(sessionId);
     mockKv = new MockKVNamespace();
     const { namespace: sessionStoreNs } = makeFakeSessionStore();
+    const d1Mock = new MockD1Database();
+    auditStore = new D1AuditEventStore(createD1AuditEventDb(d1Mock as never));
 
     env = {
       APP_ENV: "TEST",
@@ -112,6 +138,7 @@ describe("Cloudflare Agents: Task Scheduling & Durable Timers", () => {
       ET_BASE_URL: "https://apisb.etrade.com/v1",
       ETRADE_KV: mockKv as any,
       SESSION_STORE: sessionStoreNs,
+      AGENT_DB: d1Mock as any,
       ORCHESTRATOR_AGENT: {} as any,
       // Issue #261: mock ScreenerAgent — the service delegates screening to it.
       SCREENER_AGENT: {
@@ -279,8 +306,8 @@ describe("Cloudflare Agents: Task Scheduling & Durable Timers", () => {
       expect(res.data?.renewed).toBe(true);
       expect(res.data?.userLogin).toBe(sessionId);
 
-      // Verify audit event in mas_events
-      const auditEvents = orm.events.findMany({ where: { type: "etrade.token_auto_renewed" } });
+      // Verify audit event in D1 (#6102: mas_events moved to D1).
+      const auditEvents = await waitForAuditEvents("etrade.token_auto_renewed");
       expect(auditEvents.length).toBe(1);
 
       fetchSpy.mockRestore();
@@ -313,15 +340,21 @@ describe("Cloudflare Agents: Task Scheduling & Durable Timers", () => {
         expect(typeof s.momentumScore).toBe("number");
       }
 
-      // Verify audit event in mas_events if opportunities detected
-      const events = orm.events.findMany({ where: { type: "screener.opportunities_detected" } });
-      const runEvent = orm.events.findMany({ where: { type: "screener.run_completed" } })[0];
+      // Verify audit events in D1 (#6102: mas_events moved to D1).
+      // run_completed is audited before opportunities_detected, so
+      // wait for each in turn — both writes fire-and-forget.
+      const runEvents = await waitForAuditEvents("screener.run_completed");
+      const runEvent = runEvents[0];
+      expect(runEvents.length).toBe(1);
       // #2178 S1: stored payload is JSON text — parse the stored form.
-      expect(JSON.parse(runEvent.payload as unknown as string)).toMatchObject({
+      expect(auditPayload(runEvent)).toMatchObject({
         screenType: "stock",
         runType: "scheduled",
         runId: expect.stringMatching(/^screener:/),
       });
+      const events = res.data?.opportunities && res.data.opportunities.length > 0
+        ? await waitForAuditEvents("screener.opportunities_detected")
+        : await auditStore.findMany({ where: { type: "screener.opportunities_detected" } });
       if (res.data?.opportunities && res.data.opportunities.length > 0) {
         expect(events.length).toBeGreaterThan(0);
       }
@@ -381,8 +414,8 @@ describe("Cloudflare Agents: Task Scheduling & Durable Timers", () => {
       expect(updatedTrade?.status).toBe("expired");
       expect(updatedTrade?.previewNotes).toContain("Auto-expired");
 
-      // Verify audit event
-      const auditEvents = orm.events.findMany({ where: { type: "order.auto_expired" } });
+      // Verify audit event in D1 (#6102: mas_events moved to D1).
+      const auditEvents = await waitForAuditEvents("order.auto_expired");
       expect(auditEvents.length).toBe(1);
     });
 
@@ -453,8 +486,8 @@ describe("Cloudflare Agents: Task Scheduling & Durable Timers", () => {
       expect(res.taskType).toBe("reminder");
       expect(res.data?.reminderId).toBe("rem_456");
 
-      // Verify audit event
-      const auditEvents = orm.events.findMany({ where: { type: "reminder.dispatched" } });
+      // Verify audit event in D1 (#6102: mas_events moved to D1).
+      const auditEvents = await waitForAuditEvents("reminder.dispatched");
       expect(auditEvents.length).toBe(1);
 
       // Verify message in ORM
@@ -476,17 +509,16 @@ describe("Cloudflare Agents: Task Scheduling & Durable Timers", () => {
       expect(res.error).toContain("Incomplete options universe");
 
       // A partial/auth-failed run must never become a completed report.
-      const auditEvents = orm.events.findMany({ where: { type: "options.scheduled_analysis_failed" } });
+      // Audit events live in D1 now (#6102).
+      const auditEvents = await waitForAuditEvents("options.scheduled_analysis_failed");
       expect(auditEvents.length).toBe(1);
-      const failurePayload = typeof auditEvents[0].payload === "string"
-        ? JSON.parse(auditEvents[0].payload)
-        : auditEvents[0].payload;
+      const failurePayload = auditPayload(auditEvents[0]);
       expect(failurePayload).toMatchObject({
         screenType: "options",
         runType: "manual",
         runId: expect.stringMatching(/^run:/),  // #5175 slice 3: scheduled analysis run id mints run:
       });
-      expect(orm.events.findMany({ where: { type: "options.scheduled_analysis_completed" } })).toHaveLength(0);
+      expect(await auditStore.findMany({ where: { type: "options.scheduled_analysis_completed" } })).toHaveLength(0);
 
       // The failure remains visible to the user.
       const messages = orm.messages.findMany({ where: { sessionId } });

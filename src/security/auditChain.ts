@@ -167,6 +167,35 @@ export function recordBlockingAudit(
   return events.create(record);
 }
 
+/**
+ * Issue #6102 — async twin of BlockingAuditEvents, for the D1
+ * audit-event port (the DO port is sync; D1 is async).
+ */
+export interface AsyncBlockingAuditEvents {
+  create(record: AuditEvent): Promise<AuditEvent>;
+}
+
+/**
+ * Issue #6102 — async blocking audit write for consequential
+ * actions, through the D1 port. Same contract as
+ * recordBlockingAudit: deliberately no try/catch — a null port
+ * throws (fail-closed: an unaudited consequential action must
+ * never take effect), and a failed write propagates to the
+ * caller, so the caller must not report success for an action
+ * whose own audit write failed.
+ */
+export async function recordBlockingAuditAsync(
+  events: AsyncBlockingAuditEvents | null | undefined,
+  record: AuditEvent,
+): Promise<AuditEvent> {
+  if (!events) {
+    throw new Error(
+      "recordBlockingAuditAsync: no audit event port (AGENT_DB unbound)",
+    );
+  }
+  return events.create(record);
+}
+
 /** First break of a mas_events chain, for the #3156 alert path. */
 export interface AuditChainDiagnosis {
   valid: boolean;

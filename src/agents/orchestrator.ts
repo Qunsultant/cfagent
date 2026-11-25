@@ -217,6 +217,7 @@ import { handleReportsRoutes } from "./routes/reports";
 
 import { buildDataProviderPorts } from "../data/buildDataProviderPorts";
 import { createEnsuredAuditPolicyAdapter } from "../data/createAuditPolicyPorts";
+import { auditEventPort } from "../data/createAuditEventPorts";
 import type { AuditPolicyPort } from "../data/auditPolicyPorts";
 import type { D1ProviderConfigAdapter } from "../data/d1ProviderConfigAdapter";
 import type { D1ProviderCaptureAdapter } from "../data/d1ProviderCaptureAdapter";
@@ -2713,21 +2714,25 @@ export class OrchestratorAgent extends PortThink {
   }
 
   /**
-   * Inserts one audit row into mas_events and returns the stored record.
-   * Single owner of audit-row inserts (issue #270): this.audit() and the
-   * POST /audit/event route both funnel through here.
-   * Issue #2178 (Q7 S1): via the chained events Repository, not raw SQL.
+   * Inserts one audit row into mas_events (D1, #6102) and returns
+   * the stored record. Single owner of audit-row inserts (issue
+   * #270): this.audit() and the POST /audit/event route both
+   * funnel through here.
+   * Issue #2178 (Q7 S1): via the chained events port, not raw SQL.
    * Issue #6100: stamps the attribution envelope here — trace id from the
    * turn's traceparent (null, never fabricated), principal from its login,
    * tenant/correlation from an explicit caller override only.
+   * Issue #6102: the write goes to D1 through the async event-log
+   * port. A null port (AGENT_DB unbound) throws — audit() swallows
+   * it as before, POST /api/audit/event 500s as before on a write
+   * failure. No DO fallback: the DO table is frozen history.
    */
-  private recordAudit(
+  private async recordAudit(
     type: string,
     agent: string,
     payload: Record<string, unknown>,
     envelope?: AttributionEnvelopeOverride,
-  ): { id: string; type: string; agent: string; payload: Record<string, unknown>; created_at: string } {
-    const orm = this.getOrm();
+  ): Promise<{ id: string; type: string; agent: string; payload: Record<string, unknown>; created_at: string }> {
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
     const traceparent = this.turnTraceparent();
@@ -2741,7 +2746,11 @@ export class OrchestratorAgent extends PortThink {
       },
       envelope,
     );
-    orm.events.create({
+    const port = await auditEventPort(this.env);
+    if (!port) {
+      throw new Error("recordAudit: no audit event port (AGENT_DB unbound)");
+    }
+    await port.create({
       id,
       // Issue #6100: the session is this boundary's own key.
       sessionId: this.sessionKey(),
@@ -2764,11 +2773,15 @@ export class OrchestratorAgent extends PortThink {
     payload: Record<string, unknown>,
     envelope?: AttributionEnvelopeOverride,
   ) {
-    try {
-      this.recordAudit(type, agent, payload, envelope);
-    } catch {
-      // Don't fail execution if audit insertion fails
-    }
+    // #6102: recordAudit is async (D1); audit stays sync and
+    // fire-and-forgets. The settled promise is registered on the
+    // agent context's waitUntil so the write is not lost when the
+    // turn ends — and a failed write is swallowed exactly as
+    // before: audit never fails execution.
+    const settled = this.recordAudit(type, agent, payload, envelope).catch(
+      () => undefined,
+    );
+    this.ctx.waitUntil?.(settled);
   }
 
   // ---------------------------------------------------------------------------
@@ -3079,7 +3092,7 @@ export class OrchestratorAgent extends PortThink {
     validation: { ok: boolean; reasons?: string[] };
     effectiveFilters?: Record<string, unknown>;
   }): Promise<void> {
-    this.recordAudit("screener.interpretation", "orchestrator", {
+    await this.recordAudit("screener.interpretation", "orchestrator", {
       jobId: record.jobId,
       userLogin: record.userLogin,
       mode: "non-deterministic",

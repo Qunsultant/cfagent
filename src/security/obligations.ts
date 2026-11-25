@@ -95,7 +95,7 @@ import {
   type Permission,
 } from "./authorization";
 import { checkPermission, type CheckPermissionInput } from "./iaaaPdpSeam";
-import { recordBlockingAudit, type BlockingAuditEvents } from "./auditChain";
+import { recordBlockingAuditAsync, type AsyncBlockingAuditEvents } from "./auditChain";
 import {
   DEFAULT_SESSION_POLICY,
   DEFAULT_STEP_UP_FRESHNESS_MS,
@@ -205,12 +205,13 @@ export type ObligationAuditWriter = (
  * mas_events write path, so they keep the IAAA DO-log writer
  * until a worker→DO audit RPC exists; this factory is the sink
  * agent-side enforcement points use.
+ * #6102: the repo is the async D1 port now.
  */
 export function createChainedAuditWriter(
-  events: BlockingAuditEvents,
+  events: AsyncBlockingAuditEvents,
 ): ObligationAuditWriter {
   return async (event) => {
-    recordBlockingAudit(events, {
+    await recordBlockingAuditAsync(events, {
       id: crypto.randomUUID(),
       sessionId: event.principalId,
       type: "iaaa.guard_decision",

@@ -49,6 +49,7 @@ import {
   type LedgerLinkage,
 } from "../services/consolidatedScheduling";
 import { createStructuredLogger } from "./structuredLogger";
+import type { AsyncEventLogPort } from "../data/asyncEventLogPorts";
 
 /** Issue #3515 S3 — module logger on the S2 structured-logging seam. */
 const structuredLog = createStructuredLogger(createObservabilitySink({}), {
@@ -282,51 +283,48 @@ export function parseScheduledJobOutcomeRow(row: {
 }
 
 /**
- * Build a store over an ORM events port. The getters are lazy on
- * purpose: a handler passes `() => ctx.getOrm().events` and any
- * failure surfaces inside recordScheduledJobOutcome's guarded
- * paths (streak fallback, recorded:false) instead of failing the
- * response the handler owes its caller.
+ * Build a store over an async audit-events port (#6102: the D1
+ * mas_events port — the DO table is frozen at cutover). The getter
+ * is lazy on purpose: a handler passes
+ * `() => auditEventPort(ctx.env)` and any failure surfaces inside
+ * recordScheduledJobOutcome's guarded paths (streak fallback,
+ * recorded:false) instead of failing the response the handler owes
+ * its caller.
  */
-export function scheduledJobOutcomeStoreFromOrmEvents(
-  getEvents: () => {
-    create?: unknown;
-    findMany?: unknown;
-  } | null | undefined,
+export function scheduledJobOutcomeStoreFromAuditEvents(
+  getEvents: () =>
+    | AsyncEventLogPort
+    | Promise<AsyncEventLogPort | null>
+    | null
+    | undefined,
   sessionId = "",
 ): ScheduledJobOutcomeStore {
   return {
     writeOutcome: async (entry) => {
-      const events = getEvents() as {
-        create: (row: Record<string, unknown>) => void | Promise<void>;
-      };
+      const events = await getEvents();
+      if (!events) {
+        throw new Error(
+          "scheduledJobOutcomeStoreFromAuditEvents: no audit event port (AGENT_DB unbound)",
+        );
+      }
       await events.create({
         id: crypto.randomUUID(),
         sessionId,
         type: SCHEDULED_JOB_OUTCOME_TYPE,
         agent: "orchestrator",
-        payload: buildScheduledJobOutcomePayload(entry),
+        // Fresh literal (spread) so the named payload type satisfies
+        // AuditEvent's Record<string, unknown> payload.
+        payload: { ...buildScheduledJobOutcomePayload(entry) },
         createdAt: new Date().toISOString(),
       });
     },
     recentOutcomes: async (maxRows) => {
-      const events = getEvents() as {
-        findMany: (options: {
-          where: { type: string };
-          orderBy?: string;
-          limit?: number;
-        }) => Array<{
-          payload?: unknown;
-          createdAt?: string;
-          created_at?: string;
-        }> | Promise<
-          Array<{
-            payload?: unknown;
-            createdAt?: string;
-            created_at?: string;
-          }>
-        >;
-      };
+      const events = await getEvents();
+      if (!events) {
+        throw new Error(
+          "scheduledJobOutcomeStoreFromAuditEvents: no audit event port (AGENT_DB unbound)",
+        );
+      }
       const rows = await events.findMany({
         where: { type: SCHEDULED_JOB_OUTCOME_TYPE },
         orderBy: "created_at DESC",

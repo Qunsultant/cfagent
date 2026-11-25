@@ -57,6 +57,7 @@ vi.mock("../src/services/marketDataResearch", async (importOriginal) => ({
 
 import { DatabaseORM } from "../src/orm";
 import { MockSqlStorage } from "./mock-sql";
+import { MockD1Database } from "./mock-d1";
 import { InMemoryAuditPolicyAdapter } from "../src/data/inMemoryAuditPolicyAdapter";
 import { APPROVED_PREMIUM_PRICES, approvedPremiumCatalogue } from "./premiumPriceCatalogueFixture";
 import { PROPOSED_SEED_PRICES } from "../src/data/priceCataloguePorts";
@@ -350,8 +351,11 @@ describe("#1728 P-2 confirm_payment_draft: envelope unification", () => {
   it("route confirm: mode=mcp returns the full envelope; unset returns the REST subset; invalid fails closed + audits", async () => {
     const { sql, orm } = makeOrm("p2-route");
     const auditMock = vi.fn();
+    // #6102: the confirm gate's blocking audit lands in D1 — the
+    // route fails closed (503) without a bound AGENT_DB.
+    const routeEnv: any = { ...mockEnv, AGENT_DB: new MockD1Database() };
     const routeCtx: any = {
-      env: mockEnv,
+      env: routeEnv,
       ensureTables: () => sql,
       getOrm: () => orm,
       // #3156: the money-path audit gate needs a reachable policy

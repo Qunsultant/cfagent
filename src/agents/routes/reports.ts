@@ -46,10 +46,11 @@ import {
 import {
   recordScheduledJobOutcome,
   sanitizeScheduledJobErrorCode,
-  scheduledJobOutcomeStoreFromOrmEvents,
+  scheduledJobOutcomeStoreFromAuditEvents,
   type ScheduledJobOutcomeInput,
 } from "../../observability/scheduledJobOutcomes";
 import { parseTraceparent } from "../../observability/observabilityPorts";
+import { auditEventPort } from "../../data/createAuditEventPorts";
 import { createObservabilitySink } from "../../observability/createObservabilityPorts";
 import { createStructuredLogger } from "../../observability/structuredLogger";
 
@@ -259,10 +260,10 @@ async function recordReportsBackfillOutcome(
   try {
     await recordScheduledJobOutcome(
       {
-        store: scheduledJobOutcomeStoreFromOrmEvents(() => {
-          const orm = ctx.getOrm?.();
-          return orm?.events ?? null;
-        }, sessionId),
+        store: scheduledJobOutcomeStoreFromAuditEvents(
+          () => auditEventPort((ctx.env ?? {}) as unknown as { AGENT_DB?: unknown }),
+          sessionId,
+        ),
         alert: async (text: string) => {
           await postSlackText({
             post: resourceSlackPost,

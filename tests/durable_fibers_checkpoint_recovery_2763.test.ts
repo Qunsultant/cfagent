@@ -35,6 +35,11 @@ import {
 } from "../src/services/durableFibers";
 import { DurableTWAPOrderCommand } from "../src/mcps/openaimp/cloudflareAgentCommands";
 import { ETradeService } from "../src/services/etrade";
+import { MockD1Database } from "./mock-d1";
+import {
+  createD1AuditEventDb,
+  D1AuditEventStore,
+} from "../src/data/d1AuditEventAdapter";
 
 const SESSION = "sess-2763";
 
@@ -42,6 +47,19 @@ const makeOrm = (session: string = SESSION) => {
   const orm = new DatabaseORM(new MockSqlStorage());
   orm.initializeSchema(session);
   return orm;
+};
+
+/**
+ * #6102: fiber checkpoints live in D1 now. Each test gets one
+ * shared MockD1Database (the durable store both incarnations read
+ * and write, the way the DO orm was shared before) plus a store
+ * handle for direct D1 reads/corruption.
+ */
+const makeD1 = () => {
+  const mock = new MockD1Database();
+  const env = { AGENT_DB: mock };
+  const store = new D1AuditEventStore(createD1AuditEventDb(mock as never));
+  return { mock, env, store };
 };
 
 const CFG = {
@@ -77,15 +95,16 @@ afterEach(() => {
 describe("previewDurableTWAP checkpoint recovery (#2763)", () => {
   it("resumes from the latest checkpoint: checkpointed slices are not re-previewed and the run completes", async () => {
     const orm = makeOrm();
+    const d1 = makeD1();
     const callsA: number[] = [];
-    const svcA = new ETradeDurableFiberService(orm, undefined, SESSION);
+    const svcA = new ETradeDurableFiberService(orm, d1.env, SESSION);
     await expect(
       svcA.previewDurableTWAP(CFG, countingPreview(callsA, 3), { runId: "twap-run-1" })
     ).rejects.toThrow("simulated eviction mid-run");
     expect(callsA).toEqual([1, 2, 3]); // slices 1-2 checkpointed; slice 3 died before its checkpoint
 
     // Incarnation B: fresh service (empty in-memory registry), same store.
-    const svcB = new ETradeDurableFiberService(orm, undefined, SESSION);
+    const svcB = new ETradeDurableFiberService(orm, d1.env, SESSION);
     expect(svcB.listFibers()).toHaveLength(0);
     const callsB: number[] = [];
     const result = await svcB.previewDurableTWAP(CFG, countingPreview(callsB), {
@@ -109,11 +128,12 @@ describe("previewDurableTWAP checkpoint recovery (#2763)", () => {
 
   it("a fully checkpointed run replays its stored plan with zero preview calls", async () => {
     const orm = makeOrm();
-    const svcA = new ETradeDurableFiberService(orm, undefined, SESSION);
+    const d1 = makeD1();
+    const svcA = new ETradeDurableFiberService(orm, d1.env, SESSION);
     const first = await svcA.previewDurableTWAP(CFG, fakePreview, { runId: "twap-done-1" });
     expect(first.resumed).toBe(false);
 
-    const svcB = new ETradeDurableFiberService(orm, undefined, SESSION);
+    const svcB = new ETradeDurableFiberService(orm, d1.env, SESSION);
     const callsB: number[] = [];
     const replayed = await svcB.previewDurableTWAP(CFG, countingPreview(callsB), {
       runId: "twap-done-1",
@@ -128,7 +148,8 @@ describe("previewDurableTWAP checkpoint recovery (#2763)", () => {
 
   it("no checkpoint for the identity -> fresh run, all slices previewed, resumed:false", async () => {
     const orm = makeOrm();
-    const svc = new ETradeDurableFiberService(orm, undefined, SESSION);
+    const d1 = makeD1();
+    const svc = new ETradeDurableFiberService(orm, d1.env, SESSION);
     const calls: number[] = [];
     const result = await svc.previewDurableTWAP(CFG, countingPreview(calls), {
       runId: "never-seen",
@@ -141,12 +162,13 @@ describe("previewDurableTWAP checkpoint recovery (#2763)", () => {
 
   it("a run interrupted before its first checkpoint resumes from step 0 under the same identity", async () => {
     const orm = makeOrm();
-    const svcA = new ETradeDurableFiberService(orm, undefined, SESSION);
+    const d1 = makeD1();
+    const svcA = new ETradeDurableFiberService(orm, d1.env, SESSION);
     await expect(
       svcA.previewDurableTWAP(CFG, countingPreview([], 1), { runId: "twap-early-1" })
     ).rejects.toThrow("simulated eviction mid-run");
 
-    const svcB = new ETradeDurableFiberService(orm, undefined, SESSION);
+    const svcB = new ETradeDurableFiberService(orm, d1.env, SESSION);
     const callsB: number[] = [];
     const result = await svcB.previewDurableTWAP(CFG, countingPreview(callsB), {
       runId: "twap-early-1",
@@ -158,19 +180,24 @@ describe("previewDurableTWAP checkpoint recovery (#2763)", () => {
 
   it("corrupt checkpoint (unparseable payload) fails loud with fiber_checkpoint_corrupt and previews nothing", async () => {
     const orm = makeOrm();
-    const svcA = new ETradeDurableFiberService(orm, undefined, SESSION);
+    const d1 = makeD1();
+    const svcA = new ETradeDurableFiberService(orm, d1.env, SESSION);
     await expect(
       svcA.previewDurableTWAP(CFG, countingPreview([], 3), { runId: "twap-corrupt-1" })
     ).rejects.toThrow("simulated eviction mid-run");
 
-    const checkpoints = orm.events.findMany({
+    // #6102: the checkpoints live in D1 now — corrupt the latest
+    // D1 row in place (raw SQL: the store has no update).
+    const checkpoints = await d1.store.findMany({
       where: { sessionId: SESSION, type: "FIBER_CHECKPOINT" },
     });
     const latest = checkpoints[checkpoints.length - 1];
     expect(latest.id).toContain("fib_run_twap-corrupt-1");
-    orm.events.update(latest.id, { payload: "not-json{{{" as never });
+    d1.mock.sqlite
+      .prepare("UPDATE mas_events SET payload = ? WHERE id = ?")
+      .run("not-json{{{", latest.id);
 
-    const svcB = new ETradeDurableFiberService(orm, undefined, SESSION);
+    const svcB = new ETradeDurableFiberService(orm, d1.env, SESSION);
     const callsB: number[] = [];
     const err = await svcB
       .previewDurableTWAP(CFG, countingPreview(callsB), { runId: "twap-corrupt-1" })
@@ -182,29 +209,35 @@ describe("previewDurableTWAP checkpoint recovery (#2763)", () => {
 
   it("corrupt checkpoint (shape-invalid payload) fails loud with fiber_checkpoint_corrupt", async () => {
     const orm = makeOrm();
-    const svcA = new ETradeDurableFiberService(orm, undefined, SESSION);
+    const d1 = makeD1();
+    const svcA = new ETradeDurableFiberService(orm, d1.env, SESSION);
     await expect(
       svcA.previewDurableTWAP(CFG, countingPreview([], 3), { runId: "twap-corrupt-2" })
     ).rejects.toThrow("simulated eviction mid-run");
 
-    const checkpoints = orm.events.findMany({
+    // #6102: the checkpoints live in D1 now — corrupt the latest
+    // D1 row in place (raw SQL: the store has no update).
+    const checkpoints = await d1.store.findMany({
       where: { sessionId: SESSION, type: "FIBER_CHECKPOINT" },
     });
     const latest = checkpoints[checkpoints.length - 1];
-    orm.events.update(latest.id, {
-      payload: {
-        fiberId: "fib_run_twap-corrupt-2",
-        name: "twap_preview_NVDA_BUY",
-        status: "running",
-        currentStep: "two",
-        totalSteps: 4,
-        stashedData: {},
-        startedAt: "2026-11-02T00:00:00.000Z",
-        updatedAt: "2026-11-02T00:00:00.000Z",
-      } as never,
-    });
+    d1.mock.sqlite
+      .prepare("UPDATE mas_events SET payload = ? WHERE id = ?")
+      .run(
+        JSON.stringify({
+          fiberId: "fib_run_twap-corrupt-2",
+          name: "twap_preview_NVDA_BUY",
+          status: "running",
+          currentStep: "two",
+          totalSteps: 4,
+          stashedData: {},
+          startedAt: "2026-11-02T00:00:00.000Z",
+          updatedAt: "2026-11-02T00:00:00.000Z",
+        }),
+        latest.id,
+      );
 
-    const svcB = new ETradeDurableFiberService(orm, undefined, SESSION);
+    const svcB = new ETradeDurableFiberService(orm, d1.env, SESSION);
     const callsB: number[] = [];
     const err = await svcB
       .previewDurableTWAP(CFG, countingPreview(callsB), { runId: "twap-corrupt-2" })
@@ -216,12 +249,13 @@ describe("previewDurableTWAP checkpoint recovery (#2763)", () => {
 
   it("a checkpoint written for a different plan fails loud with fiber_checkpoint_mismatch", async () => {
     const orm = makeOrm();
-    const svcA = new ETradeDurableFiberService(orm, undefined, SESSION);
+    const d1 = makeD1();
+    const svcA = new ETradeDurableFiberService(orm, d1.env, SESSION);
     await expect(
       svcA.previewDurableTWAP(CFG, countingPreview([], 3), { runId: "twap-mismatch-1" })
     ).rejects.toThrow("simulated eviction mid-run");
 
-    const svcB = new ETradeDurableFiberService(orm, undefined, SESSION);
+    const svcB = new ETradeDurableFiberService(orm, d1.env, SESSION);
     const callsB: number[] = [];
     const err = await svcB
       .previewDurableTWAP(
@@ -237,12 +271,13 @@ describe("previewDurableTWAP checkpoint recovery (#2763)", () => {
 
   it("identity isolation: another runId's checkpoint is never read", async () => {
     const orm = makeOrm();
-    const svcA = new ETradeDurableFiberService(orm, undefined, SESSION);
+    const d1 = makeD1();
+    const svcA = new ETradeDurableFiberService(orm, d1.env, SESSION);
     await expect(
       svcA.previewDurableTWAP(CFG, countingPreview([], 3), { runId: "iso-a" })
     ).rejects.toThrow("simulated eviction mid-run");
 
-    const svcB = new ETradeDurableFiberService(orm, undefined, SESSION);
+    const svcB = new ETradeDurableFiberService(orm, d1.env, SESSION);
     const callsB: number[] = [];
     const result = await svcB.previewDurableTWAP(CFG, countingPreview(callsB), {
       runId: "iso-b",
@@ -254,13 +289,14 @@ describe("previewDurableTWAP checkpoint recovery (#2763)", () => {
 
   it("identity isolation: another session's checkpoint is never read", async () => {
     const orm = makeOrm();
+    const d1 = makeD1();
     orm.initializeSchema("other-session");
-    const svcA = new ETradeDurableFiberService(orm, undefined, SESSION);
+    const svcA = new ETradeDurableFiberService(orm, d1.env, SESSION);
     await expect(
       svcA.previewDurableTWAP(CFG, countingPreview([], 3), { runId: "iso-a" })
     ).rejects.toThrow("simulated eviction mid-run");
 
-    const svcC = new ETradeDurableFiberService(orm, undefined, "other-session");
+    const svcC = new ETradeDurableFiberService(orm, d1.env, "other-session");
     const callsC: number[] = [];
     const result = await svcC.previewDurableTWAP(CFG, countingPreview(callsC), {
       runId: "iso-a",
@@ -271,7 +307,8 @@ describe("previewDurableTWAP checkpoint recovery (#2763)", () => {
 
   it("an invalid runId is rejected with fiber_run_id_invalid before anything runs", async () => {
     const orm = makeOrm();
-    const svc = new ETradeDurableFiberService(orm, undefined, SESSION);
+    const d1 = makeD1();
+    const svc = new ETradeDurableFiberService(orm, d1.env, SESSION);
     const calls: number[] = [];
     const err = await svc
       .previewDurableTWAP(CFG, countingPreview(calls), { runId: "bad id!" })
@@ -283,15 +320,17 @@ describe("previewDurableTWAP checkpoint recovery (#2763)", () => {
 
   it("a resume appends a FIBER_RESUMED event naming the run and the from-step", async () => {
     const orm = makeOrm();
-    const svcA = new ETradeDurableFiberService(orm, undefined, SESSION);
+    const d1 = makeD1();
+    const svcA = new ETradeDurableFiberService(orm, d1.env, SESSION);
     await expect(
       svcA.previewDurableTWAP(CFG, countingPreview([], 3), { runId: "twap-audit-1" })
     ).rejects.toThrow("simulated eviction mid-run");
 
-    const svcB = new ETradeDurableFiberService(orm, undefined, SESSION);
+    const svcB = new ETradeDurableFiberService(orm, d1.env, SESSION);
     await svcB.previewDurableTWAP(CFG, fakePreview, { runId: "twap-audit-1" });
 
-    const resumed = orm.events.findMany({
+    // #6102: the FIBER_RESUMED row lives in D1 now.
+    const resumed = await d1.store.findMany({
       where: { sessionId: SESSION, type: "FIBER_RESUMED" },
     });
     expect(resumed).toHaveLength(1);
@@ -305,7 +344,8 @@ describe("previewDurableTWAP checkpoint recovery (#2763)", () => {
 
   it("without a runId, behavior is unchanged: fresh fiber id per run, every slice previewed, no resume reads", async () => {
     const orm = makeOrm();
-    const svc = new ETradeDurableFiberService(orm, undefined, SESSION);
+    const d1 = makeD1();
+    const svc = new ETradeDurableFiberService(orm, d1.env, SESSION);
     const calls1: number[] = [];
     const first = await svc.previewDurableTWAP(CFG, countingPreview(calls1));
     const calls2: number[] = [];
@@ -315,8 +355,9 @@ describe("previewDurableTWAP checkpoint recovery (#2763)", () => {
     expect(first.fiberId).toMatch(/^fib_\d+_[0-9a-f]{6}$/);
     expect(second.fiberId).not.toBe(first.fiberId);
     expect(first.resumed).toBe(false);
+    // #6102: the FIBER_RESUMED rows live in D1 now.
     expect(
-      orm.events.findMany({ where: { sessionId: SESSION, type: "FIBER_RESUMED" } })
+      await d1.store.findMany({ where: { sessionId: SESSION, type: "FIBER_RESUMED" } })
     ).toHaveLength(0);
   });
 });
@@ -324,12 +365,13 @@ describe("previewDurableTWAP checkpoint recovery (#2763)", () => {
 describe("runFiber generic resume seam (#2763)", () => {
   it("a restarted fiber body sees the restored stash and the recovered flag", async () => {
     const orm = makeOrm();
-    const svcA = new ETradeDurableFiberService(orm, undefined, SESSION);
+    const d1 = makeD1();
+    const svcA = new ETradeDurableFiberService(orm, d1.env, SESSION);
     await expect(
       svcA.runFiber(
         "generic_job",
         async (ctx) => {
-          ctx.stash({ progress: 1 });
+          await ctx.stash({ progress: 1 });
           throw new Error("died after first stash");
         },
         2,
@@ -337,7 +379,7 @@ describe("runFiber generic resume seam (#2763)", () => {
       )
     ).rejects.toThrow("died after first stash");
 
-    const svcB = new ETradeDurableFiberService(orm, undefined, SESSION);
+    const svcB = new ETradeDurableFiberService(orm, d1.env, SESSION);
     const seen = await svcB.runFiber(
       "generic_job",
       async (ctx) => ({
@@ -355,9 +397,12 @@ describe("runFiber generic resume seam (#2763)", () => {
 });
 
 describe("execute_durable_twap runId resume (MCP command, #2763)", () => {
-  const sharedContext = (orm: DatabaseORM, auditLog: any[]) =>
+  // #6102: the command builds its fiber service from context.env, so
+  // the shared context carries one MockD1Database — the durable
+  // store both invocations read and write.
+  const sharedContext = (orm: DatabaseORM, auditLog: any[], d1: { env: { AGENT_DB: MockD1Database } }) =>
     ({
-      env: { ETRADE_ENVIRONMENT: "sandbox" },
+      env: { ETRADE_ENVIRONMENT: "sandbox", ...d1.env },
       orm,
       sessionId: SESSION,
       audit: (type: string, agent: any, payload: Record<string, unknown>) =>
@@ -372,6 +417,7 @@ describe("execute_durable_twap runId resume (MCP command, #2763)", () => {
 
   it("an interrupted command invocation resumes under the same runId and audits resumed:true", async () => {
     const orm = makeOrm();
+    const d1 = makeD1();
     let previewCalls = 0;
     vi.spyOn(ETradeService.prototype, "previewOrder").mockImplementation(() => {
       previewCalls++;
@@ -389,7 +435,7 @@ describe("execute_durable_twap runId resume (MCP command, #2763)", () => {
     await expect(
       cmd.execute(
         { symbol: "NVDA", action: "BUY", totalQuantity: 12, slices: 4, runId: "cmd-run-1" },
-        sharedContext(orm, auditLogA)
+        sharedContext(orm, auditLogA, d1)
       )
     ).rejects.toThrow("simulated eviction mid-run");
     expect(auditLogA).toHaveLength(0); // no completion audit for a dead run
@@ -409,7 +455,7 @@ describe("execute_durable_twap runId resume (MCP command, #2763)", () => {
     const auditLogB: any[] = [];
     const result: any = await cmd.execute(
       { symbol: "NVDA", action: "BUY", totalQuantity: 12, slices: 4, runId: "cmd-run-1" },
-      sharedContext(orm, auditLogB)
+      sharedContext(orm, auditLogB, d1)
     );
 
     expect(previewCalls).toBe(2); // only slices 3 and 4 were previewed again

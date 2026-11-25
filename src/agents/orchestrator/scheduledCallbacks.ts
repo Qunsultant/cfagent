@@ -24,7 +24,8 @@ import { resolveScheduledLogin, type ScreenerExecutionContext } from "./schedule
 import { getScheduledAgentDoor } from "./meshDoors";
 import { workflowStageId } from "../../services/workflowStageSchedule";
 import { deliverGatedSlack } from "../../services/gatedSlackDelivery";
-import { recordBlockingAudit } from "../../security/auditChain";
+import { recordBlockingAuditAsync } from "../../security/auditChain";
+import { auditEventPort } from "../../data/createAuditEventPorts";
 import {
   enforceBrokerDispatch,
   enforceServiceDispatch,
@@ -250,13 +251,17 @@ export interface ScheduledCallbacksContext {
  * failure falls back to the worker log rather than vanishing.
  * Never throws, so scheduled callbacks keep their no-throw
  * contract even when both stores fail.
+ * #6102: the row writes to D1 now; a null port (AGENT_DB unbound)
+ * logs the same fallback error instead of writing.
  */
-export function recordReportStoreFailure(
-  orm: DatabaseORM,
+export async function recordReportStoreFailure(
+  env: { AGENT_DB?: unknown } | undefined,
   input: { runId: string; userLogin: string },
-): void {
+): Promise<void> {
   try {
-    orm.events.create({
+    const port = await auditEventPort(env);
+    if (!port) throw new Error("no audit event port (AGENT_DB unbound)");
+    await port.create({
       id: crypto.randomUUID(),
       sessionId: input.userLogin,
       type: "screener.report_store_failed",
@@ -333,7 +338,10 @@ export async function autoRenewETradeTokens(ctx: ScheduledCallbacksContext, payl
   // exists. A throwing store propagates out of the callback: the
   // renewal surfaces as an error (the next scheduled renewal
   // retries it), never as a success with no record.
-  recordBlockingAudit(ctx.getOrm().events, {
+  // #6102: the blocking claim writes to D1 now; a null port
+  // (AGENT_DB unbound) throws — the renewal surfaces as an error,
+  // never as a success with no record.
+  await recordBlockingAuditAsync(await auditEventPort(ctx.env as unknown as { AGENT_DB?: unknown }), {
     id: crypto.randomUUID(),
     sessionId: userLogin,
     type: "etrade.token_renewal_claim",
@@ -568,7 +576,7 @@ export async function autonomousMarketScreen(ctx: ScheduledCallbacksContext, pay
       // Record the failure visibly instead; no throw, preserving
       // this callback's deliberate no-throw contract.
       if (!stored) {
-        recordReportStoreFailure(orm, { runId: `screener:${res.timestamp}`, userLogin });
+        await recordReportStoreFailure(ctx.env as unknown as { AGENT_DB?: unknown }, { runId: `screener:${res.timestamp}`, userLogin });
       }
       }
     } catch {

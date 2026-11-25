@@ -12,6 +12,7 @@
  */
 
 import { z } from "zod";
+import { auditEventPort } from "../../data/createAuditEventPorts";
 import { GetJobStageStatusCommand, GetJobStatusCommand } from "./jobStatusCommands";
 import {
   BrokerOrderCancelAllCommand,
@@ -1816,8 +1817,17 @@ export class GetAuditEventsCommand implements IMcpToolCommand<{ limit?: number; 
     if (input.agent) where.agent = input.agent;
     const hasTimeFilter = Boolean(input.before || input.after);
     const scanLimit = hasTimeFilter ? 1000 : limit;
-    let events = context.orm.events.findMany({
-      where,
+    // #6102: the event log lives in D1 now. A null port (AGENT_DB
+    // unbound) fails closed — the DO table is frozen pre-cutover
+    // history and is never read back here.
+    const port = await auditEventPort(
+      context.env as unknown as { AGENT_DB?: unknown },
+    );
+    if (!port) {
+      throw new Error("get_audit_events: no audit event port (AGENT_DB unbound)");
+    }
+    let events = await port.findMany({
+      where: where as { sessionId?: string; type?: string; agent?: string },
       orderBy: "created_at DESC",
       limit: scanLimit,
     });

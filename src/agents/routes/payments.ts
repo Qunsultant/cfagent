@@ -90,7 +90,8 @@ import {
 import type { AgentName, Env, TransactionRecord } from "../../types";
 import { DatabaseORM, type SqlStorage } from "../../orm";
 import { checkAuditGate } from "../../services/auditGate";
-import { recordBlockingAudit } from "../../security/auditChain";
+import { recordBlockingAuditAsync } from "../../security/auditChain";
+import { auditEventPort } from "../../data/createAuditEventPorts";
 import type { AuditPolicyPort } from "../../data/auditPolicyPorts";
 import { executeMCPTool } from "../../mcps/openaimp/index";
 import { runRestTool } from "./restToolBridge";
@@ -318,8 +319,10 @@ async function gatePaymentExecution(
   action: "payment.charge" | "payment.refund" | "payment.invoice",
   reference: Record<string, unknown>,
 ): Promise<Response | null> {
-  const orm = ctx.getOrm?.() ?? new DatabaseORM(ctx.ensureTables());
-  recordBlockingAudit(orm.events, {
+  // #6102: the pre-execution claim writes to D1 now; a null port
+  // (AGENT_DB unbound) throws, the route's catch returns 500, and
+  // money never moves.
+  await recordBlockingAuditAsync(await auditEventPort(ctx.env as unknown as { AGENT_DB?: unknown }), {
     id: `gate_${crypto.randomUUID().slice(0, 8)}`,
     sessionId,
     type: "payment.execution_started",

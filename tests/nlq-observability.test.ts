@@ -12,6 +12,12 @@ import {
 } from "../src/agents/nlq";
 import { DatabaseORM } from "../src/orm";
 import { MockSqlStorage } from "./mock-sql";
+import { MockD1Database } from "./mock-d1";
+import {
+  createD1AuditEventDb,
+  D1AuditEventStore,
+} from "../src/data/d1AuditEventAdapter";
+import type { Env } from "../src/types";
 
 function tablesPlan(): NLQPlan {
   return { domain: "tables", operation: "list", role: "any" };
@@ -20,18 +26,36 @@ function tablesPlan(): NLQPlan {
 describe("NLQ execution observability (Assessment P1 #143, issue #257)", () => {
   let sql: MockSqlStorage;
   let orm: DatabaseORM;
+  // #6102: audit rows land in D1 now — one fresh mock + env per test
+  // (a shared env would share the memoized port across tests).
+  let d1Store: D1AuditEventStore;
+  let env: Env;
 
   beforeEach(() => {
     sql = new MockSqlStorage();
     orm = new DatabaseORM(sql);
     orm.initializeSchema("obs_session");
+    const d1Mock = new MockD1Database();
+    d1Store = new D1AuditEventStore(createD1AuditEventDb(d1Mock as never));
+    env = { AGENT_DB: d1Mock } as unknown as Env;
   });
 
-  it("writes exactly one nlq.executed audit row per sync execution", () => {
-    const result: NLQQueryResult = executeNLQQuery(orm, "obs_session", tablesPlan());
+  // The sync entry fire-and-forgets the D1 write, so poll briefly
+  // until the row lands instead of asserting a race.
+  async function pollAuditEvents(type: string) {
+    let rows = await d1Store.findMany({ where: { type } });
+    for (let i = 0; i < 50 && rows.length === 0; i++) {
+      await new Promise((r) => setTimeout(r, 20));
+      rows = await d1Store.findMany({ where: { type } });
+    }
+    return rows;
+  }
+
+  it("writes exactly one nlq.executed audit row per sync execution", async () => {
+    const result: NLQQueryResult = executeNLQQuery(orm, "obs_session", tablesPlan(), env);
     expect(result.domain).toBe("tables");
 
-    const events = orm.events.findMany({ where: { type: "nlq.executed" } });
+    const events = await pollAuditEvents("nlq.executed");
     expect(events).toHaveLength(1);
     const [ev] = events;
     expect(ev.agent).toBe("nlq");
@@ -47,15 +71,16 @@ describe("NLQ execution observability (Assessment P1 #143, issue #257)", () => {
   });
 
   it("writes exactly one nlq.executed row for the async entry (no double audit)", async () => {
-    await executeNLQQueryAsync(orm, "obs_session", tablesPlan(), {} as any);
+    await executeNLQQueryAsync(orm, "obs_session", tablesPlan(), env);
 
-    const executed = orm.events.findMany({ where: { type: "nlq.executed" } });
+    // The async entry awaits the audit write — direct read.
+    const executed = await d1Store.findMany({ where: { type: "nlq.executed" } });
     expect(executed).toHaveLength(1);
-    const errors = orm.events.findMany({ where: { type: "nlq.error" } });
+    const errors = await d1Store.findMany({ where: { type: "nlq.error" } });
     expect(errors).toHaveLength(0);
   });
 
-  it("writes an nlq.error row and rethrows when execution throws", () => {
+  it("writes an nlq.error row and rethrows when execution throws", async () => {
     const boom = new Error("listTables exploded");
     const brokenOrm = {
       listTables: () => {
@@ -64,9 +89,9 @@ describe("NLQ execution observability (Assessment P1 #143, issue #257)", () => {
       events: orm.events,
     } as unknown as DatabaseORM;
 
-    expect(() => executeNLQQuery(brokenOrm, "obs_session", tablesPlan())).toThrow(boom);
+    expect(() => executeNLQQuery(brokenOrm, "obs_session", tablesPlan(), env)).toThrow(boom);
 
-    const events = orm.events.findMany({ where: { type: "nlq.error" } });
+    const events = await pollAuditEvents("nlq.error");
     expect(events).toHaveLength(1);
     const [ev] = events;
     expect(ev.agent).toBe("nlq");
