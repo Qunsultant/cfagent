@@ -121,7 +121,8 @@ describe("hunt evaluated symbols (issue 6478)", () => {
     const text = extractPdfText(await generateOpportunityHuntPdf(result()));
     expect(text).toContain("Symbols evaluated: 2");
     expect(text).toContain("Symbols with setups: 1");
-    expect(text).toContain("Symbols evaluated (2)");
+    expect(text).toContain("Symbols with patterns (1)");
+    expect(text).toContain("Symbols with no patterns (1)");
     expect(text).toContain("BBBB - no setup");
     expect(text).toContain("No setup - this symbol was evaluated and no strategy produced an entry or exit signal.");
     // The setup symbol's detail is unchanged.
@@ -139,6 +140,7 @@ describe("hunt evaluated symbols (issue 6478)", () => {
     expect(text).toContain("No setups");
     expect(text).toContain("BBBB - no setup");
     expect(text).toContain("DDDD - no setup");
-    expect(text).toContain("Symbols evaluated (2)");
+    expect(text).toContain("Symbols with patterns (0)");
+    expect(text).toContain("Symbols with no patterns (2)");
   });
 });

@@ -2,6 +2,11 @@
  * Issue 6479 — the Opportunity Hunt report body, rendered from the ONE view
  * model (`buildOpportunityHuntReportModel`).
  *
+ * Issue 6499 — the evaluated universe is rendered as TWO sections, each with
+ * its own heading/count and its own sort: symbols with patterns (most patterns
+ * first, then symbol) and symbols with no patterns (symbol A→Z). The PDF
+ * renders the same groups from the same model.
+ *
  * The panel is a thin shell around this component: run controls, report link,
  * errors, and the latest scheduled run. Everything the report says — summary,
  * counts narrative, holdings/no-setups notes, table cells, per-symbol section
@@ -22,7 +27,6 @@ import {
 } from "./components/ui";
 import { OpportunityHuntChart } from "./OpportunityHuntChart";
 import {
-  HUNT_SORT_DEFAULT,
   huntTradingDayLabels,
   nextHuntSort,
   sortHuntRows,
@@ -30,7 +34,11 @@ import {
   type HuntSortKey,
   type OpportunityHuntSymbolRow,
 } from "./opportunityHuntView";
-import type { OpportunityHuntReportModel } from "./opportunityHuntReportModel";
+import type {
+  OpportunityHuntReportModel,
+  OpportunityHuntReportTableGroup,
+  OpportunityHuntReportTableRow,
+} from "./opportunityHuntReportModel";
 
 /**
  * A sortable column header. The `th` carries `aria-sort` (from the column
@@ -100,70 +108,47 @@ function SymbolSparkline({ symbol, closes }: { symbol: string; closes: readonly 
   );
 }
 
-export function OpportunityHuntReportView({ model }: { model: OpportunityHuntReportModel }) {
-  const [sort, setSort] = useState<HuntSort>(HUNT_SORT_DEFAULT);
-  const [selectedSymbol, setSelectedSymbol] = useState<string | null>(
-    model.sections[0]?.symbol ?? null,
-  );
+/**
+ * One evaluated-symbol section: its own heading/count, its own sort state, and
+ * the same columns/row behavior as the report's single table had. The model
+ * supplies the heading, rows, and default order; the page only renders it.
+ */
+function HuntGroupTable({
+  group,
+  cells,
+  rowsBySymbol,
+  selectedSymbol,
+  onSelect,
+}: {
+  group: OpportunityHuntReportTableGroup;
+  cells: ReadonlyMap<string, OpportunityHuntReportTableRow>;
+  rowsBySymbol: ReadonlyMap<string, OpportunityHuntSymbolRow>;
+  selectedSymbol: string | null;
+  onSelect: (symbol: string) => void;
+}) {
+  const [sort, setSort] = useState<HuntSort>(group.defaultSort);
+
+  // A new run resets each section to its model order (patterns desc / symbol).
+  useEffect(() => {
+    setSort(group.defaultSort);
+  }, [group]);
 
   const rows = useMemo(
-    () => sortHuntRows(model.sections.map((section) => section.row), sort),
-    [model, sort],
-  );
-
-  // A fresh result opens its first symbol; a stale selection is dropped. A
-  // closed dialog (null) stays closed until the reader selects a row again.
-  useEffect(() => {
-    setSelectedSymbol((current) =>
-      current && model.sections.some((section) => section.symbol === current)
-        ? current
-        : (model.sections[0]?.symbol ?? null),
-    );
-  }, [model]);
-
-  const cells = useMemo(
-    () => new Map(model.tableRows.map((row) => [row.symbol, row])),
-    [model],
-  );
-  const selected =
-    model.sections.find((section) => section.symbol === selectedSymbol) ?? null;
-  const labels = useMemo(
     () =>
-      selected && selected.closes.length > 0
-        ? huntTradingDayLabels(model.asOfIso, selected.closes.length)
-        : [],
-    [model.asOfIso, selected],
+      sortHuntRows(
+        group.rows
+          .map((row) => rowsBySymbol.get(row.symbol))
+          .filter((row): row is OpportunityHuntSymbolRow => !!row),
+        sort,
+      ),
+    [group, rowsBySymbol, sort],
   );
 
   const onSort = (key: HuntSortKey) => setSort((current) => nextHuntSort(current, key));
 
   return (
     <>
-      <p>
-        {model.summary} (as of {model.asOfLabel})
-      </p>
-      {model.holdingsNote ? (
-        model.holdingsAvailable === false ? (
-          <Notice tone="warning" title="Exit signals unavailable">
-            {model.holdingsNote}
-          </Notice>
-        ) : (
-          <p className="ui-meta-sm">
-            {model.holdingsHeading ? `${model.holdingsHeading}: ` : ""}
-            {model.holdingsNote}
-          </p>
-        )
-      ) : null}
-
-      <SmallHeader title={model.countsHeading} />
-      <p>{model.countsExplanation}</p>
-
-      {model.noSetupsNote ? (
-        <Notice tone="info" title="No setups">
-          {model.noSetupsNote}
-        </Notice>
-      ) : null}
-
+      <SmallHeader title={group.heading} />
       <Table<OpportunityHuntSymbolRow>
         columns={[
           {
@@ -265,16 +250,103 @@ export function OpportunityHuntReportView({ model }: { model: OpportunityHuntRep
         ]}
         rows={rows}
         rowKey={(row) => row.symbol}
-        onRowClick={(row) => setSelectedSymbol(row.symbol)}
-        rowClassName={(row) => (row.symbol === selected?.symbol ? "is-selected" : "")}
-        caption="One row per evaluated symbol — pattern count, entry and exit signals, and the entry recommendation's price range. Select a row for its recommendations and chart."
+        onRowClick={(row) => onSelect(row.symbol)}
+        rowClassName={(row) => (row.symbol === selectedSymbol ? "is-selected" : "")}
+        caption={
+          group.key === "patterns"
+            ? "Symbols with patterns, most patterns first — select a row for its recommendations and chart."
+            : "Symbols with no patterns, symbol A→Z — evaluated, with no entry or exit signal. Select a row for its chart."
+        }
         empty={
           <EmptyState
-            title="No setups"
-            description="This result retains no evaluated symbols; run the hunt again to list every symbol and its chart."
+            title={group.key === "patterns" ? "No patterns" : "No quiet symbols"}
+            description={
+              group.key === "patterns"
+                ? "No evaluated symbol produced a pattern in this run."
+                : "Every evaluated symbol produced at least one pattern."
+            }
           />
         }
       />
+    </>
+  );
+}
+
+export function OpportunityHuntReportView({ model }: { model: OpportunityHuntReportModel }) {
+  const [selectedSymbol, setSelectedSymbol] = useState<string | null>(
+    model.sections[0]?.symbol ?? null,
+  );
+
+  // A fresh result opens its first symbol; a stale selection is dropped. A
+  // closed dialog (null) stays closed until the reader selects a row again.
+  useEffect(() => {
+    setSelectedSymbol((current) =>
+      current && model.sections.some((section) => section.symbol === current)
+        ? current
+        : (model.sections[0]?.symbol ?? null),
+    );
+  }, [model]);
+
+  const cells = useMemo(
+    () =>
+      new Map(
+        model.tableGroups
+          .flatMap((group) => group.rows)
+          .map((row) => [row.symbol, row] as const),
+      ),
+    [model],
+  );
+  const rowsBySymbol = useMemo(
+    () => new Map(model.sections.map((section) => [section.symbol, section.row] as const)),
+    [model],
+  );
+  const selected =
+    model.sections.find((section) => section.symbol === selectedSymbol) ?? null;
+  const labels = useMemo(
+    () =>
+      selected && selected.closes.length > 0
+        ? huntTradingDayLabels(model.asOfIso, selected.closes.length)
+        : [],
+    [model.asOfIso, selected],
+  );
+
+  return (
+    <>
+      <p>
+        {model.summary} (as of {model.asOfLabel})
+      </p>
+      {model.holdingsNote ? (
+        model.holdingsAvailable === false ? (
+          <Notice tone="warning" title="Exit signals unavailable">
+            {model.holdingsNote}
+          </Notice>
+        ) : (
+          <p className="ui-meta-sm">
+            {model.holdingsHeading ? `${model.holdingsHeading}: ` : ""}
+            {model.holdingsNote}
+          </p>
+        )
+      ) : null}
+
+      <SmallHeader title={model.countsHeading} />
+      <p>{model.countsExplanation}</p>
+
+      {model.noSetupsNote ? (
+        <Notice tone="info" title="No setups">
+          {model.noSetupsNote}
+        </Notice>
+      ) : null}
+
+      {model.tableGroups.map((group) => (
+        <HuntGroupTable
+          key={group.key}
+          group={group}
+          cells={cells}
+          rowsBySymbol={rowsBySymbol}
+          selectedSymbol={selected?.symbol ?? null}
+          onSelect={setSelectedSymbol}
+        />
+      ))}
       <p className="ui-meta-sm">{model.summaryCountsLine}</p>
 
       <Modal

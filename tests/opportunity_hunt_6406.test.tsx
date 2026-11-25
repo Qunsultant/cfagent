@@ -572,21 +572,23 @@ describe("OpportunityHuntPanel report view (issue 6406)", () => {
       holdingsStatus: { available: true, broker: "alpaca" },
       seriesBySymbol: { AAAA: [100, 98], BBBB: [100, 120] },
     });
-    // Default sort is symbol A→Z: AAAA's row precedes BBBB's.
+    // Issue 6499 — the patterns section defaults to pattern count desc, then
+    // symbol: BBBB (2 patterns) precedes AAAA (1).
     const rowsBefore = [...container!.querySelectorAll("tbody tr")].map((tr) => tr.textContent ?? "");
-    expect(rowsBefore[0]).toContain("AAAA");
-    expect(rowsBefore[1]).toContain("BBBB");
+    expect(rowsBefore[0]).toContain("BBBB");
+    expect(rowsBefore[1]).toContain("AAAA");
     const sortButton = [...container!.querySelectorAll("button")].find((b) =>
-      b.getAttribute("aria-label")?.startsWith("Sort by Patterns"),
+      /^(Sort by Patterns|Patterns, sorted)/.test(b.getAttribute("aria-label") ?? ""),
     );
     expect(sortButton).toBeDefined();
     await act(async () => {
       sortButton!.click();
     });
     const rowsAfter = [...container!.querySelectorAll("tbody tr")].map((tr) => tr.textContent ?? "");
-    // Patterns desc: BBBB (2 patterns) first.
-    expect(rowsAfter[0]).toContain("BBBB");
-    expect(rowsAfter[1]).toContain("AAAA");
+    // Issue 6499 — the patterns section opens on pattern count desc, so the
+    // first click reverses it to ascending.
+    expect(rowsAfter[0]).toContain("AAAA");
+    expect(rowsAfter[1]).toContain("BBBB");
   });
 
   it("lists an evaluated symbol with no setup and opens its chart (issue 6478)", async () => {

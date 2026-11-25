@@ -328,12 +328,21 @@ export async function renderOpportunityHuntPdf(
     );
   }
 
-  if (model.tableRows.length > 0) {
+  // Issue 6499 — two sections, each headed and counted, each already ordered
+  // by the model (patterns desc then symbol; quiet symbol A→Z). The Exits
+  // column is danger red; a zero-row group still shows its heading and count.
+  for (const group of model.tableGroups) {
+    if (group.rows.length === 0) {
+      text(ctx, group.heading, { size: 12, bold: true });
+      text(ctx, "None.", { size: 10, color: PDF_PRINT_MUTED });
+      rule(ctx);
+      continue;
+    }
     renderTable(
       ctx,
-      model.tableHeading,
+      group.heading,
       HUNT_TABLE_COLUMNS,
-      model.tableRows.map((row) => [
+      group.rows.map((row) => [
         row.symbol,
         row.patterns,
         row.entries,
@@ -343,43 +352,44 @@ export async function renderOpportunityHuntPdf(
         row.takeProfit,
         row.lastClose,
       ]),
+      { columnColors: { 3: PDF_PRINT_DANGER } },
     );
+  }
 
-    // Per-symbol detail — the model's section text, for every evaluated
-    // symbol, with the chart drawn from the section's own series and levels.
-    for (const section of model.sections) {
-      text(ctx, section.heading, { size: 12, bold: true });
-      text(ctx, section.lastCloseLine, { size: 9, color: PDF_PRINT_MUTED });
-      if (section.noSetupNote) {
-        text(ctx, section.noSetupNote, { size: 9, color: PDF_PRINT_MUTED });
-      }
-      if (section.entryLines.length > 0) {
-        text(ctx, section.entryHeading, { size: 10, bold: true, color: PRINT_SUCCESS });
-        for (const line of section.entryLines) {
-          text(ctx, line, { size: 9 });
-        }
-      }
-      if (section.exitLines.length > 0) {
-        text(ctx, section.exitHeading, { size: 10, bold: true, color: PDF_PRINT_DANGER });
-        for (const line of section.exitLines) {
-          text(ctx, line, { size: 9 });
-        }
-      }
-      const row = section.row;
-      if (section.closes.length >= 2) {
-        const levels: PriceLevel[] = [];
-        if (row.entryLow !== null) levels.push({ value: row.entryLow, label: `Entry ${formatHuntPrice(row.entryLow)}`, color: PRINT_LEVEL_ENTRY });
-        if (row.entryHigh !== null) levels.push({ value: row.entryHigh, label: `Entry ${formatHuntPrice(row.entryHigh)}`, color: PRINT_LEVEL_ENTRY });
-        if (row.stopLoss !== null) levels.push({ value: row.stopLoss, label: `Stop ${formatHuntPrice(row.stopLoss)}`, color: PRINT_LEVEL_STOP });
-        if (row.takeProfit !== null) levels.push({ value: row.takeProfit, label: `Take-profit ${formatHuntPrice(row.takeProfit)}`, color: PRINT_LEVEL_TAKE });
-        const basis = row.exits[0]?.entryPrice;
-        if (basis !== undefined && basis !== null) {
-          levels.push({ value: basis, label: `Cost basis ${formatHuntPrice(basis)}`, color: PRINT_LEVEL_BASIS });
-        }
-        renderPriceChart(ctx, section.closes, levels, 420, 84);
-      }
-      rule(ctx);
+  // Per-symbol detail — the model's section text, for every evaluated symbol,
+  // with the chart drawn from the section's own series and levels.
+  for (const section of model.sections) {
+    text(ctx, section.heading, { size: 12, bold: true });
+    text(ctx, section.lastCloseLine, { size: 9, color: PDF_PRINT_MUTED });
+    if (section.noSetupNote) {
+      text(ctx, section.noSetupNote, { size: 9, color: PDF_PRINT_MUTED });
     }
+    if (section.entryLines.length > 0) {
+      text(ctx, section.entryHeading, { size: 10, bold: true, color: PRINT_SUCCESS });
+      for (const line of section.entryLines) {
+        text(ctx, line, { size: 9 });
+      }
+    }
+    if (section.exitLines.length > 0) {
+      text(ctx, section.exitHeading, { size: 10, bold: true, color: PDF_PRINT_DANGER });
+      for (const line of section.exitLines) {
+        text(ctx, line, { size: 9 });
+      }
+    }
+    const row = section.row;
+    if (section.closes.length >= 2) {
+      const levels: PriceLevel[] = [];
+      if (row.entryLow !== null) levels.push({ value: row.entryLow, label: `Entry ${formatHuntPrice(row.entryLow)}`, color: PRINT_LEVEL_ENTRY });
+      if (row.entryHigh !== null) levels.push({ value: row.entryHigh, label: `Entry ${formatHuntPrice(row.entryHigh)}`, color: PRINT_LEVEL_ENTRY });
+      if (row.stopLoss !== null) levels.push({ value: row.stopLoss, label: `Stop ${formatHuntPrice(row.stopLoss)}`, color: PRINT_LEVEL_STOP });
+      if (row.takeProfit !== null) levels.push({ value: row.takeProfit, label: `Take-profit ${formatHuntPrice(row.takeProfit)}`, color: PRINT_LEVEL_TAKE });
+      const basis = row.exits[0]?.entryPrice;
+      if (basis !== undefined && basis !== null) {
+        levels.push({ value: basis, label: `Cost basis ${formatHuntPrice(basis)}`, color: PRINT_LEVEL_BASIS });
+      }
+      renderPriceChart(ctx, section.closes, levels, 420, 84);
+    }
+    rule(ctx);
   }
 
   // Methodology footer — the model's wording, shared with the page.
