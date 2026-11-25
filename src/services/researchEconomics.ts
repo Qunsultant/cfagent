@@ -14,6 +14,16 @@
 
 export type ResearchOptionType = "call" | "put";
 
+import {
+  expectedMove as sharedExpectedMove,
+  expiryPayoff,
+  findBreakevensFromPayoff,
+  gridExtreme,
+  midPrice,
+  netOpenCost as sharedNetOpenCost,
+  type EconomicsLeg,
+} from "../shared/optionsEconomics";
+
 export interface ResearchLeg {
   optionType: ResearchOptionType;
   strike: number;
@@ -133,12 +143,20 @@ export function blackScholesPrice(input: BsInputs): number {
 
 /** One-standard-deviation expected move over `years` at volatility `sigma`. */
 export function expectedMove(spot: number, sigma: number, years: number): number {
-  if (!(spot > 0) || !(sigma > 0) || !(years > 0)) return NaN;
-  return spot * sigma * Math.sqrt(years);
+  return sharedExpectedMove(spot, sigma, years);
 }
 
 export function legMid(leg: ResearchLeg): number {
-  return (leg.bid + leg.ask) / 2;
+  return midPrice(leg.bid, leg.ask);
+}
+
+function asEconomicsLegs(legs: PricedLeg[]): EconomicsLeg[] {
+  return legs.map((leg) => ({
+    optionType: leg.optionType,
+    strike: leg.strike,
+    quantity: leg.quantity,
+    price: leg.mid,
+  }));
 }
 
 function withMids(legs: ResearchLeg[]): PricedLeg[] {
@@ -147,17 +165,7 @@ function withMids(legs: ResearchLeg[]): PricedLeg[] {
 
 /** Net cash flow to open: positive = debit paid, negative = credit received. */
 function netOpenCost(legs: PricedLeg[]): number {
-  return legs.reduce((sum, leg) => sum + leg.quantity * leg.mid, 0);
-}
-
-function intrinsicValue(
-  optionType: ResearchOptionType,
-  spot: number,
-  strike: number
-): number {
-  return optionType === "call"
-    ? Math.max(spot - strike, 0)
-    : Math.max(strike - spot, 0);
+  return sharedNetOpenCost(asEconomicsLegs(legs));
 }
 
 /** Structure P&L at expiry for an underlying price (per unit, pre-costs). */
@@ -167,51 +175,31 @@ export function payoffAtExpiry(
   netCredit: number,
   spot: number
 ): number {
-  const expiryValue = legs.reduce(
-    (sum, leg) => sum + leg.quantity * intrinsicValue(leg.optionType, spot, leg.strike),
-    0
-  );
-  return expiryValue - netDebit + netCredit;
+  return expiryPayoff(asEconomicsLegs(legs), spot) - netDebit + netCredit;
 }
 
 /**
  * Breakevens found numerically over a wide underlying grid — the same
  * routine backs every structure, so no hand-derived formula can drift.
  */
+function payoffSamples(referenceSpot: number, steps: number): number[] {
+  const lo = Math.max(referenceSpot * 0.01, 0.01);
+  const hi = referenceSpot * 3;
+  return Array.from({ length: steps + 1 }, (_, index) => lo + ((hi - lo) * index) / steps);
+}
+
 export function findBreakevens(
   legs: PricedLeg[],
   netDebit: number,
   netCredit: number,
   referenceSpot: number
 ): number[] {
-  const lo = Math.max(referenceSpot * 0.01, 0.01);
-  const hi = referenceSpot * 3;
-  const steps = 4000;
-  const out: number[] = [];
-  let prevS = lo;
-  let prevP = payoffAtExpiry(legs, netDebit, netCredit, prevS);
-  for (let i = 1; i <= steps; i++) {
-    const s = lo + ((hi - lo) * i) / steps;
-    const p = payoffAtExpiry(legs, netDebit, netCredit, s);
-    if ((prevP <= 0 && p >= 0) || (prevP >= 0 && p <= 0)) {
-      // Bisection refine.
-      let a = prevS;
-      let b = s;
-      for (let k = 0; k < 40; k++) {
-        const m = (a + b) / 2;
-        const pm = payoffAtExpiry(legs, netDebit, netCredit, m);
-        if ((payoffAtExpiry(legs, netDebit, netCredit, a) <= 0) === (pm <= 0)) a = m;
-        else b = m;
-      }
-      const be = (a + b) / 2;
-      if (!out.some((x) => Math.abs(x - be) < referenceSpot * 0.001)) {
-        out.push(Number(be.toFixed(2)));
-      }
-    }
-    prevS = s;
-    prevP = p;
-  }
-  return out.sort((a, b) => a - b);
+  const payoff = (spot: number): number => payoffAtExpiry(legs, netDebit, netCredit, spot);
+  return findBreakevensFromPayoff(payoff, payoffSamples(referenceSpot, 4000), {
+    refine: "bisection",
+    dedupeTolerance: referenceSpot * 0.001,
+    precision: 2,
+  });
 }
 
 function maxLossOnGrid(
@@ -220,15 +208,9 @@ function maxLossOnGrid(
   netCredit: number,
   referenceSpot: number
 ): number {
-  let worst = Infinity;
-  const lo = Math.max(referenceSpot * 0.01, 0.01);
-  const hi = referenceSpot * 3;
-  for (let i = 0; i <= 2000; i++) {
-    const s = lo + ((hi - lo) * i) / 2000;
-    const pnl = payoffAtExpiry(legs, netDebit, netCredit, s);
-    if (pnl < worst) worst = pnl;
-  }
-  return Math.max(0, -worst);
+  const payoff = (spot: number): number => payoffAtExpiry(legs, netDebit, netCredit, spot);
+  const { min } = gridExtreme(payoff, payoffSamples(referenceSpot, 2000));
+  return Math.max(0, -min);
 }
 
 function maxGainOnGrid(
@@ -237,22 +219,17 @@ function maxGainOnGrid(
   netCredit: number,
   referenceSpot: number
 ): number | null {
-  let best = -Infinity;
-  const lo = Math.max(referenceSpot * 0.01, 0.01);
-  const hi = referenceSpot * 3;
-  for (let i = 0; i <= 2000; i++) {
-    const s = lo + ((hi - lo) * i) / 2000;
-    const pnl = payoffAtExpiry(legs, netDebit, netCredit, s);
-    if (pnl > best) best = pnl;
-  }
+  const payoff = (spot: number): number => payoffAtExpiry(legs, netDebit, netCredit, spot);
+  const { max } = gridExtreme(payoff, payoffSamples(referenceSpot, 2000));
   // If the payoff is still growing at the grid edge, gain is effectively
   // unbounded over the sampled domain — report null rather than a clipped
   // number. Capped structures (spreads, condors) plateau, so they keep
   // their finite best.
-  const edge = payoffAtExpiry(legs, netDebit, netCredit, hi);
-  const nearEdge = payoffAtExpiry(legs, netDebit, netCredit, hi * 0.99);
+  const hi = referenceSpot * 3;
+  const edge = payoff(hi);
+  const nearEdge = payoff(hi * 0.99);
   if (edge - nearEdge > 1e-6) return null;
-  return Math.max(0, best);
+  return Math.max(0, max);
 }
 
 function baseEconomics(

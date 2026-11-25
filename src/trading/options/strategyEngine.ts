@@ -5,6 +5,7 @@ import { EvaluationLedger, runAcceptanceRules, runNoViewAcceptanceRules } from "
 import { filterDefinitionsByMode, resolveStrategyMode } from "./strategyChoice";
 import type { RiskProfile } from "./recommendationAgent";
 import type { ChainView, NameLedgerEntry, StrategyContext, StrategyDefinition, StrategyEvaluation } from "./strategies/types";
+import { findBreakevensFromPayoff, gridExtreme, netOpenCost } from "../../shared/optionsEconomics";
 
 export { contractKey };
 
@@ -402,11 +403,12 @@ function clamp(value: number, min = 0, max = 100): number {
 }
 
 function netDebit(legs: StrategyLeg[], fees: number): number {
-  const signedEntry = legs.reduce((sum, leg) => {
-    const sign = leg.side === "BUY" ? 1 : -1;
-    return sum + sign * leg.entryPrice * leg.quantity * leg.multiplier;
-  }, 0);
-  return signedEntry + fees;
+  return netOpenCost(
+    legs.map((leg) => ({
+      quantity: sideSign(leg) * leg.quantity,
+      price: leg.entryPrice * leg.multiplier,
+    })),
+  ) + fees;
 }
 
 function sideSign(leg: StrategyLeg): number {
@@ -441,40 +443,41 @@ function riskProfile(legs: StrategyLeg[], fees: number, underlyingPrice: number,
   const curved = optionLegs.some((leg) => (leg.daysToExpiration ?? 0) > horizon);
   const grid = curved ? Array.from({ length: 119 }, (_, index) => (upper * (index + 1)) / 120) : [];
   const points = Array.from(new Set([0, ...strikes, ...grid, upper])).sort((a, b) => a - b);
-  const values = points.map((spot) => ({ spot, pnl: expiryPnl(legs, spot, fees, rate, dividend) }));
+  // Issue #6506: the payoff stays engine-owned (fees and later-dated legs'
+  // Black-Scholes value are inside expiryPnl); the extremes and the root
+  // search come from the shared economics module, exactly as OODA's grid does.
+  const payoff = (spot: number): number => expiryPnl(legs, spot, fees, rate, dividend);
   const callSlope = legs.reduce((sum, leg) => {
     if (leg.optionType === "PUT") return sum;
     return sum + sideSign(leg) * leg.quantity * leg.multiplier;
   }, 0);
-  const pnls = values.map((point) => point.pnl);
-  const flat = Math.max(...pnls) - Math.min(...pnls) < 0.01;
-  const maxLoss = callSlope < 0 ? Infinity : Math.max(0, -Math.min(...pnls));
+  const { min, max } = gridExtreme(payoff, points);
+  const flat = max - min < 0.01;
+  const maxLoss = callSlope < 0 ? Infinity : Math.max(0, -min);
   const maxProfitUnbounded = callSlope > 0;
-  const maxProfit = maxProfitUnbounded ? null : Math.max(0, ...pnls);
-  const breakevens: number[] = [];
+  const maxProfit = maxProfitUnbounded ? null : Math.max(0, max);
+  const breakevens = findBreakevensFromPayoff(payoff, points, {
+    refine: "linear",
+    precision: 2,
+    tailSlope: callSlope,
+  });
 
-  for (let index = 0; index < values.length - 1; index++) {
-    const left = values[index];
-    const right = values[index + 1];
-    if (left.pnl === 0) breakevens.push(left.spot);
-    if ((left.pnl < 0 && right.pnl > 0) || (left.pnl > 0 && right.pnl < 0)) {
-      breakevens.push(left.spot + ((-left.pnl) * (right.spot - left.spot)) / (right.pnl - left.pnl));
-    }
-  }
-  const last = values[values.length - 1];
-  if (last.pnl === 0) breakevens.push(last.spot);
-  else if (callSlope !== 0) {
-    const tailRoot = last.spot - last.pnl / callSlope;
-    if (tailRoot > last.spot) breakevens.push(tailRoot);
-  }
+  return { maxLoss, maxProfit, maxProfitUnbounded, flat, breakevens };
+}
 
-  return {
-    maxLoss,
-    maxProfit,
-    maxProfitUnbounded,
-    flat,
-    breakevens: Array.from(new Set(breakevens.map((point) => Number(point.toFixed(2))))).sort((a, b) => a - b),
-  };
+/**
+ * Issue #6506: the screen engine's risk profile, exported for the parity pin
+ * against OODA's researchEconomics. The engine keeps its own payoff model
+ * (fees and the Black-Scholes horizon); the pure search is shared.
+ */
+export function optionStrategyRiskProfile(
+  legs: StrategyLeg[],
+  fees: number,
+  underlyingPrice: number,
+  rate = DEFAULT_RATE,
+  dividend = 0,
+) {
+  return riskProfile(legs, fees, underlyingPrice, rate, dividend);
 }
 
 /**
