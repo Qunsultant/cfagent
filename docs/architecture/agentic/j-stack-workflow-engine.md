@@ -1156,10 +1156,13 @@ replays with the earlier steps' journaled results reused. It is separate on
 purpose: `rerunStage` refuses while a run is live and re-executes a stage from
 the engine's own artifacts, while the platform restart rewinds a live instance
 — opposite preconditions, not two spellings of one thing. Addressability is
-checked, never guessed: a sharded stage or per-item `online` pacing has one
-step name per unit and refuses `stage_restart_unaddressable`; a platform that
-rejects the target refuses `stage_restart_rejected`; a host with no channel
-refuses `stage_port_unavailable`.
+derived, never guessed (#6560): the target is the plan's first unit (its
+`unitId`) and item 0 under per-item `online` pacing, so a sharded or `online`
+stage rewinds to its own beginning and every later step is discarded — the
+same rule the executor's plan follows. A sharded shape that names no shard keys
+refuses `job_shards_not_configured`; a platform that rejects the target refuses
+`stage_restart_rejected`; a host with no channel refuses
+`stage_port_unavailable`.
 
 Stage retirement is persisted on the definition (`retired`, #3944,
 `src/data/jobPipelinePorts.ts:159-167`): a retired stage never

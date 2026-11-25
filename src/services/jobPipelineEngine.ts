@@ -1637,19 +1637,38 @@ export class JobPipelineControl {
       );
     }
     const node = this.nodeAtPath(definition.root, nodePath);
-    const shards = node.processing?.shards ?? definition.config.processing.shards ?? [];
-    const pacing = definition.config.executionMode.pacing;
-    if (shards.length > 0 || pacing === "online") {
+    // Issue #6560 — the target is derived from the SAME plan the executor
+    // compiles, never assumed: a sharded stage's first unit is the plan's
+    // first unit, and per-item pacing's first item is item 0. Rewinding to
+    // that step discards every later step, so the whole stage re-runs —
+    // which is what "restart from this stage" means.
+    const mode = resolveExecutionMode({
+      ...definition.config.executionMode,
+      ...(node.executionMode ?? {}),
+    });
+    assertExecutionModeSupported(mode);
+    const shardKeys: Array<string | null> =
+      mode.shape === "sharded"
+        ? [...(node.processing?.shards ?? definition.config.processing.shards)]
+        : [];
+    if (mode.shape === "sharded" && shardKeys.length === 0) {
       throw new JobPipelineError(
-        "stage_restart_unaddressable",
-        `Stage "${jobStageId(nodePath)}" of job "${jobId}" cannot be rewound by name: ${
-          shards.length > 0
-            ? `the stage runs ${shards.length} shard unit(s)`
-            : "the job paces per item"
-        }, so each unit has its own step name. Cancel and retry the run instead.`,
+        "job_shards_not_configured",
+        `Stage "${jobStageId(nodePath)}" of job "${jobId}" is configured for the sharded shape but names no shard keys; refusing rather than guessing a target.`,
       );
     }
-    const fromStep = stepExecutionId(runId, nodePath, 0, null, null);
+    const stage = this.stageForNode(node, nodePath, mode, undefined);
+    const plan = planRun({
+      runId,
+      invocation: this.deps.invocation ?? "sync",
+      stages: [stage],
+      units: shardKeys
+        .filter((key): key is string => key !== null)
+        .map((unitId) => ({ unitId })),
+    });
+    const firstUnit = plan.units[0]?.unitId ?? null;
+    const firstItem = mode.pacing === "online" ? 0 : null;
+    const fromStep = stepExecutionId(runId, nodePath, 0, firstUnit, firstItem);
     try {
       await restart({ jobId, runId, workflowInstanceId, fromStep });
     } catch (error) {
