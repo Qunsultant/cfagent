@@ -66,6 +66,14 @@ export interface PipelinePolicy {
   notifications: NotificationPolicy;
   /** Per-fetch timeout budget for provider calls. */
   fetchTimeoutMs: number;
+  /**
+   * Issue #6551 — the bound a `wait.event` stage waits under when the job
+   * declares none. A durable wait with no bound inherits the platform's 24h
+   * maximum, which is a live instance by default: the cost direction
+   * (2026-11-25) forbids that shape, so the default is a configured bound and
+   * expiry stays the declared outcome #3955 defined.
+   */
+  waitDefaultTimeoutMs: number;
 }
 
 export const DEFAULT_PIPELINE_POLICY: PipelinePolicy = {
@@ -90,12 +98,16 @@ export const DEFAULT_PIPELINE_POLICY: PipelinePolicy = {
     },
   },
   fetchTimeoutMs: 15_000,
+  waitDefaultTimeoutMs: 3_600_000,
 };
 
 const ATTEMPTS_MIN = 1;
 const ATTEMPTS_MAX = 10;
 const DELAY_MIN_MS = 0;
 const DELAY_MAX_MS = 120_000;
+/** Issue #6551 — a wait bound is clamped to the platform's own maximum (365d is the API ceiling; 24h is the default a bound replaces). */
+const WAIT_TIMEOUT_MIN_MS = 1_000;
+const WAIT_TIMEOUT_MAX_MS = 86_400_000;
 const JITTER_MIN = 0;
 const JITTER_MAX = 1;
 
@@ -130,6 +142,7 @@ export const PIPELINE_POLICY_DEFAULTS: Record<string, string> = {
     .filter((event) => DEFAULT_PIPELINE_POLICY.notifications.events[event])
     .join(","),
   "pipeline.fetchTimeoutMs": String(DEFAULT_PIPELINE_POLICY.fetchTimeoutMs),
+  "pipeline.waitDefaultTimeoutMs": String(DEFAULT_PIPELINE_POLICY.waitDefaultTimeoutMs),
 };
 
 /**
@@ -359,7 +372,18 @@ export function resolvePipelinePolicy(
     s("pipeline.fetchTimeoutMs"),
   );
 
-  return { retry, notifications, fetchTimeoutMs };
+  // Issue #6551 — the durable-wait bound, resolved here with every other
+  // pipeline knob (settings beat env, both beat the default) so a host never
+  // invents its own. Clamped to the platform's own wait ceiling.
+  const waitDefaultTimeoutMs =
+    parseIntClamped(
+      s("pipeline.waitDefaultTimeoutMs") ?? e("PIPELINE_WAIT_DEFAULT_TIMEOUT_MS"),
+      WAIT_TIMEOUT_MIN_MS,
+      WAIT_TIMEOUT_MAX_MS,
+      "PIPELINE_WAIT_DEFAULT_TIMEOUT_MS",
+    ) ?? DEFAULT_PIPELINE_POLICY.waitDefaultTimeoutMs;
+
+  return { retry, notifications, fetchTimeoutMs, waitDefaultTimeoutMs };
 }
 
 /**
