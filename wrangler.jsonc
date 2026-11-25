@@ -5,7 +5,7 @@
   // Issue #4968 — minify the Worker bundle (deploy error 10021: startup exceeded the 1s CPU limit).
   // Measured: bundle 24,942,845 → 13,228,323 bytes; parse 456ms → 369ms median; check-startup
   // active-time minimum 703ms → 576ms. Parse is ~45% of the startup budget. limits.cpu_ms
-  // is untouched — it is the per-request guard, not the startup limit.
+  // is the per-request guard, not the startup limit (disabled on the Free plan — #6487).
   "minify": true,
   "compatibility_date": "2026-10-31",
   "compatibility_flags": ["nodejs_compat"],
@@ -20,7 +20,11 @@
   // subrequests: 50 from the same file is deliberately NOT applied: 50 is the
   // Free-plan ceiling, it changes nothing there, and on a paid plan it would
   // start failing the fan-out routes (screener, discovery, report delivery).
-  "limits": { "cpu_ms": 500 },
+  // Issue #6487 (owner direction 2026-11-25) — DISABLED. Cloudflare rejects
+  // `limits.cpu_ms` on the Free plan (API error 100328), so every `wrangler
+  // deploy` failed before this line. The intended guard is 500ms; restore it
+  // (uncomment) once the account is on a paid plan — an owner decision.
+  // "limits": { "cpu_ms": 500 },
   // The custom domain is the only intended front door; workers.dev stays
   // closed so stray subdomain traffic cannot bill.
   "workers_dev": false,
