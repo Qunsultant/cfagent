@@ -317,6 +317,22 @@
 
 
 /* ---------- Tabs ---------- */
+/* Issue #6501 — the tab strip is navigation chrome, never shrinkable
+ * content. `.ui-tabs` is a scroll container (`overflow-x: auto`, so
+ * `overflow-y` computes to `auto` too) inside the `min-height: 0`
+ * column-flex page frame, under the height-constrained `.tab-viewport`.
+ * When the page content exceeds the viewport, the flex algorithm
+ * shrinks the frame's column children — and the sibling TabPanel
+ * cannot shrink below its min-content height (the Pipeline Policy
+ * panel measures 1699.5px at min-content width, above its 1529.5px
+ * basis), so it freezes and the strip, a scroll container with
+ * automatic minimum size zero, absorbs the entire overflow and
+ * collapses to its 1px border, clipping every tab label. A strip
+ * must keep its content height on every page, so it never
+ * participates in shrink distribution: the panel content overflows
+ * visibly and the tab viewport scrolls, which is the frame's
+ * intended behavior for long pages. No height is fixed here — the
+ * strip stays fully content-derived (font + padding tokens). */
 .ui-tabs {
   display: flex;
   align-items: center;
@@ -325,6 +341,7 @@
   overflow-x: auto;
   max-width: 100%;
   scrollbar-width: thin;
+  flex-shrink: 0;
 }
 
 /* Billing sticky tab strip (#4691 follow-up): the Billing strip is the

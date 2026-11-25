@@ -32,17 +32,33 @@
  * Structural only: jsdom has no layout engine, so true bounding-box
  * assertions are impossible without a browser runner — that stays
  * out of scope.
+ *
+ * Rendered tabs == registry tabs (issue #6501): the gate also
+ * asserts that a route's tab strip shows every registry view, in
+ * registry order, and nothing else — against the registry module
+ * the page renders its strip from (ROUTE_TABS). The #6501 lone-tab
+ * collapse passed this gate with all five Data Hub tabs in the DOM
+ * and none of them visible: the panel assertion cannot see a
+ * missing or wrong strip, so the strip is asserted here. A tablist
+ * with no ROUTE_TABS entry fails the gate ("no registry tabs
+ * wired"), the same pattern as "no mount wired".
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { TradeHub } from "../src/client/TradeHub";
-import { ProductHub } from "../src/client/ProductHub";
-import { AuditVaultPage } from "../src/client/AuditVaultPage";
-import { WorkflowCatalogPage } from "../src/client/WorkflowCatalogPage";
+import { ProductHub, PRODUCT_HUB_TAB_OPTIONS } from "../src/client/ProductHub";
+import { AuditVaultPage, AUDIT_VAULT_VIEWS, AUDIT_VAULT_VIEW_LABELS } from "../src/client/AuditVaultPage";
+import { WorkflowCatalogPage, WORKFLOW_CATALOG_VIEWS, WORKFLOW_CATALOG_VIEW_LABELS } from "../src/client/WorkflowCatalogPage";
 import { NavSettingsPage } from "../src/client/NavSettingsPage";
 import { OptionsScreenerPage } from "../src/client/OptionsScreenerPage";
 import { SecurityHubHome } from "../src/client/SecurityHubHome";
+import { DataHubHome } from "../src/client/DataHubHome";
+import { ORDER_TICKET_TABS } from "../src/client/OrderTicketPanel";
+import { AUTOPILOT_SUB_TABS } from "../src/client/components/AutopilotControlCenter";
+import { OPTIONS_HUB_TAB_ITEMS } from "../src/client/OptionsHub";
+import { SECURITY_HUB_VIEWS, SECURITY_HUB_VIEW_LABELS } from "../src/client/securityHubView";
+import { DATA_HUB_VIEWS, DATA_HUB_VIEW_LABELS } from "../src/client/dataHubView";
 import { leftNavConfigIds } from "../src/client/navPresets";
 import { ToastProvider } from "../src/client/components/ui/Toast";
 import {
@@ -85,6 +101,44 @@ const STANDALONE_ROUTES: Record<string, React.ComponentType> = {
   // login (defaults), empty-shape fetch stub — the panels render
   // their loading/empty states, never a crash.
   "security-hub": SecurityHubHome,
+  // data-hub mounts standalone, as Chat mounts it. The mount URL is
+  // pipeline-policy, not the default view: the default
+  // data-providers view renders a NESTED Tabs inside
+  // DataProvidersPanel, which would double the visible panels —
+  // pipeline-policy has no nested tabs (see STANDALONE_SEARCH).
+  "data-hub": DataHubHome,
+};
+
+/** Standalone routes whose mount needs a deeper URL than `/?tab=<id>`. */
+const STANDALONE_SEARCH: Record<string, string> = {
+  "data-hub": "/?tab=data-hub&view=pipeline-policy",
+};
+
+/** Registry tabs per tabbed template route: the route's view registry
+ * (labels, in display order), derived from the same module the page
+ * renders its strip from — never a hardcoded copy, so a registry
+ * change fails this gate instead of silently drifting. Routes with
+ * no tablist (nav-settings, options-screener) have no entry; a
+ * tablist rendering on such a route fails the gate.
+ *
+ * Hub mounts render the panel's strip, not TradeHub's (TradeHub
+ * renders no tablist of its own). The order page's strip is the
+ * risk-analysis route's strip too — the route IS the order page's
+ * risk sub-tab, and the risk panel's own Tabs render inside it.
+ * The FIRST tablist in document order is the route's strip; nested
+ * tablists live inside panels, never inside it. */
+const ROUTE_TABS: Record<string, readonly string[]> = {
+  order: ORDER_TICKET_TABS.map((t) => t.label),
+  "risk-analysis": ORDER_TICKET_TABS.map((t) => t.label),
+  autopilot: AUTOPILOT_SUB_TABS.map((t) => t.label),
+  options: OPTIONS_HUB_TAB_ITEMS.map((t) => t.label),
+  "product-hub": PRODUCT_HUB_TAB_OPTIONS.map((t) => t.label),
+  "audit-vault": AUDIT_VAULT_VIEWS.map((id) => AUDIT_VAULT_VIEW_LABELS[id]),
+  "workflow-catalog": WORKFLOW_CATALOG_VIEWS.map(
+    (id) => WORKFLOW_CATALOG_VIEW_LABELS[id],
+  ),
+  "security-hub": SECURITY_HUB_VIEWS.map((id) => SECURITY_HUB_VIEW_LABELS[id]),
+  "data-hub": DATA_HUB_VIEWS.map((id) => DATA_HUB_VIEW_LABELS[id]),
 };
 
 /** Canonical slot order (PageTemplate renders them in this order). */
@@ -229,7 +283,7 @@ async function mountRoute(id: string): Promise<"hub" | "standalone"> {
   }
   const Component = STANDALONE_ROUTES[id];
   if (!Component) throw new Error(`no mount wired for template route "${id}"`);
-  window.history.pushState(null, "", `/?tab=${id}`);
+  window.history.pushState(null, "", STANDALONE_SEARCH[id] ?? `/?tab=${id}`);
   vi.stubGlobal("fetch", standaloneFetch());
   container = document.createElement("div");
   document.body.appendChild(container);
@@ -369,6 +423,30 @@ describe("general composed-page gate (#4825)", () => {
           '[role="tabpanel"]:not([hidden])',
         );
         expect(visible).toHaveLength(1);
+      }
+
+      // Rendered tabs == registry tabs (#6501): the route's tab strip
+      // must show every registry view, in registry order, and nothing
+      // else. The #6501 lone-tab collapse passed this gate with all
+      // five Data Hub tabs in the DOM and none of them visible — the
+      // panel assertion cannot see a missing or wrong strip. A
+      // tablist with no ROUTE_TABS entry fails with "no registry tabs
+      // wired". Labels come from the label span (`.ui-tab-label` /
+      // `.capability-tab-label`), not the button text — icons and
+      // badges ride on the button too.
+      const tablist = container.querySelector('[role="tablist"]');
+      if (tablist) {
+        const expected = ROUTE_TABS[route.id];
+        expect(
+          expected,
+          `${route.id}: tablist rendered but no registry tabs wired`,
+        ).toBeDefined();
+        const rendered = [...tablist.querySelectorAll('[role="tab"]')].map(
+          (tab) =>
+            tab.querySelector(".ui-tab-label, .capability-tab-label")
+              ?.textContent?.trim() ?? tab.textContent?.trim() ?? "",
+        );
+        expect(rendered).toEqual([...(expected as readonly string[])]);
       }
 
       // Every section lives inside the template. Standalone pages are

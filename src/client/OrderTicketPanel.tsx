@@ -18,6 +18,7 @@ import {
   TabPanel,
   Tabs,
   TextInput,
+  type TabOption,
 } from "./components/ui";
 import { useUrlSyncedTabs } from "./useUrlSyncedTabs";
 import type { ETradeOrderDraft, ETradeQuote } from "../types";
@@ -67,6 +68,16 @@ import {
  */
 
 export type OrderTicketTab = "stock" | "options" | "risk" | "approvals" | "nlq-guarantee";
+/** The order ticket's tabs, in display order — the registry the
+ * Tabs strip renders and the #4825 gate derives its expected tab
+ * labels from (issue #6501). */
+export const ORDER_TICKET_TABS: TabOption<OrderTicketTab>[] = [
+  { id: "stock", label: "Stock order" },
+  { id: "options", label: "Options order" },
+  { id: "risk", label: "Risk analysis" },
+  { id: "approvals", label: "Approvals" },
+  { id: "nlq-guarantee", label: "NLQ & Guarantee" },
+];
 
 export interface OrderTicketModel {
   orderSymbol: string;
@@ -446,13 +457,7 @@ export function OrderTicketPanel({ ticket }: { ticket: OrderTicketModel }) {
       <Tabs
         idBase="order-ticket"
         ariaLabel="Order type"
-        tabs={[
-          { id: "stock", label: "Stock order" },
-          { id: "options", label: "Options order" },
-          { id: "risk", label: "Risk analysis" },
-          { id: "approvals", label: "Approvals" },
-          { id: "nlq-guarantee", label: "NLQ & Guarantee" },
-        ]}
+        tabs={ORDER_TICKET_TABS}
         value={activeTab}
         onChange={(tab) => handleTabChange(tab)}
       />

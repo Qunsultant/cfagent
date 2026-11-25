@@ -16,7 +16,7 @@
  * Inactive views unmount (TabPanel default).
  */
 import { useEffect, useState } from "react";
-import { Card, CardHeader, Grid, PageSection, PageShell, Tabs, TabPanel, type TabOption } from "./components/ui";
+import { Card, CardHeader, Grid, PageSection, PageTemplate, Tabs, TabPanel, type TabOption } from "./components/ui";
 import { DataProvidersPanel } from "./DataProvidersPanel";
 import { FeedsPanel } from "./FeedsPanel";
 import { AlpacaSignInCard } from "./AlpacaSignInCard";
@@ -61,7 +61,7 @@ export function DataHubHome({ userLogin }: DataHubHomeProps = {}) {
   };
 
   return (
-    <PageShell
+    <PageTemplate
       title="DataHub"
       scopeNote="Market-data providers, data lifecycle, and parameters & export"
     >
@@ -115,6 +115,6 @@ export function DataHubHome({ userLogin }: DataHubHomeProps = {}) {
         </Card>
       </TabPanel>
       </PageSection>
-    </PageShell>
+    </PageTemplate>
   );
 }

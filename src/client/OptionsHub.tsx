@@ -125,6 +125,112 @@ interface OptionsHubProps {
   onTabChange?: (tab: OptionsHubTab) => void;
 }
 
+export const OPTIONS_HUB_TAB_ITEMS: CapabilityTabItem[] = [
+  {
+    id: "strategy-scanner",
+    label: "Strategy Scanner",
+    icon: "🎯",
+    badge: "AI",
+    badgeType: "purple",
+    tooltip: {
+      eyebrow: "STRATEGY / SYMBOL SCANNING",
+      title: "Strategy/Symbol Scanner",
+      description:
+        "Best strategy for a name, or names that fit your strategy — across the full strategy catalog.",
+    },
+  },
+  {
+    id: "options-runs",
+    label: "Options Runs",
+    icon: "🗂️",
+    tooltip: {
+      eyebrow: "RESEARCH RUNS",
+      title: "Options Runs",
+      description:
+        "The record of manual and scheduled options research runs — one surface for both.",
+    },
+  },
+  {
+    id: "strategy-discovery",
+    label: "Strategy Discovery & Payoff Analyzer",
+    icon: "🎯",
+    tooltip: {
+      eyebrow: "ALGORITHMIC SELECTION ENGINE",
+      title: "Strategy Discovery & Payoff Analyzer",
+      description:
+        "Explore multi-leg option strategies (Iron Condors, Spreads, Straddles, Covered Calls) matched to market sentiment with interactive payoff charts and Greeks.",
+    },
+  },
+  {
+    id: "contracts-screener",
+    label: "Contracts Screener",
+    icon: "📋",
+    tooltip: {
+      eyebrow: "LIVE CHAIN FILTERING",
+      title: "Contracts Screener",
+      description:
+        "Directly filter individual Call and Put contracts across symbols, DTE windows, strikes, bid/ask spreads, volume, and Greeks.",
+    },
+  },
+  {
+    id: "custom-thesis",
+    label: "Custom Thesis & Strategy Universe",
+    icon: "⚙️",
+    tooltip: {
+      eyebrow: "CONSTRAINED OPTION SCANNING",
+      title: "Custom Thesis & Strategy Universe",
+      description:
+        "Declare specific target prices, target dates, and IV assumptions to filter and rank tailored candidate structures.",
+    },
+  },
+  {
+    id: "nlq-options",
+    label: "NLQ-options",
+    icon: "💬",
+    badge: "AI",
+    badgeType: "cyan",
+    tooltip: {
+      eyebrow: "AI-POWERED PROMPT SCREENING",
+      title: "NLQ-options",
+      description:
+        "Ask questions in plain English like 'Find high IV call spreads on NVDA with 30 DTE' to run instant options filters.",
+    },
+  },
+  {
+    id: "ai-strategy-ideas",
+    label: "AI Strategy Ideas & Exporter",
+    icon: "🧪",
+    tooltip: {
+      eyebrow: "INDEPENDENT RAW-DATA AI ANALYSIS",
+      title: "AI Strategy Ideas & Exporter",
+      description:
+        "Divides chains into near/mid/long-term expiration cohorts for multi-stage AI evaluation against raw market data.",
+    },
+  },
+  {
+    id: "iv-history",
+    label: "IV History",
+    icon: "📈",
+    tooltip: {
+      eyebrow: "IMPLIED VOLATILITY",
+      title: "IV History",
+      description:
+        "Daily option-chain IV snapshots: per-symbol coverage, IV rank, and the latest readings.",
+    },
+  },
+  {
+    id: "options-flows",
+    label: "Options Flows",
+    icon: "🌊",
+    tooltip: {
+      eyebrow: "INSTITUTIONAL FLOW",
+      title: "Options Flows",
+      description:
+        "Options flows, dark pool prints, institutional sweeps, blocks, and insider disclosures.",
+    },
+  },
+];
+
 export function OptionsHub({
   activeEnv,
   userLogin,
@@ -171,111 +277,11 @@ export function OptionsHub({
   const discoveryView = discoveryViewFromUrl();
   const panelKey = `options-research-panel-${discoveryView}`;
 
-  const optionsTabs: CapabilityTabItem[] = [
-    {
-      id: "strategy-scanner",
-      label: "Strategy Scanner",
-      icon: "🎯",
-      badge: "AI",
-      badgeType: "purple",
-      tooltip: {
-        eyebrow: "STRATEGY / SYMBOL SCANNING",
-        title: "Strategy/Symbol Scanner",
-        description:
-          "Best strategy for a name, or names that fit your strategy — across the full strategy catalog.",
-      },
-    },
-    {
-      id: "options-runs",
-      label: "Options Runs",
-      icon: "🗂️",
-      tooltip: {
-        eyebrow: "RESEARCH RUNS",
-        title: "Options Runs",
-        description:
-          "The record of manual and scheduled options research runs — one surface for both.",
-      },
-    },
-    {
-      id: "strategy-discovery",
-      label: "Strategy Discovery & Payoff Analyzer",
-      icon: "🎯",
-      tooltip: {
-        eyebrow: "ALGORITHMIC SELECTION ENGINE",
-        title: "Strategy Discovery & Payoff Analyzer",
-        description:
-          "Explore multi-leg option strategies (Iron Condors, Spreads, Straddles, Covered Calls) matched to market sentiment with interactive payoff charts and Greeks.",
-      },
-    },
-    {
-      id: "contracts-screener",
-      label: "Contracts Screener",
-      icon: "📋",
-      tooltip: {
-        eyebrow: "LIVE CHAIN FILTERING",
-        title: "Contracts Screener",
-        description:
-          "Directly filter individual Call and Put contracts across symbols, DTE windows, strikes, bid/ask spreads, volume, and Greeks.",
-      },
-    },
-    {
-      id: "custom-thesis",
-      label: "Custom Thesis & Strategy Universe",
-      icon: "⚙️",
-      tooltip: {
-        eyebrow: "CONSTRAINED OPTION SCANNING",
-        title: "Custom Thesis & Strategy Universe",
-        description:
-          "Declare specific target prices, target dates, and IV assumptions to filter and rank tailored candidate structures.",
-      },
-    },
-    {
-      id: "nlq-options",
-      label: "NLQ-options",
-      icon: "💬",
-      badge: "AI",
-      badgeType: "cyan",
-      tooltip: {
-        eyebrow: "AI-POWERED PROMPT SCREENING",
-        title: "NLQ-options",
-        description:
-          "Ask questions in plain English like 'Find high IV call spreads on NVDA with 30 DTE' to run instant options filters.",
-      },
-    },
-    {
-      id: "ai-strategy-ideas",
-      label: "AI Strategy Ideas & Exporter",
-      icon: "🧪",
-      tooltip: {
-        eyebrow: "INDEPENDENT RAW-DATA AI ANALYSIS",
-        title: "AI Strategy Ideas & Exporter",
-        description:
-          "Divides chains into near/mid/long-term expiration cohorts for multi-stage AI evaluation against raw market data.",
-      },
-    },
-    {
-      id: "iv-history",
-      label: "IV History",
-      icon: "📈",
-      tooltip: {
-        eyebrow: "IMPLIED VOLATILITY",
-        title: "IV History",
-        description:
-          "Daily option-chain IV snapshots: per-symbol coverage, IV rank, and the latest readings.",
-      },
-    },
-    {
-      id: "options-flows",
-      label: "Options Flows",
-      icon: "🌊",
-      tooltip: {
-        eyebrow: "INSTITUTIONAL FLOW",
-        title: "Options Flows",
-        description:
-          "Options flows, dark pool prints, institutional sweeps, blocks, and insider disclosures.",
-      },
-    },
-  ];
+/** The options hub's capability tabs, in display order — the registry
+ * the CapabilityNavBar renders and the #4825 gate derives its
+ * expected tab labels from. Fully static, so it lives at module
+ * scope (issue #6501). */
+
 
   return (
     <PageTemplate
@@ -285,7 +291,7 @@ export function OptionsHub({
       <PageSection>
         <CapabilityNavBar
           ariaLabel="Options capabilities"
-          tabs={optionsTabs}
+          tabs={OPTIONS_HUB_TAB_ITEMS}
           activeTabId={hubTab}
           onTabChange={handleTabChange}
           rightContent={
