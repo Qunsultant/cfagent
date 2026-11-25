@@ -21,6 +21,22 @@ import {
   submitAsyncJob,
   type AsyncJobsContext,
 } from "../src/agents/orchestrator/asyncJobs";
+import { MockD1Database } from "./mock-d1";
+import {
+  createD1AuditEventDb,
+  D1AuditEventStore,
+} from "../src/data/d1AuditEventAdapter";
+
+/** A D1 whose every statement throws — the throwing-audit-store seam (#6102). */
+function throwingD1(message: string): unknown {
+  const boom = async () => {
+    throw new Error(message);
+  };
+  return {
+    prepare: () => ({ bind: () => ({ run: boom, all: boom, first: boom, raw: boom }) }),
+    batch: boom,
+  };
+}
 
 const outcome: ScreenerRunOutcome = {
   kind: "stock",
@@ -185,19 +201,21 @@ function makeCtx(
   env: Record<string, unknown>,
   delivered: Array<{ channel: string; artifacts: unknown }>,
   notified: Array<{ channel: string; text: string }> = [],
-  // Issue #2178 (Q7 S2): the delivery claim audits through the ORM
-  // events repo — injectable so pins can record or throw.
-  eventsRepo: { create: (record: unknown) => unknown } = { create: () => ({}) },
 ): AsyncJobsContext {
   const storage = sql as unknown as AsyncJobsContext["agentCtx"]["storage"]["sql"];
-  return {
-    env,
+  // #6102: the delivery claim audits through the blocking D1 helper
+  // now — bind a fresh mock per ctx (a null port fails the job) and
+  // expose the store so the blocking-audit tests can read the rows.
+  const d1Mock = new MockD1Database();
+  const auditStore = new D1AuditEventStore(createD1AuditEventDb(d1Mock as never));
+  const ctx = {
+    env: { ...env, AGENT_DB: d1Mock },
     agentCtx: { storage: { sql: storage } },
     ensureTables: () => storage,
     sessionKey: () => "session-1",
     schedule: async () => ({}),
     audit: () => {},
-    getOrm: () => ({ events: eventsRepo }),
+    getOrm: () => ({ events: { create: () => ({}) } }),
     routeRequest: async () => new Response(STOCK_BODY, { status: 200 }),
     nlqSchedulingPort: () => {
       throw new Error("unused");
@@ -222,6 +240,12 @@ function makeCtx(
     reportDispatchHitlEnabled: () => false,
     createScreenerConfirmation: () => "rc_unused",
   } as unknown as AsyncJobsContext;
+  (ctx as unknown as { auditStore: D1AuditEventStore }).auditStore = auditStore;
+  return ctx;
+}
+
+function auditStoreOf(ctx: AsyncJobsContext): D1AuditEventStore {
+  return (ctx as unknown as { auditStore: D1AuditEventStore }).auditStore;
 }
 
 async function runChain(ctx: AsyncJobsContext, sql: StatefulAsyncSql): Promise<void> {
@@ -323,13 +347,10 @@ describe("delivery blocking audit (#2178 S2)", () => {
   it("a sent delivery audits the claim before the job completes as sent", async () => {
     const sql = new StatefulAsyncSql();
     const delivered: Array<{ channel: string; artifacts: unknown }> = [];
-    const created: any[] = [];
     const ctx = makeCtx(
       sql,
       { SLACK_WEBHOOK_URL: "https://hooks.slack.com/x", SCREENER_EMAIL_TO: "ops@example.com" },
       delivered,
-      [],
-      { create: (record: any) => { created.push(record); return record; } },
     );
     await runChain(ctx, sql);
     const deliveries = sql.rows.filter((r) => r.capability === "followup.deliver");
@@ -338,10 +359,12 @@ describe("delivery blocking audit (#2178 S2)", () => {
       await executeAsyncJob(ctx, { jobId: String(d.job_id) });
       expect(getAsyncJob(ctx, String(d.job_id))?.status).toBe("completed");
     }
-    const claims = created.filter((r) => r.type === "followup.delivered");
+    // #6102: the blocking claim writes to D1 now — read the rows
+    // from the store (payload reads back as JSON text).
+    const claims = await auditStoreOf(ctx).findMany({ where: { type: "followup.delivered" } });
     expect(claims).toHaveLength(2);
-    expect(claims.map((r) => r.payload.channel).sort()).toEqual(["email", "slack"]);
-    expect(claims[0].payload.jobId).toBeTruthy();
+    expect(claims.map((r) => (JSON.parse(r.payload as unknown as string) as any).channel).sort()).toEqual(["email", "slack"]);
+    expect((JSON.parse(claims[0].payload as unknown as string) as any).jobId).toBeTruthy();
     expect(claims[0].sessionId).toBeTruthy();
   });
 
@@ -356,11 +379,13 @@ describe("delivery blocking audit (#2178 S2)", () => {
     await runChain(ctx, sql);
     const delivery = sql.rows.find((r) => r.capability === "followup.deliver");
     expect(delivery).toBeTruthy();
-    // Swap in the throwing repo only for the delivery execution: the
-    // chain itself (main + report) never needed the ORM.
-    (ctx as any).getOrm = () => ({
-      events: { create: () => { throw new Error("audit store unavailable"); } },
-    });
+    // Swap in the throwing D1 only for the delivery execution: the
+    // chain itself (main + report) never needed the audit port.
+    // A fresh env object (the port is memoized per env object).
+    (ctx as unknown as { env: Record<string, unknown> }).env = {
+      ...(ctx as unknown as { env: Record<string, unknown> }).env,
+      AGENT_DB: throwingD1("audit store unavailable"),
+    };
     await executeAsyncJob(ctx, { jobId: String(delivery!.job_id) });
     // The port still ran (the recipient may already have the
     // artifact) — but the job must NOT read as a successful sent.

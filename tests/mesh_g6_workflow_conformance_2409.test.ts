@@ -123,6 +123,7 @@ import {
 } from "../src/agents/orchestrator/meshDoors";
 import { TradingPlatformRegistry } from "../src/trading";
 import { MockSqlStorage } from "./mock-sql";
+import { MockD1Database } from "./mock-d1";
 import {
   type ScreenerWorkflowDeps,
   type ShardScreenResult,
@@ -682,6 +683,10 @@ function makeTradingHarness() {
     SERVICE_USER_LOGIN: "svc-background",
     TRADING_AGENT_PROVIDERS: "fakeg6",
     TRADING_AGENT_DEFAULT_PROVIDER: "fakeg6",
+    // #6102: the flow's settle runs through the real approval
+    // door, whose blocking audits resolve from env.AGENT_DB — a
+    // fresh mock per harness (the port is memoized per env object).
+    AGENT_DB: new MockD1Database(),
   };
 
   // A real TradingAgent over mock DO storage (the G4 idiom):

@@ -17,6 +17,11 @@ import {
   handleAgenticPaymentsRoutes,
   type AgenticPaymentsRouteContext,
 } from "../src/agents/routes/agenticPayments";
+import { MockD1Database } from "./mock-d1";
+import {
+  createD1AuditEventDb,
+  D1AuditEventStore,
+} from "../src/data/d1AuditEventAdapter";
 
 const charge = (run: string, price: number) =>
   buildCfpayChargeTransaction({ runRequestId: run, userId: "u1", family: "goal", priceUSD: price });
@@ -122,14 +127,30 @@ describe("cfpay revenue endpoint (#2022)", () => {
       { type: "payment.covered", payload: { runRequestId: "run-4", paidVia: "credits" } },
       { type: "payment.failure_credit_issued", payload: JSON.stringify({ runRequestId: "run-1", family: "goal" }) },
     ];
+    // #6102: the endpoint reads the attribution payloads from D1
+    // now, not orm.events — seed the same four rows there (the
+    // payment.covered row's object payload round-trips through the
+    // D1 JSON-text storage exactly as the string ones do).
+    const mockD1 = new MockD1Database();
+    const d1Store = new D1AuditEventStore(createD1AuditEventDb(mockD1 as never));
+    const now = new Date().toISOString();
+    for (const [i, e] of eventRows.entries()) {
+      await d1Store.create({
+        id: `cfpay-seed-${i}`,
+        sessionId: "sess-1",
+        type: e.type,
+        agent: "payments",
+        payload: (typeof e.payload === "string" ? JSON.parse(e.payload) : e.payload) as Record<
+          string,
+          unknown
+        >,
+        createdAt: now,
+      });
+    }
     const ctx = {
+      env: { AGENT_DB: mockD1 } as any,
       getOrm: () => ({
         transactions: { findMany: vi.fn(() => txRows) },
-        events: {
-          findMany: vi.fn((opts: { where?: { type?: string } }) =>
-            eventRows.filter((e) => e.type === opts.where?.type),
-          ),
-        },
       }),
       audit: vi.fn(),
     } as unknown as AgenticPaymentsRouteContext;

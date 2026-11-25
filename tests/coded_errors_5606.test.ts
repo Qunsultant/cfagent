@@ -342,11 +342,13 @@ describe("coded errors #5606: grep pins on the other converted route files", () 
 
   it("no raw error text reaches a client from the other converted route files", () => {
     const bad: string[] = [];
-    // v5: payments.ts:995 is the slice's DOCUMENTED exception
-    // (comment at :992–994: MCP command throw, route answers a
+    // v5: payments.ts:998 is the slice's DOCUMENTED exception
+    // (comment at :995–997: MCP command throw, route answers a
     // coded 404) — the sibling pin counts it as the exactly-one
     // regex site, so it is excluded here, nowhere else.
-    const documentedExceptions = new Set(["src/agents/routes/payments.ts:995"]);
+    // (#6102 shifted the line from :995: the branch added 3 lines
+    // above it in payments.ts; the line itself is unchanged.)
+    const documentedExceptions = new Set(["src/agents/routes/payments.ts:998"]);
     for (const file of [
       "src/agents/routes/platformTenants.ts",
       "src/agents/routes/platformAccounts.ts",

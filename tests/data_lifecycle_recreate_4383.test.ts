@@ -410,8 +410,12 @@ describe("recreate, tenant scope (#4383)", () => {
     // #6151 S4 adds migration 0087 (nav admin config: 3 tables + 1 index): 300 → 304.
     // #5160 adds migration 0088 (IDP attributes profile: rebuild + index table): 300 → 306.
     // Union: 310.
+    // #6102 adds migration 0089 (mas_events D1 table + 6 indexes): the
+    // projected-model walk already has them (the ORM CREATE carries
+    // the table), so the D1 leg skips seven more: 18 → 25. Selected
+    // stays 310.
     expect(body.d1.selected).toHaveLength(310);
-    expect(body.d1.skipped).toHaveLength(18);
+    expect(body.d1.skipped).toHaveLength(25);
     // Two member instances (alice, bob), each planning the fresh DO leg.
     expect(body.instances).toHaveLength(2);
     for (const inst of body.instances) {

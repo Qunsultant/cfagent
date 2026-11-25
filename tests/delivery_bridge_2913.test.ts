@@ -33,6 +33,7 @@ import {
   type AsyncJobsContext,
 } from "../src/agents/orchestrator/asyncJobs";
 import { executeEtradeScreen } from "../src/agents/routes/etradeBrokerScreen";
+import { MockD1Database } from "./mock-d1";
 import { MockSqlStorage } from "./mock-sql";
 import type { SqlStorage } from "../src/data/repositoryPorts";
 
@@ -141,7 +142,9 @@ function makeCtx(
 ): AsyncJobsContext {
   const storage = sql as unknown as AsyncJobsContext["agentCtx"]["storage"]["sql"];
   return {
-    env,
+    // #6102: the followup.deliver blocking audit writes to D1 now —
+    // bind a fresh mock per ctx (a null port fails the job).
+    env: { ...env, AGENT_DB: new MockD1Database() },
     agentCtx: { storage: { sql: storage } },
     ensureTables: () => storage,
     sessionKey: () => "session-1",

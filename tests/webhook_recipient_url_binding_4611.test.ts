@@ -43,6 +43,11 @@ import {
   resolveScreenerFollowupConfig,
   type ScreenerRunOutcome,
 } from "../src/services/screenerFollowups";
+import { MockD1Database } from "./mock-d1";
+import {
+  createD1AuditEventDb,
+  D1AuditEventStore,
+} from "../src/data/d1AuditEventAdapter";
 
 function makeOutcome(overrides: Partial<ScreenerRunOutcome> = {}): ScreenerRunOutcome {
   return {
@@ -297,16 +302,28 @@ describe("Webhook recipient URL binding: per-tenant/per-schedule URL + run check
       return new Response(JSON.stringify({ ok: true }), { status: 200 });
     }) as unknown as typeof fetch;
 
-    const events: Array<{ type: string; payload: Record<string, unknown> }> = [];
-    const orm = {
-      events: {
-        create: (row: { type: string; payload: Record<string, unknown> }) => events.push(row),
-      },
-    } as never;
+    const d1Mock = new MockD1Database();
+    const d1Store = new D1AuditEventStore(createD1AuditEventDb(d1Mock as never));
+    // #6102: the refusal audit writes to D1 now, fire-and-forget from
+    // the sync audit callback — poll until the row lands.
+    async function pollRefused(expected: number) {
+      let rows: Array<{ id: string; type: string; payload: Record<string, unknown> }> = [];
+      for (let i = 0; i < 50; i++) {
+        rows = (await d1Store.findMany({ where: { type: "delivery.recipient_refused" } })).map((r) => ({
+          id: r.id,
+          type: r.type,
+          payload: JSON.parse(r.payload as unknown as string) as Record<string, unknown>,
+        }));
+        if (rows.length >= expected) break;
+        await new Promise((r) => setTimeout(r, 20));
+      }
+      return rows;
+    }
 
     const env = {
       OUTBOUND_WEBHOOK_URL: "https://global.example.com/shared-hook",
       OUTBOUND_WEBHOOK_SECRET: "super-secret-hmac-key",
+      AGENT_DB: d1Mock,
       TENANT_WEBHOOK_URLS_JSON: JSON.stringify({
         "tenant-alpha": {
           schedules: {
@@ -317,7 +334,7 @@ describe("Webhook recipient URL binding: per-tenant/per-schedule URL + run check
       }),
     };
 
-    const service = new ETradeWebhookService(orm, env as never, "alice");
+    const service = new ETradeWebhookService(undefined, env as never, "alice");
 
     // 1. Even with a valid signing secret configured, a mismatched URL is refused + audited before fetch
     const refusedUrl = await service.dispatchOutboundWebhook(
@@ -328,9 +345,11 @@ describe("Webhook recipient URL binding: per-tenant/per-schedule URL + run check
     expect(refusedUrl.success).toBe(false);
     expect(refusedUrl.error).toContain("[FAILURE_DELIVERY_RECIPIENT_NOT_ALLOWED]");
     expect(postedUrls).toHaveLength(0);
+    const events = await pollRefused(1);
     expect(events).toHaveLength(1);
     expect(events[0].type).toBe("delivery.recipient_refused");
     expect(events[0].payload.reason).toBe("webhook_url_not_in_tenant_run");
+    const firstRefusalId = events[0].id;
 
     // 2. Wrong runId is refused + audited before fetch
     const refusedRun = await service.dispatchOutboundWebhook(
@@ -340,8 +359,16 @@ describe("Webhook recipient URL binding: per-tenant/per-schedule URL + run check
     expect(refusedRun.success).toBe(false);
     expect(refusedRun.error).toContain("[FAILURE_DELIVERY_RECIPIENT_NOT_ALLOWED]");
     expect(postedUrls).toHaveLength(0);
-    expect(events).toHaveLength(2);
-    expect(events[1].payload.reason).toBe("recipient_run_mismatch");
+    const events2 = await pollRefused(2);
+    expect(events2).toHaveLength(2);
+    // #6102: the D1 store's unordered findMany returns rows via
+    // idx_mas_events_type_created (type, created_at DESC) — newest
+    // first — so positions are NOT dispatch order. Identify the
+    // second dispatch's row by id instead: it is the row that was
+    // not present after the first refusal.
+    const secondRefusal = events2.find((e) => e.id !== firstRefusalId);
+    expect(secondRefusal).toBeDefined();
+    expect(secondRefusal!.payload.reason).toBe("recipient_run_mismatch");
 
     // 3. Matching tenant + schedule + run dispatches ONLY to the bound URL with HMAC signature header
     const allowed = await service.dispatchOutboundWebhook(

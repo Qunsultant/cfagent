@@ -116,9 +116,10 @@ describe("schema equality — all planes (#4282 P4)", () => {
     // plane (see the orm row), so the d1 counts are unchanged by it.
     // #6151 S4 adds migration 0087 (nav admin config: 3 tables + 1 index): d1 tables 108 → 111, d1 indexes 69 → 70.
     // #5160 adds migration 0088 (IDP attributes profile: lookup-index table + 1 unique index): d1 tables 108 → 109, d1 indexes 69 → 70.
-    // Union: d1 [112, 71].
+    // #6102 adds migration 0089 (mas_events D1 table + 6 indexes): d1 tables 112 → 113, d1 indexes 71 → 77.
+    // Union: d1 [113, 77].
     const counts: Record<string, [number, number]> = {
-      d1: [112, 71],
+      d1: [113, 77],
       do: [70, 41],
       orm: [13, 14],
       remainder: [19, 15],
@@ -136,12 +137,17 @@ describe("schema equality — all planes (#4282 P4)", () => {
     const { union, disagreements, overlapTables, overlapIndexes } =
       computeCombinedUnion();
     expect(disagreements).toEqual([]);
-    // 19 tables and 19 indexes appear in more than one plane; every
+    // 21 tables and 25 indexes appear in more than one plane; every
     // overlap agrees (the union absorbs column-set differences from
     // ALTER reconciliation — e.g. job_run_records gains broker_id /
     // data_provider_id / mode / mode_source from DO ALTERs).
-    expect(overlapTables).toBe(20);
-    expect(overlapIndexes).toBe(19);
+    // #6102: mas_events now lives on both the d1 and orm planes, so
+    // the table overlap grows by one: 20 → 21.
+    expect(overlapTables).toBe(21);
+    // #6102: migration 0089's six mas_events indexes carry the same
+    // names on the d1 plane as on the orm plane, so the index overlap
+    // grows by six: 19 → 25.
+    expect(overlapIndexes).toBe(25);
     expect(union).toEqual(combinedExpectedModel());
   });
 
@@ -153,7 +159,7 @@ describe("schema equality — all planes (#4282 P4)", () => {
     expect(new Set(executedCodes).size).toBe(
       COMBINED_CATALOGUE_ENTRIES.length,
     );
-    expect(COMBINED_CATALOGUE_ENTRIES.length).toBe(512);    // Issue #6167 adds 1 entry (the host_version remainder ALTER
+    expect(COMBINED_CATALOGUE_ENTRIES.length).toBe(519);    // Issue #6167 adds 1 entry (the host_version remainder ALTER
     // on mas_async_jobs): 452 → 453. Issue #5100 (F3 of #5094) adds 13:
     // 453 → 466 entries. Issue #5102 (F5 of #5094) adds 5 entries
     // (migration 0084: 4 job_run_records ALTERs + 1 index):
@@ -164,6 +170,7 @@ describe("schema equality — all planes (#4282 P4)", () => {
     // (migration 0086: job_run_records outcome facts, 9 ALTERs): 493 → 502 entries.
     // #6151 S4 adds migration 0087 (nav admin config: 3 tables + 1 index): 502 → 506 entries.
     // #5160 adds migration 0088 (IDP attributes profile: rebuild + index table): 506 → 512 entries.
+    // #6102 adds migration 0089 (mas_events D1 table + 6 indexes): 512 → 519 entries.
     // Issue #5229 adds migration 0069 (agent_referral_rules
     // expiry_period_ms column): 410 entries resolve to 421 statements.
     // Issue #5086 adds migration 0070 (otel_config_overrides table):
@@ -213,7 +220,9 @@ describe("schema equality — all planes (#4282 P4)", () => {
     // 513 → 517 statements.
     // #5160 adds migration 0088 (IDP attributes profile: rebuild + index table), each one statement:
     // 517 → 523 statements.
-    expect(executedStatements).toBe(523);
+    // #6102 adds migration 0089 (mas_events D1 table + 6 indexes), each one statement:
+    // 523 → 530 statements.
+    expect(executedStatements).toBe(530);
     const actual = instance.introspect();
     const diff = diffSchema(actual, combinedExpectedModel());
     expect(isEmptyDiff(diff)).toBe(true);

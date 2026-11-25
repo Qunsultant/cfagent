@@ -23,6 +23,11 @@ import type { Env } from "../src/types";
 import { DynamicOptionsScreener } from "../src/trading/optionsScreener";
 import { InMemoryScanRunStore } from "../src/trading/options/scanRunStore";
 import type { ETradeOptionChain } from "../src/types";
+import { MockD1Database } from "./mock-d1";
+import {
+  createD1AuditEventDb,
+  D1AuditEventStore,
+} from "../src/data/d1AuditEventAdapter";
 
 /**
  * Expiry 90 days out, computed at run time so the fixture never goes stale
@@ -41,6 +46,9 @@ describe("Autonomous Options Screening & Scheduling Pipeline", () => {
   let mockEnv: Env;
   let mockOrm: DatabaseORM;
   let inMemoryDb: any[];
+  // #6102: audit rows land in D1 now — one fresh mock + store per
+  // test (beforeEach rebuilds the env, so the port is never shared).
+  let d1Store: D1AuditEventStore;
 
   beforeEach(() => {
     inMemoryDb = [];
@@ -50,6 +58,9 @@ describe("Autonomous Options Screening & Scheduling Pipeline", () => {
       }),
     };
 
+    const d1Mock = new MockD1Database();
+    d1Store = new D1AuditEventStore(createD1AuditEventDb(d1Mock as never));
+
     mockEnv = {
       ETRADE_ENVIRONMENT: "sandbox",
       ETRADE_SANDBOX_BASE_URL: "https://apisb.etrade.com",
@@ -58,6 +69,7 @@ describe("Autonomous Options Screening & Scheduling Pipeline", () => {
       SLACK_BOT_TOKEN: "xoxb-mock-token",
       OUTBOUND_WEBHOOK_URL: "https://example.com/webhook",
       OUTBOUND_WEBHOOK_SECRET: "secret123",
+      AGENT_DB: d1Mock,
     } as unknown as Env;
 
     mockOrm = new DatabaseORM(mockSql as any);
@@ -283,7 +295,6 @@ describe("Autonomous Options Screening & Scheduling Pipeline", () => {
       vi.spyOn(mockOrm.trades, "create").mockImplementation(() => {
         throw new Error("SQLITE_FULL: database or disk is full");
       });
-      const auditSpy = vi.spyOn(mockOrm.events, "create").mockImplementation((r: any) => r);
       const postSpy = vi.spyOn(slackService, "postResponseUrl").mockResolvedValue(true);
       const sampleOptionPayload = JSON.stringify({
         symbol: "NVDA",
@@ -318,8 +329,12 @@ describe("Autonomous Options Screening & Scheduling Pipeline", () => {
       const posted = JSON.stringify(postSpy.mock.calls[0][1]);
       expect(posted).not.toContain("QUEUED FOR E*TRADE ROUTING");
       expect(posted).toContain("failed");
-      expect(auditSpy).toHaveBeenCalledTimes(1);
-      const auditRow = auditSpy.mock.calls[0][0] as any;
+      // #6102: the draft-failure audit writes to D1 now (the mocked
+      // orm.events.create is dead on the branch) — the write is
+      // awaited by the handler, so read the row directly.
+      const auditRows = await d1Store.findMany({ where: { type: "trade.options_draft_create_failed" } });
+      expect(auditRows).toHaveLength(1);
+      const auditRow = auditRows[0] as any;
       expect(auditRow.type).toContain("draft");
       expect(JSON.stringify(auditRow.payload)).toContain(result.orderId);
       expect(JSON.stringify(auditRow.payload)).toContain("SQLITE_FULL");

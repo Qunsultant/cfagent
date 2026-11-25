@@ -79,6 +79,7 @@ import { runTradeApprovalFlow } from "../src/agents/trading-trade-workflow";
 import { TradingPlatformRegistry } from "../src/trading";
 import { DatabaseORM } from "../src/orm";
 import { MockSqlStorage } from "./mock-sql";
+import { MockD1Database } from "./mock-d1";
 import { getUserDid } from "../src/agents/did";
 import {
   MeshDoorError,
@@ -201,6 +202,10 @@ function makeChatHarness() {
     SERVICE_USER_LOGIN: "svc-background",
     TRADING_AGENT_PROVIDERS: "fakeg4",
     TRADING_AGENT_DEFAULT_PROVIDER: "fakeg4",
+    // #6102: the approval door's blocking audits (decide + settle)
+    // resolve from env.AGENT_DB — a fresh mock per harness (the
+    // port is memoized per env object).
+    AGENT_DB: new MockD1Database(),
   };
 
   const agent: any = Object.create(TradingAgent.prototype);
@@ -520,6 +525,9 @@ describe("mesh G4 enabling fix: the approval door settles from the agent's own s
       // the platform default is Alpaca, so the provider is explicit.
       TRADING_AGENT_PROVIDERS: "etrade",
       TRADING_AGENT_DEFAULT_PROVIDER: "etrade",
+      // #6102: executeApprovedOrder's blocking audits resolve from
+      // env.AGENT_DB — a fresh mock for this test.
+      AGENT_DB: new MockD1Database(),
     } as Env;
     agent.name = "trading:alice";
     agent.ctx = {

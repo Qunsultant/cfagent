@@ -27,6 +27,7 @@ import {
   type AsyncJobsContext,
 } from "../src/agents/orchestrator/asyncJobs";
 import { createFollowupDeliveryPort } from "../src/services/screenerFollowupDelivery";
+import { MockD1Database } from "./mock-d1";
 import { parseStockScreenRequest } from "../src/trading/screeningSchemas";
 import type { ScreenerEvent } from "../src/events/screenerEvents";
 
@@ -187,7 +188,9 @@ function makeCtx(sql: StatefulAsyncSql, env: Record<string, unknown>, opts?: { h
   const confirmations: string[] = [];
   const storage = sql as unknown as AsyncJobsContext["agentCtx"]["storage"]["sql"];
   const ctx = {
-    env,
+    // #6102: the followup.deliver blocking audit writes to D1 now —
+    // bind a fresh mock per ctx (a null port fails the job).
+    env: { ...env, AGENT_DB: new MockD1Database() },
     agentCtx: { storage: { sql: storage } },
     ensureTables: () => storage,
     sessionKey: () => "session-1",

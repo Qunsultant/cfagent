@@ -29,11 +29,56 @@ import { createRoot, type Root } from "react-dom/client";
 import { readFileSync } from "node:fs";
 import { DatabaseORM } from "../src/orm";
 import { MockSqlStorage } from "./mock-sql";
-import { MockD1Database } from "./mock-d1";
-import {
-  createD1AuditEventDb,
-  D1AuditEventStore,
-} from "../src/data/d1AuditEventAdapter";
+
+// #6102 (jsdom): this file MUST NOT import tests/mock-d1.ts — it
+// imports node:sqlite, which cannot bundle in jsdom and fails the
+// whole file at collection. Instead the audit-event port module is
+// mocked with an in-memory stub port: create appends the record
+// (payload stored as JSON text, exactly as the D1 store returns
+// it); findMany filters by where.type. The service resolves the
+// port via auditEventPort(env), so the F19 tests observe the stub.
+const { stubAuditRows } = vi.hoisted(() => ({
+  stubAuditRows: [] as Array<{
+    id: string;
+    sessionId?: string;
+    type: string;
+    agent?: string;
+    payload: unknown;
+    createdAt: string;
+  }>,
+}));
+vi.mock("../src/data/createAuditEventPorts", () => ({
+  auditEventPort: async () => ({
+    create: async (record: any) => {
+      const stored = {
+        ...record,
+        payload:
+          typeof record.payload === "string"
+            ? record.payload
+            : JSON.stringify(record.payload ?? {}),
+      };
+      stubAuditRows.push(stored);
+      return stored;
+    },
+    findMany: async (options: any = {}) => {
+      const where = options.where ?? {};
+      return stubAuditRows.filter(
+        (r) =>
+          (where.type === undefined || r.type === where.type) &&
+          (where.sessionId === undefined || r.sessionId === where.sessionId) &&
+          (where.agent === undefined || r.agent === where.agent) &&
+          (where.id === undefined || r.id === where.id),
+      );
+    },
+    findById: async (id: string) => stubAuditRows.find((r) => r.id === id) ?? null,
+    idsCreatedBefore: async () => [],
+    delete: async () => false,
+    readChainWindow: async () => [],
+  }),
+  createAuditEventAdapter: () => null,
+  createEnsuredAuditEventAdapter: async () => null,
+  ensureAuditEventSchema: async () => [],
+}));
 import { ScheduledTasksService } from "../src/services/scheduledTasks";
 import { ETradeWebhookService } from "../src/services/tradingWebhooks";
 import { verifyHmacSha256Signature } from "../src/security/webhookSecurity";
@@ -123,30 +168,32 @@ describe("F19 — dispatchReminder failure propagation", () => {
   let sql: MockSqlStorage;
   let orm: DatabaseORM;
   const sessionId = "reminder_test_trader";
-  // #6102: audit rows land in D1 now — one fresh mock + env per
-  // test (a shared env would share the memoized port and pollute
-  // counts across tests).
+  // #6102: the service's audit() resolves the port via
+  // auditEventPort(env) — the module mock above serves an
+  // in-memory stub, so no AGENT_DB binding is needed here.
   let env: Env;
-  let d1Store: D1AuditEventStore;
 
   beforeEach(() => {
     sql = new MockSqlStorage();
     orm = new DatabaseORM(sql);
     orm.initializeSchema(sessionId);
-    const d1Mock = new MockD1Database();
-    d1Store = new D1AuditEventStore(createD1AuditEventDb(d1Mock as never));
-    env = { APP_ENV: "TEST", AGENT_DB: d1Mock } as unknown as Env;
+    stubAuditRows.length = 0;
+    env = { APP_ENV: "TEST" } as unknown as Env;
   });
 
   // The service's audit() helper is sync fire-and-forget, so poll
-  // briefly until the row lands instead of asserting a race.
+  // briefly until the row lands in the stub instead of asserting a race.
   async function pollAuditEvents(type: string) {
-    let rows = await d1Store.findMany({ where: { type } });
+    let rows = stubAuditRows.filter((r) => r.type === type);
     for (let i = 0; i < 50 && rows.length === 0; i++) {
       await new Promise((r) => setTimeout(r, 20));
-      rows = await d1Store.findMany({ where: { type } });
+      rows = stubAuditRows.filter((r) => r.type === type);
     }
     return rows;
+  }
+
+  function stubAuditEvents(type: string) {
+    return stubAuditRows.filter((r) => r.type === type);
   }
 
   it("happy path: success with per-channel truth and a dispatched audit", async () => {
@@ -156,7 +203,7 @@ describe("F19 — dispatchReminder failure propagation", () => {
     expect(res.success).toBe(true);
     expect(res.data?.channels).toEqual({ audit: true, chatMessage: true });
     expect((await pollAuditEvents("reminder.dispatched")).length).toBe(1);
-    expect((await d1Store.findMany({ where: { type: "reminder.dispatch_failed" } })).length).toBe(0);
+    expect(stubAuditEvents("reminder.dispatch_failed").length).toBe(0);
     expect(
       orm.messages.findMany({ where: { sessionId } }).some((m) => m.content.includes("Stretch and hydrate"))
     ).toBe(true);
@@ -173,7 +220,7 @@ describe("F19 — dispatchReminder failure propagation", () => {
     expect(res.error).toContain("could not be delivered");
     expect(res.data?.channels.chatMessage).toBe(false);
     expect(res.data?.messageError).toContain("sqlite locked");
-    expect((await d1Store.findMany({ where: { type: "reminder.dispatched" } })).length).toBe(0);
+    expect(stubAuditEvents("reminder.dispatched").length).toBe(0);
     const failed = await pollAuditEvents("reminder.dispatch_failed");
     expect(failed.length).toBe(1);
     // #2178 S1: stored payload is JSON text — parse the stored form.

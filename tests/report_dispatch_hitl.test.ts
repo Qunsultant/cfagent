@@ -60,12 +60,21 @@ vi.mock("agents/x402", () => {
 import { OrchestratorAgent } from "../src/agents/orchestrator";
 import { MockSqlStorage } from "./mock-sql";
 import type { Env } from "../src/types";
+import { MockD1Database } from "./mock-d1";
+import {
+  createD1AuditEventDb,
+  D1AuditEventStore,
+} from "../src/data/d1AuditEventAdapter";
 
 // Source pins read via cwd-relative paths (vitest runs at the repo root).
 const src = (rel: string) => readFileSync(`src/${rel}`, "utf8");
 
-const makeEnv = (overrides: Record<string, unknown> = {}): Env =>
-  ({
+const makeEnv = (overrides: Record<string, unknown> = {}): Env => {
+  // #6102: audit rows land in D1 now — one fresh mock per env (the
+  // agent's audit() is sync fire-and-forget into the D1 port).
+  const d1Mock = new MockD1Database();
+  const auditStore = new D1AuditEventStore(createD1AuditEventDb(d1Mock as never));
+  const env = {
     AI: {} as any,
     AI_SEARCH_ENDPOINT: "https://mock.search",
     ORCHESTRATOR_AGENT: {} as any,
@@ -73,8 +82,27 @@ const makeEnv = (overrides: Record<string, unknown> = {}): Env =>
     APP_ENV: "TEST",
     OUTBOUND_WEBHOOK_URL: "https://webhook.example.com/hook",
     OUTBOUND_WEBHOOK_SECRET: "wh-secret-277",
+    AGENT_DB: d1Mock,
     ...overrides,
-  }) as Env;
+  } as Env;
+  (env as unknown as { __auditStore: D1AuditEventStore }).__auditStore = auditStore;
+  return env;
+};
+
+/** Poll the D1 audit store until `expected` rows of `type` land. */
+async function pollAuditEvents(store: D1AuditEventStore, type: string, expected = 1) {
+  let rows: Awaited<ReturnType<D1AuditEventStore["findMany"]>> = [];
+  for (let i = 0; i < 50; i++) {
+    rows = await store.findMany({ where: { type } });
+    if (rows.length >= expected) break;
+    await new Promise((r) => setTimeout(r, 20));
+  }
+  return rows;
+}
+
+function auditPayload(row: { payload: unknown }) {
+  return JSON.parse(row.payload as unknown as string) as Record<string, unknown>;
+}
 
 const seedAgent = (env: Env) => {
   const sql = new MockSqlStorage();
@@ -84,7 +112,8 @@ const seedAgent = (env: Env) => {
     waitUntil: vi.fn(),
   };
   const agent = new OrchestratorAgent(ctx as any, env);
-  return { agent, sql };
+  const auditStore = (env as unknown as { __auditStore: D1AuditEventStore }).__auditStore;
+  return { agent, sql, auditStore };
 };
 
 const post = (agent: OrchestratorAgent, path: string, body: unknown) =>
@@ -207,7 +236,7 @@ describe("Issue #277 — report-dispatch HITL setting (server-owned)", () => {
 
   it("approve: pending email is dispatched exactly once, audit records the confirmation", async () => {
     const emailSend = vi.fn(async () => true);
-    const { agent, sql } = seedAgent(makeEnv({ EMAIL: { send: emailSend } }));
+    const { agent, auditStore } = seedAgent(makeEnv({ EMAIL: { send: emailSend } }));
     await setHitl(agent, true);
     const id = ((await (await post(agent, "/trading/reports/email", EMAIL_BODY)).json()) as any).confirmationId;
     const res = await post(agent, "/trading/reports/confirm", { confirmationId: id, decision: "approved" });
@@ -215,11 +244,11 @@ describe("Issue #277 — report-dispatch HITL setting (server-owned)", () => {
     const json = (await res.json()) as any;
     expect(json).toMatchObject({ success: true, status: "dispatched", confirmationId: id });
     expect(emailSend).toHaveBeenCalledTimes(1);
-    const audits = Array.from(
-      sql.exec("SELECT * FROM mas_events WHERE type = ?", "research_report.emailed")
-    ) as any[];
+    // #6102: the emailed audit writes to D1 now (fire-and-forget
+    // from the agent's audit funnel) — poll the store.
+    const audits = await pollAuditEvents(auditStore, "research_report.emailed");
     expect(audits.length).toBeGreaterThan(0);
-    expect(JSON.parse(audits[0].payload).confirmationId).toBe(id);
+    expect(auditPayload(audits[0]).confirmationId).toBe(id);
   });
 
   it("approve: pending webhook is dispatched with the stored payload", async () => {
@@ -391,7 +420,7 @@ describe("Issue #1324 — pending-review queue list (Reports)", () => {
   });
 
   it("expired pending rows leave the queue, marked expired with an audit row", async () => {
-    const { agent, sql } = seedAgent(makeEnv());
+    const { agent, sql, auditStore } = seedAgent(makeEnv());
     await get(agent, "/trading/reports/pending");
     const id = seedScreenerRow(sql, {
       id: "rc_old",
@@ -401,10 +430,10 @@ describe("Issue #1324 — pending-review queue list (Reports)", () => {
     expect(json.pending.find((p: any) => p.confirmationId === id)).toBeUndefined();
     const row = pendingRows(sql).find((r: any) => r.id === id);
     expect(row.status).toBe("expired");
-    const audits = Array.from(
-      sql.exec("SELECT * FROM mas_events WHERE type = ?", "research_report.confirmation_expired")
-    ) as any[];
-    expect(audits.some((a: any) => JSON.parse(a.payload).confirmationId === id)).toBe(true);
+    // #6102: the expiry audit writes to D1 now (fire-and-forget
+    // from the agent's audit funnel) — poll the store.
+    const audits = await pollAuditEvents(auditStore, "research_report.confirmation_expired");
+    expect(audits.some((a: any) => auditPayload(a).confirmationId === id)).toBe(true);
   });
 
   it("existing summary fields are unchanged (no regression)", async () => {

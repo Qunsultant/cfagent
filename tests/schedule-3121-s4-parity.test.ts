@@ -67,6 +67,7 @@ import {
   type ScreenerRunOutcome,
 } from "../src/services/screenerFollowups";
 import { remainderAlterSql } from "../src/data/schemaComponent/remainderCatalogue";
+import { MockD1Database } from "./mock-d1";
 
 /**
  * Stateful fake (same harness shape as the S2–S4 follow-up suites,
@@ -174,7 +175,9 @@ function makeCtx(
 ): AsyncJobsContext {
   const storage = sql as unknown as AsyncJobsContext["agentCtx"]["storage"]["sql"];
   return {
-    env: { SLACK_WEBHOOK_URL: "https://hooks.slack.com/x", SCREENER_EMAIL_TO: "ops@example.com" },
+    // #6102: the followup.deliver blocking audit writes to D1 now —
+    // bind a fresh mock per ctx (a null port fails the job).
+    env: { SLACK_WEBHOOK_URL: "https://hooks.slack.com/x", SCREENER_EMAIL_TO: "ops@example.com", AGENT_DB: new MockD1Database() },
     agentCtx: { storage: { sql: storage } },
     ensureTables: () => storage,
     sessionKey: () => "session-1",

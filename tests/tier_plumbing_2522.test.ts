@@ -50,6 +50,14 @@ import type {
 import type { X402ClaimVerifier } from "../src/services/x402Verifier";
 import { DatabaseORM } from "../src/orm";
 import { MockSqlStorage } from "./mock-sql";
+// #6102: the tier-decision audit writes to D1 now. The shared
+// mock is imported under an alias — this file already defines a
+// local MockD1Database (used by the email-route harness below).
+import { MockD1Database as SharedMockD1Database } from "./mock-d1";
+import {
+  createD1AuditEventDb,
+  D1AuditEventStore,
+} from "../src/data/d1AuditEventAdapter";
 import { APPROVED_PREMIUM_PRICES } from "./premiumPriceCatalogueFixture";
 
 // #5609 (G-7): the gate takes its price as an argument — the caller
@@ -143,17 +151,55 @@ class CapturingMeter implements UsageEventPort {
   }
 }
 
-function makeService(claimVerifier: X402ClaimVerifier = verifyingClaim) {
+function makeService(claimVerifier: X402ClaimVerifier = verifyingClaim, agentDb?: unknown) {
   const sql = new MockSqlStorage();
   const orm = new DatabaseORM(sql);
   orm.initializeSchema("trader_session_1");
+  // #6102: the tier-decision audit resolves from env.AGENT_DB — a
+  // fresh mock per service (the port is memoized per env object).
+  // A caller may pass a throwing stub DB instead, to prove an
+  // audit failure never refuses the call.
+  const d1Mock = agentDb ?? new SharedMockD1Database();
+  const d1Store = new D1AuditEventStore(createD1AuditEventDb(d1Mock as never));
   const env = {
+    AGENT_DB: d1Mock,
     X402_NETWORK: "base-sepolia",
     X402_RECIPIENT_ADDRESS: RECIPIENT,
     X402_FACILITATOR_URL: "https://x402.org/facilitator",
   } as unknown as Env;
   const service = new ETradeAgenticPaymentService(orm, env, "trader_session_1", claimVerifier);
-  return { orm, service };
+  return { orm, service, d1Store };
+}
+
+/**
+ * A working D1 mock whose commercial.tier.decision inserts throw:
+ * ONLY the tier-decision audit fails. A blanket throwing AGENT_DB
+ * would also break verifyPayment (its tx-hash claim goes through
+ * the D1-backed bucket ports when AGENT_DB is bound), and failing
+ * every mas_events insert would break the AGENTIC_PAYMENT_COLLECTED
+ * audit that verifyPayment awaits without a try/catch — either way
+ * the call would 402 before ever reaching the tier audit. The
+ * test's point is that a tier-audit failure alone never refuses
+ * the call. The insert's bound params are in column order
+ * (id, session_id, type, ...) so params[2] is the event type.
+ */
+class AuditFailingD1Database extends SharedMockD1Database {
+  override prepare(sql: string): any {
+    const stmt: any = super.prepare(sql);
+    if (!/^\s*insert\s+into\s+mas_events\b/i.test(sql)) return stmt;
+    return {
+      bind: (...params: unknown[]) => {
+        const bound: any = stmt.bind(...params);
+        if (params[2] !== "commercial.tier.decision") return bound;
+        return {
+          ...bound,
+          run: async () => {
+            throw new Error("audit store unavailable");
+          },
+        };
+      },
+    };
+  }
 }
 
 function paidRequest(service: ETradeAgenticPaymentService, tier: { resource: string; priceUSD: number }, txHash: string) {
@@ -177,16 +223,10 @@ function meteredOptions(meter: UsageEventPort, category: string, resolveTier?: M
   return { meter, category, ...(resolveTier ? { resolveTier } : {}) };
 }
 
-/** Capture mas_events rows written through the service orm. */
-function captureAuditRows(orm: DatabaseORM) {
-  const rows: any[] = [];
-  const events = (orm as any).events;
-  const originalCreate = events.create.bind(events);
-  events.create = (row: any) => {
-    rows.push(row);
-    return originalCreate(row);
-  };
-  return rows;
+/** Read tier-decision rows from the D1 audit store, payloads parsed (D1 stores payload as JSON TEXT). */
+async function readTierDecisions(d1Store: D1AuditEventStore) {
+  const rows = await d1Store.findMany({ where: { type: "commercial.tier.decision" } });
+  return rows.map((r) => ({ ...r, payload: JSON.parse(r.payload as unknown as string) }));
 }
 
 beforeEach(() => {
@@ -434,8 +474,7 @@ describe("gate tier-decision audit, x402 branch (#2522)", () => {
   const def = { ...TRADING_PAID_SERVICES.OPTIONS_SCREENER, priceUSD: OPTIONS_SCAN_PRICE };
 
   it("served call writes exactly one commercial.tier.decision row with the decision", async () => {
-    const { orm, service } = makeService();
-    const auditRows = captureAuditRows(orm);
+    const { service, d1Store } = makeService();
     const meter = new CapturingMeter();
     const res = await service.handleGatedEndpoint(
       paidRequest(service, def, nextTxHash()),
@@ -446,7 +485,8 @@ describe("gate tier-decision audit, x402 branch (#2522)", () => {
       meteredOptions(meter, def.id),
     );
     expect(res.status).toBe(200);
-    const decisions = auditRows.filter((r) => r.type === "commercial.tier.decision");
+    // The gate awaits the audit write, so a direct read is settled.
+    const decisions = await readTierDecisions(d1Store);
     expect(decisions).toHaveLength(1);
     expect(decisions[0].agent).toBe("payments");
     expect(decisions[0].payload).toMatchObject({
@@ -460,8 +500,7 @@ describe("gate tier-decision audit, x402 branch (#2522)", () => {
   });
 
   it("session traffic records the resolved tier, not the default", async () => {
-    const { orm, service } = makeService();
-    const auditRows = captureAuditRows(orm);
+    const { service, d1Store } = makeService();
     const meter = new CapturingMeter();
     const req = paidRequest(service, def, nextTxHash());
     req.headers.set("x-user-login", "owner-login");
@@ -474,20 +513,17 @@ describe("gate tier-decision audit, x402 branch (#2522)", () => {
       meteredOptions(meter, def.id, async () => "Subscribed"),
     );
     expect(res.status).toBe(200);
-    const decisions = auditRows.filter((r) => r.type === "commercial.tier.decision");
+    const decisions = await readTierDecisions(d1Store);
     expect(decisions).toHaveLength(1);
     expect(decisions[0].payload.tier).toBe("Subscribed");
     expect(decisions[0].payload.userLogin).toBe("owner-login");
   });
 
   it("an audit write failure never refuses or unserves the call", async () => {
-    const { orm, service } = makeService();
-    const events = (orm as any).events;
-    const originalCreate = events.create.bind(events);
-    events.create = (row: any) => {
-      if (row.type === "commercial.tier.decision") throw new Error("audit store down (test fault)");
-      return originalCreate(row);
-    };
+    // #6102: the audit now writes through the D1 port, so the
+    // failure is a mas_events-insert failure on the bound DB —
+    // the gate still serves and the meter row is still recorded.
+    const { service } = makeService(verifyingClaim, new AuditFailingD1Database());
     const meter = new CapturingMeter();
     const res = await service.handleGatedEndpoint(
       paidRequest(service, def, nextTxHash()),
@@ -529,20 +565,24 @@ describe("gate tier-decision audit, MPP branch (#2522)", () => {
     const sql = new MockSqlStorage();
     const orm = new DatabaseORM(sql);
     orm.initializeSchema("mpp_payer_test");
+    // #6102: the tier-decision audit resolves from env.AGENT_DB —
+    // a fresh mock per service (the port is memoized per env object).
+    const d1Mock = new SharedMockD1Database();
+    const d1Store = new D1AuditEventStore(createD1AuditEventDb(d1Mock as never));
     const env = {
+      AGENT_DB: d1Mock,
       X402_NETWORK: "base-sepolia",
       X402_RECIPIENT_ADDRESS: RECIPIENT,
       X402_FACILITATOR_URL: "https://x402.org/facilitator",
       MPP_SECRET_KEY: "test-mpp-secret-700",
     } as unknown as Env;
     const service = new ETradeAgenticPaymentService(orm, env, "gateway-instance-id", undefined, { payerBound: true });
-    return { orm, service };
+    return { orm, service, d1Store };
   }
 
   it("served MPP call writes one tier-decision row", async () => {
     mppFake.source = `did:pkh:eip155:8453:${MPP_PAYER}`;
-    const { orm, service } = mppService();
-    const auditRows = captureAuditRows(orm);
+    const { service, d1Store } = mppService();
     const meter = new CapturingMeter();
     const res = await service.handleGatedEndpoint(
       new Request(`https://agent.test${def.resource}`, { method: "GET", headers: { Authorization: 'Payment id="cred-700"' } }),
@@ -553,7 +593,7 @@ describe("gate tier-decision audit, MPP branch (#2522)", () => {
       meteredOptions(meter, def.id),
     );
     expect(res.status).toBe(200);
-    const decisions = auditRows.filter((r) => r.type === "commercial.tier.decision");
+    const decisions = await readTierDecisions(d1Store);
     expect(decisions).toHaveLength(1);
     expect(decisions[0].payload).toMatchObject({
       tier: "Free",

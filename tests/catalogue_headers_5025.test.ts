@@ -57,8 +57,9 @@ describe("#5025 schemaComponent barrel & membership store naming", () => {
     // facts): D1 264 → 273.
     // #6151 S4 adds migration 0087 (nav admin config: 3 tables + 1 index): D1 273 → 277.
     // #5160 adds migration 0088 (IDP attributes profile: rebuild + index table): D1 273 → 279.
-    // Union: 283.
-    expect(D1_CATALOGUE_ENTRIES.length).toBe(283);
+    // #6102 adds migration 0089 (mas_events D1 table + 6 indexes): D1 283 → 290.
+    // Union: 290.
+    expect(D1_CATALOGUE_ENTRIES.length).toBe(290);
     expect(ORM_CATALOGUE_ENTRIES.length).toBe(35);
     // Issue #6167 adds 1 remainder entry (mas_async_jobs.host_version):
     // 64 → 65. Issue #5100 (F3 of #5094) adds 13 remainder entries (4

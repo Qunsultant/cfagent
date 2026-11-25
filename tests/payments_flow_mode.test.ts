@@ -67,6 +67,11 @@ vi.mock("agents/x402", () => {
 
 import { OrchestratorAgent } from "../src/agents/orchestrator";
 import { MockSqlStorage } from "./mock-sql";
+import { MockD1Database } from "./mock-d1";
+import {
+  createD1AuditEventDb,
+  D1AuditEventStore,
+} from "../src/data/d1AuditEventAdapter";
 import { resolvePaymentsFlowMode } from "../src/agents/routes/payments";
 import type { Env } from "../src/types";
 
@@ -78,6 +83,9 @@ const makeEnv = (overrides: Record<string, unknown> = {}): Env =>
     AI_SEARCH_ENDPOINT: "https://mock.search",
     ORCHESTRATOR_AGENT: {} as any,
     AGENT_SESSIONS: {} as any,
+    // #6102: audit rows land in D1 now — a fresh mock per makeEnv
+    // call, so each test's agent gets its own audit table.
+    AGENT_DB: new MockD1Database() as any,
     STRIPE_SECRET_KEY: "sk_test_mock",
     PAYPAL_CLIENT_ID: "paypal-client-id-1711",
     PAYPAL_CLIENT_SECRET: "paypal-secret-1711",
@@ -137,7 +145,11 @@ describe("POST /payments/create + /payments/confirm per mode (#1711)", () => {
       waitUntil: vi.fn(),
     };
     const agent = new OrchestratorAgent(ctx as any, env);
-    return { agent, sql };
+    // #6102: read audit rows from the same mock bound as AGENT_DB.
+    const d1Store = new D1AuditEventStore(
+      createD1AuditEventDb((env as any).AGENT_DB as never),
+    );
+    return { agent, sql, d1Store };
   };
 
   const post = (agent: OrchestratorAgent, path: string, body: Record<string, unknown>) =>
@@ -151,23 +163,34 @@ describe("POST /payments/create + /payments/confirm per mode (#1711)", () => {
 
   const allTx = (sql: MockSqlStorage) =>
     Array.from(sql.exec("SELECT * FROM mas_transactions")) as any[];
-  const auditsOf = (sql: MockSqlStorage, type: string) =>
-    Array.from(sql.exec("SELECT * FROM mas_events WHERE type = ?", type)) as any[];
+  // #6102: audit rows land in D1 now (the DO mas_events table is
+  // frozen history). The orchestrator's audit() is sync
+  // fire-and-forget, so poll briefly until the row lands.
+  const auditsOf = (d1Store: D1AuditEventStore, type: string) =>
+    d1Store.findMany({ where: { type } });
+  async function pollAuditEvents(d1Store: D1AuditEventStore, type: string) {
+    let rows = await auditsOf(d1Store, type);
+    for (let i = 0; i < 50 && rows.length === 0; i++) {
+      await new Promise((r) => setTimeout(r, 20));
+      rows = await auditsOf(d1Store, type);
+    }
+    return rows;
+  }
   const SEED_IDS = new Set(["pay_init_stripe", "pay_init_paypal"]);
-  const baseline = (sql: MockSqlStorage) => ({
+  const baseline = async (d1Store: D1AuditEventStore, sql: MockSqlStorage) => ({
     txIds: new Set(allTx(sql).map((r) => r.id as string)),
-    awaiting: auditsOf(sql, "payment.awaiting_confirmation").length,
-    created: auditsOf(sql, "payment.created").length,
-    confirmed: auditsOf(sql, "payment.confirmed").length,
-    rejected: auditsOf(sql, "payment.rejected").length,
-    configError: auditsOf(sql, "payment.config_error").length,
+    awaiting: (await auditsOf(d1Store, "payment.awaiting_confirmation")).length,
+    created: (await auditsOf(d1Store, "payment.created")).length,
+    confirmed: (await auditsOf(d1Store, "payment.confirmed")).length,
+    rejected: (await auditsOf(d1Store, "payment.rejected")).length,
+    configError: (await auditsOf(d1Store, "payment.config_error")).length,
   });
   const newTx = (sql: MockSqlStorage, base: { txIds: Set<string> }) =>
     allTx(sql).filter((r) => !base.txIds.has(r.id) && !SEED_IDS.has(r.id));
 
   it("hitl mode: create stores awaiting_confirmation with NO checkout (control, #1690 unchanged)", async () => {
-    const { agent, sql } = makeAgent(makeEnv({ PAYMENTS_FLOW_MODE: "hitl" }));
-    const base = baseline(sql);
+    const { agent, sql, d1Store } = makeAgent(makeEnv({ PAYMENTS_FLOW_MODE: "hitl" }));
+    const base = await baseline(d1Store, sql);
     const res = await post(agent, "/payments/create", {
       amount: 25, customer: "Acme Corp", gateway: "sandbox",
     });
@@ -177,14 +200,14 @@ describe("POST /payments/create + /payments/confirm per mode (#1711)", () => {
     expect(json.transaction.checkoutUrl).toBe("");
     expect(json.transaction.gatewayRef).toBe("");
     expect(newTx(sql, base)[0].status).toBe("awaiting_confirmation");
-    expect(auditsOf(sql, "payment.awaiting_confirmation")).toHaveLength(base.awaiting + 1);
-    expect(auditsOf(sql, "payment.created")).toHaveLength(base.created);
+    expect(await pollAuditEvents(d1Store, "payment.awaiting_confirmation")).toHaveLength(base.awaiting + 1);
+    expect(await auditsOf(d1Store, "payment.created")).toHaveLength(base.created);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("immediate mode: create stores pending_checkout WITH checkoutUrl/gatewayRef and payment.created audit", async () => {
-    const { agent, sql } = makeAgent(makeEnv({ PAYMENTS_FLOW_MODE: "immediate" }));
-    const base = baseline(sql);
+    const { agent, sql, d1Store } = makeAgent(makeEnv({ PAYMENTS_FLOW_MODE: "immediate" }));
+    const base = await baseline(d1Store, sql);
     const res = await post(agent, "/payments/create", {
       amount: 25, customer: "Acme Corp", gateway: "sandbox",
     });
@@ -200,14 +223,14 @@ describe("POST /payments/create + /payments/confirm per mode (#1711)", () => {
     expect(rows[0].status).toBe("pending_checkout");
     expect(rows[0].checkout_url).toBeTruthy();
     expect(rows[0].gateway_ref).toBeTruthy();
-    expect(auditsOf(sql, "payment.created")).toHaveLength(base.created + 1);
-    expect(auditsOf(sql, "payment.awaiting_confirmation")).toHaveLength(base.awaiting);
+    expect(await pollAuditEvents(d1Store, "payment.created")).toHaveLength(base.created + 1);
+    expect(await auditsOf(d1Store, "payment.awaiting_confirmation")).toHaveLength(base.awaiting);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("immediate mode: confirm approved does NOT create a second checkout when one already exists (checkout only if missing)", async () => {
-    const { agent, sql } = makeAgent(makeEnv({ PAYMENTS_FLOW_MODE: "immediate" }));
-    const base = baseline(sql);
+    const { agent, sql, d1Store } = makeAgent(makeEnv({ PAYMENTS_FLOW_MODE: "immediate" }));
+    const base = await baseline(d1Store, sql);
     const created = await post(agent, "/payments/create", {
       amount: 25, customer: "Acme Corp", gateway: "sandbox",
     });
@@ -223,7 +246,7 @@ describe("POST /payments/create + /payments/confirm per mode (#1711)", () => {
     expect(json.checkoutUrl).toBe(existingUrl);
     expect(json.gatewayRef).toBe(existingRef);
     expect(newTx(sql, base)[0].status).toBe("completed");
-    expect(auditsOf(sql, "payment.confirmed")).toHaveLength(base.confirmed + 1);
+    expect(await pollAuditEvents(d1Store, "payment.confirmed")).toHaveLength(base.confirmed + 1);
   });
 
   it("immediate mode: confirm on a missing draft keeps the recovered silent-success behavior (NOT 404)", async () => {
@@ -249,8 +272,8 @@ describe("POST /payments/create + /payments/confirm per mode (#1711)", () => {
   });
 
   it("default (unset) → hitl: create stores awaiting_confirmation, no checkout", async () => {
-    const { agent, sql } = makeAgent(makeEnv());
-    const base = baseline(sql);
+    const { agent, sql, d1Store } = makeAgent(makeEnv());
+    const base = await baseline(d1Store, sql);
     const res = await post(agent, "/payments/create", {
       amount: 25, customer: "Acme Corp", gateway: "sandbox",
     });
@@ -262,8 +285,8 @@ describe("POST /payments/create + /payments/confirm per mode (#1711)", () => {
   });
 
   it("invalid value → hitl FAIL-CLOSED with a payment.config_error audit, never immediate", async () => {
-    const { agent, sql } = makeAgent(makeEnv({ PAYMENTS_FLOW_MODE: "bogus-mode" }));
-    const base = baseline(sql);
+    const { agent, sql, d1Store } = makeAgent(makeEnv({ PAYMENTS_FLOW_MODE: "bogus-mode" }));
+    const base = await baseline(d1Store, sql);
     const res = await post(agent, "/payments/create", {
       amount: 25, customer: "Acme Corp", gateway: "sandbox",
     });
@@ -271,9 +294,9 @@ describe("POST /payments/create + /payments/confirm per mode (#1711)", () => {
     const json = (await res.json()) as any;
     expect(json.transaction.status).toBe("awaiting_confirmation");
     expect(json.transaction.checkoutUrl).toBe("");
-    expect(auditsOf(sql, "payment.created")).toHaveLength(base.created);
-    expect(auditsOf(sql, "payment.config_error")).toHaveLength(base.configError + 1);
-    const err = auditsOf(sql, "payment.config_error").at(-1) as any;
+    expect(await pollAuditEvents(d1Store, "payment.config_error")).toHaveLength(base.configError + 1);
+    expect(await auditsOf(d1Store, "payment.created")).toHaveLength(base.created);
+    const err = (await auditsOf(d1Store, "payment.config_error")).at(-1) as any;
     const payload = typeof err?.payload === "string" ? JSON.parse(err.payload) : err?.payload;
     expect(JSON.stringify(payload)).toContain("bogus-mode");
   });

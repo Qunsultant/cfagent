@@ -56,6 +56,11 @@ import { TradingAgent, settleTradingOrder } from "../src/agents/trading-agent";
 import { getTradingAgentConfig } from "../src/config/tradingAgentConfig";
 import { TradingPlatformRegistry } from "../src/trading";
 import type { Env } from "../src/types";
+import { MockD1Database } from "./mock-d1";
+import {
+  createD1AuditEventDb,
+  D1AuditEventStore,
+} from "../src/data/d1AuditEventAdapter";
 
 const executions: any[] = [];
 TradingPlatformRegistry.register("fakeflow291" as any, () => ({
@@ -198,15 +203,20 @@ describe("trade workflow wiring (#291 T3b)", () => {
 
   it("startTradeApproval records a trade.approval_started audit carrying the workflow id (#2989)", async () => {
     const agent: any = Object.create(TradingAgent.prototype);
-    agent.env = { TRADE_WORKFLOW: {} };
+    // #6102: the start claim writes to D1 now (best-effort — a
+    // failed write only warns), resolved from env.AGENT_DB; the
+    // old getOrm fake is dead on this branch. Fresh mock per test.
+    const d1Mock = new MockD1Database();
+    const d1Store = new D1AuditEventStore(createD1AuditEventDb(d1Mock as never));
+    agent.env = { TRADE_WORKFLOW: {}, AGENT_DB: d1Mock };
     agent.runWorkflow = async () => "trade-wf-1";
     agent.instanceUserLogin = () => "alice";
-    const created: any[] = [];
-    agent.getOrm = () => ({ events: { create: (row: any) => { created.push(row); return row; } } });
     const res = await agent.startTradeApproval({ orderId: "draft-1", provider: "fake", userLogin: "alice" });
     expect(res).toEqual({ workflowId: "trade-wf-1", orderId: "draft-1", status: "awaiting_approval" });
-    const started = created.find((r) => r.type === "trade.approval_started");
-    expect(started).toBeDefined();
+    // startTradeApproval awaits the audit, so a direct read is settled.
+    const startedRows = await d1Store.findMany({ where: { type: "trade.approval_started" } });
+    expect(startedRows).toHaveLength(1);
+    const started = { ...startedRows[0], payload: JSON.parse(startedRows[0].payload as unknown as string) };
     expect(started.payload).toMatchObject({ orderId: "draft-1", workflowId: "trade-wf-1" });
   });
 

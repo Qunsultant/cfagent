@@ -56,6 +56,7 @@ import {
 } from "../src/agents/orchestrator/asyncJobs";
 import { buildStageChainView } from "../src/services/stageChain";
 import { listScreeningActivity } from "../src/services/screeningActivity";
+import { MockD1Database } from "./mock-d1";
 
 /* ------------------------------------------------------------------ */
 /* Stateful fake SQL: mas_async_jobs with status-guard honoring, plus  */
@@ -159,7 +160,10 @@ function makeCtx(sql: C3FakeSql, overrides?: Partial<AsyncJobsContext>): {
   const scheduleCalls: ScheduleCall[] = [];
   const storage = sql as unknown as AsyncJobsContext["agentCtx"]["storage"]["sql"];
   const ctx = {
-    env: { SLACK_WEBHOOK_URL: "https://hooks.slack.com/x", SCREENER_EMAIL_TO: "ops@example.com" },
+    // #6102: a successful followup.deliver audits followup.delivered
+    // through the blocking helper, resolved from env.AGENT_DB — a
+    // fresh mock per ctx (the port is memoized per env object).
+    env: { SLACK_WEBHOOK_URL: "https://hooks.slack.com/x", SCREENER_EMAIL_TO: "ops@example.com", AGENT_DB: new MockD1Database() },
     agentCtx: { storage: { sql: storage } },
     ensureTables: () => storage,
     sessionKey: () => "session-1",

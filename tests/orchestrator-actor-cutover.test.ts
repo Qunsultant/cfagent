@@ -269,6 +269,11 @@ import { createAgentMcpTools } from "../src/agents/mcpAdapter";
 import { resolveAiModelName } from "../src/agents/model";
 import { EXPECTED_PROMPTS } from "./orchestrator-prompt-fixtures";
 import { MockSqlStorage } from "./mock-sql";
+import { MockD1Database } from "./mock-d1";
+import {
+  createD1AuditEventDb,
+  D1AuditEventStore,
+} from "../src/data/d1AuditEventAdapter";
 import judgeGolden from "./fixtures/judge-golden.json";
 
 /**
@@ -302,12 +307,26 @@ class ClaimAwareSql extends MockSqlStorage {
   }
 }
 
-function makeAgent(env: Record<string, unknown> = { AI: {} }) {
+function makeAgent(env: Record<string, unknown> = { AI: {} }, opts?: { auditDb?: boolean }) {
   const sql = new ClaimAwareSql();
   // Issue #1738: the actor session store runs on the DO key-value
   // API (ctx.storage.get/put/delete), not on SQL — the test ctx
   // carries a Map-backed implementation of it.
   const kv = new Map<string, unknown>();
+  // #6102: the turn's audits (route.decided, response.evaluated,
+  // chatstream.uistreamerror.error) write to D1 now, resolved from
+  // env.AGENT_DB — a fresh mock per agent (the port is memoized
+  // per env object). The DO mas_events table is frozen history.
+  // Opt-in: binding it makes every turn pay the D1 schema-ensure
+  // + write cost, which takes the 105-entry golden-corpus parity
+  // test from ~0.5s to ~17s (25s timeout) — only the tests that
+  // read audit rows bind it; the rest run exactly as before.
+  const d1Mock = opts?.auditDb ? new MockD1Database() : undefined;
+  const d1Store =
+    d1Mock !== undefined
+      ? new D1AuditEventStore(createD1AuditEventDb(d1Mock as never))
+      : undefined;
+  if (d1Mock !== undefined) env.AGENT_DB = d1Mock;
   const ctx = {
     id: { toString: () => "cutover-session-1" },
     storage: {
@@ -322,7 +341,7 @@ function makeAgent(env: Record<string, unknown> = { AI: {} }) {
     },
   };
   const agent = new OrchestratorAgent(ctx as never, env as never) as any;
-  return { agent, sql };
+  return { agent, sql, d1Store };
 }
 
 function readMessages(sql: MockSqlStorage) {
@@ -333,14 +352,29 @@ function readMessages(sql: MockSqlStorage) {
   }>;
 }
 
-function readEvents(sql: MockSqlStorage) {
-  return (
-    Array.from(sql.exec("SELECT type, agent, payload FROM mas_events")) as Array<{
-      type: string;
-      agent: string;
-      payload: string;
-    }>
-  ).map((e) => ({ ...e, payload: JSON.parse(e.payload) }));
+type AuditRow = { type: string; agent: string; payload: any };
+
+/**
+ * Read audit rows from the D1 store. audit() is fire-and-forget
+ * (no waitUntil on the test ctx), so poll briefly until a row of
+ * the awaited type lands, then return every row. The payload reads
+ * back as JSON TEXT, exactly as the DO port returned it.
+ */
+async function readEvents(d1Store: D1AuditEventStore, waitForType?: string): Promise<AuditRow[]> {
+  let rows = await d1Store.findMany({});
+  for (
+    let i = 0;
+    i < 50 && (waitForType ? !rows.some((r) => r.type === waitForType) : rows.length === 0);
+    i++
+  ) {
+    await new Promise((r) => setTimeout(r, 20));
+    rows = await d1Store.findMany({});
+  }
+  return rows.map((r) => ({
+    type: r.type,
+    agent: r.agent,
+    payload: JSON.parse(r.payload as unknown as string),
+  }));
 }
 
 describe("#686 R1 — identity stability under the cutover", () => {
@@ -565,7 +599,7 @@ describe("#686 R2/R3/R4 — the production turn, through runAgenticChatTurn", ()
   });
 
   it("side effects land exactly once: user + assistant rows, route.decided + response.evaluated", async () => {
-    const { agent, sql } = makeAgent();
+    const { agent, sql, d1Store } = makeAgent(undefined, { auditDb: true });
     const { route } = await agent.runAgenticChatTurn({
       userText: "remember that my risk tolerance is conservative",
       recentTurns: [],
@@ -580,7 +614,7 @@ describe("#686 R2/R3/R4 — the production turn, through runAgenticChatTurn", ()
       },
       { role: "assistant", content: "Stub assistant reply.", agent: route.agent },
     ]);
-    const events = readEvents(sql);
+    const events = await readEvents(d1Store!, "response.evaluated");
     const decided = events.find((e) => e.type === "route.decided");
     expect(decided?.payload).toEqual({
       route: route.agent,
@@ -681,7 +715,7 @@ describe("#686 R5 — onChatError carries the live stream-error format", () => {
 
 describe("#1952 — the Think turn path on the production class", () => {
   it("aborted mid-flight turn lands no message and no response side effects", async () => {
-    const { agent, sql } = makeAgent();
+    const { agent, sql, d1Store } = makeAgent(undefined, { auditDb: true });
     // Park the stub engine inside runTurn, then run the
     // memory-reset sequence (the route's abort + stash reset +
     // transcript clear) before releasing it. Reset `entered` first:
@@ -733,7 +767,7 @@ describe("#1952 — the Think turn path on the production class", () => {
       // no assistant record: the gated onChatResponse never fired.
       expect(await agent.getPortMessages()).toEqual([]);
       expect(readMessages(sql).filter((m) => m.role === "assistant")).toEqual([]);
-      const events = readEvents(sql);
+      const events = await readEvents(d1Store!, "route.decided");
       expect(events.filter((e) => e.type === "route.decided")).toHaveLength(1);
       expect(events.filter((e) => e.type === "response.evaluated")).toEqual([]);
     } finally {
@@ -745,7 +779,7 @@ describe("#1952 — the Think turn path on the production class", () => {
   });
 
   it("model failure reports through onChatError exactly once, then rethrows", async () => {
-    const { agent, sql } = makeAgent();
+    const { agent, sql, d1Store } = makeAgent(undefined, { auditDb: true });
     thinkStubControl.failNext = true;
     try {
       await expect(
@@ -762,12 +796,12 @@ describe("#1952 — the Think turn path on the production class", () => {
     // The aspect event the error hook logs fires exactly once: the
     // facet calls the hook on the throw path (the stub engine throws
     // before its own hook, so the facet's call is the only one).
-    const events = readEvents(sql);
+    const events = await readEvents(d1Store!, "chatstream.uistreamerror.error");
     expect(events.filter((e) => e.type === "chatstream.uistreamerror.error")).toHaveLength(1);
   });
 
   it("direct Think turn delegates to the port hooks (no one-shot installed)", async () => {
-    const { agent, sql } = makeAgent();
+    const { agent, sql, d1Store } = makeAgent(undefined, { auditDb: true });
     // A direct turn reads its user text from the port session, the
     // way the facet path seeds it before driving the turn.
     await agent.addPortMessages([
@@ -787,7 +821,7 @@ describe("#1952 — the Think turn path on the production class", () => {
     expect(config).toBeDefined();
     expect(typeof (config as any).instructions).toBe("string");
     expect((config as any).maxSteps).toBe(6);
-    const events = readEvents(sql);
+    const events = await readEvents(d1Store!, "route.decided");
     expect(events.filter((e) => e.type === "route.decided")).toHaveLength(1);
     expect(readMessages(sql)).toEqual([
       { role: "user", content: "hello there", agent: "orchestrator" },

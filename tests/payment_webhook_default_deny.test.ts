@@ -86,6 +86,11 @@ import { PaymentStrategyFactory, PayPalPaymentStrategy } from "../src/patterns/p
 import { OrchestratorAgent } from "../src/agents/orchestrator";
 import { computeHmacSha256Hex } from "../src/services/cryptoUtils";
 import { MockSqlStorage } from "./mock-sql";
+import { MockD1Database } from "./mock-d1";
+import {
+  createD1AuditEventDb,
+  D1AuditEventStore,
+} from "../src/data/d1AuditEventAdapter";
 import type { Env } from "../src/types";
 
 // Source pins read via cwd-relative paths (vitest runs at the repo root) —
@@ -101,6 +106,9 @@ const makeEnv = (overrides: Record<string, unknown> = {}): Env =>
     AI_SEARCH_ENDPOINT: "https://mock.search",
     ORCHESTRATOR_AGENT: {} as any,
     AGENT_SESSIONS: {} as any,
+    // #6102: audit rows land in D1 now — a fresh mock per makeEnv
+    // call, so each test's agent gets its own audit table.
+    AGENT_DB: new MockD1Database() as any,
     STRIPE_SECRET_KEY: "sk_test_mock",
     STRIPE_WEBHOOK_SECRET: STRIPE_WH_SECRET,
     LEMONSQUEEZY_WEBHOOK_SECRET: LS_WH_SECRET,
@@ -571,13 +579,17 @@ describe("/payments/webhook route — an unverifiable provider cannot settle a t
       waitUntil: vi.fn(),
     };
     const agent = new OrchestratorAgent(ctx as any, env);
+    // #6102: read audit rows from the same mock bound as AGENT_DB.
+    const d1Store = new D1AuditEventStore(
+      createD1AuditEventDb((env as any).AGENT_DB as never),
+    );
     sql.exec(
       `INSERT INTO mas_transactions (id, session_id, action, amount, currency, customer, gateway, gateway_ref, status, checkout_url, proposer_did, authorizer_did, proof_signature, note, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       DRAFT_ID, "sess-148", "charge", 25, "USD", "Acme Corp", "stripe", "",
       "pending_checkout", "", "did:agent:openaimp:payments", "", "sig", "", SENTINEL_TS, SENTINEL_TS
     );
-    return { agent, sql };
+    return { agent, sql, d1Store };
   };
 
   const txRow = (sql: MockSqlStorage) =>
@@ -585,8 +597,19 @@ describe("/payments/webhook route — an unverifiable provider cannot settle a t
 
   const txStatus = (sql: MockSqlStorage) => txRow(sql)?.status;
 
-  const settledAudits = (sql: MockSqlStorage) =>
-    Array.from(sql.exec("SELECT * FROM mas_events WHERE type = ?", "payment.settled_webhook")) as any[];
+  // #6102: audit rows land in D1 now (the DO mas_events table is
+  // frozen history). The orchestrator's audit() is sync
+  // fire-and-forget, so poll briefly until the row lands.
+  const settledAudits = (d1Store: D1AuditEventStore) =>
+    d1Store.findMany({ where: { type: "payment.settled_webhook" } });
+  async function pollAuditEvents(d1Store: D1AuditEventStore, type: string) {
+    let rows = await d1Store.findMany({ where: { type } });
+    for (let i = 0; i < 50 && rows.length === 0; i++) {
+      await new Promise((r) => setTimeout(r, 20));
+      rows = await d1Store.findMany({ where: { type } });
+    }
+    return rows;
+  }
 
   const postWebhook = (agent: OrchestratorAgent, query: string, body: string, headers: Record<string, string> = {}) =>
     agent.onRequest(
@@ -598,23 +621,23 @@ describe("/payments/webhook route — an unverifiable provider cannot settle a t
     );
 
   it("unknown provider: 401, transaction untouched, no settled audit", async () => {
-    const { agent, sql } = seedAgent(makeEnv());
+    const { agent, sql, d1Store } = seedAgent(makeEnv());
     const res = await postWebhook(agent, "?provider=boguspay", JSON.stringify({ draftId: DRAFT_ID, type: "x" }));
     expect(res.status).toBe(401);
     const json = (await res.json()) as any;
     expect(json.error).toContain("Unsupported webhook provider");
     expect(txStatus(sql)).toBe("pending_checkout");
     expect(txRow(sql)?.updated_at).toBe(SENTINEL_TS);
-    expect(settledAudits(sql)).toHaveLength(0);
+    expect(await settledAudits(d1Store)).toHaveLength(0);
   });
 
   it("sandbox provider: 401, transaction untouched, no settled audit", async () => {
-    const { agent, sql } = seedAgent(makeEnv());
+    const { agent, sql, d1Store } = seedAgent(makeEnv());
     const res = await postWebhook(agent, "?provider=sandbox", JSON.stringify({ draftId: DRAFT_ID }));
     expect(res.status).toBe(401);
     expect(txStatus(sql)).toBe("pending_checkout");
     expect(txRow(sql)?.updated_at).toBe(SENTINEL_TS);
-    expect(settledAudits(sql)).toHaveLength(0);
+    expect(await settledAudits(d1Store)).toHaveLength(0);
   });
 
   // Stripe-shaped body whose extracted reference id IS the seeded draft,
@@ -625,29 +648,29 @@ describe("/payments/webhook route — an unverifiable provider cannot settle a t
   });
 
   it("stripe with an invalid signature: 401, transaction untouched, no settled audit", async () => {
-    const { agent, sql } = seedAgent(makeEnv());
+    const { agent, sql, d1Store } = seedAgent(makeEnv());
     const res = await postWebhook(agent, "?provider=stripe", routeBody, {
       "stripe-signature": await stripeSignature(routeBody, "wrong-secret"),
     });
     expect(res.status).toBe(401);
     expect(txStatus(sql)).toBe("pending_checkout");
     expect(txRow(sql)?.updated_at).toBe(SENTINEL_TS);
-    expect(settledAudits(sql)).toHaveLength(0);
+    expect(await settledAudits(d1Store)).toHaveLength(0);
   });
 
   it("stripe with the webhook secret unconfigured: 401, transaction untouched", async () => {
-    const { agent, sql } = seedAgent(makeEnv({ STRIPE_WEBHOOK_SECRET: undefined }));
+    const { agent, sql, d1Store } = seedAgent(makeEnv({ STRIPE_WEBHOOK_SECRET: undefined }));
     const res = await postWebhook(agent, "?provider=stripe", routeBody, {
       "stripe-signature": await stripeSignature(routeBody, STRIPE_WH_SECRET),
     });
     expect(res.status).toBe(401);
     expect(txStatus(sql)).toBe("pending_checkout");
     expect(txRow(sql)?.updated_at).toBe(SENTINEL_TS);
-    expect(settledAudits(sql)).toHaveLength(0);
+    expect(await settledAudits(d1Store)).toHaveLength(0);
   });
 
   it("stripe with a genuine signature still settles the transaction and audits it", async () => {
-    const { agent, sql } = seedAgent(makeEnv());
+    const { agent, sql, d1Store } = seedAgent(makeEnv());
     const res = await postWebhook(agent, "?provider=stripe", routeBody, {
       "stripe-signature": await stripeSignature(routeBody, STRIPE_WH_SECRET),
     });
@@ -657,10 +680,10 @@ describe("/payments/webhook route — an unverifiable provider cannot settle a t
     // The settle UPDATE targeted the seeded row (its updated_at advanced
     // past the sentinel) and the settled audit was written for this draft.
     expect(txRow(sql)?.updated_at).not.toBe(SENTINEL_TS);
-    const audits = settledAudits(sql);
+    const audits = await pollAuditEvents(d1Store, "payment.settled_webhook");
     expect(audits).toHaveLength(1);
-    expect(JSON.parse(audits[0].payload).draftId).toBe(DRAFT_ID);
-    expect(JSON.parse(audits[0].payload).provider).toBe("stripe");
+    expect(JSON.parse(audits[0].payload as unknown as string).draftId).toBe(DRAFT_ID);
+    expect(JSON.parse(audits[0].payload as unknown as string).provider).toBe("stripe");
   });
 });
 

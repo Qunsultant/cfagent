@@ -231,7 +231,7 @@ describe("issue #782: single-source shared mas_* schema", () => {
     }
   });
 
-  it("source pin: shared-table DDL exists in exactly one file under src/", () => {
+  it("source pin: shared-table DDL exists only in the catalogue homes under src/", () => {
     const srcRoot = fileURLToPath(new URL("../src", import.meta.url));
     const sharedAlt = SHARED_TABLES.join("|");
     const pattern = new RegExp(`CREATE TABLE IF NOT EXISTS\\s+(?:${sharedAlt})\\b`);
@@ -244,7 +244,15 @@ describe("issue #782: single-source shared mas_* schema", () => {
     // (now catalogue-derived, so the canonical-module pin above still
     // holds), but the literal DDL text lives in exactly one file, the
     // catalogue module. The single-source intent is unchanged.
-    expect(offenders).toEqual(["data/schemaComponent/ormCatalogue.ts"]);
+    // #6102 (disclosed pin update): migration 0089 gives mas_events a
+    // D1 home — its CREATE TABLE now also lives in d1Catalogue.ts
+    // (the table's new D1 home), while the frozen DO DDL stays in
+    // ormCatalogue.ts. Two files, not one; any third file still fails
+    // the pin, so the single-source guard still holds.
+    expect(offenders).toEqual([
+      "data/schemaComponent/d1Catalogue.ts",
+      "data/schemaComponent/ormCatalogue.ts",
+    ]);
   });
 
   it("source pin: both initialization paths consume the canonical module", () => {
