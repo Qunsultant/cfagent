@@ -22,6 +22,7 @@ import {
   type JobPipelineDeps,
   type JobRunOutcome,
 } from "../services/jobPipelineEngine";
+import { resolveWorkflowWaitChannel, type WorkflowEventWaitStep } from "./workflowEventWait";
 import { createJobPipelineControl } from "../services/jobPipelineControlFactory";
 import { JobPipelineError } from "../services/jobPipelineConfig";
 import type { JobRunTrigger } from "../data/jobRunRecordPorts";
@@ -36,6 +37,12 @@ export interface JobPipelineWorkflowPayload {
 /** Minimal structural step surface the flow needs (fakeable in tests). */
 export interface JobPipelineWorkflowStep {
   do<T>(name: string, fn: () => Promise<T>): Promise<T>;
+  /**
+   * Issue #3955 — the platform's step-level event wait. Optional at the
+   * seam: a step without it leaves the engine's wait stage refusing by
+   * name rather than silently skipping the wait.
+   */
+  waitForEvent?: WorkflowEventWaitStep["waitForEvent"];
 }
 
 /**
@@ -73,6 +80,7 @@ export async function runJobPipelineWorkflowFlow(
   // workflow-dispatched run emits `job.run.settled` and its steps
   // stay replay-safe through step.do.
   const control = createJobPipelineControl({
+    ...resolveWorkflowWaitChannel(step),
     ...deps,
     journal: {
       do: async <T>(name: string, fn: () => Promise<T>): Promise<T> => step.do(name, fn),

@@ -417,7 +417,10 @@ export type WorkflowErrorCode =
   | "unavailable"
   | "workflow_binding_absent"
   | "workflow_binding_malformed"
-  | "projection_store_unbound";
+  | "projection_store_unbound"
+  // Issue #3955 — the delivery half of the durable event wait: an instance
+  // that cannot receive events refuses by name instead of dropping them.
+  | "send_event_unsupported";
 
 export class WorkflowError extends Error {
   readonly code: WorkflowErrorCode;

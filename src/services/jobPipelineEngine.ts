@@ -280,6 +280,60 @@ export const identityJobStepJournal: JobStepJournal = {
   do: async (_name, fn) => fn(),
 };
 
+/**
+ * Issue #3955 — the durable event-wait stage: a step whose name is
+ * WAIT_EVENT_STEP waits for ONE named event and continues on it. The
+ * wait resolves to a declared outcome — `{outcome: "event"}` carrying
+ * the payload, or `{outcome: "timeout"}` — and a timeout is NEVER a
+ * failed run: the job can branch on it.
+ *
+ * The wait is deliberately not a registry step. Rules of Workflows
+ * forbid `waitForEvent` inside `step.do`, and a journaled wait would
+ * replay as a completed step instead of re-arming; the engine calls the
+ * host's channel outside the journal instead.
+ */
+export const WAIT_EVENT_STEP = "wait.event";
+
+/** One wait request: what to wait for, where, and under what bound. */
+export interface JobEventWaitRequest {
+  jobId: string;
+  runId: string;
+  /** The node path the wait belongs to (the stage boundary's identity). */
+  nodePath: string;
+  /**
+   * The wait's stable platform name — the engine's ONE naming site, so a
+   * replay of the same run re-arms the same wait instead of opening a second.
+   */
+  stepName: string;
+  /** The event type the delivery side sends. */
+  event: string;
+  /** The declared bound in ms; null = no bound declared (the host's maximum). */
+  timeoutMs: number | null;
+}
+
+/** A wait's result. A timeout is an OUTCOME, never an error. */
+export type JobEventWaitOutcome =
+  | { outcome: "event"; payload: unknown }
+  | { outcome: "timeout" };
+
+/** The host's wait channel. Absent ⇒ a wait stage refuses by name. */
+export type JobEventWaitHandler = (
+  request: JobEventWaitRequest,
+) => Promise<JobEventWaitOutcome>;
+
+/** One delivery: the event, its payload, and the durable host to reach. */
+export interface JobEventSendRequest {
+  jobId: string;
+  runId: string;
+  /** The run's durable host instance; null when the run has none. */
+  workflowInstanceId: string | null;
+  event: string;
+  payload: unknown;
+}
+
+/** The host's delivery channel. Absent ⇒ delivery refuses by name. */
+export type JobEventSender = (request: JobEventSendRequest) => Promise<void>;
+
 /** Issue #6028 — module logger, on the same structured-logging seam as the services. */
 const structuredLog = createStructuredLogger(createObservabilitySink({}), {
   component: "services/jobPipelineEngine",
@@ -322,6 +376,18 @@ export interface JobPipelineDeps {
    */
   stageEventsMirror?: JobStageEventStore;
   journal?: JobStepJournal;
+  /**
+   * Issue #3955 — the durable event-wait channel a `wait.event` step waits
+   * on. Absent ⇒ the step refuses by name (`stage_port_unavailable`) rather
+   * than pretending the wait happened: an unservable capability refuses,
+   * per #5517.
+   */
+  waitForEvent?: JobEventWaitHandler;
+  /**
+   * Issue #3955 — the delivery half of the channel: hand a named event to
+   * the run's durable host. Absent ⇒ `sendEvent` refuses by name.
+   */
+  sendEvent?: JobEventSender;
   now?: () => Date;
   newRunId?: () => string;
   /**
@@ -1421,6 +1487,56 @@ export class JobPipelineControl {
     });
     await this.recordTerminal(settled, "cancelled", undefined);
     return settled;
+  }
+
+  /**
+   * Issue #3955 — deliver a named event to a RUNNING job's durable host.
+   * This is the delivery half of the wait: an approval decision, a webhook,
+   * or a sibling stage sends, and the waiting stage resumes on it. Refusals
+   * are by name — a job that is not running, a host with no channel — never
+   * a silent drop.
+   */
+  async sendEvent(
+    jobId: string,
+    event: string,
+    payload?: unknown,
+  ): Promise<{ jobId: string; runId: string; workflowInstanceId: string | null }> {
+    const name = typeof event === "string" ? event.trim() : "";
+    if (!name) {
+      throw new JobPipelineError(
+        "job_config_invalid",
+        `Job "${jobId}" event delivery requires a non-empty event name.`,
+      );
+    }
+    const instance = await this.requireInstance(jobId);
+    if (instance.state !== "running") {
+      throw new JobPipelineError(
+        "job_not_running",
+        `Job "${jobId}" is ${instance.state}; only a running job can receive event "${name}".`,
+      );
+    }
+    const runId = instance.currentRunId;
+    if (!runId) {
+      throw new JobPipelineError(
+        "job_run_not_found",
+        `Job "${jobId}" is running without a run id; event "${name}" has no run to reach.`,
+      );
+    }
+    const send = this.deps.sendEvent;
+    if (!send) {
+      throw new JobPipelineError(
+        "stage_port_unavailable",
+        `Job "${jobId}" cannot receive event "${name}": this host provides no event-delivery channel.`,
+      );
+    }
+    await send({
+      jobId,
+      runId,
+      workflowInstanceId: instance.runWorkflowInstanceId,
+      event: name,
+      payload: payload ?? null,
+    });
+    return { jobId, runId, workflowInstanceId: instance.runWorkflowInstanceId };
   }
 
   /** Retry: a NEW run from the start (fresh run id, checkpoints cleared), from a terminal or paused state. */
@@ -3912,6 +4028,67 @@ export class JobPipelineControl {
     return key;
   }
 
+  /**
+   * Issue #3955 — one durable wait: resolve the declaration, refuse an
+   * unservable host by name, and turn the channel's answer into the step's
+   * declared outcome. The request carries the engine's ONE wait name, so a
+   * replay re-arms the same platform wait.
+   */
+  private async awaitEvent(
+    ctx: RunContext,
+    path: string,
+    stepIndex: number,
+    shardKey: string | null,
+    itemIndex: number | null,
+    params: Record<string, unknown>,
+  ): Promise<
+    { outcome: "event"; event: string; payload: unknown } | { outcome: "timeout"; event: string }
+  > {
+    const event = typeof params.event === "string" ? params.event.trim() : "";
+    if (!event) {
+      throw new JobPipelineError(
+        "job_config_invalid",
+        `Step "${WAIT_EVENT_STEP}" of node "${path || "root"}" requires a non-empty "event" name (the event the delivery side sends).`,
+      );
+    }
+    const rawTimeout = params.timeoutMs;
+    if (
+      rawTimeout !== undefined &&
+      (typeof rawTimeout !== "number" || !Number.isFinite(rawTimeout) || rawTimeout <= 0)
+    ) {
+      throw new JobPipelineError(
+        "job_config_invalid",
+        `Step "${WAIT_EVENT_STEP}" of node "${path || "root"}" has an invalid "timeoutMs" (${String(rawTimeout)}); it must be a positive number of milliseconds.`,
+      );
+    }
+    const wait = this.deps.waitForEvent;
+    if (!wait) {
+      throw new JobPipelineError(
+        "stage_port_unavailable",
+        `Step "${WAIT_EVENT_STEP}" of node "${path || "root"}" waits for event "${event}", but this host provides no event-wait channel; a durable wait runs on the workflow residency.`,
+      );
+    }
+    let result: JobEventWaitOutcome;
+    try {
+      result = await wait({
+        jobId: ctx.jobId,
+        runId: ctx.runId,
+        nodePath: path,
+        stepName: `wait:${stepExecutionId(ctx.runId, path, stepIndex, shardKey, itemIndex)}`,
+        event,
+        timeoutMs: typeof rawTimeout === "number" ? rawTimeout : null,
+      });
+    } catch (error) {
+      if (error instanceof JobPipelineError) throw error;
+      throw new JobPipelineError(
+        "job_step_failed",
+        `Event wait "${event}" of node "${path || "root"}" failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    if (result.outcome === "timeout") return { outcome: "timeout", event };
+    return { outcome: "event", event, payload: result.payload ?? null };
+  }
+
   private async execSteps(
     ctx: RunContext,
     node: JobNodeConfig,
@@ -3941,6 +4118,22 @@ export class JobPipelineControl {
       stepInput: unknown,
     ): Promise<unknown> => {
       const stepConfig = steps[stepIndex];
+      // Issue #3955 — the event-wait stage runs on the host's channel and
+      // NEVER inside the journal: Rules of Workflows forbid waitForEvent
+      // inside step.do, and a journaled wait would replay as a completed
+      // step instead of re-arming.
+      if (stepConfig.step === WAIT_EVENT_STEP) {
+        const waited = await this.awaitEvent(
+          ctx,
+          path,
+          stepIndex,
+          eff.shardKey,
+          itemIndex,
+          stepConfig.params ?? {},
+        );
+        ctx.stepExecutions += 1;
+        return waited;
+      }
       const handler = this.deps.steps.resolve(stepConfig.step);
       const stepCtx: JobStepContext = {
         jobId: ctx.jobId,

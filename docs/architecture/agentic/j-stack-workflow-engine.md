@@ -960,6 +960,32 @@ eight execution stages partitioned under four display stages
 generic families are not a five-stage cap — a job composes steps from
 the registry.
 
+**The one reserved step.** A step is a name into the platform step
+library, with one exception: `wait.event` is executed by the engine, not
+by a registered handler (#3955). A `wait.event` step waits for ONE named
+event (`params.event`) under an optional declared bound
+(`params.timeoutMs`, milliseconds; absent means the host's own maximum)
+and resolves to a declared outcome that becomes the step's output — and
+therefore the next step's input:
+
+- `{ outcome: "event", event, payload }` when the event arrives;
+- `{ outcome: "timeout", event }` when the bound expires.
+
+A timeout is an OUTCOME, never a failed run: the job branches on it. The
+wait is never wrapped in the journal — Rules of Workflows forbid
+`waitForEvent` inside `step.do`, and a journaled wait would replay as a
+completed step instead of re-arming — so the engine calls the host's
+channel (`JobPipelineDeps.waitForEvent`) outside it, under a name the
+engine computes once (`wait:<step execution id>`) so a replay re-arms the
+same platform wait. Delivery is the control plane's `sendEvent(jobId,
+event, payload)`, which addresses the run's own workflow instance through
+the one instance seam (#2989/#5270); it refuses `job_not_running` for a
+run that is not live and `stage_port_unavailable` when the host provides
+no channel, rather than reporting a delivery that never happened (#5517).
+The workflow residency wires both halves
+(`src/workflows/jobPipelineWorkflow.ts`, `workflowEventWait.ts`); a host
+that wires neither keeps the coded refusal.
+
 ### 3.3 Chain
 
 A chain is a declarative composition of stages, defined once and run
@@ -1234,7 +1260,9 @@ run that never dispatches still settles through `recordTerminal`
 current definition instead of pinning the version the run started
 under (#5278); the exactly-once edge in §4.2 (#5586); the async-alarm
 journal substrate has no production caller, so only two of the three
-substrates are live.
+substrates are live. Since #3955 the engine also waits durably: a `wait.event` stage
+waits for one named event on the host's channel and resumes on it, with a
+declared bound whose expiry is an outcome rather than a failure (§3.2).
 
 ### 4.2 Reliability — partial
 
