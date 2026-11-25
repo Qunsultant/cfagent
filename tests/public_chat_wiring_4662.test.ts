@@ -14,14 +14,14 @@ describe("Gap 9 — Public chat wiring (#4662)", () => {
       });
       expect(resolved).toEqual({
         brokerId: "public",
-        brokerLabel: "Public",
+        brokerLabel: "Public.com",
         modeId: "live",
         modeLabel: "Live",
-        quoteTool: "tool_openaimp_public_get_quote",
-        previewTool: "tool_openaimp_public_preview_order",
+        quoteTool: "tool_openaimp_market_data_get_quote",
+        previewTool: "tool_openaimp_broker_order_preview",
         executeTool: "tool_openaimp_public_place_order",
-        ordersTool: "tool_openaimp_public_orders",
-        cancelBracketTool: "tool_openaimp_public_cancel_order",
+        ordersTool: "tool_openaimp_broker_orders_list",
+        cancelBracketTool: "tool_openaimp_broker_order_cancel",
         executionPolicy: "hitl",
       });
     }
@@ -37,8 +37,8 @@ describe("Gap 9 — Public chat wiring (#4662)", () => {
       activeBroker: "public",
       activeMode: "live",
     });
-    expect(prompt).toContain("Broker-Neutral Trading & Market Screening (Public Live)");
-    expect(prompt).toContain("tool_openaimp_public_preview_order");
+    expect(prompt).toContain("Broker-Neutral Trading & Market Screening (Public.com Live)");
+    expect(prompt).toContain("tool_openaimp_broker_order_preview");
     expect(prompt).toContain("tool_openaimp_public_place_order");
     expect(prompt).not.toContain("tool_openaimp_alpaca_place_order");
     expect(prompt).not.toContain("tool_openaimp_etrade_execute_order");
