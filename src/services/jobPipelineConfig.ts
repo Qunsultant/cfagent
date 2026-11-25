@@ -79,6 +79,10 @@ export type JobPipelineErrorCode =
   //  - the run predates the definition-version stamp (#5887);
   //  - the stamped version is no longer resolvable.
   | "job_run_not_found"
+  // Issue #6552 — the platform rewind's two refusals: a stage whose first step
+  // has no single name, and a platform that rejected the target step.
+  | "stage_restart_unaddressable"
+  | "stage_restart_rejected"
   | "replay_pre_retention_run"
   | "replay_definition_version_unresolved"
   | "stage_port_unavailable";

@@ -89,7 +89,8 @@ import { fetchWikipediaIndexHtml } from "../services/indexListJob";
 import type { JobPipelineDeps } from "../services/jobPipelineEngine";
 import type { JobEventSender } from "../services/jobPipelineEngine";
 import type { JobPipelineTerminateRun } from "../services/jobPipelineEngine";
-import { sendManagedWorkflowEvent, terminateManagedWorkflowInstance, type ManagedWorkflowBinding } from "./workflowInstanceSeam";
+import type { JobPipelineRestartRun } from "../services/jobPipelineEngine";
+import { sendManagedWorkflowEvent, terminateManagedWorkflowInstance, restartManagedWorkflowInstance, type ManagedWorkflowBinding } from "./workflowInstanceSeam";
 import { JobPipelineError } from "../services/jobPipelineConfig";
 import {
   runJobPipelineWorkflowFlow,
@@ -423,6 +424,7 @@ export function createJobPipelineWorkflowDeps(env: Env): JobPipelineDeps {
      */
     sendEvent: createJobPipelineWorkflowEventSender(env),
     terminateRun: createJobPipelineWorkflowTerminator(env),
+    restartRun: createJobPipelineWorkflowRestart(env),
     invocation: "workflow-shard",
     // Issue #4782 S3 — the policy resolves from this env (the
     // platform-default layer); the engine reads nothing itself.
@@ -453,6 +455,25 @@ export function createJobPipelineWorkflowTerminator(
       // handler yet — #5958 retires the hand-built compensation into them —
       // so a rollback here would claim work that does not exist.
       rollback: false,
+    });
+  };
+}
+
+/**
+ * Issue #6552 — the workflow residency's rewind channel. Absent when the
+ * deployment binds no JOB_PIPELINE_WORKFLOW: restartFromStage then refuses by
+ * name rather than pretending the run moved.
+ */
+export function createJobPipelineWorkflowRestart(
+  env: Env,
+): JobPipelineRestartRun | undefined {
+  const binding = env.JOB_PIPELINE_WORKFLOW as unknown as
+    | ManagedWorkflowBinding
+    | undefined;
+  if (!binding) return undefined;
+  return async (request) => {
+    await restartManagedWorkflowInstance(binding, request.workflowInstanceId, {
+      from: { name: request.fromStep },
     });
   };
 }
