@@ -45,6 +45,11 @@ vi.mock("agents", () => {
 });
 import { OrchestratorAgent } from "../src/agents/orchestrator";
 import { MockSqlStorage } from "./mock-sql";
+import { MockD1Database } from "./mock-d1";
+import {
+  createD1AuditEventDb,
+  D1AuditEventStore,
+} from "../src/data/d1AuditEventAdapter";
 
 /**
  * Issue #270 — the WorkflowsHub Observability card advertises
@@ -59,20 +64,25 @@ describe("POST /api/audit/event (#270)", () => {
 
   function makeAgent() {
     const sql = new MockSqlStorage();
+    // #6102: the event log lives in D1 now — the agent's env carries
+    // a MockD1Database, as production's env carries AGENT_DB.
+    const mock = new MockD1Database();
     const ctx = {
       storage: { sql },
       id: { toString: () => SESSION_KEY },
     } as any;
     const agent: any = Object.create(OrchestratorAgent.prototype);
     agent.ctx = ctx;
-    agent.env = { APP_ENV: "TEST" } as any;
-    return { agent, sql };
+    agent.env = { APP_ENV: "TEST", AGENT_DB: mock } as any;
+    return { agent, sql, mock };
   }
 
-  function rowCount(sql: MockSqlStorage): number {
-    return Array.from(
-      sql.exec("SELECT id FROM mas_events WHERE session_id = ?", SESSION_KEY)
-    ).length;
+  async function rowCount(mock: MockD1Database): Promise<number> {
+    const store = new D1AuditEventStore(createD1AuditEventDb(mock as never));
+    const rows = await store.findMany({
+      where: { sessionId: SESSION_KEY },
+    });
+    return rows.length;
   }
 
   async function postEvent(agent: any, rawBody: string) {
@@ -87,7 +97,7 @@ describe("POST /api/audit/event (#270)", () => {
   }
 
   it("records a valid event and returns the stored record (201)", async () => {
-    const { agent, sql } = makeAgent();
+    const { agent, mock } = makeAgent();
     const { status, body } = await postEvent(
       agent,
       JSON.stringify({ type: "ui.policy_check", agent: "nlq", payload: { detail: "ok" } })
@@ -98,13 +108,12 @@ describe("POST /api/audit/event (#270)", () => {
     expect(body.agent).toBe("nlq");
     expect(body.payload).toEqual({ detail: "ok" });
     expect(typeof body.created_at).toBe("string");
-    // The write is tenant-scoped and the row is really there.
-    expect(rowCount(sql)).toBe(1);
-    const rows = Array.from(
-      sql.exec("SELECT type, agent, session_id FROM mas_events")
-    ) as Array<Record<string, string>>;
+    // The write is tenant-scoped and the row is really there (D1, #6102).
+    expect(await rowCount(mock)).toBe(1);
+    const store = new D1AuditEventStore(createD1AuditEventDb(mock as never));
+    const rows = await store.findMany({ where: { sessionId: SESSION_KEY } });
     expect(rows[0].type).toBe("ui.policy_check");
-    expect(rows[0].session_id).toBe(SESSION_KEY);
+    expect(rows[0].sessionId).toBe(SESSION_KEY);
   });
 
   it("round-trips: GET /api/audit returns the posted event", async () => {
@@ -120,36 +129,36 @@ describe("POST /api/audit/event (#270)", () => {
   });
 
   it("rejects a missing type with 400 and writes nothing", async () => {
-    const { agent, sql } = makeAgent();
+    const { agent, mock } = makeAgent();
     const { status, body } = await postEvent(agent, JSON.stringify({ agent: "nlq" }));
     expect(status).toBe(400);
     expect(body.error).toContain("type");
-    expect(rowCount(sql)).toBe(0);
+    expect(await rowCount(mock)).toBe(0);
   });
 
   it("rejects a non-object body with 400", async () => {
-    const { agent, sql } = makeAgent();
+    const { agent, mock } = makeAgent();
     const { status, body } = await postEvent(agent, "not-json{");
     expect(status).toBe(400);
-    expect(rowCount(sql)).toBe(0);
+    expect(await rowCount(mock)).toBe(0);
   });
 
   it("rejects an over-long type with 400", async () => {
-    const { agent, sql } = makeAgent();
+    const { agent, mock } = makeAgent();
     const { status } = await postEvent(agent, JSON.stringify({ type: "x".repeat(121) }));
     expect(status).toBe(400);
-    expect(rowCount(sql)).toBe(0);
+    expect(await rowCount(mock)).toBe(0);
   });
 
   it("rejects an over-sized payload with 400", async () => {
-    const { agent, sql } = makeAgent();
+    const { agent, mock } = makeAgent();
     const { status, body } = await postEvent(
       agent,
       JSON.stringify({ type: "ui.big", payload: { blob: "x".repeat(70000) } })
     );
     expect(status).toBe(400);
     expect(body.error).toContain("64 KB");
-    expect(rowCount(sql)).toBe(0);
+    expect(await rowCount(mock)).toBe(0);
   });
 
   it("defaults the agent label when omitted", async () => {

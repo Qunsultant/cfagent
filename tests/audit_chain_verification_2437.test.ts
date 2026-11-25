@@ -264,6 +264,7 @@ describe("checkpoint record parse (#2437)", () => {
       brokenIndex: null,
       brokenRowId: null,
       reason: null,
+      chain: "d1",
     };
     expect(parseAuditChainVerificationRecord(JSON.stringify(record))).toEqual(record);
     expect(parseAuditChainVerificationRecord(null)).toBeNull();
@@ -271,6 +272,14 @@ describe("checkpoint record parse (#2437)", () => {
     expect(parseAuditChainVerificationRecord(JSON.stringify({ ...record, tailRowId: "3" }))).toBeNull();
     expect(parseAuditChainVerificationRecord(JSON.stringify({ ...record, anchorKind: "surviving" }))).toBeNull();
     expect(parseAuditChainVerificationRecord(JSON.stringify({ valid: true }))).toBeNull();
+    // #6102: a record without a chain marker predates the D1 cutover —
+    // it is not a D1 checkpoint (the D1 verifier re-anchors from genesis).
+    const { chain: _dropped, ...preCutover } = record;
+    expect(parseAuditChainVerificationRecord(JSON.stringify(preCutover))).toBeNull();
+    expect(parseAuditChainVerificationRecord(JSON.stringify({ ...record, chain: "do" }))).toEqual({
+      ...record,
+      chain: "do",
+    });
   });
 });
 

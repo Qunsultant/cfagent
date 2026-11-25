@@ -12,6 +12,11 @@
 import { describe, expect, it } from "vitest";
 import { MockSqlStorage } from "./mock-sql";
 import { DatabaseORM, verifyStoredAuditChain } from "../src/orm";
+import { MockD1Database } from "./mock-d1";
+import {
+  createD1AuditEventDb,
+  D1AuditEventStore,
+} from "../src/data/d1AuditEventAdapter";
 import { OrchestratorAgent } from "../src/agents/orchestrator";
 import type { Env } from "../src/types";
 import { linkAuditRow } from "../src/security/auditChain";
@@ -245,72 +250,75 @@ describe("mas_events carries the envelope as first-class columns (#6100)", () =>
 });
 
 describe("recordAudit stamps the envelope at the boundary (#6100)", () => {
+  // #6102: recordAudit is async and writes D1 through the port
+  // resolved from the agent env (memoized per env object), so each
+  // agent gets a fresh env carrying a fresh MockD1Database, and the
+  // stored row is read back from the D1 store. The store omits null
+  // envelope columns (as the DO rowToRecord did not), so null
+  // assertions read `(stored.<field> ?? null)`.
   function makeAgent(envOverrides: Record<string, unknown> = {}) {
-    const sql = new MockSqlStorage();
+    const d1Mock = new MockD1Database();
+    const store = new D1AuditEventStore(createD1AuditEventDb(d1Mock as never));
     const ctx = {
       id: { toString: () => "sess-envelope-1" },
-      storage: { sql },
+      storage: { sql: new MockSqlStorage() },
       waitUntil: () => {},
     };
-    const env = { AI: {}, ...envOverrides } as unknown as Env;
+    const env = { AI: {}, AGENT_DB: d1Mock, ...envOverrides } as unknown as Env;
     const agent = new OrchestratorAgent(ctx as any, env);
-    return { agent, sql };
+    return { agent, store };
   }
 
-  function rows(sql: MockSqlStorage) {
-    return Array.from(sql.exec("SELECT * FROM mas_events")) as Array<Record<string, unknown>>;
-  }
-
-  it("stamps platform/session/action and leaves the rest null outside a turn", () => {
-    const { agent, sql } = makeAgent();
-    const stored = (agent as any).recordAudit("async_job.queued", "orchestrator", {
+  it("stamps platform/session/action and leaves the rest null outside a turn", async () => {
+    const { agent, store } = makeAgent();
+    const stored = await (agent as any).recordAudit("async_job.queued", "orchestrator", {
       jobId: "j1",
     });
-    const row = rows(sql).find((r) => r.id === stored.id)!;
-    expect(row.platform_id).toBe("cfagent");
-    expect(row.session_id).toBe("sess-envelope-1");
+    const row = (await store.findById(stored.id))!;
+    expect(row.platformId).toBe("cfagent");
+    expect(row.sessionId).toBe("sess-envelope-1");
     expect(row.type).toBe("async_job.queued");
-    expect(row.tenant_id).toBeNull();
-    expect(row.principal_id).toBeNull();
-    expect(row.trace_id).toBeNull();
-    expect(row.correlation_id).toBeNull();
-    expect(row.event_hash).toBeTruthy();
+    expect(row.tenantId ?? null).toBeNull();
+    expect(row.principalId ?? null).toBeNull();
+    expect(row.traceId ?? null).toBeNull();
+    expect(row.correlationId ?? null).toBeNull();
+    expect(row.eventHash).toBeTruthy();
   });
 
-  it("uses the configured platform id when PLATFORM_ID is set", () => {
-    const { agent, sql } = makeAgent({ PLATFORM_ID: "acme-platform" });
-    const stored = (agent as any).recordAudit("async_job.queued", "orchestrator", {
+  it("uses the configured platform id when PLATFORM_ID is set", async () => {
+    const { agent, store } = makeAgent({ PLATFORM_ID: "acme-platform" });
+    const stored = await (agent as any).recordAudit("async_job.queued", "orchestrator", {
       jobId: "j1",
     });
-    const row = rows(sql).find((r) => r.id === stored.id)!;
-    expect(row.platform_id).toBe("acme-platform");
+    const row = (await store.findById(stored.id))!;
+    expect(row.platformId).toBe("acme-platform");
   });
 
-  it("stamps the turn user and trace id inside a turn", () => {
-    const { agent, sql } = makeAgent();
+  it("stamps the turn user and trace id inside a turn", async () => {
+    const { agent, store } = makeAgent();
     (agent as any).pendingTurn = {
       userLogin: "user-alice",
       traceparent: "00-aabbccddeeff00112233445566778899-0102030405060708-01",
     };
-    const stored = (agent as any).recordAudit("async_job.queued", "orchestrator", {
+    const stored = await (agent as any).recordAudit("async_job.queued", "orchestrator", {
       jobId: "j1",
     });
-    const row = rows(sql).find((r) => r.id === stored.id)!;
-    expect(row.principal_id).toBe("user-alice");
-    expect(row.trace_id).toBe("aabbccddeeff00112233445566778899");
+    const row = (await store.findById(stored.id))!;
+    expect(row.principalId).toBe("user-alice");
+    expect(row.traceId).toBe("aabbccddeeff00112233445566778899");
   });
 
-  it("an explicit caller override stamps tenant and correlation", () => {
-    const { agent, sql } = makeAgent();
-    const stored = (agent as any).recordAudit(
+  it("an explicit caller override stamps tenant and correlation", async () => {
+    const { agent, store } = makeAgent();
+    const stored = await (agent as any).recordAudit(
       "async_job.queued",
       "orchestrator",
       { jobId: "j1" },
       { tenantId: "tenant-acme", correlationId: "corr-9" },
     );
-    const row = rows(sql).find((r) => r.id === stored.id)!;
-    expect(row.tenant_id).toBe("tenant-acme");
-    expect(row.correlation_id).toBe("corr-9");
+    const row = (await store.findById(stored.id))!;
+    expect(row.tenantId).toBe("tenant-acme");
+    expect(row.correlationId).toBe("corr-9");
   });
 });
 

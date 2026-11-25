@@ -19,7 +19,9 @@ import type {
   ETradeWebhookPayload,
   TradingWebhookEvent,
   OutboundWebhookConfig,
+  AuditEvent,
 } from "../types";
+import { auditEventPort } from "../data/createAuditEventPorts";
 import { DatabaseORM } from "../orm";
 import { AGENT_DIDS, createDidAttestation } from "../agents/did";
 import { ETradeService } from "./etrade";
@@ -54,6 +56,21 @@ export class ETradeWebhookService {
     private env?: Env,
     private sessionId: string = "webhook_trading_agent"
   ) {}
+
+  /**
+   * #6102: best-effort D1 audit write. A null port (AGENT_DB
+   * unbound) skips — the old `if (this.orm?.events)` guard, moved
+   * to the port. A failed write throws; the async call sites are
+   * unguarded today (the DO create threw too), the sync callback
+   * site catches it.
+   */
+  private async writeAuditEvent(record: AuditEvent): Promise<void> {
+    const port = await auditEventPort(
+      this.env as unknown as { AGENT_DB?: unknown },
+    );
+    if (!port) return;
+    await port.create(record);
+  }
 
   /**
    * Verify HMAC-SHA256 webhook signature using Web Crypto API.
@@ -167,17 +184,16 @@ export class ETradeWebhookService {
     const price = payload.price ? Number(payload.price) : undefined;
     const orderType = payload.orderType || (price ? "LIMIT" : "MARKET");
 
-    // Persist event in SQLite for deduplication & audit trail
-    if (this.orm?.events) {
-      this.orm.events.create({
-        id: eventId,
-        sessionId: this.sessionId,
-        type: "WEBHOOK_TRADINGVIEW_ALERT",
-        agent: "webhook",
-        payload: { ...payload } as Record<string, unknown>,
-        createdAt: new Date().toISOString(),
-      });
-    }
+    // Persist event in the D1 audit log for deduplication & audit trail
+    // (#6102: awaited — the alert is recorded before drafting).
+    await this.writeAuditEvent({
+      id: eventId,
+      sessionId: this.sessionId,
+      type: "WEBHOOK_TRADINGVIEW_ALERT",
+      agent: "webhook",
+      payload: { ...payload } as Record<string, unknown>,
+      createdAt: new Date().toISOString(),
+    });
 
     // Automatically draft order in E*TRADE trading engine with Agent DID attestation
     // Issue #922 ([#913 S4]): in the live env the quote step now fails
@@ -292,17 +308,15 @@ export class ETradeWebhookService {
       }
     }
 
-    // Persist event in mas_events
-    if (this.orm?.events) {
-      this.orm.events.create({
-        id: eventId,
-        sessionId: this.sessionId,
-        type: `ETRADE_${payload.eventType}`,
-        agent: "broker_webhook",
-        payload: { ...payload } as Record<string, unknown>,
-        createdAt: now,
-      });
-    }
+    // Persist event in the D1 audit log (#6102: awaited).
+    await this.writeAuditEvent({
+      id: eventId,
+      sessionId: this.sessionId,
+      type: `ETRADE_${payload.eventType}`,
+      agent: "broker_webhook",
+      payload: { ...payload } as Record<string, unknown>,
+      createdAt: now,
+    });
 
     return {
       success: true,
@@ -379,19 +393,19 @@ export class ETradeWebhookService {
         layer: scope?.layer ?? "webhook_service",
         audit: (type, payload) => {
           scope?.audit?.(type, payload);
-          if (!scope?.audit && this.orm?.events) {
-            try {
-              this.orm.events.create({
-                id: `evt_wh_ref_${Date.now()}_${crypto.randomUUID().slice(0, 6)}`,
-                sessionId: this.sessionId,
-                type,
-                agent: "webhook",
-                payload: { ...payload },
-                createdAt: new Date().toISOString(),
-              });
-            } catch {
+          if (!scope?.audit) {
+            // #6102: the audit row writes to D1 now. This callback
+            // is sync — fire-and-forget, best-effort as before.
+            void this.writeAuditEvent({
+              id: `evt_wh_ref_${Date.now()}_${crypto.randomUUID().slice(0, 6)}`,
+              sessionId: this.sessionId,
+              type,
+              agent: "webhook",
+              payload: { ...payload },
+              createdAt: new Date().toISOString(),
+            }).catch(() => {
               // Best-effort audit persistence.
-            }
+            });
           }
         },
       });
@@ -500,13 +514,19 @@ export class ETradeWebhookService {
   }
 
   /**
-   * Retrieve recent webhook events from SQLite audit log
+   * Retrieve recent webhook events from the D1 audit log (#6102).
+   * Async now — the D1 read cannot be sync. The old DO query
+   * ordered by "timestamp DESC", a column the table never had;
+   * the D1 read orders by "created_at DESC".
    */
-  getRecentWebhookEvents(limit: number = 20): any[] {
-    if (!this.orm?.events) return [];
-    return this.orm.events.findMany({
+  async getRecentWebhookEvents(limit: number = 20): Promise<any[]> {
+    const port = await auditEventPort(
+      this.env as unknown as { AGENT_DB?: unknown },
+    );
+    if (!port) return [];
+    return port.findMany({
       where: { agent: "webhook" },
-      orderBy: "timestamp DESC",
+      orderBy: "created_at DESC",
       limit,
     });
   }

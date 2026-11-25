@@ -57,6 +57,11 @@ import {
 } from "../src/trading/options/discoveryRunStore";
 import { __resetTokenCache } from "../src/security/etradeTokenCache";
 import { MockSqlStorage } from "./mock-sql";
+import { MockD1Database } from "./mock-d1";
+import {
+  createD1AuditEventDb,
+  D1AuditEventStore,
+} from "../src/data/d1AuditEventAdapter";
 import type { Env, ETradeOptionChain } from "../src/types";
 import type { StrategyRequest } from "../src/trading/options/strategyEngine";
 
@@ -279,12 +284,35 @@ class FakeDiscoverySql implements DiscoverySqlExecutor {
 }
 
 function makeEnv(): Env {
+  // #6102: audit rows land in D1 now — each makeEnv() builds a
+  // fresh mock (a shared env would share the memoized port across
+  // tests). The store is stashed module-level so the service
+  // constructions below, which build their own env, can hand it
+  // back to the test for the D1 read.
+  const d1Mock = new MockD1Database();
+  lastAuditStore = new D1AuditEventStore(createD1AuditEventDb(d1Mock as never));
   return {
     ETRADE_ENVIRONMENT: "sandbox",
     ETRADE_SANDBOX_BASE_URL: "https://apisb.etrade.com",
     ETRADE_SANDBOX_CONSUMER_KEY: "mock_consumer_key",
     ETRADE_SANDBOX_CONSUMER_SECRET: "mock_consumer_secret",
+    AGENT_DB: d1Mock as any,
   } as unknown as Env;
+}
+
+// The service's audit() helper stays sync and fire-and-forgets the
+// D1 write, so poll briefly until the row lands instead of
+// asserting a race. Payload reads back as the stored JSON TEXT.
+let lastAuditStore: D1AuditEventStore | null = null;
+async function waitForAuditEvents(type: string, expected = 1) {
+  const store = lastAuditStore!;
+  let rows: any[] = [];
+  for (let i = 0; i < 50; i++) {
+    rows = await store.findMany({ where: { type } });
+    if (rows.length >= expected) break;
+    await new Promise((r) => setTimeout(r, 20));
+  }
+  return rows;
 }
 
 /** Loose ORM double: `trades` present so ETradeService treats it as
@@ -459,9 +487,9 @@ describe("ScheduledTasksService.autonomousStrategyDiscovery (#126)", () => {
     expect(stored!.outcomes[0].snapshot?.dataSource).toBe("live");
 
     // #112 surfacing on success: completion audit + session message.
-    expect(orm.events.create).toHaveBeenCalledWith(
-      expect.objectContaining({ type: "options.strategy_discovery_completed" })
-    );
+    // The audit row lives in D1 now (#6102); the write fire-and-forgets.
+    const completed = await waitForAuditEvents("options.strategy_discovery_completed");
+    expect(completed).toHaveLength(1);
     expect(orm.messages.create).toHaveBeenCalledWith(
       expect.objectContaining({ content: expect.stringContaining("Scheduled Strategy Discovery completed") })
     );
@@ -519,9 +547,10 @@ describe("ScheduledTasksService.autonomousStrategyDiscovery (#126)", () => {
     expect(stored!.outcomes[0].status).toBe("failed");
     expect(stored!.outcomes[0].error).toBeTruthy();
 
-    expect(orm.events.create).toHaveBeenCalledWith(
-      expect.objectContaining({ type: "options.strategy_discovery_failed" })
-    );
+    // The failure audit row lives in D1 now (#6102); the write
+    // fire-and-forgets.
+    const failed = await waitForAuditEvents("options.strategy_discovery_failed");
+    expect(failed).toHaveLength(1);
     expect(orm.messages.create).toHaveBeenCalledWith(
       expect.objectContaining({ content: expect.stringContaining("Scheduled Strategy Discovery failed") })
     );
@@ -535,9 +564,10 @@ describe("ScheduledTasksService.autonomousStrategyDiscovery (#126)", () => {
     expect(result.success).toBe(false);
     expect(result.error).toContain("No authenticated E*TRADE account");
     expect(await store.list({})).toHaveLength(0);
-    expect(orm.events.create).toHaveBeenCalledWith(
-      expect.objectContaining({ type: "options.strategy_discovery_failed" })
-    );
+    // No discovery run persisted — but the failure itself is still
+    // audited, now to D1 (#6102); the write fire-and-forgets.
+    const failed = await waitForAuditEvents("options.strategy_discovery_failed");
+    expect(failed).toHaveLength(1);
   });
 
   it("rejects empty and malformed saved-request payloads, persisting nothing", async () => {

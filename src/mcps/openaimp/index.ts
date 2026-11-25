@@ -22,6 +22,7 @@ import {
 } from "../../data/createUsageEventMirrorPorts";
 import { mergeMeterRows } from "../../data/d1UsageEventMirrorAdapter";
 import { McpToolFactory } from "./commands";
+import { auditEventPort } from "../../data/createAuditEventPorts";
 import { createObservabilitySink } from "../../observability/createObservabilityPorts";
 import type { ObservabilitySink } from "../../observability/observabilityPorts";
 import type { McpPrincipal, ToolPermissionPort } from "./mcpPermissionPorts";
@@ -411,7 +412,14 @@ export async function readMCPResource(
       };
     }
     case "sqlite://audit/recent": {
-      const events = orm.events.findMany({ where: { sessionId }, orderBy: "created_at DESC", limit: 30 });
+      // #6102: the event log lives in D1 now; without a bound
+      // AGENT_DB the resource reads empty (never the frozen DO rows).
+      const port = await auditEventPort(
+        context.env as unknown as { AGENT_DB?: unknown },
+      );
+      const events = port
+        ? await port.findMany({ where: { sessionId }, orderBy: "created_at DESC", limit: 30 })
+        : [];
       return {
         uri,
         mimeType: "application/json",

@@ -9,7 +9,7 @@
  */
 
 import type { IAuditObserver, IAuditPublisher, AuditEvent } from "./interfaces";
-import type { DatabaseORM } from "../orm";
+import { auditEventPort } from "../data/createAuditEventPorts";
 import { createStructuredLogger } from "../observability/structuredLogger";
 import { createObservabilitySink } from "../observability/createObservabilityPorts";
 
@@ -59,27 +59,36 @@ export class AuditEventPublisher implements IAuditPublisher {
 }
 
 /**
- * Concrete Observer: Persists audit events into SQLite via DatabaseORM
+ * Concrete Observer: Persists audit events into D1 via the async
+ * audit event port (#6102 — the DO mas_events table is frozen at
+ * cutover; new rows land in D1). The observer interface is sync,
+ * so the D1 write fire-and-forgets: a failed write warns and never
+ * fails or blocks the publisher, and no waitUntil exists at the
+ * construction sites (facade) to register the write on.
  */
-export class SqliteAuditObserver implements IAuditObserver {
-  constructor(private orm: DatabaseORM) {}
+export class D1AuditObserver implements IAuditObserver {
+  constructor(private env: { AGENT_DB?: unknown } | undefined) {}
 
   onAuditEvent(event: AuditEvent): void {
-    try {
-      this.orm.events.create({
-        id: event.id,
-        sessionId: event.sessionId,
-        type: event.type,
-        agent: (event.agent as any) || "orchestrator",
-        payload: (event.payload as any) || {},
-        createdAt: event.timestamp,
-      });
-    } catch (err) {
-      structuredLog.warn("audit.sqlite_record_failed", {
-        message: "SqliteAuditObserver failed to record event",
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
+    void (async () => {
+      try {
+        const port = await auditEventPort(this.env);
+        if (!port) return;
+        await port.create({
+          id: event.id,
+          sessionId: event.sessionId,
+          type: event.type,
+          agent: (event.agent as any) || "orchestrator",
+          payload: (event.payload as any) || {},
+          createdAt: event.timestamp,
+        });
+      } catch (err) {
+        structuredLog.warn("audit.d1_record_failed", {
+          message: "D1AuditObserver failed to record event",
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    })();
   }
 }
 

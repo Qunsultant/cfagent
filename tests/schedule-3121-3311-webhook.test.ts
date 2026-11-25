@@ -45,6 +45,13 @@ vi.mock("../src/services/auditTamperAlert", () => ({
     reason: null,
     alertRecorded: false,
   })),
+  // #6102: the route's fallback verifier is the D1 twin now.
+  verifyStoredAuditChainAndAlertD1: vi.fn(async () => ({
+    valid: true,
+    brokenIndex: null,
+    reason: null,
+    alertRecorded: false,
+  })),
 }));
 vi.mock("../src/security/etradeOAuth", () => ({
   getStoredTokens: vi.fn(),

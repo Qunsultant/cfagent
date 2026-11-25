@@ -75,10 +75,11 @@ import {
 // type; recording never changes a response.
 import {
   recordScheduledJobOutcome,
-  scheduledJobOutcomeStoreFromOrmEvents,
+  scheduledJobOutcomeStoreFromAuditEvents,
   type ScheduledJobOutcomeInput,
 } from "../../observability/scheduledJobOutcomes";
 import { parseTraceparent } from "../../observability/observabilityPorts";
+import { auditEventPort } from "../../data/createAuditEventPorts";
 import { createObservabilitySink } from "../../observability/createObservabilityPorts";
 import { createStructuredLogger } from "../../observability/structuredLogger";
 
@@ -211,10 +212,10 @@ async function recordCorpusSyncOutcome(
   try {
     await recordScheduledJobOutcome(
       {
-        store: scheduledJobOutcomeStoreFromOrmEvents(() => {
-          const orm = ctx.getOrm?.();
-          return orm?.events ?? null;
-        }, sessionId),
+        store: scheduledJobOutcomeStoreFromAuditEvents(
+          () => auditEventPort(ctx.env as unknown as { AGENT_DB?: unknown }),
+          sessionId,
+        ),
         alert: async (text: string) => {
           await postSlackText({
             post: resourceSlackPost,

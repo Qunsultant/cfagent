@@ -1026,6 +1026,100 @@ const MARKETPLACE_ENTRIES: DmlCatalogueEntry[] = [
 ];
 
 /* ------------------------------------------------------------------ */
+/* mas_events — D1AuditEventStore (#6102)                               */
+/* ------------------------------------------------------------------ */
+
+/**
+ * #6102 — the nullable-string param: envelope columns and the
+ * expected tail are explicitly null (never undefined, never
+ * invented — the #6100 rule), so the thunk requires the key and
+ * accepts a string or null.
+ */
+function reqNullableString(params: DmlParams, name: string): string | null {
+  const value = params[name];
+  if (value !== null && typeof value !== "string") {
+    throw new Error(`DML param "${name}" must be a string or null`);
+  }
+  return value as string | null;
+}
+
+/**
+ * #6102 — the chained insert: one statement that inserts only
+ * while the tail is still the tail the caller read. The WHERE
+ * clause compares the live tail (rowid order) against the
+ * expected tail with IS, so genesis works too: an empty table's
+ * tail subquery is NULL, and NULL IS NULL. When another writer
+ * lands first the WHERE matches nothing, the statement writes 0
+ * rows (meta.changes 0), and the adapter re-reads the tail and
+ * retries — the cross-instance no-fork mechanism. A duplicate id
+ * throws (PRIMARY KEY), never a silent 0.
+ */
+function masEventsInsertChained(params: DmlParams): SQL {
+  const id = reqString(params, "id");
+  const sessionId = reqString(params, "sessionId");
+  const type = reqString(params, "type");
+  const agent = reqString(params, "agent");
+  const payload = reqString(params, "payload");
+  const createdAt = reqString(params, "createdAt");
+  const previousEventHash = reqNullableString(params, "previousEventHash");
+  const eventHash = reqString(params, "eventHash");
+  const platformId = reqNullableString(params, "platformId");
+  const tenantId = reqNullableString(params, "tenantId");
+  const principalId = reqNullableString(params, "principalId");
+  const correlationId = reqNullableString(params, "correlationId");
+  const traceId = reqNullableString(params, "traceId");
+  const expectedTail = reqNullableString(params, "expectedTail");
+  return sql`INSERT INTO mas_events (id, session_id, type, agent, payload, created_at, previous_event_hash, event_hash, platform_id, tenant_id, principal_id, correlation_id, trace_id) SELECT ${id}, ${sessionId}, ${type}, ${agent}, ${payload}, ${createdAt}, ${previousEventHash}, ${eventHash}, ${platformId}, ${tenantId}, ${principalId}, ${correlationId}, ${traceId} WHERE (SELECT event_hash FROM mas_events ORDER BY rowid DESC LIMIT 1) IS ${expectedTail}`;
+}
+
+/** #6102 — the chain tail: the newest row's event_hash by insertion order. */
+function masEventsReadTailHash(): SQL {
+  return sql`SELECT event_hash FROM mas_events ORDER BY rowid DESC LIMIT 1`;
+}
+
+/**
+ * #6102 — the chain window for the checkpointed verifier: rows
+ * after a rowid, in insertion order. rowid is the chain's order
+ * and the builder cannot express it, so the window lives here.
+ */
+function masEventsReadChainWindow(params: DmlParams): SQL {
+  const afterRowId = reqNumber(params, "afterRowId");
+  let query = sql`SELECT rowid, id, session_id, type, agent, payload, created_at, previous_event_hash, event_hash FROM mas_events WHERE rowid > ${afterRowId} ORDER BY rowid ASC`;
+  const limit = params.limit;
+  if (typeof limit === "number" && Number.isFinite(limit)) {
+    query = sql`${query} LIMIT ${limit}`;
+  }
+  return query;
+}
+
+const MAS_EVENTS_ENTRIES: DmlCatalogueEntry[] = [
+  {
+    code: "dml.d1.mas_events.insert_chained",
+    table: "mas_events",
+    operation: "insert",
+    form: "build",
+    mode: "run",
+    build: masEventsInsertChained,
+  },
+  {
+    code: "dml.d1.mas_events.read_tail_hash",
+    table: "mas_events",
+    operation: "read",
+    form: "build",
+    mode: "all",
+    build: masEventsReadTailHash,
+  },
+  {
+    code: "dml.d1.mas_events.read_chain_window",
+    table: "mas_events",
+    operation: "read",
+    form: "build",
+    mode: "all",
+    build: masEventsReadChainWindow,
+  },
+];
+
+/* ------------------------------------------------------------------ */
 /* Fragments — SQL shapes the builder cannot express, resolved by     */
 /* code and passed into the adapter's own builder call.               */
 /* ------------------------------------------------------------------ */
@@ -1118,5 +1212,6 @@ export const DML_CATALOGUE_ENTRIES: DmlCatalogueEntry[] = [
   ...RESOURCE_ROLLUP_ENTRIES,
   ...BATCH_ENTRIES,
   ...MARKETPLACE_ENTRIES,
+  ...MAS_EVENTS_ENTRIES,
   ...FRAGMENT_ENTRIES,
 ];

@@ -22,6 +22,11 @@ import { ETradeService } from "../src/services/etrade";
 import { OptionsDataAgent } from "../src/trading/options/optionsDataAgent";
 import { InMemoryDiscoveryRunStore } from "../src/trading/options/discoveryRunStore";
 import { __resetTokenCache } from "../src/security/etradeTokenCache";
+import { MockD1Database } from "./mock-d1";
+import {
+  createD1AuditEventDb,
+  D1AuditEventStore,
+} from "../src/data/d1AuditEventAdapter";
 import type { Env, ETradeOptionChain } from "../src/types";
 import type { StrategyRequest } from "../src/trading/options/strategyEngine";
 import type { OptionsDataSnapshot } from "../src/trading/options/optionsDataAgent";
@@ -466,7 +471,13 @@ describe("ScheduledTasksService snapshot-input discovery (#1236)", () => {
       loadParams: { symbol: "ZZZZ", minDte: 1, maxDte: 365 }, nowIso: "2026-10-20T05:00:02.000Z",
     });
     const runStore = new InMemoryDiscoveryRunStore({ idFactory: () => "run-feed-stale" });
-    const service = new ScheduledTasksService(makeEnv(), orm, USER, undefined, undefined, runStore, undefined, undefined, undefined, feedStore);
+    // #6102: the stale-artifact audit row lands in D1 now, via the
+    // service's sync audit() helper — fire-and-forget — so the
+    // service gets a fresh env carrying a fresh MockD1Database and
+    // the row is polled for briefly instead of asserted as a race.
+    const d1Mock = new MockD1Database();
+    const d1Store = new D1AuditEventStore(createD1AuditEventDb(d1Mock as never));
+    const service = new ScheduledTasksService({ ...makeEnv(), AGENT_DB: d1Mock }, orm, USER, undefined, undefined, runStore, undefined, undefined, undefined, feedStore);
     const zzzzRequest: StrategyRequest = { ...VALID_REQUEST, symbol: "ZZZZ" };
     const result = await service.autonomousStrategyDiscovery({
       requests: [zzzzRequest],
@@ -479,9 +490,13 @@ describe("ScheduledTasksService snapshot-input discovery (#1236)", () => {
     expect(result.data?.status).toBe("completed");
     const stored = await runStore.get("run-feed-stale", { userLogin: USER });
     expect(stored!.outcomes[0].snapshotInput).toMatchObject({ artifactId, stale: true });
-    expect(orm.events.create).toHaveBeenCalledWith(
-      expect.objectContaining({ type: "options.strategy_discovery_snapshot_stale" })
-    );
+    let staleEvents: Awaited<ReturnType<typeof d1Store.findMany>> = [];
+    for (let i = 0; i < 50; i++) {
+      staleEvents = await d1Store.findMany({ where: { type: "options.strategy_discovery_snapshot_stale" } });
+      if (staleEvents.length === 1) break;
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    expect(staleEvents).toHaveLength(1);
   });
 
   it("fails honestly when snapshotInput is named but no feed store is wired", async () => {

@@ -23,6 +23,11 @@ import {
 import { ScheduledTasksService } from "../src/services/scheduledTasks";
 import { DatabaseORM } from "../src/orm";
 import { MockSqlStorage } from "./mock-sql";
+import { MockD1Database } from "./mock-d1";
+import {
+  createD1AuditEventDb,
+  D1AuditEventStore,
+} from "../src/data/d1AuditEventAdapter";
 import type { Env } from "../src/types";
 import type { GoalDrivenScreenResult } from "../src/services/goalDrivenScreen";
 import { STOCK_SCREENING_PROVIDER_ID } from "../src/trading/screeningProvider";
@@ -95,6 +100,11 @@ describe("POST /screening/goal-screen async flag (#1996)", () => {
     const sql = new MockSqlStorage();
     const orm = new DatabaseORM(sql as any);
     const settings = new Map<string, string>();
+    // #6102: the route's audit rows land in D1 now — one fresh mock
+    // per call (routeCtx is called once per test, so this is fresh
+    // per test; a shared env would share the memoized port).
+    const d1Mock = new MockD1Database();
+    const d1Store = new D1AuditEventStore(createD1AuditEventDb(d1Mock as never));
     const ctx = {
       getScreenerAgent: vi.fn(() => agent),
       getScreenerExecutionContext: vi.fn(async () => ({ userLogin: "alice" })),
@@ -106,9 +116,9 @@ describe("POST /screening/goal-screen async flag (#1996)", () => {
       // Issue #1997: the #1996 opt-in path is flag-gated, so
       // these tests run with the flag ON (the flag-OFF direct
       // behavior is pinned in goal_workflow_flag_1997.test.ts).
-      env: { FEATURE_FLAGS: JSON.stringify({ goal_workflow: true }) },
+      env: { FEATURE_FLAGS: JSON.stringify({ goal_workflow: true }), AGENT_DB: d1Mock },
     } as unknown as ScreenerResearchRouteContext;
-    return { ctx, orm };
+    return { ctx, orm, d1Store };
   }
 
   it("returns 202 with the run handle and never runs the screen inline", async () => {
@@ -183,7 +193,7 @@ describe("POST /screening/goal-screen async flag (#1996)", () => {
   it("a manual async submit leaves a session-principal audit row (#1999)", async () => {
     mockedStart.mockResolvedValue(HANDLE as never);
     const agent = { runGoalScreen: vi.fn() };
-    const { ctx, orm } = routeCtx(agent);
+    const { ctx, d1Store } = routeCtx(agent);
     const res = await handleScreenerResearchRoutes(
       req("POST", "/screening/goal-screen", { goalKind: "income", async: true }, { "x-user-login": "alice" }),
       urlOf("/screening/goal-screen"),
@@ -192,7 +202,8 @@ describe("POST /screening/goal-screen async flag (#1996)", () => {
       ctx,
     );
     expect(res!.status).toBe(202);
-    const rows = orm.events.findMany({ where: { type: "goal_screen.workflow_submitted" } });
+    // #6102: the route awaits the D1 port.create — direct read.
+    const rows = await d1Store.findMany({ where: { type: "goal_screen.workflow_submitted" } });
     expect(rows).toHaveLength(1);
     expect(rows[0].sessionId).toBe("alice");
     // Issue #2178 S1: payloads are stored as JSON text (the #1968 read
@@ -208,7 +219,7 @@ describe("POST /screening/goal-screen async flag (#1996)", () => {
   it("a manual start failure leaves a session-principal run_failed audit row (#1999)", async () => {
     mockedStart.mockRejectedValue(new WorkflowError("start_failed", "binding boom"));
     const agent = { runGoalScreen: vi.fn() };
-    const { ctx, orm } = routeCtx(agent);
+    const { ctx, d1Store } = routeCtx(agent);
     const res = await handleScreenerResearchRoutes(
       req("POST", "/screening/goal-screen", { goalKind: "income", async: true }, { "x-user-login": "alice" }),
       urlOf("/screening/goal-screen"),
@@ -217,7 +228,8 @@ describe("POST /screening/goal-screen async flag (#1996)", () => {
       ctx,
     );
     expect(res!.status).toBe(500);
-    const rows = orm.events.findMany({ where: { type: "goal_screen.run_failed" } });
+    // #6102: the route awaits the D1 port.create — direct read.
+    const rows = await d1Store.findMany({ where: { type: "goal_screen.run_failed" } });
     expect(rows).toHaveLength(1);
     expect(rows[0].sessionId).toBe("alice");
     // Issue #2178 S1: stored payload is JSON text — see the test above.

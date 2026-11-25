@@ -25,6 +25,11 @@ import { ETradeRestClient } from "../src/trading/etrade/client";
 import type { NasdaqStockListing } from "../src/services/nasdaqListings";
 import { ETradeService } from "../src/services/etrade";
 import { DatabaseORM } from "../src/orm";
+import { MockD1Database } from "./mock-d1";
+import {
+  createD1AuditEventDb,
+  D1AuditEventStore,
+} from "../src/data/d1AuditEventAdapter";
 import { planNLQ, executeNLQQueryAsync } from "../src/agents/nlq";
 import { ETradeVoiceTradingService } from "../src/trading/voice/agent";
 import type { Env, ETradeOptionChain } from "../src/types";
@@ -872,7 +877,12 @@ describe("Options Scanner & Watchlist Capability Suite", () => {
   // =========================================================================
   describe("ETradeService & Durable SQLite Watchlist Persistence", () => {
     it("durably saves screener results as a watchlist in local SQLite and records audit event", async () => {
-      const etrade = new ETradeService(orm, mockEnv, "trader_alice");
+      // #6102: the audit row lands in D1 now — a fresh mock per test
+      // (the port is memoized per env object) and the write is
+      // awaited by saveScanAsWatchlist, so read the store directly.
+      const d1Mock = new MockD1Database();
+      const d1Store = new D1AuditEventStore(createD1AuditEventDb(d1Mock as never));
+      const etrade = new ETradeService(orm, { ...mockEnv, AGENT_DB: d1Mock } as Env, "trader_alice");
 
       // Mock client createWatchlist so it simulates successful API call
       vi.spyOn(etrade.client, "createWatchlist").mockResolvedValue({
@@ -894,8 +904,9 @@ describe("Options Scanner & Watchlist Capability Suite", () => {
       expect(savedInDb).not.toBeNull();
       expect(JSON.parse(savedInDb!.symbolsJson)).toEqual(["NVDA", "PLTR", "AVGO"]);
 
-      // Verify audit event recorded
-      const events = orm.events.findMany({ where: { type: "WATCHLIST_SAVED" } });
+      // Verify audit event recorded (#6102: in D1, payload reads back
+      // as the stored JSON TEXT string — parse it as before).
+      const events = await d1Store.findMany({ where: { type: "WATCHLIST_SAVED" } });
       expect(events.length).toBeGreaterThan(0);
       // #2178 S1: stored payload is JSON text — parse the stored form.
       expect((JSON.parse(events[0].payload as unknown as string) as any).name).toBe("Tech Momentum");

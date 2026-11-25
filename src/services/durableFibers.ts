@@ -19,9 +19,10 @@
  *   (issue #135 — previews were previously counted as fills)
  */
 
-import type { Env, FiberExecutionRecord, TWAPOrderConfig } from "../types";
+import type { Env, FiberExecutionRecord, TWAPOrderConfig, AuditEvent } from "../types";
 import { DatabaseORM } from "../orm";
 import { AGENT_DIDS } from "../agents/did";
+import { auditEventPort } from "../data/createAuditEventPorts";
 
 export type FiberCheckpointErrorCode =
   | "fiber_checkpoint_corrupt"
@@ -104,8 +105,8 @@ export class DurableFiberContext {
     public readonly restoredStash: Record<string, any> = {}
   ) {}
 
-  stash(data: Record<string, any>): void {
-    this.service.updateFiberStash(this.fiberId, data);
+  async stash(data: Record<string, any>): Promise<void> {
+    await this.service.updateFiberStash(this.fiberId, data);
   }
 }
 
@@ -184,6 +185,21 @@ export class ETradeDurableFiberService {
   }
 
   /**
+   * #6102: best-effort D1 audit write for the fiber lifecycle rows
+   * (FIBER_STARTED / FIBER_RESUMED / FIBER_CHECKPOINT). A null port
+   * (AGENT_DB unbound) skips — the old `if (this.orm?.events)`
+   * guard, moved to the port. A failed write throws: a checkpoint
+   * must be durable before the fiber proceeds.
+   */
+  private async writeAuditEvent(record: AuditEvent): Promise<void> {
+    const port = await auditEventPort(
+      this.env as unknown as { AGENT_DB?: unknown },
+    );
+    if (!port) return;
+    await port.create(record);
+  }
+
+  /**
    * Load the durable state of a prior incarnation of the run
    * `fiberId` from the event log (issue #2763). Returns the record to
    * seed this incarnation from, or null when the identity has never
@@ -191,33 +207,75 @@ export class ETradeDurableFiberService {
    * own durable chain is unreadable (corrupt) or names a different
    * run (mismatch) — never a silent fresh start.
    *
+   * #6102: D1-first. New checkpoints land in D1; a run started
+   * pre-cutover holds its checkpoints in the DO table, so when D1
+   * has no rows for this identity the DO table is read as a
+   * fallback (precise by anchor id; the fallback dies when the DO
+   * table drains — no new DO rows are ever written).
+   *
    * Identity isolation is structural: rows are selected by this
    * session's id and by the session-scoped checkpoint event-id
    * anchor (see eventAnchor), so another run's or another session's
    * checkpoints are never candidates.
    */
-  private loadRunCheckpoint(
+  private async loadRunCheckpoint(
     fiberId: string,
     name: string,
     totalSteps: number
-  ): { seed: FiberExecutionRecord; resumedFromStep: number } | null {
+  ): Promise<{ seed: FiberExecutionRecord; resumedFromStep: number } | null> {
+    const anchor = this.eventAnchor(fiberId);
+    const port = await auditEventPort(
+      this.env as unknown as { AGENT_DB?: unknown },
+    );
+    if (port) {
+      const checkpointRows = await port.findMany({
+        where: { sessionId: this.sessionId, type: "FIBER_CHECKPOINT" },
+      });
+      const mine = checkpointRows.filter(
+        (row) => typeof row.id === "string" && row.id.startsWith(`evt_${anchor}_s`)
+      );
+      if (mine.length > 0) {
+        return this.checkpointFromRows(fiberId, name, totalSteps, mine, null);
+      }
+      const startedRow = await port.findById(`evt_${anchor}`);
+      if (startedRow && startedRow.sessionId === this.sessionId) {
+        return this.checkpointFromRows(fiberId, name, totalSteps, [], startedRow);
+      }
+      // No D1 rows for this identity — fall through to the DO table.
+    }
     if (!this.orm?.events) return null;
     const events = this.orm.events;
-
-    const anchor = this.eventAnchor(fiberId);
     const checkpointRows = events.findMany({
       where: { sessionId: this.sessionId, type: "FIBER_CHECKPOINT" },
     });
     const mine = checkpointRows.filter(
       (row) => typeof row.id === "string" && row.id.startsWith(`evt_${anchor}_s`)
     );
+    if (mine.length > 0) {
+      return this.checkpointFromRows(fiberId, name, totalSteps, mine, null);
+    }
+    const startedRow = events.findById(`evt_${anchor}`);
+    return this.checkpointFromRows(fiberId, name, totalSteps, [], startedRow ?? null);
+  }
 
+  /**
+   * Pure row processing for loadRunCheckpoint: given this run's
+   * checkpoint rows (possibly empty) and its FIBER_STARTED row
+   * (possibly absent), return the seed record or null. Throws
+   * FiberCheckpointError on a corrupt or mismatched chain.
+   */
+  private checkpointFromRows(
+    fiberId: string,
+    name: string,
+    totalSteps: number,
+    mine: Array<{ id: string; payload: unknown }>,
+    startedRow: { sessionId: string; payload: unknown } | null
+  ): { seed: FiberExecutionRecord; resumedFromStep: number } | null {
     if (mine.length === 0) {
       // No checkpoints yet: a FIBER_STARTED under this identity means
       // a previous incarnation died before its first checkpoint. The
       // run restarts from step 0 under the same identity — nothing was
       // checkpointed, so nothing can be double-executed.
-      const startedRow = events.findById(`evt_${anchor}`);
       if (!startedRow || startedRow.sessionId !== this.sessionId) return null;
       const started = parseStoredRecord(startedRow.payload);
       if (!started || started.fiberId !== fiberId) {
@@ -306,7 +364,7 @@ export class ETradeDurableFiberService {
     let record: FiberExecutionRecord;
 
     const prior =
-      runId !== undefined ? this.loadRunCheckpoint(fiberId, name, totalSteps) : null;
+      runId !== undefined ? await this.loadRunCheckpoint(fiberId, name, totalSteps) : null;
     if (prior) {
       recovered = true;
       resumedFromStep = prior.resumedFromStep;
@@ -331,11 +389,14 @@ export class ETradeDurableFiberService {
     }
     this.activeFibers.set(fiberId, record);
 
-    // Save in SQLite events table for durability across worker restarts
-    if (this.orm?.events) {
+    // Save in the D1 event log for durability across worker restarts
+    // (#6102: the lifecycle rows write to D1 now, awaited — a run
+    // must not proceed until its FIBER_STARTED / FIBER_RESUMED row
+    // is durable).
+    {
       const anchor = this.eventAnchor(fiberId);
       if (recovered) {
-        this.orm.events.create({
+        await this.writeAuditEvent({
           id: `evt_${anchor}_resumed_${Date.now()}_${crypto.randomUUID().slice(0, 6)}`,
           sessionId: this.sessionId,
           type: "FIBER_RESUMED",
@@ -344,7 +405,7 @@ export class ETradeDurableFiberService {
           createdAt: now,
         });
       } else {
-        this.orm.events.create({
+        await this.writeAuditEvent({
           id: `evt_${anchor}`,
           sessionId: this.sessionId,
           type: "FIBER_STARTED",
@@ -386,25 +447,26 @@ export class ETradeDurableFiberService {
   }
 
   /**
-   * Stash intermediate progress data
+   * Stash intermediate progress data. Async (#6102): the checkpoint
+   * row must be durable before the fiber proceeds — a step is only
+   * ever skipped after its checkpoint was written, so callers await
+   * this (via ctx.stash).
    */
-  updateFiberStash(fiberId: string, data: Record<string, any>): void {
+  async updateFiberStash(fiberId: string, data: Record<string, any>): Promise<void> {
     const record = this.activeFibers.get(fiberId);
     if (record) {
       record.stashedData = { ...record.stashedData, ...data };
       record.currentStep++;
       record.updatedAt = new Date().toISOString();
 
-      if (this.orm?.events) {
-        this.orm.events.create({
-          id: `evt_${this.eventAnchor(fiberId)}_s${record.currentStep}`,
-          sessionId: this.sessionId,
-          type: "FIBER_CHECKPOINT",
-          agent: "durable_execution",
-          payload: JSON.parse(JSON.stringify(record)),
-          createdAt: record.updatedAt,
-        });
-      }
+      await this.writeAuditEvent({
+        id: `evt_${this.eventAnchor(fiberId)}_s${record.currentStep}`,
+        sessionId: this.sessionId,
+        type: "FIBER_CHECKPOINT",
+        agent: "durable_execution",
+        payload: JSON.parse(JSON.stringify(record)),
+        createdAt: record.updatedAt,
+      });
     }
   }
 
@@ -506,7 +568,9 @@ export class ETradeDurableFiberService {
           // Stash state checkpoint — including the previews so far and
           // the plan fingerprint, so a later incarnation can resume
           // from exactly this point and prove it is the same plan.
-          ctx.stash({
+          // Awaited: the checkpoint must be durable before the next
+          // slice runs (#6102).
+          await ctx.stash({
             sliceIndex: i + 1,
             previewedQty: totalPreviewedShares,
             lastPreview: slicePreview,

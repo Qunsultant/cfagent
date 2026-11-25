@@ -201,6 +201,7 @@ describe("DML catalogue coverage (#4384)", () => {
       agent_free_run_counts: 1,
       agent_runs_pack_balances: 2,
       agent_async_jobs: 1,
+      mas_events: 3,
     };
     for (const [table, expected] of Object.entries(counts)) {
       expect(DML_CATALOGUE.findByTable(table).length, table).toBe(expected);
@@ -224,6 +225,7 @@ describe("DML catalogue coverage (#4384)", () => {
       "dml.d1.agent_referral_codes.increment_redemption_count",
       "dml.d1.agent_free_run_counts.increment_used",
       "dml.d1.agent_async_jobs.stale_guard",
+      "dml.d1.mas_events.insert_chained",
     ]) {
       expect(DML_CATALOGUE.has(code), code).toBe(true);
     }

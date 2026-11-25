@@ -114,6 +114,11 @@ vi.mock("agents", () => {
 });
 import { OrchestratorAgent } from "../src/agents/orchestrator";
 import type { Env } from "../src/types";
+import { MockD1Database } from "./mock-d1";
+import {
+  createD1AuditEventDb,
+  D1AuditEventStore,
+} from "../src/data/d1AuditEventAdapter";
 
 
 /**
@@ -141,10 +146,28 @@ import type { Env } from "../src/types";
 describe("Scheduled job failure semantics (#112)", () => {
   let env: Env;
   const sessionId = "failure_semantics_trader";
+  // #6102: audit rows land in D1 now — one fresh mock + store per
+  // test (a shared env would share the memoized port across tests).
+  let auditStore: D1AuditEventStore;
+
+  // The service's audit() helper stays sync and fire-and-forgets
+  // the D1 write, so poll briefly until the row lands instead of
+  // asserting a race. Payload reads back as the stored JSON TEXT.
+  async function waitForAuditEvents(type: string, expected = 1) {
+    let rows: any[] = [];
+    for (let i = 0; i < 50; i++) {
+      rows = await auditStore.findMany({ where: { type } });
+      if (rows.length >= expected) break;
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    return rows;
+  }
 
   beforeEach(() => {
     vi.restoreAllMocks();
     DynamicMarketScreener.setTestUniverseFixture(MOCK_TEST_UNIVERSE);
+    const d1Mock = new MockD1Database();
+    auditStore = new D1AuditEventStore(createD1AuditEventDb(d1Mock as never));
     env = {
       APP_ENV: "TEST",
       APP_BASE_URL: "https://agent.openaimp.com",
@@ -156,6 +179,7 @@ describe("Scheduled job failure semantics (#112)", () => {
       ETRADE_KV: {} as any,
       SESSIONS: {} as any,
       ORCHESTRATOR_AGENT: {} as any,
+      AGENT_DB: d1Mock as any,
       // Issue #261: ScreenerAgent mock — service delegates screening to it.
       SCREENER_AGENT: {
         idFromName: () => "mock-screener",
@@ -259,7 +283,8 @@ describe("Scheduled job failure semantics (#112)", () => {
       expect(res.error).toContain("universe fetch exploded");
 
       // The failure is audited, symmetric with options analysis.
-      const failures = orm.events.findMany({ where: { type: "screener.screen_failed" } });
+      // Audit rows live in D1 now (#6102); the write fire-and-forgets.
+      const failures = await waitForAuditEvents("screener.screen_failed");
       expect(failures.length).toBe(1);
       const payload = eventPayload(failures[0]);
       expect(payload.sector).toBe("Technology");
@@ -274,7 +299,7 @@ describe("Scheduled job failure semantics (#112)", () => {
       ).toBe(true);
 
       // No success-shaped audit event was written for the failed run.
-      expect(orm.events.findMany({ where: { type: "screener.opportunities_detected" } }).length).toBe(0);
+      expect((await auditStore.findMany({ where: { type: "screener.opportunities_detected" } })).length).toBe(0);
     });
 
     it("audits an options analysis failure AND records a failure session message naming the error", async () => {
@@ -297,7 +322,7 @@ describe("Scheduled job failure semantics (#112)", () => {
       expect(res.taskType).toBe("options_analysis");
       expect(res.error).toContain("broker chain unavailable");
 
-      const failures = orm.events.findMany({ where: { type: "options.scheduled_analysis_failed" } });
+      const failures = await waitForAuditEvents("options.scheduled_analysis_failed");
       expect(failures.length).toBe(1);
       const payload = eventPayload(failures[0]);
       expect(payload.symbols).toEqual(["AAPL", "NVDA"]);
@@ -315,7 +340,7 @@ describe("Scheduled job failure semantics (#112)", () => {
         )
       ).toBe(true);
 
-      expect(orm.events.findMany({ where: { type: "options.scheduled_analysis_completed" } }).length).toBe(0);
+      expect((await auditStore.findMany({ where: { type: "options.scheduled_analysis_completed" } })).length).toBe(0);
     });
   });
 
@@ -402,8 +427,9 @@ describe("Scheduled job failure semantics (#112)", () => {
       expect(sent[0].symbols).toEqual(["AAPL"]);
 
       // The service-level surfacing happened on the same run.
+      // Audit rows live in D1 now (#6102); the write fire-and-forgets.
       const orm = makeOrm(sql);
-      expect(orm.events.findMany({ where: { type: "options.scheduled_analysis_failed" } }).length).toBe(1);
+      expect((await waitForAuditEvents("options.scheduled_analysis_failed")).length).toBe(1);
       const messages = orm.messages.findMany({ where: { sessionId: "live_account_owner" } });
       expect(messages.some(m => m.content.includes("Scheduled Options Intelligence failed"))).toBe(true);
     });
@@ -436,7 +462,7 @@ describe("Scheduled job failure semantics (#112)", () => {
       expect(sent[0].success).toBeUndefined();
 
       const orm = makeOrm(sql);
-      expect(orm.events.findMany({ where: { type: "options.scheduled_analysis_failed" } }).length).toBe(0);
+      expect((await auditStore.findMany({ where: { type: "options.scheduled_analysis_failed" } })).length).toBe(0);
     });
 
     it("broadcasts a market screen failure as well as auditing + messaging it", async () => {
@@ -468,7 +494,7 @@ describe("Scheduled job failure semantics (#112)", () => {
       }));
 
       const orm = makeOrm(sql);
-      expect(orm.events.findMany({ where: { type: "screener.screen_failed" } }).length).toBe(1);
+      expect((await waitForAuditEvents("screener.screen_failed")).length).toBe(1);
       const messages = orm.messages.findMany({ where: { sessionId: "live_account_owner" } });
       expect(messages.some(m => m.content.includes("Scheduled Market Screen failed"))).toBe(true);
     });
@@ -567,7 +593,7 @@ describe("Scheduled job failure semantics (#112)", () => {
       expect(sent[0].success).toBeUndefined();
 
       const orm = makeOrm(sql);
-      expect(orm.events.findMany({ where: { type: "screener.screen_failed" } }).length).toBe(0);
+      expect((await auditStore.findMany({ where: { type: "screener.screen_failed" } })).length).toBe(0);
     });
 
     describe("fire-time bound-account enforcement (#5100, F3 of #5094)", () => {

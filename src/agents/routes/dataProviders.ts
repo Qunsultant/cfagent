@@ -183,7 +183,7 @@ export interface DataProviderRoutesContext {
     type: string,
     agent: string,
     payload: Record<string, unknown>
-  ): unknown;
+  ): Promise<unknown>;
   /**
    * The real verify check for a provider id; undefined = no adapter
    * wired. Optional: when the host binds none, the module default
@@ -1165,7 +1165,7 @@ export async function handleDataProviderRoutes(
             `Pipeline run ${outcome.runId} for feed job "${def.id}" settled as "${outcome.state}" before the feed pull recorded an outcome.`,
         );
       }
-      ctx.recordAudit("data_provider.feed_run", "orchestrator", {
+      await ctx.recordAudit("data_provider.feed_run", "orchestrator", {
         actor: ctx.userLogin,
         providerId: id,
         jobId: def.id,
@@ -1288,7 +1288,7 @@ export async function handleDataProviderRoutes(
         };
         await door.configurePipelineJob(jobId, { root: { schedule } });
         const next = await door.getFeedJobSurfaceStatus(jobId);
-        ctx.recordAudit("data_provider.feed_job_schedule", "orchestrator", {
+        await ctx.recordAudit("data_provider.feed_job_schedule", "orchestrator", {
           actor: ctx.userLogin,
           providerId: id,
           jobId,
@@ -1358,7 +1358,7 @@ export async function handleDataProviderRoutes(
                 : action === "cancel"
                   ? await door.cancelPipelineJob(jobId)
                   : await door.retryPipelineJob(jobId, { userLogin: ctx.userLogin });
-        ctx.recordAudit("data_provider.feed_job_action", "orchestrator", {
+        await ctx.recordAudit("data_provider.feed_job_action", "orchestrator", {
           actor: ctx.userLogin,
           providerId: id,
           jobId,
@@ -1439,7 +1439,7 @@ export async function handleDataProviderRoutes(
                 : action === "cancel"
                   ? await door.cancelPipelineJob(jobId)
                   : await door.retryPipelineJob(jobId, { userLogin: ctx.userLogin });
-        ctx.recordAudit("data_provider.enrich_job_action", "orchestrator", {
+        await ctx.recordAudit("data_provider.enrich_job_action", "orchestrator", {
           actor: ctx.userLogin,
           providerId: id,
           jobId,
@@ -1520,7 +1520,7 @@ export async function handleDataProviderRoutes(
                 : action === "cancel"
                   ? await door.cancelPipelineJob(jobId)
                   : await door.retryPipelineJob(jobId, { userLogin: ctx.userLogin });
-        ctx.recordAudit("data_provider.analyze_job_action", "orchestrator", {
+        await ctx.recordAudit("data_provider.analyze_job_action", "orchestrator", {
           actor: ctx.userLogin,
           providerId: id,
           jobId,
@@ -1601,7 +1601,7 @@ export async function handleDataProviderRoutes(
                 : action === "cancel"
                   ? await door.cancelPipelineJob(jobId)
                   : await door.retryPipelineJob(jobId, { userLogin: ctx.userLogin });
-        ctx.recordAudit("data_provider.generate_job_action", "orchestrator", {
+        await ctx.recordAudit("data_provider.generate_job_action", "orchestrator", {
           actor: ctx.userLogin,
           providerId: id,
           jobId,
@@ -1682,7 +1682,7 @@ export async function handleDataProviderRoutes(
                 : action === "cancel"
                   ? await door.cancelPipelineJob(jobId)
                   : await door.retryPipelineJob(jobId, { userLogin: ctx.userLogin });
-        ctx.recordAudit("data_provider.deliver_job_action", "orchestrator", {
+        await ctx.recordAudit("data_provider.deliver_job_action", "orchestrator", {
           actor: ctx.userLogin,
           providerId: id,
           jobId,
@@ -1804,7 +1804,7 @@ export async function handleDataProviderRoutes(
                             userLogin: ctx.userLogin,
                           })
                         : await door.cancelPipelineChainStage(jobId, stage!);
-        ctx.recordAudit("data_provider.pipeline_chain_action", "orchestrator", {
+        await ctx.recordAudit("data_provider.pipeline_chain_action", "orchestrator", {
           actor: ctx.userLogin,
           providerId: id,
           jobId,
@@ -1859,16 +1859,27 @@ export async function handleDataProviderRoutes(
       // lifecycle.ts). The audit sink and verifier binding are
       // the same either way.
       const transitionDeps = {
+        // #6102: the lifecycle sink is sync ((event) => void) and
+        // recordAudit is async (D1) — fire-and-forget with a warn on
+        // failure, never blocking the transition.
         audit: (event: ProviderLifecycleAuditEvent) => {
-          ctx.recordAudit("data_provider.lifecycle", "orchestrator", {
-            actor: event.actor,
-            providerId: event.providerId,
-            action: event.action,
-            from: event.from,
-            to: event.to,
-            outcome: event.outcome,
-            ...(event.reason ? { reason: event.reason } : {}),
-            ...(event.routeTiers ? { routeTiers: event.routeTiers } : {}),
+          void Promise.resolve(
+            ctx.recordAudit("data_provider.lifecycle", "orchestrator", {
+              actor: event.actor,
+              providerId: event.providerId,
+              action: event.action,
+              from: event.from,
+              to: event.to,
+              outcome: event.outcome,
+              ...(event.reason ? { reason: event.reason } : {}),
+              ...(event.routeTiers ? { routeTiers: event.routeTiers } : {}),
+            }),
+          ).catch((err) => {
+            structuredLog.warn("data_providers.lifecycle_audit_failed", {
+              message: `[data-providers] lifecycle audit for "${event.providerId}" failed: ${err instanceof Error ? err.message : String(err)}`,
+              providerId: event.providerId,
+              error: err instanceof Error ? err.message : String(err),
+            });
           });
         },
         verifier:

@@ -93,15 +93,17 @@ import {
 } from "../../services/consolidatedScheduling";
 import { runStorageRetention } from "../../security/storageRetention";
 import { createAuditPolicyAdapter } from "../../data/createAuditPolicyPorts";
+import { auditEventPort } from "../../data/createAuditEventPorts";
 import { pruneAuditChainForTenant } from "../../data/auditPolicyPorts";
 import { createProfileAdapter } from "../../data/createProfilePorts";
 import { createOrmPorts } from "../../data/createOrmPorts";
 import { loadIdpProfileConfig } from "../../security/idpProfileConfig";
-import { verifyStoredAuditChainAndAlert, type TamperAlertResult } from "../../services/auditTamperAlert";
+import { verifyStoredAuditChainAndAlertD1, type TamperAlertResult } from "../../services/auditTamperAlert";
 import {
-  verifyStoredAuditChainAndAlertCheckpointed,
+  verifyStoredAuditChainAndAlertCheckpointedD1,
   type CheckpointedTamperAlertResult,
 } from "../../services/auditChainVerification";
+import { settingReadFromSql, settingWriteFromSql } from "../../services/screeningFlags";
 import { createBlobStore } from "../../services/blobStoreR2Adapter";
 import { pruneJobOutcomes } from "../../services/jobOutcomes";
 import { createFeatureFlagPort } from "../../features/createFeatureFlagPort";
@@ -2812,12 +2814,27 @@ export async function handleSchedulesRoutes(
         // (position + outcome) in mas_settings, so its absence is itself
         // observable. A context without raw SQL (tests, older callers)
         // falls back to the #3156 full verify, which records no checkpoint.
+        // #6102: both paths verify the live D1 chain now. The D1 port is
+        // resolved first (a null port fails the run closed with 503 —
+        // the frozen DO chain is never verified in production again);
+        // a stored DO-chain checkpoint re-anchors from D1 genesis on
+        // the first post-cutover run (see auditChainVerification).
+        const auditEventsPort = await auditEventPort(
+          ctx.env as unknown as { AGENT_DB?: unknown },
+        );
         let auditChainVerification: TamperAlertResult | CheckpointedTamperAlertResult;
         try {
+          if (!auditEventsPort) {
+            throw new Error("audit chain verification: no audit event port (AGENT_DB unbound)");
+          }
           const auditSql = ctx.agentCtx?.storage?.sql;
           auditChainVerification = auditSql
-            ? verifyStoredAuditChainAndAlertCheckpointed(auditSql, ctx.getOrm())
-            : verifyStoredAuditChainAndAlert(ctx.getOrm());
+            ? await verifyStoredAuditChainAndAlertCheckpointedD1(
+                auditEventsPort,
+                settingReadFromSql(auditSql),
+                settingWriteFromSql(auditSql),
+              )
+            : await verifyStoredAuditChainAndAlertD1(auditEventsPort);
         } catch (err) {
           structuredLog.error("schedules.retention_tamper_alert_write_failed", {
             message: "[retention] tamper alert write failed; retention aborted:",
@@ -2846,12 +2863,23 @@ export async function handleSchedulesRoutes(
             reason: auditChainVerification.reason,
           });
         }
+        // #6102: the retention pass's summary row and D1 events prune
+        // run through the one resolved D1 audit-events port above. A null
+        // port fails the pass closed at the summary write (the route's
+        // catch returns 500) instead of silently writing to DO.
         const result = auditChainPruneSkipped
           ? { skipped: true, pruned: 0 }
-          : runStorageRetention(ctx.getOrm(), {
+          : await runStorageRetention(ctx.getOrm(), {
               retentionDays: ctx.env.MAS_MESSAGES_RETENTION_DAYS,
               eventsRetentionDays: ctx.env.MAS_EVENTS_RETENTION_DAYS,
               memoryRetentionDays: ctx.env.MAS_MEMORY_RETENTION_DAYS,
+              writeAuditEvent: async (record) => {
+                if (!auditEventsPort) {
+                  throw new Error("runStorageRetention: no audit event port (AGENT_DB unbound)");
+                }
+                await auditEventsPort.create(record);
+              },
+              auditEvents: auditEventsPort,
             });
         // #5043 (G-4): run the D1 audit-chain prune in the same nightly
         // retention pass when DO chain verification succeeded. Fails closed
@@ -2915,12 +2943,14 @@ export async function handleSchedulesRoutes(
             error: jobOutcomes.error,
           });
         }
-        const auditEvent = (type: string, payload: Record<string, unknown>) => {
+        // #6102: the leg rows write to D1 now, through the resolved
+        // port above. Best-effort as before: a missing port or a
+        // failed write is swallowed — the response fields below are
+        // the operator-visible record.
+        const auditEvent = async (type: string, payload: Record<string, unknown>) => {
           try {
-            const orm = ctx.getOrm() as unknown as {
-              events?: { create: (row: Record<string, unknown>) => void };
-            };
-            orm.events?.create({
+            if (!auditEventsPort) return;
+            await auditEventsPort.create({
               id: `retention_${crypto.randomUUID().slice(0, 8)}`,
               sessionId: "system",
               type,
@@ -2976,7 +3006,7 @@ export async function handleSchedulesRoutes(
                 },
               });
               idpProfilePrune.deleted = pruned.deleted;
-              auditEvent("RETENTION_IDP_PROFILE_PRUNE", {
+              await auditEvent("RETENTION_IDP_PROFILE_PRUNE", {
                 deleted: pruned.deleted,
                 retentionDays: config.retentionDays,
                 note: "Nightly IDP profile retention (#5160): expired profile rows for identities with no live membership.",
@@ -3057,7 +3087,7 @@ export async function handleSchedulesRoutes(
                   }
                 }
               }
-              auditEvent("RETENTION_ORPHAN_SWEEP", {
+              await auditEvent("RETENTION_ORPHAN_SWEEP", {
                 scanned: orphanSweep.scanned,
                 orphans: orphanSweep.orphans,
                 danglingRows: orphanSweep.danglingRows,
@@ -3121,7 +3151,7 @@ export async function handleSchedulesRoutes(
                 .filter((t) => t.truncated)
                 .map((t) => t.table);
               snapshot.key = key;
-              auditEvent("RETENTION_SNAPSHOT", {
+              await auditEvent("RETENTION_SNAPSHOT", {
                 tables: snapshot.tables,
                 rows: snapshot.rows,
                 truncatedTables: snapshot.truncatedTables,

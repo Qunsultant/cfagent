@@ -36,6 +36,7 @@ import {
   type OptionsStageControlOperation,
 } from "../../workflows/optionsStageControl";
 import type { DatabaseORM, SqlStorage } from "../../orm";
+import { auditEventPort } from "../../data/createAuditEventPorts";
 import type { OptionsStageStorage } from "../../workflows/optionsScreenPorts";
 import type { ScanRunStore, StrategyProfileStore } from "../../trading";
 import type { AgentScheduleItem, Env, OptionScreenResult } from "../../types";
@@ -63,16 +64,26 @@ import { createObservabilitySink } from "../../observability/createObservability
 const structuredLog = createStructuredLogger(createObservabilitySink({}), {
   component: "agents/nlq/execution",
 });
-function auditNlqExecution(
-  orm: DatabaseORM,
+/**
+ * #6102: the NLQ execution audit row writes to D1 now. Best-effort:
+ * a null port (AGENT_DB unbound) or a failed write skips silently,
+ * exactly as the old `if (!orm?.events) return` + try/catch did.
+ * Async so the async caller can await it; the sync caller
+ * fire-and-forgets (see executeNLQQuery).
+ */
+async function auditNlqExecution(
+  env: Env | undefined,
   sessionId: string,
   plan: NLQPlan,
   result: NLQQueryResult | null,
   durationMs: number,
   error?: unknown
-): void {
-  if (!orm?.events) return;
+): Promise<void> {
   try {
+    const port = await auditEventPort(
+      env as unknown as { AGENT_DB?: unknown },
+    );
+    if (!port) return;
     const payload: Record<string, unknown> = {
       domain: plan.domain,
       status: result?.status ?? "ok",
@@ -85,7 +96,7 @@ function auditNlqExecution(
       const message = error instanceof Error ? error.message : String(error);
       payload.error = message.slice(0, 200);
     }
-    orm.events.create({
+    await port.create({
       id: crypto.randomUUID(),
       sessionId,
       type: error ? "nlq.error" : "nlq.executed",
@@ -1250,10 +1261,12 @@ export function executeNLQQuery(
   const startedAt = Date.now();
   try {
     const result = executeNLQQueryCore(orm, sessionId, plan, env, userDid);
-    auditNlqExecution(orm, sessionId, plan, result, Date.now() - startedAt);
+    // Sync entry point: the D1 write must never block or fail the
+    // caller — fire-and-forget (the helper never throws).
+    void auditNlqExecution(env, sessionId, plan, result, Date.now() - startedAt);
     return result;
   } catch (err) {
-    auditNlqExecution(orm, sessionId, plan, null, Date.now() - startedAt, err);
+    void auditNlqExecution(env, sessionId, plan, null, Date.now() - startedAt, err);
     throw err;
   }
 }
@@ -1333,10 +1346,15 @@ async function executeSchedulingAction(
     );
   }
 
-  const audit = (type: string, payload: Record<string, unknown>) => {
-    if (!orm.events) return;
+  // #6102: the scheduling audit rows write to D1 now (best-effort,
+  // as before — the Scheduler itself is the source of truth).
+  const audit = async (type: string, payload: Record<string, unknown>) => {
     try {
-      orm.events.create({
+      const port = await auditEventPort(
+        env as unknown as { AGENT_DB?: unknown },
+      );
+      if (!port) return;
+      await port.create({
         id: crypto.randomUUID(),
         sessionId,
         type,
@@ -1446,7 +1464,7 @@ async function executeSchedulingAction(
         rows: [{ scheduleId, status: "NOT_FOUND", cancelledAt: executedAt }],
       };
     }
-    audit("schedule.cancelled", { scheduleId, cancelledAt: executedAt });
+    await audit("schedule.cancelled", { scheduleId, cancelledAt: executedAt });
     return {
       ...base,
       count: 1,
@@ -1681,7 +1699,7 @@ async function executeSchedulingAction(
   }
 
   if (!auditedByCapability) {
-    audit("schedule.created", {
+    await audit("schedule.created", {
       scheduleId: created.id,
       scheduleType: created.type,
       callback: created.callback,
@@ -3099,10 +3117,10 @@ export async function executeNLQQueryAsync(
   const startedAt = Date.now();
   try {
     const result = await executeNLQQueryAsyncCore(orm, sessionId, plan, env, userLogin, userDid, deps);
-    auditNlqExecution(orm, sessionId, plan, result, Date.now() - startedAt);
+    await auditNlqExecution(env, sessionId, plan, result, Date.now() - startedAt);
     return result;
   } catch (err) {
-    auditNlqExecution(orm, sessionId, plan, null, Date.now() - startedAt, err);
+    await auditNlqExecution(env, sessionId, plan, null, Date.now() - startedAt, err);
     throw err;
   }
 }

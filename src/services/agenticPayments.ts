@@ -30,7 +30,9 @@ import type {
   PaidTradingServiceDescriptor,
   PaymentRequiredCallback,
   TransactionRecord,
+  AuditEvent,
 } from "../types";
+import { auditEventPort } from "../data/createAuditEventPorts";
 import { BusinessError } from "../outcomes/outcomeAspects";
 // NOTE (issue #290): mppx/server is node-only (it imports node:util, which the
 // browser bundle cannot externalize). It is loaded lazily inside createMppx()
@@ -160,6 +162,21 @@ export class ETradeAgenticPaymentService {
   private autoApproveLimitUSD: number;
   private agentWalletAddress: string;
   private mppSecretKey?: string;
+
+  /**
+   * #6102: best-effort D1 audit write. A null port (AGENT_DB
+   * unbound) skips — the old `if (this.orm?.events)` guard, moved
+   * to the port. A failed write THROWS so each caller's own
+   * try/catch + warn still fires; the sync 402 site catches it
+   * (it cannot await). Never invents a fallback store.
+   */
+  private async writeAuditEvent(record: AuditEvent): Promise<void> {
+    const port = await auditEventPort(
+      this.env as unknown as { AGENT_DB?: unknown },
+    );
+    if (!port) return;
+    await port.create(record);
+  }
 
   constructor(
     private orm: DatabaseORM | undefined,
@@ -329,10 +346,11 @@ export class ETradeAgenticPaymentService {
     const x402HeaderVal = this.formatX402ChallengeHeader(challenge);
     const mppHeaderVal = this.formatMppChallengeHeader(mpp);
 
-    // Record challenge audit event
-    if (this.orm?.events) {
-      this.orm.events.create({
-        id: `evt_402_${Date.now()}`,
+    // Record challenge audit event. #6102: the row writes to D1
+    // now; this method is sync, so the write fire-and-forgets and
+    // can never fail the 402 response.
+    void this.writeAuditEvent({
+      id: `evt_402_${Date.now()}`,
         // Issue #183: a challenge is issued BEFORE any payment exists, so
         // in payer-bound (anonymous gateway) mode there is no verified
         // payer to scope it to yet. Key the event by the challenge's own
@@ -352,8 +370,9 @@ export class ETradeAgenticPaymentService {
           nonce: challenge.nonce,
         },
         createdAt: new Date().toISOString(),
+      }).catch(() => {
+        // Never fail the 402 response over the audit write.
       });
-    }
 
     const body = {
       error: "Payment Required",
@@ -716,23 +735,23 @@ export class ETradeAgenticPaymentService {
     // still serves — refusing a verified, metered payment over an
     // audit row would be worse than a missing audit row.
     try {
-      if (this.orm?.events) {
-        this.orm.events.create({
-          id: crypto.randomUUID(),
-          sessionId: userLogin,
-          type: "commercial.tier.decision",
-          agent: "payments",
-          payload: {
-            userLogin,
-            tier,
-            receiptId: verification.receipt.receiptId,
-            category: metered.category,
-            priceUSD,
+      // #6102: D1 audit row (see writeAuditEvent for the null-port
+      // contract); a failed write warns via the catch below.
+      await this.writeAuditEvent({
+        id: crypto.randomUUID(),
+        sessionId: userLogin,
+        type: "commercial.tier.decision",
+        agent: "payments",
+        payload: {
+          userLogin,
+          tier,
+          receiptId: verification.receipt.receiptId,
+          category: metered.category,
+          priceUSD,
             protocol: verification.receipt.protocol,
           },
           createdAt: new Date().toISOString(),
         });
-      }
     } catch (err) {
       structuredLog.warn("agenticPayments.tier_decision_audit_failed", {
         message: `[payments] tier-decision audit failed for ${resource}: ${err instanceof Error ? err.message : String(err)}`,
@@ -842,23 +861,23 @@ export class ETradeAgenticPaymentService {
     // Issue #2522: tier-decision audit. Best-effort, NEVER a gate
     // condition — same posture as the paid path.
     try {
-      if (this.orm?.events) {
-        this.orm.events.create({
-          id: crypto.randomUUID(),
-          sessionId: userLogin,
-          type: "commercial.tier.decision",
-          agent: "payments",
-          payload: {
-            userLogin,
-            tier: "Subscribed",
-            receiptId: coverageId,
-            paidVia: "subscription_included",
-            category,
-            priceUSD,
-          },
-          createdAt: new Date().toISOString(),
-        });
-      }
+      // #6102: D1 audit row (see writeAuditEvent for the null-port
+      // contract); a failed write warns via the catch below.
+      await this.writeAuditEvent({
+        id: crypto.randomUUID(),
+        sessionId: userLogin,
+        type: "commercial.tier.decision",
+        agent: "payments",
+        payload: {
+          userLogin,
+          tier: "Subscribed",
+          receiptId: coverageId,
+          paidVia: "subscription_included",
+          category,
+          priceUSD,
+        },
+        createdAt: new Date().toISOString(),
+      });
     } catch (err) {
       structuredLog.warn("agenticPayments.tier_decision_audit_failed", {
         message: `[payments] tier-decision audit failed for ${resource}: ${err instanceof Error ? err.message : String(err)}`,
@@ -1042,23 +1061,23 @@ export class ETradeAgenticPaymentService {
     // Issue #2522: tier-decision audit, same rule as the x402
     // branch — best-effort, never a gate condition.
     try {
-      if (this.orm?.events) {
-        this.orm.events.create({
-          id: crypto.randomUUID(),
-          sessionId: userLogin,
-          type: "commercial.tier.decision",
-          agent: "payments",
-          payload: {
-            userLogin,
-            tier,
-            receiptId: receipt.receiptId,
-            category: metered.category,
-            priceUSD,
-            protocol: receipt.protocol,
-          },
-          createdAt: new Date().toISOString(),
-        });
-      }
+      // #6102: D1 audit row (see writeAuditEvent for the null-port
+      // contract); a failed write warns via the catch below.
+      await this.writeAuditEvent({
+        id: crypto.randomUUID(),
+        sessionId: userLogin,
+        type: "commercial.tier.decision",
+        agent: "payments",
+        payload: {
+          userLogin,
+          tier,
+          receiptId: receipt.receiptId,
+          category: metered.category,
+          priceUSD,
+          protocol: receipt.protocol,
+        },
+        createdAt: new Date().toISOString(),
+      });
     } catch (err) {
       structuredLog.warn("agenticPayments.mpp_tier_decision_audit_failed", {
         message: `[payments] tier-decision audit failed for ${resource}: ${err instanceof Error ? err.message : String(err)}`,
@@ -1305,27 +1324,28 @@ export class ETradeAgenticPaymentService {
       this.orm.transactions.create(txRecord);
     }
 
-    if (this.orm?.events) {
-      this.orm.events.create({
-        id: `evt_pay_${Date.now()}`,
-        sessionId: stamp,
-        type: direction === "inbound" ? "AGENTIC_PAYMENT_COLLECTED" : "AGENTIC_PAYMENT_SUBMITTED",
-        agent: "trading",
-        payload: {
-          receiptId: receipt.receiptId,
-          protocol: receipt.protocol,
-          resource: receipt.resource,
-          amount: receipt.amount,
-          currency: receipt.currency,
-          payer: receipt.payer,
-          recipient: receipt.recipient,
-          txHash: receipt.txHash,
-          simulated: isSimulated,
-          direction,
-        },
-        createdAt: now,
-      });
-    }
+    // #6102: the payment audit row writes to D1 now (see
+    // writeAuditEvent for the null-port contract). No try/catch
+    // here, exactly as before: the DO create above it threw too.
+    await this.writeAuditEvent({
+      id: `evt_pay_${Date.now()}`,
+      sessionId: stamp,
+      type: direction === "inbound" ? "AGENTIC_PAYMENT_COLLECTED" : "AGENTIC_PAYMENT_SUBMITTED",
+      agent: "trading",
+      payload: {
+        receiptId: receipt.receiptId,
+        protocol: receipt.protocol,
+        resource: receipt.resource,
+        amount: receipt.amount,
+        currency: receipt.currency,
+        payer: receipt.payer,
+        recipient: receipt.recipient,
+        txHash: receipt.txHash,
+        simulated: isSimulated,
+        direction,
+      },
+      createdAt: now,
+    });
 
     return txRecord;
   }

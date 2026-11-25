@@ -80,6 +80,7 @@ import {
   type TradingIntegrationsRouteContext,
 } from "./routes/tradingIntegrations";
 import type { NLQSchedulingPort } from "./nlq/types";
+import { auditEventPort } from "../data/createAuditEventPorts";
 import type { AgentName, AuditEvent } from "../types";
 
 export class SlackAgent extends PortThink {
@@ -143,18 +144,27 @@ export class SlackAgent extends PortThink {
    * OrchestratorAgent.audit.
    */
   private audit(type: string, agent: AgentName | "judge" | "nlq" | "orchestrator", payload: Record<string, unknown>): void {
-    try {
-      this.getOrm().events.create({
-        id: crypto.randomUUID(),
-        sessionId: this.sessionKey(),
-        type,
-        agent: agent as AuditEvent["agent"],
-        payload,
-        createdAt: new Date().toISOString(),
-      });
-    } catch {
-      // Don't fail execution if audit insertion fails (orchestrator parity).
-    }
+    // #6102: the row writes to D1 now. This host's audit seam is
+    // sync and best-effort — the D1 write fire-and-forgets and can
+    // never fail or block the request (orchestrator parity).
+    void (async () => {
+      try {
+        const port = await auditEventPort(
+          this.env as unknown as { AGENT_DB?: unknown },
+        );
+        if (!port) return;
+        await port.create({
+          id: crypto.randomUUID(),
+          sessionId: this.sessionKey(),
+          type,
+          agent: agent as AuditEvent["agent"],
+          payload,
+          createdAt: new Date().toISOString(),
+        });
+      } catch {
+        // Don't fail execution if audit insertion fails (orchestrator parity).
+      }
+    })();
   }
 
   /**

@@ -28,6 +28,12 @@ import { handleAuditRoutes } from "../src/agents/routes/audit";
 import { handleMemoryResetRoutes } from "../src/agents/routes/memoryReset";
 import { handlePaymentsRoutes } from "../src/agents/routes/payments";
 import type { Env } from "../src/types";
+import { MockD1Database } from "./mock-d1";
+import {
+  createD1AuditEventDb,
+  D1AuditEventStore,
+} from "../src/data/d1AuditEventAdapter";
+import type { AuditEvent } from "../src/types";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -282,17 +288,29 @@ describe("contract: real ORM, seeded rows, shapes preserved", () => {
 
   it("GET /audit keeps session filter, payload parse, and limit clamp", async () => {
     const { sql, orm, audit } = setup();
+    // #6102: the event log lives in D1 now — seeded through the real
+    // chained store; the route passes its env to the command.
+    const mock = new MockD1Database();
+    const store = new D1AuditEventStore(createD1AuditEventDb(mock as never));
     const mk = (id: string, sessionId: string, createdAt: string) =>
-      orm.events.create({ id, sessionId, type: "t", agent: "a", payload: JSON.stringify({ k: id }), createdAt });
-    mk("e1", "s1", "t1");
-    mk("e2", "s1", "t2");
-    mk("e3", "s1", "t3");
-    mk("eX", "other", "t4");
+      store.create({
+        id,
+        sessionId,
+        type: "t",
+        agent: "a",
+        payload: JSON.stringify({ k: id }),
+        createdAt,
+      } as unknown as AuditEvent);
+    await mk("e1", "s1", "t1");
+    await mk("e2", "s1", "t2");
+    await mk("e3", "s1", "t3");
+    await mk("eX", "other", "t4");
     const ctx = {
       ensureTables: () => sql,
       getOrm: () => orm,
       audit,
       recordAudit: () => ({ id: "x", type: "t", agent: "a", payload: {}, created_at: "t" }),
+      env: { AGENT_DB: mock },
     } as never;
     const limited = await handleAuditRoutes(req("GET", "/api/audit?limit=2"), urlOf("/api/audit?limit=2"), "/api/audit", "s1", ctx);
     const limitedBody = await limited!.json();

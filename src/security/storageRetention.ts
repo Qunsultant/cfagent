@@ -8,8 +8,11 @@
  * triggers this pass through the Orchestrator agent's
  * `/schedules/trigger-retention` route. The pass deletes rows older than
  * their table's retention window, oldest first, in bounded batches, with a
- * per-run cap per table — and records one mas_events row per run summarizing
+ * per-run cap per table — and records one audit row per run summarizing
  * the work (plus a structured info event: pruning is never silent).
+ * #6102: the summary row lands in D1 (the live mas_events home) through
+ * the injected `writeAuditEvent`; the DO mas_events table is frozen at
+ * cutover and only drained here (its pre-cutover rows age out).
  *
  * Design notes:
  * - Windows are env-configurable (string or number): MAS_MESSAGES_RETENTION_DAYS
@@ -35,7 +38,9 @@
  * - mas_events — PRUNE, 365d (MAS_EVENTS_RETENTION_DAYS), nightly here (#786).
  *   Append-only audit/event log; every reader (audit route, MCP
  *   observability) is session-scoped and recent; 365d matches the run
- *   stores and preserves a year of audit history.
+ *   stores and preserves a year of audit history. #6102: the live table
+ *   is D1 (pruned through the injected port); the DO table holds only
+ *   frozen pre-cutover rows and is drained by the same pass.
  * - mas_memory — PRUNE, 365d by updated_at (MAS_MEMORY_RETENTION_DAYS),
  *   nightly here (#786). Key/value store; rows are distinct keys, so growth
  *   is key-cardinality, and a key untouched for a year is residue. (A stale
@@ -194,6 +199,8 @@
  */
 
 import type { DatabaseORM } from "../orm";
+import type { AuditEvent } from "../types";
+import type { AsyncEventLogPort } from "../data/asyncEventLogPorts";
 import { generationId, newRunId } from "../services/executionTreeIds";
 import { createStructuredLogger } from "../observability/structuredLogger";
 import {
@@ -275,6 +282,22 @@ export interface StorageRetentionOptions {
    * row (there is no "default" tenant to file it under).
    */
   userLogin?: string;
+  /**
+   * #6102 (REQUIRED): the writer for the pass's STORAGE_RETENTION
+   * summary row. The row lands in D1 through this writer — never
+   * in the DO table (fail-closed: an absent writer throws instead
+   * of silently writing to DO). The schedules route passes a
+   * D1-bound writer; tests pass a capturing writer or a D1 store.
+   */
+  writeAuditEvent: (record: AuditEvent) => Promise<void>;
+  /**
+   * #6102: the D1 audit-events port the live mas_events prune
+   * reads/deletes through. Null/absent skips ONLY the D1 prune
+   * (reported as d1EventsSkipped in the summary payload); the DO
+   * drain below still runs. The schedules route passes the same
+   * resolved port it binds the writer to.
+   */
+  auditEvents?: AsyncEventLogPort | null;
 }
 
 export interface StorageRetentionResult {
@@ -370,6 +393,38 @@ function pruneAgedRows(
 }
 
 /**
+ * Async twin of pruneAgedRows for ports whose reads/deletes return
+ * promises (the D1 audit-events port, #6102). Same loop, same
+ * oldest-first/batched/capped contract.
+ */
+async function pruneAgedRowsAsync(
+  selectAgedIds: (cutoffIso: string, limit: number) => Promise<string[]>,
+  deleteById: (id: string) => Promise<void>,
+  cutoffIso: string,
+  batchSize: number,
+  maxPerRun: number
+): Promise<{ pruned: number; capped: boolean }> {
+  let pruned = 0;
+  let capped = false;
+  for (;;) {
+    const remaining = maxPerRun - pruned;
+    if (remaining <= 0) {
+      capped = true;
+      break;
+    }
+    const limit = Math.min(batchSize, remaining);
+    const ids = await selectAgedIds(cutoffIso, limit);
+    if (ids.length === 0) break;
+    for (const id of ids) {
+      await deleteById(id);
+    }
+    pruned += ids.length;
+    if (ids.length < limit) break;
+  }
+  return { pruned, capped };
+}
+
+/**
  * Run one retention pass. Oldest rows first, batched, capped per table;
  * one mas_events audit record is written per run (even when nothing was
  * pruned, so the pass is observable). Never throws for missing data — a
@@ -379,10 +434,10 @@ function pruneAgedRows(
  * (#786), each under its own window; every other mas_* table's decision
  * is recorded in the module header.
  */
-export function runStorageRetention(
+export async function runStorageRetention(
   orm: DatabaseORM,
-  options: StorageRetentionOptions = {}
-): StorageRetentionResult {
+  options: StorageRetentionOptions
+): Promise<StorageRetentionResult> {
   const windowDays = resolveRetentionDays(options.retentionDays);
   const eventsWindowDays = resolveRetentionWindowDays(
     options.eventsRetentionDays,
@@ -447,10 +502,17 @@ export function runStorageRetention(
   // below (the row is fresh and would survive anyway; ordering keeps the
   // intent obvious). Aged STORAGE_RETENTION rows from earlier runs are
   // pruned here like any other aged event.
+  // #6102: mas_events lives in TWO homes during the drain era — the
+  // frozen DO table (pre-cutover rows, drained here so the table
+  // shrinks to nothing) and the live D1 table (pruned through the
+  // injected port). eventsPruned counts BOTH; the summary payload
+  // below splits them out.
   let eventsPruned = 0;
   let eventsCapped = false;
   let eventsSkipped = false;
   let eventsCutoffIso: string | null = null;
+  let d1EventsPruned = 0;
+  let d1EventsSkipped = false;
   if (eventsWindowDays > 0) {
     eventsCutoffIso = new Date(nowMs - eventsWindowDays * 86_400_000).toISOString();
     const r = pruneAgedRows(
@@ -462,6 +524,20 @@ export function runStorageRetention(
     );
     eventsPruned = r.pruned;
     eventsCapped = r.capped;
+    if (options.auditEvents) {
+      const d1 = await pruneAgedRowsAsync(
+        (cutoff, limit) => options.auditEvents!.idsCreatedBefore(cutoff, limit),
+        (id) => options.auditEvents!.delete(id).then(() => undefined),
+        eventsCutoffIso,
+        batchSize,
+        maxPerRun
+      );
+      d1EventsPruned = d1.pruned;
+      eventsPruned += d1.pruned;
+      eventsCapped = eventsCapped || d1.capped;
+    } else {
+      d1EventsSkipped = true;
+    }
   } else {
     eventsSkipped = true;
   }
@@ -486,7 +562,13 @@ export function runStorageRetention(
     memorySkipped = true;
   }
 
-  orm.events.create({
+  // #6102: the summary row writes to D1 through the injected writer.
+  // Fail-closed: an absent writer throws here instead of silently
+  // writing the row to the frozen DO table.
+  if (typeof options.writeAuditEvent !== "function") {
+    throw new Error("runStorageRetention requires options.writeAuditEvent (no DO fallback for the summary row)");
+  }
+  await options.writeAuditEvent({
     id: `retention_${crypto.randomUUID().slice(0, 8)}`,
     sessionId: "system",
     type: "STORAGE_RETENTION",
@@ -505,6 +587,9 @@ export function runStorageRetention(
       eventsWindowDays,
       eventsCapped,
       eventsSkipped,
+      // #6102: the live/D1 vs drain/DO split of the events prune.
+      d1EventsPruned,
+      d1EventsSkipped,
       memoryPruned,
       memoryCutoffIso,
       memoryWindowDays,

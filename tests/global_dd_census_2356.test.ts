@@ -609,7 +609,11 @@ const PORTED_TABLE_WRITERS: Record<string, { layer: string[]; bypass?: Record<st
     // holds the DELETE text — its #2489 bypass retires here.
     // The route still performs the wipe (auditConfirm-gated),
     // through the catalogue.
-    layer: ["src/data/schemaComponent/doDmlEntries.ts", "src/data/schemaComponent/ormCatalogue.ts"],
+    // #6102: the live table is D1 now — the D1 catalogue files
+    // join the layer (d1Catalogue holds the CREATE TABLE, dmlEntries
+    // holds the chained insert + tail/window reads); the DO files
+    // stay as the frozen DO table's home.
+    layer: ["src/data/schemaComponent/doDmlEntries.ts", "src/data/schemaComponent/ormCatalogue.ts", "src/data/schemaComponent/d1Catalogue.ts", "src/data/schemaComponent/dmlEntries.ts"],
   },
   mas_memory: {
     // #4386 (P6c): same move as mas_messages (see above).

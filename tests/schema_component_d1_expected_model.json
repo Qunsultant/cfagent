@@ -6079,6 +6079,76 @@
           ]
         }
       }
+    },
+    "mas_events": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "pk": 1
+        },
+        {
+          "name": "session_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "type",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "agent",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "payload",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "previous_event_hash",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "event_hash",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "platform_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "tenant_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "principal_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "correlation_id",
+          "type": "TEXT",
+          "pk": 0
+        },
+        {
+          "name": "trace_id",
+          "type": "TEXT",
+          "pk": 0
+        }
+      ],
+      "constraints": {}
     }
   },
   "indexes": {
@@ -6655,6 +6725,54 @@
         "tenant_id"
       ],
       "unique": true
+    },
+    "idx_mas_events_created": {
+      "table": "mas_events",
+      "columns": [
+        "created_at",
+        "id"
+      ],
+      "unique": false
+    },
+    "idx_mas_events_session_type": {
+      "table": "mas_events",
+      "columns": [
+        "session_id",
+        "type",
+        "created_at DESC"
+      ],
+      "unique": false
+    },
+    "idx_mas_events_tenant_created": {
+      "table": "mas_events",
+      "columns": [
+        "tenant_id",
+        "created_at DESC"
+      ],
+      "unique": false
+    },
+    "idx_mas_events_principal_created": {
+      "table": "mas_events",
+      "columns": [
+        "principal_id",
+        "created_at DESC"
+      ],
+      "unique": false
+    },
+    "idx_mas_events_type_created": {
+      "table": "mas_events",
+      "columns": [
+        "type",
+        "created_at DESC"
+      ],
+      "unique": false
+    },
+    "idx_mas_events_correlation": {
+      "table": "mas_events",
+      "columns": [
+        "correlation_id"
+      ],
+      "unique": false
     }
   }
 }

@@ -11,7 +11,7 @@
 import type { Env } from "../types";
 import type { DatabaseORM } from "../orm";
 import type { IMcpSystemFacade, IAuditPublisher } from "./interfaces";
-import { AuditEventPublisher, SqliteAuditObserver } from "./observer";
+import { AuditEventPublisher, D1AuditObserver } from "./observer";
 import { PaymentGatewayService, type CreateCheckoutParams, type CheckoutResult, type RefundParams, type RefundResult, type GatewayStatus, type SupportedGateway } from "../services/payments";
 import { createDidAttestation, getUserDid, type DidAttestationProof, AGENT_DIDS } from "../agents/did";
 import { planNLQ, executeNLQQueryAsync } from "../agents/nlq";
@@ -26,7 +26,9 @@ export class McpSystemFacade implements IMcpSystemFacade {
     public readonly sessionId: string
   ) {
     const publisher = new AuditEventPublisher(sessionId);
-    publisher.subscribe(new SqliteAuditObserver(orm));
+    // #6102: audit rows land in D1 now (the observer resolves the
+    // port from the facade's env).
+    publisher.subscribe(new D1AuditObserver(env));
     this.auditPublisher = publisher;
     this.paymentService = new PaymentGatewayService(env);
   }

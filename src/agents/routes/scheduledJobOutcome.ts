@@ -26,6 +26,7 @@ import { resolveActorAttribution } from "../../security/backgroundAttribution";
 import { getServiceUserLogin } from "../../security/serviceIdentity";
 import type { Env } from "../../types";
 import { resolveScheduledJobAlertThreshold } from "../../config/scheduledJobAlert";
+import { auditEventPort } from "../../data/createAuditEventPorts";
 import { postSlackText, resourceSlackPost } from "../resourceGoals";
 import type { SlackDeliveryEnv } from "../social/delivery";
 import {
@@ -173,7 +174,12 @@ export async function handleScheduledJobOutcomeRoute(
     },
     recentOutcomes: async (maxRows) => {
       try {
-        const rows = await ctx.getOrm().events.findMany({
+        // #6102: the outcome rows live in D1 now; a null port
+        // (AGENT_DB unbound) reads empty, exactly as the catch
+        // below does on a read failure.
+        const port = await auditEventPort(ctx.env as unknown as { AGENT_DB?: unknown });
+        if (!port) return [];
+        const rows = await port.findMany({
           where: { type: SCHEDULED_JOB_OUTCOME_TYPE },
           orderBy: "created_at DESC",
           limit: maxRows,

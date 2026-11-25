@@ -2382,3 +2382,29 @@ export const agentScreenerTaskEntries = sqliteTable("agent_screener_task_entries
   key: text("key").primaryKey(),
   value: text("value").notNull(),
 });
+
+/**
+ * Issue #6102 (migration 0089) — the D1 mas_events table: the
+ * audit event log after the DO data layer is replaced by D1.
+ * The D1 row IS the record (no projection); `payload` is the
+ * JSON text of the event payload, `previous_event_hash` /
+ * `event_hash` carry the G-5 hash chain. Columns are verbatim
+ * from the catalogued CREATE DDL (schema.d1.mas_events.
+ * create_table). This schema MAPS the table; it does not
+ * create it.
+ */
+export const masEvents = sqliteTable("mas_events", {
+  id: text("id").primaryKey(),
+  sessionId: text("session_id").notNull(),
+  type: text("type").notNull(),
+  agent: text("agent").notNull(),
+  payload: text("payload").notNull(),
+  createdAt: text("created_at").notNull(),
+  previousEventHash: text("previous_event_hash"),
+  eventHash: text("event_hash"),
+  platformId: text("platform_id"),
+  tenantId: text("tenant_id"),
+  principalId: text("principal_id"),
+  correlationId: text("correlation_id"),
+  traceId: text("trace_id"),
+});

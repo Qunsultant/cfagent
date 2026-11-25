@@ -27,6 +27,7 @@ import { DatabaseORM, type SqlStorage } from "../../orm";
 import { codedMessage, resolveOutcome } from "../../outcomes/outcomeAspects";
 import { requestInvalidResponse } from "../../api/requestValidation";
 import { runRestTool } from "./restToolBridge";
+import { auditEventPort } from "../../data/createAuditEventPorts";
 import {
   resolveAuditWriteRestSwitch,
   validateStrictAuditWrite,
@@ -61,12 +62,12 @@ export interface AuditRouteContext {
     agent: AgentName | "judge" | "nlq" | "orchestrator",
     payload: Record<string, unknown>
   ): void;
-  /** Single owner of audit-row inserts (issue #270): inserts one mas_events row. */
+  /** Single owner of audit-row inserts (issue #270): inserts one mas_events row (D1, #6102). */
   recordAudit(
     type: string,
     agent: string,
     payload: Record<string, unknown>
-  ): { id: string; type: string; agent: string; payload: Record<string, unknown>; created_at: string };
+  ): Promise<{ id: string; type: string; agent: string; payload: Record<string, unknown>; created_at: string }>;
   /** #1733: Worker env for the AUDIT_WRITE_MODE global-env level (optional — unset falls through to legacy). */
   env?: unknown;
   /** #1733: optional session/user carriers for AUDIT_WRITE_MODE (run comes from body `mode` / query `?mode=`). Populated by the execution-context owner; unset carriers fall through to env. See src/config/restTwinsModes.ts. */
@@ -210,8 +211,16 @@ export async function handleAuditRoutes(
   const detailMatch = path.match(/\/audit\/([^/]+)$/);
   if (detailMatch && detailMatch[1] !== "event" && request.method === "GET") {
     try {
-      const orm = ctx.getOrm?.() ?? new DatabaseORM(ctx.ensureTables());
-      const row = orm.events.findById(detailMatch[1]);
+      // #6102: the event log lives in D1 now; a null port (AGENT_DB
+      // unbound) fails closed — the DO table is frozen pre-cutover
+      // history and is never read back here.
+      const port = await auditEventPort(
+        ctx.env as unknown as { AGENT_DB?: unknown },
+      );
+      if (!port) {
+        return Response.json({ error: "Failed to fetch audit event", code: "FAILURE_UNEXPECTED_ERROR" }, { status: 500 });
+      }
+      const row = await port.findById(detailMatch[1]);
       if (!row || row.sessionId !== sessionId) {
         return Response.json({ error: "Not found" }, { status: 404 });
       }
@@ -263,6 +272,8 @@ export async function handleAuditRoutes(
         orm,
         sessionId,
         audit: (type, agent, payload) => ctx.audit(type, agent, payload),
+        // #6102: the command resolves the D1 event port from env.
+        env: ctx.env,
       })) as { events: Array<{ id: string; sessionId: string; type: string; agent: string; payload: string; createdAt: string }> };
 
       const parsed = out.events
@@ -357,7 +368,7 @@ export async function handleAuditRoutes(
         // #5604: the strict-validation 400 is coded; the message is unchanged.
         return requestInvalidResponse(validated.error);
       }
-      const record = ctx.recordAudit(validated.value.type, validated.value.agent, validated.value.payload);
+      const record = await ctx.recordAudit(validated.value.type, validated.value.agent, validated.value.payload);
       return Response.json(record, { status: 201 });
     } catch (err) {
       // #5606 (G-3): no raw store text reaches the client;

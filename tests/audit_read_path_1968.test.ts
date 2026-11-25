@@ -25,6 +25,12 @@ import {
   handleAuditRoutes,
   type AuditRouteContext,
 } from "../src/agents/routes/audit";
+import { MockD1Database } from "./mock-d1";
+import {
+  createD1AuditEventDb,
+  D1AuditEventStore,
+} from "../src/data/d1AuditEventAdapter";
+import type { AuditEvent } from "../src/types";
 
 const req = (method: string, path: string) =>
   new Request(`https://agent.internal${path}`, { method });
@@ -61,28 +67,83 @@ function seed(orm: DatabaseORM) {
   });
 }
 
-function ctxFor(orm: DatabaseORM, sql: MockSqlStorage): AuditRouteContext {
+function ctxFor(
+  orm: DatabaseORM,
+  sql: MockSqlStorage,
+  env: { AGENT_DB: MockD1Database },
+): AuditRouteContext {
   return {
     ensureTables: () => sql,
     getOrm: () => orm,
     audit: vi.fn(),
     recordAudit: vi.fn(),
+    env,
   } as unknown as AuditRouteContext;
+}
+
+/**
+ * #6102: the same rows in D1, through the real chained store — the
+ * route reads D1 now, so the read-path tests seed D1. The DO seed
+ * above stays for the getTableData assertions (the table browser
+ * still reads the DO table).
+ */
+async function seedD1(): Promise<{ AGENT_DB: MockD1Database }> {
+  const mock = new MockD1Database();
+  const store = new D1AuditEventStore(createD1AuditEventDb(mock as never));
+  const ev = (
+    id: string,
+    sessionId: string,
+    type: string,
+    createdAt: string,
+    payload: Record<string, unknown>,
+  ) =>
+    store.create({
+      id,
+      sessionId,
+      type,
+      agent: "orchestrator",
+      payload: JSON.stringify(payload),
+      createdAt,
+    } as unknown as AuditEvent);
+  // Awaited in order: the store serializes appends on a module-level
+  // mutex, so un-awaited seeds would still be queued behind it when
+  // the test's read runs.
+  await ev("auth-1", "s1", "etrade.auth_blocked", "2026-10-27T09:00:00Z", {
+    userLogin: "OpenAIMP",
+    kind: "options",
+    alerted: false,
+  });
+  await ev("fallback-1", "s1", "screener.run_fallback", "2026-10-27T09:30:00Z", {
+    from: "etrade",
+    reason: "etrade-auth-dead",
+  });
+  for (let i = 0; i < 60; i++) {
+    const mm = String(i).padStart(2, "0");
+    await ev(`async-${i}`, "s1", "async_job.queued", `2026-10-27T10:${mm}:00Z`, { job: i });
+  }
+  await ev("other-session-1", "s2", "etrade.auth_blocked", "2026-10-27T11:00:00Z", {
+    userLogin: "someone-else",
+    kind: "options",
+    alerted: false,
+  });
+  return { AGENT_DB: mock };
 }
 
 describe("audit read path (#1968)", () => {
   let orm: DatabaseORM;
   let sql: MockSqlStorage;
+  let env: { AGENT_DB: MockD1Database };
 
-  beforeEach(() => {
+  beforeEach(async () => {
     sql = new MockSqlStorage();
     orm = new DatabaseORM(sql);
     orm.initializeSchema("test_session_user");
     seed(orm);
+    env = await seedD1();
   });
 
   it("type filter surfaces an older matching event past the async_job flood", async () => {
-    const ctx = ctxFor(orm, sql);
+    const ctx = ctxFor(orm, sql, env);
     const res = await handleAuditRoutes(
       req("GET", "/api/audit?type=etrade.auth_blocked"),
       new URL("https://x/api/audit?type=etrade.auth_blocked"),
@@ -100,7 +161,7 @@ describe("audit read path (#1968)", () => {
   });
 
   it("event_type alias behaves like type", async () => {
-    const ctx = ctxFor(orm, sql);
+    const ctx = ctxFor(orm, sql, env);
     const res = await handleAuditRoutes(
       req("GET", "/api/audit?event_type=screener.run_fallback"),
       new URL("https://x/api/audit?event_type=screener.run_fallback"),
@@ -114,7 +175,7 @@ describe("audit read path (#1968)", () => {
   });
 
   it("before filter returns only events in the window, limit applied after", async () => {
-    const ctx = ctxFor(orm, sql);
+    const ctx = ctxFor(orm, sql, env);
     const res = await handleAuditRoutes(
       req("GET", "/api/audit?before=2026-10-27T09:15:00Z&limit=100"),
       new URL("https://x/api/audit?before=2026-10-27T09:15:00Z&limit=100"),
@@ -128,7 +189,7 @@ describe("audit read path (#1968)", () => {
   });
 
   it("after filter excludes older events and counts the full window", async () => {
-    const ctx = ctxFor(orm, sql);
+    const ctx = ctxFor(orm, sql, env);
     const res = await handleAuditRoutes(
       req("GET", "/api/audit?after=2026-10-27T09:15:00Z&limit=100"),
       new URL("https://x/api/audit?after=2026-10-27T09:15:00Z&limit=100"),
@@ -144,7 +205,7 @@ describe("audit read path (#1968)", () => {
   });
 
   it("detail endpoint returns the single event with its full payload", async () => {
-    const ctx = ctxFor(orm, sql);
+    const ctx = ctxFor(orm, sql, env);
     const res = await handleAuditRoutes(
       req("GET", "/api/audit/auth-1"),
       new URL("https://x/api/audit/auth-1"),
@@ -161,7 +222,7 @@ describe("audit read path (#1968)", () => {
   });
 
   it("detail endpoint 404s unknown ids and cross-session ids alike", async () => {
-    const ctx = ctxFor(orm, sql);
+    const ctx = ctxFor(orm, sql, env);
     const missing = await handleAuditRoutes(
       req("GET", "/api/audit/nope"),
       new URL("https://x/api/audit/nope"),

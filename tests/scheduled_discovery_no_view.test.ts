@@ -55,6 +55,11 @@ import type { NoViewStrategyRequest } from "../src/trading/options/strategyEngin
 import { __resetTokenCache } from "../src/security/etradeTokenCache";
 import { MockSqlStorage } from "./mock-sql";
 import { makeFakeSessionStore } from "./fake-session-store";
+import { MockD1Database } from "./mock-d1";
+import {
+  createD1AuditEventDb,
+  D1AuditEventStore,
+} from "../src/data/d1AuditEventAdapter";
 import type { Env, ETradeOptionChain } from "../src/types";
 
 /**
@@ -141,12 +146,38 @@ function makeAcmeChain(): ETradeOptionChain {
 }
 
 function makeEnv(): Env {
+  // #6102: audit rows land in D1 now — each makeEnv() builds a
+  // fresh mock (a shared env would share the memoized port across
+  // tests). The store is stashed module-level so the service
+  // helpers below, which build their own env, can hand it back to
+  // the test for the D1 read.
+  const d1Mock = new MockD1Database();
+  lastAuditStore = new D1AuditEventStore(createD1AuditEventDb(d1Mock as never));
   return {
     ETRADE_ENVIRONMENT: "sandbox",
     ETRADE_SANDBOX_BASE_URL: "https://apisb.etrade.com",
     ETRADE_SANDBOX_CONSUMER_KEY: "mock_consumer_key",
     ETRADE_SANDBOX_CONSUMER_SECRET: "mock_consumer_secret",
+    AGENT_DB: d1Mock as any,
   } as unknown as Env;
+}
+
+// The service's audit() helper stays sync and fire-and-forgets the
+// D1 write, so poll briefly until the row lands instead of
+// asserting a race. Payload reads back as the stored JSON TEXT.
+let lastAuditStore: D1AuditEventStore | null = null;
+async function waitForAuditEvents(type: string, expected = 1) {
+  const store = lastAuditStore!;
+  let rows: any[] = [];
+  for (let i = 0; i < 50; i++) {
+    rows = await store.findMany({ where: { type } });
+    if (rows.length >= expected) break;
+    await new Promise((r) => setTimeout(r, 20));
+  }
+  return rows;
+}
+function auditPayload(row: any) {
+  return typeof row.payload === "string" ? JSON.parse(row.payload) : row.payload;
 }
 
 function makeOrm() {
@@ -450,12 +481,10 @@ describe("ScheduledTasksService.autonomousStrategyDiscovery — no-view (#534)",
     expect(outcome.bestNoViewTrade?.rationale.join(" ")).toContain("not a recommendation");
 
     // Completion audit carries the model and the abstention list.
-    expect(orm.events.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: "options.strategy_discovery_completed",
-        payload: expect.objectContaining({ inputModel: "no-view", abstained: [] }),
-      })
-    );
+    // Audit rows live in D1 now (#6102); the write fire-and-forgets.
+    const completed = await waitForAuditEvents("options.strategy_discovery_completed");
+    expect(completed).toHaveLength(1);
+    expect(auditPayload(completed[0])).toMatchObject({ inputModel: "no-view", abstained: [] });
   });
 
   it("mixed complete / abstain / failed symbols produce a partial run with reasons recorded", async () => {
@@ -522,9 +551,8 @@ describe("ScheduledTasksService.autonomousStrategyDiscovery — no-view (#534)",
     expect(stored!.abstainedCount).toBe(1);
     expect(stored!.outcomes[0].abstained).toBe(true);
     // No failure surfacing for an honest abstention.
-    expect(orm.events.create).not.toHaveBeenCalledWith(
-      expect.objectContaining({ type: "options.strategy_discovery_failed" })
-    );
+    // Audit rows live in D1 now (#6102): no such row exists there.
+    expect((await lastAuditStore!.findMany({ where: { type: "options.strategy_discovery_failed" } })).length).toBe(0);
   });
 
   it("an all-failed fire persists a failed run and takes the #112 failure path", async () => {
@@ -549,12 +577,10 @@ describe("ScheduledTasksService.autonomousStrategyDiscovery — no-view (#534)",
     expect(stored!.status).toBe("failed");
     expect(stored!.outcomes[0].status).toBe("failed");
     expect(stored!.outcomes[0].constraintSet?.request).toEqual(FAILING_SET);
-    expect(orm.events.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: "options.strategy_discovery_failed",
-        payload: expect.objectContaining({ inputModel: "no-view", runId: "run-noview-failed" }),
-      })
-    );
+    // Audit rows live in D1 now (#6102); the write fire-and-forgets.
+    const failed = await waitForAuditEvents("options.strategy_discovery_failed");
+    expect(failed).toHaveLength(1);
+    expect(auditPayload(failed[0])).toMatchObject({ inputModel: "no-view", runId: "run-noview-failed" });
     expect(orm.messages.create).toHaveBeenCalledWith(
       expect.objectContaining({
         content: expect.stringContaining("Scheduled Strategy Discovery (no-view) failed"),

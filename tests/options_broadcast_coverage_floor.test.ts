@@ -57,6 +57,11 @@ import {
 } from "../src/workflows/optionsScreenWorkflow";
 import { createScannerScreenPorts } from "../src/workflows/strategyScreenPorts";
 import { optionsArtifactKey } from "../src/workflows/optionsScreenPorts";
+import { MockD1Database } from "./mock-d1";
+import {
+  createD1AuditEventDb,
+  D1AuditEventStore,
+} from "../src/data/d1AuditEventAdapter";
 
 const mockDeliverGatedSlack = vi.mocked(deliverGatedSlack);
 
@@ -302,6 +307,10 @@ describe("direct Slack delivery in autonomousOptionsAnalysis", () => {
   let sql: MockSqlStorage;
   let orm: DatabaseORM;
   let env: Env;
+  // #6102: the completed-run audit row lands in D1 now, via the
+  // service's sync audit() helper (fire-and-forget) — one fresh
+  // mock per test, bound on the service env.
+  let d1Store: D1AuditEventStore;
   const sessionId = "coverage_floor_test_trader";
 
   beforeEach(() => {
@@ -311,6 +320,8 @@ describe("direct Slack delivery in autonomousOptionsAnalysis", () => {
     orm.initializeSchema(sessionId);
     const mockKv = new MockKVNamespace();
     const { namespace: sessionStoreNs } = makeFakeSessionStore();
+    const d1Mock = new MockD1Database();
+    d1Store = new D1AuditEventStore(createD1AuditEventDb(d1Mock as never));
     env = {
       APP_ENV: "TEST",
       APP_BASE_URL: "https://agent.openaimp.com",
@@ -321,6 +332,7 @@ describe("direct Slack delivery in autonomousOptionsAnalysis", () => {
       ET_BASE_URL: "https://apisb.etrade.com/v1",
       ETRADE_KV: mockKv as any,
       SESSION_STORE: sessionStoreNs,
+      AGENT_DB: d1Mock,
       ORCHESTRATOR_AGENT: {} as any,
       SCREENER_AGENT: {
         idFromName: () => "mock-screener-id",
@@ -387,7 +399,15 @@ describe("direct Slack delivery in autonomousOptionsAnalysis", () => {
     expect(call).not.toHaveProperty("pdf");
     expect(call).not.toHaveProperty("files");
     // Persistence is untouched: the run record + audit still exist.
-    expect(orm.events.findMany({ where: { type: "options.scheduled_analysis_completed" } })).toHaveLength(1);
+    // #6102: the audit row lands in D1 via the sync audit() helper,
+    // so poll briefly until it lands instead of asserting a race.
+    let completed: Awaited<ReturnType<typeof d1Store.findMany>> = [];
+    for (let i = 0; i < 50; i++) {
+      completed = await d1Store.findMany({ where: { type: "options.scheduled_analysis_completed" } });
+      if (completed.length === 1) break;
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    expect(completed).toHaveLength(1);
   });
 
   it("above the floor (2 of 2 evaluated) sends today's success delivery unchanged", async () => {

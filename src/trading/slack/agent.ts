@@ -38,6 +38,7 @@ import {
   type ApprovalExecutor,
 } from "../channels/approval";
 import { TradingPlatformRegistry } from "../registry";
+import { auditEventPort } from "../../data/createAuditEventPorts";
 import { resolveChannelBroker } from "../channelBroker";
 import {
   deliverJourneyDecision,
@@ -1427,9 +1428,14 @@ export class ETradeSlackTradingService {
         // Audit the failure. Fail-visible, never masking: an audit-write
         // failure warns on the worker-log channel and the draft failure
         // result below still stands.
-        if (this.orm?.events) {
-          try {
-            this.orm.events.create({
+        // #6102: the row writes to D1 now; a null port (AGENT_DB
+        // unbound) skips, a failed write warns via the catch below.
+        try {
+          const port = await auditEventPort(
+            this.env as unknown as { AGENT_DB?: unknown },
+          );
+          if (port) {
+            await port.create({
               id: crypto.randomUUID(),
               sessionId: this.sessionId,
               type: "trade.options_draft_create_failed",
@@ -1443,13 +1449,13 @@ export class ETradeSlackTradingService {
               },
               createdAt: timestamp,
             });
-          } catch (auditErr) {
-            structuredLog.warn("slackAgent.options_draft_audit_failed", {
-              message: `[ETradeSlackAgent] Audit insertion failed (type=trade.options_draft_create_failed, draft=${draftId}): ${auditErr instanceof Error ? auditErr.message : String(auditErr)}`,
-              draftId,
-              error: auditErr instanceof Error ? auditErr.message : String(auditErr),
-            });
           }
+        } catch (auditErr) {
+          structuredLog.warn("slackAgent.options_draft_audit_failed", {
+            message: `[ETradeSlackAgent] Audit insertion failed (type=trade.options_draft_create_failed, draft=${draftId}): ${auditErr instanceof Error ? auditErr.message : String(auditErr)}`,
+            draftId,
+            error: auditErr instanceof Error ? auditErr.message : String(auditErr),
+          });
         }
 
         const errorBlocks = [

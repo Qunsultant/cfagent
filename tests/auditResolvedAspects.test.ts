@@ -28,38 +28,62 @@ import {
   handleAuditRoutes,
   type AuditRouteContext,
 } from "../src/agents/routes/audit";
+import { MockD1Database } from "./mock-d1";
+import {
+  createD1AuditEventDb,
+  D1AuditEventStore,
+} from "../src/data/d1AuditEventAdapter";
+import type { AuditEvent } from "../src/types";
 
 const req = (method: string, path: string) =>
   new Request(`https://agent.internal${path}`, { method });
 
-function seed(orm: DatabaseORM) {
+/**
+ * #6102: the event log lives in D1 now — seeds write through the
+ * real chained store, so the route reads exactly what production
+ * reads. Seeding mirrors production storage: mas_events.payload is
+ * a JSON TEXT column (recordAudit stringifies), so seeds stringify
+ * too.
+ */
+async function seedD1(): Promise<{
+  env: { AGENT_DB: MockD1Database };
+  store: D1AuditEventStore;
+}> {
+  const mock = new MockD1Database();
+  const store = new D1AuditEventStore(createD1AuditEventDb(mock as never));
   const ev = (id: string, payload: Record<string, unknown> | string) =>
-    orm.events.create({
+    store.create({
       id,
       sessionId: "s1",
       type: "test.event",
       agent: "orchestrator",
       payload: typeof payload === "string" ? payload : JSON.stringify(payload),
       createdAt: "2026-10-27T09:00:00Z",
-    } as never);
-  ev("coded-1", { coded_error: "AUTH_003", job: 1 });
-  ev("code-1", { code: "SCREEN_003" });
-  ev("bracket-1", { coded_error: "[REPORT_002] The XLSX report could not be generated." });
-  ev("obj-1", { coded_error: { code: "AUTH_003" } });
-  ev("both-1", { coded_error: "NOPE_999", code: "AUTH_003" });
-  ev("newcode-1", { coded_error: "FAILURE_REPORT_XLSX_GENERATION" });
-  ev("success-1", { code: "SUCCESS_SCREEN_COMPLETED" });
-  ev("unknown-1", { coded_error: "NOPE_999" });
-  ev("raw-1", "not-json{");
-  ev("plain-1", { job: 1 });
+    } as unknown as AuditEvent);
+  await ev("coded-1", { coded_error: "AUTH_003", job: 1 });
+  await ev("code-1", { code: "SCREEN_003" });
+  await ev("bracket-1", { coded_error: "[REPORT_002] The XLSX report could not be generated." });
+  await ev("obj-1", { coded_error: { code: "AUTH_003" } });
+  await ev("both-1", { coded_error: "NOPE_999", code: "AUTH_003" });
+  await ev("newcode-1", { coded_error: "FAILURE_REPORT_XLSX_GENERATION" });
+  await ev("success-1", { code: "SUCCESS_SCREEN_COMPLETED" });
+  await ev("unknown-1", { coded_error: "NOPE_999" });
+  await ev("raw-1", "not-json{");
+  await ev("plain-1", { job: 1 });
+  return { env: { AGENT_DB: mock }, store };
 }
 
-function ctxFor(orm: DatabaseORM, sql: MockSqlStorage): AuditRouteContext {
+function ctxFor(
+  orm: DatabaseORM,
+  sql: MockSqlStorage,
+  env: { AGENT_DB: MockD1Database },
+): AuditRouteContext {
   return {
     ensureTables: () => sql,
     getOrm: () => orm,
     audit: vi.fn(),
     recordAudit: vi.fn(),
+    env,
   } as unknown as AuditRouteContext;
 }
 
@@ -73,13 +97,15 @@ describe("audit resolved aspects (#2371, outcome catalog #2381)", () => {
   let orm: DatabaseORM;
   let sql: MockSqlStorage;
   let ctx: AuditRouteContext;
+  let store: D1AuditEventStore;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     sql = new MockSqlStorage();
     orm = new DatabaseORM(sql);
     orm.initializeSchema("test_session_user");
-    seed(orm);
-    ctx = ctxFor(orm, sql);
+    const seeded = await seedD1();
+    store = seeded.store;
+    ctx = ctxFor(orm, sql, seeded.env);
   });
 
   async function listEvents() {
@@ -197,11 +223,12 @@ describe("audit resolved aspects (#2371, outcome catalog #2381)", () => {
       "s1",
       ctx
     );
-    const row = orm.events.findById("coded-1") as unknown as { payload: string };
+    // #6102: the stored rows live in D1 now.
+    const row = await store.findById("coded-1");
     // Pre-rename value stays stored verbatim; only the read-time
     // projection carries the new code.
-    expect(row.payload).toBe(JSON.stringify({ coded_error: "AUTH_003", job: 1 }));
-    const raw = orm.events.findById("raw-1") as unknown as { payload: string };
-    expect(raw.payload).toBe("not-json{");
+    expect(row!.payload).toBe(JSON.stringify({ coded_error: "AUTH_003", job: 1 }));
+    const raw = await store.findById("raw-1");
+    expect(raw!.payload).toBe("not-json{");
   });
 });

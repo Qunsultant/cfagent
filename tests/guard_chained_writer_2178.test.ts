@@ -43,7 +43,7 @@ async function tenantAdminStore(): Promise<MembershipStore> {
 describe("chained audit writer as guard sink (#2178 S2)", () => {
   it("a successful chained write satisfies audit-before-allow", async () => {
     const rows: any[] = [];
-    const writer = createChainedAuditWriter({ create: (record: any) => { rows.push(record); return record; } });
+    const writer = createChainedAuditWriter({ create: async (record: any) => { rows.push(record); return record; } });
     const store = await tenantAdminStore();
     const result = await evaluateWithObligations(store, {
       internalUserId: "v1:admin",
@@ -62,7 +62,7 @@ describe("chained audit writer as guard sink (#2178 S2)", () => {
 
   it("a throwing chained store denies, never allows unaudited", async () => {
     const writer = createChainedAuditWriter({
-      create: () => { throw new Error("audit store unavailable"); },
+      create: async () => { throw new Error("audit store unavailable"); },
     });
     const store = await tenantAdminStore();
     const result = await evaluateWithObligations(store, {
@@ -81,7 +81,7 @@ describe("chained audit writer as guard sink (#2178 S2)", () => {
 
   it("the writer itself propagates a store throw (no swallow)", async () => {
     const writer = createChainedAuditWriter({
-      create: () => { throw new Error("audit store unavailable"); },
+      create: async () => { throw new Error("audit store unavailable"); },
     });
     await expect(
       writer({ permission: "role:assign", principalId: "v1:admin", tenantId: TENANT, decision: "allow", nowMs: NOW }),

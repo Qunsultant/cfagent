@@ -30,8 +30,13 @@ import {
 import {
   AuditEventPublisher,
   TelemetryAuditObserver,
-  SqliteAuditObserver,
+  D1AuditObserver,
 } from "../src/patterns/observer";
+import { MockD1Database } from "./mock-d1";
+import {
+  createD1AuditEventDb,
+  D1AuditEventStore,
+} from "../src/data/d1AuditEventAdapter";
 import type { IMcpToolCommand, IPaymentGatewayStrategy, McpToolContext } from "../src/patterns/interfaces";
 import { z } from "zod";
 
@@ -419,6 +424,29 @@ describe("SOLID Principles, GoF Patterns & Agent Dogfooding Suite", () => {
       publisher.publish("test.event.2", "test_agent", { message: "Second event" });
       expect(observer1.recordedEvents.length).toBe(1); // Did not receive
       expect(observer2.recordedEvents.length).toBe(2); // Received
+    });
+
+    it("Observer Pattern: D1AuditObserver writes published events to D1 (#6102)", async () => {
+      const mock = new MockD1Database();
+      const publisher = new AuditEventPublisher(sessionId);
+      publisher.subscribe(new D1AuditObserver({ AGENT_DB: mock }));
+      publisher.publish("test.event.d1", "test_agent", { message: "Hello D1" });
+      // The observer seam is sync and fire-and-forget: poll until the
+      // chained write lands (bounded — a stuck write fails, not hangs).
+      const store = new D1AuditEventStore(createD1AuditEventDb(mock as never));
+      let rows: Array<{ id: string }> = [];
+      for (let i = 0; i < 50 && rows.length === 0; i++) {
+        await new Promise((r) => setTimeout(r, 20));
+        // The table does not exist until the observer's first write
+        // runs ensure — a missing table just means "not landed yet".
+        try {
+          rows = await store.findMany({ where: { sessionId } });
+        } catch {
+          rows = [];
+        }
+      }
+      expect(rows).toHaveLength(1);
+      expect(rows[0].id).toMatch(/^evt_/);
     });
   });
 

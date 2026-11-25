@@ -523,39 +523,39 @@ describe("DML catalogue retry census pin (#4930)", () => {
     );
   }
 
-  it("the catalogue holds 64 entries: 54 executed, 10 fragments", () => {
-    expect(DML_CATALOGUE_ENTRIES).toHaveLength(64);
+  it("the catalogue holds 67 entries: 57 executed, 10 fragments", () => {
+    expect(DML_CATALOGUE_ENTRIES).toHaveLength(67);
     const executed = DML_CATALOGUE_ENTRIES.filter(
       (e) => e.form === "builder" || e.form === "build",
     );
     const fragments = DML_CATALOGUE_ENTRIES.filter(
       (e) => e.form === "fragment",
     );
-    expect(executed).toHaveLength(54);
+    expect(executed).toHaveLength(57);
     expect(fragments).toHaveLength(10);
   });
 
-  it("executed entries split read 24 / upsert 4 / insert 10 / update 10 / delete 6", () => {
+  it("executed entries split read 26 / upsert 4 / insert 11 / update 10 / delete 6", () => {
     const executed = DML_CATALOGUE_ENTRIES.filter(
       (e) => e.form === "builder" || e.form === "build",
     );
     const byOp = (op: string) =>
       executed.filter((e) => e.operation === op).length;
-    expect(byOp("read")).toBe(24);
+    expect(byOp("read")).toBe(26);
     expect(byOp("upsert")).toBe(4);
-    expect(byOp("insert")).toBe(10);
+    expect(byOp("insert")).toBe(11);
     expect(byOp("update")).toBe(10);
     expect(byOp("delete")).toBe(6);
   });
 
-  it("38 executed entries are fully retryable; 16 are did-not-run-only", () => {
+  it("40 executed entries are fully retryable; 17 are did-not-run-only", () => {
     const executed = DML_CATALOGUE_ENTRIES.filter(
       (e) => e.form === "builder" || e.form === "build",
     );
     const fully = executed.filter(isFullyRetryable);
     const didNotRunOnly = executed.filter((e) => !isFullyRetryable(e));
-    expect(fully).toHaveLength(38);
-    expect(didNotRunOnly).toHaveLength(16);
+    expect(fully).toHaveLength(40);
+    expect(didNotRunOnly).toHaveLength(17);
     // The did-not-run-only set is exactly the plain inserts plus the
     // non-idempotent updates (batch transition + counter increments).
     expect(
@@ -569,6 +569,7 @@ describe("DML catalogue retry census pin (#4930)", () => {
         "insert:dml.d1.agent_proposals.propose",
         "insert:dml.d1.agent_referrals.create",
         "insert:dml.d1.agent_user_profiles.save_once",
+        "insert:dml.d1.mas_events.insert_chained",
         "insert:dml.d1.mas_feed_datasets.insert",
         "insert:dml.d1.mas_index_lists.insert",
         "insert:dml.d1.resource_sql_ops.insert",

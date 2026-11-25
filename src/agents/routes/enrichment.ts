@@ -61,7 +61,7 @@ export interface EnrichmentRouteContext {
     type: string,
     agent: string,
     payload: Record<string, unknown>,
-  ): unknown;
+  ): Promise<unknown>;
   marketData?: EnrichmentMarketData;
   flagPort?: FeatureFlagPort;
   breakerSnapshots?: () => Array<{ providerId: string; state: string }>;

@@ -96,6 +96,7 @@ import {
   type PaymentWorkflowHost,
 } from "../../services/paymentWorkflowSubmission";
 import { createFeatureFlagPort } from "../../features/createFeatureFlagPort";
+import { auditEventPort } from "../../data/createAuditEventPorts";
 import { cfpayA2AOperation, cfpaySendEmail, getCfpayConfig } from "../../services/cfpayA2A";
 import { NATIVE_PAYMENT_DISCLOSURE } from "../../services/nativeMonetization";
 import {
@@ -832,8 +833,13 @@ export async function handleAgenticPaymentsRoutes(
       const cfpayRows = orm.transactions.findMany().filter(isCfpayLedgerRow);
       const charges = cfpayRows.filter((t) => t.action === "charge");
       const credits = cfpayRows.filter((t) => t.action === "credit");
-      const payloadsOf = (type: string): Array<Record<string, unknown>> =>
-        orm.events.findMany({ where: { type } }).map((e) => {
+      // #6102: the payment payloads live in D1 now; the mapping
+      // (object → as-is, string → JSON.parse, else {}) is unchanged.
+      const payloadsOf = async (type: string): Promise<Array<Record<string, unknown>>> => {
+        const port = await auditEventPort(ctx.env as unknown as { AGENT_DB?: unknown });
+        if (!port) return [];
+        const rows = await port.findMany({ where: { type } });
+        return rows.map((e) => {
           const raw = (e as { payload?: unknown }).payload;
           if (raw && typeof raw === "object") return raw as Record<string, unknown>;
           try {
@@ -842,12 +848,13 @@ export async function handleAgenticPaymentsRoutes(
             return {};
           }
         });
+      };
       const report = aggregateCfpayRevenue(
         charges,
         credits,
-        payloadsOf("payment.confirmed"),
-        payloadsOf("payment.covered"),
-        payloadsOf("payment.failure_credit_issued"),
+        await payloadsOf("payment.confirmed"),
+        await payloadsOf("payment.covered"),
+        await payloadsOf("payment.failure_credit_issued"),
       );
       return Response.json(report);
     } catch (err: any) {
