@@ -54,6 +54,15 @@ export interface PdfTableColumn {
   w: number;
 }
 
+export interface PdfTableOptions {
+  /**
+   * Per-column body text colour, keyed by zero-based column index. A `—` cell
+   * keeps the default ink (an empty value is not a status signal). Issue 6499:
+   * the hunt report's Exits column is danger red.
+   */
+  columnColors?: Readonly<Record<number, PdfColor>>;
+}
+
 /** A fresh context with the first page already added. */
 export function createPdfCtx(doc: PDFDocument, font: PDFFont, bold: PDFFont): PdfCtx {
   return { doc, font, bold, page: doc.addPage([PDF_PAGE_W, PDF_PAGE_H]), y: PDF_PAGE_H - PDF_MARGIN };
@@ -143,7 +152,8 @@ export function renderTable(
   ctx: PdfCtx,
   title: string,
   cols: PdfTableColumn[],
-  rows: string[][]
+  rows: string[][],
+  options: PdfTableOptions = {}
 ): void {
   if (rows.length === 0) return;
   text(ctx, title, { size: 12, bold: true });
@@ -158,13 +168,15 @@ export function renderTable(
     if (ctx.page !== pageBefore) renderTableHeader(ctx, cols);
     let x = PDF_MARGIN;
     for (let i = 0; i < row.length; i++) {
+      const cellColor =
+        row[i] !== "—" ? (options.columnColors?.[i] ?? PDF_PRINT_INK) : PDF_PRINT_INK;
       for (let li = 0; li < wrapped[i].length; li++) {
         ctx.page.drawText(cleanForPdf(wrapped[i][li]), {
           x,
           y: ctx.y - li * 10,
           size: 8,
           font: ctx.font,
-          color: rgb(...PDF_PRINT_INK),
+          color: rgb(...cellColor),
         });
       }
       x += cols[i].w;

@@ -137,9 +137,21 @@ function sentinelModel(): OpportunityHuntReportModel {
     noSetupsNote: "SENTINEL NO SETUPS NOTE",
     patternChartTitle: "SENTINEL CHART TITLE",
     patternBars: [],
-    tableHeading: "SENTINEL TABLE HEADING",
-    tableRows: [
-      { symbol: "ZZZZ", patterns: "0", entries: "—", exits: "—", entryRange: "—", stopLoss: "—", takeProfit: "—", lastClose: "$1.00" },
+    tableGroups: [
+      {
+        key: "patterns",
+        heading: "SENTINEL PATTERNS HEADING",
+        rows: [],
+        defaultSort: { key: "patterns", dir: "desc" },
+      },
+      {
+        key: "no-patterns",
+        heading: "SENTINEL NO-PATTERN HEADING",
+        rows: [
+          { symbol: "ZZZZ", patterns: "0", entries: "—", exits: "—", entryRange: "—", stopLoss: "—", takeProfit: "—", lastClose: "$1.00" },
+        ],
+        defaultSort: { key: "symbol", dir: "asc" },
+      },
     ],
     sections: [
       {
@@ -171,6 +183,7 @@ async function expectSharedContent(
     model.holdingsHeading ?? "",
     model.holdingsNote ?? "",
     model.noSetupsNote ?? "",
+    ...model.tableGroups.map((group) => group.heading),
     ...model.methodology,
   ].filter((text) => text.length > 0);
   for (const text of topLevel) {
@@ -244,7 +257,8 @@ describe("hunt report sync (issue 6479)", () => {
     expect(model.summary).not.toContain("STALE");
     expect(model.countsExplanation).toBe(huntCountsExplanation(result));
     expect(model.asOfLabel).toBe(formatReportTimestamp(result.asOf));
-    expect(model.tableRows.map((row) => row.symbol)).toEqual(["AAAA", "BBBB"]);
+    expect(model.tableGroups[0].rows.map((row) => row.symbol)).toEqual(["AAAA"]);
+    expect(model.tableGroups[1].rows.map((row) => row.symbol)).toEqual(["BBBB"]);
     expect(model.sections.map((section) => section.symbol)).toEqual(["AAAA", "BBBB"]);
     expect(model.sections[1].noSetupNote).toContain("No setup");
     expect(model.methodology.length).toBeGreaterThan(0);
@@ -257,9 +271,9 @@ describe("hunt report sync (issue 6479)", () => {
     await expectSharedContent(model, bytes);
     // The page did not accidentally render the result's own summary.
     expect(pageText()).not.toContain("Opportunity hunt:");
-    // The PDF rendered the model's table heading (the page has no table heading
-    // by design; the rows are the same).
-    expect(pdfText(extractPdfText(bytes))).toContain("SENTINEL TABLE HEADING");
+    // Both group headings are rendered by both surfaces.
+    expect(pdfText(extractPdfText(bytes))).toContain("SENTINEL PATTERNS HEADING");
+    expect(pdfText(extractPdfText(bytes))).toContain("SENTINEL NO-PATTERN HEADING");
     expect(pageText()).toContain("ZZZZ");
   });
 

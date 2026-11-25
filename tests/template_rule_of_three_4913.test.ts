@@ -442,7 +442,10 @@ describe("rule of three: headers (#4913)", () => {
     // #6151 S4 adds the Nav & Menu Access section heading too, so the primitive count now tracks one more site.
     // Issue 6479: the hunt report view renders its counts heading and its
     // methodology heading as SmallHeaders, so the count tracks those two sites.
-    expect(countTag(pageTsx(), "SmallHeader")).toBe(52);
+    // Issue 6499: the report body adds one SmallHeader SITE that renders once
+    // per evaluated-symbol group (patterns / no-patterns), so one more source
+    // site (two headings at runtime).
+    expect(countTag(pageTsx(), "SmallHeader")).toBe(53);
     // Exactly one site keeps h6 semantics (OmnichannelPanel: the email subject).
     let h6Level = 0;
     for (const f of pageTsx()) {

@@ -40,6 +40,19 @@ export interface OpportunityHuntReportTableRow {
   lastClose: string;
 }
 
+/**
+ * One rendered table section. Issue 6499 splits the evaluated universe into
+ * the symbols that produced patterns and the symbols that produced none, each
+ * with its own heading, count, rows, and default order.
+ */
+export interface OpportunityHuntReportTableGroup {
+  key: "patterns" | "no-patterns";
+  heading: string;
+  rows: readonly OpportunityHuntReportTableRow[];
+  /** The page's initial sort within this section. */
+  defaultSort: { key: "patterns" | "symbol"; dir: "asc" | "desc" };
+}
+
 /** One per-symbol detail section, already worded — both renderers print these. */
 export interface OpportunityHuntReportSection {
   symbol: string;
@@ -83,8 +96,7 @@ export interface OpportunityHuntReportModel {
   strategyBars: readonly OpportunityHuntStrategyBar[];
   patternChartTitle: string;
   patternBars: readonly OpportunityHuntPatternBar[];
-  tableHeading: string;
-  tableRows: readonly OpportunityHuntReportTableRow[];
+  tableGroups: readonly OpportunityHuntReportTableGroup[];
   sections: readonly OpportunityHuntReportSection[];
   methodology: readonly string[];
 }
@@ -189,6 +201,21 @@ export function buildOpportunityHuntReportModel(
     .slice(0, OPPORTUNITY_HUNT_PATTERN_CHART_TOP_N)
     .map((row) => ({ symbol: row.symbol, count: row.patternCount }));
 
+  const tableRowFor = (row: OpportunityHuntSymbolRow): OpportunityHuntReportTableRow => ({
+    symbol: row.symbol,
+    patterns: String(row.patternCount),
+    entries: strategyList(row.entries),
+    exits: strategyList(row.exits),
+    entryRange: entryRangeText(row),
+    stopLoss: formatHuntPrice(row.stopLoss),
+    takeProfit: formatHuntPrice(row.takeProfit),
+    lastClose: formatHuntPrice(row.lastClose),
+  });
+  // Issue 6499 — two sections: patterned (most patterns first, then symbol) and
+  // no-pattern (symbol A→Z). A reader can see the boundary and each count.
+  const patternedRows = byPatterns.filter((row) => row.patternCount > 0);
+  const quietRows = rows.filter((row) => row.patternCount === 0);
+
   return {
     title: "Opportunity Hunt Report",
     asOfIso: result.asOf,
@@ -212,17 +239,20 @@ export function buildOpportunityHuntReportModel(
     strategyBars,
     patternChartTitle: `Pattern count by symbol (top ${patternBars.length} of ${rows.length} evaluated)`,
     patternBars,
-    tableHeading: `Symbols evaluated (${rows.length})`,
-    tableRows: rows.map((row) => ({
-      symbol: row.symbol,
-      patterns: String(row.patternCount),
-      entries: strategyList(row.entries),
-      exits: strategyList(row.exits),
-      entryRange: entryRangeText(row),
-      stopLoss: formatHuntPrice(row.stopLoss),
-      takeProfit: formatHuntPrice(row.takeProfit),
-      lastClose: formatHuntPrice(row.lastClose),
-    })),
+    tableGroups: [
+      {
+        key: "patterns",
+        heading: `Symbols with patterns (${patternedRows.length})`,
+        rows: patternedRows.map(tableRowFor),
+        defaultSort: { key: "patterns", dir: "desc" },
+      },
+      {
+        key: "no-patterns",
+        heading: `Symbols with no patterns (${quietRows.length})`,
+        rows: quietRows.map(tableRowFor),
+        defaultSort: { key: "symbol", dir: "asc" },
+      },
+    ],
     sections: rows.map(sectionFor),
     methodology: METHODOLOGY,
   };
