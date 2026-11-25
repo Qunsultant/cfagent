@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Button } from "./ui";
+import { Button } from "./components/ui";
 
 /**
  * Issue #6473 — the report's shareable link.
