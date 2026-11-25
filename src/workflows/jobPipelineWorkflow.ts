@@ -88,7 +88,8 @@ import { createWorkflowResearchStepDeps } from "./researchWorkflowStageDeps";
 import { fetchWikipediaIndexHtml } from "../services/indexListJob";
 import type { JobPipelineDeps } from "../services/jobPipelineEngine";
 import type { JobEventSender } from "../services/jobPipelineEngine";
-import { sendManagedWorkflowEvent, type ManagedWorkflowBinding } from "./workflowInstanceSeam";
+import type { JobPipelineTerminateRun } from "../services/jobPipelineEngine";
+import { sendManagedWorkflowEvent, terminateManagedWorkflowInstance, type ManagedWorkflowBinding } from "./workflowInstanceSeam";
 import { JobPipelineError } from "../services/jobPipelineConfig";
 import {
   runJobPipelineWorkflowFlow,
@@ -421,6 +422,7 @@ export function createJobPipelineWorkflowDeps(env: Env): JobPipelineDeps {
      * workflow instance through the one instance seam.
      */
     sendEvent: createJobPipelineWorkflowEventSender(env),
+    terminateRun: createJobPipelineWorkflowTerminator(env),
     invocation: "workflow-shard",
     // Issue #4782 S3 — the policy resolves from this env (the
     // platform-default layer); the engine reads nothing itself.
@@ -433,6 +435,28 @@ export function createJobPipelineWorkflowDeps(env: Env): JobPipelineDeps {
  * deployment binds no JOB_PIPELINE_WORKFLOW: the control plane then refuses
  * delivery by name instead of reporting a delivery that never happened.
  */
+/**
+ * Issue #5783 — the workflow residency's stop channel. Absent when the
+ * deployment binds no JOB_PIPELINE_WORKFLOW: cancel then stays cooperative,
+ * exactly as before this slice.
+ */
+export function createJobPipelineWorkflowTerminator(
+  env: Env,
+): JobPipelineTerminateRun | undefined {
+  const binding = env.JOB_PIPELINE_WORKFLOW as unknown as
+    | ManagedWorkflowBinding
+    | undefined;
+  if (!binding) return undefined;
+  return async (request) => {
+    await terminateManagedWorkflowInstance(binding, request.workflowInstanceId, {
+      // The recorded choice (#5783): no step registers a platform rollback
+      // handler yet — #5958 retires the hand-built compensation into them —
+      // so a rollback here would claim work that does not exist.
+      rollback: false,
+    });
+  };
+}
+
 export function createJobPipelineWorkflowEventSender(
   env: Env,
 ): JobEventSender | undefined {

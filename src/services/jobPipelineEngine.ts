@@ -334,6 +334,13 @@ export interface JobEventSendRequest {
 /** The host's delivery channel. Absent ⇒ delivery refuses by name. */
 export type JobEventSender = (request: JobEventSendRequest) => Promise<void>;
 
+/** Issue #5783 — the platform stop a host exposes for a run's instance. */
+export type JobPipelineTerminateRun = (request: {
+  jobId: string;
+  runId: string;
+  workflowInstanceId: string;
+}) => Promise<void>;
+
 /** Issue #6028 — module logger, on the same structured-logging seam as the services. */
 const structuredLog = createStructuredLogger(createObservabilitySink({}), {
   component: "services/jobPipelineEngine",
@@ -388,6 +395,11 @@ export interface JobPipelineDeps {
    * the run's durable host. Absent ⇒ `sendEvent` refuses by name.
    */
   sendEvent?: JobEventSender;
+  /**
+   * Issue #5783 — stop a run's durable host (the platform terminate). Absent
+   * ⇒ cancel stays cooperative: the engine stops at its next step boundary.
+   */
+  terminateRun?: JobPipelineTerminateRun;
   now?: () => Date;
   newRunId?: () => string;
   /**
@@ -1455,12 +1467,50 @@ export class JobPipelineControl {
         updatedAt: this.iso(),
       };
       await this.deps.stores.instances.saveInstance(updated);
+      // Issue #5783 — the durable host is stopped too. The flag above only
+      // reaches an engine that is between steps; a run parked in a durable
+      // wait (#3955) never reaches a boundary at all. Once the platform
+      // instance is terminated no executor remains, so the record settles
+      // here instead of waiting for a boundary that will never come.
+      if (await this.terminateDurableRun(jobId, updated)) {
+        return this.settleCancelled(updated);
+      }
       return updated;
     }
-    // Paused: no engine is live to honor a desired state — settle
-    // it here, sweeping the run's outstanding stage units to
-    // cancelled so the cancellation is surfaced per stage,
-    // never vanished (#3069).
+    return this.settleCancelled(instance);
+  }
+
+  /**
+   * Issue #5783 — stop the run's durable host, when it has one and the host
+   * can reach it. Returns true only when an instance was terminated.
+   *
+   * The rollback choice is recorded here, at the one call site: `rollback:
+   * false` because no engine step registers a platform rollback handler yet
+   * (#5958 retires the hand-built compensation into them); asking the
+   * platform to compensate now would claim work that does not exist.
+   */
+  private async terminateDurableRun(
+    jobId: string,
+    instance: JobInstanceRecord,
+  ): Promise<boolean> {
+    const workflowInstanceId = instance.runWorkflowInstanceId;
+    const terminate = this.deps.terminateRun;
+    if (!workflowInstanceId || !terminate) return false;
+    await terminate({
+      jobId,
+      runId: instance.currentRunId ?? "",
+      workflowInstanceId,
+    });
+    return true;
+  }
+
+  /**
+   * Issue #5783 — settle a cancelled run with no executor left. The paused
+   * branch and the terminated-instance branch share ONE settlement: the
+   * run's outstanding units are swept to cancelled so the cancellation is
+   * surfaced per stage, never vanished (#3069).
+   */
+  private async settleCancelled(instance: JobInstanceRecord): Promise<JobInstanceRecord> {
     const settled: JobInstanceRecord = {
       ...instance,
       state: "cancelled",
@@ -1480,7 +1530,7 @@ export class JobPipelineControl {
     };
     await this.deps.stores.instances.saveInstance(settled);
     await publishJobStatus(this.deps.publisher, {
-      jobId,
+      jobId: instance.jobId,
       runId: instance.currentRunId ?? "unknown",
       state: "cancelled",
       at: this.iso(),
@@ -1488,7 +1538,6 @@ export class JobPipelineControl {
     await this.recordTerminal(settled, "cancelled", undefined);
     return settled;
   }
-
   /**
    * Issue #3955 — deliver a named event to a RUNNING job's durable host.
    * This is the delivery half of the wait: an approval decision, a webhook,

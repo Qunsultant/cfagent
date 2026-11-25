@@ -420,7 +420,10 @@ export type WorkflowErrorCode =
   | "projection_store_unbound"
   // Issue #3955 — the delivery half of the durable event wait: an instance
   // that cannot receive events refuses by name instead of dropping them.
-  | "send_event_unsupported";
+  | "send_event_unsupported"
+  // Issue #5783 — instance control: an instance shape that cannot pause,
+  // resume, terminate or restart refuses by name instead of reporting success.
+  | "instance_control_unsupported";
 
 export class WorkflowError extends Error {
   readonly code: WorkflowErrorCode;

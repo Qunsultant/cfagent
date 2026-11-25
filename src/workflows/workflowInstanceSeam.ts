@@ -56,6 +56,13 @@ const structuredLog = createStructuredLogger(createObservabilitySink({}), {
 export interface ManagedWorkflowBindingInstance {
   /** Issue #3955 — the delivery half of the durable event wait; absent on shapes that cannot receive events. */
   sendEvent?: (event: { type: string; payload: unknown }) => Promise<void>;
+  /** Issue #5783 — instance control; each is optional because provider shapes differ. */
+  pause?: () => Promise<void>;
+  resume?: () => Promise<void>;
+  terminate?: (options?: { rollback?: boolean }) => Promise<void>;
+  restart?: (options?: {
+    from?: { name: string; count?: number; type?: "do" | "sleep" | "waitForEvent" };
+  }) => Promise<void>;
   id?: string;
   /** Absent on payment-shaped bindings: treated as "not adoptable", never as an adoption. */
   status?: () => Promise<{
@@ -218,6 +225,87 @@ export async function sendManagedWorkflowEvent(
     );
   }
   await instance.sendEvent(event);
+}
+
+/**
+ * Issue #5783 — instance control through the SAME seam that starts instances.
+ * Each op refuses by name (`instance_control_unsupported`) when the provider's
+ * instance shape does not expose it: a control the platform cannot apply must
+ * say so, never report success.
+ *
+ * `pause` / `resume` are the platform's own hold. They are deliberately NOT how
+ * the engine pauses a run (see §3.10): the engine settles a paused run at its
+ * own step boundary and resumes it as a NEW executor, so a platform-held
+ * instance would have no resumer and the two models would deadlock. They exist
+ * for a door that holds an instance whose flow it owns.
+ */
+export async function pauseManagedWorkflowInstance(
+  binding: ManagedWorkflowBinding,
+  instanceId: string,
+): Promise<void> {
+  const instance = await binding.get(instanceId);
+  if (typeof instance.pause !== "function") {
+    throw new WorkflowError(
+      "instance_control_unsupported",
+      `Workflow instance "${instanceId}" does not expose pause(); the hold was not applied.`,
+    );
+  }
+  await instance.pause();
+}
+
+export async function resumeManagedWorkflowInstance(
+  binding: ManagedWorkflowBinding,
+  instanceId: string,
+): Promise<void> {
+  const instance = await binding.get(instanceId);
+  if (typeof instance.resume !== "function") {
+    throw new WorkflowError(
+      "instance_control_unsupported",
+      `Workflow instance "${instanceId}" does not expose resume(); the hold was not released.`,
+    );
+  }
+  await instance.resume();
+}
+
+/**
+ * Issue #5783 — stop an instance. `rollback` is REQUIRED at the seam so every
+ * call site states its choice instead of inheriting a default: the platform
+ * runs registered rollback handlers when it is true, and skips steps that
+ * registered none.
+ */
+export async function terminateManagedWorkflowInstance(
+  binding: ManagedWorkflowBinding,
+  instanceId: string,
+  options: { rollback: boolean },
+): Promise<void> {
+  const instance = await binding.get(instanceId);
+  if (typeof instance.terminate !== "function") {
+    throw new WorkflowError(
+      "instance_control_unsupported",
+      `Workflow instance "${instanceId}" does not expose terminate(); the run was not stopped.`,
+    );
+  }
+  await instance.terminate({ rollback: options.rollback });
+}
+
+/**
+ * Issue #5783 — restart an instance from its beginning or from a named step.
+ * The platform refuses a target that is not in the instance's execution
+ * history, so this helper never invents a target.
+ */
+export async function restartManagedWorkflowInstance(
+  binding: ManagedWorkflowBinding,
+  instanceId: string,
+  options?: { from?: { name: string; count?: number; type?: "do" | "sleep" | "waitForEvent" } },
+): Promise<void> {
+  const instance = await binding.get(instanceId);
+  if (typeof instance.restart !== "function") {
+    throw new WorkflowError(
+      "instance_control_unsupported",
+      `Workflow instance "${instanceId}" does not expose restart(); the restart was not applied.`,
+    );
+  }
+  await instance.restart(options ?? {});
 }
 
 export function resolveWorkflowRunId(

@@ -168,7 +168,7 @@ Partly — the ThinkWorkflow host binding is used as a durable host with a `step
   the instance. The wait name is the engine's, so a replay re-arms the same
   wait. Delivery rides `instance.sendEvent` through
   `sendManagedWorkflowEvent` (`src/workflows/workflowInstanceSeam.ts`) —
-  the seam now addresses instances for delivery as well as for starts.
+  the seam now addresses instances for delivery as well as for starts. Since #5783 the same seam stops them too: `terminateManagedWorkflowInstance` is what an engine cancel calls for a run stamped to an instance (with `rollback: false` recorded at the call site), while pause/resume/restart are exposed for a door that owns an instance's flow — the engine's own pause stays a boundary settle, not a platform hold.
 
 **Not used.**
 
