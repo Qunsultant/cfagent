@@ -477,10 +477,10 @@ describe("agent routing (2): the copilot routes quote/preview to Alpaca (#3782)"
       isAutoOptionsResearchRequest: false,
       stockCopilotMcpActive: true,
     });
-    expect(prompt).toContain("tool_openaimp_alpaca_get_quote");
-    expect(prompt).toContain("tool_openaimp_alpaca_preview_order");
+    expect(prompt).toContain("tool_openaimp_market_data_get_quote");
+    expect(prompt).toContain("tool_openaimp_broker_order_preview");
     expect(prompt).toMatch(/never present a price without .* source/i);
-    expect(prompt).toMatch(/do not use.*etrade.*(quote|preview)|not the E\*TRADE/i);
+    expect(prompt).toMatch(/do not use another broker|not another broker/i);
   });
 
   it("rule 6 carries the price-provenance rule for every trading turn", () => {

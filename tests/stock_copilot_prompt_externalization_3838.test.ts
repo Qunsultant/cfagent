@@ -66,9 +66,9 @@ describe("Issue #3838 — Stock Copilot Prompt Externalization & Alpaca HITL Inv
     });
 
     // Advertises Alpaca tools in capabilities
-    expect(prompt).toContain("tool_openaimp_alpaca_preview_order");
+    expect(prompt).toContain("tool_openaimp_broker_order_preview");
     expect(prompt).toContain("tool_openaimp_alpaca_place_order");
-    expect(prompt).toContain("tool_openaimp_alpaca_get_quote");
+    expect(prompt).toContain("tool_openaimp_market_data_get_quote");
 
     // Must NOT mandate etrade_execute_order on Stock Copilot turns
     expect(prompt).not.toContain("Only execute via 'tool_openaimp_etrade_execute_order'");
