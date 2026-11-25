@@ -18,6 +18,7 @@ import { PDFDocument, StandardFonts } from "pdf-lib";
 import type { ScreenerRunResult } from "../agents/screener-agent";
 import { yahooDataModeLabel } from "../config/yahooDataMode";
 import { defaultUniverseId } from "../config/defaultUniverse";
+import { formatReportTimestamp } from "../services/reportTimestamp";
 import {
   SCREENER_PDF_COLUMNS,
   buildScreenerPdfSections,
@@ -41,6 +42,9 @@ import {
   text,
 } from "./pdfDrawing";
 
+/** Re-exported for the existing importers and the #2088 timestamp pin. */
+export { formatReportTimestamp };
+
 /** Screener-specific print colour: the partial-screen warning.
  *  The shared base print scale lives in the drawing layer
  *  (src/trading/pdfDrawing.ts). */
@@ -55,29 +59,6 @@ export interface ScreenerPdfOptions {
  *  renderTable. */
 function sectionTitle(section: Pick<ScreenerPdfSection, "title" | "shown" | "total">): string {
   return `${section.title} (showing ${section.shown} of ${section.total})`;
-}
-
-/** Human timestamp (#2088): "Oct 28, 2026, 03:50 EDT (07:50 UTC)". Falls back to the raw ISO. */
-export function formatReportTimestamp(iso: string): string {
-  try {
-    const date = new Date(iso);
-    if (Number.isNaN(date.getTime())) return iso;
-    const parts = new Intl.DateTimeFormat("en-US", {
-      timeZone: "America/New_York",
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-      hourCycle: "h23",
-      timeZoneName: "short",
-    }).formatToParts(date);
-    const get = (type: string): string => parts.find((p) => p.type === type)?.value ?? "";
-    const utc = `${String(date.getUTCHours()).padStart(2, "0")}:${String(date.getUTCMinutes()).padStart(2, "0")}`;
-    return `${get("month")} ${get("day")}, ${get("year")}, ${get("hour")}:${get("minute")} ${get("timeZoneName")} (${utc} UTC)`;
-  } catch {
-    return iso;
-  }
 }
 
 /**

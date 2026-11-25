@@ -349,7 +349,9 @@ describe("OpportunityHuntPanel (issue 6273)", () => {
     expect(vi.mocked(runOpportunityHuntNow)).toHaveBeenCalledTimes(1);
     expect(container!.textContent).toContain("AAAA");
     expect(container!.textContent).toContain("rsi_reversal");
-    expect(container!.textContent).toContain("Scanned 2 symbol(s)");
+    // Issue 6479 — the page renders the shared report model's counts line
+    // (the same one the PDF prints), not a page-only "Scanned N" sentence.
+    expect(container!.textContent).toContain("Scanned: 2 symbol(s)");
   });
 
   it("shows the named failure when the run fails", async () => {

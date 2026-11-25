@@ -32,19 +32,13 @@
  */
 
 import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
-import { huntCountsExplanation } from "../services/opportunityHunt";
-import type {
-  OpportunityHuntResult,
-  OpportunityHuntSetup,
-} from "../services/opportunityHunt";
+import type { OpportunityHuntResult } from "../services/opportunityHunt";
 import {
-  groupHuntSetupsBySymbol,
-  formatHuntPrice,
-  formatHuntPct,
-  type OpportunityHuntSymbolRow,
-} from "../client/opportunityHuntView";
+  buildOpportunityHuntReportModel,
+  type OpportunityHuntReportModel,
+} from "../client/opportunityHuntReportModel";
+import { formatHuntPrice } from "../client/opportunityHuntView";
 import { cleanForPdf } from "./pdfText";
-import { formatReportTimestamp } from "./screenerReportPdf";
 import {
   PDF_CONTENT_W,
   PDF_MARGIN,
@@ -78,11 +72,6 @@ const PRINT_LEVEL_STOP: [number, number, number] = [0.85, 0.25, 0.25];
 const PRINT_LEVEL_TAKE: [number, number, number] = [0.15, 0.55, 0.25];
 const PRINT_LEVEL_BASIS: [number, number, number] = [0.45, 0.35, 0.65];
 
-
-/** How many symbols the pattern-count chart shows. The table below
- *  lists every symbol; the chart is a visualization, so it shows
- *  the top N by pattern count and says so — never a silent cut. */
-const PATTERN_CHART_TOP_N = 20;
 
 interface BarEntry {
   label: string;
@@ -266,18 +255,6 @@ function renderPriceChart(
   ctx.y = yBottom - 14;
 }
 
-function entryRangeText(row: OpportunityHuntSymbolRow): string {
-  return row.entryLow !== null && row.entryHigh !== null
-    ? `${formatHuntPrice(row.entryLow)} – ${formatHuntPrice(row.entryHigh)}`
-    : "—";
-}
-
-function strategyList(setups: OpportunityHuntSetup[]): string {
-  return setups.length > 0
-    ? setups.map((s) => s.strategy).join(", ")
-    : "—";
-}
-
 /** The per-symbol table's columns, in the panel's order. */
 const HUNT_TABLE_COLUMNS: PdfTableColumn[] = [
   { header: "Symbol", w: 84 },
@@ -290,158 +267,106 @@ const HUNT_TABLE_COLUMNS: PdfTableColumn[] = [
   { header: "Last close", w: 72 },
 ];
 
-export async function generateOpportunityHuntPdf(
-  result: OpportunityHuntResult,
+export async function renderOpportunityHuntPdf(
+  model: OpportunityHuntReportModel,
 ): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const bold = await doc.embedFont(StandardFonts.HelveticaBold);
   const ctx = createPdfCtx(doc, font, bold);
 
-  // The panel's own grouping — one row per symbol — so the PDF's
-  // table is the panel's table, sorted by the panel's default
-  // (symbol ascending).
-  const rows = groupHuntSetupsBySymbol(result);
-  const entries = result.setups.filter((s) => s.direction === "entry");
-  const exits = result.setups.filter((s) => s.direction === "exit");
-  // Issue 6478 — "evaluated" and "with setups" are different populations now:
-  // every evaluated symbol is a row, and most may carry zero patterns.
-  const symbolsWithSetups = rows.filter((row) => row.patternCount > 0).length;
-
-  // Header
-  text(ctx, "Opportunity Hunt Report", { size: 16, bold: true });
-  text(ctx, `As of ${formatReportTimestamp(result.asOf)}`, { size: 10, color: PDF_PRINT_MUTED });
-  text(ctx, result.summary, { size: 10, color: PDF_PRINT_MUTED });
+  // Header — every string comes from the shared model (issue 6479), so the
+  // page and this PDF cannot word the same report differently.
+  text(ctx, model.title, { size: 16, bold: true });
+  text(ctx, `As of ${model.asOfLabel}`, { size: 10, color: PDF_PRINT_MUTED });
+  text(ctx, model.summary, { size: 10, color: PDF_PRINT_MUTED });
   rule(ctx);
 
   // Summary
   text(ctx, "Summary", { size: 12, bold: true });
-  text(
-    ctx,
-    `Scanned: ${result.scanned} symbol(s)   Setups: ${result.setups.length}   Entries: ${entries.length}   Exits: ${exits.length}   Symbols evaluated: ${rows.length}   Symbols with setups: ${symbolsWithSetups}${result.skipped > 0 ? `   Skipped (short history): ${result.skipped}` : ""}`,
-    { size: 10 },
-  );
-  if (result.holdingsStatus && !result.holdingsStatus.available) {
-    text(
-      ctx,
-      `Exit signals unavailable — the hunt ran on entries only: the holdings read did not report${result.holdingsStatus.broker ? ` for ${result.holdingsStatus.broker}` : ""}${result.holdingsStatus.reason ? ` — ${result.holdingsStatus.reason}` : ""}. No exit was silently dropped; there was nothing held to evaluate.`,
-      { size: 9, color: PDF_PRINT_NOTE },
-    );
-  } else if (result.holdingsStatus?.available) {
-    text(
-      ctx,
-      `Exits evaluated against holdings from the selected broker${result.holdingsStatus.broker ? ` (${result.holdingsStatus.broker})` : ""}.`,
-      { size: 9, color: PDF_PRINT_NOTE },
-    );
+  text(ctx, model.summaryCountsLine, { size: 10 });
+  if (model.holdingsHeading) {
+    text(ctx, model.holdingsHeading, { size: 9, bold: true, color: PDF_PRINT_NOTE });
   }
-  // Issue #6473 — "how did N symbols become M setups?" is answerable from the
-  // run's own counts, so the report answers it instead of leaving the reader to
-  // wonder: a symbol carries one setup per strategy that fired, and exits are
-  // counted apart from entries. Computed here, never asserted; rendered for a
-  // zero-setup run too, because "0 setups" is still the run's arithmetic.
-  text(ctx, "How the counts add up", { size: 12, bold: true });
-  text(ctx, huntCountsExplanation(result), { size: 10 });
+  if (model.holdingsNote) {
+    text(ctx, model.holdingsNote, { size: 9, color: PDF_PRINT_NOTE });
+  }
+  // Issue #6473 — "how did N symbols become M setups?" is answered from the
+  // run's own counts. The wording lives in the model, not here.
+  text(ctx, model.countsHeading, { size: 12, bold: true });
+  text(ctx, model.countsExplanation, { size: 10 });
   rule(ctx);
 
-  if (result.setups.length === 0) {
+  if (model.noSetupsNote) {
     text(ctx, "No setups", { size: 12, bold: true });
-    text(
-      ctx,
-      `The latest bar produced no entry or exit signal for any of the ${rows.length} evaluated symbol(s).`,
-      { size: 10, color: PDF_PRINT_MUTED },
-    );
+    text(ctx, model.noSetupsNote, { size: 10, color: PDF_PRINT_MUTED });
     rule(ctx);
-  } else {
-    // Per-strategy breakdown: entries and exits per strategy.
-    const strategies = [...new Set(result.setups.map((s) => s.strategy))].sort();
-    const strategyBars: BarEntry[] = [];
-    for (const strategy of strategies) {
-      const e = entries.filter((s) => s.strategy === strategy).length;
-      const x = exits.filter((s) => s.strategy === strategy).length;
-      if (e > 0) strategyBars.push({ label: `${strategy} — entries`, value: e, color: PRINT_ENTRY_BAR });
-      if (x > 0) strategyBars.push({ label: `${strategy} — exits`, value: x, color: PRINT_EXIT_BAR });
-    }
-    renderBarChart(ctx, "Setups by strategy", strategyBars, { labelWidth: 220 });
   }
 
-  // Per-symbol pattern-count chart: top N by pattern count over the EVALUATED
-  // population (issue 6478). All-zero patterns would draw an empty chart, so a
-  // run where nothing fired skips the chart instead of drawing 20 zero bars.
-  const byPatterns = [...rows].sort(
-    (a, b) => b.patternCount - a.patternCount || a.symbol.localeCompare(b.symbol),
-  );
-  const top = byPatterns.slice(0, PATTERN_CHART_TOP_N);
-  if (top.some((row) => row.patternCount > 0)) {
+  // Per-strategy breakdown: entries and exits per strategy.
+  if (model.strategyBars.length > 0) {
+    const bars: BarEntry[] = model.strategyBars.map((bar) => ({
+      label: bar.label,
+      value: bar.value,
+      color: bar.side === "entry" ? PRINT_ENTRY_BAR : PRINT_EXIT_BAR,
+    }));
+    renderBarChart(ctx, "Setups by strategy", bars, { labelWidth: 220 });
+  }
+
+  // Per-symbol pattern count over the evaluated population (issue 6478). An
+  // all-zero chart would be noise, so a run where nothing fired skips it.
+  if (model.patternBars.some((bar) => bar.count > 0)) {
     renderBarChart(
       ctx,
-      `Pattern count by symbol (top ${top.length} of ${rows.length} evaluated)`,
-      top.map((row) => ({ label: row.symbol, value: row.patternCount, color: PRINT_COUNT_BAR })),
+      model.patternChartTitle,
+      model.patternBars.map((bar) => ({
+        label: bar.symbol,
+        value: bar.count,
+        color: PRINT_COUNT_BAR,
+      })),
       { labelWidth: 84 },
     );
   }
 
-  if (rows.length > 0) {
-    // Main table — the panel's table, one row per EVALUATED symbol.
+  if (model.tableRows.length > 0) {
     renderTable(
       ctx,
-      `Symbols evaluated (${rows.length})`,
+      model.tableHeading,
       HUNT_TABLE_COLUMNS,
-      rows.map((row) => [
+      model.tableRows.map((row) => [
         row.symbol,
-        String(row.patternCount),
-        strategyList(row.entries),
-        strategyList(row.exits),
-        entryRangeText(row),
-        formatHuntPrice(row.stopLoss),
-        formatHuntPrice(row.takeProfit),
-        formatHuntPrice(row.lastClose),
+        row.patterns,
+        row.entries,
+        row.exits,
+        row.entryRange,
+        row.stopLoss,
+        row.takeProfit,
+        row.lastClose,
       ]),
     );
 
-    // Per-symbol detail — the panel's detail card, for every evaluated symbol:
-    // grouped entry and exit recommendations with their price ranges, and the
-    // price chart. A symbol with no setup says so and still carries its chart
-    // (issue 6478): the reader sees what was evaluated and found uninteresting.
-    for (const row of rows) {
-      const hasSetup = row.patternCount > 0;
-      text(ctx, `${row.symbol} — ${hasSetup ? "recommendations" : "no setup"}`, { size: 12, bold: true });
-      const gainText =
-        row.exitGainPct !== null
-          ? ` · exits ${formatHuntPct(row.exitGainPct)} vs cost basis`
-          : "";
-      text(ctx, `Last close ${formatHuntPrice(row.lastClose)}${gainText}.`, { size: 9, color: PDF_PRINT_MUTED });
-      if (!hasSetup) {
-        text(
-          ctx,
-          "No setup — this symbol was evaluated and no strategy produced an entry or exit signal.",
-          { size: 9, color: PDF_PRINT_MUTED },
-        );
+    // Per-symbol detail — the model's section text, for every evaluated
+    // symbol, with the chart drawn from the section's own series and levels.
+    for (const section of model.sections) {
+      text(ctx, section.heading, { size: 12, bold: true });
+      text(ctx, section.lastCloseLine, { size: 9, color: PDF_PRINT_MUTED });
+      if (section.noSetupNote) {
+        text(ctx, section.noSetupNote, { size: 9, color: PDF_PRINT_MUTED });
       }
-      if (row.entries.length > 0) {
-        text(ctx, "Entry recommendations", { size: 10, bold: true, color: PRINT_SUCCESS });
-        for (const setup of row.entries) {
-          const levels = setup.levels
-            ? ` — enter ${formatHuntPrice(setup.levels.entryLow)} – ${formatHuntPrice(setup.levels.entryHigh)}, stop-loss ${formatHuntPrice(setup.levels.stopLoss)}, take-profit ${formatHuntPrice(setup.levels.takeProfit)}`
-            : "";
-          text(ctx, `• ${setup.strategy}: ${setup.detail}${levels}.`, { size: 9 });
+      if (section.entryLines.length > 0) {
+        text(ctx, section.entryHeading, { size: 10, bold: true, color: PRINT_SUCCESS });
+        for (const line of section.entryLines) {
+          text(ctx, line, { size: 9 });
         }
       }
-      if (row.exits.length > 0) {
-        text(ctx, "Exit recommendations", { size: 10, bold: true, color: PDF_PRINT_DANGER });
-        for (const setup of row.exits) {
-          const gain =
-            setup.entryPrice
-              ? ` (${formatHuntPct((setup.lastClose - setup.entryPrice) / setup.entryPrice)})`
-              : "";
-          text(
-            ctx,
-            `• ${setup.strategy}: ${setup.detail} — exit at ${formatHuntPrice(setup.lastClose)}, entered at ${formatHuntPrice(setup.entryPrice)}${gain}.`,
-            { size: 9 },
-          );
+      if (section.exitLines.length > 0) {
+        text(ctx, section.exitHeading, { size: 10, bold: true, color: PDF_PRINT_DANGER });
+        for (const line of section.exitLines) {
+          text(ctx, line, { size: 9 });
         }
       }
-      const closes = row.closes ?? result.seriesBySymbol?.[row.symbol] ?? [];
-      if (closes.length >= 2) {
+      const row = section.row;
+      if (section.closes.length >= 2) {
         const levels: PriceLevel[] = [];
         if (row.entryLow !== null) levels.push({ value: row.entryLow, label: `Entry ${formatHuntPrice(row.entryLow)}`, color: PRINT_LEVEL_ENTRY });
         if (row.entryHigh !== null) levels.push({ value: row.entryHigh, label: `Entry ${formatHuntPrice(row.entryHigh)}`, color: PRINT_LEVEL_ENTRY });
@@ -451,27 +376,30 @@ export async function generateOpportunityHuntPdf(
         if (basis !== undefined && basis !== null) {
           levels.push({ value: basis, label: `Cost basis ${formatHuntPrice(basis)}`, color: PRINT_LEVEL_BASIS });
         }
-        renderPriceChart(ctx, closes, levels, 420, 84);
+        renderPriceChart(ctx, section.closes, levels, 420, 84);
       }
       rule(ctx);
     }
   }
 
-  // Methodology footer
+  // Methodology footer — the model's wording, shared with the page.
   ensureSpace(ctx, 60);
   text(ctx, "Methodology", { size: 10, bold: true });
-  const notes = [
-    "Data: the hunt evaluates the pattern strategies over the tradable universe's daily closes from the persisted technicals bars; a hunt that finds nothing is a completed hunt, not an error.",
-    "Exits: evaluated against the tenant's holdings from the selected broker (long equity with a known cost basis only); an unavailable holdings read degrades to entries only with the reason stated, never a silent drop.",
-    "Levels: entry range, stop-loss, and take-profit are recommendation levels derived from the latest close with the per-strategy percentages in the externalized levels config — they are not the evaluator's exit triggers.",
-    "This report renders the same output the Opportunity Hunt panel shows: one row per symbol, pattern count, entry and exit signals grouped per entry and per exit, with their price ranges.",
-  ];
-  for (const n of notes) text(ctx, `* ${n}`, { size: 7.5, color: PDF_PRINT_NOTE });
+  for (const note of model.methodology) {
+    text(ctx, `* ${note}`, { size: 7.5, color: PDF_PRINT_NOTE });
+  }
 
   // Page numbers across all pages
   addPageNumbers(doc, font);
 
   return doc.save();
+}
+
+/** Build the one view model, then render it — no content decision here. */
+export async function generateOpportunityHuntPdf(
+  result: OpportunityHuntResult,
+): Promise<Uint8Array> {
+  return renderOpportunityHuntPdf(buildOpportunityHuntReportModel(result));
 }
 
 export function opportunityHuntPdfFileName(result: OpportunityHuntResult): string {
