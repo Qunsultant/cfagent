@@ -55,8 +55,8 @@ describe("Issue #3846 — Copilot-Autopilot Bridge, Autonomous Mode & Broker-Neu
       const prompt = buildOrchestratorSystemPrompt(PROMPT_BASE);
       expect(prompt).toContain("Broker-Neutral Trading & Market Screening (Alpaca Paper)");
       expect(prompt).toContain("Active broker is Alpaca (Paper) — never ask which broker to use.");
-      expect(prompt).toContain("tool_openaimp_alpaca_get_quote");
-      expect(prompt).toContain("tool_openaimp_alpaca_preview_order");
+      expect(prompt).toContain("tool_openaimp_market_data_get_quote");
+      expect(prompt).toContain("tool_openaimp_broker_order_preview");
       expect(prompt).toContain("tool_openaimp_alpaca_place_order");
       expect(prompt).not.toContain("6. E*TRADE Trading & Market Screening");
       expect(prompt).not.toContain("Only execute via 'tool_openaimp_etrade_execute_order'");
@@ -73,8 +73,8 @@ describe("Issue #3846 — Copilot-Autopilot Bridge, Autonomous Mode & Broker-Neu
         brokerLabel: "E*TRADE",
         modeId: "live",
         modeLabel: "Live",
-        quoteTool: "tool_openaimp_etrade_get_quote",
-        previewTool: "tool_openaimp_etrade_preview_order",
+        quoteTool: "tool_openaimp_market_data_get_quote",
+        previewTool: "tool_openaimp_broker_order_preview",
         executeTool: "tool_openaimp_etrade_execute_order",
         executionPolicy: "hitl",
       });
@@ -86,8 +86,8 @@ describe("Issue #3846 — Copilot-Autopilot Bridge, Autonomous Mode & Broker-Neu
       });
       expect(prompt).toContain("Broker-Neutral Trading & Market Screening (E*TRADE Live)");
       expect(prompt).toContain("Active broker is E*TRADE (Live) — never ask which broker to use.");
-      expect(prompt).toContain("tool_openaimp_etrade_get_quote");
-      expect(prompt).toContain("tool_openaimp_etrade_preview_order");
+      expect(prompt).toContain("tool_openaimp_market_data_get_quote");
+      expect(prompt).toContain("tool_openaimp_broker_order_preview");
       expect(prompt).toContain("tool_openaimp_etrade_execute_order");
     });
 
@@ -108,7 +108,7 @@ describe("Issue #3846 — Copilot-Autopilot Bridge, Autonomous Mode & Broker-Neu
         activeMode: "paper",
       });
       expect(etradePaperPrompt).toContain("Stock Copilot Trading & Execution (E*TRADE Paper — Mode: HITL)");
-      expect(etradePaperPrompt).toContain("tool_openaimp_etrade_preview_order");
+      expect(etradePaperPrompt).toContain("tool_openaimp_broker_order_preview");
     });
   });
 
