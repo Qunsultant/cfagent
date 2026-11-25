@@ -103,14 +103,19 @@ function renderBarChart(
   opts: { labelWidth?: number; maxValue?: number } = {},
 ): void {
   if (bars.length === 0) return;
-  text(ctx, title, { size: 12, bold: true });
   const labelW = opts.labelWidth ?? 140;
   const valueW = 48;
   const barAreaW = PDF_CONTENT_W - labelW - valueW - 8;
   const maxValue = opts.maxValue ?? Math.max(...bars.map((b) => b.value), 0);
   const barH = 11;
   const gap = 4;
-  ensureSpace(ctx, bars.length * (barH + gap) + 8);
+  // Issue #6473 — the heading must not be orphaned. Reserve the title plus the
+  // first few bars BEFORE drawing anything, so a page never ends on a heading;
+  // a chart longer than the page re-draws its title on each continuation page
+  // (the per-bar check below), which is why only the head of the block is
+  // reserved here rather than the whole chart.
+  ensureSpace(ctx, 18 + Math.min(bars.length, CHART_HEAD_BARS) * (barH + gap));
+  text(ctx, title, { size: 12, bold: true });
   for (const bar of bars) {
     const pageBefore = ctx.page;
     ensureSpace(ctx, barH + gap);
@@ -146,6 +151,35 @@ function renderBarChart(
   }
   ctx.y -= 4;
   rule(ctx);
+}
+
+/** Bars the heading reserves under itself, so it is never the last thing on a page. */
+const CHART_HEAD_BARS = 4;
+
+/**
+ * Issue #6473 — place one label per level so no two overlap, inside the chart
+ * box. Inputs are the levels' y positions (ascending or not); the result is one
+ * label y per level, each at least MIN_LABEL_GAP from every other, clamped to
+ * [yBottom + 2, yTop - 10]. A level with room keeps its own line; a crowded one
+ * is nudged up, then down, until it fits — never dropped, so no level goes
+ * unlabelled.
+ */
+export function levelLabelYs(levelYs: readonly number[], yBottom: number, yTop: number): number[] {
+  const MIN_LABEL_GAP = 9;
+  const low = yBottom + 2;
+  const high = yTop - 10;
+  const placed: number[] = [];
+  return levelYs.map((ly) => {
+    const preferred = Math.min(Math.max(ly + 2, low), high);
+    let candidate = preferred;
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      if (!placed.some((y) => Math.abs(y - candidate) < MIN_LABEL_GAP)) break;
+      const up = candidate + MIN_LABEL_GAP;
+      candidate = up <= high ? up : Math.max(low, candidate - MIN_LABEL_GAP);
+    }
+    placed.push(candidate);
+    return candidate;
+  });
 }
 
 interface PriceLevel {
@@ -196,8 +230,15 @@ function renderPriceChart(
     borderColor: rgb(...PDF_PRINT_HAIRLINE),
     borderWidth: 0.5,
   });
-  // Level lines (behind the price line).
-  for (const level of levels) {
+  // Level lines (behind the price line). Labels are staggered by the helper
+  // below: entry and exit levels can sit within a few points of one another,
+  // and stacked labels were unreadable (issue #6473).
+  const labelYs = levelLabelYs(
+    levels.map((level) => py(level.value)),
+    yBottom,
+    yTop,
+  );
+  for (const [index, level] of levels.entries()) {
     const ly = py(level.value);
     ctx.page.drawLine({
       start: { x: x0, y: ly },
@@ -207,7 +248,7 @@ function renderPriceChart(
     });
     ctx.page.drawText(cleanForPdf(level.label), {
       x: x0 + 4,
-      y: Math.min(Math.max(ly + 2, yBottom + 2), yTop - 10),
+      y: labelYs[index],
       size: 7,
       font: ctx.bold,
       color: rgb(...level.color),
