@@ -14,7 +14,7 @@
  */
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { TradingPlatformRegistry } from "../src/trading";
-import { EtradeResearchDataProvider } from "../src/services/researchProviders";
+import { PlatformResearchDataProvider } from "../src/services/researchProviders";
 import { runResearchPipeline, type ResearchDataProvider } from "../src/services/researchPipeline";
 import { RESEARCH_CONFIG_DEFAULTS, type ResearchConfig } from "../src/services/researchConfig";
 import { DEFAULT_TENANT_PROVIDERS } from "../src/data/commercialPorts";
@@ -46,7 +46,7 @@ describe("5912-P01 the provider resolves the selected broker and mode", () => {
       .spyOn(TradingPlatformRegistry, "getPlatform")
       .mockReturnValue({} as never);
 
-    new EtradeResearchDataProvider(
+    new PlatformResearchDataProvider(
       {} as never,
       "trader@example.com",
       undefined,
@@ -70,7 +70,7 @@ describe("5974-P02 no selection uses the shared platform default", () => {
       .spyOn(TradingPlatformRegistry, "getPlatform")
       .mockReturnValue({} as never);
 
-    new EtradeResearchDataProvider({} as never, "trader@example.com");
+    new PlatformResearchDataProvider({} as never, "trader@example.com");
 
     expect(spy).toHaveBeenCalledWith(
       DEFAULT_TENANT_PROVIDERS.brokerId,
@@ -120,7 +120,7 @@ describe("5912-P04 an unknown broker refuses by name", () => {
   it("throws before any quote is attempted", () => {
     expect(
       () =>
-        new EtradeResearchDataProvider(
+        new PlatformResearchDataProvider(
           { TRADING_MODE: "live" } as never,
           "trader@example.com",
           undefined,

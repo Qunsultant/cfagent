@@ -52,7 +52,7 @@ import {
   type ResearchEvaluation,
   type StoredIdeaRecord,
 } from "../services/researchPipeline";
-import { EtradeResearchDataProvider } from "../services/researchProviders";
+import { PlatformResearchDataProvider } from "../services/researchProviders";
 import type { TradingPlatformId } from "../trading";
 import {
   resolveYahooHistoryDeps,
@@ -609,7 +609,7 @@ export class ResearchAgent extends PortThink {
           error: err instanceof Error ? err.message : String(err),
         });
       }
-      const provider = new EtradeResearchDataProvider(
+      const provider = new PlatformResearchDataProvider(
         this.env,
         userLogin,
         historyDeps,
@@ -820,7 +820,7 @@ export class ResearchAgent extends PortThink {
   /**
    * Issue #1122 (epic #1096 Phase 3): the discovery RUN TYPE. Runs the
    * Phase 1 goal/scenario discovery engine over this agent's provider
-   * seam (the same EtradeResearchDataProvider as runResearch — one
+   * seam (the same PlatformResearchDataProvider as runResearch — one
    * pipeline, discovery is a mode of it) and persists every proposal
    * through persistDiscoveredGoals: source "discovered", status
    * "proposed", tenant-scoped. There is deliberately no activation
@@ -880,7 +880,7 @@ export class ResearchAgent extends PortThink {
           error: err instanceof Error ? err.message : String(err),
         });
       }
-      const provider = new EtradeResearchDataProvider(
+      const provider = new PlatformResearchDataProvider(
         this.env,
         userLogin,
         historyDeps,
@@ -1164,7 +1164,7 @@ export class ResearchAgent extends PortThink {
           error: err instanceof Error ? err.message : String(err),
         });
       }
-      const provider = new EtradeResearchDataProvider(
+      const provider = new PlatformResearchDataProvider(
         this.env,
         login,
         historyDeps,
@@ -1310,7 +1310,7 @@ export class ResearchAgent extends PortThink {
           error: err instanceof Error ? err.message : String(err),
         });
       }
-      const provider = new EtradeResearchDataProvider(
+      const provider = new PlatformResearchDataProvider(
         this.env,
         login,
         historyDeps,

@@ -34,7 +34,7 @@ import type { ResearchReport } from "../src/services/researchPipeline";
 const mockGetQuote = vi.fn();
 
 vi.mock("../src/services/researchProviders", () => ({
-  EtradeResearchDataProvider: class {
+  PlatformResearchDataProvider: class {
     getQuote = mockGetQuote;
   },
 }));

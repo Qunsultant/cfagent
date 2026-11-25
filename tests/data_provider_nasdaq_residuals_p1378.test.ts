@@ -39,7 +39,7 @@ import {
 } from "../src/trading/screenerPipeline";
 import { DynamicMarketScreener } from "../src/trading/screener";
 import { DynamicOptionsScreener } from "../src/trading/optionsScreener";
-import { EtradeResearchDataProvider } from "../src/services/researchProviders";
+import { PlatformResearchDataProvider } from "../src/services/researchProviders";
 import { ETradeService } from "../src/services/etrade";
 import { ETradeTradingPlatform } from "../src/trading/etrade/platform";
 import { createLiveStockScreener } from "../src/services/screeningRuntime";
@@ -372,7 +372,7 @@ describe("(c1) research provider routing", () => {
       calls += 1;
       return stub;
     });
-    const provider = new EtradeResearchDataProvider(
+    const provider = new PlatformResearchDataProvider(
       {} as Env,
       "tester",
       undefined,
@@ -398,7 +398,7 @@ describe("(c1) research provider routing", () => {
     // console-info JSON fallback, not a console.warn line.
     const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
     try {
-      const provider = new EtradeResearchDataProvider({} as Env, "tester");
+      const provider = new PlatformResearchDataProvider({} as Env, "tester");
       await expect(provider.getUniverseSymbols("TECH")).resolves.toEqual([]);
       await expect(provider.etfMap()).resolves.toEqual(new Map());
       const events: Array<{ operation: string; level: string; fields: Record<string, unknown> }> = [];
