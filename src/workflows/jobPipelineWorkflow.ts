@@ -87,6 +87,8 @@ import { optionsChainStepDepsForWorkflow } from "../services/optionsChainPipelin
 import { createWorkflowResearchStepDeps } from "./researchWorkflowStageDeps";
 import { fetchWikipediaIndexHtml } from "../services/indexListJob";
 import type { JobPipelineDeps } from "../services/jobPipelineEngine";
+import type { JobEventSender } from "../services/jobPipelineEngine";
+import { sendManagedWorkflowEvent, type ManagedWorkflowBinding } from "./workflowInstanceSeam";
 import { JobPipelineError } from "../services/jobPipelineConfig";
 import {
   runJobPipelineWorkflowFlow,
@@ -413,10 +415,42 @@ export function createJobPipelineWorkflowDeps(env: Env): JobPipelineDeps {
       // into the shared registry in the workflow residency.
       createWorkflowResearchStepDeps(env),
     ),
+    /**
+     * Issue #3955 — the delivery half of the event channel: an approval
+     * decision (or a webhook, or a sibling stage) reaches the run's own
+     * workflow instance through the one instance seam.
+     */
+    sendEvent: createJobPipelineWorkflowEventSender(env),
     invocation: "workflow-shard",
     // Issue #4782 S3 — the policy resolves from this env (the
     // platform-default layer); the engine reads nothing itself.
     env: envStrings,
+  };
+}
+
+/**
+ * Issue #3955 — the workflow residency's delivery channel. Absent when the
+ * deployment binds no JOB_PIPELINE_WORKFLOW: the control plane then refuses
+ * delivery by name instead of reporting a delivery that never happened.
+ */
+export function createJobPipelineWorkflowEventSender(
+  env: Env,
+): JobEventSender | undefined {
+  const binding = env.JOB_PIPELINE_WORKFLOW as unknown as
+    | ManagedWorkflowBinding
+    | undefined;
+  if (!binding) return undefined;
+  return async (request) => {
+    if (!request.workflowInstanceId) {
+      throw new JobPipelineError(
+        "job_run_not_found",
+        `Job "${request.jobId}" run "${request.runId}" has no workflow instance to receive event "${request.event}"; this run executes inline, so it cannot be woken by delivery.`,
+      );
+    }
+    await sendManagedWorkflowEvent(binding, request.workflowInstanceId, {
+      type: request.event,
+      payload: request.payload,
+    });
   };
 }
 

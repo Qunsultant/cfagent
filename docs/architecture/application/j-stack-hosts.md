@@ -153,7 +153,7 @@ What is NOT a justification: there is no per-host engine variant. Every site con
 
 ## 7. How well J-stack uses the Cloudflare Workflow platform
 
-Partly — the ThinkWorkflow host binding is used as a durable host with a `step.do` journal, while the event-driven and pacing primitives are re-implemented on top. The reference doc §4 states the -ilities as built / partial / filed; this section states the platform-utilization facts the same way.
+Partly — the ThinkWorkflow host binding is used as a durable host with a `step.do` journal, while the pacing primitives and the options chain settlement wait are still re-implemented on top. The reference doc §4 states the -ilities as built / partial / filed; this section states the platform-utilization facts the same way.
 
 **Used.**
 
@@ -161,14 +161,23 @@ Partly — the ThinkWorkflow host binding is used as a durable host with a `step
 - **The ThinkWorkflow host instance id as replay proof.** `JobPipelineWorkflow.run` passes `workflowInstanceId: event.instanceId` (#4454): stable across replays of one instance, distinct across instances, so a replayed flow can prove it dispatched the still-running run it resumes.
 - **The binding as the durable host.** Five ThinkWorkflow host bindings in `wrangler.jsonc:41-53`, each with concurrency limit 1. The durable path is the workflow residency: define in D1, create the instance, poll the read-back (§3).
 
+- **`step.waitForEvent` as the engine's wait stage (#3955).** A
+  `wait.event` step waits for one named event and resumes on it; the
+  platform's timeout throw is classified (`isWorkflowWaitTimeout`) and
+  becomes the declared outcome `{outcome: "timeout"}` instead of failing
+  the instance. The wait name is the engine's, so a replay re-arms the same
+  wait. Delivery rides `instance.sendEvent` through
+  `sendManagedWorkflowEvent` (`src/workflows/workflowInstanceSeam.ts`) —
+  the seam now addresses instances for delivery as well as for starts.
+
 **Not used.**
 
-- **`step.waitForEvent` — not used; the host polls the read-back instead.** `awaitOptionsWorkflowRun` polls the durable read-back until the run settles (`src/workflows/optionsWorkflowHost.ts:742-757`). This is deliberate design owned by #4291 (closed, "await a hosted run's settlement: poll the read-back"), not an oversight and not a gap. The event-driven alternative — instance-event subscriptions (`instance.subscribe()`) — is tracked under #5785 (§8).
+- **`step.waitForEvent` in the options chain — still polling.** The engine's wait stage uses it (#3955); the chain's own settlement wait still polls the durable read-back (`awaitOptionsWorkflowRun`), which #2614 owns replacing.
 - **`step.sleep` — not used.** Backoff uses the engine's injected `sleep` timer (`JobPipelineDeps.sleep`, default a real unref'd timer); the stage runner's shard-children wait was the one place a sleep loop existed, and #3025 (closed) replaced it with step retries + `waitForEvent` for that path only (#3036). The sleep / retry / rollback step primitives are tracked under #5782 (§8).
 - **The platform's own retries — not used.** Retry is an engine-internal aspect in `executeUnit` (`src/services/jobPipelineEngine.ts:3002-3150`): a failed unit retries within its budget with backoff, and the budgets are externalized in `pipelinePolicy.ts`. The platform's per-step retry configuration is not wired.
 - **`async-alarm` — not used.** No production caller (§3).
 
-**Trackers.** The programme is #5780 (open, CAIO-quns, parent #5272): "[Programme] Cloudflare Workflows surface adoption into PortThinkWorkflow — steps, triggers, events, concurrency, rules." All seventeen of its sub-issues are open, including #5781 (consume `WorkflowStepContext` in `step.do` callbacks), #5782 (sleep / retry / rollback step primitives), #5785 (instance-event subscriptions for live run updates), #5786 (conformance pins: idempotency, granularity, no outside state), #5787 (TS DAG / concurrent steps), #5788 (per-workflow concurrency tuning above the blanket limit 1), and #5958 ("Retire engine-duplicated step primitives in favor of PortThinkWorkflow step primitives" — the sharpest one for the engine-re-implements-on-top finding). Related outside #5780: #2614 (open, step retries + `waitForEvent` replacing the poll loop for the options chain / scheduled paths) and #3955 (open, Blocker, durable event-wait / approval-wait stage incl. `sendEvent` — "Today: zero waitForEvent/sendEvent in jobPipelineEngine.ts, jobPipelineWorkflowFlow.ts, stageRunnerPorts.ts, chainJobCommands.ts"). #3025 is closed and covered only the stage runner's shard-children poll, not the host read-back poll.
+**Trackers.** The programme is #5780 (open, CAIO-quns, parent #5272): "[Programme] Cloudflare Workflows surface adoption into PortThinkWorkflow — steps, triggers, events, concurrency, rules." Nine of its sub-issues were closed with grounds on 2026-11-25 (the #5780 sequencing decision), which leaves one serial ten-landing train: #3955, #5783, #5491, #5278, #5782, #5781, #5958, #5279, #2614 and #5786, with #5794, #5788 and #5796 held on a gated watch list. Related outside #5780: #2614 (open, step retries + `waitForEvent` replacing the poll loop for the options chain / scheduled paths) and #3955 (open, Blocker, durable event-wait / approval-wait stage incl. `sendEvent` — built in `jobPipelineEngine.ts`, `jobPipelineWorkflowFlow.ts` and `workflowEventWait.ts`; the poll loop on the options read-back is #2614's to retire). #3025 is closed and covered only the stage runner's shard-children poll, not the host read-back poll.
 
 ## 8. Tracker map — which programme owns which gap
 

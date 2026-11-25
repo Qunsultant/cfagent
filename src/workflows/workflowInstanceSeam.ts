@@ -54,6 +54,8 @@ const structuredLog = createStructuredLogger(createObservabilitySink({}), {
 
 /** Minimal structural surface the seam needs from a binding (no provider types). */
 export interface ManagedWorkflowBindingInstance {
+  /** Issue #3955 — the delivery half of the durable event wait; absent on shapes that cannot receive events. */
+  sendEvent?: (event: { type: string; payload: unknown }) => Promise<void>;
   id?: string;
   /** Absent on payment-shaped bindings: treated as "not adoptable", never as an adoption. */
   status?: () => Promise<{
@@ -197,6 +199,27 @@ export async function startManagedWorkflowInstance(
  * its derived id. Stored wins because the derived id is wrong for
  * every fallback-created instance.
  */
+/**
+ * Issue #3955 — deliver one named event to an instance, through the SAME
+ * seam that starts them (this module is the one place that addresses a
+ * workflow binding). Refuses by name when the instance cannot receive
+ * events: a dropped approval is worse than a failed delivery.
+ */
+export async function sendManagedWorkflowEvent(
+  binding: ManagedWorkflowBinding,
+  instanceId: string,
+  event: { type: string; payload: unknown },
+): Promise<void> {
+  const instance = await binding.get(instanceId);
+  if (typeof instance.sendEvent !== "function") {
+    throw new WorkflowError(
+      "send_event_unsupported",
+      `Workflow instance "${instanceId}" does not expose sendEvent; event "${event.type}" was not delivered.`,
+    );
+  }
+  await instance.sendEvent(event);
+}
+
 export function resolveWorkflowRunId(
   stored: string | undefined,
   derived: string,
