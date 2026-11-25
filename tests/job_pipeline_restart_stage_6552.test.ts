@@ -1,13 +1,12 @@
 // @vitest-environment node
 /**
  * Issue #6552 — rewind a LIVE run to a stage's first step through the
- * platform's own restart.
+ * platform's own restart. Issue #6560 — including sharded and per-item
+ * stages, whose target is derived from the same plan the executor compiles.
  *
  * The engine's `rerunStage` is not this op and must not become it: it refuses
  * while a run is live and re-executes a stage from the engine's artifacts,
- * while the platform restart rewinds a live instance. This pins the new op's
- * whole contract — the step name it derives, and every refusal that keeps it
- * from rewinding the wrong thing.
+ * while the platform restart rewinds a live instance.
  */
 import { describe, expect, it } from "vitest";
 import { createInMemoryJobPipelineStores } from "../src/data/inMemoryJobPipelineAdapter";
@@ -41,7 +40,7 @@ function makeHarness(restart?: JobPipelineRestartRun): Harness {
 }
 
 /** A real instance record, rewound to the shape a live dispatched run has. */
-async function seedRunning(h: Harness, jobId: string): Promise<string> {
+async function seedRunning(h: Harness, jobId: string): Promise<void> {
   await h.control.defineJob({
     jobId: "seed",
     root: {
@@ -50,7 +49,7 @@ async function seedRunning(h: Harness, jobId: string): Promise<string> {
       executionMode: { delivery: "sync" },
     },
   });
-  const dispatch = await h.control.runJob("seed");
+  await h.control.runJob("seed");
   const template = (await h.control.getJob("seed")).instance;
   if (!template) throw new Error("instance missing");
   await h.stores.instances.saveInstance({
@@ -61,13 +60,13 @@ async function seedRunning(h: Harness, jobId: string): Promise<string> {
     currentRunId: "run-1",
     runWorkflowInstanceId: "wf-1",
   });
-  return dispatch.runId;
 }
 
-describe("restart from a stage through the platform (#6552)", () => {
-  it("rewinds to the stage's first step, using the engine's own step name", async () => {
-    const calls: { jobId: string; runId: string; workflowInstanceId: string; fromStep: string }[] =
-      [];
+type Call = { jobId: string; runId: string; workflowInstanceId: string; fromStep: string };
+
+describe("restart from a stage through the platform (#6552 / #6560)", () => {
+  it("rewinds an unsharded batch stage to step 0 of the stage", async () => {
+    const calls: Call[] = [];
     const h = makeHarness(async (request) => {
       calls.push(request);
     });
@@ -81,9 +80,7 @@ describe("restart from a stage through the platform (#6552)", () => {
     });
     await seedRunning(h, "flow");
 
-    const dispatch = await h.control.restartFromStage("flow", "");
-    expect(dispatch.state).toBe("running");
-    // The exact name the engine gave step 0 of this stage in this run.
+    expect((await h.control.restartFromStage("flow", "")).state).toBe("running");
     expect(calls).toEqual([
       {
         jobId: "flow",
@@ -94,32 +91,32 @@ describe("restart from a stage through the platform (#6552)", () => {
     ]);
   });
 
-  it("refuses a sharded stage by name instead of rewinding one shard's step", async () => {
-    let called = 0;
-    const h = makeHarness(async () => {
-      called += 1;
+  it("derives a sharded stage's target from the plan's first unit", async () => {
+    const calls: Call[] = [];
+    const h = makeHarness(async (request) => {
+      calls.push(request);
     });
     await h.control.defineJob({
       jobId: "flow",
       root: {
         kind: "dummy",
         steps: [{ step: "noop" }],
-        processing: { shards: ["a", "b"] },
-        executionMode: { delivery: "sync" },
+        processing: { shards: ["alpha", "beta"] },
+        executionMode: { delivery: "sync", shape: "sharded" },
       },
     });
     await seedRunning(h, "flow");
 
-    await expect(h.control.restartFromStage("flow", "")).rejects.toMatchObject({
-      code: "stage_restart_unaddressable",
-    });
-    expect(called).toBe(0);
+    await h.control.restartFromStage("flow", "");
+    // Rewinding to the first unit's step discards every later step, so the
+    // whole stage re-runs — the same rule the executor's plan follows.
+    expect(calls[0].fromStep).toBe(stepExecutionId("run-1", "", 0, "alpha", null));
   });
 
-  it("refuses per-item pacing the same way", async () => {
-    let called = 0;
-    const h = makeHarness(async () => {
-      called += 1;
+  it("derives a per-item stage's target as item 0", async () => {
+    const calls: Call[] = [];
+    const h = makeHarness(async (request) => {
+      calls.push(request);
     });
     await h.control.defineJob({
       jobId: "flow",
@@ -131,10 +128,8 @@ describe("restart from a stage through the platform (#6552)", () => {
     });
     await seedRunning(h, "flow");
 
-    await expect(h.control.restartFromStage("flow", "")).rejects.toMatchObject({
-      code: "stage_restart_unaddressable",
-    });
-    expect(called).toBe(0);
+    await h.control.restartFromStage("flow", "");
+    expect(calls[0].fromStep).toBe(stepExecutionId("run-1", "", 0, null, 0));
   });
 
   it("refuses a run that is not live", async () => {
