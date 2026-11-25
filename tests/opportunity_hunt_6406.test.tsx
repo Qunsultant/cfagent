@@ -510,7 +510,9 @@ describe("OpportunityHuntPanel report view (issue 6406)", () => {
       holdingsStatus: { available: true, broker: "alpaca" },
       seriesBySymbol: { AAAA: [100, 104], BBBB: [100, 120] },
     });
-    const text = container!.textContent ?? "";
+    // Issue #6473 — the per-symbol detail now opens in a dialog, which Modal
+    // portals to the document body, so the detail text is read from there.
+    const text = document.body.textContent ?? "";
     // One row per symbol: AAAA appears once in the table (plus once in the
     // selected-symbol detail), BBBB once in the table.
     expect(text).toContain("AAAA");
@@ -525,8 +527,13 @@ describe("OpportunityHuntPanel report view (issue 6406)", () => {
     expect(text).toContain("entered at $100.00");
     expect(text).toContain("(+4.0%)");
     // The detail chart is mounted for the selected symbol (AAAA, first row).
-    const chartImg = container!.querySelector('[role="img"]');
-    expect(chartImg?.getAttribute("aria-label")).toContain("AAAA");
+    // The row sparklines are role=img too; the chart is the one that is not a
+    // "Trend for …" sparkline.
+    const chartImg = [...document.querySelectorAll('[role="img"]')].find((el) => {
+      const label = el.getAttribute("aria-label") ?? "";
+      return label.includes("AAAA") && !label.startsWith("Trend for");
+    });
+    expect(chartImg).toBeTruthy();
   });
 
   it("states the reason when exits are unavailable instead of dropping them silently", async () => {
