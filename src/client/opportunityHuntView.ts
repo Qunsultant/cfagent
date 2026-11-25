@@ -19,6 +19,13 @@ export interface OpportunityHuntSymbolRow {
   exits: OpportunityHuntSetup[];
   /** Latest close — the same bar for every strategy on the symbol. */
   lastClose: number;
+  /**
+   * The evaluated symbol's trailing closes, oldest → newest (capped by the
+   * hunt) — the one series the page's sparkline/dialog and the PDF's price
+   * chart draw from. Issue 6478: present for every evaluated symbol, not only
+   * the ones with a setup.
+   */
+  closes: readonly number[];
   /** Entry range rolled up across the symbol's entries (min low → max high). */
   entryLow: number | null;
   entryHigh: number | null;
@@ -41,11 +48,21 @@ export function groupHuntSetupsBySymbol(
     list.push(setup);
     bySymbol.set(setup.symbol, list);
   }
+  // Issue 6478 — the report is over the EVALUATED universe. A symbol with no
+  // setup is still a row (pattern count 0) with its chart series; otherwise
+  // the report silently answers "what fired" instead of "what was evaluated".
+  const symbols = new Set<string>(Object.keys(result.seriesBySymbol ?? {}));
+  for (const symbol of bySymbol.keys()) symbols.add(symbol);
   const rows: OpportunityHuntSymbolRow[] = [];
-  for (const [symbol, setups] of bySymbol) {
+  for (const symbol of symbols) {
+    const setups = bySymbol.get(symbol) ?? [];
+    const closes = result.seriesBySymbol?.[symbol] ?? [];
     const entries = setups.filter((s) => s.direction === "entry");
     const exits = setups.filter((s) => s.direction === "exit");
-    const lastClose = setups[0]?.lastClose ?? NaN;
+    // A no-setup row's latest close comes from its series (there is no setup
+    // carrying it); a legacy result without a series falls back to the setup.
+    const lastClose =
+      setups[0]?.lastClose ?? closes[closes.length - 1] ?? NaN;
     const entryLevels = entries
       .map((s) => s.levels)
       .filter((l): l is NonNullable<typeof l> => !!l);
@@ -59,6 +76,7 @@ export function groupHuntSetupsBySymbol(
       entries,
       exits,
       lastClose,
+      closes,
       entryLow: entryLevels.length
         ? Math.min(...entryLevels.map((l) => l.entryLow))
         : null,
