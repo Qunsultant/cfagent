@@ -134,6 +134,34 @@ describe("durable event-wait stage (#3955)", () => {
     });
   });
 
+  it("is not cut short by the stage deadline it was never declared under", async () => {
+    // A 10ms stage deadline would kill a 60ms wait if the unit deadline
+    // still applied. A durable wait is bounded by its own declaration, so
+    // the deadline stops applying to the stage that contains it.
+    const h = makeHarness({
+      wait: () =>
+        new Promise<JobEventWaitOutcome>((resolve) => {
+          setTimeout(() => resolve({ outcome: "event", payload: { late: true } }), 60);
+        }),
+    });
+    await h.control.defineJob({
+      jobId: "approval",
+      root: {
+        kind: "dummy",
+        timeoutMs: 10,
+        steps: [{ step: WAIT_EVENT_STEP, params: { event: "approval.decided" } }, { step: "record" }],
+        executionMode: { delivery: "sync" },
+      },
+    });
+    const dispatch = await h.control.runJob("approval");
+    expect(dispatch.state).toBe("completed");
+    expect(await h.stores.artifacts.getArtifact(dispatch.runId, "root/step-0")).toEqual({
+      outcome: "event",
+      event: "approval.decided",
+      payload: { late: true },
+    });
+  });
+
   it("never wraps the wait in the step journal (Rules of Workflows)", async () => {
     const journaled: string[] = [];
     const h = makeHarness({

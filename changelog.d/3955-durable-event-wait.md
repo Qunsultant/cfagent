@@ -6,5 +6,7 @@
 
 ### Changed
 
+- **A wait bounds itself (#3955):** a stage that contains a `wait.event` step is bounded by the wait declaration (or the host maximum), not the stage deadline — a 600s stage default would otherwise kill an approval wait at ten minutes.
+
 - **The platform's wait timeout is a declared outcome (#3955):** `waitForWorkflowEvent` / `isWorkflowWaitTimeout` classify the `step.waitForEvent` timeout throw once, so it becomes `{outcome: "timeout"}` while every other platform error still fails the run.
 - **The workflow residency wires both halves (#3955):** `JobPipelineWorkflow` builds the wait channel from its own step object and the delivery channel from its `JOB_PIPELINE_WORKFLOW` binding; a host that wires neither keeps the refusal by name.

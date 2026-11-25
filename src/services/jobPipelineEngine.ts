@@ -3801,7 +3801,7 @@ export class JobPipelineControl {
           ...(running?.startedAt ? { startedAt: running.startedAt } : {}),
         });
         try {
-          const executed = await this.withUnitDeadline(stage, () =>
+          const executed = await this.runUnit(stage, node, () =>
             this.execSteps(ctx, node, path, input, {
               mode: eff.mode,
               inMemory: eff.inMemory,
@@ -3956,6 +3956,22 @@ export class JobPipelineControl {
     } finally {
       ctx.activeUnits.delete(activeKey);
     }
+  }
+
+  /**
+   * Issue #3955 — a unit that contains a durable wait is bounded by the
+   * wait's own declaration (or the host's maximum), never by the stage
+   * deadline: a 600s stage default would otherwise kill an approval wait at
+   * ten minutes while looking like a timeout the job never declared. A unit
+   * with no wait keeps its stage deadline exactly as before.
+   */
+  private async runUnit<T>(
+    stage: StageRunnerStage,
+    node: JobNodeConfig,
+    fn: () => Promise<T>,
+  ): Promise<T> {
+    if ((node.steps ?? []).some((step) => step.step === WAIT_EVENT_STEP)) return fn();
+    return this.withUnitDeadline(stage, fn);
   }
 
   /** Race a unit's execution against its stage deadline; a unit past it is timed_out. */
