@@ -1,7 +1,7 @@
 /**
  * #928 (parent #913 S10) — Research chain fallback under the demo gate.
  *
- * EtradeResearchDataProvider.getChain fell through on live E*TRADE chain
+ * PlatformResearchDataProvider.getChain fell through on live E*TRADE chain
  * failure to buildCalibratedOptionChains WITHOUT consulting
  * isDemoCalibratedChainsEnabled(), while every other calibrated consumer
  * honors the gate. The fix gates the calibrated path:
@@ -18,7 +18,7 @@
  * the union would mislabel demo chains as live downstream.
  */
 import { describe, it, expect, afterEach } from "vitest";
-import { EtradeResearchDataProvider } from "../src/services/researchProviders";
+import { PlatformResearchDataProvider } from "../src/services/researchProviders";
 import type { Env } from "../src/types";
 
 function failingPlatform() {
@@ -57,7 +57,7 @@ function livePlatform() {
 }
 
 function providerWith(platform: unknown) {
-  const provider = new EtradeResearchDataProvider({} as Env, "tester");
+  const provider = new PlatformResearchDataProvider({} as Env, "tester");
   (provider as unknown as { platform: unknown }).platform = platform;
   return provider;
 }

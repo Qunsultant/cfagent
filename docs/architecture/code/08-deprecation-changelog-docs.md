@@ -78,8 +78,14 @@ table; this set links ADR files directly, never via the index.
 
 **Definition.** Platform-layer code and copy do not present one provider as
 the platform. Provider names live in the integration layer, behind the
-ports.
-**Status.** ENFORCED — `tests/neutrality_census_3525.test.ts`, shrink-only.
+ports. The rule covers declared identifiers, not only copy: a generic
+service, type, or route must be named for the capability, never for one
+broker (first slice #6508: the generic research provider is now
+`PlatformResearchDataProvider`).
+**Status.** ENFORCED — `tests/neutrality_census_3525.test.ts` (brand terms)
+and `tests/broker_named_identifier_census_6508.test.ts` (generic broker-named
+identifiers), both shrink-only; the identifier allowlist names every
+broker-scoped survivor and is removed row by row as renames land.
 **Conformance at `9925ead8`.** Baseline: 1,095 file×term rows / 8,533
 brand-term lines at base, shrink-only, cleared on touch. Platform rows were
 dispositioned in the #3525 programme; the remainder is baselined as

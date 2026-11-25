@@ -69,7 +69,7 @@ vi.mock("agents", () => ({
 const providerLogins: string[] = [];
 const mockGetQuote = vi.fn();
 vi.mock("../src/services/researchProviders", () => ({
-  EtradeResearchDataProvider: class {
+  PlatformResearchDataProvider: class {
     constructor(_env: unknown, userLogin: string) {
       providerLogins.push(userLogin);
     }

@@ -26,7 +26,7 @@ import {
   RESEARCH_CONFIG_DEFAULTS,
   type ResearchConfig,
 } from "../src/services/researchConfig";
-import { EtradeResearchDataProvider } from "../src/services/researchProviders";
+import { PlatformResearchDataProvider } from "../src/services/researchProviders";
 import type { Env } from "../src/types";
 
 const NOW = Date.now();
@@ -135,7 +135,7 @@ function expiryDates(dtes: number[]) {
 
 describe("research PMCC data window (#353)", () => {
   it("getChain selects both the near band and the LEAPS band", async () => {
-    const provider = new EtradeResearchDataProvider(
+    const provider = new PlatformResearchDataProvider(
       {} as Env,
       "tester"
     );

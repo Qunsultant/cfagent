@@ -3,7 +3,7 @@
  *
  * The production runner behind the NLQ `options_fit_discovery` action:
  * it executes Phase 2's bidirectional discovery against the live
- * research data fabric (`EtradeResearchDataProvider`, the same
+ * research data fabric (`PlatformResearchDataProvider`, the same
  * provider the research agent uses), and — only when the
  * `screening.weightsV2Ranking` flag is explicitly on — applies
  * Phase 5's strategy weights v2 to the ranking.
@@ -51,7 +51,7 @@ import {
 import { RecommendationService } from "./recommendationKernel";
 import { mapKernelNameDiscovery, mapKernelStrategyDiscovery } from "./kernelDiscoveryMapping";
 import { RESEARCH_CONFIG_DEFAULTS, type ResearchConfig } from "./researchConfig";
-import { EtradeResearchDataProvider } from "./researchProviders";
+import { PlatformResearchDataProvider } from "./researchProviders";
 import {
   resolveYahooHistoryDeps,
   nasdaqUniverseRouteBundle,
@@ -269,7 +269,7 @@ export function createFitDiscoveryRunner(deps: {
       const provider =
         deps.provider ??
         (deps.env
-          ? new EtradeResearchDataProvider(deps.env, deps.userLogin, historyDeps, universeDeps)
+          ? new PlatformResearchDataProvider(deps.env, deps.userLogin, historyDeps, universeDeps)
           : null);
       if (!provider) {
         return {

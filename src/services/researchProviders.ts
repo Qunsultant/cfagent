@@ -152,7 +152,7 @@ function chainToSnapshot(
  * only the resolution was hardcoded, so the name is kept and the selection
  * is a constructor option: unset resolves the configured default, as before.
  */
-export class EtradeResearchDataProvider implements ResearchDataProvider {
+export class PlatformResearchDataProvider implements ResearchDataProvider {
   private readonly platform: ITradingPlatform;
   /** Issue #6036 — the pair this provider actually executes (never a requested string). */
   readonly venue: ResearchVenue;

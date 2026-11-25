@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as eventCalendar from "../src/services/eventCalendar";
-import { EtradeResearchDataProvider } from "../src/services/researchProviders";
+import { PlatformResearchDataProvider } from "../src/services/researchProviders";
 
 describe("3737 research pipeline catalyst feed wiring", () => {
   afterEach(() => {
@@ -19,7 +19,7 @@ describe("3737 research pipeline catalyst feed wiring", () => {
       fetchedAt: "2026-11-19T12:00:00.000Z",
     });
 
-    const provider = new EtradeResearchDataProvider({} as any, "owner");
+    const provider = new PlatformResearchDataProvider({} as any, "owner");
     const catalysts = await provider.getCatalysts("AAPL");
     expect(catalysts).toEqual([
       {
@@ -48,7 +48,7 @@ describe("3737 research pipeline catalyst feed wiring", () => {
       fetchedAt: "2026-11-19T12:00:00.000Z",
     });
 
-    const provider = new EtradeResearchDataProvider({} as any, "owner");
+    const provider = new PlatformResearchDataProvider({} as any, "owner");
     expect(await provider.getCatalysts("MSFT")).toEqual([]);
 
     spy.mockResolvedValueOnce({

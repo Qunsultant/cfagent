@@ -7,7 +7,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TradingPlatformRegistry } from "../src/trading";
 import { AlpacaTradingPlatform } from "../src/trading/alpaca/platform";
-import { EtradeResearchDataProvider } from "../src/services/researchProviders";
+import { PlatformResearchDataProvider } from "../src/services/researchProviders";
 import type { Env } from "../src/types";
 
 afterEach(() => vi.restoreAllMocks());
@@ -26,7 +26,7 @@ describe("OODA Alpaca paper selection (#3277)", () => {
     } as unknown as Env;
     const getPlatform = vi.spyOn(TradingPlatformRegistry, "getPlatform");
 
-    new EtradeResearchDataProvider(env, "researcher@example.com", undefined, undefined, {
+    new PlatformResearchDataProvider(env, "researcher@example.com", undefined, undefined, {
       brokerId: "alpaca",
       mode: "paper",
     });
@@ -51,7 +51,7 @@ describe("OODA Alpaca paper selection (#3277)", () => {
     const env = { ALPACA_TRADING_TYPE: "live" } as unknown as Env;
     const getPlatform = vi.spyOn(TradingPlatformRegistry, "getPlatform");
 
-    new EtradeResearchDataProvider(env, "researcher@example.com", undefined, undefined, {
+    new PlatformResearchDataProvider(env, "researcher@example.com", undefined, undefined, {
       brokerId: "etrade",
       mode: "paper",
     });
