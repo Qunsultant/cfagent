@@ -782,24 +782,27 @@ describe("POST /api/schedules/create with autonomousStrategyDiscovery (#126)", (
     const agent = makeAgent();
     const { status, body } = await postCreate(agent, {
       scheduleType: "interval",
-      intervalSeconds: 3600,
-      // Issue #4235 — a 3600s interval is sub-daily, so creation
-      // carries the explicit per-schedule opt-in.
-      subDailyOptIn: true,
+      // Issue #6482 — a monthly cadence (2,592,000s): creation
+      // lands PAUSED and never arms the SDK, so the timing and the
+      // stamped payload are asserted on the paused record the route
+      // returns, not on an armed scheduleEvery call.
+      intervalSeconds: 2_592_000,
       callback: "autonomousStrategyDiscovery",
       payload: { requests: [VALID_REQUEST] },
     });
     expect(status).toBe(200);
     expect(body.success).toBe(true);
-    expect(scheduleEveryCalls).toHaveLength(1);
-    expect(scheduleEveryCalls[0][0]).toBe(3600);
-    expect(scheduleEveryCalls[0][1]).toBe("autonomousStrategyDiscovery");
-    expect(scheduleEveryCalls[0][2]).toMatchObject({
+    expect(body.paused).toBe(true);
+    expect(body.schedule.state).toBe("paused");
+    expect(scheduleEveryCalls).toHaveLength(0);
+    expect(body.schedule.definition.intervalSeconds).toBe(2_592_000);
+    expect(body.schedule.callback).toBe("autonomousStrategyDiscovery");
+    expect(body.schedule.definition.payload).toMatchObject({
       userLogin: authenticatedLogin,
       environment: "TEST",
       trigger: "scheduled",
     });
-    expect(scheduleEveryCalls[0][2].requests).toEqual([VALID_REQUEST]);
+    expect(body.schedule.definition.payload.requests).toEqual([VALID_REQUEST]);
   });
 
   it.each([
@@ -810,11 +813,11 @@ describe("POST /api/schedules/create with autonomousStrategyDiscovery (#126)", (
     const agent = makeAgent();
     const { status, body } = await postCreate(agent, {
       scheduleType: "interval",
-      intervalSeconds: 3600,
-      // Issue #4235 — a 3600s interval is sub-daily, so the request
-      // carries the explicit opt-in; the 400 under test then comes
-      // from the payload validator, as the test pins, not the cap.
-      subDailyOptIn: true,
+      // Issue #6482 — a monthly cadence: the 400 under test comes
+      // from the payload validator, as the test pins — a sub-daily
+      // interval would be refused by the floor first and the
+      // validator would never run.
+      intervalSeconds: 2_592_000,
       callback: "autonomousStrategyDiscovery",
       payload,
     });

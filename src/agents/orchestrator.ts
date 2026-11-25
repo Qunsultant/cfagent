@@ -87,6 +87,7 @@ import {
   createWorkflowStageScheduleAdapter,
   type WorkflowStageRegistry,
 } from "../services/workflowStageSchedule";
+import { resolveEffectiveScheduleFloor } from "../services/scheduleControls";
 import {
   definePipelineJobFromSpecViaDoor,
   jobStatusRouteContext,
@@ -1280,7 +1281,14 @@ export class OrchestratorAgent extends PortThink {
    * the ScheduledAgent door, with the schedule's owner as the acting
    * login. A payload without a job id throws: a dispatch never guesses.
    */
-  async runPipelineJobSchedule(payload: unknown): Promise<void> {
+  async runPipelineJobSchedule(payload: unknown, schedule?: { id?: unknown }): Promise<void> {
+    // Issue #6482 — this callback's SDK firings were unrecorded (no
+    // recordScheduleCallbackRun wrapper, unlike the other thirteen
+    // schedule callbacks), so the kill-switch choke point did not
+    // cover it. It now runs through the same wrapper as
+    // runResearchSchedule: the firing is recorded, and the
+    // kill-switch halts it like every other scheduled firing. A
+    // manual trigger (payload.trigger "manual") is never halted.
     const record =
       payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {};
     const jobId = typeof record.jobId === "string" ? record.jobId.trim() : "";
@@ -1293,8 +1301,21 @@ export class OrchestratorAgent extends PortThink {
       typeof record.userLogin === "string" && record.userLogin.trim()
         ? record.userLogin.trim()
         : undefined;
-    const door = getScheduledAgentDoor(this.env);
-    await door.runPipelineJob(jobId, { userLogin });
+    await recordScheduleCallbackRun(
+      this.ctx.storage.sql,
+      "runPipelineJobSchedule",
+      payload,
+      schedule,
+      async () => {
+        const door = getScheduledAgentDoor(this.env);
+        await door.runPipelineJob(jobId, { userLogin });
+        return { outcome: "success", descriptor: `pipeline job ${jobId} dispatched` };
+      },
+      {
+        env: this.env,
+        audit: (type, agent, body) => this.audit(type, agent, body),
+      },
+    );
   }
 
   /**
@@ -1336,6 +1357,7 @@ export class OrchestratorAgent extends PortThink {
         : { outcome: "failure", error: res.error ?? "research run failed" });
     };
     await recordScheduleCallbackRun(this.ctx.storage.sql, "runResearchSchedule", payload, schedule, run, {
+      env: this.env,
       audit: (type, agent, body) => this.audit(type, agent, body),
     });
   }
@@ -1384,7 +1406,13 @@ export class OrchestratorAgent extends PortThink {
           // The management service's store (the sync one, as the
           // routes use) — the same table the sdk adoptions write.
           store: unifiedStore.unifiedSchedulesSync,
-          alarms: makeScheduleAlarmsPort(this),
+          alarms: makeScheduleAlarmsPort(this, {
+            // Issue #6482 — the port resolves the effective floor per
+            // arm (managed setting > env carrier > default), so a
+            // floor set in the schedules home governs stage arms
+            // without a redeploy.
+            resolveFloor: () => resolveEffectiveScheduleFloor(this.ctx.storage.sql, this.env).seconds,
+          }),
           registry: stageRegistry,
           runCallback: makeRunScheduleCallback(this),
           nowIso: () => new Date().toISOString(),
@@ -1666,7 +1694,7 @@ export class OrchestratorAgent extends PortThink {
         result = await this.sweepStaleLedgerTasksUnrecorded(payload);
         return staleLedgerSweepOutcome(result);
       },
-      { audit: (type, agent, payload) => this.audit(type, agent, payload) },
+      { env: this.env, audit: (type, agent, payload) => this.audit(type, agent, payload) },
     );
     return result;
   }
@@ -1915,7 +1943,7 @@ export class OrchestratorAgent extends PortThink {
         await autoRenewETradeTokens(this.scheduledCallbacksContext(), payload);
         return { outcome: "success", descriptor: "token renewal complete" };
       },
-      { audit: (type, agent, payload) => this.audit(type, agent, payload) },
+      { env: this.env, audit: (type, agent, payload) => this.audit(type, agent, payload) },
     );
   }
 
@@ -1940,7 +1968,7 @@ export class OrchestratorAgent extends PortThink {
       payload,
       schedule,
       () => runWorkflowStage(this.scheduledCallbacksContext(), payload, schedule),
-      { audit: (type, agent, payload) => this.audit(type, agent, payload) },
+      { env: this.env, audit: (type, agent, payload) => this.audit(type, agent, payload) },
     );
   }
 
@@ -2151,7 +2179,7 @@ export class OrchestratorAgent extends PortThink {
           ...(guard.modeSource ? { modeSource: guard.modeSource } : {}),
         });
       },
-      { audit: (type, agent, payload) => this.audit(type, agent, payload) },
+      { env: this.env, audit: (type, agent, payload) => this.audit(type, agent, payload) },
     );
   }
 
@@ -2197,7 +2225,7 @@ export class OrchestratorAgent extends PortThink {
           ...(guard.modeSource ? { modeSource: guard.modeSource } : {}),
         });
       },
-      { audit: (type, agent, payload) => this.audit(type, agent, payload) },
+      { env: this.env, audit: (type, agent, payload) => this.audit(type, agent, payload) },
     );
   }
 
@@ -2361,7 +2389,7 @@ export class OrchestratorAgent extends PortThink {
         }
         return runBroker ? this.outcomeWithBinding(outcome, runBroker) : outcome;
       },
-      { audit: (type, agent, payload) => this.audit(type, agent, payload) },
+      { env: this.env, audit: (type, agent, payload) => this.audit(type, agent, payload) },
     );
   }
 
@@ -2385,7 +2413,7 @@ export class OrchestratorAgent extends PortThink {
           ...(guard.modeSource ? { modeSource: guard.modeSource } : {}),
         });
       },
-      { audit: (type, agent, payload) => this.audit(type, agent, payload) },
+      { env: this.env, audit: (type, agent, payload) => this.audit(type, agent, payload) },
     );
   }
 
@@ -2402,7 +2430,7 @@ export class OrchestratorAgent extends PortThink {
         await collectIvHistory(this.scheduledCallbacksContext(), payload);
         return { outcome: "success", descriptor: "IV collection complete" };
       },
-      { audit: (type, agent, payload) => this.audit(type, agent, payload) },
+      { env: this.env, audit: (type, agent, payload) => this.audit(type, agent, payload) },
     );
   }
 
@@ -2429,7 +2457,7 @@ export class OrchestratorAgent extends PortThink {
         await expireStaleOrderDraft(this.scheduledCallbacksContext(), payload);
         return { outcome: "success", descriptor: "stale order draft expired" };
       },
-      { audit: (type, agent, payload) => this.audit(type, agent, payload) },
+      { env: this.env, audit: (type, agent, payload) => this.audit(type, agent, payload) },
     );
   }
 
@@ -2453,7 +2481,7 @@ export class OrchestratorAgent extends PortThink {
       },
       // Issue #5085 (S6): the audit sink names a failed ledger write
       // (shared namer) like the sibling #3788 wrappers on current main.
-      { audit: (type, agent, payload) => this.audit(type, agent, payload) },
+      { env: this.env, audit: (type, agent, payload) => this.audit(type, agent, payload) },
     );
   }
 
@@ -2554,7 +2582,7 @@ export class OrchestratorAgent extends PortThink {
         await executeAsyncJob(this.asyncJobsContext(), { jobId: payload.jobId });
         return { outcome: "success", descriptor: "async job executed" };
       },
-      { audit: (type, agent, payload) => this.audit(type, agent, payload) },
+      { env: this.env, audit: (type, agent, payload) => this.audit(type, agent, payload) },
     );
   }
 
@@ -2580,7 +2608,7 @@ export class OrchestratorAgent extends PortThink {
         result = await sweepStaleAsyncJobs(this.asyncJobsContext());
         return staleAsyncJobSweepOutcome(result);
       },
-      { audit: (type, agent, payload) => this.audit(type, agent, payload) },
+      { env: this.env, audit: (type, agent, payload) => this.audit(type, agent, payload) },
     );
     return result;
   }

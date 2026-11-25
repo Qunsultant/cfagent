@@ -38,6 +38,10 @@ import type { ScheduledCallbackOutcome } from "./scheduledCallbacks";
 import { createStructuredLogger } from "../../observability/structuredLogger";
 import { createObservabilitySink } from "../../observability/createObservabilityPorts";
 import { OBS_LEDGER_WRITE_FAILED, formatCatalogMessage } from "../../observability/otelMessages";
+import {
+  checkScheduleFiringRate,
+  resolveEffectiveScheduleFiringEnabled,
+} from "../../services/scheduleControls";
 
 type OutcomeInput = ScheduledCallbackOutcome | void;
 
@@ -85,6 +89,13 @@ export interface RecordScheduleCallbackRunOptions {
    * event.
    */
   audit?: LedgerWriteFailureAudit;
+  /**
+   * Issue #6482 — the Worker env for the kill-switch + firing-rate
+   * resolution (managed setting > env carrier > default). Absent,
+   * the managed setting and the defaults still apply; the env
+   * carrier simply has no value to read.
+   */
+  env?: unknown;
 }
 
 /**
@@ -113,6 +124,12 @@ export type LedgerWriteFailureAudit = (
 ) => void;
 
 const ledgerWriteFailureLog = createStructuredLogger(
+  createObservabilitySink({}),
+  { component: "agents/orchestrator/scheduleCallbackRunRecords" },
+);
+
+/** Issue #6482 — the firing-rate guardrail's log floor (the audit sink carries the coded observation; this line is the queryable signal). */
+const firingRateLog = createStructuredLogger(
   createObservabilitySink({}),
   { component: "agents/orchestrator/scheduleCallbackRunRecords" },
 );
@@ -279,6 +296,58 @@ export async function recordScheduleCallbackRun(
     (options?.audit
       ? nameLedgerWriteFailure(options.audit, "schedule.ledger_write_failed")
       : undefined);
+  // Issue #6482 — the kill-switch gate, the ONE choke point every
+  // recorded schedule firing passes through. When firing is
+  // disabled (managed setting > env carrier > default ON), a
+  // SCHEDULED firing records a skipped run naming the halt and
+  // never invokes the callback — the armed schedule stops firing
+  // from configuration. A manual trigger is never halted: the
+  // switch stops scheduled firings, not an operator's explicit
+  // run-now. The skipped record keeps the missed-schedule sweep
+  // quiet (it reads the latest ledger run per schedule) and the
+  // halt is observable in the ledger. The gate itself never breaks
+  // a firing: a settings-read failure degrades to firing allowed.
+  const isManualTrigger = resolveScheduleRunTrigger(payload) === "manual";
+  if (!isManualTrigger) {
+    let firingEnabled = true;
+    try {
+      firingEnabled = resolveEffectiveScheduleFiringEnabled(sql, options?.env).enabled;
+    } catch {
+      firingEnabled = true;
+    }
+    if (!firingEnabled) {
+      const haltDetail =
+        "Schedule firing halted by the kill-switch (schedule.firingEnabled off): the armed schedule stays armed but does not run. Turn firing on in the schedules home to resume.";
+      storeRecord(
+        sql,
+        {
+          jobId,
+          operation: callback,
+          started,
+          finished: new Date().toISOString(),
+          outcome: "skipped",
+          triggeredBy: resolveScheduleRunTrigger(payload),
+          ...payloadProvenance(payload),
+          ...linkage,
+          detail: haltDetail,
+        },
+        onRecordFailure,
+      );
+      if (options?.audit) {
+        try {
+          options.audit("schedule.firing_halted", "orchestrator", {
+            code: "schedule_firing_halted",
+            callback,
+            scheduleId: typeof schedule?.id === "string" ? schedule.id : jobId,
+            jobId,
+          });
+        } catch {
+          // Reporting a halt must never break the callback either.
+        }
+      }
+      return;
+    }
+  }
   try {
     const outcome = normalize(await run());
     storeRecord(sql, {
@@ -303,6 +372,27 @@ export async function recordScheduleCallbackRun(
       ...(outcome.descriptor ? { descriptor: outcome.descriptor } : {}),
       ...(outcome.artifactRefs ? { artifactRefs: outcome.artifactRefs } : {}),
     }, onRecordFailure);
+    // Issue #6482 — the firing-rate guardrail, evaluated on the
+    // firing path (best-effort: a store or sink failure never breaks
+    // the firing). When firings in the trailing window exceed the
+    // configured threshold, the coded observation goes out through
+    // the audit sink (at most once per window). It runs after a real
+    // run only — halted firings never re-alert.
+    try {
+      const rate = checkScheduleFiringRate(sql, options?.env, Date.now(), (type, body) => {
+        if (options?.audit) options.audit(type, "orchestrator", body);
+      });
+      if (rate.exceeded && rate.alerted) {
+        firingRateLog.warn("schedule.firing_rate_exceeded", {
+          message: `[schedules] Schedule firings exceeded the configured rate (${rate.count} in ${rate.windowMinutes}m, threshold ${rate.threshold}).`,
+          count: rate.count,
+          threshold: rate.threshold,
+          windowMinutes: rate.windowMinutes,
+        });
+      }
+    } catch {
+      // The guardrail never breaks the firing.
+    }
   } catch (err) {
     storeRecord(sql, {
       jobId,

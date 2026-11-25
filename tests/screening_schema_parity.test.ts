@@ -731,14 +731,20 @@ describe("#959 cross-entry schedule parity (REST route / NLQ / builder)", () => 
 
   it("options analysis: REST-armed payload equals the builder's for the same criteria + identity", async () => {
     const agent = makeAgent();
-    const { status } = await postCreate(agent, {
+    const { status, body } = await postCreate(agent, {
       scheduleType: "cron",
-      cron: "0 14 * * 1-5",
+      // Issue #6482 — a yearly cron: creation lands PAUSED and
+      // never arms the SDK, so the payload is read from the paused
+      // record the route returns — a weekday cron's shortest gap is
+      // below the monthly floor and is refused before the builder
+      // runs.
+      cron: "0 14 1 1 *",
       callback: "autonomousOptionsAnalysis",
       payload: { symbols: ["NVDA"], thesis: "bullish" },
     });
     expect(status).toBe(200);
-    expect(scheduleCalls).toHaveLength(1);
+    expect(body.paused).toBe(true);
+    expect(scheduleCalls).toHaveLength(0);
     const built = buildSchedulePayload(
       "autonomousOptionsAnalysis",
       { symbols: ["NVDA"], thesis: "bullish" },
@@ -760,7 +766,7 @@ describe("#959 cross-entry schedule parity (REST route / NLQ / builder)", () => 
     // onto the armed payload; the builder is the criteria→payload
     // function, so parity is compared on the criteria payload with
     // provenance asserted separately (same shape in both tests).
-    const armedOptions = scheduleCalls[0][2] as Record<string, unknown>;
+    const armedOptions = body.schedule.definition.payload as Record<string, unknown>;
     expect(armedOptions.provenance).toEqual(
       expect.objectContaining({
         origin: "user",
@@ -774,14 +780,18 @@ describe("#959 cross-entry schedule parity (REST route / NLQ / builder)", () => 
 
   it("discovery saved-request: REST-armed payload equals the builder's", async () => {
     const agent = makeAgent();
-    const { status } = await postCreate(agent, {
+    const { status, body } = await postCreate(agent, {
       scheduleType: "cron",
-      cron: "0 14 * * 1-5",
+      // Issue #6482 — a yearly cron (see the options parity test
+      // above): creation lands PAUSED and never arms the SDK, so the
+      // payload is read from the paused record the route returns.
+      cron: "0 14 1 1 *",
       callback: "autonomousStrategyDiscovery",
       payload: { requests: [VALID_STRATEGY_REQUEST] },
     });
     expect(status).toBe(200);
-    expect(scheduleCalls).toHaveLength(1);
+    expect(body.paused).toBe(true);
+    expect(scheduleCalls).toHaveLength(0);
     const built = buildSchedulePayload(
       "autonomousStrategyDiscovery",
       { requests: [VALID_STRATEGY_REQUEST] },
@@ -794,7 +804,7 @@ describe("#959 cross-entry schedule parity (REST route / NLQ / builder)", () => 
     );
     expect(built.ok).toBe(true);
     if (!built.ok) return;
-    const armedDiscovery = scheduleCalls[0][2] as Record<string, unknown>;
+    const armedDiscovery = body.schedule.definition.payload as Record<string, unknown>;
     expect(armedDiscovery.provenance).toEqual(
       expect.objectContaining({
         origin: "user",
@@ -810,7 +820,9 @@ describe("#959 cross-entry schedule parity (REST route / NLQ / builder)", () => 
     const agent = makeAgent();
     const { status, body } = await postCreate(agent, {
       scheduleType: "cron",
-      cron: "0 14 * * 1-5",
+      // Issue #6482 — a yearly cron: the policy error under test
+      // runs after the floor, so the fixture must pass it first.
+      cron: "0 14 1 1 *",
       callback: "autonomousMarketScreen",
       payload: { sector: "Technology" },
     });

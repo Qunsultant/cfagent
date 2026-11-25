@@ -804,7 +804,7 @@ describe("ScheduledOptionsManager — strategy discovery schedules (#126 PR-G)",
       targetPrice: 380,
       allowedStrategies: ["long_put", "bull_put_spread"],
     });
-    await waitForText("Schedule created successfully");
+    await waitForText("Schedule created paused");
   });
 
   it("blocks a discovery create with an incomplete view and posts nothing", async () => {
@@ -1127,7 +1127,7 @@ describe("ScheduledOptionsManager — profile-derived discovery (#533)", () => {
     });
     expect(body.payload).not.toHaveProperty("requests");
     expect(body.payload).not.toHaveProperty("watchlistName");
-    await waitForText("Schedule created successfully");
+    await waitForText("Schedule created paused");
   });
 
   it("creates a profile-derived schedule from a watchlist name — symbols key absent", async () => {
@@ -1441,7 +1441,7 @@ describe("ScheduledOptionsManager — no-view discovery (#534)", () => {
     });
     expect(body.payload).not.toHaveProperty("requests");
     expect(body.payload).not.toHaveProperty("profileId");
-    await waitForText("Schedule created successfully");
+    await waitForText("Schedule created paused");
   });
 
   it("blocks a no-view create with no symbols and posts nothing", async () => {

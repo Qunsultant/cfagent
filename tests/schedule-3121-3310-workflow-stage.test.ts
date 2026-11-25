@@ -150,19 +150,24 @@ describe("3310-C1 classifier: the workflow-stage kind", () => {
     }
   });
 
-  it("a fast interval / fast cron is approval-bound; an unparsable cron binds fail-closed", () => {
+  it("a fast interval / fast cron is refused (#6482); an unparsable cron is refused fail-closed", () => {
     const fast = classifyAgentScheduleRequest(
       { kind: "workflow-stage", jobId: "two-child", nodePath: "0", intervalSeconds: 60 },
       CONFIG,
     );
-    expect(fast.schedulable).toBe(true);
-    if (fast.schedulable) expect(fast.requiresApproval).toBe(true);
+    expect(fast.schedulable).toBe(false);
+    if (!fast.schedulable) expect(fast.denialReason).toContain("SCHEDULE_BELOW_FREQUENCY_FLOOR");
+    const fastCron = classifyAgentScheduleRequest(
+      { kind: "workflow-stage", jobId: "two-child", nodePath: "0", cron: "*/30 * * * *" },
+      CONFIG,
+    );
+    expect(fastCron.schedulable).toBe(false);
+    if (!fastCron.schedulable) expect(fastCron.denialReason).toContain("SCHEDULE_BELOW_FREQUENCY_FLOOR");
     const unparsable = classifyAgentScheduleRequest(
       { kind: "workflow-stage", jobId: "two-child", nodePath: "0", cron: "not a cron" },
       CONFIG,
     );
-    expect(unparsable.schedulable).toBe(true);
-    if (unparsable.schedulable) expect(unparsable.requiresApproval).toBe(true);
+    expect(unparsable.schedulable).toBe(false);
   });
 
   it("a missing job id or node path is denied by name, never merely approval-bound", () => {
@@ -519,7 +524,7 @@ describe("3310-E executor: workflow-stage actions through the stages adapter", (
     };
   }
 
-  it("E1 creates a plain stage-schedule: armed with agent provenance + ledger row + audit", async () => {
+  it("E1 creates a plain stage-schedule: PAUSED with agent provenance + ledger row + audit", async () => {
     const h = makeStageHarness();
     const { deps, ledger, audits } = executorHarness(h);
     const out = await executeAgentScheduleAction(deps as never, {
@@ -529,19 +534,24 @@ describe("3310-E executor: workflow-stage actions through the stages adapter", (
       tenantId: "primary",
       jobId: "two-child",
       nodePath: "0",
-      timing: { type: "cron", cron: "0 21 * * *" },
+      // Issue #6482 — yearly (the old daily cron is below the
+      // monthly floor at resume); creation lands PAUSED.
+      timing: { type: "cron", cron: "0 0 1 1 *" },
     });
     expect(out.ok).toBe(true);
-    expect(out.scheduleId).toBe("alarm-1");
-    const record = await h.store.get("alarm-1");
+    if (!out.ok) throw new Error("expected create to succeed");
+    const record = await h.store.get(out.scheduleId);
     expect(record?.kind).toBe("workflow-stage");
+    expect(record?.state).toBe("paused");
     expect(record?.ownerLogin).toBe("OpenAIMP");
     expect((record?.definition as Record<string, unknown>).stageId).toBe("job:0");
+    // Issue #6482 — paused by default: creation arms nothing.
+    expect(h.alarms.size).toBe(0);
     expect(ledger.length).toBeGreaterThan(0);
     expect(audits.some((a) => a.type === "schedule.created" && a.payload.jobId === "two-child")).toBe(true);
   });
 
-  it("E2 an external-send stage is approval-bound; the approved arming then succeeds", async () => {
+  it("E2 an external-send stage is approval-bound; the approved creation then succeeds PAUSED", async () => {
     const h = makeStageHarness();
     const { deps, getPending } = executorHarness(h);
     const create = {
@@ -551,7 +561,9 @@ describe("3310-E executor: workflow-stage actions through the stages adapter", (
       tenantId: "primary",
       jobId: "two-child",
       nodePath: "1",
-      timing: { type: "cron", cron: "0 21 * * *" },
+      // Issue #6482 — yearly (the old daily cron is below the
+      // monthly floor at resume).
+      timing: { type: "cron", cron: "0 0 1 1 *" },
     } as const;
     const refused = await executeAgentScheduleAction(deps as never, create);
     expect(refused.ok).toBe(false);
@@ -561,12 +573,17 @@ describe("3310-E executor: workflow-stage actions through the stages adapter", (
     expect(pending[0]?.kind).toBe("workflow-stage");
     expect(pending[0]?.definition).toMatchObject({ jobId: "two-child", nodePath: "1" });
     expect(h.alarms.size).toBe(0);
-    const armed = await executeAgentScheduleAction(deps as never, {
+    const created = await executeAgentScheduleAction(deps as never, {
       ...create,
       approvedPendingId: pending[0]?.id,
     });
-    expect(armed.ok).toBe(true);
-    expect(h.alarms.size).toBe(1);
+    expect(created.ok).toBe(true);
+    // Issue #6482 — paused by default: even an approved creation
+    // arms nothing; resume is the only activation.
+    expect(h.alarms.size).toBe(0);
+    if (!created.ok) throw new Error("expected approved creation to succeed");
+    const record = await h.store.get(created.scheduleId);
+    expect(record?.state).toBe("paused");
   });
 
   it("E3 a retired stage is denied by name; a job with no registry is denied by name", async () => {
@@ -627,15 +644,19 @@ describe("3310-E executor: workflow-stage actions through the stages adapter", (
       tenantId: "primary",
       jobId: "two-child",
       nodePath: "0",
-      timing: { type: "cron", cron: "0 21 * * *" },
+      // Issue #6482 — yearly (the old daily cron is below the
+      // monthly floor at resume); creation lands PAUSED.
+      timing: { type: "cron", cron: "0 0 1 1 *" },
     });
     expect(created.ok).toBe(true);
+    if (!created.ok) throw new Error("expected create to succeed");
+    const scheduleId = created.scheduleId;
     const denied = await executeAgentScheduleAction(deps as never, {
       action: "pause",
       kind: "workflow-stage",
       principal: { login: "someone-else", agentId: "agent-2" },
       tenantId: "primary",
-      scheduleId: "alarm-1",
+      scheduleId,
     });
     expect(denied.ok).toBe(false);
     if (!denied.ok) expect(denied.reason).toContain("belongs to");
@@ -644,7 +665,7 @@ describe("3310-E executor: workflow-stage actions through the stages adapter", (
       kind: "workflow-stage",
       principal,
       tenantId: "primary",
-      scheduleId: "alarm-1",
+      scheduleId,
     });
     expect(allowed.ok).toBe(true);
   });
@@ -652,15 +673,22 @@ describe("3310-E executor: workflow-stage actions through the stages adapter", (
   it("E6 pause / resume / trigger / delete / list round-trip through the executor", async () => {
     const h = makeStageHarness();
     const { deps } = executorHarness(h);
-    await executeAgentScheduleAction(deps as never, {
+    const created = await executeAgentScheduleAction(deps as never, {
       action: "create",
       kind: "workflow-stage",
       principal,
       tenantId: "primary",
       jobId: "two-child",
       nodePath: "0",
-      timing: { type: "interval", intervalSeconds: 3600 },
+      // Issue #6482 — monthly interval (the old 3600s value is below
+      // the monthly floor at resume); creation lands PAUSED.
+      timing: { type: "interval", intervalSeconds: 2_592_000 },
     });
+    expect(created.ok).toBe(true);
+    if (!created.ok) throw new Error("expected create to succeed");
+    const scheduleId = created.scheduleId;
+    // Issue #6482 — creation arms nothing; the record starts paused.
+    expect(h.alarms.size).toBe(0);
     const listed = await executeAgentScheduleAction(deps as never, {
       action: "list",
       kind: "workflow-stage",
@@ -674,7 +702,7 @@ describe("3310-E executor: workflow-stage actions through the stages adapter", (
       kind: "workflow-stage",
       principal,
       tenantId: "primary",
-      scheduleId: "alarm-1",
+      scheduleId,
     });
     expect(paused.ok).toBe(true);
     expect(h.alarms.size).toBe(0);
@@ -683,7 +711,7 @@ describe("3310-E executor: workflow-stage actions through the stages adapter", (
       kind: "workflow-stage",
       principal,
       tenantId: "primary",
-      scheduleId: "alarm-1",
+      scheduleId,
     });
     expect(resumed.ok).toBe(true);
     expect(h.alarms.size).toBe(1);
@@ -692,21 +720,21 @@ describe("3310-E executor: workflow-stage actions through the stages adapter", (
       kind: "workflow-stage",
       principal,
       tenantId: "primary",
-      scheduleId: "alarm-1",
+      scheduleId,
     });
     expect(triggered.ok).toBe(true);
     expect(h.runs).toHaveLength(1);
     expect(h.runs[0]?.callback).toBe("runWorkflowStage");
-    expect(h.runs[0]?.payload).toMatchObject({ jobId: "two-child", nodePath: "0", trigger: "manual", scheduleId: "alarm-1" });
+    expect(h.runs[0]?.payload).toMatchObject({ jobId: "two-child", nodePath: "0", trigger: "manual", scheduleId });
     const deleted = await executeAgentScheduleAction(deps as never, {
       action: "delete",
       kind: "workflow-stage",
       principal,
       tenantId: "primary",
-      scheduleId: "alarm-1",
+      scheduleId,
     });
     expect(deleted.ok).toBe(true);
-    expect(await h.store.get("alarm-1")).toBeUndefined();
+    expect(await h.store.get(scheduleId)).toBeUndefined();
   });
 });
 
@@ -716,46 +744,55 @@ describe("3310-M the one management service serves the workflow-stage kind", () 
     const created = await h.adapter.create({
       jobId: "two-child",
       nodePath: "0",
-      timing: { type: "cron", cron: "0 21 * * *" },
+      // Issue #6482 — yearly (the old daily cron is below the
+      // monthly floor at resume); creation lands PAUSED.
+      timing: { type: "cron", cron: "0 0 1 1 *" },
       ownerLogin: "OpenAIMP",
     });
-    expect(created.id).toBe("alarm-1");
     expect(created.kind).toBe("workflow-stage");
+    expect(created.state).toBe("paused");
+    // Issue #6482 — paused by default: creation arms nothing.
+    expect(h.alarms.size).toBe(0);
     const items = await listUnifiedScheduleItems(h.management);
-    const row = items.find((i) => i.id === "alarm-1");
+    const row = items.find((i) => i.id === created.id);
     expect(row?.kind).toBe("workflow-stage");
     expect(row?.jobId).toBe("two-child");
     expect(row?.stageId).toBe("job:0");
-    const paused = await h.adapter.pause!("alarm-1");
+    const paused = await h.adapter.pause!(created.id);
     expect(paused.state).toBe("paused");
     expect(h.alarms.size).toBe(0);
-    const resumed = await h.adapter.resume!("alarm-1");
+    const resumed = await h.adapter.resume!(created.id);
     expect(resumed.state).toBe("active");
-    expect(resumed.id).toBe("alarm-1");
+    expect(resumed.id).toBe(created.id);
     expect(h.alarms.size).toBe(1);
-    await h.adapter.trigger!("alarm-1");
-    expect(h.runs[0]?.payload).toMatchObject({ jobId: "two-child", nodePath: "0", trigger: "manual", scheduleId: "alarm-1" });
-    const cancelled = await h.adapter.cancel("alarm-1");
+    await h.adapter.trigger!(created.id);
+    expect(h.runs[0]?.payload).toMatchObject({ jobId: "two-child", nodePath: "0", trigger: "manual", scheduleId: created.id });
+    const cancelled = await h.adapter.cancel(created.id);
     expect(cancelled).toBe(true);
-    expect(await h.store.get("alarm-1")).toBeUndefined();
+    expect(await h.store.get(created.id)).toBeUndefined();
   });
 
   it("M2 a paused stage-schedule re-times in place, keeping its stage address", async () => {
     const h = makeStageHarness();
-    await h.adapter.create({
+    const created = await h.adapter.create({
       jobId: "two-child",
       nodePath: "0",
-      timing: { type: "cron", cron: "0 21 * * *" },
+      // Issue #6482 — yearly (the old daily cron is below the
+      // monthly floor at resume).
+      timing: { type: "cron", cron: "0 0 1 1 *" },
       ownerLogin: "OpenAIMP",
     });
-    await h.adapter.pause!("alarm-1");
-    // Issue #4235 — the 7200s re-time is sub-daily, so the update
-    // carries the explicit per-schedule opt-in.
-    const updated = await h.adapter.update!("alarm-1", { timing: { type: "interval", intervalSeconds: 7200 }, subDailyOptIn: true });
-    expect(updated.id).toBe("alarm-1");
+    expect(created.state).toBe("paused");
+    await h.adapter.pause!(created.id);
+    // Issue #6482 — the re-time is monthly (the old 7200s value is
+    // below the monthly floor); a paused record re-times in place
+    // without arming, so no opt-in is needed.
+    const updated = await h.adapter.update!(created.id, { timing: { type: "interval", intervalSeconds: 2_592_000 } });
+    expect(updated.id).toBe(created.id);
     expect((updated.definition as Record<string, unknown>).jobId).toBe("two-child");
     expect((updated.definition as Record<string, unknown>).nodePath).toBe("0");
-    expect((updated.definition as Record<string, unknown>).intervalSeconds).toBe(7200);
+    expect((updated.definition as Record<string, unknown>).intervalSeconds).toBe(2_592_000);
+    expect(updated.state).toBe("paused");
   });
 });
 

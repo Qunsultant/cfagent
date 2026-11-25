@@ -574,11 +574,14 @@ describe("rule of three: margins and layout containers (#4913)", () => {
     // the same grow-to-fill-a-Flex-row pattern (label grows, Badge and
     // toggle sit at the row end) — plus issue #6164: the
     // ServiceTokensPanel mint row's four field wrappers (service id,
-    // audience, ttl, label), the ApiKeysPanel mint-row pattern again.
+    // audience, ttl, label), the ApiKeysPanel mint-row pattern again —
+    // plus issue #6482: the ScheduleControlsPanel's three Stack
+    // wrappers (floor control, firing control, rate-alert control),
+    // the same grow-to-fill-a-Flex-row pattern.
     const attrs = classAttrTokens4913(clientTsx());
     const grow = attrs.filter((a) => a.tokens.includes("ui-grow")).length;
     const clip = attrs.filter((a) => a.tokens.includes("ui-clip")).length;
-    expect(grow).toBe(13);
+    expect(grow).toBe(16);
     expect(clip).toBe(1);
   });
 });

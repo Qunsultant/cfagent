@@ -90,7 +90,11 @@ async function postCreate(agent: any) {
       headers: { "Content-Type": "application/json", "x-user-login": LOGIN },
       body: JSON.stringify({
         scheduleType: "cron",
-        cron: "0 3 * * *",
+        // Issue #6482 — a yearly cron: the identity preflight these
+        // tests pin runs after the floor, so the fixture must pass
+        // it first — a daily cron's shortest gap is below the
+        // monthly floor and is refused before the preflight runs.
+        cron: "0 3 1 1 *",
         callback: "autonomousMarketScreen",
         payload: { universe: "NASDAQ100", maxItems: 100 },
       }),

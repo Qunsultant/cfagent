@@ -428,9 +428,16 @@ const ORCH = "agents/orchestrator.ts";
  *  orchestrator/researchConfigDoor.ts; the class gains no logic) —
  *  measured 4,084 lines / 187,876 B on the rebased tree, so budget
  *  lines rise to 4090 and bytes rise to 188_400, which keeps headroom
- *  for the next delegating wrapper rather than a 24 B margin. */
-const BUDGET_LINES = 4090;
-const BUDGET_BYTES = 188_400;
+ *  for the next delegating wrapper rather than a 24 B margin.
+ *  #6482 (runaway alarm loop stop) adds the runPipelineJobSchedule
+ *  recordScheduleCallbackRun wrapper + the alarms-port resolveFloor
+ *  wiring + env pass-throughs (the floor itself lives in
+ *  src/config/scheduleFrequencyFloor.ts; the class gains no logic) —
+ *  measured 4,112 lines / 189,365 B on the rebased tree, so budget
+ *  lines rise to 4120 and bytes rise to 189_900, which keeps headroom
+ *  for the next delegating wrapper rather than a 35 B margin. */
+const BUDGET_LINES = 4120;
+const BUDGET_BYTES = 189_900;
 
 const count = (haystack: string, needle: string) =>
   haystack.split(needle).length - 1;
