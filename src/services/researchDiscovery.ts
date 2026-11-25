@@ -50,6 +50,10 @@ import {
 } from "./researchGates";
 import type { ResearchLeg, StructureEconomics } from "./researchEconomics";
 import {
+  catalogIdsForResearchStructure,
+  researchStructureForCatalogId,
+} from "../shared/optionsStrategyVocabulary";
+import {
   buildScenario,
   evaluateScenarioGrid,
   isStructureAdmissibleForGoal,
@@ -228,20 +232,6 @@ const THESIS_FOR_OUTLOOK: Record<Outlook, OptionThesis | null> = {
   range_bound: "range_bound",
   volatile: "large_move",
   unknown: null,
-};
-
-/** Catalog registry ids each pipeline structure constructs (Phase 2 construction map). */
-const CATALOG_IDS_BY_PIPELINE_STRUCTURE: Record<string, string[]> = {
-  bull_call_spread: ["call_debit_spread"],
-  bull_put_spread: ["put_credit_spread"],
-  bear_put_spread: ["put_debit_spread"],
-  bear_call_spread: ["call_credit_spread"],
-  cash_secured_put: ["cash_secured_put"],
-  iron_condor: ["iron_condor"],
-  butterfly: ["long_call_butterfly"],
-  long_straddle: ["long_straddle"],
-  long_strangle: ["long_strangle"],
-  pmcc: ["poor_mans_covered_call"],
 };
 
 const STATUS_RANK: Record<IdeaStatus, number> = {
@@ -441,7 +431,7 @@ export async function discoverStrategiesForName(
       source: "catalog",
       economicsOverride: structure.economics,
     });
-    for (const id of CATALOG_IDS_BY_PIPELINE_STRUCTURE[name] ?? []) {
+    for (const id of catalogIdsForResearchStructure(name)) {
       constructedCatalogIds.add(id);
     }
   }
@@ -614,13 +604,9 @@ export async function discoverNamesForStrategy(
     opts.symbols ?? (await deps.provider.getUniverseSymbols(opts.universe ?? "discovery"))
   ).map((s) => s.toUpperCase());
 
-  // Resolve a catalog id to its pipeline structure, when one exists.
-  const pipelineStructure =
-    CATALOG_IDS_BY_PIPELINE_STRUCTURE[opts.structure] !== undefined ||
-    Object.values(CATALOG_IDS_BY_PIPELINE_STRUCTURE).flat().includes(opts.structure)
-      ? (Object.entries(CATALOG_IDS_BY_PIPELINE_STRUCTURE).find(([, ids]) => ids.includes(opts.structure))?.[0] ??
-        opts.structure)
-      : opts.structure;
+  // Issue #6507: resolve a catalog id to its pipeline structure through the
+  // one shared vocabulary; an OODA name resolves to itself.
+  const pipelineStructure = researchStructureForCatalogId(opts.structure) ?? opts.structure;
 
   const ranked: NameFit[] = [];
   const rejected: Array<{ symbol: string; reason: string }> = [];
