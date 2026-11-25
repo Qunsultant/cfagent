@@ -35,7 +35,6 @@ import type {
 } from "../dataProviders/contract";
 import type { OptionRequestBudget } from "../interfaces";
 import { normalizeAlpacaBaseUrl } from "./credentials";
-import { DEFAULT_ALPACA_OPTIONS_FEED } from "../../config/alpacaOptions";
 import { createStructuredLogger } from "../../observability/structuredLogger";
 import { createObservabilitySink } from "../../observability/createObservabilityPorts";
 
@@ -43,6 +42,9 @@ import { createObservabilitySink } from "../../observability/createObservability
 const structuredLog = createStructuredLogger(createObservabilitySink({}), {
   component: "trading/alpaca/optionsData",
 });
+
+/** Default options feed when the feed env var is unset or empty. */
+export const DEFAULT_OPTIONS_FEED = "indicative";
 
 export interface AlpacaOptionsConfig {
   /** Trading host — paper or live, already resolved by the caller. */
@@ -191,7 +193,7 @@ export function buildAlpacaOptionsConfig(
     // Issue 6498 (#6237): the documented default, implemented here once so
     // every consumer of this config gets the same feed. An empty env value is
     // "unset", not a deliberate blank that would omit the required parameter.
-    feed: safeEnv.ALPACA_OPTIONS_FEED || DEFAULT_ALPACA_OPTIONS_FEED,
+    feed: safeEnv.ALPACA_OPTIONS_FEED || DEFAULT_OPTIONS_FEED,
     rateLimiter,
   };
 }
