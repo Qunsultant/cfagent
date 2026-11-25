@@ -1023,6 +1023,20 @@ function measure(): Map<string, number> {
  * the NOT-PROVIDER marker's 298 lines is likewise one line short of the
  * 299 counted, left as-is.)
  * Baseline totals move 1415/11409 -> 1433/11510.
+ * Baseline update (#6540, 2026-11-25): Phase 2 defines the one
+ * universal env context (`UniversalEnvContext`,
+ * `resolveUniversalContext`) in src/config/environment.ts. The new
+ * resolver records the resolution source per setting, so it names the
+ * provider's own env bindings (`ETRADE_ENVIRONMENT`,
+ * `ET_BASE_URL` host-gating via `isETradeHost`) and reads the core
+ * broker credentials (`resolved.etrade.apiKey/apiSecret`) — 6 new
+ * brand lines, 1 removed (the old cascade comment's "E*TRADE
+ * credentials" line is now "broker credentials"): environment.ts/
+ * etrade 51 -> 56. Dispositioned INTEGRATION: naming the provider is
+ * the config module's job — it resolves the provider's own env
+ * bindings, and neutralizing the binding names would falsify the
+ * source record. No other row moves.
+ * Baseline totals move 1433/11510 -> 1433/11515.
  */
 const BASELINE: Array<[string, string, number]> = [
   // ---- PLATFORM (188 rows / 989 lines) ----
@@ -1540,7 +1554,7 @@ const BASELINE: Array<[string, string, number]> = [
   ["src/config/cloudflareBrowserMiscModes.ts", "yahoo", 2],
   ["src/config/curatedStockUniverse.ts", "yahoo", 1],
   ["src/config/discoveryRankingModes.ts", "etrade", 1],
-  ["src/config/environment.ts", "etrade", 51],
+  ["src/config/environment.ts", "etrade", 56],
   ["src/config/etapiConfig.ts", "etrade", 1],
   ["src/config/etapiConfig.ts", "nasdaq", 2],
   ["src/config/etradeModes.ts", "etrade", 84],

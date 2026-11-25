@@ -12,7 +12,7 @@
  *    function — a 6th fails);
  *  - a new definition whose NAME already exists in the baseline at another
  *    file fails as a same-question duplicate;
- *  - the resolver definition total above its baselined 595 fails;
+ *  - the resolver definition total above its baselined 596 fails;
  *  - decreases and vanished rows pass — that is the shrink the programme
  *    wants, and retiring a duplicate means lowering or removing its
  *    baseline entry in the same PR.
@@ -48,8 +48,9 @@
  * `~/workspace/6528-recount.md`; the seed reconciliation is
  * `docs/architecture/survey/6528-census-seed.md`):
  * - standalone `resolve*` functions / const arrows (+ 5 `create*Resolver`
- *   factories), overload-collapsed: 564 (557 survey rows, all present, +
- *   the 7 new #6482 schedule-firing resolvers, named in the census seed).
+ *   factories), overload-collapsed: 565 (557 survey rows, all present, +
+ *   the 7 new #6482 schedule-firing resolvers, named in the census seed,
+ *   + the 1 new #6540 universal resolver below).
  * - `resolve*` class methods (implementations): 18.
  * - `*Resolver` type/interface definitions: 9.
  * - `resolve*` interface method declarations (contracts only): 4 — NOT 3.
@@ -58,17 +59,30 @@
  *   `EtradeTokenPort` interface, implemented anonymously in
  *   `src/data/tokenFamilyKvImpl.ts:188`), which the survey and the recount
  *   both missed (the recount verified the 3 listed, it did not scan for
- *   others). Total seeded: 564 + 18 + 9 + 4 = **595**, not the recount's
+ *   others). Total seeded: 565 + 18 + 9 + 4 = **596**, not the recount's
  *   594. Landing 594 would fail this pin on its first run, so the pin
  *   seeds the measured 595 and records the +1 here and in the census seed.
  * - Distinct questions: ≈306, recorded as a RANGE (285–320, central
  *   estimate — `copies-and-overlaps.md` §5: "an estimate, not a recount")
- *   and NEVER asserted exact. Implied copies at the seeded total: 275–310
- *   (595 − 320 … 595 − 285). The lossless check is that every definition
+ *   and NEVER asserted exact. Implied copies at the seeded total: 276–311
+ *   (596 − 320 … 596 − 285). The lossless check is that every definition
  *   maps to a question; per-row question keys are UNMAPPED at seed (the
- *   survey itemizes ≈190 of the long tail, not all 595) — the same-name
+ *   survey itemizes ≈190 of the long tail, not all 596) — the same-name
  *   duplicate check below is the name-as-question proxy until the #3786
  *   census maps every row.
+ *
+ * Phase 2 (#6540, 2026-11-25) raises the baseline 595 → 596 with ONE
+ * row: `resolveUniversalContext` (`src/config/environment.ts`,
+ * standalone, CANONICAL) — the one universal resolver, a NEW resolver
+ * that calls `resolveEnvironmentConfig` (reuse first) rather than an
+ * extension of it, so the old resolver's row is untouched and the
+ * count grows by exactly one. Disposition: CANONICAL — it is the
+ * survey's U-group resolver (`target-state-counts.md` §2.2, the
+ * extended `resolveEnvironmentConfig`), the home the later phases
+ * resolve against. No other row changes: the source helpers it uses
+ * (`sourceOfEnvironmentName`, `sourceOfBrokerBaseUrl`) are not
+ * `resolve*`-named and are internal to the universal-resolution
+ * module, hence 0 separate resolvers by the §2.1 counting rule.
  *
  * Exclusions (recorded as data, not follow-up notes — #3786 Scope):
  * - Aliases (0 definitions): `resolveTradeEnvironmentFromSettings`
@@ -238,6 +252,7 @@ const BASELINE: Array<[string, string, Kind, number, Disposition]> = [
   ["src/config/dlqDepthAlert.ts", "resolveDlqDepthAlertThreshold", "standalone", 1, "CANONICAL"],
   ["src/config/environment.ts", "resolveETradeBaseUrl", "standalone", 1, "CANONICAL"],
   ["src/config/environment.ts", "resolveEnvironmentConfig", "standalone", 1, "CANONICAL"],
+  ["src/config/environment.ts", "resolveUniversalContext", "standalone", 1, "CANONICAL"],
   ["src/config/etradeModes.ts", "resolveEtradeDiscoveryMode", "standalone", 1, "CANONICAL"],
   ["src/config/etradeModes.ts", "resolveEtradePositionsMode", "standalone", 1, "CANONICAL"],
   ["src/config/etradeModes.ts", "resolveEtradePreviewMode", "standalone", 1, "CANONICAL"],
@@ -1134,9 +1149,9 @@ describe("universal resolver census (#6528 Phase 1)", () => {
   it("the distinct-question count is a range, never an exact number", () => {
     expect(QUESTION_RANGE_LOW).toBeLessThan(QUESTION_CENTRAL_ESTIMATE);
     expect(QUESTION_CENTRAL_ESTIMATE).toBeLessThan(QUESTION_RANGE_HIGH);
-    // Implied copies at the seeded total: 595 − 320 = 275 … 595 − 285 = 310.
-    expect(baselineTotal - QUESTION_RANGE_HIGH).toBe(275);
-    expect(baselineTotal - QUESTION_RANGE_LOW).toBe(310);
+    // Implied copies at the seeded total: 596 − 320 = 276 … 596 − 285 = 311.
+    expect(baselineTotal - QUESTION_RANGE_HIGH).toBe(276);
+    expect(baselineTotal - QUESTION_RANGE_LOW).toBe(311);
   });
 
   it("no test-only or scripts-only resolver is counted as production", () => {
@@ -1195,12 +1210,12 @@ describe("universal resolver census (#6528 Phase 1)", () => {
       expect(count, `${kind} count`).toBeGreaterThan(0);
       expect(DISPOSITIONS.has(disposition), `unknown disposition ${disposition}`).toBe(true);
     }
-    expect(baselineTotal).toBe(595);
+    expect(baselineTotal).toBe(596);
     const byKind = new Map<Kind, number>();
     for (const [, , kind, count] of BASELINE) {
       byKind.set(kind, (byKind.get(kind) ?? 0) + count);
     }
-    expect(byKind.get("standalone")).toBe(564);
+    expect(byKind.get("standalone")).toBe(565);
     expect(byKind.get("class-method")).toBe(18);
     expect(byKind.get("resolver-type")).toBe(9);
     expect(byKind.get("interface-method")).toBe(4);

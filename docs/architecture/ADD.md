@@ -176,6 +176,22 @@ decision is in [Packaging and deployment](#packaging-and-deployment).
 Every change to this container or to any doc it links gets a changelog
 entry here, newest first:
 
+- 2026-11-25 — Application architecture: the one universal env context
+  defined — `UniversalEnvContext` (`src/config/environment.ts`),
+  resolved once per request by the one universal resolver
+  `resolveUniversalContext`, which calls `resolveEnvironmentConfig`
+  (so the core values are unchanged) and adds the platform / tenant /
+  user / environment dimensions plus a per-setting resolution source,
+  reusing the OTEL source vocabulary (`run | session | user | runtime |
+  env | file | builtin`). The one cascade for all config is now
+  recorded: run > session > user > runtime > env > file > built-in
+  safe default — the `environment.ts` cascade comment is corrected
+  from its 3-level statement to this 7-level statement. The
+  tenant-override home (runtime level) stays an open owner decision;
+  no read site changes in this slice. Survey decomposition:
+  [target-state counts §2](./survey/target-state-counts.md) and
+  [per-domain end state, D1 (Config)](./survey/per-domain-end-state.md)
+  (issue #6540).
 - 2026-11-18 — Packaging and deployment: canonical endpoints named —
   the one MCP server at https://mcp.openaimp.com/mcp and the one API
   server at https://api.openaimp.com/api (ADR 0034 D12) (issue #5411).
