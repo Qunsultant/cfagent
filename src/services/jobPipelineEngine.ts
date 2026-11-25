@@ -341,6 +341,15 @@ export type JobPipelineTerminateRun = (request: {
   workflowInstanceId: string;
 }) => Promise<void>;
 
+/** Issue #6552 — the platform rewind a host exposes for a live run's instance. */
+export type JobPipelineRestartRun = (request: {
+  jobId: string;
+  runId: string;
+  workflowInstanceId: string;
+  /** The engine's own step name for step 0 of the target stage. */
+  fromStep: string;
+}) => Promise<void>;
+
 /** Issue #6028 — module logger, on the same structured-logging seam as the services. */
 const structuredLog = createStructuredLogger(createObservabilitySink({}), {
   component: "services/jobPipelineEngine",
@@ -400,6 +409,11 @@ export interface JobPipelineDeps {
    * ⇒ cancel stays cooperative: the engine stops at its next step boundary.
    */
   terminateRun?: JobPipelineTerminateRun;
+  /**
+   * Issue #6552 — rewind a live run through the platform's own restart. Absent
+   * ⇒ restartFromStage refuses by name; it never falls back to a guess.
+   */
+  restartRun?: JobPipelineRestartRun;
   now?: () => Date;
   newRunId?: () => string;
   /**
@@ -1586,6 +1600,67 @@ export class JobPipelineControl {
       payload: payload ?? null,
     });
     return { jobId, runId, workflowInstanceId: instance.runWorkflowInstanceId };
+  }
+
+  /**
+   * Issue #6552 — rewind a LIVE run to the first step of one stage through the
+   * platform's own restart.
+   *
+   * This is not `rerunStage` and must not become it: `rerunStage` refuses
+   * while a run is live (`assertStageNotLive`) and re-executes a stage from
+   * the engine's own artifacts; the platform restart rewinds a live instance.
+   * Opposite preconditions, different mechanisms, both named.
+   *
+   * Addressability is checked, never guessed: the platform identifies a step
+   * by the name this engine gave it, so a stage is addressable only when its
+   * first step has ONE name. A sharded stage or per-item `online` pacing has
+   * one name per unit or item and refuses by name instead of rewinding the
+   * wrong one.
+   */
+  async restartFromStage(jobId: string, nodePath: string): Promise<JobDispatchResult> {
+    const definition = await this.requireDefinition(jobId);
+    const instance = await this.requireInstance(jobId);
+    const runId = instance.currentRunId;
+    if (instance.state !== "running" || !runId) {
+      throw new JobPipelineError(
+        "job_not_running",
+        `Job "${jobId}" is ${instance.state}; a platform restart rewinds a live run only.`,
+      );
+    }
+    this.assertStageNotRetired(definition, nodePath);
+    const restart = this.deps.restartRun;
+    const workflowInstanceId = instance.runWorkflowInstanceId;
+    if (!restart || !workflowInstanceId) {
+      throw new JobPipelineError(
+        "stage_port_unavailable",
+        `Job "${jobId}" cannot be rewound: ${workflowInstanceId ? "this host exposes no restart channel" : "the run is not stamped to a workflow instance"}.`,
+      );
+    }
+    const node = this.nodeAtPath(definition.root, nodePath);
+    const shards = node.processing?.shards ?? definition.config.processing.shards ?? [];
+    const pacing = definition.config.executionMode.pacing;
+    if (shards.length > 0 || pacing === "online") {
+      throw new JobPipelineError(
+        "stage_restart_unaddressable",
+        `Stage "${jobStageId(nodePath)}" of job "${jobId}" cannot be rewound by name: ${
+          shards.length > 0
+            ? `the stage runs ${shards.length} shard unit(s)`
+            : "the job paces per item"
+        }, so each unit has its own step name. Cancel and retry the run instead.`,
+      );
+    }
+    const fromStep = stepExecutionId(runId, nodePath, 0, null, null);
+    try {
+      await restart({ jobId, runId, workflowInstanceId, fromStep });
+    } catch (error) {
+      throw new JobPipelineError(
+        "stage_restart_rejected",
+        `The platform refused to rewind job "${jobId}" to "${fromStep}": ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+    return { jobId, runId, state: "running" };
   }
 
   /** Retry: a NEW run from the start (fresh run id, checkpoints cleared), from a terminal or paused state. */

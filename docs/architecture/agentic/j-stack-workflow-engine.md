@@ -1148,12 +1148,18 @@ the flow body before the engine's boundary check can run, while a resume
 starts a NEW executor (§3.10, #4454), so a platform-held instance would have
 no resumer: the two models would deadlock and the record would sit "running"
 forever. `pauseManagedWorkflowInstance` / `resumeManagedWorkflowInstance`
-exist on the seam for a door that owns an instance's flow. Restart-from-step
-is likewise unwired: the platform targets a `step.do` name in the instance's
-execution history, while `rerunStage` is a control op over the engine's own
-artifacts — running both would execute the same work twice. The seam's
-`restartManagedWorkflowInstance` takes the platform's `from` target for the
-day a door needs it.
+exist on the seam for a door that owns an instance's flow. Restart-from-step is wired as its own op, never through
+`rerunStage` (#6552): `restartFromStage(jobId, path)` derives the step name
+this engine gave step 0 of that stage (`stepExecutionId(runId, path, 0, null,
+null)`), hands it to the platform's `restart({ from: { name } })`, and the flow
+replays with the earlier steps' journaled results reused. It is separate on
+purpose: `rerunStage` refuses while a run is live and re-executes a stage from
+the engine's own artifacts, while the platform restart rewinds a live instance
+— opposite preconditions, not two spellings of one thing. Addressability is
+checked, never guessed: a sharded stage or per-item `online` pacing has one
+step name per unit and refuses `stage_restart_unaddressable`; a platform that
+rejects the target refuses `stage_restart_rejected`; a host with no channel
+refuses `stage_port_unavailable`.
 
 Stage retirement is persisted on the definition (`retired`, #3944,
 `src/data/jobPipelinePorts.ts:159-167`): a retired stage never
