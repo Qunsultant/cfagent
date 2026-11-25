@@ -79,7 +79,7 @@ export async function waitForWorkflowEvent(
  * can wait; a host without one keeps the engine's refusal by name
  * (`stage_port_unavailable`) instead of pretending the wait happened.
  */
-export function resolveWorkflowWaitChannel(
+export function waitChannelFromStep(
   step: WorkflowEventWaitStep,
 ): { waitForEvent?: JobEventWaitHandler } {
   const wait = step.waitForEvent;

@@ -22,7 +22,7 @@ import {
   type JobPipelineDeps,
   type JobRunOutcome,
 } from "../services/jobPipelineEngine";
-import { resolveWorkflowWaitChannel, type WorkflowEventWaitStep } from "./workflowEventWait";
+import { waitChannelFromStep, type WorkflowEventWaitStep } from "./workflowEventWait";
 import { createJobPipelineControl } from "../services/jobPipelineControlFactory";
 import { JobPipelineError } from "../services/jobPipelineConfig";
 import type { JobRunTrigger } from "../data/jobRunRecordPorts";
@@ -80,7 +80,7 @@ export async function runJobPipelineWorkflowFlow(
   // workflow-dispatched run emits `job.run.settled` and its steps
   // stay replay-safe through step.do.
   const control = createJobPipelineControl({
-    ...resolveWorkflowWaitChannel(step),
+    ...waitChannelFromStep(step),
     ...deps,
     journal: {
       do: async <T>(name: string, fn: () => Promise<T>): Promise<T> => step.do(name, fn),

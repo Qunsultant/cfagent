@@ -33,7 +33,7 @@ import {
 } from "../src/services/jobPipelineEngine";
 import { createBuiltinStepRegistry } from "../src/services/jobPipelineSteps";
 import { runJobPipelineWorkflowFlow } from "../src/workflows/jobPipelineWorkflowFlow";
-import { resolveWorkflowWaitChannel } from "../src/workflows/workflowEventWait";
+import { waitChannelFromStep } from "../src/workflows/workflowEventWait";
 
 interface Harness {
   control: ReturnType<typeof createJobPipelineControl>;
@@ -375,6 +375,6 @@ describe("workflow host wiring (#3955)", () => {
   });
 
   it("injects no channel when the step cannot wait", () => {
-    expect(resolveWorkflowWaitChannel({})).toEqual({});
+    expect(waitChannelFromStep({})).toEqual({});
   });
 });
