@@ -35,6 +35,14 @@ export interface OpportunityHuntLevelConfig {
 /** Trailing closes carried per symbol for the panel's price chart. */
 export const OPPORTUNITY_HUNT_CHART_BARS = 30;
 
+/**
+ * How many symbols the report's pattern-count chart shows (issue 6479 moved
+ * this out of the renderer). The table below lists every evaluated symbol; the
+ * chart is a visualization, so it shows the top N and says so — never a silent
+ * cut.
+ */
+export const OPPORTUNITY_HUNT_PATTERN_CHART_TOP_N = 20;
+
 export const OPPORTUNITY_HUNT_LEVELS: Record<
   SandboxStrategyId,
   OpportunityHuntLevelConfig
