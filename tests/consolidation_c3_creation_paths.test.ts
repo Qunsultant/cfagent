@@ -107,17 +107,18 @@ const ARMING_SITES: Record<string, { count: number; role: string }> = {
     role: "migration re-arm: re-arms exported schedules on the target instance from the migration payload (#2681)",
   },
   "src/agents/routes/schedules.ts": {
-    count: 11,
-    role: "the schedule store's own arming helpers (create route + resume/update re-arm; payloads arrive builder-validated) + the alarms adapter arm (3: cron/interval/delayed, #3123 unified-store alarms port) + the approve-route sdkAdapter.create (4: cron/interval/scheduled/delay, #3122) — the approve path re-arms an already-validated approved pending definition (payload built upstream via buildSchedulePayload at proposal; no new payload construction) and adopts the record into the unified store",
+    count: 3,
+    role: "the alarms adapter arm only (makeScheduleAlarmsPort, 3: cron/interval/delayed, #3123 unified-store alarms port) — the create route and the approve path write paused records instead of arming (#6482 P12), and resume/update re-arm through the adapter; payloads arrive builder-validated",
   },
   "src/agents/scheduled-agent.ts": {
     count: 1,
     role: "the heartbeat SDK alarm arm (#4234, ADR 0030): ensureHeartbeatAlarm arms the ONE recurring onCron alarm via scheduleEvery — not a screening schedule, so no builder payload: the callback is the agent's own onCron heartbeat, and goals are still polled via isDue per goal",
   },
-  "src/services/agentScheduleCapability.ts": {
-    count: 4,
-    role: "the capability's SDK adapter (nlqPortToAgentSdkAdapter.create, #3122) — a pass-through arming funnel for agent-schedulable callbacks (cron/interval/scheduled/delay); payloads arrive from the NLQ executor (buildSchedulePayload) or the approved definition; armed alarms are adopted into the unified store, cancellations remove the record",
-  },
+  // Issue #6482 — the capability's SDK adapter (nlqPortToAgentSdkAdapter)
+  // is deliberately ABSENT from this table: its create records a
+  // paused schedule and never arms the port (paused by default, P12),
+  // so it has no `.schedule(` / `.scheduleEvery(` call site at all.
+  // If it ever arms again, it must be enumerated here.
   "src/agents/nlq/execution.ts": {
     count: 4,
     role: "NLQ executor arming via the scheduling port; payloads built by buildSchedulePayload",

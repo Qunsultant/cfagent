@@ -1216,17 +1216,19 @@ describe("POST /api/schedules/create with a profile-derived discovery payload (#
     const agent = makeAgent();
     const { status, body } = await postCreate(agent, {
       scheduleType: "interval",
-      intervalSeconds: 3600,
-      // Issue #4235 — a 3600s interval is sub-daily, so creation
-      // carries the explicit per-schedule opt-in.
-      subDailyOptIn: true,
+      // Issue #6482 — a monthly cadence (2,592,000s): creation
+      // lands PAUSED and never arms the SDK, so the payload is
+      // asserted on the paused record the route returns.
+      intervalSeconds: 2_592_000,
       callback: "autonomousStrategyDiscovery",
       payload: { inputModel: "profile-derived", symbols: ["NVDA", "MSFT"], profileId: "prof-1" },
     });
     expect(status).toBe(200);
     expect(body.success).toBe(true);
-    expect(scheduleEveryCalls).toHaveLength(1);
-    expect(scheduleEveryCalls[0][2]).toMatchObject({
+    expect(body.paused).toBe(true);
+    expect(body.schedule.state).toBe("paused");
+    expect(scheduleEveryCalls).toHaveLength(0);
+    expect(body.schedule.definition.payload).toMatchObject({
       inputModel: "profile-derived",
       symbols: ["NVDA", "MSFT"],
       profileId: "prof-1",
@@ -1236,27 +1238,28 @@ describe("POST /api/schedules/create with a profile-derived discovery payload (#
 
   it("accepts a profile-derived payload with a watchlist name", async () => {
     const agent = makeAgent();
-    const { status } = await postCreate(agent, {
+    const { status, body } = await postCreate(agent, {
       scheduleType: "interval",
-      intervalSeconds: 3600,
-      // Issue #4235 — a 3600s interval is sub-daily, so creation
-      // carries the explicit per-schedule opt-in.
-      subDailyOptIn: true,
+      // Issue #6482 — a monthly cadence (2,592,000s): creation
+      // lands PAUSED and never arms the SDK, so the payload is
+      // asserted on the paused record the route returns.
+      intervalSeconds: 2_592_000,
       callback: "autonomousStrategyDiscovery",
       payload: { inputModel: "profile-derived", watchlistName: "My List", profileId: "prof-1" },
     });
     expect(status).toBe(200);
-    expect(scheduleEveryCalls[0][2]).toMatchObject({ watchlistName: "My List", profileId: "prof-1" });
+    expect(body.paused).toBe(true);
+    expect(scheduleEveryCalls).toHaveLength(0);
+    expect(body.schedule.definition.payload).toMatchObject({ watchlistName: "My List", profileId: "prof-1" });
   });
 
   it("still accepts an explicit saved-request payload", async () => {
     const agent = makeAgent();
-    const { status } = await postCreate(agent, {
+    const { status, body } = await postCreate(agent, {
       scheduleType: "interval",
-      intervalSeconds: 3600,
-      // Issue #4235 — a 3600s interval is sub-daily, so creation
-      // carries the explicit per-schedule opt-in.
-      subDailyOptIn: true,
+      // Issue #6482 — a monthly cadence (2,592,000s): creation
+      // lands PAUSED and never arms the SDK.
+      intervalSeconds: 2_592_000,
       callback: "autonomousStrategyDiscovery",
       payload: {
         inputModel: "saved-request",
@@ -1275,7 +1278,8 @@ describe("POST /api/schedules/create with a profile-derived discovery payload (#
       },
     });
     expect(status).toBe(200);
-    expect(scheduleEveryCalls).toHaveLength(1);
+    expect(body.paused).toBe(true);
+    expect(scheduleEveryCalls).toHaveLength(0);
   });
 
   it.each([
@@ -1292,11 +1296,11 @@ describe("POST /api/schedules/create with a profile-derived discovery payload (#
     const agent = makeAgent();
     const { status, body } = await postCreate(agent, {
       scheduleType: "interval",
-      intervalSeconds: 3600,
-      // Issue #4235 — a 3600s interval is sub-daily, so the request
-      // carries the explicit opt-in; the 400 under test then comes
-      // from the payload validator, as the test pins, not the cap.
-      subDailyOptIn: true,
+      // Issue #6482 — a monthly cadence: the 400 under test comes
+      // from the payload validator, as the test pins — a sub-daily
+      // interval would be refused by the floor first and the
+      // validator would never run.
+      intervalSeconds: 2_592_000,
       callback: "autonomousStrategyDiscovery",
       payload,
     });

@@ -811,7 +811,7 @@ export function StrategyDiscoveryPanel({
       if (res.ok && data.success) {
         setScheduleCaptureOpen(false);
         toast.success(
-          `🗓 Scheduled this discovery view (${capturedRequest.symbol} · ${capturedRequest.thesis} · target $${capturedRequest.targetPrice}) — manage it under Schedules.`
+          `🗓 Scheduled this discovery view (${capturedRequest.symbol} · ${capturedRequest.thesis} · target $${capturedRequest.targetPrice}) — created paused; resume it under Schedules to start it.`
         );
       } else {
         setCaptureError(data.error || `Failed to create schedule (${res.status})`);

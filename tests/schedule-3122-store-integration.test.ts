@@ -1,9 +1,13 @@
 /**
  * Issue #3121 Phase 3 (#3122) — store-integration pins (3122-P18..P22):
  * the capability adapters operate on #3123's unified store.
- * - P18: an executor SDK create adopts a unified screen record.
+ * - P18: an executor SDK create records a paused unified screen
+ *   record (#6482: paused by default — no alarm until resume, so
+ *   the record id is a stable id and alarmId is null).
  * - P19: adoption never clobbers an existing record (insert-if-absent).
- * - P20: a failing store write does not fail the creation (best-effort).
+ * - P20: a failing store write fails the creation (fail-closed,
+ *   #6482 — the paused record IS the schedule; creation arms
+ *   nothing, so there is nothing to create without it).
  * - P21: cancelling an SDK schedule removes its unified record.
  * - P22: the goals adapter operates on the unified store (the
  *   ScheduledAgent's getGoals/saveGoals read/write unified records,
@@ -14,6 +18,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { InMemoryUnifiedScheduleStore } from "../src/data/inMemoryUnifiedScheduleAdapter";
 import {
+  adoptAgentSdkScheduleRecord,
   executeAgentScheduleAction,
   nlqPortToAgentSdkAdapter,
   type AgentScheduleApprovalConfig,
@@ -73,7 +78,7 @@ function fakeNlqPort() {
 }
 
 describe("3122-P18..P21 SDK adapter adopts into the unified store", () => {
-  it("P18 an executor SDK create adopts a unified screen record (record id = alarm id)", async () => {
+  it("P18 an executor SDK create records a paused unified screen record (paused by default, no alarm id)", async () => {
     const { port } = fakeNlqPort();
     const store = new InMemoryUnifiedScheduleStore();
     const ledger: unknown[] = [];
@@ -108,17 +113,28 @@ describe("3122-P18..P21 SDK adapter adopts into the unified store", () => {
     expect(out.scheduleId).toBeTruthy();
     const record = await store.get(out.scheduleId as string);
     expect(record).toBeDefined();
+    expect(record?.id).toBe(out.scheduleId);
     expect(record?.kind).toBe("screen");
-    expect(record?.state).toBe("active");
+    // Issue #6482 — paused by default: creation records a paused
+    // schedule and never arms the port, so there is no alarm id
+    // yet (alarmId is set on resume) and the record id is a stable
+    // id, not the alarm id.
+    expect(record?.state).toBe("paused");
     expect(record?.callback).toBe("autonomousMarketScreen");
-    expect(record?.alarmId).toBe(out.scheduleId);
+    expect(record?.alarmId ?? null).toBeNull();
     // ownerLogin comes from the executor-stamped provenance, never invented.
     expect(record?.ownerLogin).toBe("OpenAIMP");
     expect((record?.definition as Record<string, unknown>)?.callback).toBe("autonomousMarketScreen");
   });
 
   it("P19 adoption never clobbers an existing record (insert-if-absent)", async () => {
-    const { port, setNextId } = fakeNlqPort();
+    // Issue #6482 — adapter.create no longer arms the port (paused
+    // by default), so there is no alarm id to adopt at creation; the
+    // insert-if-absent pin lives on adoptAgentSdkScheduleRecord, the
+    // function that still owns adoption of an armed alarm — and a
+    // fresh create mints its own record and leaves the existing one
+    // alone.
+    const { port } = fakeNlqPort();
     const store = new InMemoryUnifiedScheduleStore();
     await store.save({
       id: "alarm-1",
@@ -129,20 +145,31 @@ describe("3122-P18..P21 SDK adapter adopts into the unified store", () => {
       createdAt: "2026-01-01T00:00:00.000Z",
       updatedAt: "2026-01-01T00:00:00.000Z",
     });
-    setNextId("alarm-1");
+    await adoptAgentSdkScheduleRecord(
+      store,
+      { id: "alarm-1", callback: "autonomousMarketScreen", type: "cron", cron: "0 9 * * 1-5", payload: {} },
+      "2026-11-11T12:00:00.000Z",
+    );
+    const record = await store.get("alarm-1");
+    expect(record?.createdAt).toBe("2026-01-01T00:00:00.000Z");
+    expect((record?.definition as Record<string, unknown>)?.marker).toBe("original");
     const adapter = nlqPortToAgentSdkAdapter(port, store);
-    const armed = await adapter.create({
+    const created = await adapter.create({
       timing: { type: "cron", cron: "0 9 * * 1-5" },
       callback: "autonomousMarketScreen",
       payload: {},
     });
-    expect(armed.id).toBe("alarm-1");
-    const record = await store.get("alarm-1");
-    expect(record?.createdAt).toBe("2026-01-01T00:00:00.000Z");
-    expect((record?.definition as Record<string, unknown>)?.marker).toBe("original");
+    expect(created.id).not.toBe("alarm-1");
+    expect((await store.get("alarm-1"))?.createdAt).toBe("2026-01-01T00:00:00.000Z");
+    expect(await store.get(created.id)).toBeDefined();
   });
 
-  it("P20 a failing store write does not fail the creation (best-effort)", async () => {
+  it("P20 a failing store write fails the creation (fail-closed, #6482)", async () => {
+    // Issue #6482 — the paused record IS the schedule (creation
+    // arms nothing), so a store write that cannot persist it fails
+    // the creation: returning an id for a schedule that does not
+    // exist would be the fabricated id #111 forbids. Nothing is
+    // armed.
     const { port, items } = fakeNlqPort();
     const real = new InMemoryUnifiedScheduleStore();
     const failingStore = {
@@ -158,13 +185,14 @@ describe("3122-P18..P21 SDK adapter adopts into the unified store", () => {
       clearPaused: () => real.clearPaused(),
     };
     const adapter = nlqPortToAgentSdkAdapter(port, failingStore);
-    const armed = await adapter.create({
-      timing: { type: "cron", cron: "0 9 * * 1-5" },
-      callback: "autonomousMarketScreen",
-      payload: {},
-    });
-    expect(armed.id).toBeTruthy();
-    expect(items).toHaveLength(1);
+    await expect(
+      adapter.create({
+        timing: { type: "cron", cron: "0 9 * * 1-5" },
+        callback: "autonomousMarketScreen",
+        payload: {},
+      }),
+    ).rejects.toThrow("store down");
+    expect(items).toHaveLength(0);
     expect(await real.list()).toHaveLength(0);
   });
 

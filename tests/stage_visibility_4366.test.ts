@@ -156,7 +156,11 @@ describe("4366-P03 the schedule callback", () => {
 
   it("dispatches the job by id and refuses a payload without one", () => {
     const orchestrator = readFileSync(join(root, "src/agents/orchestrator.ts"), "utf8");
-    expect(orchestrator).toContain("async runPipelineJobSchedule(payload: unknown)");
+    // Issue #6482 — the method takes the optional schedule stamp so
+    // the callback runs through recordScheduleCallbackRun (the
+    // firing kill-switch); dispatch-by-jobId and the refuse-without-
+    // one behavior are unchanged.
+    expect(orchestrator).toContain("async runPipelineJobSchedule(payload: unknown, schedule?: { id?: unknown })");
     expect(orchestrator).toContain("requires a jobId in its payload");
     expect(orchestrator).toContain("await door.runPipelineJob(jobId, { userLogin });");
   });

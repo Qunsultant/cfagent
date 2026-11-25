@@ -137,12 +137,17 @@ describe("S0-P02 SDK timing forms (B-T2-01): four forms resolve through ctx.sche
     const routes = read("src/agents/routes/schedules.ts");
     expect(routes).toContain("?type=cron|interval|delayed|scheduled");
     // Arming lives in the `alarms` adapter (#3123): the receiver is
-    // `ctx` (one line up), so the forms assert without the prefix;
-    // the create route arms directly in the same four forms.
-    expect(routes).toContain("schedule(timing.cron, callback, payload, { idempotent: true })");
+    // `ctx` (one line up), so the forms assert without the prefix.
+    // Issue #6482 — the create route no longer arms directly: it
+    // records a paused schedule, and the idempotent opt-out rides
+    // the paused record (conditional spread) so resume arms with it;
+    // the four arming forms live in the adapter, which defaults the
+    // option to idempotent: true.
+    expect(routes).toContain("schedule(timing.cron, callback, payload, { idempotent })");
+    expect(routes).toContain("const idempotent = options?.idempotent ?? true;");
     expect(routes).toContain("scheduleEvery(timing.intervalSeconds, callback, payload)");
-    expect(routes).toContain("schedule(new Date(timing.time * 1000), callback, payload)");
-    expect(routes).toContain("ctx.schedule(cron, callback, screeningPayload, { idempotent: body.idempotent !== false })");
+    expect(routes).toContain("schedule(new Date(timing.time * 1000), callback, payload, { idempotent })");
+    expect(routes).toContain('...(typeof idempotent === "boolean" ? { idempotent } : {}),');
   });
 });
 
@@ -176,7 +181,10 @@ describe("S0-P04 idempotent creates (B-T2-03): duplicate suppression + idempoten
     const routes = read("src/agents/routes/schedules.ts");
     expect(routes).toContain("findDuplicateSchedule");
     expect(routes).toContain('ctx.audit("schedule.duplicate_suppressed"');
-    expect(routes).toContain("{ idempotent: body.idempotent !== false }");
+    // Issue #6482 — the idempotent opt-out rides the paused record
+    // (conditional spread) so resume arms with it; creation records
+    // a paused schedule and never arms.
+    expect(routes).toContain('...(typeof idempotent === "boolean" ? { idempotent } : {}),');
   });
 });
 

@@ -32,7 +32,10 @@ function seed() {
     callback: "autonomousOptionsAnalysis",
     payload: { symbols: ["AAPL"], userLogin: "venus" },
     type: "interval",
-    intervalSeconds: 3600,
+    // Issue #6482 — the seed is a monthly cadence (2,592,000s):
+    // a sub-monthly seed would be refused at resume / update by
+    // the floor, which is the behavior the tests below pin.
+    intervalSeconds: 2_592_000,
     time: 1999999999,
   });
   schedules.set("job-cron", {
@@ -123,7 +126,7 @@ describe(" pause / resume (#273)", () => {
     expect(body.previousId).toBe("job-interval");
     const rearmed = schedules.get(body.schedule.id);
     expect(rearmed?.type).toBe("interval");
-    expect(rearmed?.intervalSeconds).toBe(3600);
+    expect(rearmed?.intervalSeconds).toBe(2_592_000);
     expect(rearmed?.callback).toBe("autonomousOptionsAnalysis");
     expect(rearmed?.payload).toEqual({ symbols: ["AAPL"], userLogin: "venus" });
 
@@ -148,28 +151,50 @@ describe(" pause / resume (#273)", () => {
 
 describe("PUT /api/schedules/:id (#273)", () => {
   it("changes an interval job's frequency atomically (cancel + recreate)", async () => {
-    // Issue #4235 — 900s is sub-daily, so the update carries the
-    // explicit per-schedule opt-in; the atomic cancel + recreate is
-    // the same behavior this pin always asserted.
-    const res = await call("PUT", "/api/schedules/job-interval", { intervalSeconds: 900, subDailyOptIn: true });
+    // Issue #4235 — the update carries the explicit per-schedule
+    // opt-in; the atomic cancel + recreate is the same behavior
+    // this pin always asserted. Issue #6482 — the new frequency is
+    // a monthly-plus cadence (5,184,000s = 60 days): a sub-monthly
+    // target is refused by the floor before the cancel (see the
+    // below-floor test below), so the atomicity pin runs above it.
+    const res = await call("PUT", "/api/schedules/job-interval", { intervalSeconds: 5_184_000, subDailyOptIn: true });
     expect(res?.status).toBe(200);
     const body = await res!.json();
     expect(body.success).toBe(true);
     expect(schedules.has("job-interval")).toBe(false);
     const updated = schedules.get(body.schedule.id);
     expect(updated?.type).toBe("interval");
-    expect(updated?.intervalSeconds).toBe(900);
+    expect(updated?.intervalSeconds).toBe(5_184_000);
     // Issue #4235 — the re-armed alarm's payload records the opt-in
     // the update supplied, exactly as creation stamps it.
     expect(updated?.payload).toEqual({ symbols: ["AAPL"], userLogin: "venus", subDailyOptIn: true });
   });
 
+  it("refuses a below-floor update with 400 and leaves the job untouched (#6482)", async () => {
+    // Issue #6482 — the floor is checked before the cancel
+    // (#6210 atomicity): the update is refused and the original
+    // schedule is still armed at its stored monthly timing. Before
+    // this fix the cancel ran first, the re-arm was refused, the
+    // rollback re-arm of the original (also sub-monthly in the old
+    // fixture) was refused too, and the route reported 500 with the
+    // schedule lost.
+    const res = await call("PUT", "/api/schedules/job-interval", { intervalSeconds: 900, subDailyOptIn: true });
+    expect(res?.status).toBe(400);
+    const body = await res!.json();
+    expect(body.error).toContain("SCHEDULE_BELOW_FREQUENCY_FLOOR");
+    expect(schedules.get("job-interval")?.intervalSeconds).toBe(2_592_000);
+    expect(schedules.get("job-interval")?.callback).toBe("autonomousOptionsAnalysis");
+  });
+
   it("switches a job from interval to cron", async () => {
-    const res = await call("PUT", "/api/schedules/job-interval", { cron: "0 9 * * 1-5" });
+    // Issue #6482 — the new cron is yearly: a weekday cron's
+    // shortest gap is below the monthly floor, so the switch pins
+    // a floor-passing cadence.
+    const res = await call("PUT", "/api/schedules/job-interval", { cron: "0 9 1 1 *" });
     const body = await res!.json();
     const updated = schedules.get(body.schedule.id);
     expect(updated?.type).toBe("cron");
-    expect(updated?.cron).toBe("0 9 * * 1-5");
+    expect(updated?.cron).toBe("0 9 1 1 *");
   });
 
   it("updates a paused job in place without re-arming it", async () => {
@@ -186,7 +211,7 @@ describe("PUT /api/schedules/:id (#273)", () => {
   it("rejects a malformed cron with 400 and leaves the job untouched", async () => {
     const res = await call("PUT", "/api/schedules/job-interval", { cron: "bogus" });
     expect(res?.status).toBe(400);
-    expect(schedules.get("job-interval")?.intervalSeconds).toBe(3600);
+    expect(schedules.get("job-interval")?.intervalSeconds).toBe(2_592_000);
   });
 
   it("PUT of an unknown id is a 404", async () => {

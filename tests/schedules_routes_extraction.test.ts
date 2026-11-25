@@ -335,8 +335,10 @@ describe("schedules behavior (extraction #379)", () => {
       getScreenerExecutionContext: vi.fn(async () => ({ userLogin: "trader1", environment: "PROD" as const })),
     });
     const res = await handleSchedulesRoutes(
-      // Issue #4235 — a 60s interval is sub-daily, so the request carries the explicit opt-in.
-      req("POST", "/schedules/create", { callback: "autonomousMarketScreen", scheduleType: "interval", intervalSeconds: 60, subDailyOptIn: true, payload: { universe: "NASDAQ100" } }),
+      // Issue #6482 — a monthly cadence (2,592,000s): the credential
+      // preflight these tests pin runs after the floor, so the
+      // fixture must pass it first.
+      req("POST", "/schedules/create", { callback: "autonomousMarketScreen", scheduleType: "interval", intervalSeconds: 2_592_000, payload: { universe: "NASDAQ100" } }),
       urlOf("/schedules/create"),
       "/schedules/create",
       "s1",
@@ -346,7 +348,12 @@ describe("schedules behavior (extraction #379)", () => {
     expect(scheduleEvery).not.toHaveBeenCalled();
   });
 
-  it("POST /schedules/create surfaces an SDK throw as the honest 503, never a fabricated id (#111)", async () => {
+  it("POST /schedules/create never touches the SDK at creation, so a throwing SDK cannot fail it (#6482; #111)", async () => {
+    // Issue #6482 — creation lands PAUSED and never arms the SDK:
+    // the premise of the old 503 pin (the create route arms through
+    // scheduleEvery) is gone. A throwing SDK now cannot fail
+    // creation at all — the response is the real paused record, and
+    // its id is the record's own id, never a fabricated one (#111).
     (getStoredTokens as any).mockResolvedValue({ storedAt: new Date().toISOString(), userLogin: "trader1" });
     const scheduleEvery = vi.fn(async () => { throw new Error("sdk down"); });
     const ctx = baseCtx({
@@ -354,20 +361,22 @@ describe("schedules behavior (extraction #379)", () => {
       getScreenerExecutionContext: vi.fn(async () => ({ userLogin: "trader1", environment: "PROD" as const })),
     });
     const res = await handleSchedulesRoutes(
-      // Issue #4235 — a 60s interval is sub-daily, so the request carries the explicit opt-in.
-      req("POST", "/schedules/create", { callback: "autonomousMarketScreen", scheduleType: "interval", intervalSeconds: 60, subDailyOptIn: true, payload: { universe: "NASDAQ100" } }),
+      req("POST", "/schedules/create", { callback: "autonomousMarketScreen", scheduleType: "interval", intervalSeconds: 2_592_000, payload: { universe: "NASDAQ100" } }),
       urlOf("/schedules/create"),
       "/schedules/create",
       "s1",
       ctx
     );
-    expect((res as Response).status).toBe(503);
+    expect((res as Response).status).toBe(200);
     const body = await (res as Response).json();
-    expect(body.success).toBe(false);
-    expect(body.error).toContain("sdk down");
+    expect(body.success).toBe(true);
+    expect(body.paused).toBe(true);
+    expect(body.schedule.state).toBe("paused");
+    expect(typeof body.schedule.id).toBe("string");
+    expect(scheduleEvery).not.toHaveBeenCalled();
   });
 
-  it("POST /schedules/create arms an interval schedule through the SDK port and audits schedule.created", async () => {
+  it("POST /schedules/create lands a paused record and audits schedule.created (#6482)", async () => {
     (getStoredTokens as any).mockResolvedValue({ storedAt: new Date().toISOString(), userLogin: "trader1" });
     const scheduleEvery = vi.fn(async () => ({ id: "real-sdk-id" }));
     const audit = vi.fn();
@@ -377,17 +386,24 @@ describe("schedules behavior (extraction #379)", () => {
       getScreenerExecutionContext: vi.fn(async () => ({ userLogin: "trader1", environment: "PROD" as const })),
     });
     const res = await handleSchedulesRoutes(
-      // Issue #4235 — a 60s interval is sub-daily, so the request carries the explicit opt-in.
-      req("POST", "/schedules/create", { callback: "autonomousMarketScreen", scheduleType: "interval", intervalSeconds: 60, subDailyOptIn: true, payload: { universe: "NASDAQ100" } }),
+      // Issue #6482 — a monthly cadence (2,592,000s): creation lands
+      // PAUSED and never arms the SDK, so the SDK is never called
+      // and the audited scheduleId is the paused record's id.
+      req("POST", "/schedules/create", { callback: "autonomousMarketScreen", scheduleType: "interval", intervalSeconds: 2_592_000, payload: { universe: "NASDAQ100" } }),
       urlOf("/schedules/create"),
       "/schedules/create",
       "s1",
       ctx
     );
     expect((res as Response).status).toBe(200);
-    expect(scheduleEvery).toHaveBeenCalledWith(60, "autonomousMarketScreen", expect.objectContaining({ universe: "NASDAQ100", trigger: "scheduled", userLogin: "trader1" }));
-    expect(audit).toHaveBeenCalledWith("schedule.created", "orchestrator", expect.objectContaining({ scheduleId: "real-sdk-id", callback: "autonomousMarketScreen" }));
-    expect(await (res as Response).json()).toEqual({ success: true, schedule: { id: "real-sdk-id" } });
+    expect(scheduleEvery).not.toHaveBeenCalled();
+    expect(audit).toHaveBeenCalledWith("schedule.created", "orchestrator", expect.objectContaining({ scheduleId: expect.any(String), callback: "autonomousMarketScreen", state: "paused" }));
+    const body = await (res as Response).json();
+    expect(body.success).toBe(true);
+    expect(body.paused).toBe(true);
+    expect(body.schedule.state).toBe("paused");
+    expect(body.schedule.callback).toBe("autonomousMarketScreen");
+    expect(body.schedule.definition.intervalSeconds).toBe(2_592_000);
   });
 
   it("POST /schedules/create refuses an unbound account-scoped creation (#5100)", async () => {
@@ -404,7 +420,10 @@ describe("schedules behavior (extraction #379)", () => {
       getScreenerExecutionContext: vi.fn(async () => ({ userLogin: "trader1", environment: "PROD" as const })),
     });
     const res = await handleSchedulesRoutes(
-      req("POST", "/schedules/create", { callback: "autonomousMarketScreen", scheduleType: "interval", intervalSeconds: 60, subDailyOptIn: true, payload: { universe: "NASDAQ100" } }),
+      // Issue #6482 — a monthly cadence (2,592,000s): the binding
+      // refusal these tests pin runs after the floor, so the fixture
+      // must pass it first.
+      req("POST", "/schedules/create", { callback: "autonomousMarketScreen", scheduleType: "interval", intervalSeconds: 2_592_000, payload: { universe: "NASDAQ100" } }),
       urlOf("/schedules/create"),
       "/schedules/create",
       "s1",

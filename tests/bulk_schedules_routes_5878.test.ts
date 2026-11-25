@@ -16,6 +16,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { handleSchedulesRoutes } from "../src/agents/routes/schedules";
 import { MockSqlStorage } from "./mock-sql";
+import { createUnifiedSchedulePorts } from "../src/data/createUnifiedSchedulePorts";
+import { pausedScreenScheduleToRecord } from "../src/services/unifiedScheduleManagement";
 
 interface FakeSchedule {
   id: string;
@@ -39,7 +41,10 @@ function seed() {
     callback: "autonomousOptionsAnalysis",
     payload: { symbols: ["AAPL"], userLogin: "venus" },
     type: "interval",
-    intervalSeconds: 3600,
+    // Issue #6482 — monthly: bulk resume re-arms through the
+    // floor-checked alarms port, so a sub-monthly fixture row could
+    // never resume (the old 3600s value is refused by the floor).
+    intervalSeconds: 2_592_000,
     time: 1999999999,
   });
   schedules.set("job-cron", {
@@ -47,7 +52,9 @@ function seed() {
     callback: "autonomousMarketScreen",
     payload: { universe: "SP500", userLogin: "venus" },
     type: "cron",
-    cron: "5 * * * *",
+    // Issue #6482 — yearly (the old hourly cron is refused by the
+    // monthly floor at resume).
+    cron: "5 0 1 1 *",
     time: 1999999999,
   });
 }
@@ -235,6 +242,39 @@ describe("bulk pause / resume / trigger routes (#5878)", () => {
     }
     expect(auditEvents("schedule.resumed")).toHaveLength(2);
     expect(auditEvents("schedule.bulk-resumed")).toHaveLength(1);
+  });
+
+  it("bulk resume refuses a sub-monthly paused row per row while resuming monthly rows (#6482)", async () => {
+    // A paused sub-monthly record, seeded directly in the unified
+    // store (it has no live alarm — the floor governs arms, and
+    // resume is an arm).
+    const store = createUnifiedSchedulePorts({ sql, storage: { sql } as never }).unifiedSchedulesSync;
+    const subMonthly = pausedScreenScheduleToRecord(
+      {
+        callback: "autonomousMarketScreen",
+        type: "interval",
+        intervalSeconds: 3600,
+        payload: { universe: "SP500", userLogin: "venus" },
+        ownerLogin: "venus",
+      },
+      "2026-11-24T00:00:00.000Z",
+    );
+    store.save(subMonthly);
+    await call("POST", "/api/schedules/pause", { scope: "all" });
+    (ctx.audit as any).mockClear();
+    const res = await call("POST", "/api/schedules/resume", { scope: "all" });
+    const body = await res!.json();
+    expect(body.total).toBe(9);
+    expect(body.applied).toBe(2);
+    expect(body.refused).toBe(7);
+    expect(body.results.find((r: any) => r.id === "job-interval")?.outcome).toBe("resumed");
+    expect(body.results.find((r: any) => r.id === "job-cron")?.outcome).toBe("resumed");
+    const refusedRow = body.results.find((r: any) => r.id === subMonthly.id);
+    expect(refusedRow?.outcome).toBe("refused");
+    expect(refusedRow?.reason).toContain("SCHEDULE_BELOW_FREQUENCY_FLOOR");
+    // The monthly rows re-armed; the sub-monthly row stays paused.
+    expect(schedules.size).toBe(2);
+    expect((await store.get(subMonthly.id))?.state).toBe("paused");
   });
 
   it("bulk resume over all-active rows reports already-active, not refused", async () => {

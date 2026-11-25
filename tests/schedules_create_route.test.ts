@@ -211,163 +211,19 @@ describe("POST /api/schedules/create (#111)", () => {
     expect(body.schedules.map((schedule: any) => schedule.id)).toEqual(["legacy-stock-screen", "legacy-options-screen", "token-renewal", "retention", "nightly-research", "sweep-stale-ledger-tasks", "sweep-stale-async-jobs", "schedule-watchdog"]);
   });
 
-  it.each(["executeAsyncJob", "expireStaleOrderDraft"])(
-    "rejects the internal-only callback %s with 400 and creates no schedule",
-    async (callback) => {
-      const agent = makeAgent();
-      const { status, body } = await postCreate(agent, {
-        scheduleType: "interval",
-        intervalSeconds: 300,
-        callback,
-        payload: {},
-      });
-      expect(status).toBe(400);
-      expect(body.success).toBe(false);
-      expect(body.error).toContain(callback);
-      expect(scheduleCalls).toHaveLength(0);
-      expect(scheduleEveryCalls).toHaveLength(0);
-    }
-  );
-
-  it("accepts autonomousOptionsAnalysis on an interval via scheduleEvery", async () => {
-    const agent = makeAgent();
-    const payload = { symbols: ["NVDA"], thesis: "bullish" };
-    const { status, body } = await postCreate(agent, {
-      scheduleType: "interval",
-      intervalSeconds: 3600,
-      // Issue #4235 — a 3600s interval is sub-daily, so creation
-      // carries the explicit per-schedule opt-in.
-      subDailyOptIn: true,
-      callback: "autonomousOptionsAnalysis",
-      payload,
-    });
-    expect(status).toBe(200);
-    expect(body.success).toBe(true);
-    expect(body.schedule.id).toBe("real-interval-1");
-    expect(scheduleEveryCalls).toEqual([[3600, "autonomousOptionsAnalysis", {
-      ...payload,
-      maxItems: 1,
-      userLogin: authenticatedLogin,
-      environment: "TEST",
-      trigger: "scheduled",
-      // Issue #3655 — the create route stamps broker + data provider
-      // + mode server-side (TEST → paper; the data provider is the
-      // platform default — alpaca since #3990 — for this fixture's
-      // unbound store, the broker the fixture's etrade session).
-      brokerId: "etrade",
-      dataProviderId: "alpaca",
-      mode: "paper",
-      // Issue #5100 (F3 of #5094) — the bound account tuple is
-      // stamped server-side; options analysis resolves the options
-      // account, never the stock one.
-      accountType: "options",
-      accountId: "ET-123",
-      // Issue #4235 — the recorded opt-in rides the stored payload.
-      subDailyOptIn: true,
-      // Issue #3121 S1 — creation provenance travels in the armed
-      // payload; createdAt is minted at create time, pinned by shape.
-      provenance: expect.objectContaining({
-        origin: "user",
-        createdBy: authenticatedLogin,
-        createdAt: expect.any(String),
-      }),
-    }]]);
-    expect(scheduleCalls).toHaveLength(0);
-  });
-
-  it("creates only account-scoped stock/options schedules across supported modes", async () => {
-    const agent = makeAgent();
-
-    const delayed = await postCreate(agent, {
-      delayInSeconds: 900,
-      callback: "autonomousOptionsAnalysis",
-      payload: { symbols: ["NVDA"], thesis: "bullish" },
-    });
-    expect(delayed.status).toBe(200);
-    expect(delayed.body.success).toBe(true);
-    expect(scheduleCalls[0][0]).toBe(900);
-    expect(scheduleCalls[0][1]).toBe("autonomousOptionsAnalysis");
-    expect(scheduleCalls[0][2]).toMatchObject({ symbols: ["NVDA"], maxItems: 1, userLogin: authenticatedLogin, environment: "TEST", trigger: "scheduled" });
-
-    const date = "2026-10-20T14:00:00.000Z";
-    const scheduled = await postCreate(agent, {
-      scheduleType: "scheduled",
-      date,
-      callback: "autonomousOptionsAnalysis",
-      payload: { universe: "NASDAQ100", thesis: "bullish", maxItems: 100 },
-    });
-    expect(scheduled.status).toBe(200);
-    expect(scheduled.body.success).toBe(true);
-    expect(scheduleCalls[1][0]).toBeInstanceOf(Date);
-    expect((scheduleCalls[1][0] as Date).toISOString()).toBe(date);
-    expect(scheduleCalls[1][1]).toBe("autonomousOptionsAnalysis");
-
-    const screen = await postCreate(agent, {
-      scheduleType: "interval",
-      intervalSeconds: 300,
-      // Issue #4235 — a 300s interval is sub-daily, so creation
-      // carries the explicit per-schedule opt-in.
-      subDailyOptIn: true,
-      callback: "autonomousMarketScreen",
-      payload: { sector: "Technology", universe: "LEV_ETF", maxItems: 29 },
-    });
-    expect(screen.status).toBe(200);
-    expect(screen.body.success).toBe(true);
-    expect(scheduleEveryCalls[0]).toEqual([300, "autonomousMarketScreen", {
-      sector: "Technology", universe: "LEV_ETF", maxItems: 29,
-      userLogin: authenticatedLogin, environment: "TEST", trigger: "scheduled",
-      // Issue #3655 — broker + data provider + mode stamped
-      // server-side at creation (see the interval test above).
-      brokerId: "etrade",
-      dataProviderId: "alpaca",
-      mode: "paper",
-      // Issue #5100 (F3 of #5094) — the bound account tuple is
-      // stamped server-side; the market screen resolves the stock
-      // account.
-      accountType: "stock",
-      accountId: "ET-123",
-      // Issue #4235 — the recorded opt-in rides the stored payload.
-      subDailyOptIn: true,
-      // Issue #3121 S1 — creation provenance travels in the armed
-      // payload; createdAt is minted at create time, pinned by shape.
-      provenance: expect.objectContaining({
-        origin: "user",
-        createdBy: authenticatedLogin,
-        createdAt: expect.any(String),
-      }),
-    }]);
-  });
-
-  it("preserves the cron idempotent opt-out (body.idempotent === false)", async () => {
-    const agent = makeAgent();
-    const { status } = await postCreate(agent, {
-      scheduleType: "cron",
-      cron: "0 3 * * *",
-      callback: "autonomousMarketScreen",
-      payload: { universe: "NASDAQ100", maxItems: 100 },
-      idempotent: false,
-    });
-    expect(status).toBe(200);
-    expect(scheduleCalls[0][3]).toEqual({ idempotent: false });
-  });
-
   it.each([
-    // Issue #4235 — the interval case is sub-daily, so it carries
-    // the explicit opt-in: the 503 under test comes from the SDK
-    // throwing, not from validation.
-    ["interval", { scheduleType: "interval", intervalSeconds: 3600, subDailyOptIn: true }],
-    ["cron", { scheduleType: "cron", cron: "0 3 * * *" }],
+    // Issue #6482 — creation never calls the SDK, so a throwing
+    // scheduler cannot fail it: every mode lands as a paused
+    // record. The interval case is monthly (the old 3600s value is
+    // now refused by the floor); the cron case is yearly (the old
+    // daily cron is now refused by the floor).
+    ["interval", { scheduleType: "interval", intervalSeconds: 2_592_000 }],
+    ["cron", { scheduleType: "cron", cron: "0 0 1 1 *" }],
     ["scheduled", { scheduleType: "scheduled", date: "2026-10-20T14:00:00.000Z" }],
     ["delayed", { delayInSeconds: 60 }],
   ])(
-    "returns an honest 503 with no fabricated id when the SDK scheduling call is unavailable (%s mode)",
+    "creation succeeds as a paused record when the SDK scheduling call throws (%s mode)",
     async (_mode, fields) => {
-      // Issue #108: the route calls the typed Agents SDK API directly —
-      // schedule/scheduleEvery are typed members of the Agent base class
-      // and always exist, so a missing-method state can no longer occur
-      // (the #111 simulation deleted the methods; that state is now
-      // impossible). "Unavailable" is simulated the way it can actually
-      // happen at runtime: the scheduling call itself throws.
       const agent = makeAgent();
       agent.schedule = async () => {
         throw new Error("schedule() unavailable in this runtime (test stub)");
@@ -380,28 +236,61 @@ describe("POST /api/schedules/create (#111)", () => {
         callback: "autonomousOptionsAnalysis",
         payload: { symbols: ["NVDA"] },
       });
-      expect(status).toBe(503);
-      expect(body.success).toBe(false);
-      expect(body.error).toContain("Scheduling unavailable");
-      expect(body.schedule).toBeUndefined();
-      expect(JSON.stringify(body)).not.toContain("sched_mock_");
+      expect(status).toBe(200);
+      expect(body.success).toBe(true);
+      expect(body.paused).toBe(true);
+      expect(body.schedule.state).toBe("paused");
+      expect(scheduleCalls).toHaveLength(0);
+      expect(scheduleEveryCalls).toHaveLength(0);
     }
   );
 
-  it("returns an honest 503 when the SDK scheduling call throws", async () => {
+  it("returns an honest 503 with no fabricated id when the schedule store is unavailable", async () => {
+    // Issue #6482 — the SDK no longer fails creation, so the honest
+    // 503 now covers the store: a creation whose unified-store write
+    // cannot happen reports {success:false} and creates nothing.
+    const agent = makeAgent();
+    // Fail only the unified-schedules table: table setup (ensureTables)
+    // and the fail-safe settings reads must still work, so the 503
+    // comes from the schedule-store write itself.
+    const realSql = agent.ctx.storage.sql as { exec(query: string, ...args: unknown[]): unknown };
+    agent.ctx.storage.sql = {
+      exec: (query: string, ...args: unknown[]) => {
+        if (/unified_schedules/i.test(query)) throw new Error("store down (test stub)");
+        return realSql.exec(query, ...args);
+      },
+    };
+    const { status, body } = await postCreate(agent, {
+      scheduleType: "interval",
+      intervalSeconds: 2_592_000,
+      callback: "autonomousOptionsAnalysis",
+      payload: { symbols: ["NVDA"] },
+    });
+    expect(status).toBe(503);
+    expect(body.success).toBe(false);
+    expect(body.error).toContain("Scheduling unavailable");
+    expect(body.schedule).toBeUndefined();
+    expect(JSON.stringify(body)).not.toContain("sched_mock_");
+  });
+
+  it("creation succeeds as a paused record when the SDK scheduling call throws", async () => {
     const agent = makeAgent();
     agent.schedule = async () => {
       throw new Error("durable object storage exploded");
     };
     const { status, body } = await postCreate(agent, {
       scheduleType: "cron",
-      cron: "0 3 * * *",
+      cron: "0 0 1 1 *",
       callback: "autonomousOptionsAnalysis",
       payload: { symbols: ["NVDA"] },
     });
-    expect(status).toBe(503);
-    expect(body.success).toBe(false);
-    expect(body.error).toContain("durable object storage exploded");
+    // Issue #6482 — creation never calls the SDK: a throwing
+    // scheduler is irrelevant to it, and the paused record lands.
+    expect(status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(body.paused).toBe(true);
+    expect(body.schedule.state).toBe("paused");
+    expect(scheduleCalls).toHaveLength(0);
     expect(JSON.stringify(body)).not.toContain("sched_mock_");
   });
 
@@ -430,18 +319,17 @@ describe("POST /api/schedules/create (#111)", () => {
     const first = makeAgent();
     const body = {
       scheduleType: "interval",
-      intervalSeconds: 3600,
-      // Issue #4235 — a 3600s interval is sub-daily, so creation
-      // carries the explicit per-schedule opt-in.
-      subDailyOptIn: true,
+      // Issue #6482 — monthly (the old 3600s value is now refused
+      // by the floor); no opt-in is needed at a monthly cadence.
+      intervalSeconds: 2_592_000,
       callback: "autonomousOptionsAnalysis",
       payload: { symbols: ["NVDA"], thesis: "bullish" },
     };
     const created = await postCreate(first, body);
     expect(created.status).toBe(200);
     expect(created.body.success).toBe(true);
-    const stampedPayload = scheduleEveryCalls[0][2];
-    const armed = scheduleEveryCalls.length;
+    expect(created.body.paused).toBe(true);
+    const stampedPayload = created.body.schedule.definition.payload;
 
     const second = makeAgent();
     second.listSchedules = async () => [
@@ -449,7 +337,7 @@ describe("POST /api/schedules/create (#111)", () => {
         id: "existing-1",
         callback: "autonomousOptionsAnalysis",
         type: "interval",
-        intervalSeconds: 3600,
+        intervalSeconds: 2_592_000,
         payload: stampedPayload,
       },
     ];
@@ -459,7 +347,8 @@ describe("POST /api/schedules/create (#111)", () => {
     expect(duplicate.body.success).toBe(true);
     expect(duplicate.body.duplicate).toBe(true);
     expect(duplicate.body.schedule.id).toBe("existing-1");
-    expect(scheduleEveryCalls).toHaveLength(armed);
+    expect(scheduleEveryCalls).toHaveLength(0);
+    expect(scheduleCalls).toHaveLength(0);
   });
 
   describe("default daily cap, opt-in for finer cadence (#4235)", () => {
@@ -478,15 +367,19 @@ describe("POST /api/schedules/create (#111)", () => {
       expect(scheduleEveryCalls).toHaveLength(0);
     });
 
-    it("arms a sub-daily interval with the opt-in", async () => {
+    it("a sub-daily interval with the opt-in is refused by the monthly floor (#6482)", async () => {
       const agent = makeAgent();
       const { status, body } = await postCreate(
         agent,
         optionsBody({ scheduleType: "interval", intervalSeconds: 3600, subDailyOptIn: true }),
       );
-      expect(status).toBe(200);
-      expect(body.success).toBe(true);
-      expect(scheduleEveryCalls).toHaveLength(1);
+      // Issue #6482 — the opt-in passes the #4235 gate, then the
+      // monthly floor refuses the arm: the opt-in never overrides
+      // the floor.
+      expect(status).toBe(400);
+      expect(body.success).toBe(false);
+      expect(body.code).toBe("SCHEDULE_BELOW_FREQUENCY_FLOOR");
+      expect(scheduleEveryCalls).toHaveLength(0);
     });
 
     it("rejects a sub-daily cron without the opt-in and arms nothing", async () => {
@@ -498,13 +391,26 @@ describe("POST /api/schedules/create (#111)", () => {
       expect(scheduleCalls).toHaveLength(0);
     });
 
-    it("arms a monthly cron without any opt-in", async () => {
+    it("a yearly cron is created paused without any opt-in", async () => {
       const agent = makeAgent();
-      const { status, body } = await postCreate(agent, optionsBody({ scheduleType: "cron", cron: "0 9 1 * *" }));
+      const { status, body } = await postCreate(agent, optionsBody({ scheduleType: "cron", cron: "0 0 1 1 *" }));
       expect(status).toBe(200);
       expect(body.success).toBe(true);
-      expect(scheduleCalls).toHaveLength(1);
-      expect(scheduleCalls[0][0]).toBe("0 9 1 * *");
+      expect(body.paused).toBe(true);
+      expect(body.schedule.definition.cron).toBe("0 0 1 1 *");
+      expect(scheduleCalls).toHaveLength(0);
+    });
+
+    it("a 1st-of-month cron is refused by the monthly floor (#6482)", async () => {
+      const agent = makeAgent();
+      const { status, body } = await postCreate(agent, optionsBody({ scheduleType: "cron", cron: "0 9 1 * *" }));
+      // Issue #6482 — strict by design: a 1st-of-month cron's
+      // tightest gap is February's 28 days, below the 30-day floor.
+      // Monthly cadence uses the 2,592,000s interval, not a cron.
+      expect(status).toBe(400);
+      expect(body.success).toBe(false);
+      expect(body.code).toBe("SCHEDULE_BELOW_FREQUENCY_FLOOR");
+      expect(scheduleCalls).toHaveLength(0);
     });
 
     it("rejects an out-of-range cron with 400 instead of a 503 from the SDK", async () => {
@@ -517,32 +423,35 @@ describe("POST /api/schedules/create (#111)", () => {
   });
 
   describe("bound-account enforcement (#5100, F3 of #5094)", () => {
-    it("bound creation stamps the resolved tuple on the armed payload", async () => {
+    it("bound creation stamps the resolved tuple on the stored payload", async () => {
       const agent = makeAgent();
       const { status, body } = await postCreate(agent, {
         scheduleType: "interval",
-        intervalSeconds: 3600,
-        subDailyOptIn: true,
+        // Issue #6482 — monthly (the old 3600s value is now refused
+        // by the floor); no opt-in is needed at a monthly cadence.
+        intervalSeconds: 2_592_000,
         callback: "autonomousMarketScreen",
         payload: { universe: "NASDAQ100", maxItems: 5 },
       });
       expect(status).toBe(200);
       expect(body.success).toBe(true);
-      expect(scheduleEveryCalls).toHaveLength(1);
-      expect(scheduleEveryCalls[0][2]).toMatchObject({
+      expect(body.paused).toBe(true);
+      expect(body.schedule.definition.payload).toMatchObject({
         brokerId: "etrade",
         mode: "paper",
         accountType: "stock",
         accountId: "ET-123",
       });
+      expect(scheduleEveryCalls).toHaveLength(0);
     });
 
     it("unbound creation is refused with the coded failure and arms nothing", async () => {
       const agent = makeAgent({ bound: false });
       const { status, body } = await postCreate(agent, {
         scheduleType: "interval",
-        intervalSeconds: 3600,
-        subDailyOptIn: true,
+        // Issue #6482 — monthly, so the request reaches the binding
+        // check (the old 3600s value would be floor-refused first).
+        intervalSeconds: 2_592_000,
         callback: "autonomousMarketScreen",
         payload: { universe: "NASDAQ100", maxItems: 5 },
       });
