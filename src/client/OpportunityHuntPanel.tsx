@@ -35,6 +35,7 @@ import {
   Card,
   CardHeader,
   EmptyState,
+  Modal,
   Notice,
   PageSection,
   SmallHeader,
@@ -105,6 +106,39 @@ function SortHeader({
         {active ? (sort.dir === "asc" ? "▲" : "▼") : "↕"}
       </span>
     </Button>
+  );
+}
+
+/**
+ * Issue #6473 — the row's trend, drawn as an inline sparkline rather than a
+ * chart instance: a hunt can carry sixty-plus symbols, and one canvas per row
+ * would cost a chart per row for a shape the eye reads at 40px. The full chart
+ * opens on click, in the dialog.
+ */
+function SymbolSparkline({ symbol, closes }: { symbol: string; closes: readonly number[] }) {
+  const series = closes.slice(-40);
+  if (series.length < 2) return <span className="ui-meta-sm">—</span>;
+  const min = Math.min(...series);
+  const max = Math.max(...series);
+  const span = max - min || 1;
+  const points = series
+    .map((value, index) => {
+      const x = (index / (series.length - 1)) * 100;
+      const y = 24 - ((value - min) / span) * 22;
+      return `${x.toFixed(2)},${y.toFixed(2)}`;
+    })
+    .join(" ");
+  return (
+    <svg
+      viewBox="0 0 100 26"
+      width="100"
+      height="26"
+      role="img"
+      aria-label={`Trend for ${symbol}, last ${series.length} closes`}
+      preserveAspectRatio="none"
+    >
+      <polyline points={points} fill="none" stroke="currentColor" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+    </svg>
   );
 }
 
@@ -399,6 +433,13 @@ export function OpportunityHuntPanel() {
                   render: (row) => formatHuntPrice(row.stopLoss),
                 },
                 {
+                  key: "trend",
+                  header: "Trend",
+                  render: (row) => (
+                    <SymbolSparkline symbol={row.symbol} closes={result.seriesBySymbol?.[row.symbol] ?? []} />
+                  ),
+                },
+                {
                   key: "takeProfit",
                   header: "Take-profit",
                   align: "right",
@@ -440,6 +481,12 @@ export function OpportunityHuntPanel() {
                 : ""}
               .
             </p>
+            <Modal
+              open={selectedRow !== null}
+              onClose={() => setSelectedSymbol(null)}
+              title={selectedRow ? `${selectedRow.symbol} — recommendations` : "Recommendations"}
+              size="lg"
+            >
             {selectedRow ? (
               <Card>
                 <CardHeader
@@ -509,6 +556,7 @@ export function OpportunityHuntPanel() {
                 />
               </Card>
             ) : null}
+            </Modal>
           </>
         ) : null}
       </Card>
