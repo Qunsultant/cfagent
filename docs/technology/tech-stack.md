@@ -202,3 +202,26 @@ Data quality	Soda Core	Elastic License 2.0 since Jan 2026 [R]	Excluded on licens
 Schema migrations	Liquibase Community	FSL-1.1-ALv2 since 5.0 [R]	Excluded on license grounds — not OSI FOSS.
 Distributed query	Trino / Presto	Apache-2.0 [R]	Does not fit — JVM coordinator+worker cluster by design.
 Recommended sequencing (report §7): formalise the catalogue as Drizzle tables in D1; ODCS contracts + Data Contract CLI in CI; OpenLineage events from Workers into D1; DuckDB sidecar over R2 Parquet exports (Datasette alongside); GX Core suites on the same snapshots; ODD Platform only if the D1 catalog proves insufficient. Skip DataHub/OpenMetadata/Atlas/Amundsen entirely at this scale.
+
+For Consideration (formulas):
+
+Use now — clear wins
+trading-signals (MIT, ~608 KB unpacked) — npm Replace the standard indicators in src/trading/technicals.ts: SMA/EMA, RSI, MACD, ATR, Bollinger, ADX, stochastic. It is TypeScript, actively maintained, and tree-shakeable. Keep the bespoke parts — Fibonacci levels, opening-range/ORB, anchored VWAP, gap/regime classifiers — because no library models them the way the product does. Add parity pins: warm-up periods and Wilder smoothing often differ from hand-rolled versions.
+
+simple-statistics (ISC, tree-shakeable) — npm computeCorrelationFromCloses is plain Pearson; sampleCorrelation replaces the covariance loop. Keep the date alignment, window, and minimum-observation logic. It also covers mean/variance/regression if those grow.
+
+Optional — only if the requirement appears
+@stdlib/stats-base-dists-normal (Apache-2.0, ~47 KB) — npm A modular normal CDF/PDF. It would replace the A&S approximation, but that changes the last digits and invalidates pinned option values. Not worth it for its own sake; use it if you need higher precision or more distributions.
+
+cron-parser (MIT, ~164 KB) — npm Only if you add schedule preview/next-run computation. Today the repo stores cron strings but does not parse them, so there is nothing to replace.
+
+dayjs (MIT, ~2 KB) — npm For DTE/expiry date math if it grows. Current daysUntil is a few UTC lines; a dependency is not justified yet.
+
+papaparse (MIT) — only for parsing arbitrary user CSV. The report CSV writer is simple escaping; keep it.
+
+Later-adoption after review
+technicalindicators — 5.1 MB unpacked, CJS/stream-oriented; 
+jstat — ~706 KB, old, untyped; @stdlib is the better distribution source.
+mathjs — heavy for the handful of functions used.
+date-fns — 10.9 MB unpacked; tree-shaking helps.
+decimal.js — only if money precision becomes an explicit requirement; 
